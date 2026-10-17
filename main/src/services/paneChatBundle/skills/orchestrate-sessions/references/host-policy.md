@@ -1,6 +1,6 @@
 # Host coordination policy
 
-The core workflow is portable. The host's own instructions explain how to operate the environment (in Pane: the `pane-orchestrator` and `runpane` skills). For standalone or custom launches, a local guidance document can stand in for them. Such a document only makes guidance available to read; tools and runtime adapters come from the host.
+The core workflow is portable. The host's own instructions explain how to operate the environment (in Pane: the `pane-orchestration` guide, readable anywhere with `runpane docs read --doc skills/pane-orchestration/SKILL.md`, plus the `pane-orchestrator` and `runpane` skills in a Pane Session). For standalone or custom launches, a local guidance document can stand in for them. Such a document only makes guidance available to read; tools and runtime adapters come from the host.
 
 Host instructions come first, and when they are complete you need nothing else. If a supplied document disagrees with them, apply normal instruction precedence and the user's explicit choices. If two equally authoritative sources disagree about ownership or launch behavior, settle that conflict before the affected action, and pick one launch path.
 

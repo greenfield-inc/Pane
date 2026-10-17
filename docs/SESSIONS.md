@@ -589,6 +589,23 @@ runpane lock release --name testing-account --json
 If a worker interrupts a waiting `lock acquire`, the daemon may still grant it
 the lock for up to two minutes; release it, or let the TTL expire.
 
+## Orchestrator guide
+
+The mechanics of driving workers through Pane, for any orchestrator and any
+harness (a Pane Session, a Claude Code or Codex session in a Pane terminal, or
+a wrapper such as Agent Farm), live in one place: the bundled
+[`pane-orchestration`](../main/src/services/paneChatBundle/skills/pane-orchestration/SKILL.md)
+skill. Any agent can read it with
+`runpane docs read --doc skills/pane-orchestration/SKILL.md`, and the home
+`pane` skill points there. It covers one Pane per feature, launching a worker
+as a Pane or tab (including `--tool-command` wrappers, `--initial-input-file
+--as-file-pointer`, `--wait-ready` and reading the delivery result), the one
+wait primitive (`runpane watch --session <S> --as <name> --until-event`) and
+what each wake means, worker reports and how a status file pairs with them,
+answering workers, resuming after a restart or sleep, showing pages beside the
+person, shared-checkout and port etiquette, handoff, cleanup, and what changes
+after the next release. The sections below are the reference for each piece.
+
 ## Session watcher
 
 When monitoring is authorized, use one durable, named watcher per Session. Do not start it merely because a Session opens. `--session` takes the Session ID
@@ -759,9 +776,12 @@ when blocked. READY alone is activity evidence. Read the full report with
 panel with `runpane panels resume --panel <id> --wait-ready --yes --json`.
 
 Do not pipe follow through `head` or `grep -m1` to wait. Run `--until-event` as
-a supported background task, act on its events, then re-arm with its cursor.
+a supported background task, act on its events, then re-arm with its cursor
+(the [orchestrator guide](#orchestrator-guide) has the one wait command and
+what to do on each wake, timeout, reset and error).
 Never sleep-poll your own background task output. WATCH ERROR/nonzero exit
-means failure: report it and re-arm once. A superseded cursor means keep the
+means failure: re-read every worker's status, then re-arm once; a second
+failure goes to `runpane doctor --report`. A superseded cursor means keep the
 replacement. A normal expiry means re-arm with the next dispatch.
 
 
@@ -812,12 +832,17 @@ report means look, and maybe nudge: `runpane panels last-message --panel
 transcript (never the screen; `transcript-unavailable` otherwise), and the
 worker can be asked to run `runpane report`.
 
-An orchestrator outside a Session, or one whose harness wakes only when a
-process exits (Claude Code background Bash, Codex), waits for a report with
-`runpane watch --pane <pane-id> --as <name> --until-event --json --kinds
-agent.report,agent.blocked,panel.exited,pane.gone`, run as a background task and run again after each
-event. `--until-event` exits 0 on the first event; a `RESET` and the caller's
-own panel never end the wait.
+An orchestrator whose harness wakes only when a process exits (Claude Code
+background Bash, Codex) waits with the one wait primitive from the
+[orchestrator guide](#orchestrator-guide): `runpane watch --session <S> --as
+<name> --until-event --json --kinds
+agent.report,agent.blocked,agent.ready,panel.exited,panel.stopped,pane.gone
+--timeout-ms 45m` (`--pane <pane-id>` outside a Session), run as a background
+task and run again after each event. `--until-event` exits 0 on the first
+event and 124 at the deadline; a `RESET` and the caller's own panel never end
+the wait. When a worker keeps richer state in a status file, it writes the file
+first and reports with `--summary-file <status file>`; the file is the truth
+and the report is the signal.
 
 ## Skill contract
 

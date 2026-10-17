@@ -13,7 +13,9 @@ to check on an agent.
 
 `pane-orchestrator` says what a Pane Session does and when; `orchestrate-sessions`
 covers routing work to planning, implementation, and bug-report sessions. This
-skill is how you carry it out in Pane.
+skill is how you carry it out in Pane, and
+[`pane-orchestration`](../pane-orchestration/SKILL.md) holds the mechanics of
+launching, waiting on, answering and resuming workers.
 
 ## Persist intent, re-derive state
 
@@ -101,23 +103,11 @@ While one workstream waits, continue the others.
 
 ## Dispatch
 
-Follow progress with RunPane's wait and watch commands. Before each prompt,
-record an output baseline (cursor or hash) and a timestamp. Put the prompt in a
-file and submit it:
-
-```bash
-runpane panels submit --panel <panel-id> --input-file <prompt-file> --as-file-pointer --yes --json
-```
-
-Prefer `--as-file-pointer` for long prompts. Pane writes a private copy under
-`<pane-dir>/prompts/` and submits the single line `Read and follow <path>`
-(the result's `promptFile`), so nothing long passes through the terminal.
-Without it, multi-line or long text still goes to a Claude or Codex
-composer as one bracketed paste with a separate Enter, and `panes create`
-launches a long prompt from a file rather than typing it into the shell.
-A `warnings` entry such as `leading-bang-runs-shell` means Claude Code gives
-the text's first character a meaning of its own (`!` runs a shell command);
-reword the prompt or send it as a file pointer.
+[`pane-orchestration`](../pane-orchestration/SKILL.md) is the mechanics:
+launching a worker as a Pane or tab, delivering its prompt with
+`--as-file-pointer`, reading the delivery result, clearing start-up screens,
+the one wait primitive, worker reports, answering, and resuming. This section
+adds what Pane Chat puts in the prompts it sends.
 
 Agents in other repositories don't have Pane's skills installed. When a prompt
 asks for a skill, give its absolute path from the skills folder that
@@ -146,14 +136,10 @@ in every implementation prompt:
 - The `reviewer` and `qa-and-verify` subagents exist only in Pane Chat. In
   another repository, run `review` or `pr-test-automation` directly.
 
-A stage has started when the result reports `delivery.state: "taken"`, or
-`"queued"` for an agent that was busy (it runs the message after its current
-turn); `verifiedSubmitted: true` means the same. See "Confirm delivery" below.
-
-When the text is still in the composer (`delivery.state: "in-composer"`, or
-`panels screen` reports `composer.hasUndeliveredText: true`), run
-`runpane panels submit-composer --panel <panel-id> --strategy auto --yes --json`
-once, then check again.
+A stage has started when the delivery result says `taken`, or `queued` for an
+agent that was busy; never resend either. An instruction that carries an
+external action is resent only with proof it was not delivered, because a
+double run can't be undone. When you can prove neither, ask the user.
 
 ### Structured guidance in results
 
@@ -161,52 +147,13 @@ once, then check again.
 one:
 
 1. Accept only the expected `runpane panels` subcommand (wait, screen, output,
-   submit, submit-composer) and its flags.
+   input, submit, submit-composer) and its flags.
 2. Check that the panel ID belongs to the workstream you are driving, and that
    any choice matches the blocker.
 3. Rebuild the call as an argument list. Reject anything else, and never run
    the string through `eval`, `sh -c`, or interpolation.
 
 After clearing a blocker, repeat the submit check.
-
-### Confirm delivery
-
-For Claude and Codex, submit results carry `delivery`:
-
-- `state`: `taken` (the agent started a turn with the text), `queued` (a busy
-  agent holds it for after its current turn), `in-composer` (the text is still
-  in the composer), or `unknown`.
-- `evidence`: `transcript` (Pane found the turn in the agent's own session
-  log), `screen`, or `argv` (a create prompt passed at launch).
-
-`verifiedSubmitted` is true exactly for `taken` or `queued`; never resend
-those. For `unknown`, delivery evidence is an activity transition or output
-change against your baseline. Advance a workstream only on that evidence.
-
-`panels screen` reports placeholder and suggestion text (such as Claude's
-suggested next prompt, drawn dim or grey) as `composer.ghostText`, not as held
-input; text output marks that line `⟨suggestion⟩`.
-
-An agent finishing an earlier turn can hold a received prompt with no visible
-change, so a resend on missing evidence can run the work twice. Resend only
-with proof the prompt was not delivered: the text is still in the composer, or
-the panel stayed idle through a bounded wait with no queued or running turn on
-screen. For an instruction that carries an external action, that proof is
-required, because a double run can't be undone. When you can prove neither
-delivery nor non-delivery within the wait, ask the user.
-
-### Clear start-up screens first
-
-A new panel can open on a screen that takes keystrokes but hides the composer:
-an update prompt, a resume-or-summarize choice, a model or profile picker, or a
-trust confirmation. Read the panel's screen before the first prompt.
-
-- Clear update, resume, and model prompts with the workstream's configured
-  choice, then check readiness again.
-- Record a trust or permission confirmation as a blocker for the user.
-
-When readiness fails, compare against the live panel list before creating
-anything; the panel may already exist.
 
 ### Held input
 
@@ -272,41 +219,17 @@ working while a review is pending.
 ## Worker reports
 
 A worker's `runpane report` is its hand-back, like a background subagent's
-result. Watch for it by adding `agent.report` to `--kinds`; watchers that
-don't list it never receive it, except a Session watch. A report arrives from
-any tab, a shell tab or a wrapper launch whose agent isn't detected yet
-included. Each REPORT line
-(`REPORT <pane> pane <pane-id> panel <panel-id> ready pr#747 fc5dce9`, or
-`... blocked: <question>`) arrives at once, skipping the `--min-interval`
-batch.
+result. How to wait for it, read it, and pair it with a status file is in
+[`pane-orchestration`](../pane-orchestration/SKILL.md); in this Session the
+Liveness Contract's follow watcher also delivers it as a REPORT line.
 
-To wait for a report outside the Session watch (a Pane with no Session, or a
-harness that wakes only when a process exits, such as a background Bash task),
-run this as a background task. It exits with the event's line; act on it, then
-run it again. The named cursor means nothing is missed between runs:
-
-```bash
-runpane watch --pane <pane-id> --as <your-name> --until-event --json --kinds agent.report,agent.blocked,panel.exited,pane.gone
-```
-
-Run `--follow` through a monitor that delivers each output line to the agent; merely backgrounding it is insufficient when the harness only notifies on process exit.
-
-Never pipe `runpane watch --follow` into `grep -m1` or `head` to wait:
-`--follow` streams until quiet expiry; `--until-event` ends on news. The worker's `runpane report` output says
-whether anyone received it (`Delivered to 1 waiting watcher.`).
-
-- Treat a REPORT as the completion signal. Read the whole report (state, PR,
-  head, summary up to 16,000 characters, `summaryPath`, question) with
-  `runpane agents status --panel <panel-id> --json`, or from
-  `sessions overview` under `panes[].report`, instead of scraping the screen.
 - A report is a claim. Check it as the PR-ready check says before you
   advance the workstream: the PR, head, and checks must match.
 - `blocked` carries the worker's question; answer it or take it to the user.
   `failed` means the worker gave up; read its summary before retrying.
-- A READY without a report means look, and maybe nudge. Read the worker's last
-  reply with `runpane panels last-message --panel <panel-id> --json` (from its
-  transcript; `transcript-unavailable` means fall back to `panels screen`),
-  then, if it finished, ask it to run `runpane report`.
+- A READY without a report means look, and maybe nudge: read
+  `runpane panels last-message --panel <panel-id> --json`, then, if it
+  finished, ask it to run `runpane report`.
 
 ## Monitor and report
 

@@ -458,6 +458,8 @@ Read all of these in parallel:
 - \`${skill('runpane')}\`: driving panes through the runpane CLI
 - \`${skill('orchestrate-sessions')}\`: routing work to planning,
   implementation, and bug-report sessions
+- \`${skill('pane-orchestration')}\`: launching, waiting on, answering,
+  and resuming workers; the one wait primitive and worker reports
 
 Every other skill is in \`${skills}\`. Load one when the work calls for it.
 Helper subagents are installed for you: \`explorer\`, \`cold-reader\`,
@@ -679,7 +681,8 @@ at 10m, IDLE after 10m with backoff. Individual duration flags override it,
 for example \`--ready-settle 1m --blocked-settle 15s --min-interval 2m\`.
 
 Use a named follow consumer when the harness consumes streaming output. A harness that wakes
-only when a process exits uses \`runpane watch --as <name> --until-event --json\`
+only when a process exits uses the one wait primitive from \`pane-orchestration\`
+(\`runpane watch --session <S> --as <name> --until-event --json\` with its kinds)
 and re-arms after each event. Single-event waits deliver immediately without
 follow settling or batching; these defaults do not slow every PR waiter.
 Cadence requires a consumer name (explicit \`--as\` or the name assigned by

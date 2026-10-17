@@ -292,13 +292,23 @@ of it through the \`runpane\` CLI.
 - Read or wait on a panel: \`runpane panels screen --panel <panel-id> --limit 80 --json\`,
   \`runpane panels wait --panel <panel-id> --for idle --json\`
 - Send a message: \`runpane panels submit --panel <panel-id> --text "<message>" --yes --json\`
-- Wait for a tab's report (\`runpane report\`), with or without a Session. Run this
-  as a background task; it exits with the event's line. Act on it, then run it
-  again (the named cursor misses nothing in between). Use \`--pane <pane-id>\`
-  for workers in another Pane:
-  \`runpane watch --pane "$PANE_SESSION_ID" --as <your-name> --until-event --quiet --json --kinds agent.report,agent.blocked,panel.exited,pane.gone\`
+- Wait for workers with the one wait primitive, run as a background task that
+  wakes you when it exits; act on its event, then run it again (the named
+  cursor misses nothing in between). Use \`--pane <pane-id>\` instead of
+  \`--session\` outside a Session:
+  \`runpane watch --session <session> --as <your-name> --until-event --json --kinds agent.report,agent.blocked,agent.ready,panel.exited,panel.stopped,pane.gone --timeout-ms 45m\`
   Never pipe \`runpane watch --follow\` into \`grep -m1\` or \`head\` to wait:
-  \`--follow\` never exits on its own.
+  \`--follow\` never exits on news.
+- Workers end with \`runpane report --state <ready|blocked|failed|done> --summary-file <path>\`
+  (\`--question\` when blocked, \`--pr\` and \`--head\` when there is a PR).
+
+## Orchestrating workers
+
+To launch, wait on, answer or resume workers (including wrappers launched with
+\`--tool-command\`, such as \`agent-farm run\`), read and follow Pane's
+orchestrator guide: \`runpane docs read --doc skills/pane-orchestration/SKILL.md\`.
+It covers delivery checks, what each wake means, worker reports and status
+files, resume after a restart, showing pages, and shared-checkout etiquette.
 
 ## Sessions
 
