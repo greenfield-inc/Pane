@@ -129,7 +129,7 @@ export class WatchCadence {
 /** Entries that need action now, so they flush without waiting for the minimum interval. */
 function isUrgentEntry(entry: RunpaneWorkspaceEntry): boolean {
   return entry.kind === 'agent.blocked' || entry.kind === 'agent.report'
-    || ['pr.conflicted', 'pr.head', 'pr.closed', 'pr.stopped', 'github.unavailable', 'github.recovered'].includes(entry.kind)
+    || ['pr.conflicted', 'pr.head', 'pr.base_changed', 'pr.base_deleted', 'pr.closed', 'pr.stopped', 'github.unavailable', 'github.recovered'].includes(entry.kind)
     || (entry.kind === 'pr.checks' && entry.checks === 'failed');
 }
 

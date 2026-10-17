@@ -8,7 +8,7 @@ import { WorkspaceJournal } from './workspaceJournal';
 
 const url = 'https://github.com/acme/app/pull/7';
 const check = (name: string, status = 'COMPLETED', conclusion = 'SUCCESS', isRequired = true) => ({ __typename: 'CheckRun', name, status, conclusion, isRequired });
-const details = (): GithubPrDetails => ({ number: 7, url, state: 'OPEN', mergeable: 'MERGEABLE', headRefOid: 'a'.repeat(40), checks: [], complete: true, feedbackComplete: true, comments: [], reviews: [], mergeStateStatus: 'CLEAN' });
+const details = (): GithubPrDetails => ({ number: 7, url, state: 'OPEN', mergeable: 'MERGEABLE', headRefOid: 'a'.repeat(40), baseRefName: 'release/monday', baseRefExists: true, checks: [], complete: true, feedbackComplete: true, comments: [], reviews: [], mergeStateStatus: 'CLEAN' });
 function setup(filePath?: string) {
   let pr = details();
   let error: GithubWatchError | undefined;
@@ -168,6 +168,43 @@ describe('PR monitoring through the journal', () => {
     expect(s.journal.readAfter(0, { kinds: ['pr.checks'] }).entries).toEqual([]);
     s.set({ mergeStateStatus: 'CLEAN' }); await s.monitor.pollOnce();
     expect(s.journal.readAfter(0, { kinds: ['pr.checks'] }).entries).toMatchObject([{ checks: 'passed' }]);
+  });
+
+  it('reports a retargeted base once with the old and new branch, and wakes an until-event wait', async () => {
+    const s = setup(); s.monitor.watch('worker', url); await s.monitor.pollOnce();
+    expect(s.journal.readAfter(0, { kinds: ['pr.base_changed', 'pr.base_deleted'] }).entries).toEqual([]);
+    const wake = s.journal.waitAfter(s.journal.generation, { kinds: ['pr.base_changed'] }, 1000);
+    s.set({ baseRefName: 'main' }); await s.monitor.pollOnce(); await s.monitor.pollOnce();
+    expect((await wake).entries).toMatchObject([{ kind: 'pr.base_changed', base: { from: 'release/monday', to: 'main' }, reason: expect.stringContaining('Rebase onto main') }]);
+    expect(s.journal.readAfter(0, { kinds: ['pr.base_changed', 'pr.base_deleted'] }).entries).toHaveLength(1);
+  });
+
+  it('reports a deleted base before GitHub closes the PR, and a later retarget as a change', async () => {
+    const s = setup(); s.monitor.watch('worker', url); await s.monitor.pollOnce();
+    s.set({ baseRefExists: false }); await s.monitor.pollOnce(); await s.monitor.pollOnce();
+    s.set({ baseRefExists: true, baseRefName: 'main' }); await s.monitor.pollOnce();
+    expect(s.journal.readAfter(0, { kinds: ['pr.base_changed', 'pr.base_deleted'] }).entries).toMatchObject([
+      { kind: 'pr.base_deleted', base: { from: 'release/monday', to: 'release/monday' } },
+      { kind: 'pr.base_changed', base: { from: 'release/monday', to: 'main' } },
+    ]);
+    const closing = setup(); closing.monitor.watch('worker', url); await closing.monitor.pollOnce();
+    closing.set({ baseRefExists: false, state: 'CLOSED' }); await closing.monitor.pollOnce();
+    expect(closing.journal.readAfter(0, { kinds: ['pr.base_deleted', 'pr.closed'] }).entries.map(entry => entry.kind)).toEqual(['pr.base_deleted', 'pr.closed']);
+  });
+
+  it('records the base silently for a baseline saved before base tracking', async () => {
+    const directory = mkdtempSync(path.join(tmpdir(), 'pane-pr-base-'));
+    try {
+      const file = path.join(directory, 'journal.json');
+      const first = setup(file); first.monitor.watch('worker', url); await first.monitor.pollOnce();
+      const [record] = first.monitor.list();
+      const legacy = { ...record, baseline: { ...record.baseline, base: undefined, baseExists: undefined } };
+      first.journal.commitGithubState(JSON.parse(JSON.stringify({ watches: [legacy], discoveryFailures: [] })), []);
+      const restarted = setup(file); restarted.set({ baseRefName: 'main' }); restarted.advance(); await restarted.monitor.pollOnce();
+      expect(restarted.journal.readAfter(0, { kinds: ['pr.base_changed', 'pr.base_deleted'] }).entries).toEqual([]);
+      restarted.set({ baseRefName: 'release/tuesday' }); await restarted.monitor.pollOnce();
+      expect(restarted.journal.readAfter(0, { kinds: ['pr.base_changed'] }).entries).toMatchObject([{ base: { from: 'main', to: 'release/tuesday' } }]);
+    } finally { rmSync(directory, { recursive: true, force: true }); }
   });
 
   it('compares persisted baselines after restart and replays unread events once', async () => {

@@ -155,6 +155,10 @@ export type RunpaneWorkspaceEntryKind =
   | 'pr.merged'
   | 'pr.closed'
   | 'pr.head'
+  /** A watched PR's base branch was retargeted (by a person, or by GitHub after its old base merged and was deleted). */
+  | 'pr.base_changed'
+  /** A watched PR's base branch no longer exists; GitHub may close the PR. */
+  | 'pr.base_deleted'
   | 'pr.review'
   | 'pr.comment'
   | 'pr.stopped'
@@ -204,6 +208,8 @@ export interface RunpaneWorkspaceEntry {
   sessionName?: string;
   /** PR of a `pr.conflicted`, `pr.checks`, or `pr.merged` entry. */
   pr?: RunpaneWorkspacePullRequest;
+  /** Base branch of a `pr.base_changed` (old → new) or `pr.base_deleted` (`to` is the PR's current base name) entry. */
+  base?: { from: string; to: string };
   /** Settled result of a `pr.checks` entry. */
   checks?: 'passed' | 'failed';
   /** Up to five failing check names of a failed `pr.checks` entry. */

@@ -641,7 +641,7 @@ Panes, so held lines survive membership changes.
 
 ```bash
 runpane pr watch --pane <pane-id> --url https://github.com/owner/repo/pull/123 --head <full-sha> --json
-runpane watch --pane <pane-id> --since <generation-returned-above> --epoch <epoch-returned-above> --until-event --json --kinds pr.checks,pr.conflicted,pr.head,pr.review,pr.comment,pr.closed,pr.merged,pr.stopped,github.unavailable,github.recovered
+runpane watch --pane <pane-id> --since <generation-returned-above> --epoch <epoch-returned-above> --until-event --json --kinds pr.checks,pr.conflicted,pr.base_changed,pr.base_deleted,pr.head,pr.review,pr.comment,pr.closed,pr.merged,pr.stopped,github.unavailable,github.recovered
 runpane pr list --pane <pane-id> --json
 runpane pr unwatch --pane <pane-id> --url https://github.com/owner/repo/pull/123 --json
 ```
@@ -667,6 +667,13 @@ host/repository/number identity. It pins success to `--head`, or the first
 observed head; a new head emits `pr.head` and needs a fresh registration before
 success can be reported. Read existing discussions before arming. A wake
 means inspect the change; it never authorizes merging.
+
+The watch also reports when the ground under the PR moves. `pr.base_changed`
+(`BASE CHANGED`) fires when the base branch is retargeted, by a person or by
+GitHub after a stack parent merges and its branch is deleted; `base.from` and
+`base.to` name the old and new base. `pr.base_deleted` (`BASE DELETED`) fires
+when the base branch no longer exists; GitHub may close the PR right after.
+Both arrive at once under `--follow`. Rebase onto the new base and recheck CI.
 
 The daemon batches up to 25 fingerprints per host every two minutes (plus up
 to ten seconds of jitter), reads details on changes and at a 30-minute

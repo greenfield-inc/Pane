@@ -45,6 +45,8 @@ export const RUNPANE_CONTRACT = {
           "pr.merged",
           "pr.closed",
           "pr.head",
+          "pr.base_changed",
+          "pr.base_deleted",
           "pr.review",
           "pr.comment",
           "pr.stopped",
@@ -2301,9 +2303,10 @@ export const RUNPANE_CONTRACT = {
         "What --follow does by default (see defaults.watch.follow in the contract):",
         "  prints WATCH OK once when armed, then one line per event, with no heartbeats",
         "  kinds: agent.report, agent.ready, agent.blocked, agent.idle, panel.exited, panel.stopped,",
-        "         pane.gone, pane.associated, pane.detached, pr.conflicted, pr.checks, pr.merged",
+        "         pane.gone, pane.associated, pane.detached, pr.conflicted, pr.checks, pr.merged,",
+        "         pr.base_changed, pr.base_deleted",
         "  READY after 3m of quiet; BLOCKED after 30s; other lines batched at most every 10m",
-        "    (REPORT, BLOCKED, conflicts, and failed checks arrive at once)",
+        "    (REPORT, BLOCKED, conflicts, base changes, and failed checks arrive at once)",
         "  IDLE reminders at 10m, 30m, 1h, 3h, then daily",
         "  ends with WATCH EXPIRED and exit 0 after 3h with nothing but IDLE",
         "",
@@ -3583,9 +3586,10 @@ export const RUNPANE_CONTRACT = {
         "What --follow does by default (see defaults.watch.follow in the contract):",
         "  prints WATCH OK once when armed, then one line per event, with no heartbeats",
         "  kinds: agent.report, agent.ready, agent.blocked, agent.idle, panel.exited, panel.stopped,",
-        "         pane.gone, pane.associated, pane.detached, pr.conflicted, pr.checks, pr.merged",
+        "         pane.gone, pane.associated, pane.detached, pr.conflicted, pr.checks, pr.merged,",
+        "         pr.base_changed, pr.base_deleted",
         "  READY after 3m of quiet; BLOCKED after 30s; other lines batched at most every 10m",
-        "    (REPORT, BLOCKED, conflicts, and failed checks arrive at once)",
+        "    (REPORT, BLOCKED, conflicts, base changes, and failed checks arrive at once)",
         "  IDLE reminders at 10m, 30m, 1h, 3h, then daily",
         "  ends with WATCH EXPIRED and exit 0 after 3h with nothing but IDLE",
         "",
@@ -7444,6 +7448,8 @@ export const RUNPANE_CONTRACT = {
             "pr.merged",
             "pr.closed",
             "pr.head",
+            "pr.base_changed",
+            "pr.base_deleted",
             "pr.review",
             "pr.comment",
             "pr.stopped",
@@ -7561,6 +7567,23 @@ export const RUNPANE_CONTRACT = {
               "type": "string"
             },
             "headOid": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "base": {
+          "type": "object",
+          "description": "Base branch of a pr.base_changed (old to new) or pr.base_deleted (to is the PR's current base name) entry.",
+          "required": [
+            "from",
+            "to"
+          ],
+          "properties": {
+            "from": {
+              "type": "string"
+            },
+            "to": {
               "type": "string"
             }
           },
@@ -13205,7 +13228,7 @@ export const RUNPANE_CONTRACT = {
             "name": "--min-interval",
             "value": "<duration>",
             "required": false,
-            "description": "Override: batch READY, IDLE, NEW, GONE, EXIT, and UNKNOWN lines at most once per interval; REPORT, BLOCKED, pr.conflicted, and failed pr.checks arrive at once and carry the held lines. Default 10m. 0 turns batching off."
+            "description": "Override: batch READY, IDLE, NEW, GONE, EXIT, and UNKNOWN lines at most once per interval; REPORT, BLOCKED, pr.conflicted, pr.base_changed, pr.base_deleted, and failed pr.checks arrive at once and carry the held lines. Default 10m. 0 turns batching off."
           },
           {
             "name": "--idle-after",
@@ -13291,7 +13314,7 @@ export const RUNPANE_CONTRACT = {
           "Replay: after a reset (RESET/_reset), the baseline restates current state. In JSON, those entries carry replay: true (and changedWhileAway: true after an epoch change). A replayed agent.ready is never READY: re-read runpane sessions overview instead of acting on it. Lines mode prints only CHANGED for them.",
           "agent.report (REPORT <pane-name> pane <pane-id> panel <panel-id> <state> [pr#<n>] [<head>][: <question>]) is a worker's `runpane report`. It is in the default kinds of --follow and --until-event, and arrives from any panel: a shell tab or a wrapper launch whose agent is not yet detected included. It bypasses --min-interval, and orchestrators treat it as the completion signal; a READY without a report means look, and maybe nudge.",
           "Never pipe --follow into grep -m1, head, or any other exit-on-match reader: it does not exit when its reader does until its next write. To wait for one event, use --until-event.",
-          "Registration returns generation and epoch. Initially arm watch --until-event --since <generation> --epoch <epoch> --pane <id> --json --kinds pr.checks,pr.head,pr.comment,pr.review,pr.closed,pr.merged,pr.conflicted,pr.stopped,github.unavailable,github.recovered. Process every NDJSON event, then persist its gen and epoch for the next --since/--epoch; --limit 1 delivers one event per run. Never mix --as with --since/--epoch. On _reset or _dropped, resynchronize GitHub state, then use the control record generation and epoch; replay/baseline records are not new events. No merge or GitHub write is performed.",
+          "Registration returns generation and epoch. Initially arm watch --until-event --since <generation> --epoch <epoch> --pane <id> --json --kinds pr.checks,pr.head,pr.comment,pr.review,pr.closed,pr.merged,pr.conflicted,pr.base_changed,pr.base_deleted,pr.stopped,github.unavailable,github.recovered. Process every NDJSON event, then persist its gen and epoch for the next --since/--epoch; --limit 1 delivers one event per run. Never mix --as with --since/--epoch. On _reset or _dropped, resynchronize GitHub state, then use the control record generation and epoch; replay/baseline records are not new events. No merge or GitHub write is performed.",
           "--follow has one default cadence: READY 3m, BLOCKED 30s, non-urgent batches 10m, IDLE after 10m with backoff, expiry 3h, heartbeats off. Individual duration flags override it. --present and --profile were removed; use --ready-settle, --blocked-settle, and --min-interval for timing overrides.",
           "--until-event delivers matching events immediately without follow settling or batching. A harness that consumes a named follow stream gets its cadence; a process-exit waiter keeps immediate single-event semantics. --follow --since <generation> has no consumer name and bypasses settling and batching. Cadence requires a named follow consumer; --as cannot be combined with numeric --since."
         ]
@@ -15117,7 +15140,7 @@ export const RUNPANE_CONTRACT = {
           "prWatchResult"
         ],
         "notes": [
-          "Registration returns generation and epoch. Initially arm watch --until-event --since <generation> --epoch <epoch> --pane <id> --json --kinds pr.checks,pr.head,pr.comment,pr.review,pr.closed,pr.merged,pr.conflicted,pr.stopped,github.unavailable,github.recovered. Process every NDJSON event, then persist its gen and epoch for the next --since/--epoch; --limit 1 delivers one event per run. Never mix --as with --since/--epoch. On _reset or _dropped, resynchronize GitHub state, then use the control record generation and epoch; replay/baseline records are not new events. No merge or GitHub write is performed.",
+          "Registration returns generation and epoch. Initially arm watch --until-event --since <generation> --epoch <epoch> --pane <id> --json --kinds pr.checks,pr.head,pr.comment,pr.review,pr.closed,pr.merged,pr.conflicted,pr.base_changed,pr.base_deleted,pr.stopped,github.unavailable,github.recovered. Process every NDJSON event, then persist its gen and epoch for the next --since/--epoch; --limit 1 delivers one event per run. Never mix --as with --since/--epoch. On _reset or _dropped, resynchronize GitHub state, then use the control record generation and epoch; replay/baseline records are not new events. No merge or GitHub write is performed.",
           "Watches stop on merge/close, 8 non-rate-limit errors, or 10 comment-only updates. Archived/deleted Panes are removed. Re-register after resolving the reason. Session member PR discovery remains automatic."
         ]
       },
@@ -15159,7 +15182,7 @@ export const RUNPANE_CONTRACT = {
           "prWatchResult"
         ],
         "notes": [
-          "Registration returns generation and epoch. Initially arm watch --until-event --since <generation> --epoch <epoch> --pane <id> --json --kinds pr.checks,pr.head,pr.comment,pr.review,pr.closed,pr.merged,pr.conflicted,pr.stopped,github.unavailable,github.recovered. Process every NDJSON event, then persist its gen and epoch for the next --since/--epoch; --limit 1 delivers one event per run. Never mix --as with --since/--epoch. On _reset or _dropped, resynchronize GitHub state, then use the control record generation and epoch; replay/baseline records are not new events. No merge or GitHub write is performed.",
+          "Registration returns generation and epoch. Initially arm watch --until-event --since <generation> --epoch <epoch> --pane <id> --json --kinds pr.checks,pr.head,pr.comment,pr.review,pr.closed,pr.merged,pr.conflicted,pr.base_changed,pr.base_deleted,pr.stopped,github.unavailable,github.recovered. Process every NDJSON event, then persist its gen and epoch for the next --since/--epoch; --limit 1 delivers one event per run. Never mix --as with --since/--epoch. On _reset or _dropped, resynchronize GitHub state, then use the control record generation and epoch; replay/baseline records are not new events. No merge or GitHub write is performed.",
           "Watches stop on merge/close, 8 non-rate-limit errors, or 10 comment-only updates. Archived/deleted Panes are removed. Re-register after resolving the reason. Session member PR discovery remains automatic."
         ]
       },
@@ -15195,7 +15218,7 @@ export const RUNPANE_CONTRACT = {
           "prWatchResult"
         ],
         "notes": [
-          "Registration returns generation and epoch. Initially arm watch --until-event --since <generation> --epoch <epoch> --pane <id> --json --kinds pr.checks,pr.head,pr.comment,pr.review,pr.closed,pr.merged,pr.conflicted,pr.stopped,github.unavailable,github.recovered. Process every NDJSON event, then persist its gen and epoch for the next --since/--epoch; --limit 1 delivers one event per run. Never mix --as with --since/--epoch. On _reset or _dropped, resynchronize GitHub state, then use the control record generation and epoch; replay/baseline records are not new events. No merge or GitHub write is performed.",
+          "Registration returns generation and epoch. Initially arm watch --until-event --since <generation> --epoch <epoch> --pane <id> --json --kinds pr.checks,pr.head,pr.comment,pr.review,pr.closed,pr.merged,pr.conflicted,pr.base_changed,pr.base_deleted,pr.stopped,github.unavailable,github.recovered. Process every NDJSON event, then persist its gen and epoch for the next --since/--epoch; --limit 1 delivers one event per run. Never mix --as with --since/--epoch. On _reset or _dropped, resynchronize GitHub state, then use the control record generation and epoch; replay/baseline records are not new events. No merge or GitHub write is performed.",
           "Watches stop on merge/close, 8 non-rate-limit errors, or 10 comment-only updates. Archived/deleted Panes are removed. Re-register after resolving the reason. Session member PR discovery remains automatic."
         ]
       }

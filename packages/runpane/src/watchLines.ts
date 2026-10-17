@@ -81,6 +81,8 @@ function formatEntryLine(entry: WatchEntry): string | undefined {
     case 'pr.merged': return `PR ${name} ${pane} #${entry.pr?.number ?? '?'} MERGED`;
     case 'pr.closed': return `PR ${name} ${pane} #${entry.pr?.number ?? '?'} CLOSED${entry.reason ? ': ' + sanitizeName(entry.reason) : ''}`;
     case 'pr.head': return `PR ${name} ${pane} #${entry.pr?.number ?? '?'} HEAD CHANGED${entry.reason ? ': ' + sanitizeName(entry.reason) : ''}`;
+    case 'pr.base_changed': return `PR ${name} ${pane} #${entry.pr?.number ?? '?'} BASE CHANGED${entry.reason ? ': ' + sanitizeName(entry.reason) : ''}`;
+    case 'pr.base_deleted': return `PR ${name} ${pane} #${entry.pr?.number ?? '?'} BASE DELETED${entry.reason ? ': ' + sanitizeName(entry.reason) : ''}`;
     case 'pr.review': return `PR ${name} ${pane} #${entry.pr?.number ?? '?'} REVIEW${entry.reason ? ': ' + sanitizeName(entry.reason) : ''}`;
     case 'pr.comment': return `PR ${name} ${pane} #${entry.pr?.number ?? '?'} COMMENT${entry.reason ? ': ' + sanitizeName(entry.reason) : ''}`;
     case 'pr.stopped': return `PR ${name} ${pane} #${entry.pr?.number ?? '?'} WATCH STOPPED${entry.reason ? ': ' + sanitizeName(entry.reason) : ''}`;

@@ -1685,7 +1685,7 @@ def format_workspace_entry_line(entry: Dict[str, Any]) -> Optional[str]:
         return f"{workspace_label(kind)} {name} {pane}"
     if kind in {"pane.associated", "pane.detached"}:
         return f"{workspace_label(kind)} {name} {pane} session {sanitize_watch_value(entry.get('sessionId') or '')}"
-    pr_labels = {"pr.closed": "CLOSED", "pr.head": "HEAD CHANGED", "pr.review": "REVIEW", "pr.comment": "COMMENT", "pr.stopped": "WATCH STOPPED", "github.unavailable": "GITHUB UNAVAILABLE", "github.recovered": "GITHUB RECOVERED"}
+    pr_labels = {"pr.closed": "CLOSED", "pr.head": "HEAD CHANGED", "pr.base_changed": "BASE CHANGED", "pr.base_deleted": "BASE DELETED", "pr.review": "REVIEW", "pr.comment": "COMMENT", "pr.stopped": "WATCH STOPPED", "github.unavailable": "GITHUB UNAVAILABLE", "github.recovered": "GITHUB RECOVERED"}
     if kind in pr_labels:
         reason = ": " + sanitize_watch_value(entry["reason"]) if entry.get("reason") else ""
         return f"PR {name} {pane} #{(entry.get('pr') or {}).get('number', '?')} {pr_labels[kind]}{reason}"

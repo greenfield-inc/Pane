@@ -874,6 +874,8 @@ type WorkspaceEntryKind =
   | 'pr.merged'
   | 'pr.closed'
   | 'pr.head'
+  | 'pr.base_changed'
+  | 'pr.base_deleted'
   | 'pr.review'
   | 'pr.comment'
   | 'pr.stopped'
@@ -917,6 +919,7 @@ interface WorkspaceEntry {
   sessionId?: string;
   sessionName?: string;
   pr?: { number: number; url: string; headOid: string };
+  base?: { from: string; to: string };
   checks?: 'passed' | 'failed';
   failingChecks?: string[];
   panels?: WorkspacePanelSummary[];
@@ -1769,6 +1772,8 @@ const workspaceEntryKindSchema = boundary.enumeration(
   'pr.merged',
   'pr.closed',
   'pr.head',
+  'pr.base_changed',
+  'pr.base_deleted',
   'pr.review',
   'pr.comment',
   'pr.stopped',
@@ -1813,6 +1818,7 @@ const workspaceEntrySchema: BoundarySchema<WorkspaceEntry> = boundary.object({
   sessionId: boundary.optional(boundary.string),
   sessionName: boundary.optional(boundary.string),
   pr: boundary.optional(boundary.object({ number: boundary.number, url: boundary.string, headOid: boundary.string })),
+  base: boundary.optional(boundary.object({ from: boundary.string, to: boundary.string })),
   checks: boundary.optional(boundary.enumeration('passed', 'failed')),
   failingChecks: boundary.optional(boundary.array(boundary.string)),
   report: boundary.optional(agentReportSchema),
@@ -3596,6 +3602,8 @@ function workspaceLabel(kind: WorkspaceEntryKind): string {
     'pr.merged': 'PR MERGED',
     'pr.closed': 'PR.CLOSED',
     'pr.head': 'PR.HEAD',
+    'pr.base_changed': 'PR.BASE_CHANGED',
+    'pr.base_deleted': 'PR.BASE_DELETED',
     'pr.review': 'PR.REVIEW',
     'pr.comment': 'PR.COMMENT',
     'pr.stopped': 'PR.STOPPED',

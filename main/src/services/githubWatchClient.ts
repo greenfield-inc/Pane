@@ -46,7 +46,7 @@ export class GithubWatchClient {
       for (let offset = 0; offset < group.length; offset += BATCH_SIZE) {
         const batch = group.slice(offset, offset + BATCH_SIZE);
         const selections = batch.map((pr, i) => `p${i}: repository(owner:${JSON.stringify(pr.owner)},name:${JSON.stringify(pr.repo)}) {
-          pullRequest(number:${pr.number}) { state mergeable mergeStateStatus headRefOid updatedAt reviewDecision
+          pullRequest(number:${pr.number}) { state mergeable mergeStateStatus headRefOid baseRefName baseRef { id } updatedAt reviewDecision
             comments(last:100) { totalCount pageInfo { hasPreviousPage } nodes { id updatedAt } }
             reviews(last:100) { totalCount pageInfo { hasPreviousPage } nodes { id lastEditedAt state } }
             reviewThreads(last:100) { totalCount pageInfo { hasPreviousPage } nodes { id isResolved isOutdated comments(last:1) { totalCount nodes { id updatedAt } } } }
@@ -82,7 +82,7 @@ export class GithubWatchClient {
       const data = await this.query(target.host, `query {
         repository(owner:${JSON.stringify(target.owner)},name:${JSON.stringify(target.repo)}) {
           pullRequest(number:${target.number}) {
-            number url state mergeable mergeStateStatus headRefOid
+            number url state mergeable mergeStateStatus headRefOid baseRefName baseRef { id }
             comments(last:100) { pageInfo { hasPreviousPage } nodes { id updatedAt } }
             reviews(last:100) { pageInfo { hasPreviousPage } nodes { id submittedAt lastEditedAt state } }
             reviewThreads(last:100) { pageInfo { hasPreviousPage } nodes { id isResolved isOutdated comments(last:100) { pageInfo { hasPreviousPage } nodes { id updatedAt } } } }
@@ -107,7 +107,9 @@ export class GithubWatchClient {
       const contexts = commit.statusCheckRollup?.contexts;
       if (!detail) detail = {
         number: pr.number, url: pr.url, state: pr.state, mergeable: pr.mergeable,
-        headRefOid: pr.headRefOid, mergeStateStatus: pr.mergeStateStatus, checks: [], complete: false,
+        headRefOid: pr.headRefOid, mergeStateStatus: pr.mergeStateStatus, baseRefName: pr.baseRefName,
+        // GitHub keeps baseRefName after the branch is deleted; only baseRef goes null.
+        baseRefExists: pr.baseRef !== null, checks: [], complete: false,
         feedbackComplete: !pr.comments.pageInfo.hasPreviousPage && !pr.reviews.pageInfo.hasPreviousPage
           && !pr.reviewThreads.pageInfo.hasPreviousPage && pr.reviewThreads.nodes.every(thread => !thread.comments.pageInfo.hasPreviousPage),
         comments: [...pr.comments.nodes, ...pr.reviewThreads.nodes.flatMap(thread => thread.comments.nodes)]
@@ -208,6 +210,7 @@ const detailResponseSchema = boundary.object({
   repository: boundary.nullable(boundary.object({ pullRequest: boundary.nullable(boundary.object({
     number: boundary.number, url: boundary.string, state: boundary.string,
     mergeable: boundary.string, mergeStateStatus: boundary.string, headRefOid: boundary.string,
+    baseRefName: boundary.string, baseRef: boundary.nullable(boundary.object({ id: boundary.string })),
     comments: boundary.object({ pageInfo: previousPageSchema, nodes: boundary.array(commentSchema) }),
     reviews: boundary.object({ pageInfo: previousPageSchema, nodes: boundary.array(boundary.object({
       id: boundary.string, submittedAt: boundary.nullable(boundary.string), lastEditedAt: boundary.nullable(boundary.string), state: boundary.string,
@@ -228,6 +231,7 @@ const detailResponseSchema = boundary.object({
 export interface GithubPrDetails {
   number: number; url: string; state: string; mergeable: string; headRefOid: string;
   mergeStateStatus: string;
+  baseRefName: string; baseRefExists: boolean;
   checks: Array<ReturnType<typeof checkSchema.decode>>; complete: boolean;
   feedbackComplete: boolean;
   comments: string[]; reviews: string[];

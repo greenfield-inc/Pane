@@ -206,6 +206,16 @@ print(json.dumps([effective_watch_heartbeat_ms(180), effective_watch_heartbeat_m
     ],
     ['pr.merged', 'PR Issue 538 pane pane-1 #747 MERGED', { panelId: undefined, pr }],
     [
+      'pr.base_changed',
+      'PR Issue 538 pane pane-1 #747 BASE CHANGED: The base changed from release/monday to main.',
+      { panelId: undefined, pr, base: { from: 'release/monday', to: 'main' }, reason: 'The base changed from release/monday to main.' },
+    ],
+    [
+      'pr.base_deleted',
+      'PR Issue 538 pane pane-1 #747 BASE DELETED: The base branch release/monday was deleted.',
+      { panelId: undefined, pr, base: { from: 'release/monday', to: 'release/monday' }, reason: 'The base branch release/monday was deleted.' },
+    ],
+    [
       'agent.report',
       'REPORT Issue 538 pane pane-1 panel panel-1 ready pr#747 fc5dce9',
       { source: 'agent', report: { state: 'ready', pr: 747, head: 'fc5dce9a0b1c', reportedAt: 'T' } },

@@ -4116,6 +4116,8 @@ const workspaceEntryKindSchema = boundary.enumeration(
   'pr.merged',
   'pr.closed',
   'pr.head',
+  'pr.base_changed',
+  'pr.base_deleted',
   'pr.review',
   'pr.comment',
   'pr.stopped',
