@@ -139,7 +139,8 @@ function receiver(f, options = {}) {
   const paneDir = options.paneDir ?? f.env.PANE_DIR;
   fs.writeFileSync(config, JSON.stringify({ paneDir, log, ready, repoPath: options.repoPath ?? f.root,
     createError: options.createError, reposError: options.reposError, ownedPane: options.ownedPane,
-    sender: options.sender, screenText: options.screenText, receiverResumeId: options.receiverResumeId, item: options.item ?? { ok: true, sessionId: 'test-pane', panelId: 'test-panel', initialInput:{delivered:true,submitted:true,inputBytes:20,verifiedSubmitted:true,delivery:{state:'taken',evidence:'transcript'}} } }));
+    sender: options.sender, screenText: options.screenText, receiverResumeId: options.receiverResumeId,
+    blocked: options.blocked, extraPanels: options.extraPanels, item: options.item ?? { ok: true, sessionId: 'test-pane', panelId: 'test-panel', initialInput:{delivered:true,submitted:true,inputBytes:20,verifiedSubmitted:true,delivery:{state:'taken',evidence:'transcript'}} } }));
   const child = spawn(process.execPath, [path.join(__dirname, 'fixtures', 'runpane-handoff-daemon.cjs'),
     path.join(dist, 'daemonClient.js'), config], { env: f.env, stdio: 'ignore' });
   f.t.after(async () => {
@@ -622,6 +623,8 @@ function claudeSession(f) {
     `const dir = ${JSON.stringify(store)};`,
     "const lines = fs.readFileSync(path.join(dir, from + '.jsonl'), 'utf8').split(from).join(to);",
     "fs.writeFileSync(path.join(dir, to + '.jsonl'), lines + JSON.stringify({ type: 'assistant', sessionId: to, message: { role: 'assistant', content: 'forked' } }) + '\\n');",
+    // The sending agent's own turn keeps writing to its transcript while the handoff runs.
+    "if (process.env.FAKE_SENDER_TURN_WRITES) fs.appendFileSync(path.join(dir, from + '.jsonl'), JSON.stringify({ type: 'assistant', sessionId: from, message: { role: 'assistant', content: 'running runpane handoff' } }) + '\\n');",
   ].join('\n'));
   fs.writeFileSync(path.join(bin, 'claude.cmd'), `@"${process.execPath}" "%~dp0claude.js" %*\r\n`);
   fs.writeFileSync(path.join(bin, 'claude'), `#!/bin/sh\nexec "${process.execPath.split(path.sep).join('/')}" "$(dirname "$0")/claude.js" "$@"\n`, { mode: 0o755 });
@@ -917,4 +920,71 @@ test('two agents\' live sessions in one terminal carry neither, and say why', (t
   const out = JSON.parse(result.stdout);
   assert.equal(out.continuity.carried, false);
   assert.match(out.continuity.reason, /Both claude and codex report a live session in this terminal/);
+});
+
+// ---------------------------------------------------------------- the running sender, blocked receivers, report-back
+
+const handoffNote = (f) => {
+  const folder = path.join(f.env.HOME, '.pane', 'handoffs');
+  return fs.readFileSync(path.join(folder, fs.readdirSync(folder)[0]), 'utf8');
+};
+
+test('the running sender\'s own turn may grow its transcript; a fork that rewrote it still fails check 4', (t) => {
+  const f = fixture(t); fs.writeFileSync(path.join(f.root, 'note.md'), filled());
+  receiver(f, { sender: { agentType: 'claude', resumeId: SENDER, resumeSource: 'agent' }, screenText: `${LAST} now.` });
+  claudeSession(f);
+  f.env.FAKE_SENDER_TURN_WRITES = '1';
+  // Run by the agent itself (its live id is set): appended lines are its own turn.
+  f.env.CLAUDE_CODE_SESSION_ID = SENDER;
+  const live = runClaude(f);
+  assert.equal(live.status, 0, live.stderr + live.stdout);
+  assert.equal(JSON.parse(live.stdout).continuity.checks.originalUntouched, true);
+  // Run from a plain terminal, nobody else should be writing to the original: any change fails.
+  delete f.env.CLAUDE_CODE_SESSION_ID;
+  const idle = runClaude(f);
+  assert.equal(idle.status, 1, idle.stderr + idle.stdout);
+  const out = JSON.parse(idle.stdout);
+  assert.equal(out.continuity.checks.originalUntouched, false);
+  assert.match(out.continuity.reason, /changed while it was forked/);
+});
+
+test('a receiver stopped on its agent\'s own notice is inconclusive, with the command that answers it', (t) => {
+  const f = fixture(t); fs.writeFileSync(path.join(f.root, 'note.md'), filled());
+  receiver(f, {
+    sender: { agentType: 'claude', resumeId: SENDER, resumeSource: 'agent' },
+    blocked: { kind: 'agent-prompt', message: 'Set up security for Daybreak mode\nPress a number to choose · esc to dismiss', suggestedCommand: 'runpane panels input --panel test-tab --keys escape --yes' },
+  });
+  claudeSession(f);
+  const result = runClaude(f);
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  const out = JSON.parse(result.stdout);
+  assert.equal(out.continuity.result, 'inconclusive');
+  assert.match(out.continuity.reason, /waiting on its agent's own prompt: Set up security for Daybreak mode$/);
+  assert.match(out.continuity.next, /runpane panels input --panel test-tab --keys escape --yes/);
+});
+
+test('the receiver reports back to the tab that records the carried session, not an inherited PANE_PANEL_ID', (t) => {
+  const f = fixture(t); fs.writeFileSync(path.join(f.root, 'note.md'), filled());
+  receiver(f, {
+    sender: { agentType: 'claude', resumeId: 'b0b0b0b0-0000-4000-8000-000000000000', resumeSource: 'agent' },
+    extraPanels: [{ id: 'own-tab', agentType: 'claude', resumeId: SENDER, resumeSource: 'agent' }],
+    screenText: `${LAST} now.`,
+  });
+  claudeSession(f);
+  f.env.CLAUDE_CODE_SESSION_ID = SENDER;
+  const result = runClaude(f);
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  assert.match(handoffNote(f), /^origin_panel: own-tab$/m);
+  assert.doesNotMatch(handoffNote(f), /^origin_panel: sender-panel$/m);
+});
+
+test('with no tab recording the carried session, the receiver reports on the branch and the output says why', (t) => {
+  const f = fixture(t); fs.writeFileSync(path.join(f.root, 'note.md'), filled());
+  receiver(f, { sender: { agentType: 'claude', resumeId: 'b0b0b0b0-0000-4000-8000-000000000000', resumeSource: 'agent' }, screenText: `${LAST} now.` });
+  claudeSession(f);
+  f.env.CLAUDE_CODE_SESSION_ID = SENDER;
+  const result = runClaude(f);
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  assert.doesNotMatch(handoffNote(f), /^origin_panel:/m);
+  assert.ok(JSON.parse(result.stdout).warnings.some(warning => /PANE_PANEL_ID names another tab/.test(warning)));
 });

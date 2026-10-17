@@ -439,6 +439,13 @@ interface Carry {
   snippet?: string;
   /** Why this session and not the one Pane recorded for the tab, when they differ. */
   note?: string;
+  /** The sender is the running agent, identified by its own live record: its turn is still writing. */
+  live?: true;
+  /**
+   * The tab the receiver reports back to, when it isn't PANE_PANEL_ID (which a command run through
+   * Codex's shared background server can inherit from another tab); null when no tab can be named.
+   */
+  senderPanel?: string | null;
 }
 
 /** What happened to the sender's session, in the command's output and JSON. */
@@ -484,6 +491,7 @@ interface SenderSession {
   id: string;
   /** Set when the agent's live record and Pane's record for the tab disagree. */
   note?: string;
+  live?: true;
 }
 
 /** Which session is handing off: the agent's live record when it has one, otherwise Pane's record for this tab. */
@@ -498,7 +506,7 @@ function senderSession(recorded: { agentType?: string; resumeId?: string } | und
     return { fresh: `Both ${live.map(entry => entry.agent).join(' and ')} report a live session in this terminal (one agent was started by the other), so runpane can't tell which one is handing off. Run the handoff from that agent's own tab.` };
   }
   if (chosen) {
-    const sender: SenderSession = { ...chosen };
+    const sender: SenderSession = { ...chosen, live: true };
     if (recorded?.agentType === chosen.agent && recorded.resumeId && recorded.resumeId !== chosen.id) {
       sender.note = `Pane had recorded ${recorded.resumeId} for this tab; ${chosen.agent} itself reports ${chosen.id}, which is the one carried.`;
     }
@@ -518,9 +526,11 @@ async function planCarry(parsed: ParsedArgs, destination: HandoffDestination): P
   const paneId = process.env.PANE_SESSION_ID;
   const panelId = process.env.PANE_PANEL_ID;
   let recorded: { agentType?: string; resumeId?: string } | undefined;
+  let panels: Array<{ id: string; agentType?: string; resumeId?: string }> = [];
   if (paneId && panelId) {
     try {
       const listed = await invokeDaemon('runpane:panels:list', [{ paneId }], panelListResultSchema, { paneDir: parsed.paneDir });
+      panels = listed.panels;
       recorded = listed.panels.find(panel => panel.id === panelId || panel.panelId === panelId);
     } catch (error) {
       if (!LIVE_SESSION_ENV.some(([, key]) => process.env[key])) {
@@ -540,6 +550,13 @@ async function planCarry(parsed: ParsedArgs, destination: HandoffDestination): P
   if (!session) return { fresh: `${sender.agent} session ${sender.id} has no files in this machine's ${sender.agent} store.` };
   const carry: Carry = { session };
   if (sender.note) carry.note = sender.note;
+  if (sender.live) {
+    carry.live = true;
+    // When PANE_PANEL_ID's tab records another session, report back to the tab that records this one.
+    if (recorded?.resumeId && recorded.resumeId !== sender.id) {
+      carry.senderPanel = panels.find(panel => panel.resumeId === sender.id)?.id ?? null;
+    }
+  }
   const snippet = lastMessageSnippet(session);
   if (snippet) carry.snippet = snippet;
   return { carry };
@@ -638,9 +655,11 @@ async function checkReceiver(options: {
   paneId: string;
   panelId: string;
   ready: boolean;
+  /** What the receiver's agent is waiting on, when it did not reach its input box. */
+  blocked?: { message: string; suggestedCommand?: string };
   original?: OriginalSnapshot;
-}): Promise<Pick<ContinuityReport, 'checks' | 'result'> & { why: string }> {
-  const { destination, carry, resumedId, paneId, panelId, ready, original } = options;
+}): Promise<Pick<ContinuityReport, 'checks' | 'result' | 'next'> & { why: string }> {
+  const { destination, carry, resumedId, paneId, panelId, ready, blocked, original } = options;
   const listed = await destination.invoke('runpane:panels:list', [{ paneId }], panelListResultSchema);
   const panel = listed.panels.find(candidate => candidate.id === panelId || candidate.panelId === panelId);
   const restartResumes = panel?.resumeId === resumedId;
@@ -651,7 +670,7 @@ async function checkReceiver(options: {
     historyLoaded = screenShows(screen.text, carry.snippet);
   }
   const checks: NonNullable<ContinuityReport['checks']> = { resumedById, restartResumes, historyLoaded };
-  const changed = original ? await originalChanges(original) : [];
+  const changed = original ? await originalChanges(original, { appendOnly: carry.live }) : [];
   if (original) checks.originalUntouched = changed.length === 0;
   if (!resumedById || !restartResumes) {
     return { checks, result: 'not-continued', why: `Pane recorded ${panel?.resumeId ?? 'no id'} for the receiver, not ${resumedId}, so it is not resuming that session.` };
@@ -659,20 +678,33 @@ async function checkReceiver(options: {
   if (checks.originalUntouched === false) {
     return { checks, result: 'not-continued', why: `Your session changed while it was forked (${changed.join(', ')}).` };
   }
+  if (!ready && blocked) {
+    // The agent resumed the session but stopped on its own notice or dialog; history can be checked once it's answered.
+    return {
+      checks,
+      result: 'inconclusive',
+      why: `The receiver resumed the session but is waiting on its agent's own prompt: ${blocked.message.split('\n')[0]}`,
+      next: blocked.suggestedCommand
+        ? `Answer it with ${blocked.suggestedCommand} (or by hand), then check the receiver shows your last work and ask it "${PROBE}" if unclear.`
+        : `Answer that prompt in the receiver, then check it shows your last work and ask it "${PROBE}" if unclear.`,
+    };
+  }
   if (!ready) return { checks, result: 'not-continued', why: 'The receiver did not reach its input box, so its history could not be checked.' };
-  if (historyLoaded === true && carry.session.folder && original) {
+  const found: Pick<ContinuityReport, 'checks' | 'result'> & { why: string } = historyLoaded === true
+    ? { checks, result: 'continued', why: `The receiver shows the session's last message ("${carry.snippet}").` }
+    : {
+      checks,
+      result: 'inconclusive',
+      why: carry.snippet
+        ? `The receiver is ready but its screen does not show the session's last message ("${carry.snippet}"); it may be scrolled or compacted.`
+        : 'The receiver is ready, but this session\'s store is not text runpane can read, so its last message could not be compared.',
+    };
+  if (carry.session.folder && original) {
     // Cursor has no fork command: the fork is a copied chat folder, and Cursor can still write to
     // the original's folder once the fork is used, after this check has run.
-    return { checks, result: 'inconclusive', why: `The receiver shows the session's last message ("${carry.snippet}"), but Cursor has no fork command: runpane copied the chat, and Cursor may still write to the original chat when the fork is used. Best effort.` };
+    return { checks, result: 'inconclusive', why: `${found.why} Cursor has no fork command, so runpane copied the chat, and Cursor may still write to the original chat once the fork is used. Best effort.` };
   }
-  if (historyLoaded === true) return { checks, result: 'continued', why: `The receiver shows the session's last message ("${carry.snippet}").` };
-  return {
-    checks,
-    result: 'inconclusive',
-    why: carry.snippet
-      ? `The receiver is ready but its screen does not show the session's last message ("${carry.snippet}"); it may be scrolled or compacted.`
-      : 'The receiver is ready, but this session\'s store is not text runpane can read, so its last message could not be compared.',
-  };
+  return found;
 }
 
 // ---------------------------------------------------------------- command
@@ -704,10 +736,12 @@ export async function runHandoff(parsed: ParsedArgs): Promise<number> {
   const cwd = process.cwd();
   const tailnet = await readTailnet();
   const self = tailnet.ok ? tailnet.self.name : (process.env.HOSTNAME ?? 'this-machine');
+  // Which tab the receiver reports back to; planCarry may correct PANE_PANEL_ID.
+  let senderPanel: string | null | undefined;
   const origin = (state: GitState | null): NoteOrigin => ({
     originMachine: self,
     originPane: process.env.PANE_SESSION_ID,
-    originPanel: process.env.PANE_PANEL_ID,
+    originPanel: senderPanel === undefined ? process.env.PANE_PANEL_ID : senderPanel ?? undefined,
     originSession: process.env.PANE_ORCHESTRATION_SESSION_ID,
     repository: state?.repository,
     branch: state?.branch,
@@ -808,6 +842,10 @@ export async function runHandoff(parsed: ParsedArgs): Promise<number> {
   // A same-agent handoff carries the sender's own session; anything else is a fresh agent with the note.
   const plan = openCodePlan ?? await planCarry(parsed, destination);
   const carry = 'carry' in plan ? plan.carry : undefined;
+  if (carry?.senderPanel !== undefined) {
+    senderPanel = carry.senderPanel;
+    if (senderPanel === null) warnings.push(`This terminal's PANE_PANEL_ID names another tab, and no tab in this Pane records ${carry.session.agent} session ${carry.session.id}, so the receiver reports back on the branch instead of to a panel.`);
+  }
   const continuity: ContinuityReport = carry ? describeCarry(carry, !target) : { carried: false, reason: 'fresh' in plan ? plan.fresh : '' };
   const noteOnlyCommand = `runpane handoff ${quote(text || describeDestination(destination, machineLabel), senderShell)} --note-file ${quote(parsed.handoffNoteFile ?? '<note>', senderShell)} --note-only`;
   say(carry
@@ -903,7 +941,7 @@ export async function runHandoff(parsed: ParsedArgs): Promise<number> {
         paneDir: parsed.paneDir,
         timeoutMs: (parsed.readyTimeoutMs ?? 30_000) + 10_000,
       });
-      receiver = { ok: panel.ok, paneId: senderPane, panelId: panel.panelId, name: panel.title, initialInput: panel.initialInput, ready: panel.readiness?.ok === true, newTab: true };
+      receiver = { ok: panel.ok, paneId: senderPane, panelId: panel.panelId, name: panel.title, initialInput: panel.initialInput, ready: panel.readiness?.ok === true, blocked: panel.readiness?.blocked, newTab: true };
     } catch (error) {
       throw new Error(`runpane panels create failed in Pane ${senderPane}: ${error instanceof Error ? error.message : String(error)}. The note was sent to ${notePath}.`);
     }
@@ -942,7 +980,7 @@ export async function runHandoff(parsed: ParsedArgs): Promise<number> {
     }
     if (!item.sessionId || !item.panelId) throw new Error(`Pane on ${remote.name} reported no panel for the receiver. The note was sent to ${notePath}. Check ${recovery('sessions', 'list')} before retrying.`);
     const started = 'error' in item ? undefined : item;
-    receiver = { ok: created.ok, paneId: item.sessionId, panelId: item.panelId, name: item.name, worktreePath: item.worktreePath, initialInput: started?.initialInput, ready: started?.readiness?.ok === true, newTab: false };
+    receiver = { ok: created.ok, paneId: item.sessionId, panelId: item.panelId, name: item.name, worktreePath: item.worktreePath, initialInput: started?.initialInput, ready: started?.readiness?.ok === true, blocked: started?.readiness?.blocked, newTab: false };
   }
 
   result.pane = { id: receiver.paneId, panelId: receiver.panelId, name: receiver.name, worktreePath: receiver.worktreePath };
@@ -999,7 +1037,7 @@ interface CarriedReport {
  */
 async function reportCarried(report: CarriedReport): Promise<number> {
   const { parsed, result, continuity, carry, resumedId, receiver, destination, original, target, say } = report;
-  const checked = await checkReceiver({ destination, carry, resumedId, paneId: receiver.paneId, panelId: receiver.panelId, ready: receiver.ready, original });
+  const checked = await checkReceiver({ destination, carry, resumedId, paneId: receiver.paneId, panelId: receiver.panelId, ready: receiver.ready, blocked: receiver.blocked, original });
   continuity.checks = checked.checks;
   continuity.result = checked.result;
   continuity.reason = carry.note ? `${checked.why} ${carry.note}` : checked.why;
@@ -1013,7 +1051,7 @@ async function reportCarried(report: CarriedReport): Promise<number> {
     }
     say(step('continued', `${carry.session.agent} session ${resumedId}${continuity.fork ? ` (a fork of ${carry.session.id})` : ''} in ${where}. ${checked.why}`));
   } else if (checked.result === 'inconclusive') {
-    continuity.next = `Ask the receiver "${PROBE}" with ${report.submit(receiver.panelId)}, and compare its answer with your own last work. If it matches, ${moved ? `send it: ${movedMessage}` : 'it continues your session'}; if not, tell the person it is not continued.`;
+    continuity.next = `${checked.next ?? `Ask the receiver "${PROBE}" with ${report.submit(receiver.panelId)}, and compare its answer with your own last work.`} If it matches, ${moved ? `send it: ${movedMessage}` : 'it continues your session'}; if not, tell the person it is not continued.`;
     say(step('unclear', `${where}. ${checked.why}`, false));
     say(`Next: ${continuity.next}`);
   } else {
@@ -1189,6 +1227,8 @@ interface Receiver {
   initialInput?: ReturnType<typeof panelCreateResultSchema.decode>['initialInput'];
   /** The receiver's agent reached its input box when it was created. */
   ready: boolean;
+  /** What the receiver's agent stopped on instead, when Pane could tell. */
+  blocked?: { message: string; suggestedCommand?: string };
   newTab: boolean;
 }
 

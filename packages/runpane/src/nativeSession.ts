@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -277,6 +277,12 @@ interface FileStamp {
   absolute: string;
   bytes: number;
   modifiedMs: number;
+  /** sha256 of the file's content when it was stamped. */
+  sha256: string;
+}
+
+function sha256(content: Buffer): string {
+  return createHash('sha256').update(content).digest('hex');
 }
 
 /** How the original looked before a fork, to prove the fork left it untouched (continuity check 4). */
@@ -290,7 +296,7 @@ export async function snapshotOriginal(session: NativeSession, cwd: string): Pro
     kind: 'files',
     stamps: session.files.map(file => {
       const stat = fs.statSync(file.absolute);
-      return { absolute: file.absolute, bytes: stat.size, modifiedMs: stat.mtimeMs };
+      return { absolute: file.absolute, bytes: stat.size, modifiedMs: stat.mtimeMs, sha256: sha256(fs.readFileSync(file.absolute)) };
     }),
   };
   // A Cursor chat is a folder; a file that appears in it changes the original too.
@@ -301,13 +307,22 @@ export async function snapshotOriginal(session: NativeSession, cwd: string): Pro
   return snapshot;
 }
 
-/** What changed in the original since the snapshot: files whose size or time changed, or the session's export. */
-export async function originalChanges(snapshot: OriginalSnapshot): Promise<string[]> {
+/**
+ * What changed in the original since the snapshot: files whose size or time changed, files new in
+ * a Cursor chat folder, or the session's export. With `appendOnly`, a file may have grown, as long
+ * as everything it held at the snapshot is unchanged: the sender is the running agent, so its own
+ * turn (the one running this handoff) keeps writing to its transcript.
+ */
+export async function originalChanges(snapshot: OriginalSnapshot, options: { appendOnly?: boolean } = {}): Promise<string[]> {
   if (snapshot.kind === 'export') {
     return (await openCodeExport(snapshot.id, snapshot.cwd)) === snapshot.text ? [] : [`OpenCode session ${snapshot.id}`];
   }
   const changed = snapshot.stamps.filter(stamp => {
     try {
+      if (options.appendOnly) {
+        const content = fs.readFileSync(stamp.absolute);
+        return content.length < stamp.bytes || sha256(content.subarray(0, stamp.bytes)) !== stamp.sha256;
+      }
       const stat = fs.statSync(stamp.absolute);
       return stat.size !== stamp.bytes || stat.mtimeMs !== stamp.modifiedMs;
     } catch {
