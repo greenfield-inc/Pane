@@ -582,6 +582,19 @@ export class OrchestrationSessionManager extends EventEmitter {
   }
 
   /**
+   * Whether a panel is a worker of a Session that is not archived: its Pane is associated (the
+   * whole Pane, or this panel), and it is not the Session's own orchestrator. Reads the in-memory
+   * store without taking the Session lock, like `workspaceMembership`.
+   */
+  isActiveSessionWorker(paneId: string, panelId: string): boolean {
+    return this.store.read().sessions.some(session => session.archived !== true
+      && session.internalSessionId !== paneId
+      && !Object.values(session.panelIds).includes(panelId)
+      && session.associations.some(association => association.paneId === paneId
+        && (association.panelIds.length === 0 || association.panelIds.includes(panelId))));
+  }
+
+  /**
    * The Session a Pane belongs to: the Session whose orchestrator panel or
    * hidden terminal owner this is, or the Session it is associated with.
    */

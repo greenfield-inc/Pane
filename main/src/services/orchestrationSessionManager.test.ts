@@ -1109,6 +1109,27 @@ describe('OrchestrationSessionManager', () => {
     expect(fixture.manager.workspaceMembership('missing')).toBeUndefined();
   });
 
+  it('tells Session workers apart from other panels for auto-resume', async () => {
+    const fixture = createFixture();
+    const whole = paneFixture(fixture, 'resume-whole', { name: 'Whole' });
+    const limited = paneFixture(fixture, 'resume-limited', { name: 'Limited' });
+    paneFixture(fixture, 'resume-loose', { name: 'Loose' });
+    await seedPanel(createPanel('resume-limited-tab', limited.id));
+    const named = await fixture.manager.create({ name: 'Auto resume' });
+    await fixture.manager.associate({ sessionId: named.session.id }, { paneId: whole.id });
+    await fixture.manager.associate({ sessionId: named.session.id }, { paneId: limited.id, panelIds: ['resume-limited-tab'] });
+
+    expect(fixture.manager.isActiveSessionWorker(whole.id, 'any-panel')).toBe(true);
+    expect(fixture.manager.isActiveSessionWorker(limited.id, 'resume-limited-tab')).toBe(true);
+    expect(fixture.manager.isActiveSessionWorker(limited.id, 'other-tab')).toBe(false);
+    expect(fixture.manager.isActiveSessionWorker('resume-loose', 'loose-tab')).toBe(false);
+    // The Session's own orchestrator is never one of its workers.
+    expect(fixture.manager.isActiveSessionWorker(named.session.internalSessionId, named.session.panelIds[named.session.agent])).toBe(false);
+
+    await fixture.manager.update({ sessionId: named.session.id }, { archived: true });
+    expect(fixture.manager.isActiveSessionWorker(whole.id, 'any-panel')).toBe(false);
+  });
+
   it('finds the Session a Pane belongs to for Session-scoped locks', async () => {
     const fixture = createFixture();
     const pane = paneFixture(fixture, 'pane-1', { name: 'Feature Pane' });

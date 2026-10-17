@@ -68,6 +68,24 @@ describe('durable PR event delivery', () => {
       expect(second.readAfter(1, { kinds: ['pr.head'] }).entries).toEqual([]);
     } finally { rmSync(directory, { recursive: true, force: true }); }
   });
+
+  it('keeps a panel.resumed entry and its nudge fields across a restart, for consumers that ask for it', () => {
+    const directory = mkdtempSync(path.join(tmpdir(), 'pane-journal-'));
+    try {
+      const filePath = path.join(directory, 'journal.json');
+      const first = new WorkspaceJournal({ filePath });
+      first.appendPaneEntry('worker', {
+        kind: 'panel.resumed', panelId: 'panel-1', source: 'session', reason: 'pane-start',
+        nudged: false, heldInputPresent: true, interruptedAt: '2026-10-17T16:58:00.000Z', attempt: 2,
+      });
+      const second = new WorkspaceJournal({ filePath });
+      expect(second.readAfter(0, { kinds: ['panel.resumed'] }).entries).toMatchObject([{
+        kind: 'panel.resumed', panelId: 'panel-1', reason: 'pane-start', nudged: false,
+        interruptedAt: '2026-10-17T16:58:00.000Z', attempt: 2,
+      }]);
+      expect(second.readAfter(0, {}).entries).toEqual([]);
+    } finally { rmSync(directory, { recursive: true, force: true }); }
+  });
 });
 
 it('counts meaningful activity even when output filters hide it', () => {

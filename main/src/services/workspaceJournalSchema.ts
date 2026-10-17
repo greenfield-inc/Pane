@@ -20,6 +20,7 @@ const workspaceEntryKindSchema = boundary.enumeration(
   'pane.gone',
   'panel.exited',
   'panel.stopped',
+  'panel.resumed',
   'pane.associated',
   'pane.detached',
   'pr.conflicted',
@@ -75,4 +76,7 @@ export const workspaceEntrySchema: BoundarySchema<RunpaneWorkspaceEntry> = bound
   failingChecks: boundary.optional(boundary.array(boundary.string)),
   report: boundary.optional(agentReportSchema),
   panels: boundary.optional(boundary.array(workspacePanelSummarySchema)),
+  nudged: boundary.optional(boundary.boolean),
+  interruptedAt: boundary.optional(boundary.string),
+  attempt: boundary.optional(boundary.number),
 });

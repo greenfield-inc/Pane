@@ -1675,6 +1675,9 @@ def format_workspace_entry_line(entry: Dict[str, Any]) -> Optional[str]:
         return f"CHANGED {name} {pane}{panel}"
     if kind == "panel.stopped":
         return f"STOPPED {name} {pane}{panel}"
+    if kind == "panel.resumed":
+        nudged = "" if entry.get("nudged") else " NOT NUDGED"
+        return f"RESUMED {name} {pane}{panel} {sanitize_watch_value(entry.get('reason') or 'unknown')}{nudged}"
     if kind == "agent.idle":
         minutes = max(0, int(entry.get("idleMs") or 0) // 60_000)
         return f"IDLE {name} {minutes}m {pane}{panel}"
@@ -1766,6 +1769,7 @@ def workspace_label(kind: Any) -> str:
         "pane.gone": "GONE",
         "panel.exited": "EXIT",
         "panel.stopped": "STOPPED",
+        "panel.resumed": "RESUMED",
         "pane.associated": "JOINED",
         "pane.detached": "LEFT",
         "pr.conflicted": "PR CONFLICTED",

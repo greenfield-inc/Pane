@@ -25,6 +25,7 @@ interface WatchEntry {
   idleMs?: number;
   idleCount?: number;
   report?: WatchReport;
+  nudged?: boolean;
 }
 
 /** The fields of a worker report a REPORT line shows. */
@@ -75,6 +76,7 @@ function formatEntryLine(entry: WatchEntry): string | undefined {
     case 'pane.associated': return `JOINED ${name} ${pane} session ${sanitizeName(entry.sessionId ?? '')}`;
     case 'pane.detached': return `LEFT ${name} ${pane} session ${sanitizeName(entry.sessionId ?? '')}`;
     case 'panel.stopped': return `STOPPED ${name} ${pane}${panel}`;
+    case 'panel.resumed': return `RESUMED ${name} ${pane}${panel} ${sanitizeName(entry.reason ?? 'unknown')}${entry.nudged ? '' : ' NOT NUDGED'}`;
     case 'panel.exited': return `EXIT ${name} ${pane}${panel} code ${entry.exitCode ?? 'unknown'}`;
     case 'pr.conflicted': return `PR ${name} ${pane} #${entry.pr?.number ?? '?'} CONFLICTED`;
     case 'pr.checks': return formatChecksLine(`PR ${name} ${pane} #${entry.pr?.number ?? '?'}`, entry);

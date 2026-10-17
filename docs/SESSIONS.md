@@ -611,7 +611,9 @@ Pane.
 
 After a Pane restart, an agent panel whose process did not come back is
 reported once as `panel.stopped` (`STOPPED <pane-name> pane <pane-id> panel
-<panel-id>`, `running: false`), never as `agent.ready`. Restart it in place,
+<panel-id>`, `running: false`), never as `agent.ready`. Pane restarts Session
+workers itself (see "Auto-resume" below); to restart any other panel by hand,
+or a worker Pane left stopped, restart it in place,
 with the same panel ID and its conversation, using `runpane panels resume
 --panel <panel-id> --wait-ready --yes --json`, or every stopped agent panel of
 the Session at once with `runpane panels resume --session <session-id>
@@ -628,6 +630,37 @@ returns a `still stopping` error instead of starting a second process. Retry
 after the old processes exit. This also applies when bounded teardown could
 not kill a process; bulk resume reports the error for that panel and continues
 with the others. Archived Panes cannot be resumed, even if archive cleanup failed.
+
+### Auto-resume
+
+While Settings → General → Power → "Resume interrupted Session agents" is on
+(the default), Pane brings Session workers back by itself, so an orchestrator
+needs no instructions of its own for it
+(`main/src/services/sessionAgentAutoResume.ts`):
+
+- When Pane starts and when the computer wakes, it restarts every stopped agent
+  panel of a worker Pane associated with an active (not archived) Session, in
+  place, the same restart `runpane panels resume` runs. It skips the Session's
+  own orchestrator panel, workers whose last `runpane report` was `done` or
+  `failed`, panels an update holds for review, and Panes outside a Session. On
+  a wake it waits 10 seconds for the network first.
+- A worker whose turn ends on a transient API failure (a connection error or
+  timeout, a 5xx or overloaded response, "Your computer went to sleep
+  mid-response", `ENOTFOUND`, a dropped Codex stream) is nudged after 30
+  seconds, then 2 and 5 minutes if it fails again: at most 3 times in an hour.
+  Auth errors, usage limits and an over-long prompt are not retried.
+- Each agent gets one nudge, `You were interrupted at <time>. Re-read your
+  task's status and continue.`, sent like `panels submit`. Pane never types
+  into a composer that holds unsent text, and never nudges an agent that is
+  waiting on a person.
+- Each one is journaled as `panel.resumed` (`RESUMED <pane-name> pane <pane-id>
+  panel <panel-id> <reason>`), where `reason` is `pane-start`, `system-resume`
+  or `api-error`. The entry carries `nudged`, `interruptedAt`, and for an
+  `api-error` the `attempt`. A line ending `NOT NUDGED` means Pane typed
+  nothing: `heldInputPresent: true` (unsent text), `to: "blocked"` (waiting on
+  a person), or the agent did not come back ready. `panel.resumed` is opt-in
+  like `panel.stopped`: a Session-scoped watch and `--follow` receive it, other
+  consumers only when `--kinds` lists it.
 
 Membership changes are journal entries: `pane.associated` (`JOINED <pane-name>
 pane <pane-id> session <session-id>`) and `pane.detached` (`LEFT ...`). The
@@ -755,8 +788,10 @@ total deadline (exit 124); under follow it bounds each daemon request.
 REPORT remains the completion signal: workers use `runpane report --state
 ready|blocked|failed|done --summary-file <path>`, adding a PR/head and a question
 when blocked. READY alone is activity evidence. Read the full report with
-`runpane agents status --panel <id> --json`. Resume stopped workers in the same
-panel with `runpane panels resume --panel <id> --wait-ready --yes --json`.
+`runpane agents status --panel <id> --json`. Pane resumes and nudges stopped
+or interrupted Session workers itself (RESUMED lines, see "Auto-resume"); resume
+any other stopped worker in the same panel with `runpane panels resume --panel
+<id> --wait-ready --yes --json`.
 
 Do not pipe follow through `head` or `grep -m1` to wait. Run `--until-event` as
 a supported background task, act on its events, then re-arm with its cursor.

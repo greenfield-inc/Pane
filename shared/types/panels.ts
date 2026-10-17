@@ -92,6 +92,7 @@ export interface TerminalPanelState {
 
   // Auto-resume state (for graceful shutdown/restart)
   wasInterrupted?: boolean;          // Whether this terminal was active when app shutdown occurred
+  interruptedAt?: string;            // When that shutdown stopped it, for the auto-resume nudge
   updateResumeHold?: string;         // Operation owning the stopped panel; explicit resume releases it.
   updateResumeId?: string;           // Exact identity required by automatic update restoration.
   hasClaudeSessionId?: boolean;      // Whether --session-id was already passed to Claude (use --resume next time)

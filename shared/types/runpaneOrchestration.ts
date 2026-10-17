@@ -141,6 +141,12 @@ export type RunpaneWorkspaceEntryKind =
    * Opt-in like the Session kinds; other consumers get `agent.unknown` with `running: false`.
    */
   | 'panel.stopped'
+  /**
+   * Pane brought a Session worker back by itself: it restarted the stopped panel in place after
+   * Pane started or the computer woke (`reason` `pane-start` or `system-resume`), or nudged an
+   * agent whose turn died on a transient API error (`api-error`). Opt-in like `panel.stopped`.
+   */
+  | 'panel.resumed'
   /** A worker report, delivered only when explicitly requested in kinds. */
   | 'agent.report'
   /** The Pane joined a Session (`sessions associate`). */
@@ -211,6 +217,16 @@ export interface RunpaneWorkspaceEntry {
   panels?: RunpaneWorkspacePanelSummary[];
   /** The report of an `agent.report` entry; its summary is cut to 2,000 characters (the panel keeps up to 16,000). */
   report?: TerminalAgentReport;
+  /**
+   * A `panel.resumed` entry: whether the agent was sent its one nudge. It is not sent when the
+   * composer holds unsent text (`heldInputPresent`), the agent waits on a person (`to: 'blocked'`),
+   * or the agent did not come back ready.
+   */
+  nudged?: boolean;
+  /** A `panel.resumed` entry: when the agent stopped, if Pane knows. */
+  interruptedAt?: string;
+  /** A `panel.resumed` entry for an `api-error`: which nudge this is within the hour (at most 3). */
+  attempt?: number;
 }
 
 export interface RunpaneWorkspacePanelSummary {

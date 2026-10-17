@@ -32,8 +32,8 @@ Offer unattended resilience only when the user asks for unattended, overnight,
 or background work, or when delegated Pane work is about to begin and the
 choice affects how it runs. Ask one concise optional question with a concrete
 effect, for example: "Would you like unattended resilience for this delegated
-work? It keeps the Mac awake and can automatically resume a pane after a sleep
-or network interruption."
+work? It keeps the Mac awake and adds resume bookkeeping on top of Pane's own
+restart of interrupted workers."
 
 Remember an explicit yes or no for the rest of the Session:
 
@@ -158,50 +158,54 @@ Keep-awake (macOS only):
 
 Auto-resume:
 
-- On a READY or IDLE line for a pane you dispatched (both carry the pane and
-  panel ids), read \`runpane panels screen --panel <panel-id> --limit 80 --json\`.
-- Resume when both of these hold:
-  - The composer is empty: the payload reports
-    \`composer.hasUndeliveredText: false\`. If the field is missing, report to
-    the user.
-  - The last thing the agent printed before its turn ended is one of these
-    sleep or network failures, in the agent's own output (text inside a file
-    or tool output it was showing doesn't count):
-    - "Your computer went to sleep mid-response"
-    - "Can't reach the API server"
-    - "ENOTFOUND"
-    - "Agent stalled: no progress"
-    - "Agent terminated early due to an API error"
-    - retry attempts exhausted
-- Submit a resume message with
-  \`runpane panels submit --panel <panel-id> --text "<message>" --yes --json\`.
-  Name the failure and tell the agent to inspect its durable state (the
-  branch, its plan or ticket, and its notes) and continue from where the work
-  stopped, for example: "Your previous turn died: \`<signature>\`. Inspect
-  your durable state and continue from where the work stopped."
-- Check the result. \`verifiedSubmitted: true\` means the agent took the
-  message, or queued it behind its current turn (\`delivery.state\` says
-  which). Queued messages have not been read yet; never resend them. For an
-  urgent correction to a busy agent, use \`panels submit --interrupt\` to stop
-  the turn, wait for an idle composer, and deliver the replacement.
-  Otherwise read \`runpane panels screen\`: if the message is still in
-  the composer (\`delivery.state: "in-composer"\`), run \`runpane panels submit-composer --panel <panel-id> --yes --json\`
-  once, and if it is still held after that, report to the user. If
-  \`blocked.kind\` is \`composer-unknown\`, Pane found no composer and typed
-  nothing; read the screen and report to the user instead of retrying.
-- Run the whole sequence in one pass, so it finishes inside a short wake
-  window.
+- Pane resumes Session workers itself while its "Resume interrupted Session
+  agents" setting is on (the default), whether or not resilience is on: after
+  Pane starts and after the computer wakes, it restarts each stopped worker of
+  an active Session in place (same panel, its agent's own resume ID). A worker
+  whose turn ends on a sleep or network failure gets the same treatment after
+  a backoff (30s, 2m, then 5m; at most 3 times in an hour). Each agent gets one
+  nudge: "You were interrupted at <time>. Re-read your task's status and
+  continue." Pane never types into a composer holding unsent text, never
+  nudges a BLOCKED agent, and skips workers that reported done or failed and
+  panels an update is holding for review. It does not restart this Session's
+  own orchestrator panel.
+- Each one arrives as a RESUMED line (\`panel.resumed\`) naming the trigger:
+  \`pane-start\`, \`system-resume\`, or \`api-error\`. Don't nudge again.
+  \`NOT NUDGED\` means Pane restarted or found the agent but did not type: the
+  composer holds text (\`heldInputPresent: true\`), the agent waits on a person
+  (\`to: "blocked"\`), or it did not come back ready. Read
+  \`runpane panels screen --panel <panel-id> --limit 80 --json\` and handle it
+  like any other READY, BLOCKED, or STUCK line.
+- Fall back to resuming by hand only when Pane has not: a READY or IDLE line
+  whose screen ends on one of these failures, in the agent's own output, and
+  no RESUMED line for that panel within 10 minutes (the setting is off, or Pane
+  used its 3 nudges this hour):
+  - "Your computer went to sleep mid-response"
+  - "Can't reach the API server"
+  - "ENOTFOUND"
+  - "Agent stalled: no progress"
+  - "Agent terminated early due to an API error"
+  - retry attempts exhausted
+  When \`composer.hasUndeliveredText\` is false, submit one message with
+  \`runpane panels submit --panel <panel-id> --text "<message>" --yes --json\`
+  that names the failure and tells the agent to inspect its durable state and
+  continue. \`verifiedSubmitted: true\` means it was taken or queued; never
+  resend a queued message. If \`delivery.state\` is \`"in-composer"\`, run
+  \`runpane panels submit-composer --panel <panel-id> --yes --json\` once, then
+  report to the user. If \`blocked.kind\` is \`composer-unknown\`, Pane typed
+  nothing; read the screen and report instead of retrying.
 
 Guardrails:
 
-- Never auto-resume a pane that is BLOCKED on a human question or an
+- Never resume by hand a pane that is BLOCKED on a human question or an
   approval.
 - STUCK lines (held input) go through the Liveness Contract's resubmit rule.
-- Resume the same pane at most 3 times in any rolling hour, then report to
-  the user. Keep the count in your notes; it resets on restart.
+- Resume the same pane by hand at most 3 times in any rolling hour, counting
+  Pane's own RESUMED lines, then report to the user.
 - Resume only panes you dispatched, unless the user asked you to keep all
   panes moving.
-- Log every resume (pane, signature, time) in your next message to the user.
+- Log every resume (pane, trigger or signature, time), Pane's included, in
+  your next message to the user.
 - A resume message never authorizes merge, deploy, release, publishing,
   version changes, or destructive actions. The hard stops apply unchanged.
 
@@ -703,14 +707,24 @@ What each line means under follow (the JSON \`kind\` is in parentheses):
   \`runpane panels last-message --panel <panel-id> --json\`, then ask the
   worker to run \`runpane report\` if it finished.
 - STOPPED (\`panel.stopped\`): the panel's agent is not running, usually
-  after a Pane restart. Its panel and conversation are intact. If its work
-  is not finished, restart it in place with \`runpane panels resume --panel
+  after a Pane restart. Its panel and conversation are intact. Pane restarts
+  stopped Session workers itself when Pane starts or the computer wakes (a
+  RESUMED line follows), so act only on a worker it left stopped: one that
+  reported done or failed, or every worker when its auto-resume setting is
+  off. If such a worker's work is not finished, restart it in place with \`runpane panels resume --panel
   <panel-id> --wait-ready --yes --json\` (same panel ID, no focus change).
   When every stopped worker should come back (a restart stranded workers
   that were mid-task), \`runpane panels resume --session
   "$PANE_ORCHESTRATION_SESSION_ID" --wait-ready --yes --json\` restarts them
   all and reports each one's readiness or blocker. It relaunches finished
   workers too, so resume single panels when only some should continue.
+- RESUMED (\`panel.resumed\`): Pane brought a worker back by itself and sent
+  it one nudge to re-read its task's status and continue. \`reason\` says why:
+  \`pane-start\`, \`system-resume\` (a wake), or \`api-error\` (its turn died on
+  a sleep or network failure; \`attempt\` counts these, at most 3 an hour).
+  Don't nudge it again. A line ending \`NOT NUDGED\` means Pane did not type
+  (unsent text in its composer, the agent waiting on a person, or it did not
+  come back ready): read its screen and handle it yourself.
 - BLOCKED (\`agent.blocked\`): the agent is waiting on a human. It arrives
   within 30 seconds and skips the batch.
 - IDLE (\`agent.idle\`): nothing is dispatched. It repeats after 10 minutes,

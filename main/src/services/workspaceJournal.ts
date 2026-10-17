@@ -110,6 +110,7 @@ const sessionMembershipEventSchema = boundary.object({
 /** Kinds only a consumer that asks for them (by `kinds`, or a Session scope) receives, so older clients never see them. */
 const OPT_IN_KINDS: readonly RunpaneWorkspaceEntryKind[] = [
   'panel.stopped',
+  'panel.resumed',
   'pane.associated',
   'pane.detached',
   'pr.conflicted',
