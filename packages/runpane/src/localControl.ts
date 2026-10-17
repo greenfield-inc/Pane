@@ -5,6 +5,7 @@ import { stdin as input, stdout as output } from 'node:process';
 import { createInterface } from 'node:readline/promises';
 import { boundary, decodeBoundary } from './boundaryDecoder';
 import { invokeDaemon, PaneDaemonClientError } from './daemonClient';
+import { RunpaneError } from './errors';
 import { RUNPANE_CONTRACT } from './generated/contract';
 import { hasCadenceValueFlag, type ParsedArgs, type RunpaneAgent } from './commands';
 import type { BoundarySchema, JsonValue } from './boundaryDecoder';
@@ -253,8 +254,8 @@ interface PaneCreateItem {
 }
 
 type PaneToolSpec =
-  | { agent: RunpaneAgent; title?: string; initialInput?: string; initialInputAsFilePointer?: boolean }
-  | { command: string; agentType?: RunpaneAgent; title?: string; initialInput?: string; initialInputAsFilePointer?: boolean };
+  | { agent: RunpaneAgent; title?: string; initialInput?: string; initialInputAsFilePointer?: boolean; initialInputAttachments?: string[] }
+  | { command: string; agentType?: RunpaneAgent; title?: string; initialInput?: string; initialInputAsFilePointer?: boolean; initialInputAttachments?: string[] };
 
 interface PromptWarning {
   code: 'leading-bang-runs-shell' | 'leading-hash-memory' | 'leading-slash-command' | 'leading-at-mention';
@@ -279,6 +280,7 @@ interface PaneCreateSuccessItem {
   initialInput?: InitialInputDeliveryResult;
   association?: { sessionId: string; ok: boolean; error?: string };
   promptFile?: string;
+  attachments?: string[];
   warnings?: PromptWarning[];
   /** Set when setup waits for a slot; the agent starts after setup, so there is no panel yet. */
   setupQueue?: { position: number; message: string };
@@ -694,6 +696,7 @@ interface PanelCreateResult {
   readiness?: PanelReadiness;
   initialInput?: InitialInputDeliveryResult;
   promptFile?: string;
+  attachments?: string[];
   warnings?: PromptWarning[];
   nextCommand?: string;
 }
@@ -720,6 +723,8 @@ interface PanelInputRequest {
   input: string;
   /** panels submit only: send `Read and follow <prompt file>` in place of the text. */
   asFilePointer?: boolean;
+  /** panels submit only: absolute paths of `--attach` files to copy beside the prompt file. */
+  attachments?: string[];
   interrupt?: boolean;
   source?: 'user' | 'agent';
 }
@@ -808,6 +813,7 @@ interface PanelSubmitResult {
   sentAt: string;
   blocked?: PanelBlockedState;
   promptFile?: string;
+  attachments?: string[];
   warnings?: PromptWarning[];
   nextCommand?: string;
 }
@@ -1446,6 +1452,7 @@ export const paneCreateResultSchema: BoundarySchema<PaneCreateResult> = boundary
         error: boundary.optional(boundary.string),
       })),
       promptFile: boundary.optional(boundary.string),
+      attachments: boundary.optional(boundary.array(boundary.string)),
       warnings: promptWarningsSchema,
       setupQueue: boundary.optional(boundary.object({
         position: boundary.number,
@@ -1642,6 +1649,7 @@ export const panelCreateResultSchema: BoundarySchema<PanelCreateResult> = bounda
   readiness: boundary.optional(panelReadinessSchema),
   initialInput: boundary.optional(initialInputSchema),
   promptFile: boundary.optional(boundary.string),
+  attachments: boundary.optional(boundary.array(boundary.string)),
   warnings: promptWarningsSchema,
   nextCommand: boundary.optional(boundary.string),
 });
@@ -1699,6 +1707,7 @@ export const panelSubmitResultSchema: BoundarySchema<PanelSubmitResult> = bounda
   sentAt: boundary.string,
   blocked: boundary.optional(panelBlockedSchema),
   promptFile: boundary.optional(boundary.string),
+  attachments: boundary.optional(boundary.array(boundary.string)),
   warnings: promptWarningsSchema,
   nextCommand: boundary.optional(boundary.string),
 });
@@ -2936,9 +2945,12 @@ export function markSuggestionLine(text: string, ghostText: string | undefined):
 }
 
 /** The prompt file Pane wrote and any leading-character warnings, for human output. */
-export function printPromptNotes(result: { promptFile?: string; warnings?: PromptWarning[] }, prefix = ''): void {
+export function printPromptNotes(result: { promptFile?: string; attachments?: string[]; warnings?: PromptWarning[] }, prefix = ''): void {
   if (result.promptFile) {
     console.log(`${prefix}Prompt file: ${result.promptFile}`);
+  }
+  for (const attachment of result.attachments ?? []) {
+    console.log(`${prefix}Attached: ${attachment}`);
   }
   for (const warning of result.warnings ?? []) {
     console.log(`${prefix}Warning (${warning.code}): ${warning.message}`);
@@ -3088,6 +3100,7 @@ export function buildPanelInputRequest(parsed: ParsedArgs, command: 'input' | 's
     panelId: parsed.panelId,
     input: parsed.keys ? keysToBytes(parsed.keys) : parsed.panelInputFile ? readInputSource(parsed.panelInputFile) : parsed.panelInput ?? '',
     asFilePointer: parsed.asFilePointer || undefined,
+    attachments: resolveAttachments(parsed, `panels ${command}`),
     interrupt: parsed.interrupt || undefined,
     source: parsed.source === 'user' || parsed.source === 'agent' ? parsed.source : undefined,
   };
@@ -3249,6 +3262,7 @@ async function buildToolSpec(parsed: ParsedArgs, command = 'panes create'): Prom
     throw new Error(`--as-file-pointer needs a prompt: pass --prompt or --initial-input-file to runpane ${command}.`);
   }
   const initialInputAsFilePointer = parsed.asFilePointer || undefined;
+  const initialInputAttachments = resolveAttachments(parsed, command);
 
   // With --tool-command, --agent names the agent the command runs (a wrapper
   // such as `agent-farm run`); Pane launches the command unchanged.
@@ -3259,6 +3273,7 @@ async function buildToolSpec(parsed: ParsedArgs, command = 'panes create'): Prom
       title: parsed.title,
       initialInput,
       initialInputAsFilePointer,
+      initialInputAttachments,
     };
   }
 
@@ -3277,6 +3292,7 @@ async function buildToolSpec(parsed: ParsedArgs, command = 'panes create'): Prom
       title: parsed.title,
       initialInput,
       initialInputAsFilePointer,
+      initialInputAttachments,
     };
   }
 
@@ -3289,7 +3305,29 @@ async function buildToolSpec(parsed: ParsedArgs, command = 'panes create'): Prom
     title: parsed.title,
     initialInput,
     initialInputAsFilePointer,
+    initialInputAttachments,
   };
+}
+
+/**
+ * `--attach` files as absolute paths. Pane copies them beside the prompt file
+ * (inside the worktree when it can), so they need `--as-file-pointer`.
+ */
+function resolveAttachments(parsed: ParsedArgs, command: string): string[] | undefined {
+  if (!parsed.attachments?.length) return undefined;
+  if (!['panes create', 'panels create', 'panels submit'].includes(command)) {
+    throw new RunpaneError('ERR_ATTACH_UNSUPPORTED', `--attach is not supported by runpane ${command}. Nothing was sent.`, 'Use --attach with panes create, panels create or panels submit.');
+  }
+  if (!parsed.asFilePointer) {
+    throw new RunpaneError('ERR_ATTACH_NEEDS_FILE_POINTER', `--attach needs --as-file-pointer: Pane lists the copied files beside the prompt file. Nothing was sent.`, `Add --as-file-pointer to runpane ${command}.`);
+  }
+  return parsed.attachments.map((file) => {
+    const absolute = path.resolve(file);
+    if (!fs.statSync(absolute, { throwIfNoEntry: false })?.isFile()) {
+      throw new RunpaneError('ERR_ATTACH_NOT_FOUND', `--attach ${file}: no such file. Nothing was sent.`, 'Pass an existing file path, then retry.');
+    }
+    return absolute;
+  });
 }
 
 function resolveInitialInput(parsed: ParsedArgs): string | undefined {

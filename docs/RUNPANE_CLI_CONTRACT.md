@@ -388,7 +388,7 @@ runpane panels list --pane <pane-id> [--json] [--pane-dir <path>]
 runpane panels output --panel <panel-id> [--limit <count>] [--json] [--pane-dir <path>]
 runpane panels screen --panel <panel-id> [--limit <count>] [--json] [--pane-dir <path>]
 runpane panels input --panel <panel-id> (--text <text>|--keys <name,...>|--input-file <path|->) [--source user|agent] --yes [--json] [--pane-dir <path>]
-runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) [--as-file-pointer] [--interrupt] [--source user|agent] --yes [--json] [--pane-dir <path>]
+runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) [--as-file-pointer [--attach <file>]...] [--interrupt] [--source user|agent] --yes [--json] [--pane-dir <path>]
 runpane panels submit-composer --panel <panel-id> [--strategy auto|codex-ctrl-enter|enter|tab] --yes [--json] [--pane-dir <path>]
 runpane panels wait --panel <panel-id> [--for initialized|ready|idle|text] [--contains <text>] [--timeout-ms <ms>] [--interval-ms <ms>] [--json] [--pane-dir <path>]
 runpane panels resume --panel <panel-id> [--wait-ready] [--ready-timeout-ms <ms>] --yes [--json] [--pane-dir <path>]
@@ -541,6 +541,7 @@ These flags are consumed by local daemon-control commands:
 --file <path>
 --initial-input <text> (aliases: --prompt)
 --initial-input-file <path|-> (aliases: --prompt-file)
+--attach <file>
 --from-json <path|->
 --timeout-ms <milliseconds>
 --ready-timeout-ms <milliseconds>

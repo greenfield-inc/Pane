@@ -1073,7 +1073,7 @@ const PARSER_DEFAULT_DIFFERENCES = {
   force: false, follow: false, untilEvent: false, agentsOnly: false, ackNow: false,
   includeHeldInput: false, idleBackoff: false, allManaged: false, allStopped: false,
   includeShells: false, noHeldInput: false, selfTest: false, report: false,
-  watchKinds: [], watchPaneIds: [], watchExcludePaneIds: [],
+  watchKinds: [], watchPaneIds: [], watchExcludePaneIds: [], attachments: [],
   asFilePointer: false, interrupt: false, noAssociate: false, removeWorktree: false, merged: false,
   quiet: false, readOnly: false, launch: false,
 };
@@ -2638,6 +2638,62 @@ print(json.dumps({"calls": calls, "stdout": stdout.getvalue().splitlines(), "ref
   assert.ok(python.stdout.includes(`Prompt file: ${promptFile}`), python.stdout.join('\n'));
   assert.ok(python.stdout.includes('Warning (leading-bang-runs-shell): The text starts with `!`.'), python.stdout.join('\n'));
   assert.strictEqual(python.refused, true);
+}
+
+function checkAttachParity() {
+  const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
+  const { buildPanelInputRequest, buildPanelCreateRequest } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'localControl.js'));
+  const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-attach-')));
+  const mockup = path.join(directory, 'mockup.png');
+  const plan = path.join(directory, 'plan.html');
+  fs.writeFileSync(mockup, 'png');
+  fs.writeFileSync(plan, '<p>plan</p>');
+  const submitArgs = ['panels', 'submit', '--panel', 'panel-1', '--text', 'Build it', '--as-file-pointer', '--attach', 'mockup.png', '--attach', plan, '--yes'];
+  const originalCwd = process.cwd();
+  process.chdir(directory);
+  try {
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(buildPanelInputRequest(parseRunpaneArgs(submitArgs), 'submit'))), {
+      panelId: 'panel-1', input: 'Build it', asFilePointer: true, attachments: [mockup, plan],
+    });
+    assert.throws(
+      () => buildPanelInputRequest(parseRunpaneArgs(['panels', 'submit', '--panel', 'panel-1', '--text', 'x', '--attach', plan, '--yes']), 'submit'),
+      /--attach needs --as-file-pointer/,
+    );
+    assert.throws(
+      () => buildPanelInputRequest(parseRunpaneArgs(['panels', 'submit', '--panel', 'panel-1', '--text', 'x', '--as-file-pointer', '--attach', 'missing.png', '--yes']), 'submit'),
+      /--attach missing\.png: no such file/,
+    );
+  } finally {
+    process.chdir(originalCwd);
+  }
+  return buildPanelCreateRequest(parseRunpaneArgs([
+    'panels', 'create', '--pane', 'pane-1', '--agent', 'claude', '--prompt', 'Build it', '--as-file-pointer', '--attach', mockup, '--yes',
+  ])).then((request) => {
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(request.tool)), { agent: 'claude', initialInput: 'Build it', initialInputAsFilePointer: true, initialInputAttachments: [mockup] });
+    const python = JSON.parse(runPythonSnippet(`
+import json, os
+import runpane.local_control as local_control
+from runpane.cli import parse_args
+
+os.chdir(${JSON.stringify(directory)})
+submit = local_control.build_panel_input_request(parse_args(${JSON.stringify(submitArgs)}), "submit")
+tool = local_control.build_tool_spec(parse_args([
+    "panels", "create", "--pane", "pane-1", "--agent", "claude", "--prompt", "Build it", "--as-file-pointer", "--attach", ${JSON.stringify(mockup)}, "--yes"
+]), "panels create")
+refused = []
+for args in (["panels", "submit", "--panel", "panel-1", "--text", "x", "--attach", "plan.html", "--yes"],
+             ["panels", "submit", "--panel", "panel-1", "--text", "x", "--as-file-pointer", "--attach", "missing.png", "--yes"]):
+    try:
+        local_control.build_panel_input_request(parse_args(args), "submit")
+    except ValueError as error:
+        refused.append(str(error))
+print(json.dumps({"submit": submit, "tool": tool, "refused": refused}))
+`));
+    assert.deepStrictEqual(python.submit, { panelId: 'panel-1', input: 'Build it', asFilePointer: true, attachments: [mockup, plan] });
+    assert.deepStrictEqual(python.tool, JSON.parse(JSON.stringify(request.tool)));
+    assert.match(python.refused[0], /--attach needs --as-file-pointer/);
+    assert.match(python.refused[1], /--attach missing\.png: no such file/);
+  });
 }
 
 async function checkDeliveryParity() {
@@ -4598,6 +4654,7 @@ async function runChecks() {
   await checkPanePinParity();
   await checkWrapperAgentParity();
   await checkFilePointerParity();
+  await checkAttachParity();
   await checkDeliveryParity();
   await checkReportParity();
   await checkReportDeliveryLine();

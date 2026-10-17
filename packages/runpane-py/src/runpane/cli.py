@@ -152,6 +152,7 @@ class ParsedArgs:
     initial_input: Optional[str] = None
     initial_input_file: Optional[str] = None
     as_file_pointer: bool = False
+    attachments: List[str] = field(default_factory=list)
     interrupt: bool = False
     panel_input: Optional[str] = None
     panel_input_file: Optional[str] = None
@@ -806,6 +807,9 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
         return
     if flag == "--session":
         parsed.session_id = value
+        return
+    if flag == "--attach":
+        parsed.attachments.append(value)
         return
     if flag == "--exclude-pane":
         parsed.watch_exclude_pane_ids.append(value)

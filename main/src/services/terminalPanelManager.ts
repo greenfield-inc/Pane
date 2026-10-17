@@ -1747,6 +1747,7 @@ export class TerminalPanelManager extends EventEmitter {
             'PANE_PANEL_ID',
             'PANE_UPDATE_RESUME_NONCE',
             'PANE_ORCHESTRATION_SESSION_ID',
+            'PANE_SESSION_DIR',
             'GIT_CEILING_DIRECTORIES',
             'WORKTREE_PATH',
             'PANE_WORKSPACE_PATH',
@@ -1761,8 +1762,13 @@ export class TerminalPanelManager extends EventEmitter {
     // The ptyHost RPC DTO requires `Record<string, string>`, so both the legacy
     // `pty.spawn` path and the ptyHost path get the same undefined-free shape.
     const inheritedEnv = interactiveTerminalEnv();
-    // A Pane launched from an orchestrator must not inherit the parent's role.
+    // A Pane launched from an orchestrator must not inherit the parent's role or Session folder.
     delete inheritedEnv.PANE_ORCHESTRATION_SESSION_ID;
+    delete inheritedEnv.PANE_SESSION_DIR;
+    // A Session terminal works in its folder; a worker reads the folder of the Session its Pane belongs to.
+    const sessionDirectory = panelCustomState.orchestrationSessionId ? panelCustomState.orchestrationWorkspace : panelCustomState.sessionFolder;
+    const sessionDirectoryEnv: Record<string, string> = {};
+    if (sessionDirectory) sessionDirectoryEnv.PANE_SESSION_DIR = sessionDirectory;
     const baseSpawnEnv = {
       ...inheritedEnv,
       ...getGitAttributionEnv(getRuntimeConfigManager().getConfig()),
@@ -1777,6 +1783,7 @@ export class TerminalPanelManager extends EventEmitter {
       PANE_UPDATE_RESUME_NONCE: updateResumeNonce ?? '',
       PANE_PORT: String(panePort),
       PANE_WORKSPACE_PATH: cwd,
+      ...sessionDirectoryEnv,
       ...wslEnvVars,
     } satisfies Record<string, string>;
     const roleEnv: Record<string, string> = panelCustomState.orchestrationSessionId

@@ -49,7 +49,9 @@ import {
   normalizePromptNewlines,
   promptFileShellWord,
   stripTrailingNewlines,
+  writeAgentPromptFile,
   writePromptFile,
+  type AgentPromptFile,
 } from '../services/agents/promptDelivery';
 import type { ArchiveProgressManager } from '../services/archiveProgressManager';
 import type { ArchiveProgressTask } from '../../../shared/types/archiveProgress';
@@ -59,6 +61,8 @@ import type { Project } from '../database/models';
 import type { Session, SessionOutput } from '../types/session';
 import type { BrowserPanelState, CreatePanelRequest, EditorPanelState, TerminalAgentReport, TerminalPanelState, ToolPanel } from '../../../shared/types/panels';
 import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
+import { withSessionFolderAccess } from '../services/agents/sessionFolderAccess';
+import { sessionWorkspacePath } from '../services/sessionWorkspace';
 import { isAgentSupportedOnPlatform } from '../../../shared/constants/agentLaunchPresets';
 import { getDockTerminalPanel } from '../../../shared/utils/terminalDock';
 import {
@@ -1067,7 +1071,7 @@ export function registerRunpaneHandlers(
         throw new Error(`No Pane repo found for pane ${pane.id}`);
       }
       const tool = resolveToolSpec(normalized.tool, new PathResolver(repo).environment);
-      const { panel, readiness, initialInput, promptFile, warnings } = await createTerminalPanelForSession(services, pane, tool, {
+      const { panel, readiness, initialInput, promptFile, attachments, warnings } = await createTerminalPanelForSession(services, pane, tool, {
         activate: resolvePanelCreateActivation(normalized, tool),
         waitReady: normalized.waitReady,
         readyTimeoutMs: normalized.readyTimeoutMs,
@@ -1084,6 +1088,7 @@ export function registerRunpaneHandlers(
         readiness,
         initialInput,
         promptFile,
+        attachments,
         warnings,
         nextCommand: initialInput?.nextCommand ?? readiness?.nextCommand ?? panelOutputCommand(panel.id),
       };
@@ -1353,11 +1358,16 @@ export function registerRunpaneHandlers(
       if (normalized.interrupt && !normalized.input.trim()) return blocked('An interrupt submission needs replacement text; no input was sent.');
 
       let beforeScreen = await buildPanelScreenResult(panel, DEFAULT_PANEL_SCREEN_LIMIT);
-      const promptFile = normalized.asFilePointer
-        ? await writePromptFile(panel.sessionId, stripTrailingNewlines(normalizePromptNewlines(normalized.input)))
+      const wslContext = sessionWslContext(services, panel.sessionId);
+      const pointer = normalized.asFilePointer
+        ? await writeAgentPromptFile(panel.sessionId, stripTrailingNewlines(normalizePromptNewlines(normalized.input)), {
+          worktreePath: localWorktreePath(services, panel.sessionId, wslContext),
+          attachments: normalized.attachments,
+        })
         : undefined;
-      const submittedText = promptFile
-        ? filePointerPrompt(agentVisiblePath(promptFile, sessionWslContext(services, panel.sessionId)))
+      const promptFields = pointerResultFields(pointer);
+      const submittedText = pointer
+        ? pointerLine(pointer, wslContext)
         : normalized.input;
       // A CR inside the text would be Enter to an agent composer.
       const stagedInput = stripTrailingNewlines(normalizePromptNewlines(submittedText));
@@ -1398,7 +1408,7 @@ export function registerRunpaneHandlers(
             ok: taken, verifiedSubmitted: taken, inputBytes: Buffer.byteLength(input, 'utf8'),
             delivery: { state: taken ? 'taken' : 'unknown', evidence: 'screen' },
             blocked: taken ? undefined : { kind: 'submission_unverified', message: 'Pane sent the replacement but could not verify that Cursor started it. Inspect the screen before retrying.' },
-            promptFile,
+            ...promptFields,
           };
         }
       }
@@ -1439,7 +1449,7 @@ export function registerRunpaneHandlers(
           delivery: submission.delivery,
           sentAt: submission.sentAt,
           blocked: submission.blocked,
-          promptFile,
+          ...promptFields,
           warnings,
           nextCommand: submission.nextCommand,
         };
@@ -1461,7 +1471,7 @@ export function registerRunpaneHandlers(
             message: `Pane could not find the ${agentType === 'codex' ? 'Codex' : 'Claude'} composer in this panel, so it sent nothing. The agent may still be starting, or showing a view without its prompt. Check the screen, then submit again or use \`panels input\`.`,
             suggestedCommand,
           },
-          promptFile,
+          ...promptFields,
           warnings,
           nextCommand: suggestedCommand,
         };
@@ -1491,7 +1501,7 @@ export function registerRunpaneHandlers(
         verifiedSubmitted: verification?.verifiedSubmitted ?? false,
         delivery: verification?.delivery,
         sentAt: new Date().toISOString(),
-        promptFile,
+        ...promptFields,
         warnings,
         nextCommand: panelWaitCommand(panel.id),
       };
@@ -2028,6 +2038,7 @@ interface TerminalPanelCreateResult {
   readiness?: RunpanePaneReadiness;
   initialInput?: RunpaneInitialInputDeliveryResult;
   promptFile?: string;
+  attachments?: string[];
   warnings?: RunpanePromptWarning[];
 }
 
@@ -2039,6 +2050,8 @@ interface PreparedInitialInput {
   initialInputFile?: string;
   /** Prompt file written for `--as-file-pointer`. */
   promptFile?: string;
+  /** Copies of its `--attach` files beside it. */
+  attachments?: string[];
   warnings?: RunpanePromptWarning[];
 }
 
@@ -2062,24 +2075,69 @@ async function prepareInitialInput(
   // Agent composers read CR as Enter; plain terminals keep their bytes.
   let text = tool.agent ? stripTrailingNewlines(normalizePromptNewlines(tool.initialInput)) : tool.initialInput;
   let promptFile: string | undefined;
+  let attachments: string[] | undefined;
   if (tool.initialInputAsFilePointer) {
-    promptFile = await writePromptFile(session.id, text);
-    text = filePointerPrompt(agentVisiblePath(promptFile, wslContext));
+    const pointer = await writeAgentPromptFile(session.id, text, {
+      worktreePath: wslContext ? undefined : session.worktreePath,
+      attachments: tool.initialInputAttachments,
+    });
+    ({ promptFile, attachments } = pointerResultFields(pointer));
+    text = pointerLine(pointer, wslContext);
   }
   const prepared: RunpaneResolvedTool = { ...tool, initialInput: text };
   const warnings = tool.agent === 'claude' ? claudePromptWarnings(text) : undefined;
 
   const useArgumentDelivery = allowArgumentDelivery && shouldUseArgumentDelivery(prepared);
   if (!useArgumentDelivery || !isLongPrompt(text)) {
-    return { tool: prepared, useArgumentDelivery, promptFile, warnings };
+    return { tool: prepared, useArgumentDelivery, promptFile, attachments, warnings };
   }
   if (terminalPanelManager.launchShellReadsPromptFile(wslContext)) {
     const initialInputFile = await writePromptFile(session.id, text);
     if (promptFileShellWord(initialInputFile)) {
-      return { tool: prepared, useArgumentDelivery: true, initialInputFile, promptFile, warnings };
+      return { tool: prepared, useArgumentDelivery: true, initialInputFile, promptFile, attachments, warnings };
     }
   }
-  return { tool: prepared, useArgumentDelivery: false, promptFile, warnings };
+  return { tool: prepared, useArgumentDelivery: false, promptFile, attachments, warnings };
+}
+
+/**
+ * The folder of the Session a worker's Pane belongs to, as its agent sees it,
+ * when that folder exists. Workers read it (dispatch notes, plans) and never
+ * write it; the Session's orchestrator is its only writer.
+ */
+async function workerSessionFolder(services: AppServices, paneId: string, wslContext: WSLContext | null): Promise<string | undefined> {
+  const sessionId = await services.orchestrationSessionManager?.sessionIdForPane(paneId);
+  if (!sessionId) return undefined;
+  const folder = sessionWorkspacePath(sessionId);
+  if (!fs.existsSync(folder) || !fs.statSync(folder).isDirectory()) return undefined;
+  return agentVisiblePath(folder, wslContext);
+}
+
+/**
+ * The pointer line. Files inside the worktree are named relative to it, where
+ * the agent starts: Claude often reads an absolute path with `cd <dir>; cat`,
+ * which its read check cannot verify. Fallback files keep absolute paths.
+ */
+function pointerLine(pointer: AgentPromptFile, wslContext: WSLContext | null): string {
+  const { worktreeRoot } = pointer;
+  const shown = (file: string): string => worktreeRoot ? path.relative(worktreeRoot, file) : agentVisiblePath(file, wslContext);
+  return filePointerPrompt(shown(pointer.file), pointer.attachments.map(shown));
+}
+
+/** `promptFile` and `attachments` result fields for a written prompt file. */
+interface PointerResultFields {
+  promptFile?: string;
+  attachments?: string[];
+}
+
+function pointerResultFields(pointer: AgentPromptFile | undefined): PointerResultFields {
+  if (!pointer) return {};
+  return pointer.attachments.length > 0 ? { promptFile: pointer.file, attachments: pointer.attachments } : { promptFile: pointer.file };
+}
+
+/** The Pane's worktree when Pane can write into it directly; WSL repos keep prompt files in the Pane directory. */
+function localWorktreePath(services: AppServices, paneId: string, wslContext: WSLContext | null): string | undefined {
+  return wslContext ? undefined : services.sessionManager.getSession(paneId)?.worktreePath;
 }
 
 /** A Pane-side file path as the agent's shell sees it (a WSL mount path for WSL repos). */
@@ -2098,12 +2156,14 @@ async function createTerminalPanelForSession(
   options: TerminalPanelCreateOptions,
 ): Promise<TerminalPanelCreateResult> {
   const wslContext = sessionWslContext(services, session.id);
-  const { tool, useArgumentDelivery, initialInputFile, promptFile, warnings } = await prepareInitialInput(
+  const sessionFolder = await workerSessionFolder(services, session.id, wslContext);
+  const prepared = await prepareInitialInput(
     session,
-    requestedTool,
+    sessionFolder ? withSessionFolderAccess(requestedTool, sessionFolder) : requestedTool,
     wslContext,
     !options.agentSessionId,
   );
+  const { tool, useArgumentDelivery, initialInputFile, promptFile, attachments, warnings } = prepared;
   const launch = options.launch !== false;
   const waitReady = launch && options.waitReady;
   // A waited create delivers its own typed message, to the declared agent or the one Pane detects.
@@ -2120,6 +2180,9 @@ async function createTerminalPanelForSession(
       ? 'codex-ctrl-enter'
       : 'enter',
   };
+  if (sessionFolder) {
+    initialState.sessionFolder = sessionFolder;
+  }
   if (options.agentSessionId) {
     initialState.agentSessionId = options.agentSessionId;
     initialState.hasClaudeSessionId = tool.agent === 'claude';
@@ -2167,7 +2230,7 @@ async function createTerminalPanelForSession(
     ? await submitCreateInitialInput(panel, tool, useArgumentDelivery, readiness, session.worktreePath)
     : unawaitedInitialInput(panel, tool, useArgumentDelivery);
 
-  return { panel, readiness, initialInput, promptFile, warnings };
+  return { panel, readiness, initialInput, promptFile, attachments, warnings };
 }
 
 /**
@@ -2621,7 +2684,7 @@ async function createPaneItem(
     }
     await taskQueue.waitForSetup(session.id, Math.max(0, createDeadline - Date.now()));
 
-    const { panel, readiness, initialInput, promptFile, warnings } = await createTerminalPanelForSession(services, session, tool, {
+    const { panel, readiness, initialInput, promptFile, attachments, warnings } = await createTerminalPanelForSession(services, session, tool, {
       activate: options.activate,
       waitReady: options.waitReady,
       readyTimeoutMs: options.readyTimeoutMs,
@@ -2645,6 +2708,7 @@ async function createPaneItem(
       initialInput,
       association,
       promptFile,
+      attachments,
       warnings,
       base: sessionResult.base,
     };
@@ -4641,6 +4705,7 @@ function parsePanelSubmitRequest(value: PaneCommandValue): RunpanePanelSubmitReq
     input,
     interrupt: optionalBoolean(value.interrupt),
     asFilePointer: optionalBoolean(value.asFilePointer),
+    attachments: parseAttachments(value.attachments, optionalBoolean(value.asFilePointer), 'Panel submit request'),
     source: value.source === 'user' || value.source === 'agent' ? value.source : undefined,
   };
 }
@@ -5383,6 +5448,7 @@ function parseRunpaneToolSpec(value: PaneCommandValue, label: string): RunpaneTo
       title: optionalString(value.title),
       initialInput: optionalString(value.initialInput),
       initialInputAsFilePointer: optionalBoolean(value.initialInputAsFilePointer),
+      initialInputAttachments: parseAttachments(value.initialInputAttachments, optionalBoolean(value.initialInputAsFilePointer), label),
     };
   }
 
@@ -5398,10 +5464,30 @@ function parseRunpaneToolSpec(value: PaneCommandValue, label: string): RunpaneTo
       title: optionalString(value.title),
       initialInput: optionalString(value.initialInput),
       initialInputAsFilePointer: optionalBoolean(value.initialInputAsFilePointer),
+      initialInputAttachments: parseAttachments(value.initialInputAttachments, optionalBoolean(value.initialInputAsFilePointer), label),
     };
   }
 
   throw new Error(`${label} tool must include agent or command`);
+}
+
+/** `--attach` files: absolute paths, sent only with a prompt file to list them beside. */
+function parseAttachments(value: PaneCommandValue, asFilePointer: boolean | undefined, label: string): string[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  let attachments: string[];
+  try {
+    attachments = decodeBoundary(value, boundary.array(boundary.string));
+  } catch {
+    throw new Error(`${label} attachments must be a list of absolute file paths`);
+  }
+  if (!attachments.every(item => path.isAbsolute(item))) {
+    throw new Error(`${label} attachments must be a list of absolute file paths`);
+  }
+  if (attachments.length === 0) return undefined;
+  if (!asFilePointer) {
+    throw new PaneError('ERR_ATTACHMENT_NEEDS_FILE_POINTER', `${label} has attachments but no prompt file to list them in. Nothing was sent.`, 'Add --as-file-pointer, then retry.');
+  }
+  return attachments;
 }
 
 function parseRepoSelector(value: PaneCommandValue): RunpaneRepoSelector {
@@ -5540,6 +5626,7 @@ function resolveToolSpec(tool: RunpaneToolSpec, environment?: ProjectEnvironment
       agent: tool.agent,
       initialInput: tool.initialInput,
       initialInputAsFilePointer: tool.initialInputAsFilePointer,
+      initialInputAttachments: tool.initialInputAttachments,
     };
   }
 
@@ -5554,6 +5641,7 @@ function resolveToolSpec(tool: RunpaneToolSpec, environment?: ProjectEnvironment
       command: tool.command,
       initialInput: tool.initialInput,
       initialInputAsFilePointer: tool.initialInputAsFilePointer,
+      initialInputAttachments: tool.initialInputAttachments,
     };
   }
 
@@ -5566,6 +5654,7 @@ function resolveToolSpec(tool: RunpaneToolSpec, environment?: ProjectEnvironment
     launchMode: commandAgent === declaredAgent ? undefined : 'wrapped',
     initialInput: tool.initialInput,
     initialInputAsFilePointer: tool.initialInputAsFilePointer,
+    initialInputAttachments: tool.initialInputAttachments,
   };
 }
 

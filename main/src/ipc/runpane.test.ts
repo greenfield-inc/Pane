@@ -825,7 +825,7 @@ describe('runpane IPC handlers', () => {
       execFileSync('git', ['worktree', 'add', '-b', 'associate-adopt', worktreePath], { cwd: repoPath, stdio: 'ignore' });
       const associate = vi.fn(async () => ({}));
       // SAFETY: The handler only calls associate on the Sessions manager.
-      const services = { ...adoptionServices(repoPath, worktreePath), orchestrationSessionManager: { associate } as never };
+      const services = { ...adoptionServices(repoPath, worktreePath), orchestrationSessionManager: { associate, sessionIdForPane: async () => undefined } as never };
       vi.mocked(panelManager.createPanel).mockResolvedValue(terminalPanel);
       vi.mocked(terminalPanelManager.initializeTerminal).mockImplementation(async () => {
         expect(associate).toHaveBeenCalledWith({ sessionId: 'orchestrator-1' }, { paneId: session.id });
@@ -859,7 +859,7 @@ describe('runpane IPC handlers', () => {
       execFileSync('git', ['worktree', 'add', '-b', 'associate-missing', worktreePath], { cwd: repoPath, stdio: 'ignore' });
       const associate = vi.fn(async () => { throw new PaneError('ERR_SESSION_NOT_FOUND', 'Session typo not found'); });
       // SAFETY: The handler only calls associate on the Sessions manager.
-      const services = { ...adoptionServices(repoPath, worktreePath), orchestrationSessionManager: { associate } as never };
+      const services = { ...adoptionServices(repoPath, worktreePath), orchestrationSessionManager: { associate, sessionIdForPane: async () => undefined } as never };
       vi.mocked(panelManager.createPanel).mockResolvedValue(terminalPanel);
 
       const result = await createRegistry(services).invoke('runpane:panes:adopt', [{
@@ -881,7 +881,7 @@ describe('runpane IPC handlers', () => {
       execFileSync('git', ['worktree', 'add', '-b', 'no-associate-adopt', worktreePath], { cwd: repoPath, stdio: 'ignore' });
       const associate = vi.fn(async () => ({}));
       // SAFETY: The handler only calls associate on the Sessions manager.
-      const services = { ...adoptionServices(repoPath, worktreePath), orchestrationSessionManager: { associate } as never };
+      const services = { ...adoptionServices(repoPath, worktreePath), orchestrationSessionManager: { associate, sessionIdForPane: async () => undefined } as never };
       vi.mocked(panelManager.createPanel).mockResolvedValue(terminalPanel);
       vi.mocked(terminalPanelManager.initializeTerminal).mockResolvedValue(undefined);
 
@@ -5057,7 +5057,7 @@ describe('runpane IPC handlers', () => {
 
     const associate = vi.fn(async () => ({}));
     // SAFETY: The handler only calls associate on the Sessions manager.
-    const services = createServices({ orchestrationSessionManager: { associate } as never });
+    const services = createServices({ orchestrationSessionManager: { associate, sessionIdForPane: async () => undefined } as never });
     vi.mocked(terminalPanelManager.initializeTerminal).mockImplementation(async () => {
       expect(associate).toHaveBeenCalledWith({ sessionId: 'orchestrator-1' }, { paneId: session.id });
     });
@@ -6729,6 +6729,59 @@ describe('runpane IPC handlers', () => {
         initialInputMode: 'argument',
       });
       expect(createdInitialState().initialInputFile).toBeUndefined();
+    });
+
+    it('writes a Session worker\'s prompt and attachments into its worktree, hidden from git, and grants read access to the Session folder', async () => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-pointer-'));
+      const worktree = path.join(root, 'worktree');
+      fs.mkdirSync(worktree);
+      execFileSync('git', ['init', '-q'], { cwd: worktree });
+      const mockup = path.join(root, 'mockup.png');
+      fs.writeFileSync(mockup, 'png bytes');
+      const sessionFolder = path.join(process.env.PANE_DIR ?? '', 'sessions', 'orch-1');
+      fs.mkdirSync(sessionFolder, { recursive: true });
+      const base = createServices();
+      const services = createServices({
+        // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
+        sessionManager: { ...base.sessionManager, getSession: vi.fn(() => ({ ...session, worktreePath: worktree })) } as never,
+        // SAFETY: The handler under test reads only sessionIdForPane from the Sessions manager.
+        orchestrationSessionManager: { sessionIdForPane: async () => 'orch-1' } as never,
+      });
+      vi.mocked(panelManager.createPanel).mockImplementation(async request => createdTerminalPanel(request));
+
+      // SAFETY: The panels:create handler resolves to a RunpanePanelCreateResult.
+      const result = await createRegistry(services).invoke('runpane:panels:create', [{
+        paneId: session.id,
+        tool: { agent: 'claude', initialInput: 'Build it', initialInputAsFilePointer: true, initialInputAttachments: [mockup] },
+      }]) as { promptFile?: string; attachments?: string[] };
+
+      const promptFile = result.promptFile ?? '';
+      const [copy = ''] = result.attachments ?? [];
+      expect(path.dirname(promptFile)).toBe(path.join(fs.realpathSync.native(worktree), '.pane', 'prompts'));
+      expect(fs.readFileSync(promptFile, 'utf8')).toBe('Build it\n');
+      expect(path.dirname(copy)).toBe(promptFile.replace(/\.md$/u, ''));
+      expect(fs.readFileSync(copy, 'utf8')).toBe('png bytes');
+      expect(execFileSync('git', ['status', '--porcelain', '--untracked-files=all'], { cwd: worktree, encoding: 'utf8' })).toBe('');
+      const state = createdInitialState();
+      // The pointer line names the files relative to the worktree, where the agent starts; promptFile stays absolute.
+      const relative = (file: string): string => path.relative(fs.realpathSync.native(worktree), file);
+      expect(relative(promptFile)).toMatch(/^\.pane[\\/]prompts[\\/]/u);
+      expect(state.initialInput).toBe(`Read and follow ${relative(promptFile)} (attached: ${relative(copy)})`);
+      expect(state.sessionFolder).toBe(sessionFolder);
+      // Windows launches get only PANE_SESSION_DIR.
+      expect(state.launchCommand).toBe(process.platform === 'win32' ? 'claude --dangerously-skip-permissions' : `claude --dangerously-skip-permissions --settings '${JSON.stringify({
+        permissions: {
+          additionalDirectories: [sessionFolder],
+          deny: [`Edit(/${sessionFolder}/**)`],
+        },
+      })}'`);
+    });
+
+    it('refuses attachments without a prompt file to list them in', async () => {
+      await expect(createRegistry().invoke('runpane:panels:create', [{
+        paneId: session.id,
+        tool: { agent: 'claude', initialInput: 'Build it', initialInputAttachments: ['/tmp/mockup.png'] },
+      }])).rejects.toMatchObject({ code: 'ERR_ATTACHMENT_NEEDS_FILE_POINTER' });
     });
 
     it('stages a wrapped Claude\'s long create prompt as a paste and submits it with its own Enter', async () => {

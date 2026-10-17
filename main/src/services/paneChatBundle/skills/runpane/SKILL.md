@@ -109,9 +109,14 @@ file and submit it:
 runpane panels submit --panel <panel-id> --input-file <prompt-file> --as-file-pointer --yes --json
 ```
 
-Prefer `--as-file-pointer` for long prompts. Pane writes a private copy under
-`<pane-dir>/prompts/` and submits the single line `Read and follow <path>`
-(the result's `promptFile`), so nothing long passes through the terminal.
+Prefer `--as-file-pointer` for long prompts. Pane writes a private copy inside
+the Pane's worktree at `.pane/prompts/` (hidden from git), or under
+`<pane-dir>/prompts/` without one, and submits the single line
+`Read and follow <path>` (worktree-relative inside the worktree; the result's
+`promptFile` is absolute), so nothing long passes
+through the terminal and an agent limited to its worktree can read it. Add
+`--attach <file>` (repeatable) to copy mockups or plans beside it; the pointer
+line lists the copies.
 Without it, multi-line or long text still goes to a Claude or Codex
 composer as one bracketed paste with a separate Enter, and `panes create`
 launches a long prompt from a file rather than typing it into the shell.

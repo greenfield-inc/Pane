@@ -48,6 +48,8 @@ export interface ParsedArgs {
   initialInput?: string;
   initialInputFile?: string;
   asFilePointer?: boolean;
+  /** `--attach`, repeatable: files copied beside the prompt file. */
+  attachments?: string[];
   interrupt?: boolean;
   panelInput?: string;
   panelInputFile?: string;
@@ -695,6 +697,10 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
   }
   if (flag === '--exclude-pane') {
     (parsed.watchExcludePaneIds ??= []).push(value);
+    return;
+  }
+  if (flag === '--attach') {
+    (parsed.attachments ??= []).push(value);
     return;
   }
   if (flag === '--panel') {

@@ -1110,6 +1110,8 @@ def print_prompt_notes(result: Dict[str, Any], prefix: str = "") -> None:
     """The prompt file Pane wrote and any leading-character warnings, for human output."""
     if result.get("promptFile"):
         print(f"{prefix}Prompt file: {result.get('promptFile')}")
+    for attachment in result.get("attachments") or []:
+        print(f"{prefix}Attached: {attachment}")
     for warning in result.get("warnings") or []:
         print(f"{prefix}Warning ({warning.get('code')}): {warning.get('message')}")
 
@@ -1273,6 +1275,7 @@ def build_panel_input_request(parsed: Any, command: str = "input") -> Dict[str, 
         "panelId": parsed.panel_id,
         "input": text,
         **optional_value("asFilePointer", True if parsed.as_file_pointer else None),
+        **optional_value("attachments", resolve_attachments(parsed, f"panels {command}")),
         **optional_value("interrupt", True if parsed.interrupt else None),
         **optional_value("source", parsed.source),
     }
@@ -1397,7 +1400,10 @@ def build_tool_spec(parsed: Any, command: str = "panes create") -> Dict[str, Any
     initial_input = resolve_initial_input(parsed)
     if parsed.as_file_pointer and initial_input is None:
         raise ValueError(f"--as-file-pointer needs a prompt: pass --prompt or --initial-input-file to runpane {command}.")
-    file_pointer = optional_value("initialInputAsFilePointer", True if parsed.as_file_pointer else None)
+    file_pointer = {
+        **optional_value("initialInputAsFilePointer", True if parsed.as_file_pointer else None),
+        **optional_value("initialInputAttachments", resolve_attachments(parsed, command)),
+    }
 
     # With --tool-command, --agent names the agent the command runs (a wrapper
     # such as `agent-farm run`); Pane launches the command unchanged.
@@ -1433,6 +1439,24 @@ def build_tool_spec(parsed: Any, command: str = "panes create") -> Dict[str, Any
         **optional_value("initialInput", initial_input),
         **file_pointer,
     }
+
+
+def resolve_attachments(parsed: Any, command: str) -> Optional[List[str]]:
+    """`--attach` files as absolute paths; Pane copies them beside the `--as-file-pointer` prompt file."""
+    attachments = getattr(parsed, "attachments", None) or []
+    if not attachments:
+        return None
+    if command not in ("panes create", "panels create", "panels submit"):
+        raise ValueError(f"--attach is not supported by runpane {command}. Nothing was sent. Use --attach with panes create, panels create or panels submit.")
+    if not parsed.as_file_pointer:
+        raise ValueError(f"--attach needs --as-file-pointer: Pane lists the copied files beside the prompt file. Nothing was sent. Add --as-file-pointer to runpane {command}.")
+    resolved = []
+    for file in attachments:
+        absolute = os.path.abspath(file)
+        if not os.path.isfile(absolute):
+            raise ValueError(f"--attach {file}: no such file. Nothing was sent. Pass an existing file path, then retry.")
+        resolved.append(absolute)
+    return resolved
 
 
 def resolve_initial_input(parsed: Any) -> Optional[str]:

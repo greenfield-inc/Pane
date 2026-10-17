@@ -361,6 +361,8 @@ export interface RunpaneAgentToolSpec {
   initialInput?: string;
   /** Write initialInput to a prompt file and send `Read and follow <path>` instead (`--as-file-pointer`). */
   initialInputAsFilePointer?: boolean;
+  /** Absolute paths copied beside the prompt file and listed in the pointer line (`--attach`). */
+  initialInputAttachments?: string[];
 }
 
 export interface RunpaneCommandToolSpec {
@@ -371,6 +373,8 @@ export interface RunpaneCommandToolSpec {
   initialInput?: string;
   /** Write initialInput to a prompt file and send `Read and follow <path>` instead (`--as-file-pointer`). */
   initialInputAsFilePointer?: boolean;
+  /** Absolute paths copied beside the prompt file and listed in the pointer line (`--attach`). */
+  initialInputAttachments?: string[];
 }
 
 export type RunpaneToolSpec = RunpaneAgentToolSpec | RunpaneCommandToolSpec;
@@ -557,6 +561,8 @@ export interface RunpanePaneCreateSuccessItem {
   initialInput?: RunpaneInitialInputDeliveryResult;
   /** The prompt file Pane wrote for `--as-file-pointer`. */
   promptFile?: string;
+  /** Copies of the `--attach` files beside the prompt file. */
+  attachments?: string[];
   warnings?: RunpanePromptWarning[];
   association?: RunpanePaneAssociationOutcome;
   /** Set when the Pane's setup waits for a slot; its agent starts after setup, so there is no panel yet. */
@@ -975,6 +981,8 @@ export interface RunpanePanelCreateResult {
   initialInput?: RunpaneInitialInputDeliveryResult;
   /** The prompt file Pane wrote for `--as-file-pointer`. */
   promptFile?: string;
+  /** Copies of the `--attach` files beside the prompt file. */
+  attachments?: string[];
   warnings?: RunpanePromptWarning[];
   nextCommand?: string;
 }
@@ -1130,6 +1138,8 @@ export interface RunpanePanelSubmitRequest {
   interrupt?: boolean;
   /** Write the text to a prompt file and submit `Read and follow <path>` instead. */
   asFilePointer?: boolean;
+  /** Absolute paths copied beside the prompt file and listed in the pointer line (`--attach`). */
+  attachments?: string[];
   /** `user` when a person typed it; their next finished turn notifies the phone. */
   source?: 'user' | 'agent';
 }
@@ -1165,6 +1175,8 @@ export interface RunpanePanelSubmitResult {
   blocked?: RunpanePanelBlockedState;
   /** The prompt file Pane wrote for `asFilePointer`. */
   promptFile?: string;
+  /** Copies of the `attachments` beside the prompt file. */
+  attachments?: string[];
   warnings?: RunpanePromptWarning[];
   nextCommand?: string;
 }
@@ -1250,4 +1262,5 @@ export interface RunpaneResolvedTool {
   launchMode?: 'wrapped';
   initialInput?: string;
   initialInputAsFilePointer?: boolean;
+  initialInputAttachments?: string[];
 }

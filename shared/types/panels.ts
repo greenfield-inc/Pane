@@ -114,6 +114,8 @@ export interface TerminalPanelState {
   orchestrationWorkspace?: string;
   /** Applied when the terminal next starts, not while its agent is running. */
   orchestrationProfile?: string;
+  /** Folder of the Session this worker's Pane belongs to, as the agent sees it; exported as PANE_SESSION_DIR. */
+  sessionFolder?: string;
   /** Wrapper/custom commands own their flags and resume behavior. */
   preserveLaunchCommand?: boolean;
   customResume?: CustomCommandResume | null;
