@@ -871,7 +871,7 @@ test('a handoff to OpenCode on another machine imports the sender\'s session the
   assert.equal(fs.readFileSync(exportFile, 'utf8'), opencode.exported);
   const imported = opencode.calls().find(c => c.args[0] === 'import');
   assert.equal(path.resolve(imported.args[1]), path.resolve(exportFile));
-  assert.equal(fs.realpathSync(imported.cwd), fs.realpathSync(path.join(remote.home, 'repo')), 'imported from inside the receiving repository');
+  assert.equal(fs.realpathSync.native(imported.cwd), fs.realpathSync.native(path.join(remote.home, 'repo')), 'imported from inside the receiving repository');
   const create = remote.calls().find(c => c.channel === 'runpane:panes:create').args[0].panes[0];
   assert.equal(create.resume, OPENCODE_SENDER);
   assert.equal(create.tool.agent, 'opencode');
