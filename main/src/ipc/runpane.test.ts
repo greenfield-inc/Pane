@@ -646,7 +646,7 @@ describe('runpane IPC handlers', () => {
       expect(result, JSON.stringify(result)).toMatchObject({ ok: true, items: [{ ok: true, sessionId: session.id }] });
       expect(panelManager.createPanel).toHaveBeenCalledTimes(1);
       expect(panelManager.createPanel).toHaveBeenCalledWith(expect.objectContaining({
-        initialState: expect.objectContaining({ agentType: 'codex', agentSessionId: 'thread-1', initialCommand: launch ? 'codex --yolo' : undefined }),
+        initialState: expect.objectContaining({ agentType: 'codex', agentSessionId: 'thread-1', initialCommand: launch ? expect.stringMatching(/^codex --yolo --cd "[^"]+"$/) : undefined }),
       }));
       if (!launch) {
         expect(terminalPanelManager.writeToTerminal).toHaveBeenCalledWith(terminalPanel.id, 'codex --yolo resume "thread-1"');
@@ -975,7 +975,7 @@ describe('runpane IPC handlers', () => {
       expect(result).toMatchObject({ ok: true, items: [{ ok: true }] });
       const initialState = vi.mocked(panelManager.createPanel).mock.calls[0][0].initialState;
       expect(initialState).toMatchObject({
-        initialCommand: RUNPANE_CONTRACT.agentTemplates.codex.command,
+        initialCommand: expect.stringMatching(new RegExp(`^${RUNPANE_CONTRACT.agentTemplates.codex.command} --cd "`)),
         initialInput: 'Continue with step 2',
         initialInputSubmitStrategy: 'codex-ctrl-enter',
         agentSessionId: 'thread-1',
@@ -2558,7 +2558,8 @@ describe('runpane IPC handlers', () => {
       repo: { id: project.id }, panes: [{ name: 'handoff-feature', tool: { agent: 'codex' }, resume: 'thread-7' }],
     }]);
     expect(panelManager.createPanel).toHaveBeenCalledWith(expect.objectContaining({
-      initialState: expect.objectContaining({ agentType: 'codex', agentSessionId: 'thread-7' }),
+      // The resumed conversation recorded another folder; --cd keeps Codex from asking which to use.
+      initialState: expect.objectContaining({ agentType: 'codex', agentSessionId: 'thread-7', initialCommand: expect.stringMatching(/^codex --yolo --cd "[^"]+"$/) }),
     }));
   });
 
