@@ -13015,6 +13015,7 @@
         "notes": [
           "Prefer this over opening the system browser when showing the user a page, plan, report, or dev server.",
           "Write plans and reports as self-contained HTML files. Use --url with a file URL to render a page in a live browser, or --file to open its editable source; reopening the same target reuses its tab.",
+          "When the user views Pane from another computer, a file page loads only files in its own folder and the folders inside it. Keep the page's CSS, scripts and images there, put them inline, or serve the folder over HTTP and open its localhost URL. Give file URLs as the host sees them, not as the other computer would.",
           "Opening a tab does not steal window focus; use `panes focus` only on explicit user request."
         ]
       },
