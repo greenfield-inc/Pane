@@ -2104,6 +2104,13 @@ async function createTerminalPanelForSession(
   );
   const launch = options.launch !== false;
   const waitReady = launch && options.waitReady;
+  // A resumed Codex conversation records the folder it ran in, which for a carried or migrated
+  // session is another checkout or machine; without --cd, Codex stops to ask which folder to use.
+  const pinsCodexFolder = Boolean(options.agentSessionId) && tool.agent === 'codex' && !wslContext
+    && !/(?:^|\s)(?:--cd|-C)(?:=|\s)/.test(tool.command);
+  const launchCommand = pinsCodexFolder
+    ? `${tool.command} --cd "${session.worktreePath.replace(/([\\"$`])/g, '\\$1')}"`
+    : tool.command;
   // A waited create delivers its own typed message, to the declared agent or the one Pane detects.
   const shouldCreateSubmitInitialInput = Boolean(
     waitReady &&
@@ -2112,7 +2119,7 @@ async function createTerminalPanelForSession(
   );
   const initialState: TerminalPanelState = {
     ...toolAgentIdentityState(tool),
-    initialCommand: launch ? tool.command : undefined,
+    initialCommand: launch ? launchCommand : undefined,
     initialInput: tool.initialInput,
     initialInputSubmitStrategy: tool.agent === 'codex' && !useArgumentDelivery
       ? 'codex-ctrl-enter'
