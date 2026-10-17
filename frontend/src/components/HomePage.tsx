@@ -402,7 +402,7 @@ export function HomePage() {
 
             <div
               className="flex items-center justify-between rounded-lg bg-surface-secondary p-4"
-              title="Prevents the system from idle-sleeping while any session is active. The display can still turn off; closing the lid or choosing Sleep still sleeps the machine."
+              title="Prevents the system from idle-sleeping while an agent is working or any session is active. The display can still turn off; closing the lid or choosing Sleep still sleeps the machine."
             >
               <span className="text-text-primary">Keep Awake</span>
               <Toggle
