@@ -384,6 +384,11 @@ export interface RunpanePaneCreateItem {
   sessionPrompt?: string;
   pinned?: boolean;
   tool: RunpaneToolSpec;
+  /**
+   * A native agent session id to resume, as `panes adopt --resume`: Pane launches the agent's own
+   * resume for this id and records it as the tab's id, so a restart resumes the same conversation.
+   */
+  resume?: string;
 }
 
 export interface RunpanePaneCreateRequest {
@@ -951,6 +956,11 @@ export interface RunpanePanelCreateRequest {
   paneId: string;
   type?: 'terminal';
   tool: RunpaneToolSpec;
+  /**
+   * A native agent session id to resume, as `panes adopt --resume`: Pane launches the agent's own
+   * resume for this id and records it as the tab's id, so a restart resumes the same conversation.
+   */
+  resume?: string;
   noFocus?: boolean;
   focus?: boolean;
   source?: RunpanePanelCreateSource;

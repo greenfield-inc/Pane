@@ -324,6 +324,7 @@ const orchestrationSessionCreateSchema = boundary.object({
   isPinned: boundary.optional(boundary.boolean),
   agent: boundary.optional(boundary.enumeration('claude', 'codex', 'cursor')),
   launchCommand: boundary.optional(orchestrationTextSchema),
+  resume: boundary.optional(boundary.nonEmptyString),
   profile: boundary.optional(orchestrationTextSchema),
   goal: boundary.optional(orchestrationTextSchema),
   context: boundary.optional(orchestrationTextSchema),
@@ -879,12 +880,7 @@ export function registerRunpaneHandlers(
             throw new Error(`Worktree path is already registered by pane "${existing.name}" (${existing.id})`);
           }
           const tool = resolveToolSpec(item.tool, new PathResolver(repo).environment);
-          if (item.resume && tool.launchMode === 'wrapped') {
-            throw new Error('--resume needs a built-in agent command; a wrapper command resumes its own way.');
-          }
-          if (item.resume !== undefined && tool.agent === 'opencode' && !isValidOpenCodeSessionId(item.resume)) {
-            throw new Error('OpenCode --resume must match the required ses_* format (^ses_[A-Za-z0-9]+$).');
-          }
+          assertResumableTool(tool, item.resume);
           if (normalized.dryRun) {
             items.push({ ok: true, index, name: item.name, pinned: item.pinned !== false, worktreePath: storedWorktreePath, tool: describeTool(tool) });
             continue;
@@ -1067,8 +1063,10 @@ export function registerRunpaneHandlers(
         throw new Error(`No Pane repo found for pane ${pane.id}`);
       }
       const tool = resolveToolSpec(normalized.tool, new PathResolver(repo).environment);
+      assertResumableTool(tool, normalized.resume);
       const { panel, readiness, initialInput, promptFile, warnings } = await createTerminalPanelForSession(services, pane, tool, {
         activate: resolvePanelCreateActivation(normalized, tool),
+        agentSessionId: normalized.resume,
         waitReady: normalized.waitReady,
         readyTimeoutMs: normalized.readyTimeoutMs,
       });
@@ -2106,6 +2104,13 @@ async function createTerminalPanelForSession(
   );
   const launch = options.launch !== false;
   const waitReady = launch && options.waitReady;
+  // A resumed Codex conversation records the folder it ran in, which for a carried or migrated
+  // session is another checkout or machine; without --cd, Codex stops to ask which folder to use.
+  const pinsCodexFolder = Boolean(options.agentSessionId) && tool.agent === 'codex' && !wslContext
+    && !/(?:^|\s)(?:--cd|-C)(?:=|\s)/.test(tool.command);
+  const launchCommand = pinsCodexFolder
+    ? `${tool.command} --cd "${session.worktreePath.replace(/([\\"$`])/g, '\\$1')}"`
+    : tool.command;
   // A waited create delivers its own typed message, to the declared agent or the one Pane detects.
   const shouldCreateSubmitInitialInput = Boolean(
     waitReady &&
@@ -2114,7 +2119,7 @@ async function createTerminalPanelForSession(
   );
   const initialState: TerminalPanelState = {
     ...toolAgentIdentityState(tool),
-    initialCommand: launch ? tool.command : undefined,
+    initialCommand: launch ? launchCommand : undefined,
     initialInput: tool.initialInput,
     initialInputSubmitStrategy: tool.agent === 'codex' && !useArgumentDelivery
       ? 'codex-ctrl-enter'
@@ -2561,6 +2566,7 @@ async function createPaneItem(
   }
 
   const tool = resolveToolSpec(item.tool, new PathResolver(repo).environment);
+  assertResumableTool(tool, item.resume);
 
   let createdSessionId: string | undefined;
   let createdWorktreePath: string | undefined;
@@ -2599,7 +2605,7 @@ async function createPaneItem(
     const setupPosition = taskQueue.setupQueuePosition(session.id);
     if (setupPosition !== undefined) {
       void taskQueue.waitForSetup(session.id)
-        .then(() => createTerminalPanelForSession(services, session, tool, { activate: options.activate }))
+        .then(() => createTerminalPanelForSession(services, session, tool, { activate: options.activate, agentSessionId: item.resume }))
         .catch(error => console.error(`[Runpane] Pane ${session.id} did not launch after queued setup:`, error));
       return {
         ok: true,
@@ -2623,6 +2629,7 @@ async function createPaneItem(
 
     const { panel, readiness, initialInput, promptFile, warnings } = await createTerminalPanelForSession(services, session, tool, {
       activate: options.activate,
+      agentSessionId: item.resume,
       waitReady: options.waitReady,
       readyTimeoutMs: options.readyTimeoutMs,
     });
@@ -4390,6 +4397,7 @@ function parsePanelCreateRequest(value: PaneCommandValue): RunpanePanelCreateReq
     source: value.source === 'user' || value.source === 'agent' ? value.source : undefined,
     waitReady: optionalBoolean(value.waitReady),
     readyTimeoutMs: parsePositiveInteger(value.readyTimeoutMs, 'readyTimeoutMs'),
+    resume: parseResumeId(value.resume, 'Panel create request'),
   };
 }
 
@@ -5368,7 +5376,26 @@ function parsePaneCreateItem(value: PaneCommandValue, index: number): RunpanePan
     // in the sidebar; the Pane UI create dialog has its own startPinned preference.
     pinned: optionalBoolean(value.pinned) ?? true,
     tool: parseRunpaneToolSpec(value.tool, `Pane create item ${index}`),
+    resume: parseResumeId(value.resume, `Pane create item ${index}`),
   };
+}
+
+function parseResumeId(value: PaneCommandValue | undefined, label: string): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  const resume = optionalString(value)?.trim();
+  if (!resume) throw new Error(`${label} resume must be a non-empty native session id`);
+  return resume;
+}
+
+/** A resume id needs a built-in agent that Pane knows how to resume, as `panes adopt --resume`. */
+function assertResumableTool(tool: RunpaneResolvedTool, resume: string | undefined): void {
+  if (resume === undefined) return;
+  if (tool.launchMode === 'wrapped') {
+    throw new Error('--resume needs a built-in agent command; a wrapper command resumes its own way.');
+  }
+  if (tool.agent === 'opencode' && !isValidOpenCodeSessionId(resume)) {
+    throw new Error('OpenCode --resume must match the required ses_* format (^ses_[A-Za-z0-9]+$).');
+  }
 }
 
 function parseRunpaneToolSpec(value: PaneCommandValue, label: string): RunpaneToolSpec {

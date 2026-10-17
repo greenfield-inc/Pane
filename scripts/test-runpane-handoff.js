@@ -96,7 +96,7 @@ function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'handoff-review-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const env = { ...process.env, RUNPANE_TELEMETRY_DISABLED: '1', HOME: path.join(root, 'home'), USERPROFILE: path.join(root, 'home'), PANE_DIR: path.join(root, 'isolated-data'), GIT_CONFIG_GLOBAL: path.join(root, '.git', 'isolated-global-config'), GIT_CONFIG_NOSYSTEM: '1' };
-  for (const key of ['PANE_SESSION_ID', 'PANE_PANEL_ID', 'PANE_ORCHESTRATION_SESSION_ID', 'FOOZOL_DIR', 'NODE_OPTIONS']) delete env[key];
+  for (const key of ['PANE_SESSION_ID', 'PANE_PANEL_ID', 'PANE_ORCHESTRATION_SESSION_ID', 'FOOZOL_DIR', 'NODE_OPTIONS', 'CLAUDE_CODE_SESSION_ID', 'CODEX_THREAD_ID', 'PANE_WORKSPACES_PORT']) delete env[key];
   const git = (...args) => execFileSync('git', args, { cwd: root, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
   git('init', '-b', 'task'); fs.writeFileSync(env.GIT_CONFIG_GLOBAL, ''); git('config', 'user.email', 'test@example.invalid'); git('config', 'user.name', 'Test');
   fs.writeFileSync(path.join(root, 'code.txt'), 'initial');
@@ -138,7 +138,9 @@ function receiver(f, options = {}) {
   const config = path.join(bin, 'daemon.json');
   const paneDir = options.paneDir ?? f.env.PANE_DIR;
   fs.writeFileSync(config, JSON.stringify({ paneDir, log, ready, repoPath: options.repoPath ?? f.root,
-    createError: options.createError, reposError: options.reposError, ownedPane: options.ownedPane, item: options.item ?? { ok: true, sessionId: 'test-pane', panelId: 'test-panel', initialInput:{delivered:true,submitted:true,inputBytes:20,verifiedSubmitted:true,delivery:{state:'taken',evidence:'transcript'}} } }));
+    createError: options.createError, reposError: options.reposError, ownedPane: options.ownedPane,
+    sender: options.sender, screenText: options.screenText, receiverResumeId: options.receiverResumeId,
+    blocked: options.blocked, extraPanels: options.extraPanels, item: options.item ?? { ok: true, sessionId: 'test-pane', panelId: 'test-panel', initialInput:{delivered:true,submitted:true,inputBytes:20,verifiedSubmitted:true,delivery:{state:'taken',evidence:'transcript'}} } }));
   const child = spawn(process.execPath, [path.join(__dirname, 'fixtures', 'runpane-handoff-daemon.cjs'),
     path.join(dist, 'daemonClient.js'), config], { env: f.env, stdio: 'ignore' });
   f.t.after(async () => {
@@ -286,7 +288,7 @@ test('Cursor effort fails before Git or receiver side effects', (t) => {
  }
 });
 
-test('OpenCode handoff fails before Git, commands, files, or receiver side effects', (t) => {
+test('a fresh OpenCode agent with only a note is refused before Git, commands, files, or receiver side effects', (t) => {
   const f = fixture(t);
   fs.writeFileSync(path.join(f.root, 'note.md'), filled());
   fs.writeFileSync(path.join(f.root, 'code.txt'), 'dirty');
@@ -294,7 +296,7 @@ test('OpenCode handoff fails before Git, commands, files, or receiver side effec
   const head = f.git('rev-parse', 'HEAD'); const index = f.git('write-tree'); const status = f.git('status', '--porcelain');
   const commands = path.join(f.root, '.git', 'handoff-commands.jsonl');
   fs.appendFileSync(path.join(f.root, '.git', 'isolated-tailnet.cjs'), `for(const method of ['spawn','execFileSync']){const original=cp[method];cp[method]=(...args)=>{require('node:fs').appendFileSync(${JSON.stringify(commands)},JSON.stringify(args.slice(0,2))+'\\n');return original(...args);};}\n`);
-  const rejection = /OpenCode is supported in terminal panes, but handoff to OpenCode is not supported yet/i;
+  const rejection = /OpenCode (receives a handoff only to continue your own OpenCode session|effort is not supported)/i;
   const cases = [
     ['opencode here'],
     ['OpenCode model=openai/gpt-5 here'],
@@ -594,4 +596,395 @@ test('a git checkout keeps the Pane route even inside a Session terminal', (t) =
   assert.equal(result.status, 0, result.stderr);
   const output = JSON.parse(result.stdout);
   assert.notEqual(output.receiver?.route, 'session'); assert.equal(output.git.branch, 'task');
+});
+
+// ---------------------------------------------------------------- carrying the sender's own session
+
+const SENDER = '6f1d2c3b-4a59-4e7d-8c21-90ab12cd34ef';
+const LAST = 'Renamed the login handler and the tests are green';
+
+/** A Claude store in the fixture's home with one session, and a stand-in `claude` that forks it. */
+function claudeSession(f) {
+  const store = path.join(f.env.HOME, '.claude', 'projects', 'C--work-app');
+  fs.mkdirSync(store, { recursive: true });
+  const transcript = path.join(store, `${SENDER}.jsonl`);
+  fs.writeFileSync(transcript, [
+    { type: 'user', sessionId: SENDER, message: { role: 'user', content: 'the codeword is heron' } },
+    { type: 'assistant', sessionId: SENDER, message: { role: 'assistant', content: [{ type: 'text', text: `Done.\n${LAST} now.` }] } },
+  ].map(line => JSON.stringify(line)).join('\n') + '\n');
+  f.env.CLAUDE_CONFIG_DIR = path.join(f.env.HOME, '.claude');
+  const bin = path.join(f.root, 'fake-bin');
+  const calls = path.join(bin, 'claude-calls.jsonl');
+  fs.writeFileSync(path.join(bin, 'claude.js'), [
+    "const fs = require('node:fs'); const path = require('node:path');",
+    'const args = process.argv.slice(2);',
+    `fs.appendFileSync(${JSON.stringify(calls)}, JSON.stringify(args) + '\\n');`,
+    "const from = args[args.indexOf('--resume') + 1]; const to = args[args.indexOf('--session-id') + 1];",
+    `const dir = ${JSON.stringify(store)};`,
+    "const lines = fs.readFileSync(path.join(dir, from + '.jsonl'), 'utf8').split(from).join(to);",
+    "fs.writeFileSync(path.join(dir, to + '.jsonl'), lines + JSON.stringify({ type: 'assistant', sessionId: to, message: { role: 'assistant', content: 'forked' } }) + '\\n');",
+    // The sending agent's own turn keeps writing to its transcript while the handoff runs.
+    "if (process.env.FAKE_SENDER_TURN_WRITES) fs.appendFileSync(path.join(dir, from + '.jsonl'), JSON.stringify({ type: 'assistant', sessionId: from, message: { role: 'assistant', content: 'running runpane handoff' } }) + '\\n');",
+  ].join('\n'));
+  fs.writeFileSync(path.join(bin, 'claude.cmd'), `@"${process.execPath}" "%~dp0claude.js" %*\r\n`);
+  fs.writeFileSync(path.join(bin, 'claude'), `#!/bin/sh\nexec "${process.execPath.split(path.sep).join('/')}" "$(dirname "$0")/claude.js" "$@"\n`, { mode: 0o755 });
+  const inherited = f.env.PATH ?? f.env.Path ?? '';
+  delete f.env.Path;
+  f.env.PATH = `${bin}${path.delimiter}${inherited}`;
+  f.env.PANE_SESSION_ID = 'sender-pane';
+  f.env.PANE_PANEL_ID = 'sender-panel';
+  return { transcript, calls: () => (fs.existsSync(calls) ? fs.readFileSync(calls, 'utf8').trim().split('\n').map(line => JSON.parse(line)) : []) };
+}
+const runClaude = (f, ...args) => spawnSync(process.execPath, [cli, 'handoff', 'claude here', '--note-file', 'note.md', '--json', ...args], { cwd: f.root, encoding: 'utf8', env: f.env });
+
+test('a same-machine handoff to the same agent resumes a fork of the sender\'s session and checks it', (t) => {
+  const f = fixture(t); fs.writeFileSync(path.join(f.root, 'note.md'), filled());
+  const calls = receiver(f, { sender: { agentType: 'claude', resumeId: SENDER, resumeSource: 'agent' }, screenText: `> the codeword is heron\n● Done.\n  ${LAST} now.\n● forked` });
+  const claude = claudeSession(f);
+  const before = fs.readFileSync(claude.transcript);
+  const result = runClaude(f);
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  const out = JSON.parse(result.stdout);
+  const fork = claude.calls()[0];
+  assert.deepEqual(fork.slice(0, 5), ['-p', '--resume', SENDER, '--fork-session', '--session-id']);
+  assert.equal(out.continuity.result, 'continued');
+  assert.equal(out.continuity.fork, true);
+  assert.equal(out.continuity.resumedId, fork[5]);
+  assert.deepEqual(out.continuity.checks, { resumedById: true, restartResumes: true, historyLoaded: true, originalUntouched: true });
+  const tab = calls().find(c => c.channel === 'runpane:panels:create').args[0];
+  assert.equal(tab.resume, fork[5]);
+  assert.equal(tab.tool.initialInput, undefined);
+  assert.deepEqual(fs.readFileSync(claude.transcript), before);
+  // Same Pane, same folder: no "moved" message.
+  assert.equal(calls().some(c => c.channel === 'runpane:panels:submit'), false);
+});
+
+test('a dry run says which session would be carried, and forks nothing', (t) => {
+  const f = fixture(t); fs.writeFileSync(path.join(f.root, 'note.md'), filled());
+  receiver(f, { sender: { agentType: 'claude', resumeId: SENDER, resumeSource: 'agent' } });
+  const claude = claudeSession(f);
+  const result = runClaude(f, '--dry-run');
+  assert.equal(result.status, 0, result.stderr);
+  const out = JSON.parse(result.stdout);
+  assert.equal(out.continuity.carried, true);
+  assert.equal(out.continuity.sessionId, SENDER);
+  assert.equal(out.continuity.fork, true);
+  assert.equal(out.continuity.files, 1);
+  assert.equal(out.continuity.result, undefined);
+  assert.deepEqual(claude.calls(), []);
+});
+
+for (const [name, sender, destination, reason] of [
+  ['a different agent', { agentType: 'claude', resumeId: SENDER }, 'codex here', /session is claude and the receiver is codex/],
+  ['a shell tab with no agent session', {}, 'claude here', /runs no Claude, Codex, Cursor or OpenCode session/],
+]) test(`a handoff from ${name} starts a fresh agent with the note and says so`, (t) => {
+  const f = fixture(t); fs.writeFileSync(path.join(f.root, 'note.md'), filled());
+  const calls = receiver(f, { sender });
+  claudeSession(f);
+  const result = spawnSync(process.execPath, [cli, 'handoff', destination, '--note-file', 'note.md', '--json'], { cwd: f.root, encoding: 'utf8', env: f.env });
+  assert.equal(result.status, 0, result.stderr);
+  const out = JSON.parse(result.stdout);
+  assert.equal(out.continuity.carried, false);
+  assert.equal(out.continuity.result, 'fresh-agent');
+  assert.match(out.continuity.reason, reason);
+  const tab = calls().find(c => c.channel === 'runpane:panels:create').args[0];
+  assert.equal(tab.resume, undefined);
+  assert.match(tab.tool.initialInput, /^Read the handoff note at/);
+  const human = spawnSync(process.execPath, [cli, 'handoff', destination, '--note-file', 'note.md', '--dry-run'], { cwd: f.root, encoding: 'utf8', env: f.env });
+  assert.match(human.stdout, /fresh (codex|claude) with your note, not the same session/);
+});
+
+test('a receiver whose check fails is kept, exits non-zero, and names the note route', (t) => {
+  const f = fixture(t); fs.writeFileSync(path.join(f.root, 'note.md'), filled());
+  receiver(f, { sender: { agentType: 'claude', resumeId: SENDER, resumeSource: 'agent' }, receiverResumeId: 'some-other-session' });
+  claudeSession(f);
+  const result = runClaude(f);
+  assert.equal(result.status, 1, result.stderr + result.stdout);
+  const out = JSON.parse(result.stdout);
+  assert.equal(out.continuity.result, 'not-continued');
+  assert.equal(out.continuity.checks.restartResumes, false);
+  assert.match(out.continuity.next, /--note-only/);
+  assert.equal(out.pane.panelId, 'test-tab');
+});
+
+test('--note-only starts a fresh agent even when the session could be carried', (t) => {
+  const f = fixture(t); fs.writeFileSync(path.join(f.root, 'note.md'), filled());
+  const calls = receiver(f, { sender: { agentType: 'claude', resumeId: SENDER, resumeSource: 'agent' } });
+  const claude = claudeSession(f);
+  const result = runClaude(f, '--note-only');
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).continuity.result, 'fresh-agent');
+  assert.deepEqual(claude.calls(), []);
+  assert.equal(calls().find(c => c.channel === 'runpane:panels:create').args[0].resume, undefined);
+});
+
+// ---------------------------------------------------------------- carrying a session to another machine
+
+/**
+ * A stand-in for Pane on another machine (test-remote), reached over HTTP like a real workspace,
+ * with its own home folder and a clone of the fixture's remote. The CLI's tailnet lookup is
+ * pointed at it.
+ */
+function remoteMachine(f, options = {}) {
+  const { spawn } = require('node:child_process');
+  const home = path.join(f.root, 'remote-home');
+  const repoPath = path.join(home, 'repo');
+  fs.mkdirSync(home, { recursive: true });
+  execFileSync('git', ['clone', '-q', path.join(f.root, 'remote.git'), repoPath], { env: f.env });
+  const log = path.join(f.root, 'remote-calls.jsonl');
+  const ready = path.join(f.root, 'remote-ready.json');
+  const config = path.join(f.root, 'remote.json');
+  fs.writeFileSync(config, JSON.stringify({ home, repoPath, log, ready, agent: options.agent ?? 'claude', screenText: options.screenText }));
+  const child = spawn(process.execPath, [path.join(__dirname, 'fixtures', 'runpane-handoff-remote.cjs'), config], { env: f.env, stdio: 'ignore' });
+  f.t.after(async () => {
+    if (child.exitCode !== null || child.signalCode !== null) return;
+    const exited = new Promise(resolve => child.once('exit', resolve));
+    child.kill();
+    await exited;
+  });
+  const deadline = Date.now() + 10000;
+  while (!fs.existsSync(ready) && Date.now() < deadline) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+  const { port } = JSON.parse(fs.readFileSync(ready, 'utf8'));
+  fs.appendFileSync(path.join(f.root, '.git', 'info', 'exclude'), 'remote-home/\nremote-calls.jsonl\nremote-ready.json\nremote.json\n');
+  const self = { name: 'workstation', dnsName: 'workstation.tail.invalid', os: process.platform === 'win32' ? 'Windows' : 'Linux', online: true, ips: [], self: true, owner: 'test@github', mine: true };
+  const remote = { ...self, name: 'test-remote', dnsName: 'test-remote.tail.invalid', os: process.platform === 'win32' ? 'Windows' : 'Linux', self: false };
+  fs.appendFileSync(path.join(f.root, '.git', 'isolated-tailnet.cjs'), [
+    `const workspace = require(${JSON.stringify(path.join(dist, 'workspace.js'))});`,
+    `workspace.readTailnet = async () => ({ ok: true, self: ${JSON.stringify(self)}, machines: [${JSON.stringify(remote)}] });`,
+    `workspace.workspaceTarget = (machine) => ({ machine: machine.name, baseUrl: 'http://127.0.0.1:${port}' });`,
+    '',
+  ].join('\n'));
+  const calls = () => fs.readFileSync(log, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+  return { home, calls };
+}
+const runToRemote = (f, ...args) => spawnSync(process.execPath, [cli, 'handoff', 'claude on test-remote', '--note-file', 'note.md', '--json', ...args], { cwd: f.root, encoding: 'utf8', env: f.env });
+
+test('a handoff to another machine copies the sender\'s session into its store and resumes the same id there', (t) => {
+  const f = fixture(t); fs.writeFileSync(path.join(f.root, 'note.md'), filled());
+  receiver(f, { sender: { agentType: 'claude', resumeId: SENDER, resumeSource: 'agent' } });
+  const claude = claudeSession(f);
+  const remote = remoteMachine(f, { screenText: `● Done.\n  ${LAST} now.` });
+  const result = runToRemote(f);
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  const out = JSON.parse(result.stdout);
+  assert.equal(out.continuity.result, 'continued');
+  assert.equal(out.continuity.fork, false);
+  assert.equal(out.continuity.resumedId, SENDER);
+  const copy = path.join(remote.home, '.claude', 'projects', 'C--work-app', `${SENDER}.jsonl`);
+  assert.deepEqual(fs.readFileSync(copy), fs.readFileSync(claude.transcript));
+  assert.deepEqual(claude.calls(), [], 'nothing is forked when the session moves to another machine');
+  const create = remote.calls().find(c => c.channel === 'runpane:panes:create').args[0].panes[0];
+  assert.equal(create.resume, SENDER);
+  assert.equal(create.tool.initialInput, undefined);
+  const moved = remote.calls().find(c => c.channel === 'runpane:panels:submit').args[0];
+  assert.match(moved.input, /^This session moved to .* on test-remote\. Continue from where you were\. The sender's handoff note is at /);
+});
+
+test('a session already in the other machine\'s store is replaced in place, never copied twice', (t) => {
+  const f = fixture(t); fs.writeFileSync(path.join(f.root, 'note.md'), filled());
+  receiver(f, { sender: { agentType: 'claude', resumeId: SENDER, resumeSource: 'agent' } });
+  const claude = claudeSession(f);
+  const remote = remoteMachine(f, { screenText: `${LAST} now.` });
+  const earlier = path.join(remote.home, '.claude', 'projects', 'C--Users-me-old-checkout', `${SENDER}.jsonl`);
+  fs.mkdirSync(path.dirname(earlier), { recursive: true });
+  fs.writeFileSync(earlier, 'an older copy from an earlier handoff\n');
+  const result = runToRemote(f);
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  assert.deepEqual(fs.readFileSync(earlier), fs.readFileSync(claude.transcript));
+  assert.equal(fs.existsSync(path.join(remote.home, '.claude', 'projects', 'C--work-app', `${SENDER}.jsonl`)), false);
+});
+
+test('a session larger than one machine write is sent in parts and joined unchanged', (t) => {
+  const f = fixture(t); fs.writeFileSync(path.join(f.root, 'note.md'), filled());
+  receiver(f, { sender: { agentType: 'claude', resumeId: SENDER, resumeSource: 'agent' } });
+  const claude = claudeSession(f);
+  // 9 MB of earlier conversation before the last message, so the file needs two writes.
+  const filler = JSON.stringify({ type: 'user', sessionId: SENDER, message: { role: 'user', content: 'x'.repeat(1024) } }) + '\n';
+  const original = fs.readFileSync(claude.transcript, 'utf8');
+  fs.writeFileSync(claude.transcript, filler.repeat(9 * 1024) + original);
+  const remote = remoteMachine(f, { screenText: `${LAST} now.` });
+  const result = runToRemote(f);
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  const copyDir = path.join(remote.home, '.claude', 'projects', 'C--work-app');
+  assert.deepEqual(fs.readFileSync(path.join(copyDir, `${SENDER}.jsonl`)), fs.readFileSync(claude.transcript));
+  assert.deepEqual(fs.readdirSync(copyDir), [`${SENDER}.jsonl`], 'the parts are removed once joined');
+  const writes = remote.calls().filter(c => c.channel === 'runpane:machine:write' && c.args[0].path.includes(SENDER));
+  assert.equal(writes.length, 2);
+});
+
+// ---------------------------------------------------------------- OpenCode
+
+const OPENCODE_SENDER = 'ses_SenderSession123';
+const OPENCODE_FORK = 'ses_ForkedSession456';
+
+/** A stand-in `opencode` with one session, which exports it, forks it with a turn, and imports exports. */
+function openCodeSession(f) {
+  const bin = path.join(f.root, 'fake-bin');
+  const calls = path.join(bin, 'opencode-calls.jsonl');
+  const exported = JSON.stringify({ info: { id: OPENCODE_SENDER, title: 'login fix' }, messages: [
+    { info: { role: 'user' }, parts: [{ type: 'text', text: 'the codeword is heron' }] },
+    { info: { role: 'assistant' }, parts: [{ type: 'text', text: `${LAST} now.` }] },
+  ] });
+  fs.writeFileSync(path.join(bin, 'opencode.js'), [
+    "const fs = require('node:fs');",
+    'const args = process.argv.slice(2);',
+    `fs.appendFileSync(${JSON.stringify(calls)}, JSON.stringify({ args, cwd: process.cwd() }) + '\\n');`,
+    `if (args[0] === 'export') { if (args[1] !== ${JSON.stringify(OPENCODE_SENDER)}) process.exit(1); process.stderr.write('Exporting session...\\n'); process.stdout.write(${JSON.stringify(exported)}); }`,
+    `else if (args[0] === 'run') { console.log(JSON.stringify({ type: 'step_start', timestamp: 1, sessionID: ${JSON.stringify(OPENCODE_FORK)} })); }`,
+    "else if (args[0] === 'import') { console.log('Imported session: ' + JSON.parse(fs.readFileSync(args[1], 'utf8')).info.id); }",
+  ].join('\n'));
+  fs.writeFileSync(path.join(bin, 'opencode.cmd'), `@"${process.execPath}" "%~dp0opencode.js" %*\r\n`);
+  fs.writeFileSync(path.join(bin, 'opencode'), `#!/bin/sh\nexec "${process.execPath.split(path.sep).join('/')}" "$(dirname "$0")/opencode.js" "$@"\n`, { mode: 0o755 });
+  const inherited = f.env.PATH ?? f.env.Path ?? '';
+  delete f.env.Path;
+  if (!inherited.startsWith(bin)) f.env.PATH = `${bin}${path.delimiter}${inherited}`;
+  f.env.PANE_SESSION_ID = 'sender-pane';
+  f.env.PANE_PANEL_ID = 'sender-panel';
+  return { exported, calls: () => (fs.existsSync(calls) ? fs.readFileSync(calls, 'utf8').trim().split('\n').map(line => JSON.parse(line)) : []) };
+}
+
+test('a same-machine handoff to OpenCode resumes a fork of the sender\'s OpenCode session', (t) => {
+  const f = fixture(t); fs.writeFileSync(path.join(f.root, 'note.md'), filled());
+  const calls = receiver(f, { sender: { agentType: 'opencode', resumeId: OPENCODE_SENDER, resumeSource: 'agent' }, screenText: `${LAST} now.` });
+  const opencode = openCodeSession(f);
+  const result = spawnSync(process.execPath, [cli, 'handoff', 'opencode here', '--note-file', 'note.md', '--json'], { cwd: f.root, encoding: 'utf8', env: f.env });
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  const out = JSON.parse(result.stdout);
+  assert.equal(out.continuity.result, 'continued');
+  assert.equal(out.continuity.resumedId, OPENCODE_FORK);
+  assert.equal(out.continuity.checks.originalUntouched, true);
+  const fork = opencode.calls().find(c => c.args[0] === 'run').args;
+  assert.deepEqual(fork.slice(0, 6), ['run', '--session', OPENCODE_SENDER, '--fork', '--format', 'json']);
+  const tab = calls().find(c => c.channel === 'runpane:panels:create').args[0];
+  assert.equal(tab.resume, OPENCODE_FORK);
+  assert.equal(tab.tool.agent, 'opencode');
+});
+
+test('a handoff to OpenCode on another machine imports the sender\'s session there and resumes the same id', (t) => {
+  const f = fixture(t); fs.writeFileSync(path.join(f.root, 'note.md'), filled());
+  receiver(f, { sender: { agentType: 'opencode', resumeId: OPENCODE_SENDER, resumeSource: 'agent' } });
+  const opencode = openCodeSession(f);
+  const remote = remoteMachine(f, { agent: 'opencode', screenText: `${LAST} now.` });
+  const result = spawnSync(process.execPath, [cli, 'handoff', 'opencode on test-remote', '--note-file', 'note.md', '--json'], { cwd: f.root, encoding: 'utf8', env: f.env });
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  const out = JSON.parse(result.stdout);
+  assert.equal(out.continuity.result, 'continued');
+  assert.equal(out.continuity.resumedId, OPENCODE_SENDER);
+  const exportFile = path.join(remote.home, '.pane', 'handoffs', `opencode-${OPENCODE_SENDER}.json`);
+  assert.equal(fs.readFileSync(exportFile, 'utf8'), opencode.exported);
+  const imported = opencode.calls().find(c => c.args[0] === 'import');
+  assert.equal(path.resolve(imported.args[1]), path.resolve(exportFile));
+  assert.equal(fs.realpathSync.native(imported.cwd), fs.realpathSync.native(path.join(remote.home, 'repo')), 'imported from inside the receiving repository');
+  const create = remote.calls().find(c => c.channel === 'runpane:panes:create').args[0].panes[0];
+  assert.equal(create.resume, OPENCODE_SENDER);
+  assert.equal(create.tool.agent, 'opencode');
+});
+
+// ---------------------------------------------------------------- which session is handing off
+
+test('the agent\'s own live session id is carried even when Pane recorded another id for the tab', (t) => {
+  const f = fixture(t); fs.writeFileSync(path.join(f.root, 'note.md'), filled());
+  // Codex's shared background server can hand a command another tab's PANE_PANEL_ID.
+  const calls = receiver(f, { sender: { agentType: 'claude', resumeId: 'b0b0b0b0-0000-4000-8000-000000000000', resumeSource: 'agent' }, screenText: `${LAST} now.` });
+  const claude = claudeSession(f);
+  f.env.CLAUDE_CODE_SESSION_ID = SENDER;
+  const result = runClaude(f);
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  const out = JSON.parse(result.stdout);
+  assert.equal(out.continuity.sessionId, SENDER);
+  assert.match(out.continuity.reason, /Pane had recorded b0b0b0b0-0000-4000-8000-000000000000 for this tab; claude itself reports/);
+  assert.equal(claude.calls()[0][2], SENDER, 'the fork is made from the live session');
+  assert.equal(calls().find(c => c.channel === 'runpane:panels:create').args[0].resume, out.continuity.resumedId);
+});
+
+test('a tab whose session id Pane has not captured yet is carried by the agent\'s own live id', (t) => {
+  const f = fixture(t); fs.writeFileSync(path.join(f.root, 'note.md'), filled());
+  receiver(f, { sender: { agentType: 'claude' }, screenText: `${LAST} now.` });
+  claudeSession(f);
+  f.env.CLAUDE_CODE_SESSION_ID = SENDER;
+  const result = runClaude(f, '--dry-run');
+  assert.equal(result.status, 0, result.stderr);
+  const out = JSON.parse(result.stdout);
+  assert.equal(out.continuity.carried, true);
+  assert.equal(out.continuity.sessionId, SENDER);
+});
+
+test('two agents\' live sessions in one terminal carry neither, and say why', (t) => {
+  const f = fixture(t); fs.writeFileSync(path.join(f.root, 'note.md'), filled());
+  receiver(f, { sender: { agentType: 'opencode', resumeId: 'ses_Other1' } });
+  claudeSession(f);
+  f.env.CLAUDE_CODE_SESSION_ID = SENDER;
+  f.env.CODEX_THREAD_ID = '01a14000-0000-7000-8000-000000000000';
+  const result = runClaude(f, '--dry-run');
+  assert.equal(result.status, 0, result.stderr);
+  const out = JSON.parse(result.stdout);
+  assert.equal(out.continuity.carried, false);
+  assert.match(out.continuity.reason, /Both claude and codex report a live session in this terminal/);
+});
+
+// ---------------------------------------------------------------- the running sender, blocked receivers, report-back
+
+const handoffNote = (f) => {
+  const folder = path.join(f.env.HOME, '.pane', 'handoffs');
+  return fs.readFileSync(path.join(folder, fs.readdirSync(folder)[0]), 'utf8');
+};
+
+test('the running sender\'s own turn may grow its transcript; a fork that rewrote it still fails check 4', (t) => {
+  const f = fixture(t); fs.writeFileSync(path.join(f.root, 'note.md'), filled());
+  receiver(f, { sender: { agentType: 'claude', resumeId: SENDER, resumeSource: 'agent' }, screenText: `${LAST} now.` });
+  claudeSession(f);
+  f.env.FAKE_SENDER_TURN_WRITES = '1';
+  // Run by the agent itself (its live id is set): appended lines are its own turn.
+  f.env.CLAUDE_CODE_SESSION_ID = SENDER;
+  const live = runClaude(f);
+  assert.equal(live.status, 0, live.stderr + live.stdout);
+  assert.equal(JSON.parse(live.stdout).continuity.checks.originalUntouched, true);
+  // Run from a plain terminal, nobody else should be writing to the original: any change fails.
+  delete f.env.CLAUDE_CODE_SESSION_ID;
+  const idle = runClaude(f);
+  assert.equal(idle.status, 1, idle.stderr + idle.stdout);
+  const out = JSON.parse(idle.stdout);
+  assert.equal(out.continuity.checks.originalUntouched, false);
+  assert.match(out.continuity.reason, /changed while it was forked/);
+});
+
+test('a receiver stopped on its agent\'s own notice is inconclusive, with the command that answers it', (t) => {
+  const f = fixture(t); fs.writeFileSync(path.join(f.root, 'note.md'), filled());
+  receiver(f, {
+    sender: { agentType: 'claude', resumeId: SENDER, resumeSource: 'agent' },
+    blocked: { kind: 'agent-prompt', message: 'Set up security for Daybreak mode\nPress a number to choose · esc to dismiss', suggestedCommand: 'runpane panels input --panel test-tab --keys escape --yes' },
+  });
+  claudeSession(f);
+  const result = runClaude(f);
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  const out = JSON.parse(result.stdout);
+  assert.equal(out.continuity.result, 'inconclusive');
+  assert.match(out.continuity.reason, /waiting on its agent's own prompt: Set up security for Daybreak mode$/);
+  assert.match(out.continuity.next, /runpane panels input --panel test-tab --keys escape --yes/);
+});
+
+test('the receiver reports back to the tab that records the carried session, not an inherited PANE_PANEL_ID', (t) => {
+  const f = fixture(t); fs.writeFileSync(path.join(f.root, 'note.md'), filled());
+  receiver(f, {
+    sender: { agentType: 'claude', resumeId: 'b0b0b0b0-0000-4000-8000-000000000000', resumeSource: 'agent' },
+    extraPanels: [{ id: 'own-tab', agentType: 'claude', resumeId: SENDER, resumeSource: 'agent' }],
+    screenText: `${LAST} now.`,
+  });
+  claudeSession(f);
+  f.env.CLAUDE_CODE_SESSION_ID = SENDER;
+  const result = runClaude(f);
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  assert.match(handoffNote(f), /^origin_panel: own-tab$/m);
+  assert.doesNotMatch(handoffNote(f), /^origin_panel: sender-panel$/m);
+});
+
+test('with no tab recording the carried session, the receiver reports on the branch and the output says why', (t) => {
+  const f = fixture(t); fs.writeFileSync(path.join(f.root, 'note.md'), filled());
+  receiver(f, { sender: { agentType: 'claude', resumeId: 'b0b0b0b0-0000-4000-8000-000000000000', resumeSource: 'agent' }, screenText: `${LAST} now.` });
+  claudeSession(f);
+  f.env.CLAUDE_CODE_SESSION_ID = SENDER;
+  const result = runClaude(f);
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  assert.doesNotMatch(handoffNote(f), /^origin_panel:/m);
+  assert.ok(JSON.parse(result.stdout).warnings.some(warning => /PANE_PANEL_ID names another tab/.test(warning)));
 });
