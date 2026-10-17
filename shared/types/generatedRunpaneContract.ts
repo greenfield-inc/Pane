@@ -4670,10 +4670,10 @@ export const RUNPANE_CONTRACT = {
       "`sessions set-agent` switch the durable terminal agent for a named Session.",
       "`sessions associate` associate a user-visible Pane with a named Session.",
       "`sessions detach` detach a Pane from a named Session.",
-      "`sessions overview` read a live status, activity, git, and pull request overview for a named Session.",
+      "`sessions overview` read a live status, activity, git, and pull request overview for a named Session. Each panel in `panes[].panels[]` carries its own latest `runpane report` as `report`, so one call shows what every worker last reported and when (`reportedAt`, next to the panel's `state` and `lastActivityAt`). When a report's summary is a complete JSON object, such as a status file sent with `--summary-file`, `report.data` holds it exactly as the worker gave it; Pane never reads, renames or validates its fields. A summary that is not a JSON object (plain text, an array, a scalar or invalid JSON), is nested more than 64 levels deep, or was truncated (`summaryTruncated`), has no `data`. A panel that never reported has no `report`. `panes[].report` is still the newest report among the Pane's panels.",
       "`runpane lock acquire|release|list` coordinate a resource shared between agents, such as one test account. The caller's Pane and panel own the lock; it is scoped to the owner's Session (or global outside one), renews for the same owner, and is released on TTL expiry, owner panel exit, or owner Pane archive. `--wait` blocks in the daemon until the lock comes free.",
       "`runpane agents start|status|send` finish the three common agent jobs in one call each: start an agent on a task (a new tab in the work's Pane with `--pane <id>`, or a new Pane for new work), check on it, and send it a follow-up.",
-      "`runpane report --state ready|blocked|failed|done` is how a worker hands back its result. It stores the latest report on the worker's panel (state, `--pr`, `--head`, up to 16,000 characters of `--summary` or `--summary-file`, and the `--question` a blocked worker needs answered), journals an opt-in `agent.report` watch event (`REPORT <pane-name> pane <pane-id> panel <panel-id> ready pr#747 fc5dce9`; it skips the `--min-interval` batch), records it as Session activity, and shows it in `agents status`, `panels list`, and `sessions overview` (`panes[].report`). Inside a Pane terminal the panel comes from `PANE_SESSION_ID` and `PANE_PANEL_ID`; elsewhere pass `--pane` and `--panel`. It prints how many watches were waiting for the report and received it (`Delivered to 1 waiting watcher.`, `liveWatchers` in JSON). Zero means nobody was waiting right now, not that the report is lost: it stays on the panel, and a named-cursor watch receives it when it next waits.",
+      "`runpane report --state ready|blocked|failed|done` is how a worker hands back its result. It stores the latest report on the worker's panel (state, `--pr`, `--head`, up to 16,000 characters of `--summary` or `--summary-file`, and the `--question` a blocked worker needs answered), journals an opt-in `agent.report` watch event (`REPORT <pane-name> pane <pane-id> panel <panel-id> ready pr#747 fc5dce9`; it skips the `--min-interval` batch), records it as Session activity, and shows it in `agents status`, `panels list`, and `sessions overview` (each panel's own report as `panes[].panels[].report`, with a JSON object summary as `data`, and the Pane's newest as `panes[].report`). Inside a Pane terminal the panel comes from `PANE_SESSION_ID` and `PANE_PANEL_ID`; elsewhere pass `--pane` and `--panel`. It prints how many watches were waiting for the report and received it (`Delivered to 1 waiting watcher.`, `liveWatchers` in JSON). Zero means nobody was waiting right now, not that the report is lost: it stays on the panel, and a named-cursor watch receives it when it next waits.",
       "`runpane panels resume --panel <panel-id>` restarts a stopped terminal panel in place, keeping its panel id: an agent panel relaunches with its resume command (Claude `--resume <session>`, `codex resume <session>`, Agent Farm `agent-farm run <profile> --resume <id>` with the ID Agent Farm printed; the result's `agentSessionId` names it), the same restart the app runs when it shows the panel, without taking focus. A running panel is left alone (`action: \"already-running\"`); one whose agent exited back to its shell is stopped, and resume runs its saved command again in that shell (`action: \"resumed\"`). If that command exits at once, `--wait-ready` returns `ok: false` with `reason.code: \"command-exited\"` and the error line it printed. `--session <id|name>` or `--all-stopped` resumes every stopped agent panel in that scope, `--concurrency` at a time (default 3), then, with `--wait-ready`, waits on the resumed panels together, and returns `{ resumed, alreadyRunning, failed, notReady, items[] }` with each panel's own result, readiness, and blocker or error. After a Pane restart, or once an agent exits back to its shell, stopped panels report `running: false` (`initialized` stays true while the shell lives) in `panels list`, `panels screen`, and `panels wait` (which returns `stopped: true` instead of timing out), and `nextCommand` points at `panels resume`. `runpane watch` reports them as `panel.stopped` (`STOPPED ...`) when `--kinds` lists that kind; other consumers and `workspace state` see `agent.unknown` with `running: false`, never `agent.ready`.",
       "`runpane panels last-message --panel <panel-id>` reads a Claude or Codex agent's last reply from its transcript (up to `--limit` characters, default 20,000, keeping the end and reporting `truncated`). It never scrapes the screen: without a transcript it prints `{ ok: false, reason: \"transcript-unavailable\" }` and exits 1.",
       "Commands with a contract `daemonAction` (the `panes` git, script, restore, and move commands, `folders list|create`, and `links open`) call the same Pane daemon channel as the matching button in the app and print `{ ok, data, error }`. Destructive ones add a pane:// `link` to review the Pane.",
@@ -7631,6 +7631,50 @@ export const RUNPANE_CONTRACT = {
       },
       "additionalProperties": false
     },
+    "panelReport": {
+      "type": "object",
+      "description": "A panel's latest runpane report in sessions overview. data is the summary when it is a complete JSON object, returned as the worker gave it; a plain-text, array, scalar, invalid, more than 64 levels deep, or truncated summary has no data.",
+      "required": [
+        "state",
+        "reportedAt"
+      ],
+      "properties": {
+        "state": {
+          "enum": [
+            "ready",
+            "blocked",
+            "failed",
+            "done"
+          ]
+        },
+        "pr": {
+          "type": "number"
+        },
+        "head": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "summaryTruncated": {
+          "const": true
+        },
+        "summaryPath": {
+          "type": "string"
+        },
+        "question": {
+          "type": "string"
+        },
+        "reportedAt": {
+          "type": "string"
+        },
+        "data": {
+          "type": "object",
+          "description": "The worker's JSON object summary, returned as given. Pane never reads, renames or validates its fields."
+        }
+      },
+      "additionalProperties": false
+    },
     "workspaceWaitRequest": {
       "type": "object",
       "properties": {
@@ -10133,7 +10177,23 @@ export const RUNPANE_CONTRACT = {
           "type": "string"
         },
         "panes": {
-          "type": "array"
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "panels": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "report": {
+                      "$ref": "#/jsonSchemas/panelReport"
+                    }
+                  }
+                }
+              }
+            }
+          }
         },
         "activity": {
           "type": "array"
@@ -14583,7 +14643,8 @@ export const RUNPANE_CONTRACT = {
           "sessionOverviewResult"
         ],
         "notes": [
-          "The result includes `locks`: named locks scoped to the Session or held by its Panes (see `runpane lock`)."
+          "The result includes `locks`: named locks scoped to the Session or held by its Panes (see `runpane lock`).",
+          "Each `panes[].panels[]` entry has `report`, that panel's latest `runpane report` (state, `pr`, `head`, `question`, `summary`, `summaryTruncated`, `summaryPath`, `reportedAt`). When the summary is a complete JSON object, `report.data` holds it exactly as the worker gave it; Pane never reads or renames its fields. A plain-text, array or scalar summary, invalid JSON, JSON nested more than 64 levels deep, or a truncated summary (`summaryTruncated`) has no `data`. A panel that never reported has no `report` but keeps `state` and `lastActivityAt`. `panes[].report` is still the newest report among the Pane's panels, with its `panelId`; daemons that predate per-panel reports omit `panels[].report`."
         ]
       },
       "lock acquire": {

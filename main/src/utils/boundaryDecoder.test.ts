@@ -69,4 +69,20 @@ describe('decodeBoundaryAll', () => {
   it('leaves decodeBoundary stopping at the first error with its existing text', () => {
     expect(() => decodeBoundary({ items: [{}] }, payloadSchema)).toThrow('input.items.0.label: expected string');
   });
+
+  it('F-2: keeps JSON keys named __proto__ as own data, at the top level and nested', () => {
+    const text = '{"__proto__":{"state":"changed","__proto__":{"deep":true}},"ok":true}';
+    const decoded = decodeBoundary(JSON.parse(text), boundary.jsonObject);
+    expect(Object.hasOwn(decoded, '__proto__')).toBe(true);
+    expect(Object.getPrototypeOf(decoded)).toBe(Object.prototype);
+    expect(JSON.stringify(decoded)).toBe(text);
+    expect(JSON.stringify(decodeBoundary(JSON.parse(`[${text}]`), boundary.json))).toBe(`[${text}]`);
+  });
+
+  it('F-1: rejects JSON nested past the depth limit with a decode error, not a stack overflow', () => {
+    const deep = JSON.parse(`{"x":${'['.repeat(20_000)}0${']'.repeat(20_000)}}`);
+    expect(() => decodeBoundary(deep, boundary.jsonObject)).toThrow(BoundaryDecodeError);
+    const fine = JSON.parse(`{"x":${'['.repeat(100)}0${']'.repeat(100)}}`);
+    expect(JSON.stringify(decodeBoundary(fine, boundary.jsonObject))).toBe(JSON.stringify(fine));
+  });
 });

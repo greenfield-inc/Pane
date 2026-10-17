@@ -126,6 +126,13 @@ def run_sessions_detach(parsed: Any) -> int:
     return print_session_result(result, parsed.json, "Detached")
 
 
+def _describe_panel_overview(panel: Dict[str, Any]) -> str:
+    """`Reviewer (panel <id>): idle, report ready pr#747 fc5dce9 at <reportedAt>`; a panel without a report shows only its state."""
+    line = f"{panel.get('title')} (panel {panel.get('panelId')}): {panel.get('state')}"
+    report = panel.get("report")
+    return f"{line}, report {describe_report(report)} at {report.get('reportedAt')}" if report else line
+
+
 def run_sessions_overview(parsed: Any) -> int:
     result = invoke_daemon("runpane:sessions:overview", [_session_selector(parsed)], pane_dir=parsed.pane_dir)
     if parsed.json:
@@ -144,8 +151,12 @@ def run_sessions_overview(parsed: Any) -> int:
                 for panel in pane.get("panels", [])
             ) or "no terminal panels"
         print(f"  {pane.get('name')}: {details}")
+        panels = pane.get("panels", [])
         report = pane.get("report")
-        if report:
+        if any(panel.get("report") for panel in panels):
+            for panel in panels:
+                print(f"    {_describe_panel_overview(panel)}")
+        elif report:
             print(f"    report {describe_report(report)} (panel {report.get('panelId')}, {report.get('reportedAt')})")
     for lock in result.get("locks") or []:
         print(f"  lock {format_lock_line(lock)}")

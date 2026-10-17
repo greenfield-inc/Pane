@@ -798,9 +798,13 @@ The daemon then:
 - appends a `report` activity (with the worker's `paneId` and `panelId`) to
   every Session the Pane is associated with, which makes an older Session
   report stale;
-- shows the report in `agents status`, `panels list`, and `sessions overview`,
-  where `panes[].report` is the newest report among the Pane's panels, with its
-  `panelId`;
+- shows the report in `agents status`, `panels list`, and `sessions overview`.
+  There each panel carries its own latest report as `panes[].panels[].report`,
+  and `panes[].report` is the newest report among the Pane's panels, with its
+  `panelId`. When the summary is a complete JSON object (a status file sent
+  with `--summary-file`, say), the panel's `report.data` holds it exactly as
+  given; a plain-text, array, scalar, invalid, truncated, or more than 64
+  levels deep summary has no `data`;
 - returns `liveWatchers`, the number of watches that were waiting and received
   it. The CLI prints `Delivered to 1 waiting watcher.`; with no Session and
   nobody waiting it says the report is stored on the panel and that a
