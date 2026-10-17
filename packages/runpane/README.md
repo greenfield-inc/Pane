@@ -325,7 +325,7 @@ plain words. The CLI checks every section is filled in, needs the branch pushed
 (`--push` commits uncommitted work as WIP and pushes, never forcing), and starts
 the agent in a new Pane there, branched from yours. It reports back to you.
 
-When you run it from a Pane tab with a Claude, Codex or Cursor session and the
+When you run it from a Pane tab with a Claude, Codex, Cursor or OpenCode session and the
 receiver is the same agent, it carries that session. Another machine gets a copy
 of the session's files in its agent store and resumes the same id; this machine
 resumes a fork, so two agents never share one session. The CLI checks the
@@ -335,7 +335,10 @@ receiver), or `not-continued` (exit 1; the receiver is kept and `next` gives the
 `--note-only` command). After `continued` or `inconclusive`, stop working on the
 branch; the session continues there. `--note-only`, a different agent, or no
 session to carry starts a fresh agent with the note, and the output says so.
-Carrying a Cursor chat is best effort, since Cursor's store is undocumented. The
+OpenCode keeps sessions in a database, so its session travels as `opencode export`
+and is brought in with `opencode import` inside the receiving repository; an
+OpenCode receiver is accepted only to continue an OpenCode session. Carrying a
+Cursor chat is best effort, since Cursor's store is undocumented. The
 destination's agent store is assumed at its default location (`~/.claude`,
 `~/.codex`, `~/.cursor`).
 

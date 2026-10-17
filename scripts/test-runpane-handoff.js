@@ -287,7 +287,7 @@ test('Cursor effort fails before Git or receiver side effects', (t) => {
  }
 });
 
-test('OpenCode handoff fails before Git, commands, files, or receiver side effects', (t) => {
+test('a fresh OpenCode agent with only a note is refused before Git, commands, files, or receiver side effects', (t) => {
   const f = fixture(t);
   fs.writeFileSync(path.join(f.root, 'note.md'), filled());
   fs.writeFileSync(path.join(f.root, 'code.txt'), 'dirty');
@@ -295,7 +295,7 @@ test('OpenCode handoff fails before Git, commands, files, or receiver side effec
   const head = f.git('rev-parse', 'HEAD'); const index = f.git('write-tree'); const status = f.git('status', '--porcelain');
   const commands = path.join(f.root, '.git', 'handoff-commands.jsonl');
   fs.appendFileSync(path.join(f.root, '.git', 'isolated-tailnet.cjs'), `for(const method of ['spawn','execFileSync']){const original=cp[method];cp[method]=(...args)=>{require('node:fs').appendFileSync(${JSON.stringify(commands)},JSON.stringify(args.slice(0,2))+'\\n');return original(...args);};}\n`);
-  const rejection = /OpenCode is supported in terminal panes, but handoff to OpenCode is not supported yet/i;
+  const rejection = /OpenCode (receives a handoff only to continue your own OpenCode session|effort is not supported)/i;
   const cases = [
     ['opencode here'],
     ['OpenCode model=openai/gpt-5 here'],
@@ -673,7 +673,7 @@ test('a dry run says which session would be carried, and forks nothing', (t) => 
 
 for (const [name, sender, destination, reason] of [
   ['a different agent', { agentType: 'claude', resumeId: SENDER }, 'codex here', /session is claude and the receiver is codex/],
-  ['a shell tab with no agent session', {}, 'claude here', /runs no Claude, Codex or Cursor session/],
+  ['a shell tab with no agent session', {}, 'claude here', /runs no Claude, Codex, Cursor or OpenCode session/],
 ]) test(`a handoff from ${name} starts a fresh agent with the note and says so`, (t) => {
   const f = fixture(t); fs.writeFileSync(path.join(f.root, 'note.md'), filled());
   const calls = receiver(f, { sender });
@@ -807,4 +807,72 @@ test('a session larger than one machine write is sent in parts and joined unchan
   assert.deepEqual(fs.readdirSync(copyDir), [`${SENDER}.jsonl`], 'the parts are removed once joined');
   const writes = remote.calls().filter(c => c.channel === 'runpane:machine:write' && c.args[0].path.includes(SENDER));
   assert.equal(writes.length, 2);
+});
+
+// ---------------------------------------------------------------- OpenCode
+
+const OPENCODE_SENDER = 'ses_SenderSession123';
+const OPENCODE_FORK = 'ses_ForkedSession456';
+
+/** A stand-in `opencode` with one session, which exports it, forks it with a turn, and imports exports. */
+function openCodeSession(f) {
+  const bin = path.join(f.root, 'fake-bin');
+  const calls = path.join(bin, 'opencode-calls.jsonl');
+  const exported = JSON.stringify({ info: { id: OPENCODE_SENDER, title: 'login fix' }, messages: [
+    { info: { role: 'user' }, parts: [{ type: 'text', text: 'the codeword is heron' }] },
+    { info: { role: 'assistant' }, parts: [{ type: 'text', text: `${LAST} now.` }] },
+  ] });
+  fs.writeFileSync(path.join(bin, 'opencode.js'), [
+    "const fs = require('node:fs');",
+    'const args = process.argv.slice(2);',
+    `fs.appendFileSync(${JSON.stringify(calls)}, JSON.stringify({ args, cwd: process.cwd() }) + '\\n');`,
+    `if (args[0] === 'export') { if (args[1] !== ${JSON.stringify(OPENCODE_SENDER)}) process.exit(1); process.stderr.write('Exporting session...\\n'); process.stdout.write(${JSON.stringify(exported)}); }`,
+    `else if (args[0] === 'run') { console.log(JSON.stringify({ type: 'step_start', timestamp: 1, sessionID: ${JSON.stringify(OPENCODE_FORK)} })); }`,
+    "else if (args[0] === 'import') { console.log('Imported session: ' + JSON.parse(fs.readFileSync(args[1], 'utf8')).info.id); }",
+  ].join('\n'));
+  fs.writeFileSync(path.join(bin, 'opencode.cmd'), `@"${process.execPath}" "%~dp0opencode.js" %*\r\n`);
+  fs.writeFileSync(path.join(bin, 'opencode'), `#!/bin/sh\nexec "${process.execPath.split(path.sep).join('/')}" "$(dirname "$0")/opencode.js" "$@"\n`, { mode: 0o755 });
+  const inherited = f.env.PATH ?? f.env.Path ?? '';
+  delete f.env.Path;
+  if (!inherited.startsWith(bin)) f.env.PATH = `${bin}${path.delimiter}${inherited}`;
+  f.env.PANE_SESSION_ID = 'sender-pane';
+  f.env.PANE_PANEL_ID = 'sender-panel';
+  return { exported, calls: () => (fs.existsSync(calls) ? fs.readFileSync(calls, 'utf8').trim().split('\n').map(line => JSON.parse(line)) : []) };
+}
+
+test('a same-machine handoff to OpenCode resumes a fork of the sender\'s OpenCode session', (t) => {
+  const f = fixture(t); fs.writeFileSync(path.join(f.root, 'note.md'), filled());
+  const calls = receiver(f, { sender: { agentType: 'opencode', resumeId: OPENCODE_SENDER, resumeSource: 'agent' }, screenText: `${LAST} now.` });
+  const opencode = openCodeSession(f);
+  const result = spawnSync(process.execPath, [cli, 'handoff', 'opencode here', '--note-file', 'note.md', '--json'], { cwd: f.root, encoding: 'utf8', env: f.env });
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  const out = JSON.parse(result.stdout);
+  assert.equal(out.continuity.result, 'continued');
+  assert.equal(out.continuity.resumedId, OPENCODE_FORK);
+  assert.equal(out.continuity.checks.originalUntouched, true);
+  const fork = opencode.calls().find(c => c.args[0] === 'run').args;
+  assert.deepEqual(fork.slice(0, 6), ['run', '--session', OPENCODE_SENDER, '--fork', '--format', 'json']);
+  const tab = calls().find(c => c.channel === 'runpane:panels:create').args[0];
+  assert.equal(tab.resume, OPENCODE_FORK);
+  assert.equal(tab.tool.agent, 'opencode');
+});
+
+test('a handoff to OpenCode on another machine imports the sender\'s session there and resumes the same id', (t) => {
+  const f = fixture(t); fs.writeFileSync(path.join(f.root, 'note.md'), filled());
+  receiver(f, { sender: { agentType: 'opencode', resumeId: OPENCODE_SENDER, resumeSource: 'agent' } });
+  const opencode = openCodeSession(f);
+  const remote = remoteMachine(f, { agent: 'opencode', screenText: `${LAST} now.` });
+  const result = spawnSync(process.execPath, [cli, 'handoff', 'opencode on test-remote', '--note-file', 'note.md', '--json'], { cwd: f.root, encoding: 'utf8', env: f.env });
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  const out = JSON.parse(result.stdout);
+  assert.equal(out.continuity.result, 'continued');
+  assert.equal(out.continuity.resumedId, OPENCODE_SENDER);
+  const exportFile = path.join(remote.home, '.pane', 'handoffs', `opencode-${OPENCODE_SENDER}.json`);
+  assert.equal(fs.readFileSync(exportFile, 'utf8'), opencode.exported);
+  const imported = opencode.calls().find(c => c.args[0] === 'import');
+  assert.equal(path.resolve(imported.args[1]), path.resolve(exportFile));
+  assert.equal(fs.realpathSync(imported.cwd), fs.realpathSync(path.join(remote.home, 'repo')), 'imported from inside the receiving repository');
+  const create = remote.calls().find(c => c.channel === 'runpane:panes:create').args[0].panes[0];
+  assert.equal(create.resume, OPENCODE_SENDER);
+  assert.equal(create.tool.agent, 'opencode');
 });

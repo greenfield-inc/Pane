@@ -6,7 +6,7 @@ import { boundary, decodeBoundary, type BoundarySchema } from './boundaryDecoder
 import type { ParsedArgs, RunpaneAgent } from './commands';
 import { PaneDaemonClientError, resolvePaneDirectory, invokeDaemon, invokeRemoteDaemon } from './daemonClient';
 import { buildPaneCreateRequest, buildPanelCreateRequest, paneCreateResultSchema, panelCreateResultSchema, paneListResultSchema, panelListResultSchema, panelScreenResultSchema, panelSubmitResultSchema, repoListResultSchema, runpaneSessionListResultSchema, runpaneSessionResultSchema } from './localControl';
-import { changedFiles, forkNativeSession, isNativeAgent, lastMessageSnippet, locateNativeSession, screenShows, stampFiles, type FileStamp, type NativeSession } from './nativeSession';
+import { forkNativeSession, isNativeAgent, lastMessageSnippet, locateNativeSession, originalChanges, screenShows, snapshotOriginal, type NativeSession, type OriginalSnapshot } from './nativeSession';
 import { RunpaneError } from './errors';
 import { RUNPANE_CONTRACT } from './generated/contract';
 import { readTailnet, resolveMachine, workspaceTarget, type TailnetMachine } from './workspace';
@@ -83,7 +83,6 @@ export function parseDestination(text: string, machines: readonly TailnetMachine
   }
   const agent = overrides.agent ?? agents[0];
   if (!agent) throw new Error(`Name the agent: claude, codex, or cursor. For example: runpane handoff "claude opus on parsas-macbook-pro" --note-file ~/handoff.md`);
-  if (agent === 'opencode') throw new Error('OpenCode is supported in terminal panes, but handoff to OpenCode is not supported yet. Choose claude, codex, or cursor; nothing was committed or sent.');
 
   let machine: string | null = null;
   if (overrides.machine) {
@@ -101,6 +100,7 @@ export function parseDestination(text: string, machines: readonly TailnetMachine
   if (model !== undefined && !/^[A-Za-z0-9._:/-]+$/.test(model)) throw new Error('Invalid model identifier. Use letters, numbers, dots, underscores, colons, slashes, or hyphens.');
   if (effort !== undefined && !EFFORTS.has(effort)) throw new Error(`Invalid effort. Use ${[...EFFORTS].join(', ')}.`);
   if (agent === 'cursor' && effort !== undefined) throw new Error('Cursor effort is not supported. Omit --effort and effort text; nothing was committed or sent.');
+  if (agent === 'opencode' && effort !== undefined) throw new Error('OpenCode effort is not supported. Omit --effort and effort text; nothing was committed or sent.');
   if (model) destination.model = model;
   if (effort) destination.effort = effort;
   if (wsl) destination.wsl = true;
@@ -487,12 +487,12 @@ async function planCarry(parsed: ParsedArgs, destination: HandoffDestination): P
   }
   const agent = sender?.agentType;
   if (!isNativeAgent(agent) || !sender?.resumeId) {
-    return { fresh: 'This tab runs no Claude, Codex or Cursor session that Pane has an id for.' };
+    return { fresh: 'This tab runs no Claude, Codex, Cursor or OpenCode session that Pane has an id for.' };
   }
   if (agent !== destination.agent) {
     return { fresh: `Your session is ${agent} and the receiver is ${destination.agent}; a session can't move between agents.` };
   }
-  const session = locateNativeSession(agent, sender.resumeId);
+  const session = await locateNativeSession(agent, sender.resumeId, process.cwd());
   if (!session) return { fresh: `${agent} session ${sender.resumeId} has no files in this machine's ${agent} store.` };
   const carry: Carry = { session };
   const snippet = lastMessageSnippet(session);
@@ -540,8 +540,20 @@ function quoted(value: string, windows: boolean): string {
   return windows ? `'${value.replace(/'/g, "''")}'` : `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
-/** Copies the session's files into the destination agent's store; returns the main file's path there. */
-async function placeSession(destination: Destination, session: NativeSession): Promise<string> {
+/**
+ * Copies the session's files into the destination agent's store; returns the main file's path
+ * there. An OpenCode session goes in as its export, imported into OpenCode's database from inside
+ * `repoPath`, so OpenCode files it under that repository.
+ */
+async function placeSession(destination: Destination, session: NativeSession, repoPath: string): Promise<string> {
+  if (session.exported) {
+    const written = await destination.write(`~/${session.files[0].home}`, fs.readFileSync(session.files[0].absolute).toString('base64'), 'base64');
+    const windows = destination.os === 'Windows';
+    await mustRun(destination, windows
+      ? ['powershell', '-NoProfile', '-Command', `Set-Location -LiteralPath ${quoted(repoPath, true)}; opencode import ${quoted(written, true)}`]
+      : ['sh', '-c', `cd ${quoted(repoPath, false)} && opencode import ${quoted(written, false)}`], `opencode import of session ${session.id}`, 300_000);
+    return `OpenCode's store, from ${written}`;
+  }
   const existing = await existingCopy(destination, session);
   const mainDir = path.posix.dirname(session.files[0].home);
   const targetDir = existing ? path.posix.dirname(existing) : mainDir;
@@ -580,9 +592,9 @@ async function checkReceiver(options: {
   paneId: string;
   panelId: string;
   ready: boolean;
-  stamps?: FileStamp[];
+  original?: OriginalSnapshot;
 }): Promise<Pick<ContinuityReport, 'checks' | 'result'> & { why: string }> {
-  const { destination, carry, resumedId, paneId, panelId, ready, stamps } = options;
+  const { destination, carry, resumedId, paneId, panelId, ready, original } = options;
   const listed = await destination.invoke('runpane:panels:list', [{ paneId }], panelListResultSchema);
   const panel = listed.panels.find(candidate => candidate.id === panelId || candidate.panelId === panelId);
   const restartResumes = panel?.resumeId === resumedId;
@@ -593,12 +605,13 @@ async function checkReceiver(options: {
     historyLoaded = screenShows(screen.text, carry.snippet);
   }
   const checks: NonNullable<ContinuityReport['checks']> = { resumedById, restartResumes, historyLoaded };
-  if (stamps) checks.originalUntouched = changedFiles(stamps).length === 0;
+  const changed = original ? await originalChanges(original) : [];
+  if (original) checks.originalUntouched = changed.length === 0;
   if (!resumedById || !restartResumes) {
     return { checks, result: 'not-continued', why: `Pane recorded ${panel?.resumeId ?? 'no id'} for the receiver, not ${resumedId}, so it is not resuming that session.` };
   }
   if (checks.originalUntouched === false) {
-    return { checks, result: 'not-continued', why: `Your session's files changed while it was forked (${changedFiles(stamps ?? []).join(', ')}).` };
+    return { checks, result: 'not-continued', why: `Your session changed while it was forked (${changed.join(', ')}).` };
   }
   if (!ready) return { checks, result: 'not-continued', why: 'The receiver did not reach its input box, so its history could not be checked.' };
   if (historyLoaded === true) return { checks, result: 'continued', why: `The receiver shows the session's last message ("${carry.snippet}").` };
@@ -666,6 +679,16 @@ export async function runHandoff(parsed: ParsedArgs): Promise<number> {
     machine: parsed.handoffMachine, agent: parsed.agent, model: parsed.handoffModel, effort: parsed.handoffEffort,
   });
   if (destination.wsl) throw new Error('Handoff to a WSL receiver is not supported yet. Choose a native destination without wsl; nothing was committed or sent.');
+  // OpenCode receives a handoff only to continue an OpenCode session; a fresh OpenCode agent
+  // with only the note is not supported. Decide that before touching git or the destination.
+  const openCodePlan = destination.agent === 'opencode' ? await planCarry(parsed, destination) : undefined;
+  if (openCodePlan && 'fresh' in openCodePlan) {
+    throw new RunpaneError(
+      'ERR_HANDOFF_OPENCODE_FRESH',
+      `OpenCode receives a handoff only to continue your own OpenCode session, and this one can't be carried: ${openCodePlan.fresh} Nothing was committed or sent.`,
+      'Run handoff from the OpenCode tab whose session should continue, or choose claude, codex or cursor for a fresh agent with the note.',
+    );
+  }
   if (destination.machine && !tailnet.ok) throw new Error(`Handing off to another machine needs Tailscale: ${tailnet.reason}. ${tailnet.fix}`);
   const machineLabel = destination.machine ?? `${self} (this machine)`;
   const say = (line: string): void => { if (!parsed.json) console.log(line); };
@@ -732,7 +755,7 @@ export async function runHandoff(parsed: ParsedArgs): Promise<number> {
   say(step('git', `${state.branch} @ ${state.head.slice(0, 7)}, ${state.pushed ? `pushed to ${state.remote}` : 'NOT pushed'}${state.dirty.length ? `, ${state.dirty.length} uncommitted` : ''}`, state.pushed && !state.dirty.length));
 
   // A same-agent handoff carries the sender's own session; anything else is a fresh agent with the note.
-  const plan = await planCarry(parsed, destination);
+  const plan = openCodePlan ?? await planCarry(parsed, destination);
   const carry = 'carry' in plan ? plan.carry : undefined;
   const continuity: ContinuityReport = carry ? describeCarry(carry, !target) : { carried: false, reason: 'fresh' in plan ? plan.fresh : '' };
   const noteOnlyCommand = `runpane handoff ${quote(text || describeDestination(destination, machineLabel), senderShell)} --note-file ${quote(parsed.handoffNoteFile ?? '<note>', senderShell)} --note-only`;
@@ -774,15 +797,15 @@ export async function runHandoff(parsed: ParsedArgs): Promise<number> {
 
   // Same machine: the receiver resumes a fork, so two agents never share one session file.
   // Another machine: the session is copied into that machine's store and resumed by its own id.
-  let stamps: FileStamp[] | undefined;
+  let original: OriginalSnapshot | undefined;
   if (carry) {
     try {
       if (target) {
-        const placed = await placeSession(remote, carry.session);
+        const placed = await placeSession(remote, carry.session, repo.path);
         continuity.resumedId = carry.session.id;
         say(step('copied', `${continuity.files} file${continuity.files === 1 ? '' : 's'} of ${carry.session.agent} session ${carry.session.id} to ${placed}`));
       } else {
-        stamps = stampFiles(carry.session);
+        original = await snapshotOriginal(carry.session, state.root);
         continuity.resumedId = await forkNativeSession(carry.session, state.root);
         say(step('forked', `${carry.session.agent} session ${carry.session.id} as ${continuity.resumedId}`));
       }
@@ -876,7 +899,7 @@ export async function runHandoff(parsed: ParsedArgs): Promise<number> {
   const inspect = recovery('panels', 'screen', '--panel', receiver.panelId);
   const check = receiverStatus(receiver.paneId, receiver.panelId);
   if (carry && resumedId) {
-    return reportCarried({ parsed, result, continuity, carry, resumedId, receiver, destination: remote, stamps, say,
+    return reportCarried({ parsed, result, continuity, carry, resumedId, receiver, destination: remote, original, say,
       target: Boolean(target), notePath, noteOnlyCommand, inspect, check, branch: state.branch,
       submit: (panelId: string) => recovery('panels', 'submit', '--panel', panelId, '--text', '<message>', '--yes') });
   }
@@ -907,7 +930,7 @@ interface CarriedReport {
   resumedId: string;
   receiver: Receiver;
   destination: Destination;
-  stamps?: FileStamp[];
+  original?: OriginalSnapshot;
   target: boolean;
   notePath: string;
   noteOnlyCommand: string;
@@ -924,8 +947,8 @@ interface CarriedReport {
  * is kept and never replaced: the next step names the note route for the person to choose.
  */
 async function reportCarried(report: CarriedReport): Promise<number> {
-  const { parsed, result, continuity, carry, resumedId, receiver, destination, stamps, target, say } = report;
-  const checked = await checkReceiver({ destination, carry, resumedId, paneId: receiver.paneId, panelId: receiver.panelId, ready: receiver.ready, stamps });
+  const { parsed, result, continuity, carry, resumedId, receiver, destination, original, target, say } = report;
+  const checked = await checkReceiver({ destination, carry, resumedId, paneId: receiver.paneId, panelId: receiver.panelId, ready: receiver.ready, original });
   continuity.checks = checked.checks;
   continuity.result = checked.result;
   continuity.reason = checked.why;
@@ -1024,7 +1047,7 @@ async function handOffSession({ parsed, sessionId, destination, machines, self, 
   say(step('note sent', notePath));
   if (carry) {
     try {
-      const placed = await placeSession(await remoteDestination(target), carry.session);
+      const placed = await placeSession(await remoteDestination(target), carry.session, '~');
       continuity.resumedId = carry.session.id;
       say(step('copied', `${carry.session.agent} session ${carry.session.id} to ${placed}`));
     } catch (error) {
