@@ -42,8 +42,6 @@ type TerminalUnderTest = {
   scrollbackBuffer: string;
   alternateScreenBuffer: string;
   screenEmulator?: RemoteTerminalEmulator;
-  commandHistory: string[];
-  currentCommand: string;
   lastActivity: Date;
   lastOutputAt?: Date;
   outputGeneration: number;
@@ -174,8 +172,6 @@ function createTerminal(overrides: Partial<TerminalUnderTest> = {}): TerminalUnd
     sessionId: 'session-1',
     scrollbackBuffer: '',
     alternateScreenBuffer: '',
-    commandHistory: [],
-    currentCommand: '',
     lastActivity: new Date(),
     outputGeneration: 0,
     wslContext: null,
@@ -889,7 +885,6 @@ describe('TerminalPanelManager hidden output delivery', () => {
       alternateScreenBuffer: 'screen',
       screenEmulator,
       isAlternateScreen: true,
-      currentCommand: 'codex',
       capturedAgentSessionId: 'agent-session-1',
     });
     manager.terminals.set(terminal.panelId, terminal);
@@ -922,7 +917,6 @@ describe('TerminalPanelManager hidden output delivery', () => {
       screenText: 'agent screen',
       isAlternateScreen: true,
       activityStatus: 'idle',
-      currentCommand: 'codex',
       isCliPanel: true,
       isCliReady: true,
       agentType: 'codex',
