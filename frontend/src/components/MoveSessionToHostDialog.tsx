@@ -102,7 +102,7 @@ export function MoveSessionToHostDialog({ sessionId, onClose, onMoved }: MoveSes
         <ModalHeader title={`Move ${session?.name ?? 'Session'} to another host`} />
         <ModalBody>
           <p className="text-sm text-text-secondary">
-            Pane asks this Session's agent to hand it off with <code>runpane handoff</code>. The new Session starts from the agent's note and waits for your first message. This one stays here.
+            Pane asks this Session's agent to hand it off with <code>runpane handoff</code>. With the same agent, the new Session continues this Session's own conversation when you open it; otherwise it starts from the agent's note. This one stays here.
           </p>
           {sessionHost.kind === 'paired' && <p className="mt-3 text-sm text-text-secondary">{sessionHost.reason}</p>}
           {sessionHost.kind !== 'paired' && !targets && !error && <p className="mt-3 text-sm text-text-tertiary">Looking for your machines…</p>}
