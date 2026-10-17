@@ -55,6 +55,26 @@ describe('durable PR event delivery', () => {
     } finally { rmSync(directory, { recursive: true, force: true }); }
   });
 
+  it('reloads missing reports and blocked prompts with their output and screen lines', () => {
+    const directory = mkdtempSync(path.join(tmpdir(), 'pane-journal-'));
+    try {
+      const filePath = path.join(directory, 'journal.json');
+      const journal = new WorkspaceJournal({ filePath });
+      journal.appendPaneEntry('worker', { kind: 'agent.blocked', panelId: 'panel', source: 'agent', screenLines: ['Red or blue?', '❯ 1. Red'] });
+      journal.appendPaneEntry('worker', {
+        kind: 'agent.report.missing', panelId: 'panel', source: 'agent', reason: 'ready',
+        expectedSince: '2026-10-15T10:00:00.000Z', lastOutput: 'Opened PR #12.', lastOutputSource: 'transcript',
+      });
+      journal.dispose();
+
+      const reloaded = new WorkspaceJournal({ filePath });
+      expect(reloaded.readAfter(0, { kinds: ['agent.blocked', 'agent.report.missing'] }).entries).toEqual([
+        expect.objectContaining({ kind: 'agent.blocked', screenLines: ['Red or blue?', '❯ 1. Red'] }),
+        expect.objectContaining({ kind: 'agent.report.missing', lastOutput: 'Opened PR #12.', lastOutputSource: 'transcript', expectedSince: '2026-10-15T10:00:00.000Z' }),
+      ]);
+    } finally { rmSync(directory, { recursive: true, force: true }); }
+  });
+
   it('restores the baseline and unread events together without changing cursor identity', () => {
     const directory = mkdtempSync(path.join(tmpdir(), 'pane-journal-'));
     try {

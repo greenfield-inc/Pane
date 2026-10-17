@@ -29,9 +29,11 @@ import { assertNewBranchName } from '../services/worktreeManager';
 import { queuedSetupMessage } from '../services/taskQueue';
 import { assessComposerEvidence, hasConfiguredCodexScreen, isSlashCommandInput, looksLikePendingComposer } from './runpaneComposerEvidence';
 import { presentStoppedPanel, projectWorkspaceEntry } from '../services/workspaceJournal';
+import { SessionInbox } from '../services/sessionInbox';
+import { ExpectedReportTracker, MAX_MISSING_REPORT_OUTPUT_LENGTH, type PanelLastOutput } from '../services/expectedReports';
 import { detectAgentState } from '../services/agentStatus/manifestEngine';
 import { getManifestForAgent, CURSOR_MANIFEST } from '../services/agentStatus/manifests';
-import { detectAgentComposer, detectAgentFromScreen, screenShowsQueuedMessage } from '../services/agents/agentScreenSignature';
+import { detectAgentBackgroundWork, detectAgentComposer, detectAgentFromScreen, screenShowsQueuedMessage } from '../services/agents/agentScreenSignature';
 import { agentTranscripts, type TranscriptLocator } from '../services/agentTranscript';
 import {
   AGENT_REPORT_STATES,
@@ -39,7 +41,7 @@ import {
   normalizeAgentReport,
   readPanelAgentReport,
 } from '../services/agentReport';
-import { resolveAgentTypeFromCommand } from '../services/agents/agentIdentity';
+import { isCliAgentType, resolveAgentTypeFromCommand } from '../services/agents/agentIdentity';
 import { assertDirectOpenCodeLaunchCommand, isValidOpenCodeSessionId } from '../services/agents/opencodeLaunch';
 import {
   bracketedPaste,
@@ -57,7 +59,7 @@ import { classifyWorktree } from '../services/worktreeTrash';
 import type { CommandRunner } from '../utils/commandRunner';
 import type { Project } from '../database/models';
 import type { Session, SessionOutput } from '../types/session';
-import type { BrowserPanelState, CreatePanelRequest, EditorPanelState, TerminalAgentReport, TerminalPanelState, ToolPanel } from '../../../shared/types/panels';
+import type { BrowserPanelState, CreatePanelRequest, EditorPanelState, TerminalAgentReport, TerminalExpectedReport, TerminalPanelState, ToolPanel } from '../../../shared/types/panels';
 import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
 import { isAgentSupportedOnPlatform } from '../../../shared/constants/agentLaunchPresets';
 import { getDockTerminalPanel } from '../../../shared/utils/terminalDock';
@@ -169,6 +171,8 @@ import type {
   RunpaneWorkspaceStateResult,
   RunpaneWorkspaceWaitRequest,
   RunpaneWorkspaceWaitResult,
+  RunpaneInboxAckResult,
+  RunpaneInboxListResult,
   RunpaneSessionListResult,
   RunpaneSessionResult,
   RunpaneSessionOverviewResult,
@@ -369,6 +373,14 @@ const lockReleaseRequestSchema = boundary.object({
   sessionId: boundary.optional(boundary.nonEmptyString),
   owner: lockOwnerInputSchema,
 });
+const inboxListRequestSchema = boundary.object({
+  session: boundary.nonEmptyString,
+});
+const inboxAckRequestSchema = boundary.object({
+  ids: boundary.optional(boundary.array(boundary.string)),
+  session: boundary.optional(boundary.nonEmptyString),
+  all: boundary.optional(boundary.boolean),
+});
 const lockListRequestSchema = boundary.object({
   sessionId: boundary.optional(boundary.nonEmptyString),
 });
@@ -394,6 +406,23 @@ export function registerRunpaneHandlers(
   services.workspaceJournal = workspaceJournal;
   services.workspaceStateReader = workspaceStateReader;
   services.workspaceCursorStore = workspaceCursorStore;
+  if (!services.sessionInbox) {
+    const sessionInbox = new SessionInbox(path.join(getAppDirectory(), 'session-inbox.json'), {
+      sessionIdsFor: (paneId, panelId) => services.orchestrationSessionManager?.memberSessionIds(paneId, panelId) ?? [],
+    });
+    sessionInbox.attach(workspaceJournal);
+    services.sessionInbox = sessionInbox;
+    services.expectedReportTracker = new ExpectedReportTracker({
+      journal: workspaceJournal,
+      filePath: path.join(getAppDirectory(), 'expected-reports.json'),
+      panelExists: panelId => panelManager.getPanel(panelId) !== undefined,
+      lastReportAt: panelId => readPanelAgentReport(panelManager.getPanel(panelId))?.reportedAt,
+      lastOutput: panelId => readPanelLastOutput(panelId, sessionManager),
+      backgroundWork: readPanelBackgroundWork,
+      log: (message, error) => console.warn(message, error),
+    });
+  }
+  const sessionInbox = services.sessionInbox;
 
   commandRegistry.register('runpane:doctor', async (): Promise<RunpaneDoctorResult> => {
     return withRunpaneAction(services, 'doctor', {}, async () => {
@@ -842,6 +871,8 @@ export function registerRunpaneHandlers(
             readyTimeoutMs: normalized.readyTimeoutMs,
             activate: resolvePaneCreateActivation(normalized, item),
             associateSession: normalized.associateSession,
+            expectReport: normalized.expectReport,
+            source: normalized.source,
           });
           if (normalized.focus === true) requestHostDesktopFocus(created);
           return created;
@@ -1067,11 +1098,13 @@ export function registerRunpaneHandlers(
         throw new Error(`No Pane repo found for pane ${pane.id}`);
       }
       const tool = resolveToolSpec(normalized.tool, new PathResolver(repo).environment);
+      const since = new Date().toISOString();
       const { panel, readiness, initialInput, promptFile, warnings } = await createTerminalPanelForSession(services, pane, tool, {
         activate: resolvePanelCreateActivation(normalized, tool),
         waitReady: normalized.waitReady,
         readyTimeoutMs: normalized.readyTimeoutMs,
       });
+      const expectedReport = shouldExpectReport(normalized, Boolean(tool.initialInput)) ? armExpectedReport(services, panel.id, since) : undefined;
 
       return {
         ok: Boolean((!readiness || readiness.ok) && isInitialInputDelivered(initialInput, readiness)),
@@ -1085,6 +1118,7 @@ export function registerRunpaneHandlers(
         initialInput,
         promptFile,
         warnings,
+        expectedReport,
         nextCommand: initialInput?.nextCommand ?? readiness?.nextCommand ?? panelOutputCommand(panel.id),
       };
     }, result => ({
@@ -1342,165 +1376,177 @@ export function registerRunpaneHandlers(
         throw new Error(`Terminal panel ${panel.id} is not initialized`);
       }
       if (normalized.source === 'user') getMobilePushSender(configManager).arm(panel.id);
-
-      const blocked = (message: string): RunpanePanelSubmitResult => ({
-        ok: false, panelId: panel.id, paneId: panel.sessionId, inputBytes: 0,
-        enter: 'cr', sequenceName: 'enter-cr', verifiedSubmitted: false,
-        sentAt: new Date().toISOString(),
-        blocked: { kind: 'agent-prompt', message, suggestedCommand: panelScreenCommand(panel.id) },
-        nextCommand: panelScreenCommand(panel.id),
-      });
-      if (normalized.interrupt && !normalized.input.trim()) return blocked('An interrupt submission needs replacement text; no input was sent.');
-
-      let beforeScreen = await buildPanelScreenResult(panel, DEFAULT_PANEL_SCREEN_LIMIT);
-      const promptFile = normalized.asFilePointer
-        ? await writePromptFile(panel.sessionId, stripTrailingNewlines(normalizePromptNewlines(normalized.input)))
-        : undefined;
-      const submittedText = promptFile
-        ? filePointerPrompt(agentVisiblePath(promptFile, sessionWslContext(services, panel.sessionId)))
-        : normalized.input;
-      // A CR inside the text would be Enter to an agent composer.
-      const stagedInput = stripTrailingNewlines(normalizePromptNewlines(submittedText));
-      const agentType = screenAgentType(beforeScreen);
-      if (normalized.interrupt) {
-        const ready = (screen: RunpanePanelScreenResult): boolean =>
-          screenAgentType(screen) === agentType && screen.state.activityStatus === 'idle' &&
-          (agentType === 'cursor'
-            ? detectAgentState(CURSOR_MANIFEST, { screen: screen.text, oscTitle: '', oscProgress: '' }).visibleIdle === true &&
-              /^\s*→\s+(?:Add a follow-up|Plan, search, build anything)\s*$/imu.test(screen.text)
-            : screen.composer.isPresent && !screen.composer.hasUndeliveredText);
-        if (agentType !== 'codex' && agentType !== 'claude' && agentType !== 'cursor') {
-          return blocked('Pane cannot safely interrupt this agent: composer readiness is not supported. No input was sent.');
-        }
-        if (beforeScreen.composer.hasUndeliveredText) {
-          return blocked('The composer already contains text. Resolve it before using --interrupt; no input was sent.');
-        }
-        if (beforeScreen.state.activityStatus === 'active') {
-          terminalPanelManager.writeToTerminal(panel.id, agentType === 'cursor' ? '\x03' : '\x1b');
-          // Activity stays working for 10 seconds after the final interrupt redraw.
-          beforeScreen = await waitForPanelScreen(panel, ready, DEFAULT_PANEL_WAIT_TIMEOUT_MS);
-        }
-        if (!ready(beforeScreen)) {
-          return blocked('The agent did not reach an empty idle composer. The replacement text was not sent; inspect the screen before retrying.');
-        }
-        if (agentType === 'cursor') {
-          const generation = terminalPanelManager.getOutputGeneration(panel.id);
-          const input = ensureSubmitEnter(stagedInput);
-          terminalPanelManager.writeToTerminal(panel.id, input);
-          const screen = await waitForPanelScreen(panel, current =>
-            panelHasFreshOutputSince(panel.id, generation) &&
-            detectAgentState(CURSOR_MANIFEST, { screen: current.text, oscTitle: '', oscProgress: '' }).visibleWorking === true,
-          );
-          const taken = panelHasFreshOutputSince(panel.id, generation) &&
-            detectAgentState(CURSOR_MANIFEST, { screen: screen.text, oscTitle: '', oscProgress: '' }).visibleWorking === true;
-          return {
-            ...blocked('Pane sent the replacement, but could not verify that Cursor started it. Inspect the screen before retrying.'),
-            ok: taken, verifiedSubmitted: taken, inputBytes: Buffer.byteLength(input, 'utf8'),
-            delivery: { state: taken ? 'taken' : 'unknown', evidence: 'screen' },
-            blocked: taken ? undefined : { kind: 'submission_unverified', message: 'Pane sent the replacement but could not verify that Cursor started it. Inspect the screen before retrying.' },
-            promptFile,
-          };
-        }
-      }
-      const warnings = agentType === 'claude' ? claudePromptWarnings(stagedInput) : undefined;
-      // Claude reads text and Enter arriving in one read as a paste and keeps
-      // the Enter as a newline. Terminal readiness can precede Claude drawing
-      // its UI or reading input, so wait while it is still drawing for its
-      // composer, then for the staged text to show, before sending Enter alone.
-      // Claude draws its UI on the alternate screen, so a quiet alternate
-      // screen without a composer is a menu or picker and gets the plain
-      // write. Startup can pause for seconds before the first frame.
-      if (stagedInput.length > 0 && agentType === 'claude' && !beforeScreen.composer.isPresent) {
-        beforeScreen = await waitForPanelScreen(
-          panel,
-          screen => screen.composer.isPresent ||
-            (screen.state.isAlternateScreen === true && !panelHasOutputWithin(panel.id, CLAUDE_UI_QUIET_MS)),
-        );
-      }
-      const stagesComposer = beforeScreen.composer.isPresent && (agentType === 'claude' ||
-        agentType === 'codex');
-      if (stagedInput.length > 0 && stagesComposer && (agentType === 'claude' || agentType === 'codex')) {
-        // Claude takes a separately written Enter while it works (it queues
-        // the message), so staging never waits for it to be idle.
-        const staged = await stageComposerText(panel, agentType, stagedInput);
-        const submission = await submitComposerForPanel(panel, normalized.interrupt ? 'enter' : 'auto', {
-          cwd: sessionManager.getSession(panel.sessionId)?.worktreePath,
-          text: stagedInput,
-        });
-        return {
-          ok: normalized.interrupt ? submission.delivery?.state === 'taken' : submission.ok,
-          panelId: panel.id,
-          paneId: panel.sessionId,
-          inputBytes: staged.inputBytes + submission.inputBytes,
-          enter: submission.strategy === 'tab' ? 'tab' : 'cr',
-          sequenceName: submission.sequenceName,
-          verifiedSubmitted: submission.verifiedSubmitted,
-          verification: submission.verification,
-          delivery: submission.delivery,
-          sentAt: submission.sentAt,
-          blocked: submission.blocked,
-          promptFile,
-          warnings,
-          nextCommand: submission.nextCommand,
-        };
-      }
-
-      if (stagedInput.length > 0 && isComposerUnknown(panel, beforeScreen, agentType)) {
-        const suggestedCommand = panelScreenCommand(panel.id);
-        return {
-          ok: false,
-          panelId: panel.id,
-          paneId: panel.sessionId,
-          inputBytes: 0,
-          enter: 'cr',
-          sequenceName: 'enter-cr',
-          verifiedSubmitted: false,
-          sentAt: new Date().toISOString(),
-          blocked: {
-            kind: 'composer-unknown',
-            message: `Pane could not find the ${agentType === 'codex' ? 'Codex' : 'Claude'} composer in this panel, so it sent nothing. The agent may still be starting, or showing a view without its prompt. Check the screen, then submit again or use \`panels input\`.`,
-            suggestedCommand,
-          },
-          promptFile,
-          warnings,
-          nextCommand: suggestedCommand,
-        };
-      }
-
-      // An agent's CRs inside the text would each be an Enter; a shell keeps its bytes.
-      const input = ensureSubmitEnter(agentType === 'claude' || agentType === 'codex' ? stagedInput : submittedText);
-      // A busy Codex takes text and Enter in one write and holds the message
-      // for its next turn; its transcript or queue hint says where it went.
-      const probeBase = agentType === 'codex' && beforeScreen.composer.isPresent && stagedInput.length > 0
-        ? composerDeliveryProbe(panel, sessionManager.getSession(panel.sessionId)?.worktreePath, agentType, stagedInput)
-        : undefined;
-      const probe = probeBase ? { ...probeBase, sentAtMs: Date.now() } : undefined;
-      const outputGenerationBeforeWrite = terminalPanelManager.getOutputGeneration(panel.id);
-      terminalPanelManager.writeToTerminal(panel.id, input);
-      const verification = probe
-        ? await verifyComposerSubmitted(panel, beforeScreen, outputGenerationBeforeWrite, probe)
-        : undefined;
-
-      return {
-        ok: true,
-        panelId: panel.id,
-        paneId: panel.sessionId,
-        inputBytes: Buffer.byteLength(input, 'utf8'),
-        enter: 'cr',
-        sequenceName: 'enter-cr',
-        verifiedSubmitted: verification?.verifiedSubmitted ?? false,
-        delivery: verification?.delivery,
-        sentAt: new Date().toISOString(),
-        promptFile,
-        warnings,
-        nextCommand: panelWaitCommand(panel.id),
-      };
+      const since = new Date().toISOString();
+      const result = await submitToPanel(normalized, panel);
+      // Armed only when something was sent: a refused submission leaves no work to report on. By
+      // default only an agent's panel owes a report; a plain shell has nobody to report back. A panel
+      // launched with a command counts before Pane identifies the agent behind it (an agent-farm
+      // wrapper around Claude Code).
+      const toAgent = panelStateSummary(panel, terminalPanelManager.getTerminalSnapshot(panel.id)).agentType !== undefined
+        || panelLaunchCommand(panel) !== undefined;
+      if (result.inputBytes > 0 && shouldExpectReport(normalized, toAgent)) result.expectedReport = armExpectedReport(services, panel.id, since);
+      return result;
     }, result => ({
       paneId: result.paneId,
       panelId: result.panelId,
       inputBytes: result.inputBytes,
     }));
   });
+
+  async function submitToPanel(normalized: RunpanePanelSubmitRequest, panel: ToolPanel): Promise<RunpanePanelSubmitResult> {
+    const blocked = (message: string): RunpanePanelSubmitResult => ({
+      ok: false, panelId: panel.id, paneId: panel.sessionId, inputBytes: 0,
+      enter: 'cr', sequenceName: 'enter-cr', verifiedSubmitted: false,
+      sentAt: new Date().toISOString(),
+      blocked: { kind: 'agent-prompt', message, suggestedCommand: panelScreenCommand(panel.id) },
+      nextCommand: panelScreenCommand(panel.id),
+    });
+    if (normalized.interrupt && !normalized.input.trim()) return blocked('An interrupt submission needs replacement text; no input was sent.');
+
+    let beforeScreen = await buildPanelScreenResult(panel, DEFAULT_PANEL_SCREEN_LIMIT);
+    const promptFile = normalized.asFilePointer
+      ? await writePromptFile(panel.sessionId, stripTrailingNewlines(normalizePromptNewlines(normalized.input)))
+      : undefined;
+    const submittedText = promptFile
+      ? filePointerPrompt(agentVisiblePath(promptFile, sessionWslContext(services, panel.sessionId)))
+      : normalized.input;
+    // A CR inside the text would be Enter to an agent composer.
+    const stagedInput = stripTrailingNewlines(normalizePromptNewlines(submittedText));
+    const agentType = screenAgentType(beforeScreen);
+    if (normalized.interrupt) {
+      const ready = (screen: RunpanePanelScreenResult): boolean =>
+        screenAgentType(screen) === agentType && screen.state.activityStatus === 'idle' &&
+        (agentType === 'cursor'
+          ? detectAgentState(CURSOR_MANIFEST, { screen: screen.text, oscTitle: '', oscProgress: '' }).visibleIdle === true &&
+            /^\s*→\s+(?:Add a follow-up|Plan, search, build anything)\s*$/imu.test(screen.text)
+          : screen.composer.isPresent && !screen.composer.hasUndeliveredText);
+      if (agentType !== 'codex' && agentType !== 'claude' && agentType !== 'cursor') {
+        return blocked('Pane cannot safely interrupt this agent: composer readiness is not supported. No input was sent.');
+      }
+      if (beforeScreen.composer.hasUndeliveredText) {
+        return blocked('The composer already contains text. Resolve it before using --interrupt; no input was sent.');
+      }
+      if (beforeScreen.state.activityStatus === 'active') {
+        terminalPanelManager.writeToTerminal(panel.id, agentType === 'cursor' ? '\x03' : '\x1b');
+        // Activity stays working for 10 seconds after the final interrupt redraw.
+        beforeScreen = await waitForPanelScreen(panel, ready, DEFAULT_PANEL_WAIT_TIMEOUT_MS);
+      }
+      if (!ready(beforeScreen)) {
+        return blocked('The agent did not reach an empty idle composer. The replacement text was not sent; inspect the screen before retrying.');
+      }
+      if (agentType === 'cursor') {
+        const generation = terminalPanelManager.getOutputGeneration(panel.id);
+        const input = ensureSubmitEnter(stagedInput);
+        terminalPanelManager.writeToTerminal(panel.id, input);
+        const screen = await waitForPanelScreen(panel, current =>
+          panelHasFreshOutputSince(panel.id, generation) &&
+          detectAgentState(CURSOR_MANIFEST, { screen: current.text, oscTitle: '', oscProgress: '' }).visibleWorking === true,
+        );
+        const taken = panelHasFreshOutputSince(panel.id, generation) &&
+          detectAgentState(CURSOR_MANIFEST, { screen: screen.text, oscTitle: '', oscProgress: '' }).visibleWorking === true;
+        return {
+          ...blocked('Pane sent the replacement, but could not verify that Cursor started it. Inspect the screen before retrying.'),
+          ok: taken, verifiedSubmitted: taken, inputBytes: Buffer.byteLength(input, 'utf8'),
+          delivery: { state: taken ? 'taken' : 'unknown', evidence: 'screen' },
+          blocked: taken ? undefined : { kind: 'submission_unverified', message: 'Pane sent the replacement but could not verify that Cursor started it. Inspect the screen before retrying.' },
+          promptFile,
+        };
+      }
+    }
+    const warnings = agentType === 'claude' ? claudePromptWarnings(stagedInput) : undefined;
+    // Claude reads text and Enter arriving in one read as a paste and keeps
+    // the Enter as a newline. Terminal readiness can precede Claude drawing
+    // its UI or reading input, so wait while it is still drawing for its
+    // composer, then for the staged text to show, before sending Enter alone.
+    // Claude draws its UI on the alternate screen, so a quiet alternate
+    // screen without a composer is a menu or picker and gets the plain
+    // write. Startup can pause for seconds before the first frame.
+    if (stagedInput.length > 0 && agentType === 'claude' && !beforeScreen.composer.isPresent) {
+      beforeScreen = await waitForPanelScreen(
+        panel,
+        screen => screen.composer.isPresent ||
+          (screen.state.isAlternateScreen === true && !panelHasOutputWithin(panel.id, CLAUDE_UI_QUIET_MS)),
+      );
+    }
+    const stagesComposer = beforeScreen.composer.isPresent && (agentType === 'claude' ||
+      agentType === 'codex');
+    if (stagedInput.length > 0 && stagesComposer && (agentType === 'claude' || agentType === 'codex')) {
+      // Claude takes a separately written Enter while it works (it queues
+      // the message), so staging never waits for it to be idle.
+      const staged = await stageComposerText(panel, agentType, stagedInput);
+      const submission = await submitComposerForPanel(panel, normalized.interrupt ? 'enter' : 'auto', {
+        cwd: sessionManager.getSession(panel.sessionId)?.worktreePath,
+        text: stagedInput,
+      });
+      return {
+        ok: normalized.interrupt ? submission.delivery?.state === 'taken' : submission.ok,
+        panelId: panel.id,
+        paneId: panel.sessionId,
+        inputBytes: staged.inputBytes + submission.inputBytes,
+        enter: submission.strategy === 'tab' ? 'tab' : 'cr',
+        sequenceName: submission.sequenceName,
+        verifiedSubmitted: submission.verifiedSubmitted,
+        verification: submission.verification,
+        delivery: submission.delivery,
+        sentAt: submission.sentAt,
+        blocked: submission.blocked,
+        promptFile,
+        warnings,
+        nextCommand: submission.nextCommand,
+      };
+    }
+
+    if (stagedInput.length > 0 && isComposerUnknown(panel, beforeScreen, agentType)) {
+      const suggestedCommand = panelScreenCommand(panel.id);
+      return {
+        ok: false,
+        panelId: panel.id,
+        paneId: panel.sessionId,
+        inputBytes: 0,
+        enter: 'cr',
+        sequenceName: 'enter-cr',
+        verifiedSubmitted: false,
+        sentAt: new Date().toISOString(),
+        blocked: {
+          kind: 'composer-unknown',
+          message: `Pane could not find the ${agentType === 'codex' ? 'Codex' : 'Claude'} composer in this panel, so it sent nothing. The agent may still be starting, or showing a view without its prompt. Check the screen, then submit again or use \`panels input\`.`,
+          suggestedCommand,
+        },
+        promptFile,
+        warnings,
+        nextCommand: suggestedCommand,
+      };
+    }
+
+    // An agent's CRs inside the text would each be an Enter; a shell keeps its bytes.
+    const input = ensureSubmitEnter(agentType === 'claude' || agentType === 'codex' ? stagedInput : submittedText);
+    // A busy Codex takes text and Enter in one write and holds the message
+    // for its next turn; its transcript or queue hint says where it went.
+    const probeBase = agentType === 'codex' && beforeScreen.composer.isPresent && stagedInput.length > 0
+      ? composerDeliveryProbe(panel, sessionManager.getSession(panel.sessionId)?.worktreePath, agentType, stagedInput)
+      : undefined;
+    const probe = probeBase ? { ...probeBase, sentAtMs: Date.now() } : undefined;
+    const outputGenerationBeforeWrite = terminalPanelManager.getOutputGeneration(panel.id);
+    terminalPanelManager.writeToTerminal(panel.id, input);
+    const verification = probe
+      ? await verifyComposerSubmitted(panel, beforeScreen, outputGenerationBeforeWrite, probe)
+      : undefined;
+
+    return {
+      ok: true,
+      panelId: panel.id,
+      paneId: panel.sessionId,
+      inputBytes: Buffer.byteLength(input, 'utf8'),
+      enter: 'cr',
+      sequenceName: 'enter-cr',
+      verifiedSubmitted: verification?.verifiedSubmitted ?? false,
+      delivery: verification?.delivery,
+      sentAt: new Date().toISOString(),
+      promptFile,
+      warnings,
+      nextCommand: panelWaitCommand(panel.id),
+    };
+  }
 
   commandRegistry.register('runpane:panels:submit-composer', async (request: PaneCommandValue): Promise<RunpanePanelSubmitComposerResult> => {
     return withRunpaneAction(services, 'panels:submit-composer', {}, async () => {
@@ -1585,6 +1631,30 @@ export function registerRunpaneHandlers(
       return { ok: true, ...monitor.watch(input.paneId, input.url, input.head) };
     });
   }
+
+  commandRegistry.register('runpane:inbox:list', async (request: PaneCommandValue): Promise<RunpaneInboxListResult> => {
+    return withRunpaneAction(services, 'inbox:list', {}, async () => {
+      const { session } = decodeBoundary(request, inboxListRequestSchema);
+      const record = await requireOrchestrationSessionManager(services).get({ sessionId: session });
+      return { ok: true, session: { id: record.id, name: record.name }, items: sessionInbox.list(record.id) };
+    }, result => ({ resultCount: result.items.length }));
+  });
+
+  commandRegistry.register('runpane:inbox:ack', async (request: PaneCommandValue): Promise<RunpaneInboxAckResult> => {
+    return withRunpaneAction(services, 'inbox:ack', {}, async () => {
+      const normalized = decodeBoundary(request, inboxAckRequestSchema);
+      const sessionId = normalized.session
+        ? (await requireOrchestrationSessionManager(services).get({ sessionId: normalized.session })).id
+        : undefined;
+      if (normalized.all) {
+        if (!sessionId) throw new Error('Clearing every inbox item needs a Session: pass session with all.');
+        return { ok: true, acknowledged: sessionInbox.ackAll(sessionId), unknown: [] };
+      }
+      const ids = normalized.ids?.map(id => id.trim()).filter(Boolean) ?? [];
+      if (ids.length === 0) throw new Error('Name the inbox items to clear (ids), or pass all with a session.');
+      return { ok: true, ...sessionInbox.ack(ids, sessionId) };
+    }, result => ({ resultCount: result.acknowledged.length }));
+  });
 
   commandRegistry.register('runpane:workspace:state', async (request: PaneCommandValue = {}): Promise<RunpaneWorkspaceStateResult> => {
     return withRunpaneAction(services, 'workspace:state', {}, () => {
@@ -1968,6 +2038,45 @@ async function storePanelAgentReport(panel: ToolPanel, report: TerminalAgentRepo
   });
 }
 
+/** What a panel's agent still runs in the background, read from its live screen. */
+function readPanelBackgroundWork(panelId: string): string | undefined {
+  const panel = panelManager.getPanel(panelId);
+  const snapshot = terminalPanelManager.getTerminalSnapshot(panelId);
+  if (!panel || !snapshot?.screenText) return undefined;
+  const agentType = panelStateSummary(panel, snapshot).agentType;
+  return detectAgentBackgroundWork(snapshot.screenText, isCliAgentType(agentType) ? agentType : undefined);
+}
+
+/** At most this many screen lines stand in for an agent's last reply. */
+const LAST_OUTPUT_SCREEN_LINES = 20;
+
+/** What an agent said last: its transcript reply, or else the bottom of its screen. */
+async function readPanelLastOutput(panelId: string, sessionManager: AppServices['sessionManager']): Promise<PanelLastOutput | undefined> {
+  const panel = panelManager.getPanel(panelId);
+  if (!panel) return undefined;
+  const message = await readPanelLastMessage(panel, sessionManager.getSession(panel.sessionId)?.worktreePath, MAX_MISSING_REPORT_OUTPUT_LENGTH);
+  if (message.ok) return { text: message.text, source: 'transcript' };
+  const screenText = terminalPanelManager.getTerminalSnapshot(panelId)?.screenText;
+  if (!screenText) return undefined;
+  const lines = screenText.split('\n').map(line => line.trimEnd()).filter(line => line.trim().length > 0);
+  return { text: lines.slice(-LAST_OUTPUT_SCREEN_LINES).join('\n'), source: 'screen' };
+}
+
+/**
+ * Whether the sender of a panel's work waits for a `runpane report`. `--expect-report` and
+ * `--no-expect-report` decide it; otherwise work sent through runpane expects a report unless a
+ * person sent it (`source: 'user'`, as Pane's own UI does). Typing into a tab never reaches here.
+ */
+function shouldExpectReport(request: { expectReport?: boolean; source?: 'user' | 'agent' }, carriesWork: boolean): boolean {
+  if (request.expectReport !== undefined) return request.expectReport;
+  return carriesWork && request.source !== 'user';
+}
+
+/** Records that the sender of a panel's work waits for a `runpane report` from it. */
+function armExpectedReport(services: AppServices, panelId: string, since: string): TerminalExpectedReport | undefined {
+  return services.expectedReportTracker?.arm(panelId, since);
+}
+
 /**
  * The agent's last reply from its transcript, bounded to `limit` characters (the tail is kept).
  * Without a transcript this reports `transcript-unavailable`; it never falls back to the screen.
@@ -2011,6 +2120,8 @@ interface PaneCreateItemOptions {
   readyTimeoutMs?: number;
   activate?: boolean;
   associateSession?: string;
+  expectReport?: boolean;
+  source?: 'user' | 'agent';
 }
 
 interface TerminalPanelCreateOptions {
@@ -2599,7 +2710,11 @@ async function createPaneItem(
     const setupPosition = taskQueue.setupQueuePosition(session.id);
     if (setupPosition !== undefined) {
       void taskQueue.waitForSetup(session.id)
-        .then(() => createTerminalPanelForSession(services, session, tool, { activate: options.activate }))
+        .then(async () => {
+          const since = new Date().toISOString();
+          const { panel } = await createTerminalPanelForSession(services, session, tool, { activate: options.activate });
+          if (shouldExpectReport(options, Boolean(tool.initialInput))) armExpectedReport(services, panel.id, since);
+        })
         .catch(error => console.error(`[Runpane] Pane ${session.id} did not launch after queued setup:`, error));
       return {
         ok: true,
@@ -2621,11 +2736,13 @@ async function createPaneItem(
     }
     await taskQueue.waitForSetup(session.id, Math.max(0, createDeadline - Date.now()));
 
+    const since = new Date().toISOString();
     const { panel, readiness, initialInput, promptFile, warnings } = await createTerminalPanelForSession(services, session, tool, {
       activate: options.activate,
       waitReady: options.waitReady,
       readyTimeoutMs: options.readyTimeoutMs,
     });
+    const expectedReport = shouldExpectReport(options, Boolean(tool.initialInput)) ? armExpectedReport(services, panel.id, since) : undefined;
 
     const itemOk = Boolean((!readiness || readiness.ok) && isInitialInputDelivered(initialInput, readiness));
     return {
@@ -2647,6 +2764,7 @@ async function createPaneItem(
       promptFile,
       warnings,
       base: sessionResult.base,
+      expectedReport,
     };
   } catch (error) {
     // Two creates for one branch can both pass the early check; name the Pane that won.
@@ -4122,6 +4240,7 @@ const workspaceEntryKindSchema = boundary.enumeration(
   'github.unavailable',
   'github.recovered',
   'agent.report',
+  'agent.report.missing',
 );
 
 function parseWorkspaceKinds(value: PaneCommandValue): RunpaneWorkspaceEntryKind[] | undefined {
@@ -4185,6 +4304,7 @@ function parsePaneCreateRequest(value: PaneCommandValue): RunpanePaneCreateReque
     focus: optionalBoolean(value.focus),
     source: value.source === 'user' || value.source === 'agent' ? value.source : undefined,
     associateSession: optionalString(value.associateSession)?.trim() || undefined,
+    expectReport: optionalBoolean(value.expectReport),
   };
 }
 
@@ -4390,6 +4510,7 @@ function parsePanelCreateRequest(value: PaneCommandValue): RunpanePanelCreateReq
     source: value.source === 'user' || value.source === 'agent' ? value.source : undefined,
     waitReady: optionalBoolean(value.waitReady),
     readyTimeoutMs: parsePositiveInteger(value.readyTimeoutMs, 'readyTimeoutMs'),
+    expectReport: optionalBoolean(value.expectReport),
   };
 }
 
@@ -4642,6 +4763,7 @@ function parsePanelSubmitRequest(value: PaneCommandValue): RunpanePanelSubmitReq
     interrupt: optionalBoolean(value.interrupt),
     asFilePointer: optionalBoolean(value.asFilePointer),
     source: value.source === 'user' || value.source === 'agent' ? value.source : undefined,
+    expectReport: optionalBoolean(value.expectReport),
   };
 }
 

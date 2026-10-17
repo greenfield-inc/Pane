@@ -268,6 +268,36 @@ export const CODEX_MANIFEST: AgentManifest = {
         { contains: ['enter continue', 'esc quit'] },
       ],
     },
+    // Full-screen startup prompts that hold the composer back. Each is live only while its footer
+    // is the last thing on screen, and each has its own id so the next one reads as a new question.
+    {
+      id: 'update_prompt',
+      state: 'blocked',
+      priority: 1000,
+      region: 'whole_recent',
+      visibleBlocker: true,
+      contains: ['update available', 'skip until next version'],
+      regex: [/enter continue · esc skip\s*$/i],
+    },
+    {
+      id: 'sign_in_prompt',
+      state: 'blocked',
+      priority: 1000,
+      region: 'whole_recent',
+      visibleBlocker: true,
+      contains: ['sign in with chatgpt'],
+      regex: [/press enter to continue\s*$/i],
+    },
+    {
+      // Folder trust since 0.160 ("esc back"); the 0.156 footer is in live_strong_blocker.
+      id: 'folder_trust_prompt',
+      state: 'blocked',
+      priority: 1000,
+      region: 'whole_recent',
+      visibleBlocker: true,
+      contains: ['trust this folder?'],
+      regex: [/enter continue · esc (?:back|quit)\s*$/i],
+    },
     {
       id: 'weak_blocker',
       state: 'blocked',

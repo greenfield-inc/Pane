@@ -817,7 +817,112 @@ process exits (Claude Code background Bash, Codex), waits for a report with
 `runpane watch --pane <pane-id> --as <name> --until-event --json --kinds
 agent.report,agent.blocked,panel.exited,pane.gone`, run as a background task and run again after each
 event. `--until-event` exits 0 on the first event; a `RESET` and the caller's
-own panel never end the wait.
+own panel never end the wait. Add `agent.report.missing` to `--kinds` to
+wake on a MISSING REPORT too.
+
+### Dispatching with `--wait`
+
+An orchestrator dispatches a worker with one background tool call that
+returns the worker's result:
+
+```text
+runpane panels submit --panel <panel-id> --input-file <prompt-file> --as-file-pointer --wait --yes
+```
+
+`panels create` and `panes create` with a prompt take `--wait` too. `--wait`
+turns the expected report on and blocks on that panel until the first
+`agent.report`, `agent.report.missing`, `agent.blocked`, `panel.exited`, or
+`pane.gone`. It then prints one line of JSON (`dispatchWaitResult` in the
+contract) and exits:
+
+| `outcome` | Exit | Carries |
+| --- | --- | --- |
+| `report` | 0 | `report`: state, summary, `summaryPath`, PR, head, question |
+| `missing` | 3 | `lastOutput` and `lastOutputSource` |
+| `blocked` | 4 | `screenLines`, the prompt the worker waits on |
+| `exited`, `gone` | 5 | `exitCode` or `reason` |
+| `timeout` | 124 | after `--timeout <duration>` (`30m`, `2h`) |
+
+The result never includes the transcript. The daemon stamps the result of
+every create and submit with the journal generation it read before delivering
+the work, and `--wait` follows the journal from there
+(`runpane:workspace:wait` filtered to the Pane), so an event that fires right
+after delivery can't be missed, and a daemon restart only reconnects. Like
+`--until-event`, it is a single-event wait: it delivers at once, without
+`--follow`'s settling or batching, and since it exits on the event, a plain
+background task is enough (no line-delivering monitor). Claude
+Code wakes the orchestrator when the background call exits, and the line
+arrives as the tool result. To answer a blocked worker, send the answer with
+another `panels submit --wait`, which takes a new position and arms a new
+expectation.
+
+### Expected reports
+
+Work sent to an agent through runpane expects a `runpane report` back: a
+`panels submit` to an agent's panel, and a `panels create` or `panes create`
+that carries a prompt. A request marked `--source user` (Pane's own UI marks
+its sends that way) expects none, and neither does typing into a tab, which
+never goes through runpane. `--no-expect-report` sends fire-and-forget input;
+`--expect-report` asks for a report anyway, also from a plain shell panel.
+`shouldExpectReport()` in `main/src/ipc/runpane.ts` holds the rule. Pane saves `{ since }` per panel in `expected-reports.json` below `PANE_DIR`
+(results echo it as `expectedReport`); only the tracker writes that file, so
+panel-state writes cannot bring back a cleared expectation. When the agent then goes ready (`agent.ready`)
+or its panel exits without a report made at or after `since`, Pane journals
+one `agent.report.missing` entry (`MISSING REPORT <pane-name> pane <pane-id>
+panel <panel-id> ready|exited`) and clears the expectation. The entry's
+`lastOutput` is the agent's last reply from its transcript, or else the last
+20 lines on its screen (`lastOutputSource: transcript|screen`), cut to 2,000
+characters with the end kept. A report clears the expectation.
+
+An agent can end its turn while work it started keeps running. Pane reads
+that from the screen: Claude Code counts running background shells in its
+footer (`⏵⏵ bypass permissions on · 1 shell`) and lists each running
+background subagent under it (`◯ general-purpose  <task>  14s`); Codex prints
+`1 background terminal running · /ps to view` above its prompt
+(`detectAgentBackgroundWork()` in `agentScreenSignature.ts`). While one shows,
+a READY does not raise the missing report. Claude takes a new turn when the
+work finishes, and that turn's READY decides. Codex doesn't, so Pane looks at
+the screen again every 10 seconds while the panel stays ready, and raises
+once nothing runs. An exit raises at once.
+
+Like
+`agent.report`, the kind reaches only watchers that list it in `--kinds` (a
+Session scope alone does not deliver it), and it skips the `--min-interval`
+batch. The tracker is `main/src/services/expectedReports.ts`.
+
+### Questions on screen
+
+Pane's status detection (`main/src/services/agentStatus/manifests.ts`)
+classifies a panel as blocked when its screen shows a live prompt waiting on
+input: Claude's AskUserQuestion picker, permission prompts, folder trust, the
+"Allow external CLAUDE.md file imports?" dialog, and Codex's folder-trust,
+sign-in, approval and "Update available" screens. The journal records
+`agent.blocked` only once a panel has stayed blocked for 2 seconds
+(`BLOCKED_DEBOUNCE_MS` in `workspaceJournal.ts`), so a prompt-like line that
+flashes past in normal output never becomes BLOCKED. The entry carries
+`screenLines`: up to 20 non-empty lines of the screen region the prompt was
+matched in. The agent does not need to report anything for this.
+
+### Session inbox
+
+Pane keeps, per Session, what its orchestrator has not acknowledged:
+reports (`agent.report`), missing reports (`agent.report.missing`), and
+questions on screen (`agent.blocked`, with `screenLines`). It is fed from the
+journal for every Pane associated with the Session (`main/src/services/sessionInbox.ts`)
+and saved in `session-inbox.json` below `PANE_DIR`, so a dead or never-armed
+watcher cannot hide a finished worker. A newer report replaces the panel's
+older report or missing report; a blocked item goes once its panel moves on
+(busy, ready, exited, or reported). Each Session keeps at most 200 items.
+
+```text
+runpane inbox --session <id|name> [--json]       # defaults to $PANE_ORCHESTRATION_SESSION_ID
+runpane inbox ack <item-id>... [--session <id|name>]
+runpane inbox ack --all --session <id|name>
+```
+
+An orchestrator runs `runpane inbox` when it starts or resumes, to catch what
+finished while it was down. Pane never adds the inbox to the orchestrator's
+turns: worker output reaches it only as the result of a tool call it made.
 
 ## Skill contract
 

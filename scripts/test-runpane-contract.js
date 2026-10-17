@@ -216,6 +216,8 @@ print(json.dumps([effective_watch_heartbeat_ms(180), effective_watch_heartbeat_m
       { source: 'agent', report: { state: 'blocked', question: `Which API\nversion? ${'x'.repeat(400)}`, reportedAt: 'T' } },
     ],
     ['agent.report', 'REPORT Issue 538 pane pane-1 panel panel-1 done', { source: 'agent', report: { state: 'done', reportedAt: 'T' } }],
+    ['agent.report.missing', 'MISSING REPORT Issue 538 pane pane-1 panel panel-1 ready', { source: 'agent', reason: 'ready', lastOutput: 'Done.' }],
+    ['agent.report.missing', 'MISSING REPORT Issue 538 pane pane-1 panel panel-1 exited', { source: 'agent', reason: 'exited' }],
   ];
   for (const [kind, line, extra = {}] of expected) {
     assert.deepStrictEqual(
@@ -851,6 +853,69 @@ function scriptedWatch(responses, requests) {
   };
 }
 
+/** `panels submit --wait`: deliver, then follow the journal from the daemon's pre-delivery position, on that panel only. */
+async function checkDispatchWait() {
+  const submitted = {
+    ok: true, generation: 10, panelId: 'panel-2', paneId: 'pane-1', inputBytes: 7, enter: 'cr', sequenceName: 'enter-cr',
+    verifiedSubmitted: true, sentAt: '2026-10-16T19:00:00.000Z', expectedReport: { since: '2026-10-16T19:00:00.000Z' },
+  };
+  const at = '2026-10-16T19:01:00.000Z';
+  const otherPanel = { gen: 11, at, kind: 'agent.blocked', paneId: 'pane-1', paneName: 'Worker', panelId: 'panel-9', source: 'agent', screenLines: ['Allow?'] };
+  const missing = {
+    gen: 12, at, kind: 'agent.report.missing', paneId: 'pane-1', paneName: 'Worker', panelId: 'panel-2', source: 'agent',
+    reason: 'ready', lastOutput: 'DONE', lastOutputSource: 'transcript', expectedSince: submitted.expectedReport.since,
+  };
+  const report = { ...reportEntry(12, 'panel-2'), report: { state: 'done', pr: 7, head: 'abc1234', summary: 'Shipped.', summaryPath: '/tmp/s.md', reportedAt: at } };
+  const dispatch = ['panels', 'submit', '--panel', 'panel-2', '--text', 'ship it', '--wait', '--yes'];
+  for (const runtime of ['npm', 'pip']) {
+    const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), `runpane-dispatch-${runtime}-`));
+    try {
+      const daemon = (waits, requests) => (frame) => {
+        requests.push({ channel: frame.channel, ...frame.args[0] });
+        if (frame.channel === 'runpane:panels:submit') return { result: submitted };
+        const index = requests.filter(request => request.channel === 'runpane:workspace:wait').length;
+        return waits[Math.min(index, waits.length) - 1];
+      };
+
+      let requests = [];
+      let run = await withFakeDaemon(paneDir, daemon([
+        { result: { ...watchResult(11), timedOut: false, entries: [otherPanel] } },
+        { result: { ...watchResult(12), timedOut: false, entries: [missing] }, delayMs: 100 },
+      ], requests), () => runCliOnce(runtime, dispatch, paneDir));
+      assert.strictEqual(run.code, 3, `${runtime} --wait exits 3 for a missing report. stdout=${run.stdout} stderr=${run.stderr}`);
+      assert.deepStrictEqual(JSON.parse(run.stdout), {
+        ok: false, outcome: 'missing', paneId: 'pane-1', paneName: 'Worker', generation: 12, at, panelId: 'panel-2',
+        lastOutput: 'DONE', lastOutputSource: 'transcript', reason: 'ready',
+      }, `${runtime} prints one compact line and skips another panel's prompt`);
+      assert.strictEqual(lf(run.stdout).split('\n').filter(Boolean).length, 1);
+      assert.strictEqual(requests[0].expectReport, true, `${runtime} --wait turns the expected report on`);
+      const waits = requests.filter(request => request.channel === 'runpane:workspace:wait');
+      assert.deepStrictEqual(waits.map(request => request.since), [10, 11], `${runtime} follows from the pre-delivery generation`);
+      assert.deepStrictEqual(waits[0].paneIds, ['pane-1']);
+      assert.deepStrictEqual(waits[0].kinds, ['agent.report', 'agent.report.missing', 'agent.blocked', 'panel.exited', 'pane.gone']);
+
+      requests = [];
+      run = await withFakeDaemon(paneDir, daemon([{ result: { ...watchResult(12), timedOut: false, entries: [report] } }], requests),
+        () => runCliOnce(runtime, dispatch, paneDir));
+      assert.strictEqual(run.code, 0, `${runtime} --wait exits 0 for a report. stderr=${run.stderr}`);
+      assert.deepStrictEqual(JSON.parse(run.stdout).report, { state: 'done', pr: 7, head: 'abc1234', summary: 'Shipped.', summaryPath: '/tmp/s.md' });
+
+      requests = [];
+      run = await withFakeDaemon(paneDir, daemon([{ result: { ...watchResult(10), timedOut: true }, delayMs: 50 }], requests),
+        () => runCliOnce(runtime, [...dispatch, '--timeout', '1s'], paneDir));
+      assert.strictEqual(run.code, 124, `${runtime} --wait --timeout exits 124. stdout=${run.stdout} stderr=${run.stderr}`);
+      assert.strictEqual(JSON.parse(run.stdout).outcome, 'timeout');
+
+      for (const args of [[...dispatch, '--no-expect-report'], ['panels', 'submit', '--panel', 'panel-2', '--text', 'x', '--timeout', '1s', '--yes']]) {
+        run = await runCliOnce(runtime, args, paneDir);
+        assert.notStrictEqual(run.code, 0, `${runtime} refuses ${args.slice(-2).join(' ')}`);
+      }
+    } finally {
+      fs.rmSync(paneDir, { recursive: true, force: true });
+    }
+  }
+}
+
 async function checkWatchUntilEvent() {
   const quietJson = ['watch', '--as', 'orch', '--until-event', '--json', '--kinds', 'agent.report'];
   for (const runtime of ['npm', 'pip']) {
@@ -1076,6 +1141,7 @@ const PARSER_DEFAULT_DIFFERENCES = {
   watchKinds: [], watchPaneIds: [], watchExcludePaneIds: [],
   asFilePointer: false, interrupt: false, noAssociate: false, removeWorktree: false, merged: false,
   quiet: false, readOnly: false, launch: false,
+  all: false, inboxIds: [], waitForResult: false,
 };
 
 function normalizeParsedArgs(value) {
@@ -4573,6 +4639,7 @@ async function runChecks() {
   checkWatchFormatterGoldens();
   await checkWatchStreamParity();
   await checkWatchUntilEvent();
+  await checkDispatchWait();
   checkPythonWatchReaderClosedErrnos();
   compareLegacyRemoteDaemonHealthParity();
   compareDaemonRepairJsonParity();

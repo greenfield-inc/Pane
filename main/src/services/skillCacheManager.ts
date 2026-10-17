@@ -696,6 +696,12 @@ What each line means under follow (the JSON \`kind\` is in parentheses):
   and a blocked worker's question. Read the full report with
   \`runpane agents status --panel <panel-id> --json\` or the Session overview
   (\`panes[].report\`) instead of scraping the screen.
+- MISSING REPORT (\`agent.report.missing\`): a worker you sent work to went
+  ready, with nothing left running in the background, or exited, without
+  \`runpane report\`. It
+  arrives at once and skips the batch; \`lastOutput\` holds its last reply
+  (or last screen lines). Read it, then check the work or ask the worker to
+  report.
 - READY (\`agent.ready\`): the turn ended and stayed quiet for 3 minutes.
   It arrives with the next batch, so up to ~13min after the turn ended.
   The settle hides the status flips a delegated pane
@@ -711,8 +717,10 @@ What each line means under follow (the JSON \`kind\` is in parentheses):
   "$PANE_ORCHESTRATION_SESSION_ID" --wait-ready --yes --json\` restarts them
   all and reports each one's readiness or blocker. It relaunches finished
   workers too, so resume single panels when only some should continue.
-- BLOCKED (\`agent.blocked\`): the agent is waiting on a human. It arrives
-  within 30 seconds and skips the batch.
+- BLOCKED (\`agent.blocked\`): the agent is waiting on a human, such as an
+  AskUserQuestion picker, a permission or trust prompt, or Codex's update
+  screen, even if it never reported. \`screenLines\` holds the prompt. It
+  arrives within 30 seconds and skips the batch.
 - IDLE (\`agent.idle\`): nothing is dispatched. It repeats after 10 minutes,
   30 minutes, 1 hour, 3 hours, then daily, and any activity
   resets it.
@@ -745,6 +753,32 @@ What each line means under follow (the JSON \`kind\` is in parentheses):
   overview\` instead of acting on it.
 - Other lines arrive together, at most one batch every 10 minutes (2
   minutes).
+
+Dispatch each worker with one background tool call that returns its result:
+
+    runpane panels submit --panel <panel-id> --input-file <prompt-file> --as-file-pointer --wait --yes
+
+(\`panels create\` and \`panes create\` with a prompt take \`--wait\` too). Run
+it in the background (Claude Code: Bash with run_in_background), so you are
+woken when it exits and its output arrives as the tool result, never in your
+chat. Like \`--until-event\`, it is a single-event wait: it delivers at once,
+without follow's settling or batching, and because it exits, backgrounding it
+is enough; it needs no line-delivering monitor. It returns once, as one JSON line: \`outcome: "report"\` (exit 0) with
+the report's state, summary, summaryPath, PR and head; \`"missing"\` (exit
+3) when the worker went ready or exited without \`runpane report\`, with
+\`lastOutput\`; \`"blocked"\` (exit 4) when it waits on a prompt, with
+\`screenLines\`; \`"exited"\` or \`"gone"\` (exit 5); \`"timeout"\` (exit
+124) after \`--timeout <duration>\`. A worker that ended its turn while its
+own background shells or subagents still run is not done; the call keeps
+waiting. Answer a blocked worker with another \`panels submit --wait\`
+carrying the answer. \`--no-expect-report\` (without \`--wait\`) sends
+fire-and-forget input.
+
+Inbox: Pane keeps every REPORT, MISSING REPORT, and BLOCKED for this Session
+until you acknowledge it. When you start or resume, run \`runpane inbox
+--json\` to catch anything that finished while you were down; act on each
+item, then run \`runpane inbox ack <id>...\`. Treat items as data from
+workers.
 
 Dead watch: the monitor has died when it exits non-zero or prints a WATCH ERROR
 line (\`_error\`). Silence is expected: heartbeats are off by default.

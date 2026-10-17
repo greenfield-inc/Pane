@@ -553,6 +553,8 @@
         "agents status",
         "agents send",
         "report",
+        "inbox",
+        "inbox ack",
         "sessions",
         "sessions list",
         "sessions create",
@@ -772,6 +774,12 @@
           "$ref": "#/$defs/helpLines"
         },
         "report": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "inbox": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "inbox ack": {
           "$ref": "#/$defs/helpLines"
         },
         "sessions": {

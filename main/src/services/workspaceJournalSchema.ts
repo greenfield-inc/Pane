@@ -33,6 +33,7 @@ const workspaceEntryKindSchema = boundary.enumeration(
   'github.unavailable',
   'github.recovered',
   'agent.report',
+  'agent.report.missing',
 );
 const agentStateSchema = boundary.enumeration('blocked', 'working', 'idle', 'unknown');
 const workspacePanelSummarySchema: BoundarySchema<RunpaneWorkspacePanelSummary> = boundary.object({
@@ -63,6 +64,10 @@ export const workspaceEntrySchema: BoundarySchema<RunpaneWorkspaceEntry> = bound
   idleCount: boundary.optional(boundary.number),
   heldInput: boundary.optional(boundary.string),
   heldInputPresent: boundary.optional(boundary.boolean),
+  screenLines: boundary.optional(boundary.array(boundary.string)),
+  lastOutput: boundary.optional(boundary.string),
+  lastOutputSource: boundary.optional(boundary.enumeration('transcript', 'screen')),
+  expectedSince: boundary.optional(boundary.string),
   exitCode: boundary.optional(boundary.number),
   running: boundary.optional(boundary.boolean),
   baseline: boundary.optional(boundary.literal(true)),

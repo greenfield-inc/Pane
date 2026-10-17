@@ -571,6 +571,18 @@ export class OrchestrationSessionManager extends EventEmitter {
   }
 
   /**
+   * The Sessions a panel works for: those associated with its Pane, for every panel or this one.
+   * A Session's own orchestrator Pane never counts. Reads the in-memory store without the lock.
+   */
+  memberSessionIds(paneId: string, panelId: string): string[] {
+    return this.store.read().sessions
+      .filter(record => record.internalSessionId !== paneId && !Object.values(record.panelIds).includes(panelId))
+      .filter(record => record.associations.some(association => association.paneId === paneId
+        && (association.panelIds.length === 0 || association.panelIds.includes(panelId))))
+      .map(record => record.id);
+  }
+
+  /**
    * Panes associated with a Session that is not archived, for the Session PR monitor. Reads the
    * in-memory store without taking the Session lock, like `workspaceMembership`.
    */

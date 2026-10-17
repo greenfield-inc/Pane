@@ -33,6 +33,12 @@ export type TerminalAgentDetection = 'declared' | 'command' | 'process' | 'scree
 /** What a worker says about its task when it runs `runpane report`. */
 export type TerminalAgentReportState = 'ready' | 'blocked' | 'failed' | 'done';
 
+/** A report the sender of a panel's work is waiting for (`--expect-report`); kept in `expected-reports.json`. */
+export interface TerminalExpectedReport {
+  /** When the work was sent; a report at or after this time fulfils it. */
+  since: string;
+}
+
 /** The latest `runpane report` from an agent panel, kept in its custom state so it survives restarts. */
 export interface TerminalAgentReport {
   state: TerminalAgentReportState;

@@ -15,7 +15,7 @@ import type { Project } from '../database/models';
 import type { Session } from '../types/session';
 import type { AppServices } from './types';
 import type { CreatePanelRequest, TerminalPanelState, ToolPanel } from '../../../shared/types/panels';
-import type { RunpanePaneListResult, RunpanePanelListResult, RunpaneToolSpec } from '../../../shared/types/runpaneOrchestration';
+import type { RunpaneCommandToolSpec, RunpanePaneListResult, RunpanePanelListResult, RunpaneToolSpec } from '../../../shared/types/runpaneOrchestration';
 import type { OrchestrationSessionCreateInput } from '../../../shared/types/orchestrationSession';
 
 import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
@@ -2536,6 +2536,34 @@ describe('runpane IPC handlers', () => {
       }],
     });
     expect(terminalPanelManager.isTerminalInitialized).toHaveBeenCalledWith(terminalPanel.id);
+  });
+
+  it('expects a report by default from an agent-farm panel given a prompt, and not from a person\'s', async () => {
+    const farmPanel: ToolPanel = {
+      ...terminalPanel,
+      id: 'panel-farm',
+      title: 'agent-farm',
+      state: { isActive: false, customState: { initialCommand: 'agent-farm run bigbrain/implementer:opus', isCliPanel: false } },
+    };
+    vi.mocked(panelManager.createPanel).mockResolvedValue(farmPanel);
+    const services = createServices({ workspaceJournal: new WorkspaceJournal() });
+    const registry = createRegistry(services);
+    const create = (extra: Record<string, string | boolean>, initialInput?: string) => {
+      // No --agent: Pane learns it is Claude Code only once it sees it behind the wrapper.
+      const tool: RunpaneCommandToolSpec = { command: 'agent-farm run bigbrain/implementer:opus' };
+      if (initialInput) tool.initialInput = initialInput;
+      return registry.invoke('runpane:panels:create', [{ paneId: session.id, tool, noFocus: true, ...extra }]);
+    };
+
+    const dispatched = await create({}, 'Implement P-1, then run runpane report.');
+    expect(dispatched.expectedReport).toEqual({ since: expect.any(String) });
+    expect(services.expectedReportTracker?.expectation('panel-farm')).toEqual(dispatched.expectedReport);
+    // Expectations are saved under PANE_DIR, which the tests in this file share.
+    services.workspaceJournal?.appendPaneEntry(session.id, { kind: 'agent.report', panelId: 'panel-farm', source: 'agent' });
+
+    expect((await create({ source: 'user' }, 'Have a look.')).expectedReport).toBeUndefined();
+    expect((await create({})).expectedReport).toBeUndefined();
+    expect(services.expectedReportTracker?.expectation('panel-farm')).toBeUndefined();
   });
 
   it('creates a background terminal panel inside an existing pane', async () => {
@@ -7099,6 +7127,95 @@ describe('runpane IPC handlers', () => {
         entries: [{ kind: 'agent.report', panelId: terminalPanel.id, report: { state: 'blocked', question: 'q' } }],
       });
       await expect(otherKinds).resolves.toMatchObject({ timedOut: true, entries: [] });
+    });
+
+    it('expects a report for work sent to an agent unless a person sent it or the sender opted out', async () => {
+      vi.mocked(terminalPanelManager.getForegroundProcess).mockReturnValue({ name: 'zsh', isShell: true });
+      const services = createServices({ workspaceJournal: new WorkspaceJournal() });
+      const registry = createRegistry(services);
+      const submit = async (request: Record<string, string | boolean>) => {
+        stored = structuredClone(terminalPanel);
+        services.expectedReportTracker?.arm(terminalPanel.id, 'stale');
+        services.workspaceJournal?.appendPaneEntry(session.id, { kind: 'agent.report', panelId: terminalPanel.id, source: 'agent' });
+        const result = await registry.invoke('runpane:panels:submit', [{ panelId: terminalPanel.id, input: 'ship it', ...request }]);
+        return { result, expectation: services.expectedReportTracker?.expectation(terminalPanel.id) };
+      };
+
+      const byDefault = await submit({});
+      expect(byDefault.result.expectedReport).toEqual({ since: expect.any(String) });
+      expect(byDefault.expectation).toEqual(byDefault.result.expectedReport);
+      expect((await submit({ source: 'agent' })).expectation).toEqual({ since: expect.any(String) });
+      for (const optedOut of [{ source: 'user' }, { expectReport: false }]) {
+        const { result, expectation } = await submit(optedOut);
+        expect(result.expectedReport).toBeUndefined();
+        expect(expectation).toBeUndefined();
+      }
+      expect((await submit({ source: 'user', expectReport: true })).expectation).toEqual({ since: expect.any(String) });
+      // Expectations are saved under PANE_DIR, which the tests in this file share.
+      services.workspaceJournal?.appendPaneEntry(session.id, { kind: 'agent.report', panelId: terminalPanel.id, source: 'agent' });
+    });
+
+    it('expects a report by default for work sent to an agent-farm panel before Pane identifies its agent', async () => {
+      vi.mocked(terminalPanelManager.getForegroundProcess).mockReturnValue({ name: 'zsh', isShell: true });
+      stored = structuredClone(terminalPanel);
+      stored.state.customState = { initialCommand: 'agent-farm run bigbrain/implementer:opus', isCliPanel: false };
+      vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue({ ...terminalSnapshot('$ ', 'idle'), agentType: undefined, currentCommand: 'agent-farm', isCliPanel: false });
+      const services = createServices({ workspaceJournal: new WorkspaceJournal() });
+      const registry = createRegistry(services);
+
+      const result = await registry.invoke('runpane:panels:submit', [{ panelId: terminalPanel.id, input: 'Continue with P-2.' }]);
+      expect(result.expectedReport).toEqual({ since: expect.any(String) });
+      services.workspaceJournal?.appendPaneEntry(session.id, { kind: 'agent.report', panelId: terminalPanel.id, source: 'agent' });
+    });
+
+    it('expects no report by default from a panel with no agent', async () => {
+      vi.mocked(terminalPanelManager.getForegroundProcess).mockReturnValue({ name: 'zsh', isShell: true });
+      stored = structuredClone(terminalPanel);
+      stored.state.customState = { isCliPanel: false };
+      vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue({ ...terminalSnapshot('$ ', 'idle'), agentType: undefined, currentCommand: 'zsh', isCliPanel: false });
+      const services = createServices({ workspaceJournal: new WorkspaceJournal() });
+      const registry = createRegistry(services);
+
+      const result = await registry.invoke('runpane:panels:submit', [{ panelId: terminalPanel.id, input: 'npm test' }]);
+      expect(result.expectedReport).toBeUndefined();
+      expect(services.expectedReportTracker?.expectation(terminalPanel.id)).toBeUndefined();
+    });
+
+    it('arms an expected report on submit and puts the missing report in the Session inbox', async () => {
+      // A plain shell takes the submission without waiting for an agent composer.
+      stored = structuredClone(terminalPanel);
+      vi.mocked(terminalPanelManager.getForegroundProcess).mockReturnValue({ name: 'zsh', isShell: true });
+      // SAFETY: Only the Session lookups the inbox handlers reach are used, and they are stubbed below.
+      const orchestrationSessionManager = Object.create(OrchestrationSessionManager.prototype) as OrchestrationSessionManager;
+      vi.spyOn(orchestrationSessionManager, 'memberSessionIds').mockReturnValue(['session-a']);
+      vi.spyOn(orchestrationSessionManager, 'get').mockResolvedValue(
+        // SAFETY: The inbox handlers read only the record's id and name.
+        { id: 'session-a', name: 'Release' } as Awaited<ReturnType<OrchestrationSessionManager['get']>>,
+      );
+      const services = createServices({ orchestrationSessionManager, workspaceJournal: new WorkspaceJournal() });
+      const registry = createRegistry(services);
+
+      const submitted = await registry.invoke('runpane:panels:submit', [{ panelId: terminalPanel.id, input: 'ship it', expectReport: true }]);
+      expect(submitted.expectedReport).toEqual({ since: expect.any(String) });
+      expect(services.expectedReportTracker?.expectation(terminalPanel.id)).toEqual(submitted.expectedReport);
+
+      vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(terminalSnapshot('Opened PR #12.\n$ ', 'idle'));
+      services.workspaceJournal?.appendPaneEntry(session.id, { kind: 'agent.ready', panelId: terminalPanel.id, agentType: 'claude', source: 'agent' });
+      const waited = await registry.invoke('runpane:workspace:wait', [{ since: 0, timeoutMs: 1_000, kinds: ['agent.report.missing'] }]);
+      expect(waited.entries).toEqual([expect.objectContaining({
+        kind: 'agent.report.missing',
+        panelId: terminalPanel.id,
+        reason: 'ready',
+        expectedSince: submitted.expectedReport.since,
+      })]);
+      expect(services.expectedReportTracker?.expectation(terminalPanel.id)).toBeUndefined();
+
+      const inbox = await registry.invoke('runpane:inbox:list', [{ session: 'Release' }]);
+      expect(inbox).toMatchObject({ ok: true, session: { id: 'session-a', name: 'Release' }, items: [{ kind: 'report.missing', panelId: terminalPanel.id }] });
+      const id = inbox.items[0].id;
+      expect(await registry.invoke('runpane:inbox:ack', [{ ids: [id, 'in-gone'] }])).toEqual({ ok: true, acknowledged: [id], unknown: ['in-gone'] });
+      expect((await registry.invoke('runpane:inbox:list', [{ session: 'session-a' }])).items).toEqual([]);
+      await expect(registry.invoke('runpane:inbox:ack', [{ all: true }])).rejects.toThrow('needs a Session');
     });
 
     it('refuses a blocked report without a question, a bad head, and a panel from another Pane', async () => {

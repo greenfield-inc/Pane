@@ -41,7 +41,7 @@ import {
 import { sharedEmulatorThread, type RemoteTerminalEmulator, type TerminalEmulatorHostConnection } from './terminalEmulatorClient';
 import type { ScreenState } from './terminalEmulatorHost';
 import { AgentStatusMonitor } from './agentStatus/agentStatusMonitor';
-import { detectAgentState } from './agentStatus/manifestEngine';
+import { blockedScreenLines, detectAgentState } from './agentStatus/manifestEngine';
 import { getManifestForAgent } from './agentStatus/manifests';
 import type { AgentDetectionResult, AgentState, PanelAgentStatusEvent } from '../../../shared/types/agentStatus';
 import type { PaneEventArgument } from '../core/eventSink';
@@ -2550,7 +2550,12 @@ export class TerminalPanelManager extends EventEmitter {
     this.ensureAgentStatusPoll();
   }
 
-  private emitAgentStatus(terminal: TerminalProcess, state: AgentState, reason: string | null): void {
+  private emitAgentStatus(
+    terminal: TerminalProcess,
+    state: AgentState,
+    reason: string | null,
+    screenLines?: string[],
+  ): void {
     terminal.lastStatusReason = reason;
     const payload: PanelAgentStatusEvent = {
       panelId: terminal.panelId,
@@ -2559,6 +2564,7 @@ export class TerminalPanelManager extends EventEmitter {
       reason,
       agentType: terminal.agentType,
     };
+    if (state === 'blocked' && screenLines?.length) payload.screenLines = screenLines;
     if (state === 'idle') {
       payload.workedVisibly = terminal.workedVisibly ?? false;
       terminal.workedVisibly = false;
@@ -2611,14 +2617,19 @@ export class TerminalPanelManager extends EventEmitter {
         }
         if (detection.visibleWorking) terminal.workedVisibly = true;
         const next = this.agentStatusMonitor.update(terminal.panelId, detection, Date.now());
-        if (next) this.emitAgentStatus(terminal, next, detection.matchedRuleId);
+        const promptLines = () => blockedScreenLines(manifest, detection.matchedRuleId, {
+          screen: screen.screenText,
+          oscTitle: screen.oscTitle,
+          oscProgress: screen.oscProgress,
+        });
+        if (next) this.emitAgentStatus(terminal, next, detection.matchedRuleId, next === 'blocked' ? promptLines() : undefined);
         // A new blocking screen (folder trust giving way to another prompt) keeps
         // the state but carries a new reason, which the Session view reads.
         else if (
           detection.state === 'blocked'
           && this.agentStatusMonitor.getState(terminal.panelId) === 'blocked'
           && detection.matchedRuleId !== terminal.lastStatusReason
-        ) this.emitAgentStatus(terminal, 'blocked', detection.matchedRuleId);
+        ) this.emitAgentStatus(terminal, 'blocked', detection.matchedRuleId, promptLines());
         if (
           terminal.agentType === 'opencode'
           && detection.matchedRuleId === 'idle_composer'

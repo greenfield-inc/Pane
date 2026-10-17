@@ -46,6 +46,8 @@ import {
   runPanesRename,
   runPanesFocus,
   runReport,
+  runInbox,
+  runInboxAck,
   runPanelsOpen,
   runSessionsAssociate,
   runSessionsCreate,
@@ -329,6 +331,8 @@ const commandHandlers = new Map<string, CommandHandler>(Object.entries({
   'report': async (parsed, telemetryContext) => {
     return runReport(parsed);
   },
+  'inbox': async (parsed) => runInbox(parsed),
+  'inbox ack': async (parsed) => runInboxAck(parsed),
   'agents doctor': async (parsed, telemetryContext) => {
     return runAgentsDoctor(parsed);
   },
