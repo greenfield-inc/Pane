@@ -5,6 +5,7 @@ import type { BrowserPanelState, ToolPanel, ToolPanelState } from '../../../shar
 import { isRemotePaneCommand } from '../daemon/commandRegistry';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { hasFileProtocol } from '../../../shared/utils/browserUrl';
+import { PaneError } from '../../../shared/paneError';
 
 const browserUrlSchema = boundary.object({ currentUrl: boundary.optional(boundary.string) });
 
@@ -41,7 +42,11 @@ export async function readBrowserPanelFile(panel: ToolPanel | undefined, request
   const requestedPath = await fs.realpath(requestedFilePath);
   const relative = path.relative(root, requestedPath);
   if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
-    throw new Error('File is outside the opened browser bundle');
+    throw new PaneError(
+      'ERR_BROWSER_FILE_OUTSIDE_FOLDER',
+      `Pane did not load ${requestedFilePath} because it is outside this page's folder, ${root}. On a connected desktop, a host file page can load only files in its own folder and the folders inside it.`,
+      'Move the file into the page\'s folder, put it inline in the page, or serve the folder over HTTP (for example `python3 -m http.server`) and open the page\'s localhost URL.',
+    );
   }
   const file = await fs.open(requestedPath, 'r');
   try {

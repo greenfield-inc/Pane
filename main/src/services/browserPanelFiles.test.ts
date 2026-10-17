@@ -6,6 +6,7 @@ import { pathToFileURL } from 'url';
 import type { ToolPanel } from '../../../shared/types/panels';
 import { assertHostBrowserFileNavigation, readBrowserPanelFile } from './browserPanelFiles';
 import { PaneCommandRegistry } from '../daemon/commandRegistry';
+import { PaneError } from '../../../shared/paneError';
 
 const directories: string[] = [];
 afterEach(async () => {
@@ -87,6 +88,15 @@ describe('browser panel file reads', () => {
     for (const relative of ['../private/secret.txt', '%2e%2e/private/secret.txt', 'escape/secret.txt', './']) {
       await expect(readBrowserPanelFile(panel, new URL(relative, url).href)).rejects.toThrow('outside');
     }
+    // The refusal names the file, the folder it had to be in, and the ways to fix the page.
+    const refusal = readBrowserPanelFile(panel, new URL('../private/secret.txt', url).href);
+    await expect(refusal).rejects.toBeInstanceOf(PaneError);
+    await expect(refusal).rejects.toMatchObject({
+      code: 'ERR_BROWSER_FILE_OUTSIDE_FOLDER',
+      message: expect.stringContaining(path.join(root, 'private', 'secret.txt')),
+      next: expect.stringContaining('over HTTP'),
+    });
+    await expect(refusal).rejects.toThrow(await fs.realpath(bundle));
     await expect(readBrowserPanelFile(panel, 'https://example.com/')).rejects.toThrow();
     const large = await fs.open(path.join(bundle, 'large.bin'), 'w');
     await large.truncate(16 * 1024 * 1024 + 1);
