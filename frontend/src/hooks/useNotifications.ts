@@ -138,8 +138,7 @@ export function useNotifications() {
     title: string,
     body: string,
     icon?: string,
-    _triggerEvent?: string,
-    _trackingKey?: string,
+    tag?: string,
   ) => {
     requestPermission().then((hasPermission) => {
       if (hasPermission) {
@@ -147,7 +146,7 @@ export function useNotifications() {
           body,
           icon: icon || '/favicon.ico',
           badge: '/favicon.ico',
-          tag: 'claude-code-commander',
+          tag,
           requireInteraction: false,
         });
 
@@ -203,8 +202,7 @@ export function useNotifications() {
       `${context.panelName} finished`,
       context.body,
       undefined,
-      'panel_idle',
-      `idle:${panelId}:${Date.now()}`,
+      `pane:panel:${panelId}`,
     );
   }
 
@@ -222,8 +220,7 @@ export function useNotifications() {
       `${context.panelName} needs your input`,
       context.body,
       undefined,
-      'panel_blocked',
-      `blocked:${panelId}:${Date.now()}`,
+      `pane:panel:${panelId}`,
     );
   }
 
