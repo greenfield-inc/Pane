@@ -8,6 +8,8 @@ import type { WorkspaceJournal } from '../services/workspaceJournal';
 import type { WorkspaceStateReader } from '../services/workspaceStateReader';
 import type { WorkspaceCursorStore } from '../services/workspaceCursorStore';
 import type { NamedLockService } from '../services/namedLockService';
+import type { SessionInbox } from '../services/sessionInbox';
+import type { ExpectedReportTracker } from '../services/expectedReports';
 
 export interface DaemonHostServices extends CoreServices {
   taskQueue: TaskQueue | null;
@@ -19,6 +21,8 @@ export interface DaemonHostServices extends CoreServices {
   workspaceStateReader?: WorkspaceStateReader;
   workspaceCursorStore?: WorkspaceCursorStore;
   namedLockService?: NamedLockService;
+  sessionInbox?: SessionInbox;
+  expectedReportTracker?: ExpectedReportTracker;
 }
 
 export interface AppServices extends DaemonHostServices {

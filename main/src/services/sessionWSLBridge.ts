@@ -54,7 +54,7 @@ export function sessionWSLBridge(appDirectory: string, record: OrchestrationSess
     '    case "$key" in',
     '      --repo)',
     '        if [[ "$arg" == *=* ]]; then arg="$key=$(pane_repo_selector "${arg#*=}")"; else repo_arg=true; fi ;;',
-    '      --pane-dir|--pane-path|--download-dir|--file|--path|--input-file|--initial-input-file|--prompt-file|--body-file|--summary-file|--from-json)',
+    '      --pane-dir|--pane-path|--download-dir|--file|--path|--input-file|--initial-input-file|--prompt-file|--attach|--body-file|--summary-file|--from-json)',
     '        if [[ "$arg" == *=* ]]; then arg="$key=$(pane_windows_path "${arg#*=}")"; else path_arg=true; fi ;;',
     '    esac',
     '  fi',

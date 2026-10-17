@@ -887,6 +887,29 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void
     manager.acknowledgeBytes(panel.id, output.length);
   });
 
+  it('exports a worker\'s Session folder as PANE_SESSION_DIR without giving it the orchestrator role', async () => {
+    const spawn = vi.spyOn(ptyHost, 'spawn');
+    const panel = makePanel('session-worker-panel');
+    panel.state.customState = { sessionFolder: '/home/me/.pane/sessions/orch-1' };
+    const previous = process.env.PANE_SESSION_DIR;
+    process.env.PANE_SESSION_DIR = '/home/me/.pane/sessions/parent';
+    try {
+      await startTerminal(panel);
+      const env = spawn.mock.calls[0][0].env;
+      expect(env.PANE_SESSION_DIR).toBe('/home/me/.pane/sessions/orch-1');
+      expect(env.PANE_ORCHESTRATION_SESSION_ID).toBeUndefined();
+
+      const plain = makePanel('plain-panel');
+      await startTerminal(plain);
+      // A Pane launched from a Session terminal does not inherit its folder.
+      expect(spawn.mock.calls[1][0].env.PANE_SESSION_DIR).toBeUndefined();
+    } finally {
+      if (previous === undefined) delete process.env.PANE_SESSION_DIR;
+      else process.env.PANE_SESSION_DIR = previous;
+      vi.restoreAllMocks();
+    }
+  });
+
   it('launches and respawns a saved WSL Session inside its distro with Linux cwd and role environment', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
     const spawn = vi.spyOn(ptyHost, 'spawn');

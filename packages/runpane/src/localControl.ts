@@ -5,6 +5,7 @@ import { stdin as input, stdout as output } from 'node:process';
 import { createInterface } from 'node:readline/promises';
 import { boundary, decodeBoundary } from './boundaryDecoder';
 import { invokeDaemon, PaneDaemonClientError } from './daemonClient';
+import { RunpaneError } from './errors';
 import { RUNPANE_CONTRACT } from './generated/contract';
 import { hasCadenceValueFlag, type ParsedArgs, type RunpaneAgent } from './commands';
 import type { BoundarySchema, JsonValue } from './boundaryDecoder';
@@ -219,6 +220,7 @@ interface PaneCreateRequest {
   focus?: boolean;
   source?: 'user' | 'agent';
   associateSession?: string;
+  expectReport?: boolean;
 }
 
 interface PaneAdoptRequest {
@@ -253,8 +255,8 @@ interface PaneCreateItem {
 }
 
 type PaneToolSpec =
-  | { agent: RunpaneAgent; title?: string; initialInput?: string; initialInputAsFilePointer?: boolean }
-  | { command: string; agentType?: RunpaneAgent; title?: string; initialInput?: string; initialInputAsFilePointer?: boolean };
+  | { agent: RunpaneAgent; title?: string; initialInput?: string; initialInputAsFilePointer?: boolean; initialInputAttachments?: string[] }
+  | { command: string; agentType?: RunpaneAgent; title?: string; initialInput?: string; initialInputAsFilePointer?: boolean; initialInputAttachments?: string[] };
 
 interface PromptWarning {
   code: 'leading-bang-runs-shell' | 'leading-hash-memory' | 'leading-slash-command' | 'leading-at-mention';
@@ -279,7 +281,9 @@ interface PaneCreateSuccessItem {
   initialInput?: InitialInputDeliveryResult;
   association?: { sessionId: string; ok: boolean; error?: string };
   promptFile?: string;
+  attachments?: string[];
   warnings?: PromptWarning[];
+  expectedReport?: ExpectedReport;
   /** Set when setup waits for a slot; the agent starts after setup, so there is no panel yet. */
   setupQueue?: { position: number; message: string };
   /** The base a worktree Pane started from; `notice` says when it could not be refreshed from the remote. */
@@ -676,6 +680,12 @@ interface PanelCreateRequest {
   source?: 'user' | 'agent';
   waitReady?: boolean;
   readyTimeoutMs?: number;
+  expectReport?: boolean;
+}
+
+/** The report Pane waits for after `--expect-report`. */
+interface ExpectedReport {
+  since: string;
 }
 
 interface PanelCreateResult {
@@ -694,7 +704,9 @@ interface PanelCreateResult {
   readiness?: PanelReadiness;
   initialInput?: InitialInputDeliveryResult;
   promptFile?: string;
+  attachments?: string[];
   warnings?: PromptWarning[];
+  expectedReport?: ExpectedReport;
   nextCommand?: string;
 }
 
@@ -720,8 +732,12 @@ interface PanelInputRequest {
   input: string;
   /** panels submit only: send `Read and follow <prompt file>` in place of the text. */
   asFilePointer?: boolean;
+  /** panels submit only: absolute paths of `--attach` files to copy beside the prompt file. */
+  attachments?: string[];
   interrupt?: boolean;
   source?: 'user' | 'agent';
+  /** panels submit only. */
+  expectReport?: boolean;
 }
 
 interface PanelInputResult {
@@ -808,7 +824,9 @@ interface PanelSubmitResult {
   sentAt: string;
   blocked?: PanelBlockedState;
   promptFile?: string;
+  attachments?: string[];
   warnings?: PromptWarning[];
+  expectedReport?: ExpectedReport;
   nextCommand?: string;
 }
 
@@ -866,7 +884,9 @@ type WorkspaceEntryKind =
   | 'pane.gone'
   | 'panel.exited'
   | 'panel.stopped'
+  | 'panel.resumed'
   | 'agent.report'
+  | 'agent.report.missing'
   | 'pane.associated'
   | 'pane.detached'
   | 'pr.conflicted'
@@ -874,6 +894,8 @@ type WorkspaceEntryKind =
   | 'pr.merged'
   | 'pr.closed'
   | 'pr.head'
+  | 'pr.base_changed'
+  | 'pr.base_deleted'
   | 'pr.review'
   | 'pr.comment'
   | 'pr.stopped'
@@ -917,10 +939,18 @@ interface WorkspaceEntry {
   sessionId?: string;
   sessionName?: string;
   pr?: { number: number; url: string; headOid: string };
+  base?: { from: string; to: string };
   checks?: 'passed' | 'failed';
   failingChecks?: string[];
   panels?: WorkspacePanelSummary[];
   report?: AgentReport;
+  lastOutput?: string;
+  lastOutputSource?: 'transcript' | 'screen';
+  expectedSince?: string;
+  screenLines?: string[];
+  nudged?: boolean;
+  interruptedAt?: string;
+  attempt?: number;
 }
 
 interface WorkspaceStateResult {
@@ -1100,6 +1130,7 @@ const agentReportFields = {
   reportedAt: boundary.string,
 };
 const agentReportSchema: BoundarySchema<AgentReport> = boundary.object(agentReportFields);
+const expectedReportSchema: BoundarySchema<ExpectedReport> = boundary.object({ since: boundary.string });
 const reportResultSchema: BoundarySchema<ReportResult> = boundary.object({
   ok: boundary.literal(true),
   generation: boundary.optional(boundary.number),
@@ -1446,7 +1477,9 @@ export const paneCreateResultSchema: BoundarySchema<PaneCreateResult> = boundary
         error: boundary.optional(boundary.string),
       })),
       promptFile: boundary.optional(boundary.string),
+      attachments: boundary.optional(boundary.array(boundary.string)),
       warnings: promptWarningsSchema,
+      expectedReport: boundary.optional(expectedReportSchema),
       setupQueue: boundary.optional(boundary.object({
         position: boundary.number,
         message: boundary.string,
@@ -1642,7 +1675,9 @@ export const panelCreateResultSchema: BoundarySchema<PanelCreateResult> = bounda
   readiness: boundary.optional(panelReadinessSchema),
   initialInput: boundary.optional(initialInputSchema),
   promptFile: boundary.optional(boundary.string),
+  attachments: boundary.optional(boundary.array(boundary.string)),
   warnings: promptWarningsSchema,
+  expectedReport: boundary.optional(expectedReportSchema),
   nextCommand: boundary.optional(boundary.string),
 });
 const panelOutputResultSchema: BoundarySchema<PanelOutputResult> = boundary.object({
@@ -1699,7 +1734,9 @@ export const panelSubmitResultSchema: BoundarySchema<PanelSubmitResult> = bounda
   sentAt: boundary.string,
   blocked: boundary.optional(panelBlockedSchema),
   promptFile: boundary.optional(boundary.string),
+  attachments: boundary.optional(boundary.array(boundary.string)),
   warnings: promptWarningsSchema,
+  expectedReport: boundary.optional(expectedReportSchema),
   nextCommand: boundary.optional(boundary.string),
 });
 const panelSubmitComposerResultSchema: BoundarySchema<PanelSubmitComposerResult> = boundary.object({
@@ -1762,6 +1799,7 @@ const workspaceEntryKindSchema = boundary.enumeration(
   'pane.gone',
   'panel.exited',
   'panel.stopped',
+  'panel.resumed',
   'pane.associated',
   'pane.detached',
   'pr.conflicted',
@@ -1769,12 +1807,15 @@ const workspaceEntryKindSchema = boundary.enumeration(
   'pr.merged',
   'pr.closed',
   'pr.head',
+  'pr.base_changed',
+  'pr.base_deleted',
   'pr.review',
   'pr.comment',
   'pr.stopped',
   'github.unavailable',
   'github.recovered',
   'agent.report',
+  'agent.report.missing',
 );
 const agentStateSchema = boundary.enumeration('blocked', 'working', 'idle', 'unknown');
 const workspacePanelSummarySchema: BoundarySchema<WorkspacePanelSummary> = boundary.object({
@@ -1813,10 +1854,18 @@ const workspaceEntrySchema: BoundarySchema<WorkspaceEntry> = boundary.object({
   sessionId: boundary.optional(boundary.string),
   sessionName: boundary.optional(boundary.string),
   pr: boundary.optional(boundary.object({ number: boundary.number, url: boundary.string, headOid: boundary.string })),
+  base: boundary.optional(boundary.object({ from: boundary.string, to: boundary.string })),
   checks: boundary.optional(boundary.enumeration('passed', 'failed')),
   failingChecks: boundary.optional(boundary.array(boundary.string)),
   report: boundary.optional(agentReportSchema),
   panels: boundary.optional(boundary.array(workspacePanelSummarySchema)),
+  lastOutput: boundary.optional(boundary.string),
+  lastOutputSource: boundary.optional(boundary.enumeration('transcript', 'screen')),
+  expectedSince: boundary.optional(boundary.string),
+  screenLines: boundary.optional(boundary.array(boundary.string)),
+  nudged: boundary.optional(boundary.boolean),
+  interruptedAt: boundary.optional(boundary.string),
+  attempt: boundary.optional(boundary.number),
 });
 export const workspaceStateResultSchema: BoundarySchema<WorkspaceStateResult> = boundary.object({
   ok: boundary.literal(true),
@@ -2435,12 +2484,21 @@ function isRetryableWatchError(error: Error): boolean {
 
 export async function runPanesCreate(parsed: ParsedArgs): Promise<number> {
   const request = await buildPaneCreateRequest(parsed);
+  if (parsed.expectReport !== undefined) request.expectReport = parsed.expectReport;
   await confirmPaneCreate(parsed, request);
 
   const result = await invokeDaemon('runpane:panes:create', [request], paneCreateResultSchema, {
     paneDir: parsed.paneDir,
     timeoutMs: (parsed.timeoutMs ?? 120_000) + (parsed.readyTimeoutMs ?? 30_000) + 10_000,
   });
+  if (parsed.waitForResult) {
+    const [item] = result.items;
+    if (result.items.length !== 1) throw new Error('panes create --wait waits for one Pane; create several without --wait and dispatch each with panels submit --wait.');
+    // A Pane queued behind setup has no panel yet; its first agent panel's events still name the Pane.
+    if (result.ok && item && 'paneId' in item && item.paneId) {
+      return waitForDispatchResult(parsed, { paneId: item.paneId, panelId: item.panelId, since: result.generation });
+    }
+  }
 
   if (parsed.json) {
     printJson(result);
@@ -2667,12 +2725,16 @@ export async function runPanelsList(parsed: ParsedArgs): Promise<number> {
 
 export async function runPanelsCreate(parsed: ParsedArgs): Promise<number> {
   const request = await buildPanelCreateRequest(parsed);
+  if (parsed.expectReport !== undefined) request.expectReport = parsed.expectReport;
   await confirmPanelCreate(parsed, request);
 
   const result = await invokeDaemon('runpane:panels:create', [request], panelCreateResultSchema, {
     paneDir: parsed.paneDir,
     timeoutMs: (parsed.readyTimeoutMs ?? 30_000) + 10_000,
   });
+  if (parsed.waitForResult && result.ok) {
+    return waitForDispatchResult(parsed, { paneId: result.paneId, panelId: result.panelId, since: result.generation });
+  }
 
   if (parsed.json) {
     printJson(result);
@@ -2881,6 +2943,136 @@ function describeReportDelivery(result: ReportResult): string[] {
   return lines;
 }
 
+interface InboxItem {
+  id: string;
+  sessionId: string;
+  kind: 'report' | 'report.missing' | 'blocked';
+  at: string;
+  paneId: string;
+  paneName: string;
+  panelId: string;
+  panelTitle?: string;
+  agentType?: string;
+  report?: AgentReport;
+  lastOutput?: string;
+  lastOutputSource?: 'transcript' | 'screen';
+  reason?: string;
+  screenLines?: string[];
+}
+
+interface InboxListResult {
+  ok: true;
+  session: { id: string; name: string };
+  items: InboxItem[];
+}
+
+interface InboxAckResult {
+  ok: true;
+  acknowledged: string[];
+  unknown: string[];
+}
+
+const inboxItemSchema: BoundarySchema<InboxItem> = boundary.object({
+  id: boundary.string,
+  sessionId: boundary.string,
+  kind: boundary.enumeration('report', 'report.missing', 'blocked'),
+  at: boundary.string,
+  paneId: boundary.string,
+  paneName: boundary.string,
+  panelId: boundary.string,
+  panelTitle: boundary.optional(boundary.string),
+  agentType: boundary.optional(boundary.string),
+  report: boundary.optional(agentReportSchema),
+  lastOutput: boundary.optional(boundary.string),
+  lastOutputSource: boundary.optional(boundary.enumeration('transcript', 'screen')),
+  reason: boundary.optional(boundary.string),
+  screenLines: boundary.optional(boundary.array(boundary.string)),
+});
+const inboxListResultSchema: BoundarySchema<InboxListResult> = boundary.object({
+  ok: boundary.literal(true),
+  session: boundary.object({ id: boundary.string, name: boundary.string }),
+  items: boundary.array(inboxItemSchema),
+});
+const inboxAckResultSchema: BoundarySchema<InboxAckResult> = boundary.object({
+  ok: boundary.literal(true),
+  acknowledged: boundary.array(boundary.string),
+  unknown: boundary.array(boundary.string),
+});
+
+const MAX_INBOX_DETAIL_LENGTH = 300;
+
+/** `--session`, else the Session whose orchestrator this terminal is. */
+function inboxSession(parsed: ParsedArgs, env: NodeJS.ProcessEnv): string | undefined {
+  return parsed.sessionId?.trim() || env.PANE_ORCHESTRATION_SESSION_ID?.trim() || undefined;
+}
+
+export async function runInbox(parsed: ParsedArgs, env: NodeJS.ProcessEnv = process.env): Promise<number> {
+  const session = inboxSession(parsed, env);
+  if (!session) {
+    throw new Error('runpane inbox needs --session <id|name> outside a Session orchestrator (PANE_ORCHESTRATION_SESSION_ID).');
+  }
+  const result = await invokeDaemon('runpane:inbox:list', [{ session }], inboxListResultSchema, { paneDir: parsed.paneDir });
+  if (parsed.json) {
+    printJson(result);
+    return 0;
+  }
+  if (result.items.length === 0) {
+    console.log(`Inbox for ${result.session.name}: nothing unacknowledged.`);
+    return 0;
+  }
+  console.log(`Inbox for ${result.session.name}: ${result.items.length} unacknowledged.`);
+  for (const item of result.items) console.log(formatInboxItem(item));
+  console.log(`Clear handled items with: runpane inbox ack ${result.items.map(item => item.id).join(' ')}`);
+  return 0;
+}
+
+export async function runInboxAck(parsed: ParsedArgs, env: NodeJS.ProcessEnv = process.env): Promise<number> {
+  const session = parsed.all ? inboxSession(parsed, env) : parsed.sessionId;
+  if (parsed.all && !session) {
+    throw new Error('runpane inbox ack --all needs --session <id|name> outside a Session orchestrator.');
+  }
+  const result = await invokeDaemon('runpane:inbox:ack', [{
+    ids: parsed.all ? undefined : parsed.inboxIds,
+    session,
+    all: parsed.all || undefined,
+  }], inboxAckResultSchema, { paneDir: parsed.paneDir });
+  if (parsed.json) {
+    printJson(result);
+  } else {
+    console.log(`Acknowledged ${result.acknowledged.length} inbox item${result.acknowledged.length === 1 ? '' : 's'}.`);
+    if (result.unknown.length > 0) console.log(`Not found (already acknowledged?): ${result.unknown.join(', ')}`);
+  }
+  return 0;
+}
+
+/** `<id> REPORT <pane> pane <id> panel <id> ready pr#12 abc1234`, then indented detail lines. */
+function formatInboxItem(item: InboxItem): string {
+  const where = `${oneLine(item.paneName)} pane ${item.paneId} panel ${item.panelId}`;
+  if (item.kind === 'report') {
+    const lines = [`${item.id} REPORT ${where} ${item.report ? describeReport(item.report) : 'unknown'}`];
+    if (item.report?.summary) lines.push(`  ${clip(oneLine(item.report.summary))}`);
+    return lines.join('\n');
+  }
+  if (item.kind === 'report.missing') {
+    const lines = [`${item.id} MISSING REPORT ${where} ${item.reason ?? 'ready'} without runpane report`];
+    if (item.lastOutput) lines.push(`  last ${item.lastOutputSource ?? 'output'}: ${clip(oneLine(item.lastOutput), true)}`);
+    return lines.join('\n');
+  }
+  const lines = [`${item.id} BLOCKED ${where} waiting on a prompt`];
+  for (const line of (item.screenLines ?? []).slice(-8)) lines.push(`  | ${line}`);
+  return lines.join('\n');
+}
+
+function oneLine(text: string): string {
+  return text.replace(/\s+/gu, ' ').trim();
+}
+
+/** Cut to the detail length, keeping the start, or the end when `tail` (an agent's conclusion is last). */
+function clip(text: string, tail = false): string {
+  if (text.length <= MAX_INBOX_DETAIL_LENGTH) return text;
+  return tail ? `…${text.slice(text.length - MAX_INBOX_DETAIL_LENGTH + 1)}` : `${text.slice(0, MAX_INBOX_DETAIL_LENGTH - 1)}…`;
+}
+
 export async function runPanelsSubmit(parsed: ParsedArgs): Promise<number> {
   const request = buildPanelInputRequest(parsed, 'submit');
   await confirmPanelInput(parsed, request, 'submit');
@@ -2888,6 +3080,9 @@ export async function runPanelsSubmit(parsed: ParsedArgs): Promise<number> {
   const result = await invokeDaemon('runpane:panels:submit', [request], panelSubmitResultSchema, {
     paneDir: parsed.paneDir,
   });
+  if (parsed.waitForResult && result.ok) {
+    return waitForDispatchResult(parsed, { paneId: result.paneId, panelId: result.panelId, since: result.generation });
+  }
 
   if (parsed.json) {
     printJson(result);
@@ -2906,6 +3101,112 @@ export async function runPanelsSubmit(parsed: ParsedArgs): Promise<number> {
   }
 
   return result.ok ? 0 : 1;
+}
+
+/** Each way a `--wait` dispatch ends, the journal kind behind it, and the exit code it returns. */
+const DISPATCH_OUTCOMES = {
+  'agent.report': { outcome: 'report', exitCode: 0 },
+  'agent.report.missing': { outcome: 'missing', exitCode: 3 },
+  'agent.blocked': { outcome: 'blocked', exitCode: 4 },
+  'panel.exited': { outcome: 'exited', exitCode: 5 },
+  'pane.gone': { outcome: 'gone', exitCode: 5 },
+} as const satisfies Partial<Record<WorkspaceEntryKind, { outcome: string; exitCode: number }>>;
+type DispatchOutcomeKind = keyof typeof DISPATCH_OUTCOMES;
+const DISPATCH_WAIT_KINDS: DispatchOutcomeKind[] = ['agent.report', 'agent.report.missing', 'agent.blocked', 'panel.exited', 'pane.gone'];
+
+/** What `--wait` prints (`dispatchWaitResult` in the contract). */
+interface DispatchWaitResult {
+  ok: boolean;
+  outcome: (typeof DISPATCH_OUTCOMES)[DispatchOutcomeKind]['outcome'] | 'timeout';
+  paneId: string;
+  paneName?: string;
+  panelId?: string;
+  generation: number;
+  at?: string;
+  report?: Pick<AgentReport, 'state' | 'pr' | 'head' | 'summary' | 'summaryTruncated' | 'summaryPath' | 'question'>;
+  screenLines?: string[];
+  lastOutput?: string;
+  lastOutputSource?: 'transcript' | 'screen';
+  reason?: string;
+  exitCode?: number;
+}
+const DISPATCH_TIMEOUT_EXIT_CODE = 124;
+/** One daemon request waits at most this long, so a dropped connection is noticed. */
+const DISPATCH_WAIT_CALL_MS = 60_000;
+
+function isDispatchOutcomeKind(kind: WorkspaceEntryKind): kind is DispatchOutcomeKind {
+  return Object.hasOwn(DISPATCH_OUTCOMES, kind);
+}
+
+/**
+ * `--wait`: block until the dispatched panel reports, misses its report, waits on a prompt, or
+ * exits, then print the result as one line of JSON. `since` is the journal generation the daemon took
+ * before delivering the work, so an event right after delivery is never missed.
+ */
+async function waitForDispatchResult(
+  parsed: ParsedArgs,
+  target: { paneId?: string; panelId?: string; since?: number },
+): Promise<number> {
+  const { paneId, panelId } = target;
+  if (!paneId || target.since === undefined) {
+    throw new Error('This Pane daemon does not return a journal position, so --wait cannot follow the work. Update Pane, or use runpane watch --until-event.');
+  }
+  let since = target.since;
+  const deadline = parsed.waitTimeoutMs ? Date.now() + parsed.waitTimeoutMs : undefined;
+  for (;;) {
+    const remaining = deadline === undefined ? DISPATCH_WAIT_CALL_MS : Math.max(0, deadline - Date.now());
+    if (remaining === 0) {
+      console.log(JSON.stringify({ ok: false, outcome: 'timeout', paneId, panelId, generation: since } satisfies DispatchWaitResult));
+      return DISPATCH_TIMEOUT_EXIT_CODE;
+    }
+    const timeoutMs = Math.min(DISPATCH_WAIT_CALL_MS, remaining);
+    let result: WorkspaceWaitResult;
+    try {
+      result = await invokeDaemon('runpane:workspace:wait', [{ since, timeoutMs, kinds: DISPATCH_WAIT_KINDS, paneIds: [paneId] }],
+        workspaceWaitResultSchema, { paneDir: parsed.paneDir, timeoutMs: timeoutMs + 5_000, eventInclude: [] });
+    } catch (error) {
+      // A daemon restart drops the connection; the saved journal keeps the position.
+      if (!(error instanceof Error) || !isRetryableWatchError(error)) throw error;
+      await new Promise(resolve => setTimeout(resolve, 1_000));
+      continue;
+    }
+    const entry = result.entries.find(candidate => !candidate.replay && !candidate.baseline
+      && (candidate.kind === 'pane.gone' || !panelId || candidate.panelId === panelId));
+    if (entry && isDispatchOutcomeKind(entry.kind)) {
+      const { outcome, exitCode } = DISPATCH_OUTCOMES[entry.kind];
+      console.log(JSON.stringify(compactDispatchResult(outcome, entry)));
+      return exitCode;
+    }
+    since = Math.max(since, result.generation);
+  }
+}
+
+/** The `--wait` result: what the orchestrator needs to act, never the transcript. */
+function compactDispatchResult(outcome: DispatchWaitResult['outcome'], entry: WorkspaceEntry): DispatchWaitResult {
+  const { report } = entry;
+  return {
+    ok: outcome === 'report',
+    outcome,
+    paneId: entry.paneId,
+    paneName: entry.paneName,
+    generation: entry.gen,
+    at: entry.at,
+    panelId: entry.panelId,
+    report: report && {
+      state: report.state,
+      pr: report.pr,
+      head: report.head,
+      summary: report.summary,
+      summaryTruncated: report.summaryTruncated,
+      summaryPath: report.summaryPath,
+      question: report.question,
+    },
+    screenLines: entry.screenLines?.length ? entry.screenLines : undefined,
+    lastOutput: entry.lastOutput || undefined,
+    lastOutputSource: entry.lastOutput ? entry.lastOutputSource : undefined,
+    reason: entry.reason || undefined,
+    exitCode: entry.exitCode,
+  };
 }
 
 /** Where the prompt went, for human output: `Delivery: queued (transcript)`. */
@@ -2936,9 +3237,18 @@ export function markSuggestionLine(text: string, ghostText: string | undefined):
 }
 
 /** The prompt file Pane wrote and any leading-character warnings, for human output. */
-export function printPromptNotes(result: { promptFile?: string; warnings?: PromptWarning[] }, prefix = ''): void {
+export function printPromptNotes(
+  result: { promptFile?: string; attachments?: string[]; warnings?: PromptWarning[]; expectedReport?: ExpectedReport },
+  prefix = '',
+): void {
   if (result.promptFile) {
     console.log(`${prefix}Prompt file: ${result.promptFile}`);
+  }
+  for (const attachment of result.attachments ?? []) {
+    console.log(`${prefix}Attached: ${attachment}`);
+  }
+  if (result.expectedReport) {
+    console.log(`${prefix}Expecting a runpane report; without one Pane emits agent.report.missing.`);
   }
   for (const warning of result.warnings ?? []) {
     console.log(`${prefix}Warning (${warning.code}): ${warning.message}`);
@@ -3088,8 +3398,10 @@ export function buildPanelInputRequest(parsed: ParsedArgs, command: 'input' | 's
     panelId: parsed.panelId,
     input: parsed.keys ? keysToBytes(parsed.keys) : parsed.panelInputFile ? readInputSource(parsed.panelInputFile) : parsed.panelInput ?? '',
     asFilePointer: parsed.asFilePointer || undefined,
+    attachments: resolveAttachments(parsed, `panels ${command}`),
     interrupt: parsed.interrupt || undefined,
     source: parsed.source === 'user' || parsed.source === 'agent' ? parsed.source : undefined,
+    expectReport: command === 'submit' ? parsed.expectReport : undefined,
   };
 }
 
@@ -3249,6 +3561,7 @@ async function buildToolSpec(parsed: ParsedArgs, command = 'panes create'): Prom
     throw new Error(`--as-file-pointer needs a prompt: pass --prompt or --initial-input-file to runpane ${command}.`);
   }
   const initialInputAsFilePointer = parsed.asFilePointer || undefined;
+  const initialInputAttachments = resolveAttachments(parsed, command);
 
   // With --tool-command, --agent names the agent the command runs (a wrapper
   // such as `agent-farm run`); Pane launches the command unchanged.
@@ -3259,6 +3572,7 @@ async function buildToolSpec(parsed: ParsedArgs, command = 'panes create'): Prom
       title: parsed.title,
       initialInput,
       initialInputAsFilePointer,
+      initialInputAttachments,
     };
   }
 
@@ -3277,6 +3591,7 @@ async function buildToolSpec(parsed: ParsedArgs, command = 'panes create'): Prom
       title: parsed.title,
       initialInput,
       initialInputAsFilePointer,
+      initialInputAttachments,
     };
   }
 
@@ -3289,7 +3604,29 @@ async function buildToolSpec(parsed: ParsedArgs, command = 'panes create'): Prom
     title: parsed.title,
     initialInput,
     initialInputAsFilePointer,
+    initialInputAttachments,
   };
+}
+
+/**
+ * `--attach` files as absolute paths. Pane copies them beside the prompt file
+ * (inside the worktree when it can), so they need `--as-file-pointer`.
+ */
+function resolveAttachments(parsed: ParsedArgs, command: string): string[] | undefined {
+  if (!parsed.attachments?.length) return undefined;
+  if (!['panes create', 'panels create', 'panels submit'].includes(command)) {
+    throw new RunpaneError('ERR_ATTACH_UNSUPPORTED', `--attach is not supported by runpane ${command}. Nothing was sent.`, 'Use --attach with panes create, panels create or panels submit.');
+  }
+  if (!parsed.asFilePointer) {
+    throw new RunpaneError('ERR_ATTACH_NEEDS_FILE_POINTER', `--attach needs --as-file-pointer: Pane lists the copied files beside the prompt file. Nothing was sent.`, `Add --as-file-pointer to runpane ${command}.`);
+  }
+  return parsed.attachments.map((file) => {
+    const absolute = path.resolve(file);
+    if (!fs.statSync(absolute, { throwIfNoEntry: false })?.isFile()) {
+      throw new RunpaneError('ERR_ATTACH_NOT_FOUND', `--attach ${file}: no such file. Nothing was sent.`, 'Pass an existing file path, then retry.');
+    }
+    return absolute;
+  });
 }
 
 function resolveInitialInput(parsed: ParsedArgs): string | undefined {
@@ -3589,6 +3926,7 @@ function workspaceLabel(kind: WorkspaceEntryKind): string {
     'pane.gone': 'GONE',
     'panel.exited': 'EXIT',
     'panel.stopped': 'STOPPED',
+    'panel.resumed': 'RESUMED',
     'pane.associated': 'JOINED',
     'pane.detached': 'LEFT',
     'pr.conflicted': 'PR CONFLICTED',
@@ -3596,12 +3934,15 @@ function workspaceLabel(kind: WorkspaceEntryKind): string {
     'pr.merged': 'PR MERGED',
     'pr.closed': 'PR.CLOSED',
     'pr.head': 'PR.HEAD',
+    'pr.base_changed': 'PR.BASE_CHANGED',
+    'pr.base_deleted': 'PR.BASE_DELETED',
     'pr.review': 'PR.REVIEW',
     'pr.comment': 'PR.COMMENT',
     'pr.stopped': 'PR.STOPPED',
     'github.unavailable': 'GITHUB.UNAVAILABLE',
     'github.recovered': 'GITHUB.RECOVERED',
     'agent.report': 'REPORT',
+    'agent.report.missing': 'MISSING REPORT',
   } satisfies Record<WorkspaceEntryKind, string>;
   return labels[kind];
 }

@@ -20,6 +20,7 @@ const baselineSchema = boundary.object({
   state: boundary.string, head: boundary.string, mergeable: boundary.string,
   failed: boundary.array(boundary.string), passed: boundary.boolean,
   feedbackComplete: boundary.optional(boundary.boolean),
+  base: boundary.optional(boundary.string), baseExists: boundary.optional(boundary.boolean),
   comments: boundary.array(boundary.string), reviews: boundary.array(boundary.string),
 });
 const recordSchema = boundary.object({
@@ -221,6 +222,16 @@ export class SessionPrMonitor {
     if (record.unavailable) events.push(event('github.recovered', 'GitHub reads resumed.'));
     const previousHead = previous?.head ?? record.head;
     if (previousHead && previousHead !== pr.headRefOid) events.push(event('pr.head', 'The PR head changed. Recheck this commit and register its SHA before accepting success.'));
+    // Baselines written before base tracking have no base; their first read records it silently.
+    const previousBase = previous?.base;
+    if (previousBase !== undefined && previous?.baseExists !== false && !pr.baseRefExists) events.push({
+      ...event('pr.base_deleted', `The base branch ${previousBase} was deleted. GitHub may close the PR; retarget it to a live branch, rebase, and recheck CI.`),
+      base: { from: previousBase, to: pr.baseRefName },
+    });
+    else if (previousBase !== undefined && previousBase !== pr.baseRefName) events.push({
+      ...event('pr.base_changed', `The base changed from ${previousBase} to ${pr.baseRefName}. Rebase onto ${pr.baseRefName}, resolve conflicts, and recheck CI.`),
+      base: { from: previousBase, to: pr.baseRefName },
+    });
     if (pr.state === 'MERGED' || pr.state === 'CLOSED') {
       if (previous?.state !== pr.state) events.push(event(pr.state === 'MERGED' ? 'pr.merged' : 'pr.closed'));
       record.stopped = pr.state === 'MERGED' ? 'merged' : 'closed';
@@ -242,7 +253,8 @@ export class SessionPrMonitor {
       }
     }
     record.baseline = { state: pr.state, head: pr.headRefOid, mergeable: pr.mergeable === 'UNKNOWN' ? previous?.mergeable ?? 'UNKNOWN' : pr.mergeable,
-      failed: failures, passed: passed && (!record.head || record.head === pr.headRefOid), feedbackComplete: pr.feedbackComplete, comments: pr.comments, reviews: pr.reviews };
+      failed: failures, passed: passed && (!record.head || record.head === pr.headRefOid), feedbackComplete: pr.feedbackComplete,
+      base: pr.baseRefName, baseExists: pr.baseRefExists, comments: pr.comments, reviews: pr.reviews };
     record.fingerprint = fingerprint; record.fullReadAt = this.now(); record.errors = 0; record.retryAt = 0; record.unavailable = false;
     this.commit(events);
   }

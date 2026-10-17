@@ -7,7 +7,7 @@ description: Use when the user asks to start, kick off, spawn, check on, nudge, 
 
 You coordinate. Another agent in a Pane does the work.
 
-If you are already Pane Chat / a Session orchestrator, follow `pane-orchestrator` and `runpane`.
+If you are already Pane Chat / a Session orchestrator, follow `pane-orchestrator` and `runpane`. To launch, wait on, answer or resume several workers from any harness, follow Pane's orchestrator guide: `runpane docs read --doc skills/pane-orchestration/SKILL.md`.
 
 ## Trivial work stays here
 

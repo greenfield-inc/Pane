@@ -218,6 +218,29 @@ when blocked. READY alone is activity evidence. Read the full report with
 `runpane agents status --panel <id> --json`. Resume stopped workers in the same
 panel with `runpane panels resume --panel <id> --wait-ready --yes --json`.
 
+Work an agent sends with `panels create`, `panes create` (with a prompt), or
+`panels submit` expects that report; `--no-expect-report` sends without
+waiting, and `--expect-report` asks for one on `--source user` work. If the
+agent goes ready, with nothing left running in the background, or exits
+without one,
+watchers that list `agent.report.missing` get `MISSING REPORT <pane> pane
+<pane-id> panel <panel-id> ready` with its last reply; add it to `--kinds`, for
+example `--until-event --kinds
+agent.report,agent.report.missing,agent.blocked,panel.exited,pane.gone`.
+`runpane inbox [--session <id|name>]` lists the reports, missing reports, and
+on-screen questions a Session has not acknowledged (an orchestrator reads it
+when it starts or resumes), and `runpane inbox ack <id>...` clears them.
+
+To dispatch and get the result in one call, add `--wait`. It blocks on that
+panel and prints one line of JSON when the worker reports (exit 0), ends
+without a report (3, with `lastOutput`), waits on a prompt (4, with
+`screenLines`), or exits (5); `--timeout 30m` gives up with exit 124. Run it as
+a background task:
+
+```bash
+runpane panels submit --panel <panel-id> --input-file prompt.md --as-file-pointer --wait --yes
+```
+
 Do not pipe follow through `head` or `grep -m1` to wait. Run `--until-event` as
 a supported background task, act on its events, then re-arm with its cursor.
 Never sleep-poll your own background task output. WATCH ERROR/nonzero exit
@@ -228,7 +251,7 @@ replacement. A normal expiry means re-arm with the next dispatch.
 
 ```bash
 runpane pr watch --pane <pane-id> --url https://github.com/owner/repo/pull/123 --head <full-sha> --json
-runpane watch --pane <pane-id> --since <generation-returned-above> --epoch <epoch-returned-above> --until-event --json --kinds pr.checks,pr.conflicted,pr.head,pr.review,pr.comment,pr.closed,pr.merged,pr.stopped,github.unavailable,github.recovered
+runpane watch --pane <pane-id> --since <generation-returned-above> --epoch <epoch-returned-above> --until-event --json --kinds pr.checks,pr.conflicted,pr.base_changed,pr.base_deleted,pr.head,pr.review,pr.comment,pr.closed,pr.merged,pr.stopped,github.unavailable,github.recovered
 runpane pr list --pane <pane-id> --json
 runpane pr unwatch --pane <pane-id> --url https://github.com/owner/repo/pull/123 --json
 ```
@@ -254,6 +277,13 @@ host/repository/number identity. It pins success to `--head`, or the first
 observed head; a new head emits `pr.head` and needs a fresh registration before
 success can be reported. Read existing discussions before arming. A wake
 means inspect the change; it never authorizes merging.
+
+The watch also reports when the ground under the PR moves. `pr.base_changed`
+(`BASE CHANGED`) fires when the base branch is retargeted, by a person or by
+GitHub after a stack parent merges and its branch is deleted; `base.from` and
+`base.to` name the old and new base. `pr.base_deleted` (`BASE DELETED`) fires
+when the base branch no longer exists; GitHub may close the PR right after.
+Both arrive at once under `--follow`. Rebase onto the new base and recheck CI.
 
 The daemon batches up to 25 fingerprints per host every two minutes (plus up
 to ten seconds of jitter), reads details on changes and at a 30-minute

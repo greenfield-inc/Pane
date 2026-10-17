@@ -30,7 +30,7 @@ export async function markTerminalPanelsInterrupted(
       const agentType = resumeState.agentType ?? resolveAgentTypeFromCommand(resumeState.initialCommand);
       if (!isCliAgentType(agentType) && !effectiveCustomResume(resumeState)) continue;
 
-      panel.state.customState = { ...customState, wasInterrupted: true, agentType };
+      panel.state.customState = { ...customState, wasInterrupted: true, interruptedAt: new Date().toISOString(), agentType };
       await updatePanel(panelId, { state: panel.state });
 
       const existing = interruptedPanels.get(panel.sessionId);

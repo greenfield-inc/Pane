@@ -642,6 +642,8 @@ def effective_watch_heartbeat_ms(seconds: float) -> float:
 
 def run_panes_create(parsed: Any) -> int:
     request = build_pane_create_request(parsed)
+    if parsed.expect_report is not None:
+        request["expectReport"] = parsed.expect_report
     confirm_pane_create(parsed, request)
     result = invoke_daemon(
         "runpane:panes:create",
@@ -649,6 +651,13 @@ def run_panes_create(parsed: Any) -> int:
         pane_dir=parsed.pane_dir,
         timeout_ms=(parsed.timeout_ms or 120_000) + (parsed.ready_timeout_ms or 30_000) + 10_000,
     )
+    if parsed.wait_for_result:
+        items = result.get("items") or []
+        if len(items) != 1:
+            raise ValueError("panes create --wait waits for one Pane; create several without --wait and dispatch each with panels submit --wait.")
+        # A Pane queued behind setup has no panel yet; its first agent panel's events still name the Pane.
+        if result.get("ok") and items[0].get("paneId"):
+            return wait_for_dispatch_result(parsed, items[0].get("paneId"), items[0].get("panelId"), result.get("generation"))
 
     if parsed.json:
         print_json(result)
@@ -867,6 +876,8 @@ def run_panels_list(parsed: Any) -> int:
 
 def run_panels_create(parsed: Any) -> int:
     request = build_panel_create_request(parsed)
+    if parsed.expect_report is not None:
+        request["expectReport"] = parsed.expect_report
     confirm_panel_create(parsed, request)
     result = invoke_daemon(
         "runpane:panels:create",
@@ -874,6 +885,8 @@ def run_panels_create(parsed: Any) -> int:
         pane_dir=parsed.pane_dir,
         timeout_ms=(parsed.ready_timeout_ms or 30_000) + 10_000,
     )
+    if parsed.wait_for_result and result.get("ok"):
+        return wait_for_dispatch_result(parsed, result.get("paneId"), result.get("panelId"), result.get("generation"))
 
     if parsed.json:
         print_json(result)
@@ -1059,10 +1072,195 @@ def describe_report_delivery(result: Dict[str, Any]) -> List[str]:
     return lines
 
 
+MAX_INBOX_DETAIL_LENGTH = 300
+
+
+def inbox_session(parsed: Any, env: Dict[str, str]) -> Optional[str]:
+    """`--session`, else the Session whose orchestrator this terminal is."""
+    return (parsed.session_id or "").strip() or (env.get("PANE_ORCHESTRATION_SESSION_ID") or "").strip() or None
+
+
+def run_inbox(parsed: Any, env: Optional[Dict[str, str]] = None) -> int:
+    env = dict(os.environ) if env is None else env
+    session = inbox_session(parsed, env)
+    if not session:
+        raise ValueError("runpane inbox needs --session <id|name> outside a Session orchestrator (PANE_ORCHESTRATION_SESSION_ID).")
+    result = invoke_daemon("runpane:inbox:list", [{"session": session}], pane_dir=parsed.pane_dir)
+    if parsed.json:
+        print_json(result)
+        return 0
+    items = result.get("items") or []
+    name = (result.get("session") or {}).get("name")
+    if not items:
+        print(f"Inbox for {name}: nothing unacknowledged.")
+        return 0
+    print(f"Inbox for {name}: {len(items)} unacknowledged.")
+    for item in items:
+        print(format_inbox_item(item))
+    print(f"Clear handled items with: runpane inbox ack {' '.join(item.get('id') for item in items)}")
+    return 0
+
+
+def run_inbox_ack(parsed: Any, env: Optional[Dict[str, str]] = None) -> int:
+    env = dict(os.environ) if env is None else env
+    session = inbox_session(parsed, env) if parsed.all else parsed.session_id
+    if parsed.all and not session:
+        raise ValueError("runpane inbox ack --all needs --session <id|name> outside a Session orchestrator.")
+    request: Dict[str, Any] = {
+        **optional_value("ids", None if parsed.all else parsed.inbox_ids),
+        **optional_value("session", session),
+        **optional_value("all", True if parsed.all else None),
+    }
+    result = invoke_daemon("runpane:inbox:ack", [request], pane_dir=parsed.pane_dir)
+    if parsed.json:
+        print_json(result)
+    else:
+        acknowledged = result.get("acknowledged") or []
+        print(f"Acknowledged {len(acknowledged)} inbox item{'' if len(acknowledged) == 1 else 's'}.")
+        unknown = result.get("unknown") or []
+        if unknown:
+            print(f"Not found (already acknowledged?): {', '.join(unknown)}")
+    return 0
+
+
+def format_inbox_item(item: Dict[str, Any]) -> str:
+    """`<id> REPORT <pane> pane <id> panel <id> ready pr#12 abc1234`, then indented detail lines."""
+    where = f"{_one_line(item.get('paneName') or '')} pane {item.get('paneId')} panel {item.get('panelId')}"
+    kind = item.get("kind")
+    if kind == "report":
+        report = item.get("report")
+        lines = [f"{item.get('id')} REPORT {where} {describe_report(report) if report else 'unknown'}"]
+        if report and report.get("summary"):
+            lines.append(f"  {_clip(_one_line(report['summary']))}")
+        return "\n".join(lines)
+    if kind == "report.missing":
+        lines = [f"{item.get('id')} MISSING REPORT {where} {item.get('reason') or 'ready'} without runpane report"]
+        if item.get("lastOutput"):
+            lines.append(f"  last {item.get('lastOutputSource') or 'output'}: {_clip(_one_line(item['lastOutput']), True)}")
+        return "\n".join(lines)
+    lines = [f"{item.get('id')} BLOCKED {where} waiting on a prompt"]
+    for line in (item.get("screenLines") or [])[-8:]:
+        lines.append(f"  | {line}")
+    return "\n".join(lines)
+
+
+def _one_line(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _clip(text: str, tail: bool = False) -> str:
+    """Cut to the detail length, keeping the start, or the end when `tail` (an agent's conclusion is last)."""
+    if len(text) <= MAX_INBOX_DETAIL_LENGTH:
+        return text
+    return f"…{text[len(text) - MAX_INBOX_DETAIL_LENGTH + 1:]}" if tail else f"{text[:MAX_INBOX_DETAIL_LENGTH - 1]}…"
+
+
+# Each way a `--wait` dispatch ends, by journal kind: (outcome, exit code).
+DISPATCH_OUTCOMES = {
+    "agent.report": ("report", 0),
+    "agent.report.missing": ("missing", 3),
+    "agent.blocked": ("blocked", 4),
+    "panel.exited": ("exited", 5),
+    "pane.gone": ("gone", 5),
+}
+DISPATCH_TIMEOUT_EXIT_CODE = 124
+# One daemon request waits at most this long, so a dropped connection is noticed.
+DISPATCH_WAIT_CALL_MS = 60_000
+RETRYABLE_DISPATCH_WAIT_ERRORS = {
+    "ERR_RUNPANE_DAEMON_CLOSED",
+    "ERR_RUNPANE_DAEMON_CONNECT_FAILED",
+    "ERR_RUNPANE_DAEMON_TIMEOUT",
+    "ECONNREFUSED",
+    "ENOENT",
+}
+
+
+def wait_for_dispatch_result(parsed: Any, pane_id: Optional[str], panel_id: Optional[str], since: Optional[int]) -> int:
+    """`--wait`: block until the dispatched panel reports, misses its report, waits on a prompt, or
+    exits, then print the result as one line of JSON. `since` is the journal generation the daemon
+    took before delivering the work, so an event right after delivery is never missed."""
+    if not pane_id or since is None:
+        raise RuntimeError(
+            "This Pane daemon does not return a journal position, so --wait cannot follow the work. "
+            "Update Pane, or use runpane watch --until-event."
+        )
+    deadline = time.monotonic() * 1_000 + parsed.wait_timeout_ms if parsed.wait_timeout_ms else None
+    try:
+        while True:
+            remaining = DISPATCH_WAIT_CALL_MS if deadline is None else max(0, deadline - time.monotonic() * 1_000)
+            if remaining == 0:
+                print(json.dumps({"ok": False, "outcome": "timeout", "paneId": pane_id, "panelId": panel_id, "generation": since}, ensure_ascii=False), flush=True)
+                return DISPATCH_TIMEOUT_EXIT_CODE
+            timeout_ms = int(min(DISPATCH_WAIT_CALL_MS, remaining))
+            try:
+                result = invoke_daemon(
+                    "runpane:workspace:wait",
+                    [{"since": since, "timeoutMs": timeout_ms, "kinds": list(DISPATCH_OUTCOMES), "paneIds": [pane_id]}],
+                    pane_dir=parsed.pane_dir,
+                    timeout_ms=timeout_ms + 5_000,
+                    event_include=[],
+                )
+            except PaneDaemonClientError as error:
+                # A daemon restart drops the connection; the saved journal keeps the position.
+                if error.code not in RETRYABLE_DISPATCH_WAIT_ERRORS:
+                    raise
+                time.sleep(1)
+                continue
+            entry = next((
+                candidate for candidate in result.get("entries") or []
+                if not candidate.get("replay") and not candidate.get("baseline")
+                and candidate.get("kind") in DISPATCH_OUTCOMES
+                and (candidate.get("kind") == "pane.gone" or not panel_id or candidate.get("panelId") == panel_id)
+            ), None)
+            if entry:
+                outcome, exit_code = DISPATCH_OUTCOMES[entry["kind"]]
+                print(json.dumps(compact_dispatch_result(outcome, entry), ensure_ascii=False), flush=True)
+                return exit_code
+            since = max(since, result.get("generation", since))
+    except KeyboardInterrupt:
+        return 130
+
+
+def compact_dispatch_result(outcome: str, entry: Dict[str, Any]) -> Dict[str, Any]:
+    """The `--wait` result: what the orchestrator needs to act, never the transcript."""
+    result: Dict[str, Any] = {
+        "ok": outcome == "report",
+        "outcome": outcome,
+        "paneId": entry.get("paneId"),
+        "paneName": entry.get("paneName"),
+        "generation": entry.get("gen"),
+        "at": entry.get("at"),
+    }
+    if entry.get("panelId"):
+        result["panelId"] = entry["panelId"]
+    report = entry.get("report")
+    if report:
+        compact = {"state": report.get("state")}
+        for key in ("pr", "head", "summary", "summaryPath", "question"):
+            if report.get(key) is not None:
+                compact[key] = report[key]
+        if report.get("summaryTruncated"):
+            compact["summaryTruncated"] = True
+        result["report"] = compact
+    if entry.get("screenLines"):
+        result["screenLines"] = entry["screenLines"]
+    if entry.get("lastOutput"):
+        result["lastOutput"] = entry["lastOutput"]
+        if entry.get("lastOutputSource"):
+            result["lastOutputSource"] = entry["lastOutputSource"]
+    if entry.get("reason"):
+        result["reason"] = entry["reason"]
+    if entry.get("exitCode") is not None:
+        result["exitCode"] = entry["exitCode"]
+    return result
+
+
 def run_panels_submit(parsed: Any) -> int:
     request = build_panel_input_request(parsed, "submit")
     confirm_panel_input(parsed, request, "submit")
     result = invoke_daemon("runpane:panels:submit", [request], pane_dir=parsed.pane_dir)
+    if parsed.wait_for_result and result.get("ok"):
+        return wait_for_dispatch_result(parsed, result.get("paneId"), result.get("panelId"), result.get("generation"))
 
     if parsed.json:
         print_json(result)
@@ -1110,6 +1308,10 @@ def print_prompt_notes(result: Dict[str, Any], prefix: str = "") -> None:
     """The prompt file Pane wrote and any leading-character warnings, for human output."""
     if result.get("promptFile"):
         print(f"{prefix}Prompt file: {result.get('promptFile')}")
+    for attachment in result.get("attachments") or []:
+        print(f"{prefix}Attached: {attachment}")
+    if result.get("expectedReport"):
+        print(f"{prefix}Expecting a runpane report; without one Pane emits agent.report.missing.")
     for warning in result.get("warnings") or []:
         print(f"{prefix}Warning ({warning.get('code')}): {warning.get('message')}")
 
@@ -1273,8 +1475,10 @@ def build_panel_input_request(parsed: Any, command: str = "input") -> Dict[str, 
         "panelId": parsed.panel_id,
         "input": text,
         **optional_value("asFilePointer", True if parsed.as_file_pointer else None),
+        **optional_value("attachments", resolve_attachments(parsed, f"panels {command}")),
         **optional_value("interrupt", True if parsed.interrupt else None),
         **optional_value("source", parsed.source),
+        **optional_value("expectReport", parsed.expect_report if command == "submit" else None),
     }
 
 
@@ -1397,7 +1601,10 @@ def build_tool_spec(parsed: Any, command: str = "panes create") -> Dict[str, Any
     initial_input = resolve_initial_input(parsed)
     if parsed.as_file_pointer and initial_input is None:
         raise ValueError(f"--as-file-pointer needs a prompt: pass --prompt or --initial-input-file to runpane {command}.")
-    file_pointer = optional_value("initialInputAsFilePointer", True if parsed.as_file_pointer else None)
+    file_pointer = {
+        **optional_value("initialInputAsFilePointer", True if parsed.as_file_pointer else None),
+        **optional_value("initialInputAttachments", resolve_attachments(parsed, command)),
+    }
 
     # With --tool-command, --agent names the agent the command runs (a wrapper
     # such as `agent-farm run`); Pane launches the command unchanged.
@@ -1433,6 +1640,24 @@ def build_tool_spec(parsed: Any, command: str = "panes create") -> Dict[str, Any
         **optional_value("initialInput", initial_input),
         **file_pointer,
     }
+
+
+def resolve_attachments(parsed: Any, command: str) -> Optional[List[str]]:
+    """`--attach` files as absolute paths; Pane copies them beside the `--as-file-pointer` prompt file."""
+    attachments = getattr(parsed, "attachments", None) or []
+    if not attachments:
+        return None
+    if command not in ("panes create", "panels create", "panels submit"):
+        raise ValueError(f"--attach is not supported by runpane {command}. Nothing was sent. Use --attach with panes create, panels create or panels submit.")
+    if not parsed.as_file_pointer:
+        raise ValueError(f"--attach needs --as-file-pointer: Pane lists the copied files beside the prompt file. Nothing was sent. Add --as-file-pointer to runpane {command}.")
+    resolved = []
+    for file in attachments:
+        absolute = os.path.abspath(file)
+        if not os.path.isfile(absolute):
+            raise ValueError(f"--attach {file}: no such file. Nothing was sent. Pass an existing file path, then retry.")
+        resolved.append(absolute)
+    return resolved
 
 
 def resolve_initial_input(parsed: Any) -> Optional[str]:
@@ -1675,6 +1900,9 @@ def format_workspace_entry_line(entry: Dict[str, Any]) -> Optional[str]:
         return f"CHANGED {name} {pane}{panel}"
     if kind == "panel.stopped":
         return f"STOPPED {name} {pane}{panel}"
+    if kind == "panel.resumed":
+        nudged = "" if entry.get("nudged") else " NOT NUDGED"
+        return f"RESUMED {name} {pane}{panel} {sanitize_watch_value(entry.get('reason') or 'unknown')}{nudged}"
     if kind == "agent.idle":
         minutes = max(0, int(entry.get("idleMs") or 0) // 60_000)
         return f"IDLE {name} {minutes}m {pane}{panel}"
@@ -1685,7 +1913,7 @@ def format_workspace_entry_line(entry: Dict[str, Any]) -> Optional[str]:
         return f"{workspace_label(kind)} {name} {pane}"
     if kind in {"pane.associated", "pane.detached"}:
         return f"{workspace_label(kind)} {name} {pane} session {sanitize_watch_value(entry.get('sessionId') or '')}"
-    pr_labels = {"pr.closed": "CLOSED", "pr.head": "HEAD CHANGED", "pr.review": "REVIEW", "pr.comment": "COMMENT", "pr.stopped": "WATCH STOPPED", "github.unavailable": "GITHUB UNAVAILABLE", "github.recovered": "GITHUB RECOVERED"}
+    pr_labels = {"pr.closed": "CLOSED", "pr.head": "HEAD CHANGED", "pr.base_changed": "BASE CHANGED", "pr.base_deleted": "BASE DELETED", "pr.review": "REVIEW", "pr.comment": "COMMENT", "pr.stopped": "WATCH STOPPED", "github.unavailable": "GITHUB UNAVAILABLE", "github.recovered": "GITHUB RECOVERED"}
     if kind in pr_labels:
         reason = ": " + sanitize_watch_value(entry["reason"]) if entry.get("reason") else ""
         return f"PR {name} {pane} #{(entry.get('pr') or {}).get('number', '?')} {pr_labels[kind]}{reason}"
@@ -1694,6 +1922,8 @@ def format_workspace_entry_line(entry: Dict[str, Any]) -> Optional[str]:
     if kind == "agent.report":
         report = entry.get("report")
         return f"REPORT {name} {pane}{panel} {describe_report(report) if report else 'unknown'}"
+    if kind == "agent.report.missing":
+        return f"MISSING REPORT {name} {pane}{panel} {sanitize_watch_value(entry.get('reason') or 'ready')}"
     return f"{workspace_label(kind)} {name} {pane}{panel}"
 
 
@@ -1766,12 +1996,14 @@ def workspace_label(kind: Any) -> str:
         "pane.gone": "GONE",
         "panel.exited": "EXIT",
         "panel.stopped": "STOPPED",
+        "panel.resumed": "RESUMED",
         "pane.associated": "JOINED",
         "pane.detached": "LEFT",
         "pr.conflicted": "PR CONFLICTED",
         "pr.checks": "PR CHECKS",
         "pr.merged": "PR MERGED",
         "agent.report": "REPORT",
+        "agent.report.missing": "MISSING REPORT",
     }.get(kind, str(kind).upper())
 
 

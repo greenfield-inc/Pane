@@ -6,7 +6,7 @@ export interface WorkspaceIdleCandidate {
   paneId: string;
   paneName: string;
   panelTitle?: string;
-  agentType: string;
+  agentType?: string;
   repoId?: number;
   repoName?: string;
   worktreePath?: string;

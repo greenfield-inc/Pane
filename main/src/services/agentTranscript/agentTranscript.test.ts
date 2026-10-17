@@ -3,6 +3,7 @@ import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { claudeProjectDirName, parseClaudeLine } from './claude';
+import { CLAUDE_API_ENOTFOUND_TRANSCRIPT_LINE } from '../agentStatus/__fixtures__/claudeApiErrorScreens';
 import { agentTranscripts, turnTextMatches, type TranscriptLocator } from './index';
 
 const { findUserTurnSince, lastAssistantMessage } = agentTranscripts;
@@ -282,5 +283,14 @@ describe('readTranscriptTail', () => {
     expect((await readTranscriptTail(file, parseClaudeLine)).at(-1)?.text).toBe('Reply with the single word OK');
     fs.appendFileSync(file, JSON.stringify(claude.user('Next prompt', '2026-09-27T18:35:00.000Z')).slice(40) + '\n');
     expect((await readTranscriptTail(file, parseClaudeLine)).at(-1)?.text).toBe('Next prompt');
+  });
+});
+
+describe('parseClaudeLine on an API error', () => {
+  it('reads the synthetic API error message as the last assistant reply', () => {
+    expect(parseClaudeLine(CLAUDE_API_ENOTFOUND_TRANSCRIPT_LINE)).toMatchObject({
+      kind: 'assistant',
+      text: "API Error: Can't reach the API server — check your internet or DNS (ENOTFOUND)",
+    });
   });
 });

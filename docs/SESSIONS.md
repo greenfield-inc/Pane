@@ -441,6 +441,54 @@ An association identifies work that a Session coordinates; it does not grant
 implementation authority by itself. Detach a Pane before assigning it to a
 different Session.
 
+## Worker file access
+
+A worker's agent may be allowed to read only its working directories (Claude
+Code's `permissions.blockReadsOutsideWorkingDirectories`). Its brief and the
+Session files the brief points to must not sit outside them, or the worker
+stops on a permission prompt nobody is watching.
+
+**Briefs and attachments.** `--as-file-pointer` (`panes create`,
+`panels create`, `panels submit`, `agents send`) writes the prompt inside the
+Pane's worktree, at `<worktree>/.pane/prompts/<timestamp>.md`, and sends the
+one line `Read and follow .pane/prompts/<timestamp>.md`. The path is relative
+to the worktree, where the agent starts: given an absolute path, Claude Code
+often reads it with `cd <worktree>; cat <file>`, which its read check can't
+verify, so it asks. The result's `promptFile` is always absolute. Pane adds `/.pane/prompts/` to the
+repository's `.git/info/exclude` (never a committed `.gitignore`), so the file
+can't be committed. `--attach <file>` (repeatable; `panes create`,
+`panels create` and `panels submit`, with `--as-file-pointer`) copies each file
+into `<worktree>/.pane/prompts/<timestamp>/` and sends
+`Read and follow <path> (attached: <copy>, ...)`, also worktree-relative; the
+result lists the copies, absolute, in `attachments`. Attach mockups, plans or dispatch notes the worker needs
+instead of pointing at the Session folder. Without a local git worktree (a
+folder that is not the top of a checkout, a WSL repo) the file goes to
+`<pane-dir>/prompts/<pane-id>/` as before, and the pointer line names it by
+absolute path.
+
+**The Session folder.** A Pane associated with a Session gets that Session's
+folder (`<pane-dir>/sessions/<id>`) as `PANE_SESSION_DIR` in every tab created
+after the association. The Session's own terminals get it too.
+`PANE_ORCHESTRATION_SESSION_ID` keeps its meaning: it is set only in the
+Session's own terminals, never in a worker's. Workers read the folder and never
+write it; the orchestrator is its only writer. What each built-in template gets:
+
+| Agent | Read access to the Session folder |
+| --- | --- |
+| Claude Code (`claude --dangerously-skip-permissions`) | Pane adds `--settings '{"permissions":{"additionalDirectories":["<folder>"],"deny":["Edit(/<folder>/**)"]}}'`. `additionalDirectories` (like `--add-dir`) makes the folder a working directory, which grants read and write; an `allow` rule alone does not lift `blockReadsOutsideWorkingDirectories`. The `Edit` deny rule takes the file tools' write access back (it covers Write too; Claude ignores `Write(path)` rules). Under bypass permissions Bash can still write anywhere, so the read-only rule is a guard, not a sandbox. The folder's `CLAUDE.md` is not loaded. Not added on Windows. |
+| Codex (`codex --yolo`) | Nothing to add: `--yolo` runs without a sandbox, and every Codex sandbox mode reads the whole disk. Codex's `--add-dir` grants write access, so Pane does not pass it. |
+| Cursor, OpenCode | Only `PANE_SESSION_DIR`. |
+| `--tool-command` wrappers (agent-farm) and custom commands | Only `PANE_SESSION_DIR`; the wrapper maps it to its harness's flag. |
+
+The flag is fixed when the tab is created: a tab opened before its Pane was
+associated has no `PANE_SESSION_DIR` until a new tab is created.
+
+Write the folder's absolute path into the brief rather than
+`$PANE_SESSION_DIR`. Under `blockReadsOutsideWorkingDirectories` Claude Code
+asks before any Bash command whose variables it cannot check, so a worker that
+runs `echo $PANE_SESSION_DIR` or `cat "$PANE_SESSION_DIR/..."` stops on a
+prompt. The variable is for wrappers and scripts.
+
 ## Stable interfaces
 
 The shared record and service are:
@@ -589,6 +637,23 @@ runpane lock release --name testing-account --json
 If a worker interrupts a waiting `lock acquire`, the daemon may still grant it
 the lock for up to two minutes; release it, or let the TTL expire.
 
+## Orchestrator guide
+
+The mechanics of driving workers through Pane, for any orchestrator and any
+harness (a Pane Session, a Claude Code or Codex session in a Pane terminal, or
+a wrapper such as Agent Farm), live in one place: the bundled
+[`pane-orchestration`](../main/src/services/paneChatBundle/skills/pane-orchestration/SKILL.md)
+skill. Any agent can read it with
+`runpane docs read --doc skills/pane-orchestration/SKILL.md`, and the home
+`pane` skill points there. It covers one Pane per feature, launching a worker
+as a Pane or tab (including `--tool-command` wrappers, `--initial-input-file
+--as-file-pointer`, `--wait-ready` and reading the delivery result), the one
+wait primitive (`runpane watch --session <S> --as <name> --until-event`) and
+what each wake means, worker reports and how a status file pairs with them,
+answering workers, resuming after a restart or sleep, showing pages beside the
+person, shared-checkout and port etiquette, handoff, cleanup, and what changes
+after the next release. The sections below are the reference for each piece.
+
 ## Session watcher
 
 When monitoring is authorized, use one durable, named watcher per Session. Do not start it merely because a Session opens. `--session` takes the Session ID
@@ -611,7 +676,9 @@ Pane.
 
 After a Pane restart, an agent panel whose process did not come back is
 reported once as `panel.stopped` (`STOPPED <pane-name> pane <pane-id> panel
-<panel-id>`, `running: false`), never as `agent.ready`. Restart it in place,
+<panel-id>`, `running: false`), never as `agent.ready`. Pane restarts Session
+workers itself (see "Auto-resume" below); to restart any other panel by hand,
+or a worker Pane left stopped, restart it in place,
 with the same panel ID and its conversation, using `runpane panels resume
 --panel <panel-id> --wait-ready --yes --json`, or every stopped agent panel of
 the Session at once with `runpane panels resume --session <session-id>
@@ -629,6 +696,37 @@ after the old processes exit. This also applies when bounded teardown could
 not kill a process; bulk resume reports the error for that panel and continues
 with the others. Archived Panes cannot be resumed, even if archive cleanup failed.
 
+### Auto-resume
+
+While Settings → General → Power → "Resume interrupted Session agents" is on
+(the default), Pane brings Session workers back by itself, so an orchestrator
+needs no instructions of its own for it
+(`main/src/services/sessionAgentAutoResume.ts`):
+
+- When Pane starts and when the computer wakes, it restarts every stopped agent
+  panel of a worker Pane associated with an active (not archived) Session, in
+  place, the same restart `runpane panels resume` runs. It skips the Session's
+  own orchestrator panel, workers whose last `runpane report` was `done` or
+  `failed`, panels an update holds for review, and Panes outside a Session. On
+  a wake it waits 10 seconds for the network first.
+- A worker whose turn ends on a transient API failure (a connection error or
+  timeout, a 5xx or overloaded response, "Your computer went to sleep
+  mid-response", `ENOTFOUND`, a dropped Codex stream) is nudged after 30
+  seconds, then 2 and 5 minutes if it fails again: at most 3 times in an hour.
+  Auth errors, usage limits and an over-long prompt are not retried.
+- Each agent gets one nudge, `You were interrupted at <time>. Re-read your
+  task's status and continue.`, sent like `panels submit`. Pane never types
+  into a composer that holds unsent text, and never nudges an agent that is
+  waiting on a person.
+- Each one is journaled as `panel.resumed` (`RESUMED <pane-name> pane <pane-id>
+  panel <panel-id> <reason>`), where `reason` is `pane-start`, `system-resume`
+  or `api-error`. The entry carries `nudged`, `interruptedAt`, and for an
+  `api-error` the `attempt`. A line ending `NOT NUDGED` means Pane typed
+  nothing: `heldInputPresent: true` (unsent text), `to: "blocked"` (waiting on
+  a person), or the agent did not come back ready. `panel.resumed` is opt-in
+  like `panel.stopped`: a Session-scoped watch and `--follow` receive it, other
+  consumers only when `--kinds` lists it.
+
 Membership changes are journal entries: `pane.associated` (`JOINED <pane-name>
 pane <pane-id> session <session-id>`) and `pane.detached` (`LEFT ...`). The
 Session manager emits them from `sessions associate` (only when the Pane was
@@ -641,7 +739,7 @@ Panes, so held lines survive membership changes.
 
 ```bash
 runpane pr watch --pane <pane-id> --url https://github.com/owner/repo/pull/123 --head <full-sha> --json
-runpane watch --pane <pane-id> --since <generation-returned-above> --epoch <epoch-returned-above> --until-event --json --kinds pr.checks,pr.conflicted,pr.head,pr.review,pr.comment,pr.closed,pr.merged,pr.stopped,github.unavailable,github.recovered
+runpane watch --pane <pane-id> --since <generation-returned-above> --epoch <epoch-returned-above> --until-event --json --kinds pr.checks,pr.conflicted,pr.base_changed,pr.base_deleted,pr.head,pr.review,pr.comment,pr.closed,pr.merged,pr.stopped,github.unavailable,github.recovered
 runpane pr list --pane <pane-id> --json
 runpane pr unwatch --pane <pane-id> --url https://github.com/owner/repo/pull/123 --json
 ```
@@ -667,6 +765,13 @@ host/repository/number identity. It pins success to `--head`, or the first
 observed head; a new head emits `pr.head` and needs a fresh registration before
 success can be reported. Read existing discussions before arming. A wake
 means inspect the change; it never authorizes merging.
+
+The watch also reports when the ground under the PR moves. `pr.base_changed`
+(`BASE CHANGED`) fires when the base branch is retargeted, by a person or by
+GitHub after a stack parent merges and its branch is deleted; `base.from` and
+`base.to` name the old and new base. `pr.base_deleted` (`BASE DELETED`) fires
+when the base branch no longer exists; GitHub may close the PR right after.
+Both arrive at once under `--follow`. Rebase onto the new base and recheck CI.
 
 The daemon batches up to 25 fingerprints per host every two minutes (plus up
 to ten seconds of jitter), reads details on changes and at a 30-minute
@@ -755,13 +860,18 @@ total deadline (exit 124); under follow it bounds each daemon request.
 REPORT remains the completion signal: workers use `runpane report --state
 ready|blocked|failed|done --summary-file <path>`, adding a PR/head and a question
 when blocked. READY alone is activity evidence. Read the full report with
-`runpane agents status --panel <id> --json`. Resume stopped workers in the same
-panel with `runpane panels resume --panel <id> --wait-ready --yes --json`.
+`runpane agents status --panel <id> --json`. Pane resumes and nudges stopped
+or interrupted Session workers itself (RESUMED lines, see "Auto-resume"); resume
+any other stopped worker in the same panel with `runpane panels resume --panel
+<id> --wait-ready --yes --json`.
 
 Do not pipe follow through `head` or `grep -m1` to wait. Run `--until-event` as
-a supported background task, act on its events, then re-arm with its cursor.
+a supported background task, act on its events, then re-arm with its cursor
+(the [orchestrator guide](#orchestrator-guide) has the one wait command and
+what to do on each wake, timeout, reset and error).
 Never sleep-poll your own background task output. WATCH ERROR/nonzero exit
-means failure: report it and re-arm once. A superseded cursor means keep the
+means failure: re-read every worker's status, then re-arm once; a second
+failure goes to `runpane doctor --report`. A superseded cursor means keep the
 replacement. A normal expiry means re-arm with the next dispatch.
 
 
@@ -812,12 +922,120 @@ report means look, and maybe nudge: `runpane panels last-message --panel
 transcript (never the screen; `transcript-unavailable` otherwise), and the
 worker can be asked to run `runpane report`.
 
-An orchestrator outside a Session, or one whose harness wakes only when a
-process exits (Claude Code background Bash, Codex), waits for a report with
-`runpane watch --pane <pane-id> --as <name> --until-event --json --kinds
-agent.report,agent.blocked,panel.exited,pane.gone`, run as a background task and run again after each
-event. `--until-event` exits 0 on the first event; a `RESET` and the caller's
-own panel never end the wait.
+An orchestrator whose harness wakes only when a process exits (Claude Code
+background Bash, Codex) waits with the one wait primitive from the
+[orchestrator guide](#orchestrator-guide): `runpane watch --session <S> --as
+<name> --until-event --json --kinds
+agent.report,agent.report.missing,agent.blocked,agent.ready,panel.exited,panel.stopped,pane.gone` (`--pane <pane-id>` outside a Session), run as a background
+task and run again after each event. `--until-event` exits 0 on the first
+event (124 at a `--timeout-ms` deadline, if you give one); a `RESET` and the caller's own panel never end
+the wait. When a worker keeps richer state in a status file, it writes the file
+first and reports with `--summary-file <status file>`; the file is the truth
+and the report is the signal.
+
+### Dispatching with `--wait`
+
+An orchestrator dispatches a worker with one background tool call that
+returns the worker's result:
+
+```text
+runpane panels submit --panel <panel-id> --input-file <prompt-file> --as-file-pointer --wait --yes
+```
+
+`panels create` and `panes create` with a prompt take `--wait` too. `--wait`
+turns the expected report on and blocks on that panel until the first
+`agent.report`, `agent.report.missing`, `agent.blocked`, `panel.exited`, or
+`pane.gone`. It then prints one line of JSON (`dispatchWaitResult` in the
+contract) and exits:
+
+| `outcome` | Exit | Carries |
+| --- | --- | --- |
+| `report` | 0 | `report`: state, summary, `summaryPath`, PR, head, question |
+| `missing` | 3 | `lastOutput` and `lastOutputSource` |
+| `blocked` | 4 | `screenLines`, the prompt the worker waits on |
+| `exited`, `gone` | 5 | `exitCode` or `reason` |
+| `timeout` | 124 | after `--timeout <duration>` (`30m`, `2h`) |
+
+The result never includes the transcript. The daemon stamps the result of
+every create and submit with the journal generation it read before delivering
+the work, and `--wait` follows the journal from there
+(`runpane:workspace:wait` filtered to the Pane), so an event that fires right
+after delivery can't be missed, and a daemon restart only reconnects. Like
+`--until-event`, it is a single-event wait: it delivers at once, without
+`--follow`'s settling or batching, and since it exits on the event, a plain
+background task is enough (no line-delivering monitor). Claude
+Code wakes the orchestrator when the background call exits, and the line
+arrives as the tool result. To answer a blocked worker, send the answer with
+another `panels submit --wait`, which takes a new position and arms a new
+expectation.
+
+### Expected reports
+
+Work sent to an agent through runpane expects a `runpane report` back: a
+`panels submit` to an agent's panel, and a `panels create` or `panes create`
+that carries a prompt. A request marked `--source user` (Pane's own UI marks
+its sends that way) expects none, and neither does typing into a tab, which
+never goes through runpane. `--no-expect-report` sends fire-and-forget input;
+`--expect-report` asks for a report anyway, also from a plain shell panel.
+`shouldExpectReport()` in `main/src/ipc/runpane.ts` holds the rule. Pane saves `{ since }` per panel in `expected-reports.json` below `PANE_DIR`
+(results echo it as `expectedReport`); only the tracker writes that file, so
+panel-state writes cannot bring back a cleared expectation. When the agent then goes ready (`agent.ready`)
+or its panel exits without a report made at or after `since`, Pane journals
+one `agent.report.missing` entry (`MISSING REPORT <pane-name> pane <pane-id>
+panel <panel-id> ready|exited`) and clears the expectation. The entry's
+`lastOutput` is the agent's last reply from its transcript, or else the last
+20 lines on its screen (`lastOutputSource: transcript|screen`), cut to 2,000
+characters with the end kept. A report clears the expectation.
+
+An agent can end its turn while work it started keeps running. Pane reads
+that from the screen: Claude Code counts running background shells in its
+footer (`⏵⏵ bypass permissions on · 1 shell`) and lists each running
+background subagent under it (`◯ general-purpose  <task>  14s`); Codex prints
+`1 background terminal running · /ps to view` above its prompt
+(`detectAgentBackgroundWork()` in `agentScreenSignature.ts`). While one shows,
+a READY does not raise the missing report. Claude takes a new turn when the
+work finishes, and that turn's READY decides. Codex doesn't, so Pane looks at
+the screen again every 10 seconds while the panel stays ready, and raises
+once nothing runs. An exit raises at once.
+
+Like
+`agent.report`, the kind reaches only watchers that list it in `--kinds` (a
+Session scope alone does not deliver it), and it skips the `--min-interval`
+batch. The tracker is `main/src/services/expectedReports.ts`.
+
+### Questions on screen
+
+Pane's status detection (`main/src/services/agentStatus/manifests.ts`)
+classifies a panel as blocked when its screen shows a live prompt waiting on
+input: Claude's AskUserQuestion picker, permission prompts, folder trust, the
+"Allow external CLAUDE.md file imports?" dialog, and Codex's folder-trust,
+sign-in, approval and "Update available" screens. The journal records
+`agent.blocked` only once a panel has stayed blocked for 2 seconds
+(`BLOCKED_DEBOUNCE_MS` in `workspaceJournal.ts`), so a prompt-like line that
+flashes past in normal output never becomes BLOCKED. The entry carries
+`screenLines`: up to 20 non-empty lines of the screen region the prompt was
+matched in. The agent does not need to report anything for this.
+
+### Session inbox
+
+Pane keeps, per Session, what its orchestrator has not acknowledged:
+reports (`agent.report`), missing reports (`agent.report.missing`), and
+questions on screen (`agent.blocked`, with `screenLines`). It is fed from the
+journal for every Pane associated with the Session (`main/src/services/sessionInbox.ts`)
+and saved in `session-inbox.json` below `PANE_DIR`, so a dead or never-armed
+watcher cannot hide a finished worker. A newer report replaces the panel's
+older report or missing report; a blocked item goes once its panel moves on
+(busy, ready, exited, or reported). Each Session keeps at most 200 items.
+
+```text
+runpane inbox --session <id|name> [--json]       # defaults to $PANE_ORCHESTRATION_SESSION_ID
+runpane inbox ack <item-id>... [--session <id|name>]
+runpane inbox ack --all --session <id|name>
+```
+
+An orchestrator runs `runpane inbox` when it starts or resumes, to catch what
+finished while it was down. Pane never adds the inbox to the orchestrator's
+turns: worker output reaches it only as the result of a tool call it made.
 
 ## Skill contract
 

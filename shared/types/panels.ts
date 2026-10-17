@@ -33,6 +33,12 @@ export type TerminalAgentDetection = 'declared' | 'command' | 'process' | 'scree
 /** What a worker says about its task when it runs `runpane report`. */
 export type TerminalAgentReportState = 'ready' | 'blocked' | 'failed' | 'done';
 
+/** A report the sender of a panel's work is waiting for (`--expect-report`); kept in `expected-reports.json`. */
+export interface TerminalExpectedReport {
+  /** When the work was sent; a report at or after this time fulfils it. */
+  since: string;
+}
+
 /** The latest `runpane report` from an agent panel, kept in its custom state so it survives restarts. */
 export interface TerminalAgentReport {
   state: TerminalAgentReportState;
@@ -92,6 +98,7 @@ export interface TerminalPanelState {
 
   // Auto-resume state (for graceful shutdown/restart)
   wasInterrupted?: boolean;          // Whether this terminal was active when app shutdown occurred
+  interruptedAt?: string;            // When that shutdown stopped it, for the auto-resume nudge
   updateResumeHold?: string;         // Operation owning the stopped panel; explicit resume releases it.
   updateResumeId?: string;           // Exact identity required by automatic update restoration.
   hasClaudeSessionId?: boolean;      // Whether --session-id was already passed to Claude (use --resume next time)
@@ -114,6 +121,8 @@ export interface TerminalPanelState {
   orchestrationWorkspace?: string;
   /** Applied when the terminal next starts, not while its agent is running. */
   orchestrationProfile?: string;
+  /** Folder of the Session this worker's Pane belongs to, as the agent sees it; exported as PANE_SESSION_DIR. */
+  sessionFolder?: string;
   /** Wrapper/custom commands own their flags and resume behavior. */
   preserveLaunchCommand?: boolean;
   customResume?: CustomCommandResume | null;

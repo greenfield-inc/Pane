@@ -76,7 +76,9 @@ fixtures came from.
 `main/src/services/agents/agentResume.ts` → `resolveResumeId` maps the agent to the
 resume id shown in the resume dialog. `sessionManager.resumeInterruptedSessions` and
 the `index.ts` graceful-shutdown path are agent-generic once the classifier knows the
-binary.
+binary. `sessionAgentAutoResume.ts` restarts Session workers through the same path, and
+lists the agent's transient API error lines (`TRANSIENT_API_ERRORS`): add the new agent's
+network and overload failures there.
 
 ## 6. RunPane IPC
 

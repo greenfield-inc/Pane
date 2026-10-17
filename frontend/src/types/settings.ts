@@ -20,6 +20,7 @@ export type SettingsSettingId =
   | 'send-feedback'
   | 'start-on-login'
   | 'keep-awake'
+  | 'auto-resume-session-agents'
   | 'html-file-open-mode'
   | 'theme'
   | 'appearance-mode'

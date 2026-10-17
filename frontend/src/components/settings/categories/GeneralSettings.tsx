@@ -109,17 +109,29 @@ export function GeneralSettings({ persistence, onUpdate, onSendFeedback }: Gener
         </SettingRow>
       </SettingsSection>
 
-      <SettingsSection title="Power" description="System sleep behavior while sessions are active.">
+      <SettingsSection title="Power" description="System sleep, and what happens to agents a restart or sleep interrupted.">
         <SettingRow
           settingId="keep-awake"
           label="Keep computer awake while sessions are active"
-          description="Prevents the system from idle-sleeping while any session is active. The display can still turn off; closing the lid or choosing Sleep still sleeps the machine."
+          description="Prevents the system from idle-sleeping while an agent is working or any session is active. The display can still turn off; closing the lid or choosing Sleep still sleeps the machine."
           saveState={persistence.saveStates['keep-awake']}
         >
           <ImmediateToggle
             label="Keep computer awake while sessions are active"
             value={config.keepAwakeWhileSessionsActive !== false}
             onSave={(value) => persistence.saveConfig('keep-awake', { keepAwakeWhileSessionsActive: value })}
+          />
+        </SettingRow>
+        <SettingRow
+          settingId="auto-resume-session-agents"
+          label="Resume interrupted Session agents"
+          description="When Pane starts, the computer wakes, or an agent's turn ends on a network or API error, restart the stopped agents working for a Session and tell each one to continue. A composer holding unsent text is never typed into."
+          saveState={persistence.saveStates['auto-resume-session-agents']}
+        >
+          <ImmediateToggle
+            label="Resume interrupted Session agents"
+            value={config.autoResumeSessionAgents !== false}
+            onSave={(value) => persistence.saveConfig('auto-resume-session-agents', { autoResumeSessionAgents: value })}
           />
         </SettingRow>
       </SettingsSection>
