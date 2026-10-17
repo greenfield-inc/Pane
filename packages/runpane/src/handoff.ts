@@ -6,7 +6,7 @@ import { boundary, decodeBoundary, type BoundarySchema } from './boundaryDecoder
 import type { ParsedArgs, RunpaneAgent } from './commands';
 import { PaneDaemonClientError, resolvePaneDirectory, invokeDaemon, invokeRemoteDaemon } from './daemonClient';
 import { buildPaneCreateRequest, buildPanelCreateRequest, paneCreateResultSchema, panelCreateResultSchema, paneListResultSchema, panelListResultSchema, panelScreenResultSchema, panelSubmitResultSchema, repoListResultSchema, runpaneSessionListResultSchema, runpaneSessionResultSchema } from './localControl';
-import { forkNativeSession, isNativeAgent, lastMessageSnippet, locateNativeSession, originalChanges, screenShows, snapshotOriginal, type NativeSession, type OriginalSnapshot } from './nativeSession';
+import { forkNativeSession, isNativeAgent, lastMessageSnippet, locateNativeSession, originalChanges, screenShows, snapshotOriginal, type NativeAgent, type NativeSession, type OriginalSnapshot } from './nativeSession';
 import { RunpaneError } from './errors';
 import { RUNPANE_CONTRACT } from './generated/contract';
 import { readTailnet, resolveMachine, workspaceTarget, type TailnetMachine } from './workspace';
@@ -437,6 +437,8 @@ interface Carry {
   session: NativeSession;
   /** A phrase from the last complete message, which the receiver's screen must show. */
   snippet?: string;
+  /** Why this session and not the one Pane recorded for the tab, when they differ. */
+  note?: string;
 }
 
 /** What happened to the sender's session, in the command's output and JSON. */
@@ -470,31 +472,74 @@ export interface ContinuityReport {
 type CarryPlan = { carry: Carry } | { fresh: string };
 
 /**
- * The sender's session when the receiver can continue it: this terminal is a Pane tab whose agent
- * Pane knows, the receiver is the same agent, and the session's files are on this machine.
+ * Where an agent records, for every command it runs, which of its own conversations ran it. This is
+ * the sender's own live record, so it is trusted over the id Pane captured for the tab: Pane learns
+ * a Codex id only when Codex exits, and a command run through Codex's shared background server
+ * can inherit another tab's PANE_PANEL_ID.
+ */
+const LIVE_SESSION_ENV = [['claude', 'CLAUDE_CODE_SESSION_ID'], ['codex', 'CODEX_THREAD_ID']] as const;
+
+interface SenderSession {
+  agent: NativeAgent;
+  id: string;
+  /** Set when the agent's live record and Pane's record for the tab disagree. */
+  note?: string;
+}
+
+/** Which session is handing off: the agent's live record when it has one, otherwise Pane's record for this tab. */
+function senderSession(recorded: { agentType?: string; resumeId?: string } | undefined): { sender: SenderSession } | { fresh: string } {
+  const live = LIVE_SESSION_ENV.flatMap(([agent, key]) => {
+    const id = process.env[key]?.trim();
+    return id ? [{ agent, id }] : [];
+  });
+  // One agent started inside another sees both records; the tab's agent decides which one is speaking.
+  const chosen = live.length > 1 ? live.find(entry => entry.agent === recorded?.agentType) : live[0];
+  if (live.length > 1 && !chosen) {
+    return { fresh: `Both ${live.map(entry => entry.agent).join(' and ')} report a live session in this terminal (one agent was started by the other), so runpane can't tell which one is handing off. Run the handoff from that agent's own tab.` };
+  }
+  if (chosen) {
+    const sender: SenderSession = { ...chosen };
+    if (recorded?.agentType === chosen.agent && recorded.resumeId && recorded.resumeId !== chosen.id) {
+      sender.note = `Pane had recorded ${recorded.resumeId} for this tab; ${chosen.agent} itself reports ${chosen.id}, which is the one carried.`;
+    }
+    return { sender };
+  }
+  const agent = recorded?.agentType;
+  if (!isNativeAgent(agent) || !recorded?.resumeId) return { fresh: 'This tab runs no Claude, Codex, Cursor or OpenCode session that Pane has an id for.' };
+  return { sender: { agent, id: recorded.resumeId } };
+}
+
+/**
+ * The sender's session when the receiver can continue it: the agent's own live record, or the id
+ * Pane recorded for this tab; the receiver is the same agent; and the session's files are here.
  */
 async function planCarry(parsed: ParsedArgs, destination: HandoffDestination): Promise<CarryPlan> {
   if (parsed.handoffNoteOnly) return { fresh: 'You passed --note-only.' };
   const paneId = process.env.PANE_SESSION_ID;
   const panelId = process.env.PANE_PANEL_ID;
-  if (!paneId || !panelId) return { fresh: 'This terminal is not a Pane tab, so there is no agent session to carry.' };
-  let sender: { agentType?: string; resumeId?: string } | undefined;
-  try {
-    const listed = await invokeDaemon('runpane:panels:list', [{ paneId }], panelListResultSchema, { paneDir: parsed.paneDir });
-    sender = listed.panels.find(panel => panel.id === panelId || panel.panelId === panelId);
-  } catch (error) {
-    return { fresh: `Pane could not say which agent session this tab runs (${error instanceof Error ? error.message : String(error)}).` };
+  let recorded: { agentType?: string; resumeId?: string } | undefined;
+  if (paneId && panelId) {
+    try {
+      const listed = await invokeDaemon('runpane:panels:list', [{ paneId }], panelListResultSchema, { paneDir: parsed.paneDir });
+      recorded = listed.panels.find(panel => panel.id === panelId || panel.panelId === panelId);
+    } catch (error) {
+      if (!LIVE_SESSION_ENV.some(([, key]) => process.env[key])) {
+        return { fresh: `Pane could not say which agent session this tab runs (${error instanceof Error ? error.message : String(error)}).` };
+      }
+    }
+  } else if (!LIVE_SESSION_ENV.some(([, key]) => process.env[key])) {
+    return { fresh: 'This terminal is not a Pane tab, so there is no agent session to carry.' };
   }
-  const agent = sender?.agentType;
-  if (!isNativeAgent(agent) || !sender?.resumeId) {
-    return { fresh: 'This tab runs no Claude, Codex, Cursor or OpenCode session that Pane has an id for.' };
+  const identified = senderSession(recorded);
+  if ('fresh' in identified) return identified;
+  const { sender } = identified;
+  if (sender.agent !== destination.agent) {
+    return { fresh: `Your session is ${sender.agent} and the receiver is ${destination.agent}; a session can't move between agents.` };
   }
-  if (agent !== destination.agent) {
-    return { fresh: `Your session is ${agent} and the receiver is ${destination.agent}; a session can't move between agents.` };
-  }
-  const session = await locateNativeSession(agent, sender.resumeId, process.cwd());
-  if (!session) return { fresh: `${agent} session ${sender.resumeId} has no files in this machine's ${agent} store.` };
+  const session = await locateNativeSession(sender.agent, sender.id, process.cwd());
+  if (!session) return { fresh: `${sender.agent} session ${sender.id} has no files in this machine's ${sender.agent} store.` };
   const carry: Carry = { session };
+  if (sender.note) carry.note = sender.note;
   const snippet = lastMessageSnippet(session);
   if (snippet) carry.snippet = snippet;
   return { carry };
@@ -508,9 +553,10 @@ function describeCarry(carry: Carry, fork: boolean): ContinuityReport {
     fork,
     files: carry.session.files.length,
     bytes: carry.session.files.reduce((total, file) => total + file.bytes, 0),
-    reason: fork
+    reason: (fork
       ? `The receiver resumes a fork of your ${carry.session.agent} session ${carry.session.id}: two agents never resume one session on one machine.`
-      : `The receiver resumes your own ${carry.session.agent} session ${carry.session.id}, copied to the destination.`,
+      : `The receiver resumes your own ${carry.session.agent} session ${carry.session.id}, copied to the destination.`)
+      + (carry.note ? ` ${carry.note}` : ''),
   };
 }
 
@@ -614,6 +660,11 @@ async function checkReceiver(options: {
     return { checks, result: 'not-continued', why: `Your session changed while it was forked (${changed.join(', ')}).` };
   }
   if (!ready) return { checks, result: 'not-continued', why: 'The receiver did not reach its input box, so its history could not be checked.' };
+  if (historyLoaded === true && carry.session.folder && original) {
+    // Cursor has no fork command: the fork is a copied chat folder, and Cursor can still write to
+    // the original's folder once the fork is used, after this check has run.
+    return { checks, result: 'inconclusive', why: `The receiver shows the session's last message ("${carry.snippet}"), but Cursor has no fork command: runpane copied the chat, and Cursor may still write to the original chat when the fork is used. Best effort.` };
+  }
   if (historyLoaded === true) return { checks, result: 'continued', why: `The receiver shows the session's last message ("${carry.snippet}").` };
   return {
     checks,
@@ -951,7 +1002,7 @@ async function reportCarried(report: CarriedReport): Promise<number> {
   const checked = await checkReceiver({ destination, carry, resumedId, paneId: receiver.paneId, panelId: receiver.panelId, ready: receiver.ready, original });
   continuity.checks = checked.checks;
   continuity.result = checked.result;
-  continuity.reason = checked.why;
+  continuity.reason = carry.note ? `${checked.why} ${carry.note}` : checked.why;
   const where = receiver.newTab ? `a new tab in Pane ${receiver.paneId}` : `Pane ${receiver.paneId} on ${destination.name}${receiver.worktreePath ? ` (${receiver.worktreePath})` : ''}`;
   const moved = target || !receiver.newTab;
   const movedMessage = `This session moved to ${receiver.worktreePath ?? 'a new worktree'} on ${destination.name}. Continue from where you were. The sender's handoff note is at ${report.notePath}; follow its "Receiver instructions" to report back.`;

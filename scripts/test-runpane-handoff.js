@@ -96,7 +96,7 @@ function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'handoff-review-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const env = { ...process.env, RUNPANE_TELEMETRY_DISABLED: '1', HOME: path.join(root, 'home'), USERPROFILE: path.join(root, 'home'), PANE_DIR: path.join(root, 'isolated-data'), GIT_CONFIG_GLOBAL: path.join(root, '.git', 'isolated-global-config'), GIT_CONFIG_NOSYSTEM: '1' };
-  for (const key of ['PANE_SESSION_ID', 'PANE_PANEL_ID', 'PANE_ORCHESTRATION_SESSION_ID', 'FOOZOL_DIR', 'NODE_OPTIONS']) delete env[key];
+  for (const key of ['PANE_SESSION_ID', 'PANE_PANEL_ID', 'PANE_ORCHESTRATION_SESSION_ID', 'FOOZOL_DIR', 'NODE_OPTIONS', 'CLAUDE_CODE_SESSION_ID', 'CODEX_THREAD_ID', 'PANE_WORKSPACES_PORT']) delete env[key];
   const git = (...args) => execFileSync('git', args, { cwd: root, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
   git('init', '-b', 'task'); fs.writeFileSync(env.GIT_CONFIG_GLOBAL, ''); git('config', 'user.email', 'test@example.invalid'); git('config', 'user.name', 'Test');
   fs.writeFileSync(path.join(root, 'code.txt'), 'initial');
@@ -875,4 +875,46 @@ test('a handoff to OpenCode on another machine imports the sender\'s session the
   const create = remote.calls().find(c => c.channel === 'runpane:panes:create').args[0].panes[0];
   assert.equal(create.resume, OPENCODE_SENDER);
   assert.equal(create.tool.agent, 'opencode');
+});
+
+// ---------------------------------------------------------------- which session is handing off
+
+test('the agent\'s own live session id is carried even when Pane recorded another id for the tab', (t) => {
+  const f = fixture(t); fs.writeFileSync(path.join(f.root, 'note.md'), filled());
+  // Codex's shared background server can hand a command another tab's PANE_PANEL_ID.
+  const calls = receiver(f, { sender: { agentType: 'claude', resumeId: 'b0b0b0b0-0000-4000-8000-000000000000', resumeSource: 'agent' }, screenText: `${LAST} now.` });
+  const claude = claudeSession(f);
+  f.env.CLAUDE_CODE_SESSION_ID = SENDER;
+  const result = runClaude(f);
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  const out = JSON.parse(result.stdout);
+  assert.equal(out.continuity.sessionId, SENDER);
+  assert.match(out.continuity.reason, /Pane had recorded b0b0b0b0-0000-4000-8000-000000000000 for this tab; claude itself reports/);
+  assert.equal(claude.calls()[0][2], SENDER, 'the fork is made from the live session');
+  assert.equal(calls().find(c => c.channel === 'runpane:panels:create').args[0].resume, out.continuity.resumedId);
+});
+
+test('a tab whose session id Pane has not captured yet is carried by the agent\'s own live id', (t) => {
+  const f = fixture(t); fs.writeFileSync(path.join(f.root, 'note.md'), filled());
+  receiver(f, { sender: { agentType: 'claude' }, screenText: `${LAST} now.` });
+  claudeSession(f);
+  f.env.CLAUDE_CODE_SESSION_ID = SENDER;
+  const result = runClaude(f, '--dry-run');
+  assert.equal(result.status, 0, result.stderr);
+  const out = JSON.parse(result.stdout);
+  assert.equal(out.continuity.carried, true);
+  assert.equal(out.continuity.sessionId, SENDER);
+});
+
+test('two agents\' live sessions in one terminal carry neither, and say why', (t) => {
+  const f = fixture(t); fs.writeFileSync(path.join(f.root, 'note.md'), filled());
+  receiver(f, { sender: { agentType: 'opencode', resumeId: 'ses_Other1' } });
+  claudeSession(f);
+  f.env.CLAUDE_CODE_SESSION_ID = SENDER;
+  f.env.CODEX_THREAD_ID = '01a14000-0000-7000-8000-000000000000';
+  const result = runClaude(f, '--dry-run');
+  assert.equal(result.status, 0, result.stderr);
+  const out = JSON.parse(result.stdout);
+  assert.equal(out.continuity.carried, false);
+  assert.match(out.continuity.reason, /Both claude and codex report a live session in this terminal/);
 });
