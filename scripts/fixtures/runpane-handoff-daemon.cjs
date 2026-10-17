@@ -49,13 +49,16 @@ const server = net.createServer(socket => {
         if (request.resume) receiverResume = request.resume;
         result = { ok: true, paneId: request.paneId, panelId: 'test-tab', title: 'Codex', active: false, focused: false,
           tool: { title: 'Codex', command: 'codex' }, initialInput: request.resume ? undefined : config.item.initialInput, warnings: [],
-          readiness: { ok: true, condition: 'ready', matched: true, timedOut: false, elapsedMs: 1, state: { initialized: true } } };
+          readiness: config.blocked
+            ? { ok: false, condition: 'ready', matched: false, timedOut: false, elapsedMs: 1, state: { initialized: true }, blocked: config.blocked }
+            : { ok: true, condition: 'ready', matched: true, timedOut: false, elapsedMs: 1, state: { initialized: true } } };
       }
       else if (frame.channel === 'runpane:panels:list') {
         // The sender's own tab (config.sender), and the receiver tab with the id it resumes.
         const panels = [];
         const base = { paneId: frame.args[0].paneId, type: 'terminal', active: false };
         if (config.sender) panels.push({ ...base, id: 'sender-panel', panelId: 'sender-panel', title: 'sender', ...config.sender });
+        for (const extra of config.extraPanels ?? []) panels.push({ ...base, panelId: extra.id, title: extra.id, ...extra });
         panels.push({ ...base, id: 'test-tab', panelId: 'test-tab', title: 'receiver', agentType: config.sender?.agentType,
           resumeId: config.receiverResumeId ?? receiverResume, resumeSource: 'agent' });
         result = { ok: true, paneId: frame.args[0].paneId, panels };
