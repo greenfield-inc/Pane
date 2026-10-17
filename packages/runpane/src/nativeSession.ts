@@ -281,18 +281,24 @@ interface FileStamp {
 
 /** How the original looked before a fork, to prove the fork left it untouched (continuity check 4). */
 export type OriginalSnapshot =
-  | { kind: 'files'; stamps: FileStamp[] }
+  | { kind: 'files'; stamps: FileStamp[]; folder?: string; listing?: string[] }
   | { kind: 'export'; id: string; cwd: string; text: string | undefined };
 
 export async function snapshotOriginal(session: NativeSession, cwd: string): Promise<OriginalSnapshot> {
   if (session.agent === 'opencode') return { kind: 'export', id: session.id, cwd, text: await openCodeExport(session.id, cwd) };
-  return {
+  const snapshot: OriginalSnapshot = {
     kind: 'files',
     stamps: session.files.map(file => {
       const stat = fs.statSync(file.absolute);
       return { absolute: file.absolute, bytes: stat.size, modifiedMs: stat.mtimeMs };
     }),
   };
+  // A Cursor chat is a folder; a file that appears in it changes the original too.
+  if (session.folder) {
+    snapshot.folder = session.folder;
+    snapshot.listing = filesUnder(session.folder);
+  }
+  return snapshot;
 }
 
 /** What changed in the original since the snapshot: files whose size or time changed, or the session's export. */
@@ -300,7 +306,7 @@ export async function originalChanges(snapshot: OriginalSnapshot): Promise<strin
   if (snapshot.kind === 'export') {
     return (await openCodeExport(snapshot.id, snapshot.cwd)) === snapshot.text ? [] : [`OpenCode session ${snapshot.id}`];
   }
-  return snapshot.stamps.filter(stamp => {
+  const changed = snapshot.stamps.filter(stamp => {
     try {
       const stat = fs.statSync(stamp.absolute);
       return stat.size !== stamp.bytes || stat.mtimeMs !== stamp.modifiedMs;
@@ -308,6 +314,9 @@ export async function originalChanges(snapshot: OriginalSnapshot): Promise<strin
       return true;
     }
   }).map(stamp => stamp.absolute);
+  const before = new Set(snapshot.listing ?? []);
+  const added = snapshot.folder ? filesUnder(snapshot.folder).filter(file => !before.has(file)) : [];
+  return [...changed, ...added];
 }
 
 function run(command: string, args: string[], cwd: string, timeoutMs: number): Promise<{ code: number | null; stdout: string; stderr: string }> {
