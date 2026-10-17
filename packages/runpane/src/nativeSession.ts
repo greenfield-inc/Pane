@@ -6,12 +6,13 @@ import path from 'node:path';
 import { boundary, decodeBoundary, type BoundarySchema } from './boundaryDecoder';
 
 /**
- * An agent's own session (a Claude Code transcript, a Codex rollout, a Cursor chat) as files in
- * that agent's store, so `runpane handoff` can carry it to another machine or fork it on this one.
+ * An agent's own session (a Claude Code transcript, a Codex rollout, a Cursor chat, an OpenCode
+ * session) as files, so `runpane handoff` can carry it to another machine or fork it on this one.
  * The stores are each tool's internal format; this module only finds, copies and forks them, and
- * prefers each tool's own fork to editing files.
+ * prefers each tool's own commands to editing files. OpenCode keeps sessions in a database, so its
+ * session travels as the file `opencode export` writes and `opencode import` reads.
  */
-export type NativeAgent = 'claude' | 'codex' | 'cursor';
+export type NativeAgent = 'claude' | 'codex' | 'cursor' | 'opencode';
 
 interface StoreFile {
   absolute: string;
@@ -29,10 +30,12 @@ export interface NativeSession {
   files: StoreFile[];
   /** A Cursor chat's own folder, which is the whole session. */
   folder?: string;
+  /** OpenCode: the one file is an export, which the destination brings in with `opencode import`. */
+  exported?: true;
 }
 
 export function isNativeAgent(value: string | undefined): value is NativeAgent {
-  return value === 'claude' || value === 'codex' || value === 'cursor';
+  return value === 'claude' || value === 'codex' || value === 'cursor' || value === 'opencode';
 }
 
 function homeDirectory(env: NodeJS.ProcessEnv): string {
@@ -46,7 +49,7 @@ interface StoreLocation {
   storeDir: string;
 }
 
-function storeRoot(agent: NativeAgent, env: NodeJS.ProcessEnv): StoreLocation {
+function storeRoot(agent: Exclude<NativeAgent, 'opencode'>, env: NodeJS.ProcessEnv): StoreLocation {
   const home = homeDirectory(env);
   if (agent === 'claude') return { root: env.CLAUDE_CONFIG_DIR || path.join(home, '.claude'), storeDir: '.claude' };
   if (agent === 'codex') return { root: env.CODEX_HOME || path.join(home, '.codex'), storeDir: '.codex' };
@@ -77,9 +80,11 @@ function storeFile(absolute: string, root: string, storeDir: string): StoreFile 
 /**
  * The files of one session on this machine, or undefined when the store has none. Throws when
  * the id is ambiguous (two copies in one store), which the agent itself cannot resume either.
+ * `cwd` is where an OpenCode export runs.
  */
-export function locateNativeSession(agent: NativeAgent, id: string, env: NodeJS.ProcessEnv = process.env): NativeSession | undefined {
+export async function locateNativeSession(agent: NativeAgent, id: string, cwd: string, env: NodeJS.ProcessEnv = process.env): Promise<NativeSession | undefined> {
   if (!/^[A-Za-z0-9._-]+$/.test(id)) return undefined;
+  if (agent === 'opencode') return exportOpenCodeSession(id, cwd);
   const { root, storeDir } = storeRoot(agent, env);
   const mains: string[] = [];
   const extras: string[] = [];
@@ -117,6 +122,55 @@ export function locateNativeSession(agent: NativeAgent, id: string, env: NodeJS.
   const located: NativeSession = { agent, id, storeDir, files: [mains[0], ...extras].map(file => storeFile(file, root, storeDir)) };
   if (folder) located.folder = folder;
   return located;
+}
+
+/** An OpenCode export: the session and its messages, each with parts of which some carry text. */
+const openCodeExportSchema = boundary.object({
+  info: boundary.object({ id: boundary.string }),
+  messages: boundary.array(boundary.object({
+    info: boundary.object({ role: boundary.optional(boundary.string) }),
+    parts: boundary.optional(boundary.array(boundary.object({ type: boundary.optional(boundary.string), text: boundary.optional(boundary.string) }))),
+  })),
+});
+
+async function openCodeExport(id: string, cwd: string): Promise<string | undefined> {
+  const result = await run('opencode', ['export', id], cwd, 120_000);
+  if (result.code !== 0) return undefined;
+  // The JSON is on stdout; a progress line goes to stderr.
+  const start = result.stdout.indexOf('{');
+  return start >= 0 ? result.stdout.slice(start) : undefined;
+}
+
+/** An OpenCode session as the file `opencode export` writes, in a private temporary folder. */
+async function exportOpenCodeSession(id: string, cwd: string): Promise<NativeSession | undefined> {
+  const text = await openCodeExport(id, cwd);
+  if (text === undefined) return undefined;
+  try {
+    if (decodeBoundary(JSON.parse(text), openCodeExportSchema).info.id !== id) return undefined;
+  } catch {
+    return undefined;
+  }
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-opencode-'));
+  const absolute = path.join(folder, `${id}.json`);
+  fs.writeFileSync(absolute, text, { mode: 0o600 });
+  return {
+    agent: 'opencode', id, storeDir: '.pane', exported: true,
+    files: [{ absolute, home: `.pane/handoffs/opencode-${id}.json`, bytes: Buffer.byteLength(text) }],
+  };
+}
+
+function openCodeLastMessage(text: string): string | undefined {
+  try {
+    const { messages } = decodeBoundary(JSON.parse(text), openCodeExportSchema);
+    for (const message of [...messages].reverse()) {
+      if (message.info.role !== 'user' && message.info.role !== 'assistant') continue;
+      const snippet = snippetOf((message.parts ?? []).filter(part => part.type === 'text').map(part => part.text ?? '').join('\n'));
+      if (snippet) return snippet;
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
 }
 
 /** A message's content as Claude and Codex store it: a string, or parts of which some carry text. */
@@ -188,6 +242,7 @@ export function lastMessageSnippet(session: NativeSession): string | undefined {
   } catch {
     return undefined;
   }
+  if (session.agent === 'opencode') return openCodeLastMessage(text);
   const lines = text.split('\n');
   for (let index = lines.length - 1; index >= 0; index -= 1) {
     const message = lineMessage(session.agent, lines[index]);
@@ -218,22 +273,34 @@ export function screenShows(screen: string, snippet: string): boolean {
   return normalize(screen).includes(normalize(snippet));
 }
 
-export interface FileStamp {
+interface FileStamp {
   absolute: string;
   bytes: number;
   modifiedMs: number;
 }
 
-export function stampFiles(session: NativeSession): FileStamp[] {
-  return session.files.map(file => {
-    const stat = fs.statSync(file.absolute);
-    return { absolute: file.absolute, bytes: stat.size, modifiedMs: stat.mtimeMs };
-  });
+/** How the original looked before a fork, to prove the fork left it untouched (continuity check 4). */
+export type OriginalSnapshot =
+  | { kind: 'files'; stamps: FileStamp[] }
+  | { kind: 'export'; id: string; cwd: string; text: string | undefined };
+
+export async function snapshotOriginal(session: NativeSession, cwd: string): Promise<OriginalSnapshot> {
+  if (session.agent === 'opencode') return { kind: 'export', id: session.id, cwd, text: await openCodeExport(session.id, cwd) };
+  return {
+    kind: 'files',
+    stamps: session.files.map(file => {
+      const stat = fs.statSync(file.absolute);
+      return { absolute: file.absolute, bytes: stat.size, modifiedMs: stat.mtimeMs };
+    }),
+  };
 }
 
-/** Files whose size or modification time changed since they were stamped. */
-export function changedFiles(stamps: readonly FileStamp[]): string[] {
-  return stamps.filter(stamp => {
+/** What changed in the original since the snapshot: files whose size or time changed, or the session's export. */
+export async function originalChanges(snapshot: OriginalSnapshot): Promise<string[]> {
+  if (snapshot.kind === 'export') {
+    return (await openCodeExport(snapshot.id, snapshot.cwd)) === snapshot.text ? [] : [`OpenCode session ${snapshot.id}`];
+  }
+  return snapshot.stamps.filter(stamp => {
     try {
       const stat = fs.statSync(stamp.absolute);
       return stat.size !== stamp.bytes || stat.mtimeMs !== stamp.modifiedMs;
@@ -266,9 +333,8 @@ function failure(what: string, result: { code: number | null; stdout: string; st
 
 /**
  * A new session with its own id holding a copy of this one's history, made with the agent's own
- * fork so the original's files are never written. Each fork runs one short turn of its own (never
- * in the original). Cursor has no fork command, so its chat folder is copied under a new id, best
- * effort.
+ * fork so the original is never written. Each fork runs one short turn of its own (never in the
+ * original). Cursor has no fork command, so its chat folder is copied under a new id, best effort.
  */
 const FORK_PROMPT = 'This conversation was forked for a handoff. Reply with one word: forked.';
 
@@ -277,7 +343,7 @@ export async function forkNativeSession(session: NativeSession, cwd: string, env
     const forkId = randomUUID();
     const result = await run('claude', ['-p', '--resume', session.id, '--fork-session', '--session-id', forkId, FORK_PROMPT], cwd, 300_000);
     if (result.code !== 0) throw failure(`claude --resume ${session.id} --fork-session`, result);
-    if (!locateNativeSession('claude', forkId, env)) throw new Error(`claude reported a fork, but its transcript ${forkId}.jsonl is not in the store.`);
+    if (!await locateNativeSession('claude', forkId, cwd, env)) throw new Error(`claude reported a fork, but its transcript ${forkId}.jsonl is not in the store.`);
     return forkId;
   }
   if (session.agent === 'codex') {
@@ -290,6 +356,15 @@ export async function forkNativeSession(session: NativeSession, cwd: string, env
       .find(Boolean);
     if (!started) throw failure(`codex exec fork ${session.id}`, result);
     return started;
+  }
+  if (session.agent === 'opencode') {
+    // `--format json` prints one event per line, each naming the session it belongs to: the fork.
+    const result = await run('opencode', ['run', '--session', session.id, '--fork', '--format', 'json', FORK_PROMPT], cwd, 300_000);
+    const forked = result.stdout.split('\n')
+      .map(line => decodeLine(line, boundary.object({ sessionID: boundary.string }))?.sessionID)
+      .find(id => id !== undefined && id !== session.id);
+    if (!forked) throw failure(`opencode run --session ${session.id} --fork`, result);
+    return forked;
   }
   if (!session.folder) throw new Error(`Cursor chat ${session.id} has no folder to copy.`);
   const forkId = randomUUID();
