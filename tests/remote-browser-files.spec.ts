@@ -83,7 +83,11 @@ test('remote browser loads host HTML, assets and linked pages through the remote
       sessionId: 'test-pane', type: 'browser', initialState: { currentUrl: url },
     }]), attackerUrl)).rejects.toThrow('on the host');
     await guest('location.href = new URL("../private.txt", location.href).href');
-    await expect.poll(() => guest('document.body.innerText')).toContain('Unable to read this file from the host');
+    await expect.poll(() => guest('document.body.innerText')).toContain("outside this page's folder");
+    // A refused stylesheet never shows in the page, so the tab names it under the address bar.
+    await guest(`location.href = new URL("parent-asset.html", ${JSON.stringify(entryUrl)}).href`);
+    await expect.poll(() => guest('document.body.innerText')).toContain('Page with a parent asset');
+    await expect(page.getByText(/private\.txt because it is outside this page's folder/)).toBeVisible();
     await page.evaluate(() => window.electronAPI.invoke('preview-test:disconnect'));
     await page.getByTitle('Refresh', { exact: true }).click();
     await expect.poll(() => guest('document.body.innerText')).toContain('The connected host has changed');

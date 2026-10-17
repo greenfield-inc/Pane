@@ -377,6 +377,8 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
       setIsLoading(false);
     };
 
+    // A new document drops the previous page's load errors.
+    const onDidNavigateDocument = () => setUrlError('');
     const onDidStartLoading = () => setIsLoading(true);
     const onDidFailLoad = (event: Electron.DidFailLoadEvent) => {
       if (!event.isMainFrame || event.errorCode === -3) return;
@@ -391,6 +393,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
     };
 
     webview.addEventListener('dom-ready', onDomReady);
+    webview.addEventListener('did-navigate', onDidNavigateDocument);
     webview.addEventListener('did-navigate', onDidNavigate);
     webview.addEventListener('did-navigate-in-page', onDidNavigate);
     webview.addEventListener('did-start-loading', onDidStartLoading);
@@ -399,6 +402,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
 
     return () => {
       webview.removeEventListener('dom-ready', onDomReady);
+      webview.removeEventListener('did-navigate', onDidNavigateDocument);
       webview.removeEventListener('did-navigate', onDidNavigate);
       webview.removeEventListener('did-navigate-in-page', onDidNavigate);
       webview.removeEventListener('did-start-loading', onDidStartLoading);
@@ -436,6 +440,18 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
     window.addEventListener('browser-panel:popup-requested', handler);
     return () => window.removeEventListener('browser-panel:popup-requested', handler);
   }, [panel.id, panel.sessionId, addPanel, setActivePanelInStore]);
+
+  // A host file this page asked for and did not get, often a script or stylesheet the page
+  // never shows. Main names the file and why, so the person sees what to fix.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      // SAFETY: The preload bridge is the only sender of this event.
+      const { panelId, message } = (e as CustomEvent<{ panelId: string; message: string }>).detail;
+      if (panelId === panel.id) setUrlError(message);
+    };
+    window.addEventListener('browser-panel:file-refused', handler);
+    return () => window.removeEventListener('browser-panel:file-refused', handler);
+  }, [panel.id]);
 
   // Navigate requests (terminal links, "Open in Browser") name the tab they target;
   // only that tab acts, and it takes focus so the person sees the page.

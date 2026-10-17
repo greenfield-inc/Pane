@@ -25,6 +25,7 @@ app.whenReady().then(async () => {
   await fs.writeFile(path.join(bundle, 'theme.css'), 'body{background:#eef5f0;color:#123d2b;font:20px system-ui;padding:60px}main{max-width:760px}h1{font-size:44px}img{width:100px}a{color:#145c39}');
   await fs.writeFile(path.join(bundle, 'mark.svg'), '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="80"><rect width="100" height="80" rx="12" fill="#287d50"/></svg>');
   await fs.writeFile(path.join(bundle, 'nested/next.html'), '<h1>Sibling navigation works</h1><a href="../index.html">Back to entry</a>');
+  await fs.writeFile(path.join(bundle, 'parent-asset.html'), '<link rel="stylesheet" href="../private.txt"><h1>Page with a parent asset</h1>');
   await fs.writeFile(path.join(root, 'private.txt'), 'Must not be served');
   databaseService.createSession({ id: 'test-pane', name: 'Preview', initial_prompt: '', worktree_name: 'preview', worktree_path: root, tool_type: 'none' });
   const panel = await panelManager.createPanel({
