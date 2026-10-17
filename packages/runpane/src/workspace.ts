@@ -7,8 +7,14 @@ import type { BoundarySchema, JsonValue } from './boundaryDecoder';
 import type { ParsedArgs } from './commands';
 import { invokeDaemon, invokeRemoteDaemon, PaneDaemonClientError, type RemoteDaemonTarget } from './daemonClient';
 
-/** Tailnet port where each joined machine's Pane serves workspaces. */
-const WORKSPACE_HTTPS_PORT = 8443;
+/**
+ * Tailnet port where each joined machine's Pane serves workspaces. Pane reads PANE_WORKSPACES_PORT
+ * to serve somewhere else (a development build beside an installed Pane), and so does runpane.
+ */
+function workspaceHttpsPort(): number {
+  const port = Number(process.env.PANE_WORKSPACES_PORT);
+  return Number.isInteger(port) && port > 0 && port < 65536 ? port : 8443;
+}
 const TAILSCALE_TIMEOUT_MS = 3_000;
 const PROBE_TIMEOUT_MS = 4_000;
 const LOCAL_STATUS_TIMEOUT_MS = 1_500;
@@ -223,7 +229,7 @@ function describeMachine(machine: TailnetMachine): string {
 }
 
 export function workspaceTarget(machine: TailnetMachine): RemoteDaemonTarget {
-  return { machine: machine.name, baseUrl: `https://${machine.dnsName}:${WORKSPACE_HTTPS_PORT}` };
+  return { machine: machine.name, baseUrl: `https://${machine.dnsName}:${workspaceHttpsPort()}` };
 }
 
 async function probeMachine(machine: TailnetMachine): Promise<{ info?: MachineInfo; error?: string }> {
