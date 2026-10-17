@@ -1593,6 +1593,32 @@ describe('runpane IPC handlers', () => {
     expect(result.entries.filter(entry => entry.kind === 'agent.idle')[0]).not.toHaveProperty('heldInputPresent');
   });
 
+  it('reminds about an idle agent panel whose wrapped agent is not identified yet', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T12:00:00.000Z'));
+    // `agent-farm run` left at its shell after the agent stopped, before Pane named the agent.
+    vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue({
+      ...terminalSnapshot('$ ', 'idle', 'claude', '2026-01-01T11:49:00.000Z'),
+      currentCommand: 'agent-farm',
+      agentType: undefined,
+    });
+    const wrapperPanel: ToolPanel = {
+      ...terminalPanel,
+      title: 'agent-farm run bigbrain/implementer',
+      state: { isActive: true, customState: { isCliPanel: true, initialCommand: 'agent-farm run bigbrain/implementer' } },
+    };
+    vi.mocked(panelManager.getPanelsForSession).mockImplementation((sessionId: string) =>
+      sessionId === session.id ? [wrapperPanel] : []);
+    const registry = createRegistry(createServices({ workspaceJournal: new WorkspaceJournal() }));
+
+    const result = await registry.invoke('runpane:workspace:wait', [{
+      since: 0, timeoutMs: 0, idleAfterMs: 600_000, kinds: ['agent.idle'], agentsOnly: true,
+    }]);
+
+    expect(result.entries).toEqual([expect.objectContaining({ kind: 'agent.idle', panelId: terminalPanel.id, idleCount: 1 })]);
+    expect(result.entries[0]?.agentType).toBeUndefined();
+  });
+
   it('keeps idle disabled for old clients and applies workspace filters', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-01-01T12:00:00.000Z'));

@@ -176,16 +176,23 @@ export function screenShowsQueuedMessage(text: string, agentType: CliAgentType |
   return lines.slice(0, composerRow).some(line => /^(?:❯|↳)\s/u.test(line) && line.includes(marker));
 }
 
+// Each agent's folder-trust prompt names the agent and offers its own answer,
+// so a wrapper that starts the agent in an untrusted folder is identified there.
+const CLAUDE_TRUST_PROMPT = /Claude\s+Code'll\s+be\s+able\s+to\s+read[\s\S]*Yes,\s+I\s+trust\s+this\s+folder/u;
+const CODEX_TRUST_PROMPT = /Codex\s+can\s+read,\s+edit,\s+and\s+run\s+files\s+here[\s\S]*Trust\s+and\s+continue/u;
+
 /**
  * Identify an agent from one screen: Claude's closed rule/`❯`/rule composer
- * box, or Codex's `OpenAI Codex` header with its `›` prompt. Callers that
- * persist the result require it on consecutive polls, since one frame can
- * be anything.
+ * box, or Codex's `OpenAI Codex` header with its `›` prompt, or either
+ * agent's folder-trust prompt. Callers that persist the result require it on
+ * consecutive polls, since one frame can be anything.
  */
 export function detectAgentFromScreen(text: string | undefined): CliAgentType | undefined {
   if (!text) return undefined;
   const lines = screenLines(text);
   if (findClaudeComposerBox(lines)?.closed) return 'claude';
   if (CODEX_HEADER.test(text) && lines.some(line => /^›(?:\s|$)/u.test(line))) return 'codex';
+  if (CLAUDE_TRUST_PROMPT.test(text)) return 'claude';
+  if (CODEX_TRUST_PROMPT.test(text)) return 'codex';
   return undefined;
 }

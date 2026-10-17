@@ -571,4 +571,32 @@ describe('GENERIC_MANIFEST', () => {
     expect(detectAgentState(GENERIC_MANIFEST, screen('Overwrite file? (y/n)\n$ ')).state).toBe('idle');
     expect(detectAgentState(GENERIC_MANIFEST, screen('$ ')).state).toBe('idle');
   });
+
+  // Agent Farm's variant picker, captured from a live `agent-farm run` panel (#743).
+  const agentFarmPicker = [
+    '~/r/blooma/bloom-mono/w/ios-xcode27-launch on ios-xcode27-launch > agent-farm ru',
+    'n bigbrain/investigator --arg parent=/Users/x/.agent/status/investigator.json',
+    '│',
+    '◆  Which bigbrain/investigator variant?',
+    '│  ● claude (claude · claude-opus-5-5 high · default)',
+    '│  ○ codex',
+    '│  ↑/↓ to navigate • Enter: confirm',
+    '└',
+    '',
+    '',
+  ].join('\n');
+
+  it("detects a wrapper's open choice prompt as blocked", () => {
+    const r = detectAgentState(GENERIC_MANIFEST, screen(agentFarmPicker));
+    expect(r.state).toBe('blocked');
+    expect(r.matchedRuleId).toBe('live_choice_prompt');
+    expect(detectAgentState(GENERIC_MANIFEST, screen('◆  Project name?\n│  my-app\n└')).state).toBe('blocked');
+  });
+
+  it('does not stay blocked once the choice is answered', () => {
+    const answered = ['◇  Which bigbrain/investigator variant?', '│  claude', '', 'Starting Claude Code…'].join('\n');
+    expect(detectAgentState(GENERIC_MANIFEST, screen(answered)).state).toBe('idle');
+    const exited = [agentFarmPicker.trimEnd(), '$ '].join('\n');
+    expect(detectAgentState(GENERIC_MANIFEST, screen(exited)).state).toBe('idle');
+  });
 });

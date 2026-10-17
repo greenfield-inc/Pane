@@ -5792,12 +5792,13 @@ function workspaceIdleCandidates(
   repoId?: number,
 ): WorkspaceIdleCandidate[] {
   return workspaceStateReader.listManagedCliPanels(repoId).flatMap((panel) => {
-    if (panel.agentState !== 'idle' || !panel.agentType) return [];
+    // A wrapper launch whose agent is not identified yet is still an agent panel.
+    if (panel.agentState !== 'idle') return [];
     const snapshotTime = panel.lastActivityTime ? Date.parse(panel.lastActivityTime) : Number.NaN;
     const idleSinceMs = workspaceJournal.readySince(panel.panelId)
       ?? (Number.isFinite(snapshotTime) ? snapshotTime : undefined);
     if (idleSinceMs === undefined) return [];
-    return [{ ...panel, agentType: panel.agentType, idleSinceMs }];
+    return [{ ...panel, idleSinceMs }];
   });
 }
 

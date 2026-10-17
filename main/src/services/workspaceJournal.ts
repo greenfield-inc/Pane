@@ -128,6 +128,11 @@ const OPT_IN_KINDS: readonly RunpaneWorkspaceEntryKind[] = [
  * which a panel only raises on purpose (a shell tab, or a wrapper launch not yet detected).
  */
 const AGENTS_ONLY_EXEMPT_KINDS: readonly RunpaneWorkspaceEntryKind[] = ['pane.created', 'pane.gone', 'agent.report', ...OPT_IN_KINDS];
+/**
+ * Agent-state kinds are only journalled for agent panels, so they pass `agentsOnly` without an
+ * agent type: a wrapper launch (`agent-farm run`) whose agent Pane has not identified yet.
+ */
+const AGENT_PANEL_KINDS: readonly RunpaneWorkspaceEntryKind[] = ['agent.busy', 'agent.ready', 'agent.blocked', 'agent.unknown', 'agent.idle'];
 const panelExitEventSchema = boundary.object({
   type: boundary.string,
   source: boundary.object({
@@ -539,7 +544,12 @@ function matchesFilter(
   if (filter.excludePaneIds && filter.excludePaneIds.includes(entry.paneId)) return false;
   if (filter.repoId !== undefined && entry.repoId !== filter.repoId) return false;
   if (filter.nameContains && !entry.paneName.toLocaleLowerCase().includes(filter.nameContains.toLocaleLowerCase())) return false;
-  if (filter.agentsOnly && !entry.agentType && !AGENTS_ONLY_EXEMPT_KINDS.includes(entry.kind)) return false;
+  if (
+    filter.agentsOnly
+    && !entry.agentType
+    && !AGENTS_ONLY_EXEMPT_KINDS.includes(entry.kind)
+    && !AGENT_PANEL_KINDS.includes(entry.kind)
+  ) return false;
   return true;
 }
 

@@ -342,6 +342,23 @@ describe('WorkspaceJournal', () => {
     });
   });
 
+  it('reports an agent panel whose wrapped agent is not identified yet to agents-only readers', () => {
+    // `agent-farm run` is an agent panel from launch; its picker or a stalled agent runs before Pane names it.
+    const journal = new WorkspaceJournal({
+      resolvePane: paneId => ({ paneId, paneName: 'Farm' }),
+      resolvePanel: panelId => ({ panelId, paneId: 'pane-1', isCliPanel: true }),
+    });
+    journal.send('panel:agentStatus', { panelId: 'panel-1', sessionId: 'pane-1', state: 'working' });
+    journal.send('panel:agentStatus', { panelId: 'panel-1', sessionId: 'pane-1', state: 'blocked' });
+    journal.send('panel:agentStatus', { panelId: 'panel-1', sessionId: 'pane-1', state: 'idle' });
+
+    expect(journal.readAfter(0, { agentsOnly: true }).entries.map(entry => [entry.kind, entry.agentType])).toEqual([
+      ['agent.busy', undefined],
+      ['agent.blocked', undefined],
+      ['agent.ready', undefined],
+    ]);
+  });
+
   it('delivers agent.report only to a consumer that lists it in kinds', async () => {
     const journal = new WorkspaceJournal({
       resolvePane: paneId => ({ paneId, paneName: 'Fix login', repoId: 7 }),
@@ -365,10 +382,9 @@ describe('WorkspaceJournal', () => {
     const report = { state: 'blocked' as const, question: 'q', reportedAt: '2026-10-14T20:00:00.000Z' };
     journal.appendPaneEntry('one', { kind: 'agent.report', panelId: 'agent-panel', agentType: 'claude', source: 'agent', report });
     journal.appendPaneEntry('one', { kind: 'agent.report', panelId: 'shell-panel', source: 'agent', report });
-    journal.appendPaneEntry('one', { kind: 'agent.ready', panelId: 'shell-panel', source: 'agent' });
-    journal.appendPaneEntry('one', { kind: 'agent.idle', panelId: 'shell-panel', source: 'agent' });
+    journal.appendPaneEntry('one', { kind: 'panel.exited', panelId: 'shell-panel', source: 'exit' });
 
-    const followWithReports = { kinds: ['agent.report', 'agent.ready'] as const, agentsOnly: true };
+    const followWithReports = { kinds: ['agent.report', 'panel.exited'] as const, agentsOnly: true };
     expect(journal.readAfter(0, followWithReports).entries.map(entry => entry.panelId)).toEqual(['agent-panel', 'shell-panel']);
     expect(journal.readAfter(0, { agentsOnly: true }).entries).toEqual([]);
   });
@@ -381,7 +397,7 @@ describe('WorkspaceJournal', () => {
     });
     const report = { state: 'done' as const, reportedAt: '2026-10-14T20:00:00.000Z' };
     journal.appendPaneEntry('one', { kind: 'agent.report', panelId: 'shell-panel', source: 'agent', report });
-    journal.appendPaneEntry('one', { kind: 'agent.ready', panelId: 'shell-panel', source: 'agent' });
+    journal.appendPaneEntry('one', { kind: 'panel.exited', panelId: 'shell-panel', source: 'exit' });
 
     expect(journal.readAfter(0, { sessionId, agentsOnly: true }).entries.map(entry => entry.kind)).toEqual(['agent.report']);
   });

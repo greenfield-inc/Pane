@@ -335,6 +335,17 @@ export const GENERIC_MANIFEST: AgentManifest = {
         { lineRegex: [/waiting for permission\.{0,3}\s*$/i] },
       ],
     },
+    {
+      // A clack-style prompt still open at the bottom (Agent Farm's variant
+      // picker, for one): `◆` heads it, `│` rows follow, `└` closes it.
+      // Answered prompts turn `◆` into `◇`.
+      id: 'live_choice_prompt',
+      state: 'blocked',
+      priority: 590,
+      region: 'whole_recent',
+      visibleBlocker: true,
+      regex: [/(?:^|\n)[^\S\n]*◆[^\S\n][^\n]*\n(?:[^\S\n]*│[^\n]*\n)*[^\S\n]*└[^\S\n]*\s*$/u],
+    },
   ],
 };
 

@@ -22,6 +22,29 @@ describe('detectAgentFromScreen', () => {
     expect(detectAgentFromScreen('OpenAI Codex docs\n$ ')).toBeUndefined();
   });
 
+  // A wrapper (`agent-farm run`) can start the agent in a folder it has not trusted yet (#743).
+  it("recognises Claude and Codex by their folder-trust prompts", () => {
+    const claudeTrust = [
+      rule,
+      ' Accessing workspace:',
+      ' /tmp/untrusted-repo',
+      " Quick safety check: Is this a project you created or one you trust? (Like your",
+      " Claude Code'll be able to read, edit, and execute files here.",
+      ' ❯ No, exit',
+      '   Yes, I trust this folder',
+      ' Enter to confirm · Esc to cancel',
+    ].join('\n');
+    expect(detectAgentFromScreen(claudeTrust)).toBe('claude');
+    const codexTrust = [
+      '  Folder access',
+      '  Trust this folder? Codex can read, edit, and run files here, subject to your permission',
+      '› 1. Trust and continue',
+      '  2. Quit',
+      '  enter continue · esc quit',
+    ].join('\n');
+    expect(detectAgentFromScreen(codexTrust)).toBe('codex');
+  });
+
   it('ignores empty screens', () => {
     expect(detectAgentFromScreen(undefined)).toBeUndefined();
     expect(detectAgentFromScreen('')).toBeUndefined();
