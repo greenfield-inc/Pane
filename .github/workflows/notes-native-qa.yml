@@ -31,7 +31,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-2022]
+        # Pinned: Playwright 1.54.1 cannot install dependencies on Ubuntu 26.04
+        # (ubuntu-latest).
+        os: [ubuntu-24.04, windows-2022]
     env:
       AGENT_FARM_ARTIFACT_BUNDLE: ${{ github.workspace }}/tmp/greenfield/pane-notes
     steps:
