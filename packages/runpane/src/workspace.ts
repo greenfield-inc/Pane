@@ -228,13 +228,17 @@ export function workspaceTarget(machine: TailnetMachine): RemoteDaemonTarget {
   return { machine: machine.name, baseUrl: `https://${machine.dnsName}:${WORKSPACE_HTTPS_PORT}` };
 }
 
-async function probeMachine(machine: TailnetMachine): Promise<{ info?: MachineInfo; error?: string }> {
+const NOT_ANSWERING = 'Pane is not answering there; it needs a Pane with workspaces running and signed in to Tailscale';
+/** With the tailnet-wide setting off, no machine can answer, so name the setting instead of the machine. */
+const CERTIFICATES_OFF = 'this tailnet has HTTPS certificates turned off. Fix: Turn on HTTPS Certificates at https://login.tailscale.com/admin/dns.';
+
+async function probeMachine(machine: TailnetMachine, notAnswering = NOT_ANSWERING): Promise<{ info?: MachineInfo; error?: string }> {
   if (!machine.online) return { error: 'offline' };
   try {
     return { info: await invokeRemoteDaemon(workspaceTarget(machine), 'runpane:machine:info', [], machineInfoSchema, PROBE_TIMEOUT_MS) };
   } catch (error) {
     if (error instanceof PaneDaemonClientError && (error.code === 'ERR_WORKSPACE_UNREACHABLE' || error.code === 'ERR_WORKSPACE_TIMEOUT')) {
-      return { error: 'Pane is not answering there; it needs a Pane with workspaces running and signed in to Tailscale' };
+      return { error: notAnswering };
     }
     return { error: error instanceof Error ? error.message : String(error) };
   }
@@ -268,18 +272,14 @@ async function routePath(value: string, verb: string): Promise<TailnetMachine> {
 export async function runWorkspaceList(parsed: ParsedArgs): Promise<number> {
   const tailnet = await requireTailnet();
   const local = await readLocalStatus(parsed.paneDir);
-  // With the tailnet-wide setting off, no machine can answer, so name it instead of each machine.
-  const tailnetCause = tailnet.httpsCertificates
-    ? null
-    : 'this tailnet has HTTPS certificates turned off. Fix: Turn on HTTPS Certificates at https://login.tailscale.com/admin/dns.';
   // Offline machines need no probe, so only online ones count toward the limit; mine come first.
   const probed = new Set(tailnet.machines.filter((machine) => machine.online).slice(0, MAX_PROBED_MACHINES));
-  const rows = await Promise.all(tailnet.machines.map(async (machine) => {
-    const probe = probed.has(machine) || !machine.online
-      ? await probeMachine(machine)
-      : { error: `not checked (Pane checks the first ${MAX_PROBED_MACHINES} online machines)` };
-    return { machine, probe: tailnetCause && machine.online && !probe.info ? { error: tailnetCause } : probe };
-  }));
+  const rows = await Promise.all(tailnet.machines.map(async (machine) => ({
+    machine,
+    probe: probed.has(machine) || !machine.online
+      ? await probeMachine(machine, tailnet.httpsCertificates ? NOT_ANSWERING : CERTIFICATES_OFF)
+      : { error: `not checked (Pane checks the first ${MAX_PROBED_MACHINES} online machines)` },
+  })));
   if (parsed.json) {
     console.log(JSON.stringify({
       ok: true,
