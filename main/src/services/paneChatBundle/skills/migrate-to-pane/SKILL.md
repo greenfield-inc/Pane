@@ -149,12 +149,14 @@ Register each repository once with `runpane repos add --path <repo root>`
   resumed agent waits for input, so next copy the checkout's uncommitted and
   untracked files into the new worktree until `git status` and the file
   contents match the source. The original keeps running in its own
-  checkout. Fork the Cursor agent's chats the same way, best effort, and report
-  exactly what the check finds. When a tool has no fork that leaves the
+  checkout. Cursor has no fork command, and a copy of a Cursor chat still
+  writes to the original chat once it is used, so a running Cursor session
+  has no such fork. When a tool has no fork that leaves the
   original untouched, don't fork: report the session as not continued
   ("still running elsewhere; close it there and say 'migrate to Pane' again").
-  Record each original's size and modification time before you fork it, and
-  compare them once the fork's tab is open: check 4 of the continuity check.
+  Record each original's size, sha256 and modification time before you fork
+  it, and compare them once the fork's tab is open: check 4 of the continuity
+  check.
   A fork with no turn of its own can lead its tool back to the original when
   it is opened (an empty Codex fork, for example, made the tool write to the
   original's file), so prefer a fork that carries one short turn of its own.

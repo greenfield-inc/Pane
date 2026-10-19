@@ -26,9 +26,15 @@ assumed it:
    prior conversation, including the last turn recorded in the copy that was
    opened.
 4. **Original untouched** (forks only). When you forked, the original
-   session's file and process were not changed: the file has the same size
-   and modification time as before you started, and its process is still
-   running if it was.
+   session's files and process were not changed: each file has the same size,
+   content and modification time as before you started, nothing was added to
+   its folder, and its process is still running if it was. One exception: when
+   the original's own agent is the one handing off (it ran `runpane handoff`
+   itself), its current turn keeps appending to its transcript. Then the file
+   may grow, as long as every byte it held before the fork is unchanged; the
+   growth is that turn, and `runpane handoff` reports it as `originalAppended`.
+   Any other change, or any growth of an original nobody is running, fails
+   check 4.
 
 "The last turn recorded" is the last complete user or assistant message in the
 copy that was opened. A copy taken mid-turn, as a handoff takes it, ends with
@@ -62,7 +68,10 @@ send the tab one message:
 > This session moved to `<path>` on `<machine>`. Continue from where you were.
 
 Use `runpane panels submit --panel <id> --text "<message>" --yes`. Adopting a
-checkout in place changes neither, so it gets no message.
+checkout in place changes neither, so it gets no message. `runpane handoff`
+starts its receiver with no prompt, so it always sends one: the "moved"
+message, or, for a new tab in the same Pane, that the session was handed off
+to that tab. Both name the handoff note.
 
 ## Report
 

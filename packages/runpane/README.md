@@ -338,9 +338,14 @@ session to carry starts a fresh agent with the note, and the output says so.
 OpenCode keeps sessions in a database, so its session travels as `opencode export`
 and is brought in with `opencode import` inside the receiving repository; an
 OpenCode receiver is accepted only to continue an OpenCode session. Carrying a
-Cursor chat is best effort, since Cursor's store is undocumented. The
-destination's agent store is assumed at its default location (`~/.claude`,
-`~/.codex`, `~/.cursor`).
+Cursor chat to another machine is best effort, since Cursor's store is
+undocumented; on the same machine it isn't carried (`not-continued`), because a
+copied Cursor chat still writes to the original. The destination's agent store
+is assumed at its default location (`~/.claude`, `~/.codex`, `~/.cursor`). A
+copy already there is replaced only when yours holds all of it and no agent
+there runs it; otherwise nothing is copied and the result is `not-continued`.
+A destination Pane too old to resume a carried session
+(`ERR_HANDOFF_RESUME_UNSUPPORTED`) is refused before anything is sent.
 
 ```bash
 runpane handoff --template > ~/handoff.md
