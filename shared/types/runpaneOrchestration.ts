@@ -1,4 +1,4 @@
-import type { ProjectEnvironment, TerminalAgentReport, TerminalAgentReportState, ToolPanelType } from './panels';
+import type { ProjectEnvironment, TerminalAgentReport, TerminalAgentReportState, TerminalExpectedReport, ToolPanelType } from './panels';
 import type { RunpaneAgent } from './generatedRunpaneContract';
 import type { RemoteDaemonExecutableHealth } from './remoteDaemon';
 import type { TerminalGraphicsProtocol } from '../constants/terminalGraphics';
@@ -143,6 +143,11 @@ export type RunpaneWorkspaceEntryKind =
   | 'panel.stopped'
   /** A worker report, delivered only when explicitly requested in kinds. */
   | 'agent.report'
+  /**
+   * A panel sent work with `--expect-report` went ready or exited without running `runpane report`.
+   * Delivered only when explicitly requested in kinds.
+   */
+  | 'agent.report.missing'
   /** The Pane joined a Session (`sessions associate`). */
   | 'pane.associated'
   /** The Pane left a Session (`sessions detach`). */
@@ -155,6 +160,10 @@ export type RunpaneWorkspaceEntryKind =
   | 'pr.merged'
   | 'pr.closed'
   | 'pr.head'
+  /** A watched PR's base branch was retargeted (by a person, or by GitHub after its old base merged and was deleted). */
+  | 'pr.base_changed'
+  /** A watched PR's base branch no longer exists; GitHub may close the PR. */
+  | 'pr.base_deleted'
   | 'pr.review'
   | 'pr.comment'
   | 'pr.stopped'
@@ -204,6 +213,8 @@ export interface RunpaneWorkspaceEntry {
   sessionName?: string;
   /** PR of a `pr.conflicted`, `pr.checks`, or `pr.merged` entry. */
   pr?: RunpaneWorkspacePullRequest;
+  /** Base branch of a `pr.base_changed` (old → new) or `pr.base_deleted` (`to` is the PR's current base name) entry. */
+  base?: { from: string; to: string };
   /** Settled result of a `pr.checks` entry. */
   checks?: 'passed' | 'failed';
   /** Up to five failing check names of a failed `pr.checks` entry. */
@@ -211,6 +222,16 @@ export interface RunpaneWorkspaceEntry {
   panels?: RunpaneWorkspacePanelSummary[];
   /** The report of an `agent.report` entry; its summary is cut to 2,000 characters (the panel keeps up to 16,000). */
   report?: TerminalAgentReport;
+  /**
+   * What an `agent.report.missing` entry's agent said last, up to 2,000 characters: its last reply
+   * from the transcript, or else the last lines on its screen (`lastOutputSource`).
+   */
+  lastOutput?: string;
+  lastOutputSource?: 'transcript' | 'screen';
+  /** When the report an `agent.report.missing` entry is about was asked for. */
+  expectedSince?: string;
+  /** The screen lines of the prompt an `agent.blocked` entry's agent is waiting on (at most 20). */
+  screenLines?: string[];
 }
 
 export interface RunpaneWorkspacePanelSummary {
@@ -371,6 +392,8 @@ export interface RunpaneAgentToolSpec {
   initialInput?: string;
   /** Write initialInput to a prompt file and send `Read and follow <path>` instead (`--as-file-pointer`). */
   initialInputAsFilePointer?: boolean;
+  /** Absolute paths copied beside the prompt file and listed in the pointer line (`--attach`). */
+  initialInputAttachments?: string[];
 }
 
 export interface RunpaneCommandToolSpec {
@@ -381,6 +404,8 @@ export interface RunpaneCommandToolSpec {
   initialInput?: string;
   /** Write initialInput to a prompt file and send `Read and follow <path>` instead (`--as-file-pointer`). */
   initialInputAsFilePointer?: boolean;
+  /** Absolute paths copied beside the prompt file and listed in the pointer line (`--attach`). */
+  initialInputAttachments?: string[];
 }
 
 export type RunpaneToolSpec = RunpaneAgentToolSpec | RunpaneCommandToolSpec;
@@ -414,6 +439,8 @@ export interface RunpanePaneCreateRequest {
   source?: RunpanePanelCreateSource;
   /** Session to associate each new Pane with (the calling orchestrator's PANE_ORCHESTRATION_SESSION_ID). */
   associateSession?: string;
+  /** The sender waits for a `runpane report`: journal `agent.report.missing` if the agent goes ready or exits without one. */
+  expectReport?: boolean;
 }
 
 export interface RunpanePaneAdoptItem {
@@ -572,8 +599,12 @@ export interface RunpanePaneCreateSuccessItem {
   initialInput?: RunpaneInitialInputDeliveryResult;
   /** The prompt file Pane wrote for `--as-file-pointer`. */
   promptFile?: string;
+  /** Copies of the `--attach` files beside the prompt file. */
+  attachments?: string[];
   warnings?: RunpanePromptWarning[];
   association?: RunpanePaneAssociationOutcome;
+  /** The report Pane now waits for (`expectReport`); absent when no agent panel was created. */
+  expectedReport?: TerminalExpectedReport;
   /** Set when the Pane's setup waits for a slot; its agent starts after setup, so there is no panel yet. */
   setupQueue?: { position: number; message: string };
   /** Set for a Pane with its own worktree: the base it started from and whether that base was refreshed. */
@@ -602,6 +633,8 @@ export type RunpanePaneCreateResultItem =
   | RunpanePaneCreateFailureItem;
 
 export interface RunpanePaneCreateResult {
+  /** Epoch of the pre-dispatch journal position. */
+  epoch?: string;
   ok: boolean;
   generation?: number;
   repo: RunpaneRepoSummary;
@@ -976,9 +1009,13 @@ export interface RunpanePanelCreateRequest {
   source?: RunpanePanelCreateSource;
   waitReady?: boolean;
   readyTimeoutMs?: number;
+  /** The sender waits for a `runpane report`: journal `agent.report.missing` if the agent goes ready or exits without one. */
+  expectReport?: boolean;
 }
 
 export interface RunpanePanelCreateResult {
+  /** Epoch of the pre-dispatch journal position. */
+  epoch?: string;
   ok: boolean;
   generation?: number;
   paneId: string;
@@ -995,7 +1032,11 @@ export interface RunpanePanelCreateResult {
   initialInput?: RunpaneInitialInputDeliveryResult;
   /** The prompt file Pane wrote for `--as-file-pointer`. */
   promptFile?: string;
+  /** Copies of the `--attach` files beside the prompt file. */
+  attachments?: string[];
   warnings?: RunpanePromptWarning[];
+  /** The report Pane now waits for (`expectReport`). */
+  expectedReport?: TerminalExpectedReport;
   nextCommand?: string;
 }
 
@@ -1150,8 +1191,12 @@ export interface RunpanePanelSubmitRequest {
   interrupt?: boolean;
   /** Write the text to a prompt file and submit `Read and follow <path>` instead. */
   asFilePointer?: boolean;
+  /** Absolute paths copied beside the prompt file and listed in the pointer line (`--attach`). */
+  attachments?: string[];
   /** `user` when a person typed it; their next finished turn notifies the phone. */
   source?: 'user' | 'agent';
+  /** The sender waits for a `runpane report`: journal `agent.report.missing` if the agent goes ready or exits without one. */
+  expectReport?: boolean;
 }
 
 export type RunpanePanelVerification = 'observed' | 'unverifiable';
@@ -1170,6 +1215,8 @@ export interface RunpaneDelivery {
 }
 
 export interface RunpanePanelSubmitResult {
+  /** Epoch of the pre-dispatch journal position. */
+  epoch?: string;
   ok: boolean;
   generation?: number;
   panelId: string;
@@ -1185,7 +1232,11 @@ export interface RunpanePanelSubmitResult {
   blocked?: RunpanePanelBlockedState;
   /** The prompt file Pane wrote for `asFilePointer`. */
   promptFile?: string;
+  /** Copies of the `attachments` beside the prompt file. */
+  attachments?: string[];
   warnings?: RunpanePromptWarning[];
+  /** The report Pane now waits for (`expectReport`); absent when nothing was sent. */
+  expectedReport?: TerminalExpectedReport;
   nextCommand?: string;
 }
 
@@ -1270,4 +1321,61 @@ export interface RunpaneResolvedTool {
   launchMode?: 'wrapped';
   initialInput?: string;
   initialInputAsFilePointer?: boolean;
+  initialInputAttachments?: string[];
+}
+
+/** What a Session inbox item is about. */
+export type RunpaneInboxItemKind = 'report' | 'report.missing' | 'blocked';
+
+/**
+ * Something a Session's orchestrator has not acknowledged yet: a worker's report, a missing report,
+ * or a question waiting on a worker's screen. Reports coalesce per panel, blockers clear when the
+ * panel moves on, and each Session keeps at most 200 items until acknowledged or superseded.
+ */
+export interface RunpaneInboxItem {
+  id: string;
+  sessionId: string;
+  kind: RunpaneInboxItemKind;
+  /** When Pane saw it. */
+  at: string;
+  paneId: string;
+  paneName: string;
+  panelId: string;
+  panelTitle?: string;
+  agentType?: string;
+  /** The report of a `report` item; its summary is cut to 2,000 characters. */
+  report?: TerminalAgentReport;
+  /** A `report.missing` item's agent output, as on the `agent.report.missing` entry. */
+  lastOutput?: string;
+  lastOutputSource?: 'transcript' | 'screen';
+  /** `ready` or `exited` for a `report.missing` item; the detection rule for a `blocked` one. */
+  reason?: string;
+  /** A `blocked` item's prompt lines. */
+  screenLines?: string[];
+}
+
+export interface RunpaneInboxListRequest {
+  /** Session id or exact name. */
+  session: string;
+}
+
+export interface RunpaneInboxListResult {
+  ok: true;
+  session: { id: string; name: string };
+  items: RunpaneInboxItem[];
+}
+
+export interface RunpaneInboxAckRequest {
+  /** Item ids to clear. */
+  ids?: string[];
+  /** Session id or exact name; with `all`, clears every item of that Session. */
+  session?: string;
+  all?: boolean;
+}
+
+export interface RunpaneInboxAckResult {
+  ok: true;
+  acknowledged: string[];
+  /** Ids that matched no item (already acknowledged, or never existed). */
+  unknown: string[];
 }

@@ -278,7 +278,7 @@ The prompt stays small because Pane ships its skills and installs them into the 
 - `skills/pane-chat/skills/`: the bundled skills, also installed in `.claude/skills/` and `.codex/skills/`
 - `.claude/agents/` and `.codex/agents/`: helper subagents (explorer, cold-reader, qa-and-verify, reviewer)
 
-The bundle lives in `main/src/services/paneChatBundle/`. It is built on Agent Farm's raw profile (`prepare-pr`, `create-ticket`, `tdd`, `quick-verify`, `babysit-pr`, `investigate`, and others), general primitives such as `orchestrate-sessions`, `verify-app`, `options`, and `brief`, and three Pane-specific skills, `runpane`, `pane-work`, and `migrate-to-pane`. Pane generates the `pane-orchestrator` entry point at install time. Nothing is downloaded at runtime.
+The bundle lives in `main/src/services/paneChatBundle/`. It is built on Agent Farm's raw profile (`prepare-pr`, `create-ticket`, `tdd`, `quick-verify`, `babysit-pr`, `investigate`, and others), general primitives such as `orchestrate-sessions`, `verify-app`, `options`, and `brief`, and four Pane-specific skills, `runpane`, `pane-orchestration` (the orchestrator guide), `pane-work`, and `migrate-to-pane`. Pane generates the `pane-orchestrator` entry point at install time. Nothing is downloaded at runtime.
 
 The top-right toggle switches Pane Chat between Claude, Codex, and Cursor and persists the default orchestrator agent in Pane settings. All three use the same Pane-specific contract and the same bundled skills.
 

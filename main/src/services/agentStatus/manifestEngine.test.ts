@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
+  blockedScreenLines,
   detectAgentState,
   extractRegion,
   ruleMatches,
   type AgentManifest,
   type ManifestRule,
 } from './manifestEngine';
+import { CLAUDE_MANIFEST } from './manifests';
 
 const input = (screen: string, oscTitle = '', oscProgress = '') => ({
   screen,
@@ -146,5 +148,47 @@ describe('detectAgentState', () => {
     const result = detectAgentState(m, input('', '⠉ Claude'));
     expect(result.state).toBe('working');
     expect(result.visibleWorking).toBe(true);
+  });
+});
+
+describe('blockedScreenLines', () => {
+  // Real Claude Code 2.1.300 AskUserQuestion picker: its last rule sits just above the footer.
+  const picker = [
+    '⏺ second turn finished.',
+    '',
+    '❯ Use the AskUserQuestion tool to ask me one question: red or blue? Then wait',
+    '  for my answer.',
+    '─'.repeat(80),
+    ' ☐ Color ',
+    '',
+    'Red or blue?',
+    '',
+    '❯ 1. Red',
+    '     Pick red.',
+    '  2. Blue',
+    '     Pick blue.',
+    '  3. Type something.',
+    '─'.repeat(80),
+    '  4. Chat about this',
+    '',
+    'Enter to select · ↑/↓ to navigate · Esc to cancel',
+  ].join('\n');
+
+  it('keeps the question above a picker whose matched region is only its footer', () => {
+    const input = { screen: picker, oscTitle: '', oscProgress: '' };
+    const detection = detectAgentState(CLAUDE_MANIFEST, input);
+    expect(detection.matchedRuleId).toBe('live_blocked_form');
+
+    const lines = blockedScreenLines(CLAUDE_MANIFEST, detection.matchedRuleId, input);
+    expect(lines).toHaveLength(12);
+    expect(lines).toContain('Red or blue?');
+    expect(lines.at(-1)).toBe('Enter to select · ↑/↓ to navigate · Esc to cancel');
+    expect(lines.every(line => line.trim().length > 0)).toBe(true);
+  });
+
+  it('caps a long prompt at 20 lines', () => {
+    const screen = Array.from({ length: 40 }, (_, index) => `line ${index}`).join('\n');
+    const lines = blockedScreenLines(CLAUDE_MANIFEST, 'legacy_no_prompt_blocker', { screen, oscTitle: '', oscProgress: '' });
+    expect(lines).toEqual(Array.from({ length: 20 }, (_, index) => `line ${index + 20}`));
   });
 });

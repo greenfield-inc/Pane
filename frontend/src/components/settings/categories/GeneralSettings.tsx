@@ -113,7 +113,7 @@ export function GeneralSettings({ persistence, onUpdate, onSendFeedback }: Gener
         <SettingRow
           settingId="keep-awake"
           label="Keep computer awake while sessions are active"
-          description="Prevents the system from idle-sleeping while any session is active. The display can still turn off; closing the lid or choosing Sleep still sleeps the machine."
+          description="Prevents the system from idle-sleeping while an agent is working or any session is active. The display can still turn off; closing the lid or choosing Sleep still sleeps the machine."
           saveState={persistence.saveStates['keep-awake']}
         >
           <ImmediateToggle

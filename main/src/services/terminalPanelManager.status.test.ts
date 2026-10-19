@@ -134,6 +134,12 @@ describe('terminal status events', () => {
     const count = statuses().length;
     await pollAgentStatus();
     expect(statuses()).toHaveLength(count);
+
+    fixture.data(['\x1b[2J\x1b[H', rule, ' Choose a deployment target', '', ' ❯ Staging', '   Production', '', ' Enter to confirm · Esc to cancel'].join('\r\n'));
+    await pollAgentStatus();
+    expect(statuses()).toHaveLength(count + 1);
+    expect(statuses().at(-1)).toMatchObject({ state: 'blocked', reason: 'live_selection_menu',
+      screenLines: expect.arrayContaining([expect.stringContaining('Choose a deployment target')]) });
   });
 
   it('retires destroyed terminals before old exit and data callbacks can affect a replacement', async () => {

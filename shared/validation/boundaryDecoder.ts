@@ -147,7 +147,11 @@ function decodeUnion<Schemas extends readonly BoundarySchema<unknown>[]>(
   return current.fail("did not match any allowed shape");
 }
 
+/** Past this nesting a JSON value fails to decode, rather than overflowing the stack. */
+const MAX_JSON_DEPTH = 512;
+
 function decodeJsonValue(current: BoundaryCursor): JsonValue {
+  if (current.path.length > MAX_JSON_DEPTH) return current.fail(`JSON nesting is deeper than ${MAX_JSON_DEPTH} levels`);
   if (
     current.value === null ||
     typeof current.value === "string" ||
@@ -166,7 +170,8 @@ function decodeJsonValue(current: BoundaryCursor): JsonValue {
     for (const [key, value] of Object.entries(source)) {
       // Match JSON.stringify: an undefined property is an absent key, not an invalid value.
       if (value === undefined) continue;
-      decoded[key] = decodeJsonValue(current.child(key, value));
+      // Define, not assign: a JSON key named __proto__ must stay an own key, not set the prototype.
+      Object.defineProperty(decoded, key, { value: decodeJsonValue(current.child(key, value)), enumerable: true, writable: true, configurable: true });
     }
     return decoded;
   }

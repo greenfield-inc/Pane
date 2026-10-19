@@ -53,9 +53,9 @@ export function subscribePanelStatus(source: PanelStatusSource = desktopStatusSo
   const unsubscribeStatus = source.onAgentStatus(data => {
     changedDuringRead.add(data.panelId);
     if (deleted.has(data.panelId)) return;
-    if (data.reason === 'exit' || data.reason === 'destroyed') {
+    if (data.reason === 'exit' || data.reason === 'destroyed' || data.reason === 'pty_host_restart') {
       // Rebaseline notification subscribers atomically, as with a snapshot.
-      // A stopped process must not become an unseen completed agent turn.
+      // A stopped or interrupted process must not become a completed agent turn.
       usePanelStore.setState(state => ({
         agentStatus: { ...state.agentStatus, [data.panelId]: data.state },
         agentStatusSession: { ...state.agentStatusSession, [data.panelId]: data.sessionId },

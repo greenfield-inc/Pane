@@ -1,6 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { EventEmitter } from 'events';
 import * as pty from '@lydell/node-pty';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetPaneRuntimeForTests, setPaneRuntime, type PtyHandleLike, type PtyHostRuntime } from '../core/runtime';
@@ -13,6 +14,7 @@ import { DatabaseService, PANEL_STATE_CEILING_BYTES } from '../database/database
 import { splitPanelBufferState } from '../database/panelBuffers';
 import { trimAnsiSafe } from '../utils/ansiTrim';
 import { ConfigManager } from './configManager';
+import { PowerSaveManager } from './powerSaveManager';
 import { databaseService } from './database';
 import { panelManager as panelManagerMock } from '../test/setup';
 import { inProcessEmulatorHost } from '../test/inProcessEmulatorHost';
@@ -24,6 +26,8 @@ import { windowsPathToWSLMount } from '../utils/wslUtils';
 import * as shellPathUtils from '../utils/shellPath';
 import { ShellDetector } from '../utils/shellDetector';
 import * as processTree from '../utils/processTree';
+import { ExpectedReportTracker } from './expectedReports';
+import { WorkspaceJournal } from './workspaceJournal';
 
 /** In-process stand-in for a ptyHost PTY: output is whatever the test emits. */
 class FakePtyHandle implements PtyHandleLike {
@@ -646,6 +650,48 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void
     }
   });
 
+  it.each(['typed', 'argument'] as const)('records a deferred %s-delivery activation failure without submitting the prompt', async (mode) => {
+    vi.useFakeTimers();
+    const journal = new WorkspaceJournal();
+    let tracker: ExpectedReportTracker | undefined;
+    try {
+      const panel = mode === 'typed'
+        ? makeOpenCodePanel('typed-activation-failure', { agentSessionId: 'ses_ActivationFailure', initialInput: 'Task' })
+        : makePanel('argument-activation-failure');
+      if (mode === 'argument') panel.state.customState = {
+        agentType: 'codex', initialCommand: 'codex --yolo', initialInputMode: 'argument', initialInput: 'Task',
+      };
+      const { manager, handle } = await startTerminal(panel);
+      const filePath = path.join(tempDir, 'expected.json');
+      tracker = new ExpectedReportTracker({ journal, filePath,
+        lastReportAt: () => undefined, lastOutput: async () => undefined,
+        subscribeDelivery: listener => {
+          manager.on('initial-input-delivery', listener);
+          return () => { manager.off('initial-input-delivery', listener); };
+        },
+      });
+      tracker.arm(panel.id, new Date().toISOString(), true);
+      // Reservation succeeds; activation cannot replace the expectation file.
+      fs.unlinkSync(filePath);
+      fs.mkdirSync(filePath);
+      handle.emit('$ ');
+      await vi.advanceTimersByTimeAsync(500);
+      if (mode === 'typed') emitOpenCodeIdleFrame(handle);
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      if (mode === 'typed') expect(handle.written).toContain('Task');
+      else expect(handle.written).toEqual([]);
+      expect(handle.written).not.toContain('\r');
+      expect(databaseService.getPanel(panel.id)?.state.customState?.initialInputError).toMatch(/Next:.*Check permissions/);
+      expect(tracker.expectation(panel.id)).toBeUndefined();
+    } finally {
+      tracker?.dispose();
+      journal.dispose();
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+  });
+
   it('keeps OpenCode initial input pending when the readiness timeout has no output', async () => {
     vi.useFakeTimers();
     try {
@@ -852,6 +898,38 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void
     }
   });
 
+  it.each(['failed spawn', 'missing panel'])('releases keep-awake when PTY recovery leaves no terminal (%s)', async (failure) => {
+    vi.useFakeTimers();
+    const panel = makePanel(`keep-awake-recovery-${failure}`);
+    const { manager, handle } = await startTerminal(panel);
+    const sessions = Object.assign(new EventEmitter(), { getPowerSaveSnapshotSessions: () => [] });
+    const blocker = { start: vi.fn(() => 42), stop: vi.fn() };
+    const power = new PowerSaveManager(configManager, sessions, manager, blocker);
+    try {
+      handle.emit('Agent working...\r\n');
+      await vi.advanceTimersByTimeAsync(500);
+      expect(manager.getAgentStatus(panel.id)).toBe('working');
+      expect(blocker.start).toHaveBeenCalledWith('prevent-app-suspension');
+      expect(blocker.stop).not.toHaveBeenCalled();
+
+      if (failure === 'failed spawn') ptyHost.spawnError = new Error('PTY host spawn failed');
+      else panelManagerMock.getPanel.mockReturnValue(undefined);
+      panelManagerMock.emitPanelEvent.mockClear();
+
+      await manager.respawnAll();
+
+      expect(manager.getActiveTerminals()).toEqual([]);
+      expect(blocker.stop).toHaveBeenCalledTimes(1);
+      expect(blocker.stop).toHaveBeenCalledWith(42);
+      expect(panelManagerMock.emitPanelEvent).not.toHaveBeenCalledWith(panel.id, 'terminal:exit', expect.anything());
+      expect(events.some(event => event.channel === 'terminal:exited')).toBe(false);
+    } finally {
+      power.dispose();
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+  });
+
   it('keeps a registered viewer across a PTY host respawn', async () => {
     const panel = makePanel('viewed-respawn-flow-control');
     const { manager } = await startTerminal(panel);
@@ -885,6 +963,29 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void
     ptyHost.latest().emit(output);
     expect(events.filter(event => event.channel === 'terminal:output')).toHaveLength(wasVisible ? 0 : 1);
     manager.acknowledgeBytes(panel.id, output.length);
+  });
+
+  it('exports a worker\'s Session folder as PANE_SESSION_DIR without giving it the orchestrator role', async () => {
+    const spawn = vi.spyOn(ptyHost, 'spawn');
+    const panel = makePanel('session-worker-panel');
+    panel.state.customState = { sessionFolder: '/home/me/.pane/sessions/orch-1' };
+    const previous = process.env.PANE_SESSION_DIR;
+    process.env.PANE_SESSION_DIR = '/home/me/.pane/sessions/parent';
+    try {
+      await startTerminal(panel);
+      const env = spawn.mock.calls[0][0].env;
+      expect(env.PANE_SESSION_DIR).toBe('/home/me/.pane/sessions/orch-1');
+      expect(env.PANE_ORCHESTRATION_SESSION_ID).toBeUndefined();
+
+      const plain = makePanel('plain-panel');
+      await startTerminal(plain);
+      // A Pane launched from a Session terminal does not inherit its folder.
+      expect(spawn.mock.calls[1][0].env.PANE_SESSION_DIR).toBeUndefined();
+    } finally {
+      if (previous === undefined) delete process.env.PANE_SESSION_DIR;
+      else process.env.PANE_SESSION_DIR = previous;
+      vi.restoreAllMocks();
+    }
   });
 
   it('launches and respawns a saved WSL Session inside its distro with Linux cwd and role environment', async () => {

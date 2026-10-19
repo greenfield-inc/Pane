@@ -2,6 +2,7 @@ import { EventEmitter } from 'events';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppConfig } from '../types/config';
 import type { Session } from '../types/session';
+import type { AgentState } from '../../../shared/types/agentStatus';
 
 const powerSaveBlocker = {
   start: vi.fn(() => 42),
@@ -35,6 +36,12 @@ class SessionManagerStub extends EventEmitter {
   }
 }
 
+class PanelActivityStub extends EventEmitter {
+  setState(panelId: string, state: AgentState): void {
+    this.emit('agent-status', { panelId, sessionId: 'session-1', state, reason: null });
+  }
+}
+
 function createSession(
   id: string,
   status: Session['status'],
@@ -56,6 +63,7 @@ function createSession(
 describe('PowerSaveManager', () => {
   let configManager: ConfigManagerStub;
   let sessionManager: SessionManagerStub;
+  let panelActivity: PanelActivityStub;
   let manager: PowerSaveManager;
 
   beforeEach(() => {
@@ -64,7 +72,8 @@ describe('PowerSaveManager', () => {
     powerSaveBlocker.isStarted.mockClear();
     configManager = new ConfigManagerStub();
     sessionManager = new SessionManagerStub();
-    manager = new PowerSaveManager(configManager, sessionManager, powerSaveBlocker);
+    panelActivity = new PanelActivityStub();
+    manager = new PowerSaveManager(configManager, sessionManager, panelActivity, powerSaveBlocker);
   });
 
   afterEach(() => {
@@ -206,12 +215,69 @@ describe('PowerSaveManager', () => {
       createSession('archived-session', 'running', { archived: true }),
       createSession('stopped-session', 'stopped'),
     ]);
-    manager = new PowerSaveManager(configManager, sessionManager, powerSaveBlocker);
+    manager = new PowerSaveManager(configManager, sessionManager, panelActivity, powerSaveBlocker);
     manager.sync();
 
     expect(powerSaveBlocker.start).toHaveBeenCalledTimes(1);
     expect(powerSaveBlocker.start).toHaveBeenCalledWith('prevent-app-suspension');
     expect(powerSaveBlocker.stop).not.toHaveBeenCalled();
+  });
+
+  // Issue #610: session rows sit at stopped/interrupted while their agent panels
+  // work, so a working panel must hold the blocker on its own.
+  it('holds one blocker while an agent panel is working, with every session stopped', () => {
+    sessionManager.emit('sessions-loaded', [createSession('session-1', 'stopped')]);
+    panelActivity.setState('panel-1', 'working');
+    panelActivity.setState('panel-1', 'working');
+
+    expect(powerSaveBlocker.start).toHaveBeenCalledTimes(1);
+    expect(powerSaveBlocker.start).toHaveBeenCalledWith('prevent-app-suspension');
+    expect(powerSaveBlocker.stop).not.toHaveBeenCalled();
+  });
+
+  it.each<AgentState>(['idle', 'blocked', 'unknown'])(
+    'releases when the last working panel turns %s',
+    state => {
+      panelActivity.setState('panel-1', 'working');
+      panelActivity.setState('panel-2', 'working');
+      panelActivity.setState('panel-1', state);
+
+      expect(powerSaveBlocker.stop).not.toHaveBeenCalled();
+
+      panelActivity.setState('panel-2', state);
+      expect(powerSaveBlocker.stop).toHaveBeenCalledTimes(1);
+      expect(powerSaveBlocker.stop).toHaveBeenCalledWith(42);
+    },
+  );
+
+  it('stays held while a panel works after its session stops, and releases when both are idle', () => {
+    sessionManager.emit('session-created', createSession('session-1', 'running'));
+    panelActivity.setState('panel-1', 'working');
+    sessionManager.emit('session-updated', createSession('session-1', 'stopped'));
+
+    expect(powerSaveBlocker.stop).not.toHaveBeenCalled();
+
+    panelActivity.setState('panel-1', 'idle');
+    expect(powerSaveBlocker.start).toHaveBeenCalledTimes(1);
+    expect(powerSaveBlocker.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not hold for a working panel while keep-awake is disabled', () => {
+    configManager.setKeepAwake(false);
+    panelActivity.setState('panel-1', 'working');
+
+    expect(powerSaveBlocker.start).not.toHaveBeenCalled();
+
+    configManager.setKeepAwake(true);
+    expect(powerSaveBlocker.start).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops listening to panel activity after dispose', () => {
+    manager.dispose();
+    panelActivity.setState('panel-1', 'working');
+
+    expect(powerSaveBlocker.start).not.toHaveBeenCalled();
+    expect(panelActivity.listenerCount('agent-status')).toBe(0);
   });
 
   it('defaults keep-awake to enabled for a fresh ConfigManager', () => {

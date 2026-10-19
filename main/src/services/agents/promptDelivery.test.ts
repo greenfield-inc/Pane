@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { execFileSync } from 'child_process';
+import os from 'os';
 import { describe, expect, it } from 'vitest';
 import { getAppDirectory } from '../../utils/appDirectory';
 import {
@@ -12,6 +13,7 @@ import {
   normalizePromptNewlines,
   promptFileShellWord,
   stripTrailingNewlines,
+  writeAgentPromptFile,
   writePromptFile,
 } from './promptDelivery';
 
@@ -80,5 +82,95 @@ describe('prompt delivery', () => {
 
   it('has no warning for ordinary text', () => {
     expect(claudePromptWarnings('Plan issue 42')).toBeUndefined();
+  });
+
+  describe('agent prompt files', () => {
+    function gitWorktree(): string {
+      const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-prompt-'));
+      execFileSync('git', ['init', '-q'], { cwd: directory });
+      return fs.realpathSync.native(directory);
+    }
+
+    it('writes inside the worktree and adds one exclude line that keeps it out of git', async () => {
+      const worktree = gitWorktree();
+      const first = await writeAgentPromptFile('pane-1', 'one', { worktreePath: worktree });
+      const second = await writeAgentPromptFile('pane-1', 'two', { worktreePath: worktree });
+
+      expect(path.dirname(first.file)).toBe(path.join(worktree, '.pane', 'prompts'));
+      expect(first.worktreeRoot).toBe(worktree);
+      expect(path.dirname(second.file)).toBe(path.dirname(first.file));
+      const exclude = fs.readFileSync(path.join(worktree, '.git', 'info', 'exclude'), 'utf8');
+      expect(exclude.split('\n').filter(line => line === '/.pane/prompts/')).toHaveLength(1);
+      expect(execFileSync('git', ['status', '--porcelain', '--untracked-files=all'], { cwd: worktree, encoding: 'utf8' })).toBe('');
+      if (process.platform !== 'win32') {
+        expect(fs.statSync(first.file).mode & 0o777).toBe(0o600);
+        expect(fs.statSync(path.dirname(first.file)).mode & 0o777).toBe(0o700);
+      }
+    });
+
+    it.each([['.pane', false], ['.pane/prompts', false], ['.pane', true], ['.pane/prompts', true]])('refuses symlinked %s (outside checkout: %s) without writing private material or changing the target', async (component, outside) => {
+      const worktree = gitWorktree();
+      const other = outside ? gitWorktree() : worktree;
+      const target = path.join(other, 'data');
+      fs.mkdirSync(target, { mode: 0o755 });
+      fs.mkdirSync(path.dirname(path.join(worktree, component)), { recursive: true });
+      fs.symlinkSync(target, path.join(worktree, component), 'junction');
+      const attachment = path.join(worktree, 'attachment.txt');
+      fs.writeFileSync(attachment, 'private attachment');
+      const before = execFileSync('git', ['status', '--porcelain', '--untracked-files=all'], { cwd: worktree, encoding: 'utf8' });
+      const mode = fs.statSync(target).mode;
+      try {
+        await expect(writeAgentPromptFile('symlink-worker', 'private brief', { worktreePath: worktree, attachments: [attachment] }))
+          .rejects.toMatchObject({ code: 'ERR_PROMPT_STORAGE_SYMLINK' });
+        expect(fs.readdirSync(target)).toEqual([]);
+        expect(fs.statSync(target).mode).toBe(mode);
+        expect(execFileSync('git', ['status', '--porcelain', '--untracked-files=all'], { cwd: worktree, encoding: 'utf8' })).toBe(before);
+      } finally {
+        fs.rmSync(worktree, { recursive: true, force: true });
+        if (outside) fs.rmSync(other, { recursive: true, force: true });
+      }
+    });
+
+    it('falls back to the Pane directory without a worktree, outside git, or below the top of a checkout', async () => {
+      const appPrompts = path.join(getAppDirectory(), 'prompts', 'pane-2');
+      const plain = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-plain-'));
+      const nested = path.join(gitWorktree(), 'sessions', 'one');
+      fs.mkdirSync(nested, { recursive: true });
+
+      for (const worktreePath of [undefined, plain, nested, path.join(plain, 'missing')]) {
+        const { file, worktreeRoot } = await writeAgentPromptFile('pane-2', 'brief', { worktreePath });
+        expect(path.dirname(file)).toBe(appPrompts);
+        expect(worktreeRoot).toBeUndefined();
+      }
+      expect(fs.existsSync(path.join(plain, '.pane'))).toBe(false);
+      expect(fs.existsSync(path.join(nested, '.pane'))).toBe(false);
+    });
+
+    it('copies attachments beside the prompt file, keeping repeated names apart, and lists them in the pointer line', async () => {
+      const worktree = gitWorktree();
+      const sources = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-attach-'));
+      fs.mkdirSync(path.join(sources, 'b'));
+      fs.writeFileSync(path.join(sources, 'plan.html'), 'first');
+      fs.writeFileSync(path.join(sources, 'b', 'plan.html'), 'second');
+
+      const { file, attachments } = await writeAgentPromptFile('pane-3', 'brief', {
+        worktreePath: worktree,
+        attachments: [path.join(sources, 'plan.html'), path.join(sources, 'b', 'plan.html')],
+      });
+
+      const folder = file.replace(/\.md$/u, '');
+      expect(attachments).toEqual([path.join(folder, 'plan.html'), path.join(folder, '2-plan.html')]);
+      expect(attachments.map(copy => fs.readFileSync(copy, 'utf8'))).toEqual(['first', 'second']);
+      expect(filePointerPrompt(file, attachments)).toBe(`Read and follow ${file} (attached: ${attachments.join(', ')})`);
+    });
+
+    it('refuses a missing or non-file attachment before writing anything', async () => {
+      const worktree = gitWorktree();
+      await expect(writeAgentPromptFile('pane-4', 'brief', { worktreePath: worktree, attachments: [path.join(worktree, 'missing.png')] }))
+        .rejects.toMatchObject({ code: 'ERR_ATTACHMENT_UNREADABLE' });
+      await expect(writeAgentPromptFile('pane-4', 'brief', { worktreePath: worktree, attachments: [worktree] }))
+        .rejects.toMatchObject({ code: 'ERR_ATTACHMENT_UNREADABLE' });
+      expect(fs.existsSync(path.join(worktree, '.pane'))).toBe(false);
+    });
   });
 });

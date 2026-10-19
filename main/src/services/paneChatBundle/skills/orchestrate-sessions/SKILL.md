@@ -9,7 +9,7 @@ You coordinate. Planning sessions own investigation, options and plans. Implemen
 
 ## Host and workflow
 
-Before any workspace or session action, read the host's own instructions (in Pane: the `pane-orchestrator` and `runpane` skills), and follow [references/host-policy.md](references/host-policy.md).
+Before any workspace or session action, read the host's own instructions (in Pane: the [`pane-orchestration`](../pane-orchestration/SKILL.md) guide, plus `pane-orchestrator` and `runpane` in a Pane Session), and follow [references/host-policy.md](references/host-policy.md).
 
 - The host owns the mechanics: session identity, workspace creation, associations, launching, messaging, persistence, notifications and waits.
 - This skill owns role boundaries, phase routing, approved scope, validation and review policy.
@@ -19,8 +19,10 @@ Use the host's own tools for its mechanics. If a required host capability is mis
 
 ## In Pane
 
-Pane's `pane-orchestrator` and `runpane` skills bind this skill to Pane, and
-they win where the two differ:
+Pane's [`pane-orchestration`](../pane-orchestration/SKILL.md) guide (launching,
+waiting, reports, answers, resume) and, in a Pane Session, its
+`pane-orchestrator` and `runpane` skills bind this skill to Pane, and they win
+on mechanics where the two differ:
 
 - The Pane Chat Session is the planning session. Discussion, investigation,
   options, and the ticket happen there; start a separate planning session only
@@ -28,7 +30,8 @@ they win where the two differ:
 - Pane refreshes Session state and arms its watcher at startup.
 - Workers end with `runpane report`. Its REPORT event (`agent.report`) is the
   completion and blocker signal; a READY without one is only a cue to look.
-  `runpane` has the prompt line and how to read a report.
+  `pane-orchestration` has the one wait primitive, the prompt line, and how to
+  read a report and pair it with a status file.
 - **1 feature = 1 worktree = 1 branch = 1 Pane; reviews, audits, fixes and QA
   for it are tabs in that Pane.** A feature means one branch and its PR. A new
   Pane creates a worktree that checks out, installs and often builds, so it is

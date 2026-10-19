@@ -121,8 +121,15 @@ doctor), `agentLaunchPresets.test.ts`, `scripts/test-runpane-contract.js`.
 People often start a supported agent through their own command, such as
 `agent-farm run free-range` or a shell script. The launch command then says
 nothing about the agent, but Pane still needs to know it, because composer
-detection, `panels submit` staging, the status manifest, `panels list` and the
-workspace journal (`watch`) all depend on the panel's `agentType`.
+detection, `panels submit` staging, the agent-specific status manifest and the
+agent shown in `panels list` depend on the panel's `agentType`.
+
+Managed agent panels emit `agent.busy`, `agent.ready`, `agent.blocked`,
+`agent.unknown` and `agent.idle` events before identification. These reach the
+default agents-only workspace watch even without an `agentType`; ordinary shell
+panels do not emit them. For example, an Agent Farm variant picker can report
+`agent.blocked` before the agent starts. An untyped `panel.exited` is still
+filtered by the agents-only watch.
 
 Pane decides a terminal panel's agent in this order, and records the source in
 `TerminalPanelState.agentDetection`:
@@ -143,7 +150,10 @@ Pane decides a terminal panel's agent in this order, and records the source in
    (for example a Node process that spawns the agent in its own process group)
    hides the agent from this check.
 4. **`screen`**: Claude's closed rule/`❯`/rule composer box, or Codex's
-   `OpenAI Codex` header with its `›` prompt
+   `OpenAI Codex` header with its `›` prompt, or either agent's folder-trust
+   screen: Claude's `Claude Code'll be able to read` with
+   `Yes, I trust this folder`, or Codex's `Codex can read, edit, and run files here`
+   with `Trust and continue`
    (`main/src/services/agents/agentScreenSignature.ts`). Pane adopts it only after
    two consecutive status polls match. It ignores the check while Pane's own
    shell is in the foreground, so an agent's last frame left above a shell
@@ -156,11 +166,11 @@ it is known, Pane:
 - stores `agentType`, `agentDetection`, `launchCommand`, `isCliPanel: true` and
   `launchMode: 'wrapped'` on the panel's custom state;
 - switches the panel to that agent's status manifest;
-- restates the panel's current status, so watchers that ignored the panel so far
-  see it from now on.
+- restates the panel's current status with the identified agent attached.
 
-Readiness and a starting message key off the identified agent, however it was
-identified:
+Agent-specific composer readiness and a starting message key off the identified
+agent, however it was identified. Pre-identification watch events and folder-trust
+identification do not establish composer readiness:
 
 - `--wait-ready` (and `panels wait --for ready`) on a launched command matches
   only once the panel has an agent and that agent's own ready rule passes:

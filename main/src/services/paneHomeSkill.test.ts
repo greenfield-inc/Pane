@@ -39,6 +39,11 @@ describe('Pane home skill', () => {
     ]);
   });
 
+  it('points every agent at the bundled orchestrator guide', () => {
+    const skill = buildPaneHomeSkill();
+    expect(skill).toContain('runpane docs read --doc skills/pane-orchestration/SKILL.md');
+  });
+
   it('installs a marked skill and rewrites only when it changes', async () => {
     expect((await installPaneHomeSkill(dirs)).map(result => result.outcome)).toEqual(['written', 'written']);
     const content = await fs.readFile(skillPath(dirs[0]), 'utf8');

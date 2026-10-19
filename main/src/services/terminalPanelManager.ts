@@ -1,6 +1,6 @@
 import { withRunpaneOnPath } from './runpaneShim';
 import { sessionRuntimePath, sessionWSLContext } from './sessionRuntime';
-import { escapeForBash } from '../utils/wslUtils';
+import { escapeForBash, windowsPathToWSLMount } from '../utils/wslUtils';
 import { validateCustomCommandResume, customResumeAgentType, effectiveCustomResume } from '../../../shared/types/customCommandResume';
 import { prepareSessionWorkspace, sessionGitCeiling } from './sessionWorkspace';
 import { OrchestrationSessionStore } from './orchestrationSessionStore';
@@ -29,7 +29,7 @@ import { getWSLShellSpawn, buildWSLENV, WSLContext } from '../utils/wslUtils';
 import { getGitAttributionEnv } from '../utils/attribution';
 import { interactiveTerminalEnv } from '../utils/inheritedProcessEnv';
 import { createShellStartupPromptWatcher } from './shellStartupPrompts';
-import { PaneError } from '../../../shared/paneError';
+import { PaneError, paneErrorText } from '../../../shared/paneError';
 import { isProcessAlive, listDescendantPids, terminateProcessTrees, waitForProcessesToExit } from '../utils/processTree';
 import {
   type FlowControlRecord,
@@ -41,7 +41,7 @@ import {
 import { sharedEmulatorThread, type RemoteTerminalEmulator, type TerminalEmulatorHostConnection } from './terminalEmulatorClient';
 import type { ScreenState } from './terminalEmulatorHost';
 import { AgentStatusMonitor } from './agentStatus/agentStatusMonitor';
-import { detectAgentState } from './agentStatus/manifestEngine';
+import { blockedPromptKey, blockedScreenLines, detectAgentState } from './agentStatus/manifestEngine';
 import { getManifestForAgent } from './agentStatus/manifests';
 import type { AgentDetectionResult, AgentState, PanelAgentStatusEvent } from '../../../shared/types/agentStatus';
 import type { PaneEventArgument } from '../core/eventSink';
@@ -309,7 +309,7 @@ interface TerminalProcess {
   /** The agent showed its own working signal since it last went idle. */
   workedVisibly?: boolean;
   /** Reason sent with the last `panel:agentStatus` event. */
-  lastStatusReason?: string | null;
+  lastStatusPromptKey?: string;
   /** Last status scan, reused while the emulator pushes no new screen. */
   lastStatusScan?: { screen: ScreenState; detection: AgentDetectionResult };
   /** The CLI came up with typed initial input still to send; the status poll sends it. */
@@ -776,11 +776,20 @@ export class TerminalPanelManager extends EventEmitter {
         bytes: Buffer.byteLength(delivery.input, 'utf8'),
         submit: submitStrategy,
       })}`);
-      this.writeInitialInput(panelId, delivery.input, submitStrategy);
+      return this.writeInitialInput(panelId, delivery.input, submitStrategy);
     }).catch((error) => {
-      if (this.terminals.get(panelId) !== terminal || terminal.destroying) return;
-      console.warn(`[TerminalPanelManager] Failed to send initial input for panel ${panelId}:`, error);
-      this.markInitialInputError(panelId, error instanceof Error ? error.message : String(error)).catch(() => {});
+      this.recordInitialInputFailure(terminal, error instanceof Error ? error : new Error(String(error)));
+    });
+  }
+
+  /** Deferred delivery failures belong to the panel, never an unhandled timer or promise. */
+  private recordInitialInputFailure(terminal: TerminalProcess, error: Error): void {
+    const panelId = terminal.panelId;
+    if (this.terminals.get(panelId) !== terminal || terminal.destroying) return;
+    console.warn(`[TerminalPanelManager] Failed to send initial input for panel ${panelId}:`, error);
+    const message = error instanceof PaneError ? paneErrorText(error) : error.message;
+    void this.markInitialInputError(panelId, message).catch(persistError => {
+      console.warn(`[TerminalPanelManager] Could not record initial input failure for panel ${panelId}:`, persistError);
     });
   }
 
@@ -830,20 +839,20 @@ export class TerminalPanelManager extends EventEmitter {
     this.sendInitialInputOnce(terminal.panelId);
   }
 
-  private writeInitialInput(
+  private async writeInitialInput(
     panelId: string,
     input: string,
     submitStrategy: NonNullable<TerminalPanelState['initialInputSubmitStrategy']>,
-  ): void {
+  ): Promise<void> {
     const terminal = this.terminals.get(panelId);
     if (!terminal || terminal.destroying) return;
     // An agent reads text and Enter arriving together as a paste and keeps
     // the Enter as a newline, so agents get the Enter as its own write.
     if (submitStrategy === 'codex-ctrl-enter' || terminal.agentType) {
-      void this.stageAndSubmitInitialInput(terminal, input, submitStrategy);
-      return;
+      return this.stageAndSubmitInitialInput(terminal, input, submitStrategy);
     }
 
+    this.emit('initial-input-delivery', panelId);
     this.writeToTerminal(panelId, input.endsWith('\r') ? input : `${input}\r`);
   }
 
@@ -863,6 +872,7 @@ export class TerminalPanelManager extends EventEmitter {
     const isCodex = submitStrategy === 'codex-ctrl-enter';
     await this.waitForInputSettle(terminal, generation, isCodex ? CODEX_INPUT_SETTLE_MIN_MS : CLAUDE_INPUT_SETTLE_MIN_MS);
     if (this.terminals.get(terminal.panelId) !== terminal || terminal.destroying) return;
+    this.emit('initial-input-delivery', terminal.panelId);
     this.writeToTerminal(terminal.panelId, isCodex ? CODEX_SUBMIT_SEQUENCE : '\r');
     await new Promise(resolve => setTimeout(resolve, INPUT_OUTCOME_DELAY_MS));
     if (this.terminals.get(terminal.panelId) !== terminal || terminal.destroying) return;
@@ -1752,6 +1762,7 @@ export class TerminalPanelManager extends EventEmitter {
             'PANE_PANEL_ID',
             'PANE_UPDATE_RESUME_NONCE',
             'PANE_ORCHESTRATION_SESSION_ID',
+            'PANE_SESSION_DIR',
             'GIT_CEILING_DIRECTORIES',
             'WORKTREE_PATH',
             'PANE_WORKSPACE_PATH',
@@ -1766,8 +1777,13 @@ export class TerminalPanelManager extends EventEmitter {
     // The ptyHost RPC DTO requires `Record<string, string>`, so both the legacy
     // `pty.spawn` path and the ptyHost path get the same undefined-free shape.
     const inheritedEnv = interactiveTerminalEnv();
-    // A Pane launched from an orchestrator must not inherit the parent's role.
+    // A Pane launched from an orchestrator must not inherit the parent's role or Session folder.
     delete inheritedEnv.PANE_ORCHESTRATION_SESSION_ID;
+    delete inheritedEnv.PANE_SESSION_DIR;
+    // A Session terminal works in its folder; a worker reads the folder of the Session its Pane belongs to.
+    const sessionDirectory = panelCustomState.orchestrationSessionId ? panelCustomState.orchestrationWorkspace : panelCustomState.sessionFolder;
+    const sessionDirectoryEnv: Record<string, string> = {};
+    if (sessionDirectory) sessionDirectoryEnv.PANE_SESSION_DIR = isWSL && process.platform === 'win32' ? windowsPathToWSLMount(sessionDirectory) : sessionDirectory;
     const baseSpawnEnv = {
       ...inheritedEnv,
       ...getGitAttributionEnv(getRuntimeConfigManager().getConfig()),
@@ -1782,6 +1798,7 @@ export class TerminalPanelManager extends EventEmitter {
       PANE_UPDATE_RESUME_NONCE: updateResumeNonce ?? '',
       PANE_PORT: String(panePort),
       PANE_WORKSPACE_PATH: cwd,
+      ...sessionDirectoryEnv,
       ...wslEnvVars,
     } satisfies Record<string, string>;
     const roleEnv: Record<string, string> = panelCustomState.orchestrationSessionId
@@ -1939,16 +1956,23 @@ export class TerminalPanelManager extends EventEmitter {
       const panelId = panel.id;
       const injectCommand = () => {
         if (this.terminals.get(panelId) !== terminalProcess || terminalProcess.destroying) return;
-        // The launch command goes ahead of anything typed while the shell started.
-        this.releaseHeldInput(terminalProcess, commandToRun! + '\r');
-        terminalProcess.launchCommandWrittenAt = Date.now();
+        try {
+          // The launch command goes ahead of anything typed while the shell started.
+          if (launchResolution.customState.initialInputMode === 'argument' && launchResolution.customState.initialInputSentAt) {
+            this.emit('initial-input-delivery', panelId);
+          }
+          this.releaseHeldInput(terminalProcess, commandToRun! + '\r');
+          terminalProcess.launchCommandWrittenAt = Date.now();
 
-        // For CLI tool terminals, signal the frontend when the CLI responds
-        if (isCliCommand) {
-          this.armCliReadySignal(terminalProcess, launchResolution.customState.agentType);
-        } else if (initialInput) {
-          // A command Pane does not know yet may be a wrapper: its message waits for an identified agent.
-          this.holdInitialInput(panelId);
+          // For CLI tool terminals, signal the frontend when the CLI responds
+          if (isCliCommand) {
+            this.armCliReadySignal(terminalProcess, launchResolution.customState.agentType);
+          } else if (initialInput) {
+            // A command Pane does not know yet may be a wrapper: its message waits for an identified agent.
+            this.holdInitialInput(panelId);
+          }
+        } catch (error) {
+          this.recordInitialInputFailure(terminalProcess, error instanceof Error ? error : new Error(String(error)));
         }
       };
 
@@ -2555,8 +2579,13 @@ export class TerminalPanelManager extends EventEmitter {
     this.ensureAgentStatusPoll();
   }
 
-  private emitAgentStatus(terminal: TerminalProcess, state: AgentState, reason: string | null): void {
-    terminal.lastStatusReason = reason;
+  private emitAgentStatus(
+    terminal: TerminalProcess,
+    state: AgentState,
+    reason: string | null,
+    screenLines?: string[],
+  ): void {
+    terminal.lastStatusPromptKey = state === 'blocked' ? blockedPromptKey(reason, screenLines) : undefined;
     const payload: PanelAgentStatusEvent = {
       panelId: terminal.panelId,
       sessionId: terminal.sessionId,
@@ -2564,6 +2593,7 @@ export class TerminalPanelManager extends EventEmitter {
       reason,
       agentType: terminal.agentType,
     };
+    if (state === 'blocked' && screenLines?.length) payload.screenLines = screenLines;
     if (state === 'idle') {
       payload.workedVisibly = terminal.workedVisibly ?? false;
       terminal.workedVisibly = false;
@@ -2616,14 +2646,19 @@ export class TerminalPanelManager extends EventEmitter {
         }
         if (detection.visibleWorking) terminal.workedVisibly = true;
         const next = this.agentStatusMonitor.update(terminal.panelId, detection, Date.now());
-        if (next) this.emitAgentStatus(terminal, next, detection.matchedRuleId);
+        const promptLines = () => blockedScreenLines(manifest, detection.matchedRuleId, {
+          screen: screen.screenText,
+          oscTitle: screen.oscTitle,
+          oscProgress: screen.oscProgress,
+        });
+        if (next) this.emitAgentStatus(terminal, next, detection.matchedRuleId, next === 'blocked' ? promptLines() : undefined);
         // A new blocking screen (folder trust giving way to another prompt) keeps
         // the state but carries a new reason, which the Session view reads.
         else if (
           detection.state === 'blocked'
           && this.agentStatusMonitor.getState(terminal.panelId) === 'blocked'
-          && detection.matchedRuleId !== terminal.lastStatusReason
-        ) this.emitAgentStatus(terminal, 'blocked', detection.matchedRuleId);
+          && blockedPromptKey(detection.matchedRuleId, promptLines()) !== terminal.lastStatusPromptKey
+        ) this.emitAgentStatus(terminal, 'blocked', detection.matchedRuleId, promptLines());
         if (
           terminal.agentType === 'opencode'
           && detection.matchedRuleId === 'idle_composer'
@@ -3044,6 +3079,12 @@ export class TerminalPanelManager extends EventEmitter {
       if (!terminal.isPtyHost || !terminal.ptyId) {
         continue;
       }
+
+      // The old PTY lifetime has ended even if its replacement cannot start
+      // or its panel has disappeared. Clear activity without reporting an exit.
+      this.agentStatusMonitor.unregister(panelId);
+      this.maybeStopAgentStatusPoll();
+      this.emitAgentStatus(terminal, 'idle', 'pty_host_restart');
 
       const panel = panelManager.getPanel(panelId);
       if (!panel) {

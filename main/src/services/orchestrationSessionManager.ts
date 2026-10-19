@@ -32,6 +32,7 @@ import {
   type OrchestrationLink,
   type OrchestrationPaneOverview,
   type OrchestrationPanelOverview,
+  type OrchestrationPanelReport,
   type OrchestrationReport,
   type OrchestrationSessionCreateInput,
   type OrchestrationSessionListResult,
@@ -56,7 +57,7 @@ import { isAgentSupportedOnPlatform } from '../../../shared/constants/agentLaunc
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { OrchestrationSessionStore } from './orchestrationSessionStore';
 import type { WorkspaceSessionMembership } from './workspaceJournal';
-import { readPanelAgentReport } from './agentReport';
+import { agentReportData, readPanelAgentReport } from './agentReport';
 import { paneChatFirstPrompt } from './paneChatMigrateOffer';
 import { applyTerminalInput, sessionNameFromMessage } from './sessionAutoName';
 import { PaneError } from '../../../shared/paneError';
@@ -577,6 +578,18 @@ export class OrchestrationSessionManager extends EventEmitter {
   }
 
   /**
+   * The Sessions a panel works for: those associated with its Pane, for every panel or this one.
+   * A Session's own orchestrator Pane never counts. Reads the in-memory store without the lock.
+   */
+  memberSessionIds(paneId: string, panelId: string): string[] {
+    return this.store.read().sessions
+      .filter(record => record.internalSessionId !== paneId && !Object.values(record.panelIds).includes(panelId))
+      .filter(record => record.associations.some(association => association.paneId === paneId
+        && (association.panelIds.length === 0 || association.panelIds.includes(panelId))))
+      .map(record => record.id);
+  }
+
+  /**
    * Panes associated with a Session that is not archived, for the Session PR monitor. Reads the
    * in-memory store without taking the Session lock, like `workspaceMembership`.
    */
@@ -1062,7 +1075,7 @@ export class OrchestrationSessionManager extends EventEmitter {
       const snapshot = panel.type === 'terminal' ? terminalPanelManager.getTerminalSnapshot(panel.id) : null;
       const initialized = panel.type === 'terminal' && terminalPanelManager.isTerminalInitialized(panel.id);
       const panelAgent = snapshot?.agentType ?? customState.agentType;
-      return {
+      const overview: OrchestrationPanelOverview = {
         panelId: panel.id,
         title: panel.title,
         agentType: isPaneChatAgent(panelAgent) ? panelAgent : undefined,
@@ -1070,6 +1083,9 @@ export class OrchestrationSessionManager extends EventEmitter {
         initialized: initialized || customState.isInitialized === true,
         lastActivityAt: snapshot?.lastActivityTime,
       };
+      const report = panelOverviewReport(panel);
+      if (report) overview.report = report;
+      return overview;
     });
     const panelIds = new Set(allPanels.map(panel => panel.id));
     for (const panelId of association.panelIds) {
@@ -1313,6 +1329,14 @@ function agentReportMessage(report: TerminalAgentReport): string {
   ].filter(Boolean).join(' ');
   const question = report.question ? ` Question: ${report.question}` : '';
   return `Worker reported ${report.state}${details ? `: ${details}` : ''}.${question}`;
+}
+
+/** A panel's latest report, with its JSON object summary as `data` (derived on read, so older reports get it too). */
+function panelOverviewReport(panel: ToolPanel): OrchestrationPanelReport | undefined {
+  const report = readPanelAgentReport(panel);
+  if (!report) return undefined;
+  const data = agentReportData(report);
+  return data ? { ...report, data } : report;
 }
 
 /** The most recent report among a Pane's panels, tagged with the panel that sent it. */

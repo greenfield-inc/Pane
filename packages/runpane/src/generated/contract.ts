@@ -45,6 +45,8 @@ export const RUNPANE_CONTRACT = {
           "pr.merged",
           "pr.closed",
           "pr.head",
+          "pr.base_changed",
+          "pr.base_deleted",
           "pr.review",
           "pr.comment",
           "pr.stopped",
@@ -437,8 +439,8 @@ export const RUNPANE_CONTRACT = {
       "name": "panes create",
       "summary": "1 feature = 1 worktree = 1 branch = 1 Pane; reviews, audits, fixes and QA for it are tabs in that Pane. Create a Pane (a new worktree) only when the work's branch has no Pane yet; for review, audit, fix or QA on existing work use `panels create --pane <id>`.",
       "usage": [
-        "runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor> [--source user|agent] [--focus|--no-focus] [--base <ref>] [--branch <name>] [--prompt-file <path|->] [options] [--pane-dir <path>]",
-        "runpane panes create --repo <selector> --name <name> --tool-command <command> [--agent <codex|claude|cursor>] [--source user|agent] [--focus|--no-focus] [--base <ref>] [--branch <name>] [--prompt-file <path|->] [options] [--pane-dir <path>]",
+        "runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor> [--source user|agent] [--focus|--no-focus] [--base <ref>] [--branch <name>] [--prompt-file <path|->] [--expect-report|--no-expect-report] [--wait [--timeout <duration>]] [options] [--pane-dir <path>]",
+        "runpane panes create --repo <selector> --name <name> --tool-command <command> [--agent <codex|claude|cursor>] [--source user|agent] [--focus|--no-focus] [--base <ref>] [--branch <name>] [--prompt-file <path|->] [--expect-report|--no-expect-report] [--wait [--timeout <duration>]] [options] [--pane-dir <path>]",
         "runpane panes create --from-json <path|-> [--yes] [--json] [--pane-dir <path>]"
       ],
       "mutates": true,
@@ -448,7 +450,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "jsonSchemas": [
         "paneCreateRequest",
-        "paneCreateResult"
+        "paneCreateResult",
+        "dispatchWaitResult"
       ],
       "localControl": true
     },
@@ -562,8 +565,8 @@ export const RUNPANE_CONTRACT = {
       "name": "panels create",
       "summary": "Open a new agent or terminal tab inside an existing Pane, sharing its worktree. The default for review, QA, fixes and any other agent on work that already has a Pane.",
       "usage": [
-        "runpane panels create --pane <pane-id> --agent <codex|claude|cursor> [--source user|agent] [--focus|--no-focus] [--wait-ready] --yes [--json] [--pane-dir <path>]",
-        "runpane panels create --pane <pane-id> --tool-command <command> [--agent <codex|claude|cursor>] [--title <title>] [--focus|--no-focus] [--wait-ready] --yes [--json] [--pane-dir <path>]"
+        "runpane panels create --pane <pane-id> --agent <codex|claude|cursor> [--source user|agent] [--focus|--no-focus] [--wait-ready] [--expect-report|--no-expect-report] [--wait [--timeout <duration>]] --yes [--json] [--pane-dir <path>]",
+        "runpane panels create --pane <pane-id> --tool-command <command> [--agent <codex|claude|cursor>] [--title <title>] [--focus|--no-focus] [--wait-ready] [--expect-report|--no-expect-report] [--wait [--timeout <duration>]] --yes [--json] [--pane-dir <path>]"
       ],
       "mutates": true,
       "additive": true,
@@ -573,7 +576,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "jsonSchemas": [
         "panelCreateRequest",
-        "panelCreateResult"
+        "panelCreateResult",
+        "dispatchWaitResult"
       ],
       "localControl": true
     },
@@ -653,7 +657,7 @@ export const RUNPANE_CONTRACT = {
       "name": "panels submit",
       "summary": "Send and submit text to a terminal panel, including idle agent composers.",
       "usage": [
-        "runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) [--as-file-pointer] [--interrupt] [--source user|agent] --yes [--json] [--pane-dir <path>]"
+        "runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) [--as-file-pointer [--attach <file>]...] [--interrupt] [--source user|agent] [--expect-report|--no-expect-report] [--wait [--timeout <duration>]] --yes [--json] [--pane-dir <path>]"
       ],
       "mutates": true,
       "toolsets": [
@@ -661,7 +665,8 @@ export const RUNPANE_CONTRACT = {
       ],
       "jsonSchemas": [
         "panelSubmitRequest",
-        "panelSubmitResult"
+        "panelSubmitResult",
+        "dispatchWaitResult"
       ],
       "localControl": true
     },
@@ -1234,6 +1239,31 @@ export const RUNPANE_CONTRACT = {
       "localControl": true
     },
     {
+      "name": "inbox",
+      "summary": "List the reports, missing reports, and on-screen questions a Session's orchestrator has not acknowledged.",
+      "usage": [
+        "runpane inbox [--session <id|name>] [--json] [--pane-dir <path>]"
+      ],
+      "jsonSchemas": [
+        "inboxListResult"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "inbox ack",
+      "summary": "Clear Session inbox items once they are handled.",
+      "usage": [
+        "runpane inbox ack <item-id>... [--session <id|name>] [--json] [--pane-dir <path>]",
+        "runpane inbox ack --all --session <id|name> [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "idempotent": true,
+      "jsonSchemas": [
+        "inboxAckResult"
+      ],
+      "localControl": true
+    },
+    {
       "name": "sessions list",
       "summary": "List durable named orchestration Sessions.",
       "usage": [
@@ -1669,6 +1699,11 @@ export const RUNPANE_CONTRACT = {
         "description": "Read initial input from a file or stdin. --prompt-file is an alias."
       },
       {
+        "name": "--attach",
+        "value": "<file>",
+        "description": "Copy a file beside the --as-file-pointer prompt file and list its copy in the pointer line; repeatable."
+      },
+      {
         "name": "--from-json",
         "value": "<path|->",
         "description": "Read a structured JSON request payload from a file or stdin."
@@ -1806,7 +1841,12 @@ export const RUNPANE_CONTRACT = {
       {
         "name": "--wait",
         "value": "<milliseconds>",
-        "description": "How long lock acquire waits for a held lock to come free; 0 (the default) returns at once."
+        "description": "lock acquire: how long to wait for a held lock to come free; 0 (the default) returns at once. On panels submit, panels create and panes create, --wait takes no value: block until that panel reports, misses its report, waits on a prompt, or exits, then print one JSON result."
+      },
+      {
+        "name": "--timeout",
+        "value": "<duration>",
+        "description": "With --wait: give up after this long (30m, 2h; 0 waits without limit) and exit 124."
       },
       {
         "name": "--note",
@@ -1954,7 +1994,7 @@ export const RUNPANE_CONTRACT = {
       },
       {
         "name": "--as-file-pointer",
-        "description": "Write the prompt or text to a private file under the Pane directory and send the one line `Read and follow <path>` instead."
+        "description": "Write the prompt or text to a private prompt file (in the Pane's worktree, hidden from git, when it has one) and send the one line `Read and follow <path>` instead."
       },
       {
         "name": "--follow",
@@ -2011,6 +2051,18 @@ export const RUNPANE_CONTRACT = {
       {
         "name": "--interrupt",
         "description": "Stop the current agent turn, wait for an empty idle composer, then submit and verify the replacement."
+      },
+      {
+        "name": "--expect-report",
+        "description": "Pane expects a `runpane report` and emits agent.report.missing if the agent goes ready or exits without one. The default for work an agent sends; use it to ask for one on work marked --source user."
+      },
+      {
+        "name": "--no-expect-report",
+        "description": "Send work without waiting for a `runpane report` (fire-and-forget input); no agent.report.missing follows."
+      },
+      {
+        "name": "--all",
+        "description": "inbox ack only: clear every item of the --session."
       }
     ]
   },
@@ -2078,6 +2130,8 @@ export const RUNPANE_CONTRACT = {
         "  runpane agents status (--pane <pane-id>|--panel <panel-id>) [--limit <count>] [--json] [--pane-dir <path>]",
         "  runpane agents send (--pane <pane-id>|--panel <panel-id>) --text <message> --yes [--json] [--pane-dir <path>]",
         "  runpane report --state <ready|blocked|failed|done> [--pr <number>] [--head <sha>] [--summary-file <path|->] [--question <text>] [--json]",
+        "  runpane inbox [--session <id|name>] [--json]",
+        "  runpane inbox ack <item-id>... [--session <id|name>] [--json]",
         "  runpane panes squash-rebase --pane <pane-id> --message <message> --yes [--json] [--pane-dir <path>]",
         "  runpane panes stash --pane <pane-id> --yes [--json] [--pane-dir <path>]",
         "  runpane panes stash-pop --pane <pane-id> --yes [--json] [--pane-dir <path>]",
@@ -2305,9 +2359,10 @@ export const RUNPANE_CONTRACT = {
         "What --follow does by default (see defaults.watch.follow in the contract):",
         "  prints WATCH OK once when armed, then one line per event, with no heartbeats",
         "  kinds: agent.report, agent.ready, agent.blocked, agent.idle, panel.exited, panel.stopped,",
-        "         pane.gone, pane.associated, pane.detached, pr.conflicted, pr.checks, pr.merged",
+        "         pane.gone, pane.associated, pane.detached, pr.conflicted, pr.checks, pr.merged,",
+        "         pr.base_changed, pr.base_deleted",
         "  READY after 3m of quiet; BLOCKED after 30s; other lines batched at most every 10m",
-        "    (REPORT, BLOCKED, conflicts, and failed checks arrive at once)",
+        "    (REPORT, BLOCKED, conflicts, base changes, and failed checks arrive at once)",
         "  IDLE reminders at 10m, 30m, 1h, 3h, then daily",
         "  ends with WATCH EXPIRED and exit 0 after 3h with nothing but IDLE",
         "",
@@ -2316,6 +2371,8 @@ export const RUNPANE_CONTRACT = {
         "its line, then run it again; its named cursor means nothing is missed between runs.",
         "Single-event waits deliver immediately without follow settling or batching.",
         "--follow --since <generation> has no consumer name and bypasses settling and batching. Cadence requires a named follow consumer; --as cannot be combined with numeric --since.",
+        "agent.report.missing (an agent given work ended its turn or exited without `runpane report`) is opt-in:",
+        "add it to --kinds to wake on MISSING REPORT too.",
         "",
         "Options:",
         "  --session <id|name>            Watch every Pane in a Session; associate/detach apply live",
@@ -2374,6 +2431,12 @@ export const RUNPANE_CONTRACT = {
         "  --prompt <text>                Alias for --initial-input",
         "  --initial-input-file <path|->  Read initial input from a file or stdin",
         "  --as-file-pointer              Send `Read and follow <prompt file>` instead of the prompt",
+        "  --attach <file>                Copy a file beside the prompt file and list it; repeatable",
+        "  --expect-report                Expect a `runpane report` even for --source user work (the default otherwise)",
+        "  --no-expect-report             Fire-and-forget: no agent.report.missing if the agent ends without reporting",
+        "  --wait                         Block until this panel reports, misses its report, waits on a prompt, or exits;",
+        "                                 print one JSON line (exit 0 report, 3 missing, 4 blocked, 5 exited, 124 timeout)",
+        "  --timeout <duration>           With --wait: give up after this long (30m, 2h)",
         "  --prompt-file <path|->         Alias for --initial-input-file",
         "  --from-json <path|->           Read a full request payload",
         "  --timeout-ms <milliseconds>    Pane creation timeout",
@@ -2598,7 +2661,7 @@ export const RUNPANE_CONTRACT = {
       ],
       "panels submit": [
         "Usage:",
-        "  runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) [--as-file-pointer] [--interrupt] --yes [--json]",
+        "  runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) [--as-file-pointer [--attach <file>]...] [--interrupt] [--expect-report|--no-expect-report] [--wait [--timeout <duration>]] --yes [--json]",
         "",
         "Sends text to a terminal panel and normalizes the final terminal Enter to CR. Use this for ordinary prompt answers and shell commands.",
         "",
@@ -2608,11 +2671,23 @@ export const RUNPANE_CONTRACT = {
         "",
         "For Claude, text starting with `!`, `#`, `/` or `@` is sent unchanged and the result carries a `warnings` entry (for example `leading-bang-runs-shell`), because Claude Code gives those characters a meaning of its own.",
         "",
+        "Optional --wait returns a per-dispatch result; the orchestrator guide uses submit without --wait and a named watch. Choose one completion consumer.",
+        "It returns once, with a compact result: outcome, ids, the report (state, summary,",
+        "summaryPath, PR, head, question), screenLines for a prompt, or lastOutput for a missing",
+        "report. Answer a blocked panel with `panels submit --no-expect-report`,",
+        "then watch for the original result.",
+        "",
         "Options:",
         "  --panel <panel-id>             Terminal panel id",
         "  --text <text>                  Text to submit before Enter",
         "  --input-file <path|->          Read text from a file or stdin before Enter",
         "  --as-file-pointer              Write the text to a prompt file and submit `Read and follow <path>`",
+        "  --attach <file>                Copy a file beside the prompt file and list it; repeatable",
+        "  --expect-report                Expect a `runpane report` even for --source user work (the default otherwise)",
+        "  --no-expect-report             Fire-and-forget: no agent.report.missing if the agent ends without reporting",
+        "  --wait                         Block until this panel reports, misses its report, waits on a prompt, or exits;",
+        "                                 print one JSON line (exit 0 report, 3 missing, 4 blocked, 5 exited, 124 timeout)",
+        "  --timeout <duration>           With --wait: give up after this long (30m, 2h)",
         "  --pane-dir <path>              Connect to a specific Pane data directory",
         "  --json                         Print machine-readable output",
         "  --yes                          Skip confirmation for this mutating command",
@@ -2637,8 +2712,8 @@ export const RUNPANE_CONTRACT = {
         "Create a terminal-backed tool panel inside an existing Pane session.",
         "",
         "Usage:",
-        "  runpane panels create --pane <pane-id> --agent <codex|claude|cursor> [--title <title>] [--initial-input <text>] [--no-focus] [--wait-ready] --yes [--json]",
-        "  runpane panels create --pane <pane-id> --tool-command <command> [--agent <codex|claude|cursor>] [--title <title>] [--no-focus] [--wait-ready] --yes [--json]",
+        "  runpane panels create --pane <pane-id> --agent <codex|claude|cursor> [--title <title>] [--initial-input <text>] [--no-focus] [--wait-ready] [--expect-report|--no-expect-report] [--wait [--timeout <duration>]] --yes [--json]",
+        "  runpane panels create --pane <pane-id> --tool-command <command> [--agent <codex|claude|cursor>] [--title <title>] [--no-focus] [--wait-ready] [--expect-report|--no-expect-report] [--wait [--timeout <duration>]] --yes [--json]",
         "",
         "Options:",
         "  --pane <pane-id>              Existing Pane session to add the panel to.",
@@ -2648,6 +2723,12 @@ export const RUNPANE_CONTRACT = {
         "  --initial-input, --prompt     Initial input to send after the tool starts.",
         "  --initial-input-file <path|-> Read initial input from a file or stdin.",
         "  --as-file-pointer             Send `Read and follow <prompt file>` instead of the prompt.",
+        "  --attach <file>               Copy a file beside the prompt file and list it; repeatable.",
+        "  --expect-report                Expect a `runpane report` even for --source user work (the default otherwise)",
+        "  --no-expect-report             Fire-and-forget: no agent.report.missing if the agent ends without reporting",
+        "  --wait                         Block until this panel reports, misses its report, waits on a prompt, or exits;",
+        "                                 print one JSON line (exit 0 report, 3 missing, 4 blocked, 5 exited, 124 timeout)",
+        "  --timeout <duration>           With --wait: give up after this long (30m, 2h)",
         "  --no-focus                    Create the panel in the background.",
         "  --focus                       Explicitly focus the created panel.",
         "  --source <user|agent>         Mark the mutation source; agent implies background creation.",
@@ -3320,6 +3401,35 @@ export const RUNPANE_CONTRACT = {
         "runpane pr list [--pane <id>] [--json] [--pane-dir <path>]",
         "",
         "List PR registrations and stopped watches."
+      ],
+      "inbox": [
+        "Usage:",
+        "  runpane inbox [--session <id|name>] [--json] [--pane-dir <path>]",
+        "",
+        "Lists what a Session's orchestrator has not acknowledged: worker reports (agent.report),",
+        "missing reports (agent.report.missing), and questions waiting on a worker's screen",
+        "(agent.blocked; these clear themselves once the worker moves on). Pane keeps them across",
+        "restarts. An orchestrator reads it when it starts or resumes, to catch what finished while it was down.",
+        "",
+        "Options:",
+        "  --session <id|name>            Session; defaults to PANE_ORCHESTRATION_SESSION_ID",
+        "  --pane-dir <path>              Connect to a specific Pane data directory",
+        "  --json                         Print machine-readable output",
+        "",
+        "Clear handled items with `runpane inbox ack <item-id>...`."
+      ],
+      "inbox ack": [
+        "Usage:",
+        "  runpane inbox ack <item-id>... [--session <id|name>] [--json] [--pane-dir <path>]",
+        "  runpane inbox ack --all --session <id|name> [--json] [--pane-dir <path>]",
+        "",
+        "Clears Session inbox items. Ids that match nothing are listed as unknown; acknowledging twice is harmless.",
+        "",
+        "Options:",
+        "  --session <id|name>            Only clear items of this Session; required with --all",
+        "  --all                          Clear every item of the Session",
+        "  --pane-dir <path>              Connect to a specific Pane data directory",
+        "  --json                         Print machine-readable output"
       ]
     },
     "pip": {
@@ -3370,6 +3480,8 @@ export const RUNPANE_CONTRACT = {
         "  runpane agents status (--pane <pane-id>|--panel <panel-id>) [--limit <count>] [--json] [--pane-dir <path>]",
         "  runpane agents send (--pane <pane-id>|--panel <panel-id>) --text <message> --yes [--json] [--pane-dir <path>]",
         "  runpane report --state <ready|blocked|failed|done> [--pr <number>] [--head <sha>] [--summary-file <path|->] [--question <text>] [--json]",
+        "  runpane inbox [--session <id|name>] [--json]",
+        "  runpane inbox ack <item-id>... [--session <id|name>] [--json]",
         "  runpane panes squash-rebase --pane <pane-id> --message <message> --yes [--json] [--pane-dir <path>]",
         "  runpane panes stash --pane <pane-id> --yes [--json] [--pane-dir <path>]",
         "  runpane panes stash-pop --pane <pane-id> --yes [--json] [--pane-dir <path>]",
@@ -3592,9 +3704,10 @@ export const RUNPANE_CONTRACT = {
         "What --follow does by default (see defaults.watch.follow in the contract):",
         "  prints WATCH OK once when armed, then one line per event, with no heartbeats",
         "  kinds: agent.report, agent.ready, agent.blocked, agent.idle, panel.exited, panel.stopped,",
-        "         pane.gone, pane.associated, pane.detached, pr.conflicted, pr.checks, pr.merged",
+        "         pane.gone, pane.associated, pane.detached, pr.conflicted, pr.checks, pr.merged,",
+        "         pr.base_changed, pr.base_deleted",
         "  READY after 3m of quiet; BLOCKED after 30s; other lines batched at most every 10m",
-        "    (REPORT, BLOCKED, conflicts, and failed checks arrive at once)",
+        "    (REPORT, BLOCKED, conflicts, base changes, and failed checks arrive at once)",
         "  IDLE reminders at 10m, 30m, 1h, 3h, then daily",
         "  ends with WATCH EXPIRED and exit 0 after 3h with nothing but IDLE",
         "",
@@ -3603,6 +3716,8 @@ export const RUNPANE_CONTRACT = {
         "its line, then run it again; its named cursor means nothing is missed between runs.",
         "Single-event waits deliver immediately without follow settling or batching.",
         "--follow --since <generation> has no consumer name and bypasses settling and batching. Cadence requires a named follow consumer; --as cannot be combined with numeric --since.",
+        "agent.report.missing (an agent given work ended its turn or exited without `runpane report`) is opt-in:",
+        "add it to --kinds to wake on MISSING REPORT too.",
         "",
         "Options:",
         "  --session <id|name>            Watch every Pane in a Session; associate/detach apply live",
@@ -3661,6 +3776,12 @@ export const RUNPANE_CONTRACT = {
         "  --prompt <text>                Alias for --initial-input",
         "  --initial-input-file <path|->  Read initial input from a file or stdin",
         "  --as-file-pointer              Send `Read and follow <prompt file>` instead of the prompt",
+        "  --attach <file>                Copy a file beside the prompt file and list it; repeatable",
+        "  --expect-report                Expect a `runpane report` even for --source user work (the default otherwise)",
+        "  --no-expect-report             Fire-and-forget: no agent.report.missing if the agent ends without reporting",
+        "  --wait                         Block until this panel reports, misses its report, waits on a prompt, or exits;",
+        "                                 print one JSON line (exit 0 report, 3 missing, 4 blocked, 5 exited, 124 timeout)",
+        "  --timeout <duration>           With --wait: give up after this long (30m, 2h)",
         "  --prompt-file <path|->         Alias for --initial-input-file",
         "  --from-json <path|->           Read a full request payload",
         "  --timeout-ms <milliseconds>    Pane creation timeout",
@@ -3877,7 +3998,7 @@ export const RUNPANE_CONTRACT = {
       ],
       "panels submit": [
         "Usage:",
-        "  runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) [--as-file-pointer] [--interrupt] --yes [--json]",
+        "  runpane panels submit --panel <panel-id> (--text <text>|--input-file <path|->) [--as-file-pointer [--attach <file>]...] [--interrupt] [--expect-report|--no-expect-report] [--wait [--timeout <duration>]] --yes [--json]",
         "",
         "Sends text to a terminal panel and normalizes the final terminal Enter to CR. Use this for ordinary prompt answers and shell commands.",
         "",
@@ -3887,11 +4008,23 @@ export const RUNPANE_CONTRACT = {
         "",
         "For Claude, text starting with `!`, `#`, `/` or `@` is sent unchanged and the result carries a `warnings` entry (for example `leading-bang-runs-shell`), because Claude Code gives those characters a meaning of its own.",
         "",
+        "Optional --wait returns a per-dispatch result; the orchestrator guide uses submit without --wait and a named watch. Choose one completion consumer.",
+        "It returns once, with a compact result: outcome, ids, the report (state, summary,",
+        "summaryPath, PR, head, question), screenLines for a prompt, or lastOutput for a missing",
+        "report. Answer a blocked panel with `panels submit --no-expect-report`,",
+        "then watch for the original result.",
+        "",
         "Options:",
         "  --panel <panel-id>             Terminal panel id",
         "  --text <text>                  Text to submit before Enter",
         "  --input-file <path|->          Read text from a file or stdin before Enter",
         "  --as-file-pointer              Write the text to a prompt file and submit `Read and follow <path>`",
+        "  --attach <file>                Copy a file beside the prompt file and list it; repeatable",
+        "  --expect-report                Expect a `runpane report` even for --source user work (the default otherwise)",
+        "  --no-expect-report             Fire-and-forget: no agent.report.missing if the agent ends without reporting",
+        "  --wait                         Block until this panel reports, misses its report, waits on a prompt, or exits;",
+        "                                 print one JSON line (exit 0 report, 3 missing, 4 blocked, 5 exited, 124 timeout)",
+        "  --timeout <duration>           With --wait: give up after this long (30m, 2h)",
         "  --pane-dir <path>              Connect to a specific Pane data directory",
         "  --json                         Print machine-readable output",
         "  --yes                          Skip confirmation for this mutating command",
@@ -3927,6 +4060,12 @@ export const RUNPANE_CONTRACT = {
         "  --initial-input, --prompt     Initial input to send after the tool starts.",
         "  --initial-input-file <path|-> Read initial input from a file or stdin.",
         "  --as-file-pointer             Send `Read and follow <prompt file>` instead of the prompt.",
+        "  --attach <file>               Copy a file beside the prompt file and list it; repeatable.",
+        "  --expect-report                Expect a `runpane report` even for --source user work (the default otherwise)",
+        "  --no-expect-report             Fire-and-forget: no agent.report.missing if the agent ends without reporting",
+        "  --wait                         Block until this panel reports, misses its report, waits on a prompt, or exits;",
+        "                                 print one JSON line (exit 0 report, 3 missing, 4 blocked, 5 exited, 124 timeout)",
+        "  --timeout <duration>           With --wait: give up after this long (30m, 2h)",
         "  --no-focus                    Create the panel in the background.",
         "  --focus                       Explicitly focus the created panel.",
         "  --source <user|agent>         Mark the mutation source; agent implies background creation.",
@@ -4523,6 +4662,35 @@ export const RUNPANE_CONTRACT = {
         "runpane pr list [--pane <id>] [--json] [--pane-dir <path>]",
         "",
         "List PR registrations and stopped watches."
+      ],
+      "inbox": [
+        "Usage:",
+        "  runpane inbox [--session <id|name>] [--json] [--pane-dir <path>]",
+        "",
+        "Lists what a Session's orchestrator has not acknowledged: worker reports (agent.report),",
+        "missing reports (agent.report.missing), and questions waiting on a worker's screen",
+        "(agent.blocked; these clear themselves once the worker moves on). Pane keeps them across",
+        "restarts. An orchestrator reads it when it starts or resumes, to catch what finished while it was down.",
+        "",
+        "Options:",
+        "  --session <id|name>            Session; defaults to PANE_ORCHESTRATION_SESSION_ID",
+        "  --pane-dir <path>              Connect to a specific Pane data directory",
+        "  --json                         Print machine-readable output",
+        "",
+        "Clear handled items with `runpane inbox ack <item-id>...`."
+      ],
+      "inbox ack": [
+        "Usage:",
+        "  runpane inbox ack <item-id>... [--session <id|name>] [--json] [--pane-dir <path>]",
+        "  runpane inbox ack --all --session <id|name> [--json] [--pane-dir <path>]",
+        "",
+        "Clears Session inbox items. Ids that match nothing are listed as unknown; acknowledging twice is harmless.",
+        "",
+        "Options:",
+        "  --session <id|name>            Only clear items of this Session; required with --all",
+        "  --all                          Clear every item of the Session",
+        "  --pane-dir <path>              Connect to a specific Pane data directory",
+        "  --json                         Print machine-readable output"
       ]
     }
   },
@@ -4679,10 +4847,13 @@ export const RUNPANE_CONTRACT = {
       "`sessions set-agent` switch the durable terminal agent for a named Session.",
       "`sessions associate` associate a user-visible Pane with a named Session.",
       "`sessions detach` detach a Pane from a named Session.",
-      "`sessions overview` read a live status, activity, git, and pull request overview for a named Session.",
+      "`sessions overview` read a live status, activity, git, and pull request overview for a named Session. Each panel in `panes[].panels[]` carries its own latest `runpane report` as `report`, so one call shows what every worker last reported and when (`reportedAt`, next to the panel's `state` and `lastActivityAt`). When a report's summary is a complete JSON object, such as a status file sent with `--summary-file`, `report.data` holds it exactly as the worker gave it; Pane never reads, renames or validates its fields. A summary that is not a JSON object (plain text, an array, a scalar or invalid JSON), is nested more than 64 levels deep, or was truncated (`summaryTruncated`), has no `data`. A panel that never reported has no `report`. `panes[].report` is still the newest report among the Pane's panels.",
       "`runpane lock acquire|release|list` coordinate a resource shared between agents, such as one test account. The caller's Pane and panel own the lock; it is scoped to the owner's Session (or global outside one), renews for the same owner, and is released on TTL expiry, owner panel exit, or owner Pane archive. `--wait` blocks in the daemon until the lock comes free.",
       "`runpane agents start|status|send` finish the three common agent jobs in one call each: start an agent on a task (a new tab in the work's Pane with `--pane <id>`, or a new Pane for new work), check on it, and send it a follow-up.",
-      "`runpane report --state ready|blocked|failed|done` is how a worker hands back its result. It stores the latest report on the worker's panel (state, `--pr`, `--head`, up to 16,000 characters of `--summary` or `--summary-file`, and the `--question` a blocked worker needs answered), journals an opt-in `agent.report` watch event (`REPORT <pane-name> pane <pane-id> panel <panel-id> ready pr#747 fc5dce9`; it skips the `--min-interval` batch), records it as Session activity, and shows it in `agents status`, `panels list`, and `sessions overview` (`panes[].report`). Inside a Pane terminal the panel comes from `PANE_SESSION_ID` and `PANE_PANEL_ID`; elsewhere pass `--pane` and `--panel`. It prints how many watches were waiting for the report and received it (`Delivered to 1 waiting watcher.`, `liveWatchers` in JSON). Zero means nobody was waiting right now, not that the report is lost: it stays on the panel, and a named-cursor watch receives it when it next waits.",
+      "`runpane report --state ready|blocked|failed|done` is how a worker hands back its result. It stores the latest report on the worker's panel (state, `--pr`, `--head`, up to 16,000 characters of `--summary` or `--summary-file`, and the `--question` a blocked worker needs answered), journals an opt-in `agent.report` watch event (`REPORT <pane-name> pane <pane-id> panel <panel-id> ready pr#747 fc5dce9`; it skips the `--min-interval` batch), records it as Session activity, and shows it in `agents status`, `panels list`, and `sessions overview` (each panel's own report as `panes[].panels[].report`, with a JSON object summary as `data`, and the Pane's newest as `panes[].report`). Inside a Pane terminal the panel comes from `PANE_SESSION_ID` and `PANE_PANEL_ID`; elsewhere pass `--pane` and `--panel`. It prints how many watches were waiting for the report and received it (`Delivered to 1 waiting watcher.`, `liveWatchers` in JSON). Zero means nobody was waiting right now, not that the report is lost: it stays on the panel, and a named-cursor watch receives it when it next waits.",
+      "Work sent to an agent through `runpane panels create`, `panes create` (with a prompt), or `panels submit` records that the sender waits for a `runpane report`, unless the request says `--source user` (Pane's own UI does) or `--no-expect-report`; `--expect-report` asks for one anyway. Typing into a tab never does. If the agent then goes ready or its panel exits without a report, Pane journals one opt-in `agent.report.missing` entry (`MISSING REPORT <pane-name> pane <pane-id> panel <panel-id> ready|exited`) whose `lastOutput` is the agent's last transcript reply or last screen lines; it skips the `--min-interval` batch and reaches only watchers that list it in `--kinds`. While the agent's screen shows background work (Claude's `· 1 shell` footer or a running background subagent row, Codex's `background terminal running` line), Pane waits and looks again every 10 seconds instead. `agent.blocked` entries carry `screenLines`, the prompt the agent waits on, and are journalled once a panel has stayed blocked for 2 seconds.",
+      "The orchestrator guide prescribes submit without `--wait`, followed by its named watch; use one completion consumer. As an optional CLI route, `--wait` on `runpane panels submit`, `panels create`, and `panes create` turns the expected report on and blocks on that panel until the first `agent.report`, `agent.report.missing`, `agent.blocked`, `panel.exited`, or `pane.gone`, then prints one line of JSON (`dispatchWaitResult`): the outcome, ids, the report's state, summary, `summaryPath`, PR and head, `screenLines` for a prompt, or `lastOutput` for a missing report, never the transcript. It exits 0 for a report, 3 missing, 4 blocked, 5 exited or gone, and 124 when `--timeout <duration>` passes. It follows the journal from the position the daemon took before delivering the work, so nothing that happens right after delivery is missed. It reuses watch --until-event and returns indeterminate (exit 6) if the journal epoch changes or retained history is lost; inspect the panel and inbox before retrying. Report-expected dispatches are serialized per panel and refused before writing while a result or missing-output collection is outstanding. Answer a blocked panel with panels submit --no-expect-report, then watch for the original result.",
+      "`runpane inbox [--session <id|name>] [--json]` lists what a Session's orchestrator has not acknowledged: reports, missing reports, and on-screen questions (a question clears itself once its panel moves on). `runpane inbox ack <item-id>...` or `--all --session <id|name>` clears items. An orchestrator runs it when it starts or resumes, to catch anything that finished while it was down; Pane never injects the inbox into its turns.",
       "`runpane panels resume --panel <panel-id>` restarts a stopped terminal panel in place, keeping its panel id: an agent panel relaunches with its resume command (Claude `--resume <session>`, `codex resume <session>`, Agent Farm `agent-farm run <profile> --resume <id>` with the ID Agent Farm printed; the result's `agentSessionId` names it), the same restart the app runs when it shows the panel, without taking focus. A running panel is left alone (`action: \"already-running\"`); one whose agent exited back to its shell is stopped, and resume runs its saved command again in that shell (`action: \"resumed\"`). If that command exits at once, `--wait-ready` returns `ok: false` with `reason.code: \"command-exited\"` and the error line it printed. `--session <id|name>` or `--all-stopped` resumes every stopped agent panel in that scope, `--concurrency` at a time (default 3), then, with `--wait-ready`, waits on the resumed panels together, and returns `{ resumed, alreadyRunning, failed, notReady, items[] }` with each panel's own result, readiness, and blocker or error. After a Pane restart, or once an agent exits back to its shell, stopped panels report `running: false` (`initialized` stays true while the shell lives) in `panels list`, `panels screen`, and `panels wait` (which returns `stopped: true` instead of timing out), and `nextCommand` points at `panels resume`. `runpane watch` reports them as `panel.stopped` (`STOPPED ...`) when `--kinds` lists that kind; other consumers and `workspace state` see `agent.unknown` with `running: false`, never `agent.ready`.",
       "`runpane panels last-message --panel <panel-id>` reads a Claude or Codex agent's last reply from its transcript (up to `--limit` characters, default 20,000, keeping the end and reporting `truncated`). It never scrapes the screen: without a transcript it prints `{ ok: false, reason: \"transcript-unavailable\" }` and exits 1.",
       "Commands with a contract `daemonAction` (the `panes` git, script, restore, and move commands, `folders list|create`, and `links open`) call the same Pane daemon channel as the matching button in the app and print `{ ok, data, error }`. Destructive ones add a pane:// `link` to review the Pane.",
@@ -5652,6 +5823,117 @@ export const RUNPANE_CONTRACT = {
         "42",
         "--epoch",
         "test-epoch"
+      ],
+      [
+        "panels",
+        "submit",
+        "--panel",
+        "panel-1",
+        "--text",
+        "go",
+        "--expect-report",
+        "--yes",
+        "--json"
+      ],
+      [
+        "panels",
+        "create",
+        "--pane",
+        "pane-1",
+        "--agent",
+        "claude",
+        "--expect-report",
+        "--yes"
+      ],
+      [
+        "panes",
+        "create",
+        "--repo",
+        "active",
+        "--name",
+        "feat",
+        "--agent",
+        "codex",
+        "--expect-report",
+        "--yes"
+      ],
+      [
+        "inbox",
+        "--session",
+        "Release",
+        "--json"
+      ],
+      [
+        "inbox",
+        "ack",
+        "in-1a2b3c4d",
+        "in-5e6f7a8b",
+        "--session",
+        "Release",
+        "--json"
+      ],
+      [
+        "inbox",
+        "ack",
+        "--all",
+        "--session",
+        "Release"
+      ],
+      [
+        "panels",
+        "submit",
+        "--panel",
+        "panel-1",
+        "--text",
+        "fyi",
+        "--no-expect-report",
+        "--yes"
+      ],
+      [
+        "panels",
+        "submit",
+        "--panel",
+        "panel-1",
+        "--input-file",
+        "prompt.md",
+        "--as-file-pointer",
+        "--wait",
+        "--yes"
+      ],
+      [
+        "panels",
+        "submit",
+        "--panel",
+        "panel-1",
+        "--text",
+        "Red",
+        "--wait",
+        "--timeout",
+        "30m",
+        "--yes",
+        "--json"
+      ],
+      [
+        "panes",
+        "create",
+        "--repo",
+        "active",
+        "--name",
+        "feat",
+        "--agent",
+        "claude",
+        "--prompt-file",
+        "task.md",
+        "--wait",
+        "--yes"
+      ],
+      [
+        "lock",
+        "acquire",
+        "--name",
+        "deploy",
+        "--wait",
+        "5000"
       ]
     ],
     "topLevelHelpIncludes": [
@@ -6497,6 +6779,12 @@ export const RUNPANE_CONTRACT = {
                       },
                       "initialInputAsFilePointer": {
                         "type": "boolean"
+                      },
+                      "initialInputAttachments": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
                       }
                     },
                     "additionalProperties": false
@@ -6525,6 +6813,12 @@ export const RUNPANE_CONTRACT = {
                       },
                       "initialInputAsFilePointer": {
                         "type": "boolean"
+                      },
+                      "initialInputAttachments": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
                       }
                     },
                     "additionalProperties": false
@@ -6565,6 +6859,10 @@ export const RUNPANE_CONTRACT = {
         "associateSession": {
           "type": "string",
           "description": "Session id to associate each created Pane with; the CLI sets it from PANE_ORCHESTRATION_SESSION_ID unless --no-associate."
+        },
+        "expectReport": {
+          "type": "boolean",
+          "description": "true or false decides whether Pane waits for a `runpane report`; omitted, it waits unless source is user (and, for a submit, only on an agent's panel)."
         }
       },
       "additionalProperties": false
@@ -6898,6 +7196,12 @@ export const RUNPANE_CONTRACT = {
                   "promptFile": {
                     "type": "string"
                   },
+                  "attachments": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
                   "warnings": {
                     "$ref": "#/jsonSchemas/panelSubmitResult/properties/warnings"
                   },
@@ -6994,6 +7298,10 @@ export const RUNPANE_CONTRACT = {
               }
             ]
           }
+        },
+        "epoch": {
+          "type": "string",
+          "description": "Epoch of the journal position captured before dispatch; pass it with generation when waiting."
         }
       },
       "additionalProperties": false
@@ -7446,6 +7754,7 @@ export const RUNPANE_CONTRACT = {
             "panel.exited",
             "panel.stopped",
             "agent.report",
+            "agent.report.missing",
             "pane.associated",
             "pane.detached",
             "pr.conflicted",
@@ -7453,6 +7762,8 @@ export const RUNPANE_CONTRACT = {
             "pr.merged",
             "pr.closed",
             "pr.head",
+            "pr.base_changed",
+            "pr.base_deleted",
             "pr.review",
             "pr.comment",
             "pr.stopped",
@@ -7575,6 +7886,23 @@ export const RUNPANE_CONTRACT = {
           },
           "additionalProperties": false
         },
+        "base": {
+          "type": "object",
+          "description": "Base branch of a pr.base_changed (old to new) or pr.base_deleted (to is the PR's current base name) entry.",
+          "required": [
+            "from",
+            "to"
+          ],
+          "properties": {
+            "from": {
+              "type": "string"
+            },
+            "to": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
         "checks": {
           "enum": [
             "passed",
@@ -7596,6 +7924,28 @@ export const RUNPANE_CONTRACT = {
         "epoch": {
           "type": "string",
           "description": "Added to watch --json NDJSON events. Persist with gen after processing for numeric rearm."
+        },
+        "lastOutput": {
+          "type": "string",
+          "description": "What an agent.report.missing entry's agent said last, up to 2,000 characters (the end is kept)."
+        },
+        "lastOutputSource": {
+          "enum": [
+            "transcript",
+            "screen"
+          ],
+          "description": "transcript: the agent's last reply; screen: the last lines on its screen."
+        },
+        "expectedSince": {
+          "type": "string",
+          "description": "When the work an agent.report.missing entry is about was sent."
+        },
+        "screenLines": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The screen lines of the prompt an agent.blocked entry's agent waits on (at most 20)."
         }
       },
       "additionalProperties": false
@@ -7636,6 +7986,50 @@ export const RUNPANE_CONTRACT = {
         },
         "reportedAt": {
           "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "panelReport": {
+      "type": "object",
+      "description": "A panel's latest runpane report in sessions overview. data is the summary when it is a complete JSON object, returned as the worker gave it; a plain-text, array, scalar, invalid, more than 64 levels deep, or truncated summary has no data.",
+      "required": [
+        "state",
+        "reportedAt"
+      ],
+      "properties": {
+        "state": {
+          "enum": [
+            "ready",
+            "blocked",
+            "failed",
+            "done"
+          ]
+        },
+        "pr": {
+          "type": "number"
+        },
+        "head": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "summaryTruncated": {
+          "const": true
+        },
+        "summaryPath": {
+          "type": "string"
+        },
+        "question": {
+          "type": "string"
+        },
+        "reportedAt": {
+          "type": "string"
+        },
+        "data": {
+          "type": "object",
+          "description": "The worker's JSON object summary, returned as given. Pane never reads, renames or validates its fields."
         }
       },
       "additionalProperties": false
@@ -8772,6 +9166,12 @@ export const RUNPANE_CONTRACT = {
         "asFilePointer": {
           "type": "boolean"
         },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "source": {
           "type": "string",
           "enum": [
@@ -8781,6 +9181,10 @@ export const RUNPANE_CONTRACT = {
         },
         "interrupt": {
           "type": "boolean"
+        },
+        "expectReport": {
+          "type": "boolean",
+          "description": "true or false decides whether Pane waits for a `runpane report`; omitted, it waits unless source is user (and, for a submit, only on an agent's panel)."
         }
       },
       "additionalProperties": false
@@ -8866,6 +9270,12 @@ export const RUNPANE_CONTRACT = {
         "promptFile": {
           "type": "string"
         },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "warnings": {
           "type": "array",
           "items": {
@@ -8898,6 +9308,23 @@ export const RUNPANE_CONTRACT = {
             "observed",
             "unverifiable"
           ]
+        },
+        "expectedReport": {
+          "type": "object",
+          "required": [
+            "since"
+          ],
+          "properties": {
+            "since": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "description": "The report Pane now waits for: set for work an agent sent, or with --expect-report."
+        },
+        "epoch": {
+          "type": "string",
+          "description": "Epoch of the journal position captured before dispatch; pass it with generation when waiting."
         }
       },
       "additionalProperties": false
@@ -9685,6 +10112,10 @@ export const RUNPANE_CONTRACT = {
         },
         "readyTimeoutMs": {
           "type": "number"
+        },
+        "expectReport": {
+          "type": "boolean",
+          "description": "true or false decides whether Pane waits for a `runpane report`; omitted, it waits unless source is user (and, for a submit, only on an agent's panel)."
         }
       },
       "additionalProperties": false
@@ -9869,11 +10300,34 @@ export const RUNPANE_CONTRACT = {
         "promptFile": {
           "type": "string"
         },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "warnings": {
           "$ref": "#/jsonSchemas/panelSubmitResult/properties/warnings"
         },
         "nextCommand": {
           "type": "string"
+        },
+        "expectedReport": {
+          "type": "object",
+          "required": [
+            "since"
+          ],
+          "properties": {
+            "since": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "description": "The report Pane now waits for: set for work an agent sent, or with --expect-report."
+        },
+        "epoch": {
+          "type": "string",
+          "description": "Epoch of the journal position captured before dispatch; pass it with generation when waiting."
         }
       },
       "additionalProperties": false
@@ -10142,7 +10596,23 @@ export const RUNPANE_CONTRACT = {
           "type": "string"
         },
         "panes": {
-          "type": "array"
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "panels": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "report": {
+                      "$ref": "#/jsonSchemas/panelReport"
+                    }
+                  }
+                }
+              }
+            }
+          }
         },
         "activity": {
           "type": "array"
@@ -10933,6 +11403,234 @@ export const RUNPANE_CONTRACT = {
         },
         "epoch": {
           "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "inboxListResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "session",
+        "items"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "session": {
+          "type": "object",
+          "required": [
+            "id",
+            "name"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "sessionId",
+              "kind",
+              "at",
+              "paneId",
+              "paneName",
+              "panelId"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "report",
+                  "report.missing",
+                  "blocked"
+                ]
+              },
+              "at": {
+                "type": "string"
+              },
+              "paneId": {
+                "type": "string"
+              },
+              "paneName": {
+                "type": "string"
+              },
+              "panelId": {
+                "type": "string"
+              },
+              "panelTitle": {
+                "type": "string"
+              },
+              "agentType": {
+                "type": "string"
+              },
+              "report": {
+                "$ref": "#/jsonSchemas/agentReport"
+              },
+              "lastOutput": {
+                "type": "string"
+              },
+              "lastOutputSource": {
+                "enum": [
+                  "transcript",
+                  "screen"
+                ]
+              },
+              "reason": {
+                "type": "string"
+              },
+              "screenLines": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "inboxAckResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "acknowledged",
+        "unknown"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "acknowledged": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "unknown": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "dispatchWaitResult": {
+      "type": "object",
+      "description": "What `--wait` prints, as one line: how the dispatched work ended. Exit codes: 0 report, 3 missing, 4 blocked, 5 exited or gone, 124 timeout. Exit 6 is indeterminate after journal replacement or history loss; inspect the panel and inbox before retrying.",
+      "required": [
+        "ok",
+        "outcome"
+      ],
+      "properties": {
+        "ok": {
+          "type": "boolean",
+          "description": "true only for outcome report."
+        },
+        "outcome": {
+          "enum": [
+            "report",
+            "missing",
+            "blocked",
+            "exited",
+            "gone",
+            "timeout",
+            "indeterminate"
+          ]
+        },
+        "paneId": {
+          "type": "string"
+        },
+        "paneName": {
+          "type": "string"
+        },
+        "panelId": {
+          "type": "string"
+        },
+        "generation": {
+          "type": "number",
+          "description": "The journal entry that ended the wait (on timeout, the position reached)."
+        },
+        "at": {
+          "type": "string"
+        },
+        "report": {
+          "type": "object",
+          "required": [
+            "state"
+          ],
+          "properties": {
+            "state": {
+              "enum": [
+                "ready",
+                "blocked",
+                "failed",
+                "done"
+              ]
+            },
+            "pr": {
+              "type": "number"
+            },
+            "head": {
+              "type": "string"
+            },
+            "summary": {
+              "type": "string"
+            },
+            "summaryTruncated": {
+              "const": true
+            },
+            "summaryPath": {
+              "type": "string"
+            },
+            "question": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "screenLines": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "lastOutput": {
+          "type": "string"
+        },
+        "lastOutputSource": {
+          "enum": [
+            "transcript",
+            "screen"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        },
+        "exitCode": {
+          "type": "number"
+        },
+        "nextCommand": {
+          "type": "string",
+          "description": "Recovery command when the outcome is indeterminate."
         }
       },
       "additionalProperties": false
@@ -11816,7 +12514,13 @@ export const RUNPANE_CONTRACT = {
           {
             "name": "--as-file-pointer",
             "required": false,
-            "description": "Write the prompt or text to a private file under the Pane directory and send the one line `Read and follow <path>` instead."
+            "description": "Write the prompt or text to a private prompt file (in the Pane's worktree, hidden from git, when it has one) and send the one line `Read and follow <path>` instead."
+          },
+          {
+            "name": "--attach",
+            "required": false,
+            "value": "<file>",
+            "description": "Copy a file beside the --as-file-pointer prompt file and list its copy in the pointer line; repeatable. Needs --as-file-pointer; the result lists the copies in `attachments`."
           },
           {
             "name": "--from-json",
@@ -11892,6 +12596,27 @@ export const RUNPANE_CONTRACT = {
             "value": "<path>",
             "required": false,
             "description": "Connect to a specific Pane data directory."
+          },
+          {
+            "name": "--expect-report",
+            "required": false,
+            "description": "Expect a `runpane report` even for --source user work. Work an agent sends expects one by default: Pane emits agent.report.missing (with the agent's last output) if the agent goes ready or exits without one."
+          },
+          {
+            "name": "--no-expect-report",
+            "required": false,
+            "description": "Fire-and-forget input: don't wait for a report."
+          },
+          {
+            "name": "--wait",
+            "required": false,
+            "description": "Block until this panel reports (exit 0), misses its report (3), waits on a prompt (4), or exits (5); print one JSON line. The way an orchestrator dispatches: run it as a background tool call."
+          },
+          {
+            "name": "--timeout",
+            "value": "<duration>",
+            "required": false,
+            "description": "With --wait: give up after this long and exit 124 (outcome timeout)."
           }
         ],
         "examples": [
@@ -11913,7 +12638,8 @@ export const RUNPANE_CONTRACT = {
           "Agent-created Panes should pass `--source agent --no-focus --wait-ready --yes --json` unless the user explicitly wants focus moved. `panes create` pins the new Pane by default, so a follow-up `panes pin` call is unnecessary; pass `--no-pinned` for throwaway shells or bulk imports. `--pinned` is still accepted and is now a no-op. Inside a Session orchestrator (`PANE_ORCHESTRATION_SESSION_ID` set), new Panes are associated with that Session automatically; `--no-associate` opts out. A failed association is reported on the item and never undoes the Pane.",
           "The built-in agent templates come from the runpane contract; custom terminal commands can pass agent-specific flags when requested by the user.",
           "Use --initial-input-file for multi-line prompts or shell-sensitive initial input. A long or multi-line prompt is never typed into the shell: on bash, zsh or sh the agent launches with `\"$(cat '<prompt file>')\"` reading a private copy under `<pane-dir>/prompts/<pane-id>/`; on PowerShell, cmd, fish or WSL the prompt is pasted into the agent's composer once it is ready.",
-          "`--as-file-pointer` writes the text to `<pane-dir>/prompts/<pane-id>/<timestamp>.md` (readable only by you) and sends the one line `Read and follow <path>`; the result includes `promptFile`. Prefer it for long prompts.",
+          "`--as-file-pointer` writes the text to a prompt file readable only by you, inside the Pane's git worktree at `.pane/prompts/` (hidden by the repository's `.git/info/exclude`, never committed) when it has one, otherwise under `<pane-dir>/prompts/<pane-id>/`, so an agent limited to its working directories reads it without a permission prompt, and sends the one line `Read and follow <path>`, with the path relative to the worktree (where the agent starts) when the file is inside it; the result's `promptFile` is always absolute. Prefer it for long prompts.",
+          "`--attach <file>` (repeatable, with `--as-file-pointer`) copies each file into a folder beside the prompt file and sends `Read and follow <path> (attached: <copy>, ...)`; the result lists the copies in `attachments`.",
           "For Claude, text starting with `!`, `#`, `/` or `@` is sent unchanged and the result carries a `warnings` entry (for example `leading-bang-runs-shell`), because Claude Code gives those characters a meaning of its own.",
           "With --wait-ready, `initialInput.delivery` reports `taken`, `queued`, `in-composer` or `unknown` with its evidence (`transcript`, `screen`, or `argv` for a prompt passed at launch); verifiedSubmitted is true for `taken` or `queued`. Routing initial input alone does not imply verified submission, and the create's `ok` is false unless a Claude or Codex starting message is verified.",
           "If initialInput.blocked.kind is submission_unverified, do not submit again automatically. Inspect initialInput.staged and attempts, then run nextCommand to resolve the ambiguous composer state.",
@@ -12617,7 +13343,13 @@ export const RUNPANE_CONTRACT = {
           {
             "name": "--as-file-pointer",
             "required": false,
-            "description": "Write the prompt or text to a private file under the Pane directory and send the one line `Read and follow <path>` instead."
+            "description": "Write the prompt or text to a private prompt file (in the Pane's worktree, hidden from git, when it has one) and send the one line `Read and follow <path>` instead."
+          },
+          {
+            "name": "--attach",
+            "required": false,
+            "value": "<file>",
+            "description": "Copy a file beside the --as-file-pointer prompt file and list its copy in the pointer line; repeatable. Needs --as-file-pointer; the result lists the copies in `attachments`."
           },
           {
             "name": "--interrupt",
@@ -12639,9 +13371,31 @@ export const RUNPANE_CONTRACT = {
             "value": "<path>",
             "required": false,
             "description": "Connect to a specific Pane data directory."
+          },
+          {
+            "name": "--expect-report",
+            "required": false,
+            "description": "Expect a `runpane report` even for --source user work. Work an agent sends expects one by default: Pane emits agent.report.missing (with the agent's last output) if the agent goes ready or exits without one."
+          },
+          {
+            "name": "--no-expect-report",
+            "required": false,
+            "description": "Fire-and-forget input: don't wait for a report."
+          },
+          {
+            "name": "--wait",
+            "required": false,
+            "description": "Block until this panel reports (exit 0), misses its report (3), waits on a prompt (4), or exits (5); print one JSON line. The way an orchestrator dispatches: run it as a background tool call."
+          },
+          {
+            "name": "--timeout",
+            "value": "<duration>",
+            "required": false,
+            "description": "With --wait: give up after this long and exit 124 (outcome timeout)."
           }
         ],
         "examples": [
+          "runpane panels submit --panel <panel-id> --input-file prompt.md --as-file-pointer --wait --yes",
           "runpane panels submit --panel <panel-id> --text \"2\" --yes --json",
           "printf \"echo hello\" | runpane panels submit --panel <panel-id> --input-file - --yes --json",
           "runpane panels submit --panel <panel-id> --input-file brief.md --as-file-pointer --yes --json",
@@ -12657,7 +13411,8 @@ export const RUNPANE_CONTRACT = {
           "Use `panels input` for Ctrl-C, escape sequences, or any workflow requiring exact bytes.",
           "On `blocked.kind: composer-unknown`, nothing was typed. Check `panels screen`; if the agent is at a prompt Pane does not recognise, use `panels input`.",
           "For Claude, text starting with `!`, `#`, `/` or `@` is sent unchanged and the result carries a `warnings` entry (for example `leading-bang-runs-shell`), because Claude Code gives those characters a meaning of its own.",
-          "`--as-file-pointer` writes the text to `<pane-dir>/prompts/<pane-id>/<timestamp>.md` (readable only by you) and sends the one line `Read and follow <path>`; the result includes `promptFile`. Prefer it for long prompts.",
+          "`--as-file-pointer` writes the text to a prompt file readable only by you, inside the Pane's git worktree at `.pane/prompts/` (hidden by the repository's `.git/info/exclude`, never committed) when it has one, otherwise under `<pane-dir>/prompts/<pane-id>/`, so an agent limited to its working directories reads it without a permission prompt, and sends the one line `Read and follow <path>`, with the path relative to the worktree (where the agent starts) when the file is inside it; the result's `promptFile` is always absolute. Prefer it for long prompts.",
+          "`--attach <file>` (repeatable, with `--as-file-pointer`) copies each file into a folder beside the prompt file and sends `Read and follow <path> (attached: <copy>, ...)`; the result lists the copies in `attachments`.",
           "With --interrupt, Pane sends the stop key only while the agent is active, waits for an empty idle composer, then submits. If readiness times out, replacement text is not sent. A queued result is not read yet: delivery.message explains the delay; never resend queued text. Interrupt success requires delivery.state: taken. Unknown agents and occupied composers are rejected without typing."
         ]
       },
@@ -12883,7 +13638,13 @@ export const RUNPANE_CONTRACT = {
           {
             "name": "--as-file-pointer",
             "required": false,
-            "description": "Write the prompt or text to a private file under the Pane directory and send the one line `Read and follow <path>` instead."
+            "description": "Write the prompt or text to a private prompt file (in the Pane's worktree, hidden from git, when it has one) and send the one line `Read and follow <path>` instead."
+          },
+          {
+            "name": "--attach",
+            "required": false,
+            "value": "<file>",
+            "description": "Copy a file beside the --as-file-pointer prompt file and list its copy in the pointer line; repeatable. Needs --as-file-pointer; the result lists the copies in `attachments`."
           },
           {
             "name": "--source",
@@ -12927,6 +13688,27 @@ export const RUNPANE_CONTRACT = {
             "value": "<path>",
             "required": false,
             "description": "Connect to a specific Pane data directory."
+          },
+          {
+            "name": "--expect-report",
+            "required": false,
+            "description": "Expect a `runpane report` even for --source user work. Work an agent sends expects one by default: Pane emits agent.report.missing (with the agent's last output) if the agent goes ready or exits without one."
+          },
+          {
+            "name": "--no-expect-report",
+            "required": false,
+            "description": "Fire-and-forget input: don't wait for a report."
+          },
+          {
+            "name": "--wait",
+            "required": false,
+            "description": "Block until this panel reports (exit 0), misses its report (3), waits on a prompt (4), or exits (5); print one JSON line. The way an orchestrator dispatches: run it as a background tool call."
+          },
+          {
+            "name": "--timeout",
+            "value": "<duration>",
+            "required": false,
+            "description": "With --wait: give up after this long and exit 124 (outcome timeout)."
           }
         ],
         "examples": [
@@ -13215,7 +13997,7 @@ export const RUNPANE_CONTRACT = {
             "name": "--min-interval",
             "value": "<duration>",
             "required": false,
-            "description": "Override: batch READY, IDLE, NEW, GONE, EXIT, and UNKNOWN lines at most once per interval; REPORT, BLOCKED, pr.conflicted, and failed pr.checks arrive at once and carry the held lines. Default 10m. 0 turns batching off."
+            "description": "Override: batch READY, IDLE, NEW, GONE, EXIT, and UNKNOWN lines at most once per interval; REPORT, BLOCKED, pr.conflicted, pr.base_changed, pr.base_deleted, and failed pr.checks arrive at once and carry the held lines. Default 10m. 0 turns batching off."
           },
           {
             "name": "--idle-after",
@@ -13301,7 +14083,7 @@ export const RUNPANE_CONTRACT = {
           "Replay: after a reset (RESET/_reset), the baseline restates current state. In JSON, those entries carry replay: true (and changedWhileAway: true after an epoch change). A replayed agent.ready is never READY: re-read runpane sessions overview instead of acting on it. Lines mode prints only CHANGED for them.",
           "agent.report (REPORT <pane-name> pane <pane-id> panel <panel-id> <state> [pr#<n>] [<head>][: <question>]) is a worker's `runpane report`. It is in the default kinds of --follow and --until-event, and arrives from any panel: a shell tab or a wrapper launch whose agent is not yet detected included. It bypasses --min-interval, and orchestrators treat it as the completion signal; a READY without a report means look, and maybe nudge.",
           "Never pipe --follow into grep -m1, head, or any other exit-on-match reader: it does not exit when its reader does until its next write. To wait for one event, use --until-event.",
-          "Registration returns generation and epoch. Initially arm watch --until-event --since <generation> --epoch <epoch> --pane <id> --json --kinds pr.checks,pr.head,pr.comment,pr.review,pr.closed,pr.merged,pr.conflicted,pr.stopped,github.unavailable,github.recovered. Process every NDJSON event, then persist its gen and epoch for the next --since/--epoch; --limit 1 delivers one event per run. Never mix --as with --since/--epoch. On _reset or _dropped, resynchronize GitHub state, then use the control record generation and epoch; replay/baseline records are not new events. No merge or GitHub write is performed.",
+          "Registration returns generation and epoch. Initially arm watch --until-event --since <generation> --epoch <epoch> --pane <id> --json --kinds pr.checks,pr.head,pr.comment,pr.review,pr.closed,pr.merged,pr.conflicted,pr.base_changed,pr.base_deleted,pr.stopped,github.unavailable,github.recovered. Process every NDJSON event, then persist its gen and epoch for the next --since/--epoch; --limit 1 delivers one event per run. Never mix --as with --since/--epoch. On _reset or _dropped, resynchronize GitHub state, then use the control record generation and epoch; replay/baseline records are not new events. No merge or GitHub write is performed.",
           "--follow has one default cadence: READY 3m, BLOCKED 30s, non-urgent batches 10m, IDLE after 10m with backoff, expiry 3h, heartbeats off. Individual duration flags override it. --present and --profile were removed; use --ready-settle, --blocked-settle, and --min-interval for timing overrides.",
           "--until-event delivers matching events immediately without follow settling or batching. A harness that consumes a named follow stream gets its cadence; a process-exit waiter keeps immediate single-event semantics. --follow --since <generation> has no consumer name and bypasses settling and batching. Cadence requires a named follow consumer; --as cannot be combined with numeric --since."
         ]
@@ -14286,7 +15068,7 @@ export const RUNPANE_CONTRACT = {
           {
             "name": "--as-file-pointer",
             "required": false,
-            "description": "Write the prompt or text to a private file under the Pane directory and send the one line `Read and follow <path>` instead."
+            "description": "Write the prompt or text to a private prompt file (in the Pane's worktree, hidden from git, when it has one) and send the one line `Read and follow <path>` instead."
           },
           {
             "name": "--yes",
@@ -14315,7 +15097,7 @@ export const RUNPANE_CONTRACT = {
         "notes": [
           "`delivered` is true when the agent took the message or queued it for after its current turn; `delivery` says which (`taken` or `queued`) and how Pane knows (`transcript` or `screen`). Never resend a delivered message.",
           "It types the text, then queues with Tab when Codex is working or submits with Enter when ready. It is for messages, not keys. To answer a menu, use `runpane panels input --panel <panel-id> --keys down,enter --yes`, then check the screen with `runpane agents status`.",
-          "`--as-file-pointer` writes the text to `<pane-dir>/prompts/<pane-id>/<timestamp>.md` (readable only by you) and sends the one line `Read and follow <path>`; the result includes `promptFile`. Prefer it for long prompts."
+          "`--as-file-pointer` writes the text to a prompt file readable only by you, inside the Pane's git worktree at `.pane/prompts/` (hidden by the repository's `.git/info/exclude`, never committed) when it has one, otherwise under `<pane-dir>/prompts/<pane-id>/`, so an agent limited to its working directories reads it without a permission prompt, and sends the one line `Read and follow <path>`, with the path relative to the worktree (where the agent starts) when the file is inside it; the result's `promptFile` is always absolute. Prefer it for long prompts."
         ]
       },
       "report": {
@@ -14593,7 +15375,8 @@ export const RUNPANE_CONTRACT = {
           "sessionOverviewResult"
         ],
         "notes": [
-          "The result includes `locks`: named locks scoped to the Session or held by its Panes (see `runpane lock`)."
+          "The result includes `locks`: named locks scoped to the Session or held by its Panes (see `runpane lock`).",
+          "Each `panes[].panels[]` entry has `report`, that panel's latest `runpane report` (state, `pr`, `head`, `question`, `summary`, `summaryTruncated`, `summaryPath`, `reportedAt`). When the summary is a complete JSON object, `report.data` holds it exactly as the worker gave it; Pane never reads or renames its fields. A plain-text, array or scalar summary, invalid JSON, JSON nested more than 64 levels deep, or a truncated summary (`summaryTruncated`) has no `data`. A panel that never reported has no `report` but keeps `state` and `lastActivityAt`. `panes[].report` is still the newest report among the Pane's panels, with its `panelId`; daemons that predate per-panel reports omit `panels[].report`."
         ]
       },
       "lock acquire": {
@@ -15133,7 +15916,7 @@ export const RUNPANE_CONTRACT = {
           "prWatchResult"
         ],
         "notes": [
-          "Registration returns generation and epoch. Initially arm watch --until-event --since <generation> --epoch <epoch> --pane <id> --json --kinds pr.checks,pr.head,pr.comment,pr.review,pr.closed,pr.merged,pr.conflicted,pr.stopped,github.unavailable,github.recovered. Process every NDJSON event, then persist its gen and epoch for the next --since/--epoch; --limit 1 delivers one event per run. Never mix --as with --since/--epoch. On _reset or _dropped, resynchronize GitHub state, then use the control record generation and epoch; replay/baseline records are not new events. No merge or GitHub write is performed.",
+          "Registration returns generation and epoch. Initially arm watch --until-event --since <generation> --epoch <epoch> --pane <id> --json --kinds pr.checks,pr.head,pr.comment,pr.review,pr.closed,pr.merged,pr.conflicted,pr.base_changed,pr.base_deleted,pr.stopped,github.unavailable,github.recovered. Process every NDJSON event, then persist its gen and epoch for the next --since/--epoch; --limit 1 delivers one event per run. Never mix --as with --since/--epoch. On _reset or _dropped, resynchronize GitHub state, then use the control record generation and epoch; replay/baseline records are not new events. No merge or GitHub write is performed.",
           "Watches stop on merge/close, 8 non-rate-limit errors, or 10 comment-only updates. Archived/deleted Panes are removed. Re-register after resolving the reason. Session member PR discovery remains automatic."
         ]
       },
@@ -15175,7 +15958,7 @@ export const RUNPANE_CONTRACT = {
           "prWatchResult"
         ],
         "notes": [
-          "Registration returns generation and epoch. Initially arm watch --until-event --since <generation> --epoch <epoch> --pane <id> --json --kinds pr.checks,pr.head,pr.comment,pr.review,pr.closed,pr.merged,pr.conflicted,pr.stopped,github.unavailable,github.recovered. Process every NDJSON event, then persist its gen and epoch for the next --since/--epoch; --limit 1 delivers one event per run. Never mix --as with --since/--epoch. On _reset or _dropped, resynchronize GitHub state, then use the control record generation and epoch; replay/baseline records are not new events. No merge or GitHub write is performed.",
+          "Registration returns generation and epoch. Initially arm watch --until-event --since <generation> --epoch <epoch> --pane <id> --json --kinds pr.checks,pr.head,pr.comment,pr.review,pr.closed,pr.merged,pr.conflicted,pr.base_changed,pr.base_deleted,pr.stopped,github.unavailable,github.recovered. Process every NDJSON event, then persist its gen and epoch for the next --since/--epoch; --limit 1 delivers one event per run. Never mix --as with --since/--epoch. On _reset or _dropped, resynchronize GitHub state, then use the control record generation and epoch; replay/baseline records are not new events. No merge or GitHub write is performed.",
           "Watches stop on merge/close, 8 non-rate-limit errors, or 10 comment-only updates. Archived/deleted Panes are removed. Re-register after resolving the reason. Session member PR discovery remains automatic."
         ]
       },
@@ -15211,8 +15994,89 @@ export const RUNPANE_CONTRACT = {
           "prWatchResult"
         ],
         "notes": [
-          "Registration returns generation and epoch. Initially arm watch --until-event --since <generation> --epoch <epoch> --pane <id> --json --kinds pr.checks,pr.head,pr.comment,pr.review,pr.closed,pr.merged,pr.conflicted,pr.stopped,github.unavailable,github.recovered. Process every NDJSON event, then persist its gen and epoch for the next --since/--epoch; --limit 1 delivers one event per run. Never mix --as with --since/--epoch. On _reset or _dropped, resynchronize GitHub state, then use the control record generation and epoch; replay/baseline records are not new events. No merge or GitHub write is performed.",
+          "Registration returns generation and epoch. Initially arm watch --until-event --since <generation> --epoch <epoch> --pane <id> --json --kinds pr.checks,pr.head,pr.comment,pr.review,pr.closed,pr.merged,pr.conflicted,pr.base_changed,pr.base_deleted,pr.stopped,github.unavailable,github.recovered. Process every NDJSON event, then persist its gen and epoch for the next --since/--epoch; --limit 1 delivers one event per run. Never mix --as with --since/--epoch. On _reset or _dropped, resynchronize GitHub state, then use the control record generation and epoch; replay/baseline records are not new events. No merge or GitHub write is performed.",
           "Watches stop on merge/close, 8 non-rate-limit errors, or 10 comment-only updates. Archived/deleted Panes are removed. Re-register after resolving the reason. Session member PR discovery remains automatic."
+        ]
+      },
+      "inbox": {
+        "name": "inbox",
+        "summary": "List the reports, missing reports, and on-screen questions a Session's orchestrator has not acknowledged.",
+        "details": "An orchestrator runs it when it starts or resumes, to catch reports, missing reports, and questions that arrived while it was down. Pane never adds the inbox to the orchestrator's turns.",
+        "requiresPaneDaemon": true,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "--session",
+            "value": "<id|name>",
+            "required": false,
+            "description": "Session; defaults to PANE_ORCHESTRATION_SESSION_ID."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane inbox --session \"$PANE_ORCHESTRATION_SESSION_ID\" --json"
+        ],
+        "jsonSchemas": [
+          "inboxListResult"
+        ],
+        "notes": [
+          "Items: report (agent.report), report.missing (agent.report.missing), and blocked (agent.blocked, with the prompt's screen lines). Reports coalesce per panel, blockers clear when the panel moves on, and each Session keeps at most 200 items until acknowledged or superseded. A journal replay watermark recovers committed outcomes after restart within journal retention.",
+          "A newer report replaces the panel's older report or missing report."
+        ]
+      },
+      "inbox ack": {
+        "name": "inbox ack",
+        "summary": "Clear Session inbox items once they are handled.",
+        "details": "Acknowledge each item once you have acted on it, so the hook stops repeating it.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "<item-id>...",
+            "required": false,
+            "description": "Item ids from `runpane inbox`."
+          },
+          {
+            "name": "--session",
+            "value": "<id|name>",
+            "required": false,
+            "description": "Only clear items of this Session; required with --all."
+          },
+          {
+            "name": "--all",
+            "required": false,
+            "description": "Clear every item of the Session."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane inbox ack in-1a2b3c4d --json"
+        ],
+        "jsonSchemas": [
+          "inboxAckResult"
+        ],
+        "notes": [
+          "Unknown ids are reported under `unknown`; acknowledging twice is harmless."
         ]
       }
     },

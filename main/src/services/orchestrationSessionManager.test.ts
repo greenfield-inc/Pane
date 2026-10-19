@@ -26,6 +26,9 @@ import { OrchestrationSessionStore } from './orchestrationSessionStore';
 import { terminalPanelManager } from './terminalPanelManager';
 import { sessionWorkspacePath, prepareSessionWorkspace } from './sessionWorkspace';
 import { OrchestrationSessionManager } from './orchestrationSessionManager';
+import { normalizeAgentReport } from './agentReport';
+import { serializeJsonTransport } from '../daemon/jsonTransport';
+import { boundary } from '../../../shared/validation/boundaryDecoder';
 import * as wslUtils from '../utils/wslUtils';
 
 const liveStates = new Map<string, AgentState>();
@@ -1238,6 +1241,79 @@ describe('OrchestrationSessionManager', () => {
     const untouched = await fixture.manager.overview({ sessionId: other.session.id });
     expect(untouched.activity.some(activity => activity.kind === 'report')).toBe(false);
     await expect(fixture.manager.recordAgentReport('missing-panel', newer)).resolves.toEqual([]);
+  });
+
+  it('J-2: gives each panel its own latest report, with data only for a complete JSON object summary', async () => {
+    const fixture = createFixture();
+    const named = await fixture.manager.create({ name: 'Panel reports' });
+    const pane = paneFixture(fixture, 'panel-report-pane', { name: 'Panel Report Pane' });
+    const planner = createPanel('panel-report-planner', pane.id, 'Planner');
+    const plain = createPanel('panel-report-plain', pane.id, 'Plain');
+    const list = createPanel('panel-report-list', pane.id, 'List');
+    const truncated = createPanel('panel-report-truncated', pane.id, 'Truncated');
+    const silent = createPanel('panel-report-silent', pane.id, 'Silent');
+    for (const panel of [planner, plain, list, truncated, silent]) await seedPanel(panel);
+    await fixture.manager.associate({ sessionId: named.session.id }, { paneId: pane.id });
+    const status = { profile: 'planner', state: 'running', checks: { pass: ['S-1'] }, pr: null };
+    const reports = {
+      [planner.id]: { state: 'ready' as const, pr: 412, head: '3f9c2ab', summary: JSON.stringify(status), summaryPath: '/tmp/status.json', reportedAt: '2026-10-17T16:00:00.000Z' },
+      [plain.id]: { state: 'blocked' as const, question: 'Which filename?', summary: 'Waiting on a filename.', reportedAt: '2026-10-17T16:01:00.000Z' },
+      [list.id]: { state: 'done' as const, summary: '["a","b"]', reportedAt: '2026-10-17T16:02:00.000Z' },
+      [truncated.id]: { state: 'ready' as const, summary: '{"long":"…\n[summary truncated]', summaryTruncated: true as const, reportedAt: '2026-10-17T16:03:00.000Z' },
+    };
+    for (const panel of [planner, plain, list, truncated]) {
+      await panelManager.updatePanel(panel.id, { state: { ...panel.state, customState: { ...panel.state.customState, agentReport: reports[panel.id] } } });
+    }
+    liveStates.set(silent.id, 'working');
+    vi.mocked(terminalPanelManager.getTerminalSnapshot).mockImplementation(panelId => panelId === silent.id ? {
+      initialized: true,
+      scrollbackBuffer: '',
+      alternateScreenBuffer: '',
+      isAlternateScreen: false,
+      activityStatus: 'active',
+      lastActivityTime: '2026-10-17T16:05:00.000Z',
+      currentCommand: '',
+    } : null);
+
+    const overview = await fixture.manager.overview({ sessionId: named.session.id });
+    const panels = new Map(overview.panes[0].panels.map(panel => [panel.panelId, panel]));
+
+    expect(panels.get(planner.id)?.report).toEqual({ ...reports[planner.id], data: status });
+    expect(panels.get(plain.id)?.report).toEqual(reports[plain.id]);
+    expect(panels.get(list.id)?.report).toEqual(reports[list.id]);
+    expect(panels.get(truncated.id)?.report).toEqual(reports[truncated.id]);
+    expect(panels.get(silent.id)).toMatchObject({ state: 'working', lastActivityAt: '2026-10-17T16:05:00.000Z' });
+    expect(panels.get(silent.id)).not.toHaveProperty('report');
+    // The per-Pane report keeps its shape: the newest report, its panel, and no data.
+    expect(overview.panes[0].report).toEqual({ ...reports[truncated.id], panelId: truncated.id });
+  });
+
+  it('F-1, F-2: a deeply nested summary leaves the overview readable, and __proto__ keys survive in data', async () => {
+    const fixture = createFixture();
+    const named = await fixture.manager.create({ name: 'Hostile reports' });
+    const pane = paneFixture(fixture, 'hostile-report-pane', { name: 'Hostile Report Pane' });
+    const nested = createPanel('hostile-report-nested', pane.id, 'Nested');
+    const proto = createPanel('hostile-report-proto', pane.id, 'Proto');
+    await seedPanel(nested);
+    await seedPanel(proto);
+    await fixture.manager.associate({ sessionId: named.session.id }, { paneId: pane.id });
+    const nestedReport = normalizeAgentReport({ state: 'ready', summary: `{"x":${'['.repeat(2000)}0${']'.repeat(2000)}}` }, '2026-10-17T16:00:00.000Z');
+    const protoSummary = '{"__proto__":{"state":"changed","__proto__":{"deep":true}},"ok":true}';
+    const protoReport = normalizeAgentReport({ state: 'ready', summary: protoSummary }, '2026-10-17T16:01:00.000Z');
+    expect(nestedReport.summaryTruncated).toBeUndefined();
+    await panelManager.updatePanel(nested.id, { state: { ...nested.state, customState: { ...nested.state.customState, agentReport: nestedReport } } });
+    await panelManager.updatePanel(proto.id, { state: { ...proto.state, customState: { ...proto.state.customState, agentReport: protoReport } } });
+
+    const overview = await fixture.manager.overview({ sessionId: named.session.id });
+    const panels = new Map(overview.panes[0].panels.map(panel => [panel.panelId, panel]));
+
+    expect(panels.get(nested.id)?.report).toEqual(nestedReport);
+    const data = panels.get(proto.id)?.report?.data;
+    expect(data && Object.hasOwn(data, '__proto__')).toBe(true);
+    expect(JSON.stringify(data)).toBe(protoSummary);
+    // The daemon serializes the overview through the JSON transport; the result survives it unchanged.
+    expect(serializeJsonTransport(overview, boundary.json)).toEqual(JSON.parse(JSON.stringify(overview)));
+    expect(JSON.stringify(serializeJsonTransport(overview, boundary.json))).toBe(JSON.stringify(overview));
   });
 
   it('supports exact-name selectors and rejects lost updates with an optimistic revision guard', async () => {
