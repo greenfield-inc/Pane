@@ -81,6 +81,7 @@ const sessionSchema: BoundarySchema<OrchestrationSessionRecord> = boundary.objec
   agent: paneChatAgentSchema,
   launchCommand: boundary.optional(boundary.string),
   customResume: boundary.optional(boundary.nullable(customCommandResumeSchema)),
+  resume: boundary.optional(boundary.nonEmptyString),
   profile: boundary.optional(boundary.string),
   internalSessionId: boundary.nonEmptyString,
   panelIds: boundary.object({

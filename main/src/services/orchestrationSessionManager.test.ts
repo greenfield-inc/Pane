@@ -298,6 +298,42 @@ describe('OrchestrationSessionManager', () => {
       .rejects.toThrow('Session resume must be a native session id');
   });
 
+  it('saves the resumed conversation with the Session, so a tab created after an interrupted create still resumes it', async () => {
+    const fixture = createFixture();
+    const id = '0e5c1b2a-7d3f-4a69-9b84-3c2d1e0f9a87';
+    // The durable record is written, then the tab can't be created (the app exits, or a write fails).
+    vi.spyOn(panelManager, 'createPanel').mockRejectedValueOnce(new Error('interrupted'));
+    await expect(fixture.manager.create({ name: 'Moved mid-create', agent: 'codex', resume: id })).rejects.toThrow('was saved but could not be opened');
+    const restarted = new OrchestrationSessionManager(fixture.configManager, fixture.sessionManager,
+      fixture.skillCacheManager, fixture.paneChatManager, undefined, fixture.store);
+    const [saved] = (await restarted.list()).sessions.filter(session => session.name === 'Moved mid-create');
+    expect(saved.resume).toBe(id);
+    // Startup repair creates the missing tab from the record: with the conversation, not a fresh one.
+    const repaired = await restarted.getView({ sessionId: saved.id });
+    expect(repaired.panel.state.customState).toMatchObject({ agentType: 'codex', agentSessionId: id });
+    expect(repaired.panel.state.customState?.initialInput).toBeUndefined();
+  });
+
+  it('repairs a resumed Session\'s tab without replacing a conversation the tab has moved on to', async () => {
+    const fixture = createFixture();
+    const created = await fixture.manager.create({ name: 'Moved on', agent: 'claude', resume: '5d0c7a1e-2b9f-4e3a-8c61-0f7d2e4b9a35' });
+    // The tab lost its id (a crash before it was saved), so repair fills it in from the record.
+    await panelManager.updatePanel(created.panel.id, { state: { ...created.panel.state, customState: { ...created.panel.state.customState, agentSessionId: undefined } } });
+    const filled = await fixture.manager.getView({ sessionId: created.session.id });
+    expect(filled.panel.state.customState?.agentSessionId).toBe('5d0c7a1e-2b9f-4e3a-8c61-0f7d2e4b9a35');
+    // Later the conversation moved on (Claude /clear); repair keeps the tab's own id.
+    await panelManager.updatePanel(created.panel.id, { state: { ...filled.panel.state, customState: { ...filled.panel.state.customState, agentSessionId: '9a9a9a9a-0000-4000-8000-000000000000' } } });
+    const kept = await fixture.manager.getView({ sessionId: created.session.id });
+    expect(kept.panel.state.customState?.agentSessionId).toBe('9a9a9a9a-0000-4000-8000-000000000000');
+  });
+
+  it('drops the resumed conversation when the Session changes agent', async () => {
+    const fixture = createFixture();
+    const created = await fixture.manager.create({ name: 'Switching', agent: 'claude', resume: '5d0c7a1e-2b9f-4e3a-8c61-0f7d2e4b9a35' });
+    const updated = await fixture.manager.update({ sessionId: created.session.id }, { agent: 'codex' });
+    expect(updated.resume).toBeUndefined();
+  });
+
   it('creates a pinned Session and persists declarative pin updates', async () => {
     const fixture = createFixture();
     const input = { name: 'Pinned coordinator', isPinned: true };

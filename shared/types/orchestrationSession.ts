@@ -90,6 +90,11 @@ export interface OrchestrationSessionRecord {
   /** Empty uses the selected built-in agent command. */
   launchCommand?: string;
   customResume?: CustomCommandResume | null;
+  /**
+   * A native conversation of `agent` the Session's tab resumes (`runpane handoff` moving a
+   * Session). Saved with the record, so a tab created or repaired at startup still resumes it.
+   */
+  resume?: string;
   /** Snapshot of the behavior profile, independent of app defaults. */
   profile?: string;
   /** Hidden detached Pane session that owns the durable terminal conversation. */

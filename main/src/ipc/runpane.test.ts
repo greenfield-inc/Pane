@@ -646,7 +646,7 @@ describe('runpane IPC handlers', () => {
       expect(result, JSON.stringify(result)).toMatchObject({ ok: true, items: [{ ok: true, sessionId: session.id }] });
       expect(panelManager.createPanel).toHaveBeenCalledTimes(1);
       expect(panelManager.createPanel).toHaveBeenCalledWith(expect.objectContaining({
-        initialState: expect.objectContaining({ agentType: 'codex', agentSessionId: 'thread-1', initialCommand: launch ? expect.stringMatching(/^codex --yolo --cd "[^"]+"$/) : undefined }),
+        initialState: expect.objectContaining({ agentType: 'codex', agentSessionId: 'thread-1', initialCommand: launch ? 'codex --yolo' : undefined, resumeDirectory: worktreePath }),
       }));
       if (!launch) {
         expect(terminalPanelManager.writeToTerminal).toHaveBeenCalledWith(terminalPanel.id, 'codex --yolo resume "thread-1"');
@@ -975,7 +975,8 @@ describe('runpane IPC handlers', () => {
       expect(result).toMatchObject({ ok: true, items: [{ ok: true }] });
       const initialState = vi.mocked(panelManager.createPanel).mock.calls[0][0].initialState;
       expect(initialState).toMatchObject({
-        initialCommand: expect.stringMatching(new RegExp(`^${RUNPANE_CONTRACT.agentTemplates.codex.command} --cd "`)),
+        initialCommand: RUNPANE_CONTRACT.agentTemplates.codex.command,
+        resumeDirectory: expect.any(String),
         initialInput: 'Continue with step 2',
         initialInputSubmitStrategy: 'codex-ctrl-enter',
         agentSessionId: 'thread-1',
@@ -1210,7 +1211,9 @@ describe('runpane IPC handlers', () => {
       },
     });
     // SAFETY: The doctor result shape is asserted immediately above before its channels are inspected.
-    const daemon = (result as { daemon: { channels: string[] } }).daemon;
+    const daemon = (result as { daemon: { channels: string[]; features: string[] } }).daemon;
+    // runpane handoff carries a session only to a Pane that says create honours resume.
+    expect(daemon.features).toContain('resume-on-create');
     expect(daemon.channels).toContain('runpane:doctor');
     expect(daemon.channels).toContain('runpane:panes:rename');
     expect(daemon.channels).toContain('runpane:panes:focus');
@@ -2558,8 +2561,8 @@ describe('runpane IPC handlers', () => {
       repo: { id: project.id }, panes: [{ name: 'handoff-feature', tool: { agent: 'codex' }, resume: 'thread-7' }],
     }]);
     expect(panelManager.createPanel).toHaveBeenCalledWith(expect.objectContaining({
-      // The resumed conversation recorded another folder; --cd keeps Codex from asking which to use.
-      initialState: expect.objectContaining({ agentType: 'codex', agentSessionId: 'thread-7', initialCommand: expect.stringMatching(/^codex --yolo --cd "[^"]+"$/) }),
+      // The resumed conversation recorded another folder; the terminal pins it with --cd so Codex does not ask which to use.
+      initialState: expect.objectContaining({ agentType: 'codex', agentSessionId: 'thread-7', initialCommand: 'codex --yolo', resumeDirectory: expect.any(String) }),
     }));
   });
 

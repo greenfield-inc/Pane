@@ -59,6 +59,7 @@ import type { Project } from '../database/models';
 import type { Session, SessionOutput } from '../types/session';
 import type { BrowserPanelState, CreatePanelRequest, EditorPanelState, TerminalAgentReport, TerminalPanelState, ToolPanel } from '../../../shared/types/panels';
 import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
+import { RUNPANE_DAEMON_FEATURES } from '../../../shared/types/runpaneOrchestration';
 import { isAgentSupportedOnPlatform } from '../../../shared/constants/agentLaunchPresets';
 import { getDockTerminalPanel } from '../../../shared/utils/terminalDock';
 import {
@@ -412,6 +413,7 @@ export function registerRunpaneHandlers(
         },
         daemon: {
           channels: [...runpaneDaemonChannels()],
+          features: [...RUNPANE_DAEMON_FEATURES],
           executableHealth: await collectRemoteDaemonExecutableHealthAsync(getAppDirectory()),
         },
         repos: {
@@ -2108,9 +2110,6 @@ async function createTerminalPanelForSession(
   // session is another checkout or machine; without --cd, Codex stops to ask which folder to use.
   const pinsCodexFolder = Boolean(options.agentSessionId) && tool.agent === 'codex' && !wslContext
     && !/(?:^|\s)(?:--cd|-C)(?:=|\s)/.test(tool.command);
-  const launchCommand = pinsCodexFolder
-    ? `${tool.command} --cd "${session.worktreePath.replace(/([\\"$`])/g, '\\$1')}"`
-    : tool.command;
   // A waited create delivers its own typed message, to the declared agent or the one Pane detects.
   const shouldCreateSubmitInitialInput = Boolean(
     waitReady &&
@@ -2119,7 +2118,7 @@ async function createTerminalPanelForSession(
   );
   const initialState: TerminalPanelState = {
     ...toolAgentIdentityState(tool),
-    initialCommand: launch ? launchCommand : undefined,
+    initialCommand: launch ? tool.command : undefined,
     initialInput: tool.initialInput,
     initialInputSubmitStrategy: tool.agent === 'codex' && !useArgumentDelivery
       ? 'codex-ctrl-enter'
@@ -2128,6 +2127,10 @@ async function createTerminalPanelForSession(
   if (options.agentSessionId) {
     initialState.agentSessionId = options.agentSessionId;
     initialState.hasClaudeSessionId = tool.agent === 'claude';
+  }
+  if (pinsCodexFolder) {
+    // The terminal adds `--cd` when it launches, quoted for its own shell.
+    initialState.resumeDirectory = session.worktreePath;
   }
   if (useArgumentDelivery) {
     initialState.initialInputMode = 'argument';

@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import * as claudeTranscripts from './claudeSessionTranscript';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ConfigManager } from './configManager';
@@ -1365,9 +1366,66 @@ describe('TerminalPanelManager hidden output delivery', () => {
     const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
     const state: TerminalPanelState = { agentType: 'codex', orchestrationSessionId: 'session', orchestrationWorkspace: '/tmp/new session', agentSessionId: 'saved-thread' };
     expect(manager.resolveCliLaunchCommand('panel', 'codex --yolo', state).commandToRun)
-      .toBe('codex --yolo resume "saved-thread" --cd "/tmp/new session"');
+      .toBe(`codex --yolo resume "saved-thread" --cd '/tmp/new session'`);
     expect(manager.resolveCliLaunchCommand('panel', 'codex --cd /custom', state).commandToRun)
       .toBe('codex --cd /custom resume "saved-thread"');
+  });
+
+  describe('quotes the resumed Codex folder for the terminal\'s own shell', () => {
+    // A legal folder name that each shell would expand if it were quoted for another shell.
+    const hostile = 'C:\\repos\\a b\\$(Write-Output PANE_SECURITY_SENTINEL)\\it\'s ’q’ `tick\\wt';
+    const resumeWord = (shellType: string | undefined, directory = hostile, field: 'resumeDirectory' | 'orchestrationWorkspace' = 'resumeDirectory'): string | undefined => {
+      const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+      const state: TerminalPanelState = { agentType: 'codex', agentSessionId: 'saved-thread', [field]: directory };
+      const { commandToRun } = manager.resolveCliLaunchCommand('panel', 'codex --yolo', state, shellType);
+      const prefix = 'codex --yolo resume "saved-thread"';
+      expect(commandToRun.startsWith(prefix)).toBe(true);
+      const rest = commandToRun.slice(prefix.length);
+      if (!rest) return undefined;
+      expect(rest.startsWith(' --cd ')).toBe(true);
+      return rest.slice(' --cd '.length);
+    };
+
+    it.each(['powershell', 'pwsh', 'powershell.exe', 'pwsh.exe'])('single-quotes it for %s, doubling straight and typographic single quotes', shell => {
+      expect(resumeWord(shell)).toBe('\'C:\\repos\\a b\\$(Write-Output PANE_SECURITY_SENTINEL)\\it\'\'s ’’q’’ `tick\\wt\'');
+      expect(resumeWord(shell, 'C:\\x‘y‚z‛w')).toBe('\'C:\\x‘‘y‚‚z‛‛w\'');
+    });
+
+    it('double-quotes it for cmd, and skips pinning a folder cmd would expand', () => {
+      expect(resumeWord('cmd.exe')).toBe('"C:\\repos\\a b\\$(Write-Output PANE_SECURITY_SENTINEL)\\it\'s ’q’ `tick\\wt"');
+      expect(resumeWord('cmd', 'C:\\repos\\%PATH%\\wt')).toBeUndefined();
+      expect(resumeWord('cmd', 'C:\\repos\\a!b\\wt')).toBeUndefined();
+      expect(resumeWord('cmd', 'C:\\repos\\a"b\\wt')).toBeUndefined();
+      expect(resumeWord('cmd', 'C:\\repos\\a\nb\\wt')).toBeUndefined();
+    });
+
+    it('single-quotes it for fish, escaping backslashes and single quotes', () => {
+      expect(resumeWord('fish')).toBe('\'C:\\\\repos\\\\a b\\\\$(Write-Output PANE_SECURITY_SENTINEL)\\\\it\\\'s ’q’ `tick\\\\wt\'');
+    });
+
+    it.each(['bash', 'zsh', 'sh', 'gitbash', '/bin/zsh', undefined])('single-quotes it for POSIX shells (%s)', shell => {
+      expect(resumeWord(shell)).toBe('\'C:\\repos\\a b\\$(Write-Output PANE_SECURITY_SENTINEL)\\it\'\\\'\'s ’q’ `tick\\wt\'');
+    });
+
+    it('quotes a managed orchestration workspace the same way', () => {
+      expect(resumeWord('powershell', hostile, 'orchestrationWorkspace')).toBe(resumeWord('powershell'));
+    });
+
+    it.skipIf(process.platform !== 'win32')('passes the folder through PowerShell as one literal word', () => {
+      // A managed workspace takes the same path, and was quoted for a POSIX shell before.
+      const word = resumeWord('powershell', hostile, 'orchestrationWorkspace');
+      expect(word).toBeDefined();
+      const result = spawnSync('powershell.exe', [
+        '-NoProfile', '-NonInteractive', '-Command',
+        `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Write-Output ${word}`,
+      ], { encoding: 'utf8' });
+      expect(result.status).toBe(0);
+      const stdout = result.stdout.replace(/\r?\n$/, '');
+      expect(stdout).toBe(hostile);
+      // The sentinel appears only inside the literal text, never as the output of an expansion.
+      expect(stdout.split('PANE_SECURITY_SENTINEL').length).toBe(2);
+      expect(stdout).toContain('$(Write-Output PANE_SECURITY_SENTINEL)');
+    });
   });
 
   it('uses generic templates to allocate and resume a wrapper conversation without changing its saved command', () => {
