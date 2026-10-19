@@ -19,6 +19,11 @@ export interface WorkspaceAccessConfig {
   password?: WorkspacePasswordHash;
 }
 
+/** Where a tailnet admin turns on HTTPS Certificates, which workspaces need. */
+export const TAILSCALE_DNS_ADMIN_URL = 'https://login.tailscale.com/admin/dns';
+/** The `reason` workspaces report while the tailnet has HTTPS Certificates turned off. */
+export const TAILNET_HTTPS_OFF_REASON = 'this tailnet has HTTPS certificates turned off';
+
 export interface WorkspaceAccessSummary {
   visibility: WorkspaceVisibility;
   passwordProtected: boolean;

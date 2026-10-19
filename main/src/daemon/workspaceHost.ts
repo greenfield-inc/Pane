@@ -7,7 +7,12 @@ import { randomBytes } from 'crypto';
 import type { PaneEventSink } from '../core/eventSink';
 import type { WorkspaceAccessPolicy } from './auth';
 import { createWorkspacePasswordVerifier, type SecretCheck } from './workspacePassword';
-import type { WorkspaceAccessSummary, WorkspacePasswordHash } from '../../../shared/types/workspaceAccess';
+import {
+  TAILNET_HTTPS_OFF_REASON,
+  TAILSCALE_DNS_ADMIN_URL,
+  type WorkspaceAccessSummary,
+  type WorkspacePasswordHash,
+} from '../../../shared/types/workspaceAccess';
 import {
   readTailnetIdentity,
   readTailscaleServeHandlers,
@@ -103,8 +108,8 @@ export function readTailnetSelf(statusJson: string): TailnetSelf {
   if (!parsed.CertDomains?.length) {
     return {
       ok: false,
-      reason: 'this tailnet has HTTPS certificates turned off',
-      fix: 'Turn on HTTPS Certificates at https://login.tailscale.com/admin/dns.',
+      reason: TAILNET_HTTPS_OFF_REASON,
+      fix: `Turn on HTTPS Certificates at ${TAILSCALE_DNS_ADMIN_URL}.`,
     };
   }
   const owner = decodeOptionalBoundary(parsed.User?.[String(parsed.Self.UserID)], tailnetUserSchema);

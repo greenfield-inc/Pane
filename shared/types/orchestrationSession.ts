@@ -90,6 +90,11 @@ export interface OrchestrationSessionRecord {
   /** Empty uses the selected built-in agent command. */
   launchCommand?: string;
   customResume?: CustomCommandResume | null;
+  /**
+   * A native conversation of `agent` the Session's tab resumes (`runpane handoff` moving a
+   * Session). Saved with the record, so a tab created or repaired at startup still resumes it.
+   */
+  resume?: string;
   /** Snapshot of the behavior profile, independent of app defaults. */
   profile?: string;
   /** Hidden detached Pane session that owns the durable terminal conversation. */
@@ -197,6 +202,11 @@ export interface OrchestrationSessionCreateInput {
   agent?: PaneChatAgent;
   launchCommand?: string;
   customResume?: CustomCommandResume | null;
+  /**
+   * A native session id of `agent` to resume: the Session's agent tab resumes that conversation
+   * when it first opens, instead of starting a new one. `runpane handoff` uses it to move a Session.
+   */
+  resume?: string;
   profile?: string;
   goal?: string;
   context?: string;

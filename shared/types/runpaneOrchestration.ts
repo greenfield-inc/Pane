@@ -301,6 +301,14 @@ export interface RunpaneRepoListResult {
   repos: RunpaneRepoSummary[];
 }
 
+/**
+ * What this Pane's daemon supports beyond its channel list, so a newer runpane can tell an older
+ * Pane apart before relying on a field an older one would drop. `resume-on-create`: panes create,
+ * panels create and sessions create honour `resume`, launching the agent's own resume for that id
+ * and recording it as the tab's conversation.
+ */
+export const RUNPANE_DAEMON_FEATURES = ['resume-on-create'] as const;
+
 export interface RunpaneDoctorResult {
   ok: true;
   app: {
@@ -312,6 +320,8 @@ export interface RunpaneDoctorResult {
   };
   daemon: {
     channels: string[];
+    /** See RUNPANE_DAEMON_FEATURES. */
+    features: string[];
     executableHealth: RemoteDaemonExecutableHealth;
   };
   repos: {
@@ -384,6 +394,11 @@ export interface RunpanePaneCreateItem {
   sessionPrompt?: string;
   pinned?: boolean;
   tool: RunpaneToolSpec;
+  /**
+   * A native agent session id to resume, as `panes adopt --resume`: Pane launches the agent's own
+   * resume for this id and records it as the tab's id, so a restart resumes the same conversation.
+   */
+  resume?: string;
 }
 
 export interface RunpanePaneCreateRequest {
@@ -951,6 +966,11 @@ export interface RunpanePanelCreateRequest {
   paneId: string;
   type?: 'terminal';
   tool: RunpaneToolSpec;
+  /**
+   * A native agent session id to resume, as `panes adopt --resume`: Pane launches the agent's own
+   * resume for this id and records it as the tab's id, so a restart resumes the same conversation.
+   */
+  resume?: string;
   noFocus?: boolean;
   focus?: boolean;
   source?: RunpanePanelCreateSource;

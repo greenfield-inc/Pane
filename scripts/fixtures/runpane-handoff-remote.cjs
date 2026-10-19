@@ -1,0 +1,127 @@
+// A disposable stand-in for Pane on another machine, reached the way runpane reaches a workspace:
+// HTTP POST /invoke. Machine exec and write act on a fake home folder on this machine; Pane
+// commands answer from canned state. Never launches agents.
+const fs = require('node:fs');
+const http = require('node:http');
+const path = require('node:path');
+const { spawn } = require('node:child_process');
+
+const config = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const windows = process.platform === 'win32';
+const repo = { id: 7, name: 'receiver', path: config.repoPath, active: true, sessionCount: 0 };
+const ready = { ok: true, condition: 'ready', matched: true, timedOut: false, elapsedMs: 1, state: { initialized: true } };
+let receiverResume;
+
+const resolveHome = (file) => (file.startsWith('~/') ? path.join(config.home, file.slice(2)) : file);
+
+function exec(command, timeoutMs) {
+  return new Promise((resolve) => {
+    const child = windows
+      ? spawn('powershell.exe', ['-NoProfile', '-Command', command], { cwd: config.home, windowsHide: true })
+      : spawn('sh', ['-c', command], { cwd: config.home });
+    let stdout = '';
+    let stderr = '';
+    const timer = setTimeout(() => child.kill(), timeoutMs ?? 120000);
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.on('error', (error) => {
+      clearTimeout(timer);
+      resolve({ os: windows ? 'Windows' : 'Linux', shell: windows ? 'powershell' : 'sh', exitCode: 1, stdout, stderr: stderr + error.message });
+    });
+    child.on('close', (exitCode) => {
+      clearTimeout(timer);
+      resolve({ os: windows ? 'Windows' : 'Linux', shell: windows ? 'powershell' : 'sh', exitCode, stdout, stderr });
+    });
+  });
+}
+
+async function answer(channel, args) {
+  switch (channel) {
+    case 'runpane:machine:exec':
+      return exec(args[0].command, args[0].timeoutMs);
+    case 'runpane:machine:write': {
+      // config.failWrite: a write to a path containing it fails, as a dropped connection would.
+      if (config.failWrite && args[0].path.includes(config.failWrite)) throw new Error(`Injected write failure for ${args[0].path}`);
+      const target = resolveHome(args[0].path);
+      const bytes = Buffer.from(args[0].content, args[0].encoding ?? 'utf8');
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, bytes);
+      return { path: target, bytes: bytes.length };
+    }
+    case 'runpane:doctor': {
+      const daemon = { channels: [] }; if (config.features !== null) daemon.features = config.features ?? ['resume-on-create'];
+      return { ok: true, app: { version: 'fixture' }, daemon };
+    }
+    case 'runpane:panes:list':
+      // config.running: a Pane there whose tab is running the given session.
+      return { ok: true, panes: config.running ? [{ id: 'busy-pane', paneId: 'busy-pane', name: 'busy', status: 'running', agentStatus: 'idle', worktreePath: config.repoPath, repoId: 7, panelCount: 1, pinned: false, ownership: 'pane' }] : [] };
+    case 'runpane:sessions:list':
+      // config.runningInSession: a Session there whose agent tab (in its hidden owner) runs the given session.
+      return { ok: true, sessions: config.runningInSession ? [{ id: 'busy-session', name: 'Busy', agent: config.agent, internalSessionId: 'busy-owner',
+        panelIds: { claude: 'busy-session-tab', codex: 'c', cursor: 'u' }, goal: '', context: '', decisions: [], blockers: [], nextAction: '', evidence: [], outputs: [],
+        associations: [], activity: [], revision: 1, createdAt: '2026-10-19T00:00:00.000Z', updatedAt: '2026-10-19T00:00:00.000Z' }] : [] };
+    case 'runpane:repos:list':
+      return { ok: true, repos: [repo] };
+    case 'runpane:panes:create': {
+      const item = args[0].panes[0];
+      receiverResume = item.resume;
+      return { ok: true, repo, items: [{ ok: true, index: 0, name: item.name, pinned: false, warnings: [],
+        sessionId: 'remote-pane', paneId: 'remote-pane', panelId: 'remote-tab', worktreePath: path.join(config.home, 'worktrees', item.name),
+        // config.blocked: the agent stopped on its own prompt; config.notReady: still starting when the wait ended.
+        readiness: config.blocked ? { ...ready, ok: false, matched: false, blocked: config.blocked } : config.notReady ? { ...ready, ok: false, matched: false, timedOut: true } : ready }] };
+    }
+    case 'runpane:panels:list':
+      if (args[0].paneId === 'busy-owner') {
+        return { ok: true, paneId: 'busy-owner', panels: [{ id: 'busy-session-tab', panelId: 'busy-session-tab', paneId: 'busy-owner', type: 'terminal', title: 'Busy', active: false, running: true, agentType: config.agent, resumeId: config.runningInSession, resumeSource: 'agent' }] };
+      }
+      if (args[0].paneId === 'busy-pane') {
+        return { ok: true, paneId: 'busy-pane', panels: [{ id: 'busy-tab', panelId: 'busy-tab', paneId: 'busy-pane', type: 'terminal', title: 'busy', active: false, running: true, agentType: config.agent, resumeId: config.running, resumeSource: 'agent' }] };
+      }
+      return { ok: true, paneId: args[0].paneId, panels: [{ id: 'remote-tab', panelId: 'remote-tab', paneId: args[0].paneId, type: 'terminal',
+        title: 'receiver', active: false, agentType: config.agent, resumeId: receiverResume, resumeSource: 'agent' }] };
+    case 'runpane:panels:screen':
+      return { ok: true, panelId: args[0].panelId, source: 'scrollback', limit: 400, returnedLineCount: 1, hasMore: false,
+        text: config.screenText ?? '', state: { initialized: true }, composer: { isPresent: true, hasUndeliveredText: false } };
+    case 'runpane:panels:submit':
+      if (config.submitError) throw new Error('Injected connection reset');
+      return { ok: true, panelId: args[0].panelId, inputBytes: args[0].input.length, enter: 'cr', sequenceName: 'enter-cr',
+        verifiedSubmitted: true, delivery: { state: 'taken', evidence: 'transcript' }, sentAt: new Date().toISOString() };
+    default:
+      throw new Error(`Unexpected fixture channel: ${channel}`);
+  }
+}
+
+const server = http.createServer((request, response) => {
+  let body = '';
+  request.on('data', (chunk) => { body += chunk; });
+  request.on('end', async () => {
+    let parsed;
+    try {
+      parsed = JSON.parse(body);
+    } catch {
+      fs.appendFileSync(`${config.log}.errors`, `${request.method} ${request.url} with an unreadable body (${body.length} bytes)
+`);
+      response.writeHead(400).end();
+      return;
+    }
+    const { channel, args } = parsed;
+    // Log the channel and a summary of its arguments; writes carry whole files.
+    fs.appendFileSync(config.log, JSON.stringify({ channel, args: channel === 'runpane:machine:write'
+      ? [{ path: args[0].path, encoding: args[0].encoding, length: args[0].content.length }] : args }) + '\n');
+    let reply;
+    try {
+      reply = { ok: true, result: await answer(channel, args) };
+    } catch (error) {
+      reply = { ok: false, error: { message: error.message } };
+    }
+    response.writeHead(200, { 'Content-Type': 'application/json' });
+    response.end(JSON.stringify(reply));
+  });
+});
+process.on('uncaughtException', (error) => {
+  fs.appendFileSync(`${config.log}.errors`, `${error.stack}
+`);
+  process.exit(1);
+});
+server.listen(0, '127.0.0.1', () => fs.writeFileSync(config.ready, JSON.stringify({ port: server.address().port })));
+process.on('SIGTERM', () => server.close(() => process.exit()));

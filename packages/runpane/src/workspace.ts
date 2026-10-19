@@ -7,8 +7,14 @@ import type { BoundarySchema, JsonValue } from './boundaryDecoder';
 import type { ParsedArgs } from './commands';
 import { invokeDaemon, invokeRemoteDaemon, PaneDaemonClientError, type RemoteDaemonTarget } from './daemonClient';
 
-/** Tailnet port where each joined machine's Pane serves workspaces. */
-const WORKSPACE_HTTPS_PORT = 8443;
+/**
+ * Tailnet port where each joined machine's Pane serves workspaces. Pane reads PANE_WORKSPACES_PORT
+ * to serve somewhere else (a development build beside an installed Pane), and so does runpane.
+ */
+function workspaceHttpsPort(): number {
+  const port = Number(process.env.PANE_WORKSPACES_PORT);
+  return Number.isInteger(port) && port > 0 && port < 65536 ? port : 8443;
+}
 const TAILSCALE_TIMEOUT_MS = 3_000;
 const PROBE_TIMEOUT_MS = 4_000;
 const LOCAL_STATUS_TIMEOUT_MS = 1_500;
@@ -32,7 +38,8 @@ export interface TailnetMachine {
 }
 
 export type Tailnet =
-  | { ok: true; self: TailnetMachine; machines: TailnetMachine[] }
+  /** `httpsCertificates` is the tailnet-wide setting that workspaces need on every machine. */
+  | { ok: true; self: TailnetMachine; machines: TailnetMachine[]; httpsCertificates: boolean }
   | { ok: false; reason: string; fix: string };
 
 const peerSchema = boundary.object({
@@ -50,6 +57,7 @@ const statusSchema = boundary.object({
   Self: boundary.optional(boundary.nullable(peerSchema)),
   Peer: boundary.optional(boundary.nullable(boundary.jsonObject)),
   User: boundary.optional(boundary.nullable(boundary.jsonObject)),
+  CertDomains: boundary.optional(boundary.nullable(boundary.array(boundary.string))),
 });
 const userSchema = boundary.object({ LoginName: boundary.string });
 
@@ -132,7 +140,7 @@ export async function readTailnet(): Promise<Tailnet> {
     .sort((left, right) => Number(right.mine) - Number(left.mine) || Number(right.online) - Number(left.online)
       || left.name.localeCompare(right.name));
   if (!self) return { ok: false, reason: `Tailscale reports an unsupported OS (${status.Self.OS})`, fix: 'Run Pane on macOS, Windows, or Linux.' };
-  return { ok: true, self, machines };
+  return { ok: true, self, machines, httpsCertificates: Boolean(status.CertDomains?.length) };
 }
 
 const TAILSCALE_OS_NAMES = new Map<string, MachineOs>([['macos', 'macOS'], ['windows', 'Windows'], ['linux', 'Linux']]);
@@ -223,16 +231,20 @@ function describeMachine(machine: TailnetMachine): string {
 }
 
 export function workspaceTarget(machine: TailnetMachine): RemoteDaemonTarget {
-  return { machine: machine.name, baseUrl: `https://${machine.dnsName}:${WORKSPACE_HTTPS_PORT}` };
+  return { machine: machine.name, baseUrl: `https://${machine.dnsName}:${workspaceHttpsPort()}` };
 }
 
-async function probeMachine(machine: TailnetMachine): Promise<{ info?: MachineInfo; error?: string }> {
+const NOT_ANSWERING = 'Pane is not answering there; it needs a Pane with workspaces running and signed in to Tailscale';
+/** With the tailnet-wide setting off, no machine can answer, so name the setting instead of the machine. */
+const CERTIFICATES_OFF = 'this tailnet has HTTPS certificates turned off. Fix: Turn on HTTPS Certificates at https://login.tailscale.com/admin/dns.';
+
+async function probeMachine(machine: TailnetMachine, notAnswering = NOT_ANSWERING): Promise<{ info?: MachineInfo; error?: string }> {
   if (!machine.online) return { error: 'offline' };
   try {
     return { info: await invokeRemoteDaemon(workspaceTarget(machine), 'runpane:machine:info', [], machineInfoSchema, PROBE_TIMEOUT_MS) };
   } catch (error) {
     if (error instanceof PaneDaemonClientError && (error.code === 'ERR_WORKSPACE_UNREACHABLE' || error.code === 'ERR_WORKSPACE_TIMEOUT')) {
-      return { error: 'Pane is not answering there; it needs a Pane with workspaces running and signed in to Tailscale' };
+      return { error: notAnswering };
     }
     return { error: error instanceof Error ? error.message : String(error) };
   }
@@ -271,7 +283,7 @@ export async function runWorkspaceList(parsed: ParsedArgs): Promise<number> {
   const rows = await Promise.all(tailnet.machines.map(async (machine) => ({
     machine,
     probe: probed.has(machine) || !machine.online
-      ? await probeMachine(machine)
+      ? await probeMachine(machine, tailnet.httpsCertificates ? NOT_ANSWERING : CERTIFICATES_OFF)
       : { error: `not checked (Pane checks the first ${MAX_PROBED_MACHINES} online machines)` },
   })));
   if (parsed.json) {

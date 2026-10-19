@@ -285,11 +285,15 @@ the `handoff` skill.
 The agent writes a handoff note, and handoff creates a Session on that machine
 with the same name (numbered "<name> 2" if the name is taken), goal and agent.
 Its next action is to read the note, which handoff saved in that machine's
-`~/.pane/handoffs/`. Like every Session, it waits for your first message: switch
-to that machine, open the Session, and send "continue". Only the note moves. The
-conversation, the Session folder and its Panes stay where they are, and the
-original Session is not archived; archive it from the same menu when you are
-done with it.
+`~/.pane/handoffs/`. When the new Session uses the same agent, the conversation
+moves too: its agent session's files are copied to that machine, and the new
+Session resumes that conversation when you first open it. Check that it shows
+the last message, and if that is unclear, ask it what it was last working on.
+With a different agent, or `--note-only`, only the note moves and the new
+Session starts fresh from it. Like every Session, it waits for your first
+message: switch to that machine, open the Session, and send "continue". The
+Session folder and its Panes stay where they are, and the original Session is
+not archived; archive it from the same menu when you are done with it.
 
 ## Bring your existing sessions into Pane
 

@@ -114,6 +114,7 @@ import { detectAgentComposer, detectAgentFromScreen } from './agents/agentScreen
 import { readForegroundExecutablePath, readForegroundProcessGroup } from '../utils/foregroundProcess';
 import { buildCursorLaunchCommand, createCursorReadyDetector, extractCursorChatId } from './agents/cursorLaunch';
 import { resolveOpenCodeLaunchCommand } from './agents/opencodeLaunch';
+import { quoteShellWord } from './agents/shellWord';
 import {
   bracketedPaste,
   canLaunchWithPromptFile,
@@ -533,7 +534,7 @@ export class TerminalPanelManager extends EventEmitter {
     const resolution = agentType === 'claude'
       ? this.resolveClaudeLaunch(panelId, initialCommand, customState, nextState, isWSL)
       : agentType === 'codex'
-        ? this.resolveCodexLaunch(panelId, initialCommand, customState, nextState)
+        ? this.resolveCodexLaunch(panelId, initialCommand, customState, nextState, isWSL ? 'bash' : shellType)
         : agentType === 'cursor'
           ? this.resolveCursorLaunch(panelId, initialCommand, customState, nextState, shellType)
           : agentType === 'opencode'
@@ -632,14 +633,18 @@ export class TerminalPanelManager extends EventEmitter {
     initialCommand: string,
     customState: TerminalPanelState,
     nextState: TerminalPanelState,
+    shellType?: string,
   ): CliLaunchResolution | undefined {
     const resumeBase = codexResumeBase(initialCommand);
     if ((customState.wasInterrupted || customState.agentSessionId) && resumeBase !== undefined) {
       nextState.wasInterrupted = undefined;
       if (customState.orchestrationSessionId && !customState.agentSessionId) return { commandToRun: initialCommand, customState: nextState, isCliCommand: true };
-      const directoryArg = customState.orchestrationWorkspace && !/(?:^|\s)(?:--cd|-C)(?:=|\s)/.test(initialCommand)
-        ? ` --cd ${this.quoteCommandArgument(customState.orchestrationWorkspace)}`
-        : '';
+      // Quoted for the terminal's own shell: a folder name may hold characters another shell expands.
+      const directory = customState.orchestrationWorkspace ?? customState.resumeDirectory;
+      const directoryWord = directory && !/(?:^|\s)(?:--cd|-C)(?:=|\s)/.test(initialCommand)
+        ? quoteShellWord(directory, shellType)
+        : undefined;
+      const directoryArg = directoryWord ? ` --cd ${directoryWord}` : '';
       const commandToRun = customState.agentSessionId
         ? `${resumeBase} resume ${this.quoteCommandArgument(customState.agentSessionId)}${directoryArg}`
         : `${resumeBase} resume${directoryArg}`;
