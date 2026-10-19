@@ -54,7 +54,9 @@ const server = net.createServer(socket => {
         if (request.resume) receiverResume = request.resume;
         result = { ok: true, paneId: request.paneId, panelId: 'test-tab', title: 'Codex', active: false, focused: false,
           tool: { title: 'Codex', command: 'codex' }, initialInput: request.resume ? undefined : config.item.initialInput, warnings: [],
-          readiness: config.blocked
+          readiness: config.notReady
+            ? { ok: false, condition: 'ready', matched: false, timedOut: true, elapsedMs: 1, state: { initialized: true } }
+            : config.blocked
             ? { ok: false, condition: 'ready', matched: false, timedOut: false, elapsedMs: 1, state: { initialized: true }, blocked: config.blocked }
             : { ok: true, condition: 'ready', matched: true, timedOut: false, elapsedMs: 1, state: { initialized: true } } };
       }

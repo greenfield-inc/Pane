@@ -140,7 +140,7 @@ function receiver(f, options = {}) {
   fs.writeFileSync(config, JSON.stringify({ paneDir, log, ready, repoPath: options.repoPath ?? f.root,
     createError: options.createError, reposError: options.reposError, ownedPane: options.ownedPane,
     sender: options.sender, screenText: options.screenText, receiverResumeId: options.receiverResumeId,
-    blocked: options.blocked, extraPanels: options.extraPanels, features: options.features, item: options.item ?? { ok: true, sessionId: 'test-pane', panelId: 'test-panel', initialInput:{delivered:true,submitted:true,inputBytes:20,verifiedSubmitted:true,delivery:{state:'taken',evidence:'transcript'}} } }));
+    blocked: options.blocked, notReady: options.notReady, extraPanels: options.extraPanels, features: options.features, item: options.item ?? { ok: true, sessionId: 'test-pane', panelId: 'test-panel', initialInput:{delivered:true,submitted:true,inputBytes:20,verifiedSubmitted:true,delivery:{state:'taken',evidence:'transcript'}} } }));
   const child = spawn(process.execPath, [path.join(__dirname, 'fixtures', 'runpane-handoff-daemon.cjs'),
     path.join(dist, 'daemonClient.js'), config], { env: f.env, stdio: 'ignore' });
   f.t.after(async () => {
@@ -751,7 +751,8 @@ function remoteMachine(f, options = {}) {
   const ready = path.join(f.root, 'remote-ready.json');
   const config = path.join(f.root, 'remote.json');
   fs.writeFileSync(config, JSON.stringify({ home, repoPath, log, ready, agent: options.agent ?? 'claude', screenText: options.screenText,
-    failWrite: options.failWrite, submitError: options.submitError, running: options.running, features: options.features }));
+    failWrite: options.failWrite, submitError: options.submitError, running: options.running, features: options.features,
+    blocked: options.blocked, notReady: options.notReady }));
   const child = spawn(process.execPath, [path.join(__dirname, 'fixtures', 'runpane-handoff-remote.cjs'), config], { env: f.env, stdio: 'ignore' });
   f.t.after(async () => {
     if (child.exitCode !== null || child.signalCode !== null) return;
@@ -981,8 +982,8 @@ test('a receiver stopped on its agent\'s own notice is inconclusive, with the co
   assert.equal(result.status, 0, result.stderr + result.stdout);
   const out = JSON.parse(result.stdout);
   assert.equal(out.continuity.result, 'inconclusive');
-  assert.match(out.continuity.reason, /waiting on its agent's own prompt: Set up security for Daybreak mode$/);
-  assert.match(out.continuity.next, /runpane panels input --panel test-tab --keys escape --yes/);
+  assert.match(out.continuity.reason, /waiting on its agent's own prompt: Set up security for Daybreak mode \/ Press a number to choose/);
+  assert.match(out.continuity.next, /^Answer it with runpane .*panels input --panel test-tab --keys escape --yes/);
 });
 
 test('the receiver reports back to the tab that records the carried session, not an inherited PANE_PANEL_ID', (t) => {
@@ -1008,7 +1009,7 @@ test('with no tab recording the carried session, the receiver reports on the bra
   const result = runClaude(f);
   assert.equal(result.status, 0, result.stderr + result.stdout);
   assert.doesNotMatch(handoffNote(f), /^origin_panel:/m);
-  assert.ok(JSON.parse(result.stdout).warnings.some(warning => /PANE_PANEL_ID names another tab/.test(warning)));
+  assert.ok(JSON.parse(result.stdout).warnings.some(warning => /PANE_PANEL_ID may name another tab/.test(warning)));
 });
 
 // ---------------------------------------------------------------- review of #1040: copies, old Panes, Cursor, delivery
@@ -1258,4 +1259,51 @@ for (const agent of ['codex', 'opencode']) test(`${agent === 'opencode' ? 'an' :
     .then(id => { console.log('returned ' + id); process.exit(0); }, error => { console.log('rejected ' + error.message); process.exit(0); });`;
   const result = spawnSync(process.execPath, ['-e', script], { encoding: 'utf8', env });
   assert.match(result.stdout, /^rejected .*fork.* failed: not signed in/m, result.stdout + result.stderr);
+});
+
+// ---------------------------------------------------------------- final-head QA: slow and blocked receivers, report-back
+
+test('a receiver still starting when the wait ends is inconclusive, not not-continued', (t) => {
+  const f = fixture(t); fs.writeFileSync(path.join(f.root, 'note.md'), filled());
+  const calls = receiver(f, { sender: { agentType: 'claude', resumeId: SENDER, resumeSource: 'agent' }, notReady: true });
+  claudeSession(f);
+  const result = runClaude(f);
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  const out = JSON.parse(result.stdout);
+  assert.equal(out.continuity.result, 'inconclusive');
+  assert.match(out.continuity.reason, /had not reached its input box when runpane stopped waiting/);
+  assert.match(out.continuity.next, /^Look at it with runpane .*panels screen --panel test-tab until it is ready/);
+  // A carried receiver gets longer to resume than a fresh agent to start.
+  assert.equal(calls().find(c => c.channel === 'runpane:panels:create').args[0].readyTimeoutMs, 120000);
+});
+
+test('a receiver on another machine blocked on its agent\'s prompt gets commands that reach that machine', (t) => {
+  const f = fixture(t); fs.writeFileSync(path.join(f.root, 'note.md'), filled());
+  receiver(f, { sender: { agentType: 'claude', resumeId: SENDER, resumeSource: 'agent' } });
+  claudeSession(f);
+  remoteMachine(f, { blocked: { kind: 'agent-prompt', message: 'The terminal is waiting at an interactive prompt:\n\nDo you trust the contents of this directory?\n1. Yes, continue', suggestedCommand: 'runpane panels screen --panel remote-tab' } });
+  const result = runToRemote(f);
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  const out = JSON.parse(result.stdout);
+  assert.equal(out.continuity.result, 'inconclusive');
+  assert.match(out.continuity.reason, /own prompt: The terminal is waiting at an interactive prompt: \/ Do you trust the contents of this directory\? \/ 1\. Yes, continue$/);
+  // `screen` only reads, so it is offered for looking, and it goes through the workspace.
+  assert.match(out.continuity.next, /^Look at the prompt with runpane workspace test-remote panels screen --panel remote-tab, answer it in the receiver/);
+  assert.match(out.continuity.next, /If it matches, send it this message: "This session moved to .*" If not, tell the person/);
+});
+
+test('with several tabs of the sender\'s agent and none recording its session, the report-back tab is not guessed', (t) => {
+  const f = fixture(t); fs.writeFileSync(path.join(f.root, 'note.md'), filled());
+  // Both Codex-like tabs share one background server, so PANE_PANEL_ID may be the other one's.
+  receiver(f, {
+    sender: { agentType: 'claude' },
+    extraPanels: [{ id: 'other-tab', agentType: 'claude' }],
+    screenText: `${LAST} now.`,
+  });
+  claudeSession(f);
+  f.env.CLAUDE_CODE_SESSION_ID = SENDER;
+  const result = runClaude(f);
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  assert.doesNotMatch(handoffNote(f), /^origin_panel:/m);
+  assert.ok(JSON.parse(result.stdout).warnings.some(warning => /PANE_PANEL_ID may name another tab/.test(warning)));
 });

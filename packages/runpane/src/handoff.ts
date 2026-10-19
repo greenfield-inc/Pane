@@ -560,8 +560,13 @@ async function planCarry(parsed: ParsedArgs, destination: HandoffDestination): P
   if (sender.live) {
     carry.live = true;
     // When PANE_PANEL_ID's tab records another session, report back to the tab that records this one.
+    const owner = panels.find(panel => panel.resumeId === sender.id)?.id;
     if (recorded?.resumeId && recorded.resumeId !== sender.id) {
-      carry.senderPanel = panels.find(panel => panel.resumeId === sender.id)?.id ?? null;
+      carry.senderPanel = owner ?? null;
+    } else if (!recorded?.resumeId && !owner && panels.filter(panel => panel.agentType === sender.agent && !panel.resumeId).length > 1) {
+      // No tab records this session yet (Pane learns a Codex id when Codex exits), and several of
+      // this agent's tabs could be the sender: an inherited PANE_PANEL_ID can't be trusted.
+      carry.senderPanel = null;
     }
   }
   const snippet = lastMessageSnippet(session);
@@ -783,6 +788,9 @@ async function importOpenCodeSession(destination: Destination, session: NativeSe
   return `OpenCode's store, from ${written}`;
 }
 
+/** How long a receiver resuming a carried session has to reach its input box, unless --ready-timeout-ms says otherwise. */
+const CARRIED_READY_TIMEOUT_MS = 120_000;
+
 const PROBE = 'What were you last working on? Answer in one or two sentences.';
 
 /** Checks 1 to 4 of the continuity check on the receiver, then says what was found. */
@@ -796,6 +804,10 @@ async function checkReceiver(options: {
   /** What the receiver's agent is waiting on, when it did not reach its input box. */
   blocked?: { message: string; suggestedCommand?: string };
   original?: OriginalSnapshot;
+  /** How to look at the receiver from here. */
+  inspect: string;
+  /** A local runpane command, as run from here against the destination. */
+  route(command: string): string;
 }): Promise<Pick<ContinuityReport, 'checks' | 'result' | 'next'> & { why: string }> {
   const { destination, carry, resumedId, paneId, panelId, ready, blocked, original } = options;
   const listed = await destination.invoke('runpane:panels:list', [{ paneId }], panelListResultSchema);
@@ -817,18 +829,30 @@ async function checkReceiver(options: {
   if (checks.originalUntouched === false) {
     return { checks, result: 'not-continued', why: `Your session changed while it was forked (${changed.join(', ')}).` };
   }
+  const then = `then check it shows your last work, and ask it "${PROBE}" if that is unclear.`;
   if (!ready && blocked) {
     // The agent resumed the session but stopped on its own notice or dialog; history can be checked once it's answered.
+    const prompt = blocked.message.split('\n').map(line => line.trim()).filter(Boolean).slice(0, 3).join(' / ');
+    const command = blocked.suggestedCommand ? options.route(blocked.suggestedCommand) : undefined;
+    const answers = command !== undefined && /\bpanels (?:input|submit)\b/.test(command);
     return {
       checks,
       result: 'inconclusive',
-      why: `The receiver resumed the session but is waiting on its agent's own prompt: ${blocked.message.split('\n')[0]}`,
-      next: blocked.suggestedCommand
-        ? `Answer it with ${blocked.suggestedCommand} (or by hand), then check the receiver shows your last work and ask it "${PROBE}" if unclear.`
-        : `Answer that prompt in the receiver, then check it shows your last work and ask it "${PROBE}" if unclear.`,
+      why: `The receiver resumed the session but is waiting on its agent's own prompt: ${prompt}`,
+      next: answers
+        ? `Answer it with ${command} (or by hand), ${then}`
+        : `Look at the prompt with ${command ?? options.inspect}, answer it in the receiver, ${then}`,
     };
   }
-  if (!ready) return { checks, result: 'not-continued', why: 'The receiver did not reach its input box, so its history could not be checked.' };
+  if (!ready) {
+    // Pane recorded the resumed id (checks 1 and 2), so the agent is resuming it; it is just slow to start.
+    return {
+      checks,
+      result: 'inconclusive',
+      why: 'The receiver is resuming the session but had not reached its input box when runpane stopped waiting, so its history was not checked.',
+      next: `Look at it with ${options.inspect} until it is ready, ${then}`,
+    };
+  }
   if (historyLoaded === true) return { checks, result: 'continued', why: `The receiver shows the session's last message ("${carry.snippet}").` };
   return {
     checks,
@@ -999,7 +1023,7 @@ export async function runHandoff(parsed: ParsedArgs): Promise<number> {
   const carry = 'carry' in plan ? plan.carry : undefined;
   if (carry?.senderPanel !== undefined) {
     senderPanel = carry.senderPanel;
-    if (senderPanel === null) warnings.push(`This terminal's PANE_PANEL_ID names another tab, and no tab in this Pane records ${carry.session.agent} session ${carry.session.id}, so the receiver reports back on the branch instead of to a panel.`);
+    if (senderPanel === null) warnings.push(`No tab in this Pane records ${carry.session.agent} session ${carry.session.id}, and this terminal's PANE_PANEL_ID may name another tab (it can be inherited from another tab's agent), so the receiver reports back on the branch instead of to a panel.`);
   }
   const continuity: ContinuityReport = carry ? describeCarry(carry, !target) : { carried: false, reason: 'fresh' in plan ? plan.fresh : '' };
   const noteOnlyCommand = `runpane handoff ${quote(text || describeDestination(destination, machineLabel), senderShell)} --note-file ${quote(parsed.handoffNoteFile ?? '<note>', senderShell)} --note-only`;
@@ -1084,6 +1108,8 @@ export async function runHandoff(parsed: ParsedArgs): Promise<number> {
   const resumedId = continuity.resumedId;
 
   const toolCommand = agentCommand(destination, remote.shell);
+  // Resuming a long session is slower than starting fresh (Codex on another machine took over 30 s in QA).
+  const readyTimeoutMs = parsed.readyTimeoutMs ?? (resumedId ? CARRIED_READY_TIMEOUT_MS : undefined);
   // A resumed session already knows its work; it gets the note with the "moved" message after the check.
   const prompt = resumedId ? undefined : `Read the handoff note at ${notePath} and continue the work it describes. Start with its "Receiver instructions" section.`;
   // 1 feature = 1 worktree = 1 branch = 1 Pane: on this machine, from inside the
@@ -1104,14 +1130,14 @@ export async function runHandoff(parsed: ParsedArgs): Promise<number> {
   let receiver: Receiver;
   if (senderPane) {
     const panelRequest = await buildPanelCreateRequest({
-      ...parsed, paneId: senderPane, agent: destination.agent, toolCommand, initialInput: prompt,
+      ...parsed, readyTimeoutMs, paneId: senderPane, agent: destination.agent, toolCommand, initialInput: prompt,
       source: 'agent', noFocus: true, focus: false, waitReady: true, yes: true,
     });
     if (resumedId) panelRequest.resume = resumedId;
     try {
       const panel = await invokeDaemon('runpane:panels:create', [panelRequest], panelCreateResultSchema, {
         paneDir: parsed.paneDir,
-        timeoutMs: (parsed.readyTimeoutMs ?? 30_000) + 10_000,
+        timeoutMs: (readyTimeoutMs ?? 30_000) + 10_000,
       });
       receiver = { ok: panel.ok, paneId: senderPane, panelId: panel.panelId, name: panel.title, initialInput: panel.initialInput, ready: panel.readiness?.ok === true, blocked: panel.readiness?.blocked, newTab: true };
     } catch (error) {
@@ -1119,7 +1145,7 @@ export async function runHandoff(parsed: ParsedArgs): Promise<number> {
     }
   } else {
     const request = await buildPaneCreateRequest({
-      ...parsed, repo: String(repo.id), name, baseBranch: state.head, agent: destination.agent,
+      ...parsed, readyTimeoutMs, repo: String(repo.id), name, baseBranch: state.head, agent: destination.agent,
       toolCommand, initialInput: prompt, source: 'agent', noFocus: true, focus: false,
       waitReady: true, yes: true, noAssociate: true, fromJson: undefined,
     });
@@ -1168,7 +1194,8 @@ export async function runHandoff(parsed: ParsedArgs): Promise<number> {
   if (carry && resumedId) {
     return reportCarried({ parsed, result, continuity, carry, resumedId, receiver, destination: remote, original, say,
       target: Boolean(target), notePath, noteOnlyCommand, inspect, check, branch: state.branch,
-      submit: (panelId: string) => recovery('panels', 'submit', '--panel', panelId, '--text', '<message>', '--yes') });
+      submit: (panelId: string) => recovery('panels', 'submit', '--panel', panelId, '--text', '<message>', '--yes'),
+      route: (command: string) => command.replace(/^runpane\s+/,`${recovery()} `) });
   }
   const input = receiver.initialInput;
   const verified = input?.verifiedSubmitted === true
@@ -1211,6 +1238,8 @@ interface CarriedReport {
   noteOnlyCommand: string;
   inspect: string;
   check: string;
+  /** A local runpane command, as run from here against the destination. */
+  route(command: string): string;
   branch: string;
   submit(panelId: string): string;
   say(line: string): void;
@@ -1223,7 +1252,7 @@ interface CarriedReport {
  */
 async function reportCarried(report: CarriedReport): Promise<number> {
   const { parsed, result, continuity, carry, resumedId, receiver, destination, original, target, say } = report;
-  const checked = await checkReceiver({ destination, carry, resumedId, paneId: receiver.paneId, panelId: receiver.panelId, ready: receiver.ready, blocked: receiver.blocked, original });
+  const checked = await checkReceiver({ destination, carry, resumedId, paneId: receiver.paneId, panelId: receiver.panelId, ready: receiver.ready, blocked: receiver.blocked, original, inspect: report.inspect, route: report.route });
   continuity.checks = checked.checks;
   continuity.result = checked.result;
   continuity.reason = carry.note ? `${checked.why} ${carry.note}` : checked.why;
@@ -1242,7 +1271,7 @@ async function reportCarried(report: CarriedReport): Promise<number> {
     }
     say(step('continued', `${carry.session.agent} session ${resumedId}${continuity.fork ? ` (a fork of ${carry.session.id})` : ''} in ${where}. ${checked.why}`));
   } else if (checked.result === 'inconclusive') {
-    continuity.next = `${checked.next ?? `Ask the receiver "${PROBE}" with ${report.submit(receiver.panelId)}, and compare its answer with your own last work.`} If it matches, send it: ${message}; if not, tell the person it is not continued.`;
+    continuity.next = `${checked.next ?? `Ask the receiver "${PROBE}" with ${report.submit(receiver.panelId)}, and compare its answer with your own last work.`} If it matches, send it this message: "${message}" If not, tell the person it is not continued.`;
     say(step('unclear', `${where}. ${checked.why}`, false));
     say(`Next: ${continuity.next}`);
   } else {

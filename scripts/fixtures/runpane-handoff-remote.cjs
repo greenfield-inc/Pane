@@ -62,7 +62,8 @@ async function answer(channel, args) {
       receiverResume = item.resume;
       return { ok: true, repo, items: [{ ok: true, index: 0, name: item.name, pinned: false, warnings: [],
         sessionId: 'remote-pane', paneId: 'remote-pane', panelId: 'remote-tab', worktreePath: path.join(config.home, 'worktrees', item.name),
-        readiness: ready }] };
+        // config.blocked: the agent stopped on its own prompt; config.notReady: still starting when the wait ended.
+        readiness: config.blocked ? { ...ready, ok: false, matched: false, blocked: config.blocked } : config.notReady ? { ...ready, ok: false, matched: false, timedOut: true } : ready }] };
     }
     case 'runpane:panels:list':
       if (args[0].paneId === 'busy-pane') {
