@@ -128,7 +128,7 @@ export async function locateNativeSession(agent: NativeAgent, id: string, cwd: s
 const openCodeExportSchema = boundary.object({
   info: boundary.object({ id: boundary.string }),
   messages: boundary.array(boundary.object({
-    info: boundary.object({ role: boundary.optional(boundary.string) }),
+    info: boundary.object({ id: boundary.optional(boundary.string), role: boundary.optional(boundary.string) }),
     parts: boundary.optional(boundary.array(boundary.object({ type: boundary.optional(boundary.string), text: boundary.optional(boundary.string) }))),
   })),
 });
@@ -137,8 +137,7 @@ async function openCodeExport(id: string, cwd: string): Promise<string | undefin
   const result = await run('opencode', ['export', id], cwd, 120_000);
   if (result.code !== 0) return undefined;
   // The JSON is on stdout; a progress line goes to stderr.
-  const start = result.stdout.indexOf('{');
-  return start >= 0 ? result.stdout.slice(start) : undefined;
+  return result.stdout.includes('{') ? exportJson(result.stdout) : undefined;
 }
 
 /** An OpenCode session as the file `opencode export` writes, in a private temporary folder. */
@@ -157,6 +156,31 @@ async function exportOpenCodeSession(id: string, cwd: string): Promise<NativeSes
     agent: 'opencode', id, storeDir: '.pane', exported: true,
     files: [{ absolute, home: `.pane/handoffs/opencode-${id}.json`, bytes: Buffer.byteLength(text) }],
   };
+}
+
+/** The JSON in `opencode export`'s output: a progress line can come first. */
+function exportJson(output: string): string {
+  const start = output.indexOf('{');
+  return start >= 0 ? output.slice(start) : output;
+}
+
+/**
+ * How many messages another copy of an OpenCode session (`opencode export` output) has that this
+ * export lacks: more than none means that copy was continued after this one was taken. A copy
+ * runpane can't read counts as all of its messages missing, since nothing in it can be matched.
+ */
+export function openCodeMessagesMissing(exported: string, other: string): number {
+  const ids = (text: string): string[] | undefined => {
+    try {
+      return decodeBoundary(JSON.parse(exportJson(text)), openCodeExportSchema).messages.map((message, index) => message.info.id ?? `#${index}`);
+    } catch {
+      return undefined;
+    }
+  };
+  const ours = new Set(ids(exported) ?? []);
+  const theirs = ids(other);
+  if (!theirs) return Number.POSITIVE_INFINITY;
+  return theirs.filter(id => !ours.has(id)).length;
 }
 
 function openCodeLastMessage(text: string): string | undefined {
@@ -281,7 +305,7 @@ interface FileStamp {
   sha256: string;
 }
 
-function sha256(content: Buffer): string {
+export function sha256(content: Buffer): string {
   return createHash('sha256').update(content).digest('hex');
 }
 
@@ -307,31 +331,42 @@ export async function snapshotOriginal(session: NativeSession, cwd: string): Pro
   return snapshot;
 }
 
+/** How the original compares with its snapshot. */
+export interface OriginalComparison {
+  /** Files whose earlier content changed, files new in a Cursor chat folder, or the session's export. */
+  changed: string[];
+  /** Files that only grew: everything they held at the snapshot is still there, byte for byte. */
+  appended: string[];
+}
+
 /**
- * What changed in the original since the snapshot: files whose size or time changed, files new in
- * a Cursor chat folder, or the session's export. With `appendOnly`, a file may have grown, as long
- * as everything it held at the snapshot is unchanged: the sender is the running agent, so its own
- * turn (the one running this handoff) keeps writing to its transcript.
+ * What happened to the original since the snapshot. Any change to a file fails, unless
+ * `appendOnly`: the sender is the running agent, so its own turn (the one running this handoff)
+ * keeps appending to its transcript. Then a file may grow, as long as every byte it held at the
+ * snapshot is unchanged; it is reported in `appended`, not `changed`.
  */
-export async function originalChanges(snapshot: OriginalSnapshot, options: { appendOnly?: boolean } = {}): Promise<string[]> {
+export async function originalChanges(snapshot: OriginalSnapshot, options: { appendOnly?: boolean } = {}): Promise<OriginalComparison> {
   if (snapshot.kind === 'export') {
-    return (await openCodeExport(snapshot.id, snapshot.cwd)) === snapshot.text ? [] : [`OpenCode session ${snapshot.id}`];
+    const same = (await openCodeExport(snapshot.id, snapshot.cwd)) === snapshot.text;
+    return { changed: same ? [] : [`OpenCode session ${snapshot.id}`], appended: [] };
   }
-  const changed = snapshot.stamps.filter(stamp => {
+  const changed: string[] = [];
+  const appended: string[] = [];
+  for (const stamp of snapshot.stamps) {
+    let content: Buffer;
     try {
-      if (options.appendOnly) {
-        const content = fs.readFileSync(stamp.absolute);
-        return content.length < stamp.bytes || sha256(content.subarray(0, stamp.bytes)) !== stamp.sha256;
-      }
-      const stat = fs.statSync(stamp.absolute);
-      return stat.size !== stamp.bytes || stat.mtimeMs !== stamp.modifiedMs;
+      content = fs.readFileSync(stamp.absolute);
     } catch {
-      return true;
+      changed.push(stamp.absolute);
+      continue;
     }
-  }).map(stamp => stamp.absolute);
+    const kept = content.length >= stamp.bytes && sha256(content.subarray(0, stamp.bytes)) === stamp.sha256;
+    if (!kept) changed.push(stamp.absolute);
+    else if (content.length > stamp.bytes) (options.appendOnly ? appended : changed).push(stamp.absolute);
+  }
   const before = new Set(snapshot.listing ?? []);
-  const added = snapshot.folder ? filesUnder(snapshot.folder).filter(file => !before.has(file)) : [];
-  return [...changed, ...added];
+  if (snapshot.folder) changed.push(...filesUnder(snapshot.folder).filter(file => !before.has(file)));
+  return { changed, appended };
 }
 
 function run(command: string, args: string[], cwd: string, timeoutMs: number): Promise<{ code: number | null; stdout: string; stderr: string }> {
@@ -358,7 +393,8 @@ function failure(what: string, result: { code: number | null; stdout: string; st
 /**
  * A new session with its own id holding a copy of this one's history, made with the agent's own
  * fork so the original is never written. Each fork runs one short turn of its own (never in the
- * original). Cursor has no fork command, so its chat folder is copied under a new id, best effort.
+ * original), and a fork whose command fails is not used. Cursor has no fork command; see
+ * CURSOR_NO_FORK.
  */
 const FORK_PROMPT = 'This conversation was forked for a handoff. Reply with one word: forked.';
 
@@ -374,6 +410,8 @@ export async function forkNativeSession(session: NativeSession, cwd: string, env
     // A fork with no turn of its own can lead Codex back to the original when it is opened, which
     // then writes to the original's file, so the fork carries one short turn.
     const result = await run('codex', ['exec', 'fork', session.id, FORK_PROMPT, '--json'], cwd, 300_000);
+    // The id arrives before the fork's turn runs: a failed turn leaves a fork without its own turn.
+    if (result.code !== 0) throw failure(`codex exec fork ${session.id}`, result);
     // `--json` prints one event per line; the fork's id arrives as `thread.started`'s thread_id.
     const started = result.stdout.split('\n')
       .map(line => decodeLine(line, boundary.object({ thread_id: boundary.string }))?.thread_id)
@@ -384,14 +422,18 @@ export async function forkNativeSession(session: NativeSession, cwd: string, env
   if (session.agent === 'opencode') {
     // `--format json` prints one event per line, each naming the session it belongs to: the fork.
     const result = await run('opencode', ['run', '--session', session.id, '--fork', '--format', 'json', FORK_PROMPT], cwd, 300_000);
+    if (result.code !== 0) throw failure(`opencode run --session ${session.id} --fork`, result);
     const forked = result.stdout.split('\n')
       .map(line => decodeLine(line, boundary.object({ sessionID: boundary.string }))?.sessionID)
       .find(id => id !== undefined && id !== session.id);
     if (!forked) throw failure(`opencode run --session ${session.id} --fork`, result);
     return forked;
   }
-  if (!session.folder) throw new Error(`Cursor chat ${session.id} has no folder to copy.`);
-  const forkId = randomUUID();
-  fs.cpSync(session.folder, path.join(path.dirname(session.folder), forkId), { recursive: true, errorOnExist: true });
-  return forkId;
+  throw new Error(CURSOR_NO_FORK);
 }
+
+/**
+ * Why a Cursor session can't be continued by a second agent on the same machine: a copy of its
+ * chat folder under a new id still writes to the original chat once it is used (QA saw it).
+ */
+export const CURSOR_NO_FORK = 'Cursor has no fork command, and a copied Cursor chat still writes to the original chat once it is used, so a second Cursor agent on this machine can\'t continue your session without changing it';

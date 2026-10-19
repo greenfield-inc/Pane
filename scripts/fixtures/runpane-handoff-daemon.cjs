@@ -23,7 +23,12 @@ const server = net.createServer(socket => {
       }
       fs.appendFileSync(config.log, JSON.stringify({ ...frame, paneDir: config.paneDir }) + '\n');
       let result;
-      if (frame.channel === 'runpane:repos:list') {
+      if (frame.channel === 'runpane:doctor') {
+        // A Pane from before resume-on-create has no features; config.features: null stands in for it.
+        const daemon = { channels: [] }; if (config.features !== null) daemon.features = config.features ?? ['resume-on-create'];
+        result = { ok: true, app: { version: 'fixture' }, daemon };
+      }
+      else if (frame.channel === 'runpane:repos:list') {
         if (config.reposError) {
           socket.write(JSON.stringify({ type: 'response', id: frame.id, ok: false, error: config.reposError }) + '\n');
           continue;

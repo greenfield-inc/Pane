@@ -40,12 +40,21 @@ async function answer(channel, args) {
     case 'runpane:machine:exec':
       return exec(args[0].command, args[0].timeoutMs);
     case 'runpane:machine:write': {
+      // config.failWrite: a write to a path containing it fails, as a dropped connection would.
+      if (config.failWrite && args[0].path.includes(config.failWrite)) throw new Error(`Injected write failure for ${args[0].path}`);
       const target = resolveHome(args[0].path);
       const bytes = Buffer.from(args[0].content, args[0].encoding ?? 'utf8');
       fs.mkdirSync(path.dirname(target), { recursive: true });
       fs.writeFileSync(target, bytes);
       return { path: target, bytes: bytes.length };
     }
+    case 'runpane:doctor': {
+      const daemon = { channels: [] }; if (config.features !== null) daemon.features = config.features ?? ['resume-on-create'];
+      return { ok: true, app: { version: 'fixture' }, daemon };
+    }
+    case 'runpane:panes:list':
+      // config.running: a Pane there whose tab is running the given session.
+      return { ok: true, panes: config.running ? [{ id: 'busy-pane', paneId: 'busy-pane', name: 'busy', status: 'running', agentStatus: 'idle', worktreePath: config.repoPath, repoId: 7, panelCount: 1, pinned: false, ownership: 'pane' }] : [] };
     case 'runpane:repos:list':
       return { ok: true, repos: [repo] };
     case 'runpane:panes:create': {
@@ -56,12 +65,16 @@ async function answer(channel, args) {
         readiness: ready }] };
     }
     case 'runpane:panels:list':
+      if (args[0].paneId === 'busy-pane') {
+        return { ok: true, paneId: 'busy-pane', panels: [{ id: 'busy-tab', panelId: 'busy-tab', paneId: 'busy-pane', type: 'terminal', title: 'busy', active: false, running: true, agentType: config.agent, resumeId: config.running, resumeSource: 'agent' }] };
+      }
       return { ok: true, paneId: args[0].paneId, panels: [{ id: 'remote-tab', panelId: 'remote-tab', paneId: args[0].paneId, type: 'terminal',
         title: 'receiver', active: false, agentType: config.agent, resumeId: receiverResume, resumeSource: 'agent' }] };
     case 'runpane:panels:screen':
       return { ok: true, panelId: args[0].panelId, source: 'scrollback', limit: 400, returnedLineCount: 1, hasMore: false,
         text: config.screenText ?? '', state: { initialized: true }, composer: { isPresent: true, hasUndeliveredText: false } };
     case 'runpane:panels:submit':
+      if (config.submitError) throw new Error('Injected connection reset');
       return { ok: true, panelId: args[0].panelId, inputBytes: args[0].input.length, enter: 'cr', sequenceName: 'enter-cr',
         verifiedSubmitted: true, delivery: { state: 'taken', evidence: 'transcript' }, sentAt: new Date().toISOString() };
     default:

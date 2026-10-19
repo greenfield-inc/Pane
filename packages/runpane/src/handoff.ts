@@ -6,7 +6,7 @@ import { boundary, decodeBoundary, type BoundarySchema } from './boundaryDecoder
 import type { ParsedArgs, RunpaneAgent } from './commands';
 import { PaneDaemonClientError, resolvePaneDirectory, invokeDaemon, invokeRemoteDaemon } from './daemonClient';
 import { buildPaneCreateRequest, buildPanelCreateRequest, paneCreateResultSchema, panelCreateResultSchema, paneListResultSchema, panelListResultSchema, panelScreenResultSchema, panelSubmitResultSchema, repoListResultSchema, runpaneSessionListResultSchema, runpaneSessionResultSchema } from './localControl';
-import { forkNativeSession, isNativeAgent, lastMessageSnippet, locateNativeSession, originalChanges, screenShows, snapshotOriginal, type NativeAgent, type NativeSession, type OriginalSnapshot } from './nativeSession';
+import { CURSOR_NO_FORK, forkNativeSession, isNativeAgent, lastMessageSnippet, locateNativeSession, openCodeMessagesMissing, originalChanges, screenShows, sha256, snapshotOriginal, type NativeAgent, type NativeSession, type OriginalSnapshot } from './nativeSession';
 import { RunpaneError } from './errors';
 import { RUNPANE_CONTRACT } from './generated/contract';
 import { readTailnet, resolveMachine, workspaceTarget, type TailnetMachine } from './workspace';
@@ -360,7 +360,8 @@ function localDestination(name: string, paneDir?: string): Destination {
 
 function quote(value: string, shell: string): string {
   if (/^[\w./:@=+-]+$/.test(value)) return value;
-  return /(?:powershell|pwsh)(?:\.exe)?$/i.test(shell) ? `'${value.replace(/'/g, "''")}'` : `'${value.replace(/'/g, `'\\''`)}'`;
+  // PowerShell also ends a single-quoted string at a typographic single quote.
+  return /(?:powershell|pwsh)(?:\.exe)?$/i.test(shell) ? `'${value.replace(/['\u2018\u2019\u201A\u201B]/g, '$&$&')}'` : `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
 async function mustRun(destination: Destination, command: string[], what: string, timeoutMs?: number): Promise<string> {
@@ -469,8 +470,14 @@ export interface ContinuityReport {
     restartResumes: boolean;
     /** The receiver's screen showed the copy's last message; null when there was nothing to compare. */
     historyLoaded: boolean | null;
-    /** Forks only: the sender's session files did not change. */
+    /**
+     * Forks only: everything the sender's session held before the fork is unchanged, byte for byte,
+     * and nothing else changed it. When `originalAppended` is set, the sender's transcript also grew:
+     * the sender is the running agent, and its own current turn appended to it.
+     */
     originalUntouched?: boolean;
+    /** Forks only: the running sender's own turn appended to its transcript during the handoff. */
+    originalAppended?: true;
   };
   reason: string;
   next?: string;
@@ -583,6 +590,7 @@ const WRITE_CHUNK_BYTES = 8 * 1024 * 1024;
 /**
  * Where the session's main file already is in the destination's store, as a path under home,
  * so a session handed back and forth is replaced in place and its id never has two copies.
+ * Two copies there is an error: runpane can't tell which one the agent resumes.
  */
 async function existingCopy(destination: Destination, session: NativeSession): Promise<string | undefined> {
   const name = path.posix.basename(session.files[0].home);
@@ -592,7 +600,10 @@ async function existingCopy(destination: Destination, session: NativeSession): P
       `Get-ChildItem -Recurse -File -Path '${store}' -Filter '${name}' -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }`], 60_000)
     : await destination.run(['find', store, '-name', name, '-type', 'f'], 60_000);
   const found = result.stdout.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
-  if (found.length !== 1) return undefined;
+  if (found.length > 1) {
+    throw new Error(`${destination.name} has ${found.length} copies of ${session.agent} session ${session.id} (${found.join(', ')}), so runpane can't tell which one ${session.agent} resumes there. Nothing was copied. Remove the stale copy on ${destination.name}, then run the handoff again`);
+  }
+  if (found.length === 0) return undefined;
   const normalized = found[0].replace(/\\/g, '/').replace(/^\.\//, '');
   if (normalized.startsWith(`${store}/`)) return normalized;
   const index = normalized.indexOf(`/${store}/`);
@@ -600,49 +611,175 @@ async function existingCopy(destination: Destination, session: NativeSession): P
 }
 
 function quoted(value: string, windows: boolean): string {
-  return windows ? `'${value.replace(/'/g, "''")}'` : `'${value.replace(/'/g, `'\\''`)}'`;
+  // PowerShell also ends a single-quoted string at a typographic single quote.
+  return windows ? `'${value.replace(/['‘’‚‛]/g, '$&$&')}'` : `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+interface FileDigest {
+  bytes: number;
+  sha256: string;
+}
+
+/** Size and sha256 of each file on the destination (paths under home), by index; missing files are left out. */
+async function destinationDigests(destination: Destination, files: string[]): Promise<Map<number, FileDigest>> {
+  const windows = destination.os === 'Windows';
+  const list = files.map(file => quoted(file, windows));
+  // No double quotes in the PowerShell: Windows PowerShell mangles them in a nested -Command.
+  const script = windows
+    ? `$i=0; foreach ($p in @(${list.join(',')})) { if (Test-Path -LiteralPath $p -PathType Leaf) { ($i, (Get-Item -LiteralPath $p).Length, (Get-FileHash -Algorithm SHA256 -LiteralPath $p).Hash.ToLower()) -join ' ' }; $i++ }`
+    : `i=0; for p in ${list.join(' ')}; do if [ -f "$p" ]; then printf '%s %s %s\\n' "$i" "$(wc -c < "$p" | tr -d ' ')" "$( (sha256sum "$p" 2>/dev/null || shasum -a 256 "$p") | cut -d ' ' -f 1)"; fi; i=$((i+1)); done`;
+  const output = await mustRun(destination, windows ? ['powershell', '-NoProfile', '-Command', script] : ['sh', '-c', script], 'Reading the session files there', 300_000);
+  const digests = new Map<number, FileDigest>();
+  for (const line of output.split(/\r?\n/)) {
+    const match = /^(\d+) (\d+) ([0-9a-f]{64})$/.exec(line.trim());
+    if (match) digests.set(Number(match[1]), { bytes: Number(match[2]), sha256: match[3] });
+  }
+  return digests;
+}
+
+/** A session file on its way into the destination's store; every path is under home. */
+interface Placement {
+  bytes: Buffer;
+  /** Where the file goes. */
+  target: string;
+  /** Where it is written first, beside the target. */
+  staged: string;
+  /** Where the destination's previous copy waits until every file is in place. */
+  previous: string;
 }
 
 /**
  * Copies the session's files into the destination agent's store; returns the main file's path
- * there. An OpenCode session goes in as its export, imported into OpenCode's database from inside
- * `repoPath`, so OpenCode files it under that repository.
+ * there. A copy already there (from an earlier handoff) is replaced only when this machine's copy
+ * holds everything it does and no agent there is running it: history continued on the destination
+ * is never overwritten. Every file is written beside its target and checked before any is swapped
+ * in, and a failed swap puts the previous copy back. An OpenCode session goes in as its export,
+ * imported into OpenCode's database from inside `repoPath`, so OpenCode files it under that repository.
  */
 async function placeSession(destination: Destination, session: NativeSession, repoPath: string): Promise<string> {
-  if (session.exported) {
-    const written = await destination.write(`~/${session.files[0].home}`, fs.readFileSync(session.files[0].absolute).toString('base64'), 'base64');
-    const windows = destination.os === 'Windows';
-    await mustRun(destination, windows
-      ? ['powershell', '-NoProfile', '-Command', `Set-Location -LiteralPath ${quoted(repoPath, true)}; opencode import ${quoted(written, true)}`]
-      : ['sh', '-c', `cd ${quoted(repoPath, false)} && opencode import ${quoted(written, false)}`], `opencode import of session ${session.id}`, 300_000);
-    return `OpenCode's store, from ${written}`;
-  }
+  if (session.exported) return importOpenCodeSession(destination, session, repoPath);
+  const windows = destination.os === 'Windows';
   const existing = await existingCopy(destination, session);
   const mainDir = path.posix.dirname(session.files[0].home);
   const targetDir = existing ? path.posix.dirname(existing) : mainDir;
-  const windows = destination.os === 'Windows';
-  let mainPath = '';
-  for (const file of session.files) {
-    const home = targetDir + file.home.slice(mainDir.length);
-    const bytes = fs.readFileSync(file.absolute);
-    let written: string;
-    if (bytes.length <= WRITE_CHUNK_BYTES) {
-      written = await destination.write(`~/${home}`, bytes.toString('base64'), 'base64');
-    } else {
-      const parts: string[] = [];
-      for (let offset = 0, index = 0; offset < bytes.length; offset += WRITE_CHUNK_BYTES, index += 1) {
-        parts.push(await destination.write(`~/${home}.part${index}`, bytes.subarray(offset, offset + WRITE_CHUNK_BYTES).toString('base64'), 'base64'));
-      }
-      written = parts[0].replace(/\.part0$/, '');
-      const list = parts.map(part => quoted(part, windows));
-      const join = windows
-        ? ['powershell', '-NoProfile', '-Command', `$out = [IO.File]::Create(${quoted(written, true)}); foreach ($p in @(${list.join(',')})) { $b = [IO.File]::ReadAllBytes($p); $out.Write($b, 0, $b.Length) }; $out.Close(); Remove-Item ${list.join(',')}`]
-        : ['sh', '-c', `cat ${list.join(' ')} > ${quoted(written, false)} && rm ${list.join(' ')}`];
-      await mustRun(destination, join, `Joining ${path.posix.basename(home)}`, 300_000);
+  const tag = `handoff-${randomUUID().slice(0, 8)}`;
+  const placements: Placement[] = session.files.map(file => {
+    const target = targetDir + file.home.slice(mainDir.length);
+    return { bytes: fs.readFileSync(file.absolute), target, staged: `${target}.${tag}`, previous: `${target}.${tag}.previous` };
+  });
+
+  if (existing) {
+    const there = await destinationDigests(destination, placements.map(placement => placement.target));
+    const diverged = placements.filter((placement, index) => {
+      const digest = there.get(index);
+      return digest !== undefined && (digest.bytes > placement.bytes.length || sha256(placement.bytes.subarray(0, digest.bytes)) !== digest.sha256);
+    });
+    if (diverged.length) {
+      throw new Error(`${destination.name}'s copy of ${session.agent} session ${session.id} has history this machine's copy doesn't (${diverged.map(placement => placement.target).join(', ')}): it was continued there after an earlier handoff. Nothing was copied, so that history is kept. Continue it on ${destination.name}, or hand it off from there back to here`);
     }
-    if (file === session.files[0]) mainPath = written;
+    const running = await runningReceivers(destination, session);
+    if (running.length) {
+      throw new Error(`${session.agent} session ${session.id} is open on ${destination.name} (${running.join(', ')}), and replacing its files under a running agent would mix two conversations. Nothing was copied. Close it there first, then run the handoff again`);
+    }
   }
+
+  const written: string[] = [];
+  let mainPath = '';
+  try {
+    for (const placement of placements) {
+      let staged: string;
+      if (placement.bytes.length <= WRITE_CHUNK_BYTES) {
+        staged = await destination.write(`~/${placement.staged}`, placement.bytes.toString('base64'), 'base64');
+        written.push(staged);
+      } else {
+        const parts: string[] = [];
+        for (let offset = 0, index = 0; offset < placement.bytes.length; offset += WRITE_CHUNK_BYTES, index += 1) {
+          const part = await destination.write(`~/${placement.staged}.part${index}`, placement.bytes.subarray(offset, offset + WRITE_CHUNK_BYTES).toString('base64'), 'base64');
+          parts.push(part);
+          written.push(part);
+        }
+        staged = parts[0].replace(/\.part0$/, '');
+        written.push(staged);
+        const list = parts.map(part => quoted(part, windows));
+        const join = windows
+          ? ['powershell', '-NoProfile', '-Command', `$out = [IO.File]::Create(${quoted(staged, true)}); foreach ($p in @(${list.join(',')})) { $b = [IO.File]::ReadAllBytes($p); $out.Write($b, 0, $b.Length) }; $out.Close(); Remove-Item ${list.join(',')}`]
+          : ['sh', '-c', `cat ${list.join(' ')} > ${quoted(staged, false)} && rm ${list.join(' ')}`];
+        await mustRun(destination, join, `Joining ${path.posix.basename(placement.target)}`, 300_000);
+      }
+      if (placement === placements[0]) mainPath = staged.slice(0, -(tag.length + 1));
+    }
+    const staged = await destinationDigests(destination, placements.map(placement => placement.staged));
+    const damaged = placements.filter((placement, index) => staged.get(index)?.sha256 !== sha256(placement.bytes));
+    if (damaged.length) throw new Error(`The copies of ${damaged.map(placement => path.posix.basename(placement.target)).join(', ')} written to ${destination.name} don't match this machine's`);
+  } catch (error) {
+    const list = written.map(file => quoted(file, windows));
+    if (list.length) {
+      await destination.run(windows
+        ? ['powershell', '-NoProfile', '-Command', `Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath ${list.join(',')}`]
+        : ['sh', '-c', `rm -f ${list.join(' ')}`]).catch(() => undefined);
+    }
+    throw new Error(`${error instanceof Error ? error.message : String(error)}. Nothing in ${destination.name}'s ${session.agent} store was changed`, { cause: error });
+  }
+  await mustRun(destination, swapScript(placements, windows), 'Putting the session files in place (any previous copy was put back)', 300_000);
   return mainPath;
+}
+
+/**
+ * Moves each staged file over its target in one script, keeping the target's previous copy until
+ * all are in place. If any move fails, every target gets its previous copy back (or is removed if
+ * it had none) and the staged files are deleted, so the store holds the old session or the new one.
+ */
+function swapScript(placements: Placement[], windows: boolean): string[] {
+  const q = (value: string): string => quoted(value, windows);
+  if (windows) {
+    const list = placements.map(placement => `$p += ,@(${q(placement.staged)}, ${q(placement.target)}, ${q(placement.previous)})`).join('; ');
+    return ['powershell', '-NoProfile', '-Command', [
+      `$ErrorActionPreference = 'Stop'; $p = @(); ${list}`,
+      'function Undo { foreach ($x in $p) { if (Test-Path -LiteralPath $x[2]) { Move-Item -Force -LiteralPath $x[2] -Destination $x[1] } elseif (-not (Test-Path -LiteralPath $x[0])) { Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath $x[1] }; Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath $x[0] } }',
+      'try { foreach ($x in $p) { if (Test-Path -LiteralPath $x[1]) { Move-Item -LiteralPath $x[1] -Destination $x[2] }; Move-Item -LiteralPath $x[0] -Destination $x[1] } } catch { Undo; throw }',
+      'foreach ($x in $p) { Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath $x[2] }',
+      // -Command exits 1 when its last statement failed, even silently (no previous copy to remove).
+      'exit 0',
+    ].join('; ')];
+  }
+  const undo = placements.map(({ staged, target, previous }) =>
+    `if [ -e ${q(previous)} ]; then mv -f ${q(previous)} ${q(target)}; elif [ ! -e ${q(staged)} ]; then rm -f ${q(target)}; fi; rm -f ${q(staged)}`).join('; ');
+  const moves = placements.map(({ staged, target, previous }) =>
+    `if [ -e ${q(target)} ]; then mv -f ${q(target)} ${q(previous)} || { undo; exit 1; }; fi; mv -f ${q(staged)} ${q(target)} || { undo; exit 1; }`);
+  return ['sh', '-c', [`undo() { ${undo}; }`, ...moves, `rm -f ${placements.map(placement => q(placement.previous)).join(' ')}`].join('\n')];
+}
+
+/** Panels on the destination running this session, as "Pane <id> tab <id>". */
+async function runningReceivers(destination: Destination, session: NativeSession): Promise<string[]> {
+  const { panes } = await destination.invoke('runpane:panes:list', [{}], paneListResultSchema);
+  const running: string[] = [];
+  for (const pane of panes) {
+    const { panels } = await destination.invoke('runpane:panels:list', [{ paneId: pane.id }], panelListResultSchema);
+    for (const panel of panels) {
+      if (panel.running && panel.resumeId === session.id && panel.agentType === session.agent) running.push(`Pane ${pane.id} tab ${panel.id}`);
+    }
+  }
+  return running;
+}
+
+/**
+ * An OpenCode session goes in with `opencode import`. A session already there is replaced only
+ * when this export holds every message it does.
+ */
+async function importOpenCodeSession(destination: Destination, session: NativeSession, repoPath: string): Promise<string> {
+  const windows = destination.os === 'Windows';
+  const inRepo = (command: string): string[] => windows
+    ? ['powershell', '-NoProfile', '-Command', `Set-Location -LiteralPath ${quoted(repoPath, true)}; ${command}`]
+    : ['sh', '-c', `cd ${quoted(repoPath, false)} && ${command}`];
+  const exported = fs.readFileSync(session.files[0].absolute, 'utf8');
+  const there = await destination.run(inRepo(`opencode export ${quoted(session.id, windows)}`), 120_000);
+  const missing = there.exitCode === 0 ? openCodeMessagesMissing(exported, there.stdout) : 0;
+  if (missing) {
+    throw new Error(`${destination.name}'s copy of OpenCode session ${session.id} has ${missing} message${missing === 1 ? '' : 's'} this machine's copy doesn't: it was continued there after an earlier handoff. Nothing was imported, so that history is kept. Continue it on ${destination.name}, or hand it off from there back to here`);
+  }
+  const written = await destination.write(`~/${session.files[0].home}`, Buffer.from(exported).toString('base64'), 'base64');
+  await mustRun(destination, inRepo(`opencode import ${quoted(written, windows)}`), `opencode import of session ${session.id}`, 300_000);
+  return `OpenCode's store, from ${written}`;
 }
 
 const PROBE = 'What were you last working on? Answer in one or two sentences.';
@@ -670,8 +807,9 @@ async function checkReceiver(options: {
     historyLoaded = screenShows(screen.text, carry.snippet);
   }
   const checks: NonNullable<ContinuityReport['checks']> = { resumedById, restartResumes, historyLoaded };
-  const changed = original ? await originalChanges(original, { appendOnly: carry.live }) : [];
+  const { changed, appended } = original ? await originalChanges(original, { appendOnly: carry.live }) : { changed: [], appended: [] };
   if (original) checks.originalUntouched = changed.length === 0;
+  if (appended.length) checks.originalAppended = true;
   if (!resumedById || !restartResumes) {
     return { checks, result: 'not-continued', why: `Pane recorded ${panel?.resumeId ?? 'no id'} for the receiver, not ${resumedId}, so it is not resuming that session.` };
   }
@@ -690,21 +828,37 @@ async function checkReceiver(options: {
     };
   }
   if (!ready) return { checks, result: 'not-continued', why: 'The receiver did not reach its input box, so its history could not be checked.' };
-  const found: Pick<ContinuityReport, 'checks' | 'result'> & { why: string } = historyLoaded === true
-    ? { checks, result: 'continued', why: `The receiver shows the session's last message ("${carry.snippet}").` }
-    : {
-      checks,
-      result: 'inconclusive',
-      why: carry.snippet
-        ? `The receiver is ready but its screen does not show the session's last message ("${carry.snippet}"); it may be scrolled or compacted.`
-        : 'The receiver is ready, but this session\'s store is not text runpane can read, so its last message could not be compared.',
-    };
-  if (carry.session.folder && original) {
-    // Cursor has no fork command: the fork is a copied chat folder, and Cursor can still write to
-    // the original's folder once the fork is used, after this check has run.
-    return { checks, result: 'inconclusive', why: `${found.why} Cursor has no fork command, so runpane copied the chat, and Cursor may still write to the original chat once the fork is used. Best effort.` };
-  }
-  return found;
+  if (historyLoaded === true) return { checks, result: 'continued', why: `The receiver shows the session's last message ("${carry.snippet}").` };
+  return {
+    checks,
+    result: 'inconclusive',
+    why: carry.snippet
+      ? `The receiver is ready but its screen does not show the session's last message ("${carry.snippet}"); it may be scrolled or compacted.`
+      : 'The receiver is ready, but this session\'s store is not text runpane can read, so its last message could not be compared.',
+  };
+}
+
+/** What `runpane:doctor` says about the daemon's features; older Panes have none. */
+const doctorFeaturesSchema = boundary.object({
+  app: boundary.object({ version: boundary.string }),
+  daemon: boundary.object({ features: boundary.optional(boundary.array(boundary.string)) }),
+});
+
+/**
+ * The daemon feature (Pane's RUNPANE_DAEMON_FEATURES) that says panes, panels and sessions create
+ * honour `resume`. An older Pane drops the field it doesn't know and starts a fresh conversation,
+ * so a carried session must not be sent to it.
+ */
+const RESUME_ON_CREATE = 'resume-on-create';
+
+async function assertResumesOnCreate(invoke: Destination['invoke'], where: string): Promise<void> {
+  const doctor = await invoke('runpane:doctor', [], doctorFeaturesSchema);
+  if (doctor.daemon.features?.includes(RESUME_ON_CREATE)) return;
+  throw new RunpaneError(
+    'ERR_HANDOFF_RESUME_UNSUPPORTED',
+    `Pane ${doctor.app.version} on ${where} can't resume a carried session: it would start a fresh conversation and report it as yours. Nothing was committed, copied or created.`,
+    `Update Pane on ${where} (runpane install client), then run the handoff again. Or ask the person before handing off with only the note: add --note-only.`,
+  );
 }
 
 // ---------------------------------------------------------------- command
@@ -848,9 +1002,17 @@ export async function runHandoff(parsed: ParsedArgs): Promise<number> {
   }
   const continuity: ContinuityReport = carry ? describeCarry(carry, !target) : { carried: false, reason: 'fresh' in plan ? plan.fresh : '' };
   const noteOnlyCommand = `runpane handoff ${quote(text || describeDestination(destination, machineLabel), senderShell)} --note-file ${quote(parsed.handoffNoteFile ?? '<note>', senderShell)} --note-only`;
-  say(carry
+  // A second Cursor agent here would change the original chat (CURSOR_NO_FORK), so it is never
+  // started; the note route is the person's call, not a silent fallback.
+  const cursorHere = carry?.session.agent === 'cursor' && !target;
+  if (cursorHere) {
+    continuity.carried = false;
+    continuity.reason = `${CURSOR_NO_FORK}. Nothing was copied and no receiver was started.`;
+    continuity.next = `Ask the person before starting a fresh Cursor agent with the note instead: ${noteOnlyCommand}`;
+  }
+  say(carry && !cursorHere
     ? step('session', continuity.reason)
-    : step('session', `A fresh ${destination.agent} with your note, not the same session. ${continuity.reason}`, false));
+    : step('session', cursorHere ? continuity.reason : `A fresh ${destination.agent} with your note, not the same session. ${continuity.reason}`, false));
 
   const result: HandoffResult = {
     ok: true,
@@ -864,12 +1026,21 @@ export async function runHandoff(parsed: ParsedArgs): Promise<number> {
   };
   if (parsed.dryRun) {
     for (const warning of warnings) say(`  ! ${warning}`);
+    if (cursorHere) say(`Next: ${continuity.next}`);
     say('Dry run: nothing was sent.');
     if (parsed.json) console.log(JSON.stringify(result, null, 2));
     return 0;
   }
+  if (cursorHere) {
+    continuity.result = 'not-continued';
+    result.ok = false;
+    say(`Next: ${continuity.next}`);
+    if (parsed.json) console.log(JSON.stringify(result, null, 2));
+    return 1;
+  }
   if (!carry) continuity.result = 'fresh-agent';
   if (!state.pushed) throw new Error(`${warnings.join(' ')}\nThe receiver would start without your work, so nothing was sent.`);
+  if (carry) await assertResumesOnCreate(remote.invoke, remote.name);
   for (const warning of warnings) say(`  ! ${warning}`);
 
   await mustRun(remote, ['git', '-C', repo.path, 'fetch', repoRemote, state.branch], 'git fetch', 120_000);
@@ -962,16 +1133,22 @@ export async function runHandoff(parsed: ParsedArgs): Promise<number> {
     }
     const item = created.items[0];
     if (item?.ok && item.sessionId && item.setupQueue) {
-      // The receiver's prompt rides on the launch after setup, so delivery is not verified yet.
-      result.ok = false;
       result.pane = { id: item.sessionId, name: item.name, worktreePath: item.worktreePath };
-      if (resumedId) {
-        continuity.result = 'inconclusive';
-        continuity.reason = `Pane ${item.sessionId} is queued for setup; its agent resumes ${resumedId} after setup, so the continuity check has not run.`;
-        continuity.next = `After setup, check the receiver with ${receiverStatus(item.sessionId)} and, if its history is unclear, ask it: "${PROBE}"`;
-      }
       warnings.push(`Pane ${item.sessionId} was created and is queued for setup (${item.setupQueue.message}). The receiver starts after setup${resumedId ? ', resuming the session' : ' with the note'}; ${resumedId ? 'it is not checked' : 'its prompt is not verified'} yet, so do not retry. Check on it after setup: ${receiverStatus(item.sessionId)}`);
       for (const warning of warnings) say(`  ! ${warning}`);
+      if (resumedId) {
+        // The carry itself succeeded; only the check waits for setup, which is what inconclusive (exit 0) means.
+        continuity.result = 'inconclusive';
+        continuity.reason = `Pane ${item.sessionId} is queued for setup; its agent resumes ${resumedId} after setup, so the continuity check has not run.`;
+        continuity.next = `After setup, check the receiver with ${receiverStatus(item.sessionId)} and, if its history is unclear, ask it: "${PROBE}". Then send it: ${receiverMessage(remote.name, item.worktreePath, notePath, true)}`;
+        say(step('queued', continuity.reason, false));
+        say(`Next: ${continuity.next}`);
+        say(`Your session continues there after setup. End your turn now and make no more changes on ${state.branch}.`);
+        if (parsed.json) console.log(JSON.stringify(result, null, 2));
+        return 0;
+      }
+      // The receiver's prompt rides on the launch after setup, so delivery is not verified yet.
+      result.ok = false;
       if (parsed.json) console.log(JSON.stringify(result, null, 2));
       return 1;
     }
@@ -1011,6 +1188,14 @@ export async function runHandoff(parsed: ParsedArgs): Promise<number> {
   return 0;
 }
 
+/**
+ * The first message a receiver that resumed the sender's session gets, after the check: where it
+ * now runs when the folder or machine changed, and where the sender's note is.
+ */
+function receiverMessage(machine: string, movedTo: string | undefined, notePath: string, moved: boolean): string {
+  return `${moved ? `This session moved to ${movedTo ?? 'a new worktree'} on ${machine}.` : 'This session was handed off to this tab.'} Continue from where you were. The sender's handoff note is at ${notePath}; follow its "Receiver instructions" to report back.`;
+}
+
 interface CarriedReport {
   parsed: ParsedArgs;
   result: HandoffResult;
@@ -1043,15 +1228,20 @@ async function reportCarried(report: CarriedReport): Promise<number> {
   continuity.reason = carry.note ? `${checked.why} ${carry.note}` : checked.why;
   const where = receiver.newTab ? `a new tab in Pane ${receiver.paneId}` : `Pane ${receiver.paneId} on ${destination.name}${receiver.worktreePath ? ` (${receiver.worktreePath})` : ''}`;
   const moved = target || !receiver.newTab;
-  const movedMessage = `This session moved to ${receiver.worktreePath ?? 'a new worktree'} on ${destination.name}. Continue from where you were. The sender's handoff note is at ${report.notePath}; follow its "Receiver instructions" to report back.`;
+  // The receiver started without a prompt, so it learns of the handoff (and its note) only from this.
+  const message = receiverMessage(destination.name, moved ? receiver.worktreePath ?? 'a new worktree' : undefined, report.notePath, moved);
   if (checked.result === 'continued') {
-    if (moved) {
-      const sent = await destination.invoke('runpane:panels:submit', [{ panelId: receiver.panelId, input: movedMessage, source: 'agent' }], panelSubmitResultSchema);
-      if (!sent.ok) result.warnings.push(`The "moved" message was not verified on panel ${receiver.panelId}. Send it yourself: ${report.submit(receiver.panelId)} with: ${movedMessage}`);
+    const manual = `Send it yourself: ${report.submit(receiver.panelId)} with: ${message}`;
+    try {
+      const sent = await destination.invoke('runpane:panels:submit', [{ panelId: receiver.panelId, input: message, source: 'agent' }], panelSubmitResultSchema);
+      if (!sent.ok) result.warnings.push(`The message telling the receiver to continue was not delivered to panel ${receiver.panelId}. ${manual}`);
+    } catch (error) {
+      // The check passed and the receiver is kept; only this message's delivery is unknown.
+      result.warnings.push(`Sending the receiver its message to continue failed (${error instanceof Error ? error.message : String(error)}), so it may or may not have arrived. Look at the receiver first: ${report.inspect}. If the message isn't there, ${manual.charAt(0).toLowerCase()}${manual.slice(1)}`);
     }
     say(step('continued', `${carry.session.agent} session ${resumedId}${continuity.fork ? ` (a fork of ${carry.session.id})` : ''} in ${where}. ${checked.why}`));
   } else if (checked.result === 'inconclusive') {
-    continuity.next = `${checked.next ?? `Ask the receiver "${PROBE}" with ${report.submit(receiver.panelId)}, and compare its answer with your own last work.`} If it matches, ${moved ? `send it: ${movedMessage}` : 'it continues your session'}; if not, tell the person it is not continued.`;
+    continuity.next = `${checked.next ?? `Ask the receiver "${PROBE}" with ${report.submit(receiver.panelId)}, and compare its answer with your own last work.`} If it matches, send it: ${message}; if not, tell the person it is not continued.`;
     say(step('unclear', `${where}. ${checked.why}`, false));
     say(`Next: ${continuity.next}`);
   } else {
@@ -1127,6 +1317,7 @@ async function handOffSession({ parsed, sessionId, destination, machines, self, 
     return 0;
   }
 
+  if (carry) await assertResumesOnCreate((channel, args, schema) => invokeRemoteDaemon(remote, channel, args, schema), target.name);
   const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..*/, '').replace('T', '-');
   const slug = `handoff-${source.name}`.toLowerCase().replace(/[^a-z0-9-]+/g, '-').slice(0, 48).replace(/-+$/, '');
   const stamped = stampNote(noteText ?? '', origin, sessionReceiverInstructions(origin, source.name, target.name, carry !== undefined));
@@ -1178,6 +1369,20 @@ async function handOffSession({ parsed, sessionId, destination, machines, self, 
   result.reportBack = origin.originPanel ? `${self} panel ${origin.originPanel}` : undefined;
   say(step('created', `Session "${created.session.name}" on ${target.name}`));
   if (carry) {
+    // The Session's tab must already record the carried id, or opening it starts a fresh conversation.
+    const recorded = await sessionResumeId(remote, created);
+    if (recorded !== continuity.resumedId) {
+      continuity.result = 'not-continued';
+      continuity.checks = { resumedById: false, restartResumes: false, historyLoaded: null };
+      continuity.reason = `Session "${created.session.name}" on ${target.name} records ${recorded ?? 'no conversation'} for its agent, not ${continuity.resumedId}, so opening it would not continue your conversation.`;
+      continuity.next = `The Session is kept on ${target.name}; look at it before archiving it. Ask the person before moving the Session with only the note instead: runpane handoff ${quote(parsed.handoffDestination ?? `${destination.agent} on ${target.name}`, 'sh')} --note-file <note> --note-only`;
+      result.ok = false;
+      say(step('not continued', continuity.reason, false));
+      say(`Next: ${continuity.next}`);
+      if (parsed.json) console.log(JSON.stringify(result, null, 2));
+      return 1;
+    }
+    continuity.checks = { resumedById: true, restartResumes: true, historyLoaded: null };
     // A Session's agent launches when the person opens it, so the history check runs then.
     continuity.result = 'inconclusive';
     continuity.reason = `"${created.session.name}" resumes ${carry.session.agent} session ${carry.session.id} when it is first opened; its history can only be checked then.`;
@@ -1190,6 +1395,13 @@ async function handOffSession({ parsed, sessionId, destination, machines, self, 
   }
   if (parsed.json) console.log(JSON.stringify(result, null, 2));
   return 0;
+}
+
+/** The conversation id a new Session's agent tab records, which it resumes when first opened. */
+async function sessionResumeId(remote: ReturnType<typeof workspaceTarget>, created: ReturnType<typeof runpaneSessionResultSchema.decode>): Promise<string | undefined> {
+  if (!created.internalSessionId || !created.panelId) return undefined;
+  const listed = await invokeRemoteDaemon(remote, 'runpane:panels:list', [{ paneId: created.internalSessionId }], panelListResultSchema);
+  return listed.panels.find(panel => panel.id === created.panelId || panel.panelId === created.panelId)?.resumeId;
 }
 
 /** Pane's numbering for a taken Session name: "<name> 2", "<name> 3", compared without case. */
