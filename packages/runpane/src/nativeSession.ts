@@ -312,10 +312,15 @@ export function sha256(content: Buffer): string {
 /** How the original looked before a fork, to prove the fork left it untouched (continuity check 4). */
 export type OriginalSnapshot =
   | { kind: 'files'; stamps: FileStamp[]; folder?: string; listing?: string[] }
-  | { kind: 'export'; id: string; cwd: string; text: string | undefined };
+  | { kind: 'export'; id: string; cwd: string; text: string };
 
 export async function snapshotOriginal(session: NativeSession, cwd: string): Promise<OriginalSnapshot> {
-  if (session.agent === 'opencode') return { kind: 'export', id: session.id, cwd, text: await openCodeExport(session.id, cwd) };
+  if (session.agent === 'opencode') {
+    // Without a readable export there is nothing to compare the original with afterwards.
+    const text = await openCodeExport(session.id, cwd);
+    if (text === undefined) throw new Error(`opencode export ${session.id} failed, so the original can't be checked after the fork`);
+    return { kind: 'export', id: session.id, cwd, text };
+  }
   const snapshot: OriginalSnapshot = {
     kind: 'files',
     stamps: session.files.map(file => {
@@ -363,6 +368,8 @@ export async function originalChanges(snapshot: OriginalSnapshot, options: { app
     const kept = content.length >= stamp.bytes && sha256(content.subarray(0, stamp.bytes)) === stamp.sha256;
     if (!kept) changed.push(stamp.absolute);
     else if (content.length > stamp.bytes) (options.appendOnly ? appended : changed).push(stamp.absolute);
+    // Same content but a new modification time: something rewrote or touched it, which check 4 doesn't allow.
+    else if (fs.statSync(stamp.absolute).mtimeMs !== stamp.modifiedMs) changed.push(stamp.absolute);
   }
   const before = new Set(snapshot.listing ?? []);
   if (snapshot.folder) changed.push(...filesUnder(snapshot.folder).filter(file => !before.has(file)));

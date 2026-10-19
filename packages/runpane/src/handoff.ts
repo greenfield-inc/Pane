@@ -684,10 +684,7 @@ async function placeSession(destination: Destination, session: NativeSession, re
     if (diverged.length) {
       throw new Error(`${destination.name}'s copy of ${session.agent} session ${session.id} has history this machine's copy doesn't (${diverged.map(placement => placement.target).join(', ')}): it was continued there after an earlier handoff. Nothing was copied, so that history is kept. Continue it on ${destination.name}, or hand it off from there back to here`);
     }
-    const running = await runningReceivers(destination, session);
-    if (running.length) {
-      throw new Error(`${session.agent} session ${session.id} is open on ${destination.name} (${running.join(', ')}), and replacing its files under a running agent would mix two conversations. Nothing was copied. Close it there first, then run the handoff again`);
-    }
+    await refuseRunningReceivers(destination, session, 'copied');
   }
 
   const written: string[] = [];
@@ -758,20 +755,38 @@ function swapScript(placements: Placement[], windows: boolean): string[] {
 
 /** Panels on the destination running this session, as "Pane <id> tab <id>". */
 async function runningReceivers(destination: Destination, session: NativeSession): Promise<string[]> {
+  // Panes list only Panes; a Session's agent tab lives in its hidden owner, so Sessions are listed too.
   const { panes } = await destination.invoke('runpane:panes:list', [{}], paneListResultSchema);
+  const { sessions } = await destination.invoke('runpane:sessions:list', [], runpaneSessionListResultSchema);
+  const owners = [
+    ...panes.map(pane => ({ id: pane.id, label: `Pane ${pane.id}` })),
+    ...sessions.map(record => ({ id: record.internalSessionId, label: `Session "${record.name}"` })),
+  ];
   const running: string[] = [];
-  for (const pane of panes) {
-    const { panels } = await destination.invoke('runpane:panels:list', [{ paneId: pane.id }], panelListResultSchema);
+  for (const owner of owners) {
+    const { panels } = await destination.invoke('runpane:panels:list', [{ paneId: owner.id }], panelListResultSchema);
     for (const panel of panels) {
-      if (panel.running && panel.resumeId === session.id && panel.agentType === session.agent) running.push(`Pane ${pane.id} tab ${panel.id}`);
+      if (panel.running && panel.resumeId === session.id && panel.agentType === session.agent) running.push(`${owner.label} tab ${panel.id}`);
     }
   }
   return running;
 }
 
+/** Stops the copy when an agent on the destination is running this session. */
+async function refuseRunningReceivers(destination: Destination, session: NativeSession, what: string): Promise<void> {
+  const running = await runningReceivers(destination, session);
+  if (running.length) {
+    throw new Error(`${session.agent} session ${session.id} is open on ${destination.name} (${running.join(', ')}), and replacing it under a running agent would mix two conversations. Nothing was ${what}. Close it there first, then run the handoff again`);
+  }
+}
+
+/** How `opencode export` says the session isn't in its database. */
+const OPENCODE_NO_SESSION = /not\s*found|NotFoundError|no such session|does not exist/i;
+
 /**
  * An OpenCode session goes in with `opencode import`. A session already there is replaced only
- * when this export holds every message it does.
+ * when this export holds every message it does and no agent there is running it; an export that
+ * fails for any reason but a missing session stops the import.
  */
 async function importOpenCodeSession(destination: Destination, session: NativeSession, repoPath: string): Promise<string> {
   const windows = destination.os === 'Windows';
@@ -780,6 +795,16 @@ async function importOpenCodeSession(destination: Destination, session: NativeSe
     : ['sh', '-c', `cd ${quoted(repoPath, false)} && ${command}`];
   const exported = fs.readFileSync(session.files[0].absolute, 'utf8');
   const there = await destination.run(inRepo(`opencode export ${quoted(session.id, windows)}`), 120_000);
+  if (there.exitCode !== 0) {
+    // Only "no such session" means there is no history to keep; anything else (a locked database,
+    // a broken install) means runpane can't tell, so it stops instead of importing over it.
+    const detail = (there.stderr || there.stdout).trim().split('\n').slice(-3).join(' ');
+    if (!OPENCODE_NO_SESSION.test(detail)) {
+      throw new Error(`Couldn't read ${destination.name}'s OpenCode session ${session.id} to check for history this machine's copy lacks (${detail || `exit ${there.exitCode}`}). Nothing was imported. Fix that there, then run the handoff again`);
+    }
+  } else {
+    await refuseRunningReceivers(destination, session, 'imported');
+  }
   const missing = there.exitCode === 0 ? openCodeMessagesMissing(exported, there.stdout) : 0;
   if (missing) {
     throw new Error(`${destination.name}'s copy of OpenCode session ${session.id} has ${missing} message${missing === 1 ? '' : 's'} this machine's copy doesn't: it was continued there after an earlier handoff. Nothing was imported, so that history is kept. Continue it on ${destination.name}, or hand it off from there back to here`);

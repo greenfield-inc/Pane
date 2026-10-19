@@ -43,8 +43,10 @@ expected.
 
 **Continued as a fork** is the same result for a fork: checks 1 to 4 hold for
 the fork's id, and the tab is a new conversation that starts with the
-original's history. If the original's file changed at any point, even when a
-later fork worked, check 4 failed: report that session as **not continued**,
+original's history. If the original changed at any point in a way check 4
+doesn't allow (anything but the running sender's own appends, including a new
+modification time alone), even when a later fork worked, check 4 failed:
+report that session as **not continued**,
 say what changed it, and leave the person's original as it now is.
 
 ## When a check is inconclusive

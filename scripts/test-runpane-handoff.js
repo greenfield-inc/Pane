@@ -637,6 +637,8 @@ function claudeSession(f) {
     "const lines = fs.readFileSync(path.join(dir, from + '.jsonl'), 'utf8').split(from).join(to);",
     "fs.writeFileSync(path.join(dir, to + '.jsonl'), lines + JSON.stringify({ type: 'assistant', sessionId: to, message: { role: 'assistant', content: 'forked' } }) + '\\n');",
     // The sending agent's own turn keeps writing to its transcript while the handoff runs.
+    // Something touches the original without changing its bytes.
+    "if (process.env.FAKE_SENDER_TOUCH) { const later = new Date(Date.now() + 60000); fs.utimesSync(path.join(dir, from + '.jsonl'), later, later); }",
     "if (process.env.FAKE_SENDER_TURN_WRITES) fs.appendFileSync(path.join(dir, from + '.jsonl'), JSON.stringify({ type: 'assistant', sessionId: from, message: { role: 'assistant', content: 'running runpane handoff' } }) + '\\n');",
   ].join('\n'));
   fs.writeFileSync(path.join(bin, 'claude.cmd'), `@"${process.execPath}" "%~dp0claude.js" %*\r\n`);
@@ -751,7 +753,7 @@ function remoteMachine(f, options = {}) {
   const ready = path.join(f.root, 'remote-ready.json');
   const config = path.join(f.root, 'remote.json');
   fs.writeFileSync(config, JSON.stringify({ home, repoPath, log, ready, agent: options.agent ?? 'claude', screenText: options.screenText,
-    failWrite: options.failWrite, submitError: options.submitError, running: options.running, features: options.features,
+    failWrite: options.failWrite, submitError: options.submitError, running: options.running, runningInSession: options.runningInSession, features: options.features,
     blocked: options.blocked, notReady: options.notReady }));
   const child = spawn(process.execPath, [path.join(__dirname, 'fixtures', 'runpane-handoff-remote.cjs'), config], { env: f.env, stdio: 'ignore' });
   f.t.after(async () => {
@@ -848,7 +850,9 @@ function openCodeSession(f) {
     "const fs = require('node:fs');",
     'const args = process.argv.slice(2);',
     `fs.appendFileSync(${JSON.stringify(calls)}, JSON.stringify({ args, cwd: process.cwd() }) + '\\n');`,
-    `if (args[0] === 'export') { if (args[1] !== ${JSON.stringify(OPENCODE_SENDER)}) process.exit(1); process.stderr.write('Exporting session...\\n');`,
+    // A destination whose OpenCode database is busy: export fails for a reason other than a missing session.
+    "if (args[0] === 'export' && fs.existsSync('.opencode-locked')) { process.stderr.write('Error: database is locked\\n'); process.exit(1); }",
+    `if (args[0] === 'export') { if (args[1] !== ${JSON.stringify(OPENCODE_SENDER)}) { process.stderr.write('Error: Session not found\\n'); process.exit(1); } process.stderr.write('Exporting session...\\n');`,
     // A copy continued on the destination after an earlier handoff has a message the sender's lacks.
     `  const data = ${exported}; if (fs.existsSync('.opencode-continued-here')) data.messages.push({ info: { id: 'msg_there', role: 'user' }, parts: [] });`,
     '  process.stdout.write(JSON.stringify(data)); }',
@@ -1320,4 +1324,50 @@ test('a note saved by PowerShell (BOM, CRLF) has its own front matter replaced, 
   const delivered = handoffNote(f);
   assert.doesNotMatch(delivered, /origin_panel|stale-tab|elsewhere|﻿/);
   assert.equal(delivered.match(/^---$/gm).length, 2, 'one front matter block');
+});
+
+// ---------------------------------------------------------------- follow-up review: hidden owners, OpenCode, timestamps
+
+test('a session open in a Session\'s agent tab on the other machine is not replaced under it', (t) => {
+  const f = fixture(t); fs.writeFileSync(path.join(f.root, 'note.md'), filled());
+  receiver(f, { sender: { agentType: 'claude', resumeId: SENDER, resumeSource: 'agent' } });
+  const claude = claudeSession(f);
+  // A Session's tab lives in a hidden owner that panes list leaves out.
+  const remote = remoteMachine(f, { screenText: `${LAST} now.`, runningInSession: SENDER });
+  const there = path.join(remote.home, '.claude', 'projects', 'C--old-checkout', `${SENDER}.jsonl`);
+  fs.mkdirSync(path.dirname(there), { recursive: true });
+  fs.writeFileSync(there, fs.readFileSync(claude.transcript).subarray(0, 40));
+  const result = runToRemote(f);
+  assert.equal(result.status, 1, result.stderr + result.stdout);
+  assert.match(JSON.parse(result.stdout).continuity.reason, /is open on test-remote \(Session "Busy" tab busy-session-tab\).*Nothing was copied/);
+  assert.equal(fs.readFileSync(there).length, 40);
+});
+
+for (const [name, setup, reason] of [
+  ['open in a running agent there', (f, remote) => remote, /is open on test-remote \(Pane busy-pane tab busy-tab\).*Nothing was imported/],
+  ['unreadable there (database is locked)', (f, remote) => fs.writeFileSync(path.join(remote.home, 'repo', '.opencode-locked'), ''), /Couldn't read test-remote's OpenCode session .*database is locked.*Nothing was imported/],
+]) test(`an OpenCode session ${name} is not imported over`, (t) => {
+  const f = fixture(t); fs.writeFileSync(path.join(f.root, 'note.md'), filled());
+  receiver(f, { sender: { agentType: 'opencode', resumeId: OPENCODE_SENDER, resumeSource: 'agent' } });
+  const opencode = openCodeSession(f);
+  const remote = remoteMachine(f, { agent: 'opencode', screenText: `${LAST} now.`, running: name.startsWith('open') ? OPENCODE_SENDER : undefined });
+  setup(f, remote);
+  const result = spawnSync(process.execPath, [cli, 'handoff', 'opencode on test-remote', '--note-file', 'note.md', '--json'], { cwd: f.root, encoding: 'utf8', env: f.env });
+  assert.equal(result.status, 1, result.stderr + result.stdout);
+  const out = JSON.parse(result.stdout);
+  assert.equal(out.continuity.result, 'not-continued');
+  assert.match(out.continuity.reason, reason);
+  assert.equal(opencode.calls().some(c => c.args[0] === 'import'), false);
+});
+
+test('an original touched without a byte changed still fails check 4: its modification time changed', (t) => {
+  const f = fixture(t); fs.writeFileSync(path.join(f.root, 'note.md'), filled());
+  receiver(f, { sender: { agentType: 'claude', resumeId: SENDER, resumeSource: 'agent' }, screenText: `${LAST} now.` });
+  claudeSession(f);
+  f.env.FAKE_SENDER_TOUCH = '1';
+  const result = runClaude(f);
+  assert.equal(result.status, 1, result.stderr + result.stdout);
+  const out = JSON.parse(result.stdout);
+  assert.equal(out.continuity.checks.originalUntouched, false);
+  assert.match(out.continuity.reason, /changed while it was forked/);
 });

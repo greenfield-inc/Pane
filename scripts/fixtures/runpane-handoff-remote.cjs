@@ -55,6 +55,11 @@ async function answer(channel, args) {
     case 'runpane:panes:list':
       // config.running: a Pane there whose tab is running the given session.
       return { ok: true, panes: config.running ? [{ id: 'busy-pane', paneId: 'busy-pane', name: 'busy', status: 'running', agentStatus: 'idle', worktreePath: config.repoPath, repoId: 7, panelCount: 1, pinned: false, ownership: 'pane' }] : [] };
+    case 'runpane:sessions:list':
+      // config.runningInSession: a Session there whose agent tab (in its hidden owner) runs the given session.
+      return { ok: true, sessions: config.runningInSession ? [{ id: 'busy-session', name: 'Busy', agent: config.agent, internalSessionId: 'busy-owner',
+        panelIds: { claude: 'busy-session-tab', codex: 'c', cursor: 'u' }, goal: '', context: '', decisions: [], blockers: [], nextAction: '', evidence: [], outputs: [],
+        associations: [], activity: [], revision: 1, createdAt: '2026-10-19T00:00:00.000Z', updatedAt: '2026-10-19T00:00:00.000Z' }] : [] };
     case 'runpane:repos:list':
       return { ok: true, repos: [repo] };
     case 'runpane:panes:create': {
@@ -66,6 +71,9 @@ async function answer(channel, args) {
         readiness: config.blocked ? { ...ready, ok: false, matched: false, blocked: config.blocked } : config.notReady ? { ...ready, ok: false, matched: false, timedOut: true } : ready }] };
     }
     case 'runpane:panels:list':
+      if (args[0].paneId === 'busy-owner') {
+        return { ok: true, paneId: 'busy-owner', panels: [{ id: 'busy-session-tab', panelId: 'busy-session-tab', paneId: 'busy-owner', type: 'terminal', title: 'Busy', active: false, running: true, agentType: config.agent, resumeId: config.runningInSession, resumeSource: 'agent' }] };
+      }
       if (args[0].paneId === 'busy-pane') {
         return { ok: true, paneId: 'busy-pane', panels: [{ id: 'busy-tab', panelId: 'busy-tab', paneId: 'busy-pane', type: 'terminal', title: 'busy', active: false, running: true, agentType: config.agent, resumeId: config.running, resumeSource: 'agent' }] };
       }
