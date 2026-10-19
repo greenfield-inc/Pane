@@ -10,10 +10,13 @@ Explicit choices from older versions must never be overwritten.
 Import the SDK through `posthog-js/dist/module.no-external` and keep
 `disable_external_dependency_loading` enabled. This is PostHog's
 [supported entry point for Electron](https://posthog.com/docs/libraries/js):
-analytics requests and JSON configuration remain available, while executable
-configuration, session replay, surveys, and other remote extensions cannot load.
-All executable dependencies must come from the reviewed, lockfile-pinned build.
-Do not add a second import from the default SDK entry point.
+executable configuration, session replay, surveys, and other remote extensions
+cannot load. All executable dependencies must come from the reviewed,
+lockfile-pinned build. Do not add a second import from the default SDK entry point.
+
+Keep `advanced_disable_flags` enabled. Pane uses no feature flags, and the SDK
+then makes no `/array/<token>/config` or `/flags` requests. Those requests carry
+the identity stored in localStorage, including after opt-out.
 
 ## Identity Comes First
 
@@ -75,7 +78,26 @@ describe this telemetry as anonymous while those person properties are sent.
 Capture `analytics_opted_out` with identity context before disabling analytics.
 After that capture, discard queued usage events and keep analytics disabled.
 
-This records who opted out without sending their later product usage.
+This records who opted out without sending their later product usage. After
+opt-out, the only request Pane still sends is the install heartbeat.
+
+## Install Heartbeat
+
+The main process sends `app_heartbeat` at launch and every 24 hours while Pane
+runs, whether analytics is on or off, so active installs stay countable
+(`startHeartbeat` in `main/src/services/analyticsManager.ts`). Its properties
+are exactly `distinct_id: install:<installId>`, `app_version`, `platform` and
+`$process_person_profile: false`. It creates an install ID if the install has
+none, and never sends `$set`, account or Git details. PostHog still shows it on
+an existing person already linked to that install ID, and derives location from
+the request IP.
+
+Only the installed app sends it: a packaged build on the default data directory
+(no `PANE_DIR`, `FOOZOL_DIR` or `--pane-dir`). `DO_NOT_TRACK=1` or a non-empty
+`RUNPANE_TELEMETRY_DISABLED` turns it off.
+
+Settings › Privacy discloses the payload. Adding a property means changing that
+copy and this section in the same PR.
 
 ## Config Saves Preserve Analytics Fields
 
@@ -212,8 +234,9 @@ Changes to disclosure, analytics config, or first-run event ordering should upda
 or add coverage in:
 
 - `main/src/services/analyticsIdentity.test.ts`
+- `main/src/services/analyticsManager.test.ts` (error events and the heartbeat)
 - `tests/analytics-consent.spec.ts`
 
 The Playwright test should verify both event order and payload shape, including
-SDK identity and interaction events, and reject external script requests even
-when remote configuration enables extensions.
+SDK identity and interaction events, and reject external script, `/config` and
+`/flags` requests.
