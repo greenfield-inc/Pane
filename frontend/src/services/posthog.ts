@@ -163,8 +163,10 @@ export function initPostHog(config: PostHogConfig, options: PostHogInitOptions =
     posthog.init(apiKey, {
       api_host: host,
       // Keep executable analytics code inside the reviewed, lockfile-pinned bundle.
-      // The no-external entry uses JSON for remote configuration instead of config.js.
       disable_external_dependency_loading: true,
+      // Pane uses no feature flags. This also stops the remote-config request
+      // and the /flags refresh, which send stored identity even when opted out.
+      advanced_disable_flags: true,
       // Restrict autocapture to interactive elements only — prevents capturing
       // sensitive text content (code, prompts) from non-interactive UI areas
       autocapture: {
