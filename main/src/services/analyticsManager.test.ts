@@ -4,9 +4,10 @@ import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDec
 
 const send = vi.fn<(url: string, options: RequestInit) => Promise<Response>>().mockResolvedValue(new Response());
 
-function setup(appPath = '/Applications/Pane.app/Contents/Resources/app.asar') {
+function setup(appPath = '/Applications/Pane.app/Contents/Resources/app.asar', isInstalledApp = true) {
   const config = {
     isAnalyticsEnabled: vi.fn(() => true),
+    getOrCreateAnalyticsInstallId: vi.fn(async () => 'install_11111111-1111-4111-8111-111111111111'),
     isVerbose: () => false,
     getAnalyticsSettings: () => ({
       installId: 'install_11111111-1111-4111-8111-111111111111',
@@ -19,11 +20,13 @@ function setup(appPath = '/Applications/Pane.app/Contents/Resources/app.asar') {
     fetch: send,
     getVersion: () => '2.4.152',
     getAppPath: () => appPath,
+    isInstalledApp: () => isInstalledApp,
   }) };
 }
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllEnvs();
   send.mockReset().mockResolvedValue(new Response());
 });
 
@@ -154,5 +157,81 @@ describe('app error telemetry', () => {
     send.mockImplementation(() => { throw new Error('network failure'); });
     expect(() => analytics.captureException(undefined, 'shutdown')).not.toThrow();
     await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(5));
+  });
+});
+
+describe('install heartbeat', () => {
+  const DAY = 24 * 60 * 60 * 1000;
+
+  function heartbeatBody(call: number) {
+    const options = decodeBoundary(send.mock.calls[call][1], boundary.object({ body: boundary.string }));
+    return decodeBoundary(JSON.parse(options.body), boundary.jsonObject);
+  }
+
+  it.each([true, false])('sends only the install ID, version and OS at start and every 24 hours (analytics on: %s)', async (enabled) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-19T12:00:00.000Z'));
+    const { config, analytics } = setup();
+    config.isAnalyticsEnabled.mockReturnValue(enabled);
+    analytics.startHeartbeat();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0][0]).toBe('https://runpane.com/api/c/capture/');
+    expect(heartbeatBody(0)).toEqual({
+      api_key: 'phc_wir25CCsjr2NsZGEdlWNdvwcNG1XDjhxc9RyL5KDCf1',
+      event: 'app_heartbeat',
+      properties: {
+        distinct_id: 'install:install_11111111-1111-4111-8111-111111111111',
+        app_version: '2.4.152',
+        platform: process.platform,
+        $process_person_profile: false,
+      },
+      timestamp: '2026-10-19T12:00:00.000Z',
+    });
+
+    await vi.advanceTimersByTimeAsync(DAY - 1);
+    expect(send).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(send).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(DAY);
+    expect(send).toHaveBeenCalledTimes(3);
+    expect(heartbeatBody(2).event).toBe('app_heartbeat');
+  });
+
+  it('creates an install ID when the install has none', async () => {
+    const { config, analytics } = setup();
+    config.getOrCreateAnalyticsInstallId.mockResolvedValue('install_22222222-2222-4222-8222-222222222222');
+    analytics.startHeartbeat();
+    await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+    expect(config.getOrCreateAnalyticsInstallId).toHaveBeenCalled();
+    expect(heartbeatBody(0).properties).toMatchObject({ distinct_id: 'install:install_22222222-2222-4222-8222-222222222222' });
+  });
+
+  it.each([
+    ['DO_NOT_TRACK=1', () => vi.stubEnv('DO_NOT_TRACK', '1'), true],
+    ['RUNPANE_TELEMETRY_DISABLED', () => vi.stubEnv('RUNPANE_TELEMETRY_DISABLED', 'yes'), true],
+    ['not the installed app', () => {}, false],
+  ])('sends nothing with %s', async (_name, arrange, installed) => {
+    vi.useFakeTimers();
+    arrange();
+    const { config, analytics } = setup(undefined, installed);
+    analytics.startHeartbeat();
+    await vi.advanceTimersByTimeAsync(2 * DAY);
+    expect(send).not.toHaveBeenCalled();
+    expect(config.getOrCreateAnalyticsInstallId).not.toHaveBeenCalled();
+  });
+
+  it('survives failing and hanging requests, and stops on shutdown', async () => {
+    vi.useFakeTimers();
+    const { analytics } = setup();
+    send.mockRejectedValueOnce(new Error('offline')).mockReturnValueOnce(new Promise<Response>(() => {}));
+    expect(() => analytics.startHeartbeat()).not.toThrow();
+    await vi.advanceTimersByTimeAsync(DAY);
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(send.mock.calls[1][1].signal).toBeInstanceOf(AbortSignal);
+
+    analytics.stopHeartbeat();
+    await vi.advanceTimersByTimeAsync(2 * DAY);
+    expect(send).toHaveBeenCalledTimes(2);
   });
 });

@@ -101,7 +101,7 @@ import type { ArchiveProgressManager } from './services/archiveProgressManager';
 import type { AnalyticsManager } from './services/analyticsManager';
 import { readWebAttribution, resolveAnalyticsIdentity } from './services/analyticsIdentity';
 import { resourceMonitorService } from './services/resourceMonitorService';
-import { applyAppDirectoryOverrideFromArgs, getAppDirectoryOverrideFromArgs, migrateDataDirectory } from './utils/appDirectory';
+import { applyAppDirectoryOverrideFromArgs, isPackagedOnDefaultDirectory, migrateDataDirectory } from './utils/appDirectory';
 import { getCurrentWorktreeName } from './utils/worktreeUtils';
 import { setupAutoUpdater } from './autoUpdater';
 import type { CliManagerFactory } from './services/cliManagerFactory';
@@ -302,7 +302,7 @@ function showMainWindow(): void {
  * the installed app, so those run beside it without taking the lock.
  */
 function acquireSingleInstanceLock(): boolean {
-  if (!app.isPackaged || getAppDirectoryOverrideFromArgs() || process.env.PANE_DIR || process.env.FOOZOL_DIR) {
+  if (!isPackagedOnDefaultDirectory()) {
     return true;
   }
   return app.requestSingleInstanceLock();
@@ -1379,6 +1379,8 @@ if (launchRemoteSetup) {
     console.warn('[Main] Failed to manage crash sentinel:', err);
   }
 
+  analyticsManager.startHeartbeat();
+
   // Track app lifecycle events
   try {
     const currentVersion = app.getVersion();
@@ -1509,6 +1511,7 @@ if (launchRemoteSetup) {
 
   usageManager.stop();
   void sharedCredentialSync?.stop();
+  analyticsManager?.stopHeartbeat();
 
   // Guard against multiple shutdown attempts
   if (shutdownInProgress) {
