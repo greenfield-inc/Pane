@@ -192,7 +192,8 @@ function frontMatter(origin: NoteOrigin): string {
 
 /** Replaces the note's front matter with the CLI's own, so the origin and git state are never stale. */
 function stampNote(text: string, origin: NoteOrigin, receiver: string): string {
-  const body = text.replace(/^---\n[\s\S]*?\n---\n/, '').replace(/^\n+/, '');
+  // A note saved by PowerShell starts with a BOM and uses CRLF; its front matter is replaced all the same.
+  const body = text.replace(/^﻿/, '').replace(/\r\n/g, '\n').replace(/^---\n[\s\S]*?\n---\n/, '').replace(/^\n+/, '');
   return `${frontMatter(origin)}\n${body.trimEnd()}\n\n${receiver}\n`;
 }
 

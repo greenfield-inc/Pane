@@ -1307,3 +1307,17 @@ test('with several tabs of the sender\'s agent and none recording its session, t
   assert.doesNotMatch(handoffNote(f), /^origin_panel:/m);
   assert.ok(JSON.parse(result.stdout).warnings.some(warning => /PANE_PANEL_ID may name another tab/.test(warning)));
 });
+
+test('a note saved by PowerShell (BOM, CRLF) has its own front matter replaced, so a stale origin panel never survives', (t) => {
+  const f = fixture(t);
+  const note = `﻿---\norigin_machine: elsewhere\norigin_panel: stale-tab\n---\n\n${filled()}`.replace(/\n/g, '\r\n');
+  fs.writeFileSync(path.join(f.root, 'note.md'), note);
+  receiver(f, { sender: { agentType: 'claude' }, extraPanels: [{ id: 'other-tab', agentType: 'claude' }], screenText: `${LAST} now.` });
+  claudeSession(f);
+  f.env.CLAUDE_CODE_SESSION_ID = SENDER;
+  const result = runClaude(f);
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  const delivered = handoffNote(f);
+  assert.doesNotMatch(delivered, /origin_panel|stale-tab|elsewhere|﻿/);
+  assert.equal(delivered.match(/^---$/gm).length, 2, 'one front matter block');
+});
