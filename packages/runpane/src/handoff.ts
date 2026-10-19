@@ -626,7 +626,8 @@ async function destinationDigests(destination: Destination, files: string[]): Pr
   const list = files.map(file => quoted(file, windows));
   // No double quotes in the PowerShell: Windows PowerShell mangles them in a nested -Command.
   const script = windows
-    ? `$i=0; foreach ($p in @(${list.join(',')})) { if (Test-Path -LiteralPath $p -PathType Leaf) { ($i, (Get-Item -LiteralPath $p).Length, (Get-FileHash -Algorithm SHA256 -LiteralPath $p).Hash.ToLower()) -join ' ' }; $i++ }`
+    // .NET's SHA256, not Get-FileHash: a Windows PowerShell started from pwsh can fail to load the module that defines it.
+    ? `$i=0; $sha=[Security.Cryptography.SHA256]::Create(); foreach ($p in @(${list.join(',')})) { if (Test-Path -LiteralPath $p -PathType Leaf) { $b=[IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $p).ProviderPath); ($i, $b.Length, ([BitConverter]::ToString($sha.ComputeHash($b)) -replace '-','').ToLower()) -join ' ' }; $i++ }`
     : `i=0; for p in ${list.join(' ')}; do if [ -f "$p" ]; then printf '%s %s %s\\n' "$i" "$(wc -c < "$p" | tr -d ' ')" "$( (sha256sum "$p" 2>/dev/null || shasum -a 256 "$p") | cut -d ' ' -f 1)"; fi; i=$((i+1)); done`;
   const output = await mustRun(destination, windows ? ['powershell', '-NoProfile', '-Command', script] : ['sh', '-c', script], 'Reading the session files there', 300_000);
   const digests = new Map<number, FileDigest>();
