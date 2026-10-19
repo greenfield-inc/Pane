@@ -32,7 +32,8 @@ export interface TailnetMachine {
 }
 
 export type Tailnet =
-  | { ok: true; self: TailnetMachine; machines: TailnetMachine[] }
+  /** `httpsCertificates` is the tailnet-wide setting that workspaces need on every machine. */
+  | { ok: true; self: TailnetMachine; machines: TailnetMachine[]; httpsCertificates: boolean }
   | { ok: false; reason: string; fix: string };
 
 const peerSchema = boundary.object({
@@ -50,6 +51,7 @@ const statusSchema = boundary.object({
   Self: boundary.optional(boundary.nullable(peerSchema)),
   Peer: boundary.optional(boundary.nullable(boundary.jsonObject)),
   User: boundary.optional(boundary.nullable(boundary.jsonObject)),
+  CertDomains: boundary.optional(boundary.nullable(boundary.array(boundary.string))),
 });
 const userSchema = boundary.object({ LoginName: boundary.string });
 
@@ -132,7 +134,7 @@ export async function readTailnet(): Promise<Tailnet> {
     .sort((left, right) => Number(right.mine) - Number(left.mine) || Number(right.online) - Number(left.online)
       || left.name.localeCompare(right.name));
   if (!self) return { ok: false, reason: `Tailscale reports an unsupported OS (${status.Self.OS})`, fix: 'Run Pane on macOS, Windows, or Linux.' };
-  return { ok: true, self, machines };
+  return { ok: true, self, machines, httpsCertificates: Boolean(status.CertDomains?.length) };
 }
 
 const TAILSCALE_OS_NAMES = new Map<string, MachineOs>([['macos', 'macOS'], ['windows', 'Windows'], ['linux', 'Linux']]);
@@ -266,8 +268,10 @@ async function routePath(value: string, verb: string): Promise<TailnetMachine> {
 export async function runWorkspaceList(parsed: ParsedArgs): Promise<number> {
   const tailnet = await requireTailnet();
   const local = await readLocalStatus(parsed.paneDir);
-  // The setting is tailnet-wide, so no other machine can answer either.
-  const tailnetCause = local?.reason === 'this tailnet has HTTPS certificates turned off' ? `${local.reason}. Fix: ${local.fix}` : null;
+  // With the tailnet-wide setting off, no machine can answer, so name it instead of each machine.
+  const tailnetCause = tailnet.httpsCertificates
+    ? null
+    : 'this tailnet has HTTPS certificates turned off. Fix: Turn on HTTPS Certificates at https://login.tailscale.com/admin/dns.';
   // Offline machines need no probe, so only online ones count toward the limit; mine come first.
   const probed = new Set(tailnet.machines.filter((machine) => machine.online).slice(0, MAX_PROBED_MACHINES));
   const rows = await Promise.all(tailnet.machines.map(async (machine) => {

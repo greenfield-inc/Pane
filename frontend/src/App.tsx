@@ -827,9 +827,10 @@ function App() {
       <div className="pane-app-shell relative h-screen flex flex-col overflow-hidden bg-bg-primary">
         <div className={isSettingsOpen ? 'hidden' : 'contents'}>
           <WindowTitleBar projects={projects} sidebarWidth={sidebarWidth} sidebarCollapsed={sidebarCollapsed} controlsSlotRef={setTitleBarControlsSlot} />
+          {/* Settings draws its own title-bar spacer, which the window controls overlap. */}
+          <TailnetHttpsBanner />
         </div>
         <RemoteConnectionBanner onSettings={() => openSettings({ category: 'remote-access' })} />
-        <TailnetHttpsBanner />
         <div className="pane-main-layout flex flex-1 min-h-0">
         <MainProcessLogger />
         {isSettingsOpen && (
