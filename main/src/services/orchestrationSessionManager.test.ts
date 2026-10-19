@@ -272,6 +272,7 @@ function orchestrationRecord(id: string, name: string): OrchestrationSessionReco
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
   liveStates.clear();
   for (const directory of temporaryDirectories.splice(0)) fs.rmSync(directory, { recursive: true, force: true });
@@ -1210,6 +1211,8 @@ describe('OrchestrationSessionManager', () => {
   });
 
   it('records a worker report as Session activity and shows the newest one under its Pane in the overview', async () => {
+    // Association and report can be recorded in the same millisecond.
+    vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-09-27T18:00:00.000Z') });
     const fixture = createFixture();
     const named = await fixture.manager.create({ name: 'Reports' });
     const other = await fixture.manager.create({ name: 'Unrelated' });
