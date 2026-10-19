@@ -5,6 +5,7 @@ import { API } from '../utils/api';
 import { useConfigStore } from '../stores/configStore';
 import { ToolPanel } from '../../../shared/types/panels';
 import type { AgentState } from '../../../shared/types/agentStatus';
+import { openPanelOnClick } from './notificationClick';
 
 // Extend window interface for webkit audio context compatibility
 declare global {
@@ -131,9 +132,33 @@ export function useNotifications() {
     }
   }, []);
 
-  // showNotification fires unconditionally so that the two direct callers in
-  // App.tsx (unclean-shutdown and version-update) always work. Activity gating
-  // lives only inside maybeNotifyPanelIdle.
+  // Fires unconditionally; activity gating lives in the maybeNotify* callers.
+  // A panel target makes the notification open that tab when clicked.
+  const fireNotification = useCallback((
+    title: string,
+    body: string,
+    icon?: string,
+    panelTarget?: { paneId: string; panelId: string },
+  ) => {
+    requestPermission().then((hasPermission) => {
+      if (hasPermission) {
+        const notification = new Notification(title, {
+          body,
+          icon: icon || '/favicon.ico',
+          badge: '/favicon.ico',
+          tag: 'claude-code-commander',
+          requireInteraction: false,
+        });
+        const openPaneLink = window.electronAPI?.window?.openPaneLink;
+        if (panelTarget && openPaneLink) openPanelOnClick(notification, panelTarget, openPaneLink);
+
+        playNotificationSound();
+      }
+    });
+  }, [playNotificationSound, requestPermission]);
+
+  // showNotification is for the two direct callers in App.tsx
+  // (unclean-shutdown and version-update), so they always work.
   const showNotification = useCallback((
     title: string,
     body: string,
@@ -141,20 +166,8 @@ export function useNotifications() {
     _triggerEvent?: string,
     _trackingKey?: string,
   ) => {
-    requestPermission().then((hasPermission) => {
-      if (hasPermission) {
-        new Notification(title, {
-          body,
-          icon: icon || '/favicon.ico',
-          badge: '/favicon.ico',
-          tag: 'claude-code-commander',
-          requireInteraction: false,
-        });
-
-        playNotificationSound();
-      }
-    });
-  }, [playNotificationSound, requestPermission]);
+    fireNotification(title, body, icon);
+  }, [fireNotification]);
 
   /** Resolve a panel to its session + display names, or null when unknown. */
   function findPanelContext(panelId: string) {
@@ -179,6 +192,7 @@ export function useNotifications() {
       : '';
     return {
       session,
+      panelTarget: { paneId: session.id, panelId },
       panelName: foundPanel.title || 'Terminal',
       body: projectName ? `${session.name} · ${projectName}` : session.name,
     };
@@ -199,13 +213,7 @@ export function useNotifications() {
     const context = findPanelContext(panelId);
     if (!context) return;
 
-    showNotification(
-      `${context.panelName} finished`,
-      context.body,
-      undefined,
-      'panel_idle',
-      `idle:${panelId}:${Date.now()}`,
-    );
+    fireNotification(`${context.panelName} finished`, context.body, undefined, context.panelTarget);
   }
 
   // Fires as soon as an agent flips to blocked: it is waiting on the human, so
@@ -218,13 +226,7 @@ export function useNotifications() {
     const context = findPanelContext(panelId);
     if (!context) return;
 
-    showNotification(
-      `${context.panelName} needs your input`,
-      context.body,
-      undefined,
-      'panel_blocked',
-      `blocked:${panelId}:${Date.now()}`,
-    );
+    fireNotification(`${context.panelName} needs your input`, context.body, undefined, context.panelTarget);
   }
 
   // Subscribe to panelStore.agentStatus (the unified per-panel agent state) and

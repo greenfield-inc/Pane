@@ -1160,6 +1160,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Window state queries (invoke, not event subscriptions)
   window: {
     isFocused: async (): Promise<boolean> => decodeBoundary(await invokeIpc('window:is-focused'), boundary.boolean),
+    openPaneLink: async (link: string): Promise<void> => {
+      await invokeIpc('window:open-pane-link', link);
+    },
   },
 
   // ptyHost: typed wrapper over the per-window MessagePort. The raw port is

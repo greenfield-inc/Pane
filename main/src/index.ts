@@ -9,6 +9,7 @@ import { getAppDirectory } from './utils/appDirectory';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { boundary, decodeBoundary } from '../../shared/validation/boundaryDecoder';
+import type { PaneCommandValue } from './daemon/commandRegistry';
 import type { PaneEventArgument } from './core/eventSink';
 
 const launchHeadlessDaemon = hasHeadlessDaemonLaunchArg();
@@ -1306,6 +1307,12 @@ if (launchRemoteSetup) {
   // Register before any renderer loads. useNotifications pulls this on mount
   // and will race a late registration inside createWindow/loadURL.
   ipcMain.handle('window:is-focused', () => mainWindow?.isFocused() ?? true);
+  // A clicked desktop notification opens its tab the way an OS pane:// link does.
+  // The window comes forward even when the tab has since been closed.
+  ipcMain.handle('window:open-pane-link', (_event, link: PaneCommandValue) => {
+    showMainWindow();
+    openPaneLink(decodeBoundary(link, boundary.string));
+  });
 
   // Start the ptyHost supervisor before the window opens so the renderer's
   // preload listener for 'ptyHost-port' has a port to receive when the window

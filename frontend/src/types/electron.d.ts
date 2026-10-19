@@ -643,6 +643,8 @@ interface ElectronAPI {
   // Window state queries (invoke, not event subscriptions)
   window: {
     isFocused: () => Promise<boolean>;
+    /** Raises the window and opens a pane:// link, like one opened from the OS. */
+    openPaneLink: (link: string) => Promise<void>;
   };
 
   // ptyHost: typed wrapper over the per-window MessagePort installed by the
