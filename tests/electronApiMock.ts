@@ -101,6 +101,8 @@ export type ElectronApiMockOptions = {
   holdSshOpens?: boolean;
   feedbackOutcome?: 'success' | 'failure';
   openExternalOutcome?: 'success' | 'failure';
+  /** Overrides this machine's workspace status (remote-daemon:get-workspace-access). */
+  workspaceAccess?: Partial<WorkspaceAccessSummary>;
 };
 
 export async function installElectronApiMock(page: Page, options: ElectronApiMockOptions = {}) {
@@ -175,6 +177,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       state: 'on',
       machineName: 'devbox',
       url: 'https://devbox.tail1234.ts.net:8443',
+      ...mockOptions.workspaceAccess,
     };
     const remoteConnectionState: RemotePaneConnectionState = {
       mode: 'local',

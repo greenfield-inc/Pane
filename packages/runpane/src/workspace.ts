@@ -266,14 +266,16 @@ async function routePath(value: string, verb: string): Promise<TailnetMachine> {
 export async function runWorkspaceList(parsed: ParsedArgs): Promise<number> {
   const tailnet = await requireTailnet();
   const local = await readLocalStatus(parsed.paneDir);
+  // The setting is tailnet-wide, so no other machine can answer either.
+  const tailnetCause = local?.reason === 'this tailnet has HTTPS certificates turned off' ? `${local.reason}. Fix: ${local.fix}` : null;
   // Offline machines need no probe, so only online ones count toward the limit; mine come first.
   const probed = new Set(tailnet.machines.filter((machine) => machine.online).slice(0, MAX_PROBED_MACHINES));
-  const rows = await Promise.all(tailnet.machines.map(async (machine) => ({
-    machine,
-    probe: probed.has(machine) || !machine.online
+  const rows = await Promise.all(tailnet.machines.map(async (machine) => {
+    const probe = probed.has(machine) || !machine.online
       ? await probeMachine(machine)
-      : { error: `not checked (Pane checks the first ${MAX_PROBED_MACHINES} online machines)` },
-  })));
+      : { error: `not checked (Pane checks the first ${MAX_PROBED_MACHINES} online machines)` };
+    return { machine, probe: tailnetCause && machine.online && !probe.info ? { error: tailnetCause } : probe };
+  }));
   if (parsed.json) {
     console.log(JSON.stringify({
       ok: true,

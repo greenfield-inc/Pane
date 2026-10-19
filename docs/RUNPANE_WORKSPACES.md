@@ -46,6 +46,8 @@ When workspaces are off, the first line says why and gives the one step that fix
 | Pane is not running | Open Pane. |
 | Turned off with `runpane workspace disable` | `runpane workspace enable` |
 
+While the tailnet has HTTPS Certificates turned off, the desktop app shows a notice with a link to that setting. Turning it on writes machine names (`<machine>.<tailnet>.ts.net`) to the public Certificate Transparency log. The notice clears within a minute of the change, and `runpane workspace list` names the setting as the reason other machines are not reachable.
+
 `runpane workspace disable` removes the 8443 handler and keeps this machine off until `runpane workspace enable`. This machine can still reach your other machines while it is off. A Pane started with a different data directory (`PANE_DIR` or `--pane-dir`) stays off unless you run `runpane workspace enable` against it.
 
 Pane must be running on a machine for others to reach it. Pane checks Tailscale again every minute, so signing in to Tailscale after Pane starts is enough. Serve handlers belong to one tailnet, so after you switch this machine to another tailnet Pane puts the 8443 handler back on the new one and reports the new URL within a minute.
