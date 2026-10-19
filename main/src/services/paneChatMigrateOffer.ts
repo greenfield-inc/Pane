@@ -13,7 +13,7 @@ import type { TerminalPanelState } from '../../../shared/types/panels';
  */
 export const MIGRATE_OFFER_PREFERENCE = 'pane_chat_migrate_offer_sent';
 
-const PANE_CHAT_AGENTS: readonly PaneChatAgent[] = ['claude', 'codex', 'cursor'];
+const PANE_CHAT_AGENTS: readonly PaneChatAgent[] = ['claude', 'codex', 'cursor', 'opencode'];
 
 function samePath(left: string, right: string): boolean {
   const normalize = (value: string) => {

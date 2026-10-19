@@ -52,7 +52,7 @@ describe('WSL Session RunPane bridge', () => {
     const record: OrchestrationSessionRecord = {
       id: 'session', internalSessionId: 'owner', name: 'Bridge test', agent: 'codex',
       runtime: 'wsl', wslDistribution: process.env.PANE_TEST_WSL_DISTRO,
-      panelIds: { codex: 'saved-panel', claude: 'claude', cursor: 'cursor' },
+      panelIds: { codex: 'saved-panel', claude: 'claude', cursor: 'cursor', opencode: 'opencode' },
       goal: '', context: '', decisions: [], blockers: [], nextAction: '', evidence: [], outputs: [], associations: [], activity: [],
       revision: 1, createdAt: '2026-10-01', updatedAt: '2026-10-01',
     };

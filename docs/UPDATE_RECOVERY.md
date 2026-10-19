@@ -103,10 +103,15 @@ During downtime, preflight may fail before reaching the lock. Use `--status`
 
 Only a panel recorded as actively working, with an exact conversation ID and a
 supported resume command, is eligible to reopen. Built-in launch resolution
-covers Claude, Codex and Cursor; custom commands need an explicit resume template
-containing `{sessionId}`. Eligibility is not a promise of success: `resumed`
-requires fresh conversation-identity and readiness evidence from the running
-harness. An incompatible command or missing evidence yields `needs-attention`.
+covers Claude, Codex, Cursor and native OpenCode. OpenCode requires a recorded
+valid `ses_…` selector and an eligible direct launch command; incompatible Session
+wrappers or custom-resume settings are refused. Custom commands use their
+effective resume profile: an explicit template containing `{sessionId}`, or the
+derived profile for a recognized Agent Farm launch. Eligibility and command
+construction do not prove history exists or guarantee provider restoration:
+`resumed` requires fresh conversation-identity and readiness evidence from the
+running harness. An incompatible command or missing evidence yields
+`needs-attention`.
 
 Readiness requires an explicit adapter acknowledgment after the harness has
 accepted the exact conversation and is usable. The relaunched process receives
@@ -117,12 +122,15 @@ wrapper ID line, generic output, startup animation or CLI-ready timeout does not
 confirm readiness. Login/trust blockers and command exit prevent success.
 Do not print this marker merely because a wrapper started or received a resume ID.
 
-The built-in Claude/Codex/Cursor launch commands do not currently provide this
-acknowledgment themselves. Without an instrumented harness adapter, reopening
-these conversations reports `needs-attention`; inspect the live panel manually.
-Custom reported/generated commands can integrate the same acknowledgment. The
-native QA adapter proves this protocol with a harmless process, not a vendor
-login or conversation acceptance.
+The built-in Claude/Codex/Cursor/OpenCode launch commands do not currently provide
+this acknowledgment themselves; Pane has no vendor acknowledgment adapter for
+them. Without an instrumented harness adapter and verification of the fresh
+challenge plus actual loaded conversation ID, reopening these conversations
+reports `needs-attention`; inspect the live panel manually. Custom
+reported/generated commands, including Agent Farm, can integrate the same
+acknowledgment. A reported conversation ID alone is insufficient. The native QA
+adapter proves this protocol with a harmless process, not a vendor login or
+conversation acceptance.
 
 Reopening the conversation does not submit the interrupted task again. The agent
 may return to its prompt; review it and decide what to send. Idle, completed and

@@ -322,7 +322,7 @@ const orchestrationSessionCreateSchema = boundary.object({
   wslDistribution: boundary.optional(boundary.nonEmptyString),
   name: boundary.nonEmptyString,
   isPinned: boundary.optional(boundary.boolean),
-  agent: boundary.optional(boundary.enumeration('claude', 'codex', 'cursor')),
+  agent: boundary.optional(boundary.enumeration('claude', 'codex', 'cursor', 'opencode')),
   launchCommand: boundary.optional(orchestrationTextSchema),
   profile: boundary.optional(orchestrationTextSchema),
   goal: boundary.optional(orchestrationTextSchema),
@@ -337,7 +337,7 @@ const orchestrationSessionUpdateSchema = boundary.object({
   name: boundary.optional(orchestrationTextSchema),
   archived: boundary.optional(boundary.boolean),
   isPinned: boundary.optional(boundary.boolean),
-  agent: boundary.optional(boundary.enumeration('claude', 'codex', 'cursor')),
+  agent: boundary.optional(boundary.enumeration('claude', 'codex', 'cursor', 'opencode')),
   launchCommand: boundary.optional(orchestrationTextSchema),
   profile: boundary.optional(orchestrationTextSchema),
   goal: boundary.optional(orchestrationTextSchema),
@@ -3979,7 +3979,7 @@ interface OrchestrationSessionAgentRequest {
 function parseOrchestrationSessionAgentRequest(value: PaneCommandValue): OrchestrationSessionAgentRequest {
   if (!isRecord(value)) throw new Error('Session agent request must be an object');
   const selector = parseOrchestrationSessionSelector(value.selector);
-  const agent = decodeBoundary(value.agent, boundary.enumeration('claude', 'codex', 'cursor'));
+  const agent = decodeBoundary(value.agent, boundary.enumeration('claude', 'codex', 'cursor', 'opencode'));
   return { selector, agent };
 }
 

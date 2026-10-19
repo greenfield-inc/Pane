@@ -26,6 +26,7 @@ import type { TailnetMachineList, WorkspaceAccessSummary, WorkspaceAccessUpdate 
 import type { HostNavigationMemory } from '../../shared/types/hostNavigation';
 import type { SessionWorkspaceLayout } from '../../shared/types/sessionWorkspaceLayout';
 import type { PanelActivationRequest, SessionPanelLayout, ToolPanel } from '../../shared/types/panels';
+import type { PaneChatAgent } from '../../shared/types/paneChat';
 import type { DiffScope, FileDiffRequest } from '../../shared/types/gitDiff';
 import type { PanelAgentStatusEvent } from '../../shared/types/agentStatus';
 import type {
@@ -398,7 +399,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   paneChat: {
     getOrCreate: (): Promise<IPCResponse> => invokeIpc('pane-chat:get-or-create'),
-    setAgent: (agent: 'claude' | 'codex' | 'cursor'): Promise<IPCResponse> => invokeIpc('pane-chat:set-agent', agent),
+    setAgent: (agent: PaneChatAgent): Promise<IPCResponse> => invokeIpc('pane-chat:set-agent', agent),
   },
   sshHosts: {
     list: (): Promise<IPCResponse> => invokeIpc('ssh-hosts:list'),
@@ -413,7 +414,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     get: (selector: OrchestrationSessionSelector): Promise<IPCResponse> => invokeIpc('orchestration-sessions:get', selector),
     update: (selector: OrchestrationSessionSelector, input: OrchestrationSessionUpdateInput): Promise<IPCResponse> => invokeIpc('orchestration-sessions:update', selector, input),
     reorder: (sessionIds: string[]): Promise<IPCResponse> => invokeIpc('orchestration-sessions:reorder', { sessionIds }),
-    setAgent: (selector: OrchestrationSessionSelector, agent: 'claude' | 'codex' | 'cursor'): Promise<IPCResponse> => invokeIpc('orchestration-sessions:set-agent', selector, agent),
+    setAgent: (selector: OrchestrationSessionSelector, agent: PaneChatAgent): Promise<IPCResponse> => invokeIpc('orchestration-sessions:set-agent', selector, agent),
     associate: (selector: OrchestrationSessionSelector, association: OrchestrationAssociationInput): Promise<IPCResponse> => invokeIpc('orchestration-sessions:associate', selector, association),
     detach: (selector: OrchestrationSessionSelector, paneId?: string): Promise<IPCResponse> => invokeIpc('orchestration-sessions:detach', selector, paneId),
     overview: (selector: OrchestrationSessionSelector): Promise<IPCResponse> => invokeIpc('orchestration-sessions:overview', selector),

@@ -107,9 +107,15 @@ beforeEach(async () => {
   const db = databaseService.getDb();
   db.prepare('DELETE FROM user_preferences WHERE key = ?').run(MIGRATE_OFFER_PREFERENCE);
   // Pane Chat panels are permanent; return each to a terminal that never launched.
-  for (const agent of ['claude', 'codex', 'cursor'] as const) {
+  for (const agent of ['claude', 'codex', 'cursor', 'opencode'] as const) {
     const panel = panelManager.getPanel(getPaneChatPanelId(agent));
-    if (panel) await panelManager.updatePanel(panel.id, { state: { ...panel.state, customState: {} } });
+    if (panel) {
+      // Database state merges keys; explicit undefined removes them before activation reloads the cache.
+      const saved = databaseService.getPanel(panel.id)?.state.customState ?? {};
+      const cleared = Object.fromEntries(Object.keys(saved).map(key => [key, undefined]));
+      await panelManager.updatePanel(panel.id, { state: { ...panel.state, customState: cleared } });
+      expect(databaseService.getPanel(panel.id)?.state.customState).toEqual({});
+    }
   }
   db.prepare('DELETE FROM sessions WHERE id != ?').run(PANE_CHAT_SESSION_ID);
   db.prepare('DELETE FROM projects').run();
@@ -162,6 +168,29 @@ describe('Pane Chat first-run migrate offer', () => {
 
     await restarted.paneChat.setAgent('claude');
     expect(customState('claude')?.initialInput).toBeUndefined();
+  });
+
+  it('remembers an OpenCode offer before switching to an unused agent and after manager reconstruction', async () => {
+    const first = fixture('opencode');
+    await first.paneChat.getOrCreate();
+    expect(customState('opencode')?.initialInput).toContain('Pane sent this once');
+    await launchWithFirstPrompt('opencode');
+    expect(customState('opencode')?.initialInputSentAt).toBe('2026-10-16T12:01:00.000Z');
+    expect(databaseService.getUserPreference(MIGRATE_OFFER_PREFERENCE)).toBeNull();
+    expect(customState('claude')?.initialInputSentAt).toBeUndefined();
+    expect(customState('claude')?.hasClaudeSessionId).not.toBe(true);
+
+    await first.paneChat.setAgent('claude');
+    expect(customState('claude')?.initialInput).toBeUndefined();
+    expect(databaseService.getUserPreference(MIGRATE_OFFER_PREFERENCE)).toBe('true');
+
+    const restarted = fixture('claude');
+    await restarted.paneChat.getOrCreate();
+    expect(customState('claude')?.initialInput).toBeUndefined();
+    expect(databaseService.getUserPreference(MIGRATE_OFFER_PREFERENCE)).toBe('true');
+    await restarted.paneChat.setAgent('opencode');
+    expect(customState('opencode')?.initialInput).toBeUndefined();
+    expect(databaseService.getUserPreference(MIGRATE_OFFER_PREFERENCE)).toBe('true');
   });
 
   it('keeps offering until a launch actually sends it', async () => {

@@ -20,6 +20,7 @@ import { registerUsageHandlers } from './usage';
 import { registerMissionControlHandlers } from './missionControl';
 import type { AppServices } from './types';
 import { isDaemonOwnedChannel } from '../../../shared/types/daemon';
+import { PaneError, paneErrorText, toPaneDaemonError } from '../../../shared/paneError';
 
 const USAGE_CHANNELS = [
   'usage:get-report',
@@ -452,6 +453,86 @@ describe('daemon registry IPC bindings', () => {
 
     expect(registry.listChannels()).toEqual([...ORCHESTRATION_SESSION_CHANNELS].sort());
     expect(ipcMain.boundChannels.sort()).toEqual([...ORCHESTRATION_SESSION_CHANNELS].sort());
+  });
+
+  it('keeps actionable Session refusal text and the existing IPC failure shape', async () => {
+    const registry = new PaneCommandRegistry();
+    const failure = new PaneError('ERR_SESSION_OPENCODE_LAUNCH',
+      'OpenCode Session launch was refused: "OpenCode launch command has an unmatched quote". No OpenCode terminal launch was started; saved conversation identity was kept.',
+      'Use a direct `opencode --auto` Session launch without wrappers or custom resume settings.');
+    const getView = vi.fn(async () => { throw failure; });
+    registerOrchestrationSessionHandlers(createIpcMainStub(), createServicesStub({
+      // SAFETY: The get channel only reaches this getView refusal stub.
+      orchestrationSessionManager: { getView } as never,
+    }), registry);
+    expect(toPaneDaemonError(failure, 'ERR_INTERNAL')).toEqual({
+      code: failure.code, message: failure.message, next: failure.next,
+    });
+    await expect(registry.invoke('orchestration-sessions:get', [{ sessionId: 'session-1' }]))
+      .resolves.toEqual({ success: false, error: paneErrorText(failure) });
+    getView.mockRejectedValueOnce(new Error('plain cause')).mockRejectedValueOnce('non-error');
+    await expect(registry.invoke('orchestration-sessions:get', [{ sessionId: 'session-1' }]))
+      .resolves.toEqual({ success: false, error: 'plain cause' });
+    await expect(registry.invoke('orchestration-sessions:get', [{ sessionId: 'session-1' }]))
+      .resolves.toEqual({ success: false, error: 'Sessions operation failed' });
+  });
+
+  it('accepts OpenCode in both Session set-agent forms', async () => {
+    const registry = new PaneCommandRegistry();
+    const setAgent = vi.fn(async () => ({ agent: 'opencode' }));
+    // SAFETY: Only setAgent is reached; the stub exposes the decoded selection.
+    registerOrchestrationSessionHandlers(createIpcMainStub(), createServicesStub({
+      orchestrationSessionManager: { setAgent } as never,
+    }), registry);
+
+    await expect(registry.invoke('orchestration-sessions:set-agent', [{ sessionId: 'session-1', agent: 'opencode' }]))
+      .resolves.toMatchObject({ success: true, data: { agent: 'opencode' } });
+    await expect(registry.invoke('orchestration-sessions:set-agent', [{ name: 'Coordinator' }, 'opencode']))
+      .resolves.toMatchObject({ success: true, data: { agent: 'opencode' } });
+    expect(setAgent).toHaveBeenNthCalledWith(1, { sessionId: 'session-1', name: undefined }, 'opencode');
+    expect(setAgent).toHaveBeenNthCalledWith(2, { sessionId: undefined, name: 'Coordinator' }, 'opencode');
+  });
+
+  it('accepts OpenCode in Session create and update', async () => {
+    const registry = new PaneCommandRegistry();
+    const create = vi.fn(async () => ({ agent: 'opencode' }));
+    const update = vi.fn(async () => ({ agent: 'opencode' }));
+    // SAFETY: Only create/update are reached; the stubs expose the decoded agent.
+    registerOrchestrationSessionHandlers(createIpcMainStub(), createServicesStub({
+      orchestrationSessionManager: { create, update } as never,
+    }), registry);
+
+    await expect(registry.invoke('orchestration-sessions:create', [{ name: 'Coordinator', agent: 'opencode' }]))
+      .resolves.toMatchObject({ success: true, data: { agent: 'opencode' } });
+    await expect(registry.invoke('orchestration-sessions:update', [{ sessionId: 'session-1' }, { agent: 'opencode' }]))
+      .resolves.toMatchObject({ success: true, data: { agent: 'opencode' } });
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ name: 'Coordinator', agent: 'opencode' }));
+    expect(update).toHaveBeenCalledWith({ sessionId: 'session-1' }, expect.objectContaining({ agent: 'opencode' }));
+  });
+
+  it('rejects unknown Session agents before calling the manager', async () => {
+    const registry = new PaneCommandRegistry();
+    const create = vi.fn();
+    const update = vi.fn();
+    const setAgent = vi.fn();
+    // SAFETY: Invalid agents must be rejected before any manager method is reached.
+    registerOrchestrationSessionHandlers(createIpcMainStub(), createServicesStub({
+      orchestrationSessionManager: { create, update, setAgent } as never,
+    }), registry);
+
+    for (const agent of ['aider', 'constructor', 'toString', '__proto__']) {
+      await expect(registry.invoke('orchestration-sessions:create', [{ name: 'Invalid', agent }]))
+        .resolves.toMatchObject({ success: false, error: expect.stringContaining('expected one of') });
+      await expect(registry.invoke('orchestration-sessions:update', [{ sessionId: 'session-1' }, { agent }]))
+        .resolves.toMatchObject({ success: false, error: expect.stringContaining('expected one of') });
+      await expect(registry.invoke('orchestration-sessions:set-agent', [{ sessionId: 'session-1', agent }]))
+        .rejects.toThrow('expected one of');
+      await expect(registry.invoke('orchestration-sessions:set-agent', [{ sessionId: 'session-1' }, agent]))
+        .rejects.toThrow('expected one of');
+    }
+    expect(create).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
+    expect(setAgent).not.toHaveBeenCalled();
   });
 
   it('binds daemon-owned permission channels through the shared registry', () => {

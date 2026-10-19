@@ -15,7 +15,7 @@ import { visibleAgentPresets } from '../../../utils/agentPresets';
 import type { AgentLaunchPresetId } from '../../../../../shared/constants/agentLaunchPresets';
 
 function isPaneChatAgent(id: AgentLaunchPresetId): id is PaneChatAgent {
-  return id === 'claude' || id === 'codex' || id === 'cursor';
+  return id === 'claude' || id === 'codex' || id === 'cursor' || id === 'opencode';
 }
 
 const paneChatAgentOptions = visibleAgentPresets()

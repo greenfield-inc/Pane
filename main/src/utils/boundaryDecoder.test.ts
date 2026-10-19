@@ -30,6 +30,18 @@ function issuesOf(run: () => void): BoundaryDecodeIssues {
 }
 
 describe('decodeBoundaryAll', () => {
+  it('collects missing own fields rather than accepting inherited values', () => {
+    const inherited = Object.setPrototypeOf({}, { label: 'inherited', url: 'https://example.test' });
+
+    const error = issuesOf(() => decodeBoundaryAll({ items: [inherited] }, payloadSchema));
+
+    expect(error.issues.map(issue => `${issue.where}: ${issue.message}`)).toEqual([
+      'items[0].label: missing',
+      'items[0].url: missing',
+    ]);
+    expect(() => decodeBoundary(inherited, itemSchema)).toThrow('input.label: expected string');
+  });
+
   it('reports every field problem at once, with "missing" for absent required fields', () => {
     const error = issuesOf(() => decodeBoundaryAll({
       name: 3,

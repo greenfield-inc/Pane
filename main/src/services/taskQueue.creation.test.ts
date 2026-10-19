@@ -10,10 +10,13 @@ import { CommandRunner } from '../utils/commandRunner';
 import { PathResolver } from '../utils/pathResolver';
 import type { Session } from '../types/session';
 import type { SessionManager } from './sessionManager';
+import type { ToolPanel } from '../../../shared/types/panels';
 import { TaskQueue } from './taskQueue';
+import type { CreateSessionQueueResult, SessionCreationJob } from './taskQueue';
 import { WorktreeManager } from './worktreeManager';
 import { worktreePoolManager } from './worktreePoolManager';
 import { panelManager } from './panelManager';
+import { terminalPanelManager } from './terminalPanelManager';
 import { worktreeFileSyncService } from './worktreeFileSyncService';
 import { resetPaneRuntimeForTests, setPaneRuntime } from '../core/runtime';
 
@@ -21,6 +24,11 @@ const send = vi.fn();
 
 function partialMock<T>(value: Partial<T>): T {
   // SAFETY: Fixtures supply every collaborator used by the no-agent creation flow.
+  return value as T;
+}
+
+function testAccess<T>(value: TaskQueue): T {
+  // SAFETY: Each access type mirrors the exact private TaskQueue members exercised by these tests.
   return value as T;
 }
 
@@ -89,6 +97,7 @@ async function createPane(name = 'Feature', isMainRepo = false, taskQueue = queu
 }
 
 describe('pane creation name reuse', () => {
+  // Real-Git history and identity checks use the integration budget, not a latency contract.
   it('reuses an archived display name without taking its worktree identity or commits', async () => {
     const original = await createPane();
     await runner.execFile('git', ['-c', 'user.name=Pane Test', '-c', 'user.email=test@example.com', 'commit', '--allow-empty', '-m', 'Archived work'], original.worktree_path);
@@ -104,8 +113,9 @@ describe('pane creation name reuse', () => {
     expect((await runner.execFile('git', ['rev-parse', 'HEAD'], created.worktree_path)).stdout)
       .toBe((await runner.execFile('git', ['rev-parse', 'main'], project.path)).stdout);
     expect(database.getSession(original.id)?.archived).toBeTruthy();
-  });
+  }, 15000);
 
+  // Real-Git checkout and preservation checks use the integration budget, not a latency contract.
   it('creates a fresh pane when a deleted pane branch is checked out elsewhere', async () => {
     const original = await createPane();
     const externalPath = path.join(tempDir, 'kept-work');
@@ -119,7 +129,7 @@ describe('pane creation name reuse', () => {
     expect(created.name).toBe('Feature');
     expect(created.worktree_name).toBe('feature-1');
     expect(readFileSync(path.join(externalPath, 'keep.txt'), 'utf8')).toBe('Do not touch');
-  });
+  }, 15000);
 
   it('does not reuse leftover branches after permanent deletion, including branch namespaces', async () => {
     await runner.execFile('git', ['branch', 'feature'], project.path);
@@ -143,6 +153,7 @@ describe('pane creation name reuse', () => {
     expect(readFileSync(path.join(existingPath, 'keep.txt'), 'utf8')).toBe('Do not touch');
   });
 
+  // Two real-Git creations use the integration budget, not a latency contract.
   it('suffixes active display names while preserving separate worktrees', async () => {
     // Two queues exercise overlapping creates even on Linux's single-worker queue.
     const secondQueue = new TaskQueue(queueOptions);
@@ -153,7 +164,7 @@ describe('pane creation name reuse', () => {
     } finally {
       await secondQueue.close();
     }
-  });
+  }, 15000);
 
   it('waits beyond the default mutex timeout for a preceding checkout', async () => {
     let releaseCheckout!: () => void;
@@ -208,35 +219,89 @@ describe('pane creation name reuse', () => {
   });
 
   it('runs two setups at once and starts a queued one when a slot frees, even after a failure', async () => {
+    vi.spyOn(queueOptions.worktreeManager, 'resolveWorkingDirectory').mockImplementation(async (_projectPath, worktreeName) => {
+      const worktreePath = path.join(tempDir, worktreeName);
+      mkdirSync(worktreePath);
+      return { worktreePath, baseCommit: undefined, baseBranch: 'main' };
+    });
     const started: string[] = [];
     const settle: Array<(failure?: Error) => void> = [];
+    let admitSecond = () => {};
+    let admitThird = () => {};
+    const secondAdmission = new Promise<void>(resolve => { admitSecond = resolve; });
+    const thirdAdmission = new Promise<void>(resolve => { admitThird = resolve; });
+    let cleaningUp = false;
     vi.spyOn(worktreeFileSyncService, 'syncWorktree').mockImplementation((_source, worktreePath) => {
       started.push(worktreePath);
+      if (started.length === 2) admitSecond();
+      if (started.length === 3) admitThird();
       return new Promise((resolve, reject) => {
-        settle.push(failure => (failure ? reject(failure) : resolve({ failures: [], installCommand: null })));
+        const finish = (failure?: Error) => (failure ? reject(failure) : resolve({ failures: [], installCommand: null }));
+        settle.push(finish);
+        if (cleaningUp) finish();
       });
     });
     Object.assign(queueOptions.sessionManager, { updateSessionStatus: vi.fn() });
+    vi.spyOn(panelManager, 'getPanelsForSession').mockImplementation(sessionId => [
+      partialMock<ToolPanel>({ id: `terminal-${sessionId}`, sessionId, type: 'terminal' }),
+    ]);
+    vi.spyOn(terminalPanelManager, 'isTerminalInitialized').mockReturnValue(true);
+    const notices = vi.spyOn(terminalPanelManager, 'showNotice').mockImplementation(() => {});
+    // SAFETY: These TaskQueue internals track reporting promises that waitForSetup does not await.
+    const setupQueue = testAccess<{
+      settleSetup: (setup: Promise<void>, sessionId: string, worktreePath: string, ctx: NonNullable<ReturnType<SessionManager['getProjectContextByProjectId']>>) => Promise<void>;
+      setupLineWrites: Map<string, Promise<void>>;
+    }>(queue);
+    const setupSettlements: Promise<void>[] = [];
+    const settleSetup = setupQueue.settleSetup.bind(queue);
+    vi.spyOn(setupQueue, 'settleSetup').mockImplementation((...args) => {
+      const settlement = settleSetup(...args);
+      setupSettlements.push(settlement);
+      return settlement;
+    });
+    const creations: Array<ReturnType<typeof createPane>> = [];
 
-    // Each create returns once its Pane exists, without waiting for setup.
-    const first = await createPane('First');
-    await createPane('Second');
-    const third = await createPane('Third');
+    try {
+      // Each create returns once its Pane exists, without waiting for setup.
+      creations.push(createPane('First'));
+      const first = await creations[0];
+      creations.push(createPane('Second'));
+      const second = await creations[1];
+      creations.push(createPane('Third'));
+      const third = await creations[2];
 
-    await vi.waitFor(() => expect(started).toHaveLength(2));
-    expect(queue.setupQueuePosition(third.id)).toBe(1);
-    expect(queueOptions.sessionManager.updateSessionStatus).toHaveBeenCalledWith(
-      third.id, 'initializing', 'Queued for setup: 1st in line; setup starts when an earlier Pane finishes',
-    );
+      await secondAdmission;
+      expect(started).toHaveLength(2);
+      expect(queue.setupQueuePosition(third.id)).toBe(1);
+      expect(queueOptions.sessionManager.updateSessionStatus).toHaveBeenCalledWith(
+        third.id, 'initializing', 'Queued for setup: 1st in line; setup starts when an earlier Pane finishes',
+      );
 
-    settle[0](new Error('Install exploded'));
+      settle[0](new Error('Install exploded'));
 
-    await expect(queue.waitForSetup(first.id)).rejects.toThrow('Install exploded');
-    await vi.waitFor(() => expect(started).toEqual([first.worktree_path, expect.any(String), third.worktree_path]));
-    expect(queue.setupQueuePosition(third.id)).toBeUndefined();
-    settle[1]();
-    settle[2]();
-    await queue.waitForSetup(third.id);
+      await expect(queue.waitForSetup(first.id)).rejects.toThrow('Install exploded');
+      await thirdAdmission;
+      expect(started).toEqual([first.worktree_path, expect.any(String), third.worktree_path]);
+      expect(new Set(started).size).toBe(3);
+      expect(queue.setupQueuePosition(third.id)).toBeUndefined();
+      settle[1]();
+      settle[2]();
+      await queue.waitForSetup(third.id);
+      await queue.waitForSetup(second.id);
+      await Promise.allSettled(setupSettlements);
+      expect(notices).toHaveBeenCalledWith(`terminal-${third.id}`, 'Queued for setup: 1st in line; setup starts when an earlier Pane finishes');
+      expect(notices).toHaveBeenCalledWith(`terminal-${first.id}`, 'Setup failed: Install exploded');
+    } finally {
+      cleaningUp = true;
+      admitSecond();
+      admitThird();
+      for (const finish of settle) finish();
+      const panes = await Promise.allSettled(creations);
+      await Promise.allSettled(panes.flatMap(pane => pane.status === 'fulfilled' ? [queue.waitForSetup(pane.value.id)] : []));
+      await Promise.allSettled(setupSettlements);
+      await Promise.allSettled([...setupQueue.setupLineWrites.values()]);
+      expect(setupQueue.setupLineWrites.size).toBe(0);
+    }
   });
 
   it('reports the created session id while setup is still running', async () => {
@@ -281,21 +346,49 @@ describe('pane creation name reuse', () => {
   });
 
   it('tells a whenSessionCreated listener about a Pane whose panel setup fails', async () => {
-    let failSetup: (error: Error) => void = () => {};
-    vi.spyOn(panelManager, 'ensureExplorerPanel').mockReturnValueOnce(new Promise((_resolve, reject) => { failSetup = reject; }));
-    const job = await queue.createSession({
-      projectId: project.id, worktreeTemplate: 'Feature', prompt: '', toolType: 'none', baseBranch: 'main',
+    vi.spyOn(queueOptions.worktreeManager, 'resolveWorkingDirectory').mockResolvedValue({
+      worktreePath: project.path, baseCommit: undefined, baseBranch: 'main',
     });
-    const listener = vi.fn();
-    queue.whenSessionCreated(job, listener);
-    await vi.waitFor(() => expect(panelManager.ensureExplorerPanel).toHaveBeenCalledOnce());
+    let admitPanel = () => {};
+    const panelAdmission = new Promise<void>(resolve => { admitPanel = resolve; });
+    let failSetup: (error: Error) => void = () => {};
+    const panelSetup = new Promise<void>((_resolve, reject) => { failSetup = reject; });
+    void panelSetup.catch(() => {});
+    vi.spyOn(panelManager, 'ensureExplorerPanel').mockImplementationOnce(() => {
+      admitPanel();
+      return panelSetup;
+    });
+    // SAFETY: Await the existing private job waiter without replacing whenSessionCreated's listener.
+    const creationQueue = testAccess<{
+      waitForSessionCreationJob: (job: SessionCreationJob, timeoutMs?: number) => Promise<CreateSessionQueueResult>;
+    }>(queue);
+    let creationFinished: Promise<CreateSessionQueueResult> | undefined;
+    try {
+      const job = await queue.createSession({
+        projectId: project.id, worktreeTemplate: 'Feature', prompt: '', toolType: 'none', baseBranch: 'main', isMainRepo: true,
+      });
+      creationFinished = creationQueue.waitForSessionCreationJob(job);
+      void creationFinished.catch(() => {});
+      const listener = vi.fn();
+      queue.whenSessionCreated(job, listener);
+      await Promise.race([
+        panelAdmission,
+        creationFinished.then(() => { throw new Error('Creation finished before Explorer admission'); }),
+      ]);
+      expect(panelManager.ensureExplorerPanel).toHaveBeenCalledOnce();
 
-    failSetup(new Error('Panel setup failed'));
+      failSetup(new Error('Panel setup failed'));
 
-    await vi.waitFor(() => expect(listener).toHaveBeenCalledOnce());
-    const [createdId] = listener.mock.calls[0];
-    expect(database.getSession(createdId)?.name).toBe('Feature');
-    expect(queueOptions.sessionManager.emitSessionCreated).toHaveBeenCalledWith(expect.objectContaining({ id: createdId, status: 'error' }), expect.anything());
+      await expect(creationFinished).rejects.toThrow('Panel setup failed');
+      expect(listener).toHaveBeenCalledOnce();
+      const [createdId] = listener.mock.calls[0];
+      expect(database.getSession(createdId)?.name).toBe('Feature');
+      expect(queueOptions.sessionManager.emitSessionCreated).toHaveBeenCalledWith(expect.objectContaining({ id: createdId, status: 'error' }), expect.anything());
+    } finally {
+      admitPanel();
+      failSetup(new Error('Panel setup failed'));
+      await Promise.allSettled(creationFinished ? [creationFinished] : []);
+    }
   });
 
   it('reuses archived names for panes in the project directory without reserving a branch', async () => {

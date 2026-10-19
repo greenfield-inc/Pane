@@ -3,6 +3,7 @@ import { validateWSLAvailable } from '../utils/wslUtils';
 import { sessionRuntimePath } from './sessionRuntime';
 import { findClaudeSessionTranscript } from './claudeSessionTranscript';
 import { CLI_AGENT_TYPES, resolveAgentTypeFromCommand } from './agents/agentIdentity';
+import { assertDirectOpenCodeLaunchCommand } from './agents/opencodeLaunch';
 import { prepareSessionWorkspace, sessionWorkspacePath, discardSessionScaffold, isPristineSessionWorkspace } from './sessionWorkspace';
 import { DEFAULT_SESSION_PROFILE } from '../../../shared/types/sessionProfile';
 import { EventEmitter } from 'events';
@@ -59,13 +60,13 @@ import type { WorkspaceSessionMembership } from './workspaceJournal';
 import { readPanelAgentReport } from './agentReport';
 import { paneChatFirstPrompt } from './paneChatMigrateOffer';
 import { applyTerminalInput, sessionNameFromMessage } from './sessionAutoName';
-import { PaneError } from '../../../shared/paneError';
+import { PaneError, reasonOf } from '../../../shared/paneError';
 import { moveWithinOwnPlaces } from '../../../shared/utils/sessionOrder';
 import type { MobileAlertSubject } from '../daemon/mobilePushSender';
 
 const ORCHESTRATION_SESSION_PANEL_PREFIX = '__orchestration_panel_';
 const LEGACY_AGENT_SESSION_ID_PREFIX = `${LEGACY_ORCHESTRATION_SESSION_ID}-`;
-const PANE_CHAT_AGENTS: readonly PaneChatAgent[] = ['claude', 'codex', 'cursor'];
+const PANE_CHAT_AGENTS: readonly PaneChatAgent[] = ['claude', 'codex', 'cursor', 'opencode'];
 
 const ORCHESTRATION_SESSION_TITLE = 'Session';
 const ORCHESTRATION_BOOTSTRAP_VERSION = 2;
@@ -75,7 +76,7 @@ function getOrchestrationPanelId(sessionId: string, agent: PaneChatAgent): strin
 }
 
 function isPaneChatAgent(agent: string | undefined): agent is PaneChatAgent {
-  return agent === 'claude' || agent === 'codex' || agent === 'cursor';
+  return agent === 'claude' || agent === 'codex' || agent === 'cursor' || agent === 'opencode';
 }
 
 export class OrchestrationSessionManager extends EventEmitter {
@@ -242,8 +243,10 @@ export class OrchestrationSessionManager extends EventEmitter {
       const customResume = sourcePanel ? sourceState?.customResume
         : input.customResume !== undefined ? input.customResume
           : fits('', config.defaultSessionResume) ? config.defaultSessionResume : null;
-      const agent = resolveSessionAgent(explicitAgent, launchCommand, customResume)
-        ?? normalizePaneChatAgent(config.defaultOrchestratorAgent);
+      const defaultAgent = normalizePaneChatAgent(config.defaultOrchestratorAgent);
+      const agent = explicitAgent ?? launchAgent(launchCommand.trim() || RUNPANE_CONTRACT.agentTemplates[defaultAgent].command, customResume)
+        ?? defaultAgent;
+      resolveSessionAgent(agent, launchCommand, customResume);
       this.assertAgentSupported(agent, input.runtime);
       const record: OrchestrationSessionRecord = {
         // Omitted runtime is the native host; 'windows' is a legacy name for it.
@@ -264,6 +267,7 @@ export class OrchestrationSessionManager extends EventEmitter {
           claude: sourceState?.agentType === 'claude' && sourcePanel ? sourcePanel.id : getOrchestrationPanelId(id, 'claude'),
           codex: sourceState?.agentType === 'codex' && sourcePanel ? sourcePanel.id : getOrchestrationPanelId(id, 'codex'),
           cursor: getOrchestrationPanelId(id, 'cursor'),
+          opencode: getOrchestrationPanelId(id, 'opencode'),
         },
         goal: input.goal?.trim() ?? '',
         context: input.context?.trim() ?? (sourcePane ? `Conversation promoted from Pane ${sourcePane.id}. Project files remain at ${sourcePane.worktreePath}. Continue project work there; this Session folder holds coordination artifacts.` : ''),
@@ -339,7 +343,9 @@ export class OrchestrationSessionManager extends EventEmitter {
       const agentChanging = input.agent !== undefined && input.agent !== current.agent;
       const launchCommand = input.launchCommand ?? (agentChanging ? '' : current.launchCommand);
       const customResume = input.customResume !== undefined ? input.customResume : agentChanging ? undefined : current.customResume;
-      const agent = resolveSessionAgent(input.agent, launchCommand ?? '', customResume) ?? current.agent;
+      const command = launchCommand?.trim() || RUNPANE_CONTRACT.agentTemplates[input.agent ?? current.agent].command;
+      const agent = input.agent ?? launchAgent(command, customResume) ?? current.agent;
+      resolveSessionAgent(agent, command, customResume);
       const nextRecord: OrchestrationSessionRecord = {
         ...current,
         name,
@@ -689,6 +695,7 @@ export class OrchestrationSessionManager extends EventEmitter {
     let withFailures: OrchestrationSessionStoreData = normalized;
     for (const record of normalized.sessions) {
       try {
+        this.buildTerminalState(record);
         await this.reconcilePersistedSessionOwner(record);
         await this.finishPromotion(record);
         if (!Object.values(record.panelIds).some(id => terminalPanelManager.isTerminalInitialized(id))) {
@@ -827,6 +834,7 @@ export class OrchestrationSessionManager extends EventEmitter {
         claude: getPaneChatPanelId('claude'),
         codex: getPaneChatPanelId('codex'),
         cursor: getPaneChatPanelId('cursor'),
+        opencode: getPaneChatPanelId('opencode'),
       },
       goal: '',
       context: '',
@@ -926,11 +934,18 @@ export class OrchestrationSessionManager extends EventEmitter {
   }
 
   private async refreshPanelLaunchState(panel: ToolPanel, record: OrchestrationSessionRecord): Promise<void> {
-    const desired = this.buildTerminalState(record);
     // SAFETY: Session-owned terminal panels persist their launch fields in the
     // TerminalPanelState custom state; resume ids and terminal buffers are
     // retained by spreading this previously validated state below.
     const current = panel.state.customState as TerminalPanelState | undefined;
+    // Validate saved OpenCode metadata before record overlays can erase an
+    // incompatible wrapper/resume setting or reset the conversation selector.
+    if (record.agent === 'opencode' || current?.agentType === 'opencode'
+      || resolveAgentTypeFromCommand(current?.initialCommand) === 'opencode') {
+      resolveSessionAgent('opencode', current?.initialCommand ?? '', current?.customResume);
+      if (current?.launchMode === 'wrapped') throw openCodeSessionLaunchError('OpenCode Sessions cannot use wrapped launches');
+    }
+    const desired = this.buildTerminalState(record);
     const isInitialized = terminalPanelManager.isTerminalInitialized(panel.id);
     const nextCustomState: TerminalPanelState = isInitialized
       ? {
@@ -977,10 +992,16 @@ export class OrchestrationSessionManager extends EventEmitter {
 
   private buildTerminalState(record: OrchestrationSessionRecord): TerminalPanelState {
     const command = record.launchCommand?.trim() || RUNPANE_CONTRACT.agentTemplates[record.agent].command;
-    const nativeCommand = /^(?:claude|codex|cursor-agent)(?:\s|$)/.test(command) && !/[;&|\n]/.test(command);
-    const resolvedAgent = launchAgent(command, record.customResume);
+    const initialCommand = record.launchCommand?.trim()
+      || (record.runtime === 'wsl' ? command : this.skillCacheManager?.launchCommand(record.agent)) || command;
+    const effectiveAgent = launchAgent(initialCommand, record.customResume);
+    const resolvedAgent = record.agent === 'opencode' || effectiveAgent === 'opencode'
+      ? resolveSessionAgent(record.agent, initialCommand, record.customResume)
+      : launchAgent(command, record.customResume);
+    const nativeCommand = resolvedAgent === 'opencode'
+      || /^(?:claude|codex|cursor-agent)(?:\s|$)/.test(command) && !/[;&|\n]/.test(command);
     return {
-      initialCommand: record.launchCommand?.trim() || (record.runtime === 'wsl' ? command : this.skillCacheManager?.launchCommand(record.agent)) || command,
+      initialCommand,
       customResume: record.customResume,
       initialInput: this.firstPrompt(record),
       initialInputMode: 'argument',
@@ -1139,9 +1160,7 @@ export class OrchestrationSessionManager extends EventEmitter {
 
 function launchAgent(command: string, resume?: CustomCommandResume | null): PaneChatAgent | undefined {
   const commandAgent = resolveAgentTypeFromCommand(command);
-  if (commandAgent === 'opencode') {
-    throw new Error('OpenCode is a terminal-only agent and cannot be used in named Sessions');
-  }
+  if (commandAgent === 'opencode') return commandAgent;
   const agent = customResumeAgentType(resume) ?? commandAgent;
   return isPaneChatAgent(agent) ? agent : undefined;
 }
@@ -1149,10 +1168,27 @@ function launchAgent(command: string, resume?: CustomCommandResume | null): Pane
 /** An explicit agent wins; a launch command for a different agent is rejected. */
 function resolveSessionAgent(explicit: PaneChatAgent | undefined, command: string, resume?: CustomCommandResume | null): PaneChatAgent | undefined {
   const commandAgent = launchAgent(command, resume);
-  if (explicit && commandAgent && commandAgent !== explicit) {
-    throw new Error(`The launch command runs ${commandAgent}, but the Session agent is ${explicit}; change one to match`);
+  try {
+    if (explicit === 'opencode' || commandAgent === 'opencode') {
+      if (resume) throw new Error('OpenCode Sessions cannot use custom resume settings');
+      if (command.trim()) assertDirectOpenCodeLaunchCommand(command, process.platform === 'win32');
+    }
+    if (explicit && commandAgent && commandAgent !== explicit) {
+      throw new Error(`The launch command runs ${commandAgent}, but the Session agent is ${explicit}; change one to match`);
+    }
+  } catch (cause) {
+    if (explicit !== 'opencode' && commandAgent !== 'opencode') throw cause;
+    throw openCodeSessionLaunchError(cause);
   }
   return explicit ?? commandAgent;
+}
+
+function openCodeSessionLaunchError(cause: unknown): PaneError {
+  return new PaneError(
+    'ERR_SESSION_OPENCODE_LAUNCH',
+    `OpenCode Session launch was refused: "${reasonOf(cause)}". No OpenCode terminal launch was started; saved conversation identity was kept.`,
+    'Set the Session launch command to `opencode --auto` and remove wrapped-launch/custom-resume settings, or choose the agent that matches the command.',
+  );
 }
 
 function validateCreateInput(input: OrchestrationSessionCreateInput): void {

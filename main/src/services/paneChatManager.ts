@@ -28,7 +28,7 @@ function isValidUuid(value: string | undefined): value is string {
 }
 
 function isPaneChatAgent(agent: string | undefined): agent is PaneChatAgent {
-  return agent === 'claude' || agent === 'codex' || agent === 'cursor';
+  return agent === 'claude' || agent === 'codex' || agent === 'cursor' || agent === 'opencode';
 }
 
 export class PaneChatManager {
@@ -148,14 +148,15 @@ export class PaneChatManager {
     // SAFETY: Pane Chat owns this terminal panel and writes its custom state exclusively as TerminalPanelState.
     const previousCustomState = panel.state.customState as TerminalPanelState | undefined;
     const shouldResetClaudeLaunch = agent === 'claude' && !isValidUuid(previousCustomState?.agentSessionId) && !wasInitialized;
+    const preserveDeliveryState = wasInitialized || agent === 'opencode';
     // Bootstrap metadata may change after an app upgrade. An initialized panel
     // already owns a live conversation, so refreshing the launch metadata must
     // never clear its durable scrollback, serialized buffer, or captured agent id.
     const nextCustomState: TerminalPanelState = {
       ...previousCustomState,
       ...this.buildTerminalState(agent, previousCustomState, shouldResetClaudeLaunch),
-      initialInputSentAt: wasInitialized ? previousCustomState?.initialInputSentAt : undefined,
-      initialInputError: wasInitialized ? previousCustomState?.initialInputError : undefined,
+      initialInputSentAt: preserveDeliveryState ? previousCustomState?.initialInputSentAt : undefined,
+      initialInputError: preserveDeliveryState ? previousCustomState?.initialInputError : undefined,
     };
 
     if (wasInitialized) {
@@ -194,6 +195,7 @@ export class PaneChatManager {
       isCliPanel: true,
       isCliReady: false,
     };
+    if (agent === 'opencode') panelState.preserveLaunchCommand = false;
     if (agentSessionId) panelState.agentSessionId = agentSessionId;
     return panelState;
   }
@@ -205,7 +207,7 @@ export class PaneChatManager {
         : randomUUID();
     }
 
-    // Codex and Cursor own their ids; reuse only what was captured for this agent.
+    // Non-Claude agents own their ids; reuse only what was saved for this agent.
     return previousState?.agentType === agent ? previousState.agentSessionId : undefined;
   }
 

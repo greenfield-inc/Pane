@@ -401,6 +401,44 @@ describe('runpane IPC handlers', () => {
       .rejects.toThrow('expected boolean');
   });
 
+  it('accepts OpenCode in RunPane Session create, update and set-agent', async () => {
+    const view = { session: { id: 'coordinator', agent: 'opencode' }, panel: { id: 'coordinator-panel' }, internalSession: { id: 'coordinator-owner' } };
+    const create = vi.fn(async () => view);
+    const update = vi.fn(async () => view.session);
+    const setAgent = vi.fn(async () => view);
+    // SAFETY: These commands only reach the three supplied Session methods.
+    const registry = createRegistry(createServices({ orchestrationSessionManager: { create, update, setAgent } as never }));
+
+    await expect(registry.invoke('runpane:sessions:create', [{ name: 'Coordinator', agent: 'opencode' }]))
+      .resolves.toMatchObject({ ok: true, session: { agent: 'opencode' } });
+    await expect(registry.invoke('runpane:sessions:update', [{ selector: { sessionId: 'coordinator' }, input: { agent: 'opencode' } }]))
+      .resolves.toMatchObject({ ok: true, session: { agent: 'opencode' } });
+    await expect(registry.invoke('runpane:sessions:set-agent', [{ selector: { name: 'Coordinator' }, agent: 'opencode' }]))
+      .resolves.toMatchObject({ ok: true, session: { agent: 'opencode' } });
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ name: 'Coordinator', agent: 'opencode' }));
+    expect(update).toHaveBeenCalledWith({ sessionId: 'coordinator' }, expect.objectContaining({ agent: 'opencode' }));
+    expect(setAgent).toHaveBeenCalledWith({ name: 'Coordinator' }, 'opencode');
+  });
+
+  it('rejects unknown RunPane Session agents before calling the manager', async () => {
+    const create = vi.fn();
+    const update = vi.fn();
+    const setAgent = vi.fn();
+    // SAFETY: Invalid agents must be rejected before any manager method is reached.
+    const registry = createRegistry(createServices({ orchestrationSessionManager: { create, update, setAgent } as never }));
+
+    for (const agent of ['aider', 'constructor', 'toString', '__proto__']) {
+      await expect(registry.invoke('runpane:sessions:create', [{ name: 'Invalid', agent }])).rejects.toThrow('expected one of');
+      await expect(registry.invoke('runpane:sessions:update', [{ selector: { sessionId: 'coordinator' }, input: { agent } }]))
+        .rejects.toThrow('expected one of');
+      await expect(registry.invoke('runpane:sessions:set-agent', [{ selector: { sessionId: 'coordinator' }, agent }]))
+        .rejects.toThrow('expected one of');
+    }
+    expect(create).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
+    expect(setAgent).not.toHaveBeenCalled();
+  });
+
   it('rejects a Session update payload with every problem named and leaves the Session unchanged', async () => {
     const update = vi.fn();
     // SAFETY: This command only reaches update, which must not be called for an invalid payload.
@@ -7359,6 +7397,7 @@ describe('runpane IPC handlers', () => {
     });
   });
 
+  // Real-Git archive cases below use local integration budgets, not a latency contract.
   describe('runpane:panes:archive', () => {
     it('archives an externally owned pane without inspecting or removing its worktree', async () => {
       const externalSession: Session = { ...session, worktreeOwnership: 'external' };
@@ -7429,7 +7468,7 @@ describe('runpane IPC handlers', () => {
           hasUntrackedFiles: false,
         },
       });
-    });
+    }, 15000);
 
     it('rejects archiving a pane that is already archived', async () => {
       const services = createServices({
@@ -7498,7 +7537,7 @@ describe('runpane IPC handlers', () => {
         },
         nextCommand: `runpane panes archive --pane ${session.id} --force --yes --json`,
       });
-    });
+    }, 15000);
 
     it('archives a dirty pane when --force is passed', async () => {
       const repoPath = createTempGitRepo('dirty-force-repo');
@@ -7536,7 +7575,7 @@ describe('runpane IPC handlers', () => {
           hasUncommittedChanges: true,
         },
       });
-    });
+    }, 15000);
 
     it('refuses to archive a pane with commits unpushed to its remote upstream', async () => {
       const repoPath = createTempGitRepo('unpushed-repo');
@@ -7597,7 +7636,7 @@ describe('runpane IPC handlers', () => {
           },
         },
       });
-    });
+    }, 15000);
 
     it('refreshes a stale remote-tracking ref before deciding that pushed commits are unpushed', async () => {
       const repoPath = createTempGitRepo('stale-upstream-repo');
@@ -7648,7 +7687,7 @@ describe('runpane IPC handlers', () => {
           unpushedCommitDetails: [],
         },
       });
-    });
+    }, 15000);
 
     it('dry-runs archive safety without deleting the pane', async () => {
       const repoPath = createTempGitRepo('archive-dry-run-repo');
@@ -7688,7 +7727,7 @@ describe('runpane IPC handlers', () => {
           unpushedCommitDetails: [],
         },
       });
-    });
+    }, 15000);
 
     it('archives a pane whose branch is merged and fully pushed (0 unpushed commits)', async () => {
       const repoPath = createTempGitRepo('merged-repo');
@@ -7734,7 +7773,7 @@ describe('runpane IPC handlers', () => {
           unpushedCommits: 0,
         },
       });
-    });
+    }, 15000);
 
     it('archives a main-repo pane immediately even if it is dirty, skipping the safety gate', async () => {
       const repoPath = createTempGitRepo('main-repo-dirty');
@@ -7766,7 +7805,7 @@ describe('runpane IPC handlers', () => {
           worktreeWillRemain: true,
         },
       });
-    });
+    }, 15000);
 
     it('fails safe with status-unknown when git status cannot be determined', async () => {
       const services = createServices({
@@ -7828,7 +7867,7 @@ describe('runpane IPC handlers', () => {
         archived: true,
         worktreeCleanup: 'failed',
       });
-    });
+    }, 15000);
 
     it('polls for worktree removal when no archiveProgressManager is configured', async () => {
       const repoPath = createTempGitRepo('polling-repo');
@@ -7858,7 +7897,7 @@ describe('runpane IPC handlers', () => {
         ok: true,
         worktreeCleanup: 'completed',
       });
-    });
+    }, 15000);
 
     it('reports completed with pending trash deletion as a successful archive while a large worktree is still deleting', async () => {
       const repoPath = createTempGitRepo('queued-cleanup-repo');
@@ -7882,7 +7921,7 @@ describe('runpane IPC handlers', () => {
       const result = await registry.invoke('runpane:panes:archive', [{ paneId: session.id }]);
 
       expect(result).toMatchObject({ ok: true, archived: true, worktreeCleanup: 'completed', trashDeletion: 'pending' });
-    });
+    }, 15000);
 
     it('only emits worktreeCleanup values that released runpane CLIs can decode', async () => {
       // The enum shipped in runpane <= 2.4.133; its decoders reject anything else.
@@ -8007,7 +8046,7 @@ describe('runpane IPC handlers', () => {
         expect(execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd: repoPath, encoding: 'utf8' })).not.toContain('adopted-clean-adopted');
         expect(execFileSync('git', ['branch', '--list', 'adopted-feature'], { cwd: repoPath, encoding: 'utf8' })).toContain('adopted-feature');
         expect(fs.readdirSync(path.join(repoPath, '.git', 'pane-trash'))).toEqual([]);
-      });
+      }, 15000);
 
       it('blocks an adopted worktree with uncommitted work and keeps --remove-worktree in the next command', async () => {
         const { repoPath, worktreePath } = createRepoWithLinkedWorktree('adopted-dirty');
@@ -8026,7 +8065,7 @@ describe('runpane IPC handlers', () => {
           nextCommand: `runpane panes archive --pane ${session.id} --remove-worktree --force --yes --json`,
         });
         expect(fs.existsSync(worktreePath)).toBe(true);
-      });
+      }, 15000);
 
       it('reports why the check was skipped without --remove-worktree, and merged-PR evidence with it or in a Session close-out', async () => {
         const { repoPath, worktreePath } = createRepoWithLinkedWorktree('adopted-merged');
@@ -8091,7 +8130,7 @@ describe('runpane IPC handlers', () => {
         } finally {
           execFileSpy.mockRestore();
         }
-      });
+      }, 15000);
 
       it('refuses to remove an adopted path that is the repository main checkout', async () => {
         const { repoPath } = createRepoWithLinkedWorktree('adopted-main');
@@ -8103,7 +8142,7 @@ describe('runpane IPC handlers', () => {
         await expect(registry.invoke('runpane:panes:archive', [{ paneId: session.id, removeWorktree: true }]))
           .rejects.toThrow(/main checkout/);
         expect(sessionsDelete).not.toHaveBeenCalled();
-      });
+      }, 15000);
     });
 
     describe('merged pull request evidence', () => {
@@ -8176,7 +8215,7 @@ describe('runpane IPC handlers', () => {
           },
         });
         expect(JSON.parse(JSON.stringify(result))).not.toHaveProperty('blocked');
-      });
+      }, 15000);
 
       it.each(['agent-config-only', 'ordinary-untracked', 'nested-agent-config', 'tracked-agent-config'])('checks archive dirtiness with %s', async (scenario) => {
         const { repoPath, head } = createFeatureBranchRepo('agent-config-repo');
@@ -8210,7 +8249,7 @@ describe('runpane IPC handlers', () => {
             unpushedCommits: 0,
           },
         });
-      });
+      }, 15000);
 
       it('treats an upstream deleted on the remote as gone and archives with merged PR evidence', async () => {
         const { repoPath, head } = createFeatureBranchRepo('upstream-gone-repo');
@@ -8242,7 +8281,7 @@ describe('runpane IPC handlers', () => {
             mergedViaPr: { number: 42, headOid: head },
           },
         });
-      });
+      }, 15000);
 
       it('finds no evidence when gh is missing or no merged PR head matches HEAD', async () => {
         const { repoPath } = createFeatureBranchRepo('no-evidence-repo');
@@ -8268,7 +8307,7 @@ describe('runpane IPC handlers', () => {
           });
           expect(JSON.parse(JSON.stringify(result))).not.toHaveProperty('blocked.safetyCheck.mergedViaPr');
         }
-      });
+      }, 15000);
     });
 
     describe('--session --merged', () => {
@@ -8375,7 +8414,7 @@ describe('runpane IPC handlers', () => {
           ],
         });
         expect(JSON.stringify(result)).not.toContain('Rerun with --force');
-      });
+      }, 15000);
 
       it('dry-runs the Session archive, says what it would do, and reports a reason for every skipped Pane', async () => {
         const { pane } = createRemoteRepo();
@@ -8410,7 +8449,7 @@ describe('runpane IPC handlers', () => {
             { paneId: 'pane-missing', outcome: 'skipped', skipped: { code: 'missing-pane' } },
           ],
         });
-      });
+      }, 15000);
 
       it('keeps work written while the PR lookup is in flight', async () => {
         const { pane } = createRemoteRepo();
@@ -8428,7 +8467,7 @@ describe('runpane IPC handlers', () => {
         expect(sessionsDelete).not.toHaveBeenCalled();
         expect(fs.existsSync(draft)).toBe(true);
         expect(result).toMatchObject({ archived: 0, items: [{ paneId: 'pane-racing', outcome: 'skipped', skipped: { code: 'uncommitted-changes' }, safetyCheck: { hasUntrackedFiles: true } }] });
-      });
+      }, 15000);
 
       it('keeps a detached worktree whose HEAD is the stored start commit but on no remote or base branch', async () => {
         const { repoPath, git, pane } = createRemoteRepo();
