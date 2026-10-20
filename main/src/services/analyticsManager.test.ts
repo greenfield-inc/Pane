@@ -221,14 +221,30 @@ describe('install heartbeat', () => {
     expect(config.getOrCreateAnalyticsInstallId).not.toHaveBeenCalled();
   });
 
-  it('survives failing and hanging requests, and stops on shutdown', async () => {
+  it('cancels a request that hangs past 1.5 seconds', async () => {
+    const { analytics } = setup();
+    const started = performance.now();
+    let abortedAfter: number | undefined;
+    send.mockImplementationOnce((_url, { signal }) => new Promise<Response>((_resolve, reject) => {
+      signal?.addEventListener('abort', () => {
+        abortedAfter = performance.now() - started;
+        reject(signal.reason);
+      });
+    }));
+    analytics.startHeartbeat();
+    await vi.waitFor(() => expect(abortedAfter).toBeDefined(), { timeout: 3000 });
+    expect(abortedAfter).toBeGreaterThanOrEqual(1400);
+    expect(abortedAfter).toBeLessThan(2500);
+    analytics.stopHeartbeat();
+  });
+
+  it('survives failing requests, and stops on shutdown', async () => {
     vi.useFakeTimers();
     const { analytics } = setup();
-    send.mockRejectedValueOnce(new Error('offline')).mockReturnValueOnce(new Promise<Response>(() => {}));
+    send.mockRejectedValueOnce(new Error('offline'));
     expect(() => analytics.startHeartbeat()).not.toThrow();
     await vi.advanceTimersByTimeAsync(DAY);
     expect(send).toHaveBeenCalledTimes(2);
-    expect(send.mock.calls[1][1].signal).toBeInstanceOf(AbortSignal);
 
     analytics.stopHeartbeat();
     await vi.advanceTimersByTimeAsync(2 * DAY);

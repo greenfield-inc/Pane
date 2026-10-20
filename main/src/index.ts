@@ -1511,7 +1511,6 @@ if (launchRemoteSetup) {
 
   usageManager.stop();
   void sharedCredentialSync?.stop();
-  analyticsManager?.stopHeartbeat();
 
   // Guard against multiple shutdown attempts
   if (shutdownInProgress) {
@@ -1561,6 +1560,7 @@ if (launchRemoteSetup) {
     archiveProgressManager.clearAll();
   }
 
+  analyticsManager?.stopHeartbeat();
   powerSaveManager?.dispose();
   powerSaveManager = null;
 
