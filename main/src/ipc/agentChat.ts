@@ -15,6 +15,7 @@ const sendSchema = boundary.object({
 /** One command surface for Electron, daemon clients and the remote PWA. */
 export function registerAgentChatHandlers(ipcMain: IpcMain, registry: PaneCommandRegistry): void {
   registry.register('agent-chat:get', (panelId: string) => agentChatManager.view(decodeBoundary(panelId, boundary.nonEmptyString)));
+  registry.register('agent-chat:identify', (panelId: string, nativeId: string, socketPath: string) => agentChatManager.identify(decodeBoundary(panelId, boundary.nonEmptyString), decodeBoundary(nativeId, boundary.nonEmptyString), decodeBoundary(socketPath, boundary.nonEmptyString)));
   registry.register('agent-chat:setup', async () => { await installClaudeAdapter(); return { installed: true }; });
   registry.register('agent-chat:switch', (panelId: string, mode: PaneCommandValue, generation: number) => agentChatManager.switchTo(
     decodeBoundary(panelId, boundary.nonEmptyString), decodeBoundary(mode, interfaceSchema), decodeBoundary(generation, boundary.number),
@@ -33,5 +34,5 @@ export function registerAgentChatHandlers(ipcMain: IpcMain, registry: PaneComman
   });
   registry.register('agent-chat:configure', (panelId: string, generation: number, configId: string, value: string) => agentChatManager.configure(decodeBoundary(panelId, boundary.nonEmptyString), decodeBoundary(generation, boundary.number), decodeBoundary(configId, boundary.nonEmptyString), decodeBoundary(value, boundary.string)));
   registry.register('agent-chat:stop', (panelId: string) => agentChatManager.stop(decodeBoundary(panelId, boundary.nonEmptyString)));
-  for (const operation of ['get', 'setup', 'switch', 'recover', 'send', 'receipt', 'cancel', 'permission', 'stop', 'configure']) registry.bindChannel(ipcMain, `agent-chat:${operation}`);
+  for (const operation of ['get', 'identify', 'setup', 'switch', 'recover', 'send', 'receipt', 'cancel', 'permission', 'stop', 'configure']) registry.bindChannel(ipcMain, `agent-chat:${operation}`);
 }

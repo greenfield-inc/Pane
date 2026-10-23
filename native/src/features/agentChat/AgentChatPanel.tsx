@@ -17,8 +17,11 @@ import type { useAgentChat } from './useAgentChat';
 
 type Chat = ReturnType<typeof useAgentChat>;
 
+const MESSAGE_COMPONENTS = { Message: ChatMessage };
+
 function ConversationList({ chat, approvalScroll }: { chat: Chat; approvalScroll: RefObject<(() => void) | null> }) {
-  // Indices belong to the runtime snapshot, which may lag the host by a render.
+  // Capture restoration once; changing native contentOffset later can reset Android to zero.
+  const [initialPosition] = useState(() => ({ ...chat.readingPosition }));
   const messages = useAuiState(state => state.thread.messages);
   const list = useRef<LegendListRef>(null);
   const { chat: colors } = useTheme();
@@ -33,14 +36,13 @@ function ConversationList({ chat, approvalScroll }: { chat: Chat; approvalScroll
     };
     return () => { approvalScroll.current = null; };
   }, [approvalScroll, chat.view?.permissions, messages, reducedMotion]);
-  if (!chat.view?.transcript) return <View style={styles.loading}><ActivityIndicator color={colors.mutedForeground} /><Text style={{ color: colors.mutedForeground }}>Loading conversation…</Text></View>;
   return <View style={styles.fill}>
-    <LegendList ref={list} testID="chat-messages" data={messages} keyExtractor={message => message.id} recycleItems={false} estimatedItemSize={120} contentContainerStyle={styles.messages} keyboardShouldPersistTaps="handled" maintainVisibleContentPosition maintainScrollAtEnd={{ animated: false }} maintainScrollAtEndThreshold={0.04} initialScrollAtEnd={chat.readingPosition.atBottom} initialScrollOffset={chat.readingPosition.offset} onScroll={event => {
+    <LegendList ref={list} testID="chat-messages" data={messages} keyExtractor={message => message.id} recycleItems={false} estimatedItemSize={120} contentContainerStyle={styles.messages} keyboardShouldPersistTaps="handled" maintainVisibleContentPosition maintainScrollAtEnd={{ animated: false }} maintainScrollAtEndThreshold={0.04} initialScrollAtEnd={initialPosition.atBottom} initialScrollOffset={initialPosition.atBottom ? undefined : initialPosition.offset} onScroll={event => {
       const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
       const bottom = contentSize.height - contentOffset.y - layoutMeasurement.height < 32;
       chat.saveReadingPosition(contentOffset.y, bottom);
       setAtBottom(bottom);
-    }} renderItem={({ index }) => <ThreadPrimitive.MessageByIndex index={index} components={{ Message: ChatMessage }} />} />
+    }} renderItem={({ item }) => <ThreadPrimitive.Unstable_MessageById messageId={item.id} components={MESSAGE_COMPONENTS} />} />
     {!atBottom && <Pressable testID="chat-latest" accessibilityRole="button" accessibilityLabel="Scroll to latest message" onPress={() => void list.current?.scrollToEnd({ animated: !reducedMotion })} style={[styles.latest, { backgroundColor: colors.background, borderColor: colors.border }]}><Icon ios="arrow.down" android="arrow_downward" size={18} color={colors.foreground} /></Pressable>}
   </View>;
 }
@@ -95,7 +97,7 @@ export function AgentChatPanel({ chat, draft, onChangeDraft, confirmDraft }: { c
         <Text selectable variant="footnote" style={{ color: theme.chat.mutedForeground }}>Conversation {view.conversation.nativeSessionId}</Text>
         <Text variant="subhead" style={{ color: theme.chat.mutedForeground }}>Recovery opens Terminal to restore this conversation’s launch environment.</Text>
         <ChatButton testID="chat-recover" title={recovering ? 'Recovering…' : 'Recover exact conversation'} disabled={!chat.connected || recovering} onPress={() => { setRecovering(true); void chat.recover().finally(() => setRecovering(false)); }} />
-      </View> : <ConversationList chat={chat} approvalScroll={approvalScroll} />}
+      </View> : !view?.transcript ? <View style={styles.loading}><ActivityIndicator color={theme.chat.mutedForeground} /><Text style={{ color: theme.chat.mutedForeground }}>Loading conversation…</Text></View> : <ConversationList key={view.conversation?.nativeSessionId} chat={chat} approvalScroll={approvalScroll} />}
       <View style={styles.composerArea}>
         {/* A phone must keep an approval reachable even while its tool row is offscreen. */}
         {!!view?.permissions.length && unmatchedPermissions.length === 0 && <ChatButton testID="chat-approval-needed" title="Approval needed" onPress={() => approvalScroll.current?.()} />}

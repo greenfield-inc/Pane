@@ -1,18 +1,27 @@
 import { randomUUID } from 'crypto';
 import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ConfigManager } from '../configManager';
+import { resetPaneRuntimeForTests, setPaneRuntime } from '../../core/runtime';
 import { databaseService } from '../database';
 import { panelManager } from '../panelManager';
 import { AgentChatManager } from './agentChatManager';
 import type { TerminalPanelState } from '../../../../shared/types/panels';
 
+beforeEach(async () => {
+  const config = new ConfigManager();
+  await config.updateConfig({ defaultAgentInterface: 'terminal' });
+  setPaneRuntime({ eventSink: { send: vi.fn() }, getConfigManager: () => config, getPtyHostRuntime: () => null, getWebviewContextMap: () => new Map() });
+});
+afterEach(() => { resetPaneRuntimeForTests(); vi.unstubAllEnvs(); });
+
 describe('agent chat host commands', () => {
-  it('keeps an unsupported shared-daemon Codex tab native and rejects raw input only for an actual chat owner', async () => {
+  it('keeps an unregistered terminal usable without inventing ownership', async () => {
     const id = randomUUID();
     databaseService.createSession({ id, name: id, initial_prompt: '', worktree_name: id, worktree_path: process.cwd(), project_id: null, tool_type: 'none' });
     const panel = await panelManager.createPanel({ sessionId: id, type: 'terminal', title: 'Codex', initialState: { customState: { agentType: 'codex', initialCommand: 'codex --yolo' } } });
     const manager = new AgentChatManager();
-    expect(manager.view(panel.id)).toMatchObject({ available: false, unavailableReason: expect.stringMatching(/shared.daemon/i) });
+    expect(manager.view(panel.id)).toMatchObject({ available: false, unavailableReason: expect.stringMatching(/verified conversation connection/i) });
     expect(() => manager.guardNativeInput(panel.id, 'hello')).not.toThrow();
     await expect(manager.switchTo(panel.id, 'chat', 0)).rejects.toMatchObject({ code: 'CHAT_PROFILE_UNSUPPORTED' });
     // SAFETY: This fixture creates a terminal panel and reads its typed custom state.
@@ -20,8 +29,8 @@ describe('agent chat host commands', () => {
   });
 });
 
-// These integration fixtures execute a POSIX fake CLI; Windows profiles remain unsupported.
-it.skipIf(process.platform === 'win32')('keeps a supported native conversation usable when its adapter setup is missing and persists the checkpoint identity', async () => {
+// These fixtures use a POSIX fake CLI. Actual Windows processes have separate runtime QA.
+it.skipIf(process.platform === 'win32')('keeps a native conversation usable when automatic adapter setup fails and persists the checkpoint identity', async () => {
   const { mkdtempSync, writeFileSync, rmSync } = await import('fs');
   const { tmpdir } = await import('os');
   const { join } = await import('path');
@@ -38,7 +47,7 @@ it.skipIf(process.platform === 'win32')('keeps a supported native conversation u
   const nativeId = randomUUID();
   databaseService.createSession({ id, name: id, initial_prompt: '', worktree_name: id, worktree_path: directory, project_id: null, tool_type: 'none' });
   const panel = await panelManager.createPanel({ sessionId: id, type: 'terminal', initialState: { agentType: 'claude', initialCommand: executable, agentSessionId: nativeId } });
-  const manager = new AgentChatManager({ enabled: () => true, supportsNativeHost: () => true });
+  const manager = new AgentChatManager({ enabled: () => true });
   const { getPaneEventSink } = await import('../../core/runtime');
   const events = vi.spyOn(getPaneEventSink(), 'send');
   try {
@@ -52,7 +61,9 @@ it.skipIf(process.platform === 'win32')('keeps a supported native conversation u
     recordNativeHook(saved.launch.journalFile, { session_id: nativeId, hook_event_name: 'Stop', permission_mode: 'default', background_tasks: [], session_crons: [] });
     await expect.poll(() => events.mock.calls.some(([channel, payload]) => channel === 'agent-chat:state' && decodeOptionalBoundary(payload, boundary.object({ running: boundary.boolean }))?.running === false)).toBe(true);
     expect(manager.view(panel.id)).toMatchObject({ available: true, setupRequired: true });
-    await expect(manager.switchTo(panel.id, 'chat', 1)).rejects.toMatchObject({ code: 'CHAT_ADAPTER_MISSING' });
+    vi.stubEnv('npm_config_registry', 'http://127.0.0.1:1');
+    vi.stubEnv('npm_config_fetch_retries', '0');
+    await expect(manager.switchTo(panel.id, 'chat', 1)).rejects.toMatchObject({ code: 'CHAT_ADAPTER_INSTALL_FAILED' });
     expect(manager.view(panel.id).conversation?.active).toBe('terminal');
     expect(() => manager.guardNativeInput(panel.id, 'New prompt\r')).not.toThrow();
     events.mockClear();
@@ -78,7 +89,9 @@ let mode='default', effort='medium';
 const config = () => [{id:'mode',name:'Mode',type:'select',currentValue:mode,options:[{value:'default',name:'Default'},{value:'plan',name:'Plan'}]},{id:'effort',name:'Effort',type:'select',currentValue:effort,options:[{value:'medium',name:'Medium'},{value:'high',name:'High'}]}];
 process.stdin.on('data', chunk => { buffer += chunk; let end; while ((end=buffer.indexOf('\\n'))>=0) {
  const m=JSON.parse(buffer.slice(0,end)); buffer=buffer.slice(end+1); if (m.id===undefined) continue;
- let result={}; if(m.method==='initialize') result={protocolVersion:1,agentCapabilities:{loadSession:true,sessionCapabilities:{close:{}}}};
+ let result={}; if(m.method==='initialize') result={protocolVersion:1,agentCapabilities:{loadSession:true,sessionCapabilities:{close:{},fork:{}}}};
+ if(m.method==='session/fork') result={sessionId:'fork-native-a'};
+ if(m.method==='session/load' && require('fs').existsSync('exact-load-fails')) { require('fs').unlinkSync('exact-load-fails');send({jsonrpc:'2.0',id:m.id,error:{code:-32000,message:'Exact import unavailable'}});continue; }
  if(m.method==='session/load') { send({jsonrpc:'2.0',method:'session/update',params:{sessionId:m.params.sessionId,update:{sessionUpdate:'user_message_chunk',messageId:'history-a',content:{type:'text',text:'Preserved native history'}}}}); result={modes:{currentModeId:'default',availableModes:[{id:'default',name:'Default'}]},configOptions:config()}; }
  if(m.method==='session/new') result={sessionId:'fresh-native-a',modes:{currentModeId:'default',availableModes:[{id:'default',name:'Default'}]}};
  if(m.method==='session/prompt' && m.params.prompt[0]?.text==='Fail this turn') { send({jsonrpc:'2.0',id:m.id,error:{code:-32000,message:'Provider authentication expired'}}); continue; }
@@ -95,10 +108,10 @@ process.stdin.on('data', chunk => { buffer += chunk; let end; while ((end=buffer
   const id = randomUUID(), nativeId = randomUUID();
   databaseService.createSession({ id, name: id, initial_prompt: '', worktree_name: id, worktree_path: directory, project_id: null, tool_type: 'none' });
   const panel = await panelManager.createPanel({ sessionId: id, type: 'terminal', initialState: { agentType: 'claude', initialCommand: executable, agentSessionId: nativeId } });
-  const manager = new AgentChatManager({ enabled: () => true, supportsNativeHost: () => true });
+  const manager = new AgentChatManager({ enabled: () => true });
   // SAFETY: This fixture creates a terminal panel and reads its typed custom state.
   const state = () => (panelManager.getPanel(panel.id)!.state.customState as TerminalPanelState).agentChat!;
-  const hook = (name: string, extra = {}) => recordNativeHook(state().launch.journalFile, { session_id: nativeId, hook_event_name: name, cwd: directory, ...extra });
+  const hook = (name: string, extra = {}) => recordNativeHook(state().launch.journalFile, { session_id: state().conversation.nativeSessionId, hook_event_name: name, cwd: directory, ...extra });
   try {
     manager.attachNative({
       pid: () => child.pid,
@@ -110,7 +123,7 @@ process.stdin.on('data', chunk => { buffer += chunk; let end; while ((end=buffer
         exited = once(child, 'exit');
         await once(child, 'spawn');
         const command = await manager.prepareNativeLaunch(panelManager.getPanel(panel.id)!, directory, process.env, `${executable} --resume ${nativeId}`, 'bash', false);
-        expect(command).toContain(`--resume ${nativeId}`);
+        expect(command).toContain(`'--resume' '${state().conversation.nativeSessionId}'`);
         hook('SessionStart', { source: 'resume' });
       },
     });
@@ -118,6 +131,8 @@ process.stdin.on('data', chunk => { buffer += chunk; let end; while ((end=buffer
     hook('SessionStart', { source: 'startup' });
     hook('Stop', { permission_mode: 'default', background_tasks: [], session_crons: [] });
     await manager.switchTo(panel.id, 'chat', 1);
+    const { getRuntimeConfigManager } = await import('../../core/runtime');
+    expect(getRuntimeConfigManager().getConfig().defaultAgentInterface).toBe('chat');
     const firstViewer = manager.view(panel.id);
     const secondViewer = manager.view(panel.id);
     expect(firstViewer).toEqual(secondViewer);
@@ -164,10 +179,18 @@ process.stdin.on('data', chunk => { buffer += chunk; let end; while ((end=buffer
     await manager.configure(panel.id, 2, 'mode', 'plan');
     await manager.configure(panel.id, 2, 'effort', 'high');
     await manager.switchTo(panel.id, 'terminal', 2);
+    expect(getRuntimeConfigManager().getConfig().defaultAgentInterface).toBe('terminal');
     expect(state().launch).toMatchObject({ permissionMode: 'plan', effort: 'high' });
     expect(manager.view(panel.id).conversation).toMatchObject({ active: 'terminal', nativeSessionId: nativeId, generation: 3 });
     expect(manager.verifyNativeResume(panel.id, nativeId)).toEqual({ pid: child.pid });
     expect(() => manager.verifyNativeResume(panel.id, 'different-conversation')).toThrow(/exact saved conversation/);
+    hook('Stop', { permission_mode: 'plan', effort: { level: 'high' }, background_tasks: [], session_crons: [] });
+    writeFileSync(join(directory, 'exact-load-fails'), 'controlled exact import failure');
+    await manager.switchTo(panel.id, 'chat', 3);
+    expect(manager.view(panel.id).conversation).toMatchObject({ active: 'chat', nativeSessionId: 'fork-native-a', generation: 4 });
+    expect(manager.view(panel.id).conversation?.transferNotice).toBeUndefined();
+    await manager.switchTo(panel.id, 'terminal', 4);
+    expect(manager.view(panel.id).conversation).toMatchObject({ active: 'terminal', nativeSessionId: 'fork-native-a', generation: 5 });
     const fresh = await panelManager.createPanel({ sessionId: id, type: 'terminal', initialState: { agentType: 'claude', initialCommand: executable, initialInput: 'Fresh first turn' } });
     expect(await manager.prepareFreshChat(fresh, directory, process.env, 'bash', false, 'chat')).toBe(true);
     expect(manager.view(fresh.id).conversation).toMatchObject({ active: 'chat', nativeSessionId: 'fresh-native-a', generation: 1 });
@@ -200,4 +223,98 @@ it('restores saved native ownership as stopped without starting a replacement pr
   expect(restarted.view(panel.id).conversation).toMatchObject({ active: 'stopped', nativeSessionId: 'exact-saved-id', generation: 4 });
   expect(() => restarted.guardNativeInput(panel.id, 'submit\r')).toThrow(/stopped/i);
   expect(() => restarted.assertNativeInitialize(panel.id)).toThrow(/already has a conversation owner/i);
+});
+
+it.skipIf(process.platform === 'win32')('shares one Codex owner between native and Chat and remembers the last selected interface', async () => {
+  const { mkdtempSync, writeFileSync, rmSync } = await import('fs');
+  const { tmpdir } = await import('os');
+  const { join } = await import('path');
+  const { spawn } = await import('child_process');
+  const { once } = await import('events');
+  const { getRuntimeConfigManager } = await import('../../core/runtime');
+  const directory = mkdtempSync(join(tmpdir(), 'pane-codex-host-'));
+  const executable = join(directory, 'codex');
+  writeFileSync(executable, `#!${process.execPath}
+if(process.argv.includes('--version')){console.log('codex-cli test-capabilities');process.exit(0)}
+const {WebSocketServer}=require(${JSON.stringify(require.resolve('ws'))});const crypto=require('crypto');const args=process.argv.slice(2);const digest=args[args.indexOf('--ws-token-sha256')+1];
+const server=new WebSocketServer({port:0,host:'127.0.0.1',verifyClient:({req})=>crypto.createHash('sha256').update((req.headers.authorization||'').replace(/^Bearer /,'')).digest('hex')===digest});
+server.on('listening',()=>process.stderr.write('listening on: ws://127.0.0.1:'+server.address().port+'\\n'));
+server.on('connection',socket=>socket.on('message',data=>{const m=JSON.parse(data);if(m.id===undefined)return;const send=value=>socket.send(JSON.stringify(value));let result={};if(m.method==='model/list')result={data:[]};if(m.method.startsWith('thread/'))result={thread:{id:'native-codex-thread',turns:[],historyMode:'legacy',status:{type:'idle'}},model:'gpt-test',reasoningEffort:'low',approvalPolicy:'on-request',approvalsReviewer:'user',sandbox:{type:'readOnly'}};if(m.method==='turn/start'){result={turn:{id:'new-turn',status:'inProgress'}};send({method:'item/completed',params:{threadId:'native-codex-thread',item:{id:'answer',type:'agentMessage',text:'Fresh response'}}});send({method:'turn/completed',params:{threadId:'native-codex-thread',turn:{id:'new-turn',status:'completed'}}});}send({id:m.id,result});}));`, { mode: 0o700 });
+  const id = randomUUID();
+  databaseService.createSession({ id, name: id, initial_prompt: '', worktree_name: id, worktree_path: directory, project_id: null, tool_type: 'none' });
+  const panel = await panelManager.createPanel({ sessionId: id, type: 'terminal', initialState: { agentType: 'codex', initialCommand: executable } });
+  const child = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { stdio: 'ignore' });
+  const exited = once(child, 'exit'); await once(child, 'spawn');
+  const manager = new AgentChatManager({ enabled: () => true });
+  manager.attachNative({ pid: () => child.pid, writeControl: () => { throw new Error('Switch must not interrupt the native view'); }, destroy: async () => { child.kill(); await exited; }, initialize: async () => { throw new Error('Switch must not restart the native view'); } });
+  try {
+    const env = { ...process.env };
+    expect(await manager.prepareFreshChat(panel, directory, env, 'bash', false)).toBe(false);
+    expect(manager.view(panel.id).conversation).toMatchObject({ provider: 'codex', active: 'terminal', nativeSessionId: 'native-codex-thread', generation: 1 });
+    const command = await manager.prepareNativeLaunch(panel, directory, env, executable, 'bash', false);
+    expect(command).toContain('native-codex-thread');
+    expect(command).toContain('--remote');
+    expect(command).not.toContain(env.PANE_CODEX_CHAT_TOKEN);
+    await manager.switchTo(panel.id, 'chat', 1);
+    expect(getRuntimeConfigManager().getConfig().defaultAgentInterface).toBe('chat');
+    expect(() => manager.guardNativeInput(panel.id, 'hidden terminal input')).toThrow(/raw terminal input/i);
+    manager.send(panel.id, { generation: 2, operationId: 'fresh', text: 'New request' });
+    await expect.poll(() => manager.receipt(panel.id, 'fresh')?.state).toBe('completed');
+    expect(manager.view(panel.id).transcript).toMatchObject({ generation: 2, messages: expect.arrayContaining([expect.objectContaining({ id: 'answer' })]) });
+    await manager.switchTo(panel.id, 'terminal', 2);
+    expect(manager.view(panel.id).conversation).toMatchObject({ active: 'terminal', generation: 3, nativeSessionId: 'native-codex-thread' });
+    expect(getRuntimeConfigManager().getConfig().defaultAgentInterface).toBe('terminal');
+    expect(() => manager.guardNativeInput(panel.id, 'native input')).not.toThrow();
+  } finally { await manager.stop(panel.id); child.kill(); await exited; manager.detachObservers(); rmSync(directory, { recursive: true, force: true }); }
+});
+
+it.skipIf(process.platform === 'win32')('binds an identified legacy tab to its existing owner without guessing or replaying history', async () => {
+  const { mkdtempSync, writeFileSync, rmSync } = await import('fs');
+  const { tmpdir } = await import('os');
+  const { join } = await import('path');
+  const { spawn } = await import('child_process');
+  const { once } = await import('events');
+  const { WebSocketServer } = await import('ws');
+  const { decodeBoundary } = await import('../../../../shared/validation/boundaryDecoder');
+  const directory = mkdtempSync(join(tmpdir(), 'pane-codex-identify-'));
+  const server = new WebSocketServer({ port: 0, host: '127.0.0.1' });
+  await once(server, 'listening');
+  const { port } = decodeBoundary(server.address(), boundary.object({ port: boundary.number }));
+  const nativeId = randomUUID();
+  const calls: string[] = [];
+  server.on('connection', socket => socket.on('message', data => {
+    const message = JSON.parse(data.toString()); calls.push(message.method);
+    if (message.id === undefined) return;
+    const result = message.method === 'model/list' ? { data: [] } : message.method === 'thread/loaded/list' ? { data: [nativeId] } : message.method === 'initialize' ? {} : { thread: { id: nativeId, turns: [{ id: 'old-turn', status: 'completed', items: [{ type: 'agentMessage', id: 'old-answer', text: 'Native history' }] }] }, approvalPolicy: 'on-request', sandbox: { type: 'readOnly' } };
+    socket.send(JSON.stringify({ id: message.id, result }));
+  }));
+  const executable = join(directory, 'codex');
+  writeFileSync(executable, `#!${process.execPath}\nconst socket=require('net').connect({host:'127.0.0.1',port:${port}});process.stdin.pipe(socket).pipe(process.stdout);process.stdin.on('end',()=>socket.end());socket.on('close',()=>process.exit(0));`, { mode: 0o700 });
+  const child = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { stdio: 'ignore' });
+  const exited = once(child, 'exit'); await once(child, 'spawn');
+  const id = randomUUID();
+  databaseService.createSession({ id, name: id, initial_prompt: '', worktree_name: id, worktree_path: directory, project_id: null, tool_type: 'none' });
+  const panel = await panelManager.createPanel({ sessionId: id, type: 'terminal', initialState: { agentType: 'codex', initialCommand: executable } });
+  const manager = new AgentChatManager({ enabled: () => true });
+  manager.attachNative({ pid: () => child.exitCode === null ? child.pid : undefined, writeControl: () => { throw new Error('Identification must never type into the native draft'); }, destroy: async () => { child.kill(); await exited; }, initialize: async () => { throw new Error('Original owner must stay alive'); } });
+  try {
+    expect(await manager.prepareNativeLaunch(panel, directory, process.env, executable, 'bash', false)).toBe(executable);
+    expect(manager.view(panel.id).identificationRequired).toBe(true);
+    await expect(manager.identify(panel.id, randomUUID(), join(directory, 'owner.sock'))).rejects.toMatchObject({ code: 'CHAT_IDENTITY_UNAVAILABLE' });
+    expect(manager.view(panel.id).identificationRequired).toBe(true);
+    await manager.identify(panel.id, nativeId, join(directory, 'owner.sock'));
+    await manager.switchTo(panel.id, 'chat', 1);
+    expect(manager.view(panel.id)).toMatchObject({ available: true, conversation: { nativeSessionId: nativeId, active: 'chat', generation: 2 }, transcript: { messages: [{ id: 'old-answer' }] } });
+    await manager.switchTo(panel.id, 'terminal', 2);
+    expect(child.exitCode).toBeNull();
+    expect(calls).not.toContain('thread/start'); expect(calls).not.toContain('thread/fork'); expect(calls).not.toContain('turn/start');
+    await manager.stop(panel.id);
+    expect(server.address()).not.toBeNull();
+  } finally {
+    await manager.stop(panel.id); manager.detachObservers();
+    if (child.exitCode === null) { child.kill(); await exited; }
+    for (const client of server.clients) client.terminate();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+    rmSync(directory, { recursive: true, force: true });
+  }
 });

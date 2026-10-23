@@ -114,6 +114,7 @@ export class RemoteRuntimeAdapter {
   readonly agentChat: AgentChatClient = {
     get: async panelId => decodeAgentChatView(await this.invoke('agent-chat:get', [panelId])),
     setup: () => this.invoke('agent-chat:setup'),
+    identify: async (panelId, nativeId, socketPath) => decodeAgentChatView(await this.invoke('agent-chat:identify', [panelId, nativeId, socketPath])),
     switch: (panelId, mode, generation) => this.invoke('agent-chat:switch', [panelId, mode, generation]),
     recover: (panelId, mode, generation) => this.invoke('agent-chat:recover', [panelId, mode, generation]),
     send: (panelId, request) => this.invoke('agent-chat:send', [panelId, request]),

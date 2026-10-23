@@ -62,6 +62,10 @@ export interface AgentConversationRecord {
   active: AgentInterface | 'stopped';
   preferred: AgentInterface;
   recovery?: string;
+  /** Only incomplete transfers need disclosure; successful full forks are quiet. */
+  transferNotice?: string;
+  /** Provider may have copied history before its fork response was lost. */
+  forkUnconfirmed?: boolean;
   pendingSwitch?: { target: AgentInterface; reason: string };
   transition?: { source: AgentInterface; target: AgentInterface; phase: 'releasing' | 'loading' };
 }
@@ -79,6 +83,9 @@ export interface AgentChatLaunch {
   strictMcpConfig: boolean;
   journalFile: string;
   settingsFile: string;
+  codexConfigArgs?: string[];
+  codexEndpoint?: string;
+  codexSocketPath?: string;
 }
 
 export interface AgentChatProcessIdentity { pid: number; parent: number; started: string }
@@ -104,6 +111,7 @@ export interface AgentChatView {
   panelId: string;
   conversation?: AgentConversationRecord;
   available: boolean;
+  identificationRequired?: boolean;
   unavailableReason?: string;
   setupRequired: boolean;
   running: boolean;
@@ -134,6 +142,7 @@ export interface AgentChatClient {
   onReconnect?(callback: () => void): () => void;
   get(panelId: string): Promise<AgentChatView>;
   setup(): Promise<{ installed: boolean }>;
+  identify?(panelId: string, nativeId: string, socketPath: string): Promise<AgentChatView>;
   switch(panelId: string, mode: AgentInterface, generation: number): Promise<AgentConversationRecord>;
   recover(panelId: string, mode: AgentInterface, generation: number): Promise<AgentConversationRecord>;
   send(panelId: string, request: AgentChatSend): Promise<AgentChatReceipt>;

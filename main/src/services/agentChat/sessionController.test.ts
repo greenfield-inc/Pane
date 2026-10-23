@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { SessionController, type ConversationRecord, type RuntimeDriver } from './sessionController';
 
 const original: ConversationRecord = {
@@ -31,6 +31,64 @@ function storage() {
 }
 
 describe('conversation runtime handoff', () => {
+  it('retains a durably returned fork when its history load fails instead of restoring an old identity', async () => {
+    const store = storage();
+    const released: string[] = [];
+    const driver: RuntimeDriver = {
+      preflight: async () => undefined,
+      checkpoint: async () => ({ ready: false, reason: 'Running' }),
+      release: async (_record, mode) => { released.push(mode); },
+      acquire: async (_record, mode) => {
+        expect(mode).toBe('chat');
+        store.write({ ...store.read(), nativeSessionId: 'durable-fork' });
+        throw new Error('History transport disconnected');
+      },
+    };
+    const controller = new SessionController(store, driver);
+    await expect(controller.switchTo('chat', 1)).rejects.toMatchObject({ code: 'CHAT_HANDOFF_FAILED' });
+    expect(controller.snapshot()).toMatchObject({ active: 'stopped', nativeSessionId: 'durable-fork', generation: 2 });
+    expect(released).toEqual(['terminal', 'chat']);
+  });
+  it('preserves a running turn when both interfaces attach to the same verified provider owner', async () => {
+    const store = storage();
+    const driver: RuntimeDriver = {
+      preflight: async () => undefined,
+      handoff: async record => ({ nativeSessionId: record.nativeSessionId, historyVerified: true }),
+      checkpoint: async () => { throw new Error('Must not wait for a checkpoint'); },
+      release: async () => { throw new Error('Must not stop the shared owner'); },
+      acquire: async () => { throw new Error('Must not start a second owner'); },
+    };
+    const controller = new SessionController(store, driver);
+    await controller.switchTo('chat', 1);
+    expect(controller.snapshot()).toMatchObject({ active: 'chat', nativeSessionId: 'conversation-a', generation: 2 });
+    await controller.switchTo('terminal', 2);
+    expect(controller.snapshot()).toMatchObject({ active: 'terminal', nativeSessionId: 'conversation-a', generation: 3 });
+  });
+  it('stops an active original before forking and returns to the fork in the same tab', async () => {
+    const store = storage();
+    let running = true;
+    const owners = new Set(['terminal']);
+    const driver: RuntimeDriver = {
+      preflight: async () => undefined,
+      checkpoint: async () => ({ ready: false, reason: 'The original is responding' }),
+      release: async (_record, mode) => { running = false; owners.delete(mode); },
+      acquire: async (record, mode) => {
+        expect(running).toBe(false);
+        expect(owners.size).toBe(0);
+        owners.add(mode);
+        if (mode === 'chat') return { nativeSessionId: 'fork-b', historyVerified: true, forked: true };
+        expect(record.nativeSessionId).toBe('fork-b');
+        return { nativeSessionId: record.nativeSessionId, historyVerified: true };
+      },
+    };
+    const controller = new SessionController(store, driver);
+    await controller.switchTo('chat', 1);
+    expect(controller.snapshot()).toMatchObject({ panelId: 'panel-a', active: 'chat', nativeSessionId: 'fork-b', generation: 2 });
+    expect(controller.snapshot().pendingSwitch).toBeUndefined();
+    await controller.switchTo('terminal', 2);
+    expect(controller.snapshot()).toMatchObject({ panelId: 'panel-a', active: 'terminal', nativeSessionId: 'fork-b', generation: 3 });
+    expect([...owners]).toEqual(['terminal']);
+  });
   it('requires explicit recovery after a host restart and verifies both possible owners before resuming the exact id', async () => {
     const store = storage();
     store.write({ ...original, active: 'chat', preferred: 'chat' });
@@ -52,15 +110,28 @@ describe('conversation runtime handoff', () => {
     expect(controller.snapshot()).toMatchObject({ active: 'chat', generation: 2, nativeSessionId: 'conversation-a' });
     expect([...owners]).toEqual(['chat']);
   });
-  it('rechecks work after freezing input and leaves the source usable when new work raced preflight', async () => {
-    const runtime = provider();
-    let checks = 0;
-    runtime.driver.checkpoint = async () => ++checks === 1 ? { ready: true } : { ready: false, reason: 'A new turn arrived' };
-    const controller = new SessionController(storage(), runtime.driver);
-    await expect(controller.switchTo('chat', 1)).rejects.toMatchObject({ code: 'CHAT_CHECKPOINT_UNAVAILABLE' });
-    expect(controller.snapshot()).toEqual(original);
-    expect([...runtime.owners]).toEqual(['terminal']);
-    expect(() => controller.assertWritable(1)).not.toThrow();
+  it('freezes input before checking transferability and cancelling work that raced preflight', async () => {
+    const store = storage();
+    let working = false;
+    const owners = new Set(['terminal']);
+    const driver: RuntimeDriver = {
+      preflight: async () => { working = true; },
+      checkpoint: async () => {
+        expect(() => controller.assertWritable(1)).toThrow(/switch/i);
+        return { ready: false, reason: 'A new turn arrived' };
+      },
+      release: async (_record, mode) => { working = false; owners.delete(mode); },
+      acquire: async (_record, mode, options) => {
+        expect(working).toBe(false);
+        expect(owners.size).toBe(0);
+        expect(options).toEqual({ fork: true });
+        owners.add(mode);
+        return { nativeSessionId: 'fork-after-race', historyVerified: true, forked: true };
+      },
+    };
+    const controller = new SessionController(store, driver);
+    await controller.switchTo('chat', 1);
+    expect(controller.snapshot()).toMatchObject({ active: 'chat', nativeSessionId: 'fork-after-race', generation: 2 });
   });
   it('leaves the source usable when preflight fails or the feature is disabled', async () => {
     const runtime = provider();
@@ -167,34 +238,33 @@ it('releases a failed recovery target before leaving the exact conversation stop
 });
 
 
-it('keeps the active runtime interactive while a switch waits, supports cancellation, and transfers only at a verified checkpoint', async () => {
-  vi.useFakeTimers();
+it('keeps a partial-transfer notice on the adopted fork without exposing a routine fork notice', async () => {
   const store = storage();
-  let ready = false;
-  const owners = new Set(['terminal']);
   const driver: RuntimeDriver = {
     preflight: async () => undefined,
-    checkpoint: async () => ready ? { ready: true } : { ready: false, reason: 'A tool is still running' },
-    release: async (_record, mode) => { owners.delete(mode); },
-    acquire: async record => { expect(owners.size).toBe(0); owners.add('chat'); return { nativeSessionId: record.nativeSessionId, historyVerified: true }; },
+    checkpoint: async () => ({ ready: false, reason: 'No exact checkpoint' }),
+    release: async () => undefined,
+    acquire: async () => ({ nativeSessionId: 'partial-fork', historyVerified: true, forked: true, transferNotice: 'The provider could not copy one image attachment.' }),
   };
-  try {
-    const controller = new SessionController(store, driver);
-    await controller.switchTo('chat', 1);
-    expect(controller.snapshot().pendingSwitch?.target).toBe('chat');
-    expect(() => controller.assertWritable(1)).not.toThrow();
-    await controller.switchTo('terminal', 1);
-    ready = true;
-    await vi.advanceTimersByTimeAsync(1000);
-    expect([...owners]).toEqual(['terminal']);
-    ready = false;
-    await controller.switchTo('chat', 1);
-    await vi.advanceTimersByTimeAsync(500);
-    expect([...owners]).toEqual(['terminal']);
-    ready = true;
-    await vi.advanceTimersByTimeAsync(500);
-    expect([...owners]).toEqual(['chat']);
-    expect(controller.snapshot()).toMatchObject({ active: 'chat', generation: 2, nativeSessionId: original.nativeSessionId });
-    expect(controller.snapshot().pendingSwitch).toBeUndefined();
-  } finally { vi.useRealTimers(); }
+  const controller = new SessionController(store, driver);
+  await controller.switchTo('chat', 1);
+  expect(controller.snapshot()).toMatchObject({ active: 'chat', nativeSessionId: 'partial-fork', transferNotice: 'The provider could not copy one image attachment.' });
+});
+
+it('leaves an unacknowledged fork stopped instead of automatically restoring or forking again', async () => {
+  const store = storage();
+  let acquisitions = 0;
+  const driver: RuntimeDriver = {
+    preflight: async () => undefined, checkpoint: async () => ({ ready: false, reason: 'Active work' }),
+    release: async () => undefined,
+    acquire: async () => {
+      acquisitions++;
+      store.write({ ...store.read(), forkUnconfirmed: true });
+      throw new Error('Connection ended before the fork identity arrived');
+    },
+  };
+  const controller = new SessionController(store, driver);
+  await expect(controller.switchTo('chat', 1)).rejects.toMatchObject({ code: 'CHAT_HANDOFF_FAILED' });
+  expect(acquisitions).toBe(1);
+  expect(controller.snapshot()).toMatchObject({ active: 'stopped', nativeSessionId: 'conversation-a', forkUnconfirmed: true });
 });

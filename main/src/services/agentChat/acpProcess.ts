@@ -74,6 +74,7 @@ export class AcpProcess {
     if (this.timer) clearInterval(this.timer);
     await this.observation;
     await this.tracker.refresh();
+    await this.tracker.terminateSurvivors();
     await this.tracker.verifyExited(5000);
     if (this.observationError) throw new PaneError('CHAT_PROCESS_OBSERVATION_FAILED', `Process ownership observation failed: ${reasonOf(this.observationError)}.`, 'Verify the stopped conversation before explicitly recovering it.');
     if (protocolError) throw new PaneError('CHAT_CLOSE_UNCONFIRMED', `The adapter exited, but did not acknowledge session close: ${reasonOf(protocolError)}.`, 'Recover the exact conversation explicitly after inspecting its state.');

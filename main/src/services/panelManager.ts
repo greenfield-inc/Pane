@@ -371,10 +371,14 @@ class PanelManager {
 
   /** Synchronous durable fence: callers may release a writer only after this
    * returns. Normal panel updates cannot replace this host-owned field. */
-  commitAgentChat(panelId: string, chat: AgentChatPanelState): void {
+  commitAgentChat(panelId: string, chat: AgentChatPanelState | undefined): void {
     const panel = this.getPanel(panelId);
     if (!panel || panel.type !== 'terminal') throw new PaneError('CHAT_PANEL_MISSING', 'The agent tab no longer exists. No runtime was acquired.', 'Open an existing agent tab.');
-    const state = { ...panel.state, customState: { ...panel.state.customState, agentChat: structuredClone(chat) } };
+    // SAFETY: The terminal panel type was checked above; customState is its persisted terminal state.
+    const previous = panel.state.customState as TerminalPanelState | undefined;
+    const customState: TerminalPanelState = { ...previous, agentChat: structuredClone(chat) };
+    if (chat?.conversation.nativeSessionId) { customState.agentSessionId = chat.conversation.nativeSessionId; customState.agentType = chat.conversation.provider; }
+    const state = { ...panel.state, customState };
     if (!databaseService.updatePanel(panelId, { state })) throw new PaneError('CHAT_STATE_NOT_SAVED', 'The runtime ownership record could not be saved. The switch did not proceed.', 'Resolve the storage error before switching.');
     const saved = databaseService.getPanel(panelId);
     // SAFETY: The row was just written as a terminal panel with host-owned chat state.

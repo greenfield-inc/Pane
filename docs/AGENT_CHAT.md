@@ -1,48 +1,54 @@
 # Agent Chat
 
-Agent tabs can use Chat or the agent's native Terminal interface. The tab's
-ellipsis menu and context menu offer **View as Chat** and **View as Terminal**.
-Compatible conversations also have a Chat/Terminal switch above the content,
-including in the React Native companion.
-Both interfaces continue the same saved provider conversation. Switching waits
-for an idle checkpoint; it does not transfer a running tool or cancel a turn.
+Agent tabs can use Chat or the agent's native Terminal interface. Right-click
+an agent tab (or use Shift+F10, the Context Menu key, or a touch long press) for
+**View as Chat** and **View as Terminal**. The React Native companion also has
+a Chat/Terminal switch. Chat header actions use the same contextual interaction.
 
-Settings → AI & Agents → **Default agent interface** applies to new compatible
-tabs. Existing installations default to Terminal, and existing tabs keep their
-choice. **Chat interface** disables new Chat transitions without terminating
-existing Chat work. Those conversations can still send, cancel, stop and return
-to Terminal.
+Switching keeps one tab. It reuses the provider conversation where possible;
+otherwise it stops the original writer and copies history using the provider's
+native fork operation. The fork becomes this tab's active conversation, including
+when returning to Terminal. Historical prompts and tools are never replayed as
+new work. Successful transfers are quiet; incomplete transfers show a notice.
 
-## Current compatibility
+The last selected interface is one global preference for new agent tabs, saved
+across restart. Existing tabs retain their choice. Settings → AI & Agents →
+**Default agent interface** can also change the default. **Chat interface**
+disables new Chat transitions without terminating existing Chat work.
 
-The initial implementation enables Claude Code **2.1.309** with
-`@agentclientprotocol/claude-agent-acp` **0.94.0** on **macOS Apple Silicon**.
-Pane uses ACP SDK **2.0.1** and assistant-ui **0.15.31** as a display/composer
-binding; the React Native companion uses the matching **0.1.50** distribution.
-Both share core **0.3.31**, store **0.3.22** and tap **0.9.24**; their exact
-release-age exceptions keep this tested runtime family together. The adapter uses the verified native Claude executable on the workspace
-host. Chat uses the existing provider login; there is no additional chat cloud
-service or second conversation store.
+## Provider connections
 
-A directly launched `claude` command can preserve model, effort, permission
-mode, `--strict-mcp-config` and `--add-dir`. Wrappers, custom resume templates,
-SSH commands, unknown flags and existing tabs without Pane's lifecycle hooks
-remain Terminal. A switch requested during work waits for a verified checkpoint;
-**Cancel pending switch** leaves the current interface active. The hooks
-report foreground completion, pending work, background tasks and scheduled
-wakeups. An incomplete observation blocks switching.
+Claude Code uses the pinned upstream `@agentclientprotocol/claude-agent-acp`
+adapter on the workspace host. Pane installs it automatically in its own data
+directory using bundled npm. Setup uses the existing provider login and leaves
+global provider configuration alone. Authentication or installation failures are
+reported explicitly. Runtime support depends on provider capabilities, rather
+than an operating-system or exact CLI-version allowlist.
 
-Default shared-daemon Codex tabs remain Terminal: exiting their TUI does not
-prove release of the conversation's writer. A dedicated `--no-daemon` experiment
-proved continuity, but its background-work checkpoint is not enabled in the
-product. Linux, Windows, WSL and other providers also remain Terminal until
-validated. A browser on another operating system can view a supported host's
-Chat; it never starts a substitute local agent.
+Direct Claude launches preserve model, effort, permission mode,
+`--strict-mcp-config` and `--add-dir`. Native lifecycle hooks establish the
+conversation identity and checkpoint. If exact loading is unavailable, the
+adapter's native history-copy capability supplies the fallback.
 
-**Set up Chat** explicitly installs the pinned upstream adapter under the
-workspace host's Pane data directory. Missing adapters leave native terminals
-usable. The default Chat setting falls back to Terminal for unsupported launches
-or missing adapters. Setup does not alter global Claude/Codex configuration.
+New direct Codex tabs use a dedicated native app-server with authenticated
+loopback WebSocket transport. Chat and the native TUI share that owner, allowing
+interface switches during a response without restarting the turn. Native policy,
+reviewer, sandbox roots and configuration stay in Codex; Pane does not reduce
+them to adapter permission presets. The raw connection credential stays on the
+host and is passed only to the native TUI, not browser viewers or provider tools.
+
+For older Codex tabs without a verified binding, tab actions offer one-time
+identification. Run `/status` yourself when the native composer is ready and
+enter its current Session ID and server socket. Pane verifies that the thread
+is loaded on that owner and remembers the binding. It never guesses from cwd,
+recency or a similarly named history file, and never types into an unknown
+native draft or modal. The shared server remains externally owned; Pane owns
+only its proxy connection and tab's terminal.
+
+Custom wrappers, unknown launch options, SSH and WSL launch translation require
+a verified host launch route. An unavailable route reports its limitation;
+remote viewers never start a substitute local provider. A connection or successful
+build alone is not evidence of a tested provider round trip on that platform.
 
 ## Lifetime and recovery
 
@@ -51,12 +57,16 @@ pending permissions and transcript projection. Hiding a tab, switching viewers
 or disconnecting a remote browser only detaches subscriptions. Stop, close and
 archive clean up the active runtime on the owning host.
 
-A handoff preflights the destination, verifies the source checkpoint, freezes
-submissions, and saves a transition before releasing the source. The source's
-tracked process lifetimes must end before the destination loads the exact ID.
-Failed imports never fall back to a new conversation, a latest-session selector
-or a summary. After a failed target load, Pane restores the exact source only
-when target release is verified; otherwise the tab remains stopped.
+A handoff preflights the destination, freezes submissions and saves its transition
+before changing ownership. A shared Codex owner remains alive across views.
+When changing runtimes, the original turn is stopped and tracked process lifetimes
+must end before exact loading or a provider-native fork starts. An active turn
+does not wait for normal completion merely to switch views.
+
+A returned fork ID is saved before history hydration. If subsequent loading
+fails, recovery retains that fork. If a fork response is lost, Pane leaves the
+outcome unconfirmed and does not automatically request another copy. Original
+provider history is preserved. Recovery never guesses a latest-session ID.
 
 After a host restart, Chat recovery is explicit, including after an app update. Recover in Terminal first to rebuild
 the normal workspace launch environment. If a crash occurred before a spawned
@@ -74,15 +84,15 @@ retry automatically; sends, answers and configuration changes cannot.
 Chat uses assistant-ui’s default thread, message and composer styling. It renders
 Markdown, reasoning, tools and edit details. Resource links, embedded resources
 and unfamiliar message content have expandable, selectable details; provider protocol metadata is under
-Conversation options → Diagnostics on desktop/web. Model, mode and effort
+the Chat header context menu → Diagnostics on desktop/web. Model, mode and effort
 choices come from the host and sit beside Send. Narrow web panels combine them
 in one menu trigger; the native app uses a settings sheet.
-Images and configuration controls appear only when advertised by the adapter.
+Configuration controls expose provider-supported choices; native policy details remain available in Diagnostics.
 The browser never executes provider tools. Unsupported client filesystem,
 terminal and elicitation capabilities are not advertised.
 
-The display cache is limited to 4,000 messages and 16 MiB; larger imports remain
-in Terminal with an explanation. The provider retains the complete conversation.
+The display cache is limited to 4,000 messages and 16 MiB; larger imports show
+a notice that Chat cannot display the entire history. The provider retains the complete conversation.
 The desktop/web viewer renders pages of 200 messages; the React Native viewer
 uses Legend List virtualization. Both open heavy tool details on demand.
 Draft text, pending delivery reconciliation and scroll position survive viewer

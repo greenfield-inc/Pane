@@ -33,6 +33,7 @@
       "ignoreUnresolved": ["/usr/bin/time"],
       "ignoreDependencies": [
         "original-fs",
+        "npm",
         "@agentclientprotocol/sdk",
         "@anthropic-ai/sdk",
         "@lydell/node-pty",

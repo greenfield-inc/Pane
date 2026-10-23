@@ -11,8 +11,9 @@ import { getAppDirectory } from '../../utils/appDirectory';
 import { findExecutableInPath } from '../../utils/shellPath';
 import { getPaneEventSink, getRuntimeConfigManager } from '../../core/runtime';
 import { quoteShellWord } from '../agents/shellWord';
-import { claudeChatProfile } from './launchProfile';
-import { CLAUDE_NATIVE_VERSION } from './adapterSetup';
+import { claudeChatProfile, codexChatProfile, type CodexChatProfile } from './launchProfile';
+import { CodexProcess, CODEX_TOKEN_ENV } from './codexProcess';
+import { hostCommand, nativeCommand, providerScript } from './hostCommand';
 import { ArchiveProcessTracker, readArchiveProcesses } from '../archiveProcessTracker';
 import { NativeHookJournal } from './nativeHookJournal';
 import { SessionController, type ConversationRecord, type RuntimeDriver } from './sessionController';
@@ -24,7 +25,7 @@ import type { AgentChatPanelState, AgentChatView, AgentInterface, AgentChatSend,
 import type { TerminalPanelState } from '../../../../shared/types/panels';
 import { PaneError, reasonOf } from '../../../../shared/paneError';
 import { panelManager } from '../panelManager';
-import { claudeAdapterEntry } from './adapterSetup';
+import { adapterEntry, installAdapter } from './adapterSetup';
 
 const execFileAsync = promisify(execFile);
 export interface NativeChatPort {
@@ -37,7 +38,6 @@ export interface NativeChatPort {
 }
 export interface AgentChatManagerOptions {
   enabled?: () => boolean;
-  supportsNativeHost?: () => boolean;
 }
 
 /** The host owns runtime lifetime; desktop and remote callers share this instance. */
@@ -51,20 +51,132 @@ export class AgentChatManager {
   private readonly observationErrors = new Map<string, string>();
   private readonly controllers = new Map<string, SessionController>();
   private readonly adapters = new Map<string, AcpProcess>();
+  private readonly codex = new Map<string, CodexProcess>();
   private readonly transcripts = new Map<string, TranscriptProjection>();
   private readonly environments = new Map<string, NodeJS.ProcessEnv>();
   private readonly acquiring = new Set<string>();
   private readonly observations = new Map<string, Promise<void>>();
   private readonly updateOperations = new Map<string, string>();
   private readonly launchInputs = new Map<string, string>();
+  private readonly adopting = new Set<string>();
+  private readonly legacyCodex = new Map<string, { cwd: string; env: NodeJS.ProcessEnv; shellType: string; profile: CodexChatProfile; executable: string }>();
 
   constructor(private readonly options: AgentChatManagerOptions = {}) {}
 
   attachNative(port: NativeChatPort): void { this.native = port; }
   private enabled(): boolean { return this.options.enabled?.() ?? getRuntimeConfigManager().getConfig().agentChatEnabled !== false; }
+  private session(panelId: string) { return this.codex.get(panelId)?.session ?? this.adapters.get(panelId)?.session; }
+
+  private async prepareCodex(panel: ToolPanel, cwd: string, env: NodeJS.ProcessEnv, shellType: string, profile: CodexChatProfile, preference?: AgentInterface): Promise<boolean> {
+    const running = this.codex.get(panel.id);
+    if (running) { env[CODEX_TOKEN_ENV] = running.token; return false; }
+    // SAFETY: TerminalPanelManager supplies a terminal panel before native spawn.
+    const state = panel.state.customState as TerminalPanelState | undefined;
+    if (!state || state.launchMode || state.preserveLaunchCommand || state.customResume || state.sshHost) return false;
+    const previous = this.record(panel.id);
+    if (previous && this.acquiring.has(panel.id)) {
+      this.environments.set(panel.id, { ...env });
+      const runtime = await this.startCodex(previous.conversation);
+      await runtime.session.load({ sessionId: previous.conversation.nativeSessionId, cwd: previous.launch.cwd, mcpServers: [] });
+      env[CODEX_TOKEN_ENV] = runtime.token;
+      return false;
+    }
+    // Existing daemon conversations require attachment to their original owner;
+    // never load their ID into an unrelated newly spawned server.
+    if (state.agentSessionId || state.agentChat || profile.remote) return false;
+    const executable = path.isAbsolute(profile.executable) ? profile.executable : findExecutableInPath(profile.executable);
+    if (!executable) return false;
+    const command = hostCommand(executable, ['--version']);
+    const { stdout } = await execFileAsync(command.executable, command.args, { cwd, env, windowsVerbatimArguments: command.windowsVerbatimArguments, timeout: 5000, maxBuffer: 16 * 1024 });
+    const directory = path.join(getAppDirectory(), 'agent-chat', createHash('sha256').update(panel.id).digest('hex'), randomUUID());
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
+    const active = preference ?? getRuntimeConfigManager().getConfig().defaultAgentInterface ?? 'terminal';
+    const saved: AgentChatPanelState = {
+      conversation: { panelId: panel.id, workspaceId: panel.sessionId, provider: 'codex', nativeSessionId: '', active: 'stopped', preferred: active, generation: 0, recovery: 'Preparing Codex…' },
+      launch: { command: state.launchCommand ?? state.initialCommand ?? '', cwd, shellType, executable, version: stdout.trim(), strictMcpConfig: false, journalFile: '', settingsFile: path.join(directory, 'codex.json'), codexConfigArgs: profile.configArgs },
+      processes: { terminal: [], chat: [] },
+    };
+    this.known.add(panel.id);
+    panelManager.commitAgentChat(panel.id, saved);
+    this.environments.set(panel.id, { ...env });
+    this.controller(panel.id);
+    try {
+      const runtime = await this.startCodex(saved.conversation);
+      await runtime.session.create({ cwd, mcpServers: [] }, panel.title || 'Pane conversation');
+      panelManager.commitAgentChat(panel.id, { ...this.required(panel.id), conversation: { ...this.required(panel.id).conversation, active, generation: 1, recovery: undefined } });
+      env[CODEX_TOKEN_ENV] = runtime.token;
+      this.publish(panel.id);
+      if (active === 'chat' && state.initialInput) {
+        this.send(panel.id, { generation: 1, operationId: `initial:${panel.id}`, text: state.initialInput });
+        const current = panelManager.getPanel(panel.id)!;
+        await panelManager.updatePanel(panel.id, { state: { ...current.state, customState: { ...current.state.customState, initialInputSentAt: new Date().toISOString() } } });
+      }
+      return active === 'chat';
+    } catch (error) {
+      let release = '';
+      try { await this.codex.get(panel.id)?.release(); this.codex.delete(panel.id); } catch (failure) { release = ` Release remains unverified: ${reasonOf(failure)}.`; }
+      panelManager.commitAgentChat(panel.id, { ...this.required(panel.id), conversation: { ...this.required(panel.id).conversation, active: 'stopped', recovery: `Codex startup failed: ${reasonOf(error)}.${release}` } });
+      this.publish(panel.id);
+      return true;
+    }
+  }
+
+  private async startCodex(record: ConversationRecord): Promise<CodexProcess> {
+    const saved = this.required(record.panelId);
+    const generation = record.generation + 1;
+    const projection = new TranscriptProjection(record.panelId, generation);
+    this.transcripts.set(record.panelId, projection);
+    panelManager.commitAgentChat(record.panelId, { ...saved, processes: { ...saved.processes, unverifiedSpawn: 'chat' } });
+    const runtime = new CodexProcess({
+      executable: saved.launch.executable, configArgs: saved.launch.codexConfigArgs ?? [], cwd: saved.launch.cwd,
+      env: this.environments.get(record.panelId) ?? process.env, directory: path.dirname(saved.launch.settingsFile), generation, socketPath: saved.launch.codexSocketPath,
+      save: identities => panelManager.commitAgentChat(record.panelId, { ...this.required(record.panelId), processes: { ...this.required(record.panelId).processes, chat: structuredClone(identities), unverifiedSpawn: undefined } }),
+      onIdentity: nativeSessionId => panelManager.commitAgentChat(record.panelId, { ...this.required(record.panelId), conversation: { ...this.required(record.panelId).conversation, nativeSessionId } }),
+      onChange: change => {
+        const event = projection.acceptChange(change);
+        if (!projection.error()) getPaneEventSink().send('agent-chat:event', event);
+      },
+      onState: () => this.publish(record.panelId),
+      onDisconnect: () => {
+        const current = this.record(record.panelId);
+        if (current && current.conversation.active !== 'stopped') {
+          panelManager.commitAgentChat(record.panelId, { ...current, conversation: { ...current.conversation, active: 'stopped', recovery: 'The Codex connection closed. Verify its recorded runtime before recovery.' } });
+        }
+      },
+    });
+    try {
+      await runtime.start();
+      this.codex.set(record.panelId, runtime);
+      await runtime.session.initialize();
+      panelManager.commitAgentChat(record.panelId, { ...this.required(record.panelId), launch: { ...this.required(record.panelId).launch, codexEndpoint: runtime.endpoint } });
+      return runtime;
+    } catch (error) {
+      await runtime.release();
+      this.codex.delete(record.panelId);
+      throw error;
+    }
+  }
+
+  private async handoffCodex(record: ConversationRecord, target: AgentInterface) {
+    const runtime = this.codex.get(record.panelId);
+    if (!runtime) throw new PaneError('CHAT_RECOVERY_REQUIRED', 'The Codex server is no longer connected.', 'Recover the recorded conversation before switching.');
+    await runtime.session.verifyIdentity(record.nativeSessionId);
+    if (target === 'terminal' && !this.native?.pid(record.panelId)) {
+      this.acquiring.add(record.panelId);
+      try { await this.native!.initialize(record.panelId, this.required(record.panelId).launch.cwd); }
+      finally { this.acquiring.delete(record.panelId); }
+    }
+    runtime.session.setGeneration(record.generation + 1);
+    this.transcripts.get(record.panelId)?.setGeneration(record.generation + 1);
+    return { nativeSessionId: record.nativeSessionId, historyVerified: true };
+  }
 
   async prepareFreshChat(panel: ToolPanel, cwd: string, env: NodeJS.ProcessEnv, shellType: string, isWSL: boolean, preference?: AgentInterface): Promise<boolean> {
-    if ((preference ?? getRuntimeConfigManager().getConfig().defaultAgentInterface) !== 'chat' || !this.enabled() || isWSL || !(this.options.supportsNativeHost?.() ?? (process.platform === 'darwin' && process.arch === 'arm64')) || !claudeAdapterEntry()) return false;
+    // SAFETY: TerminalPanelManager supplies a terminal panel before native spawn.
+    const terminal = panel.state.customState as TerminalPanelState | undefined;
+    const codexProfile = codexChatProfile(terminal?.launchCommand ?? terminal?.initialCommand ?? '');
+    if (codexProfile && this.enabled() && !isWSL) return this.prepareCodex(panel, cwd, env, shellType, codexProfile, preference);
+    if ((preference ?? getRuntimeConfigManager().getConfig().defaultAgentInterface) !== 'chat' || !this.enabled() || isWSL) return false;
     // SAFETY: TerminalPanelManager supplies a terminal panel before any PTY is spawned.
     const state = panel.state.customState as TerminalPanelState | undefined;
     if (!state || state.agentSessionId || state.agentChat || state.isInitialized || state.initialInputSentAt || state.launchMode || state.preserveLaunchCommand || state.customResume || state.sshHost) return false;
@@ -72,16 +184,17 @@ export class AgentChatManager {
     if (!profile) return false;
     const executable = path.isAbsolute(profile.executable) ? profile.executable : findExecutableInPath(profile.executable);
     if (!executable) return false;
-    const { stdout } = await execFileAsync(executable, ['--version'], { cwd, env, timeout: 5000, maxBuffer: 16 * 1024 });
-    if (stdout.trim().split(/\s+/)[0] !== CLAUDE_NATIVE_VERSION) return false;
+    const versionCommand = hostCommand(executable, ['--version']);
+    const { stdout } = await execFileAsync(versionCommand.executable, versionCommand.args, { cwd, env, windowsVerbatimArguments: versionCommand.windowsVerbatimArguments, timeout: 5000, maxBuffer: 16 * 1024 });
+    const version = stdout.trim();
     const directory = path.join(getAppDirectory(), 'agent-chat', createHash('sha256').update(panel.id).digest('hex'), randomUUID());
     mkdirSync(directory, { recursive: true, mode: 0o700 });
     const journalFile = path.join(directory, 'lifecycle.jsonl'), settingsFile = path.join(directory, 'settings.json');
-    const settings = nativeChatHookSettings(journalFile, shellType);
+    const settings = nativeChatHookSettings(journalFile);
     writeFileSync(settingsFile, JSON.stringify(settings), { mode: 0o600 });
     const saved: AgentChatPanelState = {
       conversation: { panelId: panel.id, workspaceId: panel.sessionId, provider: 'claude', nativeSessionId: '', active: 'stopped', preferred: 'chat', generation: 0, recovery: 'Creating a new conversation; its identity has not been returned yet.' },
-      launch: { ...profile, command: state.launchCommand ?? state.initialCommand ?? '', cwd, shellType, executable, version: CLAUDE_NATIVE_VERSION, journalFile, settingsFile },
+      launch: { ...profile, command: state.launchCommand ?? state.initialCommand ?? '', cwd, shellType, executable, version, journalFile, settingsFile },
       processes: { terminal: [], chat: [] },
     };
     this.known.add(panel.id);
@@ -119,7 +232,29 @@ export class AgentChatManager {
   }
 
   async prepareNativeLaunch(panel: ToolPanel, cwd: string, env: NodeJS.ProcessEnv, command: string, shellType: string, isWSL: boolean): Promise<string> {
-    if ((!this.enabled() && !this.acquiring.has(panel.id)) || isWSL || !(this.options.supportsNativeHost?.() ?? (process.platform === 'darwin' && process.arch === 'arm64'))) return command;
+    const codex = this.codex.get(panel.id);
+    if (codex) {
+      const saved = this.required(panel.id);
+      const input = nativeCommand(saved.launch.executable, ['resume', saved.conversation.nativeSessionId, '--remote', codex.endpoint, ...(saved.launch.codexSocketPath ? [] : ['--remote-auth-token-env', CODEX_TOKEN_ENV])], shellType);
+      this.launchInputs.set(panel.id, `${input}\r`);
+      const pid = this.native?.pid(panel.id);
+      if (!pid) throw new PaneError('CHAT_NATIVE_OWNER_MISSING', 'The native terminal disappeared before Codex attached.', 'Retry the interface switch.');
+      const tracker = new ArchiveProcessTracker([], identities => panelManager.commitAgentChat(panel.id, { ...this.required(panel.id), processes: { ...this.required(panel.id).processes, terminal: structuredClone(identities) } }));
+      this.trackers.set(panel.id, tracker);
+      await tracker.capture([pid]);
+      return input;
+    }
+    // Older tabs keep their native launch untouched until their user identifies
+    // the current thread/owner. Retain the real launch environment for that step.
+    // SAFETY: TerminalPanelManager invokes this only for terminal panels.
+    const legacyState = panel.state.customState as TerminalPanelState | undefined;
+    const legacy = codexChatProfile(legacyState?.launchCommand ?? legacyState?.initialCommand ?? '');
+    if (legacy && this.enabled() && !isWSL) {
+      const executable = path.isAbsolute(legacy.executable) ? legacy.executable : findExecutableInPath(legacy.executable);
+      if (executable) this.legacyCodex.set(panel.id, { cwd, env: { ...env }, shellType, profile: legacy, executable });
+      return command;
+    }
+    if ((!this.enabled() && !this.acquiring.has(panel.id)) || isWSL) return command;
     // SAFETY: Only TerminalPanelManager calls this for a native terminal launch.
     const state = panel.state.customState as TerminalPanelState | undefined;
     if (!state?.agentSessionId || state.launchMode || state.preserveLaunchCommand || state.customResume || state.sshHost) return command;
@@ -127,13 +262,14 @@ export class AgentChatManager {
     if (!profile) return command;
     const executable = path.isAbsolute(profile.executable) ? profile.executable : findExecutableInPath(profile.executable);
     if (!executable) return command;
-    const { stdout } = await execFileAsync(executable, ['--version'], { cwd, env, timeout: 5000, maxBuffer: 16 * 1024 });
-    if (stdout.trim().split(/\s+/)[0] !== CLAUDE_NATIVE_VERSION) return command;
+    const versionCommand = hostCommand(executable, ['--version']);
+    const { stdout } = await execFileAsync(versionCommand.executable, versionCommand.args, { cwd, env, windowsVerbatimArguments: versionCommand.windowsVerbatimArguments, timeout: 5000, maxBuffer: 16 * 1024 });
+    const version = stdout.trim();
     const directory = path.join(getAppDirectory(), 'agent-chat', createHash('sha256').update(panel.id).digest('hex'), randomUUID());
     mkdirSync(directory, { recursive: true, mode: 0o700 });
     const journalFile = path.join(directory, 'lifecycle.jsonl');
     const settingsFile = path.join(directory, 'settings.json');
-    writeFileSync(settingsFile, JSON.stringify(nativeChatHookSettings(journalFile, shellType)), { mode: 0o600 });
+    writeFileSync(settingsFile, JSON.stringify(nativeChatHookSettings(journalFile)), { mode: 0o600 });
     const previous = this.record(panel.id);
     if (previous && !this.acquiring.has(panel.id)) throw new PaneError('CHAT_RECOVERY_REQUIRED', 'This conversation already has an ownership record. No replacement native agent was started.', 'Use explicit recovery to resume the exact conversation.');
     for (const otherId of databaseService.getAgentChatPanelIds()) {
@@ -143,7 +279,7 @@ export class AgentChatManager {
     }
     const saved: AgentChatPanelState = {
       conversation: previous?.conversation ?? { panelId: panel.id, workspaceId: panel.sessionId, provider: 'claude', nativeSessionId: state.agentSessionId, active: 'terminal', preferred: 'terminal', generation: 1 },
-      launch: { ...profile, ...previous?.launch, command: state.launchCommand ?? state.initialCommand ?? '', cwd, shellType, executable, version: CLAUDE_NATIVE_VERSION, journalFile, settingsFile },
+      launch: { ...profile, ...previous?.launch, command: state.launchCommand ?? state.initialCommand ?? '', cwd, shellType, executable, version, journalFile, settingsFile },
       processes: { ...(previous?.processes ?? { terminal: [], chat: [] }), unverifiedSpawn: 'terminal' },
     };
     this.known.add(panel.id);
@@ -180,15 +316,14 @@ export class AgentChatManager {
     }, 200);
     timer.unref();
     this.timers.set(panel.id, timer);
-    const base = previous ? [
-      quoteShellWord(saved.launch.executable, shellType),
-      saved.launch.model ? `--model ${quoteShellWord(saved.launch.model, shellType)}` : '',
-      saved.launch.effort ? `--effort ${quoteShellWord(saved.launch.effort, shellType)}` : '',
-      saved.launch.permissionMode === 'bypassPermissions' ? '--dangerously-skip-permissions' : saved.launch.permissionMode ? `--permission-mode ${quoteShellWord(saved.launch.permissionMode, shellType)}` : '',
-      saved.launch.strictMcpConfig ? '--strict-mcp-config' : '',
-      ...(saved.launch.additionalDirectories ?? []).map(directory => `--add-dir ${quoteShellWord(directory, shellType)}`),
-      `--resume ${saved.conversation.nativeSessionId}`,
-    ].filter(Boolean).join(' ') : command;
+    const base = previous ? nativeCommand(saved.launch.executable, [
+      ...(saved.launch.model ? ['--model', saved.launch.model] : []),
+      ...(saved.launch.effort ? ['--effort', saved.launch.effort] : []),
+      ...(saved.launch.permissionMode === 'bypassPermissions' ? ['--dangerously-skip-permissions'] : saved.launch.permissionMode ? ['--permission-mode', saved.launch.permissionMode] : []),
+      ...(saved.launch.strictMcpConfig ? ['--strict-mcp-config'] : []),
+      ...(saved.launch.additionalDirectories ?? []).flatMap(directory => ['--add-dir', directory]),
+      '--resume', saved.conversation.nativeSessionId,
+    ], shellType) : command;
     const augmented = `${base} --settings ${quoteShellWord(settingsFile, shellType)}`;
     this.launchInputs.set(panel.id, `${augmented}\r`);
     return augmented;
@@ -244,28 +379,23 @@ export class AgentChatManager {
 
   view(panelId: string, includeTranscript = true): AgentChatView {
     this.reconcile(panelId);
-    const panel = panelManager.getPanel(panelId);
-    // SAFETY: The panel type discriminates its custom state.
-    const state = panel?.type === 'terminal' ? panel.state.customState as TerminalPanelState | undefined : undefined;
     const saved = this.record(panelId);
-    const unavailableReason = saved ? undefined : state?.agentType === 'codex'
-      ? 'Shared-daemon Codex tabs cannot confirm per-conversation release. Keep using Terminal; a dedicated profile also needs a verified background-work checkpoint.'
-      : 'Chat switching currently requires Claude Code 2.1.309 on a macOS Apple Silicon host, launched directly with Chat enabled. Custom wrappers and unsupported flags stay in Terminal.';
-    const adapter = this.adapters.get(panelId)?.session;
+    const unavailableReason = saved ? undefined : 'This terminal has no verified conversation connection. Launch Claude or Codex directly with Chat enabled, or inspect its launch configuration.';
+    const adapter = this.session(panelId);
     const lastReceipt = saved?.receipts?.at(-1);
     // The protocol clears its running flag before its promise settles here.
     // Keep the host turn working until finish() durably commits the outcome;
     // otherwise a rejection briefly emits a false idle/completion notification.
     const awaitingResult = saved?.conversation.active === 'chat' && lastReceipt?.generation === saved.conversation.generation && lastReceipt.state === 'accepted';
     return {
-      panelId, conversation: saved?.conversation, available: !!saved, unavailableReason,
-      setupRequired: !!saved && !claudeAdapterEntry(), running: saved?.conversation.active === 'terminal' ? !this.journals.get(panelId)?.checkpoint().ready : awaitingResult || (adapter?.isRunning() ?? false), canAttachImages: adapter?.supportsImages() ?? false,
+      panelId, conversation: saved?.conversation, available: !!saved && !this.adopting.has(panelId), unavailableReason, identificationRequired: !saved && this.legacyCodex.has(panelId),
+      setupRequired: saved?.conversation.provider === 'claude' && !adapterEntry('claude'), running: saved?.conversation.active === 'terminal' && saved.conversation.provider === 'claude' ? !this.journals.get(panelId)?.checkpoint().ready : awaitingResult || (adapter?.isRunning() ?? false), canAttachImages: adapter?.supportsImages() ?? false,
       controls: adapter?.controls(),
-      permissions: adapter?.permissions().map(permission => ({ id: permission.id, generation: permission.generation,
+      permissions: this.codex.get(panelId)?.session.permissions() ?? this.adapters.get(panelId)?.session.permissions().map(permission => ({ id: permission.id, generation: permission.generation,
         title: permission.request.toolCall.title ?? 'Permission requested',
         toolCall: decodeBoundary(permission.request.toolCall, boundary.json), options: permission.request.options })) ?? [],
       transcript: includeTranscript ? this.transcripts.get(panelId)?.snapshot() : undefined,
-      error: this.transcripts.get(panelId)?.error() ?? (lastReceipt?.generation === saved?.conversation.generation && lastReceipt?.state === 'failed'
+      error: this.transcripts.get(panelId)?.error() ?? this.codex.get(panelId)?.session.error() ?? (lastReceipt?.generation === saved?.conversation.generation && lastReceipt?.state === 'failed'
         ? `The agent could not complete this turn: ${lastReceipt.error ?? 'The provider rejected the request'}. Check the provider connection and settings, then send a new turn when ready.` : undefined),
       configuration: adapter?.config() ? decodeBoundary(adapter.config(), boundary.json) : undefined,
     };
@@ -273,6 +403,7 @@ export class AgentChatManager {
 
   guardNativeInput(panelId: string, data: string): void {
     this.reconcile(panelId);
+    if (this.adopting.has(panelId)) throw new PaneError('CHAT_TRANSITION_IN_PROGRESS', 'Pane is identifying this conversation. No terminal input was sent.', 'Wait for identification to finish.');
     const record = this.record(panelId)?.conversation;
     if (!record) return;
     if (this.acquiring.has(panelId) && this.launchInputs.get(panelId) === data) { this.launchInputs.delete(panelId); return; }
@@ -309,8 +440,9 @@ export class AgentChatManager {
         return checkpoint;
       },
       release: (record, mode) => this.release(record.panelId, mode),
-      acquire: (record, mode) => this.acquire(record, mode),
+      acquire: (record, mode, options) => this.acquire(record, mode, options),
     };
+    if (this.required(panelId).conversation.provider === 'codex') driver.handoff = (record, target) => this.handoffCodex(record, target);
     const controller = new SessionController({
       read: () => structuredClone(this.required(panelId).conversation),
       write: conversation => { panelManager.commitAgentChat(panelId, { ...this.required(panelId), conversation }); this.publish(panelId); },
@@ -320,28 +452,47 @@ export class AgentChatManager {
   }
 
   private async preflight(record: ConversationRecord, target: AgentInterface): Promise<void> {
+    if (this.adopting.has(record.panelId)) throw new PaneError('CHAT_TRANSITION_IN_PROGRESS', 'This conversation is being identified.', 'Wait for identification to finish.');
+    if (record.provider === 'codex') {
+      const runtime = this.codex.get(record.panelId);
+      if (!runtime && record.active === 'stopped' && target === 'terminal' && this.native) return;
+      if (!runtime) throw new PaneError('CHAT_RECOVERY_REQUIRED', 'The saved Codex server is not connected. No second owner was started.', 'Recover in Terminal to restore its original launch environment.');
+      await runtime.session.verifyIdentity(record.nativeSessionId);
+      return;
+    }
     const saved = this.required(record.panelId);
     if (target === 'chat' && !this.environments.has(record.panelId)) throw new PaneError('CHAT_ENVIRONMENT_UNVERIFIED', 'The original launch environment is no longer in memory. Chat recovery did not start.', 'Recover this exact conversation in Terminal first; its normal launcher restores the workspace environment.');
     if (!this.native) throw new PaneError('CHAT_NATIVE_OWNER_MISSING', 'The native terminal owner is unavailable.', 'Restart Pane before recovering this conversation.');
-    const { stdout } = await execFileAsync(saved.launch.executable, ['--version'], { timeout: 5000, maxBuffer: 16 * 1024, env: this.environments.get(record.panelId) });
-    if (stdout.trim().split(/\s+/)[0] !== saved.launch.version) throw new PaneError('CHAT_CLI_VERSION_CHANGED', 'The native CLI changed since this conversation started. No handoff was attempted.', 'Keep using the current runtime until this CLI version is validated.');
+    const command = hostCommand(saved.launch.executable, ['--version']);
+    await execFileAsync(command.executable, command.args, { timeout: 5000, maxBuffer: 16 * 1024, env: this.environments.get(record.panelId), windowsVerbatimArguments: command.windowsVerbatimArguments });
     if (target === 'chat' && !this.adapters.has(record.panelId)) await this.startAdapter(record);
   }
 
   private async startAdapter(record: ConversationRecord): Promise<AcpProcess> {
-    const entry = claudeAdapterEntry();
-    if (!entry) throw new PaneError('CHAT_ADAPTER_MISSING', 'The pinned Claude ACP adapter is not installed. Terminal remains available.', 'Choose Set up Chat, then try switching again.');
+    await installAdapter(record.provider);
+    const entry = adapterEntry(record.provider);
+    if (!entry) throw new PaneError('CHAT_ADAPTER_MISSING', 'Chat setup finished without a usable adapter. The conversation was not replaced.', 'Retry Chat setup on the workspace host.');
     const saved = this.required(record.panelId);
     const projection = new TranscriptProjection(record.panelId, record.generation + 1);
     this.transcripts.set(record.panelId, projection);
     panelManager.commitAgentChat(record.panelId, { ...saved, processes: { ...saved.processes, unverifiedSpawn: 'chat' } });
     const runtime = new AcpProcess({
       executable: process.execPath, args: [entry], cwd: saved.launch.cwd,
-      env: { ...(this.environments.get(record.panelId) ?? process.env), ELECTRON_RUN_AS_NODE: '1', CLAUDE_CODE_EXECUTABLE: saved.launch.executable },
+      env: { ...(this.environments.get(record.panelId) ?? process.env), ELECTRON_RUN_AS_NODE: '1', CLAUDE_CODE_EXECUTABLE: providerScript(saved.launch.executable, 'claude') ?? saved.launch.executable },
       generation: record.generation + 1,
       save: identities => {
         const current = this.required(record.panelId);
         panelManager.commitAgentChat(record.panelId, { ...current, processes: { ...current.processes, chat: structuredClone(identities), unverifiedSpawn: undefined } });
+      },
+      onForkRequested: () => {
+        const current = this.required(record.panelId);
+        if (current.conversation.forkUnconfirmed) throw new PaneError('CHAT_FORK_UNCONFIRMED', 'A previous history copy did not return its identity. No further fork was requested.', 'Inspect the provider history before retrying a history copy; the original conversation is preserved.');
+        panelManager.commitAgentChat(record.panelId, { ...current, conversation: { ...current.conversation, forkUnconfirmed: true } });
+      },
+      onIdentity: nativeSessionId => {
+        const current = this.required(record.panelId);
+        panelManager.commitAgentChat(record.panelId, { ...current, conversation: { ...current.conversation, nativeSessionId, forkUnconfirmed: undefined } });
+        this.journals.set(record.panelId, new NativeHookJournal(current.launch.journalFile, nativeSessionId));
       },
       onDisconnect: () => {
         const current = this.record(record.panelId);
@@ -379,9 +530,21 @@ export class AgentChatManager {
   private async release(panelId: string, mode: AgentInterface): Promise<void> {
     const unverified = this.required(panelId).processes.unverifiedSpawn;
     if (unverified === mode) throw new PaneError('CHAT_SPAWN_UNVERIFIED', 'The host stopped before recording the spawned runtime identity. No replacement was started.', 'Inspect the adapter and native processes on this host before manually recovering the tab.');
+    if (this.required(panelId).conversation.provider === 'codex') {
+      const runtime = this.codex.get(panelId);
+      if (mode === 'chat' && runtime) { await runtime.release(); this.codex.delete(panelId); return; }
+      const saved = this.required(panelId);
+      if (mode === 'terminal' && saved.launch.codexSocketPath) { await this.native?.destroy(panelId); return; }
+      const tracker = new ArchiveProcessTracker(saved.processes[mode], identities => panelManager.commitAgentChat(panelId, { ...this.required(panelId), processes: { ...this.required(panelId).processes, [mode]: structuredClone(identities) } }));
+      await tracker.refresh();
+      if (mode === 'terminal') await this.native?.destroy(panelId);
+      await tracker.terminateSurvivors();
+      await tracker.verifyExited(5000);
+      return;
+    }
     if (mode === 'chat') {
       const adapter = this.adapters.get(panelId);
-      if (adapter) { await adapter.release(); this.adapters.delete(panelId); }
+      if (adapter) { await adapter.session.cancel(); await adapter.release(); this.adapters.delete(panelId); }
       else {
         const saved = this.required(panelId);
         const tracker = new ArchiveProcessTracker(saved.processes.chat, identities => panelManager.commitAgentChat(panelId, { ...this.required(panelId), processes: { ...this.required(panelId).processes, chat: structuredClone(identities) } }));
@@ -397,12 +560,18 @@ export class AgentChatManager {
     const alive = saved.processes.terminal.some(identity => table.some(current => current.pid === identity.pid && current.started === identity.started && !current.exited));
     const journal = this.journals.get(panelId);
     if (alive && journal && this.native?.pid(panelId)) {
-      this.native.writeControl(panelId, '/exit\r');
-      const deadline = Date.now() + 15_000;
-      while (!journal.ended() && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 50));
-      if (!journal.ended()) throw new PaneError('CHAT_NATIVE_EXIT_UNCONFIRMED', 'The native CLI did not acknowledge its exit. Chat was not loaded.', 'Keep the conversation stopped until its exact runtime has exited.');
+      if (journal.checkpoint().ready) {
+        this.native.writeControl(panelId, '/exit\r');
+        const deadline = Date.now() + 1500;
+        while (!journal.ended() && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 50));
+      } else {
+        // Never type /exit into a running tool or an unfinished prompt. The
+        // tracked process lifetimes, rather than terminal appearance, fence exit.
+        this.native.writeControl(panelId, '\x03');
+      }
       await tracker.refresh();
       await this.native.destroy(panelId);
+      await tracker.terminateSurvivors();
     }
     await this.stopObserving(panelId);
     await tracker.verifyExited(5000);
@@ -410,8 +579,23 @@ export class AgentChatManager {
     this.journals.delete(panelId);
   }
 
-  private async acquire(record: ConversationRecord, mode: AgentInterface): Promise<{ nativeSessionId: string; historyVerified: boolean }> {
+  private async acquire(record: ConversationRecord, mode: AgentInterface, options?: { fork: boolean }): Promise<{ nativeSessionId: string; historyVerified: boolean; forked?: boolean; transferNotice?: string }> {
     const saved = this.required(record.panelId);
+    if (record.provider === 'codex') {
+      if (mode === 'terminal') {
+        this.acquiring.add(record.panelId);
+        try { await this.native!.initialize(record.panelId, saved.launch.cwd, this.updateOperations.get(record.panelId)); }
+        finally { this.acquiring.delete(record.panelId); }
+      } else {
+        const runtime = this.codex.get(record.panelId) ?? await this.startCodex(record);
+        await runtime.session.load({ sessionId: record.nativeSessionId, cwd: saved.launch.cwd, mcpServers: [] });
+      }
+      await this.codex.get(record.panelId)?.session.verifyIdentity(record.nativeSessionId);
+      if (!this.codex.has(record.panelId)) throw new PaneError('CHAT_RECOVERY_FAILED', 'Codex recovery did not attach its saved conversation.', 'Inspect the stopped tab before retrying.');
+      return { nativeSessionId: record.nativeSessionId, historyVerified: true };
+    }
+    let forked = false;
+    let transferNotice: string | undefined;
     if (mode === 'terminal') {
       this.acquiring.add(record.panelId);
       try {
@@ -421,22 +605,37 @@ export class AgentChatManager {
         if (!this.journals.get(record.panelId)?.resumed()) throw new PaneError('CHAT_NATIVE_RESUME_UNCONFIRMED', 'The native CLI did not acknowledge the exact resumed conversation.', 'Leave the tab stopped and inspect recovery.');
       } finally { this.acquiring.delete(record.panelId); }
     } else {
-      const runtime = this.adapters.get(record.panelId) ?? await this.startAdapter(record);
+      let runtime = this.adapters.get(record.panelId) ?? await this.startAdapter(record);
       const journalFile = path.join(path.dirname(saved.launch.settingsFile), `acp-${randomUUID()}.jsonl`);
-      const settings = nativeChatHookSettings(journalFile, saved.launch.shellType);
+      const settings = nativeChatHookSettings(journalFile);
       this.journals.set(record.panelId, new NativeHookJournal(journalFile, record.nativeSessionId));
       panelManager.commitAgentChat(record.panelId, { ...saved, launch: { ...saved.launch, journalFile } });
-      const result = await runtime.session.load({ sessionId: record.nativeSessionId, cwd: saved.launch.cwd, mcpServers: [], _meta: { claudeCode: { options: {
+      const request = { sessionId: record.nativeSessionId, cwd: saved.launch.cwd, mcpServers: [], _meta: { claudeCode: { options: {
         settings, strictMcpConfig: saved.launch.strictMcpConfig, additionalDirectories: saved.launch.additionalDirectories ?? [],
         effort: saved.launch.effort,
-      } } } });
-      this.transcripts.get(record.panelId)?.assertComplete();
+      } } } };
+      let result;
+      if (options?.fork) { result = await runtime.session.fork(request); forked = true; }
+      else {
+        try { result = await runtime.session.load(request, { allowIncompleteHistory: true }); }
+        catch (error) {
+          if (!options) throw error;
+          // The original owner is already stopped. Verify the failed loader's
+          // exit before asking a fresh adapter to copy provider-native history.
+          await this.release(record.panelId, 'chat');
+          runtime = await this.startAdapter(record);
+          result = await runtime.session.fork(request);
+          forked = true;
+        }
+      }
+      transferNotice = runtime.session.historyNotice() ?? this.transcripts.get(record.panelId)?.error();
       if (saved.launch.effort) await runtime.session.configure('effort', saved.launch.effort);
+      if (forked && saved.launch.model) await runtime.session.configure('model', saved.launch.model);
       const model = decodeOptionalBoundary(result.configOptions?.find(option => option.id === 'model')?.currentValue, boundary.string);
-      if (model) panelManager.commitAgentChat(record.panelId, { ...this.required(record.panelId), launch: { ...this.required(record.panelId).launch, model: model === 'default' ? undefined : model } });
-      if (saved.launch.permissionMode && result.modes?.currentModeId !== saved.launch.permissionMode) throw new PaneError('CHAT_CONFIGURATION_MISMATCH', 'The adapter did not restore the native permission mode. Chat was not activated.', 'Continue in Terminal or correct the adapter configuration.');
+      if (model && !forked) panelManager.commitAgentChat(record.panelId, { ...this.required(record.panelId), launch: { ...this.required(record.panelId).launch, model: model === 'default' ? undefined : model } });
+      if (saved.launch.permissionMode && result.modes?.currentModeId !== saved.launch.permissionMode) await runtime.session.configure('mode', saved.launch.permissionMode);
     }
-    return { nativeSessionId: record.nativeSessionId, historyVerified: true };
+    return { nativeSessionId: this.required(record.panelId).conversation.nativeSessionId, historyVerified: true, forked, transferNotice };
   }
 
   private captureConfiguration(panelId: string): void {
@@ -458,9 +657,47 @@ export class AgentChatManager {
     panelManager.commitAgentChat(panelId, { ...saved, launch });
   }
 
+  async identify(panelId: string, nativeId: string, socketPath: string): Promise<AgentChatView> {
+    const launch = this.legacyCodex.get(panelId);
+    const panel = panelManager.getPanel(panelId);
+    const pid = this.native?.pid(panelId);
+    if (!launch || !panel || !pid || this.record(panelId) || this.adopting.has(panelId)) throw new PaneError('CHAT_IDENTIFICATION_UNAVAILABLE', 'This tab is no longer waiting for conversation identification.', 'Refresh the tab actions.');
+    socketPath = socketPath.trim().replace(/^unix:\/\//, '');
+    nativeId = nativeId.trim();
+    if (!/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(nativeId) || !path.isAbsolute(socketPath) || ['\r', '\n', String.fromCharCode(0)].some(character => socketPath.includes(character))) throw new PaneError('CHAT_IDENTIFICATION_INVALID', 'Enter the current Session ID and absolute server socket shown by Codex /status.', 'Run /status yourself when the native composer is ready; preserve any unsent draft.');
+    this.adopting.add(panelId);
+    const saved: AgentChatPanelState = {
+      conversation: { panelId, workspaceId: panel.sessionId, provider: 'codex', nativeSessionId: '', active: 'terminal', preferred: 'terminal', generation: 1 },
+      launch: { command: launch.profile.executable, cwd: launch.cwd, shellType: launch.shellType, executable: launch.executable, version: '', strictMcpConfig: false, journalFile: '', settingsFile: '', codexSocketPath: socketPath },
+      processes: { terminal: [], chat: [] },
+    };
+    this.known.add(panelId);
+    panelManager.commitAgentChat(panelId, saved);
+    this.environments.set(panelId, launch.env);
+    this.controller(panelId);
+    try {
+      const runtime = await this.startCodex(saved.conversation);
+      await runtime.session.verifyLoaded(nativeId);
+      if (this.native?.pid(panelId) !== pid) throw new PaneError('CHAT_NATIVE_OWNER_MISSING', 'The original native terminal exited during identification.', 'Refresh before identifying its replacement.');
+      await runtime.session.load({ sessionId: nativeId, cwd: launch.cwd, mcpServers: [] });
+      if (this.native?.pid(panelId) !== pid) throw new PaneError('CHAT_NATIVE_OWNER_MISSING', 'The original native terminal exited during identification.', 'Refresh before identifying its replacement.');
+      runtime.session.setGeneration(1); this.transcripts.get(panelId)?.setGeneration(1);
+      this.known.add(panelId);
+      this.publish(panelId);
+      return this.view(panelId);
+    } catch (error) {
+      await this.codex.get(panelId)?.release(false);
+      this.codex.delete(panelId); this.controllers.delete(panelId); this.transcripts.delete(panelId);
+      panelManager.commitAgentChat(panelId, undefined); this.known.delete(panelId);
+      throw error;
+    } finally { this.adopting.delete(panelId); this.publish(panelId); }
+  }
+
   async switchTo(panelId: string, target: AgentInterface, generation: number): Promise<ConversationRecord> {
     this.captureConfiguration(panelId);
-    return this.controller(panelId).switchTo(target, generation);
+    const conversation = await this.controller(panelId).switchTo(target, generation);
+    await getRuntimeConfigManager().updateConfig({ defaultAgentInterface: target });
+    return conversation;
   }
 
   receipt(panelId: string, operationId: string): AgentChatReceipt | undefined {
@@ -479,7 +716,7 @@ export class AgentChatManager {
     if (saved.conversation.active !== 'chat') throw new PaneError('CHAT_NOT_ACTIVE', 'Chat does not own this conversation. No prompt was sent.', 'Use the active Terminal or switch to Chat.');
     if (!request.operationId || request.operationId.length > 128 || (!request.text.trim() && !request.images?.length)) throw new PaneError('CHAT_PROMPT_INVALID', 'The prompt or operation ID is empty or invalid. Nothing was sent.', 'Enter a prompt and use a unique operation ID.');
     if (request.text.length + (request.images ?? []).reduce((sum, image) => sum + image.data.length, 0) > 8 * 1024 * 1024) throw new PaneError('CHAT_PROMPT_TOO_LARGE', 'The prompt exceeds the 8 MiB transport limit. Nothing was sent.', 'Use a smaller image or prompt.');
-    const runtime = this.adapters.get(panelId)?.session;
+    const runtime = this.session(panelId);
     if (!runtime) throw new PaneError('CHAT_RECOVERY_REQUIRED', 'The Chat runtime is unavailable. No prompt was sent.', 'Recover the exact saved conversation.');
     if (request.images?.length && (!runtime.supportsImages() || request.images.some(image => !/^image\/(png|jpeg|webp|gif)$/.test(image.mimeType) || !/^[A-Za-z0-9+/]*={0,2}$/.test(image.data)))) throw new PaneError('CHAT_IMAGE_UNSUPPORTED', 'The adapter cannot accept these image attachments. Nothing was sent.', 'Use a supported PNG, JPEG, WebP or GIF image or send text.');
     if (this.view(panelId, false).running) throw new PaneError('CHAT_TURN_RUNNING', 'The agent is already working. No prompt was sent.', 'Wait for its turn or cancel it.');
@@ -493,7 +730,9 @@ export class AgentChatManager {
       ...(request.text ? [{ type: 'text' as const, text: request.text }] : []),
       ...(request.images ?? []).map(image => ({ type: 'image' as const, mimeType: image.mimeType, data: image.data })),
     ];
-    for (const content of userContent) {
+    // Codex emits the provider's authoritative user item; adding a local item
+    // as well would duplicate the same request when that notification arrives.
+    for (const content of this.codex.has(panelId) ? [] : userContent) {
       const event = projection?.accept({ sessionUpdate: 'user_message_chunk', messageId: `user:${request.operationId}`, content });
       if (event && !projection?.error()) getPaneEventSink().send('agent-chat:event', event);
     }
@@ -510,7 +749,7 @@ export class AgentChatManager {
 
   async configure(panelId: string, generation: number, configId: string, value: string): Promise<void> {
     this.controller(panelId).assertWritable(generation);
-    const session = this.adapters.get(panelId)?.session;
+    const session = this.session(panelId);
     if (!session || this.required(panelId).conversation.active !== 'chat') throw new PaneError('CHAT_NOT_ACTIVE', 'Chat does not own this conversation. Nothing changed.', 'Use the active interface.');
     await session.configure(configId, value);
     const saved = this.required(panelId);
@@ -524,14 +763,14 @@ export class AgentChatManager {
 
   async cancel(panelId: string, generation: number): Promise<void> {
     this.controller(panelId).assertWritable(generation);
-    const session = this.adapters.get(panelId)?.session;
+    const session = this.session(panelId);
     if (!session) throw new PaneError('CHAT_NOT_ACTIVE', 'There is no active Chat turn to cancel.', 'Use the active Terminal controls.');
     await session.cancel();
   }
 
   answerPermission(panelId: string, generation: number, requestId: string, optionId: string): void {
     this.controller(panelId).assertWritable(generation);
-    const session = this.adapters.get(panelId)?.session;
+    const session = this.session(panelId);
     if (!session) throw new PaneError('CHAT_NOT_ACTIVE', 'The Chat runtime is no longer active. No answer was sent.', 'Refresh the conversation.');
     session.answer(requestId, generation, optionId);
   }
@@ -545,7 +784,7 @@ export class AgentChatManager {
     throw new PaneError('CHAT_RUNTIME_OWNED', 'This tab already has a conversation owner. No native runtime was started.', 'Open its current view or explicitly recover the saved conversation.');
   }
 
-  activePanelIds(): string[] { return [...new Set([...this.adapters.keys(), ...this.trackers.keys(), ...databaseService.getAgentChatPanelIds()])]; }
+  activePanelIds(): string[] { return [...new Set([...this.adapters.keys(), ...this.codex.keys(), ...this.trackers.keys(), ...databaseService.getAgentChatPanelIds()])]; }
 
   processIds(): Map<string, number[]> {
     const result = new Map<string, number[]>();
@@ -571,7 +810,9 @@ export class AgentChatManager {
 
   async recover(panelId: string, mode: AgentInterface, generation: number): Promise<ConversationRecord> {
     if (!this.required(panelId).conversation.nativeSessionId) throw new PaneError('CHAT_IDENTITY_UNAVAILABLE', 'Startup did not return a conversation ID. No replacement conversation was created.', 'Inspect the provider session store and open the intended conversation explicitly in a separate Terminal tab.');
-    return this.controller(panelId).recover(mode, generation);
+    const conversation = await this.controller(panelId).recover(mode, generation);
+    await getRuntimeConfigManager().updateConfig({ defaultAgentInterface: mode });
+    return conversation;
   }
 
   async restoreAfterUpdate(panelId: string, operationId: string): Promise<void> {
@@ -595,8 +836,8 @@ export class AgentChatManager {
   private async stopOwned(panelId: string): Promise<void> {
     const saved = this.required(panelId);
     if (saved.processes.unverifiedSpawn) throw new PaneError('CHAT_SPAWN_UNVERIFIED', 'The runtime identity was not recorded before interruption. Stop cannot safely target an unknown process.', 'Inspect the native and adapter processes on the workspace host.');
-    await this.adapters.get(panelId)?.session.cancel();
-    if (this.adapters.has(panelId)) await this.release(panelId, 'chat');
+    await this.session(panelId)?.cancel();
+    if (this.adapters.has(panelId) || this.codex.has(panelId)) await this.release(panelId, 'chat');
     else {
       const chat = new ArchiveProcessTracker(saved.processes.chat, identities => panelManager.commitAgentChat(panelId, { ...this.required(panelId), processes: { ...this.required(panelId).processes, chat: structuredClone(identities) } }));
       await chat.refresh();
@@ -604,6 +845,7 @@ export class AgentChatManager {
       await chat.verifyExited(5000);
     }
     await this.stopObserving(panelId);
+    if (saved.launch.codexSocketPath) { await this.native?.destroy(panelId); this.trackers.delete(panelId); return; }
     const tracker = this.trackers.get(panelId) ?? new ArchiveProcessTracker(saved.processes.terminal, identities => panelManager.commitAgentChat(panelId, { ...this.required(panelId), processes: { ...this.required(panelId).processes, terminal: structuredClone(identities) } }));
     await tracker.refresh();
     await this.native?.destroy(panelId);

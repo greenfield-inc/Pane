@@ -3,8 +3,8 @@ import {
   client, methods, type ClientConnection, type ContentBlock, type InitializeResponse,
   type LoadSessionRequest, type RequestPermissionRequest, type RequestPermissionResponse,
   type SessionNotification, type Stream, type PromptResponse, type NewSessionRequest, type NewSessionResponse,
-  type LoadSessionResponse,
-} from '@agentclientprotocol/sdk';
+  type LoadSessionResponse, type ForkSessionRequest, type ForkSessionResponse,
+} from '@agentclientprotocol/sdk/unstable';
 import { PaneError } from '../../../../shared/paneError';
 
 export interface ChatPermission {
@@ -18,6 +18,9 @@ export interface AcpSessionOptions {
   onUpdate?: (notification: SessionNotification) => void;
   onState?: () => void;
   onDisconnect?: () => void;
+  /** Durable host fence before history loading or accepting new input. */
+  onIdentity?: (sessionId: string) => void;
+  onForkRequested?: () => void;
 }
 
 /** Protocol lifetime owned by the host. Viewers never close this connection. */
@@ -29,6 +32,7 @@ export class AcpSession {
   private disconnected = false;
   private closing = false;
   private historyVerified = false;
+  private transferNotice?: string;
   private readonly history: SessionNotification[] = [];
   private readonly pending = new Map<string, { permission: ChatPermission; resolve: (response: RequestPermissionResponse) => void }>();
   private running = false;
@@ -80,17 +84,43 @@ export class AcpSession {
     return this.initialization;
   }
 
-  async load(request: LoadSessionRequest): Promise<LoadSessionResponse> {
+  async load(request: LoadSessionRequest, options?: { allowIncompleteHistory: boolean }): Promise<LoadSessionResponse> {
     this.assertEmpty();
+    return this.loadHistory(request, options?.allowIncompleteHistory);
+  }
+
+  /** Provider-native history copy: this never submits the old turns as prompts. */
+  async fork(request: ForkSessionRequest): Promise<ForkSessionResponse> {
+    this.assertEmpty();
+    if (!this.initialization?.agentCapabilities?.sessionCapabilities?.fork || !this.initialization.agentCapabilities.loadSession) {
+      throw new PaneError('CHAT_FORK_UNSUPPORTED', 'The adapter cannot copy and load conversation history.', 'Retry with a compatible adapter; the original history is preserved.');
+    }
+    this.options.onForkRequested?.();
+    const response = await this.bounded(this.connection.agent.request(methods.agent.session.fork, request));
+    if (!response.sessionId || response.sessionId === request.sessionId) {
+      throw new PaneError('CHAT_FORK_IDENTITY_INVALID', 'The adapter did not return a separate conversation identity.', 'Keep the tab stopped and inspect the provider session before retrying.');
+    }
+    // Retain the returned identity even when replay fails, so close still targets
+    // the fork and never the original provider conversation.
+    this.sessionId = response.sessionId;
+    this.options.onIdentity?.(response.sessionId);
+    const loaded = await this.loadHistory({ ...request, sessionId: response.sessionId, mcpServers: request.mcpServers ?? [] }, true);
+    return { ...loaded, sessionId: response.sessionId };
+  }
+
+  historyNotice(): string | undefined { return this.transferNotice; }
+
+  private async loadHistory(request: LoadSessionRequest, allowIncompleteHistory = false): Promise<LoadSessionResponse> {
     if (!this.initialization?.agentCapabilities?.loadSession) {
       throw new PaneError('CHAT_IMPORT_UNSUPPORTED', 'The adapter cannot load an existing conversation.', 'Keep this tab in Terminal or install a compatible adapter.');
     }
     this.sessionId = request.sessionId;
     this.loaded = false;
     const response = await this.bounded(this.connection.agent.request(methods.agent.session.load, request));
-    if (!this.historyVerified) {
+    if (!this.historyVerified && !allowIncompleteHistory) {
       throw new PaneError('CHAT_HISTORY_UNVERIFIED', 'The adapter returned no conversation history. Chat was not activated.', 'Keep the exact conversation stopped until the adapter can replay it; do not create a replacement.');
     }
+    this.transferNotice = this.historyVerified ? undefined : 'The provider did not return earlier conversation history. Its saved conversation is retained, but Chat cannot confirm that all prior context is available.';
     this.loaded = true;
     this.configuration = response;
     return response;
@@ -104,6 +134,7 @@ export class AcpSession {
     this.assertEmpty();
     const response = await this.bounded(this.connection.agent.request(methods.agent.session.new, request));
     this.sessionId = response.sessionId;
+    this.options.onIdentity?.(response.sessionId);
     this.loaded = true;
     this.configuration = response;
     return response;

@@ -5,13 +5,23 @@ import type { AgentConversationRecord, AgentInterface } from '../../../../shared
 export type { AgentInterface } from '../../../../shared/types/agentChat';
 export type ConversationRecord = AgentConversationRecord;
 
+interface RuntimeAcquisition {
+  nativeSessionId: string;
+  historyVerified: boolean;
+  forked?: boolean;
+  transferNotice?: string;
+}
+
 /** Process/protocol boundary. Preflight must never load the conversation;
- * release resolves only when the owned runtime and its writers have exited. */
+ * release stops the current turn and resolves only once the source can no longer
+ * write. A shared provider daemon must release the tab's conversation, not peers. */
 export interface RuntimeDriver {
   preflight(record: ConversationRecord, target: AgentInterface): Promise<void>;
+  /** Both views can attach to one verified owner without restarting its work. */
+  handoff?(record: ConversationRecord, target: AgentInterface): Promise<RuntimeAcquisition>;
   checkpoint(record: ConversationRecord): Promise<NativeCheckpointState>;
   release(record: ConversationRecord, mode: AgentInterface): Promise<void>;
-  acquire(record: ConversationRecord, mode: AgentInterface): Promise<{ nativeSessionId: string; historyVerified: boolean }>;
+  acquire(record: ConversationRecord, mode: AgentInterface, options?: { fork: boolean }): Promise<RuntimeAcquisition>;
 }
 
 export interface ConversationStorage {
@@ -24,7 +34,6 @@ export interface ConversationStorage {
  * callers. Its lifetime is independent of any renderer or transport viewer. */
 export class SessionController {
   private switching = false;
-  private pendingTimer?: ReturnType<typeof setTimeout>;
 
   constructor(
     private readonly storage: ConversationStorage,
@@ -47,29 +56,6 @@ export class SessionController {
     if (record.transition) throw new PaneError('CHAT_TRANSITION_IN_PROGRESS', 'The conversation is switching interfaces. No input was sent.', 'Wait for the switch to finish.');
     if (record.generation !== generation) throw new PaneError('CHAT_STALE_GENERATION', 'The conversation runtime changed. No input was sent.', 'Refresh the conversation and retry explicitly.');
     if (record.active === 'stopped') throw new PaneError('CHAT_STOPPED', 'The conversation is stopped. No input was sent.', 'Recover the exact conversation before sending input.');
-  }
-
-  private schedulePending(): void {
-    if (this.pendingTimer) clearTimeout(this.pendingTimer);
-    this.pendingTimer = setTimeout(() => { void this.advancePending(); }, 500);
-    this.pendingTimer.unref();
-  }
-
-  private async advancePending(): Promise<void> {
-    const before = this.snapshot();
-    const pending = before.pendingSwitch;
-    if (!pending || before.active === 'stopped' || before.transition) return;
-    try {
-      const checkpoint = await this.runtime.checkpoint(before);
-      // Cancellation or another viewer may have changed the request while checking.
-      const current = this.snapshot();
-      if (current.pendingSwitch?.target !== pending.target || current.generation !== before.generation) return;
-      if (!checkpoint.ready) { this.schedulePending(); return; }
-      await this.switchTo(pending.target, before.generation);
-    } catch (error) {
-      const current = this.snapshot();
-      this.storage.write({ ...current, pendingSwitch: undefined, recovery: reasonOf(error) });
-    }
   }
 
   async stop(cleanup: () => Promise<void>): Promise<void> {
@@ -124,7 +110,6 @@ export class SessionController {
     this.assertWritable(generation);
     const before = this.snapshot();
     if (before.active === target) {
-      if (this.pendingTimer) clearTimeout(this.pendingTimer);
       this.storage.write({ ...before, pendingSwitch: undefined, preferred: target });
       return this.snapshot();
     }
@@ -133,34 +118,43 @@ export class SessionController {
     let sourceReleased = false;
     try {
       await this.runtime.preflight(before, target);
-      const checkpoint = await this.runtime.checkpoint(before);
-      if (!checkpoint.ready) {
-        this.storage.write({ ...before, preferred: target, pendingSwitch: { target, reason: checkpoint.reason } });
-        this.schedulePending();
-        return this.snapshot();
-      }
       before.pendingSwitch = undefined;
       const transition = { source: before.active, target, phase: 'releasing' as const };
       this.storage.write({ ...before, preferred: target, transition });
-      const frozenCheckpoint = await this.runtime.checkpoint(before);
-      if (!frozenCheckpoint.ready) {
-        this.storage.write(before);
-        throw new PaneError('CHAT_CHECKPOINT_UNAVAILABLE', frozenCheckpoint.reason, 'Wait for the current work to finish, then switch again.');
+      if (this.runtime.handoff) {
+        try {
+          const attached = await this.runtime.handoff(before, target);
+          if (attached.nativeSessionId !== before.nativeSessionId || !attached.historyVerified) throw new Error('The shared runtime did not verify this conversation');
+          this.storage.write({ ...before, active: target, preferred: target, generation: before.generation + 1, transition: undefined });
+          return this.snapshot();
+        } catch (error) {
+          this.storage.write({ ...before, transition: undefined });
+          throw error;
+        }
       }
+      const checkpoint = await this.runtime.checkpoint(before);
       await this.runtime.release(before, before.active);
       sourceReleased = true;
       this.storage.write({ ...before, preferred: target, active: 'stopped', transition: { ...transition, phase: 'loading' } });
-      const loaded = await this.runtime.acquire(before, target);
-      if (loaded.nativeSessionId !== before.nativeSessionId || !loaded.historyVerified) {
+      const loaded = await this.runtime.acquire(before, target, { fork: !checkpoint.ready });
+      if (!loaded.nativeSessionId || (!loaded.forked && loaded.nativeSessionId !== before.nativeSessionId) || !loaded.historyVerified) {
         throw new PaneError('CHAT_IDENTITY_MISMATCH', 'The target did not verify the exact saved conversation and its history.', 'Leave the conversation stopped and inspect its recovery state.');
       }
-      this.storage.write({ ...before, active: target, preferred: target, generation: before.generation + 1, transition: undefined });
+      this.storage.write({ ...before, nativeSessionId: loaded.nativeSessionId, transferNotice: loaded.transferNotice, active: target, preferred: target, generation: before.generation + 1, transition: undefined });
       return this.snapshot();
     } catch (error) {
       if (!this.snapshot().transition) throw error;
       if (sourceReleased) {
         try {
           await this.runtime.release(before, target);
+          if (this.snapshot().forkUnconfirmed) {
+            this.storage.write({ ...this.snapshot(), active: 'stopped', generation: before.generation + 1, transition: undefined, recovery: `The provider may have copied the conversation, but its new identity was not returned: ${reasonOf(error)}. The original history is preserved; no additional fork was requested.` });
+            throw new PaneError('CHAT_HANDOFF_FAILED', this.snapshot().recovery!, 'Inspect provider history before retrying a copy, or explicitly recover the saved original in Terminal.');
+          }
+          if (this.snapshot().nativeSessionId !== before.nativeSessionId) {
+            this.storage.write({ ...this.snapshot(), active: 'stopped', generation: before.generation + 1, transition: undefined, recovery: `The provider created the saved fork, but its interface could not load: ${reasonOf(error)}. The original history is preserved.` });
+            throw new PaneError('CHAT_HANDOFF_FAILED', this.snapshot().recovery!, 'Recover this saved fork explicitly; no new prompt has been submitted.');
+          }
           const restored = await this.runtime.acquire(before, before.active);
           if (restored.nativeSessionId !== before.nativeSessionId || !restored.historyVerified) {
             throw new Error('The previous runtime did not verify the exact conversation');

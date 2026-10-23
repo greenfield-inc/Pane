@@ -40,6 +40,9 @@ export interface DropdownProps {
   closeOnSelect?: boolean;
   separateVariants?: boolean;
   onOpenChange?: (open: boolean) => void;
+  /** Use the supplied surface itself for right-click, keyboard and touch actions. */
+  contextMenu?: boolean;
+  menuLabel?: string;
   
   // Optional footer content (e.g., settings button)
   footer?: ReactNode | ((controls: { close: () => void }) => ReactNode);
@@ -80,7 +83,7 @@ function getMenuControls(content: HTMLElement | null): HTMLElement[] {
 
   return Array.from(content.querySelectorAll<HTMLElement>(
     'button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
-  ));
+  )).filter(control => !control.matches(':disabled, [aria-disabled="true"]'));
 }
 
 export function Dropdown({
@@ -93,6 +96,8 @@ export function Dropdown({
   closeOnSelect = true,
   separateVariants = true,
   onOpenChange,
+  contextMenu = false,
+  menuLabel,
   footer,
   formLabel,
   className,
@@ -108,6 +113,17 @@ export function Dropdown({
   const dropdownRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLElement>(null);
+  const contextFocus = useRef<HTMLElement | null>(null);
+  const touchTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  const openContextMenu = () => {
+    contextFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setActiveIndex(initialActiveIndex(items, selectedId));
+    setIsOpen(true);
+    onOpenChange?.(true);
+  };
+  const clearTouch = () => { clearTimeout(touchTimer.current); touchTimer.current = undefined; };
+  useEffect(() => () => clearTimeout(touchTimer.current), []);
 
   const handleToggle = () => {
     const newState = !isOpen;
@@ -125,9 +141,9 @@ export function Dropdown({
     onOpenChange?.(false);
 
     if (focusWasInMenu) {
-      triggerRef.current?.focus();
+      (contextMenu ? contextFocus.current ?? triggerRef.current : triggerRef.current)?.focus();
     }
-  }, [onOpenChange]);
+  }, [onOpenChange, contextMenu]);
 
   const handleItemClick = (item: DropdownItem) => {
     if (item.disabled) return;
@@ -160,7 +176,7 @@ export function Dropdown({
   useLayoutEffect(() => {
     if (!isOpen) return;
     const controls = getMenuControls(contentRef.current);
-    const target = controls[activeIndex] ?? controls[0];
+    const target = controls.find(control => control.dataset.dropdownItemIndex === String(activeIndex)) ?? controls[0];
     target?.focus();
   }, [isOpen, activeIndex]);
 
@@ -168,6 +184,7 @@ export function Dropdown({
     switch (event.key) {
       case 'ArrowDown':
       case 'ArrowUp': {
+        if (event.target instanceof HTMLElement && event.target.matches('input, select, textarea')) return;
         event.preventDefault();
         const controls = getMenuControls(contentRef.current);
         if (controls.length === 0) break;
@@ -178,7 +195,9 @@ export function Dropdown({
         const next = current === -1
           ? (step === 1 ? 0 : controls.length - 1)
           : (current + step + controls.length) % controls.length;
-        setActiveIndex(next);
+        const itemIndex = controls[next].dataset.dropdownItemIndex;
+        if (itemIndex !== undefined) setActiveIndex(Number(itemIndex));
+        else controls[next].focus();
         break;
       }
       case 'Enter':
@@ -219,7 +238,7 @@ export function Dropdown({
 
     let lastRectKey = '';
     const computePosition = () => {
-      const el = dropdownRef.current;
+      const el = contextMenu ? triggerRef.current : dropdownRef.current;
       if (!el) return;
       const rect = el.getBoundingClientRect();
       const rectKey = `${rect.top},${rect.left},${rect.width},${rect.height}`;
@@ -281,7 +300,7 @@ export function Dropdown({
       raf = requestAnimationFrame(track);
     });
     return () => cancelAnimationFrame(raf);
-  }, [isOpen, position, width]);
+  }, [isOpen, position, width, contextMenu]);
 
   // Handle click outside
   useEffect(() => {
@@ -327,13 +346,24 @@ export function Dropdown({
       {/* Trigger */}
       <Slot
         ref={triggerRef}
-        onClick={handleToggle}
+        onClick={contextMenu ? undefined : handleToggle}
+        onContextMenu={contextMenu ? event => { event.preventDefault(); triggerRef.current?.focus(); openContextMenu(); } : undefined}
+        onPointerDown={contextMenu ? event => {
+          clearTouch();
+          if (event.pointerType === 'touch') touchTimer.current = setTimeout(openContextMenu, 500);
+        } : undefined}
+        onPointerUp={contextMenu ? clearTouch : undefined}
+        onPointerCancel={contextMenu ? clearTouch : undefined}
+        onPointerMove={contextMenu ? clearTouch : undefined}
         className={triggerClassName}
         aria-haspopup={formLabel ? 'dialog' : 'menu'}
         aria-expanded={isOpen}
         aria-controls={isOpen ? menuId : undefined}
         onKeyDown={(e) => {
-          if (e.key === 'ArrowDown' && !isOpen) {
+          if (contextMenu && (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10'))) {
+            e.preventDefault();
+            openContextMenu();
+          } else if (!contextMenu && e.key === 'ArrowDown' && !isOpen) {
             e.preventDefault();
             handleToggle();
           }
@@ -348,7 +378,7 @@ export function Dropdown({
           id={menuId}
           ref={contentRef}
           role={formLabel ? 'dialog' : 'menu'}
-          aria-label={formLabel}
+          aria-label={formLabel ?? menuLabel}
           aria-orientation={formLabel ? undefined : 'vertical'}
           onKeyDown={handleMenuKeyDown}
           className={cn(

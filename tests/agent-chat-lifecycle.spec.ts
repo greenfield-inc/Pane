@@ -1,5 +1,30 @@
 import { expect, test } from '@playwright/test';
 import path from 'node:path';
+
+test('opens tab actions with right click and keyboard without a visible menu button', async ({ page }) => {
+  const fixture = path.resolve('tests/fixtures/agent-chat-context.tsx');
+  await page.route('**/agent-chat-context.html', route => route.fulfill({ contentType: 'text/html', body: `<html><body><div id="root"></div><script type="module">import RefreshRuntime from "/@react-refresh"; RefreshRuntime.injectIntoGlobalHook(window); window.$RefreshReg$ = () => {}; window.$RefreshSig$ = () => type => type; window.__vite_plugin_react_preamble_installed__ = true;</script><script type="module" src="/@fs/${fixture}"></script></body></html>` }));
+  await page.goto('/agent-chat-context.html');
+  const tab = page.getByRole('tab', { name: 'Claude fixture' });
+  await expect(tab).toBeVisible();
+  await expect(page.getByRole('button', { name: 'View Claude fixture as' })).toHaveCount(0);
+  await expect(page.getByLabel('Conversation options')).toHaveCount(0);
+  await tab.click({ button: 'right' });
+  await expect(page.getByRole('menuitemradio', { name: 'View as Chat', exact: true })).toBeEnabled();
+  await page.keyboard.press('Escape');
+  await expect(tab).toBeFocused();
+  await tab.press('Shift+F10');
+  await page.getByRole('menuitemradio', { name: 'View as Chat', exact: true }).click();
+  await expect(page.getByLabel('Host switch result')).toHaveText('chat:1');
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Other actions' }).press('ArrowDown');
+  await expect(page.getByRole('menuitemradio', { name: 'Last selected' })).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await expect(page.getByRole('menuitemradio', { name: 'First enabled' })).toBeFocused();
+  await page.keyboard.press('ArrowUp');
+  await expect(page.getByRole('menuitemradio', { name: 'Last selected' })).toBeFocused();
+  await expect(page.getByRole('menuitemradio', { name: 'Middle disabled' })).toHaveAttribute('tabindex', '-1');
+});
 for (const olderPage of [false,true]) test(`restores actual reading position after asynchronous reload; olderPage=${olderPage}`,async({page},testInfo)=>{
  const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));
  const fixture = path.resolve('tests/fixtures/agent-chat-lifecycle.tsx');
@@ -122,4 +147,24 @@ test('combines configuration on narrow screens and preserves host option values'
   await expect(page.getByRole('button', { name: 'Send message', exact: true })).toBeFocused();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: testInfo.outputPath('combined-configuration-closed.png') });
+});
+
+test('identifies a legacy conversation through a keyboard-accessible contextual form', async ({ page }, testInfo) => {
+  const fixture = path.resolve('tests/fixtures/agent-chat-context.tsx');
+  await page.route('**/agent-chat-context.html?legacy', route => route.fulfill({ contentType: 'text/html', body: `<html><body><div id="root"></div><script type="module">import RefreshRuntime from "/@react-refresh"; RefreshRuntime.injectIntoGlobalHook(window); window.$RefreshReg$ = () => {}; window.$RefreshSig$ = () => type => type; window.__vite_plugin_react_preamble_installed__ = true;</script><script type="module" src="/@fs/${fixture}"></script></body></html>` }));
+  await page.goto('/agent-chat-context.html?legacy');
+  const tab = page.getByRole('tab', { name: 'Claude fixture' });
+  await tab.press('Shift+F10');
+  const dialog = page.getByRole('dialog', { name: 'Identify this Codex conversation' });
+  await expect(dialog).toBeVisible();
+  const id = dialog.getByLabel('Codex Session ID');
+  const socket = dialog.getByLabel('Codex server socket');
+  await id.fill('01a169da-b81b-7552-bccf-e7c790a37ece');
+  await page.keyboard.press('Tab'); await expect(socket).toBeFocused();
+  await socket.fill('/owned/codex-control.sock');
+  await page.keyboard.press('Tab'); await expect(dialog.getByRole('button', { name: 'Connect conversation' })).toBeFocused();
+  await page.screenshot({ path: testInfo.outputPath('identify-conversation.png') });
+  await page.keyboard.press('Enter');
+  await expect(page.getByLabel('Host switch result')).toHaveText('01a169da-b81b-7552-bccf-e7c790a37ece:/owned/codex-control.sock');
+  await expect(page.getByRole('menuitemradio', { name: 'View as Chat', exact: true })).toBeEnabled();
 });

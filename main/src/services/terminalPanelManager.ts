@@ -1756,7 +1756,7 @@ export class TerminalPanelManager extends EventEmitter {
     // Resolve native OpenCode while the spawn slot is held and hard-persist its
     // exact identity before either PTY backend can create a process. Wrappers
     // and custom/preserved launchers remain opaque and use the legacy path.
-    const existingState = terminalCustomState(panel.state);
+    let existingState = terminalCustomState(panel.state);
     const initialCommand = existingState.initialCommand;
     const initialInput = existingState.initialInput;
     let launchResolution: CliLaunchResolution | undefined;
@@ -1848,6 +1848,9 @@ export class TerminalPanelManager extends EventEmitter {
     shellArgs = launch.args;
     const spawnEnv = launch.env;
     if (await this.agentChat?.prepareFreshChat(panel, cwd, spawnEnv, shellType, isWSL)) return;
+    // A host-owned Codex server may allocate the identity before its TUI starts.
+    // Resolve the native command from that durable state, not the pre-spawn copy.
+    existingState = terminalCustomState(panel.state);
 
     // Read the setting once per spawn so we don't scatter config reads.
     // `getPtyHostRuntime()` returns null when the setting is off or when

@@ -1,5 +1,5 @@
 import { PaneError } from '../../../../shared/paneError';
-import type { SessionUpdate } from '@agentclientprotocol/sdk';
+import type { SessionUpdate } from '@agentclientprotocol/sdk/unstable';
 import { boundary, decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
 import { type AgentChatEvent, type AgentChatMessage, type AgentChatPart, type AgentChatTranscript } from '../../../../shared/types/agentChat';
 
@@ -20,6 +20,8 @@ export class TranscriptProjection {
   snapshot(): AgentChatTranscript {
     return structuredClone(this.state);
   }
+
+  setGeneration(generation: number): void { this.state = { ...this.state, generation, revision: 0 }; }
 
   error(): string | undefined { return this.overflow ? 'The conversation exceeds the Chat display limit (4,000 messages or 16 MiB). The provider retains its full history. Use Terminal to inspect the complete conversation.' : undefined; }
 
@@ -62,7 +64,12 @@ export class TranscriptProjection {
       // Preserve protocol extensions and metadata for a generic renderer.
       change = { type: 'replace', message: { id: `update:${update.sessionUpdate}`, role: 'assistant', parts: [{ type: 'content', content: decodeBoundary(update, boundary.json) }] } };
     }
-    const event: AgentChatEvent = { panelId: this.state.panelId, generation: this.state.generation, revision, change };
+    return this.acceptChange(change);
+  }
+
+  /** Provider messages share the same bounded, revisioned viewer contract. */
+  acceptChange(change: AgentChatEvent['change']): AgentChatEvent {
+    const event: AgentChatEvent = { panelId: this.state.panelId, generation: this.state.generation, revision: this.state.revision + 1, change };
     if (this.overflow) return event;
     const id = change.type === 'replace' ? change.message.id : change.id;
     const index = this.indexes.get(id);
@@ -80,7 +87,7 @@ export class TranscriptProjection {
     else this.state.messages[index] = message;
     this.sizes.set(id, size);
     this.bytes = bytes;
-    this.state.revision = revision;
+    this.state.revision = event.revision;
     return event;
   }
 }

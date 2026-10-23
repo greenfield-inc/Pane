@@ -18,9 +18,8 @@ export function AgentConversationSurface({ panel, draft, onChangeDraft, confirmD
   const state = panel.state.customState as TerminalPanelState | undefined;
   const conversation = chat.view?.conversation ?? state?.agentChat?.conversation;
   const showChat = conversation && conversation.active !== 'terminal';
-  const hasAgent = state?.agentType === 'claude' || state?.agentType === 'codex';
   return <View style={styles.fill}>
-    {(conversation || chat.view?.available || hasAgent) && <AgentModeBar chat={chat} />}
+    {(conversation || chat.view?.available || chat.view?.identificationRequired) && <AgentModeBar chat={chat} />}
     {showChat ? <AgentChatPanel chat={chat} draft={draft} onChangeDraft={onChangeDraft} confirmDraft={confirmDraft} /> : <View style={styles.fill}>
       {children}
       {chat.error && <Text testID="chat-switch-error" variant="footnote" tone="danger" style={styles.error}>{chat.error}</Text>}

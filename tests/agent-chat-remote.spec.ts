@@ -76,9 +76,9 @@ test('streams a bounded Chat thread through the remote client and reconnects wit
   await page.getByRole('button', { name: 'Reject this edit' }).click();
   await expect.poll(() => mutations).toEqual(['agent-chat:permission']);
   view.error = 'The agent could not complete this turn: Provider authentication expired. Check the provider connection.';
-  await page.getByLabel('Conversation options', { exact: true }).click();
-  await page.getByRole('button', { name: 'Refresh', exact: true }).click();
-  await page.getByLabel('Conversation options', { exact: true }).click();
+  await page.locator('.chat-header').click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Refresh conversation', exact: true }).click();
+  await page.keyboard.press('Escape');
   await expect(page.getByRole('alert')).toContainText('Provider authentication expired');
   expect(mutations).toEqual(['agent-chat:permission']);
   view.error = undefined;
@@ -86,7 +86,7 @@ test('streams a bounded Chat thread through the remote client and reconnects wit
   view.permissions = [];
   await emitRemoteHostEvent(page, 'agent-chat:state', decodeBoundary(view, boundary.json));
   await expect(page.getByText('The previous handoff was interrupted.', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'View Claude as', exact: true }).click();
+  await page.getByRole('tab', { name: 'Claude', exact: true }).click({ button: 'right' });
   await expect(page.getByRole('menuitemradio', { name: 'View as Terminal', exact: true })).toBeEnabled();
   await page.keyboard.press('Escape');
   await page.getByRole('button', { name: 'Recover exact conversation', exact: true }).click();

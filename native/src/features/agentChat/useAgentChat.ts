@@ -59,6 +59,7 @@ export function useAgentChat(panelId: string) {
     setError: (error?: string) => session.setError(error),
     setAttachment: (image?: NonNullable<AgentChatSend['images']>[number]) => session.setAttachment(image),
     setup: () => perform('agent-chat:setup', []),
+    identify: (nativeId: string, socketPath: string) => perform('agent-chat:identify', [panelId, nativeId, socketPath]),
     switch: (mode: AgentInterface) => perform('agent-chat:switch', [panelId, mode, generation]),
     recover: () => perform('agent-chat:recover', [panelId, 'terminal', generation]),
     cancel: () => perform('agent-chat:cancel', [panelId, generation]),

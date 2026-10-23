@@ -1,8 +1,54 @@
-import { agent, methods, type AnyMessage } from '@agentclientprotocol/sdk';
+import { agent, methods, type AnyMessage } from '@agentclientprotocol/sdk/unstable';
 import { describe, expect, it } from 'vitest';
 import { AcpSession } from './acpSession';
 
 describe('host ACP session', () => {
+  it('can continue an explicitly allowed partial import with an honest history notice and no replay', async () => {
+    const toAgent = new TransformStream<AnyMessage>();
+    const toHost = new TransformStream<AnyMessage>();
+    const server = agent().onRequest(methods.agent.initialize, () => ({ protocolVersion: 1, agentCapabilities: { loadSession: true } }))
+      .onRequest(methods.agent.session.load, () => ({}))
+      .connect({ readable: toAgent.readable, writable: toHost.writable });
+    const host = new AcpSession({ readable: toHost.readable, writable: toAgent.writable }, 2);
+    try {
+      await host.initialize();
+      await host.load({ sessionId: 'saved-empty', cwd: '/workspace', mcpServers: [] }, { allowIncompleteHistory: true });
+      expect(host.historyNotice()).toMatch(/did not return.*history/i);
+      expect(host.updates()).toEqual([]);
+    } finally { await host.close(); server.close(); }
+  });
+  it('forks stored history without prompting and directs subsequent input only to the fork', async () => {
+    const toAgent = new TransformStream<AnyMessage>();
+    const toHost = new TransformStream<AnyMessage>();
+    const prompts: string[] = [];
+    const identities: string[] = [];
+    const server = agent().onRequest(methods.agent.initialize, () => ({
+      protocolVersion: 1, agentCapabilities: { loadSession: true, sessionCapabilities: { fork: {} } },
+    })).onRequest(methods.agent.session.fork, ({ params }) => {
+      expect(params.sessionId).toBe('original');
+      return { sessionId: 'fork' };
+    }).onRequest(methods.agent.session.load, async ({ params, client }) => {
+      expect(identities).toEqual(['fork']);
+      expect(params.sessionId).toBe('fork');
+      await client.notify(methods.client.session.update, { sessionId: 'fork', update: {
+        sessionUpdate: 'user_message_chunk', content: { type: 'text', text: 'An old request, already handled' },
+      } });
+      return {};
+    }).onRequest(methods.agent.session.prompt, ({ params }) => {
+      expect(params.sessionId).toBe('fork');
+      prompts.push(...params.prompt.flatMap(part => part.type === 'text' ? [part.text] : []));
+      return { stopReason: 'end_turn' };
+    }).connect({ readable: toAgent.readable, writable: toHost.writable });
+    const host = new AcpSession({ readable: toHost.readable, writable: toAgent.writable }, 2, { onIdentity: id => { identities.push(id); } });
+    try {
+      await host.initialize();
+      expect(await host.fork({ sessionId: 'original', cwd: '/workspace', mcpServers: [] })).toMatchObject({ sessionId: 'fork' });
+      expect(host.updates()).toHaveLength(1);
+      expect(prompts).toEqual([]);
+      await host.prompt([{ type: 'text', text: 'A new request' }]);
+      expect(prompts).toEqual(['A new request']);
+    } finally { await host.close(); server.close(); }
+  });
   it('bounds an unresponsive adapter preflight without submitting or creating a conversation', async () => {
     const toAgent = new TransformStream<AnyMessage>();
     const toHost = new TransformStream<AnyMessage>();

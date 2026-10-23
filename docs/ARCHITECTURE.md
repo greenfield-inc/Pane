@@ -217,9 +217,10 @@ destination instead of claiming delivery. There is no cross-machine sync.
 
 ### Agent Chat
 
-[Agent Chat](AGENT_CHAT.md) adds a host-owned ACP runtime to eligible agent tabs.
-The same panel keeps its exact provider conversation and a durable ownership
-generation when switching between ACP and a native terminal. Desktop and remote
+[Agent Chat](AGENT_CHAT.md) connects agent tabs to host-owned Claude ACP or native
+Codex app-server runtimes. The same panel keeps a durable conversation identity
+and generation across interfaces, using provider-native history forks when exact
+transfer is unavailable. Codex views can share one running provider owner. Desktop and remote
 viewers share the command registry and ordered projection events; viewer lifetime
 does not control the agent process. See the compatibility and recovery limits in
 the linked guide.

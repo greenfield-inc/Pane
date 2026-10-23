@@ -412,6 +412,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
     get: (panelId: string) => invokeIpc('agent-chat:get', panelId),
     setup: () => invokeIpc('agent-chat:setup'),
+    identify: (panelId: string, nativeId: string, socketPath: string) => invokeIpc('agent-chat:identify', panelId, nativeId, socketPath),
     switch: (panelId: string, mode: AgentInterface, generation: number) => invokeIpc('agent-chat:switch', panelId, mode, generation),
     recover: (panelId: string, mode: AgentInterface, generation: number) => invokeIpc('agent-chat:recover', panelId, mode, generation),
     send: (panelId: string, request: AgentChatSend) => invokeIpc('agent-chat:send', panelId, request),

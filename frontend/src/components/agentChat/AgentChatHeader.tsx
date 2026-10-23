@@ -1,5 +1,6 @@
 import { useMemo, useState, useSyncExternalStore } from 'react';
-import { MessageSquare, MoreHorizontal, TerminalSquare } from 'lucide-react';
+import { MessageSquare, TerminalSquare } from 'lucide-react';
+import { Dropdown } from '../ui/Dropdown';
 import type { AgentChatClient, AgentInterface } from '../../../../shared/types/agentChat';
 import { agentChatViewer } from '../../services/agentChatViewer';
 import './agentChat.css';
@@ -9,6 +10,7 @@ export function AgentChatHeader({ panelId, client, connected = true }: { panelId
   const viewer = useMemo(() => agentChatViewer(client, panelId), [client, panelId]);
   const { view } = useSyncExternalStore(viewer.subscribe, viewer.snapshot, viewer.snapshot);
   const [busy, setBusy] = useState(false);
+  const [diagnostics, setDiagnostics] = useState(false);
   const conversation = view?.conversation;
   const transitioning = !!conversation?.transition && conversation.active !== 'stopped';
   const focusMode = conversation?.active === 'stopped' ? 'terminal' : conversation?.active ?? 'chat';
@@ -23,7 +25,13 @@ export function AgentChatHeader({ panelId, client, connected = true }: { panelId
     finally { setBusy(false); }
   };
   const status = conversation?.active === 'stopped' ? 'Conversation stopped' : transitioning ? 'Switching interface…' : !connected ? 'Reconnecting…' : conversation?.pendingSwitch ? `Switch to ${conversation.pendingSwitch.target === 'chat' ? 'Chat' : 'Terminal'} after this turn` : view?.permissions.length ? 'Waiting for you' : view?.running ? 'Agent is working' : '';
-  return <div className="agent-chat chat-header">
+  return <Dropdown className="contents" contextMenu menuLabel="Conversation actions" closeOnSelect={false}
+    items={[
+      { id: 'refresh', label: 'Refresh conversation', onClick: () => void viewer.refresh() },
+      { id: 'diagnostics', label: 'Diagnostics', onClick: () => setDiagnostics(value => !value) },
+    ]}
+    footer={diagnostics ? <pre className="agent-chat chat-diagnostics max-h-64 overflow-auto p-3 text-xs">{JSON.stringify({ conversation, configuration: view?.configuration, updates: view?.transcript?.messages.filter(message => message.id.startsWith('update:')) }, null, 2)}</pre> : undefined}
+    trigger={<div className="agent-chat chat-header">
     <div className="chat-switch" role="radiogroup" aria-label="View this conversation as" onKeyDown={event => {
       if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
       const options = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')];
@@ -34,7 +42,7 @@ export function AgentChatHeader({ panelId, client, connected = true }: { panelId
       options[index].focus();
       options[index].click();
     }}>
-      {(['chat', 'terminal'] as const).map(mode => <button key={mode} type="button" role="radio" tabIndex={focusMode === mode ? 0 : -1} aria-checked={conversation?.active === mode} disabled={!connected || busy || !view?.available || transitioning || (mode === 'chat' && view.setupRequired)} onClick={() => void change(mode)}>
+      {(['chat', 'terminal'] as const).map(mode => <button key={mode} type="button" role="radio" tabIndex={focusMode === mode ? 0 : -1} aria-checked={conversation?.active === mode} disabled={!connected || busy || !view?.available || transitioning} onClick={() => void change(mode)}>
         {mode === 'chat' ? <MessageSquare className="h-3.5 w-3.5" /> : <TerminalSquare className="h-3.5 w-3.5" />}{mode === 'chat' ? 'Chat' : 'Terminal'}
       </button>)}
     </div>
@@ -42,12 +50,6 @@ export function AgentChatHeader({ panelId, client, connected = true }: { panelId
       <span role="status" className="chat-status">{status}</span>
       {conversation?.pendingSwitch && <button type="button" className="chat-button" disabled={busy || !connected} onClick={() => void change(conversation.active === 'chat' ? 'chat' : 'terminal')}>Cancel pending switch</button>}
     </div>}
-    <details className="chat-menu">
-      <summary className="chat-icon" aria-label="Conversation options" title="Conversation options"><MoreHorizontal className="h-4 w-4" /></summary>
-      <div className="chat-menu-popover">
-        <button type="button" className="chat-button" onClick={() => void viewer.refresh()}>Refresh</button>
-        <details className="chat-diagnostics"><summary className="chat-button">Diagnostics</summary><pre>{JSON.stringify({ conversation, configuration: view?.configuration, updates: view?.transcript?.messages.filter(message => message.id.startsWith('update:')) }, null, 2)}</pre></details>
-      </div>
-    </details>
-  </div>;
+    {conversation?.transferNotice && <p role="status" className="chat-status">{conversation.transferNotice}</p>}
+  </div>} />;
 }
