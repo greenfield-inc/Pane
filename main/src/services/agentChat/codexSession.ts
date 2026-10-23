@@ -23,6 +23,8 @@ type CodexEnvelope = ReturnType<typeof envelopeSchema.decode>;
 
 export interface CodexSessionOptions {
   onStart?: (attempt?: AgentChatStartAttempt) => void;
+  onStartMatched?: (attempt: AgentChatStartAttempt, turnId: string, status: string) => void;
+  onTurnStatus?: (turnId: string, status: string) => void;
   onIdentity?: (id: string) => void;
   onChange?: (change: AgentChatEvent['change']) => void;
   onState?: () => void;
@@ -98,6 +100,7 @@ export class CodexSession {
     if (thread.id !== threadId || matches.length !== 1 || !match || inputHash(array(match.item.content)) !== attempt.inputHash || !['inProgress', 'completed', 'failed', 'interrupted'].includes(String(match.turn.status))) {
       throw new PaneError('CHAT_START_UNCONFIRMED', 'The original provider history does not yet confirm this exact send. Its delivery remains unknown.', 'Retry recovery to read the same conversation again; the original native attachment is retained and no prompt was replayed.');
     }
+    this.options.onStartMatched?.(attempt, string(match.turn.id), string(match.turn.status));
     return string(match.turn.status);
   }
 
@@ -181,6 +184,7 @@ export class CodexSession {
       this.threadId = id;
       this.options.onIdentity?.(id);
       this.settings = response;
+      this.turnId = undefined;
       // New servers may return only the newest history window. Read the older
       // pages without sending any historical request as a new model turn.
       const itemsCursor = decodeOptionalBoundary(response.itemsBackwardsCursor, boundary.string);
@@ -215,6 +219,7 @@ export class CodexSession {
   private hydrateTurn(turn: JsonObject): void {
     if (turn.status === 'inProgress') this.turnId = string(turn.id);
     for (const item of array(turn.items ?? [])) this.item(object(item));
+    this.options.onTurnStatus?.(string(turn.id), string(turn.status));
   }
 
   private item(item: JsonObject): void {
@@ -239,6 +244,7 @@ export class CodexSession {
     else if (method === 'turn/started') { this.turnId = string(object(params.turn).id); this.unconfirmedStart = false; }
     else if (method === 'turn/completed') {
       const turn = object(params.turn); const id = string(turn.id);
+      this.options.onTurnStatus?.(id, string(turn.status));
       this.unconfirmedStart = false;
       this.completed.set(id, turn);
       if (this.completed.size > 64) this.completed.delete(this.completed.keys().next().value!);
@@ -324,6 +330,7 @@ export class CodexSession {
   }
 
   isConnected(): boolean { return this.socket.readyState === this.socket.OPEN; }
+  isLoaded(): boolean { return this.loaded; }
   hasUnconfirmedStart(): boolean { return this.unconfirmedStart; }
   isRunning(): boolean { return !!this.turnId || !!this.turnResult || this.configuring || this.unconfirmedStart; }
   supportsImages(): boolean { return true; }

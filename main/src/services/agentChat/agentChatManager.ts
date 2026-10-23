@@ -135,6 +135,12 @@ export class AgentChatManager {
       env: this.environments.get(record.panelId) ?? process.env, directory: path.dirname(saved.launch.settingsFile), generation, socketPath: saved.launch.codexSocketPath, remote: saved.launch.codexRemote,
       save: identities => panelManager.commitAgentChat(record.panelId, { ...this.required(record.panelId), processes: { ...this.required(record.panelId).processes, chat: structuredClone(identities), unverifiedSpawn: undefined } }),
       onStart: pendingCodexStart => panelManager.commitAgentChat(record.panelId, { ...this.required(record.panelId), pendingCodexStart }),
+      onStartMatched: (attempt, turnId, status) => {
+        const current = this.required(record.panelId);
+        panelManager.commitAgentChat(record.panelId, { ...current, pendingCodexStart: undefined, codexDelivery: { operationId: attempt.operationId, turnId } });
+        this.settleCodexDelivery(record.panelId, turnId, status, false);
+      },
+      onTurnStatus: (turnId, status) => this.settleCodexDelivery(record.panelId, turnId, status),
       onIdentity: nativeSessionId => panelManager.commitAgentChat(record.panelId, { ...this.required(record.panelId), conversation: { ...this.required(record.panelId).conversation, nativeSessionId, forkUnconfirmed: undefined } }),
       onChange: change => {
         const event = projection.acceptChange(change);
@@ -169,6 +175,14 @@ export class AgentChatManager {
       this.codex.delete(record.panelId);
       throw error;
     }
+  }
+
+  private settleCodexDelivery(panelId: string, turnId: string, status: string, clear = true): void {
+    const saved = this.record(panelId);
+    const delivery = saved?.codexDelivery;
+    if (!saved || delivery?.turnId !== turnId) return;
+    const terminal = ['completed', 'failed', 'interrupted'].includes(status);
+    panelManager.commitAgentChat(panelId, { ...saved, codexDelivery: terminal && clear ? undefined : delivery, receipts: saved.receipts?.map(receipt => receipt.operationId === delivery.operationId ? { ...receipt, state: status === 'completed' ? 'completed' : terminal ? 'failed' : 'accepted', error: terminal && status !== 'completed' ? `Provider turn ${status}; the input was delivered.` : undefined } : receipt) });
   }
 
   private async handoffCodex(record: ConversationRecord, target: AgentInterface) {
@@ -492,16 +506,27 @@ export class AgentChatManager {
     return controller;
   }
 
-  private async preflight(record: ConversationRecord, target: AgentInterface): Promise<void> {
+  private async preflight(record: ConversationRecord, target: AgentInterface): Promise<'shared-owner' | void> {
     if (this.adopting.has(record.panelId)) throw new PaneError('CHAT_TRANSITION_IN_PROGRESS', 'This conversation is being identified.', 'Wait for identification to finish.');
     if (record.provider === 'codex') {
       let runtime = this.codex.get(record.panelId);
       const saved = this.required(record.panelId);
       if (record.active === 'stopped' && saved.pendingCodexStart && (saved.launch.codexSocketPath || saved.launch.codexRemote)) {
         runtime ??= await this.startCodex(record);
-        const status = await runtime.reconcileStart(record.nativeSessionId, saved.pendingCodexStart);
-        const current = this.required(record.panelId);
-        panelManager.commitAgentChat(record.panelId, { ...current, pendingCodexStart: undefined, receipts: current.receipts?.map(receipt => receipt.operationId === saved.pendingCodexStart!.operationId ? { ...receipt, state: status === 'inProgress' ? 'accepted' : status === 'completed' ? 'completed' : 'failed', error: status === 'failed' || status === 'interrupted' ? `Provider turn ${status}; the input was delivered.` : undefined } : receipt) });
+        await runtime.reconcileStart(record.nativeSessionId, saved.pendingCodexStart);
+        return 'shared-owner';
+      }
+      if (record.active === 'stopped' && (saved.launch.codexSocketPath || saved.launch.codexRemote)) {
+        if (saved.codexDelivery) {
+          runtime ??= await this.startCodex(record);
+          await runtime.reconnect();
+          await runtime.session.load({ sessionId: record.nativeSessionId, cwd: saved.launch.cwd, mcpServers: [] });
+          return 'shared-owner';
+        }
+        if (runtime?.session.isConnected() && runtime.session.isLoaded()) {
+          await runtime.session.verifyIdentity(record.nativeSessionId);
+          return 'shared-owner';
+        }
       }
       // Explicit recovery first releases recorded owners, then reconnects the
       // saved identity. A dead cached socket cannot preflight that new runtime.

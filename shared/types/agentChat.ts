@@ -97,6 +97,7 @@ export interface AgentChatStartAttempt { operationId: string; clientId: string; 
 export interface AgentChatPanelState {
   receipts?: AgentChatReceipt[];
   pendingCodexStart?: AgentChatStartAttempt;
+  codexDelivery?: { operationId: string; turnId: string };
   conversation: AgentConversationRecord;
   launch: AgentChatLaunch;
   processes: { terminal: AgentChatProcessIdentity[]; chat: AgentChatProcessIdentity[]; unverifiedSpawn?: AgentInterface };

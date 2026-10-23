@@ -268,3 +268,18 @@ it('leaves an unacknowledged fork stopped instead of automatically restoring or 
   expect(acquisitions).toBe(1);
   expect(controller.snapshot()).toMatchObject({ active: 'stopped', nativeSessionId: 'conversation-a', forkUnconfirmed: true });
 });
+
+it('recovers a positively verified shared owner without canceling its running work', async () => {
+  const store = storage(); store.write({ ...original, provider: 'codex', active: 'stopped' });
+  let releases = 0;
+  const driver: RuntimeDriver = {
+    preflight: async () => 'shared-owner',
+    checkpoint: async () => ({ ready: false }),
+    release: async () => { releases++; throw new Error('Recovery must preserve the verified shared turn'); },
+    acquire: async () => { throw new Error('Must not create another owner'); },
+    handoff: async record => ({ nativeSessionId: record.nativeSessionId, historyVerified: true }),
+  };
+  const controller = new SessionController(store, driver);
+  await expect(controller.recover('chat', 1)).resolves.toMatchObject({ active: 'chat', generation: 2 });
+  expect(releases).toBe(0);
+});

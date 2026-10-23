@@ -445,3 +445,52 @@ it('keeps the original embedded Terminal usable when identification setup cannot
     } finally { commit.mockRestore(); }
   } finally { rmSync(blocked, { recursive: true, force: true }); manager.detachObservers(); }
 });
+
+it.each([false, true])('recovers a correlated borrowed turn without interrupt and settles its receipt; completionRace=%s', async completionRace => {
+  const { WebSocketServer } = await import('ws');
+  const { once } = await import('events');
+  const { decodeBoundary } = await import('../../../../shared/validation/boundaryDecoder');
+  const server = new WebSocketServer({ port: 0, host: '127.0.0.1' }); await once(server, 'listening');
+  const { port } = decodeBoundary(server.address(), boundary.object({ port: boundary.number }));
+  const nativeId = randomUUID(), id = randomUUID();
+  let clientId = '', input: unknown[] = [], visible = false, resumed = false;
+  let sawStart: (() => void) | undefined;
+  const started = new Promise<void>(resolve => { sawStart = resolve; });
+  const calls: string[] = [];
+  server.on('connection', socket => socket.on('message', data => {
+    const message = JSON.parse(data.toString()); if (message.id === undefined) return;
+    calls.push(message.method);
+    if (message.method === 'turn/start') { clientId = message.params.clientUserMessageId; input = message.params.input; sawStart?.(); return; }
+    if (message.method === 'thread/resume' && visible) resumed = true;
+    const result = message.method === 'model/list' ? { data: [] } : message.method === 'thread/loaded/list' ? { data: [nativeId] } : message.method.startsWith('thread/') ? { thread: { id: nativeId, turns: visible ? [{ id: 'recovered-turn', status: completionRace && resumed ? 'completed' : 'inProgress', items: [{ type: 'userMessage', id: 'native-message', clientId, content: input }] }] : [] } } : {};
+    socket.send(JSON.stringify({ id: message.id, result }));
+  }));
+  databaseService.createSession({ id, name: id, initial_prompt: '', worktree_name: id, worktree_path: process.cwd(), project_id: null, tool_type: 'none' });
+  const command = `/fixture/codex --remote ws://127.0.0.1:${port}`;
+  const panel = await panelManager.createPanel({ sessionId: id, type: 'terminal', initialState: { agentType: 'codex', initialCommand: command } });
+  const manager = new AgentChatManager({ enabled: () => true });
+  const destroy = vi.fn(async () => {});
+  manager.attachNative({ pid: () => process.pid, writeControl: () => {}, destroy, initialize: async () => { throw new Error('No native replacement needed to recover Chat'); } });
+  try {
+    await manager.prepareNativeLaunch(panel, process.cwd(), process.env, command, 'bash', false);
+    await manager.identify(panel.id, nativeId, ''); await manager.switchTo(panel.id, 'chat', 1);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    manager.send(panel.id, { operationId: 'lost-response', generation: 2, text: 'One owned request' });
+    await started; await vi.advanceTimersByTimeAsync(30_001); vi.useRealTimers();
+    expect(manager.view(panel.id).conversation?.active).toBe('stopped');
+    for (const socket of server.clients) socket.terminate();
+    await new Promise(resolve => setTimeout(resolve, 20));
+    visible = true;
+    await manager.recover(panel.id, 'chat', 2);
+    expect(destroy).not.toHaveBeenCalled();
+    expect(calls.filter(method => method === 'turn/start')).toHaveLength(1);
+    expect(calls).not.toContain('turn/interrupt');
+    if (!completionRace) {
+      expect(manager.view(panel.id).running).toBe(true);
+      expect(() => manager.send(panel.id, { operationId: 'too-soon', generation: 3, text: 'Do not start' })).toThrow(/already working/i);
+      for (const socket of server.clients) socket.send(JSON.stringify({ method: 'turn/completed', params: { threadId: nativeId, turn: { id: 'recovered-turn', status: 'completed' } } }));
+    }
+    await expect.poll(() => manager.receipt(panel.id, 'lost-response')?.state).toBe('completed');
+    expect(manager.view(panel.id).running).toBe(false);
+  } finally { vi.useRealTimers(); await manager.stop(panel.id); manager.detachObservers(); for (const socket of server.clients) socket.terminate(); await new Promise<void>(resolve => server.close(() => resolve())); }
+});

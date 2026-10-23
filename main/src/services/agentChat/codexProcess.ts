@@ -149,7 +149,7 @@ export class CodexProcess {
 
   nativeConfirms(id: string): boolean { return this.nativeConnection?.confirms(id) ?? false; }
 
-  async reconcileStart(threadId: string, attempt: AgentChatStartAttempt): Promise<string> {
+  async reconnect(): Promise<void> {
     if (!this.connection?.isConnected()) {
       await this.connection?.close();
       const socket = this.options.socketPath ? await this.proxySocket(this.options.socketPath) : await this.connect();
@@ -157,10 +157,14 @@ export class CodexProcess {
       this.connection = new CodexSession(socket, this.options.generation, this.options);
       await this.connection.initialize();
     }
-    const status = await this.connection.readStartOutcome(threadId, attempt);
+  }
+
+  async reconcileStart(threadId: string, attempt: AgentChatStartAttempt): Promise<string> {
+    await this.reconnect();
+    const status = await this.session.readStartOutcome(threadId, attempt);
     // Only positive correlation permits attaching/subscribing again. An absent
     // marker never counts as rejection or permission to replay the old send.
-    await this.connection.load({ sessionId: threadId, cwd: this.options.cwd, mcpServers: [] });
+    await this.session.load({ sessionId: threadId, cwd: this.options.cwd, mcpServers: [] });
     return status;
   }
 

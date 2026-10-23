@@ -12,11 +12,12 @@ interface RuntimeAcquisition {
   transferNotice?: string;
 }
 
-/** Process/protocol boundary. Preflight must never load the conversation;
+/** Process/protocol boundary. Preflight must not create a new owner; it may
+ * reattach to a positively verified shared owner during recovery.
  * release stops the current turn and resolves only once the source can no longer
  * write. A shared provider daemon must release the tab's conversation, not peers. */
 export interface RuntimeDriver {
-  preflight(record: ConversationRecord, target: AgentInterface): Promise<void>;
+  preflight(record: ConversationRecord, target: AgentInterface): Promise<'shared-owner' | void>;
   /** Both views can attach to one verified owner without restarting its work. */
   handoff?(record: ConversationRecord, target: AgentInterface): Promise<RuntimeAcquisition>;
   checkpoint(record: ConversationRecord): Promise<NativeCheckpointState>;
@@ -80,7 +81,14 @@ export class SessionController {
     this.switching = true;
     let acquiring = false;
     try {
-      await this.runtime.preflight(before, target);
+      const ownership = await this.runtime.preflight(before, target);
+      if (ownership === 'shared-owner' && this.runtime.handoff) {
+        this.storage.write({ ...this.snapshot(), transition: { source: before.preferred, target, phase: 'loading' }, recovery: undefined });
+        const loaded = await this.runtime.handoff(before, target);
+        if (loaded.nativeSessionId !== before.nativeSessionId || !loaded.historyVerified) throw new Error('The shared owner did not verify this conversation');
+        this.storage.write({ ...this.snapshot(), active: target, preferred: target, generation: before.generation + 1, transition: undefined, nativeStartup: undefined, recovery: undefined });
+        return this.snapshot();
+      }
       // Both sides may have existed when a host died between durable phases.
       // A driver without a live handle must verify recorded process lifetimes;
       // missing transport state alone can never count as release.
