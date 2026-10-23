@@ -62,7 +62,7 @@ export function AIAgentsSettings({ persistence, onDirtyChange }: AIAgentsSetting
         <SettingRow settingId="agent-chat-enabled" label="Chat interface" description="Allow supported agent tabs to switch between Chat and their native Terminal. Turning this off prevents new Chat transitions; existing Chat work remains available." saveState={persistence.saveStates['agent-chat-enabled']}>
           <ImmediateToggle label="Chat interface" value={config.agentChatEnabled !== false} onSave={value => persistence.saveConfig('agent-chat-enabled', { agentChatEnabled: value })} />
         </SettingRow>
-        <SettingRow settingId="default-agent-interface" label="Default agent interface" description="Choose the interface for new compatible agent tabs. Existing tabs keep their choice. Unsupported profiles and hosts, or a missing adapter, start in Terminal; use the tab menu to set up Chat." saveState={persistence.saveStates['default-agent-interface']}>
+        <SettingRow settingId="default-agent-interface" label="Default agent interface" description="Choose the interface for new agent tabs. Switching a tab also updates this default; existing tabs keep their choice. Pane sets up required adapters automatically on the workspace host." saveState={persistence.saveStates['default-agent-interface']}>
           <SegmentedControl<'terminal' | 'chat'> label="Default agent interface" value={config.defaultAgentInterface ?? 'terminal'} options={[{ id: 'terminal', label: 'Terminal' }, { id: 'chat', label: 'Chat' }]} onChange={value => void persistence.saveConfig('default-agent-interface', { defaultAgentInterface: value })} />
         </SettingRow>
 

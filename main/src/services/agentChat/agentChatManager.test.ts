@@ -302,7 +302,7 @@ it.skipIf(process.platform === 'win32')('binds an identified legacy tab to its e
     expect(manager.view(panel.id).identificationRequired).toBe(true);
     await expect(manager.identify(panel.id, randomUUID(), join(directory, 'owner.sock'))).rejects.toMatchObject({ code: 'CHAT_IDENTITY_UNAVAILABLE' });
     expect(manager.view(panel.id).identificationRequired).toBe(true);
-    await manager.identify(panel.id, nativeId, join(directory, 'owner.sock'));
+    expect(await manager.identify(panel.id, nativeId, join(directory, 'owner.sock'))).toMatchObject({ available: true, identificationRequired: false });
     await manager.switchTo(panel.id, 'chat', 1);
     expect(manager.view(panel.id)).toMatchObject({ available: true, conversation: { nativeSessionId: nativeId, active: 'chat', generation: 2 }, transcript: { messages: [{ id: 'old-answer' }] } });
     await manager.switchTo(panel.id, 'terminal', 2);

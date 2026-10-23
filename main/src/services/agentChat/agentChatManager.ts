@@ -684,13 +684,13 @@ export class AgentChatManager {
       runtime.session.setGeneration(1); this.transcripts.get(panelId)?.setGeneration(1);
       this.known.add(panelId);
       this.publish(panelId);
-      return this.view(panelId);
     } catch (error) {
       await this.codex.get(panelId)?.release(false);
       this.codex.delete(panelId); this.controllers.delete(panelId); this.transcripts.delete(panelId);
       panelManager.commitAgentChat(panelId, undefined); this.known.delete(panelId);
       throw error;
     } finally { this.adopting.delete(panelId); this.publish(panelId); }
+    return this.view(panelId);
   }
 
   async switchTo(panelId: string, target: AgentInterface, generation: number): Promise<ConversationRecord> {
