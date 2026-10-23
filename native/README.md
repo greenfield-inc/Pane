@@ -65,7 +65,8 @@ maestro --device <simulator-udid> test -e CONNECTION_CODE="$(cat ~/.pane_rn_dev/
 ## Agent Chat
 
 Compatible agent panels offer **Chat** and **Terminal** below the tab strip. Both
-continue the exact conversation on the host. Chat uses `@assistant-ui/react-native`
+continue the active conversation on the host, with provider-native history copy
+in the same tab when exact transfer is unavailable. Chat uses `@assistant-ui/react-native`
 with the default appearance, adapted to theme tokens and a virtualized Legend
 List. There is no model process or chat cloud on the phone. See
 [Agent Chat](../docs/AGENT_CHAT.md) for host compatibility and recovery.
@@ -73,8 +74,9 @@ List. There is no model process or chat cloud on the phone. See
 Chat supports streamed Markdown, reasoning, expandable tools/diffs, the host’s
 permission choices, images up to 5 MiB, and advertised model/mode/effort settings.
 Its Send and Cancel controls dispatch semantic host commands; Terminal retains
-its keyboard, controller and upload behavior. Switching during work waits for a
-checkpoint and can be cancelled. A stopped conversation offers explicit recovery
+its keyboard, controller and upload behavior. Switching preserves a shared
+Codex turn; a change of runtime stops the current turn before transferring
+history. A stopped conversation offers explicit recovery
 in Terminal. Disconnecting or leaving the screen never stops the host agent.
 
 Draft text uses the existing per-host/pane/panel device storage. Uncertain sends

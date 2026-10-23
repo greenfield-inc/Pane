@@ -61,7 +61,7 @@ function MessageList({ chat, approvalScroll, messages }: { chat: Chat; approvalS
       // inside the now-measured row rather than scrolling beyond its content.
       if (target && size && -target.viewOffset >= size) void list.current?.scrollToIndex({ ...target, viewOffset: 1 - size, animated: false });
       savePosition();
-    }} onScroll={savePosition} onMomentumScrollEnd={savePosition} onScrollEndDrag={savePosition} renderItem={({ item }) => <ThreadPrimitive.Unstable_MessageById messageId={item.id} components={MESSAGE_COMPONENTS} />} />
+    }} onContentSizeChange={savePosition} onLayout={savePosition} onScroll={savePosition} onMomentumScrollEnd={savePosition} onScrollEndDrag={savePosition} renderItem={({ item }) => <ThreadPrimitive.Unstable_MessageById messageId={item.id} components={MESSAGE_COMPONENTS} />} />
     {!atBottom && <Pressable testID="chat-latest" accessibilityRole="button" accessibilityLabel="Scroll to latest message" onPress={() => void list.current?.scrollToEnd({ animated: !reducedMotion })} style={[styles.latest, { backgroundColor: colors.background, borderColor: colors.border }]}><Icon ios="arrow.down" android="arrow_downward" size={18} color={colors.foreground} /></Pressable>}
   </View>;
 }
