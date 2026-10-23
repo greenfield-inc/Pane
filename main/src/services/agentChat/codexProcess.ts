@@ -31,6 +31,7 @@ export class CodexProcess {
   private connection?: CodexSession;
   private timer?: ReturnType<typeof setInterval>;
   private observation = Promise.resolve();
+  private observing = false;
   private observationError?: Error;
   private releasePromise?: Promise<void>;
   private spawnError?: Error;
@@ -56,13 +57,17 @@ export class CodexProcess {
     let banner = '';
     this.child.stderr.on('data', (data: Buffer) => {
       banner = (banner + data.toString('utf8')).slice(-16_384);
-      const match = banner.match(/(?:^|\n)listening on: (ws:\/\/127\.0\.0\.1:(\d+))\r?\n/);
+      const match = banner.match(/(?:^|\n)[ \t]*listening on: (ws:\/\/127\.0\.0\.1:(\d+))\r?\n/);
       if (match && Number(match[2]) > 0 && Number(match[2]) <= 65535) this.endpoint = match[1];
     });
     if (!this.child.pid) throw new PaneError('CHAT_CODEX_START_FAILED', 'Codex could not start its conversation server.', 'Check the installed Codex executable and retry.');
     await this.tracker.capture([this.child.pid]);
     this.timer = setInterval(() => {
-      this.observation = this.observation.then(() => this.tracker.refresh()).catch(error => { this.observationError = error instanceof Error ? error : new Error(String(error)); });
+      // Windows process snapshots can outlast this cadence. Keep one in flight
+      // so release waits for current evidence, not a growing queue of snapshots.
+      if (this.observing) return;
+      this.observing = true;
+      this.observation = this.tracker.refresh().catch(error => { this.observationError = error instanceof Error ? error : new Error(String(error)); }).finally(() => { this.observing = false; });
     }, 200);
     this.timer.unref();
     const deadline = Date.now() + 15_000;
