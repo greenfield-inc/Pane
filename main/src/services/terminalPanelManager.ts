@@ -17,6 +17,7 @@ import { ToolPanel, TerminalPanelState } from '../../../shared/types/panels';
 import { MISSION_CONTROL_VIEWER_PREFIX } from '../../../shared/types/missionControl';
 import { getPaneDaemonEventSink, getPaneEventSink, getPtyHostRuntime, getRuntimeConfigManager, type PtyHandleLike, type PtyHostRuntime } from '../core/runtime';
 import { panelManager } from './panelManager';
+import { resolveTerminalPanelKind } from './terminalPanelKind';
 import * as path from 'path';
 import { promises as fs } from 'fs';
 import { randomUUID } from 'crypto';
@@ -1798,6 +1799,7 @@ export class TerminalPanelManager extends EventEmitter {
             'PANE_PORT',
             'PANE_SESSION_ID',
             'PANE_PANEL_ID',
+            'PANE_PANEL_KIND',
             'PANE_UPDATE_RESUME_NONCE',
             'PANE_ORCHESTRATION_SESSION_ID',
             'PANE_SESSION_DIR',
@@ -1833,6 +1835,7 @@ export class TerminalPanelManager extends EventEmitter {
       PANE_SESSION_ID: panel.sessionId,
       PANE_NOTES_FILE: isWSL ? '' : noteContextPath(path.join(getAppDirectory(), 'notes'), panel.sessionId),
       PANE_PANEL_ID: panel.id,
+      PANE_PANEL_KIND: resolveTerminalPanelKind(panel, panelManager.getPanelsForSession(panel.sessionId)),
       PANE_UPDATE_RESUME_NONCE: updateResumeNonce ?? '',
       PANE_PORT: String(panePort),
       PANE_WORKSPACE_PATH: cwd,
