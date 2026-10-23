@@ -112,6 +112,7 @@ export interface AgentChatView {
   conversation?: AgentConversationRecord;
   available: boolean;
   identificationRequired?: boolean;
+  identificationSocketRequired?: boolean;
   unavailableReason?: string;
   setupRequired: boolean;
   running: boolean;

@@ -68,6 +68,9 @@ export class AgentChatManager {
   private session(panelId: string) { return this.codex.get(panelId)?.session ?? this.adapters.get(panelId)?.session; }
 
   private async prepareCodex(panel: ToolPanel, cwd: string, env: NodeJS.ProcessEnv, shellType: string, profile: CodexChatProfile, preference?: AgentInterface): Promise<boolean> {
+    // Named profiles select a native config-loader layer. The installed
+    // app-server CLI does not expose that loader; keep the original TUI intact.
+    if (profile.configProfile) return false;
     const running = this.codex.get(panel.id);
     if (running) { env[CODEX_TOKEN_ENV] = running.token; return false; }
     // SAFETY: TerminalPanelManager supplies a terminal panel before native spawn.
@@ -131,7 +134,7 @@ export class AgentChatManager {
       executable: saved.launch.executable, configArgs: saved.launch.codexConfigArgs ?? [], cwd: saved.launch.cwd,
       env: this.environments.get(record.panelId) ?? process.env, directory: path.dirname(saved.launch.settingsFile), generation, socketPath: saved.launch.codexSocketPath,
       save: identities => panelManager.commitAgentChat(record.panelId, { ...this.required(record.panelId), processes: { ...this.required(record.panelId).processes, chat: structuredClone(identities), unverifiedSpawn: undefined } }),
-      onIdentity: nativeSessionId => panelManager.commitAgentChat(record.panelId, { ...this.required(record.panelId), conversation: { ...this.required(record.panelId).conversation, nativeSessionId } }),
+      onIdentity: nativeSessionId => panelManager.commitAgentChat(record.panelId, { ...this.required(record.panelId), conversation: { ...this.required(record.panelId).conversation, nativeSessionId, forkUnconfirmed: undefined } }),
       onChange: change => {
         const event = projection.acceptChange(change);
         if (!projection.error()) getPaneEventSink().send('agent-chat:event', event);
@@ -383,19 +386,21 @@ export class AgentChatManager {
     const unavailableReason = saved ? undefined : 'This terminal has no verified conversation connection. Launch Claude or Codex directly with Chat enabled, or inspect its launch configuration.';
     const adapter = this.session(panelId);
     const lastReceipt = saved?.receipts?.at(-1);
+    const legacy = this.legacyCodex.get(panelId);
+    const profileError = legacy?.profile.configProfile ? `Codex's app-server cannot load the named profile ${legacy.profile.configProfile}. This tab keeps its original Terminal configuration. Use Terminal for this profile; Pane has not substituted default settings.` : undefined;
     // The protocol clears its running flag before its promise settles here.
     // Keep the host turn working until finish() durably commits the outcome;
     // otherwise a rejection briefly emits a false idle/completion notification.
     const awaitingResult = saved?.conversation.active === 'chat' && lastReceipt?.generation === saved.conversation.generation && lastReceipt.state === 'accepted';
     return {
-      panelId, conversation: saved?.conversation, available: !!saved && !this.adopting.has(panelId), unavailableReason, identificationRequired: !saved && this.legacyCodex.has(panelId),
+      panelId, conversation: saved?.conversation, available: !!saved && !this.adopting.has(panelId), unavailableReason, identificationRequired: !saved && !!legacy && !profileError, identificationSocketRequired: !legacy?.profile.embedded,
       setupRequired: saved?.conversation.provider === 'claude' && !adapterEntry('claude'), running: saved?.conversation.active === 'terminal' && saved.conversation.provider === 'claude' ? !this.journals.get(panelId)?.checkpoint().ready : awaitingResult || (adapter?.isRunning() ?? false), canAttachImages: adapter?.supportsImages() ?? false,
       controls: adapter?.controls(),
       permissions: this.codex.get(panelId)?.session.permissions() ?? this.adapters.get(panelId)?.session.permissions().map(permission => ({ id: permission.id, generation: permission.generation,
         title: permission.request.toolCall.title ?? 'Permission requested',
         toolCall: decodeBoundary(permission.request.toolCall, boundary.json), options: permission.request.options })) ?? [],
       transcript: includeTranscript ? this.transcripts.get(panelId)?.snapshot() : undefined,
-      error: this.transcripts.get(panelId)?.error() ?? this.codex.get(panelId)?.session.error() ?? (lastReceipt?.generation === saved?.conversation.generation && lastReceipt?.state === 'failed'
+      error: profileError ?? this.transcripts.get(panelId)?.error() ?? this.codex.get(panelId)?.session.error() ?? (lastReceipt?.generation === saved?.conversation.generation && lastReceipt?.state === 'failed'
         ? `The agent could not complete this turn: ${lastReceipt.error ?? 'The provider rejected the request'}. Check the provider connection and settings, then send a new turn when ready.` : undefined),
       configuration: adapter?.config() ? decodeBoundary(adapter.config(), boundary.json) : undefined,
     };
@@ -455,7 +460,9 @@ export class AgentChatManager {
     if (this.adopting.has(record.panelId)) throw new PaneError('CHAT_TRANSITION_IN_PROGRESS', 'This conversation is being identified.', 'Wait for identification to finish.');
     if (record.provider === 'codex') {
       const runtime = this.codex.get(record.panelId);
-      if (!runtime && record.active === 'stopped' && target === 'terminal' && this.native) return;
+      // Explicit recovery first releases recorded owners, then reconnects the
+      // saved identity. A dead cached socket cannot preflight that new runtime.
+      if (record.active === 'stopped' && ((target === 'terminal' && this.native) || this.environments.has(record.panelId))) return;
       if (!runtime) throw new PaneError('CHAT_RECOVERY_REQUIRED', 'The saved Codex server is not connected. No second owner was started.', 'Recover in Terminal to restore its original launch environment.');
       await runtime.session.verifyIdentity(record.nativeSessionId);
       return;
@@ -662,9 +669,11 @@ export class AgentChatManager {
     const panel = panelManager.getPanel(panelId);
     const pid = this.native?.pid(panelId);
     if (!launch || !panel || !pid || this.record(panelId) || this.adopting.has(panelId)) throw new PaneError('CHAT_IDENTIFICATION_UNAVAILABLE', 'This tab is no longer waiting for conversation identification.', 'Refresh the tab actions.');
+    if (launch.profile.configProfile) throw new PaneError('CHAT_CODEX_PROFILE_UNSUPPORTED', 'The native app-server cannot load this named profile. The original Terminal remains unchanged.', 'Continue in Terminal with this profile; no default policy was substituted.');
     socketPath = socketPath.trim().replace(/^unix:\/\//, '');
     nativeId = nativeId.trim();
-    if (!/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(nativeId) || !path.isAbsolute(socketPath) || ['\r', '\n', String.fromCharCode(0)].some(character => socketPath.includes(character))) throw new PaneError('CHAT_IDENTIFICATION_INVALID', 'Enter the current Session ID and absolute server socket shown by Codex /status.', 'Run /status yourself when the native composer is ready; preserve any unsent draft.');
+    if (!/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(nativeId) || (!launch.profile.embedded && !path.isAbsolute(socketPath)) || ['\r', '\n', String.fromCharCode(0)].some(character => socketPath.includes(character))) throw new PaneError('CHAT_IDENTIFICATION_INVALID', 'Enter the current Session ID and, for a shared server, its absolute socket shown by Codex /status.', 'Run /status yourself when the native composer is ready; preserve any unsent draft.');
+    if (launch.profile.embedded) return this.identifyEmbedded(panel, nativeId, pid, launch);
     this.adopting.add(panelId);
     const saved: AgentChatPanelState = {
       conversation: { panelId, workspaceId: panel.sessionId, provider: 'codex', nativeSessionId: '', active: 'terminal', preferred: 'terminal', generation: 1 },
@@ -688,6 +697,41 @@ export class AgentChatManager {
       await this.codex.get(panelId)?.release(false);
       this.codex.delete(panelId); this.controllers.delete(panelId); this.transcripts.delete(panelId);
       panelManager.commitAgentChat(panelId, undefined); this.known.delete(panelId);
+      throw error;
+    } finally { this.adopting.delete(panelId); this.publish(panelId); }
+    return this.view(panelId);
+  }
+
+  private async identifyEmbedded(panel: ToolPanel, nativeId: string, pid: number, launch: NonNullable<ReturnType<typeof this.legacyCodex.get>>): Promise<AgentChatView> {
+    const panelId = panel.id;
+    this.adopting.add(panelId);
+    this.known.add(panelId);
+    const directory = path.join(getAppDirectory(), 'agent-chat', createHash('sha256').update(panelId).digest('hex'), randomUUID());
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
+    panelManager.commitAgentChat(panelId, {
+      conversation: { panelId, workspaceId: panel.sessionId, provider: 'codex', nativeSessionId: nativeId, active: 'stopped', preferred: 'chat', generation: 1 },
+      launch: { command: launch.profile.executable, cwd: launch.cwd, shellType: launch.shellType, executable: launch.executable, version: '', strictMcpConfig: false, journalFile: '', settingsFile: path.join(directory, 'codex.json'), codexConfigArgs: launch.profile.configArgs },
+      processes: { terminal: [], chat: [] },
+    });
+    this.environments.set(panelId, launch.env);
+    const tracker = new ArchiveProcessTracker([], identities => panelManager.commitAgentChat(panelId, { ...this.required(panelId), processes: { ...this.required(panelId).processes, terminal: structuredClone(identities) } }));
+    this.controller(panelId);
+    try {
+      await tracker.capture([pid]);
+      if (this.native?.pid(panelId) !== pid) throw new PaneError('CHAT_NATIVE_OWNER_MISSING', 'The original embedded terminal changed before release.', 'Inspect its saved identity before recovery.');
+      await this.native.destroy(panelId);
+      await tracker.terminateSurvivors();
+      await tracker.verifyExited(5000);
+      const runtime = await this.startCodex(this.required(panelId).conversation);
+      panelManager.commitAgentChat(panelId, { ...this.required(panelId), conversation: { ...this.required(panelId).conversation, forkUnconfirmed: true } });
+      await runtime.session.fork({ sessionId: nativeId, cwd: launch.cwd, mcpServers: [] });
+      panelManager.commitAgentChat(panelId, { ...this.required(panelId), conversation: { ...this.required(panelId).conversation, active: 'chat', generation: 2, transferNotice: 'The embedded conversation was stopped and its saved history copied. Recent in-progress output may be missing.' } });
+      await getRuntimeConfigManager().updateConfig({ defaultAgentInterface: 'chat' });
+    } catch (error) {
+      let cleanup = '';
+      try { await this.codex.get(panelId)?.release(); this.codex.delete(panelId); }
+      catch (failure) { cleanup = ` Release remains unverified: ${reasonOf(failure)}.`; }
+      panelManager.commitAgentChat(panelId, { ...this.required(panelId), conversation: { ...this.required(panelId).conversation, active: 'stopped', recovery: `The identified conversation could not transfer: ${reasonOf(error)}.${cleanup}` } });
       throw error;
     } finally { this.adopting.delete(panelId); this.publish(panelId); }
     return this.view(panelId);
@@ -836,7 +880,7 @@ export class AgentChatManager {
   private async stopOwned(panelId: string): Promise<void> {
     const saved = this.required(panelId);
     if (saved.processes.unverifiedSpawn) throw new PaneError('CHAT_SPAWN_UNVERIFIED', 'The runtime identity was not recorded before interruption. Stop cannot safely target an unknown process.', 'Inspect the native and adapter processes on the workspace host.');
-    await this.session(panelId)?.cancel();
+    if (!this.codex.has(panelId)) await this.session(panelId)?.cancel();
     if (this.adapters.has(panelId) || this.codex.has(panelId)) await this.release(panelId, 'chat');
     else {
       const chat = new ArchiveProcessTracker(saved.processes.chat, identities => panelManager.commitAgentChat(panelId, { ...this.required(panelId), processes: { ...this.required(panelId).processes, chat: structuredClone(identities) } }));

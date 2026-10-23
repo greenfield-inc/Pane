@@ -1,6 +1,6 @@
 import { tokenizeShellCommand } from '../agents/agentIdentity';
 
-export interface CodexChatProfile { executable: string; configArgs: string[]; remote?: string; authTokenEnv?: string }
+export interface CodexChatProfile { executable: string; configArgs: string[]; configProfile?: string; embedded?: boolean; remote?: string; authTokenEnv?: string }
 
 /** Keep arbitrary -c values in the provider's own parser. Explicit native CLI
  * switches map to native configuration keys, never ACP permission presets. */
@@ -12,14 +12,15 @@ export function codexChatProfile(command: string, platform: NodeJS.Platform = pr
   const set = (key: string, value: string) => result.configArgs.push('--config', `${key}=${JSON.stringify(value)}`);
   for (let index = 1; index < tokens.length; index++) {
     const token = tokens[index];
-    if (token === '--no-daemon' || token === '--no-alt-screen') continue;
+    if (token === '--no-daemon') { result.embedded = true; continue; }
+    if (token === '--no-alt-screen') continue;
     if (token === '--yolo' || token === '--dangerously-bypass-approvals-and-sandbox') { set('approval_policy', 'never'); set('sandbox_mode', 'danger-full-access'); continue; }
     if (token === '--full-auto') { set('approval_policy', 'on-request'); set('sandbox_mode', 'workspace-write'); continue; }
     const value = tokens[++index];
     if (!value || value.startsWith('-')) return;
     if (token === '-c' || token === '--config') result.configArgs.push('--config', value);
     else if (token === '-m' || token === '--model') set('model', value);
-    else if (token === '-p' || token === '--profile') set('profile', value);
+    else if (token === '-p' || token === '--profile') result.configProfile = value;
     else if (token === '-s' || token === '--sandbox') set('sandbox_mode', value);
     else if (token === '-a' || token === '--ask-for-approval') set('approval_policy', value);
     else if (token === '--enable' || token === '--disable') result.configArgs.push('--config', `features.${value}=${token === '--enable'}`);

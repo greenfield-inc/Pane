@@ -239,7 +239,7 @@ if(process.argv.includes('--version')){console.log('codex-cli test-capabilities'
 const {WebSocketServer}=require(${JSON.stringify(require.resolve('ws'))});const crypto=require('crypto');const args=process.argv.slice(2);const digest=args[args.indexOf('--ws-token-sha256')+1];
 const server=new WebSocketServer({port:0,host:'127.0.0.1',verifyClient:({req})=>crypto.createHash('sha256').update((req.headers.authorization||'').replace(/^Bearer /,'')).digest('hex')===digest});
 server.on('listening',()=>process.stderr.write('listening on: ws://127.0.0.1:'+server.address().port+'\\n'));
-server.on('connection',socket=>socket.on('message',data=>{const m=JSON.parse(data);if(m.id===undefined)return;const send=value=>socket.send(JSON.stringify(value));let result={};if(m.method==='model/list')result={data:[]};if(m.method.startsWith('thread/'))result={thread:{id:'native-codex-thread',turns:[],historyMode:'legacy',status:{type:'idle'}},model:'gpt-test',reasoningEffort:'low',approvalPolicy:'on-request',approvalsReviewer:'user',sandbox:{type:'readOnly'}};if(m.method==='turn/start'){result={turn:{id:'new-turn',status:'inProgress'}};send({method:'item/completed',params:{threadId:'native-codex-thread',item:{id:'answer',type:'agentMessage',text:'Fresh response'}}});send({method:'turn/completed',params:{threadId:'native-codex-thread',turn:{id:'new-turn',status:'completed'}}});}send({id:m.id,result});}));`, { mode: 0o700 });
+server.on('connection',socket=>socket.on('message',data=>{const m=JSON.parse(data);if(m.id===undefined)return;const send=value=>socket.send(JSON.stringify(value));let result={};if(m.method==='model/list')result={data:[]};if(m.method.startsWith('thread/'))result={thread:{id:'native-codex-thread',turns:[],historyMode:'legacy',status:{type:'idle'}},model:'gpt-test',reasoningEffort:'low',approvalPolicy:'on-request',approvalsReviewer:'user',sandbox:{type:'readOnly'}};if(m.method==='turn/start'){if(m.params.input[0].text==='Disconnect fixture'){send({method:'turn/started',params:{threadId:'native-codex-thread',turn:{id:'interrupted-turn'}}});socket.close();return;}result={turn:{id:'new-turn',status:'inProgress'}};send({method:'item/completed',params:{threadId:'native-codex-thread',item:{id:'answer',type:'agentMessage',text:'Fresh response'}}});send({method:'turn/completed',params:{threadId:'native-codex-thread',turn:{id:'new-turn',status:'completed'}}});}send({id:m.id,result});}));`, { mode: 0o700 });
   const id = randomUUID();
   databaseService.createSession({ id, name: id, initial_prompt: '', worktree_name: id, worktree_path: directory, project_id: null, tool_type: 'none' });
   const panel = await panelManager.createPanel({ sessionId: id, type: 'terminal', initialState: { agentType: 'codex', initialCommand: executable } });
@@ -265,6 +265,13 @@ server.on('connection',socket=>socket.on('message',data=>{const m=JSON.parse(dat
     expect(manager.view(panel.id).conversation).toMatchObject({ active: 'terminal', generation: 3, nativeSessionId: 'native-codex-thread' });
     expect(getRuntimeConfigManager().getConfig().defaultAgentInterface).toBe('terminal');
     expect(() => manager.guardNativeInput(panel.id, 'native input')).not.toThrow();
+    await manager.switchTo(panel.id, 'chat', 3);
+    manager.send(panel.id, { generation: 4, operationId: 'disconnect', text: 'Disconnect fixture' });
+    await expect.poll(() => manager.view(panel.id).conversation?.active).toBe('stopped');
+    await manager.recover(panel.id, 'chat', 4);
+    expect(manager.view(panel.id).conversation).toMatchObject({ active: 'chat', generation: 5, nativeSessionId: 'native-codex-thread' });
+    manager.send(panel.id, { generation: 5, operationId: 'after-recovery', text: 'Continue after reconnect' });
+    await expect.poll(() => manager.receipt(panel.id, 'after-recovery')?.state).toBe('completed');
   } finally { await manager.stop(panel.id); child.kill(); await exited; manager.detachObservers(); rmSync(directory, { recursive: true, force: true }); }
 });
 
@@ -317,4 +324,55 @@ it.skipIf(process.platform === 'win32')('binds an identified legacy tab to its e
     await new Promise<void>(resolve => server.close(() => resolve()));
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+it.skipIf(process.platform === 'win32')('stops an identified embedded Codex owner before copying native history into the same tab', async () => {
+  const { mkdtempSync, writeFileSync, readFileSync, rmSync } = await import('fs');
+  const { tmpdir } = await import('os');
+  const { join } = await import('path');
+  const { spawn } = await import('child_process');
+  const { once } = await import('events');
+  const directory = mkdtempSync(join(tmpdir(), 'pane-embedded-codex-'));
+  const child = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { stdio: 'ignore' });
+  const exited = once(child, 'exit'); await once(child, 'spawn');
+  const nativeId = randomUUID(), forkId = randomUUID();
+  const executable = join(directory, 'codex'), callsFile = join(directory, 'calls.jsonl');
+  writeFileSync(executable, `#!${process.execPath}
+const {WebSocketServer}=require(${JSON.stringify(require.resolve('ws'))});const fs=require('fs');const server=new WebSocketServer({port:0,host:'127.0.0.1'});
+server.on('listening',()=>process.stderr.write('listening on: ws://127.0.0.1:'+server.address().port+'\\n'));
+server.on('connection',socket=>socket.on('message',data=>{const m=JSON.parse(data);if(m.id===undefined)return;fs.appendFileSync(${JSON.stringify(callsFile)},JSON.stringify(m)+'\\n');let result={};
+if(m.method==='model/list')result={data:[]};
+if(m.method==='thread/fork'){let alive=false;try{process.kill(${child.pid},0);alive=true;}catch{}if(alive){socket.send(JSON.stringify({id:m.id,error:{message:'Original owner still alive'}}));return;}result={thread:{id:${JSON.stringify(forkId)},turns:[{id:'old-turn',status:'completed',items:[{id:'historical-answer',type:'agentMessage',text:'Retained native history'}]}]},approvalPolicy:'on-request',sandbox:{type:'readOnly'}};}
+socket.send(JSON.stringify({id:m.id,result}));}));`, { mode: 0o700 });
+  const id = randomUUID();
+  databaseService.createSession({ id, name: id, initial_prompt: '', worktree_name: id, worktree_path: directory, project_id: null, tool_type: 'none' });
+  const command = `${executable} --no-daemon`;
+  const panel = await panelManager.createPanel({ sessionId: id, type: 'terminal', initialState: { agentType: 'codex', initialCommand: command, agentSessionId: nativeId } });
+  const manager = new AgentChatManager({ enabled: () => true });
+  manager.attachNative({ pid: () => child.exitCode === null && child.signalCode === null ? child.pid : undefined, writeControl: () => {}, destroy: async () => { child.kill(); await exited; }, initialize: async () => { throw new Error('Identification must not create another terminal'); } });
+  try {
+    await manager.prepareNativeLaunch(panel, directory, process.env, command, 'bash', false);
+    const view = await manager.identify(panel.id, nativeId, '');
+    expect(view).toMatchObject({ available: true, identificationRequired: false, conversation: { panelId: panel.id, active: 'chat', nativeSessionId: forkId }, transcript: { messages: [expect.objectContaining({ id: 'historical-answer' })] } });
+    expect(view.conversation?.transferNotice).toMatch(/in-progress output/i);
+    const calls = readFileSync(callsFile, 'utf8');
+    expect(calls).toContain('"deferGoalContinuation":true');
+    expect(calls).not.toContain('turn/start');
+  } finally {
+    try { await manager.stop(panel.id); } finally { child.kill(); await exited; manager.detachObservers(); rmSync(directory, { recursive: true, force: true }); }
+  }
+});
+
+it('keeps a named native Codex profile in its original Terminal instead of substituting default policy', async () => {
+  const id = randomUUID(), nativeId = randomUUID();
+  databaseService.createSession({ id, name: id, initial_prompt: '', worktree_name: id, worktree_path: process.cwd(), project_id: null, tool_type: 'none' });
+  const command = '/fixture/codex --profile locked-down';
+  const panel = await panelManager.createPanel({ sessionId: id, type: 'terminal', initialState: { agentType: 'codex', initialCommand: command, agentSessionId: nativeId } });
+  const manager = new AgentChatManager({ enabled: () => true });
+  manager.attachNative({ pid: () => process.pid, writeControl: () => { throw new Error('Must not inject input'); }, destroy: async () => { throw new Error('Must not stop the original profile'); }, initialize: async () => { throw new Error('Must not replace the profile'); } });
+  expect(await manager.prepareFreshChat(panel, process.cwd(), process.env, 'bash', false, 'chat')).toBe(false);
+  expect(await manager.prepareNativeLaunch(panel, process.cwd(), process.env, command, 'bash', false)).toBe(command);
+  expect(manager.view(panel.id)).toMatchObject({ available: false, identificationRequired: false, error: expect.stringContaining('named profile locked-down') });
+  await expect(manager.identify(panel.id, nativeId, '')).rejects.toMatchObject({ code: 'CHAT_CODEX_PROFILE_UNSUPPORTED' });
+  expect(manager.manages(panel.id)).toBe(false);
 });

@@ -37,10 +37,10 @@ export function AgentModeBar({ chat }: { chat: ReturnType<typeof useAgentChat> }
     </View>}
     {chat.view?.identificationRequired && <ChatButton testID="chat-identify-open" title="Connect Chat to this conversation" onPress={() => setIdentifying(true)} />}
     <ComposerSheet visible={identifying && !!chat.view?.identificationRequired} onClose={() => setIdentifying(false)} testID="chat-identification">
-      <View style={styles.identification}><Text>Run /status in this tab when its composer is ready. Enter its Session ID and server socket once.</Text>
+      <View style={styles.identification}><Text>Run /status in this tab when its composer is ready. {chat.view?.identificationSocketRequired === false ? 'Enter its Session ID once; Pane will stop this embedded runtime and continue from its saved history.' : 'Enter its Session ID and server socket once.'}</Text>
       <TextInput accessibilityLabel="Codex Session ID" placeholder="Session ID" placeholderTextColor={theme.colors.textSecondary} style={{ color: theme.colors.text }} value={nativeId} onChangeText={setNativeId} autoCapitalize="none" autoCorrect={false} editable={!busy} />
-      <TextInput accessibilityLabel="Codex server socket" placeholder="Server socket" placeholderTextColor={theme.colors.textSecondary} style={{ color: theme.colors.text }} value={socketPath} onChangeText={setSocketPath} autoCapitalize="none" autoCorrect={false} editable={!busy} />
-      <ChatButton testID="chat-identify-submit" title="Connect conversation" disabled={busy || !chat.connected || !nativeId.trim() || !socketPath.trim()} onPress={() => { setBusy(true); void chat.identify(nativeId, socketPath).finally(() => setBusy(false)); }} />
+      {chat.view?.identificationSocketRequired !== false && <TextInput accessibilityLabel="Codex server socket" placeholder="Server socket" placeholderTextColor={theme.colors.textSecondary} style={{ color: theme.colors.text }} value={socketPath} onChangeText={setSocketPath} autoCapitalize="none" autoCorrect={false} editable={!busy} />}
+      <ChatButton testID="chat-identify-submit" title="Connect conversation" disabled={busy || !chat.connected || !nativeId.trim() || (chat.view?.identificationSocketRequired !== false && !socketPath.trim())} onPress={() => { setBusy(true); void chat.identify(nativeId, socketPath).finally(() => setBusy(false)); }} />
       {chat.error && <Text tone="danger">{chat.error}</Text>}</View>
     </ComposerSheet>
     {conversation?.pendingSwitch && <ChatButton testID="chat-cancel-switch" title="Cancel pending switch" disabled={busy || !chat.connected} onPress={() => void change(conversation.active === 'chat' ? 'chat' : 'terminal')} />}

@@ -42,7 +42,7 @@ export function AgentViewMenu({ panelId, title, client, trigger }: { panelId: st
       { id: 'terminal', label: 'View as Terminal', icon: TerminalSquare, disabled: busy || transitioning, onClick: () => void change('terminal') },
       { id: 'chat', label: 'View as Chat', icon: MessageSquare, disabled: busy || transitioning, onClick: () => void change('chat') },
     ] : []}
-    footer={busy || !view || error || view.conversation?.recovery || view.identificationRequired ? <div className="max-w-64 whitespace-normal px-3 py-2 text-xs text-text-secondary">
+    footer={busy || !view || error || view.error || view.conversation?.recovery || view.identificationRequired ? <div className="max-w-64 whitespace-normal px-3 py-2 text-xs text-text-secondary">
       {view?.identificationRequired && <form className="space-y-2" onKeyDown={event => {
         if (event.key !== 'Tab') return;
         const controls = [...event.currentTarget.querySelectorAll('input:not(:disabled), button:not(:disabled)')];
@@ -50,13 +50,14 @@ export function AgentViewMenu({ panelId, title, client, trigger }: { panelId: st
         const next = current + (event.shiftKey ? -1 : 1);
         if (current >= 0 && next >= 0 && next < controls.length) event.stopPropagation();
       }} onSubmit={event => { event.preventDefault(); void identify(); }}>
-        <p>Run /status in this tab when its composer is ready. Enter its Session ID and server socket once; Pane remembers them.</p>
+        <p>Run /status in this tab when its composer is ready. {view.identificationSocketRequired === false ? 'Enter its Session ID once; Pane will stop this embedded runtime and continue from its saved history.' : 'Enter its Session ID and server socket once; Pane remembers them.'}</p>
         <label className="block">Session ID<input aria-label="Codex Session ID" className="mt-1 w-full rounded border border-border-primary bg-surface-primary px-2 py-1 text-text-primary" value={nativeId} onChange={event => setNativeId(event.target.value)} disabled={busy} /></label>
-        <label className="block">Server socket<input aria-label="Codex server socket" className="mt-1 w-full rounded border border-border-primary bg-surface-primary px-2 py-1 text-text-primary" value={socketPath} onChange={event => setSocketPath(event.target.value)} disabled={busy} /></label>
-        <button type="submit" disabled={busy || !nativeId.trim() || !socketPath.trim()} className="rounded px-2 py-1 text-interactive disabled:opacity-50">Connect conversation</button>
+        {view.identificationSocketRequired !== false && <label className="block">Server socket<input aria-label="Codex server socket" className="mt-1 w-full rounded border border-border-primary bg-surface-primary px-2 py-1 text-text-primary" value={socketPath} onChange={event => setSocketPath(event.target.value)} disabled={busy} /></label>}
+        <button type="submit" disabled={busy || !nativeId.trim() || (view.identificationSocketRequired !== false && !socketPath.trim())} className="rounded px-2 py-1 text-interactive disabled:opacity-50">Connect conversation</button>
       </form>}
       {busy ? <p role="status">Switching interface…</p> : !view && !error ? <p role="status">Checking conversation…</p> : null}
       {view?.conversation?.recovery && <p role="status">{view.conversation.recovery}</p>}
       {error && <p role="alert" className="text-status-error">{error}</p>}
+      {!error && view?.error && <p role="alert" className="text-status-error">{view.error}</p>}
     </div> : undefined} />;
 }

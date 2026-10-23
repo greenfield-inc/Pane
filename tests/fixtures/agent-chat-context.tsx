@@ -9,7 +9,7 @@ import '../../frontend/src/index.css';
 
 const panel: ToolPanel = { id: 'context-tab', sessionId: 'context-pane', type: 'terminal', title: 'Claude fixture', state: { isActive: true }, metadata: { createdAt: '', lastActiveAt: '', position: 0 } };
 const view: AgentChatView = { panelId: panel.id, available: true, setupRequired: true, running: true, permissions: [], conversation: { panelId: panel.id, workspaceId: panel.sessionId, provider: 'claude', nativeSessionId: 'context-original', generation: 1, active: 'terminal', preferred: 'terminal' } };
-if (new URLSearchParams(location.search).has('legacy')) { view.available = false; view.identificationRequired = true; view.conversation = undefined; }
+if (new URLSearchParams(location.search).has('legacy')) { view.available = false; view.identificationRequired = true; view.identificationSocketRequired = new URLSearchParams(location.search).get('legacy') !== 'embedded'; view.conversation = undefined; }
 const client: AgentChatClient = {
   identify: async (_panel, nativeId, socketPath) => {
     document.getElementById('result')!.textContent = `${nativeId}:${socketPath}`;
@@ -32,4 +32,5 @@ createRoot(document.getElementById('root')!).render(<main>
   <AgentChatHeader panelId={panel.id} client={client} />
   <output id="result" aria-label="Host switch result" />
   <Dropdown trigger={<button>Other actions</button>} selectedId="last" items={[{ id: 'first', label: 'First enabled' }, { id: 'middle', label: 'Middle disabled', disabled: true }, { id: 'last', label: 'Last selected' }]} />
+  <Dropdown trigger={<button>Actions with footer</button>} items={[{ id: 'action', label: 'Menu action' }]} footer={<button>Footer action</button>} />
 </main>);

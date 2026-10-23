@@ -45,6 +45,18 @@ recency or a similarly named history file, and never types into an unknown
 native draft or modal. The shared server remains externally owned; Pane owns
 only its proxy connection and tab's terminal.
 
+For a captured `--no-daemon` launch, enter only the confirmed Session ID.
+Pane stops the owned embedded runtime before copying its saved native history
+into a new conversation in the same tab. The original history remains intact;
+recent unflushed output may be missing and is disclosed. Returning to Terminal
+uses the copied conversation's ID. Historical requests are never replayed.
+
+Named Codex `--profile` launches retain their original Terminal configuration.
+The installed app-server does not expose the native named-profile loader, and
+replacing it with a config override changes precedence and permission semantics.
+Tab actions explain this capability limitation; Pane does not substitute its
+default profile or stop the original runtime for an unsupported transfer.
+
 Custom wrappers, unknown launch options, SSH and WSL launch translation require
 a verified host launch route. An unavailable route reports its limitation;
 remote viewers never start a substitute local provider. A connection or successful

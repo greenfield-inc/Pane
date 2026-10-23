@@ -6,6 +6,37 @@ import { TranscriptProjection } from './transcriptProjection';
 import { boundary, decodeBoundary, type JsonObject } from '../../../../shared/validation/boundaryDecoder';
 
 describe('Codex host protocol', () => {
+  it('hydrates older native turns before the current window without replaying requests', async () => {
+    const server = new WebSocketServer({ port: 0, host: '127.0.0.1' });
+    await once(server, 'listening');
+    const address = decodeBoundary(server.address(), boundary.object({ port: boundary.number }));
+    const calls: string[] = [];
+    const turn = (id: string) => ({ id: `turn-${id}`, status: 'completed', items: [{ type: 'agentMessage', id, text: id }] });
+    server.on('connection', socket => socket.on('message', data => {
+      const request = JSON.parse(data.toString());
+      if (request.id === undefined) return;
+      calls.push(request.method);
+      const result = request.method === 'initialize' ? {}
+        : request.method === 'model/list' ? { data: [] }
+        : request.method === 'thread/turns/list' ? request.params.cursor === 'older'
+          ? { data: [turn('middle')], nextCursor: 'oldest' }
+          : { data: [turn('first')], nextCursor: null }
+        : { thread: { id: 'thread', turns: [turn('latest')] }, turnsBackwardsCursor: 'older', itemsBackwardsCursor: null };
+      socket.send(JSON.stringify({ id: request.id, result }));
+    }));
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}`);
+    await once(socket, 'open');
+    const projection = new TranscriptProjection('panel', 2);
+    const session = new CodexSession(socket, 2, { onChange: change => projection.acceptChange(change) });
+    try {
+      await session.initialize();
+      await session.load({ sessionId: 'thread', cwd: '/fixture', mcpServers: [] });
+      expect(projection.snapshot().messages.map(message => message.id)).toEqual(['first', 'middle', 'latest']);
+      expect(calls.filter(method => method === 'thread/turns/list')).toHaveLength(2);
+      expect(calls).not.toContain('turn/start');
+    } finally { await session.close(); for (const client of server.clients) client.terminate(); await new Promise<void>(resolve => server.close(() => resolve())); }
+  });
+
   it('loads native history without replay or policy overrides and durably identifies a deferred fork', async () => {
     const server = new WebSocketServer({ port: 0, host: '127.0.0.1' });
     await once(server, 'listening');

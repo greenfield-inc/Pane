@@ -162,7 +162,8 @@ export class CodexSession {
       this.settings = response;
       // New servers may return only the newest history window. Read the older
       // pages without sending any historical request as a new model turn.
-      const backwardsCursor = decodeOptionalBoundary(response.itemsBackwardsCursor, boundary.string);
+      const itemsCursor = decodeOptionalBoundary(response.itemsBackwardsCursor, boundary.string);
+      const backwardsCursor = itemsCursor ?? decodeOptionalBoundary(response.turnsBackwardsCursor, boundary.string);
       if (backwardsCursor) {
         let cursor: string | null = backwardsCursor;
         const pages: JsonObject[][] = [];
@@ -170,11 +171,14 @@ export class CodexSession {
         while (cursor) {
           if (seen.has(cursor)) throw new Error('Codex repeated its history cursor');
           seen.add(cursor);
-          const page = await this.request('thread/items/list', { threadId: id, cursor, sortDirection: 'desc', limit: 100 });
+          const page = await this.request(itemsCursor ? 'thread/items/list' : 'thread/turns/list', { threadId: id, cursor, sortDirection: 'desc', limit: 100 });
           pages.push(array(page.data).map(object));
           cursor = decodeOptionalBoundary(page.nextCursor, boundary.string) ?? null;
         }
-        for (const page of pages.reverse()) for (const entry of page.reverse()) this.item(object(entry.item));
+        for (const page of pages.reverse()) for (const entry of page.reverse()) {
+          if (itemsCursor) this.item(object(entry.item));
+          else this.hydrateTurn(entry);
+        }
       }
       for (const value of array(thread.turns ?? [])) this.hydrateTurn(object(value));
       this.loaded = true;
@@ -287,6 +291,7 @@ export class CodexSession {
     return result;
   }
 
+  isConnected(): boolean { return this.socket.readyState === this.socket.OPEN; }
   isRunning(): boolean { return !!this.turnId || !!this.turnResult || this.configuring; }
   supportsImages(): boolean { return true; }
   config(): JsonObject { return structuredClone(this.settings); }

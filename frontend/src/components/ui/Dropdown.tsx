@@ -197,7 +197,9 @@ export function Dropdown({
           : (current + step + controls.length) % controls.length;
         const itemIndex = controls[next].dataset.dropdownItemIndex;
         if (itemIndex !== undefined) setActiveIndex(Number(itemIndex));
-        else controls[next].focus();
+        // Returning from a footer control can select the same item index;
+        // React then skips the focus effect, so move DOM focus here as well.
+        controls[next].focus();
         break;
       }
       case 'Enter':

@@ -128,7 +128,7 @@ export class CodexProcess {
 
   private async releaseOnce(cancel: boolean): Promise<void> {
     if (this.connection) {
-      if (cancel) await this.connection.cancel();
+      if (cancel && this.connection.isConnected()) await this.connection.cancel();
       await this.connection.close();
     }
     if (this.timer) clearInterval(this.timer);
