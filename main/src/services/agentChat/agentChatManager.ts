@@ -59,7 +59,6 @@ export class AgentChatManager {
   private readonly updateOperations = new Map<string, string>();
   private readonly launchInputs = new Map<string, string>();
   private readonly adopting = new Set<string>();
-  private readonly identifiedNative = new Map<string, { pid: number; id: string }>();
   private readonly legacyCodex = new Map<string, { cwd: string; env: NodeJS.ProcessEnv; shellType: string; profile: CodexChatProfile; executable: string }>();
 
   constructor(private readonly options: AgentChatManagerOptions = {}) {}
@@ -135,6 +134,7 @@ export class AgentChatManager {
       executable: saved.launch.executable, configArgs: saved.launch.codexConfigArgs ?? [], cwd: saved.launch.cwd,
       env: this.environments.get(record.panelId) ?? process.env, directory: path.dirname(saved.launch.settingsFile), generation, socketPath: saved.launch.codexSocketPath, remote: saved.launch.codexRemote,
       save: identities => panelManager.commitAgentChat(record.panelId, { ...this.required(record.panelId), processes: { ...this.required(record.panelId).processes, chat: structuredClone(identities), unverifiedSpawn: undefined } }),
+      onStart: pendingCodexStart => panelManager.commitAgentChat(record.panelId, { ...this.required(record.panelId), pendingCodexStart }),
       onIdentity: nativeSessionId => panelManager.commitAgentChat(record.panelId, { ...this.required(record.panelId), conversation: { ...this.required(record.panelId).conversation, nativeSessionId, forkUnconfirmed: undefined } }),
       onChange: change => {
         const event = projection.acceptChange(change);
@@ -179,6 +179,9 @@ export class AgentChatManager {
       const saved = this.required(record.panelId);
       panelManager.commitAgentChat(record.panelId, { ...saved, conversation: { ...saved.conversation, nativeStartup: true } });
       try {
+        // Identification binds the conversation, not the lifetime of its old
+        // TUI. Replace only that tab's attachment; keep the shared server/turn.
+        if (this.native?.pid(record.panelId) && !runtime.nativeConfirms(record.nativeSessionId)) await this.native.destroy(record.panelId);
         if (!this.native?.pid(record.panelId)) {
           this.acquiring.add(record.panelId);
           try { await this.native!.initialize(record.panelId, this.required(record.panelId).launch.cwd); }
@@ -196,8 +199,7 @@ export class AgentChatManager {
   }
 
   private nativeCodexConfirmed(panelId: string, id: string): boolean {
-    const identified = this.identifiedNative.get(panelId);
-    return this.codex.get(panelId)?.nativeConfirms(id) === true || (identified?.id === id && identified.pid === this.native?.pid(panelId));
+    return !!this.native?.pid(panelId) && this.codex.get(panelId)?.nativeConfirms(id) === true;
   }
 
   private async waitForNativeCodex(panelId: string, id: string): Promise<void> {
@@ -269,7 +271,6 @@ export class AgentChatManager {
   async prepareNativeLaunch(panel: ToolPanel, cwd: string, env: NodeJS.ProcessEnv, command: string, shellType: string, isWSL: boolean): Promise<string> {
     const codex = this.codex.get(panel.id);
     if (codex) {
-      this.identifiedNative.delete(panel.id);
       const saved = this.required(panel.id);
       const endpoint = await codex.prepareNative();
       const input = nativeCommand(saved.launch.executable, ['resume', saved.conversation.nativeSessionId, '--remote', endpoint, '--remote-auth-token-env', CODEX_TOKEN_ENV], shellType);
@@ -494,7 +495,14 @@ export class AgentChatManager {
   private async preflight(record: ConversationRecord, target: AgentInterface): Promise<void> {
     if (this.adopting.has(record.panelId)) throw new PaneError('CHAT_TRANSITION_IN_PROGRESS', 'This conversation is being identified.', 'Wait for identification to finish.');
     if (record.provider === 'codex') {
-      const runtime = this.codex.get(record.panelId);
+      let runtime = this.codex.get(record.panelId);
+      const saved = this.required(record.panelId);
+      if (record.active === 'stopped' && saved.pendingCodexStart && (saved.launch.codexSocketPath || saved.launch.codexRemote)) {
+        runtime ??= await this.startCodex(record);
+        const status = await runtime.reconcileStart(record.nativeSessionId, saved.pendingCodexStart);
+        const current = this.required(record.panelId);
+        panelManager.commitAgentChat(record.panelId, { ...current, pendingCodexStart: undefined, receipts: current.receipts?.map(receipt => receipt.operationId === saved.pendingCodexStart!.operationId ? { ...receipt, state: status === 'inProgress' ? 'accepted' : status === 'completed' ? 'completed' : 'failed', error: status === 'failed' || status === 'interrupted' ? `Provider turn ${status}; the input was delivered.` : undefined } : receipt) });
+      }
       // Explicit recovery first releases recorded owners, then reconnects the
       // saved identity. A dead cached socket cannot preflight that new runtime.
       if (record.active === 'stopped' && ((target === 'terminal' && this.native) || this.environments.has(record.panelId))) return;
@@ -739,7 +747,6 @@ export class AgentChatManager {
       await runtime.session.load({ sessionId: nativeId, cwd: launch.cwd, mcpServers: [] });
       if (this.native?.pid(panelId) !== pid) throw new PaneError('CHAT_NATIVE_OWNER_MISSING', 'The original native terminal exited during identification.', 'Refresh before identifying its replacement.');
       runtime.session.setGeneration(1); this.transcripts.get(panelId)?.setGeneration(1);
-      this.identifiedNative.set(panelId, { pid, id: nativeId });
       this.known.add(panelId);
       this.publish(panelId);
     } catch (error) {
@@ -843,7 +850,8 @@ export class AgentChatManager {
       this.transcripts.get(panelId)?.endTurn();
       this.publish(panelId);
     };
-    void runtime.prompt(userContent).then(() => finish('completed'), error => finish('failed', reasonOf(error)));
+    const codex = this.codex.get(panelId)?.session;
+    void (codex ? codex.prompt(userContent, request.operationId) : runtime.prompt(userContent)).then(() => finish('completed'), error => finish('failed', reasonOf(error)));
     return structuredClone(receipt);
   }
 

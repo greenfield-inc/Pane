@@ -1,12 +1,17 @@
 import type { WebSocket } from 'ws';
+import { createHash, randomUUID } from 'crypto';
 import type { ContentBlock, ForkSessionRequest, LoadSessionRequest, NewSessionRequest, PromptResponse } from '@agentclientprotocol/sdk/unstable';
 import { PaneError } from '../../../../shared/paneError';
 import { boundary, decodeBoundary, decodeOptionalBoundary, type JsonObject, type JsonValue } from '../../../../shared/validation/boundaryDecoder';
-import type { AgentChatConfigOption, AgentChatEvent, AgentChatMessage, AgentChatPart, AgentChatPermission } from '../../../../shared/types/agentChat';
+import type { AgentChatConfigOption, AgentChatEvent, AgentChatMessage, AgentChatPart, AgentChatPermission, AgentChatStartAttempt } from '../../../../shared/types/agentChat';
 
 function object(value: JsonValue | undefined): JsonObject { return decodeBoundary(value, boundary.jsonObject); }
 function string(value: JsonValue | undefined): string { return decodeBoundary(value, boundary.string); }
 function array(value: JsonValue | undefined): JsonValue[] { return decodeBoundary(value, boundary.array(boundary.json)); }
+function inputHash(input: JsonValue[]): string {
+  const values = input.map(value => { const part = object(value); return part.type === 'text' ? { type: 'text', text: part.text } : part.type === 'image' ? { type: 'image', url: part.url } : part; });
+  return createHash('sha256').update(JSON.stringify(values)).digest('hex');
+}
 const envelopeSchema = boundary.object({
   method: boundary.optional(boundary.string),
   id: boundary.optional(boundary.union(boundary.string, boundary.number)),
@@ -17,6 +22,7 @@ const envelopeSchema = boundary.object({
 type CodexEnvelope = ReturnType<typeof envelopeSchema.decode>;
 
 export interface CodexSessionOptions {
+  onStart?: (attempt?: AgentChatStartAttempt) => void;
   onIdentity?: (id: string) => void;
   onChange?: (change: AgentChatEvent['change']) => void;
   onState?: () => void;
@@ -79,6 +85,20 @@ export class CodexSession {
   async verifyIdentity(id: string): Promise<void> {
     const response = await this.request('thread/read', { threadId: id });
     if (!this.loaded || id !== this.threadId || object(response.thread).id !== id) throw new PaneError('CHAT_IDENTITY_MISMATCH', 'Codex did not confirm the active conversation.', 'Reconnect before switching interfaces.');
+  }
+
+  async readStartOutcome(threadId: string, attempt: AgentChatStartAttempt): Promise<string> {
+    const response = await this.request('thread/read', { threadId, includeTurns: true });
+    const thread = object(response.thread);
+    const matches = array(thread.turns ?? []).flatMap(value => {
+      const turn = object(value);
+      return array(turn.items ?? []).map(object).filter(item => item.type === 'userMessage' && item.clientId === attempt.clientId).map(item => ({ turn, item }));
+    });
+    const match = matches[0];
+    if (thread.id !== threadId || matches.length !== 1 || !match || inputHash(array(match.item.content)) !== attempt.inputHash || !['inProgress', 'completed', 'failed', 'interrupted'].includes(String(match.turn.status))) {
+      throw new PaneError('CHAT_START_UNCONFIRMED', 'The original provider history does not yet confirm this exact send. Its delivery remains unknown.', 'Retry recovery to read the same conversation again; the original native attachment is retained and no prompt was replayed.');
+    }
+    return string(match.turn.status);
   }
 
   private fail(error: Error): void {
@@ -274,7 +294,7 @@ export class CodexSession {
     this.approvals.delete(id); this.options.onState?.();
   }
 
-  async prompt(content: ContentBlock[]): Promise<PromptResponse> {
+  async prompt(content: ContentBlock[], operationId: string = randomUUID()): Promise<PromptResponse> {
     if (!this.loaded || !this.threadId) throw new PaneError('CHAT_NOT_LOADED', 'Codex has no verified conversation.', 'Recover its saved conversation first.');
     if (this.isRunning()) throw new PaneError('CHAT_TURN_RUNNING', 'Codex is already working. No new turn started.', 'Cancel the current turn or wait for its response.');
     const input = content.map((part): JsonObject => {
@@ -282,19 +302,22 @@ export class CodexSession {
       if (part.type === 'image') return { type: 'image', url: `data:${part.mimeType};base64,${part.data}` };
       throw new PaneError('CHAT_CONTENT_UNSUPPORTED', 'Codex cannot send this attachment type.', 'Use text or an image.');
     });
+    const attempt = { operationId, clientId: randomUUID(), inputHash: inputHash(input) };
+    this.options.onStart?.(attempt);
     const result = new Promise<PromptResponse>((resolve, reject) => { this.turnResult = { resolve, reject }; });
     this.options.onState?.();
     try {
-      const response = await this.request('turn/start', { threadId: this.threadId, input });
+      const response = await this.request('turn/start', { threadId: this.threadId, input, clientUserMessageId: attempt.clientId });
       const turn = object(response.turn); const id = string(turn.id);
+      this.options.onStart?.();
       const completed = this.completed.get(id);
       if (completed || turn.status !== 'inProgress') this.finishTurn(completed ?? turn);
       else this.turnId = id;
     } catch (error) {
-      if (error instanceof PaneError && error.code === 'CHAT_CODEX_TIMEOUT') {
+      if (!(error instanceof PaneError && error.code === 'CHAT_CODEX_REQUEST_FAILED')) {
         this.loaded = false; this.unconfirmedStart = true;
         this.options.onDisconnect?.('Codex did not acknowledge the turn start. Its delivery is unknown; recover the saved conversation before sending again.');
-      }
+      } else this.options.onStart?.();
       this.turnResult?.reject(error instanceof Error ? error : new Error(String(error))); this.turnResult = undefined;
     }
     return result;

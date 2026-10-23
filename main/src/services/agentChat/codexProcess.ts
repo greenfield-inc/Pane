@@ -8,6 +8,7 @@ import { ArchiveProcessTracker, type ArchiveProcessIdentity } from '../archivePr
 import { providerCommand } from './hostCommand';
 import { CodexSession, type CodexSessionOptions } from './codexSession';
 import { CodexNativeConnection } from './codexNativeConnection';
+import type { AgentChatStartAttempt } from '../../../../shared/types/agentChat';
 
 export const CODEX_TOKEN_ENV = 'PANE_CODEX_CHAT_TOKEN';
 export interface CodexProcessOptions extends CodexSessionOptions {
@@ -147,6 +148,21 @@ export class CodexProcess {
   }
 
   nativeConfirms(id: string): boolean { return this.nativeConnection?.confirms(id) ?? false; }
+
+  async reconcileStart(threadId: string, attempt: AgentChatStartAttempt): Promise<string> {
+    if (!this.connection?.isConnected()) {
+      await this.connection?.close();
+      const socket = this.options.socketPath ? await this.proxySocket(this.options.socketPath) : await this.connect();
+      if (!socket) throw new PaneError('CHAT_CODEX_CONNECT_FAILED', 'The original Codex owner could not be reached for delivery recovery.', 'Restore its connection and retry; no prompt was replayed.');
+      this.connection = new CodexSession(socket, this.options.generation, this.options);
+      await this.connection.initialize();
+    }
+    const status = await this.connection.readStartOutcome(threadId, attempt);
+    // Only positive correlation permits attaching/subscribing again. An absent
+    // marker never counts as rejection or permission to replay the old send.
+    await this.connection.load({ sessionId: threadId, cwd: this.options.cwd, mcpServers: [] });
+    return status;
+  }
 
   private connect(): Promise<WebSocket | undefined> {
     const authEnv = this.options.remote?.authTokenEnv;

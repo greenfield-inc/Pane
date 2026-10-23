@@ -62,20 +62,21 @@ export class AcpProcess {
   }
 
   private async releaseOnce(): Promise<void> {
-    if (this.timer) clearInterval(this.timer);
     let protocolError: unknown;
-    try { await this.session.close(); } catch (error) { protocolError = error; }
-    this.child.stdin.end();
-    const deadline = Date.now() + 1500;
-    while (this.child.exitCode === null && this.child.signalCode === null && Date.now() < deadline) {
-      await new Promise(resolve => setTimeout(resolve, 25));
-    }
-    if (this.child.exitCode === null && this.child.signalCode === null) {
-      const root = this.identities.find(identity => identity.pid === this.child.pid);
-      const current = (await readArchiveProcesses()).find(identity => identity.pid === this.child.pid);
-      if (root && current?.started === root.started && !current.exited) this.child.kill('SIGTERM');
-    }
-    if (this.timer) clearInterval(this.timer);
+    try {
+      try { await this.session.close(); } catch (error) { protocolError = error; }
+      this.child.stdin.end();
+      const deadline = Date.now() + 1500;
+      while (this.child.exitCode === null && this.child.signalCode === null && Date.now() < deadline) {
+        await new Promise(resolve => setTimeout(resolve, 25));
+      }
+      if (this.child.exitCode === null && this.child.signalCode === null) {
+        await this.tracker.refresh();
+        const root = this.identities.find(identity => identity.pid === this.child.pid);
+        const current = (await readArchiveProcesses()).find(identity => identity.pid === this.child.pid);
+        if (root && current?.started === root.started && !current.exited) this.child.kill('SIGTERM');
+      }
+    } finally { if (this.timer) clearInterval(this.timer); }
     await this.observation;
     await this.tracker.refresh();
     await this.tracker.terminateSurvivors();

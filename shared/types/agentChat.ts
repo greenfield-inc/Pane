@@ -92,9 +92,11 @@ export interface AgentChatLaunch {
 }
 
 export interface AgentChatProcessIdentity { pid: number; parent: number; started: string }
+export interface AgentChatStartAttempt { operationId: string; clientId: string; inputHash: string }
 
 export interface AgentChatPanelState {
   receipts?: AgentChatReceipt[];
+  pendingCodexStart?: AgentChatStartAttempt;
   conversation: AgentConversationRecord;
   launch: AgentChatLaunch;
   processes: { terminal: AgentChatProcessIdentity[]; chat: AgentChatProcessIdentity[]; unverifiedSpawn?: AgentInterface };

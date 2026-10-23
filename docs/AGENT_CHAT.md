@@ -41,6 +41,11 @@ for the saved conversation. Its startup remains visible and interactive while
 that acknowledgement is pending; a server-side history read alone does not
 complete the switch. An unacknowledged turn start fences further sends until
 explicit recovery, so a timeout cannot silently submit the request twice.
+For borrowed servers, recovery reads the same owner's history before releasing
+the original native attachment. A durable client message ID and input hash must
+match one provider message before the uncertain send can be reconciled. Missing
+or conflicting history keeps sends fenced and permits another recovery read;
+an idle server does not prove the request was rejected.
 
 For older Codex tabs without a verified binding, tab actions offer one-time
 identification. Run `/status` yourself when the native composer is ready and

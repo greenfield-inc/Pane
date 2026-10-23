@@ -58,3 +58,33 @@ it.skipIf(process.platform === 'win32')('closes its raw proxy while preserving t
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+it('reconciles a borrowed start after proxy closure without replaying or killing the external owner', async () => {
+  const { WebSocketServer } = await import('ws');
+  const { boundary, decodeBoundary } = await import('../../../../shared/validation/boundaryDecoder');
+  const server = new WebSocketServer({ port: 0, host: '127.0.0.1' }); await once(server, 'listening');
+  const { port } = decodeBoundary(server.address(), boundary.object({ port: boundary.number }));
+  let attempt: import('../../../../shared/types/agentChat').AgentChatStartAttempt | undefined;
+  let input: unknown[] = [];
+  let clientId = '', starts = 0, visible = false;
+  server.on('connection', socket => socket.on('message', data => {
+    const request = JSON.parse(data.toString());
+    if (request.id === undefined) return;
+    if (request.method === 'turn/start') { starts++; input = request.params.input; clientId = request.params.clientUserMessageId; return; }
+    const result = request.method === 'model/list' ? { data: [] } : request.method.startsWith('thread/') ? { thread: { id: 'original', turns: visible ? [{ id: 'accepted-turn', status: 'completed', items: [{ type: 'userMessage', id: 'message', clientId, content: input }] }] : [] } } : {};
+    socket.send(JSON.stringify({ id: request.id, result }));
+  }));
+  const runtime = new CodexProcess({ executable: process.execPath, configArgs: [], cwd: process.cwd(), env: process.env, directory: process.cwd(), remote: { endpoint: `ws://127.0.0.1:${port}` }, generation: 1, requestTimeoutMs: 30, save: () => {}, onStart: value => { attempt = value; } });
+  try {
+    await runtime.start(); await runtime.session.initialize(); await runtime.session.load({ sessionId: 'original', cwd: process.cwd(), mcpServers: [] });
+    await expect(runtime.session.prompt([{ type: 'text', text: 'One request' }], 'operation')).rejects.toMatchObject({ code: 'CHAT_CODEX_TIMEOUT' });
+    await expect(runtime.release()).rejects.toMatchObject({ code: 'CHAT_START_UNCONFIRMED' });
+    expect(runtime.session.isConnected()).toBe(false);
+    await expect(runtime.reconcileStart('original', attempt!)).rejects.toMatchObject({ code: 'CHAT_START_UNCONFIRMED' });
+    visible = true;
+    await expect(runtime.reconcileStart('original', attempt!)).resolves.toBe('completed');
+    await runtime.release();
+    expect(starts).toBe(1);
+    expect(server.address()).not.toBeNull();
+  } finally { await runtime.release(false); for (const socket of server.clients) socket.terminate(); await new Promise<void>(resolve => server.close(() => resolve())); }
+});

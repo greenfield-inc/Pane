@@ -298,7 +298,7 @@ it.skipIf(process.platform === 'win32').each([false, true])('binds an identified
   const { join } = await import('path');
   const { spawn } = await import('child_process');
   const { once } = await import('events');
-  const { WebSocketServer } = await import('ws');
+  const { WebSocketServer, WebSocket } = await import('ws');
   const { decodeBoundary } = await import('../../../../shared/validation/boundaryDecoder');
   const directory = mkdtempSync(join(tmpdir(), 'pane-codex-identify-'));
   const server = new WebSocketServer({ port: 0, host: '127.0.0.1' });
@@ -316,14 +316,27 @@ it.skipIf(process.platform === 'win32').each([false, true])('binds an identified
   }); });
   const executable = join(directory, 'codex');
   writeFileSync(executable, `#!${process.execPath}\nconst socket=require('net').connect({host:'127.0.0.1',port:${port}});process.stdin.pipe(socket).pipe(process.stdout);process.stdin.on('end',()=>socket.end());socket.on('close',()=>process.exit(0));`, { mode: 0o700 });
-  const child = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { stdio: 'ignore' });
-  const exited = once(child, 'exit'); await once(child, 'spawn');
+  let child = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { stdio: 'ignore' });
+  let exited = once(child, 'exit'); await once(child, 'spawn');
   const id = randomUUID();
   databaseService.createSession({ id, name: id, initial_prompt: '', worktree_name: id, worktree_path: directory, project_id: null, tool_type: 'none' });
   const command = remote ? `${executable} --remote ws://127.0.0.1:${port} --remote-auth-token-env OWNED_FIXTURE_TOKEN` : executable;
   const panel = await panelManager.createPanel({ sessionId: id, type: 'terminal', initialState: { agentType: 'codex', initialCommand: command } });
   const manager = new AgentChatManager({ enabled: () => true });
-  manager.attachNative({ pid: () => child.exitCode === null ? child.pid : undefined, writeControl: () => { throw new Error('Identification must never type into the native draft'); }, destroy: async () => { child.kill(); await exited; }, initialize: async () => { throw new Error('Original owner must stay alive'); } });
+  const originalPid = child.pid;
+  const clients: InstanceType<typeof WebSocket>[] = [];
+  manager.attachNative({ pid: () => child.exitCode === null && child.signalCode === null ? child.pid : undefined, writeControl: () => { throw new Error('Identification must never type into the native draft'); }, destroy: async () => { child.kill(); await exited; }, initialize: async () => {
+    child = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { stdio: 'ignore' });
+    exited = once(child, 'exit'); await once(child, 'spawn');
+    const env: NodeJS.ProcessEnv = { ...process.env, OWNED_FIXTURE_TOKEN: 'fixture-only-secret' };
+    await manager.prepareFreshChat(panelManager.getPanel(panel.id)!, directory, env, 'bash', false);
+    const input = await manager.prepareNativeLaunch(panelManager.getPanel(panel.id)!, directory, env, command, 'bash', false);
+    const { tokenizeShellCommand } = await import('../agents/agentIdentity');
+    const args = tokenizeShellCommand(input)!;
+    const native = new WebSocket(args[args.indexOf('--remote') + 1], { headers: { Authorization: `Bearer ${env.PANE_CODEX_CHAT_TOKEN}` } });
+    clients.push(native); await once(native, 'open');
+    native.send(JSON.stringify({ id: 99, method: 'thread/resume', params: { threadId: nativeId } }));
+  } });
   try {
     expect(await manager.prepareNativeLaunch(panel, directory, { ...process.env, OWNED_FIXTURE_TOKEN: 'fixture-only-secret' }, command, 'bash', false)).toBe(command);
     expect(manager.view(panel.id).identificationRequired).toBe(true);
@@ -334,11 +347,14 @@ it.skipIf(process.platform === 'win32').each([false, true])('binds an identified
     expect(manager.view(panel.id)).toMatchObject({ available: true, conversation: { nativeSessionId: nativeId, active: 'chat', generation: 2 }, transcript: { messages: [{ id: 'old-answer' }] } });
     await manager.switchTo(panel.id, 'terminal', 2);
     expect(child.exitCode).toBeNull();
+    expect(child.pid).not.toBe(originalPid);
+    expect(manager.verifyNativeResume(panel.id, nativeId)).toEqual({ pid: child.pid });
     expect(calls).not.toContain('thread/start'); expect(calls).not.toContain('thread/fork'); expect(calls).not.toContain('turn/start');
     await manager.stop(panel.id);
     expect(server.address()).not.toBeNull();
   } finally {
     await manager.stop(panel.id); manager.detachObservers();
+    for (const client of clients) client.terminate();
     if (child.exitCode === null) { child.kill(); await exited; }
     for (const client of server.clients) client.terminate();
     await new Promise<void>(resolve => server.close(() => resolve()));

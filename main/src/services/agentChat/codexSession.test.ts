@@ -113,7 +113,7 @@ it('keeps native permission choices and one transcript across generation changes
     expect(() => session.answer(current.id, 3, current.options[0].optionId)).toThrow(/no longer available/i);
     expect(await response).toEqual({ stopReason: 'end_turn' });
     expect(calls.find(call => call.id === 'request-1' && call.result)?.result).toEqual({ decision: 'accept' });
-    expect(calls.find(call => call.method === 'turn/start')?.params).toEqual({ threadId: 'thread', input: [{ type: 'text', text: 'A new request', text_elements: [] }] });
+    expect(calls.find(call => call.method === 'turn/start')?.params).toEqual({ threadId: 'thread', input: [{ type: 'text', text: 'A new request', text_elements: [] }], clientUserMessageId: expect.stringMatching(/^[0-9a-f-]{36}$/) });
     expect(projection.snapshot()).toMatchObject({ generation: 3, messages: [{ id: 'answer', parts: [{ type: 'text', text: 'Saved exactly once' }] }] });
     expect(session.permissions()).toEqual([]);
   } finally { await session.close(); for (const client of server.clients) client.terminate(); await new Promise<void>(resolve => server.close(() => resolve())); }
@@ -175,4 +175,43 @@ it('fences an unconfirmed turn start until explicit recovery, including after la
     await session.load({ sessionId: 'thread', cwd: '/fixture', mcpServers: [] });
     expect(starts).toBe(1);
   } finally { await session.close(); for (const client of server.clients) client.terminate(); await new Promise<void>(resolve => server.close(() => resolve())); }
+});
+
+it('reconciles a lost start through its durable native client marker on a fresh read-only connection', async () => {
+  const server = new WebSocketServer({ port: 0, host: '127.0.0.1' });
+  await once(server, 'listening');
+  const { port } = decodeBoundary(server.address(), boundary.object({ port: boundary.number }));
+  const calls: string[] = [];
+  let delivered: { clientUserMessageId: string; input: unknown[] } | undefined;
+  let attempt: import('../../../../shared/types/agentChat').AgentChatStartAttempt | undefined;
+  let showHistory = false;
+  let conflict = false;
+  server.on('connection', socket => socket.on('message', data => {
+    const message = JSON.parse(data.toString());
+    if (message.id === undefined) return;
+    calls.push(message.method);
+    if (message.method === 'turn/start') { delivered = message.params; return; }
+    const result = message.method === 'model/list' ? { data: [] } : message.method.startsWith('thread/') ? { thread: { id: 'thread', turns: showHistory ? [{ id: 'received-turn', status: 'completed', items: [{ type: 'userMessage', id: 'native-user-item', clientId: delivered?.clientUserMessageId, content: conflict ? [{ type: 'text', text: 'Different input' }] : delivered?.input }] }] : [] } } : {};
+    socket.send(JSON.stringify({ id: message.id, result }));
+  }));
+  const sessions: CodexSession[] = [];
+  const connect = async () => { const socket = new WebSocket(`ws://127.0.0.1:${port}`); await once(socket, 'open'); const session = new CodexSession(socket, 1, { requestTimeoutMs: 30, onStart: value => { attempt = value; } }); sessions.push(session); await session.initialize(); return session; };
+  try {
+    const original = await connect();
+    await original.load({ sessionId: 'thread', cwd: '/fixture', mcpServers: [] });
+    await expect(original.prompt([{ type: 'text', text: 'Exactly once' }], 'owned-operation')).rejects.toMatchObject({ code: 'CHAT_CODEX_TIMEOUT' });
+    expect(attempt?.operationId).toBe('owned-operation');
+    expect(attempt?.clientId).toBe(delivered?.clientUserMessageId);
+    await original.close();
+    const recovery = await connect();
+    const beforeRead = calls.length;
+    await expect(recovery.readStartOutcome('thread', attempt!)).rejects.toMatchObject({ code: 'CHAT_START_UNCONFIRMED' });
+    expect(calls.slice(beforeRead)).toEqual(['thread/read']);
+    showHistory = true; conflict = true;
+    await expect(recovery.readStartOutcome('thread', attempt!)).rejects.toMatchObject({ code: 'CHAT_START_UNCONFIRMED' });
+    conflict = false;
+    await expect(recovery.readStartOutcome('thread', attempt!)).resolves.toBe('completed');
+    expect(calls.filter(method => method === 'turn/start')).toHaveLength(1);
+    expect(calls.filter(method => method === 'thread/resume')).toHaveLength(1);
+  } finally { for (const session of sessions) await session.close(); for (const client of server.clients) client.terminate(); await new Promise<void>(resolve => server.close(() => resolve())); }
 });
