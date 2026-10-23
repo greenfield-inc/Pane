@@ -29,6 +29,9 @@ function ConversationList({ chat, approvalScroll }: { chat: Chat; approvalScroll
 function MessageList({ chat, approvalScroll, messages }: { chat: Chat; approvalScroll: RefObject<(() => void) | null>; messages: ThreadState['messages'] }) {
   const conversationId = chat.view?.conversation?.nativeSessionId ?? '';
   const [initialPosition] = useState(() => resolveReadingPosition(chat.readingPosition, conversationId, messages));
+  // An oversized anchor must be measured even when its estimated height
+  // would put the requested within-row offset beyond the virtualized window.
+  const [pinnedAnchor, setPinnedAnchor] = useState(() => initialPosition.index ? { keys: [messages[initialPosition.index.index].id] } : undefined);
   const list = useRef<LegendListRef>(null);
   const ready = useRef(false);
   const { chat: colors } = useTheme();
@@ -49,8 +52,9 @@ function MessageList({ chat, approvalScroll, messages }: { chat: Chat; approvalS
     return () => { approvalScroll.current = null; };
   }, [approvalScroll, chat.view?.permissions, messages, reducedMotion]);
   return <View style={styles.fill}>
-    <LegendList ref={list} testID="chat-messages" data={messages} keyExtractor={message => message.id} recycleItems={false} estimatedItemSize={120} contentContainerStyle={styles.messages} keyboardShouldPersistTaps="handled" maintainVisibleContentPosition maintainScrollAtEnd={{ animated: false }} maintainScrollAtEndThreshold={0.04} initialScrollAtEnd={initialPosition.atBottom} initialScrollIndex={initialPosition.index} onLoad={() => {
+    <LegendList ref={list} testID="chat-messages" data={messages} keyExtractor={message => message.id} recycleItems={false} estimatedItemSize={120} contentContainerStyle={styles.messages} keyboardShouldPersistTaps="handled" maintainVisibleContentPosition maintainScrollAtEnd={{ animated: false }} maintainScrollAtEndThreshold={0.04} initialScrollAtEnd={initialPosition.atBottom} initialScrollIndex={initialPosition.index} alwaysRender={pinnedAnchor} onLoad={() => {
       ready.current = true;
+      setPinnedAnchor(undefined);
       const target = initialPosition.index;
       const size = target && list.current?.getState().sizeAtIndex(target.index);
       // A row may shrink while this surface is detached. Keep its bookmark
