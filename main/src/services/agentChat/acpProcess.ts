@@ -62,6 +62,7 @@ export class AcpProcess {
   }
 
   private async releaseOnce(): Promise<void> {
+    if (this.timer) clearInterval(this.timer);
     let protocolError: unknown;
     try { await this.session.close(); } catch (error) { protocolError = error; }
     this.child.stdin.end();

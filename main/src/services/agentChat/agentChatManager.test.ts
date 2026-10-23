@@ -119,6 +119,7 @@ process.stdin.on('data', chunk => { buffer += chunk; let end; while ((end=buffer
       destroy: async () => { await exited; },
       initialize: async () => {
         expect(state().processes.chat).toEqual([]);
+        expect(state().conversation.nativeStartup).toBe(true);
         child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
         exited = once(child, 'exit');
         await once(child, 'spawn');
@@ -178,7 +179,9 @@ process.stdin.on('data', chunk => { buffer += chunk; let end; while ((end=buffer
     hook('Stop', { permission_mode: 'default', effort: { level: 'medium' }, background_tasks: [], session_crons: [] });
     await manager.configure(panel.id, 2, 'mode', 'plan');
     await manager.configure(panel.id, 2, 'effort', 'high');
-    await manager.switchTo(panel.id, 'terminal', 2);
+    const { AcpSession } = await import('./acpSession');
+    const brokenCancel = vi.spyOn(AcpSession.prototype, 'cancel').mockRejectedValue(new Error('Broken cancel write'));
+    try { await manager.switchTo(panel.id, 'terminal', 2); } finally { brokenCancel.mockRestore(); }
     expect(getRuntimeConfigManager().getConfig().defaultAgentInterface).toBe('terminal');
     expect(state().launch).toMatchObject({ permissionMode: 'plan', effort: 'high' });
     expect(manager.view(panel.id).conversation).toMatchObject({ active: 'terminal', nativeSessionId: nativeId, generation: 3 });
@@ -289,7 +292,7 @@ server.on('connection',socket=>socket.on('message',data=>{const m=JSON.parse(dat
   } finally { await manager.stop(panel.id); child.kill(); await exited; manager.detachObservers(); rmSync(directory, { recursive: true, force: true }); }
 });
 
-it.skipIf(process.platform === 'win32')('binds an identified legacy tab to its existing owner without guessing or replaying history', async () => {
+it.skipIf(process.platform === 'win32').each([false, true])('binds an identified legacy tab to its existing owner without replay; remote=%s', async remote => {
   const { mkdtempSync, writeFileSync, rmSync } = await import('fs');
   const { tmpdir } = await import('os');
   const { join } = await import('path');
@@ -303,27 +306,30 @@ it.skipIf(process.platform === 'win32')('binds an identified legacy tab to its e
   const { port } = decodeBoundary(server.address(), boundary.object({ port: boundary.number }));
   const nativeId = randomUUID();
   const calls: string[] = [];
-  server.on('connection', socket => socket.on('message', data => {
+  server.on('connection', (socket, request) => {
+    if (remote) expect(request.headers.authorization).toBe('Bearer fixture-only-secret');
+    socket.on('message', data => {
     const message = JSON.parse(data.toString()); calls.push(message.method);
     if (message.id === undefined) return;
     const result = message.method === 'model/list' ? { data: [] } : message.method === 'thread/loaded/list' ? { data: [nativeId] } : message.method === 'initialize' ? {} : { thread: { id: nativeId, turns: [{ id: 'old-turn', status: 'completed', items: [{ type: 'agentMessage', id: 'old-answer', text: 'Native history' }] }] }, approvalPolicy: 'on-request', sandbox: { type: 'readOnly' } };
     socket.send(JSON.stringify({ id: message.id, result }));
-  }));
+  }); });
   const executable = join(directory, 'codex');
   writeFileSync(executable, `#!${process.execPath}\nconst socket=require('net').connect({host:'127.0.0.1',port:${port}});process.stdin.pipe(socket).pipe(process.stdout);process.stdin.on('end',()=>socket.end());socket.on('close',()=>process.exit(0));`, { mode: 0o700 });
   const child = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { stdio: 'ignore' });
   const exited = once(child, 'exit'); await once(child, 'spawn');
   const id = randomUUID();
   databaseService.createSession({ id, name: id, initial_prompt: '', worktree_name: id, worktree_path: directory, project_id: null, tool_type: 'none' });
-  const panel = await panelManager.createPanel({ sessionId: id, type: 'terminal', initialState: { agentType: 'codex', initialCommand: executable } });
+  const command = remote ? `${executable} --remote ws://127.0.0.1:${port} --remote-auth-token-env OWNED_FIXTURE_TOKEN` : executable;
+  const panel = await panelManager.createPanel({ sessionId: id, type: 'terminal', initialState: { agentType: 'codex', initialCommand: command } });
   const manager = new AgentChatManager({ enabled: () => true });
   manager.attachNative({ pid: () => child.exitCode === null ? child.pid : undefined, writeControl: () => { throw new Error('Identification must never type into the native draft'); }, destroy: async () => { child.kill(); await exited; }, initialize: async () => { throw new Error('Original owner must stay alive'); } });
   try {
-    expect(await manager.prepareNativeLaunch(panel, directory, process.env, executable, 'bash', false)).toBe(executable);
+    expect(await manager.prepareNativeLaunch(panel, directory, { ...process.env, OWNED_FIXTURE_TOKEN: 'fixture-only-secret' }, command, 'bash', false)).toBe(command);
     expect(manager.view(panel.id).identificationRequired).toBe(true);
-    await expect(manager.identify(panel.id, randomUUID(), join(directory, 'owner.sock'))).rejects.toMatchObject({ code: 'CHAT_IDENTITY_UNAVAILABLE' });
+    await expect(manager.identify(panel.id, randomUUID(), remote ? '' : join(directory, 'owner.sock'))).rejects.toMatchObject({ code: 'CHAT_IDENTITY_UNAVAILABLE' });
     expect(manager.view(panel.id).identificationRequired).toBe(true);
-    expect(await manager.identify(panel.id, nativeId, join(directory, 'owner.sock'))).toMatchObject({ available: true, identificationRequired: false });
+    expect(await manager.identify(panel.id, nativeId, remote ? '' : join(directory, 'owner.sock'))).toMatchObject({ available: true, identificationRequired: false });
     await manager.switchTo(panel.id, 'chat', 1);
     expect(manager.view(panel.id)).toMatchObject({ available: true, conversation: { nativeSessionId: nativeId, active: 'chat', generation: 2 }, transcript: { messages: [{ id: 'old-answer' }] } });
     await manager.switchTo(panel.id, 'terminal', 2);
@@ -389,4 +395,37 @@ it('keeps a named native Codex profile in its original Terminal instead of subst
   expect(manager.view(panel.id)).toMatchObject({ available: false, identificationRequired: false, error: expect.stringContaining('named profile locked-down') });
   await expect(manager.identify(panel.id, nativeId, '')).rejects.toMatchObject({ code: 'CHAT_CODEX_PROFILE_UNSUPPORTED' });
   expect(manager.manages(panel.id)).toBe(false);
+});
+
+it('keeps the original embedded Terminal usable when identification setup cannot write its directory', async () => {
+  const { createHash } = await import('crypto');
+  const { mkdirSync, writeFileSync, rmSync } = await import('fs');
+  const { join } = await import('path');
+  const { getAppDirectory } = await import('../../utils/appDirectory');
+  const id = randomUUID(), nativeId = randomUUID();
+  databaseService.createSession({ id, name: id, initial_prompt: '', worktree_name: id, worktree_path: process.cwd(), project_id: null, tool_type: 'none' });
+  const command = '/fixture/codex --no-daemon';
+  const panel = await panelManager.createPanel({ sessionId: id, type: 'terminal', initialState: { agentType: 'codex', initialCommand: command } });
+  const manager = new AgentChatManager({ enabled: () => true });
+  const destroy = vi.fn(async () => {});
+  manager.attachNative({ pid: () => process.pid, writeControl: () => {}, destroy, initialize: async () => {} });
+  await manager.prepareNativeLaunch(panel, process.cwd(), process.env, command, 'bash', false);
+  const parent = join(getAppDirectory(), 'agent-chat');
+  mkdirSync(parent, { recursive: true });
+  const blocked = join(parent, createHash('sha256').update(panel.id).digest('hex'));
+  writeFileSync(blocked, 'A file blocks directory creation');
+  try {
+    await expect(manager.identify(panel.id, nativeId, '')).rejects.toMatchObject({ code: 'ENOTDIR' });
+    expect(() => manager.guardNativeInput(panel.id, 'retained draft')).not.toThrow();
+    expect(manager.manages(panel.id)).toBe(false);
+    expect(destroy).not.toHaveBeenCalled();
+    rmSync(blocked);
+    const commit = vi.spyOn(panelManager, 'commitAgentChat').mockImplementationOnce(() => { throw new Error('State storage unavailable'); });
+    try {
+      await expect(manager.identify(panel.id, nativeId, '')).rejects.toThrow('State storage unavailable');
+      expect(() => manager.guardNativeInput(panel.id, 'retry draft')).not.toThrow();
+      expect(manager.manages(panel.id)).toBe(false);
+      expect(destroy).not.toHaveBeenCalled();
+    } finally { commit.mockRestore(); }
+  } finally { rmSync(blocked, { recursive: true, force: true }); manager.detachObservers(); }
 });

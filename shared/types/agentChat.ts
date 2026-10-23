@@ -88,6 +88,7 @@ export interface AgentChatLaunch {
   codexConfigArgs?: string[];
   codexEndpoint?: string;
   codexSocketPath?: string;
+  codexRemote?: { endpoint: string; authTokenEnv?: string };
 }
 
 export interface AgentChatProcessIdentity { pid: number; parent: number; started: string }

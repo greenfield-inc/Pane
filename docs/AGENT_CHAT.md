@@ -44,7 +44,9 @@ explicit recovery, so a timeout cannot silently submit the request twice.
 
 For older Codex tabs without a verified binding, tab actions offer one-time
 identification. Run `/status` yourself when the native composer is ready and
-enter its current Session ID and server socket. Pane verifies that the thread
+enter its current Session ID and server socket. A captured explicit `--remote`
+launch already supplies its endpoint, so only its Session ID is needed; Pane
+uses the original host-side authentication environment. Pane verifies that the thread
 is loaded on that owner and remembers the binding. It never guesses from cwd,
 recency or a similarly named history file, and never types into an unknown
 native draft or modal. The shared server remains externally owned; Pane owns

@@ -18,6 +18,7 @@ export interface CodexProcessOptions extends CodexSessionOptions {
   directory: string;
   /** Borrowed provider owner; only the proxy child belongs to Pane. */
   socketPath?: string;
+  remote?: { endpoint: string; authTokenEnv?: string };
   generation: number;
   save: (identities: ArchiveProcessIdentity[]) => void;
   onNativeState?: (id?: string) => void;
@@ -50,6 +51,14 @@ export class CodexProcess {
   }
 
   async start(): Promise<void> {
+    if (this.options.remote) {
+      this.endpoint = this.options.remote.endpoint;
+      const socket = await this.connect();
+      if (!socket) throw new PaneError('CHAT_CODEX_CONNECT_FAILED', 'The original remote Codex server could not be reached.', 'Check its existing connection and authentication, then retry identification.');
+      this.connection = new CodexSession(socket, this.options.generation, this.options);
+      this.options.save([]);
+      return;
+    }
     if (this.options.socketPath) {
       const socket = await this.proxySocket(this.options.socketPath);
       this.endpoint = `unix://${this.options.socketPath}`;
@@ -140,8 +149,11 @@ export class CodexProcess {
   nativeConfirms(id: string): boolean { return this.nativeConnection?.confirms(id) ?? false; }
 
   private connect(): Promise<WebSocket | undefined> {
+    const authEnv = this.options.remote?.authTokenEnv;
+    const token = this.options.remote ? (authEnv ? this.options.env[authEnv] : undefined) : this.token;
+    if (authEnv && !token) throw new PaneError('CHAT_CODEX_AUTH_MISSING', 'The original remote Codex authentication environment is unavailable.', 'Restore this tab’s launch environment and retry; no alternate server was started.');
     return new Promise(resolve => {
-      const socket = new WebSocket(this.endpoint, { headers: { Authorization: `Bearer ${this.token}` }, handshakeTimeout: 1000 });
+      const socket = new WebSocket(this.endpoint, { headers: token ? { Authorization: `Bearer ${token}` } : {}, handshakeTimeout: 5000 });
       socket.once('open', () => resolve(socket));
       socket.once('error', () => { socket.terminate(); resolve(undefined); });
     });
@@ -168,7 +180,7 @@ export class CodexProcess {
     if (this.observationError) throw this.observationError;
     // Killing the owned server confirms its work stopped. Closing a borrowed
     // proxy cannot establish that for the externally owned daemon.
-    if (this.options.socketPath && (cancelError || (cancel && this.connection?.hasUnconfirmedStart()))) {
+    if ((this.options.socketPath || this.options.remote) && (cancelError || (cancel && this.connection?.hasUnconfirmedStart()))) {
       throw cancelError ?? new PaneError('CHAT_START_UNCONFIRMED', 'The borrowed provider still has an unconfirmed turn start.', 'Inspect or stop that conversation in its original native terminal before recovery.');
     }
   }
