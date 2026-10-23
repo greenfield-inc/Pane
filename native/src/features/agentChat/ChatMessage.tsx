@@ -69,14 +69,16 @@ function ToolPart({ toolCallId, toolName, args, result, isError }: ToolCallMessa
   const [expanded, setExpanded] = useState(isError ?? false);
   const open = waiting || expanded;
   const running = args.status === 'pending' || args.status === 'in_progress';
+  const label = `${waiting ? 'Waiting on tool' : isError ? 'Failed tool' : running ? 'Running tool' : 'Used tool'}: ${toolName}`;
   const output = decodeOptionalBoundary(result, boundary.object({ output: boundary.json, content: boundary.array(boundary.json) }));
   return <Animated.View layout={LinearTransition.duration(150).reduceMotion(ReduceMotion.System)} style={[styles.tool, { backgroundColor: chat.card, borderColor: chat.border }]}>
-    <Pressable testID={`chat-tool-${toolCallId}`} accessibilityRole="button" accessibilityState={{ expanded: open }} onPress={() => setExpanded(!expanded)} style={styles.trigger}>
+    <Pressable testID={`chat-tool-${toolCallId}`} accessibilityRole="button" accessibilityState={{ expanded: open }} accessibilityLabel={label} onPress={() => setExpanded(!expanded)} style={styles.trigger}>
       <Icon ios={waiting ? 'exclamationmark.circle' : isError ? 'xmark.circle' : running ? 'clock' : 'checkmark'} android={waiting ? 'error_outline' : isError ? 'cancel' : running ? 'schedule' : 'check'} size={16} color={chat.mutedForeground} />
-      <Text variant="subhead" style={[styles.flex, { color: chat.mutedForeground }]}>{waiting ? 'Waiting on tool' : isError ? 'Failed tool' : running ? 'Running tool' : 'Used tool'}: <Text variant="callout" style={{ color: chat.foreground }}>{toolName}</Text></Text>
+      <Text variant="subhead" numberOfLines={1} ellipsizeMode="tail" style={[styles.flex, { minWidth: 0, color: chat.mutedForeground }]}>{label}</Text>
       <Icon ios={open ? 'chevron.down' : 'chevron.right'} android={open ? 'expand_more' : 'chevron_right'} size={16} color={chat.mutedForeground} />
     </Pressable>
     {open && <View style={styles.toolContent}>
+      <Text selectable style={{ color: chat.foreground }}>{toolName}</Text>
       {args.input != null && <Text selectable style={[styles.code, { backgroundColor: chat.muted, color: chat.foreground }]}>{JSON.stringify(args.input, null, 2)}</Text>}
       <PermissionChoices permissions={permissions} />
       {output?.content.map((content, index) => {

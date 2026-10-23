@@ -48,7 +48,7 @@
 .chat-tool { width:100%; font-size:14px; }
 .chat-tool-trigger { display:flex; align-items:center; gap:8px; width:fit-content; max-width:100%; padding:6px 0; cursor:pointer; color:var(--chat-muted-foreground); list-style:none; }
 .chat-tool-trigger::-webkit-details-marker { display:none; }
-.chat-tool-trigger>span { min-width:0; line-height:1.25; overflow-wrap:anywhere; }
+.chat-tool-trigger>span { min-width:0; line-height:1.25; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .chat-tool-trigger svg { width:16px; height:16px; flex-shrink:0; }
 .chat-tool-chevron { transform:rotate(-90deg); }
 .chat-tool[open]>.chat-tool-trigger>.chat-tool-chevron { transform:rotate(0); }

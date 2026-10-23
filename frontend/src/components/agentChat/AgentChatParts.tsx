@@ -29,11 +29,13 @@ function ToolPart({ toolCallId, toolName, args, result, isError }: ToolCallMessa
   const waiting = permissions.length > 0;
   const [expanded, setExpanded] = useState(isError ?? false);
   const running = args.status === 'pending' || args.status === 'in_progress';
+  const label = `${waiting ? 'Waiting on tool' : isError ? 'Failed tool' : running ? 'Running tool' : 'Used tool'}: ${toolName}`;
   const Icon = waiting ? AlertCircle : isError ? XCircle : running ? LoaderCircle : Check;
   const output = decodeOptionalBoundary(result, boundary.object({ output: boundary.json, content: boundary.array(boundary.json) }));
   return <details className="chat-tool" data-chat-tool={toolCallId} open={waiting || expanded} onToggle={event => setExpanded(event.currentTarget.open)}>
-    <summary className="chat-tool-trigger"><Icon /><span>{waiting ? 'Waiting on tool' : isError ? 'Failed tool' : running ? 'Running tool' : 'Used tool'}: <b>{toolName}</b></span><ChevronDown className="chat-tool-chevron" /></summary>
+    <summary className="chat-tool-trigger"><Icon /><span title={label}>{label}</span><ChevronDown className="chat-tool-chevron" /></summary>
     {(waiting || expanded) && <div className="chat-tool-content">
+      <p className="break-all">{toolName}</p>
       {args.input != null && <pre>{JSON.stringify(args.input, null, 2)}</pre>}
       <AgentChatPermissions {...permissionContext} permissions={permissions} inline />
       {output?.content.map((content, index) => {

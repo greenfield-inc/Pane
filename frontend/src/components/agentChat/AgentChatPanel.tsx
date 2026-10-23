@@ -180,7 +180,7 @@ export default function AgentChatPanel({ panelId, client, connected = true }: { 
     <ThreadPrimitive.Root ref={rootRef} className="agent-chat flex h-full min-h-0 flex-col">
       <AgentChatHeader panelId={panelId} client={client} connected={connected} />
       {(snapshot.error || view?.error) && <div role="alert" className="chat-alert">{snapshot.error ?? view?.error}</div>}
-      {pendingDelivery && <div className="flex flex-wrap items-center gap-2 px-4 py-2"><span role="status" className="text-xs">{delivering ? 'Confirming delivery…' : 'Delivery is unconfirmed.'}</span><button type="button" disabled={!connected || delivering} onClick={() => void checkDelivery(false)} className="chat-button chat-button-outline">Check delivery</button><button type="button" disabled={!connected || delivering} onClick={() => void checkDelivery(true)} className="chat-button chat-button-outline">Retry same delivery</button></div>}
+      {pendingDelivery && !delivering && <div className="flex flex-wrap items-center gap-2 px-4 py-2"><span role="status" className="text-xs">Delivery is unconfirmed.</span><button type="button" disabled={!connected || delivering} onClick={() => void checkDelivery(false)} className="chat-button chat-button-outline">Check delivery</button><button type="button" disabled={!connected || delivering} onClick={() => void checkDelivery(true)} className="chat-button chat-button-outline">Retry same delivery</button></div>}
       {view?.conversation?.active === 'stopped' && <div className="chat-recovery">
         <p>{view.conversation.recovery ?? 'This conversation is stopped.'}</p>
         <p className="break-all text-xs">Conversation {view.conversation.nativeSessionId}</p>
@@ -197,7 +197,8 @@ export default function AgentChatPanel({ panelId, client, connected = true }: { 
           tool?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus({ preventScroll: true });
         }}>Approval needed</button>}
         <AgentChatPermissions permissions={unmatchedPermissions} disabled={disabled || answering} onAnswer={answer} />
-        <ComposerPrimitive.Root className="chat-composer">
+        <ComposerPrimitive.Root className="chat-composer" aria-busy={delivering}>
+          {delivering && <span className="sr-only" role="status">Confirming delivery…</span>}
           <div className="flex flex-wrap gap-2 empty:hidden">{pendingDelivery?.images?.map((image, index) => <span key={index} className="chat-attachment"><img alt="Image awaiting delivery confirmation" src={`data:${image.mimeType};base64,${image.data}`} /></span>)}<ComposerPrimitive.Attachments components={{ Attachment }} /></div>
           <ComposerPrimitive.Input readOnly={!!pendingDelivery} aria-label="Message agent" placeholder="Send a message..." rows={1} onChange={event => viewer.setDraft(event.target.value)} className="chat-input" />
           <div className="chat-composer-actions">
