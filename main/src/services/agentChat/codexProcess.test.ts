@@ -1,4 +1,4 @@
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -7,7 +7,7 @@ import { once } from 'events';
 import { CodexProcess } from './codexProcess';
 import type { ArchiveProcessIdentity } from '../archiveProcessTracker';
 
-it('owns an authenticated Codex endpoint and releases only its recorded process tree', async () => {
+it.each([false, true])('releases its authenticated owned server even when graceful cancellation fails=%s', async cancelFails => {
   const directory = mkdtempSync(join(tmpdir(), 'pane-codex-server-'));
   const fixture = join(directory, 'server.cjs');
   writeFileSync(fixture, `const {WebSocketServer}=require(${JSON.stringify(require.resolve('ws'))}); const crypto=require('crypto'); const args=process.argv.slice(2);const endpoint=args[args.indexOf('--listen')+1];const digest=args[args.indexOf('--ws-token-sha256')+1];const server=new WebSocketServer({port:Number(new URL(endpoint).port),host:'127.0.0.1',verifyClient:({req})=>crypto.createHash('sha256').update((req.headers.authorization||'').replace(/^Bearer /,'')).digest('hex')===digest});server.on('listening',()=>process.stderr.write('codex app-server (WebSockets)\\n  listening on: ws://127.0.0.1:'+server.address().port+'\\n'));server.on('connection',socket=>socket.on('message',data=>{const m=JSON.parse(data);if(m.id===undefined)return;socket.send(JSON.stringify({id:m.id,result:m.method==='model/list'?{data:[]}: {userAgent:'fixture'}}));}));`);
@@ -21,7 +21,8 @@ it('owns an authenticated Codex endpoint and releases only its recorded process 
     await expect(error).resolves.toMatchObject([expect.objectContaining({ message: expect.stringContaining('401') })]);
     denied.terminate();
     await runtime.session.initialize();
-    await runtime.release();
+    if (cancelFails) vi.spyOn(runtime.session, 'cancel').mockRejectedValue(new Error('Interrupt acknowledgement timed out'));
+    await runtime.release(cancelFails);
     expect(identities).toEqual([]);
   } finally { await runtime.release(); rmSync(directory, { recursive: true, force: true }); }
 });

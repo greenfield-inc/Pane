@@ -178,7 +178,7 @@ export function Dropdown({
     const controls = getMenuControls(contentRef.current);
     const target = controls.find(control => control.dataset.dropdownItemIndex === String(activeIndex)) ?? controls[0];
     target?.focus();
-  }, [isOpen, activeIndex]);
+  }, [isOpen, activeIndex, formLabel]);
 
   const handleMenuKeyDown = (event: React.KeyboardEvent) => {
     switch (event.key) {

@@ -17,13 +17,13 @@ export function AgentConversationSurface({ panel, draft, onChangeDraft, confirmD
   // The panel snapshot prevents a terminal attach while Chat history is loading.
   const state = panel.state.customState as TerminalPanelState | undefined;
   const conversation = chat.view?.conversation ?? state?.agentChat?.conversation;
-  const showChat = conversation && conversation.active !== 'terminal';
+  const showChat = conversation && conversation.active !== 'terminal' && !conversation.nativeStartup;
   return <View style={styles.fill}>
     {(conversation || chat.view?.available || chat.view?.identificationRequired) && <AgentModeBar chat={chat} />}
     {showChat ? <AgentChatPanel chat={chat} draft={draft} onChangeDraft={onChangeDraft} confirmDraft={confirmDraft} /> : <View style={styles.fill}>
       {children}
-      {chat.error && <Text testID="chat-switch-error" variant="footnote" tone="danger" style={styles.error}>{chat.error}</Text>}
-      {conversation?.transition && <View testID="chat-switching" style={[StyleSheet.absoluteFill, styles.transition, { backgroundColor: theme.colors.background }]}><ActivityIndicator color={theme.colors.textMuted} /><Text tone="secondary">Switching interface…</Text></View>}
+      {(chat.error || chat.view?.error) && <Text testID="chat-switch-error" variant="footnote" tone="danger" style={styles.error}>{chat.error ?? chat.view?.error}</Text>}
+      {conversation?.transition && !conversation.nativeStartup && <View testID="chat-switching" style={[StyleSheet.absoluteFill, styles.transition, { backgroundColor: theme.colors.background }]}><ActivityIndicator color={theme.colors.textMuted} /><Text tone="secondary">Switching interface…</Text></View>}
     </View>}
   </View>;
 }

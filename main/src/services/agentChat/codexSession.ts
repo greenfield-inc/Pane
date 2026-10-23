@@ -20,7 +20,7 @@ export interface CodexSessionOptions {
   onIdentity?: (id: string) => void;
   onChange?: (change: AgentChatEvent['change']) => void;
   onState?: () => void;
-  onDisconnect?: () => void;
+  onDisconnect?: (reason?: string) => void;
   requestTimeoutMs?: number;
 }
 
@@ -37,6 +37,7 @@ export class CodexSession {
   private models: JsonObject[] = [];
   private loaded = false;
   private configuring = false;
+  private unconfirmedStart = false;
   private closing = false;
   private hydrating = false;
   private buffered: Array<{ method: string; params: JsonObject }> = [];
@@ -182,6 +183,7 @@ export class CodexSession {
       }
       for (const value of array(thread.turns ?? [])) this.hydrateTurn(object(value));
       this.loaded = true;
+      this.unconfirmedStart = false;
       return { sessionId: id };
     } finally {
       this.hydrating = false;
@@ -214,9 +216,10 @@ export class CodexSession {
     if (params.threadId !== this.threadId) return;
     if (method === 'item/started' || method === 'item/completed') this.item(object(params.item));
     else if (method === 'item/agentMessage/delta' || method === 'item/reasoning/textDelta' || method === 'item/reasoning/summaryTextDelta') this.options.onChange?.({ type: 'append', id: string(params.itemId), role: 'assistant', part: { type: method === 'item/agentMessage/delta' ? 'text' : 'thought', text: string(params.delta) } });
-    else if (method === 'turn/started') this.turnId = string(object(params.turn).id);
+    else if (method === 'turn/started') { this.turnId = string(object(params.turn).id); this.unconfirmedStart = false; }
     else if (method === 'turn/completed') {
       const turn = object(params.turn); const id = string(turn.id);
+      this.unconfirmedStart = false;
       this.completed.set(id, turn);
       if (this.completed.size > 64) this.completed.delete(this.completed.keys().next().value!);
       if (this.turnId === id) { this.turnId = undefined; this.finishTurn(turn); }
@@ -260,7 +263,7 @@ export class CodexSession {
     this.options.onState?.();
   }
 
-  error(): string | undefined { return this.unhandledInteraction?.message; }
+  error(): string | undefined { return this.unconfirmedStart ? 'The turn start was not acknowledged. Its delivery is unknown; recover the saved conversation before sending again.' : this.unhandledInteraction?.message; }
 
   permissions(): AgentChatPermission[] { return structuredClone([...this.approvals.values()].map(entry => entry.permission)); }
   answer(id: string, generation: number, optionId: string): void {
@@ -287,12 +290,19 @@ export class CodexSession {
       const completed = this.completed.get(id);
       if (completed || turn.status !== 'inProgress') this.finishTurn(completed ?? turn);
       else this.turnId = id;
-    } catch (error) { this.turnResult?.reject(error instanceof Error ? error : new Error(String(error))); this.turnResult = undefined; }
+    } catch (error) {
+      if (error instanceof PaneError && error.code === 'CHAT_CODEX_TIMEOUT') {
+        this.loaded = false; this.unconfirmedStart = true;
+        this.options.onDisconnect?.('Codex did not acknowledge the turn start. Its delivery is unknown; recover the saved conversation before sending again.');
+      }
+      this.turnResult?.reject(error instanceof Error ? error : new Error(String(error))); this.turnResult = undefined;
+    }
     return result;
   }
 
   isConnected(): boolean { return this.socket.readyState === this.socket.OPEN; }
-  isRunning(): boolean { return !!this.turnId || !!this.turnResult || this.configuring; }
+  hasUnconfirmedStart(): boolean { return this.unconfirmedStart; }
+  isRunning(): boolean { return !!this.turnId || !!this.turnResult || this.configuring || this.unconfirmedStart; }
   supportsImages(): boolean { return true; }
   config(): JsonObject { return structuredClone(this.settings); }
   controls(): AgentChatConfigOption[] {
@@ -318,6 +328,7 @@ export class CodexSession {
   }
 
   async cancel(): Promise<void> {
+    if (this.unconfirmedStart && !this.turnId) throw new PaneError('CHAT_START_UNCONFIRMED', 'The provider did not acknowledge this turn, so cancellation cannot yet confirm its outcome.', 'Stop the owned runtime or inspect the original native conversation before recovery.');
     const startingDeadline = Date.now() + (this.options.requestTimeoutMs ?? 30_000);
     while (this.turnResult && !this.turnId && Date.now() < startingDeadline) await new Promise(resolve => setTimeout(resolve, 20));
     if (this.turnResult && !this.turnId) throw new PaneError('CHAT_CANCEL_UNCONFIRMED', 'Codex has not identified the starting turn, so its cancellation is unconfirmed.', 'Inspect the current turn before retrying.');

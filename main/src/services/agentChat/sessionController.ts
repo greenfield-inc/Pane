@@ -91,7 +91,7 @@ export class SessionController {
       acquiring = true;
       const loaded = await this.runtime.acquire(before, target);
       if (loaded.nativeSessionId !== before.nativeSessionId || !loaded.historyVerified) throw new Error('Exact conversation identity or history was not verified');
-      this.storage.write({ ...before, active: target, preferred: target, generation: before.generation + 1, transition: undefined, recovery: undefined });
+      this.storage.write({ ...before, active: target, preferred: target, generation: before.generation + 1, transition: undefined, nativeStartup: undefined, recovery: undefined });
       return this.snapshot();
     } catch (error) {
       let cleanupError = '';
@@ -99,7 +99,7 @@ export class SessionController {
         try { await this.runtime.release(before, target); }
         catch (releaseError) { cleanupError = ` Target release remains unverified: ${reasonOf(releaseError)}.`; }
       }
-      this.storage.write({ ...this.snapshot(), active: 'stopped', recovery: `Recovery could not verify the exact conversation: ${reasonOf(error)}.${cleanupError}` });
+      this.storage.write({ ...this.snapshot(), active: 'stopped', nativeStartup: undefined, recovery: `Recovery could not verify the exact conversation: ${reasonOf(error)}.${cleanupError}` });
       throw new PaneError('CHAT_RECOVERY_FAILED', this.snapshot().recovery!, 'Release the recorded runtime before trying explicit recovery again.');
     } finally { this.switching = false; }
   }
@@ -125,7 +125,7 @@ export class SessionController {
         try {
           const attached = await this.runtime.handoff(before, target);
           if (attached.nativeSessionId !== before.nativeSessionId || !attached.historyVerified) throw new Error('The shared runtime did not verify this conversation');
-          this.storage.write({ ...before, active: target, preferred: target, generation: before.generation + 1, transition: undefined });
+          this.storage.write({ ...before, active: target, preferred: target, generation: before.generation + 1, transition: undefined, nativeStartup: undefined });
           return this.snapshot();
         } catch (error) {
           this.storage.write({ ...before, transition: undefined });

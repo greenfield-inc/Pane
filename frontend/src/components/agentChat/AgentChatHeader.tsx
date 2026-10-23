@@ -13,7 +13,7 @@ export function AgentChatHeader({ panelId, client, connected = true }: { panelId
   const [diagnostics, setDiagnostics] = useState(false);
   const conversation = view?.conversation;
   const transitioning = !!conversation?.transition && conversation.active !== 'stopped';
-  const focusMode = conversation?.active === 'stopped' ? 'terminal' : conversation?.active ?? 'chat';
+  const focusMode = conversation?.nativeStartup ? 'terminal' : conversation?.active === 'stopped' ? 'terminal' : conversation?.active ?? 'chat';
   const change = async (mode: AgentInterface) => {
     if (!conversation) return;
     setBusy(true);
@@ -24,7 +24,7 @@ export function AgentChatHeader({ panelId, client, connected = true }: { panelId
     } catch (error) { viewer.setError(error instanceof Error ? error.message : String(error)); }
     finally { setBusy(false); }
   };
-  const status = conversation?.active === 'stopped' ? 'Conversation stopped' : transitioning ? 'Switching interface…' : !connected ? 'Reconnecting…' : conversation?.pendingSwitch ? `Switch to ${conversation.pendingSwitch.target === 'chat' ? 'Chat' : 'Terminal'} after this turn` : view?.permissions.length ? 'Waiting for you' : view?.running ? 'Agent is working' : '';
+  const status = conversation?.nativeStartup ? 'Waiting for native startup…' : conversation?.active === 'stopped' ? 'Conversation stopped' : transitioning ? 'Switching interface…' : !connected ? 'Reconnecting…' : conversation?.pendingSwitch ? `Switch to ${conversation.pendingSwitch.target === 'chat' ? 'Chat' : 'Terminal'} after this turn` : view?.permissions.length ? 'Waiting for you' : view?.running ? 'Agent is working' : '';
   return <Dropdown className="contents" contextMenu menuLabel="Conversation actions" closeOnSelect={false}
     items={[
       { id: 'refresh', label: 'Refresh conversation', onClick: () => void viewer.refresh() },
@@ -42,7 +42,7 @@ export function AgentChatHeader({ panelId, client, connected = true }: { panelId
       options[index].focus();
       options[index].click();
     }}>
-      {(['chat', 'terminal'] as const).map(mode => <button key={mode} type="button" role="radio" tabIndex={focusMode === mode ? 0 : -1} aria-checked={conversation?.active === mode} disabled={!connected || busy || !view?.available || transitioning} onClick={() => void change(mode)}>
+      {(['chat', 'terminal'] as const).map(mode => <button key={mode} type="button" role="radio" tabIndex={focusMode === mode ? 0 : -1} aria-checked={(conversation?.nativeStartup ? 'terminal' : conversation?.active) === mode} disabled={!connected || busy || !view?.available || transitioning} onClick={() => void change(mode)}>
         {mode === 'chat' ? <MessageSquare className="h-3.5 w-3.5" /> : <TerminalSquare className="h-3.5 w-3.5" />}{mode === 'chat' ? 'Chat' : 'Terminal'}
       </button>)}
     </div>

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import type { AgentChatEvent, AgentChatView } from '@shared/types/agentChat';
+import { decodeAgentChatView } from '@shared/types/agentChatDecoders';
 
 import { DraftStore } from '../composer/draftStore';
 
@@ -13,7 +14,7 @@ function fixture() {
     transcript: { panelId: 'panel-a', generation: 2, revision: 0, messages: [] },
   };
   const transport = {
-    get: vi.fn(async () => structuredClone(host)),
+    get: vi.fn(async () => decodeAgentChatView(structuredClone(host))),
     send: vi.fn(async () => ({ operationId: 'send-a', generation: 2, fingerprint: 'same', state: 'accepted' as const })),
     receipt: vi.fn(async () => ({ operationId: 'send-a', generation: 2, fingerprint: 'same', state: 'completed' as const })),
   };
@@ -22,6 +23,14 @@ function fixture() {
 }
 
 describe('native Chat viewer', () => {
+  it('retains host identification requirements and native startup through snapshot and event decoding', async () => {
+    const { session, setHost, getHost } = fixture();
+    setHost({ ...getHost(), identificationRequired: true, identificationSocketRequired: false });
+    await session.refresh();
+    expect(session.snapshot().view?.identificationSocketRequired).toBe(false);
+    session.receiveState(decodeAgentChatView({ ...getHost(), conversation: { ...getHost().conversation!, nativeStartup: true } }));
+    expect(session.snapshot().view?.conversation?.nativeStartup).toBe(true);
+  });
   it('loads the new generation when a handoff overtakes an older snapshot', async () => {
     const { session, transport, getHost } = fixture();
     let resolve: ((view: AgentChatView) => void) | undefined;

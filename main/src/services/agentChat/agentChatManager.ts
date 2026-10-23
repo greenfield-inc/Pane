@@ -59,6 +59,7 @@ export class AgentChatManager {
   private readonly updateOperations = new Map<string, string>();
   private readonly launchInputs = new Map<string, string>();
   private readonly adopting = new Set<string>();
+  private readonly identifiedNative = new Map<string, { pid: number; id: string }>();
   private readonly legacyCodex = new Map<string, { cwd: string; env: NodeJS.ProcessEnv; shellType: string; profile: CodexChatProfile; executable: string }>();
 
   constructor(private readonly options: AgentChatManagerOptions = {}) {}
@@ -106,7 +107,7 @@ export class AgentChatManager {
     try {
       const runtime = await this.startCodex(saved.conversation);
       await runtime.session.create({ cwd, mcpServers: [] }, panel.title || 'Pane conversation');
-      panelManager.commitAgentChat(panel.id, { ...this.required(panel.id), conversation: { ...this.required(panel.id).conversation, active, generation: 1, recovery: undefined } });
+      panelManager.commitAgentChat(panel.id, { ...this.required(panel.id), conversation: { ...this.required(panel.id).conversation, active, generation: 1, nativeStartup: active === 'terminal', recovery: undefined } });
       env[CODEX_TOKEN_ENV] = runtime.token;
       this.publish(panel.id);
       if (active === 'chat' && state.initialInput) {
@@ -140,10 +141,20 @@ export class AgentChatManager {
         if (!projection.error()) getPaneEventSink().send('agent-chat:event', event);
       },
       onState: () => this.publish(record.panelId),
-      onDisconnect: () => {
+      onNativeState: id => {
+        const current = this.record(record.panelId);
+        if (!current || current.conversation.transition || current.conversation.active !== 'terminal') return;
+        if (id === current.conversation.nativeSessionId) {
+          panelManager.commitAgentChat(record.panelId, { ...current, conversation: { ...current.conversation, nativeStartup: undefined } });
+        } else {
+          panelManager.commitAgentChat(record.panelId, { ...current, conversation: { ...current.conversation, active: 'stopped', nativeStartup: undefined, recovery: id ? 'The native client selected a different conversation. Its original history is preserved; confirm the intended identity before recovery.' : 'The native Codex client disconnected. Its server and saved conversation are retained for recovery.' } });
+        }
+        this.publish(record.panelId);
+      },
+      onDisconnect: reason => {
         const current = this.record(record.panelId);
         if (current && current.conversation.active !== 'stopped') {
-          panelManager.commitAgentChat(record.panelId, { ...current, conversation: { ...current.conversation, active: 'stopped', recovery: 'The Codex connection closed. Verify its recorded runtime before recovery.' } });
+          panelManager.commitAgentChat(record.panelId, { ...current, conversation: { ...current.conversation, active: 'stopped', nativeStartup: undefined, recovery: reason ?? 'The Codex connection closed. Verify its recorded runtime before recovery.' } });
         }
       },
     });
@@ -164,14 +175,35 @@ export class AgentChatManager {
     const runtime = this.codex.get(record.panelId);
     if (!runtime) throw new PaneError('CHAT_RECOVERY_REQUIRED', 'The Codex server is no longer connected.', 'Recover the recorded conversation before switching.');
     await runtime.session.verifyIdentity(record.nativeSessionId);
-    if (target === 'terminal' && !this.native?.pid(record.panelId)) {
-      this.acquiring.add(record.panelId);
-      try { await this.native!.initialize(record.panelId, this.required(record.panelId).launch.cwd); }
-      finally { this.acquiring.delete(record.panelId); }
+    if (target === 'terminal') {
+      const saved = this.required(record.panelId);
+      panelManager.commitAgentChat(record.panelId, { ...saved, conversation: { ...saved.conversation, nativeStartup: true } });
+      try {
+        if (!this.native?.pid(record.panelId)) {
+          this.acquiring.add(record.panelId);
+          try { await this.native!.initialize(record.panelId, this.required(record.panelId).launch.cwd); }
+          finally { this.acquiring.delete(record.panelId); }
+        }
+        await this.waitForNativeCodex(record.panelId, record.nativeSessionId);
+      } finally {
+        const current = this.required(record.panelId);
+        panelManager.commitAgentChat(record.panelId, { ...current, conversation: { ...current.conversation, nativeStartup: undefined } });
+      }
     }
     runtime.session.setGeneration(record.generation + 1);
     this.transcripts.get(record.panelId)?.setGeneration(record.generation + 1);
     return { nativeSessionId: record.nativeSessionId, historyVerified: true };
+  }
+
+  private nativeCodexConfirmed(panelId: string, id: string): boolean {
+    const identified = this.identifiedNative.get(panelId);
+    return this.codex.get(panelId)?.nativeConfirms(id) === true || (identified?.id === id && identified.pid === this.native?.pid(panelId));
+  }
+
+  private async waitForNativeCodex(panelId: string, id: string): Promise<void> {
+    const deadline = Date.now() + 30_000;
+    while (this.native?.pid(panelId) && !this.nativeCodexConfirmed(panelId, id) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 50));
+    if (!this.nativeCodexConfirmed(panelId, id)) throw new PaneError('CHAT_NATIVE_RESUME_UNCONFIRMED', 'The native Codex client did not confirm the saved conversation. Its Chat connection is retained.', 'Inspect native startup or authentication and retry the Terminal switch; no prompt was replayed.');
   }
 
   async prepareFreshChat(panel: ToolPanel, cwd: string, env: NodeJS.ProcessEnv, shellType: string, isWSL: boolean, preference?: AgentInterface): Promise<boolean> {
@@ -237,8 +269,10 @@ export class AgentChatManager {
   async prepareNativeLaunch(panel: ToolPanel, cwd: string, env: NodeJS.ProcessEnv, command: string, shellType: string, isWSL: boolean): Promise<string> {
     const codex = this.codex.get(panel.id);
     if (codex) {
+      this.identifiedNative.delete(panel.id);
       const saved = this.required(panel.id);
-      const input = nativeCommand(saved.launch.executable, ['resume', saved.conversation.nativeSessionId, '--remote', codex.endpoint, ...(saved.launch.codexSocketPath ? [] : ['--remote-auth-token-env', CODEX_TOKEN_ENV])], shellType);
+      const endpoint = await codex.prepareNative();
+      const input = nativeCommand(saved.launch.executable, ['resume', saved.conversation.nativeSessionId, '--remote', endpoint, '--remote-auth-token-env', CODEX_TOKEN_ENV], shellType);
       this.launchInputs.set(panel.id, `${input}\r`);
       const pid = this.native?.pid(panel.id);
       if (!pid) throw new PaneError('CHAT_NATIVE_OWNER_MISSING', 'The native terminal disappeared before Codex attached.', 'Retry the interface switch.');
@@ -351,7 +385,7 @@ export class AgentChatManager {
     if (!saved) return;
     this.known.add(panelId);
     if (saved.conversation.active !== 'stopped' || saved.conversation.transition) {
-      panelManager.commitAgentChat(panelId, { ...saved, conversation: { ...saved.conversation, active: 'stopped', recovery: 'Pane restarted without a live runtime handle. Verify release before recovering this exact conversation.' } });
+      panelManager.commitAgentChat(panelId, { ...saved, conversation: { ...saved.conversation, active: 'stopped', nativeStartup: undefined, recovery: 'Pane restarted without a live runtime handle. Verify release before recovering this exact conversation.' } });
     }
   }
 
@@ -412,6 +446,7 @@ export class AgentChatManager {
     const record = this.record(panelId)?.conversation;
     if (!record) return;
     if (this.acquiring.has(panelId) && this.launchInputs.get(panelId) === data) { this.launchInputs.delete(panelId); return; }
+    if (record.nativeStartup && (record.active === 'terminal' || record.transition?.target === 'terminal') && this.native?.pid(panelId)) return;
     if (record.transition || record.active === 'stopped') throw new PaneError('CHAT_STOPPED', 'The conversation is switching or stopped. No terminal input was sent.', 'Wait for the transition or recover the exact conversation.');
     if (record.active === 'chat') throw new PaneError('CHAT_RAW_TERMINAL_UNSUPPORTED', 'Raw terminal input is unavailable while Chat owns this conversation. No input was sent.', 'Send a semantic prompt or switch to Terminal.');
     if (this.launchInputs.get(panelId) === data) { this.launchInputs.delete(panelId); return; }
@@ -591,7 +626,11 @@ export class AgentChatManager {
     if (record.provider === 'codex') {
       if (mode === 'terminal') {
         this.acquiring.add(record.panelId);
-        try { await this.native!.initialize(record.panelId, saved.launch.cwd, this.updateOperations.get(record.panelId)); }
+        try {
+          panelManager.commitAgentChat(record.panelId, { ...saved, conversation: { ...saved.conversation, nativeStartup: true } });
+          await this.native!.initialize(record.panelId, saved.launch.cwd, this.updateOperations.get(record.panelId));
+          await this.waitForNativeCodex(record.panelId, record.nativeSessionId);
+        }
         finally { this.acquiring.delete(record.panelId); }
       } else {
         const runtime = this.codex.get(record.panelId) ?? await this.startCodex(record);
@@ -691,6 +730,7 @@ export class AgentChatManager {
       await runtime.session.load({ sessionId: nativeId, cwd: launch.cwd, mcpServers: [] });
       if (this.native?.pid(panelId) !== pid) throw new PaneError('CHAT_NATIVE_OWNER_MISSING', 'The original native terminal exited during identification.', 'Refresh before identifying its replacement.');
       runtime.session.setGeneration(1); this.transcripts.get(panelId)?.setGeneration(1);
+      this.identifiedNative.set(panelId, { pid, id: nativeId });
       this.known.add(panelId);
       this.publish(panelId);
     } catch (error) {
@@ -868,7 +908,8 @@ export class AgentChatManager {
   verifyNativeResume(panelId: string, nativeId: string) {
     const record = this.required(panelId).conversation;
     const pid = this.native?.pid(panelId);
-    if (!pid || record.active !== 'terminal' || record.nativeSessionId !== nativeId || !this.journals.get(panelId)?.resumed()) throw new PaneError('CHAT_NATIVE_RESUME_UNCONFIRMED', 'The native runtime did not confirm the exact saved conversation.', 'Inspect this tab before resuming it again.');
+    const confirmed = record.provider === 'codex' ? this.nativeCodexConfirmed(panelId, nativeId) : this.journals.get(panelId)?.resumed();
+    if (!pid || record.active !== 'terminal' || record.nativeSessionId !== nativeId || !confirmed) throw new PaneError('CHAT_NATIVE_RESUME_UNCONFIRMED', 'The native runtime did not confirm the exact saved conversation.', 'Inspect this tab before resuming it again.');
     return { pid };
   }
 

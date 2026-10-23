@@ -4,6 +4,7 @@ import { PanelTabStrip } from '../../frontend/src/components/panels/PanelTabStri
 import { AgentChatHeader } from '../../frontend/src/components/agentChat/AgentChatHeader';
 import { Dropdown } from '../../frontend/src/components/ui/Dropdown';
 import type { AgentChatClient, AgentChatView } from '../../shared/types/agentChat';
+import { decodeAgentChatView } from '../../shared/types/agentChatDecoders';
 import type { ToolPanel } from '../../shared/types/panels';
 import '../../frontend/src/index.css';
 
@@ -17,7 +18,7 @@ const client: AgentChatClient = {
     view.conversation = { panelId: panel.id, workspaceId: panel.sessionId, provider: 'codex', nativeSessionId: nativeId, generation: 1, active: 'terminal', preferred: 'terminal' };
     return structuredClone(view);
   },
-  get: async () => structuredClone(view), onState: () => () => {}, onEvent: () => () => {},
+  get: async () => decodeAgentChatView(structuredClone(view)), onState: () => () => {}, onEvent: () => () => {},
   setup: async () => ({ installed: true }), send: async () => { throw new Error('No inference in this UI fixture'); }, receipt: async () => undefined,
   permission: async () => {}, cancel: async () => {}, stop: async () => {},
   switch: async (_panel, mode, generation) => {

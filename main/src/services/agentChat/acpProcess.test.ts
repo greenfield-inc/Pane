@@ -1,6 +1,6 @@
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { AcpProcess } from './acpProcess';
-import type { ArchiveProcessIdentity } from '../archiveProcessTracker';
+import { ArchiveProcessTracker, type ArchiveProcessIdentity } from '../archiveProcessTracker';
 
 it('owns a real adapter process until its protocol and OS lifetime have both ended', async () => {
   let identities: ArchiveProcessIdentity[] = [];
@@ -10,11 +10,20 @@ it('owns a real adapter process until its protocol and OS lifetime have both end
     cwd: process.cwd(), env: process.env, generation: 1,
     save: entries => { identities = structuredClone(entries); },
   });
+  const refresh = ArchiveProcessTracker.prototype.refresh;
+  let observations = 0;
+  const slowObservation = vi.spyOn(ArchiveProcessTracker.prototype, 'refresh').mockImplementation(async function (this: ArchiveProcessTracker) {
+    observations++;
+    await new Promise(resolve => setTimeout(resolve, 600));
+    await refresh.call(this);
+  });
   try {
     await runtime.start();
     expect(identities.length).toBeGreaterThan(0);
     await runtime.session.initialize();
+    await new Promise(resolve => setTimeout(resolve, 1100));
     await runtime.release();
     expect(identities).toEqual([]);
-  } finally { await runtime.release(); }
+    expect(observations).toBeLessThanOrEqual(4);
+  } finally { slowObservation.mockRestore(); await runtime.release(); }
 });

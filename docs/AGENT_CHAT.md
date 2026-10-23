@@ -36,6 +36,11 @@ interface switches during a response without restarting the turn. Native policy,
 reviewer, sandbox roots and configuration stay in Codex; Pane does not reduce
 them to adapter permission presets. The raw connection credential stays on the
 host and is passed only to the native TUI, not browser viewers or provider tools.
+Terminal handoff waits for the native client's own successful resume response
+for the saved conversation. Its startup remains visible and interactive while
+that acknowledgement is pending; a server-side history read alone does not
+complete the switch. An unacknowledged turn start fences further sends until
+explicit recovery, so a timeout cannot silently submit the request twice.
 
 For older Codex tabs without a verified binding, tab actions offer one-time
 identification. Run `/status` yourself when the native composer is ready and

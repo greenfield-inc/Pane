@@ -22,6 +22,7 @@ export class AcpProcess {
   private identities: ArchiveProcessIdentity[] = [];
   private timer?: ReturnType<typeof setInterval>;
   private observation: Promise<void> = Promise.resolve();
+  private observing = false;
   private observationError?: unknown;
   private releasePromise?: Promise<void>;
   private startupError?: Error;
@@ -48,7 +49,9 @@ export class AcpProcess {
     await this.tracker.capture([this.child.pid]);
     if (this.identities.length === 0) throw new PaneError('CHAT_PROCESS_IDENTITY_UNVERIFIED', 'The adapter exited before its process identity could be verified.', 'Inspect the stopped runtime before recovering the conversation.');
     this.timer = setInterval(() => {
-      this.observation = this.observation.then(() => this.tracker.refresh()).catch(error => { this.observationError = error; });
+      if (this.observing) return;
+      this.observing = true;
+      this.observation = this.tracker.refresh().catch(error => { this.observationError = error; }).finally(() => { this.observing = false; });
     }, 200);
     this.timer.unref();
   }

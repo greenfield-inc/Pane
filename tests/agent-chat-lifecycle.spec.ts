@@ -166,6 +166,7 @@ for (const embedded of [false, true]) test(`identifies a legacy conversation thr
   await expect(dialog).toBeVisible();
   const id = dialog.getByLabel('Codex Session ID');
   const socket = dialog.getByLabel('Codex server socket');
+  await expect(id).toBeFocused();
   await id.fill('01a169da-b81b-7552-bccf-e7c790a37ece');
   if (!embedded) {
     await page.keyboard.press('Tab'); await expect(socket).toBeFocused();

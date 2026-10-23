@@ -147,3 +147,32 @@ it('makes a newly created empty conversation resumable without sending a model t
     expect(calls).not.toContain('turn/start');
   } finally { await session.close(); for (const client of server.clients) client.terminate(); await new Promise<void>(resolve => server.close(() => resolve())); }
 });
+
+it('fences an unconfirmed turn start until explicit recovery, including after late provider events', async () => {
+  const server = new WebSocketServer({ port: 0, host: '127.0.0.1' });
+  await once(server, 'listening');
+  const address = decodeBoundary(server.address(), boundary.object({ port: boundary.number }));
+  let starts = 0, stopped = 0;
+  server.on('connection', socket => socket.on('message', data => {
+    const request = JSON.parse(data.toString());
+    if (request.id === undefined) return;
+    if (request.method === 'turn/start') { starts++; return; }
+    const result = request.method === 'model/list' ? { data: [] } : request.method === 'thread/resume' ? { thread: { id: 'thread', turns: [] } } : {};
+    socket.send(JSON.stringify({ id: request.id, result }));
+  }));
+  const socket = new WebSocket(`ws://127.0.0.1:${address.port}`);
+  await once(socket, 'open');
+  const session = new CodexSession(socket, 1, { requestTimeoutMs: 30, onDisconnect: () => stopped++ });
+  try {
+    await session.initialize(); await session.load({ sessionId: 'thread', cwd: '/fixture', mcpServers: [] });
+    await expect(session.prompt([{ type: 'text', text: 'Only once' }])).rejects.toMatchObject({ code: 'CHAT_CODEX_TIMEOUT' });
+    expect(stopped).toBe(1);
+    await expect(session.prompt([{ type: 'text', text: 'Do not duplicate' }])).rejects.toMatchObject({ code: 'CHAT_NOT_LOADED' });
+    expect(starts).toBe(1);
+    for (const client of server.clients) client.send(JSON.stringify({ method: 'turn/completed', params: { threadId: 'thread', turn: { id: 'late-turn', status: 'completed' } } }));
+    await expect.poll(() => session.isRunning()).toBe(false);
+    await expect(session.prompt([{ type: 'text', text: 'Still needs recovery' }])).rejects.toMatchObject({ code: 'CHAT_NOT_LOADED' });
+    await session.load({ sessionId: 'thread', cwd: '/fixture', mcpServers: [] });
+    expect(starts).toBe(1);
+  } finally { await session.close(); for (const client of server.clients) client.terminate(); await new Promise<void>(resolve => server.close(() => resolve())); }
+});

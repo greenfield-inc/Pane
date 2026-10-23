@@ -7,6 +7,7 @@ import { PaneError } from '../../../../shared/paneError';
 import { ArchiveProcessTracker, type ArchiveProcessIdentity } from '../archiveProcessTracker';
 import { providerCommand } from './hostCommand';
 import { CodexSession, type CodexSessionOptions } from './codexSession';
+import { CodexNativeConnection } from './codexNativeConnection';
 
 export const CODEX_TOKEN_ENV = 'PANE_CODEX_CHAT_TOKEN';
 export interface CodexProcessOptions extends CodexSessionOptions {
@@ -19,6 +20,7 @@ export interface CodexProcessOptions extends CodexSessionOptions {
   socketPath?: string;
   generation: number;
   save: (identities: ArchiveProcessIdentity[]) => void;
+  onNativeState?: (id?: string) => void;
 }
 
 /** A per-tab provider owner, shared by its Chat and native TUI clients. It never
@@ -35,6 +37,8 @@ export class CodexProcess {
   private observationError?: Error;
   private releasePromise?: Promise<void>;
   private spawnError?: Error;
+  private nativeConnection?: CodexNativeConnection;
+  private nativeEndpoint?: string;
 
   constructor(private readonly options: CodexProcessOptions) {
     this.tracker = new ArchiveProcessTracker([], options.save);
@@ -46,7 +50,12 @@ export class CodexProcess {
   }
 
   async start(): Promise<void> {
-    if (this.options.socketPath) return this.attachProxy(this.options.socketPath);
+    if (this.options.socketPath) {
+      const socket = await this.proxySocket(this.options.socketPath);
+      this.endpoint = `unix://${this.options.socketPath}`;
+      this.connection = new CodexSession(socket, this.options.generation, this.options);
+      return;
+    }
     const digest = createHash('sha256').update(this.token).digest('hex');
     const command = providerCommand(this.options.executable, [...this.options.configArgs, 'app-server', '--listen', 'ws://127.0.0.1:0', '--ws-auth', 'capability-token', '--ws-token-sha256', digest], 'codex');
     const env = { ...this.options.env };
@@ -81,7 +90,7 @@ export class CodexProcess {
     throw new PaneError('CHAT_CODEX_CONNECT_FAILED', 'Codex did not open its authenticated conversation server.', 'Check the CLI installation and local network policy, then retry.');
   }
 
-  private async attachProxy(socketPath: string): Promise<void> {
+  private async proxySocket(socketPath: string): Promise<WebSocket> {
     const command = providerCommand(this.options.executable, ['app-server', 'proxy', '--socket', socketPath], 'codex');
     const env = { ...this.options.env };
     if (command.executable === process.execPath) env.ELECTRON_RUN_AS_NODE = '1';
@@ -114,9 +123,21 @@ export class CodexProcess {
     child.stdin.on('error', error => connection.destroy(error));
     const socket = new WebSocket('ws://localhost/', { createConnection: () => connection, handshakeTimeout: 5000 });
     await new Promise<void>((resolve, reject) => { socket.once('open', resolve); socket.once('error', reject); });
-    this.endpoint = `unix://${socketPath}`;
-    this.connection = new CodexSession(socket, this.options.generation, this.options);
+    return socket;
   }
+
+  async prepareNative(): Promise<string> {
+    if (this.nativeEndpoint) return this.nativeEndpoint;
+    this.nativeConnection = new CodexNativeConnection(this.token, async () => {
+      const socket = this.options.socketPath ? await this.proxySocket(this.options.socketPath) : await this.connect();
+      if (!socket) throw new PaneError('CHAT_NATIVE_CONNECT_FAILED', 'The native client could not connect to the recorded Codex server.', 'Retry the Terminal switch.');
+      return socket;
+    }, this.options.onNativeState);
+    this.nativeEndpoint = await this.nativeConnection.start();
+    return this.nativeEndpoint;
+  }
+
+  nativeConfirms(id: string): boolean { return this.nativeConnection?.confirms(id) ?? false; }
 
   private connect(): Promise<WebSocket | undefined> {
     return new Promise(resolve => {
@@ -132,15 +153,23 @@ export class CodexProcess {
   }
 
   private async releaseOnce(cancel: boolean): Promise<void> {
+    let cancelError: unknown;
     if (this.connection) {
-      if (cancel && this.connection.isConnected()) await this.connection.cancel();
-      await this.connection.close();
+      try { if (cancel && this.connection.isConnected()) await this.connection.cancel(); }
+      catch (error) { cancelError = error; }
+      finally { await this.connection.close(); }
     }
+    await this.nativeConnection?.close();
     if (this.timer) clearInterval(this.timer);
     await this.observation;
     await this.tracker.refresh();
     await this.tracker.terminateSurvivors();
     await this.tracker.verifyExited(5000);
     if (this.observationError) throw this.observationError;
+    // Killing the owned server confirms its work stopped. Closing a borrowed
+    // proxy cannot establish that for the externally owned daemon.
+    if (this.options.socketPath && (cancelError || (cancel && this.connection?.hasUnconfirmedStart()))) {
+      throw cancelError ?? new PaneError('CHAT_START_UNCONFIRMED', 'The borrowed provider still has an unconfirmed turn start.', 'Inspect or stop that conversation in its original native terminal before recovery.');
+    }
   }
 }

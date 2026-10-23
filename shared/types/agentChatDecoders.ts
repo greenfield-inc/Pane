@@ -11,6 +11,7 @@ const conversation: BoundarySchema<AgentConversationRecord> = boundary.object({
   panelId: boundary.string, workspaceId: boundary.string, provider: boundary.enumeration('claude', 'codex'), nativeSessionId: boundary.string,
   generation: boundary.number, active: boundary.enumeration('terminal', 'chat', 'stopped'), preferred: boundary.enumeration('terminal', 'chat'), recovery: boundary.optional(boundary.string),
   transferNotice: boundary.optional(boundary.string), forkUnconfirmed: boundary.optional(boundary.boolean),
+  nativeStartup: boundary.optional(boundary.boolean),
   pendingSwitch: boundary.optional(boundary.object({ target: boundary.enumeration('terminal', 'chat'), reason: boundary.string })),
   transition: boundary.optional(boundary.object({ source: boundary.enumeration('terminal', 'chat'), target: boundary.enumeration('terminal', 'chat'), phase: boundary.enumeration('releasing', 'loading') })),
 });
@@ -25,6 +26,7 @@ const view: BoundarySchema<AgentChatView> = boundary.object({
   panelId: boundary.string, conversation: boundary.optional(conversation), available: boundary.boolean, unavailableReason: boundary.optional(boundary.string), setupRequired: boundary.boolean, running: boundary.boolean,
   controls: boundary.optional(boundary.array(boundary.object({ id: boundary.string, name: boundary.string, currentValue: boundary.string, options: boundary.array(boundary.object({ value: boundary.string, name: boundary.string })) }))),
   identificationRequired: boundary.optional(boundary.boolean),
+  identificationSocketRequired: boundary.optional(boundary.boolean),
   canAttachImages: boundary.optional(boundary.boolean), error: boundary.optional(boundary.string), configuration: boundary.optional(boundary.json),
   permissions: boundary.array(boundary.object({ id: boundary.string, generation: boundary.number, title: boundary.string, toolCall: boundary.json, options: boundary.array(boundary.object({ optionId: boundary.string, name: boundary.string, kind: boundary.string })) })),
   transcript: boundary.optional(boundary.object({ panelId: boundary.string, generation: boundary.number, revision: boundary.number, messages: boundary.array(message) })),

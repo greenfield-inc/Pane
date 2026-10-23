@@ -66,6 +66,8 @@ export interface AgentConversationRecord {
   transferNotice?: string;
   /** Provider may have copied history before its fork response was lost. */
   forkUnconfirmed?: boolean;
+  /** Show the native startup surface while its own attachment is unconfirmed. */
+  nativeStartup?: boolean;
   pendingSwitch?: { target: AgentInterface; reason: string };
   transition?: { source: AgentInterface; target: AgentInterface; phase: 'releasing' | 'loading' };
 }
