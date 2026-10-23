@@ -455,13 +455,18 @@ export class AgentChatManager {
     };
   }
 
+  isNativeStarting(panelId: string): boolean {
+    const record = this.record(panelId)?.conversation;
+    return !!(record?.nativeStartup && (record.active === 'terminal' || record.transition?.target === 'terminal') && this.native?.pid(panelId));
+  }
+
   guardNativeInput(panelId: string, data: string): void {
     this.reconcile(panelId);
     if (this.adopting.has(panelId)) throw new PaneError('CHAT_TRANSITION_IN_PROGRESS', 'Pane is identifying this conversation. No terminal input was sent.', 'Wait for identification to finish.');
     const record = this.record(panelId)?.conversation;
     if (!record) return;
     if (this.acquiring.has(panelId) && this.launchInputs.get(panelId) === data) { this.launchInputs.delete(panelId); return; }
-    if (record.nativeStartup && (record.active === 'terminal' || record.transition?.target === 'terminal') && this.native?.pid(panelId)) return;
+    if (this.isNativeStarting(panelId)) return;
     if (record.transition || record.active === 'stopped') throw new PaneError('CHAT_STOPPED', 'The conversation is switching or stopped. No terminal input was sent.', 'Wait for the transition or recover the exact conversation.');
     if (record.active === 'chat') throw new PaneError('CHAT_RAW_TERMINAL_UNSUPPORTED', 'Raw terminal input is unavailable while Chat owns this conversation. No input was sent.', 'Send a semantic prompt or switch to Terminal.');
     if (this.launchInputs.get(panelId) === data) { this.launchInputs.delete(panelId); return; }

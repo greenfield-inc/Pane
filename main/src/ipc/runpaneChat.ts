@@ -7,7 +7,7 @@ import type { AgentChatView } from '../../../shared/types/agentChat';
 
 export function assertRawTerminal(panelId: string): void {
   const mode = agentChatManager.mode(panelId);
-  if (mode && mode !== 'terminal') throw new PaneError('CHAT_RAW_TERMINAL_UNSUPPORTED', `This conversation is ${mode === 'chat' ? 'in Chat' : 'stopped'}. No live native terminal screen or composer is available.`, 'Use panels submit, wait or last-message, or switch to Terminal.');
+  if (mode && mode !== 'terminal' && !agentChatManager.isNativeStarting(panelId)) throw new PaneError('CHAT_RAW_TERMINAL_UNSUPPORTED', `This conversation is ${mode === 'chat' ? 'in Chat' : 'stopped'}. No live native terminal screen or composer is available.`, 'Use panels submit, wait or last-message, or switch to Terminal.');
 }
 
 function chatState(view: AgentChatView): RunpanePanelStateSummary {

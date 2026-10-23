@@ -268,6 +268,7 @@ server.on('connection',socket=>socket.on('message',data=>{const m=JSON.parse(dat
     const returning = manager.switchTo(panel.id, 'terminal', 2);
     await expect.poll(() => manager.view(panel.id).conversation?.nativeStartup).toBe(true);
     expect(manager.view(panel.id).conversation?.active).toBe('chat');
+    expect(manager.isNativeStarting(panel.id)).toBe(true);
     expect(() => manager.guardNativeInput(panel.id, 'native startup input')).not.toThrow();
     const { WebSocket } = await import('ws');
     const endpoint = command.match(/ws:\/\/127\.0\.0\.1:\d+/)?.[0];
@@ -278,6 +279,7 @@ server.on('connection',socket=>socket.on('message',data=>{const m=JSON.parse(dat
     native.send(JSON.stringify({ id: 1, method: 'thread/resume', params: { threadId: 'native-codex-thread' } }));
     await attached;
     await returning;
+    expect(manager.isNativeStarting(panel.id)).toBe(false);
     expect(manager.verifyNativeResume(panel.id, 'native-codex-thread')).toEqual({ pid: child.pid });
     expect(manager.view(panel.id).conversation).toMatchObject({ active: 'terminal', generation: 3, nativeSessionId: 'native-codex-thread' });
     expect(getRuntimeConfigManager().getConfig().defaultAgentInterface).toBe('terminal');

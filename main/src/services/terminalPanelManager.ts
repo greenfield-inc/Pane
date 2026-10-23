@@ -2591,7 +2591,7 @@ export class TerminalPanelManager extends EventEmitter {
 
   isAgentRuntimeInitialized(panelId: string): boolean {
     const mode = this.agentChat?.mode(panelId);
-    return mode === 'chat' || (mode !== 'stopped' && this.isTerminalInitialized(panelId));
+    return mode === 'chat' || ((mode !== 'stopped' || !!this.agentChat?.isNativeStarting(panelId)) && this.isTerminalInitialized(panelId));
   }
 
   getAgentStatus(panelId: string): AgentState | undefined {
