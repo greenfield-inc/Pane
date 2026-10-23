@@ -116,6 +116,10 @@ The desktop/web viewer renders pages of 200 messages; the React Native viewer
 uses Legend List virtualization. Both open heavy tool details on demand.
 Draft text, pending delivery reconciliation and scroll position survive viewer
 remounts during the same application/browser session. The native app also saves
+the visible message identity and position within that message, so changing
+virtualized height estimates do not redefine its reading bookmark. If that
+message was removed, restoration uses the nearest surviving row at its old index.
+The native app saves
 draft text per host, pane and panel on the device. Native image attachments use
 ACP image content, with a 5 MiB limit; they do not paste a host filesystem path.
 The native app keeps uncertain operations and attachments by saved host profile

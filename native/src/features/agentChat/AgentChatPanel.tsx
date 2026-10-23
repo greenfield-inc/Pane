@@ -1,4 +1,4 @@
-import { AssistantRuntimeProvider, ThreadPrimitive, generateId, useAuiState, useExternalStoreRuntime } from '@assistant-ui/react-native';
+import { AssistantRuntimeProvider, ThreadPrimitive, generateId, useAuiState, useExternalStoreRuntime, type ThreadState } from '@assistant-ui/react-native';
 import { LegendList, type LegendListRef } from '@legendapp/list/react-native';
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import { ActivityIndicator, Image, Pressable, StyleSheet, TextInput, View } from 'react-native';
@@ -13,6 +13,7 @@ import { ComposerSheet } from '../composer/ComposerSheet';
 import { ChatButton } from './ChatButton';
 import { ChatMessage, NativePermissionContext, PermissionChoices } from './ChatMessage';
 import { pickChatImage } from './pickChatImage';
+import { captureReadingPosition, resolveReadingPosition, MESSAGE_TOP_PADDING } from './readingPosition';
 import type { useAgentChat } from './useAgentChat';
 
 type Chat = ReturnType<typeof useAgentChat>;
@@ -20,13 +21,24 @@ type Chat = ReturnType<typeof useAgentChat>;
 const MESSAGE_COMPONENTS = { Message: ChatMessage };
 
 function ConversationList({ chat, approvalScroll }: { chat: Chat; approvalScroll: RefObject<(() => void) | null> }) {
-  // Capture restoration once; changing native contentOffset later can reset Android to zero.
-  const [initialPosition] = useState(() => ({ ...chat.readingPosition }));
   const messages = useAuiState(state => state.thread.messages);
+  // Wait for assistant-ui's actual message data before freezing restoration.
+  return messages.length ? <MessageList chat={chat} approvalScroll={approvalScroll} messages={messages} /> : <View style={styles.fill} />;
+}
+
+function MessageList({ chat, approvalScroll, messages }: { chat: Chat; approvalScroll: RefObject<(() => void) | null>; messages: ThreadState['messages'] }) {
+  const conversationId = chat.view?.conversation?.nativeSessionId ?? '';
+  const [initialPosition] = useState(() => resolveReadingPosition(chat.readingPosition, conversationId, messages));
   const list = useRef<LegendListRef>(null);
+  const ready = useRef(false);
   const { chat: colors } = useTheme();
   const reducedMotion = useReducedMotion();
-  const [atBottom, setAtBottom] = useState(chat.readingPosition.atBottom);
+  const [atBottom, setAtBottom] = useState(initialPosition.atBottom);
+  const savePosition = () => {
+    const state = list.current?.getState();
+    const position = state && captureReadingPosition(conversationId, state, ready.current);
+    if (position) { chat.saveReadingPosition(position); setAtBottom(position.atBottom); }
+  };
   useEffect(() => {
     approvalScroll.current = () => {
       const ids = new Set(chat.view?.permissions.map(permissionToolId));
@@ -37,12 +49,14 @@ function ConversationList({ chat, approvalScroll }: { chat: Chat; approvalScroll
     return () => { approvalScroll.current = null; };
   }, [approvalScroll, chat.view?.permissions, messages, reducedMotion]);
   return <View style={styles.fill}>
-    <LegendList ref={list} testID="chat-messages" data={messages} keyExtractor={message => message.id} recycleItems={false} estimatedItemSize={120} contentContainerStyle={styles.messages} keyboardShouldPersistTaps="handled" maintainVisibleContentPosition maintainScrollAtEnd={{ animated: false }} maintainScrollAtEndThreshold={0.04} initialScrollAtEnd={initialPosition.atBottom} initialScrollOffset={initialPosition.atBottom ? undefined : initialPosition.offset} onScroll={event => {
-      const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
-      const bottom = contentSize.height - contentOffset.y - layoutMeasurement.height < 32;
-      chat.saveReadingPosition(contentOffset.y, bottom);
-      setAtBottom(bottom);
-    }} renderItem={({ item }) => <ThreadPrimitive.Unstable_MessageById messageId={item.id} components={MESSAGE_COMPONENTS} />} />
+    <LegendList ref={list} testID="chat-messages" data={messages} keyExtractor={message => message.id} recycleItems={false} estimatedItemSize={120} contentContainerStyle={styles.messages} keyboardShouldPersistTaps="handled" maintainVisibleContentPosition maintainScrollAtEnd={{ animated: false }} maintainScrollAtEndThreshold={0.04} initialScrollAtEnd={initialPosition.atBottom} initialScrollIndex={initialPosition.index} onLoad={() => {
+      ready.current = true;
+      const target = initialPosition.index;
+      const size = target && list.current?.getState().sizeAtIndex(target.index);
+      // A row may shrink while this surface is detached. Keep its bookmark
+      // inside the now-measured row rather than scrolling beyond its content.
+      if (target && size && -target.viewOffset >= size) void list.current?.scrollToIndex({ ...target, viewOffset: 1 - size, animated: false });
+    }} onScroll={savePosition} onMomentumScrollEnd={savePosition} onScrollEndDrag={savePosition} renderItem={({ item }) => <ThreadPrimitive.Unstable_MessageById messageId={item.id} components={MESSAGE_COMPONENTS} />} />
     {!atBottom && <Pressable testID="chat-latest" accessibilityRole="button" accessibilityLabel="Scroll to latest message" onPress={() => void list.current?.scrollToEnd({ animated: !reducedMotion })} style={[styles.latest, { backgroundColor: colors.background, borderColor: colors.border }]}><Icon ios="arrow.down" android="arrow_downward" size={18} color={colors.foreground} /></Pressable>}
   </View>;
 }
@@ -121,7 +135,7 @@ export function AgentChatPanel({ chat, draft, onChangeDraft, confirmDraft }: { c
   </AssistantRuntimeProvider>;
 }
 const styles = StyleSheet.create({
-  fill: { flex: 1, minHeight: 0 }, loading: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 }, messages: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 32 },
+  fill: { flex: 1, minHeight: 0 }, loading: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 }, messages: { paddingHorizontal: 16, paddingTop: MESSAGE_TOP_PADDING, paddingBottom: 32 },
   latest: { position: 'absolute', bottom: 12, alignSelf: 'center', width: 44, height: 44, borderRadius: 22, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   composerArea: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 4, gap: 8 }, composer: { borderWidth: 1, borderRadius: 24, padding: 8, gap: 8 }, input: { minHeight: 40, maxHeight: 192, paddingHorizontal: 10, paddingVertical: 4, fontSize: 16, lineHeight: 24, textAlignVertical: 'top' },
   composerActions: { flexDirection: 'row', alignItems: 'center' }, target: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }, send: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' }, config: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 6, minHeight: 44, paddingHorizontal: 6 },

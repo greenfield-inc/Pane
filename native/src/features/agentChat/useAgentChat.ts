@@ -7,6 +7,7 @@ import { decodeAgentChatEvent, decodeAgentChatView } from '@shared/types/agentCh
 import { invokeChannel, useDaemon, useDaemonEvent } from '@/daemon';
 
 import { ChatSessionRegistry } from './chatSessionRegistry';
+import type { ChatReadingPosition } from './readingPosition';
 
 const sessions = new ChatSessionRegistry<RemoteDaemonClient>(client => ({
   get: async id => decodeAgentChatView(await invokeChannel(client, 'agent-chat:get', [id])),
@@ -49,7 +50,7 @@ export function useAgentChat(panelId: string) {
   return {
     ...snapshot, connected,
     readingPosition: session.readingPosition,
-    saveReadingPosition: (offset: number, atBottom: boolean) => { session.readingPosition = { offset, atBottom }; },
+    saveReadingPosition: (position: ChatReadingPosition) => { session.readingPosition = position; },
     refresh: () => session.refresh(),
     send: (request: AgentChatSend, confirmed?: () => void) => {
       if (!connected) { session.setError('The host is disconnected. Reconnect before sending.'); return Promise.resolve(undefined); }

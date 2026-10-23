@@ -23,7 +23,7 @@ it('retains an uncertain image operation through host switching and credential r
   await session.refresh();
   const image = { mimeType: 'image/png', data: 'image' };
   session.setAttachment(image);
-  session.readingPosition = { offset: 321, atBottom: false };
+  session.readingPosition = { conversationId: 'native', atBottom: false, anchor: { messageId: 'reading', withinItemOffset: 21, fallbackIndex: 3 } };
   const request = { operationId: 'op', generation: 2, text: 'Exactly once', images: [image] };
   await session.send(request);
   detach();
@@ -37,7 +37,7 @@ it('retains an uncertain image operation through host switching and credential r
   await returned.refresh();
   expect(returned.snapshot().pendingDelivery).toEqual(request);
   expect(returned.snapshot().attachment).toEqual(image);
-  expect(returned.readingPosition.offset).toBe(321);
+  expect(returned.readingPosition.anchor).toEqual({ messageId: 'reading', withinItemOffset: 21, fallbackIndex: 3 });
   await returned.send({ ...request, operationId: 'duplicate' });
   expect(returnedClient.send).not.toHaveBeenCalled();
   const renewedCredentialClient = client();

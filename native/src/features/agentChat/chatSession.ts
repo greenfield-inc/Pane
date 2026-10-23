@@ -6,6 +6,7 @@ import {
   type AgentChatSend,
   type AgentChatView,
 } from '@shared/types/agentChat';
+import type { ChatReadingPosition } from './readingPosition';
 
 interface ChatSnapshot {
   view?: AgentChatView;
@@ -29,7 +30,7 @@ export class ChatSession {
   private loadedTransportRevision = -1;
   private confirmation?: () => void;
   private deliveryConversation?: string;
-  readingPosition = { offset: 0, atBottom: true };
+  readingPosition: ChatReadingPosition = { atBottom: true };
 
   constructor(readonly panelId: string, private transport: ChatTransport) {}
 
