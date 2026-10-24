@@ -203,11 +203,12 @@ Every terminal operation (`complete`, `failed` or `needs-attention`) releases it
 locks, and the next `runpane update` reclaims a lock whose owner's journal is
 terminal. Rerunning `runpane update` installs the same or newer release in a new
 operation directory, so the old journal, checkpoint and snapshot stay in place.
-A lock whose owner is still running is never reclaimed. Incomplete or ambiguous
-locks require manual inspection: lock directories are listed in `preflight.json`
-as `lockDirectory` and `additionalLockDirectories`; move aside only locks whose
-`owner.json` contains the exact operation ID, and do not infer ownership from a
-reused PID. If recovery of a crashed lock cleanup is itself interrupted,
-its persistent cleanup claim also requires manual inspection; another caller
-will not steal it or report a new update as completed. Logout/reboot continuation
-is not guaranteed.
+A lock whose owner journal is not terminal is not reclaimed. Incomplete,
+ambiguous or non-terminal stale locks require manual inspection: lock
+directories are listed in `preflight.json` as `lockDirectory` and
+`additionalLockDirectories`; move aside only locks whose `owner.json` contains
+the exact operation ID, and do not infer ownership from a reused PID. If
+recovery of a crashed lock cleanup is itself interrupted, its persistent
+cleanup claim also requires manual inspection; another caller will not steal
+it or report a new update as completed. Logout/reboot continuation is not
+guaranteed.
