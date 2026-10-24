@@ -51,7 +51,7 @@ test.describe('motion', () => {
     await openDesktop(page);
 
     await page.keyboard.press('ControlOrMeta+Shift+P');
-    const input = page.getByPlaceholder('Search commands...');
+    const input = page.getByPlaceholder('Search commands…');
     await expect(input).toBeVisible();
 
     // A hundred-times-a-day keyboard surface: any entrance reads as lag, so the
