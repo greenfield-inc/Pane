@@ -67,6 +67,13 @@ describe('durable update operation', () => {
     releaseUpdateLock(lock, 'first');
     expect(claimUpdateLock(lock, 'third', file)).toMatchObject({ acquired: false, id: 'second' });
   });
+  it('lets a new update claim the host after a needs-attention operation', () => {
+    const { file, directory } = fixture();
+    writeUpdateJson(file, { ...readUpdateJournal(file), id: 'first', phase: 'needs-attention' });
+    const lock = path.join(directory, 'lock');
+    claimUpdateLock(lock, 'first', file);
+    expect(claimUpdateLock(lock, 'next', 'next-status')).toEqual({ id: 'next', statusFile: 'next-status', acquired: true });
+  });
   it('repairs cleanup after the terminal journal committed and its releaser died', () => {
     const { file, directory } = fixture();
     writeUpdateJson(file, { ...readUpdateJournal(file), id: 'first', phase: 'complete' });

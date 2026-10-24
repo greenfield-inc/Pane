@@ -96,8 +96,9 @@ can still be in progress. `failed` and `needs-attention` return exit 1. Command 
 preflight errors also return nonzero. `--wait` has no overall timeout. Ctrl+C stops
 the waiting caller, not the independent operation; inspect status before retrying.
 There is no supported operation cancellation command. A fresh update runs
-preflight before checking locks. If preflight succeeds and an existing lock is
-found, it returns that operation's status instead of starting another install.
+preflight before checking locks. If preflight succeeds and a running operation
+holds the lock, it returns that operation's status instead of starting another
+install.
 During downtime, preflight may fail before reaching the lock. Use `--status`
 (which bypasses preflight), or read the journal directly, to inspect recovery.
 
@@ -198,15 +199,15 @@ leave locks and snapshots intact and ask a maintainer to inspect them.
    updater does not automate or validate such a rollback. Get maintainer help
    when compatibility or installer state is uncertain.
 
-A post-shutdown `needs-attention` operation deliberately keeps its locks. There
-is no automated recovery/lock-clear command. After recovery is verified and all
-operation-owned helpers/installers have exited, the installation owner or a
-maintainer can archive the operation and move aside only locks whose `owner.json`
-contains this exact operation ID. Lock directories are listed in
-`preflight.json` as `lockDirectory` and `additionalLockDirectories`. Preserve the
-journal/checkpoint/snapshot; do not delete another operation's locks or infer
-ownership from a reused PID. Incomplete or ambiguous locks require the same
-manual inspection. If recovery of a crashed lock cleanup is itself interrupted,
+Every terminal operation (`complete`, `failed` or `needs-attention`) releases its
+locks, and the next `runpane update` reclaims a lock whose owner's journal is
+terminal. Rerunning `runpane update` installs the same or newer release in a new
+operation directory, so the old journal, checkpoint and snapshot stay in place.
+A lock whose owner is still running is never reclaimed. Incomplete or ambiguous
+locks require manual inspection: lock directories are listed in `preflight.json`
+as `lockDirectory` and `additionalLockDirectories`; move aside only locks whose
+`owner.json` contains the exact operation ID, and do not infer ownership from a
+reused PID. If recovery of a crashed lock cleanup is itself interrupted,
 its persistent cleanup claim also requires manual inspection; another caller
 will not steal it or report a new update as completed. Logout/reboot continuation
 is not guaranteed.

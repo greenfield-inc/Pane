@@ -245,9 +245,8 @@ export async function runUpdateHelper(directory: string, artifacts: UpdateArtifa
     return {};
   } });
   if (terminal(result)) {
-    // Keep failed-after-shutdown ownership for inspection; a new operation must
-    // not overwrite the recovery evidence or start a second installer.
-    if (result.phase === 'complete' || result.phase === 'failed') for (const lock of [preflight.lockDirectory, ...preflight.additionalLockDirectories]) releaseUpdateLock(lock, id);
+    // A new operation gets its own directory, so this journal and snapshot stay.
+    for (const lock of [preflight.lockDirectory, ...preflight.additionalLockDirectories]) releaseUpdateLock(lock, id);
     try { removeUpdateSupervisor(id); } catch { /* terminal journal prevents another execution */ }
   }
   return result.phase === 'complete' ? 0 : 1;
