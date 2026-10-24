@@ -63,7 +63,7 @@ const TERMINAL_LOADING_TIMEOUT_MS = 30_000;
 const TERMINAL_TOOLBAR_BUTTON = 'group/toolbar-button flex h-6 w-6 items-center justify-center rounded text-text-tertiary hover:text-text-secondary transition-colors';
 const TERMINAL_TOOLBAR_CHIP = 'rounded bg-surface-secondary/60 p-0.5 group-hover/toolbar-button:bg-surface-tertiary/80 transition-colors';
 
-const SKELETON_TRANSCRIPT_WIDTHS =['w-2/3', 'w-1/2', 'w-5/6', 'w-1/3', 'w-3/4', 'w-2/5'];
+const SKELETON_TRANSCRIPT_WIDTHS = ['w-2/3', 'w-1/2', 'w-5/6', 'w-1/3', 'w-3/4', 'w-2/5'];
 
 // Opaque stand-in shaped like a CLI agent session: greeting banner, transcript
 // lines, and a prompt box, swept by a single shimmer so it reads as one
