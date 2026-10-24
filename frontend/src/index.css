@@ -1237,7 +1237,8 @@ body.understory {
 .pane-changes-list-row.is-active { background: var(--color-surface-hover); }
 .pane-changes-list-row.is-selected { background: var(--color-surface-selected); }
 
-/* The dir prefix absorbs all truncation; the basename always renders in full. */
+/* The dir prefix absorbs truncation first (its shrink factor dwarfs the
+   basename's); the basename truncates only when it alone overflows the row. */
 .pane-changes-list-path {
   display: flex;
   align-items: baseline;
@@ -1246,14 +1247,14 @@ body.understory {
   font-family: theme('fontFamily.mono');
 }
 .pane-changes-list-dir {
-  flex: 0 1 auto;
+  flex: 0 1000 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--color-text-secondary);
 }
-.pane-changes-list-name { flex: 0 0 auto; white-space: nowrap; color: var(--color-text-primary); }
+.pane-changes-list-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-text-primary); }
 
 .pane-changes-list-stats { color: var(--color-text-secondary); font-size: 10px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .pane-changes-list-status { color: var(--color-text-secondary); font-size: 10px; font-weight: 600; }
