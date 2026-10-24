@@ -451,8 +451,9 @@ export function SessionWorkspacePanels({
             <button type="button" disabled={!loaded} aria-label={showTerminal ? 'Collapse terminal' : 'Expand terminal'}
               aria-expanded={showTerminal} onClick={() => { void toggleTool('terminal'); }}
               className="flex h-8 flex-shrink-0 items-center gap-2 px-3 text-xs text-text-secondary hover:bg-surface-hover">
-              {showTerminal ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronUp className="h-3.5 w-3.5" />}
-              <Terminal className="h-3.5 w-3.5" /> Terminal
+              {showTerminal ? <ChevronDown className="h-3.5 w-3.5 text-text-tertiary" /> : <ChevronUp className="h-3.5 w-3.5 text-text-tertiary" />}
+              <Terminal className="h-3.5 w-3.5 text-text-tertiary" />
+              <span className="text-[11px] font-medium uppercase tracking-wider">Terminal</span>
             </button>
             {terminal && <div className="relative min-h-0 flex-1" style={{ display: showTerminal ? 'block' : 'none' }}>
               <PanelContainer panel={terminal} isActive={showTerminal} autoFocus={false} />
