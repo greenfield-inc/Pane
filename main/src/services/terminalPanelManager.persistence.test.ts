@@ -988,6 +988,24 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void
     }
   });
 
+  it('exports PANE_PANEL_KIND so shell startup can tell the dock shell from agent and shell tabs', async () => {
+    const spawn = vi.spyOn(ptyHost, 'spawn');
+    const agent = makePanel('kind-agent');
+    agent.state.customState = { initialCommand: 'claude' };
+    const dock = makePanel('kind-dock');
+    const shell = makePanel('kind-shell');
+    panelManagerMock.getPanelsForSession.mockReturnValue([agent, dock, shell]);
+    try {
+      await startTerminal(agent);
+      await startTerminal(dock);
+      await startTerminal(shell);
+      expect(spawn.mock.calls.map(([opts]) => opts.env.PANE_PANEL_KIND)).toEqual(['agent', 'dock', 'shell']);
+    } finally {
+      panelManagerMock.getPanelsForSession.mockReturnValue([]);
+      vi.restoreAllMocks();
+    }
+  });
+
   it('launches and respawns a saved WSL Session inside its distro with Linux cwd and role environment', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
     const spawn = vi.spyOn(ptyHost, 'spawn');
