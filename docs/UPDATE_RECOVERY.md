@@ -3,6 +3,8 @@
 `runpane update` defaults to the running Pane app and the CLI that received the
 command, on the machine where the command runs. A remote host selected in the UI
 does not change that target. Use `--pane-only` or `--cli-only` for one component.
+The Update button in Settings uses the app's built-in updater instead, and does
+not need the prerequisites below.
 Run `runpane update --dry-run --json` first to see the executable, data directory,
 CLI owner and supervisor capability without starting an update.
 

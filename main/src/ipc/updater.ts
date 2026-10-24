@@ -1,6 +1,5 @@
 import { clipboard, IpcMain } from 'electron';
 import type { AppServices } from './types';
-import type { AppUpdater } from 'electron-updater';
 import { getAutoUpdater } from '../autoUpdater';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -9,25 +8,10 @@ import { commandExecutor } from '../utils/commandExecutor';
 import { getCurrentWorktreeName } from '../utils/worktreeUtils';
 import { getAppDirectory } from '../utils/appDirectory';
 import { getUpdateCapabilities } from '../utils/updateCapabilities';
-import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
-
-// runpane failures raised before an update operation can act: preflight, or
-// staging a standalone Node runtime that is missing or unpatched.
-const FALLBACK_CODES = new Set(['ERR_UPDATE_PREFLIGHT', 'ERR_UPDATE_RUNTIME', 'ERR_NODE_RUNTIME']);
-const failureSchema = boundary.object({ ok: boundary.literal(false), error: boundary.object({ code: boundary.string }) });
-
-/** The code of runpane's `--json` failure on stdout, or '' for anything else. */
-function failureCode(stdout: string): string {
-  try {
-    return decodeBoundary(JSON.parse(stdout), failureSchema).error.code;
-  } catch {
-    return '';
-  }
-}
 
 const MAC_UPDATE_COMMAND = 'curl -fsSL https://runpane.com/install.sh | sh';
 
-export function registerUpdaterHandlers(ipcMain: IpcMain, { app, versionChecker }: AppServices, getUpdater: () => Pick<AppUpdater, 'autoInstallOnAppQuit' | 'checkForUpdatesAndNotify' | 'downloadUpdate' | 'quitAndInstall'> = getAutoUpdater): void {
+export function registerUpdaterHandlers(ipcMain: IpcMain, { app, versionChecker }: AppServices): void {
   ipcMain.handle('updater:get-capabilities', async () => ({
     success: true,
     data: await getUpdateCapabilities({
@@ -158,7 +142,7 @@ export function registerUpdaterHandlers(ipcMain: IpcMain, { app, versionChecker 
       }
 
       // Check for updates using autoUpdater
-      const result = await getUpdater().checkForUpdatesAndNotify();
+      const result = await getAutoUpdater().checkForUpdatesAndNotify();
 
       return { success: true, message: 'Checking for updates...', data: result };
     } catch (error) {
@@ -174,7 +158,7 @@ export function registerUpdaterHandlers(ipcMain: IpcMain, { app, versionChecker 
       }
 
       // Start downloading the update
-      const result = await getUpdater().downloadUpdate();
+      const result = await getAutoUpdater().downloadUpdate();
 
       return { success: true, message: 'Downloading update...', data: result };
     } catch (error) {
@@ -214,38 +198,19 @@ export function registerUpdaterHandlers(ipcMain: IpcMain, { app, versionChecker 
     }
   });
 
-  ipcMain.handle('updater:install-update', async () => {
+  ipcMain.handle('updater:install-update', () => {
     try {
       if (!app.isPackaged && !process.env.TEST_UPDATES) {
         return { success: false, error: 'Auto-update is only available in packaged apps' };
       }
 
-      const autoUpdater = getUpdater();
-      autoUpdater.autoInstallOnAppQuit = false;
-      const paneDir = getAppDirectory();
-      const engine = path.join(paneDir, 'bin', 'runpane.cjs');
-      const result = await new Promise<{ failure: string | null; stdout: string }>(resolve => {
-        execFile(process.execPath, [engine, 'update', '--pane-dir', paneDir, '--json'], {
-          env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, encoding: 'utf8', timeout: 60_000,
-        }, (error, stdout, stderr) => resolve({ failure: error ? stderr.trim() || error.message : null, stdout }));
-      });
-      if (!result.failure) {
-        return { success: true, message: 'Independent update started. Pane will restart after staging and checkpointing.', data: JSON.parse(result.stdout) };
-      }
-      // Fall back only when runpane reported a failure that changed nothing.
-      // A printed operation status, or a timeout mid-start, may own the update,
-      // and installing beside it would race it.
-      if (!FALLBACK_CODES.has(failureCode(result.stdout))) throw new Error(result.failure);
-      // The independent update needs a patched standalone Node and a writable
-      // install directory. Without them, electron-updater installs the artifact
-      // it already downloaded: Squirrel on macOS, the NSIS installer (with its
-      // own elevation prompt) on Windows.
-      console.warn('[AutoUpdater] Independent update unavailable, installing with electron-updater:', result.failure);
-      autoUpdater.quitAndInstall(false, true);
+      // Quit and install the update
+      getAutoUpdater().quitAndInstall(false, true);
+
       return { success: true, message: 'Installing update...' };
     } catch (error) {
       console.error('Failed to install update:', error);
-      return { success: false, error: error instanceof Error ? error.message : 'Failed to start the independent update' };
+      return { success: false, error: 'Failed to install update' };
     }
   });
 }

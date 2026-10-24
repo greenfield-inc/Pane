@@ -141,8 +141,8 @@ installed components, host health, and each panel's restoration outcome. A
 current-user launchd, Task Scheduler, or systemd service owns the helper; its
 code and standalone runtime are staged outside the files being replaced.
 
-Settings installation uses this same operation; downloaded legacy updates never
-install implicitly on quit. Before downtime, Pane fences new mutations, waits for
+The app's own Update button in Settings uses the built-in electron-updater
+instead, and does not need these prerequisites. Before downtime, Pane fences new mutations, waits for
 in-flight work, checks snapshot readability and capacity on every affected volume,
 and records a clean-shutdown acknowledgment after persistence and service cleanup.
 A forced exit or missing acknowledgment never authorizes installation.

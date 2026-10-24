@@ -9,7 +9,6 @@ const loadUpdaterDependency = createRequire(__filename);
 // is up, so it is required on first use rather than at launch.
 export function getAutoUpdater(): AppUpdater {
   const { autoUpdater }: typeof import('electron-updater') = loadUpdaterDependency('electron-updater');
-  autoUpdater.autoInstallOnAppQuit = false;
   return autoUpdater;
 }
 
@@ -29,14 +28,11 @@ export function setupAutoUpdater(getMainWindow: () => BrowserWindow | null): voi
   } else {
     // Configure electron-updater for production
     autoUpdater.autoDownload = false; // We'll manually trigger downloads
-    autoUpdater.autoInstallOnAppQuit = false;
+    autoUpdater.autoInstallOnAppQuit = true;
 
     // The publish configuration in package.json will be used automatically
     // No need to manually set feed URL with electron-updater
   }
-
-  // Installs start from updater:install-update, never during ordinary quit.
-  autoUpdater.autoInstallOnAppQuit = false;
 
   // Error handling
   autoUpdater.on('error', (error) => {
