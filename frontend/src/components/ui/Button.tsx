@@ -13,8 +13,8 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
 
 const buttonVariants = {
   primary: 'bg-interactive text-text-on-interactive hover:bg-interactive-hover focus-visible:ring-interactive shadow-button hover:shadow-button-hover',
-  secondary: 'bg-surface-secondary text-text-secondary hover:bg-surface-hover focus-visible:ring-border-primary',
-  ghost: 'text-text-tertiary hover:text-text-secondary hover:bg-bg-hover focus-visible:ring-border-primary',
+  secondary: 'bg-surface-secondary text-text-secondary hover:bg-surface-hover focus-visible:ring-border-focus',
+  ghost: 'text-text-tertiary hover:text-text-secondary hover:bg-bg-hover focus-visible:ring-border-focus',
   danger: 'bg-status-error text-text-on-status-error hover:bg-status-error-hover focus-visible:ring-status-error',
   warning: 'bg-status-warning text-text-on-status-warning hover:bg-status-warning-hover focus-visible:ring-status-warning',
 };
@@ -101,8 +101,8 @@ export interface IconButtonProps extends Omit<ButtonProps, 'children' | 'fullWid
 
 const iconButtonVariants = {
   primary: 'bg-interactive text-text-on-interactive hover:bg-interactive-hover focus-visible:ring-interactive',
-  secondary: 'bg-surface-secondary text-text-secondary hover:bg-surface-hover focus-visible:ring-border-primary',
-  ghost: 'text-text-tertiary hover:text-text-secondary hover:bg-bg-hover focus-visible:ring-border-primary',
+  secondary: 'bg-surface-secondary text-text-secondary hover:bg-surface-hover focus-visible:ring-border-focus',
+  ghost: 'text-text-tertiary hover:text-text-secondary hover:bg-bg-hover focus-visible:ring-border-focus',
   danger: 'bg-status-error text-text-on-status-error hover:bg-status-error-hover focus-visible:ring-status-error',
   warning: 'bg-status-warning text-text-on-status-warning hover:bg-status-warning-hover focus-visible:ring-status-warning',
 };

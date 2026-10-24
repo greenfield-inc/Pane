@@ -43,7 +43,7 @@ export function InspectorTabs({ tab, onTabChange, filesPanel, changesPanel, chan
               onTabChange(next.id);
             }}
             className={cn(
-              'flex flex-1 items-center justify-center gap-1.5 rounded-t-md border border-transparent px-2 text-[12px] font-medium focus:outline-none focus:ring-0',
+              'flex flex-1 items-center justify-center gap-1.5 rounded-t-md border border-transparent px-2 text-[12px] font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus-ring-subtle',
               selected
                 ? 'border-border-primary border-b-surface-primary bg-surface-primary text-text-primary -mb-px'
                 : 'text-text-tertiary hover:text-text-primary hover:bg-surface-hover',
