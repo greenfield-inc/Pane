@@ -8,12 +8,7 @@ import { LiveRegion } from '../../ui/LiveRegion';
 import { areKeyboardShortcutsEnabled, useConfigStore } from '../../../stores/configStore';
 import { useScrollSurface } from '../../../hooks/useScrollSurface';
 
-interface LogEntry {
-  timestamp: string;
-  level: 'info' | 'warn' | 'error' | 'debug';
-  message: string;
-  source?: string;
-}
+import { SessionLogBuffer, type LogEntry } from '../../../../../shared/utils/session-log-buffer';
 
 interface LogsViewProps {
   sessionId: string;
@@ -22,6 +17,7 @@ interface LogsViewProps {
 
 export const LogsView: React.FC<LogsViewProps> = ({ sessionId, isVisible }) => {
   const [logs, setLogs] = useState<LogEntry[]>([]);
+  const logBuffer = useRef(new SessionLogBuffer());
   const [filterTerm, setFilterTerm] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [searchVisible, setSearchVisible] = useState(false);
@@ -43,7 +39,6 @@ export const LogsView: React.FC<LogsViewProps> = ({ sessionId, isVisible }) => {
     registerScrollSurface(element);
   }, [registerScrollSurface]);
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const lastLogCount = useRef(0);
   const { theme } = useTheme();
   const keyboardShortcutsEnabled = useConfigStore((state) => areKeyboardShortcutsEnabled(state.config));
 
@@ -78,8 +73,9 @@ export const LogsView: React.FC<LogsViewProps> = ({ sessionId, isVisible }) => {
       try {
         const result = await window.electronAPI.sessions.getLogs(sessionId);
         if (result.success && result.data) {
-          setLogs(result.data);
-          lastLogCount.current = result.data.length;
+          logBuffer.current.clear();
+          for (const entry of result.data) logBuffer.current.append(entry);
+          setLogs(logBuffer.current.snapshot());
         }
       } catch (error) {
         console.error('Failed to load logs:', error);
@@ -98,7 +94,8 @@ export const LogsView: React.FC<LogsViewProps> = ({ sessionId, isVisible }) => {
       entry: LogEntry;
     }) => {
       if (data.sessionId === sessionId) {
-        setLogs(prev => [...prev, data.entry]);
+        logBuffer.current.append(data.entry);
+        setLogs(logBuffer.current.snapshot());
       }
     });
 
@@ -106,8 +103,8 @@ export const LogsView: React.FC<LogsViewProps> = ({ sessionId, isVisible }) => {
       sessionId: string;
     }) => {
       if (data.sessionId === sessionId) {
+        logBuffer.current.clear();
         setLogs([]);
-        lastLogCount.current = 0;
       }
     });
 
@@ -119,10 +116,9 @@ export const LogsView: React.FC<LogsViewProps> = ({ sessionId, isVisible }) => {
 
   // Auto-scroll to bottom when new logs arrive
   useEffect(() => {
-    if (autoScroll && logContainerRef.current && logs.length > lastLogCount.current) {
+    if (autoScroll && logContainerRef.current) {
       logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
     }
-    lastLogCount.current = logs.length;
   }, [logs, autoScroll]);
 
   // Filter logs based on filter term
@@ -212,6 +208,7 @@ export const LogsView: React.FC<LogsViewProps> = ({ sessionId, isVisible }) => {
   const handleClearLogs = async () => {
     try {
       await window.electronAPI.sessions.clearLogs(sessionId);
+      logBuffer.current.clear();
       setLogs([]);
     } catch (error) {
       console.error('Failed to clear logs:', error);
