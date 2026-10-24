@@ -22,7 +22,6 @@ import {
 import type { JsonValue } from '../../../shared/validation/boundaryDecoder';
 
 const paneChatAgentSchema = boundary.enumeration('claude', 'codex', 'cursor');
-const MAX_STORE_BYTES = 2_000_000;
 const sourceSchema = boundary.enumeration('user', 'agent', 'system');
 const activityKindSchema = boundary.enumeration(
   'created',
@@ -141,9 +140,6 @@ export class OrchestrationSessionStore {
     fs.mkdirSync(path.dirname(this.filePath), { recursive: true, mode: 0o700 });
     try {
       const payload = `${JSON.stringify(validated, null, 2)}\n`;
-      if (Buffer.byteLength(payload, 'utf8') > MAX_STORE_BYTES) {
-        throw new Error(`orchestration Session store exceeds ${MAX_STORE_BYTES} bytes`);
-      }
       fs.writeFileSync(temporaryPath, payload, { mode: 0o600 });
       fs.renameSync(temporaryPath, this.filePath);
       this.data = cloneStore(validated);
@@ -156,9 +152,6 @@ export class OrchestrationSessionStore {
     if (this.loaded) return;
     try {
       const raw = fs.readFileSync(this.filePath, 'utf8');
-      if (Buffer.byteLength(raw, 'utf8') > MAX_STORE_BYTES) {
-        throw new Error(`orchestration Session store exceeds ${MAX_STORE_BYTES} bytes`);
-      }
       const parsed = decodeBoundary(JSON.parse(raw), boundary.json);
       this.data = validateStore(parsed);
     } catch (error) {
