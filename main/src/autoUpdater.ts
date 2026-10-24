@@ -35,8 +35,7 @@ export function setupAutoUpdater(getMainWindow: () => BrowserWindow | null): voi
     // No need to manually set feed URL with electron-updater
   }
 
-  // All installation entry points use the independent operation and its lock.
-  // A downloaded electron-updater artifact must never install during ordinary quit.
+  // Installs start from updater:install-update, never during ordinary quit.
   autoUpdater.autoInstallOnAppQuit = false;
 
   // Error handling

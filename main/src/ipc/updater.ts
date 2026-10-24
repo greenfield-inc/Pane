@@ -1,5 +1,6 @@
 import { clipboard, IpcMain } from 'electron';
 import type { AppServices } from './types';
+import type { AppUpdater } from 'electron-updater';
 import { getAutoUpdater } from '../autoUpdater';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -9,9 +10,9 @@ import { getCurrentWorktreeName } from '../utils/worktreeUtils';
 import { getAppDirectory } from '../utils/appDirectory';
 import { getUpdateCapabilities } from '../utils/updateCapabilities';
 
-const MAC_UPDATE_COMMAND = 'runpane update --wait';
+const MAC_UPDATE_COMMAND = 'curl -fsSL https://runpane.com/install.sh | sh';
 
-export function registerUpdaterHandlers(ipcMain: IpcMain, { app, versionChecker }: AppServices): void {
+export function registerUpdaterHandlers(ipcMain: IpcMain, { app, versionChecker }: AppServices, getUpdater: () => Pick<AppUpdater, 'autoInstallOnAppQuit' | 'checkForUpdatesAndNotify' | 'downloadUpdate' | 'quitAndInstall'> = getAutoUpdater): void {
   ipcMain.handle('updater:get-capabilities', async () => ({
     success: true,
     data: await getUpdateCapabilities({
@@ -142,7 +143,7 @@ export function registerUpdaterHandlers(ipcMain: IpcMain, { app, versionChecker 
       }
 
       // Check for updates using autoUpdater
-      const result = await getAutoUpdater().checkForUpdatesAndNotify();
+      const result = await getUpdater().checkForUpdatesAndNotify();
 
       return { success: true, message: 'Checking for updates...', data: result };
     } catch (error) {
@@ -158,7 +159,7 @@ export function registerUpdaterHandlers(ipcMain: IpcMain, { app, versionChecker 
       }
 
       // Start downloading the update
-      const result = await getAutoUpdater().downloadUpdate();
+      const result = await getUpdater().downloadUpdate();
 
       return { success: true, message: 'Downloading update...', data: result };
     } catch (error) {
@@ -204,15 +205,28 @@ export function registerUpdaterHandlers(ipcMain: IpcMain, { app, versionChecker 
         return { success: false, error: 'Auto-update is only available in packaged apps' };
       }
 
-      getAutoUpdater().autoInstallOnAppQuit = false;
+      const autoUpdater = getUpdater();
+      autoUpdater.autoInstallOnAppQuit = false;
       const paneDir = getAppDirectory();
       const engine = path.join(paneDir, 'bin', 'runpane.cjs');
-      const output = await new Promise<string>((resolve, reject) => {
+      const result = await new Promise<{ failure: string | null; killed: boolean; stdout: string }>(resolve => {
         execFile(process.execPath, [engine, 'update', '--pane-dir', paneDir, '--json'], {
           env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, encoding: 'utf8', timeout: 60_000,
-        }, (error, stdout, stderr) => error ? reject(new Error(stderr.trim() || error.message)) : resolve(stdout));
+        }, (error, stdout, stderr) => resolve({ failure: error ? stderr.trim() || error.message : null, killed: Boolean(error?.killed), stdout }));
       });
-      return { success: true, message: 'Independent update started. Pane will restart after staging and checkpointing.', data: JSON.parse(output) };
+      if (!result.failure) {
+        return { success: true, message: 'Independent update started. Pane will restart after staging and checkpointing.', data: JSON.parse(result.stdout) };
+      }
+      // An operation that printed its status, or was killed mid-start, may own
+      // the update; installing beside it would race it.
+      if (result.killed || result.stdout.trim()) throw new Error(result.failure);
+      // The independent update needs a standalone Node and a writable install
+      // directory. Without them, electron-updater installs the artifact it
+      // already downloaded: Squirrel on macOS, the NSIS installer (with its
+      // own elevation prompt) on Windows.
+      console.warn('[AutoUpdater] Independent update unavailable, installing with electron-updater:', result.failure);
+      autoUpdater.quitAndInstall(false, true);
+      return { success: true, message: 'Installing update...' };
     } catch (error) {
       console.error('Failed to install update:', error);
       return { success: false, error: error instanceof Error ? error.message : 'Failed to start the independent update' };
