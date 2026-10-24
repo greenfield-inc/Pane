@@ -92,18 +92,33 @@ describe('OrchestrationSessionStore', () => {
     expect(fs.readdirSync(path.dirname(filePath))).toEqual(['orchestration-sessions.json']);
   });
 
-  it('copies an unparseable file aside and starts fresh', () => {
+  it('starts empty from a file that is not JSON, keeping the original until the next write', () => {
     const filePath = createStorePath();
     fs.writeFileSync(filePath, '{"version":1,"sessions":[', { mode: 0o600 });
     const store = new OrchestrationSessionStore(filePath);
 
     expect(store.read().sessions).toEqual([]);
+    expect(fs.readFileSync(filePath, 'utf8')).toBe('{"version":1,"sessions":[');
     store.write(createData());
 
     const backups = fs.readdirSync(path.dirname(filePath)).filter(name => name.startsWith('orchestration-sessions.json.corrupt-'));
     expect(backups).toHaveLength(1);
     expect(fs.readFileSync(path.join(path.dirname(filePath), backups[0]), 'utf8')).toBe('{"version":1,"sessions":[');
     expect(new OrchestrationSessionStore(filePath).read()).toEqual(createData());
+  });
+
+  it('salvages the Sessions of a store with another version or a bad envelope', () => {
+    const filePath = createStorePath();
+    const raw = JSON.stringify({ version: 2, selectedSessionId: 42, order: 'session-1', sessions: [createRecord()] });
+    fs.writeFileSync(filePath, raw);
+    const store = new OrchestrationSessionStore(filePath);
+
+    expect(store.read()).toEqual({ version: ORCHESTRATION_SESSION_STORE_VERSION, sessions: [createRecord()] });
+    expect(fs.readFileSync(filePath, 'utf8')).toBe(raw);
+    store.write(createData());
+    expect(new OrchestrationSessionStore(filePath).read()).toEqual(createData());
+    const backups = fs.readdirSync(path.dirname(filePath)).filter(name => name.includes('.corrupt-'));
+    expect(fs.readFileSync(path.join(path.dirname(filePath), backups[0]), 'utf8')).toBe(raw);
   });
 
   it('drops bad entries, keeps the rest, and saves the original file aside', () => {

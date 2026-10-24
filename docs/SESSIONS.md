@@ -501,14 +501,17 @@ The shared record and service are:
 - `main/src/services/orchestrationSessionManager.ts`
 - `orchestration-sessions.json` below `PANE_DIR`
 
-The store has no size or count limit. On load, Pane drops any malformed
-Session, link or activity entry, keeps the rest, and logs what it dropped. If
-it dropped anything, or the file does not parse, Pane first copies the file to
-`orchestration-sessions.json.corrupt-<timestamp>` beside it.
+The store has no size or count limit. On load, Pane keeps every Session in the
+file's `sessions` array that decodes, whatever the file's `version` says, and
+drops any malformed Session, link or activity entry. An invalid
+`selectedSessionId` or `order` is dropped. Only a file that is not JSON loads
+with no Sessions. If anything was dropped or repaired, Pane logs it and first
+copies the file to `orchestration-sessions.json.corrupt-<timestamp>` beside it.
+The original file stays as it was until the next write.
 
-Each Session keeps its newest 100 activity entries and 200 inbox items. Set
+Each Session keeps its newest 500 activity entries and 1000 inbox items. Set
 `retention` in `config.json` to change either:
-`"retention": { "sessionActivity": 100, "sessionInbox": 200 }`. A missing or
+`"retention": { "sessionActivity": 500, "sessionInbox": 1000 }`. A missing or
 invalid value uses the default.
 
 The daemon and Electron IPC channels are:
@@ -1017,7 +1020,7 @@ Recovery is bounded by the journal's retention. If entries expired before
 projection, or the journal was replaced, Pane logs the history loss explicitly;
 already projected items remain available. A newer report replaces the panel's
 older report or missing report; a blocked item goes once its panel moves on
-(busy, ready, exited, or reported). Each Session keeps its newest 200 items
+(busy, ready, exited, or reported). Each Session keeps its newest 1000 items
 (`retention.sessionInbox` in `config.json`).
 
 ```text

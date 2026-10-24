@@ -110,14 +110,6 @@ const sessionSchema: BoundarySchema<OrchestrationSessionRecord> = boundary.objec
   updatedAt: timestampSchema,
 });
 
-/** The envelope only; each Session is decoded on its own so one bad Session cannot sink the rest. */
-const storeSchema = boundary.object({
-  version: boundary.literal(ORCHESTRATION_SESSION_STORE_VERSION),
-  selectedSessionId: boundary.optional(boundary.nonEmptyString),
-  order: boundary.optional(boundary.array(boundary.nonEmptyString)),
-  sessions: boundary.array(boundary.json),
-});
-
 /** Session list fields whose bad entries are dropped one by one. */
 const SESSION_LIST_FIELDS: ReadonlyArray<[string, BoundarySchema<unknown>]> = [
   ['decisions', boundary.string],
@@ -163,8 +155,9 @@ export class OrchestrationSessionStore {
   }
 
   /**
-   * Loads fail open: bad entries are dropped and an unparseable file starts fresh. Either way the
-   * original file is copied aside first, so nothing a person wrote is lost.
+   * Loads fail open: every Session that decodes is kept and bad entries are dropped. Only a file
+   * that is not JSON starts empty. Either way the original is copied aside first and stays in
+   * place until the next write.
    */
   private ensureLoaded(): void {
     if (this.loaded) return;
@@ -185,24 +178,34 @@ export class OrchestrationSessionStore {
       this.data = sanitizeStore(decodeBoundary(JSON.parse(raw), boundary.json), problems);
     } catch (error) {
       if (!(error instanceof SyntaxError || error instanceof BoundaryDecodeError)) throw error;
-      problems.push(`the file is unreadable (${error.message}); starting with no Sessions`);
+      problems.push(`the file is not JSON (${error.message}); starting with no Sessions`);
       this.data = emptyStore();
     }
     if (problems.length > 0) {
       const backupPath = `${this.filePath}.corrupt-${new Date().toISOString().replace(/[:.]/g, '-')}`;
       fs.copyFileSync(this.filePath, backupPath);
-      console.warn(`[OrchestrationSessionStore] Repaired ${this.filePath}; the original is saved as ${backupPath}: ${problems.join('; ')}`);
+      console.warn(`[OrchestrationSessionStore] Loaded ${this.filePath} with problems; the original is saved as ${backupPath}: ${problems.join('; ')}`);
     }
     this.loaded = true;
   }
 }
 
-/** Decodes a store, dropping or repairing each bad entry and describing it in `problems`. Throws only when the envelope is unreadable. */
+/**
+ * Decodes a store, dropping or repairing each bad entry and describing it in `problems`. The
+ * sessions array is taken whatever the version or other envelope fields say.
+ */
 function sanitizeStore(value: JsonValue | OrchestrationSessionStoreData, problems: string[]): OrchestrationSessionStoreData {
-  const decoded = decodeBoundary(value, storeSchema);
+  const envelope = decodeOptionalBoundary(value, boundary.jsonObject) ?? {};
+  if (envelope.version !== ORCHESTRATION_SESSION_STORE_VERSION) {
+    problems.push(`read a store marked version ${JSON.stringify(envelope.version) ?? 'missing'} as version ${ORCHESTRATION_SESSION_STORE_VERSION}`);
+  }
+  const entries = decodeOptionalBoundary(envelope.sessions, boundary.array(boundary.json));
+  if (!entries) problems.push('found no sessions array');
+  const selectedSessionId = optionalField(envelope.selectedSessionId, boundary.nonEmptyString, 'selectedSessionId', problems);
+  const order = optionalField(envelope.order, boundary.array(boundary.nonEmptyString), 'order', problems);
   const sessions: OrchestrationSessionRecord[] = [];
   const ids = new Set<string>();
-  decoded.sessions.forEach((entry, index) => {
+  (entries ?? []).forEach((entry, index) => {
     const session = sanitizeSession(entry, index, problems);
     if (!session) return;
     if (ids.has(session.id)) {
@@ -212,14 +215,22 @@ function sanitizeStore(value: JsonValue | OrchestrationSessionStoreData, problem
     ids.add(session.id);
     sessions.push(session);
   });
-  const data: OrchestrationSessionStoreData = { version: decoded.version, sessions };
-  if (decoded.selectedSessionId !== undefined) {
-    if (ids.has(decoded.selectedSessionId)) data.selectedSessionId = decoded.selectedSessionId;
-    else problems.push(`cleared the selection of missing Session ${decoded.selectedSessionId}`);
+  const data: OrchestrationSessionStoreData = { version: ORCHESTRATION_SESSION_STORE_VERSION, sessions };
+  if (selectedSessionId !== undefined) {
+    if (ids.has(selectedSessionId)) data.selectedSessionId = selectedSessionId;
+    else problems.push(`cleared the selection of missing Session ${selectedSessionId}`);
   }
   // The order is a preference, not a record: forget ids of Sessions that no longer exist.
-  if (decoded.order) data.order = [...new Set(decoded.order)].filter(id => ids.has(id));
+  if (order) data.order = [...new Set(order)].filter(id => ids.has(id));
   return data;
+}
+
+/** An optional envelope field; a present value that fails `schema` is dropped. */
+function optionalField<Value>(value: JsonValue | undefined, schema: BoundarySchema<Value>, label: string, problems: string[]): Value | undefined {
+  if (value === undefined) return undefined;
+  const decoded = decodeOptionalBoundary(value, schema);
+  if (decoded === undefined) problems.push(`dropped an invalid ${label}`);
+  return decoded;
 }
 
 function sanitizeSession(value: JsonValue, index: number, problems: string[]): OrchestrationSessionRecord | undefined {

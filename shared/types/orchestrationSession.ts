@@ -17,7 +17,7 @@ export interface SessionRetention {
   sessionInbox: number;
 }
 const positiveIntegerSchema = boundary.refine(boundary.number, value => Number.isInteger(value) && value > 0, 'expected a positive integer');
-export const DEFAULT_SESSION_RETENTION: SessionRetention = { sessionActivity: 100, sessionInbox: 200 };
+export const DEFAULT_SESSION_RETENTION: SessionRetention = { sessionActivity: 500, sessionInbox: 1000 };
 
 /** The configured retention, with the default for any value that is missing or not a positive integer. */
 export function resolveSessionRetention(configured: Partial<SessionRetention> | undefined): SessionRetention {
