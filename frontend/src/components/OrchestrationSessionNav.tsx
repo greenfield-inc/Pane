@@ -482,7 +482,7 @@ export function OrchestrationSessionNav({
           </button>
           {/* Same masked hover slot as Pane rows; it covers the activity summary while shown. */}
           <div className={cn(
-            'absolute inset-y-0 right-2 z-10 flex items-center bg-surface-secondary pr-0.5 opacity-0 transition-opacity group-hover/orchestration-row:opacity-100 group-focus-within/orchestration-row:opacity-100',
+            'absolute inset-y-0.5 right-2 z-10 flex items-center bg-surface-secondary pr-0.5 opacity-0 transition-opacity group-hover/orchestration-row:opacity-100 group-focus-within/orchestration-row:opacity-100',
             isOpen
               ? 'bg-[linear-gradient(var(--color-surface-selected),var(--color-surface-selected))]'
               : 'group-hover/orchestration-row:bg-[linear-gradient(var(--color-surface-hover),var(--color-surface-hover))]',
