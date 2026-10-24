@@ -7,6 +7,7 @@ import type { VoiceTranscriptionMode } from '../../../shared/types/voiceTranscri
 import type { WorktreeFileSyncEntry } from '../../../shared/types/worktreeFileSync';
 import type { ApnsCredentialConfig, SharedCredentialId, SharedCredentialMeta } from '../../../shared/types/sharedCredentials';
 import type { AppearanceMode, DarkTheme, LightTheme, Theme } from '../../../shared/types/appearance';
+import type { SessionRetention } from '../../../shared/types/orchestrationSession';
 
 interface TerminalShortcut {
   id: string;
@@ -143,6 +144,8 @@ export interface AppConfig {
   // Route PTY spawns through an isolated ptyHost UtilityProcess for crash isolation.
   // On by default on Windows. Requires app restart; the supervisor is forked once at `app.whenReady`.
   usePtyHost?: boolean;
+  // Entries each Session keeps before the oldest are dropped; a missing value uses the default
+  retention?: Partial<SessionRetention>;
   // Experimental: show Mission Control, the grid of every agent pane (off by default).
   missionControlEnabled?: boolean;
   // What a click on an .html file in Explorer opens: the browser preview (default when absent) or its source

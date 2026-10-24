@@ -501,6 +501,16 @@ The shared record and service are:
 - `main/src/services/orchestrationSessionManager.ts`
 - `orchestration-sessions.json` below `PANE_DIR`
 
+The store has no size or count limit. On load, Pane drops any malformed
+Session, link or activity entry, keeps the rest, and logs what it dropped. If
+it dropped anything, or the file does not parse, Pane first copies the file to
+`orchestration-sessions.json.corrupt-<timestamp>` beside it.
+
+Each Session keeps its newest 100 activity entries and 200 inbox items. Set
+`retention` in `config.json` to change either:
+`"retention": { "sessionActivity": 100, "sessionInbox": 200 }`. A missing or
+invalid value uses the default.
+
 The daemon and Electron IPC channels are:
 
 `orchestration-sessions:list`, `orchestration-sessions:select`,
@@ -543,9 +553,7 @@ overview after associations or updates.
 - `report` (update only) is `{"summary", "status": "reported"|"verified",
   "evidence": [at least one link], "reportedAt", "provenance"}`; `null`
   clears it.
-- Arrays replace the stored value, so send the whole list. Each array holds at
-  most 100 items and each text at most 16000 characters
-  (`shared/types/orchestrationSession.ts`).
+- Arrays replace the stored value, so send the whole list.
 - A bad payload is refused whole with one `ERR_SESSION_PAYLOAD_INVALID` error
   that lists every problem (`outputs[0].addedAt: missing`, ...). The CLI
   checks it before calling Pane, and the daemon checks it again for clients
@@ -1009,7 +1017,8 @@ Recovery is bounded by the journal's retention. If entries expired before
 projection, or the journal was replaced, Pane logs the history loss explicitly;
 already projected items remain available. A newer report replaces the panel's
 older report or missing report; a blocked item goes once its panel moves on
-(busy, ready, exited, or reported). Each Session keeps at most 200 items.
+(busy, ready, exited, or reported). Each Session keeps its newest 200 items
+(`retention.sessionInbox` in `config.json`).
 
 ```text
 runpane inbox --session <id|name> [--json]       # defaults to $PANE_ORCHESTRATION_SESSION_ID

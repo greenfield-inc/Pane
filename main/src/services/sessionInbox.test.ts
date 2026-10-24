@@ -2,7 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { MAX_INBOX_ITEMS_PER_SESSION, SessionInbox } from './sessionInbox';
+import { SessionInbox } from './sessionInbox';
 import { WorkspaceJournal } from './workspaceJournal';
 import type { RunpaneWorkspaceEntry } from '../../../shared/types/runpaneOrchestration';
 
@@ -14,7 +14,7 @@ describe('SessionInbox', () => {
   let journal: WorkspaceJournal;
   const members = new Map<string, string[]>([['pane-1', ['session-a']], ['pane-2', ['session-a', 'session-b']]]);
   const open = () => {
-    const inbox = new SessionInbox(filePath, { sessionIdsFor: paneId => members.get(paneId) ?? [] });
+    const inbox = new SessionInbox(filePath, { sessionIdsFor: paneId => members.get(paneId) ?? [], itemsPerSession: () => 3 });
     inbox.attach(journal);
     return inbox;
   };
@@ -91,16 +91,14 @@ describe('SessionInbox', () => {
     expect(inbox.list('session-a')).toEqual([]);
   });
 
-  it('ignores replayed entries and caps each Session', () => {
+  it('ignores replayed entries and keeps the newest items of each Session', () => {
     const inbox = open();
     journal.append(entry('agent.report.missing', 'pane-1', { replay: true }));
     expect(inbox.list('session-a')).toEqual([]);
 
-    for (let index = 0; index <= MAX_INBOX_ITEMS_PER_SESSION; index += 1) {
+    for (let index = 0; index < 5; index += 1) {
       journal.append(entry('agent.report.missing', 'pane-1', { panelId: `panel-${index}` }));
     }
-    const items = inbox.list('session-a');
-    expect(items).toHaveLength(MAX_INBOX_ITEMS_PER_SESSION);
-    expect(items[0].panelId).toBe('panel-1');
+    expect(inbox.list('session-a').map(item => item.panelId)).toEqual(['panel-2', 'panel-3', 'panel-4']);
   });
 });

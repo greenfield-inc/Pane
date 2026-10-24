@@ -277,13 +277,12 @@ describe('NamedLockService', () => {
     expect(() => locks.list()).toThrow(/Unable to read named lock store/);
   });
 
-  it('validates names, TTLs, and notes', async () => {
+  it('validates names and TTLs', async () => {
     const locks = createService();
     expect(() => locks.acquire({ name: 'has space', ttlMs: MINUTE, owner: workerA })).toThrow(/Lock names/);
     expect(() => locks.acquire({ name: 'x'.repeat(129), ttlMs: MINUTE, owner: workerA })).toThrow(/Lock names/);
     expect(() => locks.acquire({ name: 'ok', ttlMs: 0, owner: workerA })).toThrow(/TTL/);
     expect(() => locks.acquire({ name: 'ok', ttlMs: 25 * 60 * MINUTE, owner: workerA })).toThrow(/TTL/);
-    expect(() => locks.acquire({ name: 'ok', ttlMs: MINUTE, note: 'n'.repeat(501), owner: workerA })).toThrow(/notes/);
     await expect(locks.acquire({ name: 'x'.repeat(128), ttlMs: MINUTE, owner: workerA })).resolves.toMatchObject({ ok: true });
   });
 });

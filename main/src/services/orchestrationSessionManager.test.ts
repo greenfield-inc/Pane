@@ -338,6 +338,18 @@ describe('OrchestrationSessionManager', () => {
     expect(updated.resume).toBeUndefined();
   });
 
+  it('keeps the newest activity entries up to the configured retention', async () => {
+    const fixture = createFixture();
+    Object.assign(fixture.configManager.getConfig(), { retention: { sessionActivity: 2 } });
+    const created = await fixture.manager.create({ name: 'Busy' });
+    const selector = { sessionId: created.session.id };
+    for (const goal of ['one', 'two', 'three']) await fixture.manager.update(selector, { goal });
+
+    const { activity } = await fixture.manager.get(selector);
+    expect(activity).toHaveLength(2);
+    expect(activity.every(entry => entry.kind === 'updated')).toBe(true);
+  });
+
   it('creates a pinned Session and persists declarative pin updates', async () => {
     const fixture = createFixture();
     const input = { name: 'Pinned coordinator', isPinned: true };

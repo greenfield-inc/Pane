@@ -1,11 +1,6 @@
 import { PaneError } from '../../../shared/paneError';
 import type { PaneCommandValue } from '../daemon/commandRegistry';
-import {
-  MAX_ORCHESTRATION_ITEMS,
-  MAX_ORCHESTRATION_TEXT_LENGTH,
-  type OrchestrationLink,
-  type OrchestrationReport,
-} from '../../../shared/types/orchestrationSession';
+import type { OrchestrationLink, OrchestrationReport } from '../../../shared/types/orchestrationSession';
 import {
   boundary,
   BoundaryDecodeIssues,
@@ -15,27 +10,11 @@ import {
 
 /**
  * The Session create/update payload pieces that people and agents write by hand. Decoded with
- * `decodeOrchestrationSessionPayload`, every problem is reported at once, and the link URL scheme,
- * dates and limits are checked here first; the manager and store keep the same checks as backstops.
+ * `decodeOrchestrationSessionPayload`, every problem is reported at once, and the link URL scheme
+ * and dates are checked here first; the manager and store keep the same checks as backstops.
  * The CLI keeps the same rules in packages/runpane/src/localControl.ts.
  */
 const LINK_URL_PATTERN = /^(?:https?:\/\/|file:\/\/|grain:\/\/)/i;
-
-function boundedText(schema: BoundarySchema<string>): BoundarySchema<string> {
-  return boundary.refine(
-    schema,
-    value => value.length <= MAX_ORCHESTRATION_TEXT_LENGTH,
-    `expected at most ${MAX_ORCHESTRATION_TEXT_LENGTH} characters`,
-  );
-}
-
-function boundedArray<Value>(schema: BoundarySchema<Value>): BoundarySchema<Value[]> {
-  return boundary.refine(
-    boundary.array(schema),
-    values => values.length <= MAX_ORCHESTRATION_ITEMS,
-    `expected at most ${MAX_ORCHESTRATION_ITEMS} items`,
-  );
-}
 
 const isoDateSchema = boundary.refine(
   boundary.nonEmptyString,
@@ -43,13 +22,13 @@ const isoDateSchema = boundary.refine(
   'expected an ISO 8601 date such as 2026-10-14T09:30:00Z',
 );
 
-export const orchestrationTextSchema = boundedText(boundary.string);
-export const orchestrationTextArraySchema = boundedArray(orchestrationTextSchema);
+export const orchestrationTextSchema = boundary.string;
+export const orchestrationTextArraySchema = boundary.array(orchestrationTextSchema);
 
 export const orchestrationLinkSchema: BoundarySchema<OrchestrationLink> = boundary.object({
-  label: boundedText(boundary.nonEmptyString),
+  label: boundary.nonEmptyString,
   url: boundary.refine(
-    boundedText(boundary.nonEmptyString),
+    boundary.nonEmptyString,
     value => LINK_URL_PATTERN.test(value),
     'expected a URL starting with https://, http://, file:// or grain://',
   ),
@@ -57,10 +36,10 @@ export const orchestrationLinkSchema: BoundarySchema<OrchestrationLink> = bounda
   provenance: boundary.optional(orchestrationTextSchema),
   addedAt: isoDateSchema,
 });
-export const orchestrationLinksSchema = boundedArray(orchestrationLinkSchema);
+export const orchestrationLinksSchema = boundary.array(orchestrationLinkSchema);
 
 export const orchestrationReportSchema: BoundarySchema<OrchestrationReport> = boundary.object({
-  summary: boundedText(boundary.nonEmptyString),
+  summary: boundary.nonEmptyString,
   status: boundary.enumeration('reported', 'verified'),
   evidence: boundary.refine(orchestrationLinksSchema, links => links.length > 0, 'expected at least one link'),
   reportedAt: isoDateSchema,
@@ -77,7 +56,6 @@ const ORCHESTRATION_SESSION_PAYLOAD_GUIDE = 'outputs and evidence items are {"la
   + '"url": https/http/file/grain URL, "addedAt": ISO 8601 date, "kind"?: evidence|output|ticket|pull-request|other, '
   + '"provenance"?: string}; decisions and blockers are arrays of strings; report is {"summary", '
   + '"status": reported|verified, "evidence": [at least one item], "reportedAt": ISO 8601 date, "provenance"}; '
-  + `at most ${MAX_ORCHESTRATION_ITEMS} items per array and ${MAX_ORCHESTRATION_TEXT_LENGTH} characters per text; `
   + 'arrays replace the stored value';
 
 /** Decodes a Session create/update payload, reporting every problem in one PaneError. */

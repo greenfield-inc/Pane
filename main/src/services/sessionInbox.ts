@@ -17,9 +17,6 @@ import type {
  * or never-armed watcher would have missed, and it survives restarts in `session-inbox.json`.
  */
 
-/** A Session keeps at most this many items; the oldest go first. */
-export const MAX_INBOX_ITEMS_PER_SESSION = 200;
-
 /** The inbox item a journal entry becomes, if any. */
 function inboxKindFor(kind: RunpaneWorkspaceEntryKind): RunpaneInboxItemKind | undefined {
   if (kind === 'agent.report') return 'report';
@@ -84,6 +81,8 @@ export interface SessionInboxAckOutcome {
 export interface SessionInboxOptions {
   /** The Sessions a Pane (and panel) belongs to, never counting a Session's own orchestrator. */
   sessionIdsFor(paneId: string, panelId: string): string[];
+  /** How many items a Session keeps; the oldest go first. */
+  itemsPerSession(): number;
 }
 
 export class SessionInbox {
@@ -163,7 +162,7 @@ export class SessionInbox {
         next = next.filter(item =>
           !(item.sessionId === sessionId && item.panelId === panelId && superseded.includes(item.kind)));
         next = [...next, this.itemFor(entry, panelId, sessionId, kind)];
-        next = trimSession(next, sessionId);
+        next = trimSession(next, sessionId, this.options.itemsPerSession());
       }
     }
     if (next !== this.items) this.replace(next);
@@ -239,9 +238,9 @@ export class SessionInbox {
   }
 }
 
-function trimSession(items: RunpaneInboxItem[], sessionId: string): RunpaneInboxItem[] {
+function trimSession(items: RunpaneInboxItem[], sessionId: string, limit: number): RunpaneInboxItem[] {
   const count = items.filter(item => item.sessionId === sessionId).length;
-  let excess = count - MAX_INBOX_ITEMS_PER_SESSION;
+  let excess = count - limit;
   if (excess <= 0) return items;
   return items.filter(item => {
     if (excess > 0 && item.sessionId === sessionId) {

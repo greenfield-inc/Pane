@@ -9,7 +9,7 @@ import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { browserFileContext } from '../services/browserFileContext';
 import { PaneError, paneErrorText, reasonOf } from '../../../shared/paneError';
-import { isOrchestrationInternalSessionId } from '../../../shared/types/orchestrationSession';
+import { isOrchestrationInternalSessionId, resolveSessionRetention } from '../../../shared/types/orchestrationSession';
 import type { IpcMain } from 'electron';
 import type { AppServices } from './types';
 import type { PaneCommandRegistry, PaneCommandValue } from '../daemon/commandRegistry';
@@ -417,6 +417,7 @@ export function registerRunpaneHandlers(
   if (!services.sessionInbox) {
     const sessionInbox = new SessionInbox(path.join(getAppDirectory(), 'session-inbox.json'), {
       sessionIdsFor: (paneId, panelId) => services.orchestrationSessionManager?.memberSessionIds(paneId, panelId) ?? [],
+      itemsPerSession: () => resolveSessionRetention(configManager.getConfig().retention).sessionInbox,
     });
     sessionInbox.attach(workspaceJournal);
     services.sessionInbox = sessionInbox;

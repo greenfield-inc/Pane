@@ -22,10 +22,8 @@ import type { TerminalAgentReport, ToolPanel, TerminalPanelState } from '../../.
 import type { AgentState } from '../../../shared/types/agentStatus';
 import {
   LEGACY_ORCHESTRATION_SESSION_ID,
-  MAX_ORCHESTRATION_ACTIVITY,
-  MAX_ORCHESTRATION_ITEMS,
-  MAX_ORCHESTRATION_TEXT_LENGTH,
   ORCHESTRATION_SESSION_INTERNAL_ID_PREFIX,
+  resolveSessionRetention,
   type OrchestrationActivity,
   type OrchestrationAssociation,
   type OrchestrationAssociationInput,
@@ -123,13 +121,6 @@ export class OrchestrationSessionManager extends EventEmitter {
   async reorder(sessionIds: string[]): Promise<OrchestrationSessionListResult> {
     return withLock('orchestration-sessions', async () => {
       await this.ensureInitializedUnlocked();
-      if (sessionIds.length > MAX_ORCHESTRATION_ITEMS) {
-        throw new PaneError(
-          'ERR_SESSION_ORDER_TOO_LONG',
-          `A Session order can name at most ${MAX_ORCHESTRATION_ITEMS} Sessions; this one named ${sessionIds.length}`,
-          'The order was not saved. Send only the Sessions being moved.',
-        );
-      }
       const data = this.store.read();
       const order = moveWithinOwnPlaces(orderedSessions(data).map(session => session.id), sessionIds, id => id);
       const nextData: OrchestrationSessionStoreData = { ...data, order };
@@ -387,7 +378,7 @@ export class OrchestrationSessionManager extends EventEmitter {
         nextRecord.reportActivityId = undefined;
         nextRecord.reportAcceptedAt = undefined;
       }
-      trimActivity(nextRecord);
+      this.trimActivity(nextRecord);
       if (nextRecord.archived !== true) await this.ensurePanelForAgent(nextRecord);
       const replaced = replaceSession(data, nextRecord);
       const isArchiving = current.archived !== true && nextRecord.archived === true;
@@ -453,7 +444,7 @@ export class OrchestrationSessionManager extends EventEmitter {
         updatedAt: new Date().toISOString(),
         activity: [...current.activity, this.activity('associated', `Associated Pane “${pane.name}”.`, 'user', input.paneId)],
       };
-      trimActivity(nextRecord);
+      this.trimActivity(nextRecord);
       this.store.write(replaceSession(data, nextRecord));
       if (!current.associations.some(item => item.paneId === input.paneId) && pane.isFavorite) {
         try {
@@ -488,7 +479,7 @@ export class OrchestrationSessionManager extends EventEmitter {
         updatedAt: new Date().toISOString(),
         activity: [...current.activity, this.activity('detached', message, 'user', paneId)],
       };
-      trimActivity(nextRecord);
+      this.trimActivity(nextRecord);
       this.store.write(replaceSession(data, nextRecord));
       this.emitChanged(nextRecord, 'detached', false, removed.map(item => item.paneId));
       return clone(nextRecord);
@@ -643,7 +634,7 @@ export class OrchestrationSessionManager extends EventEmitter {
           updatedAt: new Date().toISOString(),
           activity: [...current.activity, this.activity(state, `Agent state changed to ${state}.`, 'agent', association?.paneId, panelId)],
         };
-        trimActivity(nextRecord);
+        this.trimActivity(nextRecord);
         nextData = replaceSession(nextData, nextRecord);
         changed.push(nextRecord);
         refreshed.push({ panelId, sessionId: current.id, state });
@@ -678,7 +669,7 @@ export class OrchestrationSessionManager extends EventEmitter {
           updatedAt: new Date().toISOString(),
           activity: [...current.activity, this.activity('report', agentReportMessage(report), 'agent', parentPaneId, panelId)],
         };
-        trimActivity(nextRecord);
+        this.trimActivity(nextRecord);
         nextData = replaceSession(nextData, nextRecord);
         changed.push(nextRecord);
       }
@@ -730,7 +721,7 @@ export class OrchestrationSessionManager extends EventEmitter {
         console.error(`[OrchestrationSessionManager] ${record.name} (${record.id}): ${message}`);
         if (record.activity.at(-1)?.message === message) continue;
         const failed = { ...record, revision: record.revision + 1, activity: [...record.activity, this.activity('updated', message, 'system')] };
-        trimActivity(failed);
+        this.trimActivity(failed);
         withFailures = replaceSession(withFailures, failed);
       }
     }
@@ -1156,7 +1147,11 @@ export class OrchestrationSessionManager extends EventEmitter {
   }
 
   private activity(kind: OrchestrationActivity['kind'], message: string, source: OrchestrationActivity['source'], paneId?: string, panelId?: string): OrchestrationActivity {
-    return { id: randomUUID(), kind, message: message.slice(0, MAX_ORCHESTRATION_TEXT_LENGTH), at: new Date().toISOString(), source, paneId, panelId };
+    return { id: randomUUID(), kind, message, at: new Date().toISOString(), source, paneId, panelId };
+  }
+
+  private trimActivity(record: OrchestrationSessionRecord): void {
+    record.activity = record.activity.slice(-resolveSessionRetention(this.configManager.getConfig().retention).sessionActivity);
   }
 
   /** `paneIds` names the Panes an associate or detach added or removed; the workspace journal records them. */
@@ -1191,40 +1186,23 @@ function resolveSessionAgent(explicit: PaneChatAgent | undefined, command: strin
 
 function validateCreateInput(input: OrchestrationSessionCreateInput): void {
   if (!input.name || input.name.trim().length === 0) throw new Error('Session name is required');
-  if (input.name.length > MAX_ORCHESTRATION_TEXT_LENGTH) throw new Error('Session name is too long');
   if (input.customResume) validateCustomCommandResume(input.customResume);
   if (input.resume !== undefined) {
     if (!/^[A-Za-z0-9._:-]{1,200}$/.test(input.resume)) throw new Error('Session resume must be a native session id');
     if (input.customResume) throw new Error('A Session resumes either a native session id or a custom resume command, not both');
   }
-  validateOptionalText(input.launchCommand, 'launch command');
-  validateOptionalText(input.profile, 'profile');
-  validateOptionalText(input.goal, 'goal');
-  validateOptionalText(input.context, 'context');
-  validateOptionalText(input.nextAction, 'next action');
-  validateTextArray(input.decisions, 'decisions');
-  validateTextArray(input.blockers, 'blockers');
   validateLinks(input.evidence, 'evidence');
   validateLinks(input.outputs, 'outputs');
 }
 
 function validateUpdateInput(input: OrchestrationSessionUpdateInput): void {
-  validateOptionalText(input.name, 'name');
   if (input.name !== undefined && input.name.trim().length === 0) throw new Error('Session name is required');
   if (input.archived !== undefined) decodeBoundary(input.archived, boundary.boolean);
   if (input.isPinned !== undefined) decodeBoundary(input.isPinned, boundary.boolean);
   if (input.customResume) validateCustomCommandResume(input.customResume);
-  validateOptionalText(input.launchCommand, 'launch command');
-  validateOptionalText(input.profile, 'profile');
-  validateOptionalText(input.goal, 'goal');
-  validateOptionalText(input.context, 'context');
-  validateOptionalText(input.nextAction, 'next action');
-  validateTextArray(input.decisions, 'decisions');
-  validateTextArray(input.blockers, 'blockers');
   validateLinks(input.evidence, 'evidence');
   validateLinks(input.outputs, 'outputs');
   if (input.report) {
-    validateOptionalText(input.report.summary, 'report summary');
     validateLinks(input.report.evidence, 'report evidence');
     if (input.report.evidence.length === 0) throw new Error('Report evidence is required');
   }
@@ -1271,25 +1249,11 @@ function canReuniteLegacySession(
 
 function validateAssociationInput(input: OrchestrationAssociationInput): void {
   if (!input.paneId || input.paneId.trim().length === 0) throw new Error('Pane id is required');
-  if ((input.panelIds?.length ?? 0) > MAX_ORCHESTRATION_ITEMS) throw new Error('Too many associated panels');
-}
-
-function validateOptionalText(value: string | undefined, label: string): void {
-  if (value !== undefined && value.length > MAX_ORCHESTRATION_TEXT_LENGTH) throw new Error(`${label} is too long`);
-}
-
-function validateTextArray(values: string[] | undefined, label: string): void {
-  if (!values) return;
-  if (values.length > MAX_ORCHESTRATION_ITEMS) throw new Error(`${label} contains too many entries`);
-  values.forEach(value => validateOptionalText(value, label));
 }
 
 function validateLinks(links: OrchestrationLink[] | undefined, label: string): void {
   if (!links) return;
-  if (links.length > MAX_ORCHESTRATION_ITEMS) throw new Error(`${label} contains too many links`);
   for (const link of links) {
-    validateOptionalText(link.label, `${label} label`);
-    validateOptionalText(link.url, `${label} URL`);
     if (!/^(?:https?:\/\/|file:\/\/|grain:\/\/)/i.test(link.url)) throw new Error(`${label} URL must use https, file, or grain scheme`);
   }
 }
@@ -1348,10 +1312,6 @@ function newestAgentReport(panels: readonly ToolPanel[]): (TerminalAgentReport &
     if (report && (!newest || report.reportedAt > newest.reportedAt)) newest = { ...report, panelId: panel.id };
   }
   return newest;
-}
-
-function trimActivity(record: OrchestrationSessionRecord): void {
-  record.activity = record.activity.slice(-MAX_ORCHESTRATION_ACTIVITY);
 }
 
 function missingPanel(panelId: string): OrchestrationPanelOverview {

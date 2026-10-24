@@ -7,8 +7,6 @@ import type {
   RunpaneLockReleaseResult,
 } from '../../../shared/types/runpaneOrchestration';
 import {
-  MAX_NAMED_LOCKS,
-  MAX_NAMED_LOCK_TEXT_LENGTH,
   NAMED_LOCK_NAME_PATTERN,
   namedLockKey,
   type NamedLockStore,
@@ -216,9 +214,6 @@ export class NamedLockService implements PaneEventSink {
   private grant(input: NamedLockAcquireInput, startedAt: number, held: RunpaneLockRecord | undefined): RunpaneLockAcquireResult {
     const now = this.now();
     const key = namedLockKey(input.name, input.sessionId);
-    if (!held && !this.locks.has(key) && this.locks.size >= MAX_NAMED_LOCKS) {
-      throw new Error(`Pane holds ${MAX_NAMED_LOCKS} named locks already; release some before acquiring more.`);
-    }
     const lock: RunpaneLockRecord = {
       name: input.name,
       scope: input.sessionId ? 'session' : 'global',
@@ -338,9 +333,6 @@ function validateAcquireInput(input: NamedLockAcquireInput): void {
   }
   if (input.waitMs !== undefined && (!Number.isFinite(input.waitMs) || input.waitMs < 0)) {
     throw new Error('Lock wait must be a non-negative number of milliseconds.');
-  }
-  if (input.note !== undefined && input.note.length > MAX_NAMED_LOCK_TEXT_LENGTH) {
-    throw new Error(`Lock notes are at most ${MAX_NAMED_LOCK_TEXT_LENGTH} characters.`);
   }
 }
 

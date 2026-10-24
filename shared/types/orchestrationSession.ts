@@ -2,15 +2,29 @@ import type { CustomCommandResume } from './customCommandResume';
 import type { AgentState } from './agentStatus';
 import type { PaneChatAgent } from './paneChat';
 import type { TerminalAgentReport, ToolPanel } from './panels';
-import type { JsonObject } from '../validation/boundaryDecoder';
+import { boundary, decodeOptionalBoundary, type JsonObject } from '../validation/boundaryDecoder';
 
 /** Stable identifier of the built-in orchestration session imported from Pane Chat. */
 export const LEGACY_ORCHESTRATION_SESSION_ID = 'legacy-pane-chat';
 export const ORCHESTRATION_SESSION_INTERNAL_ID_PREFIX = '__orchestration_session_';
 export const ORCHESTRATION_SESSION_STORE_VERSION = 1 as const;
-export const MAX_ORCHESTRATION_ACTIVITY = 100;
-export const MAX_ORCHESTRATION_ITEMS = 100;
-export const MAX_ORCHESTRATION_TEXT_LENGTH = 16_000;
+
+/** How many entries each Session keeps before the oldest are dropped; `retention` in config.json overrides each one. */
+export interface SessionRetention {
+  /** Activity entries kept per Session. */
+  sessionActivity: number;
+  /** Inbox items kept per Session. */
+  sessionInbox: number;
+}
+const positiveIntegerSchema = boundary.refine(boundary.number, value => Number.isInteger(value) && value > 0, 'expected a positive integer');
+export const DEFAULT_SESSION_RETENTION: SessionRetention = { sessionActivity: 100, sessionInbox: 200 };
+
+/** The configured retention, with the default for any value that is missing or not a positive integer. */
+export function resolveSessionRetention(configured: Partial<SessionRetention> | undefined): SessionRetention {
+  const pick = (key: keyof SessionRetention): number =>
+    decodeOptionalBoundary(configured?.[key], positiveIntegerSchema) ?? DEFAULT_SESSION_RETENTION[key];
+  return { sessionActivity: pick('sessionActivity'), sessionInbox: pick('sessionInbox') };
+}
 
 export function isOrchestrationInternalSessionId(sessionId: string): boolean {
   return sessionId === '__pane_chat_session__' || sessionId.startsWith(ORCHESTRATION_SESSION_INTERNAL_ID_PREFIX);

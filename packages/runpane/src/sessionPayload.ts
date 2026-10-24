@@ -5,32 +5,22 @@ import type { BoundarySchema, JsonValue } from './boundaryDecoder';
 /**
  * The Session create/update payload that people and agents write by hand for
  * `runpane sessions create|update --from-json`. Every problem is reported at once, and the link
- * URL scheme, dates and limits are checked before anything reaches Pane. The daemon applies the
+ * URL scheme and dates are checked before anything reaches Pane. The daemon applies the
  * same rules (main/src/services/orchestrationSessionPayload.ts); keep the two in step.
  */
-const MAX_ITEMS = 100;
-const MAX_TEXT_LENGTH = 16_000;
 const LINK_URL_PATTERN = /^(?:https?:\/\/|file:\/\/|grain:\/\/)/i;
-
-function boundedText(schema: BoundarySchema<string>): BoundarySchema<string> {
-  return boundary.refine(schema, value => value.length <= MAX_TEXT_LENGTH, `expected at most ${MAX_TEXT_LENGTH} characters`);
-}
-
-function boundedArray<Value>(schema: BoundarySchema<Value>): BoundarySchema<Value[]> {
-  return boundary.refine(boundary.array(schema), values => values.length <= MAX_ITEMS, `expected at most ${MAX_ITEMS} items`);
-}
 
 const isoDateSchema = boundary.refine(
   boundary.nonEmptyString,
   value => Number.isFinite(Date.parse(value)),
   'expected an ISO 8601 date such as 2026-10-14T09:30:00Z',
 );
-const textSchema = boundedText(boundary.string);
-const textArraySchema = boundedArray(textSchema);
+const textSchema = boundary.string;
+const textArraySchema = boundary.array(textSchema);
 const linkSchema = boundary.object({
-  label: boundedText(boundary.nonEmptyString),
+  label: boundary.nonEmptyString,
   url: boundary.refine(
-    boundedText(boundary.nonEmptyString),
+    boundary.nonEmptyString,
     value => LINK_URL_PATTERN.test(value),
     'expected a URL starting with https://, http://, file:// or grain://',
   ),
@@ -38,9 +28,9 @@ const linkSchema = boundary.object({
   provenance: boundary.optional(textSchema),
   addedAt: isoDateSchema,
 });
-const linksSchema = boundedArray(linkSchema);
+const linksSchema = boundary.array(linkSchema);
 const reportSchema = boundary.object({
-  summary: boundedText(boundary.nonEmptyString),
+  summary: boundary.nonEmptyString,
   status: boundary.enumeration('reported', 'verified'),
   evidence: boundary.refine(linksSchema, links => links.length > 0, 'expected at least one link'),
   reportedAt: isoDateSchema,
@@ -92,7 +82,6 @@ const SESSION_PAYLOAD_GUIDE = 'outputs and evidence items are {"label": string, 
   + '"url": https/http/file/grain URL, "addedAt": ISO 8601 date, "kind"?: evidence|output|ticket|pull-request|other, '
   + '"provenance"?: string}; decisions and blockers are arrays of strings; report is {"summary", '
   + '"status": reported|verified, "evidence": [at least one item], "reportedAt": ISO 8601 date, "provenance"}; '
-  + `at most ${MAX_ITEMS} items per array and ${MAX_TEXT_LENGTH} characters per text; `
   + 'arrays replace the stored value';
 
 function decodeSessionPayload<Value>(value: JsonValue, schema: BoundarySchema<Value>, action: 'create' | 'update'): Value {
