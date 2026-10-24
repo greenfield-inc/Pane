@@ -59,7 +59,11 @@ interface DropdownPosition {
 const TERMINAL_OVERLAY_LINGER_MS = 150;
 const TERMINAL_LOADING_TIMEOUT_MS = 30_000;
 
-const SKELETON_TRANSCRIPT_WIDTHS = ['w-2/3', 'w-1/2', 'w-5/6', 'w-1/3', 'w-3/4', 'w-2/5'];
+// The hover toolbar's buttons: a 24px target around a 16px chip.
+const TERMINAL_TOOLBAR_BUTTON = 'group/toolbar-button flex h-6 w-6 items-center justify-center rounded text-text-tertiary hover:text-text-secondary transition-colors';
+const TERMINAL_TOOLBAR_CHIP = 'rounded bg-surface-secondary/60 p-0.5 group-hover/toolbar-button:bg-surface-tertiary/80 transition-colors';
+
+const SKELETON_TRANSCRIPT_WIDTHS =['w-2/3', 'w-1/2', 'w-5/6', 'w-1/3', 'w-3/4', 'w-2/5'];
 
 // Opaque stand-in shaped like a CLI agent session: greeting banner, transcript
 // lines, and a prompt box, swept by a single shimmer so it reads as one
@@ -2107,7 +2111,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
 
       {/* Terminal scroll buttons — compact, revealed on hover or keyboard focus */}
       {isInitialized && (
-        <div className="absolute top-2 right-5 z-30 flex items-center gap-0.5 opacity-0 pointer-events-none group-hover/terminal:opacity-100 group-hover/terminal:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto transition-opacity">
+        <div className="absolute top-1 right-4 z-30 flex items-center opacity-0 pointer-events-none group-hover/terminal:opacity-100 group-hover/terminal:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto transition-opacity">
           <input
             ref={uploadInputRef}
             type="file"
@@ -2122,47 +2126,47 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
           <button
             type="button"
             onClick={() => uploadInputRef.current?.click()}
-            className="p-0.5 rounded bg-surface-secondary/60 hover:bg-surface-tertiary/80 text-text-tertiary hover:text-text-secondary transition-colors"
+            className={TERMINAL_TOOLBAR_BUTTON}
             title="Upload files"
           >
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <span className={TERMINAL_TOOLBAR_CHIP}><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M6 8V2" />
               <path d="M3.5 4.5L6 2l2.5 2.5" />
               <path d="M2 8.5v1.5h8V8.5" />
-            </svg>
+            </svg></span>
           </button>
           <button
             onClick={() => { void handleManualRefresh(); }}
-            className="p-0.5 rounded bg-surface-secondary/60 hover:bg-surface-tertiary/80 text-text-tertiary hover:text-text-secondary transition-colors"
+            className={TERMINAL_TOOLBAR_BUTTON}
             title="Refresh terminal"
           >
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <span className={TERMINAL_TOOLBAR_CHIP}><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M1.5 2v3h3" />
               <path d="M10.5 10v-3h-3" />
               <path d="M9.25 4.5A3.75 3.75 0 0 0 3 3.15L1.5 5" />
               <path d="M2.75 7.5A3.75 3.75 0 0 0 9 8.85L10.5 7" />
-            </svg>
+            </svg></span>
           </button>
           <button
             onClick={() => xtermRef.current?.scrollToTop()}
-            className="p-0.5 rounded bg-surface-secondary/60 hover:bg-surface-tertiary/80 text-text-tertiary hover:text-text-secondary transition-colors"
+            className={TERMINAL_TOOLBAR_BUTTON}
             title="Scroll to top"
           >
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <span className={TERMINAL_TOOLBAR_CHIP}><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M3 7L6 4L9 7" />
-            </svg>
+            </svg></span>
           </button>
           <button
             onClick={() => {
               xtermRef.current?.scrollToBottom();
               isNearBottomRef.current = true;
             }}
-            className="p-0.5 rounded bg-surface-secondary/60 hover:bg-surface-tertiary/80 text-text-tertiary hover:text-text-secondary transition-colors"
+            className={TERMINAL_TOOLBAR_BUTTON}
             title="Scroll to bottom"
           >
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <span className={TERMINAL_TOOLBAR_CHIP}><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M3 5L6 8L9 5" />
-            </svg>
+            </svg></span>
           </button>
         </div>
       )}

@@ -43,15 +43,15 @@ export function InspectorTabs({ tab, onTabChange, filesPanel, changesPanel, chan
               onTabChange(next.id);
             }}
             className={cn(
-              'flex flex-1 items-center justify-center gap-1.5 rounded-t-md border border-transparent px-2 text-[12px] font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-border-focus',
+              'flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-t-md border border-transparent px-2 text-[12px] font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-border-focus',
               selected
                 ? 'border-border-primary border-b-surface-primary bg-surface-primary text-text-primary -mb-px'
                 : 'text-text-tertiary hover:text-text-primary hover:bg-surface-hover',
             )}
           >
-            <span>{item.label}</span>
+            <span className="truncate">{item.label}</span>
             {!!item.badge && (
-              <span aria-hidden="true" className="rounded-full bg-surface-tertiary px-1.5 text-[10px] leading-4 text-text-secondary tabular-nums">{item.badge}</span>
+              <span aria-hidden="true" className="flex-shrink-0 rounded-full bg-surface-tertiary px-1.5 text-[10px] leading-4 text-text-secondary tabular-nums">{item.badge}</span>
             )}
           </button>
         );

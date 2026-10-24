@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { ChevronDown, ChevronUp, Terminal, X } from 'lucide-react';
+import { ChevronDown, Minus, Plus, Terminal, X } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useConfigStore } from '../stores/configStore';
 import { useSessionStore } from '../stores/sessionStore';
@@ -8,6 +8,7 @@ import { API } from '../utils/api';
 import { Dropdown } from './ui/Dropdown';
 import { Badge } from './ui/Badge';
 import { Toggle } from './ui/Toggle';
+import { IconButton } from './ui/Button';
 import { AddProjectDialog } from './AddProjectDialog';
 import { CloneFromGitHubDialog } from './CloneFromGitHubDialog';
 import { formatDistanceToNow, isValidTimestamp } from '../utils/timestampUtils';
@@ -378,25 +379,25 @@ export function HomePage() {
             <div className="flex items-center justify-between rounded-lg bg-surface-secondary p-4">
               <span className="text-text-primary">UI Scale</span>
               <div className="flex items-center gap-2">
-                <button
+                <IconButton
                   type="button"
                   aria-label="Decrease UI scale"
-                  onClick={() => void handleScaleChange(-0.1)}
+                  icon={<Minus className="h-4 w-4" />}
+                  variant="secondary"
+                  size="sm"
                   disabled={uiScale <= 0.8}
-                  className="rounded-md bg-surface-tertiary p-1 hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  <ChevronDown className="w-4 h-4" />
-                </button>
-                <span className="w-10 text-center text-sm text-text-secondary">{uiScale.toFixed(1)}x</span>
-                <button
+                  onClick={() => void handleScaleChange(-0.1)}
+                />
+                <span className="w-10 text-center text-sm text-text-secondary tabular-nums">{uiScale.toFixed(1)}x</span>
+                <IconButton
                   type="button"
                   aria-label="Increase UI scale"
-                  onClick={() => void handleScaleChange(0.1)}
+                  icon={<Plus className="h-4 w-4" />}
+                  variant="secondary"
+                  size="sm"
                   disabled={uiScale >= 1.5}
-                  className="rounded-md bg-surface-tertiary p-1 hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  <ChevronUp className="w-4 h-4" />
-                </button>
+                  onClick={() => void handleScaleChange(0.1)}
+                />
               </div>
             </div>
 
