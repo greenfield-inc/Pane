@@ -74,6 +74,14 @@ export function applyAppDirectoryOverrideFromArgs(args = getLaunchArgs()): strin
 }
 
 /**
+ * The installed Pane: a packaged build on the default data directory. Dev
+ * builds and --pane-dir/PANE_DIR instances run beside it.
+ */
+export function isPackagedOnDefaultDirectory(): boolean {
+  return Boolean(getElectronApp()?.isPackaged) && !getAppDirectoryOverrideFromArgs() && !process.env.PANE_DIR && !process.env.FOOZOL_DIR;
+}
+
+/**
  * Sets a custom Pane directory path. This should be called early in the
  * application lifecycle, before any services are initialized.
  */

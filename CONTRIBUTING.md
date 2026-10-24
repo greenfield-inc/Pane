@@ -63,7 +63,10 @@ install's data:
   default policy from enabling analytics when neither `analytics_consent_shown`
   nor `analytics_default_applied` records a choice. Native QA must establish an
   explicit analytics choice and its persisted preference before the first UI
-  render, or isolate analytics with a test-runtime guard.
+  render, or isolate analytics with a test-runtime guard. Instances with their
+  own `PANE_DIR` or `--pane-dir`, and unpackaged builds, send no install
+  heartbeat. Packaged QA on the default data directory should set
+  `RUNPANE_TELEMETRY_DISABLED=1`.
 - **Pane data** (`sessions.db`, `config.json`, skills) lives in `~/.pane`
   unless you set `PANE_DIR` or pass `--pane-dir`. Always set one for `pnpm dev`,
   Playwright runs and scripts. Keep the path short, like `~/.pane_test`: a long

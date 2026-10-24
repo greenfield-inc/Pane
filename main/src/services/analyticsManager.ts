@@ -4,21 +4,26 @@ import { app, BrowserWindow, net } from 'electron';
 import * as crypto from 'crypto';
 import * as os from 'os';
 import { failureDetails, FailureLimiter } from '../utils/failureTelemetry';
+import { isPackagedOnDefaultDirectory } from '../utils/appDirectory';
 import type { JsonValue } from '../../../shared/validation/boundaryDecoder';
 
 type AppExceptionSource = 'main-uncaught' | 'renderer-error' | 'renderer-rejection' | 'react-boundary' | 'renderer-crash' | 'renderer-oom' | 'shutdown';
-type AnalyticsConfig = Pick<ConfigManager, 'isAnalyticsEnabled' | 'getAnalyticsSettings' | 'isVerbose'>;
+type AnalyticsConfig = Pick<ConfigManager, 'isAnalyticsEnabled' | 'getAnalyticsSettings' | 'getOrCreateAnalyticsInstallId' | 'isVerbose'>;
+
+const HEARTBEAT_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 export class AnalyticsManager extends EventEmitter {
   private configManager: AnalyticsConfig;
   private mainWindow: BrowserWindow | null = null;
   private exceptionLimiter = new FailureLimiter();
   private errorRequests = 0;
+  private heartbeatTimer: NodeJS.Timeout | undefined;
 
   constructor(configManager: AnalyticsConfig, private runtime = {
     fetch: (url: string, options: RequestInit) => net.fetch(url, options),
     getVersion: () => app.getVersion(),
     getAppPath: () => app.getAppPath(),
+    isInstalledApp: isPackagedOnDefaultDirectory,
   }) {
     super();
     this.configManager = configManager;
@@ -103,6 +108,53 @@ export class AnalyticsManager extends EventEmitter {
     }
   }
 
+  /**
+   * Counts active installs, so it ignores the analytics toggle. The payload is
+   * exactly what the Privacy copy discloses; see docs/ANALYTICS_INVARIANTS.md.
+   */
+  startHeartbeat(): void {
+    if (this.heartbeatTimer || !this.runtime.isInstalledApp()) return;
+    if (process.env.DO_NOT_TRACK === '1' || process.env.RUNPANE_TELEMETRY_DISABLED) return;
+    void this.sendHeartbeat();
+    this.heartbeatTimer = setInterval(() => void this.sendHeartbeat(), HEARTBEAT_INTERVAL_MS);
+    this.heartbeatTimer.unref();
+  }
+
+  stopHeartbeat(): void {
+    clearInterval(this.heartbeatTimer);
+    this.heartbeatTimer = undefined;
+  }
+
+  private async sendHeartbeat(): Promise<void> {
+    try {
+      const installId = await this.configManager.getOrCreateAnalyticsInstallId();
+      await this.postCapture('app_heartbeat', `install:${installId}`, {
+        app_version: this.runtime.getVersion(),
+        platform: os.platform(),
+      });
+    } catch {
+      // Telemetry must not change app behaviour.
+    }
+  }
+
+  /** Personless direct capture; starts the request synchronously. */
+  private postCapture(event: string, distinctId: string, properties: Record<string, JsonValue | undefined>): Promise<Response> {
+    const settings = this.configManager.getAnalyticsSettings();
+    const token = settings.posthogApiKey || 'phc_wir25CCsjr2NsZGEdlWNdvwcNG1XDjhxc9RyL5KDCf1';
+    const host = settings.posthogHost || 'https://runpane.com/api/c';
+    return this.runtime.fetch(`${host.replace(/\/$/, '')}/capture/`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        api_key: token,
+        event,
+        properties: { ...properties, distinct_id: distinctId, $process_person_profile: false },
+        timestamp: new Date().toISOString(),
+      }),
+      signal: AbortSignal.timeout(1500),
+    });
+  }
+
   private sendErrorEvent(event: '$exception' | 'runpane_local_control_failed', properties: Record<string, JsonValue | undefined>): void {
     try {
       if (!this.isEnabled() || this.errorRequests >= 4) return;
@@ -110,30 +162,16 @@ export class AnalyticsManager extends EventEmitter {
       const distinctId = settings.installId && /^install_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(settings.installId)
         ? `install:${settings.installId}` : undefined;
       if (!distinctId) return; // Don't create identity or write config on an error path.
-      const token = settings.posthogApiKey || 'phc_wir25CCsjr2NsZGEdlWNdvwcNG1XDjhxc9RyL5KDCf1';
-      const host = settings.posthogHost || 'https://runpane.com/api/c';
-      const body = JSON.stringify({
-        api_key: token,
-        event,
-        properties: {
-          ...properties,
-          distinct_id: distinctId,
-          $process_person_profile: false,
-          app_version: this.runtime.getVersion(),
-          platform: os.platform(),
-          electron_version: process.versions.electron,
-        },
-      });
       this.errorRequests++;
       let request: Promise<Response>;
       try {
         // Start immediately: a fatal monitor callback may never reach another
         // microtask. Completion is still best effort when the process exits.
-        request = this.runtime.fetch(`${host.replace(/\/$/, '')}/capture/`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body,
-          signal: AbortSignal.timeout(1500),
+        request = this.postCapture(event, distinctId, {
+          ...properties,
+          app_version: this.runtime.getVersion(),
+          platform: os.platform(),
+          electron_version: process.versions.electron,
         });
       } catch {
         this.errorRequests--;
