@@ -2136,6 +2136,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
             </svg></span>
           </button>
           <button
+            type="button"
             onClick={() => { void handleManualRefresh(); }}
             className={TERMINAL_TOOLBAR_BUTTON}
             title="Refresh terminal"
@@ -2148,6 +2149,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
             </svg></span>
           </button>
           <button
+            type="button"
             onClick={() => xtermRef.current?.scrollToTop()}
             className={TERMINAL_TOOLBAR_BUTTON}
             title="Scroll to top"
@@ -2157,6 +2159,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
             </svg></span>
           </button>
           <button
+            type="button"
             onClick={() => {
               xtermRef.current?.scrollToBottom();
               isNearBottomRef.current = true;
