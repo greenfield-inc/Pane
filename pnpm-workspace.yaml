@@ -5,6 +5,31 @@ packages:
   - 'native'
   - 'packages/runpane'
   - 'shared'
+onlyBuiltDependencies:
+  - electron
+  - better-sqlite3-multiple-ciphers
+  - '@lydell/node-pty'
+  - esbuild
+  - msgpackr-extract
+  - electron-winstaller
+overrides:
+  prebuild-install>node-abi: ^4.33.0
+  d3-sankey>d3-array: ^3.2.0
+  # Security floors for transitive packages, each kept inside its current major.
+  dompurify: ^3.4.17
+  protobufjs@7: ^7.6.1
+  shell-quote: ^1.9.0
+  '@xmldom/xmldom@0.8': ^0.8.15
+  tmp: ^0.2.6
+  brace-expansion@1: ^1.1.20
+  brace-expansion@2: ^2.1.6
+  '@isaacs/brace-expansion': ^5.0.1
+  minimatch@3: ^3.1.4
+  minimatch@5: ^5.1.8
+  minimatch@9: ^9.0.7
+  minimatch@10: ^10.2.3
+patchedDependencies:
+  '@xterm/addon-webgl@0.20.0-beta.298': patches/@xterm__addon-webgl@0.20.0-beta.298.patch
 minimumReleaseAge: 10080
 minimumReleaseAgeExclude:
   # Exact ACP and assistant-ui releases validated together by the Chat fixtures.

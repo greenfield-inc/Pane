@@ -14,23 +14,6 @@
     "node": "^22.23.4 || ^24.22.1 || ^26.12.1",
     "pnpm": ">=8.0.0"
   },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "electron",
-      "better-sqlite3-multiple-ciphers",
-      "@lydell/node-pty",
-      "esbuild",
-      "msgpackr-extract",
-      "electron-winstaller"
-    ],
-    "overrides": {
-      "prebuild-install>node-abi": "^4.33.0",
-      "d3-sankey>d3-array": "^3.2.0"
-    },
-    "patchedDependencies": {
-      "@xterm/addon-webgl@0.20.0-beta.298": "patches/@xterm__addon-webgl@0.20.0-beta.298.patch"
-    }
-  },
   "scripts": {
     "dev": "node scripts/pane-run-script.js",
     "daemon:headless": "pnpm run build:main && pnpm exec electron ./main/dist/main/src/daemon/headless.js",
@@ -121,28 +104,28 @@
     "npm": "10.9.4",
     "smol-toml": "1.7.1",
     "web-streams-polyfill": "^3.3.3",
-    "ws": "^8.20.1"
+    "ws": "^8.22.0"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.10.2",
     "@electron/rebuild": "4.2.0",
     "@oxlint/plugins": "1.76.0",
-    "@playwright/test": "^1.52.0",
+    "@playwright/test": "^1.64.1",
     "ajv": "6.12.6",
     "concurrently": "^9.1.0",
     "electron": "43.8.3",
     "electron-builder": "26.7.0",
     "electron-builder-squirrel-windows": "26.7.0",
     "esbuild": "0.25.7",
-    "js-yaml": "^4.1.1",
+    "js-yaml": "^4.3.2",
     "knip": "6.29.0",
     "oxlint": "1.76.0",
-    "playwright": "^1.52.0",
+    "playwright": "^1.64.1",
     "png-to-ico": "^3.0.1",
     "png2icons": "^2.0.1",
     "potrace": "^2.1.8",
-    "sharp": "^0.34.5",
-    "wait-on": "^9.0.0"
+    "sharp": "^0.35.5",
+    "wait-on": "^9.5.1"
   },
   "build": {
     "appId": "com.dcouple.pane",
