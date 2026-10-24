@@ -1236,6 +1236,9 @@ body.understory {
 .pane-changes-list-row:hover { background: var(--color-surface-hover); }
 .pane-changes-list-row.is-active { background: var(--color-surface-hover); }
 .pane-changes-list-row.is-selected { background: var(--color-surface-selected); }
+/* The list owns focus and points at a row with aria-activedescendant, so the
+   keyboard ring goes on that row. */
+.pane-changes-list:focus-visible .pane-changes-list-row.is-active { outline: 2px solid var(--color-focus-ring); outline-offset: -2px; }
 
 /* The dir prefix absorbs truncation first (its shrink factor dwarfs the
    basename's); the basename truncates only when it alone overflows the row. */
