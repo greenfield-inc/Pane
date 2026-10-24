@@ -304,7 +304,7 @@ export function DetailPanel({
         {!gitUnavailable && session.worktreePath && (
           <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
             <div className="px-2 pt-2 flex-shrink-0"><SectionHeader>History</SectionHeader></div>
-            <div ref={detailScrollSurfaceRef} role="region" tabIndex={0} aria-label="Commit history" className="flex-1 min-h-0 overflow-y-auto px-2 pb-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus-ring-subtle">
+            <div ref={detailScrollSurfaceRef} role="region" tabIndex={0} aria-label="Commit history" className="flex-1 min-h-0 overflow-y-auto px-2 pb-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-border-focus">
               <GitHistoryGraph
                 sessionId={session.id}
                 baseBranch={session.baseBranch || 'main'}
