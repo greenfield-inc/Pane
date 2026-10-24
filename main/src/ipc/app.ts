@@ -17,7 +17,22 @@ import {
   WINDOW_BACKGROUND_COLORS_KEY,
 } from '../utils/windowBackgroundColor';
 
-export function registerAppHandlers(ipcMain: IpcMain, services: AppServices): void {
+async function openExternalUrl(url: string): Promise<void> {
+  if (process.platform === 'darwin') {
+    // On macOS, shell.openExternal can fail silently due to permission/entitlement issues.
+    // Use the native `open` command which works reliably.
+    await new Promise<void>((resolve, reject) => {
+      execFile('open', [url], (error) => {
+        if (error) reject(error);
+        else resolve();
+      });
+    });
+  } else {
+    await shell.openExternal(url);
+  }
+}
+
+export function registerAppHandlers(ipcMain: IpcMain, services: AppServices, openExternal: (url: string) => Promise<void> = openExternalUrl): void {
   const { app } = services;
 
   // Basic app info handlers
@@ -119,18 +134,11 @@ export function registerAppHandlers(ipcMain: IpcMain, services: AppServices): vo
       return { success: false, error: 'That port on the host is not reachable from this computer right now.' };
     }
     try {
-      if (process.platform === 'darwin') {
-        // On macOS, shell.openExternal can fail silently due to permission/entitlement issues.
-        // Use the native `open` command which works reliably.
-        await new Promise<void>((resolve, reject) => {
-          execFile('open', [url], (error) => {
-            if (error) reject(error);
-            else resolve();
-          });
-        });
-      } else {
-        await shell.openExternal(url);
+      const parsed = new URL(url);
+      if (!['http:', 'https:', 'mailto:'].includes(parsed.protocol)) {
+        throw new Error('Only HTTP, HTTPS, and mailto URLs can be opened externally');
       }
+      await openExternal(parsed.href);
       return { success: true };
     } catch (error) {
       console.error('Failed to open external URL:', error);
