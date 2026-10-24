@@ -9,6 +9,21 @@ import { commandExecutor } from '../utils/commandExecutor';
 import { getCurrentWorktreeName } from '../utils/worktreeUtils';
 import { getAppDirectory } from '../utils/appDirectory';
 import { getUpdateCapabilities } from '../utils/updateCapabilities';
+import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+
+// runpane failures raised before an update operation can act: preflight, or
+// staging a standalone Node runtime that is missing or unpatched.
+const FALLBACK_CODES = new Set(['ERR_UPDATE_PREFLIGHT', 'ERR_UPDATE_RUNTIME', 'ERR_NODE_RUNTIME']);
+const failureSchema = boundary.object({ ok: boundary.literal(false), error: boundary.object({ code: boundary.string }) });
+
+/** The code of runpane's `--json` failure on stdout, or '' for anything else. */
+function failureCode(stdout: string): string {
+  try {
+    return decodeBoundary(JSON.parse(stdout), failureSchema).error.code;
+  } catch {
+    return '';
+  }
+}
 
 const MAC_UPDATE_COMMAND = 'curl -fsSL https://runpane.com/install.sh | sh';
 
@@ -209,20 +224,21 @@ export function registerUpdaterHandlers(ipcMain: IpcMain, { app, versionChecker 
       autoUpdater.autoInstallOnAppQuit = false;
       const paneDir = getAppDirectory();
       const engine = path.join(paneDir, 'bin', 'runpane.cjs');
-      const result = await new Promise<{ failure: string | null; killed: boolean; stdout: string }>(resolve => {
+      const result = await new Promise<{ failure: string | null; stdout: string }>(resolve => {
         execFile(process.execPath, [engine, 'update', '--pane-dir', paneDir, '--json'], {
           env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, encoding: 'utf8', timeout: 60_000,
-        }, (error, stdout, stderr) => resolve({ failure: error ? stderr.trim() || error.message : null, killed: Boolean(error?.killed), stdout }));
+        }, (error, stdout, stderr) => resolve({ failure: error ? stderr.trim() || error.message : null, stdout }));
       });
       if (!result.failure) {
         return { success: true, message: 'Independent update started. Pane will restart after staging and checkpointing.', data: JSON.parse(result.stdout) };
       }
-      // An operation that printed its status, or was killed mid-start, may own
-      // the update; installing beside it would race it.
-      if (result.killed || result.stdout.trim()) throw new Error(result.failure);
-      // The independent update needs a standalone Node and a writable install
-      // directory. Without them, electron-updater installs the artifact it
-      // already downloaded: Squirrel on macOS, the NSIS installer (with its
+      // Fall back only when runpane reported a failure that changed nothing.
+      // A printed operation status, or a timeout mid-start, may own the update,
+      // and installing beside it would race it.
+      if (!FALLBACK_CODES.has(failureCode(result.stdout))) throw new Error(result.failure);
+      // The independent update needs a patched standalone Node and a writable
+      // install directory. Without them, electron-updater installs the artifact
+      // it already downloaded: Squirrel on macOS, the NSIS installer (with its
       // own elevation prompt) on Windows.
       console.warn('[AutoUpdater] Independent update unavailable, installing with electron-updater:', result.failure);
       autoUpdater.quitAndInstall(false, true);
