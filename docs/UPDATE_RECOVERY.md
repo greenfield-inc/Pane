@@ -96,8 +96,9 @@ can still be in progress. `failed` and `needs-attention` return exit 1. Command 
 preflight errors also return nonzero. `--wait` has no overall timeout. Ctrl+C stops
 the waiting caller, not the independent operation; inspect status before retrying.
 There is no supported operation cancellation command. A fresh update runs
-preflight before checking locks. If preflight succeeds and an existing lock is
-found, it returns that operation's status instead of starting another install.
+preflight before checking locks. If preflight succeeds and another operation
+holds the lock, it returns that operation's status instead of starting another
+install.
 During downtime, preflight may fail before reaching the lock. Use `--status`
 (which bypasses preflight), or read the journal directly, to inspect recovery.
 
@@ -198,15 +199,19 @@ leave locks and snapshots intact and ask a maintainer to inspect them.
    updater does not automate or validate such a rollback. Get maintainer help
    when compatibility or installer state is uncertain.
 
-A post-shutdown `needs-attention` operation deliberately keeps its locks. There
-is no automated recovery/lock-clear command. After recovery is verified and all
-operation-owned helpers/installers have exited, the installation owner or a
-maintainer can archive the operation and move aside only locks whose `owner.json`
-contains this exact operation ID. Lock directories are listed in
-`preflight.json` as `lockDirectory` and `additionalLockDirectories`. Preserve the
-journal/checkpoint/snapshot; do not delete another operation's locks or infer
-ownership from a reused PID. Incomplete or ambiguous locks require the same
-manual inspection. If recovery of a crashed lock cleanup is itself interrupted,
-its persistent cleanup claim also requires manual inspection; another caller
-will not steal it or report a new update as completed. Logout/reboot continuation
-is not guaranteed.
+An operation releases its locks when it ends `complete` or `failed`, or ends
+`needs-attention` after its `install` step completed (for example, a failed
+health check or panel restoration). The next `runpane update` also reclaims a
+lock left by such an operation. It runs in a new operation directory, so the
+old journal, checkpoint and snapshot stay in place.
+
+A `needs-attention` operation that stopped before or during `install` keeps
+its locks, because an installer child may still be running. A lock owned by an
+operation that has not ended is not reclaimed either. To recover, verify that no
+operation-owned helper or installer is running, then move aside only locks whose
+`owner.json` contains this exact operation ID. Lock directories are listed in
+`preflight.json` as `lockDirectory` and `additionalLockDirectories`. Do not
+infer ownership from a reused PID. If recovery of a crashed lock cleanup is
+itself interrupted, its persistent cleanup claim also requires manual
+inspection; another caller will not steal it or report a new update as
+completed. Logout/reboot continuation is not guaranteed.
