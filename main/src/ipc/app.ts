@@ -1,7 +1,8 @@
-import { IpcMain, shell } from 'electron';
-import { execFile } from 'child_process';
+import { IpcMain } from 'electron';
 import type { AppServices } from './types';
 import { revealInFileManager } from '../utils/revealInFileManager';
+import { openExternalUrl } from '../utils/openExternalUrl';
+import { PaneError, paneErrorText } from '../../../shared/paneError';
 import { remotePaneClientController } from '../daemon/client/remotePaneClient';
 import type { PaneCommandValue } from '../daemon/commandRegistry';
 import { decodeBoundary } from '../../../shared/validation/boundaryDecoder';
@@ -119,21 +120,11 @@ export function registerAppHandlers(ipcMain: IpcMain, services: AppServices): vo
       return { success: false, error: 'That port on the host is not reachable from this computer right now.' };
     }
     try {
-      if (process.platform === 'darwin') {
-        // On macOS, shell.openExternal can fail silently due to permission/entitlement issues.
-        // Use the native `open` command which works reliably.
-        await new Promise<void>((resolve, reject) => {
-          execFile('open', [url], (error) => {
-            if (error) reject(error);
-            else resolve();
-          });
-        });
-      } else {
-        await shell.openExternal(url);
-      }
+      await openExternalUrl(url);
       return { success: true };
     } catch (error) {
       console.error('Failed to open external URL:', error);
+      if (error instanceof PaneError) return { success: false, error: paneErrorText(error) };
       return { success: false, error: error instanceof Error ? error.message : 'Failed to open URL' };
     }
   });
