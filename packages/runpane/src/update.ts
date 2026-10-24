@@ -10,7 +10,7 @@ import { RunpaneError } from './errors';
 import { preflightUpdate, updateHostSchema } from './updatePreflight';
 import { stageUpdateRuntime } from './updateRuntime';
 import { checkUpdateSupervisor, startUpdateSupervisor, removeUpdateSupervisor } from './updateSupervisor';
-import { assertUpdateQuiescence, claimUpdateLock, releaseUpdateLock, executeUpdate, readUpdateJournal, writeUpdateJson, type UpdateJournal } from './updateOperation';
+import { assertUpdateQuiescence, claimUpdateLock, releaseUpdateLock, executeUpdate, readUpdateJournal, updateLockReleasable, writeUpdateJson, type UpdateJournal } from './updateOperation';
 import { activateManagedCli, runNpm, stageCliPackage, stageUpdateCode, type StagedCli } from './updatePackage';
 import { identifyPythonCli, stagePythonCli, installPythonCli } from './updatePython';
 import { stageApp, installStagedApp, type StagedApp } from './updateArtifacts';
@@ -246,7 +246,7 @@ export async function runUpdateHelper(directory: string, artifacts: UpdateArtifa
   } });
   if (terminal(result)) {
     // A new operation gets its own directory, so this journal and snapshot stay.
-    for (const lock of [preflight.lockDirectory, ...preflight.additionalLockDirectories]) releaseUpdateLock(lock, id);
+    if (updateLockReleasable(result)) for (const lock of [preflight.lockDirectory, ...preflight.additionalLockDirectories]) releaseUpdateLock(lock, id);
     try { removeUpdateSupervisor(id); } catch { /* terminal journal prevents another execution */ }
   }
   return result.phase === 'complete' ? 0 : 1;

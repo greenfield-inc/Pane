@@ -80,6 +80,12 @@ export async function executeUpdate(file: string, steps: UpdateSteps): Promise<U
   return journal;
 }
 
+/** No owned installer can still be writing. A needs-attention operation that
+ *  stopped before finishing install may have a surviving installer child. */
+export function updateLockReleasable(journal: UpdateJournal): boolean {
+  return journal.phase === 'complete' || journal.phase === 'failed' || (journal.phase === 'needs-attention' && journal.completed.includes('install'));
+}
+
 /** Publish a fully durable owner directory atomically; never expose an empty lock. */
 export function claimUpdateLock(directory: string, id: string, statusFile: string) {
   const candidate = fs.mkdtempSync(`${directory}.${id}.`);
@@ -104,7 +110,7 @@ export function claimUpdateLock(directory: string, id: string, statusFile: strin
         writeUpdateJson(owner.statusFile, journal);
       }
     }
-    if (journal.id === owner.id && ['complete', 'failed', 'needs-attention'].includes(journal.phase)) {
+    if (journal.id === owner.id && updateLockReleasable(journal)) {
       releaseUpdateLock(directory, owner.id);
       if (!fs.existsSync(directory)) return claimUpdateLock(directory, id, statusFile);
       const current = decodeBoundary(JSON.parse(fs.readFileSync(file, 'utf8')), boundary.object({ id: boundary.string }));
@@ -125,7 +131,7 @@ export function releaseUpdateLock(directory: string, id: string): void {
     if (fs.existsSync(marker)) {
       const journal = readUpdateJournal(owner.statusFile);
       const releasing = decodeBoundary(JSON.parse(fs.readFileSync(marker, 'utf8')), boundary.object({ id: boundary.string, pid: boundary.number }));
-      if (journal.id !== id || !['complete', 'failed', 'needs-attention'].includes(journal.phase) || releasing.id !== id || releasing.pid <= 0) return;
+      if (journal.id !== id || !updateLockReleasable(journal) || releasing.id !== id || releasing.pid <= 0) return;
       try { process.kill(releasing.pid, 0); return; } catch (error) {
         if (decodeBoundary(error, boundary.object({ code: boundary.string })).code !== 'ESRCH') return;
       }
