@@ -6,7 +6,7 @@ import { boundary, decodeBoundary } from '../shared/validation/boundaryDecoder';
 test('streams a bounded Chat thread through the remote client and reconnects without stopping its host', async ({ page }, testInfo) => {
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
-  await openConnectedRemotePwa(page, { sessionNames: ['Chat fixture'], panelTitles: ['Claude'] });
+  await openConnectedRemotePwa(page, { sessionNames: ['Chat fixture'], panelTitles: ['Claude'], chatEnabled: true });
   const conversation = { panelId: 'anim-panel-0', workspaceId: 'anim-remote-0', provider: 'claude' as const, nativeSessionId: 'exact-native-id', generation: 2, active: 'chat' as const, preferred: 'chat' as const };
   const view: AgentChatView = { panelId: conversation.panelId, conversation, available: true, setupRequired: false, running: false, permissions: [], transcript: {
     panelId: conversation.panelId, generation: 2, revision: 0,
@@ -98,7 +98,7 @@ test('streams a bounded Chat thread through the remote client and reconnects wit
 
 
 test('keeps an uncertain draft visible and retries only its original delivery', async ({ page }) => {
-  await openConnectedRemotePwa(page, { sessionNames: ['Delivery fixture'], panelTitles: ['Claude'] });
+  await openConnectedRemotePwa(page, { sessionNames: ['Delivery fixture'], panelTitles: ['Claude'], chatEnabled: true });
   const conversation = { panelId: 'anim-panel-0', workspaceId: 'anim-remote-0', provider: 'claude' as const, nativeSessionId: 'delivery-native-id', generation: 2, active: 'chat' as const, preferred: 'chat' as const };
   const view: AgentChatView = { panelId: conversation.panelId, conversation, available: true, setupRequired: false, running: false, permissions: [], transcript: { panelId: conversation.panelId, generation: 2, revision: 0, messages: [] } };
   const panel = { id: conversation.panelId, sessionId: conversation.workspaceId, type: 'terminal', title: 'Claude', state: { isActive: true, customState: { agentType: 'claude', agentChat: { conversation } } }, metadata: { createdAt: '', lastActiveAt: '', position: 0 } };
@@ -148,7 +148,7 @@ test('keeps an uncertain draft visible and retries only its original delivery', 
 
 for (const theme of ['light', 'dark']) test(`keeps pending-switch and reconnect controls readable in a narrow header (${theme})`, async ({ page }, testInfo) => {
   if (testInfo.project.name === 'phone') await page.setViewportSize({ width: 320, height: 844 });
-  await openConnectedRemotePwa(page, { sessionNames: ['Header fixture'], panelTitles: ['Claude'] });
+  await openConnectedRemotePwa(page, { sessionNames: ['Header fixture'], panelTitles: ['Claude'], chatEnabled: true });
   const conversation = { panelId: 'anim-panel-0', workspaceId: 'anim-remote-0', provider: 'claude' as const, nativeSessionId: 'header-native-id', generation: 2, active: 'chat' as const, preferred: 'chat' as const, pendingSwitch: { target: 'terminal' as const, reason: 'Wait for the active turn' } };
   const view: AgentChatView = { panelId: conversation.panelId, conversation, available: true, setupRequired: false, running: true, permissions: [], transcript: { panelId: conversation.panelId, generation: 2, revision: 0, messages: [] } };
   const panel = { id: conversation.panelId, sessionId: conversation.workspaceId, type: 'terminal', title: 'Claude', state: { isActive: true, customState: { agentType: 'claude', agentChat: { conversation } } }, metadata: { createdAt: '', lastActiveAt: '', position: 0 } };

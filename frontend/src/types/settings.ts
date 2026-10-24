@@ -38,7 +38,6 @@ export type SettingsSettingId =
   | 'terminal-reference-line-count'
   | 'terminal-shell'
   | 'default-pane-chat-agent'
-  | 'agent-chat-enabled'
   | 'default-agent-interface'
   | 'mcp-registration'
   | 'mcp-toolsets'
@@ -76,7 +75,8 @@ export type SettingsSettingId =
   | 'journey-timings'
   | 'pty-host'
   | 'additional-paths'
-  | 'mission-control';
+  | 'mission-control'
+  | 'experimental-chat';
 
 export interface SettingsTarget {
   category: SettingsCategoryId;

@@ -64,7 +64,9 @@ export class AgentChatManager {
   constructor(private readonly options: AgentChatManagerOptions = {}) {}
 
   attachNative(port: NativeChatPort): void { this.native = port; }
-  private enabled(): boolean { return this.options.enabled?.() ?? getRuntimeConfigManager().getConfig().agentChatEnabled !== false; }
+  enabled(): boolean { return this.options.enabled?.() ?? getRuntimeConfigManager().getConfig().experimentalChatEnabled === true; }
+  /** With experimental Chat off, a saved conversation is inert and its tab is a plain terminal. */
+  private inert(panelId: string): boolean { return !this.acquiring.has(panelId) && !!this.record(panelId) && !this.enabled(); }
   private session(panelId: string) { return this.codex.get(panelId)?.session ?? this.adapters.get(panelId)?.session; }
 
   private async prepareCodex(panel: ToolPanel, cwd: string, env: NodeJS.ProcessEnv, shellType: string, profile: CodexChatProfile, preference?: AgentInterface): Promise<boolean> {
@@ -283,6 +285,7 @@ export class AgentChatManager {
   }
 
   async prepareNativeLaunch(panel: ToolPanel, cwd: string, env: NodeJS.ProcessEnv, command: string, shellType: string, isWSL: boolean): Promise<string> {
+    if (this.inert(panel.id)) { this.dropRuntime(panel.id); return command; }
     const codex = this.codex.get(panel.id);
     if (codex) {
       const saved = this.required(panel.id);
@@ -381,6 +384,18 @@ export class AgentChatManager {
     return augmented;
   }
 
+  /** An inert tab launches its own native command, which resumes the
+   * conversation through the agentSessionId every Chat record mirrors. A Chat
+   * runtime left from before the flag turned off is released best effort and
+   * never blocks that launch. */
+  private dropRuntime(panelId: string): void {
+    const runtime = this.adapters.get(panelId) ?? this.codex.get(panelId);
+    this.adapters.delete(panelId);
+    this.codex.delete(panelId);
+    runtime?.release().catch(error => console.warn(`[AgentChat] Chat is off; releasing the Chat runtime of panel ${panelId} failed: ${reasonOf(error)}`));
+    void this.stopObserving(panelId);
+  }
+
   detachObservers(): void {
     for (const timer of this.timers.values()) clearInterval(timer);
     this.timers.clear();
@@ -397,7 +412,7 @@ export class AgentChatManager {
   private reconcile(panelId: string): void {
     if (this.known.has(panelId)) return;
     const saved = this.record(panelId);
-    if (!saved) return;
+    if (!saved || !this.enabled()) return;
     this.known.add(panelId);
     if (saved.conversation.active !== 'stopped' || saved.conversation.transition) {
       panelManager.commitAgentChat(panelId, { ...saved, conversation: { ...saved.conversation, active: 'stopped', nativeStartup: undefined, recovery: 'Pane restarted without a live runtime handle. Verify release before recovering this exact conversation.' } });
@@ -405,11 +420,13 @@ export class AgentChatManager {
   }
 
   mode(panelId: string): AgentInterface | 'stopped' | undefined {
+    if (this.inert(panelId)) return undefined;
     this.reconcile(panelId);
     return this.record(panelId)?.conversation.active;
   }
 
   status(panelId: string): AgentState | undefined {
+    if (this.inert(panelId)) return undefined;
     const saved = this.record(panelId);
     if (!saved || saved.conversation.active === 'terminal') return;
     if (saved.conversation.active === 'stopped') return 'unknown';
@@ -456,11 +473,13 @@ export class AgentChatManager {
   }
 
   isNativeStarting(panelId: string): boolean {
+    if (this.inert(panelId)) return false;
     const record = this.record(panelId)?.conversation;
     return !!(record?.nativeStartup && (record.active === 'terminal' || record.transition?.target === 'terminal') && this.native?.pid(panelId));
   }
 
   guardNativeInput(panelId: string, data: string): void {
+    if (this.inert(panelId)) return;
     this.reconcile(panelId);
     if (this.adopting.has(panelId)) throw new PaneError('CHAT_TRANSITION_IN_PROGRESS', 'Pane is identifying this conversation. No terminal input was sent.', 'Wait for identification to finish.');
     const record = this.record(panelId)?.conversation;
@@ -913,16 +932,16 @@ export class AgentChatManager {
     session.answer(requestId, generation, optionId);
   }
 
-  manages(panelId: string): boolean { return !!this.record(panelId); }
+  manages(panelId: string): boolean { return !this.inert(panelId) && !!this.record(panelId); }
 
   assertNativeInitialize(panelId: string): void {
-    if (this.acquiring.has(panelId)) return;
+    if (this.acquiring.has(panelId) || this.inert(panelId)) return;
     const saved = this.record(panelId);
     if (!saved) return;
     throw new PaneError('CHAT_RUNTIME_OWNED', 'This tab already has a conversation owner. No native runtime was started.', 'Open its current view or explicitly recover the saved conversation.');
   }
 
-  activePanelIds(): string[] { return [...new Set([...this.adapters.keys(), ...this.codex.keys(), ...this.trackers.keys(), ...databaseService.getAgentChatPanelIds()])]; }
+  activePanelIds(): string[] { return [...new Set([...this.adapters.keys(), ...this.codex.keys(), ...this.trackers.keys(), ...databaseService.getAgentChatPanelIds().filter(panelId => !this.inert(panelId))])]; }
 
   processIds(): Map<string, number[]> {
     const result = new Map<string, number[]>();

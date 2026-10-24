@@ -15,6 +15,7 @@ import { formatKeyDisplay } from '../../utils/hotkeyUtils';
 import { Tooltip } from '../ui/Tooltip';
 import { Kbd } from '../ui/Kbd';
 import { usePanelStore } from '../../stores/panelStore';
+import { isChatEnabled, useConfigStore } from '../../stores/configStore';
 import { showActionError } from '../../stores/errorStore';
 import { PanelTabStatusDot } from './PanelTabStatusDot';
 import type { PanelTabPresentationResolver } from '../../types/panelComponents';
@@ -110,6 +111,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
   }, [activePanelId, panels]);
 
   const hotkeys = useHotkeyStore(s => s.hotkeys);
+  const chatEnabled = useConfigStore(s => isChatEnabled(s.config));
   const hotkeyDisplay = useCallback((id: string) => {
     const keys = hotkeys.get(id)?.keys;
     return keys ? formatKeyDisplay(keys) : null;
@@ -360,7 +362,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
         ) : null;
 
         const tooltipTab = tooltipContent && tabButton ? <Tooltip content={tooltipContent} side="bottom">{tabButton}</Tooltip> : tabButton;
-        const contextualTab = panel.type === 'terminal' && tooltipTab
+        const contextualTab = chatEnabled && panel.type === 'terminal' && tooltipTab
           ? <AgentViewMenu panelId={panel.id} title={displayTitle} client={window.electronAPI.agentChat} trigger={tooltipTab} />
           : tooltipTab;
         const tab = (

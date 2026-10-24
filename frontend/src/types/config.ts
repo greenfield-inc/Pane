@@ -78,7 +78,8 @@ export interface AppConfig {
   defaultModel?: string;
   // Default agent used by the global Pane Chat orchestrator terminal
   defaultOrchestratorAgent?: PaneChatAgent;
-  agentChatEnabled?: boolean;
+  // Experimental: open Claude and Codex agent tabs as Chat (off by default).
+  experimentalChatEnabled?: boolean;
   defaultAgentInterface?: 'terminal' | 'chat';
   // Auto-check for updates
   autoCheckUpdates?: boolean;
@@ -200,7 +201,7 @@ export interface UpdateConfigRequest {
   defaultPermissionMode?: 'approve' | 'ignore';
   defaultModel?: string;
   defaultOrchestratorAgent?: PaneChatAgent;
-  agentChatEnabled?: boolean;
+  experimentalChatEnabled?: boolean;
   defaultAgentInterface?: 'terminal' | 'chat';
   autoCheckUpdates?: boolean;
   autoStartOnBoot?: boolean;

@@ -1,6 +1,12 @@
 # Agent Chat
 
-Agent tabs can use Chat or the agent's native Terminal interface. Right-click
+Chat is experimental and off by default. Turn it on in Settings → Advanced →
+Experimental → **Chat interface**. While it is off, agent tabs are plain
+terminals: Pane starts no Chat adapter or server, and a tab saved in Chat opens
+in its terminal and resumes the same conversation there. Turning it back on
+restores the tab's Chat record.
+
+With Chat on, agent tabs can use Chat or the agent's native Terminal interface. Right-click
 an agent tab (or use Shift+F10, the Context Menu key, or a touch long press) for
 **View as Chat** and **View as Terminal**. The React Native companion also has
 a Chat/Terminal switch. Chat header actions use the same contextual interaction.
@@ -13,8 +19,8 @@ new work. Successful transfers are quiet; incomplete transfers show a notice.
 
 The last selected interface is one global preference for new agent tabs, saved
 across restart. Existing tabs retain their choice. Settings → AI & Agents →
-**Default agent interface** can also change the default. **Chat interface**
-disables new Chat transitions without terminating existing Chat work.
+**Default agent interface** can also change the default; it appears only while
+Chat is on.
 
 ## Provider connections
 

@@ -222,10 +222,56 @@ it('restores saved native ownership as stopped without starting a replacement pr
     launch: { command: 'claude', cwd: process.cwd(), shellType: 'bash', executable: 'claude', version: '2.1.309', strictMcpConfig: true, journalFile: '/unused', settingsFile: '/unused' },
     processes: { terminal: [], chat: [] },
   });
-  const restarted = new AgentChatManager();
+  const restarted = new AgentChatManager({ enabled: () => true });
   expect(restarted.view(panel.id).conversation).toMatchObject({ active: 'stopped', nativeSessionId: 'exact-saved-id', generation: 4 });
   expect(() => restarted.guardNativeInput(panel.id, 'submit\r')).toThrow(/stopped/i);
   expect(() => restarted.assertNativeInitialize(panel.id)).toThrow(/already has a conversation owner/i);
+});
+
+it('opens a broken saved Chat conversation as a plain native terminal while experimental Chat is off, and keeps it for later', async () => {
+  const id = randomUUID();
+  databaseService.createSession({ id, name: id, initial_prompt: '', worktree_name: id, worktree_path: process.cwd(), project_id: null, tool_type: 'none' });
+  const claude = await panelManager.createPanel({ sessionId: id, type: 'terminal', initialState: { agentType: 'claude', initialCommand: 'claude', agentSessionId: 'claude-chat-id' } });
+  const codex = await panelManager.createPanel({ sessionId: id, type: 'terminal', initialState: { agentType: 'codex', initialCommand: 'codex --yolo' } });
+  const launch = { command: 'claude', cwd: process.cwd(), shellType: 'bash', executable: 'claude', version: '2.1.309', strictMcpConfig: false, journalFile: '/unused', settingsFile: '/unused' };
+  // An unrecorded spawn makes every release, and so the Chat-to-Terminal switch, fail.
+  panelManager.commitAgentChat(claude.id, { conversation: { panelId: claude.id, workspaceId: id, provider: 'claude', nativeSessionId: 'claude-chat-id', active: 'chat', preferred: 'chat', generation: 3 }, launch, processes: { terminal: [], chat: [], unverifiedSpawn: 'chat' } });
+  panelManager.commitAgentChat(codex.id, { conversation: { panelId: codex.id, workspaceId: id, provider: 'codex', nativeSessionId: 'codex-chat-id', active: 'chat', preferred: 'chat', generation: 2 }, launch: { ...launch, executable: 'codex' }, processes: { terminal: [], chat: [], unverifiedSpawn: 'chat' } });
+  const manager = new AgentChatManager();
+  for (const panel of [claude, codex]) {
+    expect(manager.manages(panel.id)).toBe(false);
+    expect(manager.mode(panel.id)).toBeUndefined();
+    expect(manager.status(panel.id)).toBeUndefined();
+    expect(() => manager.assertNativeInitialize(panel.id)).not.toThrow();
+    expect(() => manager.guardNativeInput(panel.id, 'hello\r')).not.toThrow();
+  }
+  expect(await manager.prepareNativeLaunch(panelManager.getPanel(claude.id)!, process.cwd(), process.env, 'claude --resume claude-chat-id', 'bash', false)).toBe('claude --resume claude-chat-id');
+  expect(await manager.prepareNativeLaunch(panelManager.getPanel(codex.id)!, process.cwd(), process.env, 'codex resume codex-chat-id', 'bash', false)).toBe('codex resume codex-chat-id');
+  expect(manager.activePanelIds()).not.toContain(claude.id);
+  const optedIn = new AgentChatManager({ enabled: () => true });
+  expect(optedIn.view(codex.id).conversation).toMatchObject({ provider: 'codex', nativeSessionId: 'codex-chat-id', generation: 2 });
+});
+
+it.skipIf(process.platform === 'win32')('keeps a new Codex tab in its native Terminal while experimental Chat is off', async () => {
+  const { mkdtempSync, writeFileSync, rmSync } = await import('fs');
+  const { tmpdir } = await import('os');
+  const { join } = await import('path');
+  const { getRuntimeConfigManager } = await import('../../core/runtime');
+  await getRuntimeConfigManager().updateConfig({ defaultAgentInterface: 'chat' });
+  const directory = mkdtempSync(join(tmpdir(), 'pane-codex-off-'));
+  const executable = join(directory, 'codex');
+  writeFileSync(executable, '#!/bin/sh\necho "codex-cli 0.0.0"\n', { mode: 0o700 });
+  const id = randomUUID();
+  databaseService.createSession({ id, name: id, initial_prompt: '', worktree_name: id, worktree_path: directory, project_id: null, tool_type: 'none' });
+  const panel = await panelManager.createPanel({ sessionId: id, type: 'terminal', initialState: { agentType: 'codex', initialCommand: executable } });
+  const manager = new AgentChatManager();
+  try {
+    expect(await manager.prepareFreshChat(panel, directory, process.env, 'bash', false)).toBe(false);
+    expect(await manager.prepareNativeLaunch(panel, directory, process.env, executable, 'bash', false)).toBe(executable);
+    // SAFETY: This fixture creates a terminal panel and reads its typed custom state.
+    expect((panelManager.getPanel(panel.id)!.state.customState as TerminalPanelState).agentChat).toBeUndefined();
+    expect(manager.view(panel.id).available).toBe(false);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
 it.skipIf(process.platform === 'win32')('shares one Codex owner between native and Chat and remembers the last selected interface', async () => {

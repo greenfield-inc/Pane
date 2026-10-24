@@ -45,7 +45,8 @@ export interface AnalyticsIdentity {
 type HtmlFileOpenMode = 'preview' | 'source';
 
 export interface AppConfig {
-  agentChatEnabled?: boolean;
+  // Experimental: open Claude and Codex agent tabs as Chat (off by default).
+  experimentalChatEnabled?: boolean;
   defaultAgentInterface?: 'terminal' | 'chat';
   verbose?: boolean;
   anthropicApiKey?: string;

@@ -5,7 +5,7 @@ import { SettingsSection } from '../../ui/SettingsSection';
 import { SettingRow, SettingsPage } from '../SettingRow';
 import { ImmediateToggle } from '../SettingsControls';
 import type { SettingsPersistence } from '../useSettingsPersistence';
-import { isMissionControlEnabled } from '../../../stores/configStore';
+import { isChatEnabled, isMissionControlEnabled } from '../../../stores/configStore';
 import type { Journey, JourneyTimingSummary } from '../../../../../shared/types/journeyTimings';
 import type { IPCResponse } from '../../../utils/api';
 
@@ -159,6 +159,18 @@ export function AdvancedSettings({ persistence, platform, onDirtyChange }: Advan
             label="Mission Control"
             value={isMissionControlEnabled(config)}
             onSave={(value) => persistence.saveConfig('mission-control', { missionControlEnabled: value })}
+          />
+        </SettingRow>
+        <SettingRow
+          settingId="experimental-chat"
+          label="Chat interface"
+          description="Open Claude and Codex agents in a chat view instead of the terminal. Turning it off returns Chat tabs to the terminal and keeps their conversations."
+          saveState={persistence.saveStates['experimental-chat']}
+        >
+          <ImmediateToggle
+            label="Chat interface"
+            value={isChatEnabled(config)}
+            onSave={(value) => persistence.saveConfig('experimental-chat', { experimentalChatEnabled: value })}
           />
         </SettingRow>
         <SettingRow

@@ -3,6 +3,7 @@ import type { PaneCommandRegistry, PaneCommandValue } from '../daemon/commandReg
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { agentChatManager } from '../services/agentChat/agentChatManager';
 import { installClaudeAdapter } from '../services/agentChat/adapterSetup';
+import { PaneError } from '../../../shared/paneError';
 
 const interfaceSchema = boundary.enumeration('terminal', 'chat');
 const sendSchema = boundary.object({
@@ -16,7 +17,11 @@ const sendSchema = boundary.object({
 export function registerAgentChatHandlers(ipcMain: IpcMain, registry: PaneCommandRegistry): void {
   registry.register('agent-chat:get', (panelId: string) => agentChatManager.view(decodeBoundary(panelId, boundary.nonEmptyString)));
   registry.register('agent-chat:identify', (panelId: string, nativeId: string, socketPath: string) => agentChatManager.identify(decodeBoundary(panelId, boundary.nonEmptyString), decodeBoundary(nativeId, boundary.nonEmptyString), decodeBoundary(socketPath, boundary.nonEmptyString)));
-  registry.register('agent-chat:setup', async () => { await installClaudeAdapter(); return { installed: true }; });
+  registry.register('agent-chat:setup', async () => {
+    if (!agentChatManager.enabled()) throw new PaneError('CHAT_DISABLED', 'Chat is off, so Pane did not install the Chat adapter.', 'Turn on Chat interface in Settings > Advanced > Experimental, then retry.');
+    await installClaudeAdapter();
+    return { installed: true };
+  });
   registry.register('agent-chat:switch', (panelId: string, mode: PaneCommandValue, generation: number) => agentChatManager.switchTo(
     decodeBoundary(panelId, boundary.nonEmptyString), decodeBoundary(mode, interfaceSchema), decodeBoundary(generation, boundary.number),
   ));

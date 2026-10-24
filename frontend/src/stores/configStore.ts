@@ -26,6 +26,11 @@ export function isMissionControlEnabled(config: AppConfig | null): boolean {
   return config?.missionControlEnabled === true;
 }
 
+/** Chat is experimental: agent tabs stay in Terminal until the user opts in. */
+export function isChatEnabled(config: AppConfig | null): boolean {
+  return config?.experimentalChatEnabled === true;
+}
+
 /** What a click on an .html file in Explorer opens; the browser preview unless the user chose source. */
 export function htmlFileOpenModeOf(config: AppConfig | null): HtmlFileOpenMode {
   return config?.htmlFileOpenMode === 'source' ? 'source' : 'preview';

@@ -39,6 +39,7 @@ export function registerConfigHandlers(
         })),
         voiceTranscription: buildRemotePwaVoiceAffordance(config),
         sessionAgents: buildRemotePwaSessionAgents(config.defaultOrchestratorAgent),
+        chatEnabled: config.experimentalChatEnabled === true,
       };
     };
     commandRegistry.register('remote:pwa-affordances', buildAffordances);

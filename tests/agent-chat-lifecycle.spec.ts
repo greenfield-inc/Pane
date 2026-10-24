@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import path from 'node:path';
+import { installElectronApiMock } from './electronApiMock';
 
 test('opens tab actions with right click and keyboard without a visible menu button', async ({ page }) => {
   const fixture = path.resolve('tests/fixtures/agent-chat-context.tsx');
@@ -177,4 +178,32 @@ for (const embedded of [false, true]) test(`identifies a legacy conversation thr
   await page.keyboard.press('Enter');
   await expect(page.getByLabel('Host switch result')).toHaveText(`01a169da-b81b-7552-bccf-e7c790a37ece:${embedded ? '' : '/owned/codex-control.sock'}`);
   await expect(page.getByRole('menuitemradio', { name: 'View as Chat', exact: true })).toBeEnabled();
+});
+
+test('with Chat off, a saved Chat tab opens as a plain terminal even when its host switch would fail', async ({ page }) => {
+  const fixture = path.resolve('tests/fixtures/agent-chat-context.tsx');
+  await page.route('**/agent-chat-context.html?chat-off', route => route.fulfill({ contentType: 'text/html', body: `<html><body><div id="root"></div><script type="module">import RefreshRuntime from "/@react-refresh"; RefreshRuntime.injectIntoGlobalHook(window); window.$RefreshReg$ = () => {}; window.$RefreshSig$ = () => type => type; window.__vite_plugin_react_preamble_installed__ = true;</script><script type="module" src="/@fs/${fixture}"></script></body></html>` }));
+  await page.goto('/agent-chat-context.html?chat-off');
+  await expect(page.getByText('Native terminal')).toBeVisible();
+  await expect(page.getByRole('radiogroup', { name: 'View this conversation as' })).toHaveCount(0);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await expect(page.locator('[role=status]')).toHaveCount(0);
+  await page.getByRole('tab', { name: 'Claude fixture' }).click({ button: 'right' });
+  await expect(page.getByRole('menuitemradio', { name: 'View as Chat', exact: true })).toHaveCount(0);
+  await expect(page.getByLabel('Host switch result')).toHaveText('');
+});
+
+test('Chat interface is an Experimental setting that starts off and gates the default interface', async ({ page }) => {
+  await installElectronApiMock(page);
+  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await page.getByRole('button', { name: 'Settings' }).first().click();
+  await page.getByRole('button', { name: 'AI & Agents', exact: true }).click();
+  await expect(page.getByRole('radiogroup', { name: 'Default agent interface' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Advanced', exact: true }).click();
+  const toggle = page.getByRole('switch', { name: 'Chat interface' });
+  await expect(toggle).toHaveAttribute('aria-checked', 'false');
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-checked', 'true');
+  await page.getByRole('button', { name: 'AI & Agents', exact: true }).click();
+  await expect(page.getByRole('radiogroup', { name: 'Default agent interface' })).toBeVisible();
 });

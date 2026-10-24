@@ -55,7 +55,7 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategoryDefinition[] = [
     label: 'AI & Agents',
     description: 'Agent defaults, context, and CLI installations.',
     icon: Bot,
-    settingIds: ['agent-chat-enabled', 'default-agent-interface', 'default-pane-chat-agent', 'mcp-registration', 'mcp-toolsets', 'agent-skill', 'agent-context', 'session-defaults', 'claude-executable'],
+    settingIds: ['default-agent-interface', 'default-pane-chat-agent', 'mcp-registration', 'mcp-toolsets', 'agent-skill', 'agent-context', 'session-defaults', 'claude-executable'],
     aliases: ['claude', 'codex', 'cursor', 'pane chat', 'agents.md', 'mcp', 'tools', 'skill'],
   },
   {
@@ -119,7 +119,7 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategoryDefinition[] = [
     label: 'Advanced',
     description: 'Diagnostics, terminal backend, environment paths, and experimental features.',
     icon: SlidersHorizontal,
-    settingIds: ['verbose-logging', 'developer-mode', 'journey-timings', 'pty-host', 'additional-paths', 'mission-control', 'attention-inbox'],
+    settingIds: ['verbose-logging', 'developer-mode', 'journey-timings', 'pty-host', 'additional-paths', 'mission-control', 'experimental-chat', 'attention-inbox'],
     aliases: ['debug', 'verbose', 'developer', 'performance', 'timings', 'pty', 'path', 'experimental', 'mission control', 'inbox', 'attention'],
   },
 ] as const;

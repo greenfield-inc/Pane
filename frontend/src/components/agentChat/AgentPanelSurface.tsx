@@ -4,9 +4,10 @@ import type { AgentChatClient } from '../../../../shared/types/agentChat';
 import { AgentChatHeader } from './AgentChatHeader';
 const AgentChatPanel = lazy(() => import('./AgentChatPanel'));
 
-export function AgentPanelSurface({ panel, client, connected, children }: { panel: ToolPanel; client: AgentChatClient; connected?: boolean; children: ReactNode }) {
+/** `chatEnabled` is undefined until the host reports its flag. While it is false the host treats a saved conversation as inert, so the tab is only its terminal. */
+export function AgentPanelSurface({ panel, client, connected, chatEnabled, children }: { panel: ToolPanel; client: AgentChatClient; connected?: boolean; chatEnabled?: boolean; children: ReactNode }) {
   // SAFETY: This surface is only mounted for terminal panels.
-  const conversation = (panel.state.customState as TerminalPanelState | undefined)?.agentChat?.conversation;
+  const conversation = chatEnabled === false ? undefined : (panel.state.customState as TerminalPanelState | undefined)?.agentChat?.conversation;
   if (conversation && conversation.active !== 'terminal' && !conversation.nativeStartup) return <Suspense fallback={<div role="status" className="p-4 text-sm text-text-secondary">Loading conversation…</div>}><AgentChatPanel panelId={panel.id} client={client} connected={connected} /></Suspense>;
   return <div className="relative flex h-full min-h-0 w-full flex-1 flex-col">
     {conversation && <AgentChatHeader panelId={panel.id} client={client} connected={connected} />}

@@ -71,7 +71,7 @@ export class ConfigManager extends EventEmitter {
       defaultPermissionMode: 'ignore',
       defaultModel: 'sonnet',
       defaultOrchestratorAgent: DEFAULT_PANE_CHAT_AGENT,
-      agentChatEnabled: true,
+      experimentalChatEnabled: false,
       defaultAgentInterface: 'terminal',
       autoStartOnBoot: true,
       keepAwakeWhileSessionsActive: true,
@@ -208,7 +208,6 @@ export class ConfigManager extends EventEmitter {
         defaultOrchestratorAgent: normalizePaneChatAgent(
           loadedConfig.defaultOrchestratorAgent ?? this.config.defaultOrchestratorAgent,
         ),
-        agentChatEnabled: loadedConfig.agentChatEnabled !== false,
         defaultAgentInterface: loadedConfig.defaultAgentInterface === 'chat' ? 'chat' : 'terminal',
         remoteDaemon: normalizeRemoteDaemonConfig(loadedConfig.remoteDaemon),
         // Use !== undefined to distinguish "user cleared all entries" (empty array → preserve)

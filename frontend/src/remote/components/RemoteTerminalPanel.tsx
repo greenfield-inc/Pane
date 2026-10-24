@@ -15,6 +15,8 @@ interface RemoteTerminalPanelProps {
   panel: ToolPanel;
   sessionId: string;
   connectionStatus: RemotePaneConnectionStatus;
+  /** Undefined until the host reports its Chat flag. */
+  chatEnabled?: boolean;
   shortcuts: RemotePwaTerminalShortcut[];
   voiceTranscription: RemotePwaVoiceTranscriptionAffordance;
   shortcutsLoading?: boolean;
@@ -22,7 +24,7 @@ interface RemoteTerminalPanelProps {
 }
 
 export function RemoteTerminalPanel(props: RemoteTerminalPanelProps) {
-  return <AgentPanelSurface panel={props.panel} client={props.adapter.agentChat} connected={props.connectionStatus === 'connected'}><NativeRemoteTerminalPanel {...props} /></AgentPanelSurface>;
+  return <AgentPanelSurface panel={props.panel} client={props.adapter.agentChat} connected={props.connectionStatus === 'connected'} chatEnabled={props.chatEnabled}><NativeRemoteTerminalPanel {...props} /></AgentPanelSurface>;
 }
 
 function NativeRemoteTerminalPanel({

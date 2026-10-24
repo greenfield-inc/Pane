@@ -12,6 +12,8 @@ import type { ListeningPortsSnapshot } from '../shared/types/listeningPorts';
 export interface RemotePwaMockOptions {
   /** Panes the mock host reports, in sidebar order. */
   sessionNames?: string[];
+  /** The host's experimental Chat flag; omitted like a host older than the flag. */
+  chatEnabled?: boolean;
   /** Panels the selected pane reports, in host order. */
   panelTitles?: string[];
   /** Each panel's type, by index into panelTitles; terminal when absent. */
@@ -158,6 +160,7 @@ function buildFixtures(options: RemotePwaMockOptions) {
       { name: 'Codex', command: 'codex' },
     ],
     sessionAgents: { agents: ['claude', 'codex'], defaultAgent: 'codex' },
+    chatEnabled: options.chatEnabled,
     voiceTranscription: {
       availableModes: [],
       defaultMode: 'streaming',

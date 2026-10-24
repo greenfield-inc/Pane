@@ -316,6 +316,8 @@ export interface RemotePwaAffordances {
   voiceTranscription: RemotePwaVoiceTranscriptionAffordance;
   /** Hosts older than the PWA's Sessions support omit this. */
   sessionAgents?: RemotePwaSessionAgents;
+  /** The host's experimental Chat flag. Hosts older than the flag omit this. */
+  chatEnabled?: boolean;
 }
 
 export interface RemotePaneConnectionState {
