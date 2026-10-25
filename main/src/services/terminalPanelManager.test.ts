@@ -2517,3 +2517,41 @@ describe('TerminalPanelManager Agent Farm resume', () => {
     disposeFlowControlRecord(terminal.flowControl);
   });
 });
+
+type DestroyTerminalAccess = {
+  terminals: Map<string, TerminalUnderTest>;
+  destroyTerminal(panelId: string): Promise<void>;
+  flushOutputBuffer(terminal: TerminalUnderTest): void;
+};
+
+describe('TerminalPanelManager destroyTerminal teardown', () => {
+  afterEach(() => {
+    vi.mocked(panelManager.getPanel).mockReset();
+  });
+
+  it('arms the WSL kill even when the graceful exit write throws', async () => {
+    const manager = testAccess<DestroyTerminalAccess>(new TerminalPanelManager());
+    const terminal = createTerminal({ isWSL: true, outputBuffer: '' });
+    terminal.pty.write.mockImplementation(() => { throw new Error('EPIPE'); });
+    manager.terminals.set(terminal.panelId, terminal);
+
+    await manager.destroyTerminal(terminal.panelId).catch(() => undefined);
+    expect(terminal.pty.write).toHaveBeenCalledWith('exit\r');
+    await new Promise(resolve => setTimeout(resolve, 600));
+
+    expect(terminal.pty.kill).toHaveBeenCalled();
+    expect(manager.terminals.has(terminal.panelId)).toBe(false);
+  });
+
+  it('kills the PTY when the final output flush throws', async () => {
+    const manager = testAccess<DestroyTerminalAccess>(new TerminalPanelManager());
+    const terminal = createTerminal({ outputBuffer: '' });
+    manager.terminals.set(terminal.panelId, terminal);
+    vi.spyOn(manager, 'flushOutputBuffer').mockImplementation(() => { throw new Error('event sink exploded'); });
+
+    await expect(manager.destroyTerminal(terminal.panelId)).rejects.toThrow('event sink exploded');
+
+    expect(terminal.pty.kill).toHaveBeenCalled();
+    expect(manager.terminals.has(terminal.panelId)).toBe(false);
+  });
+});
