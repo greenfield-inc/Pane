@@ -119,6 +119,16 @@ export interface PopoverButtonProps extends React.ButtonHTMLAttributes<HTMLButto
   children: React.ReactNode;
 }
 
+const popoverButtonVariants = {
+  default: 'text-text-primary enabled:hover:bg-bg-hover',
+  primary: 'text-interactive enabled:hover:bg-surface-interactive-hover',
+  // Red text on the same neutral hover plate the other items use. A red
+  // background token here has no alpha channel (Tailwind emits the bare
+  // `var(--color-status-error)`), so tinting it silently paints a solid red
+  // block over the red label — the menu item then reads as an unlabeled slab.
+  danger: 'text-status-error enabled:hover:bg-bg-hover',
+};
+
 export const PopoverButton: React.FC<PopoverButtonProps> = ({
   variant = 'default',
   className,
@@ -126,23 +136,13 @@ export const PopoverButton: React.FC<PopoverButtonProps> = ({
   onMouseEnter,
   ...props
 }) => {
-  const variants = {
-    default: 'text-text-primary enabled:hover:bg-bg-hover',
-    primary: 'text-interactive enabled:hover:bg-surface-interactive-hover',
-    // Red text on the same neutral hover plate the other items use. A red
-    // background token here has no alpha channel (Tailwind emits the bare
-    // `var(--color-status-error)`), so tinting it silently paints a solid red
-    // block over the red label — the menu item then reads as an unlabeled slab.
-    danger: 'text-status-error enabled:hover:bg-bg-hover',
-  };
-
   return (
     <button
       className={cn(
         'w-full whitespace-nowrap rounded px-3 py-2 text-left text-sm transition-colors duration-fast',
         'focus:outline-none focus:bg-bg-hover',
         'disabled:opacity-50 disabled:cursor-not-allowed',
-        variants[variant],
+        popoverButtonVariants[variant],
         className
       )}
       // Once focus is in the menu, it follows the pointer, so a focused item never stays lit beside the
