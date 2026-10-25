@@ -18,7 +18,7 @@ const SelectTrigger = forwardRef<
       'flex h-9 w-full items-center justify-between gap-1 rounded-md px-3 py-2',
       'text-sm',
       'bg-bg-primary',
-      'border border-border-subtle',
+      'border border-border-primary',
       'shadow-sm',
       'ring-offset-bg-primary',
       'placeholder:text-text-muted',
@@ -88,7 +88,7 @@ const SelectContent = forwardRef<
           'relative z-50 max-h-96 min-w-[8rem] overflow-hidden',
           'rounded-md',
           'bg-surface-primary',
-          'border border-border-subtle',
+          'border border-border-primary',
           'shadow-lg',
           'data-[state=open]:animate-fade-in data-[state=open]:animate-zoom-in-95',
           'transition-all duration-200',
@@ -150,8 +150,8 @@ const SelectItem = forwardRef<
       className={cn(
         'relative flex w-full cursor-default select-none items-center rounded-sm py-1.5 pl-2 pr-8 text-sm outline-none',
         'text-text-primary',
-        'hover:bg-surface-secondary hover:text-text-primary',
-        'focus:bg-surface-secondary focus:text-text-primary',
+        'hover:bg-bg-hover hover:text-text-primary',
+        'focus:bg-bg-hover focus:text-text-primary',
         'data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
         'transition-colors duration-150',
         className
@@ -182,7 +182,7 @@ const SelectSeparator = forwardRef<
 >(({ className, ...props }, ref) => (
   <SelectPrimitive.Separator
     ref={ref}
-    className={cn('-mx-1 my-1 h-px bg-border-subtle', className)}
+    className={cn('-mx-1 my-1 h-px bg-border-primary', className)}
     {...props}
   />
 ));

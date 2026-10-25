@@ -10,7 +10,7 @@ function getStatusIcon(status: ArchiveProgressTask['status']) {
     case 'failed':
       return <AlertCircle className="w-3 h-3 text-status-error" />;
     case 'queued':
-      return <Archive className="w-3 h-3 text-status-waiting" />;
+      return <Archive className="w-3 h-3 text-status-neutral" />;
     default:
       return <Loader2 className="w-3 h-3 text-status-info animate-spin" />;
   }
@@ -152,7 +152,7 @@ export function ArchiveProgress() {
             </span>
           )}
           {progress.tasks.filter(t => t.status === 'queued').length > 0 && (
-            <span className="px-1.5 py-0.5 bg-status-waiting/20 text-status-waiting text-xs rounded-full">
+            <span className="px-1.5 py-0.5 bg-status-neutral/20 text-status-neutral text-xs rounded-full">
               {progress.tasks.filter(t => t.status === 'queued').length} queued
             </span>
           )}
