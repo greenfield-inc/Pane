@@ -101,6 +101,7 @@ export const TerminalPopover: React.FC<TerminalPopoverProps> = ({
   return createPortal(
     <div
       ref={ref}
+      data-terminal-popover
       className={cn('fixed z-[10001] w-56 max-w-[calc(100vw-20px)] max-h-[calc(100vh-20px)] overflow-y-auto bg-surface-primary border border-border-primary rounded-lg shadow-dropdown-elevated p-1', className)}
       style={{ left: position.left, top: position.top }}
     >
@@ -126,13 +127,13 @@ export const PopoverButton: React.FC<PopoverButtonProps> = ({
   ...props
 }) => {
   const variants = {
-    default: 'text-text-primary hover:bg-bg-hover',
-    primary: 'text-interactive hover:bg-surface-interactive-hover',
+    default: 'text-text-primary enabled:hover:bg-bg-hover',
+    primary: 'text-interactive enabled:hover:bg-surface-interactive-hover',
     // Red text on the same neutral hover plate the other items use. A red
     // background token here has no alpha channel (Tailwind emits the bare
     // `var(--color-status-error)`), so tinting it silently paints a solid red
     // block over the red label — the menu item then reads as an unlabeled slab.
-    danger: 'text-status-error hover:bg-bg-hover',
+    danger: 'text-status-error enabled:hover:bg-bg-hover',
   };
 
   return (
@@ -147,7 +148,7 @@ export const PopoverButton: React.FC<PopoverButtonProps> = ({
       // Once focus is in the menu, it follows the pointer, so a focused item never stays lit beside the
       // hovered one. Focus elsewhere (the terminal under a link popover) stays put.
       onMouseEnter={event => {
-        if (event.currentTarget.closest('[role="menu"]')?.contains(document.activeElement)) event.currentTarget.focus();
+        if (event.currentTarget.closest('[data-terminal-popover]')?.contains(document.activeElement)) event.currentTarget.focus();
         onMouseEnter?.(event);
       }}
       {...props}
