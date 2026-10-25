@@ -62,12 +62,12 @@ it('uses persisted verbose changes immediately for every optional production log
   expect(sink.error).toHaveBeenCalledTimes(3);
 });
 
-it('keeps development logging enabled when verbose is off', async () => {
+it('keeps development logging enabled but leaves debug and render logs to verbose', async () => {
   const sink = await logger('development');
   sink.write();
-  expect(sink.log.mock.calls).toEqual([['normal', { paneId: 'pane-1' }], ['render']]);
+  expect(sink.log.mock.calls).toEqual([['normal', { paneId: 'pane-1' }]]);
   expect(sink.warn).toHaveBeenCalledWith('warning');
-  expect(sink.debug).toHaveBeenCalledWith('debug');
+  expect(sink.debug).not.toHaveBeenCalled();
   expect(sink.info).toHaveBeenCalledWith('information');
   expect(sink.error).toHaveBeenCalledWith('failure');
 });

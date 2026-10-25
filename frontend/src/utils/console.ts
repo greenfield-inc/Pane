@@ -1,7 +1,8 @@
 import { useConfigStore } from '../stores/configStore';
 
 // Read the current persisted setting at each call so Settings takes effect immediately.
-const isLoggingEnabled = () => process.env.NODE_ENV === 'development' || useConfigStore.getState().config?.verbose === true;
+const isVerboseEnabled = () => useConfigStore.getState().config?.verbose === true;
+const isLoggingEnabled = () => process.env.NODE_ENV === 'development' || isVerboseEnabled();
 
 export const devLog = {
   log: (...args: unknown[]) => {
@@ -23,7 +24,7 @@ export const devLog = {
   },
   
   debug: (...args: unknown[]) => {
-    if (isLoggingEnabled()) {
+    if (isVerboseEnabled()) {
       // eslint-disable-next-line no-console -- this module is the centralized console adapter.
       console.debug(...args);
     }
@@ -39,10 +40,10 @@ export const devLog = {
 
 /**
  * Performance-focused logging for component renders
- * Uses the same development/verbose gate as other optional diagnostics
+ * Only logs with verbose enabled, so development builds stay quiet by default
  */
 export const renderLog = (...args: unknown[]) => {
-  if (isLoggingEnabled()) {
+  if (isVerboseEnabled()) {
     // eslint-disable-next-line no-console -- this module is the centralized console adapter.
     console.log(...args);
   }
