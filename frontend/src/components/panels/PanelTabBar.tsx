@@ -1,5 +1,5 @@
 import React, { useCallback, memo, useState, useRef, useEffect, useMemo } from 'react';
-import { Plus, X, Terminal, GitBranch, FileCode, FileDiff, FileText, BarChart3, PanelRight, FolderTree, TerminalSquare, Play, Globe, Pencil } from 'lucide-react';
+import { Plus, X, Terminal, PanelRight, FolderTree, TerminalSquare, Play, Globe, Pencil } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { cn } from '../../utils/cn';
 import { useHotkey } from '../../hooks/useHotkey';
@@ -11,11 +11,11 @@ import { formatKeyDisplay } from '../../utils/hotkeyUtils';
 import { useHotkeyStore } from '../../stores/hotkeyStore';
 import { Tooltip } from '../ui/Tooltip';
 import { useTitleBarSlotStore } from '../../stores/titleBarSlotStore';
-import { editorPanelState } from '../../services/openFileInEditor';
 import { Kbd } from '../ui/Kbd';
-import { CLI_BRAND_ICONS, getCliBrandIcon } from '../ui/brandIconRegistry';
+import { getCliBrandIcon } from '../ui/brandIconRegistry';
 import { visibleAgentPresets } from '../../utils/agentPresets';
 import { PanelTabStrip } from './PanelTabStrip';
+import { getPanelIcon } from './panelIcon';
 import { PromoteChatButton } from './PromoteChatButton';
 import { CustomCommandForm } from './CustomCommandForm';
 import type { WorktreeFileSyncEntry } from '../../../../shared/types/worktreeFileSync';
@@ -65,37 +65,6 @@ Analyze this project's actual framework and structure first, then create the com
 IMPORTANT: After creating the script, TEST THE RESTART PATH — run 'node scripts/pane-run-script.js', then kill it ungracefully (Ctrl+C or kill the terminal), then run it again. It must reclaim the same port without EADDRINUSE or lock file errors. A single happy-path run proves nothing. Then commit and merge to main so all future worktrees have it.`;
 }
 
-function getPanelIcon(type: ToolPanelType, panel?: ToolPanel) {
-  // Check for brand-specific terminal panels by title
-  if (type === 'terminal' && panel) {
-    const title = panel.title.toLowerCase();
-    for (const [keyword, IconComponent] of Object.entries(CLI_BRAND_ICONS)) {
-      if (title.includes(keyword)) {
-        return <IconComponent className="w-4 h-4" />;
-      }
-    }
-  }
-  switch (type) {
-    case 'terminal':
-      return <Terminal className="w-4 h-4" />;
-    case 'diff':
-      return <GitBranch className="w-4 h-4" />;
-    case 'explorer':
-      return <FolderTree className="w-4 h-4" />;
-    case 'notes':
-      return <FileText className="w-4 h-4" />;
-    case 'editor':
-      return panel && editorPanelState(panel)?.diff ? <FileDiff className="w-4 h-4" /> : <FileText className="w-4 h-4" />;
-    case 'logs':
-      return <FileCode className="w-4 h-4" />;
-    case 'dashboard':
-      return <BarChart3 className="w-4 h-4" />;
-    case 'browser':
-      return <Globe className="w-4 h-4" />;
-    default:
-      return null;
-  }
-}
 
 export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
   panels,
@@ -807,7 +776,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
                   className={menuItemClass}
                   onClick={() => handleAddPanel(type)}
                 >
-                  <span className="flex flex-shrink-0 [&>svg]:h-3.5 [&>svg]:w-3.5">{getPanelIcon(type)}</span>
+                  {getPanelIcon(type, undefined, 'w-3.5 h-3.5 flex-shrink-0')}
                   <span className="capitalize">{type}</span>
                 </button>
               );})}

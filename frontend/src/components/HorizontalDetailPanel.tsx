@@ -201,7 +201,7 @@ export function HorizontalDetailPanel({
                   </Tooltip>
                 )}
                 items={ideItems}
-                footer={onConfigureIDE ? <DropdownMenuItem icon={Settings} label="Configure..." onClick={onConfigureIDE} /> : undefined}
+                footer={onConfigureIDE ? <DropdownMenuItem icon={Settings} label="Configure…" onClick={onConfigureIDE} /> : undefined}
                 position="auto"
                 width="sm"
               />

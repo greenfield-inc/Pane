@@ -2,7 +2,7 @@ import { createElement, type ReactElement } from 'react';
 import { AiderIcon, ClaudeIcon, CursorIcon, GeminiIcon, OpenAIIcon, OpenCodeIcon } from './BrandIcons';
 
 /** Lookup map used to dynamically show the right icon for any terminal panel. */
-export const CLI_BRAND_ICONS = {
+const CLI_BRAND_ICONS = {
   claude: ClaudeIcon,
   codex: OpenAIIcon,
   cursor: CursorIcon,
