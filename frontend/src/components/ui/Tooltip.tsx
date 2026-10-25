@@ -188,7 +188,9 @@ export const Tooltip = React.forwardRef<HTMLElement, TooltipProps>(({
         }}
         onFocus={(event) => {
           onFocus?.(event);
-          if (!event.defaultPrevented) show();
+          // Keyboard focus only: a press also focuses the trigger, and reopening
+          // here would undo the dismissal in onPointerDown.
+          if (!event.defaultPrevented && event.currentTarget.matches(':focus-visible')) show();
         }}
         onBlur={(event) => {
           onBlur?.(event);

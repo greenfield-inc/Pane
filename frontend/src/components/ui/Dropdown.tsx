@@ -65,17 +65,17 @@ const widthClasses = {
 };
 
 const variantStyles = {
-  default: 'text-text-secondary hover:bg-interactive/10 hover:text-text-primary hover:shadow-[inset_0_1px_2px_rgba(0,0,0,0.05)]',
-  success: 'text-status-success hover:bg-interactive/10 hover:text-text-primary hover:shadow-[inset_0_1px_2px_rgba(0,0,0,0.05)]',
-  warning: 'text-status-warning hover:bg-interactive/10 hover:text-text-primary hover:shadow-[inset_0_1px_2px_rgba(0,0,0,0.05)]',
-  danger: 'text-status-error hover:bg-interactive/10 hover:text-text-primary hover:shadow-[inset_0_1px_2px_rgba(0,0,0,0.05)]',
+  default: 'text-text-secondary hover:bg-bg-hover hover:text-text-primary',
+  success: 'text-status-success hover:bg-bg-hover hover:text-text-primary',
+  warning: 'text-status-warning hover:bg-bg-hover hover:text-text-primary',
+  danger: 'text-status-error hover:bg-bg-hover hover:text-text-primary',
 };
 
 const selectedVariantStyles = {
-  default: 'bg-interactive/15 text-interactive shadow-[inset_0_1px_2px_rgba(0,0,0,0.1)] border border-interactive/30',
-  success: 'bg-interactive/15 text-status-success shadow-[inset_0_1px_2px_rgba(0,0,0,0.1)] border border-status-success/30',
-  warning: 'bg-interactive/15 text-status-warning shadow-[inset_0_1px_2px_rgba(0,0,0,0.1)] border border-status-warning/30',
-  danger: 'bg-interactive/15 text-status-error shadow-[inset_0_1px_2px_rgba(0,0,0,0.1)] border border-status-error/30',
+  default: 'bg-surface-selected text-interactive',
+  success: 'bg-surface-selected text-status-success',
+  warning: 'bg-surface-selected text-status-warning',
+  danger: 'bg-surface-selected text-status-error',
 };
 
 function getMenuControls(content: HTMLElement | null): HTMLElement[] {
@@ -385,7 +385,7 @@ export function Dropdown({
           onKeyDown={handleMenuKeyDown}
           className={cn(
             'z-[10000] pointer-events-auto',
-            'bg-surface-primary rounded-md shadow-dropdown',
+            'bg-surface-primary rounded-lg shadow-dropdown',
             'border border-border-primary',
             'overflow-hidden',
             width !== 'full' && widthClasses[width],
@@ -401,7 +401,7 @@ export function Dropdown({
             transformOrigin: `${fixedStyle.bottom !== undefined ? 'bottom' : 'top'} ${fixedStyle.right !== undefined ? 'right' : 'left'}`,
           }}
         >
-            <div className="py-1 max-h-[70vh] overflow-y-auto">
+            <div className="p-1 max-h-[70vh] overflow-y-auto">
               {items.map((item, index) => {
                 const Icon = item.icon;
                 const isSelectable = selectedId !== undefined;
@@ -418,7 +418,7 @@ export function Dropdown({
                       onMouseEnter={() => !item.disabled && setActiveIndex(index)}
                       disabled={item.disabled}
                       className={cn(
-                        'w-full text-left px-2.5 py-1',
+                        'w-full text-left px-2.5 py-1 rounded',
                         'flex items-center gap-2',
                         'focus:outline-none focus:ring-2 focus:ring-inset focus:ring-focus-ring-subtle',
                         'min-h-[1.75rem] group relative',
@@ -492,8 +492,8 @@ export function DropdownMenuItem({
     <button
       onClick={onClick}
       className={cn(
-        'w-full text-left px-2.5 py-1',
-        'text-text-secondary hover:bg-surface-hover hover:text-text-primary',
+        'w-full text-left px-2.5 py-1 rounded',
+        'text-text-secondary hover:bg-bg-hover hover:text-text-primary',
         'flex items-center gap-2',
         'focus:outline-none focus:ring-2 focus:ring-inset focus:ring-focus-ring-subtle',
         'min-h-[1.75rem] group',

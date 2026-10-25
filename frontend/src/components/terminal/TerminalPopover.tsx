@@ -101,7 +101,7 @@ export const TerminalPopover: React.FC<TerminalPopoverProps> = ({
   return createPortal(
     <div
       ref={ref}
-      className={cn('fixed z-[10001] w-56 max-w-[calc(100vw-20px)] max-h-[calc(100vh-20px)] overflow-y-auto bg-surface-primary border border-border-primary rounded-lg shadow-dropdown-elevated py-1', className)}
+      className={cn('fixed z-[10001] w-56 max-w-[calc(100vw-20px)] max-h-[calc(100vh-20px)] overflow-y-auto bg-surface-primary border border-border-primary rounded-lg shadow-dropdown-elevated p-1', className)}
       style={{ left: position.left, top: position.top }}
     >
       {children}
@@ -122,6 +122,7 @@ export const PopoverButton: React.FC<PopoverButtonProps> = ({
   variant = 'default',
   className,
   children,
+  onMouseEnter,
   ...props
 }) => {
   const variants = {
@@ -137,12 +138,18 @@ export const PopoverButton: React.FC<PopoverButtonProps> = ({
   return (
     <button
       className={cn(
-        'w-full whitespace-nowrap px-3 py-2 text-left text-sm transition-colors duration-fast',
+        'w-full whitespace-nowrap rounded px-3 py-2 text-left text-sm transition-colors duration-fast',
         'focus:outline-none focus:bg-bg-hover',
         'disabled:opacity-50 disabled:cursor-not-allowed',
         variants[variant],
         className
       )}
+      // Once focus is in the menu, it follows the pointer, so a focused item never stays lit beside the
+      // hovered one. Focus elsewhere (the terminal under a link popover) stays put.
+      onMouseEnter={event => {
+        if (event.currentTarget.closest('[role="menu"]')?.contains(document.activeElement)) event.currentTarget.focus();
+        onMouseEnter?.(event);
+      }}
       {...props}
     >
       {children}

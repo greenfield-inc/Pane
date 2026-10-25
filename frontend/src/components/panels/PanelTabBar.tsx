@@ -592,9 +592,13 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
           </Tooltip>
 
           {showDropdown && (() => {
-            // Track ref index for keyboard navigation
+            // Keyboard navigation follows render order, so each item takes its index while rendering.
             let refIndex = 0;
-            const menuItemClass = "flex items-center gap-2 w-full h-7 px-2.5 text-[13px] text-text-secondary hover:bg-surface-hover hover:text-text-primary focus:bg-surface-hover focus:text-text-primary focus:outline-none text-left";
+            const itemRef = () => {
+              const index = refIndex++;
+              return (el: HTMLButtonElement | null) => { dropdownItemsRef.current[index] = el; };
+            };
+            const menuItemClass = "flex items-center gap-2 w-full h-7 px-2.5 rounded text-[13px] text-text-secondary hover:bg-bg-hover hover:text-text-primary focus:bg-bg-hover focus:text-text-primary focus:outline-none text-left";
             const separator = <hr className="my-1 border-t border-border-primary" />;
             const otherPanelTypes = availablePanelTypes.filter(t => t !== 'terminal' && t !== 'explorer' && t !== 'browser');
             const groupLabel = (label: string) => (
@@ -605,16 +609,22 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
             return createPortal(
             <div
               ref={dropdownMenuRef}
-              className="min-w-[228px] py-1 bg-surface-primary border border-border-primary rounded-md shadow-dropdown z-50"
+              className="min-w-[228px] p-1 bg-surface-primary border border-border-primary rounded-lg shadow-dropdown z-50"
               style={dropdownStyle}
               role="menu"
               onKeyDown={handleDropdownKeyDown}
+              // Focus follows the pointer, so the hovered item is the only one lit.
+              onMouseMove={event => {
+                const item = event.target instanceof Element ? event.target.closest('button') : null;
+                const index = item ? dropdownItemsRef.current.indexOf(item) : -1;
+                if (index >= 0 && index !== focusedDropdownIndex) setFocusedDropdownIndex(index);
+              }}
             >
               {/* Terminal - plain terminal */}
               {availablePanelTypes.includes('terminal') && (
                 <button
                   type="button"
-                  ref={(el) => { dropdownItemsRef.current[refIndex++] = el; }}
+                  ref={itemRef()}
                   role="menuitem"
                   className={menuItemClass}
                   onClick={() => handleAddPanel('terminal')}
@@ -628,7 +638,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
               {availablePanelTypes.includes('explorer') && (
                 <button
                   type="button"
-                  ref={(el) => { dropdownItemsRef.current[refIndex++] = el; }}
+                  ref={itemRef()}
                   role="menuitem"
                   className={menuItemClass}
                   onClick={() => {
@@ -644,7 +654,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
               {availablePanelTypes.includes('browser') && (
                 <button
                   type="button"
-                  ref={(el) => { dropdownItemsRef.current[refIndex++] = el; }}
+                  ref={itemRef()}
                   role="menuitem"
                   className={menuItemClass}
                   onClick={() => handleAddPanel('browser')}
@@ -664,7 +674,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
                 <button
                   key={preset.id}
                   type="button"
-                  ref={(el) => { dropdownItemsRef.current[refIndex++] = el; }}
+                  ref={itemRef()}
                   role="menuitem"
                   className={menuItemClass}
                   onClick={() => handleAddPanel('terminal', {
@@ -680,7 +690,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
               {availablePanelTypes.includes('terminal') && separator}
               {/* Saved custom commands */}
               {availablePanelTypes.includes('terminal') && customCommands.map((cmd, index) => {
-                const currentRefIndex = refIndex++;
+                const itemRefCallback = itemRef();
                 const shortcutDisplay = hotkeyDisplay(`add-tool-custom-${index}`);
                 const displayName = truncateCustomCommandLabel(cmd.name);
                 return (
@@ -696,7 +706,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
                     side="bottom"
                   >
                     <button
-                      ref={(el) => { dropdownItemsRef.current[currentRefIndex] = el; }}
+                      ref={itemRefCallback}
                       type="button"
                       role="menuitem"
                       className={cn(menuItemClass, 'min-w-0 flex-1')}
@@ -775,7 +785,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
                 ) : (
                   <button
                     type="button"
-                    ref={(el) => { dropdownItemsRef.current[refIndex++] = el; }}
+                    ref={itemRef()}
                     role="menuitem"
                     className={menuItemClass}
                     onClick={() => { setEditingCustomIndex(null); setShowCustomInput(true); }}
@@ -788,17 +798,16 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
               {/* Other panel types (terminal, explorer and browser are listed above) */}
               {otherPanelTypes.length > 0 && separator}
               {otherPanelTypes.map((type) => {
-                const currentRefIndex = refIndex++;
                 return (
                 <button
                   key={type}
                   type="button"
-                  ref={(el) => { dropdownItemsRef.current[currentRefIndex] = el; }}
+                  ref={itemRef()}
                   role="menuitem"
                   className={menuItemClass}
                   onClick={() => handleAddPanel(type)}
                 >
-                  {getPanelIcon(type)}
+                  <span className="flex flex-shrink-0 [&>svg]:h-3.5 [&>svg]:w-3.5">{getPanelIcon(type)}</span>
                   <span className="capitalize">{type}</span>
                 </button>
               );})}
