@@ -95,6 +95,11 @@ const INPUT_OUTCOME_DELAY_MS = 1500;
 // down forcefully and the rest of the budget is spent confirming it is gone.
 const PROCESS_EXIT_GRACE_MS = 3000;
 const PROCESS_EXIT_TIMEOUT_MS = 8000;
+// On quit, agents have already had Ctrl+C and two seconds to leave, and a
+// shell exits within milliseconds of its hangup: anything still alive after
+// this is not leaving on its own.
+const QUIT_EXIT_GRACE_MS = 500;
+const QUIT_KILL_TIMEOUT_MS = 2000;
 // Formal ceiling for the restore/getState replay payload (now the emulator
 // serialization for normal buffers, raw ANSI log otherwise). Peer consensus:
 // Orca (TERMINAL_SCROLLBACK_REPLAY_BYTE_LIMIT) and Superset (MAX_HISTORY_SCROLLBACK_BYTES) both use
@@ -2973,6 +2978,31 @@ export class TerminalPanelManager extends EventEmitter {
     await Promise.all(terminals.map(terminal => this.destroyTerminal(terminal.panelId)));
   }
 
+  /**
+   * Kill whatever a destroyed terminal left running, for a panel that is going
+   * away. `destroyTerminal` hangs up the PTY and returns; a process that ignores
+   * the hangup (`nohup cmd &`) outlives it, reparented where nothing can walk
+   * to it again. Its pids were captured before the kill. Bounded the same way
+   * as `terminateSessionTerminals`.
+   */
+  async reapStoppedProcesses(panelId: string): Promise<void> {
+    const tree = this.stoppingProcesses.get(panelId);
+    if (!tree || tree.length === 0) return;
+    const outlived = await waitForProcessesToExit(tree, PROCESS_EXIT_GRACE_MS);
+    const survivors = outlived.length === 0 ? [] : await (async () => {
+      console.warn(`[TerminalPanelManager] process_exit_timeout panelId=${panelId} pids=${outlived.join(',')} killing their process trees`);
+      return terminateProcessTrees(outlived, { timeoutMs: PROCESS_EXIT_TIMEOUT_MS - PROCESS_EXIT_GRACE_MS });
+    })();
+    // A replacement terminal may have started stopping in this panel meanwhile.
+    if (this.stoppingProcesses.get(panelId) !== tree) return;
+    if (survivors.length === 0) {
+      this.stoppingProcesses.delete(panelId);
+      return;
+    }
+    this.stoppingProcesses.set(panelId, survivors);
+    console.error(`[TerminalPanelManager] process_kill_failed panelId=${panelId} pids=${survivors.join(',')}`);
+  }
+
   destroyTerminal(panelId: string, options: { saveState?: boolean; chatInternal?: boolean } = {}): Promise<void> {
     if (!options.chatInternal && this.agentChat?.manages(panelId)) return this.agentChat.stop(panelId);
     const terminal = this.terminals.get(panelId);
@@ -3270,6 +3300,27 @@ export class TerminalPanelManager extends EventEmitter {
           console.log(`[TerminalPanelManager] Pruned serialized snapshot for ${id} to stay under 64MB total`);
         }
       }
+    }
+  }
+
+  /**
+   * Quit teardown: destroy every terminal, then kill any process from their
+   * trees that outlived its PTY's hangup, so quitting leaves no orphans.
+   * The trees are read before the kill, while every child is still reachable.
+   */
+  async terminateAllTerminals(): Promise<void> {
+    const roots = [...this.terminals.values()].map(terminal => terminal.pty.pid);
+    const stopping = [...this.stoppingProcesses.values()].flat();
+    const tree = [...new Set([...roots, ...stopping, ...await listDescendantPids(roots)])].filter(isProcessAlive);
+    this.destroyAllTerminals();
+    if (tree.length === 0) return;
+    const outlived = await waitForProcessesToExit(tree, QUIT_EXIT_GRACE_MS);
+    if (outlived.length === 0) return;
+    console.warn(`[TerminalPanelManager] process_exit_timeout on quit pids=${outlived.join(',')} killing their process trees`);
+    // index.ts force-exits ten seconds into quit; stay well inside that.
+    const survivors = await terminateProcessTrees(outlived, { timeoutMs: QUIT_KILL_TIMEOUT_MS });
+    if (survivors.length > 0) {
+      console.error(`[TerminalPanelManager] process_kill_failed on quit pids=${survivors.join(',')}`);
     }
   }
 

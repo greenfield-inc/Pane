@@ -63,4 +63,16 @@ describe('panel deletion IPC', () => {
     await expect(deleting).resolves.toEqual({ success: true });
     expect(remove).toHaveBeenCalledWith('p');
   });
+
+  it('reaps what the deleted terminal left running without waiting for it', async () => {
+    vi.spyOn(panelManager, 'getPanel').mockReturnValue(panel('p', 's'));
+    vi.spyOn(terminalPanelManager, 'destroyTerminal').mockResolvedValue();
+    vi.spyOn(panelManager, 'deletePanel').mockResolvedValue();
+    const reap = vi.spyOn(terminalPanelManager, 'reapStoppedProcesses').mockReturnValue(new Promise<void>(() => undefined));
+    const registry = new PaneCommandRegistry();
+    registerPanelHandlers(partial<IpcMain>({ handle: vi.fn() }), partial<AppServices>({}), registry);
+
+    await expect(registry.invoke('panels:delete', 'p')).resolves.toEqual({ success: true });
+    expect(reap).toHaveBeenCalledWith('p');
+  });
 });

@@ -1649,7 +1649,7 @@ if (launchRemoteSetup) {
     // Kill all terminal panel PTY processes so Claude doesn't survive as an orphan
     logToFile('Destroying all terminal panel processes');
     console.log('[Main] Destroying all terminal panel processes...');
-    terminalPanelManager.destroyAllTerminals();
+    await terminalPanelManager.terminateAllTerminals();
     console.log('[Main] Terminal panel processes destroyed');
 
     // Phase 4: Host/runtime cleanup
