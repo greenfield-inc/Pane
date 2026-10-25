@@ -178,7 +178,7 @@ export function CodelessRemoteSettings({ connectionState, otherHosts, accessFoot
   return (
     <>
       {error && (
-        <div className="flex items-start justify-between gap-3 rounded-md border border-status-error/30 bg-status-error/10 p-3 text-sm text-status-error" role="alert">
+        <div className="flex items-start justify-between gap-3 rounded-md border border-status-error/30 bg-status-error/10 p-3 text-sm text-text-primary" role="alert">
           <span>{error}</span>
           <Button type="button" variant="ghost" size="sm" onClick={() => setError(null)}>Dismiss</Button>
         </div>

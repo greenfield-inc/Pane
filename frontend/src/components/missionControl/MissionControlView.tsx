@@ -148,8 +148,8 @@ function StatusCountPill({ status, count, label, compact, onClick, title }: {
   if (count === 0) return null;
 
   const tone = status === 'blocked'
-    ? 'bg-status-error/15 text-status-error'
-    : 'bg-interactive/15 text-interactive';
+    ? 'bg-status-error/15 text-text-primary'
+    : 'bg-interactive/15 text-text-primary';
   const className = `flex items-center gap-1 rounded-full px-2 py-px text-[10px] font-medium ${tone}${
     compact ? ' normal-case tracking-normal' : ''
   }${onClick ? ' transition-colors hover:bg-status-error/25 focus:outline-none focus-visible:ring-1 focus-visible:ring-status-error' : ''}`;
@@ -908,7 +908,7 @@ export function MissionControlView() {
             Finding agents…
           </div>
         ) : error ? (
-          <div className="rounded border border-status-error/30 bg-status-error/10 p-4 text-sm text-status-error">
+          <div className="rounded border border-status-error/30 bg-status-error/10 p-4 text-sm text-text-primary">
             {error}
           </div>
         ) : tiles.length === 0 ? (

@@ -387,7 +387,7 @@ export function LeaderboardTab() {
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-4">
       {error && (
-        <div className="rounded border border-status-error/30 bg-status-error/10 p-3 text-xs text-status-error">
+        <div className="rounded border border-status-error/30 bg-status-error/10 p-3 text-xs text-text-primary">
           {error}
         </div>
       )}

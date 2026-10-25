@@ -35,13 +35,13 @@ export const GitErrorDialog: React.FC<GitErrorDialogProps> = ({
             <div>
               <h3 className="text-sm font-medium text-text-tertiary mb-2">Error Message</h3>
               <Card variant="bordered" padding="sm" className="bg-status-error/10 border-status-error/30">
-                <p className="text-status-error text-sm">{errorDetails.message}</p>
+                <p className="text-text-primary text-sm">{errorDetails.message}</p>
               </Card>
             </div>
 
             {errorDetails.conflictingFiles && errorDetails.conflictingFiles.length > 0 && (
               <Card variant="bordered" className="border-2 border-status-warning/30 bg-status-warning/10">
-                <h3 className="text-base font-semibold text-status-warning mb-3 flex items-center">
+                <h3 className="text-base font-semibold text-text-primary mb-3 flex items-center">
                   <AlertCircle className="w-5 h-5 mr-2" />
                   Conflicting Files
                 </h3>
@@ -81,7 +81,7 @@ export const GitErrorDialog: React.FC<GitErrorDialogProps> = ({
             )}
 
             <Card variant="bordered" className="border-2 border-status-error/30 bg-status-error/10">
-              <h3 className="text-base font-semibold text-status-error mb-3 flex items-center">
+              <h3 className="text-base font-semibold text-text-primary mb-3 flex items-center">
                 <FileText className="w-5 h-5 mr-2" />
                 Git Output
               </h3>

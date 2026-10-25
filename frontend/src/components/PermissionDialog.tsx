@@ -148,7 +148,7 @@ export const PermissionDialog: React.FC<PermissionDialogProps> = ({ request, onR
               <Code className="w-4 h-4 text-text-tertiary" />
               <h3 className="text-sm font-medium text-text-secondary">Tool</h3>
               {isHighRisk(request.toolName) && (
-                <span className="text-xs bg-status-error/20 text-status-error px-2 py-0.5 rounded">High Risk</span>
+                <span className="text-xs bg-status-error/20 text-text-primary px-2 py-0.5 rounded">High Risk</span>
               )}
             </div>
             <p className="text-text-primary font-mono">{formatToolName(request.toolName)}</p>
@@ -180,7 +180,7 @@ export const PermissionDialog: React.FC<PermissionDialogProps> = ({ request, onR
           
           {isHighRisk(request.toolName) && (
             <div className="bg-status-error/10 border border-status-error/30 rounded p-3">
-              <div className="flex items-center gap-2 text-status-error">
+              <div className="flex items-center gap-2 text-text-primary">
                 <AlertTriangle className="w-4 h-4" />
                 <span className="text-sm font-medium">High Risk Action</span>
               </div>

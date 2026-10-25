@@ -574,7 +574,7 @@ export function UsageView() {
             Reading usage…
           </div>
         ) : error ? (
-          <div className="rounded border border-status-error/30 bg-status-error/10 p-4 text-sm text-status-error">
+          <div className="rounded border border-status-error/30 bg-status-error/10 p-4 text-sm text-text-primary">
             {error}
           </div>
         ) : bothRootsMissing ? (

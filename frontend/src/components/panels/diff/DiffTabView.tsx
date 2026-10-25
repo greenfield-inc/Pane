@@ -115,7 +115,7 @@ export function DiffTabView({ sessionId, filePath, diffRef }: DiffTabViewProps) 
       </div>
       <div className="min-h-0 flex-1 overflow-auto">
         {loading && !result ? <div className="flex items-center gap-2 p-4 text-sm text-text-secondary"><RefreshCw className="h-3.5 w-3.5 animate-spin" />Loading diff…</div>
-          : error ? <div role="alert" className="m-4 rounded border border-status-error/30 bg-status-error/10 p-4 text-sm text-status-error">{error}</div>
+          : error ? <div role="alert" className="m-4 rounded border border-status-error/30 bg-status-error/10 p-4 text-sm text-text-primary">{error}</div>
             : !result || result.status === 'no-longer-changed' ? <div className="p-4 text-sm text-text-tertiary">{filePath} is no longer changed in {diffRefLabel(diffRef)}.</div>
               : result.file.isBinary ? <div className="p-4 text-sm text-text-secondary">Binary file</div>
                 : diffData ? <DiffView data={diffData} diffViewMode={viewType} diffViewTheme={isLightTheme(theme) ? 'light' : 'dark'} diffViewHighlight={Boolean(highlighter)} registerHighlighter={highlighter ?? undefined} diffViewWrap={true} diffViewFontSize={13} />

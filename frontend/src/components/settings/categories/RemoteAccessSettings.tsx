@@ -22,7 +22,7 @@ export function RemoteAccessSettings({ controller, onOpenSubview }: RemoteAccess
         <p className="text-sm text-text-tertiary" aria-live="polite">Loading Remote Pane status...</p>
       )}
       {controller.error && (
-        <div className="flex items-center justify-between gap-3 rounded-md border border-status-error/30 bg-status-error/10 p-3 text-sm text-status-error" role="alert">
+        <div className="flex items-center justify-between gap-3 rounded-md border border-status-error/30 bg-status-error/10 p-3 text-sm text-text-primary" role="alert">
           <span>{controller.error}</span>
           <Button type="button" variant="secondary" size="sm" onClick={() => void controller.reload()}>Retry</Button>
         </div>

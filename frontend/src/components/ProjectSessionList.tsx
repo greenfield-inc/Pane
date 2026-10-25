@@ -462,7 +462,7 @@ export function ProjectSessionList({
             {/* Agents waiting on an answer are worth seeing without opening the grid. */}
             {blockedAgentCount > 0 && (
               <span
-                className="ml-auto flex items-center gap-1 rounded-full bg-status-error/15 px-1.5 text-[10px] font-medium tabular-nums text-status-error"
+                className="ml-auto flex items-center gap-1 rounded-full bg-status-error/15 px-1.5 text-[10px] font-medium tabular-nums text-text-primary"
                 title={`${blockedAgentCount} ${blockedAgentCount === 1 ? 'agent needs' : 'agents need'} input`}
               >
                 <AgentStatusDot status="blocked" size="sm" />

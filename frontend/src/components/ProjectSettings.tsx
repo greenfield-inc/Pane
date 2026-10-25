@@ -143,7 +143,7 @@ export default function ProjectSettings({ project, isOpen, onClose, onUpdate, on
 
       <ModalBody>
         {error && (
-          <div className="mb-6 p-4 bg-status-error/10 border border-status-error/30 rounded-lg text-status-error">
+          <div className="mb-6 p-4 bg-status-error/10 border border-status-error/30 rounded-lg text-text-primary">
             {error}
           </div>
         )}

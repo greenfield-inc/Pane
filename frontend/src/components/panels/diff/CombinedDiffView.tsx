@@ -227,7 +227,7 @@ const CombinedDiffView = memo(forwardRef<CombinedDiffViewHandle, CombinedDiffVie
             </div>
           </div>
         ) : loading && !visibleManifest ? <div className="animate-pulse p-4 text-sm text-text-secondary">Loading {label}…</div>
-          : error ? <div role="alert" className="m-4 rounded border border-status-error/30 bg-status-error/10 p-4 text-sm text-status-error">{error}</div>
+          : error ? <div role="alert" className="m-4 rounded border border-status-error/30 bg-status-error/10 p-4 text-sm text-text-primary">{error}</div>
             : visible && visible.manifest.files.length > 0 ? <ChangesList sessionId={sessionId} rows={visible.rows} scopeKey={scopeKey(scope)} activePath={activeDiffPath} onFileOpen={handleFileOpen} />
               : <div className="flex h-full items-center justify-center text-sm text-text-secondary"><div className="space-y-2 text-center"><p>{emptyMessage}</p>{isMainRepo && historySource === 'remote' && <p className="text-sm text-text-tertiary">Create new commits to see them here.</p>}</div></div>}
       </div>

@@ -76,8 +76,8 @@ export const Toggle: React.FC<ToggleProps> = ({
           'focus:outline-none focus:ring-2 focus:ring-interactive focus:ring-offset-2',
           isPressed 
             ? variant === 'warning' 
-              ? 'bg-status-warning/20 text-status-warning border border-status-warning/30'
-              : 'bg-interactive/20 text-interactive border border-interactive/30'
+              ? 'bg-status-warning/20 text-text-primary border border-status-warning/30'
+              : 'bg-interactive/20 text-text-primary border border-interactive/30'
             : 'bg-surface-secondary text-text-secondary border border-border-primary hover:bg-surface-hover',
           disabled && 'opacity-50 cursor-not-allowed',
           !disabled && 'cursor-default',

@@ -65,17 +65,17 @@ const widthClasses = {
 };
 
 const variantStyles = {
-  default: 'text-text-secondary hover:bg-interactive/10 hover:text-text-primary hover:shadow-[inset_0_1px_2px_rgba(0,0,0,0.05)]',
-  success: 'text-status-success hover:bg-interactive/10 hover:text-text-primary hover:shadow-[inset_0_1px_2px_rgba(0,0,0,0.05)]',
-  warning: 'text-status-warning hover:bg-interactive/10 hover:text-text-primary hover:shadow-[inset_0_1px_2px_rgba(0,0,0,0.05)]',
-  danger: 'text-status-error hover:bg-interactive/10 hover:text-text-primary hover:shadow-[inset_0_1px_2px_rgba(0,0,0,0.05)]',
+  default: 'text-text-secondary hover:bg-bg-hover hover:text-text-primary',
+  success: 'text-status-success hover:bg-bg-hover hover:text-text-primary',
+  warning: 'text-status-warning hover:bg-bg-hover hover:text-text-primary',
+  danger: 'text-status-error hover:bg-bg-hover hover:text-text-primary',
 };
 
 const selectedVariantStyles = {
-  default: 'bg-interactive/15 text-interactive shadow-[inset_0_1px_2px_rgba(0,0,0,0.1)] border border-interactive/30',
-  success: 'bg-interactive/15 text-status-success shadow-[inset_0_1px_2px_rgba(0,0,0,0.1)] border border-status-success/30',
-  warning: 'bg-interactive/15 text-status-warning shadow-[inset_0_1px_2px_rgba(0,0,0,0.1)] border border-status-warning/30',
-  danger: 'bg-interactive/15 text-status-error shadow-[inset_0_1px_2px_rgba(0,0,0,0.1)] border border-status-error/30',
+  default: 'bg-surface-selected text-interactive',
+  success: 'bg-surface-selected text-status-success',
+  warning: 'bg-surface-selected text-status-warning',
+  danger: 'bg-surface-selected text-status-error',
 };
 
 function getMenuControls(content: HTMLElement | null): HTMLElement[] {

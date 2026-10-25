@@ -44,8 +44,8 @@ export function RemoteAccessWorkflows({ subview, controller, onBack, onDirtyChan
         Back to Remote Access
       </Button>
       <div className="mt-5">
-        {controller.error && <div className="mb-4 rounded-md border border-status-error/30 bg-status-error/10 p-3 text-sm text-status-error" role="alert">{controller.error}</div>}
-        {controller.result && <div className="mb-4 rounded-md border border-status-success/30 bg-status-success/10 p-3 text-sm text-status-success" aria-live="polite">{controller.result}</div>}
+        {controller.error && <div className="mb-4 rounded-md border border-status-error/30 bg-status-error/10 p-3 text-sm text-text-primary" role="alert">{controller.error}</div>}
+        {controller.result && <div className="mb-4 rounded-md border border-status-success/30 bg-status-success/10 p-3 text-sm text-text-primary" aria-live="polite">{controller.result}</div>}
         {subview === 'host-setup' && <HostSetup controller={controller} />}
         {subview === 'advanced-host' && <AdvancedHost controller={controller} />}
       </div>
@@ -68,7 +68,7 @@ function HostSetup({ controller }: { controller: RemoteAccessController }) {
       <SettingsSection title="Host status">
         {executableHealth && (
           <div
-            className={`mb-3 rounded-md border p-3 text-sm ${executableHealth.severity === 'error' ? 'border-status-error/30 bg-status-error/10 text-status-error' : 'border-status-warning/30 bg-status-warning/10 text-text-primary'}`}
+            className={`mb-3 rounded-md border p-3 text-sm ${executableHealth.severity === 'error' ? 'border-status-error/30 bg-status-error/10 text-text-primary' : 'border-status-warning/30 bg-status-warning/10 text-text-primary'}`}
             role="alert"
           >
             <p className="font-medium">{executableHealth.code}</p>

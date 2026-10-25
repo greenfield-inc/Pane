@@ -299,7 +299,7 @@ export function FileEditorView({
         } : undefined}
       />
       {error && (
-        <div role="alert" className="px-4 py-2 bg-status-error/20 text-status-error text-sm">
+        <div role="alert" className="px-4 py-2 bg-status-error/20 text-text-primary text-sm">
           Error: {error}
         </div>
       )}
