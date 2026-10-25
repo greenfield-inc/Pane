@@ -85,9 +85,9 @@ function StatCard({
   detail?: string;
 }) {
   return (
-    <div className="rounded border border-border-primary bg-surface-secondary px-3 py-2">
+    <div className="min-w-0 rounded border border-border-primary bg-surface-secondary px-3 py-2">
       <p className="text-[10px] uppercase tracking-wider text-text-muted">{label}</p>
-      <p className="mt-0.5 text-lg font-semibold tabular-nums text-text-primary">{value}</p>
+      <p className="mt-0.5 truncate text-lg font-semibold tabular-nums text-text-primary" title={value}>{value}</p>
       {detail && <p className="text-[10px] text-text-tertiary">{detail}</p>}
     </div>
   );
