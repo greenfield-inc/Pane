@@ -841,10 +841,10 @@ export function MissionControlView() {
               type="button"
               onClick={() => setActionError(null)}
               title="Dismiss"
-              className="flex items-center gap-1 rounded-full bg-status-error/15 px-2 py-px text-[10px] font-medium text-status-error transition-colors hover:bg-status-error/25"
+              className="flex items-center gap-1 rounded-full bg-status-error/15 px-2 py-px text-[10px] font-medium text-text-primary transition-colors hover:bg-status-error/25"
             >
               {actionError}
-              <X className="h-2.5 w-2.5" aria-hidden="true" />
+              <X className="h-2.5 w-2.5 text-status-error" aria-hidden="true" />
             </button>
           )}
         </div>

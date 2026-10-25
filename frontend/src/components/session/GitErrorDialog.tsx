@@ -62,7 +62,7 @@ export const GitErrorDialog: React.FC<GitErrorDialogProps> = ({
                     <h4 className="text-sm font-semibold text-interactive-on-dark mb-2">Your Commits</h4>
                     <div className="text-xs font-mono space-y-1 max-h-32 overflow-y-auto">
                       {errorDetails.conflictingCommits.ours.map((commit, idx) => (
-                        <div key={idx} className="text-interactive-on-dark/80">{commit}</div>
+                        <div key={idx} className="text-interactive-on-dark">{commit}</div>
                       ))}
                     </div>
                   </Card>
@@ -72,7 +72,7 @@ export const GitErrorDialog: React.FC<GitErrorDialogProps> = ({
                     <h4 className="text-sm font-semibold text-status-success-hover mb-2">Incoming Commits</h4>
                     <div className="text-xs font-mono space-y-1 max-h-32 overflow-y-auto">
                       {errorDetails.conflictingCommits.theirs.map((commit, idx) => (
-                        <div key={idx} className="text-status-success-hover/80">{commit}</div>
+                        <div key={idx} className="text-status-success-hover">{commit}</div>
                       ))}
                     </div>
                   </Card>
@@ -133,7 +133,7 @@ export const GitErrorDialog: React.FC<GitErrorDialogProps> = ({
                 <Info className="w-5 h-5 text-interactive-on-dark mt-0.5 flex-shrink-0" />
                 <div>
                   <h4 className="text-sm font-medium text-interactive-on-dark mb-1">Troubleshooting Tips</h4>
-                  <ul className="text-sm text-interactive-on-dark/80 space-y-1">
+                  <ul className="text-sm text-interactive-on-dark space-y-1">
                     {getGitErrorTips(errorDetails).map((tip, idx) => <li key={idx}>{tip}</li>)}
                   </ul>
                 </div>

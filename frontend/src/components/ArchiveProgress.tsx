@@ -224,7 +224,7 @@ export function ArchiveProgress() {
                     </div>
                   )}
                   {task.status === 'removing-worktree' && (
-                    <div className="text-xs text-status-warning/80 pl-5 mt-1 italic">
+                    <div className="text-xs text-status-warning pl-5 mt-1 italic">
                       ⚠️ Worktree removal can take several minutes for large repositories
                     </div>
                   )}

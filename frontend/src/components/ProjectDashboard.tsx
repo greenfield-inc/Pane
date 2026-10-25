@@ -332,7 +332,7 @@ export const ProjectDashboard: React.FC<ProjectDashboardProps> = React.memo(({ p
           <AlertCircle className="w-5 h-5" />
           <span className="font-medium">Error loading dashboard</span>
         </div>
-        <p className="mt-1 text-sm text-status-error/80">{error}</p>
+        <p className="mt-1 text-sm text-status-error">{error}</p>
         <button
           type="button"
           onClick={() => fetchDashboardData(false)}

@@ -203,8 +203,8 @@ const CombinedDiffView = memo(forwardRef<CombinedDiffViewHandle, CombinedDiffVie
           )}
           {hasUncommitted && (
             <>
-              <button type="button" onClick={() => setShowCommitDialog(true)} className="rounded px-1.5 py-0.5 text-[11px] font-medium text-status-success hover:bg-status-success/15">Commit</button>
-              <button type="button" onClick={handleRestore} title="Restore all uncommitted changes" className="rounded px-1.5 py-0.5 text-[11px] font-medium text-status-warning hover:bg-status-warning/15">Restore</button>
+              <button type="button" onClick={() => setShowCommitDialog(true)} className="rounded px-1.5 py-0.5 text-[11px] font-medium text-status-success hover:bg-status-success/15 hover:text-text-primary">Commit</button>
+              <button type="button" onClick={handleRestore} title="Restore all uncommitted changes" className="rounded px-1.5 py-0.5 text-[11px] font-medium text-status-warning hover:bg-status-warning/15 hover:text-text-primary">Restore</button>
             </>
           )}
           {scope.kind === 'commit' && (

@@ -165,7 +165,7 @@ export function AboutDialog({ isOpen, onClose, onUpdate }: AboutDialogProps) {
                     v{versionInfo.latest} available
                   </p>
                   {versionInfo.publishedAt && (
-                    <p className="text-xs text-interactive/70 mt-0.5">
+                    <p className="text-xs text-interactive mt-0.5">
                       {formatDate(versionInfo.publishedAt)}
                     </p>
                   )}

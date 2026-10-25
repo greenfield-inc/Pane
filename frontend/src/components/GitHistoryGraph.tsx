@@ -37,7 +37,7 @@ function CommitTooltipContent({ entry }: { entry: GitGraphCommitData }) {
   });
 
   if (entry.hash === 'index') {
-    return <span className="text-[11px] text-status-warning/80 italic">Uncommitted changes</span>;
+    return <span className="text-[11px] text-status-warning italic">Uncommitted changes</span>;
   }
 
   const hasStats = entry.filesChanged != null && entry.filesChanged > 0;
@@ -124,7 +124,7 @@ const CommitRow = memo(function CommitRow({
         <div className="min-w-0 flex-1 py-0.5 pr-1">
           {isIndex ? (
             <>
-              <div className="text-[10px] text-status-warning/70 italic truncate leading-snug">
+              <div className="text-[10px] text-status-warning italic truncate leading-snug">
                 {entry.message}
               </div>
               {hasStats && (

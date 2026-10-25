@@ -126,7 +126,7 @@ function JoinedBanner({
           type="button"
           onClick={onLeave}
           disabled={leaving}
-          className="inline-flex items-center gap-1.5 rounded px-2.5 py-1.5 text-xs text-status-error/80 transition-colors hover:bg-status-error/10 disabled:opacity-50"
+          className="inline-flex items-center gap-1.5 rounded px-2.5 py-1.5 text-xs text-status-error transition-colors hover:bg-status-error/10 hover:text-text-primary disabled:opacity-50"
         >
           {leaving ? (
             <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
