@@ -121,7 +121,7 @@ export default function ProjectSettings({ project, isOpen, onClose, onUpdate, on
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} size="xl">
+    <Modal isOpen={isOpen} onClose={onClose} size="xl" showCloseButton={false}>
       <ModalHeader 
         title="Project Settings" 
         icon={<Settings className="w-5 h-5" />}
@@ -186,7 +186,7 @@ export default function ProjectSettings({ project, isOpen, onClose, onUpdate, on
                   size="lg"
                   fullWidth
                 />
-                {project.wsl_enabled && project.wsl_distribution && (
+                {!!project.wsl_enabled && project.wsl_distribution && (
                   <div className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-blue-500/10 border border-blue-500/20 text-blue-400 text-sm">
                     <span className="font-semibold">WSL</span>
                     <span className="text-blue-300/70">|</span>

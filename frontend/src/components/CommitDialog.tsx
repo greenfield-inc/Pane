@@ -158,7 +158,7 @@ export const CommitDialog: React.FC<CommitDialogProps> = ({
   }, [handleCommit, isCommitting, keyboardShortcutsEnabled, needsIdentity, onClose, title]);
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} size="md">
+    <Modal isOpen={isOpen} onClose={onClose} size="md" showCloseButton={false}>
       <ModalHeader
         icon={<GitCommit className="w-5 h-5" />}
         title="Commit Changes"
