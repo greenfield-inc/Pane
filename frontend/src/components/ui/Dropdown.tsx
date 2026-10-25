@@ -71,11 +71,12 @@ const variantStyles = {
   danger: 'text-status-error hover:bg-bg-hover hover:text-text-primary',
 };
 
+// The selection dot carries the state; primary text stays readable on the selected fill in every theme.
 const selectedVariantStyles = {
-  default: 'bg-surface-selected text-interactive',
-  success: 'bg-surface-selected text-status-success',
-  warning: 'bg-surface-selected text-status-warning',
-  danger: 'bg-surface-selected text-status-error',
+  default: 'bg-surface-selected text-text-primary',
+  success: 'bg-surface-selected text-text-primary',
+  warning: 'bg-surface-selected text-text-primary',
+  danger: 'bg-surface-selected text-text-primary',
 };
 
 function getMenuControls(content: HTMLElement | null): HTMLElement[] {
@@ -436,7 +437,7 @@ export function Dropdown({
                       <div className="flex-1 min-w-0">
                         <div className={cn('text-[13px] leading-tight truncate', 'group-hover:text-inherit')}>{item.label}</div>
                         {item.description && !item.descriptionInTooltip && (
-                          <div className="text-[11px] text-text-tertiary mt-0.5 leading-tight">{item.description}</div>
+                          <div className={cn('text-[11px] mt-0.5 leading-tight', isSelected ? 'text-text-secondary' : 'text-text-tertiary group-hover:text-text-secondary')}>{item.description}</div>
                         )}
                       </div>
                       {item.shortcut && <Kbd variant="inline" className="shrink-0 pl-3">{formatKeyDisplay(item.shortcut)}</Kbd>}
