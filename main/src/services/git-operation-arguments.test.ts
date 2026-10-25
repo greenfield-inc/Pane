@@ -48,6 +48,15 @@ it('reports a real conflict against the literal comparison ref without modifying
   expect(readFileSync(join(project, 'shared.txt'), 'utf8')).toBe('base edit\n');
 });
 
+it('reports no conflict when both branches edit separate lines of the same file', async () => {
+  commit(project, 'shared.txt', 'one\ntwo\nthree\nfour\nfive\n', 'Lines');
+  git(worktree, 'reset', '--hard', base);
+  commit(project, 'shared.txt', 'one base\ntwo\nthree\nfour\nfive\n', 'Base change');
+  commit(worktree, 'shared.txt', 'one\ntwo\nthree\nfour\nfive feature\n', 'Feature change');
+  expect(await manager.checkForRebaseConflicts(worktree, base, runner))
+    .toEqual({ hasConflicts: false, canAutoMerge: true });
+});
+
 it('rebases onto the literal base while preserving both branches changes', async () => {
   commit(project, 'base.txt', 'base content\n', 'Base change');
   commit(worktree, 'feature.txt', 'feature content\n', 'Feature change');

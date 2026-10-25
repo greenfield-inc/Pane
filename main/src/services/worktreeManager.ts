@@ -870,8 +870,9 @@ export class WorktreeManager {
       // Try a dry-run merge to detect conflicts
       // We use merge-tree to check for conflicts without modifying the working tree
       try {
+        // The three-argument (trivial-merge) form rejects `--` with exit 128.
         const { stdout: mergeTreeOutput } = await commandRunner.execFile(
-          'git', ['merge-tree', '--', base, 'HEAD', mainBranch],
+          'git', ['merge-tree', base, 'HEAD', mainBranch],
           worktreePath
         );
 
