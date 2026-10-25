@@ -4,6 +4,7 @@ import { mkdtempSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { vi } from 'vitest';
+import type { ToolPanel } from '../../../shared/types/panels';
 
 // Every module that imports services/database opens `${PANE_DIR}/sessions.db`
 // and runs the startup migrations at import time. Point that at a scratch
@@ -51,6 +52,7 @@ export const nativeTheme = {
 export const panelManager = {
   emitPanelEvent: vi.fn(),
   getPanel: vi.fn(),
+  getPanelsForSession: vi.fn((): ToolPanel[] => []),
   updatePanel: vi.fn(),
 };
 
