@@ -2074,13 +2074,13 @@ export const SessionView = memo(() => {
                       inert={!terminalDockContentActive ? true : undefined}
                     >
                       {/* Terminal tab header with collapse toggle and pill shortcuts */}
-                      <div className="pane-terminal-shell-header flex items-center h-8 px-3 bg-surface-primary border-b border-border-primary gap-2 flex-shrink-0">
-                        {/* Left: chevron + icon + label */}
+                      <div className="pane-terminal-shell-header flex items-center h-8 bg-surface-primary border-b border-border-primary flex-shrink-0">
+                        {/* The whole header toggles the dock, like the Session view's terminal header. */}
                         <button
                           type="button"
                           onClick={toggleTerminalCollapse}
                           aria-label={isTerminalCollapsed ? 'Expand terminal' : 'Collapse terminal'}
-                          className="p-0.5 hover:bg-surface-hover rounded transition-colors"
+                          className="flex h-full flex-1 items-center gap-2 px-3 text-left hover:bg-surface-hover transition-colors"
                           title={isTerminalCollapsed ? 'Expand terminal' : 'Collapse terminal'}
                         >
                           {isTerminalCollapsed ? (
@@ -2088,11 +2088,9 @@ export const SessionView = memo(() => {
                           ) : (
                             <ChevronDown className="w-3.5 h-3.5 text-text-tertiary" />
                           )}
+                          <Terminal className="w-3.5 h-3.5 text-text-tertiary" />
+                          <span className="text-[11px] font-medium text-text-secondary uppercase tracking-wider">Terminal</span>
                         </button>
-                        <Terminal className="w-3.5 h-3.5 text-text-tertiary" />
-                        <span className="text-[11px] font-medium text-text-secondary uppercase tracking-wider">Terminal</span>
-
-                        <div className="flex-1" />
                       </div>
                       {/* Terminal content (hidden when collapsed) */}
                       {!isTerminalCollapsed && (
