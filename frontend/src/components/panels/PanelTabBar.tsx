@@ -798,7 +798,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
                   className={menuItemClass}
                   onClick={() => handleAddPanel(type)}
                 >
-                  {getPanelIcon(type)}
+                  <span className="flex-shrink-0 [&>svg]:h-3.5 [&>svg]:w-3.5">{getPanelIcon(type)}</span>
                   <span className="capitalize">{type}</span>
                 </button>
               );})}

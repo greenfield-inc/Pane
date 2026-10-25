@@ -118,7 +118,7 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
             aria-controls={listboxId}
             aria-activedescendant={commandCount > 0 ? `${listboxId}-option-${selectedIndex}` : undefined}
             type="text"
-            placeholder="Search commands..."
+            placeholder="Search commands…"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             onKeyDown={handleKeyDown}
@@ -133,8 +133,10 @@ export function CommandPalette({ isOpen, onClose }: CommandPaletteProps) {
         ref={listRef}
         role="listbox"
         aria-label="Commands"
-        className="overflow-y-auto py-2"
-        style={{ maxHeight: '380px' }}
+        // A fixed height keeps the input still while results filter: the
+        // palette is centred, so a shrinking list would move it on every key.
+        className="min-h-0 overflow-y-auto py-2"
+        style={{ height: '380px' }}
       >
         {commandCount === 0 ? (
           <div className="px-4 py-8 text-center text-text-tertiary text-sm">

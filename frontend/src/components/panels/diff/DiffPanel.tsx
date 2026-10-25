@@ -191,14 +191,14 @@ const DiffPanel: React.FC<DiffPanelProps> = ({
           onClick={() => void handleOpenPullRequest()}
           disabled={!reviewUrl}
           title={reviewUrl ? 'Open pull request in Browser' : 'No pull request yet'}
-          className={`inline-flex flex-shrink-0 items-center gap-1 rounded px-2 py-1 text-xs transition-colors ${
+          className={`inline-flex min-w-0 items-center gap-1 rounded px-2 py-1 text-xs transition-colors ${
             reviewUrl
               ? 'text-text-secondary hover:bg-surface-hover'
               : 'cursor-not-allowed text-text-muted'
           }`}
         >
-          <Globe className="h-3 w-3" />
-          Open PR
+          <Globe className="h-3 w-3 flex-shrink-0" />
+          <span className="truncate">Open PR</span>
         </button>
       </div>
 
