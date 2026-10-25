@@ -2105,9 +2105,9 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
         onClose={closeSearch}
       />
 
-      {/* Terminal scroll buttons — compact, revealed on hover */}
+      {/* Terminal scroll buttons — compact, revealed on hover or keyboard focus */}
       {isInitialized && (
-        <div className="absolute top-2 right-5 z-30 flex items-center gap-0.5 opacity-0 pointer-events-none group-hover/terminal:opacity-100 group-hover/terminal:pointer-events-auto transition-opacity">
+        <div className="absolute top-2 right-5 z-30 flex items-center gap-0.5 opacity-0 pointer-events-none group-hover/terminal:opacity-100 group-hover/terminal:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto transition-opacity">
           <input
             ref={uploadInputRef}
             type="file"

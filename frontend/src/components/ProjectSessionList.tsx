@@ -1066,9 +1066,10 @@ function SessionRow({
         />
       </div>
 
-      {/* Each action masks only its own area. A pinned row shows just the pin
-          at rest; hover or keyboard focus reveals Archive as well. */}
-      <div className="absolute inset-y-0 right-2 z-10 flex items-center">
+      {/* Each action masks only its own area, inset 2px so the row's focus ring
+          stays whole. A pinned row shows just the pin at rest; hover or
+          keyboard focus reveals Archive as well. */}
+      <div className="absolute inset-y-0.5 right-2 z-10 flex items-center">
         {onDismiss && (
           <div className={cn(actionSurfaceClassName, 'pr-0.5 opacity-0')}>
             <button
