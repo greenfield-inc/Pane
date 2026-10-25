@@ -189,7 +189,7 @@ export const ModalHeader = React.forwardRef<HTMLDivElement, ModalHeaderProps>(
                 type="button"
                 aria-label="Close modal"
                 onClick={onClose}
-                className="text-text-tertiary hover:text-text-secondary transition-colors"
+                className="text-text-tertiary hover:text-text-secondary transition-colors p-1 rounded"
               >
                 <X className="w-5 h-5" aria-hidden="true" />
               </button>
