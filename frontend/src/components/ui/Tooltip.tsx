@@ -55,6 +55,8 @@ export const Tooltip = React.forwardRef<HTMLElement, TooltipProps>(({
   onBlur,
   onKeyDown,
   onPointerDown,
+  onPointerEnter,
+  onPointerLeave,
   ...triggerProps
 }, forwardedRef) => {
   const [isOpen, setIsOpen] = useState(false);
@@ -178,6 +180,16 @@ export const Tooltip = React.forwardRef<HTMLElement, TooltipProps>(({
         onMouseLeave={(event) => {
           onMouseLeave?.(event);
           if (!event.defaultPrevented) hide();
+        }}
+        // Chromium sends no mouse events to a disabled button, only pointer
+        // events, so these carry the hover for a disabled trigger's tooltip.
+        onPointerEnter={(event) => {
+          onPointerEnter?.(event);
+          if (!event.defaultPrevented && event.pointerType === 'mouse' && event.currentTarget.matches(':disabled')) show();
+        }}
+        onPointerLeave={(event) => {
+          onPointerLeave?.(event);
+          if (!event.defaultPrevented && event.pointerType === 'mouse' && event.currentTarget.matches(':disabled')) hide();
         }}
         onPointerDown={(event) => {
           onPointerDown?.(event);
