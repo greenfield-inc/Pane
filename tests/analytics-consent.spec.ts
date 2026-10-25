@@ -16,6 +16,13 @@ type CapturedPostHogEvent = {
 
 type CapturedPostHogPayload = CapturedPostHogEvent[] | (CapturedPostHogEvent & { batch?: CapturedPostHogEvent[] });
 
+// Remote config and feature flags are disabled; these requests would send stored identity.
+function flagOrConfigRequests(requests: CapturedPostHogRequest[]): string[] {
+  return requests
+    .map((request) => new URL(request.url).pathname)
+    .filter((pathname) => /^\/(flags|decide)\b|^\/array\/[^/]+\/config/.test(pathname));
+}
+
 function parseCapturedEvents(requests: CapturedPostHogRequest[]): CapturedPostHogEvent[] {
   return requests.flatMap((request) => {
     try {
@@ -67,7 +74,7 @@ test.beforeEach(async ({ page }) => {
   );
 });
 
-test('bundled analytics preserves identity and opt-out without loading remote code', async ({ page, baseURL }) => {
+test('bundled analytics preserves identity and opt-out without remote code, config or flags', async ({ page, baseURL }) => {
   if (!baseURL) throw new Error('Analytics network verification requires a base URL');
   const appOrigin = new URL(baseURL).origin;
   const identity = {
@@ -151,7 +158,7 @@ test('bundled analytics preserves identity and opt-out without loading remote co
   const identified = parseCapturedEvents(requests).find((event) => event.event === '$identify');
   expect(identified?.properties?.distinct_id).toBe(identity.distinctId);
   expect(identified?.$set).toMatchObject({ install_id: identity.installId });
-  expect(requests.some((request) => new URL(request.url).pathname === '/array/phc_test/config')).toBe(true);
+  expect(flagOrConfigRequests(requests)).toEqual([]);
   expect(remoteScripts).toEqual([]);
 
   await page.getByRole('switch', { name: 'Allow product analytics' }).click();
@@ -187,6 +194,7 @@ test('bundled analytics preserves identity and opt-out without loading remote co
     web_attribution_present: true,
     is_first_launch: true,
   });
+  expect(flagOrConfigRequests(requests)).toEqual([]);
   expect(remoteScripts).toEqual([]);
 });
 
@@ -242,8 +250,5 @@ test('an explicit existing opt-out stays disabled and receives no default-on eve
   await page.getByRole('button', { name: 'Settings' }).first().click();
   await page.getByRole('button', { name: 'Privacy', exact: true }).click();
   await expect(page.getByRole('switch', { name: 'Allow product analytics' })).not.toBeChecked();
-  const eventNames = parseCapturedEvents(requests).map((event) => event.event);
-  for (const eventName of ['analytics_default_enabled', 'app_opened', '$identify', '$autocapture']) {
-    expect(eventNames).not.toContain(eventName);
-  }
+  expect(requests.map((request) => request.url)).toEqual([]);
 });
