@@ -103,7 +103,7 @@ export const Toggle: React.FC<ToggleProps> = ({
       className={cn(
         'relative inline-flex items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-interactive focus:ring-offset-2',
         sizes.container,
-        isPressed ? 'bg-interactive' : 'bg-surface-secondary border border-border-primary',
+        isPressed ? 'bg-interactive enabled:hover:bg-interactive-hover' : 'bg-surface-secondary border border-border-primary enabled:hover:bg-surface-hover enabled:hover:border-border-hover',
         disabled && 'opacity-50 cursor-not-allowed',
         !disabled && 'cursor-default',
         className
@@ -113,7 +113,7 @@ export const Toggle: React.FC<ToggleProps> = ({
         className={cn(
           'inline-block transform rounded-full bg-surface-primary border border-border-secondary shadow-sm transition-transform',
           sizes.thumb,
-          checked ? sizes.translateOn : sizes.translateOff
+          isPressed ? sizes.translateOn : sizes.translateOff
         )}
       />
     </button>
