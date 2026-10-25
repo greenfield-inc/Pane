@@ -537,7 +537,15 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
 
         {/* Add Panel dropdown button - outside overflow container so dropdown isn't clipped */}
         <div className="relative h-[var(--panel-tab-height)] flex items-center flex-shrink-0" ref={dropdownRef}>
-          <Tooltip content={hotkeyDisplay('open-add-tool') ? <Kbd>{hotkeyDisplay('open-add-tool')}</Kbd> : undefined} side="bottom">
+          <Tooltip
+            content={(
+              <span className="flex items-center gap-2">
+                <span>Add tool</span>
+                {hotkeyDisplay('open-add-tool') && <Kbd size="xs" variant="muted">{hotkeyDisplay('open-add-tool')}</Kbd>}
+              </span>
+            )}
+            side="bottom"
+          >
             <button
               ref={addToolButtonRef}
               type="button"
