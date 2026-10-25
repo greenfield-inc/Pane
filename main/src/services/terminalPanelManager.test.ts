@@ -2595,7 +2595,7 @@ describe('TerminalPanelManager orphan reaping', () => {
     manager.terminals.set(terminal.panelId, terminal);
     manager.stoppingProcesses.set('panel-deleted', [7101]);
     vi.spyOn(processTree, 'isProcessAlive').mockReturnValue(true);
-    const list = vi.spyOn(processTree, 'listDescendantPids').mockResolvedValue([7002, 7003]);
+    const list = vi.spyOn(processTree, 'listTerminalProcessPids').mockResolvedValue([7002, 7003]);
     vi.spyOn(processTree, 'waitForProcessesToExit').mockResolvedValue([7003, 7101]);
     const terminate = vi.spyOn(processTree, 'terminateProcessTrees').mockResolvedValue([]);
 
@@ -2613,7 +2613,7 @@ describe('TerminalPanelManager orphan reaping', () => {
     terminal.pty.pid = 7001;
     manager.terminals.set(terminal.panelId, terminal);
     vi.spyOn(processTree, 'isProcessAlive').mockReturnValue(true);
-    vi.spyOn(processTree, 'listDescendantPids').mockResolvedValue([7002]);
+    vi.spyOn(processTree, 'listTerminalProcessPids').mockResolvedValue([7002]);
     vi.spyOn(processTree, 'waitForProcessesToExit').mockResolvedValue([]);
     const terminate = vi.spyOn(processTree, 'terminateProcessTrees');
 

@@ -31,7 +31,7 @@ import { getGitAttributionEnv } from '../utils/attribution';
 import { interactiveTerminalEnv } from '../utils/inheritedProcessEnv';
 import { createShellStartupPromptWatcher } from './shellStartupPrompts';
 import { PaneError, paneErrorText } from '../../../shared/paneError';
-import { isProcessAlive, listDescendantPids, terminateProcessTrees, waitForProcessesToExit } from '../utils/processTree';
+import { isProcessAlive, listTerminalProcessPids, terminateProcessTrees, waitForProcessesToExit } from '../utils/processTree';
 import {
   type FlowControlRecord,
   createFlowControlRecord,
@@ -2981,8 +2981,9 @@ export class TerminalPanelManager extends EventEmitter {
   /**
    * Kill whatever a destroyed terminal left running, for a panel that is going
    * away. `destroyTerminal` hangs up the PTY and returns; a process that ignores
-   * the hangup (`nohup cmd &`) outlives it, reparented where nothing can walk
-   * to it again. Its pids were captured before the kill. Bounded the same way
+   * the hangup (`nohup cmd &`) or double-forked out of the shell's tree
+   * outlives it. Its pids were read from the terminal's session before the
+   * kill (`listTerminalProcessPids`). Bounded the same way
    * as `terminateSessionTerminals`.
    */
   async reapStoppedProcesses(panelId: string): Promise<void> {
@@ -3015,7 +3016,7 @@ export class TerminalPanelManager extends EventEmitter {
     const panelId = terminal.panelId;
     // Start the snapshot alongside persistence, but finish it before kill: once
     // the shell exits its surviving children may no longer be discoverable.
-    const tree = listDescendantPids([terminal.pty.pid]);
+    const tree = listTerminalProcessPids([terminal.pty.pid]);
     // Stop detection as soon as teardown begins, so output during the save
     // cannot announce completion. Keep the emulator alive through any snapshot save.
     this.agentStatusMonitor.unregister(panelId);
@@ -3305,13 +3306,13 @@ export class TerminalPanelManager extends EventEmitter {
 
   /**
    * Quit teardown: destroy every terminal, then kill any process from their
-   * trees that outlived its PTY's hangup, so quitting leaves no orphans.
-   * The trees are read before the kill, while every child is still reachable.
+   * sessions that outlived its PTY's hangup, so quitting leaves no orphans.
+   * Sessions are read before the kill, while the PTYs still identify them.
    */
   async terminateAllTerminals(): Promise<void> {
     const roots = [...this.terminals.values()].map(terminal => terminal.pty.pid);
     const stopping = [...this.stoppingProcesses.values()].flat();
-    const tree = [...new Set([...roots, ...stopping, ...await listDescendantPids(roots)])].filter(isProcessAlive);
+    const tree = [...new Set([...roots, ...stopping, ...await listTerminalProcessPids(roots)])].filter(isProcessAlive);
     this.destroyAllTerminals();
     if (tree.length === 0) return;
     const outlived = await waitForProcessesToExit(tree, QUIT_EXIT_GRACE_MS);

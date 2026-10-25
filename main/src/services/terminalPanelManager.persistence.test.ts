@@ -173,7 +173,7 @@ describe('terminal panel persistence', () => {
   let configManager: ConfigManager;
 
   beforeEach(() => {
-    vi.spyOn(processTree, 'listDescendantPids').mockResolvedValue([]);
+    vi.spyOn(processTree, 'listTerminalProcessPids').mockResolvedValue([]);
     vi.spyOn(processTree, 'isProcessAlive').mockReturnValue(false);
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-terminal-persistence-'));
     ptyHost = new FakePtyHost();
@@ -797,7 +797,7 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void
 
   it('refuses to restart a destroyed panel until its old shell and agent have exited', async () => {
     const panel = makePanel('resume-during-teardown');
-    vi.mocked(processTree.listDescendantPids).mockResolvedValue([4243]);
+    vi.mocked(processTree.listTerminalProcessPids).mockResolvedValue([4243]);
     const alive = new Set([4242, 4243]);
     vi.mocked(processTree.isProcessAlive).mockImplementation(pid => alive.has(pid));
     const { manager } = await startTerminal(panel);
@@ -818,7 +818,7 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void
   it('keeps the old terminal registered until its process snapshot completes', async () => {
     const panel = makePanel('resume-during-snapshot');
     let finishSnapshot!: (pids: number[]) => void;
-    vi.mocked(processTree.listDescendantPids).mockReturnValue(new Promise(resolve => { finishSnapshot = resolve; }));
+    vi.mocked(processTree.listTerminalProcessPids).mockReturnValue(new Promise(resolve => { finishSnapshot = resolve; }));
     const { manager, handle } = await startTerminal(panel);
     const kill = vi.spyOn(handle, 'kill');
     const destroying = manager.destroyTerminal(panel.id, { saveState: false });
@@ -833,7 +833,7 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void
 
   it('blocks resume even after session teardown gives up on a surviving agent', async () => {
     const panel = makePanel('resume-after-teardown-budget');
-    vi.mocked(processTree.listDescendantPids).mockResolvedValue([4243]);
+    vi.mocked(processTree.listTerminalProcessPids).mockResolvedValue([4243]);
     vi.mocked(processTree.isProcessAlive).mockImplementation(pid => pid === 4243);
     vi.spyOn(processTree, 'waitForProcessesToExit').mockResolvedValue([4243]);
     vi.spyOn(processTree, 'terminateProcessTrees').mockResolvedValue([4243]);
@@ -846,7 +846,7 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void
 
   it('also blocks resume on surviving children discovered during escalation', async () => {
     const panel = makePanel('resume-after-new-child-survives');
-    vi.mocked(processTree.listDescendantPids).mockResolvedValue([4243]);
+    vi.mocked(processTree.listTerminalProcessPids).mockResolvedValue([4243]);
     vi.mocked(processTree.isProcessAlive).mockImplementation(pid => pid === 4244);
     vi.spyOn(processTree, 'waitForProcessesToExit').mockResolvedValue([4243]);
     let finishKill!: (pids: number[]) => void;

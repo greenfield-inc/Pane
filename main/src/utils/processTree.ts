@@ -72,6 +72,74 @@ export async function listDescendantPids(rootPids: readonly number[]): Promise<n
   return descendants;
 }
 
+/** `ps` prints `??` (macOS) or `?` (Linux) for a process with no controlling terminal. */
+function controllingTerminal(tty: string): string | undefined {
+  return /^[?-]+$/u.test(tty) ? undefined : tty;
+}
+
+/**
+ * Each process's controlling terminal (`ttys004`, `pts/3`), for the processes
+ * that have one. Empty on Windows, which has no such thing. Naming terminals
+ * costs `ps` about 200 ms on macOS, so read this only when a PTY shell is
+ * involved. A failed read throws: callers decide what an unknown means.
+ */
+export async function readControllingTerminals(): Promise<Map<number, string>> {
+  const terminals = new Map<number, string>();
+  if (process.platform === 'win32') return terminals;
+  const { stdout } = await execFileAsync('ps', ['-Ao', 'pid=,tty='], { encoding: 'utf8', timeout: SNAPSHOT_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 });
+  for (const line of stdout.split('\n')) {
+    const match = /^\s*(\d+)\s+(\S+)\s*$/u.exec(line);
+    const tty = match && controllingTerminal(match[2]);
+    if (match && tty) terminals.set(Number(match[1]), tty);
+  }
+  return terminals;
+}
+
+/**
+ * Every process in the terminal sessions the PTY shells `rootPids` lead,
+ * excluding the roots: their descendants, plus, for a root that leads its
+ * terminal's session, anything on that controlling terminal that started no
+ * earlier than it. The second
+ * part catches workers that double-forked away from the shell (prompt helpers
+ * such as gitstatusd, an agent's MCP server whose parent exited); init adopts
+ * them, so no walk from the shell reaches them, but they keep its terminal.
+ *
+ * Read this while the PTYs are still open: a closed PTY's device name can be
+ * reused by another terminal. Windows has no controlling terminal, so there
+ * this is the descendant tree alone. Best effort, like `listDescendantPids`.
+ */
+export async function listTerminalProcessPids(rootPids: readonly number[]): Promise<number[]> {
+  const roots = rootPids.filter(pid => Number.isInteger(pid) && pid > 0);
+  if (roots.length === 0) return [];
+  const [descendants, sessionMembers] = await Promise.all([
+    listDescendantPids(roots),
+    process.platform === 'win32' ? Promise.resolve([]) : listSameTerminalPids(roots),
+  ]);
+  const rootSet = new Set(roots);
+  return [...new Set([...descendants, ...sessionMembers])].filter(pid => !rootSet.has(pid));
+}
+
+async function listSameTerminalPids(roots: readonly number[]): Promise<number[]> {
+  let stdout: string;
+  try {
+    stdout = (await execFileAsync('ps', ['-Ao', 'pid=,tty=,stat=,lstart='], { encoding: 'utf8', timeout: SNAPSHOT_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 })).stdout;
+  } catch (error) {
+    console.warn('[ProcessTree] terminal_snapshot_failed:', error);
+    return [];
+  }
+  const rows = stdout.split('\n').flatMap(line => {
+    const match = /^\s*(\d+)\s+(\S+)\s+(\S+)\s+(.+?)\s*$/u.exec(line);
+    const tty = match && controllingTerminal(match[2]);
+    return match && tty ? [{ pid: Number(match[1]), tty, sessionLeader: match[3].includes('s'), started: Date.parse(match[4]) }] : [];
+  });
+  // Only a root that leads its terminal's session (a PTY shell) names it; any
+  // other process may share the terminal that launched Pane.
+  const sessions = rows.filter(row => row.sessionLeader && roots.includes(row.pid));
+  return rows
+    .filter(row => sessions.some(root => root.tty === row.tty && root.started <= row.started))
+    .map(row => row.pid);
+}
+
 /**
  * Forcefully terminates `pids` and everything descended from them, then waits
  * for them to leave the process table. Returns the pids still running when

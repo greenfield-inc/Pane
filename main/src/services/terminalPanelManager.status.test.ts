@@ -69,7 +69,7 @@ async function pollAgentStatus() {
 }
 
 beforeEach(() => {
-  vi.spyOn(processTree, 'listDescendantPids').mockResolvedValue([]);
+  vi.spyOn(processTree, 'listTerminalProcessPids').mockResolvedValue([]);
   // xterm writes need real timers; only the status clock is controlled.
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(20_000);
