@@ -870,32 +870,15 @@ export class WorktreeManager {
       // Try a dry-run merge to detect conflicts
       // We use merge-tree to check for conflicts without modifying the working tree
       try {
-        // The three-argument (trivial-merge) form rejects `--` with exit 128.
-        const { stdout: mergeTreeOutput } = await commandRunner.execFile(
-          'git', ['merge-tree', base, 'HEAD', mainBranch],
-          worktreePath
+        // Exit 1 means conflicts (text, binary, rename or delete); stdout is the tree OID, then one conflicted path per line.
+        const { stdout: mergeTreeOutput, exitCode } = await commandRunner.execFile(
+          'git', ['merge-tree', '--write-tree', '--name-only', '--no-messages', '--', 'HEAD', mainBranch],
+          worktreePath,
+          { okExitCodes: [1] }
         );
 
-        // Parse merge-tree output for conflicts
-        const conflictMarkers = mergeTreeOutput.match(/<<<<<<< /g);
-        const hasConflicts = conflictMarkers && conflictMarkers.length > 0;
-
-        if (hasConflicts) {
-          // Get list of files that would conflict
-          const { stdout: diffOutput } = await commandRunner.execFile(
-            'git', ['diff', '--name-only', `${base}...HEAD`, '--'],
-            worktreePath
-          );
-          const ourFiles = diffOutput.trim().split('\n').filter(f => f);
-
-          const { stdout: theirDiffOutput } = await commandRunner.execFile(
-            'git', ['diff', '--name-only', `${base}...${mainBranch}`, '--'],
-            worktreePath
-          );
-          const theirFiles = theirDiffOutput.trim().split('\n').filter(f => f);
-
-          // Find files modified in both branches
-          const conflictingFiles = ourFiles.filter(f => theirFiles.includes(f));
+        if (exitCode === 1) {
+          const conflictingFiles = mergeTreeOutput.trim().split('\n').slice(1).filter(f => f);
 
           // Get commit info for better error reporting
           const { stdout: ourCommits } = await commandRunner.execFile(

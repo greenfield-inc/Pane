@@ -57,6 +57,15 @@ it('reports no conflict when both branches edit separate lines of the same file'
     .toEqual({ hasConflicts: false, canAutoMerge: true });
 });
 
+it('reports a conflict when both branches change the same binary file', async () => {
+  commit(project, 'image.bin', 'header\0base\n', 'Binary');
+  git(worktree, 'reset', '--hard', base);
+  commit(project, 'image.bin', 'header\0base edit\n', 'Base change');
+  commit(worktree, 'image.bin', 'header\0feature edit\n', 'Feature change');
+  expect(await manager.checkForRebaseConflicts(worktree, base, runner))
+    .toMatchObject({ hasConflicts: true, canAutoMerge: false, conflictingFiles: ['image.bin'] });
+});
+
 it('rebases onto the literal base while preserving both branches changes', async () => {
   commit(project, 'base.txt', 'base content\n', 'Base change');
   commit(worktree, 'feature.txt', 'feature content\n', 'Feature change');
