@@ -174,7 +174,7 @@ export function RemotePanelTabs({
         {showAddMenu && (
           <div
             id={addMenuId}
-            className="animate-dropdown-enter absolute right-0 top-full z-40 mt-2 w-[min(20rem,calc(100vw-1rem))] origin-top-right overflow-hidden rounded-lg border border-border-primary bg-surface-primary shadow-dropdown"
+            className="animate-dropdown-enter absolute right-0 top-full z-40 mt-2 w-[min(20rem,calc(100vw-1rem))] origin-top-right overflow-hidden rounded-lg border border-border-primary bg-surface-primary p-1 shadow-dropdown"
             role="menu"
             aria-label="Add tool"
             onKeyDown={handleMenuKeyDown}
@@ -249,7 +249,7 @@ function AddToolMenuItem({
       role="menuitem"
       tabIndex={-1}
       onClick={onClick}
-      className="flex w-full items-start gap-3 px-3 py-2.5 text-left text-sm text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
+      className="flex w-full items-start gap-3 rounded px-3 py-2.5 text-left text-sm text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary"
     >
       <span className="mt-0.5 shrink-0 text-text-tertiary" aria-hidden="true">{icon}</span>
       <span className="min-w-0">
