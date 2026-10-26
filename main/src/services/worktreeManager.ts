@@ -63,6 +63,13 @@ class GitOperationError extends Error {
   originalError?: { message?: string; stderr?: string; stdout?: string };
 }
 
+export interface RebaseConflictCheck {
+  hasConflicts: boolean;
+  conflictingFiles?: string[];
+  conflictingCommits?: { ours: string[]; theirs: string[] };
+  canAutoMerge?: boolean;
+}
+
 // Interface for raw commit data
 interface RawCommitData {
   hash: string;
@@ -846,12 +853,15 @@ export class WorktreeManager {
     }
   }
 
-  async checkForRebaseConflicts(worktreePath: string, mainBranch: string, commandRunner: CommandRunner): Promise<{
-    hasConflicts: boolean;
-    conflictingFiles?: string[];
-    conflictingCommits?: { ours: string[]; theirs: string[] };
-    canAutoMerge?: boolean;
-  }> {
+  private async listDivergentCommits(worktreePath: string, base: string, mainBranch: string, commandRunner: CommandRunner): Promise<{ ours: string[]; theirs: string[] }> {
+    const log = async (range: string) => {
+      const { stdout } = await commandRunner.execFile('git', ['log', '--oneline', range, '--'], worktreePath);
+      return stdout.trim().split('\n').filter(c => c);
+    };
+    return { ours: await log(`${base}..HEAD`), theirs: await log(`${base}..${mainBranch}`) };
+  }
+
+  async checkForRebaseConflicts(worktreePath: string, mainBranch: string, commandRunner: CommandRunner): Promise<RebaseConflictCheck> {
     try {
 
       // First check if there are any changes to rebase
@@ -880,25 +890,12 @@ export class WorktreeManager {
         if (exitCode === 1) {
           const conflictingFiles = mergeTreeOutput.trim().split('\n').slice(1).filter(f => f);
 
-          // Get commit info for better error reporting
-          const { stdout: ourCommits } = await commandRunner.execFile(
-            'git', ['log', '--oneline', `${base}..HEAD`, '--'],
-            worktreePath
-          );
-          const { stdout: theirCommits } = await commandRunner.execFile(
-            'git', ['log', '--oneline', `${base}..${mainBranch}`, '--'],
-            worktreePath
-          );
-
           console.log(`[WorktreeManager] Found conflicts in files: ${conflictingFiles.join(', ')}`);
 
           return {
             hasConflicts: true,
             conflictingFiles,
-            conflictingCommits: {
-              ours: ourCommits.trim().split('\n').filter(c => c),
-              theirs: theirCommits.trim().split('\n').filter(c => c)
-            },
+            conflictingCommits: await this.listDivergentCommits(worktreePath, base, mainBranch, commandRunner),
             canAutoMerge: false
           };
         }
@@ -926,25 +923,12 @@ export class WorktreeManager {
         const conflictingFiles = ourFiles.filter(f => theirFiles.includes(f));
 
         if (conflictingFiles.length > 0) {
-          // Get commit info
-          const { stdout: ourCommits } = await commandRunner.execFile(
-            'git', ['log', '--oneline', `${base}..HEAD`, '--'],
-            worktreePath
-          );
-          const { stdout: theirCommits } = await commandRunner.execFile(
-            'git', ['log', '--oneline', `${base}..${mainBranch}`, '--'],
-            worktreePath
-          );
-
           console.log(`[WorktreeManager] Potential conflicts in files: ${conflictingFiles.join(', ')}`);
 
           return {
             hasConflicts: true,
             conflictingFiles,
-            conflictingCommits: {
-              ours: ourCommits.trim().split('\n').filter(c => c),
-              theirs: theirCommits.trim().split('\n').filter(c => c)
-            },
+            conflictingCommits: await this.listDivergentCommits(worktreePath, base, mainBranch, commandRunner),
             canAutoMerge: false
           };
         }
@@ -961,7 +945,8 @@ export class WorktreeManager {
     }
   }
 
-  async rebaseMainIntoWorktree(worktreePath: string, mainBranch: string, commandRunner: CommandRunner): Promise<void> {
+  /** Returns the conflict, with the worktree restored, when replaying a commit conflicts even though the tips merge cleanly. */
+  async rebaseMainIntoWorktree(worktreePath: string, mainBranch: string, commandRunner: CommandRunner): Promise<RebaseConflictCheck> {
     return await withLock(`git-rebase-${worktreePath}`, async () => {
       const executedCommands: string[] = [];
       let lastOutput = '';
@@ -984,13 +969,18 @@ export class WorktreeManager {
             conflict_occurred: false
           });
         }
+        return { hasConflicts: false, canAutoMerge: true };
       } catch (error: unknown) {
         const err = decodeBoundary(error, commandErrorSchema);
         console.error(`[WorktreeManager] Failed to rebase ${mainBranch} into worktree:`, err);
 
-        // Check if conflict occurred
-        const errorOutput = err.stderr || err.stdout || err.message || '';
-        conflictOccurred = errorOutput.includes('CONFLICT');
+        // A stopped rebase leaves its conflicts as unmerged paths
+        const { stdout: unmergedOutput } = await commandRunner.execFile(
+          'git', ['diff', '--name-only', '--diff-filter=U', '--'],
+          worktreePath
+        ).catch(() => ({ stdout: '' }));
+        const conflictingFiles = unmergedOutput.trim().split('\n').filter(f => f);
+        conflictOccurred = conflictingFiles.length > 0;
 
         // Track failed rebase
         if (this.analyticsManager) {
@@ -1007,6 +997,17 @@ export class WorktreeManager {
             operation_type: 'rebase_from_main',
             error_category: errorCategory
           });
+        }
+
+        if (conflictOccurred) {
+          await commandRunner.execFile('git', ['rebase', '--abort'], worktreePath);
+          const { stdout: mergeBase } = await commandRunner.execFile('git', ['merge-base', '--', 'HEAD', mainBranch], worktreePath);
+          return {
+            hasConflicts: true,
+            conflictingFiles,
+            conflictingCommits: await this.listDivergentCommits(worktreePath, mergeBase.trim(), mainBranch, commandRunner),
+            canAutoMerge: false
+          };
         }
 
         // Create detailed error with git command output

@@ -76,6 +76,21 @@ it('rebases onto the literal base while preserving both branches changes', async
   expect(git(worktree, 'log', '-3', '--format=%s')).toBe('Feature change\nBase change\nInitial');
 });
 
+it('aborts a rebase that conflicts mid-replay and reports the conflict, leaving the worktree untouched', async () => {
+  commit(worktree, 'shared.txt', 'B\n', 'Feature to B');
+  commit(worktree, 'shared.txt', 'C\n', 'Feature to C');
+  commit(project, 'shared.txt', 'C\n', 'Base to C');
+  const head = git(worktree, 'rev-parse', 'HEAD');
+  // Both tips hold C, so the tip check passes; replaying "Feature to B" onto C conflicts.
+  expect(await manager.checkForRebaseConflicts(worktree, base, runner)).toEqual({ hasConflicts: false, canAutoMerge: true });
+  expect(await manager.rebaseMainIntoWorktree(worktree, base, runner))
+    .toMatchObject({ hasConflicts: true, canAutoMerge: false, conflictingFiles: ['shared.txt'] });
+  expect(() => git(worktree, 'rev-parse', '--verify', '--quiet', 'REBASE_HEAD')).toThrow();
+  expect(git(worktree, 'rev-parse', 'HEAD')).toBe(head);
+  expect(git(worktree, 'status', '--porcelain')).toBe('');
+  expect(readFileSync(join(worktree, 'shared.txt'), 'utf8')).toBe('C\n');
+});
+
 it('fast-forwards the literal target after rebasing the literal feature branch', async () => {
   commit(project, 'base.txt', 'base content\n', 'Base change');
   commit(worktree, 'feature.txt', 'feature content\n', 'Feature change');
