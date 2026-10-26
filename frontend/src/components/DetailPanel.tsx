@@ -279,7 +279,7 @@ export function DetailPanel({
               <div className="p-2 bg-status-error/10 border border-status-error/30 rounded-md">
                 <div className="flex items-start gap-2">
                   <AlertTriangle className="w-4 h-4 text-status-error flex-shrink-0 mt-0.5" />
-                  <p className="text-xs text-status-error">{mergeError}</p>
+                  <p className="text-xs text-text-primary">{mergeError}</p>
                 </div>
               </div>
             </div>

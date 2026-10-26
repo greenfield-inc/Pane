@@ -147,7 +147,7 @@ export function ArchiveProgress() {
             Archive Tasks
           </span>
           {progress.activeCount > 0 && (
-            <span className="px-1.5 py-0.5 bg-status-info/20 text-status-info text-xs rounded-full animate-pulse">
+            <span className="px-1.5 py-0.5 bg-status-info/20 text-status-info-on-tint text-xs rounded-full animate-pulse">
               {progress.activeCount} active
             </span>
           )}
@@ -224,7 +224,7 @@ export function ArchiveProgress() {
                     </div>
                   )}
                   {task.status === 'removing-worktree' && (
-                    <div className="text-xs text-status-warning/80 pl-5 mt-1 italic">
+                    <div className="text-xs text-status-warning pl-5 mt-1 italic">
                       ⚠️ Worktree removal can take several minutes for large repositories
                     </div>
                   )}

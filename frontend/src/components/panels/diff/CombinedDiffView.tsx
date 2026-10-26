@@ -203,8 +203,8 @@ const CombinedDiffView = memo(forwardRef<CombinedDiffViewHandle, CombinedDiffVie
           )}
           {hasUncommitted && (
             <>
-              <button type="button" onClick={() => setShowCommitDialog(true)} className="rounded px-1.5 py-0.5 text-[11px] font-medium text-status-success hover:bg-status-success/15">Commit</button>
-              <button type="button" onClick={handleRestore} title="Restore all uncommitted changes" className="rounded px-1.5 py-0.5 text-[11px] font-medium text-status-warning hover:bg-status-warning/15">Restore</button>
+              <button type="button" onClick={() => setShowCommitDialog(true)} className="rounded px-1.5 py-0.5 text-[11px] font-medium text-status-success hover:bg-status-success/15 hover:text-text-primary">Commit</button>
+              <button type="button" onClick={handleRestore} title="Restore all uncommitted changes" className="rounded px-1.5 py-0.5 text-[11px] font-medium text-status-warning hover:bg-status-warning/15 hover:text-text-primary">Restore</button>
             </>
           )}
           {scope.kind === 'commit' && (
@@ -227,7 +227,7 @@ const CombinedDiffView = memo(forwardRef<CombinedDiffViewHandle, CombinedDiffVie
             </div>
           </div>
         ) : loading && !visibleManifest ? <div className="animate-pulse p-4 text-sm text-text-secondary">Loading {label}…</div>
-          : error ? <div role="alert" className="m-4 rounded border border-status-error/30 bg-status-error/10 p-4 text-sm text-status-error">{error}</div>
+          : error ? <div role="alert" className="m-4 rounded border border-status-error/30 bg-status-error/10 p-4 text-sm text-text-primary">{error}</div>
             : visible && visible.manifest.files.length > 0 ? <ChangesList sessionId={sessionId} rows={visible.rows} scopeKey={scopeKey(scope)} activePath={activeDiffPath} onFileOpen={handleFileOpen} />
               : <div className="flex h-full items-center justify-center px-4 text-sm text-text-secondary"><div className="space-y-2 text-center"><p>{emptyMessage}</p>{isMainRepo && historySource === 'remote' && <p className="text-sm text-text-tertiary">Create new commits to see them here.</p>}</div></div>}
       </div>

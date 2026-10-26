@@ -1,6 +1,6 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { isProcessAlive } from '../utils/processTree';
+import { isProcessAlive, readControllingTerminals } from '../utils/processTree';
 
 const execFileAsync = promisify(execFile);
 
@@ -12,6 +12,8 @@ export interface ArchiveProcessIdentity {
 
 export interface ArchiveProcessObservation extends ArchiveProcessIdentity {
   exited: boolean;
+  /** POSIX: leads its session, as every PTY shell does (`ps` stat flag `s`). */
+  sessionLeader?: boolean;
 }
 
 /** A failed snapshot must never be interpreted as an empty process table. */
@@ -24,13 +26,15 @@ export async function readArchiveProcesses(): Promise<ArchiveProcessObservation[
   return stdout.split('\n').filter(line => line.trim()).map(line => {
     const match = /^\s*(\d+)\s+(\d+)\s+(.+?)\s*$/u.exec(line);
     if (!match) throw new Error('Cannot parse the process identity snapshot');
-    return { pid: Number(match[1]), parent: Number(match[2]), started: match[3], exited: false };
+    const record: ArchiveProcessObservation = { pid: Number(match[1]), parent: Number(match[2]), started: match[3], exited: false };
+    return record;
   }).map(record => {
     // Zombies cannot write files. POSIX state is not part of lifetime identity.
     if (process.platform !== 'win32') {
       const state = record.started.split(/\s+/u).pop() ?? '';
       record.started = record.started.slice(0, -(state.length)).trim();
       record.exited = state.startsWith('Z');
+      if (state.includes('s')) record.sessionLeader = true;
     }
     return record;
   });
@@ -71,7 +75,13 @@ export class ArchiveProcessTracker {
     private save: (identities: ArchiveProcessIdentity[]) => void,
     private read = readArchiveProcesses,
     private terminate = terminateArchiveProcesses,
+    private readTerminals = readControllingTerminals,
   ) {}
+
+  /** Tracked identities not yet confirmed gone. */
+  get processes(): readonly ArchiveProcessIdentity[] {
+    return this.identities;
+  }
 
   async capture(roots: readonly number[]): Promise<void> {
     if (roots.length === 0) return;
@@ -80,6 +90,24 @@ export class ArchiveProcessTracker {
     for (const pid of selected) {
       if (!table.some(record => record.pid === pid) && isProcessAlive(pid)) {
         throw new Error(`Cannot establish process identity for PID ${pid}`);
+      }
+    }
+    // A worker that double-forks away from the terminal's shell (prompt
+    // helpers like gitstatusd, an agent's MCP server whose parent exited) is
+    // reparented to init and no longer a descendant, but it keeps the shell's
+    // controlling terminal. Only here, while Pane still holds the PTY, does
+    // that terminal name one session: refresh and escalation never match by
+    // terminal, since a closed PTY's name can be reused. Only a root that
+    // leads its terminal's session (a PTY shell) qualifies: any other child of
+    // Pane inherits whatever terminal launched Pane, such as a developer's.
+    // Terminal names are slow to read, so they are read only for such a root.
+    const leaders = table.filter(record => selected.has(record.pid) && record.sessionLeader);
+    const terminals = leaders.length > 0 ? await this.readTerminals() : new Map<number, string>();
+    for (const root of leaders) {
+      const tty = terminals.get(root.pid);
+      if (!tty) continue;
+      for (const record of table) {
+        if (terminals.get(record.pid) === tty && Date.parse(root.started) <= Date.parse(record.started)) selected.add(record.pid);
       }
     }
     this.captureTable(table, selected);

@@ -1,4 +1,5 @@
 import { AT_TERMINAL_LINE_COUNT_PRESETS } from '../../../types/settings';
+import { DEFAULT_TERMINAL_FONT_SIZE } from '../../../../../shared/types/appearance';
 import { useEffect, useState } from 'react';
 import { Minus, Plus } from 'lucide-react';
 import { IconButton } from '../../ui/Button';
@@ -35,7 +36,7 @@ export function TerminalSettings({ persistence, systemMonoFonts }: TerminalSetti
   // The current font always has an option, so the select never shows blank for the
   // bundled default or a custom name. Dot-prefixed families are hidden system fonts.
   const fontOptions = [...new Set([fontFamily, ...systemMonoFonts.filter((font) => !font.startsWith('.'))])];
-  const fontSize = config.terminalFontSize ?? 14;
+  const fontSize = config.terminalFontSize ?? DEFAULT_TERMINAL_FONT_SIZE;
 
   return (
     <SettingsPage title="Terminal" description="Defaults for terminal panels across all projects.">

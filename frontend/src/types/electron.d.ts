@@ -1,4 +1,5 @@
 /// <reference types="electron" />
+import type { PreferencesApi } from '../../../shared/types/preferences';
 // Type definitions for Electron preload API
 import type { Session, SessionOutput, GitStatus, VersionInfo, VersionUpdateInfo } from './session';
 import type { Project } from './project';
@@ -97,6 +98,7 @@ interface IPCResponse<T = any> {
 
 interface ElectronAPI {
   onNotesChanged: (callback: () => void) => () => void;
+  preferences: PreferencesApi;
   // Generic invoke method. Daemon-owned channels route through the main-process
   // daemon bridge while adapter-only channels stay on direct Electron IPC.
   invoke: {
@@ -296,7 +298,6 @@ interface ElectronAPI {
     // Log operations
     getLogs: (sessionId: string) => Promise<IPCResponse>;
     clearLogs: (sessionId: string) => Promise<IPCResponse>;
-    addLog: (sessionId: string, entry: LogEntry) => Promise<IPCResponse>;
     
     // Large text operations
     saveLargeText: (sessionId: string, text: string) => Promise<string>;
@@ -502,7 +503,6 @@ interface ElectronAPI {
      * Re-fires on auto-reattach after a supervisor restart with a new ptyId.
      */
     onTerminalPtyReady: (callback: (data: { sessionId: string; panelId: string; ptyId: string }) => void) => () => void;
-    onUncleanShutdownDetected: (callback: () => void) => () => void;
     onMainLog: (callback: (level: string, message: string) => void) => () => void;
     onVersionUpdateAvailable: (callback: (versionInfo: VersionUpdateInfo) => void) => () => void;
     
@@ -649,6 +649,7 @@ interface ElectronAPI {
 
   // Window state queries (invoke, not event subscriptions)
   window: {
+    consumeUncleanShutdown: () => Promise<boolean>;
     isFocused: () => Promise<boolean>;
     /** Raises the window and opens a pane:// link, like one opened from the OS. */
     openPaneLink: (link: string) => Promise<void>;

@@ -1,5 +1,6 @@
 import type { AgentChatEvent, AgentChatView, AgentChatSend, AgentInterface } from '../../shared/types/agentChat';
 import { contextBridge, ipcRenderer } from 'electron';
+import { createPreferencesApi } from '../../shared/types/preferences';
 import { isDaemonOwnedChannel } from '../../shared/types/daemon';
 import {
   WINDOW_CONTROLS_OVERLAY_ARG,
@@ -350,6 +351,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('notes:changed', listener);
     return () => ipcRenderer.removeListener('notes:changed', listener);
   },
+  preferences: createPreferencesApi(invokeIpc),
   // Generic invoke method for direct IPC calls
   invoke: (channel: string, ...args: unknown[]) => invokeIpc(channel, ...args),
   
@@ -580,7 +582,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // Log operations
     getLogs: (sessionId: string): Promise<IPCResponse> => invokeIpc('sessions:get-logs', sessionId),
     clearLogs: (sessionId: string): Promise<IPCResponse> => invokeIpc('sessions:clear-logs', sessionId),
-    addLog: (sessionId: string, entry: LogEntry): Promise<IPCResponse> => invokeIpc('sessions:add-log', sessionId, entry),
   },
 
   // Project management
@@ -1021,13 +1022,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.removeAllListeners(channel);
     },
     
-    // Unclean shutdown detection (crash sentinel)
-    onUncleanShutdownDetected: (callback: () => void) => {
-      const wrappedCallback = (_event: Electron.IpcRendererEvent) => callback();
-      ipcRenderer.on('app:unclean-shutdown-detected', wrappedCallback);
-      return () => ipcRenderer.removeListener('app:unclean-shutdown-detected', wrappedCallback);
-    },
-
     // Main process logging
     onMainLog: (callback: (level: string, message: string) => void) => {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, level: string, message: string) => callback(level, message);
@@ -1193,6 +1187,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Window state queries (invoke, not event subscriptions)
   window: {
+    consumeUncleanShutdown: async (): Promise<boolean> => decodeBoundary(await invokeIpc('app:consume-unclean-shutdown'), boundary.boolean),
     isFocused: async (): Promise<boolean> => decodeBoundary(await invokeIpc('window:is-focused'), boundary.boolean),
     openPaneLink: async (link: string): Promise<void> => {
       await invokeIpc('window:open-pane-link', link);

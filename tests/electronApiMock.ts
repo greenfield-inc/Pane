@@ -28,6 +28,7 @@ export type ElectronApiMockOptions = {
   analyticsIdentity?: JsonObject;
   initialConfig?: JsonObject;
   initialWindowFocused?: boolean;
+  uncleanShutdown?: boolean;
   initialPreferences?: Record<string, string>;
   platform?: 'darwin' | 'linux' | 'win32';
   /** Whether main handed the title bar to the page (Window Controls Overlay). */
@@ -513,6 +514,19 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       },
     });
 
+    const persistPreference = (key: string, value: string): { success: true } | { success: false; error: string } => {
+      if (nextPreferenceSetError) {
+        const error = nextPreferenceSetError;
+        nextPreferenceSetError = null;
+        return { success: false, error };
+      }
+      if (key) {
+        preferences[key] = value;
+        preferenceWrites.push({ key, value });
+      }
+      return { success: true };
+    };
+
     const invoke = (channel: string, ...args: unknown[]) => {
       const calls = invokeCalls.get(channel) ?? [];
       calls.push({ channel, args });
@@ -554,18 +568,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       if (channel === 'preferences:get') {
         return success(key ? preferences[key] ?? 'true' : 'true');
       }
-      if (channel === 'preferences:set') {
-        if (nextPreferenceSetError) {
-          const error = nextPreferenceSetError;
-          nextPreferenceSetError = null;
-          return Promise.resolve({ success: false, error });
-        }
-        if (key) {
-          preferences[key] = value ?? '';
-          preferenceWrites.push({ key, value: value ?? '' });
-        }
-        return success();
-      }
+      if (channel === 'preferences:set') return Promise.resolve(persistPreference(key ?? '', value ?? ''));
       if (channel === 'preferences:get-all') {
         return success(clone(preferences));
       }
@@ -590,10 +593,24 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       return success();
     };
 
+    let uncleanShutdownPending = mockOptions.uncleanShutdown === true;
     const electronAPI = {
+      preferences: {
+        get: async (key: string) => preferences[key] ?? 'true',
+        getAll: async () => clone(preferences),
+        set: async (key: string, value: string) => {
+          const response = persistPreference(key, value);
+          if (!response.success) throw new Error(response.error);
+        },
+      },
       invoke,
       events,
       window: {
+        consumeUncleanShutdown: () => {
+          const detected = uncleanShutdownPending;
+          uncleanShutdownPending = false;
+          return Promise.resolve(detected);
+        },
         isFocused: () => Promise.resolve(mockOptions.initialWindowFocused !== false),
       },
       getPlatform: () => Promise.resolve(mockOptions.platform ?? 'linux'),

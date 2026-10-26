@@ -21,6 +21,7 @@ import { registerUIStateHandlers } from './uiState';
 import { registerDashboardHandlers } from './dashboard';
 import { setupLogHandlers } from './logs';
 import { registerPanelHandlers } from './panels';
+import { registerTerminalPathHandlers } from './terminalPaths';
 import { registerEditorPanelHandlers } from './editorPanel';
 import { registerNimbalystHandlers } from './nimbalyst';
 import { registerSpotlightHandlers } from './spotlight';
@@ -106,6 +107,7 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
   registerDashboardHandlers(ipcMain, services);
   setupLogHandlers(ipcMain, services.sessionManager, commandRegistry);
   registerPanelHandlers(ipcMain, services, commandRegistry);
+  registerTerminalPathHandlers(ipcMain, services, commandRegistry);
   registerEditorPanelHandlers(ipcMain, services);
   registerNimbalystHandlers(ipcMain, services);
   registerSpotlightHandlers(ipcMain, services);

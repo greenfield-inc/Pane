@@ -327,6 +327,8 @@ export class RemotePaneClient {
     const endpoint = buildRemoteEndpoint(this.normalizedBaseUrl, 'invoke');
     let payload: RemoteInvokeResponsePayload;
     const generation = this.streamGeneration;
+    // Reads and viewer bookkeeping change nothing the person must check, so losing one is only an interruption.
+    const nothingToCheck = REMOTE_READ_CHANNELS.has(channel) || REMOTE_RESTORE_CHANNELS.has(channel);
     try {
       const response = await requestJson(endpoint, this.buildRequestOptions(endpoint, {
         method: 'POST', signal,
@@ -343,9 +345,8 @@ export class RemotePaneClient {
       payload = parseJsonResponse(response, 'Remote daemon returned an invalid invoke response', remoteInvokeResponseSchema);
     } catch (error) {
       if (error instanceof PaneError) throw error;
-      const isRead = REMOTE_READ_CHANNELS.has(channel);
-      const failure = new PaneError(isRead ? 'ERR_REMOTE_TRANSPORT' : 'ERR_REMOTE_DELIVERY_UNKNOWN',
-        isRead ? 'Remote connection interrupted: the host response was incomplete. Pane is reconnecting.'
+      const failure = new PaneError(nothingToCheck ? 'ERR_REMOTE_TRANSPORT' : 'ERR_REMOTE_DELIVERY_UNKNOWN',
+        nothingToCheck ? 'Remote connection interrupted: the host response was incomplete. Pane is reconnecting.'
           : 'Delivery unknown: the remote response was interrupted. The action may have completed; it was not replayed.',
         'Wait for reconnection and check the destination before trying again.');
       if (!signal?.aborted && generation === this.streamGeneration && !this.closedByClient) {
@@ -354,7 +355,7 @@ export class RemotePaneClient {
       throw failure;
     }
     if (generation !== this.streamGeneration || this.closedByClient) {
-      throw new PaneError('ERR_REMOTE_STALE_RESPONSE', REMOTE_READ_CHANNELS.has(channel) ? 'Remote connection interrupted: the host changed before its response arrived.' : `Delivery unknown: ${this.profile.label} changed connection before the response arrived.`, 'Check the original destination before trying again.');
+      throw new PaneError('ERR_REMOTE_STALE_RESPONSE', nothingToCheck ? 'Remote connection interrupted: the host changed before its response arrived.' : `Delivery unknown: ${this.profile.label} changed connection before the response arrived.`, 'Check the original destination before trying again.');
     }
 
     if (!payload.ok) {
@@ -1087,7 +1088,8 @@ export class RemotePaneClientController extends EventEmitter {
    * Tunnels every port in a host's Ports list and returns the list with where each port is
    * reachable here. Null for a list of an unknown shape, or from a client that is no longer active.
    */
-  private async tunnelPorts<Value>(client: RemotePaneClient, value: Value): Promise<ListeningPortsSnapshot | null> {
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Host port lists are decoded with decodeListeningPortsSnapshot before use.
+  private async tunnelPorts(client: RemotePaneClient, value: unknown): Promise<ListeningPortsSnapshot | null> {
     const snapshot = decodeListeningPortsSnapshot(value);
     const tunnel = this.portTunnel;
     if (!snapshot || !tunnel || this.activeClient !== client) return null;
@@ -1136,7 +1138,8 @@ export class RemotePaneClientController extends EventEmitter {
     return await this.tunnelPorts(client, listed) ?? listed;
   }
 
-  private async publishTunnelledPorts<Value>(client: RemotePaneClient, value: Value): Promise<void> {
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Host port events pass through tunnelPorts, which decodes them before use.
+  private async publishTunnelledPorts(client: RemotePaneClient, value: unknown): Promise<void> {
     try {
       const snapshot = await this.tunnelPorts(client, value);
       if (snapshot && this.activeClient === client) this.rendererEventSink.send(PORTS_CHANGED_CHANNEL, snapshot);

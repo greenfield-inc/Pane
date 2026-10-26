@@ -1,6 +1,6 @@
-import { spawnSync } from 'node:child_process';
 import * as claudeTranscripts from './claudeSessionTranscript';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ConfigManager } from './configManager';
 import { resetPaneRuntimeForTests, setPaneRuntime } from '../core/runtime';
 import { createFanoutEventSink } from '../core/eventSink';
@@ -16,7 +16,9 @@ import { ShellDetector } from '../utils/shellDetector';
 import { panelManager } from '../test/setup';
 import { RunCommandManager } from './runCommandManager';
 import type { DatabaseService } from '../database/database';
+import * as processTree from '../utils/processTree';
 import { ArchiveProcessTracker, type ArchiveProcessIdentity, type ArchiveProcessObservation } from './archiveProcessTracker';
+import { spawnDetachedWorkerPty, type DetachedWorkerPty } from '../test/detachedWorkerPty';
 
 vi.spyOn(panelManager, 'emitPanelEvent');
 vi.spyOn(panelManager, 'getPanel');
@@ -43,8 +45,6 @@ type TerminalUnderTest = {
   scrollbackBuffer: string;
   alternateScreenBuffer: string;
   screenEmulator?: RemoteTerminalEmulator;
-  commandHistory: string[];
-  currentCommand: string;
   lastActivity: Date;
   lastOutputAt?: Date;
   outputGeneration: number;
@@ -175,8 +175,6 @@ function createTerminal(overrides: Partial<TerminalUnderTest> = {}): TerminalUnd
     sessionId: 'session-1',
     scrollbackBuffer: '',
     alternateScreenBuffer: '',
-    commandHistory: [],
-    currentCommand: '',
     lastActivity: new Date(),
     outputGeneration: 0,
     wslContext: null,
@@ -890,7 +888,6 @@ describe('TerminalPanelManager hidden output delivery', () => {
       alternateScreenBuffer: 'screen',
       screenEmulator,
       isAlternateScreen: true,
-      currentCommand: 'codex',
       capturedAgentSessionId: 'agent-session-1',
     });
     manager.terminals.set(terminal.panelId, terminal);
@@ -923,7 +920,6 @@ describe('TerminalPanelManager hidden output delivery', () => {
       screenText: 'agent screen',
       isAlternateScreen: true,
       activityStatus: 'idle',
-      currentCommand: 'codex',
       isCliPanel: true,
       isCliReady: true,
       agentType: 'codex',
@@ -2021,6 +2017,10 @@ type DetectionAccess = AgentStatusAccess & {
 
 describe('TerminalPanelManager wrapper agent detection', () => {
   const rule = '─'.repeat(40);
+  // The fake shell pid 4242 may be a real process here: destroy must not track it.
+  let capture: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => { capture = vi.spyOn(ArchiveProcessTracker.prototype, 'capture').mockResolvedValue(); });
+  afterEach(() => { capture.mockRestore(); });
 
   function wrapperPanel(customState: TerminalPanelState = { initialCommand: 'agent-farm run free-range' }) {
     const panel = {
@@ -2516,4 +2516,105 @@ describe('TerminalPanelManager Agent Farm resume', () => {
     expect(terminal.capturedAgentSessionId).toBe(LAUNCH_ID);
     disposeFlowControlRecord(terminal.flowControl);
   });
+});
+
+type DestroyTerminalAccess = {
+  terminals: Map<string, TerminalUnderTest>;
+  stoppingProcesses: Map<string, ArchiveProcessTracker>;
+  destroyTerminal(panelId: string): Promise<void>;
+  terminateAllTerminals(): Promise<void>;
+  flushOutputBuffer(terminal: TerminalUnderTest): void;
+};
+
+describe('TerminalPanelManager destroyTerminal teardown', () => {
+  afterEach(() => {
+    vi.mocked(panelManager.getPanel).mockReset();
+  });
+
+  it('arms the WSL kill even when the graceful exit write throws', async () => {
+    const manager = testAccess<DestroyTerminalAccess>(new TerminalPanelManager());
+    const terminal = createTerminal({ isWSL: true, outputBuffer: '' });
+    terminal.pty.write.mockImplementation(() => { throw new Error('EPIPE'); });
+    manager.terminals.set(terminal.panelId, terminal);
+
+    await manager.destroyTerminal(terminal.panelId).catch(() => undefined);
+    expect(terminal.pty.write).toHaveBeenCalledWith('exit\r');
+    await new Promise(resolve => setTimeout(resolve, 600));
+
+    expect(terminal.pty.kill).toHaveBeenCalled();
+    expect(manager.terminals.has(terminal.panelId)).toBe(false);
+  });
+
+  it('kills the PTY when the final output flush throws', async () => {
+    const manager = testAccess<DestroyTerminalAccess>(new TerminalPanelManager());
+    const terminal = createTerminal({ outputBuffer: '' });
+    manager.terminals.set(terminal.panelId, terminal);
+    vi.spyOn(manager, 'flushOutputBuffer').mockImplementation(() => { throw new Error('event sink exploded'); });
+
+    await expect(manager.destroyTerminal(terminal.panelId)).rejects.toThrow('event sink exploded');
+
+    expect(terminal.pty.kill).toHaveBeenCalled();
+    expect(manager.terminals.has(terminal.panelId)).toBe(false);
+  });
+});
+
+describe.skipIf(process.platform === 'win32')('TerminalPanelManager orphan reaping', () => {
+  const terminals: DetachedWorkerPty[] = [];
+  const bystanders: ChildProcess[] = [];
+
+  afterEach(() => {
+    for (const terminal of terminals.splice(0)) {
+      terminal.close();
+      if (processTree.isProcessAlive(terminal.workerPid)) process.kill(terminal.workerPid, 'SIGKILL');
+    }
+    for (const bystander of bystanders.splice(0)) bystander.kill('SIGKILL');
+  });
+
+  /** A real PTY shell with a worker that double-forked away from it, open in `panelId`. */
+  async function openTerminal(manager: DestroyTerminalAccess, panelId: string): Promise<DetachedWorkerPty> {
+    const terminal = await spawnDetachedWorkerPty();
+    terminals.push(terminal);
+    const record = createTerminal({ panelId, outputBuffer: '' });
+    record.pty.pid = terminal.shellPid;
+    record.pty.kill.mockImplementation(() => terminal.close());
+    manager.terminals.set(panelId, record);
+    return terminal;
+  }
+
+  /** An unrelated process, plus a leftover entry naming its pid with another process's start time. */
+  function bystanderWithStaleEntry() {
+    const bystander = spawn('sleep', ['600'], { stdio: 'ignore' });
+    bystanders.push(bystander);
+    // SAFETY: spawn of an existing binary yields a pid synchronously.
+    const pid = bystander.pid!;
+    return { pid, stale: new ArchiveProcessTracker([{ pid, parent: 1, started: 'Thu Jan  1 00:00:00 2015' }], () => undefined) };
+  }
+
+  it('on tab delete, kills what the terminal left running, but not a stale pid that now belongs to another process', async () => {
+    const manager = testAccess<DestroyTerminalAccess>(new TerminalPanelManager());
+    // A panel whose terminal was destroyed earlier, leaving an entry whose pid was since reused.
+    const bystander = bystanderWithStaleEntry();
+    manager.stoppingProcesses.set('panel-old', bystander.stale);
+    const terminal = await openTerminal(manager, 'panel-1');
+
+    await manager.destroyTerminal('panel-old');
+    await manager.destroyTerminal('panel-1');
+
+    await vi.waitFor(() => expect(manager.stoppingProcesses.has('panel-1')).toBe(false), { timeout: 15_000 });
+    expect(processTree.isProcessAlive(terminal.workerPid)).toBe(false);
+    expect(processTree.isProcessAlive(bystander.pid)).toBe(true);
+  }, 30_000);
+
+  it('on quit, kills what outlived the hangup, but not a stale pid that now belongs to another process', async () => {
+    const manager = testAccess<DestroyTerminalAccess>(new TerminalPanelManager());
+    const bystander = bystanderWithStaleEntry();
+    manager.stoppingProcesses.set('panel-deleted', bystander.stale);
+    const terminal = await openTerminal(manager, 'panel-1');
+
+    await manager.terminateAllTerminals();
+
+    expect(manager.terminals.size).toBe(0);
+    expect(processTree.isProcessAlive(terminal.workerPid)).toBe(false);
+    expect(processTree.isProcessAlive(bystander.pid)).toBe(true);
+  }, 30_000);
 });

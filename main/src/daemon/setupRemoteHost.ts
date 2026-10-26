@@ -325,8 +325,9 @@ export async function readConfiguredTailscaleServeAccess(
   };
 }
 
-function buildNextRemoteDaemonConfig<Value>(
-  value: Value,
+function buildNextRemoteDaemonConfig(
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Saved config is normalized before host setup reads or updates its fields.
+  value: unknown,
   client: RemoteDaemonConfig['host']['clients'][number],
   listenPort: number,
   access: RemoteDaemonHostAccess,
@@ -649,7 +650,8 @@ function upsertById<T extends { id: string }>(items: T[], nextItem: T): T[] {
   return items.map((item, index) => (index === existingIndex ? nextItem : item));
 }
 
-function isRecord<Value>(value: Value): value is Value & JsonObject {
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- Setup parses external command JSON before reading its fields.
+function isRecord(value: unknown): value is JsonObject {
   try {
     decodeBoundary(value, boundary.jsonObject);
     return true;
@@ -658,7 +660,8 @@ function isRecord<Value>(value: Value): value is Value & JsonObject {
   }
 }
 
-function isNodeErrorWithCode<ErrorValue>(error: ErrorValue, code: string): boolean {
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- Caught OS errors are decoded before inspecting their error code.
+function isNodeErrorWithCode(error: unknown, code: string): boolean {
   if (!(error instanceof Error)) {
     return false;
   }

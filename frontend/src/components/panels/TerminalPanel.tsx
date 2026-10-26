@@ -1,4 +1,5 @@
 import React, { useRef, useEffect, useLayoutEffect, useState, useCallback } from 'react';
+import { API } from '../../utils/api';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import type { WebglAddon } from '@xterm/addon-webgl';
@@ -7,7 +8,7 @@ import type { SerializeAddon } from '@xterm/addon-serialize';
 import { useSession } from '../../contexts/SessionContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import { TerminalPanelProps } from '../../types/panelComponents';
-import { isHotkeyEnabledForEvent, useHotkeyStore } from '../../stores/hotkeyStore';
+import { isHotkeyEnabledForEvent } from '../../stores/hotkeyStore';
 import { renderLog, devLog } from '../../utils/console';
 import { getTerminalTheme, buildTerminalFontFamily, getMinimumContrastRatio, DEFAULT_TERMINAL_FONT_FAMILY } from '../../utils/terminalTheme';
 import {
@@ -34,6 +35,7 @@ import { useTerminalSearch } from '../../hooks/useTerminalSearch';
 import { useScrollSurface } from '../../hooks/useScrollSurface';
 import { TerminalSearchOverlay } from '../terminal/TerminalSearchOverlay';
 import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
+import { DEFAULT_TERMINAL_FONT_SIZE } from '../../../../shared/types/appearance';
 import {
   loadTerminalCapabilities, terminalCapabilityOptions, type LoadedTerminalCapabilities,
 } from '../../utils/terminalCapabilities';
@@ -106,7 +108,6 @@ interface TerminalRestoreState {
   cursorY?: number;
 }
 
-const DEFAULT_TERMINAL_FONT_SIZE = 14;
 const WEBGL_APP_BLUR_DETACH_DELAY_MS = 10_000;
 const REFOCUS_DELAYED_REFRESH_MS = 300;
 const TERMINAL_ACTIVATION_MASK_AFTER_PAINT_MS = 200;
@@ -619,6 +620,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
     handleOpenInEditor,
     handleOpenInBrowser,
     handleShowInExplorer,
+    pathContext,
     closeFilePopover,
     closeSelectionPopover,
   } = useTerminalLinks(terminalInstance, {
@@ -1056,6 +1058,15 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
 
           const ctrlOrMeta = e.ctrlKey || e.metaKey;
 
+          // On macOS Control+Backslash is SIGQUIT; Command owns Pane splitting.
+          // Stop bubbling so the app's Ctrl/Cmd-normalized registry cannot split.
+          if (isMac() && e.ctrlKey && !e.metaKey && !e.altKey
+            && (e.code === 'Backslash' || e.code === 'IntlBackslash')) {
+            e.stopPropagation();
+            return true;
+          }
+
+
           // Pane owns focused-surface scrolling before xterm encodes the key.
           // Managed CLI panels (Claude, Codex, Cursor, etc.) reserve the exact
           // Shift+Arrow chords for Pane; ordinary alternate-screen TUIs keep them.
@@ -1107,73 +1118,6 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
           }
           if (terminalKeyDecision.action === 'pass-through') return true;
 
-          // Ctrl/Cmd+1-9: switch sessions
-          if (ctrlOrMeta && e.key >= '1' && e.key <= '9') return false;
-          // Ctrl+Alt+1-9: switch panel tabs
-          if (ctrlOrMeta && e.altKey && e.key >= '1' && e.key <= '9') return false;
-          // Ctrl/Cmd+Alt+letter: terminal shortcuts — only release if a matching hotkey is registered
-          // Use e.code instead of e.key because macOS Option key modifies e.key to special chars
-          // (e.g. Option+A produces e.key='å' but e.code='KeyA')
-          // Skip AltGr — on Windows/Linux international layouts AltGr sets both ctrlKey+altKey
-          // but is used for character input (e.g. AltGr+Q = '@' on German keyboards)
-          if (ctrlOrMeta && e.altKey && !e.getModifierState('AltGraph') && /^Key[A-Z]$/.test(e.code)) {
-            const pressed = `mod+alt+${e.code.slice(3).toLowerCase()}`;
-            const hotkeys = useHotkeyStore.getState().hotkeys;
-            for (const def of hotkeys.values()) {
-              if (def.keys === pressed) return false;
-            }
-          }
-          // Ctrl/Cmd+Alt+/: open shortcut settings
-          // Check e.code too: macOS Option modifies e.key (e.g. '/' becomes '÷')
-          if (ctrlOrMeta && e.altKey && (e.key === '/' || (!e.getModifierState('AltGraph') && e.code === 'Slash'))) return false;
-          // Ctrl/Cmd+W or Ctrl/Cmd+Q: close active tab
-          if (ctrlOrMeta && (e.key.toLowerCase() === 'w' || e.key.toLowerCase() === 'q')) return false;
-          // Ctrl/Cmd+T: open Add Tool dropdown
-          if (ctrlOrMeta && e.key.toLowerCase() === 't') return false;
-          // Ctrl/Cmd+P: prompt history; Ctrl/Cmd+Shift+P: command palette
-          if (ctrlOrMeta && e.key.toLowerCase() === 'p') return false;
-          // Ctrl/Cmd+N: new workspace
-          if (ctrlOrMeta && e.key.toLowerCase() === 'n') return false;
-          // Ctrl/Cmd+Shift+D: toggle diff
-          if (ctrlOrMeta && e.shiftKey && e.key.toLowerCase() === 'd') return false;
-          // Ctrl/Cmd+Shift+R: toggle run
-          if (ctrlOrMeta && e.shiftKey && e.key.toLowerCase() === 'r') return false;
-          // Git shortcuts - release to DOM for hotkeyStore
-          if (ctrlOrMeta && e.shiftKey && e.key.toLowerCase() === 'm') return false;
-          if (ctrlOrMeta && e.shiftKey && e.key.toLowerCase() === 'u') return false;
-          if (ctrlOrMeta && e.shiftKey && e.key.toLowerCase() === 'l') return false;
-          // Ctrl/Cmd+Shift+N: new project
-          if (ctrlOrMeta && e.shiftKey && e.key.toLowerCase() === 'n') return false;
-
-          // Session cycling - Tab
-          if (ctrlOrMeta && e.key === 'Tab') return false;
-          // Session cycling - Ctrl+Up/Down arrows
-          if (ctrlOrMeta && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) return false;
-          // Tab cycling - Ctrl+A/D
-          if (ctrlOrMeta && (e.key.toLowerCase() === 'a' || e.key.toLowerCase() === 'd')) return false;
-          // Ctrl/Cmd+B: toggle sidebar
-          if (ctrlOrMeta && e.key.toLowerCase() === 'b') return false;
-          // Ctrl/Cmd+Shift+digit: panel tab switching (use e.code for layout independence)
-          if (ctrlOrMeta && e.shiftKey && /^Digit[1-9]$/.test(e.code)) return false;
-          // Ctrl/Cmd+Alt+digit: add tool shortcuts (skip AltGr — used for @/€ etc. on EU layouts)
-          if (ctrlOrMeta && e.altKey && !e.getModifierState('AltGraph') && /^Digit[1-9]$/.test(e.code)) return false;
-          // Ctrl/Cmd+`: toggle bottom terminal
-          if (ctrlOrMeta && e.key === '`') return false;
-          // Ctrl/Cmd+,: open settings
-          if (ctrlOrMeta && e.key === ',') return false;
-          // Ctrl/Cmd+Shift+E: focus sidebar
-          if (ctrlOrMeta && e.shiftKey && e.key.toLowerCase() === 'e') return false;
-
-          // Split tab groups: Mod+\ and Mod+Shift+\ (Ctrl+\ is SIGQUIT - must release!)
-          // ISO/international keyboards report the key as IntlBackslash.
-          // On macOS the app hotkey is Cmd+\, so only release metaKey there
-          // and let Ctrl+\ keep delivering SIGQUIT to the PTY.
-          if ((isMac() ? e.metaKey : e.ctrlKey) && (e.code === 'Backslash' || e.code === 'IntlBackslash')) return false;
-          // Zoom toggle: Mod+Shift+Z
-          if (ctrlOrMeta && e.shiftKey && e.key.toLowerCase() === 'z') return false;
-          // Directional group focus: Mod+Alt+Arrows (all four directions)
-          if (ctrlOrMeta && e.altKey && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return false;
-
           // Detect AltGr+key producing '@' (e.g. German AltGr+Q) — set flag so the
           // interceptor skips activation for this keystroke. AltGr sets both ctrlKey+altKey
           // on Windows/Linux, or e.getModifierState('AltGraph') on some platforms.
@@ -1193,7 +1137,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
           // which is handled by our paste event listener on the terminal container
           if (ctrlOrMeta && e.key.toLowerCase() === 'v') return false;
 
-          return true; // Let terminal handle everything else
+          return !isHotkeyEnabledForEvent(e);
         });
 
         // FIX: Additional check before DOM manipulation
@@ -1758,14 +1702,9 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
             onCopy: handleCopy,
             onStateChange: () => interceptor.notifyStateChange(),
             onForceCancel: () => interceptor.forceCancel(),
-            getPreference: async (key: string) => {
-              const resp = await window.electronAPI.invoke('preferences:get', key);
-              return resp?.success
-                ? decodeOptionalBoundary(resp.data, boundary.nullable(boundary.string)) ?? null
-                : null;
-            },
+            getPreference: (key: string) => API.preferences.get(key).catch(() => null),
             setPreference: (key: string, value: string) => {
-              window.electronAPI.invoke('preferences:set', key, value);
+              void API.preferences.set(key, value).catch(error => console.error('[TerminalPanel] Failed to save preference:', error));
             },
           }));
 
@@ -2215,15 +2154,20 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
         y={filePopover.y}
         onClose={closeFilePopover}
       >
-        <PopoverButton onClick={handleOpenInEditor}>
+        <PopoverButton onClick={handleOpenInEditor} disabled={filePopover.relativePath === null}>
           <span className="flex items-center gap-2">
             <FileEdit className="w-4 h-4" />
             Open in Editor
           </span>
         </PopoverButton>
+        {filePopover.relativePath === null && (
+          <p className="px-3 py-1 text-xs text-text-secondary">
+            {filePopover.absolutePath ? 'Outside this worktree' : 'Home directory unavailable'}
+          </p>
+        )}
         <PopoverButton
           onClick={handleShowInExplorer}
-          disabled={isRemoteMode}
+          disabled={isRemoteMode || !filePopover.absolutePath}
           title={isRemoteMode ? 'Only available in local mode' : undefined}
         >
           <span className="flex items-center gap-2">
@@ -2239,7 +2183,8 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
         y={selectionPopover.y}
         text={selectionPopover.text}
         panelTitle={panel.title}
-        workingDirectory={workingDirectory}
+        workingDirectory={pathContext?.workingDirectory ?? workingDirectory}
+        homeDirectory={pathContext?.homeDirectory ?? undefined}
         sessionId={panel.sessionId}
         isRemoteMode={isRemoteMode}
         onOpenInBrowser={handleOpenInBrowser}

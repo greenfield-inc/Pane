@@ -18,7 +18,8 @@ const eventSchema = boundary.object({
 
 /** Only lifecycle facts cross this boundary; prompts, credentials and tool inputs
  * are deliberately excluded. This file belongs to one native runtime generation. */
-export function recordNativeHook<Value>(file: string, payload: Value): void {
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- Native hook payloads are decoded with eventSchema before anything is recorded.
+export function recordNativeHook(file: string, payload: unknown): void {
   const event = decodeOptionalBoundary(payload, eventSchema);
   if (existsSync(file) && statSync(file).size > MAX_JOURNAL_BYTES) return;
   const safe = event ? {

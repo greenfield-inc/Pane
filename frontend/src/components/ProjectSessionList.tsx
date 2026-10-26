@@ -130,13 +130,9 @@ export function ProjectSessionList({
 
     const loadSidebarPaneRowLayout = async () => {
       try {
-        // SAFETY: The named IPC/API channel contract establishes this response payload type.
-        const result = await window.electron?.invoke(
-          'preferences:get',
-          SETTINGS_PREFERENCE_KEYS.sidebarPaneRowLayout
-        ) as { success?: boolean; data?: string } | undefined;
+        const value = await API.preferences.get(SETTINGS_PREFERENCE_KEYS.sidebarPaneRowLayout);
         if (!cancelled) {
-          setSidebarPaneRowLayout(normalizeSidebarPaneRowLayout(result?.data));
+          setSidebarPaneRowLayout(normalizeSidebarPaneRowLayout(value));
         }
       } catch {
         if (!cancelled) setSidebarPaneRowLayout('single');
@@ -462,7 +458,7 @@ export function ProjectSessionList({
             {/* Agents waiting on an answer are worth seeing without opening the grid. */}
             {blockedAgentCount > 0 && (
               <span
-                className="ml-auto flex items-center gap-1 rounded-full bg-status-error/15 px-1.5 text-[10px] font-medium tabular-nums text-status-error"
+                className="ml-auto flex items-center gap-1 rounded-full bg-status-error/15 px-1.5 text-[10px] font-medium tabular-nums text-status-error-on-tint"
                 title={`${blockedAgentCount} ${blockedAgentCount === 1 ? 'agent needs' : 'agents need'} input`}
               >
                 <AgentStatusDot status="blocked" size="sm" />
@@ -950,7 +946,6 @@ function SessionRow({
   onArchive, onTogglePinned, onDismiss, displayName, repositoryName, rowLayout, nested = false,
 }: SessionRowProps) {
   const [contextMenu, setContextMenu] = useState<CompactSessionMenuState | null>(null);
-  const [localGitStatus, setLocalGitStatus] = useState<GitStatus | undefined>(session.gitStatus);
   const initialGitStatusRequestRef = useRef<string | null>(null);
 
   const hasUnviewedCompletedActivity = usePanelStore(s => Boolean(s.unviewedCompletedActivity[session.id]));
@@ -972,7 +967,7 @@ function SessionRow({
           true
         ) as GitStatusIPCResponse;
         if (res?.success && res.gitStatus) {
-          setLocalGitStatus(res.gitStatus);
+          useSessionStore.getState().updateSessionGitStatus(session.id, res.gitStatus);
         }
       } catch {
         // Silently fail
@@ -981,25 +976,7 @@ function SessionRow({
     fetchStatus();
   }, [session.id, session.archived, session.status]);
 
-  // Sync from session prop when store updates
-  useEffect(() => {
-    if (session.gitStatus) setLocalGitStatus(session.gitStatus);
-  }, [session.gitStatus]);
-
-  // Listen for background git status updates (e.g., PR enrichment)
-  useEffect(() => {
-    const handler = (e: Event) => {
-      // SAFETY: The registered DOM/custom-event source establishes this target and detail shape.
-      const detail = (e as CustomEvent<{ sessionId: string; gitStatus: GitStatus }>).detail;
-      if (detail?.sessionId === session.id && detail?.gitStatus) {
-        setLocalGitStatus(detail.gitStatus);
-      }
-    };
-    window.addEventListener('git-status-updated', handler);
-    return () => window.removeEventListener('git-status-updated', handler);
-  }, [session.id]);
-
-  const gs = localGitStatus;
+  const gs = session.gitStatus;
 
   const iconColor = gs?.prState
     ? gs.prState === 'MERGED' ? 'text-purple-400'
@@ -1037,7 +1014,7 @@ function SessionRow({
       )}
     >
       <Tooltip
-        content={<SessionDetailTooltip session={session} gitStatus={localGitStatus} showName showDiffStats={false} globalIndex={globalIndex} />}
+        content={<SessionDetailTooltip session={session} gitStatus={session.gitStatus} showName showDiffStats={false} globalIndex={globalIndex} />}
         side="right"
         interactive
       >

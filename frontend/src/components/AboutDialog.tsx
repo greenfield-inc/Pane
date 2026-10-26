@@ -161,11 +161,11 @@ export function AboutDialog({ isOpen, onClose, onUpdate }: AboutDialogProps) {
             <div className="mb-6 p-3 rounded-lg bg-interactive/10 border border-interactive/20">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-medium text-interactive">
+                  <p className="text-sm font-medium text-text-primary">
                     v{versionInfo.latest} available
                   </p>
                   {versionInfo.publishedAt && (
-                    <p className="text-xs text-interactive/70 mt-0.5">
+                    <p className="text-xs text-text-primary mt-0.5">
                       {formatDate(versionInfo.publishedAt)}
                     </p>
                   )}
@@ -216,7 +216,7 @@ export function AboutDialog({ isOpen, onClose, onUpdate }: AboutDialogProps) {
           </div>
 
           {error && (
-            <div role="alert" className="mb-6 p-2 bg-status-error/10 border border-status-error/20 rounded text-xs text-status-error text-center">
+            <div role="alert" className="mb-6 p-2 bg-status-error/10 border border-status-error/20 rounded text-xs text-text-primary text-center">
               {error}
             </div>
           )}

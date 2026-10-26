@@ -8,7 +8,7 @@ import type { SettingsPersistence } from './settings/useSettingsPersistence';
 
 export function NotificationSettings({ persistence }: { persistence: SettingsPersistence }) {
   const config = persistence.config!;
-  const notifications = config.notifications ?? { playSound: true, enabled: true };
+  const notifications = config.notifications ?? { playSound: false, enabled: true };
   const [permissionStatus, setPermissionStatus] = useState<NotificationPermission | 'unsupported'>('default');
   const [actionResult, setActionResult] = useState<string | null>(null);
 

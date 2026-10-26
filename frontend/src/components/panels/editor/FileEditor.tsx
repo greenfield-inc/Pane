@@ -45,7 +45,7 @@ interface HeadlessFileTreeProps {
   onHtmlPreview: (filePath: string) => void;
   /** The context menu's "Open as file": the HTML file's editable source, whatever the setting. */
   onHtmlOpenAsFile: (file: FileItem) => void;
-  /** Window-level shortcuts (⌘F, rename, delete, clipboard) only while the tree is the visible panel. */
+  /** Enable tree shortcuts while its panel is visible; focus stays scoped to the tree. */
   shortcutsActive?: boolean;
 }
 
@@ -66,6 +66,7 @@ export function HeadlessFileTree({
 }: HeadlessFileTreeProps) {
   // Cache stores loaded directory contents. Key = dirPath, Value = FileItem[].
   const filesCacheRef = useRef(new Map<string, FileItem[]>());
+  const keyboardScopeRef = useRef<HTMLDivElement>(null);
 
   // Refs for values used in dataLoader (avoids stale closures)
   const sessionIdRef = useCommittedRef(sessionId);
@@ -710,7 +711,8 @@ export function HeadlessFileTree({
 
   // Keyboard shortcuts
   useEffect(() => {
-    if (!shortcutsActive) return;
+    const keyboardScope = keyboardScopeRef.current;
+    if (!shortcutsActive || !keyboardScope) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target instanceof HTMLElement ? e.target : null;
       const isEditingText = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || !!target?.isContentEditable;
@@ -764,12 +766,13 @@ export function HeadlessFileTree({
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    keyboardScope.addEventListener('keydown', handleKeyDown);
+    return () => keyboardScope.removeEventListener('keydown', handleKeyDown);
   }, [shortcutsActive, searchQuery, showNewItemDialog, contextMenu, keyboardShortcutsEnabled, selectedItems, tree, startRename, handleDelete, clipboard, handlePaste]);
 
   return (
     <div
+      ref={keyboardScopeRef}
       className={`h-full flex flex-col ${isDragOver ? 'ring-2 ring-interactive ring-inset bg-interactive/10' : ''}`}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -868,12 +871,12 @@ export function HeadlessFileTree({
         </div>
       )}
       {error && (
-        <div role="alert" className="px-3 py-2 bg-status-error/20 text-status-error text-sm border-b border-status-error/30">
+        <div role="alert" className="px-3 py-2 bg-status-error/20 text-text-primary text-sm border-b border-status-error/30">
           {error}
         </div>
       )}
       {uploadStatus && (
-        <div className="px-3 py-2 bg-interactive/20 text-interactive text-sm border-b border-interactive/30">
+        <div className="px-3 py-2 bg-interactive/20 text-text-primary text-sm border-b border-interactive/30">
           {uploadStatus}
         </div>
       )}
@@ -1299,7 +1302,7 @@ export function FileEditor({ sessionId, initialState, onStateChange, shortcutsAc
   return (
     <div className="pane-explorer-tree h-full w-full min-w-0 flex flex-col overflow-hidden bg-surface-secondary">
       {error && (
-        <div role="alert" className="px-3 py-1.5 bg-status-error/20 text-status-error text-xs">
+        <div role="alert" className="px-3 py-1.5 bg-status-error/20 text-text-primary text-xs">
           {error}
         </div>
       )}

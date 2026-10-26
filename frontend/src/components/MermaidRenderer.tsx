@@ -92,9 +92,9 @@ export const MermaidRenderer: React.FC<MermaidRendererProps> = ({ chart, id }) =
   if (hasError) {
     return (
       <div className="border border-status-error/30 rounded p-2 bg-status-error/5 text-sm">
-        <p className="text-status-error">
+        <p className="text-text-primary">
           <span className="font-semibold">⚠ Diagram error:</span>{' '}
-          <span className="text-status-error/90">{errorMessage}</span>
+          <span className="text-text-primary">{errorMessage}</span>
         </p>
       </div>
     );

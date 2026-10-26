@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import * as processTree from '../utils/processTree';
+import { ArchiveProcessTracker } from './archiveProcessTracker';
 import { TerminalPanelManager } from './terminalPanelManager';
 import { inProcessEmulatorHost } from '../test/inProcessEmulatorHost';
 import { AgentStatusMonitor } from './agentStatus/agentStatusMonitor';
@@ -69,7 +69,8 @@ async function pollAgentStatus() {
 }
 
 beforeEach(() => {
-  vi.spyOn(processTree, 'listDescendantPids').mockResolvedValue([]);
+  // The fixtures' PTY pid is this test process: never track it, or its reap would kill it.
+  vi.spyOn(ArchiveProcessTracker.prototype, 'capture').mockResolvedValue();
   // xterm writes need real timers; only the status clock is controlled.
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(20_000);

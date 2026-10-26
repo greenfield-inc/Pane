@@ -20,7 +20,6 @@
  *     - main/assets/pane-logo.svg
  */
 
-const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
@@ -75,9 +74,6 @@ function buildSvg(pathData, fgColor, bgColor, comment) {
 }
 
 async function main() {
-  console.log('Installing potrace and sharp...');
-  execSync('npm install --no-save potrace sharp', { cwd: projectRoot, stdio: 'inherit' });
-
   const potrace = require('potrace');
   const sharp = require('sharp');
 

@@ -32,7 +32,8 @@ import { getGitAttributionEnv } from '../utils/attribution';
 import { interactiveTerminalEnv } from '../utils/inheritedProcessEnv';
 import { createShellStartupPromptWatcher } from './shellStartupPrompts';
 import { PaneError, paneErrorText } from '../../../shared/paneError';
-import { isProcessAlive, listDescendantPids, terminateProcessTrees, waitForProcessesToExit } from '../utils/processTree';
+import { isProcessAlive, waitForProcessesToExit } from '../utils/processTree';
+import { ArchiveProcessTracker, type ArchiveProcessIdentity } from './archiveProcessTracker';
 import {
   type FlowControlRecord,
   createFlowControlRecord,
@@ -60,12 +61,6 @@ const AGENT_STATUS_POLL_MS = 500; // cadence for re-deriving blocked/working/don
 const SCREEN_SIGNATURE_MATCHES = 2;
 const MAX_SCROLLBACK_BUFFER_SIZE = 500_000; // 500KB of normal shell history
 const MAX_ALTERNATE_SCREEN_BUFFER_SIZE = 100_000; // 100KB of recent TUI redraw state
-// Command-detection heuristic bounds. These buffers live in memory only and
-// are never persisted; full-screen apps redraw without newlines, so the
-// accumulator is frozen while the alternate screen is active.
-const MAX_CURRENT_COMMAND_SIZE = 4096;
-const MAX_COMMAND_HISTORY_ENTRY_SIZE = 1024;
-const MAX_COMMAND_HISTORY_ENTRIES = 100;
 const MIN_PTY_COLS = 20;
 const MIN_PTY_ROWS = 5;
 const FORCED_REDRAW_TRANSITION_MS = 50;
@@ -90,12 +85,19 @@ const LAUNCH_EXIT_GRACE_MS = 1500;
 const HELD_INPUT_AGENT_WINDOW_MS = 30_000;
 // How long after the submit key the composer is read to log the outcome.
 const INPUT_OUTCOME_DELAY_MS = 1500;
-// Archive waits for the real OS exit of a session's PTY processes before its
-// worktree is removed. A shell leaves within milliseconds of its kill; the
-// grace covers an agent flushing its transcript, after which the tree is taken
-// down forcefully and the rest of the budget is spent confirming it is gone.
+// A destroyed terminal's processes get this long to exit after the hangup. A
+// shell leaves within milliseconds; the grace covers an agent flushing its
+// transcript. Survivors are then killed, and the rest of the budget is spent
+// confirming they are gone.
 const PROCESS_EXIT_GRACE_MS = 3000;
 const PROCESS_EXIT_TIMEOUT_MS = 8000;
+// On quit, agents have already had Ctrl+C and two seconds to leave, and a
+// shell exits within milliseconds of its hangup: anything still alive after
+// this is not leaving on its own. The whole snapshot-and-kill step is capped
+// well inside the 30 s forced exit in index.ts, so the cleanup after it runs.
+const QUIT_EXIT_GRACE_MS = 500;
+const QUIT_KILL_TIMEOUT_MS = 2000;
+const QUIT_TEARDOWN_TIMEOUT_MS = 8000;
 // Formal ceiling for the restore/getState replay payload (now the emulator
 // serialization for normal buffers, raw ANSI log otherwise). Peer consensus:
 // Orca (TERMINAL_SCROLLBACK_REPLAY_BYTE_LIMIT) and Superset (MAX_HISTORY_SCROLLBACK_BYTES) both use
@@ -148,7 +150,6 @@ export interface TerminalPanelSnapshot {
   isAlternateScreen: boolean;
   activityStatus: 'active' | 'idle';
   lastActivityTime: string;
-  currentCommand: string;
   isCliPanel?: boolean;
   isCliReady?: boolean;
   agentType?: CliAgentType;
@@ -271,10 +272,10 @@ interface TerminalProcess {
   alternateScreenBuffer: string;
   /** Authoritative xterm-compatible model of the live PTY byte stream. */
   screenEmulator?: RemoteTerminalEmulator;
-  commandHistory: string[];
-  currentCommand: string;
   /** Coalesces teardown callers and prevents callbacks from reviving a closing terminal. */
   destroying?: Promise<void>;
+  /** Settles once what the destroyed terminal left running is gone or given up on. Never rejects. */
+  reaped?: Promise<void>;
   exitDuringDestroy?: { exitCode: number; signal?: number };
   lastActivity: Date;
   lastOutputAt?: Date;
@@ -382,8 +383,9 @@ export class TerminalPanelManager extends EventEmitter {
   private agentChat?: AgentChatManager;
   private terminals = new Map<string, TerminalProcess>();
   // Retiring a PTY is not proof its shell or agent exited. Keep their identities
-  // until the OS confirms exit, including survivors of bounded session teardown.
-  private stoppingProcesses = new Map<string, number[]>();
+  // (pid and start time) until the OS confirms exit; a pid alone may since
+  // belong to an unrelated process.
+  private stoppingProcesses = new Map<string, ArchiveProcessTracker>();
   private sessionTerminations = new Map<string, Promise<void>>();
   private serializedBuffers = new Map<string, string>();
   private readonly visibleViewersByPanel = new Map<string, Map<string, number>>();
@@ -1687,9 +1689,8 @@ export class TerminalPanelManager extends EventEmitter {
         `Wait a few seconds, then run \`runpane panels resume --panel ${panel.id} --yes\` again.`,
       );
     }
-    const stopping = (this.stoppingProcesses.get(panel.id) ?? []).filter(isProcessAlive);
+    const stopping = (this.stoppingProcesses.get(panel.id)?.processes ?? []).map(item => item.pid).filter(isProcessAlive);
     if (stopping.length > 0) {
-      this.stoppingProcesses.set(panel.id, stopping);
       throw new PaneError(
         'ERR_PANEL_STILL_STOPPING',
         `Panel ${panel.id} is still stopping: its previous processes (${stopping.join(', ')}) have not exited. It was not restarted.`,
@@ -1922,8 +1923,6 @@ export class TerminalPanelManager extends EventEmitter {
       scrollbackBuffer: '',
       alternateScreenBuffer: '',
       screenEmulator: this.emulatorHost().createEmulator(spawnCols, spawnRows),
-      commandHistory: [],
-      currentCommand: '',
       lastActivity: new Date(),
       outputGeneration: 0,
       isWSL: !!(wslContext && process.platform === 'win32'),
@@ -2107,47 +2106,6 @@ export class TerminalPanelManager extends EventEmitter {
       // recent visual frame and should not evict normal history.
       this.addToScrollback(terminal, filtered);
 
-      // Detect commands (simple heuristic - look for carriage returns)
-      if (data.includes('\r') || data.includes('\n')) {
-        if (terminal.currentCommand.trim()) {
-          terminal.commandHistory.push(terminal.currentCommand.slice(0, MAX_COMMAND_HISTORY_ENTRY_SIZE));
-          if (terminal.commandHistory.length > MAX_COMMAND_HISTORY_ENTRIES) {
-            terminal.commandHistory.splice(0, terminal.commandHistory.length - MAX_COMMAND_HISTORY_ENTRIES);
-          }
-
-          // Emit command executed event
-          panelManager.emitPanelEvent(
-            terminal.panelId,
-            'terminal:command_executed',
-            {
-              command: terminal.currentCommand,
-              timestamp: new Date().toISOString()
-            }
-          );
-
-          // Check for file operation commands
-          if (this.isFileOperationCommand(terminal.currentCommand)) {
-            panelManager.emitPanelEvent(
-              terminal.panelId,
-              'files:changed',
-              {
-                command: terminal.currentCommand,
-                timestamp: new Date().toISOString()
-              }
-            );
-          }
-
-          terminal.currentCommand = '';
-        }
-      } else if (!terminal.isAlternateScreen) {
-        // Accumulate command input. Anything past the cap is not a command
-        // (a TUI frame, a paste, a progress bar), so drop it rather than grow.
-        terminal.currentCommand += data;
-        if (terminal.currentCommand.length > MAX_CURRENT_COMMAND_SIZE) {
-          terminal.currentCommand = '';
-        }
-      }
-
       // Buffer output for batching instead of sending immediately
       terminal.outputBuffer += filtered;
 
@@ -2210,17 +2168,6 @@ export class TerminalPanelManager extends EventEmitter {
       terminal.scrollbackBuffer + data,
       MAX_SCROLLBACK_BUFFER_SIZE
     );
-  }
-  
-  private isFileOperationCommand(command: string): boolean {
-    const fileOperations = [
-      'touch', 'rm', 'mv', 'cp', 'mkdir', 'rmdir',
-      'cat >', 'echo >', 'echo >>', 'vim', 'vi', 'nano', 'emacs',
-      'git add', 'git rm', 'git mv'
-    ];
-    
-    const trimmedCommand = command.trim().toLowerCase();
-    return fileOperations.some(op => trimmedCommand.startsWith(op));
   }
   
   isTerminalInitialized(panelId: string): boolean {
@@ -2556,7 +2503,6 @@ export class TerminalPanelManager extends EventEmitter {
       isAlternateScreen: terminal.screenEmulator?.state.isAlternateScreen ?? terminal.isAlternateScreen,
       activityStatus: this.deriveActivityStatus(panelId),
       lastActivityTime: terminal.lastActivity.toISOString(),
-      currentCommand: terminal.currentCommand,
       isCliPanel: customState.isCliPanel,
       isCliReady: customState.isCliReady,
       agentType,
@@ -2925,47 +2871,27 @@ export class TerminalPanelManager extends EventEmitter {
    * directory cannot be renamed or deleted while it is any live process's
    * current working directory, and both the panel shell and the agent CLI it
    * started sit in the worktree, so archive has to see them leave the process
-   * table first. Bounded: a process that outlives the grace period has its
-   * tree killed, and one that survives even that is logged and left behind
-   * rather than holding the archive open.
+   * table first. Bounded by each terminal's reap: a process that outlives the
+   * grace period is killed, and one that survives even that is logged and left
+   * behind rather than holding the archive open.
    */
-  terminateSessionTerminals(sessionId: string, options: { timeoutMs?: number } = {}): Promise<void> {
+  terminateSessionTerminals(sessionId: string): Promise<void> {
     const pending = this.sessionTerminations.get(sessionId);
     if (pending) return pending;
-    const termination = this.finishTerminateSessionTerminals(sessionId, options).finally(() => {
+    const termination = this.finishTerminateSessionTerminals(sessionId).finally(() => {
       this.sessionTerminations.delete(sessionId);
     });
     this.sessionTerminations.set(sessionId, termination);
     return termination;
   }
 
-  private async finishTerminateSessionTerminals(sessionId: string, options: { timeoutMs?: number }): Promise<void> {
+  private async finishTerminateSessionTerminals(sessionId: string): Promise<void> {
     await this.agentChat?.stopSession(sessionId);
     const terminals = [...this.terminals.values()].filter(terminal => terminal.sessionId === sessionId);
-    if (terminals.length === 0) return;
-    const deadline = Date.now() + (options.timeoutMs ?? PROCESS_EXIT_TIMEOUT_MS);
     await Promise.all(terminals.map(terminal => this.destroyTerminal(terminal.panelId).catch(error => {
       console.error(`[TerminalPanelManager] Destroy failed for ${terminal.panelId}:`, error);
     })));
-
-    const tree = [...new Set(terminals.flatMap(terminal =>
-      this.stoppingProcesses.get(terminal.panelId) ?? [terminal.pty.pid]))];
-    const graceMs = Math.min(PROCESS_EXIT_GRACE_MS, Math.max(0, deadline - Date.now()));
-    const outlived = await waitForProcessesToExit(tree, graceMs);
-    if (outlived.length === 0) return;
-
-    console.warn(`[TerminalPanelManager] process_exit_timeout sessionId=${sessionId} pids=${outlived.join(',')} killing their process trees`);
-    const survivors = await terminateProcessTrees(outlived, { timeoutMs: Math.max(0, deadline - Date.now()) });
-    if (survivors.length > 0) {
-      // Escalation takes a fresh snapshot and may discover new children. They
-      // share this session's worktree, so guard every retired panel against them.
-      for (const terminal of terminals) {
-        this.stoppingProcesses.set(terminal.panelId, [...new Set([
-          ...(this.stoppingProcesses.get(terminal.panelId) ?? []), ...survivors,
-        ])]);
-      }
-      console.error(`[TerminalPanelManager] process_kill_failed sessionId=${sessionId} pids=${survivors.join(',')} these may still hold the worktree open`);
-    }
+    await Promise.all(terminals.map(terminal => terminal.reaped));
   }
 
   /** Preserve normal terminal resource retirement. ArchiveProcessTracker
@@ -2974,6 +2900,38 @@ export class TerminalPanelManager extends EventEmitter {
     await this.agentChat?.stopSession(sessionId);
     const terminals = [...this.terminals.values()].filter(terminal => terminal.sessionId === sessionId);
     await Promise.all(terminals.map(terminal => this.destroyTerminal(terminal.panelId)));
+  }
+
+  /**
+   * Kill whatever a destroyed terminal left running. `destroyTerminal` hangs up
+   * the PTY and returns; a process that ignores the hangup (`nohup cmd &`) or
+   * double-forked out of the shell's tree outlives it. The tracker captured
+   * them before the hangup, and once they are confirmed gone the panel may
+   * restart.
+   */
+  private async reapStoppedProcesses(panelId: string, tracker: ArchiveProcessTracker): Promise<void> {
+    const survivors = await this.stopTrackedProcesses(tracker, PROCESS_EXIT_GRACE_MS, PROCESS_EXIT_TIMEOUT_MS - PROCESS_EXIT_GRACE_MS, `panelId=${panelId}`);
+    // A replacement terminal may have started stopping in this panel meanwhile.
+    if (survivors.length === 0 && this.stoppingProcesses.get(panelId) === tracker) this.stoppingProcesses.delete(panelId);
+  }
+
+  /**
+   * Waits up to `graceMs` for the tracked processes to exit, then kills the
+   * survivors and any children they started since. Each kill first re-checks
+   * the pid's start time, so a pid that now belongs to another process is never
+   * signalled. Returns what is not confirmed gone after `killTimeoutMs`. Never throws.
+   */
+  private async stopTrackedProcesses(tracker: ArchiveProcessTracker, graceMs: number, killTimeoutMs: number, label: string): Promise<readonly ArchiveProcessIdentity[]> {
+    const outlived = await waitForProcessesToExit(tracker.processes.map(item => item.pid), graceMs);
+    if (outlived.length === 0) return [];
+    console.warn(`[TerminalPanelManager] process_exit_timeout ${label} pids=${outlived.join(',')} killing them`);
+    try {
+      await tracker.terminateSurvivors();
+      await tracker.verifyExited(killTimeoutMs);
+    } catch (error) {
+      console.error(`[TerminalPanelManager] process_kill_failed ${label} pids=${tracker.processes.map(item => item.pid).join(',')}:`, error);
+    }
+    return tracker.processes;
   }
 
   destroyTerminal(panelId: string, options: { saveState?: boolean; chatInternal?: boolean } = {}): Promise<void> {
@@ -2987,8 +2945,13 @@ export class TerminalPanelManager extends EventEmitter {
   private async finishDestroyTerminal(terminal: TerminalProcess, saveState: boolean): Promise<void> {
     const panelId = terminal.panelId;
     // Start the snapshot alongside persistence, but finish it before kill: once
-    // the shell exits its surviving children may no longer be discoverable.
-    const tree = listDescendantPids([terminal.pty.pid]);
+    // the shell exits its surviving children may no longer be discoverable, and
+    // the PTY's terminal name only identifies its session while Pane holds it.
+    // An unreadable process table means nothing beyond the hangup is killed.
+    const tracker = new ArchiveProcessTracker([], () => undefined);
+    const captured = tracker.capture([terminal.pty.pid]).catch(error => {
+      console.warn(`[TerminalPanelManager] process_snapshot_failed panelId=${panelId}; only hanging up its terminal:`, error);
+    });
     // Stop detection as soon as teardown begins, so output during the save
     // cannot announce completion. Keep the emulator alive through any snapshot save.
     this.agentStatusMonitor.unregister(panelId);
@@ -2998,9 +2961,10 @@ export class TerminalPanelManager extends EventEmitter {
     } catch (error) {
       console.error(`[TerminalPanelManager] Failed to save state for ${panelId}:`, error);
     }
-    const descendants = await tree;
+    await captured;
     if (this.terminals.get(panelId) !== terminal) return;
-    this.stoppingProcesses.set(panelId, [...new Set([terminal.pty.pid, ...descendants])]);
+    this.stoppingProcesses.set(panelId, tracker);
+    terminal.reaped = this.reapStoppedProcesses(panelId, tracker);
 
     try {
       this.retireTerminal(terminal, terminal.exitDuringDestroy);
@@ -3273,6 +3237,39 @@ export class TerminalPanelManager extends EventEmitter {
           console.log(`[TerminalPanelManager] Pruned serialized snapshot for ${id} to stay under 64MB total`);
         }
       }
+    }
+  }
+
+  /**
+   * Quit teardown: destroy every terminal, then kill any process from their
+   * sessions that outlived its PTY's hangup, so quitting leaves no orphans.
+   * Sessions are read before the kill, while the PTYs still identify them.
+   * Deleted terminals' processes not yet confirmed gone are included; the
+   * tracker kills only those whose pid still has the same start time.
+   */
+  async terminateAllTerminals(): Promise<void> {
+    const roots = [...this.terminals.values()].map(terminal => terminal.pty.pid);
+    const tracker = new ArchiveProcessTracker([...this.stoppingProcesses.values()].flatMap(stopping => stopping.processes), () => undefined);
+    const teardown = (async () => {
+      try {
+        await tracker.capture(roots);
+      } catch (error) {
+        console.warn('[TerminalPanelManager] process_snapshot_failed on quit; only hanging up the terminals:', error);
+      } finally {
+        this.destroyAllTerminals();
+      }
+      await this.stopTrackedProcesses(tracker, QUIT_EXIT_GRACE_MS, QUIT_KILL_TIMEOUT_MS, 'on quit');
+    })();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = new Promise<boolean>(resolve => { timer = setTimeout(() => resolve(true), QUIT_TEARDOWN_TIMEOUT_MS); });
+    try {
+      if (await Promise.race([teardown.then(() => false), timedOut])) {
+        console.warn(`[TerminalPanelManager] process_teardown_timeout on quit after ${QUIT_TEARDOWN_TIMEOUT_MS}ms; continuing shutdown`);
+      }
+    } finally {
+      clearTimeout(timer);
+      // A snapshot that never returns must not keep the PTYs open.
+      this.destroyAllTerminals();
     }
   }
 
