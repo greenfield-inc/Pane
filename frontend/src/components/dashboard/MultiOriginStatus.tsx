@@ -127,7 +127,7 @@ export const MultiOriginStatus: React.FC<MultiOriginStatusProps> = ({
                     </div>
                     <div className="flex items-center gap-2">
                       {upstream.status !== 'up-to-date' && (
-                        <span className="text-xs font-medium text-interactive">
+                        <span className="text-xs font-medium text-text-primary">
                           {getStatusText(upstream)}
                         </span>
                       )}
@@ -152,7 +152,7 @@ export const MultiOriginStatus: React.FC<MultiOriginStatusProps> = ({
                           {origin.name}/{origin.branch}
                         </span>
                         {origin.isFork && (
-                          <span className="inline-flex items-center gap-1 text-xs bg-interactive/20 text-interactive px-1.5 py-0.5 rounded">
+                          <span className="inline-flex items-center gap-1 text-xs bg-interactive/20 text-interactive-on-tint px-1.5 py-0.5 rounded">
                             <GitFork className="w-3 h-3" />
                             <span>fork</span>
                           </span>
@@ -162,7 +162,7 @@ export const MultiOriginStatus: React.FC<MultiOriginStatusProps> = ({
                     </div>
                     <div className="flex items-center gap-2">
                       {origin.status !== 'up-to-date' && (
-                        <span className="text-xs font-medium text-interactive">
+                        <span className="text-xs font-medium text-text-primary">
                           {getStatusText(origin)}
                         </span>
                       )}
@@ -209,7 +209,7 @@ export const MultiOriginStatus: React.FC<MultiOriginStatusProps> = ({
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 text-status-warning" />
-                <span className="text-sm font-medium text-status-warning">
+                <span className="text-sm font-medium text-text-primary">
                   Updates available in the cascade
                 </span>
               </div>

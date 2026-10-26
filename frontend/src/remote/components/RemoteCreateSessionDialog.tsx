@@ -397,7 +397,7 @@ export function RemoteCreateSessionDialog({
           </section>
 
           {error && (
-            <div id={errorId} role="alert" className="mx-5 mb-5 rounded-md border border-status-error/40 bg-status-error/10 p-3 text-sm text-status-error">
+            <div id={errorId} role="alert" className="mx-5 mb-5 rounded-md border border-status-error/40 bg-status-error/10 p-3 text-sm text-text-primary">
               {error}
             </div>
           )}

@@ -260,7 +260,7 @@ export const LogsView: React.FC<LogsViewProps> = ({ sessionId, isVisible }) => {
             className={cn(
               "p-1.5 rounded transition-colors",
               autoScroll 
-                ? "bg-interactive/20 text-interactive" 
+                ? "bg-interactive/20 text-interactive-on-tint" 
                 : "text-text-secondary hover:text-text-primary hover:bg-surface-hover"
             )}
             title={autoScroll ? "Auto-scroll enabled" : "Auto-scroll disabled"}

@@ -486,6 +486,15 @@
   /* Selected row (sidebar). Mixed from the theme's own text colour so every
      theme gets a fitting shade without a per-theme override. */
   --color-surface-selected: color-mix(in srgb, var(--color-text-primary) 9%, transparent);
+  /* Status text on its own 15-20% tint (badges, pills). Mixed toward the text
+     colour in OKLCH, which keeps the status hue; a theme lowers the mix when
+     its status colours sit too close to their tint to reach 4.5:1. */
+  --status-on-tint-mix: 65%;
+  --color-status-success-on-tint: color-mix(in oklch, var(--color-status-success) var(--status-on-tint-mix), var(--color-text-primary));
+  --color-status-warning-on-tint: color-mix(in oklch, var(--color-status-warning) var(--status-on-tint-mix), var(--color-text-primary));
+  --color-status-error-on-tint: color-mix(in oklch, var(--color-status-error) var(--status-on-tint-mix), var(--color-text-primary));
+  --color-status-info-on-tint: color-mix(in oklch, var(--color-status-info) var(--status-on-tint-mix), var(--color-text-primary));
+  --color-interactive-on-tint: color-mix(in oklch, var(--color-interactive-primary) var(--status-on-tint-mix), var(--color-text-primary));
 
   /* Structural tokens for theme-aware layout */
   --color-bg-chrome: var(--color-bg-primary);
@@ -864,6 +873,7 @@
 
 /* Dusk Theme — Emdash-inspired achromatic navy-gray */
 :root.dusk {
+  --status-on-tint-mix: 45%;
   /* Backgrounds */
   --color-bg-primary: var(--dusk-900);
   --color-bg-secondary: var(--dusk-800);
@@ -1131,6 +1141,7 @@
 
 /* Forge Theme — IntelliJ-inspired two-tone with blue accent */
 :root.forge {
+  --status-on-tint-mix: 40%;
   /* Backgrounds — TWO-TONE foundation */
   --color-bg-primary: var(--forge-gray2);
   --color-bg-secondary: var(--forge-gray2);
@@ -1425,6 +1436,7 @@
 
 /* Aurora Theme — Rosé Pine-inspired romantic dark */
 :root.aurora {
+  --status-on-tint-mix: 40%;
   --color-bg-primary: #232136;
   --color-bg-secondary: #2a273f;
   --color-bg-tertiary: #393552;
@@ -1877,6 +1889,7 @@
 
 /* Terracotta Theme — warm dusty earth-tone, zero blue light */
 :root.terracotta {
+  --status-on-tint-mix: 55%;
   /* Backgrounds — TWO-TONE foundation */
   --color-bg-primary: var(--terra-900);
   --color-bg-secondary: var(--terra-850);
@@ -2512,6 +2525,7 @@
 
 /* Folio Theme — paper & ink: warm cream stock, near-black ink, vermilion rubrication */
 :root.folio {
+  --status-on-tint-mix: 65%;
   /* Backgrounds — page / sheet / margin tonal steps */
   --color-bg-primary: var(--folio-paper);
   --color-bg-secondary: var(--folio-chrome);
@@ -2673,6 +2687,7 @@
 
 /* Newsprint Theme — cool grey-white stock, graphite ink, halftone greys, ink-blue accent */
 :root.newsprint {
+  --status-on-tint-mix: 65%;
   /* Backgrounds — stock / sheet / halftone tonal steps */
   --color-bg-primary: var(--news-paper);
   --color-bg-secondary: var(--news-chrome);
@@ -2834,6 +2849,7 @@
 
 /* Walnut Theme — vellum & walnut: deep warm brown-black, parchment text, brass accent */
 :root.walnut {
+  --status-on-tint-mix: 65%;
   /* Backgrounds — TWO-TONE foundation, sunken editor */
   --color-bg-primary: var(--walnut-900);
   --color-bg-secondary: var(--walnut-850);
@@ -3154,6 +3170,7 @@
 
 /* Teletype Theme — 1970s terminal on paper: warm off-white, brown ink, burnt-orange & olive accents */
 :root.teletype {
+  --status-on-tint-mix: 60%;
   /* Backgrounds — paper primary, beige chrome */
   --color-bg-primary: var(--tty-paper-100);
   --color-bg-secondary: var(--tty-paper-200);
@@ -3464,6 +3481,7 @@
 
 /* Haar Theme — cold pre-dawn sea fog: blue-white surfaces, ink text (light base) */
 :root.haar {
+  --status-on-tint-mix: 55%;
   /* Backgrounds — fog bank (chrome) vs. clearing (editor) */
   --color-bg-primary: var(--haar-100);
   --color-bg-secondary: var(--haar-150);
@@ -3784,6 +3802,7 @@
 
 /* Understory Theme — forest floor: moss greens, bark-brown chrome, lichen accent (dark base) */
 :root.understory {
+  --status-on-tint-mix: 60%;
   /* Backgrounds — TWO-TONE: bark chrome, moss floor editor */
   --color-bg-primary: var(--under-900);
   --color-bg-secondary: var(--under-850);
@@ -3964,6 +3983,7 @@
    diff add/remove, terminal ANSI) come from the Okabe-Ito palette so they stay
    distinguishable under protanopia, deuteranopia and tritanopia. */
 :root.colorblind-safe {
+  --status-on-tint-mix: 50%;
   /* Backgrounds */
   --color-bg-primary: var(--cbs-900);
   --color-bg-secondary: var(--cbs-850);
@@ -4137,6 +4157,7 @@
    parchment text (never pure white), a honey-gold accent and a desaturated,
    low-blue palette. Text stays ≥ 4.5:1 but avoids the 18:1 glare of black/white. */
 :root.low-fatigue {
+  --status-on-tint-mix: 40%;
   /* Backgrounds */
   --color-bg-primary: var(--lf-900);
   --color-bg-secondary: var(--lf-850);

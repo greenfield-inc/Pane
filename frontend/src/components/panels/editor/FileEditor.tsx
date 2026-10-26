@@ -868,12 +868,12 @@ export function HeadlessFileTree({
         </div>
       )}
       {error && (
-        <div role="alert" className="px-3 py-2 bg-status-error/20 text-status-error text-sm border-b border-status-error/30">
+        <div role="alert" className="px-3 py-2 bg-status-error/20 text-text-primary text-sm border-b border-status-error/30">
           {error}
         </div>
       )}
       {uploadStatus && (
-        <div className="px-3 py-2 bg-interactive/20 text-interactive text-sm border-b border-interactive/30">
+        <div className="px-3 py-2 bg-interactive/20 text-text-primary text-sm border-b border-interactive/30">
           {uploadStatus}
         </div>
       )}
@@ -1299,7 +1299,7 @@ export function FileEditor({ sessionId, initialState, onStateChange, shortcutsAc
   return (
     <div className="pane-explorer-tree h-full w-full min-w-0 flex flex-col overflow-hidden bg-surface-secondary">
       {error && (
-        <div role="alert" className="px-3 py-1.5 bg-status-error/20 text-status-error text-xs">
+        <div role="alert" className="px-3 py-1.5 bg-status-error/20 text-text-primary text-xs">
           {error}
         </div>
       )}

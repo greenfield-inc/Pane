@@ -205,7 +205,7 @@ const DiffPanel: React.FC<DiffPanelProps> = ({
       {/* Stale indicator bar */}
       {isStale && !isActive && (
         <div className="bg-status-warning/10 border-b border-status-warning/30 px-3 py-2 flex items-center justify-between">
-          <div className="flex items-center gap-2 text-status-warning text-sm">
+          <div className="flex items-center gap-2 text-text-primary text-sm">
             <AlertCircle className="w-4 h-4" />
             <span>Files changed - switch to diff panel to refresh</span>
           </div>

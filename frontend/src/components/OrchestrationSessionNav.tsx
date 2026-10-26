@@ -671,7 +671,7 @@ export function OrchestrationSessionNav({
         </div>
         <div id="orchestration-sessions-list" hidden={!sectionExpanded}>
         {sessionError && (
-          <div className="mx-3 mb-1 rounded border border-status-error/40 bg-status-error/10 px-2 py-1.5 text-[11px] text-status-error" role="alert">
+          <div className="mx-3 mb-1 rounded border border-status-error/40 bg-status-error/10 px-2 py-1.5 text-[11px] text-text-primary" role="alert">
             <p>{sessionError}</p>
             <button type="button" className="mt-1 underline" onClick={() => {
               if (selectionError && selectedSessionId) void openSession(selectedSessionId);
@@ -680,7 +680,7 @@ export function OrchestrationSessionNav({
           </div>
         )}
         {actionError && (
-          <div className="mx-3 mb-1 rounded border border-status-error/40 bg-status-error/10 px-2 py-1.5 text-[11px] text-status-error" role="alert">
+          <div className="mx-3 mb-1 rounded border border-status-error/40 bg-status-error/10 px-2 py-1.5 text-[11px] text-text-primary" role="alert">
             {actionError}
           </div>
         )}

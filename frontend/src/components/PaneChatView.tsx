@@ -972,8 +972,8 @@ function SessionOverviewPanel({ record, overview, error, onRefresh, onUpdate, on
 
         {record.blockers.length > 0 && (
           <div className="rounded-md border border-status-error/30 bg-status-error/10 px-2 py-2">
-            <h3 className={cn(OVERVIEW_HEADING, 'text-status-error')}>Blockers</h3>
-            <ul className="select-text list-disc space-y-1 pl-4 text-status-error">
+            <h3 className={cn(OVERVIEW_HEADING, 'text-text-primary')}>Blockers</h3>
+            <ul className="select-text list-disc space-y-1 pl-4 text-text-primary">
               {record.blockers.map((blocker, index) => <li key={index}>{blocker}</li>)}
             </ul>
           </div>

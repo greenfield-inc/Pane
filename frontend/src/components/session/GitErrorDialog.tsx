@@ -35,13 +35,13 @@ export const GitErrorDialog: React.FC<GitErrorDialogProps> = ({
             <div>
               <h3 className="text-sm font-medium text-text-tertiary mb-2">Error Message</h3>
               <Card variant="bordered" padding="sm" className="bg-status-error/10 border-status-error/30">
-                <p className="text-status-error text-sm">{errorDetails.message}</p>
+                <p className="text-text-primary text-sm">{errorDetails.message}</p>
               </Card>
             </div>
 
             {errorDetails.conflictingFiles && errorDetails.conflictingFiles.length > 0 && (
               <Card variant="bordered" className="border-2 border-status-warning/30 bg-status-warning/10">
-                <h3 className="text-base font-semibold text-status-warning mb-3 flex items-center">
+                <h3 className="text-base font-semibold text-text-primary mb-3 flex items-center">
                   <AlertCircle className="w-5 h-5 mr-2" />
                   Conflicting Files
                 </h3>
@@ -59,20 +59,20 @@ export const GitErrorDialog: React.FC<GitErrorDialogProps> = ({
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {errorDetails.conflictingCommits.ours.length > 0 && (
                   <Card variant="bordered" className="border-interactive/30 bg-interactive/10">
-                    <h4 className="text-sm font-semibold text-interactive-on-dark mb-2">Your Commits</h4>
+                    <h4 className="text-sm font-semibold text-text-primary mb-2">Your Commits</h4>
                     <div className="text-xs font-mono space-y-1 max-h-32 overflow-y-auto">
-                      {errorDetails.conflictingCommits.ours.map((commit, idx) => (
-                        <div key={idx} className="text-interactive-on-dark/80">{commit}</div>
+                      {errorDetails.conflictingCommits.ours.map((commit) => (
+                        <div key={commit} className="text-text-primary">{commit}</div>
                       ))}
                     </div>
                   </Card>
                 )}
                 {errorDetails.conflictingCommits.theirs.length > 0 && (
                   <Card variant="bordered" className="border-status-success/30 bg-status-success/10">
-                    <h4 className="text-sm font-semibold text-status-success-hover mb-2">Incoming Commits</h4>
+                    <h4 className="text-sm font-semibold text-text-primary mb-2">Incoming Commits</h4>
                     <div className="text-xs font-mono space-y-1 max-h-32 overflow-y-auto">
-                      {errorDetails.conflictingCommits.theirs.map((commit, idx) => (
-                        <div key={idx} className="text-status-success-hover/80">{commit}</div>
+                      {errorDetails.conflictingCommits.theirs.map((commit) => (
+                        <div key={commit} className="text-text-primary">{commit}</div>
                       ))}
                     </div>
                   </Card>
@@ -81,7 +81,7 @@ export const GitErrorDialog: React.FC<GitErrorDialogProps> = ({
             )}
 
             <Card variant="bordered" className="border-2 border-status-error/30 bg-status-error/10">
-              <h3 className="text-base font-semibold text-status-error mb-3 flex items-center">
+              <h3 className="text-base font-semibold text-text-primary mb-3 flex items-center">
                 <FileText className="w-5 h-5 mr-2" />
                 Git Output
               </h3>
@@ -130,11 +130,11 @@ export const GitErrorDialog: React.FC<GitErrorDialogProps> = ({
 
             <Card variant="bordered" className="bg-interactive/10 border-interactive/30">
               <div className="flex items-start space-x-2">
-                <Info className="w-5 h-5 text-interactive-on-dark mt-0.5 flex-shrink-0" />
+                <Info className="w-5 h-5 text-interactive mt-0.5 flex-shrink-0" />
                 <div>
-                  <h4 className="text-sm font-medium text-interactive-on-dark mb-1">Troubleshooting Tips</h4>
-                  <ul className="text-sm text-interactive-on-dark/80 space-y-1">
-                    {getGitErrorTips(errorDetails).map((tip, idx) => <li key={idx}>{tip}</li>)}
+                  <h4 className="text-sm font-medium text-text-primary mb-1">Troubleshooting Tips</h4>
+                  <ul className="text-sm text-text-primary space-y-1">
+                    {getGitErrorTips(errorDetails).map((tip) => <li key={tip}>{tip}</li>)}
                   </ul>
                 </div>
               </div>

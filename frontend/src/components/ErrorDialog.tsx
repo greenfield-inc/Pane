@@ -82,7 +82,7 @@ export function ErrorDialog({
                 )}
               </div>
               <Card id={detailsId} variant="bordered" padding="sm" className="bg-status-error/10 border-status-error/30">
-                <pre className="text-sm text-status-error font-mono overflow-x-auto whitespace-pre-wrap">
+                <pre className="text-sm text-text-primary font-mono overflow-x-auto whitespace-pre-wrap">
                   {displayDetails}
                 </pre>
               </Card>
