@@ -22,7 +22,7 @@ same command to the end of your own `PATH`, so it works in any terminal.
 - If that Electron binary is gone (a failed update, or the app was moved), the
   shim runs the CLI with `node` from `PATH` instead. Without `node`, it prints
   one line: reinstall Pane from https://runpane.com, or install Node.js and
-  run `npx --yes runpane@latest update`. When Pane is not running,
+  run `npx --yes runpane@latest update`. It exits 127 (`runpane.cmd`: 1). When Pane is not running,
   `runpane update` installs the latest release instead of updating in place,
   so it works in this state.
 - The shim checks only that the binary exists and is executable. If the
@@ -76,7 +76,10 @@ so a `runpane` you installed with npm keeps winning outside Pane.
   type (`REG_EXPAND_SZ` or `REG_SZ`), and broadcasts `WM_SETTINGCHANGE`.
   Terminals opened afterwards find `runpane`; already open ones keep their
   old `PATH`.
-- **WSL:** unchanged. Windows `PATH` changes do not reach the distro.
+- **WSL:** Pane writes nothing into the distro. WSL appends the Windows
+  `PATH`, so a WSL shell can find Pane's Windows shim; it prints one line
+  asking you to run `npm i -g runpane` in the distro (or use
+  `npx --yes runpane@latest`) and exits 1.
 - **Remote daemon hosts** (`runpane install daemon`): unchanged. Only the
   desktop app edits `PATH`; on a server, install `runpane` with npm.
 

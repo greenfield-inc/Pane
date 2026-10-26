@@ -80,6 +80,17 @@ describe('installRunpaneShim', () => {
     expect(noNode.stderr.trim()).toBe('runpane: Pane is missing and Node.js is not on PATH. Reinstall Pane from https://runpane.com, or install Node.js and run: npx --yes runpane@latest update');
   });
 
+  it.skipIf(process.platform === 'win32')('tells a WSL shell that found the Windows shim to install runpane in the distro', () => {
+    const state = installRunpaneShim({ appDirectory, bundledCliPath, execPath: 'C:\\Program Files\\Pane\\Pane.exe', platform: 'win32' })!;
+    const fakeBin = path.join(root, 'fake bin');
+    fs.mkdirSync(fakeBin);
+    fs.writeFileSync(path.join(fakeBin, 'uname'), '#!/bin/sh\necho 5.15.167.4-microsoft-standard-WSL2\n', { mode: 0o755 });
+    const result = spawnSync(path.join(state.binDir, 'runpane'), ['version'], { encoding: 'utf8', env: { PATH: `${fakeBin}:${path.dirname(process.execPath)}` } });
+    expect(result.status).toBe(1);
+    expect(result.stdout).toBe('');
+    expect(result.stderr.trim()).toBe('runpane: this runpane belongs to Pane on Windows and cannot run inside WSL. In this distro, run: npm i -g runpane (or use npx --yes runpane@latest)');
+  });
+
   it.runIf(process.platform === 'win32')('falls back to node on PATH when Pane.exe is gone (Windows)', () => {
     const state = installRunpaneShim({ appDirectory, bundledCliPath, execPath: path.join(root, 'moved', 'Pane.exe'), platform: 'win32' })!;
     const result = spawnSync('cmd.exe', ['/d', '/s', '/c', `""${state.shimPath}" update"`], {
@@ -261,11 +272,14 @@ describe('addRunpaneToUserPath', () => {
       expect(registry).toEqual({ kind: 'ExpandString', value: binDir });
     });
 
-    it('leaves an existing entry alone, matched through %VARIABLES%', async () => {
-      const entry = ['%PANE_TEST_HOME%', '.pane', 'bin', ''].join(path.sep);
-      registry = { kind: 'ExpandString', value: `C:\\Tools;${entry}` };
+    it.each([
+      ['through %VARIABLES%', () => ['%PANE_TEST_HOME%', '.pane', 'bin', ''].join(path.sep)],
+      ['in quotes', () => `"${binDir}"`],
+      ['with the other slash and a trailing one', () => `${binDir.replace(/[\\/]/g, match => (match === '/' ? '\\' : '/'))}/`],
+    ])('leaves an existing entry alone, written %s', async (_spelling, entry) => {
+      registry = { kind: 'ExpandString', value: `C:\\Tools;${entry()}` };
       expect(await addOnWindows({ PANE_TEST_HOME: home })).toEqual([]);
-      expect(registry.value).toBe(`C:\\Tools;${entry}`);
+      expect(registry.value).toBe(`C:\\Tools;${entry()}`);
       expect(reads).toBe(1);
     });
   });

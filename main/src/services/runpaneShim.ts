@@ -32,6 +32,7 @@ export const PANE_MANAGED_SHIM_MARKER = 'pane-managed-runpane-shim v1';
 const MANAGED_SHELL_MARKER = 'pane-managed-shell-wrapper v1';
 // No cmd.exe metacharacters: the Windows shim echoes it unquoted.
 const MISSING_RUNTIME_MESSAGE = 'runpane: Pane is missing and Node.js is not on PATH. Reinstall Pane from https://runpane.com, or install Node.js and run: npx --yes runpane@latest update';
+const WSL_MESSAGE = 'runpane: this runpane belongs to Pane on Windows and cannot run inside WSL. In this distro, run: npm i -g runpane (or use npx --yes runpane@latest)';
 
 export interface RunpaneShimState {
   binDir: string;
@@ -97,12 +98,17 @@ function ensureDirectory(directory: string): void {
   fs.mkdirSync(directory, { recursive: true, mode: 0o755 });
 }
 
-function posixShim(appDirectory: string, execPath: string, cliPath: string): string {
+function posixShim(appDirectory: string, execPath: string, cliPath: string, platform: NodeJS.Platform): string {
+  // WSL appends the Windows PATH, so a WSL shell can find the shim Git Bash uses; its Windows paths mean nothing there.
+  const wsl = platform === 'win32'
+    ? [`case "$(uname -r 2>/dev/null)" in *[Mm]icrosoft*|*WSL*) echo ${shellQuote(WSL_MESSAGE)} >&2; exit 1 ;; esac`]
+    : [];
   return [
     '#!/bin/sh',
     `# ${PANE_MANAGED_SHIM_MARKER}: Pane rewrites this file at startup; edits are lost.`,
     '# Runs the runpane CLI bundled with this Pane build using its Electron binary as Node,',
     '# or Node on PATH when that binary is gone (a failed update, a moved app).',
+    ...wsl,
     `if [ -z "\${PANE_DIR:-}" ]; then PANE_DIR=${shellQuote(appDirectory)}; export PANE_DIR; fi`,
     `if [ -x ${shellQuote(execPath)} ]; then ELECTRON_RUN_AS_NODE=1 exec ${shellQuote(execPath)} ${shellQuote(cliPath)} "$@"; fi`,
     `if command -v node >/dev/null 2>&1; then exec node ${shellQuote(cliPath)} "$@"; fi`,
@@ -258,7 +264,7 @@ export function installRunpaneShim(options: InstallRunpaneShimOptions): RunpaneS
 
   const shimPath = path.join(binDir, platform === 'win32' ? 'runpane.cmd' : 'runpane');
   // Git Bash on Windows also finds the extensionless POSIX shim.
-  if (!writeManagedFile(path.join(binDir, 'runpane'), posixShim(options.appDirectory, execPath, cliPath), PANE_MANAGED_SHIM_MARKER, 0o755)) {
+  if (!writeManagedFile(path.join(binDir, 'runpane'), posixShim(options.appDirectory, execPath, cliPath, platform), PANE_MANAGED_SHIM_MARKER, 0o755)) {
     return null;
   }
   if (platform === 'win32'
@@ -432,7 +438,12 @@ function powershell(script: string, env: NodeJS.ProcessEnv = {}): Promise<string
   const encoded = Buffer.from(`$ErrorActionPreference = 'Stop'\n${script}`, 'utf16le').toString('base64');
   return new Promise((resolve, reject) => {
     execFile(path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'), ['-NoProfile', '-NonInteractive', '-EncodedCommand', encoded], { env: { ...process.env, ...env }, timeout: 30_000, windowsHide: true },
-      (error, stdout) => (error ? reject(error) : resolve(String(stdout))));
+      (error, stdout, stderr) => {
+        if (!error) return resolve(String(stdout));
+        // Node's message repeats the whole encoded script; keep the reason.
+        const detail = String(stderr).trim().split(/\r?\n/)[0] || (error.killed ? 'timed out' : `exit code ${error.code ?? 'unknown'}`);
+        reject(new Error(`powershell.exe failed: ${detail}`));
+      });
   });
 }
 
@@ -482,7 +493,10 @@ const registryUserPath: WindowsUserPathStore = {
 async function appendWindowsUserPath(binDir: string, env: NodeJS.ProcessEnv, store: WindowsUserPathStore): Promise<UserPathResult> {
   const { kind, value } = await store.read();
   if (kind !== 'None' && kind !== 'String' && kind !== 'ExpandString') return 'refused';
-  const normalize = (entry: string) => entry.replace(/%([^%]+)%/g, (match, name: string) => env[name] ?? match).replace(/[\\/]+$/, '').toLowerCase();
+  // C:\x\bin, C:/x/bin/ and "C:\x\bin" are one entry to Windows.
+  const normalize = (entry: string) => entry.trim().replace(/^"(.*)"$/, '$1')
+    .replace(/%([^%]+)%/g, (match, name: string) => env[name] ?? match)
+    .replace(/[\\/]+/g, '/').replace(/\/$/, '').toLowerCase();
   if (value.split(';').some(entry => normalize(entry) === normalize(binDir))) return 'present';
   await store.write({
     kind: kind === 'String' ? 'String' : 'ExpandString',
@@ -520,7 +534,8 @@ export async function addRunpaneToUserPath(options: AddRunpaneToUserPathOptions)
     try {
       result = target === WINDOWS_USER_PATH ? await appendWindowsUserPath(options.binDir, env, options.windowsUserPath ?? registryUserPath) : appendShellPathBlock(target, options.binDir);
     } catch (error) {
-      console.warn(`[runpane] Could not add runpane to PATH in ${target}:`, error);
+      const reason = error instanceof Error ? error.message : String(error);
+      console.warn(`[runpane] Could not add ${options.binDir} to PATH in ${target} (${reason}). Pane retries at its next start; until then, add it by hand.`);
       continue;
     }
     if (result === 'refused') continue;
@@ -537,6 +552,6 @@ export async function addRunpaneToUserPathBestEffort(): Promise<void> {
     const changed = await addRunpaneToUserPath({ binDir: currentState.binDir });
     if (changed.length > 0) console.log(`[runpane] Added ${currentState.binDir} to PATH in ${changed.join(', ')}`);
   } catch (error) {
-    console.warn('[runpane] Failed to add runpane to the user PATH:', error);
+    console.warn(`[runpane] Could not add ${currentState.binDir} to the user PATH (${error instanceof Error ? error.message : String(error)}). Pane retries at its next start.`);
   }
 }
