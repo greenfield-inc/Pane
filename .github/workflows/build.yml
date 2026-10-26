@@ -216,7 +216,7 @@ jobs:
         cache: 'pnpm'
     - name: Ensure npm supports trusted publishing
       run: npm install -g npm@^11.5.1
-    - run: pnpm install
+    - run: pnpm install --filter runpane --ignore-scripts
     - run: pnpm --filter runpane build
     - name: Publish runpane to npm with token fallback
       if: ${{ env.NPM_TOKEN != '' }}
