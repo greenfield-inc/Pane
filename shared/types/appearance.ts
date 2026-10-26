@@ -74,6 +74,8 @@ export const DEFAULT_APPEARANCE: AppearanceConfig = {
   systemDarkTheme: 'dark',
 };
 
+export const DEFAULT_TERMINAL_FONT_SIZE = 16;
+
 export class AppearanceValidationError extends Error {
   constructor(message: string) {
     super(message);
