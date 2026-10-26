@@ -276,7 +276,7 @@ try {
       console.error('Failed to dispatch browser-panel:popup-requested to window:', e);
     }
   });
-  ipcRenderer.on('browser-panel:file-refused', (_event: Electron.IpcRendererEvent, data: { panelId: string; message: string }) => {
+  ipcRenderer.on('browser-panel:file-refused', (_event: Electron.IpcRendererEvent, data: { panelId: string; message: string; next?: string }) => {
     try {
       window.dispatchEvent(new CustomEvent('browser-panel:file-refused', { detail: data }));
     } catch (e) {
