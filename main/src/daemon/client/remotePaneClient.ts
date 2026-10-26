@@ -327,6 +327,8 @@ export class RemotePaneClient {
     const endpoint = buildRemoteEndpoint(this.normalizedBaseUrl, 'invoke');
     let payload: RemoteInvokeResponsePayload;
     const generation = this.streamGeneration;
+    // Reads and viewer bookkeeping change nothing the person must check, so losing one is only an interruption.
+    const nothingToCheck = REMOTE_READ_CHANNELS.has(channel) || REMOTE_RESTORE_CHANNELS.has(channel);
     try {
       const response = await requestJson(endpoint, this.buildRequestOptions(endpoint, {
         method: 'POST', signal,
@@ -343,9 +345,8 @@ export class RemotePaneClient {
       payload = parseJsonResponse(response, 'Remote daemon returned an invalid invoke response', remoteInvokeResponseSchema);
     } catch (error) {
       if (error instanceof PaneError) throw error;
-      const isRead = REMOTE_READ_CHANNELS.has(channel);
-      const failure = new PaneError(isRead ? 'ERR_REMOTE_TRANSPORT' : 'ERR_REMOTE_DELIVERY_UNKNOWN',
-        isRead ? 'Remote connection interrupted: the host response was incomplete. Pane is reconnecting.'
+      const failure = new PaneError(nothingToCheck ? 'ERR_REMOTE_TRANSPORT' : 'ERR_REMOTE_DELIVERY_UNKNOWN',
+        nothingToCheck ? 'Remote connection interrupted: the host response was incomplete. Pane is reconnecting.'
           : 'Delivery unknown: the remote response was interrupted. The action may have completed; it was not replayed.',
         'Wait for reconnection and check the destination before trying again.');
       if (!signal?.aborted && generation === this.streamGeneration && !this.closedByClient) {
@@ -354,7 +355,7 @@ export class RemotePaneClient {
       throw failure;
     }
     if (generation !== this.streamGeneration || this.closedByClient) {
-      throw new PaneError('ERR_REMOTE_STALE_RESPONSE', REMOTE_READ_CHANNELS.has(channel) ? 'Remote connection interrupted: the host changed before its response arrived.' : `Delivery unknown: ${this.profile.label} changed connection before the response arrived.`, 'Check the original destination before trying again.');
+      throw new PaneError('ERR_REMOTE_STALE_RESPONSE', nothingToCheck ? 'Remote connection interrupted: the host changed before its response arrived.' : `Delivery unknown: ${this.profile.label} changed connection before the response arrived.`, 'Check the original destination before trying again.');
     }
 
     if (!payload.ok) {
