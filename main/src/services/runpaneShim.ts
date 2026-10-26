@@ -10,8 +10,11 @@
  * files run, so a profile that rebuilds PATH cannot hide the shim or put a
  * globally installed (possibly mismatched) runpane ahead of it.
  *
- * WSL terminals are left alone: a Windows Electron path cannot run inside the
- * distro, and env set on wsl.exe does not reach the Linux shell anyway.
+ * WSL terminals run the same POSIX shim from the distro: it starts the Windows
+ * Electron binary through WSL interop, so the CLI is a Windows process that can
+ * open the daemon's named pipe (Linux processes cannot). WSLENV carries
+ * ELECTRON_RUN_AS_NODE and PANE_DIR across. A WSL rcfile re-applies PATH after
+ * the user's login files, using `wslpath` for the Linux side of each path.
  */
 import fs from 'fs';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
@@ -31,6 +34,8 @@ export interface RunpaneShimState {
   /** Wrapper startup files that re-apply PATH after the user's own files. */
   zshDotDir: string;
   bashRcFile: string;
+  /** Windows only: the rcfile WSL terminals start bash with. */
+  wslBashRcFile?: string;
 }
 
 export interface InstallRunpaneShimOptions {
@@ -88,12 +93,30 @@ function ensureDirectory(directory: string): void {
   fs.mkdirSync(directory, { recursive: true, mode: 0o755 });
 }
 
-function posixShim(appDirectory: string, execPath: string, cliPath: string): string {
+/**
+ * Inside WSL, the Windows binary runs through interop. Its Windows paths stay
+ * as they are, except the executable, which the distro needs as a Linux path.
+ */
+function wslShimLines(execPath: string, cliPath: string): string[] {
+  return [
+    'if [ -n "${WSL_DISTRO_NAME:-}" ]; then',
+    "  if ! grep -qs '^enabled' /proc/sys/fs/binfmt_misc/WSLInterop /proc/sys/fs/binfmt_misc/WSLInterop-late; then",
+    '    echo "runpane: WSL interop is off in $WSL_DISTRO_NAME, so it cannot start Pane\'s Windows CLI. Nothing was run. Set enabled=true under [interop] in /etc/wsl.conf, then run wsl.exe --shutdown from Windows." >&2',
+    '    exit 126',
+    '  fi',
+    '  WSLENV="${WSLENV:+$WSLENV:}ELECTRON_RUN_AS_NODE:PANE_DIR"; export WSLENV',
+    `  ELECTRON_RUN_AS_NODE=1 exec "$(wslpath -u ${shellQuote(execPath)})" ${shellQuote(cliPath)} "$@"`,
+    'fi',
+  ];
+}
+
+function posixShim(appDirectory: string, execPath: string, cliPath: string, platform: NodeJS.Platform): string {
   return [
     '#!/bin/sh',
     `# ${PANE_MANAGED_SHIM_MARKER}: Pane rewrites this file at startup; edits are lost.`,
     '# Runs the runpane CLI bundled with this Pane build using its Electron binary as Node.',
     `if [ -z "\${PANE_DIR:-}" ]; then PANE_DIR=${shellQuote(appDirectory)}; export PANE_DIR; fi`,
+    ...(platform === 'win32' ? wslShimLines(execPath, cliPath) : []),
     `ELECTRON_RUN_AS_NODE=1 exec ${shellQuote(execPath)} ${shellQuote(cliPath)} "$@"`,
     '',
   ].join('\n');
@@ -162,16 +185,11 @@ function zshWrapperFiles(binDir: string, wrapperDir: string) {
   };
 }
 
-/** bash --rcfile replaces ~/.bashrc for an interactive non-login shell. */
-function bashRcFile(binDir: string): string {
-  const quoted = shellQuote(binDir);
+/** Move `dir` (a shell expression) to the front of PATH now and before each prompt. */
+function bashPathLines(dir: string): string[] {
   return [
-    `# ${MANAGED_SHELL_MARKER}: Pane rewrites this file at startup; edits are lost.`,
-    '# Same files an interactive non-login bash reads, then keep runpane first on PATH.',
-    '[ -f /etc/bash.bashrc ] && . /etc/bash.bashrc',
-    '[ -f "$HOME/.bashrc" ] && . "$HOME/.bashrc"',
     '_pane_runpane_path() {',
-    `  local dir=${quoted} rest=":$PATH:"`,
+    `  local dir=${dir} rest=":$PATH:"`,
     '  rest="${rest//:$dir:/:}"; rest="${rest#:}"; rest="${rest%:}"',
     '  PATH="$dir${rest:+:$rest}"',
     '}',
@@ -181,6 +199,36 @@ function bashRcFile(binDir: string): string {
     '  *) PROMPT_COMMAND="${PROMPT_COMMAND:+$PROMPT_COMMAND;}_pane_runpane_path" ;;',
     'esac',
     'hash -r 2>/dev/null || true',
+  ];
+}
+
+/** bash --rcfile replaces ~/.bashrc for an interactive non-login shell. */
+function bashRcFile(binDir: string): string {
+  return [
+    `# ${MANAGED_SHELL_MARKER}: Pane rewrites this file at startup; edits are lost.`,
+    '# Same files an interactive non-login bash reads, then keep runpane first on PATH.',
+    '[ -f /etc/bash.bashrc ] && . /etc/bash.bashrc',
+    '[ -f "$HOME/.bashrc" ] && . "$HOME/.bashrc"',
+    ...bashPathLines(shellQuote(binDir)),
+    '',
+  ].join('\n');
+}
+
+/**
+ * WSL terminals start a login bash. This rcfile reads the same files a login
+ * bash reads, then puts the Windows bin directory, as a Linux path, first.
+ */
+function wslBashRcFile(binDir: string): string {
+  return [
+    `# ${MANAGED_SHELL_MARKER}: Pane rewrites this file at startup; edits are lost.`,
+    '# Same files a login bash reads, then keep runpane first on PATH.',
+    '[ -f /etc/profile ] && . /etc/profile',
+    'if [ -f "$HOME/.bash_profile" ]; then . "$HOME/.bash_profile"',
+    'elif [ -f "$HOME/.bash_login" ]; then . "$HOME/.bash_login"',
+    'elif [ -f "$HOME/.profile" ]; then . "$HOME/.profile"; fi',
+    `_pane_runpane_dir=$(wslpath -u ${shellQuote(binDir)})`,
+    'export PANE_RUNPANE_BIN="$_pane_runpane_dir/runpane"',
+    ...bashPathLines('"$_pane_runpane_dir"'),
     '',
   ].join('\n');
 }
@@ -234,7 +282,7 @@ export function installRunpaneShim(options: InstallRunpaneShimOptions): RunpaneS
 
   const shimPath = path.join(binDir, platform === 'win32' ? 'runpane.cmd' : 'runpane');
   // Git Bash on Windows also finds the extensionless POSIX shim.
-  if (!writeManagedFile(path.join(binDir, 'runpane'), posixShim(options.appDirectory, execPath, cliPath), PANE_MANAGED_SHIM_MARKER, 0o755)) {
+  if (!writeManagedFile(path.join(binDir, 'runpane'), posixShim(options.appDirectory, execPath, cliPath, platform), PANE_MANAGED_SHIM_MARKER, 0o755)) {
     return null;
   }
   if (platform === 'win32'
@@ -251,8 +299,16 @@ export function installRunpaneShim(options: InstallRunpaneShimOptions): RunpaneS
   }
   const bashRc = path.join(bashDir, 'rcfile');
   writeManagedFile(bashRc, bashRcFile(binDir), MANAGED_SHELL_MARKER, 0o644);
-
   currentState = { binDir, shimPath, zshDotDir, bashRcFile: bashRc };
+  if (platform === 'win32') {
+    const wslRc = path.join(bashDir, 'wsl-rcfile');
+    if (writeManagedFile(wslRc, wslBashRcFile(binDir), MANAGED_SHELL_MARKER, 0o644)) currentState.wslBashRcFile = wslRc;
+  }
+  return currentState;
+}
+
+/** The installed shim, or null when this Pane has none. */
+export function getRunpaneShimState(): RunpaneShimState | null {
   return currentState;
 }
 

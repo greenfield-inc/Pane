@@ -174,14 +174,20 @@ export function buildWSLENV(varNames: readonly string[]): string {
  * Get shell spawn info for opening an interactive WSL terminal.
  * Returns shape compatible with ShellDetector's ShellInfo.
  */
-export function getWSLShellSpawn(distro: string, cwd?: string): WSLShellSpawn {
+export function getWSLShellSpawn(distro: string, cwd?: string, windowsRcFile?: string): WSLShellSpawn {
   // Use bash -c "cd ... && exec bash" instead of --cd flag.
   // The --cd flag is broken on many WSL versions (e.g., 2.5.9.0) for Linux paths.
   // --exec runs bash directly; `--` would pass the command line through the
   // user's default shell first, which re-parses the quoting.
   const args = ['-d', distro, '--exec', 'bash'];
+  // A Windows rcfile (Pane's runpane PATH setup) replaces the login shell when the distro can read it.
+  const shell = windowsRcFile
+    ? `{ rc=$(wslpath -u ${escapeForBash(windowsRcFile)} 2>/dev/null) && [ -r "$rc" ] && exec bash --rcfile "$rc" -i; exec bash --login; }`
+    : 'exec bash --login';
   if (cwd) {
-    args.push('-c', `cd ${escapeForBash(cwd)} && exec bash --login`);
+    args.push('-c', `cd ${escapeForBash(cwd)} && ${shell}`);
+  } else if (windowsRcFile) {
+    args.push('-c', shell);
   } else {
     args.push('--login');
   }
