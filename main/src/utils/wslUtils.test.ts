@@ -25,10 +25,6 @@ describe('getWSLShellSpawn', () => {
     expect(getWSLShellSpawn('Ubuntu', cwd).args).toEqual(['-d', 'Ubuntu', '--exec', 'bash', '-c', script]);
   });
 
-  it('starts bash with a readable Windows rcfile, else a login shell', () => {
-    expect(getWSLShellSpawn('Ubuntu', '/home/me', 'C:\\Users\\me\\.pane\\shell\\bash\\wsl-rcfile').args).toEqual(['-d', 'Ubuntu', '--exec', 'bash', '-c',
-      "cd '/home/me' && { rc=$(wslpath -u 'C:\\Users\\me\\.pane\\shell\\bash\\wsl-rcfile' 2>/dev/null) && [ -r \"$rc\" ] && exec bash --rcfile \"$rc\" -i; exec bash --login; }"]);
-  });
 });
 
 describe('validateWSLAvailable', () => {

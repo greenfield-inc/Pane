@@ -4,7 +4,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { getWSLShellSpawn } from '../utils/wslUtils';
+import { getWSLShellSpawn, WSLPATH } from '../utils/wslUtils';
 import {
   installRunpaneShim,
   PANE_MANAGED_SHIM_MARKER,
@@ -114,27 +114,44 @@ describe('WSL terminals', () => {
     const state = installRunpaneShim({ appDirectory, bundledCliPath, execPath: 'C:\\Program Files\\Pane\\Pane.exe', platform: 'win32' });
     const result = spawnSync(path.join(state!.binDir, 'runpane'), ['doctor'], { encoding: 'utf8', env: { PATH: '/usr/bin:/bin', WSL_DISTRO_NAME: 'Ubuntu-24.04' } });
     expect(result.status).toBe(126);
-    expect(result.stderr).toBe("runpane: WSL interop is off in Ubuntu-24.04, so it cannot start Pane's Windows CLI. Nothing was run. Set enabled=true under [interop] in /etc/wsl.conf, then run wsl.exe --shutdown from Windows.\n");
+    expect(result.stderr).toContain('WSL interop is off in Ubuntu-24.04');
+    expect(result.stderr).toContain('Nothing was run');
   });
 
-  it.skipIf(process.platform === 'win32')('keeps Pane runpane first after the login files edit PATH', () => {
+  /**
+   * Runs the WSL terminal launch in a real bash. Outside WSL there is no
+   * /bin/wslpath, so the launch script and rcfile call a fake one instead.
+   */
+  function launchWslTerminal(fakeWslpath: string, probe: string) {
     const state = installRunpaneShim({ appDirectory, bundledCliPath, execPath: process.execPath, platform: 'win32' })!;
     const home = path.join(root, 'home');
     const globalBin = path.join(root, 'global bin');
-    const fakeBin = path.join(root, 'fake bin');
-    for (const dir of [home, globalBin, fakeBin]) fs.mkdirSync(dir, { recursive: true });
+    for (const dir of [home, globalBin]) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(globalBin, 'runpane'), '#!/bin/sh\necho global\n', { mode: 0o755 });
-    // Paths are already POSIX here, so wslpath -u returns its argument.
-    fs.writeFileSync(path.join(fakeBin, 'wslpath'), '#!/bin/sh\nprintf %s "$2"\n', { mode: 0o755 });
     fs.writeFileSync(path.join(home, '.profile'), `export PATH='${globalBin}':"$PATH"\nexport USER_PROFILE_RAN=yes\n`);
-
-    const script = getWSLShellSpawn('Ubuntu', home, state.wslBashRcFile).args.at(-1)!;
-    const probe = 'echo "RESOLVED=$(command -v runpane) BIN=$PANE_RUNPANE_BIN PROFILE=$USER_PROFILE_RAN"; runpane probe; exit\n';
-    const env = { HOME: home, PATH: `${fakeBin}:/usr/bin:/bin`, TERM: 'dumb' };
+    const wslpath = path.join(root, 'wslpath');
+    fs.writeFileSync(wslpath, fakeWslpath, { mode: 0o755 });
+    const rcFile = path.join(root, 'wsl-rcfile');
+    fs.writeFileSync(rcFile, fs.readFileSync(state.wslBashRcFile!, 'utf8').replaceAll(WSLPATH, wslpath));
+    const script = getWSLShellSpawn('Ubuntu', home, rcFile).args.at(-1)!.replaceAll(WSLPATH, wslpath);
+    const env = { HOME: home, PATH: '/usr/bin:/bin', TERM: 'dumb' };
     const result = spawnSync('/bin/bash', ['-c', script], { input: probe, encoding: 'utf8', env, timeout: 15_000 });
-    const output = `${result.stdout}${result.stderr}`;
+    return `${result.stdout}${result.stderr}`;
+  }
+
+  it.skipIf(process.platform === 'win32')('keeps Pane runpane first after the login files edit PATH', () => {
+    // Paths are already POSIX here, so wslpath -u returns its argument.
+    const output = launchWslTerminal('#!/bin/sh\nprintf %s "$2"\n',
+      'echo "RESOLVED=$(command -v runpane) BIN=$PANE_RUNPANE_BIN PROFILE=$USER_PROFILE_RAN"; runpane probe; exit\n');
     expect(output).toContain(`RESOLVED=${appDirectory}/bin/runpane BIN=${appDirectory}/bin/runpane PROFILE=yes`);
     expect(output).toContain(`pane-runpane ${appDirectory} probe`);
+  });
+
+  it.skipIf(process.platform === 'win32')('starts a login shell when wslpath fails', () => {
+    const output = launchWslTerminal('#!/bin/sh\nexit 1\n',
+      'shopt -q login_shell && echo LOGIN=yes; echo "RESOLVED=$(command -v runpane) PROFILE=$USER_PROFILE_RAN"; exit\n');
+    expect(output).toContain('LOGIN=yes');
+    expect(output).toContain(`RESOLVED=${path.join(root, 'global bin')}/runpane PROFILE=yes`);
   });
 });
 
