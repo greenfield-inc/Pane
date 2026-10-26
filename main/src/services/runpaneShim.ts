@@ -393,7 +393,8 @@ function shellPathBlock(file: string, binDir: string): string {
 function appendShellPathBlock(file: string, binDir: string, home: string): UserPathResult {
   if (isSymlink(file)) return 'refused';
   const previous = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
-  const relative = path.relative(home, binDir);
+  // Shell startup files spell paths with '/'.
+  const relative = path.relative(home, binDir).split(path.sep).join('/');
   if ([USER_PATH_MARKER, binDir, `$HOME/${relative}`, `\${HOME}/${relative}`, `~/${relative}`].some(text => previous.includes(text))) return 'present';
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const separator = previous === '' ? '' : previous.endsWith('\n') ? '\n' : '\n\n';
