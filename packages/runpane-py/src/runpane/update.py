@@ -21,7 +21,7 @@ def run_update(parsed) -> int:
             code="ERR_UPDATE_RUNTIME",
             next="Open a Pane build supporting independent updates and install standalone Node, then retry from this Python environment.",
         )
-        if parsed.update_status or parsed.dry_run or parsed.update_scope == "cli" or parsed.pane_version != "latest":
+        if parsed.update_status or parsed.dry_run or parsed.update_scope == "cli" or parsed.pane_version != "latest" or parsed.pane_path:
             raise refusal
         return update_in_app(parsed, pane_dir, refusal)
     args = [node, str(engine), "update", "--pane-dir", str(pane_dir), "--version", parsed.pane_version]
@@ -49,8 +49,14 @@ def update_in_app(parsed, pane_dir: Path, refusal: PaneDaemonClientError) -> int
     try:
         result = invoke_daemon("runpane:update:in-app", [], pane_dir=str(pane_dir), timeout_ms=15 * 60_000)
     except PaneDaemonClientError as error:
-        if error.code != "ERR_UNKNOWN_CHANNEL":
+        if error.code == "ERR_RUNPANE_DAEMON_CONNECT_FAILED":
             raise
+        if error.code != "ERR_UNKNOWN_CHANNEL":
+            raise PaneDaemonClientError(
+                f"{error} The independent update had already refused this host: {refusal}",
+                code=error.code,
+                next=error.next,
+            ) from error
         raise PaneDaemonClientError(
             f"Updating from runpane is unsupported by this Pane: it is older than the in-app update handoff, and the independent update refused this host ({refusal}).",
             code="ERR_UPDATE_IN_APP_UNAVAILABLE",

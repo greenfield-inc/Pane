@@ -9,7 +9,7 @@ hands off to that built-in updater: the running Pane downloads the latest releas
 quits and installs it, and the command prints `"mode": "in-app"`. The handoff
 skips the checkpoint, snapshot and panel restoration described here, and it
 leaves an npm or pip CLI as it was (`cliUpdated: false`). Pinned versions,
-`--cli-only` and `--dry-run` still report the refusal.
+`--pane-path`, `--cli-only` and `--dry-run` still report the refusal.
 Run `runpane update --dry-run --json` first to see the executable, data directory,
 CLI owner and supervisor capability without starting an update.
 When Pane is not running on the machine, for example because a failed update

@@ -128,7 +128,10 @@ describe('runpane update hands off to the in-app updater', () => {
     inApp.mockImplementation(() => { throw new PaneError('ERR_UPDATE_IN_APP_UNAVAILABLE', 'In-app update is unsupported in a development build. Nothing was changed.', 'Use a packaged Pane installation.'); });
     await startDesktop();
     runAsManagedCli(path.join(root, 'empty'));
-    await expect(update()).rejects.toMatchObject({ code: 'ERR_UPDATE_IN_APP_UNAVAILABLE', next: 'Use a packaged Pane installation.' });
+    await expect(update()).rejects.toMatchObject({
+      code: 'ERR_UPDATE_IN_APP_UNAVAILABLE', next: 'Use a packaged Pane installation.',
+      message: expect.stringContaining('The independent update had already refused this host: No independent Node runtime is available'),
+    });
   });
 
   it('keeps reporting the refusal for requests the in-app updater cannot honor', async () => {
@@ -136,6 +139,7 @@ describe('runpane update hands off to the in-app updater', () => {
     runAsManagedCli(path.join(root, 'empty'));
     await expect(update('--version', '2.4.190')).rejects.toMatchObject({ code: 'ERR_UPDATE_PREFLIGHT' });
     await expect(update('--cli-only')).rejects.toMatchObject({ code: 'ERR_UPDATE_PREFLIGHT' });
+    await expect(update('--pane-path', path.join(root, 'elsewhere'))).rejects.toMatchObject({ code: 'ERR_UPDATE_PREFLIGHT' });
     expect(inApp).not.toHaveBeenCalled();
   });
 });
