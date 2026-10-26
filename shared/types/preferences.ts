@@ -22,20 +22,22 @@ const preferenceMapSchema: BoundarySchema<Record<string, string>> = {
   },
 };
 
-function readResponse<Value, T>(value: Value, schema: BoundarySchema<T>): T {
-  const response = decodeBoundary(value, boundary.union(
-    boundary.object({ success: boundary.literal(true), data: schema }),
-    failureSchema,
-  ));
-  if (!response.success) throw new Error(response.error);
-  return response.data;
+function responseSchema<T>(data: BoundarySchema<T>): BoundarySchema<T> {
+  const envelope = boundary.union(boundary.object({ success: boundary.literal(true), data }), failureSchema);
+  return {
+    decode(current) {
+      const response = envelope.decode(current);
+      if (!response.success) throw new Error(response.error);
+      return response.data;
+    },
+  };
 }
 
 /** Decode the raw IPC envelope once, before values cross into renderer callers. */
 export function createPreferencesApi<Value>(invoke: PreferenceInvoke<Value>): PreferencesApi {
   return {
-    get: async key => readResponse(await invoke('preferences:get', key), boundary.nullable(boundary.string)),
-    getAll: async () => readResponse(await invoke('preferences:get-all'), preferenceMapSchema),
+    get: async key => decodeBoundary(await invoke('preferences:get', key), responseSchema(boundary.nullable(boundary.string))),
+    getAll: async () => decodeBoundary(await invoke('preferences:get-all'), responseSchema(preferenceMapSchema)),
     set: async (key, value) => {
       const response = decodeBoundary(await invoke('preferences:set', key, value), boundary.union(
         boundary.object({ success: boundary.literal(true) }),
