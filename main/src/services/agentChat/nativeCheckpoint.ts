@@ -20,7 +20,8 @@ export class NativeCheckpoint {
 
   constructor(private readonly conversationId: string) {}
 
-  observe<Value>(input: Value): void {
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Native hook payloads are decoded immediately with hookSchema.
+  observe(input: unknown): void {
     const event = decodeOptionalBoundary(input, hookSchema);
     if (!event || event.session_id !== this.conversationId) return;
     this.input();

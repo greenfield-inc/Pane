@@ -1087,7 +1087,8 @@ export class RemotePaneClientController extends EventEmitter {
    * Tunnels every port in a host's Ports list and returns the list with where each port is
    * reachable here. Null for a list of an unknown shape, or from a client that is no longer active.
    */
-  private async tunnelPorts<Value>(client: RemotePaneClient, value: Value): Promise<ListeningPortsSnapshot | null> {
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Host port lists are decoded with decodeListeningPortsSnapshot before use.
+  private async tunnelPorts(client: RemotePaneClient, value: unknown): Promise<ListeningPortsSnapshot | null> {
     const snapshot = decodeListeningPortsSnapshot(value);
     const tunnel = this.portTunnel;
     if (!snapshot || !tunnel || this.activeClient !== client) return null;
@@ -1136,7 +1137,8 @@ export class RemotePaneClientController extends EventEmitter {
     return await this.tunnelPorts(client, listed) ?? listed;
   }
 
-  private async publishTunnelledPorts<Value>(client: RemotePaneClient, value: Value): Promise<void> {
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Host port events pass through tunnelPorts, which decodes them before use.
+  private async publishTunnelledPorts(client: RemotePaneClient, value: unknown): Promise<void> {
     try {
       const snapshot = await this.tunnelPorts(client, value);
       if (snapshot && this.activeClient === client) this.rendererEventSink.send(PORTS_CHANGED_CHANNEL, snapshot);

@@ -31,5 +31,7 @@ const view: BoundarySchema<AgentChatView> = boundary.object({
   permissions: boundary.array(boundary.object({ id: boundary.string, generation: boundary.number, title: boundary.string, toolCall: boundary.json, options: boundary.array(boundary.object({ optionId: boundary.string, name: boundary.string, kind: boundary.string })) })),
   transcript: boundary.optional(boundary.object({ panelId: boundary.string, generation: boundary.number, revision: boundary.number, messages: boundary.array(message) })),
 });
-export function decodeAgentChatView<Value>(value: Value): AgentChatView { return decodeBoundary(value, view); }
-export function decodeAgentChatEvent<Value>(value: Value): AgentChatEvent { return decodeBoundary(value, event); }
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- External agent chat data is decoded immediately with the view schema.
+export function decodeAgentChatView(value: unknown): AgentChatView { return decodeBoundary(value, view); }
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- External agent chat data is decoded immediately with the event schema.
+export function decodeAgentChatEvent(value: unknown): AgentChatEvent { return decodeBoundary(value, event); }

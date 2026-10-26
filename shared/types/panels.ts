@@ -534,6 +534,7 @@ const sessionPanelLayoutSchema: BoundarySchema<SessionPanelLayout> = boundary.ob
 });
 
 /** Returns null for anything that is not a version 1 layout tree. */
-export function decodeSessionPanelLayout<Value>(value: Value): SessionPanelLayout | null {
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- External saved data is decoded immediately with sessionPanelLayoutSchema.
+export function decodeSessionPanelLayout(value: unknown): SessionPanelLayout | null {
   return decodeOptionalBoundary(value, sessionPanelLayoutSchema) ?? null;
 }

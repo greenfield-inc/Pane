@@ -128,7 +128,8 @@ function arrowStep(key: string, density: MissionControlDensity): number | undefi
   }
 }
 
-function writeStoredOption<T>(key: string, value: T): void {
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- This localStorage output boundary serializes saved options as JSON.
+function writeStoredOption(key: string, value: unknown): void {
   try {
     window.localStorage.setItem(key, JSON.stringify(value));
   } catch {
