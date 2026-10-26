@@ -5279,6 +5279,9 @@ describe('runpane IPC handlers', () => {
         }],
       });
       expect(services.taskQueue?.createSessionAndWait).not.toHaveBeenCalled();
+      expect(services.analyticsManager?.track).toHaveBeenCalledWith('runpane_local_control_failed', expect.objectContaining({
+        action: 'panes:create', failure_kind: 'handled', error_code: 'ERR_RUNPANE_BRANCH_HAS_PANE',
+      }));
     });
 
     it('passes the exact requested branch and base to pane creation', async () => {
@@ -6897,6 +6900,21 @@ describe('runpane IPC handlers', () => {
           initialInput: { delivered: false, verifiedSubmitted: false, error: { message: expect.stringContaining('not sent') } },
         }],
       });
+    });
+
+    it('reports why the agent was not ready in failure telemetry', async () => {
+      vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue({
+        ...terminalSnapshot('Building agent bundle...\n', 'idle'), isCliPanel: false, isCliReady: false, agentType: undefined,
+      });
+      const services = createServices();
+      await createRegistry(services).invoke('runpane:panes:create', [{
+        repo: { id: project.id }, waitReady: true, readyTimeoutMs: 30,
+        panes: [{ name: 'farm', tool: { command: 'agent-farm run greenfield/planner:opus', initialInput: 'say hi' } }],
+      }]);
+
+      expect(services.analyticsManager?.track).toHaveBeenCalledWith('runpane_local_control_failed', expect.objectContaining({
+        action: 'panes:create', failure_kind: 'handled', error_code: 'no-agent-detected',
+      }));
     });
 
     it('holds the message for the agent when a startup prompt blocks it', async () => {
