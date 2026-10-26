@@ -581,6 +581,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         configState.preferredShell = String(args[0]);
         return Promise.resolve(undefined);
       }
+      if (channel === 'ports:list') {
+        return Promise.resolve({ host: 'mock-host', ports: [] });
+      }
       if (channel === 'panels:get-layout') {
         return success(clone(key && mockLayouts.has(key) ? mockLayouts.get(key) : mockOptions.initialLayout ?? null));
       }
