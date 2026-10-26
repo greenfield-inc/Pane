@@ -134,11 +134,13 @@ export function useNotifications() {
   }, []);
 
   // Fires unconditionally; activity gating lives in the maybeNotify* callers.
-  // A panel target makes the notification open that tab when clicked.
+  // A notification replaces an earlier one with the same tag. A panel target
+  // makes the notification open that tab when clicked.
   const fireNotification = useCallback((
     title: string,
     body: string,
     icon?: string,
+    tag?: string,
     panelTarget?: { paneId: string; panelId: string },
   ) => {
     requestPermission().then((hasPermission) => {
@@ -147,7 +149,7 @@ export function useNotifications() {
           body,
           icon: icon || '/favicon.ico',
           badge: '/favicon.ico',
-          tag: 'claude-code-commander',
+          tag,
           requireInteraction: false,
         });
         const openPaneLink = window.electronAPI?.window?.openPaneLink;
@@ -164,10 +166,9 @@ export function useNotifications() {
     title: string,
     body: string,
     icon?: string,
-    _triggerEvent?: string,
-    _trackingKey?: string,
+    tag?: string,
   ) => {
-    fireNotification(title, body, icon);
+    fireNotification(title, body, icon, tag);
   }, [fireNotification]);
 
   /** Resolve a panel to its session + display names, or null when unknown. */
@@ -216,7 +217,7 @@ export function useNotifications() {
 
     void isDesktopAlertHandedOff(window.electronAPI?.notifications?.isHandedOff).then((handedOff) => {
       if (handedOff) return;
-      fireNotification(`${context.panelName} finished`, context.body, undefined, context.panelTarget);
+      fireNotification(`${context.panelName} finished`, context.body, undefined, `pane:panel:${panelId}`, context.panelTarget);
     });
   }
 
@@ -232,7 +233,7 @@ export function useNotifications() {
 
     void isDesktopAlertHandedOff(window.electronAPI?.notifications?.isHandedOff).then((handedOff) => {
       if (handedOff) return;
-      fireNotification(`${context.panelName} needs your input`, context.body, undefined, context.panelTarget);
+      fireNotification(`${context.panelName} needs your input`, context.body, undefined, `pane:panel:${panelId}`, context.panelTarget);
     });
   }
 
