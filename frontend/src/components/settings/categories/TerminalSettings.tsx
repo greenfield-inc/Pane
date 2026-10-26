@@ -29,8 +29,12 @@ export function TerminalSettings({ persistence, systemMonoFonts }: TerminalSetti
     // SAFETY: Select options use only PreferredShell identifiers supplied by the backend.
     return persistence.runSave('terminal-shell', () => hostShell.setPreferredShell(value as PreferredShell));
   };
-  const [customFont, setCustomFont] = useState(config.terminalFontFamily ?? 'Geist Mono');
-  useEffect(() => setCustomFont(config.terminalFontFamily ?? 'Geist Mono'), [config.terminalFontFamily]);
+  const fontFamily = config.terminalFontFamily ?? 'Geist Mono';
+  const [customFont, setCustomFont] = useState(fontFamily);
+  useEffect(() => setCustomFont(fontFamily), [fontFamily]);
+  // The current font always has an option, so the select never shows blank for the
+  // bundled default or a custom name. Dot-prefixed families are hidden system fonts.
+  const fontOptions = [...new Set([fontFamily, ...systemMonoFonts.filter((font) => !font.startsWith('.'))])];
   const fontSize = config.terminalFontSize ?? 14;
 
   return (
@@ -46,12 +50,12 @@ export function TerminalSettings({ persistence, systemMonoFonts }: TerminalSetti
           <div className="w-full space-y-2 sm:w-72">
             {systemMonoFonts.length > 0 && (
               <Select
-                value={config.terminalFontFamily ?? 'Geist Mono'}
+                value={fontFamily}
                 onValueChange={(value) => void persistence.saveConfig('terminal-font-family', { terminalFontFamily: value })}
               >
                 <SelectTrigger aria-label="Terminal font family"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {systemMonoFonts.map((font) => <SelectItem key={font} value={font}>{font}</SelectItem>)}
+                  {fontOptions.map((font) => <SelectItem key={font} value={font}>{font}</SelectItem>)}
                 </SelectContent>
               </Select>
             )}
