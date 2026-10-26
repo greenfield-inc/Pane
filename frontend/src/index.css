@@ -72,6 +72,14 @@ code,
   user-select: text;
 }
 
+/* Keyboard focus on a control that draws no ring of its own gets the theme's
+   ring instead of the browser's. `:where` keeps this at zero specificity, so any
+   component ring or `outline-none` still wins. */
+:where(:is(button, a[href], [role="button"], [role="tab"], [role="menuitem"], [role="option"], summary, input[type="checkbox"], input[type="radio"]):focus-visible) {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+}
+
 /* Rings on buttons and menu items appear for keyboard focus only. */
 :is(button, [role="button"], [role="tab"], [role="menuitem"], [role="option"], summary):focus:not(:focus-visible) {
   outline: none !important;
@@ -795,7 +803,7 @@ body.understory {
 
 .thinking-content blockquote {
   color: inherit;
-  border-color: rgba(var(--color-interactive-rgb), 0.2);
+  border-color: rgb(var(--color-interactive-rgb) / 0.2);
   @apply pl-3 py-1;
 }
 

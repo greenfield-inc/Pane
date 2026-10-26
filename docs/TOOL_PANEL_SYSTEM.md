@@ -38,6 +38,9 @@ The tool panel system consists of several key components:
 - XTerm.js instances mount/unmount based on panel visibility to save memory
 - Working directories are maintained independently per panel
 - Command history and environment variables can be preserved across restarts
+- Each shell gets `PANE_PANEL_KIND`, set when it starts so shell startup files can branch on it: `dock` (the first
+  plain shell, pinned to the bottom terminal dock), `shell` (another plain shell tab), `agent` (an agent CLI such as
+  Claude Code or Codex) or `command` (any other launch command)
 - Cmd-click on macOS or Ctrl-click on Windows/Linux opens `pane://open?pane=<pane-id>&panel=<panel-id>` links in terminal output inside Pane. The panel parameter is optional.
 
 ## Database Schema
