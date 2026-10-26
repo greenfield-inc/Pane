@@ -344,6 +344,46 @@ Recommended checks after connecting:
 6. Check git status and commit/diff flows.
 7. Run an approve-mode command and confirm the permission dialog appears on the client.
 
+## When a connection fails
+
+When you connect to a host (Connect in Settings → Remote Access, Add with a
+Code, the sidebar host switcher, or Retry), the main area shows a checklist of
+the connection's stages. The first stage that fails shows what went wrong and a
+fix. The same checklist appears when Pane gives up reconnecting after five
+minutes, and from **Check connection** on the "Connection lost" banner.
+
+| Stage | Fails when | Fix |
+|---|---|---|
+| Tailscale on this computer (Your computers only) | Tailscale is signed out or not installed here | Open Tailscale Setup, or Download Tailscale |
+| Host reachable | The host times out or its name does not resolve; a Your computers machine is offline on Tailscale | Check that both computers are on the same network or tailnet |
+| Pane daemon running / Pane open | The host refuses the connection, or a proxy such as Tailscale Serve answers 502-504 | Start it, or Copy command |
+| Signed in | The host rejects this computer's token or password | Paste new code, or Enter password |
+| Versions match | The host runs a different Pane version (a warning; the workspace still loads) | Update it, or Update Pane on this computer |
+| Workspace loaded | The host answered but the workspace did not restore | Retry |
+
+**Start it** and **Update it** run one fixed command on the host over your own
+SSH config. They appear only when exactly one `Host` alias in `~/.ssh/config`
+matches the host: its Tailscale machine name, or the first label of the host
+name in its address (`devbox` for `devbox.tail1234.ts.net`). Pane runs:
+
+```bash
+ssh -o BatchMode=yes -o ConnectTimeout=10 <alias> "$SHELL" -lc '<command>'
+```
+
+`BatchMode` makes ssh fail instead of asking for a password, and the login
+shell puts `npx` on the `PATH`. With no single matching alias, or when ssh
+fails, the row offers **Copy command** so you can run the same command on the
+host yourself:
+
+| Fix | Code host (daemon) | Your computers machine (Pane app) |
+|---|---|---|
+| Start it | `npx --yes runpane@latest daemon repair --yes` | `open -a Pane` (macOS hosts only; otherwise open Pane there) |
+| Update it | `npx --yes runpane@latest update && npx --yes runpane@latest daemon repair --yes` | `npx --yes runpane@latest update` |
+
+`daemon repair` uses the default daemon data directory, `~/.pane_remote`. For a
+host set up with another `--pane-dir`, run `runpane daemon repair --pane-dir
+<dir> --yes` there instead.
+
 ## Troubleshooting
 
 Start with machine-readable environment diagnostics:

@@ -146,8 +146,16 @@ Remote Pane events must never include:
 
 Allowed properties should stay enum-like: `surface`, `role`, `flow`, `result`,
 `tunnel_preference`, `tunnel_kind`, `data_mode`, `client_kind`,
-`connection_mode`, `failure_stage`, `failure_category`, and connected-client
-count buckets.
+`connection_mode`, `failure_stage`, `failure_category`, `failed_check`, and
+connected-client count buckets.
+
+`failed_check` names the checklist row that failed. Connect checks send it on
+`remote_pane_client_connection_failed` with `failure_stage: connection_check`:
+`tailscale_here`, `host_offline`, `host_unreachable`, `pane_not_running`,
+`sign_in_rejected`, `password_required`, `owner_only`, `workspace_restore`.
+Set Up Host sends it on `remote_pane_host_setup_failed`: `setup_service`,
+`setup_port`, `setup_tailscale`, `setup_https`, `setup_code`, `setup_daemon`.
+The sanitizer drops any other value.
 
 ## Remote Pane Event Catalog
 

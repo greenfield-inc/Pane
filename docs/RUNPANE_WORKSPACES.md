@@ -127,6 +127,7 @@ Machine commands (`read`, `write`, `exec`) are served only to workspace identity
 
 ## Troubleshooting
 
+- When **Connect** fails, the desktop app shows a checklist naming the stage that failed and its fix; see [When a connection fails](SELF_HOSTED_REMOTE_DAEMON.md#when-a-connection-fails).
 - `runpane workspace list` shows each machine's state. "Pane is not answering there" means Pane is not running on that machine, its workspaces are off, or it runs a Pane version without workspaces.
 - `tailscale serve status` should list `https://<machine>.<tailnet>.ts.net:8443` proxying to `http://127.0.0.1:<port>`.
 - A Pane older than workspaces reports `Workspaces: off ... (this Pane is older than workspaces)`; update Pane.
