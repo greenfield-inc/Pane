@@ -6,7 +6,10 @@ import childProcess from 'child_process';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { decodePaneRemoteConnection } from '../../../shared/types/remoteDaemon';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+import type { RemoteHostSetupProgress } from '../../../shared/types/remoteDaemon';
+import type { RemoteSetupCommandRunner } from './remote-setup-command';
 import {
+  getFailedRemoteHostSetupStep,
   readConfiguredTailscaleServeAccess,
   setupRemoteHost as setupRemoteHostImpl,
   type SetupRemoteHostOptions,
@@ -373,6 +376,133 @@ describe('setupRemoteHost', () => {
       preferTunnel: 'manual',
       installService: false,
     })).rejects.toThrow('Manual HTTPS remote setup requires a base URL.');
+  });
+});
+
+describe('setupRemoteHost steps', () => {
+  const forbidSync = { spawnSync: () => { throw new Error('Synchronous setup cannot run here'); } };
+  const tailscaleMissing: RemoteSetupCommandRunner = async () => ({ ok: false, stdout: '', stderr: 'not found' });
+  const tailscaleServing = (serve: { ok: boolean; stdout: string; stderr: string }): RemoteSetupCommandRunner =>
+    async (_command, args) => {
+      if (args[0] === 'serve' && args[1] === '--bg') return serve;
+      return { ok: true, stdout: args[0] === 'ip' ? '100.100.10.1\n' : 'https://office-mac.tailnet.ts.net', stderr: '' };
+    };
+  let tempDir: string | null = null;
+  afterEach(async () => {
+    if (tempDir) await fs.rm(tempDir, { recursive: true, force: true });
+    tempDir = null;
+  });
+
+  async function runSetup(options: SetupRemoteHostOptions) {
+    const progress: RemoteHostSetupProgress[] = [];
+    const error = await setupRemoteHostImpl({
+      tailscaleDependencies: forbidSync,
+      existingConfig: {},
+      writeConfig: async () => {},
+      ...options,
+      onProgress: (update) => progress.push(update),
+    }).then(() => null, (thrown: Error) => thrown);
+    return { progress, error };
+  }
+
+  it('reports each step in order for a Tailscale setup on the current data directory', async () => {
+    const { progress, error } = await runSetup({
+      installService: false,
+      listenPort: 42137,
+      asyncCommandRunner: tailscaleServing({ ok: true, stdout: '', stderr: '' }),
+    });
+
+    expect(error).toBeNull();
+    expect(progress).toEqual([
+      { step: 'port', status: 'running' },
+      { step: 'port', status: 'passed' },
+      { step: 'tailscale', status: 'running' },
+      { step: 'tailscale', status: 'passed' },
+      { step: 'https', status: 'running' },
+      { step: 'https', status: 'passed' },
+      { step: 'code', status: 'running' },
+      { step: 'code', status: 'passed' },
+    ]);
+  });
+
+  const failures: Array<{ step: string; options: () => Promise<SetupRemoteHostOptions>; message: string }> = [
+    {
+      step: 'service',
+      options: async () => ({
+        installService: true,
+        serviceDependencies: {
+          platform: 'linux',
+          homeDir: os.tmpdir(),
+          executablePath: process.execPath,
+          executableCandidates: [],
+          sourceRoot: null,
+          commandExists: () => false,
+          runCommand: () => ({ ok: false, stdout: '', stderr: '' }),
+        },
+      }),
+      message: 'cannot persist the current executable safely',
+    },
+    {
+      step: 'port',
+      options: async () => ({ installService: false, listenPort: 0 }),
+      message: 'Remote daemon listen port must be between 1 and 65535',
+    },
+    {
+      step: 'tailscale',
+      options: async () => ({ installService: false, asyncCommandRunner: tailscaleMissing }),
+      message: 'Tailscale is not installed.',
+    },
+    {
+      step: 'https',
+      options: async () => ({
+        installService: false,
+        asyncCommandRunner: tailscaleServing({ ok: false, stdout: '', stderr: 'Serve is not enabled on your tailnet' }),
+      }),
+      message: 'Tailscale Serve setup failed: Serve is not enabled on your tailnet',
+    },
+    {
+      step: 'https',
+      options: async () => ({ installService: false, preferTunnel: 'manual' }),
+      message: 'Manual HTTPS remote setup requires a base URL.',
+    },
+    {
+      step: 'code',
+      options: async () => ({
+        installService: false,
+        preferTunnel: 'ssh',
+        writeConfig: async () => { throw new Error('disk full'); },
+      }),
+      message: 'disk full',
+    },
+    {
+      step: 'daemon',
+      options: async () => {
+        tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'pane-remote-daemon-step-'));
+        // A file where the launcher directory belongs makes the service install fail.
+        await fs.writeFile(path.join(tempDir, 'remote-daemon'), '');
+        return {
+          paneDir: tempDir,
+          installService: true,
+          preferTunnel: 'ssh',
+          serviceDependencies: {
+            platform: 'linux',
+            homeDir: tempDir,
+            sourceRoot: tempDir,
+            commandExists: () => true,
+            runCommand: () => ({ ok: true, stdout: '', stderr: '' }),
+          },
+        };
+      },
+      message: 'remote-daemon',
+    },
+  ];
+
+  it.each(failures)('attributes "$message" to the $step step', async ({ step, options, message }) => {
+    const { progress, error } = await runSetup(await options());
+
+    expect(error?.message).toContain(message);
+    expect(getFailedRemoteHostSetupStep(error)).toBe(step);
+    expect(progress.at(-1)).toEqual({ step, status: 'failed', detail: error?.message });
   });
 });
 

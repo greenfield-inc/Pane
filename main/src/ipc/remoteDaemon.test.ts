@@ -359,6 +359,41 @@ describe('remote daemon IPC', () => {
     expect(configManager.getConfig().remoteDaemon).toEqual(createDefaultRemoteDaemonConfig());
   });
 
+  it('shows setup progress and reports the Tailscale step when Tailscale is missing', async () => {
+    const ipcMain = createIpcMainStub();
+    const configManager = createConfigManagerStub();
+    const send = vi.fn();
+    const track = vi.fn();
+    vi.mocked(setupRemoteHost).mockImplementation((options) => setupRemoteHostImpl({
+      ...options,
+      asyncCommandRunner: async () => ({ ok: false, stdout: '', stderr: 'not found' }),
+    }));
+
+    registerTestRemoteDaemonHandlers(ipcMain, {
+      configManager,
+      // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
+      getMainWindow: () => ({ isDestroyed: () => false, webContents: { send } }) as never,
+      // SAFETY: The handler only calls track on the analytics manager.
+      analyticsManager: { track } as never,
+    });
+
+    const response = await ipcMain.handlers.get('remote-daemon:setup-host')?.({}, { label: 'Office Mac mini' });
+
+    expect(response).toMatchObject({ success: false, error: expect.stringContaining('Tailscale is not installed.') });
+    expect(send).toHaveBeenCalledWith('remote-daemon:setup-progress', { step: 'port', status: 'passed' });
+    expect(send).toHaveBeenLastCalledWith('remote-daemon:setup-progress', {
+      step: 'tailscale',
+      status: 'failed',
+      detail: expect.stringContaining('Tailscale is not installed.'),
+    });
+    const failures = track.mock.calls.filter(([eventName]) => eventName === 'remote_pane_host_setup_failed');
+    expect(failures).toEqual([['remote_pane_host_setup_failed', expect.objectContaining({
+      result: 'failed',
+      failure_stage: 'setup_host',
+      failed_check: 'setup_tailscale',
+    })]]);
+  });
+
   it('builds an interactive Tailscale setup command for the current Pane data directory', async () => {
     const ipcMain = createIpcMainStub();
     const configManager = createConfigManagerStub();

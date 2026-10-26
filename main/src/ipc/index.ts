@@ -75,6 +75,7 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
     },
     analyticsManager: services.analyticsManager,
     resolveTailnetMachineUrl: (machine) => resolveTailnetMachineUrl(machine, readTailscaleStatus),
+    appVersion: services.app.getVersion(),
   });
   ipcMain.handle('remote-daemon:restore-complete', (event, restoreId: PaneCommandValue, error: PaneCommandValue) => {
     const result = decodeBoundary({ restoreId, error }, boundary.object({ restoreId: boundary.number, error: boundary.optional(boundary.string) }));

@@ -31,9 +31,29 @@ import { createPortTunnel, type PortTunnel } from './portTunnel';
 import { REMOTE_READ_CHANNELS, REMOTE_RESTORE_CHANNELS } from '../../../../shared/remoteClient/readChannels';
 import { RecoveryCycle } from '../../../../shared/remoteClient/recoveryCycle';
 import { PaneError } from '../../../../shared/paneError';
+import type {
+  RemoteConnectionCheck,
+  RemoteConnectionCheckRow,
+  RemoteConnectionCheckStage,
+} from '../../../../shared/types/remoteDaemon';
+import type { RemotePaneFailedCheck } from '../../services/remoteAnalytics';
+import { lookupTailnetMachine, probeWorkspace, readTailscaleStatus } from '../../services/tailnetMachines';
+import { listSshConfigHosts } from '../../services/sshConfigHosts';
+import {
+  addressOf,
+  copyCommandRow,
+  initialRows,
+  probeHost,
+  routeOf,
+  runSshCommand,
+  versionRow,
+  type ConnectionCheckDependencies,
+} from './connectionChecks';
 
 interface RemoteConnectionStateMetadata {
   lastSeenAt?: string | null;
+  /** The host's Pane version from its ready event; absent before ready and from older hosts. */
+  hostVersion?: string;
 }
 
 interface RemotePaneClientOptions {
@@ -81,6 +101,7 @@ interface RemoteReadyEventPayload {
   replay: 'none';
   resync: 'refetch-state-after-reconnect';
   timestamp: string;
+  paneVersion?: string;
 }
 
 const remoteInvokeResponseSchema: BoundarySchema<RemoteInvokeResponsePayload> = boundary.union(
@@ -104,6 +125,7 @@ const remoteReadyEventSchema: BoundarySchema<RemoteReadyEventPayload> = boundary
   replay: boundary.literal('none'),
   resync: boundary.literal('refetch-state-after-reconnect'),
   timestamp: boundary.string,
+  paneVersion: boundary.optional(boundary.string),
 });
 const remoteHeartbeatSchema: BoundarySchema<RemoteDaemonHeartbeatPayload> = boundary.object({
   timestamp: boundary.nonEmptyString,
@@ -132,6 +154,14 @@ const MEDIA_RESPONSE_HEADERS = [
   'access-control-allow-origin', 'access-control-expose-headers',
 ] as const;
 const NULL_BODY_STATUSES = new Set([204, 205, 304]);
+const CONNECTION_CHECK_TIMEOUT_MS = 5_000;
+/** What a reverse proxy such as Tailscale Serve answers when nothing listens behind it. */
+const PROXY_BACKEND_DOWN_STATUSES = new Set([502, 503, 504]);
+
+export type HostHealthCheck =
+  | { kind: 'running'; elapsedMs: number }
+  | { kind: 'not-running'; elapsedMs: number; detail: string }
+  | { kind: 'unreachable'; detail: string };
 
 type RemoteRequestOptions = RequestOptions & {
   servername?: string;
@@ -294,6 +324,54 @@ export class RemotePaneClient {
       });
       outgoing.on('error', reject);
       outgoing.end();
+    });
+  }
+
+  /**
+   * A timed GET /health. A refusal, or a proxy answering 502-504, means nothing serves Pane on a
+   * host that answered; a timeout or failed lookup means the host itself was not reached.
+   */
+  async checkHealth(timeoutMs = CONNECTION_CHECK_TIMEOUT_MS): Promise<HostHealthCheck> {
+    const endpoint = new URL('health', this.normalizedBaseUrl);
+    const startedAt = Date.now();
+    const result = await this.timedGet(endpoint, {}, timeoutMs);
+    const elapsedMs = Date.now() - startedAt;
+    if ('statusCode' in result) {
+      return PROXY_BACKEND_DOWN_STATUSES.has(result.statusCode)
+        ? { kind: 'not-running', elapsedMs, detail: `HTTP ${result.statusCode}` }
+        : { kind: 'running', elapsedMs };
+    }
+    return result.code === 'ECONNREFUSED'
+      ? { kind: 'not-running', elapsedMs, detail: result.message }
+      : { kind: 'unreachable', detail: result.message };
+  }
+
+  /** Whether the host accepts this profile's sign-in, without opening an event stream. */
+  async checkSignIn(timeoutMs = CONNECTION_CHECK_TIMEOUT_MS): Promise<'accepted' | 'rejected'> {
+    const endpoint = buildRemoteEndpoint(this.normalizedBaseUrl, 'events');
+    endpoint.searchParams.set('auth_check', '1');
+    const result = await this.timedGet(endpoint, this.authorizationHeader(), timeoutMs);
+    // Anything else is left to the real connect, which reports it on the workspace row.
+    return 'statusCode' in result && (result.statusCode === 401 || result.statusCode === 403) ? 'rejected' : 'accepted';
+  }
+
+  private timedGet(
+    endpoint: URL,
+    headers: http.OutgoingHttpHeaders,
+    timeoutMs: number,
+  ): Promise<{ statusCode: number } | { code: string | undefined; message: string }> {
+    return new Promise((resolve) => {
+      const request = createRequest(endpoint, this.buildRequestOptions(endpoint, { method: 'GET', headers }), (response) => {
+        response.resume();
+        resolve({ statusCode: response.statusCode ?? 0 });
+      });
+      // An absolute deadline, so a host that accepts the connection and never answers still fails.
+      const deadline = setTimeout(() => {
+        request.destroy(Object.assign(new Error(`no answer within ${Math.round(timeoutMs / 1000)} s`), { code: 'ETIMEDOUT' }));
+      }, timeoutMs);
+      request.on('error', (error: NodeJS.ErrnoException) => resolve({ code: error.code, message: error.message }));
+      request.on('close', () => clearTimeout(deadline));
+      request.end();
     });
   }
 
@@ -474,7 +552,10 @@ export class RemotePaneClient {
               readyReceived = true;
               this.markRemoteSeen();
               if (resolveOnReady && !settled) { settled = true; resolve(); }
-              this.onConnectionStateChange?.('restoring', null, { lastSeenAt: this.lastSeenAt });
+              this.onConnectionStateChange?.('restoring', null, {
+                lastSeenAt: this.lastSeenAt,
+                hostVersion: readyPayload.paneVersion,
+              });
               void Promise.resolve().then(() => this.onResyncRequired?.()).then(() => {
                 if (!isStale()) {
                   clearHandshakeTimer();
@@ -680,7 +761,21 @@ interface RemotePaneClientControllerOptions {
   analyticsManager?: Pick<AnalyticsManager, 'track'>;
   /** Looks up a codeless profile's machine on its tailnet; see `tailnetMachine`. */
   resolveTailnetMachineUrl?: (machine: TailnetMachineRef) => Promise<string>;
+  /** This app's Pane version, compared with the host's on the checklist's version row. */
+  appVersion?: string;
+  checkDependencies?: Partial<ConnectionCheckDependencies>;
 }
+
+const defaultCheckDependencies: ConnectionCheckDependencies = {
+  readTailscaleStatus,
+  lookupTailnetMachine,
+  probeWorkspace,
+  listSshHosts: () => listSshConfigHosts(),
+  runSsh: runSshCommand,
+};
+/** How long a host gets to start serving after a fix ran on it. */
+const HOST_FIX_SETTLE_MS = 30_000;
+const HOST_FIX_POLL_MS = 2_000;
 
 export class RemotePaneClientController extends EventEmitter {
   private configManager: ConfigManager | null = null;
@@ -706,6 +801,17 @@ export class RemotePaneClientController extends EventEmitter {
   private state = createDefaultRemotePaneConnectionState();
   private configListenerAttached = false;
   private remoteRuntimeUsageTracked = false;
+  private appVersion: string | undefined;
+  private checkDependencies = defaultCheckDependencies;
+  /** The checklist of the latest connect the user started, or of a connection that failed. */
+  private check: RemoteConnectionCheck | null = null;
+  private checkProfile: RemotePaneConnectionProfile | null = null;
+  private checkSequence = 0;
+  /** The SSH host and command behind each of the current check's run-on-host fixes. */
+  private hostFixes = new Map<RemoteConnectionCheckStage, { alias: string; command: string }>();
+  private versionRowReady: Promise<void> = Promise.resolve();
+  /** When this app last heard from each host, and its version; kept in memory only. */
+  private readonly sightings = new Map<string, { at: string | null; version: string | null }>();
 
   private readonly configUpdatedListener = () => {
     void this.syncToConfig().catch((error) => {
@@ -729,6 +835,8 @@ export class RemotePaneClientController extends EventEmitter {
     this.rendererEventSink = options.rendererEventSink;
     this.analyticsManager = options.analyticsManager;
     this.resolveTailnetMachineUrl = options.resolveTailnetMachineUrl;
+    this.appVersion = options.appVersion;
+    this.checkDependencies = { ...defaultCheckDependencies, ...options.checkDependencies };
     this.configManager.on('config-updated', this.configUpdatedListener);
     this.configListenerAttached = true;
 
@@ -743,7 +851,7 @@ export class RemotePaneClientController extends EventEmitter {
   }
 
   getConnectionState(): RemotePaneConnectionState {
-    return { ...this.state };
+    return { ...this.state, check: this.check };
   }
 
   isRemoteModeActive(): boolean {
@@ -813,10 +921,21 @@ export class RemotePaneClientController extends EventEmitter {
     return result;
   }
 
-  async activateProfile(profile: RemotePaneConnectionProfile): Promise<RemotePaneConnectionState> {
-    if (this.activeClient?.isSameProfile(profile)) {
+  /**
+   * Connects to a profile the user chose, running the connection checklist first. A failed check
+   * throws and leaves the current connection as it was; `recheck` reconnects even when connected.
+   */
+  async activateProfile(
+    profile: RemotePaneConnectionProfile,
+    options: { recheck?: boolean } = {},
+  ): Promise<RemotePaneConnectionState> {
+    const sameProfile = this.activeClient?.isSameProfile(profile) === true;
+    if (sameProfile && this.state.status === 'connected' && !options.recheck) return this.getConnectionState();
+    await this.runProbes(profile);
+    const activeClient = this.activeClient;
+    if (sameProfile && activeClient && !options.recheck) {
       const machine = tailnetMachineRef(profile);
-      if (this.state.status === 'error' && machine) await this.reresolveTailnetMachine(profile, machine, this.activeClient);
+      if (this.state.status === 'error' && machine) await this.reresolveTailnetMachine(profile, machine, activeClient);
       await this.activeClient?.retryNow();
       return this.getConnectionState();
     }
@@ -870,7 +989,49 @@ export class RemotePaneClientController extends EventEmitter {
     this.activeClient?.resume();
   }
 
+  /** Closes the checklist, as "Continue to workspace" does. */
+  dismissCheck(checkId: number): RemotePaneConnectionState {
+    if (this.check?.id === checkId) {
+      this.check = null;
+      this.publishState();
+    }
+    return this.getConnectionState();
+  }
+
+  /**
+   * Runs a row's fixed command on the host over the user's SSH config, then waits for the host to
+   * serve again. Returns the profile to reconnect to, or null when the command failed; the row then
+   * offers the command to copy instead.
+   */
+  async runCheckFix(checkId: number, stage: RemoteConnectionCheckStage): Promise<RemotePaneConnectionProfile | null> {
+    const target = this.hostFixes.get(stage);
+    const profile = this.checkProfile;
+    const row = this.check?.rows.find((candidate) => candidate.stage === stage);
+    if (this.check?.id !== checkId || !target || !profile || !row) {
+      throw new PaneError('ERR_REMOTE_CHECK_STALE', 'This connection check is out of date, so the fix did not run.', 'Retry the connection, then use the fix again.');
+    }
+    this.updateCheck(checkId, { rows: this.withRow({ ...row, status: 'running' }) });
+    try {
+      await this.checkDependencies.runSsh(target.alias, target.command);
+    } catch (error) {
+      this.hostFixes.delete(stage);
+      this.updateCheck(checkId, { rows: this.withRow({
+        ...row,
+        ...copyCommandRow(profile, target.command, `ssh ${target.alias} failed: ${getErrorMessage(error, 'unknown error')}.`),
+      }) });
+      return null;
+    }
+    const deadline = Date.now() + HOST_FIX_SETTLE_MS;
+    while (Date.now() < deadline && this.check?.id === checkId) {
+      const outcome = await probeHost(profile, new RemotePaneClient(profile), this.checkDependencies, () => {});
+      if (outcome.failedCheck !== 'pane_not_running' && outcome.failedCheck !== 'host_unreachable') break;
+      await new Promise((resolve) => setTimeout(resolve, HOST_FIX_POLL_MS));
+    }
+    return this.check?.id === checkId ? profile : null;
+  }
+
   async switchToLocalMode(): Promise<RemotePaneConnectionState> {
+    this.check = null;
     this.connectionGeneration += 1;
     await this.disconnectActiveClient();
     this.setConnectionState(createDefaultRemotePaneConnectionState());
@@ -981,6 +1142,7 @@ export class RemotePaneClientController extends EventEmitter {
       },
       onConnectionStateChange: (status, errorMessage, metadata) => {
         if (this.activeClient !== client) return;
+        this.advanceCheck(savedProfile, status, errorMessage, metadata?.hostVersion);
         if (status === 'error' || status === 'reconnecting') {
           this.pendingRestore?.reject(new Error('Connection interrupted'));
           this.pendingRestore = null;
@@ -1195,8 +1357,155 @@ export class RemotePaneClientController extends EventEmitter {
 
   private setConnectionState(nextState: RemotePaneConnectionState): void {
     this.state = nextState;
+    if (nextState.activeProfileId && nextState.lastSeenAt) {
+      const sighting = this.sightings.get(nextState.activeProfileId);
+      this.sightings.set(nextState.activeProfileId, { at: nextState.lastSeenAt, version: sighting?.version ?? null });
+    }
+    this.publishState();
+  }
+
+  private publishState(): void {
     this.emit('state-changed', this.getConnectionState());
     this.rendererEventSink.send('remote-daemon:connection-state-changed', this.getConnectionState());
+  }
+
+  /**
+   * Starts a checklist for `profile` and runs its probe stages. Throws when one fails, naming the
+   * stage, so the connect stops before it touches the current connection.
+   */
+  private async runProbes(profile: RemotePaneConnectionProfile): Promise<void> {
+    const id = ++this.checkSequence;
+    const sighting = this.sightings.get(profile.id);
+    this.checkProfile = profile;
+    this.hostFixes = new Map();
+    this.check = {
+      id,
+      profileId: profile.id,
+      hostLabel: profile.label,
+      route: routeOf(profile),
+      address: addressOf(profile),
+      outcome: 'running',
+      rows: initialRows(profile),
+      lastConnectedAt: sighting?.at ?? null,
+      hostVersion: sighting?.version ?? null,
+    };
+    this.publishState();
+    const outcome = await probeHost(profile, new RemotePaneClient(profile), this.checkDependencies, (rows) => this.updateCheck(id, { rows }));
+    if (this.check?.id !== id) {
+      throw new PaneError('ERR_REMOTE_CHECK_SUPERSEDED', `The connection to ${profile.label} was replaced by a newer one.`, 'Wait for the newer connection to finish.');
+    }
+    this.hostFixes = outcome.hostFixes;
+    if (outcome.hostVersion) this.recordHostVersion(profile.id, outcome.hostVersion);
+    const failed = outcome.rows.find((row) => row.status === 'failed');
+    if (failed && outcome.failedCheck) {
+      this.updateCheck(id, { rows: outcome.rows, address: outcome.address, outcome: 'failed' });
+      this.trackCheckFailure(outcome.failedCheck);
+      throw new PaneError('ERR_REMOTE_CHECK_FAILED', `${failed.label}.`, failed.detail ?? 'Use the fix on the connection checklist, then retry.');
+    }
+    this.updateCheck(id, {
+      address: outcome.address,
+      rows: outcome.rows.map((row) => (row.stage === 'version' ? { ...row, status: 'running' } : row)),
+    });
+  }
+
+  /**
+   * Moves the active checklist along with the real connect: the ready event fills the version row
+   * and a restored workspace closes it. A connection that fails with no checklist running gets one,
+   * so the card names the failed stage.
+   */
+  private advanceCheck(
+    profile: RemotePaneConnectionProfile,
+    status: RemotePaneConnectionStatus,
+    errorMessage: string | null | undefined,
+    hostVersion: string | undefined,
+  ): void {
+    const check = this.check;
+    // A codeless host already described its version to the probe; older hosts omit it on ready.
+    const version = hostVersion ?? (profile.tailnetMachine && check?.profileId === profile.id ? check.hostVersion : null);
+    if (status === 'restoring') this.recordHostVersion(profile.id, version);
+    if (!check || check.profileId !== profile.id || check.outcome !== 'running') {
+      if (status === 'error') void this.diagnoseFailure(profile, errorMessage);
+      return;
+    }
+    const id = check.id;
+    if (status === 'restoring') {
+      this.versionRowReady = this.resolveVersionRow(id, profile, version);
+      return;
+    }
+    if (status === 'connected') {
+      void this.versionRowReady.then(() => {
+        const current = this.check;
+        if (current?.id !== id || current.outcome !== 'running') return;
+        const rows = this.withRow({ stage: 'workspace', status: 'passed', label: 'Workspace loaded' });
+        this.updateCheck(id, { rows, outcome: rows.some((row) => row.status === 'warning') ? 'warning' : 'passed' });
+      });
+      return;
+    }
+    // A reconnecting state with no error is a new attempt starting, not a failure.
+    if (status === 'error' || (status === 'reconnecting' && errorMessage)) {
+      this.updateCheck(id, {
+        rows: this.withRow({ stage: 'workspace', status: 'failed', label: 'Workspace did not load', detail: errorMessage ?? 'The host stopped answering.' }),
+        outcome: 'failed',
+      });
+      this.trackCheckFailure('workspace_restore');
+    }
+  }
+
+  private async resolveVersionRow(id: number, profile: RemotePaneConnectionProfile, hostVersion: string | null): Promise<void> {
+    // Without this app's version there is nothing to compare; the row passes.
+    const { row, target } = this.appVersion
+      ? await versionRow(profile, hostVersion, this.appVersion, this.checkDependencies)
+      : { row: { stage: 'version' as const, status: 'passed' as const, label: 'Versions match', metric: hostVersion ?? undefined }, target: null };
+    if (this.check?.id !== id) return;
+    if (target) this.hostFixes.set('version', target);
+    this.updateCheck(id, { rows: this.withRow(row) });
+    if (this.check?.id === id) this.updateCheck(id, { rows: this.withRow({ stage: 'workspace', status: 'running', label: 'Workspace loaded' }) });
+  }
+
+  /** Runs the probe stages once after a connection fails on its own, to name the stage. */
+  private async diagnoseFailure(profile: RemotePaneConnectionProfile, errorMessage: string | null | undefined): Promise<void> {
+    try {
+      await this.runProbes(profile);
+    } catch {
+      return;
+    }
+    const id = this.check?.id;
+    if (id === undefined) return;
+    this.updateCheck(id, {
+      rows: this.withRow({ stage: 'workspace', status: 'failed', label: 'Workspace did not load', detail: errorMessage ?? 'The host stopped answering.' })
+        .map((row) => (row.stage === 'version' ? { ...row, status: 'waiting' } : row)),
+      outcome: 'failed',
+    });
+    this.trackCheckFailure('workspace_restore');
+  }
+
+  private recordHostVersion(profileId: string, version: string | null): void {
+    const sighting = this.sightings.get(profileId);
+    this.sightings.set(profileId, { at: sighting?.at ?? null, version });
+    if (this.check?.profileId === profileId && version) this.check = { ...this.check, hostVersion: version };
+  }
+
+  /** The current check's rows with `row` in its stage's place. */
+  private withRow(row: RemoteConnectionCheckRow): RemoteConnectionCheckRow[] {
+    return (this.check?.rows ?? []).map((candidate) => (candidate.stage === row.stage ? row : candidate));
+  }
+
+  private updateCheck(id: number, update: Partial<Pick<RemoteConnectionCheck, 'rows' | 'outcome' | 'address'>>): void {
+    if (this.check?.id !== id) return;
+    this.check = { ...this.check, ...update };
+    this.publishState();
+  }
+
+  private trackCheckFailure(failedCheck: RemotePaneFailedCheck): void {
+    trackRemotePaneEvent(this.analyticsManager, 'remote_pane_client_connection_failed', {
+      surface: 'desktop',
+      role: 'client',
+      flow: 'connect',
+      result: 'failed',
+      failure_stage: 'connection_check',
+      failed_check: failedCheck,
+      client_kind: 'desktop',
+    });
   }
 }
 

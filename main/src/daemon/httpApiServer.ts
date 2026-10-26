@@ -96,6 +96,8 @@ interface RemoteReadyEventPayload {
   replay: 'none';
   resync: 'refetch-state-after-reconnect';
   timestamp: string;
+  /** This host's Pane version, for the client's version check. Hosts before it omit it. */
+  paneVersion?: string;
 }
 
 interface RemoteHealthPayload {
@@ -196,6 +198,8 @@ interface PaneRemoteHttpApiServerOptions {
   workspace?: WorkspaceIdentityOptions;
   /** Whether a port is in the host's forwarded list; port streams reach only those. Without it, none. */
   isForwardedPort?(port: number): boolean;
+  /** Sent to signed-in clients on the ready event. */
+  paneVersion?: string;
 }
 
 interface WorkspaceIdentityOptions {
@@ -245,6 +249,7 @@ export class PaneRemoteHttpApiServer {
   private readonly analyticsSink?: RemotePaneAnalyticsSink;
   private readonly workspace?: WorkspaceIdentityOptions;
   private readonly isForwardedPort: (port: number) => boolean;
+  private readonly paneVersion?: string;
 
   constructor(
     private readonly commandRegistry: PaneCommandRegistry,
@@ -255,6 +260,7 @@ export class PaneRemoteHttpApiServer {
     this.analyticsSink = options.analyticsSink;
     this.workspace = options.workspace;
     this.isForwardedPort = options.isForwardedPort ?? (() => false);
+    this.paneVersion = options.paneVersion;
     this.daemonEventSink = createFanoutEventSink([
       {
         send: (channel, ...args) => {
@@ -811,11 +817,13 @@ export class PaneRemoteHttpApiServer {
     response.flushHeaders();
     const stream = compress ? createSseGzipStream(response) : response;
     stream.write('retry: 1000\n\n');
-    writeSseEvent(stream, 'ready', {
+    const ready: RemoteReadyEventPayload = {
       replay: 'none',
       resync: 'refetch-state-after-reconnect',
       timestamp: new Date().toISOString(),
-    } satisfies RemoteReadyEventPayload);
+    };
+    if (this.paneVersion) ready.paneVersion = this.paneVersion;
+    writeSseEvent(stream, 'ready', ready);
 
     const clientConnectionId = String(this.nextClientConnectionId++);
     const connectedAt = new Date().toISOString();

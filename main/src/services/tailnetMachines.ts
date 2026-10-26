@@ -222,6 +222,32 @@ export async function resolveTailnetMachineUrl(
   return findMachineUrl(tailnet, machine.name);
 }
 
+export type TailnetMachineLookup =
+  | { kind: 'tailscale-missing'; reason: string }
+  | { kind: 'tailscale-down'; reason: string; fix: string }
+  | { kind: 'not-found'; reason: string }
+  | { kind: 'found'; peer: { dnsName: string; ip: string | undefined; online: boolean; os: TailnetMachine['os'] } };
+
+/** Where a saved machine stands on this computer's tailnet, for the connection checklist. */
+export async function lookupTailnetMachine(
+  machine: { name: string; domain: string },
+  readStatus: () => Promise<string | null>,
+): Promise<TailnetMachineLookup> {
+  const output = await readStatus();
+  const tailnet = readTailnetPeers(output);
+  if (!tailnet.ok) {
+    return output === null
+      ? { kind: 'tailscale-missing', reason: tailnet.reason }
+      : { kind: 'tailscale-down', reason: tailnet.reason, fix: tailnet.fix };
+  }
+  if (tailnet.domain.toLowerCase() !== machine.domain.toLowerCase()) {
+    return { kind: 'not-found', reason: `${machine.name} was saved on another tailnet (${machine.domain}). This computer is now on ${tailnet.tailnet}; connect again from Your computers.` };
+  }
+  const peer = tailnet.peers.find((candidate) => candidate.name.toLowerCase() === machine.name.toLowerCase());
+  if (!peer) return { kind: 'not-found', reason: `${machine.name} is not on your current tailnet (${tailnet.tailnet}).` };
+  return { kind: 'found', peer: { dnsName: peer.dnsName, ip: peer.ip, online: peer.online, os: peer.os } };
+}
+
 /** The address of a machine by name on the current tailnet, and that tailnet's domain. */
 export async function locateTailnetMachine(name: string, readStatus: () => Promise<string | null>): Promise<{ url: string; domain: string }> {
   const tailnet = readTailnetPeers(await readStatus());

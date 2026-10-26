@@ -409,6 +409,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     mode === 'desktop' && path.resolve(getAppDirectory()) === path.join(os.homedir(), '.pane'),
     runRemoteSetupCommand,
     isForwardedPort,
+    options.app.getVersion(),
   );
   registerWorkspaceCommands(commandRegistry, workspaceHost, configManager, options.app.getVersion());
   const phonePreviews = new PhonePreviewHost({
@@ -432,7 +433,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   commandRegistry.register('ports:phone-address', async (port: number) => { await phonePreviews.request(port); });
 
   let paneDaemonServer: PaneDaemonServer | null = null;
-  const remoteTransportController = new PaneRemoteTransportController(commandRegistry, configManager, analyticsManager, isForwardedPort);
+  const remoteTransportController = new PaneRemoteTransportController(commandRegistry, configManager, analyticsManager, isForwardedPort, options.app.getVersion());
   const remoteHostTailnetMonitor = new RemoteHostTailnetMonitor(configManager);
   try {
     paneDaemonServer = new PaneDaemonServer(commandRegistry, getAppDirectory());
