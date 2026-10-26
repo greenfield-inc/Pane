@@ -27,6 +27,7 @@ for (const runtime of ['npm', 'pip']) {
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-telemetry-'));
       process.env.PANE_DIR = dir;
       delete process.env.CI;
+      delete process.env.GITHUB_ACTIONS;
       delete process.env.RUNPANE_TELEMETRY_DISABLED;
       const events = [];
       global.fetch = async (_, options) => { events.push(JSON.parse(options.body)); return {}; };
@@ -66,6 +67,7 @@ def pin(parsed, pinned):
 local.run_panes_pin = pin
 from runpane.cli import main
 os.environ.pop('CI', None)
+os.environ.pop('GITHUB_ACTIONS', None)
 os.environ.pop('RUNPANE_TELEMETRY_DISABLED', None)
 with tempfile.TemporaryDirectory(prefix='pane-telemetry-') as directory:
     os.environ['PANE_DIR'] = directory
