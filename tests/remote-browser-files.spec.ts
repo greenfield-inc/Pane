@@ -87,7 +87,16 @@ test('remote browser loads host HTML, assets and linked pages through the remote
     // A refused stylesheet never shows in the page, so the tab names it under the address bar.
     await guest(`location.href = new URL("parent-asset.html", ${JSON.stringify(entryUrl)}).href`);
     await expect.poll(() => guest('document.body.innerText')).toContain('Page with a parent asset');
+    const refusedNotice = page.getByRole('button', { name: "1 file wasn't loaded (outside this page's folder)" });
+    await expect(refusedNotice).toBeVisible();
+    await expect(page.getByText(/private\.txt because it is outside this page's folder/)).toHaveCount(0);
+    await page.screenshot({ path: testInfo.outputPath('refused-file-collapsed.png') });
+    await refusedNotice.click();
     await expect(page.getByText(/private\.txt because it is outside this page's folder/)).toBeVisible();
+    await expect(page.getByText(/^Next: Move the file/)).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath('refused-file-expanded.png') });
+    await page.getByRole('button', { name: 'Dismiss' }).click();
+    await expect(refusedNotice).toHaveCount(0);
     await page.evaluate(() => window.electronAPI.invoke('preview-test:disconnect'));
     await page.getByTitle('Refresh', { exact: true }).click();
     await expect.poll(() => guest('document.body.innerText')).toContain('The connected host has changed');
