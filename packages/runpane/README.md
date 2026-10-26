@@ -123,6 +123,8 @@ not count as updating either package.
 Run `runpane update --dry-run --json` to inspect the machine, executable, CLI
 owner, and supervisor capability. App updates require a running host supporting
 the continuity protocol and a release with a matching `continuity.json` manifest.
+When Pane is not running on this machine, `runpane update` installs the
+requested release (latest by default) instead, like `runpane install`.
 Both the running app and the requested target must support this protocol.
 Existing 2.4.182 releases do not provide this upgrade path; install a
 continuity-capable release manually first. See the
