@@ -38,7 +38,7 @@ interface DetailPanelProps {
   isMainRepo?: boolean;
 }
 
-const sidebarButtonClass = 'w-full !h-7 justify-start !rounded-md !px-2 !py-0 !text-[12px] !font-medium !text-text-secondary hover:!bg-surface-hover hover:!text-text-primary focus-visible:!ring-inset focus-visible:!ring-offset-0';
+const sidebarButtonClass = 'w-full !h-7 justify-start !rounded-md !px-2 !py-0 !text-[12px] !font-medium !text-text-secondary enabled:hover:!bg-surface-hover enabled:hover:!text-text-primary focus-visible:!ring-inset focus-visible:!ring-offset-0';
 const remoteIdeTooltip = 'Open in IDE is only available in local mode. Switch this client back to the local runtime to use your desktop IDE.';
 
 function SectionHeader({ children }: { children: React.ReactNode }) {
@@ -265,7 +265,7 @@ export function DetailPanel({
                       </Button>
                     )}
                     items={ideItems}
-                    footer={onConfigureIDE ? <DropdownMenuItem icon={Settings} label="Configure..." onClick={onConfigureIDE} /> : undefined}
+                    footer={onConfigureIDE ? <DropdownMenuItem icon={Settings} label="Configure…" onClick={onConfigureIDE} /> : undefined}
                     position="auto"
                     width="sm"
                   />

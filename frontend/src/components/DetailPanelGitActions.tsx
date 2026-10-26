@@ -29,7 +29,7 @@ type ActionRow =
   | { type: 'single'; action: GitBranchAction }
   | { type: 'pair'; left: GitBranchAction; right: GitBranchAction };
 
-const sidebarButtonClass = 'w-full !h-7 justify-start !rounded-md !px-2 !py-0 !text-[12px] !font-medium !text-text-secondary hover:!bg-surface-hover hover:!text-text-primary focus-visible:!ring-inset focus-visible:!ring-offset-0';
+const sidebarButtonClass = 'w-full !h-7 justify-start !rounded-md !px-2 !py-0 !text-[12px] !font-medium !text-text-secondary enabled:hover:!bg-surface-hover enabled:hover:!text-text-primary focus-visible:!ring-inset focus-visible:!ring-offset-0';
 
 function actionTooltip(action: GitBranchAction, disabled: boolean) {
   const message = disabled ? action.disabledReason ?? action.description : action.description;
@@ -85,7 +85,7 @@ function ActionPair({
   const isRebaseMerge = left.id === 'rebase-from-main';
   const mainBranchName = (gitCommands?.comparisonBaseBranch || 'main').split('/').pop() || 'main';
   const mainBranch = mainBranchName.length > 12 ? `${mainBranchName.slice(0, 12)}…` : mainBranchName;
-  const pairButtonClass = 'flex-1 !min-h-7 justify-start !rounded-md !px-2 !py-0 !text-[12px] !font-medium !text-text-secondary hover:!bg-surface-hover hover:!text-text-primary focus-visible:!ring-inset focus-visible:!ring-offset-0';
+  const pairButtonClass = 'flex-1 overflow-hidden !min-h-7 justify-start !rounded-md !px-2 !py-0 !text-[12px] !font-medium !text-text-secondary enabled:hover:!bg-surface-hover enabled:hover:!text-text-primary focus-visible:!ring-inset focus-visible:!ring-offset-0';
   const pairIconClass = 'mr-1.5 h-3.5 w-3.5 flex-shrink-0';
   const branchName = gitCommands?.currentBranch?.trim() || 'branch';
   const shortBranch = branchName.length > 6 ? `${branchName.slice(0, 6)}…` : branchName;
@@ -96,18 +96,18 @@ function ActionPair({
         <Button variant="ghost" size="sm" className={pairButtonClass} onClick={left.onClick} disabled={left.disabled || isMerging}>
           <left.icon className={pairIconClass} />
           {isRebaseMerge ? (
-            <span className="flex flex-col items-start leading-tight">
-              <span>Rebase</span>
-              <span className="text-[10px] text-text-tertiary">from {mainBranch}</span>
+            <span className="flex min-w-0 flex-col items-start leading-tight">
+              <span className="max-w-full truncate">Rebase</span>
+              <span className="max-w-full truncate text-[10px] text-text-tertiary">from {mainBranch}</span>
             </span>
           ) : left.id === 'fetch' && fetchedAgo ? (
             <span className="flex flex-col items-start leading-tight min-w-0">
-              <span>{left.label}</span>
-              <span className="text-[10px] text-text-tertiary">{fetchedAgo}</span>
+              <span className="max-w-full truncate">{left.label}</span>
+              <span className="max-w-full truncate text-[10px] text-text-tertiary">{fetchedAgo}</span>
             </span>
           ) : (
             <>
-              <span>{left.label}</span>
+              <span className="max-w-full truncate">{left.label}</span>
               {left.id === 'pull' && !!gitStatus?.behind && (
                 <span className="text-[10px] text-status-warning font-medium ml-1">&darr;{gitStatus.behind}</span>
               )}
@@ -119,13 +119,13 @@ function ActionPair({
         <Button variant="ghost" size="sm" className={pairButtonClass} onClick={right.onClick} disabled={right.disabled || isMerging}>
           <right.icon className={pairIconClass} />
           {isRebaseMerge ? (
-            <span className="flex flex-col items-start leading-tight">
-              <span>Merge</span>
-              <span className="text-[10px] text-text-tertiary">to {mainBranch}</span>
+            <span className="flex min-w-0 flex-col items-start leading-tight">
+              <span className="max-w-full truncate">Merge</span>
+              <span className="max-w-full truncate text-[10px] text-text-tertiary">to {mainBranch}</span>
             </span>
           ) : right.id === 'commit' ? (
             <span className="flex flex-col items-start leading-tight min-w-0">
-              <span>{right.label}</span>
+              <span className="max-w-full truncate">{right.label}</span>
               <span className="text-[10px] text-text-tertiary truncate max-w-full">
                 {gitStatus?.filesChanged
                   ? `${gitStatus.filesChanged} ${gitStatus.filesChanged === 1 ? 'file' : 'files'}`
@@ -134,7 +134,7 @@ function ActionPair({
             </span>
           ) : (
             <>
-              <span>{right.label}</span>
+              <span className="max-w-full truncate">{right.label}</span>
               {right.id === 'push' && !!gitStatus?.ahead && (
                 <span className="text-[10px] text-status-success font-medium ml-1">&uarr;{gitStatus.ahead}</span>
               )}
@@ -175,7 +175,7 @@ export function DetailPanelGitActions({ actions = [], isMerging, gitCommands, gi
               {row.action.id === 'fetch' && fetchedAgo ? (
                 <span className="flex flex-col items-start leading-tight min-w-0">
                   <span>{row.action.label}</span>
-                  <span className="text-[10px] text-text-tertiary">{fetchedAgo}</span>
+                  <span className="max-w-full truncate text-[10px] text-text-tertiary">{fetchedAgo}</span>
                 </span>
               ) : <span className="truncate">{row.action.label}</span>}
             </Button>

@@ -1,5 +1,5 @@
 import React, { useCallback, memo, useState, useRef, useEffect, useMemo } from 'react';
-import { Plus, X, Terminal, GitBranch, FileCode, FileDiff, FileText, BarChart3, PanelRight, FolderTree, TerminalSquare, Play, Globe, Pencil } from 'lucide-react';
+import { Plus, X, Terminal, PanelRight, FolderTree, TerminalSquare, Play, Globe, Pencil } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { cn } from '../../utils/cn';
 import { useHotkey } from '../../hooks/useHotkey';
@@ -11,11 +11,11 @@ import { formatKeyDisplay } from '../../utils/hotkeyUtils';
 import { useHotkeyStore } from '../../stores/hotkeyStore';
 import { Tooltip } from '../ui/Tooltip';
 import { useTitleBarSlotStore } from '../../stores/titleBarSlotStore';
-import { editorPanelState } from '../../services/openFileInEditor';
 import { Kbd } from '../ui/Kbd';
-import { CLI_BRAND_ICONS, getCliBrandIcon } from '../ui/brandIconRegistry';
+import { getCliBrandIcon } from '../ui/brandIconRegistry';
 import { visibleAgentPresets } from '../../utils/agentPresets';
 import { PanelTabStrip } from './PanelTabStrip';
+import { getPanelIcon } from './panelIcon';
 import { PromoteChatButton } from './PromoteChatButton';
 import { CustomCommandForm } from './CustomCommandForm';
 import type { WorktreeFileSyncEntry } from '../../../../shared/types/worktreeFileSync';
@@ -65,37 +65,6 @@ Analyze this project's actual framework and structure first, then create the com
 IMPORTANT: After creating the script, TEST THE RESTART PATH — run 'node scripts/pane-run-script.js', then kill it ungracefully (Ctrl+C or kill the terminal), then run it again. It must reclaim the same port without EADDRINUSE or lock file errors. A single happy-path run proves nothing. Then commit and merge to main so all future worktrees have it.`;
 }
 
-function getPanelIcon(type: ToolPanelType, panel?: ToolPanel) {
-  // Check for brand-specific terminal panels by title
-  if (type === 'terminal' && panel) {
-    const title = panel.title.toLowerCase();
-    for (const [keyword, IconComponent] of Object.entries(CLI_BRAND_ICONS)) {
-      if (title.includes(keyword)) {
-        return <IconComponent className="w-4 h-4" />;
-      }
-    }
-  }
-  switch (type) {
-    case 'terminal':
-      return <Terminal className="w-4 h-4" />;
-    case 'diff':
-      return <GitBranch className="w-4 h-4" />;
-    case 'explorer':
-      return <FolderTree className="w-4 h-4" />;
-    case 'notes':
-      return <FileText className="w-4 h-4" />;
-    case 'editor':
-      return panel && editorPanelState(panel)?.diff ? <FileDiff className="w-4 h-4" /> : <FileText className="w-4 h-4" />;
-    case 'logs':
-      return <FileCode className="w-4 h-4" />;
-    case 'dashboard':
-      return <BarChart3 className="w-4 h-4" />;
-    case 'browser':
-      return <Globe className="w-4 h-4" />;
-    default:
-      return null;
-  }
-}
 
 export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
   panels,
@@ -568,7 +537,15 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
 
         {/* Add Panel dropdown button - outside overflow container so dropdown isn't clipped */}
         <div className="relative h-[var(--panel-tab-height)] flex items-center flex-shrink-0" ref={dropdownRef}>
-          <Tooltip content={hotkeyDisplay('open-add-tool') ? <Kbd>{hotkeyDisplay('open-add-tool')}</Kbd> : undefined} side="bottom">
+          <Tooltip
+            content={(
+              <span className="flex items-center gap-2">
+                <span>Add tool</span>
+                {hotkeyDisplay('open-add-tool') && <Kbd size="xs" variant="muted">{hotkeyDisplay('open-add-tool')}</Kbd>}
+              </span>
+            )}
+            side="bottom"
+          >
             <button
               ref={addToolButtonRef}
               type="button"
@@ -592,9 +569,13 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
           </Tooltip>
 
           {showDropdown && (() => {
-            // Track ref index for keyboard navigation
+            // Keyboard navigation follows render order, so each item takes its index while rendering.
             let refIndex = 0;
-            const menuItemClass = "flex items-center gap-2 w-full h-7 px-2.5 text-[13px] text-text-secondary hover:bg-surface-hover hover:text-text-primary focus:bg-surface-hover focus:text-text-primary focus:outline-none text-left";
+            const itemRef = () => {
+              const index = refIndex++;
+              return (el: HTMLButtonElement | null) => { dropdownItemsRef.current[index] = el; };
+            };
+            const menuItemClass = "flex items-center gap-2 w-full h-7 px-2.5 rounded text-[13px] text-text-secondary hover:bg-bg-hover hover:text-text-primary focus:bg-bg-hover focus:text-text-primary focus:outline-none text-left";
             const separator = <hr className="my-1 border-t border-border-primary" />;
             const otherPanelTypes = availablePanelTypes.filter(t => t !== 'terminal' && t !== 'explorer' && t !== 'browser');
             const groupLabel = (label: string) => (
@@ -605,16 +586,22 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
             return createPortal(
             <div
               ref={dropdownMenuRef}
-              className="min-w-[228px] py-1 bg-surface-primary border border-border-primary rounded-md shadow-dropdown z-50"
+              className="min-w-[228px] p-1 bg-surface-primary border border-border-primary rounded-lg shadow-dropdown z-50"
               style={dropdownStyle}
               role="menu"
               onKeyDown={handleDropdownKeyDown}
+              // Focus follows the pointer, so the hovered item is the only one lit.
+              onMouseMove={event => {
+                const item = event.target instanceof Element ? event.target.closest('button') : null;
+                const index = item ? dropdownItemsRef.current.indexOf(item) : -1;
+                if (index >= 0 && index !== focusedDropdownIndex) setFocusedDropdownIndex(index);
+              }}
             >
               {/* Terminal - plain terminal */}
               {availablePanelTypes.includes('terminal') && (
                 <button
                   type="button"
-                  ref={(el) => { dropdownItemsRef.current[refIndex++] = el; }}
+                  ref={itemRef()}
                   role="menuitem"
                   className={menuItemClass}
                   onClick={() => handleAddPanel('terminal')}
@@ -628,7 +615,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
               {availablePanelTypes.includes('explorer') && (
                 <button
                   type="button"
-                  ref={(el) => { dropdownItemsRef.current[refIndex++] = el; }}
+                  ref={itemRef()}
                   role="menuitem"
                   className={menuItemClass}
                   onClick={() => {
@@ -644,7 +631,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
               {availablePanelTypes.includes('browser') && (
                 <button
                   type="button"
-                  ref={(el) => { dropdownItemsRef.current[refIndex++] = el; }}
+                  ref={itemRef()}
                   role="menuitem"
                   className={menuItemClass}
                   onClick={() => handleAddPanel('browser')}
@@ -664,7 +651,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
                 <button
                   key={preset.id}
                   type="button"
-                  ref={(el) => { dropdownItemsRef.current[refIndex++] = el; }}
+                  ref={itemRef()}
                   role="menuitem"
                   className={menuItemClass}
                   onClick={() => handleAddPanel('terminal', {
@@ -680,7 +667,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
               {availablePanelTypes.includes('terminal') && separator}
               {/* Saved custom commands */}
               {availablePanelTypes.includes('terminal') && customCommands.map((cmd, index) => {
-                const currentRefIndex = refIndex++;
+                const itemRefCallback = itemRef();
                 const shortcutDisplay = hotkeyDisplay(`add-tool-custom-${index}`);
                 const displayName = truncateCustomCommandLabel(cmd.name);
                 return (
@@ -696,7 +683,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
                     side="bottom"
                   >
                     <button
-                      ref={(el) => { dropdownItemsRef.current[currentRefIndex] = el; }}
+                      ref={itemRefCallback}
                       type="button"
                       role="menuitem"
                       className={cn(menuItemClass, 'min-w-0 flex-1')}
@@ -775,7 +762,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
                 ) : (
                   <button
                     type="button"
-                    ref={(el) => { dropdownItemsRef.current[refIndex++] = el; }}
+                    ref={itemRef()}
                     role="menuitem"
                     className={menuItemClass}
                     onClick={() => { setEditingCustomIndex(null); setShowCustomInput(true); }}
@@ -788,17 +775,16 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
               {/* Other panel types (terminal, explorer and browser are listed above) */}
               {otherPanelTypes.length > 0 && separator}
               {otherPanelTypes.map((type) => {
-                const currentRefIndex = refIndex++;
                 return (
                 <button
                   key={type}
                   type="button"
-                  ref={(el) => { dropdownItemsRef.current[currentRefIndex] = el; }}
+                  ref={itemRef()}
                   role="menuitem"
                   className={menuItemClass}
                   onClick={() => handleAddPanel(type)}
                 >
-                  {getPanelIcon(type)}
+                  {getPanelIcon(type, undefined, 'w-3.5 h-3.5 flex-shrink-0')}
                   <span className="capitalize">{type}</span>
                 </button>
               );})}

@@ -460,7 +460,15 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
   const headerControls = (
     <>
       {onToggleCollapse && (
-        <Tooltip content={hotkeyDisplay('toggle-sidebar') ? <Kbd>{hotkeyDisplay('toggle-sidebar')}</Kbd> : undefined} side="bottom">
+        <Tooltip
+          content={(
+            <span className="flex items-center gap-2">
+              <span>{collapsed ? 'Expand sidebar' : 'Collapse sidebar'}</span>
+              {hotkeyDisplay('toggle-sidebar') && <Kbd size="xs" variant="muted">{hotkeyDisplay('toggle-sidebar')}</Kbd>}
+            </span>
+          )}
+          side="bottom"
+        >
           <IconButton
             type="button"
             onClick={onToggleCollapse}

@@ -505,7 +505,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
           onClick={handleBack}
           disabled={!canGoBack}
           className={cn(
-            'p-1 rounded hover:bg-surface-hover transition-colors',
+            'p-1 rounded enabled:hover:bg-surface-hover transition-colors',
             !canGoBack && 'opacity-30 cursor-not-allowed'
           )}
           title="Back"
@@ -516,7 +516,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
           onClick={handleForward}
           disabled={!canGoForward}
           className={cn(
-            'p-1 rounded hover:bg-surface-hover transition-colors',
+            'p-1 rounded enabled:hover:bg-surface-hover transition-colors',
             !canGoForward && 'opacity-30 cursor-not-allowed'
           )}
           title="Forward"
@@ -527,7 +527,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
           onClick={handleRefresh}
           disabled={!url}
           className={cn(
-            'p-1 rounded hover:bg-surface-hover transition-colors',
+            'p-1 rounded enabled:hover:bg-surface-hover transition-colors',
             !url && 'opacity-30 cursor-not-allowed'
           )}
           title="Refresh"
@@ -542,7 +542,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
           onClick={handleToggleDevTools}
           disabled={!url}
           className={cn(
-            'p-1 rounded hover:bg-surface-hover transition-colors',
+            'p-1 rounded enabled:hover:bg-surface-hover transition-colors',
             !url && 'opacity-30 cursor-not-allowed',
             devToolsOpen && 'bg-surface-hover text-text-primary'
           )}
@@ -582,7 +582,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
           onClick={handleCopyUrl}
           disabled={!url}
           className={cn(
-            'p-1 rounded hover:bg-surface-hover transition-colors',
+            'p-1 rounded enabled:hover:bg-surface-hover transition-colors',
             !url && 'opacity-30 cursor-not-allowed'
           )}
           title="Copy URL"

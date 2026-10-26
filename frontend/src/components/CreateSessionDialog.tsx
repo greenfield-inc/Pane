@@ -727,7 +727,7 @@ export function CreatePaneForm({
                               variant="ghost"
                               size="sm"
                               onClick={() => setShowSessionOptions(true)}
-                              className="text-text-tertiary hover:text-text-primary p-0.5"
+                              className="text-text-tertiary enabled:hover:text-text-primary p-0.5"
                               title="Create multiple panes"
                             >
                               <ChevronRight className="w-3.5 h-3.5" />
@@ -762,7 +762,7 @@ export function CreatePaneForm({
                               setSessionCount(1);
                               setFormData(prev => ({ ...prev, count: 1 }));
                             }}
-                            className="text-text-tertiary hover:text-text-primary p-0.5"
+                            className="text-text-tertiary enabled:hover:text-text-primary p-0.5"
                             title="Reset to 1"
                           >
                             <X className="w-3 h-3" />

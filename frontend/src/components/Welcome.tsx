@@ -39,7 +39,7 @@ export default function Welcome({ isOpen, onClose }: WelcomeProps) {
         <p className="text-sm text-text-tertiary mt-1">
           Run multiple agentic coding sessions in parallel, each in its own git worktree.
         </p>
-        <p className="text-xs text-text-quaternary mt-3">
+        <p className="text-xs text-text-muted mt-3">
           Make sure your CLI tool (Claude Code, Codex, etc.) is installed and authenticated.
         </p>
       </div>

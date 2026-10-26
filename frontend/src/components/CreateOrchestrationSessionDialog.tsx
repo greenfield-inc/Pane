@@ -234,7 +234,7 @@ export function OrchestrationSessionForm({ isOpen, onClose, onCreate, header, on
             />
           </div>
           <details className="space-y-3">
-            <summary className="cursor-default text-sm font-medium text-text-secondary">Launch command and behavior</summary>
+            <summary className="cursor-default text-sm font-medium text-text-secondary transition-colors hover:text-text-primary">Launch command and behavior</summary>
             <SessionLaunchFields
               resume={customResume}
               onResumeChange={value => { userEditedLaunch.current = true; dispatch({ type: 'update', values: { customResume: value } }); }}

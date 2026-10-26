@@ -145,7 +145,7 @@ export const GitErrorDialog: React.FC<GitErrorDialogProps> = ({
       <ModalFooter className="flex justify-between items-center">
         <div className="flex items-center space-x-3">
           {(errorDetails.isRebaseConflict || errorDetails.hasConflicts) && (
-            <Button onClick={onAbortAndUseClaude} className="bg-status-success hover:bg-status-success-hover">
+            <Button onClick={onAbortAndUseClaude} className="bg-status-success enabled:hover:bg-status-success-hover">
               <CheckCircle className="w-4 h-4 mr-2" />
               Use Claude Code to Resolve
             </Button>
