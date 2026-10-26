@@ -59,6 +59,7 @@ afterEach(async () => {
   else Reflect.deleteProperty(process.versions, 'electron');
   process.argv[1] = argv1;
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
   fs.rmSync(root, { recursive: true, force: true });
 });
@@ -110,9 +111,11 @@ describe('runpane update hands off to the in-app updater', () => {
     expect(printed()).toMatchObject({ phase: 'current', cliUpdated: false, next: 'Pane 2.4.202 is the latest release.' });
   });
 
-  it('tells the caller to open Pane when the desktop is not running', async () => {
+  it('falls through to reinstalling the release when the desktop is not running', async () => {
     runAsManagedCli(path.join(root, 'empty'));
-    await expect(update()).rejects.toMatchObject({ next: expect.stringContaining('Open Pane on this machine') });
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network disabled in test')));
+    await expect(update()).rejects.toThrow('network disabled in test');
+    expect(output.join('\n')).toContain('Pane is not running on this machine, so runpane installs the release');
   });
 
   it('points a desktop older than the handoff at its Settings Update button', async () => {
