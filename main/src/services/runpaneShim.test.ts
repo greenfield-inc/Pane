@@ -4,6 +4,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { getWSLShellSpawn, WSLPATH } from '../utils/wslUtils';
 import {
   addRunpaneToUserPath,
   installRunpaneShim,
@@ -80,17 +81,6 @@ describe('installRunpaneShim', () => {
     expect(noNode.stderr.trim()).toBe('runpane: Pane is missing and Node.js is not on PATH. Reinstall Pane from https://runpane.com, or install Node.js and run: npx --yes runpane@latest update');
   });
 
-  it.skipIf(process.platform === 'win32')('tells a WSL shell that found the Windows shim to install runpane in the distro', () => {
-    const state = installRunpaneShim({ appDirectory, bundledCliPath, execPath: 'C:\\Program Files\\Pane\\Pane.exe', platform: 'win32' })!;
-    const fakeBin = path.join(root, 'fake bin');
-    fs.mkdirSync(fakeBin);
-    fs.writeFileSync(path.join(fakeBin, 'uname'), '#!/bin/sh\necho 5.15.167.4-microsoft-standard-WSL2\n', { mode: 0o755 });
-    const result = spawnSync(path.join(state.binDir, 'runpane'), ['version'], { encoding: 'utf8', env: { PATH: `${fakeBin}:${path.dirname(process.execPath)}` } });
-    expect(result.status).toBe(1);
-    expect(result.stdout).toBe('');
-    expect(result.stderr.trim()).toBe('runpane: this runpane belongs to Pane on Windows and cannot run inside WSL. In this distro, run: npm i -g runpane (or use npx --yes runpane@latest)');
-  });
-
   it.runIf(process.platform === 'win32')('falls back to node on PATH when Pane.exe is gone (Windows)', () => {
     const state = installRunpaneShim({ appDirectory, bundledCliPath, execPath: path.join(root, 'moved', 'Pane.exe'), platform: 'win32' })!;
     const result = spawnSync('cmd.exe', ['/d', '/s', '/c', `""${state.shimPath}" update"`], {
@@ -136,6 +126,52 @@ describe('installRunpaneShim', () => {
     expect(cmd).toContain('set ELECTRON_RUN_AS_NODE=1');
     expect(cmd).toContain('"C:\\Program Files\\Pane\\Pane.exe"');
     expect(fs.existsSync(path.join(appDirectory, 'bin', 'runpane'))).toBe(true);
+  });
+});
+
+describe('WSL terminals', () => {
+  it.skipIf(process.platform === 'win32' || fs.existsSync('/proc/sys/fs/binfmt_misc/WSLInterop'))('explains when WSL interop is off', () => {
+    const state = installRunpaneShim({ appDirectory, bundledCliPath, execPath: 'C:\\Program Files\\Pane\\Pane.exe', platform: 'win32' });
+    const result = spawnSync(path.join(state!.binDir, 'runpane'), ['doctor'], { encoding: 'utf8', env: { PATH: '/usr/bin:/bin', WSL_DISTRO_NAME: 'Ubuntu-24.04' } });
+    expect(result.status).toBe(126);
+    expect(result.stderr).toContain('WSL interop is off in Ubuntu-24.04');
+    expect(result.stderr).toContain('Nothing was run');
+  });
+
+  /**
+   * Runs the WSL terminal launch in a real bash. Outside WSL there is no
+   * /bin/wslpath, so the launch script and rcfile call a fake one instead.
+   */
+  function launchWslTerminal(fakeWslpath: string, probe: string) {
+    const state = installRunpaneShim({ appDirectory, bundledCliPath, execPath: process.execPath, platform: 'win32' })!;
+    const home = path.join(root, 'home');
+    const globalBin = path.join(root, 'global bin');
+    for (const dir of [home, globalBin]) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(globalBin, 'runpane'), '#!/bin/sh\necho global\n', { mode: 0o755 });
+    fs.writeFileSync(path.join(home, '.profile'), `export PATH='${globalBin}':"$PATH"\nexport USER_PROFILE_RAN=yes\n`);
+    const wslpath = path.join(root, 'wslpath');
+    fs.writeFileSync(wslpath, fakeWslpath, { mode: 0o755 });
+    const rcFile = path.join(root, 'wsl-rcfile');
+    fs.writeFileSync(rcFile, fs.readFileSync(state.wslBashRcFile!, 'utf8').replaceAll(WSLPATH, wslpath));
+    const script = getWSLShellSpawn('Ubuntu', home, rcFile).args.at(-1)!.replaceAll(WSLPATH, wslpath);
+    const env = { HOME: home, PATH: '/usr/bin:/bin', TERM: 'dumb' };
+    const result = spawnSync('/bin/bash', ['-c', script], { input: probe, encoding: 'utf8', env, timeout: 15_000 });
+    return `${result.stdout}${result.stderr}`;
+  }
+
+  it.skipIf(process.platform === 'win32')('keeps Pane runpane first after the login files edit PATH', () => {
+    // Paths are already POSIX here, so wslpath -u returns its argument.
+    const output = launchWslTerminal('#!/bin/sh\nprintf %s "$2"\n',
+      'echo "RESOLVED=$(command -v runpane) BIN=$PANE_RUNPANE_BIN PROFILE=$USER_PROFILE_RAN"; runpane probe; exit\n');
+    expect(output).toContain(`RESOLVED=${appDirectory}/bin/runpane BIN=${appDirectory}/bin/runpane PROFILE=yes`);
+    expect(output).toContain(`pane-runpane ${appDirectory} probe`);
+  });
+
+  it.skipIf(process.platform === 'win32')('starts a login shell when wslpath fails', () => {
+    const output = launchWslTerminal('#!/bin/sh\nexit 1\n',
+      'shopt -q login_shell && echo LOGIN=yes; echo "RESOLVED=$(command -v runpane) PROFILE=$USER_PROFILE_RAN"; exit\n');
+    expect(output).toContain('LOGIN=yes');
+    expect(output).toContain(`RESOLVED=${path.join(root, 'global bin')}/runpane PROFILE=yes`);
   });
 });
 

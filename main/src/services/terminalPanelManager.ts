@@ -1,5 +1,5 @@
 import { agentChatManager, type AgentChatManager } from './agentChat/agentChatManager';
-import { withRunpaneOnPath } from './runpaneShim';
+import { getRunpaneShimState, withRunpaneOnPath } from './runpaneShim';
 import { sessionRuntimePath, sessionWSLContext } from './sessionRuntime';
 import { escapeForBash, windowsPathToWSLMount } from '../utils/wslUtils';
 import { validateCustomCommandResume, customResumeAgentType, effectiveCustomResume } from '../../../shared/types/customCommandResume';
@@ -1713,7 +1713,7 @@ export class TerminalPanelManager extends EventEmitter {
     let spawnCwd: string | undefined = cwd;
 
     if (wslContext && process.platform === 'win32') {
-      const wslShell = getWSLShellSpawn(wslContext.distribution, cwd);
+      const wslShell = getWSLShellSpawn(wslContext.distribution, cwd, getRunpaneShimState()?.wslBashRcFile);
       shellPath = wslShell.path;
       shellArgs = wslShell.args;
       if (sessionRuntimeRc) {
@@ -1855,7 +1855,7 @@ export class TerminalPanelManager extends EventEmitter {
       ? { ...baseSpawnEnv, PANE_ORCHESTRATION_SESSION_ID: panelCustomState.orchestrationSessionId, GIT_CEILING_DIRECTORIES: sessionRuntimePath(sessionGitCeiling(), isWSL ? { runtime: 'wsl', wslDistribution: wslContext?.distribution } : undefined) }
       : baseSpawnEnv;
     // Pane's own runpane goes first on PATH (see runpaneShim.ts). WSL shells
-    // cannot run the Windows Electron binary, so they keep their own PATH.
+    // get it from the rcfile getWSLShellSpawn passes, as a Linux path.
     const launch = isWSL ? { args: shellArgs, env: roleEnv } : withRunpaneOnPath({ name: shellType, args: shellArgs }, roleEnv);
     shellArgs = launch.args;
     const spawnEnv = launch.env;

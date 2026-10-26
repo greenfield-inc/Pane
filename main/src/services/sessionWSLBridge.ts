@@ -1,5 +1,5 @@
 import path from 'path';
-import { escapeForBash } from '../utils/wslUtils';
+import { escapeForBash, RUNPANE_PATH_FLAGS, RUNPANE_WSL_PATH_FUNCTIONS, WSLPATH } from '../utils/wslUtils';
 import { sessionRuntimePath } from './sessionRuntime';
 import type { OrchestrationSessionRecord } from '../../../shared/types/orchestrationSession';
 
@@ -7,7 +7,11 @@ function quotePowerShell(value: string): string {
   return `'${value.replaceAll("'", "''")}'`;
 }
 
-/** Run the bundled Windows CLI, which can open this instance's named pipe. */
+/**
+ * Run the bundled Windows CLI, which can open this instance's named pipe.
+ * WSL Session terminals use this PowerShell bridge, pinned to their Session;
+ * other WSL terminals use the interop branch of runpaneShim.ts's POSIX shim.
+ */
 export function sessionWSLBridge(appDirectory: string, record: OrchestrationSessionRecord, launcherPath: string, execPath = process.execPath): string {
   appDirectory = path.resolve(appDirectory);
   launcherPath = path.resolve(launcherPath);
@@ -25,12 +29,7 @@ export function sessionWSLBridge(appDirectory: string, record: OrchestrationSess
     '#!/bin/bash',
     '# Pane-managed WSL Session bridge. Arguments cross as PowerShell literals.',
     'set -euo pipefail',
-    'pane_windows_path() {',
-    String.raw`  case "$1" in -|[A-Za-z]:*|\\*) printf %s "$1" ;; *) wslpath -aw "$1" ;; esac`,
-    '}',
-    'pane_repo_selector() {',
-    '  case "$1" in /*|./*|../*|.|..) pane_windows_path "$1" ;; *) printf %s "$1" ;; esac',
-    '}',
+    ...RUNPANE_WSL_PATH_FUNCTIONS,
     `panel_id=\${PANE_PANEL_ID:-${escapeForBash(record.panelIds[record.agent])}}`,
     "panel_id=${panel_id//\\'/\\'\\'}",
     `command=${escapeForBash(`${command}; $env:PANE_PANEL_ID = `)}`,
@@ -54,7 +53,7 @@ export function sessionWSLBridge(appDirectory: string, record: OrchestrationSess
     '    case "$key" in',
     '      --repo)',
     '        if [[ "$arg" == *=* ]]; then arg="$key=$(pane_repo_selector "${arg#*=}")"; else repo_arg=true; fi ;;',
-    '      --pane-dir|--pane-path|--download-dir|--file|--path|--input-file|--initial-input-file|--prompt-file|--attach|--body-file|--summary-file|--from-json)',
+    `      ${RUNPANE_PATH_FLAGS.join('|')})`,
     '        if [[ "$arg" == *=* ]]; then arg="$key=$(pane_windows_path "${arg#*=}")"; else path_arg=true; fi ;;',
     '    esac',
     '  fi',
@@ -69,7 +68,7 @@ export function sessionWSLBridge(appDirectory: string, record: OrchestrationSess
     `script=$(mktemp ${escapeForBash(`${sessionRuntimePath(path.dirname(launcherPath), record)}/bridge-XXXXXX.ps1`)})`,
     'trap \'rm -f -- "$script" "$script.json"\' EXIT',
     String.raw`{ printf '\xff\xfe'; printf %s "$command" | iconv -f UTF-8 -t UTF-16LE; } > "$script"`,
-    `${escapeForBash(powershell)} -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$(wslpath -aw "$script")"`,
+    `${escapeForBash(powershell)} -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$(${WSLPATH} -aw "$script")"`,
     '',
   ].join('\n');
 }
