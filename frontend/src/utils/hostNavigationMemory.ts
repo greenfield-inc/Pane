@@ -232,6 +232,13 @@ export async function restoreHostNavigation(ownsRuntime: () => boolean = () => t
     return;
   }
 
+  if (memory.view === 'loops') {
+    await setActiveSession(null);
+    if (!ownsRuntime()) return;
+    navigation.navigateToLoops();
+    return;
+  }
+
   if (memory.view === 'ssh') {
     await setActiveSession(null);
     if (!ownsRuntime()) return;

@@ -37,6 +37,9 @@ import { PathResolver } from '../utils/pathResolver';
 import { agentTranscripts } from '../services/agentTranscript';
 import { claudeProjectDirName } from '../services/agentTranscript/claude';
 import { registerRunpaneHandlers } from './runpane';
+import { LoopManager } from '../services/loops/loopManager';
+import { LoopRepository } from '../services/loops/loopRepository';
+import { createLoopTestDb } from '../services/loops/loopTestDb';
 import type { TaskQueue } from '../services/taskQueue';
 import { PaneError } from '../../../shared/paneError';
 
@@ -9276,5 +9279,44 @@ describe('runpane IPC handlers', () => {
         .rejects.toThrow('exactly one of url or filePath');
       expect(panelManager.createPanel).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe('runpane loops', () => {
+  function loopServices(): AppServices {
+    const db = createLoopTestDb();
+    const services = createServices();
+    services.loopManager = new LoopManager({
+      repo: new LoopRepository(() => db),
+      startRun: async () => ({ sessionId: 'run-pane' }),
+      archiveRun: async () => true,
+      projectExists: id => id === 1,
+      prepareSession: async target => target,
+    });
+    return services;
+  }
+
+  it('saves, pauses and deletes a loop by request object', async () => {
+    const services = loopServices();
+    const registry = createRegistry(services);
+
+    await expect(registry.invoke('runpane:loops:save', [{ name: 'Nightly', projectId: 1, cron: '0 3 * * *', agent: 'claude', enabled: true }]))
+      .resolves.toMatchObject({ ok: true, loop: { name: 'Nightly', scheduleText: 'Daily at 3:00 AM' } });
+    const [loop] = services.loopManager?.list() ?? [];
+    if (!loop) throw new Error('runpane:loops:save stored no loop');
+
+    await expect(registry.invoke('runpane:loops:set-enabled', [{ loopId: loop.id, enabled: false }]))
+      .resolves.toMatchObject({ ok: true, loop: { id: loop.id, enabled: false, nextRunAtMs: null } });
+    await expect(registry.invoke('runpane:loops:delete', [{ loopId: loop.id }])).resolves.toEqual({ ok: true, deleted: loop.id });
+    await expect(registry.invoke('runpane:loops:list')).resolves.toEqual({ ok: true, loops: [] });
+  });
+
+  it('rejects unknown loops, bad requests, and a Pane without loops with coded errors', async () => {
+    const registry = createRegistry(loopServices());
+    await expect(registry.invoke('runpane:loops:run-now', [{ loopId: 'loop-9' }])).rejects.toMatchObject({ code: 'ERR_LOOP_NOT_FOUND' });
+    await expect(registry.invoke('runpane:loops:run-now', ['loop-9'])).rejects.toThrow('expected object');
+    await expect(registry.invoke('runpane:loops:preview', [{ cron: 'not cron' }])).resolves.toMatchObject({ ok: false });
+
+    await expect(createRegistry().invoke('runpane:loops:list')).rejects.toMatchObject({ code: 'ERR_LOOPS_UNAVAILABLE' });
   });
 });

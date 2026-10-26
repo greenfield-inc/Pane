@@ -16,6 +16,8 @@ import { registerPromptHandlers } from './prompt';
 import { registerScriptHandlers } from './script';
 import { registerSessionHandlers } from './session';
 import { registerVoiceHandlers } from './voice';
+import { registerLoopHandlers } from './loops';
+import type { LoopManager } from '../services/loops/loopManager';
 import { registerUsageHandlers } from './usage';
 import { registerMissionControlHandlers } from './missionControl';
 import type { AppServices } from './types';
@@ -25,6 +27,14 @@ const USAGE_CHANNELS = [
   'usage:get-report',
   'usage:get-status',
   'usage:rescan',
+] as const;
+const LOOP_CHANNELS = [
+  'loops:list',
+  'loops:save',
+  'loops:delete',
+  'loops:set-enabled',
+  'loops:run-now',
+  'loops:preview',
 ] as const;
 const MISSION_CONTROL_CHANNELS = [
   'mission-control:list-agents',
@@ -399,6 +409,17 @@ describe('daemon registry IPC bindings', () => {
 
     expect(registry.listChannels()).toEqual([...USAGE_CHANNELS].sort());
     expect(ipcMain.boundChannels.sort()).toEqual([...USAGE_CHANNELS].sort());
+  });
+
+  it('binds daemon-owned loop channels through the shared registry', () => {
+    const registry = new PaneCommandRegistry();
+    const ipcMain = createIpcMainStub();
+
+    // SAFETY: Binding never calls the manager.
+    registerLoopHandlers(ipcMain, {} as LoopManager, registry);
+
+    expect(registry.listChannels()).toEqual([...LOOP_CHANNELS].sort());
+    expect(ipcMain.boundChannels.sort()).toEqual([...LOOP_CHANNELS].sort());
   });
 
   it('binds daemon-owned missionControl channels through the shared registry', () => {

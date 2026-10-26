@@ -60,6 +60,8 @@ import {
 import type { VersionInfo, VersionUpdateInfo } from './types/session';
 import type { AnalyticsIdentity, TerminalShortcut } from './types/config';
 import type { ResumableSession } from '../../shared/types/panels';
+import { useLoopsRefresh } from './stores/loopsStore';
+import { LoopDrawer } from './components/loops/LoopDrawer';
 import type { Project } from './types/project';
 import type { SettingsCategoryId, SettingsOpenRequest, SettingsTarget } from './types/settings';
 import type {
@@ -149,6 +151,7 @@ function App() {
 
 
   useIPCEvents();
+  useLoopsRefresh();
   const { showNotification } = useNotifications();
 
   // Subscribe to live statuses and reconcile the daemon baseline on attach/reconnect.
@@ -883,6 +886,7 @@ function App() {
         <Welcome isOpen={isWelcomeOpen} onClose={() => setIsWelcomeOpen(false)} />
         <AboutDialog isOpen={isAboutOpen} onClose={() => setIsAboutOpen(false)} onUpdate={handleUpdateRequest} />
         <FeedbackDialog isOpen={isFeedbackOpen} onClose={() => setIsFeedbackOpen(false)} />
+        <LoopDrawer />
         <UpdateDialog
           isOpen={isUpdateDialogOpen}
           onClose={() => setIsUpdateDialogOpen(false)}

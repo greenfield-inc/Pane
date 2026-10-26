@@ -26,6 +26,8 @@ export interface ModalProps {
    * this reason.
    */
   instant?: boolean;
+  /** `right` docks the dialog to the window's right edge at full height, as a side drawer. */
+  placement?: 'center' | 'right';
 }
 
 function canReceiveFocus(element: HTMLElement | null): element is HTMLElement {
@@ -47,6 +49,7 @@ export const Modal: React.FC<ModalProps> = ({
   initialFocusRef,
   restoreFocusOnClose = true,
   instant = false,
+  placement = 'center',
 }) => {
   const contentRef = useRef<HTMLDivElement>(null);
   const openerRef = useRef<HTMLElement | null>(null);
@@ -98,8 +101,10 @@ export const Modal: React.FC<ModalProps> = ({
           aria-modal="true"
           aria-describedby={undefined}
           className={cn(
-            'fixed inset-0 z-modal m-auto h-fit w-[calc(100%-2rem)] max-h-[calc(100vh-2rem)] outline-none',
-            sizeClasses[size],
+            'fixed z-modal outline-none',
+            placement === 'right'
+              ? 'inset-y-3 right-3 w-[min(28rem,calc(100%-1.5rem))]'
+              : cn('inset-0 m-auto h-fit w-[calc(100%-2rem)] max-h-[calc(100vh-2rem)]', sizeClasses[size]),
           )}
           onOpenAutoFocus={(event) => {
             const target = initialFocusRef?.current ?? null;
@@ -123,7 +128,8 @@ export const Modal: React.FC<ModalProps> = ({
           <PortalContainerProvider value={portalContainer}>
             <div
               className={cn(
-                'relative bg-surface-primary border border-border-primary rounded-modal shadow-modal w-full max-h-[calc(100vh-2rem)] overflow-hidden flex flex-col',
+                'relative bg-surface-primary border border-border-primary rounded-modal shadow-modal w-full overflow-hidden flex flex-col',
+                placement === 'right' ? 'h-full' : 'max-h-[calc(100vh-2rem)]',
                 !instant && 'animate-modal-enter',
                 className,
               )}

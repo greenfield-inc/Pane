@@ -193,7 +193,17 @@ import type {
   RunpaneLockOwnerInput,
   RunpaneLockReleaseRequest,
   RunpaneLockReleaseResult,
+  RunpaneLoopDeleteResult,
+  RunpaneLoopListResult,
+  RunpaneLoopPreviewRequest,
+  RunpaneLoopPreviewResult,
+  RunpaneLoopRequest,
+  RunpaneLoopResult,
+  RunpaneLoopSetEnabledRequest,
 } from '../../../shared/types/runpaneOrchestration';
+import type { LoopManager } from '../services/loops/loopManager';
+import { previewLoopSchedule } from '../services/loops/loopSchedule';
+import { loopInputSchema } from '../../../shared/types/loop';
 import type {
   OrchestrationAssociationInput,
   OrchestrationSessionCreateInput,
@@ -261,6 +271,12 @@ const RUNPANE_CHANNELS = [
   'runpane:workspace:state',
   'runpane:workspace:wait',
   'runpane:agents:doctor',
+  'runpane:loops:list',
+  'runpane:loops:save',
+  'runpane:loops:delete',
+  'runpane:loops:set-enabled',
+  'runpane:loops:run-now',
+  'runpane:loops:preview',
 ] as const;
 
 const AGENT_TEMPLATES = RUNPANE_CONTRACT.agentTemplates;
@@ -393,6 +409,9 @@ const inboxAckRequestSchema = boundary.object({
 const lockListRequestSchema = boundary.object({
   sessionId: boundary.optional(boundary.nonEmptyString),
 });
+const loopRequestSchema = boundary.object({ loopId: boundary.nonEmptyString });
+const loopSetEnabledRequestSchema = boundary.object({ loopId: boundary.nonEmptyString, enabled: boundary.boolean });
+const loopPreviewRequestSchema = boundary.object({ cron: boundary.string });
 
 export function registerRunpaneHandlers(
   _ipcMain: IpcMain,
@@ -1923,6 +1942,52 @@ export function registerRunpaneHandlers(
       environment: result.environment,
     }));
   });
+
+  commandRegistry.register('runpane:loops:list', async (): Promise<RunpaneLoopListResult> => {
+    return withRunpaneAction(services, 'loops:list', {}, () => ({ ok: true, loops: requireLoopManager(services).list() }),
+      result => ({ resultCount: result.loops.length }));
+  });
+
+  commandRegistry.register('runpane:loops:save', async (request: PaneCommandValue): Promise<RunpaneLoopResult> => {
+    return withRunpaneAction(services, 'loops:save', {}, async () =>
+      ({ ok: true, loop: await requireLoopManager(services).save(decodeBoundary(request, loopInputSchema)) }));
+  });
+
+  commandRegistry.register('runpane:loops:delete', async (request: PaneCommandValue): Promise<RunpaneLoopDeleteResult> => {
+    return withRunpaneAction(services, 'loops:delete', {}, () => {
+      const { loopId }: RunpaneLoopRequest = decodeBoundary(request, loopRequestSchema);
+      requireLoopManager(services).delete(loopId);
+      return { ok: true, deleted: loopId };
+    });
+  });
+
+  commandRegistry.register('runpane:loops:set-enabled', async (request: PaneCommandValue): Promise<RunpaneLoopResult> => {
+    return withRunpaneAction(services, 'loops:set-enabled', {}, () => {
+      const { loopId, enabled }: RunpaneLoopSetEnabledRequest = decodeBoundary(request, loopSetEnabledRequestSchema);
+      return { ok: true, loop: requireLoopManager(services).setEnabled(loopId, enabled) };
+    });
+  });
+
+  commandRegistry.register('runpane:loops:run-now', async (request: PaneCommandValue): Promise<RunpaneLoopResult> => {
+    return withRunpaneAction(services, 'loops:run-now', {}, async () => {
+      const { loopId }: RunpaneLoopRequest = decodeBoundary(request, loopRequestSchema);
+      return { ok: true, loop: await requireLoopManager(services).runNow(loopId) };
+    });
+  });
+
+  commandRegistry.register('runpane:loops:preview', async (request: PaneCommandValue): Promise<RunpaneLoopPreviewResult> => {
+    return withRunpaneAction(services, 'loops:preview', {}, () => {
+      const { cron }: RunpaneLoopPreviewRequest = decodeBoundary(request, loopPreviewRequestSchema);
+      return previewLoopSchedule(cron, Date.now());
+    });
+  });
+}
+
+function requireLoopManager(services: AppServices): LoopManager {
+  if (!services.loopManager) {
+    throw new PaneError('ERR_LOOPS_UNAVAILABLE', 'Loops are unavailable: this Pane has not started its loop scheduler. Nothing was changed.', 'Restart Pane, then run the command again.');
+  }
+  return services.loopManager;
 }
 
 function runpaneDaemonChannels(): readonly string[] {

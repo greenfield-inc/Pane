@@ -46,11 +46,8 @@ def run_daemon_action(parsed: Any, action: Dict[str, Any]) -> int:
             raise ValueError(f"runpane {parsed.command} requires {flag}.")
         args.append(value)
     spec = contract_command(parsed.command)
-    if spec.get("mutates") and not parsed.yes:
-        if parsed.json or not (sys.stdin.isatty() and sys.stdout.isatty()):
-            raise ValueError(f"runpane {parsed.command} mutates Pane state. Rerun with --yes in non-interactive shells.")
-        if input(f"Run {parsed.command}? [y/N] ").strip().lower() not in {"y", "yes"}:
-            raise ValueError("Cancelled.")
+    if spec.get("mutates"):
+        confirm_mutation(parsed)
     result = normalize_response(invoke_daemon(action["channel"], args, pane_dir=parsed.pane_dir))
     # A destructive change to a Pane comes back with a link the user can open to review it.
     if result["ok"] and parsed.pane_id and spec.get("mutates") and not spec.get("additive"):
@@ -62,6 +59,16 @@ def run_daemon_action(parsed: Any, action: Dict[str, Any]) -> int:
     else:
         print(result["error"]["message"], file=sys.stderr)
     return 0 if result["ok"] else 1
+
+
+def confirm_mutation(parsed: Any) -> None:
+    """Mutating commands need --yes outside an interactive terminal, like every runpane mutation."""
+    if parsed.yes:
+        return
+    if parsed.json or not (sys.stdin.isatty() and sys.stdout.isatty()):
+        raise ValueError(f"runpane {parsed.command} mutates Pane state. Rerun with --yes in non-interactive shells.")
+    if input(f"Run {parsed.command}? [y/N] ").strip().lower() not in {"y", "yes"}:
+        raise ValueError("Cancelled.")
 
 
 def normalize_response(response: Any) -> Dict[str, Any]:

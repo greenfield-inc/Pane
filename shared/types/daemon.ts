@@ -89,6 +89,7 @@ export const DAEMON_OWNED_CHANNEL_PREFIXES = [
   'agent-usage:',
   'folders:',
   'logs:',
+  'loops:',
   'mobile:',
   'mission-control:',
   'panels:',

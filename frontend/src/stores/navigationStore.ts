@@ -67,6 +67,7 @@ interface NavigationState {
   navigateToPaneChat: () => void;
   navigateToMissionControl: () => void;
   navigateToSsh: () => void;
+  navigateToLoops: () => void;
 }
 
 export const useNavigationStore = create<NavigationState>((set, get) => ({
@@ -181,6 +182,12 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
 
   navigateToSsh: () => set({
     activeView: 'ssh',
+    activeProjectId: null
+  }),
+
+  // Loops span every project, so the page clears the project scope.
+  navigateToLoops: () => set({
+    activeView: 'loops',
     activeProjectId: null
   }),
 }));

@@ -73,6 +73,9 @@ import { Kbd } from './ui/Kbd';
 import type { InspectorTab } from './InspectorTabs';
 import { useErrorStore } from '../stores/errorStore';
 import ProjectSettings from './ProjectSettings';
+import { LoopsView } from './loops/LoopsView';
+import { LoopRunHeader, LoopRunsRail } from './loops/LoopRunChrome';
+import { useLoopsStore } from '../stores/loopsStore';
 
 function pickDefaultPanel(panelList: ToolPanel[], hasReviewPr: boolean): ToolPanel | undefined {
   return (hasReviewPr ? panelList.find(p => p.type === 'diff') : undefined)
@@ -135,6 +138,9 @@ export const SessionView = memo(() => {
     // Otherwise look in regular sessions
     return state.sessions.find(session => session.id === state.activeSessionId);
   });
+  // A loop's run Pane: known from the loops already loaded, so its header and
+  // rail are there on the Pane's first render and never refit the terminal later.
+  const loopRun = useLoopsStore(state => activeSession ? state.runsBySessionId.get(activeSession.id) : undefined);
   const ownsPanelLoad = panelLoad?.id === selectedPaneId && panelLoad?.revision === selectionRevision && panelLoad?.hostId === hostId;
   const activeProjectEnvironment = sessionProject && sessionProject.id === activeSession?.projectId
     ? sessionProject.environment
@@ -702,13 +708,20 @@ export const SessionView = memo(() => {
   );
 
   // --- Inspector (right rail: Details / Files / Changes) ---
-  const [detailVisible, setDetailVisible] = useState(() => {
+  const [paneDetailVisible, setPaneDetailVisible] = useState(() => {
     const stored = localStorage.getItem('pane-detail-panel-visible');
     return stored !== null ? stored === 'true' : true;
   });
   useEffect(() => {
-    localStorage.setItem('pane-detail-panel-visible', String(detailVisible));
-  }, [detailVisible]);
+    localStorage.setItem('pane-detail-panel-visible', String(paneDetailVisible));
+  }, [paneDetailVisible]);
+  // Loop run Panes remember their own choice and start with the inspector closed.
+  const [loopRunDetailVisible, setLoopRunDetailVisible] = useState(() => localStorage.getItem('pane-loop-run-detail-panel-visible') === 'true');
+  useEffect(() => {
+    localStorage.setItem('pane-loop-run-detail-panel-visible', String(loopRunDetailVisible));
+  }, [loopRunDetailVisible]);
+  const detailVisible = loopRun ? loopRunDetailVisible : paneDetailVisible;
+  const setDetailVisible = loopRun ? setLoopRunDetailVisible : setPaneDetailVisible;
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>(() => {
     const stored = localStorage.getItem('pane-inspector-tab');
     return stored === 'files' || stored === 'details' ? stored : 'changes';
@@ -728,7 +741,7 @@ export const SessionView = memo(() => {
     setInspectorTab(tab);
     setDetailVisible(true);
     setIsDetailCollapsed(false);
-  }, []);
+  }, [setDetailVisible]);
 
   const handleCommitClick = useCallback(
     async (commitHash: string) => {
@@ -1640,7 +1653,7 @@ export const SessionView = memo(() => {
     } else {
       setDetailVisible(v => !v);
     }
-  }, [immersiveMode, swappedLayoutRendered, toggleDetailCollapse]);
+  }, [immersiveMode, setDetailVisible, swappedLayoutRendered, toggleDetailCollapse]);
 
   // Terminal collapse state with localStorage persistence (collapsed by default)
   const [isTerminalCollapsed, setIsTerminalCollapsed] = useState(() => {
@@ -1911,6 +1924,10 @@ export const SessionView = memo(() => {
     return <SshView />;
   }
 
+  if (activeView === 'loops') {
+    return <LoopsView />;
+  }
+
   const loadError = selectionError ?? (ownsPanelLoad ? panelLoad?.error : null);
   if (selectedPaneId && (!activeSession || !ownsPanelLoad || loadError)) {
     return <div className="flex flex-1 flex-col bg-bg-primary">
@@ -1928,6 +1945,10 @@ export const SessionView = memo(() => {
       <LiveRegion mode={activeSession.status === 'error' ? 'assertive' : 'polite'}>
         {sessionStatusAnnouncement}
       </LiveRegion>
+      {loopRun && <LoopRunHeader runRef={loopRun} />}
+      {/* Always this shape, run Pane or not, so the panels below never remount. */}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-row">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       {/* SINGLE SessionProvider wraps everything */}
       <SessionProvider session={activeSession} gitBranchActions={branchActions} isMerging={hook.isMerging} gitCommands={hook.gitCommands} onOpenIDEWithCommand={handleOpenIDEWithCommand} onOpenUrlInBrowser={handleOpenUrlInBrowser} onConfigureIDE={() => setShowProjectSettings(true)} onSetTracking={handleOpenSetTracking} trackingBranch={currentUpstream} configuredIDECommand={sessionProject?.open_ide_command} isRemoteMode={isRemoteMode}>
 
@@ -2142,6 +2163,9 @@ export const SessionView = memo(() => {
         </div>
 
       </SessionProvider>
+      </div>
+      {loopRun && <LoopRunsRail runRef={loopRun} />}
+      </div>
 
       <CommitMessageDialog
         isOpen={hook.showCommitMessageDialog}

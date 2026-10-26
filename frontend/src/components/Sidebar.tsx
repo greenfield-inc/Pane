@@ -3,7 +3,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { ProjectSessionList, ArchivedSessions } from './ProjectSessionList';
 import { ArchiveProgress } from './ArchiveProgress';
-import { ArrowUpDown, BookOpen, ChevronDown, ChevronRight, Info, LayoutGrid, FolderGit2, Home, Laptop, Monitor, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pin, Settings as SettingsIcon, Plus, RefreshCw, MessageSquare, Server, SquareTerminal } from 'lucide-react';
+import { ArrowUpDown, BookOpen, ChevronDown, ChevronRight, Info, LayoutGrid, FolderGit2, Home, Laptop, Monitor, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pin, Settings as SettingsIcon, Plus, RefreshCw, MessageSquare, Repeat, Server, SquareTerminal } from 'lucide-react';
 import { SessionDetailTooltip } from './SessionDetailTooltip';
 import { IconButton } from './ui/Button';
 import { Tooltip } from './ui/Tooltip';
@@ -35,6 +35,8 @@ import { DiscordIcon } from './DiscordIcon';
 import { OrchestrationSessionNav } from './OrchestrationSessionNav';
 import { useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
 import { useSshHostsRefresh, useSshHostsStore } from '../stores/sshHostsStore';
+import { navigateToLoops, useLoopsStore } from '../stores/loopsStore';
+import { useAnyLoopRunning } from './loops/loopRunView';
 
 // --- Collapsed sidebar tooltip content ---
 
@@ -297,6 +299,8 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
   const setSidebarNavigationScope = useNavigationStore((state) => state.setSidebarNavigationScope);
   /** Agents waiting on the user, anywhere — surfaced on the Mission Control rail button. */
   const blockedAgentCount = useBlockedAgentCount();
+  const loops = useLoopsStore((state) => state.loops);
+  const loopRunning = useAnyLoopRunning(loops);
   useSessionNavigationHotkeys({ projects, sessionSortAscending });
   useSshHostsRefresh();
 
@@ -571,6 +575,25 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
                 </button>
               </Tooltip>
             )}
+
+            {/* Like SSH hosts, the rail lists Loops once there is one; the full sidebar always does. */}
+            {loops.length > 0 && <Tooltip content="Loops" side="right">
+              <button
+                type="button"
+                data-testid="compact-loops"
+                data-compact-rail-item
+                onClick={() => navigateToLoops()}
+                aria-label="Loops"
+                className={`${COMPACT_RAIL_BUTTON} ${activeView === 'loops' ? COMPACT_RAIL_ACTIVE : COMPACT_RAIL_IDLE}`}
+              >
+                <Repeat className="h-4 w-4" />
+                {loopRunning && (
+                  <span className="absolute right-0 top-0 flex h-3 w-3 items-center justify-center" aria-hidden="true">
+                    <span className="h-1.5 w-1.5 rounded-full bg-status-info" />
+                  </span>
+                )}
+              </button>
+            </Tooltip>}
 
             {missionControlEnabled && (
               <Tooltip content="Mission Control" side="right">

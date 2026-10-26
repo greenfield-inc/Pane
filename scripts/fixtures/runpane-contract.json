@@ -1050,6 +1050,94 @@
       "deploy",
       "--wait",
       "5000"
+    ],
+    [
+      "loops",
+      "create",
+      "--repo",
+      "active",
+      "--name",
+      "nightly",
+      "--cron",
+      "0 3 * * *",
+      "--agent",
+      "claude",
+      "--prompt",
+      "Sweep bugs",
+      "--worktree-name",
+      "nightly-sweep",
+      "--paused",
+      "--dry-run",
+      "--yes",
+      "--json"
+    ],
+    [
+      "loops",
+      "create",
+      "--repo=2",
+      "--name=deps",
+      "--cron=0 9 * * 1",
+      "--tool-command",
+      "./scripts/nightly-report.sh",
+      "--prompt-file",
+      "-"
+    ],
+    [
+      "loops",
+      "create",
+      "--session",
+      "new",
+      "--name",
+      "triage",
+      "--cron",
+      "0 9 * * 1-5",
+      "--agent",
+      "claude",
+      "--prompt",
+      "Triage",
+      "--yes"
+    ],
+    [
+      "loops",
+      "update",
+      "--loop",
+      "loop-1",
+      "--cron",
+      "0 4 * * *",
+      "--yes"
+    ],
+    [
+      "loops",
+      "update",
+      "--loop",
+      "loop-1",
+      "--session",
+      "Nightly",
+      "--yes"
+    ],
+    [
+      "loops",
+      "run",
+      "--loop=loop-1",
+      "--yes",
+      "--json"
+    ],
+    [
+      "loops",
+      "pause",
+      "--loop",
+      "loop-1",
+      "--pane-dir",
+      "/tmp/pane"
+    ],
+    [
+      "loops",
+      "list",
+      "--json"
+    ],
+    [
+      "loops",
+      "--help"
     ]
   ],
   "help": {
@@ -1081,11 +1169,13 @@
     ],
     "npmIncludes": [
       "pnpm dlx runpane@latest",
-      "npx --yes runpane@latest"
+      "npx --yes runpane@latest",
+      "runpane loops list"
     ],
     "pipIncludes": [
       "pipx run runpane",
-      "python -m pip install runpane && python -m runpane setup"
+      "python -m pip install runpane && python -m runpane setup",
+      "python -m runpane loops list"
     ],
     "installIncludes": [
       "--version <latest|vX.Y.Z>",

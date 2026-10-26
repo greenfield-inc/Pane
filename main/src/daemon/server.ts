@@ -18,6 +18,7 @@ const DAEMON_EVENT_PREFIXES = [
   'agent-chat:',
   'archive:',
   'folder:',
+  'loops:',
   'panel:',
   'ports:',
   'project:',

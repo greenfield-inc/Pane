@@ -59,6 +59,11 @@ import { PhonePreviewHost } from './phonePreviews';
 import { createPreviewFiles } from './previewProxy';
 import { WorkspaceJournal } from '../services/workspaceJournal';
 import { SessionPrMonitor } from '../services/sessionPrMonitor';
+import { LoopManager } from '../services/loops/loopManager';
+import { LoopRepository } from '../services/loops/loopRepository';
+import { archiveLoopRun, prepareLoopSession, startLoopRun } from '../ipc/loops';
+import { trustClaudeFolder } from '../services/loops/claudeFolderTrust';
+import { sessionWorkspacePath } from '../services/sessionWorkspace';
 import { NamedLockService } from '../services/namedLockService';
 import { NamedLockStore } from '../services/namedLockStore';
 import { WorkspaceStateReader } from '../services/workspaceStateReader';
@@ -317,6 +322,19 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     journal: workspaceJournal,
     logger,
   });
+  // Loop runs go through the registry's `runpane panes create`, which exists once handlers are registered.
+  const loopManager = new LoopManager({
+    repo: new LoopRepository(() => databaseService.getDb()),
+    startRun: (loop, slotAtMs) => startLoopRun(commandRegistry, loop, slotAtMs, { launchedCommand: panelId => terminalPanelManager.launchedCommand(panelId) }),
+    archiveRun: sessionId => archiveLoopRun(commandRegistry, sessionId),
+    projectExists: projectId => Boolean(databaseService.getProject(projectId)),
+    prepareSession: (target, loop) => prepareLoopSession(commandRegistry, target, loop, async sessionId => {
+      // A failed write only means the first run may stop at Claude's prompt, as before.
+      await trustClaudeFolder(sessionWorkspacePath(sessionId)).catch(error => logger.warn(`[Loops] Could not mark Session ${sessionId}'s folder trusted for Claude: ${error instanceof Error ? error.message : String(error)}`));
+    }),
+    onChange: () => getPaneEventSink().send('loops:changed'),
+    logger,
+  });
   const workspaceStateReader = new WorkspaceStateReader(
     sessionManager,
     () => workspaceJournal.epoch,
@@ -358,6 +376,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     workspaceJournal,
     workspaceStateReader,
     sessionPrMonitor,
+    loopManager,
     workspaceCursorStore,
     namedLockService,
   };
@@ -467,6 +486,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
 
   gitStatusManager.startPolling();
   sessionPrMonitor.start();
+  loopManager.start();
   listeningPortMonitor.start();
   if (mode === 'desktop') {
     versionChecker.startPeriodicCheck();
@@ -500,6 +520,8 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     },
     permissionIpcServer,
     async shutdown(): Promise<void> {
+      // First, so no run starts while the services it needs are closing.
+      loopManager.stop();
       await archiveCleanupManager.stop();
       // Before terminals stop: their exits during shutdown must not release locks.
       namedLockService.dispose();

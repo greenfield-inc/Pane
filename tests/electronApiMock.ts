@@ -10,6 +10,7 @@ import type {
   RemotePaneConnectionState,
 } from '../shared/types/remoteDaemon';
 import type { SubmitFeedbackRequest } from '../shared/types/feedback';
+import type { Loop, LoopInput, LoopSchedulePreview } from '../shared/types/loop';
 import type { TailnetMachineList, WorkspaceAccessSummary } from '../shared/types/workspaceAccess';
 import type { JsonObject, JsonValue } from '../shared/validation/boundaryDecoder';
 import { DEFAULT_APPEARANCE, LIGHT_THEMES, normalizeAppearance, type AppearanceConfig } from '../shared/types/appearance';
@@ -41,6 +42,7 @@ export type ElectronApiMockOptions = {
   mainAnalyticsEvents?: AnalyticsMainEvent[];
   initialProjects?: JsonObject[];
   initialSessions?: JsonObject[];
+  initialLoops?: Loop[];
   /** remote-daemon:list-tailnet-machines answer. */
   tailnetMachines?: TailnetMachineList;
   /** Remote connections end in `error` with this message instead of connecting. */
@@ -272,6 +274,32 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     };
     let mockProjects = clone(mockOptions.initialProjects ?? []);
     let mockSessions = clone(mockOptions.initialSessions ?? []);
+    let mockLoops = clone(mockOptions.initialLoops ?? []);
+    /** A plausible loops:preview answer for the form's preset shapes. */
+    const previewLoopCron = (cron: string): LoopSchedulePreview => {
+      const fields = cron.trim().split(/\s+/);
+      if (fields.length !== 5) return { ok: false, error: 'A cron has five fields' };
+      const [minute, hour, , , weekday] = fields;
+      if (!/^\d+$/.test(minute)) return { ok: false, error: 'Loops run at most once an hour' };
+      // Main's wording (`describeSchedule`): "Daily at 3:00 AM".
+      const at = (h: string) => `${Number(h) % 12 || 12}:${minute.padStart(2, '0')} ${Number(h) < 12 ? 'AM' : 'PM'}`;
+      const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+      const step = /^\*\/(\d+)$/.exec(hour);
+      const scheduleText = hour === '*' ? 'Hourly, on the hour'
+        : step ? `Every ${step[1]} hours`
+        : weekday === '1-5' ? `Every weekday (Monday to Friday) at ${at(hour)}`
+        : weekday !== '*' ? `Weekly on ${days[Number(weekday) % 7] ?? weekday} at ${at(hour)}`
+        : `Daily at ${at(hour)}`;
+      // Daily shapes repeat at their time each day; hourly ones on the hour.
+      const next = new Date();
+      next.setSeconds(0, 0);
+      next.setMinutes(Number(minute));
+      const everyMs = /^\d+$/.test(hour) ? 86_400_000 : 3_600_000;
+      if (everyMs === 86_400_000) next.setHours(Number(hour));
+      while (next.getTime() <= Date.now()) next.setTime(next.getTime() + everyMs);
+      const nextRunsAtMs = [0, 1, 2].map((index) => next.getTime() + index * everyMs);
+      return { ok: true, scheduleText, nextRunAtMs: nextRunsAtMs[0], nextRunsAtMs };
+    };
     let mockPanels = clone(mockOptions.initialPanels ?? []);
     let nextPanelId = mockPanels.length + 1;
     const heldSshPanelReads: Array<() => void> = [];
@@ -485,6 +513,12 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         }
         if (prop === 'onSessionUpdated') {
           return (callback: MockEventCallback) => subscribe('session:updated', callback);
+        }
+        if (prop === 'onSessionCreated') {
+          return (callback: MockEventCallback) => subscribe('session:created', callback);
+        }
+        if (prop === 'onLoopsChanged') {
+          return (callback: MockEventCallback) => subscribe('loops:changed', callback);
         }
         if (prop === 'onSessionDeleted') {
           return (callback: MockEventCallback) => subscribe('session:deleted', callback);
@@ -981,6 +1015,78 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         getSnapshot: () => success(null),
         startActive: () => success(),
         stopActive: () => success(),
+      }),
+      loops: namespace({
+        list: () => success(clone(mockLoops)),
+        save: (input: LoopInput) => {
+          const preview = previewLoopCron(input.cron);
+          if (!preview.ok) return Promise.resolve({ success: false, error: preview.error });
+          const existingIndex = input.id ? mockLoops.findIndex((loop) => loop.id === input.id) : -1;
+          const existing = existingIndex >= 0 ? mockLoops[existingIndex] : undefined;
+          const loop: Loop = {
+            ...input,
+            id: existing?.id ?? `loop-${mockLoops.length + 1}`,
+            createdAtMs: existing?.createdAtMs ?? Date.now(),
+            nextRunAtMs: input.enabled ? preview.nextRunAtMs : null,
+            scheduleText: preview.scheduleText,
+            runs: existing?.runs ?? [],
+          };
+          if (existingIndex >= 0) mockLoops[existingIndex] = loop;
+          else mockLoops.push(loop);
+          return success(clone(loop));
+        },
+        delete: (id: string) => {
+          mockLoops = mockLoops.filter((loop) => loop.id !== id);
+          return success();
+        },
+        setEnabled: (id: string, enabled: boolean) => {
+          const loop = mockLoops.find((candidate) => candidate.id === id);
+          if (!loop) return Promise.resolve({ success: false, error: 'Loop not found' });
+          loop.enabled = enabled;
+          const preview = previewLoopCron(loop.cron);
+          loop.nextRunAtMs = enabled && preview.ok ? preview.nextRunAtMs : null;
+          return success(clone(loop));
+        },
+        // Starts a run as main does: a new running Pane in the loop's project, named after the loop.
+        runNow: (id: string) => {
+          const loop = mockLoops.find((candidate) => candidate.id === id);
+          if (!loop) return Promise.resolve({ success: false, error: 'Loop not found' });
+          const now = new Date();
+          const slug = loop.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+          const when = `${now.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} ${now.toTimeString().slice(0, 5)}`;
+          const sessionId = `${loop.id}-run-${loop.runs.length + 1}`;
+          const session = {
+            id: sessionId,
+            name: `${slug} · ${when}`,
+            projectId: loop.projectId,
+            worktreePath: `/tmp/worktrees/${slug}-${loop.runs.length + 1}`,
+            prompt: loop.initialInput ?? '',
+            status: 'running',
+            createdAt: now.toISOString(),
+            lastActivity: now.toISOString(),
+            output: [],
+            jsonMessages: [],
+            permissionMode: 'ignore',
+            toolType: 'none',
+            archived: false,
+            isHidden: false,
+            isFavorite: false,
+          };
+          mockSessions.push(session);
+          loop.runs = [{
+            id: `${sessionId}-record`,
+            loopId: loop.id,
+            slotAtMs: now.getTime(),
+            trigger: 'manual' as const,
+            status: 'started' as const,
+            error: null,
+            sessionId,
+          }, ...loop.runs].slice(0, 10);
+          emit('session:created', clone(session));
+          emit('loops:changed');
+          return success(clone(loop));
+        },
+        preview: (cron: string) => success(previewLoopCron(cron)),
       }),
       sessions: namespace({
         // The SSH view's hidden Session; other ids keep the generic empty answer.
@@ -1502,6 +1608,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         getSessionsReadCount() {
           return sessionsGetCount;
+        },
+        getLoops() {
+          return clone(mockLoops);
         },
         getSessionDeleteCalls() {
           return clone(sessionDeleteCalls);

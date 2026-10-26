@@ -4,6 +4,7 @@ import type { Project } from '../types/project';
 import type { UpdateConfigRequest } from '../types/config';
 import type { SessionCreationPreferences } from '../stores/sessionPreferencesStore';
 import type { PaneChatAgent, PaneChatState } from '../../../shared/types/paneChat';
+import type { LoopInput } from '../../../shared/types/loop';
 import { startOwnPaneCreation } from './ownPaneCreations';
 import type { MissionControlSnapshotRequest } from '../../../shared/types/missionControl';
 import type {
@@ -190,6 +191,35 @@ export class API {
     },
   };
 
+  // Loops (scheduled tasks)
+  static loops = {
+    async list() {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.loops.list();
+    },
+    async save(input: LoopInput) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.loops.save(input);
+    },
+    async remove(id: string) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.loops.delete(id);
+    },
+    async setEnabled(id: string, enabled: boolean) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.loops.setEnabled(id, enabled);
+    },
+    /** Start one run now; the schedule is unchanged. */
+    async runNow(id: string) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.loops.runNow(id);
+    },
+    /** The cron as a sentence and its next run, or why it is rejected. */
+    async preview(cron: string) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.loops.preview(cron);
+    },
+  };
   // Mission Control
   static missionControl = {
     /** Every agent pane across all sessions and projects. */

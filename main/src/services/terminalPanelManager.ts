@@ -319,6 +319,8 @@ interface TerminalProcess {
   initialInputHeld?: boolean;
   /** When Pane wrote the panel's launch command to its shell. */
   launchCommandWrittenAt?: number;
+  /** The command line Pane last wrote to launch the panel's program, after resume rewriting. */
+  launchedCommand?: string;
   /** While no agent is identified: when the held starting message last had a reason to keep waiting. */
   initialInputHeldSince?: number;
   /** Set only for direct OpenCode launches; status detection calls it on the idle composer frame. */
@@ -1460,6 +1462,11 @@ export class TerminalPanelManager extends EventEmitter {
     return relaunch;
   }
 
+  /** The command line Pane last launched in a live panel's shell; undefined when none is live. */
+  launchedCommand(panelId: string): string | undefined {
+    return this.terminals.get(panelId)?.launchedCommand;
+  }
+
   /**
    * Run the panel's saved launch command again in its live shell, once
    * hasLaunchCommandExited says the last one exited. It resolves the way a
@@ -1478,6 +1485,7 @@ export class TerminalPanelManager extends EventEmitter {
     }
     this.writeToTerminal(panelId, `${launch.commandToRun}\r`);
     terminal.launchCommandWrittenAt = Date.now();
+    terminal.launchedCommand = launch.commandToRun;
     // The saved state now says not ready; the relaunched agent must say ready again.
     if (launch.isCliCommand) this.armCliReadySignal(terminal, launch.customState.agentType);
   }
@@ -2011,6 +2019,7 @@ export class TerminalPanelManager extends EventEmitter {
           }
           this.releaseHeldInput(terminalProcess, commandToRun! + '\r');
           terminalProcess.launchCommandWrittenAt = Date.now();
+          terminalProcess.launchedCommand = commandToRun!;
 
           // For CLI tool terminals, signal the frontend when the CLI responds
           if (isCliCommand) {

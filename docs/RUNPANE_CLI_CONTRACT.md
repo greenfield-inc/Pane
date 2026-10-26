@@ -129,6 +129,9 @@ runpane sessions overview --session <id|name> [--json] [--pane-dir <path>]
 runpane lock acquire --name testing-account --ttl 30m --wait 1800000 --note "call QA" --json
 runpane lock release --name testing-account --json
 runpane lock list --json
+runpane loops create --repo active --name nightly-bug-sweep --cron "0 3 * * *" --agent claude --prompt "Fix one bug from yesterday's issues" --yes --json
+runpane loops list --json
+runpane loops run --loop <loop-id> --yes --json
 runpane agents start --repo active --name fix-login --agent claude --prompt "Fix the login redirect" --yes --json
 runpane agents start --pane <pane-id> --agent codex --prompt "Review the PR from this branch and report findings" --yes --json
 runpane agents status --pane <pane-id> --json
@@ -236,6 +239,8 @@ The desktop app treats one consumer name specially: while a `runpane watch --as 
 `sessions overview` read a live status, activity, git, and pull request overview for a named Session. Each panel in `panes[].panels[]` carries its own latest `runpane report` as `report`, so one call shows what every worker last reported and when (`reportedAt`, next to the panel's `state` and `lastActivityAt`). When a report's summary is a complete JSON object, such as a status file sent with `--summary-file`, `report.data` holds it exactly as the worker gave it; Pane never reads, renames or validates its fields. A summary that is not a JSON object (plain text, an array, a scalar or invalid JSON), is nested more than 64 levels deep, or was truncated (`summaryTruncated`), has no `data`. A panel that never reported has no `report`. `panes[].report` is still the newest report among the Pane's panels.
 
 `runpane lock acquire|release|list` coordinate a resource shared between agents, such as one test account. The caller's Pane and panel own the lock; it is scoped to the owner's Session (or global outside one), renews for the same owner, and is released on TTL expiry, owner panel exit, or owner Pane archive. `--wait` blocks in the daemon until the lock comes free.
+
+`runpane loops list|create|update|run|pause|resume|delete` manage loops (scheduled tasks): a cron schedule that starts a new Pane in a fresh worktree for each run, or sends a prompt to a Session's agent. Loops are for large recurring jobs and run at most once an hour; for short waits, agents use their harness's own sleep and wake. See [LOOPS.md](LOOPS.md).
 
 `runpane agents start|status|send` finish the three common agent jobs in one call each: start an agent on a task (a new tab in the work's Pane with `--pane <id>`, or a new Pane for new work), check on it, and send it a follow-up.
 
@@ -352,6 +357,13 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `pr watch`: Register durable GitHub PR monitoring for a Pane.
 - `pr unwatch`: Remove a Pane’s explicit PR registration.
 - `pr list`: List PR registrations and stopped watches.
+- `loops list`: List loops (scheduled tasks) with their schedule, next run, and recent runs.
+- `loops create`: Create a loop: a cron schedule that starts a new Pane in a fresh worktree for each run, or sends a prompt to a Session's agent. Loops are for large recurring jobs and run at most once an hour; for short waits, use your agent harness's own sleep and wake.
+- `loops update`: Change a loop's repo or Session, name, schedule, agent or command, prompt, or worktree template. Loops are for large recurring jobs and run at most once an hour; for short waits, use your agent harness's own sleep and wake.
+- `loops run`: Start a run of a loop now. The schedule stays the same.
+- `loops pause`: Pause a loop: it starts no scheduled runs until resumed.
+- `loops resume`: Resume a paused loop from its next scheduled time.
+- `loops delete`: Delete a loop. It starts no more runs.
 
 ```bash
 runpane help [command]
@@ -451,6 +463,13 @@ runpane sessions pin --session <id|name> [--json] [--pane-dir <path>]
 runpane pr watch [--pane <id>] --url <PR URL> [--head <full-sha>] [--json] [--pane-dir <path>]
 runpane pr unwatch [--pane <id>] --url <PR URL> [--json] [--pane-dir <path>]
 runpane pr list [--pane <id>] [--json] [--pane-dir <path>]
+runpane loops list [--json] [--pane-dir <path>]
+runpane loops create (--repo <selector>|--session <id|name|new>) --name <name> --cron <expr> (--agent <claude|codex|cursor>|--tool-command <command>) [--prompt <text>|--prompt-file <path|->] [--worktree-name <template>] [--paused] [--dry-run] --yes [--json] [--pane-dir <path>]
+runpane loops update --loop <id> [--repo <selector>|--session <id|name|new>] [--name <name>] [--cron <expr>] [--agent <claude|codex|cursor>|--tool-command <command>] [--prompt <text>|--prompt-file <path|->] [--worktree-name <template>] [--dry-run] --yes [--json] [--pane-dir <path>]
+runpane loops run --loop <id> --yes [--json] [--pane-dir <path>]
+runpane loops pause --loop <id> --yes [--json] [--pane-dir <path>]
+runpane loops resume --loop <id> --yes [--json] [--pane-dir <path>]
+runpane loops delete --loop <id> --yes [--json] [--pane-dir <path>]
 ```
 
 ## Agent Context
@@ -587,6 +606,8 @@ These flags are consumed by local daemon-control commands:
 --wait <milliseconds>
 --timeout <duration>
 --note <text>
+--loop <id>
+--cron <expr>
 --message <message>
 --query <text>
 --doc <path>
@@ -635,6 +656,7 @@ These flags are consumed by local daemon-control commands:
 --expect-report
 --no-expect-report
 --all
+--paused
 ```
 
 `runpane doctor --json`, `runpane repos list`, `runpane panes ...`, and `runpane panels ...` commands use or describe the local framed daemon socket/pipe for a running Pane app. `--pane-dir` points the wrapper at a non-default Pane data directory, such as `PANE_DIR=~/.pane_test` in development. `runpane agent-context` is local/offline and can be used before Pane is running. `agent-context` and `version` accept and ignore `--pane-dir`, so one `--pane-dir` can be passed to every runpane command. In a Pane repository checkout, if `runpane` is not on PATH, build the local wrapper with `pnpm --filter runpane build` and run it with patched Node 22.23.4+ (22.x), 24.22.1+ (24.x), or 26.12.1+ (26.x), for example `node packages/runpane/dist/cli.js doctor --json`. From WSL, if the user runs Windows Pane, call the Windows wrapper through `powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane ...'` so the command can reach the Windows named-pipe daemon and avoid UNC cwd issues.

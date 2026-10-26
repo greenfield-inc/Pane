@@ -4,6 +4,7 @@ import type { RemoteDaemonExecutableHealth } from './remoteDaemon';
 import type { TerminalGraphicsProtocol } from '../constants/terminalGraphics';
 import type { AgentState } from './agentStatus';
 import type { UsageByPane, UsagePaneCostSlice, UsageTotals } from './usage';
+import type { Loop, LoopSchedulePreview } from './loop';
 import type {
   OrchestrationSessionOverview,
   OrchestrationSessionRecord,
@@ -712,6 +713,38 @@ export interface RunpanePaneRenameResult {
   dryRun?: true;
   pane: RunpanePaneSummary;
 }
+
+export interface RunpaneLoopListResult {
+  ok: true;
+  loops: Loop[];
+}
+
+/** `runpane:loops:save` takes a `LoopInput`; `runpane:loops:set-enabled` and `run-now` answer the loop. */
+export interface RunpaneLoopResult {
+  ok: true;
+  loop: Loop;
+}
+
+export interface RunpaneLoopRequest {
+  loopId: string;
+}
+
+export interface RunpaneLoopSetEnabledRequest {
+  loopId: string;
+  enabled: boolean;
+}
+
+export interface RunpaneLoopDeleteResult {
+  ok: true;
+  deleted: string;
+}
+
+export interface RunpaneLoopPreviewRequest {
+  cron: string;
+}
+
+/** An invalid cron answers `ok: false` with the reason, not a thrown error. */
+export type RunpaneLoopPreviewResult = LoopSchedulePreview;
 
 export interface RunpanePaneFocusRequest {
   paneId: string;

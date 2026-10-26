@@ -44,6 +44,7 @@
         "better-sqlite3-multiple-ciphers",
         "bull",
         "chokidar",
+        "croner",
         "electron-updater",
         "smol-toml",
         "web-streams-polyfill",

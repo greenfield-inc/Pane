@@ -30,6 +30,11 @@ from .local_control import (
     run_lock_acquire,
     run_lock_list,
     run_lock_release,
+    run_loops_delete,
+    run_loops_list,
+    run_loops_run,
+    run_loops_save,
+    run_loops_set_enabled,
     run_panels_create,
     run_panels_input,
     run_panels_last_message,
@@ -89,6 +94,7 @@ AGENTS = set(RUNPANE_CONTRACT["enums"]["agents"])
 COMMAND_GROUP_HELP_TOPICS = {"panes", "panels", "workspace"}
 COMMAND_GROUP_HELP_TOPICS.add("sessions")
 COMMAND_GROUP_HELP_TOPICS.add("lock")
+COMMAND_GROUP_HELP_TOPICS.add("loops")
 LOCK_DURATION_PATTERN = re.compile(r"^(\d+)(ms|s|m|h)?$")
 LOCK_DURATION_UNIT_MS = {"ms": 1, "s": 1_000, "m": 60_000, "h": 3_600_000}
 MAX_LOCK_DURATION_MS = 86_400_000
@@ -228,6 +234,9 @@ class ParsedArgs:
     lock_ttl_ms: Optional[int] = None
     lock_wait_ms: Optional[int] = None
     note: Optional[str] = None
+    loop_id: Optional[str] = None
+    cron: Optional[str] = None
+    paused: bool = False
     help_topic: Optional[str] = None
     remote_setup_args: List[str] = field(default_factory=list)
 
@@ -830,6 +839,9 @@ def parse_local_boolean_flag(parsed: ParsedArgs, flag: str) -> None:
     if flag == "--all":
         parsed.all = True
         return
+    if flag == "--paused":
+        parsed.paused = True
+        return
     raise ValueError(f"Unknown option for {parsed.command}: {flag}")
 
 
@@ -1098,6 +1110,12 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
     if flag == "--note":
         parsed.note = value
         return
+    if flag == "--loop":
+        parsed.loop_id = value
+        return
+    if flag == "--cron":
+        parsed.cron = value
+        return
     raise ValueError(f"Unknown option for {parsed.command}: {flag}")
 
 
@@ -1341,6 +1359,13 @@ COMMAND_HANDLERS: Dict[str, Callable[[ParsedArgs, WrapperTelemetryContext], int]
     "lock acquire": lambda parsed, context: run_lock_acquire(parsed),
     "lock release": lambda parsed, context: run_lock_release(parsed),
     "lock list": lambda parsed, context: run_lock_list(parsed),
+    "loops list": lambda parsed, context: run_loops_list(parsed),
+    "loops create": lambda parsed, context: run_loops_save(parsed),
+    "loops update": lambda parsed, context: run_loops_save(parsed),
+    "loops run": lambda parsed, context: run_loops_run(parsed),
+    "loops pause": lambda parsed, context: run_loops_set_enabled(parsed, False),
+    "loops resume": lambda parsed, context: run_loops_set_enabled(parsed, True),
+    "loops delete": lambda parsed, context: run_loops_delete(parsed),
     "panes list": lambda parsed, context: run_panes_list(parsed),
     "panes cost": lambda parsed, context: run_panes_cost(parsed),
     "workspace state": lambda parsed, context: run_workspace_state(parsed),

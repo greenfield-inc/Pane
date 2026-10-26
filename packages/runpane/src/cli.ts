@@ -58,6 +58,11 @@ import {
   runLockAcquire,
   runLockList,
   runLockRelease,
+  runLoopsDelete,
+  runLoopsList,
+  runLoopsRun,
+  runLoopsSave,
+  runLoopsSetEnabled,
   runSessionsSetAgent,
   runSessionsUpdate,
   runSessionsPin,
@@ -260,6 +265,13 @@ const commandHandlers = new Map<string, CommandHandler>(Object.entries({
   'lock list': async (parsed, telemetryContext) => {
     return runLockList(parsed);
   },
+  'loops list': async (parsed) => runLoopsList(parsed),
+  'loops create': async (parsed) => runLoopsSave(parsed),
+  'loops update': async (parsed) => runLoopsSave(parsed),
+  'loops run': async (parsed) => runLoopsRun(parsed),
+  'loops pause': async (parsed) => runLoopsSetEnabled(parsed, false),
+  'loops resume': async (parsed) => runLoopsSetEnabled(parsed, true),
+  'loops delete': async (parsed) => runLoopsDelete(parsed),
   'workspace state': async (parsed, telemetryContext) => {
     return runWorkspaceState(parsed);
   },

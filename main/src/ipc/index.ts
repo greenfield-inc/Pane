@@ -38,6 +38,7 @@ import { registerSshHostHandlers } from './sshHosts';
 import { registerUsageHandlers } from './usage';
 import { registerOrchestrationSessionHandlers } from './orchestrationSessions';
 import { registerExportHandlers } from './export';
+import { registerLoopHandlers } from './loops';
 import { registerMissionControlHandlers } from './missionControl';
 import { createDaemonBridgeRouter, registerDaemonBridgeHandlers } from './daemon';
 import { registerPermissionHandlers } from './permissions';
@@ -137,6 +138,7 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
   registerSshHostHandlers(ipcMain, services, commandRegistry);
   registerOrchestrationSessionHandlers(ipcMain, services, commandRegistry);
   registerUsageHandlers(ipcMain, commandRegistry);
+  if (services.loopManager) registerLoopHandlers(ipcMain, services.loopManager, commandRegistry);
   registerMissionControlHandlers(ipcMain, services, commandRegistry);
   registerOnboardingHandlers(ipcMain, services);
   registerDaemonBridgeHandlers(ipcMain, bridgeRouter);

@@ -133,6 +133,10 @@ export interface ParsedArgs {
   lockTtlMs?: number;
   lockWaitMs?: number;
   note?: string;
+  /** loops: the loop id, its cron, and create's --paused. */
+  loopId?: string;
+  cron?: string;
+  paused?: boolean;
   /** `runpane workspace <machine> ...` */
   workspaceMachine?: string;
   workspacePath?: string;
@@ -169,7 +173,7 @@ const targetSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.installTarge
 const formatSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.artifactFormats);
 const channelSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.channels);
 const agentSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.agents);
-const COMMAND_GROUP_HELP_TOPICS = new Set(['panes', 'panels', 'sessions', 'workspace', 'lock']);
+const COMMAND_GROUP_HELP_TOPICS = new Set(['panes', 'panels', 'sessions', 'workspace', 'lock', 'loops']);
 const LOCK_DURATION_PATTERN = /^(\d+)(ms|s|m|h)?$/u;
 const LOCK_DURATION_UNIT_MS = { ms: 1, s: 1_000, m: 60_000, h: 3_600_000 } as const;
 const MAX_LOCK_DURATION_MS = 86_400_000;
@@ -730,6 +734,10 @@ function parseLocalBooleanFlag(flag: string, parsed: ParsedArgs): void {
     parsed.handoffNoteOnly = true;
     return;
   }
+  if (flag === '--paused') {
+    parsed.paused = true;
+    return;
+  }
 
   throw new Error(`Unknown option for ${parsed.command}: ${flag}`);
 }
@@ -1063,6 +1071,14 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
   }
   if (flag === '--note') {
     parsed.note = value;
+    return;
+  }
+  if (flag === '--loop') {
+    parsed.loopId = value;
+    return;
+  }
+  if (flag === '--cron') {
+    parsed.cron = value;
     return;
   }
 

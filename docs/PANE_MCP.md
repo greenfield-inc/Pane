@@ -39,6 +39,7 @@ A server that offers dozens of tools makes models, especially smaller ones, wors
 | `panels` | create, list, output, screen, input, submit, submit-composer, wait |
 | `git` | status, commit, push, pull, fetch, rebase onto main, squash-rebase onto main, stash, stash-pop, soft reset (`panes_*`) |
 | `sessions` | the eight `sessions_*` tools and the three named-lock tools (`lock_acquire`, `lock_release`, `lock_list`) |
+| `loops` | `loops_list`, `loops_create`, `loops_update`, `loops_run`, `loops_pause`, `loops_resume`, `loops_delete` (see [Loops](LOOPS.md)) |
 | `repos`, `docs`, `links`, `admin` | repository, documentation, deep-link, and diagnostic tools |
 | `all` / `read` | every tool / every read-only tool |
 

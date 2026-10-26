@@ -1,3 +1,4 @@
+import type { LoopInput } from '../../shared/types/loop';
 import type { AgentChatEvent, AgentChatView, AgentChatSend, AgentInterface } from '../../shared/types/agentChat';
 import { contextBridge, ipcRenderer } from 'electron';
 import { createPreferencesApi } from '../../shared/types/preferences';
@@ -481,6 +482,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
       invokeIpc('export:share-image', data, filename),
   },
 
+  // Loops (scheduled tasks)
+  loops: {
+    list: (): Promise<IPCResponse> => invokeIpc('loops:list'),
+    save: (input: LoopInput): Promise<IPCResponse> => invokeIpc('loops:save', input),
+    delete: (id: string): Promise<IPCResponse> => invokeIpc('loops:delete', id),
+    setEnabled: (id: string, enabled: boolean): Promise<IPCResponse> => invokeIpc('loops:set-enabled', id, enabled),
+    runNow: (id: string): Promise<IPCResponse> => invokeIpc('loops:run-now', id),
+    preview: (cron: string): Promise<IPCResponse> => invokeIpc('loops:preview', cron),
+  },
   // Mission Control — live overview of every agent pane across all sessions
   missionControl: {
     listAgents: (options?: { includeArchived?: boolean }): Promise<IPCResponse> => invokeIpc('mission-control:list-agents', options),
@@ -834,6 +844,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
       const wrappedCallback = () => callback();
       ipcRenderer.on('remote:settings-changed', wrappedCallback);
       return () => ipcRenderer.removeListener('remote:settings-changed', wrappedCallback);
+    },
+    onLoopsChanged: (callback: () => void) => {
+      const wrappedCallback = () => callback();
+      ipcRenderer.on('loops:changed', wrappedCallback);
+      return () => ipcRenderer.removeListener('loops:changed', wrappedCallback);
     },
     onPaneFocusRequested: (callback: (data: RunpanePaneFocusRequestedEvent) => void) => {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, data: RunpanePaneFocusRequestedEvent) => callback(data);

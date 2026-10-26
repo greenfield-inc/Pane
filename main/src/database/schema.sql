@@ -116,6 +116,43 @@ CREATE TABLE IF NOT EXISTS usage_rate_limits (
   PRIMARY KEY (provider, limit_id, scope)
 );
 
+-- Loops (scheduled tasks): a cron plus what each run does.
+-- NOTE this file is split on the statement separator at startup, so a comment
+-- must never contain one.
+-- schedule_from_ms: only slots after this count. Set on create, resume and a
+-- cron change, so none of them replays slots from before.
+CREATE TABLE IF NOT EXISTS loops (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  -- The target: a project (each run is a new Pane) or a Session (each run messages its agent).
+  project_id INTEGER,
+  orchestration_session_id TEXT,
+  cron TEXT NOT NULL,
+  agent TEXT,
+  tool_command TEXT,
+  initial_input TEXT,
+  worktree_template TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  schedule_from_ms INTEGER NOT NULL,
+  created_at_ms INTEGER NOT NULL,
+  CHECK ((project_id IS NULL) <> (orchestration_session_id IS NULL)),
+  FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+);
+
+-- One row per run: its Pane, a failure to create it, or a skipped slot.
+CREATE TABLE IF NOT EXISTS loop_runs (
+  id TEXT PRIMARY KEY,
+  loop_id TEXT NOT NULL,
+  slot_at_ms INTEGER NOT NULL,
+  trigger TEXT NOT NULL,
+  status TEXT NOT NULL,
+  error TEXT,
+  session_id TEXT,
+  FOREIGN KEY (loop_id) REFERENCES loops(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_loop_runs_loop ON loop_runs(loop_id, slot_at_ms);
+
 -- Index for faster lookups
 CREATE INDEX IF NOT EXISTS idx_usage_events_ts ON usage_events(timestamp_ms);
 CREATE INDEX IF NOT EXISTS idx_usage_events_model_ts ON usage_events(model, timestamp_ms);

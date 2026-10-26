@@ -569,7 +569,15 @@
         "lock",
         "lock acquire",
         "lock release",
-        "lock list"
+        "lock list",
+        "loops",
+        "loops list",
+        "loops create",
+        "loops update",
+        "loops run",
+        "loops pause",
+        "loops resume",
+        "loops delete"
       ],
       "properties": {
         "default": {
@@ -819,6 +827,30 @@
           "$ref": "#/$defs/helpLines"
         },
         "lock list": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "loops": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "loops list": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "loops create": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "loops update": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "loops run": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "loops pause": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "loops resume": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "loops delete": {
           "$ref": "#/$defs/helpLines"
         },
         "sessions pin": {

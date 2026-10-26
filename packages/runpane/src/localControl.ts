@@ -5,6 +5,7 @@ import { stdin as input, stdout as output } from 'node:process';
 import { createInterface } from 'node:readline/promises';
 import { boundary, decodeBoundary } from './boundaryDecoder';
 import { invokeDaemon, PaneDaemonClientError } from './daemonClient';
+import { confirmMutation } from './daemonActions';
 import { RunpaneError } from './errors';
 import { RUNPANE_CONTRACT } from './generated/contract';
 import { hasCadenceValueFlag, type ParsedArgs, type RunpaneAgent } from './commands';
@@ -2221,6 +2222,291 @@ function formatLockLine(lock: LockRecord): string {
   const scope = lock.scope === 'session' ? `session ${lock.sessionId}` : 'global';
   const note = lock.note ? ` (${lock.note})` : '';
   return `${lock.name} [${scope}] held by ${formatLockOwner(lock.owner)} until ${lock.expiresAt}${note}`;
+}
+
+const LOOP_AGENTS = ['claude', 'codex', 'cursor'] as const;
+type LoopAgent = typeof LOOP_AGENTS[number];
+
+/** Exactly one target: `projectId` (each run is a new Pane) or `orchestrationSessionId` (each run messages that Session's agent). */
+interface LoopInput {
+  id?: string;
+  name: string;
+  projectId?: number;
+  /** A Session id; saving also accepts a Session name or `new`. */
+  orchestrationSessionId?: string;
+  cron: string;
+  agent?: LoopAgent;
+  toolCommand?: string;
+  initialInput?: string;
+  worktreeTemplate?: string;
+  enabled: boolean;
+}
+
+interface LoopRun {
+  id: string;
+  loopId: string;
+  slotAtMs: number;
+  trigger: 'schedule' | 'manual';
+  status: 'started' | 'failed' | 'skipped';
+  error: string | null;
+  sessionId: string | null;
+}
+
+/** The CLI's copy of `Loop` in shared/types/loop.ts, which this package cannot import. */
+interface Loop extends Omit<LoopInput, 'id'> {
+  id: string;
+  createdAtMs: number;
+  nextRunAtMs: number | null;
+  scheduleText: string;
+  runs: LoopRun[];
+}
+
+type LoopSchedulePreview = { ok: true; scheduleText: string; nextRunAtMs: number } | { ok: false; error: string };
+
+/** An optional loop field the daemon may send as null. */
+const optionalLoopText = boundary.optional(boundary.nullable(boundary.string));
+const loopRunSchema: BoundarySchema<LoopRun> = boundary.object({
+  id: boundary.string,
+  loopId: boundary.string,
+  slotAtMs: boundary.number,
+  trigger: boundary.enumeration('schedule', 'manual'),
+  status: boundary.enumeration('started', 'failed', 'skipped'),
+  error: boundary.nullable(boundary.string),
+  sessionId: boundary.nullable(boundary.string),
+});
+const loopFieldsSchema = boundary.object({
+  id: boundary.string,
+  name: boundary.string,
+  projectId: boundary.optional(boundary.nullable(boundary.number)),
+  orchestrationSessionId: optionalLoopText,
+  cron: boundary.string,
+  agent: boundary.optional(boundary.nullable(boundary.enumeration(...LOOP_AGENTS))),
+  toolCommand: optionalLoopText,
+  initialInput: optionalLoopText,
+  worktreeTemplate: optionalLoopText,
+  enabled: boundary.boolean,
+  createdAtMs: boundary.number,
+  nextRunAtMs: boundary.nullable(boundary.number),
+  scheduleText: boundary.string,
+  runs: boundary.array(loopRunSchema),
+});
+/** Drops unset optional fields and puts the set ones last; the Python CLI prints loops in this same order. */
+const loopSchema: BoundarySchema<Loop> = {
+  decode(cursor) {
+    const { projectId, orchestrationSessionId, agent, toolCommand, initialInput, worktreeTemplate, ...rest } = loopFieldsSchema.decode(cursor);
+    const loop: Loop = rest;
+    if (projectId) loop.projectId = projectId;
+    if (orchestrationSessionId) loop.orchestrationSessionId = orchestrationSessionId;
+    if (agent) loop.agent = agent;
+    if (toolCommand) loop.toolCommand = toolCommand;
+    if (initialInput) loop.initialInput = initialInput;
+    if (worktreeTemplate) loop.worktreeTemplate = worktreeTemplate;
+    return loop;
+  },
+};
+const loopPreviewSchema: BoundarySchema<LoopSchedulePreview> = boundary.union(
+  boundary.object({ ok: boundary.literal(true), scheduleText: boundary.string, nextRunAtMs: boundary.number }),
+  boundary.object({ ok: boundary.literal(false), error: boundary.string }),
+);
+
+const loopListResultSchema = boundary.object({ ok: boundary.literal(true), loops: boundary.array(loopSchema) });
+const loopResultSchema = boundary.object({ ok: boundary.literal(true), loop: loopSchema });
+const loopDeleteResultSchema = boundary.object({ ok: boundary.literal(true), deleted: boundary.string });
+
+async function listLoops(parsed: ParsedArgs): Promise<Loop[]> {
+  return (await invokeDaemon('runpane:loops:list', [], loopListResultSchema, { paneDir: parsed.paneDir })).loops;
+}
+
+export async function runLoopsList(parsed: ParsedArgs): Promise<number> {
+  const loops = await listLoops(parsed);
+  if (parsed.json) {
+    printJson({ ok: true, loops });
+    return 0;
+  }
+  if (loops.length === 0) {
+    console.log('No loops. Create one with `runpane loops create`.');
+    return 0;
+  }
+  const repoNames = new Map<number, string>();
+  if (loops.some((loop) => loop.projectId)) {
+    const repos = await invokeDaemon('runpane:repos:list', [], repoListResultSchema, { paneDir: parsed.paneDir });
+    for (const repo of repos.repos) repoNames.set(repo.id, repo.name);
+  }
+  const sessionNames = loops.some((loop) => loop.orchestrationSessionId) ? await loopSessionNames(parsed) : new Map<string, string>();
+  for (const loop of loops) {
+    const target = loop.orchestrationSessionId
+      ? describeLoopSession(sessionNames, loop.orchestrationSessionId)
+      : (loop.projectId && repoNames.get(loop.projectId)) || `repo ${loop.projectId}`;
+    const [lastRun] = loop.runs;
+    const last = lastRun ? ` · last ${describeLoopRunStatus(lastRun)} ${formatLoopTime(lastRun.slotAtMs)}` : '';
+    console.log(`${loop.name} (${loop.id}) · ${target} · ${loop.scheduleText} · ${describeNextRun(loop)}${last}`);
+  }
+  return 0;
+}
+
+export async function runLoopsSave(parsed: ParsedArgs): Promise<number> {
+  const input = parsed.command === 'loops update' ? await mergeLoopUpdate(parsed) : await buildLoopCreate(parsed);
+  if (parsed.dryRun) {
+    const preview = await invokeDaemon('runpane:loops:preview', [{ cron: input.cron }], loopPreviewSchema, { paneDir: parsed.paneDir });
+    if (!preview.ok) throw new RunpaneError('ERR_RUNPANE_LOOP_CRON', `${preview.error} Nothing was saved.`, 'Pass a five-field cron such as "0 3 * * *" with --cron.');
+    const result = { ok: true, dryRun: true, input, scheduleText: preview.scheduleText, nextRunAtMs: preview.nextRunAtMs };
+    if (parsed.json) printJson(result);
+    else console.log(`Would save loop ${input.name}: ${preview.scheduleText}, next run ${formatLoopTime(preview.nextRunAtMs)}${input.enabled ? '' : ' (paused)'}.`);
+    return 0;
+  }
+  await confirmMutation(parsed);
+  const { loop } = await invokeDaemon('runpane:loops:save', [input], loopResultSchema, { paneDir: parsed.paneDir });
+  if (parsed.json) printJson({ ok: true, loop });
+  else console.log(`Saved loop ${loop.name} (${loop.id}): ${loop.scheduleText}, ${describeNextRun(loop)}.`);
+  return 0;
+}
+
+/** A started run with a warning needs the person, as the app shows it. */
+function describeLoopRunStatus(run: LoopRun): string {
+  return run.status === 'started' && run.error ? 'needs attention' : run.status;
+}
+
+export async function runLoopsRun(parsed: ParsedArgs): Promise<number> {
+  const id = requireLoopId(parsed);
+  await confirmMutation(parsed);
+  const { loop } = await invokeDaemon('runpane:loops:run-now', [{ loopId: id }], loopResultSchema, { paneDir: parsed.paneDir });
+  const [run] = loop.runs;
+  if (parsed.json) {
+    printJson({ ok: true, loop });
+  } else if (run?.status === 'failed') {
+    console.log(`Run of ${loop.name} failed: ${run.error ?? 'unknown error'}`);
+  } else {
+    // A Session run with a warning was held, so it was not sent.
+    const session = loop.orchestrationSessionId ? describeLoopSession(await loopSessionNames(parsed), loop.orchestrationSessionId) : undefined;
+    const started = !session ? `Started a run of ${loop.name}${run?.sessionId ? ` in Pane ${run.sessionId}` : ''}`
+      : run?.error ? `Started a run of ${loop.name} for ${session}` : `Sent a run of ${loop.name} to ${session}`;
+    console.log(run?.error ? `${started}; it needs attention: ${run.error}` : `${started}.`);
+  }
+  return run?.status === 'failed' ? 1 : 0;
+}
+
+export async function runLoopsSetEnabled(parsed: ParsedArgs, enabled: boolean): Promise<number> {
+  const id = requireLoopId(parsed);
+  await confirmMutation(parsed);
+  const { loop } = await invokeDaemon('runpane:loops:set-enabled', [{ loopId: id, enabled }], loopResultSchema, { paneDir: parsed.paneDir });
+  if (parsed.json) printJson({ ok: true, loop });
+  else console.log(enabled ? `Resumed loop ${loop.name}: ${describeNextRun(loop)}.` : `Paused loop ${loop.name}.`);
+  return 0;
+}
+
+export async function runLoopsDelete(parsed: ParsedArgs): Promise<number> {
+  const id = requireLoopId(parsed);
+  await confirmMutation(parsed);
+  await invokeDaemon('runpane:loops:delete', [{ loopId: id }], loopDeleteResultSchema, { paneDir: parsed.paneDir });
+  if (parsed.json) printJson({ ok: true, deleted: id });
+  else console.log(`Deleted loop ${id}.`);
+  return 0;
+}
+
+/** Session names by id, for naming a Session loop's target. */
+async function loopSessionNames(parsed: ParsedArgs): Promise<Map<string, string>> {
+  const { sessions } = await invokeDaemon('runpane:sessions:list', [], runpaneSessionListResultSchema, { paneDir: parsed.paneDir });
+  return new Map(sessions.map((session) => [session.id, session.name]));
+}
+
+function describeLoopSession(sessionNames: Map<string, string>, sessionId: string): string {
+  return `Session ${sessionNames.get(sessionId) ?? sessionId}`;
+}
+
+function requireLoopId(parsed: ParsedArgs): string {
+  const id = parsed.loopId?.trim();
+  if (!id) throw new Error(`runpane ${parsed.command} requires --loop <id>. See ids with \`runpane loops list\`.`);
+  return id;
+}
+
+function loopAgent(parsed: ParsedArgs): LoopAgent | undefined {
+  const agent = parsed.agent;
+  if (agent === undefined) return undefined;
+  if (agent === 'claude' || agent === 'codex' || agent === 'cursor') return agent;
+  throw new Error(`Loops run ${LOOP_AGENTS.join(', ')}, or any command with --tool-command; got --agent ${agent}.`);
+}
+
+/** The project id `--repo` names, resolved by the daemon exactly as `panes list --repo` resolves it. */
+async function resolveLoopProjectId(parsed: ParsedArgs, repo: string): Promise<number> {
+  const result = await invokeDaemon('runpane:panes:list', [{ repo }], paneListResultSchema, { paneDir: parsed.paneDir });
+  if (!result.repo) throw new Error(`No Pane repo matches --repo ${repo}. See saved repos with \`runpane repos list\`.`);
+  return result.repo.id;
+}
+
+async function buildLoopCreate(parsed: ParsedArgs): Promise<LoopInput> {
+  const name = parsed.name?.trim();
+  const session = parsed.sessionId?.trim();
+  if (parsed.repo && session) throw new Error('runpane loops create takes either --repo or --session, not both.');
+  if ((!parsed.repo && !session) || !name || !parsed.cron) {
+    throw new Error('runpane loops create requires --repo <selector> or --session <id|name|new>, --name <name>, and --cron <expr>.');
+  }
+  const agent = loopAgent(parsed);
+  if (agent && parsed.toolCommand) throw new Error('runpane loops create takes either --agent or --tool-command, not both.');
+  if (!agent && !parsed.toolCommand) throw new Error('runpane loops create requires either --agent or --tool-command.');
+  return withoutEmptyLoopFields({
+    name,
+    projectId: parsed.repo ? await resolveLoopProjectId(parsed, parsed.repo) : undefined,
+    orchestrationSessionId: session,
+    cron: parsed.cron,
+    agent,
+    toolCommand: parsed.toolCommand,
+    initialInput: resolveInitialInput(parsed),
+    worktreeTemplate: parsed.worktreeName,
+    enabled: !parsed.paused,
+  });
+}
+
+/** Reads the loop and replaces the fields the flags name; --agent and --tool-command replace each other, as do --repo and --session. */
+async function mergeLoopUpdate(parsed: ParsedArgs): Promise<LoopInput> {
+  const id = requireLoopId(parsed);
+  if (parsed.paused) throw new Error('runpane loops update does not take --paused. Use `runpane loops pause --loop <id>`.');
+  const agent = loopAgent(parsed);
+  if (agent && parsed.toolCommand) throw new Error('Pass either --agent or --tool-command, not both.');
+  const session = parsed.sessionId?.trim();
+  if (parsed.repo && session) throw new Error('Pass either --repo or --session, not both.');
+  const loops = await listLoops(parsed);
+  const loop = loops.find((candidate) => candidate.id === id);
+  if (!loop) throw new RunpaneError('ERR_RUNPANE_LOOP_NOT_FOUND', `No loop found with id ${id}. Nothing was changed.`, 'See loop ids with `runpane loops list`.');
+  const replacesTool = Boolean(agent || parsed.toolCommand);
+  const replacesTarget = Boolean(parsed.repo || session);
+  const initialInput = resolveInitialInput(parsed);
+  return withoutEmptyLoopFields({
+    id,
+    name: parsed.name?.trim() || loop.name,
+    projectId: parsed.repo ? await resolveLoopProjectId(parsed, parsed.repo) : replacesTarget ? undefined : loop.projectId,
+    orchestrationSessionId: replacesTarget ? session : loop.orchestrationSessionId,
+    cron: parsed.cron ?? loop.cron,
+    agent: replacesTool ? agent : loop.agent,
+    toolCommand: replacesTool ? parsed.toolCommand : loop.toolCommand,
+    initialInput: initialInput ?? loop.initialInput,
+    worktreeTemplate: parsed.worktreeName ?? loop.worktreeTemplate,
+    enabled: loop.enabled,
+  });
+}
+
+/** Leaves out the optional fields that are unset or blank, so the daemon stores them as absent. */
+function withoutEmptyLoopFields(input: LoopInput): LoopInput {
+  const { projectId, orchestrationSessionId, agent, toolCommand, initialInput, worktreeTemplate, ...rest } = input;
+  const result: LoopInput = rest;
+  if (projectId) result.projectId = projectId;
+  if (orchestrationSessionId) result.orchestrationSessionId = orchestrationSessionId;
+  if (agent) result.agent = agent;
+  if (toolCommand?.trim()) result.toolCommand = toolCommand;
+  if (initialInput?.trim()) result.initialInput = initialInput;
+  if (worktreeTemplate?.trim()) result.worktreeTemplate = worktreeTemplate;
+  return result;
+}
+
+function describeNextRun(loop: Loop): string {
+  if (!loop.enabled) return 'paused';
+  return loop.nextRunAtMs === null ? 'no next run' : `next run ${formatLoopTime(loop.nextRunAtMs)}`;
+}
+
+/** Local time as YYYY-MM-DD HH:MM, matching the loop's local-time cron. */
+function formatLoopTime(ms: number): string {
+  const date = new Date(ms);
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 function sessionSelectorFromParsed(parsed: ParsedArgs): SessionSelectorValue {

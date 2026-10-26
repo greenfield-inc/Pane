@@ -1,6 +1,6 @@
 import { CompactSessionMenu, type CompactSessionMenuState } from './CompactSessionMenu';
 import { useState, useEffect, useMemo, useCallback, useRef, useId } from 'react';
-import { Check, ChevronDown, ChevronRight, Plus, GitBranch, MoreHorizontal, Archive, ArchiveRestore, Trash2, GitPullRequest, GitPullRequestDraft, Pin, Monitor, MessageSquare, Settings, LayoutGrid, Server } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, Plus, GitBranch, MoreHorizontal, Archive, ArchiveRestore, Trash2, GitPullRequest, GitPullRequestDraft, Pin, Monitor, MessageSquare, Settings, LayoutGrid, Server, Repeat } from 'lucide-react';
 import { SessionDetailTooltip } from './SessionDetailTooltip';
 import { useSessionStore } from '../stores/sessionStore';
 import { useNavigationStore } from '../stores/navigationStore';
@@ -27,6 +27,8 @@ import { useAttentionInboxStore } from '../stores/attentionInboxStore';
 import { rollupSessionAgentState } from '../utils/agentStatus';
 import { OrchestrationSessionNav } from './OrchestrationSessionNav';
 import { useSshHostsStore } from '../stores/sshHostsStore';
+import { navigateToLoops, useLoopsStore } from '../stores/loopsStore';
+import { useAnyLoopRunning } from './loops/loopRunView';
 import { SSH_HOSTS_SESSION_ID } from '../../../shared/types/sshHosts';
 import type { TerminalPanelState } from '../../../shared/types/panels';
 import {
@@ -435,6 +437,8 @@ export function ProjectSessionList({
           </button>
         ) : null}
 
+        <LoopsNavRow active={activeView === 'loops'} />
+
         {missionControlEnabled && (
           <button
             type="button"
@@ -705,6 +709,40 @@ export function ProjectSessionList({
 
 
 
+// --- Loops nav entry ---
+
+/** Opens the Loops page; shows how many loops exist and a blue dot while any run is working. */
+function LoopsNavRow({ active }: { active: boolean }) {
+  const loops = useLoopsStore(s => s.loops);
+  const running = useAnyLoopRunning(loops);
+  return (
+    <button
+      type="button"
+      data-testid="loops-nav"
+      onClick={() => navigateToLoops()}
+      className={cn(
+        SIDEBAR_ROW_BASE,
+        SIDEBAR_ROW_GAP,
+        SIDEBAR_ROW_PADDING,
+        'h-7 rounded-md text-[13px] hover:bg-surface-hover hover:text-text-primary',
+        active ? 'bg-surface-hover text-text-primary' : 'text-text-secondary',
+      )}
+    >
+      <Repeat className="h-3.5 w-3.5" />
+      <span>Loops</span>
+      {loops.length > 0 && (
+        <span className="ml-auto flex items-center gap-1 text-[11px] tabular-nums text-text-tertiary">
+          {/* The dot keeps its box while hidden, so the count never shifts. */}
+          <span className="flex h-3 w-3 items-center justify-center" aria-hidden="true">
+            <span className={cn('h-1.5 w-1.5 rounded-full bg-status-info', !running && 'invisible')} />
+          </span>
+          <span aria-label={running ? `${loops.length} loops, a run in progress` : `${loops.length} loops`}>{loops.length}</span>
+        </span>
+      )}
+    </button>
+  );
+}
+
 // --- Attention inbox footer ---
 
 /** Hosts from the SSH config; hidden when it lists none. A click shows the host's tab in the SSH view. */
@@ -833,6 +871,7 @@ function SessionRowContent({
   showUnviewedCompleted,
   agentDisplayStatus,
   rowLayout,
+  isLoopRun,
 }: {
   session: Session;
   gs: GitStatus | undefined;
@@ -846,10 +885,13 @@ function SessionRowContent({
   showUnviewedCompleted: boolean;
   agentDisplayStatus: AgentDisplayStatus;
   rowLayout: SidebarPaneRowLayout;
+  isLoopRun: boolean;
 }) {
   const title = displayName || gs?.prTitle || session.name || 'Untitled';
   const prNumber = gs?.prNumber;
   const PullRequestIcon = gs?.prIsDraft ? GitPullRequestDraft : GitPullRequest;
+  // A loop's run Pane wears the loop icon until it has a PR.
+  const BranchIcon = isLoopRun ? Repeat : GitBranch;
   const showMetadata = Boolean(prNumber || hasDiff || session.worktreeOwnership === 'external');
   // The repository yields all its space before the Pane name gives up any.
   const repositoryLabel = repositoryName ? (
@@ -862,7 +904,7 @@ function SessionRowContent({
         {prNumber ? (
           <PullRequestIcon className={`w-3.5 h-3.5 flex-shrink-0 ${iconColor}`} />
         ) : (
-          <GitBranch className={`w-3.5 h-3.5 flex-shrink-0 ${iconColor}`} />
+          <BranchIcon className={`w-3.5 h-3.5 flex-shrink-0 ${iconColor}`} />
         )}
         <AgentStatusDot status={agentDisplayStatus} size="sm" className="flex-shrink-0" />
         <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
@@ -884,7 +926,7 @@ function SessionRowContent({
       {prNumber ? (
         <PullRequestIcon className={`mt-0.5 w-3.5 h-3.5 flex-shrink-0 ${iconColor}`} />
       ) : (
-        <GitBranch className={`mt-0.5 w-3.5 h-3.5 flex-shrink-0 ${iconColor}`} />
+        <BranchIcon className={`mt-0.5 w-3.5 h-3.5 flex-shrink-0 ${iconColor}`} />
       )}
       <AgentStatusDot status={agentDisplayStatus} size="sm" className="mt-0.5 flex-shrink-0" />
       <div className="flex min-w-0 flex-1 flex-col">
@@ -950,6 +992,7 @@ function SessionRow({
 
   const hasUnviewedCompletedActivity = usePanelStore(s => Boolean(s.unviewedCompletedActivity[session.id]));
   const agentDisplayStatus = useSessionAgentDisplayStatus(session.id);
+  const isLoopRun = useLoopsStore(s => s.runsBySessionId.has(session.id));
 
   // Queue the initial refresh even when cached status is available, so cached
   // PR state is corrected by the background git/PR refresh path.
@@ -1040,6 +1083,7 @@ function SessionRow({
           showUnviewedCompleted={hasUnviewedCompletedActivity && !isActive && !showActivity}
           agentDisplayStatus={agentDisplayStatus}
           rowLayout={rowLayout}
+          isLoopRun={isLoopRun}
         />
       </div>
 
