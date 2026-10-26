@@ -151,11 +151,11 @@ describe('addRunpaneToUserPath', () => {
     fs.mkdirSync(binDir, { recursive: true });
   });
 
-  it('appends the zsh block to ~/.zprofile once', async () => {
-    expect(await add('/bin/zsh')).toEqual([path.join(home, '.zprofile')]);
-    expect(read('.zprofile')).toBe(posixBlock());
+  it('appends the zsh block to ~/.zshenv once', async () => {
+    expect(await add('/bin/zsh')).toEqual([path.join(home, '.zshenv')]);
+    expect(read('.zshenv')).toBe(posixBlock());
     expect(await add('/bin/zsh')).toEqual([]);
-    expect(read('.zprofile')).toBe(posixBlock());
+    expect(read('.zshenv')).toBe(posixBlock());
   });
 
   it('appends to ~/.bashrc, and ~/.bash_profile on macOS', async () => {
@@ -187,25 +187,25 @@ describe('addRunpaneToUserPath', () => {
   });
 
   it('leaves a file that already puts the directory on PATH alone', async () => {
-    fs.writeFileSync(path.join(home, '.zprofile'), 'export PATH="$HOME/.pane/bin:$PATH"\n');
+    fs.writeFileSync(path.join(home, '.zshenv'), 'export PATH="$HOME/.pane/bin:$PATH"\n');
     expect(await add('/bin/zsh')).toEqual([]);
-    expect(read('.zprofile')).toBe('export PATH="$HOME/.pane/bin:$PATH"\n');
+    expect(read('.zshenv')).toBe('export PATH="$HOME/.pane/bin:$PATH"\n');
   });
 
   it('never follows a symbolic link', async () => {
-    const dotfile = path.join(root, 'dotfiles', 'zprofile');
+    const dotfile = path.join(root, 'dotfiles', 'zshenv');
     fs.mkdirSync(path.dirname(dotfile));
     fs.writeFileSync(dotfile, 'mine\n');
-    fs.symlinkSync(dotfile, path.join(home, '.zprofile'));
+    fs.symlinkSync(dotfile, path.join(home, '.zshenv'));
     expect(await add('/bin/zsh')).toEqual([]);
     expect(fs.readFileSync(dotfile, 'utf8')).toBe('mine\n');
   });
 
   it('does not add the block back after the user removes it', async () => {
     await add('/bin/zsh');
-    fs.writeFileSync(path.join(home, '.zprofile'), '');
+    fs.writeFileSync(path.join(home, '.zshenv'), '');
     expect(await add('/bin/zsh')).toEqual([]);
-    expect(read('.zprofile')).toBe('');
+    expect(read('.zshenv')).toBe('');
   });
 
   it('writes nothing with OS integration disabled, or outside the installed app', async () => {

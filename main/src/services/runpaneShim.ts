@@ -369,7 +369,8 @@ function shellStartupFiles(home: string, loginShell: string, platform: NodeJS.Pl
   const shell = path.basename(loginShell);
   const bashProfile = path.join(home, '.bash_profile');
   const files = platform === 'darwin' && (shell === 'bash' || fs.existsSync(bashProfile)) ? [bashProfile] : [];
-  if (shell === 'zsh') files.unshift(path.join(home, '.zprofile'));
+  // zsh reads .zshenv in every shell, login or not, on macOS and Linux alike.
+  if (shell === 'zsh') files.unshift(path.join(home, '.zshenv'));
   if (shell === 'bash') files.unshift(path.join(home, '.bashrc'));
   if (shell === 'fish') files.unshift(path.join(home, '.config', 'fish', 'conf.d', 'pane.fish'));
   return files;

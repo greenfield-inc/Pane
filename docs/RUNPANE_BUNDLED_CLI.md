@@ -25,6 +25,9 @@ same command to the end of your own `PATH`, so it works in any terminal.
   run `npx --yes runpane@latest update`. When Pane is not running,
   `runpane update` installs the latest release instead of updating in place,
   so it works in this state.
+- The shim checks only that the binary exists and is executable. If the
+  binary exists but crashes on launch, `runpane` fails with it; run
+  `npx --yes runpane@latest update` to reinstall Pane.
 - Terminal launches put `<PANE_DIR>/bin` first on `PATH` and export
   `PANE_RUNPANE_BIN` with the shim's absolute path. User startup files can
   rebuild `PATH`, so supported shells re-apply it afterwards:
@@ -54,7 +57,7 @@ so a `runpane` you installed with npm keeps winning outside Pane.
 - **macOS and Linux:** Pane appends a block marked `pane-runpane-path v1` to
   the startup files of your login shell. The block adds the directory only if
   `PATH` does not already contain it.
-  - zsh: `~/.zprofile` (created if missing)
+  - zsh: `~/.zshenv` (created if missing), which zsh reads in every shell
   - bash: `~/.bashrc`, plus `~/.bash_profile` on macOS
   - fish: `~/.config/fish/conf.d/pane.fish`
   - On macOS, an existing `~/.bash_profile` also gets the block when your
@@ -68,6 +71,8 @@ so a `runpane` you installed with npm keeps winning outside Pane.
   Terminals opened afterwards find `runpane`; already open ones keep their
   old `PATH`.
 - **WSL:** unchanged. Windows `PATH` changes do not reach the distro.
+- **Remote daemon hosts** (`runpane install daemon`): unchanged. Only the
+  desktop app edits `PATH`; on a server, install `runpane` with npm.
 
 Pane changes each file, and the Windows `PATH`, at most once, and records
 what it changed in `<PANE_DIR>/bin/user-path.json`. Pane skips all of this when
