@@ -2,6 +2,7 @@ import { validateCustomCommandResume } from '../../../shared/types/customCommand
 import { EventEmitter } from 'events';
 import type { AnalyticsIdentity, AppConfig } from '../types/config';
 import { DEFAULT_PANE_CHAT_AGENT, normalizePaneChatAgent } from '../../../shared/types/paneChat';
+import { DEFAULT_TERMINAL_FONT_SIZE } from '../../../shared/types/appearance';
 import { createDefaultRemoteDaemonConfig, normalizeRemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
 import type { WorktreeFileSyncEntry } from '../../../shared/types/worktreeFileSync';
 import { DEFAULT_WORKTREE_FILE_SYNC_ENTRIES } from '../../../shared/types/worktreeFileSync';
@@ -66,7 +67,7 @@ export class ConfigManager extends EventEmitter {
       systemDarkTheme: 'dark',
       highContrast: false,
       terminalFontFamily: 'Geist Mono',
-      terminalFontSize: 14,
+      terminalFontSize: DEFAULT_TERMINAL_FONT_SIZE,
       terminalPowerMode: 'performance',
       defaultPermissionMode: 'ignore',
       defaultModel: 'sonnet',

@@ -35,6 +35,7 @@ import { useTerminalSearch } from '../../hooks/useTerminalSearch';
 import { useScrollSurface } from '../../hooks/useScrollSurface';
 import { TerminalSearchOverlay } from '../terminal/TerminalSearchOverlay';
 import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
+import { DEFAULT_TERMINAL_FONT_SIZE } from '../../../../shared/types/appearance';
 import {
   loadTerminalCapabilities, terminalCapabilityOptions, type LoadedTerminalCapabilities,
 } from '../../utils/terminalCapabilities';
@@ -107,7 +108,6 @@ interface TerminalRestoreState {
   cursorY?: number;
 }
 
-const DEFAULT_TERMINAL_FONT_SIZE = 14;
 const WEBGL_APP_BLUR_DETACH_DELAY_MS = 10_000;
 const REFOCUS_DELAYED_REFRESH_MS = 300;
 const TERMINAL_ACTIVATION_MASK_AFTER_PAINT_MS = 200;
