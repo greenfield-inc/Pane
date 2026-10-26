@@ -20,6 +20,7 @@ import fs from 'fs';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import path from 'path';
 import type { PtyHostSpawnOpts } from '../ptyHost/types';
+import { RUNPANE_PATH_FLAGS, RUNPANE_WSL_PATH_FUNCTIONS, WSLPATH } from '../utils/wslUtils';
 
 /** Environment handed to a terminal spawn. */
 type SpawnEnv = PtyHostSpawnOpts['env'];
@@ -95,7 +96,9 @@ function ensureDirectory(directory: string): void {
 
 /**
  * Inside WSL, the Windows binary runs through interop. Its Windows paths stay
- * as they are, except the executable, which the distro needs as a Linux path.
+ * as they are; the executable becomes a Linux path, and a Linux PANE_DIR and
+ * path-valued flags become Windows paths. WSL Session terminals use
+ * sessionWSLBridge.ts instead, a PowerShell bridge pinned to their Session.
  */
 function wslShimLines(execPath: string, cliPath: string): string[] {
   return [
@@ -104,8 +107,30 @@ function wslShimLines(execPath: string, cliPath: string): string[] {
     '    echo "runpane: WSL interop is off in $WSL_DISTRO_NAME, so it cannot start Pane\'s Windows CLI. Nothing was run. Set enabled=true under [interop] in /etc/wsl.conf, then run wsl.exe --shutdown from Windows." >&2',
     '    exit 126',
     '  fi',
+    ...RUNPANE_WSL_PATH_FUNCTIONS.map(line => `  ${line}`),
+    '  case "$PANE_DIR" in /*) PANE_DIR=$(pane_windows_path "$PANE_DIR") ;; esac',
+    '  # Rebuild "$@" with path values converted; everything after -- passes through.',
+    '  pane_count=$# pane_next= pane_rest=',
+    '  while [ "$pane_count" -gt 0 ]; do',
+    '    pane_arg=$1; shift; pane_count=$((pane_count - 1))',
+    '    case "$pane_next" in',
+    '      path) pane_arg=$(pane_windows_path "$pane_arg") ;;',
+    '      repo) pane_arg=$(pane_repo_selector "$pane_arg") ;;',
+    '    esac',
+    '    pane_next=',
+    '    if [ -z "$pane_rest" ]; then',
+    '      case "$pane_arg" in',
+    '        --) pane_rest=1 ;;',
+    '        --repo=*) pane_arg="--repo=$(pane_repo_selector "${pane_arg#*=}")" ;;',
+    '        --repo) pane_next=repo ;;',
+    `        ${RUNPANE_PATH_FLAGS.map(flag => `${flag}=*`).join('|')}) pane_arg="\${pane_arg%%=*}=$(pane_windows_path "\${pane_arg#*=}")" ;;`,
+    `        ${RUNPANE_PATH_FLAGS.join('|')}) pane_next=path ;;`,
+    '      esac',
+    '    fi',
+    '    set -- "$@" "$pane_arg"',
+    '  done',
     '  WSLENV="${WSLENV:+$WSLENV:}ELECTRON_RUN_AS_NODE:PANE_DIR"; export WSLENV',
-    `  ELECTRON_RUN_AS_NODE=1 exec "$(wslpath -u ${shellQuote(execPath)})" ${shellQuote(cliPath)} "$@"`,
+    `  ELECTRON_RUN_AS_NODE=1 exec "$(${WSLPATH} -u ${shellQuote(execPath)})" ${shellQuote(cliPath)} "$@"`,
     'fi',
   ];
 }
@@ -226,9 +251,12 @@ function wslBashRcFile(binDir: string): string {
     'if [ -f "$HOME/.bash_profile" ]; then . "$HOME/.bash_profile"',
     'elif [ -f "$HOME/.bash_login" ]; then . "$HOME/.bash_login"',
     'elif [ -f "$HOME/.profile" ]; then . "$HOME/.profile"; fi',
-    `_pane_runpane_dir=$(wslpath -u ${shellQuote(binDir)})`,
+    `_pane_runpane_dir=$(${WSLPATH} -u ${shellQuote(binDir)} 2>/dev/null)`,
+    '# An empty dir would put the current folder on PATH.',
+    'if [ -n "$_pane_runpane_dir" ]; then',
     'export PANE_RUNPANE_BIN="$_pane_runpane_dir/runpane"',
     ...bashPathLines('"$_pane_runpane_dir"'),
+    'fi',
     '',
   ].join('\n');
 }

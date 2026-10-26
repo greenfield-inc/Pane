@@ -170,6 +170,30 @@ export function buildWSLENV(varNames: readonly string[]): string {
   return existing ? `${existing}:${ours}` : ours;
 }
 
+/** WSL creates this link on WSL1 and WSL2; an absolute path ignores the user's PATH. */
+export const WSLPATH = '/bin/wslpath';
+
+/** runpane flags whose values are file paths, which a Windows CLI needs as Windows paths. */
+export const RUNPANE_PATH_FLAGS = [
+  '--pane-dir', '--pane-path', '--download-dir', '--file', '--path', '--input-file', '--initial-input-file',
+  '--prompt-file', '--attach', '--body-file', '--summary-file', '--from-json',
+];
+
+/**
+ * POSIX shell functions that WSL-to-Windows runpane bridges use on argument
+ * values: `pane_windows_path` converts a Linux path (left as is when already
+ * Windows-shaped or unconvertible), `pane_repo_selector` converts a --repo
+ * value only when it looks like a path rather than a repo name or id.
+ */
+export const RUNPANE_WSL_PATH_FUNCTIONS = [
+  'pane_windows_path() {',
+  String.raw`  case "$1" in -|[A-Za-z]:*|\*) printf %s "$1" ;; *) ${WSLPATH} -aw "$1" 2>/dev/null || printf %s "$1" ;; esac`,
+  '}',
+  'pane_repo_selector() {',
+  '  case "$1" in /*|./*|../*|.|..) pane_windows_path "$1" ;; *) printf %s "$1" ;; esac',
+  '}',
+];
+
 /**
  * Get shell spawn info for opening an interactive WSL terminal.
  * Returns shape compatible with ShellDetector's ShellInfo.
@@ -182,7 +206,7 @@ export function getWSLShellSpawn(distro: string, cwd?: string, windowsRcFile?: s
   const args = ['-d', distro, '--exec', 'bash'];
   // A Windows rcfile (Pane's runpane PATH setup) replaces the login shell when the distro can read it.
   const shell = windowsRcFile
-    ? `{ rc=$(wslpath -u ${escapeForBash(windowsRcFile)} 2>/dev/null) && [ -r "$rc" ] && exec bash --rcfile "$rc" -i; exec bash --login; }`
+    ? `{ rc=$(${WSLPATH} -u ${escapeForBash(windowsRcFile)} 2>/dev/null) && [ -r "$rc" ] && exec bash --rcfile "$rc" -i; exec bash --login; }`
     : 'exec bash --login';
   if (cwd) {
     args.push('-c', `cd ${escapeForBash(cwd)} && ${shell}`);
