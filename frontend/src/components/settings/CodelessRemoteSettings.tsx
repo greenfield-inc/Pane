@@ -45,6 +45,8 @@ const STATE_TEXT = {
 
 interface CodelessRemoteSettingsProps {
   connectionState: RemotePaneConnectionState;
+  /** Wraps a connect so Settings closes once its checklist card appears. */
+  showChecklist: <T>(connect: () => Promise<T>) => Promise<T>;
   /** Hosts saved from connection codes, listed with the Tailscale machines. */
   otherHosts?: ReactNode;
   /** The last row of the access section. */
@@ -55,7 +57,7 @@ interface CodelessRemoteSettingsProps {
  * Codeless remote access over Tailscale: the machines this app can connect to with one click,
  * and who may connect to this machine (visibility, plus an optional password).
  */
-export function CodelessRemoteSettings({ connectionState, otherHosts, accessFooter }: CodelessRemoteSettingsProps) {
+export function CodelessRemoteSettings({ connectionState, showChecklist, otherHosts, accessFooter }: CodelessRemoteSettingsProps) {
   const fetchConfig = useConfigStore((state) => state.fetchConfig);
   const [access, setAccess] = useState<WorkspaceAccessSummary | null>(null);
   const [machines, setMachines] = useState<TailnetMachineList | null>(null);
@@ -148,7 +150,8 @@ export function CodelessRemoteSettings({ connectionState, otherHosts, accessFoot
         setError(saved.error ?? `Could not connect to ${machine.name}.`);
         return;
       }
-      const switched = await API.remoteDaemon.updateClientState({ activeProfileId: saved.data.id, mode: 'remote' });
+      const profileId = saved.data.id;
+      const switched = await showChecklist(() => API.remoteDaemon.updateClientState({ activeProfileId: profileId, mode: 'remote' }));
       if (!switched.success) {
         setError(switched.error ?? `Could not connect to ${machine.name}.`);
         return;

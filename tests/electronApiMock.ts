@@ -1375,6 +1375,13 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           subscribe('remote-daemon:connection-state-changed', callback),
         onHostStateChanged: (callback: MockEventCallback) =>
           subscribe('remote-daemon:host-state-changed', callback),
+        onSetupProgress: (callback: MockEventCallback) =>
+          subscribe('remote-daemon:setup-progress', callback),
+        runCheckFix: () => success(clone(remoteConnectionState)),
+        dismissCheck: () => {
+          setRemoteConnectionState({ check: null });
+          return success(clone(remoteConnectionState));
+        },
       }),
       uiState: namespace({
         getExpanded: () => {

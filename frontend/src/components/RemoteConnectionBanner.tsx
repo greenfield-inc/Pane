@@ -29,7 +29,10 @@ export function RemoteConnectionBanner({ onSettings }: { onSettings: () => void 
     const timer = setTimeout(() => setUnknownDelivery(null), DELIVERY_UNKNOWN_CLEAR_MS);
     return () => clearTimeout(timer);
   }, [unknownDelivery, connected]);
-  const connectionProblem = !connected && (outageIsLong || state.status === 'error' || Boolean(state.updateIntent));
+  // The connection checklist card speaks for the connection while it shows.
+  const checkShowing = Boolean(state.check && state.check.outcome !== 'passed');
+  const connectionProblem = !connected && !checkShowing && (outageIsLong || state.status === 'error' || Boolean(state.updateIntent));
+  const reconnecting = !state.updateIntent && state.status !== 'restoring' && state.status !== 'error';
   if (!unknownDelivery && !connectionProblem) return null;
   const retry = async () => {
     if (retrying) return;
@@ -48,7 +51,7 @@ export function RemoteConnectionBanner({ onSettings }: { onSettings: () => void 
       </div>
       <div className="flex shrink-0 gap-3">
         {unknownDelivery && <button type="button" onClick={() => setUnknownDelivery(null)}>Dismiss</button>}
-        {connectionProblem && <button type="button" disabled={retrying || state.status === 'restoring'} onClick={() => void retry()}>Retry now</button>}
+        {connectionProblem && <button type="button" disabled={retrying || state.status === 'restoring'} onClick={() => void retry()}>{reconnecting ? 'Check connection' : 'Retry now'}</button>}
         <button type="button" onClick={onSettings}>Connection settings</button>
       </div>
     </div>

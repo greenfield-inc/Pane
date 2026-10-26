@@ -53,6 +53,7 @@ export type SettingsSettingId =
   | 'notification-sound'
   | 'desktop-notifications'
   | 'remote-pane'
+  | 'remote-add-code'
   | 'remote-machines'
   | 'remote-visibility'
   | 'remote-password'

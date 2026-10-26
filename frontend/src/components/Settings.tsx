@@ -54,6 +54,7 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
   const [platform, setPlatform] = useState('darwin');
   const [systemMonoFonts, setSystemMonoFonts] = useState<string[]>([]);
   const [remoteSubview, setRemoteSubview] = useState<RemoteAccessSubviewId | undefined>();
+  const [addCodeRequest, setAddCodeRequest] = useState<number>();
   const handledRequestRef = useRef<number | null>(null);
   const fontsLoadedRef = useRef(false);
   const remote = useRemoteAccessSettings(isOpen, onClose);
@@ -87,6 +88,7 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
     requestTransition(() => {
       onCategoryChange(openRequest.target.category);
       setRemoteSubview(openRequest.target.subview);
+      if (openRequest.target.setting === 'remote-add-code') setAddCodeRequest(openRequest.nonce);
       focusSetting(openRequest.target.setting);
     });
     onOpenRequestHandled();
@@ -147,7 +149,7 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
       case 'remote-access':
         return remoteSubview
           ? <RemoteAccessWorkflows subview={remoteSubview} controller={remote} onBack={() => requestTransition(() => setRemoteSubview(undefined))} {...sharedDirtyProps} />
-          : <RemoteAccessSettings controller={remote} onOpenSubview={openRemoteSubview} />;
+          : <RemoteAccessSettings controller={remote} onOpenSubview={openRemoteSubview} addCodeRequest={addCodeRequest} />;
       case 'integrations':
         return <IntegrationsSettings persistence={persistence} {...sharedDirtyProps} />;
       case 'shortcuts':
