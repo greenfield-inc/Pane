@@ -282,18 +282,21 @@ describe('pane creation name reuse', () => {
 
   it('tells a whenSessionCreated listener about a Pane whose panel setup fails', async () => {
     let failSetup: (error: Error) => void = () => {};
-    vi.spyOn(panelManager, 'ensureExplorerPanel').mockReturnValueOnce(new Promise((_resolve, reject) => { failSetup = reject; }));
+    const setupStarted = new Promise<void>(resolve => {
+      vi.spyOn(panelManager, 'ensureExplorerPanel').mockImplementationOnce(() => {
+        resolve();
+        return new Promise((_resolve, reject) => { failSetup = reject; });
+      });
+    });
     const job = await queue.createSession({
       projectId: project.id, worktreeTemplate: 'Feature', prompt: '', toolType: 'none', baseBranch: 'main',
     });
-    const listener = vi.fn();
-    queue.whenSessionCreated(job, listener);
-    await vi.waitFor(() => expect(panelManager.ensureExplorerPanel).toHaveBeenCalledOnce());
+    const created = new Promise<string>(resolve => queue.whenSessionCreated(job, resolve));
+    await setupStarted;
 
     failSetup(new Error('Panel setup failed'));
 
-    await vi.waitFor(() => expect(listener).toHaveBeenCalledOnce());
-    const [createdId] = listener.mock.calls[0];
+    const createdId = await created;
     expect(database.getSession(createdId)?.name).toBe('Feature');
     expect(queueOptions.sessionManager.emitSessionCreated).toHaveBeenCalledWith(expect.objectContaining({ id: createdId, status: 'error' }), expect.anything());
   });
