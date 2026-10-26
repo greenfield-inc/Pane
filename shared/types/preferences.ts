@@ -22,7 +22,8 @@ const preferenceMapSchema: BoundarySchema<Record<string, string>> = {
   },
 };
 
-function readResponse<Value, T>(value: Value, schema: BoundarySchema<T>): T {
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- Raw IPC envelopes are decoded against the success/failure schema before use.
+function readResponse<T>(value: unknown, schema: BoundarySchema<T>): T {
   const response = decodeBoundary(value, boundary.union(
     boundary.object({ success: boundary.literal(true), data: schema }),
     failureSchema,
