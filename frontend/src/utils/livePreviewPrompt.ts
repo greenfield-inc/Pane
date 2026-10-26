@@ -35,11 +35,13 @@ export function livePreviewPortFor({ paneId, projectId, ports, panels, viewingRe
     const port = url ? loopbackPortOf(url) : null;
     return port === null ? [] : [port];
   }));
-  const candidates = ports.ports
-    .filter(port => port.group === 'pane-terminal' && port.sessionId === paneId && port.kind === 'web')
-    .map(port => port.port)
-    .filter(port => !shownPorts.has(port) && !answered.has(pairKey(paneId, port)));
-  return candidates.length ? Math.min(...candidates) : null;
+  let lowest: number | null = null;
+  for (const { port, group, sessionId, kind } of ports.ports) {
+    if (group !== 'pane-terminal' || sessionId !== paneId || kind !== 'web') continue;
+    if (shownPorts.has(port) || answered.has(pairKey(paneId, port))) continue;
+    if (lowest === null || port < lowest) lowest = port;
+  }
+  return lowest;
 }
 
 /** The one analytics event: how the person met the prompt, and nothing about the server. */
