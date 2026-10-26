@@ -902,6 +902,7 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void
     const { manager, handle } = await startTerminal(panel);
     const sessions = Object.assign(new EventEmitter(), { getPowerSaveSnapshotSessions: () => [] });
     const blocker = { start: vi.fn(() => 42), stop: vi.fn() };
+    Object.assign(configManager.getConfig(), { keepAwakeWhilePluggedIn: true });
     const power = new PowerSaveManager(configManager, sessions, manager, { blocker, helper: null });
     try {
       handle.emit('Agent working...\r\n');

@@ -564,11 +564,11 @@ describe('PowerSaveManager', () => {
     });
   });
 
-  it('defaults keep-awake to on while plugged in and off on battery for a fresh ConfigManager', () => {
+  it('defaults keep-awake to on while sessions are active, off while plugged in and on battery, for a fresh ConfigManager', () => {
     const config = new ConfigManager().getConfig();
 
     expect(config.keepAwakeWhileSessionsActive).toBe(true);
-    expect(config.keepAwakeWhilePluggedIn).toBe(true);
+    expect(config.keepAwakeWhilePluggedIn).toBe(false);
     expect(config.keepAwakeOnBattery).toBe(false);
   });
 });
