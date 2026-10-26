@@ -72,6 +72,29 @@ export async function listDescendantPids(rootPids: readonly number[]): Promise<n
   return descendants;
 }
 
+/** `ps` prints `??` (macOS) or `?` (Linux) for a process with no controlling terminal. */
+function controllingTerminal(tty: string): string | undefined {
+  return /^[?-]+$/u.test(tty) ? undefined : tty;
+}
+
+/**
+ * Each process's controlling terminal (`ttys004`, `pts/3`), for the processes
+ * that have one. Empty on Windows, which has no such thing. Naming terminals
+ * costs `ps` about 200 ms on macOS, so read this only when a PTY shell is
+ * involved. A failed read throws: callers decide what an unknown means.
+ */
+export async function readControllingTerminals(): Promise<Map<number, string>> {
+  const terminals = new Map<number, string>();
+  if (process.platform === 'win32') return terminals;
+  const { stdout } = await execFileAsync('ps', ['-Ao', 'pid=,tty='], { encoding: 'utf8', timeout: SNAPSHOT_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 });
+  for (const line of stdout.split('\n')) {
+    const match = /^\s*(\d+)\s+(\S+)\s*$/u.exec(line);
+    const tty = match && controllingTerminal(match[2]);
+    if (match && tty) terminals.set(Number(match[1]), tty);
+  }
+  return terminals;
+}
+
 /**
  * Forcefully terminates `pids` and everything descended from them, then waits
  * for them to leave the process table. Returns the pids still running when

@@ -1578,9 +1578,9 @@ if (launchRemoteSetup) {
   // Safety net: force exit if graceful shutdown takes too long
   // Placed after the dialog so user interaction time isn't counted
   const shutdownSafetyTimeout = setTimeout(() => {
-    logToFile('FORCED EXIT: shutdown timed out after 10s');
+    logToFile('FORCED EXIT: shutdown timed out after 30s');
     app.exit(1);
-  }, 10_000);
+  }, 30_000);
 
   try {
     if (paneDaemonHost?.paneDaemonServer) {
@@ -1655,7 +1655,7 @@ if (launchRemoteSetup) {
     // Kill all terminal panel PTY processes so Claude doesn't survive as an orphan
     logToFile('Destroying all terminal panel processes');
     console.log('[Main] Destroying all terminal panel processes...');
-    terminalPanelManager.destroyAllTerminals();
+    await terminalPanelManager.terminateAllTerminals();
     console.log('[Main] Terminal panel processes destroyed');
 
     // Phase 4: Host/runtime cleanup
