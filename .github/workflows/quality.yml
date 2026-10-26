@@ -80,9 +80,6 @@ jobs:
     - name: Verify GitHub release publication behavior
       run: bash scripts/test-publish-github-release.sh
 
-    - name: Verify macOS updater metadata merge
-      run: node scripts/test-merge-mac-latest.js
-
     - name: Rebuild native modules for Node tests
       run: pnpm rebuild better-sqlite3-multiple-ciphers
 

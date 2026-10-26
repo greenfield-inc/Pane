@@ -70,18 +70,14 @@ Nightly and canary builds use the same native runner split and architecture
 commands, so their artifacts pass the same packaging guard.
 
 ```
-build (macOS arm64, ──┬─ publish-mac ─────┐
-  macOS x64, Linux    │                   ├─ publish-release ─ checksums ─┬─ notify-website
-  x64, Linux arm64)   ├─ publish-windows ─┘                               ├─ publish-npm   ┐
-build-windows (x64, ──┘                   validate-runpane-packages ──────┴─ publish-pypi  ┘
-  arm64)
+build (macOS + Linux) ─┐
+                       ├─ publish-windows ─ publish-release ─ checksums ─┬─ notify-website
+build-windows (x64,  ──┘                                                ├─ publish-npm   ┐
+  arm64)                                   validate-runpane-packages ───┴─ publish-pypi  ┘
 ```
 
-macOS arm64 and x64 build, sign and notarize in parallel jobs that never
-publish. `publish-mac` merges their `latest-mac.yml` files with
-`scripts/merge-mac-latest.js` and uploads the macOS assets, the same way
-`publish-windows` does for Windows. `publish-npm` and `publish-pypi` each need
-both `checksums` and `validate-runpane-packages`.
+`publish-npm` and `publish-pypi` each need both `checksums` and
+`validate-runpane-packages`.
 
 ### Verify
 
