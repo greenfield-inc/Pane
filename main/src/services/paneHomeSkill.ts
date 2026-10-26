@@ -272,11 +272,12 @@ of it through the \`runpane\` CLI.
 3. If runpane cannot be reached or doctor fails, stop and tell the user what
    failed. Do not substitute raw \`git worktree\` checkouts or built-in
    subagents for work that belongs in a Pane, and do not invent commands.
-   From WSL when Pane runs on Windows, use the Windows wrapper through
-   PowerShell from a Windows directory, for example
-   \`powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane doctor --json'\`.
-   Use that form for subsequent commands too. A Linux wrapper cannot reach
-   the Windows named-pipe daemon; a Windows-mounted shim can also fail in WSL.
+   From WSL when Pane runs on Windows, a Linux wrapper cannot reach the
+   Windows named-pipe daemon. Use Pane's own shim, which runs the Windows CLI
+   through WSL interop: \`/mnt/c/Users/<you>/.pane/bin/runpane doctor --json\`
+   (Pane's WSL terminals already have it on PATH). With an older Pane, use
+   \`powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane doctor --json'\`
+   and that form for subsequent commands.
 
 ## Common commands
 
