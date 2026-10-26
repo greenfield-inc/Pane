@@ -58,6 +58,8 @@ one entry per session you placed:
 
 Read it at the start of every run. A session whose `tool` and `id` are already
 in it is "already in Pane", forks included, so a rerun creates nothing twice.
+Pane's "Bring your sessions into Pane" card brings idle sessions in and writes
+this same record, with `tool` set to the agent and a `source` naming the tool.
 
 ## Keep it fast
 
