@@ -22,7 +22,7 @@ interface NotificationSettings {
 
 export function useNotifications() {
   const settings = useConfigStore((state) => state.config?.notifications) ?? {
-    playSound: true,
+    playSound: false,
     enabled: true,
   } satisfies NotificationSettings;
 
