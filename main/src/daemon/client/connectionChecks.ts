@@ -214,7 +214,7 @@ async function hostFix(
 
 export function copyCommandRow(profile: RemotePaneConnectionProfile, command: string, why?: string): Pick<RemoteConnectionCheckRow, 'fix' | 'detail'> {
   const fix: RemoteConnectionCheckFix = { kind: 'copy-command', label: 'Copy command', command };
-  return { fix, detail: `${why ? `${why} ` : ''}Run this on ${profile.label}: ${command}` };
+  return { fix, detail: `${why ? `${why} ` : ''}Run this on ${profile.label}.` };
 }
 
 /**

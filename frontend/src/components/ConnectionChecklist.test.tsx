@@ -73,7 +73,7 @@ describe('ConnectionChecklist', () => {
     }
   });
 
-  it('offers the fix and Continue to workspace beside a version warning', () => {
+  it('offers the fix on a version warning and Continue to workspace below the rows', () => {
     const { markup, row } = render({
       ...failedCheck,
       outcome: 'warning',
@@ -91,8 +91,8 @@ describe('ConnectionChecklist', () => {
 
     const warning = row('devbox runs an older Pane (2.4.200)');
     expect(warning).toContain('data-status="warning"');
-    expect(buttons(warning)).toEqual(['Update it', 'Continue to workspace']);
-    expect(buttons(markup).slice(-3)).toEqual(['Retry', 'Use this computer', 'Connection settings']);
+    expect(buttons(warning)).toEqual(['Update it']);
+    expect(buttons(markup).slice(-4)).toEqual(['Continue to workspace', 'Retry', 'Use this computer', 'Connection settings']);
   });
 
   it('builds the footnote only from what the app knows', () => {

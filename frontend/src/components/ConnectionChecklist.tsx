@@ -52,7 +52,7 @@ export function ChecklistRow({ status, label, metric, detail, action }: Checklis
       <StatusBadge status={status} />
       <div className="min-w-0 flex-1">
         <p className={cn(problem && 'font-semibold')}>{label}</p>
-        {detail && <p className="mt-0.5 text-xs text-text-secondary">{detail}</p>}
+        {detail && <p className="mt-0.5 break-words text-xs text-text-secondary">{detail}</p>}
       </div>
       {right && <div className="flex flex-none items-center gap-1.5 whitespace-nowrap text-[11px] text-text-tertiary">{right}</div>}
     </li>
@@ -116,18 +116,13 @@ export function ConnectionChecklist({ check, onOpenSettings, onUpdatePane }: Con
     void API.remoteDaemon.updateClientState(mode === 'remote' ? { mode, activeProfileId: check.profileId } : { mode });
   };
 
-  const rowAction = (row: RemoteConnectionCheckRow) => {
-    const continueButton = check.outcome === 'warning' && row.status === 'warning' && (
-      <Button size="sm" onClick={() => void API.remoteDaemon.dismissCheck(check.id)}>Continue to workspace</Button>
-    );
-    const fixButton = row.fix && (row.status === 'failed' || row.status === 'warning') && (
-      <Button size="sm" variant={continueButton ? 'secondary' : 'primary'} onClick={() => runFix(row)}>
-        {copiedStage === row.stage ? 'Copied' : row.fix.label}
-      </Button>
-    );
-    if (!fixButton && !continueButton) return undefined;
-    return <>{fixButton}{continueButton}</>;
-  };
+  const warned = check.outcome === 'warning';
+  const rowAction = (row: RemoteConnectionCheckRow) => row.fix && (row.status === 'failed' || row.status === 'warning') ? (
+    // While "Continue to workspace" waits below, the fix is the secondary choice.
+    <Button size="sm" variant={warned ? 'secondary' : 'primary'} onClick={() => runFix(row)}>
+      {copiedStage === row.stage ? 'Copied' : row.fix.label}
+    </Button>
+  ) : undefined;
 
   const quietLink = 'text-text-secondary hover:text-text-primary hover:underline focus-visible:outline-none focus-visible:underline';
   return (
@@ -140,6 +135,11 @@ export function ConnectionChecklist({ check, onOpenSettings, onUpdatePane }: Con
             <ChecklistRow key={row.stage} status={row.status} label={row.label} metric={row.metric} detail={row.detail} action={rowAction(row)} />
           ))}
         </ul>
+        {warned && (
+          <div className="mt-2.5 flex justify-end">
+            <Button size="sm" onClick={() => void API.remoteDaemon.dismissCheck(check.id)}>Continue to workspace</Button>
+          </div>
+        )}
         {note && <p className="mt-2.5 text-xs text-text-tertiary">{note}</p>}
         <p className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-text-tertiary">
           <button type="button" className={quietLink} onClick={() => connect('remote')}>Retry</button>
