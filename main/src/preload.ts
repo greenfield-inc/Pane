@@ -1,5 +1,6 @@
 import type { AgentChatEvent, AgentChatView, AgentChatSend, AgentInterface } from '../../shared/types/agentChat';
 import { contextBridge, ipcRenderer } from 'electron';
+import { createPreferencesApi } from '../../shared/types/preferences';
 import { isDaemonOwnedChannel } from '../../shared/types/daemon';
 import {
   WINDOW_CONTROLS_OVERLAY_ARG,
@@ -350,6 +351,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('notes:changed', listener);
     return () => ipcRenderer.removeListener('notes:changed', listener);
   },
+  preferences: createPreferencesApi(invokeIpc),
   // Generic invoke method for direct IPC calls
   invoke: (channel: string, ...args: unknown[]) => invokeIpc(channel, ...args),
   
