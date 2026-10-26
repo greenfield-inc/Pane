@@ -96,6 +96,8 @@ function App() {
   const supportPromptCheckStarted = useRef(false);
 
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  // Each opening mounts a fresh launcher: empty query, All, nothing selected.
+  const [searchOpenCount, setSearchOpenCount] = useState(0);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [settingsCategory, setSettingsCategory] = useState<SettingsCategoryId>('general');
   const [settingsOpenRequest, setSettingsOpenRequest] = useState<SettingsOpenRequest>();
@@ -210,7 +212,10 @@ function App() {
     label: 'Open Search',
     keys: 'mod+shift+p',
     category: 'navigation',
-    action: () => setIsCommandPaletteOpen(true),
+    action: () => {
+      setSearchOpenCount(count => count + 1);
+      setIsCommandPaletteOpen(true);
+    },
   });
 
   useHotkey({
@@ -919,6 +924,7 @@ function App() {
           />
         )}
         <CommandPalette
+          key={searchOpenCount}
           isOpen={isCommandPaletteOpen}
           onClose={() => setIsCommandPaletteOpen(false)}
           projects={projects}

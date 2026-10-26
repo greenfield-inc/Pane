@@ -144,7 +144,7 @@ function actionsFor(item: SearchItem, context: { onNewPane: (projectId: number) 
 export function CommandPalette({ isOpen, onClose, projects, onNewPane }: CommandPaletteProps) {
   const [query, setQuery] = useState('');
   const [chosenFilter, setChosenFilter] = useState<SearchFilter>('all');
-  const [selectedIndex, setSelectedIndex] = useState(0);
+  const [selection, setSelection] = useState({ view: '', index: 0 });
   // The row whose ⌘K Actions are showing, and the text filtering them.
   const [actionsItem, setActionsItem] = useState<SearchItem | null>(null);
   const [actionQuery, setActionQuery] = useState('');
@@ -188,22 +188,12 @@ export function CommandPalette({ isOpen, onClose, projects, onNewPane }: Command
 
   const rows = useMemo(() => buildRows(results.sections, actionsItem ? actions : null), [actions, actionsItem, results.sections]);
   const selectable = useMemo(() => rows.filter((row): row is Exclude<Row, { type: 'header' }> => row.type !== 'header'), [rows]);
+  // A selection belongs to the view it was made in, so a new query, type or Actions menu starts at the top.
+  const view = [query, chosenFilter, actionsItem?.key ?? '', actionQuery].join('\u0000');
+  const selectedIndex = selection.view === view ? selection.index : 0;
+  const setSelectedIndex = (index: number) => setSelection({ view, index });
   const selected = selectable[selectedIndex];
   const selectedItem = actionsItem ?? (selected?.type === 'item' ? selected.item : null);
-
-  useEffect(() => {
-    if (isOpen) {
-      setQuery('');
-      setChosenFilter('all');
-      setSelectedIndex(0);
-      setActionsItem(null);
-      setActionQuery('');
-    }
-  }, [isOpen]);
-
-  useEffect(() => {
-    setSelectedIndex(0);
-  }, [query, chosenFilter, actionsItem, actionQuery]);
 
   useEffect(() => {
     listRef.current?.querySelector('[data-selected="true"]')?.scrollIntoView({ block: 'nearest' });
@@ -249,7 +239,7 @@ export function CommandPalette({ isOpen, onClose, projects, onNewPane }: Command
       if (count === 0) return;
       e.preventDefault();
       const step = e.key === 'ArrowDown' ? 1 : -1;
-      setSelectedIndex(prev => (prev + step + count) % count);
+      setSelectedIndex((selectedIndex + step + count) % count);
     } else if (e.key === 'Enter') {
       e.preventDefault();
       choose(selected);
