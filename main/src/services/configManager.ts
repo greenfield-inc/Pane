@@ -79,7 +79,7 @@ export class ConfigManager extends EventEmitter {
       keepAwakeWhilePluggedIn: true,
       keepAwakeOnBattery: false,
       notifications: {
-        playSound: true,
+        playSound: false,
         enabled: true
       },
       sessionCreationPreferences: {

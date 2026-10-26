@@ -1,17 +1,36 @@
 import { useEffect, useState } from 'react';
 import { useRemoteRuntimeState } from '../hooks/useRemoteRuntimeState';
 import { API } from '../utils/api';
+import { stripIpcWrapper } from '../utils/ipcErrorMessage';
+
+/** Pane reconnects on its own, so a shorter outage shows nothing. */
+const CONNECTION_PROBLEM_DELAY_MS = 60_000;
+/** How long a delivery warning stays once the connection is back. */
+const DELIVERY_UNKNOWN_CLEAR_MS = 8_000;
 
 export function RemoteConnectionBanner({ onSettings }: { onSettings: () => void }) {
   const { connectionState: state } = useRemoteRuntimeState();
   const [retrying, setRetrying] = useState(false);
   const [unknownDelivery, setUnknownDelivery] = useState<string | null>(null);
+  const [outageIsLong, setOutageIsLong] = useState(false);
+  const connected = state.mode !== 'remote' || state.status === 'connected';
   useEffect(() => {
-    const listener = (event: Event) => setUnknownDelivery(event instanceof CustomEvent ? String(event.detail) : 'Delivery unknown: check the original host before resubmitting.');
+    const listener = (event: Event) => setUnknownDelivery(event instanceof CustomEvent ? stripIpcWrapper(String(event.detail)) : 'Delivery unknown: check the original host before resubmitting.');
     window.addEventListener('remote-delivery-unknown', listener);
     return () => window.removeEventListener('remote-delivery-unknown', listener);
   }, []);
-  if (!unknownDelivery && (state.mode !== 'remote' || state.status === 'connected')) return null;
+  useEffect(() => {
+    if (connected) return;
+    const timer = setTimeout(() => setOutageIsLong(true), CONNECTION_PROBLEM_DELAY_MS);
+    return () => { clearTimeout(timer); setOutageIsLong(false); };
+  }, [connected]);
+  useEffect(() => {
+    if (!unknownDelivery || !connected) return;
+    const timer = setTimeout(() => setUnknownDelivery(null), DELIVERY_UNKNOWN_CLEAR_MS);
+    return () => clearTimeout(timer);
+  }, [unknownDelivery, connected]);
+  const connectionProblem = !connected && (outageIsLong || state.status === 'error' || Boolean(state.updateIntent));
+  if (!unknownDelivery && !connectionProblem) return null;
   const retry = async () => {
     if (retrying) return;
     setRetrying(true);
@@ -29,7 +48,7 @@ export function RemoteConnectionBanner({ onSettings }: { onSettings: () => void 
       </div>
       <div className="flex shrink-0 gap-3">
         {unknownDelivery && <button type="button" onClick={() => setUnknownDelivery(null)}>Dismiss</button>}
-        {state.mode === 'remote' && state.status !== 'connected' && <button type="button" disabled={retrying || state.status === 'restoring'} onClick={() => void retry()}>Retry now</button>}
+        {connectionProblem && <button type="button" disabled={retrying || state.status === 'restoring'} onClick={() => void retry()}>Retry now</button>}
         <button type="button" onClick={onSettings}>Connection settings</button>
       </div>
     </div>
