@@ -9,7 +9,7 @@ import { getCurrentWorktreeName } from '../utils/worktreeUtils';
 import { getAppDirectory } from '../utils/appDirectory';
 import { getUpdateCapabilities } from '../utils/updateCapabilities';
 
-const MAC_UPDATE_COMMAND = 'curl -fsSL https://runpane.com/install.sh | sh';
+export const MAC_UPDATE_COMMAND = 'curl -fsSL https://runpane.com/install.sh | sh';
 
 export function registerUpdaterHandlers(ipcMain: IpcMain, { app, versionChecker }: AppServices): void {
   ipcMain.handle('updater:get-capabilities', async () => ({

@@ -4,7 +4,12 @@
 command, on the machine where the command runs. A remote host selected in the UI
 does not change that target. Use `--pane-only` or `--cli-only` for one component.
 The Update button in Settings uses the app's built-in updater instead, and does
-not need the prerequisites below.
+not need the prerequisites below. When a prerequisite is missing, `runpane update`
+hands off to that built-in updater: the running Pane downloads the latest release,
+quits and installs it, and the command prints `"mode": "in-app"`. The handoff
+skips the checkpoint, snapshot and panel restoration described here, and it
+leaves an npm or pip CLI as it was (`cliUpdated: false`). Pinned versions,
+`--cli-only` and `--dry-run` still report the refusal.
 Run `runpane update --dry-run --json` first to see the executable, data directory,
 CLI owner and supervisor capability without starting an update.
 When Pane is not running on the machine, for example because a failed update
