@@ -24,7 +24,7 @@ function openingPrompt(repository: { name: string; path: string }): string {
   return [
     `Pane sent this once, to introduce Pane Chat to someone who has been running Panes by hand in the repository ${repository.name} (${repository.path}).`,
     'In two or three short sentences, say that you can start Panes, give each one a task, and check on them while they work.',
-    'Then look at the repository briefly and suggest two small, real tasks from it that could run in parallel, each in its own Pane.',
+    'Then look at the repository briefly and suggest two small, real tasks from it that could run in parallel, each in a new Pane of its own.',
     'Ask whether to start them or what else to run. Don\'t create any Panes until the user answers.',
   ].join(' ');
 }
@@ -113,7 +113,7 @@ export function PaneChatIntroOffer({ suppressed }: { suppressed: boolean }) {
   return (
     <section
       aria-label="Pane Chat offer"
-      className="absolute right-4 top-14 z-30 w-[300px] rounded-lg border border-border-primary bg-surface-primary p-4 text-text-primary shadow-dropdown"
+      className="absolute right-4 top-20 z-30 w-[300px] rounded-lg border border-border-primary bg-surface-primary p-4 text-text-primary shadow-dropdown"
     >
       <button
         type="button"
@@ -128,7 +128,7 @@ export function PaneChatIntroOffer({ suppressed }: { suppressed: boolean }) {
         <h2 className="text-sm font-semibold">Let an agent run your Panes</h2>
       </div>
       <p className="mt-1.5 text-sm text-text-secondary">Pane Chat starts Panes, sends tasks and checks on them for you.</p>
-      {error && offerVisible && <p role="alert" className="mt-2 text-sm text-status-error">{error}</p>}
+      {error && offerVisible && <p role="alert" className="mt-2 text-sm text-status-error [overflow-wrap:anywhere]">{error}</p>}
       {offerVisible && (
         <div className="mt-3 flex gap-2">
           <Button size="sm" onClick={() => void tryIt()} loading={creating} loadingText="Starting…">Try it</Button>
