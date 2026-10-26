@@ -1542,6 +1542,42 @@ print(json.dumps(normalized))
   assert.deepStrictEqual(JSON.parse(pythonOutput), nodeOutput);
 }
 
+/** With Pane not running, update installs the release instead; --cli-only and --status never reach that path. */
+async function checkUpdateInstallsWhenPaneIsNotRunning() {
+  const { main } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'cli.js'));
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-update-fallback-'));
+  const originalFetch = global.fetch;
+  const originalLog = console.log;
+  const originalTelemetry = process.env.RUNPANE_TELEMETRY_DISABLED;
+  const lines = [];
+  let fetches = 0;
+  global.fetch = async () => {
+    fetches += 1;
+    return { ok: true, json: async () => artifactRelease };
+  };
+  console.log = (...args) => lines.push(args.join(' '));
+  process.env.RUNPANE_TELEMETRY_DISABLED = '1';
+  const fellBack = () => lines.some((line) => line.includes('Pane is not running on this machine'));
+  try {
+    assert.strictEqual(await main(['update', '--pane-only', '--dry-run', '--pane-dir', paneDir]), 0);
+    assert.ok(fellBack(), lines.join('\n'));
+    assert.ok(lines.some((line) => line.includes('Artifact: Pane-2.2.8-')), lines.join('\n'));
+
+    lines.length = 0;
+    fetches = 0;
+    await assert.rejects(main(['update', '--status', 'no-such-operation', '--pane-dir', paneDir]));
+    await main(['update', '--cli-only', '--dry-run', '--pane-dir', paneDir]).catch(() => 1);
+    assert.ok(!fellBack(), lines.join('\n'));
+    assert.strictEqual(fetches, 0);
+  } finally {
+    global.fetch = originalFetch;
+    console.log = originalLog;
+    if (originalTelemetry === undefined) delete process.env.RUNPANE_TELEMETRY_DISABLED;
+    else process.env.RUNPANE_TELEMETRY_DISABLED = originalTelemetry;
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
+}
+
 async function checkPreferredDownloadUrls() {
   const releases = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'releases.js'));
   const originalFetch = global.fetch;
@@ -4910,6 +4946,7 @@ async function runChecks() {
   checkPythonUnixEndpointSeparatorsAreHostIndependent();
   compareArtifactSelectionParity();
   await checkPreferredDownloadUrls();
+  await checkUpdateInstallsWhenPaneIsNotRunning();
   compareWrapperTelemetrySanitizers();
   compareExistingReusePolicy();
   compareDaemonLaunchEnvironmentParity();

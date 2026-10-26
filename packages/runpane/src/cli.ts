@@ -560,7 +560,8 @@ async function updateOrReinstall(parsed: ParsedArgs, telemetryContext: WrapperTe
   try {
     return await runUpdate(parsed);
   } catch (error) {
-    if (!(error instanceof PaneDaemonClientError && error.connectionFailure) || parsed.updateScope === 'cli' || parsed.updateStatus) throw error;
+    // Only the Pane host lookup connects to the daemon; --cli-only and --status never reach it.
+    if (!(error instanceof PaneDaemonClientError && error.connectionFailure)) throw error;
     console.log('runpane: Pane is not running on this machine, so runpane installs the release instead of updating it in place.');
     return installOrUpdate(parsed, telemetryContext);
   }
