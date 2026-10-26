@@ -13,6 +13,7 @@ import { RemoteAccessSettings } from './settings/categories/RemoteAccessSettings
 import { IntegrationsSettings } from './settings/categories/IntegrationsSettings';
 import { ShortcutsSettings } from './settings/categories/ShortcutsSettings';
 import { PrivacySettings } from './settings/categories/PrivacySettings';
+import { ImportExportSettings } from './settings/categories/ImportExportSettings';
 import { AdvancedSettings } from './settings/categories/AdvancedSettings';
 import { UsageView } from './usage/UsageView';
 import { RemoteAccessWorkflows } from './settings/RemoteAccessWorkflows';
@@ -154,6 +155,8 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
         return <ShortcutsSettings persistence={persistence} onShowKeyboardShortcuts={showKeyboardShortcuts} {...sharedDirtyProps} />;
       case 'privacy':
         return <PrivacySettings persistence={persistence} />;
+      case 'import-export':
+        return <ImportExportSettings persistence={persistence} platform={platform} />;
       case 'advanced':
         return <AdvancedSettings persistence={persistence} platform={platform} {...sharedDirtyProps} />;
     }

@@ -1,5 +1,6 @@
 import type { LucideIcon } from 'lucide-react';
 import {
+  ArrowUpDown,
   Bell,
   Bot,
   BrainCircuit,
@@ -113,6 +114,14 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategoryDefinition[] = [
     icon: Shield,
     settingIds: ['analytics', 'browser-data'],
     aliases: ['analytics', 'telemetry', 'tracking', 'browser', 'cookies', 'logins', 'sign out'],
+  },
+  {
+    id: 'import-export',
+    label: 'Import & Export',
+    description: 'Move your Pane setup between computers.',
+    icon: ArrowUpDown,
+    settingIds: ['setup-transfer'],
+    aliases: ['export', 'import', 'backup', 'transfer', 'move', 'new computer', 'settings file'],
   },
   {
     id: 'advanced',

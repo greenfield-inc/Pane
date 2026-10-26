@@ -4,6 +4,8 @@ import { installElectronApiMock } from './electronApiMock';
 
 type SettingsMock = {
   getConfig: () => JsonObject;
+  getInvokeCalls: (channel: string) => Array<{ args: unknown[] }>;
+  getProjectUpdates: () => Array<{ projectId: string; updates: JsonObject }>;
   getConfigUpdates: () => JsonObject[];
   getListenerCount: (channel: string) => number;
   getPreferenceWrites: () => Array<{ key: string; value: string }>;
@@ -185,6 +187,7 @@ test.describe('Settings', () => {
       'Integrations',
       'Shortcuts',
       'Privacy',
+      'Import & Export',
       'Advanced',
     ];
     const navigation = page.getByRole('navigation', { name: 'Settings categories' });
@@ -571,6 +574,75 @@ test.describe('Settings', () => {
     await expect(page.locator('html')).toHaveClass(/night-owl/);
     await expect(page.getByTestId('settings-page')).toBeVisible();
     await page.screenshot({ path: 'test-results/settings-dark.png' });
+  });
+
+  test('exports the kept sections, previews an import, cancels, then applies it', async ({ page }) => {
+    await bootSettings(page, { platform: 'darwin' });
+    const mock = () => page.evaluate(() => {
+      // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
+      const bridge = (window as typeof window & { __paneTestElectronMock: SettingsMock }).__paneTestElectronMock;
+      return {
+        exports: bridge.getInvokeCalls('setup:export').map((call) => call.args[0]),
+        previews: bridge.getInvokeCalls('setup:preview').length,
+        configUpdates: bridge.getConfigUpdates(),
+        preferenceWrites: bridge.getPreferenceWrites(),
+        projectUpdates: bridge.getProjectUpdates(),
+      };
+    });
+    await page.getByRole('navigation', { name: 'Settings categories' }).getByRole('button', { name: 'Import & Export', exact: true }).click();
+    const content = page.getByTestId('settings-content');
+
+    await expect(content.getByText('Claude Code · Codex')).toBeVisible();
+    await expect(content.getByText('· 1 left out')).toBeVisible();
+    const shortcuts = content.getByRole('checkbox', { name: 'Terminal shortcuts' });
+    await expect(shortcuts).toHaveAttribute('aria-checked', 'true');
+    await shortcuts.click();
+    await expect(shortcuts).toHaveAttribute('aria-checked', 'false');
+    await content.getByRole('button', { name: 'Export…' }).click();
+    await expect(content.getByText(/Saved pane-setup-2026-10-26\.json\. Left out deploy-prod because it looks like it contains a token\./)).toBeVisible();
+    await expect(content.getByRole('button', { name: 'Show in Finder' })).toBeVisible();
+    expect((await mock()).exports).toEqual([
+      ['agentPresets', 'customCommands', 'runScripts', 'skills', 'worktreeFileSync', 'appearance', 'preferences'],
+    ]);
+
+    await content.getByRole('button', { name: 'Import…' }).click();
+    await expect(content.getByRole('heading', { name: 'Import pane-setup-2026-10-26.json' })).toBeVisible();
+    await expect(content.getByText('From Pane 2.4.202 on macOS. Nothing is removed, and nothing changes until you import.')).toBeVisible();
+    await expect(content.getByRole('checkbox', { name: 'Terminal shortcuts' })).toBeDisabled();
+    await expect(content.getByText('1 of 2 repositories here')).toBeVisible();
+    await content.getByRole('button', { name: 'Show Custom commands changes' }).click();
+    await expect(content.getByText('claude "/review --strict"')).toBeVisible();
+    await expect(content.getByText('was claude "/review"')).toBeVisible();
+    await content.getByRole('button', { name: 'Cancel' }).click();
+    await expect(content.getByRole('heading', { name: 'Export your Pane setup' })).toBeVisible();
+    expect(await mock()).toMatchObject({ previews: 0, configUpdates: [], projectUpdates: [] });
+
+    await content.getByRole('button', { name: 'Import…' }).click();
+    await content.getByRole('checkbox', { name: 'Preferences' }).click();
+    await content.getByRole('button', { name: 'Import 2 sections' }).click();
+    await expect(content.getByText("Imported 2 sections. Skipped marketing-site, which isn't in Pane on this computer.")).toBeVisible();
+    await expect(content.getByRole('heading', { name: 'Export your Pane setup' })).toBeVisible();
+    const applied = await mock();
+    expect(applied.previews).toBe(1);
+    expect(applied.configUpdates).toEqual([{
+      customCommands: [
+        { name: 'lint-fix', command: 'pnpm lint --fix' },
+        { name: 'review', command: 'claude "/review --strict"' },
+      ],
+    }]);
+    expect(applied.preferenceWrites.filter((write) => write.key === 'sidebar_pane_row_layout')).toEqual([]);
+    expect(applied.projectUpdates).toEqual([{ projectId: '1', updates: { run_script: 'pnpm dev' } }]);
+  });
+
+  test('says why a file was refused and changes nothing', async ({ page }) => {
+    await bootSettings(page, {
+      setupImportError: "Couldn't import notes.json: it isn't a Pane setup file. Nothing changed. Next: Choose a file exported from Settings › Import & Export.",
+    });
+    await page.getByRole('navigation', { name: 'Settings categories' }).getByRole('button', { name: 'Import & Export', exact: true }).click();
+    const content = page.getByTestId('settings-content');
+    await content.getByRole('button', { name: 'Import…' }).click();
+    await expect(content.getByRole('alert')).toHaveText("Couldn't import notes.json: it isn't a Pane setup file. Nothing changed. Choose a file exported from Settings › Import & Export.");
+    await expect(content.getByRole('heading', { name: 'Export your Pane setup' })).toBeVisible();
   });
 
   test('returns to the workspace with Back', async ({ page }) => {

@@ -5,6 +5,7 @@ import type { VoiceTranscriptionMode } from '../../../shared/types/voiceTranscri
 import type { WorktreeFileSyncEntry } from '../../../shared/types/worktreeFileSync';
 import type { ApnsCredentialConfig, SharedCredentialId, SharedCredentialMeta } from '../../../shared/types/sharedCredentials';
 import type { AppearanceMode, DarkTheme, LightTheme, Theme } from '../../../shared/types/appearance';
+import type { SessionRetention } from '../../../shared/types/orchestrationSession';
 
 export interface TerminalShortcut {
   id: string;
@@ -242,4 +243,6 @@ export interface UpdateConfigRequest {
   terminalPowerMode?: PreferredTerminalPowerMode;
   terminalFontFamily?: string;
   terminalFontSize?: number;
+  // How many entries each Session keeps before the oldest are dropped
+  retention?: Partial<SessionRetention>;
 }

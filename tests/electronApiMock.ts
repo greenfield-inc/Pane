@@ -15,6 +15,7 @@ import type { TailnetMachineList, WorkspaceAccessSummary } from '../shared/types
 import type { JsonObject, JsonValue } from '../shared/validation/boundaryDecoder';
 import { DEFAULT_APPEARANCE, LIGHT_THEMES, normalizeAppearance, type AppearanceConfig } from '../shared/types/appearance';
 import type { DiffManifest, DiffScope, FileDiffResult } from '../shared/types/gitDiff';
+import type { SetupExportSummary, SetupFile, SetupImportPreview, SetupSectionId } from '../shared/types/setupTransfer';
 
 type MockEventValue = JsonValue | object | undefined;
 type MockEventCallback = (...args: MockEventValue[]) => void;
@@ -106,6 +107,8 @@ export type ElectronApiMockOptions = {
   openExternalOutcome?: 'success' | 'failure';
   /** Overrides this machine's workspace status (remote-daemon:get-workspace-access). */
   workspaceAccess?: Partial<WorkspaceAccessSummary>;
+  /** setup:choose-import fails with this PaneError text instead of previewing. */
+  setupImportError?: string;
 };
 
 export async function installElectronApiMock(page: Page, options: ElectronApiMockOptions = {}) {
@@ -561,11 +564,73 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       return { success: true };
     };
 
-    const invoke = (channel: string, ...args: unknown[]) => {
+    const trackCall = (channel: string, args: unknown[]) => {
       const calls = invokeCalls.get(channel) ?? [];
       calls.push({ channel, args });
       if (calls.length > 500) calls.shift();
       invokeCalls.set(channel, calls);
+    };
+
+    // Settings › Import & Export: this computer's setup and one file to import.
+    const setupSummary: SetupExportSummary = {
+      rows: [
+        { id: 'agentPresets', count: 2, leftOut: [], agents: ['Claude Code', 'Codex'] },
+        { id: 'customCommands', count: 2, leftOut: [{ section: 'customCommands', name: 'deploy-prod' }] },
+        { id: 'runScripts', count: 4, leftOut: [] },
+        { id: 'skills', count: 2, leftOut: [], skills: { homeSkill: true, registerMcp: true } },
+        { id: 'terminalShortcuts', count: 4, leftOut: [] },
+        { id: 'worktreeFileSync', count: 3, leftOut: [] },
+        { id: 'appearance', count: 1, leftOut: [], appearance: { mode: 'fixed', theme: 'dark', light: 'light-rounded', dark: 'dark' } },
+        { id: 'preferences', count: 14, leftOut: [] },
+      ],
+    };
+    const setupPreview: SetupImportPreview = {
+      fileName: 'pane-setup-2026-10-26.json',
+      appVersion: '2.4.202',
+      platform: 'darwin',
+      otherPlatform: false,
+      file: {
+        kind: 'pane-setup',
+        version: 1,
+        exportedAt: '2026-10-26T22:40:00Z',
+        appVersion: '2.4.202',
+        platform: 'darwin',
+        sections: { customCommands: [{ name: 'lint-fix', command: 'pnpm lint --fix' }] },
+      },
+      sections: [
+        {
+          id: 'customCommands', changes: 2, added: 1, replaced: 1, keyInUse: 0,
+          items: [
+            { kind: 'new', name: 'lint-fix', text: 'pnpm lint --fix' },
+            { kind: 'replaces', name: 'review', text: 'claude "/review --strict"', was: 'claude "/review"' },
+          ],
+          apply: {
+            config: {
+              customCommands: [
+                { name: 'lint-fix', command: 'pnpm lint --fix' },
+                { name: 'review', command: 'claude "/review --strict"' },
+              ],
+            },
+          },
+        },
+        {
+          id: 'runScripts', changes: 1, added: 1, replaced: 0, keyInUse: 0, repositories: { matched: 1, total: 2 },
+          items: [
+            { kind: 'new', name: 'acme-web', field: 'Run Commands', text: 'pnpm dev' },
+            { kind: 'skipped', name: 'marketing-site', reason: 'not in Pane on this computer', cause: 'missing' },
+          ],
+          apply: { projects: [{ id: 1, name: 'acme-web', updates: { run_script: 'pnpm dev' } }] },
+        },
+        { id: 'terminalShortcuts', changes: 0, added: 0, replaced: 0, keyInUse: 0, items: [], apply: {} },
+        {
+          id: 'preferences', changes: 1, added: 0, replaced: 0, keyInUse: 0, items: [],
+          apply: { preferences: { sidebar_pane_row_layout: 'two-row' } },
+        },
+      ],
+    };
+
+    const invoke = (channel: string, ...args: unknown[]) => {
+      trackCall(channel, args);
       if (channel === 'terminal:ack') terminalAckedBytes += Number(args[1]);
 
       const key = args[0] === undefined ? undefined : String(args[0]);
@@ -728,6 +793,24 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       export: namespace({
         saveImage: () => success(null),
         shareImage: () => success({ method: 'clipboard' }),
+      }),
+      setup: namespace({
+        summary: () => success(clone(setupSummary)),
+        export: (sections: SetupSectionId[]) => {
+          trackCall('setup:export', [sections]);
+          return success({
+            fileName: 'pane-setup-2026-10-26.json',
+            filePath: '/Users/test/pane-setup-2026-10-26.json',
+            leftOut: [{ section: 'customCommands', name: 'deploy-prod' }],
+          });
+        },
+        chooseImport: () => (mockOptions.setupImportError
+          ? Promise.resolve({ success: false, error: mockOptions.setupImportError })
+          : success(clone(setupPreview))),
+        preview: (file: SetupFile, fileName: string) => {
+          trackCall('setup:preview', [file, fileName]);
+          return success(clone(setupPreview));
+        },
       }),
       usage: namespace({
         getReport: () => success(clone(mockOptions.initialUsageReport ?? {

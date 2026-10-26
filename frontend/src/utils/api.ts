@@ -34,6 +34,7 @@ import type {
 } from '../../../shared/types/daemon';
 import type { ProjectDashboardSessionUpdateEvent, ProjectDashboardUpdateEvent } from '../types/projectDashboard';
 import type { DiffScope, FileDiffRequest } from '../../../shared/types/gitDiff';
+import type { SetupFile, SetupSectionId } from '../../../shared/types/setupTransfer';
 
 // Type for IPC response
 // oxlint-disable-next-line typescript/no-explicit-any -- Generic type parameter default for flexible API responses
@@ -146,6 +147,26 @@ export class API {
     async shareImage(data: string, filename: string) {
       if (!isElectron()) throw new Error('Electron API not available');
       return window.electronAPI.export.shareImage(data, filename);
+    },
+  };
+
+  // Settings › Import & Export
+  static setup = {
+    async summary() {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.setup.summary();
+    },
+    async export(sections: SetupSectionId[]) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.setup.export(sections);
+    },
+    async chooseImport() {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.setup.chooseImport();
+    },
+    async preview(file: SetupFile, fileName: string) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.setup.preview(file, fileName);
     },
   };
 
