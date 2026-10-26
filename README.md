@@ -406,6 +406,8 @@ The shell installers and the other one-shot commands are at the top of this READ
 
 OpenCode's native terminal preset preserves its exact conversation ID when you reopen a project. OpenCode is not yet available as a Pane Chat or named Session agent.
 
+Moving to a new computer? **Settings → Import & Export** saves your commands, run scripts, agent defaults, shortcuts, skill and MCP choices and look to a file, and imports it after showing what would change. Keys and tokens stay behind. See [Export and import your Pane setup](docs/SETUP_EXPORT_IMPORT.md).
+
 You can reuse an archived or deleted pane's name. Pane keeps any old worktree
 identity and Git branches separate, choosing a free worktree name for the new
 pane. Creation errors appear in a dismissible error dialog on desktop and Remote

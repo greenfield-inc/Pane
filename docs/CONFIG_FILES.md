@@ -155,6 +155,10 @@ When your teammates pull, Pane will automatically:
 
 If your repo already has a `conductor.json`, `.gitpod.yml`, or `.devcontainer/devcontainer.json`, Pane will detect and use it automatically. No changes needed.
 
+### Moving your own scripts to another computer
+
+Scripts saved in Project Settings live on one computer. **Settings › Import & Export** carries them, with the rest of your setup, to another one, and skips any script a repo's config file already provides. See [Export and import your Pane setup](SETUP_EXPORT_IMPORT.md).
+
 ## Visibility
 
 ### Project Settings
