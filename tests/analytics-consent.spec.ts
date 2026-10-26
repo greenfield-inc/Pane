@@ -3,6 +3,9 @@ import { gunzipSync } from 'node:zlib';
 import type { JsonObject } from '../shared/validation/boundaryDecoder';
 import { installElectronApiMock } from './electronApiMock';
 
+// The renderer's Content-Security-Policy only lets analytics reach the default host.
+const POSTHOG_HOST = 'https://runpane.com/api/c';
+
 type CapturedPostHogRequest = {
   url: string;
   body: Buffer;
@@ -18,8 +21,9 @@ type CapturedPostHogPayload = CapturedPostHogEvent[] | (CapturedPostHogEvent & {
 
 // Remote config and feature flags are disabled; these requests would send stored identity.
 function flagOrConfigRequests(requests: CapturedPostHogRequest[]): string[] {
+  const hostPath = new URL(POSTHOG_HOST).pathname;
   return requests
-    .map((request) => new URL(request.url).pathname)
+    .map((request) => new URL(request.url).pathname.slice(hostPath.length))
     .filter((pathname) => /^\/(flags|decide)\b|^\/array\/[^/]+\/config/.test(pathname));
 }
 
@@ -97,7 +101,7 @@ test('bundled analytics preserves identity and opt-out without remote code, conf
     }
   });
 
-  await page.route('http://posthog.test/**', async (route) => {
+  await page.route(`${POSTHOG_HOST}/**`, async (route) => {
     requests.push({
       url: route.request().url(),
       body: route.request().postDataBuffer() ?? Buffer.alloc(0),
@@ -125,7 +129,7 @@ test('bundled analytics preserves identity and opt-out without remote code, conf
       analytics: {
         enabled: false,
         posthogApiKey: 'phc_test',
-        posthogHost: 'http://posthog.test',
+        posthogHost: POSTHOG_HOST,
         installId: identity.installId,
         distinctId: identity.distinctId,
         identitySource: identity.identitySource,
@@ -212,7 +216,7 @@ test('an explicit existing opt-out stays disabled and receives no default-on eve
   };
   const requests: CapturedPostHogRequest[] = [];
 
-  await page.route('http://posthog.test/**', async (route) => {
+  await page.route(`${POSTHOG_HOST}/**`, async (route) => {
     requests.push({
       url: route.request().url(),
       body: route.request().postDataBuffer() ?? Buffer.alloc(0),
@@ -231,7 +235,7 @@ test('an explicit existing opt-out stays disabled and receives no default-on eve
       analytics: {
         enabled: false,
         posthogApiKey: 'phc_test',
-        posthogHost: 'http://posthog.test',
+        posthogHost: POSTHOG_HOST,
         installId: identity.installId,
         distinctId: identity.distinctId,
         identitySource: identity.identitySource,

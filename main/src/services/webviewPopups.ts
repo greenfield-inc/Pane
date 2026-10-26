@@ -1,4 +1,5 @@
 import type { WebContents } from 'electron';
+import { externalUrlOrNull } from '../utils/externalUrl';
 
 interface WebviewPopupRouting {
   /** The panel a webview belongs to, once the renderer has registered it. */
@@ -12,8 +13,19 @@ interface WebviewPopupRouting {
  * Routes a browser tab's window.open calls. Sign-in popups become real windows in
  * the tab's own store, so they share its logins; other links open as Pane tabs.
  */
-export function routeWebviewPopups(wvContents: WebContents, routing: WebviewPopupRouting): void {
+export function routeWebviewPopups(
+  wvContents: Pick<WebContents, 'id' | 'setWindowOpenHandler' | 'on' | 'once'>,
+  routing: WebviewPopupRouting,
+): void {
   wvContents.setWindowOpenHandler(({ url, disposition }) => {
+    // Pages in a browser tab are untrusted: only web links may leave it. A file: or
+    // app-scheme URL would otherwise reach the OS through a popup, tab or openExternal.
+    // about:blank stays allowed for popups that a sign-in script navigates after opening.
+    if (url !== 'about:blank' && externalUrlOrNull(url) === null) {
+      console.warn('[BrowserPanel] Blocked window.open to a non-web URL scheme, wcId:', wvContents.id);
+      return { action: 'deny' };
+    }
+
     // Auth popups (Firebase signInWithPopup, OAuth providers, etc.) use window.open()
     // with explicit features (width, height, toolbar=no), which Chromium reports as
     // disposition 'new-window'. Let these open as real BrowserWindows so the

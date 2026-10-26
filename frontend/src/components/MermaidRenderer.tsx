@@ -1,5 +1,6 @@
 import React, { useEffect, useId, useRef, useState } from 'react';
 import mermaid from 'mermaid';
+import DOMPurify from 'dompurify';
 
 interface MermaidRendererProps {
   chart: string;
@@ -31,16 +32,24 @@ export const MermaidRenderer: React.FC<MermaidRendererProps> = ({ chart, id }) =
         mermaid.initialize({
           startOnLoad: false,
           theme: isDarkTheme ? 'dark' : 'default',
-          securityLevel: 'loose',
+          // Charts come from untrusted READMEs and agent output: 'strict' encodes
+          // label HTML and disables click callbacks.
+          securityLevel: 'strict',
           fontFamily: 'monospace',
         });
 
         // Render the chart
         const { svg } = await mermaid.render(graphId, chart);
 
-        // Insert the SVG
+        // Strict mode already sanitizes the SVG; sanitize again where it is inserted, with
+        // mermaid's own settings, so this stays safe if that changes. Flowchart labels are
+        // HTML inside foreignObject, so it must stay an HTML integration point.
         if (elementRef.current) {
-          elementRef.current.innerHTML = svg;
+          elementRef.current.innerHTML = DOMPurify.sanitize(svg, {
+            ADD_TAGS: ['foreignobject'],
+            ADD_ATTR: ['dominant-baseline'],
+            HTML_INTEGRATION_POINTS: { foreignobject: true },
+          });
         }
       } catch (error: unknown) {
         console.error('Mermaid rendering error:', error);

@@ -70,7 +70,7 @@ if (process.platform === 'win32') {
 }
 
 // Now import the rest of electron
-import { autoUpdater as nativeAutoUpdater, BrowserWindow, ipcMain, screen, shell, dialog, session, WebContents, webContents, WebContentsView, type BrowserWindowConstructorOptions, type IpcMainEvent } from 'electron';
+import { autoUpdater as nativeAutoUpdater, BrowserWindow, ipcMain, screen, dialog, session, WebContents, webContents, WebContentsView, type BrowserWindowConstructorOptions, type IpcMainEvent } from 'electron';
 import * as path from 'path';
 import * as os from 'os';
 import type { SessionManager } from './services/sessionManager';
@@ -128,6 +128,7 @@ import { runRemoteSetupCli } from './daemon/setupRemoteHostCli';
 import { PowerSaveManager } from './services/powerSaveManager';
 import { warmShellPath } from './utils/shellPath';
 import { routeWebviewPopups } from './services/webviewPopups';
+import { openExternalUrl } from './utils/openExternalUrl';
 import { hardenWebviewPreferences } from './services/webviewPreferences';
 import { APP_MENU_ACTION_CHANNEL, attachEditContextMenu, installApplicationMenu, type AppMenuAction } from './services/nativeMenus';
 import { fitBoundsToWorkAreas, parseSavedWindowState, trackWindowState, WINDOW_STATE_KEY } from './utils/windowState';
@@ -583,7 +584,9 @@ async function createWindow() {
     routeWebviewPopups(wvContents, {
       contextOf: id => webviewContextMap.get(id),
       openBrowserTab: request => mainWindow?.webContents.send('browser-panel:popup-requested', request),
-      openExternal: url => void shell.openExternal(url),
+      openExternal: url => void openExternalUrl(url).catch((error) => {
+        console.error('[BrowserPanel] Did not open popup URL externally:', error);
+      }),
     });
 
     wvContents.setBackgroundThrottling(true);
@@ -805,7 +808,7 @@ async function createWindow() {
       return { action: 'deny' };
     }
 
-    void shell.openExternal(url).catch((error) => {
+    void openExternalUrl(url).catch((error) => {
       console.error('Failed to open external URL from window.open:', error);
     });
     return { action: 'deny' };
