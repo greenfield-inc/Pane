@@ -185,7 +185,7 @@ const CombinedDiffView = memo(forwardRef<CombinedDiffViewHandle, CombinedDiffVie
   return (
     <div className="combined-diff-view flex h-full flex-col">
       <div className="flex items-center justify-between gap-2 border-b border-border-primary bg-surface-secondary px-3 py-1.5">
-        <div className="flex min-w-0 items-center gap-2">
+        <div className="flex min-w-0 items-center gap-2 overflow-hidden">
           <span className="truncate text-xs font-medium text-text-secondary">{headerLabel}</span>
           {visibleManifest && (
             <div className="flex flex-shrink-0 items-center gap-2 text-xs">
@@ -223,13 +223,13 @@ const CombinedDiffView = memo(forwardRef<CombinedDiffViewHandle, CombinedDiffVie
             <RefreshCw className="mb-4 h-12 w-12 animate-spin text-interactive" />
             <div className="text-center text-text-secondary">
               <p className="font-medium">Git operation in progress</p>
-              <p className="mt-1 text-sm text-text-tertiary">Please wait while the operation completes...</p>
+              <p className="mt-1 text-sm text-text-tertiary">Please wait while the operation completes…</p>
             </div>
           </div>
         ) : loading && !visibleManifest ? <div className="animate-pulse p-4 text-sm text-text-secondary">Loading {label}…</div>
           : error ? <div role="alert" className="m-4 rounded border border-status-error/30 bg-status-error/10 p-4 text-sm text-status-error">{error}</div>
             : visible && visible.manifest.files.length > 0 ? <ChangesList sessionId={sessionId} rows={visible.rows} scopeKey={scopeKey(scope)} activePath={activeDiffPath} onFileOpen={handleFileOpen} />
-              : <div className="flex h-full items-center justify-center text-sm text-text-secondary"><div className="space-y-2 text-center"><p>{emptyMessage}</p>{isMainRepo && historySource === 'remote' && <p className="text-sm text-text-tertiary">Create new commits to see them here.</p>}</div></div>}
+              : <div className="flex h-full items-center justify-center px-4 text-sm text-text-secondary"><div className="space-y-2 text-center"><p>{emptyMessage}</p>{isMainRepo && historySource === 'remote' && <p className="text-sm text-text-tertiary">Create new commits to see them here.</p>}</div></div>}
       </div>
       <CommitDialog isOpen={showCommitDialog} onClose={() => setShowCommitDialog(false)} onCommit={handleCommit} fileCount={visibleManifest?.stats.filesChanged ?? 0} sessionId={sessionId} />
     </div>

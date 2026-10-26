@@ -158,7 +158,7 @@ test.describe('animation evidence', () => {
       async () => {},
       async (page) => {
         await page.keyboard.press('Meta+Shift+P');
-        await expect(page.getByPlaceholder('Search commands...')).toBeVisible();
+        await expect(page.getByPlaceholder('Search commands…')).toBeVisible();
       },
       (page) => boxOf(page, '[role="dialog"]', 48),
     );
@@ -171,7 +171,7 @@ test.describe('animation evidence', () => {
       'Arrow keys move the selection through the command list',
       async (page) => {
         await page.keyboard.press('Meta+Shift+P');
-        await expect(page.getByPlaceholder('Search commands...')).toBeVisible();
+        await expect(page.getByPlaceholder('Search commands…')).toBeVisible();
       },
       async (page) => {
         for (let i = 0; i < 6; i += 1) {

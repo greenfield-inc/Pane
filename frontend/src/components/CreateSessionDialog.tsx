@@ -448,7 +448,7 @@ export function CreatePaneForm({
                 </div>
                 <div ref={branchDropdownRef} className="relative">
                   <div
-                    className={`flex items-center w-full border rounded-md bg-surface-secondary ${
+                    className={`flex items-center w-full border rounded-md bg-bg-primary ${
                       isBranchDropdownOpen
                         ? 'border-interactive ring-2 ring-interactive'
                         : 'border-border-primary'
