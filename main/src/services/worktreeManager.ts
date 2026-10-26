@@ -1,4 +1,4 @@
-import { mkdir } from 'fs/promises';
+import { mkdir, stat } from 'fs/promises';
 import { withLock } from '../utils/mutex';
 import type { ConfigManager } from './configManager';
 import type { AnalyticsManager } from './analyticsManager';
@@ -945,19 +945,35 @@ export class WorktreeManager {
     }
   }
 
+  /** Rebase metadata works in linked worktrees and does not depend on Git's locale. */
+  async isRebaseInProgress(worktreePath: string, pathResolver: PathResolver, commandRunner: CommandRunner): Promise<boolean> {
+    for (const stateDirectory of ['rebase-merge', 'rebase-apply']) {
+      const { stdout } = await commandRunner.execFile('git',
+        ['rev-parse', '--path-format=absolute', '--git-path', stateDirectory], worktreePath);
+      try {
+        if ((await stat(pathResolver.toFileSystem(stdout.trim()))).isDirectory()) return true;
+      } catch (error) {
+        const { code } = decodeBoundary(error, boundary.object({ code: boundary.optional(boundary.string) }));
+        if (code !== 'ENOENT') throw error;
+      }
+    }
+    return false;
+  }
+
   /** Returns the conflict, with the worktree restored, when replaying a commit conflicts even though the tips merge cleanly. */
-  async rebaseMainIntoWorktree(worktreePath: string, mainBranch: string, commandRunner: CommandRunner): Promise<RebaseConflictCheck> {
+  async rebaseMainIntoWorktree(worktreePath: string, mainBranch: string, pathResolver: PathResolver, commandRunner: CommandRunner): Promise<RebaseConflictCheck> {
     return await withLock(`git-rebase-${worktreePath}`, async () => {
       const executedCommands: string[] = [];
       let lastOutput = '';
       const startTime = Date.now();
       let conflictOccurred = false;
+      const rebaseAlreadyInProgress = await this.isRebaseInProgress(worktreePath, pathResolver, commandRunner);
 
       try {
         // Rebase the current worktree branch onto local main branch
         const command = `git rebase ${mainBranch}`;
         executedCommands.push(`${command} (in ${worktreePath})`);
-        const rebaseResult = await commandRunner.execFile('git', ['rebase', '--', mainBranch], worktreePath, { timeout: 120000 });
+        const rebaseResult = await commandRunner.execFile('git', ['rebase', '--no-rerere-autoupdate', '--', mainBranch], worktreePath, { timeout: 120000 });
         lastOutput = rebaseResult.stdout || rebaseResult.stderr || '';
 
         // Track successful rebase
@@ -974,13 +990,13 @@ export class WorktreeManager {
         const err = decodeBoundary(error, commandErrorSchema);
         console.error(`[WorktreeManager] Failed to rebase ${mainBranch} into worktree:`, err);
 
-        // A stopped rebase leaves its conflicts as unmerged paths
+        // This call's rebase stopped partway on a conflict, even one rerere resolved; its unmerged paths name the files
+        conflictOccurred = !rebaseAlreadyInProgress && await this.isRebaseInProgress(worktreePath, pathResolver, commandRunner);
         const { stdout: unmergedOutput } = await commandRunner.execFile(
           'git', ['diff', '--name-only', '--diff-filter=U', '--'],
           worktreePath
         ).catch(() => ({ stdout: '' }));
         const conflictingFiles = unmergedOutput.trim().split('\n').filter(f => f);
-        conflictOccurred = conflictingFiles.length > 0;
 
         // Track failed rebase
         if (this.analyticsManager) {

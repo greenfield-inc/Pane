@@ -1,7 +1,6 @@
 import type { IpcMain } from 'electron';
 import { hasCommitMessageTitle } from '../../../shared/utils/commitMessage';
 import { existsSync } from 'fs';
-import { stat } from 'fs/promises';
 import { join } from 'path';
 import type { AppServices } from './types';
 import type { PaneCommandRegistry } from '../daemon/commandRegistry';
@@ -678,7 +677,7 @@ export function registerGitHandlers(
 
       // The check compares branch tips; replaying an intermediate commit can still conflict, and the rebase then aborts.
       const rebaseResult = await Promise.race([
-        worktreeManager.rebaseMainIntoWorktree(session.worktreePath, comparisonBranch, ctx.commandRunner),
+        worktreeManager.rebaseMainIntoWorktree(session.worktreePath, comparisonBranch, ctx.pathResolver, ctx.commandRunner),
         new Promise<never>((_, reject) => setTimeout(() => reject(new Error('rebaseMainIntoWorktree timeout')), 120000))
       ]);
       if (rebaseResult.hasConflicts) return reportConflicts(rebaseResult);
@@ -750,19 +749,7 @@ export function registerGitHandlers(
       const ctx = sessionManager.getProjectContext(sessionId);
       if (!ctx) throw new Error('Project context not found for session');
 
-      // Rebase metadata works in linked worktrees and does not depend on Git's locale.
-      let rebaseInProgress = false;
-      for (const stateDirectory of ['rebase-merge', 'rebase-apply']) {
-        const { stdout } = await ctx.commandRunner.execFile('git',
-          ['rev-parse', '--path-format=absolute', '--git-path', stateDirectory], session.worktreePath);
-        try {
-          if ((await stat(ctx.pathResolver.toFileSystem(stdout.trim()))).isDirectory()) rebaseInProgress = true;
-        } catch (error) {
-          const { code } = decodeBoundary(error, boundary.object({ code: boundary.optional(boundary.string) }));
-          if (code !== 'ENOENT') throw error;
-        }
-      }
-      if (rebaseInProgress) {
+      if (await worktreeManager.isRebaseInProgress(session.worktreePath, ctx.pathResolver, ctx.commandRunner)) {
         await worktreeManager.abortRebase(session.worktreePath, ctx.commandRunner);
         emitGitOperationToProject(sessionId, 'git:operation_completed', '🔄 GIT OPERATION\nAborted rebase successfully', {
           operation: 'abort_rebase'
