@@ -21,6 +21,8 @@ import type {
   RemoteHostSetupResult,
   RemoteHostSetupTerminalCommandResult,
   RemotePaneConnectionState,
+  RemoteConnectionCheckStage,
+  RemoteHostSetupProgress,
   RemotePaneConnectionProfile,
 } from '../../../shared/types/remoteDaemon';
 import type { TailnetMachineList, WorkspaceAccessSummary, WorkspaceAccessUpdate } from '../../../shared/types/workspaceAccess';
@@ -391,6 +393,9 @@ interface ElectronAPI {
     updateWorkspaceAccess: (update: WorkspaceAccessUpdate) => Promise<IPCResponse<WorkspaceAccessSummary>>;
     listTailnetMachines: () => Promise<IPCResponse<TailnetMachineList>>;
     saveTailnetMachine: (input: { name: string; password?: string }) => Promise<IPCResponse<RemotePaneConnectionProfile>>;
+    runCheckFix: (checkId: number, stage: RemoteConnectionCheckStage) => Promise<IPCResponse<RemotePaneConnectionState>>;
+    dismissCheck: (checkId: number) => Promise<IPCResponse<RemotePaneConnectionState>>;
+    onSetupProgress: (callback: (progress: RemoteHostSetupProgress) => void) => () => void;
     onConnectionStateChanged: (callback: (state: RemotePaneConnectionState) => void) => () => void;
     onHostStateChanged: (callback: (state: RemoteDaemonHostRuntimeState) => void) => () => void;
   };

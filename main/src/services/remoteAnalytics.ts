@@ -28,6 +28,14 @@ export type RemotePaneAnalyticsEventName =
   | 'remote_pane_pwa_client_disconnected'
   | 'remote_pane_remote_runtime_used';
 
+/** Which checklist row failed: a connect check, or a Set Up Host step (`setup_*`). */
+export const REMOTE_PANE_FAILED_CHECKS = [
+  'tailscale_here', 'host_offline', 'host_unreachable', 'pane_not_running', 'sign_in_rejected',
+  'password_required', 'owner_only', 'workspace_restore',
+  'setup_service', 'setup_port', 'setup_tailscale', 'setup_https', 'setup_code', 'setup_daemon',
+] as const;
+export type RemotePaneFailedCheck = typeof REMOTE_PANE_FAILED_CHECKS[number];
+
 export type RemotePaneAnalyticsProperties = {
   surface?: 'desktop' | 'remote_pwa' | 'host_transport';
   role?: 'host' | 'client';
@@ -40,6 +48,7 @@ export type RemotePaneAnalyticsProperties = {
   connection_mode?: 'remote' | 'local';
   failure_stage?: string;
   failure_category?: string;
+  failed_check?: RemotePaneFailedCheck;
   connected?: boolean;
   connected_client_count_bucket?: '0' | '1' | '2-3' | '4+';
   remote_runtime_used?: boolean;
@@ -172,6 +181,7 @@ function sanitizeRemotePaneProperties(
     connection_mode: properties.connection_mode,
     failure_stage: properties.failure_stage,
     failure_category: properties.failure_category,
+    failed_check: REMOTE_PANE_FAILED_CHECKS.find(value => value === properties.failed_check),
     connected: properties.connected,
     connected_client_count_bucket: properties.connected_client_count_bucket,
     remote_runtime_used: properties.remote_runtime_used,

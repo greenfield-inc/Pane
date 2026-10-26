@@ -329,6 +329,73 @@ export interface RemotePaneConnectionState {
   activeBaseUrl: string | null;
   lastError: string | null;
   lastSeenAt: string | null;
+  /** The latest connection checklist, while a connect the user started runs, failed or warns. */
+  check?: RemoteConnectionCheck | null;
+}
+
+/** The stages of connecting to a remote Pane, in checklist order. `tailscale` runs only for codeless hosts. */
+export type RemoteConnectionCheckStage = 'tailscale' | 'reachable' | 'running' | 'signed-in' | 'version' | 'workspace';
+
+export type RemoteConnectionCheckRowStatus = 'waiting' | 'running' | 'passed' | 'failed' | 'warning';
+
+/**
+ * What a row's button does. `run-on-host` asks main to run the row's fixed command on the host over
+ * the user's SSH config (Start it, Update it); `copy-command` copies `command` to run there by hand.
+ */
+export type RemoteConnectionCheckFixKind =
+  | 'run-on-host'
+  | 'copy-command'
+  | 'open-tailscale'
+  | 'download-tailscale'
+  | 'paste-code'
+  | 'enter-password'
+  | 'update-pane';
+
+export interface RemoteConnectionCheckFix {
+  kind: RemoteConnectionCheckFixKind;
+  label: string;
+  /** The exact command a `run-on-host` or `copy-command` fix runs on the host. */
+  command?: string;
+}
+
+export interface RemoteConnectionCheckRow {
+  stage: RemoteConnectionCheckStage;
+  status: RemoteConnectionCheckRowStatus;
+  /** The row's text: the stage name once it passes or while it waits, the problem when it fails or warns. */
+  label: string;
+  /** A short value on the right of a passed row, such as "38 ms" or a version. */
+  metric?: string;
+  /** One more line under a failed or warning row. */
+  detail?: string;
+  fix?: RemoteConnectionCheckFix;
+}
+
+export interface RemoteConnectionCheck {
+  /** Increases with each check run; a fix names the run it belongs to. */
+  id: number;
+  profileId: string;
+  hostLabel: string;
+  /** How this computer reaches the host, for the card's subtitle. */
+  route: 'Tailscale' | 'SSH tunnel' | 'URL';
+  address: string;
+  /** `warning`: connected, but a row warns, so the card waits for "Continue to workspace". */
+  outcome: 'running' | 'failed' | 'warning' | 'passed';
+  rows: RemoteConnectionCheckRow[];
+  /** When this app last heard from the host since it launched; not saved. */
+  lastConnectedAt: string | null;
+  /** The host's Pane version, when this app saw it since it launched; not saved. */
+  hostVersion: string | null;
+}
+
+/** The steps of setting up this computer as a host, in order. */
+export type RemoteHostSetupStep = 'service' | 'port' | 'tailscale' | 'https' | 'code' | 'daemon';
+
+/** Pushed on `remote-daemon:setup-progress` as Set Up Host moves through its steps. */
+export interface RemoteHostSetupProgress {
+  step: RemoteHostSetupStep;
+  status: 'running' | 'passed' | 'failed';
+  /** The error text, for a failed step. */
+  detail?: string;
 }
 
 export interface RemoteInvokeRequest {

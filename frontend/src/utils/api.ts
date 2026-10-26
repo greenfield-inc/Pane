@@ -26,6 +26,8 @@ import type {
   RemoteDaemonHostRuntimeState,
   RemoteHostSetupRequest,
   RemotePaneConnectionState,
+  RemoteConnectionCheckStage,
+  RemoteHostSetupProgress,
   RemotePaneConnectionProfile,
 } from '../../../shared/types/remoteDaemon';
 import type { WorkspaceAccessUpdate } from '../../../shared/types/workspaceAccess';
@@ -764,6 +766,21 @@ export class API {
     async saveTailnetMachine(input: { name: string; password?: string }) {
       if (!isElectron()) throw new Error('Electron API not available');
       return window.electronAPI.remoteDaemon.saveTailnetMachine(input);
+    },
+
+    async runCheckFix(checkId: number, stage: RemoteConnectionCheckStage) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.remoteDaemon.runCheckFix(checkId, stage);
+    },
+
+    async dismissCheck(checkId: number) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.remoteDaemon.dismissCheck(checkId);
+    },
+
+    onSetupProgress(callback: (progress: RemoteHostSetupProgress) => void) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.remoteDaemon.onSetupProgress(callback);
     },
 
     onConnectionStateChanged(callback: (state: RemotePaneConnectionState) => void) {

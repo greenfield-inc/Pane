@@ -23,6 +23,8 @@ import type {
   RemoteHostSetupResult,
   RemoteHostSetupTerminalCommandResult,
   RemotePaneConnectionState,
+  RemoteConnectionCheckStage,
+  RemoteHostSetupProgress,
   RemotePaneConnectionProfile,
 } from '../../shared/types/remoteDaemon';
 import type { TailnetMachineList, WorkspaceAccessSummary, WorkspaceAccessUpdate } from '../../shared/types/workspaceAccess';
@@ -699,6 +701,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     listTailnetMachines: (): Promise<IPCResponse<TailnetMachineList>> => invokeIpc('remote-daemon:list-tailnet-machines'),
     saveTailnetMachine: (input: { name: string; password?: string }): Promise<IPCResponse<RemotePaneConnectionProfile>> =>
       invokeIpc('remote-daemon:save-tailnet-machine', input),
+    runCheckFix: (checkId: number, stage: RemoteConnectionCheckStage): Promise<IPCResponse<RemotePaneConnectionState>> =>
+      invokeIpc('remote-daemon:run-check-fix', { checkId, stage }),
+    dismissCheck: (checkId: number): Promise<IPCResponse<RemotePaneConnectionState>> =>
+      invokeIpc('remote-daemon:dismiss-check', { checkId }),
+    onSetupProgress: (callback: (progress: RemoteHostSetupProgress) => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, progress: RemoteHostSetupProgress) => callback(progress);
+      ipcRenderer.on('remote-daemon:setup-progress', wrappedCallback);
+      return () => ipcRenderer.removeListener('remote-daemon:setup-progress', wrappedCallback);
+    },
     onConnectionStateChanged: (callback: (state: RemotePaneConnectionState) => void) => {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, state: RemotePaneConnectionState) => callback(state);
       ipcRenderer.on('remote-daemon:connection-state-changed', wrappedCallback);
