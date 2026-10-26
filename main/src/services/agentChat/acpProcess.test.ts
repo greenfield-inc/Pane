@@ -2,6 +2,10 @@ import { expect, it, vi } from 'vitest';
 import { AcpProcess } from './acpProcess';
 import { ArchiveProcessTracker, type ArchiveProcessIdentity } from '../archiveProcessTracker';
 
+// On Windows every process scan starts PowerShell (Get-CimInstance). With the scripted
+// delays, these tests take 3.7 to 5 s each on Windows CI, too close to the 5 s default.
+const PROCESS_SCAN_TIMEOUT_MS = 20_000;
+
 it('owns a real adapter process until its protocol and OS lifetime have both ended', async () => {
   let identities: ArchiveProcessIdentity[] = [];
   const runtime = new AcpProcess({
@@ -26,7 +30,7 @@ it('owns a real adapter process until its protocol and OS lifetime have both end
     expect(identities).toEqual([]);
     expect(observations).toBeLessThanOrEqual(4);
   } finally { slowObservation.mockRestore(); await runtime.release(); }
-});
+}, PROCESS_SCAN_TIMEOUT_MS);
 
 it('records descendants created during graceful close before their parent exits', async () => {
   const { mkdtempSync, readFileSync, rmSync, existsSync } = await import('fs');
@@ -48,4 +52,4 @@ it('records descendants created during graceful close before their parent exits'
     if (existsSync(pidFile)) { try { process.kill(Number(readFileSync(pidFile, 'utf8')), 'SIGTERM'); } catch { /* Owned child already exited. */ } }
     rmSync(directory, { recursive: true, force: true });
   }
-});
+}, PROCESS_SCAN_TIMEOUT_MS);

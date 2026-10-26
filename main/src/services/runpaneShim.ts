@@ -12,17 +12,27 @@
  *
  * WSL terminals are left alone: a Windows Electron path cannot run inside the
  * distro, and env set on wsl.exe does not reach the Linux shell anyway.
+ *
+ * The installed app also appends `<PANE_DIR>/bin` to the end of the user's own
+ * PATH (shell startup files, or the Windows user PATH), so `runpane` works in
+ * terminals Pane did not open, such as when recovering from a failed update.
  */
+import { execFile } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import path from 'path';
 import type { PtyHostSpawnOpts } from '../ptyHost/types';
+import { isPackagedOnDefaultDirectory } from '../utils/appDirectory';
 
 /** Environment handed to a terminal spawn. */
 type SpawnEnv = PtyHostSpawnOpts['env'];
 
 export const PANE_MANAGED_SHIM_MARKER = 'pane-managed-runpane-shim v1';
 const MANAGED_SHELL_MARKER = 'pane-managed-shell-wrapper v1';
+// No cmd.exe metacharacters: the Windows shim echoes it unquoted.
+const MISSING_RUNTIME_MESSAGE = 'runpane: Pane is missing and Node.js is not on PATH. Reinstall Pane from https://runpane.com, or install Node.js and run: npx --yes runpane@latest update';
+const WSL_MESSAGE = 'runpane: this runpane belongs to Pane on Windows and cannot run inside WSL. In this distro, run: npm i -g runpane (or use npx --yes runpane@latest)';
 
 export interface RunpaneShimState {
   binDir: string;
@@ -88,25 +98,45 @@ function ensureDirectory(directory: string): void {
   fs.mkdirSync(directory, { recursive: true, mode: 0o755 });
 }
 
-function posixShim(appDirectory: string, execPath: string, cliPath: string): string {
+function posixShim(appDirectory: string, execPath: string, cliPath: string, platform: NodeJS.Platform): string {
+  // WSL appends the Windows PATH, so a WSL shell can find the shim Git Bash uses; its Windows paths mean nothing there.
+  const wsl = platform === 'win32'
+    ? [`case "$(uname -r 2>/dev/null)" in *[Mm]icrosoft*|*WSL*) echo ${shellQuote(WSL_MESSAGE)} >&2; exit 1 ;; esac`]
+    : [];
   return [
     '#!/bin/sh',
     `# ${PANE_MANAGED_SHIM_MARKER}: Pane rewrites this file at startup; edits are lost.`,
-    '# Runs the runpane CLI bundled with this Pane build using its Electron binary as Node.',
+    '# Runs the runpane CLI bundled with this Pane build using its Electron binary as Node,',
+    '# or Node on PATH when that binary is gone (a failed update, a moved app).',
+    ...wsl,
     `if [ -z "\${PANE_DIR:-}" ]; then PANE_DIR=${shellQuote(appDirectory)}; export PANE_DIR; fi`,
-    `ELECTRON_RUN_AS_NODE=1 exec ${shellQuote(execPath)} ${shellQuote(cliPath)} "$@"`,
+    `if [ -x ${shellQuote(execPath)} ]; then ELECTRON_RUN_AS_NODE=1 exec ${shellQuote(execPath)} ${shellQuote(cliPath)} "$@"; fi`,
+    `if command -v node >/dev/null 2>&1; then exec node ${shellQuote(cliPath)} "$@"; fi`,
+    `echo ${shellQuote(MISSING_RUNTIME_MESSAGE)} >&2`,
+    'exit 127',
     '',
   ].join('\n');
 }
 
 function windowsShim(appDirectory: string, execPath: string, cliPath: string): string {
+  // A batch file expands %NAME% even inside quotes; %% is a literal %.
+  const [paneDir, exe, cli] = [appDirectory, execPath, cliPath].map(value => value.replace(/%/g, '%%'));
   return [
     '@echo off',
     `rem ${PANE_MANAGED_SHIM_MARKER}: Pane rewrites this file at startup; edits are lost.`,
     'setlocal',
-    `if not defined PANE_DIR set "PANE_DIR=${appDirectory}"`,
+    `if not defined PANE_DIR set "PANE_DIR=${paneDir}"`,
+    `if not exist "${exe}" goto node`,
     'set ELECTRON_RUN_AS_NODE=1',
-    `"${execPath}" "${cliPath}" %*`,
+    `"${exe}" "${cli}" %*`,
+    'exit /b %ERRORLEVEL%',
+    ':node',
+    'where node >nul 2>nul || goto missing',
+    `node "${cli}" %*`,
+    'exit /b %ERRORLEVEL%',
+    ':missing',
+    `echo ${MISSING_RUNTIME_MESSAGE} 1>&2`,
+    'exit /b 1',
     '',
   ].join('\r\n');
 }
@@ -234,7 +264,7 @@ export function installRunpaneShim(options: InstallRunpaneShimOptions): RunpaneS
 
   const shimPath = path.join(binDir, platform === 'win32' ? 'runpane.cmd' : 'runpane');
   // Git Bash on Windows also finds the extensionless POSIX shim.
-  if (!writeManagedFile(path.join(binDir, 'runpane'), posixShim(options.appDirectory, execPath, cliPath), PANE_MANAGED_SHIM_MARKER, 0o755)) {
+  if (!writeManagedFile(path.join(binDir, 'runpane'), posixShim(options.appDirectory, execPath, cliPath, platform), PANE_MANAGED_SHIM_MARKER, 0o755)) {
     return null;
   }
   if (platform === 'win32'
@@ -321,4 +351,207 @@ export function withRunpaneOnPath(
 export function withRunpaneBinOnPath(env: SpawnEnv, state: RunpaneShimState | null = currentState, platform: NodeJS.Platform = process.platform): SpawnEnv {
   if (!state) return env;
   return { ...env, PATH: prependPath(env.PATH, state.binDir, platform === 'win32' ? ';' : ':'), PANE_RUNPANE_BIN: state.shimPath };
+}
+
+/** Marks the PATH lines Pane appends to a user's shell startup file. */
+const USER_PATH_MARKER = 'pane-runpane-path v1';
+/** Records which targets already got the entry, so one the user removes stays removed. */
+const USER_PATH_RECORD = 'user-path.json';
+const WINDOWS_USER_PATH = 'HKCU\\Environment\\Path';
+
+type UserPathResult = 'changed' | 'present' | 'refused';
+
+export interface AddRunpaneToUserPathOptions {
+  binDir: string;
+  home?: string;
+  /** The user's login shell; it decides which startup files get the PATH lines. */
+  loginShell?: string;
+  platform?: NodeJS.Platform;
+  env?: NodeJS.ProcessEnv;
+  /** A packaged build on the default data directory; dev and side-by-side builds never touch the user's profile. */
+  installed?: boolean;
+  windowsUserPath?: WindowsUserPathStore;
+}
+
+/**
+ * The .zshenv zsh reads for this user: in ZDOTDIR when /etc/zshenv or the
+ * inherited environment sets one, else in $HOME. A Pane started from the Dock
+ * may not inherit it, so ask zsh; -f skips the user's own files but still
+ * reads /etc/zshenv.
+ */
+async function zshEnvFile(loginShell: string, home: string, binDir: string, env: NodeJS.ProcessEnv): Promise<string> {
+  // Pane's own terminals point ZDOTDIR at its wrapper; that is not the user's.
+  const inherited = env.ZDOTDIR && env.ZDOTDIR !== path.join(path.dirname(binDir), 'shell', 'zsh') ? env.ZDOTDIR : env.PANE_USER_ZDOTDIR;
+  const probeEnv: NodeJS.ProcessEnv = { ...env, HOME: home, ZDOTDIR: inherited };
+  if (!inherited) delete probeEnv.ZDOTDIR;
+  const probed = await new Promise<string>(resolve => {
+    execFile(loginShell, ['-f', '-c', 'printf %s "$ZDOTDIR"'], { env: probeEnv, timeout: 3_000, windowsHide: true },
+      (error, stdout) => resolve(error ? '' : String(stdout)));
+  });
+  return path.join(probed || inherited || home, '.zshenv');
+}
+
+/**
+ * zsh: .zshenv, read by every zsh. bash: ~/.bashrc, and on macOS the login
+ * file bash reads first (.bash_profile, .bash_login, .profile); Pane creates
+ * .bash_profile only when none exists, since it would hide the others.
+ * fish: a conf.d file.
+ */
+async function shellStartupFiles(home: string, loginShell: string, platform: NodeJS.Platform, binDir: string, env: NodeJS.ProcessEnv): Promise<string[]> {
+  const shell = path.basename(loginShell);
+  const loginFiles = ['.bash_profile', '.bash_login', '.profile'].map(name => path.join(home, name));
+  const bashLogin = loginFiles.find(file => fs.existsSync(file)) ?? (shell === 'bash' ? loginFiles[0] : undefined);
+  const files = platform === 'darwin' && bashLogin ? [bashLogin] : [];
+  if (shell === 'zsh') files.unshift(await zshEnvFile(loginShell, home, binDir, env));
+  if (shell === 'bash') files.unshift(path.join(home, '.bashrc'));
+  if (shell === 'fish') files.unshift(path.join(env.XDG_CONFIG_HOME || path.join(home, '.config'), 'fish', 'conf.d', 'pane.fish'));
+  return files;
+}
+
+function shellPathBlock(file: string, binDir: string): string {
+  const quoted = shellQuote(binDir);
+  const body = file.endsWith('.fish')
+    ? [`if not contains -- ${quoted} $PATH`, `    set -gx PATH $PATH ${quoted}`, 'end']
+    : ['case ":$PATH:" in', `  *:${quoted}:*) ;;`, `  *) export PATH="\${PATH:+$PATH:}"${quoted} ;;`, 'esac'];
+  return [
+    `# ${USER_PATH_MARKER}: Pane added these lines so runpane works in every terminal.`,
+    '# Delete them to undo; Pane does not add them again.',
+    ...body,
+    `# end ${USER_PATH_MARKER}`,
+    '',
+  ].join('\n');
+}
+
+/** Append the block once, keeping the file's mode. A symbolic link is left alone. */
+function appendShellPathBlock(file: string, binDir: string): UserPathResult {
+  if (isSymlink(file)) return 'refused';
+  const exists = fs.existsSync(file);
+  const previous = exists ? fs.readFileSync(file, 'utf8') : '';
+  if (previous.includes(USER_PATH_MARKER)) return 'present';
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const separator = previous === '' ? '' : previous.endsWith('\n') ? '\n' : '\n\n';
+  const mode = exists ? fs.statSync(file).mode & 0o7777 : 0o644;
+  return writeManagedFile(file, `${previous}${separator}${shellPathBlock(file, binDir)}`, null, mode) ? 'changed' : 'refused';
+}
+
+function powershell(script: string, env: NodeJS.ProcessEnv = {}): Promise<string> {
+  const encoded = Buffer.from(`$ErrorActionPreference = 'Stop'\n${script}`, 'utf16le').toString('base64');
+  return new Promise((resolve, reject) => {
+    execFile(path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'), ['-NoProfile', '-NonInteractive', '-EncodedCommand', encoded], { env: { ...process.env, ...env }, timeout: 30_000, windowsHide: true },
+      (error, stdout, stderr) => {
+        if (!error) return resolve(String(stdout));
+        // Node's message repeats the whole encoded script; keep the reason.
+        const detail = String(stderr).trim().split(/\r?\n/)[0] || (error.killed ? 'timed out' : `exit code ${error.code ?? 'unknown'}`);
+        reject(new Error(`powershell.exe failed: ${detail}`));
+      });
+  });
+}
+
+// Base64 keeps non-ASCII PATH entries intact whatever the console code page is.
+const READ_WINDOWS_USER_PATH = [
+  "$key = Get-Item -LiteralPath 'HKCU:\\Environment'",
+  "$value = $key.GetValue('Path', $null, 'DoNotExpandEnvironmentNames')",
+  "$kind = if ($null -eq $value) { 'None' } else { $key.GetValueKind('Path').ToString() }",
+  '[Console]::Out.Write([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("$kind`n$value")))',
+].join('\n');
+
+// Set-ItemProperty keeps the value's type, unlike [Environment]::SetEnvironmentVariable,
+// which rewrites REG_EXPAND_SZ as REG_SZ. The broadcast lets Explorer hand new terminals the new PATH.
+const WRITE_WINDOWS_USER_PATH = [
+  "Set-ItemProperty -LiteralPath 'HKCU:\\Environment' -Name 'Path' -Value $env:PANE_USER_PATH -Type $env:PANE_USER_PATH_KIND",
+  'try {',
+  "  Add-Type -Namespace Pane -Name Environment -MemberDefinition '[DllImport(\"user32.dll\", CharSet = CharSet.Unicode)] public static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint msg, UIntPtr wParam, string lParam, uint flags, uint timeout, out UIntPtr result);'",
+  '  $result = [UIntPtr]::Zero',
+  "  [void][Pane.Environment]::SendMessageTimeout([IntPtr]0xffff, 0x1a, [UIntPtr]::Zero, 'Environment', 2, 5000, [ref]$result)",
+  '} catch {}',
+].join('\n');
+
+/** HKCU\Environment\Path and its registry type: String, ExpandString, or None when the value is missing. */
+export interface WindowsUserPath {
+  kind: string;
+  value: string;
+}
+
+/** Reads and writes the Windows user PATH. */
+interface WindowsUserPathStore {
+  read(): Promise<WindowsUserPath>;
+  write(next: WindowsUserPath): Promise<void>;
+}
+
+const registryUserPath: WindowsUserPathStore = {
+  async read() {
+    const decoded = Buffer.from((await powershell(READ_WINDOWS_USER_PATH)).trim(), 'base64').toString('utf8');
+    const newline = decoded.indexOf('\n');
+    return { kind: decoded.slice(0, newline), value: decoded.slice(newline + 1) };
+  },
+  async write(next) {
+    await powershell(WRITE_WINDOWS_USER_PATH, { PANE_USER_PATH: next.value, PANE_USER_PATH_KIND: next.kind });
+  },
+};
+
+/** Append to the user PATH once, keeping REG_EXPAND_SZ or REG_SZ as it was. */
+async function appendWindowsUserPath(binDir: string, env: NodeJS.ProcessEnv, store: WindowsUserPathStore): Promise<UserPathResult> {
+  const { kind, value } = await store.read();
+  if (kind !== 'None' && kind !== 'String' && kind !== 'ExpandString') return 'refused';
+  // C:\x\bin, C:/x/bin/ and "C:\x\bin" are one entry to Windows.
+  const normalize = (entry: string) => entry.trim().replace(/^"(.*)"$/, '$1')
+    .replace(/%([^%]+)%/g, (match, name: string) => env[name] ?? match)
+    .replace(/[\\/]+/g, '/').replace(/\/$/, '').toLowerCase();
+  if (value.split(';').some(entry => normalize(entry) === normalize(binDir))) return 'present';
+  await store.write({
+    kind: kind === 'String' ? 'String' : 'ExpandString',
+    value: value === '' || value.endsWith(';') ? `${value}${binDir}` : `${value};${binDir}`,
+  });
+  return 'changed';
+}
+
+function readUserPathRecord(file: string): string[] {
+  try {
+    return decodeBoundary(JSON.parse(fs.readFileSync(file, 'utf8')), boundary.object({ done: boundary.array(boundary.string) })).done;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Put `binDir` at the end of the user's own PATH so `runpane` works in
+ * terminals Pane did not open. A runpane installed with npm keeps winning there.
+ * Each target is changed at most once. Returns the targets it changed.
+ */
+export async function addRunpaneToUserPath(options: AddRunpaneToUserPathOptions): Promise<string[]> {
+  const env = options.env ?? process.env;
+  if (env.PANE_DISABLE_OS_INTEGRATION === '1' || !(options.installed ?? isPackagedOnDefaultDirectory())) return [];
+  const platform = options.platform ?? process.platform;
+  const home = options.home ?? os.homedir();
+  const recordFile = path.join(options.binDir, USER_PATH_RECORD);
+  const done = readUserPathRecord(recordFile);
+  const targets = platform === 'win32'
+    ? [WINDOWS_USER_PATH]
+    : await shellStartupFiles(home, options.loginShell ?? os.userInfo().shell ?? env.SHELL ?? '', platform, options.binDir, env);
+  const changed: string[] = [];
+  for (const target of targets.filter(candidate => !done.includes(candidate))) {
+    let result: UserPathResult;
+    try {
+      result = target === WINDOWS_USER_PATH ? await appendWindowsUserPath(options.binDir, env, options.windowsUserPath ?? registryUserPath) : appendShellPathBlock(target, options.binDir);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      console.warn(`[runpane] Could not add ${options.binDir} to PATH in ${target} (${reason}). Pane retries at its next start; until then, add it by hand.`);
+      continue;
+    }
+    if (result === 'refused') continue;
+    if (result === 'changed') changed.push(target);
+    done.push(target);
+    writeManagedFile(recordFile, `${JSON.stringify({ done }, null, 2)}\n`, null, 0o644);
+  }
+  return changed;
+}
+
+export async function addRunpaneToUserPathBestEffort(): Promise<void> {
+  if (!currentState) return;
+  try {
+    const changed = await addRunpaneToUserPath({ binDir: currentState.binDir });
+    if (changed.length > 0) console.log(`[runpane] Added ${currentState.binDir} to PATH in ${changed.join(', ')}`);
+  } catch (error) {
+    console.warn(`[runpane] Could not add ${currentState.binDir} to the user PATH (${error instanceof Error ? error.message : String(error)}). Pane retries at its next start.`);
+  }
 }
