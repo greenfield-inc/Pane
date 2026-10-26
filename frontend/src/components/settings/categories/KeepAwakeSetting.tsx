@@ -10,8 +10,8 @@ const MASTER_LABEL = 'Keep awake while sessions are active';
 
 /**
  * The keep-awake master toggle and, under its chevron, when it applies: plugged
- * in (on by default) and on battery (off by default, because it keeps the
- * screen on). Turning the toggle off disables both boxes but keeps their values.
+ * in and on battery, both off by default (on battery it also keeps the screen
+ * on). Turning the toggle off disables both boxes but keeps their values.
  */
 export function KeepAwakeSetting({ persistence }: { persistence: SettingsPersistence }) {
   const config = persistence.config!;
