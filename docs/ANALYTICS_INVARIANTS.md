@@ -182,8 +182,8 @@ command starts or successes. Preserve sanitized wrapper failures and download
 lifecycle events; honor explicit local analytics opt-out as well as CI,
 `DO_NOT_TRACK=1` and `RUNPANE_TELEMETRY_DISABLED`.
 
-`runpane_wrapper_command_failed` reports thrown errors and non-zero exits from
-`install`, `update` and setup only (`runTrackedCommand` in
+`runpane_wrapper_command_failed` reports thrown errors, and non-zero exits from
+`install` or `update` only (also when setup runs them) (`runTrackedCommand` in
 `packages/runpane/src/cli.ts` and `run_tracked_command` in the pip `cli.py`).
 Other exit codes are documented results and send nothing. The event carries
 `error_code` (the code the `--json` error prints) and a `failure_category` read
