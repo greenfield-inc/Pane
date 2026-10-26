@@ -3386,12 +3386,19 @@ test('Move to host… with Tailscale signed out passes on the reason and the fix
   await expect(dialog.getByRole('button', { name: 'Move Session' })).toBeDisabled();
 });
 
+type PaneChatOfferRecord = { preferences: string[]; creates: Array<{ name: string; openingPrompt?: string }>; failNextCreate: boolean };
+declare global {
+  interface Window {
+    __paneChatOffer?: PaneChatOfferRecord;
+  }
+}
+
 async function installPaneChatOfferFixture(page: Page): Promise<void> {
   await installSessionsFixture(page, [], [paneFixture('pane-copy', 'checkout-copy'), paneFixture('pane-timeouts', 'api-timeouts')]);
   await page.addInitScript(() => {
     const api = window.electronAPI;
-    const record = { preferences: [] as string[], creates: [] as Array<{ name: string; openingPrompt?: string }>, failNextCreate: true };
-    Object.assign(window, { __paneChatOffer: record });
+    const record: PaneChatOfferRecord = { preferences: [], creates: [], failNextCreate: true };
+    window.__paneChatOffer = record;
     api.paneChat.introOffer = async () => ({ success: true, data: { eligible: true } });
     const setPreference = api.preferences.set;
     api.preferences.set = async (key: string, value: string) => {
@@ -3412,7 +3419,10 @@ async function installPaneChatOfferFixture(page: Page): Promise<void> {
 }
 
 function paneChatOfferRecord(page: Page) {
-  return page.evaluate(() => (window as Window & { __paneChatOffer: { preferences: string[]; creates: Array<{ name: string; openingPrompt?: string }> } }).__paneChatOffer);
+  return page.evaluate(() => {
+    if (!window.__paneChatOffer) throw new Error('The Pane Chat offer fixture is not installed');
+    return window.__paneChatOffer;
+  });
 }
 
 test('the Pane Chat offer shows over a Pane, retries a failed start, and follows the user into the new Session', async ({ page }) => {
