@@ -619,6 +619,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
     handleOpenInEditor,
     handleOpenInBrowser,
     handleShowInExplorer,
+    pathContext,
     closeFilePopover,
     closeSelectionPopover,
   } = useTerminalLinks(terminalInstance, {
@@ -2157,15 +2158,20 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
         y={filePopover.y}
         onClose={closeFilePopover}
       >
-        <PopoverButton onClick={handleOpenInEditor}>
+        <PopoverButton onClick={handleOpenInEditor} disabled={filePopover.relativePath === null}>
           <span className="flex items-center gap-2">
             <FileEdit className="w-4 h-4" />
             Open in Editor
           </span>
         </PopoverButton>
+        {filePopover.relativePath === null && (
+          <p className="px-3 py-1 text-xs text-text-secondary">
+            {filePopover.absolutePath ? 'Outside this worktree' : 'Home directory unavailable'}
+          </p>
+        )}
         <PopoverButton
           onClick={handleShowInExplorer}
-          disabled={isRemoteMode}
+          disabled={isRemoteMode || !filePopover.absolutePath}
           title={isRemoteMode ? 'Only available in local mode' : undefined}
         >
           <span className="flex items-center gap-2">
@@ -2181,7 +2187,8 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
         y={selectionPopover.y}
         text={selectionPopover.text}
         panelTitle={panel.title}
-        workingDirectory={workingDirectory}
+        workingDirectory={pathContext?.workingDirectory ?? workingDirectory}
+        homeDirectory={pathContext?.homeDirectory ?? undefined}
         sessionId={panel.sessionId}
         isRemoteMode={isRemoteMode}
         onOpenInBrowser={handleOpenInBrowser}
