@@ -50,10 +50,16 @@ from the distro as `/mnt/c/...`. Nothing is installed in the distro.
 - Pane already lists the terminal's `PANE_*` variables in `WSLENV`, so they
   reach the CLI. Its working directory is the Windows form of the shell's
   (`\\wsl.localhost\<distro>\...`, or `C:\...` under `/mnt/c`).
+- The shim converts Linux paths to Windows paths with `wslpath -w`: an
+  absolute `PANE_DIR`, the values of path flags such as `--file`,
+  `--prompt-file` and `--pane-dir` (also in `--flag=value` form), and a
+  path-like `--repo` value. Arguments after `--` pass through unchanged. The
+  flag list is shared with the WSL Session bridge (`RUNPANE_PATH_FLAGS` in
+  `main/src/utils/wslUtils.ts`).
 - WSL terminals start bash with `--rcfile <PANE_DIR>/shell/bash/wsl-rcfile`
   instead of `--login`. The rcfile reads the files a login bash reads
   (`/etc/profile`, then the first of `~/.bash_profile`, `~/.bash_login`,
-  `~/.profile`), then puts the bin directory (via `wslpath -u`) first on
+  `~/.profile`), then puts the bin directory (via `/bin/wslpath -u`) first on
   `PATH`, exports `PANE_RUNPANE_BIN`, and adds a `PROMPT_COMMAND` hook. The
   shell is interactive but not a login shell, so use `exit`, not `logout`. If
   the distro cannot read the rcfile, the terminal starts `bash --login` as
@@ -62,7 +68,8 @@ from the distro as `/mnt/c/...`. Nothing is installed in the distro.
   enabled=true` in `/etc/wsl.conf`) and exits 126.
 - A Windows command line is limited to 32,767 characters. Pass long text with
   a file flag such as `--prompt-file` instead of inline.
-- WSL Sessions keep their own `.pane-runtime/runpane` bridge
+- WSL Sessions keep their own `.pane-runtime/runpane` bridge, which runs the
+  CLI through PowerShell and pins it to the Session
   ([SESSIONS.md](SESSIONS.md)).
 
 ## Existing global installs
