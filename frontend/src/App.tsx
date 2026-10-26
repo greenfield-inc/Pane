@@ -383,6 +383,9 @@ function App() {
 
         if (!hasLegacyChoice && !hasAppliedDefault) {
           const identity = await resolveAnalyticsIdentity();
+          // A config change during the identity lookup restarts this effect;
+          // only the latest run captures and aliases.
+          if (cancelled) return;
 
           initPostHog({
             enabled: true,
