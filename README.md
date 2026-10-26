@@ -328,7 +328,7 @@ Other tools build custom chat UIs that only work with agents they've explicitly 
 
 | Shortcut | Action |
 |----------|--------|
-| `⌘⇧P` / `Ctrl+Shift+P` | Open command palette |
+| `⌘⇧P` / `Ctrl+Shift+P` | Open Search: find any Pane, Session, project or command |
 | `⌘K` / `Ctrl+K` | Clear terminal scrollback |
 | `⌘N` / `Ctrl+N` | New pane |
 | `⌘⇧W` / `Ctrl+Shift+W` | Archive pane |
@@ -490,7 +490,7 @@ Pane is the only tool that is a real desktop app, agent-agnostic, cross-platform
 ## FAQ
 
 **"Isn't this just tmux with extra steps?"**
-tmux is from 2007. Pane is a modern desktop app with a built-in diff viewer, file explorer, git workflow, command palette, browser tab, resource manager, persistent state, cross-terminal context sharing, and (unlike tmux) it works on Windows. tmux is a terminal multiplexer; Pane is a workstation for managing AI coding agents.
+tmux is from 2007. Pane is a modern desktop app with a built-in diff viewer, file explorer, git workflow, Search launcher, browser tab, resource manager, persistent state, cross-terminal context sharing, and (unlike tmux) it works on Windows. tmux is a terminal multiplexer; Pane is a workstation for managing AI coding agents.
 
 **"What if a new AI agent comes out tomorrow?"**
 You just run it. Pane doesn't bundle agents or lock you in. If it runs in a terminal, it runs in Pane, instantly. No plugins, no SDK, no waiting for support.

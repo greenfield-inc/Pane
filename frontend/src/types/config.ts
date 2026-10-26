@@ -168,7 +168,7 @@ export interface AppConfig {
   terminalShortcuts?: TerminalShortcut[];
   // Whether Pane intercepts application keyboard shortcuts
   keyboardShortcutsEnabled?: boolean;
-  // Whether the Command Palette shortcut remains active when other shortcuts are disabled
+  // Whether the Search shortcut (open-command-palette) remains active when other shortcuts are disabled
   commandPaletteShortcutEnabled?: boolean;
   // Whether the terminal answers kitty keyboard protocol requests (CSI = | ? | > | < u)
   kittyKeyboardEnabled?: boolean;
