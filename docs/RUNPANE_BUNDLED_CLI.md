@@ -57,14 +57,20 @@ so a `runpane` you installed with npm keeps winning outside Pane.
 - **macOS and Linux:** Pane appends a block marked `pane-runpane-path v1` to
   the startup files of your login shell. The block adds the directory only if
   `PATH` does not already contain it.
-  - zsh: `~/.zshenv` (created if missing), which zsh reads in every shell
-  - bash: `~/.bashrc`, plus `~/.bash_profile` on macOS
-  - fish: `~/.config/fish/conf.d/pane.fish`
-  - On macOS, an existing `~/.bash_profile` also gets the block when your
+  - zsh: `.zshenv`, which zsh reads in every shell, in your `ZDOTDIR` (as
+    zsh reports it after `/etc/zshenv`) or else `~` (created if missing)
+  - bash: `~/.bashrc`, plus on macOS the login file bash reads: the first of
+    `~/.bash_profile`, `~/.bash_login` and `~/.profile` that exists. Pane
+    creates `~/.bash_profile` only when none exists, because a new
+    `~/.bash_profile` would stop bash reading the others.
+  - fish: `$XDG_CONFIG_HOME/fish/conf.d/pane.fish` (default `~/.config`)
+  - On macOS, that existing bash login file also gets the block when your
     login shell is not bash.
 
-  Pane skips a file that is a symbolic link or already mentions the directory.
-  New terminals pick it up; run `exec $SHELL -l` in an open one.
+  Pane skips a file that is a symbolic link or already has the block, and
+  keeps a file's permissions. If a file cannot be written, Pane logs it, tries
+  the others, and retries it at the next start. New terminals pick it up; run
+  `exec $SHELL -l` in an open one.
 - **Windows:** Pane appends the directory to your user `PATH`
   (`HKCU\Environment\Path`, no administrator rights), keeping the value's
   type (`REG_EXPAND_SZ` or `REG_SZ`), and broadcasts `WM_SETTINGCHANGE`.

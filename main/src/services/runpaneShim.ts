@@ -113,18 +113,20 @@ function posixShim(appDirectory: string, execPath: string, cliPath: string): str
 }
 
 function windowsShim(appDirectory: string, execPath: string, cliPath: string): string {
+  // A batch file expands %NAME% even inside quotes; %% is a literal %.
+  const [paneDir, exe, cli] = [appDirectory, execPath, cliPath].map(value => value.replace(/%/g, '%%'));
   return [
     '@echo off',
     `rem ${PANE_MANAGED_SHIM_MARKER}: Pane rewrites this file at startup; edits are lost.`,
     'setlocal',
-    `if not defined PANE_DIR set "PANE_DIR=${appDirectory}"`,
-    `if not exist "${execPath}" goto node`,
+    `if not defined PANE_DIR set "PANE_DIR=${paneDir}"`,
+    `if not exist "${exe}" goto node`,
     'set ELECTRON_RUN_AS_NODE=1',
-    `"${execPath}" "${cliPath}" %*`,
+    `"${exe}" "${cli}" %*`,
     'exit /b %ERRORLEVEL%',
     ':node',
     'where node >nul 2>nul || goto missing',
-    `node "${cliPath}" %*`,
+    `node "${cli}" %*`,
     'exit /b %ERRORLEVEL%',
     ':missing',
     `echo ${MISSING_RUNTIME_MESSAGE} 1>&2`,
@@ -365,14 +367,38 @@ export interface AddRunpaneToUserPathOptions {
   windowsUserPath?: WindowsUserPathStore;
 }
 
-function shellStartupFiles(home: string, loginShell: string, platform: NodeJS.Platform): string[] {
+/**
+ * The .zshenv zsh reads for this user: in ZDOTDIR when /etc/zshenv or the
+ * inherited environment sets one, else in $HOME. A Pane started from the Dock
+ * may not inherit it, so ask zsh; -f skips the user's own files but still
+ * reads /etc/zshenv.
+ */
+async function zshEnvFile(loginShell: string, home: string, binDir: string, env: NodeJS.ProcessEnv): Promise<string> {
+  // Pane's own terminals point ZDOTDIR at its wrapper; that is not the user's.
+  const inherited = env.ZDOTDIR && env.ZDOTDIR !== path.join(path.dirname(binDir), 'shell', 'zsh') ? env.ZDOTDIR : env.PANE_USER_ZDOTDIR;
+  const probeEnv: NodeJS.ProcessEnv = { ...env, HOME: home, ZDOTDIR: inherited };
+  if (!inherited) delete probeEnv.ZDOTDIR;
+  const probed = await new Promise<string>(resolve => {
+    execFile(loginShell, ['-f', '-c', 'printf %s "$ZDOTDIR"'], { env: probeEnv, timeout: 3_000, windowsHide: true },
+      (error, stdout) => resolve(error ? '' : String(stdout)));
+  });
+  return path.join(probed || inherited || home, '.zshenv');
+}
+
+/**
+ * zsh: .zshenv, read by every zsh. bash: ~/.bashrc, and on macOS the login
+ * file bash reads first (.bash_profile, .bash_login, .profile); Pane creates
+ * .bash_profile only when none exists, since it would hide the others.
+ * fish: a conf.d file.
+ */
+async function shellStartupFiles(home: string, loginShell: string, platform: NodeJS.Platform, binDir: string, env: NodeJS.ProcessEnv): Promise<string[]> {
   const shell = path.basename(loginShell);
-  const bashProfile = path.join(home, '.bash_profile');
-  const files = platform === 'darwin' && (shell === 'bash' || fs.existsSync(bashProfile)) ? [bashProfile] : [];
-  // zsh reads .zshenv in every shell, login or not, on macOS and Linux alike.
-  if (shell === 'zsh') files.unshift(path.join(home, '.zshenv'));
+  const loginFiles = ['.bash_profile', '.bash_login', '.profile'].map(name => path.join(home, name));
+  const bashLogin = loginFiles.find(file => fs.existsSync(file)) ?? (shell === 'bash' ? loginFiles[0] : undefined);
+  const files = platform === 'darwin' && bashLogin ? [bashLogin] : [];
+  if (shell === 'zsh') files.unshift(await zshEnvFile(loginShell, home, binDir, env));
   if (shell === 'bash') files.unshift(path.join(home, '.bashrc'));
-  if (shell === 'fish') files.unshift(path.join(home, '.config', 'fish', 'conf.d', 'pane.fish'));
+  if (shell === 'fish') files.unshift(path.join(env.XDG_CONFIG_HOME || path.join(home, '.config'), 'fish', 'conf.d', 'pane.fish'));
   return files;
 }
 
@@ -390,23 +416,22 @@ function shellPathBlock(file: string, binDir: string): string {
   ].join('\n');
 }
 
-/** Append the block once. A file that already names the directory, or a symbolic link, is left alone. */
-function appendShellPathBlock(file: string, binDir: string, home: string): UserPathResult {
+/** Append the block once, keeping the file's mode. A symbolic link is left alone. */
+function appendShellPathBlock(file: string, binDir: string): UserPathResult {
   if (isSymlink(file)) return 'refused';
-  const previous = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
-  // Shell startup files spell paths with '/'.
-  const relative = path.relative(home, binDir).split(path.sep).join('/');
-  if ([USER_PATH_MARKER, binDir, `$HOME/${relative}`, `\${HOME}/${relative}`, `~/${relative}`].some(text => previous.includes(text))) return 'present';
+  const exists = fs.existsSync(file);
+  const previous = exists ? fs.readFileSync(file, 'utf8') : '';
+  if (previous.includes(USER_PATH_MARKER)) return 'present';
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const separator = previous === '' ? '' : previous.endsWith('\n') ? '\n' : '\n\n';
-  fs.appendFileSync(file, `${separator}${shellPathBlock(file, binDir)}`, { mode: 0o644 });
-  return 'changed';
+  const mode = exists ? fs.statSync(file).mode & 0o7777 : 0o644;
+  return writeManagedFile(file, `${previous}${separator}${shellPathBlock(file, binDir)}`, null, mode) ? 'changed' : 'refused';
 }
 
 function powershell(script: string, env: NodeJS.ProcessEnv = {}): Promise<string> {
   const encoded = Buffer.from(`$ErrorActionPreference = 'Stop'\n${script}`, 'utf16le').toString('base64');
   return new Promise((resolve, reject) => {
-    execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', encoded], { env: { ...process.env, ...env }, timeout: 30_000, windowsHide: true },
+    execFile(path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'), ['-NoProfile', '-NonInteractive', '-EncodedCommand', encoded], { env: { ...process.env, ...env }, timeout: 30_000, windowsHide: true },
       (error, stdout) => (error ? reject(error) : resolve(String(stdout))));
   });
 }
@@ -488,10 +513,16 @@ export async function addRunpaneToUserPath(options: AddRunpaneToUserPathOptions)
   const done = readUserPathRecord(recordFile);
   const targets = platform === 'win32'
     ? [WINDOWS_USER_PATH]
-    : shellStartupFiles(home, options.loginShell ?? os.userInfo().shell ?? env.SHELL ?? '', platform);
+    : await shellStartupFiles(home, options.loginShell ?? os.userInfo().shell ?? env.SHELL ?? '', platform, options.binDir, env);
   const changed: string[] = [];
   for (const target of targets.filter(candidate => !done.includes(candidate))) {
-    const result = target === WINDOWS_USER_PATH ? await appendWindowsUserPath(options.binDir, env, options.windowsUserPath ?? registryUserPath) : appendShellPathBlock(target, options.binDir, home);
+    let result: UserPathResult;
+    try {
+      result = target === WINDOWS_USER_PATH ? await appendWindowsUserPath(options.binDir, env, options.windowsUserPath ?? registryUserPath) : appendShellPathBlock(target, options.binDir);
+    } catch (error) {
+      console.warn(`[runpane] Could not add runpane to PATH in ${target}:`, error);
+      continue;
+    }
     if (result === 'refused') continue;
     if (result === 'changed') changed.push(target);
     done.push(target);
