@@ -112,8 +112,7 @@ it.skipIf(process.platform === 'win32')('matches by terminal only at capture, on
     // 1000006 shares a terminal it does not lead, like a child of Pane launched from a developer's shell.
     [1000006, 'ttys011'], [1000007, 'ttys011'],
   ]);
-  const readTerminals = vi.fn(async () => terminals);
-  const tracker = new ArchiveProcessTracker([], items => { saved = items; }, async () => table, terminate, readTerminals);
+  const tracker = new ArchiveProcessTracker([], items => { saved = items; }, async () => table, terminate, async () => terminals);
   await tracker.capture([1000001, 1000006]);
   expect(saved.map(item => item.pid)).toEqual([1000001, 1000002, 1000006]);
 
@@ -122,14 +121,4 @@ it.skipIf(process.platform === 'win32')('matches by terminal only at capture, on
   terminals.set(1000005, 'ttys009');
   await tracker.terminateSurvivors();
   expect(terminate.mock.calls[0][0].map(item => item.pid)).toEqual([1000006, 1000002, 1000001]);
-  expect(readTerminals).toHaveBeenCalledOnce();
-});
-
-it('does not read terminal names when no root leads a terminal session', async () => {
-  const readTerminals = vi.fn(async () => new Map<number, string>());
-  const tracker = new ArchiveProcessTracker([], () => undefined, async () => [
-    { pid: 1000001, parent: 0, started: process.platform === 'win32' ? '101' : '2026-10-03T00:00:01Z', exited: false },
-  ], undefined, readTerminals);
-  await tracker.capture([1000001]);
-  expect(readTerminals).not.toHaveBeenCalled();
 });

@@ -3,8 +3,7 @@ import { mkdtempSync, promises as fs, realpathSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { isProcessAlive, listDescendantPids, listTerminalProcessPids, terminateProcessTrees, waitForProcessesToExit } from './processTree';
-import { spawnDetachedWorkerPty } from '../test/detachedWorkerPty';
+import { isProcessAlive, listDescendantPids, terminateProcessTrees, waitForProcessesToExit } from './processTree';
 
 const spawned: ChildProcess[] = [];
 const directories: string[] = [];
@@ -115,31 +114,6 @@ describe('listDescendantPids', () => {
   it('has nothing to report for a pid that cannot exist', async () => {
     await expect(listDescendantPids([])).resolves.toEqual([]);
     await expect(listDescendantPids([0, -7])).resolves.toEqual([]);
-  });
-});
-
-describe.skipIf(process.platform === 'win32')('listTerminalProcessPids', () => {
-  it('finds a worker that double-forked out of the shell, by its controlling terminal', async () => {
-    const terminal = await spawnDetachedWorkerPty();
-    const unrelated = idleProcess(temporaryDirectory());
-    try {
-      expect(await listDescendantPids([terminal.shellPid])).not.toContain(terminal.workerPid);
-
-      const pids = await listTerminalProcessPids([terminal.shellPid]);
-
-      expect(pids).toContain(terminal.workerPid);
-      expect(pids).not.toContain(terminal.shellPid);
-      expect(pids).not.toContain(unrelated.pid);
-      // The worker shares the terminal but does not lead its session, so it names nothing.
-      expect(await listTerminalProcessPids([terminal.workerPid])).not.toContain(terminal.shellPid);
-    } finally {
-      terminal.close();
-      await terminateProcessTrees([terminal.workerPid], { timeoutMs: 5000 });
-    }
-  }, 30_000);
-
-  it('has nothing to report for a pid that cannot exist', async () => {
-    await expect(listTerminalProcessPids([0, -7])).resolves.toEqual([]);
   });
 });
 

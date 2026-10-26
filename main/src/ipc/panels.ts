@@ -566,11 +566,6 @@ export function registerPanelHandlers(
       // Clean up terminal process if it's a terminal panel
       if (panel?.type === 'terminal') {
         await terminalPanelManager.destroyTerminal(panelId, { saveState: false });
-        // The tab is gone: nothing it started may outlive it. Not awaited, so
-        // closing a tab does not wait out a process's grace period.
-        void terminalPanelManager.reapStoppedProcesses(panelId).catch(error => {
-          console.error(`[IPC] Failed to reap processes of deleted panel ${panelId}:`, error);
-        });
       }
 
       await panelManager.deletePanel(panelId);

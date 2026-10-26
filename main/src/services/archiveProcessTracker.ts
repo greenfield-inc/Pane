@@ -78,6 +78,11 @@ export class ArchiveProcessTracker {
     private readTerminals = readControllingTerminals,
   ) {}
 
+  /** Tracked identities not yet confirmed gone. */
+  get processes(): readonly ArchiveProcessIdentity[] {
+    return this.identities;
+  }
+
   async capture(roots: readonly number[]): Promise<void> {
     if (roots.length === 0) return;
     const table = await this.read();

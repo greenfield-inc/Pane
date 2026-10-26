@@ -1572,9 +1572,9 @@ if (launchRemoteSetup) {
   // Safety net: force exit if graceful shutdown takes too long
   // Placed after the dialog so user interaction time isn't counted
   const shutdownSafetyTimeout = setTimeout(() => {
-    logToFile('FORCED EXIT: shutdown timed out after 10s');
+    logToFile('FORCED EXIT: shutdown timed out after 30s');
     app.exit(1);
-  }, 10_000);
+  }, 30_000);
 
   try {
     if (paneDaemonHost?.paneDaemonServer) {

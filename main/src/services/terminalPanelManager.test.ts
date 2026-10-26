@@ -1,6 +1,6 @@
-import { spawnSync } from 'node:child_process';
 import * as claudeTranscripts from './claudeSessionTranscript';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ConfigManager } from './configManager';
 import { resetPaneRuntimeForTests, setPaneRuntime } from '../core/runtime';
 import { createFanoutEventSink } from '../core/eventSink';
@@ -18,6 +18,7 @@ import { RunCommandManager } from './runCommandManager';
 import type { DatabaseService } from '../database/database';
 import * as processTree from '../utils/processTree';
 import { ArchiveProcessTracker, type ArchiveProcessIdentity, type ArchiveProcessObservation } from './archiveProcessTracker';
+import { spawnDetachedWorkerPty, type DetachedWorkerPty } from '../test/detachedWorkerPty';
 
 vi.spyOn(panelManager, 'emitPanelEvent');
 vi.spyOn(panelManager, 'getPanel');
@@ -2022,6 +2023,10 @@ type DetectionAccess = AgentStatusAccess & {
 
 describe('TerminalPanelManager wrapper agent detection', () => {
   const rule = '─'.repeat(40);
+  // The fake shell pid 4242 may be a real process here: destroy must not track it.
+  let capture: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => { capture = vi.spyOn(ArchiveProcessTracker.prototype, 'capture').mockResolvedValue(); });
+  afterEach(() => { capture.mockRestore(); });
 
   function wrapperPanel(customState: TerminalPanelState = { initialCommand: 'agent-farm run free-range' }) {
     const panel = {
@@ -2521,8 +2526,9 @@ describe('TerminalPanelManager Agent Farm resume', () => {
 
 type DestroyTerminalAccess = {
   terminals: Map<string, TerminalUnderTest>;
-  stoppingProcesses: Map<string, number[]>;
+  stoppingProcesses: Map<string, ArchiveProcessTracker>;
   destroyTerminal(panelId: string): Promise<void>;
+  terminateAllTerminals(): Promise<void>;
   flushOutputBuffer(terminal: TerminalUnderTest): void;
 };
 
@@ -2558,68 +2564,63 @@ describe('TerminalPanelManager destroyTerminal teardown', () => {
   });
 });
 
-describe('TerminalPanelManager orphan reaping', () => {
+describe.skipIf(process.platform === 'win32')('TerminalPanelManager orphan reaping', () => {
+  const terminals: DetachedWorkerPty[] = [];
+  const bystanders: ChildProcess[] = [];
+
   afterEach(() => {
-    vi.restoreAllMocks();
+    for (const terminal of terminals.splice(0)) {
+      terminal.close();
+      if (processTree.isProcessAlive(terminal.workerPid)) process.kill(terminal.workerPid, 'SIGKILL');
+    }
+    for (const bystander of bystanders.splice(0)) bystander.kill('SIGKILL');
   });
 
-  it('kills the process trees a deleted terminal left running, then forgets them', async () => {
+  /** A real PTY shell with a worker that double-forked away from it, open in `panelId`. */
+  async function openTerminal(manager: DestroyTerminalAccess, panelId: string): Promise<DetachedWorkerPty> {
+    const terminal = await spawnDetachedWorkerPty();
+    terminals.push(terminal);
+    const record = createTerminal({ panelId, outputBuffer: '' });
+    record.pty.pid = terminal.shellPid;
+    record.pty.kill.mockImplementation(() => terminal.close());
+    manager.terminals.set(panelId, record);
+    return terminal;
+  }
+
+  /** An unrelated process, plus a leftover entry naming its pid with another process's start time. */
+  function bystanderWithStaleEntry() {
+    const bystander = spawn('sleep', ['600'], { stdio: 'ignore' });
+    bystanders.push(bystander);
+    // SAFETY: spawn of an existing binary yields a pid synchronously.
+    const pid = bystander.pid!;
+    return { pid, stale: new ArchiveProcessTracker([{ pid, parent: 1, started: 'Thu Jan  1 00:00:00 2015' }], () => undefined) };
+  }
+
+  it('on tab delete, kills what the terminal left running, but not a stale pid that now belongs to another process', async () => {
     const manager = testAccess<DestroyTerminalAccess>(new TerminalPanelManager());
-    manager.stoppingProcesses.set('panel-1', [7001, 7002]);
-    const wait = vi.spyOn(processTree, 'waitForProcessesToExit').mockResolvedValue([7002]);
-    const terminate = vi.spyOn(processTree, 'terminateProcessTrees').mockResolvedValue([]);
+    // A panel whose terminal was destroyed earlier, leaving an entry whose pid was since reused.
+    const bystander = bystanderWithStaleEntry();
+    manager.stoppingProcesses.set('panel-old', bystander.stale);
+    const terminal = await openTerminal(manager, 'panel-1');
 
-    await new TerminalPanelManager().reapStoppedProcesses('missing');
-    await testAccess<TerminalPanelManager>(manager).reapStoppedProcesses('panel-1');
+    await manager.destroyTerminal('panel-old');
+    await manager.destroyTerminal('panel-1');
 
-    expect(wait).toHaveBeenCalledOnce();
-    expect(terminate).toHaveBeenCalledWith([7002], expect.anything());
-    expect(manager.stoppingProcesses.has('panel-1')).toBe(false);
-  });
+    await vi.waitFor(() => expect(manager.stoppingProcesses.has('panel-1')).toBe(false), { timeout: 15_000 });
+    expect(processTree.isProcessAlive(terminal.workerPid)).toBe(false);
+    expect(processTree.isProcessAlive(bystander.pid)).toBe(true);
+  }, 30_000);
 
-  it('keeps the pids that survive the kill so a restart in that panel is refused', async () => {
+  it('on quit, kills what outlived the hangup, but not a stale pid that now belongs to another process', async () => {
     const manager = testAccess<DestroyTerminalAccess>(new TerminalPanelManager());
-    manager.stoppingProcesses.set('panel-1', [7001]);
-    vi.spyOn(processTree, 'waitForProcessesToExit').mockResolvedValue([7001]);
-    vi.spyOn(processTree, 'terminateProcessTrees').mockResolvedValue([7001]);
+    const bystander = bystanderWithStaleEntry();
+    manager.stoppingProcesses.set('panel-deleted', bystander.stale);
+    const terminal = await openTerminal(manager, 'panel-1');
 
-    await testAccess<TerminalPanelManager>(manager).reapStoppedProcesses('panel-1');
+    await manager.terminateAllTerminals();
 
-    expect(manager.stoppingProcesses.get('panel-1')).toEqual([7001]);
-  });
-
-  it('on quit, reads every tree before the kill and kills what outlives the hangup', async () => {
-    const manager = testAccess<DestroyTerminalAccess>(new TerminalPanelManager());
-    const terminal = createTerminal({ outputBuffer: '' });
-    terminal.pty.pid = 7001;
-    manager.terminals.set(terminal.panelId, terminal);
-    manager.stoppingProcesses.set('panel-deleted', [7101]);
-    vi.spyOn(processTree, 'isProcessAlive').mockReturnValue(true);
-    const list = vi.spyOn(processTree, 'listTerminalProcessPids').mockResolvedValue([7002, 7003]);
-    vi.spyOn(processTree, 'waitForProcessesToExit').mockResolvedValue([7003, 7101]);
-    const terminate = vi.spyOn(processTree, 'terminateProcessTrees').mockResolvedValue([]);
-
-    await testAccess<TerminalPanelManager>(manager).terminateAllTerminals();
-
-    expect(list).toHaveBeenCalledWith([7001]);
-    expect(list.mock.invocationCallOrder[0]).toBeLessThan(terminal.pty.kill.mock.invocationCallOrder[0]);
-    expect(terminate).toHaveBeenCalledWith([7003, 7101], { timeoutMs: 2000 });
     expect(manager.terminals.size).toBe(0);
-  });
-
-  it('on quit, kills nothing when every process left with its PTY', async () => {
-    const manager = testAccess<DestroyTerminalAccess>(new TerminalPanelManager());
-    const terminal = createTerminal({ outputBuffer: '' });
-    terminal.pty.pid = 7001;
-    manager.terminals.set(terminal.panelId, terminal);
-    vi.spyOn(processTree, 'isProcessAlive').mockReturnValue(true);
-    vi.spyOn(processTree, 'listTerminalProcessPids').mockResolvedValue([7002]);
-    vi.spyOn(processTree, 'waitForProcessesToExit').mockResolvedValue([]);
-    const terminate = vi.spyOn(processTree, 'terminateProcessTrees');
-
-    await testAccess<TerminalPanelManager>(manager).terminateAllTerminals();
-
-    expect(terminal.pty.kill).toHaveBeenCalled();
-    expect(terminate).not.toHaveBeenCalled();
-  });
+    expect(processTree.isProcessAlive(terminal.workerPid)).toBe(false);
+    expect(processTree.isProcessAlive(bystander.pid)).toBe(true);
+  }, 30_000);
 });
