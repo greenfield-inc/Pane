@@ -110,6 +110,7 @@ const config = {
           'on-dark-focus': 'var(--color-text-interactive-on-dark-focus)',
           'surface': 'var(--color-interactive-surface)',
           'surface-hover': 'var(--color-interactive-surface-hover)',
+          'on-tint': 'var(--color-interactive-on-tint)',
           'border': 'var(--color-interactive-border)',
           'border-hover': 'var(--color-interactive-border-hover)',
         },
@@ -133,6 +134,10 @@ const config = {
           'error': 'var(--color-status-error)',
           'error-hover': 'var(--color-status-error-hover)',
           'info': 'var(--color-status-info)',
+          'success-on-tint': 'var(--color-status-success-on-tint)',
+          'warning-on-tint': 'var(--color-status-warning-on-tint)',
+          'error-on-tint': 'var(--color-status-error-on-tint)',
+          'info-on-tint': 'var(--color-status-info-on-tint)',
           'neutral': 'var(--color-status-neutral)',
         },
         // Brand colors

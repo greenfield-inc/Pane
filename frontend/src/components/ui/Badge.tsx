@@ -14,11 +14,11 @@ interface BadgeProps {
 
 const variantClasses = {
   default: 'bg-surface-secondary text-text-secondary border-border-secondary',
-  success: 'bg-status-success/20 text-text-primary border-status-success/30 dark:border-status-success/20',
-  warning: 'bg-status-warning/20 text-text-primary border-status-warning/30 dark:border-status-warning/20',
-  error: 'bg-status-error/20 text-text-primary border-status-error/30 dark:border-status-error/20',
-  info: 'bg-status-info/20 text-text-primary border-status-info/30 dark:border-status-info/20',
-  primary: 'bg-interactive/20 text-text-primary border-interactive/30 dark:border-interactive/20'
+  success: 'bg-status-success/20 text-status-success-on-tint border-status-success/30 dark:border-status-success/20',
+  warning: 'bg-status-warning/20 text-status-warning-on-tint border-status-warning/30 dark:border-status-warning/20',
+  error: 'bg-status-error/20 text-status-error-on-tint border-status-error/30 dark:border-status-error/20',
+  info: 'bg-status-info/20 text-status-info-on-tint border-status-info/30 dark:border-status-info/20',
+  primary: 'bg-interactive/20 text-interactive-on-tint border-interactive/30 dark:border-interactive/20'
 };
 
 const sizeClasses = {

@@ -148,8 +148,8 @@ function StatusCountPill({ status, count, label, compact, onClick, title }: {
   if (count === 0) return null;
 
   const tone = status === 'blocked'
-    ? 'bg-status-error/15 text-text-primary'
-    : 'bg-interactive/15 text-text-primary';
+    ? 'bg-status-error/15 text-status-error-on-tint'
+    : 'bg-interactive/15 text-interactive-on-tint';
   const className = `flex items-center gap-1 rounded-full px-2 py-px text-[10px] font-medium ${tone}${
     compact ? ' normal-case tracking-normal' : ''
   }${onClick ? ' transition-colors hover:bg-status-error/25 focus:outline-none focus-visible:ring-1 focus-visible:ring-status-error' : ''}`;
@@ -841,7 +841,7 @@ export function MissionControlView() {
               type="button"
               onClick={() => setActionError(null)}
               title="Dismiss"
-              className="flex items-center gap-1 rounded-full bg-status-error/15 px-2 py-px text-[10px] font-medium text-text-primary transition-colors hover:bg-status-error/25"
+              className="flex items-center gap-1 rounded-full bg-status-error/15 px-2 py-px text-[10px] font-medium text-status-error-on-tint transition-colors hover:bg-status-error/25 hover:text-text-primary"
             >
               {actionError}
               <X className="h-2.5 w-2.5 text-status-error" aria-hidden="true" />

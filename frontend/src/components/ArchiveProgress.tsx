@@ -147,7 +147,7 @@ export function ArchiveProgress() {
             Archive Tasks
           </span>
           {progress.activeCount > 0 && (
-            <span className="px-1.5 py-0.5 bg-status-info/20 text-text-primary text-xs rounded-full animate-pulse">
+            <span className="px-1.5 py-0.5 bg-status-info/20 text-status-info-on-tint text-xs rounded-full animate-pulse">
               {progress.activeCount} active
             </span>
           )}

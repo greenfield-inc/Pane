@@ -152,7 +152,7 @@ export const MultiOriginStatus: React.FC<MultiOriginStatusProps> = ({
                           {origin.name}/{origin.branch}
                         </span>
                         {origin.isFork && (
-                          <span className="inline-flex items-center gap-1 text-xs bg-interactive/20 text-text-primary px-1.5 py-0.5 rounded">
+                          <span className="inline-flex items-center gap-1 text-xs bg-interactive/20 text-interactive-on-tint px-1.5 py-0.5 rounded">
                             <GitFork className="w-3 h-3" />
                             <span>fork</span>
                           </span>
