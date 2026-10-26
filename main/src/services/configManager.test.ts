@@ -32,6 +32,27 @@ describe('ConfigManager appearance persistence', () => {
     });
   });
 
+  it('ships agent-neutral terminal shortcuts and keeps awake only while sessions are active', async () => {
+    const manager = new ConfigManager();
+    await manager.initialize();
+    const saved = JSON.parse(await fs.readFile(configPath, 'utf8'));
+    expect(saved.terminalShortcuts.map(({ key, label }: { key: string; label: string }) => [key, label])).toEqual([
+      ['e', 'Root cause or symptom?'],
+      ['p', 'Plan before editing'],
+      ['r', 'Review your own diff'],
+      ['t', 'Show it works'],
+    ]);
+    expect(saved).toMatchObject({ keepAwakeWhileSessionsActive: true, keepAwakeWhilePluggedIn: false });
+  });
+
+  it('keeps an existing config\'s shortcuts and keeps it awake while plugged in when the setting predates it', async () => {
+    const stored = [{ id: 'default-codex-review', label: 'Codex review loop', key: 'r', text: 'codex review', enabled: true }];
+    await fs.writeFile(configPath, JSON.stringify({ terminalShortcuts: stored }));
+    const manager = new ConfigManager();
+    await manager.initialize();
+    expect(manager.getConfig()).toMatchObject({ terminalShortcuts: stored, keepAwakeWhilePluggedIn: true });
+  });
+
   it('preserves an existing analytics opt-out', async () => {
     await fs.writeFile(configPath, JSON.stringify({ analytics: { enabled: false } }));
     const manager = new ConfigManager();

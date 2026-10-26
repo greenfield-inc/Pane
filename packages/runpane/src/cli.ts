@@ -12,7 +12,7 @@ import { runDocsRead, runDocsSearch } from './docs';
 import { runHandoff } from './handoff';
 import { runLinksCreate } from './links';
 import { helpText, parseRunpaneArgs, splitWorkspacePassThrough, type ParsedArgs, type RunpaneCommand } from './commands';
-import { routeDaemonCallsTo } from './daemonClient';
+import { PaneDaemonClientError, routeDaemonCallsTo } from './daemonClient';
 import { describeFailure, printFailure, RunpaneError } from './errors';
 import { boundary, decodeBoundary } from './boundaryDecoder';
 import { downloadArtifact } from './download';
@@ -354,7 +354,7 @@ const commandHandlers = new Map<string, CommandHandler>(Object.entries({
     return installOrUpdate(parsed, telemetryContext);
   },
   'update': async (parsed, telemetryContext) => {
-    return runUpdate(parsed);
+    return updateOrReinstall(parsed, telemetryContext);
   },
   'panes git-status': (parsed) => { const action = daemonActionFor(parsed.command); if (!action) throw new Error('Missing daemon action'); return runDaemonAction(parsed, action); },
   'panes commit': (parsed) => { const action = daemonActionFor(parsed.command); if (!action) throw new Error('Missing daemon action'); return runDaemonAction(parsed, action); },
@@ -533,7 +533,7 @@ async function runInteractiveWizard(telemetryContext: WrapperTelemetryContext): 
 
   // All prompts have finished before the child inherits stdin for login/sudo.
   setSetupSelection(telemetryContext, action === 'update' ? 'update' : 'install', parsed.target);
-  const code = parsed.command === 'update' ? await runUpdate(parsed) : await installOrUpdate(parsed, telemetryContext);
+  const code = parsed.command === 'update' ? await updateOrReinstall(parsed, telemetryContext) : await installOrUpdate(parsed, telemetryContext);
   if (code === 0) {
     if (parsed.target === 'daemon') {
       prompts.log.success('Remote host setup finished.');
@@ -561,6 +561,22 @@ function createParsedArgs(command: ParsedArgs['command'], overrides: Partial<Par
     remoteSetupArgs: [],
     ...overrides
   };
+}
+
+/**
+ * An update hands the running Pane's panels to the new release. When Pane is
+ * not running here (for example after a failed update left it unable to
+ * start), there is nothing to hand over, so install the release instead.
+ */
+async function updateOrReinstall(parsed: ParsedArgs, telemetryContext: WrapperTelemetryContext): Promise<number> {
+  try {
+    return await runUpdate(parsed);
+  } catch (error) {
+    // Only the Pane host lookup connects to the daemon; --cli-only and --status never reach it.
+    if (!(error instanceof PaneDaemonClientError && error.connectionFailure)) throw error;
+    console.log('runpane: Pane is not running on this machine, so runpane installs the release instead of updating it in place.');
+    return installOrUpdate(parsed, telemetryContext);
+  }
 }
 
 export async function installOrUpdate(parsed: ParsedArgs, telemetryContext?: WrapperTelemetryContext): Promise<number> {

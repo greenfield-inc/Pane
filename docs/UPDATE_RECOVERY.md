@@ -7,6 +7,10 @@ The Update button in Settings uses the app's built-in updater instead, and does
 not need the prerequisites below.
 Run `runpane update --dry-run --json` first to see the executable, data directory,
 CLI owner and supervisor capability without starting an update.
+When Pane is not running on the machine, for example because a failed update
+left it unable to start, `runpane update` installs the requested release
+(latest by default) instead, like `runpane install`. If even `runpane` fails, see
+[Bundled runpane](RUNPANE_BUNDLED_CLI.md#how-it-works) for its fallback to `node`.
 
 ## Prerequisites
 

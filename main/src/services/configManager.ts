@@ -76,7 +76,7 @@ export class ConfigManager extends EventEmitter {
       defaultAgentInterface: 'terminal',
       autoStartOnBoot: true,
       keepAwakeWhileSessionsActive: true,
-      keepAwakeWhilePluggedIn: true,
+      keepAwakeWhilePluggedIn: false,
       keepAwakeOnBattery: false,
       notifications: {
         playSound: false,
@@ -115,24 +115,24 @@ export class ConfigManager extends EventEmitter {
           enabled: true
         },
         {
-          id: 'default-codex-review',
-          label: 'Codex review loop',
+          id: 'default-plan-first',
+          label: 'Plan before editing',
+          key: 'p',
+          text: 'Before you change any code, explain your plan in a few short steps and wait for my go-ahead.',
+          enabled: true
+        },
+        {
+          id: 'default-review-diff',
+          label: 'Review your own diff',
           key: 'r',
-          text: "Prepare a PR once done with changes, then run in a subagent 'codex review --base main' and wait for it to respond. Read its response and make the fixes it suggests. Continue in a loop until it says there are no longer any issues.",
+          text: "Before you say you're done, review your own diff. Fix any bugs, leftover debug code, or missed edge cases.",
           enabled: true
         },
         {
-          id: 'default-rebase-merge-release',
-          label: 'Rebase, merge & release',
-          key: 'd',
-          text: 'Rebase main and merge the PR to main, then bump a release patch.',
-          enabled: true
-        },
-        {
-          id: 'default-review-and-release',
-          label: 'Review and release loop',
-          key: 's',
-          text: "Prepare a PR once done with changes, then run in a subagent 'codex review --base main' and wait for it to respond. Read its response and make the fixes it suggests. Continue in a loop until it says there are no longer any issues. Once there are no issues, rebase main and merge the PR to main, then bump a release patch.",
+          id: 'default-show-it-works',
+          label: 'Show it works',
+          key: 't',
+          text: 'Show me it works: run the relevant tests or the app and share the real output.',
           enabled: true
         }
       ],
@@ -210,6 +210,8 @@ export class ConfigManager extends EventEmitter {
           loadedConfig.defaultOrchestratorAgent ?? this.config.defaultOrchestratorAgent,
         ),
         defaultAgentInterface: loadedConfig.defaultAgentInterface === 'chat' ? 'chat' : 'terminal',
+        // Configs saved before this setting existed kept the machine awake while plugged in.
+        keepAwakeWhilePluggedIn: loadedConfig.keepAwakeWhilePluggedIn ?? true,
         remoteDaemon: normalizeRemoteDaemonConfig(loadedConfig.remoteDaemon),
         // Use !== undefined to distinguish "user cleared all entries" (empty array → preserve)
         // from "field absent in config file" (→ use defaults)

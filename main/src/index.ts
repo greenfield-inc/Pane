@@ -67,8 +67,11 @@ if (getStartupTerminalPowerMode() === 'batterySaver') {
 
 // Set Windows AUMID to match electron-builder's appId so Windows resolves
 // the installed Start Menu shortcut for notification icon and display name.
+// Dev builds get their own id: Electron writes a Start Menu shortcut for the
+// running exe, and one claiming the installed id makes notification clicks
+// launch a bare electron.exe.
 if (process.platform === 'win32') {
-  app.setAppUserModelId('com.dcouple.pane');
+  app.setAppUserModelId(app.isPackaged ? 'com.dcouple.pane' : 'com.dcouple.pane.dev');
 }
 
 // Now import the rest of electron
@@ -121,6 +124,7 @@ import { LeaderboardService } from './services/leaderboardService';
 import { registerLeaderboardHandlers } from './ipc/leaderboard';
 import { PtyHostSupervisor } from './ptyHost/ptyHostSupervisor';
 import { syncAutoStartOnBoot } from './utils/autoStart';
+import { addRunpaneToUserPathBestEffort } from './services/runpaneShim';
 import { syncPaneMcpForApp } from './services/paneMcpRegistration';
 import { findPaneLinkArg, forwardPaneLinkToRunningPane, OPEN_PANE_LINK_CHANNEL, PANE_LINK_SCHEME, parsePaneLink } from './services/paneLinks';
 import { createPaneDaemonHost, type PaneDaemonHost } from './daemon/bootstrap';
@@ -1303,6 +1307,7 @@ if (launchRemoteSetup) {
     void warmShellPath();
     await initializeServices();
     if (process.env.PANE_DISABLE_OS_INTEGRATION !== '1') syncAutoStartOnBoot(app, configManager.getConfig().autoStartOnBoot !== false);
+    void addRunpaneToUserPathBestEffort();
     if (process.env.PANE_DISABLE_OS_INTEGRATION !== '1') setTimeout(() => syncPaneMcpForApp({
       isPackaged: app.isPackaged,
       config: configManager.getConfig(),
