@@ -12,6 +12,7 @@ import { useFocusedSurfaceScrolling } from './hooks/useFocusedSurfaceScrolling';
 import { ShortcutHintsOverlay } from './components/ShortcutHintsOverlay';
 import { Sidebar } from './components/Sidebar';
 import { SessionView } from './components/SessionView';
+import { PaneChatIntroOffer } from './components/PaneChatIntroOffer';
 import Welcome from './components/Welcome';
 import Help from './components/Help';
 import OnboardingDialog, {
@@ -869,7 +870,10 @@ function App() {
             }}
           />
         </div>
-        <SessionView />
+        <div className="relative flex min-h-0 min-w-0 flex-1">
+          <SessionView />
+          <PaneChatIntroOffer suppressed={isOnboardingOpen || isWelcomeOpen} />
+        </div>
         </div>
         <OnboardingDialog
           isOpen={isOnboardingOpen}

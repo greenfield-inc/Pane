@@ -438,6 +438,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   paneChat: {
     getOrCreate: (): Promise<IPCResponse> => invokeIpc('pane-chat:get-or-create'),
     setAgent: (agent: 'claude' | 'codex' | 'cursor'): Promise<IPCResponse> => invokeIpc('pane-chat:set-agent', agent),
+    introOffer: (): Promise<IPCResponse<{ eligible: boolean }>> => invokeIpc('pane-chat:intro-offer'),
   },
   sshHosts: {
     list: (): Promise<IPCResponse> => invokeIpc('ssh-hosts:list'),

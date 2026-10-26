@@ -329,7 +329,8 @@ automatic greeting, diagnostic sweep, watcher setup, or continuation of a
 saved next action. Reopening an already-running Session reconnects without
 interrupting work the user has already authorized.
 
-There is one exception, and it happens at most once per Pane data directory.
+There are two exceptions, each at most once per Pane data directory.
+
 The first time the built-in Pane Chat Session launches while Pane has no Panes
 and no repositories (the sample repository the onboarding dialog clones doesn't
 count), Pane sends it one prompt, which says that Pane sent it and why. The
@@ -338,6 +339,14 @@ starts only when you say yes. Pane records the offer in the
 `pane_chat_migrate_offer_sent` user preference once a launch has sent it, so a
 restart or an agent switch never sends it again. See
 [Bring your existing sessions into Pane](#bring-your-existing-sessions-into-pane).
+
+Pane may also offer Pane Chat once, in a card over a Pane, after you have
+created at least two worktree Panes and used Pane on at least three days, if you
+have never created a Session. "Try it" creates a Session named after the Pane's
+repository, whose agent introduces itself, suggests two small tasks from that
+repository, and waits for your answer before starting any Pane. Pane removes
+that opening prompt from the Session once a launch has sent it, so a restart
+never sends it again.
 
 Pane may prepare instruction files and terminal infrastructure at startup;
 that preparation does not require an agent turn. Unattended work and watchers

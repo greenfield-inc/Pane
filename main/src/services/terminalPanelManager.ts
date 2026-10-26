@@ -127,7 +127,7 @@ import {
   promptFileShellWord,
   stripTrailingNewlines,
 } from './agents/promptDelivery';
-import { PANE_CHAT_MIGRATE_OFFER_OPENING } from '../../../shared/types/paneChat';
+import { PANE_ONE_TIME_PROMPT_OPENING } from '../../../shared/types/paneChat';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -1648,12 +1648,13 @@ export class TerminalPanelManager extends EventEmitter {
     }
 
     const sessionState = terminalCustomState(panel.state);
-    const unsentMigrateOffer = !sessionState.initialInputSentAt
-      && sessionState.initialInput?.startsWith(PANE_CHAT_MIGRATE_OFFER_OPENING) === true;
-    if ((sessionState.orchestrationSessionId || isOrchestrationInternalSessionId(panel.sessionId)) && !unsentMigrateOffer) {
+    const unsentOneTimePrompt = !sessionState.initialInputSentAt
+      && sessionState.initialInput?.startsWith(PANE_ONE_TIME_PROMPT_OPENING) === true;
+    if ((sessionState.orchestrationSessionId || isOrchestrationInternalSessionId(panel.sessionId)) && !unsentOneTimePrompt) {
       // Also cover supervisor restoration before the Session manager refreshes
       // old launch records. Never deliver historical bootstrap input again.
-      // Pane Chat's one-time migrate offer is the one first prompt a Session sends.
+      // Pane's one-time prompts (the migrate offer, a Session's opening prompt)
+      // are the only first prompts a Session sends.
       panel.state.customState = { ...sessionState, initialInput: undefined };
     }
     cwd = sessionState.orchestrationWorkspace ?? cwd;
