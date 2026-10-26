@@ -4,6 +4,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import { CommandRunner } from '../utils/commandRunner';
+import { PathResolver } from '../utils/pathResolver';
 import { WorktreeManager } from './worktreeManager';
 
 const base = 'main$PANE_OP_LITERAL;branch&ref';
@@ -12,6 +13,7 @@ let root: string;
 let project: string;
 let worktree: string;
 let runner: CommandRunner;
+let pathResolver: PathResolver;
 const manager = new WorktreeManager();
 
 function git(cwd: string, ...args: string[]): string {
@@ -35,6 +37,7 @@ beforeEach(() => {
   commit(project, 'shared.txt', 'initial\n', 'Initial');
   git(project, 'worktree', 'add', '-b', feature, worktree, base);
   runner = new CommandRunner({ path: project });
+  pathResolver = new PathResolver({ path: project });
 });
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
@@ -48,15 +51,59 @@ it('reports a real conflict against the literal comparison ref without modifying
   expect(readFileSync(join(project, 'shared.txt'), 'utf8')).toBe('base edit\n');
 });
 
+it('reports no conflict when both branches edit separate lines of the same file', async () => {
+  commit(project, 'shared.txt', 'one\ntwo\nthree\nfour\nfive\n', 'Lines');
+  git(worktree, 'reset', '--hard', base);
+  commit(project, 'shared.txt', 'one base\ntwo\nthree\nfour\nfive\n', 'Base change');
+  commit(worktree, 'shared.txt', 'one\ntwo\nthree\nfour\nfive feature\n', 'Feature change');
+  expect(await manager.checkForRebaseConflicts(worktree, base, runner))
+    .toEqual({ hasConflicts: false, canAutoMerge: true });
+});
+
+it('reports a conflict when both branches change the same binary file', async () => {
+  commit(project, 'image.bin', 'header\0base\n', 'Binary');
+  git(worktree, 'reset', '--hard', base);
+  commit(project, 'image.bin', 'header\0base edit\n', 'Base change');
+  commit(worktree, 'image.bin', 'header\0feature edit\n', 'Feature change');
+  expect(await manager.checkForRebaseConflicts(worktree, base, runner))
+    .toMatchObject({ hasConflicts: true, canAutoMerge: false, conflictingFiles: ['image.bin'] });
+});
+
 it('rebases onto the literal base while preserving both branches changes', async () => {
   commit(project, 'base.txt', 'base content\n', 'Base change');
   commit(worktree, 'feature.txt', 'feature content\n', 'Feature change');
-  await manager.rebaseMainIntoWorktree(worktree, base, runner);
+  await manager.rebaseMainIntoWorktree(worktree, base, pathResolver, runner);
   expect(readFileSync(join(worktree, 'base.txt'), 'utf8')).toBe('base content\n');
   expect(readFileSync(join(worktree, 'feature.txt'), 'utf8')).toBe('feature content\n');
   expect(git(worktree, 'branch', '--show-current')).toBe(feature);
   expect(git(worktree, 'log', '-3', '--format=%s')).toBe('Feature change\nBase change\nInitial');
 });
+
+for (const savedResolution of [false, true]) {
+  it(`aborts a rebase that conflicts mid-replay${savedResolution ? ' even when rerere stages a saved resolution' : ''}, leaving the worktree untouched`, async () => {
+    commit(worktree, 'shared.txt', 'B\n', 'Feature to B');
+    commit(worktree, 'shared.txt', 'C\n', 'Feature to C');
+    commit(project, 'shared.txt', 'C\n', 'Base to C');
+    const head = git(worktree, 'rev-parse', 'HEAD');
+    if (savedResolution) {
+      git(project, 'config', 'rerere.enabled', 'true');
+      git(project, 'config', 'rerere.autoupdate', 'true');
+      expect(() => git(worktree, 'rebase', base)).toThrow();
+      writeFileSync(join(worktree, 'shared.txt'), 'resolved\n');
+      git(worktree, 'add', 'shared.txt');
+      git(worktree, 'rerere');
+      git(worktree, 'rebase', '--abort');
+    }
+    // Both tips hold C, so the tip check passes; replaying "Feature to B" onto C conflicts.
+    expect(await manager.checkForRebaseConflicts(worktree, base, runner)).toEqual({ hasConflicts: false, canAutoMerge: true });
+    expect(await manager.rebaseMainIntoWorktree(worktree, base, pathResolver, runner))
+      .toMatchObject({ hasConflicts: true, canAutoMerge: false, conflictingFiles: ['shared.txt'] });
+    expect(() => git(worktree, 'rev-parse', '--verify', '--quiet', 'REBASE_HEAD')).toThrow();
+    expect(git(worktree, 'rev-parse', 'HEAD')).toBe(head);
+    expect(git(worktree, 'status', '--porcelain')).toBe('');
+    expect(readFileSync(join(worktree, 'shared.txt'), 'utf8')).toBe('C\n');
+  });
+}
 
 it('fast-forwards the literal target after rebasing the literal feature branch', async () => {
   commit(project, 'base.txt', 'base content\n', 'Base change');
