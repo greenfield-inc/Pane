@@ -86,6 +86,16 @@ describe('RemotePaneClient', () => {
     await client.disconnect();
   });
 
+  it('reports truncated viewer bookkeeping as an interruption, not unknown delivery', async () => {
+    const server = await createTestRemoteServer();
+    activeServers.push(server);
+    const client = new RemotePaneClient({ id: 'bookkeeping', label: 'host', baseUrl: server.baseUrl, token: '', transport: 'http+sse' });
+    await client.connect();
+    server.truncateInvoke();
+    await expect(client.invoke('terminal:setVisibility', ['panel', true, 'viewer'])).rejects.toThrow(/^Remote connection interrupted:/);
+    await client.disconnect();
+  });
+
   it('waits for restoration before connected and ignores restoration after disconnect', async () => {
     const server = await createTestRemoteServer();
     activeServers.push(server);
