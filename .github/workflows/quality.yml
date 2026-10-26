@@ -245,6 +245,9 @@ jobs:
     - name: Run handoff tests
       run: node --test scripts/test-runpane-handoff.js
 
+    - name: Run wrapper telemetry tests
+      run: node --test scripts/test-runpane-telemetry.js
+
   # Ubuntu is already covered by quality-checks above; this job only adds the
   # other platforms, and only when main-process code (or its deps) changed.
   cross-os-main-tests:

@@ -32,7 +32,10 @@ for (const runtime of ['npm', 'pip']) {
       global.fetch = async (_, options) => { events.push(JSON.parse(options.body)); return {}; };
       let exit = 0;
       const local = require('./packages/runpane/dist/localControl');
-      local.runPanesPin = async () => exit;
+      local.runPanesPin = async () => {
+        if (exit === 'throw') throw Object.assign(new Error('EACCES: permission denied, open secret-repo-path'), { code: 'EACCES' });
+        return exit;
+      };
       const { main } = require('./packages/runpane/dist/cli');
       (async () => {
         try {
@@ -40,8 +43,11 @@ for (const runtime of ['npm', 'pip']) {
           if (events.length !== 0) throw new Error('Successful command emitted telemetry');
           exit = 7;
           if (await main(['panes', 'pin', '--pane', 'secret-repo-path', '--yes']) !== 7) throw new Error('Exit code changed');
+          if (events.length !== 0) throw new Error('A result exit emitted telemetry');
+          exit = 'throw';
+          await main(['panes', 'pin', '--pane', 'secret-repo-path', '--yes']).catch(() => {});
           fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({ analytics: { enabled: false } }));
-          await main(['panes', 'pin', '--pane', 'secret-repo-path', '--yes']);
+          await main(['panes', 'pin', '--pane', 'secret-repo-path', '--yes']).catch(() => {});
           console.log(JSON.stringify(events));
         } finally { fs.rmSync(dir, { recursive: true, force: true }); }
       })().catch(error => { console.error(error); process.exitCode = 1; });
@@ -52,7 +58,12 @@ import runpane.local_control as local
 events = []
 telemetry._post_telemetry = events.append
 exit_code = 0
-local.run_panes_pin = lambda parsed, pinned: exit_code
+def pin(parsed, pinned):
+    if exit_code == 'throw':
+        error = PermissionError(13, 'Permission denied', 'secret-repo-path')
+        raise error
+    return exit_code
+local.run_panes_pin = pin
 from runpane.cli import main
 os.environ.pop('CI', None)
 os.environ.pop('RUNPANE_TELEMETRY_DISABLED', None)
@@ -62,6 +73,9 @@ with tempfile.TemporaryDirectory(prefix='pane-telemetry-') as directory:
     assert events == [], 'Successful command emitted telemetry'
     exit_code = 7
     assert main(['panes', 'pin', '--pane', 'secret-repo-path', '--yes']) == 7
+    assert events == [], 'A result exit emitted telemetry'
+    exit_code = 'throw'
+    main(['panes', 'pin', '--pane', 'secret-repo-path', '--yes'])
     with open(os.path.join(directory, 'config.json'), 'w') as target:
         json.dump({'analytics': {'enabled': False}}, target)
     main(['panes', 'pin', '--pane', 'secret-repo-path', '--yes'])
@@ -78,7 +92,7 @@ with tempfile.TemporaryDirectory(prefix='pane-telemetry-') as directory:
     assert.equal(download_source, runtime);
     assert.deepEqual(properties, {
       command: 'panes pin', target: 'client', pane_version: 'latest', channel: 'stable',
-      format: 'auto', dry_run: false, failure_stage: 'unknown', failure_category: 'process_exit', exit_code: 7,
+      format: 'auto', dry_run: false, failure_stage: 'unknown', failure_category: 'permission', error_code: 'EACCES',
     });
     assert.equal(JSON.stringify(events).includes('secret-repo-path'), false);
   });
