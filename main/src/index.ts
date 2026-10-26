@@ -67,8 +67,11 @@ if (getStartupTerminalPowerMode() === 'batterySaver') {
 
 // Set Windows AUMID to match electron-builder's appId so Windows resolves
 // the installed Start Menu shortcut for notification icon and display name.
+// Dev builds get their own id: Electron writes a Start Menu shortcut for the
+// running exe, and one claiming the installed id makes notification clicks
+// launch a bare electron.exe.
 if (process.platform === 'win32') {
-  app.setAppUserModelId('com.dcouple.pane');
+  app.setAppUserModelId(app.isPackaged ? 'com.dcouple.pane' : 'com.dcouple.pane.dev');
 }
 
 // Now import the rest of electron
