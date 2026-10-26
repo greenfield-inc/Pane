@@ -4,6 +4,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { getWSLShellSpawn } from '../utils/wslUtils';
 import {
   installRunpaneShim,
   PANE_MANAGED_SHIM_MARKER,
@@ -105,6 +106,35 @@ describe('installRunpaneShim', () => {
     expect(cmd).toContain('set ELECTRON_RUN_AS_NODE=1');
     expect(cmd).toContain('"C:\\Program Files\\Pane\\Pane.exe"');
     expect(fs.existsSync(path.join(appDirectory, 'bin', 'runpane'))).toBe(true);
+  });
+});
+
+describe('WSL terminals', () => {
+  it.skipIf(process.platform === 'win32' || fs.existsSync('/proc/sys/fs/binfmt_misc/WSLInterop'))('explains when WSL interop is off', () => {
+    const state = installRunpaneShim({ appDirectory, bundledCliPath, execPath: 'C:\\Program Files\\Pane\\Pane.exe', platform: 'win32' });
+    const result = spawnSync(path.join(state!.binDir, 'runpane'), ['doctor'], { encoding: 'utf8', env: { PATH: '/usr/bin:/bin', WSL_DISTRO_NAME: 'Ubuntu-24.04' } });
+    expect(result.status).toBe(126);
+    expect(result.stderr).toBe("runpane: WSL interop is off in Ubuntu-24.04, so it cannot start Pane's Windows CLI. Nothing was run. Set enabled=true under [interop] in /etc/wsl.conf, then run wsl.exe --shutdown from Windows.\n");
+  });
+
+  it.skipIf(process.platform === 'win32')('keeps Pane runpane first after the login files edit PATH', () => {
+    const state = installRunpaneShim({ appDirectory, bundledCliPath, execPath: process.execPath, platform: 'win32' })!;
+    const home = path.join(root, 'home');
+    const globalBin = path.join(root, 'global bin');
+    const fakeBin = path.join(root, 'fake bin');
+    for (const dir of [home, globalBin, fakeBin]) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(globalBin, 'runpane'), '#!/bin/sh\necho global\n', { mode: 0o755 });
+    // Paths are already POSIX here, so wslpath -u returns its argument.
+    fs.writeFileSync(path.join(fakeBin, 'wslpath'), '#!/bin/sh\nprintf %s "$2"\n', { mode: 0o755 });
+    fs.writeFileSync(path.join(home, '.profile'), `export PATH='${globalBin}':"$PATH"\nexport USER_PROFILE_RAN=yes\n`);
+
+    const script = getWSLShellSpawn('Ubuntu', home, state.wslBashRcFile).args.at(-1)!;
+    const probe = 'echo "RESOLVED=$(command -v runpane) BIN=$PANE_RUNPANE_BIN PROFILE=$USER_PROFILE_RAN"; runpane probe; exit\n';
+    const env = { HOME: home, PATH: `${fakeBin}:/usr/bin:/bin`, TERM: 'dumb' };
+    const result = spawnSync('/bin/bash', ['-c', script], { input: probe, encoding: 'utf8', env, timeout: 15_000 });
+    const output = `${result.stdout}${result.stderr}`;
+    expect(output).toContain(`RESOLVED=${appDirectory}/bin/runpane BIN=${appDirectory}/bin/runpane PROFILE=yes`);
+    expect(output).toContain(`pane-runpane ${appDirectory} probe`);
   });
 });
 

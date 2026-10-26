@@ -34,9 +34,36 @@ command always matches the running Pane build.
   - **fish:** `--init-command` runs after the user's config and adds a
     `fish_prompt` handler.
   - **Other shells, Windows, and run scripts:** `PATH` is prepended only.
-  - **WSL terminals** are unchanged. The Windows Electron binary cannot run
-    inside the distro. Install `runpane` in the distro, or use
-    `npx --yes runpane@latest`.
+  - **WSL terminals:** see below.
+
+## WSL terminals
+
+On Windows, WSL terminals use the same `<PANE_DIR>/bin/runpane` shim, read
+from the distro as `/mnt/c/...`. Nothing is installed in the distro.
+
+- The daemon listens on a Windows named pipe, which Linux processes cannot
+  open (a distro `node` gets `ENOENT`). So inside WSL (`WSL_DISTRO_NAME` is
+  set) the shim runs Pane's Windows Electron binary through WSL interop, with
+  `ELECTRON_RUN_AS_NODE` and `PANE_DIR` added to `WSLENV`. The CLI is then a
+  Windows process on the same pipe as Windows terminals. A call takes about
+  0.4 s.
+- Pane already lists the terminal's `PANE_*` variables in `WSLENV`, so they
+  reach the CLI. Its working directory is the Windows form of the shell's
+  (`\\wsl.localhost\<distro>\...`, or `C:\...` under `/mnt/c`).
+- WSL terminals start bash with `--rcfile <PANE_DIR>/shell/bash/wsl-rcfile`
+  instead of `--login`. The rcfile reads the files a login bash reads
+  (`/etc/profile`, then the first of `~/.bash_profile`, `~/.bash_login`,
+  `~/.profile`), then puts the bin directory (via `wslpath -u`) first on
+  `PATH`, exports `PANE_RUNPANE_BIN`, and adds a `PROMPT_COMMAND` hook. The
+  shell is interactive but not a login shell, so use `exit`, not `logout`. If
+  the distro cannot read the rcfile, the terminal starts `bash --login` as
+  before.
+- With interop off, `runpane` prints how to turn it back on (`[interop]
+  enabled=true` in `/etc/wsl.conf`) and exits 126.
+- A Windows command line is limited to 32,767 characters. Pass long text with
+  a file flag such as `--prompt-file` instead of inline.
+- WSL Sessions keep their own `.pane-runtime/runpane` bridge
+  ([SESSIONS.md](SESSIONS.md)).
 
 ## Existing global installs
 
