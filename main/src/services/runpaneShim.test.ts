@@ -189,7 +189,8 @@ describe('addRunpaneToUserPath', () => {
     expect(await add('/bin/bash', 'darwin')).toEqual([path.join(home, '.bashrc'), path.join(home, '.profile')]);
     expect(fs.existsSync(path.join(home, '.bash_profile'))).toBe(false);
     expect(read('.profile')).toMatch(/^export EDITOR=vim\n\n# pane-runpane-path v1/);
-    expect(fs.statSync(path.join(home, '.profile')).mode & 0o777).toBe(0o600);
+    // Windows has no POSIX modes, and Pane never writes shell files there.
+    if (process.platform !== 'win32') expect(fs.statSync(path.join(home, '.profile')).mode & 0o777).toBe(0o600);
   });
 
   it('adds an existing macOS bash login file for a zsh user too', async () => {
