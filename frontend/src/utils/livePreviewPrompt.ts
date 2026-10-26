@@ -30,6 +30,7 @@ export function livePreviewPortFor({ paneId, projectId, ports, panels, viewingRe
   if (!ports || viewingRemoteHost || mutedProjects.has(projectId)) return null;
   const shownPorts = new Set(panels.flatMap(panel => {
     if (panel.type !== 'browser') return [];
+    // SAFETY: The browser panel type discriminator establishes BrowserPanelState.
     const url = (panel.state.customState as BrowserPanelState | undefined)?.currentUrl;
     const port = url ? loopbackPortOf(url) : null;
     return port === null ? [] : [port];
@@ -41,33 +42,51 @@ export function livePreviewPortFor({ paneId, projectId, ports, panels, viewingRe
   return candidates.length ? Math.min(...candidates) : null;
 }
 
+/** The one analytics event: how the person met the prompt, and nothing about the server. */
+export type TrackLivePreview = (action: 'shown' | 'opened' | 'not_now') => void;
+
+const trackWithPostHog: TrackLivePreview = action => capture('live_preview_prompt', { action });
+
 /** Counts the prompt as shown, once per Pane and port per run. */
-export function recordLivePreviewShown(paneId: string, port: number): void {
+export function recordLivePreviewShown(paneId: string, port: number, track: TrackLivePreview = trackWithPostHog): void {
   const key = pairKey(paneId, port);
   if (shown.has(key)) return;
   shown.add(key);
-  capture('live_preview_prompt', { action: 'shown' });
+  track('shown');
 }
 
 /** "Not now": no prompt in any Pane of this project until Pane restarts. */
-export function muteLivePreview(projectId: number): void {
+export function muteLivePreview(projectId: number, track: TrackLivePreview = trackWithPostHog): void {
   mutedProjects.add(projectId);
-  capture('live_preview_prompt', { action: 'not_now' });
+  track('not_now');
 }
 
 export type OpenLivePreviewOutcome = { kind: 'opened' } | { kind: 'failed'; message: string };
 
-type Invoke = (channel: string, request: unknown) => Promise<unknown>;
+/** The `runpane panels open` request that puts a Browser tab in the split beside the agent. */
+interface PreviewOpenRequest {
+  paneId: string;
+  url: string;
+  title: string;
+  placement: 'split';
+  source: 'user';
+}
+
+export type OpenPreviewTab = (request: PreviewOpenRequest) => Promise<void>;
+
+const openWithRunpane: OpenPreviewTab = async request => {
+  await window.electronAPI.invoke('runpane:panels:open', request);
+};
 
 /** "Open preview": a Browser tab on the port, in the split beside the agent (or the tab already showing it). */
 export async function openLivePreview(
   paneId: string,
   port: number,
-  invoke: Invoke = (channel, request) => window.electronAPI.invoke(channel, request),
+  { openTab = openWithRunpane, track = trackWithPostHog }: { openTab?: OpenPreviewTab; track?: TrackLivePreview } = {},
 ): Promise<OpenLivePreviewOutcome> {
-  capture('live_preview_prompt', { action: 'opened' });
+  track('opened');
   try {
-    await invoke('runpane:panels:open', {
+    await openTab({
       paneId,
       url: `http://localhost:${port}/`,
       title: `Preview · :${port}`,
