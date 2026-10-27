@@ -26,15 +26,17 @@ export function LivePreviewToast({ port, failure, opening, onOpen, onNotNow }: L
         <span className="flex h-4 w-4 flex-shrink-0 items-center justify-center">
           {failure ? <AlertCircle className="h-4 w-4 text-status-error" /> : <Globe className="h-4 w-4 text-interactive" />}
         </span>
-        <span className="truncate">{failure ? "Preview didn't open" : `Dev server on :${port}`}</span>
+        {/* Wraps rather than truncates, so a narrow window still shows the port. */}
+        <span className="min-w-0">{failure ? "Preview didn't open" : `Dev server on :${port}`}</span>
       </div>
       <p className="mt-1 truncate text-text-secondary" title={failure ?? undefined}>
         {failure ? `Try again, or pick :${port} from the + menu.` : 'Open a live preview next to this agent?'}
       </p>
       {failure && <span className="sr-only">{failure}</span>}
-      <div className="mt-3 flex justify-end gap-2">
-        <Button variant="ghost" size="sm" onClick={onNotNow}>Not now</Button>
-        <Button variant="primary" size="sm" onClick={onOpen} disabled={opening}>
+      {/* Pressing a button keeps focus where it was, so typing into the terminal carries on. */}
+      <div className="mt-3 flex flex-wrap justify-end gap-2" onMouseDown={event => event.preventDefault()}>
+        <Button variant="ghost" size="sm" className="whitespace-nowrap" onClick={onNotNow}>Not now</Button>
+        <Button variant="primary" size="sm" className="whitespace-nowrap" onClick={onOpen} disabled={opening}>
           {failure ? 'Try again' : 'Open preview'}
         </Button>
       </div>
