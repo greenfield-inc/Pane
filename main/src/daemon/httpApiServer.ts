@@ -1071,18 +1071,22 @@ export class PaneRemoteHttpApiServer {
   }
 
   /**
-   * The name other screens show for the device behind a request: the name its event stream gave
-   * (live, or remembered from earlier on this runtime), else its pairing label or Tailscale login.
+   * The name other screens show for the device behind a request: the name its event stream gave,
+   * else the name on the request, else one remembered from an earlier stream on this runtime,
+   * else its pairing label or Tailscale login.
    */
   private senderDevice(auth: Extract<RemoteRequestAuthResult, { ok: true }>, request: IncomingMessage, runtimeIdFallback?: string | null): string {
     const runtimeId = getRemoteRuntimeIdFromRequest(request, runtimeIdFallback);
     const streams = [...this.eventClients.values()];
-    const stream = (runtimeId ? streams.find(client => client.remoteRuntimeId === runtimeId) : undefined)
-      ?? (auth.client ? streams.find(client => client.remoteClientId === auth.client?.id) : undefined);
+    const own = runtimeId ? streams.find(client => client.remoteRuntimeId === runtimeId) : undefined;
+    const sameClient = auth.client ? streams.find(client => client.remoteClientId === auth.client?.id) : undefined;
     const known = runtimeId ? this.deviceLabelsByRuntime.get(runtimeId) : undefined;
     const login = decodeOptionalBoundary(request.headers['tailscale-user-login'], boundary.string)?.trim();
-    return stream?.deviceLabel ?? known ?? stream?.label ?? auth.client?.label ?? (login || 'another device');
+    // A phone answering from an alert button has no stream open; it names itself on the request.
+    return own?.deviceLabel ?? getClientDeviceLabelFromHeaders(request) ?? known ?? sameClient?.deviceLabel
+      ?? own?.label ?? sameClient?.label ?? auth.client?.label ?? (login || 'another device');
   }
+
 
   /** The request's Tailscale login when it is this workspace's owner, else null. */
   private workspaceOwnerLogin(request: IncomingMessage): string | null {

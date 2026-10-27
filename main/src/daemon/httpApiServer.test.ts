@@ -311,6 +311,12 @@ describe('PaneRemoteHttpApiServer', () => {
     await stream.nextEvent();
     await requestJson(server, 'POST', '/invoke', { channel: 'notify:remote-command', args: [answer] }, 'secret-token', { 'X-Pane-Remote-Runtime-Id': 'phone-runtime' });
     expect(handler).toHaveBeenLastCalledWith(answer, { device: 'Parsa’s iPhone' });
+
+    // An alert button pressed with the app closed: no stream, the name rides on the request.
+    await requestJson(server, 'POST', '/invoke', { channel: 'notify:remote-command', args: [answer] }, 'secret-token', {
+      'X-Pane-Remote-Runtime-Id': 'other-phone', 'X-Pane-Client-Device-Label': encodeURIComponent('Parsa’s iPad'),
+    });
+    expect(handler).toHaveBeenLastCalledWith(answer, { device: 'Parsa’s iPad' });
   });
 
   it.each(['credentials:shared:get', 'credentials:shared:apply'])(
