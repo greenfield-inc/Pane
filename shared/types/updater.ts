@@ -1,3 +1,5 @@
+import type { HostNavigationMemory } from './hostNavigation';
+
 export type UpdateMode = 'seamless' | 'manual';
 
 export type UpdateModeReason =
@@ -39,6 +41,13 @@ export interface RestartToUpdateState {
   tonight: boolean;
 }
 
+/** Where the user was when Pane restarted to update, on the host shown then. */
+export interface RestoredNavigation {
+  /** Null means this computer. */
+  hostId: string | null;
+  memory: HostNavigationMemory;
+}
+
 /** Returned once on the launch after a restart to update. */
 export interface UpdateRestoreResult {
   source: RestartToUpdateSource;
@@ -47,6 +56,10 @@ export interface UpdateRestoreResult {
   toVersion: string;
   /** False when the relaunch kept the old version. */
   installed: boolean;
-  /** Every open (not archived) Pane, resumed or reopened without an agent. */
+  /** Open (not archived) Panes that came back, resumed or reopened without an agent. */
   panesRestored: number;
+  /** Panes with an agent that could not resume; they stay interrupted. */
+  panesFailed: number;
+  /** Null when nothing was remembered. */
+  navigation: RestoredNavigation | null;
 }

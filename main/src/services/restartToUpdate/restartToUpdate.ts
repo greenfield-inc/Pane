@@ -3,6 +3,7 @@ import { PaneError } from '../../../../shared/paneError';
 import type {
   RestartToUpdateSource,
   RestartToUpdateState,
+  RestoredNavigation,
   UpdateBusyState,
   UpdateRestoreResult,
 } from '../../../../shared/types/updater';
@@ -15,6 +16,8 @@ import type { ArchiveProgressManager } from '../archiveProgressManager';
 import type { AnalyticsManager } from '../analyticsManager';
 import type { DatabaseService } from '../../database/database';
 import type { SessionManager } from '../sessionManager';
+import type { ConfigManager } from '../configManager';
+import type { AppConfig } from '../../types/config';
 import { DEFAULT_UPDATE_IDLE_TIMING, UpdateIdleGate, type UpdateIdleTiming } from './updateIdleGate';
 import { discardRestoreNote, takeRestoreNote, writeRestoreNote } from './restoreNote';
 
@@ -22,6 +25,9 @@ const TICK_MS = 15_000;
 
 interface RestartToUpdateDeps {
   getMainWindow: () => BrowserWindow | null;
+  configManager: ConfigManager;
+  /** Where the user is now, saved into the restore note. */
+  readNavigation: () => RestoredNavigation | null;
   archiveProgressManager?: ArchiveProgressManager;
 }
 
@@ -32,6 +38,7 @@ interface RestoreDeps {
 }
 
 let gate: UpdateIdleGate | null = null;
+let readNavigation: () => RestoredNavigation | null = () => null;
 let restoreTaken = false;
 
 /** Shortened timers and the Tonight window, for local update testing only. */
@@ -67,8 +74,9 @@ function readBusy(archiveProgressManager?: ArchiveProgressManager): UpdateBusySt
 }
 
 /** Starts watching for idle time. Call once, after the main window exists. */
-export function startRestartToUpdate({ getMainWindow, archiveProgressManager }: RestartToUpdateDeps): void {
+export function startRestartToUpdate({ getMainWindow, configManager, readNavigation: navigation, archiveProgressManager }: RestartToUpdateDeps): void {
   if (gate) return;
+  readNavigation = navigation;
   const idleGate = new UpdateIdleGate({
     now: Date.now,
     readBusy: () => readBusy(archiveProgressManager),
@@ -83,6 +91,8 @@ export function startRestartToUpdate({ getMainWindow, archiveProgressManager }: 
     timing: testTiming(),
   });
   gate = idleGate;
+  idleGate.setEnabled(configManager.getConfig().autoCheckUpdates !== false);
+  configManager.on('config-updated', (config: AppConfig) => idleGate.setEnabled(config.autoCheckUpdates !== false));
   idleGate.on('state', (state: RestartToUpdateState) => {
     const window = getMainWindow();
     if (window && !window.isDestroyed()) window.webContents.send('updater:restart-state', state);
@@ -135,7 +145,7 @@ export function restartToUpdate(source: RestartToUpdateSource): void {
       'Open Settings and choose Check Now.',
     );
   }
-  writeRestoreNote(getAppDirectory(), { source, fromVersion: app.getVersion(), toVersion });
+  writeRestoreNote(getAppDirectory(), { source, fromVersion: app.getVersion(), toVersion, navigation: readNavigation() });
   if (!app.isPackaged && process.env.TEST_UPDATES === 'true') {
     // A dev build cannot install the update, so it relaunches in place to exercise the restore.
     app.relaunch();
@@ -164,10 +174,12 @@ export async function takeUpdateRestoreResult({ sessionManager, databaseService,
   const sessionIds = databaseService.getAllProjects()
     .flatMap(project => sessionManager.getResumableSessions(project.id))
     .map(session => session.sessionId);
+  let panesFailed: number;
   try {
-    await sessionManager.resumeInterruptedSessions(sessionIds);
+    panesFailed = (await sessionManager.resumeInterruptedSessions(sessionIds)).failedSessionIds.length;
   } catch (error) {
-    console.error('[RestartToUpdate] Failed to resume some Panes after the restart:', error);
+    console.error('[RestartToUpdate] Failed to resume Panes after the restart:', error);
+    panesFailed = sessionIds.length;
   }
 
   const toVersion = app.getVersion();
@@ -176,7 +188,9 @@ export async function takeUpdateRestoreResult({ sessionManager, databaseService,
     fromVersion: note.fromVersion,
     toVersion,
     installed: toVersion !== note.fromVersion,
-    panesRestored: databaseService.getAllSessions().length,
+    panesRestored: databaseService.getAllSessions().length - panesFailed,
+    panesFailed,
+    navigation: note.navigation,
   };
   analyticsManager?.track('update_restart_restored', {
     source: result.source,
@@ -184,6 +198,7 @@ export async function takeUpdateRestoreResult({ sessionManager, databaseService,
     to_version: result.toVersion,
     installed: result.installed,
     panes_restored: result.panesRestored,
+    panes_failed: result.panesFailed,
   });
   return result;
 }

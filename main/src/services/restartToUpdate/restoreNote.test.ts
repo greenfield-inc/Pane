@@ -17,15 +17,17 @@ describe('restore note', () => {
   });
 
   it('returns a fresh note once, then nothing', () => {
-    writeRestoreNote(directory, { source: 'toast', fromVersion: '2.4.202', toVersion: '2.4.203' }, writtenAt);
+    const navigation = { hostId: null, memory: { view: 'sessions' as const, projectId: 1, paneId: 'dark-mode', orchestrationSessionId: null } };
+    writeRestoreNote(directory, { source: 'toast', fromVersion: '2.4.202', toVersion: '2.4.203', navigation }, writtenAt);
     expect(takeRestoreNote(directory, writtenAt + 30_000)).toEqual({
       source: 'toast', fromVersion: '2.4.202', toVersion: '2.4.203', writtenAt,
+      navigation: { hostId: null, memory: { view: 'sessions', projectId: 1, paneId: 'dark-mode', orchestrationSessionId: null } },
     });
     expect(takeRestoreNote(directory, writtenAt + 31_000)).toBeNull();
   });
 
   it('ignores and removes a note older than 1 hour', () => {
-    writeRestoreNote(directory, { source: 'tonight', fromVersion: '2.4.202', toVersion: '2.4.203' }, writtenAt);
+    writeRestoreNote(directory, { source: 'tonight', fromVersion: '2.4.202', toVersion: '2.4.203', navigation: null }, writtenAt);
     expect(takeRestoreNote(directory, writtenAt + 60 * 60_000 + 1)).toBeNull();
     expect(fs.readdirSync(directory)).toEqual([]);
   });

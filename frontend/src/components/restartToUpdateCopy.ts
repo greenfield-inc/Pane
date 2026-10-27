@@ -66,9 +66,16 @@ function panesBack(paneCount: number, withCount: boolean): string {
 }
 
 /** The one-line notice on the launch after a restart to update. */
+function panesFailed(paneCount: number): string {
+  if (paneCount === 0) return '';
+  if (paneCount === 1) return ' 1 Pane could not resume its agent and stays interrupted.';
+  return ` ${paneCount} Panes could not resume their agents and stay interrupted.`;
+}
+
 export function restoredToastMessage(result: UpdateRestoreResult): string {
-  if (result.installed) return `Pane updated to ${result.toVersion}.${panesBack(result.panesRestored, true)}`;
-  return `Pane restarted, but the update did not install.${panesBack(result.panesRestored, false)} To try again, open Settings and choose Check Now.`;
+  const failed = panesFailed(result.panesFailed);
+  if (result.installed) return `Pane updated to ${result.toVersion}.${panesBack(result.panesRestored, true)}${failed}`;
+  return `Pane restarted, but the update did not install.${panesBack(result.panesRestored, false)}${failed} To try again, open Settings and choose Check Now.`;
 }
 
 /** The pill's label; null when there is no pill. A ready download wins over a release that can only be installed by hand. */

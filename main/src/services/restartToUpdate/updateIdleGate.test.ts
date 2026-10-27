@@ -105,6 +105,30 @@ describe('UpdateIdleGate idle toast', () => {
   });
 });
 
+describe('UpdateIdleGate with automatic updates off', () => {
+  it('hides a ready update, even one that finishes downloading later, until turned back on', () => {
+    const t = createGate(afternoon);
+    t.gate.setReady('2.4.203');
+    t.gate.setEnabled(false);
+    t.gate.setReady('2.4.204');
+    t.advance(10 * MINUTE);
+    expect(t.gate.getState()).toMatchObject({ readyVersion: null, availableVersion: null, idleToastDue: false });
+    t.gate.setEnabled(true);
+    expect(t.gate.getState()).toMatchObject({ readyVersion: '2.4.204', idleToastDue: true });
+  });
+
+  it('cancels Tonight', () => {
+    const t = createGate(new Date(2026, 9, 26, 23, 0));
+    t.gate.setReady('2.4.203');
+    t.gate.setTonight(true);
+    t.gate.setEnabled(false);
+    t.setSystemIdleMinutes(240);
+    t.advance(4 * HOUR);
+    expect(t.restartTonight).not.toHaveBeenCalled();
+    expect(t.gate.getState().tonight).toBe(false);
+  });
+});
+
 describe('UpdateIdleGate Tonight', () => {
   const evening = new Date(2026, 9, 26, 23, 0);
 

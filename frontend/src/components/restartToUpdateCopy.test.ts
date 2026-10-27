@@ -58,12 +58,21 @@ describe('restoredToastMessage', () => {
     toVersion: '2.4.203',
     installed: true,
     panesRestored: 4,
+    panesFailed: 0,
+    navigation: null,
     ...overrides,
   });
 
   it('reports the new version and the Panes that came back', () => {
     expect(restoredToastMessage(result({}))).toBe('Pane updated to 2.4.203. 4 Panes are back.');
     expect(restoredToastMessage(result({ panesRestored: 1 }))).toBe('Pane updated to 2.4.203. Your Pane is back.');
+  });
+
+  it('names the Panes whose agents did not resume', () => {
+    expect(restoredToastMessage(result({ panesRestored: 3, panesFailed: 1 })))
+      .toBe('Pane updated to 2.4.203. 3 Panes are back. 1 Pane could not resume its agent and stays interrupted.');
+    expect(restoredToastMessage(result({ panesRestored: 2, panesFailed: 2 })))
+      .toBe('Pane updated to 2.4.203. 2 Panes are back. 2 Panes could not resume their agents and stay interrupted.');
   });
 
   it('says how to retry when the update did not install', () => {

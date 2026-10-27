@@ -112,6 +112,8 @@ import { applyAppDirectoryOverrideFromArgs, isPackagedOnDefaultDirectory, migrat
 import { getCurrentWorktreeName } from './utils/worktreeUtils';
 import { setupAutoUpdater } from './autoUpdater';
 import { getUpdateCapabilities } from './utils/updateCapabilities';
+import { UIStateManager } from './services/uiStateManager';
+import { getActiveRemoteHostId } from '../../shared/types/remoteDaemon';
 import { cancelRestartToUpdate, setUpdateAvailable, setUpdateReady, startRestartToUpdate } from './services/restartToUpdate/restartToUpdate';
 import type { CliManagerFactory } from './services/cliManagerFactory';
 import { setupConsoleWrapper } from './utils/consoleWrapper';
@@ -1150,7 +1152,17 @@ async function initializeServices() {
   analyticsManager = services.analyticsManager;
   powerSaveManager = new PowerSaveManager(configManager, sessionManager, terminalPanelManager, { logger });
   powerSaveManager.sync();
-  startRestartToUpdate({ getMainWindow: () => mainWindow, archiveProgressManager });
+  const navigationMemory = new UIStateManager(databaseService);
+  startRestartToUpdate({
+    getMainWindow: () => mainWindow,
+    configManager,
+    readNavigation: () => {
+      const hostId = getActiveRemoteHostId(configManager.getConfig().remoteDaemon);
+      const memory = navigationMemory.getNavigationMemory(hostId);
+      return memory ? { hostId, memory } : null;
+    },
+    archiveProgressManager,
+  });
 
   leaderboardService = new LeaderboardService(configManager);
   registerLeaderboardHandlers(ipcMain, leaderboardService);
@@ -1602,7 +1614,14 @@ if (launchRemoteSetup) {
     // named locks; resumed agents still hold them after the restart.
     paneDaemonHost?.services.namedLockService?.suspendAutoRelease();
 
-    await agentChatManager.stopAll();
+    // A Chat tab that refuses to stop must not skip marking the other agents
+    // interrupted below, or the next launch has nothing to resume.
+    try {
+      await agentChatManager.stopAll();
+    } catch (error) {
+      logToFile(`Agent Chat stop failed: ${error}`);
+      console.error('[Main] Agent Chat could not stop every conversation; continuing shutdown:', error);
+    }
 
     // Phase 1: Send Ctrl+C to all terminals to gracefully exit Claude instances
     // Claude needs to exit cleanly so it releases the session ID lock, allowing

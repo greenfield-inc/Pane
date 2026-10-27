@@ -54,7 +54,7 @@ export function RestartToUpdateToast() {
     <>
       <LiveRegion>{announcement}</LiveRegion>
       {restoreResult && <RestoredToast result={restoreResult} />}
-      {view && copy && <ActionToast view={view} title={copy.title} body={copy.body} note={copy.note} idleToastDue={state?.idleToastDue ?? false} />}
+      {view && copy && <ActionToast view={view} title={copy.title} body={copy.body} note={copy.note} />}
     </>
   );
 }
@@ -64,10 +64,9 @@ interface ActionToastProps {
   title: string;
   body: string;
   note?: string;
-  idleToastDue: boolean;
 }
 
-function ActionToast({ view, title, body, note, idleToastDue }: ActionToastProps) {
+function ActionToast({ view, title, body, note }: ActionToastProps) {
   const closePillToast = useRestartToUpdateStore(store => store.closePillToast);
   const [restarting, setRestarting] = useState(false);
   const fromPill = view.kind !== 'idle';
@@ -81,8 +80,7 @@ function ActionToast({ view, title, body, note, idleToastDue }: ActionToastProps
 
   const later = () => {
     if (fromPill) closePillToast();
-    // The pill only reopened what Later would have hidden, so hide the idle offer too.
-    if (!fromPill || idleToastDue) void snoozeRestartToUpdate();
+    void snoozeRestartToUpdate();
   };
 
   const setTonight = (enabled: boolean) => {

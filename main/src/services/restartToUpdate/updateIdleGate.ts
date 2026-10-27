@@ -52,6 +52,7 @@ export class UpdateIdleGate extends EventEmitter {
   private snoozedUntil: number | null = null;
   private tonight = false;
   private tonightFired = false;
+  private enabled = true;
   private published = '';
 
   constructor(options: UpdateIdleGateOptions) {
@@ -74,6 +75,13 @@ export class UpdateIdleGate extends EventEmitter {
   /** Something was busy just now, even if it has already finished. */
   markBusy(): void {
     this.lastBusyAt = this.options.now();
+    this.tick();
+  }
+
+  /** "Check for updates automatically": off hides any update and cancels Tonight. */
+  setEnabled(enabled: boolean): void {
+    this.enabled = enabled;
+    if (!enabled) this.tonight = false;
     this.tick();
   }
 
@@ -102,11 +110,12 @@ export class UpdateIdleGate extends EventEmitter {
 
   getState(): RestartToUpdateState {
     const now = this.options.now();
+    const readyVersion = this.enabled ? this.readyVersion : null;
     return {
-      readyVersion: this.readyVersion,
-      availableVersion: this.availableVersion,
+      readyVersion,
+      availableVersion: this.enabled ? this.availableVersion : null,
       busy: this.busy,
-      idleToastDue: this.readyVersion !== null
+      idleToastDue: readyVersion !== null
         && !this.busy
         && now - this.lastBusyAt >= this.timing.quietHoldMs
         && this.snoozedUntil === null
@@ -117,7 +126,7 @@ export class UpdateIdleGate extends EventEmitter {
   }
 
   private isTonightDue(now: number): boolean {
-    if (!this.tonight || this.tonightFired || !this.readyVersion || this.busy) return false;
+    if (!this.enabled || !this.tonight || this.tonightFired || !this.readyVersion || this.busy) return false;
     const hour = new Date(now).getHours();
     return hour >= this.timing.tonightStartHour
       && hour < this.timing.tonightEndHour

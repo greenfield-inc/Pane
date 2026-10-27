@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import type { RestartToUpdateSource } from '../../../../shared/types/updater';
+import type { RestartToUpdateSource, RestoredNavigation } from '../../../../shared/types/updater';
+import { decodeHostNavigationMemory } from '../../../../shared/types/hostNavigation';
 import { boundary, decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
 
 const NOTE_FILE = 'restart-to-update.json';
@@ -11,6 +12,8 @@ export interface RestoreNote {
   source: RestartToUpdateSource;
   fromVersion: string;
   toVersion: string;
+  /** Where the user was at restart; a write during the next launch cannot overwrite it here. */
+  navigation: RestoredNavigation | null;
   writtenAt: number;
 }
 
@@ -34,9 +37,15 @@ export function takeRestoreNote(directory: string, now = Date.now()): RestoreNot
       source: boundary.enumeration('toast', 'pill', 'tonight', 'runpane'),
       fromVersion: boundary.string,
       toVersion: boundary.string,
+      navigation: boundary.optional(boundary.nullable(boundary.object({
+        hostId: boundary.nullable(boundary.string),
+        memory: boundary.json,
+      }))),
       writtenAt: boundary.number,
     }));
-    return now - note.writtenAt <= NOTE_LIFETIME_MS ? note : null;
+    if (now - note.writtenAt > NOTE_LIFETIME_MS) return null;
+    const memory = note.navigation ? decodeHostNavigationMemory(note.navigation.memory) : null;
+    return { ...note, navigation: note.navigation && memory ? { hostId: note.navigation.hostId, memory } : null };
   } catch (error) {
     console.warn('[RestartToUpdate] Ignored an unreadable restore note:', error);
     return null;

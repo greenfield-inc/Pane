@@ -712,8 +712,9 @@ function App() {
         if (restored) {
           useRestartToUpdateStore.getState().showRestoreResult(restored);
           if (!useConfigStore.getState().config) await useConfigStore.getState().fetchConfig();
-          if (!cancelled) await restoreHostNavigation();
-          return;
+          if (!cancelled) await restoreHostNavigation(() => true, restored.navigation);
+          // Panes whose agents could not resume stay interrupted; offer them as on any launch.
+          if (cancelled || restored.panesFailed === 0) return;
         }
       }
       let sessions: ResumableSession[] = [];
