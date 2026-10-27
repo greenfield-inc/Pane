@@ -21,6 +21,7 @@ describe('getDockTerminalPanel', () => {
     { agentType: 'codex' as const },
     { agentType: 'claude' as const },
     { isCliPanel: true },
+    { stagedCommand: 'codex login' },
   ])('never promotes a tool after deleting its shell: %j', state => {
     const agent = terminal('agent', state);
     const shell = terminal('shell');

@@ -10,7 +10,8 @@ export function getDockTerminalPanel(panels: readonly ToolPanel[]): ToolPanel | 
     if (panel.type !== 'terminal') return false;
     // SAFETY: The terminal discriminator determines the custom-state shape.
     const state = panel.state.customState as TerminalPanelState | undefined;
-    // initialCommand is available before the process reports its agent metadata.
-    return !state?.initialCommand?.trim() && !state?.isCliPanel && !state?.agentType;
+    // initialCommand is available before the process reports its agent metadata;
+    // a staged setup command (an agent's install or sign-in) marks a working tab too.
+    return !state?.initialCommand?.trim() && !state?.stagedCommand?.trim() && !state?.isCliPanel && !state?.agentType;
   });
 }
