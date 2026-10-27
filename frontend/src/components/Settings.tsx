@@ -107,6 +107,12 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
     });
   }, [onClose, requestTransition]);
 
+  // Search opened a Pane, Session or project behind Settings: leave, keeping the unsaved-edits guard.
+  useEffect(() => {
+    window.addEventListener('leave-settings', requestClose);
+    return () => window.removeEventListener('leave-settings', requestClose);
+  }, [requestClose]);
+
   const showKeyboardShortcuts = useCallback(() => {
     requestTransition(onShowKeyboardShortcuts);
   }, [onShowKeyboardShortcuts, requestTransition]);

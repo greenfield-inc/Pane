@@ -164,6 +164,17 @@ test('Enter opens a Pane, a Session, a project or runs a command, and closes Sea
   await expect(page.getByRole('heading', { name: 'General' })).toBeVisible();
 });
 
+test('choosing a Pane from Search leaves Settings', async ({ page }) => {
+  await boot(page);
+  await page.keyboard.press('ControlOrMeta+,');
+  await expect(page.getByRole('heading', { name: 'General' })).toBeVisible();
+  const input = await openSearch(page);
+  await input.fill('runpane-update-fix');
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('heading', { name: 'General' })).toBeHidden();
+  await expect(page.locator('[aria-current="page"][aria-label="runpane-update-fix"]').first()).toBeVisible();
+});
+
 test('Tab cycles the filters, N more opens one, and > selects Commands', async ({ page }) => {
   await boot(page);
   const input = await openSearch(page);

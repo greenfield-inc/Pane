@@ -57,7 +57,11 @@ const TYPE_LABEL = {
 // Commands that open a dialog wait for the launcher to finish closing, so focus lands in the dialog.
 const AFTER_CLOSE_MS = 50;
 
+// Settings covers the whole window, so a navigation from Search asks it to close.
+const leaveSettings = () => window.dispatchEvent(new Event('leave-settings'));
+
 function openPane(paneId: string) {
+  leaveSettings();
   useNavigationStore.getState().setSidebarNavigationScope('repositories');
   const selected = useSessionStore.getState().setActiveSession(paneId);
   useNavigationStore.getState().navigateToSessions();
@@ -65,6 +69,7 @@ function openPane(paneId: string) {
 }
 
 function openSession(sessionId: string) {
+  leaveSettings();
   void useSessionStore.getState().setActiveSession(null);
   useNavigationStore.getState().navigateToPaneChat();
   // The store owns selection errors and surfaces them in the sidebar.
@@ -130,8 +135,8 @@ function actionsFor(item: SearchItem, context: { onNewPane: (projectId: number) 
     case 'project': {
       const { project } = item;
       return [
-        { id: 'open', label: 'Open Project', icon: SquareArrowOutUpRight, run: () => useNavigationStore.getState().navigateToProject(project.id) },
-        { id: 'new-pane', label: 'New Pane here', icon: Plus, run: () => setTimeout(() => context.onNewPane(project.id), AFTER_CLOSE_MS) },
+        { id: 'open', label: 'Open Project', icon: SquareArrowOutUpRight, run: () => { leaveSettings(); useNavigationStore.getState().navigateToProject(project.id); } },
+        { id: 'new-pane', label: 'New Pane here', icon: Plus, run: () => { leaveSettings(); setTimeout(() => context.onNewPane(project.id), AFTER_CLOSE_MS); } },
       ];
     }
     case 'command':
@@ -372,7 +377,7 @@ export function CommandPalette({ isOpen, onClose, projects, onNewPane }: Command
             return (
               <div key={row.key} {...optionProps} className={cn(rowClass(isSelected, false), 'h-8 text-[13px] text-text-tertiary')}>
                 <span className="w-4" aria-hidden="true" />
-                <span className="flex-1">{row.section.more} more {row.section.label}</span>
+                <span className="flex-1">{row.section.more} more {row.section.more === 1 ? row.section.label.slice(0, -1) : row.section.label}</span>
                 {isSelected && <CornerDownLeft className="h-4 w-4 text-text-tertiary" aria-hidden="true" />}
               </div>
             );
@@ -517,7 +522,7 @@ function ResultRow({ item, query, selected }: { item: SearchItem; query: string;
         {selected ? (
           <>
             {item.kind !== 'command' && <MoreHorizontal className="h-4 w-4" aria-label="Actions" />}
-            <CornerDownLeft className="h-4 w-4" aria-hidden="true" />
+            {!isDisabled(item) && <CornerDownLeft className="h-4 w-4" aria-hidden="true" />}
           </>
         ) : metadata(item)}
       </span>
