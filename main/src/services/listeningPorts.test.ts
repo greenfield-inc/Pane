@@ -67,10 +67,15 @@ async function startTunnellingPane(hostPort: number): Promise<number> {
     format: 'cjs',
     write: false,
   }).outputFiles;
-  const source = `${bundle.text}
+  // Too long for `node -e` on Linux and Windows, so it runs from a file.
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pane-tunnel-'));
+  const script = path.join(dir, 'tunnel.js');
+  await fs.writeFile(script, `${bundle.text}
 module.exports.createPortTunnel(() => { throw new Error('unused'); }).sync([${hostPort}])
-  .then(ports => console.log(ports.get(${hostPort})));`;
-  return (await startListener(source)).port;
+  .then(ports => console.log(ports.get(${hostPort})));`);
+  const { child, port } = await startListener(`require(${JSON.stringify(script)})`);
+  child.once('exit', () => void fs.rm(dir, { recursive: true, force: true }));
+  return port;
 }
 
 async function freePort(): Promise<number> {
