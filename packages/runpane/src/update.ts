@@ -124,21 +124,41 @@ async function updateInApp(parsed: ParsedArgs, paneDir: string, refusal: Runpane
     throw new RunpaneError('ERR_UPDATE_IN_APP_UNAVAILABLE', `Updating from runpane is unsupported by this Pane: it is older than the in-app update handoff, and the independent update refused this host (${refusal.message}).`, 'Open Pane, go to Settings, and click Update. Then runpane update works directly next time.');
   }
   // Pane rewrites its managed copy of the CLI at startup, so the new app brings
-  // the matching CLI. A pinned managed, npm or pip CLI is its own installation.
+  // the matching CLI. A pinned managed, npm or pip CLI is its own installation;
+  // a pip CLI delegates here through the managed engine, so check its owner first.
+  const pipCli = Boolean(process.env.PANE_UPDATE_PYTHON && process.env.PANE_UPDATE_PYTHON_ENTRYPOINT);
   const bundled = path.join(paneDir, 'bin', 'runpane.cjs');
-  const cliFollowsApp = parsed.updateScope === 'pane' || (fs.existsSync(bundled) && fs.realpathSync(process.argv[1]) === fs.realpathSync(bundled));
-  const installing = result.state === 'installing';
-  const next = installing
+  const cliFollowsApp = parsed.updateScope === 'pane' || (!pipCli && fs.existsSync(bundled) && fs.realpathSync(process.argv[1]) === fs.realpathSync(bundled));
+  let phase: 'installing' | 'complete' | 'current' = result.state;
+  if (phase === 'installing' && parsed.updateWait) {
+    await waitForRelaunch(paneDir, result.version);
+    phase = 'complete';
+  }
+  const next = phase === 'installing'
     ? `Pane ${result.version} installs and relaunches in about a minute; run runpane doctor --json afterwards to confirm.`
-    : `Pane ${result.version} is the latest release.`;
-  const cliNext = cliFollowsApp ? '' : ' This CLI was not updated; update it with its package manager (npm install --global runpane@latest or pip install --upgrade runpane).';
+    : phase === 'complete' ? `Pane ${result.version} is running.` : `Pane ${result.version} is the latest release.`;
+  const cliNext = cliFollowsApp ? '' : ` This CLI was not updated; update it with ${pipCli ? 'pip install --upgrade runpane' : 'its package manager (npm install --global runpane@latest or pip install --upgrade runpane)'}.`;
   if (parsed.json) {
-    console.log(JSON.stringify({ mode: 'in-app', phase: installing ? 'installing' : 'current', fromVersion: result.fromVersion, version: result.version, cliUpdated: installing && cliFollowsApp, independentRefusal: refusal, next: next + cliNext }, null, 2));
+    console.log(JSON.stringify({ mode: 'in-app', phase, fromVersion: result.fromVersion, version: result.version, cliUpdated: phase !== 'current' && cliFollowsApp, independentRefusal: refusal, next: next + cliNext }, null, 2));
   } else {
     console.log(`The independent update cannot run here (${refusal.message}), so Pane's built-in updater is handling it.`);
-    console.log(`${installing ? `Pane is updating itself from ${result.fromVersion} to ${result.version}.` : 'Pane is up to date.'} ${next}${cliNext}`);
+    console.log(`${phase === 'current' ? 'Pane is up to date.' : `Pane is updating itself from ${result.fromVersion} to ${result.version}.`} ${next}${cliNext}`);
   }
   return 0;
+}
+
+const RELAUNCH_TIMEOUT_MS = 10 * 60_000;
+
+/** --wait: return once the relaunched Pane answers with the new version. */
+async function waitForRelaunch(paneDir: string, version: string): Promise<void> {
+  const deadline = Date.now() + RELAUNCH_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    try {
+      if ((await invokeDaemon('runpane:update:host', [], updateHostSchema, { paneDir, timeoutMs: 5_000 })).version === version) return;
+    } catch { /* Pane is quitting, installing or starting */ }
+    await pause(2_000);
+  }
+  throw new RunpaneError('ERR_UPDATE_IN_APP_TIMEOUT', `Timed out after 10 minutes waiting for Pane to come back as ${version} from its built-in update. The install may still be running, or it may have failed and left the previous version.`, 'Open Pane and check its version in Settings, then run runpane doctor --json.');
 }
 
 async function presentUpdate(file: string, parsed: ParsedArgs): Promise<number> {

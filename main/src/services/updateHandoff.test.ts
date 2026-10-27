@@ -16,9 +16,10 @@ let output: string[];
 const inApp = vi.fn();
 const electronVersion = Object.getOwnPropertyDescriptor(process.versions, 'electron');
 const argv1 = process.argv[1];
+let runningVersion: string;
 
 function host(executable: string) {
-  return { protocol: 1, machine: os.hostname(), bootId: 'boot', pid: process.pid, executable, version: '2.4.201', paneDir, userData: path.join(root, 'profile'), packaged: true, remoteEnabled: false, remoteHealthy: true, endpointFingerprint: 'fingerprint', active: 0, idle: 0, blocked: 0 };
+  return { protocol: 1, machine: os.hostname(), bootId: 'boot', pid: process.pid, executable, version: runningVersion, paneDir, userData: path.join(root, 'profile'), packaged: true, remoteEnabled: false, remoteHealthy: true, endpointFingerprint: 'fingerprint', active: 0, idle: 0, blocked: 0 };
 }
 
 async function startDesktop({ inAppUpdate = true, executable = path.join(root, 'Pane.app/Contents/MacOS/Pane') } = {}) {
@@ -48,6 +49,7 @@ beforeEach(() => {
   fs.mkdirSync(paneDir);
   server = null;
   output = [];
+  runningVersion = '2.4.201';
   inApp.mockReset().mockReturnValue({ state: 'installing', fromVersion: '2.4.201', version: '2.4.202' });
   vi.stubEnv('RUNPANE_TELEMETRY_DISABLED', '1');
   vi.spyOn(console, 'log').mockImplementation((line: string) => { output.push(line); });
@@ -101,6 +103,27 @@ describe('runpane update hands off to the in-app updater', () => {
     vi.stubEnv('PATH', path.join(root, 'empty'));
     expect(await update()).toBe(0);
     expect(printed()).toMatchObject({ cliUpdated: false, next: expect.stringContaining('npm install --global runpane@latest') });
+  });
+
+  it('with --wait, returns only after Pane relaunches on the new version', async () => {
+    inApp.mockImplementation(() => {
+      setTimeout(() => { runningVersion = '2.4.202'; }, 500);
+      return { state: 'installing', fromVersion: '2.4.201', version: '2.4.202' };
+    });
+    await startDesktop();
+    runAsManagedCli(path.join(root, 'empty'));
+    expect(await update('--wait')).toBe(0);
+    expect(runningVersion).toBe('2.4.202');
+    expect(printed()).toMatchObject({ mode: 'in-app', phase: 'complete', version: '2.4.202', cliUpdated: true, next: 'Pane 2.4.202 is running.' });
+  });
+
+  it('reports a pip CLI delegating through the managed engine as not updated', async () => {
+    await startDesktop();
+    runAsManagedCli(path.join(root, 'empty'));
+    vi.stubEnv('PANE_UPDATE_PYTHON', '/usr/bin/python3');
+    vi.stubEnv('PANE_UPDATE_PYTHON_ENTRYPOINT', path.join(root, 'site-packages/runpane/cli.py'));
+    expect(await update()).toBe(0);
+    expect(printed()).toMatchObject({ cliUpdated: false, next: expect.stringContaining('pip install --upgrade runpane') });
   });
 
   it('reports a current desktop without restarting it', async () => {

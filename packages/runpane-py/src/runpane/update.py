@@ -7,6 +7,7 @@ import json
 import shutil
 import subprocess
 import sys
+import time
 
 from .daemon_client import PaneDaemonClientError, invoke_daemon, resolve_pane_directory
 
@@ -23,6 +24,7 @@ def run_update(parsed) -> int:
         )
         if parsed.update_status or parsed.dry_run or parsed.update_scope == "cli" or parsed.pane_version != "latest" or parsed.pane_path:
             raise refusal
+        assert_update_options(parsed)
         return update_in_app(parsed, pane_dir, refusal)
     args = [node, str(engine), "update", "--pane-dir", str(pane_dir), "--version", parsed.pane_version]
     if parsed.update_scope != "both":
@@ -44,6 +46,37 @@ def run_update(parsed) -> int:
     return subprocess.call(args, env=environment)
 
 
+NATIVE_UPDATE_FORMAT = {"darwin": "zip", "win32": "exe"}.get(sys.platform, "appimage")
+RELAUNCH_TIMEOUT_SECONDS = 10 * 60
+
+
+def assert_update_options(parsed) -> None:
+    """The managed engine refuses these before updating; refuse them here too before handing off."""
+    if parsed.channel != "stable" or parsed.download_dir or parsed.format not in {"auto", NATIVE_UPDATE_FORMAT}:
+        raise PaneDaemonClientError(
+            "These installer options are not supported by independent updates. Nothing was changed.",
+            code="ERR_UPDATE_PREFLIGHT",
+            next="Use the stable client release with automatic format and operation-owned staging, or use runpane install for other installer options.",
+        )
+
+
+def wait_for_relaunch(pane_dir: Path, version: str) -> None:
+    """--wait: return once the relaunched Pane answers with the new version."""
+    deadline = time.monotonic() + RELAUNCH_TIMEOUT_SECONDS
+    while time.monotonic() < deadline:
+        try:
+            if invoke_daemon("runpane:update:host", [], pane_dir=str(pane_dir), timeout_ms=5_000).get("version") == version:
+                return
+        except PaneDaemonClientError:
+            pass  # Pane is quitting, installing or starting
+        time.sleep(2)
+    raise PaneDaemonClientError(
+        f"Timed out after 10 minutes waiting for Pane to come back as {version} from its built-in update. The install may still be running, or it may have failed and left the previous version.",
+        code="ERR_UPDATE_IN_APP_TIMEOUT",
+        next="Open Pane and check its version in Settings, then run runpane doctor --json.",
+    )
+
+
 def update_in_app(parsed, pane_dir: Path, refusal: PaneDaemonClientError) -> int:
     """Without the engine or Node, the running Pane installs the release itself with electron-updater."""
     try:
@@ -62,17 +95,20 @@ def update_in_app(parsed, pane_dir: Path, refusal: PaneDaemonClientError) -> int
             code="ERR_UPDATE_IN_APP_UNAVAILABLE",
             next="Open Pane, go to Settings, and click Update. Then runpane update works directly next time.",
         ) from error
-    installing = result["state"] == "installing"
-    next_step = (
-        f"Pane {result['version']} installs and relaunches in about a minute; run runpane doctor --json afterwards to confirm."
-        if installing else f"Pane {result['version']} is the latest release."
-    )
+    phase = result["state"]
+    if phase == "installing" and parsed.update_wait:
+        wait_for_relaunch(pane_dir, result["version"])
+        phase = "complete"
+    next_step = {
+        "installing": f"Pane {result['version']} installs and relaunches in about a minute; run runpane doctor --json afterwards to confirm.",
+        "complete": f"Pane {result['version']} is running.",
+    }.get(phase, f"Pane {result['version']} is the latest release.")
     if parsed.update_scope != "pane":
         next_step += " This CLI was not updated; update it with pip install --upgrade runpane."
     if parsed.json:
         print(json.dumps({
             "mode": "in-app",
-            "phase": "installing" if installing else "current",
+            "phase": phase,
             "fromVersion": result["fromVersion"],
             "version": result["version"],
             "cliUpdated": False,
@@ -81,6 +117,6 @@ def update_in_app(parsed, pane_dir: Path, refusal: PaneDaemonClientError) -> int
         }, indent=2))
     else:
         print(f"The independent update cannot run here ({refusal}), so Pane's built-in updater is handling it.")
-        headline = f"Pane is updating itself from {result['fromVersion']} to {result['version']}." if installing else "Pane is up to date."
+        headline = "Pane is up to date." if phase == "current" else f"Pane is updating itself from {result['fromVersion']} to {result['version']}."
         print(f"{headline} {next_step}")
     return 0

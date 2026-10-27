@@ -8,7 +8,9 @@ not need the prerequisites below. When a prerequisite is missing, `runpane updat
 hands off to that built-in updater: the running Pane downloads the latest release,
 quits and installs it, and the command prints `"mode": "in-app"`. The handoff
 skips the checkpoint, snapshot and panel restoration described here, and it
-leaves an npm or pip CLI as it was (`cliUpdated: false`). Pinned versions,
+leaves an npm or pip CLI as it was (`cliUpdated: false`). It returns `"phase": "installing"` once the
+install starts; with `--wait` it returns `"phase": "complete"` only after the relaunched Pane
+reports the new version, and fails with `ERR_UPDATE_IN_APP_TIMEOUT` after 10 minutes. Pinned versions,
 `--pane-path`, `--cli-only` and `--dry-run` still report the refusal.
 Run `runpane update --dry-run --json` first to see the executable, data directory,
 CLI owner and supervisor capability without starting an update.

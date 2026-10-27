@@ -134,7 +134,8 @@ cannot run the independent update (no standalone Node, an unwritable install, a
 system-managed Linux package, a cached/local npm install), `runpane update`
 asks the running Pane to install the latest release with its built-in updater
 instead, the same path as the Settings Update button. That handoff updates the
-app and its managed CLI; an npm or pip CLI is reported as not updated. It
+app and its managed CLI; an npm or pip CLI is reported as not updated. With
+`--wait`, it returns once the relaunched Pane reports the new version. It
 applies to `--version latest` without `--pane-path`, `--cli-only` or `--dry-run`, and needs
 Pane open. Python delegates to the managed engine installed by Pane and records
 the invoking Python environment; without that engine or Node it hands off the
