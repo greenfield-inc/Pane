@@ -97,6 +97,22 @@ test.describe('Pane Notify in the main window', () => {
     await expect(history.filter({ hasText: 'Lint rule question' })).toContainText('Expired');
   });
 
+  test('a suggestion fills the answer field and waits for Enter', async ({ page }) => {
+    await boot(page);
+    await page.getByTestId('notify-nav').click();
+    const card = page.getByTestId('notify-inbox').getByTestId('notify-card').filter({ hasText: 'release headline' });
+    await card.getByRole('button', { name: /Notify is here/ }).click();
+    const field = card.getByPlaceholder('Type your answer');
+    await expect(field).toHaveValue('Notify is here');
+    await expect(field).toBeFocused();
+    expect(await commands(page)).toEqual([]);
+
+    await field.press('End');
+    await field.pressSequentially(' in 2.5');
+    await field.press('Enter');
+    await expect.poll(() => commands(page)).toEqual([{ type: 'answer', id: 'q-ask', answer: { text: 'Notify is here in 2.5' } }]);
+  });
+
   test('the inbox explains Notify when nothing waits, and main can open it', async ({ page }) => {
     const empty = { ...notifyFixture(), items: [], queue: [], strip: null, stripSurface: null };
     await boot(page, empty);
@@ -164,8 +180,21 @@ test.describe('Settings → Notify', () => {
     await page.getByRole('radio', { name: 'Top right' }).click();
     await expect.poll(() => configUpdates(page)).toEqual([
       { notify: { showOutsidePane: false } },
-      { notify: { showOutsidePane: false, position: 'top-right' } },
+      { notify: { position: 'top-right' } },
     ]);
+  });
+
+  test('shows a change made from the tray and saves only the edited setting', async ({ page }) => {
+    await boot(page);
+    await openNotifySettings(page);
+    const fromTray = notifyFixture();
+    fromTray.settings.showOutsidePane = false;
+    // SAFETY: installElectronApiMock installs these test-only IPC controls on the page.
+    await page.evaluate((snapshot) => (window as MockWindow).__paneTestElectronMock.emitNotifySnapshot(snapshot), fromTray);
+    await expect(page.getByRole('switch', { name: 'Show outside Pane' })).toHaveAttribute('aria-checked', 'false');
+
+    await page.getByRole('radio', { name: 'Top right' }).click();
+    await expect.poll(() => configUpdates(page)).toEqual([{ notify: { position: 'top-right' } }]);
   });
 
   test('greys out every child setting while Notify is off', async ({ page }) => {

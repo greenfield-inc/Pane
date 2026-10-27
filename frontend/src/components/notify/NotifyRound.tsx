@@ -24,8 +24,13 @@ export function NotifyRound({ snapshot, startId, onCommand }: NotifyRoundProps) 
   const empty = snapshot.queue.length === 0;
   const closedRef = useRef(false);
 
+  // The window is reused, so each batch of questions gets one close when it empties.
   useEffect(() => {
-    if (!empty || closedRef.current) return;
+    if (!empty) {
+      closedRef.current = false;
+      return;
+    }
+    if (closedRef.current) return;
     closedRef.current = true;
     onCommand({ type: 'close-round' });
   }, [empty, onCommand]);
@@ -217,8 +222,17 @@ function RoundPanel({ item, position, total, onCommand }: RoundPanelProps) {
               type="button"
               role="option"
               aria-selected={index === selected}
-              onClick={() => (ask ? send(index) : setSelected(index))}
-              onDoubleClick={() => send(index)}
+              onClick={() => {
+                if (!ask) {
+                  setSelected(index);
+                  return;
+                }
+                // A suggestion fills the field; ↵ sends it.
+                setText(row.label);
+                setSelected(-1);
+                textRef.current?.focus();
+              }}
+              onDoubleClick={() => { if (!ask) send(index); }}
               className={cn(
                 'flex h-[50px] w-full items-center gap-3.5 rounded-xl px-3.5 text-left text-[16px]',
                 index === selected ? 'bg-surface-tertiary' : 'hover:bg-surface-hover',

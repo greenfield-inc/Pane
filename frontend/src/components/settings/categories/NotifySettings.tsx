@@ -100,14 +100,16 @@ function ShortcutRecorder({ accelerator, disabled, onSave }: { accelerator: stri
 
 export function NotifySettings({ persistence }: { persistence: SettingsPersistence }) {
   const config = persistence.config!;
-  const stored = config.notify ?? {};
-  const settings: NotifySettingValues = { ...DEFAULT_NOTIFY_SETTINGS, ...stored };
+  // The snapshot carries main's live settings, so a change from the tray shows here at once.
+  const live = useNotifyStore((state) => state.snapshot?.settings);
+  const settings: NotifySettingValues = live ?? { ...DEFAULT_NOTIFY_SETTINGS, ...config.notify };
   const shortcutRegistered = useNotifyStore((state) => state.snapshot?.shortcutRegistered ?? true);
   const showOutsideSupported = useNotifyStore((state) => state.snapshot?.showOutsideSupported ?? true);
   const off = !settings.enabled;
 
   const save = <K extends keyof NotifySettingValues>(settingId: SettingsSettingId, key: K, value: NotifySettingValues[K]) =>
-    persistence.saveConfig(settingId, { notify: { ...stored, [key]: value } });
+    // Only the edited key: main merges it, so a newer tray change isn't overwritten.
+    persistence.saveConfig(settingId, { notify: { [key]: value } });
 
   const shortcutText = shortcutLabel(settings.shortcut, isMac());
   return (

@@ -240,15 +240,17 @@ interface TextFieldProps {
   autoFocus?: boolean;
   /** Shows the send arrow, lit once there is text. */
   sendLabel?: string;
+  /** Focuses the field each time it changes, such as after a suggestion fills it. */
+  focusKey?: number;
 }
 
-function TextField({ value, onChange, onSubmit, placeholder, onFieldFocusRequest, autoFocus, sendLabel }: TextFieldProps) {
+function TextField({ value, onChange, onSubmit, placeholder, onFieldFocusRequest, autoFocus, sendLabel, focusKey = 0 }: TextFieldProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
-    if (autoFocus) focusAfterRequest(inputRef.current, onFieldFocusRequest);
-    // Focus once, when the field appears.
+    if (autoFocus || focusKey > 0) focusAfterRequest(inputRef.current, onFieldFocusRequest);
+    // Focus when the field appears (autoFocus) and whenever focusKey asks again.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [focusKey]);
   const hasText = value.trim().length > 0;
   return (
     <div className="flex h-[42px] items-center gap-2 rounded-xl bg-surface-tertiary pl-3.5 pr-2 focus-within:ring-[1.5px] focus-within:ring-inset focus-within:ring-border-hover">
@@ -364,6 +366,7 @@ function QuestionCard({
   const [denying, setDenying] = useState(false);
   const [showDetail, setShowDetail] = useState(form === 'docked');
   const [text, setText] = useState('');
+  const [textFocusKey, setTextFocusKey] = useState(0);
   const titleClass = form === 'inbox'
     ? 'px-3.5 pt-1 text-[14.5px] font-semibold leading-snug text-text-primary'
     : 'px-[22px] pt-1.5 text-[18px] font-semibold leading-[1.35] tracking-[-0.015em] text-text-primary';
@@ -483,7 +486,7 @@ function QuestionCard({
                 onClick={() => setShowDetail((shown) => !shown)}
                 className="ml-auto pr-2 text-[13px] text-text-tertiary hover:text-text-primary"
               >
-                {showDetail ? 'Hide the details' : 'Show the details'}
+                {showDetail ? 'Hide details' : item.detailLabel?.trim() || 'Show details'}
               </button>
             )}
           </div>
@@ -502,7 +505,11 @@ function QuestionCard({
         {suggestions.length > 0 && (
           <div className={cn('flex flex-wrap items-center gap-1', form === 'inbox' ? 'px-2 pt-2.5' : 'px-3.5 pt-3')}>
             {suggestions.map((suggestion, index) => (
-              <Chip key={suggestion} keyLabel={String(index + 1)} label={suggestion} inbox={form === 'inbox'} onClick={() => answerText(suggestion)} />
+              <Chip key={suggestion} keyLabel={String(index + 1)} label={suggestion} inbox={form === 'inbox'} onClick={() => {
+                // A suggestion is a starting point: it fills the field, and Send or ↵ answers.
+                setText(suggestion);
+                setTextFocusKey((key) => key + 1);
+              }} />
             ))}
           </div>
         )}
@@ -514,6 +521,7 @@ function QuestionCard({
             placeholder={form === 'strip' ? 'Click to type your answer' : 'Type your answer'}
             onFieldFocusRequest={onFieldFocusRequest}
             sendLabel={`Send to ${item.source.agent}`}
+            focusKey={textFocusKey}
           />
         </div>
       </>

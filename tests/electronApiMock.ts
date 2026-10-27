@@ -632,6 +632,13 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
 
     let uncleanShutdownPending = mockOptions.uncleanShutdown === true;
     let notifySnapshot = mockOptions.notifySnapshot ? clone(mockOptions.notifySnapshot) : null;
+    // Like main: the snapshot's settings are the saved notify settings over the defaults.
+    const applyNotifyConfig = () => {
+      if (notifySnapshot && configState.notify && !Array.isArray(configState.notify) && configState.notify instanceof Object) {
+        Object.assign(notifySnapshot.settings, configState.notify);
+      }
+    };
+    applyNotifyConfig();
     const notifyCommands: NotifyCommand[] = [];
     const notifyWindowSizes: NotifyWindowSize[] = [];
     const notifyApi = notifySnapshot ? {
@@ -861,8 +868,17 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           if ('systemDarkTheme' in updates && mockOptions.appearance.lightThemes.includes(String(updates.systemDarkTheme))) {
             return Promise.resolve({ success: false, error: 'systemDarkTheme must be a dark palette' });
           }
+          const savedNotify = configState.notify;
           Object.assign(configState, updates);
           configUpdates.push(clone(updates));
+          if (updates.notify instanceof Object && !Array.isArray(updates.notify)) {
+            // Main merges each notify field into the saved ones and sends a new snapshot.
+            const merged: JsonObject = {};
+            if (savedNotify instanceof Object && !Array.isArray(savedNotify)) Object.assign(merged, savedNotify);
+            configState.notify = Object.assign(merged, updates.notify);
+            applyNotifyConfig();
+            if (notifySnapshot) queueMicrotask(() => emit('notify:snapshot', clone(notifySnapshot)));
+          }
           const response = success(clone(configState));
           if ('terminalFontFamily' in updates || 'terminalFontSize' in updates) {
             queueMicrotask(() => emit('config:terminal-font-updated', {

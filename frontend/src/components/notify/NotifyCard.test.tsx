@@ -47,12 +47,18 @@ describe('NotifyCard', () => {
       title: 'Apply migration 0042 to staging?',
       context: 'Adds one nullable column. Staging only.',
       detail: 'ALTER TABLE sessions ADD COLUMN revoked_at timestamptz;',
+      detailLabel: 'Show the SQL',
     }));
     expect(visible).toContain('Needs approval');
     expect(visible).toContain('Adds one nullable column. Staging only.');
     expect(visible).toMatch(/N Deny Y Approve/);
-    expect(visible).toContain('Show the details');
+    expect(visible).toContain('Show the SQL');
     expect(visible).not.toContain('ALTER TABLE');
+  });
+
+  it('labels the disclosure Show details when the agent gives no label', () => {
+    const visible = text(render({ ...base, ui: 'approve', title: 'Deploy?', detail: 'fly deploy --app web' }));
+    expect(visible).toContain('Show details');
   });
 
   it('shows a free-text question as a field, with the agent’s suggestions above it', () => {
