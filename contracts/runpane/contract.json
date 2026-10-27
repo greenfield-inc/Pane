@@ -1237,6 +1237,24 @@
       "localControl": true
     },
     {
+      "name": "notify",
+      "summary": "Ask the person a question, or tell them something, wherever they are, and get their answer back.",
+      "usage": [
+        "runpane notify --ui <options|approve|ask|info> --title <text> [--context <text>] [--choices <json>] [--detail <text>] [--suggestions <json>] [--action <json>] [--json] [--pane-dir <path>]",
+        "runpane notify --resume <id> [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "additive": true,
+      "toolsets": [
+        "core"
+      ],
+      "jsonSchemas": [
+        "notifyRequest",
+        "notifyResult"
+      ],
+      "localControl": true
+    },
+    {
       "name": "inbox",
       "summary": "List the reports, missing reports, and on-screen questions a Session's orchestrator has not acknowledged.",
       "usage": [
@@ -2059,6 +2077,36 @@
         "name": "--epoch",
         "value": "<epoch>",
         "description": "Journal epoch paired with --since; a mismatch emits _reset instead of silently skipping events."
+      },
+      {
+        "name": "--ui",
+        "value": "<options|approve|ask|info>",
+        "description": "notify: what to show: pick one of choices, approve or deny, type an answer, or an update."
+      },
+      {
+        "name": "--context",
+        "value": "<text>",
+        "description": "notify: background shown under Details."
+      },
+      {
+        "name": "--choices",
+        "value": "<json>",
+        "description": "notify --ui options: 1 to 9 choices as a JSON array of {label, detail?, recommended?}."
+      },
+      {
+        "name": "--detail",
+        "value": "<text>",
+        "description": "notify --ui approve: a preformatted block, such as the command or SQL to approve."
+      },
+      {
+        "name": "--suggestions",
+        "value": "<json>",
+        "description": "notify --ui ask: suggested answers as a JSON array of strings."
+      },
+      {
+        "name": "--action",
+        "value": "<json>",
+        "description": "notify --ui info: one button as a JSON object {label, url}."
       }
     ],
     "localBoolean": [
@@ -2259,6 +2307,7 @@
         "  runpane agents status (--pane <pane-id>|--panel <panel-id>) [--limit <count>] [--json] [--pane-dir <path>]",
         "  runpane agents send (--pane <pane-id>|--panel <panel-id>) --text <message> --yes [--json] [--pane-dir <path>]",
         "  runpane report --state <ready|blocked|failed|done> [--pr <number>] [--head <sha>] [--summary-file <path|->] [--question <text>] [--json]",
+        "  runpane notify --ui <options|approve|ask|info> --title <text> [--choices <json>] [--resume <id>] [--json]",
         "  runpane inbox [--session <id|name>] [--json]",
         "  runpane inbox ack <item-id>... [--session <id|name>] [--json]",
         "  runpane panes squash-rebase --pane <pane-id> --message <message> --yes [--json] [--pane-dir <path>]",
@@ -3311,6 +3360,31 @@
         "Example:",
         "  runpane report --state ready --pr 747 --head fc5dce9 --summary-file /tmp/report.md"
       ],
+      "notify": [
+        "Usage:",
+        "  runpane notify --ui <options|approve|ask|info> --title <text> [--context <text>] [--choices <json>] [--detail <text>] [--suggestions <json>] [--action <json>] [--json] [--pane-dir <path>]",
+        "  runpane notify --resume <id> [--json] [--pane-dir <path>]",
+        "",
+        "Asks the person a question, or tells them something, on screen wherever they are, and",
+        "prints their answer. The call waits until they answer; --ui info returns at once.",
+        "Inside a Pane terminal the question names its Pane from PANE_SESSION_ID and PANE_PANEL_ID.",
+        "When Pane is not running it prints an unavailable result: ask in the terminal instead.",
+        "",
+        "Options:",
+        "  --ui <ui>                      options, approve, ask, or info",
+        "  --title <text>                 The question or update in one line",
+        "  --context <text>               Background shown under Details",
+        "  --choices <json>               options: 1 to 9 of [{\"label\":\"...\",\"detail\":\"...\",\"recommended\":true}]",
+        "  --detail <text>                approve: the command or SQL to approve",
+        "  --suggestions <json>           ask: suggested answers, such as [\"main\",\"release\"]",
+        "  --action <json>                info: one button, such as {\"label\":\"Open PR\",\"url\":\"https://...\"}",
+        "  --resume <id>                  Keep waiting on a question an earlier call returned waiting for",
+        "  --pane-dir <path>              Connect to a specific Pane data directory",
+        "  --json                         Print machine-readable output",
+        "",
+        "Example:",
+        "  runpane notify --ui options --title \"Which database?\" --choices '[{\"label\":\"Redis\",\"recommended\":true},{\"label\":\"SQLite\"}]'"
+      ],
       "panels resume": [
         "Usage:",
         "  runpane panels resume --panel <panel-id> [--wait-ready] [--ready-timeout-ms <ms>] --yes [--json] [--pane-dir <path>]",
@@ -3750,6 +3824,7 @@
         "  runpane agents status (--pane <pane-id>|--panel <panel-id>) [--limit <count>] [--json] [--pane-dir <path>]",
         "  runpane agents send (--pane <pane-id>|--panel <panel-id>) --text <message> --yes [--json] [--pane-dir <path>]",
         "  runpane report --state <ready|blocked|failed|done> [--pr <number>] [--head <sha>] [--summary-file <path|->] [--question <text>] [--json]",
+        "  runpane notify --ui <options|approve|ask|info> --title <text> [--choices <json>] [--resume <id>] [--json]",
         "  runpane inbox [--session <id|name>] [--json]",
         "  runpane inbox ack <item-id>... [--session <id|name>] [--json]",
         "  runpane panes squash-rebase --pane <pane-id> --message <message> --yes [--json] [--pane-dir <path>]",
@@ -4761,6 +4836,31 @@
         "Example:",
         "  runpane report --state ready --pr 747 --head fc5dce9 --summary-file /tmp/report.md"
       ],
+      "notify": [
+        "Usage:",
+        "  runpane notify --ui <options|approve|ask|info> --title <text> [--context <text>] [--choices <json>] [--detail <text>] [--suggestions <json>] [--action <json>] [--json] [--pane-dir <path>]",
+        "  runpane notify --resume <id> [--json] [--pane-dir <path>]",
+        "",
+        "Asks the person a question, or tells them something, on screen wherever they are, and",
+        "prints their answer. The call waits until they answer; --ui info returns at once.",
+        "Inside a Pane terminal the question names its Pane from PANE_SESSION_ID and PANE_PANEL_ID.",
+        "When Pane is not running it prints an unavailable result: ask in the terminal instead.",
+        "",
+        "Options:",
+        "  --ui <ui>                      options, approve, ask, or info",
+        "  --title <text>                 The question or update in one line",
+        "  --context <text>               Background shown under Details",
+        "  --choices <json>               options: 1 to 9 of [{\"label\":\"...\",\"detail\":\"...\",\"recommended\":true}]",
+        "  --detail <text>                approve: the command or SQL to approve",
+        "  --suggestions <json>           ask: suggested answers, such as [\"main\",\"release\"]",
+        "  --action <json>                info: one button, such as {\"label\":\"Open PR\",\"url\":\"https://...\"}",
+        "  --resume <id>                  Keep waiting on a question an earlier call returned waiting for",
+        "  --pane-dir <path>              Connect to a specific Pane data directory",
+        "  --json                         Print machine-readable output",
+        "",
+        "Example:",
+        "  runpane notify --ui options --title \"Which database?\" --choices '[{\"label\":\"Redis\",\"recommended\":true},{\"label\":\"SQLite\"}]'"
+      ],
       "panels resume": [
         "Usage:",
         "  runpane panels resume --panel <panel-id> [--wait-ready] [--ready-timeout-ms <ms>] --yes [--json] [--pane-dir <path>]",
@@ -5270,6 +5370,7 @@
       "`runpane loops list|create|update|run|pause|resume|delete` manage loops (scheduled tasks): a cron schedule that starts a new Pane in a fresh worktree for each run, or sends a prompt to a Session's agent. Loops are for large recurring jobs and run at most once an hour; for short waits, agents use their harness's own sleep and wake. See [LOOPS.md](LOOPS.md).",
       "`runpane agents start|status|send` finish the three common agent jobs in one call each: start an agent on a task (a new tab in the work's Pane with `--pane <id>`, or a new Pane for new work), check on it, and send it a follow-up.",
       "`runpane report --state ready|blocked|failed|done` is how a worker hands back its result. It stores the latest report on the worker's panel (state, `--pr`, `--head`, up to 16,000 characters of `--summary` or `--summary-file`, and the `--question` a blocked worker needs answered), journals an opt-in `agent.report` watch event (`REPORT <pane-name> pane <pane-id> panel <panel-id> ready pr#747 fc5dce9`; it skips the `--min-interval` batch), records it as Session activity, and shows it in `agents status`, `panels list`, and `sessions overview` (each panel's own report as `panes[].panels[].report`, with a JSON object summary as `data`, and the Pane's newest as `panes[].report`). Inside a Pane terminal the panel comes from `PANE_SESSION_ID` and `PANE_PANEL_ID`; elsewhere pass `--pane` and `--panel`. It prints how many watches were waiting for the report and received it (`Delivered to 1 waiting watcher.`, `liveWatchers` in JSON). Zero means nobody was waiting right now, not that the report is lost: it stays on the panel, and a named-cursor watch receives it when it next waits.",
+      "`runpane notify` asks the person a question, or tells them something, on screen wherever they are, and prints their answer: `--ui options` with 1 to 9 `--choices` returns `{answer, note?}` (the chosen label), `--ui approve` returns `{approved, note?}`, `--ui ask` returns `{answer}`, and `--ui info` returns `{delivered: \"screen\"|\"inbox\"}` at once. The call waits with no time limit. A `{waiting: true, id, next}` result means the wait should continue with `runpane notify --resume <id>`; `runpane mcp` asks for it only for clients whose tool calls time out. When Pane is not running or Notify is off it prints `{unavailable, next}` and exits 0, so the agent asks in its terminal. Invalid input fails before anything is shown, with a message naming the field. It needs no `--yes`: asking the person is the point.",
       "Work sent to an agent through `runpane panels create`, `panes create` (with a prompt), or `panels submit` records that the sender waits for a `runpane report`, unless the request says `--source user` (Pane's own UI does) or `--no-expect-report`; `--expect-report` asks for one anyway. Typing into a tab never does. If the agent then goes ready or its panel exits without a report, Pane journals one opt-in `agent.report.missing` entry (`MISSING REPORT <pane-name> pane <pane-id> panel <panel-id> ready|exited`) whose `lastOutput` is the agent's last transcript reply or last screen lines; it skips the `--min-interval` batch and reaches only watchers that list it in `--kinds`. While the agent's screen shows background work (Claude's `· 1 shell` footer or a running background subagent row, Codex's `background terminal running` line), Pane waits and looks again every 10 seconds instead. `agent.blocked` entries carry `screenLines`, the prompt the agent waits on, and are journalled once a panel has stayed blocked for 2 seconds.",
       "The orchestrator guide prescribes submit without `--wait`, followed by its named watch; use one completion consumer. As an optional CLI route, `--wait` on `runpane panels submit`, `panels create`, and `panes create` turns the expected report on and blocks on that panel until the first `agent.report`, `agent.report.missing`, `agent.blocked`, `panel.exited`, or `pane.gone`, then prints one line of JSON (`dispatchWaitResult`): the outcome, ids, the report's state, summary, `summaryPath`, PR and head, `screenLines` for a prompt, or `lastOutput` for a missing report, never the transcript. It exits 0 for a report, 3 missing, 4 blocked, 5 exited or gone, and 124 when `--timeout <duration>` passes. It follows the journal from the position the daemon took before delivering the work, so nothing that happens right after delivery is missed. It reuses watch --until-event and returns indeterminate (exit 6) if the journal epoch changes or retained history is lost; inspect the panel and inbox before retrying. Report-expected dispatches are serialized per panel and refused before writing while a result or missing-output collection is outstanding. Answer a blocked panel with panels submit --no-expect-report, then watch for the original result.",
       "`runpane inbox [--session <id|name>] [--json]` lists what a Session's orchestrator has not acknowledged: reports, missing reports, and on-screen questions (a question clears itself once its panel moves on). `runpane inbox ack <item-id>...` or `--all --session <id|name>` clears items. An orchestrator runs it when it starts or resumes, to catch anything that finished while it was down; Pane never injects the inbox into its turns.",
@@ -6441,6 +6542,47 @@
       [
         "loops",
         "--help"
+      ],
+      [
+        "notify",
+        "--ui",
+        "options",
+        "--title",
+        "Ship it?",
+        "--context",
+        "Tests pass.",
+        "--choices=[{\"label\":\"Yes\",\"recommended\":true},{\"label\":\"No\"}]",
+        "--json"
+      ],
+      [
+        "notify",
+        "--ui=approve",
+        "--title=Drop the table?",
+        "--detail=DROP TABLE t;",
+        "--pane-dir",
+        "/tmp/pane"
+      ],
+      [
+        "notify",
+        "--ui",
+        "ask",
+        "--title",
+        "Which branch?",
+        "--suggestions=[\"main\"]"
+      ],
+      [
+        "notify",
+        "--ui",
+        "info",
+        "--title",
+        "Done",
+        "--action={\"label\":\"Open\",\"url\":\"https://example.com\"}"
+      ],
+      [
+        "notify",
+        "--resume",
+        "n-1",
+        "--json"
       ]
     ],
     "topLevelHelpIncludes": [
@@ -12394,6 +12536,209 @@
         }
       },
       "additionalProperties": false
+    },
+    "notifyChoice": {
+      "type": "object",
+      "required": [
+        "label"
+      ],
+      "properties": {
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The answer notify returns when the person picks this choice."
+        },
+        "detail": {
+          "type": "string",
+          "description": "One more line about this choice."
+        },
+        "recommended": {
+          "type": "boolean",
+          "description": "Shade this choice as the one you recommend."
+        }
+      },
+      "additionalProperties": false
+    },
+    "notifyAction": {
+      "type": "object",
+      "required": [
+        "label",
+        "url"
+      ],
+      "properties": {
+        "label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "url": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "notifyRequest": {
+      "description": "What `runpane notify` sends on the runpane:notify daemon channel: the question fields, or resume alone.",
+      "type": "object",
+      "required": [
+        "caller"
+      ],
+      "properties": {
+        "ui": {
+          "enum": [
+            "options",
+            "approve",
+            "ask",
+            "info"
+          ]
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "context": {
+          "type": "string"
+        },
+        "choices": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 9,
+          "items": {
+            "$ref": "#/jsonSchemas/notifyChoice"
+          }
+        },
+        "detail": {
+          "type": "string"
+        },
+        "suggestions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "action": {
+          "$ref": "#/jsonSchemas/notifyAction"
+        },
+        "resume": {
+          "type": "string",
+          "minLength": 1
+        },
+        "returnAfterMs": {
+          "type": "number",
+          "description": "Return waiting after this long; set for MCP clients whose tool calls time out."
+        },
+        "caller": {
+          "type": "object",
+          "properties": {
+            "paneId": {
+              "type": "string"
+            },
+            "panelId": {
+              "type": "string"
+            },
+            "cwd": {
+              "type": "string"
+            },
+            "agent": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "notifyResult": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "answer"
+          ],
+          "properties": {
+            "answer": {
+              "type": "string",
+              "description": "options: the chosen label. ask: the typed answer."
+            },
+            "note": {
+              "type": "string",
+              "description": "What the person typed with their answer."
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "approved"
+          ],
+          "properties": {
+            "approved": {
+              "type": "boolean"
+            },
+            "note": {
+              "type": "string",
+              "description": "What the person typed with their answer."
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "delivered"
+          ],
+          "properties": {
+            "delivered": {
+              "enum": [
+                "screen",
+                "inbox"
+              ],
+              "description": "screen: shown on the strip. inbox: listed in the Notify inbox because a question was on screen."
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "waiting",
+            "id",
+            "next"
+          ],
+          "properties": {
+            "waiting": {
+              "const": true
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "next": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "unavailable",
+            "next"
+          ],
+          "properties": {
+            "unavailable": {
+              "type": "string",
+              "description": "Why nobody can answer through Pane."
+            },
+            "next": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
     }
   },
   "agentContext": {
@@ -12703,6 +13048,17 @@
             "--session <id|name>",
             "--self-test",
             "--kinds <kind,...>",
+            "--json"
+          ]
+        },
+        {
+          "name": "notify",
+          "summary": "Ask the person a question wherever they are and wait for the answer; prefer it to asking in the terminal.",
+          "arguments": [
+            "--ui <options|approve|ask|info>",
+            "--title <text>",
+            "--choices <json>",
+            "--resume <id>",
             "--json"
           ]
         }
@@ -17232,6 +17588,119 @@
           "loopDeleteResult"
         ],
         "notes": []
+      },
+      "notify": {
+        "name": "notify",
+        "summary": "Ask the person a question, or tell them something, wherever they are, and get their answer back.",
+        "details": "Prefer this to asking in the terminal whenever you need the person: to pick between options (ui options), to approve or deny an action (ui approve), to type a short answer (ui ask), or to tell them something that needs no answer (ui info). Pane shows it on screen even while the person works in another app, and the call waits until they answer, however long that takes. info returns at once.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--ui",
+            "value": "<options|approve|ask|info>",
+            "required": false,
+            "description": "options: pick one of choices. approve: Approve or Deny. ask: a typed answer. info: an update that returns at once. Required unless resume.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "options",
+                "approve",
+                "ask",
+                "info"
+              ]
+            }
+          },
+          {
+            "name": "--title",
+            "value": "<text>",
+            "required": false,
+            "description": "The question or update in one line; long titles wrap to 3 lines. Required unless resume."
+          },
+          {
+            "name": "--context",
+            "value": "<text>",
+            "required": false,
+            "description": "Background the person can open under Details."
+          },
+          {
+            "name": "--choices",
+            "value": "<json>",
+            "required": false,
+            "description": "ui options only, and required there: 1 to 9 choices. The answer is the chosen label. Mark at most the one you recommend.",
+            "schema": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 9,
+              "items": {
+                "$ref": "#/jsonSchemas/notifyChoice"
+              }
+            }
+          },
+          {
+            "name": "--detail",
+            "value": "<text>",
+            "required": false,
+            "description": "ui approve only: a preformatted block, such as the command or SQL to approve, behind a disclosure."
+          },
+          {
+            "name": "--suggestions",
+            "value": "<json>",
+            "required": false,
+            "description": "ui ask only: suggested answers, shown as chips above the text field.",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          {
+            "name": "--action",
+            "value": "<json>",
+            "required": false,
+            "description": "ui info only: one button that opens a URL.",
+            "schema": {
+              "$ref": "#/jsonSchemas/notifyAction"
+            }
+          },
+          {
+            "name": "--resume",
+            "value": "<id>",
+            "required": false,
+            "description": "The id from a waiting result: keep waiting on that question. Pass no other fields."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane notify --ui options --title \"Which database for the cache?\" --choices '[{\"label\":\"Redis\",\"recommended\":true},{\"label\":\"SQLite\"}]' --json",
+          "runpane notify --ui approve --title \"Drop the legacy_users table?\" --detail \"DROP TABLE legacy_users;\" --json",
+          "runpane notify --ui ask --title \"Which branch should I base this on?\" --suggestions '[\"main\",\"release\"]' --json",
+          "runpane notify --ui info --title \"PR #812 is ready for review\" --action '{\"label\":\"Open PR\",\"url\":\"https://github.com/org/repo/pull/812\"}' --json",
+          "runpane notify --resume n-4f2a --json"
+        ],
+        "jsonSchemas": [
+          "notifyRequest",
+          "notifyResult"
+        ],
+        "notes": [
+          "Results: options returns {answer: <chosen label>, note?}; approve returns {approved: true|false, note?}; ask returns {answer}; info returns {delivered: \"screen\"|\"inbox\"}.",
+          "A result of {waiting: true, id} means the question is still on screen and your client would otherwise time out: call `runpane notify --resume <id>` right away to keep waiting. After 15 minutes on this loop Pane gives up and returns unavailable.",
+          "A result of {unavailable, next} means nobody can answer through Pane right now (Pane is not running, Notify is off, or the wait ended): ask in the terminal instead. It is a result, not an error.",
+          "Inside a Pane terminal the question names its Pane and panel (PANE_SESSION_ID and PANE_PANEL_ID); elsewhere it names the working directory.",
+          "Invalid input, such as choices with ui ask or 10 choices, fails with a message naming the field, and nothing is shown."
+        ]
       }
     },
     "managedBlock": [
@@ -17240,6 +17709,8 @@
       "This repository is used with [Pane](https://runpane.com). Drive it with the CLI or the `pane` MCP server.",
       "",
       "1 feature = 1 worktree = 1 branch = 1 Pane; reviews, audits, fixes and QA for it are tabs in that Pane. Open later agents with `runpane panels create --pane <id>` (MCP: `panels_create` or `agents_start` with `pane`), not a new Pane.",
+      "",
+      "When you need the person (a choice, an approval, a short answer), call the `notify` MCP tool (or `runpane notify`) instead of asking in the terminal. If it returns `waiting`, call it again with `resume`; if it returns `unavailable`, ask in the terminal.",
       "",
       "CLI: `npm i -g runpane` (or `npx --yes runpane@latest`), then `runpane doctor --json`. Full command reference: `runpane agent-context --json`.",
       "",

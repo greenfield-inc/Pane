@@ -553,6 +553,7 @@
         "agents status",
         "agents send",
         "report",
+        "notify",
         "inbox",
         "inbox ack",
         "sessions",
@@ -782,6 +783,9 @@
           "$ref": "#/$defs/helpLines"
         },
         "report": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "notify": {
           "$ref": "#/$defs/helpLines"
         },
         "inbox": {
@@ -1033,6 +1037,10 @@
         "description": {
           "type": "string",
           "minLength": 1
+        },
+        "schema": {
+          "description": "JSON Schema for this argument's MCP tool input when it takes an array, object, or enum. Array and object values reach the CLI as JSON.",
+          "type": "object"
         }
       },
       "additionalProperties": false

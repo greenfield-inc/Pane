@@ -133,6 +133,13 @@ export interface ParsedArgs {
   lockTtlMs?: number;
   lockWaitMs?: number;
   note?: string;
+  /** `runpane notify`: the question fields as given; JSON ones are parsed and checked when it runs. */
+  notifyUi?: string;
+  notifyContext?: string;
+  notifyChoices?: string;
+  notifyDetail?: string;
+  notifySuggestions?: string;
+  notifyAction?: string;
   /** loops: the loop id, its cron, and create's --paused. */
   loopId?: string;
   cron?: string;
@@ -1075,6 +1082,30 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
   }
   if (flag === '--loop') {
     parsed.loopId = value;
+    return;
+  }
+  if (flag === '--ui') {
+    parsed.notifyUi = value;
+    return;
+  }
+  if (flag === '--context') {
+    parsed.notifyContext = value;
+    return;
+  }
+  if (flag === '--choices') {
+    parsed.notifyChoices = value;
+    return;
+  }
+  if (flag === '--detail') {
+    parsed.notifyDetail = value;
+    return;
+  }
+  if (flag === '--suggestions') {
+    parsed.notifySuggestions = value;
+    return;
+  }
+  if (flag === '--action') {
+    parsed.notifyAction = value;
     return;
   }
   if (flag === '--cron') {

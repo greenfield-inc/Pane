@@ -72,6 +72,7 @@ from .local_control import (
     run_pr_watch_command,
     run_workspace_state,
 )
+from .notify import run_notify
 from .platforms import detect_platform
 from .releases import resolve_release
 from .telemetry import (
@@ -119,6 +120,14 @@ INLINE_VALUE_FLAGS = {
 }
 DEFAULTS = RUNPANE_CONTRACT["defaults"]
 REPORT_STATES = ["ready", "blocked", "failed", "done"]
+NOTIFY_VALUE_FLAGS = {
+    "--ui": "notify_ui",
+    "--context": "notify_context",
+    "--choices": "notify_choices",
+    "--detail": "notify_detail",
+    "--suggestions": "notify_suggestions",
+    "--action": "notify_action",
+}
 HEAD_PATTERN = re.compile(r"[0-9a-fA-F]{7,40}")
 
 
@@ -235,6 +244,13 @@ class ParsedArgs:
     lock_ttl_ms: Optional[int] = None
     lock_wait_ms: Optional[int] = None
     note: Optional[str] = None
+    # `runpane notify`: the question fields as given; JSON ones are parsed and checked when it runs.
+    notify_ui: Optional[str] = None
+    notify_context: Optional[str] = None
+    notify_choices: Optional[str] = None
+    notify_detail: Optional[str] = None
+    notify_suggestions: Optional[str] = None
+    notify_action: Optional[str] = None
     loop_id: Optional[str] = None
     cron: Optional[str] = None
     paused: bool = False
@@ -1118,6 +1134,9 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
     if flag == "--loop":
         parsed.loop_id = value
         return
+    if flag in NOTIFY_VALUE_FLAGS:
+        setattr(parsed, NOTIFY_VALUE_FLAGS[flag], value)
+        return
     if flag == "--cron":
         parsed.cron = value
         return
@@ -1403,6 +1422,7 @@ COMMAND_HANDLERS: Dict[str, Callable[[ParsedArgs, WrapperTelemetryContext], int]
     "panels resume": lambda parsed, context: run_panels_resume(parsed),
     "panels last-message": lambda parsed, context: run_panels_last_message(parsed),
     "report": lambda parsed, context: run_report(parsed),
+    "notify": lambda parsed, context: run_notify(parsed),
     "inbox": lambda parsed, context: run_inbox(parsed),
     "inbox ack": lambda parsed, context: run_inbox_ack(parsed),
     "agents doctor": lambda parsed, context: run_agents_doctor(parsed),

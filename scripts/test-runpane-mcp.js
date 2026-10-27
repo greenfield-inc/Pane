@@ -36,14 +36,14 @@ test('doctor structured content matches its advertised output schema', async () 
   }
 });
 
-async function withMcpClient(action, { args = ['--toolsets', 'all'], env = {} } = {}) {
+async function withMcpClient(action, { args = ['--toolsets', 'all'], env = {}, clientName = 'runpane-mcp-test' } = {}) {
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [dist('cli.js'), 'mcp', ...args],
     env: { ...process.env, RUNPANE_TELEMETRY_DISABLED: '1', ...env },
     stderr: 'pipe',
   });
-  const client = new Client({ name: 'runpane-mcp-test', version: '1.0.0' });
+  const client = new Client({ name: clientName, version: '1.0.0' });
   await client.connect(transport);
   try {
     return await action(client);
@@ -204,6 +204,53 @@ test('a new contract command becomes a tool with inputs from its usage and agent
     ['widgets', 'frob', '--widget=- w1', '--force', '--limit=5', '--yes', '--json'],
   );
   assert.throws(() => buildToolArgv(tool, { widget: 'w1', color: 'red' }), /Unknown argument\(s\) for widgets_frob: color/);
+});
+
+test('notify types its inputs, so a model passes choices as objects, and needs no yes', () => {
+  const { buildMcpTools, buildToolArgv } = require(dist('mcpTools.js'));
+  const notify = buildMcpTools().find((tool) => tool.name === 'notify');
+  const { ui, choices, suggestions, action } = notify.inputSchema.properties;
+
+  assert.deepEqual(ui.enum, ['options', 'approve', 'ask', 'info']);
+  assert.equal(choices.type, 'array');
+  assert.equal(choices.minItems, 1);
+  assert.equal(choices.maxItems, 9);
+  assert.equal(choices.items.type, 'object');
+  assert.deepEqual(choices.items.required, ['label']);
+  assert.deepEqual(Object.keys(choices.items.properties).sort(), ['detail', 'label', 'recommended']);
+  assert.equal(suggestions.items.type, 'string');
+  assert.deepEqual(action.required, ['label', 'url']);
+  assert.ok(!('yes' in notify.inputSchema.properties), 'notify must run without yes');
+  assert.deepEqual(
+    buildToolArgv(notify, { ui: 'options', title: 'Ship?', choices: [{ label: 'Yes', recommended: true }, { label: 'No' }] }),
+    ['notify', '--ui=options', '--title=Ship?', '--choices=[{"label":"Yes","recommended":true},{"label":"No"}]', '--json'],
+  );
+});
+
+test('notify tells Pane who is asking, and returns waiting early only for clients whose calls time out', async () => {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-mcp-'));
+  const waiting = { waiting: true, id: 'n-1', next: 'Call `runpane notify --resume n-1` now.' };
+  const callNotify = (clientName) => withMcpClient((client) => client.callTool({
+    name: 'notify', arguments: { ui: 'ask', title: 'Which branch?', suggestions: ['main'], paneDir },
+  }), { args: [], clientName });
+  try {
+    await withStubDaemon(paneDir, { 'runpane:notify': waiting }, async (requests) => {
+      const cursor = await callNotify('cursor-agent');
+      const claude = await callNotify('claude-code');
+
+      assert.notEqual(cursor.isError, true, cursor.content[0].text);
+      assert.deepEqual(cursor.structuredContent, { ...waiting, next: 'Call `notify` with resume: n-1 now.' });
+      const [fromCursor, fromClaude] = requests.map((request) => request.args[0]);
+      assert.equal(fromCursor.returnAfterMs, 50000);
+      assert.equal(fromCursor.caller.agent, 'Cursor');
+      assert.deepEqual(fromCursor.suggestions, ['main']);
+      assert.equal(fromClaude.returnAfterMs, undefined);
+      assert.equal(fromClaude.caller.agent, 'Claude');
+      assert.equal(claude.isError, undefined);
+    });
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
 });
 
 test('the server lists daemon and diagnostic commands but not installer commands', async () => {
@@ -488,7 +535,7 @@ test('serves the core toolset by default, and named toolsets or read-only on req
 
   const core = await names([]);
   assert.deepEqual(core.map((tool) => tool.name).sort(), [
-    'agents_send', 'agents_start', 'agents_status', 'docs_read', 'docs_search', 'doctor', 'links_create',
+    'agents_send', 'agents_start', 'agents_status', 'docs_read', 'docs_search', 'doctor', 'links_create', 'notify',
     'panels_create', 'panels_input', 'panes_archive', 'panes_git_status', 'panes_list', 'panes_restore', 'repos_add', 'repos_list', 'workspace_state',
   ]);
   const git = await names(['--toolsets', 'git']);

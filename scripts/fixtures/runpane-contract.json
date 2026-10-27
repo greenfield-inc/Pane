@@ -1138,6 +1138,47 @@
     [
       "loops",
       "--help"
+    ],
+    [
+      "notify",
+      "--ui",
+      "options",
+      "--title",
+      "Ship it?",
+      "--context",
+      "Tests pass.",
+      "--choices=[{\"label\":\"Yes\",\"recommended\":true},{\"label\":\"No\"}]",
+      "--json"
+    ],
+    [
+      "notify",
+      "--ui=approve",
+      "--title=Drop the table?",
+      "--detail=DROP TABLE t;",
+      "--pane-dir",
+      "/tmp/pane"
+    ],
+    [
+      "notify",
+      "--ui",
+      "ask",
+      "--title",
+      "Which branch?",
+      "--suggestions=[\"main\"]"
+    ],
+    [
+      "notify",
+      "--ui",
+      "info",
+      "--title",
+      "Done",
+      "--action={\"label\":\"Open\",\"url\":\"https://example.com\"}"
+    ],
+    [
+      "notify",
+      "--resume",
+      "n-1",
+      "--json"
     ]
   ],
   "help": {
