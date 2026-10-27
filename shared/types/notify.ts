@@ -146,6 +146,20 @@ export interface NotifySnapshot {
   showOutsideSupported: boolean;
   /** Shown once: the first strip ever carries the "Click to answer" hint. */
   firstRun: boolean;
+  /** Pane's Notify block in each agent's user-level instruction file. */
+  instructionFiles: NotifyInstructionsFile[];
+}
+
+/** Pane's Notify block in one agent's user-level instruction file (~/.claude/CLAUDE.md, ~/.codex/AGENTS.md). */
+export interface NotifyInstructionsFile {
+  agent: 'Claude Code' | 'Codex';
+  file: string;
+  /**
+   * written: holds the current block. absent: holds none (Notify is off). not-found: the agent's
+   * config folder doesn't exist. skipped: left as it was, for `reason`.
+   */
+  state: 'written' | 'absent' | 'not-found' | 'skipped';
+  reason?: string;
 }
 
 export type NotifyRemindAfter = '10m' | '1h' | 'pane';

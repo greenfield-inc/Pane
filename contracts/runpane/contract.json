@@ -17717,6 +17717,7 @@
           "notifyResult"
         ],
         "notes": [
+          "Write the card the way the pane MCP server's instructions say: in plain words, what the work is for, what just happened, and what you need.",
           "Results: options returns {answer: <chosen label>, note?}; approve returns {approved: true|false, note?}; ask returns {answer}; info returns {delivered: \"screen\"|\"inbox\"}.",
           "A result of {waiting: true, id} means the question is still on screen and your client would otherwise time out: call `runpane notify --resume <id>` right away to keep waiting. After 15 minutes on this loop Pane gives up and returns unavailable.",
           "A result of {unavailable, next} means nobody can answer through Pane right now (Pane is not running, Notify is off, or the wait ended): ask in the terminal instead. It is a result, not an error.",
@@ -17737,6 +17738,82 @@
       "CLI: `npm i -g runpane` (or `npx --yes runpane@latest`), then `runpane doctor --json`. Full command reference: `runpane agent-context --json`.",
       "",
       "MCP: packaged Pane registers a stdio server named `pane` with Claude Code, Codex, and Cursor. Check the connection with `claude mcp list`, `codex mcp list`, or `agent mcp list`. Cursor may ask you to enable `pane` with `agent mcp enable pane`. If tools are missing, add it in the agent's MCP settings: Claude Code `claude mcp add --scope user pane -- npx --yes runpane@latest mcp`; Codex (`~/.codex/config.toml`) table `[mcp_servers.pane]` with `command = \"npx\"` and `args = [\"--yes\", \"runpane@latest\", \"mcp\"]`; Cursor (`~/.cursor/mcp.json`) uses `mcpServers.pane` with the same `npx` command and args; any other stdio client uses them too."
-    ]
+    ],
+    "notifyGuidance": {
+      "rules": [
+        "Ask only what you can't find out yourself.",
+        "Put related questions in one card.",
+        "Send `info` rarely, only for what the person must know now.",
+        "Keep titles short and choices to a few words."
+      ],
+      "cardRule": "The person is juggling many tasks and has lost the thread. In plain words, say what the work is for (the outcome, not the file), what just happened, and what you need. For a decision, give the options and what each one means. Pane already shows which Pane and agent sent it.",
+      "results": "`waiting` means call `notify` again with `resume`; `unavailable` means ask in the terminal.",
+      "examples": [
+        {
+          "name": "Needs a decision",
+          "ui": "approve",
+          "bad": [
+            {
+              "title": "Approve the migration?",
+              "context": "Ready to run 0042_add_index on prod. Proceed?"
+            }
+          ],
+          "good": {
+            "title": "Speed up slow search: run the database change?",
+            "context": "Search in the app takes 4 s, and an index brings it under 100 ms. It changes the live database and can't easily be undone. Approve runs it now; Deny keeps it ready for later."
+          }
+        },
+        {
+          "name": "Blocked",
+          "ui": "options",
+          "bad": [
+            {
+              "title": "Blocked",
+              "context": "CI failing on macos-intel, hdiutil resource busy."
+            }
+          ],
+          "good": {
+            "title": "The 2.5 release is stuck on a GitHub hiccup",
+            "context": "The fixes you asked for pass everywhere except one Mac build machine, which errored. That's GitHub's machine, not our code.",
+            "choices": [
+              "Rerun it (about 15 min)",
+              "Ship without the Intel Mac build"
+            ]
+          }
+        },
+        {
+          "name": "Just so you know",
+          "ui": "info",
+          "bad": [
+            {
+              "title": "Done",
+              "context": "Completed refactor of src/notify/queue.ts (head 06d310a)."
+            },
+            {
+              "title": "PR #812 is ready",
+              "context": "Tests pass."
+            }
+          ],
+          "good": {
+            "title": "Questions from agents now wait until you answer",
+            "context": "The fix you asked for this morning is done and tested. Next is your review: one click to merge."
+          }
+        },
+        {
+          "name": "A question for ask",
+          "ui": "ask",
+          "bad": [
+            {
+              "title": "Which option?",
+              "context": "1, 2 or 3?"
+            }
+          ],
+          "good": {
+            "title": "What should the release headline say?",
+            "context": "You're writing the 2.5 release notes, and the headline is the first line people read. A few words is enough."
+          }
+        }
+      ]
+    }
   }
 }

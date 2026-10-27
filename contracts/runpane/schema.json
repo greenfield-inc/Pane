@@ -905,7 +905,45 @@
             "type": "string"
           },
           "minItems": 1
+        },
+        "notifyGuidance": {
+          "$ref": "#/$defs/notifyGuidance"
         }
+      },
+      "additionalProperties": false
+    },
+    "notifyGuidance": {
+      "description": "How agents should write notify cards: Pane's user-level instruction block and the MCP server instructions both read it.",
+      "type": "object",
+      "required": ["rules", "cardRule", "results", "examples"],
+      "properties": {
+        "rules": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "cardRule": { "type": "string" },
+        "results": { "type": "string" },
+        "examples": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "ui", "bad", "good"],
+            "properties": {
+              "name": { "type": "string" },
+              "ui": { "enum": ["options", "approve", "ask", "info"] },
+              "bad": { "type": "array", "items": { "$ref": "#/$defs/notifyExampleCard" }, "minItems": 1 },
+              "good": { "$ref": "#/$defs/notifyExampleCard" }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "notifyExampleCard": {
+      "type": "object",
+      "required": ["title", "context"],
+      "properties": {
+        "title": { "type": "string" },
+        "context": { "type": "string" },
+        "choices": { "type": "array", "items": { "type": "string" } }
       },
       "additionalProperties": false
     },

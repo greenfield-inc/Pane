@@ -91,6 +91,30 @@ Pause for 1 hour (tray menu) hides strips and mutes sound while questions keep
 queueing. Strips show over full-screen apps, during screen sharing, and with
 Focus or Do Not Disturb on; Pause is the way to quiet them.
 
+## What Pane tells agents
+
+While Notify is on, Pane keeps a short block in each agent's user-level
+instruction file, so every agent knows to ask through `notify`:
+
+- Claude Code: `~/.claude/CLAUDE.md` (or `$CLAUDE_CONFIG_DIR/CLAUDE.md`)
+- Codex: `~/.codex/AGENTS.md` (or `$CODEX_HOME/AGENTS.md`)
+
+The block sits between `<!-- pane-notify:begin ... -->` and
+`<!-- pane-notify:end -->`. It says when to ask (only what the agent can't
+find out itself, related questions in one card, `info` rarely) and how to
+write a card for someone who has lost the thread: what the work is for, what
+just happened, and what is needed. Pane writes only those lines; the rest of
+the file keeps every byte. It creates the file only when the agent's config
+folder exists, and it leaves alone a file that is a symlink, isn't UTF-8, or
+has a stray marker. Settings → Notify → Agent instructions shows each file's
+state.
+
+To remove the block, turn Notify off in Settings → Notify. Pane writes it
+again when you turn Notify back on, or at the next launch with Notify on.
+
+The `pane` MCP server's instructions carry the same rules, plus good and bad
+example cards; that is how Cursor learns them.
+
 ## Linking a call to its Pane
 
 Pane sets `PANE_SESSION_ID` and `PANE_PANEL_ID` in every terminal it opens.

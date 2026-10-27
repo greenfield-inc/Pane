@@ -29,8 +29,25 @@ const INSTRUCTIONS = [
   '- `panes_archive` removes a Pane\'s worktree; `panes_restore` undoes it. `links_create` returns a pane:// link the user can click to see any Pane, panel, repo, or Session.',
   '- Before guessing how Pane works, call `docs_search`, then `docs_read` on a path it returns. The same docs are available as `runpane-docs:` resources.',
   '- Tools have no stdin: send exact terminal bytes (newlines, Ctrl-C as \\u0003) as text instead of a file.',
-  '- When you need the person (a choice, an approval, a typed answer), call `notify` instead of asking in the terminal. Call it again with `resume: <id>` when it returns `waiting`, and ask in the terminal when it returns `unavailable`.',
+  '- When you need the person (a choice, an approval, a short answer), call `notify` instead of asking in the terminal.',
+  '',
+  notifyGuidance(),
 ].join('\n');
+
+/** When and how to write a notify card; Pane writes the same rules into the agents' user-level instruction files. */
+function notifyGuidance(): string {
+  const { rules, cardRule, results, examples } = RUNPANE_CONTRACT.agentContext.notifyGuidance;
+  const card = ({ title, context, choices }: { title: string; context: string; choices?: readonly string[] }) =>
+    `title "${title}" / context "${context}"${choices ? ` / choices ${choices.map((choice) => `"${choice}"`).join(', ')}` : ''}`;
+  return [
+    'Writing a notify card:',
+    ...rules.map((rule) => `- ${rule}`),
+    `- ${results}`,
+    cardRule,
+    ...examples.map(({ name, ui, bad, good }) =>
+      `${name} (ui ${ui}). ${bad.map((example) => `Bad: ${card(example)}`).join(' ')} Good: ${card(good)}`),
+  ].join('\n');
+}
 
 // The lists only change with a new runpane version, which restarts this server.
 const LIST_CACHE = { ttlMs: 3_600_000, cacheScope: 'public' } as const;

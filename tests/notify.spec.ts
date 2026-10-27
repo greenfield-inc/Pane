@@ -174,6 +174,9 @@ test.describe('Settings → Notify', () => {
     await expect(page.getByRole('radio', { name: 'Bottom center' })).toHaveAttribute('aria-checked', 'true');
     await expect(page.getByRole('switch', { name: 'Sound' })).toHaveAttribute('aria-checked', 'true');
     await expect(page.getByRole('combobox', { name: 'Updates hide after' })).toContainText('6 seconds');
+    const instructionFiles = page.getByTestId('notify-instructions-file');
+    await expect(instructionFiles.filter({ hasText: 'Claude Code' })).toContainText('Written');
+    await expect(instructionFiles.filter({ hasText: 'Codex' })).toContainText('Not found');
 
     await page.getByRole('switch', { name: 'Show outside Pane' }).click();
     await expect(page.getByRole('switch', { name: 'Show outside Pane' })).toHaveAttribute('aria-checked', 'false');

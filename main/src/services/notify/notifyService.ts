@@ -6,6 +6,7 @@ import {
   DEFAULT_NOTIFY_SETTINGS,
   type NotifyCaller,
   type NotifyCommand,
+  type NotifyInstructionsFile,
   type NotifyRequest,
   type NotifyResult,
   type NotifySettings,
@@ -16,6 +17,7 @@ import {
 import { NotifyQueue } from './notifyQueue';
 import { canFloatOverOtherApps, NotifyWindows } from './notifyWindows';
 import { NotifyTray } from './notifyTray';
+import { syncNotifyInstructions } from './notifyInstructions';
 
 const AGENT_NAMES = new Map([['claude', 'Claude'], ['codex', 'Codex'], ['cursor', 'Cursor'], ['opencode', 'OpenCode']]);
 
@@ -43,6 +45,7 @@ export class NotifyService {
   private broadcastPending = false;
   private lastSettings: NotifySettings;
   private lastAppearance: string;
+  private instructionFiles: NotifyInstructionsFile[] = [];
 
   constructor(private readonly deps: NotifyServiceDependencies) {
     this.lastSettings = this.settings();
@@ -51,6 +54,7 @@ export class NotifyService {
       settings: () => this.settings(),
       showOutsideSupported: canFloatOverOtherApps(),
       shortcutRegistered: () => this.shortcutRegistered,
+      instructionFiles: () => this.instructionFiles,
     });
     this.windows = new NotifyWindows({
       rendererArguments: deps.rendererArguments,
@@ -83,6 +87,7 @@ export class NotifyService {
       this.scheduleBroadcast();
     });
     this.applyShortcut(this.lastSettings);
+    this.syncInstructions(this.lastSettings.enabled);
     this.scheduleBroadcast();
   }
 
@@ -167,7 +172,15 @@ export class NotifyService {
     this.lastSettings = next;
     if (previous.enabled && !next.enabled) this.queue.turnOff();
     if (previous.shortcut !== next.shortcut || previous.enabled !== next.enabled) this.applyShortcut(next);
+    if (previous.enabled !== next.enabled) this.syncInstructions(next.enabled);
     this.scheduleBroadcast();
+  }
+
+  /** Keeps Pane's Notify block in the agents' user-level instruction files while Notify is on. */
+  private syncInstructions(enabled: boolean): void {
+    // PANE_DIR isolates app data, not the person's agent configuration: isolated runtimes leave it alone.
+    if (process.env.PANE_DISABLE_OS_INTEGRATION === '1') return;
+    this.instructionFiles = syncNotifyInstructions(enabled);
   }
 
   private applyShortcut(settings: NotifySettings): void {

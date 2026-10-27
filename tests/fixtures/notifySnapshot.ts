@@ -88,6 +88,10 @@ export function notifyFixture(now = Date.now()): NotifySnapshot {
     pausedUntil: null,
     shortcutRegistered: true,
     showOutsideSupported: true,
+    instructionFiles: [
+      { agent: 'Claude Code', file: '~/.claude/CLAUDE.md', state: 'written' },
+      { agent: 'Codex', file: '~/.codex/AGENTS.md', state: 'not-found' },
+    ],
     firstRun: true,
   };
 }

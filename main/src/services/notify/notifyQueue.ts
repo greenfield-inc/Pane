@@ -2,6 +2,7 @@ import { EventEmitter } from 'events';
 import { randomUUID } from 'crypto';
 import type {
   NotifyAnswer,
+  NotifyInstructionsFile,
   NotifyItem,
   NotifyQuestion,
   NotifyRemindAfter,
@@ -53,6 +54,7 @@ export interface NotifyQueueEnvironment {
   settings: () => NotifySettings;
   showOutsideSupported: boolean;
   shortcutRegistered: () => boolean;
+  instructionFiles: () => NotifyInstructionsFile[];
 }
 
 /**
@@ -208,6 +210,7 @@ export class NotifyQueue extends EventEmitter {
       pausedUntil: this.isPaused() ? this.pausedUntil : null,
       shortcutRegistered: this.env.shortcutRegistered(),
       showOutsideSupported: this.env.showOutsideSupported,
+      instructionFiles: this.env.instructionFiles(),
       firstRun: strip?.kind === 'question' && (this.hintItemId === undefined || this.hintItemId === strip.itemId),
     };
   }

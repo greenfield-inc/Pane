@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import {
   DEFAULT_NOTIFY_SETTINGS,
   NOTIFY_UPDATES_HIDE_AFTER_CHOICES,
+  type NotifyInstructionsFile,
   type NotifyPosition,
   type NotifySettings as NotifySettingValues,
 } from '../../../../../shared/types/notify';
@@ -105,6 +106,7 @@ export function NotifySettings({ persistence }: { persistence: SettingsPersisten
   const settings: NotifySettingValues = live ?? { ...DEFAULT_NOTIFY_SETTINGS, ...config.notify };
   const shortcutRegistered = useNotifyStore((state) => state.snapshot?.shortcutRegistered ?? true);
   const showOutsideSupported = useNotifyStore((state) => state.snapshot?.showOutsideSupported ?? true);
+  const instructionFiles = useNotifyStore((state) => state.snapshot?.instructionFiles ?? []);
   const off = !settings.enabled;
 
   const save = <K extends keyof NotifySettingValues>(settingId: SettingsSettingId, key: K, value: NotifySettingValues[K]) =>
@@ -193,6 +195,41 @@ export function NotifySettings({ persistence }: { persistence: SettingsPersisten
           <ImmediateToggle label="Sound" value={settings.sound} disabled={off} onSave={(sound) => save('notify-sound', 'sound', sound)} />
         </SettingRow>
       </div>
+
+      {instructionFiles.length > 0 && <AgentInstructions files={instructionFiles} />}
     </SettingsPage>
+  );
+}
+
+const INSTRUCTIONS_STATE_LABELS = {
+  written: 'Written',
+  absent: 'Not written',
+  'not-found': 'Not found',
+  skipped: 'Not updated',
+} satisfies Record<NotifyInstructionsFile['state'], string>;
+
+/** Which user-level instruction files hold Pane's Notify block. */
+function AgentInstructions({ files }: { files: NotifyInstructionsFile[] }) {
+  return (
+    <section className="rounded-2xl bg-surface-primary p-4 shadow-card ring-1 ring-border-secondary" aria-labelledby="notify-agent-instructions">
+      <h3 id="notify-agent-instructions" className="text-sm font-medium text-text-primary">Agent instructions</h3>
+      <p className="mt-1 max-w-2xl text-xs leading-relaxed text-text-tertiary">
+        While Notify is on, Pane keeps a few lines in these files that tell agents to ask you here. Turning Notify off removes them.
+      </p>
+      <ul className="mt-3 space-y-2">
+        {files.map((file) => (
+          <li key={file.file} data-testid="notify-instructions-file" className="text-xs">
+            <div className="flex items-center gap-3">
+              <span className="w-24 shrink-0 text-text-secondary">{file.agent}</span>
+              <span className="min-w-0 flex-1 truncate font-mono text-text-tertiary" title={file.file}>{file.file}</span>
+              <span className={cn('shrink-0', file.state === 'skipped' ? 'text-status-warning' : 'text-text-secondary')}>
+                {INSTRUCTIONS_STATE_LABELS[file.state]}
+              </span>
+            </div>
+            {file.reason && <p className="mt-1 pl-[6.75rem] text-text-tertiary">{file.reason}</p>}
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }

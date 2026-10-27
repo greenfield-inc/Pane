@@ -13,7 +13,7 @@ const migration: NotifyQuestion = { ui: 'approve', title: 'Apply migration 0042 
 
 function makeQueue(overrides: Partial<NotifySettings> = {}) {
   let settings: NotifySettings = { ...DEFAULT_NOTIFY_SETTINGS, ...overrides };
-  const queue = new NotifyQueue({ settings: () => settings, showOutsideSupported: true, shortcutRegistered: () => true });
+  const queue = new NotifyQueue({ settings: () => settings, showOutsideSupported: true, shortcutRegistered: () => true, instructionFiles: () => [] });
   return {
     queue,
     setSettings: (next: Partial<NotifySettings>) => { settings = { ...settings, ...next }; },
