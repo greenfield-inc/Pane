@@ -32,7 +32,9 @@ runpane notify --ui options --title "Which session store should the refactor use
 A question waits until you answer it. How the call stays open depends on the
 client:
 
-- **Claude Code and Codex** wait in one call. Pane's MCP server sends a
+- **Claude Code and Codex** wait in one call. Claude Code moves a call that
+  runs past about 2 minutes into a background task and ends its turn; your
+  answer still reaches the agent when you send it. Pane's MCP server sends a
   progress notification every minute, and Pane registers the server with
   Codex using a 24-hour tool timeout.
 - **Cursor's CLI** ends every tool call after 60 seconds. About every 50
