@@ -15,7 +15,6 @@ import { normalizeAppearance } from '../../../shared/types/appearance';
 import { PaneError } from '../../../shared/paneError';
 import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
 import type { NotifyCommand, NotifyRemoteCommand, NotifyRequest, NotifyResult, NotifySharedState } from '../../../shared/types/notify';
-import type { NotifyItem } from '../../../shared/types/notify';
 import type { AgentState } from '../../../shared/types/agentStatus';
 
 const MAX_CHOICES = 9;
@@ -153,7 +152,7 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: AppServices, 
     if (!remotePaneClientController.isRemoteModeActive()) return;
     let state: NotifySharedState;
     try {
-      state = decodeBoundary(value, notifySharedStateSchema) satisfies { items: NotifyItem[] };
+      state = decodeBoundary(value, notifySharedStateSchema);
     } catch (error) {
       console.warn('[Notify] The host sent a Notify state this Pane cannot read; its questions are not shown here:', error);
       return;
