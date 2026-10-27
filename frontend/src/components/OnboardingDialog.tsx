@@ -219,17 +219,16 @@ interface RepoListProps {
   emptyText: string;
   compact?: boolean;
   label: string;
-  selectedPath: string | undefined;
+  checkedPaths: ReadonlySet<string>;
   disabled: boolean;
-  onSelect: (repo: FoundRepo) => void;
-  onOpen: (repo: FoundRepo) => void;
+  onToggle: (repo: FoundRepo) => void;
 }
 
 /**
  * Up to five rows. It keeps three rows' height (two in a WSL column) so
  * loading, empty and short lists match.
  */
-function RepoList({ repos, emptyText, compact, label, selectedPath, disabled, onSelect, onOpen }: RepoListProps) {
+function RepoList({ repos, emptyText, compact, label, checkedPaths, disabled, onToggle }: RepoListProps) {
   const minHeight = compact ? 'min-h-[78px]' : 'min-h-[120px]';
   if (repos === null) {
     return (
@@ -248,42 +247,41 @@ function RepoList({ repos, emptyText, compact, label, selectedPath, disabled, on
   }
 
   return (
-    <div role="radiogroup" aria-label={label} className={cn(minHeight, 'space-y-1.5')}>
+    <div role="group" aria-label={label} className={cn(minHeight, 'space-y-1.5')}>
       {repos.map((repo, index) => {
-        const selected = repo.path === selectedPath;
-        // One Tab stop per list (the selected row, else the first); arrows move the selection.
-        const tabStop = selected || (index === 0 && !repos.some(other => other.path === selectedPath));
+        const checked = checkedPaths.has(repo.path);
         const lastCommit = repo.lastCommitAt === null ? '' : formatTimeAgo(new Date(repo.lastCommitAt).toISOString());
         return (
-          <button
+          <label
             key={repo.path}
-            type="button"
-            role="radio"
-            aria-checked={selected}
-            disabled={disabled}
-            tabIndex={tabStop ? 0 : -1}
-            onClick={() => onSelect(repo)}
-            onDoubleClick={() => onOpen(repo)}
-            onKeyDown={(event) => {
-              const step = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }[event.key];
-              if (!step) return;
-              event.preventDefault();
-              const next = (index + step + repos.length) % repos.length;
-              onSelect(repos[next]);
-              event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="radio"]')[next]?.focus();
-            }}
             className={cn(
-              'flex h-9 w-full items-center gap-2.5 rounded-lg border bg-surface-secondary px-3 text-left text-sm transition-colors disabled:cursor-default',
-              selected ? 'border-interactive ring-1 ring-interactive' : 'border-border-secondary hover:bg-surface-hover',
+              'flex h-9 w-full items-center gap-2.5 rounded-lg border bg-surface-secondary px-3 text-left text-sm transition-colors',
+              disabled ? 'cursor-default' : 'cursor-pointer',
+              checked ? 'border-interactive ring-1 ring-interactive' : 'border-border-secondary hover:bg-surface-hover',
             )}
           >
+            <input
+              type="checkbox"
+              className="h-3.5 w-3.5 shrink-0 accent-interactive"
+              checked={checked}
+              disabled={disabled}
+              onChange={() => onToggle(repo)}
+              onKeyDown={(event) => {
+                // Arrow keys move focus between rows; Space checks.
+                const step = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }[event.key];
+                if (!step) return;
+                event.preventDefault();
+                const next = (index + step + repos.length) % repos.length;
+                event.currentTarget.closest('[role="group"]')?.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')[next]?.focus();
+              }}
+            />
             <Folder className="h-4 w-4 shrink-0 text-text-tertiary" aria-hidden="true" />
             <span className="min-w-0 max-w-[50%] truncate font-medium text-text-primary">{repo.name}</span>
             {!compact && <span className="min-w-0 truncate text-text-tertiary">{repo.displayPath}</span>}
             <span className="ml-auto min-w-0 max-w-[45%] truncate pl-2 text-xs text-text-tertiary">
               {compact ? parentFolder(repo.displayPath) : [repo.branch, lastCommit].filter(Boolean).join(' · ')}
             </span>
-          </button>
+          </label>
         );
       })}
     </div>
@@ -302,7 +300,8 @@ function RepoColumn({ title, footnote, ...list }: RepoListProps & { title: strin
 
 /**
  * First-run "Open your project": lists the user's repos (with a WSL column on
- * Windows when a default distro exists) and lands them in the one they pick.
+ * Windows when a default distro exists), adds the ones they check as projects
+ * and lands them in the newest.
  */
 export default function OnboardingDialog({ isOpen, onClose }: OnboardingDialogProps) {
   const paneLogo = usePaneLogo();
@@ -310,7 +309,8 @@ export default function OnboardingDialog({ isOpen, onClose }: OnboardingDialogPr
   const [env, setEnv] = useState<EnvironmentInfo | null>(null);
   const [host, setHost] = useState<HostRepos | null>(null);
   const [wsl, setWsl] = useState<WslState | null>(null);
-  const [pickedPath, setPickedPath] = useState<string | null>(null);
+  // null until the user toggles a row; until then only the newest repo is checked.
+  const [checkedOverride, setCheckedOverride] = useState<ReadonlySet<string> | null>(null);
   const [isCloning, setIsCloning] = useState(false);
   const [sample, setSample] = useState<SampleState>({ status: 'idle' });
   const [error, setError] = useState<string | null>(null);
@@ -318,10 +318,13 @@ export default function OnboardingDialog({ isOpen, onClose }: OnboardingDialogPr
   // Set once the dialog is done, so a sample setup that outlives a Skip doesn't navigate.
   const closedRef = useRef(false);
   const titleRef = useRef<HTMLHeadingElement>(null);
+  // Repos already added by an Open that partly failed, keyed by path, so the next Open still counts them.
+  const openedRef = useRef(new Map<string, { repo: FoundRepo; projectId: number }>());
 
   useEffect(() => {
     if (!isOpen) return;
     closedRef.current = false;
+    openedRef.current.clear();
     let cancelled = false;
     void setPreference(ONBOARDING_OPEN_PROJECT_SCREEN_PREFERENCE, OPEN_PROJECT_SCREEN_SEEN);
 
@@ -365,9 +368,11 @@ export default function OnboardingDialog({ isOpen, onClose }: OnboardingDialogPr
   const wslDistro = host?.wslDistro ?? null;
   const wslRepos = wsl?.status === 'ready' ? wsl.result.repos : [];
   const allRepos = [...(host?.repos ?? []), ...wslRepos];
-  // Until the WSL column answers, nothing is preselected, so the pick can't jump under the cursor.
+  // Until the WSL column answers, nothing is prechecked, so the default can't jump under the cursor.
   const awaitingWsl = wsl?.status === 'loading';
-  const selected = allRepos.find(repo => repo.path === pickedPath) ?? (awaitingWsl ? undefined : newestRepo(allRepos));
+  const defaultChecked = awaitingWsl ? undefined : newestRepo(allRepos);
+  const checkedPaths = checkedOverride ?? new Set(defaultChecked ? [defaultChecked.path] : []);
+  const checkedRepos = allRepos.filter(repo => checkedPaths.has(repo.path));
   const isLoading = host === null || awaitingWsl;
   const nothingFound = !isLoading && allRepos.length === 0;
   const gitMissing = env !== null && !env.gitInstalled;
@@ -386,26 +391,66 @@ export default function OnboardingDialog({ isOpen, onClose }: OnboardingDialogPr
     await complete(properties);
   };
 
-  const addProject = async (name: string, path: string, properties: AnalyticsProperties & { entry: OnboardingEntry; wsl: boolean }) => {
-    setIsOpening(true);
-    setError(null);
+  const createProject = async (name: string, path: string): Promise<{ projectId: number } | { error: string }> => {
     try {
       const response = await API.projects.create({ name, path, active: false });
-      if (response.success && response.data) {
-        await openProject(response.data.id, properties);
-        return;
-      }
-      setError(`Couldn't open ${name}: ${reasonText(response.error, 'Pane could not add the project')}.`);
+      if (response.success && response.data) return { projectId: response.data.id };
+      return { error: `Couldn't open ${name}: ${reasonText(response.error, 'Pane could not add the project')}.` };
     } catch (cause) {
-      setError(`Couldn't open ${name}: ${reasonText(cause instanceof Error ? cause.message : undefined, 'Pane could not add the project')}.`);
-    } finally {
-      setIsOpening(false);
+      return { error: `Couldn't open ${name}: ${reasonText(cause instanceof Error ? cause.message : undefined, 'Pane could not add the project')}.` };
     }
   };
 
-  const openRepo = (repo: FoundRepo) => {
-    if (isBusy) return;
-    void addProject(repo.name, repo.path, { entry: 'found_repo', repo_source: repo.source, wsl: isWslPath(repo.path) });
+  const addProject = async (name: string, path: string, properties: AnalyticsProperties & { entry: OnboardingEntry; wsl: boolean }) => {
+    setIsOpening(true);
+    setError(null);
+    const created = await createProject(name, path);
+    if ('projectId' in created) {
+      await openProject(created.projectId, properties);
+    } else {
+      setError(created.error);
+    }
+    setIsOpening(false);
+  };
+
+  /** Adds every checked repo as a project and lands in the newest one. */
+  const openRepos = async (repos: FoundRepo[]) => {
+    if (isBusy || repos.length === 0) return;
+    setIsOpening(true);
+    setError(null);
+    const failures: string[] = [];
+    const openedNow: string[] = [];
+    for (const repo of repos.filter(({ path }) => !openedRef.current.has(path))) {
+      const created = await createProject(repo.name, repo.path);
+      if ('projectId' in created) {
+        openedRef.current.set(repo.path, { repo, projectId: created.projectId });
+        openedNow.push(repo.name);
+      } else {
+        failures.push(created.error);
+      }
+    }
+    const opened = [...openedRef.current.values()];
+    const active = opened.find(entry => entry.repo === newestRepo(opened.map(({ repo }) => repo)));
+    if (active && failures.length === 0) {
+      await openProject(active.projectId, {
+        entry: 'found_repo',
+        repo_source: active.repo.source,
+        wsl: isWslPath(active.repo.path),
+        repo_count: opened.length,
+      });
+    } else {
+      // Keep the dialog open on the repos that failed; the ones added stay added and unchecked.
+      if (openedNow.length > 0) window.dispatchEvent(new Event('project-changed'));
+      setCheckedOverride(new Set(repos.filter(repo => !openedRef.current.has(repo.path)).map(repo => repo.path)));
+      setError([openedNow.length > 0 ? `Opened ${joinNames(openedNow)}.` : '', ...failures].filter(Boolean).join(' '));
+    }
+    setIsOpening(false);
+  };
+
+  const toggleRepo = (repo: FoundRepo) => {
+    const next = new Set(checkedPaths);
+    if (!next.delete(repo.path)) next.add(repo.path);
+    setCheckedOverride(next);
   };
 
   const chooseFolder = async () => {
@@ -472,12 +517,8 @@ export default function OnboardingDialog({ isOpen, onClose }: OnboardingDialogPr
     );
   }
 
-  const listProps = {
-    selectedPath: selected?.path,
-    disabled: isBusy,
-    onSelect: (repo: FoundRepo) => setPickedPath(repo.path),
-    onOpen: openRepo,
-  };
+  const listProps = { checkedPaths, disabled: isBusy, onToggle: toggleRepo };
+  const openLabel = checkedRepos.length === 1 ? `Open ${checkedRepos[0].name}` : checkedRepos.length > 1 ? `Open ${checkedRepos.length} projects` : 'Open';
   const wslFootnote = wsl?.status === 'ready' && wsl.result.agents.length > 0
     ? `Agents run inside WSL. ${joinNames(wsl.result.agents)} found.`
     : 'Agents run inside WSL.';
@@ -516,7 +557,7 @@ export default function OnboardingDialog({ isOpen, onClose }: OnboardingDialogPr
             <p className="text-sm text-text-secondary">
               {wslDistro
                 ? 'Where does your code live? Pane runs agents in the same place.'
-                : 'Pick the repo you want agents to work on. Each task gets its own copy (a worktree), so your branch stays untouched.'}
+                : 'Pick the repos you want agents to work on. Each task gets its own copy (a worktree), so your branch stays untouched.'}
             </p>
 
             {wslDistro ? (
@@ -595,12 +636,12 @@ export default function OnboardingDialog({ isOpen, onClose }: OnboardingDialogPr
         ) : (
           <Button
             variant="primary"
-            disabled={!selected || isBusy}
+            disabled={checkedRepos.length === 0 || isBusy}
             loading={isOpening}
-            loadingText={selected ? `Open ${selected.name}` : 'Open'}
-            onClick={() => selected && openRepo(selected)}
+            loadingText={openLabel}
+            onClick={() => void openRepos(checkedRepos)}
           >
-            <span className="block max-w-[16rem] truncate">{selected ? `Open ${selected.name}` : 'Open'}</span>
+            <span className="block max-w-[16rem] truncate">{openLabel}</span>
           </Button>
         )}
       </ModalFooter>
