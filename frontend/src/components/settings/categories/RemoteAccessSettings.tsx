@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { ExternalLink, Plus, Server, Terminal, Trash2 } from 'lucide-react';
 import { Button, IconButton } from '../../ui/Button';
 import { Textarea } from '../../ui/Input';
@@ -56,7 +56,8 @@ export function RemoteAccessSettings({ controller, onOpenSubview, addCodeRequest
       <CodelessRemoteSettings
         connectionState={connectionState}
         showChecklist={controller.showChecklist}
-        otherHosts={<CodeHosts controller={controller} addCodeRequest={addCodeRequest} />}
+        // A new request remounts the list with the code box open.
+        otherHosts={<CodeHosts key={addCodeRequest} controller={controller} startAdding={addCodeRequest !== undefined} />}
         accessFooter={(
           <SettingRow
             settingId="remote-pane"
@@ -89,9 +90,8 @@ export function RemoteAccessSettings({ controller, onOpenSubview, addCodeRequest
 }
 
 /** Hosts saved from connection codes, plus pasting a new code. */
-function CodeHosts({ controller, addCodeRequest }: { controller: RemoteAccessController; addCodeRequest?: number }) {
-  const [adding, setAdding] = useState(false);
-  useEffect(() => { if (addCodeRequest !== undefined) setAdding(true); }, [addCodeRequest]);
+function CodeHosts({ controller, startAdding }: { controller: RemoteAccessController; startAdding: boolean }) {
+  const [adding, setAdding] = useState(startAdding);
   const { connectionState } = controller;
   const hosts = controller.config.client.profiles.filter((profile) => !profile.tailnetMachine);
 
