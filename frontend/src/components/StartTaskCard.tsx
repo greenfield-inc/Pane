@@ -91,7 +91,7 @@ export function StartTaskCard({ projectId, projectEnvironment, openTerminal }: S
       const request: RunpanePaneCreateRequest = {
         repo: { id: projectId },
         focus: true,
-        panes: [{ name: paneName, baseBranch, tool: { agent: selected, initialInput: trimmedTask } }],
+        panes: [{ name: paneName, baseBranch, pinned: false, tool: { agent: selected, initialInput: trimmedTask } }],
       };
       const result = decodeOptionalBoundary(await window.electronAPI.invoke('runpane:panes:create', request), paneCreateResultSchema);
       const item = result?.items[0];
