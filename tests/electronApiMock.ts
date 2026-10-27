@@ -876,6 +876,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         onGitHubAuthTerminalOutput: (callback: MockEventCallback) => subscribe('onboarding:github-auth-pty-output', callback),
         onGitHubAuthTerminalExit: (callback: MockEventCallback) => subscribe('onboarding:github-auth-pty-exit', callback),
         setupDefaultRepo: () => success({}),
+        findRepos: () => success({ repos: [], shells: [], wslDistro: null }),
+        findWslRepos: (distro: string) => success({ distro, repos: [], agents: [] }),
+        checkFolder: (folder: string) => success({ name: folder.split(/[\\/]/).pop() ?? folder, path: folder }),
         supportProject: () => success({}),
       }),
       paneChat: namespace({
@@ -1003,6 +1006,19 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         detectConfig: () => success(null),
         refreshGitStatus: () => success(),
+        create: (request: JsonObject) => {
+          const now = new Date().toISOString();
+          const project = {
+            id: mockProjects.reduce((max, existing) => Math.max(max, Number(existing.id)), 0) + 1,
+            name: request.name,
+            path: request.path,
+            active: false,
+            created_at: now,
+            updated_at: now,
+          };
+          mockProjects = [...mockProjects, project];
+          return success(clone(project));
+        },
       }),
       prompts: namespace({
         getAll: () => success([]),

@@ -9,6 +9,8 @@ import { useNavigationStore } from '../stores/navigationStore';
 interface CloneFromGitHubDialogProps {
   isOpen: boolean;
   onClose: () => void;
+  /** Called after the clone is added as a project and opened. */
+  onCloned?: (projectId: number, clonedPath: string) => void;
 }
 
 function GitHubIcon({ className }: { className?: string }) {
@@ -19,7 +21,7 @@ function GitHubIcon({ className }: { className?: string }) {
   );
 }
 
-export function CloneFromGitHubDialog({ isOpen, onClose }: CloneFromGitHubDialogProps) {
+export function CloneFromGitHubDialog({ isOpen, onClose, onCloned }: CloneFromGitHubDialogProps) {
   const [url, setUrl] = useState('');
   const [destPath, setDestPath] = useState('');
   const [cloning, setCloning] = useState(false);
@@ -71,6 +73,7 @@ export function CloneFromGitHubDialog({ isOpen, onClose }: CloneFromGitHubDialog
       window.dispatchEvent(new Event('project-changed'));
       navigateToProject(projectResult.data.id);
       resetAndClose();
+      onCloned?.(projectResult.data.id, clonedPath);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An unexpected error occurred');
       setCloning(false);

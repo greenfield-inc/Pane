@@ -1,12 +1,16 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { API } from '../utils/api';
-import { GitFork, AlertCircle, Star, ExternalLink, Loader2 } from 'lucide-react';
+import { AlertCircle, Star, ExternalLink, Folder, FolderOpen, Loader2 } from 'lucide-react';
 import { usePaneLogo } from '../hooks/usePaneLogo';
 import { Modal, ModalBody, ModalFooter } from './ui/Modal';
 import { Button } from './ui/Button';
-import { capture } from '../services/posthog';
+import { CloneFromGitHubDialog } from './CloneFromGitHubDialog';
+import { capture, type AnalyticsProperties } from '../services/posthog';
+import { useNavigationStore } from '../stores/navigationStore';
+import { formatTimeAgo } from '../utils/timestampUtils';
+import { cn } from '../utils/cn';
+import type { FoundRepo, HostRepos, WslRepos } from '../../../shared/types/onboarding';
 
-type DialogStep = 'detecting' | 'ready';
 type OnboardingEnvironmentStatus = 'detecting' | 'git_missing' | 'gh_ready' | 'gh_missing' | 'gh_not_authenticated' | 'gh_missing_scopes' | 'gh_not_ready';
 
 interface EnvironmentInfo {
@@ -35,6 +39,9 @@ const GITHUB_CLI_URL = 'https://cli.github.com/';
 export const ONBOARDING_REPO_SETUP_PREFERENCE = 'onboarding_repo_setup';
 export const ONBOARDING_GH_PROMPT_SHOWN_PREFERENCE = 'onboarding_gh_prompt_shown';
 const ONBOARDING_GH_STATUS_AT_FIRST_LAUNCH_PREFERENCE = 'onboarding_gh_status_at_first_launch';
+/** Set to OPEN_PROJECT_SCREEN_SEEN when this install showed "Open your project" (never 'true': the test mock answers 'true' to unknown keys). */
+const ONBOARDING_OPEN_PROJECT_SCREEN_PREFERENCE = 'onboarding_open_project_screen';
+const OPEN_PROJECT_SCREEN_SEEN = 'seen';
 
 function fallbackEnvironment(): EnvironmentInfo {
   return {
@@ -80,22 +87,16 @@ async function setPreference(key: string, value: string): Promise<void> {
   if (window.electronAPI?.preferences) await API.preferences.set(key, value);
 }
 
-async function markSupportPromptShown(): Promise<void> {
-  await setPreference(ONBOARDING_GH_PROMPT_SHOWN_PREFERENCE, 'true');
-}
-
 async function recordFirstLaunchEnvironmentStatus(status: OnboardingEnvironmentStatus): Promise<void> {
   const existing = await getPreference(ONBOARDING_GH_STATUS_AT_FIRST_LAUNCH_PREFERENCE);
   if (existing) return;
   await setPreference(ONBOARDING_GH_STATUS_AT_FIRST_LAUNCH_PREFERENCE, status);
 }
 
-function SupportExplainer({ showTitle = true }: { showTitle?: boolean }) {
+function SupportExplainer() {
   return (
     <div className="space-y-1">
-      {showTitle && (
-        <p className="text-sm font-semibold text-text-primary">Support Pane with a star and follow</p>
-      )}
+      <p className="text-sm font-semibold text-text-primary">Support Pane with a star and follow</p>
       <p className="text-xs leading-relaxed text-text-secondary">
         Pane is built by Parsa, a self-funded developer. A GitHub star for Pane and a follow are the easiest free way to support the project so it can keep growing.
       </p>
@@ -164,306 +165,420 @@ export function SupportPaneDialog({ isOpen, onClose }: SupportPaneDialogProps) {
   );
 }
 
+
+type OnboardingEntry = 'found_repo' | 'chosen_folder' | 'github_clone' | 'sample_repo';
+type WslState = { status: 'loading' } | { status: 'ready'; result: WslRepos } | { status: 'unavailable' };
+type SampleState = { status: 'idle' } | { status: 'running' } | { status: 'failed'; reason: string };
+
+const NO_HOST_REPOS: HostRepos = { repos: [], shells: [], wslDistro: null };
+const NOT_A_REPO = "That folder isn't a Git repo. Choose a repo folder. To start a new repo, skip this and use Add repository.";
+
+async function detectEnvironmentInfo(): Promise<EnvironmentInfo> {
+  try {
+    const result = await window.electronAPI.onboarding.detectEnvironment();
+    // SAFETY: The surrounding typed producer establishes the narrower value shape consumed here.
+    return result.success && result.data ? normalizeEnvironment(result.data as Partial<EnvironmentInfo>) : fallbackEnvironment();
+  } catch {
+    return fallbackEnvironment();
+  }
+}
+
+function isWslPath(value: string): boolean {
+  return /^\\\\wsl(\.localhost|\$)\\/i.test(value);
+}
+
+function parentFolder(displayPath: string): string {
+  const index = Math.max(displayPath.lastIndexOf('/'), displayPath.lastIndexOf('\\'));
+  return index > 0 ? displayPath.slice(0, index) : displayPath;
+}
+
+function newestRepo(repos: FoundRepo[]): FoundRepo | undefined {
+  return repos.reduce<FoundRepo | undefined>((best, repo) => (!best || (repo.lastCommitAt ?? -1) > (best.lastCommitAt ?? -1) ? repo : best), undefined);
+}
+
+function joinNames(names: string[]): string {
+  return names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+}
+
+function reasonText(reason: string | undefined, fallback: string): string {
+  return (reason || fallback).trim().replace(/\.+$/, '');
+}
+
+interface RepoListProps {
+  /** null while loading. */
+  repos: FoundRepo[] | null;
+  /** Shown in place of the rows when nothing was found or the source failed. */
+  emptyText: string;
+  compact?: boolean;
+  label: string;
+  selectedPath: string | undefined;
+  disabled: boolean;
+  onSelect: (repo: FoundRepo) => void;
+  onOpen: (repo: FoundRepo) => void;
+}
+
+/**
+ * Up to five rows. It keeps three rows' height (two in a WSL column) so
+ * loading, empty and short lists match.
+ */
+function RepoList({ repos, emptyText, compact, label, selectedPath, disabled, onSelect, onOpen }: RepoListProps) {
+  const minHeight = compact ? 'min-h-[78px]' : 'min-h-[120px]';
+  if (repos === null) {
+    return (
+      <div className={cn(minHeight, 'space-y-1.5')} aria-busy="true" aria-label={label}>
+        {(compact ? ['w-[60%]', 'w-[48%]'] : ['w-[60%]', 'w-[48%]', 'w-[55%]']).map(width => (
+          <div key={width} className="flex h-9 items-center rounded-lg border border-border-secondary bg-surface-secondary px-3">
+            <span className={cn('h-2.5 animate-pulse rounded bg-surface-tertiary', width)} />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (repos.length === 0) {
+    return <p className={cn(minHeight, 'py-2 text-sm text-text-tertiary')}>{emptyText}</p>;
+  }
+
+  return (
+    <div role="radiogroup" aria-label={label} className={cn(minHeight, 'space-y-1.5')}>
+      {repos.map(repo => {
+        const selected = repo.path === selectedPath;
+        const lastCommit = repo.lastCommitAt === null ? '' : formatTimeAgo(new Date(repo.lastCommitAt).toISOString());
+        return (
+          <button
+            key={repo.path}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            disabled={disabled}
+            onClick={() => onSelect(repo)}
+            onDoubleClick={() => onOpen(repo)}
+            className={cn(
+              'flex h-9 w-full items-center gap-2.5 rounded-lg border bg-surface-secondary px-3 text-left text-sm transition-colors disabled:cursor-default',
+              selected ? 'border-interactive ring-1 ring-interactive' : 'border-border-secondary hover:bg-surface-hover',
+            )}
+          >
+            <Folder className="h-4 w-4 shrink-0 text-text-tertiary" aria-hidden="true" />
+            <span className="max-w-[50%] shrink-0 truncate font-medium text-text-primary">{repo.name}</span>
+            {!compact && <span className="min-w-0 truncate text-text-tertiary">{repo.displayPath}</span>}
+            <span className="ml-auto shrink-0 pl-2 text-xs text-text-tertiary">
+              {compact ? parentFolder(repo.displayPath) : [repo.branch, lastCommit].filter(Boolean).join(' · ')}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function RepoColumn({ title, footnote, ...list }: RepoListProps & { title: string; footnote: string | null }) {
+  return (
+    <div className="min-w-0 space-y-2">
+      <h3 className="text-[11px] font-semibold uppercase tracking-wide text-text-tertiary">{title}</h3>
+      <RepoList {...list} compact />
+      {footnote && <p className="text-xs text-text-tertiary">{footnote}</p>}
+    </div>
+  );
+}
+
+/**
+ * First-run "Open your project": lists the user's repos (with a WSL column on
+ * Windows when a default distro exists) and lands them in the one they pick.
+ */
 export default function OnboardingDialog({ isOpen, onClose }: OnboardingDialogProps) {
   const paneLogo = usePaneLogo();
-  const [step, setStep] = useState<DialogStep>('detecting');
+  const navigateToProject = useNavigationStore(s => s.navigateToProject);
   const [env, setEnv] = useState<EnvironmentInfo | null>(null);
-  const [shouldSupportOnSetup, setShouldSupportOnSetup] = useState(true);
-  const [showSupportPopover, setShowSupportPopover] = useState(false);
-  const [showOptOutConfirm, setShowOptOutConfirm] = useState(false);
-  const supportPromptRecordedRef = useRef(false);
+  const [host, setHost] = useState<HostRepos | null>(null);
+  const [wsl, setWsl] = useState<WslState | null>(null);
+  const [pickedPath, setPickedPath] = useState<string | null>(null);
+  const [isCloning, setIsCloning] = useState(false);
+  const [sample, setSample] = useState<SampleState>({ status: 'idle' });
+  const [error, setError] = useState<string | null>(null);
+  const [isOpening, setIsOpening] = useState(false);
+  // Set once the dialog is done, so a sample setup that outlives a Skip doesn't navigate.
+  const closedRef = useRef(false);
+  const titleRef = useRef<HTMLHeadingElement>(null);
 
-  const markOnboardingComplete = async () => {
+  useEffect(() => {
+    if (!isOpen) return;
+    closedRef.current = false;
+    let cancelled = false;
+    void setPreference(ONBOARDING_OPEN_PROJECT_SCREEN_PREFERENCE, OPEN_PROJECT_SCREEN_SEEN);
+
+    void detectEnvironmentInfo().then((nextEnv) => {
+      if (cancelled) return;
+      setEnv(nextEnv);
+      const status = getEnvironmentStatus(nextEnv);
+      capture('onboarding_started', { gh_status_at_first_launch: status });
+      void recordFirstLaunchEnvironmentStatus(status);
+    });
+
+    const findRepos = async () => {
+      let found = NO_HOST_REPOS;
+      try {
+        const result = await window.electronAPI.onboarding.findRepos();
+        if (result.success && result.data) found = result.data;
+      } catch {
+        // Nothing found: the dialog offers a folder, GitHub and the sample.
+      }
+      if (cancelled) return;
+      setHost(found);
+      if (!found.wslDistro) return;
+
+      setWsl({ status: 'loading' });
+      let next: WslState = { status: 'unavailable' };
+      try {
+        const result = await window.electronAPI.onboarding.findWslRepos(found.wslDistro);
+        if (result.success && result.data) next = { status: 'ready', result: result.data };
+      } catch {
+        // Shown as the column's unavailable state.
+      }
+      if (!cancelled) setWsl(next);
+    };
+    void findRepos();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen]);
+
+  const wslDistro = host?.wslDistro ?? null;
+  const wslRepos = wsl?.status === 'ready' ? wsl.result.repos : [];
+  const allRepos = [...(host?.repos ?? []), ...wslRepos];
+  const selected = allRepos.find(repo => repo.path === pickedPath) ?? newestRepo(allRepos);
+  const isLoading = host === null || wsl?.status === 'loading';
+  const nothingFound = !isLoading && allRepos.length === 0;
+  const gitMissing = env !== null && !env.gitInstalled;
+  const isBusy = isOpening || sample.status === 'running';
+
+  const complete = async (properties: AnalyticsProperties & { entry: OnboardingEntry; wsl: boolean }) => {
+    closedRef.current = true;
     try {
       await setPreference(ONBOARDING_REPO_SETUP_PREFERENCE, 'true');
     } catch {
-      // Ensure dialog closes even if preference write fails
+      // Close even if the preference write fails.
     }
+    capture('onboarding_completed', properties);
+    onClose();
   };
 
-  const detectEnvironment = useCallback(async (options?: { showLoading?: boolean }): Promise<EnvironmentInfo> => {
-    if (options?.showLoading !== false) {
-      setStep('detecting');
-    }
+  const openProject = async (projectId: number, properties: AnalyticsProperties & { entry: OnboardingEntry; wsl: boolean }) => {
+    window.dispatchEvent(new Event('project-changed'));
+    navigateToProject(projectId);
+    await complete(properties);
+  };
 
+  const addProject = async (name: string, path: string, properties: AnalyticsProperties & { entry: OnboardingEntry; wsl: boolean }) => {
+    setIsOpening(true);
+    setError(null);
     try {
-      const result = await window.electronAPI.onboarding.detectEnvironment();
-      if (result.success && result.data) {
-        // SAFETY: The surrounding typed producer establishes the narrower value shape consumed here.
-        const nextEnv = normalizeEnvironment(result.data as Partial<EnvironmentInfo>);
-        setEnv(nextEnv);
-        setStep('ready');
-        return nextEnv;
+      const response = await API.projects.create({ name, path, active: false });
+      if (response.success && response.data) {
+        await openProject(response.data.id, properties);
+        return;
       }
-
-      const nextEnv = fallbackEnvironment();
-      setEnv(nextEnv);
-      setStep('ready');
-      return nextEnv;
-    } catch {
-      const nextEnv = fallbackEnvironment();
-      setEnv(nextEnv);
-      setStep('ready');
-      return nextEnv;
+      setError(`Couldn't open ${name}: ${reasonText(response.error, 'Pane could not add the project')}.`);
+    } catch (cause) {
+      setError(`Couldn't open ${name}: ${reasonText(cause instanceof Error ? cause.message : undefined, 'Pane could not add the project')}.`);
+    } finally {
+      setIsOpening(false);
     }
-  }, []);
-
-  useEffect(() => {
-    if (isOpen) {
-      supportPromptRecordedRef.current = false;
-      void detectEnvironment().then((nextEnv) => {
-        const status = getEnvironmentStatus(nextEnv);
-        capture('onboarding_started', {
-          gh_status_at_first_launch: status,
-        });
-        void recordFirstLaunchEnvironmentStatus(status);
-      });
-    }
-  }, [isOpen, detectEnvironment]);
-
-  useEffect(() => {
-    if (!isOpen || !env?.ghReady || supportPromptRecordedRef.current) return;
-    supportPromptRecordedRef.current = true;
-    capture('onboarding_support_prompt_shown', {
-      source: 'first_launch',
-      gh_status: getEnvironmentStatus(env),
-    });
-    void markSupportPromptShown();
-  }, [isOpen, env]);
-
-  const setupDefaultRepoInBackground = () => {
-    void window.electronAPI.onboarding.setupDefaultRepo()
-      .then((result) => {
-        if (result.success) {
-          window.dispatchEvent(new Event('project-changed'));
-        } else {
-          console.error('[Onboarding] Background setup failed:', result.error || 'Failed to set up project');
-        }
-      })
-      .catch((error) => {
-        console.error('[Onboarding] Background setup failed:', error);
-      });
   };
 
-  const supportProjectInBackground = () => {
-    void window.electronAPI.onboarding.supportProject()
-      .then((supportResult) => {
-        if (supportResult?.success) {
-          capture('onboarding_project_supported_during_setup');
-        }
-      })
-      .catch(() => {
-        // Support failure is non-fatal.
-      });
+  const openRepo = (repo: FoundRepo) => {
+    if (isBusy) return;
+    void addProject(repo.name, repo.path, { entry: 'found_repo', repo_source: repo.source, wsl: isWslPath(repo.path) });
   };
 
-  const handleSetup = async () => {
-    if (!env?.gitInstalled) {
+  const chooseFolder = async () => {
+    setError(null);
+    const picked = await window.electronAPI.dialog.openDirectory();
+    if (!picked.success || !picked.data) return;
+    const folder = await window.electronAPI.onboarding.checkFolder(picked.data);
+    if (!folder.success || !folder.data) {
+      setError(folder.error ?? NOT_A_REPO);
       return;
     }
+    await addProject(folder.data.name, folder.data.path, { entry: 'chosen_folder', wsl: isWslPath(folder.data.path) });
+  };
 
-    await markOnboardingComplete();
-    onClose();
-
-    if (shouldSupportOnSetup && env?.ghReady) {
-      supportProjectInBackground();
+  const setUpSample = async () => {
+    setError(null);
+    setSample({ status: 'running' });
+    let failure = '';
+    try {
+      const result = await window.electronAPI.onboarding.setupDefaultRepo();
+      if (closedRef.current) {
+        // Skipped during setup: the project still appears, nothing navigates.
+        if (result.success) window.dispatchEvent(new Event('project-changed'));
+        return;
+      }
+      if (result.success && result.data) {
+        await openProject(result.data.projectId, { entry: 'sample_repo', wsl: false, was_already_cloned: result.data.wasAlreadyCloned });
+        return;
+      }
+      failure = reasonText(result.error, 'setup failed');
+    } catch (cause) {
+      failure = reasonText(cause instanceof Error ? cause.message : undefined, 'setup failed');
     }
-
-    setupDefaultRepoInBackground();
+    if (!closedRef.current) setSample({ status: 'failed', reason: failure });
   };
 
   const handleSkip = async () => {
-    capture('onboarding_skipped', {
-      step: step === 'detecting' ? 'detecting' : getEnvironmentStatus(env),
-    });
-    await markOnboardingComplete();
-    onClose();
-  };
-
-  const handleSupportCheckboxChange = (checked: boolean) => {
-    if (!checked && shouldSupportOnSetup) {
-      setShowSupportPopover(false);
-      setShowOptOutConfirm(true);
-      return;
+    capture('onboarding_skipped', { step: env ? getEnvironmentStatus(env) : 'detecting' });
+    closedRef.current = true;
+    try {
+      await setPreference(ONBOARDING_REPO_SETUP_PREFERENCE, 'true');
+    } catch {
+      // Close even if the preference write fails.
     }
-
-    setShouldSupportOnSetup(checked);
-  };
-
-  const handleKeepSupporting = () => {
-    setShouldSupportOnSetup(true);
-    setShowOptOutConfirm(false);
-  };
-
-  const handleConfirmOptOut = () => {
-    setShouldSupportOnSetup(false);
-    setShowOptOutConfirm(false);
-  };
-
-  const handleOpenGitGuide = () => {
-    window.electronAPI.openExternal('https://git-scm.com/downloads');
+    onClose();
   };
 
   if (!isOpen) return null;
 
+  if (isCloning) {
+    return (
+      <CloneFromGitHubDialog
+        isOpen
+        onClose={() => setIsCloning(false)}
+        onCloned={(_projectId, clonedPath) => void complete({ entry: 'github_clone', wsl: isWslPath(clonedPath) })}
+      />
+    );
+  }
+
+  const listProps = {
+    selectedPath: selected?.path,
+    disabled: isBusy,
+    onSelect: (repo: FoundRepo) => setPickedPath(repo.path),
+    onOpen: openRepo,
+  };
+  const wslFootnote = wsl?.status === 'ready' && wsl.result.agents.length > 0
+    ? `Agents run inside WSL. ${joinNames(wsl.result.agents)} found.`
+    : 'Agents run inside WSL.';
+
   return (
     <Modal
-      ariaLabel="Get Started with Pane"
+      ariaLabel="Open your project"
       isOpen={isOpen}
       onClose={() => {}}
-      size="md"
+      size={wslDistro ? 'lg' : 'md'}
+      initialFocusRef={titleRef}
       closeOnOverlayClick={false}
       closeOnEscape={false}
       showCloseButton={false}
     >
-      {/* Header */}
       <div className="p-6 border-b border-border-primary">
         <div className="flex items-center">
           <img src={paneLogo} alt="Pane" className="h-10 w-10 mr-3" />
-          <h1 className="text-lg font-semibold text-text-primary">Get Started with Pane</h1>
+          <h1 ref={titleRef} tabIndex={-1} className="text-lg font-semibold text-text-primary outline-none">Open your project</h1>
         </div>
       </div>
 
-      <ModalBody className={step === 'ready' && env?.ghReady ? 'overflow-visible' : undefined}>
-        {step === 'detecting' && (
-          <div className="flex flex-col items-center py-8 gap-4">
-            <Loader2 className="h-8 w-8 text-interactive animate-spin" />
-            <p className="text-text-secondary">Checking your setup...</p>
+      <ModalBody>
+        {gitMissing ? (
+          <div className="flex items-start gap-3">
+            <AlertCircle className="h-6 w-6 text-status-warning flex-shrink-0 mt-0.5" />
+            <div className="space-y-2">
+              <p className="text-text-primary font-medium">Git Required</p>
+              <p className="text-text-secondary text-sm">
+                Git is required to use Pane. Please install Git and restart the application.
+              </p>
+            </div>
           </div>
-        )}
+        ) : (
+          <div className="space-y-3">
+            <p className="text-sm text-text-secondary">
+              {wslDistro
+                ? 'Where does your code live? Pane runs agents in the same place.'
+                : 'Pick the repo you want agents to work on. Each task gets its own copy (a worktree), so your branch stays untouched.'}
+            </p>
 
-        {step === 'ready' && env && (
-          <div className="space-y-4">
-            {env.ghReady ? (
-              <>
-                <div className="flex items-start gap-3">
-                  <GitFork className="h-6 w-6 text-interactive flex-shrink-0 mt-0.5" />
-                  <div className="space-y-2">
-                    <p className="text-text-primary font-medium">
-                      Start developing with Pane as your first project
-                    </p>
-                    <p className="text-text-secondary text-sm">
-                      We&apos;ll set up a real codebase so you&apos;re not staring at a blank screen.
-                    </p>
-                  </div>
-                </div>
-                <div
-                  className="relative w-fit ml-9"
-                  onMouseEnter={() => {
-                    if (!showOptOutConfirm) setShowSupportPopover(true);
-                  }}
-                  onMouseLeave={() => setShowSupportPopover(false)}
-                  onFocus={() => {
-                    if (!showOptOutConfirm) setShowSupportPopover(true);
-                  }}
-                  onBlur={(event) => {
-                    if (!event.currentTarget.contains(event.relatedTarget)) {
-                      setShowSupportPopover(false);
-                    }
-                  }}
-                >
-                  {(showSupportPopover || showOptOutConfirm) && (
-                    <div className="absolute left-0 bottom-full mb-3 w-80 z-30 rounded-lg border border-border-primary bg-surface-primary shadow-lg p-4">
-                      {showOptOutConfirm ? (
-                        <div className="space-y-3">
-                          <div className="space-y-1">
-                            <p className="text-sm font-semibold text-text-primary">Keep supporting independent development?</p>
-                            <SupportExplainer showTitle={false} />
-                          </div>
-                          <div className="flex items-center justify-end gap-2">
-                            <Button variant="ghost" size="sm" onClick={handleConfirmOptOut}>
-                              Uncheck anyway
-                            </Button>
-                            <Button variant="primary" size="sm" onClick={handleKeepSupporting}>
-                              Keep supporting
-                            </Button>
-                          </div>
-                        </div>
-                      ) : (
-                        <SupportExplainer />
-                      )}
-                    </div>
-                  )}
-                  <label className="flex items-center gap-2 cursor-default w-fit">
-                    <input
-                      type="checkbox"
-                      checked={shouldSupportOnSetup}
-                      onChange={(e) => handleSupportCheckboxChange(e.target.checked)}
-                      className="rounded border-border-primary text-interactive focus:ring-interactive"
-                    />
-                    <Star className="h-3.5 w-3.5 text-text-secondary flex-shrink-0" />
-                    <span className="text-text-secondary text-xs underline decoration-dotted underline-offset-2">
-                      Help us keep building Pane independently
-                    </span>
-                  </label>
-                </div>
-              </>
-            ) : !env.gitInstalled ? (
-              <div className="flex items-start gap-3">
-                <AlertCircle className="h-6 w-6 text-status-warning flex-shrink-0 mt-0.5" />
-                <div className="space-y-2">
-                  <p className="text-text-primary font-medium">
-                    Git Required
-                  </p>
-                  <p className="text-text-secondary text-sm">
-                    Git is required to use Pane. Please install Git and restart the application.
-                  </p>
-                </div>
+            {wslDistro ? (
+              <div className="grid grid-cols-2 gap-4">
+                <RepoColumn
+                  {...listProps}
+                  title="Windows"
+                  label="Windows repos"
+                  repos={host?.repos ?? null}
+                  emptyText="No Git repos found in your usual code folders."
+                  footnote={host && host.shells.length > 0 ? `Shell: ${host.shells.join(' · ')}` : null}
+                />
+                <RepoColumn
+                  {...listProps}
+                  title={`WSL · ${wslDistro}`}
+                  label={`WSL ${wslDistro} repos`}
+                  repos={wsl?.status === 'ready' ? wsl.result.repos : wsl?.status === 'unavailable' ? [] : null}
+                  emptyText={wsl?.status === 'unavailable' ? "Couldn't read WSL in time. Choose a folder instead." : 'No Git repos found in your usual code folders.'}
+                  footnote={wsl?.status === 'unavailable' ? null : wslFootnote}
+                />
               </div>
             ) : (
-              <div className="flex items-start gap-3">
-                <GitFork className="h-6 w-6 text-interactive flex-shrink-0 mt-0.5" />
-                <div className="space-y-2">
-                  <p className="text-text-primary font-medium">
-                    Start with a local clone
-                  </p>
-                  <p className="text-text-secondary text-sm">
-                    We&apos;ll clone Pane with Git so you can get into the app now. If GitHub CLI is ready on a future launch, we&apos;ll ask once about starring and following then.
-                  </p>
-                </div>
-              </div>
+              <RepoList
+                {...listProps}
+                label="Your repos"
+                repos={host?.repos ?? null}
+                emptyText="No Git repos found in your usual code folders."
+              />
             )}
-            {!env.ghReady && env.gitInstalled && (
-              <p className="text-xs text-text-secondary">
-                GitHub CLI is optional. Plain Git can clone the repository, but starring, following, and fork creation require GitHub authentication.
+
+            {error && <p role="alert" className="text-sm text-status-error">{error}</p>}
+
+            <div className="flex flex-wrap gap-2">
+              {!nothingFound && (
+                <Button variant="secondary" size="sm" icon={<FolderOpen className="h-4 w-4" />} disabled={isBusy} onClick={() => void chooseFolder()}>
+                  Choose another folder…
+                </Button>
+              )}
+              <Button variant="secondary" size="sm" disabled={isBusy} onClick={() => setIsCloning(true)}>
+                Clone from GitHub
+              </Button>
+            </div>
+
+            {sample.status === 'running' ? (
+              <p className="flex items-center gap-2 text-xs text-text-tertiary" role="status">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                Setting up the sample repo…
+              </p>
+            ) : sample.status === 'failed' ? (
+              <div className="flex items-center gap-3 text-xs text-status-error" role="alert">
+                <span>Couldn&apos;t set up the sample repo: {sample.reason}. Check your connection and try again.</span>
+                <Button variant="secondary" size="sm" onClick={() => void setUpSample()}>Try again</Button>
+              </div>
+            ) : (
+              <p className="text-xs text-text-tertiary">
+                No project handy?{' '}
+                <button type="button" className="text-interactive hover:underline disabled:opacity-50" disabled={isBusy} onClick={() => void setUpSample()}>
+                  Try Pane on a sample repo
+                </button>
               </p>
             )}
           </div>
         )}
-
       </ModalBody>
 
       <ModalFooter className="flex justify-between items-center">
-        {step === 'detecting' && (
-          <>
-            <Button onClick={handleSkip} variant="ghost">Skip</Button>
-            <div />
-          </>
+        <Button onClick={() => void handleSkip()} variant="ghost">Skip</Button>
+        {gitMissing ? (
+          <Button onClick={() => window.electronAPI.openExternal('https://git-scm.com/downloads')} variant="primary" icon={<ExternalLink className="h-4 w-4" />}>
+            Install Git
+          </Button>
+        ) : nothingFound ? (
+          <Button variant="primary" icon={<FolderOpen className="h-4 w-4" />} disabled={isBusy} onClick={() => void chooseFolder()}>
+            Choose a folder…
+          </Button>
+        ) : (
+          <Button
+            variant="primary"
+            disabled={!selected || isBusy}
+            loading={isOpening}
+            loadingText={selected ? `Open ${selected.name}` : 'Open'}
+            onClick={() => selected && openRepo(selected)}
+          >
+            {selected ? `Open ${selected.name}` : 'Open'}
+          </Button>
         )}
-
-        {step === 'ready' && env && (
-          <>
-            <Button onClick={handleSkip} variant="ghost">Skip</Button>
-            {env.ghReady ? (
-              <Button onClick={handleSetup} variant="primary" icon={<GitFork className="h-4 w-4" />}>
-                Let&apos;s go
-              </Button>
-            ) : !env.gitInstalled ? (
-              <Button onClick={handleOpenGitGuide} variant="primary" icon={<ExternalLink className="h-4 w-4" />}>
-                Install Git
-              </Button>
-            ) : (
-              <Button
-                onClick={handleSetup}
-                variant="primary"
-                icon={<GitFork className="h-4 w-4" />}
-              >
-                Start with local clone
-              </Button>
-            )}
-          </>
-        )}
-
       </ModalFooter>
     </Modal>
   );
