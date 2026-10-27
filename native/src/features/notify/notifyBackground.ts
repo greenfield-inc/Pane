@@ -23,12 +23,13 @@ const opensApp = Platform.OS === 'ios' && IOS_BUTTONS_OPEN_APP;
 // Presses already handled; declared before the launch response below is answered.
 const answered = new Set<string>();
 
-const setup = Promise.all([
-  ...notifyCategories(opensApp).map(category => Notifications.setNotificationCategoryAsync(category.identifier, category.actions)),
-  Platform.OS === 'android'
-    ? Notifications.setNotificationChannelAsync(ANDROID_CHANNEL, { name: 'Questions from agents', importance: Notifications.AndroidImportance.HIGH, sound: 'default' })
-    : null,
-]).catch(() => undefined);
+const setup = (async () => {
+  // One at a time: each call rewrites the whole category set, so parallel calls drop each other's.
+  for (const category of notifyCategories(opensApp)) await Notifications.setNotificationCategoryAsync(category.identifier, category.actions);
+  if (Platform.OS === 'android') {
+    await Notifications.setNotificationChannelAsync(ANDROID_CHANNEL, { name: 'Questions from agents', importance: Notifications.AndroidImportance.HIGH, sound: 'default' });
+  }
+})().catch(() => undefined);
 
 TaskManager.defineTask<Notifications.NotificationTaskPayload>(TASK, async ({ data }) => {
   if ('actionIdentifier' in data) await answerFromAlert(data);
