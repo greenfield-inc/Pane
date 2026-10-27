@@ -34,11 +34,12 @@ const MAX_PORT_ATTEMPTS = 20;
 const ANSWER_PROBE_TIMEOUT_MS = 300;
 const MAX_PORT = 65_535;
 /**
- * Every Pane process on this machine lists its tunnel listeners here, one file per pid, so hosts
- * leave them out of their Ports lists. Otherwise two desktops would mirror each other's
- * listeners without end: two clients of one host, or two Panes connected to each other.
+ * Every Pane process of this user on this machine lists its tunnel listeners here, one file per
+ * pid, so hosts leave them out of their Ports lists. Otherwise two desktops would mirror each
+ * other's listeners without end: two clients of one host, or two Panes connected to each other.
+ * One folder per user: Linux shares /tmp, and a host cannot see another user's pids anyway.
  */
-const TUNNEL_REGISTRY_DIR = path.join(os.tmpdir(), 'pane-port-tunnels');
+const TUNNEL_REGISTRY_DIR = path.join(os.tmpdir(), `pane-port-tunnels-${process.getuid?.() ?? 'user'}`);
 const TUNNEL_REGISTRY_FILE = path.join(TUNNEL_REGISTRY_DIR, `${process.pid}.json`);
 const liveTunnels = new Set<ReadonlyMap<number, PortListener>>();
 let removesRegistryOnExit = false;
@@ -141,7 +142,7 @@ function recordTunnelListeners(): void {
 }
 
 /**
- * The tunnel listeners of every Pane process on this machine, by pid. A process removes its file
+ * The tunnel listeners of this user's Pane processes on this machine, by pid. A process removes its file
  * when it exits. A crashed process's file stays, which is harmless: a port is left out only when
  * the same pid owns it again.
  */
