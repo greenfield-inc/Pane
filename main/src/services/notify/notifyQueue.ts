@@ -109,6 +109,8 @@ export class NotifyQueue extends EventEmitter {
     }
 
     this.queue.push(item.id);
+    // A question never waits behind an update; the update stays under For your information.
+    if (this.transient?.view.kind === 'info') this.clearTransient();
     this.armMidnight();
     if (this.env.settings().sound && !this.isPaused()) this.emit('chime');
     const result = this.wait(entry, request.returnAfterMs, signal);
@@ -232,7 +234,8 @@ export class NotifyQueue extends EventEmitter {
   }
 
   private wait(entry: Entry, returnAfterMs: number | undefined, signal?: AbortSignal): Promise<NotifyResult> {
-    entry.waiter?.detach();
+    // One call waits per question: an overlapping resume takes over, and the older call returns.
+    entry.waiter?.resolve(unavailable('Another notify call is now waiting on this question.'));
     return new Promise((resolve) => {
       let returnTimer: Timer | undefined;
       const onAbort = () => {
@@ -443,7 +446,7 @@ export class NotifyQueue extends EventEmitter {
   private armMidnight(): void {
     if (this.midnightTimer) return;
     const now = Date.now();
-    const next = startOfLocalDay(now) + 24 * 60 * 60_000;
+    const next = startOfNextLocalDay(now);
     this.midnightTimer = setTimeout(() => {
       this.midnightTimer = undefined;
       this.changed();
@@ -475,6 +478,14 @@ function unavailable(reason: string): NotifyResult {
 
 function startOfLocalDay(at: number): number {
   const day = new Date(at);
+  day.setHours(0, 0, 0, 0);
+  return day.getTime();
+}
+
+/** By calendar day, so a daylight-saving change still lands on midnight. */
+function startOfNextLocalDay(at: number): number {
+  const day = new Date(at);
+  day.setDate(day.getDate() + 1);
   day.setHours(0, 0, 0, 0);
   return day.getTime();
 }

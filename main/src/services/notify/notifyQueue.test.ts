@@ -258,6 +258,53 @@ describe('NotifyQueue', () => {
     expect(queue.snapshot().stripSurface).toBeNull();
   });
 
+  it('returns an overlapping resume call instead of leaving it waiting forever', async () => {
+    const { queue } = makeQueue();
+    const first = queue.ask({ question: sessionStore, source: claude, returnAfterMs: 50_000 });
+    await vi.advanceTimersByTimeAsync(50_000);
+    const waiting = await first;
+    const id = 'id' in waiting ? waiting.id : '';
+
+    const older = queue.ask({ resume: id, source: claude, returnAfterMs: 50_000 });
+    const newer = queue.ask({ resume: id, source: claude, returnAfterMs: 50_000 });
+    expect(await older).toEqual({ unavailable: 'Another notify call is now waiting on this question.', next: 'Ask in the terminal instead.' });
+
+    queue.run({ type: 'answer', id, answer: { choice: 'Keep Redis' } });
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(await newer).toEqual({ answer: 'Keep Redis' });
+  });
+
+  it('shows a new question at once even while an update is on screen and hovered', async () => {
+    const { queue } = makeQueue();
+    await queue.ask({ question: { ui: 'info', title: 'Deploy finished' }, source: claude });
+    const updateId = queue.snapshot().items[0].id;
+    queue.run({ type: 'hover-info', id: updateId, hovering: true });
+
+    ask(queue, sessionStore);
+    expect(queue.snapshot().strip).toEqual({ kind: 'question', itemId: onlyId(queue) });
+    expect(queue.snapshot().items.find(item => item.id === updateId)?.state).toBe('info');
+  });
+
+  it('refreshes once at local midnight on a daylight-saving day', async () => {
+    const previousTz = process.env.TZ;
+    process.env.TZ = 'America/Los_Angeles';
+    try {
+      // 2026-11-01 is 25 hours long in Los Angeles: clocks fall back at 02:00.
+      vi.setSystemTime(new Date('2026-11-01T22:00:00-08:00'));
+      const { queue } = makeQueue();
+      ask(queue, sessionStore);
+      let changes = 0;
+      queue.on('change', () => { changes += 1; });
+
+      await vi.advanceTimersByTimeAsync(90 * 60_000);
+      expect(changes).toBe(0);
+      await vi.advanceTimersByTimeAsync(60 * 60_000);
+      expect(changes).toBe(1);
+    } finally {
+      process.env.TZ = previousTz;
+    }
+  });
+
   it('rejects an answer that is not one of the choices', () => {
     const { queue } = makeQueue();
     ask(queue, sessionStore);
