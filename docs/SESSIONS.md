@@ -312,9 +312,9 @@ Pane" → **Find sessions** opens the same card at any time.
   folder is first copied into your own Claude Code or Codex store.
 - Sessions still running elsewhere are listed but can't be chosen; quit them
   and press **Check again**, or use the skill below, which forks them. A tab
-  whose agent doesn't come up is closed and reported, and a new Pane whose
-  sessions all failed is removed. A tab waiting at the agent's folder-trust
-  prompt stays open for you to answer.
+  whose agent exits without resuming is closed and reported, and a new Pane
+  whose sessions all failed is removed. A tab waiting at the agent's
+  folder-trust prompt, or whose agent is still starting, stays open for you.
 - **Not now** or **Done** on Home hides the card for good. The card and the
   skill share the record below, so neither brings a session in twice.
 

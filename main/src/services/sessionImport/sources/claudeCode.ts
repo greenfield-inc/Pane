@@ -3,7 +3,7 @@ import path from 'path';
 import type { ImportRunning } from '../../../../../shared/types/sessionImport';
 import { boundary, decodeOptionalBoundary } from '../../../../../shared/validation/boundaryDecoder';
 import type { FoundSession, ReaderContext, SourceReader } from './types';
-import { absent, claudeConfigDir, exists, mtimeMs, readHeadLines, readJson, readTailLines, unreadable } from './common';
+import { absent, claudeConfigDir, exists, findClaudeTranscript, listDir, mtimeMs, readHeadLines, readJson, readTailLines, unreadable } from './common';
 
 // Claude Code 1.x-2.x keeps one JSONL transcript per session at
 // `<config>/projects/<cwd with non-alphanumerics as '-'>/<session id>.jsonl`.
@@ -78,29 +78,6 @@ export function claudeRunning(live: LiveClaudeSession[] | undefined, sessionId: 
   // A live process that hasn't named its session yet could be this one.
   if (live.some(entry => !entry.sessionId && (!entry.cwd || entry.cwd === folder))) return 'unknown';
   return 'no';
-}
-
-/** The transcript of `sessionId` in `<configDir>/projects`, if there is one. */
-export function findClaudeTranscript(configDir: string, sessionId: string, folder?: string): string | undefined {
-  const projects = path.join(configDir, 'projects');
-  const file = `${sessionId}.jsonl`;
-  if (folder) {
-    const direct = path.join(projects, folder.replace(/[^a-zA-Z0-9]/gu, '-'), file);
-    if (exists(direct)) return direct;
-  }
-  for (const project of listDir(projects)) {
-    const candidate = path.join(projects, project, file);
-    if (exists(candidate)) return candidate;
-  }
-  return undefined;
-}
-
-function listDir(dir: string): string[] {
-  try {
-    return fs.readdirSync(dir);
-  } catch {
-    return [];
-  }
 }
 
 interface TranscriptMeta {

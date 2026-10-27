@@ -2,21 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import type { FoundSession, ReaderContext, SourceReadResult, SourceReader } from './types';
 import type { ImportRunning } from '../../../../../shared/types/sessionImport';
-import {
-  absent,
-  claudeConfigDir,
-  codexHome,
-  exists,
-  hasColumns,
-  isRecord,
-  readJson,
-  stringField,
-  tableColumns,
-  toMs,
-  unreadable,
-  withSqliteCopy,
-  type SqliteDatabase,
-} from './common';
+import { absent, claudeConfigDir, codexHome, exists, findClaudeTranscript, findCodexTranscript, hasColumns, isRecord, listDir, readJson, stringField, tableColumns, toMs, type SqliteDatabase, unreadable, withSqliteCopy } from './common';
 
 const SOURCE = 'superset';
 
@@ -69,14 +55,6 @@ function agentFor(agentId: string): string {
   return agentId === 'cursor-agent' ? 'cursor' : agentId;
 }
 
-function readDirNames(dir: string): string[] {
-  try {
-    return fs.readdirSync(dir);
-  } catch {
-    return [];
-  }
-}
-
 /** Whether the process recorded in a pid file or manifest is alive; undefined when the record can't be read. */
 function pidAlive(context: ReaderContext, pid: number): boolean | undefined {
   return Number.isInteger(pid) && pid > 0 ? context.isPidAlive(pid) : undefined;
@@ -106,30 +84,6 @@ function agentHomeOf(agent: string, transcript: string): string | undefined {
   if (agent === 'codex') {
     const sessions = path.dirname(path.dirname(path.dirname(path.dirname(transcript))));
     return path.basename(sessions) === 'sessions' ? path.dirname(sessions) : undefined;
-  }
-  return undefined;
-}
-
-function findClaudeTranscript(agentHome: string, sessionId: string): string | undefined {
-  const projects = path.join(agentHome, 'projects');
-  for (const project of readDirNames(projects)) {
-    const file = path.join(projects, project, `${sessionId}.jsonl`);
-    if (exists(file)) return file;
-  }
-  return undefined;
-}
-
-function findCodexTranscript(agentHome: string, sessionId: string): string | undefined {
-  const sessions = path.join(agentHome, 'sessions');
-  const suffix = `-${sessionId}.jsonl`;
-  for (const year of readDirNames(sessions)) {
-    for (const month of readDirNames(path.join(sessions, year))) {
-      for (const day of readDirNames(path.join(sessions, year, month))) {
-        const dayDir = path.join(sessions, year, month, day);
-        const match = readDirNames(dayDir).find(name => name.startsWith('rollout-') && name.endsWith(suffix));
-        if (match) return path.join(dayDir, match);
-      }
-    }
   }
   return undefined;
 }
@@ -261,7 +215,7 @@ function readAppState(file: string): { sessions: V1Session[]; panes: Map<string,
 export const readSuperset: SourceReader = async context => {
   const base = supersetHome(context);
   const hostRoot = path.join(base, 'host');
-  const hostDbs = readDirNames(hostRoot)
+  const hostDbs = listDir(hostRoot)
     .map(org => path.join(hostRoot, org, 'host.db'))
     .filter(exists);
   const localDb = path.join(base, 'local.db');

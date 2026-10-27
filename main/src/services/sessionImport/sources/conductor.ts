@@ -1,8 +1,8 @@
 import path from 'path';
 import type { ImportRunning } from '../../../../../shared/types/sessionImport';
 import type { FoundSession, SourceReader } from './types';
-import { absent, appDataDir, claudeConfigDir, codexHome, exists, tableColumns, toMs, unreadable, withSqliteCopy } from './common';
-import { claudeRunning, findClaudeTranscript, liveClaudeSessions } from './claudeCode';
+import { absent, appDataDir, claudeConfigDir, codexHome, exists, findClaudeTranscript, tableColumns, toMs, unreadable, withSqliteCopy } from './common';
+import { claudeRunning, liveClaudeSessions } from './claudeCode';
 import { codexRunning, listCodexSessions } from './codex';
 
 // Conductor (macOS only) keeps `~/Library/Application Support/com.conductor.app/conductor.db`.

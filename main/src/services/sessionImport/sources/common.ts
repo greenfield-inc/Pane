@@ -151,3 +151,39 @@ export function toMs(value: JsonValue | undefined): number | undefined {
   return Number.isNaN(parsed) ? undefined : parsed;
 }
 
+
+/** Names in a folder, or none when it can't be read. */
+export function listDir(dir: string): string[] {
+  try {
+    return fs.readdirSync(dir);
+  } catch {
+    return [];
+  }
+}
+
+/** A Claude Code transcript, `<config>/projects/<cwd slug>/<id>.jsonl`, trying `folder`'s slug first. */
+export function findClaudeTranscript(configDir: string, sessionId: string, folder?: string): string | undefined {
+  const projects = path.join(configDir, 'projects');
+  const file = `${sessionId}.jsonl`;
+  if (folder) {
+    const direct = path.join(projects, folder.replace(/[^a-zA-Z0-9]/gu, '-'), file);
+    if (exists(direct)) return direct;
+  }
+  return listDir(projects).map(project => path.join(projects, project, file)).find(exists);
+}
+
+/** A Codex rollout, `<home>/sessions/YYYY/MM/DD/rollout-<time>-<id>.jsonl`, found by name only. */
+export function findCodexTranscript(codexHomeDir: string, sessionId: string): string | undefined {
+  const sessions = path.join(codexHomeDir, 'sessions');
+  const suffix = `-${sessionId}.jsonl`;
+  for (const year of listDir(sessions)) {
+    for (const month of listDir(path.join(sessions, year))) {
+      for (const day of listDir(path.join(sessions, year, month))) {
+        const dayDir = path.join(sessions, year, month, day);
+        const match = listDir(dayDir).find(name => name.startsWith('rollout-') && name.endsWith(suffix));
+        if (match) return path.join(dayDir, match);
+      }
+    }
+  }
+  return undefined;
+}

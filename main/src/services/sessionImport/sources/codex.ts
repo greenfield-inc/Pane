@@ -3,7 +3,7 @@ import path from 'path';
 import type { ImportRunning } from '../../../../../shared/types/sessionImport';
 import { boundary, decodeOptionalBoundary, type BoundarySchema } from '../../../../../shared/validation/boundaryDecoder';
 import type { ReaderContext, SourceReader } from './types';
-import { absent, codexHome, exists, mtimeMs, readTailLines, unreadable } from './common';
+import { absent, codexHome, exists, listDir, mtimeMs, readTailLines, unreadable } from './common';
 
 // Codex keeps one rollout per thread at
 // `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-<ts>-<thread id>.jsonl`. Its first
@@ -35,14 +35,6 @@ export interface CodexStore {
   reason?: string;
   storePaths: string[];
   threads: CodexThread[];
-}
-
-function listDir(dir: string): string[] {
-  try {
-    return fs.readdirSync(dir);
-  } catch {
-    return [];
-  }
 }
 
 /** The first line of a file, read until its newline or `maxBytes`. */

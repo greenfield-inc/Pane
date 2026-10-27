@@ -7,6 +7,7 @@ import type {
 import { reasonOf } from '../../../../shared/paneError';
 import { writeRecordEntry, type MigrationRecordEntry } from './record';
 import { SOURCE_NAMES, type ScannedSession } from './scan';
+import { findClaudeTranscript, findCodexTranscript } from './sources/common';
 
 /** How a launched tab ended its readiness check. */
 export type TabCheck =
@@ -191,22 +192,8 @@ function personStore(agent: string, stores: PersonStores): string | undefined {
 
 /** Whether the person's own store holds a transcript for this session id. */
 function personStoreHas(agent: string, sessionId: string, stores: PersonStores): boolean {
-  if (agent === 'claude') {
-    const projects = path.join(stores.claudeConfigDir, 'projects');
-    return listDirs(projects).some(project => fs.existsSync(path.join(projects, project, `${sessionId}.jsonl`)));
-  }
-  if (agent === 'codex') {
-    const sessions = path.join(stores.codexHome, 'sessions');
-    for (const year of listDirs(sessions)) {
-      for (const month of listDirs(path.join(sessions, year))) {
-        for (const day of listDirs(path.join(sessions, year, month))) {
-          const files = safeReaddir(path.join(sessions, year, month, day));
-          if (files.some(file => file.startsWith('rollout-') && file.endsWith(`${sessionId}.jsonl`))) return true;
-        }
-      }
-    }
-    return false;
-  }
+  if (agent === 'claude') return findClaudeTranscript(stores.claudeConfigDir, sessionId) !== undefined;
+  if (agent === 'codex') return findCodexTranscript(stores.codexHome, sessionId) !== undefined;
   return true;
 }
 
@@ -239,18 +226,3 @@ function copyTranscript(session: ScannedSession, stores: PersonStores): void {
   fs.copyFileSync(session.transcript.path, destination, fs.constants.COPYFILE_EXCL);
 }
 
-function listDirs(folder: string): string[] {
-  try {
-    return fs.readdirSync(folder, { withFileTypes: true }).filter(entry => entry.isDirectory()).map(entry => entry.name);
-  } catch {
-    return [];
-  }
-}
-
-function safeReaddir(folder: string): string[] {
-  try {
-    return fs.readdirSync(folder);
-  } catch {
-    return [];
-  }
-}

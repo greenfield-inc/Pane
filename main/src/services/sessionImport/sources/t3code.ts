@@ -2,20 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import type { FoundSession, ReaderContext, SourceReader } from './types';
 import type { ImportRunning } from '../../../../../shared/types/sessionImport';
-import {
-  absent,
-  claudeConfigDir,
-  codexHome,
-  exists,
-  hasColumns,
-  isRecord,
-  readJson,
-  stringField,
-  toMs,
-  unreadable,
-  withSqliteCopy,
-  type SqliteDatabase,
-} from './common';
+import { absent, claudeConfigDir, codexHome, exists, findClaudeTranscript, findCodexTranscript, hasColumns, isRecord, listDir, readJson, stringField, toMs, type SqliteDatabase, unreadable, withSqliteCopy } from './common';
 
 const SOURCE = 't3code';
 
@@ -91,40 +78,6 @@ function instanceHomes(settingsFile: string, home: string): Map<string, string> 
     homes.set(id, path.resolve(expanded));
   }
   return homes;
-}
-
-function readDirNames(dir: string): string[] {
-  try {
-    return fs.readdirSync(dir);
-  } catch {
-    return [];
-  }
-}
-
-/** A Claude transcript: `<home>/projects/<encoded folder>/<id>.jsonl`. */
-function findClaudeTranscript(agentHome: string, sessionId: string): string | undefined {
-  const projects = path.join(agentHome, 'projects');
-  for (const project of readDirNames(projects)) {
-    const file = path.join(projects, project, `${sessionId}.jsonl`);
-    if (exists(file)) return file;
-  }
-  return undefined;
-}
-
-/** A Codex rollout: `<home>/sessions/YYYY/MM/DD/rollout-<time>-<id>.jsonl`, found by name only. */
-function findCodexTranscript(agentHome: string, sessionId: string): string | undefined {
-  const sessions = path.join(agentHome, 'sessions');
-  const suffix = `-${sessionId}.jsonl`;
-  for (const year of readDirNames(sessions)) {
-    for (const month of readDirNames(path.join(sessions, year))) {
-      for (const day of readDirNames(path.join(sessions, year, month))) {
-        const dayDir = path.join(sessions, year, month, day);
-        const match = readDirNames(dayDir).find(name => name.startsWith('rollout-') && name.endsWith(suffix));
-        if (match) return path.join(dayDir, match);
-      }
-    }
-  }
-  return undefined;
 }
 
 /**
