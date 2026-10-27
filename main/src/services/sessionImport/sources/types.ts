@@ -48,6 +48,18 @@ export interface SourceReadResult {
   reason?: string;
   storePaths: string[];
   sessions: FoundSession[];
+  /**
+   * Where this tool's sessions run now, whatever their age. The scan keeps
+   * other sessions out of these checkouts even when the live one is too old
+   * to list.
+   */
+  busy?: BusyFolder[];
+}
+
+export interface BusyFolder {
+  folder: string;
+  agent: string;
+  sessionId?: string;
 }
 
 export type SourceReader = (context: ReaderContext) => Promise<SourceReadResult>;

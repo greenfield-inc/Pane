@@ -2,8 +2,8 @@ import fs from 'fs';
 import path from 'path';
 import type { ImportRunning } from '../../../../../shared/types/sessionImport';
 import { boundary, decodeOptionalBoundary, type BoundarySchema } from '../../../../../shared/validation/boundaryDecoder';
-import type { ReaderContext, SourceReader } from './types';
-import { absent, codexHome, exists, listDir, mtimeMs, readTailLines, unreadable } from './common';
+import type { BusyFolder, ReaderContext, SourceReader } from './types';
+import { absent, codexHome, exists, findCodexTranscript, listDir, mtimeMs, readTailLines, unreadable } from './common';
 
 // Codex keeps one rollout per thread at
 // `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-<ts>-<thread id>.jsonl`. Its first
@@ -195,5 +195,16 @@ export const readCodex: SourceReader = async context => {
       lastActiveMs: thread.lastActiveMs,
       running: codexRunning(home, thread.id, executables),
     }));
-  return { source: 'codex', status: 'ok', storePaths, sessions };
+  return { source: 'codex', status: 'ok', storePaths, sessions, busy: lockedFolders(home, executables) };
 };
+
+/** Folders of Codex threads holding a writer lock while Codex runs, found through each thread's rollout. */
+function lockedFolders(home: string, executables: string[]): BusyFolder[] {
+  if (!executables.some(isCodexExecutable)) return [];
+  return listDir(path.join(home, 'thread-writer-locks')).flatMap(name => {
+    const threadId = /^(.+)\.lock$/u.exec(name)?.[1];
+    const rollout = threadId ? findCodexTranscript(home, threadId) : undefined;
+    const folder = rollout ? parseSessionMeta(readFirstLine(rollout, FIRST_LINE_MAX_BYTES))?.folder : undefined;
+    return folder ? [{ folder, agent: 'codex', sessionId: threadId }] : [];
+  });
+}

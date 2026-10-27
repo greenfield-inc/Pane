@@ -73,11 +73,19 @@ export async function scanSessions(options: ScanOptions): Promise<ScanOutcome> {
     .filter(found => found.lastActiveMs >= listedSince)
     .filter(found => !found.folder || !isUnder(found.folder, options.excludedRoots));
 
-  const checkouts = await probeFolders(merged.map(found => found.folder));
+  // Live sessions too old to list still occupy their checkout; one Pane already runs doesn't.
+  const busy = results.flatMap(result => result.status === 'ok' ? (result.busy ?? []).map(entry => ({ ...entry, source: result.source })) : [])
+    .filter(entry => !entry.sessionId || !options.alreadyInPane.has(sessionKey(entry.agent, entry.sessionId)));
+  const checkouts = await probeFolders([...merged.map(found => found.folder), ...busy.map(entry => entry.folder)]);
   const sessions = merged
     .map(found => toImportSession(found, found.folder ? checkouts.get(found.folder) : undefined, options.alreadyInPane))
     .filter(session => !session.checkout || !isUnder(session.checkout, options.excludedRoots));
-  markOccupiedCheckouts(sessions);
+  const occupied = new Map<string, SessionImportSource>();
+  for (const entry of busy) {
+    const checkout = checkouts.get(entry.folder)?.checkout;
+    if (checkout) occupied.set(checkout, entry.source);
+  }
+  markOccupiedCheckouts(sessions, occupied);
   preselect(sessions, context.now);
   sessions.sort((left, right) => right.lastActiveMs - left.lastActiveMs);
 
@@ -196,8 +204,7 @@ function unavailableReason(found: FoundSession, checkout: GitCheckout | undefine
  * A checkout with a session still running (or maybe running) outside Pane is
  * busy: bringing in another of its sessions would put two agents in one folder.
  */
-function markOccupiedCheckouts(sessions: ScannedSession[]): void {
-  const occupied = new Map<string, SessionImportSource>();
+function markOccupiedCheckouts(sessions: ScannedSession[], occupied: Map<string, SessionImportSource>): void {
   for (const session of sessions) {
     if (session.checkout && session.running !== 'no' && !session.alreadyInPane) occupied.set(session.checkout, session.source);
   }

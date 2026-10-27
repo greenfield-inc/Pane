@@ -180,4 +180,17 @@ describe('readCodex', () => {
 
     expect([fs.readFileSync(file, 'utf8'), fs.statSync(file).mtimeMs, fs.statSync(lock).mtimeMs, fs.readdirSync(path.dirname(lock))]).toEqual(before);
   });
+
+  it('reports the folder of a locked thread while Codex runs, even when its rollout is too old to list', async () => {
+    const home = defaultHome();
+    writeRollout(home, ID_A, { cwd: '/work/old' }, NOW - 60 * DAY);
+    writeLock(home, ID_A);
+
+    const running = await readCodex(context({ processCommands: async () => ['/opt/homebrew/bin/codex'] }));
+    const stopped = await readCodex(context({ processCommands: async () => ['/usr/bin/vim'] }));
+
+    expect(running.sessions).toEqual([]);
+    expect(running.busy).toEqual([{ folder: '/work/old', agent: 'codex', sessionId: ID_A }]);
+    expect(stopped.busy).toEqual([]);
+  });
 });

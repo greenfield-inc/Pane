@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import type { ImportRunning } from '../../../../../shared/types/sessionImport';
 import { boundary, decodeOptionalBoundary } from '../../../../../shared/validation/boundaryDecoder';
-import type { FoundSession, ReaderContext, SourceReader } from './types';
+import type { BusyFolder, FoundSession, ReaderContext, SourceReader } from './types';
 import { absent, claudeConfigDir, exists, findClaudeTranscript, listDir, mtimeMs, readHeadLines, readJson, readTailLines, unreadable } from './common';
 
 // Claude Code 1.x-2.x keeps one JSONL transcript per session at
@@ -69,6 +69,15 @@ export function liveClaudeSessions(context: ReaderContext, configDir: string): L
     live.push({ pid, sessionId: entry?.sessionId || undefined, cwd: entry?.cwd || undefined });
   }
   return live;
+}
+
+/** Folders of live Claude processes: the registry's cwd, else the cwd in that session's transcript. */
+function liveFolders(live: LiveClaudeSession[] | undefined, configDir: string): BusyFolder[] {
+  return (live ?? []).flatMap(entry => {
+    const transcript = !entry.cwd && entry.sessionId ? findClaudeTranscript(configDir, entry.sessionId) : undefined;
+    const folder = entry.cwd ?? (transcript ? readTranscriptMeta(transcript).cwd : undefined);
+    return folder ? [{ folder, agent: 'claude', sessionId: entry.sessionId }] : [];
+  });
 }
 
 /** Whether a Claude session is running, from the live registry. */
@@ -174,5 +183,5 @@ export const readClaudeCode: SourceReader = async context => {
   if (recognised === 0 && unrecognised > 0) {
     return unreadable('claude', 'Claude Code transcripts have a shape Pane doesn\'t recognise', storePaths);
   }
-  return { source: 'claude', status: 'ok', storePaths, sessions };
+  return { source: 'claude', status: 'ok', storePaths, sessions, busy: liveFolders(live, configDir) };
 };

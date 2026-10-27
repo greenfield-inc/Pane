@@ -234,6 +234,22 @@ describe('readOrca', () => {
     expect(result.sessions.map(session => session.running)).toEqual(['unknown', 'unknown', 'unknown']);
   });
 
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('treats sessions as unknown when a marker is reached through a folder Pane cannot open', async () => {
+    const userData = tempRoot();
+    orcaStore(userData);
+    const locked = path.join(tempRoot(), 'locked');
+    writeJson(path.join(locked, 'orca-runtime.json'), JSON.stringify({ runtimeId: 'r', pid: 999, startedAt: 1 }));
+    fs.symlinkSync(path.join(locked, 'orca-runtime.json'), path.join(userData, 'orca-runtime.json'));
+    fs.chmodSync(locked, 0o000);
+    try {
+      const result = await readOrca(context({ env: { ORCA_USER_DATA_PATH: userData }, isPidAlive: () => false }));
+
+      expect(result.sessions.map(session => session.running)).toEqual(['unknown', 'unknown', 'unknown']);
+    } finally {
+      fs.chmodSync(locked, 0o700);
+    }
+  });
+
   it('treats sessions as unknown when an Orca or daemon marker exists but cannot be read', async () => {
     const userData = tempRoot();
     orcaStore(userData);

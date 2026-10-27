@@ -184,4 +184,21 @@ describe('scanSessions', () => {
       ['ses_Abc123', undefined],
     ]);
   });
+
+  it('blocks a checkout whose live session is too old to list, unless Pane already runs that session', async () => {
+    const busyReader = (busy: Array<{ folder: string; agent: string; sessionId?: string }>) => ({
+      source: 'claude' as const,
+      read: async () => ({ source: 'claude' as const, status: 'ok' as const, storePaths: [], sessions: [session({ sessionId: id('recent-b') })], busy }),
+    });
+
+    const blocked = await scan([busyReader([{ folder: repo, agent: 'claude', sessionId: id('old-live-a') }])]);
+    const inPane = await scan([busyReader([{ folder: repo, agent: 'claude', sessionId: id('old-live-a') }])], [`claude:${id('old-live-a')}`]);
+
+    expect(blocked.scan.sessions.map(entry => [name(entry.sessionId), entry.unavailable, entry.preselected])).toEqual([
+      ['recent-b', 'another session is running in this checkout in Claude Code', false],
+    ]);
+    expect(inPane.scan.sessions.map(entry => [name(entry.sessionId), entry.unavailable, entry.preselected])).toEqual([
+      ['recent-b', undefined, true],
+    ]);
+  });
 });

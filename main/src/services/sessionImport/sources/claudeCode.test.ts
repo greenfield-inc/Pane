@@ -176,4 +176,21 @@ describe('readClaudeCode', () => {
 
     expect([fs.readFileSync(file), fs.statSync(file).mtimeMs, fs.readFileSync(registry), fs.statSync(registry).mtimeMs]).toEqual(before);
   });
+
+  it('reports the folder of a live session even when its transcript is too old to list', async () => {
+    const config = path.join(root, 'home', '.claude');
+    writeTranscript(config, '-work-app', ID_A, [message(ID_A, {})], NOW - 60 * DAY);
+    writeTranscript(config, '-work-app', ID_B, [message(ID_B, {})], NOW - DAY);
+    writeTranscript(config, '-work-api', ID_C, [message(ID_C, { cwd: '/work/api' })], NOW - 90 * DAY);
+    writeRegistry(config, 4242, { sessionId: ID_A, cwd: '/work/app' });
+    writeRegistry(config, 5151, { sessionId: ID_C });
+
+    const result = await readClaudeCode(context({ isPidAlive: pid => pid === 4242 || pid === 5151 }));
+
+    expect(result.sessions.map(session => [session.sessionId, session.running])).toEqual([[ID_B, 'no']]);
+    expect(result.busy).toEqual([
+      { folder: '/work/app', agent: 'claude', sessionId: ID_A },
+      { folder: '/work/api', agent: 'claude', sessionId: ID_C },
+    ]);
+  });
 });

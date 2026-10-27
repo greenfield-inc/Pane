@@ -204,23 +204,35 @@ function pidIn(file: string): number | undefined {
  */
 function orcaHostRunning(context: ReaderContext, userData: string): ImportRunning {
   const pidFiles = [path.join(userData, 'orca-runtime.json')];
-  const daemonDir = path.join(userData, 'daemon');
-  if (exists(daemonDir)) {
-    try {
-      for (const name of fs.readdirSync(daemonDir)) {
-        if (/^daemon-v\d+\.pid$/u.test(name)) pidFiles.push(path.join(daemonDir, name));
-      }
-    } catch {
-      return 'unknown';
+  try {
+    for (const name of fs.readdirSync(path.join(userData, 'daemon'))) {
+      if (/^daemon-v\d+\.pid$/u.test(name)) pidFiles.push(path.join(userData, 'daemon', name));
     }
+  } catch (error) {
+    // SAFETY: fs.readdirSync only throws errno errors.
+    if (!isMissing(error as NodeJS.ErrnoException)) return 'unknown';
   }
   let unclear = false;
-  for (const file of pidFiles.filter(exists)) {
+  for (const file of pidFiles) {
+    try {
+      // Follows links, so a marker reached through a folder Pane can't open is unclear, not missing.
+      fs.statSync(file);
+    } catch (error) {
+      // SAFETY: fs.statSync only throws errno errors.
+      if (isMissing(error as NodeJS.ErrnoException)) continue;
+      unclear = true;
+      continue;
+    }
     const pid = pidIn(file);
     if (pid === undefined) unclear = true;
     else if (context.isPidAlive(pid)) return 'yes';
   }
   return unclear ? 'unknown' : 'no';
+}
+
+/** Only a path that isn't there counts as absent; any other error leaves the state unknown. */
+function isMissing(error: NodeJS.ErrnoException): boolean {
+  return error.code === 'ENOENT' || error.code === 'ENOTDIR';
 }
 
 /** A hook entry's agent: ended, or its process alive or gone; otherwise as sure as the host. */
