@@ -51,7 +51,7 @@ async function checkAgent(projectId: number, agent: AgentLaunchPresetId): Promis
  * (install and sign-in, run where the project's agents run). Concurrent
  * callers share a check that is already running.
  */
-export function refreshAgentReadiness(projectId: number, agents: readonly AgentLaunchPresetId[]): Promise<void> {
+function refreshAgentReadiness(projectId: number, agents: readonly AgentLaunchPresetId[]): Promise<void> {
   return Promise.all(agents.map(async agent => {
     const key = `${projectId}:${agent}`;
     let check = inFlight.get(key);

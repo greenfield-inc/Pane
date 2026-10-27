@@ -31,10 +31,9 @@ function ensureLaunchExitSubscription(): void {
 }
 
 function dismiss(panelId: string): void {
-  useLaunchExitStore.setState(state => {
-    const { [panelId]: _dismissed, ...rest } = state.byPanel;
-    return { byPanel: rest };
-  });
+  useLaunchExitStore.setState(state => ({
+    byPanel: Object.fromEntries(Object.entries(state.byPanel).filter(([id]) => id !== panelId)),
+  }));
 }
 
 function stoppedTitle(agentTitle: string, elapsedMs: number): string {
