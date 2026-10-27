@@ -103,11 +103,13 @@ The block sits between `<!-- pane-notify:begin ... -->` and
 `<!-- pane-notify:end -->`. It says when to ask (only what the agent can't
 find out itself, related questions in one card, `info` rarely) and how to
 write a card for someone who has lost the thread: what the work is for, what
-just happened, and what is needed. Pane writes only those lines; the rest of
-the file keeps every byte. It creates the file only when the agent's config
-folder exists, and it leaves alone a file that is a symlink, isn't UTF-8, or
-has a stray marker. Settings → Notify → Agent instructions shows each file's
-state.
+just happened, and what is needed. Pane writes only those lines, plus a line
+break before them when the file didn't end with one; the rest of the file keeps
+every byte. It creates the file only when the agent's config folder exists and
+never deletes it. It leaves alone a file that is a symlink or not a regular
+file, isn't UTF-8, or has a stray marker, and one that another program keeps
+saving while Pane writes. Settings → Notify → Agent instructions shows each
+file's state.
 
 To remove the block, turn Notify off in Settings → Notify. Pane writes it
 again when you turn Notify back on, or at the next launch with Notify on.
