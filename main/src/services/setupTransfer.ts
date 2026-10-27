@@ -1,7 +1,7 @@
 import { isDeepStrictEqual } from 'node:util';
 import type { AppConfig } from '../types/config';
 import type { DetectedProjectConfig } from '../../../shared/types/projectConfig';
-import { PaneError, reasonOf } from '../../../shared/paneError';
+import { PaneError } from '../../../shared/paneError';
 import { AGENT_LAUNCH_PRESETS } from '../../../shared/constants/agentLaunchPresets';
 import { normalizePaneChatAgent } from '../../../shared/types/paneChat';
 import { isLightTheme, isTheme, normalizeAppearance, type DarkTheme, type Theme } from '../../../shared/types/appearance';
@@ -499,8 +499,8 @@ export function readSetupFile(text: string, fileName: string): SetupFile {
   let parsed: JsonValue;
   try {
     parsed = JSON.parse(text);
-  } catch (error) {
-    throw new PaneError('ERR_SETUP_FILE_NOT_JSON', `Couldn't import ${fileName}: it isn't JSON (${reasonOf(error)}). Nothing changed.`, CHOOSE_SETUP_FILE);
+  } catch {
+    throw new PaneError('ERR_SETUP_FILE_NOT_JSON', `Couldn't import ${fileName}: it isn't a Pane setup file (the text isn't valid JSON). Nothing changed.`, CHOOSE_SETUP_FILE);
   }
   const envelope = decodeEnvelope(parsed);
   if (!envelope) {
@@ -521,10 +521,10 @@ export function readSetupFile(text: string, fileName: string): SetupFile {
       Object.assign(sections, { [id]: decodeSection(id, raw) });
     } catch (error) {
       if (!(error instanceof BoundaryDecodeError)) throw error;
-      const where = formatBoundaryPath(error.path);
+      const where = error.path.length > 0 ? `at ${formatBoundaryPath(error.path)}: ` : '';
       throw new PaneError(
         'ERR_SETUP_FILE_INVALID_SECTION',
-        `Couldn't import ${fileName}: its ${SECTION_LABELS[id]} section is malformed (${where ? `${where}: ` : ''}${reasonOf(error)}). Nothing changed.`,
+        `Couldn't import ${fileName}: its ${SECTION_LABELS[id]} section is malformed (${where}${error.reason}). Nothing changed.`,
         'Export the file again from Settings › Import & Export on the other computer.',
       );
     }
@@ -578,8 +578,13 @@ function previewValues<T extends object>(
 ): ValuesPreview<T> {
   const section = emptySection(id);
   const changed: Partial<T> = {};
-  // oxlint-disable-next-line anti-slop/no-runtime-typeof -- Preview text shows strings raw and every other setting value as JSON.
-  const display = (value: T[keyof T] | undefined) => typeof value === 'string' ? value : JSON.stringify(value);
+  const display = (value: T[keyof T] | undefined) => {
+    // oxlint-disable-next-line anti-slop/no-runtime-typeof -- Preview text shows strings raw and every other setting value as JSON.
+    if (typeof value === 'string') return value;
+    // oxlint-disable-next-line anti-slop/no-runtime-typeof -- Switches read as on or off rather than true or false.
+    if (typeof value === 'boolean') return value ? 'on' : 'off';
+    return JSON.stringify(value);
+  };
   for (const key of Object.keys(incoming)) {
     // SAFETY: `key` comes from Object.keys of the decoded section, so it is one of T's fields.
     const field = key as keyof T & string;
@@ -673,6 +678,8 @@ async function previewRunScripts(repos: readonly SetupRunScripts[], sources: Set
     }
   }
   section.repositories = { matched: matchedRepos, total: repos.length };
+  // Changes first, then what was skipped and why.
+  section.items.sort((a, b) => Number(a.kind === 'skipped') - Number(b.kind === 'skipped'));
   if (updates.size > 0) section.apply = { projects: [...updates.values()] };
   return section;
 }

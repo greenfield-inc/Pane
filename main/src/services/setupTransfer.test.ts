@@ -168,6 +168,9 @@ describe('readSetupFile', () => {
   });
 
   it('says what happened, that nothing changed, and what to do next', () => {
+    expect(() => readSetupFile(JSON.stringify({ ...setupFile({}), sections: { customCommands: [{ name: 'x', command: 1 }] } }), 'pane-setup.json')).toThrow(
+      "Couldn't import pane-setup.json: its Custom commands section is malformed (at [0].command: expected string). Nothing changed.",
+    );
     expect(() => readSetupFile(JSON.stringify({ kind: 'notes' }), 'notes.json')).toThrow(
       expect.objectContaining({
         message: "Couldn't import notes.json: it isn't a Pane setup file. Nothing changed.",
@@ -299,11 +302,11 @@ describe('previewSetupImport', () => {
     expect(preview.otherPlatform).toBe(true);
     expect(section?.repositories).toEqual({ matched: 3, total: 5 });
     expect(section?.items).toEqual([
-      { kind: 'skipped', name: 'web', field: 'Build Script', reason: 'pane.json already provides it', cause: 'config-file', source: 'pane.json' },
       { kind: 'new', name: 'web', field: 'Run Commands', text: 'C:\\Users\\Bo/bin/serve' },
       { kind: 'replaces', name: 'billing', field: 'Build Script', text: 'pnpm i && pnpm db:gen', was: 'pnpm i' },
-      { kind: 'skipped', name: 'marketing-site', reason: 'not in Pane on this computer', cause: 'missing' },
       { kind: 'new', name: 'scratch', field: 'Run Commands', text: 'make' },
+      { kind: 'skipped', name: 'web', field: 'Build Script', reason: 'pane.json already provides it', cause: 'config-file', source: 'pane.json' },
+      { kind: 'skipped', name: 'marketing-site', reason: 'not in Pane on this computer', cause: 'missing' },
       { kind: 'skipped', name: 'twin', reason: 'more than one repository in Pane is named twin', cause: 'ambiguous' },
     ]);
     expect(section?.apply.projects).toEqual([

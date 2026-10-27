@@ -1,8 +1,7 @@
 # Export and import your Pane setup
 
-**Settings › Import & Export** saves your Pane setup to a file and loads it on
-another computer. Search Settings for "export", "backup" or "new computer" to
-find it.
+**Settings › Import & Export**, after Privacy in the Settings sidebar, saves
+your Pane setup to a file and loads it on another computer.
 
 ## Export
 
@@ -20,7 +19,7 @@ folder** on Windows and Linux) opens its folder.
 | Terminal shortcuts | Every terminal shortcut |
 | Worktree file sync | Every file sync entry with a relative path |
 | Appearance | Appearance mode, themes, high contrast, UI scale, terminal font and size |
-| Preferences | Behavior toggles from General, Notifications, Shortcuts, Worktrees & Git and Advanced, new-Pane defaults (without the base branch), and the sidebar and `@terminal` choices |
+| Preferences | The current value of each behavior toggle from General, Notifications, Shortcuts, Worktrees & Git and Advanced, new-Pane defaults (without the base branch), and the sidebar and `@terminal` choices |
 
 ### What is never in the file
 

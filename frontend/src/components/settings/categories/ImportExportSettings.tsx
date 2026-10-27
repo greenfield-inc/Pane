@@ -76,7 +76,10 @@ const SKILL_PHRASES = {
 } as const;
 
 function previewMeta(section: SetupPreviewSection, preview: SetupImportPreview): string {
-  if (section.changes === 0) return 'No changes';
+  if (section.changes === 0) {
+    const skipped = section.items.filter((item) => item.kind === 'skipped').length;
+    return skipped > 0 ? `No changes · ${skipped} skipped` : 'No changes';
+  }
   switch (section.id) {
     case 'customCommands':
     case 'terminalShortcuts':
@@ -100,8 +103,9 @@ function previewMeta(section: SetupPreviewSection, preview: SetupImportPreview):
   }
 }
 
+const bold = (name: string) => <b className="font-semibold text-text-primary">{name}</b>;
+
 function Names({ names }: { names: readonly string[] }) {
-  const bold = (name: string) => <b className="font-semibold text-text-primary">{name}</b>;
   return (
     <>
       {names.map((name, index) => (
@@ -151,11 +155,13 @@ interface SetupRowProps {
   dimmed?: boolean;
   meta: ReactNode;
   onToggle: () => void;
+  /** The chevron stays usable on a row with nothing to import, so its skip reasons can be read. */
+  expandDisabled?: boolean;
   expanded?: boolean;
   onExpand?: () => void;
 }
 
-function SetupRow({ id, checked, disabled, dimmed, meta, onToggle, expanded, onExpand }: SetupRowProps) {
+function SetupRow({ id, checked, disabled, dimmed, meta, onToggle, expandDisabled, expanded, onExpand }: SetupRowProps) {
   const label = SETUP_SECTION_LABELS[id];
   const metaId = `setup-row-${id}-meta`;
   return (
@@ -174,7 +180,7 @@ function SetupRow({ id, checked, disabled, dimmed, meta, onToggle, expanded, onE
           aria-hidden="true"
           className={cn(
             'flex h-4 w-4 flex-none items-center justify-center rounded-full border-[1.5px]',
-            checked ? 'border-status-success bg-status-success text-text-on-status-success' : 'border-border-primary',
+            checked ? 'border-status-success bg-status-success text-text-on-status-success' : 'border-text-muted',
           )}
         >
           {checked && <Check className="h-2.5 w-2.5" strokeWidth={3} />}
@@ -187,7 +193,7 @@ function SetupRow({ id, checked, disabled, dimmed, meta, onToggle, expanded, onE
           type="button"
           aria-expanded={expanded}
           aria-label={`${expanded ? 'Hide' : 'Show'} ${label} changes`}
-          disabled={disabled}
+          disabled={expandDisabled ?? disabled}
           onClick={onExpand}
           className="mr-2 flex h-6 w-6 flex-none items-center justify-center rounded text-text-tertiary enabled:hover:bg-surface-hover enabled:hover:text-text-secondary"
         >
@@ -212,11 +218,13 @@ function PreviewItems({ section }: { section: SetupPreviewSection }) {
               </span>{' '}
               {item.name}
               {item.field && <span className="text-text-tertiary"> · {item.field}</span>}
-              <span className="ml-1.5 break-all font-mono text-text-tertiary">{item.text}</span>
-              {item.keyInUse && <span className="text-status-warning"> · key in use</span>}
-              {item.was !== undefined && (
-                <div className="ml-16 break-all font-mono text-text-tertiary">was {item.was}</div>
-              )}
+              <span className="ml-1.5 inline-flex flex-col align-top">
+                <span className="break-all font-mono text-text-tertiary">
+                  {item.text}
+                  {item.keyInUse && <span className="font-sans text-status-warning"> · key in use</span>}
+                </span>
+                {item.was !== undefined && <span className="break-all font-mono text-text-tertiary">was {item.was}</span>}
+              </span>
             </>
           )}
         </li>
@@ -292,6 +300,7 @@ export function SetupCard(props: SetupCardProps) {
                     id={section.id}
                     checked={!empty && selected.has(section.id)}
                     disabled={disabled || empty}
+                    expandDisabled={disabled}
                     dimmed={empty}
                     meta={previewMeta(section, preview)}
                     onToggle={() => props.onToggle(section.id)}
@@ -357,6 +366,10 @@ async function settle<T>(work: () => Promise<IPCResponse<T>>, fallback: string):
   }
 }
 
+const showFileInFolder = (path: string) => {
+  void window.electronAPI.invoke('app:showItemInFolder', path).catch(() => undefined);
+};
+
 const toggled = (set: ReadonlySet<SetupSectionId>, id: SetupSectionId) => {
   const next = new Set(set);
   if (!next.delete(id)) next.add(id);
@@ -384,29 +397,38 @@ export function ImportExportSettings({ persistence, platform }: { persistence: S
 
   useEffect(() => {
     if (connectionKnown) void loadSummary();
-  }, [connectionKnown, loadSummary, remote]);
+    // Reload when the window's host or any setting changes, so row summaries stay current.
+  }, [connectionKnown, loadSummary, remote, persistence.config]);
 
   const runExport = async () => {
     setBusy(true);
     setNotice(null);
-    const result = await settle(() => API.setup.export(SETUP_SECTION_IDS.filter((id) => exportSelected.has(id))), 'Pane could not save the file.');
-    if ('error' in result) setNotice({ kind: 'error', message: result.error });
-    else if (result.data) setNotice({ kind: 'saved', result: result.data });
-    setBusy(false);
+    try {
+      const result = await settle(() => API.setup.export(SETUP_SECTION_IDS.filter((id) => exportSelected.has(id))), 'Pane could not save the file.');
+      if ('error' in result) setNotice({ kind: 'error', message: result.error });
+      else if (result.data) setNotice({ kind: 'saved', result: result.data });
+    } finally {
+      setBusy(false);
+    }
   };
 
   const chooseImport = async () => {
     setBusy(true);
     setNotice(null);
-    const result = await settle(() => API.setup.chooseImport(), 'Pane could not read the file.');
-    if ('error' in result) {
-      setNotice({ kind: 'error', message: result.error });
-    } else if (result.data) {
-      setPreview(result.data);
-      setImportSelected(new Set(result.data.sections.filter((section) => section.changes > 0).map((section) => section.id)));
-      setExpanded(new Set());
+    try {
+      const result = await settle(() => API.setup.chooseImport(), 'Pane could not read the file.');
+      if ('error' in result) {
+        setNotice({ kind: 'error', message: result.error });
+      } else if (result.data) {
+        setPreview(result.data);
+        const changed = new Set<SetupSectionId>();
+        for (const section of result.data.sections) if (section.changes > 0) changed.add(section.id);
+        setImportSelected(changed);
+        setExpanded(new Set());
+      }
+    } finally {
+      setBusy(false);
     }
-    setBusy(false);
   };
 
   const savePreference = <K extends keyof SettingsPreferenceValues>(name: K, raw: Record<string, string>) =>
@@ -415,21 +437,20 @@ export function ImportExportSettings({ persistence, platform }: { persistence: S
   const confirmImport = async () => {
     if (!preview) return;
     setBusy(true);
-    const outcome = await applySetupImport(preview, importSelected, {
-      preview: (file, fileName) => API.setup.preview(file, fileName),
-      updateConfig,
-      savePreference: (key, value) => savePreference(PREFERENCE_NAME_BY_KEY[key], { [key]: value }),
-      updateProject: (projectId, updates) => API.projects.update(projectId, updates),
-      capture,
-    });
-    setPreview(null);
-    setNotice({ kind: outcome.kind === 'success' ? 'imported' : 'error', message: outcome.message });
-    setBusy(false);
+    try {
+      const outcome = await applySetupImport(preview, importSelected, {
+        preview: (file, fileName) => API.setup.preview(file, fileName),
+        updateConfig,
+        savePreference: (key, value) => savePreference(PREFERENCE_NAME_BY_KEY[key], { [key]: value }),
+        updateProject: (projectId, updates) => API.projects.update(projectId, updates),
+        capture,
+      });
+      setPreview(null);
+      setNotice({ kind: outcome.kind === 'success' ? 'imported' : 'error', message: outcome.message });
+    } finally {
+      setBusy(false);
+    }
     await loadSummary();
-  };
-
-  const showFile = (path: string) => {
-    void window.electronAPI.invoke('app:showItemInFolder', path).catch(() => undefined);
   };
 
   return (
@@ -449,7 +470,7 @@ export function ImportExportSettings({ persistence, platform }: { persistence: S
         onImport={() => void chooseImport()}
         onCancel={() => setPreview(null)}
         onConfirm={() => void confirmImport()}
-        onShowFile={showFile}
+        onShowFile={showFileInFolder}
       />
     </SettingsPage>
   );

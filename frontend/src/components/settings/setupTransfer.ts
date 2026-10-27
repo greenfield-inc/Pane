@@ -102,7 +102,9 @@ export async function applySetupImport(
   try {
     failing = sections.filter((section) => section.apply.config);
     if (failing.length) {
-      await deps.updateConfig(failing.reduce<UpdateConfigRequest>((patch, section) => ({ ...patch, ...section.apply.config }), {}));
+      const patch: UpdateConfigRequest = {};
+      for (const section of failing) Object.assign(patch, section.apply.config);
+      await deps.updateConfig(patch);
     }
     completeWhere((section) => Boolean(section.apply.preferences || section.apply.projects?.length));
 

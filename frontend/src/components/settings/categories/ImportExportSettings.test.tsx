@@ -95,11 +95,9 @@ const button = (markup: string, needle: string) => {
 const rowButton = (markup: string, label: string) => button(markup, `aria-label="${label}"`);
 
 describe('Import & Export settings card', () => {
-  it('is a category after Privacy that search finds by its aliases', () => {
+  it('is a category after Privacy', () => {
     const ids = SETTINGS_CATEGORIES.map((category) => category.id);
     expect(ids.indexOf('import-export')).toBe(ids.indexOf('privacy') + 1);
-    expect(SETTINGS_CATEGORIES.find((category) => category.id === 'import-export')?.aliases)
-      .toEqual(expect.arrayContaining(['export', 'backup', 'new computer']));
   });
 
   it('A: lists every section checked with its summary, Import… before Export…', () => {
@@ -167,6 +165,22 @@ describe('Import & Export settings card', () => {
     expect(visible).toContain('Terminal shortcutsNo changes');
     expect(visible).toContain('Import 5 sections');
     expect(visible).not.toContain('Export…');
+  });
+
+  it('C: keeps the skip reasons of a section with nothing to import readable', () => {
+    const onlySkips = {
+      ...preview,
+      sections: [{
+        id: 'runScripts' as const, changes: 0, added: 0, replaced: 0, keyInUse: 0, repositories: { matched: 0, total: 1 }, apply: {},
+        items: [{ kind: 'skipped' as const, name: 'tool', reason: 'more than one repository in Pane is named tool', cause: 'ambiguous' as const }],
+      }],
+    };
+    const collapsed = render({ preview: onlySkips });
+    expect(text(collapsed)).toContain('Run scriptsNo changes · 1 skipped');
+    expect(rowButton(collapsed, 'Run scripts')).toContain('disabled=""');
+    expect(button(collapsed, 'Show Run scripts changes')).not.toContain('disabled=""');
+    expect(text(render({ preview: onlySkips, expanded: new Set<SetupSectionId>(['runScripts']) })))
+      .toContain('tool · more than one repository in Pane is named tool, skipped');
   });
 
   it('C: labels scripts written on another OS', () => {
