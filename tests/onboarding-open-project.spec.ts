@@ -104,6 +104,21 @@ test('lists found repos newest first and opens the selected one', async ({ page 
   expect(await preferences(page)).toMatchObject({ onboarding_repo_setup: 'true', onboarding_open_project_screen: 'seen' });
 });
 
+test('arrow keys move the selection through the repo list', async ({ page }) => {
+  const dialog = await openFirstRun(page, { host: { repos: MAC_REPOS, shells: [], wslDistro: null } });
+  const rows = dialog.getByRole('radio');
+
+  await rows.nth(0).focus();
+  await page.keyboard.press('ArrowDown');
+
+  await expect(rows.nth(1)).toBeFocused();
+  await expect(rows.nth(1)).toHaveAttribute('aria-checked', 'true');
+  await expect(dialog.getByRole('button', { name: 'Open billing-api' })).toBeEnabled();
+  await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('ArrowUp');
+  await expect(rows.nth(2)).toHaveAttribute('aria-checked', 'true');
+});
+
 test('loading, empty and three results share one dialog height', async ({ page }) => {
   const loading = await openFirstRun(page, { host: { repos: MAC_REPOS, shells: [], wslDistro: null }, hostDelayMs: 60_000 });
   await expect(loading.getByRole('button', { name: 'Open', exact: true })).toBeDisabled();

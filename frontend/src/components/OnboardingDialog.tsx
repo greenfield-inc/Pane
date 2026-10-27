@@ -249,8 +249,10 @@ function RepoList({ repos, emptyText, compact, label, selectedPath, disabled, on
 
   return (
     <div role="radiogroup" aria-label={label} className={cn(minHeight, 'space-y-1.5')}>
-      {repos.map(repo => {
+      {repos.map((repo, index) => {
         const selected = repo.path === selectedPath;
+        // One Tab stop per list (the selected row, else the first); arrows move the selection.
+        const tabStop = selected || (index === 0 && !repos.some(other => other.path === selectedPath));
         const lastCommit = repo.lastCommitAt === null ? '' : formatTimeAgo(new Date(repo.lastCommitAt).toISOString());
         return (
           <button
@@ -259,17 +261,26 @@ function RepoList({ repos, emptyText, compact, label, selectedPath, disabled, on
             role="radio"
             aria-checked={selected}
             disabled={disabled}
+            tabIndex={tabStop ? 0 : -1}
             onClick={() => onSelect(repo)}
             onDoubleClick={() => onOpen(repo)}
+            onKeyDown={(event) => {
+              const step = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }[event.key];
+              if (!step) return;
+              event.preventDefault();
+              const next = (index + step + repos.length) % repos.length;
+              onSelect(repos[next]);
+              event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="radio"]')[next]?.focus();
+            }}
             className={cn(
               'flex h-9 w-full items-center gap-2.5 rounded-lg border bg-surface-secondary px-3 text-left text-sm transition-colors disabled:cursor-default',
               selected ? 'border-interactive ring-1 ring-interactive' : 'border-border-secondary hover:bg-surface-hover',
             )}
           >
             <Folder className="h-4 w-4 shrink-0 text-text-tertiary" aria-hidden="true" />
-            <span className="max-w-[50%] shrink-0 truncate font-medium text-text-primary">{repo.name}</span>
+            <span className="min-w-0 max-w-[50%] truncate font-medium text-text-primary">{repo.name}</span>
             {!compact && <span className="min-w-0 truncate text-text-tertiary">{repo.displayPath}</span>}
-            <span className="ml-auto shrink-0 pl-2 text-xs text-text-tertiary">
+            <span className="ml-auto min-w-0 max-w-[45%] truncate pl-2 text-xs text-text-tertiary">
               {compact ? parentFolder(repo.displayPath) : [repo.branch, lastCommit].filter(Boolean).join(' · ')}
             </span>
           </button>
@@ -354,8 +365,10 @@ export default function OnboardingDialog({ isOpen, onClose }: OnboardingDialogPr
   const wslDistro = host?.wslDistro ?? null;
   const wslRepos = wsl?.status === 'ready' ? wsl.result.repos : [];
   const allRepos = [...(host?.repos ?? []), ...wslRepos];
-  const selected = allRepos.find(repo => repo.path === pickedPath) ?? newestRepo(allRepos);
-  const isLoading = host === null || wsl?.status === 'loading';
+  // Until the WSL column answers, nothing is preselected, so the pick can't jump under the cursor.
+  const awaitingWsl = wsl?.status === 'loading';
+  const selected = allRepos.find(repo => repo.path === pickedPath) ?? (awaitingWsl ? undefined : newestRepo(allRepos));
+  const isLoading = host === null || awaitingWsl;
   const nothingFound = !isLoading && allRepos.length === 0;
   const gitMissing = env !== null && !env.gitInstalled;
   const isBusy = isOpening || sample.status === 'running';
@@ -544,7 +557,7 @@ export default function OnboardingDialog({ isOpen, onClose }: OnboardingDialogPr
             ) : sample.status === 'failed' ? (
               <div className="flex items-center gap-3 text-xs text-status-error" role="alert">
                 <span>Couldn&apos;t set up the sample repo: {sample.reason}. Check your connection and try again.</span>
-                <Button variant="secondary" size="sm" onClick={() => void setUpSample()}>Try again</Button>
+                <Button variant="secondary" size="sm" className="shrink-0 whitespace-nowrap" onClick={() => void setUpSample()}>Try again</Button>
               </div>
             ) : (
               <p className="text-xs text-text-tertiary">
@@ -576,7 +589,7 @@ export default function OnboardingDialog({ isOpen, onClose }: OnboardingDialogPr
             loadingText={selected ? `Open ${selected.name}` : 'Open'}
             onClick={() => selected && openRepo(selected)}
           >
-            {selected ? `Open ${selected.name}` : 'Open'}
+            <span className="block max-w-[16rem] truncate">{selected ? `Open ${selected.name}` : 'Open'}</span>
           </Button>
         )}
       </ModalFooter>
