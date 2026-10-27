@@ -84,10 +84,8 @@ test('steps tick from projects and Panes, ignoring the sample repo, until the ca
 
   await expectSteps(page, [`${STEPS[0]} (done)`, `${STEPS[1]}Start`, STEPS[2], STEPS[3]]);
   await card(page).getByRole('button', { name: 'Start' }).click();
-  const createDialog = page.getByRole('dialog').filter({ hasText: 'acme-web' });
-  await expect(createDialog).toBeVisible();
-  await page.keyboard.press('Escape');
-  await expect(createDialog).toBeHidden();
+  await expect(page.getByRole('region', { name: 'Start a task' })).toBeVisible();
+  await page.getByRole('button', { name: 'Home', exact: true }).click();
 
   await addPane(page, pane('fix-login-redirect', 2, 20));
   await expectSteps(page, [`${STEPS[0]} (done)`, `${STEPS[1]} (done)`, `${STEPS[2]}Start`, STEPS[3]]);

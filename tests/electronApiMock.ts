@@ -15,7 +15,7 @@ import type { TailnetMachineList, WorkspaceAccessSummary } from '../shared/types
 import type { JsonObject, JsonValue } from '../shared/validation/boundaryDecoder';
 import { DEFAULT_APPEARANCE, LIGHT_THEMES, normalizeAppearance, type AppearanceConfig } from '../shared/types/appearance';
 import type { DiffManifest, DiffScope, FileDiffResult } from '../shared/types/gitDiff';
-import type { RunpaneAgentDoctorResult } from '../shared/types/runpaneOrchestration';
+import type { RunpaneAgentDoctorResult, RunpanePaneCreateRequest } from '../shared/types/runpaneOrchestration';
 
 type MockEventValue = JsonValue | object | undefined;
 type MockEventCallback = (...args: MockEventValue[]) => void;
@@ -111,6 +111,8 @@ export type ElectronApiMockOptions = {
   agentDoctor?: Partial<Record<'claude' | 'codex' | 'cursor' | 'opencode', { available: boolean; signIn?: 'signed-in' | 'signed-out' | 'unknown' }>>;
   /** Delay before runpane:agents:doctor answers, or `hold` to leave every check pending. */
   agentDoctorDelayMs?: number | 'hold';
+  /** runpane:panes:create fails with this message instead of adding the Pane. */
+  paneCreateError?: string;
 };
 
 export async function installElectronApiMock(page: Page, options: ElectronApiMockOptions = {}) {
@@ -596,6 +598,23 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         if (answer.available) result.signIn = answer.signIn ?? 'unknown';
         if (mockOptions.agentDoctorDelayMs === 'hold') return new Promise(() => undefined);
         return new Promise(resolve => setTimeout(() => resolve(clone(result)), mockOptions.agentDoctorDelayMs ?? 0));
+      }
+      if (channel === 'runpane:panes:create') {
+        // SAFETY: The Start a task card sends runpane:panes:create a request with the repo's id.
+        const request = args[0] as RunpanePaneCreateRequest & { repo: { id: number } };
+        const item = request.panes[0];
+        if (mockOptions.paneCreateError) return Promise.reject(new Error(`Error invoking remote method 'invoke': Error: ${mockOptions.paneCreateError}`));
+        const at = new Date().toISOString();
+        const sessionId = `created-${item.name}`;
+        // Stands in for main creating the Pane and its agent tab.
+        const session: JsonObject = {
+          id: sessionId, name: item.name, projectId: request.repo.id, worktreePath: `/tmp/worktrees/${item.name}`, prompt: '',
+          status: 'running', createdAt: at, lastActivity: at, output: [], jsonMessages: [], permissionMode: 'ignore',
+          toolType: 'none', archived: false, isHidden: false, isFavorite: false,
+        };
+        mockSessions.push(clone(session));
+        emit('session:created', clone(session));
+        return Promise.resolve({ ok: true, items: [{ ok: true, index: 0, name: item.name, sessionId, paneId: sessionId }] });
       }
       if (channel === 'runpane:panels:resume') {
         // SAFETY: The exit card sends runpane:panels:resume a { panelId } request.

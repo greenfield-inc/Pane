@@ -27,6 +27,7 @@ import { useProjectViewActionsStore } from '../stores/projectViewActionsStore';
 import { useNavigationStore } from '../stores/navigationStore';
 import { PANEL_CAPABILITIES } from '../../../shared/types/panels';
 import type { ProjectEnvironment } from '../../../shared/types/panels';
+import { StartTaskCard } from './StartTaskCard';
 
 interface ProjectViewProps {
   projectId: number;
@@ -102,6 +103,9 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
   }, [detailVisible]);
 
   const immersiveMode = useNavigationStore(s => s.immersiveMode);
+  // "New task…" and the first steps show the card even over this checkout's tabs, until a tab is chosen.
+  const startTaskRequested = useNavigationStore(s => s.startTaskProjectId === projectId);
+  const clearStartTask = useNavigationStore(s => s.clearStartTask);
   const projectContentBox = useObservedContentBox<HTMLDivElement>();
   const detailResize = useOuterPanelResize({
     config: OUTER_PANEL_CONFIGS.projectInspector,
@@ -251,10 +255,11 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
   const handlePanelSelect = useCallback(
     async (panel: ToolPanel) => {
       if (!mainRepoSessionId) return;
+      clearStartTask();
       setActivePanelInStore(mainRepoSessionId, panel.id);
       await panelApi.setActivePanel(mainRepoSessionId, panel.id);
     },
-    [mainRepoSessionId, setActivePanelInStore]
+    [mainRepoSessionId, setActivePanelInStore, clearStartTask]
   );
 
   const handlePanelClose = useCallback(
@@ -305,9 +310,10 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
       // The panel:created event will also fire, but addPanel checks for duplicates
       addPanel(newPanel);
       setActivePanelInStore(mainRepoSessionId, newPanel.id);
+      if (type !== 'explorer' && type !== 'diff') clearStartTask();
       return newPanel;
     },
-    [mainRepoSessionId, addPanel, setActivePanelInStore]
+    [mainRepoSessionId, addPanel, setActivePanelInStore, clearStartTask]
   );
 
   const handleOpenUrlInBrowser = useCallback(async (url: string, title: string) => {
@@ -519,7 +525,13 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
                     <div className="h-3 w-2/3 bg-surface-tertiary rounded" />
                   </div>
                 </div>
-              ) : workingPanels.length > 0 && currentActivePanel ? (
+              ) : startTaskRequested || workingPanels.length === 0 ? (
+                <StartTaskCard
+                  projectId={projectId}
+                  projectEnvironment={projectEnvironment}
+                  openTerminal={options => { void handlePanelCreate('terminal', options); }}
+                />
+              ) : currentActivePanel ? (
                 workingPanels.map(panel => {
                   const isActive = panel.id === currentActivePanel.id;
                   return (
@@ -539,17 +551,7 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
                     </div>
                   );
                 })
-              ) : (
-                <div className="flex h-full items-center justify-center">
-                  <button
-                    type="button"
-                    onClick={() => handlePanelCreate('terminal')}
-                    className="flex h-7 items-center gap-2 rounded px-3 text-[13px] text-text-secondary hover:bg-surface-hover hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle"
-                  >
-                    Open a terminal
-                  </button>
-                </div>
-              )}
+              ) : null}
             </div>
 
             {/* Right: detail panel */}

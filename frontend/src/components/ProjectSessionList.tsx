@@ -26,6 +26,7 @@ import { usePanelStore } from '../stores/panelStore';
 import { useAttentionInboxStore } from '../stores/attentionInboxStore';
 import { rollupSessionAgentState } from '../utils/agentStatus';
 import { OrchestrationSessionNav } from './OrchestrationSessionNav';
+import { useFirstSteps } from './FirstStepsCard';
 import { useSshHostsStore } from '../stores/sshHostsStore';
 import { navigateToLoops, useLoopsStore } from '../stores/loopsStore';
 import { useAnyLoopRunning } from './loops/loopRunView';
@@ -112,6 +113,11 @@ export function ProjectSessionList({
   const orchestrationAvailability = useOrchestrationSessionStore(s => s.availability);
   const selectOrchestrationSession = useOrchestrationSessionStore(s => s.select);
   const navigateToProject = useNavigationStore(s => s.navigateToProject);
+  const navigateToStartTask = useNavigationStore(s => s.navigateToStartTask);
+  const startTaskProjectId = useNavigationStore(s => s.startTaskProjectId);
+  // New users get a "New task…" row under each project while "Your first steps" is active.
+  const firstSteps = useFirstSteps(projects);
+  const showNewTaskRows = firstSteps !== null && firstSteps !== 'loading';
   const navigateToMissionControl = useNavigationStore(s => s.navigateToMissionControl);
   const missionControlEnabled = useConfigStore(s => isMissionControlEnabled(s.config));
   const setSidebarNavigationScope = useNavigationStore(s => s.setSidebarNavigationScope);
@@ -666,6 +672,20 @@ export function ProjectSessionList({
                     />
                   ))}
                 </div>
+              )}
+              {isExpanded && showNewTaskRows && (
+                <button
+                  type="button"
+                  onClick={() => navigateToStartTask(project.id)}
+                  aria-current={activeView === 'project' && startTaskProjectId === project.id ? 'page' : undefined}
+                  className={cn(
+                    'mx-2 flex w-[calc(100%-1rem)] items-center gap-1.5 rounded-md py-1 pl-6 pr-2 text-left text-[13px] text-interactive transition-colors focus:outline-none focus:ring-2 focus:ring-inset focus:ring-interactive',
+                    activeView === 'project' && startTaskProjectId === project.id ? 'bg-surface-selected' : 'hover:bg-surface-hover',
+                  )}
+                >
+                  <Plus className="h-3.5 w-3.5 flex-shrink-0" />
+                  <span className="truncate">New task…</span>
+                </button>
               )}
             </div>
           );

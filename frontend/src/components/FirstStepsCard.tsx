@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Check } from 'lucide-react';
+import { create } from 'zustand';
 import { API } from '../utils/api';
 import { cn } from '../utils/cn';
 import { useSessionStore } from '../stores/sessionStore';
 import { useNavigationStore } from '../stores/navigationStore';
 import { Button } from './ui/Button';
-import { CreateSessionDialog } from './CreateSessionDialog';
 import { ONBOARDING_OPEN_PROJECT_SCREEN_PREFERENCE, OPEN_PROJECT_SCREEN_SEEN } from './OnboardingDialog';
 import type { Project } from '../types/project';
 import type { Session } from '../types/session';
@@ -38,6 +38,31 @@ function normalizePath(value: string): string {
   return value.replace(/[\\/]+$/, '');
 }
 
+interface FirstStepsGate {
+  gate: 'loading' | 'active' | 'inactive';
+  samplePath: string | null;
+}
+
+// Shared by Home's card and the sidebar's "New task…" rows, so Hide or done applies to both at once.
+const useGateStore = create<FirstStepsGate>(() => ({ gate: 'loading', samplePath: null }));
+
+async function checkGate(): Promise<void> {
+  try {
+    const [seen, state] = await Promise.all([
+      API.preferences.get(ONBOARDING_OPEN_PROJECT_SCREEN_PREFERENCE),
+      API.preferences.get(FIRST_STEPS_PREFERENCE),
+    ]);
+    const active = seen === OPEN_PROJECT_SCREEN_SEEN && state !== 'done' && state !== 'hidden';
+    if (active) {
+      const sample = await window.electronAPI.onboarding.sampleRepoPath();
+      if (sample.success && sample.data) useGateStore.setState({ samplePath: normalizePath(sample.data) });
+    }
+    useGateStore.setState({ gate: active ? 'active' : 'inactive' });
+  } catch {
+    useGateStore.setState({ gate: 'inactive' });
+  }
+}
+
 /**
  * Home's "Your first steps" for installs that saw the "Open your project"
  * screen. Ticks come from the projects and Panes Pane already has, ignoring
@@ -46,36 +71,16 @@ function normalizePath(value: string): string {
  */
 export function useFirstSteps(projects: Project[] | null): FirstSteps | 'loading' | null {
   const sessions = useSessionStore(state => state.sessions);
-  const [gate, setGate] = useState<'loading' | 'active' | 'inactive'>('loading');
-  const [samplePath, setSamplePath] = useState<string | null>(null);
+  const gate = useGateStore(state => state.gate);
+  const samplePath = useGateStore(state => state.samplePath);
   const [archived, setArchived] = useState<Array<Project & { sessions: Session[] }> | null>(null);
 
   // The first screen writes its "seen" preference after Home mounts, and its close fires project-changed.
   useEffect(() => {
-    let cancelled = false;
-    const check = async () => {
-      try {
-        const [seen, state] = await Promise.all([
-          API.preferences.get(ONBOARDING_OPEN_PROJECT_SCREEN_PREFERENCE),
-          API.preferences.get(FIRST_STEPS_PREFERENCE),
-        ]);
-        const active = seen === OPEN_PROJECT_SCREEN_SEEN && state !== 'done' && state !== 'hidden';
-        if (active) {
-          const sample = await window.electronAPI.onboarding.sampleRepoPath();
-          if (!cancelled && sample.success && sample.data) setSamplePath(normalizePath(sample.data));
-        }
-        if (!cancelled) setGate(active ? 'active' : 'inactive');
-      } catch {
-        if (!cancelled) setGate('inactive');
-      }
-    };
-    void check();
-    const handler = () => void check();
+    void checkGate();
+    const handler = () => void checkGate();
     window.addEventListener('project-changed', handler);
-    return () => {
-      cancelled = true;
-      window.removeEventListener('project-changed', handler);
-    };
+    return () => window.removeEventListener('project-changed', handler);
   }, []);
 
   const ownProjects = useMemo(
@@ -120,8 +125,8 @@ export function useFirstSteps(projects: Project[] | null): FirstSteps | 'loading
   const allDone = isReady && steps.every(step => step.done);
 
   const finish = useCallback((state: 'done' | 'hidden') => {
-    setGate('inactive');
-    void API.preferences.set(FIRST_STEPS_PREFERENCE, state).catch(() => setGate('active'));
+    useGateStore.setState({ gate: 'inactive' });
+    void API.preferences.set(FIRST_STEPS_PREFERENCE, state).catch(() => useGateStore.setState({ gate: 'active' }));
   }, []);
 
   useEffect(() => {
@@ -145,8 +150,8 @@ export function useFirstSteps(projects: Project[] | null): FirstSteps | 'loading
 export function FirstStepsCard({ firstSteps }: { firstSteps: FirstSteps }) {
   const { steps, newestProject, newestPane, hide } = firstSteps;
   const navigateToSessions = useNavigationStore(s => s.navigateToSessions);
+  const navigateToStartTask = useNavigationStore(s => s.navigateToStartTask);
   const setActiveSession = useSessionStore(state => state.setActiveSession);
-  const [createFor, setCreateFor] = useState<Project | null>(null);
   const next = steps.find(step => !step.done);
 
   const run = (id: StepId) => {
@@ -157,7 +162,7 @@ export function FirstStepsCard({ firstSteps }: { firstSteps: FirstSteps }) {
       navigateToSessions();
       setActiveSession(newestPane.id).catch(() => {});
     } else if (newestProject) {
-      setCreateFor(newestProject);
+      navigateToStartTask(newestProject.id);
     }
   };
 
@@ -215,15 +220,6 @@ export function FirstStepsCard({ firstSteps }: { firstSteps: FirstSteps }) {
           );
         })}
       </ol>
-
-      {createFor && (
-        <CreateSessionDialog
-          isOpen
-          onClose={() => setCreateFor(null)}
-          projectName={createFor.name}
-          projectId={createFor.id}
-        />
-      )}
     </section>
   );
 }
