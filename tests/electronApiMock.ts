@@ -902,6 +902,8 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           configState.defaultOrchestratorAgent = agent === 'codex' || agent === 'cursor' ? agent : 'claude';
           return success(createPaneChatState());
         },
+        // No smoke test sees the one-time Pane Chat offer.
+        introOffer: () => success({ eligible: false, openingPromptAtLaunch: true }),
       }),
       sshHosts: namespace({
         list: () => {

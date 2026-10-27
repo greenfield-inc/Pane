@@ -3,7 +3,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { ProjectSessionList, ArchivedSessions } from './ProjectSessionList';
 import { ArchiveProgress } from './ArchiveProgress';
-import { ArrowUpDown, BookOpen, ChevronDown, ChevronRight, Info, LayoutGrid, FolderGit2, Home, Laptop, Monitor, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pin, Settings as SettingsIcon, Plus, RefreshCw, MessageSquare, Repeat, Server, SquareTerminal } from 'lucide-react';
+import { ArrowUpDown, BookOpen, ChevronDown, ChevronRight, Info, LayoutGrid, FolderGit2, Home, Laptop, Monitor, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pin, Settings as SettingsIcon, Plus, RefreshCw, MessageSquare, Repeat, Search, Server, SquareTerminal } from 'lucide-react';
 import { SessionDetailTooltip } from './SessionDetailTooltip';
 import { IconButton } from './ui/Button';
 import { Tooltip } from './ui/Tooltip';
@@ -138,6 +138,8 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
     const keys = hotkeys.get(id)?.keys;
     return keys ? formatKeyDisplay(keys) : null;
   }, [hotkeys]);
+  // The sidebar's search opens the same launcher as its shortcut.
+  const openSearch = useCallback(() => hotkeys.get('open-command-palette')?.action(), [hotkeys]);
   const { version, gitCommit, worktreeName } = useAppBuildInfo();
   const [sessionSortAscending, setSessionSortAscending] = useState<boolean>(true); // Default to ascending (newest at bottom)
   const [sidebarSectionExpansion, setSidebarSectionExpansion] = useState<Record<SidebarSection, boolean>>({
@@ -531,6 +533,9 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
                 </button>
               </Tooltip>
             )}
+            <Tooltip content={<span className="flex items-center gap-2">Search{hotkeyDisplay('open-command-palette') && <Kbd>{hotkeyDisplay('open-command-palette')}</Kbd>}</span>} side="right">
+              <button type="button" data-compact-rail-item aria-label="Search" onClick={openSearch} className={`${COMPACT_RAIL_BUTTON} ${COMPACT_RAIL_IDLE}`}><Search className="h-4 w-4" /></button>
+            </Tooltip>
             <Tooltip content="New" side="right">
               <button type="button" data-compact-rail-item aria-label="New" onClick={() => setShowNewDialog(true)} className={`${COMPACT_RAIL_BUTTON} ${COMPACT_RAIL_IDLE}`}><Plus className="h-4 w-4" /></button>
             </Tooltip>
@@ -841,6 +846,18 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
               {headerControls}
             </div>
           )}
+
+        <button
+          type="button"
+          onClick={openSearch}
+          className="mx-2 mt-1 flex h-[30px] flex-shrink-0 items-center gap-2 rounded-input border border-border-primary bg-surface-primary px-2 text-[13px] text-text-muted hover:border-border-hover hover:text-text-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-interactive"
+        >
+          <Search className="h-3.5 w-3.5 flex-shrink-0" />
+          <span>Search</span>
+          {hotkeyDisplay('open-command-palette') && (
+            <Kbd size="xs" variant="muted" className="ml-auto">{hotkeyDisplay('open-command-palette')}</Kbd>
+          )}
+        </button>
 
         <button
           type="button"

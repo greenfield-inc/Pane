@@ -165,6 +165,8 @@ interface ElectronAPI {
   paneChat: {
     getOrCreate: () => Promise<IPCResponse<PaneChatState<Session>>>;
     setAgent: (agent: PaneChatAgent) => Promise<IPCResponse<PaneChatState<Session>>>;
+    /** Whether to offer Pane Chat now; see main/src/services/paneChatIntroOffer.ts. */
+    introOffer: () => Promise<IPCResponse<{ eligible: boolean; openingPromptAtLaunch: boolean }>>;
   };
 
   sshHosts: {

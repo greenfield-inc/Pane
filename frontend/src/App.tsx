@@ -12,6 +12,7 @@ import { useFocusedSurfaceScrolling } from './hooks/useFocusedSurfaceScrolling';
 import { ShortcutHintsOverlay } from './components/ShortcutHintsOverlay';
 import { Sidebar } from './components/Sidebar';
 import { SessionView } from './components/SessionView';
+import { PaneChatIntroOffer } from './components/PaneChatIntroOffer';
 import Welcome from './components/Welcome';
 import Help from './components/Help';
 import OnboardingDialog, {
@@ -98,6 +99,8 @@ function App() {
   const supportPromptCheckStarted = useRef(false);
 
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  // Each opening mounts a fresh launcher: empty query, All, nothing selected.
+  const [searchOpenCount, setSearchOpenCount] = useState(0);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [settingsCategory, setSettingsCategory] = useState<SettingsCategoryId>('general');
   const [settingsOpenRequest, setSettingsOpenRequest] = useState<SettingsOpenRequest>();
@@ -111,6 +114,7 @@ function App() {
   const [showAddProjectDialog, setShowAddProjectDialog] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const activeProjectId = useNavigationStore(s => s.activeProjectId);
+  const navigateToProject = useNavigationStore(s => s.navigateToProject);
   const sidebarCollapsed = useNavigationStore(s => s.sidebarCollapsed);
   const [titleBarControlsSlot, setTitleBarControlsSlot] = useState<HTMLDivElement | null>(null);
   const setSidebarCollapsed = useNavigationStore(s => s.setSidebarCollapsed);
@@ -208,10 +212,13 @@ function App() {
 
   useHotkey({
     id: 'open-command-palette',
-    label: 'Open Command Palette',
+    label: 'Open Search',
     keys: 'mod+shift+p',
     category: 'navigation',
-    action: () => setIsCommandPaletteOpen(true),
+    action: () => {
+      setSearchOpenCount(count => count + 1);
+      setIsCommandPaletteOpen(true);
+    },
   });
 
   useHotkey({
@@ -333,6 +340,11 @@ function App() {
     };
   }, []);
 
+  const handleNewPaneInProject = useCallback((projectId: number) => {
+    navigateToProject(projectId);
+    setShowCreateSessionDialog(true);
+  }, [navigateToProject]);
+
   const activeProject = useMemo(() => {
     if (activeProjectId) return projects.find(p => p.id === activeProjectId);
     return projects.find(p => p.active) || projects[0];
@@ -388,6 +400,9 @@ function App() {
 
         if (!hasLegacyChoice && !hasAppliedDefault) {
           const identity = await resolveAnalyticsIdentity();
+          // A config change during the identity lookup restarts this effect;
+          // only the latest run captures and aliases.
+          if (cancelled) return;
 
           initPostHog({
             enabled: true,
@@ -912,7 +927,10 @@ function App() {
             onUpdateAvailableClick={() => void openAvailableUpdate()}
           />
         </div>
-        <SessionView />
+        <div className="relative flex min-h-0 min-w-0 flex-1">
+          <SessionView />
+          <PaneChatIntroOffer suppressed={isSettingsOpen || isOnboardingOpen || isWelcomeOpen} />
+        </div>
         </div>
         <OnboardingDialog
           isOpen={isOnboardingOpen}
@@ -957,8 +975,11 @@ function App() {
           />
         )}
         <CommandPalette
+          key={searchOpenCount}
           isOpen={isCommandPaletteOpen}
           onClose={() => setIsCommandPaletteOpen(false)}
+          projects={projects}
+          onNewPane={handleNewPaneInProject}
         />
         {showCreateSessionDialog && activeProject && (
           <CreateSessionDialog

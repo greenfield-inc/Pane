@@ -1167,6 +1167,9 @@ async function initializeServices() {
   leaderboardService = new LeaderboardService(configManager);
   registerLeaderboardHandlers(ipcMain, leaderboardService);
 
+  // Read before the first identity lookup overwrites it, so the renderer can
+  // tell when the desktop id changed since the last launch.
+  const previousAnalyticsDistinctId = configManager.getAnalyticsDistinctId();
   ipcMain.handle('analytics:get-identity', async () => {
     try {
       const installId = await configManager.getOrCreateAnalyticsInstallId();
@@ -1187,6 +1190,7 @@ async function initializeServices() {
       identity.webAttributionPresent = webDistinctId !== undefined;
       identity.isFirstLaunch = isFirstLaunch;
       identity.previousVersion = previousVersion;
+      identity.previousDistinctId = previousAnalyticsDistinctId;
       await configManager.setAnalyticsIdentity(identity);
       return { success: true, data: identity };
     } catch (error) {

@@ -79,6 +79,7 @@ from .telemetry import (
     apply_parsed_args_to_telemetry_context,
     categorize_failure,
     create_initial_telemetry_context,
+    record_failure_cause,
     set_setup_selection,
     track_wrapper_event,
 )
@@ -255,7 +256,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             parsed = parse_args(effective_argv)
         except Exception as error:
             telemetry_context["failure_stage"] = "parse"
-            telemetry_context["failure_category"] = categorize_failure(error)
+            telemetry_context["failure_category"] = "validation"
+            record_failure_cause(telemetry_context, error)
             track_wrapper_event("runpane_wrapper_command_failed", telemetry_context)
             raise
         apply_parsed_args_to_telemetry_context(telemetry_context, parsed)
@@ -298,17 +300,20 @@ def dispatch_parsed_command(parsed: ParsedArgs, telemetry_context: WrapperTeleme
 
 
 def run_tracked_command(telemetry_context: WrapperTelemetryContext, execute: Callable[[], int]) -> int:
+    """Reports real failures only: anything raised, and a non-zero exit from the wrapper's own install or
+    update work. Other commands' exit codes are documented results (panels wait not ready, doctor
+    findings, watch timeouts) and send nothing."""
     try:
         code = execute()
         telemetry_context["exit_code"] = code
-        if code != 0:
+        if code != 0 and telemetry_context.get("resolved_command") in {"install", "update"}:
             telemetry_context.setdefault("failure_stage", infer_failure_stage(telemetry_context))
             telemetry_context.setdefault("failure_category", "process_exit")
             track_wrapper_event("runpane_wrapper_command_failed", telemetry_context)
         return code
     except Exception as error:
         telemetry_context.setdefault("failure_stage", "unknown")
-        telemetry_context.setdefault("failure_category", categorize_failure(error))
+        record_failure_cause(telemetry_context, error)
         track_wrapper_event("runpane_wrapper_command_failed", telemetry_context)
         raise
 

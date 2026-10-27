@@ -18,7 +18,7 @@ import {
 import type { RestartToUpdateSource } from '../../../shared/types/updater';
 import { paneErrorText, PaneError } from '../../../shared/paneError';
 
-const MAC_UPDATE_COMMAND = 'curl -fsSL https://runpane.com/install.sh | sh';
+export const MAC_UPDATE_COMMAND = 'curl -fsSL https://runpane.com/install.sh | sh';
 
 const RESTART_SOURCES: readonly RestartToUpdateSource[] = ['toast', 'pill', 'tonight', 'runpane'];
 
