@@ -1,4 +1,7 @@
+import fs from 'fs';
 import net from 'net';
+import os from 'os';
+import path from 'path';
 import { pipeline } from 'stream';
 import { createWebSocketStream, type WebSocket } from 'ws';
 
@@ -30,9 +33,17 @@ const LOOPBACK_HOSTS = ['127.0.0.1', '::1'] as const;
 const MAX_PORT_ATTEMPTS = 20;
 const ANSWER_PROBE_TIMEOUT_MS = 300;
 const MAX_PORT = 65_535;
+/**
+ * Every Pane process on this machine lists its tunnel listeners here, one file per pid, so hosts
+ * leave them out of their Ports lists. Otherwise two desktops would mirror each other's
+ * listeners without end: two clients of one host, or two Panes connected to each other.
+ */
+const TUNNEL_REGISTRY_DIR = path.join(os.tmpdir(), 'pane-port-tunnels');
+const liveTunnels = new Set<ReadonlyMap<number, PortListener>>();
 
 export function createPortTunnel(openStream: OpenPortStream): PortTunnel {
   const listeners = new Map<number, PortListener>();
+  liveTunnels.add(listeners);
   let closed = false;
 
   const ownLocalPorts = () => new Set([...listeners.values()].map(listener => listener.localPort));
@@ -86,17 +97,60 @@ export function createPortTunnel(openStream: OpenPortStream): PortTunnel {
         if (!listener) continue;
         // A disconnect while this port was opening: the tunnel is gone, so is this listener.
         if (closed) await shut(listener);
-        else listeners.set(hostPort, listener);
+        else {
+          listeners.set(hostPort, listener);
+          recordTunnelListeners();
+        }
       }
+      recordTunnelListeners();
       return new Map([...listeners].map(([hostPort, listener]) => [hostPort, listener.localPort]));
     },
     async close() {
       closed = true;
       const all = [...listeners.values()];
       listeners.clear();
+      liveTunnels.delete(listeners);
+      recordTunnelListeners();
       await Promise.all(all.map(shut));
     },
   };
+}
+
+/** Rewrites this process's registry file, or removes it when no tunnel listens. */
+function recordTunnelListeners(): void {
+  const file = path.join(TUNNEL_REGISTRY_DIR, `${process.pid}.json`);
+  const ports = [...liveTunnels].flatMap(listeners => [...listeners.values()].map(listener => listener.localPort));
+  try {
+    if (ports.length === 0) {
+      fs.rmSync(file, { force: true });
+      return;
+    }
+    fs.mkdirSync(TUNNEL_REGISTRY_DIR, { recursive: true });
+    // Renamed into place, so a host never reads half a file.
+    const partial = `${file}.${Date.now()}.tmp`;
+    fs.writeFileSync(partial, JSON.stringify(ports));
+    fs.renameSync(partial, file);
+  } catch (error) {
+    console.warn('[Pane port tunnel] registry_write_failed:', error);
+  }
+}
+
+/**
+ * The tunnel listeners of every Pane process on this machine, by pid. A crashed process's file
+ * stays, which is harmless: a port is left out only when the same pid owns it again.
+ */
+export async function readTunnelListeners(): Promise<ReadonlyMap<number, ReadonlySet<number>>> {
+  const byPid = new Map<number, Set<number>>();
+  const files = await fs.promises.readdir(TUNNEL_REGISTRY_DIR).catch(() => []);
+  await Promise.all(files.filter(file => /^\d+\.json$/u.test(file)).map(async file => {
+    try {
+      const ports: unknown = JSON.parse(await fs.promises.readFile(path.join(TUNNEL_REGISTRY_DIR, file), 'utf8'));
+      if (Array.isArray(ports)) byPid.set(Number.parseInt(file, 10), new Set(ports.filter(Number.isInteger)));
+    } catch {
+      // Removed between the listing and the read: that process has no tunnel any more.
+    }
+  }));
+  return byPid;
 }
 
 /**

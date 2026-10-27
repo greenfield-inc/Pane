@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'child_process';
+import { buildSync } from 'esbuild';
 import fs from 'fs/promises';
 import net from 'net';
 import os from 'os';
@@ -52,6 +53,24 @@ async function startOneShotListener(): Promise<{ child: ChildProcess; port: numb
   const child = spawn('nc', ['-l', String(port)], { stdio: 'ignore' });
   children.push(child);
   return { child, port, name: 'nc' };
+}
+
+/**
+ * Another Pane process on this machine whose remote desktop tunnels `hostPort`; resolves to the
+ * port its tunnel listens on.
+ */
+async function startTunnellingPane(hostPort: number): Promise<number> {
+  const [bundle] = buildSync({
+    entryPoints: [path.join(__dirname, '../daemon/client/portTunnel.ts')],
+    bundle: true,
+    platform: 'node',
+    format: 'cjs',
+    write: false,
+  }).outputFiles;
+  const source = `${bundle.text}
+module.exports.createPortTunnel(() => { throw new Error('unused'); }).sync([${hostPort}])
+  .then(ports => console.log(ports.get(${hostPort})));`;
+  return (await startListener(source)).port;
 }
 
 async function freePort(): Promise<number> {
@@ -155,6 +174,17 @@ describe('listening port monitor', { timeout: 30_000 }, () => {
 
     const listed = (await monitor.refresh()).ports.find(entry => entry.port === port);
     expect(listed).toMatchObject({ port, group: 'pane', kind: 'web' });
+  });
+
+  it("leaves out another Pane process's tunnel listeners, so desktops never mirror each other's mirrors", async () => {
+    const { port } = await startListener(HTTP_SERVER);
+    const tunnelPort = await startTunnellingPane(port);
+    const monitor = createListeningPortMonitor({ panePid: NOT_PANE, terminalPanes: () => [] });
+
+    const ports = (await monitor.refresh()).ports.map(entry => entry.port);
+    expect(ports).toContain(port);
+    expect(tunnelPort).not.toBe(port);
+    expect(ports).not.toContain(tunnelPort);
   });
 
   it('tells listeners when a port appears', async () => {

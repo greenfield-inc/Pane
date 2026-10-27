@@ -1093,11 +1093,8 @@ export class RemotePaneClientController extends EventEmitter {
     const snapshot = decodeListeningPortsSnapshot(value);
     const tunnel = this.portTunnel;
     if (!snapshot || !tunnel || this.activeClient !== client) return null;
-    // When host and client share a machine, the host also lists this desktop's own tunnel
-    // listeners; tunnelling those would connect each one back to itself.
-    const hostPorts = snapshot.ports
-      .filter(port => !(snapshot.host === getOsHostname() && port.pid === process.pid))
-      .map(port => port.port);
+    // Hosts leave every tunnel listener on their machine out of the list (readTunnelListeners).
+    const hostPorts = snapshot.ports.map(port => port.port);
     const sync = this.portTunnelSync.then(() => tunnel.sync(hostPorts));
     this.portTunnelSync = sync.catch(error => console.warn('[Pane port tunnel] sync_failed:', error));
     const localPorts = await sync;
