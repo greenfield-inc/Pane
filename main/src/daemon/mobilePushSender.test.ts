@@ -429,7 +429,12 @@ describe('Notify question alerts', () => {
     await sender.observeQuestion({ item: question({ id: 'many', choices: ['A', 'B', 'C', 'D'].map(label => ({ label })) }), open: true });
     await sender.observeQuestion({ item: question({ id: 'info', ui: 'info', state: 'info', choices: undefined }), open: true });
 
-    expect(requests.map(request => (request.payload.aps as { category?: string }).category)).toEqual(['pane.notify.approve', 'pane.notify.ask', undefined]);
+    expect(requests).toMatchObject([
+      { payload: { aps: { category: 'pane.notify.approve' } } },
+      { payload: { aps: { category: 'pane.notify.ask' } } },
+      { payload: { aps: expect.not.objectContaining({ category: expect.anything() }) } },
+    ]);
+    expect(requests).toHaveLength(3);
     expect(requests[1]?.payload).toMatchObject({ aps: { alert: { body: 'scratch has a question' } } });
     expect(requests[1]?.payload).not.toHaveProperty('paneId');
   });

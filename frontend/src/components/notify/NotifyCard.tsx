@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ArrowUp, Bell, Check, Clock, ExternalLink, Info, X } from 'lucide-react';
 import type { NotifyChoice, NotifyCommand, NotifyItem, NotifyRemindAfter } from '../../../../shared/types/notify';
 import { cn } from '../../utils/cn';
-import { NOTIFY_KIND_DOT, NOTIFY_KIND_LABEL, relativeAge } from './notifyFormat';
+import { askedBy, NOTIFY_KIND_DOT, NOTIFY_KIND_LABEL, relativeAge, unreachableText } from './notifyFormat';
 import { useNow } from './useNow';
 
 /** The compact strip shows this many choices, then More. */
@@ -97,7 +97,7 @@ function Meta({ item }: { item: NotifyItem }) {
   const now = useNow();
   return (
     <span className="min-w-0 truncate">
-      · {item.source.name} · {item.source.agent} · {relativeAge(item.createdAt, now)}
+      · {askedBy(item)} · {relativeAge(item.createdAt, now)}
     </span>
   );
 }
@@ -208,6 +208,7 @@ function CardHeader({ item, form, queue, onCommand, menuPlacement }: Pick<Notify
         <span className="inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[5px] bg-text-primary text-[10px] font-bold text-bg-primary" aria-hidden="true">P</span>
         <span className="truncate font-medium text-text-secondary">{item.source.name}</span>
         <span className="shrink-0">· {item.source.agent}</span>
+        {item.machine && <span className="shrink-0">· {item.machine}</span>}
         <span className="ml-auto shrink-0">{relativeAge(item.createdAt, now)}</span>
       </div>
     );
@@ -578,6 +579,7 @@ function QuestionCard({
       <div className={cn(titleClass, !(expanded || showDetail) && 'line-clamp-3')} title={item.title}>{item.title}</div>
       {showContext && <div className={contextClass}>{item.context}</div>}
       {body}
+      {item.unreachable && <UnreachableNotice item={item} className={form === 'inbox' ? 'px-3.5 pb-3' : 'px-[22px] pb-3'} />}
       {form === 'inbox' && item.source.paneId && (
         <div className="flex justify-end px-3.5 pb-3 text-[12.5px] text-text-tertiary">
           <FooterLink onClick={() => onCommand({ type: 'open-in-pane', id: item.id })}>
@@ -607,7 +609,7 @@ function SentLine({ item, onCommand }: NotifyCardProps) {
       <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-status-success text-text-on-status-success" aria-hidden="true">
         <Check className="h-3 w-3" strokeWidth={3} />
       </span>
-      <span className="shrink-0 text-[14px] font-semibold text-text-primary">Sent to {item.source.agent}</span>
+      <span className="shrink-0 text-[14px] font-semibold text-text-primary">{item.answeredOn ? `Answered on ${item.answeredOn}` : `Sent to ${item.source.agent}`}</span>
       {item.answerSummary && <span className="min-w-0 truncate">· {item.answerSummary}</span>}
       <button
         type="button"
@@ -616,6 +618,18 @@ function SentLine({ item, onCommand }: NotifyCardProps) {
       >
         Undo
       </button>
+    </div>
+  );
+}
+
+/** The host that asked is out of reach: an answer now would not be sent. */
+export function UnreachableNotice({ item, className }: { item: NotifyItem; className?: string }) {
+  return (
+    <div className={className}>
+      <div className="flex items-center gap-2 rounded-[9px] bg-surface-tertiary px-3 py-2.5 text-[13px] text-text-secondary" data-testid="notify-unreachable">
+        <Info className="h-3.5 w-3.5 shrink-0" />
+        {unreachableText(item)}
+      </div>
     </div>
   );
 }

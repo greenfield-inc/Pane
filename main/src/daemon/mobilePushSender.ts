@@ -62,9 +62,15 @@ const senderByConfigManager = new WeakMap<MobilePushConfigManager, MobilePushSen
 type AttentionKind = 'needs-input' | 'completed';
 
 /** iPhone notification categories the Pane app registers for Notify's answer buttons. */
-export const NOTIFY_CATEGORIES = { approve: 'pane.notify.approve', ask: 'pane.notify.ask', options: 'pane.notify.options' } as const;
+const NOTIFY_CATEGORIES = { approve: 'pane.notify.approve', ask: 'pane.notify.ask', options: 'pane.notify.options' } as const;
 /** Android shows at most three action buttons; an options question with more gets none. */
-export const NOTIFY_MAX_CHOICE_BUTTONS = 3;
+const NOTIFY_MAX_CHOICE_BUTTONS = 3;
+
+/** A Notify alert's buttons: the iPhone category, plus the choice labels for an options question. */
+interface NotifyAlertButtons {
+  category?: string;
+  choices?: string[];
+}
 
 /** The name a Pane's alert is titled with, and the Pane whose alerts it stacks under. */
 export interface MobileAlertSubject {
@@ -126,13 +132,14 @@ export class MobilePushSender {
     const registrations = config.host.mobilePush.registrations.filter(existing => (
       !matchesInstallation(existing)
     ));
-    registrations.push({
+    const registration: RemoteMobilePushRegistration = {
       id: previous?.id ?? randomUUID(), clientId, platform: request.platform, token: request.token, installationId: request.installationId,
       hostProfileId: request.hostProfileId, needsInputEnabled: request.needsInputEnabled ?? previous?.needsInputEnabled ?? true,
       completedEnabled: request.completedEnabled ?? previous?.completedEnabled ?? true,
-      ...(request.notifyButtons ? { notifyButtons: true } : {}),
       createdAt: previous?.createdAt ?? now, updatedAt: now, recentEventIds: previous?.recentEventIds ?? [],
-    });
+    };
+    if (request.notifyButtons) registration.notifyButtons = true;
+    registrations.push(registration);
     await this.save(configWithRegistrations(config, registrations));
     return this.getStatus(clientId, request.platform, request.installationId);
   }
@@ -267,29 +274,32 @@ export class MobilePushSender {
     const title = item.source.name.trim() || 'Pane';
     const body = `${title} has a question`;
     const collapseId = createHash('sha256').update(`notify:${item.id}`).digest('hex');
-    const routing: Record<string, string> = { eventId, hostProfileId: registration.hostProfileId, notifyId: item.id };
+    const routing: JsonObject = { eventId, hostProfileId: registration.hostProfileId, notifyId: item.id };
+    const threadId = item.source.paneId ? this.options.resolveSubject?.(item.source.paneId).groupPaneId ?? item.source.paneId : item.id;
     if (item.source.paneId) {
       routing.paneId = item.source.paneId;
-      routing.sessionPaneId = this.options.resolveSubject?.(item.source.paneId).groupPaneId ?? item.source.paneId;
+      routing.sessionPaneId = threadId;
     }
     if (item.source.panelId) routing.panelId = item.source.panelId;
     const buttons = notifyButtons(item);
     if (registration.platform === 'ios') {
       const credentials = readApnsCredentials(this.configManager.getConfig().apns);
       if (!credentials) throw new ProviderDeliveryError(503, '', 'APNs is not configured');
-      const payload: JsonObject = open
-        ? {
-          ...routing,
-          notifyUi: item.ui,
-          ...(buttons.choices ? { notifyChoices: buttons.choices } : {}),
-          aps: {
-            alert: { title, body }, sound: 'default', 'thread-id': routing.sessionPaneId ?? item.id,
-            ...(buttons.category ? { category: buttons.category } : {}),
-            // The app's notification service extension registers this question's choice buttons.
-            ...(buttons.choices ? { 'mutable-content': 1 } : {}),
-          },
+      const payload: JsonObject = { ...routing };
+      if (open) {
+        const aps: JsonObject = { alert: { title, body }, sound: 'default', 'thread-id': threadId };
+        payload.notifyUi = item.ui;
+        if (buttons.category) aps.category = buttons.category;
+        if (buttons.choices) {
+          payload.notifyChoices = buttons.choices;
+          // The app's notification service extension registers this question's choice buttons.
+          aps['mutable-content'] = 1;
         }
-        : { ...routing, notifyClear: true, aps: { 'content-available': 1 } };
+        payload.aps = aps;
+      } else {
+        payload.notifyClear = true;
+        payload.aps = { 'content-available': 1 };
+      }
       const response = await this.transport.apns({
         token: registration.token, jwt: createApnsJwt(credentials), topic: credentials.topic, collapseId, payload, pushType: open ? 'alert' : 'background',
       });
@@ -299,15 +309,21 @@ export class MobilePushSender {
     const credentials = readFcmCredentials();
     if (!credentials) throw new ProviderDeliveryError(503, '', 'FCM is not configured');
     // A build that draws buttons builds the alert itself, so it gets data only; older builds get the system alert.
-    const message: JsonObject = !registration.notifyButtons
-      ? { token: registration.token, notification: { title, body }, android: { notification: { tag: collapseId } }, data: routing }
-      : {
-        token: registration.token,
-        android: { priority: 'high' },
-        data: open
-          ? { ...routing, notifyUi: item.ui, notifyTitle: title, notifyBody: body, notifyTag: collapseId, ...(buttons.choices ? { notifyChoices: JSON.stringify(buttons.choices) } : {}) }
-          : { ...routing, notifyClear: '1', notifyTag: collapseId },
-      };
+    let message: JsonObject;
+    if (!registration.notifyButtons) {
+      message = { token: registration.token, notification: { title, body }, android: { notification: { tag: collapseId } }, data: routing };
+    } else {
+      const data: JsonObject = { ...routing, notifyTag: collapseId };
+      if (open) {
+        data.notifyUi = item.ui;
+        data.notifyTitle = title;
+        data.notifyBody = body;
+        if (buttons.choices) data.notifyChoices = JSON.stringify(buttons.choices);
+      } else {
+        data.notifyClear = '1';
+      }
+      message = { token: registration.token, android: { priority: 'high' }, data };
+    }
     const response = await this.transport.fcm({
       token: registration.token, accessToken: await createFcmAccessToken(credentials), projectId: credentials.projectId, payload: { message },
     });
@@ -442,7 +458,7 @@ function providerReadiness(platform: RemoteMobilePlatform, apns: ApnsCredentialC
  * The buttons an alert offers, chosen so each makes sense without the question shown: Approve and
  * Deny, Reply, or up to three choices by label, recommended first. Anything else opens the sheet.
  */
-function notifyButtons(item: NotifyItem): { category?: string; choices?: string[] } {
+function notifyButtons(item: NotifyItem): NotifyAlertButtons {
   if (item.ui === 'approve') return { category: NOTIFY_CATEGORIES.approve };
   if (item.ui === 'ask') return { category: NOTIFY_CATEGORIES.ask };
   const choices = item.choices ?? [];

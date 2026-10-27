@@ -345,13 +345,14 @@ export class RemoteDaemonClient {
   }
 
   private async requestContext(): Promise<RemoteRequestContext> {
-    return {
+    const context: RemoteRequestContext = {
       baseUrl: this.profile.baseUrl,
       token: this.profile.token,
       runtimeId: this.runtimeId ??= await this.resolveRuntimeId(),
       clientLabel: this.clientLabel,
-      ...(this.deviceLabel ? { deviceLabel: this.deviceLabel } : {}),
     };
+    if (this.deviceLabel) context.deviceLabel = this.deviceLabel;
+    return context;
   }
 
   private async checkHealth(signal: AbortSignal): Promise<void> {

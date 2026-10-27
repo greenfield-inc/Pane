@@ -120,6 +120,8 @@ export interface NotifyItem extends NotifyQuestion {
   answeredOn?: string;
   /** The machine whose agent asked; set while a screen shows two machines' questions. */
   machine?: string;
+  /** Snapshot only: its machine can't be reached right now, so an answer can't be sent. */
+  unreachable?: boolean;
 }
 
 /** What the strip shows. Main decides; every surface renders the same thing. */

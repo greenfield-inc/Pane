@@ -683,7 +683,7 @@ interface RemotePaneClientControllerOptions {
 }
 
 /** The host's Notify state; the controller emits it as `notify-shared` instead of sending it to the window. */
-export const NOTIFY_SHARED_CHANNEL = 'notify:shared-changed';
+const NOTIFY_SHARED_CHANNEL = 'notify:shared-changed';
 
 /**
  * Events: `state-changed` (connection state), `resync` (after each connect: refetch host state),

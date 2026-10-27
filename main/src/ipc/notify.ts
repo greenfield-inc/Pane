@@ -149,7 +149,7 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: AppServices, 
 
   // On a screen connected to another Pane: that host's questions show beside this machine's own.
   const hostMachine = () => notify.snapshot().remote?.machine ?? remotePaneClientController.getConnectionState().activeProfileLabel ?? 'the host';
-  const showHostState = (value: unknown) => {
+  const showHostState = (value: PaneCommandValue) => {
     if (!remotePaneClientController.isRemoteModeActive()) return;
     let state: NotifySharedState;
     try {

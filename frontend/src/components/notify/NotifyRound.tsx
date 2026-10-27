@@ -2,8 +2,8 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 're
 import { ArrowRight, CornerDownLeft, X } from 'lucide-react';
 import type { NotifyCommand, NotifyItem, NotifySnapshot } from '../../../../shared/types/notify';
 import { cn } from '../../utils/cn';
-import { NOTIFY_KIND_DOT, NOTIFY_KIND_LABEL, relativeAge } from './notifyFormat';
-import { ShortcutCap } from './NotifyCard';
+import { askedBy, NOTIFY_KIND_DOT, NOTIFY_KIND_LABEL, relativeAge } from './notifyFormat';
+import { ShortcutCap, UnreachableNotice } from './NotifyCard';
 import { useNow } from './useNow';
 
 interface NotifyRoundProps {
@@ -192,8 +192,9 @@ function RoundPanel({ item, position, total, onCommand }: RoundPanelProps) {
           <span className={cn('h-[7px] w-[7px] rounded-full', NOTIFY_KIND_DOT[item.ui])} aria-hidden="true" />
           {NOTIFY_KIND_LABEL[item.ui]}
         </span>
-        <span className="truncate">{item.source.name} · {item.source.agent} · {relativeAge(item.createdAt, now)}</span>
+        <span className="truncate">{askedBy(item)} · {relativeAge(item.createdAt, now)}</span>
       </div>
+      {item.unreachable && <UnreachableNotice item={item} className="px-[26px] pt-2" />}
       {item.context && <div className="px-[26px] py-1.5 text-[14.5px] text-text-tertiary">{item.context}</div>}
       {item.ui === 'approve' && item.detail && (
         <pre className="mx-[26px] mb-1 mt-1.5 max-h-40 overflow-auto rounded-xl bg-surface-tertiary px-3.5 py-2.5 font-mono text-[12px] leading-relaxed text-text-secondary">{item.detail}</pre>

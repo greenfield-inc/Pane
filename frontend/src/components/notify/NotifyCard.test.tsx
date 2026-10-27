@@ -17,10 +17,23 @@ function render(item: NotifyItem, props: Partial<NotifyCardProps> = {}): string 
 
 /** Visible text, without tags, so assertions read like the card does. */
 function text(markup: string): string {
-  return markup.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  return markup.replace(/<[^>]+>/g, ' ').replace(/&#x27;/g, "'").replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
 }
 
 describe('NotifyCard', () => {
+  it("names the host machine on its question, and says an answer can't be sent while it is out of reach", () => {
+    const visible = text(render({ ...base, ui: 'approve', title: 'Apply migration 0042 to staging?', machine: 'parsa-devbox', unreachable: true }));
+    expect(visible).toContain('auth-refactor · Claude · parsa-devbox');
+    expect(visible).toContain("Not sent: can't reach parsa-devbox. Try again when it reconnects.");
+    expect(visible).toContain('Approve');
+  });
+
+  it('says which device answered when another screen did, with Undo', () => {
+    const answered = { ...base, ui: 'approve' as const, title: 'Apply migration?', state: 'sent' as const, answerSummary: 'Approved' };
+    expect(text(render({ ...answered, answeredOn: 'Parsa’s iPhone' }, { view: 'sent' }))).toBe('Answered on Parsa’s iPhone · Approved Undo');
+    expect(text(render(answered, { view: 'sent' }))).toBe('Sent to Claude · Approved Undo');
+  });
+
   it('shows a choice question as four chips, then More, with the recommended one called out', () => {
     const markup = render({
       ...base,

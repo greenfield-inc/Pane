@@ -352,6 +352,7 @@ export class NotifyQueue extends EventEmitter {
             ...item,
             machine: remote.machine,
             answeredOn: this.answeredHere.has(item.id) ? undefined : item.answeredOn,
+            unreachable: remote.online ? undefined : true,
           })),
         ]
         : local,

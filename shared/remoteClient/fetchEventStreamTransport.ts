@@ -73,12 +73,12 @@ export async function readEventStreamResponse(
 }
 
 function authHeaders(context: RemoteRequestContext) {
-  const identity: Record<string, string> = {
+  const client = {
     'X-Pane-Remote-Runtime-Id': context.runtimeId,
     'X-Pane-Client-Label': context.clientLabel,
   };
   // Percent-encoded: a phone's name ("Parsa’s iPhone") is not a valid raw header value.
-  if (context.deviceLabel) identity['X-Pane-Client-Device-Label'] = encodeURIComponent(context.deviceLabel);
+  const identity = context.deviceLabel ? { ...client, 'X-Pane-Client-Device-Label': encodeURIComponent(context.deviceLabel) } : client;
   // A codeless host without a password trusts the Tailscale login alone; send no empty bearer.
   return context.token ? { ...identity, Authorization: `Bearer ${context.token}` } : identity;
 }
