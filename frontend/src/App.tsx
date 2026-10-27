@@ -872,7 +872,7 @@ function App() {
         </div>
         <div className="relative flex min-h-0 min-w-0 flex-1">
           <SessionView />
-          <PaneChatIntroOffer suppressed={isOnboardingOpen || isWelcomeOpen} />
+          <PaneChatIntroOffer suppressed={isSettingsOpen || isOnboardingOpen || isWelcomeOpen} />
         </div>
         </div>
         <OnboardingDialog

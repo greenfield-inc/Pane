@@ -3386,18 +3386,20 @@ test('Move to host… with Tailscale signed out passes on the reason and the fix
   await expect(dialog.getByRole('button', { name: 'Move Session' })).toBeDisabled();
 });
 
-type PaneChatOfferRecord = { preferences: string[]; creates: Array<{ name: string; openingPrompt?: string }>; failNextCreate: boolean };
+/** How the first create fails: before anything is saved, or after main saved the Session but couldn't open it. */
+type CreateFailure = 'before-save' | 'after-save';
+type PaneChatOfferRecord = { preferences: string[]; creates: Array<{ name: string; openingPrompt?: string; launchCommand?: string }>; firstCreateFails: CreateFailure | null };
 declare global {
   interface Window {
     __paneChatOffer?: PaneChatOfferRecord;
   }
 }
 
-async function installPaneChatOfferFixture(page: Page): Promise<void> {
+async function installPaneChatOfferFixture(page: Page, firstCreateFails: CreateFailure = 'before-save'): Promise<void> {
   await installSessionsFixture(page, [], [paneFixture('pane-copy', 'checkout-copy'), paneFixture('pane-timeouts', 'api-timeouts')]);
-  await page.addInitScript(() => {
+  await page.addInitScript((failure: CreateFailure) => {
     const api = window.electronAPI;
-    const record: PaneChatOfferRecord = { preferences: [], creates: [], failNextCreate: true };
+    const record: PaneChatOfferRecord = { preferences: [], creates: [], firstCreateFails: failure };
     window.__paneChatOffer = record;
     api.paneChat.introOffer = async () => ({ success: true, data: { eligible: true } });
     const setPreference = api.preferences.set;
@@ -3407,12 +3409,14 @@ async function installPaneChatOfferFixture(page: Page): Promise<void> {
     };
     const create = api.orchestrationSessions.create;
     api.orchestrationSessions.create = async input => {
-      record.creates.push({ name: input.name, openingPrompt: input.openingPrompt });
-      if (!record.failNextCreate) return create(input);
-      record.failNextCreate = false;
-      return { success: false, error: 'Session storage is busy' };
+      record.creates.push({ name: input.name, openingPrompt: input.openingPrompt, launchCommand: input.launchCommand });
+      const failure = record.firstCreateFails;
+      record.firstCreateFails = null;
+      if (failure === null) return create(input);
+      if (failure === 'after-save') await create(input);
+      return { success: false, error: failure === 'after-save' ? 'Session saved but could not be opened' : 'Session storage is busy' };
     };
-  });
+  }, firstCreateFails);
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
   await dismissStartupDialogs(page);
   await page.getByRole('button', { name: 'Expand project Pane fixtures', exact: true }).click();
@@ -3451,6 +3455,20 @@ test('the Pane Chat offer shows over a Pane, retries a failed start, and follows
 
   await offer.getByRole('button', { name: 'Close', exact: true }).click();
   await expect(offer).toHaveCount(0);
+});
+
+test('the Pane Chat offer opens a Session that was saved before its tab failed, instead of creating it again', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await installPaneChatOfferFixture(page, 'after-save');
+  const offer = page.getByRole('region', { name: 'Pane Chat offer' });
+  await page.getByRole('button', { name: 'checkout-copy', exact: true }).click();
+  await offer.getByRole('button', { name: 'Try it', exact: true }).click();
+
+  await expect(page.getByRole('heading', { name: 'Pane fixtures tasks', exact: true })).toBeAttached({ timeout: 10_000 });
+  await expect(offer.getByRole('button', { name: 'Try it' })).toHaveCount(0);
+  expect((await paneChatOfferRecord(page)).creates).toEqual([
+    { name: 'Pane fixtures tasks', launchCommand: '', openingPrompt: expect.stringMatching(/^Pane sent this once/) },
+  ]);
 });
 
 test('Not now hides the Pane Chat offer for the rest of the run', async ({ page }) => {

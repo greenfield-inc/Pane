@@ -46,8 +46,11 @@ export function PaneChatIntroOffer({ suppressed }: { suppressed: boolean }) {
   const setActiveSession = useSessionStore(state => state.setActiveSession);
   const selectedSessionId = useOrchestrationSessionStore(state => state.selectedSessionId);
   const createSession = useOrchestrationSessionStore(state => state.create);
+  const loadSessions = useOrchestrationSessionStore(state => state.load);
+  const selectSession = useOrchestrationSessionStore(state => state.select);
   const onPane = activeView === 'sessions' && activeSession !== undefined && !activeSession.isHidden;
-  const offerVisible = phase.kind === 'offer' && onPane && !suppressed;
+  // Desktop on its own host only: a desktop showing another computer's Pane never offers it.
+  const offerVisible = phase.kind === 'offer' && onPane && !suppressed && isRemoteMode === false;
   const followUpVisible = phase.kind === 'tried' && activeView === 'pane-chat' && selectedSessionId === phase.sessionId;
 
   // Ask on launch, after a Pane is created, and when the window regains focus.
@@ -95,18 +98,32 @@ export function PaneChatIntroOffer({ suppressed }: { suppressed: boolean }) {
       const projects = await API.projects.getAll();
       const repository = projects.success ? projects.data?.find((project: Project) => project.id === activeSession.projectId) : undefined;
       if (!repository) throw new Error('this Pane\'s repository is not in Pane');
-      const view = await createSession({ name: `${repository.name} tasks`, openingPrompt: openingPrompt(repository) });
-      capture(EVENT, { action: 'try' });
-      setPhase({ kind: 'tried', sessionId: view.session.id });
-      void setActiveSession(null);
-      navigateToPaneChat();
+      const name = `${repository.name} tasks`;
+      const open = (sessionId: string) => {
+        capture(EVENT, { action: 'try' });
+        setPhase({ kind: 'tried', sessionId });
+        void setActiveSession(null);
+        navigateToPaneChat();
+      };
+      try {
+        // The built-in launch with no custom resume, so the agent always receives the opening prompt.
+        const view = await createSession({ name, launchCommand: '', customResume: null, openingPrompt: openingPrompt(repository) });
+        open(view.session.id);
+      } catch (cause) {
+        // Main can save the Session and then fail to open its tab; open the saved one instead of creating another.
+        await loadSessions();
+        const saved = useOrchestrationSessionStore.getState().sessions.find(session => session.name === name);
+        if (!saved) throw cause;
+        await selectSession({ sessionId: saved.id });
+        open(saved.id);
+      }
     } catch (cause) {
       const reason = cause instanceof Error ? cause.message : String(cause);
       setError(`Pane Chat could not start: ${reason}. No Session was opened. Try again.`);
     } finally {
       setCreating(false);
     }
-  }, [activeSession, createSession, navigateToPaneChat, setActiveSession]);
+  }, [activeSession, createSession, loadSessions, navigateToPaneChat, selectSession, setActiveSession]);
 
   if (!offerVisible && !followUpVisible) return null;
 
