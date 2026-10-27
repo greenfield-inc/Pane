@@ -12,6 +12,8 @@ import { SOURCE_NAMES, type ScannedSession } from './scan';
 export type TabCheck =
   | { state: 'ready' }
   | { state: 'trust' }
+  /** The agent is running but hasn't shown its input box yet. */
+  | { state: 'starting' }
   | { state: 'failed'; reason: string };
 
 /** The Pane operations placement drives; the app wires them to the runpane commands. */
@@ -148,6 +150,8 @@ export async function placeSessions(options: PlacementOptions): Promise<SessionI
       record(item.session, 'continued', item.paneId, item.panelId);
     } else if (check.state === 'trust') {
       finish(item.session, { ...base, outcome: 'waiting for trust' });
+    } else if (check.state === 'starting') {
+      finish(item.session, { ...base, outcome: 'still starting' });
     } else {
       await port.closeTab(item.panelId).catch(() => undefined);
       finish(item.session, {
@@ -171,7 +175,7 @@ export async function placeSessions(options: PlacementOptions): Promise<SessionI
 
   const ordered = options.sessions.map(session => results.get(session.key)).filter((result): result is ImportSessionResult => Boolean(result));
   const tabsInExistingPanes = ordered.filter(result =>
-    result.paneId && !createdPanes.has(result.paneId) && (result.outcome === 'continued' || result.outcome === 'waiting for trust')).length;
+    result.paneId && !createdPanes.has(result.paneId) && result.outcome !== 'not continued' && result.outcome !== 'skipped running').length;
   return { results: ordered, panesCreated, tabsInExistingPanes };
 }
 

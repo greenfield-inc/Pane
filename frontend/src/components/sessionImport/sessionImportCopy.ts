@@ -59,7 +59,11 @@ export function rowMeta(
   progress?: SessionImportProgress,
 ): string {
   const summary = scan.sources.find(candidate => candidate.source === source);
-  if (summary?.status === 'unreadable') return `Couldn't read ${[TOOL_NAMES[source], summary.version].filter(Boolean).join(' ')}`;
+  if (summary?.status === 'unreadable') {
+    // Readers report a store shape or an app version; only a version reads well in the row.
+    const version = summary.version && /^v?\d+(\.\d+)+$/u.test(summary.version) ? ` ${summary.version}` : '';
+    return `Couldn't read ${TOOL_NAMES[source]}${version}`;
+  }
   if (progress?.running && progress.total[source]) return `${progress.done[source] ?? 0} of ${progress.total[source]}`;
   const sessions = scan.sessions.filter(session => session.source === source);
   const chosen = sessions.filter(session => selected.has(session.key));
@@ -82,7 +86,7 @@ export function sessionStatus(session: ImportSession): string | undefined {
 }
 
 export function resultHeadline(result: SessionImportRunResult): string {
-  const brought = result.results.filter(entry => entry.outcome === 'continued' || entry.outcome === 'waiting for trust').length;
+  const brought = result.results.filter(entry => entry.outcome !== 'not continued' && entry.outcome !== 'skipped running').length;
   const existing = result.tabsInExistingPanes > 0 ? ` and ${plural(result.tabsInExistingPanes, 'tab')} in existing Panes` : '';
   return `Brought in ${plural(brought, 'session')} as ${plural(result.panesCreated, 'Pane')}${existing}.`;
 }
@@ -111,7 +115,7 @@ export function captureSessionImport(
   if (result) {
     const outcome = (name: string) => result.results.filter(entry => entry.outcome === name).length;
     properties.panes_created = result.panesCreated;
-    properties.tabs_added = outcome('continued') + outcome('waiting for trust');
+    properties.tabs_added = outcome('continued') + outcome('waiting for trust') + outcome('still starting');
     properties.continued = outcome('continued');
     properties.not_continued = outcome('not continued');
     properties.waiting_trust = outcome('waiting for trust');

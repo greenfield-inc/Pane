@@ -30,7 +30,7 @@ import type {
 
 const SESSION_IMPORT_CHANNELS = ['session-import:home', 'session-import:scan', 'session-import:run', 'session-import:progress'] as const;
 const LISTED_MS = 30 * 24 * 60 * 60 * 1000;
-const READY_TIMEOUT_MS = 60_000;
+const READY_TIMEOUT_MS = 90_000;
 /** Home shows the card only while the person has fewer Panes than this. */
 const HOME_PANE_LIMIT = 2;
 
@@ -184,8 +184,9 @@ export function registerSessionImportHandlers(ipcMain: IpcMain, services: AppSer
 function toTabCheck(result: RunpanePanelWaitResult): TabCheck {
   if (result.matched) return { state: 'ready' };
   if (result.blocked?.kind === 'first-run-dialog' && /trust|folder access|safety check/i.test(result.blocked.message)) return { state: 'trust' };
-  const reason = result.reason?.message
-    ?? result.blocked?.message.split('\n')[0]
+  // An agent that is up but slow keeps its tab; only one that exited or never appeared has failed.
+  if (result.timedOut && result.reason?.code === 'agent-not-ready') return { state: 'starting' };
+  const reason = (result.reason?.message ?? result.blocked?.message.split('\n')[0])?.replace(/[.\s]+$/u, '')
     ?? (result.timedOut ? `it wasn't ready after ${READY_TIMEOUT_MS / 1000} seconds` : 'it stopped before it was ready');
   return { state: 'failed', reason };
 }

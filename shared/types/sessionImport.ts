@@ -59,7 +59,8 @@ export interface SessionImportScan {
   sessions: ImportSession[];
 }
 
-export type ImportSessionOutcome = 'continued' | 'not continued' | 'waiting for trust' | 'skipped running';
+/** `still starting`: the agent is up but slow; its tab stays open for the person to check. */
+export type ImportSessionOutcome = 'continued' | 'not continued' | 'waiting for trust' | 'still starting' | 'skipped running';
 
 export interface ImportSessionResult {
   key: string;

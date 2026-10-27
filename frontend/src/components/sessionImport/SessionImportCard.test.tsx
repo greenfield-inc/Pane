@@ -44,13 +44,15 @@ describe('SessionImportCard', () => {
     expect(shown).toContain('Conductor workspaces 1 worktree');
     expect(shown).toContain("Emdash tasks Couldn't read Emdash 1.4");
     expect(shown).toContain('Check again');
-    expect(shown).toMatch(/Not now\s+Bring them in$/);
+    expect(shown).toContain('Not now Bring them in');
   });
 
   it('shows the empty state when nothing was found', () => {
     const shown = text(renderToStaticMarkup(<SessionImportCard surface="settings" scan={{ scannedAt: 0, sources: [], sessions: [] }} onClose={() => undefined} />));
 
     expect(shown).toContain('No sessions found from Claude Code, Codex, Conductor, Superset, Herdr, Emdash, Orca or T3 Code on this computer.');
+    expect(shown).not.toContain('Pane found recent agent work');
+    expect(shown).not.toContain('Bring them in');
   });
 
   it('counts older sessions when nothing is preselected', () => {

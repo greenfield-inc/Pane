@@ -107,6 +107,7 @@ export function SessionImportCard({ surface, scan, onClose, onRescanned }: Sessi
   });
 
   const anyRunning = scan.sessions.some(isRunningElsewhere);
+  const empty = listedSources(scan).length === 0;
 
   return (
     <div className="w-full rounded-2xl border border-border-secondary bg-surface-primary p-5 shadow-sm" data-testid="session-import-card">
@@ -114,7 +115,14 @@ export function SessionImportCard({ surface, scan, onClose, onRescanned }: Sessi
         <RefreshCw className="h-[18px] w-[18px] flex-none text-interactive" aria-hidden />
         <h2 className="text-base font-semibold text-text-primary">{SESSION_IMPORT_TITLE}</h2>
       </div>
-      {result ? (
+      {empty ? (
+        <>
+          <p className="mt-2 text-sm text-text-tertiary">{EMPTY_STATE}</p>
+          <div className="mt-3 flex justify-end">
+            <Button variant="secondary" size="sm" onClick={() => onClose(false)}>Close</Button>
+          </div>
+        </>
+      ) : result ? (
         <ImportResult result={result} runningElsewhere={scan.sessions.filter(isRunningElsewhere).length} onDone={() => onClose(true)} />
       ) : (
         <>
@@ -128,14 +136,14 @@ export function SessionImportCard({ surface, scan, onClose, onRescanned }: Sessi
             )}
             <div className="ml-auto flex items-center gap-2">
               <Button variant="ghost" size="sm" onClick={() => { captureSessionImport('dismissed', surface, scan); onClose(false); }} disabled={working}>Not now</Button>
-              <Button size="sm" onClick={() => void bringIn()} disabled={working || selected.size === 0} aria-busy={working} className="relative">
-                {/* The label keeps the button's width; the working label and spinner sit in the same box. */}
-                <span className={cn('inline-flex items-center gap-1.5', working && 'invisible')}>Bring them in</span>
-                {working && (
-                  <span className="absolute inset-0 inline-flex items-center justify-center gap-1.5">
+              <Button size="sm" onClick={() => void bringIn()} disabled={working || selected.size === 0} aria-busy={working}>
+                {/* Both labels share one grid cell, so the button keeps the wider one's size in either state. */}
+                <span className="grid">
+                  <span className={cn('[grid-area:1/1] inline-flex items-center justify-center', working && 'invisible')}>Bring them in</span>
+                  <span className={cn('[grid-area:1/1] inline-flex items-center justify-center gap-1.5 whitespace-nowrap', !working && 'invisible')} aria-hidden={!working}>
                     <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />Bringing them in…
                   </span>
-                )}
+                </span>
               </Button>
             </div>
           </div>
@@ -158,7 +166,6 @@ interface ImportRowsProps {
 /** One row per tool; a row opens into its sessions grouped by repository. */
 export function ImportRows({ scan, selected, progress, expanded, onExpand, onToggle, disabled }: ImportRowsProps) {
   const sources = listedSources(scan);
-  if (sources.length === 0) return <p className="mt-3 text-sm text-text-tertiary">{EMPTY_STATE}</p>;
   return (
     <div className="mt-3 space-y-1.5">
       {sources.map(source => {
@@ -175,8 +182,10 @@ export function ImportRows({ scan, selected, progress, expanded, onExpand, onTog
             >
               <SourceIcon source={source} />
               <span className="min-w-0 truncate">{SOURCE_LABELS[source]}</span>
-              <span className="ml-auto whitespace-nowrap text-xs tabular-nums text-text-tertiary">{rowMeta(source, scan, selected, progress)}</span>
-              {!unreadable && <ChevronRight className={cn('h-3.5 w-3.5 flex-none text-text-tertiary transition-transform', open && 'rotate-90')} aria-hidden />}
+              <span className="ml-auto whitespace-nowrap text-xs tabular-nums text-text-tertiary" title={unreadable ? scan.sources.find(summary => summary.source === source)?.reason : undefined}>
+                {rowMeta(source, scan, selected, progress)}
+              </span>
+              <ChevronRight className={cn('h-3.5 w-3.5 flex-none text-text-tertiary transition-transform', open && 'rotate-90', unreadable && 'invisible')} aria-hidden />
             </button>
             {open && <SourceSessions sessions={scan.sessions.filter(session => session.source === source)} selected={selected} onToggle={onToggle} disabled={disabled} />}
           </div>
@@ -259,6 +268,7 @@ interface ImportResultProps {
 export function ImportResult({ result, runningElsewhere, onDone }: ImportResultProps) {
   const failed = result.results.filter(entry => entry.outcome === 'not continued');
   const waiting = result.results.filter(entry => entry.outcome === 'waiting for trust');
+  const starting = result.results.filter(entry => entry.outcome === 'still starting');
   const skipped = result.results.filter(entry => entry.outcome === 'skipped running').length + runningElsewhere;
   return (
     <div className="mt-2 space-y-2 text-sm">
@@ -268,6 +278,14 @@ export function ImportResult({ result, runningElsewhere, onDone }: ImportResultP
           {waiting.length} waiting for you to trust {waiting.length === 1 ? 'its folder' : 'their folders'}:
           <ul className="mt-1 list-disc pl-5 text-xs text-text-tertiary">
             {waiting.map(entry => <li key={entry.key}>{entry.paneName} · {entry.title ?? 'session'}: answer the trust prompt in its tab</li>)}
+          </ul>
+        </div>
+      )}
+      {starting.length > 0 && (
+        <div className="text-text-secondary">
+          {starting.length} still starting:
+          <ul className="mt-1 list-disc pl-5 text-xs text-text-tertiary">
+            {starting.map(entry => <li key={entry.key}>{entry.paneName} · {entry.title ?? 'session'}: its agent is up but slow; check its tab</li>)}
           </ul>
         </div>
       )}

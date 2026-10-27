@@ -94,6 +94,8 @@ function snapshotPanes(workspaces: JsonValue[]): PaneSession[] {
  */
 function serverRunning(context: ReaderContext, socketPath: string): Promise<ImportRunning> {
   const target = context.platform === 'win32' ? `\\\\.\\pipe\\${socketPath}` : socketPath;
+  // No socket file means no server; a connect to a long path can fail for other reasons.
+  if (context.platform !== 'win32' && !exists(socketPath)) return Promise.resolve('no');
   return new Promise(resolve => {
     const socket = net.connect(target);
     const finish = (running: ImportRunning): void => {

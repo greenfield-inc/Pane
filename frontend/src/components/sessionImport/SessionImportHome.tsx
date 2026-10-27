@@ -6,6 +6,7 @@ import { SESSION_IMPORT_HOME_RETIRED_PREFERENCE, type SessionImportScan } from '
 
 /** Pane Chat's one-time "bring your sessions in" offer; the card replaces it. */
 const PANE_CHAT_MIGRATE_OFFER_PREFERENCE = 'pane_chat_migrate_offer_sent';
+const COLLAPSE_MS = 300;
 
 /**
  * The card on Home for people just starting: shown while they have fewer than
@@ -31,13 +32,14 @@ export function SessionImportHome() {
 
   const close = () => {
     setOpen(false);
+    // Unmount once the collapse has played; transitionend doesn't fire when motion is reduced or paused.
+    window.setTimeout(() => setScan(null), COLLAPSE_MS);
     void API.preferences.set(SESSION_IMPORT_HOME_RETIRED_PREFERENCE, 'true');
   };
 
   return (
     <div
       className={cn('grid transition-[grid-template-rows,opacity] duration-300 ease-out', open ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0')}
-      onTransitionEnd={() => { if (!open) setScan(null); }}
     >
       <div className="min-h-0 overflow-hidden">
         <div className="mx-auto max-w-xl">

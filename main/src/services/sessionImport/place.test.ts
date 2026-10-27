@@ -150,4 +150,15 @@ describe('placeSessions', () => {
     expect(result.panesCreated).toBe(1);
     expect(readRecord()[0]).toMatchObject({ result: 'pending', panelId: 'tab-t' });
   });
+
+  it('keeps a slow agent\'s tab open and reports it as still starting', async () => {
+    claudeTranscript('slow');
+    const { port, calls } = fakePort({ slow: { state: 'starting' } });
+
+    const result = await placeSessions({ sessions: [session('slow', '/repo')], port, stores, paneDir });
+
+    expect(calls.some(call => call.startsWith('close') || call.startsWith('rollback'))).toBe(false);
+    expect(result).toMatchObject({ panesCreated: 1, results: [{ outcome: 'still starting', paneId: 'pane-1' }] });
+    expect(readRecord()[0]).toMatchObject({ result: 'pending' });
+  });
 });
