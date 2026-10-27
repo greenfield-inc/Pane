@@ -9,6 +9,7 @@ const trustedSchema = boundary.object({ clientId: boundary.nonEmptyString });
 const registrationSchema = boundary.object({
   platform: platformSchema, token: boundary.nonEmptyString, installationId: boundary.nonEmptyString,
   hostProfileId: boundary.nonEmptyString, needsInputEnabled: boundary.optional(boundary.boolean), completedEnabled: boundary.optional(boundary.boolean),
+  notifyButtons: boundary.optional(boundary.boolean),
 });
 const installationSchema = boundary.object({ platform: platformSchema, installationId: boundary.nonEmptyString });
 const controlsSchema = boundary.object({ platform: platformSchema, installationId: boundary.nonEmptyString, needsInputEnabled: boundary.optional(boundary.boolean), completedEnabled: boundary.optional(boundary.boolean) });

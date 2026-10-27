@@ -8,6 +8,7 @@ import { MobilePushSender, STABLE_IDLE_MS, type MobilePushTransport } from './mo
 import { decodeRemoteConnectionCode } from '../../../shared/remoteClient/pairing';
 import { encodePaneRemoteConnection } from '../../../shared/types/remoteDaemon';
 import { ConfigManager } from '../services/configManager';
+import type { NotifyItem } from '../../../shared/types/notify';
 
 const originalEnvironment = {
   team: process.env.PANE_APNS_TEAM_ID,
@@ -379,6 +380,105 @@ describe('MobilePushSender', () => {
     const sender = new MobilePushSender(new ConfigManagerStub(createDefaultRemoteDaemonConfig()));
     await expect(sender.register('client-1', { platform: 'android', token: 'device-token', installationId: 'install-1', hostProfileId: 'profile-1' }))
       .resolves.toMatchObject({ registration: 'not-registered', provider: 'missing-config', code: 'ERR_FCM_NOT_CONFIGURED' });
+  });
+});
+
+describe('Notify question alerts', () => {
+  const question = (overrides: Partial<NotifyItem> = {}): NotifyItem => ({
+    id: 'question-1', ui: 'options', title: 'Drop the users table?', state: 'waiting', createdAt: 0,
+    source: { paneId: 'pane-1', panelId: 'panel-1', name: 'billing-migration', agent: 'Claude' },
+    choices: [{ label: 'Keep it' }, { label: 'Drop it', recommended: true }],
+    ...overrides,
+  });
+
+  async function iosSender() {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'pane-mobile-notify-'));
+    temporaryDirectories.push(directory);
+    const keyPath = path.join(directory, 'AuthKey.p8');
+    await writeFile(keyPath, generateKeyPairSync('ec', { namedCurve: 'prime256v1' }).privateKey.export({ type: 'pkcs8', format: 'pem' }));
+    setEnvironment({ team: 'TEAM', key: 'KEY', keyPath, topic: 'com.dcouple.pane.mobile', environment: 'sandbox' });
+    const config = createDefaultRemoteDaemonConfig();
+    config.host.clients = [{ id: 'client-1', label: 'Phone', tokenHash: 'hash', createdAt: '2026-09-04T00:00:00.000Z' }];
+    const manager = new ConfigManagerStub(config);
+    const requests: Parameters<MobilePushTransport['apns']>[0][] = [];
+    const sender = new MobilePushSender(manager, {
+      apns: async request => { requests.push(request); return { status: 200, body: '' }; },
+      fcm: async () => ({ status: 200, body: '' }),
+    });
+    await sender.register('client-1', { platform: 'ios', token: 'token', installationId: 'install-1', hostProfileId: 'profile-1' });
+    return { sender, requests };
+  }
+
+  it('alerts once per question with nothing from the question in it, and choice buttons recommended first', async () => {
+    const { sender, requests } = await iosSender();
+    await sender.observeQuestion({ item: question(), open: true });
+    await sender.observeQuestion({ item: question(), open: true });
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({ pushType: 'alert', payload: {
+      notifyId: 'question-1', hostProfileId: 'profile-1', paneId: 'pane-1', panelId: 'panel-1', notifyUi: 'options', notifyChoices: ['Drop it', 'Keep it'],
+      aps: { alert: { title: 'billing-migration', body: 'billing-migration has a question' }, category: 'pane.notify.options', 'mutable-content': 1 },
+    } });
+    expect(JSON.stringify(requests[0]?.payload)).not.toContain('users table');
+  });
+
+  it('gives approve and ask their fixed buttons, more than three choices none, and an update no alert', async () => {
+    const { sender, requests } = await iosSender();
+    await sender.observeQuestion({ item: question({ id: 'approve', ui: 'approve', choices: undefined }), open: true });
+    await sender.observeQuestion({ item: question({ id: 'ask', ui: 'ask', choices: undefined, source: { name: 'scratch', agent: 'Codex' } }), open: true });
+    await sender.observeQuestion({ item: question({ id: 'many', choices: ['A', 'B', 'C', 'D'].map(label => ({ label })) }), open: true });
+    await sender.observeQuestion({ item: question({ id: 'info', ui: 'info', state: 'info', choices: undefined }), open: true });
+
+    expect(requests.map(request => (request.payload.aps as { category?: string }).category)).toEqual(['pane.notify.approve', 'pane.notify.ask', undefined]);
+    expect(requests[1]?.payload).toMatchObject({ aps: { alert: { body: 'scratch has a question' } } });
+    expect(requests[1]?.payload).not.toHaveProperty('paneId');
+  });
+
+  it('clears the alert silently once the question stops waiting, and alerts again after an Undo', async () => {
+    const { sender, requests } = await iosSender();
+    await sender.observeQuestion({ item: question(), open: true });
+    await sender.observeQuestion({ item: question({ state: 'sent' }), open: false });
+    await sender.observeQuestion({ item: question(), open: true });
+
+    expect(requests.map(request => request.pushType)).toEqual(['alert', 'background', 'alert']);
+    expect(requests[1]?.payload).toEqual({ eventId: 'notify:question-1:clear', hostProfileId: 'profile-1', notifyId: 'question-1', paneId: 'pane-1', sessionPaneId: 'pane-1', panelId: 'panel-1', notifyClear: true, aps: { 'content-available': 1 } });
+  });
+
+  it('sends nothing to a phone with Needs Input off', async () => {
+    const { sender, requests } = await iosSender();
+    await sender.updateControls('client-1', 'ios', 'install-1', { needsInputEnabled: false });
+    await sender.observeQuestion({ item: question(), open: true });
+    expect(requests).toEqual([]);
+  });
+
+  it('sends Android builds that draw buttons a data-only message, and older builds the system alert', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'pane-mobile-notify-fcm-'));
+    temporaryDirectories.push(directory);
+    const serviceAccountPath = path.join(directory, 'service-account.json');
+    const keyPair = generateKeyPairSync('rsa', { modulusLength: 2048 });
+    await writeFile(serviceAccountPath, JSON.stringify({ project_id: 'project', client_email: 'sender@example.test', private_key: keyPair.privateKey.export({ type: 'pkcs8', format: 'pem' }) }));
+    setEnvironment({ fcmPath: serviceAccountPath });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ access_token: 'access-token' }), { status: 200 })));
+    const config = createDefaultRemoteDaemonConfig();
+    config.host.clients = ['new', 'old'].map(id => ({ id, label: id, tokenHash: 'hash', createdAt: '2026-09-04T00:00:00.000Z' }));
+    const requests: Parameters<MobilePushTransport['fcm']>[0][] = [];
+    const sender = new MobilePushSender(new ConfigManagerStub(config), {
+      apns: async () => ({ status: 200, body: '' }),
+      fcm: async request => { requests.push(request); return { status: 200, body: '' }; },
+    });
+    await sender.register('new', { platform: 'android', token: 'new-token', installationId: 'install-new', hostProfileId: 'profile-1', notifyButtons: true });
+    await sender.register('old', { platform: 'android', token: 'old-token', installationId: 'install-old', hostProfileId: 'profile-1' });
+
+    await sender.observeQuestion({ item: question(), open: true });
+    await sender.observeQuestion({ item: question({ state: 'answered' }), open: false });
+
+    expect(requests.map(request => request.token)).toEqual(['new-token', 'old-token', 'new-token']);
+    expect(requests[0]?.payload).toMatchObject({ message: { android: { priority: 'high' }, data: {
+      notifyId: 'question-1', notifyUi: 'options', notifyTitle: 'billing-migration', notifyBody: 'billing-migration has a question', notifyChoices: '["Drop it","Keep it"]',
+    } } });
+    expect(requests[0]?.payload.message).not.toHaveProperty('notification');
+    expect(requests[1]?.payload).toMatchObject({ message: { notification: { title: 'billing-migration', body: 'billing-migration has a question' }, data: { notifyId: 'question-1' } } });
+    expect(requests[2]?.payload).toMatchObject({ message: { data: { notifyClear: '1', notifyId: 'question-1' } } });
   });
 });
 

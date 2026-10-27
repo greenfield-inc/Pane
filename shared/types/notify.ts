@@ -116,6 +116,10 @@ export interface NotifyItem extends NotifyQuestion {
   resolvedAt?: number;
   /** What was sent, in a few words: the choice, Approved, Denied, or the typed answer. */
   answerSummary?: string;
+  /** The device that answered, when another screen did; absent when this screen answered. */
+  answeredOn?: string;
+  /** The machine whose agent asked; set while a screen shows two machines' questions. */
+  machine?: string;
 }
 
 /** What the strip shows. Main decides; every surface renders the same thing. */
@@ -148,7 +152,35 @@ export interface NotifySnapshot {
   firstRun: boolean;
   /** Pane's Notify block in each agent's user-level instruction file. */
   instructionFiles: NotifyInstructionsFile[];
+  /** The connected host whose questions this screen also shows; null when it shows only its own. */
+  remote: NotifyRemoteHost | null;
 }
+
+export interface NotifyRemoteHost {
+  machine: string;
+  /** False while the connection is down: its questions can't be answered until it returns. */
+  online: boolean;
+}
+
+/**
+ * What a host shares with every connected screen and phone (`notify:remote-snapshot`, and the
+ * `notify:shared-changed` event). Where the strip shows, focus and the round stay per screen.
+ */
+export interface NotifySharedState {
+  /** The host's machine name, for the cards. */
+  machine: string;
+  enabled: boolean;
+  /** Each item's `answeredOn` names the device that answered it, the host's own screen included. */
+  items: NotifyItem[];
+  queue: string[];
+  hidden: string[];
+}
+
+/** Commands a connected screen or phone sends the host (`notify:remote-command`). */
+export type NotifyRemoteCommand =
+  | { type: 'answer'; id: string; answer: NotifyAnswer }
+  | { type: 'undo' | 'dismiss' | 'skip'; id: string }
+  | { type: 'remind'; id: string; after: Exclude<NotifyRemindAfter, 'pane'> };
 
 /** Pane's Notify block in one agent's user-level instruction file (~/.claude/CLAUDE.md, ~/.codex/AGENTS.md). */
 export interface NotifyInstructionsFile {

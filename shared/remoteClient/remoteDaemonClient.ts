@@ -42,6 +42,8 @@ export interface RemoteRequestContext {
   token: string;
   runtimeId: string;
   clientLabel: string;
+  /** This device's own name, such as the phone's; the host names answers from it. */
+  deviceLabel?: string;
 }
 
 export interface RemoteEventStreamContext extends RemoteRequestContext {
@@ -82,6 +84,8 @@ export interface RemoteDaemonClientOptions {
   /** Stable per-install ID; see `getOrCreateRuntimeId`. */
   runtimeId: () => string | Promise<string>;
   clientLabel: string;
+  /** This device's own name, such as the phone's; the host names answers from it. */
+  deviceLabel?: string;
   fetch?: RemoteFetch;
   /**
    * Reconnect when the stream delivers nothing (the host sends a heartbeat
@@ -140,6 +144,7 @@ export class RemoteDaemonClient {
   private readonly transport: RemoteDaemonTransport;
   private readonly fetch: RemoteFetch;
   private readonly clientLabel: string;
+  private readonly deviceLabel: string | undefined;
   private readonly resolveRuntimeId: () => string | Promise<string>;
   private readonly staleStreamTimeoutMs: number | undefined;
   private runtimeId: string | null = null;
@@ -164,6 +169,7 @@ export class RemoteDaemonClient {
     this.transport = options.transport;
     this.fetch = options.fetch ?? ((url, init) => globalThis.fetch(url, init));
     this.clientLabel = options.clientLabel;
+    this.deviceLabel = options.deviceLabel;
     this.resolveRuntimeId = options.runtimeId;
     this.staleStreamTimeoutMs = options.staleStreamTimeoutMs;
   }
@@ -344,6 +350,7 @@ export class RemoteDaemonClient {
       token: this.profile.token,
       runtimeId: this.runtimeId ??= await this.resolveRuntimeId(),
       clientLabel: this.clientLabel,
+      ...(this.deviceLabel ? { deviceLabel: this.deviceLabel } : {}),
     };
   }
 
