@@ -2257,7 +2257,7 @@ interface PreparedInitialInput {
  * Decide how a create prompt reaches the agent. A long or multi-line prompt
  * is never typed into the shell as an argument: on a POSIX shell the launch
  * reads it from a prompt file, elsewhere the agent's composer takes it as a
- * paste once the agent is ready. `--as-file-pointer` swaps the prompt for a
+ * paste once the agent is ready. Outside POSIX shells every prompt goes that way. `--as-file-pointer` swaps the prompt for a
  * one-line pointer to its file.
  */
 async function prepareInitialInput(
@@ -2285,7 +2285,8 @@ async function prepareInitialInput(
   const prepared: RunpaneResolvedTool = { ...tool, initialInput: text };
   const warnings = tool.agent === 'claude' ? claudePromptWarnings(text) : undefined;
 
-  const useArgumentDelivery = allowArgumentDelivery && shouldUseArgumentDelivery(prepared);
+  // Only a POSIX launch shell keeps a prompt one literal argument; elsewhere the composer takes it once the agent is ready.
+  const useArgumentDelivery = allowArgumentDelivery && shouldUseArgumentDelivery(prepared) && terminalPanelManager.launchShellIsPosix(wslContext);
   if (!useArgumentDelivery || !isLongPrompt(text)) {
     return { tool: prepared, useArgumentDelivery, promptFile, attachments, warnings };
   }

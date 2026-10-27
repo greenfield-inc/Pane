@@ -458,6 +458,29 @@ export class TerminalPanelManager extends EventEmitter {
     return isPosixShell(shellType) ? this.quoteCommandArgument(customState.initialInput ?? '') : undefined;
   }
 
+  private hasUnsentArgumentPrompt(customState: TerminalPanelState): boolean {
+    return customState.initialInputMode === 'argument' && Boolean(customState.initialInput?.trim()) && !customState.initialInputSentAt;
+  }
+
+  /**
+   * An argument-mode prompt this shell can't take on the command line is dropped from the launch,
+   * never typed in later: nothing proves the agent, and not a bare shell, would read it.
+   */
+  private dropUnplaceablePrompt(nextState: TerminalPanelState, shellType: string | undefined): void {
+    nextState.initialInput = undefined;
+    nextState.initialInputFile = undefined;
+    nextState.initialInputError = `The starting message was not sent: ${shellType ?? 'this shell'} can't pass it to the agent as one launch argument without changing it, and Pane won't type it where a shell might read it. Paste it into the agent, or send it with runpane panels submit.`;
+  }
+
+  /**
+   * Whether a new terminal for this context reads POSIX quoting, so a starting message can go on
+   * the agent's launch command line. WSL terminals run bash.
+   */
+  launchShellIsPosix(wslContext?: WSLContext | null): boolean {
+    if (wslContext && process.platform === 'win32') return true;
+    return isPosixShell(ShellDetector.getDefaultShell(getRuntimeConfigManager().getPreferredShell()).name);
+  }
+
   /**
    * Whether an agent launched in a new terminal for this context can read a
    * long prompt with `"$(cat '<file>')"`: a POSIX shell, not WSL, PowerShell
@@ -647,6 +670,8 @@ export class TerminalPanelManager extends EventEmitter {
       if (initialPromptArg && !canResumeClaudeSession) {
         nextState.initialInputSentAt = new Date().toISOString();
         nextState.initialInputError = undefined;
+      } else if (!promptWord && !canResumeClaudeSession && this.hasUnsentArgumentPrompt(customState)) {
+        this.dropUnplaceablePrompt(nextState, shellType);
       }
 
       return {
@@ -712,6 +737,7 @@ export class TerminalPanelManager extends EventEmitter {
         isCliCommand: true,
       };
     }
+    if (this.hasUnsentArgumentPrompt(customState)) this.dropUnplaceablePrompt(nextState, shellType);
 
     return undefined;
   }

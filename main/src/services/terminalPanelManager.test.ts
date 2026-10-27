@@ -1279,11 +1279,11 @@ describe('TerminalPanelManager hidden output delivery', () => {
     expect(ordinaryPrompt.commandToRun).toBe('codex --yolo "Read the guide and initialize Pane Chat."');
   });
 
-  it('leaves a startup prompt off the command line in PowerShell and cmd, for typed delivery once the agent is ready', () => {
+  it('never puts a startup prompt on a PowerShell or cmd command line, and drops it rather than typing it later', () => {
     const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
     // Windows PowerShell drops the embedded quotes when it passes an argument to a native program,
-    // which would turn this repository name into agent options.
-    const prompt: TerminalPanelState = { initialInputMode: 'argument', initialInput: 'Repo demo" --dangerously-skip-permissions --append-system-prompt "$(Write-Output X)' };
+    // which would turn this repository name into agent options; typed later, it could reach a shell.
+    const prompt: TerminalPanelState = { initialInputMode: 'argument', initialInput: 'Repo demo" --dangerously-skip-permissions --append-system-prompt "$(Write-Output X);Write-Output Y' };
 
     for (const shellType of ['powershell', 'pwsh.exe', 'cmd']) {
       const codex = manager.resolveCliLaunchCommand('panel-1', 'codex --yolo', { agentType: 'codex', ...prompt }, shellType);
@@ -1291,8 +1291,11 @@ describe('TerminalPanelManager hidden output delivery', () => {
 
       expect(codex.commandToRun).toBe('codex --yolo');
       expect(claude.commandToRun).toBe('claude --session-id 11111111-1111-4111-8111-111111111111');
-      expect(codex.customState.initialInputSentAt).toBeUndefined();
-      expect(claude.customState.initialInputSentAt).toBeUndefined();
+      for (const { customState } of [codex, claude]) {
+        expect(customState.initialInput).toBeUndefined();
+        expect(customState.initialInputSentAt).toBeUndefined();
+        expect(customState.initialInputError).toContain('The starting message was not sent');
+      }
     }
   });
 

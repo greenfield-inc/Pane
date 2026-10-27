@@ -71,6 +71,7 @@ vi.spyOn(terminalPanelManager, 'hasLaunchCommandExited');
 vi.spyOn(terminalPanelManager, 'relaunchInShell');
 vi.spyOn(terminalPanelManager, 'isBracketedPasteEnabled');
 vi.spyOn(terminalPanelManager, 'launchShellReadsPromptFile');
+vi.spyOn(terminalPanelManager, 'launchShellIsPosix');
 vi.spyOn(panelDatabase, 'getPanelBuffers');
 vi.spyOn(usageManager, 'getPaneCosts');
 
@@ -375,6 +376,7 @@ describe('runpane IPC handlers', () => {
     vi.mocked(terminalPanelManager.relaunchInShell).mockReset().mockResolvedValue(undefined);
     vi.mocked(terminalPanelManager.isBracketedPasteEnabled).mockReset().mockReturnValue(false);
     vi.mocked(terminalPanelManager.launchShellReadsPromptFile).mockReset().mockReturnValue(true);
+    vi.mocked(terminalPanelManager.launchShellIsPosix).mockReset().mockReturnValue(true);
     vi.mocked(terminalPanelManager.getOutputGeneration).mockReturnValue(0);
     vi.mocked(terminalPanelManager.getAgentStatus).mockReturnValue('idle');
     findUserTurnSince.mockReset().mockResolvedValue({ state: null });
@@ -6655,6 +6657,19 @@ describe('runpane IPC handlers', () => {
       expect(state.initialInputMode).toBeUndefined();
       expect(state.initialInputFile).toBeUndefined();
       expect(state).toMatchObject({ initialInput: 'Line one\nLine two', initialInputSubmitStrategy: strategy });
+    });
+
+    it('hands even a short create prompt to the composer when the launch shell is not POSIX', async () => {
+      vi.mocked(terminalPanelManager.launchShellIsPosix).mockReturnValue(false);
+      vi.mocked(panelManager.createPanel).mockImplementation(async request => createdTerminalPanel(request));
+
+      await createRegistry().invoke('runpane:panes:create', [{
+        repo: { id: project.id },
+        panes: [{ name: 'pwsh', tool: { agent: 'claude', initialInput: 'Fix "quoted" names' } }],
+      }]);
+
+      expect(createdInitialState().initialInputMode).toBeUndefined();
+      expect(createdInitialState()).toMatchObject({ initialInput: 'Fix "quoted" names', initialInputSubmitStrategy: 'enter' });
     });
 
     it('sends a create prompt as a pointer to its file with --as-file-pointer', async () => {
