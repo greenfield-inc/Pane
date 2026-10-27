@@ -87,6 +87,14 @@ async function setPreference(key: string, value: string): Promise<void> {
   if (window.electronAPI?.preferences) await API.preferences.set(key, value);
 }
 
+async function markOnboardingComplete(): Promise<void> {
+  try {
+    await setPreference(ONBOARDING_REPO_SETUP_PREFERENCE, 'true');
+  } catch {
+    // Close even if the preference write fails.
+  }
+}
+
 async function recordFirstLaunchEnvironmentStatus(status: OnboardingEnvironmentStatus): Promise<void> {
   const existing = await getPreference(ONBOARDING_GH_STATUS_AT_FIRST_LAUNCH_PREFERENCE);
   if (existing) return;
@@ -354,11 +362,7 @@ export default function OnboardingDialog({ isOpen, onClose }: OnboardingDialogPr
 
   const complete = async (properties: AnalyticsProperties & { entry: OnboardingEntry; wsl: boolean }) => {
     closedRef.current = true;
-    try {
-      await setPreference(ONBOARDING_REPO_SETUP_PREFERENCE, 'true');
-    } catch {
-      // Close even if the preference write fails.
-    }
+    await markOnboardingComplete();
     capture('onboarding_completed', properties);
     onClose();
   };
@@ -428,11 +432,7 @@ export default function OnboardingDialog({ isOpen, onClose }: OnboardingDialogPr
   const handleSkip = async () => {
     capture('onboarding_skipped', { step: env ? getEnvironmentStatus(env) : 'detecting' });
     closedRef.current = true;
-    try {
-      await setPreference(ONBOARDING_REPO_SETUP_PREFERENCE, 'true');
-    } catch {
-      // Close even if the preference write fails.
-    }
+    await markOnboardingComplete();
     onClose();
   };
 
