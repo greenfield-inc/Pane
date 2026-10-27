@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { ArrowRight, CornerDownLeft, X } from 'lucide-react';
 import type { NotifyCommand, NotifyItem, NotifySnapshot } from '../../../../shared/types/notify';
 import { cn } from '../../utils/cn';
@@ -117,9 +117,11 @@ function RoundPanel({ item, position, total, onCommand }: RoundPanelProps) {
 
   // Read the latest state from the key handler without re-binding it each render.
   const sendRef = useRef(send);
-  sendRef.current = send;
   const stateRef = useRef({ selected, noteOpen });
-  stateRef.current = { selected, noteOpen };
+  useLayoutEffect(() => {
+    sendRef.current = send;
+    stateRef.current = { selected, noteOpen };
+  });
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
