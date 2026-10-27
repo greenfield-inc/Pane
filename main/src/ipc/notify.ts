@@ -170,10 +170,13 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: AppServices, 
   };
   remotePaneClientController.on('notify-shared', showHostState);
   remotePaneClientController.on('resync', () => void refreshHost());
+  let hostProfileId: string | null = null;
   remotePaneClientController.on('state-changed', () => {
     const state = remotePaneClientController.getConnectionState();
-    if (state.mode !== 'remote') notify.queue.setRemote(null);
-    else if (state.status !== 'connected') notify.queue.setRemote({ machine: hostMachine(), online: false });
+    // Another host's questions start fresh, without the last host's showing as unreachable.
+    if (state.mode !== 'remote' || state.activeProfileId !== hostProfileId) notify.queue.setRemote(null);
+    hostProfileId = state.mode === 'remote' ? state.activeProfileId : null;
+    if (state.mode === 'remote' && state.status !== 'connected') notify.queue.setRemote({ machine: hostMachine(), online: false });
   });
 
   commandRegistry.register('runpane:notify', async (request: PaneCommandValue): Promise<NotifyResult> => {
@@ -182,7 +185,9 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: AppServices, 
 
   commandRegistry.register('notify:remote-snapshot', async () => notify.sharedState());
   commandRegistry.register('notify:remote-command', async (command: PaneCommandValue, sender: PaneCommandValue) => {
-    notify.runRemote(decodeBoundary(command, notifyRemoteCommandSchema) satisfies NotifyRemoteCommand, decodeBoundary(sender, remoteSenderSchema).device);
+    // A Mac names itself "studio.local" on its event stream; cards call it "studio".
+    const device = decodeBoundary(sender, remoteSenderSchema).device.replace(/\.local$/i, '');
+    notify.runRemote(decodeBoundary(command, notifyRemoteCommandSchema) satisfies NotifyRemoteCommand, device);
     return null;
   });
 

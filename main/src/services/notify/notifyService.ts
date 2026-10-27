@@ -176,13 +176,14 @@ export class NotifyService {
     } catch (error) {
       if (command.type === 'answer') this.queue.noteAnsweredHere(command.id, false);
       const code = error instanceof Error && 'code' in error ? String(error.code) : '';
-      if (code.startsWith('ERR_NOTIFY_')) {
-        // Another screen got there first; the host's state says how.
-        this.deps.refreshHost();
+      console.warn(`[Notify] ${command.type} was not sent to ${remote?.machine ?? 'the host'}:`, error);
+      if (UNREACHABLE_CODES.has(code)) {
+        // The cards say so until the connection returns.
+        if (remote) this.queue.setRemote({ machine: remote.machine, online: false });
         return;
       }
-      console.warn(`[Notify] ${command.type} was not sent to ${remote?.machine ?? 'the host'}:`, error);
-      if (remote) this.queue.setRemote({ machine: remote.machine, online: false });
+      // Refused (another screen got there first, or the hold ended): the host's state says how.
+      this.deps.refreshHost();
     }
   }
 
@@ -352,6 +353,9 @@ export class NotifyService {
     if (window && !window.isDestroyed()) window.webContents.send(channel, ...args);
   }
 }
+
+/** Failures that mean the host wasn't reached, as opposed to the host refusing the command. */
+const UNREACHABLE_CODES = new Set(['ERR_REMOTE_OFFLINE', 'ERR_REMOTE_TRANSPORT', 'ERR_NOTIFY_NOT_CONNECTED']);
 
 function notifySettings(config: AppConfig): NotifySettings {
   return { ...DEFAULT_NOTIFY_SETTINGS, ...config.notify };

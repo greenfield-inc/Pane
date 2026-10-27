@@ -474,4 +474,31 @@ describe('NotifyQueue across machines', () => {
     await vi.advanceTimersByTimeAsync(3_000);
     expect(laptop.snapshot().strip).toBeNull();
   });
+
+  it("ends Undo on every screen when the host delivers, and keeps the host's 'when I switch to Pane' to the host", async () => {
+    const { queue: host } = makeQueue({}, 'mac-studio');
+    const { queue: laptop } = makeQueue({}, 'parsa-devbox');
+    connect(host, laptop);
+    ask(host, sessionStore, claude);
+    ask(host, migration, codex);
+    const [first, second] = host.snapshot().queue;
+
+    host.run({ type: 'remind', id: second, after: 'pane' });
+    expect(laptop.snapshot().hidden).not.toContain(second);
+
+    host.run({ type: 'answer', id: first, answer: { choice: 'Keep Redis' } });
+    expect(laptop.snapshot().strip).toEqual({ kind: 'sent', itemId: first });
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(laptop.snapshot().strip).toEqual({ kind: 'question', itemId: second });
+  });
+
+  it("doesn't chime for the host's questions while this screen's Notify is off", () => {
+    const { queue: host } = makeQueue({}, 'mac-studio');
+    const { queue: laptop } = makeQueue({ enabled: false }, 'parsa-devbox');
+    connect(host, laptop);
+    const chimes = vi.fn();
+    laptop.on('chime', chimes);
+    ask(host, sessionStore, claude);
+    expect(chimes).not.toHaveBeenCalled();
+  });
 });

@@ -201,7 +201,8 @@ export class NotifyQueue extends EventEmitter {
         item.state === 'sent' || item.state === 'answered' ? { ...item, answeredOn: item.answeredOn ?? machine } : { ...item }
       )),
       queue: [...this.queue],
-      hidden: [...this.hidden],
+      // "When I switch to Pane" waits for this Pane only; other screens keep showing the question.
+      hidden: [...this.hidden].filter(id => !this.entries.get(id)?.remindOnPaneFocus),
     };
   }
 
@@ -257,7 +258,8 @@ export class NotifyQueue extends EventEmitter {
         if (!announce) continue;
         if (item.state === 'waiting') {
           if (this.transient?.view.kind === 'info') this.clearTransient();
-          if (this.env.settings().sound && !this.isPaused()) this.emit('chime');
+          const settings = this.env.settings();
+          if (settings.enabled && settings.sound && !this.isPaused()) this.emit('chime');
         } else if (item.state === 'info') {
           const current = this.strip();
           if (this.canShowStrip() && (current === null || current.kind === 'info')) this.showInfo(item.id);
@@ -268,6 +270,9 @@ export class NotifyQueue extends EventEmitter {
         this.setTransient({ kind: 'sent', itemId: item.id }, NOTIFY_UNDO_MS);
       } else if (before.state === 'sent' && item.state === 'waiting') {
         this.answeredHere.delete(item.id);
+        if (this.transient?.view.itemId === item.id) this.clearTransient();
+      } else if (before.state === 'sent' && item.state === 'answered') {
+        // The host delivered it; Undo can no longer take it back here either.
         if (this.transient?.view.itemId === item.id) this.clearTransient();
       } else if (isOpen(before) && item.state === 'expired') {
         if (stripId === item.id) this.setTransient({ kind: 'expired', itemId: item.id }, NOTIFY_EXPIRED_SHOW_MS);
