@@ -16,6 +16,7 @@ import type { JsonObject, JsonValue } from '../shared/validation/boundaryDecoder
 import { DEFAULT_APPEARANCE, LIGHT_THEMES, normalizeAppearance, type AppearanceConfig } from '../shared/types/appearance';
 import type { DiffManifest, DiffScope, FileDiffResult } from '../shared/types/gitDiff';
 import type { SetupExportSummary, SetupFile, SetupImportPreview, SetupSectionId } from '../shared/types/setupTransfer';
+import type { NotifyCommand, NotifySnapshot, NotifyWindowSize } from '../shared/types/notify';
 
 type MockEventValue = JsonValue | object | undefined;
 type MockEventCallback = (...args: MockEventValue[]) => void;
@@ -109,6 +110,8 @@ export type ElectronApiMockOptions = {
   workspaceAccess?: Partial<WorkspaceAccessSummary>;
   /** setup:choose-import fails with this PaneError text instead of previewing. */
   setupImportError?: string;
+  /** Serves window.electronAPI.notify with this queue snapshot; absent, the API is too. */
+  notifySnapshot?: NotifySnapshot;
 };
 
 export async function installElectronApiMock(page: Page, options: ElectronApiMockOptions = {}) {
@@ -696,7 +699,30 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     };
 
     let uncleanShutdownPending = mockOptions.uncleanShutdown === true;
+    let notifySnapshot = mockOptions.notifySnapshot ? clone(mockOptions.notifySnapshot) : null;
+    // Like main: the snapshot's settings are the saved notify settings over the defaults.
+    const applyNotifyConfig = () => {
+      if (notifySnapshot && configState.notify && !Array.isArray(configState.notify) && configState.notify instanceof Object) {
+        Object.assign(notifySnapshot.settings, configState.notify);
+      }
+    };
+    applyNotifyConfig();
+    const notifyCommands: NotifyCommand[] = [];
+    const notifyWindowSizes: NotifyWindowSize[] = [];
+    const notifyApi = notifySnapshot ? {
+      getSnapshot: () => Promise.resolve(clone(notifySnapshot)),
+      run: (command: NotifyCommand) => {
+        notifyCommands.push(clone(command));
+        return Promise.resolve();
+      },
+      onSnapshot: (callback: MockEventCallback) => subscribe('notify:snapshot', callback),
+      onChime: (callback: MockEventCallback) => subscribe('notify:chime', callback),
+      onNavigate: (callback: MockEventCallback) => subscribe('notify:navigate', callback),
+      resizeWindow: (size: NotifyWindowSize) => { notifyWindowSizes.push(clone(size)); },
+      focusWindow: () => Promise.resolve(),
+    } : undefined;
     const electronAPI = {
+      notify: notifyApi,
       preferences: {
         get: async (key: string) => preferences[key] ?? 'true',
         getAll: async () => clone(preferences),
@@ -940,8 +966,17 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           if ('systemDarkTheme' in updates && mockOptions.appearance.lightThemes.includes(String(updates.systemDarkTheme))) {
             return Promise.resolve({ success: false, error: 'systemDarkTheme must be a dark palette' });
           }
+          const savedNotify = configState.notify;
           Object.assign(configState, updates);
           configUpdates.push(clone(updates));
+          if (updates.notify instanceof Object && !Array.isArray(updates.notify)) {
+            // Main merges each notify field into the saved ones and sends a new snapshot.
+            const merged: JsonObject = {};
+            if (savedNotify instanceof Object && !Array.isArray(savedNotify)) Object.assign(merged, savedNotify);
+            configState.notify = Object.assign(merged, updates.notify);
+            applyNotifyConfig();
+            if (notifySnapshot) queueMicrotask(() => emit('notify:snapshot', clone(notifySnapshot)));
+          }
           const response = success(clone(configState));
           if ('terminalFontFamily' in updates || 'terminalFontSize' in updates) {
             queueMicrotask(() => emit('config:terminal-font-updated', {
@@ -1729,6 +1764,19 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         getProjectUpdates() {
           return lastProjectUpdate ? [clone(lastProjectUpdate)] : [];
+        },
+        getNotifyCommands() {
+          return clone(notifyCommands);
+        },
+        getNotifyWindowSizes() {
+          return clone(notifyWindowSizes);
+        },
+        emitNotifySnapshot(snapshot: NotifySnapshot) {
+          notifySnapshot = clone(snapshot);
+          emit('notify:snapshot', clone(snapshot));
+        },
+        emitNotifyNavigate(target: 'inbox' | 'settings') {
+          emit('notify:navigate', target);
         },
       },
     });

@@ -208,6 +208,7 @@ destination instead of claiming delivery. There is no cross-machine sync.
 | Timestamps | `main/src/utils/timestampUtils.ts` | [TIMESTAMP_HANDLING.md](TIMESTAMP_HANDLING.md) |
 | Pane Chat and orchestration sessions | `paneChatManager.ts`, `skillCacheManager.ts`, `paneChatBundle/` | [SESSIONS.md](SESSIONS.md) |
 | Loops (scheduled tasks) | `main/src/services/loops/`, `main/src/ipc/loops.ts`, `shared/types/loop.ts` | [LOOPS.md](LOOPS.md) |
+| Pane Notify (agent questions) | In-memory queue, floating strip and round windows, tray icon in `main/src/services/notify/`; `main/src/ipc/notify.ts`, `shared/types/notify.ts`; the floating windows load `frontend/notify.html` | [PANE_NOTIFY.md](PANE_NOTIFY.md) |
 | SSH hosts view | `sshConfigHosts.ts`, `ipc/sshHosts.ts`, `SshView.tsx` | [SSH_HOSTS.md](SSH_HOSTS.md) |
 | `runpane` CLI contract | `contracts/runpane/` | [RUNPANE_CLI_CONTRACT.md](RUNPANE_CLI_CONTRACT.md) |
 | Analytics | `analyticsManager.ts`, `frontend/src/services/posthog.ts` | [ANALYTICS_INVARIANTS.md](ANALYTICS_INVARIANTS.md) |

@@ -1,3 +1,4 @@
+import type { NotifySettings } from '../../../shared/types/notify';
 import type { CustomCommandResume } from '../../../shared/types/customCommandResume';
 import type { LeaderboardConfig } from '../../../shared/types/leaderboard';
 import type { RemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
@@ -101,6 +102,8 @@ export interface AppConfig {
     playSound: boolean;
     enabled: boolean;
   };
+  // Pane Notify settings; absent fields take DEFAULT_NOTIFY_SETTINGS
+  notify?: Partial<NotifySettings>;
   // Dev mode for debugging
   devMode?: boolean;
   // Additional paths to add to PATH environment variable
@@ -226,6 +229,8 @@ export interface UpdateConfigRequest {
     playSound: boolean;
     enabled: boolean;
   };
+  // Pane Notify settings; absent fields take DEFAULT_NOTIFY_SETTINGS
+  notify?: Partial<NotifySettings>;
   devMode?: boolean;
   additionalPaths?: string[];
   sessionCreationPreferences?: {

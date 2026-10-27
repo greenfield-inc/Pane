@@ -5079,6 +5079,157 @@ async function checkDryRunMessages() {
   }
 }
 
+async function checkNotifyParity() {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-notify-'));
+  const insidePane = {
+    PANE_SESSION_ID: 'session-1', PANE_PANEL_ID: 'panel-1', RUNPANE_NOTIFY_AGENT: 'Cursor', RUNPANE_NOTIFY_RETURN_AFTER_MS: '50000',
+  };
+  const outsidePane = { PANE_SESSION_ID: '', PANE_PANEL_ID: '', RUNPANE_NOTIFY_AGENT: '', RUNPANE_NOTIFY_RETURN_AFTER_MS: '' };
+  const ask = [
+    'notify', '--ui', 'options', '--title', 'Which database?', '--context', 'For the cache.',
+    '--choices=[{"label":"Redis","recommended":true},{"label":"SQLite","detail":"No server"}]',
+  ];
+  // Each daemon result and the one line a person sees for it.
+  const results = [
+    [{ answer: 'Redis', note: 'Keep it small.' }, 'Answer: Redis. Note: Keep it small.'],
+    [{ approved: false }, 'Denied'],
+    [{ delivered: 'inbox' }, 'Added to the Notify inbox.'],
+    [{ waiting: true, id: 'n-1', next: 'Call `runpane notify --resume n-1` now.' }, 'Still waiting (id n-1). Call `runpane notify --resume n-1` now.'],
+  ];
+  const frames = { npm: [], pip: [] };
+  try {
+    for (const runtime of ['npm', 'pip']) {
+      for (const [result, line] of results) {
+        for (const json of [true, false]) {
+          const run = await withFakeDaemon(paneDir, (frame) => {
+            frames[runtime].push(frame);
+            return { result };
+          }, () => runCliOnce(runtime, json ? [...ask, '--json'] : ask, paneDir, 20_000, insidePane));
+          assert.strictEqual(run.code, 0, `${runtime} notify exited ${run.code}. stdout=${run.stdout} stderr=${run.stderr}`);
+          if (json) assert.deepStrictEqual(JSON.parse(run.stdout), result, `${runtime} notify --json printed the wrong result`);
+          else assert.strictEqual(run.stdout.trim(), line, `${runtime} notify printed the wrong line`);
+        }
+      }
+      const approval = await withFakeDaemon(paneDir, (frame) => {
+        frames[runtime].push(frame);
+        return { result: { approved: true } };
+      }, () => runCliOnce(runtime, [
+        'notify', '--ui', 'approve', '--title', 'Drop the table?', '--detail', 'DROP TABLE t;', '--detail-label', 'Show the SQL', '--json',
+      ], paneDir, 20_000, outsidePane));
+      assert.deepStrictEqual(JSON.parse(approval.stdout), { approved: true });
+      const resumed = await withFakeDaemon(paneDir, (frame) => {
+        frames[runtime].push(frame);
+        return { result: { approved: true } };
+      }, () => runCliOnce(runtime, ['notify', '--resume', 'n-1', '--json'], paneDir, 20_000, outsidePane));
+      assert.deepStrictEqual(JSON.parse(resumed.stdout), { approved: true });
+
+      // No Pane is listening: an unavailable result, not an error, so the agent asks in its terminal.
+      const offline = await runCliOnce(runtime, [...ask, '--json'], paneDir, 20_000, insidePane);
+      assert.strictEqual(offline.code, 0, `${runtime} notify without Pane exited ${offline.code}. stderr=${offline.stderr}`);
+      assert.deepStrictEqual(JSON.parse(offline.stdout), { unavailable: 'Pane is not running.', next: 'Ask in the terminal instead.' });
+    }
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
+  const question = {
+    ui: 'options', title: 'Which database?', context: 'For the cache.',
+    choices: [{ label: 'Redis', recommended: true }, { label: 'SQLite', detail: 'No server' }],
+    returnAfterMs: 50000,
+    caller: { paneId: 'session-1', panelId: 'panel-1', cwd: rootDir, agent: 'Cursor' },
+  };
+  assert.deepStrictEqual(frames.npm.map((frame) => frame.channel), Array(results.length * 2 + 2).fill('runpane:notify'));
+  assert.deepStrictEqual(frames.npm[0].args, [question]);
+  assert.deepStrictEqual(frames.npm.at(-2).args, [{
+    ui: 'approve', title: 'Drop the table?', detail: 'DROP TABLE t;', detailLabel: 'Show the SQL', caller: { cwd: rootDir },
+  }]);
+  assert.deepStrictEqual(frames.npm.at(-1).args, [{ resume: 'n-1', caller: { cwd: rootDir } }]);
+  assert.deepStrictEqual(frames.pip.map((frame) => frame.args), frames.npm.map((frame) => frame.args), 'Python and Node notify sent different requests');
+
+  // Invalid input fails before any request, naming the field, the same way in both wrappers.
+  const tenChoices = JSON.stringify(Array.from({ length: 10 }, (_, index) => ({ label: `c${index}` })));
+  const invalid = [
+    ['ui', ['--title', 'x'], 'ui is required: options, approve, ask, or info.'],
+    ['ui', ['--ui', 'poll', '--title', 'x'], 'ui must be options, approve, ask, or info; got "poll".'],
+    ['title', ['--ui', 'ask'], 'title is required: one line saying what you need.'],
+    ['choices', ['--ui', 'ask', '--title', 'x', '--choices', '[{"label":"a"}]'], 'choices is only for ui options; this call is ui ask.'],
+    ['detail', ['--ui', 'info', '--title', 'x', '--detail', 'DROP TABLE t;'], 'detail is only for ui approve; this call is ui info.'],
+    ['detailLabel', ['--ui', 'ask', '--title', 'x', '--detail-label', 'Show the SQL'], 'detailLabel is only for ui approve; this call is ui ask.'],
+    ['detailLabel', ['--ui', 'approve', '--title', 'x', '--detail-label', 'Show the SQL'], 'detailLabel names the disclosure that reveals detail, so it needs detail too.'],
+    ['detailLabel', ['--ui', 'approve', '--title', 'x', '--detail', 'DROP TABLE t;', '--detail-label', 'x'.repeat(41)], 'detailLabel takes up to 40 characters; got 41.'],
+    ['choices', ['--ui', 'options', '--title', 'x'], undefined],
+    ['choices', ['--ui', 'options', '--title', 'x', '--choices', tenChoices], 'choices takes 1 to 9 choices; got 10.'],
+    ['choices', ['--ui', 'options', '--title', 'x', '--choices', '{"label":"a"}'], undefined],
+    ['choices', ['--ui', 'options', '--title', 'x', '--choices', 'Redis, SQLite'], undefined],
+    ['choices', ['--ui', 'options', '--title', 'x', '--choices', '[{"label":""}]'], undefined],
+    ['choices', ['--ui', 'options', '--title', 'x', '--choices', '[{"label":"a","recommended":"yes"}]'], undefined],
+    ['choices', ['--ui', 'options', '--title', 'x', '--choices', '[{"label":"a","detail":null}]'], undefined],
+    ['choices', ['--ui', 'options', '--title', 'x', '--choices', '[{"label":"a"},{"label":"a"}]'], 'choices[1] repeats the label "a"; each choice needs its own label.'],
+    ['suggestions', ['--ui', 'ask', '--title', 'x', '--suggestions', '["main",""]'], 'suggestions[1] must be non-empty text.'],
+    ['action', ['--ui', 'info', '--title', 'x', '--action', '{"label":"Open"}'], undefined],
+    ['resume', ['--resume', 'n-1', '--ui', 'ask'], 'resume keeps waiting on an earlier question, so it takes no other fields; remove ui.'],
+  ];
+  const { main } = require(npmCli);
+  const nodeFailures = [];
+  for (const [, args] of invalid) {
+    await assert.rejects(main(['notify', ...args]), (error) => {
+      nodeFailures.push([error.code, error.message, error.next]);
+      return true;
+    });
+  }
+  const pythonFailures = JSON.parse(runPythonSnippet(`
+import json, sys
+from runpane.cli import parse_args
+from runpane.notify import RunpaneError, build_notify_request
+failures = []
+for args in json.load(sys.stdin):
+    try:
+        build_notify_request(parse_args(["notify", *args]), {}, "/")
+        failures.append(None)
+    except RunpaneError as error:
+        failures.append([error.code, str(error), error.next])
+print(json.dumps(failures))
+`, JSON.stringify(invalid.map(([, args]) => args))));
+  assert.deepStrictEqual(pythonFailures, nodeFailures, 'Python and Node reject notify input differently');
+  invalid.forEach(([field, args, problem], index) => {
+    const [code, message, next] = nodeFailures[index];
+    assert.strictEqual(code, 'ERR_NOTIFY_INVALID', args.join(' '));
+    assert.ok(message.startsWith(field), `notify ${args.join(' ')} must name ${field}: ${message}`);
+    assert.ok(message.endsWith('Nothing was shown to the person.'), message);
+    if (problem) assert.strictEqual(message, `${problem} Nothing was shown to the person.`);
+    assert.strictEqual(next, args[0] === '--resume' ? 'Call notify again with only resume.' : `Fix ${field} and call notify again.`);
+  });
+
+  // A Pane without the notify channel (older, or the headless daemon) is unavailable too.
+  const daemonClient = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'daemonClient.js'));
+  const { runNotify } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'notify.js'));
+  const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
+  const originalInvoke = daemonClient.invokeDaemon;
+  const originalLog = console.log;
+  const printed = [];
+  daemonClient.invokeDaemon = async () => {
+    throw new daemonClient.PaneDaemonClientError('No Pane daemon command registered', 'ERR_UNKNOWN_CHANNEL');
+  };
+  console.log = (line) => printed.push(line);
+  try {
+    assert.strictEqual(await runNotify(parseRunpaneArgs(['notify', '--ui', 'info', '--title', 'Done', '--json']), {}), 0);
+  } finally {
+    daemonClient.invokeDaemon = originalInvoke;
+    console.log = originalLog;
+  }
+  const pythonUnknownChannel = runPythonSnippet(`
+import runpane.notify as notify
+from runpane.cli import parse_args
+from runpane.daemon_client import PaneDaemonClientError
+def fake_invoke(*args, **kwargs):
+    raise PaneDaemonClientError("No Pane daemon command registered", "ERR_UNKNOWN_CHANNEL")
+notify.invoke_daemon = fake_invoke
+assert notify.run_notify(parse_args(["notify", "--ui", "info", "--title", "Done", "--json"]), {}) == 0
+`);
+  const unsupported = { unavailable: 'This Pane doesn\'t support notify yet.', next: 'Ask in the terminal instead.' };
+  assert.deepStrictEqual(JSON.parse(printed.join('\n')), unsupported);
+  assert.deepStrictEqual(JSON.parse(pythonUnknownChannel), unsupported);
+}
+
 async function checkPaneCreateResultFields() {
   const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-result-fields-'));
   const result = {
@@ -5147,6 +5298,7 @@ async function runChecks() {
   await checkDeliveryParity();
   await checkReportParity();
   await checkReportDeliveryLine();
+  await checkNotifyParity();
   await checkPaneCreateBlockedReadiness();
   await checkPanelResumeCommandExitedReadiness();
   await checkSessionChildPinDefaults();

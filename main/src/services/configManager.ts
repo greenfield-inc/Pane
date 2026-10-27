@@ -398,11 +398,14 @@ export class ConfigManager extends EventEmitter {
       const agentContext = updates.agentContext !== undefined
         ? { ...this.config.agentContext, ...updates.agentContext }
         : this.config.agentContext;
+      // Notify settings arrive one field at a time from Settings and the tray menu.
+      const notify = updates.notify !== undefined ? { ...this.config.notify, ...updates.notify } : this.config.notify;
       const next: AppConfig = {
         ...this.config,
         ...updates,
         analytics,
         agentContext,
+        notify,
         defaultOrchestratorAgent: 'defaultOrchestratorAgent' in updates
           ? normalizePaneChatAgent(updates.defaultOrchestratorAgent)
           : this.config.defaultOrchestratorAgent,

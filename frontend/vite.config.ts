@@ -10,7 +10,7 @@ const MONACO_CDN = 'https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/';
 const ANALYTICS_HOST = 'https://runpane.com';
 
 /**
- * The main window's Content-Security-Policy. It renders untrusted Markdown, Mermaid and
+ * The main window's (and the Notify windows') Content-Security-Policy. It renders untrusted Markdown, Mermaid and
  * agent output next to IPC that can run commands, so scripts come only from the bundle,
  * the two inline theme bootstraps in index.html (by hash) and the pinned Monaco build.
  * frame-ancestors is not set: a <meta> policy cannot carry it, and the window is
@@ -47,7 +47,8 @@ export default defineConfig(({ command }) => ({
       // After Vite's own transforms, so the hashed inline scripts are final.
       order: 'post',
       handler(html, ctx) {
-        if (!ctx.filename.endsWith('index.html')) return html;
+        // The main window and the floating Notify windows share the preload and its IPC.
+        if (!ctx.filename.endsWith('index.html') && !ctx.filename.endsWith('notify.html')) return html;
         const policy = rendererCsp(html, command === 'serve');
         return html.replace('<head>', `<head>\n    <meta http-equiv="Content-Security-Policy" content="${policy}" />`);
       },
@@ -79,6 +80,7 @@ export default defineConfig(({ command }) => ({
       input: {
         main: resolve(import.meta.dirname, 'index.html'),
         remote: resolve(import.meta.dirname, 'remote.html'),
+        notify: resolve(import.meta.dirname, 'notify.html'),
       },
     },
   }
