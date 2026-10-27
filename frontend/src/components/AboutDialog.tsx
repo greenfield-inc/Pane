@@ -110,7 +110,7 @@ export function AboutDialog({ isOpen, onClose, onUpdate }: AboutDialogProps) {
       onClose={onClose}
       size="sm"
       restoreFocusOnClose={!isHandingOff}
-      className="mx-auto !w-[360px] max-w-full !rounded-xl border border-border-primary !bg-surface-primary !shadow-2xl"
+      className="!w-[360px] max-w-full !rounded-xl border border-border-primary !bg-surface-primary !shadow-2xl"
     >
         <LiveRegion>
           {isChecking

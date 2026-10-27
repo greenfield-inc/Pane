@@ -341,6 +341,22 @@ test('⌘K shows the selected row’s actions, filters them, and Esc goes back',
   await expect(page.getByRole('dialog', { name: 'Archive Pane' })).toContainText('Archive pane "wsl-runpane"?');
 });
 
+test('Search is centered in the window and fully on screen at any width', async ({ page }) => {
+  await page.setViewportSize({ width: 1754, height: 1000 });
+  await boot(page);
+  await openSearch(page);
+  const panel = page.getByRole('dialog').locator('> div').first();
+  for (const width of [1754, 1000, 600]) {
+    await page.setViewportSize({ width, height: 1000 });
+    const box = await panel.boundingBox();
+    if (!box) throw new Error('Search panel has no box');
+    expect(Math.abs(box.x + box.width / 2 - width / 2)).toBeLessThanOrEqual(1);
+    expect(Math.abs(box.y + box.height / 2 - 500)).toBeLessThanOrEqual(1);
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(width);
+  }
+});
+
 test('the sidebar field and the rail icon open Search ready to type', async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   await boot(page, { initialConfig: { theme: 'teletype', appearanceMode: 'fixed' } });

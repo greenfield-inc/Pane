@@ -129,7 +129,8 @@ export const Modal: React.FC<ModalProps> = ({
             <div
               className={cn(
                 'relative bg-surface-primary border border-border-primary rounded-modal shadow-modal w-full overflow-hidden flex flex-col',
-                placement === 'right' ? 'h-full' : 'max-h-[calc(100vh-2rem)]',
+                // mx-auto keeps a panel that a caller narrows with className centered in the positioned box.
+                placement === 'right' ? 'h-full' : 'mx-auto max-h-[calc(100vh-2rem)]',
                 !instant && 'animate-modal-enter',
                 className,
               )}
