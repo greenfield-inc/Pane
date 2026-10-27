@@ -257,7 +257,8 @@ function RepoList({ repos, emptyText, compact, label, checkedPaths, disabled, on
             className={cn(
               'flex h-9 w-full items-center gap-2.5 rounded-lg border bg-surface-secondary px-3 text-left text-sm transition-colors',
               disabled ? 'cursor-default' : 'cursor-pointer',
-              checked ? 'border-interactive ring-1 ring-interactive' : 'border-border-secondary hover:bg-surface-hover',
+              checked ? 'border-interactive ring-1 ring-interactive' : 'border-border-secondary',
+              !disabled && !checked && 'hover:bg-surface-hover',
             )}
           >
             <input
@@ -638,7 +639,6 @@ export default function OnboardingDialog({ isOpen, onClose }: OnboardingDialogPr
             variant="primary"
             disabled={checkedRepos.length === 0 || isBusy}
             loading={isOpening}
-            loadingText={openLabel}
             onClick={() => void openRepos(checkedRepos)}
           >
             <span className="block max-w-[16rem] truncate">{openLabel}</span>
