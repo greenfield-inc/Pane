@@ -322,6 +322,9 @@ export function CommandPalette({ isOpen, onClose, projects, onNewPane }: Command
             id: `${listboxId}-option-${row.index}`,
             role: 'option' as const,
             'aria-selected': isSelected,
+            // A windowed list mounts only some options, so each states its place in the whole list.
+            'aria-posinset': windowed ? row.index + 1 : undefined,
+            'aria-setsize': windowed ? selectable.length : undefined,
             'data-selected': isSelected,
             // Clicking a row keeps the cursor in the input, so typing and arrow keys carry on.
             onMouseDown: (e: React.MouseEvent) => e.preventDefault(),

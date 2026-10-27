@@ -357,9 +357,9 @@ test('the sidebar field and the rail icon open Search ready to type', async ({ p
   await expect(page.getByRole('combobox', { name: 'Search', exact: true })).toHaveValue('loops');
 });
 
-// 2,500 Panes, each with one tracked agent panel (a third of them blocked).
+// 2,500 bulk Panes plus the usual fixtures, each with one tracked agent panel (a third of them blocked).
 async function bootLarge(page: Page) {
-  const many = Array.from({ length: 2_400 }, (_, index) =>
+  const many = Array.from({ length: 2_500 }, (_, index) =>
     pane(`p-bulk-${index}`, `bulk-${['runpane', 'posthog', 'wsl', 'film', 'loops'][index % 5]}-${index}`, 1 + (index % 4), { lastViewedAt: ago(index) }));
   const panes = [...PANES, ...many];
   // One tracked agent panel per Pane, a third of them blocked.
@@ -406,7 +406,10 @@ test('a long list stays windowed wherever the selection goes', async ({ page }) 
   // The reviewer's repro: wrap to the last row, then edit the query and return to it.
   await page.keyboard.press('ArrowUp');
   // The least recently viewed match sorts last.
-  await expect(selectedOption(page)).toHaveAttribute('aria-label', /^bulk-loops-2399,/);
+  await expect(selectedOption(page)).toHaveAttribute('aria-label', /^bulk-loops-2499,/);
+  // Only a window is mounted, so the last row states its place in the whole list.
+  await expect(selectedOption(page)).toHaveAttribute('aria-posinset', '2500');
+  await expect(selectedOption(page)).toHaveAttribute('aria-setsize', '2500');
   expect(await mountedOptions()).toBeLessThan(60);
   await page.keyboard.type('-');
   const keystrokeMs = await page.evaluate(() => new Promise<number>(resolve => {
@@ -426,7 +429,7 @@ test('a long list stays windowed wherever the selection goes', async ({ page }) 
 
   // Scrolling to the end mounts the rows there, still a bounded window, and every match stays reachable.
   await results(page).evaluate(list => { list.scrollTop = list.scrollHeight; });
-  await expect(results(page).getByRole('option', { name: /^bulk-loops-2399,/ })).toBeVisible();
+  await expect(results(page).getByRole('option', { name: /^bulk-loops-2499,/ })).toBeVisible();
   expect(await mountedOptions()).toBeLessThan(60);
 });
 
