@@ -10,8 +10,8 @@ import { RUNPANE_CONTRACT } from '../../../../shared/types/generatedRunpaneContr
  * that tell them to ask through `notify`. Only the lines between Pane's markers are ever written or
  * removed: every other byte, the line endings and any byte order mark stay as they were.
  */
-export const NOTIFY_BLOCK_BEGIN = '<!-- pane-notify:begin (managed by Pane; edits are replaced) -->';
-export const NOTIFY_BLOCK_END = '<!-- pane-notify:end -->';
+const NOTIFY_BLOCK_BEGIN = '<!-- pane-notify:begin (managed by Pane; edits are replaced) -->';
+const NOTIFY_BLOCK_END = '<!-- pane-notify:end -->';
 /** Matches the begin marker whatever its note says, so a reworded marker is still found. */
 const BEGIN_PREFIX = '<!-- pane-notify:begin';
 const BOM = '﻿';
