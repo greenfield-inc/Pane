@@ -56,3 +56,14 @@ export interface PanelAgentStatusEvent {
   /** On blocked: the screen lines of the prompt the agent waits on. */
   screenLines?: string[];
 }
+
+/** Payload of the `terminal:launchExited` IPC event: an agent returned to the shell soon after launch. */
+export interface TerminalLaunchExitedEvent {
+  panelId: string;
+  sessionId: string;
+  agent: 'claude' | 'codex' | 'cursor' | 'opencode';
+  /** From writing the launch command to the shell's prompt coming back. */
+  elapsedMs: number;
+  /** The last non-empty line the agent printed, when there was one. */
+  lastLine?: string;
+}

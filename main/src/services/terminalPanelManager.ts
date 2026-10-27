@@ -46,7 +46,7 @@ import type { ScreenState } from './terminalEmulatorHost';
 import { AgentStatusMonitor } from './agentStatus/agentStatusMonitor';
 import { blockedPromptKey, blockedScreenLines, detectAgentState } from './agentStatus/manifestEngine';
 import { getManifestForAgent } from './agentStatus/manifests';
-import type { AgentDetectionResult, AgentState, PanelAgentStatusEvent } from '../../../shared/types/agentStatus';
+import type { AgentDetectionResult, AgentState, PanelAgentStatusEvent, TerminalLaunchExitedEvent } from '../../../shared/types/agentStatus';
 import type { PaneEventArgument } from '../core/eventSink';
 
 const OUTPUT_BATCH_INTERVAL = 32; // ms (~30fps) — wider window reduces TUI flicker
@@ -80,6 +80,9 @@ const CODEX_SUBMIT_SEQUENCE = '\x1b[13;5u\r';
 // A launch command whose shell is back in the foreground this long after the
 // command was written has exited (or never started an agent).
 const LAUNCH_EXIT_GRACE_MS = 1500;
+// An agent back at the shell this soon after launch never started; the tab explains why.
+const EARLY_LAUNCH_EXIT_WINDOW_MS = 10_000;
+const LAUNCH_EXIT_LINE_LIMIT = 300;
 // Held starting message for a launch whose agent Pane has not identified:
 // given up (never typed) after this long without an agent or a blocking prompt.
 const HELD_INPUT_AGENT_WINDOW_MS = 30_000;
@@ -130,6 +133,19 @@ import {
 import { PANE_CHAT_MIGRATE_OFFER_OPENING } from '../../../shared/types/paneChat';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/**
+ * The last non-empty line printed between a launch command's echo and the
+ * shell prompt it exited to. The echo names the command's program as a word
+ * of its own; the last row is the prompt.
+ */
+function lastLaunchOutputLine(screenText: string, launchedCommand: string | undefined): string | undefined {
+  const rows = screenText.split(/\r?\n/u).map(row => row.trim()).filter(Boolean);
+  const program = launchedCommand?.trim().split(/\s+/u)[0];
+  const line = rows.length > 1 ? rows[rows.length - 2] : undefined;
+  if (!line || (program && line.split(/\s+/u).includes(program))) return undefined;
+  return line.length > LAUNCH_EXIT_LINE_LIMIT ? `${line.slice(0, LAUNCH_EXIT_LINE_LIMIT)}…` : line;
+}
 
 function isValidUuid(value: string | undefined): value is string {
   return value !== undefined && UUID_PATTERN.test(value);
@@ -321,6 +337,9 @@ interface TerminalProcess {
   launchCommandWrittenAt?: number;
   /** The command line Pane last wrote to launch the panel's program, after resume rewriting. */
   launchedCommand?: string;
+  /** The `launchCommandWrittenAt` whose early-exit check finished, so each launch reports once. */
+  launchExitSettledFor?: number;
+  launchExitProbing?: boolean;
   /** While no agent is identified: when the held starting message last had a reason to keep waiting. */
   initialInputHeldSince?: number;
   /** Set only for direct OpenCode launches; status detection calls it on the idle composer frame. */
@@ -2035,7 +2054,15 @@ export class TerminalPanelManager extends EventEmitter {
 
       this.scheduleAfterShellPrompt(ptyProcess, injectCommand);
     } else {
-      if (terminalProcess.heldInput) this.scheduleAfterShellPrompt(ptyProcess, () => this.releaseHeldInput(terminalProcess));
+      // A staged command is typed at the first prompt and left for the person to run.
+      const stagedCommand = existingState.stagedCommand;
+      if (stagedCommand) {
+        this.scheduleAfterShellPrompt(ptyProcess, () => {
+          if (this.terminals.get(panel.id) !== terminalProcess || terminalProcess.destroying) return;
+          if (terminalProcess.heldInput) this.releaseHeldInput(terminalProcess, stagedCommand);
+          else this.writeToTerminal(panel.id, stagedCommand);
+        });
+      } else if (terminalProcess.heldInput) this.scheduleAfterShellPrompt(ptyProcess, () => this.releaseHeldInput(terminalProcess));
       if (initialInput) {
         setTimeout(() => {
           if (this.terminals.get(panel.id) === terminalProcess && !terminalProcess.destroying) this.sendInitialInputOnce(panel.id);
@@ -2047,6 +2074,8 @@ export class TerminalPanelManager extends EventEmitter {
     const state = panel.state;
     state.customState = {
       ...state.customState,
+      // Typed once; a restored tab opens on a clean prompt.
+      stagedCommand: undefined,
       isInitialized: true,
       cwd: cwd,
       shellType: path.basename(shellPath),
@@ -2640,6 +2669,7 @@ export class TerminalPanelManager extends EventEmitter {
         if (terminal.destroying || !this.agentStatusMonitor.isTracked(terminal.panelId)) continue;
         const emulator = terminal.screenEmulator;
         if (!emulator) continue;
+        this.checkEarlyLaunchExit(terminal, emulator.state);
 
         // The pushed screen is at most ~50 ms old, well inside this poll's cadence.
         // The emulator only pushes a new object when the screen changed, so an
@@ -2683,6 +2713,36 @@ export class TerminalPanelManager extends EventEmitter {
     } catch (error) {
       console.error('[TerminalPanelManager] agent status poll failed:', error);
     }
+  }
+
+  /**
+   * Tell the renderer when an agent's launch command returned to Pane's shell
+   * within EARLY_LAUNCH_EXIT_WINDOW_MS, with the last line it printed, so its
+   * tab can say why instead of showing a dead prompt. Only where the
+   * foreground process is visible (hasLaunchCommandExited).
+   */
+  private checkEarlyLaunchExit(terminal: TerminalProcess, screen: ScreenState): void {
+    const launchedAt = terminal.launchCommandWrittenAt;
+    const agent = terminal.agentType;
+    if (launchedAt === undefined || terminal.launchExitSettledFor === launchedAt || terminal.launchExitProbing) return;
+    if (!agent || Date.now() - launchedAt > EARLY_LAUNCH_EXIT_WINDOW_MS + AGENT_STATUS_POLL_MS) {
+      terminal.launchExitSettledFor = launchedAt;
+      return;
+    }
+    terminal.launchExitProbing = true;
+    void this.hasLaunchCommandExited(terminal.panelId).then(exited => {
+      if (!exited || terminal.launchCommandWrittenAt !== launchedAt || terminal.destroying) return;
+      terminal.launchExitSettledFor = launchedAt;
+      // The shell redraws its prompt as the command exits, so the last output marks the exit.
+      const elapsedMs = Math.max(0, (terminal.lastOutputAt?.getTime() ?? Date.now()) - launchedAt);
+      if (elapsedMs > EARLY_LAUNCH_EXIT_WINDOW_MS) return;
+      const event: TerminalLaunchExitedEvent = { panelId: terminal.panelId, sessionId: terminal.sessionId, agent, elapsedMs };
+      const lastLine = lastLaunchOutputLine(screen.screenText, terminal.launchedCommand);
+      if (lastLine) event.lastLine = lastLine;
+      this.sendRendererEvent('terminal:launchExited', event);
+    }, () => undefined).finally(() => {
+      terminal.launchExitProbing = false;
+    });
   }
 
   /**

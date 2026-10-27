@@ -10568,6 +10568,14 @@ export const RUNPANE_CONTRACT = {
         "version": {
           "type": "string"
         },
+        "signIn": {
+          "enum": [
+            "signed-in",
+            "signed-out",
+            "unknown"
+          ],
+          "description": "The agent's own status command: signed in, signed out, or unknown on a timeout or unrecognised output. Present only when the agent is installed."
+        },
         "checks": {
           "type": "array",
           "items": {
@@ -14034,7 +14042,8 @@ export const RUNPANE_CONTRACT = {
         ],
         "notes": [
           "For WSL repos, install the agent inside the WSL distro Pane uses, not only on Windows.",
-          "This diagnoses built-in agent templates only; custom commands should be validated by creating a pane and reading its screen."
+          "This diagnoses built-in agent templates only; custom commands should be validated by creating a pane and reading its screen.",
+          "signIn reports the agent's own status command (for example `codex login status`), checked with a 3 s timeout; `unknown` means it timed out or printed something Pane does not recognise."
         ]
       },
       "panels screen": {

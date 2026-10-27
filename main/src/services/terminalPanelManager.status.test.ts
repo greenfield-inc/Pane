@@ -610,6 +610,53 @@ describe('terminal status events', () => {
     expect(await exitManager.hasLaunchCommandExited('p')).toBe(false);
   });
 
+  describe.skipIf(process.platform === 'win32')('early launch exit', () => {
+    let shellGroup: number | undefined;
+    const settle = () => new Promise(resolve => setTimeout(resolve, 20));
+
+    function launchAgent(launchedAt: number) {
+      shellGroup = undefined;
+      manager = new TerminalPanelManager(undefined, undefined, async () => shellGroup);
+      // SAFETY: This seam mirrors the private members used by these PTY fixtures, as `access` does above.
+      access = manager as StatusAccess;
+      const fixture = attach('codex');
+      fixture.terminal.pty.process = 'codex';
+      Object.assign(fixture.terminal, { launchCommandWrittenAt: launchedAt, launchedCommand: 'codex --yolo', isPtyHost: false });
+      fixture.data('~/repo % codex --yolo\r\n');
+      return fixture;
+    }
+
+    function exitToShell(fixture: TerminalFixture, output: string) {
+      fixture.data(output);
+      fixture.terminal.pty.process = 'zsh';
+      shellGroup = fixture.terminal.pty.pid;
+    }
+
+    const exitEvents = () => events.filter(event => event.channel === 'terminal:launchExited').map(event => event.payload);
+
+    it('reports an agent that returns to the shell within ten seconds, with the last line it printed', async () => {
+      const fixture = launchAgent(19_400);
+      exitToShell(fixture, 'Error: model not found\r\n\r\n~/repo % ');
+      vi.setSystemTime(21_000);
+      await pollAgentStatus();
+      await settle();
+      await pollAgentStatus();
+      await settle();
+
+      expect(exitEvents()).toEqual([{ panelId: 'p', sessionId: 's', agent: 'codex', elapsedMs: 600, lastLine: 'Error: model not found' }]);
+    });
+
+    it('stays quiet for an agent that ran longer than ten seconds', async () => {
+      const fixture = launchAgent(5_000);
+      vi.setSystemTime(16_000);
+      exitToShell(fixture, 'Bye\r\n~/repo % ');
+      await pollAgentStatus();
+      await settle();
+
+      expect(exitEvents()).toEqual([]);
+    });
+  });
+
   it('detects a wrapper agent from its screen and then reports it to agents-only watchers', async () => {
     const customState: TerminalPanelState = { initialCommand: 'agent-farm run free-range' };
     const panel = {

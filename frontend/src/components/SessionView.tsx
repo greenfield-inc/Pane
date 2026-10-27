@@ -35,6 +35,8 @@ import { requestBrowserNavigation } from './panels/browser/browserNavigation';
 import { setPendingViewCommit } from './panels/diff/pendingViewCommit';
 import { PanelTabBar } from './panels/PanelTabBar';
 import { PanelContainer } from './panels/PanelContainer';
+import { NewTabPicker } from './panels/newTab/NewTabPanel';
+import { NewTabActionsContext, type NewTabActions } from './panels/newTab/newTabActions';
 import { getDockTerminalPanel } from '../utils/terminalDock';
 import { SplitLayout } from './panels/SplitLayout';
 import { SessionProvider } from '../contexts/SessionContext';
@@ -61,15 +63,12 @@ import {
   mergeAllGroups,
   type DropZone,
 } from '../utils/panelLayout';
-import { Download, Upload, GitMerge, GitPullRequestArrow, Terminal, ChevronDown, ChevronUp, RefreshCw, Archive, ArchiveRestore, GitCommitHorizontal, TerminalSquare, Undo2 } from 'lucide-react';
-import { getCliBrandIcon } from './ui/brandIconRegistry';
+import { Download, Upload, GitMerge, GitPullRequestArrow, Terminal, ChevronDown, ChevronUp, RefreshCw, Archive, ArchiveRestore, GitCommitHorizontal, Undo2 } from 'lucide-react';
 import { visibleAgentPresets } from '../utils/agentPresets';
 import type { Project } from '../types/project';
 import { devLog, renderLog } from '../utils/console';
 import { isMissionControlEnabled, useConfigStore } from '../stores/configStore';
 import { cycleIndex } from '../utils/arrayUtils';
-import { formatKeyDisplay } from '../utils/hotkeyUtils';
-import { Kbd } from './ui/Kbd';
 import type { InspectorTab } from './InspectorTabs';
 import { useErrorStore } from '../stores/errorStore';
 import ProjectSettings from './ProjectSettings';
@@ -1296,49 +1295,47 @@ export const SessionView = memo(() => {
     setDropZones(new Map());
   }, [primaryGroupId, primaryGroupNode, activeSession, isSplitLayout, topBarPanels, applyLayout]);
 
-  const hotkeys = useHotkeyStore((s) => s.hotkeys);
-  const hotkeyDisplay = useCallback((id: string) => {
-    const keys = hotkeys.get(id)?.keys;
-    return keys ? formatKeyDisplay(keys) : null;
-  }, [hotkeys]);
+  // The "+" opens a "New tab" picker tab, which the chosen tool replaces in place.
+  const handleOpenNewTab = useCallback(() => {
+    void handlePanelCreate('new-tab', { title: 'New tab' });
+  }, [handlePanelCreate]);
 
-  // The empty stage is the "+" menu laid out inline: one click (or the
-  // shortcut beside it) from a running tool, instead of a placeholder.
-  const emptyStage = useMemo(() => (
-    <div className="flex h-full flex-1 items-center justify-center">
-      <div className="w-64">
-        <div className="mb-2 px-2 text-[11px] font-semibold uppercase tracking-wide text-text-muted">Open</div>
-        {[
-          { key: 'terminal', label: 'Terminal', icon: <Terminal className="h-3.5 w-3.5" />, hotkeyId: 'add-tool-terminal', onClick: () => handlePanelCreate('terminal') },
-          ...agentPresets.map(preset => ({
-            key: preset.id,
-            label: preset.title,
-            icon: getCliBrandIcon(preset.iconKey, 'h-3.5 w-3.5'),
-            hotkeyId: preset.hotkeyId,
-            onClick: () => handlePanelCreate('terminal', { initialCommand: preset.command, title: preset.title }),
-          })),
-          ...customCommands.map((cmd, index) => ({
-            key: `custom-${index}`,
-            label: cmd.name,
-            icon: getCliBrandIcon(cmd.command, 'h-3.5 w-3.5') || <TerminalSquare className="h-3.5 w-3.5" />,
-            hotkeyId: `add-tool-custom-${index}`,
-            onClick: () => handlePanelCreate('terminal', { initialCommand: cmd.command, title: cmd.name, customResume: cmd.resume }),
-          })),
-        ].map(item => (
-          <button
-            key={item.key}
-            type="button"
-            onClick={item.onClick}
-            className="flex h-7 w-full items-center gap-2 rounded px-2 text-left text-[13px] text-text-secondary hover:bg-surface-hover hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle"
-          >
-            <span className="flex-shrink-0 text-text-tertiary">{item.icon}</span>
-            <span className="truncate">{item.label}</span>
-            {hotkeyDisplay(item.hotkeyId) && <Kbd variant="inline" className="ml-auto pl-3">{hotkeyDisplay(item.hotkeyId)}</Kbd>}
-          </button>
-        ))}
-      </div>
-    </div>
-  ), [agentPresets, customCommands, handlePanelCreate, hotkeyDisplay]);
+  const newTabActions = useMemo<NewTabActions>(() => ({
+    projectId: activeSession?.projectId,
+    projectEnvironment: activeProjectEnvironment,
+    replace: async (picker, type, options) => {
+      if (!activeSession) return;
+      const sid = activeSession.id;
+      const before = usePanelStore.getState().layouts[sid];
+      const pickerGroup = before && findGroupContainingPanel(before.root, picker.id);
+      // New panels land in the focused group: the picker's.
+      if (pickerGroup) handleFocusGroup(pickerGroup.id);
+      const created = await handlePanelCreate(type, options);
+      const layout = usePanelStore.getState().layouts[sid];
+      const group = layout && findGroupContainingPanel(layout.root, picker.id);
+      if (created && layout && group && allPanelIds(layout.root).includes(created.id)) {
+        const root = movePanelInLayout(layout.root, created.id, { groupId: group.id, index: group.panelIds.indexOf(picker.id) });
+        applyLayout(sid, activatePanelInLayout({ ...layout, root }, created.id));
+      }
+      await handlePanelClose(picker);
+    },
+    showExplorer: picker => {
+      void handleShowExplorer();
+      void handlePanelClose(picker);
+    },
+  }), [activeSession, activeProjectEnvironment, handleFocusGroup, handlePanelCreate, handlePanelClose, handleShowExplorer, applyLayout]);
+
+  // An empty stage shows the "New tab" picker inline.
+  const emptyStage = useMemo(() => activeSession && (
+    <NewTabPicker
+      sessionId={activeSession.id}
+      projectId={activeSession.projectId}
+      projectEnvironment={activeProjectEnvironment}
+      isActive={false}
+      choose={async (type, options) => { await handlePanelCreate(type, options); }}
+      showExplorer={() => { void handleShowExplorer(); }}
+    />
+  ), [activeSession, activeProjectEnvironment, handlePanelCreate, handleShowExplorer]);
 
   // --- Editor stage element (shared by both layouts) ---
   const editorStageElement = useMemo(() => {
@@ -1951,6 +1948,7 @@ export const SessionView = memo(() => {
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       {/* SINGLE SessionProvider wraps everything */}
       <SessionProvider session={activeSession} gitBranchActions={branchActions} isMerging={hook.isMerging} gitCommands={hook.gitCommands} onOpenIDEWithCommand={handleOpenIDEWithCommand} onOpenUrlInBrowser={handleOpenUrlInBrowser} onConfigureIDE={() => setShowProjectSettings(true)} onSetTracking={handleOpenSetTracking} trackingBranch={currentUpstream} configuredIDECommand={sessionProject?.open_ide_command} isRemoteMode={isRemoteMode}>
+      <NewTabActionsContext.Provider value={newTabActions}>
 
         {/* Tab bar at top */}
         <PanelTabBar
@@ -1960,6 +1958,7 @@ export const SessionView = memo(() => {
           onPanelClose={handlePanelClose}
           onPanelCreate={handlePanelCreate}
           onShowExplorer={() => { void handleShowExplorer(); }}
+          onOpenNewTab={handleOpenNewTab}
           projectEnvironment={activeProjectEnvironment}
           onToggleDetailPanel={handleToggleDetailPanel}
           detailPanelVisible={detailVisible}
@@ -2162,6 +2161,7 @@ export const SessionView = memo(() => {
           )}
         </div>
 
+      </NewTabActionsContext.Provider>
       </SessionProvider>
       </div>
       {loopRun && <LoopRunsRail runRef={loopRun} />}
