@@ -22,6 +22,7 @@ import { Button } from './ui/Button';
 
 const paneCreateResultSchema = boundary.object({
   items: boundary.array(boundary.object({
+    ok: boundary.boolean,
     sessionId: boundary.optional(boundary.string),
     error: boundary.optional(boundary.object({ message: boundary.string })),
   })),
@@ -57,17 +58,27 @@ export function StartTaskCard({ projectId, projectEnvironment, openTerminal }: S
 
   const [task, setTask] = useState('');
   const [picked, setPicked] = useState<AgentLaunchPresetId | null>(null);
-  const [branches, setBranches] = useState<PaneNameBranchInfo[]>([]);
+  // null until the project's branches load: Start waits for them, so the base it shows is the base it sends.
+  const [branches, setBranches] = useState<PaneNameBranchInfo[] | null>(null);
+  const [branchError, setBranchError] = useState<string | null>(null);
+  const [branchRequest, setBranchRequest] = useState(0);
   const [starting, setStarting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  /** A failed start. `keptPaneId` is a Pane that was created before the failure, so Try again would duplicate it. */
+  const [failure, setFailure] = useState<{ message: string; keptPaneId?: string } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+    setBranches(null);
+    setBranchError(null);
     API.projects.listBranches(String(projectId))
-      .then(response => { if (!cancelled && response.success && response.data) setBranches(response.data); })
-      .catch(() => {});
+      .then(response => {
+        if (cancelled) return;
+        if (response.success && response.data) setBranches(response.data);
+        else setBranchError(response.error || 'Pane did not return the branches.');
+      })
+      .catch(cause => { if (!cancelled) setBranchError(ipcErrorMessage(cause, 'Pane did not return the branches.')); });
     return () => { cancelled = true; };
-  }, [projectId]);
+  }, [projectId, branchRequest]);
 
   // Until every first check answers, no agent is selected; then the first ready one, else the first unknown one.
   const checked = presets.every(preset => readiness[preset.id] !== 'checking');
@@ -78,15 +89,22 @@ export function StartTaskCard({ projectId, projectEnvironment, openTerminal }: S
       : undefined;
 
   const trimmedTask = task.trim();
-  const baseBranch = defaultBaseBranch(branches);
+  const baseBranch = branches ? defaultBaseBranch(branches) : undefined;
   const paneName = trimmedTask
-    ? generatePaneName(taskPaneName(trimmedTask) || 'new-task', new Set(panes.map(session => session.name)), branches)
+    ? generatePaneName(taskPaneName(trimmedTask) || 'new-task', new Set(panes.map(session => session.name)), branches ?? [])
     : '';
+  const canStart = Boolean(selected && trimmedTask && branches && !starting);
+
+  const openPane = async (sessionId: string) => {
+    // A remote desktop gets no focus event from its host, so open the Pane here too.
+    navigateToSessions();
+    await useSessionStore.getState().setActiveSession(sessionId);
+  };
 
   const start = async () => {
-    if (!selected || !trimmedTask || starting) return;
+    if (!canStart || !selected) return;
     setStarting(true);
-    setError(null);
+    setFailure(null);
     try {
       const request: RunpanePaneCreateRequest = {
         repo: { id: projectId },
@@ -95,13 +113,20 @@ export function StartTaskCard({ projectId, projectEnvironment, openTerminal }: S
       };
       const result = decodeOptionalBoundary(await window.electronAPI.invoke('runpane:panes:create', request), paneCreateResultSchema);
       const item = result?.items[0];
-      if (!item?.sessionId) throw new Error(item?.error?.message ?? 'Pane creation returned no Pane.');
-      setTask('');
-      // A remote desktop gets no focus event from its host, so open the Pane here too.
-      navigateToSessions();
-      await useSessionStore.getState().setActiveSession(item.sessionId);
+      if (item?.ok && item.sessionId) {
+        setTask('');
+        await openPane(item.sessionId);
+      } else if (item?.sessionId) {
+        // The Pane exists but its agent never started, so the task was not sent; the draft stays here.
+        setFailure({
+          message: `"${paneName}" was created, but its agent didn't start, so your task wasn't sent. It's still in the box above.`,
+          keptPaneId: item.sessionId,
+        });
+      } else {
+        throw new Error(item?.error?.message ?? 'Pane creation returned no Pane.');
+      }
     } catch (cause) {
-      setError(ipcErrorMessage(cause, 'Pane creation failed.').replace(/\.?$/, '.'));
+      setFailure({ message: ipcErrorMessage(cause, 'Pane creation failed.').replace(/\.?$/, '.') });
     } finally {
       setStarting(false);
     }
@@ -118,6 +143,7 @@ export function StartTaskCard({ projectId, projectEnvironment, openTerminal }: S
   };
 
   const hasPane = panes.length > 0;
+  const keptPaneId = failure?.keptPaneId;
   return (
     <div className="h-full w-full overflow-y-auto">
       <section aria-labelledby={titleId} className="mx-auto mt-7 w-[calc(100%-2rem)] max-w-[440px] rounded-xl border border-border-primary bg-surface-primary p-4">
@@ -187,15 +213,24 @@ export function StartTaskCard({ projectId, projectEnvironment, openTerminal }: S
         />
 
         <div className="mt-3 flex items-center justify-between gap-3">
-          <span className="min-w-0 text-[11px] leading-4 text-text-tertiary">
-            {baseBranch && `Branch from ${baseBranch}`}
-            {baseBranch && paneName && ' · '}
-            {paneName && <span className="whitespace-nowrap">new Pane &quot;{paneName}&quot;</span>}
-          </span>
+          {branchError ? (
+            <span role="alert" className="min-w-0 text-[11px] leading-4 text-status-error">
+              Couldn&apos;t read this project&apos;s branches: {branchError.replace(/\.?$/, '.')}{' '}
+              <button type="button" className="text-interactive hover:underline focus-visible:outline-none focus-visible:underline" onClick={() => setBranchRequest(n => n + 1)}>
+                Try again
+              </button>
+            </span>
+          ) : (
+            <span className="min-w-0 text-[11px] leading-4 text-text-tertiary">
+              {baseBranch && `Branch from ${baseBranch}`}
+              {baseBranch && paneName && ' · '}
+              {paneName && <span className="whitespace-nowrap">new Pane &quot;{paneName}&quot;</span>}
+            </span>
+          )}
           <Button
             size="sm"
             onClick={() => void start()}
-            disabled={!selected || !trimmedTask || starting}
+            disabled={!canStart}
             icon={<Plus className="h-3.5 w-3.5" />}
             className="flex-shrink-0"
           >
@@ -203,10 +238,14 @@ export function StartTaskCard({ projectId, projectEnvironment, openTerminal }: S
           </Button>
         </div>
 
-        {error && (
+        {failure && (
           <div role="alert" className="mt-3 flex items-center justify-between gap-3 rounded-md border border-status-error/40 bg-status-error/10 px-3 py-2 text-xs text-text-primary">
-            <span className="min-w-0 break-words">Couldn&apos;t start the Pane: {error}</span>
-            <Button size="sm" variant="secondary" className="flex-shrink-0" onClick={() => void start()}>Try again</Button>
+            <span className="min-w-0 break-words">Couldn&apos;t start the Pane: {failure.message}</span>
+            {keptPaneId ? (
+              <Button size="sm" variant="secondary" className="flex-shrink-0" onClick={() => void openPane(keptPaneId)}>Open the Pane</Button>
+            ) : (
+              <Button size="sm" variant="secondary" className="flex-shrink-0" onClick={() => void start()}>Try again</Button>
+            )}
           </div>
         )}
       </section>

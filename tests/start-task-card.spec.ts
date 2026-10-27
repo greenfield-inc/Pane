@@ -134,6 +134,39 @@ test('a failed start says why and Try again retries it', async ({ page }, testIn
   await expect.poll(async () => (await paneCreates(page)).length).toBe(2);
 });
 
+test('a start that fails after creating the Pane keeps the task and offers the Pane, not a duplicate', async ({ page }) => {
+  await openProject(page, { paneCreateKeptFailure: true });
+  await card(page).getByRole('textbox', { name: 'Task' }).fill('Add a dark mode toggle');
+  await card(page).getByRole('button', { name: 'Start in a new Pane' }).click();
+
+  await expect(card(page).getByRole('alert')).toContainText('"add-dark-mode" was created, but its agent didn\'t start, so your task wasn\'t sent.');
+  await expect(card(page).getByRole('textbox', { name: 'Task' })).toHaveValue('Add a dark mode toggle');
+  await expect(card(page).getByRole('button', { name: 'Try again' })).toHaveCount(0);
+  await card(page).getByRole('button', { name: 'Open the Pane' }).click();
+  await expect(page.getByRole('button', { name: 'add-dark-mode', exact: true })).toHaveAttribute('aria-current', 'page');
+  expect(await paneCreates(page)).toHaveLength(1);
+});
+
+test('Start waits for the base branch to load', async ({ page }) => {
+  await openProject(page, { listBranchesError: 'hold' });
+  await card(page).getByRole('textbox', { name: 'Task' }).fill('Add a dark mode toggle');
+  await expect(page.getByRole('radio', { name: 'Claude Code' })).toHaveAttribute('aria-checked', 'true');
+  await expect(card(page).getByRole('button', { name: 'Start in a new Pane' })).toBeDisabled();
+  await expect(card(page)).not.toContainText('Branch from');
+});
+
+test('a failed branch read offers Try again', async ({ page }) => {
+  await openProject(page, { listBranchesError: 'git is not available' });
+  await card(page).getByRole('textbox', { name: 'Task' }).fill('Add a dark mode toggle');
+  await expect(card(page).getByRole('alert')).toContainText("Couldn't read this project's branches: git is not available.");
+  await expect(card(page).getByRole('button', { name: 'Start in a new Pane' })).toBeDisabled();
+  // SAFETY: installElectronApiMock installs this test bridge before navigation.
+  await page.evaluate(() => { window.electronAPI.projects.listBranches = async () => ({ success: true, data: [{ name: 'main', isCurrent: true, hasWorktree: false, isRemote: false }] }); });
+  await card(page).getByRole('button', { name: 'Try again' }).click();
+  await expect(card(page)).toContainText('Branch from main · new Pane "add-dark-mode"');
+  await expect(card(page).getByRole('button', { name: 'Start in a new Pane' })).toBeEnabled();
+});
+
 test('a Sign in chip opens the checkout terminal with the command typed, and closing it brings the card back', async ({ page }) => {
   await openProject(page);
   await chip(page, 'Codex').click();
@@ -142,7 +175,7 @@ test('a Sign in chip opens the checkout terminal with the command typed, and clo
   await expect(tab).toBeVisible();
   await expect(card(page)).toHaveCount(0);
   const panels = await page.evaluate(async sessionId => (await window.electronAPI.panels.getSessionPanels(sessionId)).data ?? [], mainRepo.id);
-  expect(panels.map(panel => panel.state.customState)).toContainEqual({ stagedCommand: 'codex login' });
+  expect(panels.map(panel => panel.state.customState)).toContainEqual({ stagedCommand: 'codex login', launchCommand: 'codex login' });
   await page.getByRole('button', { name: 'Close Sign in to Codex', exact: true }).click();
   await expect(card(page)).toBeVisible();
 });
@@ -151,11 +184,15 @@ test('"New task…" shows the card over the checkout\'s tabs only while first st
   await openProject(page, { initialPanels: [mainTerminal], initialPreferences: FIRST_STEPS_ACTIVE });
   await expect(card(page)).toHaveCount(0);
 
+  // The checkout's tab stays mounted under the card, so its state survives the round trip.
+  await expect(page.locator('.xterm').first()).toBeAttached();
+  await page.evaluate(() => document.querySelector('.xterm')?.setAttribute('data-before-card', ''));
   await page.getByRole('button', { name: 'New task…' }).click();
   await expect(card(page)).toBeVisible();
   await expect(page.getByRole('button', { name: 'New task…' })).toHaveAttribute('aria-current', 'page');
   await page.getByRole('tab', { name: /Terminal/ }).click();
   await expect(card(page)).toHaveCount(0);
+  await expect(page.locator('.xterm[data-before-card]')).toBeAttached();
 
   await page.getByRole('button', { name: 'Home', exact: true }).click();
   const steps = page.getByRole('region', { name: 'Your first steps' });

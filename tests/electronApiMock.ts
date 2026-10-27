@@ -113,6 +113,10 @@ export type ElectronApiMockOptions = {
   agentDoctorDelayMs?: number | 'hold';
   /** runpane:panes:create fails with this message instead of adding the Pane. */
   paneCreateError?: string;
+  /** runpane:panes:create creates the Pane, then reports a failure (ok: false) that kept it, as main does when setup fails. */
+  paneCreateKeptFailure?: boolean;
+  /** projects.listBranches fails with this message, or `hold` leaves it pending. */
+  listBranchesError?: string | 'hold';
 };
 
 export async function installElectronApiMock(page: Page, options: ElectronApiMockOptions = {}) {
@@ -614,6 +618,12 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         };
         mockSessions.push(clone(session));
         emit('session:created', clone(session));
+        if (mockOptions.paneCreateKeptFailure) {
+          return Promise.resolve({ ok: false, items: [{
+            ok: false, index: 0, name: item.name, sessionId, paneId: sessionId,
+            error: { code: 'ERR_RUNPANE_PANE_CREATE_FAILED', message: `Could not create Pane "${item.name}": setup failed. Pane ${sessionId} was created before the failure and was kept.` },
+          }] });
+        }
         return Promise.resolve({ ok: true, items: [{ ok: true, index: 0, name: item.name, sessionId, paneId: sessionId }] });
       }
       if (channel === 'runpane:panels:resume') {
@@ -1036,7 +1046,11 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
             ? mockOptions.detectedBranchByPath[path]
             : (mockOptions.detectedBranch === undefined ? 'main' : mockOptions.detectedBranch),
         ),
-        listBranches: () => success([
+        listBranches: () => mockOptions.listBranchesError === 'hold'
+          ? new Promise(() => undefined)
+          : mockOptions.listBranchesError
+            ? Promise.resolve({ success: false, error: mockOptions.listBranchesError })
+            : success([
           { name: 'origin/main', isCurrent: false, hasWorktree: false, isRemote: true },
           { name: 'main', isCurrent: true, hasWorktree: false, isRemote: false },
         ]),
