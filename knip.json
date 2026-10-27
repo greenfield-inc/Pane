@@ -90,7 +90,8 @@
         "pkill",
         "wslpath",
         "explorer.exe",
-        "dscl"
+        "dscl",
+        "mkfifo"
       ]
     },
     "packages/runpane": {

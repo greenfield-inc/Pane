@@ -106,7 +106,7 @@ export function NotifySettings({ persistence }: { persistence: SettingsPersisten
   const settings: NotifySettingValues = live ?? { ...DEFAULT_NOTIFY_SETTINGS, ...config.notify };
   const shortcutRegistered = useNotifyStore((state) => state.snapshot?.shortcutRegistered ?? true);
   const showOutsideSupported = useNotifyStore((state) => state.snapshot?.showOutsideSupported ?? true);
-  const instructionFiles = useNotifyStore((state) => state.snapshot?.instructionFiles ?? []);
+  const instructionFiles = useNotifyStore((state) => state.snapshot?.instructionFiles ?? NO_INSTRUCTION_FILES);
   const off = !settings.enabled;
 
   const save = <K extends keyof NotifySettingValues>(settingId: SettingsSettingId, key: K, value: NotifySettingValues[K]) =>
@@ -200,6 +200,9 @@ export function NotifySettings({ persistence }: { persistence: SettingsPersisten
     </SettingsPage>
   );
 }
+
+/** One empty list for every render: a fresh [] from the store selector re-renders forever. */
+const NO_INSTRUCTION_FILES: NotifyInstructionsFile[] = [];
 
 const INSTRUCTIONS_STATE_LABELS = {
   written: 'Written',

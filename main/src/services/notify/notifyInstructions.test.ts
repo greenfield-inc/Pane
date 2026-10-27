@@ -1,8 +1,12 @@
+import { execFileSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { syncNotifyInstructions } from './notifyInstructions';
+
+const BEGIN = '<!-- pane-notify:begin (managed by Pane; edits are replaced) -->';
+const END = '<!-- pane-notify:end -->';
 
 describe('Pane Notify instructions in the agents\' user-level files', () => {
   let home: string;
@@ -24,67 +28,120 @@ describe('Pane Notify instructions in the agents\' user-level files', () => {
   });
 
   const sync = (enabled: boolean) => syncNotifyInstructions(enabled, { CODEX_HOME: path.join(home, 'codex-home') }, home);
-  const read = (file: string) => fs.readFileSync(file);
+  const text = (file: string) => fs.readFileSync(file, 'utf8');
 
   it('adds the block after the person\'s own text and keeps every byte of it', () => {
-    const own = Buffer.from('﻿# Mine\r\nUse pnpm.\r\n', 'utf8');
+    const own = '﻿# Mine\r\nUse pnpm.\r\n';
     fs.writeFileSync(claudeFile, own);
 
     expect(sync(true).map(file => file.state)).toEqual(['written', 'written']);
 
-    const written = read(claudeFile).toString('utf8');
-    expect(written.startsWith(own.toString('utf8'))).toBe(true);
-    expect(written).toContain('<!-- pane-notify:begin (managed by Pane; edits are replaced) -->\r\n## Pane Notify\r\n');
+    const written = text(claudeFile);
+    expect(written.startsWith(`${own}${BEGIN}\r\n## Pane Notify\r\n`)).toBe(true);
     expect(written).toContain("call the `pane` MCP's `notify` instead of asking in the terminal");
-    expect(written.endsWith('<!-- pane-notify:end -->\r\n')).toBe(true);
+    expect(written.endsWith(`${END}\r\n`)).toBe(true);
     // Codex's folder had no AGENTS.md, so Pane created one holding only the block.
-    expect(read(codexFile).toString('utf8').startsWith('<!-- pane-notify:begin')).toBe(true);
+    expect(text(codexFile).startsWith(BEGIN)).toBe(true);
   });
 
   it('changes nothing on a second run', () => {
     fs.writeFileSync(claudeFile, '# Mine\n');
     sync(true);
-    const first = read(claudeFile);
+    const first = fs.readFileSync(claudeFile);
     const firstWrite = fs.statSync(claudeFile).mtimeMs;
 
     expect(sync(true).map(file => file.state)).toEqual(['written', 'written']);
-    expect(read(claudeFile).equals(first)).toBe(true);
+    expect(fs.readFileSync(claudeFile).equals(first)).toBe(true);
     expect(fs.statSync(claudeFile).mtimeMs).toBe(firstWrite);
+  });
+
+  it.each([
+    ['an empty file', ''],
+    ['text with a final line break', '# Mine\n'],
+    ['text without a final line break', '# Mine'],
+    ['CRLF text without a final line break', '# Mine\r\nUse pnpm.'],
+    ['a lone byte order mark', '﻿'],
+    ['a final carriage return', 'Keep final CR\r'],
+  ])('gives back %s byte for byte after on, on again and off', (_name, own) => {
+    fs.writeFileSync(claudeFile, own);
+    sync(true);
+    const on = text(claudeFile);
+    sync(true);
+    expect(text(claudeFile)).toBe(on);
+
+    sync(false);
+    // A file Pane didn't create stays, even when it is empty.
+    expect(text(claudeFile)).toBe(own);
   });
 
   it('turning Notify off removes only Pane\'s lines', () => {
     fs.writeFileSync(claudeFile, '# Mine\n\nUse pnpm.\n');
     sync(true);
-    // The person writes below the block afterwards.
+    // The person writes below the block afterwards, starting with a blank line of their own.
     fs.appendFileSync(claudeFile, '\nAlso: run lint.\n');
 
     expect(sync(false).map(file => file.state)).toEqual(['absent', 'absent']);
-    expect(read(claudeFile).toString('utf8')).toBe('# Mine\n\nUse pnpm.\n\nAlso: run lint.\n');
-    // The file Pane created held nothing else, so it is gone again.
-    expect(fs.existsSync(codexFile)).toBe(false);
+    expect(text(claudeFile)).toBe('# Mine\n\nUse pnpm.\n\nAlso: run lint.\n');
+    // The file Pane created stays, empty: Pane never deletes an instruction file.
+    expect(text(codexFile)).toBe('');
+  });
+
+  it('keeps the person\'s blank lines on both sides of an older block', () => {
+    fs.writeFileSync(claudeFile, `# My rules\n\n${BEGIN}\nold block\n${END}\n\nMore rules\n`);
+
+    sync(false);
+    expect(text(claudeFile)).toBe('# My rules\n\n\nMore rules\n');
+  });
+
+  it('keeps a personal edit made while Pane writes, and adds the block to it', () => {
+    fs.writeFileSync(claudeFile, '# My rules\n');
+    const rename = fs.renameSync;
+    let interleaved = false;
+    vi.spyOn(fs, 'renameSync').mockImplementation((from, to) => {
+      // Another editor saves just as Pane swaps its copy in.
+      if (to === claudeFile && !interleaved) {
+        interleaved = true;
+        fs.appendFileSync(claudeFile, 'Never deploy without asking me.\n');
+      }
+      rename(from, to);
+    });
+
+    expect(sync(true)[0].state).toBe('written');
+    expect(interleaved).toBe(true);
+    expect(text(claudeFile).startsWith('# My rules\nNever deploy without asking me.\n')).toBe(true);
+    expect(text(claudeFile)).toContain(BEGIN);
   });
 
   it('leaves a file alone when Pane\'s markers don\'t pair up', () => {
-    const own = '# Mine\n<!-- pane-notify:begin (managed by Pane; edits are replaced) -->\nhalf a block\n';
+    const own = `# Mine\n${BEGIN}\nhalf a block\n`;
     fs.writeFileSync(claudeFile, own);
 
     const [claude] = sync(true);
     expect(claude).toMatchObject({ state: 'skipped', reason: expect.stringContaining("don't pair up") });
-    expect(read(claudeFile).toString('utf8')).toBe(own);
+    expect(text(claudeFile)).toBe(own);
     sync(false);
-    expect(read(claudeFile).toString('utf8')).toBe(own);
+    expect(text(claudeFile)).toBe(own);
   });
 
-  // Windows needs extra rights to create a symlink.
-  it.skipIf(process.platform === 'win32')('never writes through a symlink', () => {
+  it.each([
+    ['a symlink', '# Shared\n'],
+    ['a dangling symlink', null],
+  ])('never writes through %s', (_name, targetText) => {
     const target = path.join(home, 'dotfiles-CLAUDE.md');
-    fs.writeFileSync(target, '# Shared\n');
-    fs.symlinkSync(target, claudeFile);
+    if (targetText !== null) fs.writeFileSync(target, targetText);
+    fs.symlinkSync(target, claudeFile, 'file');
 
-    const [claude] = sync(true);
-    expect(claude).toMatchObject({ state: 'skipped', reason: expect.stringContaining('symlink') });
-    expect(fs.readFileSync(target, 'utf8')).toBe('# Shared\n');
-    expect(fs.lstatSync(claudeFile).isSymbolicLink()).toBe(true);
+    for (const enabled of [true, false]) {
+      expect(sync(enabled)[0]).toMatchObject({ state: 'skipped', reason: expect.stringContaining('symlink') });
+      expect(fs.lstatSync(claudeFile).isSymbolicLink()).toBe(true);
+    }
+    expect(fs.existsSync(target) ? text(target) : null).toBe(targetText);
+  });
+
+  it.skipIf(process.platform === 'win32')('skips a FIFO instead of waiting on it', () => {
+    execFileSync('mkfifo', [claudeFile]);
+
+    expect(sync(true)[0]).toMatchObject({ state: 'skipped', reason: expect.stringContaining('regular file') });
   });
 
   it('creates nothing for an agent whose config folder is missing', () => {
