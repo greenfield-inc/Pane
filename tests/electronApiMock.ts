@@ -274,6 +274,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     };
     let mockProjects = clone(mockOptions.initialProjects ?? []);
     let mockSessions = clone(mockOptions.initialSessions ?? []);
+    const mockArchivedSessions: JsonObject[] = [];
     let mockLoops = clone(mockOptions.initialLoops ?? []);
     /** A plausible loops:preview answer for the form's preset shapes. */
     const previewLoopCron = (cron: string): LoopSchedulePreview => {
@@ -879,6 +880,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         findRepos: () => success({ repos: [], shells: [], wslDistro: null }),
         findWslRepos: (distro: string) => success({ distro, repos: [], agents: [] }),
         checkFolder: (folder: string) => success({ name: folder.split(/[\\/]/).pop() ?? folder, path: folder }),
+        sampleRepoPath: () => success('/tmp/.pane/projects/Pane'),
         supportProject: () => success({}),
       }),
       paneChat: namespace({
@@ -1135,7 +1137,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           return success(clone(mockSessions));
         },
         getAllWithProjects: () => success(clone(mockSessions)),
-        getArchivedWithProjects: () => success([]),
+        getArchivedWithProjects: () => success(mockProjects
+          .map(project => ({ ...clone(project), sessions: clone(mockArchivedSessions.filter(session => session.projectId === project.id)) }))
+          .filter(project => project.sessions.length > 0)),
         getResumable: () => success([]),
         getExecutions: () => success(clone(mockOptions.initialExecutions ?? [])),
         getGitCommands: () => success(clone(mockOptions.gitCommands ?? null)),
@@ -1558,6 +1562,19 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         setSessions(sessions: JsonObject[]) {
           mockSessions = clone(sessions);
+        },
+        // Stands in for main creating a Pane.
+        addSession(session: JsonObject) {
+          mockSessions.push(clone(session));
+          emit('session:created', clone(session));
+        },
+        // Stands in for main archiving a Pane: it leaves the active list and the store hears session:deleted.
+        archiveSession(sessionId: string) {
+          const session = mockSessions.find(candidate => candidate.id === sessionId);
+          if (!session) return;
+          mockSessions = mockSessions.filter(candidate => candidate.id !== sessionId);
+          mockArchivedSessions.push({ ...session, archived: true });
+          emit('session:deleted', { id: sessionId });
         },
         setProjects(projects: JsonObject[], activeProjectId: number | null = null) {
           mockProjects = clone(projects);

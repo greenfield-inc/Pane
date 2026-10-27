@@ -635,6 +635,7 @@ interface ElectronAPI {
     findRepos: () => Promise<IPCResponse<import('../../../shared/types/onboarding').HostRepos>>;
     findWslRepos: (distro: string) => Promise<IPCResponse<import('../../../shared/types/onboarding').WslRepos>>;
     checkFolder: (folder: string) => Promise<IPCResponse<{ name: string; path: string }>>;
+    sampleRepoPath: () => Promise<IPCResponse<string>>;
     supportProject: () => Promise<IPCResponse>;
   };
 

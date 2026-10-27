@@ -19,6 +19,7 @@ import type { PreferredShell } from '../types/config';
 import { useHostShellSettings } from '../hooks/useHostShellSettings';
 import { capture } from '../services/posthog';
 import { DISCORD_INVITE_URL, DiscordIcon } from './DiscordIcon';
+import { FirstStepsCard, useFirstSteps } from './FirstStepsCard';
 
 const HIDE_DISCORD_PREFERENCE = 'hide_discord';
 
@@ -284,7 +285,10 @@ export function HomePage() {
     return map;
   }, [projects]);
 
-  const isFirstRun = projects?.length === 0;
+  const firstSteps = useFirstSteps(projects);
+  // Installs from before "Your first steps" keep the Get Started card while they have no projects.
+  const isFirstRun = projects?.length === 0 && firstSteps === null;
+  const hasStartColumn = isFirstRun || (firstSteps !== null && firstSteps !== 'loading');
 
   const handleOpenSession = (session: Session) => {
     navigateToSessions();
@@ -312,7 +316,8 @@ export function HomePage() {
               {paneAscii}
             </pre>
           </div>
-          <section className={`grid gap-8 lg:items-stretch ${isFirstRun ? 'lg:grid-cols-[minmax(0,1.45fr)_minmax(320px,1fr)]' : ''}`}>
+          <section className={`grid gap-8 lg:items-stretch ${hasStartColumn ? 'lg:grid-cols-[minmax(0,1.45fr)_minmax(320px,1fr)]' : ''}`}>
+            {firstSteps !== null && firstSteps !== 'loading' && <FirstStepsCard firstSteps={firstSteps} />}
             {isFirstRun && (
             <div className="space-y-5 rounded-2xl border border-border-secondary bg-surface-primary/70 p-6 shadow-sm">
             <div>

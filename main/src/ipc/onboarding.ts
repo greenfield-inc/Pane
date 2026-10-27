@@ -417,6 +417,9 @@ export function registerOnboardingHandlers(ipcMain: IpcMain, services: AppServic
     }
   });
 
+  // Home's "Your first steps" ignores the sample repo, as Pane Chat's migrate offer does.
+  ipcMain.handle('onboarding:sample-repo-path', () => ({ success: true, data: sampleRepoPath() }));
+
   ipcMain.handle('onboarding:check-folder', async (_event: IpcMainInvokeEvent, folder: PaneCommandValue) => {
     try {
       return { success: true, data: await checkRepoFolder(decodeBoundary(folder, boundary.nonEmptyString)) };

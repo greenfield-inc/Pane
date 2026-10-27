@@ -19,6 +19,7 @@ import OnboardingDialog, {
   ONBOARDING_REPO_SETUP_PREFERENCE,
   SupportPaneDialog,
 } from './components/OnboardingDialog';
+import { OPEN_FIRST_SCREEN_EVENT } from './components/FirstStepsCard';
 import { AboutDialog } from './components/AboutDialog';
 import { DocsDialog } from './components/DocsDialog';
 import { FeedbackDialog } from './components/FeedbackDialog';
@@ -622,6 +623,59 @@ function App() {
     };
   }, [isLoaded, hasCheckedOnboarding, isOnboardingOpen, completedOnboardingThisSession]);
 
+  /**
+   * The once-only Support Pane dialog, for users past the first screen with GitHub CLI ready.
+   * It shows on a later launch or right after the first archive, whichever comes first.
+   */
+  const showSupportPromptOnce = useCallback(async (source: 'future_launch' | 'first_archive', isCancelled: () => boolean) => {
+    if (!window.electronAPI?.preferences || !window.electronAPI?.onboarding?.detectEnvironment) {
+      return;
+    }
+
+    try {
+      const onboardingResult = await API.preferences.get(ONBOARDING_REPO_SETUP_PREFERENCE);
+      if (onboardingResult !== 'true') return;
+
+      const promptResult = await API.preferences.get(ONBOARDING_GH_PROMPT_SHOWN_PREFERENCE);
+      if (promptResult === 'true') return;
+
+      const envResult = await window.electronAPI.onboarding.detectEnvironment();
+      if (!envResult.success || envResult.data?.ghReady !== true) return;
+
+      await API.preferences.set(ONBOARDING_GH_PROMPT_SHOWN_PREFERENCE, 'true');
+      capture('onboarding_support_prompt_shown', {
+        source,
+        gh_status: 'gh_ready',
+      });
+      if (!isCancelled()) setIsSupportPaneOpen(true);
+    } catch (error) {
+      console.error('[App] Failed to check onboarding support prompt:', error);
+    }
+  }, []);
+
+  // A Pane leaves the session store when it is archived or deleted; only the first archive counts.
+  useEffect(() => {
+    const handleSessionDeleted = (event: CustomEvent<{ id?: string }>) => {
+      const id = event.detail?.id;
+      if (!id) return;
+      void API.sessions.getArchivedWithProjects().then(response => {
+        // SAFETY: sessions:get-archived-with-projects answers projects that each carry their archived Panes.
+        const archived = response.success && response.data ? (response.data as Array<{ sessions: Array<{ id: string }> }>).flatMap(project => project.sessions) : [];
+        if (archived.length === 1 && archived[0].id === id) void showSupportPromptOnce('first_archive', () => false);
+      }).catch(() => {});
+    };
+    // SAFETY: useIPCEvents dispatches session-deleted as a CustomEvent carrying { id }.
+    window.addEventListener('session-deleted', handleSessionDeleted as EventListener);
+    // SAFETY: Same listener and event shape as registered above.
+    return () => window.removeEventListener('session-deleted', handleSessionDeleted as EventListener);
+  }, [showSupportPromptOnce]);
+
+  useEffect(() => {
+    const openFirstScreen = () => setIsOnboardingOpen(true);
+    window.addEventListener(OPEN_FIRST_SCREEN_EVENT, openFirstScreen);
+    return () => window.removeEventListener(OPEN_FIRST_SCREEN_EVENT, openFirstScreen);
+  }, []);
+
   useEffect(() => {
     if (
       supportPromptCheckStarted.current ||
@@ -639,33 +693,7 @@ function App() {
     supportPromptCheckStarted.current = true;
     let cancelled = false;
 
-    const checkDeferredSupportPrompt = async () => {
-      if (!window.electronAPI?.preferences || !window.electronAPI?.onboarding?.detectEnvironment) {
-        return;
-      }
-
-      try {
-        const onboardingResult = await API.preferences.get(ONBOARDING_REPO_SETUP_PREFERENCE);
-        if (onboardingResult !== 'true') return;
-
-        const promptResult = await API.preferences.get(ONBOARDING_GH_PROMPT_SHOWN_PREFERENCE);
-        if (promptResult === 'true') return;
-
-        const envResult = await window.electronAPI.onboarding.detectEnvironment();
-        if (!envResult.success || envResult.data?.ghReady !== true) return;
-
-        await API.preferences.set(ONBOARDING_GH_PROMPT_SHOWN_PREFERENCE, 'true');
-        capture('onboarding_support_prompt_shown', {
-          source: 'future_launch',
-          gh_status: 'gh_ready',
-        });
-        if (!cancelled) setIsSupportPaneOpen(true);
-      } catch (error) {
-        console.error('[App] Failed to check deferred onboarding support prompt:', error);
-      }
-    };
-
-    void checkDeferredSupportPrompt();
+    void showSupportPromptOnce('future_launch', () => cancelled);
     return () => {
       cancelled = true;
       supportPromptCheckStarted.current = false;
@@ -678,6 +706,7 @@ function App() {
     completedOnboardingThisSession,
     hasResolvedStartupDialogs,
     isWelcomeOpen,
+    showSupportPromptOnce,
   ]);
 
   // Check for resumable sessions on startup and on each host switch (auto-resume feature).
