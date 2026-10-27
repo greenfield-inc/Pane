@@ -642,12 +642,11 @@ async function previewRunScripts(repos: readonly SetupRunScripts[], sources: Set
   let matchedRepos = 0;
   for (const repo of repos) {
     const remote = repo.remote?.toLowerCase() ?? null;
-    let matches = remote
+    const matches = remote
       ? sources.projects.filter((_project, index) => localRemotes[index] === remote)
       : sources.projects.filter(project => project.name === repo.name);
     if (!remote && matches.length > 1) {
       count(section, { kind: 'skipped', name: repo.name, reason: `more than one repository in Pane is named ${repo.name}`, cause: 'ambiguous' });
-      matches = [];
       continue;
     }
     if (matches.length === 0) {
