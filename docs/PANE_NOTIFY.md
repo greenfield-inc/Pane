@@ -38,7 +38,9 @@ client:
 - **Cursor's CLI** ends every tool call after 60 seconds. About every 50
   seconds `notify` returns `{waiting: true, id, next}`, and the agent calls
   `notify` again with `resume: <id>`. The card doesn't change. After 15
-  minutes without an answer the call returns `unavailable`.
+  minutes without an answer the call returns `unavailable`. Cursor asks
+  "Run this MCP tool?" before every call, resumes included; pick **Allowlist
+  MCP Tool** once so a waiting agent doesn't stop at that prompt.
 
 If the agent stops waiting (you interrupt it, it exits, or its call times out),
 the card says "<agent> stopped waiting" and the question moves to **Earlier
