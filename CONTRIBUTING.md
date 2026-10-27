@@ -123,6 +123,11 @@ pnpm --filter main exec vitest run
 pnpm test:ci:minimal
 ```
 
+`pnpm typecheck` checks `frontend`, `mobile` and `native` with TypeScript 7
+(the `@typescript/native` alias), and `main` and `packages/runpane` with their
+own `typescript` 5.x, which also builds them. ESLint and editors use the 5.x
+package.
+
 - `pnpm --filter main test` runs Vitest in watch mode; use `exec vitest run`
   for a single pass, as CI does. Main tests live next to the code as
   `*.test.ts`.

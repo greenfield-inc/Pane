@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "lint": "pnpm --dir .. run lint:ox:frontend && pnpm run lint:eslint",
     "lint:eslint": "eslint src --ext .ts,.tsx",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json",
+    "typecheck": "node ../node_modules/@typescript/native/bin/tsc --noEmit && node ../node_modules/@typescript/native/bin/tsc --noEmit -p tsconfig.node.json",
     "test": "vitest run"
   },
   "dependencies": {
