@@ -46,6 +46,7 @@ export type SettingsSettingId =
   | 'agent-context'
   | 'session-defaults'
   | 'claude-executable'
+  | 'session-import'
   | 'commit-footer'
   | 'git-attribution'
   | 'auto-rename-pr'

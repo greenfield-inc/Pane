@@ -81,6 +81,7 @@ const PROMPT_CHANNELS = [
 const PANE_CHAT_CHANNELS = [
   'pane-chat:get-or-create',
   'pane-chat:set-agent',
+  'pane-chat:intro-offer',
 ] as const;
 const ORCHESTRATION_SESSION_CHANNELS = [
   'orchestration-sessions:runtimes',

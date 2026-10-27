@@ -102,7 +102,7 @@ import type { WorktreeManager } from './services/worktreeManager';
 import type { GitStatusManager } from './services/gitStatusManager';
 import type { DatabaseService } from './database/database';
 import type { RunCommandManager } from './services/runCommandManager';
-import type { VersionChecker } from './services/versionChecker';
+import type { VersionChecker, VersionInfo } from './services/versionChecker';
 import type { Logger } from './utils/logger';
 import type { ArchiveProgressManager } from './services/archiveProgressManager';
 import type { AnalyticsManager } from './services/analyticsManager';
@@ -111,6 +111,10 @@ import { resourceMonitorService } from './services/resourceMonitorService';
 import { applyAppDirectoryOverrideFromArgs, isPackagedOnDefaultDirectory, migrateDataDirectory } from './utils/appDirectory';
 import { getCurrentWorktreeName } from './utils/worktreeUtils';
 import { setupAutoUpdater } from './autoUpdater';
+import { getUpdateCapabilities } from './utils/updateCapabilities';
+import { UIStateManager } from './services/uiStateManager';
+import { getActiveRemoteHostId } from '../../shared/types/remoteDaemon';
+import { cancelRestartToUpdate, setUpdateAvailable, setUpdateReady, startRestartToUpdate } from './services/restartToUpdate/restartToUpdate';
 import type { CliManagerFactory } from './services/cliManagerFactory';
 import { setupConsoleWrapper } from './utils/consoleWrapper';
 import * as fs from 'fs';
@@ -1148,10 +1152,24 @@ async function initializeServices() {
   analyticsManager = services.analyticsManager;
   powerSaveManager = new PowerSaveManager(configManager, sessionManager, terminalPanelManager, { logger });
   powerSaveManager.sync();
+  const navigationMemory = new UIStateManager(databaseService);
+  startRestartToUpdate({
+    getMainWindow: () => mainWindow,
+    configManager,
+    readNavigation: () => {
+      const hostId = getActiveRemoteHostId(configManager.getConfig().remoteDaemon);
+      const memory = navigationMemory.getNavigationMemory(hostId);
+      return memory ? { hostId, memory } : null;
+    },
+    archiveProgressManager,
+  });
 
   leaderboardService = new LeaderboardService(configManager);
   registerLeaderboardHandlers(ipcMain, leaderboardService);
 
+  // Read before the first identity lookup overwrites it, so the renderer can
+  // tell when the desktop id changed since the last launch.
+  const previousAnalyticsDistinctId = configManager.getAnalyticsDistinctId();
   ipcMain.handle('analytics:get-identity', async () => {
     try {
       const installId = await configManager.getOrCreateAnalyticsInstallId();
@@ -1172,6 +1190,7 @@ async function initializeServices() {
       identity.webAttributionPresent = webDistinctId !== undefined;
       identity.isFirstLaunch = isFirstLaunch;
       identity.previousVersion = previousVersion;
+      identity.previousDistinctId = previousAnalyticsDistinctId;
       await configManager.setAnalyticsIdentity(identity);
       return { success: true, data: identity };
     } catch (error) {
@@ -1429,10 +1448,21 @@ if (launchRemoteSetup) {
   // here too: loading electron-updater blocks the main thread, which would
   // hold up the renderer's first requests if it ran as the window opens.
   setTimeout(async () => {
-    setupAutoUpdater(() => mainWindow);
+    setupAutoUpdater({ getMainWindow: () => mainWindow, configManager, onUpdateDownloaded: setUpdateReady });
+    if (configManager.getConfig().autoCheckUpdates === false) return;
     console.log('[Main] Performing startup version check...');
     await versionChecker.checkOnStartup();
   }, 1000); // Small delay to ensure window is fully ready
+
+  // Installs that cannot download in the background (macOS manual mode) show
+  // "Update available" in the sidebar instead of "Restart to update".
+  process.on('version-update-available', (versionInfo: VersionInfo) => {
+    if (!app.isPackaged) return;
+    void getUpdateCapabilities({ platform: process.platform, isPackaged: true, executablePath: process.execPath })
+      .then(capabilities => {
+        if (capabilities.mode === 'manual') setUpdateAvailable(versionInfo.latest);
+      });
+  });
 
 // Initialize worktree pool — cleanup orphans and seed reserves
   setTimeout(async () => {
@@ -1554,6 +1584,7 @@ if (launchRemoteSetup) {
       // User chose to wait - reset guard and cancel quit
       shutdownInProgress = false;
       appIsQuitting = false;
+      cancelRestartToUpdate();
       return;
     }
 
@@ -1587,7 +1618,14 @@ if (launchRemoteSetup) {
     // named locks; resumed agents still hold them after the restart.
     paneDaemonHost?.services.namedLockService?.suspendAutoRelease();
 
-    await agentChatManager.stopAll();
+    // A Chat tab that refuses to stop must not skip marking the other agents
+    // interrupted below, or the next launch has nothing to resume.
+    try {
+      await agentChatManager.stopAll();
+    } catch (error) {
+      logToFile(`Agent Chat stop failed: ${error}`);
+      console.error('[Main] Agent Chat could not stop every conversation; continuing shutdown:', error);
+    }
 
     // Phase 1: Send Ctrl+C to all terminals to gracefully exit Claude instances
     // Claude needs to exit cleanly so it releases the session ID lock, allowing

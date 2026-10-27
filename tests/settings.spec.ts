@@ -256,14 +256,14 @@ test.describe('Settings', () => {
     expect(updates).toContainEqual({ keyboardShortcutsEnabled: false });
   });
 
-  test('configures the Command Palette exception and opens the shortcut reference', async ({ page }) => {
+  test('configures the Search shortcut exception and opens the shortcut reference', async ({ page }) => {
     await bootSettings(page, {
       initialConfig: { keyboardShortcutsEnabled: false, commandPaletteShortcutEnabled: true },
     });
     await page.getByRole('button', { name: 'Shortcuts', exact: true }).click();
 
-    await expect(page.getByText("When disabled, Pane shortcuts won't work, but native terminal and embedded app shortcuts will. The Command Palette shortcut can remain enabled below.")).toBeVisible();
-    const paletteToggle = page.getByRole('switch', { name: 'Keep Command Palette shortcut enabled' });
+    await expect(page.getByText("When disabled, Pane shortcuts won't work, but native terminal and embedded app shortcuts will. The Search shortcut can remain enabled below.")).toBeVisible();
+    const paletteToggle = page.getByRole('switch', { name: 'Keep Search shortcut enabled' });
     await expect(paletteToggle).toHaveAttribute('aria-checked', 'true');
     await paletteToggle.click();
 
@@ -275,7 +275,7 @@ test.describe('Settings', () => {
 
     await page.getByRole('button', { name: 'View all Pane keyboard shortcuts' }).click();
     await expect(page.getByRole('dialog', { name: 'Keyboard Shortcuts' })).toBeVisible();
-    await expect(page.getByText('Open Command Palette')).toBeVisible();
+    await expect(page.getByText('Open Search')).toBeVisible();
   });
 
   test('guards the shortcut reference when snippet edits are dirty', async ({ page }) => {

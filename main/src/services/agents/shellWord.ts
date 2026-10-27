@@ -10,7 +10,7 @@
  * leave the argument out rather than emit a word the shell would rewrite.
  */
 export function quoteShellWord(value: string, shellType: string | undefined): string | undefined {
-  const shell = (shellType ?? '').split(/[\\/]/).pop()?.toLowerCase().replace(/\.exe$/, '') ?? '';
+  const shell = shellName(shellType);
   if (shell === 'powershell' || shell === 'pwsh') {
     // PowerShell ends a single-quoted string at any of its single-quote characters, typographic ones included.
     return `'${value.replace(/['‘’‚‛]/g, quote => quote + quote)}'`;
@@ -23,4 +23,13 @@ export function quoteShellWord(value: string, shellType: string | undefined): st
     return `'${value.replace(/[\\']/g, character => `\\${character}`)}'`;
   }
   return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+/** Whether the shell reads POSIX quoting: true for bash, zsh, sh and an unknown or missing shell. */
+export function isPosixShell(shellType: string | undefined): boolean {
+  return !['powershell', 'pwsh', 'cmd', 'fish'].includes(shellName(shellType));
+}
+
+function shellName(shellType: string | undefined): string {
+  return (shellType ?? '').split(/[\\/]/).pop()?.toLowerCase().replace(/\.exe$/, '') ?? '';
 }

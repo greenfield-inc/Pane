@@ -101,6 +101,7 @@ export const DAEMON_OWNED_CHANNEL_PREFIXES = [
   'prompts:',
   'resource-monitor:',
   'runpane:',
+  'session-import:',
   'sessions:',
   'ssh-hosts:',
   'terminal:',

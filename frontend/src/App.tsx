@@ -12,6 +12,7 @@ import { useFocusedSurfaceScrolling } from './hooks/useFocusedSurfaceScrolling';
 import { ShortcutHintsOverlay } from './components/ShortcutHintsOverlay';
 import { Sidebar } from './components/Sidebar';
 import { SessionView } from './components/SessionView';
+import { PaneChatIntroOffer } from './components/PaneChatIntroOffer';
 import Welcome from './components/Welcome';
 import Help from './components/Help';
 import OnboardingDialog, {
@@ -28,14 +29,16 @@ import { ErrorDialog } from './components/ErrorDialog';
 import { PermissionDialog } from './components/PermissionDialog';
 import { DISCORD_INVITE_URL } from './components/DiscordIcon';
 import { ResumeSessionsDialog } from './components/ResumeSessionsDialog';
-import { useErrorStore } from './stores/errorStore';
+import { showActionError, useErrorStore } from './stores/errorStore';
 import { useSessionStore } from './stores/sessionStore';
 import { subscribePanelStatus } from './services/panelStatusSync';
 import { subscribeAttentionInbox, useAttentionInboxStore } from './stores/attentionInboxStore';
 import { useConfigStore } from './stores/configStore';
 import { usePanelStore } from './stores/panelStore';
 import { API } from './utils/api';
-import { restoreSessionSelection, startHostNavigationMemoryWrites } from './utils/hostNavigationMemory';
+import { restoreHostNavigation, restoreSessionSelection, startHostNavigationMemoryWrites } from './utils/hostNavigationMemory';
+import { RestartToUpdateToast } from './components/RestartToUpdateToast';
+import { useRestartToUpdateStore, useRestartToUpdateSync } from './stores/restartToUpdateStore';
 import { createVisibilityAwareInterval } from './utils/performanceUtils';
 import { useWindowActive } from './hooks/useWindowActive';
 import { ContextMenuProvider } from './contexts/ContextMenuContext';
@@ -96,6 +99,8 @@ function App() {
   const supportPromptCheckStarted = useRef(false);
 
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  // Each opening mounts a fresh launcher: empty query, All, nothing selected.
+  const [searchOpenCount, setSearchOpenCount] = useState(0);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [settingsCategory, setSettingsCategory] = useState<SettingsCategoryId>('general');
   const [settingsOpenRequest, setSettingsOpenRequest] = useState<SettingsOpenRequest>();
@@ -109,6 +114,7 @@ function App() {
   const [showAddProjectDialog, setShowAddProjectDialog] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const activeProjectId = useNavigationStore(s => s.activeProjectId);
+  const navigateToProject = useNavigationStore(s => s.navigateToProject);
   const sidebarCollapsed = useNavigationStore(s => s.sidebarCollapsed);
   const [titleBarControlsSlot, setTitleBarControlsSlot] = useState<HTMLDivElement | null>(null);
   const setSidebarCollapsed = useNavigationStore(s => s.setSidebarCollapsed);
@@ -206,10 +212,13 @@ function App() {
 
   useHotkey({
     id: 'open-command-palette',
-    label: 'Open Command Palette',
+    label: 'Open Search',
     keys: 'mod+shift+p',
     category: 'navigation',
-    action: () => setIsCommandPaletteOpen(true),
+    action: () => {
+      setSearchOpenCount(count => count + 1);
+      setIsCommandPaletteOpen(true);
+    },
   });
 
   useHotkey({
@@ -286,6 +295,9 @@ function App() {
   // Register terminal shortcuts (hotkey-triggered clipboard paste)
   useTerminalShortcuts();
 
+  // Follow main's restart-to-update state for the sidebar pill and the toast.
+  useRestartToUpdateSync();
+
   // Load config on app startup
   useEffect(() => {
     fetchConfig();
@@ -327,6 +339,11 @@ function App() {
       window.removeEventListener('project-sessions-refresh', handle);
     };
   }, []);
+
+  const handleNewPaneInProject = useCallback((projectId: number) => {
+    navigateToProject(projectId);
+    setShowCreateSessionDialog(true);
+  }, [navigateToProject]);
 
   const activeProject = useMemo(() => {
     if (activeProjectId) return projects.find(p => p.id === activeProjectId);
@@ -383,6 +400,9 @@ function App() {
 
         if (!hasLegacyChoice && !hasAppliedDefault) {
           const identity = await resolveAnalyticsIdentity();
+          // A config change during the identity lookup restarts this effect;
+          // only the latest run captures and aliases.
+          if (cancelled) return;
 
           initPostHog({
             enabled: true,
@@ -681,12 +701,37 @@ function App() {
   ]);
 
   // Check for resumable sessions on startup and on each host switch (auto-resume feature).
-  // A reconnect to the same host does not prompt again.
+  // A reconnect to the same host does not prompt again. The launch after a restart to
+  // update skips the prompt: main has already resumed every agent, so reopen the
+  // remembered Pane and say what came back instead.
   useEffect(() => {
     if (!isLoaded) return;
     let cancelled = false;
+    let firstCheck = true;
+
+    const takeRestoreResult = async () => {
+      try {
+        const result = await window.electronAPI.updater?.takeRestoreResult?.();
+        return result?.success ? result.data ?? null : null;
+      } catch (error) {
+        console.error('[App] Failed to read the restart-to-update result:', error);
+        return null;
+      }
+    };
 
     const checkResumableSessions = async () => {
+      if (firstCheck) {
+        firstCheck = false;
+        const restored = await takeRestoreResult();
+        if (cancelled) return;
+        if (restored) {
+          useRestartToUpdateStore.getState().showRestoreResult(restored);
+          if (!useConfigStore.getState().config) await useConfigStore.getState().fetchConfig();
+          if (!cancelled) await restoreHostNavigation(() => true, restored.navigation);
+          // Panes whose agents could not resume stay interrupted; offer them as on any launch.
+          if (cancelled || restored.panesFailed === 0) return;
+        }
+      }
       let sessions: ResumableSession[] = [];
       try {
         const result = await window.electronAPI.sessions.getResumable();
@@ -767,15 +812,9 @@ function App() {
     // Set up version update listener
     if (!window.electronAPI?.events) return;
 
+    // Remembered for the "Update available" pill; the dialog opens only when asked.
     const handleVersionUpdate = (versionInfo: VersionUpdateInfo) => {
       setUpdateVersionInfo(versionInfo);
-      setIsUpdateDialogOpen(true);
-      showNotification(
-        `🚀 Update Available - Pane v${versionInfo.latest}`,
-        'A new version of Pane is available!',
-        '/favicon.ico',
-        `pane:update:${versionInfo.latest}` // Replace an existing OS notification for this version.
-      );
     };
 
     // Set up the listener using the events API
@@ -786,7 +825,7 @@ function App() {
         removeListener();
       }
     };
-  }, [showNotification]);
+  }, []);
 
   const handleUpdateRequest = useCallback((versionInfo: VersionInfo) => {
     setUpdateVersionInfo({
@@ -796,6 +835,24 @@ function App() {
     setIsAboutOpen(false);
     setIsUpdateDialogOpen(true);
   }, []);
+
+  // The release the version check found; a renderer reload loses it, so ask again.
+  const openAvailableUpdate = useCallback(async () => {
+    if (updateVersionInfo) {
+      setIsUpdateDialogOpen(true);
+      return;
+    }
+    try {
+      const response = await window.electronAPI.checkForUpdates();
+      if (!response.success || !response.data) {
+        showActionError('Could not check for updates', response);
+        return;
+      }
+      handleUpdateRequest(response.data);
+    } catch (error) {
+      showActionError('Could not check for updates', error);
+    }
+  }, [updateVersionInfo, handleUpdateRequest]);
 
   const handlePermissionResponse = useCallback(async (
     requestId: string,
@@ -867,9 +924,13 @@ function App() {
               capture('discord_clicked', { source: 'sidebar' });
               void window.electronAPI.openExternal(DISCORD_INVITE_URL);
             }}
+            onUpdateAvailableClick={() => void openAvailableUpdate()}
           />
         </div>
-        <SessionView />
+        <div className="relative flex min-h-0 min-w-0 flex-1">
+          <SessionView />
+          <PaneChatIntroOffer suppressed={isSettingsOpen || isOnboardingOpen || isWelcomeOpen} />
+        </div>
         </div>
         <OnboardingDialog
           isOpen={isOnboardingOpen}
@@ -887,6 +948,7 @@ function App() {
         <AboutDialog isOpen={isAboutOpen} onClose={() => setIsAboutOpen(false)} onUpdate={handleUpdateRequest} />
         <FeedbackDialog isOpen={isFeedbackOpen} onClose={() => setIsFeedbackOpen(false)} />
         <LoopDrawer />
+        <RestartToUpdateToast />
         <UpdateDialog
           isOpen={isUpdateDialogOpen}
           onClose={() => setIsUpdateDialogOpen(false)}
@@ -913,8 +975,11 @@ function App() {
           />
         )}
         <CommandPalette
+          key={searchOpenCount}
           isOpen={isCommandPaletteOpen}
           onClose={() => setIsCommandPaletteOpen(false)}
+          projects={projects}
+          onNewPane={handleNewPaneInProject}
         />
         {showCreateSessionDialog && activeProject && (
           <CreateSessionDialog

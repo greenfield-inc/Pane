@@ -1,6 +1,8 @@
 import type { LoopInput } from '../../shared/types/loop';
 import type { SetupFile, SetupSectionId } from '../../shared/types/setupTransfer';
+import type { SessionImportProgress, SessionImportRunResult, SessionImportScan } from '../../shared/types/sessionImport';
 import type { AgentChatEvent, AgentChatView, AgentChatSend, AgentInterface } from '../../shared/types/agentChat';
+import type { RestartToUpdateSource, RestartToUpdateState, UpdateRestoreResult } from '../../shared/types/updater';
 import { contextBridge, ipcRenderer } from 'electron';
 import { createPreferencesApi } from '../../shared/types/preferences';
 import { isDaemonOwnedChannel } from '../../shared/types/daemon';
@@ -387,6 +389,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     installUpdate: (): Promise<IPCResponse> => invokeIpc('updater:install-update'),
     copyUpdateCommand: (): Promise<IPCResponse> => invokeIpc('updater:copy-update-command'),
     openTerminalWithCommand: (): Promise<IPCResponse> => invokeIpc('updater:open-terminal-with-command'),
+    getRestartState: (): Promise<IPCResponse<RestartToUpdateState>> => invokeIpc('updater:get-restart-state'),
+    restartToUpdate: (source: RestartToUpdateSource): Promise<IPCResponse> => invokeIpc('updater:restart-to-update', source),
+    snooze: (): Promise<IPCResponse<RestartToUpdateState>> => invokeIpc('updater:snooze'),
+    setTonight: (enabled: boolean): Promise<IPCResponse<RestartToUpdateState>> => invokeIpc('updater:set-tonight', enabled),
+    takeRestoreResult: (): Promise<IPCResponse<UpdateRestoreResult | null>> => invokeIpc('updater:take-restore-result'),
   },
 
   // System utilities
@@ -439,6 +446,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   paneChat: {
     getOrCreate: (): Promise<IPCResponse> => invokeIpc('pane-chat:get-or-create'),
     setAgent: (agent: 'claude' | 'codex' | 'cursor'): Promise<IPCResponse> => invokeIpc('pane-chat:set-agent', agent),
+    introOffer: (): Promise<IPCResponse<{ eligible: boolean; openingPromptAtLaunch: boolean }>> => invokeIpc('pane-chat:intro-offer'),
   },
   sshHosts: {
     list: (): Promise<IPCResponse> => invokeIpc('ssh-hosts:list'),
@@ -464,6 +472,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getReport: (request?: { fromMs?: number; toMs?: number; bucket?: 'hour' | 'day' }): Promise<IPCResponse> => invokeIpc('usage:get-report', request),
     getStatus: (): Promise<IPCResponse> => invokeIpc('usage:get-status'),
     rescan: (): Promise<IPCResponse> => invokeIpc('usage:rescan'),
+  },
+
+  // Bring sessions from other agent tools into Pane
+  sessionImport: {
+    home: (): Promise<SessionImportScan | null> => invokeIpc('session-import:home'),
+    scan: (): Promise<SessionImportScan> => invokeIpc('session-import:scan'),
+    run: (keys: string[]): Promise<SessionImportRunResult> => invokeIpc('session-import:run', keys),
+    progress: (): Promise<SessionImportProgress> => invokeIpc('session-import:progress'),
   },
 
   // Leaderboard opt-in and submission
@@ -1085,6 +1101,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, info: UpdaterInfo) => callback(info);
       ipcRenderer.on('updater:update-downloaded', wrappedCallback);
       return () => ipcRenderer.removeListener('updater:update-downloaded', wrappedCallback);
+    },
+    onRestartToUpdateState: (callback: (state: RestartToUpdateState) => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, state: RestartToUpdateState) => callback(state);
+      ipcRenderer.on('updater:restart-state', wrappedCallback);
+      return () => ipcRenderer.removeListener('updater:restart-state', wrappedCallback);
     },
     onUpdaterError: (callback: (error: Error) => void) => {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, error: Error) => callback(error);
