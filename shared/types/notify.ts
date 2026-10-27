@@ -30,6 +30,8 @@ export interface NotifyQuestion {
   choices?: NotifyChoice[];
   /** approve only: preformatted block behind a "Show the …" disclosure. */
   detail?: string;
+  /** approve only, with detail: the disclosure's label, such as "Show the SQL". Default "Show details". */
+  detailLabel?: string;
   /** ask only: chips above the text field. */
   suggestions?: string[];
   /** info only: one button. */

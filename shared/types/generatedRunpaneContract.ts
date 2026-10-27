@@ -1242,7 +1242,7 @@ export const RUNPANE_CONTRACT = {
       "name": "notify",
       "summary": "Ask the person a question, or tell them something, wherever they are, and get their answer back.",
       "usage": [
-        "runpane notify --ui <options|approve|ask|info> --title <text> [--context <text>] [--choices <json>] [--detail <text>] [--suggestions <json>] [--action <json>] [--json] [--pane-dir <path>]",
+        "runpane notify --ui <options|approve|ask|info> --title <text> [--context <text>] [--choices <json>] [--detail <text>] [--detail-label <text>] [--suggestions <json>] [--action <json>] [--json] [--pane-dir <path>]",
         "runpane notify --resume <id> [--json] [--pane-dir <path>]"
       ],
       "mutates": true,
@@ -2099,6 +2099,11 @@ export const RUNPANE_CONTRACT = {
         "name": "--detail",
         "value": "<text>",
         "description": "notify --ui approve: a preformatted block, such as the command or SQL to approve."
+      },
+      {
+        "name": "--detail-label",
+        "value": "<text>",
+        "description": "notify --ui approve: label of the disclosure that reveals --detail, such as Show the SQL; up to 40 characters."
       },
       {
         "name": "--suggestions",
@@ -3364,7 +3369,7 @@ export const RUNPANE_CONTRACT = {
       ],
       "notify": [
         "Usage:",
-        "  runpane notify --ui <options|approve|ask|info> --title <text> [--context <text>] [--choices <json>] [--detail <text>] [--suggestions <json>] [--action <json>] [--json] [--pane-dir <path>]",
+        "  runpane notify --ui <options|approve|ask|info> --title <text> [--context <text>] [--choices <json>] [--detail <text>] [--detail-label <text>] [--suggestions <json>] [--action <json>] [--json] [--pane-dir <path>]",
         "  runpane notify --resume <id> [--json] [--pane-dir <path>]",
         "",
         "Asks the person a question, or tells them something, on screen wherever they are, and",
@@ -3378,6 +3383,7 @@ export const RUNPANE_CONTRACT = {
         "  --context <text>               Background shown under Details",
         "  --choices <json>               options: 1 to 9 of [{\"label\":\"...\",\"detail\":\"...\",\"recommended\":true}]",
         "  --detail <text>                approve: the command or SQL to approve",
+        "  --detail-label <text>          approve: label of the disclosure for --detail (default Show details)",
         "  --suggestions <json>           ask: suggested answers, such as [\"main\",\"release\"]",
         "  --action <json>                info: one button, such as {\"label\":\"Open PR\",\"url\":\"https://...\"}",
         "  --resume <id>                  Keep waiting on a question an earlier call returned waiting for",
@@ -4840,7 +4846,7 @@ export const RUNPANE_CONTRACT = {
       ],
       "notify": [
         "Usage:",
-        "  runpane notify --ui <options|approve|ask|info> --title <text> [--context <text>] [--choices <json>] [--detail <text>] [--suggestions <json>] [--action <json>] [--json] [--pane-dir <path>]",
+        "  runpane notify --ui <options|approve|ask|info> --title <text> [--context <text>] [--choices <json>] [--detail <text>] [--detail-label <text>] [--suggestions <json>] [--action <json>] [--json] [--pane-dir <path>]",
         "  runpane notify --resume <id> [--json] [--pane-dir <path>]",
         "",
         "Asks the person a question, or tells them something, on screen wherever they are, and",
@@ -4854,6 +4860,7 @@ export const RUNPANE_CONTRACT = {
         "  --context <text>               Background shown under Details",
         "  --choices <json>               options: 1 to 9 of [{\"label\":\"...\",\"detail\":\"...\",\"recommended\":true}]",
         "  --detail <text>                approve: the command or SQL to approve",
+        "  --detail-label <text>          approve: label of the disclosure for --detail (default Show details)",
         "  --suggestions <json>           ask: suggested answers, such as [\"main\",\"release\"]",
         "  --action <json>                info: one button, such as {\"label\":\"Open PR\",\"url\":\"https://...\"}",
         "  --resume <id>                  Keep waiting on a question an earlier call returned waiting for",
@@ -6561,6 +6568,7 @@ export const RUNPANE_CONTRACT = {
         "--ui=approve",
         "--title=Drop the table?",
         "--detail=DROP TABLE t;",
+        "--detail-label=Show the SQL",
         "--pane-dir",
         "/tmp/pane"
       ],
@@ -12612,6 +12620,10 @@ export const RUNPANE_CONTRACT = {
         "detail": {
           "type": "string"
         },
+        "detailLabel": {
+          "type": "string",
+          "maxLength": 40
+        },
         "suggestions": {
           "type": "array",
           "items": {
@@ -17646,6 +17658,16 @@ export const RUNPANE_CONTRACT = {
             "description": "ui approve only: a preformatted block, such as the command or SQL to approve, behind a disclosure."
           },
           {
+            "name": "--detail-label",
+            "value": "<text>",
+            "required": false,
+            "description": "ui approve only, with detail: the disclosure's label, such as \"Show the SQL\"; up to 40 characters. Defaults to \"Show details\".",
+            "schema": {
+              "type": "string",
+              "maxLength": 40
+            }
+          },
+          {
             "name": "--suggestions",
             "value": "<json>",
             "required": false,
@@ -17687,7 +17709,7 @@ export const RUNPANE_CONTRACT = {
         ],
         "examples": [
           "runpane notify --ui options --title \"Which database for the cache?\" --choices '[{\"label\":\"Redis\",\"recommended\":true},{\"label\":\"SQLite\"}]' --json",
-          "runpane notify --ui approve --title \"Drop the legacy_users table?\" --detail \"DROP TABLE legacy_users;\" --json",
+          "runpane notify --ui approve --title \"Drop the legacy_users table?\" --detail \"DROP TABLE legacy_users;\" --detail-label \"Show the SQL\" --json",
           "runpane notify --ui ask --title \"Which branch should I base this on?\" --suggestions '[\"main\",\"release\"]' --json",
           "runpane notify --ui info --title \"PR #812 is ready for review\" --action '{\"label\":\"Open PR\",\"url\":\"https://github.com/org/repo/pull/812\"}' --json",
           "runpane notify --resume n-4f2a --json"

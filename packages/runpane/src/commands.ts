@@ -138,6 +138,7 @@ export interface ParsedArgs {
   notifyContext?: string;
   notifyChoices?: string;
   notifyDetail?: string;
+  notifyDetailLabel?: string;
   notifySuggestions?: string;
   notifyAction?: string;
   /** loops: the loop id, its cron, and create's --paused. */
@@ -1098,6 +1099,10 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
   }
   if (flag === '--detail') {
     parsed.notifyDetail = value;
+    return;
+  }
+  if (flag === '--detail-label') {
+    parsed.notifyDetailLabel = value;
     return;
   }
   if (flag === '--suggestions') {

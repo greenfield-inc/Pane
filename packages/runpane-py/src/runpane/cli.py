@@ -125,6 +125,7 @@ NOTIFY_VALUE_FLAGS = {
     "--context": "notify_context",
     "--choices": "notify_choices",
     "--detail": "notify_detail",
+    "--detail-label": "notify_detail_label",
     "--suggestions": "notify_suggestions",
     "--action": "notify_action",
 }
@@ -249,6 +250,7 @@ class ParsedArgs:
     notify_context: Optional[str] = None
     notify_choices: Optional[str] = None
     notify_detail: Optional[str] = None
+    notify_detail_label: Optional[str] = None
     notify_suggestions: Optional[str] = None
     notify_action: Optional[str] = None
     loop_id: Optional[str] = None

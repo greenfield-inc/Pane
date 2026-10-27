@@ -1155,6 +1155,7 @@
       "--ui=approve",
       "--title=Drop the table?",
       "--detail=DROP TABLE t;",
+      "--detail-label=Show the SQL",
       "--pane-dir",
       "/tmp/pane"
     ],

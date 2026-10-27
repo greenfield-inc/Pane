@@ -15,6 +15,7 @@ import type { AgentState } from '../../../shared/types/agentStatus';
 const MAX_CHOICES = 9;
 const MAX_TEXT = 4_000;
 const MAX_DETAIL = 20_000;
+const MAX_DETAIL_LABEL = 40;
 
 const notifyRequestSchema = boundary.object({
   ui: boundary.optional(boundary.enumeration('options', 'approve', 'ask', 'info')),
@@ -26,6 +27,7 @@ const notifyRequestSchema = boundary.object({
     recommended: boundary.optional(boundary.boolean),
   }))),
   detail: boundary.optional(boundary.string),
+  detailLabel: boundary.optional(boundary.string),
   suggestions: boundary.optional(boundary.array(boundary.string)),
   action: boundary.optional(boundary.object({ label: boundary.nonEmptyString, url: boundary.nonEmptyString })),
   resume: boundary.optional(boundary.nonEmptyString),
@@ -129,6 +131,9 @@ function parseNotifyRequest(value: PaneCommandValue): NotifyRequest {
     throw invalid(`choices only goes with ui: options, not ${ui}.`);
   }
   if (request.detail !== undefined && ui !== 'approve') throw invalid(`detail only goes with ui: approve, not ${ui}.`);
+  if (request.detailLabel !== undefined && request.detail === undefined) throw invalid('detailLabel needs detail: it labels the button that shows it.');
+  // Code points, as the CLIs count them.
+  if ([...request.detailLabel ?? ''].length > MAX_DETAIL_LABEL) throw invalid(`detailLabel takes up to ${MAX_DETAIL_LABEL} characters.`);
   if (request.suggestions !== undefined && ui !== 'ask') throw invalid(`suggestions only goes with ui: ask, not ${ui}.`);
   if (request.action !== undefined && ui !== 'info') throw invalid(`action only goes with ui: info, not ${ui}.`);
   if (request.action && !/^https?:\/\//i.test(request.action.url)) throw invalid('action.url must be an http(s) URL.');

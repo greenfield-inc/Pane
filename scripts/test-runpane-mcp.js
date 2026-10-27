@@ -209,7 +209,7 @@ test('a new contract command becomes a tool with inputs from its usage and agent
 test('notify types its inputs, so a model passes choices as objects, and needs no yes', () => {
   const { buildMcpTools, buildToolArgv } = require(dist('mcpTools.js'));
   const notify = buildMcpTools().find((tool) => tool.name === 'notify');
-  const { ui, choices, suggestions, action } = notify.inputSchema.properties;
+  const { ui, choices, detailLabel, suggestions, action } = notify.inputSchema.properties;
 
   assert.deepEqual(ui.enum, ['options', 'approve', 'ask', 'info']);
   assert.equal(choices.type, 'array');
@@ -218,12 +218,18 @@ test('notify types its inputs, so a model passes choices as objects, and needs n
   assert.equal(choices.items.type, 'object');
   assert.deepEqual(choices.items.required, ['label']);
   assert.deepEqual(Object.keys(choices.items.properties).sort(), ['detail', 'label', 'recommended']);
+  assert.equal(detailLabel.type, 'string');
+  assert.equal(detailLabel.maxLength, 40);
   assert.equal(suggestions.items.type, 'string');
   assert.deepEqual(action.required, ['label', 'url']);
   assert.ok(!('yes' in notify.inputSchema.properties), 'notify must run without yes');
   assert.deepEqual(
     buildToolArgv(notify, { ui: 'options', title: 'Ship?', choices: [{ label: 'Yes', recommended: true }, { label: 'No' }] }),
     ['notify', '--ui=options', '--title=Ship?', '--choices=[{"label":"Yes","recommended":true},{"label":"No"}]', '--json'],
+  );
+  assert.deepEqual(
+    buildToolArgv(notify, { ui: 'approve', title: 'Drop it?', detail: 'DROP TABLE t;', detailLabel: 'Show the SQL' }),
+    ['notify', '--ui=approve', '--title=Drop it?', '--detail=DROP TABLE t;', '--detail-label=Show the SQL', '--json'],
   );
 });
 

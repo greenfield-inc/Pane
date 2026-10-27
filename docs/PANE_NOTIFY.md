@@ -12,7 +12,7 @@ answer as the tool's result.
 | `ui` | Card | Result |
 | --- | --- | --- |
 | `options` | The question and 1 to 9 `choices` (`{label, detail?, recommended?}`). The strip shows four, then **More**. | `{answer, note?}` |
-| `approve` | Deny and Approve, plus a disclosure with the preformatted `detail`. | `{approved, note?}` |
+| `approve` | Deny and Approve, plus a disclosure with the preformatted `detail`. `detailLabel` names the disclosure (up to 40 characters; default **Show details**). | `{approved, note?}` |
 | `ask` | A text field, with optional `suggestions` as chips above it. | `{answer}` |
 | `info` | One line, with at most one `action` button (`{label, url}`). It returns at once and hides after a few seconds. | `{delivered: "screen" \| "inbox"}` |
 

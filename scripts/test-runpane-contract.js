@@ -5110,6 +5110,13 @@ async function checkNotifyParity() {
           else assert.strictEqual(run.stdout.trim(), line, `${runtime} notify printed the wrong line`);
         }
       }
+      const approval = await withFakeDaemon(paneDir, (frame) => {
+        frames[runtime].push(frame);
+        return { result: { approved: true } };
+      }, () => runCliOnce(runtime, [
+        'notify', '--ui', 'approve', '--title', 'Drop the table?', '--detail', 'DROP TABLE t;', '--detail-label', 'Show the SQL', '--json',
+      ], paneDir, 20_000, outsidePane));
+      assert.deepStrictEqual(JSON.parse(approval.stdout), { approved: true });
       const resumed = await withFakeDaemon(paneDir, (frame) => {
         frames[runtime].push(frame);
         return { result: { approved: true } };
@@ -5130,8 +5137,11 @@ async function checkNotifyParity() {
     returnAfterMs: 50000,
     caller: { paneId: 'session-1', panelId: 'panel-1', cwd: rootDir, agent: 'Cursor' },
   };
-  assert.deepStrictEqual(frames.npm.map((frame) => frame.channel), Array(results.length * 2 + 1).fill('runpane:notify'));
+  assert.deepStrictEqual(frames.npm.map((frame) => frame.channel), Array(results.length * 2 + 2).fill('runpane:notify'));
   assert.deepStrictEqual(frames.npm[0].args, [question]);
+  assert.deepStrictEqual(frames.npm.at(-2).args, [{
+    ui: 'approve', title: 'Drop the table?', detail: 'DROP TABLE t;', detailLabel: 'Show the SQL', caller: { cwd: rootDir },
+  }]);
   assert.deepStrictEqual(frames.npm.at(-1).args, [{ resume: 'n-1', caller: { cwd: rootDir } }]);
   assert.deepStrictEqual(frames.pip.map((frame) => frame.args), frames.npm.map((frame) => frame.args), 'Python and Node notify sent different requests');
 
@@ -5143,6 +5153,9 @@ async function checkNotifyParity() {
     ['title', ['--ui', 'ask'], 'title is required: one line saying what you need.'],
     ['choices', ['--ui', 'ask', '--title', 'x', '--choices', '[{"label":"a"}]'], 'choices is only for ui options; this call is ui ask.'],
     ['detail', ['--ui', 'info', '--title', 'x', '--detail', 'DROP TABLE t;'], 'detail is only for ui approve; this call is ui info.'],
+    ['detailLabel', ['--ui', 'ask', '--title', 'x', '--detail-label', 'Show the SQL'], 'detailLabel is only for ui approve; this call is ui ask.'],
+    ['detailLabel', ['--ui', 'approve', '--title', 'x', '--detail-label', 'Show the SQL'], 'detailLabel names the disclosure that reveals detail, so it needs detail too.'],
+    ['detailLabel', ['--ui', 'approve', '--title', 'x', '--detail', 'DROP TABLE t;', '--detail-label', 'x'.repeat(41)], 'detailLabel takes up to 40 characters; got 41.'],
     ['choices', ['--ui', 'options', '--title', 'x'], undefined],
     ['choices', ['--ui', 'options', '--title', 'x', '--choices', tenChoices], 'choices takes 1 to 9 choices; got 10.'],
     ['choices', ['--ui', 'options', '--title', 'x', '--choices', '{"label":"a"}'], undefined],

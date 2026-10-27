@@ -447,7 +447,7 @@ runpane agents start (--pane <pane-id> | --repo <selector> --name <name> [--base
 runpane agents status (--pane <pane-id>|--panel <panel-id>) [--limit <count>] [--json] [--pane-dir <path>]
 runpane agents send (--pane <pane-id>|--panel <panel-id>) --text <message> [--as-file-pointer] --yes [--json] [--pane-dir <path>]
 runpane report --state <ready|blocked|failed|done> [--pr <number>] [--head <sha>] [--summary <text>|--summary-file <path|->] [--question <text>] [--pane <pane-id> --panel <panel-id>] [--json] [--pane-dir <path>]
-runpane notify --ui <options|approve|ask|info> --title <text> [--context <text>] [--choices <json>] [--detail <text>] [--suggestions <json>] [--action <json>] [--json] [--pane-dir <path>]
+runpane notify --ui <options|approve|ask|info> --title <text> [--context <text>] [--choices <json>] [--detail <text>] [--detail-label <text>] [--suggestions <json>] [--action <json>] [--json] [--pane-dir <path>]
 runpane notify --resume <id> [--json] [--pane-dir <path>]
 runpane inbox [--session <id|name>] [--json] [--pane-dir <path>]
 runpane inbox ack <item-id>... [--session <id|name>] [--json] [--pane-dir <path>]
@@ -637,6 +637,7 @@ These flags are consumed by local daemon-control commands:
 --context <text>
 --choices <json>
 --detail <text>
+--detail-label <text>
 --suggestions <json>
 --action <json>
 --json

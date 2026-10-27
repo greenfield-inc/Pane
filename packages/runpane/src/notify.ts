@@ -23,6 +23,7 @@ interface NotifyRequest {
   context?: string;
   choices?: NotifyChoice[];
   detail?: string;
+  detailLabel?: string;
   suggestions?: string[];
   action?: NotifyAction;
   resume?: string;
@@ -39,8 +40,9 @@ type NotifyResult =
 
 const UIS: readonly NotifyUi[] = ['options', 'approve', 'ask', 'info'];
 const MAX_CHOICES = 9;
+const MAX_DETAIL_LABEL = 40;
 /** Each optional field and the one ui it belongs to. */
-const FIELD_UI = [['choices', 'options'], ['detail', 'approve'], ['suggestions', 'ask'], ['action', 'info']] as const;
+const FIELD_UI = [['choices', 'options'], ['detail', 'approve'], ['detailLabel', 'approve'], ['suggestions', 'ask'], ['action', 'info']] as const;
 const CHOICES_EXPECTED = 'choices must be a JSON array of choices, such as [{"label":"Ship it","recommended":true},{"label":"Wait"}].';
 const SUGGESTIONS_EXPECTED = 'suggestions must be a JSON array of strings, such as ["main","release"].';
 const ACTION_EXPECTED = 'action must be a JSON object with a non-empty "label" and "url", such as {"label":"Open PR","url":"https://github.com/org/repo/pull/1"}.';
@@ -77,6 +79,7 @@ function buildNotifyRequest(parsed: ParsedArgs, env: NodeJS.ProcessEnv, cwd: str
     context: parsed.notifyContext,
     choices: parsed.notifyChoices,
     detail: parsed.notifyDetail,
+    detailLabel: parsed.notifyDetailLabel,
     suggestions: parsed.notifySuggestions,
     action: parsed.notifyAction,
   };
@@ -108,11 +111,18 @@ function buildNotifyRequest(parsed: ParsedArgs, env: NodeJS.ProcessEnv, cwd: str
   if (ui === 'options' && given.choices === undefined) {
     throw invalid('choices', 'choices is required with ui options: 1 to 9 choices, such as [{"label":"Ship it"},{"label":"Wait"}].');
   }
+  if (given.detailLabel !== undefined) {
+    if (given.detail === undefined) throw invalid('detailLabel', 'detailLabel names the disclosure that reveals detail, so it needs detail too.');
+    // Counts characters as Python does, so both wrappers accept the same labels.
+    const length = [...given.detailLabel].length;
+    if (length > MAX_DETAIL_LABEL) throw invalid('detailLabel', `detailLabel takes up to ${MAX_DETAIL_LABEL} characters; got ${length}.`);
+  }
 
   const request: NotifyRequest = { ui, title: given.title, ...timing, caller };
   if (given.context !== undefined) request.context = given.context;
   if (given.choices !== undefined) request.choices = parseChoices(given.choices);
   if (given.detail !== undefined) request.detail = given.detail;
+  if (given.detailLabel !== undefined) request.detailLabel = given.detailLabel;
   if (given.suggestions !== undefined) request.suggestions = parseSuggestions(given.suggestions);
   if (given.action !== undefined) request.action = decodeOr(parseJson(given.action), actionSchema, invalid('action', ACTION_EXPECTED));
   return request;

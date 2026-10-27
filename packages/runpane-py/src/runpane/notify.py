@@ -12,8 +12,9 @@ from .daemon_client import PaneDaemonClientError, invoke_daemon
 
 UIS = ["options", "approve", "ask", "info"]
 MAX_CHOICES = 9
+MAX_DETAIL_LABEL = 40
 # Each optional field and the one ui it belongs to.
-FIELD_UI = [("choices", "options"), ("detail", "approve"), ("suggestions", "ask"), ("action", "info")]
+FIELD_UI = [("choices", "options"), ("detail", "approve"), ("detailLabel", "approve"), ("suggestions", "ask"), ("action", "info")]
 CHOICES_EXPECTED = 'choices must be a JSON array of choices, such as [{"label":"Ship it","recommended":true},{"label":"Wait"}].'
 SUGGESTIONS_EXPECTED = 'suggestions must be a JSON array of strings, such as ["main","release"].'
 ACTION_EXPECTED = 'action must be a JSON object with a non-empty "label" and "url", such as {"label":"Open PR","url":"https://github.com/org/repo/pull/1"}.'
@@ -42,6 +43,7 @@ def build_notify_request(parsed: Any, env: Mapping[str, str], cwd: str) -> Dict[
         "context": parsed.notify_context,
         "choices": parsed.notify_choices,
         "detail": parsed.notify_detail,
+        "detailLabel": parsed.notify_detail_label,
         "suggestions": parsed.notify_suggestions,
         "action": parsed.notify_action,
     }
@@ -73,6 +75,11 @@ def build_notify_request(parsed: Any, env: Mapping[str, str], cwd: str) -> Dict[
             raise invalid(field, f"{field} is only for ui {owner}; this call is ui {ui}.")
     if ui == "options" and given["choices"] is None:
         raise invalid("choices", 'choices is required with ui options: 1 to 9 choices, such as [{"label":"Ship it"},{"label":"Wait"}].')
+    if given["detailLabel"] is not None:
+        if given["detail"] is None:
+            raise invalid("detailLabel", "detailLabel names the disclosure that reveals detail, so it needs detail too.")
+        if len(given["detailLabel"]) > MAX_DETAIL_LABEL:
+            raise invalid("detailLabel", f"detailLabel takes up to {MAX_DETAIL_LABEL} characters; got {len(given['detailLabel'])}.")
 
     request: Dict[str, Any] = {"ui": ui, "title": given["title"], **timing, "caller": caller}
     if given["context"] is not None:
@@ -81,6 +88,8 @@ def build_notify_request(parsed: Any, env: Mapping[str, str], cwd: str) -> Dict[
         request["choices"] = parse_choices(given["choices"])
     if given["detail"] is not None:
         request["detail"] = given["detail"]
+    if given["detailLabel"] is not None:
+        request["detailLabel"] = given["detailLabel"]
     if given["suggestions"] is not None:
         request["suggestions"] = parse_suggestions(given["suggestions"])
     if given["action"] is not None:
