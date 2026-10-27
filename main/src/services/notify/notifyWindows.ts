@@ -72,7 +72,10 @@ export class NotifyWindows {
   }
 
   closeRound(): void {
-    if (this.round && !this.round.isDestroyed() && this.round.isVisible()) this.round.hide();
+    if (!this.round || this.round.isDestroyed() || !this.round.isVisible()) return;
+    this.round.hide();
+    // A macOS panel window doesn't emit 'hide', so the strip would stay away until the next change.
+    this.options.onRoundClosed();
   }
 
   isRoundOpen(): boolean {

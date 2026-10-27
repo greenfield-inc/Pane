@@ -102,7 +102,8 @@ export function NotifyWindow({ view, startId }: { view: 'strip' | 'round'; start
       ref={rootRef}
       style={{ padding: SHADOW_PADDING }}
       className={cn(
-        'fixed inset-0 flex flex-col',
+        // Cards keep their natural height so the window can grow to fit them instead of clipping.
+        'fixed inset-0 flex flex-col [&>*]:shrink-0',
         view === 'round' ? 'items-center justify-start'
           : cn(atTop ? 'justify-start' : 'justify-end', position === 'bottom-center' ? 'items-center' : 'items-end'),
       )}
