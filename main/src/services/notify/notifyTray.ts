@@ -10,6 +10,8 @@ export interface NotifyTrayState {
   settings: NotifySettings;
   waiting: NotifyItem[];
   paused: boolean;
+  /** False on native Wayland, where Show outside Pane can't work. */
+  showOutsideSupported: boolean;
 }
 
 export interface NotifyTrayActions {
@@ -55,7 +57,7 @@ export class NotifyTray {
     this.dotted = null;
   }
 
-  private menu({ settings, waiting, paused }: NotifyTrayState): MenuItemConstructorOptions[] {
+  private menu({ settings, waiting, paused, showOutsideSupported }: NotifyTrayState): MenuItemConstructorOptions[] {
     const count = waiting.length;
     const questions: MenuItemConstructorOptions[] = waiting.slice(0, MENU_QUESTION_LIMIT).map(item => ({
       label: `${truncate(item.title, 48)} · ${item.source.name}`,
@@ -68,7 +70,10 @@ export class NotifyTray {
         : { label: 'Nothing waiting', enabled: false },
       ...questions,
       { type: 'separator' },
-      { label: 'Show outside Pane', type: 'checkbox', checked: settings.showOutsidePane, click: (menuItem) => this.actions.setShowOutsidePane(menuItem.checked) },
+      {
+        label: 'Show outside Pane', type: 'checkbox', checked: settings.showOutsidePane && showOutsideSupported, enabled: showOutsideSupported,
+        click: (menuItem) => this.actions.setShowOutsidePane(menuItem.checked),
+      },
       paused
         ? { label: 'Resume notifications', click: () => this.actions.resume() }
         : { label: 'Pause for 1 hour', click: () => this.actions.pause() },

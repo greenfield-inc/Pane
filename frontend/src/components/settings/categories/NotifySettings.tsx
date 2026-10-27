@@ -157,7 +157,7 @@ export function NotifySettings({ persistence }: { persistence: SettingsPersisten
         <SettingRow
           settingId="notify-shortcut"
           label="Answer-all shortcut"
-          description="Works from any app."
+          description={showOutsideSupported ? 'Works from any app.' : 'Works while Pane is in front. Wayland desktops may not pass it to Pane from other apps.'}
           saveState={shortcutRegistered || off
             ? persistence.saveStates['notify-shortcut']
             : { state: 'error', message: `Another app is using ${shortcutText}, so it can't open Answer all. Choose a different shortcut.` }}

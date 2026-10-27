@@ -324,6 +324,7 @@ export class NotifyService {
       settings: snapshot.settings,
       waiting: this.queue.waitingItems(),
       paused: snapshot.pausedUntil !== null,
+      showOutsideSupported: snapshot.showOutsideSupported,
     });
     this.sendToMainWindow('notify:snapshot', snapshot);
     for (const contents of this.windows.webContents()) contents.send('notify:snapshot', snapshot);

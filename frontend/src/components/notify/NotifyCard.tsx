@@ -353,6 +353,50 @@ function QueueSegments({ queue }: { queue: NotifyQueuePosition }) {
 
 // --- The question card ---
 
+/**
+ * Keys for the card the person is acting on: the pointer is over it, or (the floating strip) it
+ * was clicked and its window has the keyboard. Runs before the page's own handlers, such as a
+ * terminal's, and ignores keys typed into the card's fields and chords with modifiers.
+ */
+function useCardKeys(rootRef: React.RefObject<HTMLDivElement | null>, floating: boolean, onKey: (key: string) => boolean): void {
+  const handler = useRef(onKey);
+  handler.current = onKey;
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    // Only a pointer moved onto the card counts: a card that appears under a resting pointer
+    // must not catch what the person is typing elsewhere.
+    let hovering = false;
+    // The floating strip: clicked, and its window still has the keyboard.
+    let clicked = false;
+    const enter = () => { hovering = true; };
+    const leave = () => { hovering = false; };
+    const press = () => { clicked = floating; };
+    const blur = () => { clicked = false; };
+    const keydown = (event: KeyboardEvent) => {
+      if (!hovering && !clicked) return;
+      if (event.metaKey || event.ctrlKey || event.altKey || event.isComposing || event.repeat) return;
+      const target = event.target;
+      if (target instanceof HTMLElement && root.contains(target) && target.closest('input, textarea')) return;
+      if (!handler.current(event.key)) return;
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    root.addEventListener('pointermove', enter);
+    root.addEventListener('pointerleave', leave);
+    root.addEventListener('pointerdown', press);
+    window.addEventListener('blur', blur);
+    window.addEventListener('keydown', keydown, true);
+    return () => {
+      root.removeEventListener('pointermove', enter);
+      root.removeEventListener('pointerleave', leave);
+      root.removeEventListener('pointerdown', press);
+      window.removeEventListener('blur', blur);
+      window.removeEventListener('keydown', keydown, true);
+    };
+  }, [rootRef, floating]);
+}
+
 function recommendedIndex(choices: NotifyChoice[]): number {
   return choices.findIndex((choice) => choice.recommended);
 }
@@ -391,6 +435,38 @@ function QuestionCard({
     const trimmed = value.trim();
     if (trimmed) onCommand({ type: 'answer', id: item.id, answer: { text: trimmed } });
   };
+  const rootRef = useRef<HTMLDivElement>(null);
+  // The card's own keys, matching the key on each chip.
+  useCardKeys(rootRef, Boolean(onFieldFocusRequest), (key) => {
+    const index = /^[1-9]$/.test(key) ? Number(key) - 1 : -1;
+    if (item.ui === 'options') {
+      if (index >= 0 && index < (expanded ? choices.length : Math.min(choices.length, COMPACT_CHOICE_LIMIT))) {
+        if (expanded) setSelected(index);
+        else answerChoice(index);
+        return true;
+      }
+      if (key === 'Enter' && expanded && selected >= 0) {
+        answerChoice(selected, note);
+        return true;
+      }
+      return false;
+    }
+    if (item.ui === 'approve' && !denying) {
+      if (key.toLowerCase() === 'y') answerApproval(true);
+      else if (key.toLowerCase() === 'n') setDenying(true);
+      else return false;
+      return true;
+    }
+    if (item.ui === 'ask') {
+      const suggestion = index >= 0 ? item.suggestions?.[index] : undefined;
+      if (suggestion === undefined && key.length !== 1) return false;
+      // A suggestion fills the field, as a click does; any other character starts the answer.
+      setText((current) => suggestion ?? current + key);
+      setTextFocusKey((focusKey) => focusKey + 1);
+      return true;
+    }
+    return false;
+  });
   const openInPane = item.source.paneId && form === 'strip'
     ? () => onCommand({ type: 'open-in-pane', id: item.id })
     : undefined;
@@ -574,7 +650,14 @@ function QuestionCard({
   }
 
   return (
-    <div className={cardShell(form, narrow, className)} data-testid="notify-card" data-notify-ui={item.ui}>
+    <div
+      ref={rootRef}
+      className={cardShell(form, narrow, className)}
+      data-testid="notify-card"
+      data-notify-ui={item.ui}
+      // The floating strip takes the keyboard only when clicked, so typing elsewhere never answers it.
+      onPointerDown={() => void onFieldFocusRequest?.()}
+    >
       <CardHeader item={item} form={form} queue={queue} onCommand={onCommand} menuPlacement={menuPlacement} />
       <div className={cn(titleClass, !(expanded || showDetail) && 'line-clamp-3')} title={item.title}>{item.title}</div>
       {showContext && <div className={contextClass}>{item.context}</div>}

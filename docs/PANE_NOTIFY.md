@@ -68,6 +68,12 @@ Codex panel also expires when that panel sits idle at its prompt for 10 seconds.
   menu lists them and holds Show outside Pane, Pause for 1 hour, Open Notify
   inbox and Notify settings.
 
+**Keys on a card.** With the pointer over a card inside Pane (the in-Pane strip,
+the inbox, a docked card), its keys work: a choice's number answers it, Y
+approves, N starts a denial, and typing starts an ask's answer. The floating
+strip over another app takes keys once you click it, so typing in that app never
+answers by accident. Keys work whatever Pane's keyboard-shortcuts setting says.
+
 ✕ hides a question from the strip; it keeps waiting in the inbox.
 Right-click ✕ to bring it back in 10 minutes, in 1 hour, or when you next
 switch to Pane. Nothing is stored on disk: questions live only while the
@@ -169,10 +175,14 @@ Pane still works: its card shows the folder name and hides Open in Pane.
 
 ## Platforms
 
-macOS, Windows and Linux on X11 show the strip over other apps. On native
-Wayland, Pane can't place a window over other apps, so Show outside Pane is
-unavailable there; the in-Pane strip, the tray icon (GNOME needs the
-AppIndicator extension) and the shortcut still work.
+macOS, Windows and Linux on X11 show the strip over other apps. In a Wayland
+session Pane runs as a native Wayland app and can't place a window over other
+apps, so Show outside Pane is unavailable there (in Settings and the tray menu).
+Questions show in the in-Pane strip and the Notify inbox, with Waiting dots and
+the chime. The tray icon and its dot work; GNOME needs the AppIndicator
+extension, which Ubuntu turns on by default. On GNOME 46 (Ubuntu 24.04), which
+has no global-shortcut portal, ⌃⇧Space doesn't reach Pane from other apps;
+inside Pane it opens Answer all, and so does **Answer all** in the inbox.
 
 The code: `main/src/services/notify/` (queue, windows, tray),
 `main/src/ipc/notify.ts` (including the `notify:remote-snapshot` and
