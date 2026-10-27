@@ -104,6 +104,10 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: AppServices, 
     const agentType = decodeOptionalBoundary(panelManager.getPanel(change.panelId)?.state.customState, panelAgentSchema)?.agentType;
     if (agentType === 'codex') notify.queue.panelStatus(change.panelId, change.state === 'idle');
   });
+  app.on('browser-window-created', (_event, window: BrowserWindow) => {
+    window.on('closed', () => notify.closeFloatingWindowsIfAlone());
+  });
+  for (const window of BrowserWindow.getAllWindows()) window.on('closed', () => notify.closeFloatingWindowsIfAlone());
   app.on('will-quit', () => notify.dispose());
   return notify;
 }

@@ -132,6 +132,16 @@ export class NotifyService {
     if (this.windows.isNotifyWindow(sender)) this.windows.focusStrip();
   }
 
+  /**
+   * Windows and Linux quit when the last window closes. Hidden floating windows still count, so
+   * once only they are left they close too, and Pane quits as it did before Notify.
+   */
+  closeFloatingWindowsIfAlone(): void {
+    if (process.platform === 'darwin') return;
+    const others = BrowserWindow.getAllWindows().filter(window => !window.isDestroyed() && !this.windows.isNotifyWindow(window.webContents));
+    if (others.length === 0) this.windows.destroy();
+  }
+
   dispose(): void {
     this.queue.dispose();
     if (this.shortcut) globalShortcut.unregister(this.shortcut);
