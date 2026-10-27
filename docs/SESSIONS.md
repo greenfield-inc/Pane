@@ -193,8 +193,8 @@ first. A host running an older Pane cannot save an order: the list snaps back
 and the error says to update Pane on that host. Dragging a Session onto the
 workspace still tiles it.
 
-Click a Session row to open its chat, or use **Switch to Session: <name>** in the
-command palette (`⌘⇧P` / `Ctrl+Shift+P`), which also has **New Session**. A Session with associated Panes shows a
+Click a Session row to open its chat, or find it by name in Search (`⌘⇧P` /
+`Ctrl+Shift+P`, or the Search field above **New**), which also has **New Session**. A Session with associated Panes shows a
 chevron that expands or collapses them; a Session without Panes shows none.
 Every Session starts collapsed, including a new one and one that just got its
 first Pane, until you press its chevron. Opening the Session's chat, an agent
@@ -329,7 +329,8 @@ automatic greeting, diagnostic sweep, watcher setup, or continuation of a
 saved next action. Reopening an already-running Session reconnects without
 interrupting work the user has already authorized.
 
-There is one exception, and it happens at most once per Pane data directory.
+There are two exceptions, each at most once per Pane data directory.
+
 The first time the built-in Pane Chat Session launches while Pane has no Panes
 and no repositories (the sample repository the onboarding dialog clones doesn't
 count), Pane sends it one prompt, which says that Pane sent it and why. The
@@ -338,6 +339,14 @@ starts only when you say yes. Pane records the offer in the
 `pane_chat_migrate_offer_sent` user preference once a launch has sent it, so a
 restart or an agent switch never sends it again. See
 [Bring your existing sessions into Pane](#bring-your-existing-sessions-into-pane).
+
+Pane may also offer Pane Chat once, in a card over a Pane, after you have
+created at least two worktree Panes and used Pane on at least three days, if you
+have never created a Session. "Try it" creates a Session named after the Pane's
+repository, whose agent introduces itself, suggests two small tasks from that
+repository, and waits for your answer before starting any Pane. Pane removes
+that opening prompt from the Session once a launch has sent it, so a restart
+never sends it again.
 
 Pane may prepare instruction files and terminal infrastructure at startup;
 that preparation does not require an agent turn. Unattended work and watchers
@@ -1131,7 +1140,7 @@ exactly the old behaviour — switching Sessions replaces the view.
 The `X` on a tile's title row stops tiling that Session; the Session itself,
 its conversation and its panels are untouched, and the layout collapses back
 around the space. The last tile has no close button, since a window with no
-Session in it has nothing to show. The command palette carries the same actions
+Session in it has nothing to show. Search carries the same commands
 for the keyboard: focus the Session left, right, above or below, and stop tiling
 the focused one.
 

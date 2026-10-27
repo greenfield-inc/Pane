@@ -31,6 +31,7 @@ const createSchema = boundary.object({
   agent: boundary.optional(boundary.enumeration('claude', 'codex', 'cursor')),
   launchCommand: boundary.optional(orchestrationTextSchema),
   customResume: boundary.optional(boundary.nullable(customCommandResumeSchema)),
+  openingPrompt: boundary.optional(orchestrationTextSchema),
   profile: boundary.optional(orchestrationTextSchema),
   goal: boundary.optional(orchestrationTextSchema),
   context: boundary.optional(orchestrationTextSchema),
