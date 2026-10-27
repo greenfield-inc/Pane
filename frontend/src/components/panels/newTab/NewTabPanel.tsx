@@ -102,7 +102,7 @@ export const NewTabPicker: React.FC<NewTabPickerProps> = ({ sessionId, projectId
     void updateConfig({ customCommands: customCommands.filter((_, i) => i !== index) }).catch(() => {});
   };
 
-  const rowClass = 'flex h-9 w-full items-center gap-2.5 rounded-md border border-border-primary bg-surface-secondary px-3 text-left text-[13px] text-text-primary hover:bg-surface-hover focus:outline-none focus-visible:border-interactive focus-visible:ring-1 focus-visible:ring-interactive';
+  const rowClass = 'flex h-9 w-full items-center gap-2.5 rounded-md border border-border-primary bg-surface-secondary px-3 text-left text-[13px] text-text-primary hover:bg-surface-hover focus:border-interactive focus:outline-none focus:ring-1 focus:ring-interactive';
   const linkClass = 'text-interactive hover:underline focus:outline-none focus-visible:underline';
 
   return (
