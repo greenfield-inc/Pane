@@ -39,7 +39,9 @@ const MAX_PORT = 65_535;
  * listeners without end: two clients of one host, or two Panes connected to each other.
  */
 const TUNNEL_REGISTRY_DIR = path.join(os.tmpdir(), 'pane-port-tunnels');
+const TUNNEL_REGISTRY_FILE = path.join(TUNNEL_REGISTRY_DIR, `${process.pid}.json`);
 const liveTunnels = new Set<ReadonlyMap<number, PortListener>>();
+let removesRegistryOnExit = false;
 
 export function createPortTunnel(openStream: OpenPortStream): PortTunnel {
   const listeners = new Map<number, PortListener>();
@@ -118,26 +120,30 @@ export function createPortTunnel(openStream: OpenPortStream): PortTunnel {
 
 /** Rewrites this process's registry file, or removes it when no tunnel listens. */
 function recordTunnelListeners(): void {
-  const file = path.join(TUNNEL_REGISTRY_DIR, `${process.pid}.json`);
   const ports = [...liveTunnels].flatMap(listeners => [...listeners.values()].map(listener => listener.localPort));
   try {
     if (ports.length === 0) {
-      fs.rmSync(file, { force: true });
+      fs.rmSync(TUNNEL_REGISTRY_FILE, { force: true });
       return;
     }
     fs.mkdirSync(TUNNEL_REGISTRY_DIR, { recursive: true });
+    if (!removesRegistryOnExit) {
+      removesRegistryOnExit = true;
+      process.once('exit', () => fs.rmSync(TUNNEL_REGISTRY_FILE, { force: true }));
+    }
     // Renamed into place, so a host never reads half a file.
-    const partial = `${file}.${Date.now()}.tmp`;
+    const partial = `${TUNNEL_REGISTRY_FILE}.${Date.now()}.tmp`;
     fs.writeFileSync(partial, JSON.stringify(ports));
-    fs.renameSync(partial, file);
+    fs.renameSync(partial, TUNNEL_REGISTRY_FILE);
   } catch (error) {
     console.warn('[Pane port tunnel] registry_write_failed:', error);
   }
 }
 
 /**
- * The tunnel listeners of every Pane process on this machine, by pid. A crashed process's file
- * stays, which is harmless: a port is left out only when the same pid owns it again.
+ * The tunnel listeners of every Pane process on this machine, by pid. A process removes its file
+ * when it exits. A crashed process's file stays, which is harmless: a port is left out only when
+ * the same pid owns it again.
  */
 export async function readTunnelListeners(): Promise<ReadonlyMap<number, ReadonlySet<number>>> {
   const byPid = new Map<number, Set<number>>();
