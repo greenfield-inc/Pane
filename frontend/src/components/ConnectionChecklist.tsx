@@ -25,7 +25,7 @@ function StatusBadge({ status }: { status: RemoteConnectionCheckRowStatus }) {
     case 'running':
       return <span className={cn(box, 'animate-spin border-interactive border-r-transparent')} aria-hidden="true" />;
     case 'waiting':
-      return <span className={cn(box, 'border-border-primary')} aria-hidden="true" />;
+      return <span className={cn(box, 'border-text-tertiary')} aria-hidden="true" />;
   }
 }
 
@@ -119,14 +119,20 @@ export function ConnectionChecklist({ check, onOpenSettings, onUpdatePane }: Con
   const warned = check.outcome === 'warning';
   const rowAction = (row: RemoteConnectionCheckRow) => row.fix && (row.status === 'failed' || row.status === 'warning') ? (
     // While "Continue to workspace" waits below, the fix is the secondary choice.
-    <Button size="sm" variant={warned ? 'secondary' : 'primary'} onClick={() => runFix(row)}>
+    <Button
+      size="sm"
+      variant={warned ? 'secondary' : 'primary'}
+      // The mockup's small row button; the secondary one gets an edge so it reads as a button on the row's surface.
+      className={cn('h-[22px] px-2 py-0 text-[11px]', warned && 'border border-border-primary bg-surface-primary')}
+      onClick={() => runFix(row)}
+    >
       {copiedStage === row.stage ? 'Copied' : row.fix.label}
     </Button>
   ) : undefined;
 
   const quietLink = 'text-text-secondary hover:text-text-primary hover:underline focus-visible:outline-none focus-visible:underline';
   return (
-    <div className="flex min-w-0 flex-1 items-center justify-center overflow-auto bg-bg-primary p-6">
+    <div className="flex min-w-0 flex-1 items-start justify-center overflow-auto bg-bg-primary px-6 pb-6 pt-[22px]">
       <section aria-label={`Connecting to ${check.hostLabel}`} className="w-[430px] max-w-full rounded-[14px] border border-border-secondary bg-surface-primary px-4 py-3.5 shadow-sm">
         <h2 className="text-sm font-semibold text-text-primary">Connecting to {check.hostLabel}</h2>
         <p className="mb-2.5 mt-1 text-xs text-text-tertiary">over {check.route} · {check.address}</p>

@@ -158,6 +158,17 @@ describe('connection checklist', () => {
     expect(controller.getConnectionState().check).toBeNull();
   });
 
+  it('closes the card of a failed switch when the connected host is chosen again', async () => {
+    const { controller } = createController();
+    const connected = profile(await startHost('2.4.202'));
+    await controller.activateProfile(connected);
+    await waitFor(() => controller.getConnectionState().check?.outcome === 'passed');
+    await expect(controller.activateProfile(profile(await closedPort(), { id: 'other', label: 'other' }))).rejects.toThrow();
+    expect(controller.getConnectionState()).toMatchObject({ status: 'connected', activeProfileId: 'devbox', check: { profileId: 'other', outcome: 'failed' } });
+    await controller.activateProfile(connected);
+    expect(controller.getConnectionState().check).toBeNull();
+  });
+
   it('offers to update this Pane when the host is newer', async () => {
     const { controller } = createController();
     await controller.activateProfile(profile(await startHost('2.4.210')));

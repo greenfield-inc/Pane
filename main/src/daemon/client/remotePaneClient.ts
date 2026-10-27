@@ -930,7 +930,14 @@ export class RemotePaneClientController extends EventEmitter {
     options: { recheck?: boolean } = {},
   ): Promise<RemotePaneConnectionState> {
     const sameProfile = this.activeClient?.isSameProfile(profile) === true;
-    if (sameProfile && this.state.status === 'connected' && !options.recheck) return this.getConnectionState();
+    if (sameProfile && this.state.status === 'connected' && !options.recheck) {
+      // Choosing the connected host again closes a card left by a failed switch to another host.
+      if (this.check && this.check.outcome !== 'running') {
+        this.check = null;
+        this.publishState();
+      }
+      return this.getConnectionState();
+    }
     await this.runProbes(profile);
     const activeClient = this.activeClient;
     if (sameProfile && activeClient && !options.recheck) {
