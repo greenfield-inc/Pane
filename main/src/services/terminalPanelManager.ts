@@ -448,14 +448,14 @@ export class TerminalPanelManager extends EventEmitter {
 
   /**
    * An argument-mode prompt as one literal shell word: its prompt file read by the shell, or the
-   * text quoted for `shellType`. PowerShell, cmd and fish don't read POSIX escapes, so they get
-   * their own quoting. Undefined when the shell cannot take the text literally (cmd).
+   * quoted text. Only POSIX shells pass a quoted word to the agent unchanged: Windows PowerShell
+   * drops embedded `"` when it hands an argument to a native program, and cmd expands `%` and `!`.
+   * Elsewhere this is undefined, and the prompt is typed into the agent once it is ready instead.
    */
   private initialPromptWord(customState: TerminalPanelState, shellType: string | undefined): string | undefined {
     const fileWord = customState.initialInputFile ? promptFileShellWord(customState.initialInputFile) : undefined;
     if (fileWord) return fileWord;
-    const text = customState.initialInput ?? '';
-    return isPosixShell(shellType) ? this.quoteCommandArgument(text) : quoteShellWord(text, shellType);
+    return isPosixShell(shellType) ? this.quoteCommandArgument(customState.initialInput ?? '') : undefined;
   }
 
   /**
