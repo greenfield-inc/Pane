@@ -6,9 +6,11 @@ import { useSessionStore } from '../stores/sessionStore';
 import { useNavigationStore } from '../stores/navigationStore';
 import { Button } from './ui/Button';
 import { CreateSessionDialog } from './CreateSessionDialog';
+import { OPEN_INSPECTOR_EVENT, type InspectorRequest } from './InspectorTabs';
 import { ONBOARDING_OPEN_PROJECT_SCREEN_PREFERENCE, OPEN_PROJECT_SCREEN_SEEN } from './OnboardingDialog';
 import type { Project } from '../types/project';
 import type { Session } from '../types/session';
+import type { FirstStepsState } from '../../../shared/types/onboarding';
 
 /** 'done' once every step ticked, 'hidden' after Hide; the card never returns after either. */
 const FIRST_STEPS_PREFERENCE = 'onboarding_first_steps';
@@ -34,10 +36,6 @@ export interface FirstSteps {
   hide: () => void;
 }
 
-function normalizePath(value: string): string {
-  return value.replace(/[\\/]+$/, '');
-}
-
 /**
  * Home's "Your first steps" for installs that saw the "Open your project"
  * screen. Ticks come from the projects and Panes Pane already has, ignoring
@@ -47,8 +45,8 @@ function normalizePath(value: string): string {
 export function useFirstSteps(projects: Project[] | null): FirstSteps | 'loading' | null {
   const sessions = useSessionStore(state => state.sessions);
   const [gate, setGate] = useState<'loading' | 'active' | 'inactive'>('loading');
-  const [samplePath, setSamplePath] = useState<string | null>(null);
-  const [archived, setArchived] = useState<Array<Project & { sessions: Session[] }> | null>(null);
+  /** Main's answer, with the projects and active Panes it was read for. */
+  const [snapshot, setSnapshot] = useState<(FirstStepsState & { key: string }) | null>(null);
 
   // The first screen writes its "seen" preference after Home mounts, and its close fires project-changed.
   useEffect(() => {
@@ -60,10 +58,6 @@ export function useFirstSteps(projects: Project[] | null): FirstSteps | 'loading
           API.preferences.get(FIRST_STEPS_PREFERENCE),
         ]);
         const active = seen === OPEN_PROJECT_SCREEN_SEEN && state !== 'done' && state !== 'hidden';
-        if (active) {
-          const sample = await window.electronAPI.onboarding.sampleRepoPath();
-          if (!cancelled && sample.success && sample.data) setSamplePath(normalizePath(sample.data));
-        }
         if (!cancelled) setGate(active ? 'active' : 'inactive');
       } catch {
         if (!cancelled) setGate('inactive');
@@ -78,36 +72,37 @@ export function useFirstSteps(projects: Project[] | null): FirstSteps | 'loading
     };
   }, []);
 
+  // Archiving or restoring a Pane changes the active set, so each change rereads main's answer.
+  const key = [
+    (projects ?? []).map(project => project.id).join(','),
+    sessions.filter(session => !session.archived && !session.isMainRepo).map(session => session.id).join(','),
+  ].join('|');
+  const projectsLoaded = projects !== null;
+  useEffect(() => {
+    if (gate !== 'active' || !projectsLoaded) return;
+    let cancelled = false;
+    const settle = (data: FirstStepsState) => {
+      if (!cancelled) setSnapshot({ ...data, key });
+    };
+    // A failed read shows the card without archived Panes; the next change reads again.
+    const unknown = { sampleProjectIds: [], archivedPaneIds: [] };
+    void Promise.resolve()
+      .then(() => window.electronAPI.onboarding.firstSteps())
+      .then(response => settle(response.success && response.data ? response.data : unknown))
+      .catch(() => settle(unknown));
+    return () => { cancelled = true; };
+  }, [gate, projectsLoaded, key]);
+
   const ownProjects = useMemo(
-    () => (projects ?? []).filter(project => normalizePath(project.path) !== samplePath),
-    [projects, samplePath],
+    () => (projects ?? []).filter(project => !snapshot?.sampleProjectIds.includes(project.id)),
+    [projects, snapshot],
   );
   const activePanes = useMemo(() => {
     const ownIds = new Set(ownProjects.map(project => project.id));
     return sessions.filter(session => !session.archived && !session.isMainRepo && session.projectId !== undefined && ownIds.has(session.projectId));
   }, [sessions, ownProjects]);
-
-  // Archiving a Pane removes it from the session store, so a change in the active set reloads the archived ones.
-  const activePaneKey = activePanes.map(session => session.id).join('\n');
-  useEffect(() => {
-    if (gate !== 'active') return;
-    let cancelled = false;
-    void API.sessions.getArchivedWithProjects()
-      .then(response => {
-        if (cancelled || !response.success || !response.data) return;
-        // SAFETY: sessions:get-archived-with-projects answers projects that each carry their archived Panes.
-        setArchived(response.data as Array<Project & { sessions: Session[] }>);
-      })
-      .catch(() => {
-        if (!cancelled) setArchived(current => current ?? []);
-      });
-    return () => { cancelled = true; };
-  }, [gate, activePaneKey]);
-
-  const archivedCount = useMemo(() => {
-    const ownIds = new Set(ownProjects.map(project => project.id));
-    return (archived ?? []).filter(project => ownIds.has(project.id)).reduce((sum, project) => sum + project.sessions.length, 0);
-  }, [archived, ownProjects]);
+  // A restored Pane can be active here before the next read drops it from the archived ones.
+  const archivedCount = (snapshot?.archivedPaneIds ?? []).filter(id => !activePanes.some(session => session.id === id)).length;
 
   const paneCount = activePanes.length + archivedCount;
   const steps: FirstStep[] = [
@@ -116,12 +111,15 @@ export function useFirstSteps(projects: Project[] | null): FirstSteps | 'loading
     { id: 'start-second-pane', label: 'Start a second agent in parallel', action: 'Start', done: paneCount >= 2 },
     { id: 'archive-pane', label: 'Review the diff, then archive the Pane', action: 'Review', done: archivedCount >= 1 },
   ];
-  const isReady = gate === 'active' && projects !== null && archived !== null;
-  const allDone = isReady && steps.every(step => step.done);
+  const isReady = gate === 'active' && projects !== null && snapshot !== null;
+  // Only an answer read for the current projects and Panes can finish the card.
+  const allDone = isReady && snapshot.key === key && steps.every(step => step.done);
 
+  // A failed write keeps the card gone until Home next mounts, which checks and saves again.
   const finish = useCallback((state: 'done' | 'hidden') => {
     setGate('inactive');
-    void API.preferences.set(FIRST_STEPS_PREFERENCE, state).catch(() => setGate('active'));
+    void API.preferences.set(FIRST_STEPS_PREFERENCE, state)
+      .catch(error => console.error('[FirstSteps] Failed to save the first steps preference:', error));
   }, []);
 
   useEffect(() => {
@@ -155,6 +153,8 @@ export function FirstStepsCard({ firstSteps }: { firstSteps: FirstSteps }) {
     } else if (id === 'archive-pane') {
       if (!newestPane) return;
       navigateToSessions();
+      const request: InspectorRequest = { sessionId: newestPane.id, tab: 'changes' };
+      window.dispatchEvent(new CustomEvent(OPEN_INSPECTOR_EVENT, { detail: request }));
       setActiveSession(newestPane.id).catch(() => {});
     } else if (newestProject) {
       setCreateFor(newestProject);

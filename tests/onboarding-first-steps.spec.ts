@@ -27,6 +27,8 @@ type MockBridgeWindow = Window & {
     setProjects(projects: JsonObject[]): void;
     addSession(session: JsonObject): void;
     archiveSession(sessionId: string): void;
+    restoreSession(sessionId: string): void;
+    getInvokeCalls(channel: string): Array<{ args: unknown[] }>;
   };
 };
 
@@ -100,17 +102,30 @@ test('steps tick from projects and Panes, ignoring the sample repo, until the ca
   expect(await preferences(page)).toMatchObject({ onboarding_first_steps: 'done' });
 });
 
-test('Review opens the newest Pane', async ({ page }) => {
+const panels = (sessionId: string): JsonObject[] => ['terminal', 'diff'].map((type, position) => ({
+  id: `${sessionId}-${type}`, sessionId, type, title: type, state: { isActive: type === 'terminal', hasBeenViewed: true },
+  metadata: { createdAt: new Date(0).toISOString(), lastActiveAt: new Date(0).toISOString(), position, permanent: true },
+}));
+
+test('Review opens the newest Pane on Changes, even with the inspector hidden on Files', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('pane-detail-panel-visible', 'false');
+    localStorage.setItem('pane-inspector-tab', 'files');
+  });
   await openHome(page, {
     initialPreferences: SEEN_FIRST_SCREEN,
     initialProjects: [ACME],
     initialSessions: [pane('fix-login-redirect', 2, 20), pane('dark-mode-toggle', 2, 10)],
+    initialPanels: [...panels('fix-login-redirect'), ...panels('dark-mode-toggle')],
   });
 
   await card(page).getByRole('button', { name: 'Review' }).click();
 
   await expect(card(page)).toBeHidden();
-  await expect(page.getByText('dark-mode-toggle').first()).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'Changes' })).toHaveAttribute('aria-selected', 'true');
+  // SAFETY: installElectronApiMock installs this test bridge before navigation.
+  await expect.poll(() => page.evaluate(() => (window as MockBridgeWindow).__paneTestElectronMock.getInvokeCalls('sessions:set-active-session').at(-1)?.args[0]))
+    .toBe('dark-mode-toggle');
 });
 
 test('an archive before the second Pane ticks the last step and keeps the second next', async ({ page }) => {
@@ -124,6 +139,22 @@ test('an archive before the second Pane ticks the last step and keeps the second
   await archivePane(page, 'fix-login-redirect');
 
   await expectSteps(page, [`${STEPS[0]} (done)`, `${STEPS[1]} (done)`, `${STEPS[2]}Start`, `${STEPS[3]} (done)`]);
+});
+
+test('restoring the only archived Pane does not finish the card', async ({ page }) => {
+  await openHome(page, {
+    initialPreferences: SEEN_FIRST_SCREEN,
+    initialProjects: [ACME],
+    initialSessions: [pane('fix-login-redirect', 2, 20)],
+  });
+  await archivePane(page, 'fix-login-redirect');
+  await expectSteps(page, [`${STEPS[0]} (done)`, `${STEPS[1]} (done)`, `${STEPS[2]}Start`, `${STEPS[3]} (done)`]);
+
+  // SAFETY: installElectronApiMock installs this test bridge before navigation.
+  await page.evaluate(id => (window as MockBridgeWindow).__paneTestElectronMock.restoreSession(id), 'fix-login-redirect');
+
+  await expectSteps(page, [`${STEPS[0]} (done)`, `${STEPS[1]} (done)`, `${STEPS[2]}Start`, STEPS[3]]);
+  expect(await preferences(page)).not.toHaveProperty('onboarding_first_steps');
 });
 
 test('a user with only the sample repo still has Open your project next', async ({ page }) => {

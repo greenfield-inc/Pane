@@ -627,7 +627,11 @@ function App() {
    * The once-only Support Pane dialog, for users past the first screen with GitHub CLI ready.
    * It shows on a later launch or right after the first archive, whichever comes first.
    */
-  const showSupportPromptOnce = useCallback(async (source: 'future_launch' | 'first_archive', isCancelled: () => boolean) => {
+  const showSupportPromptOnce = useCallback(async (
+    source: 'future_launch' | 'first_archive',
+    isCancelled: () => boolean,
+    isTrigger: () => Promise<boolean> = async () => true,
+  ) => {
     if (!window.electronAPI?.preferences || !window.electronAPI?.onboarding?.detectEnvironment) {
       return;
     }
@@ -638,6 +642,7 @@ function App() {
 
       const promptResult = await API.preferences.get(ONBOARDING_GH_PROMPT_SHOWN_PREFERENCE);
       if (promptResult === 'true') return;
+      if (!(await isTrigger())) return;
 
       const envResult = await window.electronAPI.onboarding.detectEnvironment();
       if (!envResult.success || envResult.data?.ghReady !== true) return;
@@ -653,16 +658,16 @@ function App() {
     }
   }, []);
 
-  // A Pane leaves the session store when it is archived or deleted; only the first archive counts.
+  // A Pane leaves the session store when it is archived or deleted; only the first archive outside the sample repo counts.
   useEffect(() => {
     const handleSessionDeleted = (event: CustomEvent<{ id?: string }>) => {
       const id = event.detail?.id;
       if (!id) return;
-      void API.sessions.getArchivedWithProjects().then(response => {
-        // SAFETY: sessions:get-archived-with-projects answers projects that each carry their archived Panes.
-        const archived = response.success && response.data ? (response.data as Array<{ sessions: Array<{ id: string }> }>).flatMap(project => project.sessions) : [];
-        if (archived.length === 1 && archived[0].id === id) void showSupportPromptOnce('first_archive', () => false);
-      }).catch(() => {});
+      void showSupportPromptOnce('first_archive', () => false, async () => {
+        const response = await window.electronAPI.onboarding.firstSteps();
+        const archived = response.success ? response.data?.archivedPaneIds ?? [] : [];
+        return archived.length === 1 && archived[0] === id;
+      });
     };
     // SAFETY: useIPCEvents dispatches session-deleted as a CustomEvent carrying { id }.
     window.addEventListener('session-deleted', handleSessionDeleted as EventListener);
