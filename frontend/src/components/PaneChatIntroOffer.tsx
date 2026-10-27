@@ -16,8 +16,9 @@ const EVENT = 'pane_chat_intro_offer';
 
 type Phase =
   | { kind: 'waiting' }
-  | { kind: 'offer' }
-  | { kind: 'tried'; sessionId: string }
+  | { kind: 'offer'; promptAtLaunch: boolean }
+  /** `pastePrompt` is the first message for the user to paste when the launch couldn't carry it. */
+  | { kind: 'tried'; sessionId: string; pastePrompt?: string }
   | { kind: 'gone' };
 
 function openingPrompt(repository: { name: string; path: string }): string {
@@ -59,7 +60,10 @@ export function PaneChatIntroOffer({ suppressed }: { suppressed: boolean }) {
     let cancelled = false;
     const check = () => {
       void API.paneChat.introOffer().then(response => {
-        if (!cancelled && response.success && response.data?.eligible) setPhase(current => current.kind === 'waiting' ? { kind: 'offer' } : current);
+        const data = response.success ? response.data : undefined;
+        if (!cancelled && data?.eligible) {
+          setPhase(current => current.kind === 'waiting' ? { kind: 'offer', promptAtLaunch: data.openingPromptAtLaunch } : current);
+        }
       }).catch(() => undefined);
     };
     check();
@@ -90,6 +94,8 @@ export function PaneChatIntroOffer({ suppressed }: { suppressed: boolean }) {
     setPhase({ kind: 'gone' });
   }, []);
 
+  const [copied, setCopied] = useState(false);
+  const promptAtLaunch = phase.kind === 'offer' && phase.promptAtLaunch;
   const tryIt = useCallback(async () => {
     if (!activeSession) return;
     setCreating(true);
@@ -99,15 +105,17 @@ export function PaneChatIntroOffer({ suppressed }: { suppressed: boolean }) {
       const repository = projects.success ? projects.data?.find((project: Project) => project.id === activeSession.projectId) : undefined;
       if (!repository) throw new Error('this Pane\'s repository is not in Pane');
       const name = `${repository.name} tasks`;
+      const prompt = openingPrompt(repository);
       const open = (sessionId: string) => {
         capture(EVENT, { action: 'try' });
-        setPhase({ kind: 'tried', sessionId });
+        setPhase({ kind: 'tried', sessionId, pastePrompt: promptAtLaunch ? undefined : prompt });
         void setActiveSession(null);
         navigateToPaneChat();
       };
       try {
         // The built-in launch with no custom resume, so the agent always receives the opening prompt.
-        const view = await createSession({ name, launchCommand: '', customResume: null, openingPrompt: openingPrompt(repository) });
+        // A shell that can't carry it on the launch command line gets none; the user pastes it instead.
+        const view = await createSession({ name, launchCommand: '', customResume: null, openingPrompt: promptAtLaunch ? prompt : undefined });
         open(view.session.id);
       } catch (cause) {
         // Main can save the Session and then fail to open its tab; open the saved one instead of creating another.
@@ -123,7 +131,11 @@ export function PaneChatIntroOffer({ suppressed }: { suppressed: boolean }) {
     } finally {
       setCreating(false);
     }
-  }, [activeSession, createSession, navigateToPaneChat, refreshSessions, selectSession, setActiveSession]);
+  }, [activeSession, createSession, navigateToPaneChat, promptAtLaunch, refreshSessions, selectSession, setActiveSession]);
+
+  const copyPrompt = useCallback((text: string) => {
+    void navigator.clipboard.writeText(text).then(() => setCopied(true)).catch(() => undefined);
+  }, []);
 
   if (!offerVisible && !followUpVisible) return null;
 
@@ -146,6 +158,12 @@ export function PaneChatIntroOffer({ suppressed }: { suppressed: boolean }) {
       </div>
       <p className="mt-1.5 text-sm text-text-secondary">Pane Chat starts Panes, sends tasks and checks on them for you.</p>
       {error && offerVisible && <p role="alert" className="mt-2 text-sm text-status-error [overflow-wrap:anywhere]">{error}</p>}
+      {followUpVisible && phase.pastePrompt && (
+        <div className="mt-3">
+          <p className="text-sm text-text-secondary">Paste its first message into Pane Chat to start.</p>
+          <Button size="sm" className="mt-2 min-w-[10rem]" onClick={() => copyPrompt(phase.pastePrompt ?? '')}>{copied ? 'Copied' : 'Copy first message'}</Button>
+        </div>
+      )}
       {offerVisible && (
         <div className="mt-3 flex gap-2">
           <Button size="sm" onClick={() => void tryIt()} loading={creating} loadingText="Starting…">Try it</Button>

@@ -888,7 +888,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           return success(createPaneChatState());
         },
         // No smoke test sees the one-time Pane Chat offer.
-        introOffer: () => success({ eligible: false }),
+        introOffer: () => success({ eligible: false, openingPromptAtLaunch: true }),
       }),
       sshHosts: namespace({
         list: () => {

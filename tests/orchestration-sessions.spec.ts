@@ -3395,13 +3395,13 @@ declare global {
   }
 }
 
-async function installPaneChatOfferFixture(page: Page, firstCreateFails: CreateFailure = 'before-save'): Promise<void> {
+async function installPaneChatOfferFixture(page: Page, firstCreateFails: CreateFailure | null = 'before-save', openingPromptAtLaunch = true): Promise<void> {
   await installSessionsFixture(page, [], [paneFixture('pane-copy', 'checkout-copy'), paneFixture('pane-timeouts', 'api-timeouts')]);
-  await page.addInitScript((failure: CreateFailure) => {
+  await page.addInitScript(({ failure, promptAtLaunch }: { failure: CreateFailure | null; promptAtLaunch: boolean }) => {
     const api = window.electronAPI;
     const record: PaneChatOfferRecord = { preferences: [], creates: [], firstCreateFails: failure };
     window.__paneChatOffer = record;
-    api.paneChat.introOffer = async () => ({ success: true, data: { eligible: true } });
+    api.paneChat.introOffer = async () => ({ success: true, data: { eligible: true, openingPromptAtLaunch: promptAtLaunch } });
     const setPreference = api.preferences.set;
     api.preferences.set = async (key: string, value: string) => {
       record.preferences.push(`${key}=${value}`);
@@ -3416,7 +3416,7 @@ async function installPaneChatOfferFixture(page: Page, firstCreateFails: CreateF
       if (failure === 'after-save') await create(input);
       return { success: false, error: failure === 'after-save' ? 'Session saved but could not be opened' : 'Session storage is busy' };
     };
-  }, firstCreateFails);
+  }, { failure: firstCreateFails, promptAtLaunch: openingPromptAtLaunch });
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
   await dismissStartupDialogs(page);
   await page.getByRole('button', { name: 'Expand project Pane fixtures', exact: true }).click();
@@ -3469,6 +3469,22 @@ test('the Pane Chat offer opens a Session that was saved before its tab failed, 
   expect((await paneChatOfferRecord(page)).creates).toEqual([
     { name: 'Pane fixtures tasks', launchCommand: '', openingPrompt: expect.stringMatching(/^Pane sent this once/) },
   ]);
+});
+
+test('where the launch shell can\'t carry the opening prompt, Try it offers it to paste instead', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await installPaneChatOfferFixture(page, null, false);
+  const offer = page.getByRole('region', { name: 'Pane Chat offer' });
+  await page.getByRole('button', { name: 'checkout-copy', exact: true }).click();
+  await offer.getByRole('button', { name: 'Try it', exact: true }).click();
+
+  await expect(page.getByRole('heading', { name: 'Pane fixtures tasks', exact: true })).toBeAttached({ timeout: 10_000 });
+  expect((await paneChatOfferRecord(page)).creates).toEqual([{ name: 'Pane fixtures tasks', launchCommand: '', openingPrompt: undefined }]);
+  await expect(offer).toContainText('Paste its first message into Pane Chat to start.');
+  await offer.getByRole('button', { name: 'Copy first message', exact: true }).click();
+  await expect(offer.getByRole('button', { name: 'Copied', exact: true })).toBeVisible();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toMatch(/^Pane sent this once, to introduce Pane Chat .* repository Pane fixtures \(\/tmp\/pane-fixtures\)\./);
 });
 
 test('Not now hides the Pane Chat offer for the rest of the run', async ({ page }) => {
