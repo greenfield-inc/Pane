@@ -1026,14 +1026,20 @@ export class OrchestrationSessionManager extends EventEmitter {
    */
   private firstPrompt(record: OrchestrationSessionRecord): string | undefined {
     if (record.customResume) return undefined;
-    // SAFETY: Session-owned terminal panels persist TerminalPanelState as their custom state.
-    const current = panelManager.getPanel(record.panelIds[record.agent])?.state.customState as TerminalPanelState | undefined;
     if (record.openingPrompt) {
-      if (current?.initialInput !== record.openingPrompt || !current.initialInputSentAt) return record.openingPrompt;
+      // The prompt belongs to the Session: once any of its agent tabs sent it, no tab sends it again.
+      const sent = Object.values(record.panelIds).some(panelId => {
+        // SAFETY: Session-owned terminal panels persist TerminalPanelState as their custom state.
+        const state = panelManager.getPanel(panelId)?.state.customState as TerminalPanelState | undefined;
+        return state?.initialInput === record.openingPrompt && Boolean(state?.initialInputSentAt);
+      });
+      if (!sent) return record.openingPrompt;
       this.forgetOpeningPrompt(record);
       return undefined;
     }
     if (record.id !== LEGACY_ORCHESTRATION_SESSION_ID) return undefined;
+    // SAFETY: Session-owned terminal panels persist TerminalPanelState as their custom state.
+    const current = panelManager.getPanel(record.panelIds[record.agent])?.state.customState as TerminalPanelState | undefined;
     return paneChatFirstPrompt(record.agent, current, this.skillCacheManager?.paneChatSkillsRoot);
   }
 

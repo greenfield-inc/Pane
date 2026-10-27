@@ -366,6 +366,21 @@ describe('OrchestrationSessionManager', () => {
     expect((await restart().getView({ sessionId: saved.id })).panel.state.customState?.initialInput).toBeUndefined();
   });
 
+  it('does not send the opening prompt again to another agent after one agent sent it', async () => {
+    const fixture = createFixture();
+    const openingPrompt = 'Pane sent this once, to introduce Pane Chat. Suggest two tasks.';
+    const created = await fixture.manager.create({ name: 'Switch after intro', agent: 'claude', openingPrompt });
+    await panelManager.updatePanel(created.panel.id, { state: { ...created.panel.state, customState: {
+      ...created.panel.state.customState, initialInputSentAt: '2026-10-26T12:00:00.000Z', hasClaudeSessionId: true,
+    } } });
+
+    const switched = await fixture.manager.setAgent({ sessionId: created.session.id }, 'codex');
+
+    expect(switched.agent).toBe('codex');
+    expect(switched.panel.state.customState?.initialInput).toBeUndefined();
+    expect(switched.session.openingPrompt).toBeUndefined();
+  });
+
   it('refuses an opening prompt for a resumed conversation or one that does not say Pane sends it once', async () => {
     const fixture = createFixture();
     await expect(fixture.manager.create({ name: 'Resumed', agent: 'claude', resume: '5d0c7a1e-2b9f-4e3a-8c61-0f7d2e4b9a35', openingPrompt: 'Pane sent this once, hello' }))
