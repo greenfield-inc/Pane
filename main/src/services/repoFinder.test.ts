@@ -134,4 +134,12 @@ describe('checkRepoFolder', () => {
     expect(error).toMatchObject({ code: 'ONBOARDING_NOT_A_REPO', message: "That folder isn't a Git repo." });
     expect(existsSync(path.join(folder, '.git'))).toBe(false);
   });
+
+  it('refuses a plain folder inside a repo at home, such as dotfiles', async () => {
+    git(home, ['init', '-q']);
+    const folder = path.join(home, 'Documents');
+    mkdirSync(folder);
+
+    await expect(checkRepoFolder(folder, home)).rejects.toMatchObject({ code: 'ONBOARDING_NOT_A_REPO' });
+  });
 });

@@ -323,10 +323,16 @@ done`);
 }
 
 /** Checks a folder the user picked; throws a PaneError when it is not a Git repo. */
-export async function checkRepoFolder(folder: string): Promise<{ name: string; path: string }> {
+export async function checkRepoFolder(folder: string, home = os.homedir()): Promise<{ name: string; path: string }> {
   const registration = resolveProjectRegistration(folder);
   try {
     await validateProjectRepository(registration);
+    // A dotfiles repo at home would make every folder under it pass.
+    if (!registration.wsl_enabled) {
+      const topLevel = (await registration.commandRunner.execFile('git', ['rev-parse', '--show-toplevel'], registration.path, { silent: true })).stdout.trim();
+      const key = (value: string) => process.platform === 'linux' ? path.resolve(value) : path.resolve(value).toLowerCase();
+      if (key(topLevel) === key(home)) throw new Error('home repo');
+    }
   } catch {
     throw new PaneError(
       'ONBOARDING_NOT_A_REPO',
