@@ -22,6 +22,7 @@ export function agentSetupTerminal(
   if (!command) return undefined;
   return {
     title: kind === 'sign-in' ? `Sign in to ${preset.title}` : `Install ${preset.title}`,
-    initialState: { customState: { stagedCommand: command } },
+    // launchCommand outlives the one-shot stagedCommand, so the tab stays a working tab and never becomes the dock.
+    initialState: { customState: { stagedCommand: command, launchCommand: command } },
   };
 }
