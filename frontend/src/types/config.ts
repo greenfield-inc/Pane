@@ -1,3 +1,4 @@
+import type { NotifySettings } from '../../../shared/types/notify';
 import type { CustomCommandResume } from '../../../shared/types/customCommandResume';
 import type { RemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
 import type { PaneChatAgent } from '../../../shared/types/paneChat';
@@ -107,6 +108,8 @@ export interface AppConfig {
     playSound: boolean;
     enabled: boolean;
   };
+  // Pane Notify settings; absent fields take DEFAULT_NOTIFY_SETTINGS
+  notify?: Partial<NotifySettings>;
   // Dev mode for debugging
   devMode?: boolean;
   // Additional paths to add to PATH environment variable
@@ -217,6 +220,7 @@ export interface UpdateConfigRequest {
   highContrast?: boolean;
   uiScale?: number;
   notifications?: AppConfig['notifications'];
+  notify?: Partial<NotifySettings>;
   devMode?: boolean;
   additionalPaths?: string[];
   sessionCreationPreferences?: AppConfig['sessionCreationPreferences'];

@@ -39,6 +39,7 @@ import type {
 } from '../../../shared/types/panels';
 import type { JsonValue } from '../../../shared/validation/boundaryDecoder';
 import type { PanelAgentStatusEvent } from '../../../shared/types/agentStatus';
+import type { NotifyCommand, NotifySnapshot, NotifyWindowSize } from '../../../shared/types/notify';
 import type { DiffManifest, DiffScope, FileDiffRequest, FileDiffResult } from '../../../shared/types/gitDiff';
 import type { AgentUsageSnapshot } from '../../../shared/types/agentUsage';
 import type { PaneChatAgent, PaneChatState } from '../../../shared/types/paneChat';
@@ -675,6 +676,21 @@ interface ElectronAPI {
   // Whether Dictate's watcher shows Pane's alerts, so Pane skips its desktop notification
   notifications: {
     isHandedOff: () => Promise<boolean>;
+  };
+
+  // Pane Notify: the queue's snapshot and the actions every surface sends back
+  notify: {
+    getSnapshot: () => Promise<NotifySnapshot>;
+    run: (command: NotifyCommand) => Promise<void>;
+    onSnapshot: (callback: (snapshot: NotifySnapshot) => void) => () => void;
+    /** A new question arrived and Sound is on; the main window plays the beep. */
+    onChime: (callback: () => void) => () => void;
+    /** Main asks the main window to show the Notify inbox or Settings → Notify. */
+    onNavigate: (callback: (target: 'inbox' | 'settings') => void) => () => void;
+    /** Floating windows only: fit the window to its card. */
+    resizeWindow: (size: NotifyWindowSize) => void;
+    /** Floating strip only: take key focus so a text or note field can be typed in. */
+    focusWindow: () => Promise<void>;
   };
 
   // Window state queries (invoke, not event subscriptions)

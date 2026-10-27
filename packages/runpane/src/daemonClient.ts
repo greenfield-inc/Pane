@@ -50,6 +50,7 @@ export interface PaneDaemonEndpoint {
 
 interface InvokeOptions {
   paneDir?: string;
+  /** `Infinity` waits as long as the call takes, for requests that wait on a person. */
   timeoutMs?: number;
   eventInclude?: string[] | null;
 }
@@ -196,7 +197,7 @@ export async function invokeRemoteDaemon<T>(
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ channel, args }),
-      signal: AbortSignal.timeout(timeoutMs),
+      signal: Number.isFinite(timeoutMs) ? AbortSignal.timeout(timeoutMs) : undefined,
     });
   } catch (error) {
     if (error instanceof Error && error.name === 'TimeoutError') {
@@ -274,14 +275,17 @@ export async function invokeDaemon<T>(
       resolve(outcome.result);
     };
 
-    timeoutRef.current = setTimeout(() => {
-      settle({ error: new PaneDaemonClientError(
-        `Timed out waiting for Pane daemon response on ${endpoint.path}. Pane may be busy, and it may still finish ${channel}.`,
-        'ERR_RUNPANE_DAEMON_TIMEOUT',
-        false,
-        `Check whether the command took effect before running it again; if Pane stays unresponsive, run ${doctorCommand(options.paneDir)}.`,
-      ) });
-    }, options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+    const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    if (Number.isFinite(timeoutMs)) {
+      timeoutRef.current = setTimeout(() => {
+        settle({ error: new PaneDaemonClientError(
+          `Timed out waiting for Pane daemon response on ${endpoint.path}. Pane may be busy, and it may still finish ${channel}.`,
+          'ERR_RUNPANE_DAEMON_TIMEOUT',
+          false,
+          `Check whether the command took effect before running it again; if Pane stays unresponsive, run ${doctorCommand(options.paneDir)}.`,
+        ) });
+      }, timeoutMs);
+    }
 
     let sent = false;
     socket.once('connect', () => {

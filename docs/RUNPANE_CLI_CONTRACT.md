@@ -246,6 +246,8 @@ The desktop app treats one consumer name specially: while a `runpane watch --as 
 
 `runpane report --state ready|blocked|failed|done` is how a worker hands back its result. It stores the latest report on the worker's panel (state, `--pr`, `--head`, up to 16,000 characters of `--summary` or `--summary-file`, and the `--question` a blocked worker needs answered), journals an opt-in `agent.report` watch event (`REPORT <pane-name> pane <pane-id> panel <panel-id> ready pr#747 fc5dce9`; it skips the `--min-interval` batch), records it as Session activity, and shows it in `agents status`, `panels list`, and `sessions overview` (each panel's own report as `panes[].panels[].report`, with a JSON object summary as `data`, and the Pane's newest as `panes[].report`). Inside a Pane terminal the panel comes from `PANE_SESSION_ID` and `PANE_PANEL_ID`; elsewhere pass `--pane` and `--panel`. It prints how many watches were waiting for the report and received it (`Delivered to 1 waiting watcher.`, `liveWatchers` in JSON). Zero means nobody was waiting right now, not that the report is lost: it stays on the panel, and a named-cursor watch receives it when it next waits.
 
+`runpane notify` asks the person a question, or tells them something, on screen wherever they are, and prints their answer: `--ui options` with 1 to 9 `--choices` returns `{answer, note?}` (the chosen label), `--ui approve` returns `{approved, note?}`, `--ui ask` returns `{answer}`, and `--ui info` returns `{delivered: "screen"|"inbox"}` at once. The call waits with no time limit. A `{waiting: true, id, next}` result means the wait should continue with `runpane notify --resume <id>`; `runpane mcp` asks for it only for clients whose tool calls time out. When Pane is not running or Notify is off it prints `{unavailable, next}` and exits 0, so the agent asks in its terminal. Invalid input fails before anything is shown, with a message naming the field. It needs no `--yes`: asking the person is the point.
+
 Work sent to an agent through `runpane panels create`, `panes create` (with a prompt), or `panels submit` records that the sender waits for a `runpane report`, unless the request says `--source user` (Pane's own UI does) or `--no-expect-report`; `--expect-report` asks for one anyway. Typing into a tab never does. If the agent then goes ready or its panel exits without a report, Pane journals one opt-in `agent.report.missing` entry (`MISSING REPORT <pane-name> pane <pane-id> panel <panel-id> ready|exited`) whose `lastOutput` is the agent's last transcript reply or last screen lines; it skips the `--min-interval` batch and reaches only watchers that list it in `--kinds`. While the agent's screen shows background work (Claude's `· 1 shell` footer or a running background subagent row, Codex's `background terminal running` line), Pane waits and looks again every 10 seconds instead. `agent.blocked` entries carry `screenLines`, the prompt the agent waits on, and are journalled once a panel has stayed blocked for 2 seconds.
 
 The orchestrator guide prescribes submit without `--wait`, followed by its named watch; use one completion consumer. As an optional CLI route, `--wait` on `runpane panels submit`, `panels create`, and `panes create` turns the expected report on and blocks on that panel until the first `agent.report`, `agent.report.missing`, `agent.blocked`, `panel.exited`, or `pane.gone`, then prints one line of JSON (`dispatchWaitResult`): the outcome, ids, the report's state, summary, `summaryPath`, PR and head, `screenLines` for a prompt, or `lastOutput` for a missing report, never the transcript. It exits 0 for a report, 3 missing, 4 blocked, 5 exited or gone, and 124 when `--timeout <duration>` passes. It follows the journal from the position the daemon took before delivering the work, so nothing that happens right after delivery is missed. It reuses watch --until-event and returns indeterminate (exit 6) if the journal epoch changes or retained history is lost; inspect the panel and inbox before retrying. Report-expected dispatches are serialized per panel and refused before writing while a result or missing-output collection is outstanding. Answer a blocked panel with panels submit --no-expect-report, then watch for the original result.
@@ -339,6 +341,7 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `agents status`: Check on an agent: whether it is working, ready, blocked, or idle, plus its current screen.
 - `agents send`: Send a follow-up message to an agent and confirm it was submitted.
 - `report`: Hand back a worker's structured report: state, PR, head commit, summary, and the question when blocked.
+- `notify`: Ask the person a question, or tell them something, wherever they are, and get their answer back.
 - `inbox`: List the reports, missing reports, and on-screen questions a Session's orchestrator has not acknowledged.
 - `inbox ack`: Clear Session inbox items once they are handled.
 - `sessions list`: List durable named orchestration Sessions.
@@ -444,6 +447,8 @@ runpane agents start (--pane <pane-id> | --repo <selector> --name <name> [--base
 runpane agents status (--pane <pane-id>|--panel <panel-id>) [--limit <count>] [--json] [--pane-dir <path>]
 runpane agents send (--pane <pane-id>|--panel <panel-id>) --text <message> [--as-file-pointer] --yes [--json] [--pane-dir <path>]
 runpane report --state <ready|blocked|failed|done> [--pr <number>] [--head <sha>] [--summary <text>|--summary-file <path|->] [--question <text>] [--pane <pane-id> --panel <panel-id>] [--json] [--pane-dir <path>]
+runpane notify --ui <options|approve|ask|info> --title <text> [--context <text>] [--choices <json>] [--detail <text>] [--detail-label <text>] [--suggestions <json>] [--action <json>] [--json] [--pane-dir <path>]
+runpane notify --resume <id> [--json] [--pane-dir <path>]
 runpane inbox [--session <id|name>] [--json] [--pane-dir <path>]
 runpane inbox ack <item-id>... [--session <id|name>] [--json] [--pane-dir <path>]
 runpane inbox ack --all --session <id|name> [--json] [--pane-dir <path>]
@@ -521,6 +526,7 @@ Brief tools:
 - `panels wait`: Wait for terminal initialized, ready, idle, or text state with compact output.
 - `panels resume`: Restart a stopped terminal panel in place (same panel id), resuming its agent's conversation.
 - `watch`: Wait for workspace events from the durable daemon journal; follow uses conservative cadence and quiet expiry by default.
+- `notify`: Ask the person a question wherever they are and wait for the answer; prefer it to asking in the terminal.
 
 Managed AGENTS.md block body:
 
@@ -530,6 +536,8 @@ Managed AGENTS.md block body:
 This repository is used with [Pane](https://runpane.com). Drive it with the CLI or the `pane` MCP server.
 
 1 feature = 1 worktree = 1 branch = 1 Pane; reviews, audits, fixes and QA for it are tabs in that Pane. Open later agents with `runpane panels create --pane <id>` (MCP: `panels_create` or `agents_start` with `pane`), not a new Pane.
+
+When you need the person (a choice, an approval, a short answer), call the `notify` MCP tool (or `runpane notify`) instead of asking in the terminal. If it returns `waiting`, call it again with `resume`; if it returns `unavailable`, ask in the terminal.
 
 CLI: `npm i -g runpane` (or `npx --yes runpane@latest`), then `runpane doctor --json`. Full command reference: `runpane agent-context --json`.
 
@@ -625,6 +633,13 @@ These flags are consumed by local daemon-control commands:
 --model <model>
 --effort <level>
 --epoch <epoch>
+--ui <options|approve|ask|info>
+--context <text>
+--choices <json>
+--detail <text>
+--detail-label <text>
+--suggestions <json>
+--action <json>
 --json
 --wait-ready
 --no-focus

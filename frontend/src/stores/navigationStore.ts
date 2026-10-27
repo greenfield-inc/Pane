@@ -68,6 +68,7 @@ interface NavigationState {
   navigateToMissionControl: () => void;
   navigateToSsh: () => void;
   navigateToLoops: () => void;
+  navigateToNotify: () => void;
 }
 
 export const useNavigationStore = create<NavigationState>((set, get) => ({
@@ -188,6 +189,12 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
   // Loops span every project, so the page clears the project scope.
   navigateToLoops: () => set({
     activeView: 'loops',
+    activeProjectId: null
+  }),
+
+  // The Notify inbox lists questions from every project.
+  navigateToNotify: () => set({
+    activeView: 'notify',
     activeProjectId: null
   }),
 }));
