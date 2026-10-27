@@ -84,7 +84,7 @@ for (const theme of ['light', 'dark']) {
     await expect.poll(() => paneCreates(page)).toEqual([{
       repo: { id: project.id },
       focus: true,
-      panes: [{ name: 'add-dark-mode', baseBranch: 'origin/main', tool: { agent: 'claude', initialInput: 'Add a dark mode toggle' } }],
+      panes: [{ name: 'add-dark-mode', baseBranch: 'origin/main', pinned: false, tool: { agent: 'claude', initialInput: 'Add a dark mode toggle' } }],
     }]);
     await expect(page.getByRole('button', { name: 'add-dark-mode', exact: true })).toHaveAttribute('aria-current', 'page');
   });
@@ -98,6 +98,17 @@ test('while readiness is checked, chips show names only and nothing can start', 
     await expect(card(page).getByRole('radio', { name })).toBeDisabled();
   }
   await expect(card(page).getByRole('button', { name: 'Start in a new Pane' })).toBeDisabled();
+});
+
+test('an agent stays selected while the card stays open past the readiness cache', async ({ page }) => {
+  await page.clock.install();
+  await openProject(page);
+  await expect(page.getByRole('radio', { name: 'Claude Code' })).toHaveAttribute('aria-checked', 'true');
+
+  await page.clock.fastForward(61_000);
+  await card(page).getByRole('textbox', { name: 'Task' }).fill('Add a dark mode toggle');
+  await expect(page.getByRole('radio', { name: 'Claude Code' })).toHaveAttribute('aria-checked', 'true');
+  await expect(card(page).getByRole('button', { name: 'Start in a new Pane' })).toBeEnabled();
 });
 
 test('with a Pane in the project the card invites a parallel task and counts working agents', async ({ page }, testInfo) => {

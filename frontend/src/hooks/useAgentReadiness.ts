@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { create } from 'zustand';
 import type { AgentLaunchPresetId } from '../../../shared/constants/agentLaunchPresets';
 import { boundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
@@ -21,13 +21,13 @@ const doctorResultSchema = boundary.object({
   signIn: boundary.optional(boundary.enumeration('signed-in', 'signed-out', 'unknown')),
 });
 
-interface ProjectReadiness {
+interface CheckedReadiness {
+  readiness: AgentReadiness;
   checkedAt: number;
-  agents: Partial<Record<AgentLaunchPresetId, AgentReadiness>>;
 }
 
 interface ReadinessState {
-  byProject: Record<number, ProjectReadiness>;
+  byProject: Record<number, Partial<Record<AgentLaunchPresetId, CheckedReadiness>>>;
 }
 
 const useReadinessStore = create<ReadinessState>(() => ({ byProject: {} }));
@@ -60,18 +60,17 @@ function refreshAgentReadiness(projectId: number, agents: readonly AgentLaunchPr
       inFlight.set(key, check);
     }
     const readiness = await check;
-    useReadinessStore.setState(state => {
-      const previous = state.byProject[projectId];
-      const fresh = previous && Date.now() - previous.checkedAt < CACHE_TTL_MS ? previous.agents : {};
-      return { byProject: { ...state.byProject, [projectId]: { checkedAt: Date.now(), agents: { ...fresh, [agent]: readiness } } } };
-    });
+    useReadinessStore.setState(state => ({
+      byProject: { ...state.byProject, [projectId]: { ...state.byProject[projectId], [agent]: { readiness, checkedAt: Date.now() } } },
+    }));
   })).then(() => undefined);
 }
 
 /**
- * Each agent's readiness for a project. A cached answer under a minute old
- * shows at once; every mount also re-checks in the background, so a sign-in
- * finished meanwhile shows within one check.
+ * Each agent's readiness for a project. An answer under a minute old when the
+ * caller mounts shows at once, and stays while it is mounted; every mount also
+ * re-checks in the background, so a sign-in finished meanwhile shows within
+ * one check.
  */
 export function useAgentReadiness(
   projectId: number | undefined,
@@ -79,6 +78,11 @@ export function useAgentReadiness(
 ): AgentReadinessByAgent {
   const cached = useReadinessStore(state => (projectId === undefined ? undefined : state.byProject[projectId]));
   const agentKey = agents.join(',');
+  // Answers count from a minute before this caller mounted, so a long-open card or picker never falls back to checking.
+  const mountKey = `${projectId}:${agentKey}`;
+  const [mount, setMount] = useState(() => ({ key: mountKey, freshSince: Date.now() - CACHE_TTL_MS }));
+  if (mount.key !== mountKey) setMount({ key: mountKey, freshSince: Date.now() - CACHE_TTL_MS });
+  const { freshSince } = mount;
 
   useEffect(() => {
     if (projectId === undefined || agentKey === '') return;
@@ -86,11 +90,9 @@ export function useAgentReadiness(
     void refreshAgentReadiness(projectId, agentKey.split(',') as AgentLaunchPresetId[]);
   }, [projectId, agentKey]);
 
-  const fresh = cached && Date.now() - cached.checkedAt < CACHE_TTL_MS ? cached.agents : {};
-  return {
-    claude: fresh.claude ?? 'checking',
-    codex: fresh.codex ?? 'checking',
-    cursor: fresh.cursor ?? 'checking',
-    opencode: fresh.opencode ?? 'checking',
+  const answer = (agent: AgentLaunchPresetId): AgentReadiness => {
+    const checked = cached?.[agent];
+    return checked && checked.checkedAt >= freshSince ? checked.readiness : 'checking';
   };
+  return { claude: answer('claude'), codex: answer('codex'), cursor: answer('cursor'), opencode: answer('opencode') };
 }
