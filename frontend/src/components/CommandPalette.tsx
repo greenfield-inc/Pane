@@ -15,7 +15,11 @@ import { useOrchestrationSessionStore } from '../stores/orchestrationSessionStor
 import { useNavigationStore } from '../stores/navigationStore';
 import { useConfigStore } from '../stores/configStore';
 import { showActionError } from '../stores/errorStore';
-import { useSessionAgentDisplayStatus } from '../hooks/useAgentStatus';
+import { usePanelStore } from '../stores/panelStore';
+import type { PanelStore } from '../types/panelStore';
+import { rollupAgentState, toAgentDisplayStatus } from '../utils/agentStatus';
+import { afterLeavingSettings } from '../utils/settingsExit';
+import type { AgentDisplayStatus, AgentState } from '../../../shared/types/agentStatus';
 import { formatKeyDisplay } from '../utils/hotkeyUtils';
 import { formatTimeAgo } from '../utils/timestampUtils';
 import { API } from '../utils/api';
@@ -54,14 +58,16 @@ const TYPE_LABEL = {
   command: 'Command',
 } satisfies Record<SearchItem['kind'], string>;
 
+// Rows rendered at first, and added each time the list scrolls near its end.
+const RENDER_STEP = 100;
+const NO_STATUS: Record<string, AgentState> = {};
+const NO_SESSIONS: Record<string, string> = {};
+const NO_UNVIEWED: PanelStore['unviewedCompletedActivity'] = {};
+
 // Commands that open a dialog wait for the launcher to finish closing, so focus lands in the dialog.
 const AFTER_CLOSE_MS = 50;
 
-// Settings covers the whole window, so a navigation from Search asks it to close.
-const leaveSettings = () => window.dispatchEvent(new Event('leave-settings'));
-
 function openPane(paneId: string) {
-  leaveSettings();
   useNavigationStore.getState().setSidebarNavigationScope('repositories');
   const selected = useSessionStore.getState().setActiveSession(paneId);
   useNavigationStore.getState().navigateToSessions();
@@ -69,7 +75,6 @@ function openPane(paneId: string) {
 }
 
 function openSession(sessionId: string) {
-  leaveSettings();
   void useSessionStore.getState().setActiveSession(null);
   useNavigationStore.getState().navigateToPaneChat();
   // The store owns selection errors and surfaces them in the sidebar.
@@ -90,7 +95,7 @@ function actionsFor(item: SearchItem, context: { onNewPane: (projectId: number) 
     case 'pane': {
       const { pane, prUrl } = item;
       return [
-        { id: 'open', label: 'Open Pane', icon: SquareArrowOutUpRight, run: () => void openPane(pane.id) },
+        { id: 'open', label: 'Open Pane', icon: SquareArrowOutUpRight, run: () => afterLeavingSettings(() => void openPane(pane.id)) },
         ...(context.isRemote ? [] : [{
           id: 'ide', label: 'Open in IDE', icon: Code,
           run: () => void reportFailure('Could not open the IDE', API.sessions.openIDE(pane.id)),
@@ -110,10 +115,10 @@ function actionsFor(item: SearchItem, context: { onNewPane: (projectId: number) 
         {
           id: 'archive', label: 'Archive', icon: Archive,
           // The Archive Pane command asks its usual confirmation for the open Pane.
-          run: () => void openPane(pane.id).then(() => setTimeout(() => {
+          run: () => afterLeavingSettings(() => void openPane(pane.id).then(() => setTimeout(() => {
             const archive = useHotkeyStore.getState().hotkeys.get('archive-active-session');
             if (archive && (!archive.enabled || archive.enabled())) archive.action();
-          }, AFTER_CLOSE_MS)),
+          }, AFTER_CLOSE_MS))),
         },
       ];
     }
@@ -121,7 +126,7 @@ function actionsFor(item: SearchItem, context: { onNewPane: (projectId: number) 
       const { session } = item;
       const fail = (title: string) => (cause: unknown) => showActionError(title, cause);
       return [
-        { id: 'open', label: 'Open Session', icon: SquareArrowOutUpRight, run: () => openSession(session.id) },
+        { id: 'open', label: 'Open Session', icon: SquareArrowOutUpRight, run: () => afterLeavingSettings(() => openSession(session.id)) },
         {
           id: 'pin', label: session.isPinned ? 'Unpin' : 'Pin', icon: session.isPinned ? PinOff : Pin,
           run: () => void setOrchestrationSessionPinned(session.id, !session.isPinned).catch(fail('Could not pin or unpin the Session')),
@@ -135,8 +140,8 @@ function actionsFor(item: SearchItem, context: { onNewPane: (projectId: number) 
     case 'project': {
       const { project } = item;
       return [
-        { id: 'open', label: 'Open Project', icon: SquareArrowOutUpRight, run: () => { leaveSettings(); useNavigationStore.getState().navigateToProject(project.id); } },
-        { id: 'new-pane', label: 'New Pane here', icon: Plus, run: () => { leaveSettings(); setTimeout(() => context.onNewPane(project.id), AFTER_CLOSE_MS); } },
+        { id: 'open', label: 'Open Project', icon: SquareArrowOutUpRight, run: () => afterLeavingSettings(() => useNavigationStore.getState().navigateToProject(project.id)) },
+        { id: 'new-pane', label: 'New Pane here', icon: Plus, run: () => afterLeavingSettings(() => setTimeout(() => context.onNewPane(project.id), AFTER_CLOSE_MS)) },
       ];
     }
     case 'command':
@@ -149,9 +154,10 @@ function actionsFor(item: SearchItem, context: { onNewPane: (projectId: number) 
 export function CommandPalette({ isOpen, onClose, projects, onNewPane }: CommandPaletteProps) {
   const [query, setQuery] = useState('');
   const [chosenFilter, setChosenFilter] = useState<SearchFilter>('all');
-  const [selection, setSelection] = useState({ view: '', index: 0 });
-  // The row whose ⌘K Actions are showing, and the text filtering them.
-  const [actionsItem, setActionsItem] = useState<SearchItem | null>(null);
+  const [selection, setSelection] = useState({ view: '', key: '', index: 0 });
+  const [renderLimit, setRenderLimit] = useState({ view: '', count: RENDER_STEP });
+  // The row whose ⌘K Actions are showing, by key, and the text filtering them.
+  const [actionsKey, setActionsKey] = useState<string | null>(null);
   const [actionQuery, setActionQuery] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -163,6 +169,14 @@ export function CommandPalette({ isOpen, onClose, projects, onNewPane }: Command
   const selectedSessionId = useOrchestrationSessionStore(s => s.selectedSessionId);
   const hotkeys = useHotkeyStore(s => s.hotkeys);
   const isRemote = useConfigStore(s => s.config?.remoteDaemon?.client.mode === 'remote');
+  // Read only while open, so status updates don't re-render a closed launcher.
+  const agentStatus = usePanelStore(s => isOpen ? s.agentStatus : NO_STATUS);
+  const agentStatusSession = usePanelStore(s => isOpen ? s.agentStatusSession : NO_SESSIONS);
+  const unviewed = usePanelStore(s => isOpen ? s.unviewedCompletedActivity : NO_UNVIEWED);
+  const needsAttention = useMemo(
+    () => panesNeedingAttention(agentStatus, agentStatusSession, unviewed),
+    [agentStatus, agentStatusSession, unviewed],
+  );
 
   // Rebuilt when the launcher opens or its sources change, never per keystroke.
   const items = useMemo(() => isOpen
@@ -177,6 +191,10 @@ export function CommandPalette({ isOpen, onClose, projects, onNewPane }: Command
     : [],
   // eslint-disable-next-line react-hooks/exhaustive-deps -- getAll reads the hotkeys registry
   [isOpen, panes, sessions, projects, hotkeys, activePaneId, selectedSessionId]);
+
+  // Actions read their item from the current sources: a rename or pin shows at once, and a removed item leaves Actions.
+  const itemByKey = useMemo(() => new Map(items.map(item => [item.key, item])), [items]);
+  const actionsItem = actionsKey ? itemByKey.get(actionsKey) ?? null : null;
 
   const results = useMemo(() => {
     const start = performance.now();
@@ -194,9 +212,20 @@ export function CommandPalette({ isOpen, onClose, projects, onNewPane }: Command
   const rows = useMemo(() => buildRows(results.sections, actionsItem ? actions : null), [actions, actionsItem, results.sections]);
   const selectable = useMemo(() => rows.filter((row): row is Exclude<Row, { type: 'header' }> => row.type !== 'header'), [rows]);
   // A selection belongs to the view it was made in, so a new query, type or Actions menu starts at the top.
+  // Within a view it follows its row through live updates, and falls back to the nearest row if that row goes.
   const view = [query, chosenFilter, actionsItem?.key ?? '', actionQuery].join('\u0000');
-  const selectedIndex = selection.view === view ? selection.index : 0;
-  const setSelectedIndex = (index: number) => setSelection({ view, index });
+  const keptIndex = selection.view === view ? selectable.findIndex(row => row.key === selection.key) : -1;
+  const selectedIndex = keptIndex >= 0 ? keptIndex
+    : selection.view === view ? Math.min(selection.index, Math.max(0, selectable.length - 1)) : 0;
+  const setSelectedIndex = (index: number) => setSelection({ view, key: selectable[index]?.key ?? '', index });
+  // A long list renders in steps as you scroll or arrow down, so a broad filter stays quick to show.
+  const shownCount = Math.max(renderLimit.view === view ? renderLimit.count : RENDER_STEP, selectedIndex + 1);
+  const firstHidden = rows.findIndex(row => row.type !== 'header' && row.index >= shownCount);
+  const shownRows = firstHidden < 0 ? rows : rows.slice(0, firstHidden);
+  const showMoreOnScroll = (list: HTMLDivElement) => {
+    if (firstHidden < 0 || list.scrollTop + list.clientHeight < list.scrollHeight - 200) return;
+    setRenderLimit({ view, count: shownCount + RENDER_STEP });
+  };
   const selected = selectable[selectedIndex];
   const selectedItem = actionsItem ?? (selected?.type === 'item' ? selected.item : null);
 
@@ -226,7 +255,7 @@ export function CommandPalette({ isOpen, onClose, projects, onNewPane }: Command
 
   const openActions = () => {
     if (selected?.type !== 'item') return;
-    setActionsItem(selected.item);
+    setActionsKey(selected.item.key);
     setActionQuery('');
   };
 
@@ -254,12 +283,12 @@ export function CommandPalette({ isOpen, onClose, projects, onNewPane }: Command
       cycleFilter(e.shiftKey ? -1 : 1);
     } else if (e.key.toLowerCase() === 'k' && (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) {
       e.preventDefault();
-      if (actionsItem) setActionsItem(null);
+      if (actionsItem) setActionsKey(null);
       else openActions();
     } else if (e.key === 'Escape' && actionsItem) {
       // The Modal keeps itself open while Actions show; this Esc goes back to the results.
       e.preventDefault();
-      setActionsItem(null);
+      setActionsKey(null);
     }
   };
 
@@ -349,6 +378,7 @@ export function CommandPalette({ isOpen, onClose, projects, onNewPane }: Command
         aria-label={actionsItem ? 'Actions' : 'Results'}
         // A fixed height keeps the input still while results change: the
         // launcher is centred, so a shrinking list would move it on every key.
+        onScroll={(e) => showMoreOnScroll(e.currentTarget)}
         className="min-h-0 overflow-y-auto py-2"
         style={{ height: 'min(520px, calc(100vh - 220px))' }}
       >
@@ -356,7 +386,7 @@ export function CommandPalette({ isOpen, onClose, projects, onNewPane }: Command
           <div className="px-6 py-10 text-center text-sm text-text-tertiary">
             {actionsItem ? 'No matching actions' : 'No results'}
           </div>
-        ) : rows.map(row => {
+        ) : shownRows.map(row => {
           if (row.type === 'header') {
             return (
               <div key={row.key} className="px-6 pb-1.5 pt-3 text-[13px] text-text-tertiary">
@@ -370,6 +400,8 @@ export function CommandPalette({ isOpen, onClose, projects, onNewPane }: Command
             role: 'option' as const,
             'aria-selected': isSelected,
             'data-selected': isSelected,
+            // Clicking a row keeps the cursor in the input, so typing and arrow keys carry on.
+            onMouseDown: (e: React.MouseEvent) => e.preventDefault(),
             onMouseMove: () => { if (!isSelected) setSelectedIndex(row.index); },
             onClick: () => choose(row),
           };
@@ -404,6 +436,7 @@ export function CommandPalette({ isOpen, onClose, projects, onNewPane }: Command
                 item={row.item}
                 query={results.filter === 'commands' ? query.trimStart().replace(/^>/, '') : query}
                 selected={isSelected}
+                attention={row.item.kind === 'pane' ? needsAttention.get(row.item.pane.id) : undefined}
               />
             </div>
           );
@@ -475,11 +508,32 @@ function Highlighted({ text, query }: { text: string; query: string }) {
   return <>{parts}</>;
 }
 
-// Only a Pane that needs you wears a dot: a blocked agent, or work finished while you were away.
-function PaneAttentionDot({ paneId }: { paneId: string }) {
-  const status = useSessionAgentDisplayStatus(paneId);
-  if (status !== 'blocked' && status !== 'done') return null;
-  return <AgentStatusDot status={status} size="sm" className="absolute -right-1.5 -top-1.5" />;
+type AttentionStatus = Extract<AgentDisplayStatus, 'blocked' | 'done'>;
+
+/**
+ * Panes that need you, in one pass over the tracked panels: a blocked agent,
+ * or work finished while you were away. Rows look their Pane up instead of
+ * each scanning every panel.
+ */
+function panesNeedingAttention(
+  agentStatus: Record<string, AgentState>,
+  agentStatusSession: Record<string, string>,
+  unviewed: PanelStore['unviewedCompletedActivity'],
+): Map<string, AttentionStatus> {
+  const statesByPane = new Map<string, AgentState[]>();
+  for (const [panelId, state] of Object.entries(agentStatus)) {
+    const paneId = agentStatusSession[panelId];
+    if (!paneId) continue;
+    const states = statesByPane.get(paneId);
+    if (states) states.push(state);
+    else statesByPane.set(paneId, [state]);
+  }
+  const attention = new Map<string, AttentionStatus>();
+  for (const [paneId, states] of statesByPane) {
+    const status = toAgentDisplayStatus(rollupAgentState(states), Boolean(unviewed[paneId]));
+    if (status === 'blocked' || status === 'done') attention.set(paneId, status);
+  }
+  return attention;
 }
 
 const shortTimeAgo = (iso: string | undefined) => formatTimeAgo(iso).replace(' ago', '').replace('just now', 'now');
@@ -499,7 +553,7 @@ function metadata(item: SearchItem): ReactNode {
   }
 }
 
-function ResultRow({ item, query, selected }: { item: SearchItem; query: string; selected: boolean }) {
+function ResultRow({ item, query, selected, attention }: { item: SearchItem; query: string; selected: boolean; attention?: AttentionStatus }) {
   const Icon = item.kind === 'pane'
     ? (item.pane.gitStatus?.prNumber ? GitPullRequest : GitBranch)
     : item.kind === 'session' ? MessageSquare : item.kind === 'project' ? FolderGit2 : Command;
@@ -510,7 +564,7 @@ function ResultRow({ item, query, selected }: { item: SearchItem; query: string;
     <>
       <span className="relative flex flex-shrink-0">
         <Icon className="h-4 w-4 text-text-secondary" aria-hidden="true" />
-        {item.kind === 'pane' && <PaneAttentionDot paneId={item.pane.id} />}
+        {attention && <AgentStatusDot status={attention} size="sm" className="absolute -right-1.5 -top-1.5" />}
       </span>
       <span className="flex min-w-0 flex-1 items-baseline gap-2 overflow-hidden">
         <span className="truncate"><Highlighted text={item.title} query={query} /></span>

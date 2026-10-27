@@ -18,6 +18,7 @@ import { UsageView } from './usage/UsageView';
 import { RemoteAccessWorkflows } from './settings/RemoteAccessWorkflows';
 import { useSettingsPersistence } from './settings/useSettingsPersistence';
 import { useDirtySettingsForms } from './settings/useDirtySettingsForms';
+import { registerSettingsExit } from '../utils/settingsExit';
 import { useRemoteAccessSettings } from './settings/useRemoteAccessSettings';
 import { SETTINGS_CATEGORIES, settingDomId } from './settings/catalog';
 import type {
@@ -107,11 +108,12 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
     });
   }, [onClose, requestTransition]);
 
-  // Search opened a Pane, Session or project behind Settings: leave, keeping the unsaved-edits guard.
-  useEffect(() => {
-    window.addEventListener('leave-settings', requestClose);
-    return () => window.removeEventListener('leave-settings', requestClose);
-  }, [requestClose]);
+  // Search leaves Settings before it opens a Pane, Session or project, through the unsaved-edits guard.
+  useEffect(() => registerSettingsExit(then => requestTransition(() => {
+    setRemoteSubview(undefined);
+    onClose();
+    then();
+  })), [onClose, requestTransition]);
 
   const showKeyboardShortcuts = useCallback(() => {
     requestTransition(onShowKeyboardShortcuts);

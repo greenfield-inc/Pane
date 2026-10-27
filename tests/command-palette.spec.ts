@@ -55,15 +55,22 @@ const SESSIONS = [
   orchestrationSession('s-posthog', 'pane posthog', 2880, ['p-posthog']),
 ];
 
-async function boot(page: Page, options: ElectronApiMockOptions & { activePaneId?: string; panes?: JsonObject[] } = {}) {
-  const { activePaneId = 'p-spotlight', panes = PANES, ...mockOptions } = options;
+type AgentStatusFixture = { sessionId: string; panelId: string; state: 'blocked' | 'working' | 'idle' };
+
+async function boot(page: Page, options: ElectronApiMockOptions & { activePaneId?: string; panes?: JsonObject[]; agentStatuses?: AgentStatusFixture[] } = {}) {
+  const { activePaneId = 'p-spotlight', panes = PANES, agentStatuses = [], ...mockOptions } = options;
   await installElectronApiMock(page, {
     initialProjects: PROJECTS,
     initialSessions: panes,
     initialUiState: { expandedProjects: [1, 2, 3, 4] },
     ...mockOptions,
   });
-  await page.addInitScript(({ sessions }) => {
+  await page.addInitScript(({ sessions, agentStatuses }) => {
+    // The host's agent-status baseline, read once at startup.
+    const originalInvoke = window.electronAPI.invoke;
+    window.electronAPI.invoke = (channel: string, ...args: unknown[]) => channel === 'panels:agent-statuses'
+      ? Promise.resolve({ success: true, data: agentStatuses })
+      : originalInvoke(channel, ...args);
     const archived = new Set<string>();
     const view = () => sessions.map(session => ({ ...session, archived: archived.has(session.id) }));
     Object.assign(window.electronAPI, {
@@ -77,7 +84,7 @@ async function boot(page: Page, options: ElectronApiMockOptions & { activePaneId
         },
       },
     });
-  }, { sessions: SESSIONS });
+  }, { sessions: SESSIONS, agentStatuses });
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
   await expect(page.locator('[data-testid="sidebar"]').first()).toBeVisible({ timeout: 20_000 });
   if (activePaneId) {
@@ -175,6 +182,99 @@ test('choosing a Pane from Search leaves Settings', async ({ page }) => {
   await expect(page.locator('[aria-current="page"][aria-label="runpane-update-fix"]').first()).toBeVisible();
 });
 
+type SearchTestMock = {
+  emitSessionUpdated: (session: JsonObject) => void;
+  emitSessionDeleted: (sessionId: string) => void;
+};
+
+type TestWindow = typeof window & { __paneTestElectronMock: SearchTestMock };
+
+const emitSessionUpdated = (page: Page, session: JsonObject) => page.evaluate(next =>
+  // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
+  (window as TestWindow).__paneTestElectronMock.emitSessionUpdated(next), session);
+
+const emitSessionDeleted = (page: Page, sessionId: string) => page.evaluate(id =>
+  // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
+  (window as TestWindow).__paneTestElectronMock.emitSessionDeleted(id), sessionId);
+
+test('New Pane here from dirty Settings waits for the discard choice', async ({ page }) => {
+  await boot(page);
+  await page.keyboard.press('ControlOrMeta+,');
+  await page.getByRole('button', { name: 'Shortcuts', exact: true }).click();
+  await page.getByRole('button', { name: 'Add Shortcut' }).click();
+
+  const newPaneHere = async () => {
+    await openSearch(page);
+    await page.keyboard.type('bloom-mono');
+    await page.keyboard.press('ControlOrMeta+K');
+    await page.keyboard.type('new pane');
+    await page.keyboard.press('Enter');
+  };
+  const discard = page.getByRole('dialog', { name: 'Discard unsaved changes?' });
+  const newPaneDialog = page.getByRole('dialog', { name: /New Pane in bloom-mono/ });
+
+  await newPaneHere();
+  await expect(discard).toBeVisible();
+  await page.waitForTimeout(300);
+  await expect(newPaneDialog).toHaveCount(0);
+  await discard.getByRole('button', { name: 'Stay' }).click();
+  await expect(page.getByTestId('settings-page')).toBeVisible();
+  await expect(newPaneDialog).toHaveCount(0);
+
+  await newPaneHere();
+  await discard.getByRole('button', { name: 'Discard Changes' }).click();
+  await expect(newPaneDialog).toBeVisible();
+  await expect(page.getByTestId('settings-page')).toHaveCount(0);
+});
+
+test('clicking N more keeps typing and arrow keys in Search', async ({ page }) => {
+  await boot(page);
+  const input = await openSearch(page);
+  await page.keyboard.type('pane');
+  await results(page).getByRole('option', { name: /more Panes/ }).click();
+  await expect(page.getByRole('button', { name: 'Panes', pressed: true })).toBeVisible();
+  await expect(input).toBeFocused();
+  await page.keyboard.type('-');
+  await expect(input).toHaveValue('pane-');
+});
+
+test('Actions follow live changes to their Pane', async ({ page }) => {
+  await boot(page);
+  await openSearch(page);
+  await page.keyboard.type('runpane-update-fix');
+  await page.keyboard.press('ControlOrMeta+K');
+  const actions = page.getByRole('listbox', { name: 'Actions' });
+  await expect(actions.getByRole('option', { name: 'Pin', exact: true })).toBeVisible();
+
+  const updated = PANES.find(item => item.id === 'p-update');
+  await emitSessionUpdated(page, { ...updated, name: 'runpane-update-v2', isFavorite: true });
+  await expect(actions.getByRole('option', { name: 'Unpin', exact: true })).toBeVisible();
+  await expect(page.getByText('Actions for runpane-update-v2')).toBeVisible();
+
+  // A Pane removed while its Actions show takes them away, back to the results.
+  await emitSessionDeleted(page, 'p-update');
+  await expect(results(page)).toBeVisible();
+});
+
+test('the selection survives a live removal of its row', async ({ page }) => {
+  await boot(page);
+  const input = await openSearch(page);
+  await page.keyboard.type('pane');
+  await page.keyboard.press('Tab');
+  await page.keyboard.press('ArrowUp');
+  const last = await selectedOption(page).getAttribute('aria-label');
+  const removedName = last?.split(',')[0];
+  const removed = PANES.find(item => item.name === removedName);
+  expect(removed).toBeDefined();
+  await emitSessionDeleted(page, String(removed?.id));
+  await expect(results(page).getByRole('option', { name: new RegExp(`^${removedName},`) })).toHaveCount(0);
+  await expect(selectedOption(page)).toHaveCount(1);
+  await expect(input).toHaveAttribute('aria-activedescendant', /option/);
+  const next = (await selectedOption(page).getAttribute('aria-label'))?.split(',')[0];
+  await page.keyboard.press('Enter');
+  await expect(page.locator(`[aria-current="page"][aria-label="${next}"]`).first()).toBeVisible();
+});
+
 test('Tab cycles the filters, N more opens one, and > selects Commands', async ({ page }) => {
   await boot(page);
   const input = await openSearch(page);
@@ -257,10 +357,16 @@ test('the sidebar field and the rail icon open Search ready to type', async ({ p
   await expect(page.getByRole('combobox', { name: 'Search', exact: true })).toHaveValue('loops');
 });
 
-test('matches and ranks 2,500 items within a frame per keystroke', async ({ page }) => {
+test('2,500 Panes with tracked agents rank within a frame and list quickly', async ({ page }) => {
   const many = Array.from({ length: 2_400 }, (_, index) =>
     pane(`p-bulk-${index}`, `bulk-${['runpane', 'posthog', 'wsl', 'film', 'loops'][index % 5]}-${index}`, 1 + (index % 4), { lastViewedAt: ago(index) }));
-  await boot(page, { panes: [...PANES, ...many] });
+  const panes = [...PANES, ...many];
+  // One tracked agent panel per Pane, a third of them blocked.
+  const agentStatuses = panes.map((item, index): AgentStatusFixture => ({
+    sessionId: String(item.id), panelId: `panel-${String(item.id)}`, state: index % 3 ? 'idle' : 'blocked',
+  }));
+  // Projects stay collapsed: this measures Search, not the sidebar's own rows.
+  await boot(page, { panes, agentStatuses, activePaneId: '', initialUiState: { expandedProjects: [] } });
   const input = await openSearch(page);
   const box = await input.boundingBox();
   await page.evaluate(() => performance.clearMeasures('pane:search'));
@@ -269,6 +375,18 @@ test('matches and ranks 2,500 items within a frame per keystroke', async ({ page
   expect(durations.length).toBeGreaterThan(5);
   expect(Math.max(...durations)).toBeLessThan(16);
   expect(await input.boundingBox()).toEqual(box);
+
+  // The broad Panes view: from the key press to the painted list.
+  await input.fill('b');
+  const listMs = await page.evaluate(() => new Promise<number>(resolve => {
+    const field = document.querySelector<HTMLInputElement>('[role="combobox"][aria-label="Search"]');
+    const start = performance.now();
+    field?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
+    requestAnimationFrame(() => setTimeout(() => resolve(performance.now() - start)));
+  }));
+  await expect(page.getByRole('button', { name: 'Panes', pressed: true })).toBeVisible();
+  console.log(`[search] broad Panes view rendered in ${listMs.toFixed(1)} ms`);
+  expect(listMs).toBeLessThan(250);
 });
 
 test('disabled commands are listed last and do not run', async ({ page }) => {
