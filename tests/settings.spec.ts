@@ -617,6 +617,11 @@ test.describe('Settings', () => {
     await expect(content.getByRole('heading', { name: 'Export your Pane setup' })).toBeVisible();
     expect(await mock()).toMatchObject({ previews: 0, configUpdates: [], projectUpdates: [] });
 
+    // Mounted Run buttons re-resolve their command on this event.
+    await page.evaluate(() => {
+      let updates = 0;
+      window.addEventListener('project-settings-updated', () => { document.body.dataset.projectSettingsUpdates = String(++updates); });
+    });
     await content.getByRole('button', { name: 'Import…' }).click();
     await content.getByRole('checkbox', { name: 'Preferences' }).click();
     await content.getByRole('button', { name: 'Import 2 sections' }).click();
@@ -632,6 +637,7 @@ test.describe('Settings', () => {
     }]);
     expect(applied.preferenceWrites.filter((write) => write.key === 'sidebar_pane_row_layout')).toEqual([]);
     expect(applied.projectUpdates).toEqual([{ projectId: '1', updates: { run_script: 'pnpm dev' } }]);
+    await expect(page.locator('body')).toHaveAttribute('data-project-settings-updates', '1');
   });
 
   test('says why a file was refused and changes nothing', async ({ page }) => {

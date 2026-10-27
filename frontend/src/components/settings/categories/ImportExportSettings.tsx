@@ -219,11 +219,11 @@ function PreviewItems({ section }: { section: SetupPreviewSection }) {
               {item.name}
               {item.field && <span className="text-text-tertiary"> · {item.field}</span>}
               <span className="ml-1.5 inline-flex flex-col align-top">
-                <span className="break-all font-mono text-text-tertiary">
+                <span className="whitespace-pre-wrap break-all font-mono text-text-tertiary">
                   {item.text}
                   {item.keyInUse && <span className="font-sans text-status-warning"> · key in use</span>}
                 </span>
-                {item.was !== undefined && <span className="break-all font-mono text-text-tertiary">was {item.was}</span>}
+                {item.was !== undefined && <span className="whitespace-pre-wrap break-all font-mono text-text-tertiary">was {item.was}</span>}
               </span>
             </>
           )}
@@ -442,7 +442,12 @@ export function ImportExportSettings({ persistence, platform }: { persistence: S
         preview: (file, fileName) => API.setup.preview(file, fileName),
         updateConfig,
         savePreference: (key, value) => savePreference(PREFERENCE_NAME_BY_KEY[key], { [key]: value }),
-        updateProject: (projectId, updates) => API.projects.update(projectId, updates),
+        updateProject: async (projectId, updates) => {
+          const response = await API.projects.update(projectId, updates);
+          // Mounted Run buttons re-resolve their command on this event, as after Project Settings saves.
+          if (response.success) window.dispatchEvent(new Event('project-settings-updated'));
+          return response;
+        },
         capture,
       });
       setPreview(null);

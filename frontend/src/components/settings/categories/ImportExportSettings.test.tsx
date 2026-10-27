@@ -221,14 +221,21 @@ describe('applySetupImport', () => {
   }
 
   it('recomputes, then saves config once, then preferences, then projects, and records counts only', async () => {
-    const { calls, value } = deps();
+    // The recomputed preview differs from the one shown, so the saved values prove which one applies.
+    const fresh: SetupImportPreview = {
+      ...preview,
+      sections: preview.sections.map((section) => (section.id === 'runScripts'
+        ? { ...section, apply: { projects: [{ id: 7, name: 'acme-web', updates: { run_script: 'pnpm dev --port 4000' } }] } }
+        : section)),
+    };
+    const { calls, value } = deps({ preview: vi.fn(async () => ({ success: true, data: fresh })) });
     const outcome = await applySetupImport(preview, chosen, value);
 
     expect(value.preview).toHaveBeenCalledWith(file, 'pane-setup-2026-10-26.json');
     expect(calls).toEqual([
       'config defaultOrchestratorAgent,customCommands,agentContext,theme,autoCheckUpdates',
       'preference sidebar_pane_row_layout=two-row',
-      'project 7 {"run_script":"pnpm dev"}',
+      'project 7 {"run_script":"pnpm dev --port 4000"}',
     ]);
     expect(value.capture).toHaveBeenCalledWith('setup_imported', {
       sections: ['agentPresets', 'customCommands', 'runScripts', 'skills', 'appearance', 'preferences'],
