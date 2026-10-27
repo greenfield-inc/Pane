@@ -3,26 +3,14 @@
  *
  * Provides:
  * - Platform-aware key display formatting (⌘ on Mac, Ctrl on Windows)
- * - Category ordering for consistent Help dialog presentation
  * - Human-readable labels for hotkey categories
  *
- * Used by CommandPalette and Help components to present shortcuts to users.
+ * Used by Search, the sidebar and Help to present shortcuts to users.
  *
  * @module hotkeyUtils
  */
 import type { HotkeyDefinition } from '../stores/hotkeyStore';
 import { isMac } from './platformUtils';
-
-/** Canonical display order for hotkey categories */
-export const CATEGORY_ORDER: HotkeyDefinition['category'][] = [
-  'navigation',
-  'session',
-  'tabs',
-  'view',
-  'tools',
-  'shortcuts',
-  'debug',
-];
 
 export const CATEGORY_LABELS = {
   navigation: 'Navigation',

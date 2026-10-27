@@ -54,7 +54,7 @@ export function ShortcutsSettings({ persistence, onDirtyChange, onShowKeyboardSh
         <SettingRow
           settingId="keyboard-shortcuts"
           label="Enable Pane keyboard shortcuts"
-          description="When disabled, Pane shortcuts won't work, but native terminal and embedded app shortcuts will. The Command Palette shortcut can remain enabled below."
+          description="When disabled, Pane shortcuts won't work, but native terminal and embedded app shortcuts will. The Search shortcut can remain enabled below."
           saveState={persistence.saveStates['keyboard-shortcuts']}
         >
           <ImmediateToggle
@@ -65,12 +65,12 @@ export function ShortcutsSettings({ persistence, onDirtyChange, onShowKeyboardSh
         </SettingRow>
         <SettingRow
           settingId="command-palette-shortcut"
-          label="Keep Command Palette shortcut enabled"
+          label="Keep Search shortcut enabled"
           description="Keep Ctrl/Cmd+Shift+P available when other Pane keyboard shortcuts are disabled."
           saveState={persistence.saveStates['command-palette-shortcut']}
         >
           <ImmediateToggle
-            label="Keep Command Palette shortcut enabled"
+            label="Keep Search shortcut enabled"
             value={config.commandPaletteShortcutEnabled !== false}
             onSave={(value) => persistence.saveConfig('command-palette-shortcut', { commandPaletteShortcutEnabled: value })}
           />

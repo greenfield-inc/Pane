@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { usePausableDismiss } from '../../hooks/usePausableDismiss';
 
 interface UndoToastProps {
   message: string;
@@ -12,28 +12,12 @@ interface UndoToastProps {
  * Remount it (change its key) to restart the timer.
  */
 export function UndoToast({ message, onUndo, onDismiss, durationMs = 6000 }: UndoToastProps) {
-  const [hovered, setHovered] = useState(false);
-  const [focused, setFocused] = useState(false);
-  const remainingMs = useRef(durationMs);
-  const paused = hovered || focused;
-
-  useEffect(() => {
-    if (paused) return;
-    const startedAt = Date.now();
-    const timer = window.setTimeout(onDismiss, remainingMs.current);
-    return () => {
-      window.clearTimeout(timer);
-      remainingMs.current -= Date.now() - startedAt;
-    };
-  }, [paused, onDismiss]);
+  const pauseHandlers = usePausableDismiss(onDismiss, durationMs);
 
   return (
     <div
       role="status"
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      onFocus={() => setFocused(true)}
-      onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setFocused(false); }}
+      {...pauseHandlers}
       className="fixed bottom-4 left-1/2 z-50 flex max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-3 rounded-md border border-border-primary bg-surface-primary px-3 py-2 text-[13px] text-text-primary shadow-dropdown"
     >
       <span className="min-w-0 truncate">{message}</span>

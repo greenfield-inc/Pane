@@ -338,6 +338,57 @@ describe('OrchestrationSessionManager', () => {
     expect(updated.resume).toBeUndefined();
   });
 
+  it('sends a Session\'s opening prompt as its first message, even from a tab repaired before launch, and only once', async () => {
+    const fixture = createFixture();
+    const openingPrompt = 'Pane sent this once, to introduce Pane Chat. Suggest two tasks.';
+    vi.spyOn(panelManager, 'createPanel').mockRejectedValueOnce(new Error('interrupted'));
+    await expect(fixture.manager.create({ name: 'Intro', agent: 'claude', openingPrompt })).rejects.toThrow('was saved but could not be opened');
+    const restart = () => new OrchestrationSessionManager(fixture.configManager, fixture.sessionManager,
+      fixture.skillCacheManager, fixture.paneChatManager, undefined, fixture.store);
+
+    const repairedManager = restart();
+    const [saved] = (await repairedManager.list()).sessions.filter(session => session.name === 'Intro');
+    const repaired = await repairedManager.getView({ sessionId: saved.id });
+    expect(repaired.panel.state.customState).toMatchObject({ initialInput: openingPrompt, initialInputMode: 'argument' });
+
+    // The terminal launch passes it to the agent and marks it sent.
+    await panelManager.updatePanel(repaired.panel.id, { state: { ...repaired.panel.state, customState: {
+      ...repaired.panel.state.customState, initialInputSentAt: '2026-10-26T12:00:00.000Z', hasClaudeSessionId: true,
+    } } });
+    const relaunched = await restart().getView({ sessionId: saved.id });
+    expect(relaunched.panel.state.customState?.initialInput).toBeUndefined();
+    expect(relaunched.session.openingPrompt).toBeUndefined();
+
+    // A later rebuild that loses the terminal's sent marker still sends nothing.
+    await panelManager.updatePanel(relaunched.panel.id, { state: { ...relaunched.panel.state, customState: {
+      ...relaunched.panel.state.customState, initialInputSentAt: undefined,
+    } } });
+    expect((await restart().getView({ sessionId: saved.id })).panel.state.customState?.initialInput).toBeUndefined();
+  });
+
+  it('does not send the opening prompt again to another agent after one agent sent it', async () => {
+    const fixture = createFixture();
+    const openingPrompt = 'Pane sent this once, to introduce Pane Chat. Suggest two tasks.';
+    const created = await fixture.manager.create({ name: 'Switch after intro', agent: 'claude', openingPrompt });
+    await panelManager.updatePanel(created.panel.id, { state: { ...created.panel.state, customState: {
+      ...created.panel.state.customState, initialInputSentAt: '2026-10-26T12:00:00.000Z', hasClaudeSessionId: true,
+    } } });
+
+    const switched = await fixture.manager.setAgent({ sessionId: created.session.id }, 'codex');
+
+    expect(switched.agent).toBe('codex');
+    expect(switched.panel.state.customState?.initialInput).toBeUndefined();
+    expect(switched.session.openingPrompt).toBeUndefined();
+  });
+
+  it('refuses an opening prompt for a resumed conversation or one that does not say Pane sends it once', async () => {
+    const fixture = createFixture();
+    await expect(fixture.manager.create({ name: 'Resumed', agent: 'claude', resume: '5d0c7a1e-2b9f-4e3a-8c61-0f7d2e4b9a35', openingPrompt: 'Pane sent this once, hello' }))
+      .rejects.toThrow('A resumed conversation cannot take an opening prompt');
+    await expect(fixture.manager.create({ name: 'Unmarked', openingPrompt: 'Run the tests' }))
+      .rejects.toThrow('must begin with "Pane sent this once"');
+  });
+
   it('keeps the newest activity entries up to the configured retention', async () => {
     const fixture = createFixture();
     Object.assign(fixture.configManager.getConfig(), { retention: { sessionActivity: 2 } });

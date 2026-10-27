@@ -1,6 +1,6 @@
 {
   "name": "Pane",
-  "version": "2.4.202",
+  "version": "2.4.203",
   "private": true,
   "description": "Pane - Terminal-first AI code assistant manager with Windows support",
   "author": {
@@ -50,6 +50,7 @@
     "test:runpane-mcp": "pnpm --filter runpane build && node --test scripts/test-runpane-mcp.js",
     "test:runpane-workspace": "pnpm --filter runpane build && node --test scripts/test-runpane-workspace.js",
     "test:runpane-handoff": "pnpm --filter runpane build && node --test scripts/test-runpane-handoff.js",
+    "test:runpane-telemetry": "pnpm --filter runpane build && node --test scripts/test-runpane-telemetry.js",
     "test:runpane-package-smoke": "pnpm --filter runpane build && node scripts/test-runpane-package-smoke.js",
     "inject-build-info": "node scripts/inject-build-info.js",
     "release:mac": "pnpm run build:frontend && pnpm run build:main && pnpm run inject-build-info && pnpm run generate-notices && node scripts/configure-build.js && electron-builder --mac --publish always && node scripts/verify-mac-universal-binaries.js",
@@ -112,6 +113,7 @@
     "@electron/rebuild": "4.2.0",
     "@oxlint/plugins": "1.76.0",
     "@playwright/test": "^1.64.1",
+    "@typescript/native": "npm:typescript@^7.0.2",
     "ajv": "6.12.6",
     "concurrently": "^9.1.0",
     "electron": "43.8.3",

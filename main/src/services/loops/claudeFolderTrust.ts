@@ -4,8 +4,8 @@ import path from 'path';
 import { boundary, decodeBoundary, type JsonObject } from '../../../../shared/validation/boundaryDecoder';
 
 /** Claude Code's global config, where it records the folders a person trusted. */
-function claudeConfigPath(env: NodeJS.ProcessEnv = process.env): string {
-  return path.join(env.CLAUDE_CONFIG_DIR?.trim() || os.homedir(), '.claude.json');
+export function claudeConfigPath(env: NodeJS.ProcessEnv = process.env, home = os.homedir()): string {
+  return path.join(env.CLAUDE_CONFIG_DIR?.trim() || home, '.claude.json');
 }
 
 /**

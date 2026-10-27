@@ -5,9 +5,9 @@ import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import type { ParsedArgs } from './commands';
 import { boundary, decodeBoundary } from './boundaryDecoder';
-import { invokeDaemon, resolvePaneDirectory } from './daemonClient';
-import { RunpaneError } from './errors';
-import { preflightUpdate, updateHostSchema } from './updatePreflight';
+import { invokeDaemon, PaneDaemonClientError, resolvePaneDirectory } from './daemonClient';
+import { describeFailure, RunpaneError, type RunpaneFailure } from './errors';
+import { assertUpdateOptions, preflightUpdate, updateHostSchema, type UpdatePreflight } from './updatePreflight';
 import { stageUpdateRuntime } from './updateRuntime';
 import { checkUpdateSupervisor, startUpdateSupervisor, removeUpdateSupervisor } from './updateSupervisor';
 import { assertUpdateQuiescence, claimUpdateLock, releaseUpdateLock, executeUpdate, readUpdateJournal, updateLockReleasable, writeUpdateJson, type UpdateJournal } from './updateOperation';
@@ -47,7 +47,15 @@ function processExists(pid: number): boolean {
 export async function runUpdate(parsed: ParsedArgs): Promise<number> {
   const paneDir = path.resolve(resolvePaneDirectory(parsed.paneDir));
   if (parsed.updateStatus) return presentUpdate(path.join(operationDirectory(paneDir, parsed.updateStatus), 'status.json'), parsed);
-  const preflight = await preflightUpdate(parsed, parsed.updateScope ?? 'both');
+  assertUpdateOptions(parsed);
+  let preflight: UpdatePreflight;
+  try {
+    preflight = await preflightUpdate(parsed, parsed.updateScope ?? 'both');
+  } catch (error) {
+    // A pinned release or a named --pane-path is the caller's request; the in-app updater installs only the latest release into the running Pane.
+    if (parsed.dryRun || parsed.updateScope === 'cli' || parsed.paneVersion !== 'latest' || parsed.panePath) throw error;
+    return updateInApp(parsed, paneDir, describeFailure(error));
+  }
   if (parsed.dryRun) { console.log(JSON.stringify({ preflight, changed: false }, null, 2)); return 0; }
   if (!parsed.json) console.log(`Updating ${preflight.scope} on ${preflight.machine}. Pane: ${preflight.host?.executable ?? 'not selected'}; CLI: ${preflight.cli ? `${preflight.cli.owner} ${preflight.cli.entrypoint}` : 'not selected'}.`);
   const id = randomUUID();
@@ -95,6 +103,62 @@ export async function runUpdate(parsed: ParsedArgs): Promise<number> {
     throw error;
   }
   return presentUpdate(file, parsed);
+}
+
+const inAppSchema = boundary.object({ state: boundary.enumeration('installing', 'current'), fromVersion: boundary.nonEmptyString, version: boundary.nonEmptyString });
+
+/**
+ * The independent update refused this host before changing anything, most
+ * often because the managed CLI runs inside Electron with no standalone Node.
+ * The running Pane installs the release itself with electron-updater instead.
+ */
+async function updateInApp(parsed: ParsedArgs, paneDir: string, refusal: RunpaneFailure): Promise<number> {
+  let result: ReturnType<typeof inAppSchema.decode>;
+  try {
+    result = await invokeDaemon('runpane:update:in-app', [], inAppSchema, { paneDir, timeoutMs: 15 * 60_000 });
+  } catch (error) {
+    // Pane not running: the caller installs the release instead (updateOrReinstall).
+    if (error instanceof PaneDaemonClientError && error.connectionFailure) throw error;
+    const failure = describeFailure(error);
+    if (failure.code !== 'ERR_UNKNOWN_CHANNEL') throw new RunpaneError(failure.code, `${failure.message} The independent update had already refused this host: ${refusal.message}`, failure.next);
+    throw new RunpaneError('ERR_UPDATE_IN_APP_UNAVAILABLE', `Updating from runpane is unsupported by this Pane: it is older than the in-app update handoff, and the independent update refused this host (${refusal.message}).`, 'Open Pane, go to Settings, and click Update. Then runpane update works directly next time.');
+  }
+  // Pane rewrites its managed copy of the CLI at startup, so the new app brings
+  // the matching CLI. A pinned managed, npm or pip CLI is its own installation;
+  // a pip CLI delegates here through the managed engine, so check its owner first.
+  const pipCli = Boolean(process.env.PANE_UPDATE_PYTHON && process.env.PANE_UPDATE_PYTHON_ENTRYPOINT);
+  const bundled = path.join(paneDir, 'bin', 'runpane.cjs');
+  const cliFollowsApp = !pipCli && fs.existsSync(bundled) && fs.realpathSync(process.argv[1]) === fs.realpathSync(bundled);
+  let phase: 'installing' | 'complete' | 'current' = result.state;
+  if (phase === 'installing' && parsed.updateWait) {
+    await waitForRelaunch(paneDir, result.version);
+    phase = 'complete';
+  }
+  const next = phase === 'installing'
+    ? `Pane ${result.version} installs and relaunches in about a minute; run runpane doctor --json afterwards to confirm.`
+    : phase === 'complete' ? `Pane ${result.version} is running.` : `Pane ${result.version} is the latest release.`;
+  const cliNext = cliFollowsApp || parsed.updateScope === 'pane' ? '' : ` This CLI was not updated; update it with ${pipCli ? 'pip install --upgrade runpane' : 'its package manager (npm install --global runpane@latest or pip install --upgrade runpane)'}.`;
+  if (parsed.json) {
+    console.log(JSON.stringify({ mode: 'in-app', phase, fromVersion: result.fromVersion, version: result.version, cliUpdated: phase !== 'current' && cliFollowsApp, independentRefusal: refusal, next: next + cliNext }, null, 2));
+  } else {
+    console.log(`The independent update cannot run here (${refusal.message}), so Pane's built-in updater is handling it.`);
+    console.log(`${phase === 'current' ? 'Pane is up to date.' : `Pane is updating itself from ${result.fromVersion} to ${result.version}.`} ${next}${cliNext}`);
+  }
+  return 0;
+}
+
+const RELAUNCH_TIMEOUT_MS = 10 * 60_000;
+
+/** --wait: return once the relaunched Pane answers with the new version. */
+async function waitForRelaunch(paneDir: string, version: string): Promise<void> {
+  const deadline = Date.now() + RELAUNCH_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    try {
+      if ((await invokeDaemon('runpane:update:host', [], updateHostSchema, { paneDir, timeoutMs: 5_000 })).version === version) return;
+    } catch { /* Pane is quitting, installing or starting */ }
+    await pause(2_000);
+  }
+  throw new RunpaneError('ERR_UPDATE_IN_APP_TIMEOUT', `Timed out after 10 minutes waiting for Pane to come back as ${version} from its built-in update. The install may still be running, or it may have failed and left the previous version.`, 'Open Pane and check its version in Settings, then run runpane doctor --json.');
 }
 
 async function presentUpdate(file: string, parsed: ParsedArgs): Promise<number> {

@@ -3,7 +3,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { ProjectSessionList, ArchivedSessions } from './ProjectSessionList';
 import { ArchiveProgress } from './ArchiveProgress';
-import { ArrowUpDown, BookOpen, ChevronDown, ChevronRight, Info, LayoutGrid, FolderGit2, Home, Laptop, Monitor, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pin, Settings as SettingsIcon, Plus, RefreshCw, MessageSquare, Repeat, Server, SquareTerminal } from 'lucide-react';
+import { ArrowUpDown, BookOpen, ChevronDown, ChevronRight, Info, LayoutGrid, FolderGit2, Home, Laptop, Monitor, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pin, Settings as SettingsIcon, Plus, RefreshCw, MessageSquare, Repeat, Search, Server, SquareTerminal } from 'lucide-react';
 import { SessionDetailTooltip } from './SessionDetailTooltip';
 import { IconButton } from './ui/Button';
 import { Tooltip } from './ui/Tooltip';
@@ -37,6 +37,8 @@ import { useOrchestrationSessionStore } from '../stores/orchestrationSessionStor
 import { useSshHostsRefresh, useSshHostsStore } from '../stores/sshHostsStore';
 import { navigateToLoops, useLoopsStore } from '../stores/loopsStore';
 import { useAnyLoopRunning } from './loops/loopRunView';
+import { useRestartToUpdateStore } from '../stores/restartToUpdateStore';
+import { RESTART_PILL_LABELS, restartPillDescription, restartPillLabel } from './restartToUpdateCopy';
 
 // --- Collapsed sidebar tooltip content ---
 
@@ -110,6 +112,8 @@ interface SidebarProps {
   onDocsClick: () => void;
   onFeedbackClick: () => void;
   onDiscordClick: () => void;
+  /** Opens the Software Update dialog when a release can only be installed by hand. */
+  onUpdateAvailableClick: () => void;
 }
 
 const REMOTE_DESKTOP_URL = 'https://remotedesktop.google.com/access';
@@ -126,7 +130,7 @@ const HelpCircleIcon = ({ className }: { className?: string }) => (
   </svg>
 );
 
-export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, onManageRemoteConnectionsClick, width, onResize, collapsed, onToggleCollapse, titleBarControlsSlot, onHelpClick, onDocsClick, onFeedbackClick, onDiscordClick }: SidebarProps) {
+export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, onManageRemoteConnectionsClick, width, onResize, collapsed, onToggleCollapse, titleBarControlsSlot, onHelpClick, onDocsClick, onFeedbackClick, onDiscordClick, onUpdateAvailableClick }: SidebarProps) {
   const useCompactFooterActions = width < 260;
   const showFooterHomeLabel = width >= 230;
   const hotkeys = useHotkeyStore((s) => s.hotkeys);
@@ -134,6 +138,8 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
     const keys = hotkeys.get(id)?.keys;
     return keys ? formatKeyDisplay(keys) : null;
   }, [hotkeys]);
+  // The sidebar's search opens the same launcher as its shortcut.
+  const openSearch = useCallback(() => hotkeys.get('open-command-palette')?.action(), [hotkeys]);
   const { version, gitCommit, worktreeName } = useAppBuildInfo();
   const [sessionSortAscending, setSessionSortAscending] = useState<boolean>(true); // Default to ascending (newest at bottom)
   const [sidebarSectionExpansion, setSidebarSectionExpansion] = useState<Record<SidebarSection, boolean>>({
@@ -227,6 +233,11 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
 
 
   const sessions = useSessionStore((state) => state.sessions);
+  const restartState = useRestartToUpdateStore((state) => state.state);
+  const toggleRestartToast = useRestartToUpdateStore((state) => state.togglePillToast);
+  const restartLabel = restartPillLabel(restartState);
+  const restartDescription = restartPillDescription(restartState) ?? '';
+  const openRestartToUpdate = restartState?.readyVersion ? toggleRestartToast : onUpdateAvailableClick;
   const activeSessionId = useSessionStore((state) => state.activeSessionId);
   const setActiveSession = useSessionStore((state) => state.setActiveSession);
   const remoteFooterStatus = useMemo(
@@ -522,6 +533,9 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
                 </button>
               </Tooltip>
             )}
+            <Tooltip content={<span className="flex items-center gap-2">Search{hotkeyDisplay('open-command-palette') && <Kbd>{hotkeyDisplay('open-command-palette')}</Kbd>}</span>} side="right">
+              <button type="button" data-compact-rail-item aria-label="Search" onClick={openSearch} className={`${COMPACT_RAIL_BUTTON} ${COMPACT_RAIL_IDLE}`}><Search className="h-4 w-4" /></button>
+            </Tooltip>
             <Tooltip content="New" side="right">
               <button type="button" data-compact-rail-item aria-label="New" onClick={() => setShowNewDialog(true)} className={`${COMPACT_RAIL_BUTTON} ${COMPACT_RAIL_IDLE}`}><Plus className="h-4 w-4" /></button>
             </Tooltip>
@@ -751,6 +765,19 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
 
           {/* Bottom actions stay reachable even with a long Session list. */}
           <div className="flex shrink-0 flex-col items-center gap-1 border-t border-border-primary py-2">
+            {restartLabel && (
+              <Tooltip content={restartDescription} side="right">
+                <button
+                  type="button"
+                  data-compact-rail-item
+                  onClick={openRestartToUpdate}
+                  aria-label={restartDescription}
+                  className={`${COMPACT_RAIL_BUTTON} bg-interactive/15 text-interactive hover:bg-interactive/25`}
+                >
+                  <RefreshCw className="h-4 w-4" />
+                </button>
+              </Tooltip>
+            )}
             <Tooltip content={remoteFooterTooltip} side="right" interactive delay={250}>
               {remoteHostSwitcher.visible ? renderRemoteHostSwitcher(railRemoteDot, 'top-right') : railRemoteDot}
             </Tooltip>
@@ -822,6 +849,18 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
 
         <button
           type="button"
+          onClick={openSearch}
+          className="mx-2 mt-1 flex h-[30px] flex-shrink-0 items-center gap-2 rounded-input border border-border-primary bg-surface-primary px-2 text-[13px] text-text-muted hover:border-border-hover hover:text-text-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-interactive"
+        >
+          <Search className="h-3.5 w-3.5 flex-shrink-0" />
+          <span>Search</span>
+          {hotkeyDisplay('open-command-palette') && (
+            <Kbd size="xs" variant="muted" className="ml-auto">{hotkeyDisplay('open-command-palette')}</Kbd>
+          )}
+        </button>
+
+        <button
+          type="button"
           onClick={() => setShowNewDialog(true)}
           className="mx-2 mt-1 flex h-7 flex-shrink-0 items-center gap-2 rounded-md bg-surface-hover px-2 text-[13px] font-medium text-text-secondary hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-interactive"
         >
@@ -854,6 +893,26 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
           <ArchivedSessions expanded={sidebarSectionExpansion.archived} onExpandedChange={handleArchivedSectionExpandedChange} />
         </div>
 
+        {restartLabel && (
+          <div className="flex flex-shrink-0 px-2 pt-1">
+            <button
+              type="button"
+              onClick={openRestartToUpdate}
+              aria-label={restartDescription}
+              className="flex h-6 items-center gap-1.5 rounded-full bg-interactive/15 px-2.5 text-[11px] font-semibold text-interactive hover:bg-interactive/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-interactive"
+            >
+              <RefreshCw className="h-3 w-3 shrink-0" />
+              {/* Every label shares one grid cell, so the pill keeps the widest one's width. */}
+              <span className="grid">
+                {RESTART_PILL_LABELS.map(label => (
+                  <span key={label} aria-hidden="true" className={`col-start-1 row-start-1 whitespace-nowrap ${label === restartLabel ? '' : 'invisible'}`}>
+                    {label}
+                  </span>
+                ))}
+              </span>
+            </button>
+          </div>
+        )}
         <div className="flex h-12 flex-shrink-0 items-center gap-1 px-2">
           <button
             type="button"

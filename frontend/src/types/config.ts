@@ -24,6 +24,8 @@ type TerminalPowerMode = 'performance' | 'batterySaver';
 
 export interface AnalyticsIdentity {
   distinctId: string;
+  // The desktop id stored before this launch, when one was stored.
+  previousDistinctId?: string;
   identitySource: 'email' | 'github' | 'git_name' | 'posthog' | 'anonymous';
   installId?: string;
   appVersion?: string;
@@ -168,7 +170,7 @@ export interface AppConfig {
   terminalShortcuts?: TerminalShortcut[];
   // Whether Pane intercepts application keyboard shortcuts
   keyboardShortcutsEnabled?: boolean;
-  // Whether the Command Palette shortcut remains active when other shortcuts are disabled
+  // Whether the Search shortcut (open-command-palette) remains active when other shortcuts are disabled
   commandPaletteShortcutEnabled?: boolean;
   // Whether the terminal answers kitty keyboard protocol requests (CSI = | ? | > | < u)
   kittyKeyboardEnabled?: boolean;

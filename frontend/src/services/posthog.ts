@@ -90,6 +90,19 @@ function installDistinctId(identity = currentIdentity): string | undefined {
   return distinctId === identity.distinctId ? undefined : distinctId;
 }
 
+// PostHog refuses an alias whose person is already identified, so the alias
+// names whichever id is new. After the desktop id changes, the install id's
+// person is identified and only the new desktop id can be the alias.
+function installAlias(identity = currentIdentity): { distinctId: string; alias: string } | undefined {
+  const installIdDistinctId = installDistinctId(identity);
+  if (!installIdDistinctId || !identity?.distinctId) return undefined;
+
+  const desktopIdChanged = Boolean(identity.previousDistinctId && identity.previousDistinctId !== identity.distinctId);
+  return desktopIdChanged
+    ? { distinctId: installIdDistinctId, alias: identity.distinctId }
+    : { distinctId: identity.distinctId, alias: installIdDistinctId };
+}
+
 function identifyUser(config: PostHogConfig): void {
   currentIdentity = config.identity;
   if (!config.enabled || !config.identity) return;
@@ -232,22 +245,23 @@ export function discardPendingEvents(): void {
   pendingEvents = [];
 }
 
+// The web visitor id is always new to the desktop person, so it is the alias.
 export function aliasWebVisitor(webDistinctId?: string, distinctId = currentIdentity?.distinctId): void {
   if (!webDistinctId || !distinctId || webDistinctId === distinctId) return;
 
   try {
-    posthog.alias(distinctId, webDistinctId);
+    posthog.alias(webDistinctId, distinctId);
   } catch (error) {
     console.error('[PostHog] Failed to alias web visitor:', error);
   }
 }
 
 export function aliasInstallIdentity(identity = currentIdentity): void {
-  const installIdDistinctId = installDistinctId(identity);
-  if (!installIdDistinctId || !identity?.distinctId) return;
+  const pair = installAlias(identity);
+  if (!pair) return;
 
   try {
-    posthog.alias(identity.distinctId, installIdDistinctId);
+    posthog.alias(pair.alias, pair.distinctId);
   } catch (error) {
     console.error('[PostHog] Failed to alias install identity:', error);
   }
@@ -258,25 +272,25 @@ export async function aliasWebVisitorDirect(identity = currentIdentity): Promise
 
   await directCapture(
     '$create_alias',
-    { alias: identity.distinctId },
+    { alias: identity.webDistinctId },
     identity,
     {
-      distinctId: identity.webDistinctId,
+      distinctId: identity.distinctId,
       processPersonProfile: true,
     }
   );
 }
 
 export async function aliasInstallIdentityDirect(identity = currentIdentity): Promise<void> {
-  const installIdDistinctId = installDistinctId(identity);
-  if (!installIdDistinctId || !identity?.distinctId) return;
+  const pair = installAlias(identity);
+  if (!pair) return;
 
   await directCapture(
     '$create_alias',
-    { alias: identity.distinctId },
+    { alias: pair.alias },
     identity,
     {
-      distinctId: installIdDistinctId,
+      distinctId: pair.distinctId,
       processPersonProfile: true,
     }
   );

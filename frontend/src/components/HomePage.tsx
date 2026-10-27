@@ -20,6 +20,7 @@ import { useHostShellSettings } from '../hooks/useHostShellSettings';
 import { capture } from '../services/posthog';
 import { DISCORD_INVITE_URL, DiscordIcon } from './DiscordIcon';
 import { FirstStepsCard, useFirstSteps } from './FirstStepsCard';
+import { SessionImportHome } from './sessionImport/SessionImportHome';
 
 const HIDE_DISCORD_PREFERENCE = 'hide_discord';
 
@@ -316,6 +317,7 @@ export function HomePage() {
               {paneAscii}
             </pre>
           </div>
+          <SessionImportHome />
           <section className={`grid gap-8 lg:items-stretch ${hasStartColumn ? 'lg:grid-cols-[minmax(0,1.45fr)_minmax(320px,1fr)]' : ''}`}>
             {firstSteps !== null && firstSteps !== 'loading' && <FirstStepsCard firstSteps={firstSteps} />}
             {isFirstRun && (

@@ -71,6 +71,7 @@ vi.spyOn(terminalPanelManager, 'hasLaunchCommandExited');
 vi.spyOn(terminalPanelManager, 'relaunchInShell');
 vi.spyOn(terminalPanelManager, 'isBracketedPasteEnabled');
 vi.spyOn(terminalPanelManager, 'launchShellReadsPromptFile');
+vi.spyOn(terminalPanelManager, 'launchShellIsPosix');
 vi.spyOn(panelDatabase, 'getPanelBuffers');
 vi.spyOn(usageManager, 'getPaneCosts');
 
@@ -375,6 +376,7 @@ describe('runpane IPC handlers', () => {
     vi.mocked(terminalPanelManager.relaunchInShell).mockReset().mockResolvedValue(undefined);
     vi.mocked(terminalPanelManager.isBracketedPasteEnabled).mockReset().mockReturnValue(false);
     vi.mocked(terminalPanelManager.launchShellReadsPromptFile).mockReset().mockReturnValue(true);
+    vi.mocked(terminalPanelManager.launchShellIsPosix).mockReset().mockReturnValue(true);
     vi.mocked(terminalPanelManager.getOutputGeneration).mockReturnValue(0);
     vi.mocked(terminalPanelManager.getAgentStatus).mockReturnValue('idle');
     findUserTurnSince.mockReset().mockResolvedValue({ state: null });
@@ -5279,6 +5281,9 @@ describe('runpane IPC handlers', () => {
         }],
       });
       expect(services.taskQueue?.createSessionAndWait).not.toHaveBeenCalled();
+      expect(services.analyticsManager?.track).toHaveBeenCalledWith('runpane_local_control_failed', expect.objectContaining({
+        action: 'panes:create', failure_kind: 'handled', error_code: 'ERR_RUNPANE_BRANCH_HAS_PANE',
+      }));
     });
 
     it('passes the exact requested branch and base to pane creation', async () => {
@@ -6657,6 +6662,19 @@ describe('runpane IPC handlers', () => {
       expect(state).toMatchObject({ initialInput: 'Line one\nLine two', initialInputSubmitStrategy: strategy });
     });
 
+    it('hands even a short create prompt to the composer when the launch shell is not POSIX', async () => {
+      vi.mocked(terminalPanelManager.launchShellIsPosix).mockReturnValue(false);
+      vi.mocked(panelManager.createPanel).mockImplementation(async request => createdTerminalPanel(request));
+
+      await createRegistry().invoke('runpane:panes:create', [{
+        repo: { id: project.id },
+        panes: [{ name: 'pwsh', tool: { agent: 'claude', initialInput: 'Fix "quoted" names' } }],
+      }]);
+
+      expect(createdInitialState().initialInputMode).toBeUndefined();
+      expect(createdInitialState()).toMatchObject({ initialInput: 'Fix "quoted" names', initialInputSubmitStrategy: 'enter' });
+    });
+
     it('sends a create prompt as a pointer to its file with --as-file-pointer', async () => {
       vi.mocked(panelManager.createPanel).mockImplementation(async request => createdTerminalPanel(request));
 
@@ -6897,6 +6915,21 @@ describe('runpane IPC handlers', () => {
           initialInput: { delivered: false, verifiedSubmitted: false, error: { message: expect.stringContaining('not sent') } },
         }],
       });
+    });
+
+    it('reports why the agent was not ready in failure telemetry', async () => {
+      vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue({
+        ...terminalSnapshot('Building agent bundle...\n', 'idle'), isCliPanel: false, isCliReady: false, agentType: undefined,
+      });
+      const services = createServices();
+      await createRegistry(services).invoke('runpane:panes:create', [{
+        repo: { id: project.id }, waitReady: true, readyTimeoutMs: 30,
+        panes: [{ name: 'farm', tool: { command: 'agent-farm run greenfield/planner:opus', initialInput: 'say hi' } }],
+      }]);
+
+      expect(services.analyticsManager?.track).toHaveBeenCalledWith('runpane_local_control_failed', expect.objectContaining({
+        action: 'panes:create', failure_kind: 'handled', error_code: 'no-agent-detected',
+      }));
     });
 
     it('holds the message for the agent when a startup prompt blocks it', async () => {
