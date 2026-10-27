@@ -171,6 +171,26 @@ export class API {
     },
   };
 
+  // Bring sessions from other agent tools into Pane
+  static sessionImport = {
+    async home() {
+      if (!isElectron()) return null;
+      return window.electronAPI.sessionImport.home();
+    },
+    async scan() {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.sessionImport.scan();
+    },
+    async run(keys: string[]) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.sessionImport.run(keys);
+    },
+    async progress() {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.sessionImport.progress();
+    },
+  };
+
   // Leaderboard
   static leaderboard = {
     async getStatus(): Promise<IPCResponse<LeaderboardStatus>> {

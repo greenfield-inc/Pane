@@ -1,4 +1,5 @@
 import type { LoopInput } from '../../shared/types/loop';
+import type { SessionImportProgress, SessionImportRunResult, SessionImportScan } from '../../shared/types/sessionImport';
 import type { AgentChatEvent, AgentChatView, AgentChatSend, AgentInterface } from '../../shared/types/agentChat';
 import type { RestartToUpdateSource, RestartToUpdateState, UpdateRestoreResult } from '../../shared/types/updater';
 import { contextBridge, ipcRenderer } from 'electron';
@@ -470,6 +471,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getReport: (request?: { fromMs?: number; toMs?: number; bucket?: 'hour' | 'day' }): Promise<IPCResponse> => invokeIpc('usage:get-report', request),
     getStatus: (): Promise<IPCResponse> => invokeIpc('usage:get-status'),
     rescan: (): Promise<IPCResponse> => invokeIpc('usage:rescan'),
+  },
+
+  // Bring sessions from other agent tools into Pane
+  sessionImport: {
+    home: (): Promise<SessionImportScan | null> => invokeIpc('session-import:home'),
+    scan: (): Promise<SessionImportScan> => invokeIpc('session-import:scan'),
+    run: (keys: string[]): Promise<SessionImportRunResult> => invokeIpc('session-import:run', keys),
+    progress: (): Promise<SessionImportProgress> => invokeIpc('session-import:progress'),
   },
 
   // Leaderboard opt-in and submission

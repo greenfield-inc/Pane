@@ -14,6 +14,7 @@ import { SessionLaunchFields } from '../../SessionLaunchFields';
 import { DEFAULT_SESSION_PROFILE } from '../../../../../shared/types/sessionProfile';
 import { visibleAgentPresets } from '../../../utils/agentPresets';
 import type { AgentLaunchPresetId } from '../../../../../shared/constants/agentLaunchPresets';
+import { SessionImportSettingsRow } from '../../sessionImport/SessionImportSettingsRow';
 
 function isPaneChatAgent(id: AgentLaunchPresetId): id is PaneChatAgent {
   return id === 'claude' || id === 'codex' || id === 'cursor';
@@ -127,6 +128,10 @@ export function AIAgentsSettings({ persistence, onDirtyChange }: AIAgentsSetting
             onSave={(value) => persistence.saveConfig('agent-context', { agentContext: { managedAgentsMd: value } })}
           />
         </SettingRow>
+      </SettingsSection>
+
+      <SettingsSection title="Your other agent tools">
+        <SessionImportSettingsRow />
       </SettingsSection>
 
       <SettingsSection title="Session defaults">

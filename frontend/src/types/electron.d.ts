@@ -64,6 +64,7 @@ import type { PaneLinkTarget } from '../../../shared/types/paneLinks';
 import type { ArchiveProgressSnapshot } from '../../../shared/types/archiveProgress';
 import type { ListeningPortsSnapshot } from '../../../shared/types/listeningPorts';
 import type { UpdateCapabilities } from '../../../shared/types/updater';
+import type { SessionImportProgress, SessionImportRunResult, SessionImportScan } from '../../../shared/types/sessionImport';
 import type {
   ProjectDashboardData,
   ProjectDashboardSessionUpdateEvent,
@@ -194,6 +195,15 @@ interface ElectronAPI {
     getReport: (request?: UsageReportRequest) => Promise<IPCResponse<UsageReport>>;
     getStatus: () => Promise<IPCResponse<UsageIndexStatus>>;
     rescan: () => Promise<IPCResponse<UsageIndexStatus>>;
+  };
+
+  // Bring sessions from other agent tools into Pane
+  sessionImport: {
+    /** The scan for the Home card, or null when Home shouldn't show it. */
+    home: () => Promise<SessionImportScan | null>;
+    scan: () => Promise<SessionImportScan>;
+    run: (keys: string[]) => Promise<SessionImportRunResult>;
+    progress: () => Promise<SessionImportProgress>;
   };
 
   // Leaderboard opt-in and submission
