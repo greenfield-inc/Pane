@@ -193,8 +193,8 @@ first. A host running an older Pane cannot save an order: the list snaps back
 and the error says to update Pane on that host. Dragging a Session onto the
 workspace still tiles it.
 
-Click a Session row to open its chat, or use **Switch to Session: <name>** in the
-command palette (`⌘⇧P` / `Ctrl+Shift+P`), which also has **New Session**. A Session with associated Panes shows a
+Click a Session row to open its chat, or find it by name in Search (`⌘⇧P` /
+`Ctrl+Shift+P`, or the Search field above **New**), which also has **New Session**. A Session with associated Panes shows a
 chevron that expands or collapses them; a Session without Panes shows none.
 Every Session starts collapsed, including a new one and one that just got its
 first Pane, until you press its chevron. Opening the Session's chat, an agent
@@ -1131,7 +1131,7 @@ exactly the old behaviour — switching Sessions replaces the view.
 The `X` on a tile's title row stops tiling that Session; the Session itself,
 its conversation and its panels are untouched, and the layout collapses back
 around the space. The last tile has no close button, since a window with no
-Session in it has nothing to show. The command palette carries the same actions
+Session in it has nothing to show. Search carries the same commands
 for the keyboard: focus the Session left, right, above or below, and stop tiling
 the focused one.
 
