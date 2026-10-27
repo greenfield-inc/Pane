@@ -176,7 +176,7 @@ function tildeToHome(text: string, home: string): string {
 
 // ---------------------------------------------------------------- remotes
 
-/** host/owner/repo for SSH and HTTPS remotes, lowercased, without .git; null when it isn't one. */
+/** host plus the full repository path (host/owner/repo, or host/group/subgroup/repo) for SSH and HTTPS remotes, lowercased, without .git; null when it isn't one. */
 function normalizeRemote(url: string | null): string | null {
   if (!url) return null;
   const trimmed = url.trim().replace(/\/+$/, '').replace(/\.git$/i, '');
@@ -186,7 +186,7 @@ function normalizeRemote(url: string | null): string | null {
   if (!match?.[1] || !match[2]) return null;
   const segments = match[2].split('/').filter(Boolean);
   if (segments.length < 2) return null;
-  return [match[1], ...segments.slice(-2)].join('/').toLowerCase();
+  return [match[1], ...segments].join('/').toLowerCase();
 }
 
 // ---------------------------------------------------------------- export
@@ -437,7 +437,8 @@ const sectionSchemas = {
     systemLightTheme: boundary.optional(themeSchema(isLightTheme, 'a light theme')),
     systemDarkTheme: boundary.optional(themeSchema((theme): theme is DarkTheme => !isLightTheme(theme), 'a dark theme')),
     highContrast: booleanField,
-    uiScale: boundary.optional(boundary.number),
+    // The range Appearance offers; Electron's zoom throws on zero or less.
+    uiScale: boundary.optional(boundary.refine(boundary.number, scale => scale >= 0.8 && scale <= 1.5, 'expected a UI scale from 0.8 to 1.5')),
     terminalFontFamily: stringField,
     terminalFontSize: boundary.optional(boundary.number),
   }),
@@ -600,6 +601,18 @@ function previewValues<T extends object>(
   return { section, changed };
 }
 
+/** Everything a custom command runs: the command and, when set, its resume mode and templates. */
+function describeCommand(command: SetupCustomCommand): string {
+  if (!command.resume) return command.command;
+  const { mode, initialTemplate, resumeTemplate } = command.resume;
+  return [
+    command.command,
+    `resume mode: ${mode}`,
+    initialTemplate ? `first launch: ${initialTemplate}` : null,
+    `resume: ${resumeTemplate}`,
+  ].filter((line): line is string => line !== null).join('\n');
+}
+
 function expandResume<T extends { resume?: SetupCustomCommand['resume'] }>(value: T, home: string): T {
   if (!value.resume) return value;
   return { ...value, resume: { ...value.resume, initialTemplate: tildeToHome(value.resume.initialTemplate, home), resumeTemplate: tildeToHome(value.resume.resumeTemplate, home) } };
@@ -744,7 +757,7 @@ export async function previewSetupImport(file: SetupFile, fileName: string, sour
   if (incoming.customCommands) {
     const commands = incoming.customCommands.map(command => expandResume({ ...command, command: tildeToHome(command.command, home) }, home));
     const local: SetupCustomCommand[] = (config.customCommands ?? []).map(command => ({ ...command }));
-    const { section, merged } = previewList('customCommands', local, commands, command => command.name, command => ({ name: command.name, text: command.command }));
+    const { section, merged } = previewList('customCommands', local, commands, command => command.name, command => ({ name: command.name, text: describeCommand(command) }));
     if (section.changes > 0) section.apply = { config: { customCommands: merged } };
     sections.push(section);
   }
@@ -760,7 +773,7 @@ export async function previewSetupImport(file: SetupFile, fileName: string, sour
       config.terminalShortcuts ?? [],
       shortcuts,
       shortcut => shortcut.id,
-      shortcut => ({ name: shortcut.label, text: shortcut.text }),
+      shortcut => ({ name: shortcut.label, text: `${shortcut.text}\nkey ${shortcut.key}, ${shortcut.enabled ? 'on' : 'off'}` }),
       (shortcut, current) => {
         const taken = shortcut.enabled && current.some(other => other.id !== shortcut.id && other.enabled !== false && other.key.toLowerCase() === shortcut.key.toLowerCase());
         return taken ? { item: { ...shortcut, enabled: false }, keyInUse: true } : { item: shortcut, keyInUse: false };

@@ -55,8 +55,9 @@ Your home folder is written as `~` in commands and scripts, so
 
 Click **Import…** and choose a setup file. Nothing changes yet: the card shows
 what importing would change on this computer, section by section. Expand a row
-to see each item it adds or replaces, with the exact text of every command and
-script and, for a replacement, what it was. A section with no changes is dimmed
+to see each item it adds or replaces, with the exact text of every command,
+resume template and script, each shortcut's key and on/off state, and, for a
+replacement, what it was. A section with no changes is dimmed
 and can't be selected. Uncheck any section you don't want, then click
 **Import N sections**.
 
@@ -85,8 +86,10 @@ turning the skill on installs it in your home skill folders.
 ### Run scripts
 
 Each repository in the file applies to every saved repository here whose
-`origin` remote is the same host, owner and repository, whether it is cloned
-over SSH or HTTPS. `github.com/acme/web` does not match `gitlab.com/acme/web`.
+`origin` remote has the same host and full repository path, whether it is
+cloned over SSH or HTTPS. `github.com/acme/web` does not match
+`gitlab.com/acme/web`, and `gitlab.com/team-a/tools/web` does not match
+`gitlab.com/team-b/tools/web`.
 A repository exported without a remote matches by name, and only when exactly
 one repository here has that name.
 

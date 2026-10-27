@@ -164,6 +164,7 @@ describe('readSetupFile', () => {
     expect(rejection(JSON.stringify({ ...valid, version: 2 }))).toBe('ERR_SETUP_FILE_NEWER_VERSION');
     expect(rejection(' '.repeat(1024 * 1024 + 1))).toBe('ERR_SETUP_FILE_TOO_LARGE');
     expect(rejection(JSON.stringify({ ...valid, sections: { customCommands: { name: 'x' } } }))).toBe('ERR_SETUP_FILE_INVALID_SECTION');
+    expect(rejection(JSON.stringify({ ...valid, sections: { appearance: { uiScale: 0 } } }))).toBe('ERR_SETUP_FILE_INVALID_SECTION');
     expect(rejection(JSON.stringify(valid))).toBe('accepted');
   });
 
@@ -217,6 +218,27 @@ describe('previewSetupImport', () => {
       { name: 'mine', command: 'make' },
       { name: 'lint-fix', command: 'pnpm lint --fix' },
     ]);
+  });
+
+  it('shows every template a replaced command would run, including its resume templates', async () => {
+    const preview = await previewSetupImport(setupFile({
+      customCommands: [{ name: 'review', command: 'claude', resume: { mode: 'generated', initialTemplate: 'printf hidden; {command} --session-id {sessionId}', resumeTemplate: '{command} --resume {sessionId}' } }],
+    }), 'f.json', sources({ config: { customCommands: [{ name: 'review', command: 'claude' }] } }));
+
+    expect(preview.sections[0]?.items).toEqual([{
+      kind: 'replaces',
+      name: 'review',
+      text: 'claude\nresume mode: generated\nfirst launch: printf hidden; {command} --session-id {sessionId}\nresume: {command} --resume {sessionId}',
+      was: 'claude',
+    }]);
+  });
+
+  it('shows a shortcut whose key or on/off state changes, even when its text is the same', async () => {
+    const preview = await previewSetupImport(setupFile({
+      terminalShortcuts: [{ id: 'status', label: 'Status', key: 'z', text: 'git status', enabled: false }],
+    }), 'f.json', sources({ config: { terminalShortcuts: [{ id: 'status', label: 'Status', key: 's', text: 'git status', enabled: true }] } }));
+
+    expect(preview.sections[0]?.items).toEqual([{ kind: 'replaces', name: 'Status', text: 'git status\nkey z, off', was: 'git status\nkey s, on' }]);
   });
 
   it('turns off an incoming shortcut whose key a different local shortcut uses', async () => {
@@ -273,6 +295,21 @@ describe('previewSetupImport', () => {
 
     const unchanged = await previewSetupImport(setupFile({ agentPresets: { defaultModel: 'opus' } }), 'f.json', sources({ config: { defaultModel: 'opus' } }));
     expect(unchanged.sections).toEqual([{ id: 'agentPresets', changes: 0, added: 0, replaced: 0, keyInUse: 0, items: [], apply: {} }]);
+  });
+
+  it('keeps nested repository namespaces apart', async () => {
+    const { file } = await exportSetup(sources({
+      projects: [{ id: 1, name: 'repo', run_script: 'make', origin: 'git@gitlab.com:group-one/subgroup/repo.git' }],
+    }), ['runScripts'], NOW);
+    expect(file.sections.runScripts?.[0]?.remote).toBe('gitlab.com/group-one/subgroup/repo');
+
+    const preview = await previewSetupImport(file, 'f.json', sources({
+      projects: [
+        { id: 2, name: 'other', run_script: 'npm start', origin: 'https://gitlab.com/group-two/subgroup/repo.git' },
+        { id: 3, name: 'same', origin: 'https://gitlab.com/Group-One/subgroup/repo' },
+      ],
+    }));
+    expect(preview.sections[0]?.apply.projects).toEqual([{ id: 3, name: 'same', updates: { run_script: 'make' } }]);
   });
 
   it('matches repositories by host/owner/repo and skips what it cannot place', async () => {

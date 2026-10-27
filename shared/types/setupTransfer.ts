@@ -54,7 +54,7 @@ export interface SetupAgentPresets {
 /** One repository's saved scripts, keyed by its origin remote. */
 export interface SetupRunScripts {
   name: string;
-  /** The origin remote as host/owner/repo, or null when the repository had none. */
+  /** The origin remote as host and full repository path (host/owner/repo), or null when the repository had none. */
   remote: string | null;
   build_script?: string;
   run_script?: string;
