@@ -5,6 +5,7 @@ import { useOrchestrationSessionStore } from '../stores/orchestrationSessionStor
 import { API } from './api';
 import { getActiveRemoteHostId } from '../../../shared/types/remoteDaemon';
 import type { HostNavigationMemory, PaneNavigationView } from '../../../shared/types/hostNavigation';
+import type { RestoredNavigation } from '../../../shared/types/updater';
 import type { Project } from '../types/project';
 
 /**
@@ -195,14 +196,18 @@ export async function restoreSessionSelection(): Promise<void> {
  * host's Panes and config have loaded, since every id is validated against them;
  * anything that no longer exists leaves the caller's home view in place.
  */
-export async function restoreHostNavigation(ownsRuntime: () => boolean = () => true): Promise<void> {
+export async function restoreHostNavigation(
+  ownsRuntime: () => boolean = () => true,
+  /** A location saved earlier, used instead of the stored memory when it belongs to the active host. */
+  saved?: RestoredNavigation | null,
+): Promise<void> {
   if (!ownsRuntime()) return;
   // The resync refetched config before calling this, so it names the incoming
   // host, whose memory is the one to read.
   const hostId = activeHostIdFromConfig();
   if (hostId === undefined) return;
 
-  const memory = await readNavigationMemory(hostId);
+  const memory = saved && saved.hostId === hostId ? saved.memory : await readNavigationMemory(hostId);
   if (!memory || !ownsRuntime()) return;
   // The resync that follows adopts this desktop's own Session over the host's.
   useOrchestrationSessionStore.getState().preferSelection(memory.orchestrationSessionId ?? undefined);

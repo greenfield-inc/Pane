@@ -4,7 +4,7 @@
 command, on the machine where the command runs. A remote host selected in the UI
 does not change that target. Use `--pane-only` or `--cli-only` for one component.
 The Update button in Settings uses the app's built-in updater instead, and does
-not need the prerequisites below. When a prerequisite is missing, `runpane update`
+not need the prerequisites below; see [Built-in updater](#built-in-updater). When a prerequisite is missing, `runpane update`
 hands off to that built-in updater: the running Pane downloads the latest release,
 quits and installs it, and the command prints `"mode": "in-app"`. The handoff
 skips the checkpoint, snapshot and panel restoration described here, and it
@@ -18,6 +18,42 @@ When Pane is not running on the machine, for example because a failed update
 left it unable to start, `runpane update` installs the requested release
 (latest by default) instead, like `runpane install`. If even `runpane` fails, see
 [Bundled runpane](RUNPANE_BUNDLED_CLI.md#how-it-works) for its fallback to `node`.
+
+## Built-in updater
+
+Packaged Pane on Windows, Linux and signed macOS installs checks for a new
+release at launch and every 4 hours and downloads it in the background. When
+the download finishes, a **Restart to update** button appears above the sidebar
+footer (a blue refresh icon when the sidebar is collapsed). After 5 minutes with
+no agent working or waiting for you, no run script running and no worktree being
+removed, a toast offers **Tonight**, **Later** or **Restart now**:
+
+- **Restart now** quits Pane the normal way, installs the update and relaunches.
+  The next launch resumes every interrupted agent in every project on its saved
+  conversation, reopens the Pane that was open and skips the Resume dialog. It
+  relaunches each agent with its resume command and types nothing into it. A
+  Pane whose agent cannot resume stays interrupted and the toast says so; the
+  Resume dialog offers it when it belongs to the active project.
+- **Later** hides the toast for 4 hours. The sidebar button stays.
+- **Tonight** restarts between 2:00 and 5:00 local time, once nothing has run for
+  an hour and the keyboard and mouse have been idle for 30 minutes. To cancel,
+  click the sidebar button (now **Restarts tonight**), then **Don't restart
+  tonight**.
+
+Clicking the sidebar button while something runs says what is running and offers
+**Restart anyway**. A macOS install whose signature cannot be verified downloads
+nothing in the background; its button reads **Update available** and opens the
+Software Update dialog. Turning off **Settings → General → Check for updates
+automatically** stops the checks and the downloads, hides the button and
+cancels Tonight.
+
+To test locally, serve a newer build from a generic feed and start a dev build
+with `TEST_UPDATES=true UPDATE_SERVER_URL=<feed url>`. The dev build downloads
+from that feed and **Restart now** relaunches in place instead of installing.
+These test-only variables shorten the timers: `PANE_TEST_UPDATE_IDLE_SECONDS`,
+`PANE_TEST_UPDATE_TONIGHT_IDLE_SECONDS`,
+`PANE_TEST_UPDATE_TONIGHT_INPUT_IDLE_SECONDS` and
+`PANE_TEST_UPDATE_TONIGHT_HOURS` (for example `0-24`).
 
 ## Prerequisites
 

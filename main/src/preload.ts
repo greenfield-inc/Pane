@@ -1,5 +1,6 @@
 import type { LoopInput } from '../../shared/types/loop';
 import type { AgentChatEvent, AgentChatView, AgentChatSend, AgentInterface } from '../../shared/types/agentChat';
+import type { RestartToUpdateSource, RestartToUpdateState, UpdateRestoreResult } from '../../shared/types/updater';
 import { contextBridge, ipcRenderer } from 'electron';
 import { createPreferencesApi } from '../../shared/types/preferences';
 import { isDaemonOwnedChannel } from '../../shared/types/daemon';
@@ -386,6 +387,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     installUpdate: (): Promise<IPCResponse> => invokeIpc('updater:install-update'),
     copyUpdateCommand: (): Promise<IPCResponse> => invokeIpc('updater:copy-update-command'),
     openTerminalWithCommand: (): Promise<IPCResponse> => invokeIpc('updater:open-terminal-with-command'),
+    getRestartState: (): Promise<IPCResponse<RestartToUpdateState>> => invokeIpc('updater:get-restart-state'),
+    restartToUpdate: (source: RestartToUpdateSource): Promise<IPCResponse> => invokeIpc('updater:restart-to-update', source),
+    snooze: (): Promise<IPCResponse<RestartToUpdateState>> => invokeIpc('updater:snooze'),
+    setTonight: (enabled: boolean): Promise<IPCResponse<RestartToUpdateState>> => invokeIpc('updater:set-tonight', enabled),
+    takeRestoreResult: (): Promise<IPCResponse<UpdateRestoreResult | null>> => invokeIpc('updater:take-restore-result'),
   },
 
   // System utilities
@@ -1077,6 +1083,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, info: UpdaterInfo) => callback(info);
       ipcRenderer.on('updater:update-downloaded', wrappedCallback);
       return () => ipcRenderer.removeListener('updater:update-downloaded', wrappedCallback);
+    },
+    onRestartToUpdateState: (callback: (state: RestartToUpdateState) => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, state: RestartToUpdateState) => callback(state);
+      ipcRenderer.on('updater:restart-state', wrappedCallback);
+      return () => ipcRenderer.removeListener('updater:restart-state', wrappedCallback);
     },
     onUpdaterError: (callback: (error: Error) => void) => {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, error: Error) => callback(error);
