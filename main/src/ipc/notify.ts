@@ -14,6 +14,7 @@ import { buildWindowAppearanceOptions } from '../services/appearanceService';
 import { normalizeAppearance } from '../../../shared/types/appearance';
 import { PaneError } from '../../../shared/paneError';
 import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
+import type { PaneLinkTarget } from '../../../shared/types/paneLinks';
 import type { NotifyCommand, NotifyRemoteCommand, NotifyRequest, NotifyResult, NotifySharedState } from '../../../shared/types/notify';
 import type { AgentState } from '../../../shared/types/agentStatus';
 
@@ -140,9 +141,11 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: AppServices, 
     refreshHost: () => void refreshHost(),
     // Every question buzzes each phone with Needs Input on (D-7), on a desktop or a headless host.
     onQuestion: (event) => void getMobilePushSender(services.configManager).observeQuestion(event),
+    // A connected desktop ignores the host's pane:focus-requested; it opens Panes as pane:// links.
     showHostPane: (paneId, panelId) => {
       const window = services.getMainWindow();
-      if (window && !window.isDestroyed()) window.webContents.send('pane:focus-requested', { paneId, panelId });
+      const target: PaneLinkTarget = panelId ? { kind: 'pane', paneId, panelId } : { kind: 'pane', paneId };
+      if (window && !window.isDestroyed()) window.webContents.send('pane:open-link', target);
     },
   });
 

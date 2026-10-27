@@ -501,4 +501,17 @@ describe('NotifyQueue across machines', () => {
     ask(host, sessionStore, claude);
     expect(chimes).not.toHaveBeenCalled();
   });
+
+  it("clears the host's questions quietly on every screen when the host turns Notify off", async () => {
+    const { queue: host, setSettings } = makeQueue({}, 'mac-studio');
+    const { queue: laptop } = makeQueue({}, 'parsa-devbox');
+    connect(host, laptop);
+    const call = ask(host, sessionStore, claude);
+
+    setSettings({ enabled: false });
+    host.turnOff();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(call.result).toEqual({ unavailable: 'Notify was turned off in Pane.', next: 'Ask in the terminal instead.' });
+    expect(laptop.snapshot()).toMatchObject({ queue: [], strip: null });
+  });
 });

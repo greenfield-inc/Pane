@@ -275,7 +275,8 @@ export class NotifyQueue extends EventEmitter {
         // The host delivered it; Undo can no longer take it back here either.
         if (this.transient?.view.itemId === item.id) this.clearTransient();
       } else if (isOpen(before) && item.state === 'expired') {
-        if (stripId === item.id) this.setTransient({ kind: 'expired', itemId: item.id }, NOTIFY_EXPIRED_SHOW_MS);
+        // Notify turned off on the host clears its questions quietly, as it does on the host's screen.
+        if (stripId === item.id && state.enabled) this.setTransient({ kind: 'expired', itemId: item.id }, NOTIFY_EXPIRED_SHOW_MS);
         else if (this.transient?.view.itemId === item.id) this.clearTransient();
       }
     }
