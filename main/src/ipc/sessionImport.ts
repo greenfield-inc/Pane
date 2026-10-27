@@ -200,7 +200,7 @@ export function registerSessionImportHandlers(ipcMain: IpcMain, services: AppSer
 function toTabCheck(result: RunpanePanelWaitResult): TabCheck {
   if (result.matched) return { state: 'ready' };
   if (result.blocked?.kind === 'first-run-dialog' && /trust|folder access|safety check/i.test(result.blocked.message)) return { state: 'trust' };
-  // An agent that is up but slow keeps its tab; only one that exited or never appeared has failed.
+  // An agent that is running but not confirmed ready keeps its tab; only one that exited or never appeared has failed.
   if (result.timedOut && result.reason?.code === 'agent-not-ready') return { state: 'starting' };
   const reason = (result.reason?.message ?? result.blocked?.message.split('\n')[0])?.replace(/[.\s]+$/u, '')
     ?? (result.timedOut ? `it wasn't ready after ${READY_TIMEOUT_MS / 1000} seconds` : 'it stopped before it was ready');

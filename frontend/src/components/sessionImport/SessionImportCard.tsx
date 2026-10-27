@@ -292,7 +292,7 @@ export function ImportResult({ result, runningElsewhere, onDone }: ImportResultP
         <div className="text-text-secondary">
           {starting.length} still starting:
           <ul className="mt-1 list-disc pl-5 text-xs text-text-tertiary">
-            {starting.map(entry => <li key={entry.key}>{entry.paneName} · {entry.title ?? 'session'}: its agent is up but slow; check its tab</li>)}
+            {starting.map(entry => <li key={entry.key}>{entry.paneName} · {entry.title ?? 'session'}: its agent is running, but Pane couldn't confirm it finished loading; check its tab</li>)}
           </ul>
         </div>
       )}

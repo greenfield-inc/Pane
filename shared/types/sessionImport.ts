@@ -59,7 +59,7 @@ export interface SessionImportScan {
   sessions: ImportSession[];
 }
 
-/** `still starting`: the agent is up but slow; its tab stays open for the person to check. */
+/** `still starting`: the agent is running but Pane couldn't confirm it is ready; its tab stays open for the person to check. */
 export type ImportSessionOutcome = 'continued' | 'not continued' | 'waiting for trust' | 'still starting' | 'skipped running';
 
 export interface ImportSessionResult {
