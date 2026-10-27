@@ -20,6 +20,8 @@ import { commandForAction, IOS_BUTTONS_OPEN_APP, NOTIFY_CATEGORY, notifyCategori
 const TASK = 'pane-notify-background';
 const ANDROID_CHANNEL = 'pane-notify';
 const opensApp = Platform.OS === 'ios' && IOS_BUTTONS_OPEN_APP;
+// Presses already handled; declared before the launch response below is answered.
+const answered = new Set<string>();
 
 const setup = Promise.all([
   ...notifyCategories(opensApp).map(category => Notifications.setNotificationCategoryAsync(category.identifier, category.actions)),
@@ -47,8 +49,6 @@ if (launchResponse) void answerFromAlert(launchResponse);
 Notifications.addNotificationReceivedListener(notification => {
   if (Platform.OS === 'ios') void receive(notification.request);
 });
-
-const answered = new Set<string>();
 
 async function answerFromAlert(response: Notifications.NotificationResponse): Promise<void> {
   if (response.actionIdentifier === Notifications.DEFAULT_ACTION_IDENTIFIER) return;
