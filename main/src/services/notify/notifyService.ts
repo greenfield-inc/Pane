@@ -42,9 +42,11 @@ export class NotifyService {
   private shortcutRegistered = true;
   private broadcastPending = false;
   private lastSettings: NotifySettings;
+  private lastAppearance: string;
 
   constructor(private readonly deps: NotifyServiceDependencies) {
     this.lastSettings = this.settings();
+    this.lastAppearance = appearanceKey(deps.configManager.getConfig());
     this.queue = new NotifyQueue({
       settings: () => this.settings(),
       showOutsideSupported: canFloatOverOtherApps(),
@@ -57,7 +59,13 @@ export class NotifyService {
     });
     this.tray = new NotifyTray({
       openRound: (itemId) => this.openRound(itemId),
-      setShowOutsidePane: (show) => void this.updateSettings({ showOutsidePane: show }),
+      setShowOutsidePane: (show) => {
+        this.updateSettings({ showOutsidePane: show }).catch((error: Error) => {
+          // The menu flipped its checkbox; redraw it from the setting that is still saved.
+          console.error(`[Notify] Show outside Pane was not saved because Pane could not write its config (${error.message}). The setting is unchanged. Free disk space or fix the config folder's permissions, then try again in Settings → Notify.`);
+          this.scheduleBroadcast();
+        });
+      },
       pause: () => this.queue.run({ type: 'pause', minutes: 60 }),
       resume: () => this.queue.run({ type: 'resume' }),
       openInbox: () => this.navigate('inbox'),
@@ -65,7 +73,15 @@ export class NotifyService {
     });
     this.queue.on('change', () => this.scheduleBroadcast());
     this.queue.on('chime', () => this.sendToMainWindow('notify:chime'));
-    deps.configManager.on('config-updated', (config: AppConfig) => this.applySettings(notifySettings(config)));
+    deps.configManager.on('config-updated', (config: AppConfig) => {
+      this.applySettings(notifySettings(config));
+      // The floating windows read the palette when they load, so a new palette recreates them.
+      const appearance = appearanceKey(config);
+      if (appearance === this.lastAppearance) return;
+      this.lastAppearance = appearance;
+      this.windows.destroy();
+      this.scheduleBroadcast();
+    });
     this.applyShortcut(this.lastSettings);
     this.scheduleBroadcast();
   }
@@ -217,4 +233,8 @@ export class NotifyService {
 
 function notifySettings(config: AppConfig): NotifySettings {
   return { ...DEFAULT_NOTIFY_SETTINGS, ...config.notify };
+}
+
+function appearanceKey(config: AppConfig): string {
+  return JSON.stringify([config.appearanceMode, config.theme, config.systemLightTheme, config.systemDarkTheme, config.highContrast]);
 }
