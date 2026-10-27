@@ -1104,6 +1104,7 @@ const PANEL_TYPE_LABELS = {
   'setup-tasks': 'Setup task',
   browser: 'Browser',
   notes: 'Notes',
+  'new-tab': 'New tab',
 } satisfies Record<ToolPanelType, string>;
 
 /** The open Session's recorded blockers, from the latest Session list. */

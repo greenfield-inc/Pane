@@ -386,10 +386,11 @@ The shell installers and the other one-shot commands are at the top of this READ
 ### Requirements
 
 - **Git** installed and available in PATH
-- At least one AI coding agent CLI installed:
-  - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) — `npm install -g @anthropic-ai/claude-code`
-  - [Codex](https://github.com/openai/codex) — `npm install -g @openai/codex`
-  - [Cursor Agent](https://cursor.com/docs/cli) — `curl https://cursor.com/install -fsS | bash` (macOS/Linux, or inside WSL on Windows)
+- At least one AI coding agent CLI installed and signed in. Pane's **New tab** ("+") shows which ones are, and its **Install** and **Sign in** links type these commands for you:
+  - [Claude Code](https://code.claude.com/docs/en/setup) — `curl -fsSL https://claude.ai/install.sh | bash` (on Windows, `npm install -g @anthropic-ai/claude-code`), then `claude auth login`
+  - [Codex](https://github.com/openai/codex) — `curl -fsSL https://chatgpt.com/codex/install.sh | sh` (on Windows, `npm install -g @openai/codex`), then `codex login`
+  - [Cursor Agent](https://cursor.com/docs/cli/installation) — `curl https://cursor.com/install -fsS | bash` (macOS/Linux, or inside WSL on Windows), then `cursor-agent login`
+  - [OpenCode](https://opencode.ai/docs) — `curl -fsSL https://opencode.ai/install | bash` (on Windows, `npm install -g opencode-ai`), then `opencode auth login`
   - [Aider](https://aider.chat/) — `pip install aider-chat`
   - [Goose](https://github.com/block/goose) — or any other CLI agent
 

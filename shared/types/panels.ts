@@ -20,7 +20,7 @@ export interface ToolPanel {
   metadata: ToolPanelMetadata;   // Creation time, position, etc.
 }
 
-export type ToolPanelType = 'terminal' | 'diff' | 'explorer' | 'editor' | 'logs' | 'dashboard' | 'setup-tasks' | 'browser' | 'notes';
+export type ToolPanelType = 'terminal' | 'diff' | 'explorer' | 'editor' | 'logs' | 'dashboard' | 'setup-tasks' | 'browser' | 'notes' | 'new-tab';
 
 export interface ToolPanelState {
   isActive: boolean;
@@ -109,6 +109,8 @@ export interface TerminalPanelState {
   agentDetection?: TerminalAgentDetection;
   /** The command the panel was launched (or staged) with, as the user gave it. */
   launchCommand?: string;
+  /** Typed at the shell's first prompt without pressing Enter, such as an agent's install or sign-in command. */
+  stagedCommand?: string;
   /**
    * `wrapped`: the launch command is a wrapper (or unknown command) that runs the agent.
    * Pane runs it unchanged — no `--session-id`, resume, or prompt-argument rewrites.
@@ -383,11 +385,14 @@ interface PanelCapabilityRegistry {
   'setup-tasks': PanelCapabilities;
   browser: PanelCapabilities;
   notes: PanelCapabilities;
+  'new-tab': PanelCapabilities;
 }
 
 // Panel Registry - Currently only terminal is implemented
 export const PANEL_CAPABILITIES: PanelCapabilityRegistry = {
   notes: { canEmit: [], canConsume: [], singleton: true, canAppearInProjects: true, canAppearInWorktrees: true },
+  // The "+" picker: a tab that becomes the tool the person picks. It never hosts a process.
+  'new-tab': { canEmit: [], canConsume: [], singleton: false, canAppearInProjects: false, canAppearInWorktrees: true },
   terminal: {
     canEmit: ['terminal:exit'],
     canConsume: [], // Terminal doesn't consume events in Phase 1-2

@@ -5,6 +5,7 @@ import { PanelLoadingFallback } from './PanelLoadingFallback';
 import { AgentPanelSurface } from '../agentChat/AgentPanelSurface';
 import { isChatEnabled, useConfigStore } from '../../stores/configStore';
 import { renderLog } from '../../utils/console';
+import { NewTabPanel } from './newTab/NewTabPanel';
 
 // Lazy load panel components for better performance
 const TerminalPanel = lazy(() => import('./TerminalPanel'));
@@ -87,6 +88,8 @@ export const PanelContainer: React.FC<PanelContainerProps> = React.memo(({
 
     // Panel type rendering
     switch (panel.type) {
+      case 'new-tab':
+        return <NewTabPanel panel={panel} isActive={isActive} />;
       case 'notes':
         return <NotesPanel paneId={panel.sessionId} viewId={panel.id} />;
       case 'terminal':

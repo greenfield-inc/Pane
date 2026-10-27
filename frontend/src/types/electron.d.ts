@@ -38,7 +38,7 @@ import type {
   ToolPanel,
 } from '../../../shared/types/panels';
 import type { JsonValue } from '../../../shared/validation/boundaryDecoder';
-import type { PanelAgentStatusEvent } from '../../../shared/types/agentStatus';
+import type { PanelAgentStatusEvent, TerminalLaunchExitedEvent } from '../../../shared/types/agentStatus';
 import type { DiffManifest, DiffScope, FileDiffRequest, FileDiffResult } from '../../../shared/types/gitDiff';
 import type { AgentUsageSnapshot } from '../../../shared/types/agentUsage';
 import type { PaneChatAgent, PaneChatState } from '../../../shared/types/paneChat';
@@ -505,6 +505,7 @@ interface ElectronAPI {
     onPanelResponseAdded: (callback: (data: { panelId: string; content: string }) => void) => () => void;
     
     onTerminalOutput: (callback: (output: import('../../../shared/types/panels').TerminalOutputEvent) => void) => () => void;
+    onTerminalLaunchExited: (callback: (data: TerminalLaunchExitedEvent) => void) => () => void;
     onTerminalCliReady: (callback: (data: { panelId: string }) => void) => () => void;
     onTerminalExited: (callback: (data: { sessionId: string; panelId: string; exitCode: number; signal: number | null }) => void) => () => void;
     onTerminalAlternateScreen: (callback: (data: { panelId: string; active: boolean }) => void) => () => void;

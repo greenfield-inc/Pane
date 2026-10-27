@@ -125,18 +125,19 @@ test('a split pane keeps its tabs in the group strips and collapses the top row'
   await page.screenshot({ path: shot });
   await testInfo.attach('split-groups.png', { path: shot, contentType: 'image/png' });
 
-  // Each group strip has its own "+", anchored menu included.
+  // Each group strip has its own "+", which opens a New tab in that group.
   const addButtons = page.getByRole('button', { name: 'Add tool', exact: true });
   await expect(addButtons).toHaveCount(2);
   const rightAdd = addButtons.nth(1);
   await rightAdd.click();
-  const menu = page.getByRole('menu');
-  await expect(menu).toBeVisible();
-  const menuBox = await menu.boundingBox();
-  const buttonBox = await rightAdd.boundingBox();
-  expect(menuBox && buttonBox && Math.abs(menuBox.x - buttonBox.x) < 40).toBe(true);
-  await page.keyboard.press('Escape');
-  await expect(menu).toBeHidden();
+  const newTab = page.getByRole('tab', { name: /New tab/ });
+  await expect(newTab).toBeVisible();
+  const tabBox = await newTab.boundingBox();
+  const leftAddBox = await addButtons.nth(0).boundingBox();
+  const rightAddBox = await rightAdd.boundingBox();
+  expect(tabBox && leftAddBox && rightAddBox && tabBox.x > leftAddBox.x && tabBox.x < rightAddBox.x).toBe(true);
+  await page.getByRole('button', { name: 'Close New tab', exact: true }).click();
+  await expect(newTab).toHaveCount(0);
 
   // Group tabs are left-aligned real tabs: they close.
   await expect(page.getByRole('button', { name: 'Close Beta', exact: true })).toHaveCount(1);

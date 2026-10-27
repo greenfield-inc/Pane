@@ -30,7 +30,7 @@ import type { HostNavigationMemory } from '../../shared/types/hostNavigation';
 import type { SessionWorkspaceLayout } from '../../shared/types/sessionWorkspaceLayout';
 import type { PanelActivationRequest, SessionPanelLayout, ToolPanel } from '../../shared/types/panels';
 import type { DiffScope, FileDiffRequest } from '../../shared/types/gitDiff';
-import type { PanelAgentStatusEvent } from '../../shared/types/agentStatus';
+import type { PanelAgentStatusEvent, TerminalLaunchExitedEvent } from '../../shared/types/agentStatus';
 import type {
   OrchestrationAssociationInput,
   OrchestrationSessionCreateInput,
@@ -985,6 +985,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, output: TerminalOutputEvent) => callback(output);
       ipcRenderer.on('terminal:output', wrappedCallback);
       return () => ipcRenderer.removeListener('terminal:output', wrappedCallback);
+    },
+
+    onTerminalLaunchExited: (callback: (data: TerminalLaunchExitedEvent) => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, data: TerminalLaunchExitedEvent) => callback(data);
+      ipcRenderer.on('terminal:launchExited', wrappedCallback);
+      return () => ipcRenderer.removeListener('terminal:launchExited', wrappedCallback);
     },
 
     onTerminalCliReady: (callback: (data: { panelId: string }) => void) => {
