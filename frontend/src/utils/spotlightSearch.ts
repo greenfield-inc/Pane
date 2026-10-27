@@ -145,7 +145,8 @@ export function buildSearchItems(sources: SearchSources): SearchItem[] {
       title: command.label,
       detail: '',
       recency: 0,
-      terms: [],
+      // Its shortcut and id still find it, as the old palette did.
+      terms: [command.keys, command.id],
       command,
       disabledReason: disabled ? command.disabledReason?.() ?? 'Command unavailable' : null,
     });
@@ -167,9 +168,9 @@ function compareRanked(a: RankedItem<SearchItem>, b: RankedItem<SearchItem>): nu
   const tier = Math.floor(b.rank) - Math.floor(a.rank);
   if (tier) return tier;
   if (a.keyIndex !== b.keyIndex) return a.keyIndex - b.keyIndex;
+  if (a.item.recency !== b.item.recency) return b.item.recency - a.item.recency;
   // Fuzzy matches carry how tightly the letters sit together; tighter wins.
-  if (a.rank !== b.rank) return b.rank - a.rank;
-  return b.item.recency - a.item.recency || a.item.title.localeCompare(b.item.title);
+  return b.rank - a.rank || a.item.title.localeCompare(b.item.title);
 }
 
 function rank(items: SearchItem[], query: string): SearchItem[] {

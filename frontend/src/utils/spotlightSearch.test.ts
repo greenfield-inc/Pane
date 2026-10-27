@@ -138,9 +138,32 @@ describe('spotlight search journeys', () => {
     expect(items.some(item => item.kind === 'command' && item.title.startsWith('Switch to'))).toBe(false);
   });
 
-  it('orders a tier by recency', () => {
-    // Both contain "runpane"; runpane-update-fix was active a minute ago, wsl-runpane an hour ago.
-    expect(titles(run('runpane', 'panes').sections[0].items)).toEqual(['runpane-update-fix', 'wsl-runpane']);
+  it('orders matches of one strength by recency, whichever name sorts first', () => {
+    // Both names contain "runpane" past their first word: one tier, one key.
+    const tie = (alphaMinutes: number, betaMinutes: number) => sources({
+      panes: [
+        pane('p-a', 'alpha-runpane', 1, { lastViewedAt: ago(alphaMinutes) }),
+        pane('p-b', 'beta-runpane', 1, { lastViewedAt: ago(betaMinutes) }),
+      ],
+    });
+    expect(titles(run('runpane', 'panes', tie(60, 1)).sections[0].items)).toEqual(['beta-runpane', 'alpha-runpane']);
+    expect(titles(run('runpane', 'panes', tie(1, 60)).sections[0].items)).toEqual(['alpha-runpane', 'beta-runpane']);
+  });
+
+  it('orders fuzzy matches by recency before letter distance', () => {
+    // "pg" fuzzily matches both; posthog's letters sit closer, pane-testing was used more recently.
+    const src = sources({
+      panes: [
+        pane('p-old', 'posthog', 1, { lastViewedAt: ago(600) }),
+        pane('p-new', 'pane-testing', 1, { lastViewedAt: ago(5) }),
+      ],
+    });
+    expect(titles(run('pg', 'panes', src).sections[0].items)).toEqual(['pane-testing', 'posthog']);
+  });
+
+  it('finds a command by its shortcut or its id', () => {
+    expect(titles(run('mod+,', 'commands').sections[0]?.items ?? [])).toEqual(['Open Settings']);
+    expect(titles(run('open-settings', 'commands').sections[0]?.items ?? [])).toEqual(['Open Settings']);
   });
 
   it('lists every match in a filtered view', () => {
