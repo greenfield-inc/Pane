@@ -47,7 +47,7 @@ export function GeneralSettings({ persistence, onUpdate, onSendFeedback }: Gener
         <SettingRow
           settingId="automatic-updates"
           label="Check for updates automatically"
-          description="Pane checks for a new release every 24 hours. Installation remains manual."
+          description="Pane checks for a new release at launch and every few hours and downloads it in the background. Restart to update when you're ready."
           saveState={persistence.saveStates['automatic-updates']}
         >
           <ImmediateToggle

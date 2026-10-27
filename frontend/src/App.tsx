@@ -28,14 +28,16 @@ import { ErrorDialog } from './components/ErrorDialog';
 import { PermissionDialog } from './components/PermissionDialog';
 import { DISCORD_INVITE_URL } from './components/DiscordIcon';
 import { ResumeSessionsDialog } from './components/ResumeSessionsDialog';
-import { useErrorStore } from './stores/errorStore';
+import { showActionError, useErrorStore } from './stores/errorStore';
 import { useSessionStore } from './stores/sessionStore';
 import { subscribePanelStatus } from './services/panelStatusSync';
 import { subscribeAttentionInbox, useAttentionInboxStore } from './stores/attentionInboxStore';
 import { useConfigStore } from './stores/configStore';
 import { usePanelStore } from './stores/panelStore';
 import { API } from './utils/api';
-import { restoreSessionSelection, startHostNavigationMemoryWrites } from './utils/hostNavigationMemory';
+import { restoreHostNavigation, restoreSessionSelection, startHostNavigationMemoryWrites } from './utils/hostNavigationMemory';
+import { RestartToUpdateToast } from './components/RestartToUpdateToast';
+import { useRestartToUpdateStore, useRestartToUpdateSync } from './stores/restartToUpdateStore';
 import { createVisibilityAwareInterval } from './utils/performanceUtils';
 import { useWindowActive } from './hooks/useWindowActive';
 import { ContextMenuProvider } from './contexts/ContextMenuContext';
@@ -285,6 +287,9 @@ function App() {
 
   // Register terminal shortcuts (hotkey-triggered clipboard paste)
   useTerminalShortcuts();
+
+  // Follow main's restart-to-update state for the sidebar pill and the toast.
+  useRestartToUpdateSync();
 
   // Load config on app startup
   useEffect(() => {
@@ -681,12 +686,36 @@ function App() {
   ]);
 
   // Check for resumable sessions on startup and on each host switch (auto-resume feature).
-  // A reconnect to the same host does not prompt again.
+  // A reconnect to the same host does not prompt again. The launch after a restart to
+  // update skips the prompt: main has already resumed every agent, so reopen the
+  // remembered Pane and say what came back instead.
   useEffect(() => {
     if (!isLoaded) return;
     let cancelled = false;
+    let firstCheck = true;
+
+    const takeRestoreResult = async () => {
+      try {
+        const result = await window.electronAPI.updater?.takeRestoreResult?.();
+        return result?.success ? result.data ?? null : null;
+      } catch (error) {
+        console.error('[App] Failed to read the restart-to-update result:', error);
+        return null;
+      }
+    };
 
     const checkResumableSessions = async () => {
+      if (firstCheck) {
+        firstCheck = false;
+        const restored = await takeRestoreResult();
+        if (cancelled) return;
+        if (restored) {
+          useRestartToUpdateStore.getState().showRestoreResult(restored);
+          if (!useConfigStore.getState().config) await useConfigStore.getState().fetchConfig();
+          if (!cancelled) await restoreHostNavigation();
+          return;
+        }
+      }
       let sessions: ResumableSession[] = [];
       try {
         const result = await window.electronAPI.sessions.getResumable();
@@ -767,15 +796,9 @@ function App() {
     // Set up version update listener
     if (!window.electronAPI?.events) return;
 
+    // Remembered for the "Update available" pill; the dialog opens only when asked.
     const handleVersionUpdate = (versionInfo: VersionUpdateInfo) => {
       setUpdateVersionInfo(versionInfo);
-      setIsUpdateDialogOpen(true);
-      showNotification(
-        `🚀 Update Available - Pane v${versionInfo.latest}`,
-        'A new version of Pane is available!',
-        '/favicon.ico',
-        `pane:update:${versionInfo.latest}` // Replace an existing OS notification for this version.
-      );
     };
 
     // Set up the listener using the events API
@@ -786,7 +809,7 @@ function App() {
         removeListener();
       }
     };
-  }, [showNotification]);
+  }, []);
 
   const handleUpdateRequest = useCallback((versionInfo: VersionInfo) => {
     setUpdateVersionInfo({
@@ -796,6 +819,24 @@ function App() {
     setIsAboutOpen(false);
     setIsUpdateDialogOpen(true);
   }, []);
+
+  // The release the version check found; a renderer reload loses it, so ask again.
+  const openAvailableUpdate = useCallback(async () => {
+    if (updateVersionInfo) {
+      setIsUpdateDialogOpen(true);
+      return;
+    }
+    try {
+      const response = await window.electronAPI.checkForUpdates();
+      if (!response.success || !response.data) {
+        showActionError('Could not check for updates', response);
+        return;
+      }
+      handleUpdateRequest(response.data);
+    } catch (error) {
+      showActionError('Could not check for updates', error);
+    }
+  }, [updateVersionInfo, handleUpdateRequest]);
 
   const handlePermissionResponse = useCallback(async (
     requestId: string,
@@ -867,6 +908,7 @@ function App() {
               capture('discord_clicked', { source: 'sidebar' });
               void window.electronAPI.openExternal(DISCORD_INVITE_URL);
             }}
+            onUpdateAvailableClick={() => void openAvailableUpdate()}
           />
         </div>
         <SessionView />
@@ -887,6 +929,7 @@ function App() {
         <AboutDialog isOpen={isAboutOpen} onClose={() => setIsAboutOpen(false)} onUpdate={handleUpdateRequest} />
         <FeedbackDialog isOpen={isFeedbackOpen} onClose={() => setIsFeedbackOpen(false)} />
         <LoopDrawer />
+        <RestartToUpdateToast />
         <UpdateDialog
           isOpen={isUpdateDialogOpen}
           onClose={() => setIsUpdateDialogOpen(false)}
