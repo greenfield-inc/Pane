@@ -46,9 +46,9 @@ describe('findHostRepos', () => {
     const repos = await findHostRepos({ home, env: env(), budgetMs });
 
     expect(repos.map(repo => [repo.name, repo.displayPath, repo.branch, repo.source])).toEqual([
-      ['acme-web', '~/code/acme-web', 'main', 'code_folder'],
-      ['billing-api', '~/code/billing-api', 'main', 'code_folder'],
-      ['mobile-app', '~/dev/mobile-app', 'develop', 'code_folder'],
+      ['acme-web', path.join('~', 'code', 'acme-web'), 'main', 'code_folder'],
+      ['billing-api', path.join('~', 'code', 'billing-api'), 'main', 'code_folder'],
+      ['mobile-app', path.join('~', 'dev', 'mobile-app'), 'develop', 'code_folder'],
     ]);
     expect(repos[0].path).toBe(path.join(home, 'code', 'acme-web'));
     expect(repos[0].lastCommitAt).toBe(Date.parse('2026-10-26T10:00:00Z'));
