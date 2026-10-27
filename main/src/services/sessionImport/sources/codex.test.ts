@@ -193,4 +193,22 @@ describe('readCodex', () => {
     expect(running.busy).toEqual([{ folder: '/work/old', agent: 'codex', sessionId: ID_A }]);
     expect(stopped.busy).toEqual([]);
   });
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('keeps the other locked threads when one locked rollout can\'t be read', async () => {
+    const home = defaultHome();
+    const unreadable = writeRollout(home, ID_A, { cwd: '/work/old' }, NOW - 60 * DAY);
+    writeRollout(home, ID_B, { cwd: '/work/app' }, NOW - DAY);
+    writeLock(home, ID_A);
+    writeLock(home, ID_B);
+    fs.chmodSync(unreadable, 0o000);
+    try {
+      const result = await readCodex(context({ processCommands: async () => ['/opt/homebrew/bin/codex'] }));
+
+      expect(result.status).toBe('ok');
+      expect(result.sessions.map(session => [session.sessionId, session.running])).toEqual([[ID_B, 'yes']]);
+      expect(result.busy).toEqual([{ folder: '/work/app', agent: 'codex', sessionId: ID_B }]);
+    } finally {
+      fs.chmodSync(unreadable, 0o600);
+    }
+  });
 });

@@ -74,10 +74,19 @@ export function liveClaudeSessions(context: ReaderContext, configDir: string): L
 /** Folders of live Claude processes: the registry's cwd, else the cwd in that session's transcript. */
 function liveFolders(live: LiveClaudeSession[] | undefined, configDir: string): BusyFolder[] {
   return (live ?? []).flatMap(entry => {
-    const transcript = !entry.cwd && entry.sessionId ? findClaudeTranscript(configDir, entry.sessionId) : undefined;
-    const folder = entry.cwd ?? (transcript ? readTranscriptMeta(transcript).cwd : undefined);
+    const folder = entry.cwd ?? (entry.sessionId ? transcriptFolder(configDir, entry.sessionId) : undefined);
     return folder ? [{ folder, agent: 'claude', sessionId: entry.sessionId }] : [];
   });
+}
+
+/** The cwd in a session's transcript; one Pane can't read leaves only that entry without a folder. */
+function transcriptFolder(configDir: string, sessionId: string): string | undefined {
+  try {
+    const transcript = findClaudeTranscript(configDir, sessionId);
+    return transcript ? readTranscriptMeta(transcript).cwd : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Whether a Claude session is running, from the live registry. */

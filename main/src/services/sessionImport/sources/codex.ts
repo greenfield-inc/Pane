@@ -3,7 +3,7 @@ import path from 'path';
 import type { ImportRunning } from '../../../../../shared/types/sessionImport';
 import { boundary, decodeOptionalBoundary, type BoundarySchema } from '../../../../../shared/validation/boundaryDecoder';
 import type { BusyFolder, ReaderContext, SourceReader } from './types';
-import { absent, codexHome, exists, findCodexTranscript, listDir, mtimeMs, readTailLines, unreadable } from './common';
+import { absent, codexHome, exists, listDir, mtimeMs, readTailLines, unreadable } from './common';
 
 // Codex keeps one rollout per thread at
 // `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-<ts>-<thread id>.jsonl`. Its first
@@ -198,13 +198,24 @@ export const readCodex: SourceReader = async context => {
   return { source: 'codex', status: 'ok', storePaths, sessions, busy: lockedFolders(home, executables) };
 };
 
-/** Folders of Codex threads holding a writer lock while Codex runs, found through each thread's rollout. */
+/**
+ * Folders of Codex threads holding a writer lock while Codex runs, found
+ * through each thread's rollout in one walk of the history. A rollout Pane
+ * can't read leaves only that thread without a folder.
+ */
 function lockedFolders(home: string, executables: string[]): BusyFolder[] {
   if (!executables.some(isCodexExecutable)) return [];
-  return listDir(path.join(home, 'thread-writer-locks')).flatMap(name => {
-    const threadId = /^(.+)\.lock$/u.exec(name)?.[1];
-    const rollout = threadId ? findCodexTranscript(home, threadId) : undefined;
-    const folder = rollout ? parseSessionMeta(readFirstLine(rollout, FIRST_LINE_MAX_BYTES))?.folder : undefined;
-    return folder ? [{ folder, agent: 'codex', sessionId: threadId }] : [];
+  const locked = new Set(listDir(path.join(home, 'thread-writer-locks')).flatMap(name => /^(.+)\.lock$/u.exec(name)?.[1] ?? []));
+  if (locked.size === 0) return [];
+  return rolloutFiles(path.join(home, 'sessions')).flatMap(rollout => {
+    // `rollout-<time>-<thread id>.jsonl`, and thread ids are UUIDs.
+    const threadId = path.basename(rollout, '.jsonl').slice(-36);
+    if (!locked.has(threadId)) return [];
+    try {
+      const folder = parseSessionMeta(readFirstLine(rollout, FIRST_LINE_MAX_BYTES))?.folder;
+      return folder ? [{ folder, agent: 'codex', sessionId: threadId }] : [];
+    } catch {
+      return [];
+    }
   });
 }

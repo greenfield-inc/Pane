@@ -193,4 +193,22 @@ describe('readClaudeCode', () => {
       { folder: '/work/api', agent: 'claude', sessionId: ID_C },
     ]);
   });
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('keeps the other live sessions when one live session\'s transcript can\'t be read', async () => {
+    const config = path.join(root, 'home', '.claude');
+    const unreadable = writeTranscript(config, '-work-old', ID_A, [message(ID_A, { cwd: '/work/old' })], NOW - 60 * DAY);
+    writeTranscript(config, '-work-app', ID_B, [message(ID_B, {})], NOW - DAY);
+    writeRegistry(config, 4242, { sessionId: ID_A });
+    writeRegistry(config, 5151, { sessionId: ID_B, cwd: '/work/app' });
+    fs.chmodSync(unreadable, 0o000);
+    try {
+      const result = await readClaudeCode(context({ isPidAlive: pid => pid === 4242 || pid === 5151 }));
+
+      expect(result.status).toBe('ok');
+      expect(result.sessions.map(session => [session.sessionId, session.running])).toEqual([[ID_B, 'yes']]);
+      expect(result.busy).toEqual([{ folder: '/work/app', agent: 'claude', sessionId: ID_B }]);
+    } finally {
+      fs.chmodSync(unreadable, 0o600);
+    }
+  });
 });
