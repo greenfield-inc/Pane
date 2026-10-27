@@ -44,10 +44,12 @@ interface SessionImportCardProps {
   onClose: (finished: boolean) => void;
   /** Called with the new scan after "Check again". */
   onRescanned?: (scan: SessionImportScan) => void;
+  /** Told when an import starts and ends, so a dialog can stay open meanwhile. */
+  onBusyChange?: (busy: boolean) => void;
 }
 
 /** The "Bring your sessions into Pane" card, used on Home and in a Settings dialog. */
-export function SessionImportCard({ surface, scan, onClose, onRescanned }: SessionImportCardProps) {
+export function SessionImportCard({ surface, scan, onClose, onRescanned, onBusyChange }: SessionImportCardProps) {
   const [selected, setSelected] = useState<Set<string>>(() => new Set(scan.sessions.filter(session => session.preselected).map(session => session.key)));
   const [expanded, setExpanded] = useState<SessionImportSource | null>(null);
   const [progress, setProgress] = useState<SessionImportProgress | undefined>();
@@ -75,6 +77,7 @@ export function SessionImportCard({ surface, scan, onClose, onRescanned }: Sessi
     const keys = [...selected];
     setError(undefined);
     setProgress({ running: true, done: {}, total: {} });
+    onBusyChange?.(true);
     captureSessionImport('started', surface, scan, { selected: keys.length });
     try {
       const outcome = await API.sessionImport.run(keys);
@@ -85,15 +88,19 @@ export function SessionImportCard({ surface, scan, onClose, onRescanned }: Sessi
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setProgress(undefined);
+      onBusyChange?.(false);
     }
   };
 
   const checkAgain = async () => {
     setChecking(true);
+    setError(undefined);
     try {
       const next = await API.sessionImport.scan();
       setSelected(previous => new Set(next.sessions.filter(session => isSelectable(session) && (previous.has(session.key) || session.preselected)).map(session => session.key)));
       onRescanned?.(next);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setChecking(false);
     }
@@ -298,6 +305,11 @@ export function ImportResult({ result, runningElsewhere, onDone }: ImportResultP
         </details>
       )}
       {skipped > 0 && <p className="text-text-tertiary">{skipped} still running elsewhere</p>}
+      {result.recordError && (
+        <p className="text-status-warning">
+          Pane couldn&apos;t update its import record ({result.recordError}), so these sessions may be offered again.
+        </p>
+      )}
       <div className="flex justify-end">
         <Button size="sm" onClick={onDone}>Done</Button>
       </div>

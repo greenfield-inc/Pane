@@ -80,6 +80,8 @@ export interface SessionImportRunResult {
   panesCreated: number;
   /** Sessions that became tabs in Panes that already existed. */
   tabsInExistingPanes: number;
+  /** Why the migrate-to-pane record couldn't be updated, when it couldn't. */
+  recordError?: string;
 }
 
 export interface SessionImportProgress {

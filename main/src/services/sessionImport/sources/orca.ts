@@ -85,11 +85,11 @@ export const readOrca: SourceReader = async context => {
     return unreadable(SOURCE, 'Orca\'s agent status file is in a format Pane doesn\'t recognise', storePaths, isRecord(lastStatus) ? String(lastStatus.version) : undefined);
   }
 
-  const hostAlive = orcaHostAlive(context, userData);
+  const host = orcaHostRunning(context, userData);
   const found: Array<{ candidate: Candidate; running: ImportRunning }> = read.state.candidates.map(candidate => ({
     candidate,
     // Orca or its terminal daemon may have restored the pane since the record was written.
-    running: hostAlive ? 'unknown' : 'no',
+    running: host === 'no' ? 'no' : 'unknown',
   }));
   if (isRecord(lastStatus) && isRecord(lastStatus.entries)) {
     for (const entry of Object.values(lastStatus.entries)) {
@@ -111,7 +111,7 @@ export const readOrca: SourceReader = async context => {
           claudeConfigDir: null,
           codexHome: null,
         },
-        running: presenceRunning(context, presence?.ended === true, pid, hostAlive),
+        running: presenceRunning(context, presence?.ended === true, pid, host),
       });
     }
   }
@@ -198,28 +198,36 @@ function pidIn(file: string): number | undefined {
   return isRecord(content) && Number.isInteger(content.pid) ? Number(content.pid) : undefined;
 }
 
-/** Whether the Orca app or its terminal daemon, which keeps PTYs alive after the window closes, is running. */
-function orcaHostAlive(context: ReaderContext, userData: string): boolean {
+/**
+ * Whether the Orca app or its terminal daemon, which keeps PTYs alive after the
+ * window closes, is running. A marker Pane can't read leaves it unknown.
+ */
+function orcaHostRunning(context: ReaderContext, userData: string): ImportRunning {
   const pidFiles = [path.join(userData, 'orca-runtime.json')];
   const daemonDir = path.join(userData, 'daemon');
-  try {
-    for (const name of fs.readdirSync(daemonDir)) {
-      if (/^daemon-v\d+\.pid$/u.test(name)) pidFiles.push(path.join(daemonDir, name));
+  if (exists(daemonDir)) {
+    try {
+      for (const name of fs.readdirSync(daemonDir)) {
+        if (/^daemon-v\d+\.pid$/u.test(name)) pidFiles.push(path.join(daemonDir, name));
+      }
+    } catch {
+      return 'unknown';
     }
-  } catch {
-    // No daemon has run.
   }
-  return pidFiles.some(file => {
+  let unclear = false;
+  for (const file of pidFiles.filter(exists)) {
     const pid = pidIn(file);
-    return pid !== undefined && context.isPidAlive(pid);
-  });
+    if (pid === undefined) unclear = true;
+    else if (context.isPidAlive(pid)) return 'yes';
+  }
+  return unclear ? 'unknown' : 'no';
 }
 
 /** A hook entry's agent: ended, or its process alive or gone; otherwise as sure as the host. */
-function presenceRunning(context: ReaderContext, ended: boolean, pid: number | undefined, hostAlive: boolean): ImportRunning {
+function presenceRunning(context: ReaderContext, ended: boolean, pid: number | undefined, host: ImportRunning): ImportRunning {
   if (ended) return 'no';
   if (pid !== undefined) return context.isPidAlive(pid) ? 'yes' : 'no';
-  return hostAlive ? 'unknown' : 'no';
+  return host === 'no' ? 'no' : 'unknown';
 }
 
 const RUNNING_RANK = { no: 0, unknown: 1, yes: 2 } satisfies Record<ImportRunning, number>;

@@ -234,6 +234,17 @@ describe('readOrca', () => {
     expect(result.sessions.map(session => session.running)).toEqual(['unknown', 'unknown', 'unknown']);
   });
 
+  it('treats sessions as unknown when an Orca or daemon marker exists but cannot be read', async () => {
+    const userData = tempRoot();
+    orcaStore(userData);
+    writeJson(path.join(userData, 'orca-runtime.json'), '{"pid": 12');
+    writeJson(path.join(userData, 'daemon', 'daemon-v52.pid'), '');
+
+    const result = await readOrca(context({ env: { ORCA_USER_DATA_PATH: userData }, isPidAlive: () => false }));
+
+    expect(result.sessions.map(session => session.running)).toEqual(['unknown', 'unknown', 'unknown']);
+  });
+
   it.each([
     ['darwin', {}, ['Library', 'Application Support', 'orca']],
     ['linux', {}, ['.config', 'orca']],

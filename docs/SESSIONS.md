@@ -310,8 +310,9 @@ Pane" → **Find sessions** opens the same card at any time.
 - **Bring them in** adopts each checkout in place as a Pane, with one tab per
   session resumed by the agent's own id. A transcript kept in a tool's own agent
   folder is first copied into your own Claude Code or Codex store.
-- Sessions still running elsewhere are listed but can't be chosen; quit them
-  and press **Check again**, or use the skill below, which forks them. A tab
+- Sessions still running elsewhere are listed but can't be chosen, and
+  neither can other sessions in the same checkout; quit them and press **Check
+  again**, or use the skill below, which forks them. A tab
   whose agent exits without resuming is closed and reported, and a new Pane
   whose sessions all failed is removed. A tab waiting at the agent's
   folder-trust prompt, or whose agent is still starting, stays open for you.

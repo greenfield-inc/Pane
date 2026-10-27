@@ -161,4 +161,45 @@ describe('placeSessions', () => {
     expect(result).toMatchObject({ panesCreated: 1, results: [{ outcome: 'still starting', paneId: 'pane-1' }] });
     expect(readRecord()[0]).toMatchObject({ result: 'pending' });
   });
+
+  it('refuses a copy that a linked folder would send outside the person\'s store', async () => {
+    const toolHome = path.join(root, 'orca', 'claude-home');
+    const source = path.join(toolHome, 'projects', '-repo', 'm.jsonl');
+    fs.mkdirSync(path.dirname(source), { recursive: true });
+    fs.writeFileSync(source, '{}\n');
+    const elsewhere = path.join(root, 'other-tool', 'projects', '-repo');
+    fs.mkdirSync(elsewhere, { recursive: true });
+    fs.mkdirSync(path.join(stores.claudeConfigDir, 'projects'), { recursive: true });
+    fs.symlinkSync(elsewhere, path.join(stores.claudeConfigDir, 'projects', '-repo'), process.platform === 'win32' ? 'junction' : 'dir');
+    const { port, calls } = fakePort();
+
+    const result = await placeSessions({ sessions: [session('m', '/repo', { source: 'orca', transcript: { agentHome: toolHome, path: source } })], port, stores, paneDir });
+
+    expect(result.results[0].outcome).toBe('not continued');
+    expect(result.results[0].reason).toContain('outside your own agent folder');
+    expect(fs.readdirSync(elsewhere)).toEqual([]);
+    expect(calls.some(call => call.startsWith('adopt'))).toBe(false);
+  });
+
+  it('still checks every tab when the record can\'t be written, and says so', async () => {
+    claudeTranscript('r');
+    fs.mkdirSync(path.join(paneDir, 'migrate-to-pane', 'record.json'), { recursive: true });
+    const { port } = fakePort();
+
+    const result = await placeSessions({ sessions: [session('r', '/repo')], port, stores, paneDir });
+
+    expect(result.results[0]).toMatchObject({ outcome: 'continued', paneId: 'pane-1' });
+    expect(result.recordError).toBeDefined();
+  });
+
+  it('keeps the tab\'s identity when a failed tab can\'t be closed', async () => {
+    claudeTranscript('x');
+    const { port } = fakePort({ x: { state: 'failed', reason: 'it exited' } }, { '/repo': 'pane-old' });
+    port.closeTab = async () => { throw new Error('the terminal would not stop'); };
+
+    const result = await placeSessions({ sessions: [session('x', '/repo')], port, stores, paneDir });
+
+    expect(result.results[0]).toMatchObject({ outcome: 'not continued', paneId: 'pane-old', panelId: 'tab-x' });
+    expect(result.results[0].reason).toBe("Claude Code didn't resume it: it exited. Pane couldn't close its tab (the terminal would not stop), so close it yourself. Say 'migrate to Pane' in Pane Chat to try it another way.");
+  });
 });

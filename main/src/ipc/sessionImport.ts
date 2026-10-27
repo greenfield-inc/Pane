@@ -79,7 +79,13 @@ export function registerSessionImportHandlers(ipcMain: IpcMain, services: AppSer
       sinceMs: now - LISTED_MS,
       tempDir: os.tmpdir(),
       isPidAlive: isProcessAlive,
-      processCommands: () => (processes ??= readProcessTable().then(rows => rows.map(row => row.executable))),
+      processCommands: () => (processes ??= readProcessTable().then(rows => {
+        // The table always holds Pane itself, so an empty one means it couldn't be read.
+        if (rows.length === 0) {
+          throw new PaneError('ERR_SESSION_IMPORT_PROCESSES', "Pane couldn't list running processes, so it can't tell which sessions are still running", 'Press Check again.');
+        }
+        return rows.map(row => row.executable);
+      })),
     };
     latest = scanSessions({ context, readers: SOURCE_READERS, alreadyInPane: alreadyInPane(), excludedRoots: excludedRoots() });
     latest.catch(error => console.error('[SessionImport] Scan failed:', error));
@@ -127,7 +133,9 @@ export function registerSessionImportHandlers(ipcMain: IpcMain, services: AppSer
       return toTabCheck(result);
     },
     async closeTab(panelId) {
-      await commandRegistry.invoke('panels:delete', [panelId]);
+      // SAFETY: the panels:delete handler answers with { success, error }.
+      const result = await commandRegistry.invoke('panels:delete', [panelId]) as { success: boolean; error?: string };
+      if (!result.success) throw new Error(result.error ?? 'the tab could not be closed');
     },
     async rollbackPane(paneId) {
       await sessionManager.archiveSession(paneId);

@@ -56,10 +56,13 @@ one entry per session you placed:
   "result": "continued | continued as a fork | not continued", "at": "<ISO time>" } ] }
 ```
 
-Read it at the start of every run. A session whose `tool` and `id` are already
-in it is "already in Pane", forks included, so a rerun creates nothing twice.
-Pane's "Bring your sessions into Pane" card brings idle sessions in and writes
-this same record, with `tool` set to the agent and a `source` naming the tool.
+Read it at the start of every run. A session whose `tool` and `id` are in it
+with any result other than "not continued" is "already in Pane", forks
+included, so a rerun creates nothing twice; a "not continued" one can be tried
+again. Pane's "Bring your sessions into Pane" card brings idle sessions in and
+writes this same record, with `tool` set to the agent, a `source` naming the
+tool, and `result: "pending"` for a tab that was still starting or waiting at
+its trust prompt.
 
 ## Keep it fast
 
@@ -106,7 +109,8 @@ files.
 - Leave out your own session (this Pane Chat). Mark as **already in Pane** every
   session a Pane tab already runs (`resumeId` in `runpane panels list --pane
   <id> --json` for each Pane in `runpane panes list --json`, or a launch command
-  naming its id) and every session in the migration record.
+  naming its id) and every session the migration record holds in Pane (any
+  result other than "not continued").
 
 ## 2. Show the list and confirm
 

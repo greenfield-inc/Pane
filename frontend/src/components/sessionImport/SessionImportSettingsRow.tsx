@@ -11,6 +11,8 @@ export function SessionImportSettingsRow() {
   const [scan, setScan] = useState<SessionImportScan | null>(null);
   const [finding, setFinding] = useState(false);
   const [error, setError] = useState<string | undefined>();
+  // While an import runs the dialog holds its result, so it can't be dismissed.
+  const [busy, setBusy] = useState(false);
 
   const find = async () => {
     setFinding(true);
@@ -40,9 +42,17 @@ export function SessionImportSettingsRow() {
       >
         <Button variant="secondary" size="sm" onClick={() => void find()} loading={finding}>Find sessions</Button>
       </SettingRow>
-      <Modal isOpen={scan !== null} onClose={() => close(false)} size="md" ariaLabel={SESSION_IMPORT_TITLE} showCloseButton={false}>
+      <Modal
+        isOpen={scan !== null}
+        onClose={() => { if (!busy) close(false); }}
+        size="md"
+        ariaLabel={SESSION_IMPORT_TITLE}
+        showCloseButton={false}
+        closeOnEscape={!busy}
+        closeOnOverlayClick={!busy}
+      >
         <ModalBody className="p-0">
-          {scan && <SessionImportCard surface="settings" scan={scan} onClose={close} onRescanned={setScan} />}
+          {scan && <SessionImportCard surface="settings" scan={scan} onClose={close} onRescanned={setScan} onBusyChange={setBusy} />}
         </ModalBody>
       </Modal>
     </>

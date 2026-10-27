@@ -4,7 +4,7 @@ import type {
   ImportSessionResult,
   SessionImportRunResult,
 } from '../../../../shared/types/sessionImport';
-import { reasonOf } from '../../../../shared/paneError';
+import { PaneError, reasonOf } from '../../../../shared/paneError';
 import { writeRecordEntry, type MigrationRecordEntry } from './record';
 import { SOURCE_NAMES, type ScannedSession } from './scan';
 import { findClaudeTranscript, findCodexTranscript } from './sources/common';
@@ -30,6 +30,7 @@ export interface PlacementPort {
   /** The agent session id Pane stored on the tab for restarts. */
   storedResumeId(panelId: string): string | undefined;
   waitReady(panelId: string): Promise<TabCheck>;
+  /** Rejects when the tab couldn't be closed. */
   closeTab(panelId: string): Promise<void>;
   /** Archive and delete a Pane this run created; its checkout stays. */
   rollbackPane(paneId: string): Promise<void>;
@@ -77,11 +78,17 @@ export async function placeSessions(options: PlacementOptions): Promise<SessionI
     results.set(session.key, { key: session.key, source: session.source, agent: session.agent, title: session.title, ...result });
     options.onProgress?.(session);
   };
+  let recordError: string | undefined;
+  // A record that can't be written never stops the run: every tab still gets its check and cleanup.
   const record = (session: ScannedSession, result: MigrationRecordEntry['result'], paneId: string | null, panelId: string | null) => {
-    writeRecordEntry(paneDir, {
-      tool: session.agent, id: session.sessionId, folder: session.folder ?? '', paneId, panelId, forkId: null,
-      result, at: now().toISOString(), source: session.source,
-    });
+    try {
+      writeRecordEntry(paneDir, {
+        tool: session.agent, id: session.sessionId, folder: session.folder ?? '', paneId, panelId, forkId: null,
+        result, at: now().toISOString(), source: session.source,
+      });
+    } catch (error) {
+      recordError ??= reasonOf(error);
+    }
   };
 
   const byCheckout = new Map<string, { repoRoot: string; sessions: ScannedSession[] }>();
@@ -154,12 +161,16 @@ export async function placeSessions(options: PlacementOptions): Promise<SessionI
     } else if (check.state === 'starting') {
       finish(item.session, { ...base, outcome: 'still starting' });
     } else {
-      await port.closeTab(item.panelId).catch(() => undefined);
-      finish(item.session, {
-        outcome: 'not continued',
-        reason: `${agentLabel(item.session)} didn't resume it: ${check.reason}. ${RERUN_NEXT}`,
-      });
-      record(item.session, 'not continued', null, null);
+      const closeError = await port.closeTab(item.panelId).then(() => undefined, (error: Error) => reasonOf(error));
+      const failure = `${agentLabel(item.session)} didn't resume it: ${check.reason}.`;
+      if (closeError) {
+        // The tab is still there: keep its identity so the person can find and close it.
+        finish(item.session, { ...base, outcome: 'not continued', reason: `${failure} Pane couldn't close its tab (${closeError}), so close it yourself. ${RERUN_NEXT}` });
+        record(item.session, 'not continued', item.paneId, item.panelId);
+      } else {
+        finish(item.session, { outcome: 'not continued', reason: `${failure} ${RERUN_NEXT}` });
+        record(item.session, 'not continued', null, null);
+      }
       continue;
     }
     survivingTabs.set(item.paneId, (survivingTabs.get(item.paneId) ?? 0) + 1);
@@ -177,7 +188,7 @@ export async function placeSessions(options: PlacementOptions): Promise<SessionI
   const ordered = options.sessions.map(session => results.get(session.key)).filter((result): result is ImportSessionResult => Boolean(result));
   const tabsInExistingPanes = ordered.filter(result =>
     result.paneId && !createdPanes.has(result.paneId) && result.outcome !== 'not continued' && result.outcome !== 'skipped running').length;
-  return { results: ordered, panesCreated, tabsInExistingPanes };
+  return { results: ordered, panesCreated, tabsInExistingPanes, recordError };
 }
 
 function agentLabel(session: ScannedSession): string {
@@ -219,10 +230,29 @@ function copyTranscript(session: ScannedSession, stores: PersonStores): void {
   if (!session.transcript || !target || personStoreHas(session.agent, session.sessionId, stores)) return;
   const relative = path.relative(session.transcript.agentHome, session.transcript.path);
   if (relative.startsWith('..') || path.isAbsolute(relative)) {
-    throw new Error(`transcript ${session.transcript.path} is outside ${session.transcript.agentHome}`);
+    throw new PaneError('ERR_SESSION_IMPORT_COPY', `its transcript ${session.transcript.path} is outside ${session.transcript.agentHome}`, RERUN_NEXT);
   }
   const destination = path.join(target, relative);
+  fs.mkdirSync(target, { recursive: true });
+  const storeRoot = fs.realpathSync(target);
+  assertInsideStore(storeRoot, path.dirname(destination));
   fs.mkdirSync(path.dirname(destination), { recursive: true });
+  // Checked again once created: a folder on the way could be a link into another store.
+  assertInsideStore(storeRoot, path.dirname(destination));
   fs.copyFileSync(session.transcript.path, destination, fs.constants.COPYFILE_EXCL);
+}
+
+/** The folder, resolved through any links, must stay inside the person's own store. */
+function assertInsideStore(storeRoot: string, folder: string): void {
+  let existing = folder;
+  while (!fs.existsSync(existing) && path.dirname(existing) !== existing) existing = path.dirname(existing);
+  const resolved = fs.realpathSync(existing);
+  if (resolved !== storeRoot && !resolved.startsWith(storeRoot + path.sep)) {
+    throw new PaneError(
+      'ERR_SESSION_IMPORT_COPY',
+      `copying its transcript would write to ${resolved}, outside your own agent folder ${storeRoot}, so nothing was copied`,
+      RERUN_NEXT,
+    );
+  }
 }
 

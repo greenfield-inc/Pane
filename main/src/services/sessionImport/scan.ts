@@ -10,6 +10,7 @@ import {
   type SessionImportSource,
 } from '../../../../shared/types/sessionImport';
 import type { FoundSession, ReaderContext, SourceReader, SourceReadResult } from './sources/types';
+import { isValidOpenCodeSessionId } from '../agents/opencodeLaunch';
 
 const LISTED_DAYS = 30;
 const PRESELECTED_DAYS = 7;
@@ -76,6 +77,7 @@ export async function scanSessions(options: ScanOptions): Promise<ScanOutcome> {
   const sessions = merged
     .map(found => toImportSession(found, found.folder ? checkouts.get(found.folder) : undefined, options.alreadyInPane))
     .filter(session => !session.checkout || !isUnder(session.checkout, options.excludedRoots));
+  markOccupiedCheckouts(sessions);
   preselect(sessions, context.now);
   sessions.sort((left, right) => right.lastActiveMs - left.lastActiveMs);
 
@@ -181,12 +183,40 @@ function toImportSession(found: FoundSession, checkout: GitCheckout | undefined,
 
 function unavailableReason(found: FoundSession, checkout: GitCheckout | undefined): string | undefined {
   if (!isResumableImportAgent(found.agent)) return `Pane can't resume ${agentName(found.agent)} yet`;
+  if (!isValidSessionId(found.agent, found.sessionId)) return `its session id isn't one ${agentName(found.agent)} would write`;
   if (!found.folder || !fs.existsSync(found.folder)) return 'folder no longer exists';
   if (!checkout) return "folder isn't in a git repository";
   if (found.agent === 'claude' && !samePath(found.folder, checkout.checkout)) {
     return "started in a subfolder; say 'migrate to Pane' in Pane Chat";
   }
   return found.unavailable;
+}
+
+/**
+ * A checkout with a session still running (or maybe running) outside Pane is
+ * busy: bringing in another of its sessions would put two agents in one folder.
+ */
+function markOccupiedCheckouts(sessions: ScannedSession[]): void {
+  const occupied = new Map<string, SessionImportSource>();
+  for (const session of sessions) {
+    if (session.checkout && session.running !== 'no' && !session.alreadyInPane) occupied.set(session.checkout, session.source);
+  }
+  for (const session of sessions) {
+    const busyIn = session.checkout ? occupied.get(session.checkout) : undefined;
+    if (busyIn && session.running === 'no' && !session.alreadyInPane && !session.unavailable) {
+      session.unavailable = `another session is running in this checkout in ${SOURCE_NAMES[busyIn]}`;
+    }
+  }
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+
+/**
+ * Session ids come from other tools' files and end up on a terminal command
+ * line, so only the shape each agent itself writes is accepted.
+ */
+function isValidSessionId(agent: string, sessionId: string): boolean {
+  return agent === 'opencode' ? isValidOpenCodeSessionId(sessionId) : UUID.test(sessionId);
 }
 
 /** Whether the card lets the person tick this session. */

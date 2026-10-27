@@ -11,7 +11,11 @@ export interface ReaderContext {
   /** Folder for temporary copies of SQLite stores; the reader deletes its copies. */
   tempDir: string;
   isPidAlive(pid: number): boolean;
-  /** Executable paths (or names, where the OS hides the path) of running processes, read once per scan. */
+  /**
+   * Executable paths (or names, where the OS hides the path) of running
+   * processes, read once per scan. Rejects when the process table can't be
+   * read, so a reader that needs it fails closed.
+   */
   processCommands(): Promise<string[]>;
 }
 
