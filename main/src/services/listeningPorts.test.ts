@@ -56,10 +56,10 @@ async function startOneShotListener(): Promise<{ child: ChildProcess; port: numb
 }
 
 /**
- * Another Pane process on this machine whose remote desktop tunnels `hostPort`; resolves to the
- * port its tunnel listens on.
+ * Another Pane process on this machine whose remote desktop tunnels `hostPort`. Resolves to the
+ * port its tunnel listens on, and `stop`, which lets it exit and remove its registry file.
  */
-async function startTunnellingPane(hostPort: number): Promise<number> {
+async function startTunnellingPane(hostPort: number): Promise<{ tunnelPort: number; stop(): Promise<void> }> {
   const [bundle] = buildSync({
     entryPoints: [path.join(__dirname, '../daemon/client/portTunnel.ts')],
     bundle: true,
@@ -72,10 +72,17 @@ async function startTunnellingPane(hostPort: number): Promise<number> {
   const script = path.join(dir, 'tunnel.js');
   await fs.writeFile(script, `${bundle.text}
 module.exports.createPortTunnel(() => { throw new Error('unused'); }).sync([${hostPort}])
-  .then(ports => console.log(ports.get(${hostPort})));`);
-  const { child, port } = await startListener(`require(${JSON.stringify(script)})`);
+  .then(ports => console.log(ports.get(${hostPort})));
+process.stdin.once('end', () => process.exit()).resume();`);
+  const { child, port } = await startListener(`require(${JSON.stringify(script)})`, 'pipe');
   child.once('exit', () => void fs.rm(dir, { recursive: true, force: true }));
-  return port;
+  return {
+    tunnelPort: port,
+    async stop() {
+      child.stdin?.end();
+      await exited(child);
+    },
+  };
 }
 
 async function freePort(): Promise<number> {
@@ -183,10 +190,11 @@ describe('listening port monitor', { timeout: 30_000 }, () => {
 
   it("leaves out another Pane process's tunnel listeners, so desktops never mirror each other's mirrors", async () => {
     const { port } = await startListener(HTTP_SERVER);
-    const tunnelPort = await startTunnellingPane(port);
+    const { tunnelPort, stop } = await startTunnellingPane(port);
     const monitor = createListeningPortMonitor({ panePid: NOT_PANE, terminalPanes: () => [] });
 
     const ports = (await monitor.refresh()).ports.map(entry => entry.port);
+    await stop();
     expect(ports).toContain(port);
     expect(tunnelPort).not.toBe(port);
     expect(ports).not.toContain(tunnelPort);
