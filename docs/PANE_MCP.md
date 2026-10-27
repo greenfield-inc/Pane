@@ -33,7 +33,7 @@ A server that offers dozens of tools makes models, especially smaller ones, wors
 
 | Toolset | Tools |
 |---|---|
-| `core` (default) | `agents_start`, `agents_status`, `agents_send`, `panels_create` (a new agent tab in an existing Pane), `panels_input` (exact keys, for menus and prompts), `repos_list`, `repos_add`, `panes_list`, `workspace_state`, `panes_git_status`, `panes_archive`, `panes_restore`, `links_create`, `docs_search`, `docs_read`, `doctor` |
+| `core` (default) | `agents_start`, `agents_status`, `agents_send`, `panels_create` (a new agent tab in an existing Pane), `panels_input` (exact keys, for menus and prompts), `repos_list`, `repos_add`, `panes_list`, `workspace_state`, `panes_git_status`, `panes_archive`, `panes_restore`, `links_create`, `docs_search`, `docs_read`, `doctor`, `notify` (ask the person and wait for the answer) |
 | `agents` | the three agent tasks, `workspace_state`, `watch` |
 | `panes` | create, adopt, list, archive, restore, pin, unpin, rename, focus, cost, run and stop the run script, move to a folder, `folders_list`, `folders_create` |
 | `panels` | create, list, output, screen, input, submit, submit-composer, wait |
@@ -52,6 +52,18 @@ The core set is built around the three jobs agents most often need, each finishe
 - `agents_start`: starts the agent with the task, waits until it is ready, and returns the pane and panel ids and a `pane://` link. Pass `pane` to open it as a new tab in an existing Pane (review, audit, fix, QA); pass `repo` and `name` only for new work, which creates a Pane. 1 feature = 1 worktree = 1 branch = 1 Pane; reviews, audits, fixes and QA for it are tabs in that Pane.
 - `agents_status`: whether the agent is working, ready, blocked (waiting on a person), idle, or exited, plus its current screen.
 - `agents_send`: submits a follow-up and reports whether the agent took it or queued it behind its current turn (`delivery`), read from the agent's transcript where Pane can find it.
+
+## Asking the person: notify
+
+`notify` asks the person a question, or tells them something, on screen wherever they are, and returns their answer as the tool result. `ui` picks the look: `options` (1 to 9 `choices`; returns `{answer, note?}` with the chosen label), `approve` (returns `{approved, note?}`), `ask` (returns `{answer}`), or `info` (returns `{delivered}` at once). `choices`, `suggestions` and `action` are typed arrays and objects in the input schema. It needs no `yes`. When Pane is not running, Notify is off, or the Pane is too old to have notify, it returns `{unavailable, next}` and the agent asks in its terminal instead.
+
+A question can wait for hours, and each client limits a tool call differently:
+
+- While any call runs, the server sends a `notifications/progress` about every minute when the request carried a progress token. That keeps Claude Code's 30-minute idle window for stdio servers open.
+- Claude Code and Codex wait in one call. Pane's registration gives Codex a long per-server tool timeout.
+- Every other client, including Cursor's CLI (which ends each call after a fixed 60 seconds), gets `{waiting: true, id, next}` after about 50 seconds. The question stays on screen, and the agent calls `notify` again with `resume: <id>`. Pane ends this loop after 15 minutes without an answer and returns `unavailable`.
+
+The server tells Pane which agent is asking (Claude, Codex, Cursor, or the client's own name) from the client's MCP name, and inside a Pane terminal the question names its Pane and panel. See [Pane Notify](PANE_NOTIFY.md).
 
 ## Docs and links
 
@@ -95,7 +107,7 @@ Automated tests cover the registration and link logic on every OS. Check these b
 **macOS, Windows, and Linux**
 
 1. Install and launch Pane, with Claude Code, Codex, and Cursor installed.
-2. Run `claude mcp list`, `codex mcp list`, and `agent mcp list`. Each lists `pane`. If Cursor asks for approval, run `agent mcp enable pane`; it should report ready with 15 core tools.
+2. Run `claude mcp list`, `codex mcp list`, and `agent mcp list`. Each lists `pane`. If Cursor asks for approval, run `agent mcp enable pane`; it should report ready with 17 core tools.
 3. In a fresh `claude` session, ask "Use Pane to list my repos". It calls `repos_list`.
 4. Quit and relaunch Pane. The Claude, Codex, and Cursor configs are unchanged.
 5. Turn off **Settings → AI & Agents → Register Pane tools with Claude Code, Codex, and Cursor**. `pane` is gone from all three configs, and the other entries are unchanged.
@@ -132,7 +144,7 @@ Automated tests cover the registration and link logic on every OS. Check these b
 - Streaming. `watch --follow` and `watch --until-event` aren't offered; use `agents_status`, or `watch` with `timeoutMs`.
 - App settings. Agents can't read or change Pane's settings.
 - Permanently deleting Panes or removing repositories. Those stay in the app, where the user sees what goes.
-- Progress notifications and pagination (the full list is small).
+- Pagination (the full list is small).
 - Code or scripts run inside the MCP server itself. Agents run code in Pane terminals through `agents_start` and `agents_send`.
 
 ## Protocol
@@ -146,7 +158,7 @@ Only JSON-RPC goes to stdout, and the server exits when stdin closes. Cancelling
 Tools are generated from [`contracts/runpane/contract.json`](../contracts/runpane/contract.json) when the server starts:
 
 - Every command that has result `jsonSchemas` becomes a tool. Spaces and hyphens in the name become underscores: `repos list` → `repos_list`, `panels submit-composer` → `panels_submit_composer`.
-- The tool's inputs are the flags from the command's `usage` lines and its `agentContext` arguments, in camelCase (`--timeout-ms` → `timeoutMs`). Flags that take a value are strings; flags without one are booleans. Daemon commands also accept `paneDir`.
+- The tool's inputs are the flags from the command's `usage` lines and its `agentContext` arguments, in camelCase (`--timeout-ms` → `timeoutMs`). Flags that take a value are strings and flags without one are booleans, unless the `agentContext` argument declares a JSON `schema` (an enum, array, or object); array and object values reach the CLI as JSON (`--choices=[...]`). Daemon commands also accept `paneDir`.
 - The description combines the command's summary, details, and notes from `agentContext`. The title is `runpane <command>`.
 - The output schema is the command's `*Result` JSON schema. Every call runs `runpane <command> … --json` and returns its JSON output unchanged, both as `structuredContent` and as a text block for older clients.
 - A non-zero exit returns a tool error (`isError: true`). A CLI failure reads as its message, a `Next:` line that names tools instead of CLI commands, and a `Code:` line; a command's own `ok: false` result comes back as its JSON. Bad arguments are tool errors too, so the model can correct them. An unknown tool name is a JSON-RPC Invalid Params error (`-32602`).
@@ -159,7 +171,7 @@ A few flags are left out. `--json` is always passed. `--follow` and `--until-eve
 
 ## Confirmation
 
-Mutating tools keep the CLI's confirmation rule. Every command whose usage includes `--yes` gets a `yes` input. Without `yes: true`, the call fails with the CLI's own refusal and changes nothing. Tools are also annotated with `readOnlyHint`, so clients can auto-approve read-only tools and prompt for the rest.
+Mutating tools keep the CLI's confirmation rule. Every command whose usage includes `--yes` gets a `yes` input; `notify` and `report` have none. Without `yes: true`, the call fails with the CLI's own refusal and changes nothing. Tools are also annotated with `readOnlyHint`, so clients can auto-approve read-only tools and prompt for the rest.
 
 ## Agent guidance
 
