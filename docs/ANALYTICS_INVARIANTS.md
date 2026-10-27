@@ -179,12 +179,26 @@ count buckets.
 Keep core desktop activity (`app_opened`, `app_closed`, `session_created`,
 `panel_switched`, `terminal_panel_created`). Neither wrapper emits routine
 command starts or successes. Preserve sanitized wrapper failures and download
-lifecycle events; honor explicit local analytics opt-out as well as CI and
-`RUNPANE_TELEMETRY_DISABLED`.
+lifecycle events; honor explicit local analytics opt-out as well as CI,
+`DO_NOT_TRACK=1` and `RUNPANE_TELEMETRY_DISABLED`.
+
+`runpane_wrapper_command_failed` reports thrown errors, and non-zero exits from
+`install` or `update` only (also when setup runs them) (`runTrackedCommand` in
+`packages/runpane/src/cli.ts` and `run_tracked_command` in the pip `cli.py`).
+Other exit codes are documented results and send nothing. The event carries
+`error_code` (the code the `--json` error prints) and a `failure_category` read
+from that code and the message's first line. Both wrappers share
+`<PANE_DIR>/runpane-wrapper-telemetry.json`: one failure event per cause per
+hour and at most 10 failure events per hour per install.
 
 Local control emits only `runpane_local_control_failed` for thrown failures or
 handled `ok: false` results. Normal wait deadlines and optional agent
-unavailability are excluded. Its properties are `action`, `status`, `command_ok`,
+unavailability are excluded. A `panes create` or `panels create` result reports
+its first failed item's error code, or why the agent was not ready
+(`no-agent-detected`, `agent-not-ready`, `command-exited`, `agent-blocked`,
+`readiness-timeout`) or that the starting message was not confirmed
+(`delivery-unverified`). `error_code` is one of those, a listed errno, or a
+Pane `ERR_*` code; anything else is `unknown`. Its properties are `action`, `status`, `command_ok`,
 `failure_kind`, `error_type`, `error_code`, and `failure_category`, plus app version,
 platform and Electron version. Each coarse operation/category/code combination
 reports at most once per five minutes, with an overall cap of 20 per hour per

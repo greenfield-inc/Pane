@@ -418,10 +418,14 @@ npm package downloads use `source=npm` when requesting release artifacts from
 matching GitHub release assets and prints a warning.
 
 The wrapper sends best-effort command failures and download lifecycle telemetry
-with a persisted anonymous `install_id`. Successful routine commands emit nothing.
+with a persisted anonymous `install_id`. Successful routine commands emit nothing,
+and neither do documented result exits such as `panels wait` not ready or `doctor`
+findings. A failure loop sends each cause at most once an hour, and at most 10
+failures an hour.
 Distinct `install_id` counts on `runpane_wrapper_*` events measure installs that
 report failures or download activity, not all CLI users. Telemetry is disabled in
-CI, when local analytics is explicitly opted out, or with `RUNPANE_TELEMETRY_DISABLED=1`.
+CI, when local analytics is explicitly opted out, or with `DO_NOT_TRACK=1` or
+`RUNPANE_TELEMETRY_DISABLED=1`.
 
 ## Maintenance Notes
 
