@@ -21,6 +21,7 @@ import {
 } from '../../../shared/types/sessionImport';
 import type { TerminalPanelState } from '../../../shared/types/panels';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+import { PaneError } from '../../../shared/paneError';
 import type {
   RunpanePaneAdoptResult,
   RunpanePanelCreateResult,
@@ -145,20 +146,27 @@ export function registerSessionImportHandlers(ipcMain: IpcMain, services: AppSer
   commandRegistry.register('session-import:progress', (): SessionImportProgress => progress);
 
   commandRegistry.register('session-import:run', async (request: PaneCommandValue): Promise<SessionImportRunResult> => {
-    if (progress.running) throw new Error('Pane is already bringing sessions in.');
+    if (progress.running) {
+      throw new PaneError(
+        'ERR_SESSION_IMPORT_RUNNING',
+        'Pane is already bringing sessions in, so this request was not started and nothing changed.',
+        'Wait for the current import to finish, then open "Bring sessions into Pane" again.',
+      );
+    }
     const keys = new Set(decodeBoundary(request, boundary.array(boundary.string)));
-    // Rescan so a session that started running since the card was drawn is left alone.
-    const fresh = await scan();
-    const chosen = [...keys].flatMap(key => fresh.sessions.get(key) ?? []);
-    const skipped: ImportSessionResult[] = chosen.filter(session => !isSelectable(session)).map(session => ({
-      key: session.key, source: session.source, agent: session.agent, title: session.title,
-      outcome: session.running === 'no' ? 'not continued' : 'skipped running',
-      reason: session.alreadyInPane ? 'It is already in Pane.' : session.unavailable,
-    }));
-    const placeable = chosen.filter(isSelectable);
+    // Claim the run before the first await, so a second request can't start alongside it.
     progress = { running: true, done: {}, total: {} };
-    for (const session of placeable) progress.total[session.source] = (progress.total[session.source] ?? 0) + 1;
     try {
+      // Rescan so a session that started running since the card was drawn is left alone.
+      const fresh = await scan();
+      const chosen = [...keys].flatMap(key => fresh.sessions.get(key) ?? []);
+      const skipped: ImportSessionResult[] = chosen.filter(session => !isSelectable(session)).map(session => ({
+        key: session.key, source: session.source, agent: session.agent, title: session.title,
+        outcome: session.running === 'no' ? 'not continued' : 'skipped running',
+        reason: session.alreadyInPane ? 'It is already in Pane.' : session.unavailable,
+      }));
+      const placeable = chosen.filter(isSelectable);
+      for (const session of placeable) progress.total[session.source] = (progress.total[session.source] ?? 0) + 1;
       const result = await placeSessions({
         sessions: placeable,
         port,
