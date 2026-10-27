@@ -128,11 +128,18 @@ requested release (latest by default) instead, like `runpane install`.
 Both the running app and the requested target must support this protocol.
 Existing 2.4.182 releases do not provide this upgrade path; install a
 continuity-capable release manually first. See the
-[prerequisites and recovery guide](../../docs/UPDATE_RECOVERY.md). Cached/local npm installs,
-system-managed Linux packages, non-stable/daemon installer options, custom download
-directories, missing standalone Node, and unwritable targets
-are refused before downtime. Python delegates to the managed engine installed
-by Pane and records the invoking Python environment.
+[prerequisites and recovery guide](../../docs/UPDATE_RECOVERY.md). Non-stable/daemon
+installer options and custom download directories are refused. When this host
+cannot run the independent update (no standalone Node, an unwritable install, a
+system-managed Linux package, a cached/local npm install), `runpane update`
+asks the running Pane to install the latest release with its built-in updater
+instead, the same path as the Settings Update button. That handoff updates the
+app and its managed CLI; an npm or pip CLI is reported as not updated. With
+`--wait`, it returns once the relaunched Pane reports the new version. It
+applies to `--version latest` without `--pane-path`, `--cli-only` or `--dry-run`, and needs
+Pane open. Python delegates to the managed engine installed by Pane and records
+the invoking Python environment; without that engine or Node it hands off the
+same way.
 
 The command returns an operation ID after the independent helper acknowledges
 startup. That is acceptance, not completion. The
