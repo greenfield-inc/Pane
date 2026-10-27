@@ -1279,6 +1279,20 @@ describe('TerminalPanelManager hidden output delivery', () => {
     expect(ordinaryPrompt.commandToRun).toBe('codex --yolo "Read the guide and initialize Pane Chat."');
   });
 
+  it('keeps a startup prompt literal in PowerShell, and leaves it out where cmd would rewrite it', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const prompt: TerminalPanelState = { initialInputMode: 'argument', initialInput: 'Repo demo-$(Write-Output EVALUATED) isn\'t "safe"' };
+
+    const codex = manager.resolveCliLaunchCommand('panel-1', 'codex --yolo', { agentType: 'codex', ...prompt }, 'powershell');
+    const claude = manager.resolveCliLaunchCommand('11111111-1111-4111-8111-111111111111', 'claude', { agentType: 'claude', ...prompt }, 'pwsh.exe');
+    const cmd = manager.resolveCliLaunchCommand('panel-3', 'codex --yolo', { agentType: 'codex', initialInputMode: 'argument', initialInput: 'Use 100% of it' }, 'cmd');
+
+    expect(codex.commandToRun).toBe('codex --yolo \'Repo demo-$(Write-Output EVALUATED) isn\'\'t "safe"\'');
+    expect(claude.commandToRun).toBe('claude --session-id 11111111-1111-4111-8111-111111111111 \'Repo demo-$(Write-Output EVALUATED) isn\'\'t "safe"\'');
+    expect(cmd.commandToRun).toBe('codex --yolo');
+    expect(cmd.customState.initialInputSentAt).toBeUndefined();
+  });
+
   it('passes fresh Claude slash input as a quoted startup argument', () => {
     const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
 

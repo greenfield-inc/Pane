@@ -118,7 +118,7 @@ import { detectAgentComposer, detectAgentFromScreen } from './agents/agentScreen
 import { readForegroundExecutablePath, readForegroundProcessGroup } from '../utils/foregroundProcess';
 import { buildCursorLaunchCommand, createCursorReadyDetector, extractCursorChatId } from './agents/cursorLaunch';
 import { resolveOpenCodeLaunchCommand } from './agents/opencodeLaunch';
-import { quoteShellWord } from './agents/shellWord';
+import { isPosixShell, quoteShellWord } from './agents/shellWord';
 import {
   bracketedPaste,
   canLaunchWithPromptFile,
@@ -446,10 +446,16 @@ export class TerminalPanelManager extends EventEmitter {
     return `"${value.replace(/([\\"$`])/g, '\\$1')}"`;
   }
 
-  /** An argument-mode prompt as one shell word: its prompt file read by the shell, or the quoted text. */
-  private initialPromptWord(customState: TerminalPanelState): string {
+  /**
+   * An argument-mode prompt as one literal shell word: its prompt file read by the shell, or the
+   * text quoted for `shellType`. PowerShell, cmd and fish don't read POSIX escapes, so they get
+   * their own quoting. Undefined when the shell cannot take the text literally (cmd).
+   */
+  private initialPromptWord(customState: TerminalPanelState, shellType: string | undefined): string | undefined {
     const fileWord = customState.initialInputFile ? promptFileShellWord(customState.initialInputFile) : undefined;
-    return fileWord ?? this.quoteCommandArgument(customState.initialInput ?? '');
+    if (fileWord) return fileWord;
+    const text = customState.initialInput ?? '';
+    return isPosixShell(shellType) ? this.quoteCommandArgument(text) : quoteShellWord(text, shellType);
   }
 
   /**
@@ -562,7 +568,7 @@ export class TerminalPanelManager extends EventEmitter {
     };
 
     const resolution = agentType === 'claude'
-      ? this.resolveClaudeLaunch(panelId, initialCommand, customState, nextState, isWSL)
+      ? this.resolveClaudeLaunch(panelId, initialCommand, customState, nextState, isWSL, isWSL ? 'bash' : shellType)
       : agentType === 'codex'
         ? this.resolveCodexLaunch(panelId, initialCommand, customState, nextState, isWSL ? 'bash' : shellType)
         : agentType === 'cursor'
@@ -606,6 +612,7 @@ export class TerminalPanelManager extends EventEmitter {
     customState: TerminalPanelState,
     nextState: TerminalPanelState,
     isWSL = false,
+    shellType?: string,
   ): CliLaunchResolution | undefined {
     if (
       !initialCommand.includes('--session-id') &&
@@ -629,9 +636,10 @@ export class TerminalPanelManager extends EventEmitter {
         : undefined;
       const canResumeClaudeSession = customState.hasClaudeSessionId === true && Boolean(existingClaudeSessionId)
         && (!checkTranscript || Boolean(transcript));
-      const initialPromptArg = customState.initialInputMode === 'argument' && customState.initialInput?.trim()
-        ? ` ${this.initialPromptWord(customState)}`
-        : '';
+      const promptWord = customState.initialInputMode === 'argument' && customState.initialInput?.trim()
+        ? this.initialPromptWord(customState, shellType)
+        : undefined;
+      const initialPromptArg = promptWord ? ` ${promptWord}` : '';
 
       nextState.hasClaudeSessionId = true;
       nextState.agentSessionId = claudeSessionId;
@@ -692,15 +700,14 @@ export class TerminalPanelManager extends EventEmitter {
       };
     }
 
-    if (
-      customState.initialInputMode === 'argument' &&
-      customState.initialInput?.trim() &&
-      !customState.initialInputSentAt
-    ) {
+    const promptWord = customState.initialInputMode === 'argument' && customState.initialInput?.trim() && !customState.initialInputSentAt
+      ? this.initialPromptWord(customState, shellType)
+      : undefined;
+    if (promptWord) {
       nextState.initialInputSentAt = new Date().toISOString();
       nextState.initialInputError = undefined;
       return {
-        commandToRun: `${initialCommand} ${this.initialPromptWord(customState)}`,
+        commandToRun: `${initialCommand} ${promptWord}`,
         customState: nextState,
         isCliCommand: true,
       };
@@ -744,7 +751,7 @@ export class TerminalPanelManager extends EventEmitter {
         nextState.initialInputSentAt = new Date().toISOString();
         nextState.initialInputError = undefined;
       }
-      const promptWord = promptArgument && customState.initialInputFile ? this.initialPromptWord(customState) : undefined;
+      const promptWord = promptArgument && customState.initialInputFile ? this.initialPromptWord(customState, shellType) : undefined;
       return {
         commandToRun: buildCursorLaunchCommand({ baseCommand: initialCommand, promptArgument, promptWord, shellType }),
         customState: nextState,
