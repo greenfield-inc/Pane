@@ -46,7 +46,7 @@ export function PaneChatIntroOffer({ suppressed }: { suppressed: boolean }) {
   const setActiveSession = useSessionStore(state => state.setActiveSession);
   const selectedSessionId = useOrchestrationSessionStore(state => state.selectedSessionId);
   const createSession = useOrchestrationSessionStore(state => state.create);
-  const loadSessions = useOrchestrationSessionStore(state => state.load);
+  const refreshSessions = useOrchestrationSessionStore(state => state.refresh);
   const selectSession = useOrchestrationSessionStore(state => state.select);
   const onPane = activeView === 'sessions' && activeSession !== undefined && !activeSession.isHidden;
   // Desktop on its own host only: a desktop showing another computer's Pane never offers it.
@@ -111,7 +111,7 @@ export function PaneChatIntroOffer({ suppressed }: { suppressed: boolean }) {
         open(view.session.id);
       } catch (cause) {
         // Main can save the Session and then fail to open its tab; open the saved one instead of creating another.
-        await loadSessions();
+        await refreshSessions();
         const saved = useOrchestrationSessionStore.getState().sessions.find(session => session.name === name);
         if (!saved) throw cause;
         await selectSession({ sessionId: saved.id });
@@ -123,7 +123,7 @@ export function PaneChatIntroOffer({ suppressed }: { suppressed: boolean }) {
     } finally {
       setCreating(false);
     }
-  }, [activeSession, createSession, loadSessions, navigateToPaneChat, selectSession, setActiveSession]);
+  }, [activeSession, createSession, navigateToPaneChat, refreshSessions, selectSession, setActiveSession]);
 
   if (!offerVisible && !followUpVisible) return null;
 
