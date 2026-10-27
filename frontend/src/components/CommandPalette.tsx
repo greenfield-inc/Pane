@@ -58,8 +58,11 @@ const TYPE_LABEL = {
   command: 'Command',
 } satisfies Record<SearchItem['kind'], string>;
 
-// Rows rendered at first, and added each time the list scrolls near its end.
-const RENDER_STEP = 100;
+// A list longer than this mounts only the rows in view (plus OVERSCAN either side) and the selected row.
+const WINDOW_THRESHOLD = 100;
+const OVERSCAN = 10;
+// Matches rowClass's h-10: a windowed list places its rows by index.
+const ROW_HEIGHT = 40;
 const NO_STATUS: Record<string, AgentState> = {};
 const NO_SESSIONS: Record<string, string> = {};
 const NO_UNVIEWED: PanelStore['unviewedCompletedActivity'] = {};
@@ -155,7 +158,9 @@ export function CommandPalette({ isOpen, onClose, projects, onNewPane }: Command
   const [query, setQuery] = useState('');
   const [chosenFilter, setChosenFilter] = useState<SearchFilter>('all');
   const [selection, setSelection] = useState({ view: '', key: '', index: 0 });
-  const [renderLimit, setRenderLimit] = useState({ view: '', count: RENDER_STEP });
+  // Where the windowed rows are scrolled to, relative to their first row.
+  const [scroll, setScroll] = useState({ top: 0, height: 520 });
+  const itemsRef = useRef<HTMLDivElement>(null);
   // The row whose ⌘K Actions are showing, by key, and the text filtering them.
   const [actionsKey, setActionsKey] = useState<string | null>(null);
   const [actionQuery, setActionQuery] = useState('');
@@ -218,13 +223,19 @@ export function CommandPalette({ isOpen, onClose, projects, onNewPane }: Command
   const selectedIndex = keptIndex >= 0 ? keptIndex
     : selection.view === view ? Math.min(selection.index, Math.max(0, selectable.length - 1)) : 0;
   const setSelectedIndex = (index: number) => setSelection({ view, key: selectable[index]?.key ?? '', index });
-  // A long list renders in steps as you scroll or arrow down, so a broad filter stays quick to show.
-  const shownCount = Math.max(renderLimit.view === view ? renderLimit.count : RENDER_STEP, selectedIndex + 1);
-  const firstHidden = rows.findIndex(row => row.type !== 'header' && row.index >= shownCount);
-  const shownRows = firstHidden < 0 ? rows : rows.slice(0, firstHidden);
-  const showMoreOnScroll = (list: HTMLDivElement) => {
-    if (firstHidden < 0 || list.scrollTop + list.clientHeight < list.scrollHeight - 200) return;
-    setRenderLimit({ view, count: shownCount + RENDER_STEP });
+  // A long list is one header over equal-height rows (a filtered view or Actions), so it can be windowed:
+  // whatever the selection or scroll, only the rows in view and the selected row are mounted.
+  const windowed = selectable.length > WINDOW_THRESHOLD
+    && rows.length === selectable.length + 1 && rows[0]?.type === 'header'
+    && selectable.every(row => row.type !== 'more');
+  const windowStart = Math.max(0, Math.floor(scroll.top / ROW_HEIGHT) - OVERSCAN);
+  const windowEnd = Math.min(selectable.length, Math.ceil((scroll.top + scroll.height) / ROW_HEIGHT) + OVERSCAN);
+  const mounted = windowed
+    ? selectable.filter(row => (row.index >= windowStart && row.index < windowEnd) || row.index === selectedIndex)
+    : selectable;
+  const trackScroll = (list: HTMLDivElement) => {
+    const itemsTop = itemsRef.current?.offsetTop ?? 0;
+    setScroll({ top: list.scrollTop - itemsTop, height: list.clientHeight });
   };
   const selected = selectable[selectedIndex];
   const selectedItem = actionsItem ?? (selected?.type === 'item' ? selected.item : null);
@@ -297,6 +308,65 @@ export function CommandPalette({ isOpen, onClose, projects, onNewPane }: Command
     : selected?.type === 'more' ? `Show all ${selected.section.label}` : null;
   const footerLabel = actionsItem ? (selected?.type === 'action' ? selected.action.label : null) : mainAction;
   const activeOption = selected ? `${listboxId}-option-${selectedIndex}` : undefined;
+
+  const renderRow = (row: Row) => {
+          if (row.type === 'header') {
+            return (
+              <div key={row.key} className="px-6 pb-1.5 pt-3 text-[13px] text-text-tertiary">
+                {row.label}
+              </div>
+            );
+          }
+          const isSelected = row.index === selectedIndex;
+          const optionProps = {
+            id: `${listboxId}-option-${row.index}`,
+            role: 'option' as const,
+            'aria-selected': isSelected,
+            'data-selected': isSelected,
+            // Clicking a row keeps the cursor in the input, so typing and arrow keys carry on.
+            onMouseDown: (e: React.MouseEvent) => e.preventDefault(),
+            onMouseMove: () => { if (!isSelected) setSelectedIndex(row.index); },
+            onClick: () => choose(row),
+          };
+          if (row.type === 'more') {
+            return (
+              <div key={row.key} {...optionProps} className={cn(rowClass(isSelected, false), 'h-8 text-[13px] text-text-tertiary')}>
+                <span className="w-4" aria-hidden="true" />
+                <span className="flex-1">{row.section.more} more {row.section.more === 1 ? row.section.label.slice(0, -1) : row.section.label}</span>
+                {isSelected && <CornerDownLeft className="h-4 w-4 text-text-tertiary" aria-hidden="true" />}
+              </div>
+            );
+          }
+          if (row.type === 'action') {
+            const Icon = row.action.icon;
+            return (
+              <div key={row.key} {...optionProps} className={rowClass(isSelected, false)}>
+                <Icon className="h-4 w-4 flex-shrink-0 text-text-secondary" aria-hidden="true" />
+                <span className="flex-1 truncate">{row.action.label}</span>
+                {isSelected && <CornerDownLeft className="h-4 w-4 text-text-tertiary" aria-hidden="true" />}
+              </div>
+            );
+          }
+          const option = (
+            <div
+              key={row.key}
+              {...optionProps}
+              aria-label={[row.item.title, row.item.detail, TYPE_LABEL[row.item.kind]].filter(Boolean).join(', ')}
+              aria-disabled={isDisabled(row.item)}
+              className={rowClass(isSelected, isDisabled(row.item))}
+            >
+              <ResultRow
+                item={row.item}
+                query={results.filter === 'commands' ? query.trimStart().replace(/^>/, '') : query}
+                selected={isSelected}
+                attention={row.item.kind === 'pane' ? needsAttention.get(row.item.pane.id) : undefined}
+              />
+            </div>
+          );
+          return row.item.kind === 'command' && row.item.disabledReason
+            ? <Tooltip key={row.key} content={row.item.disabledReason} side="right" className="block">{option}</Tooltip>
+            : option;
+  };
 
   return (
     <Modal
@@ -378,72 +448,26 @@ export function CommandPalette({ isOpen, onClose, projects, onNewPane }: Command
         aria-label={actionsItem ? 'Actions' : 'Results'}
         // A fixed height keeps the input still while results change: the
         // launcher is centred, so a shrinking list would move it on every key.
-        onScroll={(e) => showMoreOnScroll(e.currentTarget)}
-        className="min-h-0 overflow-y-auto py-2"
+        onScroll={(e) => trackScroll(e.currentTarget)}
+        className="relative min-h-0 overflow-y-auto py-2"
         style={{ height: 'min(520px, calc(100vh - 220px))' }}
       >
         {selectable.length === 0 ? (
           <div className="px-6 py-10 text-center text-sm text-text-tertiary">
             {actionsItem ? 'No matching actions' : 'No results'}
           </div>
-        ) : shownRows.map(row => {
-          if (row.type === 'header') {
-            return (
-              <div key={row.key} className="px-6 pb-1.5 pt-3 text-[13px] text-text-tertiary">
-                {row.label}
-              </div>
-            );
-          }
-          const isSelected = row.index === selectedIndex;
-          const optionProps = {
-            id: `${listboxId}-option-${row.index}`,
-            role: 'option' as const,
-            'aria-selected': isSelected,
-            'data-selected': isSelected,
-            // Clicking a row keeps the cursor in the input, so typing and arrow keys carry on.
-            onMouseDown: (e: React.MouseEvent) => e.preventDefault(),
-            onMouseMove: () => { if (!isSelected) setSelectedIndex(row.index); },
-            onClick: () => choose(row),
-          };
-          if (row.type === 'more') {
-            return (
-              <div key={row.key} {...optionProps} className={cn(rowClass(isSelected, false), 'h-8 text-[13px] text-text-tertiary')}>
-                <span className="w-4" aria-hidden="true" />
-                <span className="flex-1">{row.section.more} more {row.section.more === 1 ? row.section.label.slice(0, -1) : row.section.label}</span>
-                {isSelected && <CornerDownLeft className="h-4 w-4 text-text-tertiary" aria-hidden="true" />}
-              </div>
-            );
-          }
-          if (row.type === 'action') {
-            const Icon = row.action.icon;
-            return (
-              <div key={row.key} {...optionProps} className={rowClass(isSelected, false)}>
-                <Icon className="h-4 w-4 flex-shrink-0 text-text-secondary" aria-hidden="true" />
-                <span className="flex-1 truncate">{row.action.label}</span>
-                {isSelected && <CornerDownLeft className="h-4 w-4 text-text-tertiary" aria-hidden="true" />}
-              </div>
-            );
-          }
-          const option = (
-            <div
-              key={row.key}
-              {...optionProps}
-              aria-label={[row.item.title, row.item.detail, TYPE_LABEL[row.item.kind]].filter(Boolean).join(', ')}
-              aria-disabled={isDisabled(row.item)}
-              className={rowClass(isSelected, isDisabled(row.item))}
-            >
-              <ResultRow
-                item={row.item}
-                query={results.filter === 'commands' ? query.trimStart().replace(/^>/, '') : query}
-                selected={isSelected}
-                attention={row.item.kind === 'pane' ? needsAttention.get(row.item.pane.id) : undefined}
-              />
+        ) : windowed ? (
+          <>
+            {rows[0]?.type === 'header' && renderRow(rows[0])}
+            <div ref={itemsRef} role="presentation" className="relative" style={{ height: selectable.length * ROW_HEIGHT }}>
+              {mounted.map(row => (
+                <div key={row.key} role="presentation" className="absolute inset-x-0" style={{ top: row.index * ROW_HEIGHT }}>
+                  {renderRow(row)}
+                </div>
+              ))}
             </div>
-          );
-          return row.item.kind === 'command' && row.item.disabledReason
-            ? <Tooltip key={row.key} content={row.item.disabledReason} side="right" className="block">{option}</Tooltip>
-            : option;
-        })}
+          </>
+        ) : rows.map(renderRow)}
       </div>
 
       <div className="flex h-11 flex-shrink-0 items-center gap-5 border-t border-border-primary px-6 text-[13px] text-text-tertiary">

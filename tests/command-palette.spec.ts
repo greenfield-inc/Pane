@@ -357,7 +357,8 @@ test('the sidebar field and the rail icon open Search ready to type', async ({ p
   await expect(page.getByRole('combobox', { name: 'Search', exact: true })).toHaveValue('loops');
 });
 
-test('2,500 Panes with tracked agents rank within a frame and list quickly', async ({ page }) => {
+// 2,500 Panes, each with one tracked agent panel (a third of them blocked).
+async function bootLarge(page: Page) {
   const many = Array.from({ length: 2_400 }, (_, index) =>
     pane(`p-bulk-${index}`, `bulk-${['runpane', 'posthog', 'wsl', 'film', 'loops'][index % 5]}-${index}`, 1 + (index % 4), { lastViewedAt: ago(index) }));
   const panes = [...PANES, ...many];
@@ -367,6 +368,10 @@ test('2,500 Panes with tracked agents rank within a frame and list quickly', asy
   }));
   // Projects stay collapsed: this measures Search, not the sidebar's own rows.
   await boot(page, { panes, agentStatuses, activePaneId: '', initialUiState: { expandedProjects: [] } });
+}
+
+test('2,500 Panes with tracked agents rank within a frame and list quickly', async ({ page }) => {
+  await bootLarge(page);
   const input = await openSearch(page);
   const box = await input.boundingBox();
   await page.evaluate(() => performance.clearMeasures('pane:search'));
@@ -387,6 +392,42 @@ test('2,500 Panes with tracked agents rank within a frame and list quickly', asy
   await expect(page.getByRole('button', { name: 'Panes', pressed: true })).toBeVisible();
   console.log(`[search] broad Panes view rendered in ${listMs.toFixed(1)} ms`);
   expect(listMs).toBeLessThan(250);
+});
+
+test('a long list stays windowed wherever the selection goes', async ({ page }) => {
+  await bootLarge(page);
+  const input = await openSearch(page);
+  await page.keyboard.type('bulk');
+  await page.keyboard.press('Tab');
+  await expect(page.getByRole('button', { name: 'Panes', pressed: true })).toBeVisible();
+  const mountedOptions = () => results(page).getByRole('option').count();
+  expect(await mountedOptions()).toBeLessThan(60);
+
+  // The reviewer's repro: wrap to the last row, then edit the query and return to it.
+  await page.keyboard.press('ArrowUp');
+  // The least recently viewed match sorts last.
+  await expect(selectedOption(page)).toHaveAttribute('aria-label', /^bulk-loops-2399,/);
+  expect(await mountedOptions()).toBeLessThan(60);
+  await page.keyboard.type('-');
+  const keystrokeMs = await page.evaluate(() => new Promise<number>(resolve => {
+    const field = document.querySelector<HTMLInputElement>('[role="combobox"][aria-label="Search"]');
+    if (!field) throw new Error('Search input missing');
+    const start = performance.now();
+    // The same input event typing Backspace produces, timed to the next painted frame.
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+    setValue?.call(field, 'bulk');
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    requestAnimationFrame(() => setTimeout(() => resolve(performance.now() - start)));
+  }));
+  await expect(input).toHaveValue('bulk');
+  console.log(`[search] Backspace back to "bulk" painted in ${keystrokeMs.toFixed(1)} ms`);
+  expect(await mountedOptions()).toBeLessThan(60);
+  expect(keystrokeMs).toBeLessThan(100);
+
+  // Scrolling to the end mounts the rows there, still a bounded window, and every match stays reachable.
+  await results(page).evaluate(list => { list.scrollTop = list.scrollHeight; });
+  await expect(results(page).getByRole('option', { name: /^bulk-loops-2399,/ })).toBeVisible();
+  expect(await mountedOptions()).toBeLessThan(60);
 });
 
 test('disabled commands are listed last and do not run', async ({ page }) => {
