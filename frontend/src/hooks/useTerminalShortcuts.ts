@@ -2,6 +2,12 @@ import { useEffect, useRef } from 'react';
 import { useConfigStore } from '../stores/configStore';
 import { useHotkeyStore } from '../stores/hotkeyStore';
 
+function focusedTerminalId(): string | undefined {
+  const input = document.activeElement;
+  if (!input?.matches('.xterm-helper-textarea')) return undefined;
+  return input.closest<HTMLElement>('[data-terminal-panel-id]')?.dataset.terminalPanelId;
+}
+
 export function useTerminalShortcuts(): void {
   const config = useConfigStore((s) => s.config);
   const register = useHotkeyStore((s) => s.register);
@@ -24,8 +30,13 @@ export function useTerminalShortcuts(): void {
         label: shortcut.label || `Shortcut (${shortcut.key})`,
         keys: `mod+alt+${shortcut.key}`,
         category: 'shortcuts',
+        enabled: () => !!focusedTerminalId(),
         action: () => {
-          window.electron?.invoke('clipboard:paste', shortcut.text);
+          const panelId = focusedTerminalId();
+          if (panelId) {
+            void window.electronAPI.invoke('terminal:input', panelId, shortcut.text)
+              .catch(error => console.error('Failed to insert terminal shortcut:', error));
+          }
         },
       });
       registeredIdsRef.current.push(hotkeyId);
