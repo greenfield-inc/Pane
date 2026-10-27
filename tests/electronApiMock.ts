@@ -15,6 +15,7 @@ import type { TailnetMachineList, WorkspaceAccessSummary } from '../shared/types
 import type { JsonObject, JsonValue } from '../shared/validation/boundaryDecoder';
 import { DEFAULT_APPEARANCE, LIGHT_THEMES, normalizeAppearance, type AppearanceConfig } from '../shared/types/appearance';
 import type { DiffManifest, DiffScope, FileDiffResult } from '../shared/types/gitDiff';
+import type { NotifyCommand, NotifySnapshot, NotifyWindowSize } from '../shared/types/notify';
 
 type MockEventValue = JsonValue | object | undefined;
 type MockEventCallback = (...args: MockEventValue[]) => void;
@@ -106,6 +107,8 @@ export type ElectronApiMockOptions = {
   openExternalOutcome?: 'success' | 'failure';
   /** Overrides this machine's workspace status (remote-daemon:get-workspace-access). */
   workspaceAccess?: Partial<WorkspaceAccessSummary>;
+  /** Serves window.electronAPI.notify with this queue snapshot; absent, the API is too. */
+  notifySnapshot?: NotifySnapshot;
 };
 
 export async function installElectronApiMock(page: Page, options: ElectronApiMockOptions = {}) {
@@ -628,7 +631,23 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     };
 
     let uncleanShutdownPending = mockOptions.uncleanShutdown === true;
+    let notifySnapshot = mockOptions.notifySnapshot ? clone(mockOptions.notifySnapshot) : null;
+    const notifyCommands: NotifyCommand[] = [];
+    const notifyWindowSizes: NotifyWindowSize[] = [];
+    const notifyApi = notifySnapshot ? {
+      getSnapshot: () => Promise.resolve(clone(notifySnapshot)),
+      run: (command: NotifyCommand) => {
+        notifyCommands.push(clone(command));
+        return Promise.resolve();
+      },
+      onSnapshot: (callback: MockEventCallback) => subscribe('notify:snapshot', callback),
+      onChime: (callback: MockEventCallback) => subscribe('notify:chime', callback),
+      onNavigate: (callback: MockEventCallback) => subscribe('notify:navigate', callback),
+      resizeWindow: (size: NotifyWindowSize) => { notifyWindowSizes.push(clone(size)); },
+      focusWindow: () => Promise.resolve(),
+    } : undefined;
     const electronAPI = {
+      notify: notifyApi,
       preferences: {
         get: async (key: string) => preferences[key] ?? 'true',
         getAll: async () => clone(preferences),
@@ -1631,6 +1650,19 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         getProjectUpdates() {
           return lastProjectUpdate ? [clone(lastProjectUpdate)] : [];
+        },
+        getNotifyCommands() {
+          return clone(notifyCommands);
+        },
+        getNotifyWindowSizes() {
+          return clone(notifyWindowSizes);
+        },
+        emitNotifySnapshot(snapshot: NotifySnapshot) {
+          notifySnapshot = clone(snapshot);
+          emit('notify:snapshot', clone(snapshot));
+        },
+        emitNotifyNavigate(target: 'inbox' | 'settings') {
+          emit('notify:navigate', target);
         },
       },
     });

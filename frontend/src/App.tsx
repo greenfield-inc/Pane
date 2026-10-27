@@ -33,6 +33,8 @@ import { useErrorStore } from './stores/errorStore';
 import { useSessionStore } from './stores/sessionStore';
 import { subscribePanelStatus } from './services/panelStatusSync';
 import { subscribeAttentionInbox, useAttentionInboxStore } from './stores/attentionInboxStore';
+import { subscribeNotify } from './stores/notifyStore';
+import { NotifyInPaneStrip } from './components/notify/NotifyInPane';
 import { useConfigStore } from './stores/configStore';
 import { usePanelStore } from './stores/panelStore';
 import { API } from './utils/api';
@@ -164,6 +166,17 @@ function App() {
     void useAttentionInboxStore.getState().loadEnabled();
     return subscribeAttentionInbox();
   }, []);
+
+  // Pane Notify: keep the queue's snapshot, and open the inbox or its settings when main asks.
+  useEffect(() => subscribeNotify(), []);
+  useEffect(() => window.electronAPI?.notify?.onNavigate((target) => {
+    if (target === 'settings') {
+      openSettings({ category: 'notify' });
+      return;
+    }
+    closeSettings();
+    useNavigationStore.getState().navigateToNotify();
+  }), [closeSettings, openSettings]);
 
   /**
    * Forget a pane's status when the pane itself goes.
@@ -839,7 +852,7 @@ function App() {
           <TailnetHttpsBanner />
         </div>
         <RemoteConnectionBanner onSettings={() => openSettings({ category: 'remote-access' })} />
-        <div className="pane-main-layout flex flex-1 min-h-0">
+        <div className="pane-main-layout relative flex flex-1 min-h-0">
         <MainProcessLogger />
         {isSettingsOpen && (
           <Settings
@@ -885,6 +898,7 @@ function App() {
           <SessionView />
           <PaneChatIntroOffer suppressed={isSettingsOpen || isOnboardingOpen || isWelcomeOpen} />
         </div>
+        <NotifyInPaneStrip left={sidebarCollapsed ? 48 : sidebarWidth} />
         </div>
         <OnboardingDialog
           isOpen={isOnboardingOpen}

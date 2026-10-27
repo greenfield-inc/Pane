@@ -59,6 +59,14 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategoryDefinition[] = [
     aliases: ['claude', 'codex', 'cursor', 'pane chat', 'agents.md', 'mcp', 'tools', 'skill'],
   },
   {
+    id: 'notify',
+    label: 'Notify',
+    description: 'Questions and updates from agents, answered from any app.',
+    icon: Bell,
+    settingIds: ['notify-enabled', 'notify-show-outside', 'notify-position', 'notify-shortcut', 'notify-updates-hide-after', 'notify-sound'],
+    aliases: ['questions', 'approve', 'answer', 'ask', 'strip', 'answer all', 'shortcut', 'updates', 'sound', 'inbox'],
+  },
+  {
     id: 'usage',
     label: 'Usage & Limits',
     description: 'Agent token usage, costs, and subscription limits.',

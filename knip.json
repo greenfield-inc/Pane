@@ -56,6 +56,7 @@
       "entry": [
         "src/main.tsx",
         "src/remote/main.tsx",
+        "src/notifyWindow.tsx",
         "src/**/*.test.{ts,tsx}",
         "vite.config.ts"
       ],

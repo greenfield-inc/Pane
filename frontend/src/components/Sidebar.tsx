@@ -3,7 +3,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { ProjectSessionList, ArchivedSessions } from './ProjectSessionList';
 import { ArchiveProgress } from './ArchiveProgress';
-import { ArrowUpDown, BookOpen, ChevronDown, ChevronRight, Info, LayoutGrid, FolderGit2, Home, Laptop, Monitor, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pin, Settings as SettingsIcon, Plus, RefreshCw, MessageSquare, Repeat, Search, Server, SquareTerminal } from 'lucide-react';
+import { ArrowUpDown, Bell, BookOpen, ChevronDown, ChevronRight, Info, LayoutGrid, FolderGit2, Home, Laptop, Monitor, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pin, Settings as SettingsIcon, Plus, RefreshCw, MessageSquare, Repeat, Search, Server, SquareTerminal } from 'lucide-react';
 import { SessionDetailTooltip } from './SessionDetailTooltip';
 import { IconButton } from './ui/Button';
 import { Tooltip } from './ui/Tooltip';
@@ -36,6 +36,7 @@ import { OrchestrationSessionNav } from './OrchestrationSessionNav';
 import { useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
 import { useSshHostsRefresh, useSshHostsStore } from '../stores/sshHostsStore';
 import { navigateToLoops, useLoopsStore } from '../stores/loopsStore';
+import { useNotifyStore, waitingCount } from '../stores/notifyStore';
 import { useAnyLoopRunning } from './loops/loopRunView';
 
 // --- Collapsed sidebar tooltip content ---
@@ -293,6 +294,9 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
   const navigateToPaneChat = useNavigationStore((state) => state.navigateToPaneChat);
   const navigateToMissionControl = useNavigationStore((state) => state.navigateToMissionControl);
   const navigateToSsh = useNavigationStore((state) => state.navigateToSsh);
+  const navigateToNotify = useNavigationStore((state) => state.navigateToNotify);
+  const notifyAvailable = useNotifyStore((state) => state.snapshot !== null);
+  const notifyWaitingCount = useNotifyStore((state) => waitingCount(state.snapshot));
   const hasSshHosts = useSshHostsStore((state) => state.rows.length > 0);
   const missionControlEnabled = useConfigStore((state) => isMissionControlEnabled(state.config));
   const paneChatStatus = useSessionAgentDisplayStatus(PANE_CHAT_SESSION_ID);
@@ -560,6 +564,29 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
                 <Home className="h-4 w-4" />
               </button>
             </Tooltip>
+
+            {notifyAvailable && (
+              <Tooltip content="Notify" side="right">
+                <button
+                  type="button"
+                  data-testid="compact-notify"
+                  data-compact-rail-item
+                  onClick={() => {
+                    setSidebarNavigationScope('repositories');
+                    navigateToNotify();
+                  }}
+                  aria-label={notifyWaitingCount > 0 ? `Notify, ${notifyWaitingCount} waiting` : 'Notify'}
+                  className={`${COMPACT_RAIL_BUTTON} ${activeView === 'notify' ? COMPACT_RAIL_ACTIVE : COMPACT_RAIL_IDLE}`}
+                >
+                  <Bell className="h-4 w-4" />
+                  {notifyWaitingCount > 0 && (
+                    <span className="absolute right-0 top-0 flex h-3 w-3 items-center justify-center" aria-hidden="true">
+                      <span className="h-1.5 w-1.5 rounded-full bg-status-warning" />
+                    </span>
+                  )}
+                </button>
+              </Tooltip>
+            )}
 
             {(orchestrationAvailability === 'unavailable' || orchestrationAvailability === 'idle') && (
               <Tooltip content="Pane Chat" side="right">
