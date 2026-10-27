@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
 
-import { isPushForPane, openHref, parseIncomingLink, parsePushTarget, resolveOpenTarget } from './links';
+import { isPushForPane, openHref, parseIncomingLink, parseNotifyPush, parsePushTarget, resolveOpenTarget } from './links';
 
 const work: RemotePaneConnectionProfile = { id: 'Work Mac:http://127.0.0.1:42157:abcd1234', label: 'Work Mac', baseUrl: 'http://127.0.0.1:42157', token: 't', transport: 'http+sse' };
 const home: RemotePaneConnectionProfile = { id: 'Home:https://home.tail.ts.net:efgh5678', label: 'Home', baseUrl: 'https://home.tail.ts.net', token: 't', transport: 'http+sse' };
@@ -44,8 +44,72 @@ describe('parsePushTarget', () => {
     expect(parsePushTarget(null)).toBeNull();
   });
 
+  it('carries a Notify question id so the tap opens its sheet', () => {
+    const request = {
+      content: { title: 'api-fix', data: null },
+      trigger: { type: 'push', payload: { eventId: 'notify:q1:ask:1', hostProfileId: work.id, notifyId: 'q1', paneId: 's1', sessionPaneId: 's1', panelId: 'p1', notifyUi: 'approve', aps: {} } },
+    };
+    expect(parsePushTarget(request)).toEqual({ host: work.id, notifyId: 'q1', paneId: 's1', panelId: 'p1' });
+  });
+
   it('opens the host when the notification names no pane', () => {
     expect(parsePushTarget({ content: { data: { hostProfileId: work.id } }, trigger: null })).toEqual({ host: work.id });
+  });
+});
+
+describe('parseNotifyPush', () => {
+  it('reads an iPhone options alert with its choice labels', () => {
+    const request = {
+      content: { title: 'api-fix', body: 'api-fix has a question', data: null, categoryIdentifier: 'pane.notify.options' },
+      trigger: {
+        type: 'push',
+        payload: {
+          eventId: 'notify:q1:ask:1', hostProfileId: work.id, notifyId: 'q1', paneId: 's1', sessionPaneId: 's1', panelId: 'p1',
+          notifyUi: 'options', notifyChoices: ['Ship it', 'Wait'],
+          aps: { alert: { title: 'api-fix', body: 'api-fix has a question' }, sound: 'default', 'thread-id': 's1', category: 'pane.notify.options', 'mutable-content': 1 },
+        },
+      },
+    };
+    expect(parseNotifyPush(request)).toEqual({
+      host: work.id, notifyId: 'q1', paneId: 's1', sessionPaneId: 's1', panelId: 'p1', ui: 'options', choices: ['Ship it', 'Wait'], clear: false,
+    });
+  });
+
+  it('reads an Android data-only message from the background task', () => {
+    const payload = {
+      notification: null,
+      data: {
+        eventId: 'notify:q2:ask:1', hostProfileId: home.id, notifyId: 'q2', notifyUi: 'options', notifyTitle: 'docs', notifyBody: 'docs has a question',
+        notifyTag: 'abc123', notifyChoices: '["Yes","No","Later"]',
+      },
+    };
+    expect(parseNotifyPush(payload)).toEqual({
+      host: home.id, notifyId: 'q2', ui: 'options', choices: ['Yes', 'No', 'Later'], title: 'docs', body: 'docs has a question', tag: 'abc123', clear: false,
+    });
+  });
+
+  it('reads both platforms\' silent clear', () => {
+    const ios = { data: { eventId: 'notify:q1:clear', hostProfileId: work.id, notifyId: 'q1', notifyClear: true, dataString: null }, aps: { 'content-available': 1 } };
+    const android = { data: { eventId: 'notify:q2:clear', hostProfileId: home.id, notifyId: 'q2', notifyClear: '1', notifyTag: 'abc123' } };
+    expect(parseNotifyPush(ios)).toMatchObject({ notifyId: 'q1', clear: true });
+    expect(parseNotifyPush(android)).toMatchObject({ notifyId: 'q2', clear: true, tag: 'abc123' });
+  });
+
+  it('reads the alert behind a button press', () => {
+    const response = {
+      actionIdentifier: 'pane.notify.approve',
+      notification: { request: { content: { data: null }, trigger: { type: 'push', payload: { hostProfileId: work.id, notifyId: 'q3', notifyUi: 'approve', aps: {} } } } },
+    };
+    expect(parseNotifyPush(response)).toEqual({ host: work.id, notifyId: 'q3', ui: 'approve', choices: [], clear: false });
+  });
+
+  it('ignores alerts that are not Notify questions', () => {
+    expect(parseNotifyPush({ content: { data: { hostProfileId: work.id, paneId: 's1' } }, trigger: null })).toBeNull();
+    expect(parseNotifyPush({ data: { notifyId: 'q1' } })).toBeNull();
+  });
+
+  it('drops a malformed choice list instead of throwing', () => {
+    expect(parseNotifyPush({ data: { hostProfileId: work.id, notifyId: 'q1', notifyChoices: '[oops' } })?.choices).toEqual([]);
   });
 });
 
@@ -99,6 +163,10 @@ describe('resolveOpenTarget', () => {
       .toEqual({ type: 'open', hostId: home.id, switchHost: true, paneId: 's2' });
   });
 
+  it('keeps the Notify question the target names', () => {
+    expect(resolveOpenTarget({ host: work.id, notifyId: 'q1', paneId: 's1' }, hosts)).toEqual({ type: 'open', hostId: work.id, switchHost: false, notifyId: 'q1', paneId: 's1' });
+  });
+
   it('never connects to a host this phone has not paired with', () => {
     expect(resolveOpenTarget({ host: 'Other:https://evil.example:zzzz', paneId: 's1' }, hosts)).toEqual({ type: 'unknown-host' });
     expect(resolveOpenTarget({ host: work.id, paneId: 's1' }, { profiles: [], activeId: null })).toEqual({ type: 'unknown-host' });
@@ -110,5 +178,6 @@ describe('openHref', () => {
     expect(openHref({ host: work.id, paneId: 's1', panelId: 'p1' }))
       .toBe('/open?host=Work%20Mac%3Ahttp%3A%2F%2F127.0.0.1%3A42157%3Aabcd1234&paneId=s1&panelId=p1');
     expect(openHref({ host: home.id })).toBe('/open?host=Home%3Ahttps%3A%2F%2Fhome.tail.ts.net%3Aefgh5678');
+    expect(openHref({ host: home.id, notifyId: 'q1' })).toBe('/open?host=Home%3Ahttps%3A%2F%2Fhome.tail.ts.net%3Aefgh5678&notifyId=q1');
   });
 });

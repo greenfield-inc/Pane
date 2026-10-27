@@ -32,7 +32,7 @@ describe('registerForPush', () => {
     const { deps, invoke, request } = fakeDeps();
     await expect(registerForPush(deps, 'host-1')).resolves.toEqual({ state: 'registered', status: registered });
     expect(request).toHaveBeenCalledOnce();
-    expect(invoke).toHaveBeenCalledWith('mobile:push-register', [{ platform: 'ios', token: 'apns-token', installationId: 'install-1', hostProfileId: 'host-1' }]);
+    expect(invoke).toHaveBeenCalledWith('mobile:push-register', [{ platform: 'ios', token: 'apns-token', installationId: 'install-1', hostProfileId: 'host-1', notifyButtons: true }]);
   });
 
   it('does not ask for permission when the host cannot deliver notifications', async () => {
