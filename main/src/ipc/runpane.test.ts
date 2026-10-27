@@ -4930,6 +4930,76 @@ describe('runpane IPC handlers', () => {
     expect(execAsync.mock.calls.every(([command]) => !command.includes('--continue'))).toBe(true);
   });
 
+  describe('agent sign-in', () => {
+    // Exit codes and output as each CLI printed them with and without a login.
+    type ProbeOutcome = { code?: number; stdout?: string; stderr?: string; timedOut?: true };
+    const statusCommands = {
+      claude: "'/usr/local/bin/claude' auth status",
+      codex: "'/usr/local/bin/codex' login status",
+      cursor: "'/usr/local/bin/cursor-agent' status --format json",
+      opencode: "'/usr/local/bin/opencode' auth list",
+    } as const;
+
+    async function doctorWith(agent: keyof typeof statusCommands, outcome: ProbeOutcome | 'missing') {
+      const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform');
+      Object.defineProperty(process, 'platform', { value: 'linux' });
+      const executable = agent === 'cursor' ? 'cursor-agent' : agent;
+      const execAsync = vi.fn(async (command: string) => {
+        if (command === `command -v ${executable}`) {
+          return { stdout: outcome === 'missing' ? '' : `/usr/local/bin/${executable}\n`, stderr: '' };
+        }
+        if (command === statusCommands[agent] && outcome !== 'missing') {
+          if (outcome.timedOut) throw Object.assign(new Error('Command failed: timed out'), { killed: true, signal: 'SIGTERM', stdout: '', stderr: '' });
+          if (outcome.code) throw Object.assign(new Error('Command failed'), { code: outcome.code, stdout: outcome.stdout ?? '', stderr: outcome.stderr ?? '' });
+          return { stdout: outcome.stdout ?? '', stderr: outcome.stderr ?? '' };
+        }
+        return { stdout: '1.0.0\n', stderr: '' };
+      });
+      const base = createServices();
+      const services = createServices({
+        // SAFETY: This test fixture replaces only the command-runner seam used by the doctor unit.
+        sessionManager: {
+          ...base.sessionManager,
+          getProjectContextByProjectId: vi.fn(() => ({ commandRunner: { wslContext: null, execAsync } })),
+        } as never,
+      });
+      try {
+        const result = await createRegistry(services).invoke('runpane:agents:doctor', [{ agent, repo: 'active' }]);
+        return { result, execAsync };
+      } finally {
+        if (originalPlatform) Object.defineProperty(process, 'platform', originalPlatform);
+      }
+    }
+
+    it.each([
+      ['claude', { stdout: '{\n  "loggedIn": true,\n  "authMethod": "claude.ai"\n}\n' }, 'signed-in'],
+      ['claude', { code: 1, stdout: '{\n  "loggedIn": false,\n  "authMethod": "none"\n}\n' }, 'signed-out'],
+      ['claude', { code: 1, stderr: "error: unknown command 'auth'\n" }, 'unknown'],
+      ['codex', { stderr: 'Logged in using ChatGPT\n' }, 'signed-in'],
+      ['codex', { code: 1, stderr: 'Not logged in\n' }, 'signed-out'],
+      ['codex', { timedOut: true }, 'unknown'],
+      ['cursor', { stdout: '{\n  "status": "authenticated",\n  "isAuthenticated": true\n}\n' }, 'signed-in'],
+      ['cursor', { stdout: '{\n  "status": "unauthenticated",\n  "isAuthenticated": false,\n  "message": "Not logged in"\n}\n' }, 'signed-out'],
+      ['cursor', { stdout: 'Checking authentication…\n' }, 'unknown'],
+      ['opencode', { stdout: '\u001b[0m\n┌  Credentials \u001b[90m~/.local/share/opencode/auth.json\n│\n●  OpenAI \u001b[90moauth\n│\n└  1 credentials\n' }, 'signed-in'],
+      ['opencode', { stdout: '\u001b[0m\n┌  Credentials \u001b[90m~/.local/share/opencode/auth.json\n│\n└  0 credentials\n' }, 'signed-out'],
+      ['opencode', { stdout: '┌  Credentials\n│\n└  0 credentials\n\n┌  Environment\n│\n●  OpenRouter \u001b[90mOPENROUTER_API_KEY\n│\n└  1 environment variable\n' }, 'signed-in'],
+    ] as const)('reports %s sign-in from %j as %s', async (agent, outcome, signIn) => {
+      const { result, execAsync } = await doctorWith(agent, outcome);
+
+      expect(result).toMatchObject({ available: true, signIn });
+      expect(execAsync).toHaveBeenCalledWith(statusCommands[agent], project.path, expect.objectContaining({ timeout: 3000, silent: true }));
+    });
+
+    it('leaves sign-in out when the agent is not installed', async () => {
+      const { result, execAsync } = await doctorWith('codex', 'missing');
+
+      expect(result).toMatchObject({ available: false });
+      expect(result).not.toHaveProperty('signIn');
+      expect(execAsync.mock.calls.some(([command]) => command.includes('login status'))).toBe(false);
+    });
+  });
+
   it('probes OpenCode through the WSL project command runner context', async () => {
     const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform');
     Object.defineProperty(process, 'platform', { value: 'win32' });
