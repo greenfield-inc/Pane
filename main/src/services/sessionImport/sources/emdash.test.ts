@@ -166,7 +166,8 @@ describe('readEmdash', () => {
   ] as const)('looks for the store on %s with env %j', async (platform, env, expected) => {
     const result = await readEmdash(context({ platform, env, home: '/Users/me' }));
 
-    expect(result).toEqual({ source: 'emdash', status: 'absent', storePaths: [expected], sessions: [] });
+    // The reader joins with the host's separator, so compare in that form.
+    expect(result).toEqual({ source: 'emdash', status: 'absent', storePaths: [path.normalize(expected)], sessions: [] });
   });
 
   it('fails closed on a store from before emdash4.db', async () => {
