@@ -128,7 +128,7 @@ async function updateInApp(parsed: ParsedArgs, paneDir: string, refusal: Runpane
   // a pip CLI delegates here through the managed engine, so check its owner first.
   const pipCli = Boolean(process.env.PANE_UPDATE_PYTHON && process.env.PANE_UPDATE_PYTHON_ENTRYPOINT);
   const bundled = path.join(paneDir, 'bin', 'runpane.cjs');
-  const cliFollowsApp = parsed.updateScope === 'pane' || (!pipCli && fs.existsSync(bundled) && fs.realpathSync(process.argv[1]) === fs.realpathSync(bundled));
+  const cliFollowsApp = !pipCli && fs.existsSync(bundled) && fs.realpathSync(process.argv[1]) === fs.realpathSync(bundled);
   let phase: 'installing' | 'complete' | 'current' = result.state;
   if (phase === 'installing' && parsed.updateWait) {
     await waitForRelaunch(paneDir, result.version);
@@ -137,7 +137,7 @@ async function updateInApp(parsed: ParsedArgs, paneDir: string, refusal: Runpane
   const next = phase === 'installing'
     ? `Pane ${result.version} installs and relaunches in about a minute; run runpane doctor --json afterwards to confirm.`
     : phase === 'complete' ? `Pane ${result.version} is running.` : `Pane ${result.version} is the latest release.`;
-  const cliNext = cliFollowsApp ? '' : ` This CLI was not updated; update it with ${pipCli ? 'pip install --upgrade runpane' : 'its package manager (npm install --global runpane@latest or pip install --upgrade runpane)'}.`;
+  const cliNext = cliFollowsApp || parsed.updateScope === 'pane' ? '' : ` This CLI was not updated; update it with ${pipCli ? 'pip install --upgrade runpane' : 'its package manager (npm install --global runpane@latest or pip install --upgrade runpane)'}.`;
   if (parsed.json) {
     console.log(JSON.stringify({ mode: 'in-app', phase, fromVersion: result.fromVersion, version: result.version, cliUpdated: phase !== 'current' && cliFollowsApp, independentRefusal: refusal, next: next + cliNext }, null, 2));
   } else {

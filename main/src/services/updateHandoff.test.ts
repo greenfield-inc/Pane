@@ -94,7 +94,9 @@ describe('runpane update hands off to the in-app updater', () => {
     fs.writeFileSync(executable, '', { mode: 0o555 });
     await startDesktop({ executable });
     expect(await update('--pane-only')).toBe(0);
-    expect(printed()).toMatchObject({ mode: 'in-app', phase: 'installing', cliUpdated: true, independentRefusal: { code: 'EACCES' } });
+    // This test process is not Pane's managed CLI, so the app update leaves it as it was.
+    expect(printed()).toMatchObject({ mode: 'in-app', phase: 'installing', cliUpdated: false, independentRefusal: { code: 'EACCES' } });
+    expect(printed().next).not.toContain('This CLI was not updated');
   });
 
   it('says when this CLI is a separate installation the desktop update leaves behind', async () => {
@@ -124,6 +126,9 @@ describe('runpane update hands off to the in-app updater', () => {
     vi.stubEnv('PANE_UPDATE_PYTHON_ENTRYPOINT', path.join(root, 'site-packages/runpane/cli.py'));
     expect(await update()).toBe(0);
     expect(printed()).toMatchObject({ cliUpdated: false, next: expect.stringContaining('pip install --upgrade runpane') });
+    output = [];
+    expect(await update('--pane-only')).toBe(0);
+    expect(printed()).toMatchObject({ cliUpdated: false });
   });
 
   it('reports a current desktop without restarting it', async () => {
