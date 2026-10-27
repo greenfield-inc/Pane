@@ -140,6 +140,11 @@ interface ElectronAPI {
     installUpdate: () => Promise<IPCResponse>;
     copyUpdateCommand: () => Promise<IPCResponse<{ command: string }>>;
     openTerminalWithCommand: () => Promise<IPCResponse<{ command: string }>>;
+    getRestartState: () => Promise<IPCResponse<import('../../../shared/types/updater').RestartToUpdateState>>;
+    restartToUpdate: (source: import('../../../shared/types/updater').RestartToUpdateSource) => Promise<IPCResponse>;
+    snooze: () => Promise<IPCResponse<import('../../../shared/types/updater').RestartToUpdateState>>;
+    setTonight: (enabled: boolean) => Promise<IPCResponse<import('../../../shared/types/updater').RestartToUpdateState>>;
+    takeRestoreResult: () => Promise<IPCResponse<import('../../../shared/types/updater').UpdateRestoreResult | null>>;
   };
 
   // System utilities
@@ -524,6 +529,7 @@ interface ElectronAPI {
     onUpdaterUpdateNotAvailable: (callback: (info: { version: string }) => void) => () => void;
     onUpdaterDownloadProgress: (callback: (progressInfo: { bytesPerSecond: number; percent: number; transferred: number; total: number }) => void) => () => void;
     onUpdaterUpdateDownloaded: (callback: (info: { version: string; files: string[]; path: string; sha512: string; releaseDate: string }) => void) => () => void;
+    onRestartToUpdateState: (callback: (state: import('../../../shared/types/updater').RestartToUpdateState) => void) => () => void;
     onUpdaterError: (callback: (error: Error) => void) => () => void;
     
     // Process management events

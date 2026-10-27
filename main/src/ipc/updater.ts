@@ -8,10 +8,64 @@ import { commandExecutor } from '../utils/commandExecutor';
 import { getCurrentWorktreeName } from '../utils/worktreeUtils';
 import { getAppDirectory } from '../utils/appDirectory';
 import { getUpdateCapabilities } from '../utils/updateCapabilities';
+import {
+  getRestartToUpdateState,
+  restartToUpdate,
+  setRestartToUpdateTonight,
+  snoozeRestartToUpdate,
+  takeUpdateRestoreResult,
+} from '../services/restartToUpdate/restartToUpdate';
+import type { RestartToUpdateSource } from '../../../shared/types/updater';
+import { paneErrorText, PaneError } from '../../../shared/paneError';
 
 const MAC_UPDATE_COMMAND = 'curl -fsSL https://runpane.com/install.sh | sh';
 
-export function registerUpdaterHandlers(ipcMain: IpcMain, { app, versionChecker }: AppServices): void {
+const RESTART_SOURCES: readonly RestartToUpdateSource[] = ['toast', 'pill', 'tonight', 'runpane'];
+
+export function registerUpdaterHandlers(ipcMain: IpcMain, { app, versionChecker, sessionManager, databaseService, analyticsManager }: AppServices): void {
+  ipcMain.handle('updater:get-restart-state', () => {
+    try {
+      return { success: true, data: getRestartToUpdateState() };
+    } catch (error) {
+      return { success: false, error: error instanceof PaneError ? paneErrorText(error) : 'Failed to read the update state' };
+    }
+  });
+
+  ipcMain.handle('updater:snooze', () => {
+    try {
+      return { success: true, data: snoozeRestartToUpdate() };
+    } catch (error) {
+      return { success: false, error: error instanceof PaneError ? paneErrorText(error) : 'Failed to snooze the update' };
+    }
+  });
+
+  ipcMain.handle('updater:set-tonight', (_event, enabled: boolean) => {
+    try {
+      return { success: true, data: setRestartToUpdateTonight(enabled === true) };
+    } catch (error) {
+      return { success: false, error: error instanceof PaneError ? paneErrorText(error) : 'Failed to schedule the update' };
+    }
+  });
+
+  ipcMain.handle('updater:restart-to-update', (_event, source: RestartToUpdateSource) => {
+    try {
+      restartToUpdate(RESTART_SOURCES.includes(source) ? source : 'pill');
+      return { success: true };
+    } catch (error) {
+      console.error('Failed to restart to update:', error);
+      return { success: false, error: error instanceof PaneError ? paneErrorText(error) : 'Failed to restart to update' };
+    }
+  });
+
+  ipcMain.handle('updater:take-restore-result', async () => {
+    try {
+      return { success: true, data: await takeUpdateRestoreResult({ sessionManager, databaseService, analyticsManager }) };
+    } catch (error) {
+      console.error('Failed to restore after the update restart:', error);
+      return { success: false, error: 'Failed to restore after the update restart' };
+    }
+  });
+
   ipcMain.handle('updater:get-capabilities', async () => ({
     success: true,
     data: await getUpdateCapabilities({
