@@ -92,6 +92,10 @@ export class API {
       if (!isElectron()) throw new Error('Electron API not available');
       return window.electronAPI.paneChat.setAgent(agent);
     },
+    async introOffer(): Promise<IPCResponse<{ eligible: boolean; openingPromptAtLaunch: boolean }>> {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.paneChat.introOffer();
+    },
   };
 
   static orchestrationSessions = {
