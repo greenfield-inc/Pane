@@ -43,7 +43,7 @@ export function GeneralSettings({ persistence, onUpdate, onSendFeedback }: Gener
 
   return (
     <SettingsPage title="General" description="Application startup, update, feedback, and file-opening behavior.">
-      <SettingsSection title="Updates" description="Keep Pane current with release checks from GitHub.">
+      <SettingsSection title="Updates" description="Keep Pane current. New releases download in the background.">
         <SettingRow
           settingId="automatic-updates"
           label="Check for updates automatically"

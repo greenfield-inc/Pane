@@ -82,8 +82,8 @@ export function restartPillLabel(state: RestartToUpdateState | null): string | n
 export function restartPillDescription(state: RestartToUpdateState | null): string | null {
   if (state?.readyVersion) {
     return state.tonight
-      ? `Restarts tonight to update to Pane ${state.readyVersion}`
-      : `Restart to update to Pane ${state.readyVersion}`;
+      ? `Pane ${state.readyVersion} restarts tonight`
+      : `Pane ${state.readyVersion} is ready. Restart to update`;
   }
   if (state?.availableVersion) return `Update available: Pane ${state.availableVersion}`;
   return null;
