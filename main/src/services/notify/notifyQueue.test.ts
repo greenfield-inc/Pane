@@ -184,6 +184,25 @@ describe('NotifyQueue', () => {
     expect(queue.snapshot().items.find(item => item.id === id)?.state).toBe('expired');
   });
 
+  it('delivers an answer sent just before the 15-minute cap instead of expiring it', async () => {
+    const { queue } = makeQueue();
+    let call = queue.ask({ question: sessionStore, source: claude, returnAfterMs: 50_000 });
+    const id = onlyId(queue);
+    // 17 resume rounds of 50 s reach 14:10; the last call then runs into the cap at 15:00.
+    for (let round = 0; round < 17; round += 1) {
+      await vi.advanceTimersByTimeAsync(50_000);
+      expect(await call).toMatchObject({ waiting: true });
+      call = queue.ask({ resume: id, source: claude, returnAfterMs: 50_000 });
+    }
+    await vi.advanceTimersByTimeAsync(49_000);
+
+    // Answered at 14:59: the 3 s Undo hold ends after the cap.
+    queue.run({ type: 'answer', id, answer: { choice: 'Keep Redis' } });
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(await call).toEqual({ answer: 'Keep Redis' });
+    expect(queue.snapshot().items.find(item => item.id === id)?.state).toBe('answered');
+  });
+
   it('delivers an answer given between two resume calls to the next one', async () => {
     const { queue } = makeQueue();
     const first = queue.ask({ question: sessionStore, source: claude, returnAfterMs: 50_000 });

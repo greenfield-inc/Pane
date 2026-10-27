@@ -265,6 +265,8 @@ export class NotifyQueue extends EventEmitter {
         const remaining = entry.item.createdAt + NOTIFY_RESUME_CAP_MS - Date.now();
         returnTimer = setTimeout(() => {
           if (remaining <= returnAfterMs) {
+            // An answer in its Undo hold reaches this call when the hold ends.
+            if (entry.item.state === 'sent') return;
             this.expire(entry.item.id, unavailable('Nobody answered within 15 minutes.'));
             return;
           }
