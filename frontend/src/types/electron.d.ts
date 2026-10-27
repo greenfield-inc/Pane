@@ -631,7 +631,10 @@ interface ElectronAPI {
     killGitHubAuthTerminal: (terminalId: string) => Promise<IPCResponse>;
     onGitHubAuthTerminalOutput: (callback: (data: { terminalId: string; data: string }) => void) => () => void;
     onGitHubAuthTerminalExit: (callback: (data: { terminalId: string; exitCode: number; signal: number | null }) => void) => () => void;
-    setupDefaultRepo: () => Promise<IPCResponse>;
+    setupDefaultRepo: () => Promise<IPCResponse<import('../../../shared/types/onboarding').SampleRepoSetup>>;
+    findRepos: () => Promise<IPCResponse<import('../../../shared/types/onboarding').HostRepos>>;
+    findWslRepos: (distro: string) => Promise<IPCResponse<import('../../../shared/types/onboarding').WslRepos>>;
+    checkFolder: (folder: string) => Promise<IPCResponse<{ name: string; path: string }>>;
     supportProject: () => Promise<IPCResponse>;
   };
 

@@ -1,5 +1,5 @@
 import { clipboard, IpcMain, IpcMainInvokeEvent } from 'electron';
-import { join } from 'path';
+import { dirname, join } from 'path';
 import { existsSync } from 'fs';
 import { mkdir } from 'fs/promises';
 import { exec, execFile, execSync, spawn, type ExecSyncOptionsWithStringEncoding } from 'child_process';
@@ -12,6 +12,10 @@ import { CommandRunner } from '../utils/commandRunner';
 import { getShellPath } from '../utils/shellPath';
 import type { PaneCommandValue } from '../daemon/commandRegistry';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+import { toPaneDaemonError } from '../../../shared/paneError';
+import type { PaneDaemonError } from '../../../shared/types/daemon';
+import { getDefaultWSLDistribution } from '../utils/wslUtils';
+import { checkRepoFolder, findHostRepoContext, findWslRepos } from '../services/repoFinder';
 
 /** Returns exec options that include the user's full shell PATH (Homebrew, nvm, etc.). */
 function shellExecOpts<Options extends object>(extra: Options): Options & { env: NodeJS.ProcessEnv } {
@@ -381,8 +385,45 @@ function isPaneRepo(repoPath: string): boolean {
   }
 }
 
+/** Pane's own sample repo, cloned by the first screen's sample link. */
+function sampleRepoPath(): string {
+  return join(getAppDirectory(), 'projects', 'Pane');
+}
+
+/** The IPC answer for a failure: the message and its next step read as one sentence pair in the dialog. */
+function failure(error: PaneDaemonError & { code: string }) {
+  return { success: false, code: error.code, error: [error.message, error.next].filter(Boolean).join(' ') };
+}
+
 export function registerOnboardingHandlers(ipcMain: IpcMain, services: AppServices): void {
   const { databaseService, sessionManager, analyticsManager } = services;
+
+  ipcMain.handle('onboarding:find-repos', async () => {
+    try {
+      const data = await findHostRepoContext({ excluded: [sampleRepoPath()], getDefaultWslDistro: () => getDefaultWSLDistribution() });
+      return { success: true, data };
+    } catch (error) {
+      console.error('[Onboarding] Failed to find repos:', error);
+      return failure(toPaneDaemonError(error, 'ONBOARDING_FIND_REPOS_FAILED'));
+    }
+  });
+
+  ipcMain.handle('onboarding:find-wsl-repos', async (_event: IpcMainInvokeEvent, distro: PaneCommandValue) => {
+    try {
+      return { success: true, data: await findWslRepos(decodeBoundary(distro, boundary.nonEmptyString)) };
+    } catch (error) {
+      console.error('[Onboarding] Failed to find WSL repos:', error);
+      return failure(toPaneDaemonError(error, 'ONBOARDING_FIND_WSL_REPOS_FAILED'));
+    }
+  });
+
+  ipcMain.handle('onboarding:check-folder', async (_event: IpcMainInvokeEvent, folder: PaneCommandValue) => {
+    try {
+      return { success: true, data: await checkRepoFolder(decodeBoundary(folder, boundary.nonEmptyString)) };
+    } catch (error) {
+      return failure(toPaneDaemonError(error, 'ONBOARDING_CHECK_FOLDER_FAILED'));
+    }
+  });
 
   // Detect git/gh environment
   ipcMain.handle('onboarding:detect-environment', async () => {
@@ -525,8 +566,8 @@ export function registerOnboardingHandlers(ipcMain: IpcMain, services: AppServic
   // Fork+clone or clone the Pane repo, register as project
   ipcMain.handle('onboarding:setup-default-repo', async () => {
     try {
-      const projectsDir = join(getAppDirectory(), 'projects');
-      const clonePath = join(projectsDir, 'Pane');
+      const clonePath = sampleRepoPath();
+      const projectsDir = dirname(clonePath);
 
       // Ensure projects directory exists
       await mkdir(projectsDir, { recursive: true });
@@ -631,6 +672,7 @@ export function registerOnboardingHandlers(ipcMain: IpcMain, services: AppServic
             projectId: existingPaneProject.id,
             projectPath: clonePath,
             wasAlreadyRegistered: true,
+            wasAlreadyCloned: alreadyCloned,
           }
         };
       }
@@ -655,19 +697,13 @@ export function registerOnboardingHandlers(ipcMain: IpcMain, services: AppServic
       sessionManager.setActiveProject(project);
       sessionManager.emit('project:list-changed');
 
-      // Track onboarding
-      if (analyticsManager) {
-        analyticsManager.track('onboarding_completed', {
-          was_already_cloned: alreadyCloned,
-        });
-      }
-
       return {
         success: true,
         data: {
           projectId: project.id,
           projectPath: clonePath,
           wasAlreadyRegistered: false,
+          wasAlreadyCloned: alreadyCloned,
         }
       };
     } catch (error) {
@@ -676,7 +712,7 @@ export function registerOnboardingHandlers(ipcMain: IpcMain, services: AppServic
 
       // Provide user-friendly error for common cases
       if (errorMsg.includes('Could not resolve host') || errorMsg.includes('Connection timed out')) {
-        return { success: false, error: 'Network error — please check your internet connection and try again.' };
+        return { success: false, error: "Pane couldn't reach GitHub" };
       }
 
       return { success: false, error: errorMsg };
