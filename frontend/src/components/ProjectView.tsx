@@ -199,6 +199,7 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
     () => workingPanels.find(p => p.id === activePanels[mainRepoSessionId || '']),
     [workingPanels, activePanels, mainRepoSessionId]
   );
+  const showStartTask = startTaskRequested || workingPanels.length === 0;
 
   // A persisted active panel that now lives in the inspector opens that tab
   // and hands the stage to the first working panel.
@@ -525,33 +526,37 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
                     <div className="h-3 w-2/3 bg-surface-tertiary rounded" />
                   </div>
                 </div>
-              ) : startTaskRequested || workingPanels.length === 0 ? (
-                <StartTaskCard
-                  projectId={projectId}
-                  projectEnvironment={projectEnvironment}
-                  openTerminal={options => { void handlePanelCreate('terminal', options); }}
-                />
-              ) : currentActivePanel ? (
-                workingPanels.map(panel => {
-                  const isActive = panel.id === currentActivePanel.id;
-                  return (
-                    <div
-                      key={panel.id}
-                      className="absolute inset-0"
-                      style={{
-                        display: isActive ? 'block' : 'none',
-                        pointerEvents: isActive ? 'auto' : 'none'
-                      }}
-                    >
-                      <PanelContainer
-                        panel={panel}
-                        isActive={isActive}
-                        isMainRepo={!!mainRepoSession?.isMainRepo}
-                      />
-                    </div>
-                  );
-                })
-              ) : null}
+              ) : (
+                <>
+                  {/* Tabs stay mounted under the card, as on any tab switch, so their state survives it. */}
+                  {workingPanels.map(panel => {
+                    const isActive = !showStartTask && panel.id === currentActivePanel?.id;
+                    return (
+                      <div
+                        key={panel.id}
+                        className="absolute inset-0"
+                        style={{
+                          display: isActive ? 'block' : 'none',
+                          pointerEvents: isActive ? 'auto' : 'none'
+                        }}
+                      >
+                        <PanelContainer
+                          panel={panel}
+                          isActive={isActive}
+                          isMainRepo={!!mainRepoSession?.isMainRepo}
+                        />
+                      </div>
+                    );
+                  })}
+                  {showStartTask && (
+                    <StartTaskCard
+                      projectId={projectId}
+                      projectEnvironment={projectEnvironment}
+                      openTerminal={options => { void handlePanelCreate('terminal', options); }}
+                    />
+                  )}
+                </>
+              )}
             </div>
 
             {/* Right: detail panel */}
