@@ -24,6 +24,8 @@ type TerminalPowerMode = 'performance' | 'batterySaver';
 
 export interface AnalyticsIdentity {
   distinctId: string;
+  // The desktop id stored before this launch, when one was stored.
+  previousDistinctId?: string;
   identitySource: 'email' | 'github' | 'git_name' | 'posthog' | 'anonymous';
   installId?: string;
   appVersion?: string;

@@ -119,6 +119,23 @@ App version should come from the running app context and be attached to disclosu
 first-open, usage, attribution, and close events. This lets PostHog distinguish
 current users from older installs.
 
+The app joins the web visitor id and the install id to the desktop id with
+`$create_alias`. PostHog merges the `alias` id into the `distinct_id` person and
+refuses an `alias` id whose person is already identified, so the `alias` is
+always the id that is new:
+
+- Web visitor id: `distinct_id` = desktop id, `alias` = web visitor id.
+- Install id, desktop id unchanged since the last launch (or first launch):
+  `distinct_id` = desktop id, `alias` = `install:<id>`.
+- Install id, desktop id changed since the last launch: `distinct_id` =
+  `install:<id>`, `alias` = new desktop id. The main process reads the stored
+  desktop id before this launch overwrites it and passes it as
+  `previousDistinctId`.
+- No install alias when the desktop id is `install:<id>`.
+
+The SDK path (`posthog.alias(alias, original)`) and the direct HTTP path used
+when opting out send the same pairs.
+
 ## Remote Pane Privacy
 
 Remote Pane analytics must use explicit sanitized events. Do not rely on
