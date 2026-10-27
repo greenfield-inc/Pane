@@ -9,7 +9,8 @@ const session = (id: string, extra: JsonObject = {}): JsonObject => ({
   createdAt: now, lastActivity: now, output: [], jsonMessages: [], permissionMode: 'ignore', toolType: 'none',
   archived: false, isFavorite: false, ...extra,
 });
-const mainRepo = session('acme-web-main', { name: 'acme-web (Main)', worktreePath: project.path, isMainRepo: true });
+// Main never lists a project's own checkout among its Panes; hidden keeps it out of the mock's sidebar too.
+const mainRepo = session('acme-web-main', { name: 'acme-web (Main)', worktreePath: project.path, isMainRepo: true, isHidden: true });
 const mainTerminal = {
   id: 'main-terminal', sessionId: mainRepo.id, type: 'terminal', title: 'Terminal',
   state: { isActive: true, hasBeenViewed: true, customState: { isInitialized: false } },
