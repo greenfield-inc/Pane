@@ -24,17 +24,21 @@ removed, a toast offers **Tonight**, **Later** or **Restart now**:
 - **Restart now** quits Pane the normal way, installs the update and relaunches.
   The next launch resumes every interrupted agent in every project on its saved
   conversation, reopens the Pane that was open and skips the Resume dialog. It
-  relaunches each agent with its resume command and types nothing into it.
+  relaunches each agent with its resume command and types nothing into it. A
+  Pane whose agent cannot resume stays interrupted and the toast says so; the
+  Resume dialog offers it when it belongs to the active project.
 - **Later** hides the toast for 4 hours. The sidebar button stays.
 - **Tonight** restarts between 2:00 and 5:00 local time, once nothing has run for
-  an hour and the keyboard and mouse have been idle for 30 minutes. Clicking the
-  button (now **Restarts tonight**) cancels it.
+  an hour and the keyboard and mouse have been idle for 30 minutes. To cancel,
+  click the sidebar button (now **Restarts tonight**), then **Don't restart
+  tonight**.
 
 Clicking the sidebar button while something runs says what is running and offers
 **Restart anyway**. A macOS install whose signature cannot be verified downloads
 nothing in the background; its button reads **Update available** and opens the
 Software Update dialog. Turning off **Settings → General → Check for updates
-automatically** stops the checks, the downloads and the button.
+automatically** stops the checks and the downloads, hides the button and
+cancels Tonight.
 
 To test locally, serve a newer build from a generic feed and start a dev build
 with `TEST_UPDATES=true UPDATE_SERVER_URL=<feed url>`. The dev build downloads
