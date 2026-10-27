@@ -1848,7 +1848,10 @@ export function registerSessionHandlers(
 
   commandRegistry.register('sessions:resume-interrupted', async (sessionIds: string[]) => {
     try {
-      await sessionManager.resumeInterruptedSessions(sessionIds);
+      const { failedSessionIds } = await sessionManager.resumeInterruptedSessions(sessionIds);
+      if (failedSessionIds.length > 0) {
+        return { success: false, error: `${failedSessionIds.length} Pane${failedSessionIds.length === 1 ? '' : 's'} could not resume an agent and stay interrupted. Open the Pane to start its agent.` };
+      }
       return { success: true };
     } catch (error) {
       console.error('Failed to resume interrupted sessions:', error);

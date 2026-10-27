@@ -544,6 +544,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         if (prop === 'onArchiveProgress') {
           return (callback: MockEventCallback) => subscribe('archive:progress', callback);
         }
+        if (prop === 'onRestartToUpdateState') {
+          return (callback: MockEventCallback) => subscribe('updater:restart-state', callback);
+        }
         return () => unsubscribe;
       },
     });
@@ -672,6 +675,18 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       }),
       isPackaged: () => Promise.resolve(false),
       checkForUpdates: () => success({ hasUpdate: false }),
+      // No update is ready, so smoke tests show no pill or toast.
+      updater: namespace({
+        getRestartState: () => success({
+          readyVersion: null,
+          availableVersion: null,
+          busy: null,
+          idleToastDue: false,
+          snoozedUntil: null,
+          tonight: false,
+        }),
+        takeRestoreResult: () => success(null),
+      }),
       openExternal: (url: string) => {
         openedExternalUrls.push(url);
         if (mockOptions.openExternalOutcome === 'failure') {
@@ -890,6 +905,8 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           configState.defaultOrchestratorAgent = agent === 'codex' || agent === 'cursor' ? agent : 'claude';
           return success(createPaneChatState());
         },
+        // No smoke test sees the one-time Pane Chat offer.
+        introOffer: () => success({ eligible: false, openingPromptAtLaunch: true }),
       }),
       sshHosts: namespace({
         list: () => {

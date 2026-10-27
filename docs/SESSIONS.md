@@ -193,8 +193,8 @@ first. A host running an older Pane cannot save an order: the list snaps back
 and the error says to update Pane on that host. Dragging a Session onto the
 workspace still tiles it.
 
-Click a Session row to open its chat, or use **Switch to Session: <name>** in the
-command palette (`⌘⇧P` / `Ctrl+Shift+P`), which also has **New Session**. A Session with associated Panes shows a
+Click a Session row to open its chat, or find it by name in Search (`⌘⇧P` /
+`Ctrl+Shift+P`, or the Search field above **New**), which also has **New Session**. A Session with associated Panes shows a
 chevron that expands or collapses them; a Session without Panes shows none.
 Every Session starts collapsed, including a new one and one that just got its
 first Pane, until you press its chevron. Opening the Session's chat, an agent
@@ -297,6 +297,28 @@ not archived; archive it from the same menu when you are done with it.
 
 ## Bring your existing sessions into Pane
 
+Pane itself can bring idle sessions in with one click. While you have fewer
+than two Panes, Home shows a "Bring your sessions into Pane" card when it finds
+recent sessions from Claude Code, Codex, Conductor, Superset, Herdr, Emdash,
+Orca or T3 Code on this computer. Settings → AI & Agents → "Bring sessions into
+Pane" → **Find sessions** opens the same card at any time.
+
+- Pane reads each tool's session list locally (metadata only; SQLite stores
+  from a temporary copy) and lists sessions active in the last 30 days, one row
+  per tool. Sessions from the last 7 days are preselected, at most 3 per
+  checkout; click a row to choose sessions.
+- **Bring them in** adopts each checkout in place as a Pane, with one tab per
+  session resumed by the agent's own id. A transcript kept in a tool's own agent
+  folder is first copied into your own Claude Code or Codex store.
+- Sessions still running elsewhere are listed but can't be chosen, and
+  neither can other sessions in the same checkout; quit them and press **Check
+  again**, or use the skill below, which forks them. A tab
+  whose agent exits without resuming is closed and reported, and a new Pane
+  whose sessions all failed is removed. A tab waiting at the agent's
+  folder-trust prompt, or whose agent is still starting, stays open for you.
+- **Not now** or **Done** on Home hides the card for good. The card and the
+  skill share the record below, so neither brings a session in twice.
+
 Say "migrate to Pane" in any Session, or "yes" to the first-run offer above, and
 the `migrate-to-pane` skill brings the conversations you already have in other
 agent tools (Claude Code, Codex, OpenCode, the Cursor agent, Conductor, or
@@ -329,15 +351,25 @@ automatic greeting, diagnostic sweep, watcher setup, or continuation of a
 saved next action. Reopening an already-running Session reconnects without
 interrupting work the user has already authorized.
 
-There is one exception, and it happens at most once per Pane data directory.
+There are two exceptions, each at most once per Pane data directory.
+
 The first time the built-in Pane Chat Session launches while Pane has no Panes
 and no repositories (the sample repository the onboarding dialog clones doesn't
 count), Pane sends it one prompt, which says that Pane sent it and why. The
 agent then asks whether to bring your existing agent sessions into Pane, and
 starts only when you say yes. Pane records the offer in the
 `pane_chat_migrate_offer_sent` user preference once a launch has sent it, so a
-restart or an agent switch never sends it again. See
+restart or an agent switch never sends it again. The Home card above sets the
+same preference when it is first shown, so you get one offer, not two. See
 [Bring your existing sessions into Pane](#bring-your-existing-sessions-into-pane).
+
+Pane may also offer Pane Chat once, in a card over a Pane, after you have
+created at least two worktree Panes and used Pane on at least three days, if you
+have never created a Session. "Try it" creates a Session named after the Pane's
+repository, whose agent introduces itself, suggests two small tasks from that
+repository, and waits for your answer before starting any Pane. Pane removes
+that opening prompt from the Session once a launch has sent it, so a restart
+never sends it again.
 
 Pane may prepare instruction files and terminal infrastructure at startup;
 that preparation does not require an agent turn. Unattended work and watchers
@@ -1131,7 +1163,7 @@ exactly the old behaviour — switching Sessions replaces the view.
 The `X` on a tile's title row stops tiling that Session; the Session itself,
 its conversation and its panels are untouched, and the layout collapses back
 around the space. The last tile has no close button, since a window with no
-Session in it has nothing to show. The command palette carries the same actions
+Session in it has nothing to show. Search carries the same commands
 for the keyboard: focus the Session left, right, above or below, and stop tiling
 the focused one.
 

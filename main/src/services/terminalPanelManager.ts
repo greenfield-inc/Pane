@@ -118,7 +118,7 @@ import { detectAgentComposer, detectAgentFromScreen } from './agents/agentScreen
 import { readForegroundExecutablePath, readForegroundProcessGroup } from '../utils/foregroundProcess';
 import { buildCursorLaunchCommand, createCursorReadyDetector, extractCursorChatId } from './agents/cursorLaunch';
 import { resolveOpenCodeLaunchCommand } from './agents/opencodeLaunch';
-import { quoteShellWord } from './agents/shellWord';
+import { isPosixShell, quoteShellWord } from './agents/shellWord';
 import {
   bracketedPaste,
   canLaunchWithPromptFile,
@@ -127,7 +127,7 @@ import {
   promptFileShellWord,
   stripTrailingNewlines,
 } from './agents/promptDelivery';
-import { PANE_CHAT_MIGRATE_OFFER_OPENING } from '../../../shared/types/paneChat';
+import { PANE_ONE_TIME_PROMPT_OPENING } from '../../../shared/types/paneChat';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -446,10 +446,39 @@ export class TerminalPanelManager extends EventEmitter {
     return `"${value.replace(/([\\"$`])/g, '\\$1')}"`;
   }
 
-  /** An argument-mode prompt as one shell word: its prompt file read by the shell, or the quoted text. */
-  private initialPromptWord(customState: TerminalPanelState): string {
+  /**
+   * An argument-mode prompt as one literal shell word: its prompt file read by the shell, or the
+   * quoted text. Only POSIX shells pass a quoted word to the agent unchanged: Windows PowerShell
+   * drops embedded `"` when it hands an argument to a native program, and cmd expands `%` and `!`.
+   * Elsewhere this is undefined, and the prompt is typed into the agent once it is ready instead.
+   */
+  private initialPromptWord(customState: TerminalPanelState, shellType: string | undefined): string | undefined {
     const fileWord = customState.initialInputFile ? promptFileShellWord(customState.initialInputFile) : undefined;
-    return fileWord ?? this.quoteCommandArgument(customState.initialInput ?? '');
+    if (fileWord) return fileWord;
+    return isPosixShell(shellType) ? this.quoteCommandArgument(customState.initialInput ?? '') : undefined;
+  }
+
+  private hasUnsentArgumentPrompt(customState: TerminalPanelState): boolean {
+    return customState.initialInputMode === 'argument' && Boolean(customState.initialInput?.trim()) && !customState.initialInputSentAt;
+  }
+
+  /**
+   * An argument-mode prompt this shell can't take on the command line is dropped from the launch,
+   * never typed in later: nothing proves the agent, and not a bare shell, would read it.
+   */
+  private dropUnplaceablePrompt(nextState: TerminalPanelState, shellType: string | undefined): void {
+    nextState.initialInput = undefined;
+    nextState.initialInputFile = undefined;
+    nextState.initialInputError = `The starting message was not sent: ${shellType ?? 'this shell'} can't pass it to the agent as one launch argument without changing it, and Pane won't type it where a shell might read it. Paste it into the agent, or send it with runpane panels submit.`;
+  }
+
+  /**
+   * Whether a new terminal for this context reads POSIX quoting, so a starting message can go on
+   * the agent's launch command line. WSL terminals run bash.
+   */
+  launchShellIsPosix(wslContext?: WSLContext | null): boolean {
+    if (wslContext && process.platform === 'win32') return true;
+    return isPosixShell(ShellDetector.getDefaultShell(getRuntimeConfigManager().getPreferredShell()).name);
   }
 
   /**
@@ -562,7 +591,7 @@ export class TerminalPanelManager extends EventEmitter {
     };
 
     const resolution = agentType === 'claude'
-      ? this.resolveClaudeLaunch(panelId, initialCommand, customState, nextState, isWSL)
+      ? this.resolveClaudeLaunch(panelId, initialCommand, customState, nextState, isWSL, isWSL ? 'bash' : shellType)
       : agentType === 'codex'
         ? this.resolveCodexLaunch(panelId, initialCommand, customState, nextState, isWSL ? 'bash' : shellType)
         : agentType === 'cursor'
@@ -606,6 +635,7 @@ export class TerminalPanelManager extends EventEmitter {
     customState: TerminalPanelState,
     nextState: TerminalPanelState,
     isWSL = false,
+    shellType?: string,
   ): CliLaunchResolution | undefined {
     if (
       !initialCommand.includes('--session-id') &&
@@ -629,9 +659,10 @@ export class TerminalPanelManager extends EventEmitter {
         : undefined;
       const canResumeClaudeSession = customState.hasClaudeSessionId === true && Boolean(existingClaudeSessionId)
         && (!checkTranscript || Boolean(transcript));
-      const initialPromptArg = customState.initialInputMode === 'argument' && customState.initialInput?.trim()
-        ? ` ${this.initialPromptWord(customState)}`
-        : '';
+      const promptWord = customState.initialInputMode === 'argument' && customState.initialInput?.trim()
+        ? this.initialPromptWord(customState, shellType)
+        : undefined;
+      const initialPromptArg = promptWord ? ` ${promptWord}` : '';
 
       nextState.hasClaudeSessionId = true;
       nextState.agentSessionId = claudeSessionId;
@@ -639,6 +670,8 @@ export class TerminalPanelManager extends EventEmitter {
       if (initialPromptArg && !canResumeClaudeSession) {
         nextState.initialInputSentAt = new Date().toISOString();
         nextState.initialInputError = undefined;
+      } else if (!promptWord && !canResumeClaudeSession && this.hasUnsentArgumentPrompt(customState)) {
+        this.dropUnplaceablePrompt(nextState, shellType);
       }
 
       return {
@@ -692,19 +725,19 @@ export class TerminalPanelManager extends EventEmitter {
       };
     }
 
-    if (
-      customState.initialInputMode === 'argument' &&
-      customState.initialInput?.trim() &&
-      !customState.initialInputSentAt
-    ) {
+    const promptWord = customState.initialInputMode === 'argument' && customState.initialInput?.trim() && !customState.initialInputSentAt
+      ? this.initialPromptWord(customState, shellType)
+      : undefined;
+    if (promptWord) {
       nextState.initialInputSentAt = new Date().toISOString();
       nextState.initialInputError = undefined;
       return {
-        commandToRun: `${initialCommand} ${this.initialPromptWord(customState)}`,
+        commandToRun: `${initialCommand} ${promptWord}`,
         customState: nextState,
         isCliCommand: true,
       };
     }
+    if (this.hasUnsentArgumentPrompt(customState)) this.dropUnplaceablePrompt(nextState, shellType);
 
     return undefined;
   }
@@ -744,7 +777,7 @@ export class TerminalPanelManager extends EventEmitter {
         nextState.initialInputSentAt = new Date().toISOString();
         nextState.initialInputError = undefined;
       }
-      const promptWord = promptArgument && customState.initialInputFile ? this.initialPromptWord(customState) : undefined;
+      const promptWord = promptArgument && customState.initialInputFile ? this.initialPromptWord(customState, shellType) : undefined;
       return {
         commandToRun: buildCursorLaunchCommand({ baseCommand: initialCommand, promptArgument, promptWord, shellType }),
         customState: nextState,
@@ -1648,12 +1681,13 @@ export class TerminalPanelManager extends EventEmitter {
     }
 
     const sessionState = terminalCustomState(panel.state);
-    const unsentMigrateOffer = !sessionState.initialInputSentAt
-      && sessionState.initialInput?.startsWith(PANE_CHAT_MIGRATE_OFFER_OPENING) === true;
-    if ((sessionState.orchestrationSessionId || isOrchestrationInternalSessionId(panel.sessionId)) && !unsentMigrateOffer) {
+    const unsentOneTimePrompt = !sessionState.initialInputSentAt
+      && sessionState.initialInput?.startsWith(PANE_ONE_TIME_PROMPT_OPENING) === true;
+    if ((sessionState.orchestrationSessionId || isOrchestrationInternalSessionId(panel.sessionId)) && !unsentOneTimePrompt) {
       // Also cover supervisor restoration before the Session manager refreshes
       // old launch records. Never deliver historical bootstrap input again.
-      // Pane Chat's one-time migrate offer is the one first prompt a Session sends.
+      // Pane's one-time prompts (the migrate offer, a Session's opening prompt)
+      // are the only first prompts a Session sends.
       panel.state.customState = { ...sessionState, initialInput: undefined };
     }
     cwd = sessionState.orchestrationWorkspace ?? cwd;

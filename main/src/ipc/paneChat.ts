@@ -3,6 +3,8 @@ import type { PaneCommandRegistry, PaneCommandValue } from '../daemon/commandReg
 import type { AppServices } from './types';
 import { normalizePaneChatAgent } from '../../../shared/types/paneChat';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+import { paneChatIntroOfferEligible } from '../services/paneChatIntroOffer';
+import { terminalPanelManager } from '../services/terminalPanelManager';
 
 export function registerPaneChatHandlers(
   ipcMain: IpcMain,
@@ -45,4 +47,24 @@ export function registerPaneChatHandlers(
     }
   });
   commandRegistry.bindChannel(ipcMain, 'pane-chat:set-agent');
+
+  commandRegistry.register('pane-chat:intro-offer', async () => {
+    try {
+      if (!services.orchestrationSessionManager) {
+        throw new Error('Sessions manager is not initialized');
+      }
+      const { sessions } = await services.orchestrationSessionManager.list();
+      const agent = normalizePaneChatAgent(services.configManager.getConfig().defaultOrchestratorAgent);
+      // A shell that can't take the opening prompt on the launch command line gets it as text to paste.
+      const openingPromptAtLaunch = terminalPanelManager.launchShellIsPosix();
+      return { success: true, data: { eligible: paneChatIntroOfferEligible(sessions, agent), openingPromptAtLaunch } };
+    } catch (error) {
+      console.error('[PaneChat IPC] Failed to check the Pane Chat offer:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to check the Pane Chat offer',
+      };
+    }
+  });
+  commandRegistry.bindChannel(ipcMain, 'pane-chat:intro-offer');
 }

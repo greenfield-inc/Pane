@@ -1,7 +1,13 @@
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 
 const ERROR_TYPES = new Set(['Error', 'TypeError', 'RangeError', 'ReferenceError', 'SyntaxError', 'URIError', 'EvalError', 'AggregateError']);
-const ERROR_CODES = new Set(['EACCES', 'EPERM', 'ENOENT', 'EIO', 'ENOSPC', 'EMFILE', 'ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND', 'ETIMEDOUT', 'ERR_RUNPANE_PANE_CREATE_FAILED', 'ERR_RUNPANE_BRANCH_HAS_PANE']);
+const ERROR_CODES = new Set([
+  'EACCES', 'EPERM', 'ENOENT', 'EIO', 'ENOSPC', 'EMFILE', 'ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND', 'ETIMEDOUT',
+  // Why a created pane or panel was not ready or did not take its starting message.
+  'no-agent-detected', 'agent-not-ready', 'command-exited', 'agent-blocked', 'readiness-timeout', 'delivery-unverified',
+]);
+/** Pane's own codes name the failure without carrying user data. */
+const PANE_ERROR_CODE = /^ERR_[A-Z0-9_]{1,60}$/;
 
 export function failureDetails(cause: unknown) {
   const name = cause instanceof Error ? cause.name : undefined;
@@ -17,7 +23,7 @@ export function failureDetails(cause: unknown) {
   } catch {
     // Non-error throws carry no safe classification context.
   }
-  const errorCode = code && ERROR_CODES.has(code) ? code : 'unknown';
+  const errorCode = code && (ERROR_CODES.has(code) || PANE_ERROR_CODE.test(code)) ? code : 'unknown';
   const text = `${errorCode} ${message}`.toLowerCase();
   const category = /eacces|eperm|permission/.test(text) ? 'permission'
     : /enospc|emfile|eio/.test(text) ? 'io'
