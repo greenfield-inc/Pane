@@ -122,6 +122,12 @@ test.describe('Pane Notify in the main window', () => {
     await expect(page.getByTestId('notify-empty')).toContainText('notify');
   });
 
+  test('the strip stays up for a docked question while its terminal is out of view', async ({ page }) => {
+    // Open in Pane docked q-options in auth-refactor's terminal, but no Pane is open now.
+    await boot(page, { ...notifyFixture(), dockedItemId: 'q-options' });
+    await expect(page.getByTestId('notify-in-pane-strip').getByText('Which session store should the refactor use?')).toBeVisible();
+  });
+
   test('the in-Pane strip answers, hides, and offers a reminder', async ({ page }) => {
     await boot(page);
     const strip = page.getByTestId('notify-in-pane-strip');
