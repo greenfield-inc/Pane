@@ -72,8 +72,8 @@ export function CloneFromGitHubDialog({ isOpen, onClose, onCloned }: CloneFromGi
 
       window.dispatchEvent(new Event('project-changed'));
       navigateToProject(projectResult.data.id);
-      resetAndClose();
       onCloned?.(projectResult.data.id, clonedPath);
+      resetAndClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An unexpected error occurred');
       setCloning(false);

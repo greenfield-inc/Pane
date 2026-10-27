@@ -410,14 +410,24 @@ export default function OnboardingDialog({ isOpen, onClose }: OnboardingDialogPr
 
   const chooseFolder = async () => {
     setError(null);
-    const picked = await window.electronAPI.dialog.openDirectory();
-    if (!picked.success || !picked.data) return;
-    const folder = await window.electronAPI.onboarding.checkFolder(picked.data);
-    if (!folder.success || !folder.data) {
-      setError(folder.error ?? NOT_A_REPO);
+    let folder: { name: string; path: string };
+    try {
+      const picked = await window.electronAPI.dialog.openDirectory();
+      if (!picked.success || !picked.data) return;
+      setIsOpening(true);
+      const checked = await window.electronAPI.onboarding.checkFolder(picked.data);
+      if (!checked.success || !checked.data) {
+        setError(checked.error ?? NOT_A_REPO);
+        return;
+      }
+      folder = checked.data;
+    } catch (cause) {
+      setError(`Couldn't open that folder: ${reasonText(cause instanceof Error ? cause.message : undefined, 'Pane could not read it')}.`);
       return;
+    } finally {
+      setIsOpening(false);
     }
-    await addProject(folder.data.name, folder.data.path, { entry: 'chosen_folder', wsl: isWslPath(folder.data.path) });
+    await addProject(folder.name, folder.path, { entry: 'chosen_folder', wsl: isWslPath(folder.path) });
   };
 
   const setUpSample = async () => {
@@ -455,7 +465,8 @@ export default function OnboardingDialog({ isOpen, onClose }: OnboardingDialogPr
     return (
       <CloneFromGitHubDialog
         isOpen
-        onClose={() => setIsCloning(false)}
+        // After a clone the onboarding dialog closes itself, so the picker never shows again.
+        onClose={() => { if (!closedRef.current) setIsCloning(false); }}
         onCloned={(_projectId, clonedPath) => void complete({ entry: 'github_clone', wsl: isWslPath(clonedPath) })}
       />
     );
@@ -572,7 +583,7 @@ export default function OnboardingDialog({ isOpen, onClose }: OnboardingDialogPr
       </ModalBody>
 
       <ModalFooter className="flex justify-between items-center">
-        <Button onClick={() => void handleSkip()} variant="ghost">Skip</Button>
+        <Button onClick={() => void handleSkip()} variant="ghost" disabled={isOpening}>Skip</Button>
         {gitMissing ? (
           <Button onClick={() => window.electronAPI.openExternal('https://git-scm.com/downloads')} variant="primary" icon={<ExternalLink className="h-4 w-4" />}>
             Install Git
