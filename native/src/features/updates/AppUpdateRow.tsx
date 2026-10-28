@@ -9,12 +9,16 @@ import { describeUpdateRow } from './updateRow';
 // Tapping the row checks for an update now, which answers "did my merge reach
 // this phone yet?". A downloaded update applies at the next cold start, or
 // right away through Restart to update.
+// The dev client reports expo-updates as enabled, but Metro serves the
+// JavaScript there.
+const updatesEnabled = Updates.isEnabled && !__DEV__;
+
 export function AppUpdateRow() {
   const theme = useTheme();
   const { currentlyRunning, isChecking, isDownloading, isUpdatePending, checkError, downloadError } = Updates.useUpdates();
   const row = describeUpdateRow({
     version: Constants.expoConfig?.version ?? '?',
-    updatesEnabled: Updates.isEnabled,
+    updatesEnabled,
     isEmbeddedLaunch: currentlyRunning.isEmbeddedLaunch,
     updateId: currentlyRunning.updateId,
     createdAt: currentlyRunning.createdAt,
@@ -46,7 +50,7 @@ export function AppUpdateRow() {
       testID="settings-app-version"
       title={row.title}
       subtitle={row.kind === 'version' ? row.subtitle : undefined}
-      onPress={Updates.isEnabled && row.kind === 'version' ? () => void checkNow() : undefined}
+      onPress={updatesEnabled && row.kind === 'version' ? () => void checkNow() : undefined}
     />
   );
 }
