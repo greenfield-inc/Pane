@@ -36,7 +36,11 @@ import {
   createRemoteDaemonConnectionPair,
 } from '../daemon/remotePairing';
 import { remoteHostRuntimeStateStore } from '../daemon/remoteHostRuntimeState';
-import { readConfiguredTailscaleServeAccess, setupRemoteHost } from '../daemon/setupRemoteHost';
+import {
+  getFailedRemoteHostSetupStep,
+  readConfiguredTailscaleServeAccess,
+  setupRemoteHost,
+} from '../daemon/setupRemoteHost';
 import { tailnetMovedNotice, tailnetProblemNotice } from '../daemon/remoteHostTailnet';
 import { formatTailscaleIssue } from '../daemon/tailscaleSetup';
 import { getAppDirectory } from '../utils/appDirectory';
@@ -208,6 +212,12 @@ export function registerRemoteDaemonHandlers(
         baseUrl: request.baseUrl,
         autoSelectListenPort: true,
         asyncCommandRunner: runRemoteSetupCommand,
+        onProgress: (progress) => {
+          const mainWindow = getMainWindow?.();
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('remote-daemon:setup-progress', progress);
+          }
+        },
         existingConfig: useCurrentDataDirectory ? configManager.getConfig() : undefined,
         writeConfig: useCurrentDataDirectory
           ? async (nextConfig) => {
@@ -234,12 +244,17 @@ export function registerRemoteDaemonHandlers(
         } satisfies RemoteHostSetupResult,
       };
     } catch (error) {
-      trackRemotePaneEvent(analyticsManager, 'remote_pane_host_setup_failed', {
+      const failureProperties: RemotePaneAnalyticsProperties = {
         ...(request ? getRemoteSetupProperties(request) : { surface: 'desktop', role: 'host', flow: 'setup' }),
         result: 'failed',
         failure_stage: 'setup_host',
         failure_category: getRemoteFailureCategory(error instanceof Error ? error.message : String(error)),
-      });
+      };
+      const failedStep = getFailedRemoteHostSetupStep(error);
+      if (failedStep) {
+        failureProperties.failed_check = `setup_${failedStep}`;
+      }
+      trackRemotePaneEvent(analyticsManager, 'remote_pane_host_setup_failed', failureProperties);
       return { success: false, error: getErrorMessage(error, 'Failed to set up remote daemon host') };
     }
   });
@@ -598,36 +613,66 @@ export function registerRemoteDaemonHandlers(
     }
   });
 
-  ipcMain.handle('remote-daemon:update-client-state', async (_event, updates: PaneCommandValue) => {
-    try {
-      const decodedUpdates = decodeBoundary(updates, boundary.jsonObject);
+  async function updateClientState(updates: JsonObject, options: { recheck?: boolean } = {}): Promise<RemoteDaemonConfig> {
+    return applyRemoteClientTransition(async (current) => {
+      const nextState = buildNextClientState(current.client, updates);
+      const candidate = normalizeRemoteDaemonConfig({
+        ...current,
+        client: {
+          ...current.client,
+          ...nextState,
+        },
+      });
 
-      const next = await applyRemoteClientTransition(async (current) => {
-        const nextState = buildNextClientState(current.client, decodedUpdates);
-        const candidate = normalizeRemoteDaemonConfig({
-          ...current,
-          client: {
-            ...current.client,
-            ...nextState,
-          },
-        });
-
-        if (candidate.client.mode === 'remote') {
-          const activeProfile = candidate.client.profiles.find((profile) => profile.id === candidate.client.activeProfileId);
-          if (!activeProfile) {
-            throw new Error(`Remote daemon connection profile "${candidate.client.activeProfileId}" does not exist`);
-          }
-
-          await remotePaneClientController.activateProfile(activeProfile);
-        } else {
-          await remotePaneClientController.switchToLocalMode();
+      if (candidate.client.mode === 'remote') {
+        const activeProfile = candidate.client.profiles.find((profile) => profile.id === candidate.client.activeProfileId);
+        if (!activeProfile) {
+          throw new Error(`Remote daemon connection profile "${candidate.client.activeProfileId}" does not exist`);
         }
 
-        return {
-          next: candidate,
-          resyncRenderer: true,
-        };
-      });
+        await remotePaneClientController.activateProfile(activeProfile, options);
+      } else {
+        await remotePaneClientController.switchToLocalMode();
+      }
+
+      return {
+        next: candidate,
+        resyncRenderer: true,
+      };
+    });
+  }
+
+  // Fixes run on this computer: while connected, `ssh-hosts:*` commands go to the host, which is down.
+  ipcMain.handle('remote-daemon:run-check-fix', async (_event, input: PaneCommandValue) => {
+    try {
+      const { checkId, stage } = decodeBoundary(input, boundary.object({
+        checkId: boundary.number,
+        stage: boundary.enumeration('tailscale', 'reachable', 'running', 'signed-in', 'version', 'workspace'),
+      }));
+      const profile = await remotePaneClientController.runCheckFix(checkId, stage);
+      if (profile) {
+        await updateClientState({ mode: 'remote', activeProfileId: profile.id }, { recheck: true }).catch(() => {
+          // The new checklist names what still fails.
+        });
+      }
+      return { success: true, data: remotePaneClientController.getConnectionState() };
+    } catch (error) {
+      return { success: false, error: getErrorMessage(error, 'Failed to run the fix on the host') };
+    }
+  });
+
+  ipcMain.handle('remote-daemon:dismiss-check', async (_event, input: PaneCommandValue) => {
+    try {
+      const { checkId } = decodeBoundary(input, boundary.object({ checkId: boundary.number }));
+      return { success: true, data: remotePaneClientController.dismissCheck(checkId) };
+    } catch (error) {
+      return { success: false, error: getErrorMessage(error, 'Failed to close the connection checklist') };
+    }
+  });
+
+  ipcMain.handle('remote-daemon:update-client-state', async (_event, updates: PaneCommandValue) => {
+    try {
+      const next = await updateClientState(decodeBoundary(updates, boundary.jsonObject));
       return { success: true, data: next.client };
     } catch (error) {
       trackRemotePaneEvent(analyticsManager, 'remote_pane_client_connection_failed', {

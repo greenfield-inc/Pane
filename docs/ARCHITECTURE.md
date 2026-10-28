@@ -155,6 +155,9 @@ Preview components never enter the editable auto-save path, even on errors.
   `<git-common-dir>/pane-archive-cleanup`, separate from legacy trash sweeps.
 - Per-repo setup, run and archive scripts come from `pane.json` and friends:
   [CONFIG_FILES.md](CONFIG_FILES.md).
+- Settings › Import & Export writes and reads an allowlisted setup file in main
+  (`services/setupTransfer.ts`); the renderer applies it through Settings' own
+  save calls: [SETUP_EXPORT_IMPORT.md](SETUP_EXPORT_IMPORT.md).
 
 ## Notes
 
@@ -205,7 +208,7 @@ destination instead of claiming delivery. There is no cross-machine sync.
 | Timestamps | `main/src/utils/timestampUtils.ts` | [TIMESTAMP_HANDLING.md](TIMESTAMP_HANDLING.md) |
 | Pane Chat and orchestration sessions | `paneChatManager.ts`, `skillCacheManager.ts`, `paneChatBundle/` | [SESSIONS.md](SESSIONS.md) |
 | Loops (scheduled tasks) | `main/src/services/loops/`, `main/src/ipc/loops.ts`, `shared/types/loop.ts` | [LOOPS.md](LOOPS.md) |
-| Pane Notify (agent questions) | In-memory queue, floating strip and round windows, tray icon in `main/src/services/notify/`; `main/src/ipc/notify.ts`, `shared/types/notify.ts`; the floating windows load `frontend/notify.html` | [PANE_NOTIFY.md](PANE_NOTIFY.md) |
+| Pane Notify (agent questions) | In-memory queue, floating strip and round windows, tray icon in `main/src/services/notify/`; `main/src/ipc/notify.ts`, `shared/types/notify.ts`; the floating windows load `frontend/notify.html`. Connected desktops and phones read the host's queue over `notify:remote-snapshot`, `notify:remote-command` and the `notify:shared-changed` event; phone alerts go through `main/src/daemon/mobilePushSender.ts` | [PANE_NOTIFY.md](PANE_NOTIFY.md) |
 | SSH hosts view | `sshConfigHosts.ts`, `ipc/sshHosts.ts`, `SshView.tsx` | [SSH_HOSTS.md](SSH_HOSTS.md) |
 | `runpane` CLI contract | `contracts/runpane/` | [RUNPANE_CLI_CONTRACT.md](RUNPANE_CLI_CONTRACT.md) |
 | Analytics | `analyticsManager.ts`, `frontend/src/services/posthog.ts` | [ANALYTICS_INVARIANTS.md](ANALYTICS_INVARIANTS.md) |

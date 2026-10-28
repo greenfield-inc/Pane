@@ -47,7 +47,8 @@ export async function registerForPush(deps: PushDeps, hostProfileId: string): Pr
   }
 
   try {
-    const status = await deps.invoke<RemoteMobilePushStatus>('mobile:push-register', [{ platform: deps.platform, token, installationId, hostProfileId }]);
+    // notifyButtons: this build draws Notify's answer buttons (Pane app 1.1+).
+    const status = await deps.invoke<RemoteMobilePushStatus>('mobile:push-register', [{ platform: deps.platform, token, installationId, hostProfileId, notifyButtons: true }]);
     return status.provider === 'ready' ? { state: 'registered', status } : { state: 'host-not-ready', message: status.message };
   } catch (error) {
     return { state: 'error', message: messageOf(error) };

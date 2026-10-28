@@ -16,6 +16,7 @@ import type { JsonObject, JsonValue } from '../shared/validation/boundaryDecoder
 import { DEFAULT_APPEARANCE, LIGHT_THEMES, normalizeAppearance, type AppearanceConfig } from '../shared/types/appearance';
 import type { DiffManifest, DiffScope, FileDiffResult } from '../shared/types/gitDiff';
 import type { RunpaneAgentDoctorResult } from '../shared/types/runpaneOrchestration';
+import type { SetupExportSummary, SetupFile, SetupImportPreview, SetupSectionId } from '../shared/types/setupTransfer';
 import type { NotifyCommand, NotifySnapshot, NotifyWindowSize } from '../shared/types/notify';
 
 type MockEventValue = JsonValue | object | undefined;
@@ -112,6 +113,8 @@ export type ElectronApiMockOptions = {
   agentDoctor?: Partial<Record<'claude' | 'codex' | 'cursor' | 'opencode', { available: boolean; signIn?: 'signed-in' | 'signed-out' | 'unknown' }>>;
   /** Delay before runpane:agents:doctor answers, or `hold` to leave every check pending. */
   agentDoctorDelayMs?: number | 'hold';
+  /** setup:choose-import fails with this PaneError text instead of previewing. */
+  setupImportError?: string;
   /** Serves window.electronAPI.notify with this queue snapshot; absent, the API is too. */
   notifySnapshot?: NotifySnapshot;
 };
@@ -282,6 +285,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     };
     let mockProjects = clone(mockOptions.initialProjects ?? []);
     let mockSessions = clone(mockOptions.initialSessions ?? []);
+    const mockArchivedSessions: JsonObject[] = [];
     let mockLoops = clone(mockOptions.initialLoops ?? []);
     /** A plausible loops:preview answer for the form's preset shapes. */
     const previewLoopCron = (cron: string): LoopSchedulePreview => {
@@ -531,6 +535,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         if (prop === 'onLoopsChanged') {
           return (callback: MockEventCallback) => subscribe('loops:changed', callback);
         }
+        if (prop === 'onSessionsLoaded') {
+          return (callback: MockEventCallback) => subscribe('sessions:loaded', callback);
+        }
         if (prop === 'onSessionDeleted') {
           return (callback: MockEventCallback) => subscribe('session:deleted', callback);
         }
@@ -575,11 +582,73 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       return { success: true };
     };
 
-    const invoke = (channel: string, ...args: unknown[]) => {
+    const trackCall = (channel: string, args: unknown[]) => {
       const calls = invokeCalls.get(channel) ?? [];
       calls.push({ channel, args });
       if (calls.length > 500) calls.shift();
       invokeCalls.set(channel, calls);
+    };
+
+    // Settings › Import & Export: this computer's setup and one file to import.
+    const setupSummary: SetupExportSummary = {
+      rows: [
+        { id: 'agentPresets', count: 2, leftOut: [], agents: ['Claude Code', 'Codex'] },
+        { id: 'customCommands', count: 2, leftOut: [{ section: 'customCommands', name: 'deploy-prod' }] },
+        { id: 'runScripts', count: 4, leftOut: [] },
+        { id: 'skills', count: 2, leftOut: [], skills: { homeSkill: true, registerMcp: true } },
+        { id: 'terminalShortcuts', count: 4, leftOut: [] },
+        { id: 'worktreeFileSync', count: 3, leftOut: [] },
+        { id: 'appearance', count: 1, leftOut: [], appearance: { mode: 'fixed', theme: 'dark', light: 'light-rounded', dark: 'dark' } },
+        { id: 'preferences', count: 14, leftOut: [] },
+      ],
+    };
+    const setupPreview: SetupImportPreview = {
+      fileName: 'pane-setup-2026-10-26.json',
+      appVersion: '2.4.202',
+      platform: 'darwin',
+      otherPlatform: false,
+      file: {
+        kind: 'pane-setup',
+        version: 1,
+        exportedAt: '2026-10-26T22:40:00Z',
+        appVersion: '2.4.202',
+        platform: 'darwin',
+        sections: { customCommands: [{ name: 'lint-fix', command: 'pnpm lint --fix' }] },
+      },
+      sections: [
+        {
+          id: 'customCommands', changes: 2, added: 1, replaced: 1, keyInUse: 0,
+          items: [
+            { kind: 'new', name: 'lint-fix', text: 'pnpm lint --fix' },
+            { kind: 'replaces', name: 'review', text: 'claude "/review --strict"', was: 'claude "/review"' },
+          ],
+          apply: {
+            config: {
+              customCommands: [
+                { name: 'lint-fix', command: 'pnpm lint --fix' },
+                { name: 'review', command: 'claude "/review --strict"' },
+              ],
+            },
+          },
+        },
+        {
+          id: 'runScripts', changes: 1, added: 1, replaced: 0, keyInUse: 0, repositories: { matched: 1, total: 2 },
+          items: [
+            { kind: 'new', name: 'acme-web', field: 'Run Commands', text: 'pnpm dev' },
+            { kind: 'skipped', name: 'marketing-site', reason: 'not in Pane on this computer', cause: 'missing' },
+          ],
+          apply: { projects: [{ id: 1, name: 'acme-web', updates: { run_script: 'pnpm dev' } }] },
+        },
+        { id: 'terminalShortcuts', changes: 0, added: 0, replaced: 0, keyInUse: 0, items: [], apply: {} },
+        {
+          id: 'preferences', changes: 1, added: 0, replaced: 0, keyInUse: 0, items: [],
+          apply: { preferences: { sidebar_pane_row_layout: 'two-row' } },
+        },
+      ],
+    };
+
+    const invoke = (channel: string, ...args: unknown[]) => {
+      trackCall(channel, args);
       if (channel === 'terminal:ack') terminalAckedBytes += Number(args[1]);
 
       const key = args[0] === undefined ? undefined : String(args[0]);
@@ -610,6 +679,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       if (channel === 'terminal:set-preferred-shell') {
         configState.preferredShell = String(args[0]);
         return Promise.resolve(undefined);
+      }
+      if (channel === 'ports:list') {
+        return Promise.resolve({ host: 'mock-host', ports: [] });
       }
       if (channel === 'panels:get-layout') {
         return success(clone(key && mockLayouts.has(key) ? mockLayouts.get(key) : mockOptions.initialLayout ?? null));
@@ -794,6 +866,24 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         saveImage: () => success(null),
         shareImage: () => success({ method: 'clipboard' }),
       }),
+      setup: namespace({
+        summary: () => success(clone(setupSummary)),
+        export: (sections: SetupSectionId[]) => {
+          trackCall('setup:export', [sections]);
+          return success({
+            fileName: 'pane-setup-2026-10-26.json',
+            filePath: '/Users/test/pane-setup-2026-10-26.json',
+            leftOut: [{ section: 'customCommands', name: 'deploy-prod' }],
+          });
+        },
+        chooseImport: () => (mockOptions.setupImportError
+          ? Promise.resolve({ success: false, error: mockOptions.setupImportError })
+          : success(clone(setupPreview))),
+        preview: (file: SetupFile, fileName: string) => {
+          trackCall('setup:preview', [file, fileName]);
+          return success(clone(setupPreview));
+        },
+      }),
       usage: namespace({
         getReport: () => success(clone(mockOptions.initialUsageReport ?? {
           totals: {
@@ -950,6 +1040,18 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         onGitHubAuthTerminalOutput: (callback: MockEventCallback) => subscribe('onboarding:github-auth-pty-output', callback),
         onGitHubAuthTerminalExit: (callback: MockEventCallback) => subscribe('onboarding:github-auth-pty-exit', callback),
         setupDefaultRepo: () => success({}),
+        findRepos: () => success({ repos: [], shells: [], wslDistro: null }),
+        findWslRepos: (distro: string) => success({ distro, repos: [], agents: [] }),
+        checkFolder: (folder: string) => success({ name: folder.split(/[\\/]/).pop() ?? folder, path: folder }),
+        firstSteps: () => {
+          const sampleProjectIds = mockProjects.filter(project => project.path === '/tmp/.pane/projects/Pane').map(project => Number(project.id));
+          const archivedPaneIds = mockArchivedSessions
+            .filter(session => !sampleProjectIds.includes(Number(session.projectId)))
+            .map(session => String(session.id))
+            .reverse()
+            .slice(0, 2);
+          return success({ sampleProjectIds, archivedPaneIds });
+        },
         supportProject: () => success({}),
       }),
       paneChat: namespace({
@@ -1079,6 +1181,19 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         detectConfig: () => success(null),
         refreshGitStatus: () => success(),
+        create: (request: JsonObject) => {
+          const now = new Date().toISOString();
+          const project = {
+            id: mockProjects.reduce((max, existing) => Math.max(max, Number(existing.id)), 0) + 1,
+            name: request.name,
+            path: request.path,
+            active: false,
+            created_at: now,
+            updated_at: now,
+          };
+          mockProjects = [...mockProjects, project];
+          return success(clone(project));
+        },
       }),
       prompts: namespace({
         getAll: () => success([]),
@@ -1451,6 +1566,13 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           subscribe('remote-daemon:connection-state-changed', callback),
         onHostStateChanged: (callback: MockEventCallback) =>
           subscribe('remote-daemon:host-state-changed', callback),
+        onSetupProgress: (callback: MockEventCallback) =>
+          subscribe('remote-daemon:setup-progress', callback),
+        runCheckFix: () => success(clone(remoteConnectionState)),
+        dismissCheck: () => {
+          setRemoteConnectionState({ check: null });
+          return success(clone(remoteConnectionState));
+        },
       }),
       uiState: namespace({
         getExpanded: () => {
@@ -1621,6 +1743,27 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         setSessions(sessions: JsonObject[]) {
           mockSessions = clone(sessions);
+        },
+        // Stands in for main creating a Pane.
+        addSession(session: JsonObject) {
+          mockSessions.push(clone(session));
+          emit('session:created', clone(session));
+        },
+        // Stands in for main archiving a Pane: it leaves the active list and the store hears session:deleted.
+        archiveSession(sessionId: string) {
+          const session = mockSessions.find(candidate => candidate.id === sessionId);
+          if (!session) return;
+          mockSessions = mockSessions.filter(candidate => candidate.id !== sessionId);
+          mockArchivedSessions.push({ ...session, archived: true });
+          emit('session:deleted', { id: sessionId });
+        },
+        // Stands in for main restoring an archived Pane, which reloads the active list.
+        restoreSession(sessionId: string) {
+          const index = mockArchivedSessions.findIndex(candidate => candidate.id === sessionId);
+          if (index < 0) return;
+          const [session] = mockArchivedSessions.splice(index, 1);
+          mockSessions.push({ ...session, archived: false });
+          emit('sessions:loaded', clone(mockSessions));
         },
         setProjects(projects: JsonObject[], activeProjectId: number | null = null) {
           mockProjects = clone(projects);

@@ -6,12 +6,15 @@ import type {
   NotifyItem,
   NotifyQuestion,
   NotifyRemindAfter,
+  NotifyRemoteCommand,
   NotifyResult,
   NotifySettings,
+  NotifySharedState,
   NotifySnapshot,
   NotifySource,
   NotifyStripView,
 } from '../../../../shared/types/notify';
+import { PaneError } from '../../../../shared/paneError';
 
 /** Pane holds an answer this long so Undo can take it back. */
 const NOTIFY_UNDO_MS = 3_000;
@@ -55,6 +58,19 @@ export interface NotifyQueueEnvironment {
   showOutsideSupported: boolean;
   shortcutRegistered: () => boolean;
   instructionFiles: () => NotifyInstructionsFile[];
+  /** This machine's name, as connected screens and phones show it. */
+  machine?: string;
+}
+
+/** A connected host's questions, shown beside this machine's own. */
+interface RemoteQueue {
+  machine: string;
+  online: boolean;
+  epoch: string;
+  revision: number;
+  items: Map<string, NotifyItem>;
+  queue: string[];
+  hidden: Set<string>;
 }
 
 /**
@@ -76,6 +92,14 @@ export class NotifyQueue extends EventEmitter {
   /** The first question ever on a strip carries the "Click to answer" hint for as long as it shows. */
   private hintItemId: string | undefined;
   private midnightTimer?: Timer;
+  private remote: RemoteQueue | null = null;
+  /** Orders this machine's shared states for other screens (see NotifySharedState). */
+  private readonly epoch = randomUUID();
+  private revision = 0;
+  /** The host's questions this screen answered: they read "Sent to", not "Answered on". */
+  private readonly answeredHere = new Set<string>();
+  /** The host's questions reminded "when I switch to Pane": hidden on this screen only. */
+  private readonly remindedHere = new Set<string>();
 
   constructor(private readonly env: NotifyQueueEnvironment) {
     super();
@@ -140,10 +164,149 @@ export class NotifyQueue extends EventEmitter {
     }
   }
 
+  /**
+   * A command from another screen or a phone (`notify:remote-command`). `device` is the server's
+   * name for the sender. Refuses a command for a question no longer in the state it needs.
+   */
+  runRemote(command: NotifyRemoteCommand, device: string): void {
+    const entry = this.entries.get(command.id);
+    if (!entry) {
+      throw new PaneError('ERR_NOTIFY_GONE', `That question is no longer on ${this.machine()}: it finished earlier, or Pane restarted there. Nothing was sent.`, 'Nothing to do: the agent is no longer waiting on it.');
+    }
+    const needs = command.type === 'answer' ? 'waiting' : command.type === 'undo' ? 'sent' : 'queued';
+    const state = entry.item.state;
+    if ((needs === 'queued' && !this.queue.includes(command.id)) || (needs !== 'queued' && state !== needs)) {
+      if (state === 'expired') {
+        throw new PaneError('ERR_NOTIFY_EXPIRED', `${entry.item.source.agent} stopped waiting on this question. Nothing was sent.`, 'Nothing to do: the agent moved on.');
+      }
+      if (state === 'answered' || state === 'sent') {
+        throw new PaneError('ERR_NOTIFY_ANSWERED', `Already answered on ${entry.item.answeredOn ?? this.machine()}. Nothing was sent.`, 'Nothing to do: the agent has its answer.');
+      }
+      throw new PaneError('ERR_NOTIFY_NOT_SENT', `That question is waiting again (it was undone). Nothing was changed.`, 'Answer it again if you meant to.');
+    }
+    if (command.type === 'answer') {
+      try {
+        this.answer(command.id, command.answer, device);
+      } catch (error) {
+        throw new PaneError('ERR_NOTIFY_INVALID', `${error instanceof Error ? error.message : String(error)} Nothing was sent.`, 'Answer with one of the question\'s choices, or the kind of answer it asks for.');
+      }
+      return;
+    }
+    this.run(command);
+  }
+
+  /** What every connected screen and phone shares: the questions, their order and who answered. */
+  sharedState(): NotifySharedState {
+    this.pruneBeforeToday();
+    const machine = this.machine();
+    return {
+      machine,
+      epoch: this.epoch,
+      revision: this.revision,
+      enabled: this.env.settings().enabled,
+      items: [...this.entries.values()].map(({ item }) => (
+        item.state === 'sent' || item.state === 'answered' ? { ...item, answeredOn: item.answeredOn ?? machine } : { ...item }
+      )),
+      queue: [...this.queue],
+      // "When I switch to Pane" waits for this Pane only; other screens keep showing the question.
+      hidden: [...this.hidden].filter(id => !this.entries.get(id)?.remindOnPaneFocus),
+    };
+  }
+
+  /** Is this one of the connected host's questions? Its commands go to the host. */
+  isRemote(id: string): boolean {
+    return this.remote?.items.has(id) ?? false;
+  }
+
+  /** This screen is sending (or failed to send) an answer for the host's question; its card reads "Sent to". */
+  noteAnsweredHere(id: string, answered: boolean): void {
+    if (answered) this.answeredHere.add(id);
+    else this.answeredHere.delete(id);
+  }
+
+  /** "When I switch to Pane" for the host's question: hidden here until this Pane comes to the front. */
+  remindHere(id: string): void {
+    if (!this.remote?.queue.includes(id)) return;
+    this.remindedHere.add(id);
+    this.changed();
+  }
+
+  /**
+   * The connected host's shared state (null: not connected). `online: false` keeps its questions
+   * showing but unanswerable. Each change plays out here as it does for this machine's own
+   * questions: a chime, an update on the strip, a "Sent to" or "Answered on" hold, an expiry.
+   */
+  setRemote(next: { machine: string; online: boolean; state?: NotifySharedState } | null): void {
+    const previous = this.remote;
+    if (!next) {
+      if (!previous) return;
+      if (this.transient && previous.items.has(this.transient.view.itemId)) this.clearTransient();
+      this.remote = null;
+      this.answeredHere.clear();
+      this.remindedHere.clear();
+      this.changed();
+      return;
+    }
+    if (!next.state) {
+      if (!previous) return;
+      this.remote = { ...previous, machine: next.machine, online: next.online };
+      this.changed();
+      return;
+    }
+    const state = next.state;
+    // A snapshot read can land after a newer event; the host's revision says which is current.
+    if (previous && previous.epoch === state.epoch && state.revision < previous.revision) {
+      if (previous.online !== next.online) this.setRemote({ machine: previous.machine, online: next.online });
+      return;
+    }
+    const items = new Map(state.items.map(item => [item.id, item]));
+    const stripId = this.strip()?.itemId;
+    this.remote = {
+      machine: next.machine, online: next.online, epoch: state.epoch, revision: state.revision,
+      items, queue: [...state.queue], hidden: new Set(state.hidden),
+    };
+    // The first state after connecting shows what is already there, without a chime per question.
+    const announce = previous !== null;
+    for (const item of state.items) {
+      const before = previous?.items.get(item.id);
+      if (!before) {
+        if (!announce) continue;
+        if (item.state === 'waiting') {
+          if (this.transient?.view.kind === 'info') this.clearTransient();
+          const settings = this.env.settings();
+          if (settings.enabled && settings.sound && !this.isPaused()) this.emit('chime');
+        } else if (item.state === 'info') {
+          const current = this.strip();
+          if (this.canShowStrip() && (current === null || current.kind === 'info')) this.showInfo(item.id);
+        }
+        continue;
+      }
+      if (before.state === 'waiting' && item.state === 'sent' && (this.answeredHere.has(item.id) || stripId === item.id)) {
+        this.setTransient({ kind: 'sent', itemId: item.id }, NOTIFY_UNDO_MS);
+      } else if (before.state === 'sent' && item.state === 'waiting') {
+        this.answeredHere.delete(item.id);
+        if (this.transient?.view.itemId === item.id) this.clearTransient();
+      } else if (before.state === 'sent' && item.state === 'answered') {
+        // The host delivered it; Undo can no longer take it back here either.
+        if (this.transient?.view.itemId === item.id) this.clearTransient();
+      } else if (isOpen(before) && item.state === 'expired') {
+        // Notify turned off on the host clears its questions quietly, as it does on the host's screen.
+        if (stripId === item.id && state.enabled) this.setTransient({ kind: 'expired', itemId: item.id }, NOTIFY_EXPIRED_SHOW_MS);
+        else if (this.transient?.view.itemId === item.id) this.clearTransient();
+      }
+    }
+    for (const id of [...this.answeredHere]) if (!items.has(id) || !isOpen(items.get(id)!)) this.answeredHere.delete(id);
+    for (const id of [...this.remindedHere]) if (!state.queue.includes(id)) this.remindedHere.delete(id);
+    if (this.transient && previous?.items.has(this.transient.view.itemId) && !items.has(this.transient.view.itemId)) this.clearTransient();
+    if (state.queue.length > 0) this.armMidnight();
+    this.changed();
+  }
+
   setPaneFocused(focused: boolean): void {
     if (this.paneFocused === focused) return;
     this.paneFocused = focused;
     if (focused) {
+      this.remindedHere.clear();
       for (const entry of this.entries.values()) {
         if (!entry.remindOnPaneFocus) continue;
         entry.remindOnPaneFocus = false;
@@ -189,29 +352,42 @@ export class NotifyQueue extends EventEmitter {
   }
 
   hasWaiting(): boolean {
-    return this.queue.length > 0;
+    return this.allQueued().length > 0;
   }
 
   waitingItems(): NotifyItem[] {
-    return this.queue.flatMap(id => this.entries.get(id)?.item ?? []);
+    return this.allQueued().flatMap(id => this.find(id) ?? []);
   }
 
   snapshot(): NotifySnapshot {
     this.pruneBeforeToday();
     const strip = this.strip();
+    const remote = this.remote;
+    const local = [...this.entries.values()].map(entry => entry.item);
     return {
       settings: this.env.settings(),
-      items: [...this.entries.values()].map(entry => entry.item),
-      queue: [...this.queue],
-      hidden: [...this.hidden],
+      items: remote
+        ? [
+          ...local.map(item => ({ ...item, machine: this.machine() })),
+          ...[...remote.items.values()].map(item => ({
+            ...item,
+            machine: remote.machine,
+            answeredOn: this.answeredHere.has(item.id) ? undefined : item.answeredOn,
+            unreachable: remote.online ? undefined : true,
+          })),
+        ]
+        : local,
+      queue: this.allQueued(),
+      hidden: [...this.allHidden()],
       strip,
       stripSurface: this.stripSurface(strip),
-      dockedItemId: this.dockedItemId && this.entries.get(this.dockedItemId)?.item.state === 'waiting' ? this.dockedItemId : null,
+      dockedItemId: this.dockedItemId && this.find(this.dockedItemId)?.state === 'waiting' ? this.dockedItemId : null,
       pausedUntil: this.isPaused() ? this.pausedUntil : null,
       shortcutRegistered: this.env.shortcutRegistered(),
       showOutsideSupported: this.env.showOutsideSupported,
       instructionFiles: this.env.instructionFiles(),
       firstRun: strip?.kind === 'question' && (this.hintItemId === undefined || this.hintItemId === strip.itemId),
+      remote: remote ? { machine: remote.machine, online: remote.online } : null,
     };
   }
 
@@ -282,12 +458,13 @@ export class NotifyQueue extends EventEmitter {
     });
   }
 
-  private answer(id: string, answer: NotifyAnswer): void {
+  private answer(id: string, answer: NotifyAnswer, device?: string): void {
     const entry = this.entries.get(id);
     if (!entry || entry.item.state !== 'waiting') return;
     const result = toResult(entry.item, answer);
     entry.item.state = 'sent';
     entry.item.answerSummary = summarize(entry.item, result);
+    entry.item.answeredOn = device;
     this.queue = this.queue.filter(other => other !== id);
     this.hidden.delete(id);
     clearTimeout(entry.remindTimer);
@@ -315,6 +492,7 @@ export class NotifyQueue extends EventEmitter {
     entry.holdTimer = undefined;
     entry.item.state = 'waiting';
     entry.item.answerSummary = undefined;
+    entry.item.answeredOn = undefined;
     this.queue = [id, ...this.queue];
     if (this.transient?.view.itemId === id) this.clearTransient();
     this.changed();
@@ -419,8 +597,38 @@ export class NotifyQueue extends EventEmitter {
   /** What the strip shows: a confirmation, expiry or update first, else the oldest visible question. */
   private strip(): NotifyStripView | null {
     if (this.transient) return this.transient.view;
-    const id = this.queue.find(other => !this.hidden.has(other));
+    const hidden = this.allHidden();
+    const id = this.allQueued().find(other => !hidden.has(other));
     return id ? { kind: 'question', itemId: id } : null;
+  }
+
+  private find(id: string): NotifyItem | undefined {
+    return this.entries.get(id)?.item ?? this.remote?.items.get(id);
+  }
+
+  /** This machine's waiting questions and the connected host's, oldest first; each keeps its own order. */
+  private allQueued(): string[] {
+    const remote = this.remote;
+    if (!remote || remote.queue.length === 0) return [...this.queue];
+    const merged: string[] = [];
+    let local = 0;
+    let other = 0;
+    while (local < this.queue.length || other < remote.queue.length) {
+      const localAt = this.entries.get(this.queue[local])?.item.createdAt ?? Infinity;
+      const otherAt = remote.items.get(remote.queue[other])?.createdAt ?? Infinity;
+      if (other >= remote.queue.length || (local < this.queue.length && localAt <= otherAt)) merged.push(this.queue[local++]);
+      else merged.push(remote.queue[other++]);
+    }
+    return merged;
+  }
+
+  private allHidden(): Set<string> {
+    if (!this.remote) return this.hidden;
+    return new Set([...this.hidden, ...this.remote.hidden, ...this.remindedHere]);
+  }
+
+  private machine(): string {
+    return this.env.machine ?? 'this computer';
   }
 
   private canShowStrip(): boolean {
@@ -460,6 +668,7 @@ export class NotifyQueue extends EventEmitter {
   }
 
   private changed(): void {
+    this.revision += 1;
     this.armMidnight();
     this.emit('change');
   }

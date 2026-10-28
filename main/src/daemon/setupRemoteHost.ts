@@ -8,7 +8,9 @@ import {
   encodePaneRemoteConnection,
   normalizeRemoteDaemonConfig,
   type PaneRemoteConnectionImportPayload,
+  type RemoteHostSetupProgress,
   type RemoteHostSetupRequest,
+  type RemoteHostSetupStep,
   type RemoteHostSetupServiceResult,
   type RemoteHostSetupResult,
   type RemoteDaemonConfig,
@@ -59,6 +61,7 @@ export interface SetupRemoteHostOptions extends Omit<RemoteHostSetupRequest, 'da
   serviceDependencies?: RemoteDaemonServiceDependencies;
   tailscaleDependencies?: TailscaleSetupDependencies;
   asyncCommandRunner?: RemoteSetupCommandRunner;
+  onProgress?: (progress: RemoteHostSetupProgress) => void;
 }
 
 interface RemoteHostConfigDocument {
@@ -78,19 +81,50 @@ interface TunnelSelection {
 const DEFAULT_REMOTE_PANE_DIR = '.pane_remote';
 const DEFAULT_TUNNEL_PREFERENCE: RemoteSetupTunnelPreference = 'tailscale';
 
+type RunSetupStep = <T>(step: RemoteHostSetupStep, work: () => T | Promise<T>) => Promise<T>;
+
+const failedSetupSteps = new WeakMap<Error, RemoteHostSetupStep>();
+
+/** The setup step that threw `error`, or undefined when it came from outside every step. */
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- Callers pass whatever a failed setup threw.
+export function getFailedRemoteHostSetupStep(error: unknown): RemoteHostSetupStep | undefined {
+  return error instanceof Error ? failedSetupSteps.get(error) : undefined;
+}
+
+function createSetupStepRunner(onProgress: SetupRemoteHostOptions['onProgress']): RunSetupStep {
+  return async (step, work) => {
+    onProgress?.({ step, status: 'running' });
+    try {
+      const value = await work();
+      onProgress?.({ step, status: 'passed' });
+      return value;
+    } catch (error) {
+      const failure = error instanceof Error ? error : new Error(String(error));
+      failedSetupSteps.set(failure, step);
+      onProgress?.({ step, status: 'failed', detail: failure.message });
+      throw failure;
+    }
+  };
+}
+
 export async function setupRemoteHost(options: SetupRemoteHostOptions = {}): Promise<SetupRemoteHostResult> {
   const serviceDependencies = options.asyncCommandRunner
     ? { ...options.serviceDependencies, asyncCommandRunner: options.asyncCommandRunner }
     : options.serviceDependencies;
   const paneDir = path.resolve(options.paneDir ?? process.env.PANE_DIR ?? path.join(os.homedir(), DEFAULT_REMOTE_PANE_DIR));
-  if (!options.printOnly && options.installService !== false) {
-    await assertRemoteDaemonServiceCanBeInstalled(serviceDependencies);
+  // Steps that don't apply to this run (no service install, a non-Tailscale tunnel) report nothing.
+  const step = createSetupStepRunner(options.onProgress);
+  const installsService = !options.printOnly && options.installService !== false;
+  if (installsService) {
+    await step('service', () => assertRemoteDaemonServiceCanBeInstalled(serviceDependencies));
   }
   const configPath = path.join(paneDir, 'config.json');
-  const preferredListenPort = normalizePort(options.listenPort ?? DEFAULT_REMOTE_DAEMON_HOST_CONFIG.listenPort);
-  const listenPort = options.autoSelectListenPort === true
-    ? await findAvailableLoopbackPort(preferredListenPort)
-    : preferredListenPort;
+  const listenPort = await step('port', async () => {
+    const preferredListenPort = normalizePort(options.listenPort ?? DEFAULT_REMOTE_DAEMON_HOST_CONFIG.listenPort);
+    return options.autoSelectListenPort === true
+      ? findAvailableLoopbackPort(preferredListenPort)
+      : preferredListenPort;
+  });
   const label = normalizeLabel(options.label);
   const channel = options.channel ?? 'stable';
   const manualDaemonCommand = buildManualRemoteDaemonCommand(paneDir, serviceDependencies);
@@ -103,16 +137,18 @@ export async function setupRemoteHost(options: SetupRemoteHostOptions = {}): Pro
     manualBaseUrl: options.baseUrl,
     tailscaleDependencies: options.tailscaleDependencies,
     asyncCommandRunner: options.asyncCommandRunner,
+    step,
   });
-  const pair = createRemoteDaemonConnectionPair({
-    label,
-    baseUrl: tunnelSelection.baseUrl,
-  });
-  const importPayload = createPaneRemoteConnectionImportPayload(pair, tunnelSelection.tunnel);
-  const connectionCode = encodePaneRemoteConnection(importPayload);
-
-  let wroteConfig = false;
-  if (!options.printOnly) {
+  const { connectionCode, wroteConfig } = await step('code', async () => {
+    const pair = createRemoteDaemonConnectionPair({
+      label,
+      baseUrl: tunnelSelection.baseUrl,
+    });
+    const importPayload = createPaneRemoteConnectionImportPayload(pair, tunnelSelection.tunnel);
+    const code = encodePaneRemoteConnection(importPayload);
+    if (options.printOnly) {
+      return { connectionCode: code, wroteConfig: false };
+    }
     const existingConfig = options.existingConfig
       ? decodeBoundary(options.existingConfig, boundary.jsonObject)
       : await readConfigFile(configPath);
@@ -131,19 +167,19 @@ export async function setupRemoteHost(options: SetupRemoteHostOptions = {}): Pro
     } else {
       await writeConfigFileAtomically(paneDir, configPath, nextConfig);
     }
-    wroteConfig = true;
-  }
+    return { connectionCode: code, wroteConfig: true };
+  });
 
-  const service = options.printOnly || options.installService === false
-    ? {
+  const service = installsService
+    ? await step('daemon', () => installRemoteDaemonService(paneDir, serviceDependencies))
+    : {
         strategy: options.printOnly ? 'skipped' : 'manual',
         installed: false,
         started: false,
         message: options.printOnly
           ? 'Print-only mode did not write config or install a daemon service.'
           : 'Service installation disabled; use the manual daemon command.',
-      } satisfies RemoteHostSetupServiceResult
-    : await installRemoteDaemonService(paneDir, serviceDependencies);
+      } satisfies RemoteHostSetupServiceResult;
 
   const result: SetupRemoteHostResult = {
     paneDir,
@@ -389,6 +425,7 @@ async function selectTunnel(options: {
   manualBaseUrl?: string;
   tailscaleDependencies?: TailscaleSetupDependencies;
   asyncCommandRunner?: RemoteSetupCommandRunner;
+  step: RunSetupStep;
 }): Promise<TunnelSelection> {
   const sshCommand = buildSshForwardCommand(options.listenPort);
   const fallbackCommands = [sshCommand, buildTailscaleServeCommand(null, options.listenPort)];
@@ -407,7 +444,9 @@ async function selectTunnel(options: {
   }
 
   if (options.preferTunnel === 'manual') {
-    throw new Error('Manual HTTPS remote setup requires a base URL. Use an HTTPS tunnel or choose SSH Tunnel for local forwarding.');
+    return options.step('https', () => {
+      throw new Error('Manual HTTPS remote setup requires a base URL. Use an HTTPS tunnel or choose SSH Tunnel for local forwarding.');
+    });
   }
 
   if (options.preferTunnel === 'ssh') {
@@ -424,20 +463,15 @@ async function selectTunnel(options: {
   }
 
   if (options.preferTunnel === 'tailscale' || options.preferTunnel === 'auto') {
-    const initialTailscaleCli = options.asyncCommandRunner
-      ? await resolveTailscaleCommandAsync(options.asyncCommandRunner)
-      : resolveTailscaleCommand(options.tailscaleDependencies);
-    const tailscaleCommand = buildTailscaleServeCommand(initialTailscaleCli, options.listenPort);
     return selectTailscaleTunnel({
       listenPort: options.listenPort,
       exposeTailscale: options.exposeTailscale,
       printOnly: options.printOnly,
       interactiveTailscaleSetup: options.interactiveTailscaleSetup,
-      tailscaleCli: initialTailscaleCli,
-      tailscaleCommand,
-      fallbackCommands: [sshCommand, tailscaleCommand],
+      sshCommand,
       tailscaleDependencies: options.tailscaleDependencies,
       asyncCommandRunner: options.asyncCommandRunner,
+      step: options.step,
     });
   }
 
@@ -449,24 +483,44 @@ async function selectTailscaleTunnel(options: {
   exposeTailscale: boolean;
   printOnly: boolean;
   interactiveTailscaleSetup: boolean;
-  tailscaleCli: ResolvedCommand | null;
-  tailscaleCommand: string;
+  sshCommand: string;
+  tailscaleDependencies?: TailscaleSetupDependencies;
+  asyncCommandRunner?: RemoteSetupCommandRunner;
+  step: RunSetupStep;
+}): Promise<TunnelSelection> {
+  const { tailscaleCli, fallbackCommands } = await options.step('tailscale', async () => {
+    const initialTailscaleCli = options.asyncCommandRunner
+      ? await resolveTailscaleCommandAsync(options.asyncCommandRunner)
+      : resolveTailscaleCommand(options.tailscaleDependencies);
+    const initialFallbackCommands = [options.sshCommand, buildTailscaleServeCommand(initialTailscaleCli, options.listenPort)];
+    if (!options.exposeTailscale) {
+      throw new Error(`Tailscale is required for cross-device remote setup. Remove --no-tailscale-serve or choose SSH Tunnel under advanced options.\n\n${getTailscaleSetupInstructions()}`);
+    }
+
+    if (options.printOnly) {
+      throw new Error('Tailscale setup cannot run in print-only mode because Pane must configure Tailscale Serve before it can create a cross-device connection code.');
+    }
+
+    if (!initialTailscaleCli && options.asyncCommandRunner) {
+      throw new Error('Tailscale is not installed. Install it from https://tailscale.com/download and sign in, or use the remote setup terminal, then try again.');
+    }
+    return {
+      tailscaleCli: initialTailscaleCli ?? installTailscaleCommandOrThrow(options.tailscaleDependencies),
+      fallbackCommands: initialFallbackCommands,
+    };
+  });
+  return options.step('https', () => serveTailscaleTunnel({ ...options, tailscaleCli, fallbackCommands }));
+}
+
+async function serveTailscaleTunnel(options: {
+  listenPort: number;
+  interactiveTailscaleSetup: boolean;
+  tailscaleCli: ResolvedCommand;
   fallbackCommands: string[];
   tailscaleDependencies?: TailscaleSetupDependencies;
   asyncCommandRunner?: RemoteSetupCommandRunner;
 }): Promise<TunnelSelection> {
-  if (!options.exposeTailscale) {
-    throw new Error(`Tailscale is required for cross-device remote setup. Remove --no-tailscale-serve or choose SSH Tunnel under advanced options.\n\n${getTailscaleSetupInstructions()}`);
-  }
-
-  if (options.printOnly) {
-    throw new Error('Tailscale setup cannot run in print-only mode because Pane must configure Tailscale Serve before it can create a cross-device connection code.');
-  }
-
-  if (!options.tailscaleCli && options.asyncCommandRunner) {
-    throw new Error('Tailscale is not installed. Install it from https://tailscale.com/download and sign in, or use the remote setup terminal, then try again.');
-  }
-  const tailscaleCli = options.tailscaleCli ?? installTailscaleCommandOrThrow(options.tailscaleDependencies);
+  const tailscaleCli = options.tailscaleCli;
   const asyncRun = options.asyncCommandRunner;
   const run = asyncRun
     ? (args: string[]) => asyncRun(tailscaleCli.command, args, { env: tailscaleCli.env })

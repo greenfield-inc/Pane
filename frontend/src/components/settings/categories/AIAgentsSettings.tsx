@@ -94,7 +94,7 @@ export function AIAgentsSettings({ persistence, onDirtyChange }: AIAgentsSetting
         <SettingRow
           settingId="mcp-toolsets"
           label="Pane tools to register"
-          description="Core covers the common jobs: start an agent on a task, check on it, send it a follow-up, git status, docs, and links. All adds every Pane command, which can make smaller models pick tools less accurately."
+          description="Core covers the common jobs: start an agent on a task, check on it, send it a follow-up, git status, docs, links, and loops. All adds every Pane command, which can make smaller models pick tools less accurately."
           saveState={persistence.saveStates['mcp-toolsets']}
         >
           <SegmentedControl<McpToolsetChoice>

@@ -69,10 +69,11 @@ import type { Project } from '../types/project';
 import { devLog, renderLog } from '../utils/console';
 import { isMissionControlEnabled, useConfigStore } from '../stores/configStore';
 import { cycleIndex } from '../utils/arrayUtils';
-import type { InspectorTab } from './InspectorTabs';
+import { OPEN_INSPECTOR_EVENT, type InspectorRequest, type InspectorTab } from './InspectorTabs';
 import { useErrorStore } from '../stores/errorStore';
 import ProjectSettings from './ProjectSettings';
 import { LoopsView } from './loops/LoopsView';
+import { LivePreviewPrompt } from './LivePreviewPrompt';
 import { NotifyInbox } from './notify/NotifyInbox';
 import { LoopRunHeader, LoopRunsRail } from './loops/LoopRunChrome';
 import { useLoopsStore } from '../stores/loopsStore';
@@ -530,6 +531,11 @@ export const SessionView = memo(() => {
     if (activeSession?.id && activeSessionPanelsLoaded) markPaneViewShown(activeSession.id);
   }, [activeSession?.id, activeSessionPanelsLoaded]);
 
+  // Keyed by Pane so an open that failed stays with the Pane it failed in.
+  const livePreviewPrompt = activeSession?.projectId !== undefined && activeSessionPanelsLoaded ? (
+    <LivePreviewPrompt key={activeSession.id} paneId={activeSession.id} projectId={activeSession.projectId} panels={sessionPanels} />
+  ) : null;
+
   // The bottom dock holds the first plain shell, never an agent or command panel.
   const defaultTerminalPanel = useMemo(
     () => getDockTerminalPanel(sessionPanels),
@@ -742,6 +748,20 @@ export const SessionView = memo(() => {
     setDetailVisible(true);
     setIsDetailCollapsed(false);
   }, [setDetailVisible]);
+  // Applied once the requested Pane is active, so a loop run's own visibility choice is the one that changes.
+  const [inspectorRequest, setInspectorRequest] = useState<InspectorRequest | null>(null);
+  useEffect(() => {
+    const handleRequest = (event: CustomEvent<InspectorRequest>) => setInspectorRequest(event.detail);
+    // SAFETY: OPEN_INSPECTOR_EVENT is always dispatched as a CustomEvent carrying an InspectorRequest.
+    window.addEventListener(OPEN_INSPECTOR_EVENT, handleRequest as EventListener);
+    // SAFETY: Same listener and event shape as registered above.
+    return () => window.removeEventListener(OPEN_INSPECTOR_EVENT, handleRequest as EventListener);
+  }, []);
+  useEffect(() => {
+    if (!inspectorRequest || inspectorRequest.sessionId !== activeSession?.id) return;
+    openInspector(inspectorRequest.tab);
+    setInspectorRequest(null);
+  }, [inspectorRequest, activeSession?.id, openInspector]);
 
   const handleCommitClick = useCallback(
     async (commitHash: string) => {
@@ -1990,6 +2010,7 @@ export const SessionView = memo(() => {
                 {/* Top: active panel content */}
                 <div className="pane-editor-stage flex-1 relative min-h-0 overflow-hidden bg-bg-editor">
                   {editorStageElement || emptyStage}
+                  {livePreviewPrompt}
                 </div>
 
                 {/* Bottom: horizontal detail panel */}
@@ -2071,6 +2092,7 @@ export const SessionView = memo(() => {
                 {/* Top: active panel content */}
                 <div className="pane-editor-stage flex-1 relative min-h-0 overflow-hidden bg-bg-editor">
                   {editorStageElement || emptyStage}
+                  {livePreviewPrompt}
                 </div>
 
                 {/* Bottom: persistent terminal (collapsible) */}

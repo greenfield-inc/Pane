@@ -95,7 +95,7 @@ ask first. `update` changes only the values you pass; `--agent` and
 `--tool-command` replace each other. Add `--json` to any command for
 machine-readable output. The same commands are MCP tools: `loops_list`,
 `loops_create`, `loops_update`, `loops_run`, `loops_pause`, `loops_resume` and
-`loops_delete`, in the `loops` toolset (see
+`loops_delete`, in the default `core` toolset and the `loops` toolset (see
 [Pane MCP Server](PANE_MCP.md#toolsets)).
 
 ## Session loops

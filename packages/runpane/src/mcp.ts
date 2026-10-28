@@ -27,6 +27,7 @@ const INSTRUCTIONS = [
   '- Discover before you change anything. Repo selectors come from `repos_list` (or `active`); pane ids come from `panes_list`, `workspace_state`, or `agents_start`; panel ids from `agents_start` or `panels_list`.',
   '- Tools with a `yes` input change Pane state. Pass `yes: true` only when the user asked for that change; without it the call is refused and nothing happens.',
   '- `panes_archive` removes a Pane\'s worktree; `panes_restore` undoes it. `links_create` returns a pane:// link the user can click to see any Pane, panel, repo, or Session.',
+  '- `loops_create` schedules an agent or command to run on a cron schedule; `loops_list` shows each loop\'s next run and recent runs.',
   '- Before guessing how Pane works, call `docs_search`, then `docs_read` on a path it returns. The same docs are available as `runpane-docs:` resources.',
   '- Tools have no stdin: send exact terminal bytes (newlines, Ctrl-C as \\u0003) as text instead of a file.',
   '- When you need the person (a choice, an approval, a short answer), call `notify` instead of asking in the terminal.',

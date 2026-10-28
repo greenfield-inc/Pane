@@ -1,7 +1,12 @@
 import { app, BrowserWindow, type IpcMain } from 'electron';
+import os from 'os';
 import type { AppServices } from './types';
 import type { PaneCommandRegistry, PaneCommandValue } from '../daemon/commandRegistry';
 import { paneCommandSignal } from '../daemon/commandRegistry';
+import { remotePaneClientController } from '../daemon/client/remotePaneClient';
+import { getPaneEventSink } from '../core/runtime';
+import { hasHeadlessDaemonLaunchArg } from '../utils/runtimeMode';
+import { getMobilePushSender } from '../daemon/mobilePushSender';
 import { panelManager } from '../services/panelManager';
 import { terminalPanelManager } from '../services/terminalPanelManager';
 import { NotifyService } from '../services/notify/notifyService';
@@ -9,7 +14,8 @@ import { buildWindowAppearanceOptions } from '../services/appearanceService';
 import { normalizeAppearance } from '../../../shared/types/appearance';
 import { PaneError } from '../../../shared/paneError';
 import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
-import type { NotifyCommand, NotifyRequest, NotifyResult } from '../../../shared/types/notify';
+import type { PaneLinkTarget } from '../../../shared/types/paneLinks';
+import type { NotifyCommand, NotifyRemoteCommand, NotifyRequest, NotifyResult, NotifySharedState } from '../../../shared/types/notify';
 import type { AgentState } from '../../../shared/types/agentStatus';
 
 const MAX_CHOICES = 9;
@@ -60,10 +66,57 @@ const notifyCommandSchema = boundary.union(
   boundary.object({ type: boundary.literal('close-round') }),
   boundary.object({ type: boundary.literal('open-inbox') }),
 );
+const notifyRemoteCommandSchema = boundary.union(
+  boundary.object({ type: boundary.literal('answer'), id: boundary.nonEmptyString, answer: answerSchema }),
+  idCommand('undo'),
+  idCommand('dismiss'),
+  idCommand('skip'),
+  boundary.object({ type: boundary.literal('remind'), id: boundary.nonEmptyString, after: boundary.enumeration('10m', '1h') }),
+);
+/** The server's name for the sender (httpApiServer fills it in), never the caller's own claim. */
+const remoteSenderSchema = boundary.object({ device: boundary.nonEmptyString });
+const notifyItemSchema = boundary.object({
+  id: boundary.nonEmptyString,
+  ui: boundary.enumeration('options', 'approve', 'ask', 'info'),
+  title: boundary.string,
+  context: boundary.optional(boundary.string),
+  choices: boundary.optional(boundary.array(boundary.object({
+    label: boundary.nonEmptyString,
+    detail: boundary.optional(boundary.string),
+    recommended: boundary.optional(boundary.boolean),
+  }))),
+  detail: boundary.optional(boundary.string),
+  detailLabel: boundary.optional(boundary.string),
+  suggestions: boundary.optional(boundary.array(boundary.string)),
+  action: boundary.optional(boundary.object({ label: boundary.nonEmptyString, url: boundary.nonEmptyString })),
+  source: boundary.object({
+    paneId: boundary.optional(boundary.string),
+    panelId: boundary.optional(boundary.string),
+    name: boundary.string,
+    agent: boundary.string,
+  }),
+  state: boundary.enumeration('waiting', 'sent', 'answered', 'expired', 'info'),
+  createdAt: boundary.number,
+  resolvedAt: boundary.optional(boundary.number),
+  answerSummary: boundary.optional(boundary.string),
+  answeredOn: boundary.optional(boundary.string),
+});
+const notifySharedStateSchema = boundary.object({
+  machine: boundary.string,
+  epoch: boundary.string,
+  revision: boundary.number,
+  enabled: boundary.boolean,
+  items: boundary.array(notifyItemSchema),
+  queue: boundary.array(boundary.string),
+  hidden: boundary.array(boundary.string),
+});
 const windowSizeSchema = boundary.object({ width: boundary.number, height: boundary.number });
 const panelAgentSchema = boundary.object({ agentType: boundary.optional(boundary.string) });
 
-export function registerNotifyHandlers(ipcMain: IpcMain, services: AppServices, commandRegistry: PaneCommandRegistry): NotifyService {
+/** What Notify reads from the app's services: the config, Panes by id, and the main window. */
+type NotifyServices = Pick<AppServices, 'configManager' | 'getMainWindow'> & { sessionManager: Pick<AppServices['sessionManager'], 'getSession'> };
+
+export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyServices, commandRegistry: PaneCommandRegistry): NotifyService {
   const notify = new NotifyService({
     configManager: services.configManager,
     getMainWindow: services.getMainWindow,
@@ -80,10 +133,109 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: AppServices, 
       await commandRegistry.invoke('runpane:panes:focus', [{ paneId, panelId, source: 'user' }]);
     },
     rendererArguments: () => buildWindowAppearanceOptions(normalizeAppearance(services.configManager.getConfig()).appearance, false, {}).additionalArguments,
+    headless: hasHeadlessDaemonLaunchArg(),
+    machine: machineName(),
+    publish: (state) => getPaneEventSink().send('notify:shared-changed', state),
+    sendToHost: async (command) => {
+      const send = () => remotePaneClientController.invoke('notify:remote-command', [command], () => Promise.reject(new PaneError(
+        'ERR_NOTIFY_NOT_CONNECTED',
+        'This Pane is no longer connected to the host that asked. Nothing was sent.',
+        'Reconnect to that host, then answer again.',
+      )));
+      try {
+        await send();
+      } catch (error) {
+        // While the connection restores, the host's questions already show but commands wait.
+        // ERR_REMOTE_OFFLINE means nothing was sent, so the answer goes once it is connected.
+        if (!(error instanceof PaneError && error.code === 'ERR_REMOTE_OFFLINE') || !(await connectedAfterRestore())) throw error;
+        await send();
+      }
+    },
+    refreshHost: () => void refreshHost(),
+    // Every question buzzes each phone with Needs Input on (D-7), on a desktop or a headless host.
+    onQuestion: (event) => {
+      // Optional delivery: a failed send or config write must never take the host down.
+      getMobilePushSender(services.configManager).observeQuestion(event).catch((error: Error) => {
+        console.warn('[Notify] The phone alert for a question was not sent:', error);
+      });
+    },
+    // A connected desktop ignores the host's pane:focus-requested; it opens Panes as pane:// links.
+    showHostPane: (paneId, panelId) => {
+      const window = services.getMainWindow();
+      const target: PaneLinkTarget = panelId ? { kind: 'pane', paneId, panelId } : { kind: 'pane', paneId };
+      if (window && !window.isDestroyed()) window.webContents.send('pane:open-link', target);
+    },
+  });
+
+  /** Waits up to 15 s for a connection that is restoring to finish; false if it isn't restoring or doesn't. */
+  const connectedAfterRestore = () => new Promise<boolean>((resolve) => {
+    if (remotePaneClientController.getConnectionState().status !== 'restoring') {
+      resolve(false);
+      return;
+    }
+    const done = (connected: boolean) => {
+      clearTimeout(timer);
+      remotePaneClientController.off('state-changed', check);
+      resolve(connected);
+    };
+    const check = () => {
+      const { status } = remotePaneClientController.getConnectionState();
+      if (status === 'connected') done(true);
+      else if (status !== 'restoring') done(false);
+    };
+    const timer = setTimeout(() => done(false), 15_000);
+    remotePaneClientController.on('state-changed', check);
+  });
+
+  // On a screen connected to another Pane: that host's questions show beside this machine's own.
+  const hostMachine = () => notify.snapshot().remote?.machine ?? remotePaneClientController.getConnectionState().activeProfileLabel ?? 'the host';
+  const showHostState = (value: PaneCommandValue) => {
+    if (!remotePaneClientController.isRemoteModeActive()) return;
+    let state: NotifySharedState;
+    try {
+      state = decodeBoundary(value, notifySharedStateSchema);
+    } catch (error) {
+      console.warn('[Notify] The host sent a Notify state this Pane cannot read; its questions are not shown here:', error);
+      return;
+    }
+    notify.queue.setRemote({ machine: state.machine, online: true, state });
+  };
+  const refreshHost = async () => {
+    if (!remotePaneClientController.isRemoteModeActive()) return;
+    try {
+      showHostState(await remotePaneClientController.invoke('notify:remote-snapshot', [], () => Promise.resolve(null)));
+    } catch (error) {
+      // An older host has no remote Notify; its questions stay on its own screen.
+      console.warn(`[Notify] Could not read ${hostMachine()}'s questions:`, error);
+    }
+  };
+  remotePaneClientController.on('notify-shared', showHostState);
+  remotePaneClientController.on('resync', () => void refreshHost());
+  let hostProfileId: string | null = null;
+  remotePaneClientController.on('state-changed', () => {
+    const state = remotePaneClientController.getConnectionState();
+    // Another host's questions start fresh, without the last host's showing as unreachable.
+    if (state.mode !== 'remote' || state.activeProfileId !== hostProfileId) notify.queue.setRemote(null);
+    hostProfileId = state.mode === 'remote' ? state.activeProfileId : null;
+    if (state.mode !== 'remote') return;
+    if (state.status !== 'connected') {
+      notify.queue.setRemote({ machine: hostMachine(), online: false });
+      return;
+    }
+    // A stream can recover, or a new host connect, without a resync here yet: read the host again.
+    if (notify.snapshot().remote?.online !== true) void refreshHost();
   });
 
   commandRegistry.register('runpane:notify', async (request: PaneCommandValue): Promise<NotifyResult> => {
     return notify.ask(parseNotifyRequest(request), paneCommandSignal());
+  });
+
+  commandRegistry.register('notify:remote-snapshot', async () => notify.sharedState());
+  commandRegistry.register('notify:remote-command', async (command: PaneCommandValue, sender: PaneCommandValue) => {
+    // A Mac names itself "studio.local" on its event stream; cards call it "studio".
+    const device = decodeBoundary(sender, remoteSenderSchema).device.replace(/\.local$/i, '');
+    notify.runRemote(decodeBoundary(command, notifyRemoteCommandSchema) satisfies NotifyRemoteCommand, device);
+    return null;
   });
 
   ipcMain.handle('notify:snapshot', () => notify.snapshot());
@@ -142,6 +294,11 @@ function parseNotifyRequest(value: PaneCommandValue): NotifyRequest {
   if (request.action !== undefined && ui !== 'info') throw invalid(`action only goes with ui: info, not ${ui}.`);
   if (request.action && !/^https?:\/\//i.test(request.action.url)) throw invalid('action.url must be an http(s) URL.');
   return request;
+}
+
+/** The name other screens and phones show for this machine, as a connected client labels itself. */
+function machineName(): string {
+  return os.hostname().trim().replace(/\.local$/i, '').slice(0, 80) || 'this computer';
 }
 
 function invalid(reason: string): PaneError {

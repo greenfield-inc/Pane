@@ -11,9 +11,9 @@ const sessionStore: NotifyQuestion = {
 };
 const migration: NotifyQuestion = { ui: 'approve', title: 'Apply migration 0042 to staging?', detail: 'ALTER TABLE …' };
 
-function makeQueue(overrides: Partial<NotifySettings> = {}) {
+function makeQueue(overrides: Partial<NotifySettings> = {}, machine?: string) {
   let settings: NotifySettings = { ...DEFAULT_NOTIFY_SETTINGS, ...overrides };
-  const queue = new NotifyQueue({ settings: () => settings, showOutsideSupported: true, shortcutRegistered: () => true, instructionFiles: () => [] });
+  const queue = new NotifyQueue({ settings: () => settings, showOutsideSupported: true, shortcutRegistered: () => true, instructionFiles: () => [], machine });
   return {
     queue,
     setSettings: (next: Partial<NotifySettings>) => { settings = { ...settings, ...next }; },
@@ -328,5 +328,213 @@ describe('NotifyQueue', () => {
     const { queue } = makeQueue();
     ask(queue, sessionStore);
     expect(() => queue.run({ type: 'answer', id: onlyId(queue), answer: { choice: 'MongoDB' } })).toThrow(/doesn't fit/);
+  });
+});
+
+/** A host and the screens connected to it, wired the way the event stream wires them. */
+function connect(host: NotifyQueue, ...screens: NotifyQueue[]) {
+  const push = () => { for (const screen of screens) screen.setRemote({ machine: 'mac-studio', online: true, state: host.sharedState() }); };
+  host.on('change', push);
+  push();
+}
+
+describe('NotifyQueue across machines', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 9, 26, 9, 41));
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it("shows the host's question beside the screen's own, each naming its machine, and each answer reaches only its agent", async () => {
+    const { queue: host } = makeQueue({}, 'mac-studio');
+    const { queue: laptop } = makeQueue({}, 'parsa-devbox');
+    connect(host, laptop);
+    const hostCall = ask(host, sessionStore, claude);
+    vi.advanceTimersByTime(1_000);
+    const laptopCall = ask(laptop, migration, codex);
+
+    const [hostId, laptopId] = laptop.snapshot().queue;
+    expect(laptop.snapshot().items.map(item => [item.title, item.machine])).toEqual([
+      ['Apply migration 0042 to staging?', 'parsa-devbox'],
+      ['Which session store should the refactor use?', 'mac-studio'],
+    ]);
+    expect(laptop.snapshot().strip).toEqual({ kind: 'question', itemId: hostId });
+    expect(laptop.isRemote(hostId)).toBe(true);
+    expect(laptop.isRemote(laptopId)).toBe(false);
+
+    laptop.noteAnsweredHere(hostId, true);
+    host.runRemote({ type: 'answer', id: hostId, answer: { choice: 'Keep Redis' } }, 'parsa-devbox');
+    laptop.run({ type: 'answer', id: laptopId, answer: { approved: true } });
+    await vi.advanceTimersByTimeAsync(3_000);
+
+    expect(hostCall.result).toEqual({ answer: 'Keep Redis' });
+    expect(laptopCall.result).toEqual({ approved: true });
+  });
+
+  it('holds an answer from another device on every screen, and Undo from a third one brings it back everywhere', async () => {
+    const { queue: host } = makeQueue({}, 'mac-studio');
+    const { queue: answering } = makeQueue({}, 'parsa-devbox');
+    const { queue: watching } = makeQueue({}, 'parsa-air');
+    connect(host, answering, watching);
+    const call = ask(host, migration, claude);
+    const id = onlyId(host);
+
+    answering.noteAnsweredHere(id, true);
+    host.runRemote({ type: 'answer', id, answer: { approved: true } }, 'parsa-devbox');
+    for (const screen of [host, answering, watching]) expect(screen.snapshot().strip).toEqual({ kind: 'sent', itemId: id });
+    expect(host.snapshot().items[0].answeredOn).toBe('parsa-devbox');
+    expect(answering.snapshot().items[0].answeredOn).toBeUndefined();
+    expect(watching.snapshot().items[0].answeredOn).toBe('parsa-devbox');
+
+    host.runRemote({ type: 'undo', id }, "Parsa's iPhone");
+    for (const screen of [host, answering, watching]) expect(screen.snapshot().strip).toEqual({ kind: 'question', itemId: id });
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(call.result).toBeUndefined();
+
+    host.run({ type: 'answer', id, answer: { approved: false } });
+    expect(watching.snapshot().items[0].answeredOn).toBe('mac-studio');
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(call.result).toEqual({ approved: false });
+  });
+
+  it('refuses a command for a question that is no longer waiting, and the agent gets one answer', async () => {
+    const { queue: host } = makeQueue({}, 'mac-studio');
+    const call = ask(host, sessionStore, claude);
+    const id = onlyId(host);
+
+    host.runRemote({ type: 'answer', id, answer: { choice: 'Postgres table' } }, "Parsa's iPhone");
+    expect(() => host.runRemote({ type: 'answer', id, answer: { choice: 'Keep Redis' } }, 'parsa-devbox'))
+      .toThrow(expect.objectContaining({ code: 'ERR_NOTIFY_ANSWERED', message: "Already answered on Parsa's iPhone. Nothing was sent." }));
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(call.result).toEqual({ answer: 'Postgres table' });
+
+    const controller = new AbortController();
+    ask(host, migration, codex, { signal: controller.signal });
+    const expired = onlyId(host);
+    controller.abort();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(() => host.runRemote({ type: 'answer', id: expired, answer: { approved: true } }, 'parsa-devbox'))
+      .toThrow(expect.objectContaining({ code: 'ERR_NOTIFY_EXPIRED', message: 'Codex stopped waiting on this question. Nothing was sent.' }));
+    expect(() => host.runRemote({ type: 'answer', id: 'gone', answer: { approved: true } }, 'parsa-devbox'))
+      .toThrow(expect.objectContaining({ code: 'ERR_NOTIFY_GONE' }));
+  });
+
+  it("shares hide, remind and skip from another screen, and keeps a 'when I switch to Pane' reminder on that screen", async () => {
+    const { queue: host } = makeQueue({}, 'mac-studio');
+    const { queue: laptop } = makeQueue({}, 'parsa-devbox');
+    connect(host, laptop);
+    ask(host, sessionStore, claude);
+    ask(host, migration, codex);
+    const [first, second] = host.snapshot().queue;
+
+    host.runRemote({ type: 'skip', id: first }, 'parsa-devbox');
+    expect(laptop.snapshot().queue).toEqual([second, first]);
+    host.runRemote({ type: 'dismiss', id: second }, 'parsa-devbox');
+    expect(host.snapshot().strip).toEqual({ kind: 'question', itemId: first });
+    expect(laptop.snapshot().strip).toEqual({ kind: 'question', itemId: first });
+    host.runRemote({ type: 'remind', id: first, after: '10m' }, 'parsa-devbox');
+    expect(laptop.snapshot().strip).toBeNull();
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(laptop.snapshot().strip).toEqual({ kind: 'question', itemId: first });
+
+    laptop.remindHere(first);
+    expect(laptop.snapshot().strip).toBeNull();
+    expect(host.snapshot().strip).toEqual({ kind: 'question', itemId: first });
+    laptop.setPaneFocused(true);
+    expect(laptop.snapshot()).toMatchObject({ strip: { kind: 'question', itemId: first }, stripSurface: 'pane' });
+  });
+
+  it("keeps the host's questions while the connection is down, and drops them when the screen disconnects", () => {
+    const { queue: host } = makeQueue({}, 'mac-studio');
+    const { queue: laptop } = makeQueue({}, 'parsa-devbox');
+    connect(host, laptop);
+    ask(host, sessionStore, claude);
+    const id = onlyId(host);
+
+    laptop.setRemote({ machine: 'mac-studio', online: false });
+    expect(laptop.snapshot()).toMatchObject({ remote: { machine: 'mac-studio', online: false }, strip: { kind: 'question', itemId: id } });
+    laptop.setRemote(null);
+    expect(laptop.snapshot()).toMatchObject({ remote: null, strip: null, queue: [] });
+  });
+
+  it("chimes on a screen when the host's question arrives, and says on the strip when its agent stops waiting", async () => {
+    const { queue: host } = makeQueue({}, 'mac-studio');
+    const { queue: laptop } = makeQueue({}, 'parsa-devbox');
+    connect(host, laptop);
+    const chimes = vi.fn();
+    laptop.on('chime', chimes);
+    const controller = new AbortController();
+    ask(host, sessionStore, claude, { signal: controller.signal });
+    const id = onlyId(host);
+    expect(chimes).toHaveBeenCalledTimes(1);
+
+    controller.abort();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(laptop.snapshot().strip).toEqual({ kind: 'expired', itemId: id });
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(laptop.snapshot().strip).toBeNull();
+  });
+
+  it("ends Undo on every screen when the host delivers, and keeps the host's 'when I switch to Pane' to the host", async () => {
+    const { queue: host } = makeQueue({}, 'mac-studio');
+    const { queue: laptop } = makeQueue({}, 'parsa-devbox');
+    connect(host, laptop);
+    ask(host, sessionStore, claude);
+    ask(host, migration, codex);
+    const [first, second] = host.snapshot().queue;
+
+    host.run({ type: 'remind', id: second, after: 'pane' });
+    expect(laptop.snapshot().hidden).not.toContain(second);
+
+    host.run({ type: 'answer', id: first, answer: { choice: 'Keep Redis' } });
+    expect(laptop.snapshot().strip).toEqual({ kind: 'sent', itemId: first });
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(laptop.snapshot().strip).toEqual({ kind: 'question', itemId: second });
+  });
+
+  it("doesn't chime for the host's questions while this screen's Notify is off", () => {
+    const { queue: host } = makeQueue({}, 'mac-studio');
+    const { queue: laptop } = makeQueue({ enabled: false }, 'parsa-devbox');
+    connect(host, laptop);
+    const chimes = vi.fn();
+    laptop.on('chime', chimes);
+    ask(host, sessionStore, claude);
+    expect(chimes).not.toHaveBeenCalled();
+  });
+
+  it("clears the host's questions quietly on every screen when the host turns Notify off", async () => {
+    const { queue: host, setSettings } = makeQueue({}, 'mac-studio');
+    const { queue: laptop } = makeQueue({}, 'parsa-devbox');
+    connect(host, laptop);
+    const call = ask(host, sessionStore, claude);
+
+    setSettings({ enabled: false });
+    host.turnOff();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(call.result).toEqual({ unavailable: 'Notify was turned off in Pane.', next: 'Ask in the terminal instead.' });
+    expect(laptop.snapshot()).toMatchObject({ queue: [], strip: null });
+  });
+
+  it("ignores a host snapshot older than the state it already shows, and takes a restarted host's", () => {
+    const { queue: host } = makeQueue({}, 'mac-studio');
+    const { queue: laptop } = makeQueue({}, 'parsa-devbox');
+    const emptyRead = host.sharedState();
+    connect(host, laptop);
+    ask(host, sessionStore, claude);
+    const id = onlyId(host);
+
+    // The reconnect read was taken before the question; it lands after the question's event.
+    laptop.setRemote({ machine: 'mac-studio', online: true, state: emptyRead });
+    expect(laptop.snapshot().queue).toEqual([id]);
+
+    // And a read taken while it waited can't bring it back once it is answered.
+    const waitingRead = host.sharedState();
+    host.run({ type: 'answer', id, answer: { choice: 'Keep Redis' } });
+    laptop.setRemote({ machine: 'mac-studio', online: true, state: waitingRead });
+    expect(laptop.snapshot().items.find(item => item.id === id)?.state).toBe('sent');
+
+    const { queue: restarted } = makeQueue({}, 'mac-studio');
+    laptop.setRemote({ machine: 'mac-studio', online: true, state: restarted.sharedState() });
+    expect(laptop.snapshot().items).toEqual([]);
   });
 });
