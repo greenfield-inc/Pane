@@ -128,6 +128,8 @@ export const DAEMON_OWNED_EXACT_CHANNELS = [
   'git:revert',
   'permission:getPending',
   'permission:respond',
+  'notify:remote-snapshot',
+  'notify:remote-command',
   'file:copy',
   'file:delete',
   'file:duplicate',

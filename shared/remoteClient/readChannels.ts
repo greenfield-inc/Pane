@@ -46,6 +46,7 @@ export const REMOTE_READ_CHANNELS = new Set([
   'loops:list',
   'loops:preview',
   'permission:getPending',
+  'notify:remote-snapshot',
   'sessions:get-archived-with-projects',
   'terminal:getState',
 ]);

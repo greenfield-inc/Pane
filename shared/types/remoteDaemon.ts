@@ -219,6 +219,8 @@ export interface RemoteMobilePushRegistration {
   hostProfileId: string;
   needsInputEnabled: boolean;
   completedEnabled: boolean;
+  /** The app build draws Notify's answer buttons from a data-only Android message (Pane app 1.1+). */
+  notifyButtons?: boolean;
   createdAt: string;
   updatedAt: string;
   revokedAt?: string;
@@ -681,6 +683,7 @@ function normalizeRemoteMobilePushSettings(value: JsonValue | undefined): Remote
     };
     const revokedAt = readOptionalString(raw.revokedAt);
     if (revokedAt) normalized.revokedAt = revokedAt;
+    if (raw.notifyButtons === true) normalized.notifyButtons = true;
     return [normalized];
   });
   const decodedAttentionSequence = decodeOptionalBoundary(settings.attentionSequence, boundary.number);

@@ -1,4 +1,4 @@
-import type { NotifyUi } from '../../../../shared/types/notify';
+import type { NotifyItem, NotifyUi } from '../../../../shared/types/notify';
 
 export const NOTIFY_KIND_LABEL = {
   options: 'Needs a choice',
@@ -14,6 +14,16 @@ export const NOTIFY_KIND_DOT = {
   ask: 'bg-status-info',
   info: 'bg-status-success',
 } satisfies Record<NotifyUi, string>;
+
+/** Who asked: "notify-remote · Claude", plus the machine while two machines' questions show. */
+export function askedBy(item: NotifyItem): string {
+  return [item.source.name, item.source.agent, item.machine].filter(Boolean).join(' · ');
+}
+
+/** On a question whose machine is out of reach; the card stays answerable for when it returns. */
+export function unreachableText(item: NotifyItem): string {
+  return `Not sent: can't reach ${item.machine ?? 'the host'}. Try again when it reconnects.`;
+}
 
 /** "now", "4m", "2h" or "3d" since the epoch-ms time. */
 export function relativeAge(since: number, now: number): string {

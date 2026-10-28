@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ArrowUp, Bell, Check, Clock, ExternalLink, Info, X } from 'lucide-react';
 import type { NotifyChoice, NotifyCommand, NotifyItem, NotifyRemindAfter } from '../../../../shared/types/notify';
 import { cn } from '../../utils/cn';
-import { NOTIFY_KIND_DOT, NOTIFY_KIND_LABEL, relativeAge } from './notifyFormat';
+import { askedBy, NOTIFY_KIND_DOT, NOTIFY_KIND_LABEL, relativeAge, unreachableText } from './notifyFormat';
 import { useNow } from './useNow';
 
 /** The compact strip shows this many choices, then More. */
@@ -97,7 +97,7 @@ function Meta({ item }: { item: NotifyItem }) {
   const now = useNow();
   return (
     <span className="min-w-0 truncate">
-      · {item.source.name} · {item.source.agent} · {relativeAge(item.createdAt, now)}
+      · {askedBy(item)} · {relativeAge(item.createdAt, now)}
     </span>
   );
 }
@@ -208,6 +208,7 @@ function CardHeader({ item, form, queue, onCommand, menuPlacement }: Pick<Notify
         <span className="inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[5px] bg-text-primary text-[10px] font-bold text-bg-primary" aria-hidden="true">P</span>
         <span className="truncate font-medium text-text-secondary">{item.source.name}</span>
         <span className="shrink-0">· {item.source.agent}</span>
+        {item.machine && <span className="shrink-0">· {item.machine}</span>}
         <span className="ml-auto shrink-0">{relativeAge(item.createdAt, now)}</span>
       </div>
     );
@@ -352,6 +353,52 @@ function QueueSegments({ queue }: { queue: NotifyQueuePosition }) {
 
 // --- The question card ---
 
+/**
+ * Keys for the card the person is acting on: the pointer is over it, or (the floating strip) it
+ * was clicked and its window has the keyboard. Runs before the page's own handlers, such as a
+ * terminal's, and ignores keys typed into the card's fields and chords with modifiers.
+ */
+function useCardKeys(rootRef: React.RefObject<HTMLDivElement | null>, floating: boolean, onKey: (key: string) => boolean): void {
+  const handler = useRef(onKey);
+  useEffect(() => {
+    handler.current = onKey;
+  });
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    // Only a pointer moved onto the card counts: a card that appears under a resting pointer
+    // must not catch what the person is typing elsewhere.
+    let hovering = false;
+    // The floating strip: clicked, and its window still has the keyboard.
+    let clicked = false;
+    const enter = () => { hovering = true; };
+    const leave = () => { hovering = false; };
+    const press = () => { clicked = floating; };
+    const blur = () => { clicked = false; };
+    const keydown = (event: KeyboardEvent) => {
+      if (!hovering && !clicked) return;
+      if (event.metaKey || event.ctrlKey || event.altKey || event.isComposing || event.repeat) return;
+      const target = event.target;
+      if (target instanceof HTMLElement && root.contains(target) && target.closest('input, textarea')) return;
+      if (!handler.current(event.key)) return;
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    root.addEventListener('pointermove', enter);
+    root.addEventListener('pointerleave', leave);
+    root.addEventListener('pointerdown', press);
+    window.addEventListener('blur', blur);
+    window.addEventListener('keydown', keydown, true);
+    return () => {
+      root.removeEventListener('pointermove', enter);
+      root.removeEventListener('pointerleave', leave);
+      root.removeEventListener('pointerdown', press);
+      window.removeEventListener('blur', blur);
+      window.removeEventListener('keydown', keydown, true);
+    };
+  }, [rootRef, floating]);
+}
+
 function recommendedIndex(choices: NotifyChoice[]): number {
   return choices.findIndex((choice) => choice.recommended);
 }
@@ -390,6 +437,38 @@ function QuestionCard({
     const trimmed = value.trim();
     if (trimmed) onCommand({ type: 'answer', id: item.id, answer: { text: trimmed } });
   };
+  const rootRef = useRef<HTMLDivElement>(null);
+  // The card's own keys, matching the key on each chip.
+  useCardKeys(rootRef, Boolean(onFieldFocusRequest), (key) => {
+    const index = /^[1-9]$/.test(key) ? Number(key) - 1 : -1;
+    if (item.ui === 'options') {
+      if (index >= 0 && index < (expanded ? choices.length : Math.min(choices.length, COMPACT_CHOICE_LIMIT))) {
+        if (expanded) setSelected(index);
+        else answerChoice(index);
+        return true;
+      }
+      if (key === 'Enter' && expanded && selected >= 0) {
+        answerChoice(selected, note);
+        return true;
+      }
+      return false;
+    }
+    if (item.ui === 'approve' && !denying) {
+      if (key.toLowerCase() === 'y') answerApproval(true);
+      else if (key.toLowerCase() === 'n') setDenying(true);
+      else return false;
+      return true;
+    }
+    if (item.ui === 'ask') {
+      const suggestion = index >= 0 ? item.suggestions?.[index] : undefined;
+      if (suggestion === undefined && key.length !== 1) return false;
+      // A suggestion fills the field, as a click does; any other character starts the answer.
+      setText((current) => suggestion ?? current + key);
+      setTextFocusKey((focusKey) => focusKey + 1);
+      return true;
+    }
+    return false;
+  });
   const openInPane = item.source.paneId && form === 'strip'
     ? () => onCommand({ type: 'open-in-pane', id: item.id })
     : undefined;
@@ -573,11 +652,19 @@ function QuestionCard({
   }
 
   return (
-    <div className={cardShell(form, narrow, className)} data-testid="notify-card" data-notify-ui={item.ui}>
+    <div
+      ref={rootRef}
+      className={cardShell(form, narrow, className)}
+      data-testid="notify-card"
+      data-notify-ui={item.ui}
+      // The floating strip takes the keyboard only when clicked, so typing elsewhere never answers it.
+      onPointerDown={() => void onFieldFocusRequest?.()}
+    >
       <CardHeader item={item} form={form} queue={queue} onCommand={onCommand} menuPlacement={menuPlacement} />
       <div className={cn(titleClass, !(expanded || showDetail) && 'line-clamp-3')} title={item.title}>{item.title}</div>
       {showContext && <div className={contextClass}>{item.context}</div>}
       {body}
+      {item.unreachable && <UnreachableNotice item={item} className={form === 'inbox' ? 'px-3.5 pb-3' : 'px-[22px] pb-3'} />}
       {form === 'inbox' && item.source.paneId && (
         <div className="flex justify-end px-3.5 pb-3 text-[12.5px] text-text-tertiary">
           <FooterLink onClick={() => onCommand({ type: 'open-in-pane', id: item.id })}>
@@ -607,7 +694,7 @@ function SentLine({ item, onCommand }: NotifyCardProps) {
       <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-status-success text-text-on-status-success" aria-hidden="true">
         <Check className="h-3 w-3" strokeWidth={3} />
       </span>
-      <span className="shrink-0 text-[14px] font-semibold text-text-primary">Sent to {item.source.agent}</span>
+      <span className="shrink-0 text-[14px] font-semibold text-text-primary">{item.answeredOn ? `Answered on ${item.answeredOn}` : `Sent to ${item.source.agent}`}</span>
       {item.answerSummary && <span className="min-w-0 truncate">· {item.answerSummary}</span>}
       <button
         type="button"
@@ -616,6 +703,18 @@ function SentLine({ item, onCommand }: NotifyCardProps) {
       >
         Undo
       </button>
+    </div>
+  );
+}
+
+/** The host that asked is out of reach: an answer now would not be sent. */
+export function UnreachableNotice({ item, className }: { item: NotifyItem; className?: string }) {
+  return (
+    <div className={className}>
+      <div className="flex items-center gap-2 rounded-[9px] bg-surface-tertiary px-3 py-2.5 text-[13px] text-text-secondary" data-testid="notify-unreachable">
+        <Info className="h-3.5 w-3.5 shrink-0" />
+        {unreachableText(item)}
+      </div>
     </div>
   );
 }
