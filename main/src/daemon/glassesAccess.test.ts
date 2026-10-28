@@ -334,6 +334,9 @@ describe('glasses on the workspace listener', () => {
 
     expect(errorCode(await screen())).toBe('ERR_GLASSES_ORIGIN_REFUSED');
     expect(host.glasses.state().refusedOrigins).toEqual([{ origin: newOrigin, at: '2026-10-28T08:00:00.000Z' }]);
+    host.advance(60_000);
+    await screen();
+    expect(host.glasses.state().refusedOrigins).toEqual([{ origin: newOrigin, at: '2026-10-28T08:01:00.000Z' }]);
     expect(host.log.filter((line) => line.includes(`refused browser origin ${newOrigin}`))).toHaveLength(1);
 
     await host.glasses.setOwnerOrigin(newOrigin, true);

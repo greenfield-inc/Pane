@@ -111,13 +111,18 @@ export class GlassesAccess {
     return EVEN_APP_ORIGINS.includes(origin) || this.envOrigins.has(origin) || this.ownerOrigins().includes(origin);
   }
 
-  /** Remembers a refused browser origin, logged once, so the owner can allow the Even app's from Settings. */
+  /**
+   * Remembers a refused browser origin with its latest refusal, newest first, so the owner can
+   * allow the Even app's from Settings. Logged once per origin.
+   */
   noteRefusedOrigin(origin: string): void {
     // Only an origin that could ever be allowed is worth offering; "null" never is.
-    if (!isExactOrigin(origin) || this.refusedOrigins.some((entry) => entry.origin === origin)) return;
+    if (!isExactOrigin(origin)) return;
+    const index = this.refusedOrigins.findIndex((entry) => entry.origin === origin);
+    if (index !== -1) this.refusedOrigins.splice(index, 1);
     this.refusedOrigins.unshift({ origin, at: new Date(this.now()).toISOString() });
     this.refusedOrigins.splice(MAX_REFUSED_ORIGINS);
-    this.log(`[Pane glasses] refused browser origin ${origin}; if this is the Even app, allow it in Settings › Remote Access › Glasses`);
+    if (index === -1) this.log(`[Pane glasses] refused browser origin ${origin}; if this is the Even app, allow it in Settings › Remote Access › Glasses`);
   }
 
   state(): GlassesAccessState {
