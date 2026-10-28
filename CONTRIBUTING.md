@@ -87,6 +87,11 @@ install's data:
   ```
   `NODE_ENV=production` loads the built renderer from `frontend/dist`, so no
   Vite server is needed. Rebuild after changes.
+- **Agent instruction files** are not covered by `PANE_DIR`. While Notify is
+  on, the dev build keeps Pane's Notify block in `~/.claude/CLAUDE.md` and
+  `~/.codex/AGENTS.md`, as the installed app does. Point `CLAUDE_CONFIG_DIR`
+  and `CODEX_HOME` at temporary folders, or set
+  `PANE_DISABLE_OS_INTEGRATION=1` to leave them alone.
 - A copy of a real `sessions.db` makes the dev build reconcile reserve worktrees
   in the real repositories it lists. Use a fresh data directory unless you need
   real data.
@@ -122,6 +127,11 @@ pnpm --filter frontend test
 pnpm --filter main exec vitest run
 pnpm test:ci:minimal
 ```
+
+`pnpm typecheck` checks `frontend`, `mobile` and `native` with TypeScript 7
+(the `@typescript/native` alias), and `main` and `packages/runpane` with their
+own `typescript` 5.x, which also builds them. ESLint and editors use the 5.x
+package.
 
 - `pnpm --filter main test` runs Vitest in watch mode; use `exec vitest run`
   for a single pass, as CI does. Main tests live next to the code as

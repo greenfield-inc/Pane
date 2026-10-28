@@ -128,11 +128,18 @@ requested release (latest by default) instead, like `runpane install`.
 Both the running app and the requested target must support this protocol.
 Existing 2.4.182 releases do not provide this upgrade path; install a
 continuity-capable release manually first. See the
-[prerequisites and recovery guide](../../docs/UPDATE_RECOVERY.md). Cached/local npm installs,
-system-managed Linux packages, non-stable/daemon installer options, custom download
-directories, missing standalone Node, and unwritable targets
-are refused before downtime. Python delegates to the managed engine installed
-by Pane and records the invoking Python environment.
+[prerequisites and recovery guide](../../docs/UPDATE_RECOVERY.md). Non-stable/daemon
+installer options and custom download directories are refused. When this host
+cannot run the independent update (no standalone Node, an unwritable install, a
+system-managed Linux package, a cached/local npm install), `runpane update`
+asks the running Pane to install the latest release with its built-in updater
+instead, the same path as the Settings Update button. That handoff updates the
+app and its managed CLI; an npm or pip CLI is reported as not updated. With
+`--wait`, it returns once the relaunched Pane reports the new version. It
+applies to `--version latest` without `--pane-path`, `--cli-only` or `--dry-run`, and needs
+Pane open. Python delegates to the managed engine installed by Pane and records
+the invoking Python environment; without that engine or Node it hands off the
+same way.
 
 The command returns an operation ID after the independent helper acknowledges
 startup. That is acceptance, not completion. The
@@ -418,10 +425,14 @@ npm package downloads use `source=npm` when requesting release artifacts from
 matching GitHub release assets and prints a warning.
 
 The wrapper sends best-effort command failures and download lifecycle telemetry
-with a persisted anonymous `install_id`. Successful routine commands emit nothing.
+with a persisted anonymous `install_id`. Successful routine commands emit nothing,
+and neither do documented result exits such as `panels wait` not ready or `doctor`
+findings. A failure loop sends each cause at most once an hour, and at most 10
+failures an hour.
 Distinct `install_id` counts on `runpane_wrapper_*` events measure installs that
 report failures or download activity, not all CLI users. Telemetry is disabled in
-CI, when local analytics is explicitly opted out, or with `RUNPANE_TELEMETRY_DISABLED=1`.
+CI, when local analytics is explicitly opted out, or with `DO_NOT_TRACK=1` or
+`RUNPANE_TELEMETRY_DISABLED=1`.
 
 ## Maintenance Notes
 

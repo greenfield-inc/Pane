@@ -1,3 +1,4 @@
+import type { NotifySettings } from '../../../shared/types/notify';
 import type { CustomCommandResume } from '../../../shared/types/customCommandResume';
 import type { LeaderboardConfig } from '../../../shared/types/leaderboard';
 import type { RemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
@@ -27,6 +28,8 @@ type TerminalPowerMode = 'performance' | 'batterySaver';
 
 export interface AnalyticsIdentity {
   distinctId: string;
+  // The desktop id stored before this launch, when one was stored.
+  previousDistinctId?: string;
   identitySource: 'email' | 'github' | 'git_name' | 'posthog' | 'anonymous';
   installId?: string;
   appVersion?: string;
@@ -99,6 +102,8 @@ export interface AppConfig {
     playSound: boolean;
     enabled: boolean;
   };
+  // Pane Notify settings; absent fields take DEFAULT_NOTIFY_SETTINGS
+  notify?: Partial<NotifySettings>;
   // Dev mode for debugging
   devMode?: boolean;
   // Additional paths to add to PATH environment variable
@@ -171,7 +176,7 @@ export interface AppConfig {
   terminalShortcuts?: TerminalShortcut[];
   // Whether Pane intercepts application keyboard shortcuts
   keyboardShortcutsEnabled?: boolean;
-  // Whether the Command Palette shortcut remains active when other shortcuts are disabled
+  // Whether the Search shortcut (open-command-palette) remains active when other shortcuts are disabled
   commandPaletteShortcutEnabled?: boolean;
   // Whether the terminal answers kitty keyboard protocol requests (CSI = | ? | > | < u)
   kittyKeyboardEnabled?: boolean;
@@ -224,6 +229,8 @@ export interface UpdateConfigRequest {
     playSound: boolean;
     enabled: boolean;
   };
+  // Pane Notify settings; absent fields take DEFAULT_NOTIFY_SETTINGS
+  notify?: Partial<NotifySettings>;
   devMode?: boolean;
   additionalPaths?: string[];
   sessionCreationPreferences?: {
@@ -261,7 +268,7 @@ export interface UpdateConfigRequest {
   terminalShortcuts?: TerminalShortcut[];
   // Whether Pane intercepts application keyboard shortcuts
   keyboardShortcutsEnabled?: boolean;
-  // Whether the Command Palette shortcut remains active when other shortcuts are disabled
+  // Whether the Search shortcut (open-command-palette) remains active when other shortcuts are disabled
   commandPaletteShortcutEnabled?: boolean;
   // Whether the terminal answers kitty keyboard protocol requests (CSI = | ? | > | < u)
   kittyKeyboardEnabled?: boolean;

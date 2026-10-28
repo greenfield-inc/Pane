@@ -123,6 +123,7 @@ Each of these is a small thing. Together they compound fast.
 | **Remote Pane** | Run panes, worktrees, terminals, files, git state, and approval prompts on a self-hosted remote machine while controlling them from desktop Pane or the browser app at [runpane.com/app](https://runpane.com/app/). | <a href="#remote-pane">Setup</a> |
 | **Pane Workspaces** | Let an agent on one of your machines read files, run commands, and drive Pane on another over Tailscale. Hand off a task with its branch and a written note; a handoff to the same agent continues your own session there. | [Workspaces](#pane-workspaces) · [Handoff](#hand-off-a-task) |
 | **Agent-Operable CLI** | Pane ships with `runpane agent-context`, `runpane repos add`, and `runpane panes create`, so a coding agent can discover Pane's command schema, register a repo, open a Pane for each new issue, and add agent tabs to existing Panes for review and fixes (1 feature = 1 worktree = 1 branch = 1 Pane). Claude Code, Codex, and Cursor get the same commands as MCP tools. | [Contract](docs/RUNPANE_CLI_CONTRACT.md) · [MCP](docs/PANE_MCP.md) |
+| **Pane Notify** | Agents ask you through the `notify` MCP tool instead of waiting in their terminal. Pane shows the question in a strip over whatever app you're in, and one click sends the answer back as the tool's result. ⌃⇧Space answers the whole queue by keyboard, and the Notify inbox holds everything. | [Notify](docs/PANE_NOTIFY.md) |
 | **Loops** | Run an agent or command on a cron schedule, such as a nightly bug sweep. Each run is a new Pane in a fresh worktree, ready to review. Loops are for large recurring jobs and run at most once an hour. | [Loops](docs/LOOPS.md) |
 | **@mention Terminals** | Type `@` in any terminal to pull the last 500 lines from another pane's terminal directly into your context, no copy-paste required. | <img src="images/qol-at-mention.png" alt="Cross-terminal @mention picker" width="420"> |
 | **Clipboard Shortcuts** | `Ctrl+Alt+[key]` pastes any saved text snippet instantly, so your most-used prompts are one keystroke away forever. | <img src="images/qol-clipboard.png" alt="Terminal clipboard shortcuts popover" width="280"> |
@@ -300,7 +301,7 @@ runpane panes create --repo active --name issue-252 --agent codex --prompt "Kick
 
 `runpane agent-context` is token-efficient by default and prints only command names, arguments, and safe usage notes. Agents can lazy-load full details for a specific command with `runpane agent-context --command "panes create" --json`.
 
-Pane also registers a `pane` MCP server with Claude Code, Codex, and Cursor, so agents in every repository can get these commands as tools. Cursor may ask you to approve the server. The default core toolset covers the common jobs in one call each: start an agent on a task, check on it, and send it a follow-up. It also has git status, docs search, and `pane://` links that open a Pane in the app. You can turn this off, or register every tool, in Settings → AI & Agents. Other MCP clients (VS Code and any stdio client) can run `npx --yes runpane@latest mcp`. See [Pane MCP Server](docs/PANE_MCP.md).
+Pane also registers a `pane` MCP server with Claude Code, Codex, and Cursor, so agents in every repository can get these commands as tools. Cursor may ask you to approve the server. The default core toolset covers the common jobs in one call each: start an agent on a task, check on it, and send it a follow-up. It also has git status, docs search, `pane://` links that open a Pane in the app, and `notify`, which asks you a question on screen wherever you are and gives the agent your answer. You can turn this off, or register every tool, in Settings → AI & Agents. Other MCP clients (VS Code and any stdio client) can run `npx --yes runpane@latest mcp`. See [Pane MCP Server](docs/PANE_MCP.md).
 
 Pane teaches agents about RunPane without editing your repositories. It installs a small Pane-managed `pane` skill in your home skill folders (`~/.claude/skills/pane`, or under `CLAUDE_CONFIG_DIR`, and `~/.agents/skills/pane`), including saved WSL distros on Windows. The skill is marked `<!-- pane-managed-skill v1 -->`. Pane never overwrites or removes a skill it did not write, and **Settings → AI & Agents → Install Pane skill for agents** removes it again.
 
@@ -328,7 +329,7 @@ Other tools build custom chat UIs that only work with agents they've explicitly 
 
 | Shortcut | Action |
 |----------|--------|
-| `⌘⇧P` / `Ctrl+Shift+P` | Open command palette |
+| `⌘⇧P` / `Ctrl+Shift+P` | Open Search: find any Pane, Session, project or command |
 | `⌘K` / `Ctrl+K` | Clear terminal scrollback |
 | `⌘N` / `Ctrl+N` | New pane |
 | `⌘⇧W` / `Ctrl+Shift+W` | Archive pane |
@@ -490,7 +491,7 @@ Pane is the only tool that is a real desktop app, agent-agnostic, cross-platform
 ## FAQ
 
 **"Isn't this just tmux with extra steps?"**
-tmux is from 2007. Pane is a modern desktop app with a built-in diff viewer, file explorer, git workflow, command palette, browser tab, resource manager, persistent state, cross-terminal context sharing, and (unlike tmux) it works on Windows. tmux is a terminal multiplexer; Pane is a workstation for managing AI coding agents.
+tmux is from 2007. Pane is a modern desktop app with a built-in diff viewer, file explorer, git workflow, Search launcher, browser tab, resource manager, persistent state, cross-terminal context sharing, and (unlike tmux) it works on Windows. tmux is a terminal multiplexer; Pane is a workstation for managing AI coding agents.
 
 **"What if a new AI agent comes out tomorrow?"**
 You just run it. Pane doesn't bundle agents or lock you in. If it runs in a terminal, it runs in Pane, instantly. No plugins, no SDK, no waiting for support.

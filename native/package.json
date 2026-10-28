@@ -9,7 +9,7 @@
     "android": "expo run:android --port ${RCT_METRO_PORT:-8137}",
     "prebuild": "expo prebuild --clean",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p terminal-web",
+    "typecheck": "node ../node_modules/@typescript/native/bin/tsc --noEmit && node ../node_modules/@typescript/native/bin/tsc --noEmit -p terminal-web",
     "build:terminal-web": "node scripts/build-terminal-web.mjs"
   },
   "dependencies": {

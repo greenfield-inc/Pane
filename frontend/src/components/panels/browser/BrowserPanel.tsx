@@ -15,6 +15,7 @@ import { useConfigStore } from '../../../stores/configStore';
 import { useRemoteRuntimeState } from '../../../hooks/useRemoteRuntimeState';
 import { Dropdown } from '../../ui/Dropdown';
 import { PortsList } from './PortsList';
+import { RefusedFilesNotice, type FileRefusal } from './RefusedFilesNotice';
 
 const COPIED_FEEDBACK_MS = 1500;
 
@@ -29,6 +30,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   const [inputUrl, setInputUrl] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [urlError, setUrlError] = useState('');
+  const [refusals, setRefusals] = useState<FileRefusal[]>([]);
   const [canGoBack, setCanGoBack] = useState(false);
   const [canGoForward, setCanGoForward] = useState(false);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
@@ -378,7 +380,10 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
     };
 
     // A new document drops the previous page's load errors.
-    const onDidNavigateDocument = () => setUrlError('');
+    const onDidNavigateDocument = () => {
+      setUrlError('');
+      setRefusals([]);
+    };
     const onDidStartLoading = () => setIsLoading(true);
     const onDidFailLoad = (event: Electron.DidFailLoadEvent) => {
       if (!event.isMainFrame || event.errorCode === -3) return;
@@ -446,8 +451,9 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   useEffect(() => {
     const handler = (e: Event) => {
       // SAFETY: The preload bridge is the only sender of this event.
-      const { panelId, message } = (e as CustomEvent<{ panelId: string; message: string }>).detail;
-      if (panelId === panel.id) setUrlError(message);
+      const { panelId, message, next } = (e as CustomEvent<FileRefusal & { panelId: string }>).detail;
+      if (panelId !== panel.id) return;
+      setRefusals(current => (current.some(refusal => refusal.message === message) ? current : [...current, { message, next }]));
     };
     window.addEventListener('browser-panel:file-refused', handler);
     return () => window.removeEventListener('browser-panel:file-refused', handler);
@@ -646,6 +652,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
           {urlError}
         </div>
       )}
+      {refusals.length > 0 && <RefusedFilesNotice refusals={refusals} onDismiss={() => setRefusals([])} />}
 
       {/* Content area */}
       {!url ? (

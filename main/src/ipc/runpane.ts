@@ -90,6 +90,7 @@ import type {
   RunpaneAgentDoctorRequest,
   RunpaneAgentDoctorResult,
   RunpaneDoctorResult,
+  RunpaneErrorPayload,
   RunpaneInitialInputDeliveryResult,
   RunpanePaneArchiveBlockCode,
   RunpanePaneArchiveBlockedResult,
@@ -905,7 +906,7 @@ export function registerRunpaneHandlers(
         repo: repoSummary,
         items,
       };
-    }, result => ({ repoId: result.repo.id, resultCount: result.items.length }));
+    }, result => ({ repoId: result.repo.id, resultCount: result.items.length, failure: result.items.map(createFailure).find(Boolean) }));
   });
 
   commandRegistry.register('runpane:panes:adopt', async (request: PaneCommandValue): Promise<RunpanePaneAdoptResult> => {
@@ -1146,6 +1147,7 @@ export function registerRunpaneHandlers(
       panelId: result.panelId,
       ok: result.ok,
       resultCount: 1,
+      failure: createFailure(result),
     }));
   });
 
@@ -2257,7 +2259,7 @@ interface PreparedInitialInput {
  * Decide how a create prompt reaches the agent. A long or multi-line prompt
  * is never typed into the shell as an argument: on a POSIX shell the launch
  * reads it from a prompt file, elsewhere the agent's composer takes it as a
- * paste once the agent is ready. `--as-file-pointer` swaps the prompt for a
+ * paste once the agent is ready. Outside POSIX shells every prompt goes that way. `--as-file-pointer` swaps the prompt for a
  * one-line pointer to its file.
  */
 async function prepareInitialInput(
@@ -2285,7 +2287,8 @@ async function prepareInitialInput(
   const prepared: RunpaneResolvedTool = { ...tool, initialInput: text };
   const warnings = tool.agent === 'claude' ? claudePromptWarnings(text) : undefined;
 
-  const useArgumentDelivery = allowArgumentDelivery && shouldUseArgumentDelivery(prepared);
+  // Only a POSIX launch shell keeps a prompt one literal argument; elsewhere the composer takes it once the agent is ready.
+  const useArgumentDelivery = allowArgumentDelivery && shouldUseArgumentDelivery(prepared) && terminalPanelManager.launchShellIsPosix(wslContext);
   if (!useArgumentDelivery || !isLongPrompt(text)) {
     return { tool: prepared, useArgumentDelivery, promptFile, attachments, warnings };
   }
@@ -2995,6 +2998,16 @@ class RunpaneCodedError extends Error {
   constructor(message: string, readonly code: string) {
     super(message);
   }
+}
+
+/** Why a created pane or panel failed: its own error, why its agent was not ready, or that its starting message was not confirmed. */
+function createFailure(item: { error?: RunpaneErrorPayload; readiness?: RunpanePaneReadiness; initialInput?: RunpaneInitialInputDeliveryResult }): RunpaneErrorPayload | undefined {
+  if (item.error) return item.error;
+  if (item.readiness && !item.readiness.ok) {
+    return { code: item.readiness.reason?.code ?? (item.readiness.blocked ? 'agent-blocked' : 'readiness-timeout'), message: '' };
+  }
+  if (!isInitialInputDelivered(item.initialInput, item.readiness)) return { code: 'delivery-unverified', message: '' };
+  return undefined;
 }
 
 function isPaneCreateItemSuccessful(item: RunpanePaneCreateResultItem): boolean {
@@ -6018,6 +6031,8 @@ interface RunpaneActionMetadata {
   timedOut?: boolean;
   available?: boolean;
   environment?: string;
+  /** Why an `ok: false` result failed, when the result carries no top-level `error`. */
+  failure?: RunpaneErrorPayload;
 }
 
 async function withRunpaneAction<T extends { ok: boolean }>(
@@ -6047,7 +6062,7 @@ async function withRunpaneAction<T extends { ok: boolean }>(
       Object.assign(actionMetadata, resultMetadata(result));
     }
     if (shouldTrackResult(result)) {
-      const cause = !commandOk && 'error' in result ? result.error : undefined;
+      const cause = commandOk ? undefined : actionMetadata.failure ?? ('error' in result ? result.error : undefined);
       trackRunpaneAction(services, action, 'success', Date.now() - startedAt, actionMetadata, cause);
     }
     return result;

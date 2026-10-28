@@ -34,11 +34,12 @@ export function prepareRemoteBrowserFiles(panelId: string) {
       } catch (error) {
         // The host names a file outside the page's folder and how to fix the page. The tab shows
         // it too, since a refused stylesheet or script never appears in the page.
-        const refusal = error instanceof PaneError && error.code === 'ERR_BROWSER_FILE_OUTSIDE_FOLDER' ? paneErrorText(error) : null;
+        const refusal = error instanceof PaneError && error.code === 'ERR_BROWSER_FILE_OUTSIDE_FOLDER' ? error : null;
         if (refusal && onSameHost()) {
-          for (const window of BrowserWindow.getAllWindows()) window.webContents.send('browser-panel:file-refused', { panelId, message: refusal });
+          const detail = { panelId, message: refusal.message, next: refusal.next };
+          for (const window of BrowserWindow.getAllWindows()) window.webContents.send('browser-panel:file-refused', detail);
         }
-        return new Response(refusal ?? 'Unable to read this file from the host. Reopen the file on the host and check the connection.', {
+        return new Response(refusal ? paneErrorText(refusal) : 'Unable to read this file from the host. Reopen the file on the host and check the connection.', {
           status: 404, headers: { 'Content-Type': 'text/plain; charset=utf-8' },
         });
       }

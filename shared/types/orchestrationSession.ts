@@ -110,6 +110,11 @@ export interface OrchestrationSessionRecord {
    * Session). Saved with the record, so a tab created or repaired at startup still resumes it.
    */
   resume?: string;
+  /**
+   * The agent's first message in a new conversation, kept until a terminal has sent it
+   * so a tab created or repaired before launch still sends it. Dropped once sent.
+   */
+  openingPrompt?: string;
   /** Snapshot of the behavior profile, independent of app defaults. */
   profile?: string;
   /** Hidden detached Pane session that owns the durable terminal conversation. */
@@ -233,6 +238,11 @@ export interface OrchestrationSessionCreateInput {
    * when it first opens, instead of starting a new one. `runpane handoff` uses it to move a Session.
    */
   resume?: string;
+  /**
+   * Sent once as the agent's first message; must begin with `PANE_ONE_TIME_PROMPT_OPENING`.
+   * The desktop's Pane Chat offer uses it; it is not part of the runpane contract.
+   */
+  openingPrompt?: string;
   profile?: string;
   goal?: string;
   context?: string;

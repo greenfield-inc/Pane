@@ -52,4 +52,4 @@ Otherwise the tool that owns the worktree remains responsible for its archive an
 
 ## Conductor imports
 
-The bulk `runpane import conductor` workflow is planned as a follow-up to the core adoption support. Until then, enumerate active Conductor workspaces and call `panes adopt` for each one. Pane already reads `conductor.json` for project scripts, but adoption deliberately does not run setup/build scripts.
+To bring Conductor workspaces in with their agents resumed, use the "Bring your sessions into Pane" card on Home or Settings → AI & Agents → "Bring sessions into Pane" (see [Bring your existing sessions into Pane](SESSIONS.md#bring-your-existing-sessions-into-pane)). It adopts each idle workspace in place, as `panes adopt --resume` does. Pane already reads `conductor.json` for project scripts, but adoption deliberately does not run setup/build scripts.
