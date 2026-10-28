@@ -2,7 +2,8 @@
   "expo": {
     "name": "Pane",
     "slug": "pane",
-    "version": "1.0",
+    "version": "1.1",
+    "runtimeVersion": "1.1",
     "orientation": "default",
     "icon": "./assets/images/icon.png",
     "scheme": [
@@ -20,7 +21,7 @@
         },
         "ITSAppUsesNonExemptEncryption": false
       },
-      "buildNumber": "16",
+      "buildNumber": "17",
       "appleTeamId": "FBM5YSF467"
     },
     "android": {
@@ -30,7 +31,7 @@
         "foregroundImage": "./assets/images/adaptive-icon.png"
       },
       "predictiveBackGestureEnabled": false,
-      "versionCode": 3
+      "versionCode": 4
     },
     "plugins": [
       [
@@ -63,7 +64,13 @@
           "microphonePermission": "Pane uses the microphone to dictate prompts to your agents."
         }
       ],
-      "expo-notifications",
+      [
+        "expo-notifications",
+        {
+          "enableBackgroundRemoteNotifications": true
+        }
+      ],
+      "@bacons/apple-targets",
       [
         "expo-splash-screen",
         {
