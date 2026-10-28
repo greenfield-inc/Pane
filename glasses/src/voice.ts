@@ -85,6 +85,7 @@ export interface VoiceSocket {
   onopen: ((event: Event) => void) | null;
   onerror: ((event: Event) => void) | null;
   onmessage: ((event: MessageEvent<string | ArrayBuffer>) => void) | null;
+  onclose: ((event: CloseEvent) => void) | null;
 }
 
 /** What a dictation needs from its computer. */
@@ -154,22 +155,33 @@ export async function streamingDictation(host: VoiceHost, onPreview: (text: stri
     live.receive(data);
     onPreview(live.preview);
   });
+  // Closing after CloseStream, or cancelling, marks the close as ours; any other close or
+  // error means the host or Deepgram gave up and the words so far are incomplete.
+  let ending = false;
+  let dropped = false;
+  ws.onclose = ws.onerror = () => {
+    if (!ending) dropped = true;
+  };
   return {
     push(pcm) {
       // A copy, so the frame is backed by a plain ArrayBuffer.
-      if (ws.readyState === WebSocket.OPEN) ws.send(new Uint8Array(pcm));
+      if (!dropped && ws.readyState === WebSocket.OPEN) ws.send(new Uint8Array(pcm));
     },
     async finish() {
-      if (ws.readyState === WebSocket.OPEN) {
+      if (!dropped && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'Finalize' }));
         await new Promise((resolve) => setTimeout(resolve, FINALIZE_WAIT_MS));
         if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'CloseStream' }));
       }
+      // A drop up to here, Finalize's wait included, loses words: nothing is sent.
+      ending = true;
       ws.close();
+      if (dropped) throw new Error(live.error ?? 'The voice connection closed.');
       if (live.error && !live.rawText) throw new Error(live.error);
       return live.rawText ? host.finalizeStreaming(live.rawText, host.now() - startedAt) : '';
     },
     cancel() {
+      ending = true;
       ws.close();
     },
   };

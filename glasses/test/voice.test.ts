@@ -12,6 +12,7 @@ class FakeSocket {
   onopen: ((event: Event) => void) | null = null;
   onerror: ((event: Event) => void) | null = null;
   onmessage: ((event: MessageEvent<string | ArrayBuffer>) => void) | null = null;
+  onclose: (() => void) | null = null;
   closed = false;
 
   constructor(readonly url: string, readonly protocols: string[]) {
@@ -88,6 +89,20 @@ describe('voice', () => {
     expect(ws.sent[1]).toEqual(new Uint8Array([9, 9]));
     expect(ws.sent.slice(2)).toEqual([JSON.stringify({ type: 'Finalize' }), JSON.stringify({ type: 'CloseStream' })]);
     expect(ws.closed).toBe(true);
+  });
+
+  it('fails a stream the connection dropped instead of sending the words heard before', async () => {
+    const sockets: FakeSocket[] = [];
+    const calls: string[] = [];
+    const dictation = await streamingDictation(voiceHost(sockets, calls), () => {});
+    const [ws] = sockets;
+    if (!ws) throw new Error('no socket');
+    ws.onmessage?.(message(JSON.stringify({ type: 'Results', is_final: true, channel: { alternatives: [{ transcript: 'run the deployment' }] } })));
+    ws.readyState = 3;
+    ws.onclose?.();
+    dictation.push(new Uint8Array([7]));
+    await expect(dictation.finish()).rejects.toThrow('The voice connection closed.');
+    expect(calls).toEqual([]);
   });
 
   it('sends a recorded clip as one WAV on release when the host has no Deepgram key', async () => {

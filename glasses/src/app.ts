@@ -79,6 +79,8 @@ export class GlassesApp {
   /** Cards answered here, hidden until the computer's next Notify state drops them. */
   private readonly answered = new Set<string>();
   private dictation: Dictation | null = null;
+  /** Counts holds; a voice startup that finishes after its hold ended sees a newer number and stands down. */
+  private listening = 0;
   private poll: Cancel | null = null;
   private readonly unsubscribe: () => void;
 
@@ -94,6 +96,7 @@ export class GlassesApp {
   dispose(): void {
     this.unsubscribe();
     this.stopPolling();
+    this.listening += 1;
     this.dictation?.cancel();
   }
 
@@ -549,15 +552,36 @@ export class GlassesApp {
 
   private async startListening(computerId: string, onPreview: (text: string) => void): Promise<void> {
     this.dictation?.cancel();
-    this.dictation = await this.deps.source.dictate(computerId, onPreview);
-    if (!(await this.deps.mic(true).catch(() => false))) {
-      this.dictation.cancel();
+    this.dictation = null;
+    const attempt = ++this.listening;
+    const released = () => attempt !== this.listening;
+    let dictation: Dictation;
+    try {
+      dictation = await this.deps.source.dictate(computerId, onPreview);
+    } catch (error) {
+      if (released()) return;
+      throw error;
+    }
+    if (released()) {
+      dictation.cancel();
+      return;
+    }
+    this.dictation = dictation;
+    const on = await this.deps.mic(true).catch(() => false);
+    if (released()) {
+      // Released while the microphone was starting: the release already took the dictation.
+      if (on) void this.deps.mic(false).catch(() => false);
+      return;
+    }
+    if (!on) {
+      dictation.cancel();
       this.dictation = null;
       throw new GlassesError('ERR_GLASSES_MIC', 'The glasses microphone did not start.', 'Check that Pane may use the microphone in the Even app, then hold again.');
     }
   }
 
   private async stopListening(): Promise<string> {
+    this.listening += 1;
     await this.deps.mic(false).catch(() => false);
     const dictation = this.dictation;
     this.dictation = null;
@@ -566,6 +590,7 @@ export class GlassesApp {
 
   // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Every catch in the app lands here; it reads only Error and GlassesError fields.
   private showProblem(title: string, error: unknown, back: View): void {
+    this.listening += 1;
     this.dictation?.cancel();
     this.dictation = null;
     void this.deps.mic(false).catch(() => false);

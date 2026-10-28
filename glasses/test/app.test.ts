@@ -111,6 +111,23 @@ describe('answering', () => {
     expect(text()[1]?.replace(' / ', ' ')).toBe('Answered fix-login: "stub the clock and rerun only the auth suite"');
   });
 
+  it('never turns the microphone on for a hold released before the computer is ready', async () => {
+    const { text, press, mic, source } = start();
+    let ready: (dictation: Dictation) => void = () => {};
+    source.dictate = () => new Promise((resolve) => { ready = resolve; });
+    const pushed: Uint8Array[] = [];
+    let cancels = 0;
+    await press({ type: 'hold' });
+    await press({ type: 'release' });
+    ready({ push: (pcm) => pushed.push(pcm), finish: async () => 'late words', cancel: () => { cancels += 1; } });
+    await settle();
+    await press({ type: 'audio', pcm: new Uint8Array([1]) });
+    expect(mic).toEqual([false]);
+    expect(pushed).toEqual([]);
+    expect(cancels).toBe(1);
+    expect(text()[0]).toMatch(/^fix-login: Stub the clock/);
+  });
+
   it('opens the whole of a long question from its row and comes back', async () => {
     const { text, press } = start();
     await press({ type: 'down' });
