@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { encodeGlassesPairingCode } from '../../shared/types/glasses';
 import type { NotifyItem, NotifySharedState } from '../../shared/types/notify';
 import { boundary, decodeBoundary, type JsonValue } from '../../shared/validation/boundaryDecoder';
@@ -20,12 +20,15 @@ class FakeHost {
   readonly handlers = new Map<string, Handler>();
   /** When set, every request gets this status and `{ ok: false, error }` body. */
   refuse: { status: number; code: string; message: string; next?: string } | null = null;
+  /** When set, requests fail the way a refused CORS preflight looks to a page: a network error. */
+  unreachable = false;
   private streams: Array<ReadableStreamDefaultController<Uint8Array>> = [];
 
   constructor(readonly url: string) {}
 
   fetch = async (url: string, init: { method?: string; headers?: Record<string, string>; body?: string } = {}): Promise<Response> => {
     this.seen.push({ url, method: init.method ?? 'GET', headers: init.headers ?? {}, body: init.body ?? '' });
+    if (this.unreachable) throw new TypeError('Load failed');
     if (this.refuse) {
       const { status, ...error } = this.refuse;
       return Response.json({ ok: false, error }, { status });
@@ -46,6 +49,12 @@ class FakeHost {
     if (!handler) return Response.json({ ok: false, error: { message: `no ${request.channel}`, code: 'ERR_TEST' } }, { status: 403 });
     return Response.json({ ok: true, result: handler(request.args) });
   };
+
+  /** Ends every open event stream, as the host does when it revokes the glasses. */
+  closeStreams(): void {
+    for (const stream of this.streams) stream.close();
+    this.streams = [];
+  }
 
   emit(channel: string, arg: NotifySharedState): void {
     const data = JSON.stringify({ channel, args: [arg], timestamp: new Date().toISOString() });
@@ -104,6 +113,7 @@ function hub(hosts: FakeHost[], timers = manualTimers()) {
     later: timers.later,
     now: timers.now,
     openSocket: () => { throw new Error('no sockets in tests'); },
+    origin: 'https://even.example',
   };
   const result = new HostHub(paired, deps);
   result.start();
@@ -141,9 +151,10 @@ describe('pairing', () => {
       })),
       runtimeId: 'runtime-1',
       clientLabel: 'Pane glasses',
+      origin: 'https://even.example',
     });
     expect(outcome.paired).toEqual([{ name: 'studio-mac', url: studio.url, token: 'pgt_studio', deviceLabel: 'Even G2 · iPhone' }]);
-    expect(outcome.failed).toEqual([{ name: 'devbox', message: 'This pairing code was already used or is more than 10 minutes old.', next: 'Make a new code in the Pane app.' }]);
+    expect(outcome.failed).toEqual([{ name: 'devbox', url: devbox.url, code: 'ERR_GLASSES_PAIRING_SECRET_INVALID', message: 'This pairing code was already used or is more than 10 minutes old.', next: 'Make a new code in the Pane app.' }]);
     const sent = studio.seen[0];
     expect(sent?.url).toBe(`${studio.url}/invoke`);
     expect(sent?.headers.Authorization).toBeUndefined();
@@ -152,11 +163,52 @@ describe('pairing', () => {
   });
 
   it('refuses a code that is not a Pane glasses code', async () => {
-    await expect(pairComputers('https://example.com#token', { fetch, runtimeId: 'r', clientLabel: 'Pane glasses' })).rejects.toThrow('not a Pane glasses code');
+    await expect(pairComputers('https://example.com#token', { fetch, runtimeId: 'r', clientLabel: 'Pane glasses', origin: 'https://even.example' })).rejects.toThrow('not a Pane glasses code');
+  });
+
+  it("points to Allow when a computer doesn't answer, since an unallowed origin looks like a network error", async () => {
+    const url = 'https://studio.tail1.ts.net:8443';
+    const code = encodeGlassesPairingCode({ v: 1, expiresAt: '2026-10-28T00:10:00Z', computers: [{ name: 'studio-mac', url, secret: 'pgs_studio' }] });
+    const outcome = await pairComputers(code, {
+      fetch: async () => { throw new TypeError('Load failed'); },
+      runtimeId: 'runtime-1',
+      clientLabel: 'Pane glasses',
+      origin: 'https://even.example',
+    });
+    expect(outcome.paired).toEqual([]);
+    expect(outcome.failed).toEqual([{
+      name: 'studio-mac',
+      url,
+      code: 'ERR_GLASSES_NO_ANSWER',
+      message: "studio-mac didn't answer. If this is the first time, allow the Even app on it: Pane › Settings › Remote Access › Glasses › Allow (origin https://even.example).",
+      next: 'Then paste again.',
+    }]);
   });
 });
 
+/** Lets fetch bodies and promise chains run without any timer. */
+const flush = () => new Promise((resolve) => setImmediate(resolve));
+
 describe('HostHub', () => {
+  it('shows a revoke while idle, with the global timers stalled as the Even SDK leaves them', async () => {
+    const a = host('https://studio.tail1.ts.net:8443', [item('a1', 100)]);
+    const { hub: one, timers } = hub([a]);
+    await until(() => one.computers()[0]?.status === 'live');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+    try {
+      a.refuse = { status: 401, code: 'ERR_GLASSES_TOKEN_INVALID', message: 'These glasses are not paired with this computer, or were revoked.', next: 'Pair again from the Pane app.' };
+      a.closeStreams();
+      for (let step = 0; step < 50 && one.computers()[0]?.status !== 'refused'; step += 1) {
+        timers.advance(1_000);
+        await flush();
+      }
+      expect(one.computers()[0]?.refusal?.code).toBe('ERR_GLASSES_TOKEN_INVALID');
+    } finally {
+      vi.useRealTimers();
+      one.stop();
+    }
+  });
+
   it('merges every computer’s cards, questions first and newest first, each with its own token', async () => {
     const a = host('https://studio.tail1.ts.net:8443', [item('a1', 100), item('a2', 400, { ui: 'info', state: 'info' })]);
     const b = host('https://devbox.tail1.ts.net:8443', [item('b1', 200), item('b2', 300, { state: 'answered' })]);
@@ -228,6 +280,26 @@ describe('HostHub', () => {
     one.stop();
   });
 
+  it('opens the terminal a Pane actually runs, never a tab that was never started', async () => {
+    const a = host('https://studio.tail1.ts.net:8443');
+    a.handlers.set('sessions:get-all-with-projects', () => ({ success: true, data: [{ sessions: [
+      { id: 'tool', name: 'dev-server', archived: false }, { id: 'shells', name: 'shells', archived: false },
+    ] }] }));
+    const tool: JsonValue[] = [
+      { id: 'blank', type: 'terminal', title: 'Terminal', state: { isActive: false, customState: { isInitialized: false } } },
+      { id: 'runner', type: 'terminal', title: 'pnpm dev', state: { isActive: false, customState: { isInitialized: true, initialCommand: 'pnpm dev' } } },
+    ];
+    const shells: JsonValue[] = [
+      { id: 'unused', type: 'terminal', title: 'Terminal 1', state: { isActive: false, customState: {} } },
+      { id: 'used', type: 'terminal', title: 'Terminal 2', state: { isActive: true, customState: { isInitialized: true } } },
+    ];
+    a.handlers.set('panels:list', ([paneId]) => ({ success: true, data: paneId === 'tool' ? tool : shells }));
+    const { hub: one } = hub([a]);
+    await until(() => one.computers()[0]?.status === 'live');
+    expect((await one.panes(a.url)).map((entry) => [entry.name, entry.panelId])).toEqual([['dev-server', 'runner'], ['shells', 'used']]);
+    one.stop();
+  });
+
   it("shows a refusal in the host's words and waits for a press instead of retrying", async () => {
     const a = host('https://studio.tail1.ts.net:8443');
     a.refuse = { status: 403, code: 'ERR_GLASSES_ORIGIN_REFUSED', message: 'This computer accepts glasses tokens only from the Even app; this request came from https://x.example.', next: 'Allow it in Settings › Remote Access › Glasses.' };
@@ -239,8 +311,32 @@ describe('HostHub', () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(a.seen.length).toBe(sent);
     a.refuse = null;
-    one.retry();
+    one.retry(a.url);
     await until(() => one.computers()[0]?.status === 'live');
+    one.stop();
+  });
+
+  it('recovers on the first press once the computer allows the app again, even with its stream still open', async () => {
+    const a = host('https://studio.tail1.ts.net:8443');
+    const { hub: one } = hub([a]);
+    await until(() => one.computers()[0]?.status === 'live');
+    a.refuse = { status: 403, code: 'ERR_GLASSES_ORIGIN_REFUSED', message: 'This request came from https://even.example.', next: 'Allow it.' };
+    await one.panes(a.url).catch(() => []);
+    expect(one.computers()[0]?.status).toBe('refused');
+    a.refuse = null;
+    one.retry(a.url);
+    await until(() => one.computers()[0]?.status === 'live' && !one.computers()[0]?.refusal);
+    one.stop();
+  });
+
+  it('connects on the first press after a computer that never answered allows the app', async () => {
+    const a = host('https://studio.tail1.ts.net:8443');
+    a.unreachable = true;
+    const { hub: one } = hub([a]);
+    await until(() => a.seen.length > 0);
+    a.unreachable = false;
+    one.retry();
+    await until(() => one.computers()[0]?.status === 'live', 1_000);
     one.stop();
   });
 

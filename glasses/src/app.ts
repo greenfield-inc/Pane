@@ -10,6 +10,7 @@ import {
   cardPage,
   cardRows,
   computersPage,
+  connectingPage,
   dictationPage,
   fullQuestionPage,
   homeCardPage,
@@ -164,8 +165,8 @@ export class GlassesApp {
     if (!source.demo && computers.length && !computers.some((computer) => computer.status === 'live')) {
       const refused = computers.find((computer) => computer.refusal);
       if (refused?.refusal) return refusedPage(refused.name, refused.refusal);
-      if (computers.some((computer) => computer.status === 'offline')) return noComputerPage(computers.length);
-      return loadingPage(`Pane · ${computers.length} computers`, 'Connecting to your computers…');
+      if (computers.some((computer) => computer.status === 'offline')) return noComputerPage(computers.length, computers.find((computer) => computer.hint)?.hint);
+      return connectingPage(computers.length);
     }
     const entries = this.homeEntries();
     const index = this.resolveHomeIndex(entries);

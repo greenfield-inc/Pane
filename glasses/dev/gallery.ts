@@ -3,7 +3,8 @@
 import { OsEventTypeList, waitForEvenAppBridge } from '@evenrealities/even_hub_sdk';
 import { Display, type Page } from '../src/display';
 import type { Computer } from '../src/model';
-import { LOCKED_OUT, ORIGIN_REFUSED, allClearPage, computersPage, loadingPage, noComputerPage, refusedPage } from '../src/screens';
+import { noAnswerMessage } from '../src/host';
+import { LOCKED_OUT, ORIGIN_REFUSED, allClearPage, computersPage, connectingPage, noComputerPage, pairingFailedPage, refusedPage } from '../src/screens';
 
 const now = Date.now();
 const clock = (epochMs: number) => new Date(epochMs).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -21,6 +22,8 @@ const pages: Array<[string, Page]> = [
   ['home-all-clear', allClearPage(3)],
   ['home-all-clear-after-answer', allClearPage(3, 'Answered fix-login: Loosen retry')],
   ['error-no-computer-reachable', noComputerPage(3)],
+  ['error-no-computer-first-time', noComputerPage(1, noAnswerMessage('studio-mac', location.origin))],
+  ['error-pairing-no-answer', pairingFailedPage([`${noAnswerMessage('studio-mac', location.origin)} Then paste again.`])],
   ['error-origin-refused', refusedPage('devbox', originRefusal)],
   ['error-locked-out', refusedPage('devbox', {
     code: LOCKED_OUT,
@@ -33,7 +36,8 @@ const pages: Array<[string, Page]> = [
     message: 'These glasses are not paired with this computer, or were revoked.',
     next: 'Pair again from the Pane app: Settings › Glasses › Pair glasses.',
   })],
-  ['home-connecting', loadingPage('Pane · 3 computers', 'Connecting to your computers…')],
+  ['home-connecting', connectingPage(3)],
+  ['home-connecting-one-computer', connectingPage(1)],
   // A native list keeps its swipes, so it comes last.
   ['computers-refused-and-offline', computersPage(computers, clock)],
 ];

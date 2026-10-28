@@ -93,6 +93,24 @@ export interface RemoteDaemonClientOptions {
    * error, so native clients should set it. Off by default.
    */
   staleStreamTimeoutMs?: number;
+  /**
+   * Schedules the client's own timers (retry delays, reconnects, the stale-stream and recovery
+   * deadlines). Defaults to the global `setTimeout`. A host that replaces the globals with timers
+   * that stall while idle, as the Even Hub SDK does, passes timers that keep firing.
+   */
+  schedule?: RemoteSchedule;
+}
+
+/** A scheduled callback that can be cancelled. */
+export interface RemoteTimer {
+  cancel(): void;
+}
+
+export type RemoteSchedule = (callback: () => void, ms: number) => RemoteTimer;
+
+function scheduleWithGlobals(callback: () => void, ms: number): RemoteTimer {
+  const handle = setTimeout(callback, ms);
+  return { cancel: () => clearTimeout(handle) };
 }
 
 /** The host rejected the connection code. Retrying cannot help. */
@@ -149,9 +167,10 @@ export class RemoteDaemonClient {
   private readonly staleStreamTimeoutMs: number | undefined;
   private runtimeId: string | null = null;
   private abortController: AbortController | null = null;
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectTimer: RemoteTimer | null = null;
   private readonly recovery = new RecoveryCycle();
-  private deadlineTimer: ReturnType<typeof setTimeout> | null = null;
+  private deadlineTimer: RemoteTimer | null = null;
+  private readonly schedule: RemoteSchedule;
   private streamController: AbortController | null = null;
   private restoreListeners = new Set<(signal: AbortSignal) => Promise<void>>();
   private eventListeners = new Set<(event: RemoteDaemonClientEvent) => void>();
@@ -172,6 +191,7 @@ export class RemoteDaemonClient {
     this.deviceLabel = options.deviceLabel;
     this.resolveRuntimeId = options.runtimeId;
     this.staleStreamTimeoutMs = options.staleStreamTimeoutMs;
+    this.schedule = options.schedule ?? scheduleWithGlobals;
   }
 
   getState(): RemoteDaemonConnectionState {
@@ -330,7 +350,7 @@ export class RemoteDaemonClient {
       }
 
       if (attempt < attempts) {
-        await delay(REQUEST_RETRY_DELAY_MS * attempt, signal);
+        await delay(this.schedule, REQUEST_RETRY_DELAY_MS * attempt, signal);
       }
     }
 
@@ -373,7 +393,7 @@ export class RemoteDaemonClient {
       }
 
       if (attempt < HEALTH_CHECK_ATTEMPTS) {
-        await delay(REQUEST_RETRY_DELAY_MS * attempt, signal);
+        await delay(this.schedule, REQUEST_RETRY_DELAY_MS * attempt, signal);
       }
     }
 
@@ -390,10 +410,11 @@ export class RemoteDaemonClient {
     let ready = false;
     const abortStream = () => stream.abort();
     signal.addEventListener('abort', abortStream, { once: true });
-    let staleTimer: ReturnType<typeof setTimeout> | null = null;
+    let staleTimer: RemoteTimer | null = null;
+    const cancelStaleTimer = () => staleTimer?.cancel();
     const armStaleTimer = () => {
-      if (staleTimer !== null) clearTimeout(staleTimer);
-      staleTimer = setTimeout(() => {
+      cancelStaleTimer();
+      staleTimer = this.schedule(() => {
         if (stream.signal.aborted) return;
         stream.abort();
         this.scheduleReconnect('Remote event stream stopped responding');
@@ -449,7 +470,7 @@ export class RemoteDaemonClient {
 
       this.scheduleReconnect(message);
     } finally {
-      if (staleTimer !== null) clearTimeout(staleTimer);
+      cancelStaleTimer();
       signal.removeEventListener('abort', abortStream);
       stream.abort();
     }
@@ -480,12 +501,12 @@ export class RemoteDaemonClient {
   }
 
   private clearDeadline(): void {
-    if (this.deadlineTimer !== null) clearTimeout(this.deadlineTimer);
+    this.deadlineTimer?.cancel();
     this.deadlineTimer = null;
   }
 
   private armDeadline(): void {
-    this.deadlineTimer ??= setTimeout(() => {
+    this.deadlineTimer ??= this.schedule(() => {
       this.stopRecovery('Could not reconnect within five minutes. Your workspace is kept. Choose Retry now.');
     }, this.recovery.remainingMs);
   }
@@ -509,7 +530,7 @@ export class RemoteDaemonClient {
       return;
     }
     this.setState({ status: 'reconnecting', lastError: message });
-    this.reconnectTimer = setTimeout(() => {
+    this.reconnectTimer = this.schedule(() => {
       this.reconnectTimer = null;
       if (!this.abortController || this.abortController.signal.aborted) return;
       if (!this.recovery.remainingMs) { this.stopRecovery('Could not reconnect within five minutes. Choose Retry now.'); return; }
@@ -536,7 +557,7 @@ export class RemoteDaemonClient {
 
   private clearReconnectTimer(): void {
     if (this.reconnectTimer !== null) {
-      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer.cancel();
       this.reconnectTimer = null;
     }
   }
@@ -574,19 +595,19 @@ function createAbortError(): Error {
   return error;
 }
 
-function delay(ms: number, signal?: AbortSignal): Promise<void> {
+function delay(schedule: RemoteSchedule, ms: number, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) {
     return Promise.reject(createAbortError());
   }
 
   return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
+    const timeout = schedule(() => {
       signal?.removeEventListener('abort', onAbort);
       resolve();
     }, ms);
 
     const onAbort = () => {
-      clearTimeout(timeout);
+      timeout.cancel();
       reject(createAbortError());
     };
 

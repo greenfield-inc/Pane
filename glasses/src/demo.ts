@@ -37,6 +37,7 @@ function terminals(): Map<string, DemoTerminal> {
       lines: ['$ pnpm test', ' Test Files  148 passed (148)', '      Tests  2311 passed (2311)', '   Duration  41.2s', '$ git status -sb', '## nightly...origin/nightly', '$ _'],
     }],
     ['scratch', { status: 'idle', agent: 'shell', earlier: [], lines: ['$ _'] }],
+    ['token-refresh', { status: 'needs you', agent: 'Claude', earlier: [], lines: ['• Bash(pnpm test auth)', '  expected 200, got 401'] }],
     ['even-g2-app', { status: 'idle', agent: 'Claude', earlier: [], lines: ['• Wrote cover-sheet.html: 5 packages, 16 checks.', '• No open questions.', '> _'] }],
     ['api-server', { status: 'idle', agent: 'shell', earlier: [], lines: ['$ pnpm dev', 'listening on :3000'] }],
   ]);
@@ -61,7 +62,7 @@ export class DemoSource implements PaneSource {
     });
     this.items = [
       card({ id: 'q1', computerId: 'studio', machine: 'studio-mac', ui: 'options', waiting: true, title: 'Stub the clock or loosen retry?', context: 'The refresh mock returns 401 before the retry fires, so auth.spec.ts fails first.', choices: ['Stub the clock', 'Loosen retry'], paneName: 'fix-login', paneId: 'fix-login', panelId: 'fix-login', createdAt: at(2) }),
-      card({ id: 'q2', computerId: 'studio', machine: 'studio-mac', ui: 'options', waiting: true, title: 'Should I stub the clock in auth.spec.ts, loosen the retry window in refresh.ts to 2 s, or mock the token endpoint so it returns 200 on the second call? Stubbing is the smallest change; loosening the window changes production behavior.', choices: ['Stub the clock', 'Loosen retry to 2 s', 'Mock the endpoint'], paneName: 'token-refresh', createdAt: at(4) }),
+      card({ id: 'q2', computerId: 'studio', machine: 'studio-mac', ui: 'options', waiting: true, title: 'Should I stub the clock in auth.spec.ts, loosen the retry window in refresh.ts to 2 s, or mock the token endpoint so it returns 200 on the second call? Stubbing is the smallest change; loosening the window changes production behavior.', choices: ['Stub the clock', 'Loosen retry to 2 s', 'Mock the endpoint'], paneName: 'token-refresh', paneId: 'token-refresh', panelId: 'token-refresh', createdAt: at(4) }),
       card({ id: 'a1', computerId: 'studio', machine: 'studio-mac', ui: 'approve', waiting: true, title: 'the G2 remote cover sheet.', paneName: 'Planner', paneId: 'even-g2-app', panelId: 'even-g2-app', createdAt: at(6) }),
       card({ id: 'i1', computerId: 'devbox', machine: 'devbox', ui: 'info', waiting: false, title: 'PR #482 opened. Checks are running.', paneName: 'docs-pass', paneId: 'docs-pass', panelId: 'docs-pass', createdAt: at(9) }),
       card({ id: 'i2', computerId: 'studio', machine: 'studio-mac', ui: 'info', waiting: false, title: 'Tests green on studio-mac.', paneName: 'nightly', paneId: 'nightly', panelId: 'nightly', createdAt: at(21) }),
@@ -129,7 +130,7 @@ export class DemoSource implements PaneSource {
 
   async dictate(computerId: string, onPreview: (text: string) => void): Promise<Dictation> {
     if (computerId === 'devbox') {
-      throw new GlassesError('ERR_GLASSES_VOICE_UNAVAILABLE', "devbox can't turn speech into text.", 'Add a Deepgram key in Pane on that computer: Settings > Voice.');
+      throw new GlassesError('ERR_GLASSES_VOICE_UNAVAILABLE', "devbox can't turn speech into text.", 'Add a Deepgram key (live) or a fal key (recorded) in Pane on that computer: Settings › Integrations › Voice transcription.');
     }
     const words = SPOKEN.split(' ');
     let shown = 0;

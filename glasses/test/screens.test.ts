@@ -7,6 +7,7 @@ import {
   cardPage,
   cardRows,
   computersPage,
+  connectingPage,
   dictationPage,
   firstRunPage,
   fullQuestionPage,
@@ -139,8 +140,8 @@ describe('card (C3)', () => {
 
 describe('terminal (T3)', () => {
   it('names the newest card elsewhere at full brightness, or reads "all clear elsewhere" dimmed', () => {
-    expect(terminalFooter(info)).toEqual({ text: '• docs-pass: PR #482 opened. Checks are running. · double press', brightness: 4 });
-    expect(terminalFooter(question)).toEqual({ text: '? fix-login needs you · double press', brightness: 4 });
+    expect(terminalFooter(info)).toEqual({ text: '• docs-pass: PR #482 opened. Checks are running. · double press for cards', brightness: 4 });
+    expect(terminalFooter(question)).toEqual({ text: '? fix-login needs you · double press for cards', brightness: 4 });
     expect(terminalFooter(undefined).text).toBe('all clear elsewhere');
     expect(terminalFooter(undefined).brightness).toBeLessThan(4);
   });
@@ -152,6 +153,13 @@ describe('terminal (T3)', () => {
     expect(texts(live)[1]?.split('\n').at(-1)).toBe('line 29');
     const up = terminalPage({ entry: terminal, lines, scrolledUp: 40, footer: terminalFooter(undefined) });
     expect(texts(up)[0]).toBe('fix-login · scrolled up 40 lines · press = live');
+  });
+});
+
+describe('connecting', () => {
+  it('names one computer in the singular', () => {
+    expect(texts(connectingPage(1))[0]).toBe('Pane · 1 computer');
+    expect(texts(connectingPage(3))[0]).toBe('Pane · 3 computers');
   });
 });
 

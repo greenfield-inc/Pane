@@ -52,6 +52,8 @@ export interface Computer {
   paneCount: number;
   workingCount: number;
   refusal?: HostRefusal;
+  /** For a computer that has never answered: how to allow this app on it. */
+  hint?: string;
 }
 
 export type PaneStatus = 'working' | 'idle' | 'needs you' | 'stopped';

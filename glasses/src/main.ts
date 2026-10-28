@@ -4,10 +4,10 @@ import { AudioInputSource, waitForEvenAppBridge, type EvenAppBridge } from '@eve
 import { GlassesApp } from './app';
 import { DemoSource } from './demo';
 import { Display, type Page } from './display';
-import { HostHub, STORAGE_KEY, mergePaired, pairComputers, readPaired, type PairedComputer, type PairingOutcome } from './host';
+import { HostHub, STORAGE_KEY, mergePaired, pairComputers, readPaired, type PairedComputer, type PairingFailure } from './host';
 import { InputRouter, type Gesture } from './input';
 import type { PaneSource } from './model';
-import { firstRunPage } from './screens';
+import { firstRunPage, pairingFailedPage } from './screens';
 
 const RUNTIME_KEY = 'pane.glasses.runtimeId';
 const CLIENT_LABEL = 'Pane glasses';
@@ -63,7 +63,7 @@ async function main(): Promise<void> {
   bridge.onEvenHubEvent((event) => input.handle(event));
 
   let source: PaneSource | null = null;
-  const renderComputers = (failed: PairingOutcome['failed'] = []) => {
+  const renderComputers = (failed: readonly PairingFailure[] = []) => {
     ui.computers.replaceChildren();
     for (const computer of source?.computers() ?? []) {
       const row = document.createElement('li');
@@ -72,6 +72,7 @@ async function main(): Promise<void> {
       row.querySelector('.name')?.append(computer.name);
       row.querySelector('.state')?.append(state);
       if (computer.refusal) row.querySelector('.why')?.append(`${computer.refusal.message}${computer.refusal.next ? ` ${computer.refusal.next}` : ''}`);
+      else if (computer.hint) row.querySelector('.why')?.append(computer.hint);
       ui.computers.append(row);
     }
     for (const failure of failed) {
@@ -108,19 +109,24 @@ async function main(): Promise<void> {
   ui.form.addEventListener('submit', (event) => {
     event.preventDefault();
     ui.status.textContent = 'Pairing…';
-    void pairComputers(ui.code.value, { fetch: (url, init) => fetch(url, init), runtimeId: id, clientLabel: CLIENT_LABEL }).then(async (outcome) => {
-      ui.code.value = '';
+    void pairComputers(ui.code.value, { fetch: (url, init) => fetch(url, init), runtimeId: id, clientLabel: CLIENT_LABEL, origin: location.origin }).then(async (outcome) => {
       if (outcome.paired.length) {
         const all: PairedComputer[] = mergePaired(paired, outcome.paired);
         await bridge.setLocalStorage(STORAGE_KEY, JSON.stringify(all));
       }
-      if (outcome.failed.length) {
-        ui.status.textContent = `Paired with ${outcome.paired.length} of ${outcome.paired.length + outcome.failed.length} computers.`;
-        renderComputers(outcome.failed);
-        if (outcome.paired.length) later(() => location.reload(), 4_000);
+      // Pasting the same code again after a partial pairing spends no secret twice: a computer
+      // already paired here just reports its secret as used, which is not a failure.
+      const pairedUrls = new Set(paired.map((computer) => computer.url));
+      const failed = outcome.failed.filter((failure) => !(failure.code === 'ERR_GLASSES_PAIRING_SECRET_INVALID' && pairedUrls.has(failure.url)));
+      if (!failed.length) {
+        location.reload();
         return;
       }
-      location.reload();
+      // The code stays in the field: its secrets are spent only on success, so it works again within 10 minutes.
+      ui.status.textContent = `Paired with ${outcome.paired.length} of ${outcome.paired.length + failed.length} computers.`;
+      renderComputers(failed);
+      if (!source) void display.show(pairingFailedPage(failed.map((failure) => `${failure.message}${failure.next ? ` ${failure.next}` : ''}`)));
+      if (outcome.paired.length) later(() => location.reload(), 8_000);
     }, (error: Error) => {
       ui.status.textContent = error.message;
     });
@@ -133,7 +139,7 @@ async function main(): Promise<void> {
   if (paired.length) {
     ui.demo.hidden = true;
     ui.status.textContent = `Paired with ${paired.length} computer${paired.length === 1 ? '' : 's'}. Open Pane from the glasses menu.`;
-    const hub = new HostHub(paired, { fetch: (url, init) => fetch(url, init), runtimeId: id, later, now: Date.now, openSocket: (url, protocols) => new WebSocket(url, protocols) });
+    const hub = new HostHub(paired, { fetch: (url, init) => fetch(url, init), runtimeId: id, later, now: Date.now, openSocket: (url, protocols) => new WebSocket(url, protocols), origin: location.origin });
     start(hub);
     hub.start();
     return;

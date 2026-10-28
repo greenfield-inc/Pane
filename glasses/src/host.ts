@@ -92,15 +92,33 @@ const pairResultSchema = boundary.object({
   }),
 });
 
+export interface PairingFailure {
+  name: string;
+  url: string;
+  code: string;
+  message: string;
+  next?: string;
+}
+
 export interface PairingOutcome {
   paired: PairedComputer[];
-  failed: Array<{ name: string; message: string; next?: string }>;
+  failed: PairingFailure[];
 }
 
 export interface PairingDeps {
   fetch: typeof fetch;
   runtimeId: string;
   clientLabel: string;
+  /** This app's `location.origin`, which each computer must allow. */
+  origin: string;
+}
+
+/**
+ * A computer that refuses the app's origin refuses its CORS preflight, which the WebView reports
+ * only as a network error; on a first connection that is the likely cause.
+ */
+export function noAnswerMessage(computerName: string, origin: string): string {
+  return `${computerName} didn't answer. If this is the first time, allow the Even app on it: Pane › Settings › Remote Access › Glasses › Allow (origin ${origin}).`;
 }
 
 /** Decodes the pasted code and trades each computer's single-use secret for its device token, once. */
@@ -116,13 +134,18 @@ export async function pairComputers(code: string, deps: PairingDeps): Promise<Pa
       const response = await deps.fetch(`${baseUrl}/invoke`, { method: 'POST', headers: request.headers, body: request.body });
       const refusal = response.ok ? null : await readRefusal(response);
       if (refusal) {
-        outcome.failed.push(refusal.next ? { name: computer.name, message: refusal.message, next: refusal.next } : { name: computer.name, message: refusal.message });
+        const failure: PairingFailure = { name: computer.name, url: baseUrl, code: refusal.code, message: refusal.message };
+        if (refusal.next) failure.next = refusal.next;
+        outcome.failed.push(failure);
         return;
       }
       const result: GlassesPairResult = decodeBoundary(await response.json(), pairResultSchema).result;
       outcome.paired.push({ name: computer.name, url: baseUrl, token: result.token, deviceLabel: result.device.label });
     } catch (error) {
-      outcome.failed.push({ name: computer.name, message: `Couldn't reach ${computer.name}: ${error instanceof Error ? error.message : String(error)}` });
+      // The pairing secret is spent only on success, so the same code works again within its 10 minutes.
+      outcome.failed.push(error instanceof TypeError
+        ? { name: computer.name, url: baseUrl, code: 'ERR_GLASSES_NO_ANSWER', message: noAnswerMessage(computer.name, deps.origin), next: 'Then paste again.' }
+        : { name: computer.name, url: baseUrl, code: 'ERR_GLASSES_PAIR_UNREADABLE', message: `${computer.name} sent an answer Pane can't read: ${error instanceof Error ? error.message : String(error)}`, next: 'Update Pane on that computer, then paste again.' });
     }
   }));
   return outcome;
@@ -194,11 +217,26 @@ const panelsSchema = boundary.object({
     id: boundary.string,
     type: boundary.string,
     title: boundary.string,
-    state: boundary.object({ customState: boundary.optional(boundary.json) }),
+    state: boundary.object({ isActive: boundary.optional(boundary.boolean), customState: boundary.optional(boundary.json) }),
   }))),
 });
 
-const agentTypeSchema = boundary.object({ agentType: boundary.optional(boundary.string) });
+const terminalStateSchema = boundary.object({
+  agentType: boundary.optional(boundary.string),
+  initialCommand: boundary.optional(boundary.string),
+  isInitialized: boundary.optional(boundary.boolean),
+});
+
+type TerminalTabState = ReturnType<typeof terminalStateSchema.decode>;
+const NO_TAB_STATE: TerminalTabState = { agentType: undefined, initialCommand: undefined, isInitialized: undefined };
+
+/**
+ * How likely a terminal tab is the one a Pane runs: its agent, then the command it was made
+ * with, then a started process, then the tab in front. A tab that never started scores lowest.
+ */
+function terminalRank(state: TerminalTabState, isActive: boolean): number {
+  return (state.agentType ? 8 : 0) + (state.initialCommand ? 4 : 0) + (state.isInitialized ? 2 : 0) + (isActive ? 1 : 0);
+}
 
 const workspaceStateSchema = boundary.object({
   entries: boundary.array(boundary.object({
@@ -251,6 +289,8 @@ export interface HostDeps {
   later(fn: () => void, ms: number): Cancel;
   now(): number;
   openSocket(url: string, protocols: string[]): VoiceSocket;
+  /** This app's `location.origin`, named in the hint for a computer that never answered. */
+  origin: string;
 }
 
 /** One paired computer: its connection, Notify state, Panes and agent status. */
@@ -278,6 +318,8 @@ export class HostConnection {
       clientLabel: paired.deviceLabel || 'Pane glasses',
       deviceLabel: paired.deviceLabel || 'Pane glasses',
       staleStreamTimeoutMs: 20_000,
+      // The Even SDK's replacement timers stall while the app is idle; these keep firing.
+      schedule: deps.later,
     });
     this.client.onRestore(() => this.restore());
     this.client.onStatus((state) => {
@@ -360,11 +402,13 @@ export class HostConnection {
     if (this.deps.now() < this.lockedUntil) return;
     this.retryTimer?.cancel();
     this.retryTimer = null;
+    const refused = this.refusal !== null;
     this.refusal = null;
-    const status = this.client.getState().status;
-    if (status === 'connected') return;
-    if (status === 'error' || status === 'local') void this.connect();
-    else this.client.retryNow();
+    if (this.client.getState().status === 'connected' && !refused) return;
+    // Start over rather than wait on a health check or reconnect still backing off from the
+    // refusal: a computer that just allowed the app should answer on this press.
+    this.client.disconnect();
+    void this.connect();
     this.changed();
   }
 
@@ -378,7 +422,8 @@ export class HostConnection {
   computer(): Computer {
     const state = this.client.getState().status;
     const live = state === 'connected';
-    const status = live ? 'live' : this.refusal ? 'refused' : state === 'connecting' || state === 'restoring' ? 'connecting' : 'offline';
+    // A refusal after connecting is newer than the open stream, so it wins.
+    const status = this.refusal ? 'refused' : live ? 'live' : state === 'connecting' || state === 'restoring' ? 'connecting' : 'offline';
     const computer: Computer = {
       id: this.id,
       name: this.paired.name,
@@ -388,6 +433,7 @@ export class HostConnection {
       workingCount: this.entries.filter((entry) => this.statusOf(entry) === 'working').length,
     };
     if (this.refusal) computer.refusal = this.refusal;
+    if (status === 'offline' && this.lastSeenAt === null) computer.hint = noAnswerMessage(this.paired.name, this.deps.origin);
     return computer;
   }
 
@@ -465,8 +511,11 @@ export class HostConnection {
     const paneEntries = await Promise.all(panes.map(async (pane): Promise<PaneEntry | null> => {
       const panels = await this.invoke('panels:list', [pane.id], panelsSchema).catch(() => null);
       const terminals = (panels?.data ?? []).filter((panel) => panel.type === 'terminal');
-      const withAgent = terminals.map((panel) => ({ panel, agentType: decodeOptionalBoundary(panel.state.customState, agentTypeSchema)?.agentType }));
-      const chosen = withAgent.find((candidate) => candidate.agentType) ?? withAgent[0];
+      const ranked = terminals.map((panel) => {
+        const state = decodeOptionalBoundary(panel.state.customState, terminalStateSchema) ?? NO_TAB_STATE;
+        return { panel, agentType: state.agentType, rank: terminalRank(state, panel.state.isActive ?? false) };
+      });
+      const chosen = ranked.reduce<(typeof ranked)[number] | undefined>((best, candidate) => (!best || candidate.rank > best.rank ? candidate : best), undefined);
       if (!chosen) return null;
       return { kind: 'pane', id: pane.id, name: pane.name, agent: agentLabel(chosen.agentType), status: 'idle', panelId: chosen.panel.id };
     }));
@@ -505,7 +554,7 @@ export class HostConnection {
     const affordances = await this.invoke('remote:pwa-affordances', [], affordancesSchema);
     const mode = voiceMode(affordances.voiceTranscription);
     if (!mode) {
-      throw new GlassesError('ERR_GLASSES_VOICE_UNAVAILABLE', `${this.paired.name} can't turn speech into text.`, 'Add a Deepgram key in Pane on that computer: Settings > Voice.');
+      throw new GlassesError('ERR_GLASSES_VOICE_UNAVAILABLE', `${this.paired.name} can't turn speech into text.`, 'Add a Deepgram key (live) or a fal key (recorded) in Pane on that computer: Settings › Integrations › Voice transcription.');
     }
     const host: VoiceHost = {
       baseUrl: this.paired.url,
@@ -584,9 +633,13 @@ export class HostHub implements PaneSource {
     return this.connection(computerId).dictate(onPreview);
   }
 
+  /**
+   * Retries one computer, or every unreachable one. A computer that refused the glasses is
+   * retried only when named: a blanket retry (on wake, say) would count against its lockout.
+   */
   retry(computerId?: string): void {
     for (const connection of this.connections) {
-      if (!computerId || connection.id === computerId) connection.retry();
+      if (computerId ? connection.id === computerId : connection.computer().status !== 'refused') connection.retry();
     }
   }
 }

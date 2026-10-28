@@ -9,6 +9,8 @@ export {
   type RemoteDaemonTransport,
   type RemoteFetch,
   type RemoteRequestContext,
+  type RemoteSchedule,
+  type RemoteTimer,
 } from './remoteDaemonClient';
 export { createFetchEventStreamTransport } from './fetchEventStreamTransport';
 export { decodeRemoteConnectionCode } from './pairing';

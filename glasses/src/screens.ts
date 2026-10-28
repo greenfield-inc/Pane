@@ -265,10 +265,10 @@ export interface FooterLine {
   brightness: Brightness;
 }
 
-export function terminalFooter(elsewhere: Card | undefined, verb = 'double press'): FooterLine {
+export function terminalFooter(elsewhere: Card | undefined): FooterLine {
   if (!elsewhere) return { text: 'all clear elsewhere', brightness: DIMMER };
   const what = elsewhere.waiting ? `? ${elsewhere.paneName} needs you` : `• ${elsewhere.paneName}: ${elsewhere.title}`;
-  return { text: `${what} · ${verb}`, brightness: BRIGHT };
+  return { text: `${what} · double press for cards`, brightness: BRIGHT };
 }
 
 export interface TerminalView {
@@ -308,15 +308,32 @@ export function dictationPage(entry: PaneEntry, lines: readonly string[], transc
   };
 }
 
+export function connectingPage(computerCount: number): Page {
+  return loadingPage(paneTitle(computerCount), 'Connecting to your computers…');
+}
+
 export function loadingPage(title: string, text: string): Page {
   return { boxes: [header(title), body(text, { y: 36, h: 252, capture: true })] };
 }
 
-export function noComputerPage(computerCount: number): Page {
+/** `firstTime`: how to allow the app on a computer that has never answered. */
+export function noComputerPage(computerCount: number, firstTime?: string): Page {
+  const why = firstTime ?? 'Is Tailscale on on your phone?';
   return {
     boxes: [
       header(`Pane · 0 of ${plural(computerCount, 'computer')}`),
-      body("Can't reach any computer.\nIs Tailscale on in your phone? Pane retries every 10 seconds.\n\nPress to retry now.", { y: 36, h: 252, capture: true }),
+      body(`Can't reach any computer.\n${why}\nPane keeps trying by itself.\n\nPress to retry now.`, { y: 36, h: 252, capture: true }),
+    ],
+  };
+}
+
+/** Pairing failed for every computer in the code; the phone page shows the same text. */
+export function pairingFailedPage(reasons: readonly string[]): Page {
+  return {
+    boxes: [
+      header('Pane · not paired'),
+      body(reasons.join('\n'), { y: 36, h: 220, capture: true }),
+      footer('press = demo   double press = exit'),
     ],
   };
 }

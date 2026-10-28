@@ -139,7 +139,7 @@ describe('Panes and the terminal', () => {
     const { text } = await openFixLogin();
     expect(text()[0]).toBe('fix-login · Claude · working');
     expect(text()[1]).toContain('expected 200, got 401');
-    expect(text()[2]).toBe('? token-refresh needs you · double press');
+    expect(text()[2]).toBe('? token-refresh needs you · double press for cards');
   });
 
   it('scrolls back through older output and returns to live on press', async () => {
