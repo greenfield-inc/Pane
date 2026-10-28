@@ -200,7 +200,9 @@ An update is dated with its commit's committer date. A phone loads only an updat
 
 ```bash
 cd native
-PANE_UPDATES_URL=http://127.0.0.1:8099/manifest npx expo run:ios --configuration Release   # or: npx expo run:android --variant release
+export PANE_UPDATES_URL=http://127.0.0.1:8099/manifest
+npx expo prebuild --clean --platform ios && npx expo run:ios --configuration Release
+# Android: npx expo prebuild --clean --platform android && npx expo run:android --variant release
 
 # Change something visible in src/, then export it.
 D=/tmp/pane-ota.noindex
@@ -215,7 +217,7 @@ docker run -d --rm --name pane-native-updates -p 8099:8080 pane-native-updates:l
 adb reverse tcp:8099 tcp:8099   # Android emulator or USB phone; on iOS, use the Simulator
 ```
 
-Launch the app once to download the update and again to run it. `PANE_UPDATES_URL` replaces `updates.url` for that build; an `http://` URL also allows plain HTTP on Android. Rebuild without it before shipping. Check the server with `curl -i -H 'expo-platform: ios' -H 'expo-runtime-version: 1.2' http://127.0.0.1:8099/manifest`: it answers `200` with `expo-protocol-version: 1` and the manifest, or `204` when it has no update for that runtime.
+Launch the app once to download the update and again to run it. `PANE_UPDATES_URL` replaces `updates.url` for that build; an `http://` URL also allows plain HTTP on Android. `expo run` only regenerates `ios/` or `android/` when the folder is missing, so the `prebuild --clean` is what writes the URL into the native project, with or without the variable. Before building anything you ship, run `unset PANE_UPDATES_URL` and `npx expo prebuild --clean` again. Check the server with `curl -i -H 'expo-platform: ios' -H 'expo-runtime-version: 1.2' http://127.0.0.1:8099/manifest`: it answers `200` with `expo-protocol-version: 1` and the manifest, or `204` when it has no update for that runtime.
 
 ## How the code is organised
 
