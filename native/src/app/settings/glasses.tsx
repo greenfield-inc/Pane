@@ -70,9 +70,11 @@ export default function GlassesSettingsScreen() {
         {machines.data && !machines.data.ok ? <Text variant="footnote" tone="secondary">{machines.data.reason}. {machines.data.fix}</Text> : null}
         {computers.map(({ machine }) => {
           const entry = devices.find(candidate => candidate.name === machine.name);
-          const status = entry?.device
-            ? `paired${entry.device.lastUsedAt ? `, last used ${new Date(entry.device.lastUsedAt).toLocaleString()}` : ''}`
-            : entry && !entry.reachable ? 'not answering' : 'ready';
+          const status = pending.includes(machine.name)
+            ? 'revoke pending'
+            : entry?.device
+              ? `paired${entry.device.lastUsedAt ? `, last used ${new Date(entry.device.lastUsedAt).toLocaleString()}` : ''}`
+              : entry?.problem ?? 'ready';
           return <ListRow key={machine.name} testID={`glasses-computer-${machine.name}`} title={machine.name} subtitle={status} />;
         })}
         {skipped.map(skip => (

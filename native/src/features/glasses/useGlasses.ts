@@ -23,9 +23,29 @@ import {
 /** Computers where a revoke could not reach yet; retried each time Settings › Glasses opens. */
 const PENDING_REVOKES_KEY = 'pane.glasses.pendingRevokes';
 
+const CONNECT_TIMEOUT_MS = 10_000;
+
+/**
+ * One call on one computer. The client sends commands only once connected (reads aside), so it
+ * connects first and waits for its stream, then disconnects.
+ */
 const invoke: GlassesInvoke = async (profile, channel, args) => {
   const client = createDaemonClient(profile);
   try {
+    await client.connect();
+    await new Promise<void>((resolve, reject) => {
+      let stop = () => {};
+      const timer = setTimeout(() => {
+        stop();
+        reject(new Error(`${profile.label} did not connect within ${CONNECT_TIMEOUT_MS / 1000} s`));
+      }, CONNECT_TIMEOUT_MS);
+      stop = client.onStatus(state => {
+        if (state.status !== 'connected') return;
+        clearTimeout(timer);
+        queueMicrotask(() => stop());
+        resolve();
+      });
+    });
     return await invokeChannel(client, channel, args);
   } finally {
     client.disconnect();
@@ -84,8 +104,8 @@ export function useGlasses() {
   const revoke = useMutation({
     mutationFn: async () => {
       const result = await revokeGlassesOnComputers(computers, await readPending(), deviceName, invoke);
-      // Computers this phone can't see right now are revoked when they next answer.
-      const unseen = skipped.map(skip => skip.name);
+      // Offline computers are revoked when they next answer.
+      const unseen = skipped.filter(skip => skip.reason === 'offline').map(skip => skip.name);
       const pending = [...new Set([...result.pending, ...unseen])].sort();
       await secureStore.setItem(PENDING_REVOKES_KEY, JSON.stringify(pending));
       return { revoked: result.revoked, pending };

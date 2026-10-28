@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { RemoteRequestError } from '@shared/remoteClient';
 import { decodeGlassesPairingCode } from '@shared/types/glasses';
 import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
 import type { TailnetMachine } from '@shared/types/workspaceAccess';
@@ -7,6 +8,7 @@ import type { TailnetMachine } from '@shared/types/workspaceAccess';
 import {
   createGlassesPairingCode,
   glassesDeviceName,
+  listGlassesOnComputers,
   pairableComputers,
   revokeGlassesOnComputers,
   type GlassesInvoke,
@@ -89,6 +91,20 @@ describe('revokeGlassesOnComputers', () => {
 
     expect(revoked).toEqual([JSON.stringify([{ id: 'g1' }])]);
     expect(result).toEqual({ revoked: ['studio-mac'], pending: ['devbox', 'laptop'] });
+  });
+});
+
+describe('a computer running a Pane without glasses support', () => {
+  const olderPane: GlassesInvoke = async () => { throw new RemoteRequestError('Unknown channel', 404, 'ERR_UNKNOWN_CHANNEL'); };
+  const { computers } = pairableComputers([machine('old-mac', 'available')], DOMAIN, []);
+
+  it('says to update Pane there, when listing and pairing', async () => {
+    expect(await listGlassesOnComputers(computers, 'Even G2', olderPane)).toEqual([{ name: 'old-mac', device: null, problem: 'update Pane there to use glasses' }]);
+    expect((await createGlassesPairingCode(computers, 'Even G2', olderPane)).skipped).toEqual([{ name: 'old-mac', reason: 'update Pane there to use glasses' }]);
+  });
+
+  it('is never left pending a revoke, since it never held the glasses', async () => {
+    expect(await revokeGlassesOnComputers(computers, ['old-mac'], 'Even G2', olderPane)).toEqual({ revoked: [], pending: [] });
   });
 });
 

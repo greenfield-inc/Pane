@@ -6,6 +6,7 @@ import {
   type GlassesPairingComputer,
   type GlassesPairingSecretResult,
 } from '@shared/types/glasses';
+import { RemoteRequestError } from '@shared/remoteClient';
 import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
 import type { TailnetMachine } from '@shared/types/workspaceAccess';
 import { boundary, decodeBoundary, type BoundarySchema } from '@shared/validation/boundaryDecoder';
@@ -88,7 +89,7 @@ export async function createGlassesPairingCode(
       const minted = decodeBoundary(await invoke(profile, GLASSES_COMMANDS.createPairingSecret, [{ deviceName }]), secretSchema);
       entries.push({ entry: { name: machine.name, url: machine.url, secret: minted.secret }, expiresAt: minted.expiresAt });
     } catch (cause) {
-      skipped.push({ name: machine.name, reason: reasonOf(cause) });
+      skipped.push({ name: machine.name, reason: isOlderPane(cause) ? OLDER_PANE : reasonOf(cause) });
     }
   }));
   const [expiresAt] = entries.map(entry => entry.expiresAt).sort();
@@ -102,18 +103,18 @@ export async function createGlassesPairingCode(
   };
 }
 
-/** These glasses on each computer, or null where the computer could not be asked. */
+/** These glasses on each computer; `problem` says why a computer could not be asked. */
 export async function listGlassesOnComputers(
   computers: readonly GlassesComputer[],
   deviceName: string,
   invoke: GlassesInvoke,
-): Promise<{ name: string; device: GlassesDevice | null; reachable: boolean }[]> {
+): Promise<{ name: string; device: GlassesDevice | null; problem: string | null }[]> {
   return Promise.all(computers.map(async ({ machine, profile }) => {
     try {
       const { devices } = decodeBoundary(await invoke(profile, GLASSES_COMMANDS.list, []), listSchema);
-      return { name: machine.name, device: devices.find(device => device.label === deviceName) ?? null, reachable: true };
-    } catch {
-      return { name: machine.name, device: null, reachable: false };
+      return { name: machine.name, device: devices.find(device => device.label === deviceName) ?? null, problem: null };
+    } catch (cause) {
+      return { name: machine.name, device: null, problem: isOlderPane(cause) ? OLDER_PANE : 'not answering' };
     }
   }));
 }
@@ -138,11 +139,20 @@ export async function revokeGlassesOnComputers(
       }
       revoked.push(machine.name);
       stillPending.delete(machine.name);
-    } catch {
-      stillPending.add(machine.name);
+    } catch (cause) {
+      // A Pane without glasses support never held these glasses: nothing is left to revoke there.
+      if (isOlderPane(cause)) stillPending.delete(machine.name);
+      else stillPending.add(machine.name);
     }
   }));
   return { revoked: revoked.sort(), pending: [...stillPending].sort() };
+}
+
+const OLDER_PANE = 'update Pane there to use glasses';
+
+/** The computer's Pane predates glasses: it doesn't know the glasses commands. */
+function isOlderPane(cause: unknown): boolean {
+  return cause instanceof RemoteRequestError && cause.code === 'ERR_UNKNOWN_CHANNEL';
 }
 
 function reasonOf(cause: unknown): string {
