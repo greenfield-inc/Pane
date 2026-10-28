@@ -12,6 +12,7 @@ import type {
 import type { SubmitFeedbackRequest } from '../shared/types/feedback';
 import type { Loop, LoopInput, LoopSchedulePreview } from '../shared/types/loop';
 import type { TailnetMachineList, WorkspaceAccessSummary } from '../shared/types/workspaceAccess';
+import type { GlassesAccessState } from '../shared/types/glasses';
 import type { JsonObject, JsonValue } from '../shared/validation/boundaryDecoder';
 import { DEFAULT_APPEARANCE, LIGHT_THEMES, normalizeAppearance, type AppearanceConfig } from '../shared/types/appearance';
 import type { DiffManifest, DiffScope, FileDiffResult } from '../shared/types/gitDiff';
@@ -108,6 +109,7 @@ export type ElectronApiMockOptions = {
   openExternalOutcome?: 'success' | 'failure';
   /** Overrides this machine's workspace status (remote-daemon:get-workspace-access). */
   workspaceAccess?: Partial<WorkspaceAccessSummary>;
+  glasses?: GlassesAccessState;
   /** setup:choose-import fails with this PaneError text instead of previewing. */
   setupImportError?: string;
   /** Serves window.electronAPI.notify with this queue snapshot; absent, the API is too. */
@@ -188,6 +190,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       url: 'https://devbox.tail1234.ts.net:8443',
       ...mockOptions.workspaceAccess,
     };
+    const glassesState: GlassesAccessState = clone(mockOptions.glasses ?? { devices: [], allowedOrigins: [], refusedOrigins: [] });
     const remoteConnectionState: RemotePaneConnectionState = {
       mode: 'local',
       status: 'local',
@@ -1506,6 +1509,17 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           return success(clone(remoteDaemonConfig.client));
         },
         getWorkspaceAccess: () => success(clone(workspaceAccess)),
+        getGlasses: () => success(clone(glassesState)),
+        revokeGlasses: (id: string) => {
+          glassesState.devices = glassesState.devices.filter((device) => device.id !== id);
+          return success(clone(glassesState));
+        },
+        setGlassesOrigin: (update: { origin: string; allowed: boolean }) => {
+          glassesState.refusedOrigins = glassesState.refusedOrigins.filter((entry) => entry.origin !== update.origin);
+          glassesState.allowedOrigins = glassesState.allowedOrigins.filter((entry) => entry.origin !== update.origin);
+          if (update.allowed) glassesState.allowedOrigins.push({ origin: update.origin, source: 'owner' });
+          return success(clone(glassesState));
+        },
         updateWorkspaceAccess: (update: { visibility?: 'off' | 'owner' | 'tailnet'; password?: string | null }) => {
           if (update.visibility) workspaceAccess.visibility = update.visibility;
           if (update.password !== undefined) workspaceAccess.passwordProtected = update.password !== null;

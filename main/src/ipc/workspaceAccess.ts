@@ -3,6 +3,7 @@ import type { AppConfig } from '../types/config';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { normalizeRemoteDaemonConfig, type RemotePaneConnectionProfile } from '../../../shared/types/remoteDaemon';
 import type { TailnetMachineList } from '../../../shared/types/workspaceAccess';
+import { GLASSES_COMMANDS } from '../../../shared/types/glasses';
 import {
   discoverTailnetMachines,
   probeWorkspace,
@@ -79,6 +80,16 @@ export function registerWorkspaceAccessHandlers(
       }),
     };
   }));
+
+  // Glasses paired with this machine, and the Even app origins it accepts for them.
+  ipcMain.handle('remote-daemon:get-glasses', () => respond('read glasses access', () =>
+    commandRegistry.invoke(GLASSES_COMMANDS.state)));
+  ipcMain.handle('remote-daemon:revoke-glasses', (_event, id) => respond('revoke the glasses', async () => {
+    await commandRegistry.invoke(GLASSES_COMMANDS.revoke, [{ id: decodeBoundary(id, boundary.nonEmptyString) }]);
+    return commandRegistry.invoke(GLASSES_COMMANDS.state);
+  }));
+  ipcMain.handle('remote-daemon:set-glasses-origin', (_event, update) => respond('change glasses origins', () =>
+    commandRegistry.invoke(GLASSES_COMMANDS.setOrigin, [update])));
 
   // Saves the codeless profile; the caller then activates it like any saved profile.
   ipcMain.handle('remote-daemon:save-tailnet-machine', (_event, input) => respond('save the machine', async (): Promise<RemotePaneConnectionProfile> => {
