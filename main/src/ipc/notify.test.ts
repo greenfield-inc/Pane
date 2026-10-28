@@ -83,4 +83,38 @@ describe('Notify across machines, through the registered handlers', () => {
     host.dispose();
     client.notify.dispose();
   });
+
+  it("makes the host's question answerable again when the connection comes back without a resync", async () => {
+    const host = new NotifyQueue({ settings: () => DEFAULT_NOTIFY_SETTINGS, showOutsideSupported: true, shortcutRegistered: () => true, instructionFiles: () => [], machine: 'mac-studio' });
+    let linkUp = true;
+    const offline = Object.assign(new Error('Remote connection interrupted: the action was not sent.'), { code: 'ERR_REMOTE_OFFLINE' });
+    vi.spyOn(remotePaneClientController, 'isRemoteModeActive').mockReturnValue(true);
+    vi.spyOn(remotePaneClientController, 'getConnectionState').mockReturnValue(connected);
+    vi.spyOn(remotePaneClientController, 'invoke').mockImplementation((channel: string, args: unknown[]) => {
+      if (!linkUp) return Promise.reject(offline);
+      if (channel === 'notify:remote-snapshot') return Promise.resolve(host.sharedState());
+      // SAFETY: Notify sends only NotifyRemoteCommand on notify:remote-command.
+      host.runRemote(args[0] as NotifyRemoteCommand, 'parsa-air');
+      return Promise.resolve(null);
+    });
+    host.on('change', () => remotePaneClientController.emit('notify-shared', host.sharedState()));
+    const client = await startPane();
+    void host.ask({ question: { ui: 'approve', title: 'Deploy the docs site?' }, source: { name: 'api', agent: 'Claude' } });
+    await flush();
+    const [question] = client.notify.snapshot().items;
+
+    linkUp = false;
+    await client.notify.run({ type: 'answer', id: question.id, answer: { approved: true } });
+    await flush();
+    expect(client.notify.snapshot().items[0]).toMatchObject({ state: 'waiting', unreachable: true });
+
+    linkUp = true;
+    remotePaneClientController.emit('state-changed');
+    await flush();
+    expect(client.notify.snapshot().items[0].unreachable).toBeUndefined();
+    await client.notify.run({ type: 'answer', id: question.id, answer: { approved: true } });
+    expect(host.snapshot().items[0]).toMatchObject({ state: 'sent', answeredOn: 'parsa-air' });
+    host.dispose();
+    client.notify.dispose();
+  });
 });

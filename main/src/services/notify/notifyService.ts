@@ -178,8 +178,9 @@ export class NotifyService {
       const code = error instanceof Error && 'code' in error ? String(error.code) : '';
       console.warn(`[Notify] ${command.type} was not sent to ${remote?.machine ?? 'the host'}:`, error);
       if (UNREACHABLE_CODES.has(code)) {
-        // The cards say so until the connection returns.
+        // The cards say so until a read of the host succeeds: now, if the link is back, or on reconnect.
         if (remote) this.queue.setRemote({ machine: remote.machine, online: false });
+        this.deps.refreshHost();
         return;
       }
       // Refused (another screen got there first, or the hold ended): the host's state says how.

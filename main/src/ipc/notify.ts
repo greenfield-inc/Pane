@@ -189,7 +189,13 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
     // Another host's questions start fresh, without the last host's showing as unreachable.
     if (state.mode !== 'remote' || state.activeProfileId !== hostProfileId) notify.queue.setRemote(null);
     hostProfileId = state.mode === 'remote' ? state.activeProfileId : null;
-    if (state.mode === 'remote' && state.status !== 'connected') notify.queue.setRemote({ machine: hostMachine(), online: false });
+    if (state.mode !== 'remote') return;
+    if (state.status !== 'connected') {
+      notify.queue.setRemote({ machine: hostMachine(), online: false });
+      return;
+    }
+    // A stream can recover, or a new host connect, without a resync here yet: read the host again.
+    if (notify.snapshot().remote?.online !== true) void refreshHost();
   });
 
   commandRegistry.register('runpane:notify', async (request: PaneCommandValue): Promise<NotifyResult> => {
