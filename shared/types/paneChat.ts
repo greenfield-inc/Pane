@@ -16,10 +16,12 @@ export const PANE_CHAT_PANEL_ID = '__pane_chat_terminal__';
 export const PANE_CHAT_CODEX_PANEL_ID = '__pane_chat_terminal_codex__';
 export const PANE_CHAT_CURSOR_PANEL_ID = '__pane_chat_terminal_cursor__';
 /**
- * How Pane Chat's one-time first-run migrate offer begins. Session launches drop
- * any saved first prompt, except an unsent one that begins with this.
+ * How every one-time first prompt Pane gives a Session agent begins. Session
+ * launches drop any saved first prompt, except an unsent one that begins with this.
  */
-export const PANE_CHAT_MIGRATE_OFFER_OPENING = 'Pane sent this once, the first time Pane Chat started with this Pane data folder:';
+export const PANE_ONE_TIME_PROMPT_OPENING = 'Pane sent this once';
+/** How Pane Chat's one-time first-run migrate offer begins. */
+export const PANE_CHAT_MIGRATE_OFFER_OPENING = `${PANE_ONE_TIME_PROMPT_OPENING}, the first time Pane Chat started with this Pane data folder:`;
 
 const PANE_CHAT_PANEL_IDS = {
   claude: PANE_CHAT_PANEL_ID,

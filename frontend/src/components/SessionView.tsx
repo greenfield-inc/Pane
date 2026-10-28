@@ -73,6 +73,7 @@ import type { InspectorTab } from './InspectorTabs';
 import { useErrorStore } from '../stores/errorStore';
 import ProjectSettings from './ProjectSettings';
 import { LoopsView } from './loops/LoopsView';
+import { NotifyInbox } from './notify/NotifyInbox';
 import { LoopRunHeader, LoopRunsRail } from './loops/LoopRunChrome';
 import { useLoopsStore } from '../stores/loopsStore';
 
@@ -1923,6 +1924,10 @@ export const SessionView = memo(() => {
 
   if (activeView === 'loops') {
     return <LoopsView />;
+  }
+
+  if (activeView === 'notify') {
+    return <NotifyInbox />;
   }
 
   const loadError = selectionError ?? (ownsPanelLoad ? panelLoad?.error : null);

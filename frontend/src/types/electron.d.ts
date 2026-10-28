@@ -39,6 +39,7 @@ import type {
 } from '../../../shared/types/panels';
 import type { JsonValue } from '../../../shared/validation/boundaryDecoder';
 import type { PanelAgentStatusEvent, TerminalLaunchExitedEvent } from '../../../shared/types/agentStatus';
+import type { NotifyCommand, NotifySnapshot, NotifyWindowSize } from '../../../shared/types/notify';
 import type { DiffManifest, DiffScope, FileDiffRequest, FileDiffResult } from '../../../shared/types/gitDiff';
 import type { AgentUsageSnapshot } from '../../../shared/types/agentUsage';
 import type { PaneChatAgent, PaneChatState } from '../../../shared/types/paneChat';
@@ -64,6 +65,7 @@ import type { PaneLinkTarget } from '../../../shared/types/paneLinks';
 import type { ArchiveProgressSnapshot } from '../../../shared/types/archiveProgress';
 import type { ListeningPortsSnapshot } from '../../../shared/types/listeningPorts';
 import type { UpdateCapabilities } from '../../../shared/types/updater';
+import type { SessionImportProgress, SessionImportRunResult, SessionImportScan } from '../../../shared/types/sessionImport';
 import type {
   ProjectDashboardData,
   ProjectDashboardSessionUpdateEvent,
@@ -140,6 +142,11 @@ interface ElectronAPI {
     installUpdate: () => Promise<IPCResponse>;
     copyUpdateCommand: () => Promise<IPCResponse<{ command: string }>>;
     openTerminalWithCommand: () => Promise<IPCResponse<{ command: string }>>;
+    getRestartState: () => Promise<IPCResponse<import('../../../shared/types/updater').RestartToUpdateState>>;
+    restartToUpdate: (source: import('../../../shared/types/updater').RestartToUpdateSource) => Promise<IPCResponse>;
+    snooze: () => Promise<IPCResponse<import('../../../shared/types/updater').RestartToUpdateState>>;
+    setTonight: (enabled: boolean) => Promise<IPCResponse<import('../../../shared/types/updater').RestartToUpdateState>>;
+    takeRestoreResult: () => Promise<IPCResponse<import('../../../shared/types/updater').UpdateRestoreResult | null>>;
   };
 
   // System utilities
@@ -160,6 +167,8 @@ interface ElectronAPI {
   paneChat: {
     getOrCreate: () => Promise<IPCResponse<PaneChatState<Session>>>;
     setAgent: (agent: PaneChatAgent) => Promise<IPCResponse<PaneChatState<Session>>>;
+    /** Whether to offer Pane Chat now; see main/src/services/paneChatIntroOffer.ts. */
+    introOffer: () => Promise<IPCResponse<{ eligible: boolean; openingPromptAtLaunch: boolean }>>;
   };
 
   sshHosts: {
@@ -187,6 +196,15 @@ interface ElectronAPI {
     getReport: (request?: UsageReportRequest) => Promise<IPCResponse<UsageReport>>;
     getStatus: () => Promise<IPCResponse<UsageIndexStatus>>;
     rescan: () => Promise<IPCResponse<UsageIndexStatus>>;
+  };
+
+  // Bring sessions from other agent tools into Pane
+  sessionImport: {
+    /** The scan for the Home card, or null when Home shouldn't show it. */
+    home: () => Promise<SessionImportScan | null>;
+    scan: () => Promise<SessionImportScan>;
+    run: (keys: string[]) => Promise<SessionImportRunResult>;
+    progress: () => Promise<SessionImportProgress>;
   };
 
   // Leaderboard opt-in and submission
@@ -525,6 +543,7 @@ interface ElectronAPI {
     onUpdaterUpdateNotAvailable: (callback: (info: { version: string }) => void) => () => void;
     onUpdaterDownloadProgress: (callback: (progressInfo: { bytesPerSecond: number; percent: number; transferred: number; total: number }) => void) => () => void;
     onUpdaterUpdateDownloaded: (callback: (info: { version: string; files: string[]; path: string; sha512: string; releaseDate: string }) => void) => () => void;
+    onRestartToUpdateState: (callback: (state: import('../../../shared/types/updater').RestartToUpdateState) => void) => () => void;
     onUpdaterError: (callback: (error: Error) => void) => () => void;
     
     // Process management events
@@ -658,6 +677,21 @@ interface ElectronAPI {
   // Whether Dictate's watcher shows Pane's alerts, so Pane skips its desktop notification
   notifications: {
     isHandedOff: () => Promise<boolean>;
+  };
+
+  // Pane Notify: the queue's snapshot and the actions every surface sends back
+  notify: {
+    getSnapshot: () => Promise<NotifySnapshot>;
+    run: (command: NotifyCommand) => Promise<void>;
+    onSnapshot: (callback: (snapshot: NotifySnapshot) => void) => () => void;
+    /** A new question arrived and Sound is on; the main window plays the beep. */
+    onChime: (callback: () => void) => () => void;
+    /** Main asks the main window to show the Notify inbox or Settings → Notify. */
+    onNavigate: (callback: (target: 'inbox' | 'settings') => void) => () => void;
+    /** Floating windows only: fit the window to its card. */
+    resizeWindow: (size: NotifyWindowSize) => void;
+    /** Floating strip only: take key focus so a text or note field can be typed in. */
+    focusWindow: () => Promise<void>;
   };
 
   // Window state queries (invoke, not event subscriptions)

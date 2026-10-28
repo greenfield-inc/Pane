@@ -1496,9 +1496,16 @@ export class SessionManager extends EventEmitter {
     return result;
   }
 
-  async resumeInterruptedSessions(sessionIds: string[]): Promise<void> {
+  /**
+   * Relaunches each interrupted agent panel on its saved conversation. A panel
+   * that fails does not stop the others; its Pane stays interrupted and is
+   * returned in `failedSessionIds`.
+   */
+  async resumeInterruptedSessions(sessionIds: string[]): Promise<{ failedSessionIds: string[] }> {
     console.log(`[SessionManager] resumeInterruptedSessions called with ${sessionIds.length} session(s): ${sessionIds.join(', ')}`);
     const { terminalPanelManager } = await import('./terminalPanelManager');
+    const { agentChatManager } = await import('./agentChat/agentChatManager');
+    const failedSessionIds: string[] = [];
 
     for (const sessionId of sessionIds) {
       const dbSession = this.db.getSession(sessionId);
@@ -1511,6 +1518,7 @@ export class SessionManager extends EventEmitter {
       const panels = this.db.getPanelsForSession(sessionId);
       console.log(`[SessionManager] Session ${sessionId} has ${panels.length} panel(s): ${panels.map(p => `${p.id} (${p.type})`).join(', ')}`);
       let resumedPanelCount = 0;
+      let failedPanelCount = 0;
 
       for (const panel of panels) {
         if (panel.type === 'terminal') {
@@ -1540,18 +1548,34 @@ export class SessionManager extends EventEmitter {
 
             const reloadedPanel = panelManager.getPanel(panel.id) ?? this.db.getPanel(panel.id);
             if (reloadedPanel) {
-              await terminalPanelManager.initializeTerminal(reloadedPanel, worktreePath);
-              console.log(`[SessionManager] Resumed terminal panel ${panel.id} via launch-time ${agentType} resolver`);
-              resumedPanelCount++;
+              try {
+                // An Agent Chat tab owns its conversation and refuses a native launch.
+                if (agentChatManager.manages(panel.id)) {
+                  await agentChatManager.resumeSaved(panel.id);
+                } else {
+                  await terminalPanelManager.initializeTerminal(reloadedPanel, worktreePath);
+                }
+                console.log(`[SessionManager] Resumed terminal panel ${panel.id} via launch-time ${agentType} resolver`);
+                resumedPanelCount++;
+              } catch (error) {
+                failedPanelCount++;
+                console.error(`[SessionManager] Failed to resume panel ${panel.id}:`, error);
+              }
             }
           }
         }
       }
 
+      if (failedPanelCount > 0) {
+        failedSessionIds.push(sessionId);
+        console.warn(`[SessionManager] Session ${sessionId} stays interrupted: ${failedPanelCount} panel(s) failed to resume`);
+        continue;
+      }
       // Update session status to running
       this.updateSession(sessionId, { status: 'running' });
       console.log(`[SessionManager] Resumed session ${sessionId}: ${resumedPanelCount} panels`);
     }
+    return { failedSessionIds };
   }
 
   async dismissInterruptedSessions(sessionIds: string[]): Promise<void> {

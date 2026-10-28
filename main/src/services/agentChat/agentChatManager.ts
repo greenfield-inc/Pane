@@ -972,6 +972,15 @@ export class AgentChatManager {
     return conversation;
   }
 
+  /**
+   * Relaunches a saved conversation after Pane restarted, in Terminal: a new
+   * process has no Chat launch environment until Terminal recovery restores it.
+   * Sends no input and leaves the default interface unchanged.
+   */
+  async resumeSaved(panelId: string): Promise<void> {
+    await this.controller(panelId).recover('terminal', this.required(panelId).conversation.generation);
+  }
+
   async restoreAfterUpdate(panelId: string, operationId: string): Promise<void> {
     this.updateOperations.set(panelId, operationId);
     try { await this.recover(panelId, 'terminal', this.required(panelId).conversation.generation); }

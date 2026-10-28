@@ -72,6 +72,7 @@ from .local_control import (
     run_pr_watch_command,
     run_workspace_state,
 )
+from .notify import run_notify
 from .platforms import detect_platform
 from .releases import resolve_release
 from .telemetry import (
@@ -79,6 +80,7 @@ from .telemetry import (
     apply_parsed_args_to_telemetry_context,
     categorize_failure,
     create_initial_telemetry_context,
+    record_failure_cause,
     set_setup_selection,
     track_wrapper_event,
 )
@@ -118,6 +120,15 @@ INLINE_VALUE_FLAGS = {
 }
 DEFAULTS = RUNPANE_CONTRACT["defaults"]
 REPORT_STATES = ["ready", "blocked", "failed", "done"]
+NOTIFY_VALUE_FLAGS = {
+    "--ui": "notify_ui",
+    "--context": "notify_context",
+    "--choices": "notify_choices",
+    "--detail": "notify_detail",
+    "--detail-label": "notify_detail_label",
+    "--suggestions": "notify_suggestions",
+    "--action": "notify_action",
+}
 HEAD_PATTERN = re.compile(r"[0-9a-fA-F]{7,40}")
 
 
@@ -234,6 +245,14 @@ class ParsedArgs:
     lock_ttl_ms: Optional[int] = None
     lock_wait_ms: Optional[int] = None
     note: Optional[str] = None
+    # `runpane notify`: the question fields as given; JSON ones are parsed and checked when it runs.
+    notify_ui: Optional[str] = None
+    notify_context: Optional[str] = None
+    notify_choices: Optional[str] = None
+    notify_detail: Optional[str] = None
+    notify_detail_label: Optional[str] = None
+    notify_suggestions: Optional[str] = None
+    notify_action: Optional[str] = None
     loop_id: Optional[str] = None
     cron: Optional[str] = None
     paused: bool = False
@@ -255,7 +274,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             parsed = parse_args(effective_argv)
         except Exception as error:
             telemetry_context["failure_stage"] = "parse"
-            telemetry_context["failure_category"] = categorize_failure(error)
+            telemetry_context["failure_category"] = "validation"
+            record_failure_cause(telemetry_context, error)
             track_wrapper_event("runpane_wrapper_command_failed", telemetry_context)
             raise
         apply_parsed_args_to_telemetry_context(telemetry_context, parsed)
@@ -298,17 +318,20 @@ def dispatch_parsed_command(parsed: ParsedArgs, telemetry_context: WrapperTeleme
 
 
 def run_tracked_command(telemetry_context: WrapperTelemetryContext, execute: Callable[[], int]) -> int:
+    """Reports real failures only: anything raised, and a non-zero exit from the wrapper's own install or
+    update work. Other commands' exit codes are documented results (panels wait not ready, doctor
+    findings, watch timeouts) and send nothing."""
     try:
         code = execute()
         telemetry_context["exit_code"] = code
-        if code != 0:
+        if code != 0 and telemetry_context.get("resolved_command") in {"install", "update"}:
             telemetry_context.setdefault("failure_stage", infer_failure_stage(telemetry_context))
             telemetry_context.setdefault("failure_category", "process_exit")
             track_wrapper_event("runpane_wrapper_command_failed", telemetry_context)
         return code
     except Exception as error:
         telemetry_context.setdefault("failure_stage", "unknown")
-        telemetry_context.setdefault("failure_category", categorize_failure(error))
+        record_failure_cause(telemetry_context, error)
         track_wrapper_event("runpane_wrapper_command_failed", telemetry_context)
         raise
 
@@ -1113,6 +1136,9 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
     if flag == "--loop":
         parsed.loop_id = value
         return
+    if flag in NOTIFY_VALUE_FLAGS:
+        setattr(parsed, NOTIFY_VALUE_FLAGS[flag], value)
+        return
     if flag == "--cron":
         parsed.cron = value
         return
@@ -1398,6 +1424,7 @@ COMMAND_HANDLERS: Dict[str, Callable[[ParsedArgs, WrapperTelemetryContext], int]
     "panels resume": lambda parsed, context: run_panels_resume(parsed),
     "panels last-message": lambda parsed, context: run_panels_last_message(parsed),
     "report": lambda parsed, context: run_report(parsed),
+    "notify": lambda parsed, context: run_notify(parsed),
     "inbox": lambda parsed, context: run_inbox(parsed),
     "inbox ack": lambda parsed, context: run_inbox_ack(parsed),
     "agents doctor": lambda parsed, context: run_agents_doctor(parsed),

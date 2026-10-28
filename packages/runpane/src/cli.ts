@@ -11,6 +11,7 @@ import { daemonActionFor, runDaemonAction } from './daemonActions';
 import { runDocsRead, runDocsSearch } from './docs';
 import { runHandoff } from './handoff';
 import { runLinksCreate } from './links';
+import { runNotify } from './notify';
 import { helpText, parseRunpaneArgs, splitWorkspacePassThrough, type ParsedArgs, type RunpaneCommand } from './commands';
 import { PaneDaemonClientError, routeDaemonCallsTo } from './daemonClient';
 import { describeFailure, printFailure, RunpaneError } from './errors';
@@ -78,6 +79,7 @@ import {
   applyParsedArgsToTelemetryContext,
   categorizeFailure,
   createInitialTelemetryContext,
+  recordFailureCause,
   setSetupSelection,
   trackWrapperEvent,
   type WrapperTelemetryContext
@@ -116,7 +118,8 @@ export async function main(argv: string[]): Promise<number> {
     parsed = parseRunpaneArgs(argv);
   } catch (error) {
     telemetryContext.failureStage = 'parse';
-    telemetryContext.failureCategory = categorizeFailure(error);
+    telemetryContext.failureCategory = 'validation';
+    recordFailureCause(telemetryContext, error);
     await trackWrapperEvent('runpane_wrapper_command_failed', telemetryContext);
     if (argv[0] === 'watch') {
       const normalized = error instanceof Error ? error : new Error(String(error));
@@ -345,6 +348,7 @@ const commandHandlers = new Map<string, CommandHandler>(Object.entries({
   'report': async (parsed, telemetryContext) => {
     return runReport(parsed);
   },
+  'notify': async (parsed) => runNotify(parsed),
   'inbox': async (parsed) => runInbox(parsed),
   'inbox ack': async (parsed) => runInboxAck(parsed),
   'agents doctor': async (parsed, telemetryContext) => {
@@ -437,6 +441,11 @@ async function confirmDaemonRepair(parsed: ParsedArgs): Promise<void> {
   }
 }
 
+/**
+ * Reports real failures only: anything thrown, and a non-zero exit from the wrapper's own install or
+ * update work. Other commands' exit codes are documented results (panels wait not ready, doctor
+ * findings, watch timeouts) and send nothing.
+ */
 async function runTrackedCommand(
   telemetryContext: WrapperTelemetryContext,
   execute: () => Promise<number>
@@ -444,7 +453,7 @@ async function runTrackedCommand(
   try {
     const code = await execute();
     telemetryContext.exitCode = code;
-    if (code !== 0) {
+    if (code !== 0 && (telemetryContext.resolvedCommand === 'install' || telemetryContext.resolvedCommand === 'update')) {
       telemetryContext.failureStage ??= inferFailureStage(telemetryContext);
       telemetryContext.failureCategory ??= 'process_exit';
       await trackWrapperEvent('runpane_wrapper_command_failed', telemetryContext);
@@ -452,7 +461,7 @@ async function runTrackedCommand(
     return code;
   } catch (error) {
     telemetryContext.failureStage ??= 'unknown';
-    telemetryContext.failureCategory ??= categorizeFailure(error);
+    recordFailureCause(telemetryContext, error);
     await trackWrapperEvent('runpane_wrapper_command_failed', telemetryContext);
     throw error;
   }

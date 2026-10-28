@@ -69,14 +69,6 @@ jobs:
     - name: Install dependencies
       run: pnpm install --ignore-scripts
 
-    # Type checking and lint run in the background beside the tests; their
-    # Finish steps print the output and fail the job on errors.
-    - name: Start type checking
-      run: scripts/ci-background.sh start typecheck pnpm typecheck
-
-    - name: Start consolidated lint harness
-      run: scripts/ci-background.sh start lint pnpm lint
-
     - name: Verify GitHub release publication behavior
       run: bash scripts/test-publish-github-release.sh
 
@@ -99,6 +91,29 @@ jobs:
           echo "::error title=runpane contract drift::Generated runpane contract files differ from contracts/runpane/contract.json. Edit contract.json, not the generated files, then run: node scripts/generate-runpane-contract.js and commit the result."
           exit 1
         }
+
+  # Type checking and lint get their own runner: beside the unit tests they
+  # competed for its CPUs and slowed the tests by about 30s. They run in
+  # parallel here; the Finish steps print each output and fail on errors.
+  typecheck-lint:
+    name: Type Check and Lint
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+
+    - name: Setup Node.js and pnpm
+      uses: ./.github/actions/setup-pnpm
+
+    - name: Install dependencies
+      run: pnpm install --ignore-scripts
+
+    - name: Start type checking
+      run: scripts/ci-background.sh start typecheck pnpm typecheck
+
+    - name: Start consolidated lint harness
+      run: scripts/ci-background.sh start lint pnpm lint
 
     - name: Finish type checking
       if: ${{ !cancelled() }}
@@ -127,7 +142,7 @@ jobs:
         fail: true
 
   # Runs beside quality-checks so the Electron smoke path does not wait on
-  # typecheck, lint, and unit tests.
+  # unit tests.
   # Pinned: ubuntu-latest is Ubuntu 26.04, which Playwright 1.54.1 cannot
   # install browser dependencies for. Move back once Playwright supports it.
   functional-smoke:
@@ -245,6 +260,9 @@ jobs:
     - name: Run handoff tests
       run: node --test scripts/test-runpane-handoff.js
 
+    - name: Run wrapper telemetry tests
+      run: node --test scripts/test-runpane-telemetry.js
+
   # Ubuntu is already covered by quality-checks above; this job only adds the
   # other platforms, and only when main-process code (or its deps) changed.
   cross-os-main-tests:
@@ -304,7 +322,7 @@ jobs:
   # cancelled ones fail it.
   ci-result:
     name: CI result
-    needs: [changes, quality-checks, functional-smoke, runpane-wrapper-tests, cross-os-main-tests]
+    needs: [changes, quality-checks, typecheck-lint, functional-smoke, runpane-wrapper-tests, cross-os-main-tests]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5

@@ -9,6 +9,7 @@ import { TerminalSettings } from './settings/categories/TerminalSettings';
 import { AIAgentsSettings } from './settings/categories/AIAgentsSettings';
 import { WorktreesGitSettings } from './settings/categories/WorktreesGitSettings';
 import { NotificationSettings } from './NotificationSettings';
+import { NotifySettings } from './settings/categories/NotifySettings';
 import { RemoteAccessSettings } from './settings/categories/RemoteAccessSettings';
 import { IntegrationsSettings } from './settings/categories/IntegrationsSettings';
 import { ShortcutsSettings } from './settings/categories/ShortcutsSettings';
@@ -18,6 +19,7 @@ import { UsageView } from './usage/UsageView';
 import { RemoteAccessWorkflows } from './settings/RemoteAccessWorkflows';
 import { useSettingsPersistence } from './settings/useSettingsPersistence';
 import { useDirtySettingsForms } from './settings/useDirtySettingsForms';
+import { registerSettingsExit } from '../utils/settingsExit';
 import { useRemoteAccessSettings } from './settings/useRemoteAccessSettings';
 import { SETTINGS_CATEGORIES, settingDomId } from './settings/catalog';
 import type {
@@ -107,6 +109,13 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
     });
   }, [onClose, requestTransition]);
 
+  // Search leaves Settings before it opens a Pane, Session or project, through the unsaved-edits guard.
+  useEffect(() => registerSettingsExit(then => requestTransition(() => {
+    setRemoteSubview(undefined);
+    onClose();
+    then();
+  })), [onClose, requestTransition]);
+
   const showKeyboardShortcuts = useCallback(() => {
     requestTransition(onShowKeyboardShortcuts);
   }, [onShowKeyboardShortcuts, requestTransition]);
@@ -142,6 +151,8 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
         return <UsageView />;
       case 'worktrees-git':
         return <WorktreesGitSettings persistence={persistence} {...sharedDirtyProps} />;
+      case 'notify':
+        return <NotifySettings persistence={persistence} />;
       case 'notifications':
         return <NotificationSettings persistence={persistence} />;
       case 'remote-access':
