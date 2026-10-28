@@ -43,11 +43,11 @@ export function GeneralSettings({ persistence, onUpdate, onSendFeedback }: Gener
 
   return (
     <SettingsPage title="General" description="Application startup, update, feedback, and file-opening behavior.">
-      <SettingsSection title="Updates" description="Keep Pane current with release checks from GitHub.">
+      <SettingsSection title="Updates" description="Keep Pane current. New releases download in the background.">
         <SettingRow
           settingId="automatic-updates"
           label="Check for updates automatically"
-          description="Pane checks for a new release every 24 hours. Installation remains manual."
+          description="Pane checks for a new release at launch and every few hours and downloads it in the background. Restart to update when you're ready."
           saveState={persistence.saveStates['automatic-updates']}
         >
           <ImmediateToggle

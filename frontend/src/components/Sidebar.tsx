@@ -3,7 +3,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { ProjectSessionList, ArchivedSessions } from './ProjectSessionList';
 import { ArchiveProgress } from './ArchiveProgress';
-import { ArrowUpDown, BookOpen, ChevronDown, ChevronRight, Info, LayoutGrid, FolderGit2, Home, Laptop, Monitor, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pin, Settings as SettingsIcon, Plus, RefreshCw, MessageSquare, Repeat, Search, Server, SquareTerminal } from 'lucide-react';
+import { ArrowUpDown, Bell, BookOpen, ChevronDown, ChevronRight, Info, LayoutGrid, FolderGit2, Home, Laptop, Monitor, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pin, Settings as SettingsIcon, Plus, RefreshCw, MessageSquare, Repeat, Search, Server, SquareTerminal } from 'lucide-react';
 import { SessionDetailTooltip } from './SessionDetailTooltip';
 import { IconButton } from './ui/Button';
 import { Tooltip } from './ui/Tooltip';
@@ -36,7 +36,10 @@ import { OrchestrationSessionNav } from './OrchestrationSessionNav';
 import { useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
 import { useSshHostsRefresh, useSshHostsStore } from '../stores/sshHostsStore';
 import { navigateToLoops, useLoopsStore } from '../stores/loopsStore';
+import { useNotifyStore, waitingCount } from '../stores/notifyStore';
 import { useAnyLoopRunning } from './loops/loopRunView';
+import { useRestartToUpdateStore } from '../stores/restartToUpdateStore';
+import { RESTART_PILL_LABELS, restartPillDescription, restartPillLabel } from './restartToUpdateCopy';
 
 // --- Collapsed sidebar tooltip content ---
 
@@ -110,6 +113,8 @@ interface SidebarProps {
   onDocsClick: () => void;
   onFeedbackClick: () => void;
   onDiscordClick: () => void;
+  /** Opens the Software Update dialog when a release can only be installed by hand. */
+  onUpdateAvailableClick: () => void;
 }
 
 const REMOTE_DESKTOP_URL = 'https://remotedesktop.google.com/access';
@@ -126,7 +131,7 @@ const HelpCircleIcon = ({ className }: { className?: string }) => (
   </svg>
 );
 
-export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, onManageRemoteConnectionsClick, width, onResize, collapsed, onToggleCollapse, titleBarControlsSlot, onHelpClick, onDocsClick, onFeedbackClick, onDiscordClick }: SidebarProps) {
+export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, onManageRemoteConnectionsClick, width, onResize, collapsed, onToggleCollapse, titleBarControlsSlot, onHelpClick, onDocsClick, onFeedbackClick, onDiscordClick, onUpdateAvailableClick }: SidebarProps) {
   const useCompactFooterActions = width < 260;
   const showFooterHomeLabel = width >= 230;
   const hotkeys = useHotkeyStore((s) => s.hotkeys);
@@ -229,6 +234,11 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
 
 
   const sessions = useSessionStore((state) => state.sessions);
+  const restartState = useRestartToUpdateStore((state) => state.state);
+  const toggleRestartToast = useRestartToUpdateStore((state) => state.togglePillToast);
+  const restartLabel = restartPillLabel(restartState);
+  const restartDescription = restartPillDescription(restartState) ?? '';
+  const openRestartToUpdate = restartState?.readyVersion ? toggleRestartToast : onUpdateAvailableClick;
   const activeSessionId = useSessionStore((state) => state.activeSessionId);
   const setActiveSession = useSessionStore((state) => state.setActiveSession);
   const remoteFooterStatus = useMemo(
@@ -293,6 +303,9 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
   const navigateToPaneChat = useNavigationStore((state) => state.navigateToPaneChat);
   const navigateToMissionControl = useNavigationStore((state) => state.navigateToMissionControl);
   const navigateToSsh = useNavigationStore((state) => state.navigateToSsh);
+  const navigateToNotify = useNavigationStore((state) => state.navigateToNotify);
+  const notifyAvailable = useNotifyStore((state) => state.snapshot !== null);
+  const notifyWaitingCount = useNotifyStore((state) => waitingCount(state.snapshot));
   const hasSshHosts = useSshHostsStore((state) => state.rows.length > 0);
   const missionControlEnabled = useConfigStore((state) => isMissionControlEnabled(state.config));
   const paneChatStatus = useSessionAgentDisplayStatus(PANE_CHAT_SESSION_ID);
@@ -561,6 +574,29 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
               </button>
             </Tooltip>
 
+            {notifyAvailable && (
+              <Tooltip content="Notify" side="right">
+                <button
+                  type="button"
+                  data-testid="compact-notify"
+                  data-compact-rail-item
+                  onClick={() => {
+                    setSidebarNavigationScope('repositories');
+                    navigateToNotify();
+                  }}
+                  aria-label={notifyWaitingCount > 0 ? `Notify, ${notifyWaitingCount} waiting` : 'Notify'}
+                  className={`${COMPACT_RAIL_BUTTON} ${activeView === 'notify' ? COMPACT_RAIL_ACTIVE : COMPACT_RAIL_IDLE}`}
+                >
+                  <Bell className="h-4 w-4" />
+                  {notifyWaitingCount > 0 && (
+                    <span className="absolute right-0 top-0 flex h-3 w-3 items-center justify-center" aria-hidden="true">
+                      <span className="h-1.5 w-1.5 rounded-full bg-status-warning" />
+                    </span>
+                  )}
+                </button>
+              </Tooltip>
+            )}
+
             {(orchestrationAvailability === 'unavailable' || orchestrationAvailability === 'idle') && (
               <Tooltip content="Pane Chat" side="right">
                 <button
@@ -756,6 +792,19 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
 
           {/* Bottom actions stay reachable even with a long Session list. */}
           <div className="flex shrink-0 flex-col items-center gap-1 border-t border-border-primary py-2">
+            {restartLabel && (
+              <Tooltip content={restartDescription} side="right">
+                <button
+                  type="button"
+                  data-compact-rail-item
+                  onClick={openRestartToUpdate}
+                  aria-label={restartDescription}
+                  className={`${COMPACT_RAIL_BUTTON} bg-interactive/15 text-interactive hover:bg-interactive/25`}
+                >
+                  <RefreshCw className="h-4 w-4" />
+                </button>
+              </Tooltip>
+            )}
             <Tooltip content={remoteFooterTooltip} side="right" interactive delay={250}>
               {remoteHostSwitcher.visible ? renderRemoteHostSwitcher(railRemoteDot, 'top-right') : railRemoteDot}
             </Tooltip>
@@ -871,6 +920,26 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
           <ArchivedSessions expanded={sidebarSectionExpansion.archived} onExpandedChange={handleArchivedSectionExpandedChange} />
         </div>
 
+        {restartLabel && (
+          <div className="flex flex-shrink-0 px-2 pt-1">
+            <button
+              type="button"
+              onClick={openRestartToUpdate}
+              aria-label={restartDescription}
+              className="flex h-6 items-center gap-1.5 rounded-full bg-interactive/15 px-2.5 text-[11px] font-semibold text-interactive hover:bg-interactive/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-interactive"
+            >
+              <RefreshCw className="h-3 w-3 shrink-0" />
+              {/* Every label shares one grid cell, so the pill keeps the widest one's width. */}
+              <span className="grid">
+                {RESTART_PILL_LABELS.map(label => (
+                  <span key={label} aria-hidden="true" className={`col-start-1 row-start-1 whitespace-nowrap ${label === restartLabel ? '' : 'invisible'}`}>
+                    {label}
+                  </span>
+                ))}
+              </span>
+            </button>
+          </div>
+        )}
         <div className="flex h-12 flex-shrink-0 items-center gap-1 px-2">
           <button
             type="button"

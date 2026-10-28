@@ -297,6 +297,28 @@ not archived; archive it from the same menu when you are done with it.
 
 ## Bring your existing sessions into Pane
 
+Pane itself can bring idle sessions in with one click. While you have fewer
+than two Panes, Home shows a "Bring your sessions into Pane" card when it finds
+recent sessions from Claude Code, Codex, Conductor, Superset, Herdr, Emdash,
+Orca or T3 Code on this computer. Settings → AI & Agents → "Bring sessions into
+Pane" → **Find sessions** opens the same card at any time.
+
+- Pane reads each tool's session list locally (metadata only; SQLite stores
+  from a temporary copy) and lists sessions active in the last 30 days, one row
+  per tool. Sessions from the last 7 days are preselected, at most 3 per
+  checkout; click a row to choose sessions.
+- **Bring them in** adopts each checkout in place as a Pane, with one tab per
+  session resumed by the agent's own id. A transcript kept in a tool's own agent
+  folder is first copied into your own Claude Code or Codex store.
+- Sessions still running elsewhere are listed but can't be chosen, and
+  neither can other sessions in the same checkout; quit them and press **Check
+  again**, or use the skill below, which forks them. A tab
+  whose agent exits without resuming is closed and reported, and a new Pane
+  whose sessions all failed is removed. A tab waiting at the agent's
+  folder-trust prompt, or whose agent is still starting, stays open for you.
+- **Not now** or **Done** on Home hides the card for good. The card and the
+  skill share the record below, so neither brings a session in twice.
+
 Say "migrate to Pane" in any Session, or "yes" to the first-run offer above, and
 the `migrate-to-pane` skill brings the conversations you already have in other
 agent tools (Claude Code, Codex, OpenCode, the Cursor agent, Conductor, or
@@ -337,7 +359,8 @@ count), Pane sends it one prompt, which says that Pane sent it and why. The
 agent then asks whether to bring your existing agent sessions into Pane, and
 starts only when you say yes. Pane records the offer in the
 `pane_chat_migrate_offer_sent` user preference once a launch has sent it, so a
-restart or an agent switch never sends it again. See
+restart or an agent switch never sends it again. The Home card above sets the
+same preference when it is first shown, so you get one offer, not two. See
 [Bring your existing sessions into Pane](#bring-your-existing-sessions-into-pane).
 
 Pane may also offer Pane Chat once, in a card over a Pane, after you have

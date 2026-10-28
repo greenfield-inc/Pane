@@ -19,6 +19,7 @@ import type { PreferredShell } from '../types/config';
 import { useHostShellSettings } from '../hooks/useHostShellSettings';
 import { capture } from '../services/posthog';
 import { DISCORD_INVITE_URL, DiscordIcon } from './DiscordIcon';
+import { SessionImportHome } from './sessionImport/SessionImportHome';
 
 const HIDE_DISCORD_PREFERENCE = 'hide_discord';
 
@@ -312,6 +313,7 @@ export function HomePage() {
               {paneAscii}
             </pre>
           </div>
+          <SessionImportHome />
           <section className={`grid gap-8 lg:items-stretch ${isFirstRun ? 'lg:grid-cols-[minmax(0,1.45fr)_minmax(320px,1fr)]' : ''}`}>
             {isFirstRun && (
             <div className="space-y-5 rounded-2xl border border-border-secondary bg-surface-primary/70 p-6 shadow-sm">

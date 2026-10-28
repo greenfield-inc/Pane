@@ -11,6 +11,7 @@ import { daemonActionFor, runDaemonAction } from './daemonActions';
 import { runDocsRead, runDocsSearch } from './docs';
 import { runHandoff } from './handoff';
 import { runLinksCreate } from './links';
+import { runNotify } from './notify';
 import { helpText, parseRunpaneArgs, splitWorkspacePassThrough, type ParsedArgs, type RunpaneCommand } from './commands';
 import { PaneDaemonClientError, routeDaemonCallsTo } from './daemonClient';
 import { describeFailure, printFailure, RunpaneError } from './errors';
@@ -347,6 +348,7 @@ const commandHandlers = new Map<string, CommandHandler>(Object.entries({
   'report': async (parsed, telemetryContext) => {
     return runReport(parsed);
   },
+  'notify': async (parsed) => runNotify(parsed),
   'inbox': async (parsed) => runInbox(parsed),
   'inbox ack': async (parsed) => runInboxAck(parsed),
   'agents doctor': async (parsed, telemetryContext) => {

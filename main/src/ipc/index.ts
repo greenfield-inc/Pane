@@ -28,6 +28,7 @@ import { registerSpotlightHandlers } from './spotlight';
 import { registerJourneyTimingHandlers } from './journeyTimings';
 import { registerRemoteDaemonHandlers } from './remoteDaemon';
 import { registerRunpaneHandlers } from './runpane';
+import { registerNotifyHandlers } from './notify';
 import { registerDesktopAlertHandlers } from './desktopAlerts';
 import { registerClipboardHandlers } from './clipboard';
 import { registerResourceMonitorHandlers } from './resourceMonitor';
@@ -36,6 +37,7 @@ import { registerVoiceHandlers } from './voice';
 import { registerPaneChatHandlers } from './paneChat';
 import { registerSshHostHandlers } from './sshHosts';
 import { registerUsageHandlers } from './usage';
+import { registerSessionImportHandlers } from './sessionImport';
 import { registerOrchestrationSessionHandlers } from './orchestrationSessions';
 import { registerExportHandlers } from './export';
 import { registerLoopHandlers } from './loops';
@@ -118,6 +120,7 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
   registerWorkspaceAccessHandlers(ipcMain, services, commandRegistry);
   registerRunpaneHandlers(ipcMain, services, commandRegistry);
   registerDesktopAlertHandlers(ipcMain, services);
+  registerNotifyHandlers(ipcMain, services, commandRegistry);
   registerPaneLinkHandler(commandRegistry, {
     repoExists: (repoId) => Boolean(services.databaseService.getProject(repoId)),
     navigate: (target) => {
@@ -139,6 +142,7 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
   registerSshHostHandlers(ipcMain, services, commandRegistry);
   registerOrchestrationSessionHandlers(ipcMain, services, commandRegistry);
   registerUsageHandlers(ipcMain, commandRegistry);
+  registerSessionImportHandlers(ipcMain, services, commandRegistry);
   if (services.loopManager) registerLoopHandlers(ipcMain, services.loopManager, commandRegistry);
   registerMissionControlHandlers(ipcMain, services, commandRegistry);
   registerOnboardingHandlers(ipcMain, services);
