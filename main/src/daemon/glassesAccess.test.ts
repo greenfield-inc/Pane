@@ -1,5 +1,6 @@
 import http from 'http';
 import type { AddressInfo } from 'net';
+import type { Duplex } from 'stream';
 import WebSocket, { WebSocketServer } from 'ws';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppConfig } from '../types/config';
@@ -51,7 +52,7 @@ async function setup(options: { visibility?: WorkspaceAccessPolicy['visibility']
     calls.push({ channel, args });
     return { ran: channel };
   });
-  for (const channel of ['runpane:panels:screen', 'runpane:panels:submit', 'notify:remote-command', 'file:write', 'git:commit', 'runpane:machine:exec', 'remote:settings:update', 'terminal:input']) {
+  for (const channel of ['runpane:panels:screen', 'runpane:panels:submit', 'runpane:panels:resume', 'sessions:mark-viewed', 'notify:remote-command', 'file:write', 'git:commit', 'runpane:machine:exec', 'remote:settings:update', 'terminal:input', 'panels:initialize', 'terminal:setVisibility']) {
     record(channel);
   }
   registry.register(GLASSES_COMMANDS.createPairingSecret, (request: PaneCommandValue) => {
@@ -165,16 +166,20 @@ describe('glasses on the workspace listener', () => {
   it('reaches exactly its allowlist', async () => {
     const host = await setup();
     const { token } = await host.pair();
-    const allowed = await host.invoke('runpane:panels:screen', [{ panelId: 'p1' }], host.fromGlasses(token));
-    expect(allowed).toMatchObject({ status: 200, body: { ok: true, result: { ran: 'runpane:panels:screen' } } });
+    // Opening a Pane reads its screen, starts it if stopped, and marks it viewed.
+    for (const [channel, args] of [['runpane:panels:screen', [{ panelId: 'p1' }]], ['runpane:panels:resume', [{ panelId: 'p1' }]], ['sessions:mark-viewed', ['pane-1']]] as const) {
+      const allowed = await host.invoke(channel, [...args], host.fromGlasses(token));
+      expect(allowed).toMatchObject({ status: 200, body: { ok: true, result: { ran: channel } } });
+    }
 
-    for (const channel of ['file:write', 'git:commit', 'runpane:machine:exec', 'remote:settings:update', 'terminal:input',
+    // Starting a terminal at a chosen folder or size, or registering as a viewer that never acks output, stays out.
+    for (const channel of ['file:write', 'git:commit', 'runpane:machine:exec', 'remote:settings:update', 'terminal:input', 'panels:initialize', 'terminal:setVisibility',
       GLASSES_COMMANDS.createPairingSecret, GLASSES_COMMANDS.list, GLASSES_COMMANDS.revoke]) {
       const refused = await host.invoke(channel, [{}], host.fromGlasses(token));
       expect({ channel, status: refused.status, code: errorCode(refused) })
         .toEqual({ channel, status: 403, code: 'ERR_GLASSES_CHANNEL_REFUSED' });
     }
-    expect(host.calls.map((call) => call.channel)).toEqual(['runpane:panels:screen']);
+    expect(host.calls.map((call) => call.channel)).toEqual(['runpane:panels:screen', 'runpane:panels:resume', 'sessions:mark-viewed']);
 
     for (const path of ['/media?sessionId=s&filePath=a', '/app/index.html']) {
       expect((await host.request('GET', path, host.fromGlasses(token))).status).toBe(403);
@@ -349,7 +354,7 @@ describe('glasses on the workspace listener', () => {
     let upstreamClosed = false;
     upstream.on('connection', (socket) => socket.once('close', () => { upstreamClosed = true; }));
     await new Promise<void>((resolve) => upstream.once('listening', resolve));
-    vi.stubEnv('DEEPGRAM_API_KEY', 'test-key');
+    vi.stubEnv('DEEPGRAM_API_KEY', 'test-key-0123456789abcdef');
     try {
       // SAFETY: a TCP server that is listening reports an AddressInfo.
       const host = await setup({ heartbeatIntervalMs: 50, deepgramListenEndpoint: `ws://127.0.0.1:${(upstream.address() as AddressInfo).port}` });
@@ -369,6 +374,37 @@ describe('glasses on the workspace listener', () => {
       await host.glasses.setOwnerOrigin(origin, false);
       await vi.waitFor(() => expect([closed, upstreamClosed]).toEqual([true, true]), { timeout: 1000 });
     } finally {
+      await new Promise<void>((resolve) => upstream.close(() => resolve()));
+    }
+  });
+
+  it('tells the glasses why the voice stream ended when the key is not a key or Deepgram rejects it', async () => {
+    // Deepgram answers a refused key's upgrade with a plain 401.
+    const upstream = http.createServer();
+    upstream.on('upgrade', (_request, socket: Duplex) => socket.end('HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n'));
+    await new Promise<void>((resolve) => upstream.listen(0, '127.0.0.1', resolve));
+    try {
+      // SAFETY: a TCP server that is listening reports an AddressInfo.
+      const host = await setup({ deepgramListenEndpoint: `ws://127.0.0.1:${(upstream.address() as AddressInfo).port}` });
+      const { token } = await host.pair();
+      const firstFrame = () => new Promise<JsonValue>((resolve, reject) => {
+        const socket = new WebSocket(`ws://127.0.0.1:${host.port}/serve-secret/voice/deepgram-stream`, ['pane-glasses', token], {
+          headers: { 'Tailscale-User-Login': OWNER, Origin: 'http://127.0.0.1:54456' },
+        });
+        socket.once('message', (data) => resolve(JSON.parse(String(data))));
+        socket.once('error', reject);
+      });
+
+      vi.stubEnv('DEEPGRAM_API_KEY', 'Here is my Deepgram key, I think');
+      expect(await firstFrame()).toMatchObject({ type: 'Error', code: 'ERR_VOICE_KEY_INVALID' });
+      vi.stubEnv('DEEPGRAM_API_KEY', 'dg-key-0123456789abcdef');
+      expect(await firstFrame()).toEqual({
+        type: 'Error',
+        code: 'ERR_VOICE_KEY_REJECTED',
+        message: 'Deepgram rejected the key saved on this computer (HTTP 401). Fix it in Pane on this computer: Settings › Integrations › Voice transcription.',
+      });
+    } finally {
+      vi.unstubAllEnvs();
       await new Promise<void>((resolve) => upstream.close(() => resolve()));
     }
   });
@@ -414,7 +450,7 @@ describe('glasses on the workspace listener', () => {
 
     await host.glasses.setOwnerOrigin(newOrigin, true);
     expect((await screen()).status).toBe(200);
-    expect(host.glasses.state()).toMatchObject({ refusedOrigins: [], allowedOrigins: [{ origin: EVEN, source: 'environment' }, { origin: newOrigin, source: 'owner' }] });
+    expect(host.glasses.state()).toMatchObject({ refusedOrigins: [], allowedOrigins: [{ origin: 'http://127.0.0.1', source: 'pane' }, { origin: EVEN, source: 'environment' }, { origin: newOrigin, source: 'owner' }] });
     expect((await host.invoke('runpane:panels:screen', [{}], host.fromGlasses(token, { Origin: `${newOrigin}:8080` }))).status).toBe(403);
 
     for (const invalid of ['null', 'https://*.even.example', 'https://even.example/path', '*']) {
@@ -425,6 +461,34 @@ describe('glasses on the workspace listener', () => {
 
     await host.invoke('runpane:panels:screen', [{}], { 'Tailscale-User-Login': OWNER, Origin: 'null' });
     expect(host.glasses.state().refusedOrigins.map((entry) => entry.origin)).not.toContain('null');
+  });
+
+  it('admits the Even app\'s http://127.0.0.1 on any port with no Allow, still only with a token', async () => {
+    const host = await setup();
+    const { token } = await host.pair();
+    const status = async (origin: string, headers = host.fromGlasses(token, { Origin: origin })) => (await host.invoke('runpane:panels:screen', [{}], headers)).status;
+
+    expect(host.glasses.state().allowedOrigins).toContainEqual({ origin: 'http://127.0.0.1', source: 'pane' });
+    const matrix: Array<[string, number]> = [
+      ['http://127.0.0.1:54456', 200],
+      ['http://127.0.0.1:61022', 200],
+      ['http://127.0.0.1', 200],
+      ['https://127.0.0.1:54456', 403],
+      ['http://localhost:54456', 403],
+      ['http://127.0.0.2:54456', 403],
+      ['http://127.0.0.1.attacker.example', 403],
+    ];
+    for (const [origin, expected] of matrix) expect({ origin, status: await status(origin) }).toEqual({ origin, status: expected });
+    expect(await status('http://127.0.0.1:61022', { ...host.fromGlasses(token, { Origin: 'http://127.0.0.1:61022' }), Authorization: 'Bearer pgt_guess' })).toBe(401);
+    const { Authorization: _authorization, ...noToken } = host.fromGlasses(token, { Origin: 'http://127.0.0.1:61022' });
+    expect(await status('http://127.0.0.1:61022', noToken)).toBe(401);
+
+    // An owner Allow of another loopback origin covers every port too.
+    await host.glasses.setOwnerOrigin('http://localhost:54456', true);
+    expect(host.glasses.state().allowedOrigins).toContainEqual({ origin: 'http://localhost', source: 'owner' });
+    expect(await status('http://localhost:61022')).toBe(200);
+    await host.glasses.setOwnerOrigin('http://localhost:61022', false);
+    expect(await status('http://localhost:54456')).toBe(403);
   });
 
   it('lets only the owner\'s own app pair, list and revoke glasses', async () => {

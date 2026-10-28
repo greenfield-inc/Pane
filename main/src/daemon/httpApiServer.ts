@@ -41,6 +41,8 @@ import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../share
 import type { BoundarySchema, JsonValue } from '../../../shared/validation/boundaryDecoder';
 import { serializeJsonTransport } from './jsonTransport';
 import { toPaneDaemonError } from '../../../shared/paneError';
+import type { VoiceStreamErrorCode } from '../../../shared/voice/deepgramLive';
+import { voiceKeyProblem } from '../../../shared/voice/voiceKeys';
 import { streamWorktreePreview } from '../services/mediaStream';
 
 interface RemoteHttpAddress {
@@ -597,6 +599,17 @@ export class PaneRemoteHttpApiServer {
   }
 
   private handleDeepgramProxySocket(client: WebSocket, deepgramApiKey: string): void {
+    /** Tells the client why its stream ended, in an Error frame with a code, then closes it. */
+    const refuse = (code: VoiceStreamErrorCode, message: string) => {
+      if (client.readyState === WebSocket.OPEN) client.send(JSON.stringify({ type: 'Error', code, message }));
+      client.close(1011);
+    };
+    const fix = 'Fix it in Pane on this computer: Settings › Integrations › Voice transcription.';
+    const keyProblem = voiceKeyProblem('deepgramApiKey', deepgramApiKey);
+    if (keyProblem) {
+      refuse('ERR_VOICE_KEY_INVALID', `The Deepgram key saved on this computer can't be used. ${keyProblem.message} ${fix}`);
+      return;
+    }
     const upstream = new WebSocket(buildDeepgramListenUrl(this.deepgramListenEndpoint), {
       headers: {
         Authorization: `Token ${deepgramApiKey}`,
@@ -635,10 +648,21 @@ export class PaneRemoteHttpApiServer {
         client.send(data, { binary: isBinary });
       }
     });
+    // Deepgram answers a refused key with an HTTP status instead of upgrading.
+    upstream.on('unexpected-response', (request, response) => {
+      request.destroy();
+      const status = response.statusCode ?? 0;
+      if (closing) return;
+      closing = true;
+      if (status === 401 || status === 403) refuse('ERR_VOICE_KEY_REJECTED', `Deepgram rejected the key saved on this computer (HTTP ${status}). ${fix}`);
+      else refuse('ERR_VOICE_UPSTREAM', `Deepgram refused the stream (HTTP ${status}).`);
+    });
     upstream.on('error', (error) => {
+      if (closing) return;
       if (client.readyState === WebSocket.OPEN) {
         client.send(JSON.stringify({
           type: 'Error',
+          code: 'ERR_VOICE_UPSTREAM' satisfies VoiceStreamErrorCode,
           message: `Deepgram streaming connection failed: ${error.message}`,
         }));
       }

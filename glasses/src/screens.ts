@@ -1,7 +1,7 @@
 // One function per glasses screen in the design reference (mockups v2: H3 home, C3 card, T3 terminal).
 // Each returns a page of boxes at G2 scale; nothing here touches the bridge.
 import { BRIGHT, DIM, DIMMER, LIST_PAD, type Box, type Brightness, type ListBox, type Page, type TextBox } from './display';
-import type { Card, Computer, HostRefusal, PaneEntry } from './model';
+import type { Card, Computer, HostRefusal, PaneEntry, PaneRow } from './model';
 import { LINE_H, SCREEN_H, SCREEN_W, fitLine, wrap, wrapClamped } from './text';
 
 const BAR_H = 32;
@@ -233,8 +233,17 @@ export function computersPage(computers: readonly Computer[], clock: (epochMs: n
   };
 }
 
-export function panesPage(computerName: string, entries: readonly PaneEntry[]): Page {
-  if (!entries.length) {
+function paneRowText(row: PaneRow): string {
+  switch (row.kind) {
+    case 'session': return `Session · ${row.name} · ${row.status}`;
+    case 'pane': return `${row.name} · ${row.agent} · ${row.status}`;
+    case 'note': return row.text;
+    case 'gap': return '';
+  }
+}
+
+export function panesPage(computerName: string, rows: readonly PaneRow[]): Page {
+  if (!rows.length) {
     return {
       boxes: [
         header(`${computerName} · Sessions and Panes`),
@@ -245,9 +254,7 @@ export function panesPage(computerName: string, entries: readonly PaneEntry[]): 
   return {
     boxes: [
       header(`${computerName} · Sessions and Panes`),
-      list('panes', BAR_H, SCREEN_H - BAR_H, entries.map((entry) => (entry.kind === 'session'
-        ? `Session · ${entry.name} · ${entry.status}`
-        : `${entry.name} · ${entry.agent} · ${entry.status}`))),
+      list('panes', BAR_H, SCREEN_H - BAR_H, rows.map(paneRowText)),
     ],
   };
 }

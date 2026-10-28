@@ -8,6 +8,8 @@ import type { GlassesAccessState } from '../../../../shared/types/glasses';
 
 /** The page lists newly refused origins while it is open, so allowing one needs no reload. */
 const REFRESH_MS = 5_000;
+/** The host keeps a loopback origin without its port and matches it on any port. */
+const LOOPBACK_ORIGIN = /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])$/;
 
 /**
  * Even G2 glasses paired with this computer through the Pane phone app, and the Even app
@@ -92,7 +94,7 @@ export function GlassesSettings() {
         <div key={entry.origin} className="flex items-center justify-between gap-3 py-3">
           <div className="min-w-0">
             <p className="truncate text-sm font-medium text-text-primary"><code>{entry.origin}</code></p>
-            <p className="text-xs text-text-tertiary">Allowed for glasses on this computer.</p>
+            <p className="text-xs text-text-tertiary">{LOOPBACK_ORIGIN.test(entry.origin) ? 'Allowed for glasses on this computer, on any port.' : 'Allowed for glasses on this computer.'}</p>
           </div>
           <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={() => void run(() => API.remoteDaemon.setGlassesOrigin({ origin: entry.origin, allowed: false }))}>
             Remove

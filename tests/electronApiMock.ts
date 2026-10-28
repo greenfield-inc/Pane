@@ -953,6 +953,10 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         })),
       }),
       config: namespace({
+        // Deepgram refuses any key starting dg-revoked and takes every other.
+        checkDeepgramKey: async (key: string) => (key.startsWith('dg-revoked')
+          ? { result: 'rejected', message: 'Saved, but Deepgram rejected this key (HTTP 401). Copy a current key from console.deepgram.com and paste it again.' }
+          : { result: 'accepted', message: 'Deepgram accepted this key.' }),
         get: async () => {
           configGetCount += 1;
           if (mockOptions.configReadDelayMs) {

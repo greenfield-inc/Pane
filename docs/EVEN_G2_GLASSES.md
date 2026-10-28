@@ -31,14 +31,12 @@ It talks straight to each of your computers over Tailscale. Pane has no relay.
 To add a computer later, tap **Add Computers** in Settings › Glasses and paste the new code the same
 way. Computers that are offline are skipped and named on the screen.
 
-### Allow the Even app on each computer (first time)
+### The Even app's origin
 
-Each computer accepts glasses only from the exact web origin the Even app uses. Pane does not ship
-that origin yet. The first time the glasses connect, each computer refuses them and the glasses show
-**Allow this app on the computer** with the origin. On each computer, open
-**Settings › Remote Access › Glasses**, find the origin under the refused list, and click **Allow**.
-Allow it only if you just tried to connect from the Even app on your own phone. Then tap **Connect**
-on the glasses app again with the same code; it works for 10 minutes from when the phone made it.
+The Even app serves the glasses app from `http://127.0.0.1`, on a port it picks each time it starts.
+Pane accepts that origin on any port, so there is nothing to allow. A computer running an older
+Pane refuses it and the glasses show **Allow this app on the computer**: update Pane on that
+computer. Allowing the origin on an older Pane lasts only until the Even app restarts on a new port.
 
 ## Use it
 
@@ -54,8 +52,11 @@ on the glasses app again with the same code; it works for 10 minutes from when t
   all-clear page.
 - **A card** shows the asking Pane's last terminal lines (dimmed), the question, and the choices.
   A long question is cut at three lines; the **Read the whole question** row shows all of it.
-- **Open a Pane…** lists your computers (live or offline), then that computer's Sessions and Panes.
-  Picking one shows its live screen, refreshed about once a second. Swipe up for earlier output.
+- **Open a Pane…** lists your computers (live or offline), then that computer's Sessions and Panes
+  in the Pane apps' order: pinned ones first, then Sessions, a blank line, then Panes. Picking one
+  shows its live screen, refreshed about once a second, and marks the Pane viewed on that computer,
+  as opening it there does. A stopped Pane starts its saved agent or command. Swipe up for earlier
+  output.
   The bottom line names the newest card from another Pane; double press goes to it.
 - **Dictation** types what you said into the Pane and presses Enter right away. A misheard line
   typed into a shell runs, so check the Pane before you talk into a plain shell.
@@ -82,15 +83,19 @@ hold:
 - It carries this computer's **glasses token**: 256 random bits, one per pair of glasses, stored on
   the computer only as a hash. Tokens travel only in the `Authorization` header (and the voice
   WebSocket's subprotocol), never in a URL.
-- It comes from an **allowed origin**, matched exactly. Null, missing and wildcard origins are never
-  accepted.
+- It comes from an **allowed origin**: the Even app's `http://127.0.0.1` on any port, or one the
+  owner allowed in **Settings › Remote Access › Glasses**, matched exactly except that a loopback
+  origin matches on any port. Null, missing and wildcard origins are never accepted. A page served
+  from `127.0.0.1` on your phone still needs a glasses token, which only the paired glasses hold.
 - The source is not **locked out**: 5 refused attempts in 10 minutes lock it out for a minute,
   doubling on each repeat up to an hour. Each refusal is logged with the source and reason, never
   the token.
 
 A glasses token reaches only what the glasses use: listing Sessions and Panes, reading and typing
-into terminals, dictation, and Notify. It cannot pair other devices, change settings, write files,
-commit, or run machine commands, and its event stream never carries terminal output.
+into terminals, dictation, and Notify. Opening a stopped Pane restarts its saved agent or command,
+in its own folder. The token cannot pair other devices, change settings, write files, commit, run
+machine commands, or choose what a terminal runs, and its event stream never carries terminal
+output.
 
 Typing into a terminal can run commands, so treat the glasses like your phone: whoever holds a
 working token on your tailnet and login can type into your shells. The Even app serves the glasses
@@ -105,15 +110,17 @@ The pairing code on your clipboard holds one-time pairing secrets, not tokens, a
 | On the glasses | Fix |
 |---|---|
 | Can't reach any computer | Turn Tailscale on in the phone's Tailscale app. The glasses reconnect on their own. |
-| Allow this app on the computer | Allow the shown origin on that computer (see above). |
+| Allow this app on the computer | Update Pane on that computer (see above). |
 | Not paired, or revoked | Pair again from Settings › Glasses in the Pane phone app. |
 | Locked out for N s | Wait. If you did not cause the refusals, revoke the glasses on that computer. |
 | Funnel is on | On the computer, run `tailscale funnel reset`, or turn Funnel off for port 8443. |
 | Can't turn speech into text | Add a Deepgram or fal key on that computer. |
+| Deepgram rejected X's key, or X's Deepgram key isn't a valid key | On that computer, paste a current key from the Deepgram console in **Settings › Integrations › Voice transcription**. Pane checks it with Deepgram when you save. |
+| Lost the connection to X while listening | Hold to talk again. If it keeps happening, check Tailscale on the phone. |
 
 ## For developers
 
 The app lives in [`glasses/`](../glasses). Run the Even simulator against it and point a dev build of
 Pane at it with `PANE_GLASSES_ORIGINS=http://localhost:5173` (an exact origin, comma separated for
-several). The host side is `main/src/daemon/glassesAccess.ts`; the shared pairing-code format is
+several; a loopback one covers every port). The host side is `main/src/daemon/glassesAccess.ts`; the shared pairing-code format is
 `shared/types/glasses.ts`.

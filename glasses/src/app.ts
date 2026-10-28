@@ -3,7 +3,7 @@
 import type { NotifyAnswer } from '../../shared/types/notify';
 import type { Page } from './display';
 import type { Gesture } from './input';
-import { GlassesError, type Card, type Dictation, type PaneEntry, type PaneSource } from './model';
+import { GlassesError, isPaneEntry, type Card, type Dictation, type PaneEntry, type PaneRow, type PaneSource } from './model';
 import {
   TERMINAL_LINES,
   allClearPage,
@@ -62,7 +62,7 @@ type View =
   | { name: 'full'; key: string }
   | { name: 'voice-answer'; key: string; transcript: string }
   | { name: 'computers' }
-  | { name: 'panes'; computerId: string; entries: PaneEntry[] | null }
+  | { name: 'panes'; computerId: string; entries: PaneRow[] | null }
   | ({ name: 'terminal' } & TerminalState)
   | ({ name: 'dictation'; transcript: string } & TerminalState)
   | { name: 'refused'; computerId: string; back: View }
@@ -82,6 +82,8 @@ export class GlassesApp {
   /** Counts holds; a voice startup that finishes after its hold ended sees a newer number and stands down. */
   private listening = 0;
   private poll: Cancel | null = null;
+  /** The tab this open already resumed, so a tab that stops again is not restarted behind the user. */
+  private resumed: string | null = null;
   private readonly unsubscribe: () => void;
 
   /** Every card key seen so far, so a question that just arrived can be told apart. */
@@ -223,10 +225,14 @@ export class GlassesApp {
     }
     if (gesture.type === 'foreground') {
       this.deps.source.retry();
+      if (this.view.name === 'terminal' || this.view.name === 'dictation') this.markViewed(this.view.computerId, this.view.entry);
       this.render();
       return;
     }
-    if (gesture.type === 'background' || gesture.type === 'exit') return;
+    if (gesture.type === 'background' || gesture.type === 'exit') {
+      if (this.view.name === 'terminal' || this.view.name === 'dictation') this.markViewed(this.view.computerId, this.view.entry);
+      return;
+    }
     const view = this.view;
     switch (view.name) {
       case 'home': this.onHome(gesture); break;
@@ -248,7 +254,11 @@ export class GlassesApp {
   }
 
   private go(view: View): void {
-    if (this.view.name === 'terminal' && view.name !== 'terminal' && view.name !== 'dictation') this.stopPolling();
+    const left = this.view;
+    if ((left.name === 'terminal' || left.name === 'dictation') && view.name !== 'terminal' && view.name !== 'dictation') {
+      this.stopPolling();
+      this.markViewed(left.computerId, left.entry);
+    }
     this.view = view;
     this.render();
   }
@@ -414,17 +424,28 @@ export class GlassesApp {
     }
   }
 
-  private onPanes(view: { computerId: string; entries: PaneEntry[] | null }, gesture: Gesture): void {
+  private onPanes(view: { computerId: string; entries: PaneRow[] | null }, gesture: Gesture): void {
     if (gesture.type === 'double') this.go({ name: 'computers' });
     else if (gesture.type === 'select') {
-      const entry = view.entries?.[gesture.index];
-      if (entry) this.openTerminal(view.computerId, entry);
+      // A press on the gap or a note opens nothing.
+      const row = view.entries?.[gesture.index];
+      if (row && isPaneEntry(row)) this.openTerminal(view.computerId, row);
     }
   }
 
   // ---------- terminal ----------
 
+  /**
+   * Opening and leaving a Pane mark it viewed on its computer, so what was read here stops
+   * showing as new on the desktop and phone. A Session has no viewed marker. Best effort.
+   */
+  private markViewed(computerId: string, entry: PaneEntry): void {
+    if (entry.kind === 'pane') void this.deps.source.markViewed(computerId, entry.id).catch(() => {});
+  }
+
   private openTerminal(computerId: string, entry: PaneEntry): void {
+    this.resumed = null;
+    this.markViewed(computerId, entry);
     this.go({ name: 'terminal', computerId, entry, lines: [], scrollback: null, scrolledUp: 0 });
     this.stopPolling();
     void this.refreshScreen();
@@ -444,6 +465,11 @@ export class GlassesApp {
     try {
       const screen = await this.deps.source.screen(computerId, entry.panelId);
       working = screen.status === 'working';
+      // A tab opened while stopped starts once, as opening it in Pane does; polling shows it come up.
+      if (screen.status === 'stopped' && this.resumed !== entry.panelId) {
+        this.resumed = entry.panelId;
+        await this.deps.source.resume(computerId, entry.panelId);
+      }
       const current = this.view;
       if ((current.name === 'terminal' || current.name === 'dictation') && current.entry.panelId === entry.panelId) {
         this.view = { ...current, lines: terminalLines(screen.lines.join('\n')), entry: { ...current.entry, status: screen.status, agent: screen.agent } };

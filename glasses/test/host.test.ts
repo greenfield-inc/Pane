@@ -3,6 +3,7 @@ import { encodeGlassesPairingCode } from '../../shared/types/glasses';
 import type { NotifyItem, NotifySharedState } from '../../shared/types/notify';
 import { boundary, decodeBoundary, type JsonValue } from '../../shared/validation/boundaryDecoder';
 import { HostHub, pairComputers, type HostDeps, type PairedComputer } from '../src/host';
+import { isPaneEntry } from '../src/model';
 import type { Cancel } from '../src/timers';
 
 interface Seen {
@@ -284,8 +285,33 @@ describe('HostHub', () => {
     await until(() => one.computers()[0]?.status === 'live');
     expect(await one.panes(a.url)).toEqual([
       { kind: 'session', id: 's1', name: 'even g2 app', agent: 'Claude', status: 'idle', panelId: 'sp1' },
+      { kind: 'gap' },
       { kind: 'pane', id: 'p1', name: 'fix-login', agent: 'Claude', status: 'working', panelId: 'term' },
     ]);
+    one.stop();
+  });
+
+  it('orders rows as the Pane apps do: Pinned, Sessions, a gap, Panes, and says when Sessions are unavailable', async () => {
+    const a = host('https://studio.tail1.ts.net:8443');
+    const panes: JsonValue[] = [
+      { id: 'p1', name: 'alpha', isFavorite: true, favoritePinnedAt: '2026-10-01T00:00:00.000Z' },
+      { id: 'p2', name: 'beta', isFavorite: false },
+      { id: 'p3', name: 'gamma', isFavorite: true, favoritePinnedAt: '2026-10-20T00:00:00.000Z' },
+      { id: 'p4', name: 'hidden', isFavorite: false, isHidden: true },
+    ];
+    a.handlers.set('sessions:get-all-with-projects', () => ({ success: true, data: [{ sessions: panes }] }));
+    a.handlers.set('orchestration-sessions:list', () => ({ success: true, data: { sessions: [
+      { id: 's1', name: 'plain', isPinned: false, agent: 'claude', internalSessionId: 'i1', panelIds: { claude: 'sp1' } },
+      { id: 's2', name: 'starred', isPinned: true, agent: 'claude', internalSessionId: 'i2', panelIds: { claude: 'sp2' } },
+    ] } }));
+    a.handlers.set('panels:list', ([paneId]) => ({ success: true, data: [{ id: `t-${String(paneId)}`, type: 'terminal', title: 'Terminal', state: { isActive: true, customState: { isInitialized: true } } }] }));
+    const { hub: one } = hub([a]);
+    await until(() => one.computers()[0]?.status === 'live');
+    const names = async () => (await one.panes(a.url)).map((row) => ('name' in row ? row.name : row.kind === 'note' ? row.text : ''));
+    expect(await names()).toEqual(['starred', 'gamma', 'alpha', 'plain', '', 'beta']);
+
+    a.handlers.set('orchestration-sessions:list', () => ({ success: false, error: 'Sessions database is busy' }));
+    expect(await names()).toEqual(['gamma', 'alpha', 'Sessions unavailable', '', 'beta']);
     one.stop();
   });
 
@@ -305,7 +331,7 @@ describe('HostHub', () => {
     a.handlers.set('panels:list', ([paneId]) => ({ success: true, data: paneId === 'tool' ? tool : shells }));
     const { hub: one } = hub([a]);
     await until(() => one.computers()[0]?.status === 'live');
-    expect((await one.panes(a.url)).map((entry) => [entry.name, entry.panelId])).toEqual([['dev-server', 'runner'], ['shells', 'used']]);
+    expect((await one.panes(a.url)).filter(isPaneEntry).map((entry) => [entry.name, entry.panelId])).toEqual([['dev-server', 'runner'], ['shells', 'used']]);
     one.stop();
   });
 

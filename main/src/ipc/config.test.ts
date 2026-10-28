@@ -218,9 +218,10 @@ describe('config IPC handlers', () => {
       const services = createServicesStub([]);
       services.configManager = configManager;
       const registry = new PaneCommandRegistry();
+      const ipcMain = createIpcMainStub();
       // SAFETY: The stub implements the IpcMain handle surface exercised by registerConfigHandlers.
-      registerConfigHandlers(createIpcMainStub() as IpcMain, services, registry);
-      return { configManager, registry };
+      registerConfigHandlers(ipcMain as IpcMain, services, registry);
+      return { configManager, registry, ipcMain };
     }
 
     const screenshotShortcut = {
@@ -262,21 +263,33 @@ describe('config IPC handlers', () => {
       const { registry } = await registerRemoteSettings();
 
       // SAFETY: remote:settings:update returns the refreshed affordances.
-      const live = await registry.invokeRemote('remote:settings:update', [{ deepgramApiKey: 'dg-key-1' }]) as RemotePwaAffordances;
+      const live = await registry.invokeRemote('remote:settings:update', [{ deepgramApiKey: 'dg-key-0123456789abcdef' }]) as RemotePwaAffordances;
       expect(live.voiceTranscription.availableModes).toEqual(['streaming']);
       // SAFETY: remote:settings:update returns the refreshed affordances.
-      const both = await registry.invokeRemote('remote:settings:update', [{ falApiKey: 'fal-key-1' }]) as RemotePwaAffordances;
+      const both = await registry.invokeRemote('remote:settings:update', [{ falApiKey: 'fal-key-0123456789abcdef' }]) as RemotePwaAffordances;
       expect(both.voiceTranscription.availableModes).toEqual(['streaming', 'recorded']);
       expect(both.voiceTranscription.configured.cleanup).toBe(false);
     });
 
     it('leaves fields the patch omits as they were', async () => {
       const { configManager, registry } = await registerRemoteSettings();
-      await registry.invokeRemote('remote:settings:update', [{ openRouterApiKey: 'or-key-1' }]);
+      await registry.invokeRemote('remote:settings:update', [{ openRouterApiKey: 'or-key-0123456789abcdef' }]);
 
       await registry.invokeRemote('remote:settings:update', [{ terminalShortcuts: [screenshotShortcut] }]);
 
-      expect(configManager.getConfig().openRouterApiKey).toBe('or-key-1');
+      expect(configManager.getConfig().openRouterApiKey).toBe('or-key-0123456789abcdef');
+    });
+
+    it('refuses a voice key that cannot be one, from the phone or desktop, saying why without repeating it', async () => {
+      const { configManager, registry, ipcMain } = await registerRemoteSettings();
+      const prose = 'Here is the key Deepgram gave me — paste it below.';
+
+      await expect(registry.invokeRemote('remote:settings:update', [{ deepgramApiKey: prose }]))
+        .rejects.toMatchObject({ code: 'ERR_VOICE_KEY_INVALID', message: "That isn't a Deepgram key: it has spaces or line breaks. No settings were saved." });
+      const desktop = await ipcMain.handlers.get('config:update')?.({}, { falApiKey: 'fal-key-0123456789abcdef\u201d' });
+      expect(desktop).toEqual({ success: false, error: expect.stringContaining("That isn't a fal key: it has characters no key has") });
+      expect(JSON.stringify(desktop)).not.toContain('0123456789');
+      expect([configManager.getConfig().deepgramApiKey, configManager.getConfig().falApiKey]).toEqual([undefined, undefined]);
     });
 
     it('refuses a patch with any other config field and writes nothing', async () => {
@@ -324,7 +337,7 @@ describe('config IPC handlers', () => {
         const { registry } = await registerRemoteSettings();
         captureEvents();
 
-        await registry.invokeRemote('remote:settings:update', [{ falApiKey: 'fal-key-1' }]);
+        await registry.invokeRemote('remote:settings:update', [{ falApiKey: 'fal-key-0123456789abcdef' }]);
 
         expect(sent).toHaveBeenCalledWith('remote:settings-changed');
       });

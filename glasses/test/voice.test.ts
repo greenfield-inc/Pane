@@ -31,6 +31,7 @@ class FakeSocket {
 
 function voiceHost(sockets: FakeSocket[], calls: string[]): VoiceHost {
   return {
+    name: 'devbox',
     baseUrl: 'https://studio.tail1.ts.net:8443',
     token: 'pgt_secret',
     now: () => 1_000,
@@ -101,8 +102,23 @@ describe('voice', () => {
     ws.readyState = 3;
     ws.onclose?.();
     dictation.push(new Uint8Array([7]));
-    await expect(dictation.finish()).rejects.toThrow('The voice connection closed.');
+    await expect(dictation.finish()).rejects.toMatchObject({ code: 'ERR_GLASSES_VOICE_DROPPED', message: 'Lost the connection to devbox while listening.' });
     expect(calls).toEqual([]);
+  });
+
+  it("names the computer and the fix when the host says Deepgram refused its key", async () => {
+    const sockets: FakeSocket[] = [];
+    const dictation = await streamingDictation(voiceHost(sockets, []), () => {});
+    const [ws] = sockets;
+    if (!ws) throw new Error('no socket');
+    ws.onmessage?.(message(JSON.stringify({ type: 'Error', code: 'ERR_VOICE_KEY_REJECTED', message: 'Deepgram rejected the key saved on this computer (HTTP 401).' })));
+    ws.readyState = 3;
+    ws.onclose?.();
+    await expect(dictation.finish()).rejects.toMatchObject({
+      code: 'ERR_VOICE_KEY_REJECTED',
+      message: "Deepgram rejected devbox's key.",
+      next: 'Fix it in Pane on devbox: Settings › Integrations › Voice transcription.',
+    });
   });
 
   it('sends a recorded clip as one WAV on release when the host has no Deepgram key', async () => {
