@@ -1,0 +1,161 @@
+name: Native OTA Updates
+
+# Publishes the phone app's JavaScript as an over-the-air update: expo export,
+# one manifest per platform (native/scripts/build-updates.mts), an nginx image
+# (deploy/native-updates) and a deploy to Cloud Run. Pull requests build and
+# smoke-test the image without deploying. See native/README.md, "Over-the-air
+# updates".
+on:
+  push:
+    branches: [ main ]
+    paths: [ 'native/**', 'shared/**', 'pnpm-lock.yaml', 'deploy/native-updates/**', '.github/workflows/native-updates.yml' ]
+  pull_request:
+    paths: [ 'native/**', 'shared/**', 'pnpm-lock.yaml', 'deploy/native-updates/**', '.github/workflows/native-updates.yml' ]
+  workflow_dispatch:
+
+# Deploys run one at a time, newest last.
+concurrency:
+  group: native-updates-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID || 'pane-pwa-preview' }}
+  GCP_REGION: ${{ vars.GCP_REGION || 'us-central1' }}
+  GAR_REPOSITORY: ${{ vars.GAR_REPOSITORY || 'pane-preview' }}
+  CLOUD_RUN_SERVICE: pane-native-updates
+  CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT: ${{ vars.CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT || '' }}
+  # Must match updates.url in native/app.json, without /manifest.
+  UPDATES_BASE_URL: https://pane-native-updates-297294606300.us-central1.run.app
+  DEPLOY: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
+
+jobs:
+  publish:
+    name: Build and publish phone update
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+      with:
+        # The freshness check compares this commit with the deployed one.
+        fetch-depth: 0
+
+    - name: Setup Node.js and pnpm
+      uses: ./.github/actions/setup-pnpm
+
+    - name: Install dependencies
+      run: pnpm install --frozen-lockfile --ignore-scripts
+
+    - name: Export the JavaScript bundles
+      working-directory: native
+      run: |
+        set -euo pipefail
+        pnpm exec expo export --platform ios --platform android --output-dir "$RUNNER_TEMP/export"
+        pnpm exec expo config --type public --json > "$RUNNER_TEMP/expo-config.json"
+
+    - name: Write manifests
+      working-directory: native
+      run: |
+        set -euo pipefail
+        node scripts/build-updates.mts --dist "$RUNNER_TEMP/export" --config "$RUNNER_TEMP/expo-config.json" \
+          --base-url "$UPDATES_BASE_URL" --out "$RUNNER_TEMP/native-updates/site"
+        cp ../deploy/native-updates/Dockerfile ../deploy/native-updates/nginx.conf "$RUNNER_TEMP/native-updates/"
+
+    - name: Build and smoke-test the image
+      run: |
+        set -euo pipefail
+        runtime=$(jq -r .runtimeVersion "$RUNNER_TEMP/expo-config.json")
+        image="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${GAR_REPOSITORY}/${CLOUD_RUN_SERVICE}:${GITHUB_SHA}"
+        docker build --tag "$image" "$RUNNER_TEMP/native-updates"
+        docker run -d --name updates -p 8080:8080 "$image"
+        for _ in $(seq 20); do curl -fs http://127.0.0.1:8080/healthz > /dev/null && break; sleep 0.5; done
+        for platform in ios android; do
+          curl -fsS -D headers.txt -o manifest.json -H "expo-platform: $platform" -H "expo-runtime-version: $runtime" -H 'expo-protocol-version: 1' http://127.0.0.1:8080/manifest
+          grep -qi '^expo-protocol-version: 1' headers.txt || { echo "::error::$platform manifest has no expo-protocol-version header"; exit 1; }
+          url=$(jq -r .launchAsset.url manifest.json)
+          curl -fsS -o bundle "http://127.0.0.1:8080${url#"$UPDATES_BASE_URL"}"
+          [ "$(openssl dgst -sha256 -binary bundle | openssl base64 -A | tr '+/' '-_' | tr -d '=')" = "$(jq -r .launchAsset.hash manifest.json)" ] \
+            || { echo "::error::$platform bundle hash does not match its manifest"; exit 1; }
+          echo "$platform: update $(jq -r .id manifest.json), created $(jq -r .createdAt manifest.json)"
+        done
+        status=$(curl -s -o /dev/null -w '%{http_code}' -H 'expo-platform: ios' -H 'expo-runtime-version: 0.0-none' http://127.0.0.1:8080/manifest)
+        [ "$status" = 204 ] || { echo "::error::An unknown runtime got $status, expected 204"; exit 1; }
+        echo "IMAGE=$image" >> "$GITHUB_ENV"
+
+    - name: Authenticate to Google Cloud
+      if: env.DEPLOY == 'true'
+      uses: google-github-actions/auth@v3
+      with:
+        workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+        service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+    - name: Setup Google Cloud SDK
+      if: env.DEPLOY == 'true'
+      uses: google-github-actions/setup-gcloud@v3
+
+    # A re-run of an older commit, or runs that start out of order, must not
+    # replace a newer publication: phones would lose the newer update.
+    - name: Check the deployed update is not newer
+      id: freshness
+      if: env.DEPLOY == 'true'
+      run: |
+        set -euo pipefail
+        if ! image=$(gcloud run services describe "$CLOUD_RUN_SERVICE" --project="$GCP_PROJECT_ID" --region="$GCP_REGION" \
+            --format='value(spec.template.spec.containers[0].image)' 2> describe-error.txt); then
+          grep -qiE 'cannot find service|could not be found|not_found' describe-error.txt || { cat describe-error.txt; exit 1; }
+          image=""
+        fi
+        deployed="${image##*:}"
+        if [ -n "$deployed" ] && [ "$deployed" != "$GITHUB_SHA" ] && git merge-base --is-ancestor "$GITHUB_SHA" "$deployed" 2> /dev/null; then
+          echo "::warning::$CLOUD_RUN_SERVICE already serves $deployed, which is newer than $GITHUB_SHA. Nothing deployed; run this workflow on the tip of main to publish again."
+          echo "deploy=false" >> "$GITHUB_OUTPUT"
+        else
+          echo "Deployed: ${deployed:-none}. Publishing $GITHUB_SHA."
+          echo "deploy=true" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Push and deploy to Cloud Run
+      if: steps.freshness.outputs.deploy == 'true'
+      run: |
+        set -euo pipefail
+        gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet --project="${GCP_PROJECT_ID}"
+        docker push "$IMAGE"
+        runtime_service_account="${CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT:-pane-remote-pwa-runtime@${GCP_PROJECT_ID}.iam.gserviceaccount.com}"
+        gcloud run deploy "$CLOUD_RUN_SERVICE" \
+          --project="$GCP_PROJECT_ID" \
+          --region="$GCP_REGION" \
+          --platform=managed \
+          --image="$IMAGE" \
+          --service-account="$runtime_service_account" \
+          --no-invoker-iam-check \
+          --min-instances=0 \
+          --max-instances=1 \
+          --cpu=1 \
+          --memory=256Mi \
+          --port=8080 \
+          --quiet
+
+    # Phones ask the fixed address in native/app.json, so check that it serves
+    # the manifests this job wrote, and that their bundles download intact.
+    - name: Check the live manifest
+      if: steps.freshness.outputs.deploy == 'true'
+      run: |
+        set -euo pipefail
+        runtime=$(jq -er .runtimeVersion "$RUNNER_TEMP/expo-config.json")
+        for platform in ios android; do
+          expected=$(jq -er .id "$RUNNER_TEMP/native-updates/site/updates/$runtime/$platform/manifest.json")
+          status=$(curl -sS -D headers.txt -o manifest.json -w '%{http_code}' -H "expo-platform: $platform" -H "expo-runtime-version: $runtime" -H 'expo-protocol-version: 1' "$UPDATES_BASE_URL/manifest")
+          [ "$status" = 200 ] || { echo "::error::$UPDATES_BASE_URL/manifest answered $status for $platform runtime $runtime, expected 200 with update $expected"; exit 1; }
+          grep -qi '^expo-protocol-version: 1' headers.txt || { echo "::error::$UPDATES_BASE_URL/manifest has no expo-protocol-version header"; exit 1; }
+          live=$(jq -er .id manifest.json)
+          [ "$live" = "$expected" ] || { echo "::error::$platform serves update $live, expected $expected from this run"; exit 1; }
+          curl -fsS -o bundle "$(jq -er .launchAsset.url manifest.json)"
+          [ "$(openssl dgst -sha256 -binary bundle | openssl base64 -A | tr '+/' '-_' | tr -d '=')" = "$(jq -er .launchAsset.hash manifest.json)" ] \
+            || { echo "::error::The live $platform bundle does not match its manifest hash"; exit 1; }
+          echo "Live $platform: update $live, created $(jq -er .createdAt manifest.json)"
+        done
