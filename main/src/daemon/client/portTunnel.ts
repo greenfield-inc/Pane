@@ -148,8 +148,12 @@ function recordTunnelListeners(): void {
     }
     // Written to a new file, then renamed into place, so a host never reads half a file.
     const partial = `${file}.${Date.now()}.tmp`;
-    fs.writeFileSync(partial, JSON.stringify(ports), { flag: 'wx', mode: 0o600 });
-    fs.renameSync(partial, file);
+    try {
+      fs.writeFileSync(partial, JSON.stringify(ports), { flag: 'wx', mode: 0o600 });
+      fs.renameSync(partial, file);
+    } finally {
+      fs.rmSync(partial, { force: true });
+    }
   } catch (error) {
     throw new PaneError(
       'ERR_PORT_TUNNEL_REGISTRY',
@@ -200,8 +204,8 @@ export async function readTunnelListeners(): Promise<ReadonlyMap<number, Readonl
   } catch (error) {
     throw new PaneError(
       'ERR_PORT_TUNNEL_REGISTRY',
-      `Pane could not read the forwarded-port list in ${dir}: ${reasonOf(error)}. The Ports list was not updated.`,
-      `Make sure ${dir} is a folder you can read, then refresh the Ports list.`,
+      `Pane could not read the forwarded-port records in ${dir}: ${reasonOf(error)}. The Ports list was not updated.`,
+      `Delete ${dir}; Pane recreates it. Then refresh the Ports list.`,
     );
   }
   return byPid;
