@@ -113,7 +113,7 @@ export default function GlassesSettingsScreen() {
       {openError ? <Text variant="footnote" tone="danger">{openError}</Text> : null}
 
       {isPaired || pending.length > 0 ? (
-        <ListSection footer={pending.length > 0 ? `Revoke pending on ${pending.join(', ')}; it finishes when they answer. Each computer can also revoke in Settings › Remote Access › Glasses.` : undefined}>
+        <ListSection footer={pending.length > 0 ? `Revoke pending on ${pending.join(', ')}; it finishes when ${pending.length === 1 ? 'it answers' : 'they answer'}. Each computer can also revoke in Settings › Remote Access › Glasses.` : undefined}>
           <ListRow testID="glasses-revoke" title="Revoke Glasses" destructive onPress={confirmRevoke} />
         </ListSection>
       ) : null}
