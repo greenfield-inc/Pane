@@ -38,6 +38,12 @@ export interface PairedComputer {
 export const STORAGE_KEY = 'pane.glasses.computers';
 /** How long the glasses wait before trying an unreachable computer again. */
 const RETRY_MS = 10_000;
+/** How often a computer that refused the glasses is tried again, so Allow on the desktop recovers by itself. */
+const REFUSED_RETRY_MS = 30_000;
+/** Refusals only pairing again can fix; retrying them only feeds the host's lockout. */
+const PAIR_AGAIN_CODES = new Set(['ERR_GLASSES_TOKEN_INVALID', 'ERR_GLASSES_TOKEN_REQUIRED']);
+/** What a workspace answers a browser origin it doesn't allow (a simple request, so it is readable). */
+const BROWSER_REFUSED = 'ERR_WORKSPACE_BROWSER_REFUSED';
 const SCREEN_LINES = 40;
 const SCROLLBACK_LINES = 400;
 /** List changes (Panes made, archived, renamed) arrive in bursts; recount once they settle. */
@@ -344,11 +350,20 @@ export class HostConnection {
       if (now < this.lockedUntil) {
         throw new GlassesError('ERR_GLASSES_LOCKED_OUT', this.refusal?.message ?? `${this.paired.name} is ignoring these glasses for now.`, this.refusal?.next);
       }
-      const response = await this.deps.fetch(url, init);
+      let response: Response;
+      try {
+        response = await this.deps.fetch(url, init);
+      } catch (error) {
+        // A refused CORS preflight looks like a network error; ask the host which it is.
+        if (error instanceof TypeError) void this.probeOrigin();
+        throw error;
+      }
       if (!response.ok) {
         const refusal = await readRefusal(response);
         if (refusal) {
-          if (response.status === 429 && refusal.code === 'ERR_GLASSES_LOCKED_OUT') {
+          if (refusal.code === BROWSER_REFUSED) {
+            this.refusal = this.originRefusal();
+          } else if (response.status === 429 && refusal.code === 'ERR_GLASSES_LOCKED_OUT') {
             this.lockedUntil = now + lockoutSeconds(refusal) * 1000;
             refusal.retryAt = this.lockedUntil;
             this.refusal = refusal;
@@ -361,6 +376,36 @@ export class HostConnection {
       }
       return adaptResponse(response);
     };
+  }
+
+  private originRefusal(): HostRefusal {
+    return {
+      code: 'ERR_GLASSES_ORIGIN_REFUSED',
+      message: `${this.paired.name} doesn't allow this app (origin ${this.deps.origin}).`,
+      next: 'Allow it in Pane on that computer: Settings › Remote Access › Glasses › Allow.',
+    };
+  }
+
+  private probing = false;
+
+  /**
+   * After a network error, a plain GET /health with no token needs no preflight: a computer that
+   * no longer allows this origin answers it with a readable 403, one that is down doesn't answer.
+   */
+  private async probeOrigin(): Promise<void> {
+    if (this.probing || this.refusal) return;
+    this.probing = true;
+    try {
+      const response = await this.deps.fetch(`${this.paired.url}/health`, { method: 'GET' });
+      if (response.ok || (await readRefusal(response))?.code !== BROWSER_REFUSED) return;
+      this.refusal = this.originRefusal();
+      this.scheduleRetry();
+      this.changed();
+    } catch {
+      // Down or off the tailnet: the computer shows offline.
+    } finally {
+      this.probing = false;
+    }
   }
 
   /** Stops the client's own retries and tries once more when the lockout ends. */
@@ -380,9 +425,8 @@ export class HostConnection {
 
   private scheduleRetry(): void {
     if (this.stopped || this.retryTimer) return;
-    // A refusal other than a lockout waits for a press: retrying a bad token or origin only adds failures.
-    if (this.refusal && this.refusal.code !== 'ERR_GLASSES_LOCKED_OUT') return;
-    const wait = this.deps.now() < this.lockedUntil ? this.lockedUntil - this.deps.now() : RETRY_MS;
+    if (this.refusal && PAIR_AGAIN_CODES.has(this.refusal.code)) return;
+    const wait = this.deps.now() < this.lockedUntil ? this.lockedUntil - this.deps.now() : this.refusal ? REFUSED_RETRY_MS : RETRY_MS;
     this.retryTimer = this.deps.later(() => {
       this.retryTimer = null;
       void this.connect();

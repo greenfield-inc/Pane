@@ -30,6 +30,14 @@ describe('Display', () => {
     expect(upgrade?.method === 'upgrade' && [upgrade.update.containerID, upgrade.update.containerName, upgrade.update.content]).toEqual([2, 'body', 'second']);
   });
 
+  it('redraws a whole new screen at once, so no frame mixes the old body with the new header', async () => {
+    const bridge = new FakeBridge();
+    const display = new Display(bridge);
+    await display.show(page('devbox · not allowed', 'Allow this app.', 4));
+    await display.show(page('1/2 · needs you', 'Stub the clock?', 1));
+    expect(bridge.calls.map((call) => call.method)).toEqual(['create', 'rebuild']);
+  });
+
   it('upgrades a brightness change in place', async () => {
     const bridge = new FakeBridge();
     const display = new Display(bridge);

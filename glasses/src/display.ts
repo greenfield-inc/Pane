@@ -183,7 +183,15 @@ export class Display {
       this.shown = next;
       return;
     }
-    if (!this.shown || this.shown.layout !== next.layout) {
+    const shown = this.shown;
+    const changed = [...next.texts].filter(([name, want]) => {
+      const have = shown?.texts.get(name);
+      return !have || have.content !== want.content || have.brightness !== want.brightness;
+    }).length;
+    // A whole new screen goes in one rebuild: box-by-box upgrades would show the old body under
+    // the new header for a moment.
+    const wholeScreen = next.texts.size > 1 && changed === next.texts.size;
+    if (!shown || shown.layout !== next.layout || wholeScreen) {
       await this.bridge.rebuildPageContainer(new RebuildPageContainer(containers(page)));
       this.shown = next;
       return;
@@ -191,7 +199,7 @@ export class Display {
     for (const [index, box] of page.boxes.entries()) {
       if (box.kind !== 'text') continue;
       const want = next.texts.get(box.name);
-      const have = this.shown.texts.get(box.name);
+      const have = shown.texts.get(box.name);
       if (!want || (have && have.content === want.content && have.brightness === want.brightness)) continue;
       await this.bridge.textContainerUpgrade(new TextContainerUpgrade({
         containerID: index + 1,
@@ -199,7 +207,7 @@ export class Display {
         content: want.content,
         textColor: want.brightness,
       }));
-      this.shown.texts.set(box.name, want);
+      shown.texts.set(box.name, want);
     }
   }
 }

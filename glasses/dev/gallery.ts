@@ -25,6 +25,11 @@ const pages: Array<[string, Page]> = [
   ['error-no-computer-first-time', noComputerPage(1, noAnswerMessage('studio-mac', location.origin))],
   ['error-pairing-no-answer', pairingFailedPage([`${noAnswerMessage('studio-mac', location.origin)} Then paste again.`])],
   ['error-origin-refused', refusedPage('devbox', originRefusal)],
+  ['error-origin-removed', refusedPage('studio-mac', {
+    code: ORIGIN_REFUSED,
+    message: `studio-mac doesn't allow this app (origin ${location.origin}).`,
+    next: 'Allow it in Pane on that computer: Settings › Remote Access › Glasses › Allow.',
+  })],
   ['error-locked-out', refusedPage('devbox', {
     code: LOCKED_OUT,
     message: 'This computer refused too many glasses requests from this device, so it is ignoring it for 60 s.',

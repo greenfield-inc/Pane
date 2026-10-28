@@ -22,6 +22,11 @@ class FakeHost {
   refuse: { status: number; code: string; message: string; next?: string } | null = null;
   /** When set, requests fail the way a refused CORS preflight looks to a page: a network error. */
   unreachable = false;
+  /**
+   * When set, the app's origin is not allowed: a request with a token needs a CORS preflight,
+   * which fails as a network error, while a plain GET gets the host's readable 403.
+   */
+  originRemoved = false;
   private streams: Array<ReadableStreamDefaultController<Uint8Array>> = [];
 
   constructor(readonly url: string) {}
@@ -29,6 +34,10 @@ class FakeHost {
   fetch = async (url: string, init: { method?: string; headers?: Record<string, string>; body?: string } = {}): Promise<Response> => {
     this.seen.push({ url, method: init.method ?? 'GET', headers: init.headers ?? {}, body: init.body ?? '' });
     if (this.unreachable) throw new TypeError('Load failed');
+    if (this.originRemoved) {
+      if (init.headers?.Authorization || init.method === 'POST') throw new TypeError('Load failed');
+      return Response.json({ ok: false, error: { message: 'Workspaces answer the runpane CLI, not browsers.', code: 'ERR_WORKSPACE_BROWSER_REFUSED' } }, { status: 403 });
+    }
     if (this.refuse) {
       const { status, ...error } = this.refuse;
       return Response.json({ ok: false, error }, { status });
@@ -300,19 +309,33 @@ describe('HostHub', () => {
     one.stop();
   });
 
-  it("shows a refusal in the host's words and waits for a press instead of retrying", async () => {
+  it("shows a refusal in the host's words and tries again only every 30 s, or on a press", async () => {
     const a = host('https://studio.tail1.ts.net:8443');
     a.refuse = { status: 403, code: 'ERR_GLASSES_ORIGIN_REFUSED', message: 'This computer accepts glasses tokens only from the Even app; this request came from https://x.example.', next: 'Allow it in Settings › Remote Access › Glasses.' };
     const { hub: one, timers } = hub([a]);
     await until(() => one.computers()[0]?.status === 'refused');
     expect(one.computers()[0]?.refusal).toEqual({ code: 'ERR_GLASSES_ORIGIN_REFUSED', message: a.refuse.message, next: a.refuse.next });
     const sent = a.seen.length;
-    timers.advance(60_000);
+    timers.advance(20_000);
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(a.seen.length).toBe(sent);
+    timers.advance(10_000);
+    await until(() => a.seen.length > sent);
     a.refuse = null;
     one.retry(a.url);
     await until(() => one.computers()[0]?.status === 'live');
+    one.stop();
+  });
+
+  it('never retries a revoked token by itself, since only pairing again can fix it', async () => {
+    const a = host('https://studio.tail1.ts.net:8443');
+    a.refuse = { status: 401, code: 'ERR_GLASSES_TOKEN_INVALID', message: 'These glasses are not paired with this computer, or were revoked.', next: 'Pair again.' };
+    const { hub: one, timers } = hub([a]);
+    await until(() => one.computers()[0]?.status === 'refused');
+    const sent = a.seen.length;
+    timers.advance(600_000);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(a.seen.length).toBe(sent);
     one.stop();
   });
 
@@ -337,6 +360,43 @@ describe('HostHub', () => {
     a.unreachable = false;
     one.retry();
     await until(() => one.computers()[0]?.status === 'live', 1_000);
+    one.stop();
+  });
+
+  it('tells a removed origin from an unreachable computer, and recovers by itself once allowed again', async () => {
+    const a = host('https://studio.tail1.ts.net:8443');
+    const { hub: one, timers } = hub([a]);
+    await until(() => one.computers()[0]?.status === 'live');
+    a.originRemoved = true;
+    a.closeStreams();
+    for (let step = 0; step < 40 && one.computers()[0]?.status !== 'refused'; step += 1) {
+      timers.advance(1_000);
+      await flush();
+    }
+    const refusal = one.computers()[0]?.refusal;
+    expect(refusal?.code).toBe('ERR_GLASSES_ORIGIN_REFUSED');
+    expect(refusal?.message).toContain('https://even.example');
+    a.originRemoved = false;
+    for (let step = 0; step < 40 && one.computers()[0]?.status !== 'live'; step += 1) {
+      timers.advance(1_000);
+      await flush();
+    }
+    expect(one.computers()[0]?.status).toBe('live');
+    one.stop();
+  });
+
+  it('shows a computer that does not answer at all as offline, not refused', async () => {
+    const a = host('https://studio.tail1.ts.net:8443');
+    const { hub: one, timers } = hub([a]);
+    await until(() => one.computers()[0]?.status === 'live');
+    a.unreachable = true;
+    a.closeStreams();
+    for (let step = 0; step < 10; step += 1) {
+      timers.advance(1_000);
+      await flush();
+    }
+    expect(one.computers()[0]?.status).not.toBe('refused');
+    expect(one.computers()[0]?.status).not.toBe('live');
     one.stop();
   });
 

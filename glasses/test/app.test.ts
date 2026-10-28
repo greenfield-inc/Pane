@@ -3,6 +3,7 @@ import { GlassesApp } from '../src/app';
 import { DemoSource } from '../src/demo';
 import type { Page } from '../src/display';
 import type { Gesture } from '../src/input';
+import { orderCards, type Card, type Computer, type Dictation, type PaneEntry, type PaneSource, type TerminalScreen } from '../src/model';
 import type { Cancel } from '../src/timers';
 
 /** Timers the test runs by hand. */
@@ -194,5 +195,84 @@ describe('Panes and the terminal', () => {
     expect(text()[1]).toContain("devbox can't turn speech into text.");
     await press({ type: 'double' });
     expect(text()[0]).toBe('api-server · shell · idle');
+  });
+});
+
+/** Computers and cards a test sets by hand. */
+class ScriptedSource implements PaneSource {
+  readonly demo = false;
+  computerList: Computer[] = [{ id: 'studio', name: 'studio-mac', status: 'live', lastSeenAt: 1, paneCount: 1, workingCount: 0 }];
+  cardList: Card[] = [];
+  retried: Array<string | undefined> = [];
+  private readonly listeners = new Set<() => void>();
+
+  computers() { return this.computerList; }
+  cards() { return orderCards(this.cardList); }
+  subscribe(listener: () => void) {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+  changed() { for (const listener of this.listeners) listener(); }
+  async panes(): Promise<PaneEntry[]> { return []; }
+  async screen(): Promise<TerminalScreen> { return { lines: [], status: 'idle', agent: 'shell' }; }
+  async scrollback() { return []; }
+  async submit() {}
+  async answer() {}
+  async dictate(): Promise<Dictation> { throw new Error('no voice'); }
+  retry(computerId?: string) { this.retried.push(computerId); }
+}
+
+function card(id: string, createdAt: number, waiting = true): Card {
+  return { key: `studio:${id}`, computerId: 'studio', machine: 'studio-mac', itemId: id, ui: waiting ? 'options' : 'info', waiting, title: `title ${id}`, choices: ['Yes'], suggestions: [], paneName: `pane-${id}`, createdAt };
+}
+
+function startScripted() {
+  const clock = new Clock();
+  const source = new ScriptedSource();
+  const pages: Page[] = [];
+  const app = new GlassesApp({ source, show: (page) => pages.push(page), exit: () => {}, mic: async () => true, later: clock.later, now: () => clock.now, clock: () => '9:40' });
+  const text = () => (pages.at(-1)?.boxes ?? []).map((box) => (box.kind === 'list' ? box.items.join(' | ') : box.lines.join(' / ')));
+  return { app, source, text };
+}
+
+describe('a refused computer', () => {
+  it('is retried by a press on home, which shows it connecting rather than the same refusal', () => {
+    const { app, source, text } = startScripted();
+    source.computerList = [{ id: 'studio', name: 'studio-mac', status: 'refused', lastSeenAt: 1, paneCount: 0, workingCount: 0, refusal: { code: 'ERR_GLASSES_ORIGIN_REFUSED', message: "studio-mac doesn't allow this app.", next: 'Allow it.' } }];
+    source.changed();
+    expect(text()[0]).toBe('studio-mac · not allowed');
+    app.handle({ type: 'press' });
+    expect(source.retried).toEqual(['studio']);
+    // Retrying clears the refusal while the computer connects.
+    source.computerList = [{ id: 'studio', name: 'studio-mac', status: 'connecting', lastSeenAt: 1, paneCount: 0, workingCount: 0 }];
+    source.changed();
+    expect(text()[0]).toBe('Pane · 1 computer');
+    expect(text()[1]).toBe('Connecting to your computers…');
+  });
+});
+
+describe('a new question', () => {
+  it('takes page 1 when it arrives on the all-clear page', () => {
+    const { source, text } = startScripted();
+    expect(text()[0]).toBe('1/1 · Pane · 1 computer · all clear');
+    source.cardList = [card('q1', 10)];
+    source.changed();
+    expect(text()[0]).toBe('1/2 · needs you · pane-q1 · studio-mac');
+  });
+
+  it('takes page 1 when it arrives on the last page, and leaves any other page alone', () => {
+    const { app, source, text } = startScripted();
+    source.cardList = [card('i1', 5, false)];
+    source.changed();
+    app.handle({ type: 'down' });
+    expect(text()[0]).toBe('2/2 · Pane · 1 computer');
+    source.cardList = [card('i1', 5, false), card('q1', 10)];
+    source.changed();
+    expect(text()[0]).toBe('1/3 · needs you · pane-q1 · studio-mac');
+    app.handle({ type: 'down' });
+    expect(text()[0]).toBe('2/3 · info · pane-i1 · studio-mac');
+    source.cardList = [card('i1', 5, false), card('q1', 10), card('q2', 20)];
+    source.changed();
+    expect(text()[0]).toBe('3/4 · info · pane-i1 · studio-mac');
   });
 });

@@ -82,7 +82,11 @@ export class GlassesApp {
   private poll: Cancel | null = null;
   private readonly unsubscribe: () => void;
 
+  /** Every card key seen so far, so a question that just arrived can be told apart. */
+  private readonly seen = new Set<string>();
+
   constructor(private readonly deps: AppDeps) {
+    for (const card of deps.source.cards()) this.seen.add(card.key);
     this.unsubscribe = deps.source.subscribe(() => this.sourceChanged());
     this.render();
   }
@@ -109,6 +113,14 @@ export class GlassesApp {
   private sourceChanged(): void {
     const keys = new Set(this.deps.source.cards().map((card) => card.key));
     for (const key of this.answered) if (!keys.has(key)) this.answered.delete(key);
+    const arrived = this.deps.source.cards().filter((card) => !this.seen.has(card.key));
+    for (const card of arrived) this.seen.add(card.key);
+    // On the all-clear or "Open a Pane…" page, a new question takes page 1 (journey J2).
+    const question = arrived.find((card) => card.waiting);
+    if (this.view.name === 'home' && this.homeFocus === 'open' && question) {
+      this.homeFocus = this.cards()[0]?.key ?? 'open';
+      this.homeIndex = 0;
+    }
     const view = this.view;
     // A card answered on another screen leaves; go home rather than show a stale question.
     if ((view.name === 'card' || view.name === 'full') && !this.card(view.key)) this.view = { name: 'home' };
@@ -251,9 +263,11 @@ export class GlassesApp {
     const computers = source.computers();
     if (!source.demo && computers.length && !computers.some((computer) => computer.status === 'live')) {
       if (gesture.type === 'press') {
-        const refused = computers.find((computer) => computer.refusal);
-        if (refused) this.go({ name: 'refused', computerId: refused.id, back: { name: 'home' } });
+        // Retry now: a computer allowed again shows "Connecting…", then home, or its refusal again.
+        const refused = computers.filter((computer) => computer.refusal);
+        if (refused.length) for (const computer of refused) source.retry(computer.id);
         else source.retry();
+        this.render();
       } else if (gesture.type === 'double') this.deps.exit();
       return;
     }
