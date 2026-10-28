@@ -34,7 +34,8 @@ export default function GlassesSettingsScreen() {
   const devices = paired.data?.computers ?? [];
   const pairedOn = devices.filter(entry => entry.device);
   const isPaired = pairedOn.length > 0;
-  const pending = revoke.data?.pending ?? paired.data?.pending ?? [];
+  // Full DNS names, which can include computers on another tailnet; shown by their short name.
+  const pending = paired.data?.pending ?? [];
 
   const openEven = async () => {
     setOpenError(null);
@@ -70,7 +71,7 @@ export default function GlassesSettingsScreen() {
         {machines.data && !machines.data.ok ? <Text variant="footnote" tone="secondary">{machines.data.reason}. {machines.data.fix}</Text> : null}
         {computers.map(({ machine }) => {
           const entry = devices.find(candidate => candidate.name === machine.name);
-          const status = pending.includes(machine.name)
+          const status = pending.includes(machine.dnsName)
             ? 'revoke pending'
             : entry?.device
               ? `paired${entry.device.lastUsedAt ? `, last used ${new Date(entry.device.lastUsedAt).toLocaleString()}` : ''}`
@@ -78,7 +79,7 @@ export default function GlassesSettingsScreen() {
           return <ListRow key={machine.name} testID={`glasses-computer-${machine.name}`} title={machine.name} subtitle={status} />;
         })}
         {skipped.map(skip => (
-          <ListRow key={skip.name} testID={`glasses-computer-${skip.name}`} title={skip.name} subtitle={pending.includes(skip.name) ? 'revoke pending' : `${skip.reason}, skipped`} />
+          <ListRow key={skip.name} testID={`glasses-computer-${skip.name}`} title={skip.name} subtitle={pending.includes(skip.dnsName) ? 'revoke pending' : `${skip.reason}, skipped`} />
         ))}
       </ListSection>
 
@@ -113,7 +114,7 @@ export default function GlassesSettingsScreen() {
       {openError ? <Text variant="footnote" tone="danger">{openError}</Text> : null}
 
       {isPaired || pending.length > 0 ? (
-        <ListSection footer={pending.length > 0 ? `Revoke pending on ${pending.join(', ')}; it finishes when ${pending.length === 1 ? 'it answers' : 'they answer'}. Each computer can also revoke in Settings › Remote Access › Glasses.` : undefined}>
+        <ListSection footer={pending.length > 0 ? `Revoke pending on ${pending.map(dnsName => dnsName.split('.')[0]).join(', ')}; it finishes when ${pending.length === 1 ? 'it answers' : 'they answer'}. Each computer can also revoke in Settings › Remote Access › Glasses.` : undefined}>
           <ListRow testID="glasses-revoke" title="Revoke Glasses" destructive onPress={confirmRevoke} />
         </ListSection>
       ) : null}

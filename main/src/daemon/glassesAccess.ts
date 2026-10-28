@@ -67,6 +67,7 @@ interface GlassesConfigStore {
 interface PendingSecret {
   hash: Buffer;
   label: string;
+  phoneId: string;
   expiresAt: number;
 }
 
@@ -163,20 +164,20 @@ export class GlassesAccess {
   }
 
   /** A single-use secret the glasses trade once, within 10 minutes, for their device token. */
-  createPairingSecret(deviceName: string): GlassesPairingSecretResult {
+  createPairingSecret(deviceName: string, phoneId: string): GlassesPairingSecretResult {
     const label = cleanDeviceName(deviceName);
     const now = this.now();
     this.prunePending(now);
     if (this.pending.length >= MAX_PENDING_SECRETS) this.pending.shift();
     const secret = `${GLASSES_PAIRING_SECRET_PREFIX}${randomBytes(32).toString('base64url')}`;
     const expiresAt = now + PAIRING_SECRET_TTL_MS;
-    this.pending.push({ hash: sha256(secret), label, expiresAt });
+    this.pending.push({ hash: sha256(secret), label, phoneId, expiresAt });
     return { secret, expiresAt: new Date(expiresAt).toISOString() };
   }
 
   /**
    * Trades a pairing secret for a new device token. The secret is consumed. An earlier token
-   * for the same device name is revoked, so pairing again replaces it.
+   * paired from the same phone is revoked, so pairing again replaces it.
    */
   async pair(secret: string): Promise<{ token: string; device: GlassesDevice } | null> {
     const now = this.now();
@@ -184,7 +185,7 @@ export class GlassesAccess {
     const presented = sha256(secret);
     const index = this.pending.findIndex((candidate) => timingSafeEqual(candidate.hash, presented));
     if (index === -1) return null;
-    const [{ label }] = this.pending.splice(index, 1);
+    const [{ label, phoneId }] = this.pending.splice(index, 1);
     const token = `${GLASSES_TOKEN_PREFIX}${randomBytes(32).toString('base64url')}`;
     const record: RemoteDaemonClientRecord = {
       id: `glasses-${randomUUID()}`,
@@ -192,8 +193,9 @@ export class GlassesAccess {
       createdAt: new Date(now).toISOString(),
       tokenHash: tokenHash(token).toString('hex'),
       kind: 'glasses',
+      phoneId,
     };
-    const replaced = this.list().filter((device) => device.label === label).map((device) => device.id);
+    const replaced = this.list().filter((device) => device.phoneId === phoneId).map((device) => device.id);
     await this.writeClients((clients) => [...clients.filter((client) => !replaced.includes(client.id)), record]);
     for (const id of replaced) this.emitRevoked(id);
     return { token, device: toDevice(record) };
@@ -359,6 +361,7 @@ function sha256(value: string): Buffer {
 
 function toDevice(record: RemoteDaemonClientRecord): GlassesDevice {
   const device: GlassesDevice = { id: record.id, label: record.label, createdAt: record.createdAt };
+  if (record.phoneId) device.phoneId = record.phoneId;
   if (record.lastUsedAt) device.lastUsedAt = record.lastUsedAt;
   return device;
 }

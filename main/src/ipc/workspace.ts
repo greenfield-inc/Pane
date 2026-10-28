@@ -32,7 +32,7 @@ const execRequestSchema = boundary.object({
   timeoutMs: boundary.optional(boundary.number),
 });
 const setEnabledRequestSchema = boundary.object({ enabled: boundary.boolean });
-const pairingSecretRequestSchema = boundary.object({ deviceName: boundary.string });
+const pairingSecretRequestSchema = boundary.object({ deviceName: boundary.string, phoneId: boundary.nonEmptyString });
 const revokeGlassesRequestSchema = boundary.object({ id: boundary.nonEmptyString });
 const setGlassesOriginRequestSchema = boundary.object({ origin: boundary.nonEmptyString, allowed: boundary.boolean });
 const setAccessRequestSchema = boundary.object({
@@ -111,8 +111,10 @@ export function registerWorkspaceCommands(
   // Describe answers clients admitted by visibility and password checks.
   registry.register('runpane:workspaces:describe', describe);
   // The HTTP transport serves these only to the owner's own devices without a glasses token.
-  registry.register(GLASSES_COMMANDS.createPairingSecret, (request: PaneCommandValue): GlassesPairingSecretResult =>
-    host.glasses.createPairingSecret(decodeBoundary(request, pairingSecretRequestSchema).deviceName));
+  registry.register(GLASSES_COMMANDS.createPairingSecret, (request: PaneCommandValue): GlassesPairingSecretResult => {
+    const { deviceName, phoneId } = decodeBoundary(request, pairingSecretRequestSchema);
+    return host.glasses.createPairingSecret(deviceName, phoneId);
+  });
   registry.register(GLASSES_COMMANDS.list, (): GlassesListResult => ({ devices: host.glasses.list() }));
   registry.register(GLASSES_COMMANDS.revoke, async (request: PaneCommandValue): Promise<GlassesRevokeResult> =>
     ({ revoked: await host.glasses.revoke(decodeBoundary(request, revokeGlassesRequestSchema).id) }));

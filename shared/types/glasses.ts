@@ -26,6 +26,8 @@ export interface GlassesDevice {
   id: string;
   /** Who the glasses are, such as "Even G2 · Parsa's iPhone"; shown on every list and Notify answer. */
   label: string;
+  /** The install id of the phone that paired them, which finds them again however the phone is named. */
+  phoneId?: string;
   createdAt: string;
   lastUsedAt?: string;
 }

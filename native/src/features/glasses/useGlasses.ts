@@ -7,7 +7,7 @@ import { boundary, decodeOptionalBoundary } from '@shared/validation/boundaryDec
 
 import { useActiveHost, useHostsStore } from '@/auth/hostsStore';
 import { secureStore } from '@/auth/secureStore';
-import { createDaemonClient, DEVICE_LABEL } from '@/daemon/createClient';
+import { createDaemonClient, DEVICE_LABEL, getRuntimeId } from '@/daemon/createClient';
 import { invokeChannel } from '@/daemon/invoke';
 import { useComputers } from '@/features/computers/useComputers';
 
@@ -20,7 +20,7 @@ import {
   type GlassesInvoke,
 } from './glassesPairing';
 
-/** Computers where a revoke could not reach yet; retried each time Settings › Glasses opens. */
+/** Full DNS names of computers a revoke could not reach yet; retried each time Settings › Glasses opens. */
 const PENDING_REVOKES_KEY = 'pane.glasses.pendingRevokes';
 
 const CONNECT_TIMEOUT_MS = 10_000;
@@ -81,20 +81,21 @@ export function useGlasses() {
     queryKey: [directory?.id ?? null, 'runpane:glasses:list', names],
     enabled: computers.length > 0,
     queryFn: async () => {
+      const phoneId = await getRuntimeId();
       const pending = await readPending();
       // A revoke that couldn't reach a computer earlier finishes once it answers.
-      const reachablePending = computers.filter(computer => pending.includes(computer.machine.name));
+      const reachablePending = computers.filter(computer => pending.includes(computer.machine.dnsName));
       if (reachablePending.length > 0) {
-        const result = await revokeGlassesOnComputers(reachablePending, pending, deviceName, invoke);
+        const result = await revokeGlassesOnComputers(reachablePending, pending, phoneId, invoke);
         await secureStore.setItem(PENDING_REVOKES_KEY, JSON.stringify(result.pending));
       }
-      return { computers: await listGlassesOnComputers(computers, deviceName, invoke), pending: await readPending() };
+      return { computers: await listGlassesOnComputers(computers, phoneId, invoke), pending: await readPending() };
     },
   });
 
   const pair = useMutation({
     mutationFn: async () => {
-      const result = await createGlassesPairingCode(computers, deviceName, invoke);
+      const result = await createGlassesPairingCode(computers, { name: deviceName, id: await getRuntimeId() }, invoke);
       if (result.code) await Clipboard.setStringAsync(result.code);
       return result;
     },
@@ -103,14 +104,13 @@ export function useGlasses() {
 
   const revoke = useMutation({
     mutationFn: async () => {
-      const result = await revokeGlassesOnComputers(computers, await readPending(), deviceName, invoke);
+      const result = await revokeGlassesOnComputers(computers, await readPending(), await getRuntimeId(), invoke);
       // Offline computers are revoked when they next answer.
-      const unseen = skipped.filter(skip => skip.reason === 'offline').map(skip => skip.name);
-      const pending = [...new Set([...result.pending, ...unseen])].sort();
-      await secureStore.setItem(PENDING_REVOKES_KEY, JSON.stringify(pending));
-      return { revoked: result.revoked, pending };
+      const unseen = skipped.filter(skip => skip.reason === 'offline').map(skip => skip.dnsName);
+      await secureStore.setItem(PENDING_REVOKES_KEY, JSON.stringify([...new Set([...result.pending, ...unseen])].sort()));
     },
-    onSettled: () => void queryClient.invalidateQueries({ queryKey: [directory?.id ?? null, 'runpane:glasses:list'] }),
+    // The screen shows what is still pending from the refreshed list, once it has refreshed.
+    onSettled: () => queryClient.invalidateQueries({ queryKey: [directory?.id ?? null, 'runpane:glasses:list'] }),
   });
 
   return { directory, machines, computers, skipped, deviceName, paired, pair, revoke };

@@ -82,6 +82,8 @@ export interface RemoteDaemonClientRecord {
   lastUsedAt?: string;
   /** "glasses": a Pane glasses app token, admitted only on the workspace listener with its narrow scope. Absent: a paired client with full access. */
   kind?: 'glasses';
+  /** Glasses only: the install id of the phone that paired them; pairing again from that phone replaces them. */
+  phoneId?: string;
 }
 
 export interface RemotePaneConnectionProfile {
@@ -473,6 +475,7 @@ const remoteClientRecordSchema: BoundarySchema<RemoteDaemonClientRecord> = bound
   tokenHash: boundary.nonEmptyString,
   lastUsedAt: boundary.optional(boundary.nonEmptyString),
   kind: boundary.optional(boundary.literal('glasses')),
+  phoneId: boundary.optional(boundary.nonEmptyString),
 });
 const remoteTunnelSchema: BoundarySchema<NonNullable<PaneRemoteConnectionImportPayload['tunnel']>> = boundary.object({
   kind: boundary.enumeration('ssh', 'tailscale', 'manual'),

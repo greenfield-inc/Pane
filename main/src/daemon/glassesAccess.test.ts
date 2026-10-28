@@ -1,5 +1,6 @@
 import http from 'http';
-import WebSocket from 'ws';
+import type { AddressInfo } from 'net';
+import WebSocket, { WebSocketServer } from 'ws';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppConfig } from '../types/config';
 import { PaneCommandRegistry, type PaneCommandValue } from './commandRegistry';
@@ -31,7 +32,7 @@ interface Response {
   body: JsonValue;
 }
 
-async function setup(options: { visibility?: WorkspaceAccessPolicy['visibility']; heartbeatIntervalMs?: number } = {}) {
+async function setup(options: { visibility?: WorkspaceAccessPolicy['visibility']; heartbeatIntervalMs?: number; deepgramListenEndpoint?: string } = {}) {
   let config: Pick<AppConfig, 'remoteDaemon' | 'workspaces'> = { remoteDaemon: createDefaultRemoteDaemonConfig() };
   const store = {
     getConfig: () => config,
@@ -53,8 +54,10 @@ async function setup(options: { visibility?: WorkspaceAccessPolicy['visibility']
   for (const channel of ['runpane:panels:screen', 'runpane:panels:submit', 'notify:remote-command', 'file:write', 'git:commit', 'runpane:machine:exec', 'remote:settings:update', 'terminal:input']) {
     record(channel);
   }
-  registry.register(GLASSES_COMMANDS.createPairingSecret, (request: PaneCommandValue) =>
-    glasses.createPairingSecret(decodeBoundary(request, boundary.object({ deviceName: boundary.string })).deviceName));
+  registry.register(GLASSES_COMMANDS.createPairingSecret, (request: PaneCommandValue) => {
+    const { deviceName, phoneId } = decodeBoundary(request, boundary.object({ deviceName: boundary.string, phoneId: boundary.string }));
+    return glasses.createPairingSecret(deviceName, phoneId);
+  });
   registry.register(GLASSES_COMMANDS.list, () => ({ devices: glasses.list() }));
   const access = (): WorkspaceAccessPolicy => ({
     ownerLogin: OWNER,
@@ -64,6 +67,7 @@ async function setup(options: { visibility?: WorkspaceAccessPolicy['visibility']
   });
   const server = new PaneRemoteHttpApiServer(registry, { getConfig: () => ({ remoteDaemon: config.remoteDaemon }) }, {
     heartbeatIntervalMs: options.heartbeatIntervalMs,
+    deepgramListenEndpoint: options.deepgramListenEndpoint,
     workspace: { listenPort: 0, pathSecret: 'serve-secret', access, glasses },
   });
   servers.push(server);
@@ -92,8 +96,8 @@ async function setup(options: { visibility?: WorkspaceAccessPolicy['visibility']
   /** The owner's Pane phone app: identity, no Origin. */
   const fromPhone = { 'Tailscale-User-Login': OWNER };
 
-  const pair = async (deviceName = 'Even G2 · iPhone') => {
-    const minted = await invoke(GLASSES_COMMANDS.createPairingSecret, [{ deviceName }], fromPhone);
+  const pair = async (deviceName = 'Even G2 · iPhone', phoneId = 'pane-native-phone-a') => {
+    const minted = await invoke(GLASSES_COMMANDS.createPairingSecret, [{ deviceName, phoneId }], fromPhone);
     const secret = readString(minted.body, 'result', 'secret');
     const paired = await invoke(GLASSES_COMMANDS.pair, [{ secret }], fromGlasses());
     return { secret, token: readString(paired.body, 'result', 'token'), paired };
@@ -138,9 +142,21 @@ describe('glasses on the workspace listener', () => {
     expect(listed.body).toMatchObject({ ok: true, result: { devices: [{ label: 'Even G2 · iPhone' }] } });
   });
 
+  it('tells two phones with the same name apart, and replaces only the glasses a phone paired before', async () => {
+    const host = await setup();
+    const first = await host.pair('Even G2 · iPhone', 'pane-native-phone-a');
+    const other = await host.pair('Even G2 · iPhone', 'pane-native-phone-b');
+    const again = await host.pair('Even G2 · iPhone', 'pane-native-phone-a');
+
+    expect(host.glasses.verifyToken(first.token)).toBeNull();
+    expect(host.glasses.verifyToken(other.token)?.phoneId).toBe('pane-native-phone-b');
+    expect(host.glasses.verifyToken(again.token)?.phoneId).toBe('pane-native-phone-a');
+    expect(host.glasses.list().map((device) => device.phoneId).sort()).toEqual(['pane-native-phone-a', 'pane-native-phone-b']);
+  });
+
   it('refuses a pairing secret that is more than 10 minutes old', async () => {
     const host = await setup();
-    const minted = await host.invoke(GLASSES_COMMANDS.createPairingSecret, [{ deviceName: 'Even G2' }], host.fromPhone);
+    const minted = await host.invoke(GLASSES_COMMANDS.createPairingSecret, [{ deviceName: 'Even G2', phoneId: 'pane-native-phone-a' }], host.fromPhone);
     host.advance(10 * 60_000 + 1);
     const late = await host.invoke(GLASSES_COMMANDS.pair, [{ secret: readString(minted.body, 'result', 'secret') }], host.fromGlasses());
     expect(late.status).toBe(403);
@@ -298,6 +314,63 @@ describe('glasses on the workspace listener', () => {
     });
     await host.glasses.setOwnerOrigin(origin, false);
     await vi.waitFor(() => expect(closed).toBe(true), { timeout: 1000 });
+  });
+
+  it('runs no command whose body arrives after the glasses lost access', async () => {
+    const host = await setup();
+    const { token } = await host.pair();
+    const origin = 'https://plugins.even.example';
+    await host.glasses.setOwnerOrigin(origin, true);
+    /** Sends the headers now and the body only after `withdraw` has run. */
+    const slowSubmit = (headers: Record<string, string>, withdraw: () => Promise<void>) => new Promise<Response>((resolve, reject) => {
+      const req = http.request({ host: '127.0.0.1', port: host.port, method: 'POST', path: '/serve-secret/invoke', headers: { 'Content-Type': 'application/json', ...headers } }, (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (chunk: Buffer) => chunks.push(chunk));
+        res.on('end', () => resolve({ status: res.statusCode ?? 0, headers: res.headers, body: decodeBoundary(JSON.parse(Buffer.concat(chunks).toString('utf8')), boundary.json) }));
+      });
+      req.once('error', reject);
+      req.write('{"channel":"runpane:panels:submit",');
+      req.flushHeaders();
+      setTimeout(() => {
+        void withdraw().then(() => req.end('"args":[{"text":"rm -rf build"}]}'), reject);
+      }, 50);
+    });
+
+    const afterOriginRemoved = await slowSubmit(host.fromGlasses(token, { Origin: origin }), async () => { await host.glasses.setOwnerOrigin(origin, false); });
+    const afterRevoke = await slowSubmit(host.fromGlasses(token), async () => { await host.glasses.revoke(host.glasses.list()[0].id); });
+
+    expect([afterOriginRemoved.status, errorCode(afterOriginRemoved)]).toEqual([403, 'ERR_GLASSES_ACCESS_WITHDRAWN']);
+    expect([afterRevoke.status, errorCode(afterRevoke)]).toEqual([403, 'ERR_GLASSES_ACCESS_WITHDRAWN']);
+    expect(host.calls).toEqual([]);
+  });
+
+  it('closes an open voice stream when the owner removes the origin it came in with', async () => {
+    const upstream = new WebSocketServer({ port: 0 });
+    let upstreamClosed = false;
+    upstream.on('connection', (socket) => socket.once('close', () => { upstreamClosed = true; }));
+    await new Promise<void>((resolve) => upstream.once('listening', resolve));
+    vi.stubEnv('DEEPGRAM_API_KEY', 'test-key');
+    try {
+      // SAFETY: a TCP server that is listening reports an AddressInfo.
+      const host = await setup({ heartbeatIntervalMs: 50, deepgramListenEndpoint: `ws://127.0.0.1:${(upstream.address() as AddressInfo).port}` });
+      const { token } = await host.pair();
+      const origin = 'https://plugins.even.example';
+      await host.glasses.setOwnerOrigin(origin, true);
+      const socket = new WebSocket(`ws://127.0.0.1:${host.port}/serve-secret/voice/deepgram-stream`, ['pane-glasses', token], {
+        headers: { 'Tailscale-User-Login': OWNER, Origin: origin },
+      });
+      let closed = false;
+      socket.once('close', () => { closed = true; });
+      await new Promise<void>((resolve, reject) => {
+        socket.once('open', () => resolve());
+        socket.once('error', reject);
+      });
+
+      await host.glasses.setOwnerOrigin(origin, false);
+      await vi.waitFor(() => expect([closed, upstreamClosed]).toEqual([true, true]), { timeout: 1000 });
+    } finally {
+      await new Promise<void>((resolve) => upstream.close(() => resolve()));
+    }
   });
 
   it('carries the voice token in the WebSocket subprotocol and checks the origin there too', async () => {

@@ -24,7 +24,15 @@ export type GlassesInvoke = (profile: RemotePaneConnectionProfile, channel: stri
 
 export interface GlassesSkip {
   name: string;
+  /** The computer's full name, unique across tailnets, such as "devbox.tail1234.ts.net". */
+  dnsName: string;
   reason: string;
+}
+
+/** This phone: the name the glasses are shown by, and its install id, which finds them again. */
+export interface GlassesPhone {
+  name: string;
+  id: string;
 }
 
 const secretSchema: BoundarySchema<GlassesPairingSecretResult> = boundary.object({
@@ -35,6 +43,7 @@ const listSchema: BoundarySchema<GlassesListResult> = boundary.object({
   devices: boundary.array(boundary.object({
     id: boundary.nonEmptyString,
     label: boundary.nonEmptyString,
+    phoneId: boundary.optional(boundary.nonEmptyString),
     createdAt: boundary.nonEmptyString,
     lastUsedAt: boundary.optional(boundary.nonEmptyString),
   })),
@@ -62,11 +71,11 @@ export function pairableComputers(
     if (machine.state === 'available' || (machine.state === 'password-required' && savedProfile?.token)) {
       computers.push({ machine, profile: savedProfile ?? codelessProfile(machine, domain) });
     } else if (machine.state === 'password-required') {
-      skipped.push({ name: machine.name, reason: 'needs its password; connect to it once in Your Computers' });
+      skipped.push({ name: machine.name, dnsName: machine.dnsName, reason: 'needs its password; connect to it once in Your Computers' });
     } else if (machine.state === 'outdated') {
-      skipped.push({ name: machine.name, reason: 'update Pane there' });
+      skipped.push({ name: machine.name, dnsName: machine.dnsName, reason: 'update Pane there' });
     } else {
-      skipped.push({ name: machine.name, reason: 'offline' });
+      skipped.push({ name: machine.name, dnsName: machine.dnsName, reason: 'offline' });
     }
   }
   return { computers, skipped };
@@ -79,17 +88,17 @@ export function pairableComputers(
  */
 export async function createGlassesPairingCode(
   computers: readonly GlassesComputer[],
-  deviceName: string,
+  phone: GlassesPhone,
   invoke: GlassesInvoke,
 ): Promise<{ code: string | null; expiresAt: string | null; paired: string[]; skipped: GlassesSkip[] }> {
   const entries: { entry: GlassesPairingComputer; expiresAt: string }[] = [];
   const skipped: GlassesSkip[] = [];
   await Promise.all(computers.map(async ({ machine, profile }) => {
     try {
-      const minted = decodeBoundary(await invoke(profile, GLASSES_COMMANDS.createPairingSecret, [{ deviceName }]), secretSchema);
+      const minted = decodeBoundary(await invoke(profile, GLASSES_COMMANDS.createPairingSecret, [{ deviceName: phone.name, phoneId: phone.id }]), secretSchema);
       entries.push({ entry: { name: machine.name, url: machine.url, secret: minted.secret }, expiresAt: minted.expiresAt });
     } catch (cause) {
-      skipped.push({ name: machine.name, reason: isOlderPane(cause) ? OLDER_PANE : reasonOf(cause) });
+      skipped.push({ name: machine.name, dnsName: machine.dnsName, reason: isOlderPane(cause) ? OLDER_PANE : reasonOf(cause) });
     }
   }));
   const [expiresAt] = entries.map(entry => entry.expiresAt).sort();
@@ -103,16 +112,16 @@ export async function createGlassesPairingCode(
   };
 }
 
-/** These glasses on each computer; `problem` says why a computer could not be asked. */
+/** The glasses this phone paired, on each computer; `problem` says why a computer could not be asked. */
 export async function listGlassesOnComputers(
   computers: readonly GlassesComputer[],
-  deviceName: string,
+  phoneId: string,
   invoke: GlassesInvoke,
 ): Promise<{ name: string; device: GlassesDevice | null; problem: string | null }[]> {
   return Promise.all(computers.map(async ({ machine, profile }) => {
     try {
       const { devices } = decodeBoundary(await invoke(profile, GLASSES_COMMANDS.list, []), listSchema);
-      return { name: machine.name, device: devices.find(device => device.label === deviceName) ?? null, problem: null };
+      return { name: machine.name, device: devices.find(device => device.phoneId === phoneId) ?? null, problem: null };
     } catch (cause) {
       return { name: machine.name, device: null, problem: isOlderPane(cause) ? OLDER_PANE : 'not answering' };
     }
@@ -120,13 +129,15 @@ export async function listGlassesOnComputers(
 }
 
 /**
- * Revokes these glasses on every computer that answers. The names it could not reach come back
- * as pending, to retry when they are next reachable; each computer's own Settings also revokes.
+ * Revokes the glasses this phone paired on every computer that answers. Pending revokes are kept
+ * by full DNS name, so a computer of the same name on another tailnet never settles them; the
+ * ones it could not reach come back pending, to retry when they are next reachable. Each
+ * computer's own Settings also revokes.
  */
 export async function revokeGlassesOnComputers(
   computers: readonly GlassesComputer[],
   pending: readonly string[],
-  deviceName: string,
+  phoneId: string,
   invoke: GlassesInvoke,
 ): Promise<{ revoked: string[]; pending: string[] }> {
   const revoked: string[] = [];
@@ -134,15 +145,15 @@ export async function revokeGlassesOnComputers(
   await Promise.all(computers.map(async ({ machine, profile }) => {
     try {
       const { devices } = decodeBoundary(await invoke(profile, GLASSES_COMMANDS.list, []), listSchema);
-      for (const device of devices.filter(candidate => candidate.label === deviceName)) {
+      for (const device of devices.filter(candidate => candidate.phoneId === phoneId)) {
         await invoke(profile, GLASSES_COMMANDS.revoke, [{ id: device.id }]);
       }
       revoked.push(machine.name);
-      stillPending.delete(machine.name);
+      stillPending.delete(machine.dnsName);
     } catch (cause) {
       // A Pane without glasses support never held these glasses: nothing is left to revoke there.
-      if (isOlderPane(cause)) stillPending.delete(machine.name);
-      else stillPending.add(machine.name);
+      if (isOlderPane(cause)) stillPending.delete(machine.dnsName);
+      else stillPending.add(machine.dnsName);
     }
   }));
   return { revoked: revoked.sort(), pending: [...stillPending].sort() };
