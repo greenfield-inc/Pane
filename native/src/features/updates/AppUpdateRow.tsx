@@ -1,5 +1,6 @@
 import Constants from 'expo-constants';
 import * as Updates from 'expo-updates';
+import { Alert } from 'react-native';
 
 import { useTheme } from '@/theme';
 import { Icon, ListRow } from '@/ui';
@@ -41,7 +42,10 @@ export function AppUpdateRow() {
         title={row.title}
         subtitle={row.subtitle}
         leading={<Icon ios="arrow.clockwise.circle.fill" android="refresh" size={20} color={theme.colors.accentText} />}
-        onPress={() => void Updates.reloadAsync()}
+        onPress={() => void Updates.reloadAsync().catch(() => Alert.alert(
+          'Couldn\'t restart into the update',
+          'Pane kept running the current version. Close Pane and open it again to use the update.',
+        ))}
       />
     );
   }
