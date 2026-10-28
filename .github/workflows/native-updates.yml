@@ -41,6 +41,9 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v7
+      with:
+        # The freshness check compares this commit with the deployed one.
+        fetch-depth: 0
 
     - name: Setup Node.js and pnpm
       uses: ./.github/actions/setup-pnpm
@@ -95,8 +98,29 @@ jobs:
       if: env.DEPLOY == 'true'
       uses: google-github-actions/setup-gcloud@v3
 
-    - name: Push and deploy to Cloud Run
+    # A re-run of an older commit, or runs that start out of order, must not
+    # replace a newer publication: phones would lose the newer update.
+    - name: Check the deployed update is not newer
+      id: freshness
       if: env.DEPLOY == 'true'
+      run: |
+        set -euo pipefail
+        if ! image=$(gcloud run services describe "$CLOUD_RUN_SERVICE" --project="$GCP_PROJECT_ID" --region="$GCP_REGION" \
+            --format='value(spec.template.spec.containers[0].image)' 2> describe-error.txt); then
+          grep -qiE 'cannot find service|could not be found|not_found' describe-error.txt || { cat describe-error.txt; exit 1; }
+          image=""
+        fi
+        deployed="${image##*:}"
+        if [ -n "$deployed" ] && [ "$deployed" != "$GITHUB_SHA" ] && git merge-base --is-ancestor "$GITHUB_SHA" "$deployed" 2> /dev/null; then
+          echo "::warning::$CLOUD_RUN_SERVICE already serves $deployed, which is newer than $GITHUB_SHA. Nothing deployed; run this workflow on the tip of main to publish again."
+          echo "deploy=false" >> "$GITHUB_OUTPUT"
+        else
+          echo "Deployed: ${deployed:-none}. Publishing $GITHUB_SHA."
+          echo "deploy=true" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Push and deploy to Cloud Run
+      if: steps.freshness.outputs.deploy == 'true'
       run: |
         set -euo pipefail
         gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet --project="${GCP_PROJECT_ID}"
@@ -116,12 +140,22 @@ jobs:
           --port=8080 \
           --quiet
 
-    # Phones ask the fixed address in native/app.json, so check that one.
+    # Phones ask the fixed address in native/app.json, so check that it serves
+    # the manifests this job wrote, and that their bundles download intact.
     - name: Check the live manifest
-      if: env.DEPLOY == 'true'
+      if: steps.freshness.outputs.deploy == 'true'
       run: |
         set -euo pipefail
-        runtime=$(jq -r .runtimeVersion "$RUNNER_TEMP/expo-config.json")
-        curl -fsS -D headers.txt -o manifest.json -H 'expo-platform: ios' -H "expo-runtime-version: $runtime" -H 'expo-protocol-version: 1' "$UPDATES_BASE_URL/manifest"
-        grep -qi '^expo-protocol-version: 1' headers.txt || { echo "::error::$UPDATES_BASE_URL/manifest has no expo-protocol-version header"; exit 1; }
-        echo "Live: update $(jq -r .id manifest.json), created $(jq -r .createdAt manifest.json)"
+        runtime=$(jq -er .runtimeVersion "$RUNNER_TEMP/expo-config.json")
+        for platform in ios android; do
+          expected=$(jq -er .id "$RUNNER_TEMP/native-updates/site/updates/$runtime/$platform/manifest.json")
+          status=$(curl -sS -D headers.txt -o manifest.json -w '%{http_code}' -H "expo-platform: $platform" -H "expo-runtime-version: $runtime" -H 'expo-protocol-version: 1' "$UPDATES_BASE_URL/manifest")
+          [ "$status" = 200 ] || { echo "::error::$UPDATES_BASE_URL/manifest answered $status for $platform runtime $runtime, expected 200 with update $expected"; exit 1; }
+          grep -qi '^expo-protocol-version: 1' headers.txt || { echo "::error::$UPDATES_BASE_URL/manifest has no expo-protocol-version header"; exit 1; }
+          live=$(jq -er .id manifest.json)
+          [ "$live" = "$expected" ] || { echo "::error::$platform serves update $live, expected $expected from this run"; exit 1; }
+          curl -fsS -o bundle "$(jq -er .launchAsset.url manifest.json)"
+          [ "$(openssl dgst -sha256 -binary bundle | openssl base64 -A | tr '+/' '-_' | tr -d '=')" = "$(jq -er .launchAsset.hash manifest.json)" ] \
+            || { echo "::error::The live $platform bundle does not match its manifest hash"; exit 1; }
+          echo "Live $platform: update $live, created $(jq -er .createdAt manifest.json)"
+        done
