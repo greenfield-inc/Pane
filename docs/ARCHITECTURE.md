@@ -155,6 +155,9 @@ Preview components never enter the editable auto-save path, even on errors.
   `<git-common-dir>/pane-archive-cleanup`, separate from legacy trash sweeps.
 - Per-repo setup, run and archive scripts come from `pane.json` and friends:
   [CONFIG_FILES.md](CONFIG_FILES.md).
+- Settings › Import & Export writes and reads an allowlisted setup file in main
+  (`services/setupTransfer.ts`); the renderer applies it through Settings' own
+  save calls: [SETUP_EXPORT_IMPORT.md](SETUP_EXPORT_IMPORT.md).
 
 ## Notes
 
