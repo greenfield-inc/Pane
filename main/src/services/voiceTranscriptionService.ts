@@ -817,8 +817,9 @@ function firstNonEmpty(...values: Array<string | undefined>): string | undefined
 }
 
 /**
- * Asks Deepgram whether it takes `key`, by listing the key's projects. A refusal is 401 or 403;
- * anything else that isn't a success means Pane couldn't tell. Never logs or returns the key.
+ * Asks Deepgram whether it takes `key`, by listing the key's projects. A refusal is 401; a 403
+ * can be a working key scoped without project access, so it and any other non-success mean Pane
+ * couldn't tell. Never logs or returns the key.
  */
 export async function checkDeepgramKey(key: string): Promise<VoiceKeyCheck> {
   const problem = voiceKeyProblem('deepgramApiKey', key);
@@ -833,8 +834,8 @@ export async function checkDeepgramKey(key: string): Promise<VoiceKeyCheck> {
     return { result: 'unchecked', message: `Saved, but Pane couldn't reach Deepgram to check the key (${error instanceof Error ? error.message : String(error)}). Live dictation will say if Deepgram refuses it.` };
   }
   if (status >= 200 && status < 300) return { result: 'accepted', message: 'Deepgram accepted this key.' };
-  if (status === 401 || status === 403) {
-    return { result: 'rejected', message: `Saved, but Deepgram rejected this key (HTTP ${status}). Copy a current key from console.deepgram.com and paste it again.` };
+  if (status === 401) {
+    return { result: 'rejected', message: 'Saved, but Deepgram rejected this key (HTTP 401). Copy a current key from console.deepgram.com and paste it again.' };
   }
   return { result: 'unchecked', message: `Saved, but Deepgram answered HTTP ${status}, so Pane couldn't check the key. Live dictation will say if Deepgram refuses it.` };
 }
