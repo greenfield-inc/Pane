@@ -1,3 +1,4 @@
+import Constants from 'expo-constants';
 import { fetch as expoFetch } from 'expo/fetch';
 import { Platform } from 'react-native';
 
@@ -11,11 +12,18 @@ import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
 import { secureStore } from '@/auth/secureStore';
 
 // expo/fetch streams response bodies, which the /events stream needs.
-const streamingFetch = expoFetch;
+export const streamingFetch = expoFetch;
 
-const CLIENT_LABEL = Platform.OS === 'ios' ? 'Pane for iOS' : 'Pane for Android';
+export const CLIENT_LABEL = Platform.OS === 'ios' ? 'Pane for iOS' : 'Pane for Android';
 
-function getRuntimeId(): Promise<string> {
+/**
+ * The phone's own name, so desktops say "Answered on Parsa's iPhone". iOS 16+ reports only
+ * "iPhone" without Apple's user-assigned-device-name entitlement; Android reports the name set
+ * in Settings.
+ */
+export const DEVICE_LABEL = Constants.deviceName?.trim() || undefined;
+
+export function getRuntimeId(): Promise<string> {
   return getOrCreateRuntimeId(
     { getItem: secureStore.getItem, setItem: secureStore.setItem },
     createInstallId,
@@ -29,6 +37,7 @@ export function createDaemonClient(profile: RemotePaneConnectionProfile): Remote
     fetch: streamingFetch,
     runtimeId: getRuntimeId,
     clientLabel: CLIENT_LABEL,
+    deviceLabel: DEVICE_LABEL,
     // Mobile networks drop idle sockets silently; the host heartbeats every 5 s.
     staleStreamTimeoutMs: 20_000,
   });

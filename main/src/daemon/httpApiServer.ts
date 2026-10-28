@@ -238,6 +238,7 @@ export class PaneRemoteHttpApiServer {
   private readonly portStreams = new Map<WebSocket, AdmittedIdentity>();
   private portStreamCheckTimer: NodeJS.Timeout | null = null;
   private readonly eventClients = new Map<string, ConnectedRemoteEventClient>();
+  private readonly deviceLabelsByRuntime = new Map<string, string>();
   private readonly daemonEventSink: PaneEventSink;
   private address: RemoteHttpAddress | null = null;
   private nextClientConnectionId = 1;
@@ -842,6 +843,10 @@ export class PaneRemoteHttpApiServer {
         : null,
     };
     this.eventClients.set(clientConnectionId, connectedClient);
+    if (connectedClient.remoteRuntimeId && connectedClient.deviceLabel) {
+      // A phone answers from an alert button with no stream open; it keeps the name it gave here.
+      this.deviceLabelsByRuntime.set(connectedClient.remoteRuntimeId, connectedClient.deviceLabel);
+    }
     this.publishConnectedClients();
     this.trackRemoteClientConnection(connectedClient, 'connected');
     this.sendHeartbeat(clientConnectionId);
@@ -1065,6 +1070,24 @@ export class PaneRemoteHttpApiServer {
     }));
   }
 
+  /**
+   * The name other screens show for the device behind a request: the name its event stream gave,
+   * else the name on the request, else one remembered from an earlier stream on this runtime,
+   * else its pairing label or Tailscale login.
+   */
+  private senderDevice(auth: Extract<RemoteRequestAuthResult, { ok: true }>, request: IncomingMessage, runtimeIdFallback?: string | null): string {
+    const runtimeId = getRemoteRuntimeIdFromRequest(request, runtimeIdFallback);
+    const streams = [...this.eventClients.values()];
+    const own = runtimeId ? streams.find(client => client.remoteRuntimeId === runtimeId) : undefined;
+    const sameClient = auth.client ? streams.find(client => client.remoteClientId === auth.client?.id) : undefined;
+    const known = runtimeId ? this.deviceLabelsByRuntime.get(runtimeId) : undefined;
+    const login = decodeOptionalBoundary(request.headers['tailscale-user-login'], boundary.string)?.trim();
+    // A phone answering from an alert button has no stream open; it names itself on the request.
+    return own?.deviceLabel ?? getClientDeviceLabelFromHeaders(request) ?? known ?? sameClient?.deviceLabel
+      ?? own?.label ?? sameClient?.label ?? auth.client?.label ?? (login || 'another device');
+  }
+
+
   /** The request's Tailscale login when it is this workspace's owner, else null. */
   private workspaceOwnerLogin(request: IncomingMessage): string | null {
     const login = decodeOptionalBoundary(request.headers['tailscale-user-login'], boundary.string)?.trim().toLowerCase();
@@ -1101,6 +1124,10 @@ export class PaneRemoteHttpApiServer {
       }
       // The second argument is server-owned, even if the client supplied extra args.
       return [args[0] ?? null, { clientId: auth.client.id }];
+    }
+    if (invokeRequest.channel === 'notify:remote-command') {
+      // The second argument is server-owned: a sender can't answer in another device's name.
+      return [args[0] ?? null, { device: this.senderDevice(auth, request, invokeRequest.runtimeId) }];
     }
     if (invokeRequest.channel !== 'terminal:setVisibility' && invokeRequest.channel !== 'terminal:ack') {
       return args;
@@ -1295,7 +1322,14 @@ function getClientLabelFromRequest(request: IncomingMessage, fallback?: string |
 }
 
 function getClientDeviceLabelFromHeaders(request: IncomingMessage): string | null {
-  return getSingleHeaderValue(request.headers['x-pane-client-device-label']);
+  const value = getSingleHeaderValue(request.headers['x-pane-client-device-label']);
+  if (!value) return value;
+  // Phones percent-encode their name; desktops send a plain hostname.
+  try {
+    return decodeURIComponent(value).slice(0, 80);
+  } catch {
+    return value;
+  }
 }
 
 function getRemoteRuntimeIdFromHeaders(request: IncomingMessage): string | null {

@@ -5,7 +5,8 @@ import { RUNPANE_CONTRACT } from './generated/contract';
  * The slice of the runpane contract that MCP tools are generated from. Every
  * command with result `jsonSchemas` becomes a tool; its inputs are the union of
  * the flags in its `usage` lines and its `agentContext` arguments, plus
- * `--pane-dir` for daemon commands. Its output schema is the command's `*Result` schema.
+ * `--pane-dir` for daemon commands. Inputs are strings or booleans unless the argument declares
+ * a `schema`. Its output schema is the command's `*Result` schema.
  */
 export interface McpToolContract {
   commands: readonly {
@@ -27,7 +28,14 @@ export interface McpToolContract {
       details?: string;
       requiresPaneDaemon?: boolean;
       notes?: readonly string[];
-      arguments: readonly { name: string; value?: string; required?: boolean; description?: string }[];
+      arguments: readonly {
+        name: string;
+        value?: string;
+        required?: boolean;
+        description?: string;
+        /** JSON Schema for the tool input; `#/jsonSchemas/...` refs resolve against the contract root. */
+        schema?: unknown;
+      }[];
     }>>;
   };
 }
@@ -36,6 +44,8 @@ interface McpToolParameter {
   flag: string;
   property: string;
   takesValue: boolean;
+  /** Array and object values reach the CLI as JSON text. */
+  json: boolean;
 }
 
 export interface McpTool {
@@ -48,7 +58,7 @@ export interface McpTool {
   parameters: McpToolParameter[];
   inputSchema: {
     type: 'object';
-    properties: Record<string, { type: 'string' | 'boolean'; description: string }>;
+    properties: Record<string, JsonObject>;
     required?: string[];
     additionalProperties: false;
   };
@@ -112,12 +122,22 @@ function buildTool(
     const baseDescription = isConfirm
       ? CONFIRM_DESCRIPTION
       : contextArg?.description ?? globalFlag?.description ?? '';
-    const parameter = { flag, property: toProperty(flag), takesValue: placeholder !== undefined };
-    parameters.push(parameter);
-    properties[parameter.property] = {
-      type: parameter.takesValue ? 'string' : 'boolean',
-      description: placeholder ? `${baseDescription} Expects ${placeholder}.`.trim() : baseDescription,
+    const schema = contextArg?.schema === undefined
+      ? undefined
+      : decodeBoundary(inlineContractRefs(decodeBoundary(contextArg.schema, boundary.json), schemas), boundary.jsonObject);
+    const parameter = {
+      flag,
+      property: toProperty(flag),
+      takesValue: placeholder !== undefined || schema !== undefined,
+      json: schema?.type === 'array' || schema?.type === 'object',
     };
+    parameters.push(parameter);
+    properties[parameter.property] = schema
+      ? { ...schema, description: baseDescription }
+      : {
+        type: parameter.takesValue ? 'string' : 'boolean',
+        description: placeholder ? `${baseDescription} Expects ${placeholder}.`.trim() : baseDescription,
+      };
     const isRequired = !isConfirm
       && command.usage.every((line) => requiredFlagsIn(line).has(flag))
       && (contextArg === undefined || contextArg.required === true);
@@ -230,7 +250,10 @@ export function buildToolArgv(tool: McpTool, input: JsonObject = {}): string[] {
       continue;
     }
     // `--flag=value` keeps values that start with "-" (like "- [ ] item") from reading as flags.
-    argv.push(`${parameter.flag}=${String(decodeBoundary(value, flagValueSchema))}`);
+    const text = parameter.json && (Array.isArray(value) || asObject(value))
+      ? JSON.stringify(value)
+      : String(decodeBoundary(value, flagValueSchema));
+    argv.push(`${parameter.flag}=${text}`);
   }
   argv.push('--json');
   return argv;

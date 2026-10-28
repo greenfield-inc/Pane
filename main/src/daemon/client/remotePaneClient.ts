@@ -682,6 +682,13 @@ interface RemotePaneClientControllerOptions {
   resolveTailnetMachineUrl?: (machine: TailnetMachineRef) => Promise<string>;
 }
 
+/** The host's Notify state; the controller emits it as `notify-shared` instead of sending it to the window. */
+const NOTIFY_SHARED_CHANNEL = 'notify:shared-changed';
+
+/**
+ * Events: `state-changed` (connection state), `resync` (after each connect: refetch host state),
+ * `notify-shared` (the host's Notify state).
+ */
 export class RemotePaneClientController extends EventEmitter {
   private configManager: ConfigManager | null = null;
   private rendererEventSink: PaneEventSink = noopPaneEventSink;
@@ -976,6 +983,11 @@ export class RemotePaneClientController extends EventEmitter {
             void this.publishTunnelledPorts(client, args[0]);
             return;
           }
+          // Notify merges the host's questions in this main process, beside this machine's own.
+          if (channel === NOTIFY_SHARED_CHANNEL) {
+            this.emit('notify-shared', args[0]);
+            return;
+          }
           this.rendererEventSink.send(channel, ...args);
         },
       },
@@ -1020,6 +1032,7 @@ export class RemotePaneClientController extends EventEmitter {
       onResyncRequired: async () => {
         await commit;
         if (this.activeClient !== client) return;
+        this.emit('resync');
         await this.restoreRenderers(hostChanged);
         hostChanged = false;
         void this.refreshTunnelledPorts(client);
@@ -1093,8 +1106,8 @@ export class RemotePaneClientController extends EventEmitter {
     const snapshot = decodeListeningPortsSnapshot(value);
     const tunnel = this.portTunnel;
     if (!snapshot || !tunnel || this.activeClient !== client) return null;
-    // When host and client share a machine, the host also lists this desktop's own tunnel
-    // listeners; tunnelling those would connect each one back to itself.
+    // Hosts leave tunnel listeners out of the list (readTunnelListeners). An older host on this
+    // machine still lists this desktop's own; tunnelling those would connect each one back to itself.
     const hostPorts = snapshot.ports
       .filter(port => !(snapshot.host === getOsHostname() && port.pid === process.pid))
       .map(port => port.port);

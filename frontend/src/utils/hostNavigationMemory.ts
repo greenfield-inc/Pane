@@ -244,6 +244,13 @@ export async function restoreHostNavigation(
     return;
   }
 
+  if (memory.view === 'notify') {
+    await setActiveSession(null);
+    if (!ownsRuntime()) return;
+    navigation.navigateToNotify();
+    return;
+  }
+
   if (memory.view === 'ssh') {
     await setActiveSession(null);
     if (!ownsRuntime()) return;

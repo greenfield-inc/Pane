@@ -1,4 +1,5 @@
 import type { LoopInput } from '../../shared/types/loop';
+import type { SetupFile, SetupSectionId } from '../../shared/types/setupTransfer';
 import type { SessionImportProgress, SessionImportRunResult, SessionImportScan } from '../../shared/types/sessionImport';
 import type { AgentChatEvent, AgentChatView, AgentChatSend, AgentInterface } from '../../shared/types/agentChat';
 import type { RestartToUpdateSource, RestartToUpdateState, UpdateRestoreResult } from '../../shared/types/updater';
@@ -33,6 +34,7 @@ import type { SessionWorkspaceLayout } from '../../shared/types/sessionWorkspace
 import type { PanelActivationRequest, SessionPanelLayout, ToolPanel } from '../../shared/types/panels';
 import type { DiffScope, FileDiffRequest } from '../../shared/types/gitDiff';
 import type { PanelAgentStatusEvent } from '../../shared/types/agentStatus';
+import type { NotifyCommand, NotifySnapshot, NotifyWindowSize } from '../../shared/types/notify';
 import type {
   OrchestrationAssociationInput,
   OrchestrationSessionCreateInput,
@@ -496,6 +498,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
       invokeIpc('export:save-image', data, defaultFilename),
     shareImage: (data: string, filename: string): Promise<IPCResponse> =>
       invokeIpc('export:share-image', data, filename),
+  },
+
+  // Settings › Import & Export: always this computer's setup
+  setup: {
+    summary: (): Promise<IPCResponse> => invokeIpc('setup:summary'),
+    export: (sections: SetupSectionId[]): Promise<IPCResponse> => invokeIpc('setup:export', sections),
+    chooseImport: (): Promise<IPCResponse> => invokeIpc('setup:choose-import'),
+    preview: (file: SetupFile, fileName: string): Promise<IPCResponse> => invokeIpc('setup:preview', file, fileName),
   },
 
   // Loops (scheduled tasks)
@@ -1222,6 +1232,33 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Whether Dictate's watcher shows Pane's alerts, so Pane skips its desktop notification
   notifications: {
     isHandedOff: async (): Promise<boolean> => decodeBoundary(await invokeIpc('notifications:handed-off'), boundary.boolean),
+  },
+
+  // Pane Notify: the queue's snapshot and the actions every surface sends back
+  notify: {
+    getSnapshot: (): Promise<NotifySnapshot> => invokeIpc('notify:snapshot'),
+    run: (command: NotifyCommand): Promise<void> => invokeIpc('notify:command', command),
+    onSnapshot: (callback: (snapshot: NotifySnapshot) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, snapshot: NotifySnapshot) => callback(snapshot);
+      ipcRenderer.on('notify:snapshot', listener);
+      return () => ipcRenderer.removeListener('notify:snapshot', listener);
+    },
+    /** A new question arrived and Sound is on; the main window plays the beep. */
+    onChime: (callback: () => void) => {
+      const listener = () => callback();
+      ipcRenderer.on('notify:chime', listener);
+      return () => ipcRenderer.removeListener('notify:chime', listener);
+    },
+    /** Main asks the main window to show the Notify inbox or Settings → Notify. */
+    onNavigate: (callback: (target: 'inbox' | 'settings') => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, target: 'inbox' | 'settings') => callback(target);
+      ipcRenderer.on('notify:navigate', listener);
+      return () => ipcRenderer.removeListener('notify:navigate', listener);
+    },
+    /** Floating windows only: fit the window to its card. */
+    resizeWindow: (size: NotifyWindowSize): void => ipcRenderer.send('notify:window-size', size),
+    /** Floating strip only: take key focus so a text or note field can be typed in. */
+    focusWindow: (): Promise<void> => invokeIpc('notify:window-focus'),
   },
 
   // Window state queries (invoke, not event subscriptions)

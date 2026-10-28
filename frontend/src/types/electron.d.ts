@@ -39,6 +39,7 @@ import type {
 } from '../../../shared/types/panels';
 import type { JsonValue } from '../../../shared/validation/boundaryDecoder';
 import type { PanelAgentStatusEvent } from '../../../shared/types/agentStatus';
+import type { NotifyCommand, NotifySnapshot, NotifyWindowSize } from '../../../shared/types/notify';
 import type { DiffManifest, DiffScope, FileDiffRequest, FileDiffResult } from '../../../shared/types/gitDiff';
 import type { AgentUsageSnapshot } from '../../../shared/types/agentUsage';
 import type { PaneChatAgent, PaneChatState } from '../../../shared/types/paneChat';
@@ -56,6 +57,7 @@ import type {
 import type { UsageIndexStatus, UsageReport, UsageReportRequest } from '../../../shared/types/usage';
 import type { LeaderboardResponse, LeaderboardStatus, LeaderboardSubmitResult } from '../../../shared/types/leaderboard';
 import type { Loop, LoopInput, LoopSchedulePreview } from '../../../shared/types/loop';
+import type { SetupExportResult, SetupExportSummary, SetupFile, SetupImportPreview, SetupSectionId } from '../../../shared/types/setupTransfer';
 import type { MissionControlAgentPanel, MissionControlSnapshotRequest, MissionControlSnapshotResult } from '../../../shared/types/missionControl';
 import type { CreateSessionRequest } from './session';
 import type { DetectedProjectConfig } from '../../../shared/types/projectConfig';
@@ -219,6 +221,17 @@ interface ElectronAPI {
   export: {
     saveImage: (data: string, defaultFilename: string) => Promise<IPCResponse<{ filePath: string } | null>>;
     shareImage: (data: string, filename: string) => Promise<IPCResponse<{ method: 'share' | 'clipboard' }>>;
+  };
+
+  // Settings › Import & Export: always this computer's setup
+  setup: {
+    summary: () => Promise<IPCResponse<SetupExportSummary>>;
+    /** Opens a save dialog; null when the person cancels. */
+    export: (sections: SetupSectionId[]) => Promise<IPCResponse<SetupExportResult | null>>;
+    /** Opens a file dialog and previews the chosen file; null when the person cancels. */
+    chooseImport: () => Promise<IPCResponse<SetupImportPreview | null>>;
+    /** Recomputes a preview against the current setup. */
+    preview: (file: SetupFile, fileName: string) => Promise<IPCResponse<SetupImportPreview>>;
   };
 
   // Loops (scheduled tasks)
@@ -678,6 +691,21 @@ interface ElectronAPI {
   // Whether Dictate's watcher shows Pane's alerts, so Pane skips its desktop notification
   notifications: {
     isHandedOff: () => Promise<boolean>;
+  };
+
+  // Pane Notify: the queue's snapshot and the actions every surface sends back
+  notify: {
+    getSnapshot: () => Promise<NotifySnapshot>;
+    run: (command: NotifyCommand) => Promise<void>;
+    onSnapshot: (callback: (snapshot: NotifySnapshot) => void) => () => void;
+    /** A new question arrived and Sound is on; the main window plays the beep. */
+    onChime: (callback: () => void) => () => void;
+    /** Main asks the main window to show the Notify inbox or Settings → Notify. */
+    onNavigate: (callback: (target: 'inbox' | 'settings') => void) => () => void;
+    /** Floating windows only: fit the window to its card. */
+    resizeWindow: (size: NotifyWindowSize) => void;
+    /** Floating strip only: take key focus so a text or note field can be typed in. */
+    focusWindow: () => Promise<void>;
   };
 
   // Window state queries (invoke, not event subscriptions)

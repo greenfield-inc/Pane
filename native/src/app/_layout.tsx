@@ -84,6 +84,14 @@ function RootStack({ signedIn }: { signedIn: boolean }) {
           options={{ presentation: 'formSheet', sheetAllowedDetents: [0.5, 1], sheetGrabberVisible: true, headerShown: false }}
         />
         <Stack.Screen
+          name="pane/[paneId]/notify"
+          options={{ presentation: 'formSheet', sheetAllowedDetents: [0.5, 1], sheetGrabberVisible: true, headerShown: false }}
+        />
+        <Stack.Screen
+          name="notify/[notifyId]"
+          options={{ presentation: 'formSheet', sheetAllowedDetents: [0.5, 1], sheetGrabberVisible: true, headerShown: false }}
+        />
+        <Stack.Screen
           name="pane/[paneId]/new-panel"
           options={{ presentation: 'formSheet', sheetAllowedDetents: [0.5, 1], sheetGrabberVisible: true, headerShown: false }}
         />

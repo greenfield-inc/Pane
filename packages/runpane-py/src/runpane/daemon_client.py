@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import ntpath
 import os
 import posixpath
@@ -28,10 +29,18 @@ def connect_next(pane_dir: Optional[str]) -> str:
 class PaneDaemonClientError(RuntimeError):
     """What happened and why in the message; the step to take in `next`."""
 
-    def __init__(self, message: str, code: Optional[str] = None, next: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        code: Optional[str] = None,
+        next: Optional[str] = None,
+        connection_failure: bool = False,
+    ) -> None:
         super().__init__(message)
         self.code = code
         self.next = next
+        # True when no connection was made, so nothing reached Pane.
+        self.connection_failure = connection_failure
 
 
 def resolve_pane_directory(pane_dir: Optional[str] = None) -> str:
@@ -59,6 +68,7 @@ def invoke_daemon(
     timeout_ms: Optional[float] = None,
     event_include: Optional[List[str]] = None,
 ) -> Any:
+    """`timeout_ms=math.inf` waits as long as the call takes, for requests that wait on a person."""
     endpoint = get_pane_daemon_endpoint(resolve_pane_directory(pane_dir))
     request = {
         "type": "request",
@@ -84,7 +94,7 @@ def invoke_unix_socket(socket_path: str, encoded_request: bytes, timeout_ms: flo
     deadline = time.monotonic() + timeout_ms / 1000
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-            client.settimeout(timeout_ms / 1000)
+            client.settimeout(socket_timeout(timeout_ms / 1000))
             try:
                 client.connect(socket_path)
             except socket.timeout:
@@ -94,6 +104,7 @@ def invoke_unix_socket(socket_path: str, encoded_request: bytes, timeout_ms: flo
                     f"Could not connect to Pane daemon at {socket_path}: {error}. Pane is not running, or it was started with a different PANE_DIR. Nothing was changed.",
                     "ERR_RUNPANE_DAEMON_CONNECT_FAILED",
                     next_step,
+                    connection_failure=True,
                 ) from error
 
             client.sendall(encoded_request)
@@ -101,7 +112,7 @@ def invoke_unix_socket(socket_path: str, encoded_request: bytes, timeout_ms: flo
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     raise socket.timeout()
-                client.settimeout(remaining)
+                client.settimeout(socket_timeout(remaining))
                 chunk = client.recv(65536)
                 if not chunk:
                     raise PaneDaemonClientError(
@@ -163,7 +174,13 @@ def invoke_windows_pipe(pipe_path: str, encoded_request: bytes, timeout_ms: floa
             f"Could not connect to Pane daemon at {pipe_path}: {error}. Pane is not running, or it was started with a different PANE_DIR. Nothing was changed.",
             "ERR_RUNPANE_DAEMON_CONNECT_FAILED",
             next_step,
+            connection_failure=True,
         ) from error
+
+
+def socket_timeout(seconds: float) -> Optional[float]:
+    """A socket timeout in seconds; None blocks without a limit."""
+    return None if math.isinf(seconds) else seconds
 
 
 def first_matching_response(frames: List[Dict[str, Any]]) -> Optional[Any]:

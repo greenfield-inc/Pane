@@ -33,6 +33,9 @@ import { showActionError, useErrorStore } from './stores/errorStore';
 import { useSessionStore } from './stores/sessionStore';
 import { subscribePanelStatus } from './services/panelStatusSync';
 import { subscribeAttentionInbox, useAttentionInboxStore } from './stores/attentionInboxStore';
+import { runNotify, subscribeNotify, useNotifyStore } from './stores/notifyStore';
+import { acceleratorFromKeys } from './components/notify/notifyFormat';
+import { NotifyInPaneStrip } from './components/notify/NotifyInPane';
 import { useConfigStore } from './stores/configStore';
 import { usePanelStore } from './stores/panelStore';
 import { API } from './utils/api';
@@ -166,6 +169,31 @@ function App() {
     void useAttentionInboxStore.getState().loadEnabled();
     return subscribeAttentionInbox();
   }, []);
+
+  // Pane Notify: keep the queue's snapshot, and open the inbox or its settings when main asks.
+  useEffect(() => subscribeNotify(), []);
+  // Native Wayland may never deliver the answer-all shortcut to Pane, even while it is in front
+  // (GNOME 46 has no global-shortcut portal), so the window answers it itself there.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const snapshot = useNotifyStore.getState().snapshot;
+      if (!snapshot || snapshot.showOutsideSupported || !snapshot.settings.enabled) return;
+      if (acceleratorFromKeys(event, false) !== snapshot.settings.shortcut) return;
+      event.preventDefault();
+      event.stopPropagation();
+      runNotify({ type: 'open-round' });
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, []);
+  useEffect(() => window.electronAPI?.notify?.onNavigate((target) => {
+    if (target === 'settings') {
+      openSettings({ category: 'notify' });
+      return;
+    }
+    closeSettings();
+    useNavigationStore.getState().navigateToNotify();
+  }), [closeSettings, openSettings]);
 
   /**
    * Forget a pane's status when the pane itself goes.
@@ -884,7 +912,7 @@ function App() {
           <TailnetHttpsBanner />
         </div>
         <RemoteConnectionBanner onSettings={() => openSettings({ category: 'remote-access' })} />
-        <div className="pane-main-layout flex flex-1 min-h-0">
+        <div className="pane-main-layout relative flex flex-1 min-h-0">
         <MainProcessLogger />
         {isSettingsOpen && (
           <Settings
@@ -931,6 +959,7 @@ function App() {
           <SessionView />
           <PaneChatIntroOffer suppressed={isSettingsOpen || isOnboardingOpen || isWelcomeOpen} />
         </div>
+        <NotifyInPaneStrip left={sidebarCollapsed ? 48 : sidebarWidth} />
         </div>
         <OnboardingDialog
           isOpen={isOnboardingOpen}
