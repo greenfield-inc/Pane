@@ -40,8 +40,8 @@ export const ONBOARDING_REPO_SETUP_PREFERENCE = 'onboarding_repo_setup';
 export const ONBOARDING_GH_PROMPT_SHOWN_PREFERENCE = 'onboarding_gh_prompt_shown';
 const ONBOARDING_GH_STATUS_AT_FIRST_LAUNCH_PREFERENCE = 'onboarding_gh_status_at_first_launch';
 /** Set to OPEN_PROJECT_SCREEN_SEEN when this install showed "Open your project" (never 'true': the test mock answers 'true' to unknown keys). */
-const ONBOARDING_OPEN_PROJECT_SCREEN_PREFERENCE = 'onboarding_open_project_screen';
-const OPEN_PROJECT_SCREEN_SEEN = 'seen';
+export const ONBOARDING_OPEN_PROJECT_SCREEN_PREFERENCE = 'onboarding_open_project_screen';
+export const OPEN_PROJECT_SCREEN_SEEN = 'seen';
 
 function fallbackEnvironment(): EnvironmentInfo {
   return {

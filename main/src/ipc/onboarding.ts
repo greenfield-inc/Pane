@@ -14,8 +14,10 @@ import type { PaneCommandValue } from '../daemon/commandRegistry';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { toPaneDaemonError } from '../../../shared/paneError';
 import type { PaneDaemonError } from '../../../shared/types/daemon';
+import type { FirstStepsState } from '../../../shared/types/onboarding';
 import { getDefaultWSLDistribution } from '../utils/wslUtils';
 import { checkRepoFolder, findHostRepoContext, findWslRepos } from '../services/repoFinder';
+import { samePath } from '../services/paneChatMigrateOffer';
 
 /** Returns exec options that include the user's full shell PATH (Homebrew, nvm, etc.). */
 function shellExecOpts<Options extends object>(extra: Options): Options & { env: NodeJS.ProcessEnv } {
@@ -414,6 +416,20 @@ export function registerOnboardingHandlers(ipcMain: IpcMain, services: AppServic
     } catch (error) {
       console.error('[Onboarding] Failed to find WSL repos:', error);
       return failure(toPaneDaemonError(error, 'ONBOARDING_FIND_WSL_REPOS_FAILED'));
+    }
+  });
+
+  // Home's "Your first steps" and the first-archive Support prompt ignore the sample repo, as Pane Chat's migrate offer does.
+  ipcMain.handle('onboarding:first-steps', () => {
+    try {
+      const sample = sampleRepoPath();
+      const sampleProjectIds = databaseService.getAllProjects().filter(project => samePath(project.path, sample)).map(project => project.id);
+      // Two archived Panes are enough to tell none, the first, and more.
+      const data: FirstStepsState = { sampleProjectIds, archivedPaneIds: databaseService.getArchivedSessionIds(2, sampleProjectIds) };
+      return { success: true, data };
+    } catch (error) {
+      console.error('[Onboarding] Failed to read first steps:', error);
+      return failure(toPaneDaemonError(error, 'ONBOARDING_FIRST_STEPS_FAILED'));
     }
   });
 
