@@ -2,6 +2,8 @@
 
 `mobile/` is a Capacitor companion that bundles `frontend/remote.html`; it never navigates a WebView to a remote host. Remote hosts are ordinary authenticated HTTP/SSE endpoints, so an arbitrary host never receives a privileged native bridge.
 
+Even G2 glasses pair from the native app's **Settings › Glasses**; see [Use Pane from Even G2 glasses](EVEN_G2_GLASSES.md).
+
 ## Development
 
 Use patched Node 22.23.4+ (22.x), 24.22.1+ (24.x), or 26.12.1+ (26.x), and pnpm:
