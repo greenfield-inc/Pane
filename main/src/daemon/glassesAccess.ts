@@ -113,7 +113,8 @@ export class GlassesAccess {
 
   /** Remembers a refused browser origin, logged once, so the owner can allow the Even app's from Settings. */
   noteRefusedOrigin(origin: string): void {
-    if (this.refusedOrigins.some((entry) => entry.origin === origin)) return;
+    // Only an origin that could ever be allowed is worth offering; "null" never is.
+    if (!isExactOrigin(origin) || this.refusedOrigins.some((entry) => entry.origin === origin)) return;
     this.refusedOrigins.unshift({ origin, at: new Date(this.now()).toISOString() });
     this.refusedOrigins.splice(MAX_REFUSED_ORIGINS);
     this.log(`[Pane glasses] refused browser origin ${origin}; if this is the Even app, allow it in Settings › Remote Access › Glasses`);

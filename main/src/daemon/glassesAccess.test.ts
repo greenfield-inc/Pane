@@ -280,6 +280,26 @@ describe('glasses on the workspace listener', () => {
     expect((await host.invoke('runpane:panels:screen', [{}], host.fromGlasses(token))).status).toBe(401);
   });
 
+  it('ends an open stream when the owner removes the origin it came in with', async () => {
+    const host = await setup({ heartbeatIntervalMs: 50 });
+    const { token } = await host.pair();
+    const origin = 'https://plugins.even.example';
+    await host.glasses.setOwnerOrigin(origin, true);
+    let closed = false;
+    await new Promise<void>((resolve, reject) => {
+      const req = http.request({ host: '127.0.0.1', port: host.port, path: '/serve-secret/events', headers: host.fromGlasses(token, { Origin: origin }) }, (res) => {
+        expect(res.statusCode).toBe(200);
+        res.resume();
+        res.on('end', () => { closed = true; });
+        resolve();
+      });
+      req.once('error', reject);
+      req.end();
+    });
+    await host.glasses.setOwnerOrigin(origin, false);
+    await vi.waitFor(() => expect(closed).toBe(true), { timeout: 1000 });
+  });
+
   it('carries the voice token in the WebSocket subprotocol and checks the origin there too', async () => {
     vi.stubEnv('DEEPGRAM_API_KEY', '');
     const host = await setup();
@@ -326,6 +346,9 @@ describe('glasses on the workspace listener', () => {
     }
     await host.glasses.setOwnerOrigin(newOrigin, false);
     expect((await screen()).status).toBe(403);
+
+    await host.invoke('runpane:panels:screen', [{}], { 'Tailscale-User-Login': OWNER, Origin: 'null' });
+    expect(host.glasses.state().refusedOrigins.map((entry) => entry.origin)).not.toContain('null');
   });
 
   it('lets only the owner\'s own app pair, list and revoke glasses', async () => {

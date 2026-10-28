@@ -15,7 +15,7 @@ It talks straight to each of your computers over Tailscale. Pane has no relay.
 - Pane open on each computer, with **Settings › Remote Access › Who can connect** set to
   **Only me** or **Everyone on tailnet** (on by default for the Pane that owns `~/.pane`).
 - For dictation and voice answers, a Deepgram key (live) or a fal key (recorded) on the computer
-  you talk to: **Settings › Integrations › Voice** on the computer, or **Settings › Voice** in the
+  you talk to: **Settings › Integrations › Voice transcription** on the computer, or **Settings › Voice** in the
   Pane phone app.
 
 ## Install and pair

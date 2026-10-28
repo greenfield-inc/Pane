@@ -71,12 +71,15 @@ interface ConnectedRemoteEventClient {
   heartbeatTimer: NodeJS.Timeout;
   /** What a workspace client signed in with, checked again before each event it receives. */
   workspaceCredentials: WorkspaceCredentials | null;
-  /** Set for the Pane glasses app: its stream carries only GLASSES_EVENT_CHANNELS. */
-  glasses: boolean;
+  /**
+   * Set for the Pane glasses app to the origin it came in with: its stream carries only
+   * GLASSES_EVENT_CHANNELS, and ends when that origin is no longer allowed.
+   */
+  glassesOrigin: string | null;
 }
 
 /** Who signed in, kept so access can be checked again after the request was admitted. */
-type AdmittedIdentity = Pick<ConnectedRemoteEventClient, 'remoteClientId' | 'remoteClientTokenHash' | 'workspaceCredentials' | 'glasses'>;
+type AdmittedIdentity = Pick<ConnectedRemoteEventClient, 'remoteClientId' | 'remoteClientTokenHash' | 'workspaceCredentials' | 'glassesOrigin'>;
 
 interface WorkspaceRefusal {
   statusCode: number;
@@ -88,7 +91,7 @@ interface WorkspaceRefusal {
  * source not locked out. `client` is the device its token names, or null for a pairing call.
  */
 interface GlassesAdmission {
-  client: { id: string; tokenHash: string; label: string } | null;
+  client: { id: string; tokenHash: string; label: string; origin: string } | null;
   source: string;
 }
 
@@ -296,7 +299,7 @@ export class PaneRemoteHttpApiServer {
           };
 
           for (const [clientConnectionId, client] of this.eventClients) {
-            if (client.glasses && !GLASSES_EVENT_CHANNELS.has(channel)) {
+            if (client.glassesOrigin !== null && !GLASSES_EVENT_CHANNELS.has(channel)) {
               continue;
             }
             if (!this.isStillAdmitted(client)) {
@@ -551,7 +554,7 @@ export class PaneRemoteHttpApiServer {
           authorization: getAuthorizationHeaderForRequest(request, url.searchParams.get('access_token')),
         }
         : null,
-      glasses: false,
+      glassesOrigin: null,
     };
     wss.handleUpgrade(request, socket, head, (client) => {
       this.portStreams.set(client, identity);
@@ -923,7 +926,7 @@ export class PaneRemoteHttpApiServer {
           authorization: getAuthorizationHeaderForRequest(request, url.searchParams.get('access_token')),
         }
         : null,
-      glasses: Boolean(glassesClient),
+      glassesOrigin: glassesClient?.origin ?? null,
     };
     this.eventClients.set(clientConnectionId, connectedClient);
     if (connectedClient.remoteRuntimeId && connectedClient.deviceLabel) {
@@ -1044,7 +1047,7 @@ export class PaneRemoteHttpApiServer {
         'Pair again from the Pane app: Settings › Glasses › Pair glasses.');
     }
     glasses.touch(client.id);
-    this.glassesAdmissions.set(request, { client: { id: client.id, tokenHash: client.tokenHash, label: client.label }, source });
+    this.glassesAdmissions.set(request, { client: { id: client.id, tokenHash: client.tokenHash, label: client.label, origin: origin ?? '' }, source });
     return null;
   }
 
@@ -1221,9 +1224,11 @@ export class PaneRemoteHttpApiServer {
 
   private isStillAdmitted(client: AdmittedIdentity): boolean {
     const { remoteClientId, remoteClientTokenHash, workspaceCredentials } = client;
-    if (client.glasses) {
+    if (client.glassesOrigin !== null) {
+      // A revoked device, or an origin the owner removed, ends the stream.
       const glasses = this.workspace?.glasses;
-      return Boolean(glasses && remoteClientId && remoteClientTokenHash && glasses.isCurrent(remoteClientId, remoteClientTokenHash));
+      return Boolean(glasses && remoteClientId && remoteClientTokenHash
+        && glasses.isCurrent(remoteClientId, remoteClientTokenHash) && glasses.allowsOrigin(client.glassesOrigin));
     }
     if (this.workspace) {
       // Narrower visibility or a new password applies to clients that are already connected.
@@ -1276,7 +1281,7 @@ export class PaneRemoteHttpApiServer {
       return;
     }
     // A revoked device loses its stream within one heartbeat, even when no event is sent.
-    if (client.glasses && !this.isStillAdmitted(client)) {
+    if (client.glassesOrigin !== null && !this.isStillAdmitted(client)) {
       this.dropEventClient(clientConnectionId);
       return;
     }
