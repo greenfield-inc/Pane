@@ -791,6 +791,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     findRepos: (): Promise<IPCResponse> => invokeIpc('onboarding:find-repos'),
     findWslRepos: (distro: string): Promise<IPCResponse> => invokeIpc('onboarding:find-wsl-repos', distro),
     checkFolder: (folder: string): Promise<IPCResponse> => invokeIpc('onboarding:check-folder', folder),
+    firstSteps: (): Promise<IPCResponse> => invokeIpc('onboarding:first-steps'),
     supportProject: (): Promise<IPCResponse> => invokeIpc('onboarding:support-project'),
   },
 

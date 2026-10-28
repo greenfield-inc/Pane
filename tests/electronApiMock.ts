@@ -274,6 +274,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     };
     let mockProjects = clone(mockOptions.initialProjects ?? []);
     let mockSessions = clone(mockOptions.initialSessions ?? []);
+    const mockArchivedSessions: JsonObject[] = [];
     let mockLoops = clone(mockOptions.initialLoops ?? []);
     /** A plausible loops:preview answer for the form's preset shapes. */
     const previewLoopCron = (cron: string): LoopSchedulePreview => {
@@ -519,6 +520,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         }
         if (prop === 'onLoopsChanged') {
           return (callback: MockEventCallback) => subscribe('loops:changed', callback);
+        }
+        if (prop === 'onSessionsLoaded') {
+          return (callback: MockEventCallback) => subscribe('sessions:loaded', callback);
         }
         if (prop === 'onSessionDeleted') {
           return (callback: MockEventCallback) => subscribe('session:deleted', callback);
@@ -894,6 +898,15 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         findRepos: () => success({ repos: [], shells: [], wslDistro: null }),
         findWslRepos: (distro: string) => success({ distro, repos: [], agents: [] }),
         checkFolder: (folder: string) => success({ name: folder.split(/[\\/]/).pop() ?? folder, path: folder }),
+        firstSteps: () => {
+          const sampleProjectIds = mockProjects.filter(project => project.path === '/tmp/.pane/projects/Pane').map(project => Number(project.id));
+          const archivedPaneIds = mockArchivedSessions
+            .filter(session => !sampleProjectIds.includes(Number(session.projectId)))
+            .map(session => String(session.id))
+            .reverse()
+            .slice(0, 2);
+          return success({ sampleProjectIds, archivedPaneIds });
+        },
         supportProject: () => success({}),
       }),
       paneChat: namespace({
@@ -1575,6 +1588,27 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         setSessions(sessions: JsonObject[]) {
           mockSessions = clone(sessions);
+        },
+        // Stands in for main creating a Pane.
+        addSession(session: JsonObject) {
+          mockSessions.push(clone(session));
+          emit('session:created', clone(session));
+        },
+        // Stands in for main archiving a Pane: it leaves the active list and the store hears session:deleted.
+        archiveSession(sessionId: string) {
+          const session = mockSessions.find(candidate => candidate.id === sessionId);
+          if (!session) return;
+          mockSessions = mockSessions.filter(candidate => candidate.id !== sessionId);
+          mockArchivedSessions.push({ ...session, archived: true });
+          emit('session:deleted', { id: sessionId });
+        },
+        // Stands in for main restoring an archived Pane, which reloads the active list.
+        restoreSession(sessionId: string) {
+          const index = mockArchivedSessions.findIndex(candidate => candidate.id === sessionId);
+          if (index < 0) return;
+          const [session] = mockArchivedSessions.splice(index, 1);
+          mockSessions.push({ ...session, archived: false });
+          emit('sessions:loaded', clone(mockSessions));
         },
         setProjects(projects: JsonObject[], activeProjectId: number | null = null) {
           mockProjects = clone(projects);

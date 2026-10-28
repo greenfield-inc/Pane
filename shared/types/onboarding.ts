@@ -35,3 +35,11 @@ export interface SampleRepoSetup {
   wasAlreadyRegistered: boolean;
   wasAlreadyCloned: boolean;
 }
+
+/** What Home's "Your first steps" reads from main, leaving out the sample repo. */
+export interface FirstStepsState {
+  /** Projects registered at the sample repo's path. */
+  sampleProjectIds: number[];
+  /** The newest archived worktree Panes in other projects, at most two. */
+  archivedPaneIds: string[];
+}
