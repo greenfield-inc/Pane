@@ -103,6 +103,19 @@ describe('parseNotifyPush', () => {
     expect(parseNotifyPush(response)).toEqual({ host: work.id, notifyId: 'q3', ui: 'approve', choices: [], clear: false });
   });
 
+  it('reads an Android button press from the background task, whose data arrives as a JSON string', () => {
+    const response = {
+      actionIdentifier: 'choice.1',
+      notification: { request: { identifier: 'q4', content: {
+        title: 'Which table?',
+        dataString: `{"hostProfileId":"${work.id}","notifyId":"q4","notifyUi":"options","notifyChoices":["users","orders"],"paneId":"s1"}`,
+      } } },
+    };
+    expect(parseNotifyPush(response)).toEqual({ host: work.id, notifyId: 'q4', ui: 'options', choices: ['users', 'orders'], paneId: 's1', clear: false });
+    expect(parsePushTarget(response.notification.request)).toEqual({ host: work.id, notifyId: 'q4', paneId: 's1' });
+    expect(parseNotifyPush({ actionIdentifier: 'approve', userText: 'x', notification: { request: { identifier: 'q5', content: { dataString: '{oops' } } } })).toBeNull();
+  });
+
   it('ignores alerts that are not Notify questions', () => {
     expect(parseNotifyPush({ content: { data: { hostProfileId: work.id, paneId: 's1' } }, trigger: null })).toBeNull();
     expect(parseNotifyPush({ data: { notifyId: 'q1' } })).toBeNull();

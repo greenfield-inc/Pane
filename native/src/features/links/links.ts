@@ -24,7 +24,9 @@ export type ResolvedTarget =
  * Reads the routing keys a Pane host puts in its push notifications
  * (main/src/daemon/mobilePushSender.ts). Takes an expo-notifications
  * `NotificationRequest`. On iOS the keys sit beside `aps`, which expo exposes
- * only as `trigger.payload`; Android puts them in `remoteMessage.data`.
+ * only as `trigger.payload`; Android puts them in `remoteMessage.data`. An
+ * Android background task's button press carries the alert's data as JSON in
+ * `content.dataString`.
  */
 export function parsePushTarget(request: unknown): OpenTarget | null {
   const data = pushData(request);
@@ -87,14 +89,7 @@ export function parseNotifyPush(value: unknown): NotifyPush | null {
 const NOTIFY_UIS: readonly NotifyUi[] = ['options', 'approve', 'ask', 'info'];
 
 function choiceLabels(value: unknown): string[] {
-  let list = value;
-  if (typeof value === 'string') {
-    try {
-      list = JSON.parse(value);
-    } catch {
-      return [];
-    }
-  }
+  const list = typeof value === 'string' ? parseJson(value) : value;
   return Array.isArray(list) ? list.filter((label): label is string => typeof label === 'string' && label.length > 0) : [];
 }
 
@@ -106,8 +101,18 @@ export function isPushForPane(request: unknown, paneId: string): boolean {
 
 function pushData(request: unknown): unknown {
   const trigger = field(request, 'trigger');
-  const candidates = [field(trigger, 'payload'), field(field(trigger, 'remoteMessage'), 'data'), field(field(request, 'content'), 'data')];
+  const content = field(request, 'content');
+  const candidates = [field(trigger, 'payload'), field(field(trigger, 'remoteMessage'), 'data'), field(content, 'data'), parseJson(field(content, 'dataString'))];
   return candidates.find(data => stringField(data, 'hostProfileId') !== undefined);
+}
+
+function parseJson(value: unknown): unknown {
+  if (typeof value !== 'string') return undefined;
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
