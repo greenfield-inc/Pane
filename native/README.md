@@ -180,6 +180,37 @@ CI reads it from the `PANE_ANDROID_GOOGLE_SERVICES_JSON` repository secret, base
 base64 < native/google-services.json | tr -d '\n' | gh secret set PANE_ANDROID_GOOGLE_SERVICES_JSON -R greenfield-inc/Pane
 ```
 
+## Over-the-air updates
+
+Release builds of the app download new JavaScript from Pane's update server, so a JavaScript change reaches installed phones without a new TestFlight or store build. The app uses `expo-updates` against a small self-hosted server: the Cloud Run service `pane-native-updates` (`updates.url` in `app.json`), which serves one manifest per runtime version and platform (`deploy/native-updates/`).
+
+**What ships over the air.** Anything in the JavaScript bundle: `src/`, `../shared/`, and JavaScript-only packages. Native code needs a store build: a package with iOS or Android code, a config plugin, a setting in `app.json` that prebuild writes into the native projects, or `targets/`. A native change must bump `runtimeVersion` in `app.json`. The `Native Runtime` PR check compares the Expo fingerprint (`fingerprint.config.js`) at the base and the head, fails when native code changed without a bump, and labels the PR `native-change`. Version and build numbers don't count as native changes. Phones get only updates for their own `runtimeVersion`, so after a bump, OTA reaches a phone once it installs a build with the new runtime.
+
+**Publishing is automatic.** Every push to `main` that touches `native/`, `shared/` or `pnpm-lock.yaml` runs `Native OTA Updates` (`.github/workflows/native-updates.yml`). It runs `expo export`, writes the manifests with `scripts/build-updates.mts`, and deploys a new image. To publish again, run that workflow from the Actions tab on `main`. An update is dated with its commit's committer date, and phones load only an update newer than the one they run, including the bundle built into the app. Re-publishing a commit therefore sends phones nothing new, and code that merged before a store build is already inside that build.
+
+**When it applies.** At launch, the app checks the server and downloads a new update in the background. It runs from the next cold start. Settings › App shows what is running: `Version 1.2 · Built-in`, or `Version 1.2 · Update a1b2c3d · Oct 28` for an update. When an update is downloaded, the row turns into **Restart to update**. Tap the row to check now. Debug and dev-client builds load JavaScript from Metro and show `Development build`.
+
+**Rolling back.** Revert the change on `main`, which publishes a newer update. Shifting Cloud Run traffic to an earlier revision does nothing for phones, because they load only a newer update. If an update throws before its first screen, the phone marks it failed and reloads the last update that launched.
+
+**Testing locally.** Build a release app pointed at an update server on your computer, then serve a newer export:
+
+```bash
+cd native
+D=/tmp/pane-ota.noindex
+pnpm exec expo export --platform ios --platform android --output-dir $D/dist
+pnpm exec expo config --type public --json > $D/expo-config.json
+# --created-at now: phones ignore an update older than their build.
+node scripts/build-updates.mts --dist $D/dist --config $D/expo-config.json \
+  --base-url http://127.0.0.1:8099 --out $D/ctx/site --created-at "$(date -u +%FT%TZ)"
+cp ../deploy/native-updates/Dockerfile ../deploy/native-updates/nginx.conf $D/ctx/
+docker build -t pane-native-updates:local $D/ctx && docker run -d --rm -p 8099:8080 pane-native-updates:local
+
+PANE_UPDATES_URL=http://127.0.0.1:8099/manifest npx expo run:android --variant release   # or: npx expo run:ios --configuration Release
+adb reverse tcp:8099 tcp:8099                                                           # Android emulator only
+```
+
+`PANE_UPDATES_URL` replaces `updates.url` for that build; an `http://` URL also allows plain HTTP on Android. Rebuild without it before shipping. Check the server with `curl -i -H 'expo-platform: ios' -H 'expo-runtime-version: 1.2' http://127.0.0.1:8099/manifest`: it answers `200` with `expo-protocol-version: 1` and the manifest, or `204` when it has no update for that runtime.
+
 ## How the code is organised
 
 | Path | What goes there |

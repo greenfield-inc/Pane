@@ -1,0 +1,87 @@
+name: Native Runtime
+
+# Over-the-air updates reach only phones whose build has the same
+# runtimeVersion. A PR that changes the phone app's native code must bump it,
+# or an update would run on a binary it doesn't fit. Compares the Expo
+# fingerprint (native/fingerprint.config.js) at the base and the head, and
+# labels native-change PRs.
+on:
+  pull_request:
+    paths: [ 'native/**', 'pnpm-lock.yaml', '.github/workflows/native-runtime.yml' ]
+
+concurrency:
+  group: native-runtime-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  native-runtime:
+    name: native-runtime
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+      with:
+        fetch-depth: 0
+
+    - name: Setup Node.js and pnpm
+      uses: ./.github/actions/setup-pnpm
+
+    - name: Fingerprint the head
+      run: |
+        set -euo pipefail
+        pnpm install --frozen-lockfile --ignore-scripts
+        cd native
+        for platform in ios android; do
+          node node_modules/expo-updates/bin/cli.js fingerprint:generate --platform "$platform" | jq -r .hash > "$RUNNER_TEMP/head-$platform"
+        done
+        jq -r .expo.runtimeVersion app.json > "$RUNNER_TEMP/head-runtime"
+
+    # With the head's expo-updates, so both sides use one fingerprint version,
+    # and a base without expo-updates still gets one.
+    - name: Fingerprint the base
+      env:
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      run: |
+        set -euo pipefail
+        git worktree add "$RUNNER_TEMP/base" "$BASE_SHA"
+        cd "$RUNNER_TEMP/base"
+        pnpm install --frozen-lockfile --ignore-scripts
+        cd native
+        for platform in ios android; do
+          node "$GITHUB_WORKSPACE/native/node_modules/expo-updates/bin/cli.js" fingerprint:generate --platform "$platform" | jq -r .hash > "$RUNNER_TEMP/base-$platform"
+        done
+        jq -r .expo.runtimeVersion app.json > "$RUNNER_TEMP/base-runtime"
+
+    - name: Compare
+      env:
+        GH_TOKEN: ${{ github.token }}
+        PR: ${{ github.event.pull_request.number }}
+        IS_FORK: ${{ github.event.pull_request.head.repo.fork }}
+      run: |
+        set -euo pipefail
+        cd "$RUNNER_TEMP"
+        changed=""
+        for platform in ios android; do
+          cmp -s "base-$platform" "head-$platform" || changed="$changed $platform"
+        done
+        if [ -z "$changed" ]; then
+          echo "No native change. This PR can ship over the air."
+          exit 0
+        fi
+        if cmp -s base-runtime head-runtime; then
+          echo "::error::Native code changed ($changed) without a runtimeVersion bump. Bump runtimeVersion in native/app.json; this PR needs a store build."
+          exit 1
+        fi
+        echo "Native code changed ($changed); runtimeVersion $(cat base-runtime) -> $(cat head-runtime)."
+        if [ "$IS_FORK" = true ]; then
+          echo "::notice::This fork PR changes native code. A maintainer adds the native-change label."
+          exit 0
+        fi
+        gh api "repos/$GITHUB_REPOSITORY/issues/$PR/labels" -f 'labels[]=native-change' > /dev/null

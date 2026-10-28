@@ -2,8 +2,8 @@
 
 How Pane ships and what runs outside a developer's machine. Pane has no server
 and no production database: the desktop app keeps its data on each user's
-machine. The things that ship are installers, two CLI packages, and a preview
-build of the Remote PWA.
+machine. The things that ship are installers, two CLI packages, a preview
+build of the Remote PWA, and over-the-air updates for the phone app.
 
 ## Surfaces
 
@@ -14,6 +14,8 @@ build of the Remote PWA.
 | Release recovery | `Build & Release` | manual, with `release_tag` and `publish` | Rebuilds and republishes an existing tag |
 | Nightly / canary | `Nightly / Canary Release` (`nightly-release.yml`) | manual, with `channel` and `source_ref` | Publishes a GitHub prerelease that is not marked Latest and has no update metadata, so auto-update never moves stable users onto it |
 | Remote PWA preview | `Deploy Remote PWA Preview` (`deploy-remote-pwa-preview.yml`) | push to `main` or `nightly` | Builds `frontend`, pushes an image to Google Artifact Registry, and deploys it to Cloud Run |
+| Phone app updates | `Native OTA Updates` (`native-updates.yml`) | push to `main` touching `native/`, `shared/` or `pnpm-lock.yaml`; manual on `main` | Exports the phone app's JavaScript, writes one update manifest per platform, and deploys it to the Cloud Run service `pane-native-updates`. On pull requests it builds and smoke-tests the image without deploying |
+| Native runtime check | `Native Runtime` (`native-runtime.yml`) | pull requests that touch `native/` or `pnpm-lock.yaml` | Fails when the phone app's native code changed without a `runtimeVersion` bump, and labels bumped PRs `native-change` |
 | Website notification | `Notify website on release` (`notify-website.yml`) | manual only | Re-sends the release event to the website repo; tag releases already do this from `Build & Release` |
 | PR checks | `Code Quality` (`quality.yml`) | pull requests and pushes to `main` | Typecheck, lint, markdown link check, runpane contract drift check, unit tests on Linux, macOS and Windows, the runpane wrapper matrix, and the Playwright smoke suite |
 | React review | `React Doctor` (`react-doctor.yml`) | pull requests that touch `frontend/` | Comments on new React findings; advisory, never blocks |
@@ -127,6 +129,13 @@ the Homebrew job logs a notice and skips. npm publishes with `--provenance`.
   back to an earlier revision
   (`gcloud run services update-traffic <service> --to-revisions <revision>=100`)
   should also work, but it is unverified: nobody has done it for this service yet.
+- **Bad phone app update:** revert the change on `main`. The revert publishes
+  a newer update, and phones run it after their next launch and restart (or
+  **Restart to update** in Settings). A Cloud Run traffic rollback does not
+  reach phones: they load only an update newer than the one they run. An
+  update that crashes before its first screen is undone on the phone by
+  itself, which falls back to the last update that launched. See
+  [Over-the-air updates](native/README.md#over-the-air-updates).
 
 ## Nightly and canary builds
 
@@ -143,6 +152,11 @@ come from repository variables: `GCP_PROJECT_ID`, `GCP_REGION`,
 `GCP_WORKLOAD_IDENTITY_PROVIDER` and `GCP_DEPLOY_SERVICE_ACCOUNT`. The one-time
 GCP setup is `scripts/gcp/setup-remote-pwa-preview.sh`.
 
+The phone app's update server, Cloud Run service `pane-native-updates`, lives
+in the same project and uses the same registry, deploy identity and runtime
+service account. `native-updates.yml` names the service itself, and the
+first deploy creates it.
+
 ## Secrets and variables
 
 Names only; values live in the GitHub repository settings.
@@ -154,7 +168,7 @@ Names only; values live in the GitHub repository settings.
 | `CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_ID`, `APPLE_TEAM_ID`, `APPLE_APP_SPECIFIC_PASSWORD` | `build.yml` | macOS signing. It turns on only when all five are set; otherwise builds are unsigned |
 | `SITE_REPO_DISPATCH_TOKEN` | `build.yml`, `notify-website.yml` | Sends the `pane-release` event to the website repo |
 | `TRAFFIC_TOKEN` | `traffic-snapshot.yml` | Reads repository traffic |
-| `GCP_*`, `CLOUD_RUN_*` variables | `deploy-remote-pwa-preview.yml` | See [Remote PWA preview](#remote-pwa-preview) |
+| `GCP_*`, `CLOUD_RUN_*` variables | `deploy-remote-pwa-preview.yml`, `native-updates.yml` (all but `CLOUD_RUN_SERVICE`) | See [Remote PWA preview](#remote-pwa-preview) |
 
 Local development needs no secrets and no `.env` file.
 

@@ -5,6 +5,7 @@ import { useHostsStore } from '@/auth/hostsStore';
 import { useDaemon } from '@/daemon';
 import { ConnectionStatus } from '@/features/hosts/ConnectionStatus';
 import { NotificationSettings } from '@/features/notifications/NotificationSettings';
+import { AppUpdateRow } from '@/features/updates/AppUpdateRow';
 import { revokePush } from '@/features/notifications/usePushSetup';
 import { useTheme } from '@/theme';
 import { Icon, ListRow, ListSection, Screen } from '@/ui';
@@ -77,6 +78,10 @@ export default function SettingsScreen() {
           leading={<Icon ios="plus.circle.fill" android="add_circle" size={20} color={theme.colors.accentText} />}
           onPress={() => router.push('/hosts/add')}
         />
+      </ListSection>
+
+      <ListSection title="App">
+        <AppUpdateRow />
       </ListSection>
     </Screen>
   );
