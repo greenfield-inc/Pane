@@ -1414,6 +1414,32 @@ describe('OrchestrationSessionManager', () => {
     expect(preserved).toMatchObject({ name: 'Alpha', context: 'Keep this context', revision: first.session.revision });
   });
 
+  it('frees an archived Session\'s name and numbers it on restore when an active Session took it', async () => {
+    const fixture = createFixture();
+    const archived = await fixture.manager.create({ name: 'pane' });
+    await fixture.manager.update({ sessionId: archived.session.id }, { archived: true });
+
+    const reused = await fixture.manager.create({ name: 'Pane' });
+    expect(reused.session.id).not.toBe(archived.session.id);
+    // Active Sessions still keep distinct names.
+    await expect(fixture.manager.create({ name: 'pane' })).rejects.toThrow('already exists');
+    const exact = await fixture.manager.create({ name: 'Exact' });
+    await fixture.manager.update({ sessionId: exact.session.id }, { archived: true });
+    const exactActive = await fixture.manager.create({ name: 'Exact' });
+    // An exact name shared with archived Sessions selects the active one.
+    expect((await fixture.manager.get({ name: 'Exact' })).id).toBe(exactActive.session.id);
+    expect((await fixture.manager.get({ sessionId: 'Exact' })).id).toBe(exactActive.session.id);
+    const other = await fixture.manager.create({ name: 'Other' });
+    await fixture.manager.update({ sessionId: other.session.id }, { archived: true });
+    await expect(fixture.manager.update({ sessionId: other.session.id }, { name: 'pane' })).resolves.toMatchObject({ name: 'pane' });
+
+    const restored = await fixture.manager.update({ sessionId: archived.session.id }, { archived: false });
+    expect(restored).toMatchObject({ name: 'pane 2', archived: false });
+    expect(restored.activity.at(-1)?.message).toBe('Renamed to “pane 2”.');
+    const restoredOther = await fixture.manager.update({ sessionId: other.session.id }, { archived: false });
+    expect(restoredOther.name).toBe('pane 3');
+  });
+
   it('archives and restores a Session durably without changing its owner, history, or associations', async () => {
     const fixture = createFixture();
     const created = await fixture.manager.create({

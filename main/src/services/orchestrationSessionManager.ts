@@ -194,7 +194,7 @@ export class OrchestrationSessionManager extends EventEmitter {
       } else if (input.wslDistribution) throw new Error('A native Session cannot specify a WSL distribution');
       const data = this.store.read();
       const name = input.name.trim();
-      if (data.sessions.some(session => normalizeSessionName(session.name) === normalizeSessionName(name))) {
+      if (activeNameTaken(data.sessions, name)) {
         throw new Error(`A Session named ${name} already exists`);
       }
       const sourcePanel = sourcePanelId ? panelManager.getPanel(sourcePanelId) : undefined;
@@ -331,7 +331,9 @@ export class OrchestrationSessionManager extends EventEmitter {
       if (input.expectedRevision !== undefined && input.expectedRevision !== current.revision) {
         throw new Error(`Session ${current.name} changed; expected revision ${input.expectedRevision}, found ${current.revision}`);
       }
-      const name = input.name?.trim() ?? current.name;
+      const restoring = current.archived === true && input.archived === false;
+      // An archived Session gives up its name; restoring it beside an active namesake numbers it.
+      const name = input.name?.trim() ?? (restoring ? freeSessionName(data.sessions, current.name, current.id) : current.name);
       // A new agent drops the previous agent's command and resume settings.
       const agentChanging = input.agent !== undefined && input.agent !== current.agent;
       const launchCommand = input.launchCommand ?? (agentChanging ? '' : current.launchCommand);
@@ -362,14 +364,14 @@ export class OrchestrationSessionManager extends EventEmitter {
         activity: [...current.activity],
       };
       if (input.name !== undefined) delete nextRecord.nameIsDefault;
-      if (input.name !== undefined && data.sessions.some(session => session.id !== current.id && normalizeSessionName(session.name) === normalizeSessionName(nextRecord.name))) {
+      if (input.name !== undefined && nextRecord.archived !== true && activeNameTaken(data.sessions, nextRecord.name, current.id)) {
         throw new Error(`A Session named ${nextRecord.name} already exists`);
       }
       this.assertAgentSupported(nextRecord.agent, nextRecord.runtime);
       if (nextRecord.archived === true && nextRecord.agent !== current.agent) {
         throw new Error(`Session ${current.name} is archived; restore it before changing its agent`);
       }
-      const renamed = input.name !== undefined && nextRecord.name !== current.name;
+      const renamed = nextRecord.name !== current.name;
       const updateMessage = input.report ? `Reported: ${input.report.summary}` : renamed ? `Renamed to “${nextRecord.name}”.` : 'Updated Session context.';
       const updateActivity = this.activity(input.report ? 'report' : 'updated', updateMessage, input.source ?? 'user');
       nextRecord.activity.push(updateActivity);
@@ -532,10 +534,7 @@ export class OrchestrationSessionManager extends EventEmitter {
     const { sessions } = await this.list();
     const record = sessions.find(session => session.panelIds[session.agent] === panelId);
     if (!record?.nameIsDefault) return;
-    const taken = new Set(sessions.filter(session => session.id !== record.id).map(session => normalizeSessionName(session.name)));
-    let uniqueName = name;
-    for (let suffix = 2; taken.has(normalizeSessionName(uniqueName)); suffix += 1) uniqueName = `${name} ${suffix}`;
-    await this.update({ sessionId: record.id }, { name: uniqueName, expectedRevision: record.revision, source: 'system' });
+    await this.update({ sessionId: record.id }, { name: freeSessionName(sessions, name, record.id), expectedRevision: record.revision, source: 'system' });
   }
 
   /**
@@ -1164,6 +1163,11 @@ export class OrchestrationSessionManager extends EventEmitter {
     if (matches.length === 0 && selector.sessionId && !selector.name) {
       matches = data.sessions.filter(session => session.name === selector.sessionId);
     }
+    // A name an archived Session once had may be reused; the active Session owns it.
+    if (matches.length > 1) {
+      const active = matches.filter(session => session.archived !== true);
+      if (active.length === 1) matches = active;
+    }
     const selectorLabel = selector.name ?? selector.sessionId;
     if (matches.length === 0) throw new PaneError('ERR_SESSION_NOT_FOUND', `Session ${selectorLabel} not found`, 'Pick a Session from `runpane sessions list --json`.');
     if (matches.length > 1) throw new PaneError('ERR_SESSION_AMBIGUOUS', `Session selector ${selectorLabel} is ambiguous`, 'Use the Session id from `runpane sessions list --json`.');
@@ -1251,6 +1255,18 @@ function validateUpdateInput(input: OrchestrationSessionUpdateInput): void {
 
 function normalizeSessionName(name: string): string {
   return name.trim().toLocaleLowerCase();
+}
+
+/** Names belong to active Sessions only: an archived Session never blocks reusing its name. Its id stays unique. */
+function activeNameTaken(sessions: readonly OrchestrationSessionRecord[], name: string, exceptId?: string): boolean {
+  return sessions.some(session => session.id !== exceptId && session.archived !== true && normalizeSessionName(session.name) === normalizeSessionName(name));
+}
+
+/** `name`, or "<name> 2", "<name> 3"... when an active Session already has it. */
+function freeSessionName(sessions: readonly OrchestrationSessionRecord[], name: string, exceptId: string): string {
+  let candidate = name;
+  for (let suffix = 2; activeNameTaken(sessions, candidate, exceptId); suffix += 1) candidate = `${name} ${suffix}`;
+  return candidate;
 }
 
 function resolveSupportedPaneChatAgent(agent: PaneChatAgent): PaneChatAgent {

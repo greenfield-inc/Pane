@@ -31,8 +31,9 @@ export function isOrchestrationInternalSessionId(sessionId: string): boolean {
 }
 
 /** Default name for a new Session: "New chat", then "New chat 2", "New chat 3", ... */
-export function nextOrchestrationSessionName(sessions: readonly { name: string }[]): string {
-  const existingNames = new Set(sessions.map(session => session.name.trim().toLocaleLowerCase()));
+export function nextOrchestrationSessionName(sessions: readonly { name: string; archived?: boolean }[]): string {
+  // Archived Sessions give up their names.
+  const existingNames = new Set(sessions.filter(session => session.archived !== true).map(session => session.name.trim().toLocaleLowerCase()));
   if (!existingNames.has('new chat')) return 'New chat';
 
   let suffix = 2;

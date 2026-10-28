@@ -99,7 +99,7 @@ describe('pane creation name reuse', () => {
     const created = await createPane();
 
     expect(created.name).toBe('Feature');
-    expect(created.worktree_name).toBe('feature-1');
+    expect(created.worktree_name).toMatch(/^feature-[a-z0-9]{4}$/);
     expect((await runner.execFile('git', ['rev-parse', 'feature'], project.path)).stdout).toBe(oldHead);
     expect((await runner.execFile('git', ['rev-parse', 'HEAD'], created.worktree_path)).stdout)
       .toBe((await runner.execFile('git', ['rev-parse', 'main'], project.path)).stdout);
@@ -117,17 +117,20 @@ describe('pane creation name reuse', () => {
     const created = await createPane();
 
     expect(created.name).toBe('Feature');
-    expect(created.worktree_name).toBe('feature-1');
+    expect(created.worktree_name).toMatch(/^feature-[a-z0-9]{4}$/);
     expect(readFileSync(path.join(externalPath, 'keep.txt'), 'utf8')).toBe('Do not touch');
   });
 
   it('does not reuse leftover branches after permanent deletion, including branch namespaces', async () => {
     await runner.execFile('git', ['branch', 'feature'], project.path);
     await runner.execFile('git', ['tag', 'feature'], project.path);
-    await runner.execFile('git', ['branch', 'feature-1/topic'], project.path);
     const created = await createPane();
     expect(created.name).toBe('Feature');
-    expect(created.worktree_name).toBe('feature-2');
+    expect(created.worktree_name).toMatch(/^feature-[a-z0-9]{4}$/);
+
+    await runner.execFile('git', ['branch', 'topic/nested'], project.path);
+    const namespaced = await createPane('Topic');
+    expect(namespaced.worktree_name).toMatch(/^topic-[a-z0-9]{4}$/);
   });
 
   it('respects an absolute worktree folder and preserves existing files', async () => {
@@ -139,7 +142,8 @@ describe('pane creation name reuse', () => {
     const created = await createPane();
 
     expect(created.name).toBe('Feature');
-    expect(created.worktree_path).toBe(path.join(project.worktree_folder, 'feature-1'));
+    expect(created.worktree_path).toBe(path.join(project.worktree_folder, created.worktree_name));
+    expect(created.worktree_name).toMatch(/^feature-[a-z0-9]{4}$/);
     expect(readFileSync(path.join(existingPath, 'keep.txt'), 'utf8')).toBe('Do not touch');
   });
 
@@ -308,6 +312,23 @@ describe('pane creation name reuse', () => {
     expect(created.name).toBe('Feature');
     expect(created.worktree_name).toBe('');
     expect(created.worktree_path).toBe(project.path);
+  });
+
+  it('gives a generated name that only an archived pane had to the new pane', async () => {
+    const archived = await createPane('Fix login', true);
+    database.archiveSession(archived.id);
+    Object.assign(queueOptions.worktreeNameGenerator, {
+      generateFallbackSessionName: () => 'Fallback name',
+      generateSessionName: async () => 'Fix login',
+    });
+    Object.assign(queueOptions.sessionManager, {
+      getSession: (id: string) => partialMock<Session>({ id, name: database.getSession(id)?.name }),
+      emit: vi.fn(),
+    });
+
+    const created = await createPane('', true);
+
+    await vi.waitFor(() => expect(database.getSession(created.id)?.name).toBe('Fix login'));
   });
 
   it('creates the worktree on an exact requested branch name off a non-default base', async () => {

@@ -23,6 +23,7 @@ import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDec
 import { withLock } from '../utils/mutex';
 import { PaneError } from '../../../shared/paneError';
 import type { RunpanePaneBase } from '../../../shared/types/runpaneOrchestration';
+import { randomInt } from 'node:crypto';
 
 const loadQueueDependency = createRequire(__filename);
 
@@ -381,6 +382,7 @@ export class TaskQueue {
           if (job.data.index === undefined || job.data.index < 0) {
             const capturedSessionId = session.id;
             const capturedFallbackName = sessionName;
+            const capturedProjectId = targetProject.id;
             this.options.worktreeNameGenerator.generateSessionName(prompt).then(aiName => {
               if (aiName && aiName !== capturedFallbackName) {
                 // Same pattern as sessions:rename IPC handler.
@@ -388,13 +390,9 @@ export class TaskQueue {
                 const sm = this.options.sessionManager;
                 const liveSession = sm.getSession(capturedSessionId);
                 if (liveSession && liveSession.name === capturedFallbackName) {
-                  // Ensure uniqueness — another session may already have this AI-generated name
+                  // Ensure uniqueness among active panes, as at creation; archived names are free.
                   let finalName = aiName;
-                  if (sm.db.checkSessionNameExists(finalName)) {
-                    let counter = 1;
-                    while (sm.db.checkSessionNameExists(`${aiName} ${counter}`)) {
-                      counter++;
-                    }
+                  for (let counter = 1; sm.db.checkActiveSessionNameExists(finalName, capturedProjectId); counter++) {
                     finalName = `${aiName} ${counter}`;
                   }
                   sm.db.updateSession(capturedSessionId, { name: finalName });
@@ -896,39 +894,6 @@ export class TaskQueue {
     return this.continueQueue.add({ sessionId, prompt });
   }
 
-  private async ensureUniqueSessionName(baseName: string, index?: number): Promise<string> {
-    const { sessionManager } = this.options;
-    const db = sessionManager.db;
-    
-    let candidateName = baseName;
-    
-    // Add index suffix if provided (for multiple sessions)
-    if (index !== undefined) {
-      candidateName = `${baseName}-${index + 1}`;
-    }
-    
-    // Check for existing sessions with this name (including archived)
-    let counter = 1;
-    let uniqueName = candidateName;
-    
-    while (true) {
-      // Check both active and archived sessions
-      if (!db.checkSessionNameExists(uniqueName)) {
-        break;
-      }
-      
-      // If we already have an index, increment after the index
-      if (index !== undefined) {
-        uniqueName = `${baseName}-${index + 1}-${counter}`;
-      } else {
-        uniqueName = `${baseName}-${counter}`;
-      }
-      counter++;
-    }
-    
-    return uniqueName;
-  }
-
   private async ensureUniqueNames(baseSessionName: string, baseWorktreeName: string, project: Project, index?: number, useWorktree = true, worktreeNameIsBranch = true): Promise<{ sessionName: string; worktreeName: string }> {
     const { sessionManager } = this.options;
     const db = sessionManager.db;
@@ -943,7 +908,8 @@ export class TaskQueue {
     }
     
     // Display names only belong to active panes in this repository. Archived
-    // worktree identities stay reserved so restoring a pane cannot share its files.
+    // worktree identities stay reserved so restoring a pane cannot share its files:
+    // a taken worktree name gets a short random suffix rather than a guessable counter.
     let counter = 1;
     let uniqueSessionName = candidateSessionName;
     let uniqueWorktreeName = candidateWorktreeName;
@@ -967,7 +933,6 @@ export class TaskQueue {
       }
     }
     const resolver = new PathResolver(project);
-    counter = 1;
     while (
       db.checkSessionNameExists(uniqueWorktreeName) ||
       branches.some(branch => branch === uniqueWorktreeName || branch.startsWith(`${uniqueWorktreeName}/`)) ||
@@ -975,7 +940,7 @@ export class TaskQueue {
         project.path, uniqueWorktreeName, project.worktree_folder || undefined, resolver,
       )))
     ) {
-      uniqueWorktreeName = `${candidateWorktreeName}-${counter++}`;
+      uniqueWorktreeName = `${candidateWorktreeName}-${randomWorktreeSuffix()}`;
     }
 
     return { sessionName: uniqueSessionName, worktreeName: uniqueWorktreeName };
@@ -986,4 +951,10 @@ export class TaskQueue {
     await this.inputQueue.close();
     await this.continueQueue.close();
   }
+}
+
+/** Four lowercase letters or digits: 1.6M values, so a taken worktree name almost never needs a second try. */
+function randomWorktreeSuffix(): string {
+  const alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  return Array.from({ length: 4 }, () => alphabet[randomInt(alphabet.length)]).join('');
 }
