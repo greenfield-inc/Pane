@@ -26,6 +26,10 @@ export const GLASSES_CHANNELS: ReadonlySet<string> = new Set([
   'runpane:panels:screen',
   'runpane:panels:output',
   'runpane:panels:submit',
+  // Opening a stopped tab starts its saved agent or command, as opening it in Pane does; the caller picks no command or folder.
+  'runpane:panels:resume',
+  // Opening and leaving a Pane mark it viewed, as selecting it on desktop does.
+  'sessions:mark-viewed',
   'voice:transcribe',
   'voice:finalize-streaming',
   'notify:remote-snapshot',

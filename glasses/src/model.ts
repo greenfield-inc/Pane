@@ -69,6 +69,16 @@ export interface PaneEntry {
   panelId: string;
 }
 
+/**
+ * A row of a computer's Sessions and Panes, in the Pane apps' order: Pinned, then Sessions, a
+ * blank `gap`, then Panes. A `note` stands in for Sessions the computer couldn't list.
+ */
+export type PaneRow = PaneEntry | { kind: 'gap' } | { kind: 'note'; text: string };
+
+export function isPaneEntry(row: PaneRow): row is PaneEntry {
+  return row.kind === 'session' || row.kind === 'pane';
+}
+
 export interface TerminalScreen {
   lines: string[];
   status: PaneStatus;
@@ -99,10 +109,14 @@ export interface PaneSource {
   /** Every card from every computer, in display order. */
   cards(): Card[];
   subscribe(listener: () => void): () => void;
-  panes(computerId: string): Promise<PaneEntry[]>;
+  panes(computerId: string): Promise<PaneRow[]>;
   screen(computerId: string, panelId: string): Promise<TerminalScreen>;
   /** Older output, oldest line first. */
   scrollback(computerId: string, panelId: string): Promise<string[]>;
+  /** Records that the person just looked at a Pane, as selecting it in Pane does, so it stops showing as new. */
+  markViewed(computerId: string, paneId: string): Promise<void>;
+  /** Starts a stopped terminal tab with its saved agent or command, as opening it in Pane does. */
+  resume(computerId: string, panelId: string): Promise<void>;
   /** Types the text into the terminal with Enter. */
   submit(computerId: string, panelId: string, text: string): Promise<void>;
   answer(card: Card, answer: NotifyAnswer): Promise<void>;

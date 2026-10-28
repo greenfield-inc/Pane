@@ -607,7 +607,7 @@ export class PaneRemoteHttpApiServer {
     const fix = 'Fix it in Pane on this computer: Settings › Integrations › Voice transcription.';
     const keyProblem = voiceKeyProblem('deepgramApiKey', deepgramApiKey);
     if (keyProblem) {
-      refuse('ERR_VOICE_KEY_INVALID', `The Deepgram key saved on this computer isn't a key: ${keyProblem.message.replace(/^That isn't a Deepgram key: /, '')} ${fix}`);
+      refuse('ERR_VOICE_KEY_INVALID', `The Deepgram key saved on this computer can't be used. ${keyProblem.message} ${fix}`);
       return;
     }
     const upstream = new WebSocket(buildDeepgramListenUrl(this.deepgramListenEndpoint), {

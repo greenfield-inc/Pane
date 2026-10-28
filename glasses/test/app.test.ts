@@ -3,7 +3,7 @@ import { GlassesApp } from '../src/app';
 import { DemoSource } from '../src/demo';
 import type { Page } from '../src/display';
 import type { Gesture } from '../src/input';
-import { orderCards, type Card, type Computer, type Dictation, type PaneEntry, type PaneSource, type TerminalScreen } from '../src/model';
+import { orderCards, type Card, type Computer, type Dictation, type PaneEntry, type PaneRow, type PaneSource, type TerminalScreen } from '../src/model';
 import type { Cancel } from '../src/timers';
 
 /** Timers the test runs by hand. */
@@ -148,8 +148,11 @@ describe('Panes and the terminal', () => {
     await started.press({ type: 'press' });
     expect(started.text()[0]).toBe('Open a Pane · pick a computer');
     await started.press({ type: 'select', index: 0 });
-    expect(started.text()[1]).toContain('Session · even g2 app · idle | fix-login · Claude · working');
+    // Sessions, a blank row, then Panes; a press on the blank row opens nothing.
+    expect(started.text()[1]).toContain('Session · even g2 app · idle |  | fix-login · Claude · working');
     await started.press({ type: 'select', index: 1 });
+    expect(started.text()[0]).toContain('Sessions and Panes');
+    await started.press({ type: 'select', index: 2 });
     return started;
   }
 
@@ -230,9 +233,20 @@ class ScriptedSource implements PaneSource {
     return () => this.listeners.delete(listener);
   }
   changed() { for (const listener of this.listeners) listener(); }
-  async panes(): Promise<PaneEntry[]> { return []; }
-  async screen(): Promise<TerminalScreen> { return { lines: [], status: 'idle', agent: 'shell' }; }
+  rows: PaneRow[] = [];
+  screenStatus: TerminalScreen['status'] = 'idle';
+  /** Calls that change something on a computer, in order. */
+  calls: string[] = [];
+  async panes(): Promise<PaneRow[]> { return this.rows; }
+  async screen(): Promise<TerminalScreen> { return { lines: [], status: this.screenStatus, agent: 'shell' }; }
   async scrollback() { return []; }
+  async markViewed(_computerId: string, paneId: string) {
+    this.calls.push(`viewed ${paneId}`);
+  }
+  async resume(_computerId: string, panelId: string) {
+    this.calls.push(`resume ${panelId}`);
+    this.screenStatus = 'idle';
+  }
   async submit() {}
   async answer() {}
   async dictate(): Promise<Dictation> { throw new Error('no voice'); }
@@ -249,8 +263,54 @@ function startScripted() {
   const pages: Page[] = [];
   const app = new GlassesApp({ source, show: (page) => pages.push(page), exit: () => {}, mic: async () => true, later: clock.later, now: () => clock.now, clock: () => '9:40' });
   const text = () => (pages.at(-1)?.boxes ?? []).map((box) => (box.kind === 'list' ? box.items.join(' | ') : box.lines.join(' / ')));
-  return { app, source, text };
+  const press = async (gesture: Gesture) => {
+    app.handle(gesture);
+    await settle();
+  };
+  return { app, source, text, press, clock };
 }
+
+/** Opens `rows[index]` on a live computer from home. */
+async function openScriptedRow(rows: PaneRow[], index: number, screenStatus: TerminalScreen['status'] = 'idle') {
+  const scripted = startScripted();
+  scripted.source.computerList = [{ id: 'studio', name: 'studio-mac', status: 'live', lastSeenAt: 1, paneCount: rows.length, workingCount: 0 }];
+  scripted.source.rows = rows;
+  scripted.source.screenStatus = screenStatus;
+  scripted.source.changed();
+  await scripted.press({ type: 'press' });
+  await scripted.press({ type: 'select', index: 0 });
+  await scripted.press({ type: 'select', index });
+  return scripted;
+}
+
+const paneRow = (id: string): PaneEntry => ({ kind: 'pane', id, name: id, agent: 'Claude', status: 'stopped', panelId: `panel-${id}` });
+
+describe('opening and leaving a Pane, as the Pane apps do', () => {
+  it('marks it viewed and starts a stopped tab once with its saved agent, then just reads it', async () => {
+    const { source, clock, text } = await openScriptedRow([paneRow('fix-login')], 0, 'stopped');
+    expect(text()[0]).toContain('fix-login');
+    expect(source.calls).toEqual(['viewed fix-login', 'resume panel-fix-login']);
+    source.screenStatus = 'stopped';
+    await clock.advance(5_000);
+    expect(source.calls).toEqual(['viewed fix-login', 'resume panel-fix-login']);
+  });
+
+  it('leaves a running tab alone, and marks the Pane viewed again on leaving or going to the background', async () => {
+    const { source, press } = await openScriptedRow([paneRow('fix-login')], 0, 'idle');
+    expect(source.calls).toEqual(['viewed fix-login']);
+    await press({ type: 'background' });
+    await press({ type: 'foreground' });
+    await press({ type: 'double' });
+    expect(source.calls).toEqual(['viewed fix-login', 'viewed fix-login', 'viewed fix-login', 'viewed fix-login']);
+  });
+
+  it('marks nothing viewed for a Session, which has no viewed marker', async () => {
+    const session: PaneEntry = { kind: 'session', id: 's1', name: 'even g2 app', agent: 'Claude', status: 'idle', panelId: 'sp1' };
+    const { source, press } = await openScriptedRow([session], 0, 'idle');
+    await press({ type: 'double' });
+    expect(source.calls).toEqual([]);
+  });
+});
 
 describe('a refused computer', () => {
   it('is retried by a press on home, which shows it connecting rather than the same refusal', () => {

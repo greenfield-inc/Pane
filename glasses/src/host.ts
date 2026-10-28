@@ -10,6 +10,7 @@ import {
   GlassesError,
   agentLabel,
   cardsFromNotify,
+  isPaneEntry,
   orderCards,
   type Card,
   type Computer,
@@ -17,6 +18,7 @@ import {
   type HostRefusal,
   type NotifyCardState,
   type PaneEntry,
+  type PaneRow,
   type PaneSource,
   type PaneStatus,
   type TerminalScreen,
@@ -206,7 +208,14 @@ const notifyStateSchema: BoundarySchema<NotifyCardState> = boundary.object({
 const sessionsSchema = boundary.object({
   success: boundary.boolean,
   data: boundary.optional(boundary.array(boundary.object({
-    sessions: boundary.array(boundary.object({ id: boundary.string, name: boundary.string, archived: boundary.optional(boundary.boolean) })),
+    sessions: boundary.array(boundary.object({
+      id: boundary.string,
+      name: boundary.string,
+      archived: boundary.optional(boundary.boolean),
+      isHidden: boundary.optional(boundary.boolean),
+      isFavorite: boundary.optional(boundary.boolean),
+      favoritePinnedAt: boundary.optional(boundary.string),
+    })),
   }))),
   error: boundary.optional(boundary.string),
 });
@@ -218,6 +227,7 @@ const orchestrationSchema = boundary.object({
       id: boundary.string,
       name: boundary.string,
       archived: boundary.optional(boundary.boolean),
+      isPinned: boundary.optional(boundary.boolean),
       agent: boundary.string,
       internalSessionId: boundary.string,
       panelIds: boundary.jsonObject,
@@ -312,7 +322,7 @@ export class HostConnection {
   readonly id: string;
   private readonly client: RemoteDaemonClient;
   private notify: NotifyCardState | null = null;
-  private entries: PaneEntry[] = [];
+  private rows: PaneRow[] = [];
   private readonly statuses = new Map<string, PaneStatus>();
   private refusal: HostRefusal | null = null;
   private lockedUntil = 0;
@@ -544,7 +554,15 @@ export class HostConnection {
     return decodeBoundary(await this.client.invoke(channel, args), schema);
   }
 
-  /** Unarchived Sessions and Panes, with the terminal each opens and its agent status. */
+  private get entries(): PaneEntry[] {
+    return this.rows.filter(isPaneEntry);
+  }
+
+  /**
+   * Unarchived Sessions and Panes, with the terminal each opens, in the Pane phone app's order
+   * (native/src/features/panes/paneList.ts): pinned Sessions, pinned Panes newest pin first, the
+   * other Sessions, a gap, the other Panes. Each shows once.
+   */
   private async readLists(): Promise<void> {
     const [sessions, orchestration, workspace] = await Promise.all([
       this.invoke('sessions:get-all-with-projects', [], sessionsSchema),
@@ -554,14 +572,20 @@ export class HostConnection {
     for (const entry of workspace?.entries ?? []) {
       if (entry.baseline && entry.panelId) this.statuses.set(entry.panelId, statusOf(entry.to, entry.running ?? true));
     }
+    const sessionsListed = orchestration?.success === true;
     const named = (orchestration?.data?.sessions ?? []).filter((session) => !session.archived);
     const internal = new Set((orchestration?.data?.sessions ?? []).map((session) => session.internalSessionId));
+    const pinnedSessions: PaneEntry[] = [];
     const sessionEntries: PaneEntry[] = [];
     for (const session of named) {
       const panelId = decodeOptionalBoundary(session.panelIds[session.agent], boundary.string);
-      if (panelId) sessionEntries.push({ kind: 'session', id: session.id, name: session.name, agent: agentLabel(session.agent), status: 'idle', panelId });
+      if (!panelId) continue;
+      const row: PaneEntry = { kind: 'session', id: session.id, name: session.name, agent: agentLabel(session.agent), status: 'idle', panelId };
+      (session.isPinned ? pinnedSessions : sessionEntries).push(row);
     }
-    const panes = (sessions.data ?? []).flatMap((project) => project.sessions).filter((pane) => !pane.archived && !internal.has(pane.id));
+    const panes = (sessions.data ?? []).flatMap((project) => project.sessions)
+      .filter((pane) => !pane.archived && !pane.isHidden && !internal.has(pane.id));
+    const pinnedAt = new Map(panes.filter((pane) => pane.isFavorite).map((pane) => [pane.id, pane.favoritePinnedAt ?? '']));
     const paneEntries = await Promise.all(panes.map(async (pane): Promise<PaneEntry | null> => {
       const panels = await this.invoke('panels:list', [pane.id], panelsSchema).catch(() => null);
       const terminals = (panels?.data ?? []).filter((panel) => panel.type === 'terminal');
@@ -573,13 +597,22 @@ export class HostConnection {
       if (!chosen) return null;
       return { kind: 'pane', id: pane.id, name: pane.name, agent: agentLabel(chosen.agentType), status: 'idle', panelId: chosen.panel.id };
     }));
-    this.entries = [...sessionEntries, ...paneEntries.filter((entry): entry is PaneEntry => entry !== null)];
+    const listed = paneEntries.filter((entry): entry is PaneEntry => entry !== null);
+    const pinnedPanes = listed.filter((entry) => pinnedAt.has(entry.id))
+      .sort((a, b) => (pinnedAt.get(b.id) ?? '').localeCompare(pinnedAt.get(a.id) ?? '') || a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+    const otherPanes = listed.filter((entry) => !pinnedAt.has(entry.id));
+    const above: PaneRow[] = [
+      ...pinnedSessions,
+      ...pinnedPanes,
+      ...(sessionsListed ? sessionEntries : [{ kind: 'note' as const, text: 'Sessions unavailable' }]),
+    ];
+    this.rows = [...above, ...(above.length && otherPanes.length ? [{ kind: 'gap' as const }] : []), ...otherPanes];
     this.changed();
   }
 
-  async panes(): Promise<PaneEntry[]> {
+  async panes(): Promise<PaneRow[]> {
     await this.readLists();
-    return this.entries.map((entry) => ({ ...entry, status: this.statusOf(entry) }));
+    return this.rows.map((row) => (isPaneEntry(row) ? { ...row, status: this.statusOf(row) } : row));
   }
 
   async screen(panelId: string): Promise<TerminalScreen> {
@@ -592,6 +625,14 @@ export class HostConnection {
   async scrollback(panelId: string): Promise<string[]> {
     const output = await this.invoke('runpane:panels:output', [{ panelId, limit: SCROLLBACK_LINES }], outputSchema);
     return stripAnsi(output.text).split('\n');
+  }
+
+  async markViewed(paneId: string): Promise<void> {
+    await this.client.invoke('sessions:mark-viewed', [paneId]);
+  }
+
+  async resume(panelId: string): Promise<void> {
+    await this.client.invoke('runpane:panels:resume', [{ panelId }]);
   }
 
   async submit(panelId: string, input: string): Promise<void> {
@@ -664,7 +705,7 @@ export class HostHub implements PaneSource {
     return () => this.listeners.delete(listener);
   }
 
-  panes(computerId: string): Promise<PaneEntry[]> {
+  panes(computerId: string): Promise<PaneRow[]> {
     return this.connection(computerId).panes();
   }
 
@@ -674,6 +715,14 @@ export class HostHub implements PaneSource {
 
   scrollback(computerId: string, panelId: string): Promise<string[]> {
     return this.connection(computerId).scrollback(panelId);
+  }
+
+  markViewed(computerId: string, paneId: string): Promise<void> {
+    return this.connection(computerId).markViewed(paneId);
+  }
+
+  resume(computerId: string, panelId: string): Promise<void> {
+    return this.connection(computerId).resume(panelId);
   }
 
   submit(computerId: string, panelId: string, text: string): Promise<void> {

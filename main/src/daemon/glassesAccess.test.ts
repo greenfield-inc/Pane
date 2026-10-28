@@ -52,7 +52,7 @@ async function setup(options: { visibility?: WorkspaceAccessPolicy['visibility']
     calls.push({ channel, args });
     return { ran: channel };
   });
-  for (const channel of ['runpane:panels:screen', 'runpane:panels:submit', 'notify:remote-command', 'file:write', 'git:commit', 'runpane:machine:exec', 'remote:settings:update', 'terminal:input']) {
+  for (const channel of ['runpane:panels:screen', 'runpane:panels:submit', 'runpane:panels:resume', 'sessions:mark-viewed', 'notify:remote-command', 'file:write', 'git:commit', 'runpane:machine:exec', 'remote:settings:update', 'terminal:input', 'panels:initialize', 'terminal:setVisibility']) {
     record(channel);
   }
   registry.register(GLASSES_COMMANDS.createPairingSecret, (request: PaneCommandValue) => {
@@ -166,16 +166,20 @@ describe('glasses on the workspace listener', () => {
   it('reaches exactly its allowlist', async () => {
     const host = await setup();
     const { token } = await host.pair();
-    const allowed = await host.invoke('runpane:panels:screen', [{ panelId: 'p1' }], host.fromGlasses(token));
-    expect(allowed).toMatchObject({ status: 200, body: { ok: true, result: { ran: 'runpane:panels:screen' } } });
+    // Opening a Pane reads its screen, starts it if stopped, and marks it viewed.
+    for (const [channel, args] of [['runpane:panels:screen', [{ panelId: 'p1' }]], ['runpane:panels:resume', [{ panelId: 'p1' }]], ['sessions:mark-viewed', ['pane-1']]] as const) {
+      const allowed = await host.invoke(channel, [...args], host.fromGlasses(token));
+      expect(allowed).toMatchObject({ status: 200, body: { ok: true, result: { ran: channel } } });
+    }
 
-    for (const channel of ['file:write', 'git:commit', 'runpane:machine:exec', 'remote:settings:update', 'terminal:input',
+    // Starting a terminal at a chosen folder or size, or registering as a viewer that never acks output, stays out.
+    for (const channel of ['file:write', 'git:commit', 'runpane:machine:exec', 'remote:settings:update', 'terminal:input', 'panels:initialize', 'terminal:setVisibility',
       GLASSES_COMMANDS.createPairingSecret, GLASSES_COMMANDS.list, GLASSES_COMMANDS.revoke]) {
       const refused = await host.invoke(channel, [{}], host.fromGlasses(token));
       expect({ channel, status: refused.status, code: errorCode(refused) })
         .toEqual({ channel, status: 403, code: 'ERR_GLASSES_CHANNEL_REFUSED' });
     }
-    expect(host.calls.map((call) => call.channel)).toEqual(['runpane:panels:screen']);
+    expect(host.calls.map((call) => call.channel)).toEqual(['runpane:panels:screen', 'runpane:panels:resume', 'sessions:mark-viewed']);
 
     for (const path of ['/media?sessionId=s&filePath=a', '/app/index.html']) {
       expect((await host.request('GET', path, host.fromGlasses(token))).status).toBe(403);

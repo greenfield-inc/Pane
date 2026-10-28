@@ -52,8 +52,11 @@ the origin under **Settings › Remote Access › Glasses**.
   all-clear page.
 - **A card** shows the asking Pane's last terminal lines (dimmed), the question, and the choices.
   A long question is cut at three lines; the **Read the whole question** row shows all of it.
-- **Open a Pane…** lists your computers (live or offline), then that computer's Sessions and Panes.
-  Picking one shows its live screen, refreshed about once a second. Swipe up for earlier output.
+- **Open a Pane…** lists your computers (live or offline), then that computer's Sessions and Panes
+  in the Pane apps' order: pinned ones first, then Sessions, a blank line, then Panes. Picking one
+  shows its live screen, refreshed about once a second, and marks the Pane viewed on that computer,
+  as opening it there does. A stopped Pane starts its saved agent or command. Swipe up for earlier
+  output.
   The bottom line names the newest card from another Pane; double press goes to it.
 - **Dictation** types what you said into the Pane and presses Enter right away. A misheard line
   typed into a shell runs, so check the Pane before you talk into a plain shell.
@@ -89,8 +92,10 @@ hold:
   the token.
 
 A glasses token reaches only what the glasses use: listing Sessions and Panes, reading and typing
-into terminals, dictation, and Notify. It cannot pair other devices, change settings, write files,
-commit, or run machine commands, and its event stream never carries terminal output.
+into terminals, dictation, and Notify. Opening a stopped Pane restarts its saved agent or command,
+in its own folder. The token cannot pair other devices, change settings, write files, commit, run
+machine commands, or choose what a terminal runs, and its event stream never carries terminal
+output.
 
 Typing into a terminal can run commands, so treat the glasses like your phone: whoever holds a
 working token on your tailnet and login can type into your shells. The Even app serves the glasses

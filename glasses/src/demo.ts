@@ -1,7 +1,7 @@
 // The demo: sample computers, cards and terminals that live in the app, with no network.
 // Even review needs it, and anyone can try every screen before pairing.
 import type { NotifyAnswer } from '../../shared/types/notify';
-import { GlassesError, orderCards, type Card, type Computer, type Dictation, type PaneEntry, type PaneSource, type TerminalScreen } from './model';
+import { GlassesError, orderCards, type Card, type Computer, type Dictation, type PaneEntry, type PaneRow, type PaneSource, type TerminalScreen } from './model';
 import type { Cancel } from './timers';
 
 const MINUTE = 60_000;
@@ -97,10 +97,10 @@ export class DemoSource implements PaneSource {
     return terminal;
   }
 
-  async panes(computerId: string): Promise<PaneEntry[]> {
+  async panes(computerId: string): Promise<PaneRow[]> {
     const names = computerId === 'studio' ? ['fix-login', 'docs-pass', 'nightly', 'scratch'] : computerId === 'devbox' ? ['api-server'] : [];
     const panes = names.map((name) => entry('pane', name, this.terminal(name)));
-    return computerId === 'studio' ? [{ ...entry('session', 'even g2 app', this.terminal('even-g2-app')), panelId: 'even-g2-app' }, ...panes] : panes;
+    return computerId === 'studio' ? [{ ...entry('session', 'even g2 app', this.terminal('even-g2-app')), panelId: 'even-g2-app' }, { kind: 'gap' }, ...panes] : panes;
   }
 
   async screen(_computerId: string, panelId: string): Promise<TerminalScreen> {
@@ -112,6 +112,13 @@ export class DemoSource implements PaneSource {
     const terminal = this.terminal(panelId);
     const filler = Array.from({ length: 30 }, (_, index) => `  ✓ auth.spec.ts > case ${index + 1}`);
     return [...filler, ...terminal.earlier, ...terminal.lines];
+  }
+
+  async markViewed(): Promise<void> {}
+
+  async resume(_computerId: string, panelId: string): Promise<void> {
+    const terminal = this.terminal(panelId);
+    if (terminal.status === 'stopped') terminal.status = 'idle';
   }
 
   async submit(_computerId: string, panelId: string, text: string): Promise<void> {
