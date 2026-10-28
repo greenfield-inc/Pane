@@ -12,6 +12,13 @@ import {
   type WorkspaceAccessUpdate,
   type WorkspaceMachineDescription,
 } from '../../../shared/types/workspaceAccess';
+import {
+  GLASSES_COMMANDS,
+  type GlassesAccessState,
+  type GlassesListResult,
+  type GlassesPairingSecretResult,
+  type GlassesRevokeResult,
+} from '../../../shared/types/glasses';
 
 const readRequestSchema = boundary.object({ path: boundary.nonEmptyString });
 const writeRequestSchema = boundary.object({
@@ -25,6 +32,9 @@ const execRequestSchema = boundary.object({
   timeoutMs: boundary.optional(boundary.number),
 });
 const setEnabledRequestSchema = boundary.object({ enabled: boundary.boolean });
+const pairingSecretRequestSchema = boundary.object({ deviceName: boundary.string });
+const revokeGlassesRequestSchema = boundary.object({ id: boundary.nonEmptyString });
+const setGlassesOriginRequestSchema = boundary.object({ origin: boundary.nonEmptyString, allowed: boundary.boolean });
 const setAccessRequestSchema = boundary.object({
   visibility: boundary.optional(boundary.enumeration('off', 'owner', 'tailnet')),
   password: boundary.optional(boundary.nullable(boundary.string)),
@@ -100,6 +110,19 @@ export function registerWorkspaceCommands(
   };
   // Describe answers clients admitted by visibility and password checks.
   registry.register('runpane:workspaces:describe', describe);
+  // The HTTP transport serves these only to the owner's own devices without a glasses token.
+  registry.register(GLASSES_COMMANDS.createPairingSecret, (request: PaneCommandValue): GlassesPairingSecretResult =>
+    host.glasses.createPairingSecret(decodeBoundary(request, pairingSecretRequestSchema).deviceName));
+  registry.register(GLASSES_COMMANDS.list, (): GlassesListResult => ({ devices: host.glasses.list() }));
+  registry.register(GLASSES_COMMANDS.revoke, async (request: PaneCommandValue): Promise<GlassesRevokeResult> =>
+    ({ revoked: await host.glasses.revoke(decodeBoundary(request, revokeGlassesRequestSchema).id) }));
+  registry.register(GLASSES_COMMANDS.state, (): GlassesAccessState => host.glasses.state());
+  registry.register(GLASSES_COMMANDS.setOrigin, (request: PaneCommandValue): Promise<GlassesAccessState> => {
+    // Which web origins may carry glasses tokens is decided on this machine only.
+    refuseRemoteCaller();
+    const { origin, allowed } = decodeBoundary(request, setGlassesOriginRequestSchema);
+    return host.glasses.setOwnerOrigin(origin, allowed);
+  });
   // A phone cannot read `tailscale status`; it asks a computer on its own login.
   // The HTTP transport restricts discovery to the signed owner identity before invoking this.
   registry.register('runpane:workspaces:machines', (): Promise<TailnetMachineList> => {

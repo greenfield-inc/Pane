@@ -7,6 +7,7 @@ import { SettingsSection } from '../ui/SettingsSection';
 import { SettingRow } from './SettingRow';
 import { settingDomId } from './catalog';
 import { SegmentedControl } from './SettingsControls';
+import { GlassesSettings } from './GlassesSettings';
 import { API } from '../../utils/api';
 import { useConfigStore } from '../../stores/configStore';
 import {
@@ -374,6 +375,8 @@ export function CodelessRemoteSettings({ connectionState, otherHosts, accessFoot
         </SettingRow>
         {accessFooter}
       </SettingsSection>
+
+      <GlassesSettings />
     </>
   );
 }

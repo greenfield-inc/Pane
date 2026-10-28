@@ -17,6 +17,11 @@ export interface WorkspaceAccessConfig {
   /** Unset means "owner". */
   visibility?: Exclude<WorkspaceVisibility, 'off'>;
   password?: WorkspacePasswordHash;
+  /**
+   * Exact Origins the owner allowed for the Pane glasses app on this machine, beside the ones Pane
+   * ships with. Added from Settings › Remote Access › Glasses on this machine only.
+   */
+  glassesOrigins?: string[];
 }
 
 /** Where a tailnet admin turns on HTTPS Certificates, which workspaces need. */

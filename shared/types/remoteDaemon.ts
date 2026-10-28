@@ -80,6 +80,8 @@ export interface RemoteDaemonClientRecord {
   createdAt: string;
   tokenHash: string;
   lastUsedAt?: string;
+  /** "glasses": a Pane glasses app token, admitted only on the workspace listener with its narrow scope. Absent: a paired client with full access. */
+  kind?: 'glasses';
 }
 
 export interface RemotePaneConnectionProfile {
@@ -470,6 +472,7 @@ const remoteClientRecordSchema: BoundarySchema<RemoteDaemonClientRecord> = bound
   createdAt: boundary.nonEmptyString,
   tokenHash: boundary.nonEmptyString,
   lastUsedAt: boundary.optional(boundary.nonEmptyString),
+  kind: boundary.optional(boundary.literal('glasses')),
 });
 const remoteTunnelSchema: BoundarySchema<NonNullable<PaneRemoteConnectionImportPayload['tunnel']>> = boundary.object({
   kind: boundary.enumeration('ssh', 'tailscale', 'manual'),
@@ -881,7 +884,7 @@ function matchesSchema<Output>(
   }
 }
 
-function base64UrlEncode(input: string): string {
+export function base64UrlEncode(input: string): string {
   const bytes = new TextEncoder().encode(input);
   let binary = '';
   for (const byte of bytes) {
@@ -894,7 +897,7 @@ function base64UrlEncode(input: string): string {
     .replace(/=+$/g, '');
 }
 
-function base64UrlDecode(input: string): string {
+export function base64UrlDecode(input: string): string {
   const normalizedInput = input.replace(/-/g, '+').replace(/_/g, '/');
   const paddingLength = (4 - (normalizedInput.length % 4)) % 4;
   const binary = atob(`${normalizedInput}${'='.repeat(paddingLength)}`);

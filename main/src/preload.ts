@@ -28,6 +28,7 @@ import type {
   RemotePaneConnectionProfile,
 } from '../../shared/types/remoteDaemon';
 import type { TailnetMachineList, WorkspaceAccessSummary, WorkspaceAccessUpdate } from '../../shared/types/workspaceAccess';
+import type { GlassesAccessState } from '../../shared/types/glasses';
 import type { HostNavigationMemory } from '../../shared/types/hostNavigation';
 import type { SessionWorkspaceLayout } from '../../shared/types/sessionWorkspaceLayout';
 import type { PanelActivationRequest, SessionPanelLayout, ToolPanel } from '../../shared/types/panels';
@@ -714,6 +715,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     updateWorkspaceAccess: (update: WorkspaceAccessUpdate): Promise<IPCResponse<WorkspaceAccessSummary>> =>
       invokeIpc('remote-daemon:update-workspace-access', update),
     listTailnetMachines: (): Promise<IPCResponse<TailnetMachineList>> => invokeIpc('remote-daemon:list-tailnet-machines'),
+    getGlasses: (): Promise<IPCResponse<GlassesAccessState>> => invokeIpc('remote-daemon:get-glasses'),
+    revokeGlasses: (id: string): Promise<IPCResponse<GlassesAccessState>> => invokeIpc('remote-daemon:revoke-glasses', id),
+    setGlassesOrigin: (update: { origin: string; allowed: boolean }): Promise<IPCResponse<GlassesAccessState>> =>
+      invokeIpc('remote-daemon:set-glasses-origin', update),
     saveTailnetMachine: (input: { name: string; password?: string }): Promise<IPCResponse<RemotePaneConnectionProfile>> =>
       invokeIpc('remote-daemon:save-tailnet-machine', input),
     onConnectionStateChanged: (callback: (state: RemotePaneConnectionState) => void) => {
