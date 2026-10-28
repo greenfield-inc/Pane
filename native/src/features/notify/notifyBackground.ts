@@ -55,25 +55,32 @@ async function answerFromAlert(response: Notifications.NotificationResponse): Pr
   if (response.actionIdentifier === Notifications.DEFAULT_ACTION_IDENTIFIER) return;
   const request = response.notification.request;
   const key = `${request.identifier}:${response.actionIdentifier}`;
+  // Stops the same press arriving twice at once; a press that sent nothing frees its key for the next one.
   if (answered.has(key)) return;
   answered.add(key);
-  const push = parseNotifyPush(request);
-  const command = push && commandForAction(push, response.actionIdentifier, response.userText);
-  if (!push || !command) return;
-  const profile = (await loadHosts(secureStore).catch(() => null))?.profiles.find(candidate => candidate.id === push.host);
-  const result: NotifySendResult = profile
-    ? await sendNotifyCommand({ fetch: streamingFetch, runtimeId: await getRuntimeId(), clientLabel: CLIENT_LABEL, deviceLabel: DEVICE_LABEL }, profile, command)
-    : { sent: false, retry: false, message: 'Not sent: this phone is no longer paired with that host. Pair with it again in Pane.' };
-  // A question that may still be waiting keeps its alert, so it can be answered again.
-  if (result.sent || !result.retry) await Notifications.dismissNotificationAsync(request.identifier).catch(() => undefined);
-  if (!result.sent) await postNotice(push, request.content.title, result);
+  let done = false;
+  try {
+    const push = parseNotifyPush(request);
+    const command = push && commandForAction(push, response.actionIdentifier, response.userText);
+    if (!push || !command) return;
+    const profile = (await loadHosts(secureStore).catch(() => null))?.profiles.find(candidate => candidate.id === push.host);
+    const result: NotifySendResult = profile
+      ? await sendNotifyCommand({ fetch: streamingFetch, runtimeId: await getRuntimeId(), clientLabel: CLIENT_LABEL, deviceLabel: DEVICE_LABEL }, profile, command)
+      : { status: 'refused', message: 'Not sent: this phone is no longer paired with that host. Pair with it again in Pane.' };
+    done = result.status !== 'retry';
+    // A question that may still be waiting keeps its alert, so it can be answered again.
+    if (done) await Notifications.dismissNotificationAsync(request.identifier).catch(() => undefined);
+    if (result.status !== 'sent') await postNotice(push, request.content.title, result);
+  } finally {
+    if (!done) answered.delete(key);
+  }
 }
 
-/** A short local alert, only when a button's answer didn't reach the agent. */
-async function postNotice(push: NotifyPush, title: string | null, result: Extract<NotifySendResult, { sent: false }>): Promise<void> {
-  // Tapping it opens the question while it can still be answered, otherwise the Pane.
+/** A short local alert, only when a button's answer didn't surely reach the agent. */
+async function postNotice(push: NotifyPush, title: string | null, result: Exclude<NotifySendResult, { status: 'sent' }>): Promise<void> {
+  // Tapping it opens the question while it may still be waiting or its answer needs checking, otherwise the Pane.
   const data: Record<string, string> = { hostProfileId: push.host };
-  if (result.retry) data.notifyId = push.notifyId;
+  if (result.status !== 'refused') data.notifyId = push.notifyId;
   if (push.paneId) data.paneId = push.paneId;
   await Notifications.scheduleNotificationAsync({
     content: { title: title || 'Pane', body: result.message, data, sound: 'default' },

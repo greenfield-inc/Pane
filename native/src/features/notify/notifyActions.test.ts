@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import type { RemoteFetch } from '@shared/remoteClient';
+import type { NotifyRemoteCommand } from '@shared/types/notify';
 import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
 
 import type { NotifyPush } from '@/features/links/links';
@@ -79,7 +80,7 @@ describe('sendNotifyCommand', () => {
 
   it('posts the command to /invoke with this phone\'s identity and the token in a header', async () => {
     const fetch = reply(200, { ok: true, result: null });
-    await expect(sendNotifyCommand(sender(fetch), work, { type: 'answer', id: 'q1', answer: { choice: 'Wait' } })).resolves.toEqual({ sent: true });
+    await expect(sendNotifyCommand(sender(fetch), work, { type: 'answer', id: 'q1', answer: { choice: 'Wait' } })).resolves.toEqual({ status: 'sent' });
     expect(fetch).toHaveBeenCalledWith('http://127.0.0.1:42157/invoke', expect.objectContaining({
       method: 'POST',
       headers: {
@@ -96,18 +97,43 @@ describe('sendNotifyCommand', () => {
   it('passes on the host\'s refusal, such as an answer from another screen', async () => {
     const fetch = reply(409, { ok: false, error: { code: 'ERR_NOTIFY_ANSWERED', message: 'Already answered on Parsa’s MacBook. Nothing was sent.' } });
     await expect(sendNotifyCommand(sender(fetch), work, { type: 'answer', id: 'q1', answer: { approved: true } }))
-      .resolves.toEqual({ sent: false, retry: false, message: 'Already answered on Parsa’s MacBook. Nothing was sent.' });
+      .resolves.toEqual({ status: 'refused', message: 'Already answered on Parsa’s MacBook. Nothing was sent.' });
   });
 
   it('says the host is unreachable when the request fails', async () => {
     const fetch: RemoteFetch = vi.fn(async () => { throw new TypeError('Network request failed'); });
     await expect(sendNotifyCommand(sender(fetch), work, { type: 'answer', id: 'q1', answer: { approved: true } }))
-      .resolves.toEqual({ sent: false, retry: true, message: 'Not sent: can\'t reach Work Mac. Try again when it reconnects.' });
+      .resolves.toEqual({ status: 'retry', message: 'Not sent: can\'t reach Work Mac. Try again when it reconnects.' });
   });
 
   it('asks to reconnect when the host no longer accepts the token', async () => {
     const fetch = reply(401, { ok: false, error: { code: 'ERR_REMOTE_AUTH', message: 'Unauthorized' } });
     await expect(sendNotifyCommand(sender(fetch), work, { type: 'answer', id: 'q1', answer: { approved: true } }))
-      .resolves.toEqual({ sent: false, retry: false, message: 'Not sent: Work Mac no longer accepts this phone. Open Pane and connect to it again.' });
+      .resolves.toEqual({ status: 'refused', message: 'Not sent: Work Mac no longer accepts this phone. Open Pane and connect to it again.' });
+  });
+
+  describe('after the host may have the answer', () => {
+    const unconfirmed = { status: 'unconfirmed', message: 'Your answer may have reached Work Mac. Open the question to check before answering again.' };
+    const approve: NotifyRemoteCommand = { type: 'answer', id: 'q1', answer: { approved: true } };
+
+    it('says the answer may have arrived when the reply is cut off or unreadable', async () => {
+      const cutOff: RemoteFetch = vi.fn(async () => ({ ok: true, status: 200, body: null, json: async () => { throw new TypeError('Network request failed'); } }));
+      await expect(sendNotifyCommand(sender(cutOff), work, approve)).resolves.toEqual(unconfirmed);
+      await expect(sendNotifyCommand(sender(reply(502, '<html>Bad gateway</html>')), work, approve)).resolves.toEqual(unconfirmed);
+    });
+
+    it('says the same when the host takes longer than 15 seconds to reply', async () => {
+      vi.useFakeTimers();
+      try {
+        const slow = vi.fn<RemoteFetch>((_url, init) => new Promise<never>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new Error('Aborted')));
+        }));
+        const result = sendNotifyCommand(sender(slow), work, approve);
+        await vi.advanceTimersByTimeAsync(15_000);
+        await expect(result).resolves.toEqual(unconfirmed);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 });

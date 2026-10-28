@@ -84,9 +84,13 @@ export interface NotifySender {
 }
 
 export type NotifySendResult =
-  | { sent: true }
-  /** `retry`: the question may still be waiting, so its alert stays. */
-  | { sent: false; message: string; retry: boolean };
+  | { status: 'sent' }
+  /** Not sent, and the question may still be waiting: its alert stays, so it can be pressed again. */
+  | { status: 'retry'; message: string }
+  /** Not sent, and pressing again won't help: the host refused it, or this phone can't send to it. */
+  | { status: 'refused'; message: string }
+  /** The host may have applied it, but its reply was lost: check the question before answering again. */
+  | { status: 'unconfirmed'; message: string };
 
 const SEND_TIMEOUT_MS = 15_000;
 
@@ -97,10 +101,15 @@ const responseSchema = boundary.object({
 
 /**
  * Sends one `notify:remote-command` straight to `/invoke`, without opening the event stream, so a
- * button pressed while Pane isn't running still answers. The token travels only in a header.
+ * button pressed while Pane isn't running still answers. The token travels only in a header. It
+ * never retries: once the host may have the request, a lost reply is `unconfirmed`, as with
+ * `RemoteUnconfirmedResultError` in the app's live connection.
  */
 export async function sendNotifyCommand(sender: NotifySender, profile: RemotePaneConnectionProfile, command: NotifyRemoteCommand): Promise<NotifySendResult> {
-  const unreachable: NotifySendResult = { sent: false, retry: true, message: `Not sent: can't reach ${profile.label}. Try again when it reconnects.` };
+  const unconfirmed: NotifySendResult = {
+    status: 'unconfirmed',
+    message: `Your answer may have reached ${profile.label}. Open the question to check before answering again.`,
+  };
   const { headers, body } = createFetchEventStreamTransport(sender.fetch).invokeRequest({
     baseUrl: profile.baseUrl,
     token: profile.token,
@@ -111,17 +120,21 @@ export async function sendNotifyCommand(sender: NotifySender, profile: RemotePan
   const abort = new AbortController();
   const timer = setTimeout(() => abort.abort(), SEND_TIMEOUT_MS);
   try {
-    const response = await sender.fetch(`${profile.baseUrl.replace(/\/+$/, '')}/invoke`, { method: 'POST', headers, body, signal: abort.signal });
+    const response = await sender.fetch(`${profile.baseUrl.replace(/\/+$/, '')}/invoke`, { method: 'POST', headers, body, signal: abort.signal })
+      .catch(() => null);
+    if (!response) {
+      // A timeout may leave the request with a slow host; a failed connection is most often a host that is unreachable.
+      if (abort.signal.aborted) return unconfirmed;
+      return { status: 'retry', message: `Not sent: can't reach ${profile.label}. Try again when it reconnects.` };
+    }
     if (response.status === 401 || response.status === 403) {
-      return { sent: false, retry: false, message: `Not sent: ${profile.label} no longer accepts this phone. Open Pane and connect to it again.` };
+      return { status: 'refused', message: `Not sent: ${profile.label} no longer accepts this phone. Open Pane and connect to it again.` };
     }
     const payload = decodeOptionalBoundary(await response.json().catch(() => undefined), responseSchema);
-    if (!payload) return unreachable;
-    if (payload.ok) return { sent: true };
+    if (!payload) return unconfirmed;
+    if (payload.ok) return { status: 'sent' };
     // The host's own words, such as "Already answered on Parsa's MacBook. Nothing was sent."
-    return { sent: false, retry: false, message: payload.error?.message ?? `Not sent: ${profile.label} refused the answer. Open Pane to answer there.` };
-  } catch {
-    return unreachable;
+    return { status: 'refused', message: payload.error?.message ?? `Not sent: ${profile.label} refused the answer. Open Pane to answer there.` };
   } finally {
     clearTimeout(timer);
   }
