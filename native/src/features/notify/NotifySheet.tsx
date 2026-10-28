@@ -10,10 +10,7 @@ import { monoFontFamily, useTheme } from '@/theme';
 import { Icon, Text, TextField } from '@/ui';
 
 import { useNotifyCommand, useNotifyShared } from './hooks';
-import { NOTIFY_KIND_LABEL, notifySheetState } from './notifyQuestions';
-
-/** The desktop's Undo hold: the host passes the answer on after this. */
-const UNDO_MS = 3_000;
+import { type AnsweredHere, NOTIFY_KIND_LABEL, notifySheetState } from './notifyQuestions';
 
 /** Opens a question's sheet: under its Pane, or on its own for a question from outside any Pane. */
 export function openNotifySheet(notifyId: string, paneId?: string) {
@@ -24,34 +21,39 @@ export function openNotifySheet(notifyId: string, paneId?: string) {
 /** One Notify question, drawn like the desktop card (frontend/src/components/notify/NotifyCard.tsx) in the app's sheet chrome. */
 export function NotifySheet({ notifyId }: { notifyId: string }) {
   const shared = useNotifyShared();
-  const command = useNotifyCommand();
-  // Set once this phone's answer is in: the agent's name for "Sent to <agent>".
-  const [sentTo, setSentTo] = useState<string | null>(null);
+  // Set when the host accepts this phone's answer, so the sheet reads "Sent to" before the snapshot catches up.
+  const [answeredHere, setAnsweredHere] = useState<AnsweredHere | null>(null);
+  const command = useNotifyCommand(sent => {
+    if (sent.type !== 'answer' || !shared.data) return;
+    void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    setAnsweredHere({ epoch: shared.data.epoch, revision: shared.data.revision });
+  });
   const close = () => router.back();
+  const state = shared.data ? notifySheetState(shared.data, notifyId, answeredHere) : null;
+  // Undone on some screen: the question is open again, and a later answer from elsewhere reads "Answered on".
+  if (answeredHere && state?.kind === 'question') setAnsweredHere(null);
+  const undoing = command.isPending && command.variables[0].type === 'undo';
+  const error = command.isError ? command.error.message : null;
+  const done = state?.kind === 'done' && !undoing && !error;
 
   useEffect(() => {
-    if (!sentTo) return;
-    const timer = setTimeout(() => router.back(), UNDO_MS);
-    return () => clearTimeout(timer);
-  }, [sentTo]);
+    if (done) router.back();
+  }, [done]);
 
-  if (sentTo) {
+  if (state?.kind === 'held' || state?.kind === 'done') {
+    const footer = state.kind === 'held' || undoing
+      ? <SheetButton testID="notify-undo" title="Undo" loading={undoing} onPress={() => command.mutate([{ type: 'undo', id: notifyId }])} />
+      : <SheetButton title="Close" onPress={close} />;
     return (
-      <DialogSheet
-        testID="notify-sheet"
-        title={`Sent to ${sentTo}`}
-        onClose={close}
-        footer={<SheetButton testID="notify-undo" title="Undo" loading={command.isPending} onPress={() => command.mutate([{ type: 'undo', id: notifyId }], { onSuccess: () => setSentTo(null) })} />}
-      >
+      <DialogSheet testID="notify-sheet" title={state.title} onClose={close} footer={footer}>
         <DialogSection divided={false}>
-          <SentLine summary={shared.data?.items.find(item => item.id === notifyId)?.answerSummary} />
-          {command.isError ? <Notice testID="notify-error" danger message={command.error.message} /> : null}
+          <SentLine summary={state.summary} />
+          {error ? <Notice testID="notify-error" danger message={error} /> : null}
         </DialogSection>
       </DialogSheet>
     );
   }
 
-  const state = shared.data ? notifySheetState(shared.data.items.find(item => item.id === notifyId)) : null;
   if (!state || state.kind === 'closed') {
     const message = shared.isPending ? 'Loading…' : shared.isError ? shared.error.message : state?.message ?? '';
     return (
@@ -63,15 +65,8 @@ export function NotifySheet({ notifyId }: { notifyId: string }) {
     );
   }
 
-  const answer = (value: NotifyAnswer) => {
-    command.mutate([{ type: 'answer', id: notifyId, answer: value }], {
-      onSuccess: () => {
-        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        setSentTo(state.item.source.agent);
-      },
-    });
-  };
-  return <QuestionSheet item={state.item} answer={answer} busy={command.isPending} error={command.isError ? command.error.message : null} onClose={close} />;
+  const answer = (value: NotifyAnswer) => command.mutate([{ type: 'answer', id: notifyId, answer: value }]);
+  return <QuestionSheet item={state.item} answer={answer} busy={command.isPending} error={error} onClose={close} />;
 }
 
 function QuestionSheet({ item, answer, busy, error, onClose }: {
@@ -179,7 +174,7 @@ function QuestionSheet({ item, answer, busy, error, onClose }: {
   );
 }
 
-/** The desktop's sent line: a check and what was sent, held for Undo. */
+/** The desktop's held line: a check and what was sent. */
 function SentLine({ summary }: { summary?: string }) {
   const theme = useTheme();
   return (

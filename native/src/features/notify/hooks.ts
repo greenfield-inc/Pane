@@ -19,9 +19,12 @@ export function useNotifyShared() {
   return shared;
 }
 
-/** Answers, Undo and the rest; the host fills in this phone's name as the sender. */
-export function useNotifyCommand() {
-  return useInvokeMutation<[NotifyRemoteCommand]>('notify:remote-command', { invalidates: [SNAPSHOT] });
+/**
+ * Answers, Undo and the rest; the host fills in this phone's name as the sender. Each stays
+ * pending until the snapshot refetches, so an Undo shows as pending until the host confirms it.
+ */
+export function useNotifyCommand(onAccepted?: (command: NotifyRemoteCommand) => void) {
+  return useInvokeMutation<[NotifyRemoteCommand]>('notify:remote-command', { invalidates: [SNAPSHOT], onAccepted: ([command]) => onAccepted?.(command) });
 }
 
 /** Removes this host's question alerts once the snapshot shows them answered or gone (D-11's in-app half). */
