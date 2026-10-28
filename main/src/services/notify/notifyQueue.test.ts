@@ -514,4 +514,27 @@ describe('NotifyQueue across machines', () => {
     expect(call.result).toEqual({ unavailable: 'Notify was turned off in Pane.', next: 'Ask in the terminal instead.' });
     expect(laptop.snapshot()).toMatchObject({ queue: [], strip: null });
   });
+
+  it("ignores a host snapshot older than the state it already shows, and takes a restarted host's", () => {
+    const { queue: host } = makeQueue({}, 'mac-studio');
+    const { queue: laptop } = makeQueue({}, 'parsa-devbox');
+    const emptyRead = host.sharedState();
+    connect(host, laptop);
+    ask(host, sessionStore, claude);
+    const id = onlyId(host);
+
+    // The reconnect read was taken before the question; it lands after the question's event.
+    laptop.setRemote({ machine: 'mac-studio', online: true, state: emptyRead });
+    expect(laptop.snapshot().queue).toEqual([id]);
+
+    // And a read taken while it waited can't bring it back once it is answered.
+    const waitingRead = host.sharedState();
+    host.run({ type: 'answer', id, answer: { choice: 'Keep Redis' } });
+    laptop.setRemote({ machine: 'mac-studio', online: true, state: waitingRead });
+    expect(laptop.snapshot().items.find(item => item.id === id)?.state).toBe('sent');
+
+    const { queue: restarted } = makeQueue({}, 'mac-studio');
+    laptop.setRemote({ machine: 'mac-studio', online: true, state: restarted.sharedState() });
+    expect(laptop.snapshot().items).toEqual([]);
+  });
 });

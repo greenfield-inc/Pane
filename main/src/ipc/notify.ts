@@ -103,6 +103,8 @@ const notifyItemSchema = boundary.object({
 });
 const notifySharedStateSchema = boundary.object({
   machine: boundary.string,
+  epoch: boundary.string,
+  revision: boundary.number,
   enabled: boundary.boolean,
   items: boundary.array(notifyItemSchema),
   queue: boundary.array(boundary.string),
@@ -111,7 +113,10 @@ const notifySharedStateSchema = boundary.object({
 const windowSizeSchema = boundary.object({ width: boundary.number, height: boundary.number });
 const panelAgentSchema = boundary.object({ agentType: boundary.optional(boundary.string) });
 
-export function registerNotifyHandlers(ipcMain: IpcMain, services: AppServices, commandRegistry: PaneCommandRegistry): NotifyService {
+/** What Notify reads from the app's services: the config, Panes by id, and the main window. */
+type NotifyServices = Pick<AppServices, 'configManager' | 'getMainWindow'> & { sessionManager: Pick<AppServices['sessionManager'], 'getSession'> };
+
+export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyServices, commandRegistry: PaneCommandRegistry): NotifyService {
   const notify = new NotifyService({
     configManager: services.configManager,
     getMainWindow: services.getMainWindow,
@@ -140,7 +145,12 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: AppServices, 
     },
     refreshHost: () => void refreshHost(),
     // Every question buzzes each phone with Needs Input on (D-7), on a desktop or a headless host.
-    onQuestion: (event) => void getMobilePushSender(services.configManager).observeQuestion(event),
+    onQuestion: (event) => {
+      // Optional delivery: a failed send or config write must never take the host down.
+      getMobilePushSender(services.configManager).observeQuestion(event).catch((error: Error) => {
+        console.warn('[Notify] The phone alert for a question was not sent:', error);
+      });
+    },
     // A connected desktop ignores the host's pane:focus-requested; it opens Panes as pane:// links.
     showHostPane: (paneId, panelId) => {
       const window = services.getMainWindow();

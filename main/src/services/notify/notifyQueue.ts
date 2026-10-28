@@ -66,6 +66,8 @@ export interface NotifyQueueEnvironment {
 interface RemoteQueue {
   machine: string;
   online: boolean;
+  epoch: string;
+  revision: number;
   items: Map<string, NotifyItem>;
   queue: string[];
   hidden: Set<string>;
@@ -91,6 +93,9 @@ export class NotifyQueue extends EventEmitter {
   private hintItemId: string | undefined;
   private midnightTimer?: Timer;
   private remote: RemoteQueue | null = null;
+  /** Orders this machine's shared states for other screens (see NotifySharedState). */
+  private readonly epoch = randomUUID();
+  private revision = 0;
   /** The host's questions this screen answered: they read "Sent to", not "Answered on". */
   private readonly answeredHere = new Set<string>();
   /** The host's questions reminded "when I switch to Pane": hidden on this screen only. */
@@ -196,6 +201,8 @@ export class NotifyQueue extends EventEmitter {
     const machine = this.machine();
     return {
       machine,
+      epoch: this.epoch,
+      revision: this.revision,
       enabled: this.env.settings().enabled,
       items: [...this.entries.values()].map(({ item }) => (
         item.state === 'sent' || item.state === 'answered' ? { ...item, answeredOn: item.answeredOn ?? machine } : { ...item }
@@ -247,9 +254,17 @@ export class NotifyQueue extends EventEmitter {
       return;
     }
     const state = next.state;
+    // A snapshot read can land after a newer event; the host's revision says which is current.
+    if (previous && previous.epoch === state.epoch && state.revision < previous.revision) {
+      if (previous.online !== next.online) this.setRemote({ machine: previous.machine, online: next.online });
+      return;
+    }
     const items = new Map(state.items.map(item => [item.id, item]));
     const stripId = this.strip()?.itemId;
-    this.remote = { machine: next.machine, online: next.online, items, queue: [...state.queue], hidden: new Set(state.hidden) };
+    this.remote = {
+      machine: next.machine, online: next.online, epoch: state.epoch, revision: state.revision,
+      items, queue: [...state.queue], hidden: new Set(state.hidden),
+    };
     // The first state after connecting shows what is already there, without a chime per question.
     const announce = previous !== null;
     for (const item of state.items) {
@@ -653,6 +668,7 @@ export class NotifyQueue extends EventEmitter {
   }
 
   private changed(): void {
+    this.revision += 1;
     this.armMidnight();
     this.emit('change');
   }

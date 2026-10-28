@@ -360,7 +360,9 @@ function QueueSegments({ queue }: { queue: NotifyQueuePosition }) {
  */
 function useCardKeys(rootRef: React.RefObject<HTMLDivElement | null>, floating: boolean, onKey: (key: string) => boolean): void {
   const handler = useRef(onKey);
-  handler.current = onKey;
+  useEffect(() => {
+    handler.current = onKey;
+  });
   useEffect(() => {
     const root = rootRef.current;
     if (!root) return;

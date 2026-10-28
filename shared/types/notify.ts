@@ -171,6 +171,10 @@ export interface NotifyRemoteHost {
 export interface NotifySharedState {
   /** The host's machine name, for the cards. */
   machine: string;
+  /** Changes each time the host's Pane starts; with `revision`, orders a snapshot read against events. */
+  epoch: string;
+  /** Rises with every change; a screen ignores a state older than one it already applied. */
+  revision: number;
   enabled: boolean;
   /** Each item's `answeredOn` names the device that answered it, the host's own screen included. */
   items: NotifyItem[];
