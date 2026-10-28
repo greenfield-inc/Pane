@@ -37,8 +37,8 @@ Each computer accepts glasses only from the exact web origin the Even app uses. 
 that origin yet. The first time the glasses connect, each computer refuses them and the glasses show
 **Allow this app on the computer** with the origin. On each computer, open
 **Settings › Remote Access › Glasses**, find the origin under the refused list, and click **Allow**.
-Allow it only if you just tried to connect from the Even app on your own phone. The glasses retry on
-their own.
+Allow it only if you just tried to connect from the Even app on your own phone. Then tap **Connect**
+on the glasses app again with the same code; it works for 10 minutes from when the phone made it.
 
 ## Use it
 
