@@ -11,6 +11,7 @@ export type SettingsCategoryId =
   | 'integrations'
   | 'shortcuts'
   | 'privacy'
+  | 'import-export'
   | 'advanced';
 
 export type RemoteAccessSubviewId = 'host-setup' | 'advanced-host';
@@ -61,6 +62,7 @@ export type SettingsSettingId =
   | 'notification-sound'
   | 'desktop-notifications'
   | 'remote-pane'
+  | 'remote-add-code'
   | 'remote-machines'
   | 'remote-visibility'
   | 'remote-password'
@@ -79,6 +81,7 @@ export type SettingsSettingId =
   | 'terminal-shortcuts'
   | 'analytics'
   | 'browser-data'
+  | 'setup-transfer'
   | 'verbose-logging'
   | 'developer-mode'
   | 'journey-timings'

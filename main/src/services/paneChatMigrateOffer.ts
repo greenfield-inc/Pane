@@ -15,7 +15,8 @@ export const MIGRATE_OFFER_PREFERENCE = 'pane_chat_migrate_offer_sent';
 
 const PANE_CHAT_AGENTS: readonly PaneChatAgent[] = ['claude', 'codex', 'cursor'];
 
-function samePath(left: string, right: string): boolean {
+/** Whether two paths name the same folder, ignoring case on Windows. */
+export function samePath(left: string, right: string): boolean {
   const normalize = (value: string) => {
     const resolved = path.resolve(value);
     return process.platform === 'win32' ? resolved.toLowerCase() : resolved;

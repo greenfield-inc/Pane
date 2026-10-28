@@ -180,6 +180,7 @@ export class PaneWorkspaceHostController {
     private readonly defaultEnabled: boolean,
     private readonly run: RemoteSetupCommandRunner = runRemoteSetupCommand,
     private readonly isForwardedPort?: (port: number) => boolean,
+    private readonly paneVersion?: string,
   ) {
     this.glasses = new GlassesAccess(configManager);
   }
@@ -351,6 +352,7 @@ export class PaneWorkspaceHostController {
     const server = new PaneRemoteHttpApiServer(this.commandRegistry, this.configManager, {
       workspace: { listenPort: 0, pathSecret: this.pathSecret, access: () => this.getAccessPolicy(), glasses: this.glasses },
       isForwardedPort: this.isForwardedPort,
+      paneVersion: this.paneVersion,
     });
     await server.start();
     this.server = server;

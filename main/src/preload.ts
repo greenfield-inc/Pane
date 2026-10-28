@@ -1,4 +1,5 @@
 import type { LoopInput } from '../../shared/types/loop';
+import type { SetupFile, SetupSectionId } from '../../shared/types/setupTransfer';
 import type { SessionImportProgress, SessionImportRunResult, SessionImportScan } from '../../shared/types/sessionImport';
 import type { AgentChatEvent, AgentChatView, AgentChatSend, AgentInterface } from '../../shared/types/agentChat';
 import type { RestartToUpdateSource, RestartToUpdateState, UpdateRestoreResult } from '../../shared/types/updater';
@@ -25,6 +26,8 @@ import type {
   RemoteHostSetupResult,
   RemoteHostSetupTerminalCommandResult,
   RemotePaneConnectionState,
+  RemoteConnectionCheckStage,
+  RemoteHostSetupProgress,
   RemotePaneConnectionProfile,
 } from '../../shared/types/remoteDaemon';
 import type { TailnetMachineList, WorkspaceAccessSummary, WorkspaceAccessUpdate } from '../../shared/types/workspaceAccess';
@@ -500,6 +503,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
       invokeIpc('export:share-image', data, filename),
   },
 
+  // Settings › Import & Export: always this computer's setup
+  setup: {
+    summary: (): Promise<IPCResponse> => invokeIpc('setup:summary'),
+    export: (sections: SetupSectionId[]): Promise<IPCResponse> => invokeIpc('setup:export', sections),
+    chooseImport: (): Promise<IPCResponse> => invokeIpc('setup:choose-import'),
+    preview: (file: SetupFile, fileName: string): Promise<IPCResponse> => invokeIpc('setup:preview', file, fileName),
+  },
+
   // Loops (scheduled tasks)
   loops: {
     list: (): Promise<IPCResponse> => invokeIpc('loops:list'),
@@ -721,6 +732,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
       invokeIpc('remote-daemon:set-glasses-origin', update),
     saveTailnetMachine: (input: { name: string; password?: string }): Promise<IPCResponse<RemotePaneConnectionProfile>> =>
       invokeIpc('remote-daemon:save-tailnet-machine', input),
+    runCheckFix: (checkId: number, stage: RemoteConnectionCheckStage): Promise<IPCResponse<RemotePaneConnectionState>> =>
+      invokeIpc('remote-daemon:run-check-fix', { checkId, stage }),
+    dismissCheck: (checkId: number): Promise<IPCResponse<RemotePaneConnectionState>> =>
+      invokeIpc('remote-daemon:dismiss-check', { checkId }),
+    onSetupProgress: (callback: (progress: RemoteHostSetupProgress) => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, progress: RemoteHostSetupProgress) => callback(progress);
+      ipcRenderer.on('remote-daemon:setup-progress', wrappedCallback);
+      return () => ipcRenderer.removeListener('remote-daemon:setup-progress', wrappedCallback);
+    },
     onConnectionStateChanged: (callback: (state: RemotePaneConnectionState) => void) => {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, state: RemotePaneConnectionState) => callback(state);
       ipcRenderer.on('remote-daemon:connection-state-changed', wrappedCallback);
@@ -794,6 +814,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
       return () => ipcRenderer.removeListener('onboarding:github-auth-pty-exit', wrappedCallback);
     },
     setupDefaultRepo: (): Promise<IPCResponse> => invokeIpc('onboarding:setup-default-repo'),
+    findRepos: (): Promise<IPCResponse> => invokeIpc('onboarding:find-repos'),
+    findWslRepos: (distro: string): Promise<IPCResponse> => invokeIpc('onboarding:find-wsl-repos', distro),
+    checkFolder: (folder: string): Promise<IPCResponse> => invokeIpc('onboarding:check-folder', folder),
+    firstSteps: (): Promise<IPCResponse> => invokeIpc('onboarding:first-steps'),
     supportProject: (): Promise<IPCResponse> => invokeIpc('onboarding:support-project'),
   },
 

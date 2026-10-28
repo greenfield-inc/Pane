@@ -1,4 +1,6 @@
 import { RemoteConnectionBanner } from './components/RemoteConnectionBanner';
+import { ConnectionChecklist } from './components/ConnectionChecklist';
+import { useRemoteRuntimeState } from './hooks/useRemoteRuntimeState';
 import { TailnetHttpsBanner } from './components/TailnetHttpsBanner';
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useIPCEvents } from './hooks/useIPCEvents';
@@ -20,6 +22,7 @@ import OnboardingDialog, {
   ONBOARDING_REPO_SETUP_PREFERENCE,
   SupportPaneDialog,
 } from './components/OnboardingDialog';
+import { OPEN_FIRST_SCREEN_EVENT } from './components/FirstStepsCard';
 import { AboutDialog } from './components/AboutDialog';
 import { DocsDialog } from './components/DocsDialog';
 import { FeedbackDialog } from './components/FeedbackDialog';
@@ -137,6 +140,7 @@ function App() {
   const terminalShortcuts = appConfig?.terminalShortcuts ?? EMPTY_TERMINAL_SHORTCUTS;
   const { isVisible: shortcutHintsVisible } = useShortcutHintsOverlay();
   useFocusedSurfaceScrolling(activeSessionId);
+  const connectionCheck = useRemoteRuntimeState().connectionState.check;
 
   const openSettings = useCallback((target?: SettingsTarget) => {
     if (target) {
@@ -670,6 +674,64 @@ function App() {
     };
   }, [isLoaded, hasCheckedOnboarding, isOnboardingOpen, completedOnboardingThisSession]);
 
+  /**
+   * The once-only Support Pane dialog, for users past the first screen with GitHub CLI ready.
+   * It shows on a later launch or right after the first archive, whichever comes first.
+   */
+  const showSupportPromptOnce = useCallback(async (
+    source: 'future_launch' | 'first_archive',
+    isCancelled: () => boolean,
+    isTrigger: () => Promise<boolean> = async () => true,
+  ) => {
+    if (!window.electronAPI?.preferences || !window.electronAPI?.onboarding?.detectEnvironment) {
+      return;
+    }
+
+    try {
+      const onboardingResult = await API.preferences.get(ONBOARDING_REPO_SETUP_PREFERENCE);
+      if (onboardingResult !== 'true') return;
+
+      const promptResult = await API.preferences.get(ONBOARDING_GH_PROMPT_SHOWN_PREFERENCE);
+      if (promptResult === 'true') return;
+      if (!(await isTrigger())) return;
+
+      const envResult = await window.electronAPI.onboarding.detectEnvironment();
+      if (!envResult.success || envResult.data?.ghReady !== true) return;
+
+      await API.preferences.set(ONBOARDING_GH_PROMPT_SHOWN_PREFERENCE, 'true');
+      capture('onboarding_support_prompt_shown', {
+        source,
+        gh_status: 'gh_ready',
+      });
+      if (!isCancelled()) setIsSupportPaneOpen(true);
+    } catch (error) {
+      console.error('[App] Failed to check onboarding support prompt:', error);
+    }
+  }, []);
+
+  // A Pane leaves the session store when it is archived or deleted; only the first archive outside the sample repo counts.
+  useEffect(() => {
+    const handleSessionDeleted = (event: CustomEvent<{ id?: string }>) => {
+      const id = event.detail?.id;
+      if (!id) return;
+      void showSupportPromptOnce('first_archive', () => false, async () => {
+        const response = await window.electronAPI.onboarding.firstSteps();
+        const archived = response.success ? response.data?.archivedPaneIds ?? [] : [];
+        return archived.length === 1 && archived[0] === id;
+      });
+    };
+    // SAFETY: useIPCEvents dispatches session-deleted as a CustomEvent carrying { id }.
+    window.addEventListener('session-deleted', handleSessionDeleted as EventListener);
+    // SAFETY: Same listener and event shape as registered above.
+    return () => window.removeEventListener('session-deleted', handleSessionDeleted as EventListener);
+  }, [showSupportPromptOnce]);
+
+  useEffect(() => {
+    const openFirstScreen = () => setIsOnboardingOpen(true);
+    window.addEventListener(OPEN_FIRST_SCREEN_EVENT, openFirstScreen);
+    return () => window.removeEventListener(OPEN_FIRST_SCREEN_EVENT, openFirstScreen);
+  }, []);
+
   useEffect(() => {
     if (
       supportPromptCheckStarted.current ||
@@ -687,33 +749,7 @@ function App() {
     supportPromptCheckStarted.current = true;
     let cancelled = false;
 
-    const checkDeferredSupportPrompt = async () => {
-      if (!window.electronAPI?.preferences || !window.electronAPI?.onboarding?.detectEnvironment) {
-        return;
-      }
-
-      try {
-        const onboardingResult = await API.preferences.get(ONBOARDING_REPO_SETUP_PREFERENCE);
-        if (onboardingResult !== 'true') return;
-
-        const promptResult = await API.preferences.get(ONBOARDING_GH_PROMPT_SHOWN_PREFERENCE);
-        if (promptResult === 'true') return;
-
-        const envResult = await window.electronAPI.onboarding.detectEnvironment();
-        if (!envResult.success || envResult.data?.ghReady !== true) return;
-
-        await API.preferences.set(ONBOARDING_GH_PROMPT_SHOWN_PREFERENCE, 'true');
-        capture('onboarding_support_prompt_shown', {
-          source: 'future_launch',
-          gh_status: 'gh_ready',
-        });
-        if (!cancelled) setIsSupportPaneOpen(true);
-      } catch (error) {
-        console.error('[App] Failed to check deferred onboarding support prompt:', error);
-      }
-    };
-
-    void checkDeferredSupportPrompt();
+    void showSupportPromptOnce('future_launch', () => cancelled);
     return () => {
       cancelled = true;
       supportPromptCheckStarted.current = false;
@@ -726,6 +762,7 @@ function App() {
     completedOnboardingThisSession,
     hasResolvedStartupDialogs,
     isWelcomeOpen,
+    showSupportPromptOnce,
   ]);
 
   // Check for resumable sessions on startup and on each host switch (auto-resume feature).
@@ -864,6 +901,20 @@ function App() {
     setIsUpdateDialogOpen(true);
   }, []);
 
+  // Pane's own update dialog, for a host that runs a newer Pane; Settings → General when the check fails.
+  const updatePane = useCallback(async () => {
+    try {
+      const response = await API.checkForUpdates();
+      if (response.success && response.data) {
+        handleUpdateRequest(response.data);
+        return;
+      }
+    } catch (error) {
+      console.warn('Update check failed:', error);
+    }
+    openSettings({ category: 'general', setting: 'check-updates-now' });
+  }, [handleUpdateRequest, openSettings]);
+
   // The release the version check found; a renderer reload loses it, so ask again.
   const openAvailableUpdate = useCallback(async () => {
     if (updateVersionInfo) {
@@ -956,7 +1007,9 @@ function App() {
           />
         </div>
         <div className="relative flex min-h-0 min-w-0 flex-1">
-          <SessionView />
+          {connectionCheck && connectionCheck.outcome !== 'passed'
+            ? <ConnectionChecklist check={connectionCheck} onOpenSettings={openSettings} onUpdatePane={() => void updatePane()} />
+            : <SessionView />}
           <PaneChatIntroOffer suppressed={isSettingsOpen || isOnboardingOpen || isWelcomeOpen} />
         </div>
         <NotifyInPaneStrip left={sidebarCollapsed ? 48 : sidebarWidth} />

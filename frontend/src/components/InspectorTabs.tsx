@@ -4,6 +4,13 @@ import { cn } from '../utils/cn';
 
 export type InspectorTab = 'details' | 'files' | 'changes';
 
+/** A window CustomEvent<InspectorRequest>: show the inspector on a tab once the Pane is active. */
+export const OPEN_INSPECTOR_EVENT = 'inspector:open';
+export interface InspectorRequest {
+  sessionId: string;
+  tab: InspectorTab;
+}
+
 interface InspectorTabsProps {
   tab: InspectorTab;
   onTabChange: (tab: InspectorTab) => void;
