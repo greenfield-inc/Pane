@@ -21,6 +21,28 @@ export const app = {
   getPath: vi.fn(() => '/mock/path'),
   getName: vi.fn(() => 'Pane'),
   getVersion: vi.fn(() => '0.1.0'),
+  on: vi.fn(),
+  focus: vi.fn(),
+};
+
+export const globalShortcut = {
+  register: vi.fn(() => true),
+  unregister: vi.fn(),
+};
+
+export class Tray {
+  setImage = vi.fn();
+  setToolTip = vi.fn();
+  setContextMenu = vi.fn();
+  destroy = vi.fn();
+}
+
+export const Menu = {
+  buildFromTemplate: vi.fn(() => ({})),
+};
+
+export const nativeImage = {
+  createFromPath: vi.fn(() => ({})),
 };
 
 export const ipcMain = {
@@ -39,7 +61,7 @@ export const powerMonitor = Object.assign(new EventEmitter(), {
   isOnBatteryPower: vi.fn(() => false),
 });
 
-export const BrowserWindow = vi.fn();
+export const BrowserWindow = Object.assign(vi.fn(), { getAllWindows: vi.fn(() => []) });
 
 export const nativeTheme = {
   // SAFETY: Test stub models Electron's writable three-value themeSource property.

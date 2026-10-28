@@ -1,4 +1,5 @@
 import type { LoopInput } from '../../shared/types/loop';
+import type { SetupFile, SetupSectionId } from '../../shared/types/setupTransfer';
 import type { SessionImportProgress, SessionImportRunResult, SessionImportScan } from '../../shared/types/sessionImport';
 import type { AgentChatEvent, AgentChatView, AgentChatSend, AgentInterface } from '../../shared/types/agentChat';
 import type { RestartToUpdateSource, RestartToUpdateState, UpdateRestoreResult } from '../../shared/types/updater';
@@ -499,6 +500,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
       invokeIpc('export:save-image', data, defaultFilename),
     shareImage: (data: string, filename: string): Promise<IPCResponse> =>
       invokeIpc('export:share-image', data, filename),
+  },
+
+  // Settings › Import & Export: always this computer's setup
+  setup: {
+    summary: (): Promise<IPCResponse> => invokeIpc('setup:summary'),
+    export: (sections: SetupSectionId[]): Promise<IPCResponse> => invokeIpc('setup:export', sections),
+    chooseImport: (): Promise<IPCResponse> => invokeIpc('setup:choose-import'),
+    preview: (file: SetupFile, fileName: string): Promise<IPCResponse> => invokeIpc('setup:preview', file, fileName),
   },
 
   // Loops (scheduled tasks)

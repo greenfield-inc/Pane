@@ -190,7 +190,7 @@ export async function runNotify(parsed: ParsedArgs, env: NodeJS.ProcessEnv = pro
     result = await invokeDaemon('runpane:notify', [request], notifyResultSchema, { paneDir: parsed.paneDir, timeoutMs: Infinity });
   } catch (error) {
     if (!(error instanceof PaneDaemonClientError)) throw error;
-    // An older Pane, or the headless daemon, has no notify channel.
+    // An older Pane has no notify channel.
     if (error.connectionFailure) {
       result = { unavailable: 'Pane is not running.', next: NOTIFY_UNAVAILABLE_NEXT };
     } else if (error.code === 'ERR_UNKNOWN_CHANNEL') {

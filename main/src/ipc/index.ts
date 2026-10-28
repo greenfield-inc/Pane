@@ -40,6 +40,7 @@ import { registerUsageHandlers } from './usage';
 import { registerSessionImportHandlers } from './sessionImport';
 import { registerOrchestrationSessionHandlers } from './orchestrationSessions';
 import { registerExportHandlers } from './export';
+import { registerSetupHandlers } from './setup';
 import { registerLoopHandlers } from './loops';
 import { registerMissionControlHandlers } from './missionControl';
 import { createDaemonBridgeRouter, registerDaemonBridgeHandlers } from './daemon';
@@ -100,6 +101,7 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
   registerSharedCredentialHandlers(services, commandRegistry);
   registerDialogHandlers(ipcMain, services);
   registerExportHandlers(ipcMain, services);
+  registerSetupHandlers(ipcMain, services);
   registerPermissionHandlers(ipcMain, services, commandRegistry);
   registerGitHandlers(ipcMain, services, commandRegistry);
   registerScriptHandlers(ipcMain, services, commandRegistry);

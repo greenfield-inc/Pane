@@ -1533,6 +1533,7 @@ export const RUNPANE_CONTRACT = {
         "runpane loops list [--json] [--pane-dir <path>]"
       ],
       "toolsets": [
+        "core",
         "loops"
       ],
       "jsonSchemas": [
@@ -1549,6 +1550,7 @@ export const RUNPANE_CONTRACT = {
       "mutates": true,
       "additive": true,
       "toolsets": [
+        "core",
         "loops"
       ],
       "jsonSchemas": [
@@ -1567,6 +1569,7 @@ export const RUNPANE_CONTRACT = {
       "mutates": true,
       "idempotent": true,
       "toolsets": [
+        "core",
         "loops"
       ],
       "jsonSchemas": [
@@ -1585,6 +1588,7 @@ export const RUNPANE_CONTRACT = {
       "mutates": true,
       "additive": true,
       "toolsets": [
+        "core",
         "loops"
       ],
       "jsonSchemas": [
@@ -1601,6 +1605,7 @@ export const RUNPANE_CONTRACT = {
       "mutates": true,
       "idempotent": true,
       "toolsets": [
+        "core",
         "loops"
       ],
       "jsonSchemas": [
@@ -1617,6 +1622,7 @@ export const RUNPANE_CONTRACT = {
       "mutates": true,
       "idempotent": true,
       "toolsets": [
+        "core",
         "loops"
       ],
       "jsonSchemas": [
@@ -1633,6 +1639,7 @@ export const RUNPANE_CONTRACT = {
       "mutates": true,
       "idempotent": true,
       "toolsets": [
+        "core",
         "loops"
       ],
       "jsonSchemas": [

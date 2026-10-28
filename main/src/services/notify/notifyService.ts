@@ -7,9 +7,12 @@ import {
   type NotifyCaller,
   type NotifyCommand,
   type NotifyInstructionsFile,
+  type NotifyItem,
+  type NotifyRemoteCommand,
   type NotifyRequest,
   type NotifyResult,
   type NotifySettings,
+  type NotifySharedState,
   type NotifySnapshot,
   type NotifySource,
   type NotifyWindowSize,
@@ -30,6 +33,20 @@ export interface NotifyServiceDependencies {
   focusPanel: (paneId: string, panelId?: string) => Promise<void>;
   /** Arguments the main window's renderer reads before its first paint (theme). */
   rendererArguments: () => string[];
+  /** A headless host has no screen: no floating windows, tray or shortcut; connected screens show its questions. */
+  headless: boolean;
+  /** This machine's name, as connected screens and phones show it. */
+  machine: string;
+  /** Sends the shared state to every connected screen and phone (`notify:shared-changed`). */
+  publish: (state: NotifySharedState) => void;
+  /** Sends a command for the connected host's question to that host. */
+  sendToHost: (command: NotifyRemoteCommand) => Promise<void>;
+  /** Reads the connected host's state again, after it refused a command. */
+  refreshHost: () => void;
+  /** Shows the host's Pane in this window, for Open in Pane on the host's question. */
+  showHostPane: (paneId: string, panelId?: string) => void;
+  /** Hears each new question once and each one that stops waiting (the phone alert). */
+  onQuestion?: (event: { item: NotifyItem; open: boolean }) => void;
 }
 
 /**
@@ -46,15 +63,18 @@ export class NotifyService {
   private lastSettings: NotifySettings;
   private lastAppearance: string;
   private instructionFiles: NotifyInstructionsFile[] = [];
+  private lastShared = '';
+  private lastStates = new Map<string, NotifyItem['state']>();
 
   constructor(private readonly deps: NotifyServiceDependencies) {
     this.lastSettings = this.settings();
     this.lastAppearance = appearanceKey(deps.configManager.getConfig());
     this.queue = new NotifyQueue({
       settings: () => this.settings(),
-      showOutsideSupported: canFloatOverOtherApps(),
+      showOutsideSupported: !deps.headless && canFloatOverOtherApps(),
       shortcutRegistered: () => this.shortcutRegistered,
       instructionFiles: () => this.instructionFiles,
+      machine: deps.machine,
     });
     this.windows = new NotifyWindows({
       rendererArguments: deps.rendererArguments,
@@ -116,7 +136,55 @@ export class NotifyService {
       case 'close-round': this.windows.closeRound(); return;
       case 'open-inbox': this.navigate('inbox'); return;
       case 'open-in-pane': await this.openInPane(command.id); return;
-      default: this.queue.run(command);
+      default:
+        if ('id' in command && command.id && this.queue.isRemote(command.id)) await this.runOnHost(command);
+        else this.queue.run(command);
+    }
+  }
+
+  /** The `notify:remote-command` daemon command: another screen or a phone acts on this machine's question. */
+  runRemote(command: NotifyRemoteCommand, device: string): void {
+    this.queue.runRemote(command, device);
+  }
+
+  sharedState(): NotifySharedState {
+    return this.queue.sharedState();
+  }
+
+  /** A command for the connected host's question. What stays on this screen runs here. */
+  private async runOnHost(command: Exclude<Extract<NotifyCommand, { id: string }>, { type: 'open-in-pane' }>): Promise<void> {
+    if (command.type === 'hover-info') {
+      this.queue.run(command);
+      return;
+    }
+    if (command.type === 'remind' && command.after === 'pane') {
+      this.queue.remindHere(command.id);
+      return;
+    }
+    // ✕ on a "Sent to" or "Stopped waiting" card only clears this screen's strip.
+    if (command.type === 'dismiss' && !this.queue.snapshot().queue.includes(command.id)) {
+      this.queue.run(command);
+      return;
+    }
+    const remote = this.queue.snapshot().remote;
+    if (remote && !remote.online) return;
+    const hostCommand: NotifyRemoteCommand = command.type === 'remind' ? { ...command, after: command.after === '1h' ? '1h' : '10m' } : command;
+    // Before the send: the host's next state can arrive before its reply does.
+    if (command.type === 'answer') this.queue.noteAnsweredHere(command.id, true);
+    try {
+      await this.deps.sendToHost(hostCommand);
+    } catch (error) {
+      if (command.type === 'answer') this.queue.noteAnsweredHere(command.id, false);
+      const code = error instanceof Error && 'code' in error ? String(error.code) : '';
+      console.warn(`[Notify] ${command.type} was not sent to ${remote?.machine ?? 'the host'}:`, error);
+      if (UNREACHABLE_CODES.has(code)) {
+        // The cards say so until a read of the host succeeds: now, if the link is back, or on reconnect.
+        if (remote) this.queue.setRemote({ machine: remote.machine, online: false });
+        this.deps.refreshHost();
+        return;
+      }
+      // Refused (another screen got there first, or the hold ended): the host's state says how.
+      this.deps.refreshHost();
     }
   }
 
@@ -160,7 +228,19 @@ export class NotifyService {
     if (!item?.source.paneId) return;
     this.windows.closeRound();
     this.queue.run({ type: 'dock', id: itemId });
-    await this.deps.focusPanel(item.source.paneId, item.source.panelId);
+    if (!this.queue.isRemote(itemId)) {
+      await this.deps.focusPanel(item.source.paneId, item.source.panelId);
+      return;
+    }
+    // The host's Pane opens in this window; the host's own window stays where it is.
+    const window = this.deps.getMainWindow();
+    if (window && !window.isDestroyed()) {
+      if (window.isMinimized()) window.restore();
+      window.show();
+      window.focus();
+      if (process.platform === 'darwin') app.focus({ steal: true });
+    }
+    this.deps.showHostPane(item.source.paneId, item.source.panelId);
   }
 
   private navigate(target: 'inbox' | 'settings'): void {
@@ -197,7 +277,7 @@ export class NotifyService {
     if (this.shortcut) globalShortcut.unregister(this.shortcut);
     this.shortcut = null;
     this.shortcutRegistered = true;
-    if (!settings.enabled || !settings.shortcut) return;
+    if (this.deps.headless || !settings.enabled || !settings.shortcut) return;
     try {
       // register() returns false when another app already holds the shortcut.
       this.shortcutRegistered = globalShortcut.register(settings.shortcut, () => this.openRound());
@@ -230,6 +310,8 @@ export class NotifyService {
   }
 
   private broadcast(): void {
+    this.publishShared();
+    if (this.deps.headless) return;
     const snapshot = this.queue.snapshot();
     if (snapshot.stripSurface === 'window') {
       this.windows.showStrip();
@@ -243,9 +325,29 @@ export class NotifyService {
       settings: snapshot.settings,
       waiting: this.queue.waitingItems(),
       paused: snapshot.pausedUntil !== null,
+      showOutsideSupported: snapshot.showOutsideSupported,
     });
     this.sendToMainWindow('notify:snapshot', snapshot);
     for (const contents of this.windows.webContents()) contents.send('notify:snapshot', snapshot);
+  }
+
+  /** Connected screens and phones get the shared state when it changes, not on this screen's own moves. */
+  private publishShared(): void {
+    const state = this.queue.sharedState();
+    const key = JSON.stringify(state);
+    if (key === this.lastShared) return;
+    const previous = this.lastStates;
+    this.lastShared = key;
+    this.lastStates = new Map(state.items.map(item => [item.id, item.state]));
+    this.deps.publish(state);
+    if (!this.deps.onQuestion) return;
+    for (const item of state.items) {
+      if (item.state === 'info') continue;
+      const before = previous.get(item.id);
+      const open = item.state === 'waiting';
+      const wasOpen = before === 'waiting';
+      if (before === undefined ? open : open !== wasOpen) this.deps.onQuestion({ item, open });
+    }
   }
 
   private sendToMainWindow(channel: string, ...args: unknown[]): void {
@@ -253,6 +355,9 @@ export class NotifyService {
     if (window && !window.isDestroyed()) window.webContents.send(channel, ...args);
   }
 }
+
+/** Failures that mean the host wasn't reached, as opposed to the host refusing the command. */
+const UNREACHABLE_CODES = new Set(['ERR_REMOTE_OFFLINE', 'ERR_REMOTE_TRANSPORT', 'ERR_NOTIFY_NOT_CONNECTED']);
 
 function notifySettings(config: AppConfig): NotifySettings {
   return { ...DEFAULT_NOTIFY_SETTINGS, ...config.notify };

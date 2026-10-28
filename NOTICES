@@ -296,6 +296,11 @@ Package: @apm-js-collab/code-transformer-bundler-plugins
 Version: 0.7.4
 Repository: https://github.com/apm-js-collab/code-transformer-bundler-plugins
 
+Package: @bacons/xcode
+Version: 1.0.0-alpha.32
+Author: Evan Bacon <bacon@expo.io> (https://github.com/evanbacon)
+Repository: https://github.com/EvanBacon/xcode.git
+
 Package: @esbuild/darwin-arm64
 Version: 0.21.5
 Repository: git+https://github.com/evanw/esbuild.git
@@ -352,6 +357,14 @@ Package: @expo/devcert
 Version: 1.2.1
 Author: Dave Wasmer
 Homepage: https://github.com/expo/devcert#readme
+
+Package: @expo/plist
+Version: 0.0.18
+Homepage: https://github.com/expo/expo-cli/tree/main/packages/plist#readme
+
+Package: @expo/plist
+Version: 0.5.4
+Homepage: https://github.com/expo/expo/tree/main/packages/@expo/plist#readme
 
 Package: @expo/sdk-runtime-versions
 Version: 1.0.0
@@ -685,6 +698,14 @@ Repository: git+ssh://git@github.com/react/react-native.git
 Package: @react-native/metro-config
 Version: 0.86.3
 Homepage: https://github.com/react/react-native/tree/HEAD/packages/metro-config#readme
+
+Package: @react-native/normalize-colors
+Version: 0.79.7
+Homepage: https://github.com/facebook/react-native/tree/HEAD/packages/normalize-color#readme
+
+Package: @react-native/normalize-colors
+Version: 0.83.10
+Homepage: https://github.com/react/react-native/tree/HEAD/packages/normalize-color#readme
 
 Package: @react-native/normalize-colors
 Version: 0.86.3
@@ -1327,6 +1348,11 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 --------------------------------------------------------------------------------
 
 Package: @babel/code-frame
+Version: 7.10.4
+Author: Sebastian McKenzie <sebmck@gmail.com>
+Homepage: https://babeljs.io/
+
+Package: @babel/code-frame
 Version: 7.29.7
 Author: The Babel Team (https://babel.dev/team)
 Homepage: https://babel.dev/docs/en/next/babel-code-frame
@@ -1440,6 +1466,11 @@ Package: @babel/helper-wrap-function
 Version: 7.29.7
 Author: The Babel Team (https://babel.dev/team)
 Homepage: https://babel.dev/docs/en/next/babel-helper-wrap-function
+
+Package: @babel/highlight
+Version: 7.25.9
+Author: The Babel Team (https://babel.dev/team)
+Homepage: https://babel.dev/docs/en/next/babel-highlight
 
 Package: @babel/plugin-proposal-decorators
 Version: 7.29.7
@@ -1835,6 +1866,35 @@ NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
 LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+--------------------------------------------------------------------------------
+
+Package: @bacons/apple-targets
+Version: 5.0.0
+Author: Evan Bacon
+Homepage: https://github.com/evanbacon/expo-apple-targets
+
+MIT License
+
+Copyright (c) 2025 Evan Bacon
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
 --------------------------------------------------------------------------------
 
@@ -2279,8 +2339,16 @@ Author: Expo
 Homepage: https://github.com/expo/expo/tree/main/packages/@expo/cli
 
 Package: @expo/config
+Version: 55.0.21
+Homepage: https://github.com/expo/expo/tree/main/packages/@expo/config#readme
+
+Package: @expo/config
 Version: 57.0.9
 Homepage: https://github.com/expo/expo/tree/main/packages/@expo/config#readme
+
+Package: @expo/config-plugins
+Version: 55.0.11
+Homepage: https://docs.expo.dev/guides/config-plugins/
 
 Package: @expo/config-plugins
 Version: 57.0.9
@@ -2309,10 +2377,22 @@ Package: @expo/image-utils
 Version: 0.11.5
 Homepage: https://github.com/expo/expo/tree/main/packages/%40expo/image-utils#readme
 
+Package: @expo/image-utils
+Version: 0.8.17
+Homepage: https://github.com/expo/expo/tree/main/packages/%40expo/image-utils#readme
+
 Package: @expo/inline-modules
 Version: 0.1.7
 Author: Expo
 Repository: https://github.com/expo/expo.git
+
+Package: @expo/json-file
+Version: 10.0.16
+Homepage: https://github.com/expo/expo/tree/main/packages/@expo/json-file#readme
+
+Package: @expo/json-file
+Version: 10.2.0
+Homepage: https://github.com/expo/expo/tree/main/packages/@expo/json-file#readme
 
 Package: @expo/json-file
 Version: 11.0.1
@@ -2351,6 +2431,10 @@ Homepage: https://github.com/expo/expo/tree/main/packages/@expo/package-manager#
 Package: @expo/plist
 Version: 0.8.1
 Homepage: https://github.com/expo/expo/tree/main/packages/@expo/plist#readme
+
+Package: @expo/prebuild-config
+Version: 55.0.22
+Homepage: https://github.com/expo/expo/tree/main/packages/@expo/prebuild-config#readme
 
 Package: @expo/prebuild-config
 Version: 57.0.16
@@ -2525,10 +2609,20 @@ Version: 57.0.4
 Author: 650 Industries, Inc.
 Homepage: https://docs.expo.dev/versions/latest/sdk/system-ui
 
+Package: expo-task-manager
+Version: 57.0.21
+Author: 650 Industries, Inc.
+Homepage: https://docs.expo.dev/versions/latest/sdk/task-manager/
+
 Package: expo-updates-interface
 Version: 57.0.2
 Author: 650 Industries, Inc.
 Homepage: https://docs.expo.dev
+
+Package: unimodules-app-loader
+Version: 57.0.2
+Author: 650 Industries, Inc.
+Homepage: https://github.com/expo/expo/tree/main/packages/unimodules-app-loader
 
 The MIT License (MIT)
 
@@ -2558,6 +2652,10 @@ Package: @expo/code-signing-certificates
 Version: 0.0.6
 Author: Expo <support@expo.dev>
 Homepage: https://github.com/expo/code-signing-certificates/tree/main#readme
+
+Package: @expo/config-types
+Version: 55.0.6
+Homepage: https://github.com/expo/expo/tree/main/packages/@expo/config-types#readme
 
 Package: @expo/config-types
 Version: 57.0.2
@@ -2644,6 +2742,10 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 --------------------------------------------------------------------------------
+
+Package: @expo/require-utils
+Version: 55.0.8
+Homepage: https://github.com/expo/expo/tree/main/packages/@expo/require-utils#readme
 
 Package: @expo/require-utils
 Version: 57.0.5
@@ -5724,6 +5826,10 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 --------------------------------------------------------------------------------
+
+Package: @xmldom/xmldom
+Version: 0.7.13
+Homepage: https://github.com/xmldom/xmldom
 
 Package: @xmldom/xmldom
 Version: 0.8.15
@@ -23427,6 +23533,11 @@ Author: Ozgur Ozcitak <oozcitak@gmail.com>
 Homepage: http://github.com/oozcitak/xmlbuilder-js
 
 Package: xmlbuilder
+Version: 14.0.0
+Author: Ozgur Ozcitak <oozcitak@gmail.com>
+Homepage: http://github.com/oozcitak/xmlbuilder-js
+
+Package: xmlbuilder
 Version: 15.1.1
 Author: Ozgur Ozcitak <oozcitak@gmail.com>
 Homepage: http://github.com/oozcitak/xmlbuilder-js
@@ -34569,7 +34680,7 @@ OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ================================================================================
 
 Package: Pane
-Version: 2.4.202
+Version: 2.4.204
 Author: Dcouple Inc
 License: AGPL-3.0
 

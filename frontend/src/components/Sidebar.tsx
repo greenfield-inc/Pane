@@ -881,9 +881,6 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
         >
           <Search className="h-3.5 w-3.5 flex-shrink-0" />
           <span>Search</span>
-          {hotkeyDisplay('open-command-palette') && (
-            <Kbd size="xs" variant="muted" className="ml-auto">{hotkeyDisplay('open-command-palette')}</Kbd>
-          )}
         </button>
 
         <button

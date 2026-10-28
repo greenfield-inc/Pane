@@ -68,11 +68,60 @@ Codex panel also expires when that panel sits idle at its prompt for 10 seconds.
   menu lists them and holds Show outside Pane, Pause for 1 hour, Open Notify
   inbox and Notify settings.
 
+**Keys on a card.** With the pointer over a card inside Pane (the in-Pane strip,
+the inbox, a docked card), its keys work: a choice's number answers it, Y
+approves, N starts a denial, and typing starts an ask's answer. The floating
+strip over another app takes keys once you click it, so typing in that app never
+answers by accident. Keys work whatever Pane's keyboard-shortcuts setting says.
+
 ✕ hides a question from the strip; it keeps waiting in the inbox.
 Right-click ✕ to bring it back in 10 minutes, in 1 hour, or when you next
 switch to Pane. Nothing is stored on disk: questions live only while the
 agent's call is open, and Earlier today empties at midnight and when Pane
 quits.
+
+## Other screens and your phone
+
+The machine running the agent keeps the one queue. Every screen connected to
+it shows its questions, and the first answer from any of them goes back to
+the agent:
+
+- **A Pane desktop connected to another machine** (Remote Access pairing or
+  Workspaces) shows that host's questions on every surface above: the strip
+  over other apps, the round, the tray dot, the chime, the inbox, the Waiting
+  dots and Open in Pane, which opens the host's Pane in this window and leaves
+  the host's own window where it is. Questions from agents on the connected
+  desktop's own machine still show beside them, and each card names its
+  machine ("notify-remote · Claude · parsa-devbox").
+- **Several screens at once**: the screen you answer on says "Sent to
+  <agent>", every other one says "Answered on <device>", and all of them offer
+  **Undo** for the 3 seconds before the agent gets the answer. ✕, the
+  reminders and → in the round apply on every screen, except "When I switch to
+  Pane", which waits for the Pane you used it on.
+- **Connection loss**: while the host can't be reached its cards stay up and
+  say "Not sent: can't reach <host>. Try again when it reconnects."; the agent
+  keeps waiting. After reconnecting the screen shows what is waiting now.
+- **Your phone**: each question sends one alert at once to every phone signed
+  in to the host in the Pane app with notifications allowed and **Needs
+  Input** on. The alert is titled with the Pane's name and says only "<Pane>
+  has a question" (the folder name for a call from outside Pane); updates
+  (`info`) send none. When the question is answered elsewhere or its agent
+  stops waiting, the host sends a silent update so the phone can remove the
+  alert, and an Undo makes it alert again. The host needs its usual phone
+  credentials (`PANE_APNS_*` or the shared ones for iPhone, FCM for Android;
+  see [NATIVE_MOBILE.md](NATIVE_MOBILE.md)); without them nothing is sent and
+  the question still waits on every screen.
+- **A headless host** (`runpane install daemon`, remote setup, workspace
+  hosts) has no screen of its own: it creates no Notify window, tray icon or
+  shortcut, and its questions show on whoever is connected and on the phone.
+  With nobody connected a question waits until someone connects or answers.
+  An update from it returns `delivered: "inbox"`; connected screens still show
+  it on their strips.
+
+Each screen keeps its own Position, Show outside Pane, Sound, answer-all
+shortcut and Pause. The host's Notify switch decides whether agents can ask:
+turning it off there returns `unavailable` to every waiting agent and clears
+its questions from every screen.
 
 ## Settings
 
@@ -126,11 +175,18 @@ Pane still works: its card shows the folder name and hides Open in Pane.
 
 ## Platforms
 
-macOS, Windows and Linux on X11 show the strip over other apps. On native
-Wayland, Pane can't place a window over other apps, so Show outside Pane is
-unavailable there; the in-Pane strip, the tray icon (GNOME needs the
-AppIndicator extension) and the shortcut still work.
+macOS, Windows and Linux on X11 show the strip over other apps. In a Wayland
+session Pane runs as a native Wayland app and can't place a window over other
+apps, so Show outside Pane is unavailable there (in Settings and the tray menu).
+Questions show in the in-Pane strip and the Notify inbox, with Waiting dots and
+the chime. The tray icon and its dot work; GNOME needs the AppIndicator
+extension, which Ubuntu turns on by default. On GNOME 46 (Ubuntu 24.04), which
+has no global-shortcut portal, ⌃⇧Space doesn't reach Pane from other apps;
+inside Pane it opens Answer all, and so does **Answer all** in the inbox.
 
 The code: `main/src/services/notify/` (queue, windows, tray),
-`main/src/ipc/notify.ts`, `shared/types/notify.ts`, and the renderer's Notify
-components with the `frontend/notify.html` entry for the floating windows.
+`main/src/ipc/notify.ts` (including the `notify:remote-snapshot` and
+`notify:remote-command` commands and the `notify:shared-changed` event other
+screens use), `main/src/daemon/mobilePushSender.ts` (the phone alert),
+`shared/types/notify.ts`, and the renderer's Notify components with the
+`frontend/notify.html` entry for the floating windows.

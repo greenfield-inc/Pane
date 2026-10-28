@@ -35,7 +35,8 @@ import { showActionError, useErrorStore } from './stores/errorStore';
 import { useSessionStore } from './stores/sessionStore';
 import { subscribePanelStatus } from './services/panelStatusSync';
 import { subscribeAttentionInbox, useAttentionInboxStore } from './stores/attentionInboxStore';
-import { subscribeNotify } from './stores/notifyStore';
+import { runNotify, subscribeNotify, useNotifyStore } from './stores/notifyStore';
+import { acceleratorFromKeys } from './components/notify/notifyFormat';
 import { NotifyInPaneStrip } from './components/notify/NotifyInPane';
 import { useConfigStore } from './stores/configStore';
 import { usePanelStore } from './stores/panelStore';
@@ -174,6 +175,20 @@ function App() {
 
   // Pane Notify: keep the queue's snapshot, and open the inbox or its settings when main asks.
   useEffect(() => subscribeNotify(), []);
+  // Native Wayland may never deliver the answer-all shortcut to Pane, even while it is in front
+  // (GNOME 46 has no global-shortcut portal), so the window answers it itself there.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const snapshot = useNotifyStore.getState().snapshot;
+      if (!snapshot || snapshot.showOutsideSupported || !snapshot.settings.enabled) return;
+      if (acceleratorFromKeys(event, false) !== snapshot.settings.shortcut) return;
+      event.preventDefault();
+      event.stopPropagation();
+      runNotify({ type: 'open-round' });
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, []);
   useEffect(() => window.electronAPI?.notify?.onNavigate((target) => {
     if (target === 'settings') {
       openSettings({ category: 'notify' });
