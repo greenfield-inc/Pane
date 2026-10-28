@@ -95,6 +95,10 @@ interface GlassesAdmission {
   source: string;
 }
 
+function glassesIdentity(client: NonNullable<GlassesAdmission['client']>): AdmittedIdentity {
+  return { remoteClientId: client.id, remoteClientTokenHash: client.tokenHash, workspaceCredentials: null, glassesOrigin: client.origin };
+}
+
 interface WorkspaceCredentials {
   login: string | string[] | undefined;
   authorization: string | string[] | undefined;
@@ -218,6 +222,8 @@ interface PaneRemoteHttpApiServerOptions {
   workspace?: WorkspaceIdentityOptions;
   /** Whether a port is in the host's forwarded list; port streams reach only those. Without it, none. */
   isForwardedPort?(port: number): boolean;
+  /** Where the voice proxy reaches Deepgram's streaming API; Deepgram's own by default. */
+  deepgramListenEndpoint?: string;
 }
 
 interface WorkspaceIdentityOptions {
@@ -259,9 +265,9 @@ export class PaneRemoteHttpApiServer {
   private server: http.Server | null = null;
   private voiceDeepgramWss: WebSocketServer | null = null;
   private portStreamWss: WebSocketServer | null = null;
-  /** Open port streams and who opened them; each one closes when its caller loses access. */
-  private readonly portStreams = new Map<WebSocket, AdmittedIdentity>();
-  private portStreamCheckTimer: NodeJS.Timeout | null = null;
+  /** Open port and glasses voice streams and who opened them; each one closes when its caller loses access. */
+  private readonly admittedSockets = new Map<WebSocket, AdmittedIdentity>();
+  private admittedSocketCheckTimer: NodeJS.Timeout | null = null;
   private readonly eventClients = new Map<string, ConnectedRemoteEventClient>();
   private readonly deviceLabelsByRuntime = new Map<string, string>();
   private readonly daemonEventSink: PaneEventSink;
@@ -271,9 +277,8 @@ export class PaneRemoteHttpApiServer {
   private readonly analyticsSink?: RemotePaneAnalyticsSink;
   private readonly workspace?: WorkspaceIdentityOptions;
   private readonly isForwardedPort: (port: number) => boolean;
+  private readonly deepgramListenEndpoint: string;
   private readonly glassesAdmissions = new WeakMap<IncomingMessage, GlassesAdmission>();
-  /** Open glasses voice streams by device, closed when that device is revoked. */
-  private readonly glassesVoiceSockets = new Map<WebSocket, string>();
   private stopWatchingGlassesRevokes: (() => void) | null = null;
 
   constructor(
@@ -285,6 +290,7 @@ export class PaneRemoteHttpApiServer {
     this.analyticsSink = options.analyticsSink;
     this.workspace = options.workspace;
     this.isForwardedPort = options.isForwardedPort ?? (() => false);
+    this.deepgramListenEndpoint = options.deepgramListenEndpoint ?? DEEPGRAM_LISTEN_ENDPOINT;
     this.daemonEventSink = createFanoutEventSink([
       {
         send: (channel, ...args) => {
@@ -341,17 +347,14 @@ export class PaneRemoteHttpApiServer {
       this.dropEventClient(clientConnectionId);
     }
 
-    const streams = [...this.portStreams.entries()]
+    const streams = [...this.admittedSockets.entries()]
       .filter(([, identity]) => !clientIdSet || (identity.remoteClientId !== null && clientIdSet.has(identity.remoteClientId)))
       .map(([stream]) => stream);
-    const voiceSockets = [...this.glassesVoiceSockets.entries()]
-      .filter(([, glassesId]) => !clientIdSet || clientIdSet.has(glassesId))
-      .map(([voiceSocket]) => voiceSocket);
-    for (const stream of [...streams, ...voiceSockets]) {
+    for (const stream of streams) {
       stream.terminate();
     }
 
-    return clientConnectionIds.length + streams.length + voiceSockets.length;
+    return clientConnectionIds.length + streams.length;
   }
 
   async start(): Promise<void> {
@@ -448,8 +451,8 @@ export class PaneRemoteHttpApiServer {
     this.address = null;
     this.stopWatchingGlassesRevokes?.();
     this.stopWatchingGlassesRevokes = null;
-    if (this.portStreamCheckTimer) clearInterval(this.portStreamCheckTimer);
-    this.portStreamCheckTimer = null;
+    if (this.admittedSocketCheckTimer) clearInterval(this.admittedSocketCheckTimer);
+    this.admittedSocketCheckTimer = null;
     const webSocketServers = [this.voiceDeepgramWss, this.portStreamWss];
     this.voiceDeepgramWss = null;
     this.portStreamWss = null;
@@ -517,11 +520,8 @@ export class PaneRemoteHttpApiServer {
     }
 
     wss.handleUpgrade(request, socket, head, (client) => {
-      const glassesId = glasses?.client?.id;
-      if (glassesId) {
-        this.glassesVoiceSockets.set(client, glassesId);
-        client.once('close', () => this.glassesVoiceSockets.delete(client));
-      }
+      const glassesClient = glasses?.client;
+      if (glassesClient) this.trackAdmittedSocket(client, glassesIdentity(glassesClient));
       this.handleDeepgramProxySocket(client, deepgramApiKey);
     });
   }
@@ -557,9 +557,7 @@ export class PaneRemoteHttpApiServer {
       glassesOrigin: null,
     };
     wss.handleUpgrade(request, socket, head, (client) => {
-      this.portStreams.set(client, identity);
-      this.portStreamCheckTimer ??= setInterval(() => this.closeRevokedPortStreams(), this.heartbeatIntervalMs);
-      this.portStreamCheckTimer.unref?.();
+      this.trackAdmittedSocket(client, identity);
       // By name, so a service on either IPv4 or IPv6 loopback answers.
       const upstream = net.connect({ host: 'localhost', port });
       const stream = createWebSocketStream(client);
@@ -567,26 +565,33 @@ export class PaneRemoteHttpApiServer {
         upstream.destroy();
         client.terminate();
       });
-      client.once('close', () => {
-        upstream.destroy();
-        this.portStreams.delete(client);
-        if (this.portStreams.size === 0 && this.portStreamCheckTimer) {
-          clearInterval(this.portStreamCheckTimer);
-          this.portStreamCheckTimer = null;
-        }
-      });
+      client.once('close', () => upstream.destroy());
     });
   }
 
-  /** A removed pairing code, narrower visibility or a new password closes streams already open. */
-  private closeRevokedPortStreams(): void {
-    for (const [stream, identity] of this.portStreams) {
-      if (!this.isStillAdmitted(identity)) stream.terminate();
-    }
+  /**
+   * A removed pairing code, narrower visibility, a new password, a revoked glasses device or a
+   * removed glasses origin closes the socket within one heartbeat.
+   */
+  private trackAdmittedSocket(client: WebSocket, identity: AdmittedIdentity): void {
+    this.admittedSockets.set(client, identity);
+    this.admittedSocketCheckTimer ??= setInterval(() => {
+      for (const [stream, admitted] of this.admittedSockets) {
+        if (!this.isStillAdmitted(admitted)) stream.terminate();
+      }
+    }, this.heartbeatIntervalMs);
+    this.admittedSocketCheckTimer.unref?.();
+    client.once('close', () => {
+      this.admittedSockets.delete(client);
+      if (this.admittedSockets.size === 0 && this.admittedSocketCheckTimer) {
+        clearInterval(this.admittedSocketCheckTimer);
+        this.admittedSocketCheckTimer = null;
+      }
+    });
   }
 
   private handleDeepgramProxySocket(client: WebSocket, deepgramApiKey: string): void {
-    const upstream = new WebSocket(buildDeepgramListenUrl(), {
+    const upstream = new WebSocket(buildDeepgramListenUrl(this.deepgramListenEndpoint), {
       headers: {
         Authorization: `Token ${deepgramApiKey}`,
       },
@@ -594,11 +599,15 @@ export class PaneRemoteHttpApiServer {
     const pendingMessages: Array<{ data: RawData; isBinary: boolean }> = [];
     let closing = false;
 
-    const closeBoth = (code?: number, reason?: Buffer) => {
+    const closeBoth = (received?: number, receivedReason?: Buffer) => {
       if (closing) {
         return;
       }
       closing = true;
+      // 1005, 1006 and 1015 only report a close that sent no code (a terminated socket); they can't be sent on.
+      const forwardable = received !== undefined && received !== 1005 && received !== 1006 && received !== 1015;
+      const code = forwardable ? received : undefined;
+      const reason = forwardable ? receivedReason : undefined;
       if (client.readyState === WebSocket.OPEN || client.readyState === WebSocket.CONNECTING) {
         client.close(code, reason);
       }
@@ -1085,6 +1094,15 @@ export class PaneRemoteHttpApiServer {
     const refuse = (statusCode: number, code: string, message: string, next?: string) => {
       this.writeJson(response, statusCode, { ok: false, error: next ? { message, code, next } : { message, code } } satisfies RemoteInvokeErrorPayload);
     };
+    // The body can arrive long after admission; a revoke, a removed origin or Funnel turned on meanwhile refuses it.
+    const stillAdmitted = admission.client
+      ? this.isStillAdmitted(glassesIdentity(admission.client))
+      : glasses.allowsOrigin(getSingleHeaderValue(request.headers.origin) ?? undefined) && !glasses.isFunnelOn();
+    if (!stillAdmitted) {
+      refuse(403, 'ERR_GLASSES_ACCESS_WITHDRAWN', 'These glasses lost access to this computer while the request was arriving; it was not run.',
+        'Check Settings › Remote Access › Glasses on the computer, then pair again if the glasses were revoked.');
+      return;
+    }
 
     if (channel === GLASSES_COMMANDS.pair) {
       const secret = decodeOptionalBoundary(decodeOptionalBoundary(invokeRequest.args[0], boundary.jsonObject)?.secret, boundary.string);
@@ -1225,9 +1243,9 @@ export class PaneRemoteHttpApiServer {
   private isStillAdmitted(client: AdmittedIdentity): boolean {
     const { remoteClientId, remoteClientTokenHash, workspaceCredentials } = client;
     if (client.glassesOrigin !== null) {
-      // A revoked device, or an origin the owner removed, ends the stream.
+      // A revoked device, an origin the owner removed, or Funnel turned on ends the stream.
       const glasses = this.workspace?.glasses;
-      return Boolean(glasses && remoteClientId && remoteClientTokenHash
+      return Boolean(glasses && remoteClientId && remoteClientTokenHash && !glasses.isFunnelOn()
         && glasses.isCurrent(remoteClientId, remoteClientTokenHash) && glasses.allowsOrigin(client.glassesOrigin));
     }
     if (this.workspace) {
@@ -1547,8 +1565,8 @@ function getHttpStatusText(statusCode: number): string {
   }
 }
 
-function buildDeepgramListenUrl(): string {
-  const url = new URL(DEEPGRAM_LISTEN_ENDPOINT);
+function buildDeepgramListenUrl(endpoint: string): string {
+  const url = new URL(endpoint);
   url.searchParams.set('model', 'nova-3');
   url.searchParams.set('language', 'en-US');
   url.searchParams.set('smart_format', 'true');
