@@ -35,8 +35,8 @@ way. Computers that are offline are skipped and named on the screen.
 
 The Even app serves the glasses app from `http://127.0.0.1`, on a port it picks each time it starts.
 Pane accepts that origin on any port, so there is nothing to allow. A computer running an older
-Pane refuses it and the glasses show **Allow this app on the computer**: update Pane there, or allow
-the origin under **Settings › Remote Access › Glasses**.
+Pane refuses it and the glasses show **Allow this app on the computer**: update Pane on that
+computer. Allowing the origin on an older Pane lasts only until the Even app restarts on a new port.
 
 ## Use it
 
@@ -110,11 +110,13 @@ The pairing code on your clipboard holds one-time pairing secrets, not tokens, a
 | On the glasses | Fix |
 |---|---|
 | Can't reach any computer | Turn Tailscale on in the phone's Tailscale app. The glasses reconnect on their own. |
-| Allow this app on the computer | Update Pane on that computer, or allow the shown origin there (see above). |
+| Allow this app on the computer | Update Pane on that computer (see above). |
 | Not paired, or revoked | Pair again from Settings › Glasses in the Pane phone app. |
 | Locked out for N s | Wait. If you did not cause the refusals, revoke the glasses on that computer. |
 | Funnel is on | On the computer, run `tailscale funnel reset`, or turn Funnel off for port 8443. |
 | Can't turn speech into text | Add a Deepgram or fal key on that computer. |
+| Deepgram rejected X's key, or X's Deepgram key isn't a valid key | On that computer, paste a current key from the Deepgram console in **Settings › Integrations › Voice transcription**. Pane checks it with Deepgram when you save. |
+| Lost the connection to X while listening | Hold to talk again. If it keeps happening, check Tailscale on the phone. |
 
 ## For developers
 

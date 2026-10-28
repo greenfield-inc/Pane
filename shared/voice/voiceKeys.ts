@@ -23,6 +23,7 @@ const MAX_KEY_LENGTH = 200;
  */
 export function voiceKeyProblem(field: VoiceKeyField, value: string): { message: string; next: string } | null {
   const provider = VOICE_KEY_PROVIDERS[field];
+  const aKey = `${/^[aeiou]/i.test(provider) ? 'an' : 'a'} ${provider} key`;
   const reason = value.length > MAX_KEY_LENGTH
     ? `it is ${value.length.toLocaleString('en-US')} characters long, and ${provider} keys are under ${MAX_KEY_LENGTH}`
     : /\s/.test(value)
@@ -30,9 +31,9 @@ export function voiceKeyProblem(field: VoiceKeyField, value: string): { message:
       : /[^\x21-\x7e]/.test(value)
         ? 'it has characters no key has, such as curly quotes or accented letters'
         : value.length < MIN_KEY_LENGTH
-          ? `it is ${value.length} characters long, too short for a ${provider} key`
+          ? `it is ${value.length} characters long, too short for ${aKey}`
           : null;
   return reason
-    ? { message: `That isn't a ${provider} key: ${reason}.`, next: `Copy only the key from ${provider} and paste it again.` }
+    ? { message: `That isn't ${aKey}: ${reason}.`, next: `Copy only the key from ${provider} and paste it again.` }
     : null;
 }
