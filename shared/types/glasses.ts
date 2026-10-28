@@ -6,6 +6,8 @@ export const GLASSES_TOKEN_PREFIX = 'pgt_';
 /** A single-use pairing secret, traded once for a device token within 10 minutes. */
 export const GLASSES_PAIRING_SECRET_PREFIX = 'pgs_';
 const PAIRING_CODE_SCHEME = 'pane-glasses://';
+/** The voice WebSocket's subprotocol: `['pane-glasses', token]`, since a browser WebSocket can't set headers. */
+export const GLASSES_WEBSOCKET_PROTOCOL = 'pane-glasses';
 
 /** Workspace-listener commands that manage glasses. Only the owner's own devices, without a glasses token, may call them. */
 export const GLASSES_COMMANDS = {

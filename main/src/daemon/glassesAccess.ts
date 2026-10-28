@@ -44,8 +44,6 @@ export const GLASSES_EVENT_CHANNELS: ReadonlySet<string> = new Set([
   'orchestration-sessions:changed',
 ]);
 
-/** The WebSocket subprotocol that carries a glasses token, since a browser cannot set headers on one. */
-export const GLASSES_WEBSOCKET_PROTOCOL = 'pane-glasses';
 
 const PAIRING_SECRET_TTL_MS = 10 * 60_000;
 const MAX_PENDING_SECRETS = 32;

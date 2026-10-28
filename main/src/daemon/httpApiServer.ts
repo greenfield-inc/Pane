@@ -20,12 +20,11 @@ import { isPaneDaemonEventChannel } from './server';
 import {
   GLASSES_CHANNELS,
   GLASSES_EVENT_CHANNELS,
-  GLASSES_WEBSOCKET_PROTOCOL,
   glassesSource,
   type GlassesAccess,
   type GlassesFailureReason,
 } from './glassesAccess';
-import { GLASSES_COMMANDS, GLASSES_TOKEN_PREFIX } from '../../../shared/types/glasses';
+import { GLASSES_COMMANDS, GLASSES_TOKEN_PREFIX, GLASSES_WEBSOCKET_PROTOCOL } from '../../../shared/types/glasses';
 import {
   createDefaultRemoteDaemonConfig,
   getRemoteDaemonHostConfigValidationError,

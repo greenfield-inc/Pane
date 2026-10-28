@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Pane</title>
+    <style>
+      :root { color-scheme: light dark; --bg: #f2f2f2; --panel: #ffffff; --ink: #111111; --muted: #666666; --line: #dddddd; --button: #111111; --button-ink: #ffffff; --live: #2f7d4f; --bad: #a23a2f; }
+      @media (prefers-color-scheme: dark) {
+        :root { --bg: #151515; --panel: #1f1f1f; --ink: #e6e6e6; --muted: #9a9a9a; --line: #333333; --button: #e6e6e6; --button-ink: #111111; --live: #6fc38d; --bad: #ef9388; }
+      }
+      [hidden] { display: none !important; }
+      body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 -apple-system, system-ui, sans-serif; }
+      main { max-width: 640px; margin: 0 auto; padding: 20px 16px 40px; }
+      h1 { font-size: 20px; margin: 0 0 4px; }
+      #status { display: block; color: var(--muted); margin-bottom: 16px; min-height: 1.4em; }
+      form { display: flex; gap: 8px; margin-bottom: 10px; }
+      input { flex: 1; min-width: 0; background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 10px; font: inherit; }
+      button { background: var(--button); color: var(--button-ink); border: 0; border-radius: 8px; padding: 10px 14px; font: inherit; font-weight: 600; }
+      button.alt { background: var(--panel); color: var(--ink); border: 1px solid var(--line); }
+      ul { list-style: none; padding: 0; margin: 16px 0; }
+      li { display: flex; flex-wrap: wrap; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--line); }
+      li .state { color: var(--muted); }
+      li .why { flex-basis: 100%; margin: 4px 0 0; color: var(--bad); font-size: 13px; }
+      li .why:empty { display: none; }
+      pre { background: #050505; color: #46f07a; border-radius: 10px; padding: 12px; font: 12px/1.5 ui-monospace, Menlo, monospace; white-space: pre-wrap; word-break: break-word; min-height: 8em; }
+      .help, #origin { color: var(--muted); font-size: 13px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Pane</h1>
+      <span id="status">Starting…</span>
+      <form id="pair">
+        <input id="pair-code" placeholder="Pairing code" aria-label="Pairing code" autocomplete="off" autocapitalize="off" spellcheck="false" />
+        <button type="submit">Connect</button>
+      </form>
+      <p class="help">Paste the code from the Pane app on this phone: Settings › Glasses › Pair glasses. It works for 10 minutes.</p>
+      <p><button id="demo" type="button" class="alt">Try the demo</button></p>
+      <ul id="computers"></ul>
+      <p class="help"><b>Swipe</b> moves between cards or scrolls. <b>Press</b> opens or picks. <b>Hold</b> to talk, release to send. <b>Double press</b> goes back; on home it exits.</p>
+      <pre id="mirror" aria-label="What the glasses show"></pre>
+      <p><button id="forget" type="button" class="alt">Forget these computers</button></p>
+      <p id="origin"></p>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

@@ -3,6 +3,7 @@ packages:
   - 'main'
   - 'mobile'
   - 'native'
+  - 'glasses'
   - 'packages/runpane'
   - 'shared'
 onlyBuiltDependencies:
