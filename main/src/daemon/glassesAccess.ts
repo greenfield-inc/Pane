@@ -57,6 +57,7 @@ const MAX_LOCKOUT_MS = 60 * 60_000;
 const MAX_DEVICE_NAME_LENGTH = 60;
 const MAX_TRACKED_SOURCES = 1_000;
 const MAX_REFUSED_ORIGINS = 10;
+const COUNTED_FAILURES: ReadonlySet<GlassesFailureReason> = new Set(['token', 'pairing-secret', 'identity', 'credential-in-url']);
 
 export type GlassesFailureReason = 'token' | 'pairing-secret' | 'origin' | 'identity' | 'funnel' | 'credential-in-url' | 'channel';
 
@@ -185,7 +186,7 @@ export class GlassesAccess {
       id: `glasses-${randomUUID()}`,
       label,
       createdAt: new Date(now).toISOString(),
-      tokenHash: sha256(token).toString('hex'),
+      tokenHash: tokenHash(token).toString('hex'),
       kind: 'glasses',
     };
     const replaced = this.list().filter((device) => device.label === label).map((device) => device.id);
@@ -196,7 +197,7 @@ export class GlassesAccess {
 
   /** The device a token belongs to, or null. */
   verifyToken(token: string): RemoteDaemonClientRecord | null {
-    const presented = sha256(token);
+    const presented = tokenHash(token);
     let match: RemoteDaemonClientRecord | null = null;
     // Compare against every record so the time taken doesn't depend on which one matches.
     for (const client of this.records()) {
@@ -246,8 +247,10 @@ export class GlassesAccess {
   recordFailure(source: string, reason: GlassesFailureReason, detail?: string): void {
     const now = this.now();
     this.log(`[Pane glasses] refused ${reason} from ${source} at ${new Date(now).toISOString()}${detail ? ` (${detail})` : ''}`);
-    // A command outside the scope is a bug or an old app, not a guess at a credential.
-    if (reason === 'channel') return;
+    // Only guesses at a credential count. A command outside the scope is a bug or an old app,
+    // and any web page on the owner's phone can send a wrong origin or reach a Funnel, so
+    // counting those would let a page lock the real glasses out.
+    if (!COUNTED_FAILURES.has(reason)) return;
     let state = this.sources.get(source);
     if (state && now - state.lastFailureAt > MAX_LOCKOUT_MS && state.lockedUntil <= now) state = undefined;
     if (!state) {
@@ -336,6 +339,14 @@ function cleanDeviceName(name: string): string {
     );
   }
   return cleaned;
+}
+
+/**
+ * A glasses token's stored hash, in its own domain: a Pane that predates glasses keeps these
+ * records as paired clients, and a plain SHA-256 would let the token in there with full access.
+ */
+function tokenHash(token: string): Buffer {
+  return sha256(`pane-glasses-v1\0${token}`);
 }
 
 function sha256(value: string): Buffer {

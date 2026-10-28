@@ -270,6 +270,8 @@ export class PaneRemoteHttpApiServer {
   private readonly workspace?: WorkspaceIdentityOptions;
   private readonly isForwardedPort: (port: number) => boolean;
   private readonly glassesAdmissions = new WeakMap<IncomingMessage, GlassesAdmission>();
+  /** Open glasses voice streams by device, closed when that device is revoked. */
+  private readonly glassesVoiceSockets = new Map<WebSocket, string>();
   private stopWatchingGlassesRevokes: (() => void) | null = null;
 
   constructor(
@@ -340,11 +342,14 @@ export class PaneRemoteHttpApiServer {
     const streams = [...this.portStreams.entries()]
       .filter(([, identity]) => !clientIdSet || (identity.remoteClientId !== null && clientIdSet.has(identity.remoteClientId)))
       .map(([stream]) => stream);
-    for (const stream of streams) {
+    const voiceSockets = [...this.glassesVoiceSockets.entries()]
+      .filter(([, glassesId]) => !clientIdSet || clientIdSet.has(glassesId))
+      .map(([voiceSocket]) => voiceSocket);
+    for (const stream of [...streams, ...voiceSockets]) {
       stream.terminate();
     }
 
-    return clientConnectionIds.length + streams.length;
+    return clientConnectionIds.length + streams.length + voiceSockets.length;
   }
 
   async start(): Promise<void> {
@@ -510,6 +515,11 @@ export class PaneRemoteHttpApiServer {
     }
 
     wss.handleUpgrade(request, socket, head, (client) => {
+      const glassesId = glasses?.client?.id;
+      if (glassesId) {
+        this.glassesVoiceSockets.set(client, glassesId);
+        client.once('close', () => this.glassesVoiceSockets.delete(client));
+      }
       this.handleDeepgramProxySocket(client, deepgramApiKey);
     });
   }

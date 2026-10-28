@@ -126,7 +126,9 @@ describe('glasses on the workspace listener', () => {
     expect(Buffer.from(secret.slice('pgs_'.length), 'base64url').length).toBeGreaterThanOrEqual(32);
     const stored = JSON.stringify(host.config());
     expect(stored).not.toContain(token);
-    expect(stored).toContain(hashRemoteDaemonToken(token));
+    // Stored in its own hash domain, so a Pane that predates glasses can't admit it as a paired client.
+    expect(stored).not.toContain(hashRemoteDaemonToken(token));
+    expect(host.glasses.verifyToken(token)?.label).toBe('Even G2 · iPhone');
 
     const reused = await host.invoke(GLASSES_COMMANDS.pair, [{ secret }], host.fromGlasses());
     expect(reused.status).toBe(403);
@@ -192,6 +194,15 @@ describe('glasses on the workspace listener', () => {
     expect(preflight.status).toBe(204);
     expect(preflight.headers['access-control-allow-headers']).toContain('Authorization');
     expect((await host.request('OPTIONS', '/invoke', { Origin: 'https://attacker.example' })).status).toBe(403);
+  });
+
+  it('does not let a web page on the owner\'s phone lock the glasses out with wrong-origin requests', async () => {
+    const host = await setup();
+    const { token } = await host.pair();
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      await host.invoke('runpane:panels:screen', [{}], host.fromGlasses('pgt_guess', { Origin: 'https://attacker.example' }));
+    }
+    expect((await host.invoke('runpane:panels:screen', [{}], host.fromGlasses(token))).status).toBe(200);
   });
 
   it('refuses glasses tokens while Funnel is on, saying so', async () => {
