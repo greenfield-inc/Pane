@@ -32,6 +32,7 @@ import type {
 } from '../../shared/types/remoteDaemon';
 import type { TailnetMachineList, WorkspaceAccessSummary, WorkspaceAccessUpdate } from '../../shared/types/workspaceAccess';
 import type { GlassesAccessState } from '../../shared/types/glasses';
+import type { VoiceKeyCheck } from '../../shared/voice/voiceKeys';
 import type { HostNavigationMemory } from '../../shared/types/hostNavigation';
 import type { SessionWorkspaceLayout } from '../../shared/types/sessionWorkspaceLayout';
 import type { PanelActivationRequest, SessionPanelLayout, ToolPanel } from '../../shared/types/panels';
@@ -684,6 +685,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     updateSessionPreferences: (preferences: AppConfig['sessionCreationPreferences']): Promise<IPCResponse> => invokeIpc('config:update-session-preferences', preferences),
     getMonospaceFonts: (): Promise<IPCResponse> => invokeIpc('config:get-monospace-fonts'),
     chooseApnsKey: (): Promise<IPCResponse<{ privateKey: string; keyId: string | null } | null>> => invokeIpc('dialog:open-apns-key'),
+    checkDeepgramKey: (key: string): Promise<VoiceKeyCheck> => invokeIpc('config:check-deepgram-key', key),
   },
 
   remoteDaemon: {

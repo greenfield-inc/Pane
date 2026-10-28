@@ -3,9 +3,9 @@
 // over the host's /voice/deepgram-stream WebSocket and voice:finalize-streaming cleans it up;
 // otherwise the PCM is wrapped as WAV on release and sent to voice:transcribe.
 import type { VoiceTranscriptionMode } from '../../shared/types/voiceTranscription';
-import { parseDeepgramLiveMessage } from '../../shared/voice/deepgramLive';
+import { parseDeepgramLiveMessage, type VoiceStreamErrorCode } from '../../shared/voice/deepgramLive';
 import { GLASSES_WEBSOCKET_PROTOCOL } from '../../shared/types/glasses';
-import type { Dictation } from './model';
+import { GlassesError, type Dictation } from './model';
 
 const SAMPLE_RATE = 16_000;
 const OPEN_TIMEOUT_MS = 8_000;
@@ -90,6 +90,8 @@ export interface VoiceSocket {
 
 /** What a dictation needs from its computer. */
 export interface VoiceHost {
+  /** The computer's name, as the glasses show it. */
+  name: string;
   baseUrl: string;
   token: string;
   finalizeStreaming(rawText: string, durationMs: number): Promise<string>;
@@ -102,11 +104,11 @@ export interface VoiceHost {
 class LiveTranscript {
   private finals: string[] = [];
   private interim = '';
-  error: string | null = null;
+  error: { message: string; code?: VoiceStreamErrorCode } | null = null;
 
   receive(data: string): void {
     const message = parseDeepgramLiveMessage(data);
-    if (message.type === 'error') this.error = message.message;
+    if (message.type === 'error') this.error = { message: message.message, code: message.code };
     if (message.type !== 'transcript') return;
     if (message.update.isFinal) {
       this.finals.push(message.update.transcript);
@@ -147,6 +149,27 @@ function openStream(host: VoiceHost, onText: (data: string) => void): Promise<Vo
   });
 }
 
+const VOICE_SETTINGS = 'Settings › Integrations › Voice transcription';
+
+/**
+ * What the glasses show when a stream fails: the host's reason when it sent one, naming the
+ * computer and the fix, or a dropped connection when it sent none.
+ */
+function streamFailure(name: string, error: LiveTranscript['error']): GlassesError {
+  switch (error?.code) {
+    case 'ERR_VOICE_KEY_INVALID':
+      return new GlassesError(error.code, `${name}'s Deepgram key isn't a valid key.`, `Paste the key again in Pane on ${name}: ${VOICE_SETTINGS}.`);
+    case 'ERR_VOICE_KEY_REJECTED':
+      return new GlassesError(error.code, `Deepgram rejected ${name}'s key.`, `Fix it in Pane on ${name}: ${VOICE_SETTINGS}.`);
+    case 'ERR_VOICE_UPSTREAM':
+      return new GlassesError(error.code, `${name} couldn't stream to Deepgram. ${error.message}`, 'Hold to talk again.');
+    case undefined:
+      return error
+        ? new GlassesError('ERR_GLASSES_VOICE_FAILED', `Deepgram stopped listening on ${name}: ${error.message}`, 'Hold to talk again.')
+        : new GlassesError('ERR_GLASSES_VOICE_DROPPED', `Lost the connection to ${name} while listening.`, 'Hold to talk again.');
+  }
+}
+
 /** Live words over the host's Deepgram stream while you hold. */
 export async function streamingDictation(host: VoiceHost, onPreview: (text: string) => void): Promise<Dictation> {
   const startedAt = host.now();
@@ -176,8 +199,7 @@ export async function streamingDictation(host: VoiceHost, onPreview: (text: stri
       // A drop up to here, Finalize's wait included, loses words: nothing is sent.
       ending = true;
       ws.close();
-      if (dropped) throw new Error(live.error ?? 'The voice connection closed.');
-      if (live.error && !live.rawText) throw new Error(live.error);
+      if (dropped || (live.error && !live.rawText)) throw streamFailure(host.name, live.error);
       return live.rawText ? host.finalizeStreaming(live.rawText, host.now() - startedAt) : '';
     },
     cancel() {

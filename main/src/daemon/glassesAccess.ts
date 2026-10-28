@@ -7,11 +7,15 @@ import { GLASSES_PAIRING_SECRET_PREFIX, GLASSES_TOKEN_PREFIX, type GlassesAccess
 /**
  * The Origins the Even Realities app's WebView sends for the Pane glasses app. Exact values only:
  * no wildcard, and never "null". Record the real value on a device before a release adds it here.
- * The owner adds more on one machine from Settings › Remote Access › Glasses (`workspaces.glassesOrigins`),
- * and `PANE_GLASSES_ORIGINS` (comma separated) adds them for a dev run, such as the Even simulator's.
+ * The Even app serves the glasses app from http://127.0.0.1 on a new port each launch, and a
+ * loopback origin matches on any port (see `originKey`). A page on that address still needs a
+ * glasses token or pairing secret. The owner adds more on one machine from
+ * Settings › Remote Access › Glasses (`workspaces.glassesOrigins`), and `PANE_GLASSES_ORIGINS` (comma separated) adds them for a dev run, such as the Even simulator's.
  */
-const EVEN_APP_ORIGINS: readonly string[] = [];
+const EVEN_APP_ORIGINS: readonly string[] = ['http://127.0.0.1'];
 const ORIGINS_ENV = 'PANE_GLASSES_ORIGINS';
+/** Hosts whose origins match on any port: the Even app serves the glasses app from http://127.0.0.1 on a port it picks each launch. */
+const LOOPBACK_HOSTS: ReadonlySet<string> = new Set(['127.0.0.1', 'localhost', '[::1]']);
 
 /** The commands a glasses token reaches. Everything else is refused before it runs. */
 export const GLASSES_CHANNELS: ReadonlySet<string> = new Set([
@@ -109,7 +113,8 @@ export class GlassesAccess {
 
   allowsOrigin(origin: string | undefined): boolean {
     if (origin === undefined || !isExactOrigin(origin)) return false;
-    return EVEN_APP_ORIGINS.includes(origin) || this.envOrigins.has(origin) || this.ownerOrigins().includes(origin);
+    const key = originKey(origin);
+    return [...EVEN_APP_ORIGINS, ...this.envOrigins, ...this.ownerOrigins()].some((allowed) => originKey(allowed) === key);
   }
 
   /**
@@ -138,7 +143,7 @@ export class GlassesAccess {
     };
   }
 
-  /** Adds or removes one exact origin the owner allows on this machine. */
+  /** Adds or removes one exact origin the owner allows on this machine; a loopback origin is kept without its port. */
   async setOwnerOrigin(origin: string, allowed: boolean): Promise<GlassesAccessState> {
     if (!isExactOrigin(origin)) {
       throw new PaneError(
@@ -148,8 +153,9 @@ export class GlassesAccess {
       );
     }
     await this.config.updateConfigWith((current) => {
-      const others = (current.workspaces?.glassesOrigins ?? []).filter((value) => value !== origin);
-      return { workspaces: { ...current.workspaces, glassesOrigins: allowed ? [...others, origin] : others } };
+      const key = originKey(origin);
+      const others = (current.workspaces?.glassesOrigins ?? []).filter((value) => !isExactOrigin(value) || originKey(value) !== key);
+      return { workspaces: { ...current.workspaces, glassesOrigins: allowed ? [...others, key] : others } };
     });
     return this.state();
   }
@@ -276,7 +282,7 @@ export class GlassesAccess {
   }
 
   private ownerOrigins(): string[] {
-    return (this.config.getConfig().workspaces?.glassesOrigins ?? []).filter(isExactOrigin);
+    return [...new Set((this.config.getConfig().workspaces?.glassesOrigins ?? []).filter(isExactOrigin).map(originKey))];
   }
 
   private records(): RemoteDaemonClientRecord[] {
@@ -332,6 +338,12 @@ function isExactOrigin(value: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** What an allow matches on: the origin itself, or scheme and host alone for a loopback host. */
+function originKey(origin: string): string {
+  const url = new URL(origin);
+  return LOOPBACK_HOSTS.has(url.hostname) ? `${url.protocol}//${url.hostname}` : origin;
 }
 
 function cleanDeviceName(name: string): string {

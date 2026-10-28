@@ -119,12 +119,20 @@ export interface PairingDeps {
   origin: string;
 }
 
+/** The Even app's own origin, http://127.0.0.1 on any port, which Pane admits without an Allow. */
+function isEvenAppOrigin(origin: string): boolean {
+  return /^http:\/\/127\.0\.0\.1(:\d+)?$/.test(origin);
+}
+
 /**
  * A computer that refuses the app's origin refuses its CORS preflight, which the WebView reports
- * only as a network error; on a first connection that is the likely cause.
+ * only as a network error. For the Even app's origin that means an older Pane; for any other
+ * origin, on a first connection, a missing Allow.
  */
 export function noAnswerMessage(computerName: string, origin: string): string {
-  return `${computerName} didn't answer. If this is the first time, allow the Even app on it: Pane › Settings › Remote Access › Glasses › Allow (origin ${origin}).`;
+  return isEvenAppOrigin(origin)
+    ? `${computerName} didn't answer. Check that Pane is open and up to date on it, and that Tailscale is on.`
+    : `${computerName} didn't answer. If this is the first time, allow the Even app on it: Pane › Settings › Remote Access › Glasses › Allow (origin ${origin}).`;
 }
 
 /** Decodes the pasted code and trades each computer's single-use secret for its device token, once. */
@@ -382,7 +390,9 @@ export class HostConnection {
     return {
       code: 'ERR_GLASSES_ORIGIN_REFUSED',
       message: `${this.paired.name} doesn't allow this app (origin ${this.deps.origin}).`,
-      next: 'Allow it in Pane on that computer: Settings › Remote Access › Glasses › Allow.',
+      next: isEvenAppOrigin(this.deps.origin)
+        ? 'Update Pane on that computer, or allow it there: Settings › Remote Access › Glasses › Allow.'
+        : 'Allow it in Pane on that computer: Settings › Remote Access › Glasses › Allow.',
     };
   }
 
@@ -601,6 +611,7 @@ export class HostConnection {
       throw new GlassesError('ERR_GLASSES_VOICE_UNAVAILABLE', `${this.paired.name} can't turn speech into text.`, 'Add a Deepgram key (live) or a fal key (recorded) in Pane on that computer: Settings › Integrations › Voice transcription.');
     }
     const host: VoiceHost = {
+      name: this.paired.name,
       baseUrl: this.paired.url,
       token: this.paired.token,
       now: this.deps.now,

@@ -1,5 +1,6 @@
 /// <reference types="electron" />
 import type { PreferencesApi } from '../../../shared/types/preferences';
+import type { VoiceKeyCheck } from '../../../shared/voice/voiceKeys';
 // Type definitions for Electron preload API
 import type { Session, SessionOutput, GitStatus, VersionInfo, VersionUpdateInfo } from './session';
 import type { Project } from './project';
@@ -399,6 +400,7 @@ interface ElectronAPI {
     updateSessionPreferences: (preferences: SessionCreationPreferences) => Promise<IPCResponse>;
     getMonospaceFonts: () => Promise<IPCResponse>;
     chooseApnsKey: () => Promise<IPCResponse<{ privateKey: string; keyId: string | null } | null>>;
+    checkDeepgramKey: (key: string) => Promise<VoiceKeyCheck>;
   };
 
   remoteDaemon: {
