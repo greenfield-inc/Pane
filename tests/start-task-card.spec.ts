@@ -142,8 +142,14 @@ test('a start that fails after creating the Pane keeps the task and offers the P
   await expect(card(page).getByRole('alert')).toContainText('"add-dark-mode" was created, but its agent didn\'t start, so your task wasn\'t sent.');
   await expect(card(page).getByRole('textbox', { name: 'Task' })).toHaveValue('Add a dark mode toggle');
   await expect(card(page).getByRole('button', { name: 'Try again' })).toHaveCount(0);
+  await expect(card(page).getByRole('button', { name: 'Start in a new Pane' })).toBeDisabled();
   await card(page).getByRole('button', { name: 'Open the Pane' }).click();
   await expect(page.getByRole('button', { name: 'add-dark-mode', exact: true })).toHaveAttribute('aria-current', 'page');
+
+  // The task was never sent, so it is still there back on the project.
+  await page.getByRole('button', { name: `Project actions for ${project.name}`, exact: true }).click();
+  await page.getByText('Open session on main', { exact: true }).click();
+  await expect(card(page).getByRole('textbox', { name: 'Task' })).toHaveValue('Add a dark mode toggle');
   expect(await paneCreates(page)).toHaveLength(1);
 });
 

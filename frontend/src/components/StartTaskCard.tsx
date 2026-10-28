@@ -28,6 +28,9 @@ const paneCreateResultSchema = boundary.object({
   })),
 });
 
+/** Unsent tasks by project, so a draft outlives the card (opening a Pane unmounts it). */
+const drafts = new Map<number, string>();
+
 const isSelectable = (readiness: AgentReadiness) => readiness === 'ready' || readiness === 'unknown';
 
 interface StartTaskCardProps {
@@ -56,7 +59,12 @@ export function StartTaskCard({ projectId, projectEnvironment, openTerminal }: S
   const navigateToSessions = useNavigationStore(state => state.navigateToSessions);
   const titleId = useId();
 
-  const [task, setTask] = useState('');
+  const [task, setTaskState] = useState(() => drafts.get(projectId) ?? '');
+  const setTask = (value: string) => {
+    setTaskState(value);
+    if (value) drafts.set(projectId, value);
+    else drafts.delete(projectId);
+  };
   const [picked, setPicked] = useState<AgentLaunchPresetId | null>(null);
   // null until the project's branches load: Start waits for them, so the base it shows is the base it sends.
   const [branches, setBranches] = useState<PaneNameBranchInfo[] | null>(null);
@@ -93,7 +101,8 @@ export function StartTaskCard({ projectId, projectEnvironment, openTerminal }: S
   const paneName = trimmedTask
     ? generatePaneName(taskPaneName(trimmedTask) || 'new-task', new Set(panes.map(session => session.name)), branches ?? [])
     : '';
-  const canStart = Boolean(selected && trimmedTask && branches && !starting);
+  // After a start that kept its Pane, Start waits for a new task, so it can't make a duplicate.
+  const canStart = Boolean(selected && trimmedTask && branches && !starting && !failure?.keptPaneId);
 
   const openPane = async (sessionId: string) => {
     // A remote desktop gets no focus event from its host, so open the Pane here too.
@@ -199,7 +208,10 @@ export function StartTaskCard({ projectId, projectEnvironment, openTerminal }: S
         <textarea
           aria-label="Task"
           value={task}
-          onChange={event => setTask(event.target.value)}
+          onChange={event => {
+            setTask(event.target.value);
+            if (failure?.keptPaneId) setFailure(null);
+          }}
           onKeyDown={event => {
             if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
               event.preventDefault();
