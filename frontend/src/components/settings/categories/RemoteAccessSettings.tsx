@@ -3,6 +3,7 @@ import { ExternalLink, Plus, Server, Terminal, Trash2 } from 'lucide-react';
 import { Button, IconButton } from '../../ui/Button';
 import { Textarea } from '../../ui/Input';
 import { SettingRow, SettingsPage } from '../SettingRow';
+import { settingDomId } from '../catalog';
 import type { RemoteAccessSubviewId } from '../../../types/settings';
 import type { RemoteAccessController } from '../useRemoteAccessSettings';
 import { CodelessRemoteSettings } from '../CodelessRemoteSettings';
@@ -10,9 +11,11 @@ import { CodelessRemoteSettings } from '../CodelessRemoteSettings';
 interface RemoteAccessSettingsProps {
   controller: RemoteAccessController;
   onOpenSubview: (subview: RemoteAccessSubviewId) => void;
+  /** Changes each time something asks for the "Add with a Code" box open. */
+  addCodeRequest?: number;
 }
 
-export function RemoteAccessSettings({ controller, onOpenSubview }: RemoteAccessSettingsProps) {
+export function RemoteAccessSettings({ controller, onOpenSubview, addCodeRequest }: RemoteAccessSettingsProps) {
   const { connectionState } = controller;
   const remote = connectionState.mode === 'remote';
 
@@ -52,7 +55,9 @@ export function RemoteAccessSettings({ controller, onOpenSubview }: RemoteAccess
       )}
       <CodelessRemoteSettings
         connectionState={connectionState}
-        otherHosts={<CodeHosts controller={controller} />}
+        showChecklist={controller.showChecklist}
+        // A new request remounts the list with the code box open.
+        otherHosts={<CodeHosts key={addCodeRequest} controller={controller} startAdding={addCodeRequest !== undefined} />}
         accessFooter={(
           <SettingRow
             settingId="remote-pane"
@@ -85,8 +90,8 @@ export function RemoteAccessSettings({ controller, onOpenSubview }: RemoteAccess
 }
 
 /** Hosts saved from connection codes, plus pasting a new code. */
-function CodeHosts({ controller }: { controller: RemoteAccessController }) {
-  const [adding, setAdding] = useState(false);
+function CodeHosts({ controller, startAdding }: { controller: RemoteAccessController; startAdding: boolean }) {
+  const [adding, setAdding] = useState(startAdding);
   const { connectionState } = controller;
   const hosts = controller.config.client.profiles.filter((profile) => !profile.tailnetMachine);
 
@@ -114,6 +119,7 @@ function CodeHosts({ controller }: { controller: RemoteAccessController }) {
       })}
       {adding ? (
         <form
+          id={settingDomId('remote-add-code')}
           className="space-y-2 py-3"
           onSubmit={(event) => {
             event.preventDefault();

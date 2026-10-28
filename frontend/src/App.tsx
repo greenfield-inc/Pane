@@ -1,4 +1,6 @@
 import { RemoteConnectionBanner } from './components/RemoteConnectionBanner';
+import { ConnectionChecklist } from './components/ConnectionChecklist';
+import { useRemoteRuntimeState } from './hooks/useRemoteRuntimeState';
 import { TailnetHttpsBanner } from './components/TailnetHttpsBanner';
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useIPCEvents } from './hooks/useIPCEvents';
@@ -138,6 +140,7 @@ function App() {
   const terminalShortcuts = appConfig?.terminalShortcuts ?? EMPTY_TERMINAL_SHORTCUTS;
   const { isVisible: shortcutHintsVisible } = useShortcutHintsOverlay();
   useFocusedSurfaceScrolling(activeSessionId);
+  const connectionCheck = useRemoteRuntimeState().connectionState.check;
 
   const openSettings = useCallback((target?: SettingsTarget) => {
     if (target) {
@@ -898,6 +901,20 @@ function App() {
     setIsUpdateDialogOpen(true);
   }, []);
 
+  // Pane's own update dialog, for a host that runs a newer Pane; Settings → General when the check fails.
+  const updatePane = useCallback(async () => {
+    try {
+      const response = await API.checkForUpdates();
+      if (response.success && response.data) {
+        handleUpdateRequest(response.data);
+        return;
+      }
+    } catch (error) {
+      console.warn('Update check failed:', error);
+    }
+    openSettings({ category: 'general', setting: 'check-updates-now' });
+  }, [handleUpdateRequest, openSettings]);
+
   // The release the version check found; a renderer reload loses it, so ask again.
   const openAvailableUpdate = useCallback(async () => {
     if (updateVersionInfo) {
@@ -990,7 +1007,9 @@ function App() {
           />
         </div>
         <div className="relative flex min-h-0 min-w-0 flex-1">
-          <SessionView />
+          {connectionCheck && connectionCheck.outcome !== 'passed'
+            ? <ConnectionChecklist check={connectionCheck} onOpenSettings={openSettings} onUpdatePane={() => void updatePane()} />
+            : <SessionView />}
           <PaneChatIntroOffer suppressed={isSettingsOpen || isOnboardingOpen || isWelcomeOpen} />
         </div>
         <NotifyInPaneStrip left={sidebarCollapsed ? 48 : sidebarWidth} />

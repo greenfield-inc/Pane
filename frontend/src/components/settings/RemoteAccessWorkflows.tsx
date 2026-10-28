@@ -11,6 +11,35 @@ import type { RemoteAccessController } from './useRemoteAccessSettings';
 import type { RemoteSetupTunnelPreference } from '../../../../shared/types/remoteDaemon';
 import { getRemoteExecutableHealthPresentation } from '../../utils/remoteRuntimePresentation';
 import { useCommittedRef } from '../../hooks/useCommittedRef';
+import { ChecklistRow } from '../ConnectionChecklist';
+import type { RemoteHostSetupProgress, RemoteHostSetupStep } from '../../../../shared/types/remoteDaemon';
+
+const SETUP_STEP_LABELS = {
+  service: 'Pane can run as a service',
+  port: 'Port chosen',
+  tailscale: 'Tailscale ready',
+  https: 'HTTPS address on Tailscale',
+  code: 'Connection code created',
+  daemon: 'Daemon service running',
+} satisfies Record<RemoteHostSetupStep, string>;
+
+/** Set Up Host's steps as they ran, with the fix for the one that failed. */
+function SetupSteps({ controller }: { controller: RemoteAccessController }) {
+  if (controller.setupSteps.length === 0) return null;
+  const fixFor = (step: RemoteHostSetupProgress) => (step.status === 'failed' && step.step === 'tailscale' ? (
+    <>
+      <Button type="button" size="sm" onClick={() => window.electronAPI.openExternal('https://tailscale.com/download')}>Download Tailscale</Button>
+      <Button type="button" variant="secondary" size="sm" onClick={() => controller.openSetupTerminal(false)}>Open Tailscale Setup</Button>
+    </>
+  ) : undefined);
+  return (
+    <ul className="space-y-1.5" aria-label="Setup steps">
+      {controller.setupSteps.map((step) => (
+        <ChecklistRow key={step.step} status={step.status} label={SETUP_STEP_LABELS[step.step]} detail={step.detail} action={fixFor(step)} />
+      ))}
+    </ul>
+  );
+}
 
 interface RemoteAccessWorkflowsProps {
   subview: RemoteAccessSubviewId;
@@ -169,6 +198,7 @@ function HostSetup({ controller }: { controller: RemoteAccessController }) {
               )}
               <Button type="button" size="sm" onClick={controller.setupHost} loading={controller.busy} disabled={!controller.validation.setupPort || !controller.validation.manualBaseUrl}>Create Connection Code</Button>
             </div>
+            <SetupSteps controller={controller} />
             {activeCode && (
               <button
                 type="button"
