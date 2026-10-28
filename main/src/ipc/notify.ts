@@ -137,11 +137,19 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
     machine: machineName(),
     publish: (state) => getPaneEventSink().send('notify:shared-changed', state),
     sendToHost: async (command) => {
-      await remotePaneClientController.invoke('notify:remote-command', [command], () => Promise.reject(new PaneError(
+      const send = () => remotePaneClientController.invoke('notify:remote-command', [command], () => Promise.reject(new PaneError(
         'ERR_NOTIFY_NOT_CONNECTED',
         'This Pane is no longer connected to the host that asked. Nothing was sent.',
         'Reconnect to that host, then answer again.',
       )));
+      try {
+        await send();
+      } catch (error) {
+        // While the connection restores, the host's questions already show but commands wait.
+        // ERR_REMOTE_OFFLINE means nothing was sent, so the answer goes once it is connected.
+        if (!(error instanceof PaneError && error.code === 'ERR_REMOTE_OFFLINE') || !(await connectedAfterRestore())) throw error;
+        await send();
+      }
     },
     refreshHost: () => void refreshHost(),
     // Every question buzzes each phone with Needs Input on (D-7), on a desktop or a headless host.
@@ -157,6 +165,26 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
       const target: PaneLinkTarget = panelId ? { kind: 'pane', paneId, panelId } : { kind: 'pane', paneId };
       if (window && !window.isDestroyed()) window.webContents.send('pane:open-link', target);
     },
+  });
+
+  /** Waits up to 15 s for a connection that is restoring to finish; false if it isn't restoring or doesn't. */
+  const connectedAfterRestore = () => new Promise<boolean>((resolve) => {
+    if (remotePaneClientController.getConnectionState().status !== 'restoring') {
+      resolve(false);
+      return;
+    }
+    const done = (connected: boolean) => {
+      clearTimeout(timer);
+      remotePaneClientController.off('state-changed', check);
+      resolve(connected);
+    };
+    const check = () => {
+      const { status } = remotePaneClientController.getConnectionState();
+      if (status === 'connected') done(true);
+      else if (status !== 'restoring') done(false);
+    };
+    const timer = setTimeout(() => done(false), 15_000);
+    remotePaneClientController.on('state-changed', check);
   });
 
   // On a screen connected to another Pane: that host's questions show beside this machine's own.

@@ -4,6 +4,7 @@ import { PaneCommandRegistry } from '../daemon/commandRegistry';
 import { remotePaneClientController } from '../daemon/client/remotePaneClient';
 import { NotifyQueue } from '../services/notify/notifyQueue';
 import { registerNotifyHandlers } from './notify';
+import { PaneError } from '../../../shared/paneError';
 import { ConfigManager } from '../services/configManager';
 import { DEFAULT_NOTIFY_SETTINGS, type NotifyRemoteCommand, type NotifyResult, type NotifySharedState } from '../../../shared/types/notify';
 import type { RemotePaneConnectionState } from '../../../shared/types/remoteDaemon';
@@ -113,6 +114,36 @@ describe('Notify across machines, through the registered handlers', () => {
     await flush();
     expect(client.notify.snapshot().items[0].unreachable).toBeUndefined();
     await client.notify.run({ type: 'answer', id: question.id, answer: { approved: true } });
+    expect(host.snapshot().items[0]).toMatchObject({ state: 'sent', answeredOn: 'parsa-air' });
+    host.dispose();
+    client.notify.dispose();
+  });
+
+  it('sends an answer given while the connection is still restoring once it is connected', async () => {
+    const host = new NotifyQueue({ settings: () => DEFAULT_NOTIFY_SETTINGS, showOutsideSupported: true, shortcutRegistered: () => true, instructionFiles: () => [], machine: 'mac-studio' });
+    let state: RemotePaneConnectionState = { ...connected, status: 'restoring' };
+    vi.spyOn(remotePaneClientController, 'isRemoteModeActive').mockReturnValue(true);
+    vi.spyOn(remotePaneClientController, 'getConnectionState').mockImplementation(() => state);
+    vi.spyOn(remotePaneClientController, 'invoke').mockImplementation((channel: string, args: unknown[]) => {
+      if (channel === 'notify:remote-snapshot') return Promise.resolve(host.sharedState());
+      if (state.status !== 'connected') return Promise.reject(new PaneError('ERR_REMOTE_OFFLINE', 'The action was not sent while the workspace is disconnected or restoring.'));
+      // SAFETY: Notify sends only NotifyRemoteCommand on notify:remote-command.
+      host.runRemote(args[0] as NotifyRemoteCommand, 'parsa-air');
+      return Promise.resolve(null);
+    });
+    host.on('change', () => remotePaneClientController.emit('notify-shared', host.sharedState()));
+    void host.ask({ question: { ui: 'approve', title: 'Ship the hotfix tonight?' }, source: { name: 'api', agent: 'Claude' } });
+    const client = await startPane();
+    remotePaneClientController.emit('resync');
+    await flush();
+    const [question] = client.notify.snapshot().items;
+
+    const answering = client.notify.run({ type: 'answer', id: question.id, answer: { approved: true } });
+    await flush();
+    expect(host.snapshot().items[0].state).toBe('waiting');
+    state = connected;
+    remotePaneClientController.emit('state-changed');
+    await answering;
     expect(host.snapshot().items[0]).toMatchObject({ state: 'sent', answeredOn: 'parsa-air' });
     host.dispose();
     client.notify.dispose();
