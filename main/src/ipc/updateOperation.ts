@@ -18,6 +18,9 @@ import { PaneError } from '../../../shared/paneError';
 import { createDefaultRemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
 import { checkpointUpdatePanel, checkpointSchema } from '../services/updateContinuation';
 import { readUpdateJournal, writeUpdateJson } from '../../../packages/runpane/src/updateOperation';
+import { getAutoUpdater } from '../autoUpdater';
+import { getUpdateCapabilities } from '../utils/updateCapabilities';
+import { MAC_UPDATE_COMMAND } from './updater';
 
 const bootId = randomUUID();
 const requestSchema = boundary.object({ id: boundary.nonEmptyString, bootId: boundary.nonEmptyString });
@@ -115,6 +118,23 @@ export function registerUpdateOperationHandlers(services: AppServices, registry:
       await terminalPanelManager.initializeTerminal(panel, cwd, context, 1, undefined, operationId);
     },
     verify: async (panelId, resumeId) => agentChatManager.manages(panelId) ? agentChatManager.verifyNativeResume(panelId, resumeId) : terminalPanelManager.verifyUpdateResume(panelId, resumeId),
+  });
+  // runpane update hands off here when this host cannot run the independent
+  // update (no standalone Node, an unwritable install, the bundled CLI). It is
+  // the Settings Update button: download, then quit and install.
+  registry.register('runpane:update:in-app', async () => {
+    if (isRemotePaneCommand()) throw new PaneError('ERR_UPDATE_LOCAL_ONLY', 'In-app update requires a local command on this host. Nothing was changed.', 'Run runpane update through the owning workspace shell.');
+    const current = services.app.getVersion();
+    if (!services.app.isPackaged) throw new PaneError('ERR_UPDATE_IN_APP_UNAVAILABLE', `In-app update is unsupported in a development build (Pane ${current}). Nothing was changed.`, 'Use a packaged Pane installation.');
+    const capabilities = await getUpdateCapabilities({ platform: process.platform, isPackaged: true, executablePath: process.execPath });
+    if (capabilities.mode === 'manual') throw new PaneError('ERR_UPDATE_IN_APP_UNAVAILABLE', `In-app update is unsupported for this copy of Pane ${current} (${capabilities.reason}). Nothing was changed.`, `Run \`${MAC_UPDATE_COMMAND}\` in a terminal.`);
+    const updater = getAutoUpdater();
+    const check = await updater.checkForUpdates();
+    if (!check?.isUpdateAvailable) return { state: 'current', fromVersion: current, version: current };
+    await updater.downloadUpdate();
+    // Reply before quitting so the CLI hears that the install started.
+    setTimeout(() => updater.quitAndInstall(false, true), 1000);
+    return { state: 'installing', fromVersion: current, version: check.updateInfo.version };
   });
   registry.register('runpane:update:restore', async (value: PaneCommandValue) => {
     if (isRemotePaneCommand()) throw new PaneError('ERR_UPDATE_LOCAL_ONLY', 'Update restoration requires a local command.', 'Run it on the owning machine.');

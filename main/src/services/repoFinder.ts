@@ -1,8 +1,10 @@
+import { spawn } from 'child_process';
 import { readFile, readdir, stat } from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { CommandRunner } from '../utils/commandRunner';
 import { escapeForBash, linuxToUNCPath } from '../utils/wslUtils';
+import { claudeConfigPath } from './loops/claudeFolderTrust';
 import { ShellDetector } from '../utils/shellDetector';
 import { agentPresetsForPlatform } from '../../../shared/constants/agentLaunchPresets';
 import { PaneError } from '../../../shared/paneError';
@@ -39,7 +41,8 @@ const HOME_CODE_FOLDERS = [
   'Documents/GitHub', 'source/repos', 'work', 'workspace',
 ];
 const WINDOWS_DRIVE_CODE_FOLDERS = ['code', 'dev', 'src', 'projects', 'repos'];
-const LOG_FORMAT = '--format=%ct%n%D';
+// --no-show-signature: a scanned repo's own config must not make git log run its gpg.program.
+const LOG_ARGS = ['log', '-1', '--no-show-signature', '--format=%ct%n%D'];
 const MARK = '@@PANE-FINDER@@';
 
 /** Absolute-path keys of `projects` in Claude Code's ~/.claude.json. */
@@ -118,12 +121,20 @@ function rankRepos(records: GitRecord[], options: RankOptions): FoundRepo[] {
     .slice(0, MAX_REPOS);
 }
 
-function orderedCandidates(claude: string[], codex: string[], folders: string[]): Candidate[] {
-  return [
-    ...claude.map(candidatePath => ({ path: candidatePath, source: 'claude_config' as const })),
-    ...codex.map(candidatePath => ({ path: candidatePath, source: 'codex_config' as const })),
+/** Agent-config projects newest first (both agents append new ones), then code folders, each path once. */
+function orderedCandidates(claude: string[], codex: string[], folders: string[], key: (value: string) => string): Candidate[] {
+  const all: Candidate[] = [
+    ...[...claude].reverse().map(candidatePath => ({ path: candidatePath, source: 'claude_config' as const })),
+    ...[...codex].reverse().map(candidatePath => ({ path: candidatePath, source: 'codex_config' as const })),
     ...folders.map(candidatePath => ({ path: candidatePath, source: 'code_folder' as const })),
   ];
+  const seen = new Set<string>();
+  return all.filter(candidate => {
+    const candidateKey = key(candidate.path);
+    if (seen.has(candidateKey)) return false;
+    seen.add(candidateKey);
+    return true;
+  });
 }
 
 async function readText(file: string): Promise<string | null> {
@@ -202,6 +213,11 @@ export async function findHostRepos(options: HostFinderOptions = {}): Promise<Fo
   const env = options.env ?? process.env;
   const platform = options.platform ?? process.platform;
   const pathApi = platform === 'win32' ? path.win32 : path.posix;
+  const caseInsensitive = platform === 'win32' || platform === 'darwin';
+  const key = (value: string) => {
+    const resolved = pathApi.resolve(value);
+    return caseInsensitive ? resolved.toLowerCase() : resolved;
+  };
 
   const folderRoots = HOME_CODE_FOLDERS.map(folder => path.join(home, folder));
   if (platform === 'win32') {
@@ -209,19 +225,27 @@ export async function findHostRepos(options: HostFinderOptions = {}): Promise<Fo
     folderRoots.push(...WINDOWS_DRIVE_CODE_FOLDERS.map(folder => `${drive}\\${folder}`));
   }
   const [claudeText, codexText, folderChildren] = await Promise.all([
-    readText(path.join(env.CLAUDE_CONFIG_DIR || home, '.claude.json')),
+    readText(claudeConfigPath(env, home)),
     readText(path.join(env.CODEX_HOME || path.join(home, '.codex'), 'config.toml')),
     Promise.all(folderRoots.map(gitChildren)),
   ]);
 
-  const candidates = orderedCandidates(claudeProjectPaths(claudeText), codexProjectPaths(codexText), folderChildren.flat());
+  const candidates = orderedCandidates(claudeProjectPaths(claudeText), codexProjectPaths(codexText), folderChildren.flat(), key);
+  // A candidate inside a repo already found (a worktree or subfolder key) costs no git calls.
+  const foundRoots: string[] = [];
+  const homeKey = key(home);
+  const isInFoundRoot = (candidatePath: string) => {
+    const candidateKey = key(candidatePath);
+    return foundRoots.some(root => candidateKey === root || candidateKey.startsWith(root + pathApi.sep));
+  };
   const records = await runWithinBudget(candidates.map(candidate => async (): Promise<GitRecord | null> => {
-    if (!await isDirectory(candidate.path)) return null;
+    if (isInFoundRoot(candidate.path) || !await isDirectory(candidate.path)) return null;
     const runner = new CommandRunner({ path: candidate.path, wsl_enabled: false });
     const timeout = Math.max(1, deadline - Date.now());
     const commonDir = (await runner.execFile('git', ['rev-parse', '--git-common-dir'], candidate.path, { silent: true, timeout })).stdout;
     const resolved = pathApi.resolve(candidate.path, commonDir.trim());
-    const log = await runner.execFile('git', ['--git-dir', resolved, 'log', '-1', LOG_FORMAT], candidate.path, { silent: true, timeout })
+    if (pathApi.basename(resolved) === '.git' && key(pathApi.dirname(resolved)) !== homeKey) foundRoots.push(key(pathApi.dirname(resolved)));
+    const log = await runner.execFile('git', ['--git-dir', resolved, ...LOG_ARGS], candidate.path, { silent: true, timeout })
       .then(result => result.stdout, () => '');
     return { candidate, commonDir, log };
   }), deadline);
@@ -229,7 +253,7 @@ export async function findHostRepos(options: HostFinderOptions = {}): Promise<Fo
   return rankRepos(records, {
     pathApi,
     home,
-    caseInsensitive: platform === 'win32' || platform === 'darwin',
+    caseInsensitive,
     excluded: options.excluded ?? [],
     toOpenPath: root => root,
   });
@@ -238,10 +262,16 @@ export async function findHostRepos(options: HostFinderOptions = {}): Promise<Fo
 /** What the first screen needs about this computer: its repos, its shells, and its default WSL distro. */
 export async function findHostRepoContext(options: HostFinderOptions & { getDefaultWslDistro: () => Promise<string | undefined> }): Promise<HostRepos> {
   const isWindows = (options.platform ?? process.platform) === 'win32';
+  let timer: NodeJS.Timeout | undefined;
+  // A slow wsl.exe must not hold the Windows column past its budget.
+  const distroWithinBudget = async () => Promise.race([
+    options.getDefaultWslDistro(),
+    new Promise<undefined>(resolve => { timer = setTimeout(() => resolve(undefined), options.budgetMs ?? HOST_BUDGET_MS); }),
+  ]);
   const [repos, wslDistro] = await Promise.all([
     findHostRepos(options),
-    isWindows ? options.getDefaultWslDistro() : Promise.resolve(undefined),
-  ]);
+    isWindows ? distroWithinBudget() : Promise.resolve(undefined),
+  ]).finally(() => clearTimeout(timer));
   return { repos, shells: isWindows ? shortShellNames() : [], wslDistro: wslDistro ?? null };
 }
 
@@ -258,29 +288,52 @@ function lines(text: string): string[] {
 }
 
 /**
+ * Runs a bash login script in a distro and returns its output, or what it had
+ * printed when time ran out. `--exec` hands bash the script as one argument;
+ * `wsl.exe --` would let the distro's default shell expand it first. A login
+ * shell, so agents on a PATH set in shell profiles are found.
+ */
+function runWslScript(distro: string, script: string, input: string, timeoutMs: number): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = spawn('wsl.exe', ['-d', distro, '--exec', 'bash', '-lc', script], { windowsHide: true });
+    let stdout = '';
+    const timer = setTimeout(() => {
+      child.kill();
+      resolve(stdout);
+    }, Math.max(0, timeoutMs));
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk: string) => { stdout += chunk; });
+    child.on('error', error => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.on('close', () => {
+      clearTimeout(timer);
+      resolve(stdout);
+    });
+    child.stdin.on('error', () => { /* bash exited before reading its input */ });
+    child.stdin.end(input);
+  });
+}
+
+/**
  * Repos inside a WSL distribution, read in two calls into the distro (one for
  * the config files, folders and agents, one for git), never one per repo.
  */
 export async function findWslRepos(distro: string, options: { excluded?: string[]; budgetMs?: number } = {}): Promise<WslRepos> {
   const deadline = Date.now() + (options.budgetMs ?? WSL_BUDGET_MS);
-  const runner = new CommandRunner({ path: '/', wsl_enabled: true, wsl_distribution: distro });
-  const run = async (script: string) => {
-    const timeout = deadline - Date.now();
-    if (timeout <= 0) throw new Error('time budget spent');
-    // A login shell, so agents on a PATH set in shell profiles are found.
-    return (await runner.execFile('bash', ['-lc', script], '/', { silent: true, timeout })).stdout;
-  };
   const presets = agentPresetsForPlatform('wsl').map(preset => ({ title: preset.title, binary: preset.command.split(' ')[0] }));
   const folders = HOME_CODE_FOLDERS.map(folder => `"$HOME"/${escapeForBash(folder)}/*/`).join(' ');
 
-  const first = await run([
+  const first = await runWslScript(distro, [
     `printf '${MARK}home\\n%s\\n' "$HOME"`,
     `printf '${MARK}claude\\n'; cat "\${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json" 2>/dev/null; echo`,
     `printf '${MARK}codex\\n'; cat "\${CODEX_HOME:-$HOME/.codex}/config.toml" 2>/dev/null; echo`,
     `printf '${MARK}folders\\n'; for c in ${folders}; do [ -e "$c.git" ] && printf '%s\\n' "\${c%/}"; done`,
     `printf '${MARK}agents\\n'; for a in ${presets.map(preset => escapeForBash(preset.binary)).join(' ')}; do command -v "$a" >/dev/null 2>&1 && printf '%s\\n' "$a"; done`,
     `printf '${MARK}end\\n'`,
-  ].join('\n'));
+  ].join('\n'), '', deadline - Date.now());
+  if (!first.includes(`${MARK}end\n`)) throw new Error(`WSL ${distro} did not answer in time`);
 
   const home = lines(section(first, 'home'))[0] ?? '/';
   const foundBinaries = new Set(lines(section(first, 'agents')));
@@ -289,18 +342,20 @@ export async function findWslRepos(distro: string, options: { excluded?: string[
     claudeProjectPaths(section(first, 'claude')).filter(candidate => candidate.startsWith('/')),
     codexProjectPaths(section(first, 'codex')).filter(candidate => candidate.startsWith('/')),
     lines(section(first, 'folders')),
+    value => path.posix.resolve(value),
   );
 
   let records: GitRecord[] = [];
   if (candidates.length > 0) {
+    // Candidates arrive on stdin, one per line, so no list outgrows the command line.
     // One record per candidate: the marker, the candidate, its common dir, then git log's two lines.
-    const second = await run(`for c in ${candidates.map(candidate => escapeForBash(candidate.path)).join(' ')}; do
+    const second = await runWslScript(distro, `while IFS= read -r c; do
   [ -d "$c" ] || continue
-  g=$(git -C "$c" rev-parse --git-common-dir 2>/dev/null) || continue
+  g=$(git -C "$c" rev-parse --git-common-dir 2>/dev/null </dev/null) || continue
   case "$g" in /*) ;; *) g="$c/$g" ;; esac
   printf '${MARK}\\n%s\\n%s\\n' "$c" "$g"
-  git --git-dir="$g" log -1 ${LOG_FORMAT} 2>/dev/null
-done`);
+  git --git-dir="$g" ${LOG_ARGS.join(' ')} 2>/dev/null </dev/null
+done`, candidates.map(candidate => `${candidate.path}\n`).join(''), deadline - Date.now());
     const byPath = new Map(candidates.map(candidate => [candidate.path, candidate]));
     records = second.split(`${MARK}\n`).slice(1).flatMap((block): GitRecord[] => {
       const [candidatePath = '', commonDir = '', ...log] = block.split('\n');

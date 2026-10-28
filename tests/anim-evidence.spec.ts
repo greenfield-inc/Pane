@@ -154,11 +154,11 @@ test.describe('animation evidence', () => {
     await capture(
       browser,
       'command-palette-open',
-      'Cmd+Shift+P opens the command palette',
+      'Cmd+Shift+P opens Search',
       async () => {},
       async (page) => {
         await page.keyboard.press('Meta+Shift+P');
-        await expect(page.getByPlaceholder('Search commands…')).toBeVisible();
+        await expect(page.getByRole('combobox', { name: 'Search' })).toBeVisible();
       },
       (page) => boxOf(page, '[role="dialog"]', 48),
     );
@@ -171,7 +171,7 @@ test.describe('animation evidence', () => {
       'Arrow keys move the selection through the command list',
       async (page) => {
         await page.keyboard.press('Meta+Shift+P');
-        await expect(page.getByPlaceholder('Search commands…')).toBeVisible();
+        await expect(page.getByRole('combobox', { name: 'Search' })).toBeVisible();
       },
       async (page) => {
         for (let i = 0; i < 6; i += 1) {

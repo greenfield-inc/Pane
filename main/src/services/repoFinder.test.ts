@@ -1,10 +1,10 @@
 import { execFileSync } from 'child_process';
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'fs';
 import os from 'os';
 import path from 'path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PaneError } from '../../../shared/paneError';
-import { checkRepoFolder, codexProjectPaths, findHostRepos } from './repoFinder';
+import { checkRepoFolder, codexProjectPaths, findHostRepos, findWslRepos } from './repoFinder';
 
 let home: string;
 
@@ -84,7 +84,8 @@ describe('findHostRepos', () => {
   });
 
   it('counts a linked worktree as its repo and leaves out excluded repos and home', async () => {
-    const main = makeRepo('code/acme-web', '2026-10-20T10:00:00Z');
+    // Outside the code folders, so only the worktree's config key can find it.
+    const main = makeRepo('elsewhere/acme-web', '2026-10-20T10:00:00Z');
     git(main, ['worktree', 'add', '-q', '-b', 'feature', path.join(main, 'worktrees', 'feature')]);
     const sample = makeRepo('pane-data/projects/Pane', '2026-10-26T10:00:00Z');
     git(home, ['init', '-q']);
@@ -105,6 +106,36 @@ describe('findHostRepos', () => {
 
     expect(repos).toEqual([]);
     expect(Date.now() - started).toBeLessThan(1000);
+  });
+});
+
+// Real WSL runs `wsl.exe -d <distro> --exec bash -lc <script>` as bash with that argv.
+// This stand-in does the same on macOS and Linux; Windows has the real wsl.exe.
+describe.skipIf(process.platform === 'win32')('findWslRepos', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('lists the distro repos as UNC paths and names the agents on its PATH', async () => {
+    const bin = path.join(home, 'bin');
+    mkdirSync(bin);
+    writeFileSync(path.join(bin, 'wsl.exe'), '#!/bin/sh\n[ "$1 $3" = "-d --exec" ] || exit 1\nshift 3\nexec "$@"\n');
+    writeFileSync(path.join(bin, 'opencode'), '#!/bin/sh\n');
+    chmodSync(path.join(bin, 'wsl.exe'), 0o755);
+    chmodSync(path.join(bin, 'opencode'), 0o755);
+    makeRepo('dev/acme-web', '2026-10-26T10:00:00Z');
+    const fromClaude = makeRepo('elsewhere/infra', '2026-10-25T10:00:00Z', 'develop');
+    writeFileSync(path.join(home, '.claude.json'), JSON.stringify({ projects: { [fromClaude]: {} } }));
+    vi.stubEnv('HOME', home);
+    vi.stubEnv('PATH', `${bin}${path.delimiter}${process.env.PATH ?? ''}`);
+
+    const result = await findWslRepos('Ubuntu', { budgetMs });
+
+    expect(result.agents).toContain('OpenCode');
+    expect(result.repos.map(repo => [repo.name, repo.path, repo.displayPath, repo.branch, repo.source])).toEqual([
+      ['acme-web', `\\\\wsl.localhost\\Ubuntu${path.join(home, 'dev', 'acme-web').replace(/\//g, '\\')}`, '~/dev/acme-web', 'main', 'code_folder'],
+      ['infra', `\\\\wsl.localhost\\Ubuntu${fromClaude.replace(/\//g, '\\')}`, '~/elsewhere/infra', 'develop', 'claude_config'],
+    ]);
   });
 });
 

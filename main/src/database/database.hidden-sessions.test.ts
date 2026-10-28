@@ -154,3 +154,22 @@ describe('permanent archived session deletion', () => {
     db.close();
   });
 });
+
+describe('archived session ids', () => {
+  it('lists at most the limit, leaving out the excluded projects', () => {
+    const { db, tempDir } = createTestDatabase();
+    const own = db.createProject('Own', path.join(tempDir, 'own'));
+    const sample = db.createProject('Sample', path.join(tempDir, 'sample'));
+    for (const [id, projectId] of [['own-a', own.id], ['own-b', own.id], ['own-c', own.id], ['sample-a', sample.id]] as const) {
+      db.createSession({ id, name: id, initial_prompt: '', worktree_name: id, worktree_path: path.join(tempDir, id), project_id: projectId, tool_type: 'none' });
+      db.archiveSession(id);
+    }
+    db.createSession({ id: 'own-active', name: 'own-active', initial_prompt: '', worktree_name: 'own-active', worktree_path: path.join(tempDir, 'own-active'), project_id: own.id, tool_type: 'none' });
+
+    expect(db.getArchivedSessionIds(10, [sample.id]).sort()).toEqual(['own-a', 'own-b', 'own-c']);
+    expect(db.getArchivedSessionIds(2, [sample.id])).toHaveLength(2);
+    expect(db.getArchivedSessionIds(10).sort()).toEqual(['own-a', 'own-b', 'own-c', 'sample-a']);
+
+    db.close();
+  });
+});

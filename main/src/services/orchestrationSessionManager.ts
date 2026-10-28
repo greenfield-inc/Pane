@@ -48,6 +48,7 @@ import {
   normalizePaneChatAgent,
   PANE_CHAT_AGENT_LABELS,
   PANE_CHAT_SESSION_ID,
+  PANE_ONE_TIME_PROMPT_OPENING,
   type PaneChatAgent,
 } from '../../../shared/types/paneChat';
 import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
@@ -253,6 +254,7 @@ export class OrchestrationSessionManager extends EventEmitter {
         launchCommand,
         customResume,
         resume: input.resume,
+        openingPrompt: input.openingPrompt?.trim() || undefined,
         profile: input.profile ?? this.configManager.getConfig().defaultSessionProfile ?? DEFAULT_SESSION_PROFILE,
         internalSessionId,
         panelIds: {
@@ -1018,12 +1020,40 @@ export class OrchestrationSessionManager extends EventEmitter {
     };
   }
 
-  /** Only the built-in Pane Chat ever speaks first; see paneChatMigrateOffer. */
+  /**
+   * A Session speaks first only with the opening prompt it was created with, or, for the
+   * built-in Pane Chat, the migrate offer (see paneChatMigrateOffer).
+   */
   private firstPrompt(record: OrchestrationSessionRecord): string | undefined {
-    if (record.id !== LEGACY_ORCHESTRATION_SESSION_ID || record.customResume) return undefined;
+    if (record.customResume) return undefined;
+    if (record.openingPrompt) {
+      // The prompt belongs to the Session: once any of its agent tabs sent it, no tab sends it again.
+      const sent = Object.values(record.panelIds).some(panelId => {
+        // SAFETY: Session-owned terminal panels persist TerminalPanelState as their custom state.
+        const state = panelManager.getPanel(panelId)?.state.customState as TerminalPanelState | undefined;
+        return state?.initialInput === record.openingPrompt && Boolean(state?.initialInputSentAt);
+      });
+      if (!sent) return record.openingPrompt;
+      this.forgetOpeningPrompt(record);
+      return undefined;
+    }
+    if (record.id !== LEGACY_ORCHESTRATION_SESSION_ID) return undefined;
     // SAFETY: Session-owned terminal panels persist TerminalPanelState as their custom state.
     const current = panelManager.getPanel(record.panelIds[record.agent])?.state.customState as TerminalPanelState | undefined;
     return paneChatFirstPrompt(record.agent, current, this.skillCacheManager?.paneChatSkillsRoot);
+  }
+
+  /**
+   * A terminal sent the opening prompt. Its own sent marker does not survive a later
+   * rebuild of the launch state, so the record drops the prompt for good.
+   */
+  private forgetOpeningPrompt(record: OrchestrationSessionRecord): void {
+    delete record.openingPrompt;
+    const data = this.store.read();
+    this.store.write({
+      ...data,
+      sessions: data.sessions.map(session => session.id === record.id ? { ...session, openingPrompt: undefined } : session),
+    });
   }
 
   private async ensureGuidePath(): Promise<string> {
@@ -1190,6 +1220,14 @@ function validateCreateInput(input: OrchestrationSessionCreateInput): void {
   if (input.resume !== undefined) {
     if (!/^[A-Za-z0-9._:-]{1,200}$/.test(input.resume)) throw new Error('Session resume must be a native session id');
     if (input.customResume) throw new Error('A Session resumes either a native session id or a custom resume command, not both');
+  }
+  if (input.openingPrompt !== undefined) {
+    if (input.resume !== undefined || input.customResume) {
+      throw new PaneError('ERR_SESSION_OPENING_PROMPT', 'A resumed conversation cannot take an opening prompt; the Session was not created.', 'Create the Session without resume, or without the opening prompt.');
+    }
+    if (!input.openingPrompt.trim().startsWith(PANE_ONE_TIME_PROMPT_OPENING)) {
+      throw new PaneError('ERR_SESSION_OPENING_PROMPT', `A Session's opening prompt must begin with "${PANE_ONE_TIME_PROMPT_OPENING}" so its launch sends it only once; the Session was not created.`, `Start the opening prompt with "${PANE_ONE_TIME_PROMPT_OPENING}".`);
+    }
   }
   validateLinks(input.evidence, 'evidence');
   validateLinks(input.outputs, 'outputs');

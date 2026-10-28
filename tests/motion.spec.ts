@@ -47,11 +47,11 @@ async function openDesktop(page: Page): Promise<void> {
 }
 
 test.describe('motion', () => {
-  test('the command palette opens with no entrance animation', async ({ page }) => {
+  test('Search opens with no entrance animation', async ({ page }) => {
     await openDesktop(page);
 
     await page.keyboard.press('ControlOrMeta+Shift+P');
-    const input = page.getByPlaceholder('Search commands…');
+    const input = page.getByRole('combobox', { name: 'Search' });
     await expect(input).toBeVisible();
 
     // A hundred-times-a-day keyboard surface: any entrance reads as lag, so the

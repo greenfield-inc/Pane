@@ -1279,6 +1279,26 @@ describe('TerminalPanelManager hidden output delivery', () => {
     expect(ordinaryPrompt.commandToRun).toBe('codex --yolo "Read the guide and initialize Pane Chat."');
   });
 
+  it('never puts a startup prompt on a PowerShell or cmd command line, and drops it rather than typing it later', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    // Windows PowerShell drops the embedded quotes when it passes an argument to a native program,
+    // which would turn this repository name into agent options; typed later, it could reach a shell.
+    const prompt: TerminalPanelState = { initialInputMode: 'argument', initialInput: 'Repo demo" --dangerously-skip-permissions --append-system-prompt "$(Write-Output X);Write-Output Y' };
+
+    for (const shellType of ['powershell', 'pwsh.exe', 'cmd']) {
+      const codex = manager.resolveCliLaunchCommand('panel-1', 'codex --yolo', { agentType: 'codex', ...prompt }, shellType);
+      const claude = manager.resolveCliLaunchCommand('11111111-1111-4111-8111-111111111111', 'claude', { agentType: 'claude', ...prompt }, shellType);
+
+      expect(codex.commandToRun).toBe('codex --yolo');
+      expect(claude.commandToRun).toBe('claude --session-id 11111111-1111-4111-8111-111111111111');
+      for (const { customState } of [codex, claude]) {
+        expect(customState.initialInput).toBeUndefined();
+        expect(customState.initialInputSentAt).toBeUndefined();
+        expect(customState.initialInputError).toContain('The starting message was not sent');
+      }
+    }
+  });
+
   it('passes fresh Claude slash input as a quoted startup argument', () => {
     const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
 

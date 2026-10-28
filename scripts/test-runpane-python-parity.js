@@ -222,3 +222,53 @@ with patch('runpane.update.Path.is_file', return_value=True), patch('runpane.upd
   assert.equal(argv[argv.indexOf('--download-dir') + 1], 'custom cache');
   assert.ok(argv.includes('--pane-only'));
 });
+
+test('Python update without the engine refuses installer options before handing off, like the npm CLI', () => {
+  const cases = [['update', '--download-dir', 'downloads'], ['update', '--format', 'dmg']];
+  const output = JSON.parse(runPython(`
+import json, sys, tempfile
+from runpane import update
+from runpane.cli import parse_args
+calls = []
+update.invoke_daemon = lambda channel, *args, **kwargs: calls.append(channel)
+results = []
+for args in json.load(sys.stdin):
+    parsed = parse_args(args + ['--pane-dir', tempfile.mkdtemp()])
+    try:
+        update.run_update(parsed)
+        results.append('handed off')
+    except update.PaneDaemonClientError as error:
+        results.append([error.code, str(error)])
+print(json.dumps({'results': results, 'calls': calls}))
+`, cases));
+  const { parseRunpaneArgs } = require(path.join(root, 'packages/runpane/dist/commands'));
+  const { assertUpdateOptions } = require(path.join(root, 'packages/runpane/dist/updatePreflight'));
+  const nodeOutput = cases.map(args => {
+    try {
+      assertUpdateOptions(parseRunpaneArgs(args));
+      return 'accepted';
+    } catch (error) {
+      return [error.code, error.message];
+    }
+  });
+  assert.deepEqual(output, { results: nodeOutput, calls: [] });
+});
+
+test('Python update without the engine waits for the relaunched Pane with --wait', () => {
+  const stdout = runPython(`
+import json, tempfile
+from runpane import update
+from runpane.cli import parse_args
+versions = iter(['2.4.201', '2.4.201', '2.4.202'])
+def fake(channel, *args, **kwargs):
+    if channel == 'runpane:update:in-app':
+        return {'state': 'installing', 'fromVersion': '2.4.201', 'version': '2.4.202'}
+    return {'version': next(versions)}
+update.invoke_daemon = fake
+update.time.sleep = lambda seconds: None
+update.run_update(parse_args(['update', '--wait', '--json', '--pane-dir', tempfile.mkdtemp()]))
+print(json.dumps(next(versions, 'all versions read')))
+`, {});
+  assert.match(stdout, /"phase": "complete"/);
+  assert.equal(JSON.parse(stdout.split('\n').slice(-1)[0]), 'all versions read');
+});
