@@ -1,0 +1,97 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import * as Clipboard from 'expo-clipboard';
+import { Platform } from 'react-native';
+
+import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
+import { boundary, decodeOptionalBoundary } from '@shared/validation/boundaryDecoder';
+
+import { useActiveHost, useHostsStore } from '@/auth/hostsStore';
+import { secureStore } from '@/auth/secureStore';
+import { createDaemonClient, DEVICE_LABEL } from '@/daemon/createClient';
+import { invokeChannel } from '@/daemon/invoke';
+import { useComputers } from '@/features/computers/useComputers';
+
+import {
+  createGlassesPairingCode,
+  glassesDeviceName,
+  listGlassesOnComputers,
+  pairableComputers,
+  revokeGlassesOnComputers,
+  type GlassesInvoke,
+} from './glassesPairing';
+
+/** Computers where a revoke could not reach yet; retried each time Settings › Glasses opens. */
+const PENDING_REVOKES_KEY = 'pane.glasses.pendingRevokes';
+
+const invoke: GlassesInvoke = async (profile, channel, args) => {
+  const client = createDaemonClient(profile);
+  try {
+    return await invokeChannel(client, channel, args);
+  } finally {
+    client.disconnect();
+  }
+};
+
+async function readPending(): Promise<string[]> {
+  try {
+    return decodeOptionalBoundary(JSON.parse((await secureStore.getItem(PENDING_REVOKES_KEY)) ?? '[]'), boundary.array(boundary.string)) ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Settings › Glasses: the computers on this phone's Tailscale login, these glasses on each, and
+ * pairing and revoking across all of them at once.
+ */
+export function useGlasses() {
+  const queryClient = useQueryClient();
+  const active = useActiveHost();
+  const profiles = useHostsStore(state => state.profiles);
+  const directory: RemotePaneConnectionProfile | null = active?.tailnetMachine
+    ? active
+    : profiles.find(profile => profile.tailnetMachine) ?? null;
+  const machines = useComputers(directory);
+  const list = machines.data?.ok ? machines.data : null;
+  const { computers, skipped } = list ? pairableComputers(list.machines, list.domain, profiles) : { computers: [], skipped: [] };
+  const deviceName = glassesDeviceName(DEVICE_LABEL, Platform.OS === 'ios' ? 'ios' : 'android');
+  const names = computers.map(computer => computer.machine.name).join(',');
+
+  const paired = useQuery({
+    queryKey: [directory?.id ?? null, 'runpane:glasses:list', names],
+    enabled: computers.length > 0,
+    queryFn: async () => {
+      const pending = await readPending();
+      // A revoke that couldn't reach a computer earlier finishes once it answers.
+      const reachablePending = computers.filter(computer => pending.includes(computer.machine.name));
+      if (reachablePending.length > 0) {
+        const result = await revokeGlassesOnComputers(reachablePending, pending, deviceName, invoke);
+        await secureStore.setItem(PENDING_REVOKES_KEY, JSON.stringify(result.pending));
+      }
+      return { computers: await listGlassesOnComputers(computers, deviceName, invoke), pending: await readPending() };
+    },
+  });
+
+  const pair = useMutation({
+    mutationFn: async () => {
+      const result = await createGlassesPairingCode(computers, deviceName, invoke);
+      if (result.code) await Clipboard.setStringAsync(result.code);
+      return result;
+    },
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: [directory?.id ?? null, 'runpane:glasses:list'] }),
+  });
+
+  const revoke = useMutation({
+    mutationFn: async () => {
+      const result = await revokeGlassesOnComputers(computers, await readPending(), deviceName, invoke);
+      // Computers this phone can't see right now are revoked when they next answer.
+      const unseen = skipped.map(skip => skip.name);
+      const pending = [...new Set([...result.pending, ...unseen])].sort();
+      await secureStore.setItem(PENDING_REVOKES_KEY, JSON.stringify(pending));
+      return { revoked: result.revoked, pending };
+    },
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: [directory?.id ?? null, 'runpane:glasses:list'] }),
+  });
+
+  return { directory, machines, computers, skipped, deviceName, paired, pair, revoke };
+}

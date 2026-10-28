@@ -44,6 +44,10 @@ export default function SettingsScreen() {
         <ListRow testID="settings-voice" title="Voice" subtitle="Keys for dictation" trailing="chevron" onPress={() => router.push('/settings/voice')} />
       </ListSection>
 
+      <ListSection title="Wearables">
+        <ListRow testID="settings-glasses" title="Glasses" subtitle="Pane on Even G2" trailing="chevron" onPress={() => router.push('/settings/glasses')} />
+      </ListSection>
+
       {profile.tailnetMachine ? (
         <ListSection title="Notifications">
           <ListRow testID="notifications-code-required" title="Connect with a Code" subtitle="Pair this phone to receive alerts" trailing="chevron" onPress={() => router.push('/hosts/add')} />
