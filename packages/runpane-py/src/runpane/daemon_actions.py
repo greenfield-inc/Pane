@@ -10,7 +10,7 @@ from urllib.parse import urlencode
 from .daemon_client import invoke_daemon
 from .generated_contract import RUNPANE_CONTRACT
 
-LINK_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+LINK_ID = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$")
 REPO_ID = re.compile(r"^[1-9][0-9]{0,15}$")
 
 
