@@ -2576,7 +2576,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane watch --follow",
         "  runpane workspace list [--json]",
         "  runpane workspace <machine> read <path>",
-        "  runpane workspace <machine> write <path>          (content from stdin)",
+        "  runpane workspace <machine> write <path>          (content from --content or stdin)",
         "  runpane workspace <machine> exec -- <command>",
         "  runpane workspace <machine> <runpane command>      (any command that talks to Pane, e.g. sessions list --json)",
         "  runpane workspace enable|disable",
@@ -3730,13 +3730,14 @@ export const RUNPANE_CONTRACT = {
       ],
       "workspace write": [
         "Usage:",
-        "  runpane workspace [<machine>] write <path> [--json]",
+        "  runpane workspace [<machine>] write <path> [--content <text>] [--json]",
         "",
-        "Write stdin to a file on a machine on your tailnet, creating parent folders.",
+        "Write --content or stdin to a file on a machine on your tailnet, creating parent folders.",
         "",
         "Options:",
         "  <machine>                       Tailscale machine name, unique prefix, MagicDNS name, or Tailscale IP. Omit it to route a path that cannot exist here to the one joined machine it fits.",
         "  <path>                          Absolute path in any form.",
+        "  --content <text>                Text that replaces the file. Without it, stdin is written.",
         "  --json                          Print machine-readable output."
       ],
       "workspace exec": [
@@ -5197,7 +5198,7 @@ export const RUNPANE_CONTRACT = {
       ],
       "workspace write": [
         "Usage:",
-        "  runpane workspace [<machine>] write <path> [--json]",
+        "  runpane workspace [<machine>] write <path> [--content <text>] [--json]",
         "",
         "`runpane workspace write` ships in the npm package and the Pane app, not in the Python package.",
         "Run it with Node instead: npx --yes runpane@latest workspace write"
@@ -17285,7 +17286,7 @@ export const RUNPANE_CONTRACT = {
           {
             "name": "<machine>",
             "required": false,
-            "description": "Tailscale machine name, unique prefix, MagicDNS name, or Tailscale IP. Omit it to route a path that cannot exist here to the one joined machine it fits."
+            "description": "Tailscale machine name, unique prefix, MagicDNS name, or Tailscale IP. Omit it to let a --cwd that cannot exist here pick the one joined machine it fits."
           },
           {
             "name": "--cwd",
