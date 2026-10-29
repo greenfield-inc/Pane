@@ -5,6 +5,7 @@ import { syncSharedCredentials, type SharedCredentialHost, type SharedCredential
 
 import { useHostsStore } from '@/auth/hostsStore';
 import { createDaemonClient } from '@/daemon/createClient';
+import { requestPushRegistration } from '@/features/notifications/usePushSetup';
 
 const SYNC_DEBOUNCE_MS = 500;
 let timer: ReturnType<typeof setTimeout> | null = null;
@@ -41,7 +42,9 @@ async function run(): Promise<void> {
         apply: async credentials => { await client.invoke('credentials:shared:apply', [credentials]); },
       };
     });
-    await syncSharedCredentials(hosts);
+    // A computer that just got the push key can now register this phone.
+    const { updated } = await syncSharedCredentials(hosts);
+    if (updated > 0) requestPushRegistration();
   } finally {
     running = false;
     if (pending) {

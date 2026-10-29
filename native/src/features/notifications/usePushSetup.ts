@@ -13,7 +13,7 @@ import { createDaemonClient } from '@/daemon/createClient';
 import { isDemoProfile } from '@/features/demo/demoHost';
 
 import { devicePush, getInstallationId } from './device';
-import { registerEverywhere, type PushHost, type PushPreferences, type PushSetupResult } from './registration';
+import { createWriteGate, preferencesFrom, registerEverywhere, type PushHost, type PushPreferences, type PushSetupResult } from './registration';
 
 /** Per phone, not per computer: every computer gets the same switches. */
 const PREFERENCES_KEY = 'pane.native.pushPreferences';
@@ -22,6 +22,11 @@ const REGISTER_DEBOUNCE_MS = 500;
 
 interface PushState {
   preferences: PushPreferences;
+  /**
+   * `saved`: the phone's own switches, sent to every computer. `absent`: never chosen on this phone,
+   * so the first pass adopts what the computers had. `unreadable`: storage failed, so nothing is sent.
+   */
+  preferencesSource: 'saved' | 'absent' | 'unreadable';
   /** The last result per saved computer, by profile id. Missing means not checked yet. */
   results: Record<string, PushSetupResult>;
   setPreference(key: keyof PushPreferences, value: boolean): void;
@@ -29,12 +34,13 @@ interface PushState {
 
 export const usePushStore = create<PushState>(set => ({
   preferences: DEFAULT_PREFERENCES,
+  preferencesSource: 'absent',
   results: {},
   setPreference: (key, value) => {
     set(state => {
       const preferences = { ...state.preferences, [key]: value };
-      void secureStore.setItem(PREFERENCES_KEY, JSON.stringify(preferences)).catch(() => undefined);
-      return { preferences };
+      savePreferences(preferences);
+      return { preferences, preferencesSource: 'saved' };
     });
     requestPushRegistration();
   },
@@ -43,9 +49,17 @@ export const usePushStore = create<PushState>(set => ({
 const preferencesSchema = boundary.object({ needsInputEnabled: boundary.boolean, completedEnabled: boundary.boolean });
 // Registration waits for the saved switches, so a default never overwrites one turned off.
 const preferencesLoaded = secureStore.getItem(PREFERENCES_KEY).then(saved => {
-  const preferences = saved ? decodeOptionalBoundary(JSON.parse(saved), preferencesSchema) : undefined;
-  if (preferences) usePushStore.setState({ preferences });
-}).catch(() => undefined);
+  if (!saved) return;
+  const preferences = decodeOptionalBoundary(JSON.parse(saved), preferencesSchema);
+  usePushStore.setState(preferences ? { preferences, preferencesSource: 'saved' } : { preferencesSource: 'unreadable' });
+}).catch(() => usePushStore.setState({ preferencesSource: 'unreadable' }));
+
+function savePreferences(preferences: PushPreferences): void {
+  void secureStore.setItem(PREFERENCES_KEY, JSON.stringify(preferences)).catch(() => undefined);
+}
+
+/** Orders Sign Out after any registration write to that computer. */
+const gate = createWriteGate();
 
 let timer: ReturnType<typeof setTimeout> | null = null;
 let running = false;
@@ -73,10 +87,12 @@ async function run(): Promise<void> {
     usePushStore.setState(state => ({
       results: Object.fromEntries(Object.entries(state.results).filter(([id]) => saved.has(id))),
     }));
-    await registerEverywhere(devicePush, profiles.map(pushHost), usePushStore.getState().preferences, (id, result) => {
-      if (!useHostsStore.getState().profiles.some(profile => profile.id === id)) return;
+    const { preferences, preferencesSource } = usePushStore.getState();
+    const results = await registerEverywhere(devicePush, profiles.map(pushHost), preferencesSource === 'saved' ? preferences : null, (id, result) => {
+      if (!isSaved(id)) return;
       usePushStore.setState(state => ({ results: { ...state.results, [id]: result } }));
     });
+    if (preferencesSource !== 'saved') adoptPreferences(results, preferencesSource);
   } finally {
     running = false;
     if (pending) {
@@ -86,10 +102,32 @@ async function run(): Promise<void> {
   }
 }
 
+/**
+ * Shows the switches the computers already had. A phone that never chose them saves that as its
+ * own and sends it everywhere; one whose storage failed shows it without saving or sending.
+ */
+function adoptPreferences(results: Record<string, PushSetupResult>, source: 'absent' | 'unreadable'): void {
+  if (!Object.values(results).some(result => result.state === 'registered')) return;
+  const preferences = preferencesFrom(results);
+  if (source === 'unreadable') {
+    usePushStore.setState({ preferences });
+    return;
+  }
+  savePreferences(preferences);
+  usePushStore.setState({ preferences, preferencesSource: 'saved' });
+  const differs = Object.values(results).some(result => result.state === 'registered'
+    && (result.status.needsInputEnabled !== preferences.needsInputEnabled || result.status.completedEnabled !== preferences.completedEnabled));
+  if (differs) requestPushRegistration();
+}
+
+function isSaved(profileId: string): boolean {
+  return useHostsStore.getState().profiles.some(profile => profile.id === profileId);
+}
+
 function pushHost(profile: RemotePaneConnectionProfile): PushHost {
   // Registration needs no workspace stream: each call is one request to that computer.
   const client = createDaemonClient(profile);
-  return { profileId: profile.id, invoke: (channel, args) => invokeChannel(client, channel, args) };
+  return gate.host(profile.id, (channel, args) => invokeChannel(client, channel, args), () => isSaved(profile.id));
 }
 
 /**
@@ -119,9 +157,15 @@ export function PushRegistrationSync() {
   return null;
 }
 
-/** Best effort: stops this host from sending to this phone before its token is deleted. */
-export async function revokePush(client: Parameters<typeof invokeChannel>[0], hostProfileId: string): Promise<void> {
-  const revoke = getInstallationId().then(installationId =>
-    invokeChannel(client, 'mobile:push-revoke', [{ platform: devicePush.platform, installationId, hostProfileId }]));
-  await Promise.race([revoke, new Promise(resolve => setTimeout(resolve, 3_000))]).catch(() => undefined);
+/**
+ * Signs this phone out of a computer: stops its alerts here, best effort within 3 s, then
+ * `remove` forgets the profile. A registration already on its way lands before the revoke.
+ */
+export function signOutPush(profile: RemotePaneConnectionProfile, remove: () => void): Promise<void> {
+  const revoke = async () => {
+    const installationId = await getInstallationId();
+    await invokeChannel(createDaemonClient(profile), 'mobile:push-revoke', [{ platform: devicePush.platform, installationId, hostProfileId: profile.id }]);
+  };
+  const bounded = () => Promise.race([revoke(), new Promise(resolve => setTimeout(resolve, 3_000))]).then(() => undefined, () => undefined);
+  return gate.close(profile.id, bounded, remove);
 }

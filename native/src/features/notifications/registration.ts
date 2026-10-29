@@ -36,7 +36,8 @@ export type PushSetupResult =
  * token replaces the old one. The system permission prompt shows only once,
  * and only for a host that can deliver.
  */
-export async function registerForPush(deps: PushDeps, hostProfileId: string, preferences: PushPreferences): Promise<PushSetupResult> {
+/** `preferences` null: the phone hasn't settled its switches, so each computer keeps its own. */
+export async function registerForPush(deps: PushDeps, hostProfileId: string, preferences: PushPreferences | null): Promise<PushSetupResult> {
   const installationId = await deps.getInstallationId();
   try {
     const status = await deps.invoke<RemoteMobilePushStatus>('mobile:push-status', [{ platform: deps.platform, installationId }]);
@@ -61,7 +62,7 @@ export async function registerForPush(deps: PushDeps, hostProfileId: string, pre
   try {
     // notifyButtons: this build draws Notify's answer buttons (Pane app 1.1+).
     const status = await deps.invoke<RemoteMobilePushStatus>('mobile:push-register', [
-      { platform: deps.platform, token, installationId, hostProfileId, notifyButtons: true, ...preferences },
+      { platform: deps.platform, token, installationId, hostProfileId, notifyButtons: true, ...(preferences ?? {}) },
     ]);
     return status.provider === 'ready'
       ? { state: 'registered', status }
@@ -86,7 +87,7 @@ export interface PushHost {
 export async function registerEverywhere(
   deps: Omit<PushDeps, 'invoke'>,
   hosts: PushHost[],
-  preferences: PushPreferences,
+  preferences: PushPreferences | null,
   onResult: (profileId: string, result: PushSetupResult) => void = () => undefined,
 ): Promise<Record<string, PushSetupResult>> {
   const shared = { ...deps, requestPermission: once(deps.requestPermission), getDeviceToken: once(deps.getDeviceToken) };
@@ -99,12 +100,60 @@ export async function registerEverywhere(
   return results;
 }
 
-async function registerHost(deps: Omit<PushDeps, 'invoke'>, host: PushHost, preferences: PushPreferences): Promise<PushSetupResult> {
+async function registerHost(deps: Omit<PushDeps, 'invoke'>, host: PushHost, preferences: PushPreferences | null): Promise<PushSetupResult> {
   try {
     return await registerForPush({ ...deps, invoke: host.invoke }, host.profileId, preferences);
   } catch (error) {
     return { state: 'error', message: messageOf(error) };
   }
+}
+
+/**
+ * The phone's first switch values, from what its computers already had: a kind that any computer
+ * had off starts off, so adopting phone-wide switches never turns on an alert someone turned off.
+ */
+export function preferencesFrom(results: Record<string, PushSetupResult>): PushPreferences {
+  const statuses = Object.values(results).flatMap(result => (result.state === 'registered' ? [result.status] : []));
+  return {
+    needsInputEnabled: statuses.every(status => status.needsInputEnabled !== false),
+    completedEnabled: statuses.every(status => status.completedEnabled !== false),
+  };
+}
+
+/**
+ * Orders signing out of a computer after this phone's registration writes to it: a write already
+ * sent lands before the revoke, and none is sent once sign-out starts.
+ */
+export function createWriteGate() {
+  const writes = new Map<string, Promise<unknown>>();
+  const closing = new Set<string>();
+  return {
+    /** The computer, with its registration writes passing through the gate. `isSaved` turns false once sign-out removed it. */
+    host(profileId: string, invoke: PushDeps['invoke'], isSaved: () => boolean = () => true): PushHost {
+      return {
+        profileId,
+        invoke: <T>(channel: string, args: unknown[]): Promise<T> => {
+          if (channel !== 'mobile:push-register') return invoke<T>(channel, args);
+          if (closing.has(profileId) || !isSaved()) return Promise.reject(new Error('This phone is signing out of this computer.'));
+          const write = invoke<T>(channel, args);
+          writes.set(profileId, write);
+          void write.catch(() => undefined).finally(() => { if (writes.get(profileId) === write) writes.delete(profileId); });
+          return write;
+        },
+      };
+    },
+    /** Stops writes to the computer, waits for one in flight, revokes, then runs `done` (removing the profile). */
+    async close(profileId: string, revoke: () => Promise<void>, done: () => void = () => undefined): Promise<void> {
+      closing.add(profileId);
+      try {
+        await writes.get(profileId)?.catch(() => undefined);
+        await revoke();
+      } finally {
+        done();
+        closing.delete(profileId);
+      }
+    },
+  };
 }
 
 /** Shares one call between concurrent and later callers; a failure lets the next caller try again. */

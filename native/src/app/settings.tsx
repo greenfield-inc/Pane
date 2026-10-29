@@ -9,7 +9,7 @@ import { isDemoProfile } from '@/features/demo/demoHost';
 import { ConnectionStatus } from '@/features/hosts/ConnectionStatus';
 import { NotificationSettings } from '@/features/notifications/NotificationSettings';
 import { AppUpdateRow } from '@/features/updates/AppUpdateRow';
-import { revokePush } from '@/features/notifications/usePushSetup';
+import { signOutPush } from '@/features/notifications/usePushSetup';
 import { useTheme } from '@/theme';
 import { Icon, ListRow, ListSection, Screen } from '@/ui';
 
@@ -28,7 +28,7 @@ export default function SettingsScreen() {
       'Pane forgets this computer on this phone. Connect again to use it.',
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Sign Out', style: 'destructive', onPress: () => void revokePush(client, profile.id).then(() => remove(profile.id)) },
+        { text: 'Sign Out', style: 'destructive', onPress: () => void signOutPush(profile, () => void remove(profile.id)) },
       ],
     );
   };

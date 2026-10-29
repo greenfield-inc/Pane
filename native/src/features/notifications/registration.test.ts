@@ -4,7 +4,7 @@ import type { RemoteMobilePushStatus } from '@shared/types/remoteDaemon';
 
 import { RemoteAuthError } from '@shared/remoteClient';
 
-import { registerEverywhere, registerForPush, type PushDeps, type PushHost } from './registration';
+import { createWriteGate, preferencesFrom, registerEverywhere, registerForPush, type PushDeps, type PushHost } from './registration';
 
 const ready: RemoteMobilePushStatus = { platform: 'ios', registration: 'not-registered', provider: 'ready', code: 'PUSH_READY', message: 'APNs delivery is configured.' };
 const notConfigured: RemoteMobilePushStatus = { platform: 'ios', registration: 'not-registered', provider: 'missing-config', code: 'ERR_APNS_NOT_CONFIGURED', message: 'This host has no valid APNs configuration.' };
@@ -131,6 +131,62 @@ describe('registerEverywhere', () => {
     for (const computer of [mac, pc]) {
       expect(computer.invoke).toHaveBeenLastCalledWith('mobile:push-register', [expect.objectContaining({ token: 'rotated-token' })]);
     }
+  });
+
+
+  it('sends no switch values until the phone has its own, so a computer\'s Off stays off', async () => {
+    const mac = host('mac', { ...ready, registration: 'registered', needsInputEnabled: false, completedEnabled: false });
+    await registerEverywhere(device().deps, [mac.computer], null);
+    expect(mac.invoke).toHaveBeenCalledWith('mobile:push-register', [
+      { platform: 'ios', token: 'apns-token', installationId: 'install-1', hostProfileId: 'mac', notifyButtons: true },
+    ]);
+  });
+
+  it('starts the phone\'s switches off for any kind a computer already had off', () => {
+    const off = (needsInputEnabled: boolean, completedEnabled: boolean) => ({ state: 'registered' as const, status: { ...registered, needsInputEnabled, completedEnabled } });
+    expect(preferencesFrom({ mac: off(true, false), pc: off(false, true), down: { state: 'unreachable', message: 'offline' } }))
+      .toEqual({ needsInputEnabled: false, completedEnabled: false });
+    expect(preferencesFrom({ down: { state: 'unreachable', message: 'offline' } })).toEqual({ needsInputEnabled: true, completedEnabled: true });
+  });
+
+  it('never lands a registration on a computer after signing out of it', async () => {
+    const calls: string[] = [];
+    let releaseToken!: (token: string) => void;
+    const invoke = (async (channel: string) => {
+      calls.push(channel);
+      return channel === 'mobile:push-status' ? ready : registered;
+    }) as PushDeps['invoke'];
+    const gate = createWriteGate();
+    let saved = true;
+    const { deps } = device();
+    const pass = registerEverywhere({ ...deps, getDeviceToken: () => new Promise(resolve => { releaseToken = resolve; }) }, [gate.host('mac', invoke, () => saved)], allOn);
+    await vi.waitFor(() => expect(releaseToken).toBeDefined());
+
+    const signedOut = gate.close('mac', async () => { calls.push('mobile:push-revoke'); }, () => { saved = false; });
+    releaseToken('apns-token');
+    await Promise.all([pass, signedOut]);
+
+    expect(calls).toEqual(['mobile:push-status', 'mobile:push-revoke']);
+  });
+
+  it('revokes only after a registration already on its way has landed', async () => {
+    const calls: string[] = [];
+    let landRegistration!: () => void;
+    const invoke = ((channel: string) => {
+      if (channel === 'mobile:push-status') return Promise.resolve(ready);
+      calls.push('register sent');
+      return new Promise<unknown>(resolve => { landRegistration = () => { calls.push('register landed'); resolve(registered); }; });
+    }) as PushDeps['invoke'];
+    const gate = createWriteGate();
+    const pass = registerEverywhere(device().deps, [gate.host('mac', invoke)], allOn);
+    await vi.waitFor(() => expect(landRegistration).toBeDefined());
+
+    const signedOut = gate.close('mac', async () => { calls.push('revoke'); });
+    await Promise.resolve();
+    landRegistration();
+    await Promise.all([pass, signedOut]);
+
+    expect(calls).toEqual(['register sent', 'register landed', 'revoke']);
   });
 
 });
