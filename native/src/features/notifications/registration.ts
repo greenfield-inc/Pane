@@ -27,7 +27,8 @@ export type PushSetupResult =
   | { state: 'denied' }
   /** The phone could not connect to the computer. */
   | { state: 'unreachable'; message: string }
-  | { state: 'error'; message: string };
+  /** `code` is the host's error code when it sent one. */
+  | { state: 'error'; message: string; code?: string };
 
 /**
  * Registers this device for the host's "needs input" and "finished" alerts.
@@ -42,8 +43,8 @@ export async function registerForPush(deps: PushDeps, hostProfileId: string, pre
     if (status.provider !== 'ready') return { state: 'host-not-ready', provider: status.provider, message: status.message };
   } catch (error) {
     // A host that answered says why; anything else means the phone never reached it.
-    const answered = error instanceof RemoteAuthError || error instanceof RemoteRequestError;
-    return { state: answered ? 'error' : 'unreachable', message: messageOf(error) };
+    if (!(error instanceof RemoteAuthError || error instanceof RemoteRequestError)) return { state: 'unreachable', message: messageOf(error) };
+    return error.code ? { state: 'error', message: error.message, code: error.code } : { state: 'error', message: error.message };
   }
 
   let permission = await deps.getPermission();

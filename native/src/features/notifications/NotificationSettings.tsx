@@ -76,6 +76,11 @@ function present(profile: RemotePaneConnectionProfile, result: PushSetupResult |
       }
       return { summary: result.message, color: 'warning', onPress: () => explain(profile, result.message) };
     case 'error':
+      // A Pane from before codeless alerts refuses a phone that connected without a code.
+      if (result.code === 'ERR_MOBILE_PUSH_PAIRING_REQUIRED' && profile.tailnetMachine) {
+        const summary = 'Update Pane on this computer to get its alerts here.';
+        return { summary, color: 'warning', onPress: () => explain(profile, summary) };
+      }
       return { summary: result.message, color: 'danger', onPress: () => explain(profile, result.message) };
   }
 }

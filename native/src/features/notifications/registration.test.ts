@@ -117,7 +117,7 @@ describe('registerEverywhere', () => {
     const results = await registerEverywhere(device().deps, [offline, refused, mac.computer], allOn, id => reported.push(id));
     expect(results).toEqual({
       offline: { state: 'unreachable', message: 'Network request failed' },
-      teammate: { state: 'error', message: 'Only this computer\'s owner can get its alerts on a phone.' },
+      teammate: { state: 'error', message: 'Only this computer\'s owner can get its alerts on a phone.', code: 'ERR_MOBILE_PUSH_OWNER_REQUIRED' },
       mac: { state: 'registered', status: registered },
     });
     expect(reported.sort()).toEqual(['mac', 'offline', 'teammate']);
