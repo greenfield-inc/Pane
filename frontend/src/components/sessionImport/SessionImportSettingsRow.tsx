@@ -4,7 +4,7 @@ import { Button } from '../ui/Button';
 import { Modal, ModalBody } from '../ui/Modal';
 import { SettingRow } from '../settings/SettingRow';
 import { SessionImportCard, SESSION_IMPORT_TITLE } from './SessionImportCard';
-import { SESSION_IMPORT_HOME_RETIRED_PREFERENCE, type SessionImportScan } from '../../../../shared/types/sessionImport';
+import type { SessionImportScan } from '../../../../shared/types/sessionImport';
 
 /** AI & Agents → "Bring sessions into Pane": always reachable, opens the card in a dialog. */
 export function SessionImportSettingsRow() {
@@ -26,11 +26,7 @@ export function SessionImportSettingsRow() {
     }
   };
 
-  const close = (finished: boolean) => {
-    // A finished import retires the Home card too.
-    if (finished) void API.preferences.set(SESSION_IMPORT_HOME_RETIRED_PREFERENCE, 'true');
-    setScan(null);
-  };
+  const close = () => setScan(null);
 
   return (
     <>
@@ -44,7 +40,7 @@ export function SessionImportSettingsRow() {
       </SettingRow>
       <Modal
         isOpen={scan !== null}
-        onClose={() => { if (!busy) close(false); }}
+        onClose={() => { if (!busy) close(); }}
         size="md"
         ariaLabel={SESSION_IMPORT_TITLE}
         showCloseButton={false}

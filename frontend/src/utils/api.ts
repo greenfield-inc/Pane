@@ -196,10 +196,6 @@ export class API {
 
   // Bring sessions from other agent tools into Pane
   static sessionImport = {
-    async home() {
-      if (!isElectron()) return null;
-      return window.electronAPI.sessionImport.home();
-    },
     async scan() {
       if (!isElectron()) throw new Error('Electron API not available');
       return window.electronAPI.sessionImport.scan();

@@ -24,7 +24,6 @@ import OnboardingDialog, {
   ONBOARDING_REPO_SETUP_PREFERENCE,
   SupportPaneDialog,
 } from './components/OnboardingDialog';
-import { OPEN_FIRST_SCREEN_EVENT } from './components/FirstStepsCard';
 import { AboutDialog } from './components/AboutDialog';
 import { DocsDialog } from './components/DocsDialog';
 import { FeedbackDialog } from './components/FeedbackDialog';
@@ -729,12 +728,6 @@ function App() {
     // SAFETY: Same listener and event shape as registered above.
     return () => window.removeEventListener('session-deleted', handleSessionDeleted as EventListener);
   }, [showSupportPromptOnce]);
-
-  useEffect(() => {
-    const openFirstScreen = () => setIsOnboardingOpen(true);
-    window.addEventListener(OPEN_FIRST_SCREEN_EVENT, openFirstScreen);
-    return () => window.removeEventListener(OPEN_FIRST_SCREEN_EVENT, openFirstScreen);
-  }, []);
 
   useEffect(() => {
     if (

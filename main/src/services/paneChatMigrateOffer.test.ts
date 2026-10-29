@@ -1,7 +1,13 @@
 import path from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
-import { getPaneChatPanelId, PANE_CHAT_SESSION_ID, type PaneChatAgent } from '../../../shared/types/paneChat';
+import {
+  getPaneChatPanelId,
+  ONBOARDING_HANDOFF_PREFERENCE,
+  PANE_CHAT_SESSION_ID,
+  type OnboardingHandoff,
+  type PaneChatAgent,
+} from '../../../shared/types/paneChat';
 import type { TerminalPanelState } from '../../../shared/types/panels';
 import { LEGACY_ORCHESTRATION_SESSION_ID } from '../../../shared/types/orchestrationSession';
 import type { Session } from '../types/session';
@@ -105,7 +111,7 @@ async function launchWithFirstPrompt(agent: PaneChatAgent): Promise<void> {
 
 beforeEach(async () => {
   const db = databaseService.getDb();
-  db.prepare('DELETE FROM user_preferences WHERE key = ?').run(MIGRATE_OFFER_PREFERENCE);
+  db.prepare('DELETE FROM user_preferences WHERE key IN (?, ?)').run(MIGRATE_OFFER_PREFERENCE, ONBOARDING_HANDOFF_PREFERENCE);
   // Pane Chat panels are permanent; return each to a terminal that never launched.
   for (const agent of ['claude', 'codex', 'cursor'] as const) {
     const panel = panelManager.getPanel(getPaneChatPanelId(agent));
@@ -115,40 +121,69 @@ beforeEach(async () => {
   db.prepare('DELETE FROM projects').run();
 });
 
-describe('Pane Chat first-run migrate offer', () => {
-  it('asks once, naming the agents and the skill, when Pane has no Panes and no repositories', async () => {
+function answerFirstRunScreen(handoff: OnboardingHandoff): void {
+  databaseService.setUserPreference(ONBOARDING_HANDOFF_PREFERENCE, handoff);
+}
+
+describe('the default Session name', () => {
+  it('is Onboarding on a new data folder', async () => {
+    const { paneChat } = fixture();
+    const state = await paneChat.getOrCreate();
+    expect(state.session.name).toBe('Onboarding');
+    expect(state.panel.title).toBe('Onboarding');
+  });
+
+  it('is Pane Chat when the data folder already has a repository of the user', async () => {
+    databaseService.createProject('app', path.join(getAppDirectory(), 'elsewhere', 'app'));
+    const { paneChat } = fixture();
+    const state = await paneChat.getOrCreate();
+    expect(state.session.name).toBe('Pane Chat');
+  });
+
+  it('is Pane Chat when the data folder already has a Pane', async () => {
+    storeSession(session('feature-pane', 'feature'));
+    const { paneChat } = fixture();
+    const state = await paneChat.getOrCreate();
+    expect(state.session.name).toBe('Pane Chat');
+  });
+});
+
+describe('the Onboarding Session first prompt', () => {
+  it('says nothing until the first-run screen has an answer, as on every existing install', async () => {
+    const { paneChat } = fixture();
+    await paneChat.getOrCreate();
+    expect(customState('claude')?.initialInput).toBeUndefined();
+  });
+
+  it('after Yes, starts Migrate to Pane at once with no list step', async () => {
+    answerFirstRunScreen('migrate');
     const { paneChat } = fixture();
     const state = await paneChat.getOrCreate();
 
-    const offer = customState(state.agent)?.initialInput ?? '';
-    expect(offer).toContain('Pane sent this once');
-    expect(offer).toContain(path.join(SKILLS_ROOT, 'migrate-to-pane', 'SKILL.md'));
-    for (const tool of ['Claude Code', 'Codex', 'OpenCode', 'Cursor', 'Conductor']) expect(offer).toContain(tool);
-    expect(offer).toContain('migrate to Pane');
+    const prompt = customState(state.agent)?.initialInput ?? '';
+    expect(prompt).toContain('Pane sent this once');
+    expect(prompt).toContain(path.join(SKILLS_ROOT, 'migrate-to-pane', 'SKILL.md'));
+    expect(prompt).toContain('said Yes');
+    expect(prompt).toContain('last 7 days');
+    expect(prompt).toContain('show no list');
   });
 
-  it('still asks when the only repository is the sample one the onboarding dialog cloned', async () => {
-    databaseService.createProject('Pane', path.join(getAppDirectory(), 'projects', 'Pane'));
-    const { paneChat } = fixture();
+  it('after Not now, asks for a Start here page that names the project they opened', async () => {
+    answerFirstRunScreen('project');
+    const appPath = path.join(getAppDirectory(), 'elsewhere', 'app');
+    databaseService.createProject('app', appPath);
+    const { paneChat } = fixture('codex');
     await paneChat.getOrCreate();
-    expect(customState('claude')?.initialInput).toContain('Pane sent this once');
+
+    const prompt = customState('codex')?.initialInput ?? '';
+    expect(prompt).toContain('Pane sent this once');
+    expect(prompt).toContain(`app (${appPath})`);
+    expect(prompt).toContain('Start here');
+    expect(prompt).toContain('Bring no sessions in');
   });
 
-  it('sends nothing when Pane already has a repository of the user', async () => {
-    databaseService.createProject('app', path.join(getAppDirectory(), 'elsewhere', 'app'));
-    const { paneChat } = fixture();
-    await paneChat.getOrCreate();
-    expect(customState('claude')?.initialInput).toBeUndefined();
-  });
-
-  it('sends nothing when Pane already has a Pane', async () => {
-    storeSession(session('feature-pane', 'feature'));
-    const { paneChat } = fixture();
-    await paneChat.getOrCreate();
-    expect(customState('claude')?.initialInput).toBeUndefined();
-  });
-
-  it('never sends it twice: not after a restart, and not to another Pane Chat agent', async () => {
+  it('never sends it twice: not after a restart, and not to another agent', async () => {
+    answerFirstRunScreen('migrate');
     const first = fixture('codex');
     await first.paneChat.getOrCreate();
     expect(customState('codex')?.initialInput).toContain('Pane sent this once');
@@ -164,7 +199,8 @@ describe('Pane Chat first-run migrate offer', () => {
     expect(customState('claude')?.initialInput).toBeUndefined();
   });
 
-  it('keeps offering until a launch actually sends it', async () => {
+  it('keeps it until a launch actually sends it', async () => {
+    answerFirstRunScreen('migrate');
     const first = fixture();
     await first.paneChat.getOrCreate();
     const restarted = fixture();
@@ -173,16 +209,19 @@ describe('Pane Chat first-run migrate offer', () => {
     expect(databaseService.getUserPreference(MIGRATE_OFFER_PREFERENCE)).toBeNull();
   });
 
-  it('reaches the built-in Pane Chat Session that the Session manager opens', async () => {
+  it('reaches the Onboarding Session that the Session manager opens', async () => {
     const { paneChat, configManager, sessionManager, skillCacheManager } = fixture();
     const directory = getAppDirectory();
     const store = new OrchestrationSessionStore(path.join(directory, `sessions-${Date.now()}.json`));
     const manager = new OrchestrationSessionManager(configManager, sessionManager, skillCacheManager, paneChat, undefined, store);
     await manager.initialize();
+    // The screen is answered after startup, before the person first opens the Session.
+    answerFirstRunScreen('migrate');
 
     const view = await manager.getView({ sessionId: LEGACY_ORCHESTRATION_SESSION_ID });
 
     expect(view.internalSession.id).toBe(PANE_CHAT_SESSION_ID);
+    expect(view.session.name).toBe('Onboarding');
     // SAFETY: Session panels persist TerminalPanelState as their custom state.
     const state = view.panel.state.customState as TerminalPanelState;
     expect(state.initialInput).toContain('Pane sent this once');

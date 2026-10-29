@@ -2,14 +2,20 @@ import path from 'path';
 import { getAppDirectory } from '../utils/appDirectory';
 import { databaseService } from './database';
 import { panelManager } from './panelManager';
-import { getPaneChatPanelId, PANE_CHAT_MIGRATE_OFFER_OPENING, type PaneChatAgent } from '../../../shared/types/paneChat';
+import {
+  getPaneChatPanelId,
+  ONBOARDING_HANDOFF_PREFERENCE,
+  PANE_CHAT_MIGRATE_OFFER_OPENING,
+  type PaneChatAgent,
+} from '../../../shared/types/paneChat';
 import type { TerminalPanelState } from '../../../shared/types/panels';
 
 /**
- * Pane Chat speaks first exactly once per Pane data folder: on its first
- * launch while Pane has no Panes and no repositories, it asks whether to bring
- * the user's existing agent sessions into Pane. Every other launch awaits the
- * user, as the Session context says.
+ * The Onboarding Session speaks first exactly once per Pane data folder, with
+ * the task the first-run screen's answer gives it: migrate the agent sessions
+ * the person said yes to, or write a Start here page for the project they
+ * opened. Without an answer (every install from before that screen) it awaits
+ * the user, as the Session context says.
  */
 export const MIGRATE_OFFER_PREFERENCE = 'pane_chat_migrate_offer_sent';
 
@@ -25,7 +31,7 @@ export function samePath(left: string, right: string): boolean {
 }
 
 /**
- * The offer counts as sent once any Pane Chat terminal launched with it. The
+ * The prompt counts as sent once any Pane Chat terminal launched with it. The
  * launch records that as `initialInputSentAt`, which a later rebuild of the
  * launch state clears, so it is copied into the preference the first time it
  * is seen.
@@ -48,21 +54,34 @@ function resumesConversation(agent: PaneChatAgent, state: TerminalPanelState | u
 }
 
 /** No Panes, and no repositories other than the sample one onboarding clones. */
-function paneIsEmpty(): boolean {
+export function paneIsEmpty(): boolean {
   if (databaseService.getAllSessions().length > 0) return false;
   const sampleRepository = path.join(getAppDirectory(), 'projects', 'Pane');
   return databaseService.getAllProjects().every(project => samePath(project.path, sampleRepository));
 }
 
-function migrateOfferText(skillsRoot: string | undefined): string {
+function migrateSkillPath(skillsRoot: string | undefined): string {
   // SkillCacheManager installs the bundle here; it is absent only in tests.
   const root = skillsRoot ?? path.join(getAppDirectory(), 'skills', 'pane-chat', 'skills');
-  const skillPath = path.join(root, 'migrate-to-pane', 'SKILL.md');
+  return path.join(root, 'migrate-to-pane', 'SKILL.md');
+}
+
+function migratePrompt(skillPath: string): string {
   return [
-    `${PANE_CHAT_MIGRATE_OFFER_OPENING} there are no repositories or Panes yet.`,
-    'Ask the user, briefly, whether they want to bring their existing agent sessions into Pane.',
-    `The Migrate to Pane skill (${skillPath}) finds sessions from Claude Code, Codex, OpenCode, Cursor, Conductor or anything similar, opens each in a Pane tab, and resumes it exactly where it was.`,
-    'Don\'t start until they say yes. If they say no, tell them they can say "migrate to Pane" any time.',
+    `${PANE_CHAT_MIGRATE_OFFER_OPENING} on Pane's first-run screen the person said Yes to bringing in their agent sessions that are running or were active in the last 7 days.`,
+    `That Yes is their confirmation. Follow the Migrate to Pane skill (${skillPath}) now, on its first-run path: show no list and ask nothing first.`,
+    'It ends with the Start here page beside this chat.',
+  ].join(' ');
+}
+
+function startHerePrompt(skillPath: string): string {
+  const projects = databaseService.getAllProjects();
+  const opened = projects.length > 0
+    ? `They opened ${projects.map(project => `${project.name} (${project.path})`).join(', ')}.`
+    : 'They have not opened a project yet.';
+  return [
+    `${PANE_CHAT_MIGRATE_OFFER_OPENING} on Pane's first-run screen the person said Not now to bringing in agent sessions, or Pane found none. ${opened}`,
+    `Follow "Start here without a migration" in the Migrate to Pane skill (${skillPath}): make their Start here page and open it beside this chat. Bring no sessions in.`,
   ].join(' ');
 }
 
@@ -76,6 +95,9 @@ export function paneChatFirstPrompt(
   previous: TerminalPanelState | undefined,
   skillsRoot: string | undefined,
 ): string | undefined {
-  if (offerAlreadySent() || resumesConversation(agent, previous) || !paneIsEmpty()) return undefined;
-  return migrateOfferText(skillsRoot);
+  const handoff = databaseService.getUserPreference(ONBOARDING_HANDOFF_PREFERENCE);
+  if (handoff !== 'migrate' && handoff !== 'project') return undefined;
+  if (offerAlreadySent() || resumesConversation(agent, previous)) return undefined;
+  const skillPath = migrateSkillPath(skillsRoot);
+  return handoff === 'migrate' ? migratePrompt(skillPath) : startHerePrompt(skillPath);
 }

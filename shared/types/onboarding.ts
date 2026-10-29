@@ -1,5 +1,7 @@
 /** Repos the first-run "Open your project" screen offers (main/src/services/repoFinder.ts). */
 
+import type { PaneChatAgent } from './paneChat';
+
 export type RepoSource = 'claude_config' | 'codex_config' | 'code_folder';
 
 export interface FoundRepo {
@@ -36,10 +38,16 @@ export interface SampleRepoSetup {
   wasAlreadyCloned: boolean;
 }
 
-/** What Home's "Your first steps" reads from main, leaving out the sample repo. */
+/** What the first-archive Support prompt reads from main, leaving out the sample repo. */
 export interface FirstStepsState {
   /** Projects registered at the sample repo's path. */
   sampleProjectIds: number[];
   /** The newest archived worktree Panes in other projects, at most two. */
   archivedPaneIds: string[];
+}
+
+/** An agent the first-run screen offers: one this platform supports, and whether its CLI is installed. */
+export interface FirstRunAgent {
+  id: PaneChatAgent;
+  found: boolean;
 }

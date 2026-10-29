@@ -507,7 +507,7 @@ export function OrchestrationSessionNav({
               type="button"
               data-testid={sessionTestId(session, 'rail')}
               data-compact-rail-item
-              aria-label={session.id === LEGACY_ORCHESTRATION_SESSION_ID ? 'Pane Chat' : `Open Session ${session.name}`}
+              aria-label={session.id === LEGACY_ORCHESTRATION_SESSION_ID ? session.name || 'Pane Chat' : `Open Session ${session.name}`}
               title={session.name}
               {...drag.source}
               {...drag.target}

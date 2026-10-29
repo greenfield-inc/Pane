@@ -36,7 +36,7 @@ function text(markup: string): string {
 
 describe('SessionImportCard', () => {
   it('shows the approved collapsed card: one row per tool with preselected counts', () => {
-    const shown = text(renderToStaticMarkup(<SessionImportCard surface="home" scan={scan} onClose={() => undefined} />));
+    const shown = text(renderToStaticMarkup(<SessionImportCard surface="settings" scan={scan} onClose={() => undefined} />));
 
     expect(shown).toContain('Bring your sessions into Pane');
     expect(shown).toContain('Pane found recent agent work on this computer. Each session opens as its own Pane, with the agent resumed.');
@@ -114,8 +114,8 @@ describe('session_import analytics', () => {
       ],
     };
 
-    captureSessionImport('shown', 'home', scan);
-    captureSessionImport('dismissed', 'home', scan);
+    captureSessionImport('shown', 'settings', scan);
+    captureSessionImport('dismissed', 'settings', scan);
     captureSessionImport('started', 'settings', scan, { selected: 2 });
     captureSessionImport('finished', 'settings', scan, { selected: 2, result });
 
@@ -126,8 +126,8 @@ describe('session_import analytics', () => {
       Object.fromEntries(Object.entries(properties ?? {}).filter(([key]) => featureKeys.includes(key))),
     ]);
     expect(sent).toEqual([
-      ['session_import', { step: 'shown', surface: 'home', found }],
-      ['session_import', { step: 'dismissed', surface: 'home', found }],
+      ['session_import', { step: 'shown', surface: 'settings', found }],
+      ['session_import', { step: 'dismissed', surface: 'settings', found }],
       ['session_import', { step: 'started', surface: 'settings', found, selected: 2 }],
       ['session_import', {
         step: 'finished', surface: 'settings', found, selected: 2,

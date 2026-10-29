@@ -14,7 +14,9 @@ import type { PaneCommandValue } from '../daemon/commandRegistry';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { toPaneDaemonError } from '../../../shared/paneError';
 import type { PaneDaemonError } from '../../../shared/types/daemon';
-import type { FirstStepsState } from '../../../shared/types/onboarding';
+import type { FirstRunAgent, FirstStepsState } from '../../../shared/types/onboarding';
+import { agentPresetsForPlatform } from '../../../shared/constants/agentLaunchPresets';
+import type { PaneChatAgent } from '../../../shared/types/paneChat';
 import { getDefaultWSLDistribution } from '../utils/wslUtils';
 import { checkRepoFolder, findHostRepoContext, findWslRepos } from '../services/repoFinder';
 import { samePath } from '../services/paneChatMigrateOffer';
@@ -32,6 +34,20 @@ const execAsync = promisify(exec);
  */
 async function runProbe(command: string, timeout?: number): Promise<string> {
   return (await execAsync(command, shellExecOpts({ encoding: 'utf-8', timeout }))).stdout;
+}
+
+const FIRST_RUN_AGENTS: readonly PaneChatAgent[] = ['claude', 'codex', 'cursor'];
+
+/** The agents the first-run screen offers on this platform, and whether a login shell finds each CLI. */
+async function findFirstRunAgents(): Promise<FirstRunAgent[]> {
+  const presets = agentPresetsForPlatform(process.platform)
+    .filter((preset): preset is typeof preset & { id: PaneChatAgent } => FIRST_RUN_AGENTS.some(agent => agent === preset.id));
+  return Promise.all(presets.map(async preset => {
+    const binary = preset.command.split(' ')[0];
+    const found = await runProbe(process.platform === 'win32' ? `where ${binary}` : `command -v ${binary}`, 10_000)
+      .then(output => output.trim().length > 0, () => false);
+    return { id: preset.id, found };
+  }));
 }
 
 const PANE_REPO = 'greenfield-inc/Pane';
@@ -430,6 +446,15 @@ export function registerOnboardingHandlers(ipcMain: IpcMain, services: AppServic
     } catch (error) {
       console.error('[Onboarding] Failed to read first steps:', error);
       return failure(toPaneDaemonError(error, 'ONBOARDING_FIRST_STEPS_FAILED'));
+    }
+  });
+
+  ipcMain.handle('onboarding:find-agents', async () => {
+    try {
+      return { success: true, data: await findFirstRunAgents() };
+    } catch (error) {
+      console.error('[Onboarding] Failed to find agents:', error);
+      return failure(toPaneDaemonError(error, 'ONBOARDING_FIND_AGENTS_FAILED'));
     }
   });
 

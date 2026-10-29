@@ -93,7 +93,7 @@ export function resultHeadline(result: SessionImportRunResult): string {
 
 export const EMPTY_STATE = 'No sessions found from Claude Code, Codex, Conductor, Superset, Herdr, Emdash, Orca or T3 Code on this computer.';
 
-export type SessionImportSurface = 'home' | 'settings';
+export type SessionImportSurface = 'settings';
 
 /** Sessions found per source, for analytics. */
 function foundCounts(scan: SessionImportScan) {

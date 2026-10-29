@@ -9,7 +9,13 @@ import { capture, type AnalyticsProperties } from '../services/posthog';
 import { useNavigationStore } from '../stores/navigationStore';
 import { formatTimeAgo } from '../utils/timestampUtils';
 import { cn } from '../utils/cn';
-import type { FoundRepo, HostRepos, WslRepos } from '../../../shared/types/onboarding';
+import type { FirstRunAgent, FoundRepo, HostRepos, WslRepos } from '../../../shared/types/onboarding';
+import { ONBOARDING_HANDOFF_PREFERENCE, type OnboardingHandoff, type PaneChatAgent } from '../../../shared/types/paneChat';
+import { LEGACY_ORCHESTRATION_SESSION_ID } from '../../../shared/types/orchestrationSession';
+import type { ImportSession } from '../../../shared/types/sessionImport';
+import { useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
+import { useSessionStore } from '../stores/sessionStore';
+import { AgentStep, SessionsStepBody, SessionsStepFooter, sessionsToBringIn } from './FirstRunSteps';
 
 type OnboardingEnvironmentStatus = 'detecting' | 'git_missing' | 'gh_ready' | 'gh_missing' | 'gh_not_authenticated' | 'gh_missing_scopes' | 'gh_not_ready';
 
@@ -39,9 +45,6 @@ const GITHUB_CLI_URL = 'https://cli.github.com/';
 export const ONBOARDING_REPO_SETUP_PREFERENCE = 'onboarding_repo_setup';
 export const ONBOARDING_GH_PROMPT_SHOWN_PREFERENCE = 'onboarding_gh_prompt_shown';
 const ONBOARDING_GH_STATUS_AT_FIRST_LAUNCH_PREFERENCE = 'onboarding_gh_status_at_first_launch';
-/** Set to OPEN_PROJECT_SCREEN_SEEN when this install showed "Open your project" (never 'true': the test mock answers 'true' to unknown keys). */
-export const ONBOARDING_OPEN_PROJECT_SCREEN_PREFERENCE = 'onboarding_open_project_screen';
-export const OPEN_PROJECT_SCREEN_SEEN = 'seen';
 
 function fallbackEnvironment(): EnvironmentInfo {
   return {
@@ -174,7 +177,8 @@ export function SupportPaneDialog({ isOpen, onClose }: SupportPaneDialogProps) {
 }
 
 
-type OnboardingEntry = 'found_repo' | 'chosen_folder' | 'github_clone' | 'sample_repo';
+type OnboardingEntry = 'migrate_sessions' | 'found_repo' | 'chosen_folder' | 'github_clone' | 'sample_repo';
+type FirstRunStep = 'agent' | 'sessions' | 'project';
 type WslState = { status: 'loading' } | { status: 'ready'; result: WslRepos } | { status: 'unavailable' };
 type SampleState = { status: 'idle' } | { status: 'running' } | { status: 'failed'; reason: string };
 
@@ -299,15 +303,32 @@ function RepoColumn({ title, footnote, ...list }: RepoListProps & { title: strin
   );
 }
 
+/** Lands in the Onboarding Session, whose first prompt follows the first-run answer. */
+async function openOnboardingSession(navigateToPaneChat: () => void): Promise<void> {
+  void useSessionStore.getState().setActiveSession(null);
+  navigateToPaneChat();
+  await useOrchestrationSessionStore.getState().select({ sessionId: LEGACY_ORCHESTRATION_SESSION_ID }).catch(() => undefined);
+}
+
 /**
- * First-run "Open your project": lists the user's repos (with a WSL column on
- * Windows when a default distro exists), adds the ones they check as projects
- * and lands them in the newest.
+ * The first-run screen. Step 1 asks which agent the person uses; step 2 offers
+ * to bring their recent agent sessions in, and Yes hands off to the Onboarding
+ * Session, which migrates them. Not now, or nothing found, shows "Open your
+ * project": it lists the user's repos (with a WSL column on Windows when a
+ * default distro exists) and adds the ones they check as projects. Every way
+ * out lands in the Onboarding Session.
  */
 export default function OnboardingDialog({ isOpen, onClose }: OnboardingDialogProps) {
   const paneLogo = usePaneLogo();
-  const navigateToProject = useNavigationStore(s => s.navigateToProject);
+  const navigateToPaneChat = useNavigationStore(s => s.navigateToPaneChat);
   const [env, setEnv] = useState<EnvironmentInfo | null>(null);
+  const [step, setStep] = useState<FirstRunStep>('agent');
+  const [agents, setAgents] = useState<FirstRunAgent[] | null>(null);
+  const [isPicking, setIsPicking] = useState(false);
+  // null while the scan runs.
+  const [bringIn, setBringIn] = useState<ImportSession[] | null>(null);
+  const [isHandingOff, setIsHandingOff] = useState(false);
+  const scanRef = useRef<Promise<ImportSession[]> | null>(null);
   const [host, setHost] = useState<HostRepos | null>(null);
   const [wsl, setWsl] = useState<WslState | null>(null);
   // null until the user toggles a row; until then only the newest repo is checked.
@@ -327,7 +348,14 @@ export default function OnboardingDialog({ isOpen, onClose }: OnboardingDialogPr
     closedRef.current = false;
     openedRef.current.clear();
     let cancelled = false;
-    void setPreference(ONBOARDING_OPEN_PROJECT_SCREEN_PREFERENCE, OPEN_PROJECT_SCREEN_SEEN);
+    setStep('agent');
+    // Started now so step 2 rarely waits; a failed scan counts as nothing found.
+    scanRef.current = API.sessionImport.scan().then(sessionsToBringIn, () => []);
+
+    void window.electronAPI.onboarding.findAgents().then(
+      result => result.success && result.data ? result.data : [],
+      () => [],
+    ).then(found => { if (!cancelled) setAgents(found); });
 
     void detectEnvironmentInfo().then((nextEnv) => {
       if (cancelled) return;
@@ -379,17 +407,66 @@ export default function OnboardingDialog({ isOpen, onClose }: OnboardingDialogPr
   const gitMissing = env !== null && !env.gitInstalled;
   const isBusy = isOpening || sample.status === 'running';
 
-  const complete = async (properties: AnalyticsProperties & { entry: OnboardingEntry; wsl: boolean }) => {
+  /** Records the answer before the Onboarding Session first opens, so its first prompt follows it. */
+  const handOff = async (handoff: OnboardingHandoff) => {
     closedRef.current = true;
+    try {
+      await setPreference(ONBOARDING_HANDOFF_PREFERENCE, handoff);
+    } catch {
+      // The Session still opens; its agent then waits for the person.
+    }
     await markOnboardingComplete();
+    await openOnboardingSession(navigateToPaneChat);
+  };
+
+  const complete = async (properties: AnalyticsProperties & { entry: OnboardingEntry; wsl: boolean }) => {
+    await handOff(properties.entry === 'migrate_sessions' ? 'migrate' : 'project');
     capture('onboarding_completed', properties);
     onClose();
   };
 
-  const openProject = async (projectId: number, properties: AnalyticsProperties & { entry: OnboardingEntry; wsl: boolean }) => {
+  const openProject = async (_projectId: number, properties: AnalyticsProperties & { entry: OnboardingEntry; wsl: boolean }) => {
     window.dispatchEvent(new Event('project-changed'));
-    navigateToProject(projectId);
     await complete(properties);
+  };
+
+  const pickAgent = async (agent: PaneChatAgent) => {
+    setIsPicking(true);
+    setError(null);
+    try {
+      const saved = await API.paneChat.setAgent(agent);
+      if (!saved.success) throw new Error(saved.error);
+      // Runtimes without Sessions run the legacy chat, which the call above already switched.
+      if (window.electronAPI.orchestrationSessions) {
+        const switched = await API.orchestrationSessions.setAgent({ sessionId: LEGACY_ORCHESTRATION_SESSION_ID }, agent);
+        if (!switched.success) throw new Error(switched.error);
+      }
+    } catch (cause) {
+      setError(`Couldn't switch to that agent: ${reasonText(cause instanceof Error ? cause.message : undefined, 'Pane could not save it')}. Pick it again, or change it later in Settings.`);
+      setIsPicking(false);
+      return;
+    }
+    capture('onboarding_agent_picked', { agent });
+    setIsPicking(false);
+    setStep('sessions');
+    const found = await (scanRef.current ?? Promise.resolve([]));
+    if (closedRef.current) return;
+    if (found.length === 0) {
+      setStep('project');
+      return;
+    }
+    setBringIn(found);
+  };
+
+  const bringSessionsIn = async () => {
+    if (!bringIn) return;
+    setIsHandingOff(true);
+    await complete({ entry: 'migrate_sessions', wsl: false, session_count: bringIn.length });
+  };
+
+  const declineSessions = () => {
+    capture('onboarding_sessions_declined', { session_count: bringIn?.length ?? 0 });
+    setStep('project');
   };
 
   const createProject = async (name: string, path: string): Promise<{ projectId: number } | { error: string }> => {
@@ -500,8 +577,7 @@ export default function OnboardingDialog({ isOpen, onClose }: OnboardingDialogPr
 
   const handleSkip = async () => {
     capture('onboarding_skipped', { step: env ? getEnvironmentStatus(env) : 'detecting' });
-    closedRef.current = true;
-    await markOnboardingComplete();
+    await handOff('project');
     onClose();
   };
 
@@ -523,6 +599,54 @@ export default function OnboardingDialog({ isOpen, onClose }: OnboardingDialogPr
   const wslFootnote = wsl?.status === 'ready' && wsl.result.agents.length > 0
     ? `Agents run inside WSL. ${joinNames(wsl.result.agents)} found.`
     : 'Agents run inside WSL.';
+
+  // Git is checked before step 1, so without it the screen shows only the Git Required message.
+  const view: FirstRunStep | 'detecting' = env === null ? 'detecting' : gitMissing ? 'project' : step;
+  const title = view === 'detecting' ? 'Welcome to Pane'
+    : view === 'agent' ? 'Which agent do you use?'
+      : view === 'sessions' ? (bringIn === null ? 'Looking for your sessions…' : `Bring your ${bringIn.length} ${bringIn.length === 1 ? 'session' : 'sessions'} into Pane?`)
+        : 'Open your project';
+
+  if (view !== 'project') {
+    return (
+      <Modal
+        ariaLabel={title}
+        isOpen={isOpen}
+        onClose={() => {}}
+        size="md"
+        initialFocusRef={titleRef}
+        closeOnOverlayClick={false}
+        closeOnEscape={false}
+        showCloseButton={false}
+      >
+        <div className="p-6 border-b border-border-primary">
+          <div className="flex items-center">
+            <img src={paneLogo} alt="Pane" className="h-10 w-10 mr-3" />
+            <h1 ref={titleRef} tabIndex={-1} className="text-lg font-semibold text-text-primary outline-none">{title}</h1>
+          </div>
+        </div>
+        <ModalBody>
+          {view === 'detecting' ? (
+            <div role="status" aria-label="Checking this computer" className="flex min-h-[132px] items-center justify-center">
+              <Loader2 className="h-5 w-5 animate-spin text-text-tertiary" aria-hidden="true" />
+            </div>
+          ) : view === 'agent' ? (
+            <AgentStep agents={agents} disabled={isPicking} onPick={agent => void pickAgent(agent)} />
+          ) : (
+            <SessionsStepBody sessions={bringIn} />
+          )}
+          {error && <p role="alert" className="mt-3 text-sm text-status-error">{error}</p>}
+        </ModalBody>
+        <ModalFooter className="flex justify-between items-center">
+          {view === 'sessions' ? (
+            <SessionsStepFooter sessions={bringIn} busy={isHandingOff} onYes={() => void bringSessionsIn()} onNotNow={declineSessions} />
+          ) : (
+            <Button variant="ghost" disabled={view === 'detecting' || isPicking} onClick={() => { setError(null); setStep('project'); }}>Skip</Button>
+          )}
+        </ModalFooter>
+      </Modal>
+    );
+  }
 
   return (
     <Modal

@@ -485,7 +485,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Bring sessions from other agent tools into Pane
   sessionImport: {
-    home: (): Promise<SessionImportScan | null> => invokeIpc('session-import:home'),
     scan: (): Promise<SessionImportScan> => invokeIpc('session-import:scan'),
     run: (keys: string[]): Promise<SessionImportRunResult> => invokeIpc('session-import:run', keys),
     progress: (): Promise<SessionImportProgress> => invokeIpc('session-import:progress'),
@@ -825,6 +824,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     findRepos: (): Promise<IPCResponse> => invokeIpc('onboarding:find-repos'),
     findWslRepos: (distro: string): Promise<IPCResponse> => invokeIpc('onboarding:find-wsl-repos', distro),
     checkFolder: (folder: string): Promise<IPCResponse> => invokeIpc('onboarding:check-folder', folder),
+    findAgents: (): Promise<IPCResponse> => invokeIpc('onboarding:find-agents'),
     firstSteps: (): Promise<IPCResponse> => invokeIpc('onboarding:first-steps'),
     supportProject: (): Promise<IPCResponse> => invokeIpc('onboarding:support-project'),
   },
