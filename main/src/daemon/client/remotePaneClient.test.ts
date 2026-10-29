@@ -148,7 +148,8 @@ describe('RemotePaneClient', () => {
     const started = Date.now();
 
     await expect(client.invoke('sessions:get-all', [])).resolves.toMatchObject({ channel: 'sessions:get-all' });
-    expect(Date.now() - started).toBeGreaterThanOrEqual(800);
+    // 250 + 750 ms, less up to 20 % jitter and clock granularity.
+    expect(Date.now() - started).toBeGreaterThanOrEqual(790);
     expect(server.getInvokeCount()).toBe(3);
     expect(states.at(-1)).toBe('connected');
     expect(server.getEventRequestCount()).toBe(1);
@@ -369,22 +370,24 @@ describe('RemotePaneClient', () => {
     }, {
       heartbeatStaleTimeoutMs: 20,
       reconnectMaxDelayMs: 20,
-      reconnectDurationMs: 160,
+      reconnectDurationMs: 400,
       onConnectionStateChange(status, errorMessage) {
         connectionStates.push({ status, errorMessage });
       },
     });
 
     await client.connect({ retryOnInitialFailure: false });
+    const outageStarted = Date.now();
     server.setEventsReady(false);
 
-    await waitFor(() => connectionStates.some((state) => state.status === 'error'), 1_500);
+    await waitFor(() => connectionStates.some((state) => state.status === 'error'), 3_000);
 
+    // The client gives up at the outage deadline, not before, and keeps retrying until then.
+    // Timer resolution varies by OS (about 16 ms on Windows), so the attempt count is only a floor.
+    expect(Date.now() - outageStarted).toBeGreaterThanOrEqual(390);
     const firstErrorIndex = connectionStates.findIndex((state) => state.status === 'error');
-    expect(firstErrorIndex).toBeGreaterThan(-1);
-    expect(server.getEventRequestCount()).toBeGreaterThan(6);
     expect(connectionStates.slice(0, firstErrorIndex).filter((state) => state.status === 'reconnecting').length)
-      .toBeGreaterThanOrEqual(5);
+      .toBeGreaterThanOrEqual(3);
     expect(connectionStates[firstErrorIndex].errorMessage).toContain('Could not reconnect');
 
     await client.disconnect();
