@@ -2359,7 +2359,7 @@ describe('runpane IPC handlers', () => {
     const result = await registry.invoke('runpane:repos:rename', [{ repo: 'Pane', name: '  Lev web  ' }]);
 
     expect(updateProject).toHaveBeenCalledWith(1, { name: 'Lev web' });
-    expect(services.sessionManager.emit).toHaveBeenCalledWith('project:updated', expect.objectContaining({ id: 1, name: 'Lev web' }));
+    expect(services.sessionManager.emit).toHaveBeenCalledWith('project:list-changed');
     expect(result).toMatchObject({ ok: true, repo: { id: 1, name: 'Lev web', path: '/repo/pane' } });
     await expect(registry.invoke('runpane:repos:rename', [{ repo: '1', name: '   ' }])).rejects.toThrow('non-empty name');
     await expect(registry.invoke('runpane:repos:rename', [{ repo: 'missing', name: 'x' }])).rejects.toThrow(/missing/);
