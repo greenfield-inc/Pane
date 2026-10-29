@@ -223,7 +223,10 @@ export function registerSessionHandlers(
     try {
       const allProjects = databaseService.getAllProjects();
       const projectsWithSessions = allProjects.map(project => {
-        const sessions = sessionManager.getSessionsForProject(project.id).map(attachCachedGitStatus);
+        // Newest first: the order the phone and glasses show a repository's Panes in.
+        const sessions = sessionManager.getSessionsForProject(project.id)
+          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+          .map(attachCachedGitStatus);
         const folders = databaseService.getFoldersForProject(project.id);
         const convertedFolders = folders.map(convertDbFolderToRendererFolder);
         return {

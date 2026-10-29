@@ -1296,14 +1296,14 @@ function validateLinks(links: OrchestrationLink[] | undefined, label: string): v
   }
 }
 
-/** Sessions in their saved order; any the order does not name follow, oldest first. */
+/** Sessions the saved order does not name (new ones) first, newest first; then the saved order. */
 function orderedSessions(data: OrchestrationSessionStoreData): OrchestrationSessionRecord[] {
   const position = new Map((data.order ?? []).map((id, index) => [id, index]));
   return [...data.sessions].sort((left, right) => {
-    const leftPosition = position.get(left.id) ?? Infinity;
-    const rightPosition = position.get(right.id) ?? Infinity;
+    const leftPosition = position.get(left.id) ?? -1;
+    const rightPosition = position.get(right.id) ?? -1;
     if (leftPosition !== rightPosition) return leftPosition - rightPosition;
-    return left.createdAt.localeCompare(right.createdAt);
+    return right.createdAt.localeCompare(left.createdAt);
   });
 }
 

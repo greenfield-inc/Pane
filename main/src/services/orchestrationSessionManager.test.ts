@@ -1534,14 +1534,14 @@ describe('OrchestrationSessionManager Session order', () => {
     return listed.sessions.filter(filter).filter(session => session.id !== LEGACY_ORCHESTRATION_SESSION_ID).map(session => session.name);
   }
 
-  it('lists Sessions oldest first when no order was saved', async () => {
+  it('lists Sessions newest first when no order was saved', async () => {
     const fixture = createFixture();
     await createInOrder(fixture, ['A', 'B', 'C', 'D']);
 
-    expect(await namesInOrder(fixture)).toEqual(['A', 'B', 'C', 'D']);
+    expect(await namesInOrder(fixture)).toEqual(['D', 'C', 'B', 'A']);
   });
 
-  it('lists and selects in the saved order, and adds a new Session at the bottom', async () => {
+  it('lists and selects in the saved order, and adds a new Session at the top', async () => {
     const fixture = createFixture();
     const ids = await createInOrder(fixture, ['A', 'B', 'C', 'D']);
 
@@ -1552,7 +1552,7 @@ describe('OrchestrationSessionManager Session order', () => {
     expect(selected.sessions.map(session => session.name).filter(name => name !== 'Pane Chat')).toEqual(['A', 'D', 'B', 'C']);
     vi.setSystemTime(start + 60_000);
     await fixture.manager.create({ name: 'E' });
-    expect(await namesInOrder(fixture)).toEqual(['A', 'D', 'B', 'C', 'E']);
+    expect(await namesInOrder(fixture)).toEqual(['E', 'A', 'D', 'B', 'C']);
   });
 
   it('changes no Session revision, timestamp or activity, and tells clients the order changed', async () => {
@@ -1575,9 +1575,9 @@ describe('OrchestrationSessionManager Session order', () => {
     const ids = await createInOrder(fixture, ['A', 'B', 'C', 'D', 'E']);
 
     // A list that shows only B and D (such as Pinned) swaps them; A, C and E stay where they are.
-    await fixture.manager.reorder([ids.D, ids.B]);
+    await fixture.manager.reorder([ids.B, ids.D]);
 
-    expect(await namesInOrder(fixture)).toEqual(['A', 'D', 'C', 'B', 'E']);
+    expect(await namesInOrder(fixture)).toEqual(['E', 'B', 'C', 'D', 'A']);
   });
 
   it('ignores unknown and repeated ids', async () => {
@@ -1617,11 +1617,11 @@ describe('OrchestrationSessionManager Session order', () => {
     const first = { ...orchestrationRecord('session-first', 'First'), createdAt: '2026-10-01T00:00:00.000Z' };
     const second = { ...orchestrationRecord('session-second', 'Second'), createdAt: '2026-10-02T00:00:00.000Z' };
     const unordered = createFixture('codex', { version: 1, sessions: [second, first] });
-    expect(await namesInOrder(unordered)).toEqual(['First', 'Second']);
+    expect(await namesInOrder(unordered)).toEqual(['Second', 'First']);
 
-    const stale = createFixture('codex', { version: 1, order: ['session-gone', 'session-second', 'session-first'], sessions: [first, second] });
-    expect(await namesInOrder(stale)).toEqual(['Second', 'First']);
-    expect(stale.store.read().order).toEqual(['session-second', 'session-first']);
+    const stale = createFixture('codex', { version: 1, order: ['session-gone', 'session-first', 'session-second'], sessions: [second, first] });
+    expect(await namesInOrder(stale)).toEqual(['First', 'Second']);
+    expect(stale.store.read().order).toEqual(['session-first', 'session-second']);
   });
 });
 

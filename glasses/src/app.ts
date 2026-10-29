@@ -20,6 +20,7 @@ import {
   keyListPage,
   keysRefusedPage,
   loadingPage,
+  moreStart,
   noComputerPage,
   openPanePage,
   panesPage,
@@ -550,7 +551,14 @@ export class GlassesApp {
     }
     if (gesture.type !== 'select') return;
     const computers = this.deps.source.computers();
-    const index = rowOrder(computers.length, startOf(computers, this.computerFocus, computerKey))[gesture.index];
+    const start = startOf(computers, this.computerFocus, computerKey);
+    const index = rowOrder(computers.length, start)[gesture.index];
+    if (index === 'more') {
+      const next = moreStart(computers.length, start);
+      this.computerFocus = { id: computers[next]?.id ?? '', index: next };
+      this.render();
+      return;
+    }
     const computer = index == null ? undefined : computers[index];
     if (index == null || !computer) return;
     this.computerFocus = { id: computer.id, index };
@@ -585,9 +593,17 @@ export class GlassesApp {
   private onPanes(view: { computerId: string; entries: PaneRow[] | null }, gesture: Gesture): void {
     if (gesture.type === 'double') this.go({ name: 'computers' });
     else if (gesture.type === 'select') {
-      // A press on the gap, a note or the divider opens nothing.
+      // A press on the gap, a note or the divider opens nothing; More continues the list.
       const entries = view.entries ?? [];
-      const index = rowOrder(entries.length, this.panesStart(view.computerId, entries))[gesture.index];
+      const start = this.panesStart(view.computerId, entries);
+      const index = rowOrder(entries.length, start)[gesture.index];
+      if (index === 'more') {
+        const next = moreStart(entries.length, start);
+        const row = entries[next];
+        this.paneFocus.set(view.computerId, { id: row ? rowKey(row) ?? '' : '', index: next });
+        this.render();
+        return;
+      }
       const row = index == null ? undefined : entries[index];
       if (index == null || !row || !isPaneEntry(row)) return;
       this.paneFocus.set(view.computerId, { id: entryKey(row), index });

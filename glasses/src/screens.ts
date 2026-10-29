@@ -1,6 +1,6 @@
 // One function per glasses screen in the design reference (mockups v2: H3 home, C3 card, T3 terminal).
 // Each returns a page of boxes at G2 scale; nothing here touches the bridge.
-import { BRIGHT, DIM, DIMMER, LIST_PAD, type Box, type Brightness, type ListBox, type Page, type TextBox } from './display';
+import { BRIGHT, DIM, DIMMER, LIST_PAD, MAX_LIST_ITEMS, type Box, type Brightness, type ListBox, type Page, type TextBox } from './display';
 import type { Card, Computer, HostRefusal, PaneEntry, PaneRow } from './model';
 import { isRule } from './terminal';
 import { LINE_H, SCREEN_H, SCREEN_W, fitLine, wrap, wrapClamped } from './text';
@@ -228,22 +228,38 @@ function computerRow(computer: Computer, clock: (epochMs: number) => string): st
 /** Where a list that starts mid-way wraps back to its first row. */
 const LIST_TOP = '· top of the list ·';
 
-/**
- * The rows of a list in the order shown: from `start` to the end, the divider (null), then the
- * rows above `start`. A native list always opens on its first row, so this is how a list comes
- * back on the row you left. Press on shown row i acts on rows[order[i]].
- */
-export function rowOrder(count: number, start: number): Array<number | null> {
+/** Every row from `start` to the end, the divider (null), then the rows above `start`. */
+function rotated(count: number, start: number): Array<number | null> {
   const all = Array.from({ length: count }, (_, index) => index);
   if (start <= 0 || start >= count) return all;
   return [...all.slice(start), null, ...all.slice(0, start)];
 }
 
+/**
+ * The rows of a list in the order shown: from `start` to the end, the divider (null), then the
+ * rows above `start`. A native list always opens on its first row, so this is how a list comes
+ * back on the row you left. A native list holds 20 rows, so a longer one ends in a `more` row
+ * after 19; pressing it starts the list at `moreStart`. Press on shown row i acts on rows[order[i]].
+ */
+export function rowOrder(count: number, start: number): Array<number | null | 'more'> {
+  const order = rotated(count, start);
+  return order.length > MAX_LIST_ITEMS ? [...order.slice(0, MAX_LIST_ITEMS - 1), 'more'] : order;
+}
+
+/** Where the list continues after its `more` row: the first row it left out. */
+export function moreStart(count: number, start: number): number {
+  return rotated(count, start)[MAX_LIST_ITEMS - 1] ?? 0;
+}
+
+/** The text of each shown row: `text` for a row, the divider, and "· 71 more ·". */
+function shownRows(count: number, start: number, text: (index: number) => string): string[] {
+  const order = rowOrder(count, start);
+  const hidden = count - order.filter((index) => index !== null && index !== 'more').length;
+  return order.map((index) => (index === 'more' ? `· ${hidden} more ·` : index === null ? LIST_TOP : text(index)));
+}
+
 export function computersPage(computers: readonly Computer[], clock: (epochMs: number) => string, start = 0): Page {
-  const rows = rowOrder(computers.length, start).map((index) => {
-    const computer = index === null ? undefined : computers[index];
-    return computer ? computerRow(computer, clock) : LIST_TOP;
-  });
+  const rows = shownRows(computers.length, start, (index) => computerRow(computers[index], clock));
   return {
     boxes: [
       header('Open a Pane · pick a computer'),
@@ -273,10 +289,7 @@ export function panesPage(computerName: string, rows: readonly PaneRow[], start 
   return {
     boxes: [
       header(`${computerName} · Sessions and Panes`),
-      list('panes', BAR_H, SCREEN_H - BAR_H, rowOrder(rows.length, start).map((index) => {
-        const row = index === null ? undefined : rows[index];
-        return row ? paneRowText(row) : LIST_TOP;
-      })),
+      list('panes', BAR_H, SCREEN_H - BAR_H, shownRows(rows.length, start, (index) => paneRowText(rows[index]))),
     ],
   };
 }
