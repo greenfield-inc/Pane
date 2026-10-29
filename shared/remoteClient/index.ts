@@ -12,6 +12,13 @@ export {
   type RemoteSchedule,
   type RemoteTimer,
 } from './remoteDaemonClient';
+export {
+  CONNECTION_GRACE_MS,
+  connectionNotice,
+  connectionPresence,
+  type ConnectionNotice,
+  type ConnectionPresence,
+} from './connectionPresence';
 export { createFetchEventStreamTransport } from './fetchEventStreamTransport';
 export { decodeRemoteConnectionCode } from './pairing';
 export {

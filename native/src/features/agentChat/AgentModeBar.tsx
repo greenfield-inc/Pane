@@ -24,7 +24,7 @@ export function AgentModeBar({ chat }: { chat: ReturnType<typeof useAgentChat> }
     try { await chat.switch(mode); }
     finally { setBusy(false); }
   };
-  const status = !chat.connected ? 'Reconnecting…' : conversation?.nativeStartup ? 'Waiting for native startup…' : transitioning ? 'Switching interface…' : conversation?.pendingSwitch ? `Switch to ${conversation.pendingSwitch.target === 'chat' ? 'Chat' : 'Terminal'} after this turn` : conversation?.active === 'stopped' ? 'Conversation stopped' : chat.view?.permissions.length ? 'Waiting for you' : chat.view?.running ? 'Agent is working' : '';
+  const status = conversation?.nativeStartup ? 'Waiting for native startup…' : transitioning ? 'Switching interface…' : conversation?.pendingSwitch ? `Switch to ${conversation.pendingSwitch.target === 'chat' ? 'Chat' : 'Terminal'} after this turn` : conversation?.active === 'stopped' ? 'Conversation stopped' : chat.view?.permissions.length ? 'Waiting for you' : chat.view?.running ? 'Agent is working' : '';
   return <View testID="chat-mode-bar" style={[styles.root, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
     {chat.view?.available && <View style={styles.row}>
       <Text accessibilityLiveRegion="polite" variant="subhead" tone="secondary" style={styles.status}>{status}</Text>

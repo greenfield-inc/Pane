@@ -5,6 +5,7 @@ import { passwordProblem } from '@/auth/computers';
 import { useHostsStore } from '@/auth/hostsStore';
 import { useDaemon } from '@/daemon';
 import { useComputers, useConnectComputer } from '@/features/computers/useComputers';
+import { useConnectionPresence } from '@/features/hosts/useConnectionPresence';
 
 import { listMachines, type Machine } from './machines';
 
@@ -19,7 +20,8 @@ export function useMachines(): Machine[] {
   const profiles = useHostsStore(state => state.profiles);
   const directory = profile.tailnetMachine ? profile : profiles.find(saved => saved.tailnetMachine) ?? null;
   const computers = useComputers(directory);
-  return listMachines({ profiles, current: profile, connection: connection.status, tailnet: computers.data });
+  const { presence } = useConnectionPresence();
+  return listMachines({ profiles, current: profile, connection: connection.status, presence, tailnet: computers.data });
 }
 
 /**

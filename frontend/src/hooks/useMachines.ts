@@ -3,6 +3,7 @@ import { create } from 'zustand';
 import { API } from '../utils/api';
 import { useConfigStore } from '../stores/configStore';
 import { buildMachineList, machineOsFromPlatform, type MachineEntry, type MachineOs } from '../utils/machineList';
+import { useConnectionPresence } from './useConnectionPresence';
 import type { TailnetMachineList } from '../../../shared/types/workspaceAccess';
 import type { RemotePaneConnectionState } from '../../../shared/types/remoteDaemon';
 
@@ -77,9 +78,11 @@ export function useMachines({ connectionState, refreshMs, wrapConnect }: UseMach
     };
   }, [refresh, refreshMs]);
 
+  // The active machine pulses through the grace window and dims after it, like every other connection dot.
+  const { presence: connectionPresence } = useConnectionPresence(connectionState);
   const machines = useMemo(
-    () => buildMachineList({ connectionState, profiles: profiles ?? [], tailnet, localName, localOs }),
-    [connectionState, profiles, tailnet, localName, localOs],
+    () => buildMachineList({ connectionState, profiles: profiles ?? [], tailnet, localName, localOs, connectionPresence }),
+    [connectionState, profiles, tailnet, localName, localOs, connectionPresence],
   );
 
   const select = useCallback(async (machine: MachineEntry, password?: string): Promise<MachineSelectOutcome> => {

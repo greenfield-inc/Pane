@@ -35,6 +35,7 @@ describe('listMachines', () => {
       profiles: [studio, devbox],
       current: studio,
       connection: 'connected',
+      presence: 'connected',
       tailnet: list([
         tailnet('studio-mac', 'macOS', 'available'),
         tailnet('build-box', 'Linux', 'available'),
@@ -53,15 +54,23 @@ describe('listMachines', () => {
     ]);
   });
 
-  it('pulses the current machine while it reconnects and dims it once it gives up', () => {
-    const states = (['connecting', 'reconnecting', 'restoring', 'error', 'local'] as const).map(connection => {
-      const [current] = listMachines({ profiles: [studio], current: studio, connection, tailnet: undefined });
+  it('pulses the current machine through the grace window and dims it after, as the shared presence rule says', () => {
+    const states = ([
+      ['connecting', 'reconnecting'],
+      ['reconnecting', 'reconnecting'],
+      ['restoring', 'restoring'],
+      ['reconnecting', 'unreachable'],
+      ['error', 'unreachable'],
+      ['local', 'unreachable'],
+    ] as const).map(([connection, presence]) => {
+      const [current] = listMachines({ profiles: [studio], current: studio, connection, presence, tailnet: undefined });
       return [current.status, current.state];
     });
     expect(states).toEqual([
       ['Connecting…', 'pulsing'],
       ['Reconnecting…', 'pulsing'],
       ['Restoring…', 'pulsing'],
+      ['Can’t reach', 'dimmed'],
       ['Offline', 'dimmed'],
       ['Not connected', 'dimmed'],
     ]);
@@ -72,6 +81,7 @@ describe('listMachines', () => {
       profiles: [studio, devbox],
       current: studio,
       connection: 'connected',
+      presence: 'connected',
       tailnet: list([tailnet('parsa-devbox', 'Windows', 'offline')]),
     });
     expect(machines[1]).toMatchObject({ name: 'parsa-devbox', status: 'Offline', state: 'dimmed', selectable: false });
@@ -79,7 +89,8 @@ describe('listMachines', () => {
 
   it('shows a machine paired with a code as a plain computer until Tailscale names it', () => {
     const coded = saved('office', { id: 'code-1', baseUrl: 'https://192.168.1.20:7777', tailnetMachine: undefined, tailnetDomain: undefined });
-    const [, other] = listMachines({ profiles: [studio, coded], current: studio, connection: 'connected', tailnet: list([]) });
+    const [, other] = listMachines({ profiles: [studio, coded], current: studio, connection: 'connected',
+      presence: 'connected', tailnet: list([]) });
     expect(other).toMatchObject({ name: 'office', os: null, state: 'solid', selectable: true });
   });
 
@@ -89,6 +100,7 @@ describe('listMachines', () => {
       profiles: [studio, coded],
       current: studio,
       connection: 'connected',
+      presence: 'connected',
       tailnet: list([tailnet('build-box', 'Linux', 'available')]),
     });
     expect(machines.map(machine => [machine.name, machine.os])).toEqual([['studio-mac', null], ['Build box', 'Linux']]);
@@ -101,13 +113,15 @@ describe('listMachines', () => {
       profiles: [studio, coded],
       current: studio,
       connection: 'connected',
+      presence: 'connected',
       tailnet: list([tailnet('build-box', 'Linux', 'unreachable')]),
     });
     expect(other).toMatchObject({ name: 'Build box', os: 'Linux', status: 'Saved', state: 'solid', selectable: true });
   });
 
   it('includes the current machine when it is not saved, as in the demo', () => {
-    const machines = listMachines({ profiles: [], current: studio, connection: 'connected', tailnet: undefined });
+    const machines = listMachines({ profiles: [], current: studio, connection: 'connected',
+      presence: 'connected', tailnet: undefined });
     expect(machines.map(machine => machine.name)).toEqual(['studio-mac']);
   });
 
@@ -117,6 +131,7 @@ describe('listMachines', () => {
       profiles: [studio],
       current: studio,
       connection: 'connected',
+      presence: 'connected',
       tailnet: list([tailnet('studio-mac', 'macOS', 'available'), tailnet('build-box', 'Linux', 'offline')]),
     });
     expect(current).toMatchObject({ name: 'studio-mac', slot: 4 });
@@ -127,6 +142,7 @@ describe('listMachines', () => {
       profiles: [studio],
       current: studio,
       connection: 'connected',
+      presence: 'connected',
       tailnet: list([tailnet('build-box', 'Linux', 'available')]),
     });
     expect(machines.map(machine => [machine.name, machine.slot])).toEqual([['studio-mac', 4], ['build-box', 3]]);

@@ -6,7 +6,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useDaemon } from '@/daemon';
 import { DemoBadge } from '@/features/demo/DemoBadge';
-import { ConnectionAccessory, MachineChips } from '@/features/machines/MachineChips';
+import { ConnectionBar, Dimmed, presenceLabel } from '@/features/hosts/ConnectionStatus';
+import { useConnectionPresence } from '@/features/hosts/useConnectionPresence';
+import { MachineChips } from '@/features/machines/MachineChips';
+import { MachineMark } from '@/features/machines/MachineMark';
 import { PaneLogo } from '@/features/machines/PaneLogo';
 import { useMachines } from '@/features/machines/useMachines';
 import { useNotifyShared } from '@/features/notify/hooks';
@@ -43,8 +46,10 @@ import { StatusBadge } from './StatusBadge';
 export function PaneListScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const { profile, connection } = useDaemon();
+  const { profile } = useDaemon();
   const machines = useMachines();
+  const current = machines.find(machine => machine.current);
+  const { presence, notice, retry } = useConnectionPresence();
   const [query, setQuery] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const projects = useProjects();
@@ -192,7 +197,7 @@ export function PaneListScreen() {
       <View style={[styles.header, { paddingTop: insets.top + 6 }]}>
         <View
           // Flows wait on the connection through this id.
-          testID={`connection-status-${connection.status}`}
+          testID={`connection-status-${presence}`}
           style={styles.brand}
           accessible
           accessibilityRole="header"
@@ -201,7 +206,13 @@ export function PaneListScreen() {
           <PaneLogo />
           <Text variant="title" numberOfLines={1} style={styles.brandTitle}>Pane</Text>
         </View>
-        {machines.length > 1 ? null : <ConnectionAccessory />}
+        {/* With one machine there are no chips, so its mark and name sit here. */}
+        {machines.length > 1 || !current ? null : (
+          <View style={styles.machine} accessible accessibilityLabel={presenceLabel(presence, current.name)}>
+            <MachineMark os={current.os} slot={current.slot} state={current.state} />
+            <Text variant="footnote" tone="secondary" numberOfLines={1}>{current.name}</Text>
+          </View>
+        )}
         <DemoBadge />
         <Pressable
           testID="open-settings"
@@ -215,91 +226,96 @@ export function PaneListScreen() {
         </Pressable>
       </View>
       {machines.length > 1 ? <MachineChips machines={machines} /> : null}
+      <ConnectionBar notice={notice} onRetry={retry} />
 
-      <View style={styles.toolbar}>
-        <View style={styles.createButtons}>
-          {sessions.unavailable ? null : (
-            <CreateButton testID="sessions-new" title="New Session" secondary onPress={() => router.push('/session/new')}>
-              <Icon ios="bubble.left" android="chat_bubble" size={16} color={theme.colors.text} />
+      {/* The last screen stays, dimmed and untouchable, while the machine isn't connected. The chips
+          above stay live, so you can switch away from a machine that is down. */}
+      <Dimmed dimmed={presence !== 'connected'} style={styles.fill}>
+        <View style={styles.toolbar}>
+          <View style={styles.createButtons}>
+            {sessions.unavailable ? null : (
+              <CreateButton testID="sessions-new" title="New Session" secondary onPress={() => router.push('/session/new')}>
+                <Icon ios="bubble.left" android="chat_bubble" size={16} color={theme.colors.text} />
+              </CreateButton>
+            )}
+            <CreateButton testID="panes-new" title="New Pane" disabled={(projects.data ?? []).length === 0} onPress={() => router.push('/pane/new')}>
+              <Icon ios="plus" android="add" size={16} color={theme.colors.onAccent} />
             </CreateButton>
-          )}
-          <CreateButton testID="panes-new" title="New Pane" disabled={(projects.data ?? []).length === 0} onPress={() => router.push('/pane/new')}>
-            <Icon ios="plus" android="add" size={16} color={theme.colors.onAccent} />
-          </CreateButton>
-        </View>
-        <View style={[styles.search, { borderRadius: theme.radius.lg, backgroundColor: theme.colors.surfaceRaised }]}>
-          <Icon ios="magnifyingglass" android="search" size={16} />
-          <TextInput
-            testID="panes-search"
-            accessibilityLabel="Search panes"
-            placeholder="Search panes"
-            placeholderTextColor={theme.colors.textMuted}
-            selectionColor={theme.colors.accent}
-            autoCapitalize="none"
-            autoCorrect={false}
-            returnKeyType="search"
-            value={query}
-            onChangeText={setQuery}
-            style={[theme.typography.body, styles.searchInput, { color: theme.colors.text }]}
-          />
-          {query ? (
-            <IconButton label="Clear search" testID="panes-search-clear" size={28} onPress={() => setQuery('')}>
-              <Icon ios="xmark.circle.fill" android="cancel" size={16} />
-            </IconButton>
-          ) : null}
-        </View>
-      </View>
-
-      <LegendList
-        testID="panes-list"
-        data={loading ? [] : items}
-        keyExtractor={item => item.key}
-        getItemType={item => item.type}
-        estimatedItemSize={48}
-        keyboardDismissMode="on-drag"
-        keyboardShouldPersistTaps="handled"
-        refreshing={refreshing}
-        onRefresh={() => void refresh()}
-        style={styles.fill}
-        contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 12 }]}
-        ListHeaderComponent={waitingCount > 0 ? (
-          <View style={styles.waitingSection}>
-            <SectionHeader title="Waiting on you" count={waitingCount} first />
-            <View style={[styles.waitingCard, { borderRadius: theme.radius.card, backgroundColor: withAlpha(theme.colors.warning, 0.09) }]}>
-              {questions.map((item, index) => (
-                <WaitingRow
-                  key={item.id}
-                  testID={`notify-row-${item.id}`}
-                  name={item.source.name}
-                  detail={item.title}
-                  divided={index > 0}
-                  onPress={() => openNotifySheet(item.id, item.source.paneId)}
-                />
-              ))}
-              {waiting.map((request, index) => {
-                const { title, target } = describePermission(request);
-                return (
-                  <WaitingRow
-                    key={request.id}
-                    testID={`permission-row-${request.sessionId}`}
-                    name={paneNames.get(request.sessionId) ?? 'Pane'}
-                    detail={target ? `${title}: ${target}` : title}
-                    divided={questions.length + index > 0}
-                    onPress={() => router.push({ pathname: '/pane/[paneId]/permission', params: { paneId: request.sessionId, requestId: request.id } })}
-                  />
-                );
-              })}
-            </View>
           </View>
-        ) : null}
-        ListEmptyComponent={
-          loading ? <LoadingRows />
-            : projects.isError ? <Notice danger message={projects.error.message} action={{ title: 'Try again', onPress: () => void projects.refetch() }} />
-            : query && (projects.data ?? []).length > 0 ? <Notice testID="panes-no-results" message={`No panes match “${query}”.`} />
-            : <Notice testID="panes-empty" message="No remote panes found on this host." />
-        }
-        renderItem={renderItem}
-      />
+          <View style={[styles.search, { borderRadius: theme.radius.lg, backgroundColor: theme.colors.surfaceRaised }]}>
+            <Icon ios="magnifyingglass" android="search" size={16} />
+            <TextInput
+              testID="panes-search"
+              accessibilityLabel="Search panes"
+              placeholder="Search panes"
+              placeholderTextColor={theme.colors.textMuted}
+              selectionColor={theme.colors.accent}
+              autoCapitalize="none"
+              autoCorrect={false}
+              returnKeyType="search"
+              value={query}
+              onChangeText={setQuery}
+              style={[theme.typography.body, styles.searchInput, { color: theme.colors.text }]}
+            />
+            {query ? (
+              <IconButton label="Clear search" testID="panes-search-clear" size={28} onPress={() => setQuery('')}>
+                <Icon ios="xmark.circle.fill" android="cancel" size={16} />
+              </IconButton>
+            ) : null}
+          </View>
+        </View>
+
+        <LegendList
+          testID="panes-list"
+          data={loading ? [] : items}
+          keyExtractor={item => item.key}
+          getItemType={item => item.type}
+          estimatedItemSize={48}
+          keyboardDismissMode="on-drag"
+          keyboardShouldPersistTaps="handled"
+          refreshing={refreshing}
+          onRefresh={() => void refresh()}
+          style={styles.fill}
+          contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 12 }]}
+          ListHeaderComponent={waitingCount > 0 ? (
+            <View style={styles.waitingSection}>
+              <SectionHeader title="Waiting on you" count={waitingCount} first />
+              <View style={[styles.waitingCard, { borderRadius: theme.radius.card, backgroundColor: withAlpha(theme.colors.warning, 0.09) }]}>
+                {questions.map((item, index) => (
+                  <WaitingRow
+                    key={item.id}
+                    testID={`notify-row-${item.id}`}
+                    name={item.source.name}
+                    detail={item.title}
+                    divided={index > 0}
+                    onPress={() => openNotifySheet(item.id, item.source.paneId)}
+                  />
+                ))}
+                {waiting.map((request, index) => {
+                  const { title, target } = describePermission(request);
+                  return (
+                    <WaitingRow
+                      key={request.id}
+                      testID={`permission-row-${request.sessionId}`}
+                      name={paneNames.get(request.sessionId) ?? 'Pane'}
+                      detail={target ? `${title}: ${target}` : title}
+                      divided={questions.length + index > 0}
+                      onPress={() => router.push({ pathname: '/pane/[paneId]/permission', params: { paneId: request.sessionId, requestId: request.id } })}
+                    />
+                  );
+                })}
+              </View>
+            </View>
+          ) : null}
+          ListEmptyComponent={
+            loading ? <LoadingRows />
+              : projects.isError ? <Notice danger message={projects.error.message} action={{ title: 'Try again', onPress: () => void projects.refetch() }} />
+              : query && (projects.data ?? []).length > 0 ? <Notice testID="panes-no-results" message={`No panes match “${query}”.`} />
+              : <Notice testID="panes-empty" message="No remote panes found on this host." />
+          }
+          renderItem={renderItem}
+        />
+      </Dimmed>
     </View>
   );
 }
@@ -368,6 +384,7 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 52, paddingHorizontal: 16, paddingBottom: 10 },
   brand: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 9 },
   brandTitle: { flexShrink: 1, fontSize: 21, letterSpacing: -0.2, fontWeight: '700' },
+  machine: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 },
   roundButton: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
   toolbar: { paddingHorizontal: 16, paddingBottom: 4, gap: 10 },
   createButtons: { flexDirection: 'row', gap: 10 },

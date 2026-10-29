@@ -1,3 +1,4 @@
+import type { ConnectionPresence } from '@shared/remoteClient';
 import type { RemotePaneConnectionProfile, RemotePaneConnectionStatus } from '@shared/types/remoteDaemon';
 import type { TailnetMachine, TailnetMachineList } from '@shared/types/workspaceAccess';
 import { assignMachineColorSlots, preferredMachineColorSlot } from '@shared/utils/machineColor';
@@ -42,25 +43,40 @@ export const TAILNET_STATE_TEXT = {
   offline: 'Offline',
 } satisfies Record<TailnetMachine['state'], string>;
 
-const CONNECTION: Record<RemotePaneConnectionStatus, { status: string; state: MachineState }> = {
-  connected: { status: 'Connected', state: 'solid' },
-  connecting: { status: 'Connecting…', state: 'pulsing' },
-  reconnecting: { status: 'Reconnecting…', state: 'pulsing' },
-  restoring: { status: 'Restoring…', state: 'pulsing' },
-  error: { status: 'Offline', state: 'dimmed' },
-  local: { status: 'Not connected', state: 'dimmed' },
+const CONNECTION_TEXT: Record<RemotePaneConnectionStatus, string> = {
+  connected: 'Connected',
+  connecting: 'Connecting…',
+  reconnecting: 'Reconnecting…',
+  restoring: 'Restoring…',
+  error: 'Offline',
+  local: 'Not connected',
 };
+
+const PRESENCE_STATE: Record<ConnectionPresence, MachineState> = {
+  connected: 'solid',
+  reconnecting: 'pulsing',
+  restoring: 'pulsing',
+  unreachable: 'dimmed',
+};
+
+/** The current machine, as the shared grace rule sees it: it pulses through the window, then dims. */
+function currentLive(connection: RemotePaneConnectionStatus, presence: ConnectionPresence): { status: string; state: MachineState } {
+  // Past the window the client is still retrying, so this is not yet "Offline".
+  const stillTrying = presence === 'unreachable' && connection !== 'error' && connection !== 'local';
+  return { status: stillTrying ? 'Can’t reach' : CONNECTION_TEXT[connection], state: PRESENCE_STATE[presence] };
+}
 
 /**
  * Saved machines in their saved order (the current one included even when it isn't saved, as in
  * the demo), then your own Tailscale machines this phone never connected to that are Ready or need
- * a password. State comes from the live connection for the current machine and from the Tailscale
- * list for the rest.
+ * a password. State comes from the shared connection presence (its grace rule) for the current
+ * machine and from the Tailscale list for the rest.
  */
-export function listMachines({ profiles, current, connection, tailnet }: {
+export function listMachines({ profiles, current, connection, presence, tailnet }: {
   profiles: readonly RemotePaneConnectionProfile[];
   current: RemotePaneConnectionProfile;
   connection: RemotePaneConnectionStatus;
+  presence: ConnectionPresence;
   tailnet: TailnetMachineList | undefined;
 }): Machine[] {
   const listed = tailnet?.ok ? tailnet.machines : [];
@@ -75,7 +91,7 @@ export function listMachines({ profiles, current, connection, tailnet }: {
     // The list probes a machine's Workspaces listener. That is a Tailscale profile's own endpoint, but a code
     // pairing answers elsewhere, so for one the entry only lends its OS and name.
     const probed = entry && profile.tailnetMachine ? entry : undefined;
-    const live = isCurrent ? CONNECTION[connection] : probed ? fromTailnet(probed.state) : { status: 'Saved', state: 'solid' as const };
+    const live = isCurrent ? currentLive(connection, presence) : probed ? fromTailnet(probed.state) : { status: 'Saved', state: 'solid' as const };
     return {
       key: profile.id,
       name: profile.label,

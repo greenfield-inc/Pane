@@ -5,6 +5,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import { useDaemon } from '@/daemon';
 import { PRIVACY_POLICY_URL } from '@/features/app/privacyPolicy';
 import { useAffordances } from '@/features/hosts/hostSettings';
+import { useConnectionPresence } from '@/features/hosts/useConnectionPresence';
 import type { Machine } from '@/features/machines/machines';
 import { MachineMark } from '@/features/machines/MachineMark';
 import { useMachines, useSelectMachine } from '@/features/machines/useMachines';
@@ -85,7 +86,7 @@ export default function SettingsScreen() {
 /** The current machine: its mark, name and state. Tapping it opens Machine details. */
 function HeroCard({ machine }: { machine: Machine }) {
   const theme = useTheme();
-  const { connection } = useDaemon();
+  const { presence, notice, retry } = useConnectionPresence();
   return (
     <View>
       <Pressable
@@ -103,13 +104,23 @@ function HeroCard({ machine }: { machine: Machine }) {
         <MachineMark os={machine.os} slot={machine.slot} state={machine.state} variant="tile" size={44} />
         <View style={styles.heroText}>
           <Text variant="title" numberOfLines={1} style={styles.heroName}>{machine.name}</Text>
-          <Text testID={`connection-status-${connection.status}`} variant="subhead" tone="muted" numberOfLines={1}>
-            {`${machine.os ?? 'Computer'} · ${connection.updateIntent && connection.status !== 'connected' ? 'Updating Pane…' : machine.status}`}
+          <Text testID={`connection-status-${presence}`} variant="subhead" tone="muted" numberOfLines={1}>
+            {`${machine.os ?? 'Computer'} · ${machine.status}`}
           </Text>
         </View>
         <Icon ios="info.circle" android="info" size={22} color={theme.colors.accentText} />
       </Pressable>
-      {connection.lastError ? <Text variant="footnote" tone="muted" style={styles.heroFooter}>{connection.lastError}</Text> : null}
+      {/* Past the grace window: the same message and Retry as the bar on home and in a Pane. */}
+      {notice ? (
+        <View style={styles.heroFooter}>
+          <Text testID="settings-connection-notice" variant="footnote" tone="muted">{notice.message}</Text>
+          {notice.canRetry ? (
+            <Pressable testID="settings-retry-connection" accessibilityRole="button" accessibilityLabel="Retry now" hitSlop={8} onPress={retry}>
+              <Text variant="footnote" tone="accent" style={styles.retry}>Retry now</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -157,6 +168,7 @@ const styles = StyleSheet.create({
   hero: { flexDirection: 'row', alignItems: 'center', gap: 14, padding: 18, borderWidth: StyleSheet.hairlineWidth },
   heroText: { flex: 1, gap: 2 },
   heroName: { fontSize: 22, fontWeight: '700' },
-  heroFooter: { paddingHorizontal: 4, paddingTop: 6 },
+  heroFooter: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', columnGap: 12, paddingHorizontal: 4, paddingTop: 6 },
+  retry: { fontWeight: '600' },
   addTile: { width: 30, height: 30, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
 });

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { ConnectionPresence } from '../../../shared/remoteClient/connectionPresence';
 import { buildMachineList, getHostingSummary, type MachineListInput } from './machineList';
 import {
   createDefaultRemoteDaemonHostRuntimeState,
@@ -109,6 +110,14 @@ describe('buildMachineList', () => {
       .toMatchObject({ subtitle: 'Linux · Reconnecting…', action: 'retry', presence: 'pulsing' });
     expect(byName(buildMachineList(input({ connectionState: onBuildBox('error') })), 'build-box'))
       .toMatchObject({ subtitle: 'Linux · Connection failed · Retry', action: 'retry', presence: 'dimmed' });
+  });
+
+  it('dims the active machine once the grace window passes, not only when the client gives up', () => {
+    const presence = (connection: ConnectionPresence) =>
+      byName(buildMachineList(input({ connectionState: onBuildBox('reconnecting'), connectionPresence: connection })), 'build-box').presence;
+    expect(presence('reconnecting')).toBe('pulsing');
+    expect(presence('restoring')).toBe('pulsing');
+    expect(presence('unreachable')).toBe('dimmed');
   });
 
   it('asks the active machine for its password again when it wants a new one', () => {

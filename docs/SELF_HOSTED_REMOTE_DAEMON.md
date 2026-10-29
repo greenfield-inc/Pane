@@ -350,7 +350,9 @@ When you connect to a host (Switch in Settings → Remote Access, Add a machine,
 the sidebar's machine menu, or Retry), the main area shows a checklist of
 the connection's stages. The first stage that fails shows what went wrong and a
 fix. The same checklist appears when Pane gives up reconnecting after five
-minutes, and from **Check connection** on the "Connection lost" banner.
+minutes, and from **Retry now** on the "Can't reach <machine>" banner. That
+banner appears once the connection has been down for 10 seconds; until then
+the workspace dims and the host dot pulses while Pane reconnects.
 
 | Stage | Fails when | Fix |
 |---|---|---|

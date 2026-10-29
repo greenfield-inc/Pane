@@ -1,6 +1,7 @@
 import { assignMachineColorSlots, preferredMachineColorSlot } from '../../../shared/utils/machineColor';
 import type { TailnetMachine, TailnetMachineList } from '../../../shared/types/workspaceAccess';
 import type { RemoteDaemonHostRuntimeState, RemotePaneConnectionProfile, RemotePaneConnectionState } from '../../../shared/types/remoteDaemon';
+import type { ConnectionPresence } from '../../../shared/remoteClient/connectionPresence';
 
 export type MachineOs = TailnetMachine['os'];
 
@@ -42,6 +43,8 @@ export interface MachineListInput {
   /** This computer's Tailscale name, when it has one. */
   localName: string | null;
   localOs: MachineOs | null;
+  /** The active connection after the grace window (`useConnectionPresence`); without it the raw status decides. */
+  connectionPresence?: ConnectionPresence;
 }
 
 const TAILNET_STATE_TEXT = {
@@ -68,8 +71,9 @@ function activeStateText(state: RemotePaneConnectionState): string {
   return 'Reconnecting…';
 }
 
-function activePresence(state: RemotePaneConnectionState): MachinePresence {
+function activePresence(state: RemotePaneConnectionState, presence: ConnectionPresence | undefined): MachinePresence {
   if (state.status === 'connected') return 'solid';
+  if (presence) return presence === 'unreachable' ? 'dimmed' : 'pulsing';
   return state.status === 'error' ? 'dimmed' : 'pulsing';
 }
 
@@ -82,7 +86,7 @@ function subtitle(os: MachineOs | null, ...parts: Array<string | false | null | 
  * machines in the order the listing gives, then saved Tailscale machines it did not list,
  * then hosts added with a connection code.
  */
-export function buildMachineList({ connectionState, profiles, tailnet, localName, localOs }: MachineListInput): MachineEntry[] {
+export function buildMachineList({ connectionState, profiles, tailnet, localName, localOs, connectionPresence }: MachineListInput): MachineEntry[] {
   const remote = connectionState.mode === 'remote';
   const activeProfileId = remote ? connectionState.activeProfileId : null;
   const listed = tailnet?.ok ? tailnet.machines : [];
@@ -119,7 +123,7 @@ export function buildMachineList({ connectionState, profiles, tailnet, localName
     return {
       ...entry,
       active,
-      presence: active ? activePresence(connectionState) : idle.presence,
+      presence: active ? activePresence(connectionState, connectionPresence) : idle.presence,
       stateText,
       subtitle: subtitle(entry.os, prefix, stateText, ...(active ? [] : idle.extra ?? [])),
       action: needsPassword ? 'password' : !active ? idle.action : connectionState.status === 'connected' ? 'none' : 'retry',

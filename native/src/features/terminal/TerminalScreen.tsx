@@ -18,7 +18,9 @@ import { isDemoProfile } from '../demo/demoHost';
 import { explainDemoLimit } from '../demo/explainDemoLimit';
 import { draftKey } from '../composer/composerDrafts';
 import { useComposerDraft } from '../composer/useComposerDraft';
+import { Dimmed } from '../hosts/ConnectionStatus';
 import { useAffordances } from '../hosts/hostSettings';
+import { useConnectionPresence } from '../hosts/useConnectionPresence';
 import { clearPaneNotifications } from '../notifications/device';
 import { useMarkPaneSeen } from '../panes/hooks';
 import { ShortcutsSheet } from '../shortcuts/ShortcutsSheet';
@@ -57,6 +59,7 @@ export function TerminalScreen({ paneId, session }: { paneId: string; session?: 
   const insets = useSafeAreaInsets();
   const keyboardVisible = useKeyboardVisible();
   const { client, profile } = useDaemon();
+  const { presence } = useConnectionPresence();
   const queryClient = useQueryClient();
 
   const pane = useInvokeQuery<{ name: string }>('sessions:get', [paneId], { enabled: !session });
@@ -120,6 +123,7 @@ export function TerminalScreen({ paneId, session }: { paneId: string; session?: 
         onSelect={selectPanel}
         onAdd={() => router.push({ pathname: '/pane/[paneId]/new-panel', params: session ? { paneId, sessionId: session.session.id } : { paneId } })}
         onStop={terminalActive ? () => terminalActions.current?.stop() : undefined}
+        stopDisabled={presence !== 'connected'}
       />
       {panel ? (
         <AgentConversationSurface key={panel.id} panel={panel} draft={draft} onChangeDraft={setDraft} confirmDraft={composer.confirmDelivery}>
@@ -178,6 +182,7 @@ function TerminalPanel({ panel, actions, draft, onChangeDraft, composer, uploads
 }) {
   const theme = useTheme();
   const { profile } = useDaemon();
+  const { presence } = useConnectionPresence();
   const terminal = useTerminal(panel.id, panel.sessionId);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [showAttach, setShowAttach] = useState(false);
@@ -192,7 +197,9 @@ function TerminalPanel({ panel, actions, draft, onChangeDraft, composer, uploads
     return () => clearTimeout(timer);
   }, [voiceSaved]);
   const [clipboardError, setClipboardError] = useState<string | null>(null);
-  const disabled = terminal.status !== 'ready';
+  // Input waits for a live terminal; until then its last screen stays up, dimmed.
+  const disabled = terminal.status !== 'ready' || presence !== 'connected';
+  const shown = terminal.status === 'ready' || terminal.hasContent;
 
   const sendKey = (data: string) => {
     terminal.scrollToBottom();
@@ -239,17 +246,35 @@ function TerminalPanel({ panel, actions, draft, onChangeDraft, composer, uploads
   return (
     <>
       <View style={[styles.fill, { backgroundColor: theme.terminal.background }]} onLayout={event => setTerminalHeight(event.nativeEvent.layout.height)}>
-        <View style={styles.screen}>
-          <TerminalTouchSurface rows={terminal.rows} onScrollLines={terminal.scrollLines}>
-            <TerminalWebView
-              ref={terminal.webView}
-              onMessage={terminal.onMessage}
-              screenText={terminal.screenText}
-              onProcessGone={terminal.reload}
-            />
-          </TerminalTouchSurface>
-        </View>
-        {terminal.status !== 'ready' ? (
+        <Dimmed dimmed={disabled} style={styles.fill}>
+          <View style={styles.screen}>
+            <TerminalTouchSurface rows={terminal.rows} onScrollLines={terminal.scrollLines}>
+              <TerminalWebView
+                ref={terminal.webView}
+                onMessage={terminal.onMessage}
+                screenText={terminal.screenText}
+                onProcessGone={terminal.reload}
+              />
+            </TerminalTouchSurface>
+          </View>
+          {shown && controllerShown ? (
+            <FloatingController onKey={sendKey} onScroll={terminal.scrollLines} layout={controllerLayout(terminalHeight, terminal.rows)} />
+          ) : null}
+          {shown && !terminal.atBottom ? (
+            <Pressable
+              testID="terminal-scroll-bottom"
+              accessibilityRole="button"
+              accessibilityLabel="Scroll to bottom"
+              onPress={terminal.scrollToBottom}
+              style={[styles.toBottom, { borderRadius: theme.radius.md, backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
+            >
+              <Icon ios="arrow.down" android="arrow_downward" size={14} color={theme.colors.textSecondary} />
+              <Text variant="callout" tone="secondary">Latest</Text>
+            </Pressable>
+          ) : null}
+        </Dimmed>
+        {/* Only a failure while connected replaces the screen; a spinner only covers a blank one. */}
+        {terminal.status === 'error' || (terminal.status === 'loading' && !terminal.hasContent) ? (
           <View style={[StyleSheet.absoluteFill, styles.center, { backgroundColor: theme.terminal.background }]}>
             {terminal.status === 'loading' ? (
               <ActivityIndicator testID="terminal-loading" color={theme.colors.textMuted} />
@@ -257,21 +282,6 @@ function TerminalPanel({ panel, actions, draft, onChangeDraft, composer, uploads
               <ErrorState title="Terminal unavailable" error={terminal.error} onRetry={terminal.retry} testID="terminal-error" />
             )}
           </View>
-        ) : null}
-        {terminal.status === 'ready' && controllerShown ? (
-          <FloatingController onKey={sendKey} onScroll={terminal.scrollLines} layout={controllerLayout(terminalHeight, terminal.rows)} />
-        ) : null}
-        {terminal.status === 'ready' && !terminal.atBottom ? (
-          <Pressable
-            testID="terminal-scroll-bottom"
-            accessibilityRole="button"
-            accessibilityLabel="Scroll to bottom"
-            onPress={terminal.scrollToBottom}
-            style={[styles.toBottom, { borderRadius: theme.radius.md, backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
-          >
-            <Icon ios="arrow.down" android="arrow_downward" size={14} color={theme.colors.textSecondary} />
-            <Text variant="callout" tone="secondary">Latest</Text>
-          </Pressable>
         ) : null}
       </View>
       <View style={[styles.inputArea, { backgroundColor: theme.colors.surface, borderTopColor: theme.colors.border }]}>

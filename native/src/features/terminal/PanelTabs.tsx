@@ -5,6 +5,8 @@ import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useTheme } from '@/theme';
 import { Icon, Text } from '@/ui';
 
+import { DIMMED_OPACITY } from '../hosts/ConnectionStatus';
+
 export interface PanelTabsProps {
   panels: readonly ToolPanel[];
   selectedId: string | null;
@@ -12,13 +14,15 @@ export interface PanelTabsProps {
   onAdd: () => void;
   /** Sends Ctrl+C to the open terminal; hidden when there is none. */
   onStop?: () => void;
+  /** Shown but dimmed and untappable while the machine is not connected, since Ctrl+C could not be sent. */
+  stopDisabled?: boolean;
 }
 
 /**
  * The web app's tool tabs: bordered tabs on a raised strip, a square + that
  * adds one, and Stop (Ctrl+C) in red at the end, always fully visible.
  */
-export function PanelTabs({ panels, selectedId, onSelect, onAdd, onStop }: PanelTabsProps) {
+export function PanelTabs({ panels, selectedId, onSelect, onAdd, onStop, stopDisabled = false }: PanelTabsProps) {
   const theme = useTheme();
   const { colors } = theme;
   return (
@@ -87,6 +91,8 @@ export function PanelTabs({ panels, selectedId, onSelect, onAdd, onStop }: Panel
           accessibilityRole="button"
           accessibilityLabel="Stop"
           accessibilityHint="Sends Ctrl+C to stop the running command"
+          accessibilityState={{ disabled: stopDisabled }}
+          disabled={stopDisabled}
           hitSlop={6}
           onPress={() => {
             void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -95,6 +101,7 @@ export function PanelTabs({ panels, selectedId, onSelect, onAdd, onStop }: Panel
           style={({ pressed }) => [
             styles.stop,
             { borderColor: colors.danger, backgroundColor: pressed ? colors.surfacePressed : colors.dangerSoft },
+            stopDisabled && styles.stopDisabled,
           ]}
         >
           <Icon ios="stop.fill" android="stop" size={10} color={colors.danger} />
@@ -139,6 +146,7 @@ const styles = StyleSheet.create({
     borderRadius: 15,
     borderWidth: 1,
   },
+  stopDisabled: { opacity: DIMMED_OPACITY },
   stopLabel: { fontWeight: '600' },
   add: { width: 30, height: 30, marginBottom: 3, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
 });
