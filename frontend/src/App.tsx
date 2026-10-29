@@ -1,6 +1,8 @@
 import { RemoteConnectionBanner } from './components/RemoteConnectionBanner';
 import { ConnectionChecklist } from './components/ConnectionChecklist';
 import { useRemoteRuntimeState } from './hooks/useRemoteRuntimeState';
+import { useConnectionPresence } from './hooks/useConnectionPresence';
+import { RemoteWorkspace } from './components/RemoteWorkspace';
 import { TailnetHttpsBanner } from './components/TailnetHttpsBanner';
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useIPCEvents } from './hooks/useIPCEvents';
@@ -140,7 +142,9 @@ function App() {
   const terminalShortcuts = appConfig?.terminalShortcuts ?? EMPTY_TERMINAL_SHORTCUTS;
   const { isVisible: shortcutHintsVisible } = useShortcutHintsOverlay();
   useFocusedSurfaceScrolling(activeSessionId);
-  const connectionCheck = useRemoteRuntimeState().connectionState.check;
+  const { connectionState } = useRemoteRuntimeState();
+  const shownConnectionCheck = connectionState.check?.outcome !== 'passed' ? connectionState.check ?? null : null;
+  const { presence: connectionPresence } = useConnectionPresence(connectionState);
 
   const openSettings = useCallback((target?: SettingsTarget) => {
     if (target) {
@@ -1006,12 +1010,13 @@ function App() {
             onUpdateAvailableClick={() => void openAvailableUpdate()}
           />
         </div>
-        <div className="relative flex min-h-0 min-w-0 flex-1">
-          {connectionCheck && connectionCheck.outcome !== 'passed'
-            ? <ConnectionChecklist check={connectionCheck} onOpenSettings={openSettings} onUpdatePane={() => void updatePane()} />
+        {/* The checklist carries its own fix buttons, so it never dims. */}
+        <RemoteWorkspace dimmed={connectionPresence !== 'connected' && !shownConnectionCheck}>
+          {shownConnectionCheck
+            ? <ConnectionChecklist check={shownConnectionCheck} onOpenSettings={openSettings} onUpdatePane={() => void updatePane()} />
             : <SessionView />}
           <PaneChatIntroOffer suppressed={isSettingsOpen || isOnboardingOpen || isWelcomeOpen} />
-        </div>
+        </RemoteWorkspace>
         <NotifyInPaneStrip left={sidebarCollapsed ? 48 : sidebarWidth} />
         </div>
         <OnboardingDialog

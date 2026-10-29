@@ -5,6 +5,7 @@ import type {
   RemotePaneConnectionProfile,
   RemotePaneConnectionState,
 } from '../../../shared/types/remoteDaemon';
+import type { ConnectionPresence } from '../../../shared/remoteClient/connectionPresence';
 
 interface RemoteHostRuntimePresentation {
   dotClassName: string;
@@ -157,13 +158,14 @@ function getRemoteHostRuntimePresentation(
 export function getRemoteFooterStatus(
   connectionState: RemotePaneConnectionState,
   hostState: RemoteDaemonHostRuntimeState,
+  presence: ConnectionPresence,
 ): RemoteFooterStatus {
   const lastSeenText = formatRemoteLastSeen(connectionState.lastSeenAt, 'inline');
 
   if (connectionState.mode === 'remote') {
     if (connectionState.status === 'error') {
       return {
-        dotClassName: 'bg-status-error',
+        dotClassName: getRemoteConnectionDotClassName(presence),
         title: 'Remote connection failed',
         description: [
           connectionState.lastError ?? 'Pane could not connect to the selected remote profile.',
@@ -175,7 +177,7 @@ export function getRemoteFooterStatus(
 
     if (connectionState.status === 'connected') {
       return {
-        dotClassName: getRemoteConnectionDotClassName(connectionState),
+        dotClassName: getRemoteConnectionDotClassName(presence),
         title: `Connected to ${connectionState.activeProfileLabel ?? 'remote runtime'}`,
         description: connectionState.activeBaseUrl
           ? `Worktrees and terminals run on ${connectionState.activeBaseUrl}.${lastSeenText ? ` ${lastSeenText}.` : ''}`
@@ -185,7 +187,7 @@ export function getRemoteFooterStatus(
     }
 
     return {
-      dotClassName: getRemoteConnectionDotClassName(connectionState),
+      dotClassName: getRemoteConnectionDotClassName(presence),
       title: 'Connecting to remote runtime',
       description: [
         connectionState.activeBaseUrl ?? 'Pane is trying to connect to the selected remote profile.',
@@ -227,16 +229,18 @@ export interface RemoteHostSwitcherModel {
   hostingSummary: string | null;
 }
 
-function getRemoteConnectionDotClassName(state: RemotePaneConnectionState): string {
-  if (state.status === 'connected') return 'bg-status-success';
-  if (state.status === 'error') return 'bg-status-error';
-  return 'bg-status-warning animate-pulse';
+/** One neutral dot: solid when connected, pulsing while reconnecting, dimmed when unreachable. Opacity only, so its box never changes. */
+function getRemoteConnectionDotClassName(presence: ConnectionPresence): string {
+  if (presence === 'connected') return 'bg-text-secondary';
+  if (presence === 'unreachable') return 'bg-text-secondary opacity-40';
+  return 'bg-text-secondary animate-pulse';
 }
 
 export function getRemoteHostSwitcherModel(
   connectionState: RemotePaneConnectionState,
   hostState: RemoteDaemonHostRuntimeState,
   profiles: RemotePaneConnectionProfile[],
+  presence: ConnectionPresence,
 ): RemoteHostSwitcherModel {
   const remote = connectionState.mode === 'remote';
   const clientCount = hostState.connectedClients.length;
@@ -247,7 +251,7 @@ export function getRemoteHostSwitcherModel(
   return {
     visible: remote || profiles.length > 0,
     label: remote ? connectionState.activeProfileLabel ?? 'Remote host' : 'This computer',
-    dotClassName: remote ? getRemoteConnectionDotClassName(connectionState) : null,
+    dotClassName: remote ? getRemoteConnectionDotClassName(presence) : null,
     selectedId: remote ? connectionState.activeProfileId ?? LOCAL_RUNTIME_ID : LOCAL_RUNTIME_ID,
     hostingSummary,
   };
