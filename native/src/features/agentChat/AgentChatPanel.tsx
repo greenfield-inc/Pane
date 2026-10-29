@@ -1,7 +1,7 @@
 import { AssistantRuntimeProvider, ThreadPrimitive, generateId, useAuiState, useExternalStoreRuntime, type ThreadState } from '@assistant-ui/react-native';
 import { LegendList, type LegendListRef } from '@legendapp/list/react-native';
 import { useEffect, useRef, useState, type RefObject } from 'react';
-import { ActivityIndicator, Image, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { ActivityIndicator, Image, Keyboard, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { useReducedMotion } from 'react-native-reanimated';
 
 import { permissionToolId, toAssistantMessage } from '@shared/agentChatPresentation';
@@ -93,6 +93,7 @@ export function AgentChatPanel({ chat, draft, onChangeDraft, confirmDraft }: { c
   const messages = (view?.transcript?.messages ?? []).filter(message => !message.id.startsWith('update:'));
   const send = async () => {
     if (sendDisabled || (!draft.trim() && !image)) return;
+    Keyboard.dismiss();
     await chat.send({ operationId: generateId(), generation: view?.conversation?.generation ?? 0, text: draft, images: image ? [image] : undefined }, confirmDraft);
   };
   const runtime = useExternalStoreRuntime({ messages, convertMessage: toAssistantMessage, isRunning: view?.running ?? false, isLoading: !view, isSendDisabled: sendDisabled, unstable_persistsHistory: true, unstable_enableToolInvocations: false, onNew: send, onCancel: chat.cancel });
