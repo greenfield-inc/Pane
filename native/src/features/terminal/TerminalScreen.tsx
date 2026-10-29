@@ -5,6 +5,7 @@ import { useEffect, useEffectEvent, useRef, useState, type Dispatch, type RefObj
 import { ActionSheetIOS, ActivityIndicator, Alert, Keyboard, KeyboardAvoidingView, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { PaneError } from '@shared/paneError';
 import { RemoteUnconfirmedResultError } from '@shared/remoteClient';
 import type { OrchestrationSessionView } from '@shared/types/orchestrationSession';
 import type { TerminalPanelState, ToolPanel } from '@shared/types/panels';
@@ -249,7 +250,8 @@ function TerminalPanel({ panel, actions, draft, onChangeDraft, composer, uploads
     // The client resends through a drop, so a failure here is final. Say whether it may have landed.
     void terminal.sendInput(`${text}${KEYS.enter}`).catch((error: unknown) => {
       onChangeDraft(text);
-      setSendError(error instanceof RemoteUnconfirmedResultError
+      const mayHaveLanded = error instanceof RemoteUnconfirmedResultError || (error instanceof PaneError && error.code === 'ERR_REMOTE_DELIVERY_UNKNOWN');
+      setSendError(mayHaveLanded
         ? 'Not confirmed: this may have reached the terminal. Check it before sending again.'
         : 'Not sent. Your text is back in the box; send it again when connected.');
     });
