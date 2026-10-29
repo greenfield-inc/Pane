@@ -1,5 +1,5 @@
 import { decodeUpdateIntent, type RemoteUpdateIntent } from './updateIntent';
-import { REMOTE_READ_CHANNELS, REMOTE_RESTORE_CHANNELS } from './readChannels';
+import { REMOTE_READ_CHANNELS, REMOTE_RESTORE_CHANNELS, REMOTE_STREAMLESS_CHANNELS } from './readChannels';
 import { RecoveryCycle } from './recoveryCycle';
 import type { ParsedSseEvent } from '../sseParser';
 import {
@@ -288,14 +288,14 @@ export class RemoteDaemonClient {
   }
 
   private async invokeRequest<T = unknown>(channel: string, args: unknown[], inputSignal?: AbortSignal): Promise<T> {
-    if (this.state.status !== 'connected' && !REMOTE_READ_CHANNELS.has(channel) && !REMOTE_RESTORE_CHANNELS.has(channel)) {
+    const mutation = !REMOTE_READ_CHANNELS.has(channel) && !REMOTE_RESTORE_CHANNELS.has(channel) && !REMOTE_STREAMLESS_CHANNELS.has(channel);
+    if (this.state.status !== 'connected' && mutation) {
       throw new PaneError('ERR_REMOTE_OFFLINE', 'The action was not sent while the workspace is disconnected or restoring.', 'Wait for restoration before submitting it.');
     }
     let lastError: Error | null = null;
     let dispatched = false;
     const connection = this.abortController;
     const stream = this.streamController;
-    const mutation = !REMOTE_READ_CHANNELS.has(channel) && !REMOTE_RESTORE_CHANNELS.has(channel);
     const signal = inputSignal ?? connection?.signal;
     const retryableRead = REMOTE_READ_CHANNELS.has(channel);
     const attempts = retryableRead ? INVOKE_ATTEMPTS : 1;
@@ -569,7 +569,8 @@ export function isAuthFailureResponse(status: number): boolean {
 
 export function getRemoteAuthFailureMessage(serverMessage?: string, code?: string | null): string {
   // A codeless host explains itself (wrong login, password needed); no code is involved.
-  if (code?.startsWith('ERR_WORKSPACE_') && serverMessage) return serverMessage;
+  // So does a host refusing one command to someone other than its owner.
+  if ((code?.startsWith('ERR_WORKSPACE_') || code?.endsWith('_OWNER_REQUIRED')) && serverMessage) return serverMessage;
   const detail = serverMessage && serverMessage !== 'Remote request failed'
     ? ` (${serverMessage})`
     : '';

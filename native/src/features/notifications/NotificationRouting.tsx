@@ -5,8 +5,6 @@ import { useEffect } from 'react';
 import { openHref, parsePushTarget } from '@/features/links/links';
 import { useClearResolvedNotifyAlerts } from '@/features/notify/hooks';
 
-import { usePushSetup } from './usePushSetup';
-
 let handledResponseId: string | null = null;
 
 /**
@@ -29,9 +27,8 @@ export function NotificationTapRouter() {
   return null;
 }
 
-/** Registers this phone for the active host's alerts and removes answered questions' alerts. Render it inside `DaemonProvider`. */
-export function PushRegistration() {
-  usePushSetup();
+/** Removes the active host's alerts for questions answered elsewhere. Render it inside `DaemonProvider`. */
+export function NotifyAlertCleanup() {
   useClearResolvedNotifyAlerts();
   return null;
 }

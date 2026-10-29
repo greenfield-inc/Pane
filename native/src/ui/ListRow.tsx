@@ -9,6 +9,8 @@ import { Text } from './Text';
 export interface ListRowProps {
   title: string;
   subtitle?: string;
+  /** Holds the subtitle at exactly this many lines, so swapping its text never resizes the row. */
+  subtitleLines?: number;
   /** Leading slot, e.g. a status dot or icon. */
   leading?: ReactNode;
   /** Trailing slot; `chevron` draws the platform disclosure indicator. */
@@ -19,7 +21,7 @@ export interface ListRowProps {
   testID?: string;
 }
 
-export function ListRow({ title, subtitle, leading, trailing, onPress, onLongPress, destructive, testID }: ListRowProps) {
+export function ListRow({ title, subtitle, subtitleLines, leading, trailing, onPress, onLongPress, destructive, testID }: ListRowProps) {
   const theme = useTheme();
   return (
     <Pressable
@@ -42,7 +44,16 @@ export function ListRow({ title, subtitle, leading, trailing, onPress, onLongPre
       {leading ? <View style={styles.leading}>{leading}</View> : null}
       <View style={styles.body}>
         <Text variant="body" tone={destructive ? 'danger' : 'primary'} numberOfLines={1}>{title}</Text>
-        {subtitle ? <Text variant="footnote" tone="muted" numberOfLines={2}>{subtitle}</Text> : null}
+        {subtitle ? (
+          <Text
+            variant="footnote"
+            tone="muted"
+            numberOfLines={subtitleLines ?? 2}
+            style={subtitleLines ? { height: subtitleLines * theme.typography.footnote.lineHeight } : undefined}
+          >
+            {subtitle}
+          </Text>
+        ) : null}
       </View>
       {trailing === 'chevron'
         ? <Icon ios="chevron.right" android="chevron_right" size={14} />

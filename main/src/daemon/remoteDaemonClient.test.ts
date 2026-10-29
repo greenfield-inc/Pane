@@ -265,6 +265,22 @@ describe('RemoteDaemonClient with the fetch event stream transport', () => {
     client.disconnect();
   });
 
+  it.each(['credentials:shared:get', 'credentials:shared:apply', 'mobile:push-register', 'mobile:push-controls', 'mobile:push-revoke'])(
+    'sends %s from a client that never opened the event stream', async channel => {
+      const host = createFakeHost();
+      const client = createClient(host);
+      await expect(client.invoke(channel, [{}])).resolves.toBeNull();
+      expect(host.requests.filter(request => request.url.endsWith('/invoke'))).toHaveLength(1);
+    },
+  );
+
+  it('passes a host\'s own refusal of a command through, not the pairing-code advice', async () => {
+    const host = createFakeHost();
+    host.onInvoke(() => Response.json({ ok: false, error: { code: 'ERR_MOBILE_PUSH_OWNER_REQUIRED', message: 'Only this computer\'s owner can get its alerts on a phone.' } }, { status: 403 }));
+    const client = createClient(host);
+    await expect(client.invoke('mobile:push-register', [{}])).rejects.toThrow('Only this computer\'s owner can get its alerts on a phone.');
+  });
+
   it('cuts an event stream request that never answers', async () => {
     const host = createFakeHost();
     host.hangEvents(true);
