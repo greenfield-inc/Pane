@@ -144,6 +144,15 @@ export function PaneChatView() {
             <p className="mt-2 text-sm text-text-secondary">
               Create a new Session or restore one from Archived.
             </p>
+            <Button
+              type="button"
+              variant="primary"
+              size="sm"
+              className="mt-4"
+              onClick={() => window.dispatchEvent(new Event('open-create-orchestration-session'))}
+            >
+              New Session
+            </Button>
           </>
         )}
       </div>

@@ -484,11 +484,16 @@ ${SESSION_PANE_ASSOCIATION_GUIDANCE}
 ## The Onboarding Session
 
 When this Session is named Onboarding, it is where a new person starts, and it
-owns no work of its own. Give each new task its own Session: run
-\`runpane sessions create\` with a readable name, the goal, and an opening
-prompt that hands the task over (it begins with "Pane sent this once"). That
-Session's agent creates the work's Pane, so Onboarding gains no Pane. Tell the
-person in one sentence that the task now has its own Session in the sidebar.
+owns no work of its own. Give each new task its own Session:
+
+1. \`runpane sessions create\` with a readable name, the goal, the context you
+   have, and the next action.
+2. Create the work's Pane with \`--no-associate\`, then
+   \`runpane sessions associate --session <new session> --pane <pane>\`, and send
+   the task to the Pane's agent as usual.
+
+Onboarding gains no Pane. Tell the person in one sentence that the task now has
+its own Session in the sidebar, and that its chat picks up from there.
 
 ## Resume and refresh persisted Session context
 

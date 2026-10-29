@@ -270,7 +270,7 @@ Use it for the work that spans panes:
 Add this repo, create three worktree panes for the next features, start Codex in each one, and keep a separate review tab ready for every PR.
 ```
 
-Already working in other agent tools? Say "migrate to Pane" and Pane Chat finds your Claude Code, Codex, OpenCode, Cursor and Conductor sessions (or anything similar), opens each one in a Pane tab with its own agent's resume, and checks that it continues where it left off. On a fresh install with no repositories, Pane Chat offers this once by itself. See [Bring your existing sessions into Pane](docs/SESSIONS.md#bring-your-existing-sessions-into-pane).
+Already working in other agent tools? Say "migrate to Pane" and Pane Chat finds your Claude Code, Codex, OpenCode, Cursor and Conductor sessions (or anything similar), opens each one in a Pane tab with its own agent's resume, and checks that it continues where it left off. On a new install, the first-run screen asks which agent you use and offers to bring your recent sessions in; Yes opens the Onboarding Session, which brings them in, groups them into Sessions, and opens a Start here page. See [Bring your existing sessions into Pane](docs/SESSIONS.md#bring-your-existing-sessions-into-pane).
 
 Pane Chat keeps the human discussion at the orchestrator level, captures work as tickets or briefs, then hands authorized implementation to Claude, Codex, or Cursor agents in Panes through RunPane.
 

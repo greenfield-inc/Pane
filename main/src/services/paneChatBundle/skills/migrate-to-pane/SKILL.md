@@ -1,6 +1,6 @@
 ---
 name: migrate-to-pane
-description: Bring the agent sessions a person already has (Claude Code, Codex, OpenCode, Cursor, Conductor, or any similar tool) into Pane, each opened in a Pane tab with its own agent's resume, verified, and reported. Use for "migrate to Pane", "bring my sessions into Pane", "import my Claude/Codex/Cursor chats", or after the person says yes to Pane's first-run offer.
+description: Bring the agent sessions a person already has (Claude Code, Codex, OpenCode, Cursor, Conductor, or any similar tool) into Pane, each opened in a Pane tab with its own agent's resume, verified, grouped into Sessions, and ending in a Start here page. Use for "migrate to Pane", "bring my sessions into Pane", "import my Claude/Codex/Cursor chats", when the Onboarding Session's first prompt says the person said Yes on Pane's first-run screen, or when it asks for a Start here page without a migration.
 ---
 
 # Migrate to Pane
@@ -17,6 +17,38 @@ another, treat it the same way.
 The bar is the [continuity check](references/continuity.md). Read it before you
 start. A session is reported as continued only when it passes.
 
+## Two ways in
+
+- **First-run Yes.** The Onboarding Session's first prompt says the person said
+  Yes on Pane's first-run screen. That Yes is their confirmation of the
+  preselected set: sessions running now or active in the last 7 days. Start at
+  once, show no list and ask nothing before placing. Everything older is left
+  out and listed as such on the Start here page. Steps 1, 3, 4, 5 and 6 apply.
+- **Asked in a chat** ("migrate to Pane"). Show the list and wait for the
+  person to confirm it (step 2) before placing anything. Steps 5 and 6 apply
+  when this chat is the Onboarding Session.
+
+A first prompt that asks for a Start here page without a migration follows
+[Start here without a migration](#start-here-without-a-migration).
+
+## How it reads in the chat
+
+The person sees a few plain lines, not a log:
+
+- "Found 18 sessions in 4 repos."
+- "Opening lev-web, 5 of 18."
+- "All 18 are open. Grouping them into Sessions."
+
+No session ids, hashes, paths, commands or command output in any message. Keep
+those in the migration record and the Start here page's details.
+
+The first time you create a Session, a Pane and a tab in this conversation,
+say in one sentence what it is, then carry on:
+
+- Session: "A Session is one task's home: its chat and the Panes doing the work."
+- Pane: "A Pane is one branch in its own folder."
+- Tab: "A tab is one agent or page inside a Pane."
+
 ## Ground rules
 
 - **Never disturb live work.** Never write to, append to, stop, or send input
@@ -27,7 +59,8 @@ start. A session is reported as continued only when it passes.
   tool resumes or forks, read its docs and `--help`. If you must try a command,
   try it on a throwaway session you create for that purpose and then remove.
   Never resume, fork, prompt or open one of the person's sessions to see what
-  happens, and never touch a session before the person has confirmed the list.
+  happens, and never touch a session before the person has confirmed the list
+  or said Yes on the first-run screen.
 - **Two agents never edit one folder.** A session still running elsewhere is
   forked into a worktree of its own. When you can't tell whether a session is
   still running, treat it as running: a wrong guess then costs a worktree, never
@@ -112,9 +145,9 @@ files.
   naming its id) and every session the migration record holds in Pane (any
   result other than "not continued").
 
-## 2. Show the list and confirm
+## 2. Show the list and confirm (asked in a chat)
 
-Show one list, grouped by repository. For each session: tool, title, branch,
+Skip this step on the first-run path. Show one list, grouped by repository. For each session: tool, title, branch,
 last active, and "running" when it is. Preselect sessions that are running or
 were active in the last 7 days. List older ones unselected, so the person can
 add them. Show "already in Pane" ones without a way to select them, and list
@@ -126,7 +159,10 @@ tabs, forks or trial runs, and no change of any kind to a session's files.
 ## 3. Place each chosen session
 
 Register each repository once with `runpane repos add --path <repo root>`
-(skip it when `runpane repos list --json` already has it). Then, per checkout:
+(skip it when `runpane repos list --json` already has it). Name each Pane
+"<project> · <branch>". From the Onboarding Session, pass `--no-associate` to
+every adopt and create, so each Pane can join its own Session in step 5. Then,
+per checkout:
 
 - **Idle session, checkout is the repository's main checkout or one of its
   worktrees**: adopt the checkout in place. The first session in a checkout
@@ -175,14 +211,62 @@ Run the fork command first and read the fork's id from its output or store; only
 then run the command that opens the fork's Pane, so the tab resumes that id.
 Write each session to the migration record as soon as its tab exists.
 
-## 4. Check, then report
+## 4. Check
 
 Run the [continuity check](references/continuity.md) on every tab you opened,
 send any "moved" messages after it passes, and keep going when one session
 fails: the rest of the run still completes.
 
-Finish with one report, grouped by repository: each session as **continued**,
-**continued as a fork**, or **not continued**, with its Pane and tab, and for
-anything not continued, what happened, why, and the next step. Mention the
-sessions you left unselected and how to bring them in later: say "migrate to
-Pane" again.
+Outside the Onboarding Session, finish with one report, grouped by repository:
+each session as **continued**, **continued as a fork**, or **not continued**,
+with its Pane and tab, and for anything not continued, what happened, why, and
+the next step. Mention the sessions you left unselected and how to bring them
+in later: say "migrate to Pane" again. In the Onboarding Session, steps 5 and 6
+replace that report.
+
+## 5. Group the work into Sessions
+
+One Session per workstream: Panes on the same branch or the same topic belong
+together. For each workstream:
+
+- Read its transcripts' last turns and write a readable name, its goal, its
+  context, and its next action. Create it with `runpane sessions create`
+  (`name`, `goal`, `context`, `nextAction`). Its chat opens on that next step
+  the first time the person opens it.
+- Associate its Panes with `runpane sessions associate`, and pin the Sessions
+  with work in the last day with `runpane sessions pin`.
+
+Name every Pane "<project> · <branch>" (`runpane panes rename` for any that
+already existed under another name).
+
+## 6. Make the Start here page
+
+Copy the template [references/start-here.html](references/start-here.html) and
+fill it as its comments say. Save it as
+`<Pane data directory>/migrate-to-pane/start-here.html`, next to the record,
+and open it beside this chat with
+`runpane panels open --file <that path> --source agent --yes`.
+
+- **Workstreams**: one row per Session from step 5, its name linked to the
+  link `runpane links create --session <id> --json` returns, then its goal and
+  next action in one line each.
+- **Receipt**: every session from step 1, grouped by repository, with its
+  result, and every session left out, with why. It matches the migration
+  record exactly: same sessions, same results.
+- **What to try next**: from the template's ladder, the 3 to 5 rungs that fit
+  what you saw, in ladder order. Each try-now prompt names one of the person's
+  real repos or branches.
+
+End the chat with two or three plain lines: how many sessions came over, how
+many Sessions hold them, that Start here is open beside the chat, and then
+"Want me to do any of these now? Say the number." When the person answers with
+a number, start that rung's try-now task in this chat.
+
+## Start here without a migration
+
+When the first prompt says the person said Not now, or Pane found no sessions,
+bring nothing in. Make the Start here page for the projects they opened: the
+template without the receipt section, workstreams only for work already in
+Pane (often none: say so in one line), and try-now prompts that name their
+repositories. Save and open it as step 6 says, and end the chat the same way.
+If they opened no project, the try-now prompts start with adding one.

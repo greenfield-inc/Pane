@@ -25,6 +25,15 @@ and delegation when authorized work benefits from it. No particular skill,
 ticket system, model, or Agent Farm installation is required. Users can select
 skills and workflows without Pane imposing an implementation pipeline.
 
+## The Onboarding Session
+
+On a new data folder, the default Session is named Onboarding. It is where a
+new person starts: the first-run screen hands off to it (see [Bring your
+existing sessions into Pane](#bring-your-existing-sessions-into-pane)), and its
+agent gives each later task a Session of its own. Archive it like any Session
+when you are done with it; Pane does not recreate it. Installs from before the
+first-run screen keep the name Pane Chat.
+
 ## Upgrading from Pane Chat
 
 Existing Pane Chat opens under Sessions automatically, keeping its name and all
@@ -297,11 +306,36 @@ not archived; archive it from the same menu when you are done with it.
 
 ## Bring your existing sessions into Pane
 
-Pane itself can bring idle sessions in with one click. While you have fewer
-than two Panes, Home shows a "Bring your sessions into Pane" card when it finds
-recent sessions from Claude Code, Codex, Conductor, Superset, Herdr, Emdash,
-Orca or T3 Code on this computer. Settings → AI & Agents → "Bring sessions into
-Pane" → **Find sessions** opens the same card at any time.
+On a new install, Pane's first-run screen asks two things before anything
+else:
+
+1. **Which agent do you use?** Claude Code, Codex or Cursor, showing only the
+   agents this computer supports. An agent whose CLI Pane can't find says "Not
+   found on this computer", with an install link. The pick becomes the
+   Onboarding Session's agent and the default for new Sessions (Settings → AI &
+   Agents).
+2. **Bring your N sessions into Pane?** Pane looks for sessions from Claude
+   Code, Codex, Conductor, Superset, Herdr, Emdash, Orca and T3 Code on this
+   computer and counts those running now or used in the last 7 days. Pane opens
+   them in place and deletes nothing.
+
+**Yes** is the confirmation: the screen closes, the Onboarding Session opens,
+and its agent runs the `migrate-to-pane` skill below on that set with no list
+to confirm. It groups the work into one Session per workstream, says what a
+Session, a Pane and a tab are the first time it makes one, and ends by opening
+a Start here page beside the chat. The page lists your workstreams, a receipt
+of what came over and what was left out (with why), what you can undo, the
+words Pane uses, and 3 to 5 things to try next with prompts naming your own
+repositories. The page is saved as `<PANE_DIR>/migrate-to-pane/start-here.html`.
+
+**Not now**, or nothing found, shows "Open your project" (your repositories, a
+folder, a GitHub clone, or a sample repository). Opening one, or skipping, also
+lands in the Onboarding Session, whose agent makes a Start here page for that
+project, without the receipt. Without Git, the screen shows only how to
+install it.
+
+Settings → AI & Agents → "Bring sessions into Pane" → **Find sessions** brings
+idle sessions in with one click at any time:
 
 - Pane reads each tool's session list locally (metadata only; SQLite stores
   from a temporary copy) and lists sessions active in the last 30 days, one row
@@ -316,11 +350,11 @@ Pane" → **Find sessions** opens the same card at any time.
   whose agent exits without resuming is closed and reported, and a new Pane
   whose sessions all failed is removed. A tab waiting at the agent's
   folder-trust prompt, or whose agent is still starting, stays open for you.
-- **Not now** or **Done** on Home hides the card for good. The card and the
-  skill share the record below, so neither brings a session in twice.
+- The card and the skill share the record below, so neither brings a session
+  in twice.
 
-Say "migrate to Pane" in any Session, or "yes" to the first-run offer above, and
-the `migrate-to-pane` skill brings the conversations you already have in other
+Say "migrate to Pane" in any Session, or Yes on the first-run screen, and the
+`migrate-to-pane` skill brings the conversations you already have in other
 agent tools (Claude Code, Codex, OpenCode, the Cursor agent, Conductor, or
 anything similar) into Pane tabs:
 
@@ -328,6 +362,8 @@ anything similar) into Pane tabs:
   running in other terminals or editors, and shows one list grouped by
   repository. Running sessions and those active in the last 7 days are
   preselected; older ones can be added. Nothing is created until you confirm.
+  After a Yes on the first-run screen, it places that preselected set without
+  showing the list.
 - An idle session's checkout is adopted in place (`runpane panes adopt
   --resume`); several sessions in one checkout become tabs in one Pane. A
   session still running elsewhere is forked with its own tool into a new Pane
@@ -353,14 +389,14 @@ interrupting work the user has already authorized.
 
 There are two exceptions, each at most once per Pane data directory.
 
-The first time the built-in Pane Chat Session launches while Pane has no Panes
-and no repositories (the sample repository the onboarding dialog clones doesn't
-count), Pane sends it one prompt, which says that Pane sent it and why. The
-agent then asks whether to bring your existing agent sessions into Pane, and
-starts only when you say yes. Pane records the offer in the
-`pane_chat_migrate_offer_sent` user preference once a launch has sent it, so a
-restart or an agent switch never sends it again. The Home card above sets the
-same preference when it is first shown, so you get one offer, not two. See
+The first time the Onboarding Session launches after the first-run screen,
+Pane sends it one prompt, which says that Pane sent it and why. After Yes, the
+prompt tells the agent to bring in the sessions you said yes to; after Not now,
+to make a Start here page for the project you opened. The screen saves your
+answer in the `onboarding_handoff` user preference (`migrate` or `project`).
+Pane records the prompt in the `pane_chat_migrate_offer_sent` user preference
+once a launch has sent it, so a restart or an agent switch never sends it
+again. Installs that never showed the screen get no prompt. See
 [Bring your existing sessions into Pane](#bring-your-existing-sessions-into-pane).
 
 Pane may also offer Pane Chat once, in a card over a Pane, after you have
