@@ -22,7 +22,9 @@ describe('opening a repository', () => {
     db.initialize();
     db.createProject('Repo', repo);
     manager = new SessionManager(db);
+    // SAFETY: getOrCreateMainRepoSession only awaits these panels; it never reads the returned panel.
     vi.spyOn(panelManager, 'ensureExplorerPanel').mockResolvedValue(undefined as never);
+    // SAFETY: as above, the returned diff panel is never read.
     vi.spyOn(panelManager, 'ensureDiffPanel').mockResolvedValue(undefined as never);
     vi.spyOn(panelManager, 'getPanelsForSession').mockReturnValue([]);
   });
