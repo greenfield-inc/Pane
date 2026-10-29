@@ -40,8 +40,8 @@ export interface TerminalInputBarProps {
 /**
  * One box holds every composer action: the draft on top, then Attach, Paste,
  * Shortcuts and Copy on the left and the mic and Send/Enter on the right.
- * Return adds a line; the button sends. While dictating, the words heard so
- * far show in the box, dimmed and read-only.
+ * Return and the button both send, and sending closes the keyboard. While
+ * dictating, the words heard so far show in the box, dimmed and read-only.
  */
 export function TerminalInputBar({
   draft, onChangeDraft, onSubmit, voice, onAttach, onPaste, onShortcuts, onCopy, onSetupVoice, controllerShown, onToggleController, onSelectionChange, selection, disabled = false,
@@ -64,6 +64,10 @@ export function TerminalInputBar({
         placeholder="Type, dictate or pick a shortcut"
         placeholderTextColor={colors.textMuted}
         multiline
+        // Return is the terminal's Enter: it sends and closes the keyboard, like the button.
+        returnKeyType="send"
+        submitBehavior="blurAndSubmit"
+        onSubmitEditing={() => { if (!disabled && !voiceBusy) onSubmit(); }}
         autoCapitalize="none"
         autoCorrect={false}
         spellCheck={false}
