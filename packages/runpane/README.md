@@ -61,6 +61,12 @@ node packages/runpane/dist/cli.js doctor --json
 macOS it reads installed app bundle metadata and must not launch
 `Pane.app/Contents/MacOS/Pane --version`.
 
+When Pane is installed and its managed CLI is newer than this package, every
+`runpane` command runs Pane's CLI instead, so a stale global install still
+gets current commands. `doctor` lists each `runpane` on `PATH` and warns about
+stale ones; `runpane doctor --fix` updates stale npm installs. See
+[docs/RUNPANE_BUNDLED_CLI.md](https://github.com/greenfield-inc/Pane/blob/main/docs/RUNPANE_BUNDLED_CLI.md#existing-global-installs).
+
 ## Advanced
 
 ### Explicit Commands

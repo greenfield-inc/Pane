@@ -184,10 +184,11 @@
     },
     {
       "name": "doctor",
-      "summary": "Run platform, release, installed Pane, daemon reachability, and remote setup diagnostics.",
+      "summary": "Run platform, release, installed Pane, daemon reachability, runpane-on-PATH, and remote setup diagnostics.",
       "openWorld": true,
       "usage": [
         "runpane doctor [--json] [--pane-dir <path>] [--pane-path <path>] [--format <format>] [--verbose]",
+        "runpane doctor --fix [--json] [--pane-dir <path>]",
         "runpane doctor --report [--title <text>] --body-file <path|-> [--yes] [--json]"
       ],
       "toolsets": [
@@ -2213,6 +2214,10 @@
       {
         "name": "--report",
         "description": "Prepare a redacted doctor report; external filing still requires --yes."
+      },
+      {
+        "name": "--fix",
+        "description": "Update each npm-installed runpane older than the Pane-managed CLI to its version. Never removes a file."
       },
       {
         "name": "--read-only",
@@ -5345,7 +5350,7 @@
       "The wrapper must stream Pane stdout/stderr without reformatting because `pane --remote-setup` prints the one-time `pane-remote://...` connection code.",
       "`runpane update` defaults to both app and active supported CLI, with independent supervision, staging, durable status, and explicit restoration outcomes. Prerequisites, status fields/exit codes, draft handling and manual recovery are documented in [Update recovery](UPDATE_RECOVERY.md).",
       "`runpane version` prints only wrapper package metadata and does not contact, launch, or focus the Pane app or daemon.",
-      "`runpane doctor` checks platform support, release metadata reachability, download URL selection, installed Pane detection, daemon reachability, and remote-daemon hints. Add `--json` for a machine-readable report that agents should run before mutating Pane state. Installed app version detection must be best-effort and must not launch, focus, or configure Pane; macOS wrappers read app bundle metadata instead of executing `Pane --version`.",
+      "`runpane doctor` checks platform support, release metadata reachability, download URL selection, installed Pane detection, daemon reachability, every `runpane` on `PATH` against the Pane-managed CLI, and remote-daemon hints. `--fix` updates npm installs of `runpane` older than the Pane-managed CLI to its version and never removes a file. Add `--json` for a machine-readable report that agents should run before mutating Pane state. Installed app version detection must be best-effort and must not launch, focus, or configure Pane; macOS wrappers read app bundle metadata instead of executing `Pane --version`.",
       "`runpane daemon repair` rewrites and restarts only the managed remote-daemon launcher/service. It never creates pairing credentials, changes tunnels, or downloads Pane; doctor only recommends it and never runs it automatically.",
       "`runpane agent-context` prints a brief, token-efficient command schema for coding agents without connecting to the Pane daemon.",
       "`runpane agent-context --command \"panes create\"` prints the detailed definition for one command. Add `--json` for machine-readable output. An unknown command exits 2 and lists the closest command names; with `--json` it prints `{ ok: false, code: \"unknown_command\", message, candidates }` on stdout.",
@@ -7120,6 +7125,101 @@
         },
         "workspaces": {
           "$ref": "#/jsonSchemas/workspacesSummary"
+        },
+        "cliInstalls": {
+          "type": "object",
+          "required": [
+            "installs",
+            "warnings"
+          ],
+          "properties": {
+            "managedVersion": {
+              "type": "string"
+            },
+            "installs": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "path",
+                  "origin"
+                ],
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  },
+                  "origin": {
+                    "enum": [
+                      "pane",
+                      "npm",
+                      "other"
+                    ]
+                  },
+                  "version": {
+                    "type": "string"
+                  },
+                  "npmPrefix": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "warnings": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "code",
+                  "path",
+                  "message",
+                  "fix"
+                ],
+                "properties": {
+                  "code": {
+                    "enum": [
+                      "RUNPANE_STALE_INSTALL",
+                      "RUNPANE_STALE_UNMANAGED",
+                      "RUNPANE_MANAGED_BEHIND"
+                    ]
+                  },
+                  "path": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string"
+                  },
+                  "fix": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "fixed": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "command",
+                  "ok"
+                ],
+                "properties": {
+                  "command": {
+                    "type": "string"
+                  },
+                  "ok": {
+                    "type": "boolean"
+                  },
+                  "error": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false

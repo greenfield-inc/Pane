@@ -95,7 +95,9 @@ Windows `PATH` (see [Every other terminal](#every-other-terminal)).
 
 At startup, the installed Pane appends `<PANE_DIR>/bin` (normally
 `~/.pane/bin`) to the end of your own `PATH`. It appends rather than prepends,
-so a `runpane` you installed with npm keeps winning outside Pane.
+so a `runpane` you installed with npm comes first outside Pane; when it is the
+older one, it runs Pane's CLI instead (see
+[Existing global installs](#existing-global-installs)).
 
 - **macOS and Linux:** Pane appends a block marked `pane-runpane-path v1` to
   the startup files of your login shell. The block adds the directory only if
@@ -123,7 +125,9 @@ so a `runpane` you installed with npm keeps winning outside Pane.
   `PATH` by default, so every WSL shell finds Pane's shim at
   `/mnt/c/Users/<you>/.pane/bin/runpane`, and it reaches Windows Pane as
   described in [WSL terminals](#wsl-terminals). A `runpane` installed in the
-  distro comes first on `PATH` there, but it cannot reach Windows Pane.
+  distro comes first on `PATH` there. When it is older than Windows Pane's
+  CLI, it runs that shim; otherwise it runs itself and cannot reach Windows
+  Pane.
 - **Remote daemon hosts** (`runpane install daemon`): unchanged. Only the
   desktop app edits `PATH`; on a server, install `runpane` with npm.
 
@@ -140,10 +144,43 @@ Environment Variables > User variables > Path. Pane does not add it again.
 
 ## Existing global installs
 
-A globally installed `runpane` (`npm i -g runpane`) still wins in other
+A globally installed `runpane` (`npm i -g runpane`) comes first in other
 terminals, because Pane appends its directory after it. Inside Pane terminals, Pane's shim resolves first because it
 matches the running build's local-control contract. Use `$PANE_RUNPANE_BIN`
 to call it by absolute path.
+
+An npm `runpane` older than Pane's CLI hands each invocation to Pane's CLI,
+with the same arguments, stdin, stdout, stderr and exit code
+(`packages/runpane/src/managedCli.ts`):
+
+- Pane's CLI is the one in `<PANE_DIR>/bin`: the version pinned by
+  `runpane update` in `runpane-override.json`, else the version line
+  (`// runpane-version <version>`) that `main/build-runpane-cli.js` writes at
+  the top of `runpane.cjs`. Without an explicit `PANE_DIR`, the npm CLI also
+  looks for a Pane-managed shim on `PATH`, which is how a distro `runpane`
+  finds Windows Pane's under WSL.
+- On macOS, Linux and WSL it runs the `runpane` shim with `/bin/sh`. On
+  Windows it runs the pinned runtime and entry point directly, or
+  `runpane.cjs` with its own Node, so no argument passes through `cmd.exe`.
+- The npm CLI runs itself when there is no Pane install, when it is the same
+  version or newer, or when the hand-off cannot start.
+- The hand-off sets `RUNPANE_NO_HANDOFF=1` for the CLI it runs, so it happens
+  at most once. Set it yourself to run a specific npm version.
+
+`runpane doctor` lists every `runpane` on `PATH` in resolution order, with its
+version and origin (Pane-managed, npm global with its prefix, or other), under
+`cliInstalls` in `--json`. It warns, with the command that fixes it in `fix`:
+
+- `RUNPANE_STALE_INSTALL`: an npm install is older than Pane's CLI. Fix:
+  `npm i -g --prefix <prefix> runpane@<version>`.
+- `RUNPANE_STALE_UNMANAGED`: a `runpane` that neither npm nor Pane installed
+  comes before Pane's CLI and is older or of unknown version. Fix: remove it.
+- `RUNPANE_MANAGED_BEHIND`: an npm install is newer than Pane's CLI. Fix:
+  `runpane update`.
+
+`runpane doctor --fix` runs the `RUNPANE_STALE_INSTALL` fixes, reports each
+under `fixed`, then checks again. It never removes a file. The Python CLI
+points `--fix` at the npm CLI.
 
 Several Pane builds that share one `PANE_DIR` (for example a dev build and
 the installed app, both on `~/.pane`) rewrite the same shim at startup; the

@@ -104,6 +104,8 @@ export interface ParsedArgs {
   /** Watch only: drop the _ok, _heartbeat, and _reconnected control lines. */
   quiet?: boolean;
   report?: boolean;
+  /** Doctor only: update stale npm installs of runpane to the Pane-managed version. */
+  fix?: boolean;
   bodyFile?: string;
   message?: string;
   query?: string;
@@ -729,6 +731,13 @@ function parseLocalBooleanFlag(flag: string, parsed: ParsedArgs): void {
   }
   if (flag === '--report') {
     parsed.report = true;
+    return;
+  }
+  if (flag === '--fix') {
+    if (parsed.command !== 'doctor') {
+      throw new Error('--fix is only valid with runpane doctor.');
+    }
+    parsed.fix = true;
     return;
   }
   if (flag === '--read-only') {

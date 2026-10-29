@@ -850,6 +850,8 @@ def parse_local_boolean_flag(parsed: ParsedArgs, flag: str) -> None:
     if flag == "--report":
         parsed.report = True
         return
+    if flag == "--fix":
+        raise ValueError("runpane doctor --fix updates npm installs of runpane, so it runs only in the npm CLI. Run: npx --yes runpane@latest doctor --fix")
     if flag == "--read-only":
         parsed.read_only = True
         return
