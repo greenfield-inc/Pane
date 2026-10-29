@@ -421,6 +421,18 @@ describe('runpane IPC handlers', () => {
     expect(terminalPanelManager.initializeTerminal).toHaveBeenCalledWith(panel, '/sessions/coordinator');
   });
 
+  it('keeps a created Session and names the resume command when its agent cannot start', async () => {
+    const create = vi.fn(async () => ({ session: { id: 'coordinator', name: 'Coordinator' }, panel: { id: 'coordinator-panel' }, internalSession: { id: 'coordinator-owner', worktreePath: '/sessions/coordinator' } }));
+    vi.mocked(terminalPanelManager.initializeTerminal).mockRejectedValueOnce(new Error('spawn claude ENOENT.'));
+    // SAFETY: This command only reaches create; the stub reports a Session result.
+    const registry = createRegistry(createServices({ orchestrationSessionManager: { create } as never }));
+    await expect(registry.invoke('runpane:sessions:create', [{ name: 'Coordinator' }])).rejects.toMatchObject({
+      code: 'ERR_SESSION_START_FAILED',
+      message: 'Session “Coordinator” was created, but its agent did not start: spawn claude ENOENT.',
+      next: expect.stringContaining('runpane panels resume --panel coordinator-panel'),
+    });
+  });
+
   it('preserves the requested Session pin through daemon create decoding', async () => {
     const create = vi.fn(async (input: OrchestrationSessionCreateInput) => ({
       session: { id: 'coordinator', name: input.name, isPinned: input.isPinned ?? false },
