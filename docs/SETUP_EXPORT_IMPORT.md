@@ -118,7 +118,7 @@ shows as no change.
 ## Remote hosts
 
 While the window is connected to another computer through Remote Pane, the
-card is disabled. Choose **This computer** in the sidebar's host switcher to
+card is disabled. Choose this computer in the sidebar's machine menu to
 export or import this computer's setup.
 
 ## For teams

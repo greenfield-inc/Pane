@@ -1,19 +1,16 @@
-import { router } from 'expo-router';
-
-import { useDaemon } from '@/daemon';
+import { useHostsStore } from '@/auth/hostsStore';
+import { isDemoProfile } from '@/features/demo/demoHost';
 import { NotificationSettings } from '@/features/notifications/NotificationSettings';
-import { ListRow, ListSection, Screen } from '@/ui';
+import { Screen, Text } from '@/ui';
 
-/** Settings › Notifications: alerts from the current machine. */
+/** Settings › Notifications: the phone-wide switches, and whether each saved machine can alert this phone. */
 export default function NotificationsSettingsScreen() {
-  const { profile } = useDaemon();
+  const saved = useHostsStore(state => state.profiles).some(profile => !isDemoProfile(profile));
   return (
     <Screen scroll grouped testID="notifications-settings">
-      {profile.tailnetMachine ? (
-        <ListSection title="Notifications" titleSuffix={`on ${profile.label}`} footer="Alerts need this phone paired with a code.">
-          <ListRow testID="notifications-code-required" title="Connect with a code" subtitle="Pair this phone to receive alerts" trailing="chevron" onPress={() => router.push('/hosts/add')} />
-        </ListSection>
-      ) : <NotificationSettings />}
+      {saved
+        ? <NotificationSettings />
+        : <Text variant="subhead" tone="secondary">Alerts come from the computers saved on this phone. The demo has none.</Text>}
     </Screen>
   );
 }

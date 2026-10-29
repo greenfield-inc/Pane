@@ -8,7 +8,8 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useActiveHost, useHostsStore } from '@/auth/hostsStore';
 import { DaemonProvider, queryClient } from '@/daemon';
 import { SharedCredentialSync } from '@/features/hosts/SharedCredentialSync';
-import { NotificationTapRouter, PushRegistration } from '@/features/notifications/NotificationRouting';
+import { NotificationTapRouter, NotifyAlertCleanup } from '@/features/notifications/NotificationRouting';
+import { PushRegistrationSync } from '@/features/notifications/usePushSetup';
 import { useTheme } from '@/theme';
 
 void SplashScreen.preventAutoHideAsync();
@@ -49,9 +50,10 @@ export default function RootLayout() {
             <>
               <DaemonProvider key={activeHost.id} profile={activeHost}>
                 <RootStack signedIn />
-                {activeHost.tailnetMachine ? null : <PushRegistration />}
+                <NotifyAlertCleanup />
               </DaemonProvider>
               <SharedCredentialSync />
+              <PushRegistrationSync />
             </>
           ) : (
             <RootStack signedIn={false} />

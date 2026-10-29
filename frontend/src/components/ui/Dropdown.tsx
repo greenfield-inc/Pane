@@ -7,6 +7,7 @@ import { Kbd } from './Kbd';
 import { initialActiveIndex } from './dropdownNavigation';
 import { usePortalContainer } from '../../contexts/PortalContainerContext';
 import { Tooltip } from './Tooltip';
+import { Check } from 'lucide-react';
 
 export interface DropdownItem {
   id: string;
@@ -14,6 +15,8 @@ export interface DropdownItem {
   description?: ReactNode;
   descriptionInTooltip?: boolean;
   icon?: React.ComponentType<{ className?: string }>;
+  /** Drawn in place of `icon` at its own size, such as a machine tile. */
+  leading?: ReactNode;
   iconColor?: string;
   onClick?: () => void;
   disabled?: boolean;
@@ -31,6 +34,10 @@ export interface DropdownProps {
   // Items
   items: DropdownItem[];
   selectedId?: string;
+  /** How the selected item is marked: a dot (default) or a check. */
+  selectedMark?: 'dot' | 'check';
+  /** A small label above the items. */
+  header?: ReactNode;
   
   // Appearance
   position?: 'auto' | 'bottom-left' | 'bottom-right' | 'top-left' | 'top-right';
@@ -92,6 +99,8 @@ export function Dropdown({
   triggerClassName,
   items,
   selectedId,
+  selectedMark = 'dot',
+  header,
   position = 'auto',
   width = 'md',
   closeOnSelect = true,
@@ -403,6 +412,7 @@ export function Dropdown({
           }}
         >
             <div className="p-1 max-h-[70vh] overflow-y-auto">
+              {header && <div className="px-2.5 pb-1 pt-1.5 text-[11px] font-medium text-text-tertiary">{header}</div>}
               {items.map((item, index) => {
                 const Icon = item.icon;
                 const isSelectable = selectedId !== undefined;
@@ -429,11 +439,11 @@ export function Dropdown({
                         itemClassName
                       )}
                     >
-                      {Icon && (
+                      {item.leading ?? (Icon && (
                         <div className="flex items-center justify-center w-4 h-4 flex-shrink-0">
                           <Icon className={cn('w-3.5 h-3.5', 'stroke-[1.5]', item.iconColor || 'text-current')} />
                         </div>
-                      )}
+                      ))}
                       <div className="flex-1 min-w-0">
                         <div className={cn('text-[13px] leading-tight truncate', 'group-hover:text-inherit')}>{item.label}</div>
                         {item.description && !item.descriptionInTooltip && (
@@ -441,7 +451,11 @@ export function Dropdown({
                         )}
                       </div>
                       {item.shortcut && <Kbd variant="inline" className="shrink-0 pl-3">{formatKeyDisplay(item.shortcut)}</Kbd>}
-                      {(isSelected || item.showDot) && (
+                      {isSelected && selectedMark === 'check' ? (
+                        <div className="flex items-center justify-center w-5 h-5 flex-shrink-0">
+                          <Check className="w-3.5 h-3.5 text-interactive" aria-hidden="true" />
+                        </div>
+                      ) : (isSelected || item.showDot) && (
                         <div className="flex items-center justify-center w-5 h-5 flex-shrink-0">
                           <div className={cn('w-2 h-2 rounded-full', isSelected && 'bg-interactive shadow-sm', item.showDot && !isSelected && item.dotColor)} />
                         </div>

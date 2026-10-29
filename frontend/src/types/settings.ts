@@ -94,6 +94,8 @@ export interface SettingsTarget {
   category: SettingsCategoryId;
   setting?: SettingsSettingId;
   subview?: RemoteAccessSubviewId;
+  /** Remote Access: the Tailscale machine whose password field opens. */
+  machine?: string;
 }
 
 export interface SettingsOpenRequest {

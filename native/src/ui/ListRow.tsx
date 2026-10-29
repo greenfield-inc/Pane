@@ -9,6 +9,8 @@ import { Text } from './Text';
 export interface ListRowProps {
   title: string;
   subtitle?: string;
+  /** Holds the subtitle at exactly this many lines, so swapping its text never resizes the row. */
+  subtitleLines?: number;
   /** Leading slot, e.g. a status dot or icon, centered in a 24-wide box. */
   leading?: ReactNode;
   /** Current setting, shown muted before the trailing slot ("On", "studio-mac"). */
@@ -30,7 +32,7 @@ export interface ListRowProps {
 }
 
 /** One row of a grouped card (ListSection). */
-export function ListRow({ title, subtitle, leading, value, trailing, onPress, onLongPress, destructive, accent, accessibilityActions, onAccessibilityAction, testID }: ListRowProps) {
+export function ListRow({ title, subtitle, subtitleLines, leading, value, trailing, onPress, onLongPress, destructive, accent, accessibilityActions, onAccessibilityAction, testID }: ListRowProps) {
   const theme = useTheme();
   return (
     <Pressable
@@ -55,7 +57,16 @@ export function ListRow({ title, subtitle, leading, value, trailing, onPress, on
       {leading ? <View style={styles.leading}>{leading}</View> : null}
       <View style={styles.body}>
         <Text variant="rowTitle" tone={destructive ? 'danger' : accent ? 'accent' : 'primary'} numberOfLines={1}>{title}</Text>
-        {subtitle ? <Text variant="rowDetail" tone="muted" numberOfLines={2}>{subtitle}</Text> : null}
+        {subtitle ? (
+          <Text
+            variant="rowDetail"
+            tone="muted"
+            numberOfLines={subtitleLines ?? 2}
+            style={subtitleLines ? { minHeight: subtitleLines * theme.typography.rowDetail.lineHeight } : undefined}
+          >
+            {subtitle}
+          </Text>
+        ) : null}
       </View>
       {value ? <Text variant="rowValue" tone="muted" numberOfLines={1} style={styles.value}>{value}</Text> : null}
       {trailing === 'chevron'

@@ -28,7 +28,7 @@ export function sessionHostFor(config: Pick<RemoteDaemonConfig, 'client'> | unde
   return {
     kind: 'paired',
     reason: `${profile.label} is connected with a pairing code, not over Tailscale, so Pane can't tell which machine it is. `
-      + 'Moving a Session works between your machines on Tailscale: connect to it from Settings → Remote Access → Your computers.',
+      + 'Moving a Session works between your machines on Tailscale: switch to it from the sidebar machine menu or Settings → Remote Access → Switch to.',
   };
 }
 

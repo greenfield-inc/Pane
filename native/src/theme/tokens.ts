@@ -67,13 +67,13 @@ export const colors = { light, dark };
 export const brandColors = { tile: '#080a0c', silver: ['#ffffff', '#f5f7f9', '#d7dce1'] } as const;
 
 /**
- * Machine colors in assignment order: violet, cyan, pink, lime, orange, coral. Clear of the agent
+ * Machine colors by slot (shared/utils/machineColor.ts): violet, cyan, pink, lime, orange, rose. Clear of the agent
  * status dots and the danger red; the first four stay apart for red-green and blue-yellow color
  * blindness. Dark uses lighter tints of the same hues.
  */
 export const machineColors = {
-  // Lime is a shade darker than the mockup's #65a30d so a mark on a chip (surfaceRaised) clears 3:1.
-  light: ['#8b5cf6', '#0891b2', '#ec4899', '#5f9b0b', '#ea580c', '#f43f5e'],
+  // The desktop's light-theme machine colours (--color-machine-* in frontend/src/styles/tokens/colors.css).
+  light: ['#7c3aed', '#0e7490', '#db2777', '#4d7c0f', '#c2410c', '#e11d48'],
   dark: ['#c4b5fd', '#67e8f9', '#f9a8d4', '#bef264', '#fdba74', '#fb7185'],
 } as const;
 

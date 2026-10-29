@@ -3,35 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
 import type { TailnetMachine, TailnetMachineList } from '@shared/types/workspaceAccess';
 
-import { colorSlots, listMachines } from './machines';
-
-describe('colorSlots', () => {
-  it('gives a name the same slot every time', () => {
-    expect(colorSlots(['parsa-devbox']).get('parsa-devbox')).toBe(5);
-    expect(colorSlots(['travel-laptop', 'parsa-devbox']).get('parsa-devbox')).toBe(5);
-  });
-
-  it('gives six machines six different colors', () => {
-    const slots = colorSlots(['studio-mac', 'build-box', 'parsa-devbox', 'travel-laptop', 'mini', 'server']);
-    expect(new Set(slots.values()).size).toBe(6);
-  });
-
-  it('settles a clash alphabetically: the first name keeps its slot, the other takes the next free one', () => {
-    // Both names want slot 3.
-    expect(Object.fromEntries(colorSlots(['studio-mac', 'build-box']))).toEqual({ 'build-box': 3, 'studio-mac': 4 });
-    expect(Object.fromEntries(colorSlots(['build-box', 'studio-mac']))).toEqual({ 'build-box': 3, 'studio-mac': 4 });
-  });
-
-  it('ignores case, so re-pairing under a different spelling keeps the color', () => {
-    expect(colorSlots(['Parsa-Devbox']).get('Parsa-Devbox')).toBe(5);
-  });
-
-  it('repeats the palette from a seventh machine on', () => {
-    const slots = colorSlots(['a1', 'a2', 'a3', 'a4', 'a5', 'a6', 'a7']);
-    expect(slots.size).toBe(7);
-    expect(new Set(slots.values()).size).toBe(6);
-  });
-});
+import { listMachines } from './machines';
 
 const DOMAIN = 'tail1234.ts.net';
 
@@ -137,6 +109,17 @@ describe('listMachines', () => {
   it('includes the current machine when it is not saved, as in the demo', () => {
     const machines = listMachines({ profiles: [], current: studio, connection: 'connected', tailnet: undefined });
     expect(machines.map(machine => machine.name)).toEqual(['studio-mac']);
+  });
+
+  it('colours from every machine the listing names, as desktop does, so a hidden offline machine still settles a clash', () => {
+    // build-box and studio-mac both hash to slot 3; build-box sorts first, so it keeps it.
+    const [current] = listMachines({
+      profiles: [studio],
+      current: studio,
+      connection: 'connected',
+      tailnet: list([tailnet('studio-mac', 'macOS', 'available'), tailnet('build-box', 'Linux', 'offline')]),
+    });
+    expect(current).toMatchObject({ name: 'studio-mac', slot: 4 });
   });
 
   it('gives each machine its color slot from the names on the list', () => {

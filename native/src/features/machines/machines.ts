@@ -1,11 +1,7 @@
 import type { RemotePaneConnectionProfile, RemotePaneConnectionStatus } from '@shared/types/remoteDaemon';
 import type { TailnetMachine, TailnetMachineList } from '@shared/types/workspaceAccess';
+import { assignMachineColorSlots, preferredMachineColorSlot } from '@shared/utils/machineColor';
 
-/** Colors in the machine palette (`machineColors` in src/theme/tokens.ts). */
-const PALETTE_SIZE = 6;
-
-/** What Machine details calls each palette slot. */
-export const MACHINE_COLOR_NAMES = ['Violet', 'Cyan', 'Pink', 'Lime', 'Orange', 'Coral'] as const;
 
 /**
  * Solid: reachable. Pulsing: the current machine while it reconnects. Dimmed: offline, Pane not
@@ -54,25 +50,6 @@ const CONNECTION: Record<RemotePaneConnectionStatus, { status: string; state: Ma
   error: { status: 'Offline', state: 'dimmed' },
   local: { status: 'Not connected', state: 'dimmed' },
 };
-
-/**
- * A palette slot per name, derived and never stored. Each name prefers the slot its hash picks;
- * names are settled alphabetically, so the first keeps a contested slot and the next takes the
- * following free one. Pairing order never matters. Past six machines the palette repeats.
- */
-export function colorSlots(names: readonly string[]): Map<string, number> {
-  const slots = new Map<string, number>();
-  let taken = new Set<number>();
-  for (const name of [...names].sort((a, b) => compare(a.toLowerCase(), b.toLowerCase()))) {
-    if (slots.has(name)) continue;
-    if (taken.size === PALETTE_SIZE) taken = new Set();
-    let slot = preferredSlot(name);
-    while (taken.has(slot)) slot = (slot + 1) % PALETTE_SIZE;
-    taken.add(slot);
-    slots.set(name, slot);
-  }
-  return slots;
-}
 
 /**
  * Saved machines in their saved order (the current one included even when it isn't saved, as in
@@ -127,9 +104,14 @@ export function listMachines({ profiles, current, connection, tailnet }: {
       domain,
     }));
 
-  const all = [...saved, ...discovered];
-  const slots = colorSlots(all.map(machine => machine.colorName));
-  return all.map(({ colorName, ...machine }) => ({ ...machine, slot: slots.get(colorName) ?? 0 }));
+  // The same set desktop Pane colours from (frontend/src/utils/machineList.ts): every machine the
+  // listing names except refused ones, so one machine has one colour on both. Machines paired with a
+  // code that the listing doesn't name join the set too.
+  const slots = assignMachineColorSlots([
+    ...listed.filter(machine => machine.state !== 'refused').map(machine => machine.name),
+    ...saved.map(machine => machine.colorName),
+  ]);
+  return [...saved, ...discovered].map(({ colorName, ...machine }) => ({ ...machine, slot: slots.get(colorName) ?? preferredMachineColorSlot(colorName) }));
 }
 
 function fromTailnet(state: TailnetMachine['state']): { status: string; state: MachineState } {
@@ -145,15 +127,4 @@ function isSameMachine(profile: RemotePaneConnectionProfile, machine: TailnetMac
 /** The host part of a machine's address. */
 export function hostOf(url: string): string {
   return /^[a-z]+:\/\/([^/:]+)/i.exec(url)?.[1]?.toLowerCase() ?? '';
-}
-
-// FNV-1a over the lowercased name: cheap and stable across app versions.
-function preferredSlot(name: string): number {
-  let hash = 0x811c9dc5;
-  for (const char of name.toLowerCase()) hash = Math.imul(hash ^ char.charCodeAt(0), 0x01000193);
-  return (hash >>> 0) % PALETTE_SIZE;
-}
-
-function compare(a: string, b: string): number {
-  return a < b ? -1 : a > b ? 1 : 0;
 }

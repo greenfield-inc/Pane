@@ -10,7 +10,7 @@ import { GLASSES_PAIRING_SECRET_PREFIX, GLASSES_TOKEN_PREFIX, type GlassesAccess
  * The Even app serves the glasses app from http://127.0.0.1 on a new port each launch, and a
  * loopback origin matches on any port (see `originKey`). A page on that address still needs a
  * glasses token or pairing secret. The owner adds more on one machine from
- * Settings › Remote Access › Glasses (`workspaces.glassesOrigins`), and `PANE_GLASSES_ORIGINS` (comma separated) adds them for a dev run, such as the Even simulator's.
+ * Settings › Remote Access › Devices (`workspaces.glassesOrigins`), and `PANE_GLASSES_ORIGINS` (comma separated) adds them for a dev run, such as the Even simulator's.
  */
 const EVEN_APP_ORIGINS: readonly string[] = ['http://127.0.0.1'];
 const ORIGINS_ENV = 'PANE_GLASSES_ORIGINS';
@@ -132,7 +132,7 @@ export class GlassesAccess {
     if (index !== -1) this.refusedOrigins.splice(index, 1);
     this.refusedOrigins.unshift({ origin, at: new Date(this.now()).toISOString() });
     this.refusedOrigins.splice(MAX_REFUSED_ORIGINS);
-    if (index === -1) this.log(`[Pane glasses] refused browser origin ${origin}; if this is the Even app, allow it in Settings › Remote Access › Glasses`);
+    if (index === -1) this.log(`[Pane glasses] refused browser origin ${origin}; if this is the Even app, allow it in Settings › Remote Access › Devices`);
   }
 
   state(): GlassesAccessState {

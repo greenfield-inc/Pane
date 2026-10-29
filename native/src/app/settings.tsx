@@ -8,7 +8,7 @@ import { useAffordances } from '@/features/hosts/hostSettings';
 import type { Machine } from '@/features/machines/machines';
 import { MachineMark } from '@/features/machines/MachineMark';
 import { useMachines, useSelectMachine } from '@/features/machines/useMachines';
-import { usePushSetup } from '@/features/notifications/usePushSetup';
+import { usePushStore } from '@/features/notifications/usePushSetup';
 import { AppUpdateRow } from '@/features/updates/AppUpdateRow';
 import { useTheme } from '@/theme';
 import { Icon, ListRow, ListSection, Screen, Text } from '@/ui';
@@ -56,10 +56,9 @@ export default function SettingsScreen() {
         />
       </ListSection>
 
-      <ListSection title="General" titleSuffix={on}>
-        {profile.tailnetMachine
-          ? <ListRow testID="settings-notifications" title="Notifications" value="Needs a code" leading={<RowIcon ios="bell" android="notifications" />} trailing="chevron" onPress={() => router.push('/settings/notifications')} />
-          : <NotificationsRow />}
+      {/* Alerts and glasses reach every saved machine, so this section names none. */}
+      <ListSection title="General">
+        <NotificationsRow />
         <ListRow testID="settings-glasses" title="Glasses" value="Even G2" leading={<RowIcon ios="eyeglasses" android="eyeglasses" />} trailing="chevron" onPress={() => router.push('/settings/glasses')} />
       </ListSection>
 
@@ -134,16 +133,14 @@ function DetailsButton({ machine }: { machine: Machine }) {
   );
 }
 
-/** Notifications for a machine paired with a code: "On" once this phone is registered with it. */
+/** The phone-wide alert switches: "On" while either is on. */
 function NotificationsRow() {
-  const setup = usePushSetup();
-  const state = setup.data?.state;
-  const value = state === 'registered' ? 'On' : state === 'denied' ? 'Off' : state ? 'Not set up' : undefined;
+  const preferences = usePushStore(state => state.preferences);
   return (
     <ListRow
       testID="settings-notifications"
       title="Notifications"
-      value={value}
+      value={preferences.needsInputEnabled || preferences.completedEnabled ? 'On' : 'Off'}
       leading={<RowIcon ios="bell" android="notifications" />}
       trailing="chevron"
       onPress={() => router.push('/settings/notifications')}

@@ -152,7 +152,7 @@ describe('resolveTailnetMachineUrl', () => {
   it('refuses to follow a name onto another tailnet, where it is a different machine', async () => {
     const switched = { ...status, MagicDNSSuffix: 'tail2.ts.net', CurrentTailnet: { Name: 'me.github' }, Peer: { a: { ...status.Peer.a, DNSName: 'my-mac.tail2.ts.net.' } } };
     await expect(resolveTailnetMachineUrl({ name: 'my-mac', domain: 'tail1.ts.net' }, async () => JSON.stringify(switched)))
-      .rejects.toThrow('my-mac was saved on another tailnet (tail1.ts.net). This computer is now on me.github; connect again from Your computers.');
+      .rejects.toThrow('my-mac was saved on another tailnet (tail1.ts.net). This computer is now on me.github; connect again from Settings › Remote Access › Switch to.');
   });
 
   it('says so when the machine is not on its tailnet any more', async () => {

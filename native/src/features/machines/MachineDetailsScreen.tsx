@@ -2,16 +2,17 @@ import { router, Stack } from 'expo-router';
 import { Alert, StyleSheet, View } from 'react-native';
 
 import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
+import { MACHINE_COLOR_NAMES } from '@shared/utils/machineColor';
 
 import { useHostsStore } from '@/auth/hostsStore';
 import { useDaemon } from '@/daemon';
-import { createDaemonClient } from '@/daemon/createClient';
 import { isDemoProfile } from '@/features/demo/demoHost';
-import { revokePush } from '@/features/notifications/usePushSetup';
+import type { PushSetupResult } from '@/features/notifications/registration';
+import { signOutPush, usePushStore } from '@/features/notifications/usePushSetup';
 import { useTheme } from '@/theme';
 import { ListRow, ListSection, Screen, Text } from '@/ui';
 
-import { hostOf, MACHINE_COLOR_NAMES, type Machine } from './machines';
+import { hostOf, type Machine } from './machines';
 import { MachineMark } from './MachineMark';
 import { useMachines, useSelectMachine } from './useMachines';
 
@@ -31,24 +32,17 @@ export function MachineDetailsScreen({ machineKey }: { machineKey: string }) {
 
 function Details({ machine }: { machine: Machine }) {
   const theme = useTheme();
-  const { client, connection } = useDaemon();
+  const { connection } = useDaemon();
   const remove = useHostsStore(state => state.remove);
   const exitDemo = useHostsStore(state => state.exitDemo);
   const { select, connecting } = useSelectMachine();
   const { profile, tailnet } = machine;
   const demo = profile ? isDemoProfile(profile) : false;
+  const alerts = usePushStore(state => (profile ? state.results[profile.id] : undefined));
   const how = machine.current && connection.status === 'connected'
     ? profile?.tailnetMachine ? ' over Tailscale' : ' with a code'
     : '';
   const address = profile ? hostOf(profile.baseUrl) : tailnet?.dnsName.replace(/\.$/, '') ?? '';
-
-  const signOut = (saved: RemotePaneConnectionProfile) => {
-    // Code pairings registered for alerts: ask the host to stop first, best effort.
-    if (saved.tailnetMachine) return remove(saved.id);
-    if (machine.current) return revokePush(client, saved.id).then(() => remove(saved.id));
-    const other = createDaemonClient(saved);
-    return revokePush(other, saved.id).finally(() => other.disconnect()).then(() => remove(saved.id));
-  };
 
   const confirmSignOut = (saved: RemotePaneConnectionProfile) => {
     Alert.alert(
@@ -62,7 +56,7 @@ function Details({ machine }: { machine: Machine }) {
           onPress: () => {
             // Signing out of the current machine switches to another and remounts every screen.
             if (!machine.current) router.back();
-            void signOut(saved);
+            void signOutPush(saved, () => void remove(saved.id));
           },
         },
       ],
@@ -84,17 +78,14 @@ function Details({ machine }: { machine: Machine }) {
           <ListRow testID="machine-status" title="Status" subtitle={machine.status} />
         </ListSection>
 
-        <ListSection title="On this phone" footer="Notifications are for the machine you are on. The color marks this machine everywhere in Pane.">
-          {machine.current ? (
-            <ListRow
-              testID="machine-notifications"
-              title="Notifications"
-              trailing="chevron"
-              onPress={() => router.push('/settings/notifications')}
-            />
-          ) : (
-            <ListRow testID="machine-notifications" title="Notifications" subtitle="Only for the current machine" />
-          )}
+        <ListSection title="On this phone" footer="Every saved machine can alert this phone. The color marks this machine everywhere in Pane.">
+          <ListRow
+            testID="machine-notifications"
+            title="Notifications"
+            value={profile && !demo ? alertText(alerts) : 'After you connect'}
+            trailing={profile && !demo ? 'chevron' : undefined}
+            onPress={profile && !demo ? () => router.push('/settings/notifications') : undefined}
+          />
           <ListRow
             testID="machine-color"
             title="Color"
@@ -120,6 +111,12 @@ function Details({ machine }: { machine: Machine }) {
       </Screen>
     </>
   );
+}
+
+/** One word for the Notifications row; the Notifications screen explains anything else. */
+function alertText(result: PushSetupResult | undefined): string {
+  if (!result) return 'Checking…';
+  return result.state === 'registered' ? 'On' : 'Not set up';
 }
 
 const styles = StyleSheet.create({
