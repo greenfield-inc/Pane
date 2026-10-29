@@ -101,7 +101,7 @@ function identifyUpdateCli(paneDir: string, entrypoint = process.argv[1]): Updat
   return { owner: 'npm', entrypoint: real, version: pkg.version, prefix, packageManager: npmRoot };
 }
 
-function findUpdateRuntime(): string {
+export function findUpdateRuntime(): string {
   if (!process.versions.electron) return process.execPath;
   const candidates = (process.env.PATH ?? '').split(path.delimiter).map(directory => path.join(directory, process.platform === 'win32' ? 'node.exe' : 'node'));
   const node = candidates.find(file => fs.existsSync(file) && fs.realpathSync(file) !== fs.realpathSync(process.execPath));

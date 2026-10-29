@@ -85,6 +85,7 @@ import {
   type WrapperTelemetryContext
 } from './telemetry';
 import { printVersion } from './version';
+import { handOffToManagedCli } from './managedCli';
 import { assertSupportedCliRuntime } from './nodeRuntime';
 import {
   readTailnet,
@@ -104,6 +105,8 @@ const SOURCE = 'npm' as const;
 export async function main(argv: string[]): Promise<number> {
   assertSupportedCliRuntime(process.versions.node, process.versions.electron);
   if (argv[0] === '__update-runner' && argv.length === 2) return runUpdateHelper(argv[1]);
+  const handedOff = await handOffToManagedCli(argv);
+  if (handedOff !== null) return handedOff;
   const telemetryContext = createInitialTelemetryContext(argv);
   if (argv.length === 0) {
     return runTrackedCommand(telemetryContext, () => runNoArgsEntrypoint(telemetryContext));

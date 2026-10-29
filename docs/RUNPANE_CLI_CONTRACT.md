@@ -168,7 +168,7 @@ The wrapper must stream Pane stdout/stderr without reformatting because `pane --
 
 `runpane version` prints only wrapper package metadata and does not contact, launch, or focus the Pane app or daemon.
 
-`runpane doctor` checks platform support, release metadata reachability, download URL selection, installed Pane detection, daemon reachability, and remote-daemon hints. Add `--json` for a machine-readable report that agents should run before mutating Pane state. Installed app version detection must be best-effort and must not launch, focus, or configure Pane; macOS wrappers read app bundle metadata instead of executing `Pane --version`.
+`runpane doctor` checks platform support, release metadata reachability, download URL selection, installed Pane detection, daemon reachability, every `runpane` on `PATH` against the Pane-managed CLI, and remote-daemon hints. `--fix` updates npm installs of `runpane` older than the Pane-managed CLI to its version and never removes a file. Add `--json` for a machine-readable report that agents should run before mutating Pane state. Installed app version detection must be best-effort and must not launch, focus, or configure Pane; macOS wrappers read app bundle metadata instead of executing `Pane --version`.
 
 `runpane daemon repair` rewrites and restarts only the managed remote-daemon launcher/service. It never creates pairing credentials, changes tunnels, or downloads Pane; doctor only recommends it and never runs it automatically.
 
@@ -281,7 +281,7 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `install`: Install Pane on this machine or configure this machine as a remote daemon host.
 - `update`: Update both Pane and the invoked supported CLI through an independent helper.
 - `version`: Print the runpane wrapper version without contacting, launching, or focusing Pane.
-- `doctor`: Run platform, release, installed Pane, daemon reachability, and remote setup diagnostics.
+- `doctor`: Run platform, release, installed Pane, daemon reachability, runpane-on-PATH, and remote setup diagnostics.
 - `daemon repair`: Repair and restart the managed remote-daemon launcher without changing pairing or tunnel configuration.
 - `agents doctor`: Diagnose whether a built-in agent command is available in a Pane repository environment.
 - `agent-context`: Print token-efficient Pane command context for coding agents.
@@ -377,6 +377,7 @@ runpane install [client|daemon] [options]
 runpane version [--pane-dir <path>]
 runpane --version
 runpane doctor [--json] [--pane-dir <path>] [--pane-path <path>] [--format <format>] [--verbose]
+runpane doctor --fix [--json] [--pane-dir <path>]
 runpane doctor --report [--title <text>] --body-file <path|-> [--yes] [--json]
 runpane daemon repair [--pane-dir <path>] [--pane-path <path>] [--yes] [--json]
 runpane agents doctor --agent <codex|claude|cursor> [--repo <selector>] [--json] [--pane-dir <path>]
@@ -663,6 +664,7 @@ These flags are consumed by local daemon-control commands:
 --no-held-input
 --self-test
 --report
+--fix
 --read-only
 --template
 --push
