@@ -56,7 +56,6 @@ const HOLD_MATCH_CHARS = 40;
 const MENU_CHANGED = 'The menu changed, so nothing more was sent';
 
 const menuKey = (menu: Menu) => [...menu.question, ...menu.choices].join('\n');
-const sameMenu = (a: Menu, b: Menu) => a.choices.join('\n') === b.choices.join('\n');
 /** The last index whose row passes `test`, or -1. */
 function lastIndex(rows: readonly string[], test: (row: string) => boolean): number {
   for (let index = rows.length - 1; index >= 0; index -= 1) if (test(rows[index] ?? '')) return index;
@@ -724,6 +723,8 @@ export class GlassesApp {
   }
 
   private onTerminal(view: Extract<View, { name: 'terminal' }>, gesture: Gesture): void {
+    // A pick in flight owns the terminal until it sends Enter or stops.
+    if (view.picking) return;
     if (gesture.type === 'hold' && (view.mode === 'scroll' || view.mode === 'keys-refused')) {
       void this.startDictation({ ...view, mode: 'scroll', scrolledUp: 0, dim: null, refusal: null });
       return;
@@ -849,7 +850,6 @@ export class GlassesApp {
   }
 
   private onPicker(view: Extract<View, { name: 'terminal' }>, gesture: Gesture): void {
-    if (view.picking) return;
     const menu = view.menu;
     if (!menu) return;
     if (gesture.type === 'double') this.update(view, { dismissed: menuKey(menu) });
@@ -892,12 +892,12 @@ export class GlassesApp {
     }
   }
 
-  /** Reads the screen until `menu` shows with its cursor on `row`, for up to `waitMs`. */
+  /** Reads the screen until `menu`, question included, shows with its cursor on `row`, for up to `waitMs`. */
   private async cursorOn(computerId: string, panelId: string, menu: Menu, row: number, waitMs: number): Promise<boolean> {
     for (let waited = 0; ; waited += PICK_READ_MS) {
       const screen = await this.deps.source.screen(computerId, panelId);
       const found = findMenu(screen.lines);
-      if (found && sameMenu(found, menu) && found.cursor === row) return true;
+      if (found && menuKey(found) === menuKey(menu) && found.cursor === row) return true;
       if (waited + PICK_READ_MS > waitMs) return false;
       await new Promise<void>((resolve) => { this.deps.later(resolve, PICK_READ_MS); });
     }

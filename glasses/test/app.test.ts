@@ -550,6 +550,24 @@ describe('the picker', () => {
     expect(text().at(-1)).toBe('The menu changed, so nothing more was sent');
   });
 
+  it('sends nothing when a different question shows the same choices', async () => {
+    const { source, press, text } = await openMenu();
+    source.screenLines = permission(0).map((line) => line.replace('Do you want to proceed?', 'Do you want to delete the repo?'));
+    await press({ type: 'select', index: 0 });
+    expect(source.keys).toEqual([]);
+    expect(text().at(-1)).toBe('The menu changed, so nothing more was sent');
+  });
+
+  it('ignores hold while a pick is sending keys', async () => {
+    const { source, press, text, clock } = await openMenu();
+    source.dictation = 'hello';
+    await press({ type: 'select', index: 2 });
+    await press({ type: 'hold' });
+    expect(text()[0]).toBe('fix-login · picking…');
+    await clock.advance(2_000);
+    expect(text()[0]).toBe('KEYS · swipe ↑↓ · press Enter · hold Esc/Tab');
+  });
+
   it('is dismissed by double press until that menu leaves the screen', async () => {
     const { source, press, text, clock } = await openMenu();
     await press({ type: 'double' });
