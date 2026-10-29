@@ -176,7 +176,8 @@ version and origin (Pane-managed, npm global with its prefix, or other), under
 - `RUNPANE_STALE_UNMANAGED`: a `runpane` that neither npm nor Pane installed
   comes before Pane's CLI and is older or of unknown version. Fix: remove it.
 - `RUNPANE_MANAGED_BEHIND`: an npm install is newer than Pane's CLI. Fix:
-  `runpane update`.
+  `<PANE_DIR>/bin/runpane update`, which updates Pane's CLI (`runpane update`
+  updates the CLI that runs it).
 
 `runpane doctor --fix` runs the `RUNPANE_STALE_INSTALL` fixes, reports each
 under `fixed`, then checks again. It never removes a file. The Python CLI

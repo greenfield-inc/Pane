@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { boundary, decodeBoundary } from './boundaryDecoder';
@@ -71,18 +71,33 @@ function findManagedCli(paneDir?: string): ManagedCli | null {
  * When the Pane-managed CLI is newer than this one, run the whole invocation
  * there and return its exit code. Null means this CLI should run it.
  */
-export function handOffToManagedCli(argv: string[]): number | null {
+export async function handOffToManagedCli(argv: string[]): Promise<number | null> {
   if (process.env[NO_HANDOFF_ENV]) return null;
   const managed = findManagedCli();
   if (!managed || compareVersions(managed.version, getWrapperVersion()) <= 0) return null;
   const env = { ...process.env, [NO_HANDOFF_ENV]: '1' };
-  const result = process.platform === 'win32'
-    ? spawnSync(managed.runtime ?? process.execPath, [managed.entrypoint, ...argv], {
+  const child = process.platform === 'win32'
+    ? spawn(managed.runtime ?? process.execPath, [managed.entrypoint, ...argv], {
       stdio: 'inherit',
       env: { PANE_DIR: path.dirname(managed.binDir), ...env },
     })
-    : spawnSync('/bin/sh', [managed.shim, ...argv], { stdio: 'inherit', env });
-  if (result.error) return null;
+    : spawn('/bin/sh', [managed.shim, ...argv], { stdio: 'inherit', env });
+  // Ctrl-C and Ctrl-\ already reach the child through the terminal's process
+  // group, so this CLI only outlives them; signals aimed at this pid go on to the child.
+  const forward = (signal: NodeJS.Signals) => { child.kill(signal); };
+  const handlers: Array<[NodeJS.Signals, () => void]> = [
+    ['SIGINT', () => {}],
+    ['SIGQUIT', () => {}],
+    ['SIGTERM', () => forward('SIGTERM')],
+    ['SIGHUP', () => forward('SIGHUP')],
+  ];
+  for (const [signal, handler] of handlers) process.on(signal, handler);
+  const result = await new Promise<{ status: number | null; signal: NodeJS.Signals | null } | null>((resolve) => {
+    child.once('error', () => resolve(null));
+    child.once('close', (status, signal) => resolve({ status, signal }));
+  });
+  for (const [signal, handler] of handlers) process.off(signal, handler);
+  if (!result) return null;
   if (result.signal) process.kill(process.pid, result.signal);
   return result.status ?? 1;
 }
@@ -148,7 +163,7 @@ export function checkCliInstalls(paneDir?: string): CliInstallsCheck {
         code: 'RUNPANE_MANAGED_BEHIND',
         path: install.path,
         message: `Pane's CLI ${managedVersion} is older than npm runpane ${install.version} at ${install.path}.`,
-        fix: 'runpane update',
+        fix: `${quoteArgument(path.join(managed.binDir, process.platform === 'win32' ? 'runpane.cmd' : 'runpane'))} update`,
       });
     } else if (install.origin === 'other' && (older || install.version === undefined) && (firstPane === -1 || index < firstPane)) {
       warnings.push({

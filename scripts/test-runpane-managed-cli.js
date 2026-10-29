@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { spawnSync } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 const { test } = require('node:test');
 
 const dist = path.join(__dirname, '..', 'packages', 'runpane', 'dist');
@@ -22,7 +22,7 @@ function npmPrefix(root, version) {
   return { prefix, bin, cli: path.join(pkg, 'dist', 'cli.js') };
 }
 
-/** A Pane data directory whose managed CLI reports its argv, environment and exit code 7. */
+/** A Pane data directory whose managed CLI reports its argv, environment and exit code 7; `wait` waits for SIGTERM and exits 3. */
 function paneDir(root, version) {
   const dir = path.join(root, 'pane');
   const bin = path.join(dir, 'bin');
@@ -30,6 +30,7 @@ function paneDir(root, version) {
   fs.writeFileSync(path.join(bin, 'runpane.cjs'), [
     '#!/usr/bin/env node',
     `// runpane-version ${version}`,
+    "if (process.argv[2] === 'wait') { process.on('SIGTERM', () => { console.log('stopped'); process.exit(3); }); console.log('ready'); setInterval(() => {}, 1000); return; }",
     'console.log(JSON.stringify({ managed: true, argv: process.argv.slice(2), paneDir: process.env.PANE_DIR, noHandoff: process.env.RUNPANE_NO_HANDOFF }));',
     'process.exitCode = 7;',
   ].join('\n'));
@@ -62,6 +63,21 @@ test('npm runpane runs itself when there is no Pane install or it is the newer o
   assert.equal(run(npm.cli, ['--version'], { PANE_DIR: path.join(root, 'no-pane') }).stdout.trim(), 'runpane 2.4.100');
   const pane = paneDir(root, '2.4.99');
   assert.equal(run(npm.cli, ['--version'], { PANE_DIR: pane.dir }).stdout.trim(), 'runpane 2.4.100');
+});
+
+test('SIGTERM to the npm runpane reaches the managed CLI, and its exit code comes back', { skip: process.platform === 'win32', timeout: 10_000 }, async () => {
+  const root = scratch();
+  const npm = npmPrefix(root, '2.4.100');
+  const pane = paneDir(root, '2.4.207');
+  const child = spawn(process.execPath, [npm.cli, 'wait'], { env: { ...process.env, RUNPANE_NO_HANDOFF: '', PANE_DIR: pane.dir } });
+  let stdout = '';
+  child.stdout.on('data', (chunk) => {
+    stdout += chunk;
+    if (stdout.includes('ready')) child.kill('SIGTERM');
+  });
+  const status = await new Promise(resolve => child.on('close', resolve));
+  assert.equal(status, 3);
+  assert.match(stdout, /stopped/);
 });
 
 test('doctor lists every runpane on PATH and gives the command that updates a stale npm install', () => {
