@@ -1,100 +1,159 @@
 import * as Linking from 'expo-linking';
 import { router } from 'expo-router';
-import { Alert } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
-import { useHostsStore } from '@/auth/hostsStore';
 import { useDaemon } from '@/daemon';
 import { PRIVACY_POLICY_URL } from '@/features/app/privacyPolicy';
-import { isDemoProfile } from '@/features/demo/demoHost';
-import { ConnectionStatus } from '@/features/hosts/ConnectionStatus';
-import { NotificationSettings } from '@/features/notifications/NotificationSettings';
+import { useAffordances } from '@/features/hosts/hostSettings';
+import type { Machine } from '@/features/machines/machines';
+import { MachineMark } from '@/features/machines/MachineMark';
+import { useMachines, useSelectMachine } from '@/features/machines/useMachines';
+import { usePushSetup } from '@/features/notifications/usePushSetup';
 import { AppUpdateRow } from '@/features/updates/AppUpdateRow';
-import { revokePush } from '@/features/notifications/usePushSetup';
 import { useTheme } from '@/theme';
-import { Icon, ListRow, ListSection, Screen } from '@/ui';
+import { Icon, ListRow, ListSection, Screen, Text } from '@/ui';
 
+/**
+ * Settings: the current machine on top, every other machine one tap away, then what's saved on
+ * the current machine ("on studio-mac") and what's about the app.
+ */
 export default function SettingsScreen() {
   const theme = useTheme();
-  const { client, profile, connection } = useDaemon();
-  const profiles = useHostsStore(state => state.profiles);
-  const setActive = useHostsStore(state => state.setActive);
-  const remove = useHostsStore(state => state.remove);
-  const exitDemo = useHostsStore(state => state.exitDemo);
-  const demo = isDemoProfile(profile);
-
-  const confirmSignOut = () => {
-    Alert.alert(
-      `Sign out of ${profile.label}?`,
-      'Pane forgets this computer on this phone. Connect again to use it.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Sign Out', style: 'destructive', onPress: () => void (profile.tailnetMachine ? remove(profile.id) : revokePush(client, profile.id).then(() => remove(profile.id))) },
-      ],
-    );
-  };
+  const { profile } = useDaemon();
+  const machines = useMachines();
+  const { select, connecting } = useSelectMachine();
+  const affordances = useAffordances();
+  const current = machines.find(machine => machine.current);
+  const others = machines.filter(machine => !machine.current);
+  const shortcuts = affordances.data?.terminalShortcuts?.length;
+  const on = `on ${profile.label}`;
 
   return (
-    <Screen scroll testID="settings-screen">
-      <ListSection title="Current host" footer={connection.lastError ?? undefined}>
-        <ListRow
-          testID="settings-current-host"
-          title={profile.label}
-          subtitle={profile.baseUrl}
-          trailing={<ConnectionStatus updateIntent={connection.updateIntent} status={connection.status} onRetry={() => client.retryNow()} />}
-        />
-        {demo
-          ? <ListRow testID="settings-exit-demo" title="Exit Demo" subtitle="Sample data only. Nothing here is real." destructive onPress={exitDemo} />
-          : <ListRow testID="settings-sign-out" title="Sign Out" destructive onPress={confirmSignOut} />}
-      </ListSection>
+    <Screen scroll grouped testID="settings-screen">
+      {current ? <HeroCard machine={current} /> : null}
 
-      <ListSection title="Composer" footer={`Saved on ${profile.label}, so desktop sees the same settings.`}>
-        <ListRow testID="settings-shortcuts" title="Shortcuts" subtitle="Text you insert with one tap" trailing="chevron" onPress={() => router.push('/settings/shortcuts')} />
-        <ListRow testID="settings-voice" title="Voice" subtitle="Keys for dictation" trailing="chevron" onPress={() => router.push('/settings/voice')} />
-      </ListSection>
-
-      <ListSection title="Wearables">
-        <ListRow testID="settings-glasses" title="Glasses" subtitle="Pane on Even G2" trailing="chevron" onPress={() => router.push('/settings/glasses')} />
-      </ListSection>
-
-      {profile.tailnetMachine ? (
-        <ListSection title="Notifications">
-          <ListRow testID="notifications-code-required" title="Connect with a Code" subtitle="Pair this phone to receive alerts" trailing="chevron" onPress={() => router.push('/hosts/add')} />
-        </ListSection>
-      ) : <NotificationSettings />}
-
-      <ListSection title="Hosts" footer="Saved in the iOS Keychain or Android Keystore.">
-        {profiles.map(host => (
+      <ListSection title="Switch to">
+        {others.map(machine => (
           <ListRow
-            key={host.id}
-            testID={`settings-host-${host.label}`}
-            title={host.label}
-            subtitle={host.baseUrl}
-            onPress={host.id === profile.id ? undefined : () => void setActive(host.id)}
-            trailing={host.id === profile.id
-              ? <Icon ios="checkmark" android="check" size={16} color={theme.colors.accentText} />
-              : undefined}
+            key={machine.key}
+            testID={`settings-machine-${machine.name}`}
+            title={machine.name}
+            subtitle={connecting === machine.tailnet?.name ? 'Connecting…' : machine.status}
+            leading={<MachineMark os={machine.os} slot={machine.slot} state={machine.state} variant="tile" size={30} />}
+            onPress={machine.selectable ? () => select(machine) : undefined}
+            onLongPress={() => router.push({ pathname: '/machine/[key]', params: { key: machine.key } })}
+            trailing={<DetailsButton machine={machine} />}
           />
         ))}
         <ListRow
-          testID="settings-computers"
-          title="Your Computers"
-          subtitle="Connect over Tailscale"
-          leading={<Icon ios="desktopcomputer" android="desktop_windows" size={20} color={theme.colors.accentText} />}
-          trailing="chevron"
+          testID="settings-add-machine"
+          title="Add a machine"
+          accent
+          leading={<View style={[styles.addTile, { backgroundColor: theme.colors.selected }]}><Icon ios="plus" android="add" size={14} color={theme.colors.accentText} /></View>}
           onPress={() => router.push('/computers')}
-        />
-        <ListRow
-          testID="settings-add-host"
-          title="Add with a Code"
-          leading={<Icon ios="plus.circle.fill" android="add_circle" size={20} color={theme.colors.accentText} />}
-          onPress={() => router.push('/hosts/add')}
         />
       </ListSection>
 
-      <ListSection title="App">
+      <ListSection title="General" titleSuffix={on}>
+        {profile.tailnetMachine
+          ? <ListRow testID="settings-notifications" title="Notifications" value="Needs a code" leading={<RowIcon ios="bell" android="notifications" />} trailing="chevron" onPress={() => router.push('/settings/notifications')} />
+          : <NotificationsRow />}
+        <ListRow testID="settings-glasses" title="Glasses" value="Even G2" leading={<RowIcon ios="eyeglasses" android="eyeglasses" />} trailing="chevron" onPress={() => router.push('/settings/glasses')} />
+      </ListSection>
+
+      <ListSection title="Composer" titleSuffix={on} footer="Saved on the machine, so desktop sees the same settings.">
+        <ListRow
+          testID="settings-shortcuts"
+          title="Shortcuts"
+          value={shortcuts === undefined ? undefined : String(shortcuts)}
+          leading={<RowIcon ios="bolt" android="bolt" />}
+          trailing="chevron"
+          onPress={() => router.push('/settings/shortcuts')}
+        />
+        <ListRow testID="settings-voice" title="Voice" leading={<RowIcon ios="mic" android="mic" />} trailing="chevron" onPress={() => router.push('/settings/voice')} />
+      </ListSection>
+
+      <ListSection title="About">
         <AppUpdateRow />
         <ListRow testID="settings-privacy" title="Privacy Policy" trailing="chevron" onPress={() => void Linking.openURL(PRIVACY_POLICY_URL)} />
       </ListSection>
     </Screen>
   );
 }
+
+/** The current machine: its mark, name and state. Tapping it opens Machine details. */
+function HeroCard({ machine }: { machine: Machine }) {
+  const theme = useTheme();
+  const { connection } = useDaemon();
+  return (
+    <View>
+      <Pressable
+        testID="settings-current-host"
+        accessibilityRole="button"
+        accessibilityLabel={`${machine.name}, ${machine.os ?? 'Computer'}, ${machine.status}`}
+        accessibilityHint="Opens machine details"
+        onPress={() => router.push({ pathname: '/machine/[key]', params: { key: machine.key } })}
+        style={({ pressed }) => [styles.hero, {
+          borderRadius: theme.radius.hero,
+          borderColor: theme.colors.cardBorder,
+          backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.card,
+        }]}
+      >
+        <MachineMark os={machine.os} slot={machine.slot} state={machine.state} variant="tile" size={44} />
+        <View style={styles.heroText}>
+          <Text variant="title" numberOfLines={1} style={styles.heroName}>{machine.name}</Text>
+          <Text testID={`connection-status-${connection.status}`} variant="subhead" tone="muted" numberOfLines={1}>
+            {`${machine.os ?? 'Computer'} · ${connection.updateIntent && connection.status !== 'connected' ? 'Updating Pane…' : machine.status}`}
+          </Text>
+        </View>
+        <Icon ios="info.circle" android="info" size={22} color={theme.colors.accentText} />
+      </Pressable>
+      {connection.lastError ? <Text variant="footnote" tone="muted" style={styles.heroFooter}>{connection.lastError}</Text> : null}
+    </View>
+  );
+}
+
+function DetailsButton({ machine }: { machine: Machine }) {
+  const theme = useTheme();
+  return (
+    <Pressable
+      testID={`settings-machine-details-${machine.name}`}
+      accessibilityRole="button"
+      accessibilityLabel={`${machine.name} details`}
+      hitSlop={10}
+      onPress={() => router.push({ pathname: '/machine/[key]', params: { key: machine.key } })}
+    >
+      <Icon ios="info.circle" android="info" size={20} color={theme.colors.accentText} />
+    </Pressable>
+  );
+}
+
+/** Notifications for a machine paired with a code: "On" once this phone is registered with it. */
+function NotificationsRow() {
+  const setup = usePushSetup();
+  const state = setup.data?.state;
+  const value = state === 'registered' ? 'On' : state === 'denied' ? 'Off' : state ? 'Not set up' : undefined;
+  return (
+    <ListRow
+      testID="settings-notifications"
+      title="Notifications"
+      value={value}
+      leading={<RowIcon ios="bell" android="notifications" />}
+      trailing="chevron"
+      onPress={() => router.push('/settings/notifications')}
+    />
+  );
+}
+
+function RowIcon({ ios, android }: { ios: Parameters<typeof Icon>[0]['ios']; android: Parameters<typeof Icon>[0]['android'] }) {
+  const theme = useTheme();
+  return <Icon ios={ios} android={android} size={20} color={theme.colors.textSecondary} />;
+}
+
+const styles = StyleSheet.create({
+  hero: { flexDirection: 'row', alignItems: 'center', gap: 14, padding: 18, borderWidth: StyleSheet.hairlineWidth },
+  heroText: { flex: 1, gap: 2 },
+  heroName: { fontSize: 22, fontWeight: '700' },
+  heroFooter: { paddingHorizontal: 4, paddingTop: 6 },
+  addTile: { width: 30, height: 30, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+});
