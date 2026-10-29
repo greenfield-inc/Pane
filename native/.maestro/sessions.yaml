@@ -34,22 +34,43 @@ name: Session journeys
     visible: "Open Session ${output.session}"
     timeout: 15000
 
-# Pin it: it shows under Pinned as well as Sessions.
-- tapOn: "Pin Session ${output.session}"
-- extendedWaitUntil:
-    visible: "Unpin Session ${output.session}"
-    timeout: 10000
-- assertVisible:
-    id: sidebar-section-pinned
+# Swipe right and tap Pin: it shows under Pinned as well as Sessions.
+# Every row's swipe actions stay mounted, so pick the one beside this row.
+- swipe:
+    from: "Open Session ${output.session}"
+    direction: RIGHT
 - tapOn:
-    text: "Unpin Session ${output.session}"
-    index: 0
+    id: "session-swipe-pin-.*"
+    leftOf: "Open Session ${output.session}"
 - extendedWaitUntil:
-    notVisible: "Unpin Session ${output.session}"
+    visible:
+      id: "session-row-pinned:.*"
+      text: "Open Session ${output.session}"
+    timeout: 10000
+# Unpin it from its row under Pinned, which sits above Sessions.
+- swipe:
+    from:
+      id: "session-row-pinned:.*"
+      text: "Open Session ${output.session}"
+    direction: RIGHT
+- tapOn:
+    id: "session-swipe-pin-pinned:.*"
+    leftOf:
+      id: "session-row-pinned:.*"
+      text: "Open Session ${output.session}"
+- extendedWaitUntil:
+    notVisible:
+      id: "session-row-pinned:.*"
+      text: "Open Session ${output.session}"
     timeout: 10000
 
-# Archive it without a confirm, as on desktop, then restore it from Archived.
-- tapOn: "Archive Session ${output.session}"
+# Swipe left and tap Archive: no confirm, as on desktop. Then restore it from Archived.
+- swipe:
+    from: "Open Session ${output.session}"
+    direction: LEFT
+- tapOn:
+    id: "session-swipe-archive-.*"
+    rightOf: "Open Session ${output.session}"
 - extendedWaitUntil:
     notVisible: "Open Session ${output.session}"
     timeout: 10000
