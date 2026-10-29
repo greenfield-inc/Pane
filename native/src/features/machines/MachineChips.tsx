@@ -61,7 +61,7 @@ function MachineChip({ machine, connecting, onPress }: { machine: Machine; conne
     >
       <View style={styles.mark}>
         {connecting
-          ? <ActivityIndicator size="small" color={theme.colors.textMuted} />
+          ? <ActivityIndicator size="small" color={theme.colors.textMuted} style={styles.spinner} />
           : <MachineMark os={machine.os} slot={machine.slot} state={machine.state} color={filled ? theme.colors.background : undefined} />}
       </View>
       <Text variant="callout" numberOfLines={1} style={[styles.name, { color: filled ? theme.colors.background : theme.colors.text }]}>{machine.name}</Text>
@@ -90,6 +90,7 @@ const styles = StyleSheet.create({
   chip: { height: 34, borderRadius: 17, flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 13 },
   // A spinner swaps in for the mark in the same box.
   mark: { width: 14, height: 14, alignItems: 'center', justifyContent: 'center' },
+  spinner: { transform: [{ scale: 0.7 }] },
   name: { fontWeight: '600' },
   accessory: { height: 34, justifyContent: 'center', paddingHorizontal: 4 },
 });

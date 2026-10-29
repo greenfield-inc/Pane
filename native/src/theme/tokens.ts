@@ -72,7 +72,8 @@ export const brandColors = { tile: '#080a0c', silver: ['#ffffff', '#f5f7f9', '#d
  * blindness. Dark uses lighter tints of the same hues.
  */
 export const machineColors = {
-  light: ['#8b5cf6', '#0891b2', '#ec4899', '#65a30d', '#ea580c', '#f43f5e'],
+  // Lime is a shade darker than the mockup's #65a30d so a mark on a chip (surfaceRaised) clears 3:1.
+  light: ['#8b5cf6', '#0891b2', '#ec4899', '#5f9b0b', '#ea580c', '#f43f5e'],
   dark: ['#c4b5fd', '#67e8f9', '#f9a8d4', '#bef264', '#fdba74', '#fb7185'],
 } as const;
 

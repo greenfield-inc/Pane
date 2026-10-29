@@ -10,7 +10,9 @@ env:
 - tapOn:
     id: open-settings
 - tapOn:
-    id: settings-add-host
+    id: settings-add-machine
+- tapOn:
+    id: computers-add-code
 - tapOn:
     id: connect-code-input
 - inputText: ${SECOND_CODE}

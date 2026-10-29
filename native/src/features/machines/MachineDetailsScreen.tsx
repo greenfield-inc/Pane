@@ -93,7 +93,7 @@ function Details({ machine }: { machine: Machine }) {
               onPress={() => router.push('/settings/notifications')}
             />
           ) : (
-            <ListRow testID="machine-notifications" title="Notifications" value="Only for the current machine" />
+            <ListRow testID="machine-notifications" title="Notifications" subtitle="Only for the current machine" />
           )}
           <ListRow
             testID="machine-color"

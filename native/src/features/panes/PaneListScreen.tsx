@@ -43,7 +43,7 @@ import { StatusBadge } from './StatusBadge';
 export function PaneListScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const { profile } = useDaemon();
+  const { profile, connection } = useDaemon();
   const machines = useMachines();
   const [query, setQuery] = useState('');
   const [refreshing, setRefreshing] = useState(false);
@@ -190,7 +190,14 @@ export function PaneListScreen() {
   return (
     <View style={[styles.fill, { backgroundColor: theme.colors.background }]}>
       <View style={[styles.header, { paddingTop: insets.top + 6 }]}>
-        <View style={styles.brand} accessible accessibilityRole="header" accessibilityLabel={`Pane on ${profile.label}`}>
+        <View
+          // Flows wait on the connection through this id.
+          testID={`connection-status-${connection.status}`}
+          style={styles.brand}
+          accessible
+          accessibilityRole="header"
+          accessibilityLabel={`Pane on ${profile.label}`}
+        >
           <PaneLogo />
           <Text variant="title" numberOfLines={1} style={styles.brandTitle}>Pane</Text>
         </View>
