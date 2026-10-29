@@ -300,7 +300,8 @@ export class WorktreeManager {
       const [topDir, folder] = await Promise.all([top, baseDir].map(dir => realpath(pathResolver.toFileSystem(dir)).catch(() => pathResolver.toFileSystem(dir))));
       const relative = pathResolver.relative(topDir, folder).replace(/\\/gu, '/');
       if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) return;
-      const line = `/${relative}/`;
+      // Escape ignore-pattern characters so the folder name matches literally.
+      const line = `/${relative.replace(/[*?[\]]/gu, '\\$&').replace(/ $/u, '\\ ')}/`;
       const exclude = pathResolver.toFileSystem(path.posix.isAbsolute(excludePath) || path.isAbsolute(excludePath) ? excludePath : pathResolver.join(projectPath, excludePath));
       const current = await readFile(exclude, 'utf8').catch(() => '');
       if (current.split(/\r?\n/u).includes(line)) return;

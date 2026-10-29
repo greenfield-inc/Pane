@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, rm } from 'fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { CommandRunner } from '../../utils/commandRunner';
@@ -432,18 +432,37 @@ describe('WorktreeManager.getSessionLocalBaseBranch', () => {
 });
 
 describe('WorktreeManager.initializeProject', () => {
-  it("keeps Pane's worktree folder out of the main checkout's git status", async () => {
+  async function initRepo(): Promise<{ repo: string; runner: CommandRunner }> {
     const repo = await mkdtemp(join(tmpdir(), 'pane-worktree-exclude-'));
-    try {
-      const runner = new CommandRunner({ path: repo });
-      await runner.execFile('git', ['init', '--initial-branch=main'], repo);
-      await runner.execFile('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', '-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-m', 'init'], repo);
+    const runner = new CommandRunner({ path: repo });
+    await runner.execFile('git', ['init', '--initial-branch=main'], repo);
+    await runner.execFile('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', '-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-m', 'init'], repo);
+    return { repo, runner };
+  }
 
+  it("keeps Pane's worktree folder out of the main checkout's git status", async () => {
+    const { repo, runner } = await initRepo();
+    try {
       await new WorktreeManager().initializeProject(repo, undefined, new PathResolver({ path: repo }), runner);
       await runner.execFile('git', ['worktree', 'add', '-b', 'feature', join(repo, 'worktrees', 'feature')], repo);
 
       const { stdout } = await runner.execFile('git', ['status', '--porcelain'], repo);
       expect(stdout).toBe('');
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('hides a worktree folder named with ignore-pattern characters literally', async () => {
+    const { repo, runner } = await initRepo();
+    try {
+      await new WorktreeManager().initializeProject(repo, 'trees[1]', new PathResolver({ path: repo }), runner);
+      await runner.execFile('git', ['worktree', 'add', '-b', 'feature', join(repo, 'trees[1]', 'feature')], repo);
+      await mkdir(join(repo, 'trees1'));
+      await writeFile(join(repo, 'trees1', 'source.ts'), '');
+
+      const { stdout } = await runner.execFile('git', ['status', '--porcelain'], repo);
+      expect(stdout).toBe('?? trees1/\n');
     } finally {
       await rm(repo, { recursive: true, force: true });
     }
