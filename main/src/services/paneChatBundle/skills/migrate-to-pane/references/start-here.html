@@ -87,7 +87,7 @@ dd { margin: 2px 0 0; }
   <rect x="332" y="40" width="290" height="112" rx="8" fill="var(--panel)" stroke="var(--line)" stroke-dasharray="5 4"/>
   <text x="346" y="62">another Pane, another branch</text>
   <rect x="346" y="76" width="122" height="30" rx="6" fill="var(--accent-soft)" stroke="var(--line)"/>
-  <text x="358" y="96">tab: a worker</text>
+  <text x="358" y="96">tab: a sub-agent</text>
   <text x="346" y="138" class="muted">project · other-branch</text>
 </svg>
 
@@ -157,8 +157,8 @@ dd { margin: 2px 0 0; }
   <dd>A Pane is a branch: one branch of one project, in its own folder, so agents on different tasks never edit the same files. Panes sit under their Session in the sidebar, named "project · branch".</dd>
   <dt>Tab</dt>
   <dd>One agent or page inside a Pane, shown along the top of the main area. A Pane can run several agents side by side.</dd>
-  <dt>Worker</dt>
-  <dd>An agent a Session's chat started in one of its Panes to do part of the task. The chat checks on it and nudges it, so you don't flip between tabs.</dd>
+  <dt>Sub-agents</dt>
+  <dd>The Panes under a Session are sub-agents its orchestrator agent runs for you. The Session's chat starts them, checks on them and nudges them, so you don't flip between tabs.</dd>
 </dl>
 </section>
 
@@ -171,7 +171,7 @@ dd { margin: 2px 0 0; }
   2. Roadblock: You keep three copies of each repo so agents don't collide.
      Removes it: Each task is a Pane on its own branch, archived when it's done.
   3. Roadblock: You flip between tabs to see who's stuck.
-     Removes it: One Session per task; its agent checks on its workers and nudges them.
+     Removes it: One Session per task; the Panes under it are sub-agents its orchestrator agent runs for you, checking on them and nudging them.
   4. Roadblock: You push, rebase and watch CI by hand.
      Removes it: The Session's agent handles git and watches the PR, with localhost open beside you.
   5. Roadblock: Nothing happens unless you start it.

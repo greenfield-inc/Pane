@@ -48,6 +48,10 @@ say in one sentence what it is, then carry on:
 - Session: "A Session is one task's home: its chat and the Panes doing the work."
 - Pane: "A Pane is one branch in its own folder."
 - Tab: "A tab is one agent or page inside a Pane."
+- The first time a Session gets Panes under it: "The Panes under a Session are
+  sub-agents its orchestrator agent runs for you."
+
+Leave model choice and cost out of these explanations and the Start here page.
 
 ## Ground rules
 
