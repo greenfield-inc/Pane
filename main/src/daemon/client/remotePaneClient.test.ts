@@ -722,6 +722,28 @@ describe('RemotePaneClientController', () => {
     });
   });
 
+  it('closes a failed checklist for the host once its connection recovers on its own', async () => {
+    const server = await createTestRemoteServer();
+    activeServers.push(server);
+    const profile = { id: 'recovers', label: 'host', baseUrl: server.baseUrl, token: 'test-token', transport: 'http+sse' as const };
+    const config = createDefaultRemoteDaemonConfig();
+    config.client = { mode: 'remote', activeProfileId: profile.id, profiles: [profile] };
+    const controller = new RemotePaneClientController();
+    controller.initialize({ configManager: createConfigManagerStub(config), rendererEventSink: { send() {} } });
+    await waitFor(() => controller.getConnectionState().status === 'connected');
+
+    // Retry now while the host is not answering: the checklist fails.
+    server.setEventsReady(false);
+    await expect(controller.activateProfile(profile, { recheck: true })).rejects.toThrow();
+    expect(controller.getConnectionState().check?.outcome).toBe('failed');
+
+    server.setEventsReady(true);
+    controller.suspend();
+    controller.resume();
+    await waitFor(() => controller.getConnectionState().status === 'connected' && !controller.getConnectionState().check);
+    await controller.switchToLocalMode();
+  });
+
   it('restores the saved local state when a manual activation fails', async () => {
     const server = await createTestRemoteServer();
     activeServers.push(server);

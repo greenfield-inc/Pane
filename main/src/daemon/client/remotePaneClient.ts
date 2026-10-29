@@ -1487,6 +1487,11 @@ export class RemotePaneClientController extends EventEmitter {
     // A codeless host already described its version to the probe; older hosts omit it on ready.
     const version = hostVersion ?? (profile.tailnetMachine && check?.profileId === profile.id ? check.hostVersion : null);
     if (status === 'restoring') this.recordHostVersion(profile.id, version);
+    // The host came back on its own, so a failed card about it would only show a stale failure.
+    if (status === 'connected' && check?.profileId === profile.id && check.outcome === 'failed') {
+      this.check = null;
+      return;
+    }
     if (!check || check.profileId !== profile.id || check.outcome !== 'running') {
       if (status === 'error') void this.diagnoseFailure(profile, errorMessage);
       return;
