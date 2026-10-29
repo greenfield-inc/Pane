@@ -9,7 +9,6 @@ describe('a menu on screen', () => {
   it('is found in a Claude permission prompt, with a choice that wraps onto a second row', () => {
     expect(findMenu(captured('claude-permission'))).toMatchObject({
       choices: ['1. Yes', '2. Yes, and always allow access to /Users/me/code/demo from this', '3. Yes, and switch to auto mode · auto mode handles these prompts for you', '4. No'],
-      cursor: 0,
       // The command sits between dashed separators above the question; it is part of what is asked.
       question: ['Tip: auto mode handles these prompts for you — choose "switch to auto mode" below', 'Create empty bye.txt file', 'touch bye.txt && ls -l bye.txt', 'Do you want to proceed?'],
     });
@@ -18,7 +17,6 @@ describe('a menu on screen', () => {
   it('is found in a Claude question with a description under each choice and one more choice below a rule', () => {
     expect(findMenu(captured('claude-question'))).toMatchObject({
       choices: ['1. Red', '2. Blue', '3. Type something.', '4. Chat about this'],
-      cursor: 0,
     });
     expect(findMenu(captured('claude-question'))?.question.slice(-2)).toEqual(['☐ Color', 'Which color do you prefer?']);
   });
@@ -26,7 +24,6 @@ describe('a menu on screen', () => {
   it('is found in a Codex approval, and in its folder trust prompt', () => {
     expect(findMenu(captured('codex-approval'))).toMatchObject({
       choices: ['1. Yes, proceed (y)', "2. Yes, and don't ask again for commands that start with `touch codex.txt` (p)", '3. No, and tell Codex what to do differently (esc)'],
-      cursor: 0,
       question: ['Would you like to run the following command?', 'Environment: local', 'Reason: Allow creating codex.txt in the current directory?', '$ touch codex.txt'],
     });
     expect(findMenu(captured('codex-trust'))?.choices).toEqual(['1. Trust and continue', '2. Back to Agent Command Center']);
@@ -43,17 +40,12 @@ describe('a menu on screen', () => {
     expect(identity(otherDescription)).not.toBe(identity(permission));
   });
 
-  it('follows the cursor to another row', () => {
-    const screen = captured('claude-permission').map((row) => row.replace(' ❯ 1. Yes', '   1. Yes').replace('   4. No', ' ❯ 4. No'));
-    expect(findMenu(screen)?.cursor).toBe(3);
-  });
-
-  it('is found with a bulleted list and a > cursor', () => {
-    expect(findMenu(['Pick a branch:', '  - main', '> - next', '  - release', '', 'enter to switch'])).toMatchObject({
-      choices: ['- main', '- next', '- release'],
-      cursor: 1,
-      question: ['Pick a branch:'],
-    });
+  it('is a different menu when any row of a long command changes, however far above the question', () => {
+    const permission = captured('claude-permission');
+    const at = permission.indexOf(' touch bye.txt && ls -l bye.txt');
+    const command = (first: string) => [...permission.slice(0, at), ` ${first}`, ' printf a', ' printf b', ' printf c', ...permission.slice(at + 1)];
+    expect(findMenu(command('touch safe.txt'))?.identity).toContain('touch safe.txt');
+    expect(findMenu(command('rm -rf ./important-work'))?.identity).not.toBe(findMenu(command('touch safe.txt'))?.identity);
   });
 });
 
@@ -83,12 +75,12 @@ describe('no menu', () => {
   });
 
   it('for a list whose numbering skips', () => {
-    expect(findMenu(['Pick one', '❯ 1. Yes', '  2. Maybe', '  4. No', '', 'Esc to cancel'])).toBeNull();
+    expect(findMenu(['', 'Pick one', '❯ 1. Yes', '  2. Maybe', '  4. No', '', 'Esc to cancel'])).toBeNull();
   });
 
   it('for a list that does not start at 1, or has one choice', () => {
-    expect(findMenu(['Pick one', '❯ 2. Yes', '  3. No'])).toBeNull();
-    expect(findMenu(['Pick one', '❯ 1. Yes', '', 'Esc to cancel'])).toBeNull();
+    expect(findMenu(['', 'Pick one', '❯ 2. Yes', '  3. No'])).toBeNull();
+    expect(findMenu(['', 'Pick one', '❯ 1. Yes', '', 'Esc to cancel'])).toBeNull();
   });
 
   it('for a menu scrolled above more output', () => {
@@ -98,8 +90,8 @@ describe('no menu', () => {
 
   it('for a menu followed by more indented rows than a description', () => {
     const output = Array.from({ length: 10 }, (_, index) => `    output ${index + 1}`);
-    expect(findMenu(['Pick one', '❯ 1. Yes', '  2. No', ...output])).toBeNull();
-    expect(findMenu(['Pick one', '❯ 1. Yes', '  2. No', ...output.slice(0, 3)])?.choices).toEqual(['1. Yes', '2. No']);
+    expect(findMenu(['', 'Pick one', '❯ 1. Yes', '  2. No', ...output])).toBeNull();
+    expect(findMenu(['', 'Pick one', '❯ 1. Yes', '  2. No', ...output.slice(0, 3)])?.choices).toEqual(['1. Yes', '2. No']);
   });
 
   it('for a menu with no question above it', () => {
@@ -110,7 +102,15 @@ describe('no menu', () => {
     expect(findMenu(['$ ./deploy.sh', '1) staging', '2) production', '3) quit', '#? '])).toBeNull();
   });
 
-  it('for bullets with different markers', () => {
-    expect(findMenu(['Pick one', '❯ - main', '  * next'])).toBeNull();
+  it('for a bulleted list, which has no number to press', () => {
+    expect(findMenu(['', '', 'Pick a branch:', '  - main', '> - next', '  - release'])).toBeNull();
+  });
+
+  it('for a prompt whose top is above the screen, where rows that would change it are out of sight', () => {
+    const permission = captured('claude-permission');
+    // From the Tip row down: no top rule, and the screen starts on text.
+    expect(findMenu(permission.slice(13))).toBeNull();
+    // The command's top separator is above the screen.
+    expect(findMenu(['', '', ...permission.slice(17)])).toBeNull();
   });
 });

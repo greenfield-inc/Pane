@@ -79,8 +79,10 @@ export function isPaneEntry(row: PaneRow): row is PaneEntry {
   return row.kind === 'session' || row.kind === 'pane';
 }
 
+/** A menu choice's number: Claude Code and Codex pick that choice when it is pressed. */
+export const CHOICE_KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9'] as const;
 /** The keys the glasses can press in a terminal; a computer takes nothing else from them. */
-export type TerminalKey = 'up' | 'down' | 'enter' | 'escape' | 'tab';
+export type TerminalKey = 'up' | 'down' | 'enter' | 'escape' | 'tab' | (typeof CHOICE_KEYS)[number];
 
 export interface TerminalScreen {
   lines: string[];

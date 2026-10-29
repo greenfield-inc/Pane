@@ -28,7 +28,7 @@ export const GLASSES_CHANNELS: ReadonlySet<string> = new Set([
   'runpane:panels:screen',
   'runpane:panels:output',
   'runpane:panels:submit',
-  // One named key per request (`glassesKeyInput`): enough to answer a terminal menu, nothing more.
+  // One key per request (`glassesKeyInput`): enough to answer a terminal menu, nothing more.
   'runpane:panels:input',
   // Opening a stopped tab starts its saved agent or command, as opening it in Pane does; the caller picks no command or folder.
   'runpane:panels:resume',
@@ -72,8 +72,8 @@ const COUNTED_FAILURES: ReadonlySet<GlassesFailureReason> = new Set(['token', 'p
 export type GlassesFailureReason = 'token' | 'pairing-secret' | 'origin' | 'identity' | 'funnel' | 'credential-in-url' | 'channel' | 'key';
 
 const { up, down, enter, escape, tab } = RUNPANE_CONTRACT.terminalKeys;
-/** The keys the glasses may send: ↑ ↓ Enter Esc Tab, one per request. */
-const GLASSES_KEYS: ReadonlySet<string> = new Set([up, down, enter, escape, tab]);
+/** The keys the glasses may send, one per request: ↑ ↓ Enter Esc Tab, and a menu choice's number. */
+const GLASSES_KEYS: ReadonlySet<string> = new Set([up, down, enter, escape, tab, '1', '2', '3', '4', '5', '6', '7', '8', '9']);
 const keyRequestSchema = boundary.object({ panelId: boundary.nonEmptyString, input: boundary.string });
 
 /**

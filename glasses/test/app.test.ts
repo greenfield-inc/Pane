@@ -552,16 +552,22 @@ describe('the picker', () => {
     expect(text()[2]?.split(' | ')[3]).toBe('4. No');
   });
 
-  it('picks with arrows, checking the cursor moved before each next key, then Enter', async () => {
-    const { source, press, text } = await openMenu();
-    let cursor = 0;
-    source.onKey = (key) => {
-      if (key === 'down') cursor += 1;
-      source.screenLines = key === 'enter' ? ['⏺ Bash(touch bye.txt)', '  ⎿  (No output)'] : permission(cursor);
-    };
+  it("picks by pressing the choice's number, wherever the cursor is", async () => {
+    const { source, press, text, clock } = await openMenu(permission(1));
+    source.onKey = () => { source.screenLines = ['⏺ Bash(touch bye.txt)', '  ⎿  (No output)']; };
     await press({ type: 'select', index: 3 });
-    expect(source.keys).toEqual(['down', 'down', 'down', 'enter']);
+    expect(source.keys).toEqual(['4']);
+    await clock.advance(1_000);
     expect(text()[0]).toBe('fix-login · shell · idle');
+  });
+
+  it('opens keys mode when the menu is still there after its number, as Codex folder trust ignores numbers', async () => {
+    const { source, press, text, clock } = await openMenu(fixture('codex-trust'));
+    await press({ type: 'select', index: 1 });
+    expect(source.keys).toEqual(['2']);
+    await clock.advance(1_000);
+    expect(text()[0]).toBe('KEYS · swipe ↑↓ · press Enter · hold Esc/Tab');
+    expect(text().at(-1)).toBe("The menu didn't take its number; answer it with keys");
   });
 
   it('sends nothing when the menu changed between showing and the pick', async () => {
@@ -570,16 +576,37 @@ describe('the picker', () => {
     await press({ type: 'select', index: 1 });
     expect(source.keys).toEqual([]);
     expect(text()[0]).toBe('KEYS · swipe ↑↓ · press Enter · hold Esc/Tab');
-    expect(text().at(-1)).toBe('The menu changed, so nothing more was sent');
+    expect(text().at(-1)).toBe('The menu changed, so nothing was sent');
   });
 
-  it('stops before Enter when the cursor does not move', async () => {
-    const { source, press, text, clock } = await openMenu();
-    await press({ type: 'select', index: 2 });
-    expect(text()[0]).toBe('fix-login · picking…');
-    await clock.advance(2_000);
+  it('waits for keys pressed before it, and sends nothing when they changed the command', async () => {
+    const scripted = startScripted();
+    const { source, press, text, clock } = scripted;
+    source.screenLines = ['$ _'];
+    source.rows = [paneRow('fix-login')];
+    source.changed();
+    await press({ type: 'press' });
+    await press({ type: 'select', index: 0 });
+    await press({ type: 'select', index: 0 });
+    // Keys mode before the menu shows: a Down that is slow to arrive, then back to the output.
+    await press({ type: 'press' });
+    let arrive = () => {};
+    source.keyDelays = [new Promise<void>((resolve) => { arrive = resolve; })];
+    await press({ type: 'down' });
+    await press({ type: 'double' });
+    source.screenLines = permission(0);
+    await clock.advance(1_100);
+    expect(text()[0]).toBe('fix-login · pick one · double = dismiss');
+    source.onKey = (key) => {
+      if (key === 'down') source.screenLines = permission(1).map((line) => line.replace('touch bye.txt && ls -l bye.txt', 'rm -rf ./important-work'));
+    };
+    await press({ type: 'select', index: 0 });
+    expect(source.keys).toEqual([]);
+    arrive();
+    await settle();
+    await settle();
     expect(source.keys).toEqual(['down']);
-    expect(text().at(-1)).toBe('The menu changed, so nothing more was sent');
+    expect(text().at(-1)).toBe('The menu changed, so nothing was sent');
   });
 
   it('sends nothing when the command being approved changes under the same question and choices', async () => {
@@ -588,18 +615,16 @@ describe('the picker', () => {
     source.screenLines = permission(0).map((line) => line.replace('touch bye.txt && ls -l bye.txt', 'rm -rf ./important-work'));
     await press({ type: 'select', index: 0 });
     expect(source.keys).toEqual([]);
-    expect(text().at(-1)).toBe('The menu changed, so nothing more was sent');
+    expect(text().at(-1)).toBe('The menu changed, so nothing was sent');
   });
 
-  it('stops before Enter when a read after an arrow shows a different menu, even if the first comes back', async () => {
-    const { source, press, text, clock } = await openMenu();
-    const other = permission(1).map((line) => line.replace('touch bye.txt && ls -l bye.txt', 'rm -rf ./important-work'));
-    source.onKey = (key) => { if (key === 'down') source.screenLines = other; };
-    await press({ type: 'select', index: 1 });
-    source.screenLines = permission(1);
-    await clock.advance(2_000);
-    expect(source.keys).toEqual(['down']);
-    expect(text().at(-1)).toBe('The menu changed, so nothing more was sent');
+  it('sends nothing when an earlier row of a long command changes under the same last rows', async () => {
+    const command = (first: string) => permission(0).flatMap((line) => (line === ' touch bye.txt && ls -l bye.txt' ? [` ${first}`, ' printf a', ' printf b', ' printf c'] : [line]));
+    const { source, press, text } = await openMenu(command('touch safe.txt'));
+    source.screenLines = command('rm -rf ./important-work');
+    await press({ type: 'select', index: 0 });
+    expect(source.keys).toEqual([]);
+    expect(text().at(-1)).toBe('The menu changed, so nothing was sent');
   });
 
   it('sends nothing when a different question shows the same choices', async () => {
@@ -607,17 +632,23 @@ describe('the picker', () => {
     source.screenLines = permission(0).map((line) => line.replace('Do you want to proceed?', 'Do you want to delete the repo?'));
     await press({ type: 'select', index: 0 });
     expect(source.keys).toEqual([]);
-    expect(text().at(-1)).toBe('The menu changed, so nothing more was sent');
+    expect(text().at(-1)).toBe('The menu changed, so nothing was sent');
   });
 
-  it('ignores hold while a pick is sending keys', async () => {
+  it('ignores hold while a pick is sending its key', async () => {
     const { source, press, text, clock } = await openMenu();
     source.dictation = 'hello';
+    let arrive = () => {};
+    source.keyDelays = [new Promise<void>((resolve) => { arrive = resolve; })];
     await press({ type: 'select', index: 2 });
     await press({ type: 'hold' });
     expect(text()[0]).toBe('fix-login · picking…');
-    await clock.advance(2_000);
-    expect(text()[0]).toBe('KEYS · swipe ↑↓ · press Enter · hold Esc/Tab');
+    arrive();
+    await settle();
+    expect(source.keys).toEqual(['3']);
+    source.screenLines = ['$ _'];
+    await clock.advance(1_000);
+    expect(text()[0]).toBe('fix-login · shell · idle');
   });
 
   it('is dismissed by double press until that menu leaves the screen', async () => {
@@ -741,6 +772,7 @@ describe('demo', () => {
     expect(text()[0]).toBe('docs-pass · pick one · double = dismiss');
     expect(text()[2]).toBe('1. Yes, push and open the PR | 2. Not yet');
     await press({ type: 'select', index: 1 });
+    await clock.advance(1_000);
     expect(text()[0]).toBe('docs-pass · Codex · idle');
     expect(shown()).toContain('Okay, the branch stays local for now.');
     await clock.advance(5_000);

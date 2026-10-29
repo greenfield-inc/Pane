@@ -3,7 +3,7 @@
 import type { NotifyAnswer } from '../../shared/types/notify';
 import { BRIGHT, type Page } from './display';
 import type { Gesture } from './input';
-import { GlassesError, isPaneEntry, type Card, type Computer, type Dictation, type PaneEntry, type PaneRow, type PaneSource, type TerminalKey } from './model';
+import { CHOICE_KEYS, GlassesError, isPaneEntry, type Card, type Computer, type Dictation, type PaneEntry, type PaneRow, type PaneSource, type TerminalKey } from './model';
 import { findMenu, type Menu } from './menu';
 import {
   HALF_PAGE,
@@ -43,9 +43,6 @@ const SCREEN_POLL_WORKING_MS = 500;
 const CARD_CONTEXT_LINES = 6;
 /** Earlier screen reads kept to spot a footer that never changes. */
 const EARLIER_READS = 3;
-/** While a pick waits for the cursor to move: how often it reads the screen, and for how long. */
-const PICK_READ_MS = 500;
-const PICK_WAIT_MS = 1_500;
 /** While held at your message, the saved output is read at most this often, and only this much of it. */
 const HOLD_READ_MS = 1_000;
 const HOLD_LINES = 150;
@@ -53,7 +50,10 @@ const HOLD_LINES = 150;
 const HOLD_FIND_MS = 5_000;
 /** Your line is found by its first characters, which fit on its first row. */
 const HOLD_MATCH_CHARS = 40;
-const MENU_CHANGED = 'The menu changed, so nothing more was sent';
+const MENU_CHANGED = 'The menu changed, so nothing was sent';
+const NUMBER_IGNORED = "The menu didn't take its number; answer it with keys";
+/** How long after a choice's number the menu should be gone. */
+const PICK_SETTLE_MS = 1_000;
 
 const menuKey = (menu: Menu) => menu.identity;
 /** The last index whose row passes `test`, or -1. */
@@ -879,53 +879,52 @@ export class GlassesApp {
   }
 
   /**
-   * Answers a menu with real keys: checks the menu is still there with the cursor where it was,
-   * sends one arrow at a time and waits to see the cursor move, then Enter. Any change stops it
-   * before Enter, and keys mode takes over. Keys are never resent.
+   * Answers a menu by pressing its choice's number, so where the cursor is never matters. Keys
+   * pressed before it land first; then the screen is read again, and a menu that changed at all
+   * gets nothing and opens keys mode. A menu still there after its number ignores numbers, as
+   * Codex's folder trust does: keys mode opens for it. The key is never resent.
    */
   private async pick(view: Extract<View, { name: 'terminal' }>, menu: Menu, index: number): Promise<void> {
     const { computerId, entry } = view;
     const panelId = entry.panelId;
+    const key = CHOICE_KEYS[index];
+    if (!key) return;
     this.update(view, { picking: menu });
-    const stop = () => {
-      const current = this.terminalOn(panelId);
-      if (current?.picking) this.update(current, { picking: null, mode: 'keys', notice: MENU_CHANGED });
-      if (current) this.readNow();
-    };
     try {
-      if (!(await this.cursorOn(computerId, panelId, menu, menu.cursor, 0))) return stop();
-      const step: TerminalKey = index > menu.cursor ? 'down' : 'up';
-      for (let cursor = menu.cursor; cursor !== index;) {
-        if (!this.terminalOn(panelId)?.picking) return;
-        await this.pressKey(computerId, panelId, step);
-        cursor += step === 'down' ? 1 : -1;
-        if (!(await this.cursorOn(computerId, panelId, menu, cursor, PICK_WAIT_MS))) return stop();
-      }
+      // Gestures wait while picking, so no key can join the queue between this read and the press.
+      await this.keyQueue;
       if (!this.terminalOn(panelId)?.picking) return;
-      await this.pressKey(computerId, panelId, 'enter');
+      const found = findMenu((await this.deps.source.screen(computerId, panelId)).lines);
+      const current = this.terminalOn(panelId);
+      if (!current?.picking) return;
+      if (!found || menuKey(found) !== menuKey(menu)) {
+        this.update(current, { picking: null, mode: 'keys', notice: MENU_CHANGED });
+        this.readNow();
+        return;
+      }
+      await this.pressKey(computerId, panelId, key);
     } catch (error) {
       this.keyRefused(panelId, error);
       return;
     }
+    const ignored = await this.stillShows(computerId, panelId, menu);
     const current = this.terminalOn(panelId);
     if (current) {
-      this.update(current, { picking: null, dismissed: menuKey(menu), hold: null, scrolledUp: 0, dim: null });
+      this.update(current, ignored
+        ? { picking: null, mode: 'keys', notice: NUMBER_IGNORED }
+        : { picking: null, dismissed: menuKey(menu), hold: null, scrolledUp: 0, dim: null });
       this.readNow();
     }
   }
 
-  /**
-   * Reads the screen until `menu` shows with its cursor on `row`, for up to `waitMs`. Any read that
-   * shows another menu, or none, fails at once: only the cursor may still be on its way.
-   */
-  private async cursorOn(computerId: string, panelId: string, menu: Menu, row: number, waitMs: number): Promise<boolean> {
-    for (let waited = 0; ; waited += PICK_READ_MS) {
-      const screen = await this.deps.source.screen(computerId, panelId);
-      const found = findMenu(screen.lines);
-      if (!found || menuKey(found) !== menuKey(menu)) return false;
-      if (found.cursor === row) return true;
-      if (waited + PICK_READ_MS > waitMs) return false;
-      await new Promise<void>((resolve) => { this.deps.later(resolve, PICK_READ_MS); });
+  /** Whether `menu` is still on screen a moment after it was answered; a failed read says no. */
+  private async stillShows(computerId: string, panelId: string, menu: Menu): Promise<boolean> {
+    await new Promise<void>((resolve) => { this.deps.later(resolve, PICK_SETTLE_MS); });
+    try {
+      const found = findMenu((await this.deps.source.screen(computerId, panelId)).lines);
+      return found !== null && menuKey(found) === menuKey(menu);
+    } catch {
+      return false;
     }
   }
 

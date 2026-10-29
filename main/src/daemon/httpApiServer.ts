@@ -1173,7 +1173,7 @@ export class PaneRemoteHttpApiServer {
       if (!key) {
         // Logged without the input, which could be anything the request carried.
         glasses.recordFailure(admission.source, 'key');
-        refuse(400, 'ERR_GLASSES_KEY_REFUSED', 'Glasses can send only one key at a time: up, down, Enter, Esc or Tab. Nothing was typed.',
+        refuse(400, 'ERR_GLASSES_KEY_REFUSED', 'Glasses can send only one key at a time: up, down, Enter, Esc, Tab or a digit from 1 to 9. Nothing was typed.',
           'Update the Pane glasses app, then try again.');
         return;
       }

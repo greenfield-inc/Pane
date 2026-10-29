@@ -1,7 +1,7 @@
 // The demo: sample computers, cards and terminals that live in the app, with no network.
 // Even review needs it, and anyone can try every screen before pairing.
 import type { NotifyAnswer } from '../../shared/types/notify';
-import { GlassesError, orderCards, type Card, type Computer, type Dictation, type PaneEntry, type PaneRow, type PaneSource, type TerminalKey, type TerminalScreen } from './model';
+import { CHOICE_KEYS, GlassesError, orderCards, type Card, type Computer, type Dictation, type PaneEntry, type PaneRow, type PaneSource, type TerminalKey, type TerminalScreen } from './model';
 import type { Cancel } from './timers';
 
 const MINUTE = 60_000;
@@ -38,7 +38,7 @@ const PUSH_MENU: DemoMenu = {
 
 function menuRows(menu: DemoMenu): string[] {
   return [
-    '', `  ${menu.question}`, '',
+    '', '', `  ${menu.question}`, '',
     ...menu.choices.map((choice, index) => `${index === menu.cursor ? '›' : ' '} ${index + 1}. ${choice}`),
     '', '  Press enter to confirm or esc to cancel',
   ];
@@ -166,15 +166,17 @@ export class DemoSource implements PaneSource {
     this.changed();
   }
 
-  /** Arrows move a menu's cursor, Enter picks, Esc cancels; elsewhere keys change nothing. */
+  /** Arrows move a menu's cursor, Enter or a choice's number picks, Esc cancels; elsewhere keys change nothing. */
   async key(_computerId: string, panelId: string, key: TerminalKey): Promise<void> {
     const terminal = this.terminal(panelId);
     const menu = terminal.menu;
     if (!menu) return;
+    const numbered = CHOICE_KEYS.findIndex((choice) => choice === key);
+    const picked = key === 'enter' ? menu.cursor : numbered < menu.choices.length ? numbered : -1;
     if (key === 'up' || key === 'down') {
       menu.cursor = Math.max(0, Math.min(menu.choices.length - 1, menu.cursor + (key === 'down' ? 1 : -1)));
-    } else if (key === 'enter' || key === 'escape') {
-      const answer = key === 'enter' ? [`› ${menu.cursor + 1}. ${menu.choices[menu.cursor] ?? ''}`, menu.replies[menu.cursor] ?? ''] : ['• Cancelled. Nothing was pushed.'];
+    } else if (picked >= 0 || key === 'escape') {
+      const answer = picked >= 0 ? [`› ${picked + 1}. ${menu.choices[picked] ?? ''}`, menu.replies[picked] ?? ''] : ['• Cancelled. Nothing was pushed.'];
       terminal.lines = [...terminal.lines, ...answer].slice(-12);
       terminal.menu = undefined;
       terminal.status = 'idle';

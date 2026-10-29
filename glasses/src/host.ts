@@ -52,7 +52,10 @@ const SCROLLBACK_LINES = 400;
 /** What an older Pane answers a command it doesn't let glasses run; it says nothing about access. */
 const CHANNEL_REFUSED = 'ERR_GLASSES_CHANNEL_REFUSED';
 /** The bytes each key sends, as the runpane contract's terminalKeys table gives them. */
-const KEY_BYTES = { up: '\u001b[A', down: '\u001b[B', enter: '\r', escape: '\u001b', tab: '\t' } as const satisfies Record<TerminalKey, string>;
+const KEY_BYTES = {
+  up: '\u001b[A', down: '\u001b[B', enter: '\r', escape: '\u001b', tab: '\t',
+  1: '1', 2: '2', 3: '3', 4: '4', 5: '5', 6: '6', 7: '7', 8: '8', 9: '9',
+} as const satisfies Record<TerminalKey, string>;
 /** List changes (Panes made, archived, renamed) arrive in bursts; recount once they settle. */
 const LIST_REFRESH_MS = 1_000;
 

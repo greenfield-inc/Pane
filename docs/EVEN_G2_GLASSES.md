@@ -64,14 +64,17 @@ Esc and Tab. You can't dictate in keys mode; leave it first.
   page: the half you just read stays on screen, dimmed. Swiping down to the end follows live again.
   Press opens keys mode, which shows the whole screen, input box included. The bottom line names
   the newest card from another Pane; double press goes to it.
-- **Menus**: when a terminal shows a menu Pane is certain of (a numbered or bulleted list at the
-  bottom of the screen with exactly one cursor mark, such as `❯`, `>` or `›`), its choices appear as
-  a list, under the last two lines above it: the question and what it asks about, such as the
-  command to run. Swipe to a choice and press: Pane sends one arrow key at a time from the cursor
-  row, checks that the cursor moved after each one, then sends Enter. If the menu changes on the
-  way (the question, the command or any choice), it stops before Enter, says "The menu changed, so
-  nothing more was sent", and opens keys mode. Double press
-  dismisses the list. Any other prompt is answered from keys mode.
+- **Menus**: when a terminal shows a menu Pane is certain of (a list numbered from 1 at the bottom
+  of the screen with exactly one cursor mark, such as `❯`, `>` or `›`, under a prompt whose top is
+  on screen), its choices appear as a list, under the last two lines above it: the question and
+  what it asks about, such as the command to run. Swipe to a choice and press: Pane waits for any
+  keys you pressed before, reads the screen again, and presses the choice's number, which Claude
+  Code and Codex take as that answer wherever the cursor is. If anything in the prompt changed
+  since the list showed (the question, any row of the command, or any choice), it sends nothing,
+  says "The menu changed, so nothing was sent", and opens keys mode. A menu still on screen a
+  second after its number ignores numbers, as Codex's folder trust prompt does: keys mode opens
+  so you answer it with arrows and Enter. Double press dismisses the list. Any other prompt,
+  including one taller than the screen, is answered from keys mode.
 - **Going back** from a terminal or a computer's list opens the list on the row you picked. Native
   glasses lists always open on their first row, so the list starts there, runs to the end, then
   continues from the top after a **· top of the list ·** row.
@@ -115,10 +118,10 @@ hold:
   the token.
 
 A glasses token reaches only what the glasses use: listing Sessions and Panes, reading and typing
-into terminals, pressing one key at a time, dictation, and Notify. The keys are ↑, ↓, Enter, Esc and
-Tab, one per request, and nothing else: text, two keys at once, Ctrl-C, Ctrl-D, ← → and digits are
-refused before they reach the terminal (`ERR_GLASSES_KEY_REFUSED`), logged without the input, and
-not counted toward the lockout. These keys are enough to answer an agent's permission menu, so the
+into terminals, pressing one key at a time, dictation, and Notify. The keys are ↑, ↓, Enter, Esc,
+Tab and the digits 1 to 9, one per request, and nothing else: text, two keys at once, Ctrl-C,
+Ctrl-D, ← → and 0 are refused before they reach the terminal (`ERR_GLASSES_KEY_REFUSED`), logged
+without the input, and not counted toward the lockout. These keys are enough to answer an agent's permission menu, so the
 glasses can approve what an agent asks to do. Opening a stopped Pane restarts its saved agent or command,
 in its own folder. The token cannot pair other devices, change settings, write files, commit, run
 machine commands, or choose what a terminal runs, and its event stream never carries terminal

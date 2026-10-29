@@ -269,24 +269,25 @@ describe('glasses on the workspace listener', () => {
     expect(host.calls).toEqual([{ channel: 'notify:remote-command', args: [{ id: 'q1', answer: 'yes' }, { device: 'Even G2 · Parsa\'s iPhone' }] }]);
   });
 
-  it('sends exactly one named key per request, as the user, and refuses anything else without counting it', async () => {
+  it('sends exactly one key per request, as the user, and refuses anything else without counting it', async () => {
     const host = await setup();
     const { token } = await host.pair();
     const input = (value: JsonValue, source = 'agent') => host.invoke('runpane:panels:input', [{ panelId: 'p1', input: value, source }], host.fromGlasses(token));
-    // Up, down, Enter, Esc and Tab, as a terminal reads them.
-    for (const key of ['\u001b[A', '\u001b[B', '\r', '\u001b', '\t']) expect((await input(key)).status).toBe(200);
-    expect(host.calls).toEqual(['\u001b[A', '\u001b[B', '\r', '\u001b', '\t'].map((key) => ({ channel: 'runpane:panels:input', args: [{ panelId: 'p1', input: key, source: 'user' }] })));
+    // Up, down, Enter, Esc, Tab and a menu choice's number, as a terminal reads them.
+    const keys = ['\u001b[A', '\u001b[B', '\r', '\u001b', '\t', '1', '9'];
+    for (const key of keys) expect((await input(key)).status).toBe(200);
+    expect(host.calls).toEqual(keys.map((key) => ({ channel: 'runpane:panels:input', args: [{ panelId: 'p1', input: key, source: 'user' }] })));
 
-    // Text, two keys at once, Ctrl-C, Ctrl-D, left, right, a digit, nothing, a non-string.
-    const refusedInputs: JsonValue[] = ['rm -rf ~\r', '\u001b[B\r', '\u0003', '\u0004', '\u001b[D', '\u001b[C', '1', '', 13];
+    // Text, two keys at once, two digits, Ctrl-C, Ctrl-D, left, right, 0, nothing, a non-string.
+    const refusedInputs: JsonValue[] = ['rm -rf ~\r', '\u001b[B\r', '12', '\u0003', '\u0004', '\u001b[D', '\u001b[C', '0', '', 13];
     for (const value of [...refusedInputs, ...refusedInputs]) {
       const refused = await input(value);
       expect({ value, status: refused.status, code: errorCode(refused) }).toEqual({ value, status: 400, code: 'ERR_GLASSES_KEY_REFUSED' });
     }
-    expect(host.calls).toHaveLength(5);
-    expect(host.log.filter((line) => line.includes('refused key'))).toHaveLength(18);
+    expect(host.calls).toHaveLength(7);
+    expect(host.log.filter((line) => line.includes('refused key'))).toHaveLength(20);
     expect(host.log.join('\n')).not.toContain('rm -rf');
-    // Eighteen refused keys and no lockout.
+    // Twenty refused keys and no lockout.
     expect((await input('\r')).status).toBe(200);
   });
 

@@ -1,16 +1,14 @@
 // Finds a terminal menu the glasses can answer with a picker. Only a certain match counts: a
-// numbered or bulleted block near the bottom of the screen with exactly one cursor mark. No rule
-// names an agent.
+// numbered block near the bottom of the screen with exactly one cursor mark, under a prompt whose
+// top is on screen. No rule names an agent.
 import { isRule } from './terminal';
 
 export interface Menu {
   /** Each choice's first row, "1. Yes", without the cursor mark. */
   choices: string[];
-  /** The choice the cursor is on. */
-  cursor: number;
   /** Up to 4 rows just above the choices, across separators: the question and what it would do. */
   question: string[];
-  /** The question and every choice row with its description, cursor mark removed: the same text is the same menu. */
+  /** Every row of the prompt, from its top to the last choice's description, cursor mark removed: the same text is the same menu. */
   identity: string;
 }
 
@@ -22,15 +20,15 @@ const MAX_BELOW = 4;
 const MAX_DESCRIPTION = 3;
 const MAX_QUESTION = 4;
 
-/** An optional cursor mark, then a number ("1." or "1)") or a bullet, then the label. */
-const CHOICE = /^(\s*)(?:([❯>›])\s*)?(\d[.)]|[-*•])\s+(\S.*?)\s*$/u;
+/** An optional cursor mark, then a number ("1." or "1)"), then the label. */
+const CHOICE = /^(\s*)(?:([❯>›])\s*)?(\d[.)])\s+(\S.*?)\s*$/u;
 const CURSOR_START = /^\s*[❯>›]/u;
 /** Dashed separators some menus draw, which `isRule` leaves to the output. */
 const DASHED = /^[╌╍┄┅┈┉]{3,}$/u;
 
 interface ChoiceRow {
   index: number;
-  /** Where the number or bullet sits. */
+  /** Where the number sits. */
   column: number;
   marker: string;
   label: string;
@@ -85,29 +83,32 @@ export function findMenu(rows: readonly string[]): Menu | null {
   }
   const choices = block.length;
   if (choices < MIN_CHOICES || choices > MAX_CHOICES) return null;
-  const numbered = block.every((choice, position) => choice.marker === `${position + 1}.` || choice.marker === `${position + 1})`);
-  const bulleted = block.every((choice) => choice.marker === lowest.marker && !/\d/.test(choice.marker));
-  if (!numbered && !bulleted) return null;
-  const cursors = block.filter((choice) => choice.cursor);
-  if (cursors.length !== 1 || !cursors[0]) return null;
+  if (!block.every((choice, position) => choice.marker === `${position + 1}.` || choice.marker === `${position + 1})`)) return null;
+  if (block.filter((choice) => choice.cursor).length !== 1) return null;
 
-  const question: string[] = [];
+  // The prompt starts below a solid rule, or below two blank rows; the screen's edge counts as one
+  // blank row. Blank rows between dashed separators belong to the command they frame. Reaching the
+  // edge otherwise means rows that could change what is asked are out of sight.
+  const first = block[0]?.index ?? last;
+  let top = first;
   let blanks = 0;
-  for (let index = (block[0]?.index ?? 0) - 1; index >= 0 && question.length < MAX_QUESTION; index -= 1) {
-    const row = rows[index] ?? '';
+  let framed = false;
+  for (let index = first - 1; ; index -= 1) {
+    const row = index < 0 ? '' : (rows[index] ?? '');
+    if (index >= 0 && isRule(row)) break;
     if (blank(row)) {
-      blanks += 1;
-      if (blanks >= 2 && question.length) break;
+      if (!framed && (blanks += 1) >= 2 && top < first) break;
+      if (index < 0) return null;
       continue;
     }
-    // A separator can sit between the question and what it asks about, such as the command to run.
-    if (separator(row)) continue;
     blanks = 0;
-    question.unshift(row.trim());
+    if (separator(row)) framed = !framed;
+    top = index;
   }
+  const asked = rows.slice(top, first).filter((row) => !blank(row) && !separator(row)).map((row) => row.trim());
   // Without a question there is nothing to tell this menu from another with the same choices.
-  if (!question.length) return null;
-  const first = block[0]?.index ?? last;
+  if (!asked.length) return null;
+  const question = asked.slice(-MAX_QUESTION);
   const shown = rows.slice(first, end + 1).map((row) => (choiceRow(row, 0) ? row.replace(/^(\s*)[❯>›]/u, '$1 ') : row).trimEnd());
-  return { choices: block.map((choice) => choice.label), cursor: block.indexOf(cursors[0]), question, identity: [...question, ...shown].join('\n') };
+  return { choices: block.map((choice) => choice.label), question, identity: [...asked, ...shown].join('\n') };
 }

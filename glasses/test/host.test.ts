@@ -277,8 +277,8 @@ describe('HostHub', () => {
     a.handlers.set('runpane:panels:input', ([request]) => { sent.push(request ?? null); return { ok: true }; });
     const { hub: one } = hub([a]);
     await until(() => one.computers()[0]?.status === 'live');
-    for (const key of ['up', 'down', 'enter', 'escape', 'tab'] as const) await one.key(a.url, 'panel-1', key);
-    expect(sent).toEqual(['\u001b[A', '\u001b[B', '\r', '\u001b', '\t'].map((input) => ({ panelId: 'panel-1', input, source: 'user' })));
+    for (const key of ['up', 'down', 'enter', 'escape', 'tab', '4'] as const) await one.key(a.url, 'panel-1', key);
+    expect(sent).toEqual(['\u001b[A', '\u001b[B', '\r', '\u001b', '\t', '4'].map((input) => ({ panelId: 'panel-1', input, source: 'user' })));
     one.stop();
   });
 
