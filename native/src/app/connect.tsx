@@ -3,6 +3,8 @@ import { useState, type ReactNode } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { useHostsStore } from '@/auth/hostsStore';
+import { PRIVACY_POLICY_URL } from '@/features/app/privacyPolicy';
 import { ComputersScreen } from '@/features/computers/ComputersScreen';
 import { ConnectForm } from '@/features/pairing/ConnectForm';
 import { useTheme } from '@/theme';
@@ -11,9 +13,10 @@ import type { IconProps } from '@/ui/Icon';
 
 const SETUP_GUIDE_URL = 'https://runpane.com/docs/remote-daemon';
 
-/** First launch: find your computers over Tailscale, connect with a code, or read the setup guide. */
+/** First launch: find your computers over Tailscale, connect with a code, read the setup guide, or try the demo. */
 export default function ConnectScreen() {
   const theme = useTheme();
+  const startDemo = useHostsStore(state => state.startDemo);
   const [mode, setMode] = useState<'menu' | 'connect' | 'computers'>('menu');
 
   if (mode === 'computers') {
@@ -67,6 +70,17 @@ export default function ConnectScreen() {
                 action="Open setup guide"
                 onPress={() => void Linking.openURL(SETUP_GUIDE_URL)}
               />
+              <MenuCard
+                testID="connect-try-demo"
+                icon={<IconTile ios="play.circle" android="play_circle" />}
+                title="Try a demo"
+                description="Look around with sample computers. Nothing connects."
+                action="Start the demo"
+                onPress={startDemo}
+              />
+              <Pressable testID="connect-privacy" accessibilityRole="link" onPress={() => void Linking.openURL(PRIVACY_POLICY_URL)} style={styles.privacy} hitSlop={8}>
+                <Text variant="footnote" tone="secondary">Privacy policy</Text>
+              </Pressable>
             </View>
           ) : (
             <View style={[styles.card, cardStyle(theme)]}>
@@ -144,4 +158,5 @@ const styles = StyleSheet.create({
   actionText: { fontWeight: '600' },
   back: { flexDirection: 'row', alignItems: 'center', gap: 8, alignSelf: 'flex-start' },
   backBar: { paddingHorizontal: 16, paddingTop: 8 },
+  privacy: { alignSelf: 'center', paddingVertical: 8 },
 });

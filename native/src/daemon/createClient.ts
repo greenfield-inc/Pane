@@ -10,6 +10,7 @@ import {
 import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
 
 import { secureStore } from '@/auth/secureStore';
+import { demoConnection, isDemoProfile } from '@/features/demo/demoHost';
 
 // expo/fetch streams response bodies, which the /events stream needs.
 export const streamingFetch = expoFetch;
@@ -33,8 +34,10 @@ export function getRuntimeId(): Promise<string> {
 export function createDaemonClient(profile: RemotePaneConnectionProfile): RemoteDaemonClient {
   return new RemoteDaemonClient({
     profile,
-    transport: createFetchEventStreamTransport(streamingFetch),
-    fetch: streamingFetch,
+    // The demo's sample computers answer in the app, whichever screen builds the client.
+    ...(isDemoProfile(profile)
+      ? demoConnection()
+      : { transport: createFetchEventStreamTransport(streamingFetch), fetch: streamingFetch }),
     runtimeId: getRuntimeId,
     clientLabel: CLIENT_LABEL,
     deviceLabel: DEVICE_LABEL,
