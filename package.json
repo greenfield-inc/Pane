@@ -53,6 +53,7 @@
     "test:runpane-managed-cli": "pnpm --filter runpane build && node --test scripts/test-runpane-managed-cli.js",
     "test:runpane-telemetry": "pnpm --filter runpane build && node --test scripts/test-runpane-telemetry.js",
     "test:runpane-package-smoke": "pnpm --filter runpane build && node scripts/test-runpane-package-smoke.js",
+    "test:flapping-proxy": "node --test scripts/flapping-link-proxy.test.mjs",
     "inject-build-info": "node scripts/inject-build-info.js",
     "release:mac": "pnpm run build:frontend && pnpm run build:main && pnpm run inject-build-info && pnpm run generate-notices && node scripts/configure-build.js && electron-builder --mac --publish always && node scripts/verify-mac-universal-binaries.js",
     "release:mac:universal": "pnpm run build:frontend && pnpm run build:main && pnpm run inject-build-info && pnpm run generate-notices && node scripts/configure-build.js && electron-builder --mac --universal --publish always && node scripts/verify-mac-universal-binaries.js",

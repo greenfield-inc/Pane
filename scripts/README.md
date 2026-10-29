@@ -96,6 +96,17 @@ scripts/ci-background.sh start typecheck pnpm typecheck
 scripts/ci-background.sh wait typecheck
 ```
 
+## flapping-link-proxy.mjs
+
+A TCP proxy that drops the link on a schedule shaped like a flapping cellular
+or Tailscale path. Put it between a remote client and a dev host to test
+reconnects. See [Testing remote clients on a flapping link](../CONTRIBUTING.md#testing-remote-clients-on-a-flapping-link).
+
+```bash
+node scripts/flapping-link-proxy.mjs --target 127.0.0.1:PORT --seed 1
+pnpm test:flapping-proxy
+```
+
 ## generate-notices.js
 
 Generates a NOTICES file containing all third-party licenses for dependencies included in the Pane distribution.
