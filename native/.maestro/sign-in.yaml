@@ -11,15 +11,15 @@ name: Sign in and sign out
     visible:
       id: connection-status-connected
     timeout: 20000
-- assertVisible:
+# The hero card opens Machine details, which holds Sign out.
+- tapOn:
     id: settings-current-host
 - tapOn:
-    id: settings-sign-out
-# Confirm in the alert (its button shares the row's label).
+    id: machine-sign-out
+# Confirm in the alert; its buttons sit side by side on iOS 27.
 - tapOn:
     text: "Sign Out"
-    below:
-      text: "Sign out of .*"
+    rightOf: "Cancel"
 - extendedWaitUntil:
     visible:
       id: connect-open-form

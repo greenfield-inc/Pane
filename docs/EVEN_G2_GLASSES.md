@@ -21,14 +21,14 @@ It talks straight to each of your computers over Tailscale. Pane has no relay.
 ## Install and pair
 
 1. In the Even Realities app, open **Even Hub** and install **Pane**.
-2. In the Pane phone app, open **Settings › Glasses** and tap **Pair Glasses**. The phone asks each
+2. In the Pane phone app, open **Settings › Glasses** and tap **Pair glasses**. The phone asks each
    of your computers for a one-time pairing secret and copies them as one code. The code works for
    10 minutes and only once per computer.
-3. Tap **Open Even App**, open Pane there, and tap **Paste**, then **Connect**.
+3. Tap **Open Even app**, open Pane there, and tap **Paste**, then **Connect**.
 4. The glasses show **Pane · N computers**. Each computer now lists the glasses under
    **Settings › Remote Access › Devices**, named after your phone, with when they were last used.
 
-To add a computer later, tap **Add Computers** in Settings › Glasses and paste the new code the same
+To add a computer later, tap **Add computers** in Settings › Glasses and paste the new code the same
 way. Computers that are offline are skipped and named on the screen.
 
 ### The Even app's origin

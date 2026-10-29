@@ -98,18 +98,23 @@ name: Try the demo
     timeout: 10000
 - tapOn:
     id: open-settings
+# The current machine on top, and another sample machine under Switch to.
 - assertVisible:
-    id: settings-exit-demo
+    id: settings-current-host
+- assertVisible:
+    id: settings-machine-build-box
 - scrollUntilVisible:
     element:
       id: settings-privacy
     timeout: 10000
 - tapOn:
-    id: settings-computers
+    id: settings-add-machine
 - extendedWaitUntil:
     visible: "travel-laptop.*"
     timeout: 10000
 - assertVisible: "build-box.*"
+- assertVisible:
+    id: computers-add-code
 - runFlow:
     when:
       platform: iOS
@@ -125,11 +130,13 @@ name: Try the demo
       - back
 - scrollUntilVisible:
     element:
-      id: settings-exit-demo
+      id: settings-current-host
     direction: UP
     timeout: 10000
 
-# Exit returns to the connect screen.
+# Exit lives in the current machine's details and returns to the connect screen.
+- tapOn:
+    id: settings-current-host
 - tapOn:
     id: settings-exit-demo
 - extendedWaitUntil:

@@ -47,17 +47,27 @@ name: Pane list journeys
 - assertVisible: "${output.pane}, .*Claude Code.*"
 - hideKeyboard
 
-# Pin it with the row's pin button; it then shows under Pinned as well.
+# Swipe the row right and tap Pin; it then shows under Pinned as well.
+- swipe:
+    from:
+      id: "pane-row-.*"
+      index: 0
+    direction: RIGHT
 - tapOn:
-    id: "pane-pin-.*"
+    id: "pane-swipe-pin-.*"
     index: 0
 - extendedWaitUntil:
-    visible: "PINNED"
+    visible: "Pinned"
     timeout: 10000
 
-# Archive it with the row's archive button and confirm.
+# Swipe the row left, tap Archive and confirm.
+- swipe:
+    from:
+      id: "pane-row-.*"
+      index: 0
+    direction: LEFT
 - tapOn:
-    id: "pane-archive-.*"
+    id: "pane-swipe-archive-.*"
     index: 0
 # The alert's buttons sit side by side on iOS 27.
 - tapOn:

@@ -66,6 +66,9 @@ export default function RootLayout() {
 }
 
 function RootStack({ signedIn }: { signedIn: boolean }) {
+  const theme = useTheme();
+  // Settings screens sit on the grouped page color, header included.
+  const grouped = { headerStyle: { backgroundColor: theme.colors.grouped }, headerShadowVisible: false, contentStyle: { backgroundColor: theme.colors.grouped } };
   return (
     // Swipe back from anywhere on the screen, not only the left edge.
     <Stack screenOptions={{ fullScreenGestureEnabled: true, headerBackButtonDisplayMode: 'minimal' }}>
@@ -75,11 +78,17 @@ function RootStack({ signedIn }: { signedIn: boolean }) {
       <Stack.Protected guard={signedIn}>
         {/* The pane list is home, like the PWA's pane drawer; it draws its own header. */}
         <Stack.Screen name="index" options={{ headerShown: false }} />
-        <Stack.Screen name="settings" options={{ title: 'Settings' }} />
-        <Stack.Screen name="settings/shortcuts" options={{ title: 'Shortcuts' }} />
+        <Stack.Screen name="settings" options={{ title: 'Settings', headerLargeTitle: true, ...grouped }} />
+        <Stack.Screen name="settings/notifications" options={{ title: 'Notifications', ...grouped }} />
+        <Stack.Screen name="settings/shortcuts" options={{ title: 'Shortcuts', ...grouped }} />
         <Stack.Screen name="settings/shortcut" options={{ presentation: 'modal', title: 'Edit shortcut' }} />
-        <Stack.Screen name="settings/voice" options={{ title: 'Voice' }} />
-        <Stack.Screen name="settings/glasses" options={{ title: 'Glasses' }} />
+        <Stack.Screen name="settings/voice" options={{ title: 'Voice', ...grouped }} />
+        <Stack.Screen name="settings/glasses" options={{ title: 'Glasses', ...grouped }} />
+        <Stack.Screen name="machine/[key]" options={{ title: '', ...grouped }} />
+        <Stack.Screen
+          name="machine/connect"
+          options={{ presentation: 'formSheet', sheetAllowedDetents: [0.5, 1], sheetGrabberVisible: true, headerShown: false }}
+        />
         {/* The terminal draws the PWA's top bar itself. */}
         <Stack.Screen name="pane/[paneId]/index" options={{ headerShown: false }} />
         <Stack.Screen
@@ -108,7 +117,7 @@ function RootStack({ signedIn }: { signedIn: boolean }) {
           options={{ presentation: 'formSheet', sheetAllowedDetents: [0.75, 1], sheetGrabberVisible: true, headerShown: false }}
         />
         <Stack.Screen name="hosts/add" options={{ presentation: 'modal', title: 'Add with a code' }} />
-        <Stack.Screen name="computers" options={{ title: 'Your computers' }} />
+        <Stack.Screen name="computers" options={{ title: 'Your computers', ...grouped }} />
       </Stack.Protected>
       <Stack.Screen name="scan" options={{ presentation: 'fullScreenModal', headerShown: false }} />
       <Stack.Screen name="pair" options={{ presentation: 'modal', title: 'Connect to host' }} />

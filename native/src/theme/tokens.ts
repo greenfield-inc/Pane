@@ -1,10 +1,10 @@
 import { Platform } from 'react-native';
 
 /**
- * Light is the Remote Pane PWA's design, which is this app's spec: its fixed
- * `light-rounded` theme, with values resolved from
+ * Light comes from the Remote Pane PWA's fixed `light-rounded` theme, with values resolved from
  * frontend/src/styles/tokens/colors.css (tmp/assets/mobile/reference/tokens.json).
- * The PWA has no dark mode; dark uses the desktop's default dark theme.
+ * The PWA has no dark mode; dark uses the desktop's default dark theme. Home and Settings now
+ * follow the phone's own design rather than the PWA's.
  */
 const dark = {
   background: '#010409',
@@ -27,6 +27,10 @@ const dark = {
   skeleton: '#161b22',
   scrim: 'rgba(1, 4, 9, 0.6)',
   selected: 'rgba(31, 111, 235, 0.15)',
+  // Grouped screens (Settings): the page behind the cards, and the cards on it.
+  grouped: '#010409',
+  card: '#161b22',
+  cardBorder: 'transparent',
 };
 
 type ColorTokens = { [Key in keyof typeof dark]: string };
@@ -52,9 +56,26 @@ const light: ColorTokens = {
   skeleton: '#eaeef2',
   scrim: 'rgba(31, 35, 40, 0.4)',
   selected: '#dbeafe', // --color-surface-navigation-selected
+  grouped: '#f2f4f7',
+  card: '#ffffff',
+  cardBorder: 'rgba(31, 35, 40, 0.12)',
 };
 
 export const colors = { light, dark };
+
+/** The Pane app icon's own colors (main/assets/icon-source.svg), the same in both themes. */
+export const brandColors = { tile: '#080a0c', silver: ['#ffffff', '#f5f7f9', '#d7dce1'] } as const;
+
+/**
+ * Machine colors by slot (shared/utils/machineColor.ts): violet, cyan, pink, lime, orange, rose. Clear of the agent
+ * status dots and the danger red; the first four stay apart for red-green and blue-yellow color
+ * blindness. Dark uses lighter tints of the same hues.
+ */
+export const machineColors = {
+  // The desktop's light-theme machine colours (--color-machine-* in frontend/src/styles/tokens/colors.css).
+  light: ['#7c3aed', '#0e7490', '#db2777', '#4d7c0f', '#c2410c', '#e11d48'],
+  dark: ['#c4b5fd', '#67e8f9', '#f9a8d4', '#bef264', '#fdba74', '#fb7185'],
+} as const;
 
 /**
  * xterm palettes from the desktop app's default terminal themes
@@ -90,7 +111,7 @@ export type ThemeColors = ColorTokens;
 
 export const spacing = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 } as const;
 // --button-radius / --input-radius / --modal-radius 8, --card-radius 12.
-export const radius = { sm: 6, md: 8, lg: 12, pill: 999 } as const;
+export const radius = { sm: 6, md: 8, lg: 12, card: 14, hero: 20, pill: 999 } as const;
 
 /** System fonts; sizes are the PWA's Tailwind scale (text-xs 12 … text-2xl 24). */
 export const typography = {
@@ -102,6 +123,11 @@ export const typography = {
   subhead: { fontSize: 14, lineHeight: 20, fontWeight: '400' }, // text-sm
   footnote: { fontSize: 12, lineHeight: 16, fontWeight: '400' }, // text-xs
   caption: { fontSize: 12, lineHeight: 16, fontWeight: '600' }, // text-xs section labels
+  // Grouped lists (Settings), on the iOS Settings scale.
+  rowTitle: { fontSize: 17, lineHeight: 22, fontWeight: '400' },
+  rowValue: { fontSize: 15, lineHeight: 20, fontWeight: '400' },
+  rowDetail: { fontSize: 13, lineHeight: 18, fontWeight: '400' }, // row subtitles, section footers
+  sectionLabel: { fontSize: 13, lineHeight: 18, fontWeight: '600' },
 } as const;
 export type TypographyVariant = keyof typeof typography;
 

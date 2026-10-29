@@ -30,7 +30,7 @@ export function NotificationSettings() {
       footer="Your computers alert this phone when an agent needs input or finishes a turn. Alerts never include terminal output."
     >
       <ListRow
-        title="Needs Input"
+        title="Needs input"
         subtitle="An agent is waiting for you"
         trailing={<Switch testID="notifications-needs-input" trackColor={trackColor} value={preferences.needsInputEnabled} onValueChange={value => setPreference('needsInputEnabled', value)} />}
       />

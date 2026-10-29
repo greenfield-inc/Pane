@@ -1,18 +1,21 @@
 import { LegendList } from '@legendapp/list/react-native';
 import { router } from 'expo-router';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Alert, Pressable, StyleSheet, TextInput, View } from 'react-native';
-import Animated, { cancelAnimation, Easing, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useDaemon } from '@/daemon';
 import { DemoBadge } from '@/features/demo/DemoBadge';
-import { ConnectionBar, ConnectionDot, Dimmed, presenceLabel } from '@/features/hosts/ConnectionStatus';
+import { ConnectionBar, Dimmed, presenceLabel } from '@/features/hosts/ConnectionStatus';
 import { useConnectionPresence } from '@/features/hosts/useConnectionPresence';
+import { MachineChips } from '@/features/machines/MachineChips';
+import { MachineMark } from '@/features/machines/MachineMark';
+import { PaneLogo } from '@/features/machines/PaneLogo';
+import { useMachines } from '@/features/machines/useMachines';
 import { useNotifyShared } from '@/features/notify/hooks';
 import { waitingQuestions } from '@/features/notify/notifyQuestions';
 import { openNotifySheet } from '@/features/notify/NotifySheet';
-import { useTheme } from '@/theme';
+import { useTheme, withAlpha } from '@/theme';
 import { Icon, Text } from '@/ui';
 
 import { useSessions, useUpdateSession } from '../sessions/hooks';
@@ -37,13 +40,15 @@ import { useSidebarSections } from './sidebarSections';
 import { StatusBadge } from './StatusBadge';
 
 /**
- * Home: the PWA's drawer as a full screen. Pinned, Sessions, Repositories and
- * Archived, plus search, permission requests and Notify questions.
+ * Home: the Pane logo and a chip per machine, then Pinned, Sessions, Repositories and Archived,
+ * with search and one card of what's waiting on you (permission requests and Notify questions).
  */
 export function PaneListScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const { profile } = useDaemon();
+  const machines = useMachines();
+  const current = machines.find(machine => machine.current);
   const { presence, notice, retry } = useConnectionPresence();
   const [query, setQuery] = useState('');
   const [refreshing, setRefreshing] = useState(false);
@@ -84,6 +89,7 @@ export function PaneListScreen() {
   // Wait for statuses too, so dots don't flip from "No agent" to their real status.
   const loading = projects.isPending || statuses.isPending;
   const divider = { borderColor: theme.colors.border };
+  const waitingCount = waiting.length + questions.length;
 
   const confirmArchive = (pane: PaneListEntry) => {
     Alert.alert(`Archive “${pane.name}”?`, 'Its agents stop and its worktree is removed. You can still find it under Archived.', [
@@ -123,7 +129,7 @@ export function PaneListScreen() {
   const renderItem = ({ item, index }: { item: SidebarItem; index: number }) => {
     switch (item.type) {
       case 'section':
-        return <SidebarSectionHeader item={item} first={index === 0 && waiting.length === 0 && questions.length === 0} onToggle={() => toggleSection(item.section)} />;
+        return <SidebarSectionHeader item={item} first={index === 0 && waitingCount === 0} onToggle={() => toggleSection(item.section)} />;
       case 'repo':
         return (
           <SectionHeader
@@ -188,42 +194,55 @@ export function PaneListScreen() {
 
   return (
     <View style={[styles.fill, { backgroundColor: theme.colors.background }]}>
-      {/* px-4 py-2 min-h-12 border-b: icon and title, then the actions. */}
-      <View style={[styles.header, divider, { paddingTop: insets.top + 8 }]}>
-        <View style={styles.brand}>
-          <Icon ios="apple.terminal" android="terminal" size={20} color={theme.colors.accent} />
-          <Text variant="headline" accessibilityRole="header" numberOfLines={1} style={styles.brandTitle}>Remote Pane</Text>
+      <View style={[styles.header, { paddingTop: insets.top + 6 }]}>
+        <View
+          // Flows wait on the connection through this id.
+          testID={`connection-status-${presence}`}
+          style={styles.brand}
+          accessible
+          accessibilityRole="header"
+          accessibilityLabel={`Pane on ${profile.label}`}
+        >
+          <PaneLogo />
+          <Text variant="title" numberOfLines={1} style={styles.brandTitle}>Pane</Text>
         </View>
-        <View testID={`connection-status-${presence}`} style={styles.machine} accessible accessibilityLabel={presenceLabel(presence, profile.label)}>
-          <ConnectionDot presence={presence} />
-          <Text variant="footnote" tone="secondary" numberOfLines={1}>{profile.label}</Text>
-        </View>
+        {/* With one machine there are no chips, so its mark and name sit here. */}
+        {machines.length > 1 || !current ? null : (
+          <View style={styles.machine} accessible accessibilityLabel={presenceLabel(presence, current.name)}>
+            <MachineMark os={current.os} slot={current.slot} state={current.state} />
+            <Text variant="footnote" tone="secondary" numberOfLines={1}>{current.name}</Text>
+          </View>
+        )}
         <DemoBadge />
-        <View style={styles.headerActions}>
-          <IconButton label="Refresh remote sessions" testID="panes-refresh" onPress={() => void refresh()}>
-            <RefreshIcon spinning={loading || refreshing} />
-          </IconButton>
-          <IconButton label="Settings" testID="open-settings" onPress={() => router.push('/settings')}>
-            <Icon ios="gearshape" android="settings" size={16} />
-          </IconButton>
-        </View>
+        <Pressable
+          testID="open-settings"
+          accessibilityRole="button"
+          accessibilityLabel="Settings"
+          hitSlop={4}
+          onPress={() => router.push('/settings')}
+          style={({ pressed }) => [styles.roundButton, { backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surfaceRaised }]}
+        >
+          <Icon ios="gearshape" android="settings" size={17} color={theme.colors.text} />
+        </Pressable>
       </View>
+      {machines.length > 1 ? <MachineChips machines={machines} /> : null}
       <ConnectionBar notice={notice} onRetry={retry} />
 
+      {/* The last screen stays, dimmed and untouchable, while the machine isn't connected. The chips
+          above stay live, so you can switch away from a machine that is down. */}
       <Dimmed dimmed={presence !== 'connected'} style={styles.fill}>
-        {/* The PWA's create buttons and, where it shows its Remote Desktop link, search: p-3 border-b. */}
-        <View style={[styles.toolbar, divider]}>
+        <View style={styles.toolbar}>
           <View style={styles.createButtons}>
             {sessions.unavailable ? null : (
-              <CreateButton testID="sessions-new" title="New Session" onPress={() => router.push('/session/new')}>
-                <Icon ios="bubble.left" android="chat_bubble" size={16} color={theme.colors.onAccent} />
+              <CreateButton testID="sessions-new" title="New Session" secondary onPress={() => router.push('/session/new')}>
+                <Icon ios="bubble.left" android="chat_bubble" size={16} color={theme.colors.text} />
               </CreateButton>
             )}
             <CreateButton testID="panes-new" title="New Pane" disabled={(projects.data ?? []).length === 0} onPress={() => router.push('/pane/new')}>
               <Icon ios="plus" android="add" size={16} color={theme.colors.onAccent} />
             </CreateButton>
           </View>
-          <View style={[styles.search, { borderRadius: theme.radius.md, borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceRaised }]}>
+          <View style={[styles.search, { borderRadius: theme.radius.lg, backgroundColor: theme.colors.surfaceRaised }]}>
             <Icon ios="magnifyingglass" android="search" size={16} />
             <TextInput
               testID="panes-search"
@@ -236,7 +255,7 @@ export function PaneListScreen() {
               returnKeyType="search"
               value={query}
               onChangeText={setQuery}
-              style={[theme.typography.subhead, styles.searchInput, { color: theme.colors.text }]}
+              style={[theme.typography.body, styles.searchInput, { color: theme.colors.text }]}
             />
             {query ? (
               <IconButton label="Clear search" testID="panes-search-clear" size={28} onPress={() => setQuery('')}>
@@ -258,31 +277,34 @@ export function PaneListScreen() {
           onRefresh={() => void refresh()}
           style={styles.fill}
           contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 12 }]}
-          ListHeaderComponent={waiting.length > 0 || questions.length > 0 ? (
-            <View>
-              {questions.length > 0 ? <SectionHeader title="Questions" first /> : null}
-              {questions.map(item => (
-                <WaitingRow
-                  key={item.id}
-                  testID={`notify-row-${item.id}`}
-                  name={item.source.name}
-                  detail={item.title}
-                  onPress={() => openNotifySheet(item.id, item.source.paneId)}
-                />
-              ))}
-              {waiting.length > 0 ? <SectionHeader title="Needs approval" first={questions.length === 0} /> : null}
-              {waiting.map(request => {
-                const { title, target } = describePermission(request);
-                return (
+          ListHeaderComponent={waitingCount > 0 ? (
+            <View style={styles.waitingSection}>
+              <SectionHeader title="Waiting on you" count={waitingCount} first />
+              <View style={[styles.waitingCard, { borderRadius: theme.radius.card, backgroundColor: withAlpha(theme.colors.warning, 0.09) }]}>
+                {questions.map((item, index) => (
                   <WaitingRow
-                    key={request.id}
-                    testID={`permission-row-${request.sessionId}`}
-                    name={paneNames.get(request.sessionId) ?? 'Pane'}
-                    detail={target ? `${title}: ${target}` : title}
-                    onPress={() => router.push({ pathname: '/pane/[paneId]/permission', params: { paneId: request.sessionId, requestId: request.id } })}
+                    key={item.id}
+                    testID={`notify-row-${item.id}`}
+                    name={item.source.name}
+                    detail={item.title}
+                    divided={index > 0}
+                    onPress={() => openNotifySheet(item.id, item.source.paneId)}
                   />
-                );
-              })}
+                ))}
+                {waiting.map((request, index) => {
+                  const { title, target } = describePermission(request);
+                  return (
+                    <WaitingRow
+                      key={request.id}
+                      testID={`permission-row-${request.sessionId}`}
+                      name={paneNames.get(request.sessionId) ?? 'Pane'}
+                      detail={target ? `${title}: ${target}` : title}
+                      divided={questions.length + index > 0}
+                      onPress={() => router.push({ pathname: '/pane/[paneId]/permission', params: { paneId: request.sessionId, requestId: request.id } })}
+                    />
+                  );
+                })}
+              </View>
             </View>
           ) : null}
           ListEmptyComponent={
@@ -298,29 +320,8 @@ export function PaneListScreen() {
   );
 }
 
-/** The drawer's refresh icon, spinning while the list loads. */
-function RefreshIcon({ spinning }: { spinning: boolean }) {
-  const rotation = useSharedValue(0);
-  useEffect(() => {
-    if (spinning) {
-      rotation.value = 0;
-      rotation.value = withRepeat(withTiming(360, { duration: 1000, easing: Easing.linear }), -1, false);
-    } else if (rotation.value % 360 !== 0) {
-      // Finish the turn instead of snapping back.
-      cancelAnimation(rotation);
-      rotation.value = withTiming(360, { duration: ((360 - (rotation.value % 360)) / 360) * 1000, easing: Easing.linear });
-    }
-  }, [spinning, rotation]);
-  const spin = useAnimatedStyle(() => ({ transform: [{ rotate: `${rotation.value}deg` }] }));
-  return (
-    <Animated.View style={spin}>
-      <Icon ios="arrow.clockwise" android="refresh" size={16} />
-    </Animated.View>
-  );
-}
-
 /** A permission request or Notify question waiting on this phone's owner. */
-function WaitingRow({ name, detail, onPress, testID }: { name: string; detail: string; onPress: () => void; testID: string }) {
+function WaitingRow({ name, detail, divided, onPress, testID }: { name: string; detail: string; divided: boolean; onPress: () => void; testID: string }) {
   const theme = useTheme();
   return (
     <Pressable
@@ -328,11 +329,12 @@ function WaitingRow({ name, detail, onPress, testID }: { name: string; detail: s
       accessibilityRole="button"
       accessibilityLabel={`${name}, ${detail}`}
       onPress={onPress}
-      style={({ pressed }) => [styles.waitingRow, { borderRadius: theme.radius.md, backgroundColor: pressed ? theme.colors.selected : theme.colors.background }]}
+      style={({ pressed }) => [styles.waitingRow, pressed && { backgroundColor: theme.colors.surfacePressed }]}
     >
+      {divided ? <View style={[styles.waitingDivider, { backgroundColor: theme.colors.border }]} /> : null}
       <StatusBadge status="blocked" />
       <View style={styles.fill}>
-        <Text variant="callout" numberOfLines={1}>{name}</Text>
+        <Text variant="callout" numberOfLines={1} style={styles.bold}>{name}</Text>
         <Text variant="footnote" tone="muted" numberOfLines={2}>{detail}</Text>
       </View>
       <Icon ios="chevron.right" android="chevron_right" size={14} />
@@ -340,11 +342,12 @@ function WaitingRow({ name, detail, onPress, testID }: { name: string; detail: s
   );
 }
 
-/** The PWA's `min-h-11 flex-1 rounded-md bg-interactive` create button. */
-function CreateButton({ title, onPress, disabled, testID, children }: {
+/** A create button: New Pane filled with the accent, New Session quieter beside it. */
+function CreateButton({ title, onPress, disabled, secondary, testID, children }: {
   title: string;
   onPress: () => void;
   disabled?: boolean;
+  secondary?: boolean;
   testID: string;
   children: ReactNode;
 }) {
@@ -358,13 +361,13 @@ function CreateButton({ title, onPress, disabled, testID, children }: {
       disabled={disabled}
       onPress={onPress}
       style={({ pressed }) => [styles.createButton, {
-        borderRadius: theme.radius.md,
-        backgroundColor: theme.colors.accent,
+        borderRadius: theme.radius.lg,
+        backgroundColor: secondary ? theme.colors.surfaceRaised : theme.colors.accent,
         opacity: disabled ? 0.5 : pressed ? 0.85 : 1,
       }]}
     >
       {children}
-      <Text variant="callout" tone="onAccent" style={styles.bold}>{title}</Text>
+      <Text variant="callout" tone={secondary ? 'primary' : 'onAccent'} numberOfLines={1} maxFontSizeMultiplier={1.6} style={[styles.bold, styles.shrink]}>{title}</Text>
     </Pressable>
   );
 }
@@ -378,19 +381,23 @@ function toggleMember(current: ReadonlySet<string>, member: string): ReadonlySet
 
 const styles = StyleSheet.create({
   fill: { flex: 1 },
-  header: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 48, paddingHorizontal: 16, paddingBottom: 8, borderBottomWidth: 1 },
-  brand: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 },
-  brandTitle: { flexShrink: 1, fontSize: 18, lineHeight: 28 },
-  machine: { flexShrink: 1, flexDirection: 'row', alignItems: 'center', gap: 6 },
-  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  toolbar: { padding: 12, gap: 8, borderBottomWidth: 1 },
-  createButtons: { flexDirection: 'row', gap: 8 },
+  header: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 52, paddingHorizontal: 16, paddingBottom: 10 },
+  brand: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 9 },
+  brandTitle: { flexShrink: 1, fontSize: 21, letterSpacing: -0.2, fontWeight: '700' },
+  machine: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 },
+  roundButton: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+  toolbar: { paddingHorizontal: 16, paddingBottom: 4, gap: 10 },
+  createButtons: { flexDirection: 'row', gap: 10 },
   createButton: { flex: 1, minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 12 },
   bold: { fontWeight: '600' },
   // ml-5 border-l pl-2 under the Session row.
   nested: { marginLeft: 20, paddingLeft: 8, borderLeftWidth: 1 },
-  search: { flexDirection: 'row', alignItems: 'center', gap: 8, height: 40, paddingLeft: 12, paddingRight: 6, borderWidth: 1 },
-  searchInput: { flex: 1, height: '100%', paddingVertical: 0 },
+  search: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 40, paddingLeft: 12, paddingRight: 6 },
+  searchInput: { flex: 1, paddingVertical: 8 },
+  shrink: { flexShrink: 1 },
   content: { padding: 12 },
-  waitingRow: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 12, marginBottom: 4 },
+  waitingSection: { marginBottom: 12 },
+  waitingCard: { overflow: 'hidden' },
+  waitingRow: { flexDirection: 'row', alignItems: 'center', gap: 11, paddingHorizontal: 14, paddingVertical: 10 },
+  waitingDivider: { position: 'absolute', top: 0, left: 33, right: 0, height: StyleSheet.hairlineWidth },
 });

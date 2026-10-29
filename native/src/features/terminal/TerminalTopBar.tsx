@@ -8,8 +8,10 @@ import { useTheme } from '@/theme';
 import { Icon, ListRow, Text } from '@/ui';
 
 import { ComposerSheet, useAfterSheetCloses } from '../composer/ComposerSheet';
-import { ConnectionBar, ConnectionDot, presenceLabel } from '../hosts/ConnectionStatus';
+import { ConnectionBar, presenceLabel } from '../hosts/ConnectionStatus';
 import { useConnectionPresence } from '../hosts/useConnectionPresence';
+import { MachineMark } from '../machines/MachineMark';
+import { useMachines } from '../machines/useMachines';
 
 /**
  * The web app's status bar, drawn below the top safe area: back, the machine
@@ -23,6 +25,7 @@ export function TerminalTopBar({ paneName, onClearScrollback }: { paneName: stri
   const insets = useSafeAreaInsets();
   const { profile } = useDaemon();
   const { presence, notice, retry } = useConnectionPresence();
+  const current = useMachines().find(machine => machine.current);
   const [menuOpen, setMenuOpen] = useState(false);
   const { afterClose, onDismiss } = useAfterSheetCloses();
   const choose = (action: () => void) => {
@@ -48,7 +51,8 @@ export function TerminalTopBar({ paneName, onClearScrollback }: { paneName: stri
             >
               <Icon ios="chevron.left" android="arrow_back" size={20} color={colors.textSecondary} />
             </Pressable>
-            <ConnectionDot presence={presence} />
+            {/* The machine's own mark, as on home and in Settings: it pulses and dims with the connection. */}
+            <View style={styles.mark}>{current ? <MachineMark os={current.os} slot={current.slot} state={current.state} /> : null}</View>
             <View style={styles.text}>
               <View style={styles.titleRow}>
                 <Text
@@ -111,6 +115,8 @@ export function TerminalTopBar({ paneName, onClearScrollback }: { paneName: stri
 }
 
 const styles = StyleSheet.create({
+  // One fixed box, so the title doesn't shift while the machine list loads.
+  mark: { width: 14, height: 14, alignItems: 'center', justifyContent: 'center' },
   row: {
     minHeight: 44,
     flexDirection: 'row',

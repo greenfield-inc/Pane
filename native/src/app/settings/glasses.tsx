@@ -23,9 +23,9 @@ export default function GlassesSettingsScreen() {
 
   if (!directory) {
     return (
-      <Screen scroll testID="glasses-settings">
+      <Screen scroll grouped testID="glasses-settings">
         <ListSection title="Glasses" footer="Glasses pair with the computers this phone reaches over Tailscale.">
-          <ListRow testID="glasses-find-computers" title="Find Your Computers" trailing="chevron" onPress={() => router.push('/computers')} />
+          <ListRow testID="glasses-find-computers" title="Find your computers" trailing="chevron" onPress={() => router.push('/computers')} />
         </ListSection>
       </Screen>
     );
@@ -58,7 +58,7 @@ export default function GlassesSettingsScreen() {
   };
 
   return (
-    <Screen scroll testID="glasses-settings">
+    <Screen scroll grouped testID="glasses-settings">
       <ListSection
         title="Glasses"
         footer={isPaired ? undefined : 'Pair Even G2 glasses with all your computers.'}
@@ -66,9 +66,9 @@ export default function GlassesSettingsScreen() {
         {isPaired ? (
           <ListRow testID="glasses-device" title={deviceName} subtitle={`${pairedOn.length} ${pairedOn.length === 1 ? 'computer' : 'computers'}`} />
         ) : null}
-        {machines.isPending ? <ActivityIndicator color={theme.colors.textMuted} /> : null}
-        {machines.isError ? <ErrorState error={machines.error} onRetry={() => void machines.refetch()} /> : null}
-        {machines.data && !machines.data.ok ? <Text variant="footnote" tone="secondary">{machines.data.reason}. {machines.data.fix}</Text> : null}
+        {machines.isPending ? <View style={styles.cardNote}><ActivityIndicator color={theme.colors.textMuted} /></View> : null}
+        {machines.isError ? <View style={styles.cardNote}><ErrorState error={machines.error} onRetry={() => void machines.refetch()} /></View> : null}
+        {machines.data && !machines.data.ok ? <View style={styles.cardNote}><Text variant="rowDetail" tone="secondary">{machines.data.reason}. {machines.data.fix}</Text></View> : null}
         {computers.map(({ machine }) => {
           const entry = devices.find(candidate => candidate.name === machine.name);
           const status = pending.includes(machine.dnsName)
@@ -86,12 +86,12 @@ export default function GlassesSettingsScreen() {
       <View style={styles.actions}>
         <Button
           testID="glasses-pair"
-          title={isPaired ? 'Add Computers' : 'Pair Glasses'}
+          title={isPaired ? 'Add computers' : 'Pair glasses'}
           loading={pair.isPending}
           disabled={computers.length === 0}
           onPress={() => pair.mutate()}
         />
-        <Text variant="footnote" tone="muted">
+        <Text variant="rowDetail" tone="muted" style={styles.inset}>
           Makes one key per computer for these glasses. You can revoke it here or on the computer.
         </Text>
       </View>
@@ -99,28 +99,28 @@ export default function GlassesSettingsScreen() {
       {pair.data?.code ? (
         <ListSection title="Code copied" footer="Next: in the Even app, open Pane and tap Paste.">
           <ListRow testID="glasses-code-copied" title="Pairing code copied" subtitle={`It works for 10 minutes, on ${pair.data.paired.join(', ')}.`} />
-          <ListRow testID="glasses-open-even" title="Open Even App" trailing="chevron" onPress={() => void openEven()} />
+          <ListRow testID="glasses-open-even" title="Open Even app" trailing="chevron" onPress={() => void openEven()} />
         </ListSection>
       ) : null}
       {pair.data && !pair.data.code ? (
-        <Text variant="footnote" tone="danger" testID="glasses-pair-failed">
+        <Text variant="rowDetail" tone="danger" testID="glasses-pair-failed" style={styles.inset}>
           No computer gave a pairing code. {pair.data.skipped.map(skip => `${skip.name}: ${skip.reason}`).join('. ')}
         </Text>
       ) : null}
       {pair.data?.code && pair.data.skipped.length > 0 ? (
-        <Text variant="footnote" tone="secondary">Skipped {pair.data.skipped.map(skip => `${skip.name} (${skip.reason})`).join(', ')}.</Text>
+        <Text variant="rowDetail" tone="secondary" style={styles.inset}>Skipped {pair.data.skipped.map(skip => `${skip.name} (${skip.reason})`).join(', ')}.</Text>
       ) : null}
-      {pair.error ? <Text variant="footnote" tone="danger">{pair.error.message}</Text> : null}
-      {openError ? <Text variant="footnote" tone="danger">{openError}</Text> : null}
+      {pair.error ? <Text variant="rowDetail" tone="danger" style={styles.inset}>{pair.error.message}</Text> : null}
+      {openError ? <Text variant="rowDetail" tone="danger" style={styles.inset}>{openError}</Text> : null}
 
       {isPaired || pending.length > 0 ? (
         <ListSection footer={pending.length > 0 ? `Revoke pending on ${pending.map(dnsName => dnsName.split('.')[0]).join(', ')}; it finishes when ${pending.length === 1 ? 'it answers' : 'they answer'}. Each computer can also revoke in Settings › Remote Access › Glasses.` : undefined}>
-          <ListRow testID="glasses-revoke" title="Revoke Glasses" destructive onPress={confirmRevoke} />
+          <ListRow testID="glasses-revoke" title="Revoke glasses" destructive onPress={confirmRevoke} />
         </ListSection>
       ) : null}
 
       <ListSection>
-        <ListRow testID="glasses-help" title="How Pane Works on Even G2" trailing="chevron" onPress={() => void Linking.openURL(GLASSES_DOCS_URL)} />
+        <ListRow testID="glasses-help" title="How Pane works on Even G2" trailing="chevron" onPress={() => void Linking.openURL(GLASSES_DOCS_URL)} />
       </ListSection>
     </Screen>
   );
@@ -128,4 +128,6 @@ export default function GlassesSettingsScreen() {
 
 const styles = StyleSheet.create({
   actions: { gap: 8 },
+  inset: { paddingHorizontal: 4 },
+  cardNote: { padding: 16 },
 });

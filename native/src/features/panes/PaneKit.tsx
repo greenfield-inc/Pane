@@ -40,9 +40,10 @@ export function IconButton({ label, onPress, testID, disabled, size = 32, childr
   );
 }
 
-/** The drawer's uppercase `text-xs font-semibold` section label, with an optional icon and "+" button. */
-export function SectionHeader({ title, first, icon, add }: {
+/** The drawer's sentence-case section label, with an optional icon and "+" button. */
+export function SectionHeader({ title, count, first, icon, add }: {
   title: string;
+  count?: number;
   /** The first section sits flush with the top of the list. */
   first?: boolean;
   icon?: ReactNode;
@@ -51,7 +52,10 @@ export function SectionHeader({ title, first, icon, add }: {
   return (
     <View style={[styles.section, !first && styles.sectionGap]}>
       {icon}
-      <Text variant="caption" tone="muted" numberOfLines={1} style={styles.sectionTitle}>{title.toUpperCase()}</Text>
+      <Text variant="caption" tone="muted" numberOfLines={1} style={styles.sectionTitle}>
+        {title}
+        {count ? <Text variant="caption" tone="muted" style={styles.count}>{`  ${count}`}</Text> : null}
+      </Text>
       {add ? (
         <IconButton label={add.label} testID={add.testID} size={22} onPress={add.onPress}>
           <Icon ios="plus" android="add" size={14} />
@@ -188,7 +192,8 @@ const styles = StyleSheet.create({
   // mb-1 px-2 gap-2; sections sit mb-4 apart.
   section: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 8, minHeight: 22, marginBottom: 4 },
   sectionGap: { marginTop: 12 },
-  sectionTitle: { flex: 1, letterSpacing: 0.3 },
+  sectionTitle: { flex: 1, fontSize: 13, lineHeight: 18, letterSpacing: 0.1 },
+  count: { fontWeight: '500' },
   loadingRow: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 44, paddingHorizontal: 12, marginBottom: 4 },
   notice: { borderWidth: 1, padding: 16, gap: 8 },
   sheetButton: { minHeight: 40, paddingHorizontal: 16, borderWidth: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },

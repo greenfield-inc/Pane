@@ -1,51 +1,17 @@
-import { useEffect, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { Pressable, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
-import Animated, { cancelAnimation, Easing, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
 
 import type { ConnectionNotice, ConnectionPresence } from '@shared/remoteClient';
 
 import { useTheme } from '@/theme';
 import { Text } from '@/ui';
 
-const DOT = 10;
-/** One period for every pulsing dot. */
-const PULSE_MS = 1800;
+/** How far content under a machine that isn't connected fades. */
 export const DIMMED_OPACITY = 0.45;
 
-/**
- * The machine dot, in a fixed box: solid when connected, a spreading ring
- * while reconnecting or restoring, dimmed when the machine can't be reached.
- */
-export function ConnectionDot({ presence }: { presence: ConnectionPresence }) {
-  const { colors } = useTheme();
-  const pulsing = presence === 'reconnecting' || presence === 'restoring';
-  const progress = useSharedValue(0);
+// The machine's own status mark is MachineMark (features/machines): one status style on the phone.
 
-  useEffect(() => {
-    if (pulsing) {
-      progress.value = 0;
-      progress.value = withRepeat(withTiming(1, { duration: PULSE_MS, easing: Easing.out(Easing.cubic) }), -1);
-    } else {
-      cancelAnimation(progress);
-      progress.value = 0;
-    }
-  }, [progress, pulsing]);
-
-  // The web app's keyframes: the ring grows to 2.6× and fades out by 70% of the loop.
-  const ringStyle = useAnimatedStyle(() => {
-    const t = Math.min(progress.value / 0.7, 1);
-    return { opacity: 0.55 * (1 - t), transform: [{ scale: 1 + 1.6 * t }] };
-  });
-
-  return (
-    <View style={styles.dotBox} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
-      {pulsing ? <Animated.View style={[styles.dot, styles.ring, { backgroundColor: colors.textSecondary }, ringStyle]} /> : null}
-      <View style={[styles.dot, { backgroundColor: colors.textSecondary, opacity: presence === 'unreachable' ? DIMMED_OPACITY : 1 }]} />
-    </View>
-  );
-}
-
-/** Spoken with the machine name, since the dot itself is hidden from screen readers. */
+/** Spoken with the machine name, since the machine mark itself is hidden from screen readers. */
 export function presenceLabel(presence: ConnectionPresence, machine: string): string {
   return presence === 'connected' ? `Connected to ${machine}` : presence === 'unreachable' ? `Can't reach ${machine}` : `Reconnecting to ${machine}`;
 }
@@ -79,9 +45,6 @@ export function Dimmed({ dimmed, style, children }: { dimmed: boolean; style?: S
 }
 
 const styles = StyleSheet.create({
-  dotBox: { width: DOT, height: DOT, alignItems: 'center', justifyContent: 'center' },
-  dot: { width: DOT, height: DOT, borderRadius: DOT / 2 },
-  ring: { position: 'absolute' },
   bar: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 36, paddingHorizontal: 16, paddingVertical: 8, borderBottomWidth: 1 },
   barText: { flex: 1 },
   retry: { fontWeight: '600' },
