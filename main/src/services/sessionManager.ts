@@ -1,3 +1,4 @@
+import { mainPaneName } from '../../../shared/utils/paneName';
 import { customCommandResumeSchema, effectiveCustomResume, type CustomCommandResume } from '../../../shared/types/customCommandResume';
 /**
  * Session management for Pane.
@@ -536,9 +537,12 @@ export class SessionManager extends EventEmitter {
     return session;
   }
 
+  /**
+   * Opening a repository opens its newest active "(Main)" Pane, an ordinary Pane working in the
+   * repository checkout, and creates one when there is none (for example after it was archived).
+   */
   async getOrCreateMainRepoSession(projectId: number): Promise<Session> {
     return await withLock(`main-repo-session-${projectId}`, async () => {
-      // First check if a main repo session already exists
       const existingSession = this.db.getMainRepoSession(projectId);
       if (existingSession) {
         const session = this.convertDbSessionToSession(existingSession);
@@ -554,11 +558,14 @@ export class SessionManager extends EventEmitter {
       }
       
 
-      // Create a new main repo session
       const sessionId = randomUUID();
-      const sessionName = `${project.name} (Main)`;
-      const worktreePath = project.path; // Use the project path directly
-      const worktreeName = 'main'; // Use 'main' as the worktree name
+      let sessionName = mainPaneName(project.name);
+      for (let counter = 1; this.db.checkActiveSessionNameExists(sessionName, projectId); counter++) {
+        sessionName = `${mainPaneName(project.name)} ${counter}`;
+      }
+      const worktreePath = project.path;
+      // No worktree of its own, like any Pane created with "Use worktree" off.
+      const worktreeName = '';
       const prompt = ''; // Empty prompt - user hasn't sent anything yet
 
       // Detect baseBranch and baseCommit from git

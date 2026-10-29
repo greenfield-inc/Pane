@@ -24,6 +24,7 @@ import { withLock } from '../utils/mutex';
 import { PaneError } from '../../../shared/paneError';
 import type { RunpanePaneBase } from '../../../shared/types/runpaneOrchestration';
 import { randomInt } from 'node:crypto';
+import { mainPaneName } from '../../../shared/utils/paneName';
 
 const loadQueueDependency = createRequire(__filename);
 
@@ -289,6 +290,8 @@ export class TaskQueue {
           }
         }
         
+        if (job.data.isMainRepo) sessionName = mainPaneName(sessionName);
+
         // Get CommandRunner for this project
         const ctx = sessionManager.getProjectContextByProjectId(targetProject.id);
         if (!ctx) {
@@ -319,7 +322,7 @@ export class TaskQueue {
             effectiveWorktreeName,
             permissionMode,
             targetProject.id,
-            false, // is_main_repo stays false — reserved for internal singleton.
+            !!job.data.isMainRepo, // Works in the repository checkout; never owns a removable worktree.
             job.data.folderId,
             toolType,
             baseCommit,
@@ -383,6 +386,7 @@ export class TaskQueue {
             const capturedSessionId = session.id;
             const capturedFallbackName = sessionName;
             const capturedProjectId = targetProject.id;
+            const capturedIsMainRepo = !!job.data.isMainRepo;
             this.options.worktreeNameGenerator.generateSessionName(prompt).then(aiName => {
               if (aiName && aiName !== capturedFallbackName) {
                 // Same pattern as sessions:rename IPC handler.
@@ -391,9 +395,10 @@ export class TaskQueue {
                 const liveSession = sm.getSession(capturedSessionId);
                 if (liveSession && liveSession.name === capturedFallbackName) {
                   // Ensure uniqueness among active panes, as at creation; archived names are free.
-                  let finalName = aiName;
+                  const baseName = capturedIsMainRepo ? mainPaneName(aiName) : aiName;
+                  let finalName = baseName;
                   for (let counter = 1; sm.db.checkActiveSessionNameExists(finalName, capturedProjectId); counter++) {
-                    finalName = `${aiName} ${counter}`;
+                    finalName = `${baseName} ${counter}`;
                   }
                   sm.db.updateSession(capturedSessionId, { name: finalName });
                   liveSession.name = finalName;

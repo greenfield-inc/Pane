@@ -852,7 +852,7 @@ test('worktree and main-repository inspectors restore separate v2 preferences', 
   await expect(page.locator('.pane-detail-panel-vertical')).toHaveCSS('width', '440px');
 
   await page.getByRole('button', { name: `Project actions for ${project.name}`, exact: true }).click();
-  await page.getByText('Open session on main', { exact: true }).click();
+  await page.getByText('Open (Main) Pane', { exact: true }).click();
   const projectInspector = page.locator('.pane-detail-panel-vertical');
   await expect(projectInspector).toHaveCSS('width', '520px');
   const projectSeparator = page.getByRole('separator', { name: 'Resize main repository inspector' });
@@ -872,6 +872,6 @@ test('worktree and main-repository inspectors restore separate v2 preferences', 
 
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.getByRole('button', { name: `Project actions for ${project.name}`, exact: true }).click();
-  await page.getByText('Open session on main', { exact: true }).click();
+  await page.getByText('Open (Main) Pane', { exact: true }).click();
   await expect(page.locator('.pane-detail-panel-vertical')).toHaveCSS('width', '520px');
 });

@@ -308,7 +308,7 @@ test('main-repository branch detection never renders the previous repository bra
   });
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
   await page.getByRole('button', { name: `Project actions for ${project.name}`, exact: true }).click();
-  await page.getByText('Open session on main', { exact: true }).click();
+  await page.getByText('Open (Main) Pane', { exact: true }).click();
   // The inspector is shown by default; open it only if it was hidden.
   const showDetails = page.getByRole('button', { name: 'Show details', exact: true });
   if (await showDetails.isVisible().catch(() => false)) await showDetails.click();
@@ -318,9 +318,9 @@ test('main-repository branch detection never renders the previous repository bra
   await page.getByRole('button', { name: `Project actions for ${secondProject.name}`, exact: true }).click();
   const renderedPreviousBranch = await page.evaluate(async () => {
     const openMainButton = Array.from(document.querySelectorAll('button')).find(
-      button => button.textContent?.trim() === 'Open session on main',
+      button => button.textContent?.trim() === 'Open (Main) Pane',
     );
-    if (!openMainButton) throw new Error('Open session on main action not found');
+    if (!openMainButton) throw new Error('Open (Main) Pane action not found');
     openMainButton.click();
     await Promise.resolve();
     return document.querySelector('.pane-detail-panel-vertical')?.textContent?.includes('main-a') ?? false;
@@ -350,7 +350,7 @@ test('latest main-repository lookup wins across A to delayed B to A', async ({ p
   });
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
   await page.getByRole('button', { name: `Project actions for ${project.name}`, exact: true }).click();
-  await page.getByText('Open session on main', { exact: true }).click();
+  await page.getByText('Open (Main) Pane', { exact: true }).click();
   // The inspector is shown by default; open it only if it was hidden.
   const showDetails = page.getByRole('button', { name: 'Show details', exact: true });
   if (await showDetails.isVisible().catch(() => false)) await showDetails.click();
@@ -376,10 +376,10 @@ test('latest main-repository lookup wins across A to delayed B to A', async ({ p
   });
 
   await page.getByRole('button', { name: `Project actions for ${secondProject.name}`, exact: true }).click();
-  await page.getByText('Open session on main', { exact: true }).click();
+  await page.getByText('Open (Main) Pane', { exact: true }).click();
   await page.waitForTimeout(50);
   await page.getByRole('button', { name: `Project actions for ${project.name}`, exact: true }).click();
-  await page.getByText('Open session on main', { exact: true }).click();
+  await page.getByText('Open (Main) Pane', { exact: true }).click();
   await page.waitForTimeout(700);
 
   const noSessionSelectedSeen = await page.evaluate(() => {
@@ -409,7 +409,7 @@ test('main-repository lookup failure clears the loading skeleton', async ({ page
   });
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
   await page.getByRole('button', { name: `Project actions for ${project.name}`, exact: true }).click();
-  await page.getByText('Open session on main', { exact: true }).click();
+  await page.getByText('Open (Main) Pane', { exact: true }).click();
 
   const loadingSession = page.getByRole('status', { name: 'Loading main repository session' });
   await expect(loadingSession).toBeVisible();

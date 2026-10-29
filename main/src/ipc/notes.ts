@@ -86,8 +86,6 @@ export function registerNotesHandlers(ipcMain: IpcMain, services: AppServices): 
       }
       if (projectChanged) {
         targets.set(project.path, repositoryExports ? projectNotes : []);
-        const main = databaseService.getMainRepoSession(project.id);
-        if (main) write('Pane agent context', noteContextPath(root, main.id), projectNotes);
       }
       for (const pane of panes) {
         const featureScope: NoteScope = { kind: 'feature', id: pane.id };

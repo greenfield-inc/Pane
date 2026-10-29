@@ -19,7 +19,6 @@ import { GitErrorDialog } from './session/GitErrorDialog';
 import { CommitMessageDialog } from './session/CommitMessageDialog';
 import { FolderArchiveDialog } from './session/FolderArchiveDialog';
 import { ConfirmDialog } from './ConfirmDialog';
-import { ProjectView } from './ProjectView';
 import { MissionControlView } from './missionControl/MissionControlView';
 import { API } from '../utils/api';
 import { markPaneViewShown } from '../utils/journeyTimings';
@@ -29,7 +28,6 @@ import { useOuterPanelResize } from '../hooks/useOuterPanelResize';
 import { OUTER_PANEL_CONFIGS } from '../utils/outerPanelSizing';
 import { OuterResizeSeparator } from './ui/OuterResizeSeparator';
 import { usePanelStore } from '../stores/panelStore';
-import { useProjectViewActionsStore } from '../stores/projectViewActionsStore';
 import { panelApi } from '../services/panelApi';
 import { requestBrowserNavigation } from './panels/browser/browserNavigation';
 import { setPendingViewCommit } from './panels/diff/pendingViewCommit';
@@ -93,15 +91,6 @@ function isInspectorPanelType(type: ToolPanel['type']): boolean {
 
 export const SessionView = memo(() => {
   const { activeView, activeProjectId } = useNavigationStore();
-  // The repository view renders its own Pane through ProjectView, which owns
-  // that Pane's shown tab and memory; this view's layout stays out of it.
-  const projectViewShown = activeView === 'project' && !!activeProjectId;
-  const projectViewShownRef = useRef(projectViewShown);
-  useEffect(() => {
-    projectViewShownRef.current = projectViewShown;
-  }, [projectViewShown]);
-  const [projectData, setProjectData] = useState<Project | null>(null);
-  const [isProjectLoading, setIsProjectLoading] = useState(false);
   const [sessionProject, setSessionProject] = useState<Project | null>(null);
   const [showSetTrackingDialog, setShowSetTrackingDialog] = useState(false);
   const [remoteBranches, setRemoteBranches] = useState<string[]>([]);
@@ -133,11 +122,6 @@ export const SessionView = memo(() => {
   // This ensures the component re-renders when git status or other session properties update
   const activeSession = useSessionStore((state) => {
     if (!state.activeSessionId) return undefined;
-    // Check main repo session first
-    if (state.activeMainRepoSession && state.activeMainRepoSession.id === state.activeSessionId) {
-      return state.activeMainRepoSession;
-    }
-    // Otherwise look in regular sessions
     return state.sessions.find(session => session.id === state.activeSessionId);
   });
   // A loop's run Pane: known from the loops already loaded, so its header and
@@ -212,8 +196,7 @@ export const SessionView = memo(() => {
       });
       // An archive or delete inside the debounce has already forgotten the
       // Pane; writing its layout back would revive the memory.
-      const { sessions, activeMainRepoSession } = useSessionStore.getState();
-      const live = activeMainRepoSession?.id === pending.sessionId || sessions.some(session => session.id === pending.sessionId);
+      const live = useSessionStore.getState().sessions.some(session => session.id === pending.sessionId);
       if (pending.remember && live) {
         rememberPaneLayout(pending.hostId, pending.sessionId, pending.layout);
       }
@@ -221,7 +204,7 @@ export const SessionView = memo(() => {
   }, []);
 
   const debouncedPersist = useCallback((sessionId: string, layout: SessionPanelLayout) => {
-    pendingLayoutRef.current = { sessionId, layout, hostId: layoutHostRef.current, remember: !projectViewShownRef.current };
+    pendingLayoutRef.current = { sessionId, layout, hostId: layoutHostRef.current, remember: true };
     if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
     persistTimerRef.current = setTimeout(flushLayoutPersist, 500);
   }, [flushLayoutPersist]);
@@ -286,7 +269,7 @@ export const SessionView = memo(() => {
   // Load panels AND layout when session changes
   useEffect(() => {
     let cancelled = false;
-    if (activeSession?.id && !projectViewShown) {
+    if (activeSession?.id) {
       const sid = activeSession.id;
       setPanelLoad(null);
       devLog.debug('[SessionView] Loading panels for session:', sid);
@@ -308,10 +291,7 @@ export const SessionView = memo(() => {
       panelApi.loadPanelsForSession(sid).then(async loadedPanels => {
         if (cancelled) return;
         devLog.debug('[SessionView] Loaded panels:', loadedPanels);
-        const sessionState = useSessionStore.getState();
-        const loadedSession = sessionState.activeMainRepoSession?.id === sid
-          ? sessionState.activeMainRepoSession
-          : sessionState.sessions.find(session => session.id === sid);
+        const loadedSession = useSessionStore.getState().sessions.find(session => session.id === sid);
         const hasReviewPr = !!loadedSession?.gitStatus?.prUrl;
         const inFlight = (usePanelStore.getState().panels[sid] || []).filter(
           p => !preLoadIds.has(p.id) && !loadedPanels.some(lp => lp.id === p.id)
@@ -407,7 +387,7 @@ export const SessionView = memo(() => {
       cancelled = true;
       flushLayoutPersist();
     };
-  }, [activeSession?.id, projectViewShown, selectionRevision, hostId, panelRetry, setPanels, setActivePanelInStore, setLayoutInStore, setFocusedGroupInStore, flushLayoutPersist]);
+  }, [activeSession?.id, selectionRevision, hostId, panelRetry, setPanels, setActivePanelInStore, setLayoutInStore, setFocusedGroupInStore, flushLayoutPersist]);
   
   // Listen for panel updates from the backend
   useEffect(() => {
@@ -463,7 +443,7 @@ export const SessionView = memo(() => {
 
     // The host or an agent brought a tab forward in the Pane this desktop shows.
     const handleActivationRequested = (request: PanelActivationRequest) => {
-      if (request.sessionId === sid && !projectViewShownRef.current) usePanelStore.getState().requestActivation(request);
+      if (request.sessionId === sid) usePanelStore.getState().requestActivation(request);
     };
 
     // Handle panel deletion events (for backend-initiated deletes)
@@ -786,17 +766,7 @@ export const SessionView = memo(() => {
   // Tab cycling: navigates between panels in the focused group using
   // keyboard shortcuts. Supports wrap-around (last → first). Only enabled
   // when there are 2+ panels. Uses focusedGroupPanels (layout order).
-  // Main-repo panes render ProjectView, which owns its own tabs and inspector;
-  // the hotkeys below act on it through this bridge instead of this view's state.
-  const isMainRepoPane = !!activeSession?.isMainRepo;
-  const projectActions = useCallback(
-    () => (isMainRepoPane ? useProjectViewActionsStore.getState().actions : null),
-    [isMainRepoPane],
-  );
-
   const cycleTab = useCallback((direction: 'next' | 'prev') => {
-    const bridged = projectActions();
-    if (bridged) { bridged.cycleTab(direction); return; }
     if (!activeSession || focusedGroupPanels.length < 2) return;
 
     const currentIndex = focusedGroupPanels.findIndex(
@@ -807,7 +777,7 @@ export const SessionView = memo(() => {
 
     const nextPanel = focusedGroupPanels[nextIndex];
     handlePanelSelect(nextPanel);
-  }, [activeSession, focusedGroupPanels, currentActivePanel, handlePanelSelect, projectActions]);
+  }, [activeSession, focusedGroupPanels, currentActivePanel, handlePanelSelect]);
 
   // Tab cycling hotkeys
   useHotkey({
@@ -815,7 +785,7 @@ export const SessionView = memo(() => {
     label: 'Previous Tab',
     keys: 'mod+a',
     category: 'tabs',
-    enabled: () => (projectActions()?.tabCount() ?? focusedGroupPanels.length) > 1,
+    enabled: () => focusedGroupPanels.length > 1,
     action: () => cycleTab('prev'),
     showInPalette: true,
   });
@@ -825,7 +795,7 @@ export const SessionView = memo(() => {
     label: 'Next Tab',
     keys: 'mod+d',
     category: 'tabs',
-    enabled: () => (projectActions()?.tabCount() ?? focusedGroupPanels.length) > 1,
+    enabled: () => focusedGroupPanels.length > 1,
     action: () => cycleTab('next'),
     showInPalette: true,
   });
@@ -837,20 +807,19 @@ export const SessionView = memo(() => {
     const name = p.type === 'diff' ? 'Review' : p.title;
     return `Switch to ${name}`;
   };
-  useHotkey({ id: 'panel-tab-1', label: panelLabel(0), keys: 'mod+shift+1', category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 0 || !!focusedGroupPanels[0], action: () => { const bridged = projectActions(); if (bridged) { bridged.selectTab(0); return; } const p = focusedGroupPanels[0]; if (p) handlePanelSelect(p); } });
-  useHotkey({ id: 'panel-tab-2', label: panelLabel(1), keys: 'mod+shift+2', category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 1 || !!focusedGroupPanels[1], action: () => { const bridged = projectActions(); if (bridged) { bridged.selectTab(1); return; } const p = focusedGroupPanels[1]; if (p) handlePanelSelect(p); } });
-  useHotkey({ id: 'panel-tab-3', label: panelLabel(2), keys: 'mod+shift+3', category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 2 || !!focusedGroupPanels[2], action: () => { const bridged = projectActions(); if (bridged) { bridged.selectTab(2); return; } const p = focusedGroupPanels[2]; if (p) handlePanelSelect(p); } });
-  useHotkey({ id: 'panel-tab-4', label: panelLabel(3), keys: 'mod+shift+4', category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 3 || !!focusedGroupPanels[3], action: () => { const bridged = projectActions(); if (bridged) { bridged.selectTab(3); return; } const p = focusedGroupPanels[3]; if (p) handlePanelSelect(p); } });
-  useHotkey({ id: 'panel-tab-5', label: panelLabel(4), keys: 'mod+shift+5', category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 4 || !!focusedGroupPanels[4], action: () => { const bridged = projectActions(); if (bridged) { bridged.selectTab(4); return; } const p = focusedGroupPanels[4]; if (p) handlePanelSelect(p); } });
-  useHotkey({ id: 'panel-tab-6', label: panelLabel(5), keys: 'mod+shift+6', category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 5 || !!focusedGroupPanels[5], action: () => { const bridged = projectActions(); if (bridged) { bridged.selectTab(5); return; } const p = focusedGroupPanels[5]; if (p) handlePanelSelect(p); } });
-  useHotkey({ id: 'panel-tab-7', label: panelLabel(6), keys: 'mod+shift+7', category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 6 || !!focusedGroupPanels[6], action: () => { const bridged = projectActions(); if (bridged) { bridged.selectTab(6); return; } const p = focusedGroupPanels[6]; if (p) handlePanelSelect(p); } });
-  useHotkey({ id: 'panel-tab-8', label: panelLabel(7), keys: 'mod+shift+8', category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 7 || !!focusedGroupPanels[7], action: () => { const bridged = projectActions(); if (bridged) { bridged.selectTab(7); return; } const p = focusedGroupPanels[7]; if (p) handlePanelSelect(p); } });
-  useHotkey({ id: 'panel-tab-9', label: panelLabel(8), keys: 'mod+shift+9', category: 'tabs', enabled: () => (projectActions()?.tabCount() ?? 0) > 8 || !!focusedGroupPanels[8], action: () => { const bridged = projectActions(); if (bridged) { bridged.selectTab(8); return; } const p = focusedGroupPanels[8]; if (p) handlePanelSelect(p); } });
+  useHotkey({ id: 'panel-tab-1', label: panelLabel(0), keys: 'mod+shift+1', category: 'tabs', enabled: () => !!focusedGroupPanels[0], action: () => { const p = focusedGroupPanels[0]; if (p) handlePanelSelect(p); } });
+  useHotkey({ id: 'panel-tab-2', label: panelLabel(1), keys: 'mod+shift+2', category: 'tabs', enabled: () => !!focusedGroupPanels[1], action: () => { const p = focusedGroupPanels[1]; if (p) handlePanelSelect(p); } });
+  useHotkey({ id: 'panel-tab-3', label: panelLabel(2), keys: 'mod+shift+3', category: 'tabs', enabled: () => !!focusedGroupPanels[2], action: () => { const p = focusedGroupPanels[2]; if (p) handlePanelSelect(p); } });
+  useHotkey({ id: 'panel-tab-4', label: panelLabel(3), keys: 'mod+shift+4', category: 'tabs', enabled: () => !!focusedGroupPanels[3], action: () => { const p = focusedGroupPanels[3]; if (p) handlePanelSelect(p); } });
+  useHotkey({ id: 'panel-tab-5', label: panelLabel(4), keys: 'mod+shift+5', category: 'tabs', enabled: () => !!focusedGroupPanels[4], action: () => { const p = focusedGroupPanels[4]; if (p) handlePanelSelect(p); } });
+  useHotkey({ id: 'panel-tab-6', label: panelLabel(5), keys: 'mod+shift+6', category: 'tabs', enabled: () => !!focusedGroupPanels[5], action: () => { const p = focusedGroupPanels[5]; if (p) handlePanelSelect(p); } });
+  useHotkey({ id: 'panel-tab-7', label: panelLabel(6), keys: 'mod+shift+7', category: 'tabs', enabled: () => !!focusedGroupPanels[6], action: () => { const p = focusedGroupPanels[6]; if (p) handlePanelSelect(p); } });
+  useHotkey({ id: 'panel-tab-8', label: panelLabel(7), keys: 'mod+shift+8', category: 'tabs', enabled: () => !!focusedGroupPanels[7], action: () => { const p = focusedGroupPanels[7]; if (p) handlePanelSelect(p); } });
+  useHotkey({ id: 'panel-tab-9', label: panelLabel(8), keys: 'mod+shift+9', category: 'tabs', enabled: () => !!focusedGroupPanels[8], action: () => { const p = focusedGroupPanels[8]; if (p) handlePanelSelect(p); } });
 
   // --- Add Tool commands (palette-only, no keybindings) ---
-  // Only enabled in session view (not project view) to prevent hidden panel mutations
-  // Worktree panes are the 'sessions' view; a main-repo pane is 'project'.
-  const isInSessionView = !!activeSession && (activeView === 'sessions' || activeView === 'project');
+  // Only enabled in the Pane view, to prevent hidden panel mutations.
+  const isInSessionView = !!activeSession && activeView === 'sessions';
 
   useHotkey({
     id: 'add-tool-terminal',
@@ -858,7 +827,7 @@ export const SessionView = memo(() => {
     keys: 'mod+alt+1',
     category: 'tools',
     enabled: () => isInSessionView,
-    action: () => { const bridged = projectActions(); if (bridged) bridged.addTerminal(); else void handlePanelCreate('terminal'); },
+    action: () => { void handlePanelCreate('terminal'); },
   });
 
   useHotkey({
@@ -867,20 +836,16 @@ export const SessionView = memo(() => {
     keys: 'mod+alt+2',
     category: 'tools',
     enabled: () => isInSessionView,
-    action: () => { const bridged = projectActions(); if (bridged) bridged.showInspector('files'); else openInspector('files'); },
+    action: () => { openInspector('files'); },
   });
 
   // Close active panel tab (skip permanent panels like diff)
   const closeTabEnabled = () => {
-    const bridged = projectActions();
-    if (bridged) return bridged.canCloseActiveTab();
     if (!currentActivePanel) return false;
     const caps = PANEL_CAPABILITIES[currentActivePanel.type];
     return !caps?.permanent && !currentActivePanel.metadata?.permanent;
   };
   const closeTabAction = () => {
-    const bridged = projectActions();
-    if (bridged) { bridged.closeActiveTab(); return; }
     if (currentActivePanel) handlePanelClose(currentActivePanel);
   };
 
@@ -1482,31 +1447,26 @@ export const SessionView = memo(() => {
     return () => { cancelled = true; };
   }, [activeSession?.id, activeSession?.isMainRepo]);
 
-  // Load project data when activeProjectId changes
+  // Opening a repository opens its "(Main)" Pane, an ordinary Pane in the repository checkout,
+  // creating one when none is active. The 'project' view only lasts until that Pane is selected.
+  const [repositoryOpenError, setRepositoryOpenError] = useState<string | null>(null);
   useEffect(() => {
-    if (activeView === 'project' && activeProjectId) {
-      const loadProjectData = async () => {
-        setIsProjectLoading(true);
-        try {
-          // Get all projects and find the one we need
-          const response = await API.projects.getAll();
-          if (response.success && response.data) {
-            const project = response.data.find((p: Project) => p.id === activeProjectId);
-            if (project) {
-              setProjectData(project);
-            }
-          }
-        } catch (error) {
-          console.error('Failed to load project data:', error);
-        } finally {
-          setIsProjectLoading(false);
-        }
-      };
-      loadProjectData();
-    } else {
-      setProjectData(null);
-    }
-  }, [activeView, activeProjectId]);
+    setRepositoryOpenError(null);
+    if (activeView !== 'project' || !activeProjectId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await API.sessions.getOrCreateMainRepoSession(activeProjectId);
+        if (cancelled) return;
+        if (!response.success || !response.data) throw new Error(response.error || 'No Pane was returned');
+        await useSessionStore.getState().setActiveSession(response.data.id);
+        if (!cancelled) navigateToSessions();
+      } catch (error) {
+        if (!cancelled) setRepositoryOpenError(error instanceof Error ? error.message : String(error));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [activeView, activeProjectId, navigateToSessions]);
 
   const hook = useSessionView(activeSession);
 
@@ -1737,7 +1697,7 @@ export const SessionView = memo(() => {
     keys: 'mod+shift+b',
     category: 'view',
     enabled: () => isInSessionView && !immersiveMode,
-    action: () => { const bridged = projectActions(); if (bridged) bridged.toggleDetail(); else handleToggleDetailPanel(); },
+    action: () => { handleToggleDetailPanel(); },
   });
 
   // Create branch actions for the panel bar
@@ -1895,45 +1855,22 @@ export const SessionView = memo(() => {
     return <MissionControlView />;
   }
 
-  // Show project view if navigation is set to project
   if (activeView === 'project' && activeProjectId) {
-    if (isProjectLoading || !projectData) {
-      return (
-        <div className="flex-1 flex flex-col overflow-hidden bg-surface-secondary p-6">
-          <div className="flex items-center justify-center h-full">
+    return (
+      <div className="flex-1 flex flex-col overflow-hidden bg-surface-secondary p-6">
+        <div className="flex items-center justify-center h-full">
+          {repositoryOpenError ? (
+            <p role="alert" className="max-w-md text-center text-text-secondary">
+              Couldn't open this repository's (Main) Pane: {repositoryOpenError}. Nothing was changed. Open the repository again from the sidebar, or create a Pane with "Use worktree" off.
+            </p>
+          ) : (
             <div className="text-center">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-interactive mx-auto mb-4"></div>
-              <p className="text-text-secondary">Loading project...</p>
+              <p className="text-text-secondary">Opening repository…</p>
             </div>
-          </div>
+          )}
         </div>
-      );
-    }
-
-    return (
-      <>
-        <ProjectView
-          projectId={activeProjectId}
-          projectName={projectData.name || 'Project'}
-          projectEnvironment={projectData.environment}
-          configuredIDECommand={projectData.open_ide_command}
-          onConfigureIDE={() => setShowProjectSettings(true)}
-        />
-        <ProjectSettings
-          project={projectData}
-          isOpen={showProjectSettings}
-          onClose={() => setShowProjectSettings(false)}
-          onUpdate={() => {
-            API.projects.getAll().then(response => {
-              if (response.success && response.data) {
-                const project = response.data.find((candidate: Project) => candidate.id === activeProjectId);
-                if (project) setProjectData(project);
-              }
-            });
-          }}
-          onDelete={() => setShowProjectSettings(false)}
-        />
-      </>
+      </div>
     );
   }
 

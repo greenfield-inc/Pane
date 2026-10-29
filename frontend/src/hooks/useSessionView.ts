@@ -238,9 +238,7 @@ export const useSessionView = (
     // Performance optimization: Check session status only, not entire state
     let previousStatus = activeSessionStatus;
     const unsubscribe = useSessionStore.subscribe((state) => {
-      const updatedSession = state.activeMainRepoSession?.id === activeSessionId
-        ? state.activeMainRepoSession
-        : state.sessions.find(s => s.id === activeSessionId);
+      const updatedSession = state.sessions.find(s => s.id === activeSessionId);
       
       // Only trigger update if status actually changed
       if (updatedSession && updatedSession.status !== previousStatus) {
@@ -429,9 +427,7 @@ export const useSessionView = (
     // PERFORMANCE: Adaptive reload interval based on output size
     const getMinReloadInterval = () => {
       const sessionState = useSessionStore.getState();
-      const currentSession = sessionState.activeMainRepoSession?.id === activeSessionId
-        ? sessionState.activeMainRepoSession
-        : sessionState.sessions.find(session => session.id === activeSessionId);
+      const currentSession = sessionState.sessions.find(session => session.id === activeSessionId);
       const outputSize = currentSession?.output?.length ?? 0;
       if (outputSize > 2000) return 3000; // 3 seconds for very large outputs
       if (outputSize > 1000) return 2000; // 2 seconds for large outputs  

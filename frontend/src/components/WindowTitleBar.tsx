@@ -102,7 +102,6 @@ export function WindowTitleBar({ projects, sidebarWidth, sidebarCollapsed, contr
   const activeView = useNavigationStore(state => state.activeView);
   const activeSession = useSessionStore(state => {
     if (!state.activeSessionId) return undefined;
-    if (state.activeMainRepoSession?.id === state.activeSessionId) return state.activeMainRepoSession;
     return state.sessions.find(session => session.id === state.activeSessionId);
   });
   const activeSessionId = useSessionStore(state => state.activeSessionId);

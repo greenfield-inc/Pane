@@ -4,7 +4,7 @@ import type { Session } from '../types/session';
 export interface PaneTitle {
   /** Repository name, always present. */
   project: string;
-  /** Pane name, or the worktree folder when the pane has no name. Empty for the main-repo pane. */
+  /** Pane name, or the worktree folder when the pane has no name. */
   pane: string;
 }
 
@@ -19,9 +19,6 @@ export function resolvePaneTitle(
   if (!session) return null;
   const project = projects.find(candidate => candidate.id === session.projectId);
   if (!project?.name) return null;
-
-  // The main-repo pane is the project itself — naming it twice adds nothing.
-  if (session.isMainRepo) return { project: project.name, pane: '' };
 
   // Pane names are set at creation, but fall back to the worktree folder (which
   // is also the branch name) so a nameless pane still says where it is.

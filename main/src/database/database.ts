@@ -3122,7 +3122,6 @@ export class DatabaseService {
     return this.transaction(() => {
       // Get the max display_order for both sessions and folders in this project
       // Sessions and folders share the same display_order space within a project
-      // Exclude main repo sessions as they have separate handling
       // SAFETY: This fixed SQLite query projection matches the declared row type at this database boundary.
       const maxSessionOrder = this.db
         .prepare(
@@ -3132,7 +3131,6 @@ export class DatabaseService {
         WHERE project_id = ?
           AND (archived = 0 OR archived IS NULL)
           AND folder_id IS NULL
-          AND (is_main_repo = 0 OR is_main_repo IS NULL)
           AND (is_hidden = 0 OR is_hidden IS NULL)
       `,
         )
@@ -3216,14 +3214,14 @@ export class DatabaseService {
       // SAFETY: This fixed SQLite query projection matches the declared row type at this database boundary.
       return this.db
         .prepare(
-          `SELECT * FROM sessions WHERE project_id = ? AND (archived = 0 OR archived IS NULL) AND (is_main_repo = 0 OR is_main_repo IS NULL)${hiddenClause} ORDER BY display_order ASC, created_at DESC`,
+          `SELECT * FROM sessions WHERE project_id = ? AND (archived = 0 OR archived IS NULL)${hiddenClause} ORDER BY display_order ASC, created_at DESC`,
         )
         .all(projectId) as Session[];
     }
     // SAFETY: This fixed SQLite query projection matches the declared row type at this database boundary.
     return this.db
       .prepare(
-        `SELECT * FROM sessions WHERE (archived = 0 OR archived IS NULL) AND (is_main_repo = 0 OR is_main_repo IS NULL)${hiddenClause} ORDER BY display_order ASC, created_at DESC`,
+        `SELECT * FROM sessions WHERE (archived = 0 OR archived IS NULL)${hiddenClause} ORDER BY display_order ASC, created_at DESC`,
       )
       .all() as Session[];
   }
@@ -3294,11 +3292,11 @@ export class DatabaseService {
   }
 
   getAllSessionsIncludingArchived(options?: { includeHidden?: boolean }): Session[] {
-    const hiddenClause = options?.includeHidden ? "" : " AND (is_hidden = 0 OR is_hidden IS NULL)";
+    const hiddenClause = options?.includeHidden ? "" : "WHERE (is_hidden = 0 OR is_hidden IS NULL)";
     // SAFETY: This fixed SQLite query projection matches the declared row type at this database boundary.
     return this.db
       .prepare(
-        `SELECT * FROM sessions WHERE (is_main_repo = 0 OR is_main_repo IS NULL)${hiddenClause} ORDER BY created_at DESC`,
+        `SELECT * FROM sessions ${hiddenClause} ORDER BY created_at DESC`,
       )
       .all() as Session[];
   }
@@ -3319,35 +3317,36 @@ export class DatabaseService {
       // SAFETY: This fixed SQLite query projection matches the declared row type at this database boundary.
       return this.db
         .prepare(
-          `SELECT * FROM sessions WHERE project_id = ? AND archived = 1 AND (is_main_repo = 0 OR is_main_repo IS NULL)${hiddenClause} ORDER BY updated_at DESC`,
+          `SELECT * FROM sessions WHERE project_id = ? AND archived = 1${hiddenClause} ORDER BY updated_at DESC`,
         )
         .all(projectId) as Session[];
     }
     // SAFETY: This fixed SQLite query projection matches the declared row type at this database boundary.
     return this.db
       .prepare(
-        `SELECT * FROM sessions WHERE archived = 1 AND (is_main_repo = 0 OR is_main_repo IS NULL)${hiddenClause} ORDER BY updated_at DESC`,
+        `SELECT * FROM sessions WHERE archived = 1${hiddenClause} ORDER BY updated_at DESC`,
       )
       .all() as Session[];
   }
 
-  /** The newest archived worktree Pane ids outside the given projects, at most `limit`. */
+  /** The newest archived Pane ids outside the given projects, at most `limit`. */
   getArchivedSessionIds(limit: number, excludeProjectIds: number[] = []): string[] {
     const excluded = excludeProjectIds.length > 0 ? ` AND project_id NOT IN (${excludeProjectIds.map(() => '?').join(', ')})` : '';
     // SAFETY: This fixed SQLite query projection matches the declared row type at this database boundary.
     const rows = this.db
       .prepare(
-        `SELECT id FROM sessions WHERE archived = 1 AND (is_main_repo = 0 OR is_main_repo IS NULL) AND (is_hidden = 0 OR is_hidden IS NULL)${excluded} ORDER BY updated_at DESC LIMIT ?`,
+        `SELECT id FROM sessions WHERE archived = 1 AND (is_hidden = 0 OR is_hidden IS NULL)${excluded} ORDER BY updated_at DESC LIMIT ?`,
       )
       .all(...excludeProjectIds, limit) as Array<{ id: string }>;
     return rows.map(row => row.id);
   }
 
+  /** The newest active Pane working in the repository checkout, if any. */
   getMainRepoSession(projectId: number): Session | undefined {
     // SAFETY: This fixed SQLite query projection matches the declared row type at this database boundary.
     return this.db
       .prepare(
-        "SELECT * FROM sessions WHERE project_id = ? AND is_main_repo = 1 AND (archived = 0 OR archived IS NULL)",
+        "SELECT * FROM sessions WHERE project_id = ? AND is_main_repo = 1 AND (archived = 0 OR archived IS NULL) AND (is_hidden = 0 OR is_hidden IS NULL) ORDER BY created_at DESC LIMIT 1",
       )
       .get(projectId) as Session | undefined;
   }
@@ -3598,7 +3597,6 @@ export class DatabaseService {
           `
           SELECT id FROM sessions
           WHERE archived = 1
-            AND (is_main_repo = 0 OR is_main_repo IS NULL)
             AND (is_hidden = 0 OR is_hidden IS NULL)
         `,
         )

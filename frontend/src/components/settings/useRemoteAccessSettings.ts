@@ -86,7 +86,7 @@ export function useRemoteAccessSettings(isOpen: boolean, closeSettings: () => vo
   const activeProjectId = useNavigationStore((state) => state.activeProjectId);
   const navigateToSessions = useNavigationStore((state) => state.navigateToSessions);
   const activeSessionProjectId = useSessionStore((state) => {
-    const activeSession = state.sessions.find((session) => session.id === state.activeSessionId) ?? state.activeMainRepoSession;
+    const activeSession = state.sessions.find((session) => session.id === state.activeSessionId);
     return activeSession?.projectId ?? null;
   });
   const setActiveSession = useSessionStore((state) => state.setActiveSession);

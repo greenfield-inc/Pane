@@ -203,7 +203,7 @@ for (const leaveVia of ['another Pane', 'the repository view'] as const) {
     if (leaveVia === 'another Pane') await page.getByRole('button', { name: 'Other pane', exact: true }).click();
     else {
       await page.getByRole('button', { name: 'Project actions for Split fixture', exact: true }).click();
-      await page.getByText('Open session on main', { exact: true }).click();
+      await page.getByText('Open (Main) Pane', { exact: true }).click();
     }
     await expect(page.getByRole('tab', { name: 'Beta', exact: true })).toHaveCount(0);
 
