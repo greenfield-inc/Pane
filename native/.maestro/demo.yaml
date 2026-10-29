@@ -74,7 +74,10 @@ name: Try the demo
     timeout: 20000
 - tapOn:
     id: terminal-back
-- tapOn: "New Pane"
+- tapOn:
+    id: home-new
+- tapOn:
+    id: panes-new
 - extendedWaitUntil:
     visible:
       id: new-pane-sheet

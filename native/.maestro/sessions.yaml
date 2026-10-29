@@ -8,6 +8,8 @@ name: Session journeys
 
 # New Session: name it and keep the host's default agent.
 - tapOn:
+    id: home-new
+- tapOn:
     id: sessions-new
 - extendedWaitUntil:
     visible:

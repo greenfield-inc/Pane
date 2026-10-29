@@ -11,6 +11,7 @@ import { ComposerSheet, useAfterSheetCloses } from '../composer/ComposerSheet';
 import { ConnectionBar, presenceLabel } from '../hosts/ConnectionStatus';
 import { useConnectionPresence } from '../hosts/useConnectionPresence';
 import { MachineMark } from '../machines/MachineMark';
+import { shortMachineName } from '../machines/machines';
 import { useMachines } from '../machines/useMachines';
 
 /**
@@ -61,7 +62,7 @@ export function TerminalTopBar({ paneName, onClearScrollback }: { paneName: stri
                   numberOfLines={1}
                   accessibilityLabel={presenceLabel(presence, profile.label)}
                 >
-                  {profile.label}
+                  {shortMachineName(profile.label, 5)}
                 </Text>
                 {paneName ? (
                   <>

@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
 import type { TailnetMachine, TailnetMachineList } from '@shared/types/workspaceAccess';
 
-import { listMachines } from './machines';
+import { listMachines, shortMachineName } from './machines';
 
 const DOMAIN = 'tail1234.ts.net';
 
@@ -146,5 +146,16 @@ describe('listMachines', () => {
       tailnet: list([tailnet('build-box', 'Linux', 'available')]),
     });
     expect(machines.map(machine => [machine.name, machine.slot])).toEqual([['studio-mac', 4], ['build-box', 3]]);
+  });
+});
+
+describe('shortMachineName', () => {
+  it('keeps the first characters and adds an ellipsis', () => {
+    expect(shortMachineName('parsa-4090m-workstation-win11pro', 10)).toBe('parsa-4090…');
+    expect(shortMachineName('parsas-macbook-pro', 5)).toBe('parsa…');
+  });
+
+  it('leaves a name that fits', () => {
+    expect(shortMachineName('studio-mac', 10)).toBe('studio-mac');
   });
 });

@@ -1,6 +1,6 @@
 import { LegendList } from '@legendapp/list/react-native';
 import { router } from 'expo-router';
-import { useState, type ReactNode } from 'react';
+import { useState } from 'react';
 import { Alert, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -232,16 +232,6 @@ export function PaneListScreen() {
           above stay live, so you can switch away from a machine that is down. */}
       <Dimmed dimmed={presence !== 'connected'} style={styles.fill}>
         <View style={styles.toolbar}>
-          <View style={styles.createButtons}>
-            {sessions.unavailable ? null : (
-              <CreateButton testID="sessions-new" title="New Session" secondary onPress={() => router.push('/session/new')}>
-                <Icon ios="bubble.left" android="chat_bubble" size={16} color={theme.colors.text} />
-              </CreateButton>
-            )}
-            <CreateButton testID="panes-new" title="New Pane" disabled={(projects.data ?? []).length === 0} onPress={() => router.push('/pane/new')}>
-              <Icon ios="plus" android="add" size={16} color={theme.colors.onAccent} />
-            </CreateButton>
-          </View>
           <View style={[styles.search, { borderRadius: theme.radius.lg, backgroundColor: theme.colors.surfaceRaised }]}>
             <Icon ios="magnifyingglass" android="search" size={16} />
             <TextInput
@@ -276,7 +266,7 @@ export function PaneListScreen() {
           refreshing={refreshing}
           onRefresh={() => void refresh()}
           style={styles.fill}
-          contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 12 }]}
+          contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 12 + NEW_BUTTON + 16 }]}
           ListHeaderComponent={waitingCount > 0 ? (
             <View style={styles.waitingSection}>
               <SectionHeader title="Waiting on you" count={waitingCount} first />
@@ -315,6 +305,16 @@ export function PaneListScreen() {
           }
           renderItem={renderItem}
         />
+        <Pressable
+          testID="home-new"
+          accessibilityRole="button"
+          accessibilityLabel="New"
+          accessibilityHint="Starts a Session or a Pane"
+          onPress={() => router.push('/new')}
+          style={({ pressed }) => [styles.newButton, { bottom: insets.bottom + 16, backgroundColor: theme.colors.accent, opacity: pressed ? 0.85 : 1 }]}
+        >
+          <Icon ios="plus" android="add" size={24} color={theme.colors.onAccent} />
+        </Pressable>
       </Dimmed>
     </View>
   );
@@ -342,42 +342,14 @@ function WaitingRow({ name, detail, divided, onPress, testID }: { name: string; 
   );
 }
 
-/** A create button: New Pane filled with the accent, New Session quieter beside it. */
-function CreateButton({ title, onPress, disabled, secondary, testID, children }: {
-  title: string;
-  onPress: () => void;
-  disabled?: boolean;
-  secondary?: boolean;
-  testID: string;
-  children: ReactNode;
-}) {
-  const theme = useTheme();
-  return (
-    <Pressable
-      testID={testID}
-      accessibilityRole="button"
-      accessibilityLabel={title}
-      accessibilityState={{ disabled }}
-      disabled={disabled}
-      onPress={onPress}
-      style={({ pressed }) => [styles.createButton, {
-        borderRadius: theme.radius.lg,
-        backgroundColor: secondary ? theme.colors.surfaceRaised : theme.colors.accent,
-        opacity: disabled ? 0.5 : pressed ? 0.85 : 1,
-      }]}
-    >
-      {children}
-      <Text variant="callout" tone={secondary ? 'primary' : 'onAccent'} numberOfLines={1} maxFontSizeMultiplier={1.6} style={[styles.bold, styles.shrink]}>{title}</Text>
-    </Pressable>
-  );
-}
-
 function toggleMember(current: ReadonlySet<string>, member: string): ReadonlySet<string> {
   const next = new Set(current);
   if (next.has(member)) next.delete(member);
   else next.add(member);
   return next;
 }
+
+const NEW_BUTTON = 56;
 
 const styles = StyleSheet.create({
   fill: { flex: 1 },
@@ -387,8 +359,8 @@ const styles = StyleSheet.create({
   machine: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 },
   roundButton: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
   toolbar: { paddingHorizontal: 16, paddingBottom: 4, gap: 10 },
-  createButtons: { flexDirection: 'row', gap: 10 },
-  createButton: { flex: 1, minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 12 },
+  // Above the home indicator, in thumb reach; the list ends clear of it.
+  newButton: { position: 'absolute', right: 16, width: NEW_BUTTON, height: NEW_BUTTON, borderRadius: NEW_BUTTON / 2, alignItems: 'center', justifyContent: 'center' },
   bold: { fontWeight: '600' },
   // ml-5 border-l pl-2 under the Session row.
   nested: { marginLeft: 20, paddingLeft: 8, borderLeftWidth: 1 },

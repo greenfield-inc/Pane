@@ -5,24 +5,20 @@ import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useTheme } from '@/theme';
 import { Icon, Text } from '@/ui';
 
-import { DIMMED_OPACITY } from '../hosts/ConnectionStatus';
-
 export interface PanelTabsProps {
   panels: readonly ToolPanel[];
   selectedId: string | null;
   onSelect: (panel: ToolPanel) => void;
   onAdd: () => void;
-  /** Sends Ctrl+C to the open terminal; hidden when there is none. */
-  onStop?: () => void;
-  /** Shown but dimmed and untappable while the machine is not connected, since Ctrl+C could not be sent. */
-  stopDisabled?: boolean;
+  /** A long press on a tab, or the VoiceOver and TalkBack action, offers to close it. */
+  onClose: (panel: ToolPanel) => void;
 }
 
 /**
- * The web app's tool tabs: bordered tabs on a raised strip, a square + that
- * adds one, and Stop (Ctrl+C) in red at the end, always fully visible.
+ * The web app's tool tabs: bordered tabs on a raised strip and a square + at
+ * the end that adds one. Ctrl+C lives on the floating controller.
  */
-export function PanelTabs({ panels, selectedId, onSelect, onAdd, onStop, stopDisabled = false }: PanelTabsProps) {
+export function PanelTabs({ panels, selectedId, onSelect, onAdd, onClose }: PanelTabsProps) {
   const theme = useTheme();
   const { colors } = theme;
   return (
@@ -45,10 +41,16 @@ export function PanelTabs({ panels, selectedId, onSelect, onAdd, onStop, stopDis
               accessibilityRole="tab"
               accessibilityState={{ selected }}
               accessibilityLabel={panel.title}
+              accessibilityActions={[{ name: 'close', label: 'Close' }]}
+              onAccessibilityAction={event => { if (event.nativeEvent.actionName === 'close') onClose(panel); }}
               onPress={() => {
                 if (selected) return;
                 void Haptics.selectionAsync();
                 onSelect(panel);
+              }}
+              onLongPress={() => {
+                void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                onClose(panel);
               }}
               style={({ pressed }) => [
                 styles.tab,
@@ -85,29 +87,6 @@ export function PanelTabs({ panels, selectedId, onSelect, onAdd, onStop, stopDis
       >
         <Icon ios="plus" android="add" size={16} color={colors.textSecondary} />
       </Pressable>
-      {onStop ? (
-        <Pressable
-          testID="terminal-stop"
-          accessibilityRole="button"
-          accessibilityLabel="Stop"
-          accessibilityHint="Sends Ctrl+C to stop the running command"
-          accessibilityState={{ disabled: stopDisabled }}
-          disabled={stopDisabled}
-          hitSlop={6}
-          onPress={() => {
-            void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-            onStop();
-          }}
-          style={({ pressed }) => [
-            styles.stop,
-            { borderColor: colors.danger, backgroundColor: pressed ? colors.surfacePressed : colors.dangerSoft },
-            stopDisabled && styles.stopDisabled,
-          ]}
-        >
-          <Icon ios="stop.fill" android="stop" size={10} color={colors.danger} />
-          <Text variant="footnote" tone="danger" style={styles.stopLabel}>Stop</Text>
-        </Pressable>
-      ) : null}
     </View>
   );
 }
@@ -136,17 +115,5 @@ const styles = StyleSheet.create({
     borderBottomWidth: 0,
   },
   label: { flexShrink: 1 },
-  stop: {
-    height: 28,
-    marginBottom: 4,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 10,
-    borderRadius: 15,
-    borderWidth: 1,
-  },
-  stopDisabled: { opacity: DIMMED_OPACITY },
-  stopLabel: { fontWeight: '600' },
   add: { width: 30, height: 30, marginBottom: 3, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
 });

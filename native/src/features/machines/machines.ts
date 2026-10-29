@@ -144,3 +144,9 @@ function isSameMachine(profile: RemotePaneConnectionProfile, machine: TailnetMac
 export function hostOf(url: string): string {
   return /^[a-z]+:\/\/([^/:]+)/i.exec(url)?.[1]?.toLowerCase() ?? '';
 }
+
+/** A machine's name cut to its first `length` characters and an ellipsis, for tight rows; labels keep the full name. */
+export function shortMachineName(name: string, length: number): string {
+  const characters = Array.from(name);
+  return characters.length > length ? `${characters.slice(0, length).join('')}…` : name;
+}
