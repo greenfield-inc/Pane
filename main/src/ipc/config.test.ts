@@ -175,13 +175,13 @@ describe('config IPC handlers', () => {
     const ipcMain = createIpcMainStub();
     const services = createServicesStub([]);
     services.configManager.updateConfig = async () => {
-      throw new AppearanceValidationError('systemLightTheme must be a light palette');
+      throw new AppearanceValidationError('systemLightTheme must be a valid palette');
     };
     // SAFETY: The stub implements the IpcMain handle surface exercised by registerConfigHandlers.
     registerConfigHandlers(ipcMain as IpcMain, services);
-    await expect(ipcMain.handlers.get('config:update')?.({}, { systemLightTheme: 'dark' })).resolves.toEqual({
+    await expect(ipcMain.handlers.get('config:update')?.({}, { systemLightTheme: 'unknown' })).resolves.toEqual({
       success: false,
-      error: 'systemLightTheme must be a light palette',
+      error: 'systemLightTheme must be a valid palette',
     });
   });
 

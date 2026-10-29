@@ -7,7 +7,7 @@ import type { PaneChatAgent } from '../../../shared/types/paneChat';
 import type { VoiceTranscriptionMode } from '../../../shared/types/voiceTranscription';
 import type { WorktreeFileSyncEntry } from '../../../shared/types/worktreeFileSync';
 import type { ApnsCredentialConfig, SharedCredentialId, SharedCredentialMeta } from '../../../shared/types/sharedCredentials';
-import type { AppearanceMode, DarkTheme, LightTheme, Theme } from '../../../shared/types/appearance';
+import type { AppearanceMode, Theme } from '../../../shared/types/appearance';
 import type { SessionRetention } from '../../../shared/types/orchestrationSession';
 
 interface TerminalShortcut {
@@ -90,8 +90,8 @@ export interface AppConfig {
   // Theme preference
   appearanceMode?: AppearanceMode;
   theme?: Theme;
-  systemLightTheme?: LightTheme;
-  systemDarkTheme?: DarkTheme;
+  systemLightTheme?: Theme;
+  systemDarkTheme?: Theme;
   // Opt-in high contrast mode: raises muted chrome text to AAA and the terminal's
   // minimumContrastRatio so dim CLI output stays legible
   highContrast?: boolean;
@@ -221,8 +221,8 @@ export interface UpdateConfigRequest {
   keepAwakeOnBattery?: boolean;
   appearanceMode?: AppearanceMode;
   theme?: Theme;
-  systemLightTheme?: LightTheme;
-  systemDarkTheme?: DarkTheme;
+  systemLightTheme?: Theme;
+  systemDarkTheme?: Theme;
   highContrast?: boolean;
   uiScale?: number;
   notifications?: {

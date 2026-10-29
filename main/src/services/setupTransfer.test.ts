@@ -151,7 +151,7 @@ describe('exportSetup', () => {
     expect(rows).toEqual([
       { id: 'agentPresets', count: 2, leftOut: [], agents: ['Claude Code', 'Codex'] },
       { id: 'skills', count: 2, leftOut: [], skills: { homeSkill: true, registerMcp: false } },
-      { id: 'appearance', count: 2, leftOut: [], appearance: { mode: 'system', theme: 'light-rounded', light: 'light-rounded', dark: 'dusk' } },
+      { id: 'appearance', count: 2, leftOut: [], appearance: { mode: 'system', theme: 'folio', light: 'folio', dark: 'dusk' } },
     ]);
   });
 });
