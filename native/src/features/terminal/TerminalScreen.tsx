@@ -59,6 +59,7 @@ export function TerminalScreen({ paneId, session }: { paneId: string; session?: 
   const insets = useSafeAreaInsets();
   const keyboardVisible = useKeyboardVisible();
   const { client, profile } = useDaemon();
+  const { presence } = useConnectionPresence();
   const queryClient = useQueryClient();
 
   const pane = useInvokeQuery<{ name: string }>('sessions:get', [paneId], { enabled: !session });
@@ -122,6 +123,7 @@ export function TerminalScreen({ paneId, session }: { paneId: string; session?: 
         onSelect={selectPanel}
         onAdd={() => router.push({ pathname: '/pane/[paneId]/new-panel', params: session ? { paneId, sessionId: session.session.id } : { paneId } })}
         onStop={terminalActive ? () => terminalActions.current?.stop() : undefined}
+        stopDisabled={presence !== 'connected'}
       />
       {panel ? (
         <AgentConversationSurface key={panel.id} panel={panel} draft={draft} onChangeDraft={setDraft} confirmDraft={composer.confirmDelivery}>

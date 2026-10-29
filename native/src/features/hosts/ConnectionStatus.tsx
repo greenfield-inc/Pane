@@ -10,7 +10,7 @@ import { Text } from '@/ui';
 const DOT = 10;
 /** One period for every pulsing dot. */
 const PULSE_MS = 1800;
-const DIMMED_OPACITY = 0.45;
+export const DIMMED_OPACITY = 0.45;
 
 /**
  * The machine dot, in a fixed box: solid when connected, a spreading ring
