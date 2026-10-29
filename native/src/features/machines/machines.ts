@@ -95,7 +95,10 @@ export function listMachines({ profiles, current, connection, tailnet }: {
     const entry = listed.find(machine => isSameMachine(profile, machine, domain));
     if (entry) matched.add(entry);
     const isCurrent = profile.id === current.id;
-    const live = isCurrent ? CONNECTION[connection] : entry ? fromTailnet(entry.state) : { status: 'Saved', state: 'solid' as const };
+    // The list probes a machine's Workspaces listener. That is a Tailscale profile's own endpoint, but a code
+    // pairing answers elsewhere, so for one the entry only lends its OS and name.
+    const probed = entry && profile.tailnetMachine ? entry : undefined;
+    const live = isCurrent ? CONNECTION[connection] : probed ? fromTailnet(probed.state) : { status: 'Saved', state: 'solid' as const };
     return {
       key: profile.id,
       name: profile.label,

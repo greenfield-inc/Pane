@@ -122,6 +122,18 @@ describe('listMachines', () => {
     expect(machines.map(machine => [machine.name, machine.os])).toEqual([['studio-mac', null], ['Build box', 'Linux']]);
   });
 
+  it('keeps a machine paired with a code selectable when Tailscale cannot reach its Workspaces listener', () => {
+    // The code pairing answers on its own port; the list probes another one.
+    const coded = saved('build-box', { id: 'code-3', label: 'Build box', baseUrl: `https://build-box.${DOMAIN}:42157`, tailnetMachine: undefined, tailnetDomain: undefined });
+    const [, other] = listMachines({
+      profiles: [studio, coded],
+      current: studio,
+      connection: 'connected',
+      tailnet: list([tailnet('build-box', 'Linux', 'unreachable')]),
+    });
+    expect(other).toMatchObject({ name: 'Build box', os: 'Linux', status: 'Saved', state: 'solid', selectable: true });
+  });
+
   it('includes the current machine when it is not saved, as in the demo', () => {
     const machines = listMachines({ profiles: [], current: studio, connection: 'connected', tailnet: undefined });
     expect(machines.map(machine => machine.name)).toEqual(['studio-mac']);
