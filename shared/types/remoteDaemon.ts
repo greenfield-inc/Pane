@@ -215,6 +215,7 @@ export type RemoteMobilePlatform = 'ios' | 'android';
 
 export interface RemoteMobilePushRegistration {
   id: string;
+  /** A paired client's id, or `tailnet:<login>` for the owner's phone registered over Tailscale with no code. */
   clientId: string;
   platform: RemoteMobilePlatform;
   token: string;
@@ -225,6 +226,8 @@ export interface RemoteMobilePushRegistration {
   completedEnabled: boolean;
   /** The app build draws Notify's answer buttons from a data-only Android message (Pane app 1.1+). */
   notifyButtons?: boolean;
+  /** The APNs endpoint that accepted this token after the key's own environment refused it. */
+  apnsEnvironment?: 'sandbox' | 'production';
   createdAt: string;
   updatedAt: string;
   revokedAt?: string;
@@ -757,6 +760,7 @@ function normalizeRemoteMobilePushSettings(value: JsonValue | undefined): Remote
     const revokedAt = readOptionalString(raw.revokedAt);
     if (revokedAt) normalized.revokedAt = revokedAt;
     if (raw.notifyButtons === true) normalized.notifyButtons = true;
+    if (raw.apnsEnvironment === 'sandbox' || raw.apnsEnvironment === 'production') normalized.apnsEnvironment = raw.apnsEnvironment;
     return [normalized];
   });
   const decodedAttentionSequence = decodeOptionalBoundary(settings.attentionSequence, boundary.number);

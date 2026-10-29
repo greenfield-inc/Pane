@@ -10,7 +10,7 @@ Set an integration key once and every Pane host you use gets it. A key set on yo
 | APNs key for iPhone notifications | Settings → Integrations → iPhone notifications |
 | Anthropic, OpenAI | `anthropicApiKey`, `openaiApiKey` in the host's `config.json` |
 
-A key that exists only in a host's environment (for example `FAL_KEY` or the `PANE_APNS_*` variables) stays on that host and is never shared. On that host the environment value wins over a shared one.
+A key that exists only in a host's environment (for example `FAL_KEY` or the `PANE_APNS_*` variables) stays on that host and is never shared. On that host the environment value wins over a shared one. To get phone alerts from every computer, load the APNs key once in Settings → Integrations rather than only in one host's environment. The APNs endpoint follows the phone's build, not the key's environment ([Native mobile](NATIVE_MOBILE.md#push-delivery-operator-setup)).
 
 ## How keys travel
 

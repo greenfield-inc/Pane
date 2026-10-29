@@ -1045,6 +1045,30 @@ describe('workspace identity mode', () => {
     },
   );
 
+  it.each(['mobile:push-status', 'mobile:push-register', 'mobile:push-controls', 'mobile:push-revoke'])(
+    'registers the owner\'s phone for push over %s without a pairing code, and refuses teammates', async (channel) => {
+      const registry = new PaneCommandRegistry();
+      const handler = vi.fn(async () => ({}));
+      registry.register(channel, handler);
+      const server = new PaneRemoteHttpApiServer(registry, createConfigManagerStub(), {
+        workspace: { listenPort: 0, pathSecret: 'serve-secret', access: () => ownerOnly({ visibility: 'tailnet' }) },
+      });
+      activeServers.push(server);
+      await server.start();
+      const input = { platform: 'ios', installationId: 'install-1' };
+      const request = { channel, args: [input, { clientId: 'forged' }] };
+
+      const refused = await requestJson(server, 'POST', invokePath, request, undefined, as(teammate));
+      expect(refused.statusCode).toBe(403);
+      expect(refused.body).toMatchObject({ error: { code: 'ERR_MOBILE_PUSH_OWNER_REQUIRED' } });
+      expect(handler).not.toHaveBeenCalled();
+
+      const allowed = await requestJson(server, 'POST', invokePath, request, undefined, as(owner.toUpperCase()));
+      expect(allowed).toEqual({ statusCode: 200, body: { ok: true, result: {} } });
+      expect(handler).toHaveBeenCalledWith(input, { clientId: `tailnet:${owner}` });
+    },
+  );
+
   it('admits the voice stream upgrade, checking the same identity', async () => {
     vi.stubEnv('DEEPGRAM_API_KEY', '');
     const server = await startOwnerServer(owner);

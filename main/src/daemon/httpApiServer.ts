@@ -1414,7 +1414,21 @@ export class PaneRemoteHttpApiServer {
       }
       return [args[0] ?? null, { clientId: `tailnet:${owner}` }];
     }
-    if (invokeRequest.channel.startsWith('mobile:push-') || sharesKeys) {
+    const registersPush = invokeRequest.channel.startsWith('mobile:push-');
+    if (registersPush && !auth.client && this.workspace) {
+      // A phone on the owner's Tailscale login registers without a code, as the owner: it can
+      // already open terminals here. Teammates the workspace lets in get no alerts.
+      const owner = this.workspaceOwnerLogin(request);
+      if (!owner) {
+        throw new RemoteDaemonBadRequestError(
+          'ERR_MOBILE_PUSH_OWNER_REQUIRED',
+          'Only this computer\'s owner can get its alerts on a phone. Sign in to Tailscale on the phone as the owner, or connect with a code.',
+          403,
+        );
+      }
+      return [args[0] ?? null, { clientId: `tailnet:${owner}` }];
+    }
+    if (registersPush || sharesKeys) {
       if (!auth.client) {
         throw new RemoteDaemonBadRequestError(
           sharesKeys ? 'ERR_SHARED_CREDENTIALS_PAIRING_REQUIRED' : 'ERR_MOBILE_PUSH_PAIRING_REQUIRED',
