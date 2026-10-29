@@ -27,7 +27,7 @@ export function createFetchEventStreamTransport(streamingFetch: RemoteFetch): Re
     invokeRequest(context, channel, args) {
       return {
         headers: { ...authHeaders(context), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ channel, args, runtimeId: context.runtimeId, clientLabel: context.clientLabel }),
+        body: JSON.stringify({ channel, args, runtimeId: context.runtimeId, clientLabel: context.clientLabel, requestId: context.requestId }),
       };
     },
 

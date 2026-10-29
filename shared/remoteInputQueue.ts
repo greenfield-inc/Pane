@@ -11,7 +11,7 @@ interface PanelInputQueue<Result> {
   active?: {
     batch: InputBatch<Result>;
     controller: AbortController;
-    timeout: ReturnType<typeof setTimeout>;
+    timeout: ReturnType<typeof setTimeout> | undefined;
   };
 }
 
@@ -31,6 +31,8 @@ export class RemoteInputQueue<Result> {
     private readonly send: (channel: string, args: unknown[], signal?: AbortSignal) => Promise<Result>,
     /** Called when the host never answered a request, after its input is failed. */
     private readonly onTimeout?: () => void,
+    /** True while `send` itself resends unanswered input until the host answers; the queue then sets no timeout. */
+    private readonly resends: () => boolean = () => false,
   ) {}
 
   invoke(channel: string, args: unknown[]): Promise<Result> {
@@ -75,7 +77,7 @@ export class RemoteInputQueue<Result> {
       return;
     }
     const controller = new AbortController();
-    const timeout = setTimeout(() => {
+    const timeout = this.resends() ? undefined : setTimeout(() => {
       this.fail(panelId, queue, new Error('Delivery unknown: terminal input timed out. Check the original panel before resubmitting; pending input was discarded.'));
       this.onTimeout?.();
     }, INPUT_TIMEOUT_MS);

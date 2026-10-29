@@ -30,6 +30,7 @@ const browserTransport: RemoteDaemonTransport = {
         token: context.token,
         runtimeId: context.runtimeId,
         clientLabel: context.clientLabel,
+        requestId: context.requestId,
       }),
     };
   },
