@@ -11,36 +11,84 @@ const fs: typeof nodeFs = process.versions.electron
   : nodeFs;
 
 /**
- * What the recovery snapshot holds. A git checkout (Pane's sample clone in
- * projects/, or any repository kept in its data folder) is not Pane state:
- * no update migrates it, and walking one with node_modules took minutes.
+ * Top-level folders of Pane data that hold Pane's own state. The recovery
+ * snapshot copies these and every top-level file (config, databases, journals).
  */
+export const PANE_STATE_FOLDERS = [
+  'agent-chat', 'artifacts', 'images', 'logs', 'mcp', 'migrate-to-pane', 'notes',
+  'prompts', 'remote-daemon', 'sessions', 'skills', 'uploads',
+] as const;
+
+/** Top-level folders Pane writes that the snapshot leaves out. */
+export const PANE_UNSNAPSHOTTED_FOLDERS = [
+  // Rebuilt by Pane at startup or on demand.
+  '.claude', '.codex', '.cursor', 'agent-adapters', 'bin', 'shell', 'tools',
+  // Live IPC endpoints, and the update operations themselves.
+  'sockets', 'updates',
+  // Repositories Pane clones for the person; no update migrates them.
+  'projects',
+] as const;
+
+const stateFolders = new Set<string>(PANE_STATE_FOLDERS);
+const knownFolders = new Set<string>([...PANE_STATE_FOLDERS, ...PANE_UNSNAPSHOTTED_FOLDERS]);
+
+/** .git is a folder in a clone and a file in a worktree. */
+function isCheckout(directory: string): boolean {
+  return fs.existsSync(path.join(directory, '.git'));
+}
+
 function inUpdateSnapshot(file: string): boolean {
   if (path.basename(file).startsWith('Singleton')) return false;
   const stat = fs.lstatSync(file);
   if (stat.isSocket()) return false;
-  // .git is a folder in a clone and a file in a worktree.
-  return !stat.isDirectory() || !fs.existsSync(path.join(file, '.git'));
+  return !stat.isDirectory() || !isCheckout(file);
 }
 
-/** Copy `source` into `target`, keeping what inUpdateSnapshot keeps; `excludeUpdates` skips the operations folder of Pane data. */
-export function copyUpdateSnapshot(source: string, target: string, excludeUpdates: boolean): void {
+/**
+ * What the snapshot takes from `source`. Pane data keeps only top-level files
+ * and Pane's state folders: anything else there (a repository, someone's
+ * backups) is not Pane's, and opening every file of it kept preflight silent
+ * for minutes behind antivirus scans. The Electron profile is copied whole.
+ */
+function snapshotEntries(source: string, paneData: boolean): string[] {
+  return fs.readdirSync(source).map(entry => path.join(source, entry)).filter(file =>
+    inUpdateSnapshot(file) && (!paneData || !fs.lstatSync(file).isDirectory() || stateFolders.has(path.basename(file))));
+}
+
+/** Folders in Pane data the snapshot skips that Pane does not know, and repositories inside its state folders. */
+export function updateSnapshotSkips(paneDir: string): string[] {
+  const skipped: string[] = [];
+  const findCheckouts = (directory: string) => {
+    for (const entry of fs.readdirSync(directory)) {
+      const file = path.join(directory, entry);
+      if (!fs.lstatSync(file).isDirectory()) continue;
+      if (isCheckout(file)) skipped.push(file);
+      else findCheckouts(file);
+    }
+  };
+  for (const entry of fs.readdirSync(paneDir)) {
+    const file = path.join(paneDir, entry);
+    if (!fs.lstatSync(file).isDirectory()) continue;
+    if (!knownFolders.has(entry)) skipped.push(file);
+    else if (stateFolders.has(entry)) findCheckouts(file);
+  }
+  return skipped;
+}
+
+/** Copy the snapshot of `source` into `target`; `paneData` selects Pane data's rule over the profile's. */
+export function copyUpdateSnapshot(source: string, target: string, paneData: boolean): void {
   fs.mkdirSync(target, { recursive: true, mode: 0o700 });
-  for (const entry of fs.readdirSync(source)) {
-    if (excludeUpdates && entry === 'updates') continue;
-    fs.cpSync(path.join(source, entry), path.join(target, entry), { recursive: true, verbatimSymlinks: true, filter: inUpdateSnapshot });
+  for (const file of snapshotEntries(source, paneData)) {
+    fs.cpSync(file, path.join(target, path.basename(file)), { recursive: true, verbatimSymlinks: true, filter: inUpdateSnapshot });
   }
 }
 
 /** Live Chromium files may be exclusively locked until clean shutdown on Windows. */
-function updateSnapshotBytes(source: string, excludeUpdates = false, liveProfile = false): number {
+function filesBytes(files: string[], liveProfile: boolean): number {
   let total = 0;
-  for (const entry of fs.readdirSync(source)) {
-    if (excludeUpdates && entry === 'updates') continue;
-    const file = path.join(source, entry);
-    if (!inUpdateSnapshot(file)) continue;
+  for (const file of files) {
     const stat = fs.lstatSync(file);
-    if (stat.isDirectory()) total += updateSnapshotBytes(file, false, liveProfile);
+    if (stat.isDirectory()) total += filesBytes(fs.readdirSync(file).map(entry => path.join(file, entry)).filter(inUpdateSnapshot), liveProfile);
     else if (stat.isSymbolicLink()) { fs.readlinkSync(file); total += stat.size; }
     else if (stat.isFile()) {
       try { const fd = fs.openSync(file, 'r'); fs.closeSync(fd); }
@@ -55,10 +103,12 @@ function updateSnapshotBytes(source: string, excludeUpdates = false, liveProfile
   return total;
 }
 
+const snapshotSize = (source: string, paneData: boolean, liveProfile = false) => filesBytes(snapshotEntries(source, paneData), liveProfile);
+
 export function assertUpdateCapacity(paneDir: string, host: { paneDir: string; userData: string } | null, install: string, cliPrefix?: string): void {
   const GiB = 1024 ** 3;
-  const installBytes = host ? (fs.statSync(install).isDirectory() ? updateSnapshotBytes(install) : fs.statSync(install).size) : 0;
-  const snapshotBytes = host ? updateSnapshotBytes(host.paneDir, true) + updateSnapshotBytes(host.userData, false, true) : 0;
+  const installBytes = host ? (fs.statSync(install).isDirectory() ? snapshotSize(install, false) : fs.statSync(install).size) : 0;
+  const snapshotBytes = host ? snapshotSize(host.paneDir, true) + snapshotSize(host.userData, false, true) : 0;
   const requirements = [
     { directory: paneDir, bytes: snapshotBytes * 1.2 + (host ? installBytes * 3 : 0) + 2 * GiB },
     ...(host ? [{ directory: path.dirname(install), bytes: installBytes * 2 }] : []),

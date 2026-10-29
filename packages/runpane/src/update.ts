@@ -22,6 +22,7 @@ const preflightSchema = boundary.object({
   cli: boundary.nullable(boundary.object({ owner: boundary.enumeration('managed', 'npm', 'pip'), entrypoint: boundary.nonEmptyString, version: boundary.nonEmptyString, prefix: boundary.nonEmptyString, packageManager: boundary.optional(boundary.nonEmptyString), pipUser: boundary.optional(boundary.boolean) })),
   disableOsIntegration: boundary.optional(boundary.boolean),
   npmSource: boundary.optional(boundary.nonEmptyString),
+  snapshotSkipped: boundary.optional(boundary.array(boundary.string)),
   runtimeSource: boundary.nonEmptyString, lockDirectory: boundary.nonEmptyString, additionalLockDirectories: boundary.array(boundary.nonEmptyString),
   limitations: boundary.array(boundary.string),
 });
