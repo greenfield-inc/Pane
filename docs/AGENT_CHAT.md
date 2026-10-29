@@ -108,8 +108,11 @@ generation and request ID; the first accepted answer wins across viewers.
 Cancellation withdraws pending requests. Remote clients resend a send whose
 response was lost with the same operation ID, which the host de-duplicates,
 for up to five minutes. After that the operation ID stays for **Check delivery**
-or an explicit **Retry same delivery**. Safe reads also retry automatically;
-answers and configuration changes do not.
+or an explicit **Retry same delivery**. Safe reads also retry automatically.
+When the host runs each request ID once (`deduplicatesRequestIds` in its
+`ready` event), permission answers and configuration changes are also resent
+with the same request ID through a dropped connection for up to five minutes.
+Against an older host they are sent once.
 
 ## Display and controls
 
