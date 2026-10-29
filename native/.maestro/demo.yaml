@@ -1,0 +1,138 @@
+# "Try a demo" from a fresh install: answer a question, use a terminal, visit
+# every screen, then exit. Needs no host: the demo runs inside the app.
+appId: com.dcouple.pane.mobile
+name: Try the demo
+---
+- runFlow: subflows/demo.yaml
+- assertVisible:
+    id: demo-badge
+- assertNotVisible: "Allow.*Notifications.*"
+
+# A waiting question: pick a choice; it leaves the list once the agent has it.
+- tapOn: "add-dark-mode.*Which colors.*"
+- extendedWaitUntil:
+    visible:
+      id: notify-sheet
+    timeout: 10000
+- tapOn:
+    id: notify-choice-0
+- assertVisible:
+    id: notify-sent
+- extendedWaitUntil:
+    notVisible: "add-dark-mode.*Which colors.*"
+    timeout: 15000
+
+# A live terminal: the agent streams, and what you send shows up.
+- waitForAnimationToEnd
+- tapOn:
+    id: "pane-row-demo-fix-checkout-race"
+    index: 0
+- extendedWaitUntil:
+    visible:
+      id: terminal-screen
+      text: "(?s).*lock the cart row.*"
+    timeout: 20000
+- extendedWaitUntil:
+    visible:
+      id: terminal-screen
+      text: "(?s).*18 passed.*"
+    timeout: 15000
+# The shell tab's screen is short enough to read back in full (long screens
+# are cut in the accessibility tree).
+- tapOn: "Terminal"
+- tapOn:
+    id: terminal-input
+- inputText: "pnpm build"
+- tapOn:
+    id: terminal-send
+- tapOn:
+    id: terminal-screen
+- extendedWaitUntil:
+    visible:
+      id: terminal-screen
+      text: "(?s).*pnpm build.*sample shell, nothing runs.*"
+    timeout: 15000
+- tapOn:
+    id: terminal-shortcuts
+- tapOn:
+    id: shortcut-demo-s1
+- extendedWaitUntil:
+    notVisible:
+      id: shortcuts-sheet
+    timeout: 5000
+- tapOn:
+    id: terminal-back
+
+# Every other screen renders with sample data.
+- tapOn:
+    id: "session-row-.*"
+    index: 0
+- extendedWaitUntil:
+    visible:
+      id: terminal-screen
+      text: "(?s).*Two decisions are yours.*"
+    timeout: 20000
+- tapOn:
+    id: terminal-back
+- tapOn: "New Pane"
+- extendedWaitUntil:
+    visible:
+      id: new-pane-sheet
+    timeout: 10000
+- scrollUntilVisible:
+    element:
+      id: new-pane-create
+    timeout: 10000
+- tapOn:
+    id: new-pane-create
+- extendedWaitUntil:
+    visible:
+      id: terminal-screen
+      text: "(?s).*Starting claude.*"
+    timeout: 20000
+- tapOn:
+    id: terminal-back
+- scrollUntilVisible:
+    element:
+      id: "pane-row-demo-new-.*"
+    timeout: 10000
+- tapOn:
+    id: open-settings
+- assertVisible:
+    id: settings-exit-demo
+- scrollUntilVisible:
+    element:
+      id: settings-privacy
+    timeout: 10000
+- tapOn:
+    id: settings-computers
+- extendedWaitUntil:
+    visible: "travel-laptop.*"
+    timeout: 10000
+- assertVisible: "build-box.*"
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - swipe:
+          start: 5%, 50%
+          end: 90%, 50%
+          duration: 400
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - back
+- scrollUntilVisible:
+    element:
+      id: settings-exit-demo
+    direction: UP
+    timeout: 10000
+
+# Exit returns to the connect screen.
+- tapOn:
+    id: settings-exit-demo
+- extendedWaitUntil:
+    visible:
+      id: connect-try-demo
+    timeout: 10000

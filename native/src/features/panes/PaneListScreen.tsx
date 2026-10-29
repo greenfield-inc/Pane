@@ -6,6 +6,7 @@ import Animated, { cancelAnimation, Easing, useAnimatedStyle, useSharedValue, wi
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useDaemon } from '@/daemon';
+import { DemoBadge } from '@/features/demo/DemoBadge';
 import { ConnectionStatus } from '@/features/hosts/ConnectionStatus';
 import { useNotifyShared } from '@/features/notify/hooks';
 import { waitingQuestions } from '@/features/notify/notifyQuestions';
@@ -192,6 +193,7 @@ export function PaneListScreen() {
           <Text variant="headline" accessibilityRole="header" numberOfLines={1} style={styles.brandTitle}>Remote Pane</Text>
         </View>
         <ConnectionStatus updateIntent={connection.updateIntent} status={connection.status} onRetry={() => client.retryNow()} />
+        <DemoBadge />
         <View style={styles.headerActions}>
           <IconButton label="Refresh remote sessions" testID="panes-refresh" onPress={() => void refresh()}>
             <RefreshIcon spinning={loading || refreshing} />

@@ -238,8 +238,10 @@ class ScriptedSource implements PaneSource {
   /** Calls that change something on a computer, in order. */
   calls: string[] = [];
   async panes(): Promise<PaneRow[]> { return this.rows; }
-  async screen(): Promise<TerminalScreen> { return { lines: [], status: this.screenStatus, agent: 'shell' }; }
-  async scrollback() { return []; }
+  screenLines: string[] = [];
+  savedOutput: string[] = [];
+  async screen(): Promise<TerminalScreen> { return { lines: this.screenLines, status: this.screenStatus, agent: 'shell' }; }
+  async scrollback() { return this.savedOutput; }
   async markViewed(_computerId: string, paneId: string) {
     this.calls.push(`viewed ${paneId}`);
   }
@@ -309,6 +311,83 @@ describe('opening and leaving a Pane, as the Pane apps do', () => {
     const { source, press } = await openScriptedRow([session], 0, 'idle');
     await press({ type: 'double' });
     expect(source.calls).toEqual([]);
+  });
+});
+
+describe('an agent terminal', () => {
+  const inputBox = ['─'.repeat(90), '> ', '─'.repeat(90), '  Opus 5.5 / medium | ctx 27% | $10.62', '  bypass permissions on · 2 shells'];
+  const output = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, index) => `out ${from + index}`);
+
+  async function openAgent() {
+    const scripted = startScripted();
+    scripted.source.screenLines = [...output(21, 30), ...inputBox];
+    scripted.source.savedOutput = [...output(1, 30), ...inputBox];
+    scripted.source.rows = [paneRow('fix-login')];
+    scripted.source.changed();
+    await scripted.press({ type: 'press' });
+    await scripted.press({ type: 'select', index: 0 });
+    await scripted.press({ type: 'select', index: 0 });
+    return scripted;
+  }
+
+  it('shows the output without the input box, and the whole screen after a press', async () => {
+    const { text, press } = await openAgent();
+    expect(text()[1]).toBe(output(23, 30).join(' / '));
+    await press({ type: 'press' });
+    expect(text()[0]).toBe('fix-login · shell · idle · full screen');
+    expect(text()[1]).toContain('bypass permissions on');
+    await press({ type: 'press' });
+    expect(text()[1]).toBe(output(23, 30).join(' / '));
+  });
+
+  it("pages up through saved output, holds still while the screen changes, and goes live on press", async () => {
+    const { text, press, source, clock } = await openAgent();
+    await press({ type: 'up' });
+    expect(text()[0]).toBe('fix-login · scrolled up 7 lines · press = live');
+    expect(text()[1]).toBe(output(16, 23).join(' / '));
+    await press({ type: 'up' });
+    expect(text()[1]).toBe(output(9, 16).join(' / '));
+
+    source.screenLines = [...output(31, 40), ...inputBox];
+    await clock.advance(3_000);
+    expect(text()[1]).toBe(output(9, 16).join(' / '));
+
+    await press({ type: 'press' });
+    expect(text()[0]).toBe('fix-login · shell · idle');
+    expect(text()[1]).toBe(output(33, 40).join(' / '));
+  });
+});
+
+describe('going back keeps your place', () => {
+  it('opens the computer and Pane lists on the rows you picked, with the rows above after the top divider', async () => {
+    const { source, text, press } = startScripted();
+    source.computerList = [
+      { id: 'studio', name: 'studio-mac', status: 'live', lastSeenAt: 1, paneCount: 4, workingCount: 0 },
+      { id: 'devbox', name: 'devbox', status: 'live', lastSeenAt: 1, paneCount: 4, workingCount: 0 },
+    ];
+    source.rows = ['a', 'b', 'c', 'd'].map(paneRow);
+    source.changed();
+    await press({ type: 'press' });
+    await press({ type: 'select', index: 1 });
+    await press({ type: 'select', index: 2 });
+    expect(text()[0]).toBe('c · shell · idle');
+
+    await press({ type: 'double' });
+    expect(text()[1]).toBe('c · Claude · stopped | d · Claude · stopped | · top of the list · | a · Claude · stopped | b · Claude · stopped');
+    await press({ type: 'select', index: 3 });
+    expect(text()[0]).toBe('a · shell · idle');
+    await press({ type: 'double' });
+    expect(text()[1]).toMatch(/^a · Claude/);
+
+    await press({ type: 'double' });
+    expect(text()[1]).toBe('devbox · 4 Panes · idle | · top of the list · | studio-mac · 4 Panes · idle');
+  });
+
+  it('starts on the next row when the Pane you left was archived', async () => {
+    const { source, text, press } = await openScriptedRow(['a', 'b', 'c', 'd'].map(paneRow), 2);
+    source.rows = ['a', 'b', 'd'].map(paneRow);
+    await press({ type: 'double' });
+    expect(text()[1]).toBe('d · Claude · stopped | · top of the list · | a · Claude · stopped | b · Claude · stopped');
   });
 });
 
