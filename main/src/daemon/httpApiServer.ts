@@ -45,6 +45,7 @@ import { toPaneDaemonError } from '../../../shared/paneError';
 import type { VoiceStreamErrorCode } from '../../../shared/voice/deepgramLive';
 import { voiceKeyProblem } from '../../../shared/voice/voiceKeys';
 import { streamWorktreePreview } from '../services/mediaStream';
+import { RecentWrites, type InvokeAnswer } from './recentWrites';
 
 interface RemoteHttpAddress {
   host: string;
@@ -57,6 +58,7 @@ const remoteInvokeRequestSchema: BoundarySchema<RemoteInvokeRequest> = boundary.
   token: boundary.optional(boundary.string),
   runtimeId: boundary.optional(boundary.string),
   clientLabel: boundary.optional(boundary.string),
+  requestId: boundary.optional(boundary.refine(boundary.string, (id) => id.length > 0 && id.length <= 128, 'expected a request id of 1 to 128 characters')),
 });
 
 interface ConnectedRemoteEventClient {
@@ -127,6 +129,8 @@ interface RemoteReadyEventPayload {
   timestamp: string;
   /** This host's Pane version, for the client's version check. Hosts before it omit it. */
   paneVersion?: string;
+  /** A write repeated with the same `requestId` runs once and gets the first answer, so clients may resend. Hosts before it omit it. */
+  deduplicatesRequestIds: true;
 }
 
 interface RemoteHealthPayload {
@@ -277,6 +281,7 @@ export class PaneRemoteHttpApiServer {
   private admittedSocketCheckTimer: NodeJS.Timeout | null = null;
   private readonly eventClients = new Map<string, ConnectedRemoteEventClient>();
   private readonly deviceLabelsByRuntime = new Map<string, string>();
+  private readonly recentWrites = new RecentWrites();
   private readonly daemonEventSink: PaneEventSink;
   private address: RemoteHttpAddress | null = null;
   private nextClientConnectionId = 1;
@@ -823,33 +828,25 @@ export class PaneRemoteHttpApiServer {
       }
     }
 
-    await this.respondToInvoke(request, response, () => this.commandRegistry.invokeRemote(
+    const login = getSingleHeaderValue(request.headers['tailscale-user-login'])?.trim().toLowerCase();
+    await this.respondToInvoke(request, response, invokeRequest.requestId, auth.client?.id ?? (login ? `login:${login}` : 'open'), () => this.commandRegistry.invokeRemote(
       invokeRequest.channel,
       this.getInvokeArgsForRequest(invokeRequest, auth, request),
     ));
   }
 
-  private async respondToInvoke(request: IncomingMessage, response: ServerResponse, run: () => ReturnType<PaneCommandRegistry['invokeRemote']>): Promise<void> {
-    try {
-      const result = await run();
-      this.writeJson(response, 200, {
-        ok: true,
-        result,
-      } satisfies RemoteInvokeSuccessPayload, request);
-    } catch (error) {
-      if (error instanceof RemoteDaemonBadRequestError) {
-        this.writeJson(response, error.statusCode, {
-          ok: false,
-          error: { message: error.message, code: error.code },
-        } satisfies RemoteInvokeErrorPayload);
-        return;
-      }
-      const failure = toPaneDaemonError(error, 'ERR_REMOTE_DAEMON_REQUEST_FAILED');
-      this.writeJson(response, failure.code === 'ERR_UNKNOWN_CHANNEL' ? 404 : 500, {
-        ok: false,
-        error: failure,
-      } satisfies RemoteInvokeErrorPayload);
-    }
+  /** Answers a write; one carrying a `requestId` runs once per client and id, and a repeat gets the first answer. */
+  private async respondToInvoke(
+    request: IncomingMessage,
+    response: ServerResponse,
+    requestId: string | undefined,
+    client: string,
+    run: () => ReturnType<PaneCommandRegistry['invokeRemote']>,
+  ): Promise<void> {
+    const answer = requestId
+      ? await this.recentWrites.answer(client, requestId, () => answerInvoke(run))
+      : (await answerInvoke(run)).answer;
+    this.writeJson(response, answer.statusCode, answer.payload, request);
   }
 
   /** File previews for remote desktops; Range passes through so media can seek. */
@@ -941,6 +938,7 @@ export class PaneRemoteHttpApiServer {
       replay: 'none',
       resync: 'refetch-state-after-reconnect',
       timestamp: new Date().toISOString(),
+      deduplicatesRequestIds: true,
     };
     if (this.paneVersion) ready.paneVersion = this.paneVersion;
     writeSseEvent(stream, 'ready', ready);
@@ -1179,7 +1177,7 @@ export class PaneRemoteHttpApiServer {
       }
       args = [key];
     }
-    await this.respondToInvoke(request, response, () => this.commandRegistry.invokeRemote(channel, args));
+    await this.respondToInvoke(request, response, invokeRequest.requestId, client.id, () => this.commandRegistry.invokeRemote(channel, args));
   }
 
   private authenticateRequest(request: IncomingMessage, token?: string | null): RemoteRequestAuthResult {
@@ -1553,6 +1551,26 @@ function withCorsHeaders(headers: http.OutgoingHttpHeaders = {}): http.OutgoingH
     ...REMOTE_DAEMON_CORS_HEADERS,
     ...headers,
   };
+}
+
+/** Runs one invoke. Refusals made before the command ran are not kept, so a resend after them runs. */
+async function answerInvoke(run: () => ReturnType<PaneCommandRegistry['invokeRemote']>): Promise<{ answer: InvokeAnswer; keep: boolean }> {
+  try {
+    const result = await run();
+    return { answer: { statusCode: 200, payload: { ok: true, result } satisfies RemoteInvokeSuccessPayload }, keep: true };
+  } catch (error) {
+    if (error instanceof RemoteDaemonBadRequestError) {
+      return {
+        answer: { statusCode: error.statusCode, payload: { ok: false, error: { message: error.message, code: error.code } } satisfies RemoteInvokeErrorPayload },
+        keep: false,
+      };
+    }
+    const failure = toPaneDaemonError(error, 'ERR_REMOTE_DAEMON_REQUEST_FAILED');
+    return {
+      answer: { statusCode: failure.code === 'ERR_UNKNOWN_CHANNEL' ? 404 : 500, payload: { ok: false, error: failure } satisfies RemoteInvokeErrorPayload },
+      keep: failure.code !== 'ERR_UNKNOWN_CHANNEL' && failure.code !== 'ERR_UPDATE_QUIESCING',
+    };
+  }
 }
 
 function writeSseEvent(

@@ -413,6 +413,11 @@ export interface RemoteInvokeRequest {
   token?: string;
   runtimeId?: string;
   clientLabel?: string;
+  /**
+   * Chosen by the client, unique per install. A host that sends `deduplicatesRequestIds` in its
+   * ready event runs a write once per id and answers a repeat with the first answer.
+   */
+  requestId?: string;
 }
 
 export interface RemoteDaemonHeartbeatPayload {
