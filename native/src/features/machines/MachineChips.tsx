@@ -48,6 +48,7 @@ function MachineChip({ machine, connecting, onPress }: { machine: Machine; conne
   const theme = useTheme();
   const filled = machine.current;
   const inactive = !machine.selectable && !machine.current;
+  const openDetails = () => router.push({ pathname: '/machine/[key]', params: { key: machine.key } });
   return (
     <Pressable
       testID={`machine-chip-${machine.name}`}
@@ -56,7 +57,9 @@ function MachineChip({ machine, connecting, onPress }: { machine: Machine; conne
       accessibilityHint={machine.current ? undefined : machine.profile ? 'Switches to this machine' : 'Connects to this machine'}
       accessibilityState={{ selected: filled, disabled: inactive, busy: connecting }}
       onPress={onPress}
-      onLongPress={() => router.push({ pathname: '/machine/[key]', params: { key: machine.key } })}
+      onLongPress={openDetails}
+      accessibilityActions={[{ name: 'details', label: 'Machine details' }]}
+      onAccessibilityAction={event => { if (event.nativeEvent.actionName === 'details') openDetails(); }}
       style={({ pressed }) => [
         styles.chip,
         { backgroundColor: filled ? theme.colors.text : pressed ? theme.colors.surfacePressed : theme.colors.surfaceRaised, opacity: inactive ? 0.4 : 1 },

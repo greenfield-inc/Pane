@@ -41,7 +41,9 @@ export default function SettingsScreen() {
             subtitle={connecting === machine.tailnet?.name ? 'Connecting…' : machine.status}
             leading={<MachineMark os={machine.os} slot={machine.slot} state={machine.state} variant="tile" size={30} />}
             onPress={machine.selectable ? () => select(machine) : undefined}
-            onLongPress={() => router.push({ pathname: '/machine/[key]', params: { key: machine.key } })}
+            onLongPress={() => openDetails(machine)}
+            accessibilityActions={[{ name: 'details', label: 'Machine details' }]}
+            onAccessibilityAction={event => { if (event.nativeEvent.actionName === 'details') openDetails(machine); }}
             trailing={<DetailsButton machine={machine} />}
           />
         ))}
@@ -92,7 +94,7 @@ function HeroCard({ machine }: { machine: Machine }) {
         accessibilityRole="button"
         accessibilityLabel={`${machine.name}, ${machine.os ?? 'Computer'}, ${machine.status}`}
         accessibilityHint="Opens machine details"
-        onPress={() => router.push({ pathname: '/machine/[key]', params: { key: machine.key } })}
+        onPress={() => openDetails(machine)}
         style={({ pressed }) => [styles.hero, {
           borderRadius: theme.radius.hero,
           borderColor: theme.colors.cardBorder,
@@ -113,6 +115,10 @@ function HeroCard({ machine }: { machine: Machine }) {
   );
 }
 
+function openDetails(machine: Machine) {
+  router.push({ pathname: '/machine/[key]', params: { key: machine.key } });
+}
+
 function DetailsButton({ machine }: { machine: Machine }) {
   const theme = useTheme();
   return (
@@ -121,7 +127,7 @@ function DetailsButton({ machine }: { machine: Machine }) {
       accessibilityRole="button"
       accessibilityLabel={`${machine.name} details`}
       hitSlop={10}
-      onPress={() => router.push({ pathname: '/machine/[key]', params: { key: machine.key } })}
+      onPress={() => openDetails(machine)}
     >
       <Icon ios="info.circle" android="info" size={20} color={theme.colors.accentText} />
     </Pressable>

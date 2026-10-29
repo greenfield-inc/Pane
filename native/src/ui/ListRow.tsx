@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Platform, Pressable, StyleSheet, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, View, type AccessibilityActionInfo, type AccessibilityActionEvent } from 'react-native';
 
 import { useTheme } from '@/theme';
 
@@ -20,11 +20,17 @@ export interface ListRowProps {
   destructive?: boolean;
   /** An action row such as "Add a machine": the title in the accent color. */
   accent?: boolean;
+  /**
+   * Extra screen reader actions. A control in `trailing` sits inside the row's focus target, so
+   * VoiceOver and TalkBack reach it only through an action here.
+   */
+  accessibilityActions?: AccessibilityActionInfo[];
+  onAccessibilityAction?: (event: AccessibilityActionEvent) => void;
   testID?: string;
 }
 
 /** One row of a grouped card (ListSection). */
-export function ListRow({ title, subtitle, leading, value, trailing, onPress, onLongPress, destructive, accent, testID }: ListRowProps) {
+export function ListRow({ title, subtitle, leading, value, trailing, onPress, onLongPress, destructive, accent, accessibilityActions, onAccessibilityAction, testID }: ListRowProps) {
   const theme = useTheme();
   return (
     <Pressable
@@ -35,6 +41,8 @@ export function ListRow({ title, subtitle, leading, value, trailing, onPress, on
       accessibilityRole={onPress ? 'button' : undefined}
       // Explicit, so icon symbol names don't leak into the merged label.
       accessibilityLabel={[title, value, subtitle].filter(Boolean).join(', ')}
+      accessibilityActions={accessibilityActions}
+      onAccessibilityAction={onAccessibilityAction}
       onPress={onPress}
       onLongPress={onLongPress}
       disabled={!onPress && !onLongPress}
