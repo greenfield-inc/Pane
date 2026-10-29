@@ -2,6 +2,7 @@
 // Each returns a page of boxes at G2 scale; nothing here touches the bridge.
 import { BRIGHT, DIM, DIMMER, LIST_PAD, type Box, type Brightness, type ListBox, type Page, type TextBox } from './display';
 import type { Card, Computer, HostRefusal, PaneEntry, PaneRow } from './model';
+import { isRule } from './terminal';
 import { LINE_H, SCREEN_H, SCREEN_W, fitLine, wrap, wrapClamped } from './text';
 
 const BAR_H = 32;
@@ -224,11 +225,29 @@ function computerRow(computer: Computer, clock: (epochMs: number) => string): st
   return `${computer.name} · offline${since} · press to retry`;
 }
 
-export function computersPage(computers: readonly Computer[], clock: (epochMs: number) => string): Page {
+/** Where a list that starts mid-way wraps back to its first row. */
+const LIST_TOP = '· top of the list ·';
+
+/**
+ * The rows of a list in the order shown: from `start` to the end, the divider (null), then the
+ * rows above `start`. A native list always opens on its first row, so this is how a list comes
+ * back on the row you left. Press on shown row i acts on rows[order[i]].
+ */
+export function rowOrder(count: number, start: number): Array<number | null> {
+  const all = Array.from({ length: count }, (_, index) => index);
+  if (start <= 0 || start >= count) return all;
+  return [...all.slice(start), null, ...all.slice(0, start)];
+}
+
+export function computersPage(computers: readonly Computer[], clock: (epochMs: number) => string, start = 0): Page {
+  const rows = rowOrder(computers.length, start).map((index) => {
+    const computer = index === null ? undefined : computers[index];
+    return computer ? computerRow(computer, clock) : LIST_TOP;
+  });
   return {
     boxes: [
       header('Open a Pane · pick a computer'),
-      list('computers', BAR_H, SCREEN_H - BAR_H, computers.map((computer) => computerRow(computer, clock))),
+      list('computers', BAR_H, SCREEN_H - BAR_H, rows),
     ],
   };
 }
@@ -242,7 +261,7 @@ function paneRowText(row: PaneRow): string {
   }
 }
 
-export function panesPage(computerName: string, rows: readonly PaneRow[]): Page {
+export function panesPage(computerName: string, rows: readonly PaneRow[], start = 0): Page {
   if (!rows.length) {
     return {
       boxes: [
@@ -254,16 +273,21 @@ export function panesPage(computerName: string, rows: readonly PaneRow[]): Page 
   return {
     boxes: [
       header(`${computerName} · Sessions and Panes`),
-      list('panes', BAR_H, SCREEN_H - BAR_H, rows.map(paneRowText)),
+      list('panes', BAR_H, SCREEN_H - BAR_H, rowOrder(rows.length, start).map((index) => {
+        const row = index === null ? undefined : rows[index];
+        return row ? paneRowText(row) : LIST_TOP;
+      })),
     ],
   };
 }
 
 export const TERMINAL_LINES = linesFor(FOOTER_Y - BAR_H, BAR_PAD);
 
-/** Rewraps terminal text to the glasses' width, keeping blank lines. */
-export function terminalLines(text: string): string[] {
-  return wrap(text.replace(/\s+$/, ''), innerWidth(BAR_PAD));
+/** Rewraps terminal rows to the glasses' width, keeping blank lines; a rule stays one line. */
+export function terminalLines(rows: readonly string[]): string[] {
+  const lines = rows.flatMap((row) => (isRule(row) ? [fitLine(row.trim(), innerWidth(BAR_PAD))] : wrap(row, innerWidth(BAR_PAD))));
+  while (lines.length && !lines.at(-1)?.trim()) lines.pop();
+  return lines;
 }
 
 /** T3's footer: the newest card from another Pane, bright, or "all clear elsewhere", dimmed. */
@@ -284,6 +308,8 @@ export interface TerminalView {
   lines: readonly string[];
   /** Lines above live; 0 is live. */
   scrolledUp: number;
+  /** The whole screen, input box and status rows included. */
+  full?: boolean;
   footer: FooterLine;
 }
 
@@ -292,7 +318,7 @@ export function terminalPage(view: TerminalView): Page {
   const { entry } = view;
   const title = view.scrolledUp
     ? `${entry.name} · scrolled up ${view.scrolledUp} lines · press = live`
-    : `${entry.name} · ${entry.agent} · ${entry.status}`;
+    : `${entry.name} · ${entry.agent} · ${entry.status}${view.full ? ' · full screen' : ''}`;
   return {
     boxes: [
       header(title),

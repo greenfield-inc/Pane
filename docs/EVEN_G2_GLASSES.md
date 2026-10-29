@@ -43,21 +43,25 @@ computer. Allowing the origin on an older Pane lasts only until the Even app res
 | Gesture | What it does |
 |---|---|
 | Swipe up / down | Move through a list, scroll a terminal, or turn card pages |
-| Press | Open or pick; in a scrolled-up terminal, jump back to live |
+| Press | Open or pick; in a terminal, show the whole screen or the output alone, or jump back to live when scrolled up |
 | Double press | Back; on the home page, exit the app |
 | Hold, then release | Talk, then send at once: an answer on a card, input in a terminal |
 
 - **Home** shows one card per page with a page counter, questions first and then done and info
   cards, newest first. The last page is **Open a Pane…**. With nothing waiting, home is one
   all-clear page.
-- **A card** shows the asking Pane's last terminal lines (dimmed), the question, and the choices.
+- **A card** shows the asking Pane's last output lines (dimmed), the question, and the choices.
   A long question is cut at three lines; the **Read the whole question** row shows all of it.
 - **Open a Pane…** lists your computers (live or offline), then that computer's Sessions and Panes
   in the Pane apps' order: pinned ones first, then Sessions, a blank line, then Panes. Picking one
   shows its live screen, refreshed about once a second, and marks the Pane viewed on that computer,
-  as opening it there does. A stopped Pane starts its saved agent or command. Swipe up for earlier
-  output.
+  as opening it there does. A stopped Pane starts its saved agent or command. The terminal hides an
+  agent's input box and the status rows under it, so you read its output; press to see the whole
+  screen. Swipe up to page through earlier output; the page holds still until you press for live.
   The bottom line names the newest card from another Pane; double press goes to it.
+- **Going back** from a terminal or a computer's list opens the list on the row you picked. Native
+  glasses lists always open on their first row, so the list starts there, runs to the end, then
+  continues from the top after a **· top of the list ·** row.
 - **Dictation** types what you said into the Pane and presses Enter right away. A misheard line
   typed into a shell runs, so check the Pane before you talk into a plain shell.
 

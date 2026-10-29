@@ -137,7 +137,7 @@ export class Display {
   private shown: Shown | null = null;
   private pending: Page | null = null;
   private busy: Promise<void> | null = null;
-  /** When the last write finished; the input router ignores phantom scrolls right after it. */
+  /** When the last write to the glasses finished; the input router ignores phantom scrolls right after it. */
   lastWriteAt = 0;
   onPage: (page: Page) => void = () => {};
 
@@ -162,18 +162,21 @@ export class Display {
     while (this.pending) {
       const page = this.pending;
       this.pending = null;
+      let wrote = true;
       try {
-        await this.write(page);
+        wrote = await this.write(page);
       } catch (error) {
         // The glasses may have dropped the write; send the whole next page.
         this.shown = null;
         console.error('[Pane glasses] display write failed', error);
       }
-      this.lastWriteAt = Date.now();
+      // A page that changed nothing on the glasses can't cause a phantom scroll, so swipes stay live.
+      if (wrote) this.lastWriteAt = Date.now();
     }
   }
 
-  private async write(page: Page): Promise<void> {
+  /** Sends what changed; false when the glasses already show the page. */
+  private async write(page: Page): Promise<boolean> {
     const next = shownOf(page);
     if (!this.created) {
       const result = await this.bridge.createStartUpPageContainer(new CreateStartUpPageContainer(containers(page)));
@@ -181,7 +184,7 @@ export class Display {
       // A second startup call is refused; a failed one leaves later pages to rebuild.
       if (Number(result) !== 0) await this.bridge.rebuildPageContainer(new RebuildPageContainer(containers(page)));
       this.shown = next;
-      return;
+      return true;
     }
     const shown = this.shown;
     const changed = [...next.texts].filter(([name, want]) => {
@@ -194,8 +197,9 @@ export class Display {
     if (!shown || shown.layout !== next.layout || wholeScreen) {
       await this.bridge.rebuildPageContainer(new RebuildPageContainer(containers(page)));
       this.shown = next;
-      return;
+      return true;
     }
+    let wrote = false;
     for (const [index, box] of page.boxes.entries()) {
       if (box.kind !== 'text') continue;
       const want = next.texts.get(box.name);
@@ -208,6 +212,8 @@ export class Display {
         textColor: want.brightness,
       }));
       shown.texts.set(box.name, want);
+      wrote = true;
     }
+    return wrote;
   }
 }
