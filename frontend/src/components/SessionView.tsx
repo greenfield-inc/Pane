@@ -1709,28 +1709,7 @@ export const SessionView = memo(() => {
         ? 'Session is currently running'
         : undefined;
     
-    return activeSession.isMainRepo ? [
-      {
-        id: 'pull',
-        label: 'Pull from Remote',
-        icon: Download,
-        onClick: hook.handleGitPull,
-        disabled: hook.isMerging || activeSession.status === 'running' || activeSession.status === 'initializing',
-        variant: 'default' as const,
-        description: hook.gitCommands?.getPullCommand ? `git ${hook.gitCommands.getPullCommand()}` : 'git pull',
-        disabledReason: busyReason,
-      },
-      {
-        id: 'push',
-        label: 'Push to Remote', 
-        icon: Upload,
-        onClick: hook.handleGitPush,
-        disabled: hook.isMerging || activeSession.status === 'running' || activeSession.status === 'initializing',
-        variant: 'success' as const,
-        description: hook.gitCommands?.getPushCommand ? `git ${hook.gitCommands.getPushCommand()}` : 'git push',
-        disabledReason: busyReason,
-      }
-    ] : [
+    const actions = [
       // --- Sync ---
       {
         id: 'fetch',
@@ -1819,7 +1798,7 @@ export const SessionView = memo(() => {
           : 'No commits to push',
         disabledReason: busyReason ?? (activeSession.gitStatus?.ahead ? undefined : 'No commits to push'),
       },
-      // --- Main branch operations (last) ---
+      // --- Main branch operations (last); a (Main) Pane is the checkout itself, so it has none ---
       {
         id: 'rebase-from-main',
         label: 'Rebase',
@@ -1846,6 +1825,9 @@ export const SessionView = memo(() => {
         disabledReason: busyReason ?? ((!activeSession.gitStatus?.totalCommits || activeSession.gitStatus?.totalCommits === 0 || activeSession.gitStatus?.ahead === 0) ? 'No commits to merge' : undefined),
       }
     ];
+    return activeSession.isMainRepo
+      ? actions.filter(action => action.id !== 'rebase-from-main' && action.id !== 'rebase-to-main')
+      : actions;
   })();
   
   // Removed unused variables - now handled by panels
@@ -1864,7 +1846,7 @@ export const SessionView = memo(() => {
               Couldn't open this repository's (Main) Pane: {repositoryOpenError}. Nothing was changed. Open the repository again from the sidebar, or create a Pane with "Use worktree" off.
             </p>
           ) : (
-            <div className="text-center">
+            <div role="status" aria-label="Opening repository" className="text-center">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-interactive mx-auto mb-4"></div>
               <p className="text-text-secondary">Opening repository…</p>
             </div>

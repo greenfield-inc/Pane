@@ -702,7 +702,8 @@ export const useSessionView = (
     if (!activeSession) return 'No active session';
     if (isMerging) return 'Git operation already in progress';
     if (isSessionBusy) return 'Session is currently running';
-    if (activeSession.isMainRepo) return 'Only available in worktree panes';
+    // Rebase and merge move work between a worktree and main; a (Main) Pane already is the checkout.
+    if (activeSession.isMainRepo && (command === 'rebase' || command === 'merge')) return 'Only available in worktree panes';
 
     switch (command) {
       case 'commit':
@@ -733,7 +734,7 @@ export const useSessionView = (
       setDialogType('commit');
       setShowCommitMessageDialog(true);
     },
-    enabled: () => !!activeSession && !isMerging && !isSessionBusy && !activeSession.isMainRepo &&
+    enabled: () => !!activeSession && !isMerging && !isSessionBusy &&
       ((activeSession.gitStatus?.hasUncommittedChanges ?? false) || (activeSession.gitStatus?.hasUntrackedFiles ?? false)),
     disabledReason: () => getGitCommandDisabledReason('commit'),
   });
@@ -744,7 +745,7 @@ export const useSessionView = (
     keys: 'mod+shift+u',
     category: 'session',
     action: () => handleGitPush(),
-    enabled: () => !!activeSession && !isMerging && !isSessionBusy && !activeSession.isMainRepo && (activeSession.gitStatus?.ahead ?? 0) > 0,
+    enabled: () => !!activeSession && !isMerging && !isSessionBusy && (activeSession.gitStatus?.ahead ?? 0) > 0,
     disabledReason: () => getGitCommandDisabledReason('push'),
   });
 
@@ -754,7 +755,7 @@ export const useSessionView = (
     keys: 'mod+alt+z',
     category: 'session',
     action: () => handleGitSoftReset(),
-    enabled: () => !!activeSession && !isMerging && !isSessionBusy && !activeSession.isMainRepo && (activeSession.gitStatus?.ahead ?? 0) > 0,
+    enabled: () => !!activeSession && !isMerging && !isSessionBusy && (activeSession.gitStatus?.ahead ?? 0) > 0,
     disabledReason: () => getGitCommandDisabledReason('undo'),
   });
 
@@ -764,7 +765,7 @@ export const useSessionView = (
     keys: 'mod+shift+l',
     category: 'session',
     action: () => handleGitPull(),
-    enabled: () => !!activeSession && !isMerging && !isSessionBusy && !activeSession.isMainRepo,
+    enabled: () => !!activeSession && !isMerging && !isSessionBusy,
     disabledReason: () => getGitCommandDisabledReason('pull'),
   });
 

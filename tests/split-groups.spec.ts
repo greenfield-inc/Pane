@@ -180,13 +180,14 @@ for (const layoutReadFails of [false, true]) {
   });
 }
 
-for (const leaveVia of ['another Pane', 'the repository view'] as const) {
+for (const leaveVia of ['another Pane', 'the (Main) Pane'] as const) {
   test(`pages an agent opens while you are in ${leaveVia} land in the split, keeping the remembered focus`, async ({ page }) => {
     const other = { ...session, id: 'other-session', name: 'Other pane', worktreePath: '/tmp/split-fixture/other-session', displayOrder: 1 };
+    const main = { ...session, id: 'main-pane', name: '(Main) Split fixture', worktreePath: project.path, isMainRepo: true, displayOrder: 2 };
     await installElectronApiMock(page, {
       platform: 'darwin',
       initialProjects: [project],
-      initialSessions: [session, other],
+      initialSessions: [session, other, main],
       initialPanels: panels,
       initialLayout: layout,
       activeProjectId: project.id,
