@@ -111,12 +111,18 @@ async function registerHost(deps: Omit<PushDeps, 'invoke'>, host: PushHost, pref
 /**
  * The phone's first switch values, from what its computers already had: a kind that any computer
  * had off starts off, so adopting phone-wide switches never turns on an alert someone turned off.
+ * `complete` is true only when every computer registered and reported its own values; until then a
+ * computer that couldn't be read may have a kind off, so the values are shown but not sent.
  */
-export function preferencesFrom(results: Record<string, PushSetupResult>): PushPreferences {
-  const statuses = Object.values(results).flatMap(result => (result.state === 'registered' ? [result.status] : []));
+export function preferencesFrom(results: Record<string, PushSetupResult>): { preferences: PushPreferences; complete: boolean } {
+  const all = Object.values(results);
+  const statuses = all.flatMap(result => (result.state === 'registered' ? [result.status] : []));
   return {
-    needsInputEnabled: statuses.every(status => status.needsInputEnabled !== false),
-    completedEnabled: statuses.every(status => status.completedEnabled !== false),
+    preferences: {
+      needsInputEnabled: statuses.every(status => status.needsInputEnabled !== false),
+      completedEnabled: statuses.every(status => status.completedEnabled !== false),
+    },
+    complete: statuses.length > 0 && statuses.length === all.length,
   };
 }
 

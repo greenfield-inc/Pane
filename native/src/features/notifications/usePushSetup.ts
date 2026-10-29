@@ -104,12 +104,13 @@ async function run(): Promise<void> {
 
 /**
  * Shows the switches the computers already had. A phone that never chose them saves that as its
- * own and sends it everywhere; one whose storage failed shows it without saving or sending.
+ * own and sends it everywhere, but only once every saved computer has reported its values; until
+ * then, and when storage failed, the values are only shown, and each computer keeps its own.
  */
 function adoptPreferences(results: Record<string, PushSetupResult>, source: 'absent' | 'unreadable'): void {
   if (!Object.values(results).some(result => result.state === 'registered')) return;
-  const preferences = preferencesFrom(results);
-  if (source === 'unreadable') {
+  const { preferences, complete } = preferencesFrom(results);
+  if (source === 'unreadable' || !complete) {
     usePushStore.setState({ preferences });
     return;
   }

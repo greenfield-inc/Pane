@@ -142,11 +142,17 @@ describe('registerEverywhere', () => {
     ]);
   });
 
-  it('starts the phone\'s switches off for any kind a computer already had off', () => {
-    const off = (needsInputEnabled: boolean, completedEnabled: boolean) => ({ state: 'registered' as const, status: { ...registered, needsInputEnabled, completedEnabled } });
-    expect(preferencesFrom({ mac: off(true, false), pc: off(false, true), down: { state: 'unreachable', message: 'offline' } }))
-      .toEqual({ needsInputEnabled: false, completedEnabled: false });
-    expect(preferencesFrom({ down: { state: 'unreachable', message: 'offline' } })).toEqual({ needsInputEnabled: true, completedEnabled: true });
+  const switches = (needsInputEnabled: boolean, completedEnabled: boolean) => ({ state: 'registered' as const, status: { ...registered, needsInputEnabled, completedEnabled } });
+
+  it('starts the phone\'s switches off for any kind a computer already had off, once every computer has answered', () => {
+    expect(preferencesFrom({ mac: switches(true, false), pc: switches(false, true) }))
+      .toEqual({ preferences: { needsInputEnabled: false, completedEnabled: false }, complete: true });
+  });
+
+  it('keeps the phone\'s switches provisional while a computer that may have them off can\'t be read', () => {
+    expect(preferencesFrom({ mac: switches(true, true), pc: { state: 'unreachable', message: 'offline' } }))
+      .toEqual({ preferences: { needsInputEnabled: true, completedEnabled: true }, complete: false });
+    expect(preferencesFrom({ mac: switches(true, true), pc: { state: 'error', message: 'refused', code: 'ERR_MOBILE_PUSH_PAIRING_REQUIRED' } }).complete).toBe(false);
   });
 
   it('never lands a registration on a computer after signing out of it', async () => {
