@@ -28,7 +28,7 @@ export interface FloatingControllerProps {
 
 /**
  * Controls floating over the terminal's right edge: the scroll joystick on
- * top, a D-pad below with Enter in its center, Esc and Tab to its left. They
+ * top, a D-pad below with Enter in its center, Esc, Tab and ^C to its left. They
  * rest faint so the terminal reads through them. Touching any one makes all
  * of them opaque; 3 s after the last touch they fade back together, on one
  * shared timer.
@@ -58,6 +58,7 @@ export function FloatingController({ onKey, onScroll, layout }: FloatingControll
         <View style={styles.sideKeys}>
           <SideKey label="Esc" data={KEYS.esc} {...key} />
           <SideKey label="Tab" data={KEYS.tab} {...key} />
+          <SideKey id="ctrl-c" label="^C" a11yLabel="Control C" data={KEYS.stop} {...key} />
         </View>
         <View style={styles.pad}>
           <PadKey id="up" label="Up arrow" data={KEYS.up} ios="arrowtriangle.up.fill" android="arrow_drop_up" area={styles.up} {...key} />
@@ -145,9 +146,9 @@ function PadKey({ ios, android, area, center = false, ...key }: KeyHandlers & {
   );
 }
 
-function SideKey({ label, ...key }: KeyHandlers & { label: string; data: string }) {
+function SideKey({ id, label, a11yLabel, ...key }: KeyHandlers & { id?: string; label: string; a11yLabel?: string; data: string }) {
   return (
-    <ControllerKey {...key} id={label.toLowerCase()} label={label} shape={styles.side}>
+    <ControllerKey {...key} id={id ?? label.toLowerCase()} label={a11yLabel ?? label} shape={styles.side}>
       {tint => <Text variant="footnote" style={[styles.sideLabel, { color: tint }]}>{label}</Text>}
     </ControllerKey>
   );
@@ -159,7 +160,8 @@ const styles = StyleSheet.create({
   layer: { ...StyleSheet.absoluteFill },
   joystick: { position: 'absolute', right: 8 },
   cluster: { position: 'absolute', right: 8, flexDirection: 'row', alignItems: 'center', gap: 10 },
-  sideKeys: { gap: 10 },
+  // Three side keys span the D-pad's height exactly.
+  sideKeys: { gap: (PAD - SIDE_KEY * 3) / 2 },
   side: {
     width: SIDE_KEY,
     height: SIDE_KEY,

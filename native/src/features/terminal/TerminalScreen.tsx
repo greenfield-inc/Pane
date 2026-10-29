@@ -2,7 +2,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import * as Clipboard from 'expo-clipboard';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useEffectEvent, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from 'react';
-import { ActivityIndicator, Keyboard, KeyboardAvoidingView, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { ActionSheetIOS, ActivityIndicator, Alert, Keyboard, KeyboardAvoidingView, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { OrchestrationSessionView } from '@shared/types/orchestrationSession';
@@ -22,7 +22,7 @@ import { Dimmed } from '../hosts/ConnectionStatus';
 import { useAffordances } from '../hosts/hostSettings';
 import { useConnectionPresence } from '../hosts/useConnectionPresence';
 import { clearPaneNotifications } from '../notifications/device';
-import { useMarkPaneSeen } from '../panes/hooks';
+import { useAgentStatuses, useMarkPaneSeen } from '../panes/hooks';
 import { ShortcutsSheet } from '../shortcuts/ShortcutsSheet';
 import { AttachSheet } from '../upload/AttachSheet';
 import { UploadReceipts } from '../upload/UploadReceipts';
@@ -68,6 +68,8 @@ export function TerminalScreen({ paneId, session }: { paneId: string; session?: 
   const hostActive = useInvokeQuery<ToolPanel | null>('panels:getActive', [paneId], { enabled: !session });
   const affordances = useAffordances();
   const setActive = useInvokeMutation<[string, string]>('panels:set-active');
+  const deletePanel = useInvokeMutation<[string]>('panels:delete', { invalidates: ['panels:list', 'panels:getActive'] });
+  const statuses = useAgentStatuses();
 
   // Tabs opened, closed or switched on the desktop show up here too.
   useEffect(() => client.onEvent(event => {
@@ -102,12 +104,32 @@ export function TerminalScreen({ paneId, session }: { paneId: string; session?: 
   const voice = useVoiceDictation(composer.insert);
   const uploads = useUploads(paneId, composer.insert);
 
-  // Stop and Clear scrollback sit in the bars above the open terminal, which owns them.
+  // Clear scrollback sits in the bar above the open terminal, which owns it.
   const terminalActions = useRef<TerminalActions | null>(null);
 
   const selectPanel = (next: ToolPanel) => {
     router.setParams({ panelId: next.id });
     setActive.mutate([paneId, next.id]);
+  };
+
+  // A long press on a tab offers Close; a tab whose agent is still at work asks once more.
+  const closePanel = (tab: ToolPanel) => {
+    const close = () => deletePanel.mutate([tab.id], { onError: error => Alert.alert('Couldn’t close the tab', error.message) });
+    const state = statuses.data?.agentStatus[tab.id];
+    const confirm = state === 'working' || state === 'blocked'
+      ? () => Alert.alert(`Close “${tab.title}”?`, 'Its agent is still working. Closing the tab stops it.', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Close', style: 'destructive', onPress: close },
+      ])
+      : close;
+    if (Platform.OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions(
+        { title: tab.title, options: ['Close', 'Cancel'], destructiveButtonIndex: 0, cancelButtonIndex: 1 },
+        index => { if (index === 0) confirm(); },
+      );
+    } else {
+      Alert.alert(tab.title, undefined, [{ text: 'Cancel', style: 'cancel' }, { text: 'Close', style: 'destructive', onPress: confirm }]);
+    }
   };
 
   return (
@@ -122,8 +144,7 @@ export function TerminalScreen({ paneId, session }: { paneId: string; session?: 
         selectedId={panel?.id ?? null}
         onSelect={selectPanel}
         onAdd={() => router.push({ pathname: '/pane/[paneId]/new-panel', params: session ? { paneId, sessionId: session.session.id } : { paneId } })}
-        onStop={terminalActive ? () => terminalActions.current?.stop() : undefined}
-        stopDisabled={presence !== 'connected'}
+        onClose={closePanel}
       />
       {panel ? (
         <AgentConversationSurface key={panel.id} panel={panel} draft={draft} onChangeDraft={setDraft} confirmDraft={composer.confirmDelivery}>
@@ -163,7 +184,6 @@ export function TerminalScreen({ paneId, session }: { paneId: string; session?: 
 }
 
 interface TerminalActions {
-  stop: () => void;
   clearScrollback: () => void;
 }
 
@@ -207,7 +227,6 @@ function TerminalPanel({ panel, actions, draft, onChangeDraft, composer, uploads
   };
   useEffect(() => {
     actions.current = {
-      stop: () => sendKey(KEYS.stop),
       clearScrollback: () => {
         terminal.scrollToBottom();
         void terminal.clearScrollback().catch(() => undefined);

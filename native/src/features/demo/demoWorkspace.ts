@@ -125,6 +125,7 @@ export class DemoWorkspace {
       case 'panels:getActive': return toJson(this.panelsOf(this.pane(first))[0] ?? null);
       case 'panels:set-active': return null;
       case 'panels:create': return toJson(this.createPanel(first as { sessionId: string; title: string }));
+      case 'panels:delete': return this.deletePanel(first);
       case 'panels:checkInitialized': return true;
       case 'panels:initialize': return true;
       case 'terminal:getState': return { scrollbackBuffer: this.panel(first).buffer, isAlternateScreen: false };
@@ -296,10 +297,18 @@ export class DemoWorkspace {
 
   private createPanel(request: { sessionId: string; title: string }): ToolPanel {
     const pane = this.pane(request.sessionId);
-    const panel: DemoPanel = { id: `${pane.id}-tab-${pane.panels.length}`, title: request.title || 'Terminal', state: 'idle', buffer: '\x1b[90m$\x1b[0m ', pending: [], typed: '' };
+    const panel: DemoPanel = { id: `${pane.id}-tab-${Date.now()}`, title: request.title || 'Terminal', state: 'idle', buffer: '\x1b[90m$\x1b[0m ', pending: [], typed: '' };
     pane.panels.push(panel);
     this.emit('panel:created', toJson(this.panelsOf(pane).at(-1) ?? null));
     return this.panelsOf(pane).at(-1) as ToolPanel;
+  }
+
+  private deletePanel(id: unknown): null {
+    const panel = this.panel(id);
+    const pane = this.paneOfPanel(panel);
+    if (pane) pane.panels = pane.panels.filter(candidate => candidate !== panel);
+    this.emit('panel:deleted', { panelId: panel.id, sessionId: pane?.id ?? null });
+    return null;
   }
 
   private write(panel: DemoPanel, output: string): void {
