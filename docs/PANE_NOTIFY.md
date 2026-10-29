@@ -143,16 +143,41 @@ Focus or Do Not Disturb on; Pause is the way to quiet them.
 ## What Pane tells agents
 
 While Notify is on, Pane keeps a short block in each agent's user-level
-instruction file, so every agent knows to ask through `notify`:
+instruction file, so every agent knows Pane is there and asks through `notify`:
 
 - Claude Code: `~/.claude/CLAUDE.md` (or `$CLAUDE_CONFIG_DIR/CLAUDE.md`)
-- Codex: `~/.codex/AGENTS.md` (or `$CODEX_HOME/AGENTS.md`)
+- Codex: `~/.codex/AGENTS.md` (or `$CODEX_HOME/AGENTS.md`). Agent Farm's
+  Codex launches use a generated `CODEX_HOME` that links this file, so they
+  read it too.
+- On Windows, the same two files in the home of each WSL distro a project
+  runs in (`CLAUDE_CONFIG_DIR` and `CODEX_HOME` as that distro's login shell
+  sets them). Pane writes them at launch and when you change the settings
+  below; a distro that doesn't answer is shown as skipped and tried again at
+  the next launch.
 
 The block sits between `<!-- pane-notify:begin ... -->` and
-`<!-- pane-notify:end -->`. It says when to ask (only what the agent can't
-find out itself, related questions in one card, `info` rarely) and how to
-write a card for someone who has lost the thread: what the work is for, what
-just happened, and what is needed. Pane writes only those lines, plus a line
+`<!-- pane-notify:end -->`. Pane writes it at first launch, since Notify is
+on by default. It has two parts:
+
+- **Pane:** when `PANE_SESSION_ID` is set, the agent is in a Pane terminal
+  and should load the `pane` skill before using Pane. With the skill turned
+  off (Settings → AI & Agents → Install Pane skill for agents), it points at
+  `runpane agent-context --json` instead. If `runpane` isn't on `PATH`, the agent runs `$PANE_RUNPANE_BIN`
+  (PowerShell: `& $env:PANE_RUNPANE_BIN`), or else the installed Pane's shim:
+  `~/.pane/bin/runpane` on macOS and Linux,
+  `C:/Users/<you>/.pane/bin/runpane.cmd` on Windows (forward slashes, so
+  PowerShell, cmd and Git Bash all run it), and
+  `/mnt/c/Users/<you>/.pane/bin/runpane` in WSL. The path is always the
+  default data folder's, so a dev build with its own `PANE_DIR` never points
+  your agents at its copy.
+- **Pane Notify:** call the `pane` MCP's `notify`, or `runpane notify` when
+  that tool isn't loaded (for example under Agent Farm's strict MCP mode).
+  It says when to ask (only what the agent can't find out itself, related
+  questions in one card, `info` rarely) and how to write a card for someone
+  who has lost the thread: what the work is for, what just happened, and what
+  is needed.
+
+Pane writes only those lines, plus a line
 break before them when the file didn't end with one; the rest of the file keeps
 every byte. It creates the file only when the agent's config folder exists and
 never deletes it. It leaves alone a file that is a symlink or not a regular

@@ -20,7 +20,8 @@ import {
 import { NotifyQueue } from './notifyQueue';
 import { canFloatOverOtherApps, NotifyWindows } from './notifyWindows';
 import { NotifyTray } from './notifyTray';
-import { syncNotifyInstructions } from './notifyInstructions';
+import { syncNotifyInstructions, syncWslNotifyInstructions } from './notifyInstructions';
+import { isPaneHomeSkillEnabled } from '../paneHomeSkill';
 
 const AGENT_NAMES = new Map([['claude', 'Claude'], ['codex', 'Codex'], ['cursor', 'Cursor'], ['opencode', 'OpenCode']]);
 
@@ -47,6 +48,8 @@ export interface NotifyServiceDependencies {
   showHostPane: (paneId: string, panelId?: string) => void;
   /** Hears each new question once and each one that stops waiting (the phone alert). */
   onQuestion?: (event: { item: NotifyItem; open: boolean }) => void;
+  /** WSL distros Pane runs agents in (its WSL projects'), whose homes get the instructions too. */
+  wslDistros?: () => string[];
 }
 
 /**
@@ -63,11 +66,15 @@ export class NotifyService {
   private lastSettings: NotifySettings;
   private lastAppearance: string;
   private instructionFiles: NotifyInstructionsFile[] = [];
+  private homeSkill: boolean;
+  /** One WSL sync at a time, in the order the settings changed. */
+  private wslSync: Promise<void> = Promise.resolve();
   private lastShared = '';
   private lastStates = new Map<string, NotifyItem['state']>();
 
   constructor(private readonly deps: NotifyServiceDependencies) {
     this.lastSettings = this.settings();
+    this.homeSkill = isPaneHomeSkillEnabled(deps.configManager.getConfig());
     this.lastAppearance = appearanceKey(deps.configManager.getConfig());
     this.queue = new NotifyQueue({
       settings: () => this.settings(),
@@ -98,7 +105,12 @@ export class NotifyService {
     this.queue.on('change', () => this.scheduleBroadcast());
     this.queue.on('chime', () => this.sendToMainWindow('notify:chime'));
     deps.configManager.on('config-updated', (config: AppConfig) => {
-      this.applySettings(notifySettings(config));
+      const homeSkill = isPaneHomeSkillEnabled(config);
+      const homeSkillChanged = homeSkill !== this.homeSkill;
+      this.homeSkill = homeSkill;
+      const instructionsChanged = this.applySettings(notifySettings(config));
+      // The block names the `pane` skill only while it is installed.
+      if (homeSkillChanged && !instructionsChanged && this.lastSettings.enabled) this.syncInstructions(true);
       // The floating windows read the palette when they load, so a new palette recreates them.
       const appearance = appearanceKey(config);
       if (appearance === this.lastAppearance) return;
@@ -257,20 +269,38 @@ export class NotifyService {
     await this.deps.configManager.updateConfig({ notify: update });
   }
 
-  private applySettings(next: NotifySettings): void {
+  /** Returns whether it synced the instruction files. */
+  private applySettings(next: NotifySettings): boolean {
     const previous = this.lastSettings;
     this.lastSettings = next;
     if (previous.enabled && !next.enabled) this.queue.turnOff();
     if (previous.shortcut !== next.shortcut || previous.enabled !== next.enabled) this.applyShortcut(next);
     if (previous.enabled !== next.enabled) this.syncInstructions(next.enabled);
     this.scheduleBroadcast();
+    return previous.enabled !== next.enabled;
   }
 
-  /** Keeps Pane's Notify block in the agents' user-level instruction files while Notify is on. */
+  /**
+   * Keeps Pane's block in the agents' user-level instruction files while Notify is on: this
+   * machine's home now, and on Windows each WSL project's distro home once it answers.
+   */
   private syncInstructions(enabled: boolean): void {
     // PANE_DIR isolates app data, not the person's agent configuration: isolated runtimes leave it alone.
     if (process.env.PANE_DISABLE_OS_INTEGRATION === '1') return;
-    this.instructionFiles = syncNotifyInstructions(enabled);
+    const options = { homeSkill: this.homeSkill };
+    const local = syncNotifyInstructions(enabled, options);
+    this.instructionFiles = local;
+    const distros = process.platform === 'win32' ? [...new Set(this.deps.wslDistros?.() ?? [])] : [];
+    if (distros.length === 0) return;
+    this.wslSync = this.wslSync
+      .then(() => syncWslNotifyInstructions(enabled, options, distros))
+      .then(wsl => {
+        // A later sync already replaced this one's local results.
+        if (this.instructionFiles !== local) return;
+        this.instructionFiles = [...local, ...wsl];
+        this.scheduleBroadcast();
+      })
+      .catch((error: Error) => console.warn('[Notify] Pane could not update the instructions in WSL homes:', error));
   }
 
   private applyShortcut(settings: NotifySettings): void {
