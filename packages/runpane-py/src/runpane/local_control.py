@@ -2511,6 +2511,8 @@ def print_agent_doctor_result(result: Dict[str, Any]) -> None:
         print(f"Path: {result.get('executablePath')}")
     if result.get("version"):
         print(f"Version: {result.get('version')}")
+    if result.get("signIn"):
+        print(f"Sign-in: {result.get('signIn')}")
     for check in result.get("checks", []):
         print(f"{'OK' if check.get('ok') else 'FAIL'} {check.get('name')}: {check.get('message')}")
     for warning in result.get("warnings") or []:

@@ -24,7 +24,7 @@ The tool panel system consists of several key components:
 
 ## Panel Lifecycle
 
-1. **Creation**: User clicks "Add Tool" → Panel entry created in database → Added to UI
+1. **Creation**: User picks a tool from the "+" New tab picker → Panel entry created in database → Added to UI
 2. **First View**: User clicks panel tab → Background process initializes → XTerm.js mounts
 3. **Switching**: User switches panels → Previous panel unmounts XTerm → New panel mounts
 4. **Background Operation**: Processes continue running even when panel is not visible
@@ -59,7 +59,7 @@ The tool panel system consists of several key components:
 
 ## Implemented Panel Types
 
-The tool panel system supports 8 panel types (`ToolPanelType` in `shared/types/panels.ts`):
+The tool panel system supports 10 panel types (`ToolPanelType` in `shared/types/panels.ts`):
 
 1. **Terminal** (`terminal`): PTY shells, several per pane. Agent CLIs such as
    Claude Code, Codex and Cursor Agent run in terminal panels
@@ -73,6 +73,45 @@ The tool panel system supports 8 panel types (`ToolPanelType` in `shared/types/p
 7. **Setup Tasks** (`setup-tasks`): project setup checklist. Singleton,
    permanent, projects only.
 8. **Browser** (`browser`): embedded browser. Worktrees only.
+9. **Notes** (`notes`): the Pane's notes. Singleton.
+10. **New tab** (`new-tab`): the "+" picker. It hosts no process; choosing a
+    tool replaces it in place. Worktrees only. A restored New tab shows the
+    picker again.
+
+## New tab picker
+
+In a Pane, "+" in the tab strip (and **mod+T**) opens a **New tab**. It lists:
+
+- each agent preset for the Pane's platform, with its readiness where this
+  Pane runs agents: **Ready**, **Sign in needed · Sign in**, **Not installed ·
+  Install**, or blank while the check runs or when it can't tell. Blank rows
+  still launch. Readiness comes from `runpane agents doctor` (install check
+  plus the agent's own status command, 3 s timeout), run through the
+  project's command runner, so WSL projects check inside their distro.
+  Answers are cached per project for 60 seconds and refreshed each time the
+  picker opens.
+- **Plain terminal**, with the shell it runs.
+- **Other tools**: Explorer, Browser, Notes, saved custom commands, and
+  **Add custom command…**.
+
+Choosing an agent or a plain terminal turns the tab into that terminal.
+**Sign in** and **Install** open a terminal tab with the vendor's command
+typed and not run (`TerminalPanelState.stagedCommand`). The commands live
+beside the presets in `shared/constants/agentLaunchPresets.ts`. An empty
+stage shows the same picker. The keyboard shortcuts for Terminal, each agent,
+Explorer and custom commands still open their tool directly. The project
+view's "+" and Pane Chat's "+" keep their menus.
+
+## Early exit card
+
+On macOS and Linux, when an agent tab's agent returns to Pane's shell within
+10 seconds of launch, main sends `terminal:launchExited` with the seconds and
+the last line it printed. The tab covers the terminal with a card (same layer
+as the loading mask, no resize): signed out or not installed when the
+readiness check says so, otherwise the agent's own last line. **Try again**
+relaunches through `runpane panels resume`; **Open terminal** removes the
+card. Windows and WSL terminals don't expose the foreground process, so the
+card doesn't show there.
 
 ## Panel Capabilities
 
@@ -90,12 +129,12 @@ Example: Diff panels are singleton + permanent + worktree-only, consuming `files
 
 ### Named custom launch profiles
 
-In a worktree's **Add Tool (+)** menu, choose **Add custom command…** and enter
+In a Pane's **New tab** picker, choose **Add custom command…** and enter
 an optional **Name** alongside the command. **Save & launch** saves the profile
 and opens a terminal tab with that name. Leaving the name blank uses the first
 three words of the command. Saved profiles are shared through app configuration.
-Use the pencil beside a saved profile to rename it; the menu and future tabs use
-the new name. Existing tabs keep their titles. Hover a profile to see its full
-name and command.
+Use the pencil beside a saved profile to rename it (or press F2 on it); the
+picker and future tabs use the new name. Existing tabs keep their titles. Hover
+a profile to see its full name and command.
 
 Resume commands retain the original shell quoting and environment assignments when removing a launch prompt. Custom Claude launchers may choose a separate configuration directory; Pane trusts their recorded conversation IDs instead of checking the app configuration for their transcripts.

@@ -4,7 +4,8 @@ import { createPortal } from 'react-dom';
 import { cn } from '../../utils/cn';
 import { useHotkey } from '../../hooks/useHotkey';
 import { PanelTabBarProps, PanelCreateOptions } from '../../types/panelComponents';
-import { ToolPanel, ToolPanelType, PANEL_CAPABILITIES } from '../../../../shared/types/panels';
+import { ToolPanel, ToolPanelType } from '../../../../shared/types/panels';
+import { addablePanelTypes } from './addablePanelTypes';
 import { useSession } from '../../contexts/SessionContext';
 import { useConfigStore } from '../../stores/configStore';
 import { formatKeyDisplay } from '../../utils/hotkeyUtils';
@@ -73,6 +74,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
   onPanelClose,
   onPanelCreate,
   onShowExplorer,
+  onOpenNewTab,
   projectEnvironment,
   context = 'worktree',  // Default to worktree for backward compatibility
   onToggleDetailPanel,
@@ -251,12 +253,16 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
   useEffect(() => {
     const handleOpenRequest = (event: Event) => {
       if (!(event instanceof CustomEvent)) return;
+      if (onOpenNewTab) {
+        onOpenNewTab();
+        return;
+      }
       externalAnchorRef.current = event.detail?.rect ?? null;
       setShowDropdown(true);
     };
     window.addEventListener('pane:open-add-tool', handleOpenRequest);
     return () => window.removeEventListener('pane:open-add-tool', handleOpenRequest);
-  }, []);
+  }, [onOpenNewTab]);
   useEffect(() => {
     if (!showDropdown) externalAnchorRef.current = null;
   }, [showDropdown]);
@@ -317,7 +323,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
     label: 'Open Add Tool menu',
     keys: 'mod+t',
     category: 'tabs',
-    action: () => setShowDropdown(true),
+    action: () => (onOpenNewTab ? onOpenNewTab() : setShowDropdown(true)),
   });
 
   /**
@@ -366,32 +372,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
     enabled: () => !!session,
   });
 
-  // Get available panel types (excluding permanent panels, logs, and enforcing singleton)
-  // SAFETY: The value comes from the adjacent finite domain definition.
-  const availablePanelTypes = (Object.keys(PANEL_CAPABILITIES) as ToolPanelType[])
-    .filter(type => {
-      const capabilities = PANEL_CAPABILITIES[type];
-      if (type === 'notes' && config?.remoteDaemon?.client.mode === 'remote') return false;
-
-      // Filter based on context
-      if (context === 'project' && !capabilities.canAppearInProjects) return false;
-      if (context === 'worktree' && !capabilities.canAppearInWorktrees) return false;
-
-      // Exclude permanent panels
-      if (capabilities.permanent) return false;
-
-      // Logs is created by running scripts; editor tabs by opening files
-      if (type === 'logs' || type === 'editor') return false;
-
-      // Enforce singleton panels
-      if (capabilities.singleton) {
-        // Check if a panel of this type already exists
-        return !panels.some(p => p.type === type);
-      }
-
-      return true;
-    });
-  
+  const availablePanelTypes = addablePanelTypes(panels, context, config?.remoteDaemon?.client.mode === 'remote');
 
   // Whether a tab drag is hovering the bar (drives the un-split affordance)
   const [dragOverBar, setDragOverBar] = useState(false);
@@ -540,7 +521,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
           <Tooltip
             content={(
               <span className="flex items-center gap-2">
-                <span>Add tool</span>
+                <span>{onOpenNewTab ? 'New tab' : 'Add tool'}</span>
                 {hotkeyDisplay('open-add-tool') && <Kbd size="xs" variant="muted">{hotkeyDisplay('open-add-tool')}</Kbd>}
               </span>
             )}
@@ -553,16 +534,16 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
                 "inline-flex items-center justify-center h-7 w-7 ml-0.5 text-text-tertiary hover:text-text-primary hover:bg-surface-hover rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle",
                 tabsInGroups && "hidden",
               )}
-              onClick={() => setShowDropdown(!showDropdown)}
+              onClick={() => (onOpenNewTab ? onOpenNewTab() : setShowDropdown(!showDropdown))}
               aria-label="Add tool"
               onKeyDown={(e) => {
-                if (e.key === 'ArrowDown' && !showDropdown) {
+                if (e.key === 'ArrowDown' && !showDropdown && !onOpenNewTab) {
                   e.preventDefault();
                   setShowDropdown(true);
                 }
               }}
-              aria-haspopup="menu"
-              aria-expanded={showDropdown}
+              aria-haspopup={onOpenNewTab ? undefined : 'menu'}
+              aria-expanded={onOpenNewTab ? undefined : showDropdown}
             >
               <Plus className="w-4 h-4" />
             </button>
