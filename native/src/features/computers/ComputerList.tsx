@@ -7,21 +7,13 @@ import type { TailnetMachine } from '@shared/types/workspaceAccess';
 
 import { passwordProblem } from '@/auth/computers';
 import { useActiveHost } from '@/auth/hostsStore';
+import { TAILNET_STATE_TEXT } from '@/features/machines/machines';
 import { useTheme } from '@/theme';
 import { Button, Text, TextField } from '@/ui';
 
 import { OsLogo } from './OsLogo';
 import { useComputers, useConnectComputer } from './useComputers';
 
-// The same words desktop Pane uses under Settings › Remote Access › Your computers.
-const STATE_TEXT = {
-  available: 'Ready',
-  'password-required': 'Needs password',
-  outdated: 'Older Pane',
-  refused: 'Owner only',
-  unreachable: 'Pane not open',
-  offline: 'Offline',
-} satisfies Record<TailnetMachine['state'], string>;
 
 interface ComputerListProps {
   /** A computer this phone can reach, asked for the list. */
@@ -53,25 +45,42 @@ export function ComputerList({ directory, header, onConnected, connected: isConn
     connect.mutate({ machine, domain, password: value ?? (directory?.tailnetMachine === machine.name && directory.tailnetDomain === domain ? directory.token : undefined) });
   };
 
-  const renderItem = ({ item: machine }: { item: TailnetMachine }) => {
+  const renderItem = ({ item: machine, index }: { item: TailnetMachine; index: number }) => {
     const connected = isConnected && active?.tailnetMachine === machine.name && active.tailnetDomain === domain;
     const connectable = machine.state !== 'offline' && machine.state !== 'unreachable' && machine.state !== 'refused';
     const pending = connect.isPending && connect.variables?.machine.name === machine.name;
     // Ask for the password when the computer says it needs one, or rejected the last one.
     const askPassword = password?.name === machine.name
       || (failure?.name === machine.name && failure.problem !== null);
-    const detail = [STATE_TEXT[machine.state], machine.mine ? null : machine.ownerLogin].filter(Boolean).join(' · ');
+    const detail = [TAILNET_STATE_TEXT[machine.state], machine.mine ? null : machine.ownerLogin].filter(Boolean).join(' · ');
     const rowError = failure?.name === machine.name
       ? failure.problem === 'invalid' ? 'That password is wrong.' : failure.problem ? null : connect.error?.message
       : null;
 
     return (
-      <View testID={`computer-${machine.name}`} style={[styles.row, { borderColor: theme.colors.border }]}>
+      // One grouped card: the end rows round its corners, the rest share hairline separators.
+      <View
+        testID={`computer-${machine.name}`}
+        style={[
+          styles.row,
+          {
+            backgroundColor: theme.colors.card,
+            borderColor: theme.colors.cardBorder,
+            borderTopWidth: index === 0 ? StyleSheet.hairlineWidth : 0,
+            borderBottomWidth: index === machines.length - 1 ? StyleSheet.hairlineWidth : 0,
+            borderTopLeftRadius: index === 0 ? theme.radius.card : 0,
+            borderTopRightRadius: index === 0 ? theme.radius.card : 0,
+            borderBottomLeftRadius: index === machines.length - 1 ? theme.radius.card : 0,
+            borderBottomRightRadius: index === machines.length - 1 ? theme.radius.card : 0,
+          },
+        ]}
+      >
+        {index > 0 ? <View style={[styles.separator, { backgroundColor: theme.colors.border }]} /> : null}
         <View style={styles.summary}>
-          <OsLogo os={machine.os} />
+          <View style={styles.logo}><OsLogo os={machine.os} /></View>
           <View style={styles.text}>
-            <Text variant="body" numberOfLines={1}>{machine.name}</Text>
-            <Text variant="footnote" tone="muted" numberOfLines={1}>{detail}</Text>
+            <Text variant="rowTitle" numberOfLines={1}>{machine.name}</Text>
+            <Text variant="rowDetail" tone="muted" numberOfLines={1}>{detail}</Text>
           </View>
           {askPassword ? null : (
             <Button
@@ -111,7 +120,7 @@ export function ComputerList({ directory, header, onConnected, connected: isConn
             </View>
           </View>
         ) : null}
-        {rowError ? <Text variant="footnote" tone="danger">{rowError}</Text> : null}
+        {rowError ? <Text variant="rowDetail" tone="danger">{rowError}</Text> : null}
       </View>
     );
   };
@@ -126,12 +135,13 @@ export function ComputerList({ directory, header, onConnected, connected: isConn
       keyboardDismissMode="on-drag"
       refreshing={computers.isRefetching}
       onRefresh={() => void computers.refetch()}
+      style={{ backgroundColor: theme.colors.grouped }}
       contentContainerStyle={styles.content}
       renderItem={renderItem}
       ListHeaderComponent={(
         <View style={styles.header}>
           {header}
-          {list?.ok ? <Text variant="footnote" tone="muted">On {list.tailnet}</Text> : null}
+          {list?.ok ? <Text variant="sectionLabel" tone="muted" style={styles.label}>On {list.tailnet}</Text> : null}
           {computers.isLoading ? <Text variant="subhead" tone="secondary">Looking for your computers…</Text> : null}
           {list && !list.ok ? <Text variant="subhead" tone="danger">{list.reason}. {list.fix}</Text> : null}
           {directoryProblem && directory ? (
@@ -149,7 +159,7 @@ export function ComputerList({ directory, header, onConnected, connected: isConn
               />
               <Button
                 testID="computers-directory-unlock"
-                title="Find Computers"
+                title="Find computers"
                 disabled={!directoryPassword || computers.isFetching}
                 onPress={() => onDirectoryChange({ ...directory, token: directoryPassword })}
               />
@@ -167,9 +177,13 @@ export function ComputerList({ directory, header, onConnected, connected: isConn
 const styles = StyleSheet.create({
   content: { paddingHorizontal: 16, paddingVertical: 16 },
   header: { gap: 12, marginBottom: 8 },
-  row: { paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, gap: 8 },
-  summary: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  text: { flex: 1, gap: 2 },
+  label: { paddingHorizontal: 4 },
+  row: { minHeight: 58, justifyContent: 'center', paddingHorizontal: 16, paddingVertical: 9, gap: 8, borderLeftWidth: StyleSheet.hairlineWidth, borderRightWidth: StyleSheet.hairlineWidth },
+  // Inset past the logo, as ListSection does below a row with a leading icon.
+  separator: { position: 'absolute', top: 0, left: 54, right: 0, height: StyleSheet.hairlineWidth },
+  summary: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  logo: { width: 24, alignItems: 'center' },
+  text: { flex: 1, minWidth: 0, gap: 1 },
   password: { gap: 8 },
   actions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 8 },
 });

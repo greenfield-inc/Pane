@@ -11,6 +11,8 @@ export interface ScreenProps {
   /** Safe-area edges to pad. Screens under a native header only need the bottom. */
   edges?: Edge[];
   padded?: boolean;
+  /** Grouped page (Settings): the gray behind ListSection cards. */
+  grouped?: boolean;
   style?: ViewStyle;
   testID?: string;
 }
@@ -19,15 +21,16 @@ export interface ScreenProps {
  * Screen background and safe areas. Long data lists should render a
  * Legend List directly instead of passing `scroll`.
  */
-export function Screen({ children, scroll, edges = ['bottom'], padded = true, style, testID }: ScreenProps) {
+export function Screen({ children, scroll, edges = ['bottom'], padded = true, grouped, style, testID }: ScreenProps) {
   const theme = useTheme();
   const padding = padded ? theme.spacing.lg : 0;
+  const backgroundColor = grouped ? theme.colors.grouped : theme.colors.background;
 
   if (scroll) {
     return (
       <ScrollView
         testID={testID}
-        style={{ backgroundColor: theme.colors.background }}
+        style={{ backgroundColor }}
         contentInsetAdjustmentBehavior="automatic"
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
@@ -40,7 +43,7 @@ export function Screen({ children, scroll, edges = ['bottom'], padded = true, st
   }
 
   return (
-    <SafeAreaView testID={testID} edges={edges} style={[styles.fill, { backgroundColor: theme.colors.background }]}>
+    <SafeAreaView testID={testID} edges={edges} style={[styles.fill, { backgroundColor }]}>
       <View style={[styles.fill, { padding }, style]}>{children}</View>
     </SafeAreaView>
   );

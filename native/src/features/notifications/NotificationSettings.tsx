@@ -30,7 +30,7 @@ export function NotificationSettings() {
         footer={controls.error?.message ?? 'The host alerts this phone when an agent is blocked or finishes a turn. Alerts never include terminal output.'}
       >
         <ListRow
-          title="Needs Input"
+          title="Needs input"
           subtitle="An agent is waiting for you"
           trailing={<Switch testID="notifications-needs-input" {...switchProps} value={result.status.needsInputEnabled ?? true} onValueChange={value => toggle('needsInputEnabled', value)} />}
         />
@@ -46,7 +46,7 @@ export function NotificationSettings() {
   if (result.state === 'denied') {
     return (
       <ListSection title="Notifications" footer="Pane can't alert you while notifications are off for Pane in Settings.">
-        <ListRow testID="notifications-denied" title="Turn On in Settings" trailing="chevron" onPress={() => void Linking.openSettings()} />
+        <ListRow testID="notifications-denied" title="Turn on in Settings" trailing="chevron" onPress={() => void Linking.openSettings()} />
       </ListSection>
     );
   }
@@ -58,7 +58,7 @@ export function NotificationSettings() {
     <ListSection title="Notifications" footer={footer}>
       <ListRow
         testID={result.state === 'host-not-ready' ? 'notifications-host-not-ready' : 'notifications-error'}
-        title={result.state === 'host-not-ready' ? 'Not Set Up on This Host' : 'Couldn’t Turn On Notifications'}
+        title={result.state === 'host-not-ready' ? 'Not set up on this host' : 'Couldn’t turn on notifications'}
         trailing={setup.isFetching ? undefined : 'chevron'}
         onPress={setup.isFetching ? undefined : retry}
       />

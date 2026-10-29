@@ -29,15 +29,15 @@ export function VoiceKeyField({ voiceKey, set, optional, asking, value, onChange
   const theme = useTheme();
   const { colors } = theme;
   const info = KEY_INFO[voiceKey];
-  const box = [styles.input, { borderRadius: theme.radius.md, backgroundColor: colors.surfaceRaised }];
+  const box = [styles.input, { borderRadius: theme.radius.card, backgroundColor: colors.card }];
 
   return (
     <View style={styles.field}>
-      <Text variant="footnote" tone="secondary" style={styles.bold}>
+      <Text variant="sectionLabel" tone="muted" style={styles.label}>
         {optional ? `Clean up text (optional) · ${info.name} key` : `${info.name} key · ${info.role}`}
       </Text>
       {asking ? (
-        <View style={[box, { borderColor: value ? colors.accent : colors.border }]}>
+        <View style={[box, { borderColor: value ? colors.accent : colors.cardBorder }]}>
           <TextInput
             testID={`voice-key-${voiceKey}`}
             accessibilityLabel={`${info.name} key`}
@@ -52,7 +52,7 @@ export function VoiceKeyField({ voiceKey, set, optional, asking, value, onChange
             textContentType="none"
             importantForAutofill="no"
             keyboardAppearance={theme.scheme}
-            style={[theme.typography.subhead, styles.grow, { color: colors.text }]}
+            style={[theme.typography.rowTitle, styles.grow, { color: colors.text }]}
           />
           <Pressable
             testID={`voice-key-paste-${voiceKey}`}
@@ -61,17 +61,17 @@ export function VoiceKeyField({ voiceKey, set, optional, asking, value, onChange
             hitSlop={8}
             onPress={() => void Clipboard.getStringAsync().then(pasted => onChange(pasted.trim()))}
           >
-            <Text variant="callout" tone="accent" style={styles.bold}>Paste</Text>
+            <Text variant="rowValue" tone="accent" style={styles.bold}>Paste</Text>
           </Pressable>
         </View>
       ) : (
-        <View style={[box, { borderColor: colors.border }]}>
+        <View style={[box, { borderColor: colors.cardBorder }]}>
           {set ? <Icon ios="checkmark" android="check" size={14} color={colors.success} /> : null}
-          <Text variant="subhead" style={[styles.grow, styles.bold, { color: set ? colors.success : colors.textMuted }]} testID={`voice-key-status-${voiceKey}`}>
+          <Text variant="rowTitle" style={[styles.grow, { color: set ? colors.success : colors.textMuted }]} testID={`voice-key-status-${voiceKey}`}>
             {set ? 'Set' : 'Not set'}
           </Text>
           <Pressable testID={`voice-key-replace-${voiceKey}`} accessibilityRole="button" accessibilityLabel={`${set ? 'Replace' : 'Add'} ${info.name} key`} hitSlop={8} onPress={onReplace}>
-            <Text variant="callout" tone={set ? 'secondary' : 'accent'}>{set ? 'Replace' : 'Add'}</Text>
+            <Text variant="rowValue" tone={set ? 'secondary' : 'accent'}>{set ? 'Replace' : 'Add'}</Text>
           </Pressable>
         </View>
       )}
@@ -81,7 +81,9 @@ export function VoiceKeyField({ voiceKey, set, optional, asking, value, onChange
 
 const styles = StyleSheet.create({
   field: { gap: 6 },
-  input: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, borderWidth: 1 },
+  label: { paddingHorizontal: 4 },
+  // A one-row grouped card (ListSection's look) holding the status or the input.
+  input: { minHeight: 58, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingVertical: 9, borderWidth: StyleSheet.hairlineWidth },
   grow: { flex: 1, paddingVertical: 0 },
   bold: { fontWeight: '600' },
 });
