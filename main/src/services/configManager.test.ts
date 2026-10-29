@@ -24,10 +24,10 @@ describe('ConfigManager appearance persistence', () => {
     const manager = new ConfigManager();
     await manager.initialize();
     expect(manager.getConfig()).toMatchObject({
-      appearanceMode: 'system', theme: 'light-rounded', systemLightTheme: 'light-rounded', systemDarkTheme: 'dark',
+      appearanceMode: 'system', theme: 'folio', systemLightTheme: 'folio', systemDarkTheme: 'dusk-oled',
     });
     expect(JSON.parse(await fs.readFile(configPath, 'utf8'))).toMatchObject({
-      appearanceMode: 'system', theme: 'light-rounded', systemLightTheme: 'light-rounded', systemDarkTheme: 'dark',
+      appearanceMode: 'system', theme: 'folio', systemLightTheme: 'folio', systemDarkTheme: 'dusk-oled',
       analytics: { enabled: true },
     });
   });
@@ -85,7 +85,7 @@ describe('ConfigManager appearance persistence', () => {
     await fs.writeFile(configPath, JSON.stringify({ theme: 'forge' }));
     const manager = new ConfigManager();
     await manager.initialize();
-    expect(manager.getConfig()).toMatchObject({ appearanceMode: 'fixed', theme: 'forge', systemLightTheme: 'light-rounded', systemDarkTheme: 'forge' });
+    expect(manager.getConfig()).toMatchObject({ appearanceMode: 'fixed', theme: 'forge', systemLightTheme: 'folio', systemDarkTheme: 'forge' });
     const first = await fs.stat(configPath);
     await new Promise((resolve) => setTimeout(resolve, 20));
     await manager.initialize();
@@ -93,12 +93,21 @@ describe('ConfigManager appearance persistence', () => {
   });
 
   it('repairs corrupt slots, preserves valid fields, and logs a diagnostic', async () => {
-    await fs.writeFile(configPath, JSON.stringify({ appearanceMode: 'system', theme: 'abyss', systemLightTheme: 'dark', systemDarkTheme: 'forge' }));
+    await fs.writeFile(configPath, JSON.stringify({ appearanceMode: 'system', theme: 'abyss', systemLightTheme: 'unknown', systemDarkTheme: 'forge' }));
     const manager = new ConfigManager();
     await manager.initialize();
-    expect(manager.getConfig()).toMatchObject({ theme: 'abyss', systemLightTheme: 'light-rounded', systemDarkTheme: 'forge' });
-    expect(console.error).toHaveBeenCalledWith('[ConfigManager] appearance: invalid systemLightTheme; restored light-rounded');
-    expect(JSON.parse(await fs.readFile(configPath, 'utf8')).systemLightTheme).toBe('light-rounded');
+    expect(manager.getConfig()).toMatchObject({ theme: 'abyss', systemLightTheme: 'folio', systemDarkTheme: 'forge' });
+    expect(console.error).toHaveBeenCalledWith('[ConfigManager] appearance: invalid systemLightTheme; restored folio');
+    expect(JSON.parse(await fs.readFile(configPath, 'utf8')).systemLightTheme).toBe('folio');
+  });
+
+  it('leaves a saved appearance on the old defaults untouched', async () => {
+    const saved = { appearanceMode: 'system', theme: 'light-rounded', systemLightTheme: 'light-rounded', systemDarkTheme: 'dark' };
+    await fs.writeFile(configPath, JSON.stringify(saved));
+    const manager = new ConfigManager();
+    await manager.initialize();
+    expect(manager.getConfig()).toMatchObject(saved);
+    expect(JSON.parse(await fs.readFile(configPath, 'utf8'))).toMatchObject(saved);
   });
 
   it('serializes concurrent updates without losing either change', async () => {
@@ -133,13 +142,15 @@ describe('ConfigManager appearance persistence', () => {
     rename.mockRestore();
   });
 
-  it('rejects a mismatched slot without changing memory or disk', async () => {
+  it('accepts any theme in a System slot and rejects an unknown one without changing memory or disk', async () => {
     const manager = new ConfigManager();
     await manager.initialize();
+    await manager.updateConfig({ systemDarkTheme: 'folio' });
+    expect(manager.getConfig().systemDarkTheme).toBe('folio');
     const before = await fs.readFile(configPath, 'utf8');
-    // SAFETY: Deliberately bypasses the compile-time slot type to exercise the runtime persistence boundary.
-    await expect(manager.updateConfig({ systemDarkTheme: 'folio' as never })).rejects.toThrow('systemDarkTheme must be a dark palette');
-    expect(manager.getConfig().systemDarkTheme).toBe('dark');
+    // SAFETY: Deliberately bypasses the compile-time theme type to exercise the runtime persistence boundary.
+    await expect(manager.updateConfig({ systemDarkTheme: 'unknown' as never })).rejects.toThrow('systemDarkTheme must be a valid palette');
+    expect(manager.getConfig().systemDarkTheme).toBe('folio');
     expect(await fs.readFile(configPath, 'utf8')).toBe(before);
   });
 
@@ -149,7 +160,7 @@ describe('ConfigManager appearance persistence', () => {
     const before = await fs.readFile(configPath, 'utf8');
     const rename = vi.spyOn(fs, 'rename').mockRejectedValueOnce(new Error('rename failed'));
     await expect(manager.updateConfig({ theme: 'forge' })).rejects.toThrow('rename failed');
-    expect(manager.getConfig().theme).toBe('light-rounded');
+    expect(manager.getConfig().theme).toBe('folio');
     expect(await fs.readFile(configPath, 'utf8')).toBe(before);
     rename.mockRestore();
   });

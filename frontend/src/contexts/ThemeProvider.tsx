@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   DEFAULT_APPEARANCE,
-  isLightTheme,
   isTheme,
   normalizeAppearance,
   resolveAppearanceTheme,
@@ -24,11 +23,11 @@ const initialAppearance = (): AppearanceConfig =>
 
 function validatePatch(patch: Partial<AppearanceConfig>): void {
   if (patch.theme !== undefined && !isTheme(patch.theme)) throw new Error('theme must be a valid palette');
-  if (patch.systemLightTheme !== undefined && !isLightTheme(patch.systemLightTheme)) {
-    throw new Error('systemLightTheme must be a light palette');
+  if (patch.systemLightTheme !== undefined && !isTheme(patch.systemLightTheme)) {
+    throw new Error('systemLightTheme must be a valid palette');
   }
-  if (patch.systemDarkTheme !== undefined && isLightTheme(patch.systemDarkTheme)) {
-    throw new Error('systemDarkTheme must be a dark palette');
+  if (patch.systemDarkTheme !== undefined && !isTheme(patch.systemDarkTheme)) {
+    throw new Error('systemDarkTheme must be a valid palette');
   }
 }
 
@@ -172,12 +171,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const setTheme = useCallback((theme: Theme): Promise<void> => {
     if (appearanceRef.current.appearanceMode === 'fixed') return setAppearance({ theme });
-    if (prefersDark) {
-      if (isLightTheme(theme)) return Promise.reject(new Error('systemDarkTheme must be a dark palette'));
-      return setAppearance({ systemDarkTheme: theme });
-    }
-    if (!isLightTheme(theme)) return Promise.reject(new Error('systemLightTheme must be a light palette'));
-    return setAppearance({ systemLightTheme: theme });
+    return setAppearance(prefersDark ? { systemDarkTheme: theme } : { systemLightTheme: theme });
   }, [prefersDark, setAppearance]);
 
   return (

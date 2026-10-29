@@ -14,7 +14,7 @@ import type { Loop, LoopInput, LoopSchedulePreview } from '../shared/types/loop'
 import type { TailnetMachineList, WorkspaceAccessSummary } from '../shared/types/workspaceAccess';
 import type { GlassesAccessState } from '../shared/types/glasses';
 import type { JsonObject, JsonValue } from '../shared/validation/boundaryDecoder';
-import { DEFAULT_APPEARANCE, LIGHT_THEMES, normalizeAppearance, type AppearanceConfig } from '../shared/types/appearance';
+import { DEFAULT_APPEARANCE, normalizeAppearance, type AppearanceConfig } from '../shared/types/appearance';
 import type { DiffManifest, DiffScope, FileDiffResult } from '../shared/types/gitDiff';
 import type { SetupExportSummary, SetupFile, SetupImportPreview, SetupSectionId } from '../shared/types/setupTransfer';
 import type { NotifyCommand, NotifySnapshot, NotifyWindowSize } from '../shared/types/notify';
@@ -118,7 +118,7 @@ export type ElectronApiMockOptions = {
 
 export async function installElectronApiMock(page: Page, options: ElectronApiMockOptions = {}) {
   type SerializedOptions = ElectronApiMockOptions & {
-    appearance: { defaults: AppearanceConfig; lightThemes: string[]; seeded: AppearanceConfig };
+    appearance: { defaults: AppearanceConfig; seeded: AppearanceConfig };
   };
   await page.addInitScript((mockOptions: SerializedOptions) => {
     if (mockOptions.notificationsSupported === false) {
@@ -973,12 +973,6 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
             const error = nextConfigUpdateError;
             nextConfigUpdateError = null;
             return Promise.resolve({ success: false, error });
-          }
-          if ('systemLightTheme' in updates && !mockOptions.appearance.lightThemes.includes(String(updates.systemLightTheme))) {
-            return Promise.resolve({ success: false, error: 'systemLightTheme must be a light palette' });
-          }
-          if ('systemDarkTheme' in updates && mockOptions.appearance.lightThemes.includes(String(updates.systemDarkTheme))) {
-            return Promise.resolve({ success: false, error: 'systemDarkTheme must be a dark palette' });
           }
           const savedNotify = configState.notify;
           Object.assign(configState, updates);
@@ -1862,7 +1856,6 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     ...options,
     appearance: {
       defaults: DEFAULT_APPEARANCE,
-      lightThemes: [...LIGHT_THEMES],
       seeded: normalizeAppearance(options.initialConfig ?? {}).appearance,
     },
   });

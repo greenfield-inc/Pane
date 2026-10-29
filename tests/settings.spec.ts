@@ -37,21 +37,25 @@ test.describe('Settings', () => {
     await page.getByRole('button', { name: 'Appearance', exact: true }).click();
     const mode = page.getByRole('radiogroup', { name: 'Appearance mode' });
     await expect(mode.getByRole('radio', { name: 'System' })).toHaveAttribute('aria-checked', 'true');
-    await expect(page.getByRole('combobox', { name: 'Light palette' })).toHaveText('Light (rounded)');
-    await expect(page.getByRole('combobox', { name: 'Dark palette' })).toHaveText('Dark (sharp)');
+    await expect(page.getByRole('combobox', { name: 'Light palette' })).toHaveText('Folio');
+    await expect(page.getByRole('combobox', { name: 'Dark palette' })).toHaveText('Dusk (OLED)');
     await expect(page.getByText('Active now')).toBeVisible();
 
+    // Both System pickers list every theme, whatever its own base.
     await page.getByRole('combobox', { name: 'Light palette' }).click();
-    await expect(page.getByRole('option', { name: /^Forge/ })).toHaveCount(0);
+    await expect(page.getByRole('option')).toHaveCount(27);
+    await page.getByRole('option', { name: /^Abyss/ }).click();
+    await expect(page.locator('html')).toHaveClass(/\bdark\b.*\babyss\b/);
+    await page.getByRole('combobox', { name: 'Light palette' }).click();
     await page.getByRole('option', { name: /^Folio/ }).click();
     await expect(page.locator('html')).toHaveClass(/folio/);
     await page.getByRole('combobox', { name: 'Dark palette' }).click();
-    await expect(page.getByRole('option', { name: /^Folio/ })).toHaveCount(0);
+    await expect(page.getByRole('option')).toHaveCount(27);
     await page.getByRole('option', { name: /^Forge/ }).click();
     await expect(page.locator('html')).toHaveClass(/folio/);
 
     await mode.getByRole('radio', { name: 'Fixed' }).click();
-    await expect(page.getByRole('combobox', { name: 'Theme' })).toHaveText('Light (rounded)');
+    await expect(page.getByRole('combobox', { name: 'Theme' })).toHaveText('Folio');
     await page.getByRole('combobox', { name: 'Theme' }).click();
     await page.getByRole('option', { name: /^Night Owl(?! \(OLED\))/ }).click();
     await expect(page.locator('html')).toHaveClass(/night-owl/);

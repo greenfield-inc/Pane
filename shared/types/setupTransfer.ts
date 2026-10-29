@@ -2,7 +2,7 @@ import type { CustomCommandResume } from './customCommandResume';
 import type { PaneChatAgent } from './paneChat';
 import type { VoiceTranscriptionMode } from './voiceTranscription';
 import type { WorktreeFileSyncEntry } from './worktreeFileSync';
-import type { AppearanceMode, DarkTheme, LightTheme, Theme } from './appearance';
+import type { AppearanceMode, Theme } from './appearance';
 import type { SessionRetention } from './orchestrationSession';
 
 /**
@@ -70,8 +70,8 @@ export interface SetupSkills {
 export interface SetupAppearance {
   appearanceMode?: AppearanceMode;
   theme?: Theme;
-  systemLightTheme?: LightTheme;
-  systemDarkTheme?: DarkTheme;
+  systemLightTheme?: Theme;
+  systemDarkTheme?: Theme;
   highContrast?: boolean;
   uiScale?: number;
   terminalFontFamily?: string;
@@ -161,7 +161,7 @@ export interface SetupExportRow {
   /** skills: what is on. */
   skills?: { homeSkill: boolean; registerMcp: boolean };
   /** appearance: the theme shown, or both system themes. */
-  appearance?: { mode: AppearanceMode; theme: Theme; light: LightTheme; dark: DarkTheme };
+  appearance?: { mode: AppearanceMode; theme: Theme; light: Theme; dark: Theme };
 }
 
 export interface SetupExportSummary {

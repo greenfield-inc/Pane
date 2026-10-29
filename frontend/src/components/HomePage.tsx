@@ -12,7 +12,7 @@ import { IconButton } from './ui/Button';
 import { AddProjectDialog } from './AddProjectDialog';
 import { CloneFromGitHubDialog } from './CloneFromGitHubDialog';
 import { formatDistanceToNow, isValidTimestamp } from '../utils/timestampUtils';
-import { getThemeLabel, themeOptionsForSlot } from '../utils/themeOptions';
+import { ALL_THEME_OPTIONS, getThemeLabel } from '../utils/themeOptions';
 import type { Project } from '../types/project';
 import type { Session } from '../types/session';
 import type { PreferredShell } from '../types/config';
@@ -233,8 +233,7 @@ function DiscordBanner() {
 }
 
 export function HomePage() {
-  const { theme, appearance, activeSystemSlot, setTheme } = useTheme();
-  const homeThemeOptions = themeOptionsForSlot(appearance.appearanceMode === 'fixed' ? 'any' : activeSystemSlot ?? 'light');
+  const { theme, setTheme } = useTheme();
   const { config, updateConfig } = useConfigStore();
   const sessions = useSessionStore(state => state.sessions);
   const setActiveSession = useSessionStore(state => state.setActiveSession);
@@ -371,7 +370,7 @@ export function HomePage() {
                     <ChevronDown className="w-3 h-3 text-text-tertiary" />
                   </button>
                 }
-                items={homeThemeOptions.map((option) => ({
+                items={ALL_THEME_OPTIONS.map((option) => ({
                   id: option.id,
                   label: option.label,
                   description: option.description,
