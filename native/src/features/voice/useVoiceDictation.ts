@@ -169,7 +169,8 @@ export function useVoiceDictation(onText: (text: string) => void) {
       metadata: live.metadata,
     };
     const result = await invokeWhenConnected<VoiceTranscriptionResult>(client, 'voice:finalize-streaming', [request]);
-    return result ? { text: result.text } : { text: live.rawText, notice: RAW_TEXT_NOTICE };
+    // The words as of stopping; the socket's handler can still add late results to `live`.
+    return result ? { text: result.text } : { text: request.rawText, notice: RAW_TEXT_NOTICE };
   };
 
   const startRecording = async () => {
