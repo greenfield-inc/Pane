@@ -793,8 +793,7 @@ export function registerRunpaneHandlers(
       const project = resolveRepoSelector(databaseService.getAllProjects(), normalized.repo);
       const renamed = databaseService.updateProject(project.id, { name: normalized.name });
       if (!renamed) throw repoNotFound(`with id ${project.id}`);
-      // The same event the app's project settings rename emits, so every window updates.
-      sessionManager.emit('project:updated', renamed);
+      sessionManager.emit('project:list-changed');
       return { ok: true, repo: projectToRepoSummary(renamed, sessionManager.getSessionsForProject(renamed.id).length) };
     }, result => ({ repoId: result.repo.id }));
   });
