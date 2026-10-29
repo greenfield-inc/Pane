@@ -11,10 +11,10 @@ export type MachinePresence = 'solid' | 'pulsing' | 'dimmed';
  * What picking a machine does: switch to a saved one, save and connect a discovered one,
  * ask for its password first, retry the active one, or nothing.
  */
-export type MachineAction = 'switch' | 'connect' | 'password' | 'retry' | 'none';
+type MachineAction = 'switch' | 'connect' | 'password' | 'retry' | 'none';
 
 /** Id of "this computer": the local runtime, next to saved profile ids. */
-export const LOCAL_RUNTIME_ID = 'local';
+const LOCAL_RUNTIME_ID = 'local';
 
 export interface MachineEntry {
   /** `local`, a saved profile id, or `tailnet:<dnsName>` for a machine never connected. */

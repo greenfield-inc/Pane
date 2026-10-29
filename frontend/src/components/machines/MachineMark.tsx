@@ -19,7 +19,7 @@ const SIZES = {
   lg: { tile: 44, logo: 'h-6 w-6' },
 } as const;
 
-export type MachineMarkSize = keyof typeof SIZES;
+type MachineMarkSize = keyof typeof SIZES;
 
 interface MachineMarkProps {
   os: MachineOs | null;
@@ -42,13 +42,9 @@ export function MachineMark({ os, slot, presence = 'solid', size, className }: M
   const Logo = os ? OS_LOGOS[os] : Server;
   const { tile, logo } = SIZES[size];
   const color = machineColorVar(slot);
-  const style: CSSProperties = {
-    width: tile,
-    height: tile,
-    color,
-    ...(size === 'logo' ? {} : { backgroundColor: `color-mix(in srgb, ${color} 16%, transparent)` }),
-    ...(size === 'rail' ? { boxShadow: `inset 0 0 0 1.5px color-mix(in srgb, ${color} 70%, transparent)` } : {}),
-  };
+  const style: CSSProperties = { width: tile, height: tile, color };
+  if (size !== 'logo') style.backgroundColor = `color-mix(in srgb, ${color} 16%, transparent)`;
+  if (size === 'rail') style.boxShadow = `inset 0 0 0 1.5px color-mix(in srgb, ${color} 70%, transparent)`;
   return (
     <span
       aria-hidden="true"
