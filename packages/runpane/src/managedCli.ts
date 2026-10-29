@@ -182,7 +182,8 @@ export function fixCliInstalls(check: CliInstallsCheck, paneDir?: string): CliIn
 }
 
 function quoteArgument(value: string): string {
-  if (/^[\w@%+=:,./\\-]+$/.test(value)) return value;
+  // `~` is safe after the first character, as in Windows short names like RUNNER~1.
+  if (/^[\w@%+=:,./\\-][\w@%+=:,./\\~-]*$/.test(value)) return value;
   return process.platform === 'win32' ? `"${value}"` : `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
