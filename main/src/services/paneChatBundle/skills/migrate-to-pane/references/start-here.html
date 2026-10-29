@@ -140,11 +140,11 @@ dd { margin: 2px 0 0; }
 <h2>4. Are my mistakes reversible?</h2>
 <dl>
   <dt>If I delete my original folder, does it disappear here?</dt>
-  <dd>{{REVERSIBLE_DELETE}}</dd>
+  <dd>Pane opened your projects where they already were, so your folders are still yours. If you delete one outside Pane, Pane deletes nothing because of it: its Pane stays in the sidebar pointing at the missing folder, and archiving that Pane clears it from the list.</dd>
   <dt>Is my real chat the old one or the new one?</dt>
-  <dd>{{REVERSIBLE_CHAT}}</dd>
+  <dd>The same conversation. Each session was resumed by its own id with Claude Code's or Codex's own resume, so what you say here continues it. A session that was still running elsewhere came over as a fork: a copy with its own id on a new branch, while the original kept running untouched. A session kept by another tool (Superset, Orca or T3 Code, for example) was copied into your own Claude Code or Codex folder, and continues in that copy. The table above says which happened to each.</dd>
   <dt>What does archiving do?</dt>
-  <dd>{{REVERSIBLE_ARCHIVE}}</dd>
+  <dd>Archiving a Session hides it from the list and keeps its chat and its Panes. Undo shows for a few seconds, and Archived in the sidebar restores it any time. Archiving a Pane that opened one of your own folders leaves that folder and its branch exactly as they are. Archiving a Pane that Pane created (a fork, or a new task) deletes its folder and keeps its branch: commit first, because uncommitted files in it are not kept.</dd>
 </dl>
 </section>
 
