@@ -881,8 +881,8 @@ export class GlassesApp {
   /**
    * Answers a menu by pressing its choice's number, so where the cursor is never matters. Keys
    * pressed before it land first; then the screen is read again, and a menu that changed at all
-   * gets nothing and opens keys mode. A menu still there after its number ignores numbers, as
-   * Codex's folder trust does: keys mode opens for it. The key is never resent.
+   * gets nothing and opens keys mode. A menu still there after its number ignores numbers: keys
+   * mode opens for it. The key is never resent.
    */
   private async pick(view: Extract<View, { name: 'terminal' }>, menu: Menu, index: number): Promise<void> {
     const { computerId, entry } = view;

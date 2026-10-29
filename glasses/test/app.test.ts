@@ -561,7 +561,7 @@ describe('the picker', () => {
     expect(text()[0]).toBe('fix-login · shell · idle');
   });
 
-  it('opens keys mode when the menu is still there after its number, as Codex folder trust ignores numbers', async () => {
+  it('opens keys mode when the menu is still there after its number', async () => {
     const { source, press, text, clock } = await openMenu(fixture('codex-trust'));
     await press({ type: 'select', index: 1 });
     expect(source.keys).toEqual(['2']);

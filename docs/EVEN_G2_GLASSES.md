@@ -70,10 +70,11 @@ Esc and Tab. You can't dictate in keys mode; leave it first.
   what it asks about, such as the command to run. Swipe to a choice and press: Pane waits for any
   keys you pressed before, reads the screen again, and presses the choice's number, which Claude
   Code and Codex take as that answer wherever the cursor is. If anything in the prompt changed
-  since the list showed (the question, any row of the command, or any choice), it sends nothing,
-  says "The menu changed, so nothing was sent", and opens keys mode. A menu still on screen a
-  second after its number ignores numbers, as Codex's folder trust prompt does: keys mode opens
-  so you answer it with arrows and Enter. Double press dismisses the list. Any other prompt,
+  between the list showing and that read (the question, any row of the command, or any choice),
+  it sends nothing, says "The menu changed, so nothing was sent", and opens keys mode. A menu that
+  changes after the read, while the number is on its way, can still receive it. A menu still on
+  screen a second after its number ignores numbers: keys mode opens so you answer it with arrows
+  and Enter. Double press dismisses the list. Any other prompt,
   including one taller than the screen, is answered from keys mode.
 - **Going back** from a terminal or a computer's list opens the list on the row you picked. Native
   glasses lists always open on their first row, so the list starts there, runs to the end, then
