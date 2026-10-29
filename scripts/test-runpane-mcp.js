@@ -294,6 +294,40 @@ test('a tool call returns the CLI JSON from the daemon', async () => {
   }
 });
 
+test('workspace tools place the machine and path in the command line and the command after --', () => {
+  const { buildMcpTools, buildToolArgv } = require(dist('mcpTools.js'));
+  const tool = (name) => buildMcpTools().find((candidate) => candidate.name === name);
+
+  assert.deepEqual(
+    buildToolArgv(tool('workspace_exec'), { machine: 'devbox', command: 'git status --short', cwd: 'C:\\src', yes: true }),
+    ['workspace', 'devbox', 'exec', '--cwd=C:\\src', '--yes', '--json', '--', 'git status --short'],
+  );
+  assert.deepEqual(tool('workspace_exec').inputSchema.required, ['command']);
+  assert.deepEqual(buildToolArgv(tool('workspace_read'), { path: '~/notes.md' }), ['workspace', 'read', '~/notes.md', '--json']);
+});
+
+test('workspace write needs yes from the server, then writes the content it was given', async () => {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-mcp-'));
+  const target = path.join(paneDir, 'prompt.md');
+  try {
+    await withStubDaemon(paneDir, { 'runpane:machine:write': { path: target, bytes: 11 } }, async (requests) => {
+      await withMcpClient(async (client) => {
+        const refused = await client.callTool({ name: 'workspace_write', arguments: { path: target, content: '- [ ] ship\n' } });
+        assert.equal(refused.isError, true);
+        assert.match(refused.content[0].text, /refused the call and nothing ran/);
+        assert.deepEqual(requests, []);
+
+        const written = await client.callTool({ name: 'workspace_write', arguments: { path: target, content: '- [ ] ship\n', yes: true } });
+        assert.notEqual(written.isError, true, written.content[0].text);
+        assert.deepEqual(written.structuredContent, { ok: true, machine: null, path: target, bytes: 11 });
+        assert.deepEqual(requests.map((request) => request.args[0]), [{ path: target, content: '- [ ] ship\n', encoding: 'utf8' }]);
+      }, { args: [], env: { PANE_DIR: paneDir } });
+    });
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
+});
+
 test('a mutating call without yes is refused before reaching the daemon', async () => {
   const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-mcp-'));
   try {
@@ -543,7 +577,9 @@ test('serves the core toolset by default, and named toolsets or read-only on req
   assert.deepEqual(core.map((tool) => tool.name).sort(), [
     'agents_send', 'agents_start', 'agents_status', 'docs_read', 'docs_search', 'doctor', 'links_create',
     'loops_create', 'loops_delete', 'loops_list', 'loops_pause', 'loops_resume', 'loops_run', 'loops_update', 'notify',
-    'panels_create', 'panels_input', 'panes_archive', 'panes_git_status', 'panes_list', 'panes_restore', 'repos_add', 'repos_list', 'workspace_state',
+    'panels_create', 'panels_input', 'panels_open', 'panes_adopt', 'panes_archive', 'panes_git_status', 'panes_list', 'panes_rename', 'panes_restore',
+    'repos_add', 'repos_list', 'sessions_associate', 'sessions_create', 'sessions_pin',
+    'workspace_exec', 'workspace_list', 'workspace_read', 'workspace_state', 'workspace_write',
   ]);
   const git = await names(['--toolsets', 'git']);
   assert.deepEqual(git.map((tool) => tool.name).sort(), [

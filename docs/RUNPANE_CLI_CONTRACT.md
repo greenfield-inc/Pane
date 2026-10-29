@@ -295,7 +295,7 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `workspace enable`: Put this machine's Pane on your tailnet for runpane workspace (the default when Tailscale is signed in).
 - `workspace disable`: Take this machine off runpane workspace and remove its tailscale serve handler on port 8443.
 - `workspace read`: Print a file from a machine on your tailnet; any path form works (C:\..., /mnt/c/..., /home/..., ~/...).
-- `workspace write`: Write stdin to a file on a machine on your tailnet, creating parent folders.
+- `workspace write`: Write --content or stdin to a file on a machine on your tailnet, creating parent folders.
 - `workspace exec`: Run a command in another machine's shell and return stdout, stderr, the exit code, OS, and shell.
 - `handoff`: Hand your task to another agent on this or another machine: check your handoff note, make the branch reachable, send the note, and start the agent on it. A same-agent handoff from a Pane tab carries and resumes your own session (a fork on this machine) and checks it continued; otherwise a fresh agent starts with the note. From a Session's terminal, create the Session on another machine instead.
 - `watch`: Wait for workspace agent and Pane transitions using a daemon-held cursor.
@@ -393,7 +393,7 @@ runpane workspace list [--json] [--pane-dir <path>]
 runpane workspace enable [--json] [--pane-dir <path>]
 runpane workspace disable [--json] [--pane-dir <path>]
 runpane workspace [<machine>] read <path> [--json]
-runpane workspace [<machine>] write <path> [--json]
+runpane workspace [<machine>] write <path> [--content <text>] [--json]
 runpane workspace <machine> exec [--cwd <path>] [--timeout-ms <ms>] [--json] -- <command>
 runpane handoff --template
 runpane handoff "<destination>" --note-file <path|-> [--machine <name>] [--agent <codex|claude|cursor|opencode>] [--model <model>] [--effort <level>] [--repo <selector>] [--push] [--note-only] [--dry-run] [--json]
@@ -641,6 +641,7 @@ These flags are consumed by local daemon-control commands:
 --detail-label <text>
 --suggestions <json>
 --action <json>
+--content <text>
 --json
 --wait-ready
 --no-focus

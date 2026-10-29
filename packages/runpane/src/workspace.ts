@@ -325,7 +325,7 @@ export async function runWorkspaceRead(parsed: ParsedArgs): Promise<number> {
 export async function runWorkspaceWrite(parsed: ParsedArgs): Promise<number> {
   const target = requirePath(parsed, 'write');
   const machine = await pickMachine(parsed, target, 'write');
-  const content = fs.readFileSync(0);
+  const content = parsed.writeContent === undefined ? fs.readFileSync(0) : Buffer.from(parsed.writeContent, 'utf8');
   const encoding = isUtf8(content) ? 'utf8' : 'base64';
   const request = { path: target, content: content.toString(encoding), encoding };
   const result = await callMachine(parsed, machine, 'runpane:machine:write', [request], writeResultSchema);

@@ -33,10 +33,11 @@ A server that offers dozens of tools makes models, especially smaller ones, wors
 
 | Toolset | Tools |
 |---|---|
-| `core` (default) | `agents_start`, `agents_status`, `agents_send`, `panels_create` (a new agent tab in an existing Pane), `panels_input` (exact keys, for menus and prompts), `repos_list`, `repos_add`, `panes_list`, `workspace_state`, `panes_git_status`, `panes_archive`, `panes_restore`, `links_create`, `docs_search`, `docs_read`, `doctor`, `notify` (ask the person and wait for the answer), and the seven loop tools (`loops_list`, `loops_create`, `loops_update`, `loops_run`, `loops_pause`, `loops_resume`, `loops_delete`) |
+| `core` (default) | `agents_start`, `agents_status`, `agents_send`, `panels_create` (a new agent tab in an existing Pane), `panels_input` (exact keys, for menus and prompts), `panels_open` (show a page or file beside the agent), `repos_list`, `repos_add`, `panes_list`, `workspace_state`, `panes_git_status`, `panes_adopt`, `panes_rename`, `panes_archive`, `panes_restore`, `sessions_create`, `sessions_associate`, `sessions_pin`, `links_create`, `docs_search`, `docs_read`, `doctor`, `notify` (ask the person and wait for the answer), the four `workspace` tools, and the seven loop tools (`loops_list`, `loops_create`, `loops_update`, `loops_run`, `loops_pause`, `loops_resume`, `loops_delete`) |
 | `agents` | the three agent tasks, `workspace_state`, `watch` |
 | `panes` | create, adopt, list, archive, restore, pin, unpin, rename, focus, cost, run and stop the run script, move to a folder, `folders_list`, `folders_create` |
-| `panels` | create, list, output, screen, input, submit, submit-composer, wait |
+| `panels` | create, open, list, output, screen, input, submit, submit-composer, wait |
+| `workspace` | `workspace_list`, `workspace_read`, `workspace_write`, `workspace_exec`: find your other machines, move files to and from them, and run commands there (see [Workspaces](RUNPANE_WORKSPACES.md)) |
 | `git` | status, commit, push, pull, fetch, rebase onto main, squash-rebase onto main, stash, stash-pop, soft reset (`panes_*`) |
 | `sessions` | the eight `sessions_*` tools and the three named-lock tools (`lock_acquire`, `lock_release`, `lock_list`) |
 | `loops` | `loops_list`, `loops_create`, `loops_update`, `loops_run`, `loops_pause`, `loops_resume`, `loops_delete` (see [Loops](LOOPS.md)) |
@@ -158,7 +159,7 @@ Only JSON-RPC goes to stdout, and the server exits when stdin closes. Cancelling
 Tools are generated from [`contracts/runpane/contract.json`](../contracts/runpane/contract.json) when the server starts:
 
 - Every command that has result `jsonSchemas` becomes a tool. Spaces and hyphens in the name become underscores: `repos list` → `repos_list`, `panels submit-composer` → `panels_submit_composer`.
-- The tool's inputs are the flags from the command's `usage` lines and its `agentContext` arguments, in camelCase (`--timeout-ms` → `timeoutMs`). Flags that take a value are strings and flags without one are booleans, unless the `agentContext` argument declares a JSON `schema` (an enum, array, or object); array and object values reach the CLI as JSON (`--choices=[...]`). Daemon commands also accept `paneDir`.
+- The tool's inputs are the flags from the command's `usage` lines and its `agentContext` arguments, in camelCase (`--timeout-ms` → `timeoutMs`). Flags that take a value are strings and flags without one are booleans, unless the `agentContext` argument declares a JSON `schema` (an enum, array, or object); array and object values reach the CLI as JSON (`--choices=[...]`). Daemon commands also accept `paneDir`. Positional `agentContext` arguments become string inputs too: `<machine>` and `<path>` go where the first usage line puts them, and `-- <command>` becomes `command`, passed after `--`.
 - The description combines the command's summary, details, and notes from `agentContext`. The title is `runpane <command>`.
 - The output schema is the command's `*Result` JSON schema. Every call runs `runpane <command> … --json` and returns its JSON output unchanged, both as `structuredContent` and as a text block for older clients.
 - A non-zero exit returns a tool error (`isError: true`). A CLI failure reads as its message, a `Next:` line that names tools instead of CLI commands, and a `Code:` line; a command's own `ok: false` result comes back as its JSON. Bad arguments are tool errors too, so the model can correct them. An unknown tool name is a JSON-RPC Invalid Params error (`-32602`).
@@ -171,7 +172,7 @@ A few flags are left out. `--json` is always passed. `--follow` and `--until-eve
 
 ## Confirmation
 
-Mutating tools keep the CLI's confirmation rule. Every command whose usage includes `--yes` gets a `yes` input; `notify` and `report` have none. Without `yes: true`, the call fails with the CLI's own refusal and changes nothing. Tools are also annotated with `readOnlyHint`, so clients can auto-approve read-only tools and prompt for the rest.
+Mutating tools keep the CLI's confirmation rule. Every command whose usage includes `--yes` gets a `yes` input; without `yes: true`, the call fails with the CLI's own refusal and changes nothing. `workspace_exec` and `workspace_write` have no `--yes` in the CLI, so the server asks for `yes: true` itself and refuses the call before anything runs. `notify`, `report`, and the `sessions_*` and lock tools have no `yes`. Tools are also annotated with `readOnlyHint`, so clients can auto-approve read-only tools and prompt for the rest.
 
 ## Agent guidance
 

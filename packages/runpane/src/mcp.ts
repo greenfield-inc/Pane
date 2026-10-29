@@ -25,8 +25,11 @@ const INSTRUCTIONS = [
   '- For the common jobs, prefer the composite tools: `agents_start` starts an agent on a task (in a new Pane for new work, or as a tab in an existing Pane with `pane: <id>`) and returns its pane and panel ids and a pane:// link; `agents_status` checks on it; `agents_send` sends it a follow-up message.',
   '- `agents_send` types text, queues with Tab while Codex is working, and submits with Enter when ready. To answer a menu or prompt in an agent\'s terminal, send exact keys with `panels_input` (Down arrow \\u001b[B, Enter \\r, Escape \\u001b) and check the screen with `agents_status` afterwards. Ask the user before answering trust or permission prompts.',
   '- Discover before you change anything. Repo selectors come from `repos_list` (or `active`); pane ids come from `panes_list`, `workspace_state`, or `agents_start`; panel ids from `agents_start` or `panels_list`.',
-  '- Tools with a `yes` input change Pane state. Pass `yes: true` only when the user asked for that change; without it the call is refused and nothing happens.',
-  '- `panes_archive` removes a Pane\'s worktree; `panes_restore` undoes it. `links_create` returns a pane:// link the user can click to see any Pane, panel, repo, or Session.',
+  '- Tools with a `yes` input change state. Pass `yes: true` only when the user asked for that change; without it the call is refused and nothing happens.',
+  '- `panes_archive` removes a Pane\'s worktree; `panes_restore` undoes it. `panes_adopt` makes a Pane for a git worktree that already exists, without changing it; `panes_rename` renames a Pane. `links_create` returns a pane:// link the user can click to see any Pane, panel, repo, or Session.',
+  '- To show the user a page, plan, report, file, or local dev server, open it as a tab beside the agent with `panels_open` instead of the system browser.',
+  '- A Session groups the Panes of one larger piece of work: `sessions_create` makes one, `sessions_associate` adds a Pane to it, and `sessions_pin` pins it in the sidebar.',
+  '- To run work on another machine in the user\'s tailnet, find it with `workspace_list`, then `workspace_exec` runs a command in its shell (its own `runpane` is first on PATH, so `runpane agents start ...` there starts an agent in that machine\'s Pane). `workspace_write` stages a file there (a prompt file, say) and `workspace_read` reads one back; both take any path form.',
   '- `loops_create` schedules an agent or command to run on a cron schedule; `loops_list` shows each loop\'s next run and recent runs.',
   '- Before guessing how Pane works, call `docs_search`, then `docs_read` on a path it returns. The same docs are available as `runpane-docs:` resources.',
   '- Tools have no stdin: send exact terminal bytes (newlines, Ctrl-C as \\u0003) as text instead of a file.',
@@ -209,6 +212,9 @@ async function callTool(
   rewrite: (text: string) => string,
   env: NodeJS.ProcessEnv,
 ): Promise<ToolResult> {
+  if (tool.confirmsInServer && input.yes !== true) {
+    return errorResult(`${tool.name} changes state on a machine, so this server refused the call and nothing ran. Pass \`yes: true\` only when the user asked for this change.`);
+  }
   let argv: string[];
   try {
     argv = buildToolArgv(tool, input);

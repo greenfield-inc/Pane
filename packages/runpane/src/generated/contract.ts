@@ -347,7 +347,15 @@ export const RUNPANE_CONTRACT = {
       "wrappers": [
         "npm"
       ],
-      "localControl": true
+      "localControl": true,
+      "openWorld": true,
+      "toolsets": [
+        "core",
+        "workspace"
+      ],
+      "jsonSchemas": [
+        "workspaceListResult"
+      ]
     },
     {
       "name": "workspace enable",
@@ -382,19 +390,35 @@ export const RUNPANE_CONTRACT = {
       "wrappers": [
         "npm"
       ],
-      "localControl": true
+      "localControl": true,
+      "openWorld": true,
+      "toolsets": [
+        "core",
+        "workspace"
+      ],
+      "jsonSchemas": [
+        "workspaceReadResult"
+      ]
     },
     {
       "name": "workspace write",
-      "summary": "Write stdin to a file on a machine on your tailnet, creating parent folders.",
+      "summary": "Write --content or stdin to a file on a machine on your tailnet, creating parent folders.",
       "usage": [
-        "runpane workspace [<machine>] write <path> [--json]"
+        "runpane workspace [<machine>] write <path> [--content <text>] [--json]"
       ],
       "mutates": true,
       "wrappers": [
         "npm"
       ],
-      "localControl": true
+      "localControl": true,
+      "openWorld": true,
+      "toolsets": [
+        "core",
+        "workspace"
+      ],
+      "jsonSchemas": [
+        "workspaceWriteResult"
+      ]
     },
     {
       "name": "workspace exec",
@@ -406,7 +430,15 @@ export const RUNPANE_CONTRACT = {
       "wrappers": [
         "npm"
       ],
-      "localControl": true
+      "localControl": true,
+      "openWorld": true,
+      "toolsets": [
+        "core",
+        "workspace"
+      ],
+      "jsonSchemas": [
+        "workspaceExecResult"
+      ]
     },
     {
       "name": "handoff",
@@ -466,6 +498,7 @@ export const RUNPANE_CONTRACT = {
       "mutates": true,
       "additive": true,
       "toolsets": [
+        "core",
         "panes"
       ],
       "jsonSchemas": [
@@ -536,6 +569,7 @@ export const RUNPANE_CONTRACT = {
       "mutates": true,
       "idempotent": true,
       "toolsets": [
+        "core",
         "panes"
       ],
       "jsonSchemas": [
@@ -593,7 +627,11 @@ export const RUNPANE_CONTRACT = {
         "panelOpenRequest",
         "panelOpenResult"
       ],
-      "localControl": true
+      "localControl": true,
+      "toolsets": [
+        "core",
+        "panels"
+      ]
     },
     {
       "name": "panels list",
@@ -1305,6 +1343,7 @@ export const RUNPANE_CONTRACT = {
       "mutates": true,
       "additive": true,
       "toolsets": [
+        "core",
         "sessions"
       ],
       "jsonSchemas": [
@@ -1368,6 +1407,7 @@ export const RUNPANE_CONTRACT = {
       "additive": true,
       "idempotent": true,
       "toolsets": [
+        "core",
         "sessions"
       ],
       "jsonSchemas": [
@@ -1478,6 +1518,7 @@ export const RUNPANE_CONTRACT = {
       "mutates": true,
       "idempotent": true,
       "toolsets": [
+        "core",
         "sessions"
       ],
       "jsonSchemas": [
@@ -2122,6 +2163,11 @@ export const RUNPANE_CONTRACT = {
         "name": "--action",
         "value": "<json>",
         "description": "notify --ui info: one button as a JSON object {label, url}."
+      },
+      {
+        "name": "--content",
+        "value": "<text>",
+        "description": "Text that workspace write writes instead of stdin."
       }
     ],
     "localBoolean": [
@@ -12861,6 +12907,305 @@ export const RUNPANE_CONTRACT = {
           "additionalProperties": false
         }
       ]
+    },
+    "workspaceMachine": {
+      "type": "object",
+      "required": [
+        "name",
+        "dnsName",
+        "os",
+        "online",
+        "ips",
+        "self",
+        "owner",
+        "mine"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Tailscale machine name; pass it as `machine`."
+        },
+        "dnsName": {
+          "type": "string"
+        },
+        "os": {
+          "enum": [
+            "macOS",
+            "Windows",
+            "Linux"
+          ]
+        },
+        "online": {
+          "type": "boolean"
+        },
+        "ips": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "self": {
+          "type": "boolean",
+          "description": "This machine."
+        },
+        "owner": {
+          "type": "string",
+          "description": "Tailscale login of the machine's owner."
+        },
+        "mine": {
+          "type": "boolean",
+          "description": "Signed in to this machine's own login."
+        }
+      }
+    },
+    "workspaceListResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "self",
+        "machines"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "self": {
+          "allOf": [
+            {
+              "$ref": "#/jsonSchemas/workspaceMachine"
+            }
+          ],
+          "properties": {
+            "workspace": {
+              "description": "This machine's workspace state; null when Pane is not running.",
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "enabled",
+                    "state"
+                  ],
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "state": {
+                      "enum": [
+                        "on",
+                        "off"
+                      ]
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "fix": {
+                      "type": "string"
+                    },
+                    "machineName": {
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "machines": {
+          "type": "array",
+          "items": {
+            "allOf": [
+              {
+                "$ref": "#/jsonSchemas/workspaceMachine"
+              }
+            ],
+            "required": [
+              "joined"
+            ],
+            "properties": {
+              "joined": {
+                "type": "boolean",
+                "description": "Its Pane answers workspace read, write, and exec."
+              },
+              "info": {
+                "type": "object",
+                "required": [
+                  "hostname",
+                  "os",
+                  "isWsl",
+                  "shell",
+                  "homeDir",
+                  "wslDistros"
+                ],
+                "properties": {
+                  "hostname": {
+                    "type": "string"
+                  },
+                  "os": {
+                    "enum": [
+                      "macOS",
+                      "Windows",
+                      "Linux"
+                    ]
+                  },
+                  "isWsl": {
+                    "type": "boolean"
+                  },
+                  "shell": {
+                    "type": "string"
+                  },
+                  "homeDir": {
+                    "type": "string"
+                  },
+                  "wslDistros": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "error": {
+                "type": "string",
+                "description": "Why it does not answer."
+              }
+            }
+          }
+        }
+      }
+    },
+    "workspaceReadResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "machine",
+        "path",
+        "encoding",
+        "content",
+        "bytes"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "machine": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The machine read from; null is this machine."
+        },
+        "path": {
+          "type": "string"
+        },
+        "encoding": {
+          "enum": [
+            "utf8",
+            "base64"
+          ]
+        },
+        "content": {
+          "type": "string",
+          "description": "File text, or base64 bytes; a directory lists its entries."
+        },
+        "bytes": {
+          "type": "number"
+        }
+      }
+    },
+    "workspaceWriteResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "machine",
+        "path",
+        "bytes"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "machine": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The machine written to; null is this machine."
+        },
+        "path": {
+          "type": "string"
+        },
+        "bytes": {
+          "type": "number"
+        }
+      }
+    },
+    "workspaceExecResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "machine",
+        "os",
+        "shell",
+        "cwd",
+        "exitCode",
+        "signal",
+        "timedOut",
+        "stdout",
+        "stderr"
+      ],
+      "properties": {
+        "ok": {
+          "type": "boolean",
+          "description": "The command exited 0."
+        },
+        "machine": {
+          "type": "string"
+        },
+        "os": {
+          "enum": [
+            "macOS",
+            "Windows",
+            "Linux"
+          ]
+        },
+        "shell": {
+          "type": "string"
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "exitCode": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "signal": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "timedOut": {
+          "type": "boolean"
+        },
+        "stillRunning": {
+          "const": true,
+          "description": "It timed out and could not be stopped."
+        },
+        "stdout": {
+          "type": "string"
+        },
+        "stderr": {
+          "type": "string"
+        }
+      }
     }
   },
   "agentContext": {
@@ -13496,7 +13841,7 @@ export const RUNPANE_CONTRACT = {
             "name": "--toolsets",
             "value": "<name,...>",
             "required": false,
-            "description": "Comma-separated toolsets to serve: core (default), all, read, repos, panes, panels, agents, sessions, loops, git, docs, links, admin."
+            "description": "Comma-separated toolsets to serve: core (default), all, read, repos, panes, panels, agents, sessions, loops, workspace, git, docs, links, admin."
           },
           {
             "name": "--read-only",
@@ -16812,6 +17157,9 @@ export const RUNPANE_CONTRACT = {
         ],
         "notes": [
           "A machine has joined when Pane runs there with workspaces on; it answers on https://<machine>.<tailnet>.ts.net:8443."
+        ],
+        "jsonSchemas": [
+          "workspaceListResult"
         ]
       },
       "workspace enable": {
@@ -16883,12 +17231,15 @@ export const RUNPANE_CONTRACT = {
         ],
         "notes": [
           "--json returns content with encoding utf8 or base64."
+        ],
+        "jsonSchemas": [
+          "workspaceReadResult"
         ]
       },
       "workspace write": {
         "name": "workspace write",
-        "summary": "Write stdin to a file on a machine on your tailnet, creating parent folders.",
-        "details": "Takes the same path forms as workspace read. Content comes from stdin and replaces the file.",
+        "summary": "Write --content or stdin to a file on a machine on your tailnet, creating parent folders.",
+        "details": "Takes the same path forms as workspace read. The content replaces the file.",
         "requiresPaneDaemon": false,
         "mutates": true,
         "arguments": [
@@ -16903,6 +17254,12 @@ export const RUNPANE_CONTRACT = {
             "description": "Absolute path in any form."
           },
           {
+            "name": "--content",
+            "value": "<text>",
+            "required": false,
+            "description": "Text that replaces the file. Without it, stdin is written, so a caller with no stdin (an MCP tool) writes an empty file."
+          },
+          {
             "name": "--json",
             "required": false,
             "description": "Print machine-readable output."
@@ -16913,6 +17270,9 @@ export const RUNPANE_CONTRACT = {
         ],
         "notes": [
           "Binary stdin is sent as base64 and written byte for byte."
+        ],
+        "jsonSchemas": [
+          "workspaceWriteResult"
         ]
       },
       "workspace exec": {
@@ -16956,6 +17316,9 @@ export const RUNPANE_CONTRACT = {
         "notes": [
           "This is SSH-level power: a local agent's sandbox and permission prompts see only runpane workspace exec, not what runs on the other machine.",
           "Pass the command as one quoted string; several words after -- are joined with spaces, so their own quoting is lost."
+        ],
+        "jsonSchemas": [
+          "workspaceExecResult"
         ]
       },
       "handoff": {
