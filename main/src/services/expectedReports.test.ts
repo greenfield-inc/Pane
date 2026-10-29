@@ -43,9 +43,9 @@ describe('ExpectedReportTracker', () => {
       lastOutput: () => new Promise(resolve => { release = resolve; }) });
     tracker.arm('panel-1', '2026-10-15T10:00:00.000Z');
     journal.appendPaneEntry('pane-1', { kind: 'agent.ready', panelId: 'panel-1', source: 'agent' });
-    expect(() => tracker.arm('panel-1', '2026-10-15T10:01:00.000Z')).toThrow(/wait/i);
+    expect(() => tracker.arm('panel-1', '2026-10-15T10:01:00.000Z')).toThrow(/owes a report/);
     journal.appendPaneEntry('pane-1', { kind: 'agent.report', panelId: 'panel-1', source: 'agent' });
-    expect(() => tracker.arm('panel-1', '2026-10-15T10:01:00.000Z')).toThrow(/wait/i);
+    expect(() => tracker.arm('panel-1', '2026-10-15T10:01:00.000Z')).toThrow(/owes a report/);
     release({ text: 'A finished', source: 'screen' });
     await new Promise(resolve => setTimeout(resolve, 0));
     expect(journal.readAfter(0, { kinds: ['agent.report.missing'] }).entries).toEqual([]);
