@@ -130,6 +130,8 @@ export function RemotePwaApp() {
   const autoConnectStartedRef = useRef(false);
   const profilesLoadedRef = useRef(false);
   const activeRuntimeRef = useRef<RemoteRuntimeAdapter | null>(null);
+  /** Counts connection drops, so a request can tell it was held through one. */
+  const dropsRef = useRef(0);
   const panelLoadRequestRef = useRef(0);
   const sidebarOpenerRef = useRef<HTMLElement | null>(null);
   const createSessionOpenerRef = useRef<HTMLElement | null>(null);
@@ -633,13 +635,15 @@ export function RemotePwaApp() {
     const runtime = adapter;
     const sessionId = selectedSessionId;
     const requestedFrom = useRemoteSessionStore.getState().selectedPanelId;
+    const drops = dropsRef.current;
     try {
       const panel = await runtime.createTerminalPanel(sessionId, options);
       // The host or the open Pane may have changed while the tab was created.
       if (runtime !== activeRuntimeRef.current) return;
       upsertPanel(panel);
-      // A create held through a dropped connection can land later; it opens only if the person stayed put.
-      if (!stillOn(sessionId, requestedFrom)) return;
+      // A create held through a dropped connection lands later, while the person may be typing elsewhere:
+      // it joins the tab strip without taking over.
+      if (drops !== dropsRef.current || !stillOn(sessionId, requestedFrom)) return;
       setSelectedPanel(panel.id);
       await runtime.setActivePanel(sessionId, panel.id);
     } catch (error) {
@@ -655,12 +659,13 @@ export function RemotePwaApp() {
     const runtime = adapter;
     const sessionId = selectedSessionId;
     const requestedFrom = useRemoteSessionStore.getState().selectedPanelId;
+    const drops = dropsRef.current;
     try {
       const panel = await runtime.createBrowserPanel(sessionId);
       // The host or the open Pane may have changed while the tab was created.
       if (runtime !== activeRuntimeRef.current) return;
       upsertPanel(panel);
-      if (!stillOn(sessionId, requestedFrom)) return;
+      if (drops !== dropsRef.current || !stillOn(sessionId, requestedFrom)) return;
       setSelectedPanel(panel.id);
       await runtime.setActivePanel(sessionId, panel.id);
     } catch (error) {
@@ -801,6 +806,7 @@ export function RemotePwaApp() {
   useEffect(() => {
     if (!adapter) return;
     const unsubscribeStatus = adapter.onStatus(state => {
+      if (state.status !== 'connected') dropsRef.current += 1;
       updateConnection({ connectionStatus: state.status, lastError: state.lastError, lastSeenAt: state.lastSeenAt, updateIntent: state.updateIntent });
     });
     return unsubscribeStatus;
