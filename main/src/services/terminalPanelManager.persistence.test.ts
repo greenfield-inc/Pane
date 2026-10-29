@@ -1035,6 +1035,27 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void
     }
   });
 
+  it('marks a Claude Session folder trusted before Claude starts there, and leaves other agents alone', async () => {
+    vi.stubEnv('CLAUDE_CONFIG_DIR', tempDir);
+    const configPath = path.join(tempDir, '.claude.json');
+    fs.writeFileSync(configPath, JSON.stringify({ numStartups: 3 }));
+    try {
+      const claude = makePanel('claude-session-panel');
+      claude.state.customState = { agentType: 'claude', orchestrationSessionId: 'claude-session' };
+      const codex = makePanel('codex-session-panel');
+      codex.state.customState = { agentType: 'codex', orchestrationSessionId: 'codex-session' };
+      await startTerminal(claude);
+      await startTerminal(codex);
+      expect(JSON.parse(fs.readFileSync(configPath, 'utf8'))).toEqual({
+        numStartups: 3,
+        // Claude keys projects by forward-slash paths on every OS.
+        projects: { [sessionWorkspacePath('claude-session').replace(/\\/g, '/')]: { hasTrustDialogAccepted: true } },
+      });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it.each([
     { input: `${PANE_CHAT_MIGRATE_OFFER_OPENING} Ask whether to bring existing sessions in.`, delivered: true },
     { input: 'Read the guide and initialize Pane Chat.', delivered: false },

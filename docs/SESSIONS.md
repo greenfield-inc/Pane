@@ -573,6 +573,19 @@ runpane sessions associate --session <session-id-or-name> --pane <pane-id> --jso
 runpane sessions detach --session <session-id-or-name> --pane <pane-id> --json
 ```
 
+`sessions create` starts the Session's agent, as opening it in the app does.
+To give it a first prompt, wait for the agent, then submit:
+
+```text
+runpane panels wait --panel <panelId> --for ready --json
+runpane panels submit --panel <panelId> --text "<prompt>" --yes --json
+```
+
+When a Session's agent is Claude, Pane marks the Session's own folder trusted
+in Claude's config before it starts, so Claude does not stop at its "trust
+this folder" prompt. Pane does this only for its Session folders, never for a
+project.
+
 Use `--from-json` for structured create and update input. Keep multiline
 context, evidence, links, and reports in the JSON file or stdin; do not put
 external text into shell source. Re-read mutation results and inspect the

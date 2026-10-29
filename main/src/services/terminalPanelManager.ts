@@ -34,6 +34,7 @@ import { createShellStartupPromptWatcher } from './shellStartupPrompts';
 import { PaneError, paneErrorText } from '../../../shared/paneError';
 import { isProcessAlive, waitForProcessesToExit } from '../utils/processTree';
 import { ArchiveProcessTracker, type ArchiveProcessIdentity } from './archiveProcessTracker';
+import { trustClaudeFolder } from './loops/claudeFolderTrust';
 import {
   type FlowControlRecord,
   createFlowControlRecord,
@@ -1701,6 +1702,10 @@ export class TerminalPanelManager extends EventEmitter {
         wslContext = sessionWSLContext(record, cwd);
         sessionRuntimeRc = sessionRuntimePath(path.join(cwd, '.pane-runtime', 'bashrc'), record);
         cwd = sessionRuntimePath(cwd, record);
+      } else if (sessionState.agentType === 'claude') {
+        // Claude asks to trust every folder it has not seen. A Session folder is
+        // Pane's own and holds no project code; a failed write only means the prompt shows.
+        await trustClaudeFolder(cwd).catch(error => console.warn(`[TerminalPanelManager] Could not mark Session folder ${cwd} trusted for Claude:`, error));
       }
     }
 

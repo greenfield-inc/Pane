@@ -267,29 +267,15 @@ describe('startLoopRun for a Session loop', () => {
 });
 
 describe('prepareLoopSession', () => {
-  const noTrust = async () => undefined;
-
-  it('marks the Session folder trusted for a Claude loop only, after the Session is set up', async () => {
-    const trusted: string[] = [];
-    const trust = async (sessionId: string) => { trusted.push(sessionId); };
-    await prepareLoopSession(sessionRegistry().registry, 'new', { name: 'Morning standup', agent: 'claude' }, trust);
-    await prepareLoopSession(sessionRegistry({ session: { agent: 'codex' } }).registry, SESSION_ID, { name: 'Standup', agent: 'codex' }, trust);
-    expect(trusted).toEqual([SESSION_ID]);
-    // A refused save trusts nothing.
-    const wrapped = sessionRegistry({ session: { launchCommand: "sh -c 'claude'" } });
-    await expect(prepareLoopSession(wrapped.registry, SESSION_ID, { name: 'Standup', agent: 'claude' }, trust)).rejects.toMatchObject({ code: 'ERR_LOOP_INVALID' });
-    expect(trusted).toEqual([SESSION_ID]);
-  });
-
   it('creates a new Session named after the loop, already unattended by its default command', async () => {
     const { registry, calls } = sessionRegistry();
-    await expect(prepareLoopSession(registry, 'new', { name: 'Morning standup', agent: 'claude' }, noTrust)).resolves.toBe(SESSION_ID);
+    await expect(prepareLoopSession(registry, 'new', { name: 'Morning standup', agent: 'claude' })).resolves.toBe(SESSION_ID);
     expect(calls).toEqual([{ channel: 'runpane:sessions:create', request: { name: 'Morning standup', agent: 'claude', launchCommand: '' } }]);
   });
 
   it('finds a Session by name and adds the missing unattended flag to its custom command', async () => {
     const { registry, calls } = sessionRegistry({ session: { agent: 'codex', launchCommand: 'codex --model gpt-5' } });
-    await expect(prepareLoopSession(registry, 'Standups', { name: 'Standup', agent: 'codex' }, noTrust)).resolves.toBe(SESSION_ID);
+    await expect(prepareLoopSession(registry, 'Standups', { name: 'Standup', agent: 'codex' })).resolves.toBe(SESSION_ID);
     expect(calls).toEqual([
       { channel: 'runpane:sessions:get', request: { name: 'Standups' } },
       { channel: 'runpane:sessions:update', request: { selector: { sessionId: SESSION_ID }, input: { launchCommand: 'codex --yolo --model gpt-5', source: 'user' } } },
@@ -298,7 +284,7 @@ describe('prepareLoopSession', () => {
 
   it('adds the flag to the agent itself, not because a quoted argument mentions it', async () => {
     const { registry, calls } = sessionRegistry({ session: { launchCommand: 'claude --append-system-prompt "Never use --dangerously-skip-permissions on production"' } });
-    await prepareLoopSession(registry, SESSION_ID, { name: 'Standup', agent: 'claude' }, noTrust);
+    await prepareLoopSession(registry, SESSION_ID, { name: 'Standup', agent: 'claude' });
     expect(calls[1]).toEqual({ channel: 'runpane:sessions:update', request: { selector: { sessionId: SESSION_ID }, input: {
       launchCommand: 'claude --dangerously-skip-permissions --append-system-prompt "Never use --dangerously-skip-permissions on production"', source: 'user',
     } } });
@@ -307,7 +293,7 @@ describe('prepareLoopSession', () => {
   it('refuses a wrapped or compound launch command it cannot change safely, and changes nothing', async () => {
     for (const launchCommand of ["sh -c 'codex --model gpt-5'", 'codex --model gpt-5 && say done', 'OPENAI_API_KEY=x codex', 'npx codex']) {
       const { registry, calls } = sessionRegistry({ session: { agent: 'codex', launchCommand } });
-      await expect(prepareLoopSession(registry, SESSION_ID, { name: 'Standup', agent: 'codex' }, noTrust)).rejects.toMatchObject({
+      await expect(prepareLoopSession(registry, SESSION_ID, { name: 'Standup', agent: 'codex' })).rejects.toMatchObject({
         code: 'ERR_LOOP_INVALID',
         message: `Session Standups launches its agent with \`${launchCommand}\`, which Pane cannot safely change to skip permission prompts. Nothing was saved.`,
       });
@@ -317,11 +303,11 @@ describe('prepareLoopSession', () => {
 
   it('leaves a command that already skips prompts alone, and switches a Session to the loop\'s agent', async () => {
     const unattended = sessionRegistry({ session: { agent: 'cursor', launchCommand: 'cursor-agent --trust --force' } });
-    await prepareLoopSession(unattended.registry, SESSION_ID, { name: 'Standup', agent: 'cursor' }, noTrust);
+    await prepareLoopSession(unattended.registry, SESSION_ID, { name: 'Standup', agent: 'cursor' });
     expect(unattended.calls.map(call => call.channel)).toEqual(['runpane:sessions:get']);
 
     const other = sessionRegistry({ session: { agent: 'codex', launchCommand: 'codex' } });
-    await prepareLoopSession(other.registry, SESSION_ID, { name: 'Standup', agent: 'claude' }, noTrust);
+    await prepareLoopSession(other.registry, SESSION_ID, { name: 'Standup', agent: 'claude' });
     expect(other.calls[1]).toEqual({ channel: 'runpane:sessions:update', request: { selector: { sessionId: SESSION_ID }, input: { agent: 'claude', source: 'user' } } });
   });
 });
