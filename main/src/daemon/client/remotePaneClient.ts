@@ -456,7 +456,7 @@ export class RemotePaneClient {
       const reconnect = counts && ++this.failedRequestsInARow >= MAX_FAILED_REQUESTS_IN_A_ROW;
       const failure = new PaneError(nothingToCheck ? 'ERR_REMOTE_TRANSPORT' : 'ERR_REMOTE_DELIVERY_UNKNOWN',
         nothingToCheck ? `Remote connection interrupted: the host response was incomplete.${reconnect ? ' Pane is reconnecting.' : ''}`
-          : 'Delivery unknown: the remote response was interrupted. The action may have completed; it was not replayed.',
+          : `Delivery unknown: the remote response was interrupted. The action may have completed${retriesRequest(channel) ? '' : '; it was not replayed'}.`,
         reconnect ? 'Wait for reconnection and check the destination before trying again.' : 'Check the destination before trying again.');
       if (reconnect) {
         this.handleUnexpectedDisconnect(`${MAX_FAILED_REQUESTS_IN_A_ROW} requests in a row failed: ${getErrorMessage(error, 'no response')}`, true);
