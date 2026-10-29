@@ -16957,7 +16957,7 @@ export const RUNPANE_CONTRACT = {
           "sessionResult"
         ],
         "notes": [
-          "Structured input accepts launchCommand (full command including arguments; empty uses the selected agent default) and profile (Session behavior instructions). Creating/opening a Session submits no automatic prompt. Changes apply on next terminal launch.",
+          "Structured input accepts launchCommand (full command including arguments; empty uses the selected agent default) and profile (Session behavior instructions). Creating/opening a Session submits no automatic prompt. Create starts the Session's agent; to give it a first prompt, run `runpane panels wait --panel <panelId> --for ready`, then `runpane panels submit --panel <panelId>`. Changes apply on next terminal launch.",
           "JSON isPinned: true/false sets the UI pin star. Creation defaults to false; update preserves the pin when omitted.",
           "Create-time isPinned requires an updated Pane app. Older apps may ignore the field; use sessions pin after creation and read back the result.",
           "runtime appears only on WSL Sessions (\"wsl\", with wslDistribution, Windows only). A Session on the native host has no runtime field on any OS; \"windows\" is accepted on input as a legacy name for the native host and is not stored.",
@@ -17011,7 +17011,7 @@ export const RUNPANE_CONTRACT = {
           "sessionResult"
         ],
         "notes": [
-          "Structured input accepts launchCommand (full command including arguments; empty uses the selected agent default) and profile (Session behavior instructions). Creating/opening a Session submits no automatic prompt. Changes apply on next terminal launch.",
+          "Structured input accepts launchCommand (full command including arguments; empty uses the selected agent default) and profile (Session behavior instructions). Creating/opening a Session submits no automatic prompt. Create starts the Session's agent; to give it a first prompt, run `runpane panels wait --panel <panelId> --for ready`, then `runpane panels submit --panel <panelId>`. Changes apply on next terminal launch.",
           "JSON isPinned: true/false sets the UI pin star. Creation defaults to false; update preserves the pin when omitted.",
           "Payload fields (all optional on update; name required on create): name, goal, context, nextAction, launchCommand, profile (strings); isPinned and, on update, archived (booleans); agent (codex|claude|cursor); decisions and blockers (arrays of strings); evidence and outputs (arrays of links); create also takes runtime (windows|wsl) and wslDistribution; update also takes report, expectedRevision (the revision you read; the update is refused if the Session has moved on) and source (user|agent).",
           "A link is {\"label\": non-empty string, \"url\": an https://, http://, file:// or grain:// URL, \"addedAt\": ISO 8601 date such as 2026-10-14T09:30:00Z, \"kind\"?: evidence|output|ticket|pull-request|other, \"provenance\"?: string}.",

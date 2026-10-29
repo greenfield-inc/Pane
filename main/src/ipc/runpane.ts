@@ -598,6 +598,8 @@ export function registerRunpaneHandlers(
       const manager = requireOrchestrationSessionManager(services);
       const input = parseOrchestrationSessionCreateRequest(request);
       const view = await manager.create(input);
+      // Start the agent now, as opening the Session in the app would, so a caller can wait for it and send a first prompt.
+      await terminalPanelManager.initializeTerminal(view.panel, view.internalSession.worktreePath);
       return { ok: true, session: view.session, panelId: view.panel.id, internalSessionId: view.internalSession.id };
     }, result => ({ resultCount: 1, panelId: result.panelId }));
   });

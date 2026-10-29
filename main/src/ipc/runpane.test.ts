@@ -412,6 +412,15 @@ describe('runpane IPC handlers', () => {
     vi.mocked(terminalPanelManager.getCleanTerminalScrollback).mockResolvedValue(null);
   });
 
+  it('starts a created Session\'s agent so a first prompt can follow without opening it', async () => {
+    const panel = { id: 'coordinator-panel' };
+    const create = vi.fn(async () => ({ session: { id: 'coordinator' }, panel, internalSession: { id: 'coordinator-owner', worktreePath: '/sessions/coordinator' } }));
+    // SAFETY: This command only reaches create; the stub reports a Session result.
+    const registry = createRegistry(createServices({ orchestrationSessionManager: { create } as never }));
+    await registry.invoke('runpane:sessions:create', [{ name: 'Coordinator' }]);
+    expect(terminalPanelManager.initializeTerminal).toHaveBeenCalledWith(panel, '/sessions/coordinator');
+  });
+
   it('preserves the requested Session pin through daemon create decoding', async () => {
     const create = vi.fn(async (input: OrchestrationSessionCreateInput) => ({
       session: { id: 'coordinator', name: input.name, isPinned: input.isPinned ?? false },

@@ -271,7 +271,6 @@ export async function prepareLoopSession(
   commandRegistry: PaneCommandRegistry,
   target: string,
   loop: { name: string; agent: LoopAgent },
-  trustClaudeSessionFolder: (sessionId: string) => Promise<void>,
 ): Promise<string> {
   // An empty launch command means the template, whatever the app's default Session command is.
   const session = target === LOOP_NEW_SESSION
@@ -290,9 +289,6 @@ export async function prepareLoopSession(
       await commandRegistry.invoke('runpane:sessions:update', [{ selector: { sessionId: session.id }, input: { launchCommand: unattended, source: 'user' } }]);
     }
   }
-  // Claude asks whether to trust every folder it has not seen, and a Session's
-  // folder is Pane's own, with no project code. Cursor's template trusts with --trust.
-  if (loop.agent === 'claude') await trustClaudeSessionFolder(session.id);
   return session.id;
 }
 
