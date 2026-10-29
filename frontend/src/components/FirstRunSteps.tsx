@@ -42,7 +42,7 @@ function joinNames(names: string[]): string {
   return names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
 }
 
-export function sourceNames(sessions: ImportSession[]): string {
+function sourceNames(sessions: ImportSession[]): string {
   return joinNames([...new Set(sessions.map(session => SOURCE_NAMES[session.source]))]);
 }
 
