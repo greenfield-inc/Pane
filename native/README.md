@@ -28,7 +28,7 @@ Settings and the welcome screen link to the privacy policy at `https://runpane.c
 
 ## Machines
 
-Home shows the Pane logo, then a chip for each machine: the saved ones, plus your own Tailscale machines that **Your computers** lists as Ready or Needs password. Tap a chip to switch; a machine you never connected to connects in that tap and is saved, asking for its password first when it needs one. Long-press a chip for **Machine details** (address, status, color, Sign out). With one machine the chips hide. Pull to refresh reloads the list.
+Home shows the Pane logo, then the current machine at the left as its mark on its color, a divider, and a chip for each other machine in saved order: the saved ones, plus your own Tailscale machines that **Your computers** lists as Ready or Needs password. Chips show the first 10 characters of a name; VoiceOver and TalkBack read it in full. Tap a chip to switch; a machine you never connected to connects in that tap and is saved, asking for its password first when it needs one. Tap the current mark, or long-press a chip, for **Machine details** (address, status, color, Sign out). With one machine the chips hide. Pull to refresh reloads the list.
 
 Each machine has a color and its OS logo (`src/features/machines/`). The color comes from the machine's Tailscale name, or its label when paired with a code, and is never stored: names settle clashes alphabetically, so pairing order never changes a color. The logo is solid when reachable, pulses while the current machine reconnects (one 1.6 s rhythm; dimmed instead under Reduce Motion), and is dimmed when the machine can't be reached.
 
