@@ -1,5 +1,5 @@
 import { decodeUpdateIntent, type RemoteUpdateIntent } from './updateIntent';
-import { REMOTE_DEDUPLICATED_CHANNELS, REMOTE_READ_CHANNELS, REMOTE_RESTORE_CHANNELS, REMOTE_STREAMLESS_CHANNELS } from './readChannels';
+import { REMOTE_DEDUPLICATED_CHANNELS, REMOTE_READ_CHANNELS, REMOTE_RESTORE_CHANNELS, REMOTE_STREAMLESS_CHANNELS, REMOTE_WRITES_BUSY_CODE } from './readChannels';
 import { RecoveryCycle, backoffDelayMs } from './recoveryCycle';
 import type { ParsedSseEvent } from '../sseParser';
 import {
@@ -339,7 +339,7 @@ export class RemoteDaemonClient {
       let attemptSignal: LinkedSignal = { signal, done: () => {} };
       try {
         if (requestId !== undefined) {
-          await this.waitUntilConnected(signal);
+          await this.waitUntilConnected(started + REQUEST_RETRY_BUDGET_MS, signal);
           if (!this.hostDeduplicates) {
             // The host came back without de-duplication: resending is no longer safe.
             if (!dispatched) throw new PaneError('ERR_REMOTE_OFFLINE', 'The action was not sent: the host that came back cannot take a resent action safely.', 'Send it again now that the workspace is connected.');
@@ -384,7 +384,7 @@ export class RemoteDaemonClient {
           ? `Remote request failed with ${response.status}`
           : paneErrorText({ message: failure?.message ?? 'Remote request failed', next: failure?.next });
         // A de-duplicating host's own error envelope is the write's answer; a repeat would replay it.
-        if (!isRetryableResponse(response.status) || (requestId !== undefined && payload?.ok === false)) {
+        if (!isRetryableResponse(response.status) || (requestId !== undefined && payload?.ok === false && failure?.code !== REMOTE_WRITES_BUSY_CODE)) {
           throw new RemoteRequestError(message, response.status, failure?.code ?? null);
         }
         lastError = new Error(message);
@@ -417,7 +417,7 @@ export class RemoteDaemonClient {
     }
     if (requestId !== undefined) {
       throw new RemoteUnconfirmedResultError(
-        'Delivery unknown: Pane resent this action until the connection gave up, but the host never confirmed it. ' +
+        'Delivery unknown: Pane resent this action for up to five minutes, but the host never confirmed it. ' +
         'Check the current state before trying again.' +
         (lastError ? ` (${lastError.message})` : ''),
       );
@@ -618,12 +618,17 @@ export class RemoteDaemonClient {
     if (!this.hostDeduplicates) this.inputQueue.cancel(error);
   }
 
-  /** Resolves once connected; rejects with `RecoveryEndedError` when reconnecting gave up or the client disconnected. */
-  private waitUntilConnected(signal?: AbortSignal): Promise<void> {
+  /**
+   * Resolves once connected and before `deadline`; rejects with `RecoveryEndedError` when reconnecting
+   * gave up, the client disconnected, or the deadline passed. The deadline is checked again at the
+   * moment the connection returns, since time asleep passes it without any timer firing.
+   */
+  private waitUntilConnected(deadline: number, signal?: AbortSignal): Promise<void> {
     return new Promise((resolve, reject) => {
       let stop = () => {};
       const settle = (state: RemoteDaemonConnectionState): boolean => {
-        if (state.status === 'connected') resolve();
+        if (Date.now() >= deadline) reject(new RecoveryEndedError('The connection did not come back within five minutes.'));
+        else if (state.status === 'connected') resolve();
         else if (state.status === 'error' || state.status === 'local') reject(new RecoveryEndedError(state.lastError ?? 'The workspace disconnected.'));
         else return false;
         stop();
@@ -633,9 +638,11 @@ export class RemoteDaemonClient {
       if (signal?.aborted) { reject(createAbortError()); return; }
       const onAbort = () => { stop(); reject(createAbortError()); };
       const listener = (state: RemoteDaemonConnectionState) => { settle(state); };
+      const timer = this.schedule(() => settle(this.state), deadline - Date.now());
       this.statusListeners.add(listener);
       signal?.addEventListener('abort', onAbort, { once: true });
       stop = () => {
+        timer.cancel();
         this.statusListeners.delete(listener);
         signal?.removeEventListener('abort', onAbort);
       };

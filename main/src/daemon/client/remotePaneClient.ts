@@ -28,7 +28,7 @@ import { RemoteInputQueue } from '../../../../shared/remoteInputQueue';
 import { decodeListeningPortsSnapshot, type ListeningPortsSnapshot } from '../../../../shared/types/listeningPorts';
 import { localTargetOf } from '../../../../shared/utils/browserUrl';
 import { createPortTunnel, type PortTunnel } from './portTunnel';
-import { REMOTE_DEDUPLICATED_CHANNELS, REMOTE_READ_CHANNELS, REMOTE_RESTORE_CHANNELS } from '../../../../shared/remoteClient/readChannels';
+import { REMOTE_DEDUPLICATED_CHANNELS, REMOTE_READ_CHANNELS, REMOTE_RESTORE_CHANNELS, REMOTE_WRITES_BUSY_CODE } from '../../../../shared/remoteClient/readChannels';
 import { RecoveryCycle, backoffDelayMs } from '../../../../shared/remoteClient/recoveryCycle';
 import { PaneError } from '../../../../shared/paneError';
 import type {
@@ -463,7 +463,9 @@ export class RemotePaneClient {
     const started = Date.now();
     let sent = false;
     for (let attempt = 0; ; attempt += 1) {
-      const outcome = await this.whenConnected(this.writeResendBudgetMs - (Date.now() - started), signal);
+      const waited = await this.whenConnected(this.writeResendBudgetMs - (Date.now() - started), signal);
+      // Checked again before every send: time asleep can pass the deadline without any timer firing.
+      const outcome = waited === 'connected' && Date.now() - started >= this.writeResendBudgetMs ? 'timeout' : waited;
       if (outcome !== 'connected' && !sent) {
         throw new PaneError('ERR_REMOTE_OFFLINE',
           `Remote connection interrupted: the action was not sent because the connection to ${this.profile.label} was not restored. Nothing was changed.`,
@@ -479,7 +481,8 @@ export class RemotePaneClient {
       try {
         return await this.invokeRequest(channel, args, signal, requestId);
       } catch (error) {
-        const interrupted = error instanceof PaneError && INTERRUPTION_CODES.has(error.code);
+        // A host whose memory of answers is full refused the write before running it.
+        const interrupted = error instanceof PaneError && (INTERRUPTION_CODES.has(error.code) || error.code === REMOTE_WRITES_BUSY_CODE);
         if (!interrupted || signal?.aborted || this.closedByClient) throw error;
         const wait = backoffDelayMs(attempt, Math.random, this.maxRetryDelayMs);
         if (Date.now() - started + wait > this.writeResendBudgetMs) throw this.unconfirmedWrite('for five minutes');

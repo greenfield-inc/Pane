@@ -44,7 +44,14 @@ function createFakeHost() {
     const path = new URL(url).pathname;
     if (hostDown) throw new TypeError('Network request failed');
     if (path === '/health') return Response.json({ ok: true });
-    if (path === '/invoke') return invokeHandler(JSON.parse(String(init?.body)));
+    if (path === '/invoke') {
+      // Like fetch: an aborted request rejects even when the host never answers.
+      const signal = init?.signal;
+      return Promise.race([
+        invokeHandler(JSON.parse(String(init?.body))),
+        new Promise<Response>((_, reject) => signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true })),
+      ]);
+    }
     if (path === '/events') {
       // Like a half-dead mobile socket: no headers, and aborting does not settle it.
       if (hangEvents) return new Promise<Response>(() => {});
@@ -648,26 +655,71 @@ describe('RemoteDaemonClient against a host that runs each request id once', () 
     client.disconnect();
   });
 
-  it('keeps terminal input in flight when the app is backgrounded and sends it on return', async () => {
+  it('resends terminal input in flight when the app is backgrounded, and the host applies it once', async () => {
     const { host, client } = await connectToDeduplicatingHost();
-    const applied: string[] = [];
-    let answer: (() => void) | null = null;
+    const applied = new Map<string, string>();
+    const attempts: Array<string | undefined> = [];
     host.onInvoke(body => {
-      applied.push(`${body.requestId}:${String(body.args[1])}`);
-      if (applied.length === 1) return new Promise<Response>((resolve) => { answer = () => resolve(Response.json({ ok: true, result: null })); });
+      attempts.push(body.requestId);
+      if (body.requestId && !applied.has(body.requestId)) applied.set(body.requestId, String(body.args[1]));
+      // The first attempt reaches the host but never answers; backgrounding cuts it.
+      if (attempts.length === 1) return new Promise<Response>(() => {});
       return Response.json({ ok: true, result: null });
     });
 
     const typed = client.invoke('terminal:input', ['panel-1', 'y']);
     await flush();
     client.suspend();
-    await vi.advanceTimersByTimeAsync(60_000);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(attempts).toHaveLength(1);
     client.resume();
-    await vi.advanceTimersByTimeAsync(30_000);
-    answer?.();
+    // Well inside the 30 s attempt timeout: only cutting the old attempt resends this soon.
+    await vi.advanceTimersByTimeAsync(5_000);
 
     await expect(typed).resolves.toBeNull();
-    expect(new Set(applied).size).toBe(1);
+    expect(attempts).toHaveLength(2);
+    expect(attempts[1]).toBe(attempts[0]);
+    expect([...applied.values()]).toEqual(['y']);
+    client.disconnect();
+  });
+
+  it('does not resend a write whose five minutes passed while the app was asleep', async () => {
+    const { host, client } = await connectToDeduplicatingHost();
+    const attempts: Array<string | undefined> = [];
+    host.onInvoke(body => {
+      attempts.push(body.requestId);
+      // Applied, but the answer is lost as the phone goes to sleep.
+      client.suspend();
+      throw new TypeError('Network connection was lost');
+    });
+
+    const typed = expect(client.invoke('terminal:input', ['panel-1', 'ls\r'])).rejects.toThrow(/^Delivery unknown:/);
+    await flush();
+    // Asleep for ten minutes: the clock moves, but no timer runs.
+    vi.setSystemTime(Date.now() + 601_000);
+    host.onInvoke(body => { attempts.push(body.requestId); return Response.json({ ok: true, result: null }); });
+    client.resume();
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    await typed;
+    expect(attempts).toHaveLength(1);
+    client.disconnect();
+  });
+
+  it('resends a write the host refused because its memory of answers was full', async () => {
+    const { host, client } = await connectToDeduplicatingHost();
+    let calls = 0;
+    host.onInvoke(() => {
+      calls += 1;
+      return calls === 1
+        ? Response.json({ ok: false, error: { message: 'Still holding answers', code: 'ERR_REMOTE_WRITES_BUSY' } }, { status: 503 })
+        : Response.json({ ok: true, result: 'ran' });
+    });
+
+    const created = client.invoke('panels:create', ['session-1']);
+    await vi.advanceTimersByTimeAsync(250);
+    await expect(created).resolves.toBe('ran');
+    expect(calls).toBe(2);
     client.disconnect();
   });
 
@@ -686,7 +738,7 @@ describe('RemoteDaemonClient against a host that runs each request id once', () 
     await flush();
     const held = expect(client.invoke('panels:create', ['session-1'])).rejects.toMatchObject({
       code: 'ERR_REMOTE_OFFLINE',
-      message: expect.stringContaining('The action was not sent. Could not reconnect within five minutes.'),
+      message: expect.stringContaining('The action was not sent.'),
     });
     await vi.advanceTimersByTimeAsync(300_000);
     await held;
@@ -696,7 +748,7 @@ describe('RemoteDaemonClient against a host that runs each request id once', () 
   it('says a sent write was not confirmed when reconnecting gives up', async () => {
     const { host, client, drop } = await connectToDeduplicatingHost();
     host.onInvoke(() => { drop(); throw new TypeError('Network connection was lost'); });
-    const sent = expect(client.invoke('panels:create', ['session-1'])).rejects.toThrow(/^Delivery unknown: Pane resent this action until the connection gave up/);
+    const sent = expect(client.invoke('panels:create', ['session-1'])).rejects.toThrow(/^Delivery unknown: Pane resent this action for up to five minutes, but the host never confirmed it/);
     await vi.advanceTimersByTimeAsync(300_000);
     await sent;
   });
