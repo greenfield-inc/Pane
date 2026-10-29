@@ -56,7 +56,7 @@ const HOLD_MATCH_CHARS = 40;
 const MENU_CHANGED = 'The menu changed, so nothing more was sent';
 
 const menuKey = (menu: Menu) => [...menu.question, ...menu.choices].join('\n');
-const sameMenu = (a: Menu | null, b: Menu) => a !== null && a.choices.join('\n') === b.choices.join('\n');
+const sameMenu = (a: Menu, b: Menu) => a.choices.join('\n') === b.choices.join('\n');
 /** The last index whose row passes `test`, or -1. */
 function lastIndex(rows: readonly string[], test: (row: string) => boolean): number {
   for (let index = rows.length - 1; index >= 0; index -= 1) if (test(rows[index] ?? '')) return index;
