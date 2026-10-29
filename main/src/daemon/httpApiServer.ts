@@ -46,6 +46,7 @@ import type { VoiceStreamErrorCode } from '../../../shared/voice/deepgramLive';
 import { voiceKeyProblem } from '../../../shared/voice/voiceKeys';
 import { streamWorktreePreview } from '../services/mediaStream';
 import { RecentWrites, type InvokeAnswer } from './recentWrites';
+import { REMOTE_WRITES_BUSY_CODE } from '../../../shared/remoteClient/readChannels';
 
 interface RemoteHttpAddress {
   host: string;
@@ -843,9 +844,19 @@ export class PaneRemoteHttpApiServer {
     client: string,
     run: () => ReturnType<PaneCommandRegistry['invokeRemote']>,
   ): Promise<void> {
-    const answer = requestId
-      ? await this.recentWrites.answer(client, requestId, () => answerInvoke(run))
-      : (await answerInvoke(run)).answer;
+    const remembered = requestId ? this.recentWrites.answer(client, requestId, () => answerInvoke(run)) : null;
+    if (remembered === 'full') {
+      this.writeJson(response, 503, {
+        ok: false,
+        error: {
+          message: 'This computer is still holding answers to this device\'s recent actions, so it did not run this one yet.',
+          code: REMOTE_WRITES_BUSY_CODE,
+          next: 'Pane sends it again by itself in a moment.',
+        },
+      } satisfies RemoteInvokeErrorPayload);
+      return;
+    }
+    const answer = remembered ? await remembered : (await answerInvoke(run)).answer;
     this.writeJson(response, answer.statusCode, answer.payload, request);
   }
 

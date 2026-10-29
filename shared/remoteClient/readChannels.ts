@@ -78,3 +78,6 @@ export const REMOTE_RESTORE_CHANNELS = new Set([
   'terminal:ack', 'terminal:resetFlowControl', 'sessions:mark-viewed',
   'panels:set-active', 'terminal:reply',
 ]);
+
+/** A host that runs each request id once refuses a write with this code, before running it, while its memory of answers is full; resending is safe. */
+export const REMOTE_WRITES_BUSY_CODE = 'ERR_REMOTE_WRITES_BUSY';

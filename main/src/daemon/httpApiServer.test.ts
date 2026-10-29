@@ -8,6 +8,7 @@ import { hashRemoteDaemonToken } from './auth';
 import { boundary, decodeBoundary, type JsonValue } from '../../../shared/validation/boundaryDecoder';
 
 import { PaneRemoteHttpApiServer, type WorkspaceAccessPolicy } from './httpApiServer';
+import { RecentWrites } from './recentWrites';
 
 interface ConfigManagerStub {
   getConfig(): { deepgramApiKey?: string; remoteDaemon?: RemoteDaemonConfig };
@@ -855,15 +856,30 @@ describe('writes carrying a request id', () => {
   it('makes a repeat that arrives while the first still runs wait for its answer', async () => {
     let finish!: () => void;
     const { run, send } = await startWithWrite(() => new Promise((resolve) => { finish = () => resolve('done'); }));
-    const first = send('phone:1');
+    const received = vi.spyOn(RecentWrites.prototype, 'answer');
+    let settled = 0;
+    const first = send('phone:1').finally(() => { settled += 1; });
     await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1));
-    const repeat = send('phone:1');
+    const repeat = send('phone:1').finally(() => { settled += 1; });
+    // The host has the repeat in hand while the first is still running.
+    await vi.waitFor(() => expect(received).toHaveBeenCalledTimes(2));
+    expect(settled).toBe(0);
+    expect(run).toHaveBeenCalledTimes(1);
     finish();
     await expect(Promise.all([first, repeat])).resolves.toEqual([
       { statusCode: 200, body: { ok: true, result: 'done' } },
       { statusCode: 200, body: { ok: true, result: 'done' } },
     ]);
     expect(run).toHaveBeenCalledTimes(1);
+    received.mockRestore();
+  });
+
+  it('refuses a new write before running it while the client\'s memory of answers is full', async () => {
+    const { run, send } = await startWithWrite(async () => 'ran');
+    const full = vi.spyOn(RecentWrites.prototype, 'answer').mockReturnValue('full');
+    await expect(send('phone:1')).resolves.toMatchObject({ statusCode: 503, body: { ok: false, error: { code: 'ERR_REMOTE_WRITES_BUSY' } } });
+    expect(run).not.toHaveBeenCalled();
+    full.mockRestore();
   });
 
   it('replays an error answer as the same error', async () => {
