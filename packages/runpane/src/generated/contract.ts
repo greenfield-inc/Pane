@@ -7182,6 +7182,7 @@ export const RUNPANE_CONTRACT = {
                     "enum": [
                       "RUNPANE_STALE_INSTALL",
                       "RUNPANE_STALE_UNMANAGED",
+                      "RUNPANE_STALE_MANAGED",
                       "RUNPANE_MANAGED_BEHIND"
                     ]
                   },

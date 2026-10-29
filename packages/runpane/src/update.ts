@@ -84,7 +84,7 @@ export async function runUpdate(parsed: ParsedArgs): Promise<number> {
     writeUpdateJson(path.join(directory, 'preflight.json'), { ...preflight, runtimeSource: runtime });
     // Verify the staged helper can load every runtime import without depending
     // on the active npm package or the installed Electron executable.
-    execFileSync(runtime, [helper, '--version'], { timeout: 15_000, env: { ...process.env, ELECTRON_RUN_AS_NODE: '' } });
+    execFileSync(runtime, [helper, '--version'], { timeout: 15_000, env: { ...process.env, ELECTRON_RUN_AS_NODE: '', RUNPANE_NO_HANDOFF: '1' } });
     startUpdateSupervisor({ id, directory, executable: runtime, args: [helper, '__update-runner', directory] });
     const deadline = Date.now() + 20_000;
     while (!readUpdateJournal(file).helperPid && Date.now() < deadline) await pause(100);
@@ -276,7 +276,7 @@ export async function runUpdateHelper(directory: string, artifacts: UpdateArtifa
     if (step === 'health' && staged.cli && preflight.cli) {
       const actual = preflight.cli.owner === 'pip'
         ? identifyPythonCli(preflight.cli.packageManager!, preflight.cli.entrypoint).version
-        : execFileSync(preflight.runtimeSource, [preflight.cli.owner === 'managed' ? path.join(preflight.cli.prefix, 'cli', id, 'package/dist/cli.js') : preflight.cli.entrypoint, '--version'], { encoding: 'utf8', timeout: 15_000 }).trim().split(/\s+/).pop();
+        : execFileSync(preflight.runtimeSource, [preflight.cli.owner === 'managed' ? path.join(preflight.cli.prefix, 'cli', id, 'package/dist/cli.js') : preflight.cli.entrypoint, '--version'], { encoding: 'utf8', timeout: 15_000, env: { ...process.env, RUNPANE_NO_HANDOFF: '1' } }).trim().split(/\s+/).pop();
       if (actual !== staged.cli.version) throw new Error(`The active CLI reports ${actual}, expected ${staged.cli.version}.`);
     }
     if (step === 'health' && host) {
