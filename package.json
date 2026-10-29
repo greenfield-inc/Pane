@@ -50,6 +50,7 @@
     "test:runpane-mcp": "pnpm --filter runpane build && node --test scripts/test-runpane-mcp.js",
     "test:runpane-workspace": "pnpm --filter runpane build && node --test scripts/test-runpane-workspace.js",
     "test:runpane-handoff": "pnpm --filter runpane build && node --test scripts/test-runpane-handoff.js",
+    "test:runpane-managed-cli": "pnpm --filter runpane build && node --test scripts/test-runpane-managed-cli.js",
     "test:runpane-telemetry": "pnpm --filter runpane build && node --test scripts/test-runpane-telemetry.js",
     "test:runpane-package-smoke": "pnpm --filter runpane build && node scripts/test-runpane-package-smoke.js",
     "inject-build-info": "node scripts/inject-build-info.js",
