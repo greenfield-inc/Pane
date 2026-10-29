@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Check } from 'lucide-react';
-import { create } from 'zustand';
 import { API } from '../utils/api';
 import { cn } from '../utils/cn';
 import { useSessionStore } from '../stores/sessionStore';
 import { useNavigationStore } from '../stores/navigationStore';
 import { Button } from './ui/Button';
+import { CreateSessionDialog } from './CreateSessionDialog';
 import { OPEN_INSPECTOR_EVENT, type InspectorRequest } from './InspectorTabs';
 import { ONBOARDING_OPEN_PROJECT_SCREEN_PREFERENCE, OPEN_PROJECT_SCREEN_SEEN } from './OnboardingDialog';
 import type { Project } from '../types/project';
@@ -36,22 +36,6 @@ export interface FirstSteps {
   hide: () => void;
 }
 
-// Shared by Home's card and the sidebar's "New task…" rows, so Hide or done applies to both at once.
-const useGateStore = create<{ gate: 'loading' | 'active' | 'inactive' }>(() => ({ gate: 'loading' }));
-
-async function checkGate(): Promise<void> {
-  try {
-    const [seen, state] = await Promise.all([
-      API.preferences.get(ONBOARDING_OPEN_PROJECT_SCREEN_PREFERENCE),
-      API.preferences.get(FIRST_STEPS_PREFERENCE),
-    ]);
-    const active = seen === OPEN_PROJECT_SCREEN_SEEN && state !== 'done' && state !== 'hidden';
-    useGateStore.setState({ gate: active ? 'active' : 'inactive' });
-  } catch {
-    useGateStore.setState({ gate: 'inactive' });
-  }
-}
-
 /**
  * Home's "Your first steps" for installs that saw the "Open your project"
  * screen. Ticks come from the projects and Panes Pane already has, ignoring
@@ -60,16 +44,32 @@ async function checkGate(): Promise<void> {
  */
 export function useFirstSteps(projects: Project[] | null): FirstSteps | 'loading' | null {
   const sessions = useSessionStore(state => state.sessions);
-  const gate = useGateStore(state => state.gate);
+  const [gate, setGate] = useState<'loading' | 'active' | 'inactive'>('loading');
   /** Main's answer, with the projects and active Panes it was read for. */
   const [snapshot, setSnapshot] = useState<(FirstStepsState & { key: string }) | null>(null);
 
   // The first screen writes its "seen" preference after Home mounts, and its close fires project-changed.
   useEffect(() => {
-    void checkGate();
-    const handler = () => void checkGate();
+    let cancelled = false;
+    const check = async () => {
+      try {
+        const [seen, state] = await Promise.all([
+          API.preferences.get(ONBOARDING_OPEN_PROJECT_SCREEN_PREFERENCE),
+          API.preferences.get(FIRST_STEPS_PREFERENCE),
+        ]);
+        const active = seen === OPEN_PROJECT_SCREEN_SEEN && state !== 'done' && state !== 'hidden';
+        if (!cancelled) setGate(active ? 'active' : 'inactive');
+      } catch {
+        if (!cancelled) setGate('inactive');
+      }
+    };
+    void check();
+    const handler = () => void check();
     window.addEventListener('project-changed', handler);
-    return () => window.removeEventListener('project-changed', handler);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('project-changed', handler);
+    };
   }, []);
 
   // Archiving or restoring a Pane changes the active set, so each change rereads main's answer.
@@ -117,7 +117,7 @@ export function useFirstSteps(projects: Project[] | null): FirstSteps | 'loading
 
   // A failed write keeps the card gone until Home next mounts, which checks and saves again.
   const finish = useCallback((state: 'done' | 'hidden') => {
-    useGateStore.setState({ gate: 'inactive' });
+    setGate('inactive');
     void API.preferences.set(FIRST_STEPS_PREFERENCE, state)
       .catch(error => console.error('[FirstSteps] Failed to save the first steps preference:', error));
   }, []);
@@ -143,8 +143,8 @@ export function useFirstSteps(projects: Project[] | null): FirstSteps | 'loading
 export function FirstStepsCard({ firstSteps }: { firstSteps: FirstSteps }) {
   const { steps, newestProject, newestPane, hide } = firstSteps;
   const navigateToSessions = useNavigationStore(s => s.navigateToSessions);
-  const navigateToStartTask = useNavigationStore(s => s.navigateToStartTask);
   const setActiveSession = useSessionStore(state => state.setActiveSession);
+  const [createFor, setCreateFor] = useState<Project | null>(null);
   const next = steps.find(step => !step.done);
 
   const run = (id: StepId) => {
@@ -157,7 +157,7 @@ export function FirstStepsCard({ firstSteps }: { firstSteps: FirstSteps }) {
       window.dispatchEvent(new CustomEvent(OPEN_INSPECTOR_EVENT, { detail: request }));
       setActiveSession(newestPane.id).catch(() => {});
     } else if (newestProject) {
-      navigateToStartTask(newestProject.id);
+      setCreateFor(newestProject);
     }
   };
 
@@ -215,6 +215,15 @@ export function FirstStepsCard({ firstSteps }: { firstSteps: FirstSteps }) {
           );
         })}
       </ol>
+
+      {createFor && (
+        <CreateSessionDialog
+          isOpen
+          onClose={() => setCreateFor(null)}
+          projectName={createFor.name}
+          projectId={createFor.id}
+        />
+      )}
     </section>
   );
 }

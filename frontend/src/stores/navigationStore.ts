@@ -22,8 +22,6 @@ export type ActiveView = PaneNavigationView;
 interface NavigationState {
   activeView: ActiveView;
   activeProjectId: number | null;
-  /** The project whose view shows the Start a task card even over its tabs, until a tab is chosen. */
-  startTaskProjectId: number | null;
 
   // Sidebar collapse
   sidebarCollapsed: boolean;
@@ -65,8 +63,6 @@ interface NavigationState {
   setActiveView: (view: ActiveView) => void;
   setActiveProjectId: (projectId: number | null) => void;
   navigateToProject: (projectId: number) => void;
-  navigateToStartTask: (projectId: number) => void;
-  clearStartTask: () => void;
   navigateToSessions: () => void;
   navigateToPaneChat: () => void;
   navigateToMissionControl: () => void;
@@ -78,7 +74,6 @@ interface NavigationState {
 export const useNavigationStore = create<NavigationState>((set, get) => ({
   activeView: 'sessions',
   activeProjectId: null,
-  startTaskProjectId: null,
 
   sidebarCollapsed: localStorage.getItem('pane-sidebar-collapsed') === 'true',
   setSidebarCollapsed: (collapsed) => {
@@ -167,17 +162,8 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
 
   navigateToProject: (projectId) => set({
     activeView: 'project',
-    activeProjectId: projectId,
-    startTaskProjectId: null,
+    activeProjectId: projectId
   }),
-
-  navigateToStartTask: (projectId) => set({
-    activeView: 'project',
-    activeProjectId: projectId,
-    startTaskProjectId: projectId,
-  }),
-
-  clearStartTask: () => set({ startTaskProjectId: null }),
 
   navigateToSessions: () => set({
     activeView: 'sessions',

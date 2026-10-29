@@ -17,7 +17,6 @@ import type { GlassesAccessState } from '../shared/types/glasses';
 import type { JsonObject, JsonValue } from '../shared/validation/boundaryDecoder';
 import { DEFAULT_APPEARANCE, normalizeAppearance, type AppearanceConfig } from '../shared/types/appearance';
 import type { DiffManifest, DiffScope, FileDiffResult } from '../shared/types/gitDiff';
-import type { RunpaneAgentDoctorResult, RunpanePaneCreateRequest } from '../shared/types/runpaneOrchestration';
 import type { SetupExportSummary, SetupFile, SetupImportPreview, SetupSectionId } from '../shared/types/setupTransfer';
 import type { NotifyCommand, NotifySnapshot, NotifyWindowSize } from '../shared/types/notify';
 
@@ -111,10 +110,6 @@ export type ElectronApiMockOptions = {
   openExternalOutcome?: 'success' | 'failure';
   /** Overrides this machine's workspace status (remote-daemon:get-workspace-access). */
   workspaceAccess?: Partial<WorkspaceAccessSummary>;
-  /** runpane:agents:doctor answers by agent; an agent left out is installed with an unknown sign-in. */
-  agentDoctor?: Partial<Record<'claude' | 'codex' | 'cursor' | 'opencode', { available: boolean; signIn?: 'signed-in' | 'signed-out' | 'unknown' }>>;
-  /** Delay before runpane:agents:doctor answers, or `hold` to leave every check pending. */
-  agentDoctorDelayMs?: number | 'hold';
   glasses?: GlassesAccessState;
   /** Devices connected to this computer's host right now. */
   hostConnectedClients?: RemoteDaemonConnectedClient[];
@@ -122,12 +117,6 @@ export type ElectronApiMockOptions = {
   setupImportError?: string;
   /** Serves window.electronAPI.notify with this queue snapshot; absent, the API is too. */
   notifySnapshot?: NotifySnapshot;
-  /** runpane:panes:create fails with this message instead of adding the Pane. */
-  paneCreateError?: string;
-  /** runpane:panes:create creates the Pane, then reports a failure (ok: false) that kept it, as main does when setup fails. */
-  paneCreateKeptFailure?: boolean;
-  /** projects.listBranches fails with this message, or `hold` leaves it pending. */
-  listBranchesError?: string | 'hold';
 };
 
 export async function installElectronApiMock(page: Page, options: ElectronApiMockOptions = {}) {
@@ -523,9 +512,6 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         if (prop === 'onTerminalOutput') {
           return (callback: MockEventCallback) => subscribe('terminal-output', callback);
         }
-        if (prop === 'onTerminalLaunchExited') {
-          return (callback: MockEventCallback) => subscribe('terminal:launchExited', callback);
-        }
         if (prop === 'onTerminalCliReady') {
           return (callback: MockEventCallback) => subscribe('terminal:cliReady', callback);
         }
@@ -671,45 +657,6 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           shells: mockOptions.platform === 'win32' ? clone(mockOptions.availableShells ?? []) : [],
           preferredShell: configState.preferredShell ?? 'auto',
         });
-      }
-      if (channel === 'runpane:agents:doctor') {
-        // SAFETY: The renderer sends runpane:agents:doctor a { agent, repo } request.
-        const { agent } = args[0] as { agent: 'claude' | 'codex' | 'cursor' | 'opencode' };
-        const answer = mockOptions.agentDoctor?.[agent] ?? { available: true, signIn: 'unknown' };
-        const result: RunpaneAgentDoctorResult = {
-          ok: answer.available, agent, command: agent, available: answer.available, checks: [],
-        };
-        if (answer.available) result.signIn = answer.signIn ?? 'unknown';
-        if (mockOptions.agentDoctorDelayMs === 'hold') return new Promise(() => undefined);
-        return new Promise(resolve => setTimeout(() => resolve(clone(result)), mockOptions.agentDoctorDelayMs ?? 0));
-      }
-      if (channel === 'runpane:panes:create') {
-        // SAFETY: The Start a task card sends runpane:panes:create a request with the repo's id.
-        const request = args[0] as RunpanePaneCreateRequest & { repo: { id: number } };
-        const item = request.panes[0];
-        if (mockOptions.paneCreateError) return Promise.reject(new Error(`Error invoking remote method 'invoke': Error: ${mockOptions.paneCreateError}`));
-        const at = new Date().toISOString();
-        const sessionId = `created-${item.name}`;
-        // Stands in for main creating the Pane and its agent tab.
-        const session: JsonObject = {
-          id: sessionId, name: item.name, projectId: request.repo.id, worktreePath: `/tmp/worktrees/${item.name}`, prompt: '',
-          status: 'running', createdAt: at, lastActivity: at, output: [], jsonMessages: [], permissionMode: 'ignore',
-          toolType: 'none', archived: false, isHidden: false, isFavorite: false,
-        };
-        mockSessions.push(clone(session));
-        emit('session:created', clone(session));
-        if (mockOptions.paneCreateKeptFailure) {
-          return Promise.resolve({ ok: false, items: [{
-            ok: false, index: 0, name: item.name, sessionId, paneId: sessionId,
-            error: { code: 'ERR_RUNPANE_PANE_CREATE_FAILED', message: `Could not create Pane "${item.name}": setup failed. Pane ${sessionId} was created before the failure and was kept.` },
-          }] });
-        }
-        return Promise.resolve({ ok: true, items: [{ ok: true, index: 0, name: item.name, sessionId, paneId: sessionId }] });
-      }
-      if (channel === 'runpane:panels:resume') {
-        // SAFETY: The exit card sends runpane:panels:resume a { panelId } request.
-        const { panelId } = args[0] as { panelId: string };
-        return Promise.resolve({ ok: true, panelId, action: 'resumed' });
       }
       if (channel === 'terminal:set-preferred-shell') {
         configState.preferredShell = String(args[0]);
@@ -1199,11 +1146,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
             ? mockOptions.detectedBranchByPath[path]
             : (mockOptions.detectedBranch === undefined ? 'main' : mockOptions.detectedBranch),
         ),
-        listBranches: () => mockOptions.listBranchesError === 'hold'
-          ? new Promise(() => undefined)
-          : mockOptions.listBranchesError
-            ? Promise.resolve({ success: false, error: mockOptions.listBranchesError })
-            : success([
+        listBranches: () => success([
           { name: 'origin/main', isCurrent: false, hasWorktree: false, isRemote: true },
           { name: 'main', isCurrent: true, hasWorktree: false, isRemote: false },
         ]),
@@ -1731,9 +1674,6 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         emitNativeAppearanceUpdated(prefersDark: boolean) {
           emit('window:appearance-native-updated', { prefersDark });
-        },
-        emitTerminalLaunchExited(event: { panelId: string; sessionId: string; agent: string; elapsedMs: number; lastLine?: string }) {
-          emit('terminal:launchExited', clone(event));
         },
         emitWindowFocusChanged(focused: boolean) {
           emit('window:focus-changed', focused);
