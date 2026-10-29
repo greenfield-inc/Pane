@@ -20,6 +20,7 @@ import { isPaneDaemonEventChannel } from './server';
 import {
   GLASSES_CHANNELS,
   GLASSES_EVENT_CHANNELS,
+  glassesKeyInput,
   glassesSource,
   type GlassesAccess,
   type GlassesFailureReason,
@@ -1164,10 +1165,20 @@ export class PaneRemoteHttpApiServer {
       return;
     }
     const client = admission.client;
+    let args = invokeRequest.args;
     // The Notify answer is stamped with the glasses' own name, never one from the request.
-    const args = channel === 'notify:remote-command'
-      ? [invokeRequest.args[0] ?? null, { device: client.label }]
-      : invokeRequest.args;
+    if (channel === 'notify:remote-command') args = [invokeRequest.args[0] ?? null, { device: client.label }];
+    if (channel === 'runpane:panels:input') {
+      const key = invokeRequest.args.length === 1 ? glassesKeyInput(invokeRequest.args[0]) : null;
+      if (!key) {
+        // Logged without the input, which could be anything the request carried.
+        glasses.recordFailure(admission.source, 'key');
+        refuse(400, 'ERR_GLASSES_KEY_REFUSED', 'Glasses can send only one key at a time: up, down, Enter, Esc, Tab or a digit from 1 to 9. Nothing was typed.',
+          'Update the Pane glasses app, then try again.');
+        return;
+      }
+      args = [key];
+    }
     await this.respondToInvoke(request, response, () => this.commandRegistry.invokeRemote(channel, args));
   }
 

@@ -1,7 +1,7 @@
 // The paired computers: one RemoteDaemonClient per computer, each with its own glasses token,
 // merged into one PaneSource. Tokens go only in the Authorization header (and the voice
 // WebSocket's subprotocol), never in a URL.
-import { RemoteDaemonClient, createFetchEventStreamTransport, type RemoteFetch } from '../../shared/remoteClient';
+import { RemoteDaemonClient, RemoteRequestError, createFetchEventStreamTransport, type RemoteFetch } from '../../shared/remoteClient';
 import type { RemoteFetchResponse } from '../../shared/remoteClient/remoteDaemonClient';
 import { GLASSES_COMMANDS, decodeGlassesPairingCode, type GlassesPairResult } from '../../shared/types/glasses';
 import type { NotifyAnswer, NotifyRemoteCommand } from '../../shared/types/notify';
@@ -21,6 +21,7 @@ import {
   type PaneRow,
   type PaneSource,
   type PaneStatus,
+  type TerminalKey,
   type TerminalScreen,
 } from './model';
 import { stripAnsi } from './text';
@@ -48,6 +49,13 @@ const PAIR_AGAIN_CODES = new Set(['ERR_GLASSES_TOKEN_INVALID', 'ERR_GLASSES_TOKE
 const BROWSER_REFUSED = 'ERR_WORKSPACE_BROWSER_REFUSED';
 const SCREEN_LINES = 40;
 const SCROLLBACK_LINES = 400;
+/** What an older Pane answers a command it doesn't let glasses run; it says nothing about access. */
+const CHANNEL_REFUSED = 'ERR_GLASSES_CHANNEL_REFUSED';
+/** The bytes each key sends, as the runpane contract's terminalKeys table gives them. */
+const KEY_BYTES = {
+  up: '\u001b[A', down: '\u001b[B', enter: '\r', escape: '\u001b', tab: '\t',
+  1: '1', 2: '2', 3: '3', 4: '4', 5: '5', 6: '6', 7: '7', 8: '8', 9: '9',
+} as const satisfies Record<TerminalKey, string>;
 /** List changes (Panes made, archived, renamed) arrive in bursts; recount once they settle. */
 const LIST_REFRESH_MS = 1_000;
 
@@ -378,6 +386,8 @@ export class HostConnection {
       }
       if (!response.ok) {
         const refusal = await readRefusal(response);
+        // A command an older Pane doesn't let glasses run is no access problem: keep the connection.
+        if (refusal?.code === CHANNEL_REFUSED) return { ...adaptResponse(response), status: 400 };
         if (refusal) {
           if (refusal.code === BROWSER_REFUSED) {
             this.refusal = this.originRefusal();
@@ -622,8 +632,8 @@ export class HostConnection {
     return { lines: stripAnsi(screen.text).split('\n'), status, agent: agentLabel(screen.state.agentType) };
   }
 
-  async scrollback(panelId: string): Promise<string[]> {
-    const output = await this.invoke('runpane:panels:output', [{ panelId, limit: SCROLLBACK_LINES }], outputSchema);
+  async scrollback(panelId: string, lines = SCROLLBACK_LINES): Promise<string[]> {
+    const output = await this.invoke('runpane:panels:output', [{ panelId, limit: lines }], outputSchema);
     return stripAnsi(output.text).split('\n');
   }
 
@@ -638,6 +648,17 @@ export class HostConnection {
   async submit(panelId: string, input: string): Promise<void> {
     const result = await this.invoke('runpane:panels:submit', [{ panelId, input, source: 'user' }], submitSchema);
     if (!result.ok) throw new GlassesError('ERR_GLASSES_SUBMIT_BLOCKED', result.blocked?.message ?? 'The Pane did not take the input.', 'Look at the terminal, then hold to try again.');
+  }
+
+  async key(panelId: string, key: TerminalKey): Promise<void> {
+    try {
+      await this.client.invoke('runpane:panels:input', [{ panelId, input: KEY_BYTES[key], source: 'user' }]);
+    } catch (error) {
+      if (error instanceof RemoteRequestError && error.code === CHANNEL_REFUSED) {
+        throw new GlassesError('ERR_GLASSES_KEYS_UNSUPPORTED', `${this.paired.name}'s Pane can't take keys from the glasses yet.`, `Update Pane on ${this.paired.name}.`);
+      }
+      throw error;
+    }
   }
 
   async answer(card: Card, answer: NotifyAnswer): Promise<void> {
@@ -713,8 +734,8 @@ export class HostHub implements PaneSource {
     return this.connection(computerId).screen(panelId);
   }
 
-  scrollback(computerId: string, panelId: string): Promise<string[]> {
-    return this.connection(computerId).scrollback(panelId);
+  scrollback(computerId: string, panelId: string, lines?: number): Promise<string[]> {
+    return this.connection(computerId).scrollback(panelId, lines);
   }
 
   markViewed(computerId: string, paneId: string): Promise<void> {
@@ -727,6 +748,10 @@ export class HostHub implements PaneSource {
 
   submit(computerId: string, panelId: string, text: string): Promise<void> {
     return this.connection(computerId).submit(panelId, text);
+  }
+
+  key(computerId: string, panelId: string, key: TerminalKey): Promise<void> {
+    return this.connection(computerId).key(panelId, key);
   }
 
   answer(card: Card, answer: NotifyAnswer): Promise<void> {

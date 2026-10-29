@@ -1,0 +1,40 @@
+ 
+  >_ OpenAI Codex (v0.165.0)
+     /Users/me/code/demo
+ 
+ 
+› Run the shell command: touch codex.txt
+ 
+ 
+• I’ll run touch codex.txt in the current directory.
+ 
+• Running touch codex.txt
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+  Would you like to run the following command?
+ 
+  Environment: local
+ 
+  Reason: Allow creating codex.txt in the current directory?
+ 
+  $ touch codex.txt
+ 
+ 
+› 1. Yes, proceed (y)                                                                               
+  2. Yes, and don't ask again for commands that start with `touch codex.txt` (p)
+  3. No, and tell Codex what to do differently (esc)
+ 
+  Press enter to confirm or esc to cancel                                                           

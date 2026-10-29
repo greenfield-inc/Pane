@@ -2,6 +2,8 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'crypto';
 import type { AppConfig } from '../types/config';
 import { PaneError } from '../../../shared/paneError';
 import { normalizeRemoteDaemonConfig, type RemoteDaemonClientRecord } from '../../../shared/types/remoteDaemon';
+import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
+import { boundary, decodeOptionalBoundary, type JsonValue } from '../../../shared/validation/boundaryDecoder';
 import { GLASSES_PAIRING_SECRET_PREFIX, GLASSES_TOKEN_PREFIX, type GlassesAccessState, type GlassesDevice, type GlassesPairingSecretResult } from '../../../shared/types/glasses';
 
 /**
@@ -26,6 +28,8 @@ export const GLASSES_CHANNELS: ReadonlySet<string> = new Set([
   'runpane:panels:screen',
   'runpane:panels:output',
   'runpane:panels:submit',
+  // One key per request (`glassesKeyInput`): enough to answer a terminal menu, nothing more.
+  'runpane:panels:input',
   // Opening a stopped tab starts its saved agent or command, as opening it in Pane does; the caller picks no command or folder.
   'runpane:panels:resume',
   // Opening and leaving a Pane mark it viewed, as selecting it on desktop does.
@@ -65,7 +69,21 @@ const MAX_TRACKED_SOURCES = 1_000;
 const MAX_REFUSED_ORIGINS = 10;
 const COUNTED_FAILURES: ReadonlySet<GlassesFailureReason> = new Set(['token', 'pairing-secret', 'identity', 'credential-in-url']);
 
-export type GlassesFailureReason = 'token' | 'pairing-secret' | 'origin' | 'identity' | 'funnel' | 'credential-in-url' | 'channel';
+export type GlassesFailureReason = 'token' | 'pairing-secret' | 'origin' | 'identity' | 'funnel' | 'credential-in-url' | 'channel' | 'key';
+
+const { up, down, enter, escape, tab } = RUNPANE_CONTRACT.terminalKeys;
+/** The keys the glasses may send, one per request: ↑ ↓ Enter Esc Tab, and a menu choice's number. */
+const GLASSES_KEYS: ReadonlySet<string> = new Set([up, down, enter, escape, tab, '1', '2', '3', '4', '5', '6', '7', '8', '9']);
+const keyRequestSchema = boundary.object({ panelId: boundary.nonEmptyString, input: boundary.string });
+
+/**
+ * The `runpane:panels:input` request the glasses may run: one panel and exactly one of
+ * `GLASSES_KEYS`, sent as the user. Null for anything else, which is refused before it runs.
+ */
+export function glassesKeyInput(request: JsonValue | undefined): { panelId: string; input: string; source: 'user' } | null {
+  const key = decodeOptionalBoundary(request, keyRequestSchema);
+  return key && GLASSES_KEYS.has(key.input) ? { panelId: key.panelId, input: key.input, source: 'user' } : null;
+}
 
 interface GlassesConfigStore {
   getConfig(): Pick<AppConfig, 'remoteDaemon' | 'workspaces'>;

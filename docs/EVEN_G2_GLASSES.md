@@ -42,10 +42,14 @@ computer. Allowing the origin on an older Pane lasts only until the Even app res
 
 | Gesture | What it does |
 |---|---|
-| Swipe up / down | Move through a list, scroll a terminal, or turn card pages |
-| Press | Open or pick; in a terminal, show the whole screen or the output alone, or jump back to live when scrolled up |
+| Swipe up / down | Move through a list, scroll a terminal half a page, or turn card pages |
+| Press | Open or pick; in a terminal, open keys mode |
 | Double press | Back; on the home page, exit the app |
 | Hold, then release | Talk, then send at once: an answer on a card, input in a terminal |
+
+In **keys mode** the gestures go to the terminal, one key at a time in the order you made them:
+swipe sends ↑ or ↓, press sends Enter and goes back to the output, double press leaves without sending anything, and hold opens a short list with
+Esc and Tab. You can't dictate in keys mode; leave it first.
 
 - **Home** shows one card per page with a page counter, questions first and then done and info
   cards, newest first. The last page is **Open a Pane…**. With nothing waiting, home is one
@@ -56,14 +60,33 @@ computer. Allowing the origin on an older Pane lasts only until the Even app res
   in the Pane apps' order: pinned ones first, then Sessions, a blank line, then Panes. Picking one
   shows its live screen, refreshed about once a second, and marks the Pane viewed on that computer,
   as opening it there does. A stopped Pane starts its saved agent or command. The terminal hides an
-  agent's input box and the status rows under it, so you read its output; press to see the whole
-  screen. Swipe up to page through earlier output; the page holds still until you press for live.
-  The bottom line names the newest card from another Pane; double press goes to it.
+  agent's input box and the status rows under it, so you read its output. Each swipe moves half a
+  page: the half you just read stays on screen, dimmed. Swiping down to the end follows live again.
+  Press opens keys mode, which shows the whole screen, input box included. The bottom line names
+  the newest card from another Pane; double press goes to it.
+- **Menus**: when a terminal shows a menu Pane is certain of (a list numbered from 1 at the bottom
+  of the screen with exactly one cursor mark, such as `❯`, `>` or `›`, under a prompt whose top is
+  on screen), its choices appear as a list, under the last two lines above it: the question and
+  what it asks about, such as the command to run. Swipe to a choice and press: Pane waits for any
+  keys you pressed before, reads the screen again, and presses the choice's number, which Claude
+  Code and Codex take as that answer wherever the cursor is. If anything in the prompt changed
+  between the list showing and that read (the question, any row of the command, or any choice),
+  it sends nothing, says "The menu changed, so nothing was sent", and opens keys mode. A menu that
+  changes after the read, while the number is on its way, can still receive it. A menu still on
+  screen a second after its number ignores numbers: keys mode opens so you answer it with arrows
+  and Enter. Double press dismisses the list. Any other prompt,
+  including one taller than the screen, is answered from keys mode.
 - **Going back** from a terminal or a computer's list opens the list on the row you picked. Native
   glasses lists always open on their first row, so the list starts there, runs to the end, then
   continues from the top after a **· top of the list ·** row.
 - **Dictation** types what you said into the Pane and presses Enter right away. A misheard line
-  typed into a shell runs, so check the Pane before you talk into a plain shell.
+  typed into a shell runs, so check the Pane before you talk into a plain shell. After you send,
+  the view holds at your line while the reply grows below it, and the top line counts the lines
+  still below ("↓ 18 more"). Swipe down to read on; the last swipe follows live again. If your line
+  leaves the screen (the agent cleared it) or a menu appears, the view goes back to live.
+- **Keys need Pane on the computer to be up to date.** A computer on an older Pane refuses the
+  first key, and the glasses say so: "<computer>'s Pane can't take keys from the glasses yet."
+  Update Pane there. Dictation still works.
 
 With the app closed, Pane's phone alerts still reach the glasses through the Even app's
 notification mirroring, as the title only ("planner has a question").
@@ -96,7 +119,11 @@ hold:
   the token.
 
 A glasses token reaches only what the glasses use: listing Sessions and Panes, reading and typing
-into terminals, dictation, and Notify. Opening a stopped Pane restarts its saved agent or command,
+into terminals, pressing one key at a time, dictation, and Notify. The keys are ↑, ↓, Enter, Esc,
+Tab and the digits 1 to 9, one per request, and nothing else: text, two keys at once, Ctrl-C,
+Ctrl-D, ← → and 0 are refused before they reach the terminal (`ERR_GLASSES_KEY_REFUSED`), logged
+without the input, and not counted toward the lockout. These keys are enough to answer an agent's permission menu, so the
+glasses can approve what an agent asks to do. Opening a stopped Pane restarts its saved agent or command,
 in its own folder. The token cannot pair other devices, change settings, write files, commit, run
 machine commands, or choose what a terminal runs, and its event stream never carries terminal
 output.

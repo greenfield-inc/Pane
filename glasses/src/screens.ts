@@ -282,10 +282,18 @@ export function panesPage(computerName: string, rows: readonly PaneRow[], start 
 }
 
 export const TERMINAL_LINES = linesFor(FOOTER_Y - BAR_H, BAR_PAD);
+/** A swipe moves half a page: the terminal shows two halves of this many lines. */
+export const HALF_PAGE = TERMINAL_LINES / 2;
+const HALF_H = (FOOTER_Y - BAR_H) / 2;
 
 /** Rewraps terminal rows to the glasses' width, keeping blank lines; a rule stays one line. */
+export function wrapRows(rows: readonly string[]): string[] {
+  return rows.flatMap((row) => (isRule(row) ? [fitLine(row.trim(), innerWidth(BAR_PAD))] : wrap(row, innerWidth(BAR_PAD))));
+}
+
+/** `wrapRows` without the blank lines at the end. */
 export function terminalLines(rows: readonly string[]): string[] {
-  const lines = rows.flatMap((row) => (isRule(row) ? [fitLine(row.trim(), innerWidth(BAR_PAD))] : wrap(row, innerWidth(BAR_PAD))));
+  const lines = wrapRows(rows);
   while (lines.length && !lines.at(-1)?.trim()) lines.pop();
   return lines;
 }
@@ -296,34 +304,98 @@ export interface FooterLine {
   brightness: Brightness;
 }
 
-export function terminalFooter(elsewhere: Card | undefined): FooterLine {
-  if (!elsewhere) return { text: 'all clear elsewhere', brightness: DIMMER };
+export function terminalFooter(elsewhere: Card | undefined, hint = 'all clear elsewhere'): FooterLine {
+  if (!elsewhere) return { text: hint, brightness: DIMMER };
   const what = elsewhere.waiting ? `? ${elsewhere.paneName} needs you` : `• ${elsewhere.paneName}: ${elsewhere.title}`;
   return { text: `${what} · double press for cards`, brightness: BRIGHT };
 }
 
 export interface TerminalView {
   entry: PaneEntry;
-  /** The lines on screen, already wrapped. */
+  /** The page's lines, already wrapped: the top half first. */
   lines: readonly string[];
   /** Lines above live; 0 is live. */
   scrolledUp: number;
-  /** The whole screen, input box and status rows included. */
-  full?: boolean;
+  /** Held at your message: the lines below the page. */
+  more?: number;
+  /** Keys mode: swipes and press go to the terminal. */
+  keys?: boolean;
+  /** The half you just read, dimmed after a swipe. */
+  dim?: 'top' | 'bottom' | null;
   footer: FooterLine;
 }
 
-/** T3: status line, output, footer for cards elsewhere. */
-export function terminalPage(view: TerminalView): Page {
+function terminalTitle(view: TerminalView): TextBox {
   const { entry } = view;
-  const title = view.scrolledUp
-    ? `${entry.name} · scrolled up ${view.scrolledUp} lines · press = live`
-    : `${entry.name} · ${entry.agent} · ${entry.status}${view.full ? ' · full screen' : ''}`;
+  if (view.keys) return bar('header', 0, 'KEYS · swipe ↑↓ · press Enter · hold Esc/Tab', BRIGHT);
+  if (view.scrolledUp) return header(`${entry.name} · scrolled up ${view.scrolledUp} lines`);
+  const status = `${entry.name} · ${entry.agent} · ${entry.status}`;
+  if (view.more === undefined) return header(status);
+  return bar('header', 0, view.more ? `${status} · ↓ ${view.more} more` : status, BRIGHT);
+}
+
+const half = (name: string, y: number, lines: readonly string[], brightness: Brightness, capture: boolean): TextBox => ({
+  kind: 'text', name, x: 0, y, w: SCREEN_W, h: HALF_H, pad: BAR_PAD, lines: [...lines], brightness, capture,
+});
+
+/**
+ * T3: status line, the output in two halves, footer for cards elsewhere. The layout never changes,
+ * so a swipe is two in-place text updates.
+ */
+export function terminalPage(view: TerminalView): Page {
+  const lines = view.lines.slice(0, TERMINAL_LINES);
   return {
     boxes: [
-      header(title),
-      { kind: 'text', name: 'output', x: 0, y: BAR_H, w: SCREEN_W, h: FOOTER_Y - BAR_H, pad: BAR_PAD, lines: view.lines.slice(-TERMINAL_LINES), brightness: BRIGHT, capture: true },
+      terminalTitle(view),
+      half('top', BAR_H, lines.slice(0, HALF_PAGE), view.dim === 'top' ? DIMMER : BRIGHT, true),
+      half('bottom', BAR_H + HALF_H, lines.slice(HALF_PAGE), view.dim === 'bottom' ? DIMMER : BRIGHT, false),
       footer(view.footer.text, view.footer.brightness),
+    ],
+  };
+}
+
+/** The rows a menu's context box shows: the last two lines that fit. */
+function contextBox(lines: readonly string[]): TextBox {
+  const wrapped = lines.flatMap((line) => wrap(line, innerWidth(BAR_PAD))).filter((line) => line.trim()).slice(-2);
+  return { kind: 'text', name: 'context', x: 0, y: BAR_H, w: SCREEN_W, h: 60, pad: BAR_PAD, lines: wrapped, brightness: DIM };
+}
+
+const MENU_Y = 96;
+
+/** A menu Pane is certain of: its question dimmed, its choices as a list to pick from. */
+export function pickerPage(entry: PaneEntry, question: readonly string[], choices: readonly string[], picking: boolean, footerLine: FooterLine): Page {
+  return {
+    boxes: [
+      bar('header', 0, picking ? `${entry.name} · picking…` : `${entry.name} · pick one · double = dismiss`, BRIGHT),
+      contextBox(question),
+      list('choices', MENU_Y, FOOTER_Y - MENU_Y, [...choices]),
+      footer(footerLine.text, footerLine.brightness),
+    ],
+  };
+}
+
+/** The keys behind hold in keys mode, in the order the list shows them. */
+export const KEY_LIST = [{ key: 'escape', label: 'Esc' }, { key: 'tab', label: 'Tab' }] as const;
+
+/** Hold in keys mode: the rows around the cursor, dimmed, over the Esc / Tab list, and the footer for cards elsewhere. */
+export function keyListPage(context: readonly string[], footerLine: FooterLine): Page {
+  return {
+    boxes: [
+      bar('header', 0, 'KEYS · press sends · double = back', BRIGHT),
+      contextBox(context),
+      list('keys', MENU_Y, FOOTER_Y - MENU_Y, KEY_LIST.map((entry) => entry.label)),
+      footer(footerLine.text, footerLine.brightness),
+    ],
+  };
+}
+
+/** The computer turned the first key away: an older Pane, or keys it would not take. */
+export function keysRefusedPage(entry: PaneEntry, message: string, next?: string): Page {
+  return {
+    boxes: [
+      bar('header', 0, `${entry.name} · keys not sent`, BRIGHT),
+      body(`${next ? `${message} ${next}` : message}\n\nHold to talk still works.`, { y: 36, h: 220, capture: true }),
+      footer('double press = back'),
     ],
   };
 }

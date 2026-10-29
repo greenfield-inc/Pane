@@ -17,6 +17,9 @@ import {
   panesPage,
   problemPage,
   refusedPage,
+  keyListPage,
+  keysRefusedPage,
+  pickerPage,
   terminalFooter,
   terminalPage,
   voiceAnswerPage,
@@ -67,6 +70,10 @@ const every: Array<[string, Page]> = [
   ['panes', panesPage('studio-mac', [terminal])],
   ['no panes', panesPage('studio-mac', [])],
   ['terminal', terminalPage({ entry: terminal, lines: Array.from({ length: 30 }, (_, index) => `line ${index}`), scrolledUp: 0, footer: terminalFooter(question) })],
+  ['terminal scrolled', terminalPage({ entry: terminal, lines: Array.from({ length: 8 }, (_, index) => `line ${index}`), scrolledUp: 4, dim: 'bottom', footer: terminalFooter(undefined) })],
+  ['picker', pickerPage(terminal, ['Try the new fullscreen renderer? Flicker-free output, mouse support, selected text auto-copies.'], ['1. Yes, try it', '2. Not now'], false, terminalFooter(undefined))],
+  ['key list', keyListPage(['  > 1. Yes, try it', '     2. Not now'], terminalFooter(undefined))],
+  ['keys refused', keysRefusedPage(terminal, "studio-mac's Pane can't take keys from the glasses yet.", 'Update Pane on studio-mac.')],
   ['dictation', dictationPage(terminal, ['a', 'b'], 'stub the clock')],
   ['no computer', noComputerPage(3)],
   ['refused', refusedPage('devbox', { code: 'ERR_GLASSES_ORIGIN_REFUSED', message: 'This request came from https://x.example.', next: 'Allow it.' })],
@@ -146,13 +153,14 @@ describe('terminal (T3)', () => {
     expect(terminalFooter(undefined).brightness).toBeLessThan(4);
   });
 
-  it('shows the newest lines live and says how far it is scrolled up', () => {
-    const lines = Array.from({ length: 30 }, (_, index) => `line ${index}`);
-    const live = terminalPage({ entry: terminal, lines, scrolledUp: 0, footer: terminalFooter(undefined) });
-    expect(texts(live)[0]).toBe('fix-login · Claude · working');
-    expect(texts(live)[1]?.split('\n').at(-1)).toBe('line 29');
-    const up = terminalPage({ entry: terminal, lines, scrolledUp: 40, footer: terminalFooter(undefined) });
-    expect(texts(up)[0]).toBe('fix-login · scrolled up 40 lines · press = live');
+  it('splits the page into two halves and says where the view is', () => {
+    const lines = Array.from({ length: 8 }, (_, index) => `line ${index}`);
+    const footer = terminalFooter(undefined);
+    const live = terminalPage({ entry: terminal, lines, scrolledUp: 0, footer });
+    expect(texts(live).slice(0, 3)).toEqual(['fix-login · Claude · working', 'line 0\nline 1\nline 2\nline 3', 'line 4\nline 5\nline 6\nline 7']);
+    expect(texts(terminalPage({ entry: terminal, lines, scrolledUp: 40, footer }))[0]).toBe('fix-login · scrolled up 40 lines');
+    expect(texts(terminalPage({ entry: terminal, lines, scrolledUp: 0, more: 18, footer }))[0]).toBe('fix-login · Claude · working · ↓ 18 more');
+    expect(texts(terminalPage({ entry: terminal, lines, scrolledUp: 0, keys: true, footer }))[0]).toBe('KEYS · swipe ↑↓ · press Enter · hold Esc/Tab');
   });
 });
 

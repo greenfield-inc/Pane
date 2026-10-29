@@ -28,6 +28,8 @@ class FakeHost {
    * which fails as a network error, while a plain GET gets the host's readable 403.
    */
   originRemoved = false;
+  /** Commands this host's Pane doesn't let glasses run, as an older Pane refuses them. */
+  readonly refusedChannels = new Set<string>();
   private streams: Array<ReadableStreamDefaultController<Uint8Array>> = [];
 
   constructor(readonly url: string) {}
@@ -55,6 +57,9 @@ class FakeHost {
       return new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream' } });
     }
     const request = decodeBoundary(JSON.parse(init.body ?? '{}'), boundary.object({ channel: boundary.string, args: boundary.array(boundary.json) }));
+    if (this.refusedChannels.has(request.channel)) {
+      return Response.json({ ok: false, error: { message: `Glasses can't run ${request.channel}.`, code: 'ERR_GLASSES_CHANNEL_REFUSED' } }, { status: 403 });
+    }
     const handler = this.handlers.get(request.channel);
     if (!handler) return Response.json({ ok: false, error: { message: `no ${request.channel}`, code: 'ERR_TEST' } }, { status: 403 });
     return Response.json({ ok: true, result: handler(request.args) });
@@ -263,6 +268,33 @@ describe('HostHub', () => {
       ['notify:remote-command', [{ type: 'answer', id: 'a1', answer: { choice: 'Yes' } }]],
       ['runpane:panels:submit', [{ panelId: 'panel-1', input: 'rerun the tests', source: 'user' }]],
     ]);
+    one.stop();
+  });
+
+  it('presses one key at a time, as the bytes a terminal reads, sent as the user', async () => {
+    const a = host('https://studio.tail1.ts.net:8443');
+    const sent: JsonValue[] = [];
+    a.handlers.set('runpane:panels:input', ([request]) => { sent.push(request ?? null); return { ok: true }; });
+    const { hub: one } = hub([a]);
+    await until(() => one.computers()[0]?.status === 'live');
+    for (const key of ['up', 'down', 'enter', 'escape', 'tab', '4'] as const) await one.key(a.url, 'panel-1', key);
+    expect(sent).toEqual(['\u001b[A', '\u001b[B', '\r', '\u001b', '\t', '4'].map((input) => ({ panelId: 'panel-1', input, source: 'user' })));
+    one.stop();
+  });
+
+  it("says a computer on an older Pane can't take keys yet, and keeps it live however often it refuses", async () => {
+    const a = host('https://studio.tail1.ts.net:8443');
+    a.refusedChannels.add('runpane:panels:input');
+    const { hub: one } = hub([a]);
+    await until(() => one.computers()[0]?.status === 'live');
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      await expect(one.key(a.url, 'panel-1', 'down')).rejects.toMatchObject({
+        code: 'ERR_GLASSES_KEYS_UNSUPPORTED',
+        message: "computer-0's Pane can't take keys from the glasses yet.",
+        next: 'Update Pane on computer-0.',
+      });
+    }
+    expect(one.computers()[0]?.status).toBe('live');
     one.stop();
   });
 
