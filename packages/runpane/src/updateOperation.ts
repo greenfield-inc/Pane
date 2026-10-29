@@ -121,6 +121,21 @@ export function claimUpdateLock(directory: string, id: string, statusFile: strin
   } finally { fs.rmSync(candidate, { recursive: true, force: true }); }
 }
 
+/**
+ * The CLI that requested the update may be answering a remote `runpane workspace
+ * exec` through the Pane this update stops. Wait for it to exit, then a moment
+ * more for that reply (the operation id) to leave, before stopping Pane. Bounded:
+ * a caller that never exits does not hold the update.
+ */
+export async function waitForUpdateCaller(journal: UpdateJournal, { timeoutMs = 60_000, graceMs = 2_000 } = {}): Promise<void> {
+  const pid = journal.setupPid;
+  if (!pid || pid === process.pid) return;
+  const alive = () => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  const deadline = Date.now() + timeoutMs;
+  while (alive() && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 100));
+  await new Promise(resolve => setTimeout(resolve, graceMs));
+}
+
 /** Elect one releaser. A terminal journal plus a dead recorded releaser repairs a crashed cleanup. */
 export function releaseUpdateLock(directory: string, id: string): void {
   const marker = path.join(directory, 'releasing');
