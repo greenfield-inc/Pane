@@ -599,7 +599,11 @@ export function registerRunpaneHandlers(
       const input = parseOrchestrationSessionCreateRequest(request);
       const view = await manager.create(input);
       // Start the agent now, as opening the Session in the app would, so a caller can wait for it and send a first prompt.
-      await terminalPanelManager.initializeTerminal(view.panel, view.internalSession.worktreePath);
+      try {
+        await terminalPanelManager.initializeTerminal(view.panel, view.internalSession.worktreePath);
+      } catch (error) {
+        throw new PaneError('ERR_SESSION_START_FAILED', `Session “${view.session.name}” was created, but its agent did not start: ${reasonOf(error)}.`, `Start it with \`runpane panels resume --panel ${view.panel.id}\`, or open the Session in Pane.`);
+      }
       return { ok: true, session: view.session, panelId: view.panel.id, internalSessionId: view.internalSession.id };
     }, result => ({ resultCount: 1, panelId: result.panelId }));
   });
