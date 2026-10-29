@@ -108,6 +108,28 @@ describe('native Chat viewer', () => {
     expect(session.snapshot().view?.transcript?.messages[0].parts).toEqual([{ type: 'text', text: 'Repaired full answer' }]);
   });
 
+  it('reloads by itself, without asking, when events were missed while reconnecting', async () => {
+    const { session, transport, setHost, getHost } = fixture();
+    const message = (revision: number) => ({ panelId: 'panel-a', generation: 2, revision, messages: [{ id: 'answer', role: 'assistant' as const, parts: [{ type: 'text' as const, text: `as of ${revision}` }] }] });
+    const event = (revision: number): AgentChatEvent => ({ panelId: 'panel-a', generation: 2, revision, change: { type: 'append', id: 'answer', role: 'assistant', part: { type: 'text', text: '.' } } });
+    const loads: Array<(view: AgentChatView) => void> = [];
+    transport.get
+      .mockImplementationOnce(() => new Promise(done => { loads.push(done); }))
+      .mockImplementationOnce(() => new Promise(done => { loads.push(done); }));
+    const refresh = session.refresh();
+    // Each load misses events: the host is at revision 0, then 2, while the phone already saw 2, then 4.
+    session.receiveEvent(event(2));
+    loads[0]?.(structuredClone(getHost()));
+    await vi.waitFor(() => expect(loads).toHaveLength(2));
+    session.receiveEvent(event(4));
+    setHost({ ...getHost(), transcript: message(2) });
+    loads[1]?.(structuredClone(getHost()));
+    setHost({ ...getHost(), transcript: message(4) });
+    await refresh;
+    await vi.waitFor(() => expect(session.snapshot().view?.transcript?.messages[0].parts).toEqual([{ type: 'text', text: 'as of 4' }]));
+    expect(session.snapshot().error).toBeUndefined();
+  });
+
   it('retries only the explicitly selected uncertain operation and keeps it when leaving the viewer', async () => {
     const { session, transport } = fixture();
     const detach = session.subscribe(() => undefined);

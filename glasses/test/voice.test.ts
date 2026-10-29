@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { recordedDictation, streamingDictation, voiceMode, voiceStreamUrl, wavFile, type VoiceHost } from '../src/voice';
 
 const message = (data: string) => new MessageEvent<string | ArrayBuffer>('message', { data });
@@ -92,16 +92,49 @@ describe('voice', () => {
     expect(ws.closed).toBe(true);
   });
 
-  it('fails a stream the connection dropped instead of sending the words heard before', async () => {
+  it('keeps the words heard before a drop, says so while you hold, and cleans them up on release', async () => {
     const sockets: FakeSocket[] = [];
     const calls: string[] = [];
-    const dictation = await streamingDictation(voiceHost(sockets, calls), () => {});
+    const previews: string[] = [];
+    const dictation = await streamingDictation(voiceHost(sockets, calls), (text) => previews.push(text));
     const [ws] = sockets;
     if (!ws) throw new Error('no socket');
     ws.onmessage?.(message(JSON.stringify({ type: 'Results', is_final: true, channel: { alternatives: [{ transcript: 'run the deployment' }] } })));
     ws.readyState = 3;
     ws.onclose?.();
+    expect(previews.at(-1)).toBe('Connection dropped. Release to send: run the deployment');
     dictation.push(new Uint8Array([7]));
+    expect(await dictation.finish()).toBe('Stub the clock.');
+    expect(calls).toEqual(['finalize:run the deployment']);
+  });
+
+  it('sends the words as heard when the computer cannot clean them up, or takes longer than 90 s', async () => {
+    const sockets: FakeSocket[] = [];
+    const failing = { ...voiceHost(sockets, []), finalizeStreaming: async () => { throw new Error('Delivery unknown'); } };
+    const first = await streamingDictation(failing, () => {});
+    sockets[0]?.onmessage?.(message(JSON.stringify({ type: 'Results', is_final: true, channel: { alternatives: [{ transcript: 'run the deployment' }] } })));
+    sockets[0]?.onclose?.();
+    expect(await first.finish()).toBe('run the deployment');
+
+    vi.useFakeTimers();
+    try {
+      const silent = { ...voiceHost(sockets, []), finalizeStreaming: () => new Promise<string>(() => {}) };
+      const second = await streamingDictation(silent, () => {});
+      sockets[1]?.onmessage?.(message(JSON.stringify({ type: 'Results', is_final: true, channel: { alternatives: [{ transcript: 'loosen retry' }] } })));
+      sockets[1]?.onclose?.();
+      const finished = second.finish();
+      await vi.advanceTimersByTimeAsync(90_000);
+      expect(await finished).toBe('loosen retry');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('says the connection dropped when it dropped before any words were heard', async () => {
+    const sockets: FakeSocket[] = [];
+    const calls: string[] = [];
+    const dictation = await streamingDictation(voiceHost(sockets, calls), () => {});
+    sockets[0]?.onclose?.();
     await expect(dictation.finish()).rejects.toMatchObject({ code: 'ERR_GLASSES_VOICE_DROPPED', message: 'Lost the connection to devbox while listening.' });
     expect(calls).toEqual([]);
   });

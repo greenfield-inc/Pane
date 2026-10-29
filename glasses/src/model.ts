@@ -98,6 +98,9 @@ export interface Dictation {
   cancel(): void;
 }
 
+/** A screen read failed while its computer reconnects; the next read may succeed. */
+export const SCREEN_RECONNECTING = 'ERR_GLASSES_RECONNECTING';
+
 /** A failure the glasses show as a screen: what happened and what to do next. */
 export class GlassesError extends Error {
   override name = 'GlassesError';
@@ -115,6 +118,7 @@ export interface PaneSource {
   cards(): Card[];
   subscribe(listener: () => void): () => void;
   panes(computerId: string): Promise<PaneRow[]>;
+  /** Rejects with code SCREEN_RECONNECTING while the computer is still reconnecting. */
   screen(computerId: string, panelId: string): Promise<TerminalScreen>;
   /** Older output, oldest line first: the last `lines` rows, or the source's own limit. */
   scrollback(computerId: string, panelId: string, lines?: number): Promise<string[]>;

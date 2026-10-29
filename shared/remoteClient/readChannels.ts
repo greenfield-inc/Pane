@@ -51,6 +51,12 @@ export const REMOTE_READ_CHANNELS = new Set([
   'terminal:getState',
   // Cleans up a dictation's text; the host keeps nothing, so a lost answer can be asked again.
   'voice:finalize-streaming',
+  // Read a terminal's screen or saved output; glasses poll the screen every second.
+  'runpane:panels:screen',
+  'runpane:panels:output',
+  // Read a worktree folder or text file; nothing on the host changes.
+  'file:list',
+  'file:read',
 ]);
 
 
