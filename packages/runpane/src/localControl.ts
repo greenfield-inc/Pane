@@ -885,7 +885,6 @@ interface AgentDoctorResult {
   available: boolean;
   executablePath?: string;
   version?: string;
-  signIn?: 'signed-in' | 'signed-out' | 'unknown';
   checks: Array<{
     name: string;
     ok: boolean;
@@ -1803,7 +1802,6 @@ const agentDoctorResultSchema: BoundarySchema<AgentDoctorResult> = boundary.obje
   available: boundary.boolean,
   executablePath: boundary.optional(boundary.string),
   version: boundary.optional(boundary.string),
-  signIn: boundary.optional(boundary.enumeration('signed-in', 'signed-out', 'unknown')),
   checks: boundary.array(boundary.object({
     name: boundary.string,
     ok: boundary.boolean,
@@ -4561,9 +4559,6 @@ function printAgentDoctorResult(result: AgentDoctorResult): void {
   }
   if (result.version) {
     console.log(`Version: ${result.version}`);
-  }
-  if (result.signIn) {
-    console.log(`Sign-in: ${result.signIn}`);
   }
   for (const check of result.checks) {
     console.log(`${check.ok ? 'OK' : 'FAIL'} ${check.name}: ${check.message}`);

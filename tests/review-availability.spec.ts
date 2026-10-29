@@ -229,9 +229,10 @@ test('New panes start with the inspector shown and the toggle hides it', async (
   await expect(page.locator('.pane-detail-panel-vertical')).toHaveCSS('width', '0px');
 });
 
-test('the New tab picker keeps long custom commands inside a narrow viewport', async ({ page }, testInfo) => {
+test('Add Tool keeps long custom commands inside a narrow viewport', async ({ page }, testInfo) => {
   const commandName = 'pnpm run extraordinarily-long-development-command';
   const fullCommand = `${commandName} --with-options`;
+  const expectedLabel = `${commandName.slice(0, 15)}...`;
 
   await page.setViewportSize({ width: 420, height: 720 });
   await openSession(page, baseGitStatus, {
@@ -242,15 +243,18 @@ test('the New tab picker keeps long custom commands inside a narrow viewport', a
   });
 
   await page.getByRole('button', { name: 'Add tool', exact: true }).click();
-  const picker = page.getByRole('region', { name: 'Start an agent here' });
-  const commandButton = picker.getByRole('button', { name: commandName, exact: true });
-  await expect(picker).toBeVisible();
-  await expect(commandButton).toBeVisible();
+  const menu = page.getByRole('menu');
+  const commandLabel = menu.getByText(expectedLabel, { exact: true });
+  const commandButton = menu.getByRole('menuitem', { name: expectedLabel, exact: false });
+  await expect(menu).toBeVisible();
+  await expect(commandLabel).toBeVisible();
+  await expect(commandLabel).toHaveText(expectedLabel);
 
-  const pickerBounds = await picker.boundingBox();
-  const commandBounds = await commandButton.boundingBox();
-  expect(pickerBounds && commandBounds).toBeTruthy();
-  expect(commandBounds!.x + commandBounds!.width).toBeLessThanOrEqual(pickerBounds!.x + pickerBounds!.width);
+  const menuBounds = await menu.boundingBox();
+  expect(menuBounds).not.toBeNull();
+  expect(menuBounds!.x).toBeGreaterThanOrEqual(8);
+  expect(menuBounds!.x + menuBounds!.width).toBeLessThanOrEqual(412);
+  expect(await commandLabel.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 
   await commandButton.hover();

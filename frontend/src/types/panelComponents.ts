@@ -25,8 +25,6 @@ export interface PanelTabBarProps {
   onPanelClose: (panel: ToolPanel) => void;
   onPanelCreate: (type: ToolPanelType, options?: PanelCreateOptions) => void;
   onShowExplorer: () => void;
-  /** When set, "+" (and its shortcut) opens a "New tab" picker tab instead of the add-tool menu. */
-  onOpenNewTab?: () => void;
   projectEnvironment?: ProjectEnvironment;
   context?: PanelContext;  // Optional context to filter available panels
   onToggleDetailPanel?: () => void;
