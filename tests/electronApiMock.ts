@@ -17,7 +17,7 @@ import type { GlassesAccessState } from '../shared/types/glasses';
 import type { JsonObject, JsonValue } from '../shared/validation/boundaryDecoder';
 import { DEFAULT_APPEARANCE, normalizeAppearance, type AppearanceConfig } from '../shared/types/appearance';
 import type { DiffManifest, DiffScope, FileDiffResult } from '../shared/types/gitDiff';
-import type { RunpaneAgentDoctorResult, RunpanePaneCreateRequest } from '../shared/types/runpaneOrchestration';
+import type { RunpaneAgentDoctorResult } from '../shared/types/runpaneOrchestration';
 import type { SetupExportSummary, SetupFile, SetupImportPreview, SetupSectionId } from '../shared/types/setupTransfer';
 import type { NotifyCommand, NotifySnapshot, NotifyWindowSize } from '../shared/types/notify';
 
@@ -122,12 +122,6 @@ export type ElectronApiMockOptions = {
   setupImportError?: string;
   /** Serves window.electronAPI.notify with this queue snapshot; absent, the API is too. */
   notifySnapshot?: NotifySnapshot;
-  /** runpane:panes:create fails with this message instead of adding the Pane. */
-  paneCreateError?: string;
-  /** runpane:panes:create creates the Pane, then reports a failure (ok: false) that kept it, as main does when setup fails. */
-  paneCreateKeptFailure?: boolean;
-  /** projects.listBranches fails with this message, or `hold` leaves it pending. */
-  listBranchesError?: string | 'hold';
 };
 
 export async function installElectronApiMock(page: Page, options: ElectronApiMockOptions = {}) {
@@ -683,29 +677,6 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         if (mockOptions.agentDoctorDelayMs === 'hold') return new Promise(() => undefined);
         return new Promise(resolve => setTimeout(() => resolve(clone(result)), mockOptions.agentDoctorDelayMs ?? 0));
       }
-      if (channel === 'runpane:panes:create') {
-        // SAFETY: The Start a task card sends runpane:panes:create a request with the repo's id.
-        const request = args[0] as RunpanePaneCreateRequest & { repo: { id: number } };
-        const item = request.panes[0];
-        if (mockOptions.paneCreateError) return Promise.reject(new Error(`Error invoking remote method 'invoke': Error: ${mockOptions.paneCreateError}`));
-        const at = new Date().toISOString();
-        const sessionId = `created-${item.name}`;
-        // Stands in for main creating the Pane and its agent tab.
-        const session: JsonObject = {
-          id: sessionId, name: item.name, projectId: request.repo.id, worktreePath: `/tmp/worktrees/${item.name}`, prompt: '',
-          status: 'running', createdAt: at, lastActivity: at, output: [], jsonMessages: [], permissionMode: 'ignore',
-          toolType: 'none', archived: false, isHidden: false, isFavorite: false,
-        };
-        mockSessions.push(clone(session));
-        emit('session:created', clone(session));
-        if (mockOptions.paneCreateKeptFailure) {
-          return Promise.resolve({ ok: false, items: [{
-            ok: false, index: 0, name: item.name, sessionId, paneId: sessionId,
-            error: { code: 'ERR_RUNPANE_PANE_CREATE_FAILED', message: `Could not create Pane "${item.name}": setup failed. Pane ${sessionId} was created before the failure and was kept.` },
-          }] });
-        }
-        return Promise.resolve({ ok: true, items: [{ ok: true, index: 0, name: item.name, sessionId, paneId: sessionId }] });
-      }
       if (channel === 'runpane:panels:resume') {
         // SAFETY: The exit card sends runpane:panels:resume a { panelId } request.
         const { panelId } = args[0] as { panelId: string };
@@ -1199,11 +1170,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
             ? mockOptions.detectedBranchByPath[path]
             : (mockOptions.detectedBranch === undefined ? 'main' : mockOptions.detectedBranch),
         ),
-        listBranches: () => mockOptions.listBranchesError === 'hold'
-          ? new Promise(() => undefined)
-          : mockOptions.listBranchesError
-            ? Promise.resolve({ success: false, error: mockOptions.listBranchesError })
-            : success([
+        listBranches: () => success([
           { name: 'origin/main', isCurrent: false, hasWorktree: false, isRemote: true },
           { name: 'main', isCurrent: true, hasWorktree: false, isRemote: false },
         ]),
