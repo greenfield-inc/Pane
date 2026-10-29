@@ -7,28 +7,40 @@ const captured = (name: string) => readFileSync(new URL(`./fixtures/${name}.txt`
 
 describe('a menu on screen', () => {
   it('is found in a Claude permission prompt, with a choice that wraps onto a second row', () => {
-    expect(findMenu(captured('claude-permission'))).toEqual({
+    expect(findMenu(captured('claude-permission'))).toMatchObject({
       choices: ['1. Yes', '2. Yes, and always allow access to /Users/me/code/demo from this', '3. Yes, and switch to auto mode · auto mode handles these prompts for you', '4. No'],
       cursor: 0,
-      question: ['Do you want to proceed?'],
+      // The command sits between dashed separators above the question; it is part of what is asked.
+      question: ['Tip: auto mode handles these prompts for you — choose "switch to auto mode" below', 'Create empty bye.txt file', 'touch bye.txt && ls -l bye.txt', 'Do you want to proceed?'],
     });
   });
 
   it('is found in a Claude question with a description under each choice and one more choice below a rule', () => {
-    expect(findMenu(captured('claude-question'))).toEqual({
+    expect(findMenu(captured('claude-question'))).toMatchObject({
       choices: ['1. Red', '2. Blue', '3. Type something.', '4. Chat about this'],
       cursor: 0,
-      question: ['☐ Color', 'Which color do you prefer?'],
     });
+    expect(findMenu(captured('claude-question'))?.question.slice(-2)).toEqual(['☐ Color', 'Which color do you prefer?']);
   });
 
   it('is found in a Codex approval, and in its folder trust prompt', () => {
-    expect(findMenu(captured('codex-approval'))).toEqual({
+    expect(findMenu(captured('codex-approval'))).toMatchObject({
       choices: ['1. Yes, proceed (y)', "2. Yes, and don't ask again for commands that start with `touch codex.txt` (p)", '3. No, and tell Codex what to do differently (esc)'],
       cursor: 0,
       question: ['Would you like to run the following command?', 'Environment: local', 'Reason: Allow creating codex.txt in the current directory?', '$ touch codex.txt'],
     });
     expect(findMenu(captured('codex-trust'))?.choices).toEqual(['1. Trust and continue', '2. Back to Agent Command Center']);
+  });
+
+  it('is a different menu when the command it asks about changes, and the same one when only the cursor moves', () => {
+    const permission = captured('claude-permission');
+    const identity = (rows: string[]) => findMenu(rows)?.identity;
+    const moved = permission.map((row) => row.replace(' ❯ 1. Yes', '   1. Yes').replace('   4. No', ' ❯ 4. No'));
+    expect(identity(moved)).toBe(identity(permission));
+    const otherCommand = permission.map((row) => row.replace('touch bye.txt && ls -l bye.txt', 'rm -rf ./important-work'));
+    expect(identity(otherCommand)).not.toBe(identity(permission));
+    const otherDescription = permission.map((row) => row.replace('      project', '      home folder'));
+    expect(identity(otherDescription)).not.toBe(identity(permission));
   });
 
   it('follows the cursor to another row', () => {
@@ -37,7 +49,7 @@ describe('a menu on screen', () => {
   });
 
   it('is found with a bulleted list and a > cursor', () => {
-    expect(findMenu(['Pick a branch:', '  - main', '> - next', '  - release', '', 'enter to switch'])).toEqual({
+    expect(findMenu(['Pick a branch:', '  - main', '> - next', '  - release', '', 'enter to switch'])).toMatchObject({
       choices: ['- main', '- next', '- release'],
       cursor: 1,
       question: ['Pick a branch:'],
@@ -82,6 +94,16 @@ describe('no menu', () => {
   it('for a menu scrolled above more output', () => {
     const permission = captured('claude-permission');
     expect(findMenu([...permission, '⏺ Bash(touch bye.txt)', '  ⎿  (No output)', '', '⏺ Done: bye.txt exists.', '', '✻ Worked for 3s'])).toBeNull();
+  });
+
+  it('for a menu followed by more indented rows than a description', () => {
+    const output = Array.from({ length: 10 }, (_, index) => `    output ${index + 1}`);
+    expect(findMenu(['Pick one', '❯ 1. Yes', '  2. No', ...output])).toBeNull();
+    expect(findMenu(['Pick one', '❯ 1. Yes', '  2. No', ...output.slice(0, 3)])?.choices).toEqual(['1. Yes', '2. No']);
+  });
+
+  it('for a menu with no question above it', () => {
+    expect(findMenu(['❯ 1. Yes', '  2. No'])).toBeNull();
   });
 
   it('for a shell select menu, which has no cursor', () => {

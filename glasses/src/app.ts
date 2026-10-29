@@ -55,7 +55,7 @@ const HOLD_FIND_MS = 5_000;
 const HOLD_MATCH_CHARS = 40;
 const MENU_CHANGED = 'The menu changed, so nothing more was sent';
 
-const menuKey = (menu: Menu) => [...menu.question, ...menu.choices].join('\n');
+const menuKey = (menu: Menu) => menu.identity;
 /** The last index whose row passes `test`, or -1. */
 function lastIndex(rows: readonly string[], test: (row: string) => boolean): number {
   for (let index = rows.length - 1; index >= 0; index -= 1) if (test(rows[index] ?? '')) return index;
@@ -190,6 +190,9 @@ export class GlassesApp {
   /** Counts screen reads; only the newest one draws or schedules the next. */
   private reads = 0;
   private holdReading = false;
+  /** Keys go out one at a time, in the order pressed; a failed key drops the ones queued behind it. */
+  private keyQueue: Promise<void> = Promise.resolve();
+  private keyFailures = 0;
   /** The tab this open already resumed, so a tab that stops again is not restarted behind the user. */
   private resumed: string | null = null;
   private readonly unsubscribe: () => void;
@@ -331,7 +334,7 @@ export class GlassesApp {
       case 'keys-refused':
         return keysRefusedPage(state.entry, state.refusal?.message ?? '', state.refusal?.next);
       case 'key-list':
-        return keyListPage(cursorRows(state.screen));
+        return keyListPage(cursorRows(state.screen), terminalFooter(elsewhere));
       case 'keys':
         return terminalPage({
           entry: state.entry, keys: true, scrolledUp: 0, lines: terminalLines(state.screen).slice(-TERMINAL_LINES),
@@ -774,12 +777,30 @@ export class GlassesApp {
   private async sendKey(view: Extract<View, { name: 'terminal' }>, key: TerminalKey, after: TerminalMode): Promise<void> {
     this.update(view, { mode: after, notice: null });
     try {
-      await this.deps.source.key(view.computerId, view.entry.panelId, key);
+      await this.pressKey(view.computerId, view.entry.panelId, key);
     } catch (error) {
       this.keyRefused(view.entry.panelId, error);
       return;
     }
     if (this.terminalOn(view.entry.panelId)) this.readNow();
+  }
+
+  /** Sends one key after every key pressed before it; once one fails, the keys already queued are not sent. */
+  private pressKey(computerId: string, panelId: string, key: TerminalKey): Promise<void> {
+    const failures = this.keyFailures;
+    const sent = this.keyQueue.then(async () => {
+      if (failures !== this.keyFailures) {
+        throw new GlassesError('ERR_GLASSES_KEY_DROPPED', 'A key before this one was not sent, so this one was not sent either.', 'Look at the terminal, then try again.');
+      }
+      try {
+        await this.deps.source.key(computerId, panelId, key);
+      } catch (error) {
+        this.keyFailures += 1;
+        throw error;
+      }
+    });
+    this.keyQueue = sent.catch(() => {});
+    return sent;
   }
 
   /** A key the computer turned away: an older Pane says so on its own screen; anything else is a problem. */
@@ -797,7 +818,7 @@ export class GlassesApp {
   private onScroll(view: Extract<View, { name: 'terminal' }>, gesture: Gesture): void {
     switch (gesture.type) {
       case 'up':
-        if (view.hold?.start != null) this.update(view, { hold: { ...view.hold, offset: view.hold.offset - HALF_PAGE }, dim: 'bottom' });
+        if (view.hold?.start != null) this.update(view, { hold: { ...view.hold, offset: Math.max(view.hold.offset - HALF_PAGE, -view.hold.start) }, dim: 'bottom' });
         else void this.scrollUp(view);
         return;
       case 'down':
@@ -823,8 +844,9 @@ export class GlassesApp {
   private scrollDown(view: Extract<View, { name: 'terminal' }>): void {
     const hold = view.hold;
     if (hold?.start != null) {
+      // From older output, swiping down stops at your line before reading on.
       if (this.heldTop(hold) + HALF_PAGE + TERMINAL_LINES >= hold.lines.length) this.update(view, { hold: null, dim: null });
-      else this.update(view, { hold: { ...hold, offset: hold.offset + HALF_PAGE }, dim: 'top' });
+      else this.update(view, { hold: { ...hold, offset: hold.offset < 0 ? Math.min(hold.offset + HALF_PAGE, 0) : hold.offset + HALF_PAGE }, dim: 'top' });
       return;
     }
     const scrolledUp = Math.max(0, view.scrolledUp - HALF_PAGE);
@@ -875,12 +897,12 @@ export class GlassesApp {
       const step: TerminalKey = index > menu.cursor ? 'down' : 'up';
       for (let cursor = menu.cursor; cursor !== index;) {
         if (!this.terminalOn(panelId)?.picking) return;
-        await this.deps.source.key(computerId, panelId, step);
+        await this.pressKey(computerId, panelId, step);
         cursor += step === 'down' ? 1 : -1;
         if (!(await this.cursorOn(computerId, panelId, menu, cursor, PICK_WAIT_MS))) return stop();
       }
       if (!this.terminalOn(panelId)?.picking) return;
-      await this.deps.source.key(computerId, panelId, 'enter');
+      await this.pressKey(computerId, panelId, 'enter');
     } catch (error) {
       this.keyRefused(panelId, error);
       return;
@@ -892,12 +914,16 @@ export class GlassesApp {
     }
   }
 
-  /** Reads the screen until `menu`, question included, shows with its cursor on `row`, for up to `waitMs`. */
+  /**
+   * Reads the screen until `menu` shows with its cursor on `row`, for up to `waitMs`. Any read that
+   * shows another menu, or none, fails at once: only the cursor may still be on its way.
+   */
   private async cursorOn(computerId: string, panelId: string, menu: Menu, row: number, waitMs: number): Promise<boolean> {
     for (let waited = 0; ; waited += PICK_READ_MS) {
       const screen = await this.deps.source.screen(computerId, panelId);
       const found = findMenu(screen.lines);
-      if (found && menuKey(found) === menuKey(menu) && found.cursor === row) return true;
+      if (!found || menuKey(found) !== menuKey(menu)) return false;
+      if (found.cursor === row) return true;
       if (waited + PICK_READ_MS > waitMs) return false;
       await new Promise<void>((resolve) => { this.deps.later(resolve, PICK_READ_MS); });
     }

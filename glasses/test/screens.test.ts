@@ -72,7 +72,7 @@ const every: Array<[string, Page]> = [
   ['terminal', terminalPage({ entry: terminal, lines: Array.from({ length: 30 }, (_, index) => `line ${index}`), scrolledUp: 0, footer: terminalFooter(question) })],
   ['terminal scrolled', terminalPage({ entry: terminal, lines: Array.from({ length: 8 }, (_, index) => `line ${index}`), scrolledUp: 4, dim: 'bottom', footer: terminalFooter(undefined) })],
   ['picker', pickerPage(terminal, ['Try the new fullscreen renderer? Flicker-free output, mouse support, selected text auto-copies.'], ['1. Yes, try it', '2. Not now'], false, terminalFooter(undefined))],
-  ['key list', keyListPage(['  > 1. Yes, try it', '     2. Not now'])],
+  ['key list', keyListPage(['  > 1. Yes, try it', '     2. Not now'], terminalFooter(undefined))],
   ['keys refused', keysRefusedPage(terminal, "studio-mac's Pane can't take keys from the glasses yet.", 'Update Pane on studio-mac.')],
   ['dictation', dictationPage(terminal, ['a', 'b'], 'stub the clock')],
   ['no computer', noComputerPage(3)],

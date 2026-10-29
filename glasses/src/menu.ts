@@ -8,14 +8,18 @@ export interface Menu {
   choices: string[];
   /** The choice the cursor is on. */
   cursor: number;
-  /** Up to 4 rows just above the choices: the question. */
+  /** Up to 4 rows just above the choices, across separators: the question and what it would do. */
   question: string[];
+  /** The question and every choice row with its description, cursor mark removed: the same text is the same menu. */
+  identity: string;
 }
 
 const MIN_CHOICES = 2;
 const MAX_CHOICES = 9;
 /** Hint and status rows a menu may have below it. */
 const MAX_BELOW = 4;
+/** Description rows the last choice may have; more means output below a stale menu. */
+const MAX_DESCRIPTION = 3;
 const MAX_QUESTION = 4;
 
 /** An optional cursor mark, then a number ("1." or "1)") or a bullet, then the label. */
@@ -55,9 +59,16 @@ export function findMenu(rows: readonly string[]): Menu | null {
 
   let below = 0;
   let described = true;
-  for (const row of rows.slice(last + 1)) {
+  let description = 0;
+  let end = last;
+  for (const [offset, row] of rows.slice(last + 1).entries()) {
     if (blank(row)) continue;
-    if (described && continues(row)) continue;
+    if (described && continues(row)) {
+      description += 1;
+      end = last + 1 + offset;
+      if (description > MAX_DESCRIPTION) return null;
+      continue;
+    }
     described = false;
     if (CURSOR_START.test(row)) return null;
     below += 1;
@@ -89,9 +100,14 @@ export function findMenu(rows: readonly string[]): Menu | null {
       if (blanks >= 2 && question.length) break;
       continue;
     }
-    if (separator(row)) break;
+    // A separator can sit between the question and what it asks about, such as the command to run.
+    if (separator(row)) continue;
     blanks = 0;
     question.unshift(row.trim());
   }
-  return { choices: block.map((choice) => choice.label), cursor: block.indexOf(cursors[0]), question };
+  // Without a question there is nothing to tell this menu from another with the same choices.
+  if (!question.length) return null;
+  const first = block[0]?.index ?? last;
+  const shown = rows.slice(first, end + 1).map((row) => (choiceRow(row, 0) ? row.replace(/^(\s*)[❯>›]/u, '$1 ') : row).trimEnd());
+  return { choices: block.map((choice) => choice.label), cursor: block.indexOf(cursors[0]), question, identity: [...question, ...shown].join('\n') };
 }

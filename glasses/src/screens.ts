@@ -377,13 +377,14 @@ export function pickerPage(entry: PaneEntry, question: readonly string[], choice
 /** The keys behind hold in keys mode, in the order the list shows them. */
 export const KEY_LIST = [{ key: 'escape', label: 'Esc' }, { key: 'tab', label: 'Tab' }] as const;
 
-/** Hold in keys mode: the rows around the cursor, dimmed, over the Esc / Tab list. */
-export function keyListPage(context: readonly string[]): Page {
+/** Hold in keys mode: the rows around the cursor, dimmed, over the Esc / Tab list, and the footer for cards elsewhere. */
+export function keyListPage(context: readonly string[], footerLine: FooterLine): Page {
   return {
     boxes: [
       bar('header', 0, 'KEYS · press sends · double = back', BRIGHT),
       contextBox(context),
       list('keys', MENU_Y, FOOTER_Y - MENU_Y, KEY_LIST.map((entry) => entry.label)),
+      footer(footerLine.text, footerLine.brightness),
     ],
   };
 }

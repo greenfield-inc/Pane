@@ -265,7 +265,11 @@ class ScriptedSource implements PaneSource {
   onKey: (key: TerminalKey) => void = () => {};
   savedReads = 0;
   async submit(_computerId: string, _panelId: string, text: string) { this.submitted.push(text); }
+  /** Each key request waits on the next of these, in order, before it lands; a rejected one fails that key. */
+  keyDelays: Array<Promise<void>> = [];
   async key(_computerId: string, _panelId: string, key: TerminalKey) {
+    const delay = this.keyDelays.shift();
+    if (delay) await delay;
     this.onKey(key);
     this.keys.push(key);
   }
@@ -448,6 +452,31 @@ describe('keys mode', () => {
     expect(text()[0]).toBe('fix-login · shell · idle');
   });
 
+  it('sends keys in the order you made them, even when one is slow to arrive', async () => {
+    const { source, press } = await openKeys();
+    let arrive = () => {};
+    source.keyDelays = [new Promise<void>((resolve) => { arrive = resolve; })];
+    await press({ type: 'down' });
+    await press({ type: 'press' });
+    expect(source.keys).toEqual([]);
+    arrive();
+    await settle();
+    expect(source.keys).toEqual(['down', 'enter']);
+  });
+
+  it('drops the keys waiting behind one that failed', async () => {
+    const { source, press, text } = await openKeys();
+    let fail = (_error: Error) => {};
+    source.keyDelays = [new Promise<void>((_resolve, reject) => { fail = reject; })];
+    await press({ type: 'down' });
+    await press({ type: 'press' });
+    fail(new Error('connection lost'));
+    await settle();
+    await settle();
+    expect(source.keys).toEqual([]);
+    expect(text()[0]).toBe('fix-login · keys not sent');
+  });
+
   it('leaves on double press, sending nothing', async () => {
     const { source, press, text } = await openKeys();
     await press({ type: 'double' });
@@ -473,10 +502,13 @@ describe('keys mode', () => {
     expect(source.keys).toEqual(['escape', 'tab']);
   });
 
-  it('still names a card from another Pane in the footer', async () => {
-    const { source, text } = await openKeys();
+  it('still names a card from another Pane in the footer, in the Esc / Tab list too', async () => {
+    const { source, text, press } = await openKeys();
     source.cardList = [card('q1', 10)];
     source.changed();
+    expect(text().at(-1)).toBe('? pane-q1 needs you · double press for cards');
+    await press({ type: 'hold' });
+    expect(text()[0]).toBe('KEYS · press sends · double = back');
     expect(text().at(-1)).toBe('? pane-q1 needs you · double press for cards');
   });
 
@@ -515,7 +547,7 @@ describe('the picker', () => {
   it('lists the choices of a menu it is certain of, under the question', async () => {
     const { text } = await openMenu();
     expect(text()[0]).toBe('fix-login · pick one · double = dismiss');
-    expect(text()[1]).toBe('Do you want to proceed?');
+    expect(text()[1]).toBe('touch bye.txt && ls -l bye.txt / Do you want to proceed?');
     expect(text()[2]?.split(' | ')[0]).toBe('1. Yes');
     expect(text()[2]?.split(' | ')[3]).toBe('4. No');
   });
@@ -545,6 +577,26 @@ describe('the picker', () => {
     const { source, press, text, clock } = await openMenu();
     await press({ type: 'select', index: 2 });
     expect(text()[0]).toBe('fix-login · picking…');
+    await clock.advance(2_000);
+    expect(source.keys).toEqual(['down']);
+    expect(text().at(-1)).toBe('The menu changed, so nothing more was sent');
+  });
+
+  it('sends nothing when the command being approved changes under the same question and choices', async () => {
+    const { source, press, text } = await openMenu();
+    expect(text()[1]).toBe('touch bye.txt && ls -l bye.txt / Do you want to proceed?');
+    source.screenLines = permission(0).map((line) => line.replace('touch bye.txt && ls -l bye.txt', 'rm -rf ./important-work'));
+    await press({ type: 'select', index: 0 });
+    expect(source.keys).toEqual([]);
+    expect(text().at(-1)).toBe('The menu changed, so nothing more was sent');
+  });
+
+  it('stops before Enter when a read after an arrow shows a different menu, even if the first comes back', async () => {
+    const { source, press, text, clock } = await openMenu();
+    const other = permission(1).map((line) => line.replace('touch bye.txt && ls -l bye.txt', 'rm -rf ./important-work'));
+    source.onKey = (key) => { if (key === 'down') source.screenLines = other; };
+    await press({ type: 'select', index: 1 });
+    source.screenLines = permission(1);
     await clock.advance(2_000);
     expect(source.keys).toEqual(['down']);
     expect(text().at(-1)).toBe('The menu changed, so nothing more was sent');
@@ -637,6 +689,17 @@ describe('after you speak, the view holds at your message', () => {
     expect(shown()).toBe(['out 1', `> ${said}`, ...reply(6)].join(' / '));
     await press({ type: 'down' });
     expect(text()[0]).toBe('fix-login · shell · idle · ↓ 13 more');
+  });
+
+  it('stops at the oldest line when swiping up, so the next swipe down comes straight back to your line', async () => {
+    const { press, text, output: shown } = await speak();
+    for (let swipe = 0; swipe < 3; swipe += 1) await press({ type: 'up' });
+    expect(shown()).toBe(['out 1', `> ${said}`, ...reply(6)].join(' / '));
+    await press({ type: 'down' });
+    expect(text()[0]).toBe('fix-login · shell · idle · ↓ 13 more');
+    expect(shown()).toBe([`> ${said}`, ...reply(7)].join(' / '));
+    await press({ type: 'down' });
+    expect(text()[0]).toBe('fix-login · shell · idle · ↓ 9 more');
   });
 
   it('reads the saved output only when the screen changed, at most once a second', async () => {

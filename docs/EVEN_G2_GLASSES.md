@@ -47,8 +47,8 @@ computer. Allowing the origin on an older Pane lasts only until the Even app res
 | Double press | Back; on the home page, exit the app |
 | Hold, then release | Talk, then send at once: an answer on a card, input in a terminal |
 
-In **keys mode** the gestures go to the terminal: swipe sends ↑ or ↓, press sends Enter and goes
-back to the output, double press leaves without sending anything, and hold opens a short list with
+In **keys mode** the gestures go to the terminal, one key at a time in the order you made them:
+swipe sends ↑ or ↓, press sends Enter and goes back to the output, double press leaves without sending anything, and hold opens a short list with
 Esc and Tab. You can't dictate in keys mode; leave it first.
 
 - **Home** shows one card per page with a page counter, questions first and then done and info
@@ -66,9 +66,11 @@ Esc and Tab. You can't dictate in keys mode; leave it first.
   the newest card from another Pane; double press goes to it.
 - **Menus**: when a terminal shows a menu Pane is certain of (a numbered or bulleted list at the
   bottom of the screen with exactly one cursor mark, such as `❯`, `>` or `›`), its choices appear as
-  a list. Swipe to a choice and press: Pane sends arrow keys from the cursor row, checks that the
-  cursor moved after each one, then sends Enter. If the menu changes on the way, it stops before
-  Enter, says "The menu changed, so nothing more was sent", and opens keys mode. Double press
+  a list, under the last two lines above it: the question and what it asks about, such as the
+  command to run. Swipe to a choice and press: Pane sends one arrow key at a time from the cursor
+  row, checks that the cursor moved after each one, then sends Enter. If the menu changes on the
+  way (the question, the command or any choice), it stops before Enter, says "The menu changed, so
+  nothing more was sent", and opens keys mode. Double press
   dismisses the list. Any other prompt is answered from keys mode.
 - **Going back** from a terminal or a computer's list opens the list on the row you picked. Native
   glasses lists always open on their first row, so the list starts there, runs to the end, then
