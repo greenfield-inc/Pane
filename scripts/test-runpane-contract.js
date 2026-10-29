@@ -16,6 +16,10 @@ const contractFixture = JSON.parse(fs.readFileSync(contractFixturePath, 'utf8'))
 const parserSamples = contractFixture.parserSamples;
 
 process.env.RUNPANE_TELEMETRY_DISABLED = '1';
+// Run as a caller outside any Pane terminal; checks that need Pane's env set it themselves.
+for (const key of Object.keys(process.env)) {
+  if (key.startsWith('PANE_') && key !== 'PANE_DIR') delete process.env[key];
+}
 
 const platformCases = [
   { platform: { os: 'darwin', arch: 'arm64' }, target: 'client' },
