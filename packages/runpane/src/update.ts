@@ -1,4 +1,4 @@
-import { assertUpdateCapacity } from './updateCapacity';
+import { assertUpdateCapacity, copyUpdateSnapshot } from './updateCapacity';
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -10,7 +10,7 @@ import { describeFailure, RunpaneError, type RunpaneFailure } from './errors';
 import { assertUpdateOptions, preflightUpdate, updateHostSchema, type UpdatePreflight } from './updatePreflight';
 import { stageUpdateRuntime } from './updateRuntime';
 import { checkUpdateSupervisor, startUpdateSupervisor, removeUpdateSupervisor } from './updateSupervisor';
-import { assertUpdateQuiescence, claimUpdateLock, releaseUpdateLock, executeUpdate, readUpdateJournal, updateLockReleasable, writeUpdateJson, type UpdateJournal } from './updateOperation';
+import { assertUpdateQuiescence, claimUpdateLock, releaseUpdateLock, executeUpdate, readUpdateJournal, updateLockReleasable, waitForUpdateCaller, writeUpdateJson, type UpdateJournal } from './updateOperation';
 import { activateManagedCli, runNpm, stageCliPackage, stageUpdateCode, type StagedCli } from './updatePackage';
 import { identifyPythonCli, stagePythonCli, installPythonCli } from './updatePython';
 import { stageApp, installStagedApp, type StagedApp } from './updateArtifacts';
@@ -211,6 +211,7 @@ export async function runUpdateHelper(directory: string, artifacts: UpdateArtifa
       await invokeDaemon('runpane:update:checkpoint', [request], boundary.jsonObject, options);
     }
     if (step === 'stop' && host) {
+      await waitForUpdateCaller(journal);
       // Reconcile an acknowledged stop after a helper restart. Never kill a
       // reused PID, another Pane installation, or a replacement daemon.
       if (processExists(host.pid)) {
@@ -228,14 +229,8 @@ export async function runUpdateHelper(directory: string, artifacts: UpdateArtifa
       if (!fs.existsSync(ready)) {
         fs.rmSync(snapshot, { recursive: true, force: true });
         fs.mkdirSync(snapshot, { recursive: true, mode: 0o700 });
-        for (const [name, source] of [['data', host.paneDir], ['profile', host.userData]]) {
-          const target = path.join(snapshot, name);
-          fs.mkdirSync(target, { recursive: true, mode: 0o700 });
-          for (const entry of fs.readdirSync(source)) {
-            if (source === host.paneDir && entry === 'updates') continue;
-            fs.cpSync(path.join(source, entry), path.join(target, entry), { recursive: true, verbatimSymlinks: true, filter: file => !fs.lstatSync(file).isSocket() && !path.basename(file).startsWith('Singleton') });
-          }
-        }
+        copyUpdateSnapshot(host.paneDir, path.join(snapshot, 'data'), true);
+        copyUpdateSnapshot(host.userData, path.join(snapshot, 'profile'), false);
         writeUpdateJson(ready, { version: host.version, createdAt: new Date().toISOString() });
       }
     }

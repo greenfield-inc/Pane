@@ -10,14 +10,36 @@ const fs: typeof nodeFs = process.versions.electron
   ? createRequire(__filename)('original-fs') as typeof nodeFs
   : nodeFs;
 
+/**
+ * What the recovery snapshot holds. A git checkout (Pane's sample clone in
+ * projects/, or any repository kept in its data folder) is not Pane state:
+ * no update migrates it, and walking one with node_modules took minutes.
+ */
+function inUpdateSnapshot(file: string): boolean {
+  if (path.basename(file).startsWith('Singleton')) return false;
+  const stat = fs.lstatSync(file);
+  if (stat.isSocket()) return false;
+  // .git is a folder in a clone and a file in a worktree.
+  return !stat.isDirectory() || !fs.existsSync(path.join(file, '.git'));
+}
+
+/** Copy `source` into `target`, keeping what inUpdateSnapshot keeps; `excludeUpdates` skips the operations folder of Pane data. */
+export function copyUpdateSnapshot(source: string, target: string, excludeUpdates: boolean): void {
+  fs.mkdirSync(target, { recursive: true, mode: 0o700 });
+  for (const entry of fs.readdirSync(source)) {
+    if (excludeUpdates && entry === 'updates') continue;
+    fs.cpSync(path.join(source, entry), path.join(target, entry), { recursive: true, verbatimSymlinks: true, filter: inUpdateSnapshot });
+  }
+}
+
 /** Live Chromium files may be exclusively locked until clean shutdown on Windows. */
 function updateSnapshotBytes(source: string, excludeUpdates = false, liveProfile = false): number {
   let total = 0;
   for (const entry of fs.readdirSync(source)) {
-    if ((excludeUpdates && entry === 'updates') || entry.startsWith('Singleton')) continue;
+    if (excludeUpdates && entry === 'updates') continue;
     const file = path.join(source, entry);
+    if (!inUpdateSnapshot(file)) continue;
     const stat = fs.lstatSync(file);
-    if (stat.isSocket()) continue;
     if (stat.isDirectory()) total += updateSnapshotBytes(file, false, liveProfile);
     else if (stat.isSymbolicLink()) { fs.readlinkSync(file); total += stat.size; }
     else if (stat.isFile()) {
