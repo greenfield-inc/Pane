@@ -37,7 +37,7 @@ export function NotificationSettings({ persistence }: { persistence: SettingsPer
         ? "macOS is blocking Pane's notifications. Allow Pane in System Settings → Notifications, then test again."
         : result.status === 'failed'
           ? `The system didn't show the test notification (${result.error}). Check Pane in your system's notification settings.`
-          : "Test notification sent. If it didn't appear, allow Pane in your system's notification settings.");
+          : "Pane sent the test, but the system didn't confirm it. If nothing appeared, allow Pane in your system's notification settings.");
       setOfferSettings(result.canOpenSettings);
     }
   };
