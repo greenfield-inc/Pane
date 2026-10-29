@@ -64,6 +64,8 @@ export function useTerminal(panelId: string, sessionId: string) {
       },
     },
     onError: cause => {
+      // A restore cut short by a reconnect is retried once the connection is back.
+      if (client.getState().status !== 'connected') return;
       setError(cause);
       setStatus('error');
     },
@@ -77,7 +79,7 @@ export function useTerminal(panelId: string, sessionId: string) {
 
   useEffect(() => client.onRestore(async signal => {
     if (!signal.aborted && size) await session.restore(size);
-  }), [client, session, size]);
+  }, 'terminal'), [client, session, size]);
 
   // Restore once the page has measured itself, and again after every
   // reconnect: the event stream does not replay output missed while offline.
@@ -143,7 +145,10 @@ export function useTerminal(panelId: string, sessionId: string) {
           : { cols: message.cols, rows: message.rows });
         break;
       case 'input':
-        void session.sendInput(message.data).catch(cause => { setError(cause); setStatus('error'); });
+        // The page only generates input: replies to the agent's terminal queries and
+        // scroll reports. One that cannot be sent while reconnecting is dropped; a
+        // broken connection shows in the header, not over the terminal.
+        void session.sendInput(message.data).catch(() => undefined);
         break;
       case 'written':
         session.ack(message.units);
