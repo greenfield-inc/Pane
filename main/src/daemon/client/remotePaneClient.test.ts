@@ -471,6 +471,34 @@ describe('RemotePaneClientController', () => {
     await controller.switchToLocalMode();
   });
 
+  it('sends a pending restoration again to a renderer that starts listening late', async () => {
+    const server = await createTestRemoteServer();
+    activeServers.push(server);
+    const config = createDefaultRemoteDaemonConfig();
+    config.client = { mode: 'remote', activeProfileId: 'late', profiles: [
+      { id: 'late', label: 'host', baseUrl: server.baseUrl, token: 'test-token', transport: 'http+sse' },
+    ] };
+    const controller = new RemotePaneClientController();
+    const restoreIds: number[] = [];
+    controller.initialize({
+      configManager: createConfigManagerStub(config),
+      rendererIds: () => [10],
+      rendererEventSink: { send(channel, payload) {
+        if (channel === 'remote-daemon:resync-required') {
+          restoreIds.push(decodeBoundary(payload, boundary.object({ restoreId: boundary.number })).restoreId);
+        }
+      } },
+    });
+    await waitFor(() => restoreIds.length === 1);
+
+    // The window's page was still loading when the request went out.
+    controller.rendererReady(10);
+    expect(restoreIds).toEqual([restoreIds[0], restoreIds[0]]);
+    controller.acknowledgeRestore(10, restoreIds[0]);
+    await waitFor(() => controller.getConnectionState().status === 'connected');
+    await controller.switchToLocalMode();
+  });
+
   it('syncs into remote mode and suppresses local daemon renderer events', async () => {
     const server = await createTestRemoteServer();
     activeServers.push(server);

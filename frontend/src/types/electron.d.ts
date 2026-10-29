@@ -405,6 +405,7 @@ interface ElectronAPI {
 
   remoteDaemon: {
     restoreComplete: (restoreId: number, error?: string) => Promise<void>;
+    restoreReady?: () => void;
     getConfig: () => Promise<IPCResponse<RemoteDaemonConfig>>;
     getConnectionState: () => Promise<IPCResponse<RemotePaneConnectionState>>;
     getHostState: () => Promise<IPCResponse<RemoteDaemonHostRuntimeState>>;

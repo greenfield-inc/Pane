@@ -84,6 +84,7 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
     const result = decodeBoundary({ restoreId, error }, boundary.object({ restoreId: boundary.number, error: boundary.optional(boundary.string) }));
     remotePaneClientController.acknowledgeRestore(event.sender.id, result.restoreId, result.error);
   });
+  ipcMain.on('remote-daemon:restore-ready', event => remotePaneClientController.rendererReady(event.sender.id));
   // Pause the remote connection while the system sleeps and reconnect on wake.
   powerMonitor.on('suspend', () => remotePaneClientController.suspend());
   powerMonitor.on('resume', () => remotePaneClientController.resume());

@@ -693,6 +693,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   remoteDaemon: {
     restoreComplete: (restoreId: number, error?: string): Promise<void> => ipcRenderer.invoke('remote-daemon:restore-complete', restoreId, error),
+    /** The renderer now handles restorations; main resends one it sent too early. */
+    restoreReady: (): void => ipcRenderer.send('remote-daemon:restore-ready'),
     getConfig: (): Promise<IPCResponse<RemoteDaemonConfig>> => invokeIpc('remote-daemon:get-config'),
     getConnectionState: (): Promise<IPCResponse<RemotePaneConnectionState>> => invokeIpc('remote-daemon:get-connection-state'),
     getHostState: (): Promise<IPCResponse<RemoteDaemonHostRuntimeState>> => invokeIpc('remote-daemon:get-host-state'),

@@ -820,7 +820,7 @@ export class RemotePaneClientController extends EventEmitter {
   private rendererIds: () => number[] = () => [];
   private restoreSequence = 0;
   private pendingRestore: {
-    id: number; waiting: Set<number>; resolve: () => void; reject: (error: Error) => void;
+    id: number; hostChanged: boolean; waiting: Set<number>; resolve: () => void; reject: (error: Error) => void;
   } | null = null;
   private activationCommitted: (() => void) | null = null;
   private connectionGeneration = 0;
@@ -1009,12 +1009,22 @@ export class RemotePaneClientController extends EventEmitter {
     if (!pending.waiting.size) { this.pendingRestore = null; pending.resolve(); }
   }
 
+  /**
+   * A renderer started listening for restorations. One sent while its page was
+   * still loading went unheard, so it gets that one again.
+   */
+  rendererReady(rendererId: number): void {
+    const pending = this.pendingRestore;
+    if (!pending?.waiting.has(rendererId)) return;
+    this.rendererEventSink.send('remote-daemon:resync-required', { hostChanged: pending.hostChanged, restoreId: pending.id });
+  }
+
   private restoreRenderers(hostChanged: boolean): Promise<void> {
     this.pendingRestore?.reject(new Error('Restoration superseded'));
     const id = ++this.restoreSequence;
     const waiting = new Set(this.rendererIds());
     const result = waiting.size ? new Promise<void>((resolve, reject) => {
-      this.pendingRestore = { id, waiting, resolve, reject };
+      this.pendingRestore = { id, hostChanged, waiting, resolve, reject };
     }) : Promise.resolve();
     this.rendererEventSink.send('remote-daemon:resync-required', { hostChanged, restoreId: id });
     return result;
