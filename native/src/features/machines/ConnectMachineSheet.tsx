@@ -5,7 +5,7 @@ import { passwordProblem } from '@/auth/computers';
 import { useConnectComputer } from '@/features/computers/useComputers';
 import { Button, Sheet, Text, TextField } from '@/ui';
 
-import { useMachines } from './useMachines';
+import { closeToHome, useMachines } from './useMachines';
 
 /**
  * The password for a machine this phone never connected to, asked before its first connect. A
@@ -13,7 +13,7 @@ import { useMachines } from './useMachines';
  */
 export function ConnectMachineSheet({ machineKey }: { machineKey: string }) {
   const machine = useMachines().find(candidate => candidate.key === machineKey);
-  const connect = useConnectComputer();
+  const connect = useConnectComputer(closeToHome);
   const [password, setPassword] = useState('');
   const { tailnet, domain } = machine ?? {};
   const problem = passwordProblem(connect.error);

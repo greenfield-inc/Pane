@@ -23,13 +23,21 @@ export function useMachines(): Machine[] {
 }
 
 /**
+ * After a new machine connects it is saved under a new key, so screens opened for its Tailscale entry
+ * (Machine details, the password sheet) no longer match anything: go back to home.
+ */
+export function closeToHome() {
+  if (router.canDismiss()) router.dismissAll();
+}
+
+/**
  * One tap on a machine: a saved one becomes current, which remounts every screen for it; a new
  * one connects the way "Your computers" does and is saved, asking for its password first when it
  * needs one. A failed connect leaves you on the current machine.
  */
 export function useSelectMachine() {
   const setActive = useHostsStore(state => state.setActive);
-  const connect = useConnectComputer();
+  const connect = useConnectComputer(closeToHome);
 
   const askPassword = (machine: Machine) => router.push({ pathname: '/machine/connect', params: { key: machine.key } });
 
