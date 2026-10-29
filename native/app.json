@@ -3,7 +3,7 @@
     "name": "Pane",
     "slug": "pane",
     "version": "1.2",
-    "runtimeVersion": "1.2",
+    "runtimeVersion": "1.3",
     "updates": {
       "url": "https://pane-native-updates-297294606300.us-central1.run.app/manifest",
       "checkAutomatically": "ON_LOAD",
@@ -66,7 +66,8 @@
       [
         "expo-audio",
         {
-          "microphonePermission": "Pane uses the microphone to dictate prompts to your agents."
+          "microphonePermission": "Pane uses the microphone to dictate prompts to your agents.",
+          "enableBackgroundPlayback": false
         }
       ],
       [

@@ -23,6 +23,7 @@ name: Try the demo
     timeout: 15000
 
 # A live terminal: the agent streams, and what you send shows up.
+- waitForAnimationToEnd
 - tapOn:
     id: "pane-row-demo-fix-checkout-race"
     index: 0
