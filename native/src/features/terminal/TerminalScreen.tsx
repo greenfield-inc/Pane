@@ -218,9 +218,11 @@ function TerminalPanel({ panel, actions, draft, onChangeDraft, composer, uploads
     };
   });
   // An empty box sends a bare Enter, to answer a menu or confirm a prompt.
+  // Sending closes the keyboard so the output shows.
   const submit = () => {
     const text = draft;
     onChangeDraft('');
+    Keyboard.dismiss();
     terminal.scrollToBottom();
     void terminal.sendInput(`${text}${KEYS.enter}`).catch(() => onChangeDraft(text));
   };
