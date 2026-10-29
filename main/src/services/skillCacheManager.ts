@@ -277,6 +277,8 @@ export class SkillCacheManager {
       for (const result of results) {
         if (result.outcome === 'user-owned' || result.outcome === 'unsafe') {
           console.warn(`[SkillCache] Left ${result.skillPath} alone (${result.outcome}); Pane only manages files it marked`);
+        } else if (result.outcome === 'newer') {
+          console.warn(`[SkillCache] Left ${result.skillPath} alone; a newer Pane wrote it`);
         }
       }
     } catch (error) {

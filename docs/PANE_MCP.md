@@ -175,6 +175,6 @@ Mutating tools keep the CLI's confirmation rule. Every command whose usage inclu
 
 ## Agent guidance
 
-Pane installs a managed `pane` skill under `~/.claude/skills/pane` (or `$CLAUDE_CONFIG_DIR/skills/pane`) and `~/.agents/skills/pane`, including saved WSL distros on Windows. It leaves any existing skill without Pane's marker alone. **Install Pane skill for agents** in Settings → AI & Agents controls the installation; turning it off removes Pane's copy.
+Pane installs a managed `pane` skill under `~/.claude/skills/pane` (or `$CLAUDE_CONFIG_DIR/skills/pane`) and `~/.agents/skills/pane`, including saved WSL distros on Windows. It leaves any existing skill without Pane's marker alone, rewrites a copy an older Pane marked, and leaves a copy a newer Pane marked. The skill also covers what to do when tools look missing: the bundled CLI (`$PANE_RUNPANE_BIN`, `~/.pane/bin/runpane`) before `npx`, `runpane notify` when this server's tools are not loaded, and where Pane keeps its data. **Install Pane skill for agents** in Settings → AI & Agents controls the installation; turning it off removes Pane's copy.
 
 **Publish Pane instructions to AGENTS.md** is off by default. If enabled, Pane writes a marked block into the active repository's `AGENTS.md` with CLI and MCP setup instructions. Turning it off removes only Pane's marked block from saved repositories. On upgrade, Pane turns off the old default once and removes those blocks; a later opt-in is remembered. The full command catalog lives in MCP tools and `runpane agent-context`.
