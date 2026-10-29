@@ -208,6 +208,11 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
       await worktreeManager.initializeProject(activeProject.path, undefined, context.pathResolver, context.commandRunner);
     }
   }
+  // Repositories whose worktree folder predates this hide it from their own git status.
+  for (const project of databaseService.getAllProjects()) {
+    const context = sessionManager.getProjectContextByProjectId(project.id);
+    if (context) void worktreeManager.excludeWorktreeFolder(project.path, project.worktree_folder || undefined, context.pathResolver, context.commandRunner);
+  }
 
   const cliManagerFactory = CliManagerFactory.getInstance(logger, configManager);
   const defaultCliManager: AbstractCliManager = await cliManagerFactory.createManager('claude', {

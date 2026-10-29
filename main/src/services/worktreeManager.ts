@@ -1,4 +1,5 @@
-import { mkdir, stat } from 'fs/promises';
+import { appendFile, mkdir, readFile, realpath, stat } from 'fs/promises';
+import path from 'path';
 import { withLock } from '../utils/mutex';
 import type { ConfigManager } from './configManager';
 import type { AnalyticsManager } from './analyticsManager';
@@ -280,6 +281,34 @@ export class WorktreeManager {
     } catch (error) {
       console.error('Failed to create worktrees directory:', error);
     }
+    await this.excludeWorktreeFolder(projectPath, worktreeFolder, pathResolver, commandRunner);
+  }
+
+  /**
+   * Hides the worktree folder from the main checkout's `git status` with a
+   * line in the repository's `info/exclude`, never a tracked `.gitignore`.
+   * Only an existing folder inside the checkout needs it. Best effort: a
+   * failure only leaves the folder visible as untracked.
+   */
+  async excludeWorktreeFolder(projectPath: string, worktreeFolder: string | undefined, pathResolver: PathResolver, commandRunner: CommandRunner): Promise<void> {
+    const { baseDir } = this.getProjectPaths(projectPath, worktreeFolder, pathResolver);
+    try {
+      if (!(await stat(pathResolver.toFileSystem(baseDir)).catch(() => undefined))?.isDirectory()) return;
+      const { stdout } = await commandRunner.execFile('git', ['rev-parse', '--show-toplevel', '--git-path', 'info/exclude'], projectPath, { silent: true });
+      const [top, excludePath] = stdout.split(/\r?\n/u);
+      if (!top || !excludePath) return;
+      const [topDir, folder] = await Promise.all([top, baseDir].map(dir => realpath(pathResolver.toFileSystem(dir)).catch(() => pathResolver.toFileSystem(dir))));
+      const relative = pathResolver.relative(topDir, folder).replace(/\\/gu, '/');
+      if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) return;
+      const line = `/${relative}/`;
+      const exclude = pathResolver.toFileSystem(path.posix.isAbsolute(excludePath) || path.isAbsolute(excludePath) ? excludePath : pathResolver.join(projectPath, excludePath));
+      const current = await readFile(exclude, 'utf8').catch(() => '');
+      if (current.split(/\r?\n/u).includes(line)) return;
+      await mkdir(path.dirname(exclude), { recursive: true });
+      await appendFile(exclude, `${current && !current.endsWith('\n') ? '\n' : ''}${line}\n`);
+    } catch (error) {
+      console.warn(`[WorktreeManager] Could not exclude ${baseDir} from git status:`, error);
+    }
   }
 
   getWorktreePath(projectPath: string, name: string, worktreeFolder: string | undefined, pathResolver: PathResolver): string {
@@ -400,6 +429,7 @@ export class WorktreeManager {
       }
       
       console.log(`[WorktreeManager] Worktree created successfully at: ${worktreePath}`);
+      await this.excludeWorktreeFolder(projectPath, worktreeFolder, pathResolver, commandRunner);
 
       // Track worktree creation
       if (this.analyticsManager) {

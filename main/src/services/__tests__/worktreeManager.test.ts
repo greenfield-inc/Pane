@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { CommandRunner } from '../../utils/commandRunner';
+import { mkdtemp, rm } from 'fs/promises';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import { CommandRunner } from '../../utils/commandRunner';
 
 function partialMock<Contract>(implementation: Partial<Contract>): Contract {
   // SAFETY: Each test fixture implements every dependency member reached by
@@ -425,5 +428,24 @@ describe('WorktreeManager.getSessionLocalBaseBranch', () => {
     );
 
     expect(localBaseBranch).toBe('release');
+  });
+});
+
+describe('WorktreeManager.initializeProject', () => {
+  it("keeps Pane's worktree folder out of the main checkout's git status", async () => {
+    const repo = await mkdtemp(join(tmpdir(), 'pane-worktree-exclude-'));
+    try {
+      const runner = new CommandRunner({ path: repo });
+      await runner.execFile('git', ['init', '--initial-branch=main'], repo);
+      await runner.execFile('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', '-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-m', 'init'], repo);
+
+      await new WorktreeManager().initializeProject(repo, undefined, new PathResolver({ path: repo }), runner);
+      await runner.execFile('git', ['worktree', 'add', '-b', 'feature', join(repo, 'worktrees', 'feature')], repo);
+
+      const { stdout } = await runner.execFile('git', ['status', '--porcelain'], repo);
+      expect(stdout).toBe('');
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
   });
 });
