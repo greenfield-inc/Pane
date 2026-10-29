@@ -828,8 +828,8 @@ export function registerSessionHandlers(
       if (dbSession && dbSession.status === 'pending') {
         console.log('[IPC] New main repo session created:', session.id);
 
-        // Emit session created event
-        sessionManager.emitSessionCreated(session);
+        // A project opens on the Start a task card, so its own checkout starts with no Terminal tab.
+        sessionManager.emitSessionCreated(session, { createDefaultTerminalOnCreate: false });
 
         // Set the status to stopped since Claude Code isn't running yet
         sessionManager.updateSession(session.id, { status: 'stopped' });

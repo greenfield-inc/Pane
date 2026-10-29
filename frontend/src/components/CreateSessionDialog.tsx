@@ -13,7 +13,7 @@ import { useSessionStore } from '../stores/sessionStore';
 import { useNavigationStore } from '../stores/navigationStore';
 import { useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
 import { areKeyboardShortcutsEnabled, useConfigStore } from '../stores/configStore';
-import { generatePaneName, sanitizePaneName } from '../utils/paneName';
+import { defaultBaseBranch, generatePaneName, sanitizePaneName } from '../utils/paneName';
 
 // Interface for branch information
 interface BranchInfo {
@@ -183,14 +183,10 @@ export function CreatePaneForm({
   useEffect(() => {
     if (!isOpen || branchesProjectId !== projectId || formData.baseBranch || branches.length === 0) return;
 
-    // Prefer a remote main branch for tracking, then fall back to the current branch.
-    const remoteMain = branches.find((branch) =>
-      branch.isRemote && (branch.name === 'origin/main' || branch.name === 'origin/master')
-    );
-    const defaultBranch = remoteMain ?? branches.find((branch) => branch.isCurrent);
-    if (!defaultBranch) return;
+    const baseBranch = defaultBaseBranch(branches);
+    if (!baseBranch) return;
 
-    setFormData((current) => ({ ...current, baseBranch: defaultBranch.name }));
+    setFormData((current) => ({ ...current, baseBranch }));
   }, [branches, branchesProjectId, formData.baseBranch, isOpen, projectId]);
 
   // Filtered branches based on search term
