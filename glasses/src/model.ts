@@ -79,6 +79,9 @@ export function isPaneEntry(row: PaneRow): row is PaneEntry {
   return row.kind === 'session' || row.kind === 'pane';
 }
 
+/** The keys the glasses can press in a terminal; a computer takes nothing else from them. */
+export type TerminalKey = 'up' | 'down' | 'enter' | 'escape' | 'tab';
+
 export interface TerminalScreen {
   lines: string[];
   status: PaneStatus;
@@ -111,14 +114,16 @@ export interface PaneSource {
   subscribe(listener: () => void): () => void;
   panes(computerId: string): Promise<PaneRow[]>;
   screen(computerId: string, panelId: string): Promise<TerminalScreen>;
-  /** Older output, oldest line first. */
-  scrollback(computerId: string, panelId: string): Promise<string[]>;
+  /** Older output, oldest line first: the last `lines` rows, or the source's own limit. */
+  scrollback(computerId: string, panelId: string, lines?: number): Promise<string[]>;
   /** Records that the person just looked at a Pane, as selecting it in Pane does, so it stops showing as new. */
   markViewed(computerId: string, paneId: string): Promise<void>;
   /** Starts a stopped terminal tab with its saved agent or command, as opening it in Pane does. */
   resume(computerId: string, panelId: string): Promise<void>;
   /** Types the text into the terminal with Enter. */
   submit(computerId: string, panelId: string, text: string): Promise<void>;
+  /** Presses one key in the terminal. A computer on an older Pane refuses with ERR_GLASSES_KEYS_UNSUPPORTED. */
+  key(computerId: string, panelId: string, key: TerminalKey): Promise<void>;
   answer(card: Card, answer: NotifyAnswer): Promise<void>;
   dictate(computerId: string, onPreview: (text: string) => void): Promise<Dictation>;
   /** Try every offline computer, or one, now. */
