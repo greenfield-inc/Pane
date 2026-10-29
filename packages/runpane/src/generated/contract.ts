@@ -294,6 +294,24 @@ export const RUNPANE_CONTRACT = {
       "localControl": true
     },
     {
+      "name": "repos rename",
+      "summary": "Rename a repository saved in the running Pane app.",
+      "usage": [
+        "runpane repos rename --repo <selector> --name <name> --yes [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "idempotent": true,
+      "toolsets": [
+        "core",
+        "repos"
+      ],
+      "jsonSchemas": [
+        "repoRenameRequest",
+        "repoRenameResult"
+      ],
+      "localControl": true
+    },
+    {
       "name": "panes list",
       "summary": "List Pane sessions in a saved repository.",
       "usage": [
@@ -2322,6 +2340,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane agents doctor --agent <codex|claude|cursor> [--repo <selector>] [--json]",
         "  runpane repos list [--json]",
         "  runpane repos add --path <path> [--name <name>]",
+        "  runpane repos rename --repo <selector> --name <name>",
         "  runpane sessions list [--json] [--pane-dir <path>]",
         "  runpane sessions create --from-json <path|-> [--json] [--pane-dir <path>]",
         "  runpane sessions get --session <id|name> [--json] [--pane-dir <path>]",
@@ -2523,6 +2542,19 @@ export const RUNPANE_CONTRACT = {
         "  --pane-dir <path>              Connect to a specific Pane data directory",
         "  --json                         Print machine-readable output",
         "  --dry-run                      Validate and preview without adding the repo",
+        "  --yes                          Skip confirmation for mutating commands"
+      ],
+      "repos rename": [
+        "Usage:",
+        "  runpane repos rename --repo <selector> --name <name> --yes [--json]",
+        "",
+        "Renames a saved repository. Only its display name changes; its path, Panes and settings stay as they are.",
+        "",
+        "Options:",
+        "  --repo <selector>              Repository: active, id, exact path, or saved name",
+        "  --name <name>                  New non-empty repository name",
+        "  --pane-dir <path>              Connect to a specific Pane data directory",
+        "  --json                         Print machine-readable output",
         "  --yes                          Skip confirmation for mutating commands"
       ],
       "panes": [
@@ -3859,6 +3891,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane agents doctor --agent <codex|claude|cursor> [--repo <selector>] [--json]",
         "  runpane repos list [--json]",
         "  runpane repos add --path <path> [--name <name>]",
+        "  runpane repos rename --repo <selector> --name <name>",
         "  runpane panes list [--repo <selector>] [--json]",
         "  runpane panes cost [--repo <selector>] [--pane <pane-id>] [--json]",
         "  runpane workspace state [--repo <selector>] [--json]",
@@ -4049,6 +4082,19 @@ export const RUNPANE_CONTRACT = {
         "  --json",
         "  --dry-run",
         "  --yes"
+      ],
+      "repos rename": [
+        "Usage:",
+        "  runpane repos rename --repo <selector> --name <name> --yes [--json]",
+        "",
+        "Renames a saved repository. Only its display name changes; its path, Panes and settings stay as they are.",
+        "",
+        "Options:",
+        "  --repo <selector>              Repository: active, id, exact path, or saved name",
+        "  --name <name>                  New non-empty repository name",
+        "  --pane-dir <path>              Connect to a specific Pane data directory",
+        "  --json                         Print machine-readable output",
+        "  --yes                          Skip confirmation for mutating commands"
       ],
       "panes": [
         "Pane session commands.",
@@ -5345,6 +5391,7 @@ export const RUNPANE_CONTRACT = {
       "runpane mcp",
       "runpane repos list --json",
       "runpane repos add --path /path/to/repo --name Pane --yes --json",
+      "runpane repos rename --repo 3 --name Lev --yes --json",
       "runpane panes list --repo active --json",
       "runpane panes cost --pane <pane-id> --json",
       "runpane panes create --repo active --name issue-252 --agent <agent> --prompt \"Kick off the discussion skill for issue 252\" --source agent --no-focus --wait-ready --yes --json",
@@ -5406,6 +5453,7 @@ export const RUNPANE_CONTRACT = {
       "`runpane mcp` runs a stdio MCP server whose tools are generated from this contract: every command with result `jsonSchemas` becomes a tool that runs `runpane <command> --json` and returns its output. Only the npm package and the Pane app include it; the Python wrapper prints how to run it with Node and exits non-zero.",
       "`runpane repos list` connects to the running local Pane daemon and prints saved repository records.",
       "`runpane repos add` registers an existing git repository with the running local Pane daemon. It does not create directories or initialize git repositories by default.",
+      "`runpane repos rename` trims and sets a saved repository's display name, the same rename as the repository settings in the app, and returns the updated repository record.",
       "`runpane panes list` lists Pane sessions, optionally scoped to one saved repository.",
       "`runpane panes cost` reports estimated token costs per Pane for the last 30 days, including per-model breakdowns and cache efficiency; unscoped output includes an Unattributed bucket that reconciles against workspace totals.",
       "`runpane panes create` connects to the running local Pane daemon, resolves the requested saved base repository, creates user-visible Pane sessions backed by Pane-managed worktrees/branches, opens terminal-backed tool tabs, and optionally sends initial input to the started tool. Built-in agent panes and `--source agent` default to background/no-focus unless `--focus` is passed. New Panes are pinned into the UI's favorite/pin set by default, except when the CLI runs inside a Session orchestrator (`PANE_ORCHESTRATION_SESSION_ID`), where child worktrees default to unpinned. Explicit `--pinned` / `--no-pinned` override creation defaults. First Session association clears an existing pin, including an explicit creation pin; use `panes pin` after association to pin a child. This avoids duplicating Session children in the global pinned list. Manual pins applied afterward are preserved. Panes created interactively in the Pane UI are unaffected. Inside a Session orchestrator (`PANE_ORCHESTRATION_SESSION_ID` set), new Panes are associated with that Session automatically; `--no-associate` opts out. A failed association is reported on the item and never undoes the Pane.",
@@ -6663,6 +6711,7 @@ export const RUNPANE_CONTRACT = {
       "runpane agent-context",
       "runpane repos list",
       "runpane repos add",
+      "runpane repos rename",
       "runpane panes list",
       "runpane panes create",
       "runpane panes archive",
@@ -7509,6 +7558,39 @@ export const RUNPANE_CONTRACT = {
             }
           },
           "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "repoRenameRequest": {
+      "type": "object",
+      "required": [
+        "repo",
+        "name"
+      ],
+      "properties": {
+        "repo": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "repoRenameResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "repo"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "repo": {
+          "$ref": "#/jsonSchemas/repoListResult/properties/repos/items"
         }
       },
       "additionalProperties": false
@@ -13286,6 +13368,17 @@ export const RUNPANE_CONTRACT = {
           ]
         },
         {
+          "name": "repos rename",
+          "summary": "Rename a repository saved in the running Pane app.",
+          "arguments": [
+            "--repo <selector>",
+            "--name <name>",
+            "--yes",
+            "--json",
+            "--pane-dir <path>"
+          ]
+        },
+        {
           "name": "panes list",
           "summary": "List Pane sessions, optionally scoped to a saved repository.",
           "arguments": [
@@ -13941,6 +14034,53 @@ export const RUNPANE_CONTRACT = {
         "notes": [
           "It does not create directories or initialize git repositories by default.",
           "For a Windows Pane app managing WSL repositories, prefer a saved WSL repo from `repos list` when possible. Adding a brand-new WSL repo from Windows may require WSL-aware path handling."
+        ]
+      },
+      "repos rename": {
+        "name": "repos rename",
+        "summary": "Rename a repository saved in the running Pane app.",
+        "details": "Use this to replace an automatic repository name, such as one with a numeric suffix, with a clear one. It changes only the display name.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--repo",
+            "value": "<selector>",
+            "required": true,
+            "description": "Repository to rename: active, id, exact path, or saved name."
+          },
+          {
+            "name": "--name",
+            "value": "<name>",
+            "required": true,
+            "description": "New non-empty repository name; surrounding whitespace is trimmed."
+          },
+          {
+            "name": "--yes",
+            "required": false,
+            "description": "Skip confirmation for mutating commands."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output including the updated repository."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane repos rename --repo 3 --name Lev --yes --json"
+        ],
+        "jsonSchemas": [
+          "repoRenameRequest",
+          "repoRenameResult"
+        ],
+        "notes": [
+          "The repository path, Panes, and settings are unchanged."
         ]
       },
       "panes list": {

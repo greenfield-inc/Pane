@@ -216,6 +216,16 @@ interface RepoAddResult {
   preview?: RepoAddPreview;
 }
 
+interface RepoRenameRequest {
+  repo: string;
+  name: string;
+}
+
+interface RepoRenameResult {
+  ok: true;
+  repo: RepoSummary;
+}
+
 interface PaneCreateRequest {
   repo: string | { id: number } | { path: string } | { name: string } | { active: true };
   panes: PaneCreateItem[];
@@ -1210,6 +1220,10 @@ const repoAddResultSchema: BoundarySchema<RepoAddResult> = boundary.object({
   repo: boundary.optional(repoSummarySchema),
   preview: boundary.optional(repoAddPreviewSchema),
 });
+const repoRenameResultSchema: BoundarySchema<RepoRenameResult> = boundary.object({
+  ok: boundary.literal(true),
+  repo: repoSummarySchema,
+});
 export const paneListResultSchema: BoundarySchema<PaneListResult> = boundary.object({
   ok: boundary.literal(true),
   repo: boundary.optional(repoSummarySchema),
@@ -1996,6 +2010,30 @@ export async function runReposAdd(parsed: ParsedArgs): Promise<number> {
     printJson(result);
   } else {
     printRepoAddResult(result);
+  }
+
+  return 0;
+}
+
+export async function runReposRename(parsed: ParsedArgs): Promise<number> {
+  if (!parsed.repo) {
+    throw new Error('runpane repos rename requires --repo. See saved repos with `runpane repos list`.');
+  }
+  const name = parsed.name?.trim();
+  if (!name) {
+    throw new Error('runpane repos rename requires a non-empty --name.');
+  }
+  const request: RepoRenameRequest = { repo: parsed.repo, name };
+  await confirmRepoRename(parsed, request);
+
+  const result = await invokeDaemon('runpane:repos:rename', [request], repoRenameResultSchema, {
+    paneDir: parsed.paneDir,
+  });
+
+  if (parsed.json) {
+    printJson(result);
+  } else {
+    console.log(`Renamed Pane repo ${result.repo.id} to ${result.repo.name}`);
   }
 
   return 0;
@@ -3875,6 +3913,26 @@ async function confirmRepoAdd(parsed: ParsedArgs, request: RepoAddRequest): Prom
   const rl = createInterface({ input, output });
   try {
     const answer = (await rl.question(`Add Pane repo ${label}? [y/N] `)).trim().toLowerCase();
+    if (answer !== 'y' && answer !== 'yes') {
+      throw new Error('Cancelled.');
+    }
+  } finally {
+    rl.close();
+  }
+}
+
+async function confirmRepoRename(parsed: ParsedArgs, request: RepoRenameRequest): Promise<void> {
+  if (parsed.yes) {
+    return;
+  }
+
+  if (!isInteractiveShell()) {
+    throw new Error('runpane repos rename mutates Pane state. Rerun with --yes in non-interactive shells.');
+  }
+
+  const rl = createInterface({ input, output });
+  try {
+    const answer = (await rl.question(`Rename Pane repo ${request.repo} to ${request.name}? [y/N] `)).trim().toLowerCase();
     if (answer !== 'y' && answer !== 'yes') {
       throw new Error('Cancelled.');
     }

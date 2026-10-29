@@ -2349,6 +2349,22 @@ describe('runpane IPC handlers', () => {
     }])).rejects.toThrow('Repo path must be an existing git repository');
   });
 
+  it('renames a repo found by any selector and announces the update', async () => {
+    const updateProject = vi.fn((id: number, updates: Partial<Project>): Project => ({ ...project, id, ...updates }));
+    const services = createServices();
+    // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
+    services.databaseService = { ...services.databaseService, updateProject } as never;
+    const registry = createRegistry(services);
+
+    const result = await registry.invoke('runpane:repos:rename', [{ repo: 'Pane', name: '  Lev web  ' }]);
+
+    expect(updateProject).toHaveBeenCalledWith(1, { name: 'Lev web' });
+    expect(services.sessionManager.emit).toHaveBeenCalledWith('project:updated', expect.objectContaining({ id: 1, name: 'Lev web' }));
+    expect(result).toMatchObject({ ok: true, repo: { id: 1, name: 'Lev web', path: '/repo/pane' } });
+    await expect(registry.invoke('runpane:repos:rename', [{ repo: '1', name: '   ' }])).rejects.toThrow('non-empty name');
+    await expect(registry.invoke('runpane:repos:rename', [{ repo: 'missing', name: 'x' }])).rejects.toThrow(/missing/);
+  });
+
   it('dry-runs pane creation with contract-backed agent templates', async () => {
     const services = createServices();
     const registry = createRegistry(services);
