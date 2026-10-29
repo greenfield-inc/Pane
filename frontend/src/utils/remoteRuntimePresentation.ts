@@ -2,7 +2,6 @@ import type {
   RemoteDaemonConnectedClient,
   RemoteDaemonExecutableHealth,
   RemoteDaemonHostRuntimeState,
-  RemotePaneConnectionProfile,
   RemotePaneConnectionState,
 } from '../../../shared/types/remoteDaemon';
 
@@ -213,42 +212,8 @@ export function getRemoteFooterStatus(
   };
 }
 
-/** Dropdown id for "This computer": the local runtime, next to saved host profile ids. */
-export const LOCAL_RUNTIME_ID = 'local';
-
-export interface RemoteHostSwitcherModel {
-  /** Shown while connected, or whenever a host is saved to switch to. */
-  visible: boolean;
-  label: string;
-  /** Status dot for a remote host; null means the local runtime. */
-  dotClassName: string | null;
-  selectedId: string;
-  /** Set when this machine is also hosting, so the switcher can link to it. */
-  hostingSummary: string | null;
-}
-
 function getRemoteConnectionDotClassName(state: RemotePaneConnectionState): string {
   if (state.status === 'connected') return 'bg-status-success';
   if (state.status === 'error') return 'bg-status-error';
   return 'bg-status-warning animate-pulse';
-}
-
-export function getRemoteHostSwitcherModel(
-  connectionState: RemotePaneConnectionState,
-  hostState: RemoteDaemonHostRuntimeState,
-  profiles: RemotePaneConnectionProfile[],
-): RemoteHostSwitcherModel {
-  const remote = connectionState.mode === 'remote';
-  const clientCount = hostState.connectedClients.length;
-  const hostingSummary = hostState.status === 'live'
-    ? `Hosting · ${clientCount} ${clientCount === 1 ? 'client' : 'clients'} connected`
-    : hostState.status === 'error' ? 'Hosting offline' : null;
-
-  return {
-    visible: remote || profiles.length > 0,
-    label: remote ? connectionState.activeProfileLabel ?? 'Remote host' : 'This computer',
-    dotClassName: remote ? getRemoteConnectionDotClassName(connectionState) : null,
-    selectedId: remote ? connectionState.activeProfileId ?? LOCAL_RUNTIME_ID : LOCAL_RUNTIME_ID,
-    hostingSummary,
-  };
 }
