@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 // A TCP proxy that drops the link on a schedule shaped like a flapping
 // cellular/Tailscale path, for testing remote Pane clients against a dev host.
 //
