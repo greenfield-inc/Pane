@@ -26,7 +26,7 @@ It talks straight to each of your computers over Tailscale. Pane has no relay.
    10 minutes and only once per computer.
 3. Tap **Open Even App**, open Pane there, and tap **Paste**, then **Connect**.
 4. The glasses show **Pane · N computers**. Each computer now lists the glasses under
-   **Settings › Remote Access › Glasses**, named after your phone, with when they were last used.
+   **Settings › Remote Access › Devices**, named after your phone, with when they were last used.
 
 To add a computer later, tap **Add Computers** in Settings › Glasses and paste the new code the same
 way. Computers that are offline are skipped and named on the screen.
@@ -72,7 +72,7 @@ notification mirroring, as the title only ("planner has a question").
 
 - On the phone: **Settings › Glasses › Revoke Glasses** revokes them on every computer it can reach,
   and finishes the rest when they next answer.
-- On a computer: **Settings › Remote Access › Glasses**, then the trash button next to the glasses.
+- On a computer: **Settings › Remote Access › Devices**, then **Revoke** next to the glasses.
 
 Revoking closes the glasses' connection to that computer within 5 seconds.
 
@@ -88,7 +88,7 @@ hold:
   the computer only as a hash. Tokens travel only in the `Authorization` header (and the voice
   WebSocket's subprotocol), never in a URL.
 - It comes from an **allowed origin**: the Even app's `http://127.0.0.1` on any port, or one the
-  owner allowed in **Settings › Remote Access › Glasses**, matched exactly except that a loopback
+  owner allowed in **Settings › Remote Access › Devices**, matched exactly except that a loopback
   origin matches on any port. Null, missing and wildcard origins are never accepted. A page served
   from `127.0.0.1` on your phone still needs a glasses token, which only the paired glasses hold.
 - The source is not **locked out**: 5 refused attempts in 10 minutes lock it out for a minute,

@@ -290,6 +290,13 @@ const UI_ON_SURFACES = [
   ['--color-interactive-primary', '--color-bg-primary'],
   ['--color-scrollbar-thumb', '--color-scrollbar-track', 'strict'],
   ['--color-terminal-cursor', '--color-terminal-bg'],
+  // Machine marks: the OS logo in the machine colour, on menus and settings cards.
+  ['--color-machine-1', '--color-surface-primary'],
+  ['--color-machine-2', '--color-surface-primary'],
+  ['--color-machine-3', '--color-surface-primary'],
+  ['--color-machine-4', '--color-surface-primary'],
+  ['--color-machine-5', '--color-surface-primary'],
+  ['--color-machine-6', '--color-surface-primary'],
 ];
 
 const TERMINAL_FG = [

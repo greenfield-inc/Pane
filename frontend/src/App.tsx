@@ -990,7 +990,8 @@ function App() {
             onAboutClick={() => setIsAboutOpen(true)}
             onSettingsClick={() => openSettings()}
             onRemoteSettingsClick={() => openSettings({ category: 'remote-access' })}
-            onManageRemoteConnectionsClick={() => openSettings({ category: 'remote-access' })}
+            onAddMachineClick={() => openSettings({ category: 'remote-access', setting: 'remote-add-code' })}
+            onMachinePasswordRequest={(machine) => openSettings({ category: 'remote-access', setting: 'remote-machines', machine })}
             width={sidebarWidth}
             onResize={startResize}
             collapsed={sidebarCollapsed}

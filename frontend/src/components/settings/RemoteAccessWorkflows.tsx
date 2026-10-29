@@ -135,7 +135,7 @@ function HostSetup({ controller }: { controller: RemoteAccessController }) {
             )}
           </div>
         </SettingRow>
-        {/* Glasses are listed and revoked under Remote Access › Glasses. */}
+        {/* Glasses are listed and revoked under Remote Access › Devices. */}
         {controller.config.host.clients.map((client) => client.kind === 'glasses' ? null : (
           <div key={client.id} className="flex items-center justify-between gap-3 py-3">
             <div className="min-w-0">

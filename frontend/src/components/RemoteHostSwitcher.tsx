@@ -1,94 +1,81 @@
-import { useState, type ReactElement } from 'react';
-import { Laptop, Plug, Radio, Server } from 'lucide-react';
+import type { ReactElement } from 'react';
+import { Plus, Radio, Settings } from 'lucide-react';
 import { Dropdown, DropdownMenuItem, type DropdownItem, type DropdownProps } from './ui/Dropdown';
-import { API } from '../utils/api';
-import { useConfigStore } from '../stores/configStore';
-import { LOCAL_RUNTIME_ID, type RemoteHostSwitcherModel } from '../utils/remoteRuntimePresentation';
-import type { RemotePaneConnectionProfile, RemotePaneConnectionState } from '../../../shared/types/remoteDaemon';
+import { MachineMark } from './machines/MachineMark';
+import { showActionError } from '../stores/errorStore';
+import type { MachineEntry } from '../utils/machineList';
+import type { MachineSelectOutcome } from '../hooks/useMachines';
 
 interface RemoteHostSwitcherProps {
   trigger: ReactElement;
   position: DropdownProps['position'];
-  model: RemoteHostSwitcherModel;
-  profiles: RemotePaneConnectionProfile[];
-  connectionState: RemotePaneConnectionState;
-  onManageConnections: () => void;
-  onOpenHosting: () => void;
+  machines: MachineEntry[];
+  switching: boolean;
+  hostingSummary: string | null;
+  onSelect: (machine: MachineEntry) => Promise<MachineSelectOutcome>;
+  /** A machine that needs its password opens Remote Access with its password field. */
+  onNeedsPassword: (machine: MachineEntry) => void;
+  onOpenChange?: (open: boolean) => void;
+  onAddMachine: () => void;
+  onOpenRemoteAccess: () => void;
 }
 
-/** Picks which machine runs agents: a saved remote host or this computer. */
+/** Offline, Owner only and Pane not open cannot be picked; the active machine stays pickable to retry. */
+function unpickable(machine: MachineEntry): boolean {
+  return machine.action === 'none' && !machine.active;
+}
+
+/** Picks which machine runs agents: this computer, a saved host, or any machine on Tailscale. */
 export function RemoteHostSwitcher({
   trigger,
   position,
-  model,
-  profiles,
-  connectionState,
-  onManageConnections,
-  onOpenHosting,
+  machines,
+  switching,
+  hostingSummary,
+  onSelect,
+  onNeedsPassword,
+  onOpenChange,
+  onAddMachine,
+  onOpenRemoteAccess,
 }: RemoteHostSwitcherProps) {
-  const fetchConfig = useConfigStore((state) => state.fetchConfig);
-  // Main does not serialize client transitions, so one switch at a time.
-  const [switching, setSwitching] = useState(false);
-  const remote = connectionState.mode === 'remote';
-  const activeStatusText = connectionState.status === 'connected'
-    ? 'Connected'
-    : connectionState.status === 'restoring' ? 'Restoring'
-    : connectionState.status === 'error' ? 'Connection failed · Retry now' : 'Reconnecting · Retry now';
-
-  const switchTo = async (profileId: string) => {
-    // Picking the current host again retries it after a failed connection.
-    if (switching || (profileId === model.selectedId && connectionState.status === 'connected')) return;
-    const updates = profileId === LOCAL_RUNTIME_ID
-      ? { activeProfileId: null, mode: 'local' as const }
-      : { activeProfileId: profileId, mode: 'remote' as const };
-    // A failed switch still lands in the pushed connection state, which the
-    // trigger's dot reports; the log keeps the reason.
-    setSwitching(true);
-    try {
-      const response = await API.remoteDaemon.updateClientState(updates);
-      if (!response.success) console.error('Failed to switch remote host:', response.error);
-      await fetchConfig().catch(() => undefined);
-    } catch (error) {
-      console.warn('Remote connection could not be changed:', error);
-    } finally {
-      setSwitching(false);
-    }
+  const pick = async (machine: MachineEntry) => {
+    const outcome = await onSelect(machine);
+    if (outcome.ok) return;
+    if (outcome.needsPassword) onNeedsPassword(machine);
+    else showActionError(`Could not switch to ${machine.name}`, outcome.error);
   };
 
-  const items: DropdownItem[] = [
-    ...profiles.map((profile) => ({
-      id: profile.id,
-      label: profile.label,
-      description: remote && profile.id === model.selectedId
-        ? `${activeStatusText} · ${profile.baseUrl}`
-        : profile.baseUrl,
-      icon: Server,
-      disabled: switching,
-      onClick: () => void switchTo(profile.id),
-    })),
-    {
-      id: LOCAL_RUNTIME_ID,
-      label: 'This computer',
-      description: remote ? 'Disconnect and use the local runtime' : 'Using the local runtime',
-      icon: Laptop,
-      disabled: switching,
-      onClick: () => void switchTo(LOCAL_RUNTIME_ID),
-    },
-  ];
+  const items: DropdownItem[] = machines.map((machine) => ({
+    id: machine.id,
+    label: <span className="font-medium">{machine.name}</span>,
+    description: machine.subtitle,
+    // A disabled row is dimmed as a whole, so its mark stays solid inside it.
+    leading: <MachineMark os={machine.os} slot={machine.slot} presence={unpickable(machine) ? 'solid' : machine.presence} size="md" />,
+    disabled: switching || unpickable(machine),
+    onClick: () => void pick(machine),
+  }));
+  const active = machines.find((machine) => machine.active);
 
   return (
     <Dropdown
       trigger={trigger}
       items={items}
-      selectedId={model.selectedId}
+      selectedId={active?.id}
+      selectedMark="check"
+      header="Agents run on"
       position={position}
-      width="lg"
+      width="auto"
+      menuClassName="w-[300px]"
+      menuLabel="Agents run on"
+      onOpenChange={onOpenChange}
+      itemClassName="py-1.5"
       footer={({ close }) => (
         <>
-          {model.hostingSummary && (
-            <DropdownMenuItem icon={Radio} label={model.hostingSummary} onClick={() => { close(); onOpenHosting(); }} />
+          {hostingSummary && (
+            <DropdownMenuItem icon={Radio} label={hostingSummary} onClick={() => { close(); onOpenRemoteAccess(); }} />
           )}
-          <DropdownMenuItem icon={Plug} label="Manage connections…" onClick={() => { close(); onManageConnections(); }} />
+          <DropdownMenuItem icon={Plus} label="Add a machine…" onClick={() => { close(); onAddMachine(); }} />
+          <DropdownMenuItem icon={Settings} label="Remote Access settings…" onClick={() => { close(); onOpenRemoteAccess(); }} />
         </>
       )}
     />

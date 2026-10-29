@@ -94,10 +94,10 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategoryDefinition[] = [
   {
     id: 'remote-access',
     label: 'Remote Access',
-    description: 'Remote Pane hosts and saved connections.',
+    description: 'Your machines, who can connect, and paired phones and glasses.',
     icon: Link2,
     settingIds: ['remote-machines', 'remote-visibility', 'remote-address', 'remote-password', 'remote-glasses', 'remote-pane', 'remote-host-setup', 'remote-advanced-host'],
-    aliases: ['remote pane', 'daemon', 'tailscale', 'cloud vm', 'vm', 'host', 'visibility', 'password', 'my machines', 'workspaces', 'glasses', 'even g2'],
+    aliases: ['remote pane', 'daemon', 'tailscale', 'cloud vm', 'vm', 'host', 'visibility', 'password', 'my machines', 'machines', 'switch machine', 'workspaces', 'glasses', 'even g2', 'phone', 'devices', 'connection code'],
   },
   {
     id: 'integrations',

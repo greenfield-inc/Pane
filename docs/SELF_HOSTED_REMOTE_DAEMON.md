@@ -12,7 +12,7 @@ Pane saves the profile and attempts to connect immediately. Local desktop mode i
 
 ## Workspaces or pairing codes?
 
-To let machines on your tailnet reach each other from the runpane CLI, you do not need this guide or a code. [Workspaces](RUNPANE_WORKSPACES.md) put each desktop Pane on your tailnet automatically (port 8443) and trust your Tailscale login, plus everyone on the tailnet when a machine's owner allows it, so `runpane workspace <machine> read|write|exec|<command>` works between your Macs, Windows PCs, and Linux machines, and the desktop app's remote mode connects to them from Settings → Remote Access → Your computers. Use the remote daemon and pairing codes in this guide for browsers and phones, and for devices outside your tailnet. The remote daemon keeps port 443, and the two run side by side.
+To let machines on your tailnet reach each other from the runpane CLI, you do not need this guide or a code. [Workspaces](RUNPANE_WORKSPACES.md) put each desktop Pane on your tailnet automatically (port 8443) and trust your Tailscale login, plus everyone on the tailnet when a machine's owner allows it, so `runpane workspace <machine> read|write|exec|<command>` works between your Macs, Windows PCs, and Linux machines, and the desktop app's remote mode connects to them from the sidebar's machine menu or Settings → Remote Access → Switch to. Use the remote daemon and pairing codes in this guide for browsers and phones, and for devices outside your tailnet. The remote daemon keeps port 443, and the two run side by side.
 
 ## Guided quick start
 
@@ -184,11 +184,11 @@ check [Troubleshooting](#troubleshooting).
 On your local desktop machine:
 
 1. Open Pane.
-2. Go to `Settings > Remote Access` and click `Add with a Code` under `Your computers`.
+2. Go to `Settings > Remote Access` and click `Add a machine` at the end of `Switch to`.
 3. Paste the full `pane-remote://...` code into `Connection Code`.
 4. Click `Connect`.
 
-If the tunnel is not reachable yet, Pane still saves the host and shows the connection error. Start the printed SSH/Tailscale tunnel and click `Connect` next to the saved host.
+If the tunnel is not reachable yet, Pane still saves the host and shows the connection error. Start the printed SSH/Tailscale tunnel and pick the saved host again from `Switch to` or the sidebar's machine menu.
 
 ## Use the Mobile / Browser App
 
@@ -324,13 +324,13 @@ On Windows the endpoint is `pipe:<pipe name>`. This is the local control endpoin
 
 ### 5. Connect the Desktop Client
 
-Use `Add connection` for a generated code, or use `Save existing remote profile` under `Pairing tools` with:
+Use `Add a machine` under `Switch to` for a generated code, or use `Save existing remote profile` under `More > Advanced > Pairing tools` with:
 
 - label
 - base URL
 - bearer token
 
-Click `Save Remote Profile`, then click `Connect` on the saved profile.
+Click `Save Remote Profile`, then pick the saved profile from `Switch to` or the sidebar's machine menu.
 
 ## Validation
 
@@ -346,16 +346,16 @@ Recommended checks after connecting:
 
 ## When a connection fails
 
-When you connect to a host (Connect in Settings → Remote Access, Add with a
-Code, the sidebar host switcher, or Retry), the main area shows a checklist of
+When you connect to a host (Switch in Settings → Remote Access, Add a machine,
+the sidebar's machine menu, or Retry), the main area shows a checklist of
 the connection's stages. The first stage that fails shows what went wrong and a
 fix. The same checklist appears when Pane gives up reconnecting after five
 minutes, and from **Check connection** on the "Connection lost" banner.
 
 | Stage | Fails when | Fix |
 |---|---|---|
-| Tailscale on this computer (Your computers only) | Tailscale is signed out or not installed here | Open Tailscale Setup, or Download Tailscale |
-| Host reachable | The host times out or its name does not resolve; a Your computers machine is offline on Tailscale | Check that both computers are on the same network or tailnet |
+| Tailscale on this computer (Tailscale machines only) | Tailscale is signed out or not installed here | Open Tailscale Setup, or Download Tailscale |
+| Host reachable | The host times out or its name does not resolve; a Tailscale machine is offline | Check that both computers are on the same network or tailnet |
 | Pane daemon running / Pane open | The host refuses the connection, or a proxy such as Tailscale Serve answers 502-504 | Start it, or Copy command |
 | Signed in | The host rejects this computer's token or password | Paste new code, or Enter password |
 | Versions match | The host runs a different Pane version (a warning; the workspace still loads) | Update it, or Update Pane on this computer |
@@ -375,7 +375,7 @@ shell puts `npx` on the `PATH`. With no single matching alias, or when ssh
 fails, the row offers **Copy command** so you can run the same command on the
 host yourself:
 
-| Fix | Code host (daemon) | Your computers machine (Pane app) |
+| Fix | Code host (daemon) | Tailscale machine (Pane app) |
 |---|---|---|
 | Start it | `npx --yes runpane@latest daemon repair --yes` | `open -a Pane` (macOS hosts only; otherwise open Pane there) |
 | Update it | `npx --yes runpane@latest update && npx --yes runpane@latest daemon repair --yes` | `npx --yes runpane@latest update` |
