@@ -19,6 +19,12 @@ interface TestRemoteServer {
   truncateInvoke(count?: number): void;
   /** Answer each invoke after `ms`. */
   delayInvoke(ms: number): void;
+  /** Say in the ready event that this host runs a write once per request id, as P1 hosts do. */
+  deduplicateRequestIds(): void;
+  /** Every invoke received, in order, with its request id. */
+  getInvokes(): Array<{ channel: string; args: JsonValue[]; requestId?: string }>;
+  /** The invokes the host ran: a repeated request id runs once. */
+  getApplied(): Array<{ channel: string; args: JsonValue[] }>;
   /** Send a heartbeat on the event stream every `ms`; 0 stops them. */
   setHeartbeatInterval(ms: number): void;
   close(): Promise<void>;
@@ -456,6 +462,127 @@ describe('RemotePaneClient', () => {
     expect(server.getEventRequestCount()).toBe(2);
     expect(connectionStates.at(-1)).toBe('connected');
 
+    await client.disconnect();
+  });
+});
+
+describe('RemotePaneClient writes through a drop', () => {
+  const profileFor = (server: TestRemoteServer, id: string) => ({ id, label: 'host', baseUrl: server.baseUrl, token: 'secret-token', transport: 'http+sse' as const });
+
+  async function connectController(server: TestRemoteServer): Promise<RemotePaneClientController> {
+    const remoteConfig = createDefaultRemoteDaemonConfig();
+    remoteConfig.client = { profiles: [profileFor(server, 'profile-writes')], activeProfileId: 'profile-writes', mode: 'remote' };
+    const controller = new RemotePaneClientController();
+    controller.initialize({ configManager: createConfigManagerStub(remoteConfig), rendererEventSink: { send() {} } });
+    await waitFor(() => controller.getConnectionState().status === 'connected');
+    // The host has answered the controller's ports read, so a cut-off answer can only be the test's write.
+    await waitFor(() => server.getApplied().some(invoke => invoke.channel === 'ports:list'));
+    return controller;
+  }
+
+  /** The controller also reads the host's ports; these tests watch only the writes. */
+  const sessionCreates = (invokes: Array<{ channel: string }>) => invokes.filter(invoke => invoke.channel === 'sessions:create');
+
+  async function dropConnection(server: TestRemoteServer, controller: RemotePaneClientController): Promise<void> {
+    server.setEventsReady(false);
+    server.closeEventStream();
+    await waitFor(() => controller.getConnectionState().status === 'reconnecting');
+  }
+
+  it('resends a write whose answer was lost with the same request id, and the host runs it once', async () => {
+    const server = await createTestRemoteServer();
+    activeServers.push(server);
+    server.deduplicateRequestIds();
+    const client = new RemotePaneClient(profileFor(server, 'resend'));
+    await client.connect();
+    server.truncateInvoke(1);
+
+    await expect(client.invoke('sessions:create', [{ prompt: 'hi' }]))
+      .resolves.toEqual({ channel: 'sessions:create', args: [{ prompt: 'hi' }] });
+    const [first, second, ...rest] = server.getInvokes();
+    expect(rest).toEqual([]);
+    expect(first.requestId).toEqual(expect.any(String));
+    expect(second.requestId).toBe(first.requestId);
+    expect(server.getApplied()).toEqual([{ channel: 'sessions:create', args: [{ prompt: 'hi' }] }]);
+    expect(server.getEventRequestCount()).toBe(1);
+    await client.disconnect();
+  });
+
+  it('says delivery is unknown once a write goes unconfirmed for the whole resend budget, without reconnecting', async () => {
+    // Scaled from the plan: a five-minute budget becomes 600 ms.
+    const server = await createTestRemoteServer();
+    activeServers.push(server);
+    server.deduplicateRequestIds();
+    const client = new RemotePaneClient(profileFor(server, 'unconfirmed'), { reconnectDurationMs: 600, reconnectMaxDelayMs: 50 });
+    await client.connect();
+    server.truncateInvoke();
+    const started = Date.now();
+
+    await expect(client.invoke('sessions:create', [])).rejects.toMatchObject({
+      code: 'ERR_REMOTE_DELIVERY_UNKNOWN',
+      message: 'Delivery unknown: Pane resent the action to host for five minutes without a confirmation. It may have completed.',
+      next: 'Check host before trying again.',
+    });
+    // Gives up when the next wait (at most 50 ms) would pass the budget.
+    expect(Date.now() - started).toBeGreaterThanOrEqual(540);
+    const ids = server.getInvokes().map(invoke => invoke.requestId);
+    expect(ids.length).toBeGreaterThan(3);
+    expect(new Set(ids).size).toBe(1);
+    expect(server.getEventRequestCount()).toBe(1);
+    await client.disconnect();
+  });
+
+  it('sends a write issued while reconnecting once the host is back', async () => {
+    const server = await createTestRemoteServer();
+    activeServers.push(server);
+    server.deduplicateRequestIds();
+    const controller = await connectController(server);
+    await dropConnection(server, controller);
+
+    const write = controller.invoke('sessions:create', [{ prompt: 'later' }], async () => undefined);
+    await sleep(300);
+    expect(sessionCreates(server.getInvokes())).toEqual([]);
+    server.setEventsReady(true);
+
+    await expect(write).resolves.toEqual({ channel: 'sessions:create', args: [{ prompt: 'later' }] });
+    expect(sessionCreates(server.getApplied())).toHaveLength(1);
+    await controller.switchToLocalMode();
+  });
+
+  it('keeps today\'s behavior against a host without the capability: no request id, no resend, no waiting', async () => {
+    const server = await createTestRemoteServer();
+    activeServers.push(server);
+    const controller = await connectController(server);
+    server.truncateInvoke(1);
+    await expect(controller.invoke('sessions:create', [], async () => undefined)).rejects.toThrow(/^Delivery unknown:/);
+    expect(sessionCreates(server.getInvokes())).toEqual([{ channel: 'sessions:create', args: [] }]);
+
+    await dropConnection(server, controller);
+    await expect(controller.invoke('sessions:create', [], async () => undefined)).rejects.toMatchObject({ code: 'ERR_REMOTE_OFFLINE' });
+    expect(sessionCreates(server.getInvokes())).toHaveLength(1);
+    await controller.switchToLocalMode();
+  });
+
+  it('delivers terminal input in flight across a reconnect once and in order', async () => {
+    const server = await createTestRemoteServer();
+    activeServers.push(server);
+    server.deduplicateRequestIds();
+    const client = new RemotePaneClient(profileFor(server, 'input'));
+    await client.connect();
+    server.delayInvoke(100);
+    server.truncateInvoke(1);
+
+    const typed = Promise.all(['a', 'b', 'c'].map(key => client.invoke('terminal:input', ['panel-1', key])));
+    await waitFor(() => server.getInvokes().length === 1);
+    server.closeEventStream();
+
+    await expect(typed).resolves.toHaveLength(3);
+    expect(server.getApplied().map(invoke => invoke.args)).toEqual([['panel-1', 'a'], ['panel-1', 'bc']]);
+    const ids = server.getInvokes().map(invoke => invoke.requestId);
+    expect(ids).toHaveLength(3);
+    expect(ids[1]).toBe(ids[0]);
+    expect(ids[2]).not.toBe(ids[0]);
+    expect(server.getEventRequestCount()).toBe(2);
     await client.disconnect();
   });
 });
@@ -900,6 +1027,10 @@ async function createTestRemoteServer(host = '127.0.0.1', basePath = ''): Promis
   let truncateInvokes = 0;
   let invokeDelayMs = 0;
   let invokeCount = 0;
+  let deduplicates = false;
+  const invokes: Array<{ channel: string; args: JsonValue[]; requestId?: string }> = [];
+  const applied: Array<{ channel: string; args: JsonValue[] }> = [];
+  const seenRequestIds = new Set<string>();
   let heartbeatTimer: NodeJS.Timeout | null = null;
   const normalizedBasePath = normalizeTestBasePath(basePath);
   const invokePath = `${normalizedBasePath}/invoke`;
@@ -914,10 +1045,14 @@ async function createTestRemoteServer(host = '127.0.0.1', basePath = ''): Promis
       if (response.destroyed) return;
       lastInvokeHost = request.headers.host;
       lastInvokePath = request.url;
-      const parsed = decodeBoundary(JSON.parse(lastInvokeBody), boundary.object({
+      const { requestId, ...parsed } = decodeBoundary(JSON.parse(lastInvokeBody), boundary.object({
         channel: boundary.string,
         args: boundary.array(boundary.json),
+        requestId: boundary.optional(boundary.string),
       }));
+      invokes.push(requestId ? { ...parsed, requestId } : parsed);
+      if (!deduplicates || !requestId || !seenRequestIds.has(requestId)) applied.push(parsed);
+      if (deduplicates && requestId) seenRequestIds.add(requestId);
       if (refusedChannels.has(parsed.channel)) {
         response.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
         response.end(JSON.stringify({
@@ -962,7 +1097,8 @@ async function createTestRemoteServer(host = '127.0.0.1', basePath = ''): Promis
       streamResponse = response;
       if (emitReadyEvent) {
         response.write('event: ready\n');
-        response.write(`data: ${JSON.stringify({ replay: 'none', resync: 'refetch-state-after-reconnect', timestamp: new Date().toISOString() })}\n\n`);
+        const ready = { replay: 'none', resync: 'refetch-state-after-reconnect', timestamp: new Date().toISOString() };
+        response.write(`data: ${JSON.stringify(deduplicates ? { ...ready, deduplicatesRequestIds: true } : ready)}\n\n`);
       }
       request.on('close', () => {
         if (streamResponse === response) {
@@ -990,6 +1126,9 @@ async function createTestRemoteServer(host = '127.0.0.1', basePath = ''): Promis
     baseUrl: `http://${host.includes(':') ? `[${host}]` : host}:${address.port}${normalizedBasePath}`,
     truncateInvoke(count = Infinity) { truncateInvokes = count; },
     delayInvoke(ms: number) { invokeDelayMs = ms; },
+    deduplicateRequestIds() { deduplicates = true; },
+    getInvokes() { return invokes; },
+    getApplied() { return applied; },
     setHeartbeatInterval(ms: number) {
       if (heartbeatTimer) clearInterval(heartbeatTimer);
       heartbeatTimer = ms ? setInterval(() => {
