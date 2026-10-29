@@ -1,18 +1,45 @@
 // The demo: sample computers, cards and terminals that live in the app, with no network.
 // Even review needs it, and anyone can try every screen before pairing.
 import type { NotifyAnswer } from '../../shared/types/notify';
-import { GlassesError, orderCards, type Card, type Computer, type Dictation, type PaneEntry, type PaneRow, type PaneSource, type TerminalScreen } from './model';
+import { GlassesError, orderCards, type Card, type Computer, type Dictation, type PaneEntry, type PaneRow, type PaneSource, type TerminalKey, type TerminalScreen } from './model';
 import type { Cancel } from './timers';
 
 const MINUTE = 60_000;
 const SPOKEN = 'stub the clock and rerun only the auth suite';
 const WORD_EVERY_MS = 350;
+/** After a demo menu is answered, it asks again this much later, so it can be tried again. */
+const ASK_AGAIN_MS = 4_000;
+
+/** A menu drawn the way Codex draws its approvals, answered with keys. */
+interface DemoMenu {
+  question: string;
+  choices: string[];
+  /** What the agent prints after each choice. */
+  replies: string[];
+  cursor: number;
+}
 
 interface DemoTerminal {
   status: TerminalScreen['status'];
   agent: string;
   earlier: string[];
   lines: string[];
+  menu?: DemoMenu;
+}
+
+const PUSH_MENU: DemoMenu = {
+  question: 'Push the branch and open the PR now?',
+  choices: ['Yes, push and open the PR', 'Not yet'],
+  replies: ['• Pushed glasses-docs and opened PR #482.', '• Okay, the branch stays local for now.'],
+  cursor: 0,
+};
+
+function menuRows(menu: DemoMenu): string[] {
+  return [
+    '', `  ${menu.question}`, '',
+    ...menu.choices.map((choice, index) => `${index === menu.cursor ? '›' : ' '} ${index + 1}. ${choice}`),
+    '', '  Press enter to confirm or esc to cancel',
+  ];
 }
 
 function terminals(): Map<string, DemoTerminal> {
@@ -30,7 +57,8 @@ function terminals(): Map<string, DemoTerminal> {
     }],
     ['docs-pass', {
       status: 'needs you', agent: 'Codex', earlier: ['$ codex', '• Reading docs/NATIVE_MOBILE.md'],
-      lines: ['• Updated docs/NATIVE_MOBILE.md and README.md.', '• Opened PR #482: Glasses docs.', '? Push the branch and open the PR now?', '  1. Yes   2. Not yet'],
+      lines: ['• Updated docs/NATIVE_MOBILE.md and README.md.', '• Wrote the glasses section of docs/EVEN_G2_GLASSES.md.'],
+      menu: { ...PUSH_MENU },
     }],
     ['nightly', {
       status: 'idle', agent: 'shell', earlier: ['$ git pull', 'Already up to date.'],
@@ -105,7 +133,8 @@ export class DemoSource implements PaneSource {
 
   async screen(_computerId: string, panelId: string): Promise<TerminalScreen> {
     const terminal = this.terminal(panelId);
-    return { lines: terminal.lines, status: terminal.status, agent: terminal.agent };
+    const lines = terminal.menu ? [...terminal.lines, ...menuRows(terminal.menu)] : terminal.lines;
+    return { lines, status: terminal.status, agent: terminal.agent };
   }
 
   async scrollback(_computerId: string, panelId: string): Promise<string[]> {
@@ -127,6 +156,28 @@ export class DemoSource implements PaneSource {
     const reply = terminal.agent === 'shell' ? [`${text.split(' ')[0] ?? text}: sample shell, nothing runs`, '$ _'] : ['• Edit(test/auth.spec.ts) +4 -1', '• Bash(pnpm test auth)'];
     terminal.lines = [...terminal.lines.filter((line) => line !== '> _' && line !== '$ _'), prompt, ...reply].slice(-12);
     if (terminal.agent !== 'shell') terminal.status = 'working';
+    this.changed();
+  }
+
+  /** Arrows move a menu's cursor, Enter picks, Esc cancels; elsewhere keys change nothing. */
+  async key(_computerId: string, panelId: string, key: TerminalKey): Promise<void> {
+    const terminal = this.terminal(panelId);
+    const menu = terminal.menu;
+    if (!menu) return;
+    if (key === 'up' || key === 'down') {
+      menu.cursor = Math.max(0, Math.min(menu.choices.length - 1, menu.cursor + (key === 'down' ? 1 : -1)));
+    } else if (key === 'enter' || key === 'escape') {
+      const answer = key === 'enter' ? [`› ${menu.cursor + 1}. ${menu.choices[menu.cursor] ?? ''}`, menu.replies[menu.cursor] ?? ''] : ['• Cancelled. Nothing was pushed.'];
+      terminal.lines = [...terminal.lines, ...answer].slice(-12);
+      terminal.menu = undefined;
+      terminal.status = 'idle';
+      const again = this.every(() => {
+        again.cancel();
+        terminal.menu = { ...PUSH_MENU };
+        terminal.status = 'needs you';
+        this.changed();
+      }, ASK_AGAIN_MS);
+    }
     this.changed();
   }
 

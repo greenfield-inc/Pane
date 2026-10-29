@@ -1,10 +1,13 @@
 // The glasses app's state machine: home ↔ card ↔ full question; home → computers → Panes → terminal.
 // It reads and acts through a PaneSource (the demo or the paired computers) and draws through `show`.
 import type { NotifyAnswer } from '../../shared/types/notify';
-import type { Page } from './display';
+import { BRIGHT, type Page } from './display';
 import type { Gesture } from './input';
-import { GlassesError, isPaneEntry, type Card, type Computer, type Dictation, type PaneEntry, type PaneRow, type PaneSource } from './model';
+import { GlassesError, isPaneEntry, type Card, type Computer, type Dictation, type PaneEntry, type PaneRow, type PaneSource, type TerminalKey } from './model';
+import { findMenu, type Menu } from './menu';
 import {
+  HALF_PAGE,
+  KEY_LIST,
   TERMINAL_LINES,
   allClearPage,
   cardPage,
@@ -14,10 +17,13 @@ import {
   dictationPage,
   fullQuestionPage,
   homeCardPage,
+  keyListPage,
+  keysRefusedPage,
   loadingPage,
   noComputerPage,
   openPanePage,
   panesPage,
+  pickerPage,
   problemPage,
   rowOrder,
   refusedPage,
@@ -25,8 +31,9 @@ import {
   terminalLines,
   terminalPage,
   voiceAnswerPage,
+  wrapRows,
 } from './screens';
-import { trimChrome } from './terminal';
+import { isRule, trimChrome } from './terminal';
 import type { Cancel } from './timers';
 
 /** How often an open terminal reads the host's screen, and faster while its agent works. */
@@ -36,9 +43,32 @@ const SCREEN_POLL_WORKING_MS = 500;
 const CARD_CONTEXT_LINES = 6;
 /** Earlier screen reads kept to spot a footer that never changes. */
 const EARLIER_READS = 3;
+/** While a pick waits for the cursor to move: how often it reads the screen, and for how long. */
+const PICK_READ_MS = 500;
+const PICK_WAIT_MS = 1_500;
+/** While held at your message, the saved output is read at most this often, and only this much of it. */
+const HOLD_READ_MS = 1_000;
+const HOLD_LINES = 150;
+/** How long after a send your line may take to show up before the view stops waiting for it. */
+const HOLD_FIND_MS = 5_000;
+/** Your line is found by its first characters, which fit on its first row. */
+const HOLD_MATCH_CHARS = 40;
+const MENU_CHANGED = 'The menu changed, so nothing more was sent';
 
-/** The rows the terminal view shows: the whole screen, or the output above the agent's input box. */
-const shownRows = (rows: readonly string[], full: boolean, earlier: readonly string[][] = []) => (full ? [...rows] : trimChrome(rows, earlier));
+const menuKey = (menu: Menu) => [...menu.question, ...menu.choices].join('\n');
+const sameMenu = (a: Menu | null, b: Menu) => a !== null && a.choices.join('\n') === b.choices.join('\n');
+/** The last index whose row passes `test`, or -1. */
+function lastIndex(rows: readonly string[], test: (row: string) => boolean): number {
+  for (let index = rows.length - 1; index >= 0; index -= 1) if (test(rows[index] ?? '')) return index;
+  return -1;
+}
+
+/** Two rows around the cursor, for the Esc / Tab list: the cursor's row and the next, or the last two rows. */
+function cursorRows(rows: readonly string[]): string[] {
+  const filled = rows.filter((row) => row.trim() && !isRule(row));
+  const at = lastIndex(filled, (row) => /^\s*[❯>›]/u.test(row));
+  return at >= 0 ? filled.slice(at, at + 2) : filled.slice(-2);
+}
 
 export interface AppDeps {
   source: PaneSource;
@@ -53,20 +83,57 @@ export interface AppDeps {
   clock(epochMs: number): string;
 }
 
+/**
+ * scroll: output only, swipes page through it. keys: the whole screen, swipes and press go to the
+ * terminal. key-list: Esc and Tab, behind hold in keys mode. keys-refused: the computer turned a key away.
+ */
+type TerminalMode = 'scroll' | 'keys' | 'key-list' | 'keys-refused';
+
+/** Held at your message after dictation: the page starts at your line while the reply grows below it. */
+interface Hold {
+  /** The first characters of what you said. */
+  text: string;
+  sentAt: number;
+  /** The saved output from the last read, wrapped, and where your line starts in it (null until it shows). */
+  lines: string[];
+  start: number | null;
+  /** Lines swiped away from `start`; negative is older. */
+  offset: number;
+  /** The screen at that read, and when it was. */
+  readScreen: string;
+  readAt: number;
+}
+
 interface TerminalState {
   computerId: string;
   entry: PaneEntry;
   /** The screen's rows from the last read, and a few reads before it, oldest first. */
   screen: string[];
   earlier: string[][];
-  /** The whole screen, input box and status rows included; press toggles it while live. */
-  full: boolean;
-  /** What the live view shows of the screen, wrapped. */
+  /** What the live view shows of the screen: the output above the input box, wrapped. */
   lines: string[];
   /** Older output, wrapped; loaded on the first swipe up. */
   scrollback: string[] | null;
   scrolledUp: number;
+  /** The half just read, dimmed after a swipe. */
+  dim: 'top' | 'bottom' | null;
+  mode: TerminalMode;
+  /** Why the computer turned a key away (keys-refused). */
+  refusal: { message: string; next?: string } | null;
+  /** Shown in keys mode's footer until the next key. */
+  notice: string | null;
+  /** The menu on the last screen read, and the one double press dismissed (until it leaves the screen). */
+  menu: Menu | null;
+  dismissed: string | null;
+  /** The menu a pick is answering, while it sends keys. */
+  picking: Menu | null;
+  hold: Hold | null;
 }
+
+const NEW_TERMINAL: Omit<TerminalState, 'computerId' | 'entry'> = {
+  screen: [], earlier: [], lines: [], scrollback: null, scrolledUp: 0, dim: null,
+  mode: 'scroll', refusal: null, notice: null, menu: null, dismissed: null, picking: null, hold: null,
+};
 
 type View =
   | { name: 'home' }
@@ -121,6 +188,9 @@ export class GlassesApp {
   /** Counts holds; a voice startup that finishes after its hold ended sees a newer number and stands down. */
   private listening = 0;
   private poll: Cancel | null = null;
+  /** Counts screen reads; only the newest one draws or schedules the next. */
+  private reads = 0;
+  private holdReading = false;
   /** The tab this open already resumed, so a tab that stops again is not restarted behind the user. */
   private resumed: string | null = null;
   private readonly unsubscribe: () => void;
@@ -202,7 +272,7 @@ export class GlassesApp {
         return view.entries ? panesPage(name, view.entries, this.panesStart(view.computerId, view.entries)) : loadingPage(`${name} · Sessions and Panes`, 'Loading…');
       }
       case 'terminal':
-        return terminalPage({ entry: view.entry, lines: this.visibleLines(view), scrolledUp: view.scrolledUp, full: view.full, footer: terminalFooter(this.elsewhere(view)) });
+        return this.terminalPage(view);
       case 'dictation':
         return dictationPage(view.entry, view.lines, view.transcript);
       case 'refused': {
@@ -249,10 +319,45 @@ export class GlassesApp {
     return this.cards().find((card) => !(card.computerId === state.computerId && card.panelId === state.entry.panelId));
   }
 
-  private visibleLines(state: TerminalState): string[] {
-    if (!state.scrolledUp || !state.scrollback) return state.lines.slice(-TERMINAL_LINES);
+  /** The picker's menu, when one shows: the menu being picked, or a menu not dismissed. */
+  private pickerMenu(state: TerminalState): Menu | null {
+    if (state.picking) return state.picking;
+    if (state.mode !== 'scroll' || !state.menu || state.dismissed === menuKey(state.menu)) return null;
+    return state.menu;
+  }
+
+  private terminalPage(state: TerminalState): Page {
+    const elsewhere = this.elsewhere(state);
+    switch (state.mode) {
+      case 'keys-refused':
+        return keysRefusedPage(state.entry, state.refusal?.message ?? '', state.refusal?.next);
+      case 'key-list':
+        return keyListPage(cursorRows(state.screen));
+      case 'keys':
+        return terminalPage({
+          entry: state.entry, keys: true, scrolledUp: 0, lines: terminalLines(state.screen).slice(-TERMINAL_LINES),
+          footer: state.notice ? { text: state.notice, brightness: BRIGHT } : terminalFooter(elsewhere, 'double press = done'),
+        });
+      case 'scroll':
+        break;
+    }
+    const footer = terminalFooter(elsewhere);
+    const menu = this.pickerMenu(state);
+    if (menu) return pickerPage(state.entry, menu.question, menu.choices, state.picking !== null, footer);
+    const page = { entry: state.entry, scrolledUp: state.scrolledUp, footer, dim: state.dim };
+    const hold = state.hold;
+    if (hold && hold.start !== null) {
+      const top = this.heldTop(hold);
+      return terminalPage({ ...page, lines: hold.lines.slice(top, top + TERMINAL_LINES), more: Math.max(0, hold.lines.length - top - TERMINAL_LINES) });
+    }
+    if (!state.scrolledUp || !state.scrollback) return terminalPage({ ...page, lines: state.lines.slice(-TERMINAL_LINES) });
     const end = state.scrollback.length - state.scrolledUp;
-    return state.scrollback.slice(Math.max(0, end - TERMINAL_LINES), end);
+    return terminalPage({ ...page, lines: state.scrollback.slice(Math.max(0, end - TERMINAL_LINES), end) });
+  }
+
+  /** The held page's first line. */
+  private heldTop(hold: Hold): number {
+    return Math.max(0, Math.min((hold.start ?? 0) + hold.offset, hold.lines.length - 1));
   }
 
   // ---------- input ----------
@@ -501,7 +606,7 @@ export class GlassesApp {
   private openTerminal(computerId: string, entry: PaneEntry): void {
     this.resumed = null;
     this.markViewed(computerId, entry);
-    this.go({ name: 'terminal', computerId, entry, screen: [], earlier: [], full: false, lines: [], scrollback: null, scrolledUp: 0 });
+    this.go({ name: 'terminal', computerId, entry, ...NEW_TERMINAL });
     this.stopPolling();
     void this.refreshScreen();
   }
@@ -511,11 +616,29 @@ export class GlassesApp {
     this.poll = null;
   }
 
+  /** The open terminal, when it is still the one `panelId` names. */
+  private terminalOn(panelId: string): Extract<View, { name: 'terminal' }> | null {
+    const view = this.view;
+    return view.name === 'terminal' && view.entry.panelId === panelId ? view : null;
+  }
+
+  private update(state: Extract<View, { name: 'terminal' }>, change: Partial<TerminalState>): void {
+    this.view = { ...state, ...change };
+    this.render();
+  }
+
+  /** Reads the screen now rather than at the next poll, so a key's effect shows quickly. */
+  private readNow(): void {
+    this.stopPolling();
+    void this.refreshScreen();
+  }
+
   /** Reads the host's rendered screen, then schedules the next read while the terminal stays open. */
   private async refreshScreen(): Promise<void> {
     const view = this.view;
     if (view.name !== 'terminal' && view.name !== 'dictation') return;
     const { computerId, entry } = view;
+    const read = ++this.reads;
     let working = entry.status === 'working';
     try {
       const screen = await this.deps.source.screen(computerId, entry.panelId);
@@ -526,24 +649,65 @@ export class GlassesApp {
         await this.deps.source.resume(computerId, entry.panelId);
       }
       const current = this.view;
-      if ((current.name === 'terminal' || current.name === 'dictation') && current.entry.panelId === entry.panelId) {
+      if (read === this.reads && (current.name === 'terminal' || current.name === 'dictation') && current.entry.panelId === entry.panelId) {
         const earlier = [...current.earlier, current.screen].filter((rows) => rows.length).slice(-EARLIER_READS);
-        const lines = terminalLines(shownRows(screen.lines, current.full, earlier));
-        this.view = { ...current, screen: screen.lines, earlier, lines, entry: { ...current.entry, status: screen.status, agent: screen.agent } };
-        // Scrolled up, the view stays where the person put it; press brings them back to live.
-        if (current.name === 'terminal' && !current.scrolledUp) this.render();
+        const lines = terminalLines(trimChrome(screen.lines, earlier));
+        const menu = findMenu(screen.lines);
+        const next: TerminalState = { ...current, screen: screen.lines, earlier, lines, menu, entry: { ...current.entry, status: screen.status, agent: screen.agent } };
+        // A dismissed menu that leaves the screen can come back as a new one.
+        if (!menu) next.dismissed = null;
+        // A new menu takes over a held view: the picker shows it.
+        if (menu && next.hold && next.dismissed !== menuKey(menu)) next.hold = null;
+        this.view = current.name === 'terminal' ? { ...next, name: 'terminal' } : { ...next, name: 'dictation', transcript: current.transcript };
+        // Scrolled up, the view stays where the person put it; press opens keys mode at live.
+        const still = current.name === 'terminal' && (current.mode !== 'scroll' || !current.scrolledUp || this.pickerMenu(next));
+        if (still) this.render();
+        if (current.name === 'terminal' && next.hold) void this.readHeld(entry.panelId);
       }
     } catch (error) {
-      if (this.view.name === 'terminal') {
+      if (this.view.name === 'terminal' && read === this.reads) {
         this.showProblem(entry.name, error, { name: 'panes', computerId, entries: null });
         void this.openPanesQuietly(computerId);
         return;
       }
     }
     const still = this.view;
-    if ((still.name === 'terminal' || still.name === 'dictation') && still.entry.panelId === entry.panelId) {
+    if (read === this.reads && (still.name === 'terminal' || still.name === 'dictation') && still.entry.panelId === entry.panelId) {
       this.poll = this.deps.later(() => void this.refreshScreen(), working ? SCREEN_POLL_WORKING_MS : SCREEN_POLL_MS);
     }
+  }
+
+  /**
+   * Held at your message: reads the saved output when the screen changed, at most once a second,
+   * and finds your line again. A line that is gone (the screen was cleared) releases the hold.
+   */
+  private async readHeld(panelId: string): Promise<void> {
+    const view = this.terminalOn(panelId);
+    const hold = view?.hold;
+    if (!view || !hold || this.holdReading) return;
+    const now = this.deps.now();
+    const screen = view.screen.join('\n');
+    if (screen === hold.readScreen || now - hold.readAt < HOLD_READ_MS) return;
+    this.holdReading = true;
+    let saved: string[];
+    try {
+      saved = await this.deps.source.scrollback(view.computerId, panelId, HOLD_LINES);
+    } catch {
+      return;
+    } finally {
+      this.holdReading = false;
+    }
+    const current = this.terminalOn(panelId);
+    if (!current || current.hold?.sentAt !== hold.sentAt) return;
+    const rows = trimChrome(saved);
+    const at = lastIndex(rows, (row) => row.includes(hold.text));
+    if (at < 0) {
+      // Not there yet just after the send; gone later, or never showing up, means follow live.
+      const waiting = hold.start === null && now - hold.sentAt < HOLD_FIND_MS;
+      this.update(current, { hold: waiting ? { ...current.hold, readAt: now, readScreen: screen } : null, dim: null });
+      return;
+    }
+    this.update(current, { hold: { ...current.hold, lines: terminalLines(rows), start: wrapRows(rows.slice(0, at)).length, readAt: now, readScreen: screen } });
   }
 
   /** Fills the Panes list behind a problem page, so double press lands on a real list. */
@@ -560,23 +724,88 @@ export class GlassesApp {
   }
 
   private onTerminal(view: Extract<View, { name: 'terminal' }>, gesture: Gesture): void {
+    if (gesture.type === 'hold' && (view.mode === 'scroll' || view.mode === 'keys-refused')) {
+      void this.startDictation({ ...view, mode: 'scroll', scrolledUp: 0, dim: null, refusal: null });
+      return;
+    }
+    switch (view.mode) {
+      case 'keys-refused':
+        if (gesture.type === 'press' || gesture.type === 'double') this.update(view, { mode: 'scroll', refusal: null });
+        return;
+      case 'key-list':
+        if (gesture.type === 'double') this.update(view, { mode: 'keys' });
+        else if (gesture.type === 'select') {
+          const entry = KEY_LIST[gesture.index];
+          if (entry) void this.sendKey(view, entry.key, 'keys');
+        }
+        return;
+      case 'keys':
+        this.onKeys(view, gesture);
+        return;
+      case 'scroll':
+        if (this.pickerMenu(view)) this.onPicker(view, gesture);
+        else this.onScroll(view, gesture);
+    }
+  }
+
+  private onKeys(view: Extract<View, { name: 'terminal' }>, gesture: Gesture): void {
     switch (gesture.type) {
       case 'up':
-        void this.scrollUp(view);
+      case 'down':
+        void this.sendKey(view, gesture.type, 'keys');
+        return;
+      case 'press':
+        // Enter answers what is on screen; the menu it answered is not offered again.
+        void this.sendKey({ ...view, dismissed: view.menu ? menuKey(view.menu) : view.dismissed }, 'enter', 'scroll');
+        return;
+      case 'hold':
+        this.update(view, { mode: 'key-list', notice: null });
+        return;
+      case 'double':
+        this.update(view, { mode: 'scroll', notice: null });
+        return;
+      default:
+        return;
+    }
+  }
+
+  /** Presses one key, then shows `after` with the screen read again at once. */
+  private async sendKey(view: Extract<View, { name: 'terminal' }>, key: TerminalKey, after: TerminalMode): Promise<void> {
+    this.update(view, { mode: after, notice: null });
+    try {
+      await this.deps.source.key(view.computerId, view.entry.panelId, key);
+    } catch (error) {
+      this.keyRefused(view.entry.panelId, error);
+      return;
+    }
+    if (this.terminalOn(view.entry.panelId)) this.readNow();
+  }
+
+  /** A key the computer turned away: an older Pane says so on its own screen; anything else is a problem. */
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- A key's failure is whatever the source threw; only GlassesError fields are read.
+  private keyRefused(panelId: string, error: unknown): void {
+    const current = this.terminalOn(panelId);
+    if (!current) return;
+    if (error instanceof GlassesError && (error.code === 'ERR_GLASSES_KEYS_UNSUPPORTED' || error.code === 'ERR_GLASSES_KEY_REFUSED')) {
+      this.update(current, { mode: 'keys-refused', picking: null, refusal: error.next ? { message: error.message, next: error.next } : { message: error.message } });
+      return;
+    }
+    this.showProblem(`${current.entry.name} · keys not sent`, error, { ...current, mode: 'scroll', picking: null });
+  }
+
+  private onScroll(view: Extract<View, { name: 'terminal' }>, gesture: Gesture): void {
+    switch (gesture.type) {
+      case 'up':
+        if (view.hold?.start != null) this.update(view, { hold: { ...view.hold, offset: view.hold.offset - HALF_PAGE }, dim: 'bottom' });
+        else void this.scrollUp(view);
         return;
       case 'down':
-        this.view = { ...view, scrolledUp: Math.max(0, view.scrolledUp - (TERMINAL_LINES - 1)) };
-        this.render();
+        this.scrollDown(view);
         return;
-      case 'press': {
-        // Press returns to live; on live it shows the whole screen, or the output alone again.
-        const full = view.scrolledUp ? view.full : !view.full;
-        this.view = { ...view, full, lines: terminalLines(shownRows(view.screen, full, view.earlier)), scrolledUp: 0, scrollback: null };
-        this.render();
-        return;
-      }
-      case 'hold':
-        void this.startDictation({ ...view, scrolledUp: 0 });
+      case 'press':
+        // Keys mode works at live, on the whole screen.
+        this.update(view, { mode: 'keys', scrolledUp: 0, scrollback: null, dim: null, hold: null, notice: null });
+        this.readNow();
         return;
       case 'double': {
         const card = this.elsewhere(view);
@@ -589,22 +818,89 @@ export class GlassesApp {
     }
   }
 
+  /** Half a page down; a step that reaches the end of a held reply, or of older output, follows live again. */
+  private scrollDown(view: Extract<View, { name: 'terminal' }>): void {
+    const hold = view.hold;
+    if (hold?.start != null) {
+      if (this.heldTop(hold) + HALF_PAGE + TERMINAL_LINES >= hold.lines.length) this.update(view, { hold: null, dim: null });
+      else this.update(view, { hold: { ...hold, offset: hold.offset + HALF_PAGE }, dim: 'top' });
+      return;
+    }
+    const scrolledUp = Math.max(0, view.scrolledUp - HALF_PAGE);
+    this.update(view, { scrolledUp, dim: scrolledUp ? 'top' : null });
+  }
+
   private async scrollUp(view: Extract<View, { name: 'terminal' }>): Promise<void> {
     // Leaving live reads Pane's saved output afresh; later swipes page through that copy.
     let scrollback = view.scrolledUp ? view.scrollback : null;
     if (!scrollback) {
       try {
-        scrollback = terminalLines(shownRows(await this.deps.source.scrollback(view.computerId, view.entry.panelId), view.full));
+        scrollback = terminalLines(trimChrome(await this.deps.source.scrollback(view.computerId, view.entry.panelId)));
       } catch (error) {
         this.showProblem(view.entry.name, error, view);
         return;
       }
     }
-    const current = this.view;
-    if (current.name !== 'terminal' || current.entry.panelId !== view.entry.panelId) return;
+    const current = this.terminalOn(view.entry.panelId);
+    if (!current || current.mode !== 'scroll') return;
     const most = Math.max(0, scrollback.length - TERMINAL_LINES);
-    this.view = { ...current, scrollback, scrolledUp: Math.min(most, current.scrolledUp + TERMINAL_LINES - 1) };
-    this.render();
+    const scrolledUp = Math.min(most, current.scrolledUp + HALF_PAGE);
+    this.update(current, { scrollback, scrolledUp, dim: scrolledUp ? 'bottom' : null });
+  }
+
+  private onPicker(view: Extract<View, { name: 'terminal' }>, gesture: Gesture): void {
+    if (view.picking) return;
+    const menu = view.menu;
+    if (!menu) return;
+    if (gesture.type === 'double') this.update(view, { dismissed: menuKey(menu) });
+    else if (gesture.type === 'select' && menu.choices[gesture.index] !== undefined) void this.pick(view, menu, gesture.index);
+  }
+
+  /**
+   * Answers a menu with real keys: checks the menu is still there with the cursor where it was,
+   * sends one arrow at a time and waits to see the cursor move, then Enter. Any change stops it
+   * before Enter, and keys mode takes over. Keys are never resent.
+   */
+  private async pick(view: Extract<View, { name: 'terminal' }>, menu: Menu, index: number): Promise<void> {
+    const { computerId, entry } = view;
+    const panelId = entry.panelId;
+    this.update(view, { picking: menu });
+    const stop = () => {
+      const current = this.terminalOn(panelId);
+      if (current?.picking) this.update(current, { picking: null, mode: 'keys', notice: MENU_CHANGED });
+      if (current) this.readNow();
+    };
+    try {
+      if (!(await this.cursorOn(computerId, panelId, menu, menu.cursor, 0))) return stop();
+      const step: TerminalKey = index > menu.cursor ? 'down' : 'up';
+      for (let cursor = menu.cursor; cursor !== index;) {
+        if (!this.terminalOn(panelId)?.picking) return;
+        await this.deps.source.key(computerId, panelId, step);
+        cursor += step === 'down' ? 1 : -1;
+        if (!(await this.cursorOn(computerId, panelId, menu, cursor, PICK_WAIT_MS))) return stop();
+      }
+      if (!this.terminalOn(panelId)?.picking) return;
+      await this.deps.source.key(computerId, panelId, 'enter');
+    } catch (error) {
+      this.keyRefused(panelId, error);
+      return;
+    }
+    const current = this.terminalOn(panelId);
+    if (current) {
+      this.update(current, { picking: null, dismissed: menuKey(menu), hold: null, scrolledUp: 0, dim: null });
+      this.readNow();
+    }
+  }
+
+  /** Reads the screen until `menu` shows with its cursor on `row`, for up to `waitMs`. */
+  private async cursorOn(computerId: string, panelId: string, menu: Menu, row: number, waitMs: number): Promise<boolean> {
+    for (let waited = 0; ; waited += PICK_READ_MS) {
+      const screen = await this.deps.source.screen(computerId, panelId);
+      const found = findMenu(screen.lines);
+      if (found && sameMenu(found, menu) && found.cursor === row) return true;
+      if (waited + PICK_READ_MS > waitMs) return false;
+      await new Promise<void>((resolve) => { this.deps.later(resolve, PICK_READ_MS); });
+    }
   }
 
   private async startDictation(view: TerminalState): Promise<void> {
@@ -624,13 +920,17 @@ export class GlassesApp {
   }
 
   private async finishDictation(view: Extract<View, { name: 'dictation' }>): Promise<void> {
-    const terminal: View = { ...view, name: 'terminal' };
+    const { transcript: _transcript, ...state } = view;
+    const terminal: View = { ...state, name: 'terminal' };
     try {
       const text = await this.stopListening();
-      this.go(terminal);
+      // After a send, the view holds at your line while the reply grows below it.
+      const hold: Hold | null = text
+        ? { text: text.slice(0, HOLD_MATCH_CHARS), sentAt: this.deps.now(), lines: [], start: null, offset: 0, readScreen: '', readAt: 0 }
+        : null;
+      this.go({ ...terminal, hold });
       if (text) await this.deps.source.submit(view.computerId, view.entry.panelId, text);
-      this.stopPolling();
-      void this.refreshScreen();
+      this.readNow();
     } catch (error) {
       this.showProblem(`${view.entry.name} · not sent`, error, terminal);
     }
