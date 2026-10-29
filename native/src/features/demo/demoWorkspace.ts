@@ -40,7 +40,7 @@ interface DemoPanel {
 const UNDO_HOLD_MS = 3_000;
 const LINE_EVERY_MS = 650;
 const FINISH_AFTER_MS = 4_000;
-const NEEDS_COMPUTER = 'needs Pane on your own computer. The demo runs on this phone and connects to nothing.';
+export const NEEDS_COMPUTER = 'needs Pane on your own computer. The demo runs on this phone and connects to nothing.';
 const MINUTE = 60_000;
 
 const SHORTCUTS: RemotePwaTerminalShortcut[] = [
@@ -56,6 +56,8 @@ export class DemoWorkspace {
   private panes: DemoPane[];
   private notify: NotifyItem[];
   private revision = 1;
+  /** Bumped by every answer and Undo, so a hold timer delivers only the answer it was set for. */
+  private readonly answerGeneration = new Map<string, number>();
   private shortcuts = SHORTCUTS;
   private sessions: OrchestrationSessionRecord[];
   private readonly epoch: string;
@@ -363,10 +365,11 @@ export class DemoWorkspace {
     const item = this.notify.find(candidate => candidate.id === command.id);
     if (!item) throw new Error('This question is no longer waiting.');
     if (command.type === 'answer' && item.state === 'waiting') {
-      const sent: NotifyItem = { ...item, state: 'sent', answerSummary: summarize(command.answer) };
-      this.replaceNotify(sent);
-      this.later(UNDO_HOLD_MS, () => this.deliver(sent.id));
+      const generation = this.nextAnswerGeneration(item.id);
+      this.replaceNotify({ ...item, state: 'sent', answerSummary: summarize(command.answer) });
+      this.later(UNDO_HOLD_MS, () => this.deliver(item.id, generation));
     } else if (command.type === 'undo' && item.state === 'sent') {
+      this.nextAnswerGeneration(item.id);
       this.replaceNotify({ ...item, state: 'waiting', answerSummary: undefined });
     } else if (command.type === 'dismiss' || command.type === 'skip' || command.type === 'remind') {
       return null;
@@ -375,16 +378,23 @@ export class DemoWorkspace {
     return null;
   }
 
+  private nextAnswerGeneration(id: string): number {
+    const generation = (this.answerGeneration.get(id) ?? 0) + 1;
+    this.answerGeneration.set(id, generation);
+    return generation;
+  }
+
   /** The hold ran out: the agent has its answer and gets back to work. */
-  private deliver(id: string): void {
+  private deliver(id: string, generation: number): void {
     const item = this.notify.find(candidate => candidate.id === id);
-    if (item?.state !== 'sent') return;
+    if (item?.state !== 'sent' || this.answerGeneration.get(id) !== generation) return;
     this.replaceNotify({ ...item, state: 'answered', resolvedAt: Date.now() });
     this.notifyChanged();
+    // The question outlives its Pane when you delete the Pane first; then there is no agent to show.
     const { paneId, panelId } = item.source;
-    if (!paneId || !panelId) return;
+    const panel = this.panes.find(pane => pane.id === paneId)?.panels.find(candidate => candidate.id === panelId);
+    if (!paneId || !panelId || !panel) return;
     this.setState(paneId, panelId, 'working');
-    const panel = this.panel(panelId);
     panel.pending.push('', `\x1b[32m●\x1b[0m Got it: ${item.answerSummary ?? 'thanks'}.`, '');
     this.startStreaming(panel);
     this.later(FINISH_AFTER_MS, () => this.setState(paneId, panelId, 'idle'));
