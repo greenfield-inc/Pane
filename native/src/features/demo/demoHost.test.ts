@@ -140,4 +140,31 @@ describe('demo host', () => {
     await expect(invokeChannel(client, 'remote:settings:update', [{ deepgramApiKey: 'x' }])).rejects.toThrow(/your own computer/);
     client.disconnect();
   });
+
+  it('still delivers an answer whose sample Pane was deleted', async () => {
+    const { client } = connectDemo();
+    await connected(client);
+    await invokeChannel(client, 'sessions:delete', ['demo-dark-mode']);
+    await invokeChannel(client, 'sessions:permanent-delete', ['demo-dark-mode']);
+    await invokeChannel(client, 'notify:remote-command', [{ type: 'answer', id: 'demo-q-colors', answer: { choice: 'Design-system tokens' } }]);
+    await vi.waitFor(async () => {
+      const after = await invokeChannel<NotifySharedState>(client, 'notify:remote-snapshot');
+      expect(after.items.find(item => item.id === 'demo-q-colors')?.state).toBe('answered');
+    }, { timeout: 5_000 });
+    client.disconnect();
+  });
+
+  it('gives a corrected answer its own Undo window', async () => {
+    const { client } = connectDemo();
+    await connected(client);
+    const answer = (choice: string) => invokeChannel(client, 'notify:remote-command', [{ type: 'answer', id: 'demo-q-colors', answer: { choice } }]);
+    const state = async () => (await invokeChannel<NotifySharedState>(client, 'notify:remote-snapshot')).items.find(item => item.id === 'demo-q-colors')?.state;
+    await answer('New dark palette');
+    await new Promise(resolve => setTimeout(resolve, 2_000));
+    await invokeChannel(client, 'notify:remote-command', [{ type: 'undo', id: 'demo-q-colors' }]);
+    await answer('Design-system tokens');
+    await new Promise(resolve => setTimeout(resolve, 1_500));
+    expect(await state()).toBe('sent');
+    client.disconnect();
+  }, 10_000);
 });
