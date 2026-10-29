@@ -484,7 +484,9 @@ ${SESSION_PANE_ASSOCIATION_GUIDANCE}
 ## The Onboarding Session
 
 When this Session is named Onboarding, it is where a new person starts, and it
-owns no work of its own. Give each new task its own Session:
+owns no work of its own. Give each new task its own new Session, even when it
+touches a repository or branch an existing Session already covers. Use an
+existing Session only when the person names it.
 
 1. \`runpane sessions create\` with a readable name, the goal, the context you
    have, and the next action.
@@ -494,6 +496,10 @@ owns no work of its own. Give each new task its own Session:
 
 Onboarding gains no Pane. Tell the person in one sentence that the task now has
 its own Session in the sidebar, and that its chat picks up from there.
+
+In this Session, call the agents in Panes sub-agents, never workers: "The Panes
+under a Session are sub-agents its orchestrator agent runs for you." Leave model
+choice and cost out.
 
 ## Resume and refresh persisted Session context
 

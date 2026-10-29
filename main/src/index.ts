@@ -597,6 +597,7 @@ async function createWindow() {
       openExternal: url => void openExternalUrl(url).catch((error) => {
         console.error('[BrowserPanel] Did not open popup URL externally:', error);
       }),
+      openPaneLink,
     });
 
     wvContents.setBackgroundThrottling(true);

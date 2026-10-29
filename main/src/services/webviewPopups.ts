@@ -7,6 +7,20 @@ interface WebviewPopupRouting {
   /** Opens a regular link as a new browser tab next to its source panel. */
   openBrowserTab(request: { url: string; sourceSessionId: string; sourcePanelId: string }): void;
   openExternal(url: string): void;
+  /** Opens a Pane, Session or repository the way an OS-level pane:// link does. */
+  openPaneLink(url: string): void;
+}
+
+/**
+ * A pane:// link opens a Pane, Session or repository. Only pages loaded from a
+ * local file (pages Pane or an agent opened, like Start here) may follow one;
+ * a web page can't steer the app.
+ */
+function followPaneLink(pageUrl: string, url: string, routing: WebviewPopupRouting): boolean {
+  if (!url.toLowerCase().startsWith('pane://')) return false;
+  if (pageUrl.toLowerCase().startsWith('file:')) routing.openPaneLink(url);
+  else console.warn('[BrowserPanel] Ignored a pane:// link from a web page');
+  return true;
 }
 
 /**
@@ -14,10 +28,15 @@ interface WebviewPopupRouting {
  * the tab's own store, so they share its logins; other links open as Pane tabs.
  */
 export function routeWebviewPopups(
-  wvContents: Pick<WebContents, 'id' | 'setWindowOpenHandler' | 'on' | 'once'>,
+  wvContents: Pick<WebContents, 'id' | 'getURL' | 'setWindowOpenHandler' | 'on' | 'once'>,
   routing: WebviewPopupRouting,
 ): void {
+  wvContents.on('will-navigate', (event, url) => {
+    if (followPaneLink(wvContents.getURL(), url, routing)) event.preventDefault();
+  });
+
   wvContents.setWindowOpenHandler(({ url, disposition }) => {
+    if (followPaneLink(wvContents.getURL(), url, routing)) return { action: 'deny' };
     // Pages in a browser tab are untrusted: only web links may leave it. A file: or
     // app-scheme URL would otherwise reach the OS through a popup, tab or openExternal.
     // about:blank stays allowed for popups that a sign-in script navigates after opening.

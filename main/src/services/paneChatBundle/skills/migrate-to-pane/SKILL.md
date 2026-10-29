@@ -51,7 +51,9 @@ say in one sentence what it is, then carry on:
 - The first time a Session gets Panes under it: "The Panes under a Session are
   sub-agents its orchestrator agent runs for you."
 
-Leave model choice and cost out of these explanations and the Start here page.
+In the Onboarding Session, every message calls the agents in Panes sub-agents,
+never workers. Leave model choice and cost out of these explanations and the
+Start here page.
 
 ## Ground rules
 
@@ -272,5 +274,7 @@ When the first prompt says the person said Not now, or Pane found no sessions,
 bring nothing in. Make the Start here page for the projects they opened: the
 template without the receipt section, workstreams only for work already in
 Pane (often none: say so in one line), and try-now prompts that name their
-repositories. Save and open it as step 6 says, and end the chat the same way.
+repositories. In section 4, keep the first and third answers and delete the
+second ("Is my real chat the old one or the new one?"), which is about migrated
+sessions. Renumber the section headings so they run 1 to 5. Save and open it as step 6 says, and end the chat the same way.
 If they opened no project, the try-now prompts start with adding one.

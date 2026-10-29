@@ -129,7 +129,7 @@ export function SessionsStepFooter({ sessions, busy, onYes, onNotNow }: Sessions
     <>
       <Button variant="ghost" disabled={busy} onClick={onNotNow}>Not now</Button>
       {sessions === null ? (
-        <span role="status" aria-label="Looking for your sessions" className={cn(ANSWER_BOX, 'inline-flex items-center justify-center rounded-button bg-surface-secondary')}>
+        <span role="status" aria-label="Looking for your sessions" className={cn(ANSWER_BOX, 'inline-flex items-center justify-center rounded-button border border-border-primary bg-surface-secondary')}>
           <Loader2 className="h-4 w-4 animate-spin text-text-tertiary" aria-hidden="true" />
         </span>
       ) : (
