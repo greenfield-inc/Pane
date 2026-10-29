@@ -188,7 +188,7 @@ position. A drag or keypress reorders only the list it starts in: Pinned
 Sessions move among themselves, and a Session dragged across the Pinned line
 stays where it was. The order is saved on the host, so every desktop, the phone
 and `runpane sessions list` show it, and it survives restarts. New Sessions
-start at the bottom. A host that has never saved an order lists Sessions oldest
+start at the top. A host that has never saved an order lists Sessions newest
 first. A host running an older Pane cannot save an order: the list snaps back
 and the error says to update Pane on that host. Dragging a Session onto the
 workspace still tiles it.
@@ -261,7 +261,7 @@ trade the places they already hold, so a list that shows only some Sessions
 unknown ids are ignored. It writes an optional `order` id list beside the
 Sessions in `orchestration-sessions.json` (the store stays at version 1) and
 changes no Session's revision, `updatedAt` or activity. An older Pane reading
-the file ignores `order`, lists Sessions oldest first, and drops it the next
+the file ignores `order`, lists Sessions in its own default order, and drops it the next
 time it writes. Archiving the selected Session chooses an available active
 Session or clears the selection if none remain. Restoring a Session does not
 replace an unrelated selection.

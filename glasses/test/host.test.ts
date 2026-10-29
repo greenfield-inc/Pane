@@ -347,6 +347,19 @@ describe('HostHub', () => {
     one.stop();
   });
 
+  it('lists Panes newest first across every repository', async () => {
+    const a = host('https://studio.tail1.ts.net:8443');
+    a.handlers.set('sessions:get-all-with-projects', () => ({ success: true, data: [
+      { sessions: [{ id: 'p1', name: 'oldest', createdAt: '2026-10-01T00:00:00.000Z' }, { id: 'p3', name: 'newest', createdAt: '2026-10-28T00:00:00.000Z' }] },
+      { sessions: [{ id: 'p2', name: 'middle', createdAt: '2026-10-15T00:00:00.000Z' }] },
+    ] }));
+    a.handlers.set('panels:list', ([paneId]) => ({ success: true, data: [{ id: `t-${String(paneId)}`, type: 'terminal', title: 'Terminal', state: { isActive: true, customState: { isInitialized: true } } }] }));
+    const { hub: one } = hub([a]);
+    await until(() => one.computers()[0]?.status === 'live');
+    expect((await one.panes(a.url)).filter(isPaneEntry).map((entry) => entry.name)).toEqual(['newest', 'middle', 'oldest']);
+    one.stop();
+  });
+
   it('opens the terminal a Pane actually runs, never a tab that was never started', async () => {
     const a = host('https://studio.tail1.ts.net:8443');
     a.handlers.set('sessions:get-all-with-projects', () => ({ success: true, data: [{ sessions: [

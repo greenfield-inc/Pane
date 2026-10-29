@@ -148,7 +148,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
   // The sidebar's search opens the same launcher as its shortcut.
   const openSearch = useCallback(() => hotkeys.get('open-command-palette')?.action(), [hotkeys]);
   const { version, gitCommit, worktreeName } = useAppBuildInfo();
-  const [sessionSortAscending, setSessionSortAscending] = useState<boolean>(true); // Default to ascending (newest at bottom)
+  const [sessionSortAscending, setSessionSortAscending] = useState<boolean>(false); // Newest first until the host says otherwise
   const [sidebarSectionExpansion, setSidebarSectionExpansion] = useState<Record<SidebarSection, boolean>>({
     pinned: true,
     repositories: true,
@@ -170,7 +170,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
         const result = await window.electronAPI.uiState.getExpanded();
         if (cancelled) return;
         if (result.success && result.data) {
-          setSessionSortAscending(result.data.sessionSortAscending ?? true);
+          setSessionSortAscending(result.data.sessionSortAscending ?? false);
           hydrateExpandedProjects(result.data.expandedProjects ?? []);
           hydrateExpandedSessions(result.data.expandedSessions ?? []);
           hydrateExpandedArchivedProjects(result.data.expandedArchivedProjects ?? []);

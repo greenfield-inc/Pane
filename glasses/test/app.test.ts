@@ -818,6 +818,23 @@ describe('going back keeps your place', () => {
     await press({ type: 'double' });
     expect(text()[1]).toBe('d · Claude · stopped | · top of the list · | a · Claude · stopped | b · Claude · stopped');
   });
+
+  it('reaches every row of a list longer than the glasses show, through a More row', async () => {
+    const { source, text, press } = startScripted();
+    source.computerList = [{ id: 'studio', name: 'studio-mac', status: 'live', lastSeenAt: 1, paneCount: 25, workingCount: 0 }];
+    source.rows = Array.from({ length: 25 }, (_, index) => paneRow(`p${index + 1}`));
+    source.changed();
+    await press({ type: 'press' });
+    await press({ type: 'select', index: 0 });
+    const shown = () => text()[1]?.split(' | ') ?? [];
+    expect(shown()).toHaveLength(20);
+    expect(shown().slice(-2)).toEqual(['p19 · Claude · stopped', '· 6 more ·']);
+
+    await press({ type: 'select', index: 19 });
+    expect(shown().slice(0, 7)).toEqual(['p20 · Claude · stopped', 'p21 · Claude · stopped', 'p22 · Claude · stopped', 'p23 · Claude · stopped', 'p24 · Claude · stopped', 'p25 · Claude · stopped', '· top of the list ·']);
+    await press({ type: 'select', index: 5 });
+    expect(text()[0]).toBe('p25 · shell · idle');
+  });
 });
 
 describe('a refused computer', () => {

@@ -50,7 +50,8 @@ export interface Page {
 }
 
 const MAX_BOXES = 8;
-const MAX_LIST_ITEMS = 20;
+/** The firmware shows at most this many rows in one list. */
+export const MAX_LIST_ITEMS = 20;
 /** The simulator caps a list item at 63 UTF-8 bytes (Even's docs say 64 characters). */
 const MAX_LIST_ITEM_BYTES = 63;
 /** The simulator caps a text container at 999 UTF-8 bytes (Even's docs say 1,000 characters on create). */

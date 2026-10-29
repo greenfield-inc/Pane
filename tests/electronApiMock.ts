@@ -404,7 +404,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     const uiState = {
       expandedProjects: [] satisfies number[],
       expandedFolders: [] satisfies string[],
-      sessionSortAscending: true,
+      sessionSortAscending: false,
       pinnedSectionExpanded: true,
       repositoriesSectionExpanded: true,
       sessionsSectionExpanded: true,

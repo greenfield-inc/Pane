@@ -1,14 +1,15 @@
 // Dev only (not in the build): shows the screens the demo can't reach, for simulator screenshots.
-// Open http://localhost:<port>/dev/gallery.html in the Even simulator; swipe down for the next one.
+// Open http://localhost:<port>/dev/gallery.html in the Even simulator; swipe down for the next one,
+// or add ?page=<name> to open on one.
 /// <reference types="vite/client" />
 import { OsEventTypeList, waitForEvenAppBridge } from '@evenrealities/even_hub_sdk';
 import claudePermission from '../test/fixtures/claude-permission.txt?raw';
 import codexApproval from '../test/fixtures/codex-approval.txt?raw';
 import { findMenu } from '../src/menu';
 import { Display, type Page } from '../src/display';
-import type { Computer } from '../src/model';
+import type { Computer, PaneRow } from '../src/model';
 import { noAnswerMessage } from '../src/host';
-import { LOCKED_OUT, ORIGIN_REFUSED, allClearPage, computersPage, connectingPage, keysRefusedPage, noComputerPage, pairingFailedPage, pickerPage, refusedPage, terminalFooter, terminalPage } from '../src/screens';
+import { LOCKED_OUT, ORIGIN_REFUSED, allClearPage, computersPage, connectingPage, keysRefusedPage, noComputerPage, pairingFailedPage, panesPage, pickerPage, refusedPage, terminalFooter, terminalPage } from '../src/screens';
 
 const now = Date.now();
 const clock = (epochMs: number) => new Date(epochMs).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -23,6 +24,12 @@ const computers: Computer[] = [
   { id: 'c', name: 'laptop', status: 'offline', lastSeenAt: now - 3_600_000, paneCount: 0, workingCount: 0 },
 ];
 const paneChat = { kind: 'session' as const, id: 's', name: 'Pane Chat', agent: 'Claude', status: 'working' as const, panelId: 'p' };
+/** More Sessions and Panes than one native list holds. */
+const manyRows: PaneRow[] = [
+  ...Array.from({ length: 6 }, (_, index): PaneRow => ({ kind: 'session', id: `s${index}`, name: `session ${6 - index}`, agent: 'Claude', status: 'idle', panelId: `sp${index}` })),
+  { kind: 'gap' },
+  ...Array.from({ length: 30 }, (_, index): PaneRow => ({ kind: 'pane', id: `p${index}`, name: `pane-${30 - index}`, agent: 'Codex', status: 'idle', panelId: `pp${index}` })),
+];
 const pages: Array<[string, Page]> = [
   ['terminal-keys-refused', keysRefusedPage(paneChat, "studio-mac's Pane can't take keys from the glasses yet.", 'Update Pane on studio-mac.')],
   ['terminal-held-at-your-message', terminalPage({
@@ -59,12 +66,15 @@ const pages: Array<[string, Page]> = [
     return [name, menu ? pickerPage(paneChat, menu.question, menu.choices, false, terminalFooter(undefined)) : allClearPage(0)];
   }),
   ['computers-refused-and-offline', computersPage(computers, clock)],
+  ['panes-more', panesPage('studio-mac', manyRows)],
+  ['panes-more-continued', panesPage('studio-mac', manyRows, 19)],
 ];
 
 async function main(): Promise<void> {
   const bridge = await waitForEvenAppBridge();
   const display = new Display(bridge);
-  let index = 0;
+  // ?page=<name> opens on that page; a list keeps the swipes that would leave it.
+  let index = Math.max(0, pages.findIndex(([name]) => name === new URLSearchParams(location.search).get('page')));
   const show = () => {
     const [name, page] = pages[index] ?? pages[0];
     console.info(`[gallery] ${index + 1}/${pages.length} ${name}`);

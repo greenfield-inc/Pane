@@ -57,7 +57,9 @@ Esc and Tab. You can't dictate in keys mode; leave it first.
 - **A card** shows the asking Pane's last output lines (dimmed), the question, and the choices.
   A long question is cut at three lines; the **Read the whole question** row shows all of it.
 - **Open a Pane…** lists your computers (live or offline), then that computer's Sessions and Panes
-  in the Pane apps' order: pinned ones first, then Sessions, a blank line, then Panes. Picking one
+  in the Pane apps' order: pinned ones first, then Sessions, a blank line, then Panes, each newest
+  first. A list longer than the 20 rows the glasses show ends in a **· N more ·** row that
+  continues it from the first row left out. Picking one
   shows its live screen, refreshed about once a second, and marks the Pane viewed on that computer,
   as opening it there does. A stopped Pane starts its saved agent or command. The terminal hides an
   agent's input box and the status rows under it, so you read its output. Each swipe moves half a

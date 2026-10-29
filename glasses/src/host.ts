@@ -223,6 +223,7 @@ const sessionsSchema = boundary.object({
       isHidden: boundary.optional(boundary.boolean),
       isFavorite: boundary.optional(boundary.boolean),
       favoritePinnedAt: boundary.optional(boundary.string),
+      createdAt: boundary.optional(boundary.string),
     })),
   }))),
   error: boundary.optional(boundary.string),
@@ -571,7 +572,8 @@ export class HostConnection {
   /**
    * Unarchived Sessions and Panes, with the terminal each opens, in the Pane phone app's order
    * (native/src/features/panes/paneList.ts): pinned Sessions, pinned Panes newest pin first, the
-   * other Sessions, a gap, the other Panes. Each shows once.
+   * other Sessions in the host's order (newest first), a gap, the other Panes newest first across
+   * every repository. Each shows once.
    */
   private async readLists(): Promise<void> {
     const [sessions, orchestration, workspace] = await Promise.all([
@@ -594,7 +596,8 @@ export class HostConnection {
       (session.isPinned ? pinnedSessions : sessionEntries).push(row);
     }
     const panes = (sessions.data ?? []).flatMap((project) => project.sessions)
-      .filter((pane) => !pane.archived && !pane.isHidden && !internal.has(pane.id));
+      .filter((pane) => !pane.archived && !pane.isHidden && !internal.has(pane.id))
+      .sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''));
     const pinnedAt = new Map(panes.filter((pane) => pane.isFavorite).map((pane) => [pane.id, pane.favoritePinnedAt ?? '']));
     const paneEntries = await Promise.all(panes.map(async (pane): Promise<PaneEntry | null> => {
       const panels = await this.invoke('panels:list', [pane.id], panelsSchema).catch(() => null);
