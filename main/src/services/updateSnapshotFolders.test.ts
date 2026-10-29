@@ -34,6 +34,7 @@ describe('update recovery snapshot folders', () => {
   });
 
   it('puts no folder on both lists', () => {
-    expect(PANE_STATE_FOLDERS.filter(name => (PANE_UNSNAPSHOTTED_FOLDERS as readonly string[]).includes(name))).toEqual([]);
+    const unsnapshotted = new Set<string>(PANE_UNSNAPSHOTTED_FOLDERS);
+    expect(PANE_STATE_FOLDERS.filter(name => unsnapshotted.has(name))).toEqual([]);
   });
 });
