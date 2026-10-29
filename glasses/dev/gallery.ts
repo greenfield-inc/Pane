@@ -4,7 +4,7 @@ import { OsEventTypeList, waitForEvenAppBridge } from '@evenrealities/even_hub_s
 import { Display, type Page } from '../src/display';
 import type { Computer } from '../src/model';
 import { noAnswerMessage } from '../src/host';
-import { LOCKED_OUT, ORIGIN_REFUSED, allClearPage, computersPage, connectingPage, noComputerPage, pairingFailedPage, refusedPage } from '../src/screens';
+import { LOCKED_OUT, ORIGIN_REFUSED, allClearPage, computersPage, connectingPage, keysRefusedPage, noComputerPage, pairingFailedPage, refusedPage, terminalFooter, terminalPage } from '../src/screens';
 
 const now = Date.now();
 const clock = (epochMs: number) => new Date(epochMs).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -18,7 +18,13 @@ const computers: Computer[] = [
   { id: 'b', name: 'devbox', status: 'refused', lastSeenAt: now, paneCount: 0, workingCount: 0, refusal: originRefusal },
   { id: 'c', name: 'laptop', status: 'offline', lastSeenAt: now - 3_600_000, paneCount: 0, workingCount: 0 },
 ];
+const paneChat = { kind: 'session' as const, id: 's', name: 'Pane Chat', agent: 'Claude', status: 'working' as const, panelId: 'p' };
 const pages: Array<[string, Page]> = [
+  ['terminal-keys-refused', keysRefusedPage(paneChat, "studio-mac's Pane can't take keys from the glasses yet.", 'Update Pane on studio-mac.')],
+  ['terminal-held-at-your-message', terminalPage({
+    entry: paneChat, scrolledUp: 0, more: 18, footer: terminalFooter(undefined),
+    lines: ['> yes, do the dry run first', '', 'Here is what the dry run found on', 'parsa-4090m-workstation-win11pro.', '', '1. Pane 2.4.200 is installed from the Microsoft Store build, so', 'runpane update hands off to the Store instead of downloading', 'the installer itself.'],
+  })],
   ['home-all-clear', allClearPage(3)],
   ['home-all-clear-after-answer', allClearPage(3, 'Answered fix-login: Loosen retry')],
   ['error-no-computer-reachable', noComputerPage(3)],
