@@ -217,7 +217,7 @@ function AgentInstructions({ files }: { files: NotifyInstructionsFile[] }) {
     <section className="rounded-2xl bg-surface-primary p-4 shadow-card ring-1 ring-border-secondary" aria-labelledby="notify-agent-instructions">
       <h3 id="notify-agent-instructions" className="text-sm font-medium text-text-primary">Agent instructions</h3>
       <p className="mt-1 max-w-2xl text-xs leading-relaxed text-text-tertiary">
-        While Notify is on, Pane keeps a few lines in these files that tell agents to ask you here. Turning Notify off removes them.
+        While Notify is on, Pane keeps a few lines in these files that tell agents Pane is there and to ask you here. Turning Notify off removes them.
       </p>
       <ul className="mt-3 space-y-2">
         {files.map((file) => (
