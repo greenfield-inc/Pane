@@ -298,10 +298,13 @@ export class WorktreeManager {
       const [top, excludePath] = stdout.split(/\r?\n/u);
       if (!top || !excludePath) return;
       const [topDir, folder] = await Promise.all([top, baseDir].map(dir => realpath(pathResolver.toFileSystem(dir)).catch(() => pathResolver.toFileSystem(dir))));
-      const relative = pathResolver.relative(topDir, folder).replace(/\\/gu, '/');
+      // Only Windows paths use a backslash as a separator; elsewhere it is a filename character.
+      const relative = pathResolver.environment === 'windows'
+        ? pathResolver.relative(topDir, folder).replace(/\\/gu, '/')
+        : pathResolver.relative(topDir, folder);
       if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) return;
       // Escape ignore-pattern characters so the folder name matches literally.
-      const line = `/${relative.replace(/[*?[\]]/gu, '\\$&').replace(/ $/u, '\\ ')}/`;
+      const line = `/${relative.replace(/[\\*?[\]]/gu, '\\$&').replace(/ $/u, '\\ ')}/`;
       const exclude = pathResolver.toFileSystem(path.posix.isAbsolute(excludePath) || path.isAbsolute(excludePath) ? excludePath : pathResolver.join(projectPath, excludePath));
       const current = await readFile(exclude, 'utf8').catch(() => '');
       if (current.split(/\r?\n/u).includes(line)) return;
@@ -502,6 +505,7 @@ export class WorktreeManager {
         if (claimed) {
           // Detect base commit from the claimed worktree
           const { baseCommit } = await detectGitBase(claimed.worktreePath, commandRunner);
+          await this.excludeWorktreeFolder(projectPath, worktreeFolder, pathResolver, commandRunner);
           return { worktreePath: claimed.worktreePath, baseCommit, baseBranch: effectiveBase, base: describeWorktreeBase(refresh, baseCommit) };
         }
       } catch (error) {
@@ -529,6 +533,7 @@ export class WorktreeManager {
   async seedReserve(projectPath: string, worktreeFolder: string | undefined, pathResolver: PathResolver, commandRunner: CommandRunner): Promise<void> {
     const base = await resolveDefaultWorktreeBase(projectPath, commandRunner);
     await worktreePoolManager.createReserve(projectPath, base, worktreeFolder, pathResolver, commandRunner);
+    await this.excludeWorktreeFolder(projectPath, worktreeFolder, pathResolver, commandRunner);
   }
 
   async removeWorktree(projectPath: string, name: string, worktreeFolder: string | undefined, sessionCreatedAt: Date | undefined, pathResolver: PathResolver, commandRunner: CommandRunner, auditContext?: WorktreeAuditContext): Promise<WorktreeTrashDeletion> {

@@ -467,4 +467,31 @@ describe('WorktreeManager.initializeProject', () => {
       await rm(repo, { recursive: true, force: true });
     }
   });
+
+  it.skipIf(process.platform === 'win32')('keeps a backslash in a POSIX folder name literal', async () => {
+    const { repo, runner } = await initRepo();
+    try {
+      await new WorktreeManager().initializeProject(repo, 'trees\\1', new PathResolver({ path: repo }), runner);
+      await runner.execFile('git', ['worktree', 'add', '-b', 'feature', join(repo, 'trees\\1', 'feature')], repo);
+      await mkdir(join(repo, 'trees', '1'), { recursive: true });
+      await writeFile(join(repo, 'trees', '1', 'source.ts'), '');
+
+      const { stdout } = await runner.execFile('git', ['status', '--porcelain'], repo);
+      expect(stdout).toBe('?? trees/\n');
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('hides a custom worktree folder that a reserve worktree creates', async () => {
+    const { repo, runner } = await initRepo();
+    try {
+      await new WorktreeManager().seedReserve(repo, 'custom-trees', new PathResolver({ path: repo }), runner);
+
+      const { stdout } = await runner.execFile('git', ['status', '--porcelain'], repo);
+      expect(stdout).toBe('');
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
 });
