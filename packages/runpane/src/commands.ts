@@ -441,6 +441,16 @@ function takeWorkspaceVerbArgs(command: string, args: string[]): Pick<ParsedArgs
   return {};
 }
 
+/** Whether runpane itself was asked for JSON: a `--json` inside an exec command belongs to that command. */
+export function wantsJsonOutput(argv: string[]): boolean {
+  try {
+    return parseRunpaneArgs(argv).json;
+  } catch {
+    const end = argv.indexOf('--');
+    return (end === -1 ? argv : argv.slice(0, end)).includes('--json');
+  }
+}
+
 /** `runpane workspace <machine> <command...>` for any command other than read, write, and exec. */
 export function splitWorkspacePassThrough(argv: string[]): { machine: string; command: string[] } | null {
   const args = [...argv];
