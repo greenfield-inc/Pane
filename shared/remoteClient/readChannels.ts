@@ -49,8 +49,13 @@ export const REMOTE_READ_CHANNELS = new Set([
   'notify:remote-snapshot',
   'sessions:get-archived-with-projects',
   'terminal:getState',
+  // Cleans up a dictation's text; the host keeps nothing, so a lost answer can be asked again.
+  'voice:finalize-streaming',
 ]);
 
+
+/** Mutations the host de-duplicates by the operation ID they carry, so a retry cannot apply twice. */
+export const REMOTE_DEDUPLICATED_CHANNELS = new Set(['agent-chat:send']);
 
 /**
  * Idempotent device bookkeeping a phone sends to every saved computer without opening its

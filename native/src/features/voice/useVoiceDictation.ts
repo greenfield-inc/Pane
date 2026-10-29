@@ -15,6 +15,7 @@ import type {
   VoiceTranscriptionRequest,
   VoiceTranscriptionResult,
 } from '@shared/types/voiceTranscription';
+import type { RemoteDaemonClient } from '@shared/remoteClient';
 import { NATIVE_APP_WEBSOCKET_ORIGIN } from '@shared/types/remoteDaemon';
 
 import { invokeChannel, useDaemon } from '@/daemon';
@@ -35,10 +36,17 @@ const CONFIRM_POLL_MS = 100;
 const TICK_MS = 250;
 const SILENCE_NOTICE = 'Stopped after 30 seconds of silence.';
 const LIMIT_NOTICE = 'Stopped at the 15-minute limit.';
+const DROPPED_NOTICE = 'The voice connection dropped. Kept what was heard.';
+const RAW_TEXT_NOTICE = 'Inserted the words as heard: the connection dropped before cleanup.';
+/** How long a stopped dictation waits for the host's cleanup; the longest outage seen on cellular was 82 s. */
+const HOST_WAIT_MS = 90_000;
 /** Mono speech at 64 kbps keeps a 15-minute clip near 7 MB, under the host's 10 MB cap. */
 const CLIP_OPTIONS = { ...RecordingPresets.HIGH_QUALITY, numberOfChannels: 1, bitRate: 64_000, isMeteringEnabled: true };
 
 export type DictationPhase = 'idle' | 'starting' | 'listening' | 'transcribing';
+
+/** A finished recording's text, and what to tell the person about it. */
+interface Finished { text: string; notice?: string }
 
 /**
  * Dictation through the host, like the web app: live audio streamed over the
@@ -63,6 +71,8 @@ export function useVoiceDictation(onText: (text: string) => void) {
   const silence = useRef(new SilenceWatch(0));
   const cuedCountdown = useRef(false);
   const keepAlive = useRef<ReturnType<typeof setInterval> | null>(null);
+  /** Why the voice socket closed mid-recording; the next tick stops and keeps the words. */
+  const dropped = useRef<string | null>(null);
   const mounted = useRef(true);
   // The mode this recording started in; a save from the setup sheet can start one the affordances don't show yet.
   const activeMode = useRef<VoiceTranscriptionMode>('streaming');
@@ -103,6 +113,7 @@ export function useVoiceDictation(onText: (text: string) => void) {
     const live = new LiveTranscript(Date.now());
     transcript.current = live;
     sentHeader.current = false;
+    dropped.current = null;
     let serverError: string | null = null;
     const ws = await openSocket(voiceStreamUrl(profile.baseUrl), profile.token, data => {
       serverError = live.receive(data, Date.now()) ?? serverError;
@@ -115,12 +126,12 @@ export function useVoiceDictation(onText: (text: string) => void) {
     }
     socket.current = ws;
     // Finishing detaches the socket before closing it, so a close while it is
-    // still attached means the host or Deepgram gave up.
+    // still attached means the host, Deepgram or the network gave up.
     ws.onclose = () => {
       if (socket.current !== ws) return;
       socket.current = null;
       stream.stop();
-      fail(serverError ?? 'The voice connection closed.');
+      dropped.current = serverError ?? DROPPED_NOTICE;
     };
     await stream.start();
     if (socket.current !== ws) {
@@ -137,7 +148,7 @@ export function useVoiceDictation(onText: (text: string) => void) {
     }
   };
 
-  const finishStreaming = async () => {
+  const finishStreaming = async (): Promise<Finished> => {
     stream.stop();
     const ws = socket.current;
     socket.current = null;
@@ -148,7 +159,7 @@ export function useVoiceDictation(onText: (text: string) => void) {
     }
     ws?.close();
     const live = transcript.current;
-    if (!live?.rawText) return '';
+    if (!live?.rawText) return { text: '' };
     const stoppedAt = Date.now();
     const request: VoiceStreamingFinalizeRequest = {
       rawText: live.rawText,
@@ -157,8 +168,9 @@ export function useVoiceDictation(onText: (text: string) => void) {
       timings: { asrMs: stoppedAt - startedAt, firstTranscriptMs: live.firstTranscriptMs },
       metadata: live.metadata,
     };
-    const result = await invokeChannel<VoiceTranscriptionResult>(client, 'voice:finalize-streaming', [request]);
-    return result.text;
+    const result = await invokeWhenConnected<VoiceTranscriptionResult>(client, 'voice:finalize-streaming', [request]);
+    // The words as of stopping; the socket's handler can still add late results to `live`.
+    return result ? { text: result.text } : { text: request.rawText, notice: RAW_TEXT_NOTICE };
   };
 
   const startRecording = async () => {
@@ -166,7 +178,7 @@ export function useVoiceDictation(onText: (text: string) => void) {
     recorder.record();
   };
 
-  const finishRecording = async () => {
+  const finishRecording = async (): Promise<Finished> => {
     await recorder.stop();
     if (!recorder.uri) throw new Error('Voice recording was empty.');
     const request: VoiceTranscriptionRequest = {
@@ -175,8 +187,9 @@ export function useVoiceDictation(onText: (text: string) => void) {
       durationMs: Date.now() - startedAt,
       language: 'en',
     };
-    const result = await invokeChannel<VoiceTranscriptionResult>(client, 'voice:transcribe', [request]);
-    return result.text;
+    const result = await invokeWhenConnected<VoiceTranscriptionResult>(client, 'voice:transcribe', [request]);
+    if (!result) throw new Error('Could not reach the host to transcribe the recording.');
+    return { text: result.text };
   };
 
   /** Stops and inserts the text so far; `notice` then shows in the error line. */
@@ -185,11 +198,12 @@ export function useVoiceDictation(onText: (text: string) => void) {
     clearTimers();
     setPhase('transcribing');
     try {
-      const text = activeMode.current === 'streaming' ? await finishStreaming() : await finishRecording();
-      if (text.trim()) onText(text.trim());
+      const result = activeMode.current === 'streaming' ? await finishStreaming() : await finishRecording();
+      if (result.text.trim()) onText(result.text.trim());
       setPhase('idle');
       setPreview('');
-      if (notice) setError(notice);
+      const shown = result.notice ?? notice;
+      if (shown) setError(shown);
     } catch (cause) {
       fail(cause);
     } finally {
@@ -202,6 +216,10 @@ export function useVoiceDictation(onText: (text: string) => void) {
   const tick = useEffectEvent((): boolean => {
     const now = Date.now();
     if (activeMode.current === 'recorded') silence.current.hear(recorder.getStatus().metering ?? -160, now);
+    if (dropped.current) {
+      void stop(dropped.current);
+      return true;
+    }
     if (now - startedAt >= MAX_RECORDING_MS) {
       void stop(LIMIT_NOTICE);
       return true;
@@ -284,6 +302,51 @@ export function useVoiceDictation(onText: (text: string) => void) {
     clearError: () => setError(null),
     toggle: () => void (phase === 'listening' ? stop() : start()),
   };
+}
+
+/**
+ * Calls `channel` once the client is connected; the client retries it while the connection
+ * recovers. Resolves to null if it fails or has not answered within `HOST_WAIT_MS`, so the
+ * caller can keep what it has.
+ */
+async function invokeWhenConnected<T>(client: RemoteDaemonClient, channel: string, args: unknown[]): Promise<T | null> {
+  const giveUp = new AbortController();
+  const timer = setTimeout(() => giveUp.abort(), HOST_WAIT_MS);
+  try {
+    if (!(await connected(client, giveUp.signal))) return null;
+    return await Promise.race([invokeChannel<T>(client, channel, args), aborted(giveUp.signal).then(() => null)]);
+  } catch (cause) {
+    console.warn(`[voice] ${channel} failed`, cause);
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Resolves true once the client is connected, or false if `signal` aborts first. */
+function connected(client: RemoteDaemonClient, signal: AbortSignal): Promise<boolean> {
+  if (client.getState().status === 'connected') return Promise.resolve(true);
+  if (signal.aborted) return Promise.resolve(false);
+  return new Promise(resolve => {
+    const finish = (value: boolean) => {
+      unsubscribe();
+      signal.removeEventListener('abort', onAbort);
+      resolve(value);
+    };
+    const onAbort = () => finish(false);
+    signal.addEventListener('abort', onAbort, { once: true });
+    // onStatus reports the current state at once; it was just checked as not connected.
+    const unsubscribe = client.onStatus(state => {
+      if (state.status === 'connected') finish(true);
+    });
+  });
+}
+
+function aborted(signal: AbortSignal): Promise<void> {
+  return new Promise(resolve => {
+    if (signal.aborted) resolve();
+    else signal.addEventListener('abort', () => resolve(), { once: true });
+  });
 }
 
 // React Native's WebSocket takes request headers as a third argument; the DOM typings don't know it.

@@ -1,6 +1,6 @@
 import { decodeUpdateIntent, type RemoteUpdateIntent } from './updateIntent';
-import { REMOTE_READ_CHANNELS, REMOTE_RESTORE_CHANNELS, REMOTE_STREAMLESS_CHANNELS } from './readChannels';
-import { RecoveryCycle } from './recoveryCycle';
+import { REMOTE_DEDUPLICATED_CHANNELS, REMOTE_READ_CHANNELS, REMOTE_RESTORE_CHANNELS, REMOTE_STREAMLESS_CHANNELS } from './readChannels';
+import { RecoveryCycle, backoffDelayMs } from './recoveryCycle';
 import type { ParsedSseEvent } from '../sseParser';
 import {
   decodeRemoteDaemonEventEnvelope,
@@ -153,10 +153,13 @@ const invokeResponseSchema = boundary.union(
 );
 
 const HEALTH_CHECK_ATTEMPTS = 5;
-const INVOKE_ATTEMPTS = 4;
 const REQUEST_RETRY_DELAY_MS = 2_000;
+/** A request safe to repeat keeps retrying as long as an outage may last. */
+const REQUEST_RETRY_BUDGET_MS = 300_000;
 /** A restore that has not finished by then is treated as a broken connection. */
 const RESTORE_TIMEOUT_MS = 30_000;
+/** The heartbeat decides liveness; this many failed requests in a row with no answer between also reconnect. */
+const MAX_FAILED_REQUESTS_IN_A_ROW = 3;
 const RECONNECT_GAVE_UP_MESSAGE = 'Could not reconnect within five minutes. Your workspace is kept. Choose Retry now.';
 
 /** Platform-neutral client for a Pane daemon's HTTP + SSE API. */
@@ -173,6 +176,7 @@ export class RemoteDaemonClient {
   private reconnectTimer: RemoteTimer | null = null;
   private readonly recovery = new RecoveryCycle();
   private deadlineTimer: RemoteTimer | null = null;
+  private failedRequestsInARow = 0;
   private readonly schedule: RemoteSchedule;
   private streamController: AbortController | null = null;
   private restoreListeners = new Map<(signal: AbortSignal) => Promise<void>, string>();
@@ -180,8 +184,8 @@ export class RemoteDaemonClient {
   private statusListeners = new Set<(state: RemoteDaemonConnectionState) => void>();
   private readonly inputQueue = new RemoteInputQueue(
     (channel, args, signal) => this.invokeRequest(channel, args, signal),
-    // Input the host never answered means the connection is broken; a restore follows.
-    () => this.scheduleReconnect('Terminal input timed out'),
+    // Unanswered input counts as one failed request; only a run of them reconnects.
+    () => this.noteFailedRequest('terminal input timed out'),
   );
   private state: RemoteDaemonConnectionState = {
     status: 'local',
@@ -300,18 +304,22 @@ export class RemoteDaemonClient {
   }
 
   private async invokeRequest<T = unknown>(channel: string, args: unknown[], inputSignal?: AbortSignal): Promise<T> {
-    const mutation = !REMOTE_READ_CHANNELS.has(channel) && !REMOTE_RESTORE_CHANNELS.has(channel) && !REMOTE_STREAMLESS_CHANNELS.has(channel);
-    if (this.state.status !== 'connected' && mutation) {
+    const deduplicated = REMOTE_DEDUPLICATED_CHANNELS.has(channel);
+    const mutation = !REMOTE_READ_CHANNELS.has(channel) && !REMOTE_RESTORE_CHANNELS.has(channel) && !REMOTE_STREAMLESS_CHANNELS.has(channel) && !deduplicated;
+    if (this.state.status !== 'connected' && (mutation || deduplicated)) {
       throw new PaneError('ERR_REMOTE_OFFLINE', 'The action was not sent while the workspace is disconnected or restoring.', 'Wait for restoration before submitting it.');
     }
     let lastError: Error | null = null;
     let dispatched = false;
+    let lostInTransit = false;
     const connection = this.abortController;
     const stream = this.streamController;
     const signal = inputSignal ?? connection?.signal;
     const retryableRead = REMOTE_READ_CHANNELS.has(channel);
-    const attempts = retryableRead ? INVOKE_ATTEMPTS : 1;
-    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    // Reads and de-duplicated mutations retry with backoff; heartbeats, not their failures, decide liveness.
+    const retries = retryableRead || deduplicated;
+    const started = Date.now();
+    for (let attempt = 0; ; attempt += 1) {
       try {
         const { headers, body } = this.transport.invokeRequest(await this.requestContext(), channel, args);
         const request: RemoteFetchInit = { method: 'POST', headers, body };
@@ -332,6 +340,8 @@ export class RemoteDaemonClient {
           }
           throw cause;
         }));
+        // The host answered, so the connection works.
+        this.failedRequestsInARow = 0;
         if (signal?.aborted || connection !== this.abortController || connection?.signal.aborted) throw createAbortError();
         const failure = payload?.ok === false ? payload.error : undefined;
         if (isAuthFailureResponse(response.status)) {
@@ -358,17 +368,22 @@ export class RemoteDaemonClient {
           throw error;
         }
         lastError = error instanceof Error ? error : new Error('Remote request failed');
-        if (this.abortController && !this.abortController.signal.aborted) this.scheduleReconnect('Remote response interrupted');
+        lostInTransit = true;
       }
 
-      if (attempt < attempts) {
-        await delay(this.schedule, REQUEST_RETRY_DELAY_MS * attempt, signal);
-      }
+      const wait = backoffDelayMs(attempt);
+      if (!retries || Date.now() - started + wait > REQUEST_RETRY_BUDGET_MS) break;
+      await delay(this.schedule, wait, signal);
     }
 
+    // One failed request fails only itself while heartbeats arrive.
+    if (lostInTransit && !retries && !signal?.aborted && connection === this.abortController && !connection?.signal.aborted) {
+      this.noteFailedRequest(lastError?.message ?? 'no response');
+    }
     if (!retryableRead) {
       throw new RemoteUnconfirmedResultError(
-        'The remote action may have completed, but its result could not be confirmed. ' +
+        // The prefix lets text-only error boundaries tell unknown delivery apart (frontend remoteFailure.ts).
+        'Delivery unknown: the remote action may have completed, but its result could not be confirmed. ' +
         'Check the current state before trying again.' +
         (lastError ? ` (${lastError.message})` : ''),
       );
@@ -417,6 +432,7 @@ export class RemoteDaemonClient {
     // on the connection signal survive the reconnect.
     if (signal.aborted) return;
     this.streamController?.abort();
+    this.failedRequestsInARow = 0;
     const stream = new AbortController();
     this.streamController = stream;
     let ready = false;
@@ -549,6 +565,12 @@ export class RemoteDaemonClient {
     this.abortController?.abort();
     this.streamController?.abort();
     this.setState({ status: 'error', lastError: message });
+  }
+
+  private noteFailedRequest(reason: string): void {
+    this.failedRequestsInARow += 1;
+    if (this.failedRequestsInARow < MAX_FAILED_REQUESTS_IN_A_ROW) return;
+    this.scheduleReconnect(`${MAX_FAILED_REQUESTS_IN_A_ROW} requests in a row failed: ${reason}`);
   }
 
   private scheduleReconnect(message: string): void {

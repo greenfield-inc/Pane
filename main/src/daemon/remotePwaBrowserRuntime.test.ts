@@ -107,7 +107,7 @@ describe('Remote PWA browser runtime', () => {
       vi.stubGlobal('fetch', fetchMock);
 
       await expect((await connectReady(createClient())).invoke(channel, ['panel-1', 'echo once\r'])).rejects.toThrow(
-        channel === 'terminal:input' ? /Delivery unknown.+Check the original panel/ : /may have completed.+Check the current state/,
+        /^Delivery unknown: .+may have completed.+Check the current state/,
       );
       expect(applied).toMatchObject([{ channel, args: ['panel-1', 'echo once\r'] }]);
       expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -132,7 +132,7 @@ describe('Remote PWA browser runtime', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it('retains bounded retries for explicitly safe reads after network and HTTP failures', async () => {
+  it('retries safe reads with backoff for up to five minutes after network and HTTP failures', async () => {
     vi.useFakeTimers();
     try {
       installBrowserGlobals();
@@ -148,10 +148,16 @@ describe('Remote PWA browser runtime', () => {
       expect(fetchMock).toHaveBeenCalledTimes(3);
 
       fetchMock.mockReset().mockRejectedValue(new TypeError('Still unavailable'));
+      const started = Date.now();
       const failed = createClient().invoke('panels:list').catch((cause: unknown) => cause);
+      // Three quick retries within the first ~3 s (250 ms, 750 ms, 2 s, each up to 20 % later).
+      await vi.advanceTimersByTimeAsync(3_600);
+      expect(fetchMock).toHaveBeenCalledTimes(4);
       await vi.runAllTimersAsync();
       expect(await failed).toMatchObject({ message: 'Still unavailable' });
-      expect(fetchMock).toHaveBeenCalledTimes(4);
+      // Then up to every 30 s, giving up within five minutes.
+      expect(Date.now() - started).toBeGreaterThan(240_000);
+      expect(Date.now() - started).toBeLessThanOrEqual(300_000);
     } finally {
       vi.useRealTimers();
     }
