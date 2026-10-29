@@ -82,7 +82,7 @@ function Details({ machine }: { machine: Machine }) {
           <ListRow
             testID="machine-notifications"
             title="Notifications"
-            value={profile && !demo ? alertText(alerts) : 'After you connect'}
+            value={demo ? 'Not in the demo' : profile ? alertText(alerts) : 'After you connect'}
             trailing={profile && !demo ? 'chevron' : undefined}
             onPress={profile && !demo ? () => router.push('/settings/notifications') : undefined}
           />
