@@ -26,6 +26,8 @@ export function useTerminal(panelId: string, sessionId: string) {
   const webView = useRef<WebView>(null);
   const [status, setStatus] = useState<TerminalStatus>('loading');
   const [error, setError] = useState<unknown>(null);
+  // Whether the page shows a screen from the host, which stays up while it reloads.
+  const [hasContent, setHasContent] = useState(false);
   const [atBottom, setAtBottom] = useState(true);
   const [screenText, setScreenText] = useState('');
   const [size, setSize] = useState<TerminalSize | null>(null);
@@ -55,6 +57,7 @@ export function useTerminal(panelId: string, sessionId: string) {
         if (pending.current) session.ack(pending.current.length);
         pending.current = '';
         send({ type: 'reset', data });
+        setHasContent(true);
         setStatus('ready');
         setError(null);
       },
@@ -132,6 +135,7 @@ export function useTerminal(panelId: string, sessionId: string) {
         send(themeCommand);
         const next = { cols: message.cols, rows: message.rows };
         // A page that loads again (after iOS reclaimed it) starts blank.
+        setHasContent(false);
         if (size && connected) {
           setStatus('loading');
           void session.restore(next);
@@ -171,6 +175,7 @@ export function useTerminal(panelId: string, sessionId: string) {
       webView.current?.reload();
     },
     status,
+    hasContent,
     error,
     atBottom,
     screenText,

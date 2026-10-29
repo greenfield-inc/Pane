@@ -10,6 +10,7 @@ import { useTheme } from '@/theme';
 import { Icon, Text } from '@/ui';
 
 import { ComposerSheet } from '../composer/ComposerSheet';
+import { Dimmed } from '../hosts/ConnectionStatus';
 import { ChatButton } from './ChatButton';
 import { ChatMessage, NativePermissionContext, PermissionChoices } from './ChatMessage';
 import { pickChatImage } from './pickChatImage';
@@ -111,12 +112,14 @@ export function AgentChatPanel({ chat, draft, onChangeDraft, confirmDraft }: { c
     <ThreadPrimitive.Root testID="agent-chat-panel" style={[styles.fill, { backgroundColor: theme.chat.background }]}>
       {error && <View accessibilityLiveRegion="polite" testID="chat-error" style={[styles.error, { backgroundColor: theme.chat.dangerSoft, borderColor: theme.chat.danger }]}><Text selectable variant="subhead" style={{ color: theme.chat.danger }}>{error}</Text><ChatButton testID="chat-refresh" title="Refresh" onPress={() => void chat.refresh()} /></View>}
       {chat.pendingDelivery && !chat.delivering && <View style={styles.delivery}><Text variant="footnote" style={{ color: theme.chat.mutedForeground }}>Delivery is unconfirmed.</Text><ChatButton testID="chat-check-delivery" title="Check delivery" disabled={!chat.connected || checking || chat.delivering} onPress={() => void check(false)} /><ChatButton testID="chat-retry-delivery" title="Retry same delivery" disabled={!chat.connected || checking || chat.delivering} onPress={() => void check(true)} /></View>}
+      <Dimmed dimmed={!chat.connected} style={styles.fill}>
       {view?.conversation?.active === 'stopped' ? <View style={styles.recovery}>
         <Text style={{ color: theme.chat.foreground }}>{view.conversation.recovery ?? 'This conversation is stopped.'}</Text>
         <Text selectable variant="footnote" style={{ color: theme.chat.mutedForeground }}>Conversation {view.conversation.nativeSessionId}</Text>
         <Text variant="subhead" style={{ color: theme.chat.mutedForeground }}>Recovery opens Terminal to restore this conversation’s launch environment.</Text>
         <ChatButton testID="chat-recover" title={recovering ? 'Recovering…' : 'Recover exact conversation'} disabled={!chat.connected || recovering} onPress={() => { setRecovering(true); void chat.recover().finally(() => setRecovering(false)); }} />
       </View> : !view?.transcript ? <View style={styles.loading}><ActivityIndicator color={theme.chat.mutedForeground} /><Text style={{ color: theme.chat.mutedForeground }}>Loading conversation…</Text></View> : <ConversationList key={view.conversation?.nativeSessionId} chat={chat} approvalScroll={approvalScroll} />}
+      </Dimmed>
       <View style={styles.composerArea}>
         {/* A phone must keep an approval reachable even while its tool row is offscreen. */}
         {!!view?.permissions.length && unmatchedPermissions.length === 0 && <ChatButton testID="chat-approval-needed" title="Approval needed" onPress={() => approvalScroll.current?.()} />}
