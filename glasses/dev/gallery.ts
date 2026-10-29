@@ -1,10 +1,14 @@
 // Dev only (not in the build): shows the screens the demo can't reach, for simulator screenshots.
 // Open http://localhost:<port>/dev/gallery.html in the Even simulator; swipe down for the next one.
+/// <reference types="vite/client" />
 import { OsEventTypeList, waitForEvenAppBridge } from '@evenrealities/even_hub_sdk';
+import claudePermission from '../test/fixtures/claude-permission.txt?raw';
+import codexApproval from '../test/fixtures/codex-approval.txt?raw';
+import { findMenu } from '../src/menu';
 import { Display, type Page } from '../src/display';
 import type { Computer } from '../src/model';
 import { noAnswerMessage } from '../src/host';
-import { LOCKED_OUT, ORIGIN_REFUSED, allClearPage, computersPage, connectingPage, keysRefusedPage, noComputerPage, pairingFailedPage, refusedPage, terminalFooter, terminalPage } from '../src/screens';
+import { LOCKED_OUT, ORIGIN_REFUSED, allClearPage, computersPage, connectingPage, keysRefusedPage, noComputerPage, pairingFailedPage, pickerPage, refusedPage, terminalFooter, terminalPage } from '../src/screens';
 
 const now = Date.now();
 const clock = (epochMs: number) => new Date(epochMs).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -49,7 +53,11 @@ const pages: Array<[string, Page]> = [
   })],
   ['home-connecting', connectingPage(3)],
   ['home-connecting-one-computer', connectingPage(1)],
-  // A native list keeps its swipes, so it comes last.
+  // A native list keeps its swipes, so lists come last.
+  ...([['picker-claude-permission', claudePermission], ['picker-codex-approval', codexApproval]] as const).map(([name, screen]): [string, Page] => {
+    const menu = findMenu(screen.split('\n'));
+    return [name, menu ? pickerPage(paneChat, menu.question, menu.choices, false, terminalFooter(undefined)) : allClearPage(0)];
+  }),
   ['computers-refused-and-offline', computersPage(computers, clock)],
 ];
 

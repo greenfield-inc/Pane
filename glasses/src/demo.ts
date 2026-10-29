@@ -25,6 +25,8 @@ interface DemoTerminal {
   earlier: string[];
   lines: string[];
   menu?: DemoMenu;
+  /** When an answered menu asks again. */
+  askAgainAt?: number;
 }
 
 const PUSH_MENU: DemoMenu = {
@@ -82,7 +84,7 @@ export class DemoSource implements PaneSource {
   private items: Card[];
   private readonly started: number;
 
-  constructor(private readonly every: (fn: () => void, ms: number) => Cancel, now: () => number = Date.now) {
+  constructor(private readonly every: (fn: () => void, ms: number) => Cancel, private readonly now: () => number = Date.now) {
     this.started = now();
     const at = (minutesAgo: number) => this.started - minutesAgo * MINUTE;
     const card = (partial: Omit<Card, 'key' | 'itemId' | 'suggestions' | 'choices'> & Partial<Pick<Card, 'choices' | 'suggestions'>> & { id: string }): Card => ({
@@ -133,6 +135,11 @@ export class DemoSource implements PaneSource {
 
   async screen(_computerId: string, panelId: string): Promise<TerminalScreen> {
     const terminal = this.terminal(panelId);
+    if (terminal.askAgainAt !== undefined && this.now() >= terminal.askAgainAt) {
+      terminal.askAgainAt = undefined;
+      terminal.menu = { ...PUSH_MENU };
+      terminal.status = 'needs you';
+    }
     const lines = terminal.menu ? [...terminal.lines, ...menuRows(terminal.menu)] : terminal.lines;
     return { lines, status: terminal.status, agent: terminal.agent };
   }
@@ -171,12 +178,7 @@ export class DemoSource implements PaneSource {
       terminal.lines = [...terminal.lines, ...answer].slice(-12);
       terminal.menu = undefined;
       terminal.status = 'idle';
-      const again = this.every(() => {
-        again.cancel();
-        terminal.menu = { ...PUSH_MENU };
-        terminal.status = 'needs you';
-        this.changed();
-      }, ASK_AGAIN_MS);
+      terminal.askAgainAt = this.now() + ASK_AGAIN_MS;
     }
     this.changed();
   }
