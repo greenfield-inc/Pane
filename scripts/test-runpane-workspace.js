@@ -145,7 +145,7 @@ test('a machine set to "Only me" refuses other logins and says how its owner can
   const refused = runpane('workspace', 'tylers-pc', 'sessions', 'list', '--json');
   assert.equal(refused.status, 1);
   assert.match(refused.output, /tylers-pc: This machine accepts only its owner's Tailscale login; parsa@github is refused\./);
-  assert.match(refused.output, /Its owner can let you in from Pane on that machine: Settings → Remote Access → Access to this computer → Who can connect → Everyone on tailnet\./);
+  assert.match(refused.output, /Its owner can let you in from Pane on that machine: Settings → Remote Access → Access → Who can connect → Everyone on tailnet\./);
 });
 
 test('a path that cannot exist on this machine routes to the online machines whose OS fits it', posixOnly, () => {
