@@ -3,7 +3,7 @@
 import type { NotifyAnswer } from '../../shared/types/notify';
 import type { Page } from './display';
 import type { Gesture } from './input';
-import { GlassesError, isPaneEntry, type Card, type Dictation, type PaneEntry, type PaneRow, type PaneSource } from './model';
+import { GlassesError, isPaneEntry, type Card, type Computer, type Dictation, type PaneEntry, type PaneRow, type PaneSource } from './model';
 import {
   TERMINAL_LINES,
   allClearPage,
@@ -19,6 +19,7 @@ import {
   openPanePage,
   panesPage,
   problemPage,
+  rowOrder,
   refusedPage,
   terminalFooter,
   terminalLines,
@@ -71,10 +72,37 @@ type View =
 /** The home pages: every card, then "Open a Pane…"; "open" marks that last page. */
 type HomeEntry = Card | 'open';
 
+/** The row last pressed in a list: its id, and where it was in case it is gone next time. */
+interface ListFocus {
+  id: string;
+  index: number;
+}
+
+/** Where a list starts: the remembered row, or the nearest row `idOf` can name when it is gone. */
+function startOf<T>(rows: readonly T[], focus: ListFocus | null, idOf: (row: T) => string | null): number {
+  if (!focus) return 0;
+  const found = rows.findIndex((row) => idOf(row) === focus.id);
+  if (found >= 0) return found;
+  for (let distance = 0; distance < rows.length; distance += 1) {
+    for (const index of [focus.index + distance, focus.index - distance]) {
+      const row = rows[index];
+      if (row !== undefined && idOf(row) !== null) return index;
+    }
+  }
+  return 0;
+}
+
+const computerKey = (computer: Computer) => computer.id;
+const entryKey = (entry: PaneEntry) => `${entry.kind}:${entry.id}`;
+const rowKey = (row: PaneRow) => (isPaneEntry(row) ? entryKey(row) : null);
+
 export class GlassesApp {
   private view: View = { name: 'home' };
   private homeIndex = 0;
   private homeFocus: string | null = null;
+  /** The computer last picked, and the Session or Pane last opened on each computer. */
+  private computerFocus: ListFocus | null = null;
+  private readonly paneFocus = new Map<string, ListFocus>();
   private confirmation: string | undefined;
   /** Cards answered here, hidden until the computer's next Notify state drops them. */
   private readonly answered = new Set<string>();
@@ -157,10 +185,10 @@ export class GlassesApp {
         return card ? voiceAnswerPage(card, view.transcript) : this.homePage();
       }
       case 'computers':
-        return computersPage(source.computers(), this.deps.clock);
+        return this.computersPage();
       case 'panes': {
         const name = this.computerName(view.computerId);
-        return view.entries ? panesPage(name, view.entries) : loadingPage(`${name} · Sessions and Panes`, 'Loading…');
+        return view.entries ? panesPage(name, view.entries, this.panesStart(view.computerId, view.entries)) : loadingPage(`${name} · Sessions and Panes`, 'Loading…');
       }
       case 'terminal':
         return terminalPage({ entry: view.entry, lines: this.visibleLines(view), scrolledUp: view.scrolledUp, footer: terminalFooter(this.elsewhere(view)) });
@@ -168,7 +196,7 @@ export class GlassesApp {
         return dictationPage(view.entry, view.lines, view.transcript);
       case 'refused': {
         const computer = source.computers().find((candidate) => candidate.id === view.computerId);
-        if (!computer?.refusal) return computersPage(source.computers(), this.deps.clock);
+        if (!computer?.refusal) return this.computersPage();
         return refusedPage(computer.name, computer.refusal);
       }
       case 'problem':
@@ -403,14 +431,26 @@ export class GlassesApp {
       return;
     }
     if (gesture.type !== 'select') return;
-    const computer = this.deps.source.computers()[gesture.index];
-    if (!computer) return;
+    const computers = this.deps.source.computers();
+    const index = rowOrder(computers.length, startOf(computers, this.computerFocus, computerKey))[gesture.index];
+    const computer = index == null ? undefined : computers[index];
+    if (index == null || !computer) return;
+    this.computerFocus = { id: computer.id, index };
     if (computer.status === 'live') void this.openPanes(computer.id);
     else if (computer.refusal) this.go({ name: 'refused', computerId: computer.id, back: { name: 'computers' } });
     else {
       this.deps.source.retry(computer.id);
       this.render();
     }
+  }
+
+  private computersPage(): Page {
+    const computers = this.deps.source.computers();
+    return computersPage(computers, this.deps.clock, startOf(computers, this.computerFocus, computerKey));
+  }
+
+  private panesStart(computerId: string, entries: readonly PaneRow[]): number {
+    return startOf(entries, this.paneFocus.get(computerId) ?? null, rowKey);
   }
 
   private async openPanes(computerId: string): Promise<void> {
@@ -427,9 +467,13 @@ export class GlassesApp {
   private onPanes(view: { computerId: string; entries: PaneRow[] | null }, gesture: Gesture): void {
     if (gesture.type === 'double') this.go({ name: 'computers' });
     else if (gesture.type === 'select') {
-      // A press on the gap or a note opens nothing.
-      const row = view.entries?.[gesture.index];
-      if (row && isPaneEntry(row)) this.openTerminal(view.computerId, row);
+      // A press on the gap, a note or the divider opens nothing.
+      const entries = view.entries ?? [];
+      const index = rowOrder(entries.length, this.panesStart(view.computerId, entries))[gesture.index];
+      const row = index == null ? undefined : entries[index];
+      if (index == null || !row || !isPaneEntry(row)) return;
+      this.paneFocus.set(view.computerId, { id: entryKey(row), index });
+      this.openTerminal(view.computerId, row);
     }
   }
 

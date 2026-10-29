@@ -312,6 +312,39 @@ describe('opening and leaving a Pane, as the Pane apps do', () => {
   });
 });
 
+describe('going back keeps your place', () => {
+  it('opens the computer and Pane lists on the rows you picked, with the rows above after the top divider', async () => {
+    const { source, text, press } = startScripted();
+    source.computerList = [
+      { id: 'studio', name: 'studio-mac', status: 'live', lastSeenAt: 1, paneCount: 4, workingCount: 0 },
+      { id: 'devbox', name: 'devbox', status: 'live', lastSeenAt: 1, paneCount: 4, workingCount: 0 },
+    ];
+    source.rows = ['a', 'b', 'c', 'd'].map(paneRow);
+    source.changed();
+    await press({ type: 'press' });
+    await press({ type: 'select', index: 1 });
+    await press({ type: 'select', index: 2 });
+    expect(text()[0]).toBe('c · shell · idle');
+
+    await press({ type: 'double' });
+    expect(text()[1]).toBe('c · Claude · stopped | d · Claude · stopped | · top of the list · | a · Claude · stopped | b · Claude · stopped');
+    await press({ type: 'select', index: 3 });
+    expect(text()[0]).toBe('a · shell · idle');
+    await press({ type: 'double' });
+    expect(text()[1]).toMatch(/^a · Claude/);
+
+    await press({ type: 'double' });
+    expect(text()[1]).toBe('devbox · 4 Panes · idle | · top of the list · | studio-mac · 4 Panes · idle');
+  });
+
+  it('starts on the next row when the Pane you left was archived', async () => {
+    const { source, text, press } = await openScriptedRow(['a', 'b', 'c', 'd'].map(paneRow), 2);
+    source.rows = ['a', 'b', 'd'].map(paneRow);
+    await press({ type: 'double' });
+    expect(text()[1]).toBe('d · Claude · stopped | · top of the list · | a · Claude · stopped | b · Claude · stopped');
+  });
+});
+
 describe('a refused computer', () => {
   it('is retried by a press on home, which shows it connecting rather than the same refusal', () => {
     const { app, source, text } = startScripted();

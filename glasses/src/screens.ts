@@ -224,11 +224,29 @@ function computerRow(computer: Computer, clock: (epochMs: number) => string): st
   return `${computer.name} · offline${since} · press to retry`;
 }
 
-export function computersPage(computers: readonly Computer[], clock: (epochMs: number) => string): Page {
+/** Where a list that starts mid-way wraps back to its first row. */
+const LIST_TOP = '· top of the list ·';
+
+/**
+ * The rows of a list in the order shown: from `start` to the end, the divider (null), then the
+ * rows above `start`. A native list always opens on its first row, so this is how a list comes
+ * back on the row you left. Press on shown row i acts on rows[order[i]].
+ */
+export function rowOrder(count: number, start: number): Array<number | null> {
+  const all = Array.from({ length: count }, (_, index) => index);
+  if (start <= 0 || start >= count) return all;
+  return [...all.slice(start), null, ...all.slice(0, start)];
+}
+
+export function computersPage(computers: readonly Computer[], clock: (epochMs: number) => string, start = 0): Page {
+  const rows = rowOrder(computers.length, start).map((index) => {
+    const computer = index === null ? undefined : computers[index];
+    return computer ? computerRow(computer, clock) : LIST_TOP;
+  });
   return {
     boxes: [
       header('Open a Pane · pick a computer'),
-      list('computers', BAR_H, SCREEN_H - BAR_H, computers.map((computer) => computerRow(computer, clock))),
+      list('computers', BAR_H, SCREEN_H - BAR_H, rows),
     ],
   };
 }
@@ -242,7 +260,7 @@ function paneRowText(row: PaneRow): string {
   }
 }
 
-export function panesPage(computerName: string, rows: readonly PaneRow[]): Page {
+export function panesPage(computerName: string, rows: readonly PaneRow[], start = 0): Page {
   if (!rows.length) {
     return {
       boxes: [
@@ -254,7 +272,10 @@ export function panesPage(computerName: string, rows: readonly PaneRow[]): Page 
   return {
     boxes: [
       header(`${computerName} · Sessions and Panes`),
-      list('panes', BAR_H, SCREEN_H - BAR_H, rows.map(paneRowText)),
+      list('panes', BAR_H, SCREEN_H - BAR_H, rowOrder(rows.length, start).map((index) => {
+        const row = index === null ? undefined : rows[index];
+        return row ? paneRowText(row) : LIST_TOP;
+      })),
     ],
   };
 }
