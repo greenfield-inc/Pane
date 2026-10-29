@@ -1,6 +1,6 @@
 import { LegendList } from '@legendapp/list/react-native';
 import { useState, type ReactElement } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet, useWindowDimensions, View } from 'react-native';
 
 import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
 import type { TailnetMachine } from '@shared/types/workspaceAccess';
@@ -28,6 +28,8 @@ interface ComputerListProps {
 /** Your computers on Tailscale, as desktop Pane lists them: tap Connect, no code. */
 export function ComputerList({ directory, header, onConnected, connected: isConnected, onDirectoryChange }: ComputerListProps) {
   const theme = useTheme();
+  // At the largest text sizes the button goes under the name instead of squeezing it.
+  const stacked = useWindowDimensions().fontScale >= 1.6;
   const computers = useComputers(directory);
   const connect = useConnectComputer(onConnected);
   const active = useActiveHost();
@@ -76,9 +78,9 @@ export function ComputerList({ directory, header, onConnected, connected: isConn
         ]}
       >
         {index > 0 ? <View style={[styles.separator, { backgroundColor: theme.colors.border }]} /> : null}
-        <View style={styles.summary}>
+        <View style={[styles.summary, stacked && styles.stacked]}>
           <View style={styles.logo}><OsLogo os={machine.os} /></View>
-          <View style={styles.text}>
+          <View style={[styles.text, stacked && styles.stackedText]}>
             <Text variant="rowTitle" numberOfLines={1}>{machine.name}</Text>
             <Text variant="rowDetail" tone="muted" numberOfLines={1}>{detail}</Text>
           </View>
@@ -182,6 +184,8 @@ const styles = StyleSheet.create({
   // Inset past the logo, as ListSection does below a row with a leading icon.
   separator: { position: 'absolute', top: 0, left: 54, right: 0, height: StyleSheet.hairlineWidth },
   summary: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  stacked: { flexDirection: 'column', alignItems: 'flex-start' },
+  stackedText: { flex: 0, alignSelf: 'stretch' },
   logo: { width: 24, alignItems: 'center' },
   text: { flex: 1, minWidth: 0, gap: 1 },
   password: { gap: 8 },

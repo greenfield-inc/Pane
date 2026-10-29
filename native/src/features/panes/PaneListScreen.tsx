@@ -351,7 +351,7 @@ function CreateButton({ title, onPress, disabled, secondary, testID, children }:
       }]}
     >
       {children}
-      <Text variant="callout" tone={secondary ? 'primary' : 'onAccent'} style={styles.bold}>{title}</Text>
+      <Text variant="callout" tone={secondary ? 'primary' : 'onAccent'} numberOfLines={1} maxFontSizeMultiplier={1.6} style={[styles.bold, styles.shrink]}>{title}</Text>
     </Pressable>
   );
 }
@@ -375,8 +375,9 @@ const styles = StyleSheet.create({
   bold: { fontWeight: '600' },
   // ml-5 border-l pl-2 under the Session row.
   nested: { marginLeft: 20, paddingLeft: 8, borderLeftWidth: 1 },
-  search: { flexDirection: 'row', alignItems: 'center', gap: 8, height: 40, paddingLeft: 12, paddingRight: 6 },
-  searchInput: { flex: 1, height: '100%', paddingVertical: 0 },
+  search: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 40, paddingLeft: 12, paddingRight: 6 },
+  searchInput: { flex: 1, paddingVertical: 8 },
+  shrink: { flexShrink: 1 },
   content: { padding: 12 },
   waitingSection: { marginBottom: 12 },
   waitingCard: { overflow: 'hidden' },

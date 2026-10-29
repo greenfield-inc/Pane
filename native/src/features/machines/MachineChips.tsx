@@ -10,6 +10,9 @@ import type { Machine } from './machines';
 import { MachineMark } from './MachineMark';
 import { useSelectMachine } from './useMachines';
 
+// Chips grow with the text size up to this, so the row stays one line you can scroll.
+const MAX_TEXT_SCALE = 1.6;
+
 type ChipItem = { type: 'machine'; machine: Machine } | { type: 'connection' };
 
 /**
@@ -64,7 +67,7 @@ function MachineChip({ machine, connecting, onPress }: { machine: Machine; conne
           ? <ActivityIndicator size="small" color={theme.colors.textMuted} style={styles.spinner} />
           : <MachineMark os={machine.os} slot={machine.slot} state={machine.state} color={filled ? theme.colors.background : undefined} />}
       </View>
-      <Text variant="callout" numberOfLines={1} style={[styles.name, { color: filled ? theme.colors.background : theme.colors.text }]}>{machine.name}</Text>
+      <Text variant="callout" numberOfLines={1} maxFontSizeMultiplier={MAX_TEXT_SCALE} style={[styles.name, { color: filled ? theme.colors.background : theme.colors.text }]}>{machine.name}</Text>
     </Pressable>
   );
 }
@@ -79,7 +82,7 @@ export function ConnectionAccessory() {
   if (connection.status !== 'error' && connection.status !== 'reconnecting') return null;
   return (
     <Pressable testID="machine-retry" accessibilityRole="button" accessibilityLabel="Retry now" hitSlop={8} onPress={() => client.retryNow()} style={styles.accessory}>
-      <Text variant="callout" tone="accent" style={styles.name}>Retry</Text>
+      <Text variant="callout" tone="accent" maxFontSizeMultiplier={MAX_TEXT_SCALE} style={styles.name}>Retry</Text>
     </Pressable>
   );
 }
@@ -87,10 +90,10 @@ export function ConnectionAccessory() {
 const styles = StyleSheet.create({
   list: { flexGrow: 0 },
   content: { gap: 8, paddingHorizontal: 16, paddingTop: 4, paddingBottom: 12 },
-  chip: { height: 34, borderRadius: 17, flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 13 },
+  chip: { minHeight: 34, borderRadius: 17, paddingVertical: 6, flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 13 },
   // A spinner swaps in for the mark in the same box.
   mark: { width: 14, height: 14, alignItems: 'center', justifyContent: 'center' },
   spinner: { transform: [{ scale: 0.7 }] },
   name: { fontWeight: '600' },
-  accessory: { height: 34, justifyContent: 'center', paddingHorizontal: 4 },
+  accessory: { minHeight: 34, justifyContent: 'center', paddingHorizontal: 4 },
 });
