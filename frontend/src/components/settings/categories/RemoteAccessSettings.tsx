@@ -21,7 +21,7 @@ interface RemoteAccessSettingsProps {
   controller: RemoteAccessController;
   onOpenSubview: (subview: RemoteAccessSubviewId) => void;
   onOpenMachine: (machineId: string) => void;
-  /** Changes each time something asks for the "Add with a Code" box open. */
+  /** Changes each time something asks for the "Add a machine" code box open. */
   addCodeRequest?: number;
   /** Opens this Tailscale machine's password field; the nonce changes per request. */
   passwordRequest?: { machine: string; nonce: number };
@@ -85,6 +85,7 @@ export function RemoteAccessSettings({ controller, onOpenSubview, onOpenMachine,
         connectedOverTailscale={active.kind === 'tailnet' && connectionState.status === 'connected'}
         switching={switchingId !== null}
         onSwitchBack={() => void pick(local)}
+        onRetry={() => void pick(active)}
         onDetails={() => onOpenMachine(active.id)}
         controller={controller}
       />
@@ -179,12 +180,13 @@ interface ActiveMachineCardProps {
   connectedOverTailscale: boolean;
   switching: boolean;
   onSwitchBack: () => void;
+  onRetry: () => void;
   onDetails: () => void;
   controller: RemoteAccessController;
 }
 
 /** The machine agents run on now, with the way back to this computer. */
-function ActiveMachineCard({ machine, local, lastError, connectedOverTailscale, switching, onSwitchBack, onDetails, controller }: ActiveMachineCardProps) {
+function ActiveMachineCard({ machine, local, lastError, connectedOverTailscale, switching, onSwitchBack, onRetry, onDetails, controller }: ActiveMachineCardProps) {
   const remote = machine.kind !== 'local';
   const detail = [machine.subtitle, connectedOverTailscale && 'Connected over Tailscale'].filter(Boolean).join(' · ');
   return (
@@ -195,6 +197,9 @@ function ActiveMachineCard({ machine, local, lastError, connectedOverTailscale, 
           <p className="truncate text-base font-semibold text-text-primary">{machine.name}</p>
           <p className="truncate text-xs text-text-tertiary">{detail}</p>
         </div>
+        {machine.action === 'retry' && (
+          <Button type="button" variant="ghost" size="sm" disabled={switching} onClick={onRetry}>Retry</Button>
+        )}
         {remote && (
           <Button type="button" variant="secondary" size="sm" disabled={switching} onClick={onSwitchBack}>
             Switch back to {local.name === THIS_COMPUTER ? 'this computer' : local.name}

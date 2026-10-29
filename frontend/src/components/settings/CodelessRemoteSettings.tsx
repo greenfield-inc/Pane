@@ -112,7 +112,7 @@ export function CodelessAccessRows({ tailnetName }: { tailnetName: string | null
         align="start"
         className={CARD_ROW}
       >
-        <div className="w-full space-y-3 sm:w-[360px]">
+        <div className="w-full space-y-3 sm:w-[420px]">
           <SegmentedControl<WorkspaceVisibility>
             label="Who can connect to this computer"
             columns={3}

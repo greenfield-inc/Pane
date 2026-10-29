@@ -1063,7 +1063,7 @@ export class PaneRemoteHttpApiServer {
       if (origin) glasses.noteRefusedOrigin(origin);
       return refuse('origin', 403, 'ERR_GLASSES_ORIGIN_REFUSED',
         `This computer accepts glasses tokens only from the Even app; this request came from ${origin ?? 'no origin'}.`,
-        'Open Pane from the Even app. If this is the Even app, allow this origin on the computer in Settings › Remote Access › Glasses.',
+        'Open Pane from the Even app. If this is the Even app, allow this origin on the computer in Settings › Remote Access › Devices.',
         `origin ${origin ?? 'none'}`);
     }
     if (new URL(rawUrl, 'http://localhost').searchParams.has('access_token')) {
@@ -1132,7 +1132,7 @@ export class PaneRemoteHttpApiServer {
       : glasses.allowsOrigin(getSingleHeaderValue(request.headers.origin) ?? undefined) && !glasses.isFunnelOn();
     if (!stillAdmitted) {
       refuse(403, 'ERR_GLASSES_ACCESS_WITHDRAWN', 'These glasses lost access to this computer while the request was arriving; it was not run.',
-        'Check Settings › Remote Access › Glasses on the computer, then pair again if the glasses were revoked.');
+        'Check Settings › Remote Access › Devices on the computer, then pair again if the glasses were revoked.');
       return;
     }
 

@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { installElectronApiMock } from './electronApiMock';
+import type { TailnetMachineList } from '../shared/types/workspaceAccess';
 
 async function saveHost(page: Page, connect: boolean) {
   await page.evaluate(async (connect) => {
@@ -13,35 +14,74 @@ async function saveHost(page: Page, connect: boolean) {
   }, connect);
 }
 
-test('the header chip names the connected host and switches back to this computer', async ({ page }, testInfo) => {
+test('the header pill names the connected machine and switches back to this computer', async ({ page }, testInfo) => {
   await installElectronApiMock(page);
   await page.goto('/');
   await expect(page.getByRole('button', { name: 'Collapse sidebar', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: /Switch host$/ })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /Switch machine$/ })).toHaveCount(0);
 
   await saveHost(page, true);
-  const chip = page.getByRole('button', { name: 'Agents run on parsas mac pro. Switch host' });
-  await expect(chip).toBeVisible();
-  await chip.click();
+  const pill = page.getByRole('button', { name: 'Agents run on parsas mac pro. Switch machine' });
+  await expect(pill).toBeVisible();
+  await pill.click();
   await expect(page.getByRole('menuitemradio', { name: /parsas mac pro/ })).toHaveAttribute('aria-checked', 'true');
-  await page.screenshot({ path: testInfo.outputPath('chip-open.png') });
+  await expect(page.getByRole('menuitemradio', { name: /devbox/ })).toContainText('Linux · This computer');
+  await page.screenshot({ path: testInfo.outputPath('pill-open.png') });
 
-  await page.getByRole('menuitemradio', { name: /This computer/ }).click();
-  await expect(page.getByRole('button', { name: 'Agents run on This computer. Switch host' })).toBeVisible();
+  await page.getByRole('menuitemradio', { name: /devbox/ }).click();
+  await expect(page.getByRole('button', { name: 'Agents run on devbox. Switch machine' })).toBeVisible();
 });
 
-test('the collapsed rail dot opens the switcher once a host is saved', async ({ page }, testInfo) => {
+test('the collapsed rail shows the active machine and opens the same menu', async ({ page }, testInfo) => {
   await installElectronApiMock(page);
   await page.goto('/');
   await page.getByRole('button', { name: 'Collapse sidebar', exact: true }).click();
 
   await saveHost(page, true);
-  await page.getByRole('button', { name: 'Connected to remote runtime', exact: true }).click();
+  await page.getByRole('button', { name: 'Agents run on parsas mac pro. Switch machine', exact: true }).click();
   await expect(page.getByRole('menuitemradio', { name: /parsas mac pro/ })).toHaveAttribute('aria-checked', 'true');
   await page.screenshot({ path: testInfo.outputPath('rail-open.png') });
 
-  await page.getByRole('button', { name: 'Manage connections…' }).click();
+  await page.getByRole('button', { name: 'Add a machine…' }).click();
   await expect(page.getByRole('heading', { name: 'Remote Access', exact: true })).toBeVisible();
+  await expect(page.getByLabel('Connection Code')).toBeVisible();
+});
+
+const tailnetMachines: TailnetMachineList = {
+  ok: true,
+  tailnet: 'demo.github',
+  domain: 'tail1234.ts.net',
+  machines: [
+    { name: 'office-pc', dnsName: 'office-pc.tail1234.ts.net', url: 'https://office-pc.tail1234.ts.net:8443', os: 'Windows', ownerLogin: 'demo@github', mine: true, state: 'available' },
+    { name: 'build-box', dnsName: 'build-box.tail1234.ts.net', url: 'https://build-box.tail1234.ts.net:8443', os: 'Linux', ownerLogin: 'demo@github', mine: true, state: 'password-required' },
+    { name: 'travel-laptop', dnsName: 'travel-laptop.tail1234.ts.net', url: 'https://travel-laptop.tail1234.ts.net:8443', os: 'macOS', ownerLogin: 'demo@github', mine: true, state: 'offline' },
+  ],
+};
+
+test('the menu lists Tailscale machines never connected and connects one in one click', async ({ page }) => {
+  await installElectronApiMock(page, { tailnetMachines });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Agents run on devbox. Switch machine' }).click();
+  await expect(page.getByRole('menuitemradio', { name: /office-pc/ })).toContainText('Windows · Ready · Never connected');
+  await expect(page.getByRole('menuitemradio', { name: /travel-laptop/ })).toBeDisabled();
+
+  await page.getByRole('menuitemradio', { name: /office-pc/ }).click();
+  await expect(page.getByRole('button', { name: 'Agents run on office-pc. Switch machine' })).toBeVisible();
+  await page.getByRole('button', { name: 'Agents run on office-pc. Switch machine' }).click();
+  await expect(page.getByRole('menuitemradio', { name: /office-pc/ })).toContainText('Windows · Agents run here');
+});
+
+test('a machine that needs a password opens its password field in Remote Access', async ({ page }) => {
+  await installElectronApiMock(page, { tailnetMachines });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Agents run on devbox. Switch machine' }).click();
+  await page.getByRole('menuitemradio', { name: /build-box/ }).click();
+
+  const field = page.getByLabel('Password for build-box');
+  await expect(field).toBeFocused();
+  await field.fill('correct horse');
+  await page.getByTestId('machine-build-box').getByRole('button', { name: 'Connect' }).click();
+  await expect(page.getByTestId('active-machine')).toContainText('build-box');
 });
 
 const repositories = [
@@ -105,11 +145,11 @@ function openPane(page: Page, name: string) {
   return page.getByRole('button', { name, exact: true }).click();
 }
 
-/** Switches through the real dropdown and waits for the chip to name the new host. */
-async function pickHost(page: Page, label: 'parsas mac pro' | 'This computer') {
-  await page.getByRole('button', { name: /Switch host$/ }).click();
+/** Switches through the real menu and waits for the pill to name the new machine. */
+async function pickHost(page: Page, label: 'parsas mac pro' | 'devbox') {
+  await page.getByRole('button', { name: /Switch machine$/ }).click();
   await page.getByRole('menuitemradio', { name: new RegExp(label) }).click();
-  await expect(page.getByRole('button', { name: `Agents run on ${label}. Switch host` })).toBeVisible();
+  await expect(page.getByRole('button', { name: `Agents run on ${label}. Switch machine` })).toBeVisible();
 }
 
 test('switching hosts returns to the Pane that was open on each of them', async ({ page }) => {
@@ -138,7 +178,7 @@ test('switching hosts returns to the Pane that was open on each of them', async 
   await expect(page).toHaveTitle('Mock Repo · Remote work');
   await memory.expectRemembered('mac', 'remote-work');
 
-  await pickHost(page, 'This computer');
+  await pickHost(page, 'devbox');
   await memory.arriveOnHost([localPane]);
   await expect(page).toHaveTitle('Mock Repo · Local work');
 
@@ -165,7 +205,7 @@ test('a remembered Pane that is gone from the host falls back to the home view',
   await expect(page).toHaveTitle('Mock Repo · Remote work');
   await memory.expectRemembered('mac', 'remote-work');
 
-  await pickHost(page, 'This computer');
+  await pickHost(page, 'devbox');
   await memory.arriveOnHost([localPane]);
   await expect(page).toHaveTitle('Pane');
 

@@ -64,7 +64,8 @@ export function RemoteHostSwitcher({
       selectedMark="check"
       header="Agents run on"
       position={position}
-      width="lg"
+      width="auto"
+      menuClassName="w-[300px]"
       menuLabel="Agents run on"
       onOpenChange={onOpenChange}
       itemClassName="py-1.5"
