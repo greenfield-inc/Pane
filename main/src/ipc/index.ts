@@ -1,7 +1,7 @@
 import { registerAgentChatHandlers } from './agentChat';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import type { PaneCommandValue } from '../daemon/commandRegistry';
-import { ipcMain, powerMonitor } from 'electron';
+import { app, ipcMain, powerMonitor } from 'electron';
 import type { AppServices } from './types';
 import { registerAppHandlers } from './app';
 import { registerNotesHandlers } from './notes';
@@ -87,6 +87,9 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
   // Pause the remote connection while the system sleeps and reconnect on wake.
   powerMonitor.on('suspend', () => remotePaneClientController.suspend());
   powerMonitor.on('resume', () => remotePaneClientController.resume());
+  // While reconnecting, the window regaining focus or the network coming back retries at once.
+  app.on('browser-window-focus', () => remotePaneClientController.retryIfReconnecting('window focused'));
+  ipcMain.on('remote-daemon:network-online', () => remotePaneClientController.retryIfReconnecting('network online'));
   const bridgeRouter = createDaemonBridgeRouter(commandRegistry);
 
   registerAppHandlers(ipcMain, services);

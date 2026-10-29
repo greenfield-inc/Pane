@@ -354,6 +354,9 @@ function invokeIpc(channel: string, ...args: unknown[]) {
   return ipcRenderer.invoke(channel, ...args);
 }
 
+// Main has no network event; a reconnecting remote host retries when the renderer sees the network return.
+window.addEventListener('online', () => ipcRenderer.send('remote-daemon:network-online'));
+
 contextBridge.exposeInMainWorld('electronAPI', {
   onNotesChanged: (callback: () => void) => {
     const listener = () => callback();

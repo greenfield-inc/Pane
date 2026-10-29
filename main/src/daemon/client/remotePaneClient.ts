@@ -60,6 +60,10 @@ interface RemotePaneClientOptions {
   eventSink?: PaneEventSink;
   initialHandshakeTimeoutMs?: number;
   heartbeatStaleTimeoutMs?: number;
+  /** How long restoration may take after the host's ready event. */
+  restoreTimeoutMs?: number;
+  /** How long one invoke waits for the host's answer. */
+  requestTimeoutMs?: number;
   reconnectInitialDelayMs?: number;
   reconnectMaxDelayMs?: number;
   reconnectDurationMs?: number;
@@ -140,6 +144,10 @@ const REMOTE_DAEMON_RECONNECT_INITIAL_DELAY_MS = 1_000;
 const REMOTE_DAEMON_RECONNECT_MAX_DELAY_MS = 30_000;
 const REMOTE_DAEMON_HEARTBEAT_STALE_TIMEOUT_MS = 20_000;
 const REMOTE_DAEMON_INITIAL_HANDSHAKE_TIMEOUT_MS = 10_000;
+const REMOTE_DAEMON_RESTORE_TIMEOUT_MS = 30_000;
+const REMOTE_DAEMON_REQUEST_TIMEOUT_MS = 15_000;
+/** The heartbeat decides liveness; this many failed requests in a row with no success between also reconnect. */
+const MAX_FAILED_REQUESTS_IN_A_ROW = 3;
 const TAILSCALE_MAGIC_DNS_SERVER = '100.100.100.100';
 const PORTS_LIST_CHANNEL = 'ports:list';
 const PORTS_CHANGED_CHANNEL = 'ports:changed';
@@ -172,6 +180,9 @@ export class RemotePaneClient {
   private readonly eventSink: PaneEventSink;
   private readonly initialHandshakeTimeoutMs: number;
   private readonly heartbeatStaleTimeoutMs: number;
+  private readonly restoreTimeoutMs: number;
+  private readonly requestTimeoutMs: number;
+  private failedRequestsInARow = 0;
   private readonly recovery: RecoveryCycle;
   private deadlineTimer: NodeJS.Timeout | null = null;
   private recoveryStopped = false;
@@ -205,6 +216,8 @@ export class RemotePaneClient {
       ?? REMOTE_DAEMON_INITIAL_HANDSHAKE_TIMEOUT_MS;
     this.heartbeatStaleTimeoutMs = options.heartbeatStaleTimeoutMs
       ?? REMOTE_DAEMON_HEARTBEAT_STALE_TIMEOUT_MS;
+    this.restoreTimeoutMs = options.restoreTimeoutMs ?? REMOTE_DAEMON_RESTORE_TIMEOUT_MS;
+    this.requestTimeoutMs = options.requestTimeoutMs ?? REMOTE_DAEMON_REQUEST_TIMEOUT_MS;
     this.recovery = new RecoveryCycle(Math.random, options.reconnectDurationMs,
       options.reconnectInitialDelayMs ?? REMOTE_DAEMON_RECONNECT_INITIAL_DELAY_MS,
       options.reconnectMaxDelayMs ?? REMOTE_DAEMON_RECONNECT_MAX_DELAY_MS);
@@ -240,7 +253,7 @@ export class RemotePaneClient {
       if (options.retryOnInitialFailure ?? true) {
         this.scheduleReconnect(message);
       } else {
-        this.onConnectionStateChange?.('error', message, { lastSeenAt: this.lastSeenAt });
+        this.reportStatus('error', message, message);
       }
       throw error;
     }
@@ -415,20 +428,24 @@ export class RemotePaneClient {
           'Content-Type': 'application/json; charset=utf-8',
           'X-Pane-Remote-Runtime-Id': REMOTE_RUNTIME_ID,
         },
-      }), JSON.stringify({ channel, args }));
+      }), JSON.stringify({ channel, args }), this.requestTimeoutMs);
       if (response.statusCode === 401 || response.statusCode === 403) {
         this.stopRecovery('The host rejected your credentials. Open connection settings to sign in again.');
         throw new PaneError('ERR_REMOTE_AUTH', 'The host rejected your credentials.', 'Open connection settings to sign in again.');
       }
       payload = parseJsonResponse(response, 'Remote daemon returned an invalid invoke response', remoteInvokeResponseSchema);
+      this.failedRequestsInARow = 0;
     } catch (error) {
       if (error instanceof PaneError) throw error;
+      // One failed request fails only itself while heartbeats arrive; a run of them reconnects.
+      const counts = !signal?.aborted && generation === this.streamGeneration && !this.closedByClient;
+      const reconnect = counts && ++this.failedRequestsInARow >= MAX_FAILED_REQUESTS_IN_A_ROW;
       const failure = new PaneError(nothingToCheck ? 'ERR_REMOTE_TRANSPORT' : 'ERR_REMOTE_DELIVERY_UNKNOWN',
-        nothingToCheck ? 'Remote connection interrupted: the host response was incomplete. Pane is reconnecting.'
+        nothingToCheck ? `Remote connection interrupted: the host response was incomplete.${reconnect ? ' Pane is reconnecting.' : ''}`
           : 'Delivery unknown: the remote response was interrupted. The action may have completed; it was not replayed.',
-        'Wait for reconnection and check the destination before trying again.');
-      if (!signal?.aborted && generation === this.streamGeneration && !this.closedByClient) {
-        this.handleUnexpectedDisconnect(failure.message, true);
+        reconnect ? 'Wait for reconnection and check the destination before trying again.' : 'Check the destination before trying again.');
+      if (reconnect) {
+        this.handleUnexpectedDisconnect(`${MAX_FAILED_REQUESTS_IN_A_ROW} requests in a row failed: ${getErrorMessage(error, 'no response')}`, true);
       }
       throw failure;
     }
@@ -446,10 +463,9 @@ export class RemotePaneClient {
   private async openEventStream(isReconnect: boolean, resolveOnReady = false): Promise<void> {
     this.clearReconnectTimer();
     const generation = ++this.streamGeneration;
+    this.failedRequestsInARow = 0;
     const isStale = (): boolean => generation !== this.streamGeneration || this.closedByClient || this.recoveryStopped;
-    this.onConnectionStateChange?.(isReconnect ? 'reconnecting' : 'connecting', null, {
-      lastSeenAt: this.lastSeenAt,
-    });
+    this.reportStatus(isReconnect ? 'reconnecting' : 'connecting', 'opening the event stream');
 
     const endpoint = buildRemoteEndpoint(this.normalizedBaseUrl, 'events');
 
@@ -498,14 +514,16 @@ export class RemotePaneClient {
         reject(new Error(message));
       };
 
-      handshakeTimer = setTimeout(() => {
-        if (isStale()) { resolve(); return; }
-        if (settled) { this.handleUnexpectedDisconnect('Workspace restoration timed out', true); return; }
-        rejectBeforeReady(
-          `Timed out waiting for remote daemon ready event after ${this.initialHandshakeTimeoutMs}ms`,
-          true,
-        );
-      }, Math.min(this.initialHandshakeTimeoutMs, this.recovery.remainingMs));
+      // The handshake waits for the ready event; restoration then gets its own, longer limit.
+      const armTimeout = (timeoutMs: number, message: string): void => {
+        clearHandshakeTimer();
+        handshakeTimer = setTimeout(() => {
+          if (isStale()) { resolve(); return; }
+          if (settled) { this.handleUnexpectedDisconnect(message, true); return; }
+          rejectBeforeReady(message, true);
+        }, Math.min(timeoutMs, this.recovery.remainingMs));
+      };
+      armTimeout(this.initialHandshakeTimeoutMs, `Timed out waiting for remote daemon ready event after ${this.initialHandshakeTimeoutMs}ms`);
 
       request = createRequest(endpoint, this.buildRequestOptions(endpoint, {
         method: 'GET',
@@ -551,17 +569,15 @@ export class RemotePaneClient {
               if (!readyPayload) { rejectBeforeReady('Invalid remote ready event', true); return; }
               readyReceived = true;
               this.markRemoteSeen();
+              armTimeout(this.restoreTimeoutMs, `Workspace restoration timed out after ${this.restoreTimeoutMs}ms`);
               if (resolveOnReady && !settled) { settled = true; resolve(); }
-              this.onConnectionStateChange?.('restoring', null, {
-                lastSeenAt: this.lastSeenAt,
-                hostVersion: readyPayload.paneVersion,
-              });
+              this.reportStatus('restoring', 'host ready', null, readyPayload.paneVersion);
               void Promise.resolve().then(() => this.onResyncRequired?.()).then(() => {
                 if (!isStale()) {
                   clearHandshakeTimer();
                   this.clearDeadline();
                   this.recovery.reset();
-                  this.onConnectionStateChange?.('connected', null, { lastSeenAt: this.lastSeenAt });
+                  this.reportStatus('connected', 'workspace restored');
                 }
                 if (!settled) { settled = true; resolve(); }
               }, error => {
@@ -707,7 +723,7 @@ export class RemotePaneClient {
     this.clearHeartbeatStaleTimer();
     this.eventResponse?.destroy();
     this.eventRequest?.destroy();
-    this.onConnectionStateChange?.('error', message, { lastSeenAt: this.lastSeenAt });
+    this.reportStatus('error', message, message);
   }
 
   private scheduleReconnect(message: string): void {
@@ -715,7 +731,7 @@ export class RemotePaneClient {
     this.armDeadline();
     const delay = this.recovery.nextDelay();
     if (delay === null) { this.expireRecovery(); return; }
-    this.onConnectionStateChange?.('reconnecting', message, { lastSeenAt: this.lastSeenAt });
+    this.reportStatus('reconnecting', `${message}; retrying in ${delay}ms`, message);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       if (!this.recovery.remainingMs) { this.expireRecovery(); return; }
@@ -723,6 +739,17 @@ export class RemotePaneClient {
         this.scheduleReconnect(getErrorMessage(error, 'Failed to reconnect to remote daemon event stream'));
       });
     }, delay);
+  }
+
+  /** Each status change is logged with its reason, so a reported drop can be traced. */
+  private reportStatus(
+    status: RemotePaneConnectionStatus,
+    reason: string,
+    errorMessage: string | null = null,
+    hostVersion?: string,
+  ): void {
+    console.info(`[Pane remote daemon] ${this.profile.label}: ${status} (${reason})`);
+    this.onConnectionStateChange?.(status, errorMessage, { lastSeenAt: this.lastSeenAt, hostVersion });
   }
 
   private clearReconnectTimer(): void {
@@ -1001,6 +1028,13 @@ export class RemotePaneClientController extends EventEmitter {
   /** Reconnects the remote host the user was on before the system slept. */
   resume(): void {
     this.activeClient?.resume();
+  }
+
+  /** Retries a reconnecting host at once, instead of waiting out the backoff, when `reason` suggests it is back. */
+  retryIfReconnecting(reason: string): void {
+    if (this.state.status !== 'reconnecting') return;
+    console.info(`[Pane remote daemon] retrying now: ${reason}`);
+    void this.activeClient?.retryNow();
   }
 
   /** Closes the checklist, as "Continue to workspace" does. */
@@ -1660,6 +1694,7 @@ async function requestJson(
   url: URL,
   options: RemoteRequestOptions,
   body: string,
+  timeoutMs: number,
 ): Promise<JsonResponse> {
   return await new Promise<JsonResponse>((resolve, reject) => {
     const request = createRequest(url, {
@@ -1677,7 +1712,7 @@ async function requestJson(
       }).catch(reject);
     });
 
-    request.setTimeout(15_000, () => request.destroy(new Error('Remote response timed out')));
+    request.setTimeout(timeoutMs, () => request.destroy(new Error(`Remote response timed out after ${timeoutMs}ms`)));
     request.on('error', reject);
     request.write(body);
     request.end();
