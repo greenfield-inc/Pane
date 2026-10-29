@@ -44,7 +44,9 @@ This is the implementation checklist for Remote Pane setup, teardown, and runtim
 
 Desktop and browser clients send at most one terminal input request per panel at a time. Keys typed while a request is pending are combined into the next request, preserving their order without a separate round trip for every buffered key. A bare Escape always ends a combined request, because terminal apps read Escape followed by another key in the same write as an Alt shortcut. Different panels and other remote commands remain independent.
 
-Input requests are not retried. On failure, disconnect, or a ten-second input timeout, queued input is discarded and outstanding callers are rejected. An interrupted request may already have reached the host, so its input must not be replayed after reconnecting. This uses the existing HTTP API and requires no host protocol upgrade.
+Against a host that runs each request ID once (`deduplicatesRequestIds` in its `ready` event), each input request carries an ID. A request whose answer is lost, or that is caught by a reconnect or by the app going to the background, is resent with the same ID once the connection is back, and the queued input behind it follows in order. Callers are rejected only when the connection gives up after five minutes.
+
+Against an older host, input requests are not retried. On failure, disconnect, or a ten-second input timeout, queued input is discarded and outstanding callers are rejected, because an interrupted request may already have reached the host.
 
 ## Desktop media previews
 
