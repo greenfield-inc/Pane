@@ -16,6 +16,7 @@ import type { GlassesAccessState } from '../shared/types/glasses';
 import type { JsonObject, JsonValue } from '../shared/validation/boundaryDecoder';
 import { DEFAULT_APPEARANCE, normalizeAppearance, type AppearanceConfig } from '../shared/types/appearance';
 import type { DiffManifest, DiffScope, FileDiffResult } from '../shared/types/gitDiff';
+import type { RunpaneAgentDoctorResult } from '../shared/types/runpaneOrchestration';
 import type { SetupExportSummary, SetupFile, SetupImportPreview, SetupSectionId } from '../shared/types/setupTransfer';
 import type { NotifyCommand, NotifySnapshot, NotifyWindowSize } from '../shared/types/notify';
 
@@ -109,6 +110,10 @@ export type ElectronApiMockOptions = {
   openExternalOutcome?: 'success' | 'failure';
   /** Overrides this machine's workspace status (remote-daemon:get-workspace-access). */
   workspaceAccess?: Partial<WorkspaceAccessSummary>;
+  /** runpane:agents:doctor answers by agent; an agent left out is installed with an unknown sign-in. */
+  agentDoctor?: Partial<Record<'claude' | 'codex' | 'cursor' | 'opencode', { available: boolean; signIn?: 'signed-in' | 'signed-out' | 'unknown' }>>;
+  /** Delay before runpane:agents:doctor answers, or `hold` to leave every check pending. */
+  agentDoctorDelayMs?: number | 'hold';
   glasses?: GlassesAccessState;
   /** setup:choose-import fails with this PaneError text instead of previewing. */
   setupImportError?: string;
@@ -509,6 +514,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         if (prop === 'onTerminalOutput') {
           return (callback: MockEventCallback) => subscribe('terminal-output', callback);
         }
+        if (prop === 'onTerminalLaunchExited') {
+          return (callback: MockEventCallback) => subscribe('terminal:launchExited', callback);
+        }
         if (prop === 'onTerminalCliReady') {
           return (callback: MockEventCallback) => subscribe('terminal:cliReady', callback);
         }
@@ -654,6 +662,22 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           shells: mockOptions.platform === 'win32' ? clone(mockOptions.availableShells ?? []) : [],
           preferredShell: configState.preferredShell ?? 'auto',
         });
+      }
+      if (channel === 'runpane:agents:doctor') {
+        // SAFETY: The renderer sends runpane:agents:doctor a { agent, repo } request.
+        const { agent } = args[0] as { agent: 'claude' | 'codex' | 'cursor' | 'opencode' };
+        const answer = mockOptions.agentDoctor?.[agent] ?? { available: true, signIn: 'unknown' };
+        const result: RunpaneAgentDoctorResult = {
+          ok: answer.available, agent, command: agent, available: answer.available, checks: [],
+        };
+        if (answer.available) result.signIn = answer.signIn ?? 'unknown';
+        if (mockOptions.agentDoctorDelayMs === 'hold') return new Promise(() => undefined);
+        return new Promise(resolve => setTimeout(() => resolve(clone(result)), mockOptions.agentDoctorDelayMs ?? 0));
+      }
+      if (channel === 'runpane:panels:resume') {
+        // SAFETY: The exit card sends runpane:panels:resume a { panelId } request.
+        const { panelId } = args[0] as { panelId: string };
+        return Promise.resolve({ ok: true, panelId, action: 'resumed' });
       }
       if (channel === 'terminal:set-preferred-shell') {
         configState.preferredShell = String(args[0]);
@@ -1667,6 +1691,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         emitNativeAppearanceUpdated(prefersDark: boolean) {
           emit('window:appearance-native-updated', { prefersDark });
+        },
+        emitTerminalLaunchExited(event: { panelId: string; sessionId: string; agent: string; elapsedMs: number; lastLine?: string }) {
+          emit('terminal:launchExited', clone(event));
         },
         emitWindowFocusChanged(focused: boolean) {
           emit('window:focus-changed', focused);

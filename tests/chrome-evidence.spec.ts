@@ -213,7 +213,7 @@ test('inspector and add-tool surfaces remain reachable', async ({ page }, testIn
   await attachScreenshot(page, testInfo, 'chrome-inspector');
 
   await page.getByRole('button', { name: 'Add tool', exact: true }).click();
-  await expect(page.getByRole('menu')).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Start an agent here' })).toBeVisible();
   await attachScreenshot(page, testInfo, 'chrome-add-tool');
 });
 
