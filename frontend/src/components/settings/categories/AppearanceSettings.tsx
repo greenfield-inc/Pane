@@ -17,6 +17,24 @@ import { useTheme } from '../../../contexts/ThemeContext';
 import { isTheme, type AppearanceMode, type Theme } from '../../../../../shared/types/appearance';
 import { THEME_OPTION_GROUPS } from '../../../utils/themeOptions';
 
+const paletteSelect = (label: string, value: Theme, onChange: (theme: Theme) => void) => (
+  <div className="w-full min-w-[220px] sm:w-60">
+    <Select value={value} onValueChange={(next) => { if (isTheme(next)) onChange(next); }}>
+      <SelectTrigger aria-label={label}><SelectValue /></SelectTrigger>
+      <SelectContent>
+        {THEME_OPTION_GROUPS.map((group) => (
+          <SelectGroup key={group.family}>
+            <SelectLabel>{group.family}</SelectLabel>
+            {group.options.map((theme) => (
+              <SelectItem key={theme.id} value={theme.id} description={theme.description}>{theme.label}</SelectItem>
+            ))}
+          </SelectGroup>
+        ))}
+      </SelectContent>
+    </Select>
+  </div>
+);
+
 export function AppearanceSettings({ persistence }: { persistence: SettingsPersistence }) {
   const config = persistence.config!;
   const scale = config.uiScale ?? 1;
@@ -26,24 +44,6 @@ export function AppearanceSettings({ persistence }: { persistence: SettingsPersi
   const saveAppearance = (settingId: 'appearance-mode' | 'theme' | 'system-light-theme' | 'system-dark-theme', patch: Parameters<typeof setAppearance>[0]) => {
     return persistence.runSave(settingId, () => setAppearance(patch));
   };
-
-  const paletteSelect = (label: string, value: Theme, onChange: (theme: Theme) => void) => (
-    <div className="w-full min-w-[220px] sm:w-60">
-      <Select value={value} onValueChange={(next) => { if (isTheme(next)) onChange(next); }}>
-        <SelectTrigger aria-label={label}><SelectValue /></SelectTrigger>
-        <SelectContent>
-          {THEME_OPTION_GROUPS.map((group) => (
-            <SelectGroup key={group.family}>
-              <SelectLabel>{group.family}</SelectLabel>
-              {group.options.map((theme) => (
-                <SelectItem key={theme.id} value={theme.id} description={theme.description}>{theme.label}</SelectItem>
-              ))}
-            </SelectGroup>
-          ))}
-        </SelectContent>
-      </Select>
-    </div>
-  );
 
   return (
     <SettingsPage title="Appearance" description="Application-wide interface and sidebar presentation.">
