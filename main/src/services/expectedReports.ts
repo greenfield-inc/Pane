@@ -87,8 +87,8 @@ export class ExpectedReportTracker {
     this.ensureLoaded();
     if (this.expectations.has(panelId) || this.raising.has(panelId)) {
       throw new PaneError('ERR_RUNPANE_REPORT_OUTSTANDING',
-        `Panel ${panelId} still owes a report or is collecting its missing report. No new work was sent. Wait for the current result.`,
-        'Wait for the current result before submitting more report-expected work.');
+        `Panel ${panelId} still owes a report for earlier work or is collecting its missing report, so this was taken as new work and not sent.`,
+        'To answer it or add to its current work, resend with --no-expect-report: Pane keeps waiting for the earlier report. To give it new work, wait for that report first.');
     }
     const expected: Expectation = pending ? { since, pending: true } : { since };
     this.expectations.set(panelId, expected);

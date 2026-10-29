@@ -7255,8 +7255,24 @@ describe('runpane IPC handlers', () => {
       await registry.invoke('runpane:panels:submit', [{ panelId: terminalPanel.id, input: 'Task A', expectReport: true }]);
       vi.mocked(terminalPanelManager.writeToTerminal).mockClear();
       await expect(registry.invoke('runpane:panels:submit', [{ panelId: terminalPanel.id, input: 'Task B', expectReport: true }]))
-        .rejects.toMatchObject({ code: 'ERR_RUNPANE_REPORT_OUTSTANDING', next: expect.stringContaining('Wait') });
+        .rejects.toMatchObject({ code: 'ERR_RUNPANE_REPORT_OUTSTANDING', next: expect.stringContaining('--no-expect-report') });
       expect(terminalPanelManager.writeToTerminal).not.toHaveBeenCalled();
+    });
+
+    it('delivers a reply to a worker that owes a report and keeps waiting for that report', async () => {
+      stored = structuredClone(terminalPanel);
+      vi.mocked(terminalPanelManager.getForegroundProcess).mockReturnValue({ name: 'zsh', isShell: true });
+      const services = createServices({ workspaceJournal: new WorkspaceJournal() });
+      const registry = createRegistry(services);
+      // SAFETY: The panels:submit handler resolves to a RunpanePanelSubmitResult.
+      const task = await registry.invoke('runpane:panels:submit', [{ panelId: terminalPanel.id, input: 'Task A', expectReport: true }]) as { expectedReport?: { since: string } };
+      vi.mocked(terminalPanelManager.writeToTerminal).mockClear();
+
+      await registry.invoke('runpane:panels:submit', [{ panelId: terminalPanel.id, input: 'answer: Q-1 → invoice id', expectReport: false }]);
+
+      expect(terminalPanelManager.writeToTerminal).toHaveBeenCalledWith(terminalPanel.id, expect.stringContaining('answer: Q-1 → invoice id'));
+      expect(services.expectedReportTracker?.expectation(terminalPanel.id)).toEqual(task.expectedReport);
+      services.workspaceJournal?.appendPaneEntry(session.id, { kind: 'agent.report', panelId: terminalPanel.id, source: 'agent' });
     });
 
     it('tracks completion during the delivery call before verification returns', async () => {

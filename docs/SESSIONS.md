@@ -997,10 +997,12 @@ the task's outcome can no longer be established from that history. Like
 `--follow`'s settling or batching, and since it exits on the event, a plain
 background task is enough (no line-delivering monitor). Claude
 Code wakes the orchestrator when the background call exits, and the line
-arrives as the tool result. To answer a blocked worker, send the answer with
-`panels submit --no-expect-report`, then watch for the original work's result.
-Report-expected work is serialized per panel: a new dispatch is refused before
-writing while an expectation or missing-output collection is outstanding.
+arrives as the tool result. Report-expected work is serialized per panel: a
+new dispatch is refused before writing while an expectation or missing-output
+collection is outstanding. A send with `--no-expect-report` (`panels submit` or
+`agents send`) is a reply, such as an answer to the worker's question or an
+addition to its current work: it is delivered while a report is outstanding,
+and Pane keeps waiting for the original work's report.
 Held starting input is reserved but does not count startup readiness as task
 completion; tracking activates immediately before the prompt's submit or launch.
 
