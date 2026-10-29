@@ -158,7 +158,7 @@ with the same arguments, stdin, stdout, stderr and exit code
   `runpane update` in `runpane-override.json`, else the version line
   (`// runpane-version <version>`) that `main/build-runpane-cli.js` writes at
   the top of `runpane.cjs`. A pin whose runtime or entry point is gone does
-  not count. Without `--pane-dir` or `PANE_DIR`, the npm CLI also
+  not count (Windows paths seen from WSL are left to the shim). Without `--pane-dir` or `PANE_DIR`, the npm CLI also
   looks for a Pane-managed shim on `PATH`, which is how a distro `runpane`
   finds Windows Pane's under WSL.
 - On macOS, Linux and WSL it runs the `runpane` shim with `/bin/sh`. On

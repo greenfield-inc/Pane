@@ -90,6 +90,16 @@ test('npm runpane runs itself when the managed version pin points at removed fil
   assert.equal(result.stdout.trim(), 'runpane 2.4.100');
 });
 
+test('npm runpane under WSL still hands off to a Windows Pane whose pin holds Windows paths', { skip: process.platform === 'win32' }, () => {
+  const root = scratch();
+  const npm = npmPrefix(root, '2.4.100');
+  const pane = paneDir(root, '2.4.207');
+  fs.writeFileSync(path.join(pane.bin, 'runpane-override.json'), JSON.stringify({
+    version: '2.4.300', entrypoint: 'C:\\Users\\me\\.pane\\bin\\cli\\cli.js', runtime: 'C:\\Program Files\\Pane\\Pane.exe',
+  }));
+  assert.equal(run(npm.cli, ['--version'], { PANE_DIR: pane.dir }).status, 7);
+});
+
 for (const signal of ['SIGTERM', 'SIGINT']) {
   test(`${signal} to the npm runpane reaches the managed CLI once, and its exit code comes back`, { skip: process.platform === 'win32', timeout: 10_000 }, async () => {
     const root = scratch();

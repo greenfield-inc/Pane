@@ -48,7 +48,9 @@ function readManagedCli(binDir: string): ManagedCli | null {
         runtime: boundary.nonEmptyString,
       }));
       // The shim runs the pin with no fallback, so a pin to removed files cannot run anything.
-      if (!isFile(pin.runtime) || !isFile(pin.entrypoint)) return null;
+      // Under WSL a Windows Pane's pin holds Windows paths, which only its shim can resolve.
+      const missing = (file: string) => path.isAbsolute(file) && !isFile(file);
+      if (missing(pin.runtime) || missing(pin.entrypoint)) return null;
       return { version: pin.version, binDir, shim, runtime: pin.runtime, entrypoint: pin.entrypoint };
     }
     const entrypoint = path.join(binDir, 'runpane.cjs');
