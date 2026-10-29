@@ -113,6 +113,10 @@ function RootStack({ signedIn }: { signedIn: boolean }) {
           options={{ presentation: 'formSheet', sheetAllowedDetents: [0.75, 1], sheetGrabberVisible: true, headerShown: false }}
         />
         <Stack.Screen
+          name="new"
+          options={{ presentation: 'formSheet', sheetAllowedDetents: 'fitToContents', sheetGrabberVisible: true, headerShown: false }}
+        />
+        <Stack.Screen
           name="pane/new"
           options={{ presentation: 'formSheet', sheetAllowedDetents: [0.75, 1], sheetGrabberVisible: true, headerShown: false }}
         />

@@ -6,8 +6,10 @@ name: Pane list journeys
 - runFlow: subflows/signed-in.yaml
 - evalScript: ${output.pane = 'mae-' + Date.now().toString(36)}
 
-# Create from the header "+": repository and base branch default, pick an
+# Create from home's "+", then New Pane: repository and base branch default, pick an
 # agent, name the pane.
+- tapOn:
+    id: home-new
 - tapOn:
     id: panes-new
 - extendedWaitUntil:
