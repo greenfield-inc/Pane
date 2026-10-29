@@ -37,6 +37,7 @@ export function MachineDetails({ machineId, controller, onBack, onNeedsPassword 
     );
   }
 
+  const profile = machine.profile;
   const localName = local.name === THIS_COMPUTER ? 'this computer' : local.name;
   const address = machine.tailnet ? machine.tailnet.dnsName : machine.profile ? phoneAddress(machine.profile.baseUrl) : null;
   const colorName = MACHINE_COLOR_NAMES[machine.slot];
@@ -126,8 +127,8 @@ export function MachineDetails({ machineId, controller, onBack, onNeedsPassword 
             {machine.action === 'retry' ? 'Retry' : 'Switch'}
           </Button>
         ) : <span />}
-        {machine.profile && (
-          <Button type="button" variant="ghost" size="sm" className="text-status-error" disabled={controller.busy} onClick={() => void forget(machine.profile?.id ?? '')}>
+        {profile && (
+          <Button type="button" variant="ghost" size="sm" className="text-status-error" disabled={controller.busy} onClick={() => void forget(profile.id)}>
             Forget {machine.name}
           </Button>
         )}

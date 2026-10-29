@@ -69,14 +69,16 @@ export function RemoteAccessSettings({ controller, onOpenSubview, onOpenMachine,
       {controller.loading && (
         <p className="text-sm text-text-tertiary" aria-live="polite">Loading Remote Pane status...</p>
       )}
-      {[controller.error, selectError].map((message, index) => message && (
-        <div key={index} className="flex items-center justify-between gap-3 rounded-md border border-status-error/30 bg-status-error/10 p-3 text-sm text-text-primary" role="alert">
-          <span>{message}</span>
-          {index === 0
-            ? <Button type="button" variant="secondary" size="sm" onClick={() => void controller.reload()}>Retry</Button>
-            : <Button type="button" variant="ghost" size="sm" onClick={() => setSelectError(null)}>Dismiss</Button>}
-        </div>
-      ))}
+      {controller.error && (
+        <ErrorBanner message={controller.error}>
+          <Button type="button" variant="secondary" size="sm" onClick={() => void controller.reload()}>Retry</Button>
+        </ErrorBanner>
+      )}
+      {selectError && (
+        <ErrorBanner message={selectError}>
+          <Button type="button" variant="ghost" size="sm" onClick={() => setSelectError(null)}>Dismiss</Button>
+        </ErrorBanner>
+      )}
 
       <ActiveMachineCard
         machine={active}
@@ -170,6 +172,15 @@ export function RemoteAccessSettings({ controller, onOpenSubview, onOpenMachine,
         </SettingRow>
       </RemoteGroup>
     </SettingsPage>
+  );
+}
+
+function ErrorBanner({ message, children }: { message: string; children: ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-md border border-status-error/30 bg-status-error/10 p-3 text-sm text-text-primary" role="alert">
+      <span>{message}</span>
+      {children}
+    </div>
   );
 }
 
@@ -363,10 +374,10 @@ function PhoneRows({ controller }: { controller: RemoteAccessController }) {
           </PhoneRow>
         );
       })}
-      {unpaired.map((client) => (
-        <PhoneRow key={client.id} title={client.deviceLabel ?? client.label ?? client.remoteAddress ?? 'A device'} detail="Connected now">
-          {client.clientId && (
-            <Button type="button" variant="ghost" size="sm" disabled={controller.busy} onClick={() => controller.disconnectClients([client.clientId ?? ''])}>Disconnect</Button>
+      {unpaired.map(({ id, clientId, deviceLabel, label, remoteAddress }) => (
+        <PhoneRow key={id} title={deviceLabel ?? label ?? remoteAddress ?? 'A device'} detail="Connected now">
+          {clientId && (
+            <Button type="button" variant="ghost" size="sm" disabled={controller.busy} onClick={() => controller.disconnectClients([clientId])}>Disconnect</Button>
           )}
         </PhoneRow>
       ))}

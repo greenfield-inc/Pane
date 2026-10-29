@@ -1,6 +1,6 @@
 import { assignMachineColorSlots, preferredMachineColorSlot } from '../../../shared/utils/machineColor';
 import type { TailnetMachine, TailnetMachineList } from '../../../shared/types/workspaceAccess';
-import type { RemotePaneConnectionProfile, RemotePaneConnectionState } from '../../../shared/types/remoteDaemon';
+import type { RemoteDaemonHostRuntimeState, RemotePaneConnectionProfile, RemotePaneConnectionState } from '../../../shared/types/remoteDaemon';
 
 export type MachineOs = TailnetMachine['os'];
 
@@ -156,7 +156,7 @@ export function buildMachineList({ connectionState, profiles, tailnet, localName
       profile,
     }, {
       presence: tailnet?.ok ? 'dimmed' : 'solid',
-      stateText: tailnet?.ok ? 'Not on Tailscale' : 'Saved',
+      stateText: tailnet?.ok ? 'Not on this tailnet' : 'Saved',
       action: 'switch',
     }));
 
@@ -175,7 +175,7 @@ export function buildMachineList({ connectionState, profiles, tailnet, localName
 }
 
 /** Set when this machine is also hosting, so the switcher can link to it. */
-export function getHostingSummary(hostState: { status: string; connectedClients: readonly unknown[] }): string | null {
+export function getHostingSummary(hostState: Pick<RemoteDaemonHostRuntimeState, 'status' | 'connectedClients'>): string | null {
   const clientCount = hostState.connectedClients.length;
   if (hostState.status === 'live') return `Hosting · ${clientCount} ${clientCount === 1 ? 'client' : 'clients'} connected`;
   return hostState.status === 'error' ? 'Hosting offline' : null;
