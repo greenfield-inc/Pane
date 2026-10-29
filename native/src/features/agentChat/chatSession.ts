@@ -111,7 +111,9 @@ export class ChatSession {
         const current = this.state.view;
         if (current?.transcript && transcript && current.transcript.generation === transcript.generation && current.transcript.revision > transcript.revision) transcript = current.transcript;
         const state = current && this.stateRevision > startingRevision && current.conversation?.generation === view.conversation?.generation ? current : view;
-        this.publish({ view: { ...state, transcript }, error: this.state.pendingDelivery ? this.state.error : undefined });
+        // Out of automatic reloads with events still missing: say so, so the person can reload.
+        const unresolved = gap && !repair ? 'The conversation kept changing while it reloaded. Refresh to load the latest messages.' : undefined;
+        this.publish({ view: { ...state, transcript }, error: unresolved ?? (this.state.pendingDelivery ? this.state.error : undefined) });
       } else if (this.state.view?.conversation?.active === 'chat' && !this.state.view.transcript) {
         // A handoff can finish while the older generation's request is in
         // flight. Its response cannot supply the new owner's history.

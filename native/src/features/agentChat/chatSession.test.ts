@@ -130,6 +130,25 @@ describe('native Chat viewer', () => {
     expect(session.snapshot().error).toBeUndefined();
   });
 
+  it('asks for a refresh once the conversation keeps changing through every automatic reload', async () => {
+    const { session, transport, setHost, getHost } = fixture();
+    const message = (revision: number) => ({ panelId: 'panel-a', generation: 2, revision, messages: [{ id: 'answer', role: 'assistant' as const, parts: [{ type: 'text' as const, text: `as of ${revision}` }] }] });
+    const event = (revision: number): AgentChatEvent => ({ panelId: 'panel-a', generation: 2, revision, change: { type: 'append', id: 'answer', role: 'assistant', part: { type: 'text', text: '.' } } });
+    const loads: Array<(view: AgentChatView) => void> = [];
+    transport.get.mockImplementation(() => new Promise(done => { loads.push(done); }));
+    const refresh = session.refresh();
+    // Every load misses an event: snapshots at revisions 0, 2, 4, 6 while the phone saw 2, 4, 6, 8.
+    for (let load = 0; load < 4; load += 1) {
+      await vi.waitFor(() => expect(loads).toHaveLength(load + 1));
+      session.receiveEvent(event(2 * load + 2));
+      setHost({ ...getHost(), transcript: message(2 * load) });
+      loads[load]?.(structuredClone(getHost()));
+    }
+    await refresh;
+    expect(loads).toHaveLength(4);
+    expect(session.snapshot().error).toBe('The conversation kept changing while it reloaded. Refresh to load the latest messages.');
+  });
+
   it('retries only the explicitly selected uncertain operation and keeps it when leaving the viewer', async () => {
     const { session, transport } = fixture();
     const detach = session.subscribe(() => undefined);
