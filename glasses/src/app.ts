@@ -26,6 +26,7 @@ import {
   terminalPage,
   voiceAnswerPage,
 } from './screens';
+import { trimChrome } from './terminal';
 import type { Cancel } from './timers';
 
 /** How often an open terminal reads the host's screen, and faster while its agent works. */
@@ -33,6 +34,11 @@ const SCREEN_POLL_MS = 1_000;
 const SCREEN_POLL_WORKING_MS = 500;
 /** How many terminal lines a card shows as context. */
 const CARD_CONTEXT_LINES = 6;
+/** Earlier screen reads kept to spot a footer that never changes. */
+const EARLIER_READS = 3;
+
+/** The rows the terminal view shows: the whole screen, or the output above the agent's input box. */
+const shownRows = (rows: readonly string[], full: boolean, earlier: readonly string[][] = []) => (full ? [...rows] : trimChrome(rows, earlier));
 
 export interface AppDeps {
   source: PaneSource;
@@ -50,7 +56,12 @@ export interface AppDeps {
 interface TerminalState {
   computerId: string;
   entry: PaneEntry;
-  /** The live screen, wrapped. */
+  /** The screen's rows from the last read, and a few reads before it, oldest first. */
+  screen: string[];
+  earlier: string[][];
+  /** The whole screen, input box and status rows included; press toggles it while live. */
+  full: boolean;
+  /** What the live view shows of the screen, wrapped. */
   lines: string[];
   /** Older output, wrapped; loaded on the first swipe up. */
   scrollback: string[] | null;
@@ -191,7 +202,7 @@ export class GlassesApp {
         return view.entries ? panesPage(name, view.entries, this.panesStart(view.computerId, view.entries)) : loadingPage(`${name} · Sessions and Panes`, 'Loading…');
       }
       case 'terminal':
-        return terminalPage({ entry: view.entry, lines: this.visibleLines(view), scrolledUp: view.scrolledUp, footer: terminalFooter(this.elsewhere(view)) });
+        return terminalPage({ entry: view.entry, lines: this.visibleLines(view), scrolledUp: view.scrolledUp, full: view.full, footer: terminalFooter(this.elsewhere(view)) });
       case 'dictation':
         return dictationPage(view.entry, view.lines, view.transcript);
       case 'refused': {
@@ -349,7 +360,7 @@ export class GlassesApp {
     void this.deps.source.screen(card.computerId, card.panelId).then((screen) => {
       const view = this.view;
       if (view.name !== 'card' || view.key !== card.key) return;
-      this.view = { ...view, context: screen.lines.filter((line) => line.trim()).slice(-CARD_CONTEXT_LINES) };
+      this.view = { ...view, context: trimChrome(screen.lines).filter((line) => line.trim()).slice(-CARD_CONTEXT_LINES) };
       this.render();
     }, () => {
       // Context is a nicety: the card works without the terminal lines.
@@ -490,7 +501,7 @@ export class GlassesApp {
   private openTerminal(computerId: string, entry: PaneEntry): void {
     this.resumed = null;
     this.markViewed(computerId, entry);
-    this.go({ name: 'terminal', computerId, entry, lines: [], scrollback: null, scrolledUp: 0 });
+    this.go({ name: 'terminal', computerId, entry, screen: [], earlier: [], full: false, lines: [], scrollback: null, scrolledUp: 0 });
     this.stopPolling();
     void this.refreshScreen();
   }
@@ -516,8 +527,11 @@ export class GlassesApp {
       }
       const current = this.view;
       if ((current.name === 'terminal' || current.name === 'dictation') && current.entry.panelId === entry.panelId) {
-        this.view = { ...current, lines: terminalLines(screen.lines.join('\n')), entry: { ...current.entry, status: screen.status, agent: screen.agent } };
-        if (current.name === 'terminal') this.render();
+        const earlier = [...current.earlier, current.screen].filter((rows) => rows.length).slice(-EARLIER_READS);
+        const lines = terminalLines(shownRows(screen.lines, current.full, earlier));
+        this.view = { ...current, screen: screen.lines, earlier, lines, entry: { ...current.entry, status: screen.status, agent: screen.agent } };
+        // Scrolled up, the view stays where the person put it; press brings them back to live.
+        if (current.name === 'terminal' && !current.scrolledUp) this.render();
       }
     } catch (error) {
       if (this.view.name === 'terminal') {
@@ -554,10 +568,13 @@ export class GlassesApp {
         this.view = { ...view, scrolledUp: Math.max(0, view.scrolledUp - (TERMINAL_LINES - 1)) };
         this.render();
         return;
-      case 'press':
-        this.view = { ...view, scrolledUp: 0, scrollback: null };
+      case 'press': {
+        // Press returns to live; on live it shows the whole screen, or the output alone again.
+        const full = view.scrolledUp ? view.full : !view.full;
+        this.view = { ...view, full, lines: terminalLines(shownRows(view.screen, full, view.earlier)), scrolledUp: 0, scrollback: null };
         this.render();
         return;
+      }
       case 'hold':
         void this.startDictation({ ...view, scrolledUp: 0 });
         return;
@@ -573,10 +590,11 @@ export class GlassesApp {
   }
 
   private async scrollUp(view: Extract<View, { name: 'terminal' }>): Promise<void> {
-    let scrollback = view.scrollback;
+    // Leaving live reads Pane's saved output afresh; later swipes page through that copy.
+    let scrollback = view.scrolledUp ? view.scrollback : null;
     if (!scrollback) {
       try {
-        scrollback = terminalLines((await this.deps.source.scrollback(view.computerId, view.entry.panelId)).join('\n'));
+        scrollback = terminalLines(shownRows(await this.deps.source.scrollback(view.computerId, view.entry.panelId), view.full));
       } catch (error) {
         this.showProblem(view.entry.name, error, view);
         return;

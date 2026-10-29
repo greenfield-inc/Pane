@@ -2,6 +2,7 @@
 // Each returns a page of boxes at G2 scale; nothing here touches the bridge.
 import { BRIGHT, DIM, DIMMER, LIST_PAD, type Box, type Brightness, type ListBox, type Page, type TextBox } from './display';
 import type { Card, Computer, HostRefusal, PaneEntry, PaneRow } from './model';
+import { isRule } from './terminal';
 import { LINE_H, SCREEN_H, SCREEN_W, fitLine, wrap, wrapClamped } from './text';
 
 const BAR_H = 32;
@@ -282,9 +283,11 @@ export function panesPage(computerName: string, rows: readonly PaneRow[], start 
 
 export const TERMINAL_LINES = linesFor(FOOTER_Y - BAR_H, BAR_PAD);
 
-/** Rewraps terminal text to the glasses' width, keeping blank lines. */
-export function terminalLines(text: string): string[] {
-  return wrap(text.replace(/\s+$/, ''), innerWidth(BAR_PAD));
+/** Rewraps terminal rows to the glasses' width, keeping blank lines; a rule stays one line. */
+export function terminalLines(rows: readonly string[]): string[] {
+  const lines = rows.flatMap((row) => (isRule(row) ? [fitLine(row.trim(), innerWidth(BAR_PAD))] : wrap(row, innerWidth(BAR_PAD))));
+  while (lines.length && !lines.at(-1)?.trim()) lines.pop();
+  return lines;
 }
 
 /** T3's footer: the newest card from another Pane, bright, or "all clear elsewhere", dimmed. */
@@ -305,6 +308,8 @@ export interface TerminalView {
   lines: readonly string[];
   /** Lines above live; 0 is live. */
   scrolledUp: number;
+  /** The whole screen, input box and status rows included. */
+  full?: boolean;
   footer: FooterLine;
 }
 
@@ -313,7 +318,7 @@ export function terminalPage(view: TerminalView): Page {
   const { entry } = view;
   const title = view.scrolledUp
     ? `${entry.name} · scrolled up ${view.scrolledUp} lines · press = live`
-    : `${entry.name} · ${entry.agent} · ${entry.status}`;
+    : `${entry.name} · ${entry.agent} · ${entry.status}${view.full ? ' · full screen' : ''}`;
   return {
     boxes: [
       header(title),

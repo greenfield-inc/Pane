@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Display, type Page } from '../src/display';
 import { FakeBridge } from './fakeBridge';
 
@@ -20,6 +20,10 @@ const listPage: Page = {
 };
 
 describe('Display', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('creates the startup page once, then upgrades only the text that changed', async () => {
     const bridge = new FakeBridge();
     const display = new Display(bridge);
@@ -28,6 +32,18 @@ describe('Display', () => {
     expect(bridge.calls.map((call) => call.method)).toEqual(['create', 'upgrade']);
     const upgrade = bridge.calls[1];
     expect(upgrade?.method === 'upgrade' && [upgrade.update.containerID, upgrade.update.containerName, upgrade.update.content]).toEqual([2, 'body', 'second']);
+  });
+
+  it('counts only real writes as writes, so a poll that changes nothing never blocks a swipe', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const display = new Display(new FakeBridge());
+    vi.setSystemTime(1_000);
+    await display.show(page('1/2', 'first'));
+    vi.setSystemTime(5_000);
+    await display.show(page('1/2', 'first'));
+    expect(display.lastWriteAt).toBe(1_000);
+    await display.show(page('1/2', 'second'));
+    expect(display.lastWriteAt).toBe(5_000);
   });
 
   it('redraws a whole new screen at once, so no frame mixes the old body with the new header', async () => {
