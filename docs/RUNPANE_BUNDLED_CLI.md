@@ -153,10 +153,12 @@ An npm `runpane` older than Pane's CLI hands each invocation to Pane's CLI,
 with the same arguments, stdin, stdout, stderr and exit code
 (`packages/runpane/src/managedCli.ts`):
 
-- Pane's CLI is the one in `<PANE_DIR>/bin`: the version pinned by
+- Pane's CLI is the one in `<dir>/bin`, where `<dir>` is the invocation's
+  `--pane-dir` (before any `--`), else `PANE_DIR`: the version pinned by
   `runpane update` in `runpane-override.json`, else the version line
   (`// runpane-version <version>`) that `main/build-runpane-cli.js` writes at
-  the top of `runpane.cjs`. Without an explicit `PANE_DIR`, the npm CLI also
+  the top of `runpane.cjs`. A pin whose runtime or entry point is gone does
+  not count (Windows paths seen from WSL are left to the shim). Without `--pane-dir` or `PANE_DIR`, the npm CLI also
   looks for a Pane-managed shim on `PATH`, which is how a distro `runpane`
   finds Windows Pane's under WSL.
 - On macOS, Linux and WSL it runs the `runpane` shim with `/bin/sh`. On
@@ -165,7 +167,12 @@ with the same arguments, stdin, stdout, stderr and exit code
 - The npm CLI runs itself when there is no Pane install, when it is the same
   version or newer, or when the hand-off cannot start.
 - The hand-off sets `RUNPANE_NO_HANDOFF=1` for the CLI it runs, so it happens
-  at most once. Set it yourself to run a specific npm version.
+  at most once. Set it yourself to run a specific npm version. `runpane
+  update` sets it for the version checks of the CLI it stages and installs.
+- Signals sent to the npm CLI's pid reach Pane's CLI once. From a terminal,
+  Ctrl-C and Ctrl-\ reach both through their shared process group; without a
+  terminal on stdin, Pane's CLI runs in its own process group and the npm CLI
+  forwards every signal.
 
 `runpane doctor` lists every `runpane` on `PATH` in resolution order, with its
 version and origin (Pane-managed, npm global with its prefix, or other), under
@@ -175,9 +182,12 @@ version and origin (Pane-managed, npm global with its prefix, or other), under
   `npm i -g --prefix <prefix> runpane@<version>`.
 - `RUNPANE_STALE_UNMANAGED`: a `runpane` that neither npm nor Pane installed
   comes before Pane's CLI and is older or of unknown version. Fix: remove it.
-- `RUNPANE_MANAGED_BEHIND`: an npm install is newer than Pane's CLI. Fix:
-  `<PANE_DIR>/bin/runpane update`, which updates Pane's CLI (`runpane update`
-  updates the CLI that runs it).
+- `RUNPANE_STALE_MANAGED`: another Pane-managed `runpane` on `PATH` is older
+  than Pane's CLI. Fix: `<its dir>/bin/runpane update --pane-dir <its dir>`.
+- `RUNPANE_MANAGED_BEHIND`: an npm install or another Pane-managed `runpane`
+  is newer than Pane's CLI. Fix: `<PANE_DIR>/bin/runpane update --pane-dir
+  <PANE_DIR>`, which updates Pane's CLI (`runpane update` updates the CLI
+  that runs it).
 
 `runpane doctor --fix` runs the `RUNPANE_STALE_INSTALL` fixes, reports each
 under `fixed`, then checks again. It never removes a file. The Python CLI

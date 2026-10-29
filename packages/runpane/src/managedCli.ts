@@ -47,6 +47,10 @@ function readManagedCli(binDir: string): ManagedCli | null {
         entrypoint: boundary.nonEmptyString,
         runtime: boundary.nonEmptyString,
       }));
+      // The shim runs the pin with no fallback, so a pin to removed files cannot run anything.
+      // Under WSL a Windows Pane's pin holds Windows paths, which only its shim can resolve.
+      const missing = (file: string) => path.isAbsolute(file) && !isFile(file);
+      if (missing(pin.runtime) || missing(pin.entrypoint)) return null;
       return { version: pin.version, binDir, shim, runtime: pin.runtime, entrypoint: pin.entrypoint };
     }
     const entrypoint = path.join(binDir, 'runpane.cjs');
@@ -67,27 +71,40 @@ function findManagedCli(paneDir?: string): ManagedCli | null {
   return pathDirectories().map(readManagedCli).find(cli => cli !== null) ?? null;
 }
 
+/** The `--pane-dir` the invocation names, as the parser reads it: the last one before `--`. */
+function explicitPaneDir(argv: string[]): string | undefined {
+  let paneDir: string | undefined;
+  for (let index = 0; index < argv.length && argv[index] !== '--'; index += 1) {
+    if (argv[index] === '--pane-dir') paneDir = argv[++index];
+    else if (argv[index].startsWith('--pane-dir=')) paneDir = argv[index].slice('--pane-dir='.length);
+  }
+  return paneDir || undefined;
+}
+
 /**
  * When the Pane-managed CLI is newer than this one, run the whole invocation
  * there and return its exit code. Null means this CLI should run it.
  */
 export async function handOffToManagedCli(argv: string[]): Promise<number | null> {
   if (process.env[NO_HANDOFF_ENV]) return null;
-  const managed = findManagedCli();
+  const managed = findManagedCli(explicitPaneDir(argv));
   if (!managed || compareVersions(managed.version, getWrapperVersion()) <= 0) return null;
   const env = { ...process.env, [NO_HANDOFF_ENV]: '1' };
+  // From a terminal, Ctrl-C and Ctrl-\ reach the child through the process group
+  // it shares with this CLI, so forwarding them would deliver them twice. Without
+  // a terminal the child gets its own group and every signal is forwarded once.
+  const ownGroup = process.platform !== 'win32' && !process.stdin.isTTY;
   const child = process.platform === 'win32'
     ? spawn(managed.runtime ?? process.execPath, [managed.entrypoint, ...argv], {
       stdio: 'inherit',
       env: { PANE_DIR: path.dirname(managed.binDir), ...env },
     })
-    : spawn('/bin/sh', [managed.shim, ...argv], { stdio: 'inherit', env });
-  // Ctrl-C and Ctrl-\ already reach the child through the terminal's process
-  // group, so this CLI only outlives them; signals aimed at this pid go on to the child.
+    : spawn('/bin/sh', [managed.shim, ...argv], { stdio: 'inherit', env, detached: ownGroup });
   const forward = (signal: NodeJS.Signals) => { child.kill(signal); };
+  const interrupt = (signal: NodeJS.Signals) => () => { if (ownGroup) forward(signal); };
   const handlers: Array<[NodeJS.Signals, () => void]> = [
-    ['SIGINT', () => {}],
-    ['SIGQUIT', () => {}],
+    ['SIGINT', interrupt('SIGINT')],
+    ['SIGQUIT', interrupt('SIGQUIT')],
     ['SIGTERM', () => forward('SIGTERM')],
     ['SIGHUP', () => forward('SIGHUP')],
   ];
@@ -119,7 +136,7 @@ function listRunpaneInstalls(): RunpaneInstall[] {
 }
 
 interface CliInstallWarning {
-  code: 'RUNPANE_STALE_INSTALL' | 'RUNPANE_STALE_UNMANAGED' | 'RUNPANE_MANAGED_BEHIND';
+  code: 'RUNPANE_STALE_INSTALL' | 'RUNPANE_STALE_UNMANAGED' | 'RUNPANE_STALE_MANAGED' | 'RUNPANE_MANAGED_BEHIND';
   path: string;
   message: string;
   /** The command that resolves it. `doctor --fix` runs it only for RUNPANE_STALE_INSTALL. */
@@ -147,23 +164,40 @@ export function checkCliInstalls(paneDir?: string): CliInstallsCheck {
   if (!managed) return { installs, warnings: [] };
   const managedVersion = managed.version;
   const firstPane = installs.findIndex(install => install.origin === 'pane');
+  // --pane-dir points `update` at the shim's own Pane when PANE_DIR names another.
+  const updateFix = (binDir: string) => `${quoteArgument(path.join(binDir, process.platform === 'win32' ? 'runpane.cmd' : 'runpane'))} update --pane-dir ${quoteArgument(path.dirname(binDir))}`;
   const warnings: CliInstallWarning[] = [];
   installs.forEach((install, index) => {
     const order = index === 0 ? ', and it runs first on PATH' : '';
     const older = install.version !== undefined && compareVersions(install.version, managedVersion) < 0;
-    if (install.origin === 'npm' && install.npmPrefix && older) {
+    const newer = install.version !== undefined && compareVersions(install.version, managedVersion) > 0;
+    if (install.origin === 'pane' && older) {
+      warnings.push({
+        code: 'RUNPANE_STALE_MANAGED',
+        path: install.path,
+        message: `Pane-managed runpane ${install.version} at ${install.path} is older than Pane's CLI ${managedVersion}${order}.`,
+        fix: updateFix(path.dirname(install.path)),
+      });
+    } else if (install.origin === 'pane' && newer) {
+      warnings.push({
+        code: 'RUNPANE_MANAGED_BEHIND',
+        path: install.path,
+        message: `Pane's CLI ${managedVersion} is older than Pane-managed runpane ${install.version} at ${install.path}.`,
+        fix: updateFix(managed.binDir),
+      });
+    } else if (install.origin === 'npm' && install.npmPrefix && older) {
       warnings.push({
         code: 'RUNPANE_STALE_INSTALL',
         path: install.path,
         message: `npm runpane ${install.version} at ${install.path} is older than Pane's CLI ${managedVersion}${order}.`,
         fix: `npm i -g --prefix ${quoteArgument(install.npmPrefix)} runpane@${managedVersion}`,
       });
-    } else if (install.origin === 'npm' && install.version && compareVersions(install.version, managedVersion) > 0) {
+    } else if (install.origin === 'npm' && newer) {
       warnings.push({
         code: 'RUNPANE_MANAGED_BEHIND',
         path: install.path,
         message: `Pane's CLI ${managedVersion} is older than npm runpane ${install.version} at ${install.path}.`,
-        fix: `${quoteArgument(path.join(managed.binDir, process.platform === 'win32' ? 'runpane.cmd' : 'runpane'))} update`,
+        fix: updateFix(managed.binDir),
       });
     } else if (install.origin === 'other' && (older || install.version === undefined) && (firstPane === -1 || index < firstPane)) {
       warnings.push({
