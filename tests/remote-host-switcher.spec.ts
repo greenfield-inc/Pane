@@ -79,10 +79,33 @@ test('a machine that needs a password opens its password field in Remote Access'
 
   const field = page.getByLabel('Password for build-box');
   await expect(field).toBeFocused();
-  await field.fill('correct horse');
+  // Focus stays in the field after Settings settles, so typing right away lands there.
+  await page.waitForTimeout(400);
+  await page.keyboard.type('correct horse');
+  await expect(field).toHaveValue('correct horse');
   await page.getByTestId('machine-build-box').getByRole('button', { name: 'Connect' }).click();
-  await expect(page.getByTestId('active-machine')).toContainText('build-box');
+  await expect(page.getByTestId('active-machine')).toContainText('Linux · Agents run here');
 });
+
+test('the active machine asks for a new password from the menu', async ({ page }) => {
+  await installElectronApiMock(page, { tailnetMachines, remoteConnectError: 'build-box refused the password.' });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Agents run on devbox. Switch machine' }).click();
+  await page.getByRole('menuitemradio', { name: /build-box/ }).click();
+  await page.getByLabel('Password for build-box').fill('wrong horse');
+  await page.getByTestId('machine-build-box').getByRole('button', { name: 'Connect' }).click();
+  const active = page.getByTestId('active-machine');
+  await expect(active).toContainText('Linux · Needs password');
+
+  await page.getByRole('button', { name: 'Back', exact: true }).first().click();
+  await page.getByRole('button', { name: 'Agents run on build-box. Switch machine' }).click();
+  await page.getByRole('menuitemradio', { name: /build-box/ }).click();
+  const field = active.getByLabel('Password for build-box');
+  await expect(field).toBeFocused();
+  await page.waitForTimeout(400);
+  await expect(field).toBeFocused();
+});
+
 
 const repositories = [
   {

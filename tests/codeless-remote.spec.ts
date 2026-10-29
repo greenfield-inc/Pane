@@ -69,7 +69,25 @@ test.describe('Remote Access', () => {
     await builder.getByLabel('Password for team-builder').fill('correct horse');
     await page.screenshot({ path: 'test-results/codeless-remote/03-password-prompt.png', fullPage: true });
     await builder.getByRole('button', { name: 'Connect' }).click();
-    await expect(page.getByTestId('active-machine')).toContainText('team-builder');
+    await expect(page.getByTestId('active-machine')).toContainText('Windows · Agents run here');
+  });
+
+  test('repairs the active machine\'s password from its card', async ({ page }) => {
+    await openRemoteAccess(page, { remoteConnectError: 'team-builder refused the password.' });
+    const builder = page.getByTestId('machine-team-builder');
+    await builder.getByRole('button', { name: 'Switch to team-builder' }).click();
+    await builder.getByLabel('Password for team-builder').fill('wrong horse');
+    await builder.getByRole('button', { name: 'Connect' }).click();
+
+    const active = page.getByTestId('active-machine');
+    await expect(active).toContainText('Windows · Needs password');
+    await active.getByRole('button', { name: 'Enter password' }).click();
+    const field = active.getByLabel('Password for team-builder');
+    await expect(field).toBeFocused();
+    await field.fill('correct horse');
+    await page.screenshot({ path: 'test-results/codeless-remote/09-active-password.png', fullPage: true });
+    await active.getByRole('button', { name: 'Connect' }).click();
+    await expect(active).toContainText('team-builder refused the password.');
   });
 
   test('shows a machine\'s details and forgets a saved one', async ({ page }) => {

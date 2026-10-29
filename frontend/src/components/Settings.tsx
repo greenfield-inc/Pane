@@ -113,7 +113,8 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
       setRemoteMachineId(undefined);
       if (openRequest.target.setting === 'remote-add-code') setAddCodeRequest(openRequest.nonce);
       if (openRequest.target.machine) askMachinePassword(openRequest.target.machine);
-      focusSetting(openRequest.target.setting);
+      // A machine's password field takes focus itself once its row is listed.
+      if (!openRequest.target.machine) focusSetting(openRequest.target.setting);
     });
     onOpenRequestHandled();
   }, [askMachinePassword, focusSetting, isOpen, onCategoryChange, onOpenRequestHandled, openRequest, requestTransition]);

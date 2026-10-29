@@ -87,7 +87,11 @@ export function RemoteAccessSettings({ controller, onOpenSubview, onOpenMachine,
         connectedOverTailscale={active.kind === 'tailnet' && connectionState.status === 'connected'}
         switching={switchingId !== null}
         onSwitchBack={() => void pick(local)}
-        onRetry={() => void pick(active)}
+        onPick={(withPassword) => void pick(active, withPassword)}
+        password={password?.id === active.id ? password.value : null}
+        onPasswordChange={(value) => setPassword({ id: active.id, value })}
+        onPasswordCancel={() => setPassword(null)}
+        busy={switchingId === active.id}
         onDetails={() => onOpenMachine(active.id)}
         controller={controller}
       />
@@ -191,13 +195,19 @@ interface ActiveMachineCardProps {
   connectedOverTailscale: boolean;
   switching: boolean;
   onSwitchBack: () => void;
-  onRetry: () => void;
+  /** Retries, or with a password, saves it and connects again. */
+  onPick: (password?: string) => void;
+  /** The password being typed, while this machine's password field is open. */
+  password: string | null;
+  onPasswordChange: (value: string) => void;
+  onPasswordCancel: () => void;
+  busy: boolean;
   onDetails: () => void;
   controller: RemoteAccessController;
 }
 
 /** The machine agents run on now, with the way back to this computer. */
-function ActiveMachineCard({ machine, local, lastError, connectedOverTailscale, switching, onSwitchBack, onRetry, onDetails, controller }: ActiveMachineCardProps) {
+function ActiveMachineCard({ machine, local, lastError, connectedOverTailscale, switching, onSwitchBack, onPick, password, onPasswordChange, onPasswordCancel, busy, onDetails, controller }: ActiveMachineCardProps) {
   const remote = machine.kind !== 'local';
   const detail = [machine.subtitle, !remote && 'Agents run here', connectedOverTailscale && 'Connected over Tailscale'].filter(Boolean).join(' · ');
   return (
@@ -209,7 +219,10 @@ function ActiveMachineCard({ machine, local, lastError, connectedOverTailscale, 
           <p className="truncate text-xs text-text-tertiary">{detail}</p>
         </div>
         {machine.action === 'retry' && (
-          <Button type="button" variant="ghost" size="sm" disabled={switching} onClick={onRetry}>Retry</Button>
+          <Button type="button" variant="ghost" size="sm" disabled={switching} onClick={() => onPick()}>Retry</Button>
+        )}
+        {machine.action === 'password' && password === null && (
+          <Button type="button" variant="ghost" size="sm" disabled={switching} onClick={() => onPick()}>Enter password</Button>
         )}
         {remote && (
           <Button type="button" variant="secondary" size="sm" disabled={switching} onClick={onSwitchBack}>
@@ -218,6 +231,11 @@ function ActiveMachineCard({ machine, local, lastError, connectedOverTailscale, 
         )}
         <IconButton type="button" size="sm" variant="ghost" aria-label={`${machine.name} details`} icon={<Info className="h-4 w-4" />} onClick={onDetails} />
       </div>
+      {password !== null && (
+        <div className="mt-3 flex justify-end border-t border-border-secondary pt-3">
+          <PasswordForm name={machine.name} value={password} busy={busy} onChange={onPasswordChange} onSubmit={() => onPick(password)} onCancel={onPasswordCancel} />
+        </div>
+      )}
       {lastError && (
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-border-secondary pt-3">
           <p className="text-xs text-status-error">{lastError}</p>
@@ -266,25 +284,7 @@ function MachineRow({ machine, disabled, busy, password, onPasswordChange, onPas
       </div>
       <div className="flex items-center gap-1">
         {password !== null ? (
-          <form
-            className="flex items-center gap-2"
-            onSubmit={(event) => {
-              event.preventDefault();
-              onPick(password);
-            }}
-          >
-            <Input
-              type="password"
-              aria-label={`Password for ${machine.name}`}
-              placeholder="Password"
-              value={password}
-              onChange={(event) => onPasswordChange(event.target.value)}
-              autoFocus
-              className="ph-no-capture"
-            />
-            <Button type="submit" size="sm" loading={busy} disabled={!password}>Connect</Button>
-            <Button type="button" variant="ghost" size="sm" onClick={onPasswordCancel}>Cancel</Button>
-          </form>
+          <PasswordForm name={machine.name} value={password} busy={busy} onChange={onPasswordChange} onSubmit={() => onPick(password)} onCancel={onPasswordCancel} />
         ) : pickable && (
           <Button
             type="button"
@@ -302,6 +302,40 @@ function MachineRow({ machine, disabled, busy, password, onPasswordChange, onPas
         <IconButton type="button" size="sm" variant="ghost" aria-label={`${machine.name} details`} icon={<Info className="h-4 w-4" />} onClick={onDetails} />
       </div>
     </div>
+  );
+}
+
+interface PasswordFormProps {
+  name: string;
+  value: string;
+  busy: boolean;
+  onChange: (value: string) => void;
+  onSubmit: () => void;
+  onCancel: () => void;
+}
+
+/** Asks for a machine's password, then connects with it. */
+function PasswordForm({ name, value, busy, onChange, onSubmit, onCancel }: PasswordFormProps) {
+  return (
+    <form
+      className="flex items-center gap-2"
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSubmit();
+      }}
+    >
+      <Input
+        type="password"
+        aria-label={`Password for ${name}`}
+        placeholder="Password"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        autoFocus
+        className="ph-no-capture"
+      />
+      <Button type="submit" size="sm" loading={busy} disabled={!value}>Connect</Button>
+      <Button type="button" variant="ghost" size="sm" onClick={onCancel}>Cancel</Button>
+    </form>
   );
 }
 

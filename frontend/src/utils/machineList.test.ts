@@ -111,6 +111,16 @@ describe('buildMachineList', () => {
       .toMatchObject({ subtitle: 'Linux · Connection failed · Retry', action: 'retry', presence: 'dimmed' });
   });
 
+  it('asks the active machine for its password again when it wants a new one', () => {
+    const list = buildMachineList(input({
+      connectionState: onBuildBox('error'),
+      tailnet: { ok: true, tailnet: 'demo.github', domain: 'tail1234.ts.net', machines: [
+        tailnetMachine('build-box', 'Linux', 'password-required', { profileId: buildBox.id }),
+      ] },
+    }));
+    expect(byName(list, 'build-box')).toMatchObject({ active: true, action: 'password', subtitle: 'Linux · Needs password' });
+  });
+
   it('keeps saved Tailscale machines pickable before the listing answers', () => {
     const list = buildMachineList(input({ tailnet: null, localName: null }));
     expect(list.map((machine) => [machine.name, machine.subtitle, machine.action])).toEqual([

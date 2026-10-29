@@ -112,15 +112,17 @@ export function buildMachineList({ connectionState, profiles, tailnet, localName
     presence: MachinePresence; stateText: string; action: MachineAction; extra?: Array<string | false | undefined>;
   }): MachineEntry => {
     const active = entry.profile !== undefined && entry.profile.id === activeProfileId;
+    // An active machine that now wants a password asks for it instead of retrying the stored one.
+    const needsPassword = active && connectionState.status !== 'connected' && idle.action === 'password';
     const prefix = entry.kind === 'code' ? 'Added with a code' : null;
-    const stateText = active ? activeStateText(connectionState) : idle.stateText;
+    const stateText = needsPassword ? idle.stateText : active ? activeStateText(connectionState) : idle.stateText;
     return {
       ...entry,
       active,
       presence: active ? activePresence(connectionState) : idle.presence,
       stateText,
       subtitle: subtitle(entry.os, prefix, stateText, ...(active ? [] : idle.extra ?? [])),
-      action: active ? (connectionState.status === 'connected' ? 'none' : 'retry') : idle.action,
+      action: needsPassword ? 'password' : !active ? idle.action : connectionState.status === 'connected' ? 'none' : 'retry',
     };
   };
 
