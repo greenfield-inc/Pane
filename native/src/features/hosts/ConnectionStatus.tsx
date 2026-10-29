@@ -7,7 +7,7 @@ import { useTheme } from '@/theme';
 import { Text } from '@/ui';
 
 /** How far content under a machine that isn't connected fades. */
-export const DIMMED_OPACITY = 0.45;
+const DIMMED_OPACITY = 0.45;
 
 // The machine's own status mark is MachineMark (features/machines): one status style on the phone.
 
