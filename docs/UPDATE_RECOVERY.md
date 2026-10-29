@@ -91,6 +91,20 @@ space on each affected volume. Windows can exclusively lock live browser-profile
 files; their sizes are counted before shutdown, and the snapshot must successfully
 read them after clean shutdown before installation is allowed. It stages downloads
 before shutting down Pane.
+
+The snapshot holds Pane's own state, not everything in the data folder: every
+top-level file (config, databases, journals) and the folders Pane keeps state in
+(`PANE_STATE_FOLDERS` in `packages/runpane/src/updateCapacity.ts`). Folders Pane
+rebuilds or doesn't migrate (`bin`, `shell`, `agent-adapters`, `projects` and
+others in `PANE_UNSNAPSHOTTED_FOLDERS`), git checkouts, and folders Pane does
+not know are left out. Preflight lists the last two in `snapshotSkipped`, so a
+dry run shows them; back them up yourself if they matter. A test fails when the
+code writes a top-level folder that is on neither list.
+
+The CLI that requested an update may be answering a remote
+`runpane workspace <machine> exec` through the Pane it is about to stop. The
+helper waits up to 60 seconds for that CLI to exit, and 2 seconds more, before
+stopping Pane, so the reply with the operation `id` arrives.
 A successful dry run checks local prerequisites; it does not download or prove
 that the requested release passes artifact verification.
 
