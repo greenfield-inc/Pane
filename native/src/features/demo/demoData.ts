@@ -38,7 +38,7 @@ export const DEMO_PROJECTS = [
 
 export const DEMO_PANES: DemoPaneSeed[] = [
   {
-    id: 'demo-fix-checkout-race', name: 'fix-checkout-race', projectId: 1, baseBranch: 'origin/main', favorite: true,
+    id: 'demo-fix-checkout-race', name: 'fix-checkout-race', projectId: 1, baseBranch: 'origin/main',
     agent: { title: 'Claude Code', type: 'claude' }, state: 'working', minutesAgo: 3,
     screen: lines(
       `${dim('~/code/acme-web')} on ${cyan('fix-checkout-race')}`,
