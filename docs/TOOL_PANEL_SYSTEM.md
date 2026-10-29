@@ -59,7 +59,7 @@ The tool panel system consists of several key components:
 
 ## Implemented Panel Types
 
-The tool panel system supports 8 panel types (`ToolPanelType` in `shared/types/panels.ts`):
+The tool panel system supports 9 panel types (`ToolPanelType` in `shared/types/panels.ts`):
 
 1. **Terminal** (`terminal`): PTY shells, several per pane. Agent CLIs such as
    Claude Code, Codex and Cursor Agent run in terminal panels
@@ -73,6 +73,7 @@ The tool panel system supports 8 panel types (`ToolPanelType` in `shared/types/p
 7. **Setup Tasks** (`setup-tasks`): project setup checklist. Singleton,
    permanent, projects only.
 8. **Browser** (`browser`): embedded browser. Worktrees only.
+9. **Notes** (`notes`): the Pane's notes. Singleton.
 
 ## Panel Capabilities
 
