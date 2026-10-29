@@ -1,16 +1,10 @@
 import { expect, test } from '@playwright/test';
-import { build } from 'esbuild';
+import { bundleFixture } from './fixtures/bundle';
 import path from 'node:path';
 
 let fixture: string;
 test.beforeAll(async () => {
-  const result = await build({
-    entryPoints: [path.resolve('tests/fixtures/file-editor-lifecycle.tsx')],
-    alias: { '@monaco-editor/react': path.resolve('tests/fixtures/editor-input.tsx') },
-    bundle: true, write: false, format: 'iife', jsx: 'automatic',
-    define: { 'process.env.NODE_ENV': '"test"' },
-  });
-  fixture = result.outputFiles[0].text;
+  fixture = await bundleFixture('file-editor-lifecycle', { '@monaco-editor/react': path.resolve('tests/fixtures/editor-input.tsx') });
 });
 
 test.beforeEach(async ({ page }) => {

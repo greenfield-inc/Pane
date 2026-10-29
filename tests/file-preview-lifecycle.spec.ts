@@ -1,15 +1,9 @@
 import { expect, test } from '@playwright/test';
-import { build } from 'esbuild';
-import path from 'node:path';
+import { bundleFixture } from './fixtures/bundle';
 
 let fixture: string;
 test.beforeAll(async () => {
-  const result = await build({
-    entryPoints: [path.resolve('tests/fixtures/file-preview-lifecycle.tsx')],
-    bundle: true, write: false, format: 'iife', jsx: 'automatic',
-    define: { 'process.env.NODE_ENV': '"test"' },
-  });
-  fixture = result.outputFiles[0].text;
+  fixture = await bundleFixture('file-preview-lifecycle');
 });
 test.beforeEach(async ({ page }) => {
   await page.route('https://preview.test/**', route => route.fulfill({ status: 200, body: '', contentType: 'video/mp4' }));
