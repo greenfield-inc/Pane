@@ -292,6 +292,33 @@ describe('PaneRemoteHttpApiServer', () => {
     },
   );
 
+  it('names the device that sent a Notify answer from its own stream, never from the arguments', async () => {
+    const registry = new PaneCommandRegistry();
+    const handler = vi.fn(async () => null);
+    registry.register('notify:remote-command', handler);
+    const server = new PaneRemoteHttpApiServer(registry, createConfigManagerStub(createEnabledRemoteConfig()));
+    activeServers.push(server);
+    await server.start();
+    const answer = { type: 'answer', id: 'question-1', answer: { approved: true } };
+
+    await requestJson(server, 'POST', '/invoke', { channel: 'notify:remote-command', args: [answer, { device: 'Someone else' }] }, 'secret-token');
+    expect(handler).toHaveBeenLastCalledWith(answer, { device: 'Mac mini' });
+
+    const stream = await openEventStream(server, 'secret-token', {
+      'X-Pane-Remote-Runtime-Id': 'phone-runtime',
+      'X-Pane-Client-Device-Label': encodeURIComponent('Parsa’s iPhone'),
+    });
+    await stream.nextEvent();
+    await requestJson(server, 'POST', '/invoke', { channel: 'notify:remote-command', args: [answer] }, 'secret-token', { 'X-Pane-Remote-Runtime-Id': 'phone-runtime' });
+    expect(handler).toHaveBeenLastCalledWith(answer, { device: 'Parsa’s iPhone' });
+
+    // An alert button pressed with the app closed: no stream, the name rides on the request.
+    await requestJson(server, 'POST', '/invoke', { channel: 'notify:remote-command', args: [answer] }, 'secret-token', {
+      'X-Pane-Remote-Runtime-Id': 'other-phone', 'X-Pane-Client-Device-Label': encodeURIComponent('Parsa’s iPad'),
+    });
+    expect(handler).toHaveBeenLastCalledWith(answer, { device: 'Parsa’s iPad' });
+  });
+
   it.each(['credentials:shared:get', 'credentials:shared:apply'])(
     'refuses %s when the host does not require pairing, so no unpaired caller reads keys', async channel => {
       const registry = new PaneCommandRegistry();

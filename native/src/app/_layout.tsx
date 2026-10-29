@@ -77,10 +77,19 @@ function RootStack({ signedIn }: { signedIn: boolean }) {
         <Stack.Screen name="settings/shortcuts" options={{ title: 'Shortcuts' }} />
         <Stack.Screen name="settings/shortcut" options={{ presentation: 'modal', title: 'Edit shortcut' }} />
         <Stack.Screen name="settings/voice" options={{ title: 'Voice' }} />
+        <Stack.Screen name="settings/glasses" options={{ title: 'Glasses' }} />
         {/* The terminal draws the PWA's top bar itself. */}
         <Stack.Screen name="pane/[paneId]/index" options={{ headerShown: false }} />
         <Stack.Screen
           name="pane/[paneId]/permission"
+          options={{ presentation: 'formSheet', sheetAllowedDetents: [0.5, 1], sheetGrabberVisible: true, headerShown: false }}
+        />
+        <Stack.Screen
+          name="pane/[paneId]/notify"
+          options={{ presentation: 'formSheet', sheetAllowedDetents: [0.5, 1], sheetGrabberVisible: true, headerShown: false }}
+        />
+        <Stack.Screen
+          name="notify/[notifyId]"
           options={{ presentation: 'formSheet', sheetAllowedDetents: [0.5, 1], sheetGrabberVisible: true, headerShown: false }}
         />
         <Stack.Screen

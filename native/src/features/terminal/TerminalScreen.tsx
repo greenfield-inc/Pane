@@ -14,6 +14,8 @@ import { useTheme } from '@/theme';
 import { EmptyState, ErrorState, Icon, Text } from '@/ui';
 
 import { AgentConversationSurface } from '../agentChat/AgentConversationSurface';
+import { isDemoProfile } from '../demo/demoHost';
+import { explainDemoLimit } from '../demo/explainDemoLimit';
 import { draftKey } from '../composer/composerDrafts';
 import { useComposerDraft } from '../composer/useComposerDraft';
 import { useAffordances } from '../hosts/hostSettings';
@@ -175,7 +177,7 @@ function TerminalPanel({ panel, actions, draft, onChangeDraft, composer, uploads
   onOpenShortcuts: () => void;
 }) {
   const theme = useTheme();
-  const hostLabel = useDaemon().profile.label;
+  const { profile } = useDaemon();
   const terminal = useTerminal(panel.id, panel.sessionId);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [showAttach, setShowAttach] = useState(false);
@@ -276,7 +278,7 @@ function TerminalPanel({ panel, actions, draft, onChangeDraft, composer, uploads
         {voiceSaved ? (
           <View testID="voice-keys-saved" accessibilityLiveRegion="polite" style={[styles.notice, { borderRadius: theme.radius.lg, borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceRaised }]}>
             <Icon ios="checkmark" android="check" size={13} color={theme.colors.success} />
-            <Text variant="footnote" style={{ color: theme.colors.success }}>Voice keys saved to {hostLabel}</Text>
+            <Text variant="footnote" style={{ color: theme.colors.success }}>Voice keys saved to {profile.label}</Text>
           </View>
         ) : null}
         <UploadReceipts receipts={uploads.receipts} onCancel={uploads.cancel} onRetry={uploads.retry} />
@@ -285,11 +287,11 @@ function TerminalPanel({ panel, actions, draft, onChangeDraft, composer, uploads
           onChangeDraft={onChangeDraft}
           onSubmit={submit}
           voice={voice}
-          onAttach={() => setShowAttach(true)}
+          onAttach={() => (isDemoProfile(profile) ? explainDemoLimit('Sending files') : setShowAttach(true))}
           onPaste={() => void paste()}
           onShortcuts={openShortcuts}
           onCopy={() => setShowCopy(true)}
-          onSetupVoice={() => setShowVoiceSetup(true)}
+          onSetupVoice={() => (isDemoProfile(profile) ? explainDemoLimit('Voice') : setShowVoiceSetup(true))}
           controllerShown={controllerShown}
           onToggleController={() => setControllerShown(!controllerShown)}
           onSelectionChange={composer.onSelectionChange}

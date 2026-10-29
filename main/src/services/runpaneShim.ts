@@ -430,8 +430,8 @@ export function withRunpaneOnPath(
   }
 }
 
-/** Non-interactive commands (run scripts) only need the PATH prepend. */
-export function withRunpaneBinOnPath(env: SpawnEnv, state: RunpaneShimState | null = currentState, platform: NodeJS.Platform = process.platform): SpawnEnv {
+/** Non-interactive commands (run scripts, workspace exec) only need the PATH prepend. */
+export function withRunpaneBinOnPath<Env extends SpawnEnv | NodeJS.ProcessEnv>(env: Env, state: RunpaneShimState | null = currentState, platform: NodeJS.Platform = process.platform): Env {
   if (!state) return env;
   return { ...env, PATH: prependPath(env.PATH, state.binDir, platform === 'win32' ? ';' : ':'), PANE_RUNPANE_BIN: state.shimPath };
 }

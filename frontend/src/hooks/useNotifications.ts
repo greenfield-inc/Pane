@@ -20,6 +20,35 @@ interface NotificationSettings {
   enabled: boolean;
 }
 
+/** Pane's short two-tone beep, for desktop alerts and Notify questions. */
+function playBeep(): void {
+  try {
+    // Create a simple notification sound using Web Audio API
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) {
+      console.warn('AudioContext not supported');
+      return;
+    }
+    const audioContext = new AudioContextClass();
+    const oscillator = audioContext.createOscillator();
+    const gainNode = audioContext.createGain();
+
+    oscillator.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+
+    oscillator.frequency.setValueAtTime(800, audioContext.currentTime);
+    oscillator.frequency.setValueAtTime(600, audioContext.currentTime + 0.1);
+
+    gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
+
+    oscillator.start(audioContext.currentTime);
+    oscillator.stop(audioContext.currentTime + 0.3);
+  } catch (error) {
+    console.warn('Could not play notification sound:', error);
+  }
+}
+
 export function useNotifications() {
   const settings = useConfigStore((state) => state.config?.notifications) ?? {
     playSound: false,
@@ -104,34 +133,11 @@ export function useNotifications() {
   }, []);
 
   const playNotificationSound = useCallback(() => {
-    if (!settingsRef.current.playSound) return;
-
-    try {
-      // Create a simple notification sound using Web Audio API
-      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-      if (!AudioContextClass) {
-        console.warn('AudioContext not supported');
-        return;
-      }
-      const audioContext = new AudioContextClass();
-      const oscillator = audioContext.createOscillator();
-      const gainNode = audioContext.createGain();
-
-      oscillator.connect(gainNode);
-      gainNode.connect(audioContext.destination);
-
-      oscillator.frequency.setValueAtTime(800, audioContext.currentTime);
-      oscillator.frequency.setValueAtTime(600, audioContext.currentTime + 0.1);
-
-      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
-      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
-
-      oscillator.start(audioContext.currentTime);
-      oscillator.stop(audioContext.currentTime + 0.3);
-    } catch (error) {
-      console.warn('Could not play notification sound:', error);
-    }
+    if (settingsRef.current.playSound) playBeep();
   }, []);
+
+  // Pane Notify: main decides when a question chimes (its own Sound setting).
+  useEffect(() => window.electronAPI?.notify?.onChime(playBeep), []);
 
   // Fires unconditionally; activity gating lives in the maybeNotify* callers.
   // A notification replaces an earlier one with the same tag. A panel target

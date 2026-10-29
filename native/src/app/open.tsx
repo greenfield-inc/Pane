@@ -4,16 +4,18 @@ import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
 import { useHostsStore } from '@/auth/hostsStore';
 import { resolveOpenTarget } from '@/features/links/links';
+import { openNotifySheet } from '@/features/notify/NotifySheet';
 import { useTheme } from '@/theme';
 import { Button, EmptyState } from '@/ui';
 
 /**
- * Opens a pane named by a `pane://pane/…?host=` link or a notification tap,
- * switching to its host first. It only ever connects to a saved host.
+ * Opens a pane named by a `pane://pane/…?host=` link or a notification tap
+ * (a Notify question's sheet when the tap names one), switching to its host
+ * first. It only ever connects to a saved host.
  */
 export default function OpenScreen() {
   const theme = useTheme();
-  const { host, paneId, panelId } = useLocalSearchParams<{ host?: string; paneId?: string; panelId?: string }>();
+  const { host, paneId, panelId, notifyId } = useLocalSearchParams<{ host?: string; paneId?: string; panelId?: string; notifyId?: string }>();
   const profiles = useHostsStore(state => state.profiles);
   const activeId = useHostsStore(state => state.activeId);
   const setActive = useHostsStore(state => state.setActive);
@@ -31,8 +33,10 @@ export default function OpenScreen() {
     }
     // Start from the host's pane list, so Back never lands on another host's screens.
     router.dismissTo('/');
-    if (paneId) router.push({ pathname: '/pane/[paneId]', params: panelId ? { paneId, panelId } : { paneId } });
-  }, [hostId, switchHost, paneId, panelId, setActive]);
+    // A Notify alert opens its question's sheet over the pane list.
+    if (notifyId) openNotifySheet(notifyId, paneId);
+    else if (paneId) router.push({ pathname: '/pane/[paneId]', params: panelId ? { paneId, panelId } : { paneId } });
+  }, [hostId, switchHost, paneId, panelId, notifyId, setActive]);
 
   if (resolved.type === 'unknown-host') {
     return (

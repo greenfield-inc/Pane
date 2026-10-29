@@ -11,7 +11,8 @@ import { daemonActionFor, runDaemonAction } from './daemonActions';
 import { runDocsRead, runDocsSearch } from './docs';
 import { runHandoff } from './handoff';
 import { runLinksCreate } from './links';
-import { helpText, parseRunpaneArgs, splitWorkspacePassThrough, type ParsedArgs, type RunpaneCommand } from './commands';
+import { runNotify } from './notify';
+import { helpText, parseRunpaneArgs, splitWorkspacePassThrough, wantsJsonOutput, type ParsedArgs, type RunpaneCommand } from './commands';
 import { PaneDaemonClientError, routeDaemonCallsTo } from './daemonClient';
 import { describeFailure, printFailure, RunpaneError } from './errors';
 import { boundary, decodeBoundary } from './boundaryDecoder';
@@ -347,6 +348,7 @@ const commandHandlers = new Map<string, CommandHandler>(Object.entries({
   'report': async (parsed, telemetryContext) => {
     return runReport(parsed);
   },
+  'notify': async (parsed) => runNotify(parsed),
   'inbox': async (parsed) => runInbox(parsed),
   'inbox ack': async (parsed) => runInboxAck(parsed),
   'agents doctor': async (parsed, telemetryContext) => {
@@ -743,16 +745,11 @@ function printDryRun(
 }
 
 /** `--json` for runpane itself; anything after `--` belongs to the command it runs elsewhere. */
-function wantsJson(argv: string[]): boolean {
-  const end = argv.indexOf('--');
-  return (end === -1 ? argv : argv.slice(0, end)).includes('--json');
-}
-
 if (require.main === module) {
   main(process.argv.slice(2)).then((code) => {
     process.exitCode = code;
   }).catch((error) => {
-    printFailure(error, wantsJson(process.argv.slice(2)));
+    printFailure(error, wantsJsonOutput(process.argv.slice(2)));
     process.exitCode = 1;
   });
 }

@@ -9,10 +9,12 @@ import { TerminalSettings } from './settings/categories/TerminalSettings';
 import { AIAgentsSettings } from './settings/categories/AIAgentsSettings';
 import { WorktreesGitSettings } from './settings/categories/WorktreesGitSettings';
 import { NotificationSettings } from './NotificationSettings';
+import { NotifySettings } from './settings/categories/NotifySettings';
 import { RemoteAccessSettings } from './settings/categories/RemoteAccessSettings';
 import { IntegrationsSettings } from './settings/categories/IntegrationsSettings';
 import { ShortcutsSettings } from './settings/categories/ShortcutsSettings';
 import { PrivacySettings } from './settings/categories/PrivacySettings';
+import { ImportExportSettings } from './settings/categories/ImportExportSettings';
 import { AdvancedSettings } from './settings/categories/AdvancedSettings';
 import { UsageView } from './usage/UsageView';
 import { RemoteAccessWorkflows } from './settings/RemoteAccessWorkflows';
@@ -55,6 +57,7 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
   const [platform, setPlatform] = useState('darwin');
   const [systemMonoFonts, setSystemMonoFonts] = useState<string[]>([]);
   const [remoteSubview, setRemoteSubview] = useState<RemoteAccessSubviewId | undefined>();
+  const [addCodeRequest, setAddCodeRequest] = useState<number>();
   const handledRequestRef = useRef<number | null>(null);
   const fontsLoadedRef = useRef(false);
   const remote = useRemoteAccessSettings(isOpen, onClose);
@@ -88,6 +91,7 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
     requestTransition(() => {
       onCategoryChange(openRequest.target.category);
       setRemoteSubview(openRequest.target.subview);
+      if (openRequest.target.setting === 'remote-add-code') setAddCodeRequest(openRequest.nonce);
       focusSetting(openRequest.target.setting);
     });
     onOpenRequestHandled();
@@ -150,18 +154,22 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
         return <UsageView />;
       case 'worktrees-git':
         return <WorktreesGitSettings persistence={persistence} {...sharedDirtyProps} />;
+      case 'notify':
+        return <NotifySettings persistence={persistence} />;
       case 'notifications':
         return <NotificationSettings persistence={persistence} />;
       case 'remote-access':
         return remoteSubview
           ? <RemoteAccessWorkflows subview={remoteSubview} controller={remote} onBack={() => requestTransition(() => setRemoteSubview(undefined))} {...sharedDirtyProps} />
-          : <RemoteAccessSettings controller={remote} onOpenSubview={openRemoteSubview} />;
+          : <RemoteAccessSettings controller={remote} onOpenSubview={openRemoteSubview} addCodeRequest={addCodeRequest} />;
       case 'integrations':
         return <IntegrationsSettings persistence={persistence} {...sharedDirtyProps} />;
       case 'shortcuts':
         return <ShortcutsSettings persistence={persistence} onShowKeyboardShortcuts={showKeyboardShortcuts} {...sharedDirtyProps} />;
       case 'privacy':
         return <PrivacySettings persistence={persistence} />;
+      case 'import-export':
+        return <ImportExportSettings persistence={persistence} platform={platform} />;
       case 'advanced':
         return <AdvancedSettings persistence={persistence} platform={platform} {...sharedDirtyProps} />;
     }

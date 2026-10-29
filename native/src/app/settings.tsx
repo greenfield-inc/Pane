@@ -1,10 +1,14 @@
+import * as Linking from 'expo-linking';
 import { router } from 'expo-router';
 import { Alert } from 'react-native';
 
 import { useHostsStore } from '@/auth/hostsStore';
 import { useDaemon } from '@/daemon';
+import { PRIVACY_POLICY_URL } from '@/features/app/privacyPolicy';
+import { isDemoProfile } from '@/features/demo/demoHost';
 import { ConnectionStatus } from '@/features/hosts/ConnectionStatus';
 import { NotificationSettings } from '@/features/notifications/NotificationSettings';
+import { AppUpdateRow } from '@/features/updates/AppUpdateRow';
 import { revokePush } from '@/features/notifications/usePushSetup';
 import { useTheme } from '@/theme';
 import { Icon, ListRow, ListSection, Screen } from '@/ui';
@@ -15,6 +19,8 @@ export default function SettingsScreen() {
   const profiles = useHostsStore(state => state.profiles);
   const setActive = useHostsStore(state => state.setActive);
   const remove = useHostsStore(state => state.remove);
+  const exitDemo = useHostsStore(state => state.exitDemo);
+  const demo = isDemoProfile(profile);
 
   const confirmSignOut = () => {
     Alert.alert(
@@ -36,12 +42,18 @@ export default function SettingsScreen() {
           subtitle={profile.baseUrl}
           trailing={<ConnectionStatus updateIntent={connection.updateIntent} status={connection.status} onRetry={() => client.retryNow()} />}
         />
-        <ListRow testID="settings-sign-out" title="Sign Out" destructive onPress={confirmSignOut} />
+        {demo
+          ? <ListRow testID="settings-exit-demo" title="Exit Demo" subtitle="Sample data only. Nothing here is real." destructive onPress={exitDemo} />
+          : <ListRow testID="settings-sign-out" title="Sign Out" destructive onPress={confirmSignOut} />}
       </ListSection>
 
       <ListSection title="Composer" footer={`Saved on ${profile.label}, so desktop sees the same settings.`}>
         <ListRow testID="settings-shortcuts" title="Shortcuts" subtitle="Text you insert with one tap" trailing="chevron" onPress={() => router.push('/settings/shortcuts')} />
         <ListRow testID="settings-voice" title="Voice" subtitle="Keys for dictation" trailing="chevron" onPress={() => router.push('/settings/voice')} />
+      </ListSection>
+
+      <ListSection title="Wearables">
+        <ListRow testID="settings-glasses" title="Glasses" subtitle="Pane on Even G2" trailing="chevron" onPress={() => router.push('/settings/glasses')} />
       </ListSection>
 
       {profile.tailnetMachine ? (
@@ -77,6 +89,11 @@ export default function SettingsScreen() {
           leading={<Icon ios="plus.circle.fill" android="add_circle" size={20} color={theme.colors.accentText} />}
           onPress={() => router.push('/hosts/add')}
         />
+      </ListSection>
+
+      <ListSection title="App">
+        <AppUpdateRow />
+        <ListRow testID="settings-privacy" title="Privacy Policy" trailing="chevron" onPress={() => void Linking.openURL(PRIVACY_POLICY_URL)} />
       </ListSection>
     </Screen>
   );

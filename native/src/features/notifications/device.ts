@@ -2,7 +2,7 @@ import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 
 import { secureStore } from '@/auth/secureStore';
-import { isPushForPane } from '@/features/links/links';
+import { isPushForPane, parseNotifyPush, type NotifyPush } from '@/features/links/links';
 
 import type { PermissionState, PushDeps } from './registration';
 
@@ -10,9 +10,13 @@ const INSTALLATION_KEY = 'pane.mobile.installationId';
 const TOKEN_TIMEOUT_MS = 15_000;
 
 // Show a host's alert even while Pane is open: the pane that needs input is
-// usually not the one on screen.
+// usually not the one on screen. Android Notify messages carry data only (the
+// app draws their alert itself), so anything without text stays hidden.
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({ shouldShowBanner: true, shouldShowList: true, shouldPlaySound: true, shouldSetBadge: false }),
+  handleNotification: async notification => {
+    const show = Boolean(notification.request.content.title || notification.request.content.body);
+    return { shouldShowBanner: show, shouldShowList: show, shouldPlaySound: show, shouldSetBadge: false };
+  },
 });
 
 export const devicePush: Omit<PushDeps, 'invoke'> = {
@@ -23,11 +27,26 @@ export const devicePush: Omit<PushDeps, 'invoke'> = {
   getInstallationId,
 };
 
-/** Removes a Pane's delivered alerts, and its workers' when it is a Session, from Notification Center or the shade. Best effort. */
+/**
+ * Removes a Pane's delivered "is blocked" and "finished" alerts, and its workers' when it is a
+ * Session, from Notification Center or the shade. Notify questions keep theirs until answered. Best effort.
+ */
 export async function clearPaneNotifications(paneId: string): Promise<void> {
+  await dismissPresented(request => isPushForPane(request, paneId) && !parseNotifyPush(request));
+}
+
+/** Removes the delivered Notify alerts `matches` picks, such as questions answered elsewhere. Best effort. */
+export async function dismissNotifyAlerts(matches: (push: NotifyPush) => boolean): Promise<void> {
+  await dismissPresented(request => {
+    const push = parseNotifyPush(request);
+    return push !== null && matches(push);
+  });
+}
+
+async function dismissPresented(matches: (request: Notifications.NotificationRequest) => boolean): Promise<void> {
   const presented = await Notifications.getPresentedNotificationsAsync().catch(() => []);
   await Promise.all(presented
-    .filter(notification => isPushForPane(notification.request, paneId))
+    .filter(notification => matches(notification.request))
     .map(notification => Notifications.dismissNotificationAsync(notification.request.identifier).catch(() => undefined)));
 }
 

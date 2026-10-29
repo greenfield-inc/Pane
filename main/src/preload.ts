@@ -1,4 +1,5 @@
 import type { LoopInput } from '../../shared/types/loop';
+import type { SetupFile, SetupSectionId } from '../../shared/types/setupTransfer';
 import type { SessionImportProgress, SessionImportRunResult, SessionImportScan } from '../../shared/types/sessionImport';
 import type { AgentChatEvent, AgentChatView, AgentChatSend, AgentInterface } from '../../shared/types/agentChat';
 import type { RestartToUpdateSource, RestartToUpdateState, UpdateRestoreResult } from '../../shared/types/updater';
@@ -25,14 +26,19 @@ import type {
   RemoteHostSetupResult,
   RemoteHostSetupTerminalCommandResult,
   RemotePaneConnectionState,
+  RemoteConnectionCheckStage,
+  RemoteHostSetupProgress,
   RemotePaneConnectionProfile,
 } from '../../shared/types/remoteDaemon';
 import type { TailnetMachineList, WorkspaceAccessSummary, WorkspaceAccessUpdate } from '../../shared/types/workspaceAccess';
+import type { GlassesAccessState } from '../../shared/types/glasses';
+import type { VoiceKeyCheck } from '../../shared/voice/voiceKeys';
 import type { HostNavigationMemory } from '../../shared/types/hostNavigation';
 import type { SessionWorkspaceLayout } from '../../shared/types/sessionWorkspaceLayout';
 import type { PanelActivationRequest, SessionPanelLayout, ToolPanel } from '../../shared/types/panels';
 import type { DiffScope, FileDiffRequest } from '../../shared/types/gitDiff';
 import type { PanelAgentStatusEvent, TerminalLaunchExitedEvent } from '../../shared/types/agentStatus';
+import type { NotifyCommand, NotifySnapshot, NotifyWindowSize } from '../../shared/types/notify';
 import type {
   OrchestrationAssociationInput,
   OrchestrationSessionCreateInput,
@@ -498,6 +504,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
       invokeIpc('export:share-image', data, filename),
   },
 
+  // Settings › Import & Export: always this computer's setup
+  setup: {
+    summary: (): Promise<IPCResponse> => invokeIpc('setup:summary'),
+    export: (sections: SetupSectionId[]): Promise<IPCResponse> => invokeIpc('setup:export', sections),
+    chooseImport: (): Promise<IPCResponse> => invokeIpc('setup:choose-import'),
+    preview: (file: SetupFile, fileName: string): Promise<IPCResponse> => invokeIpc('setup:preview', file, fileName),
+  },
+
   // Loops (scheduled tasks)
   loops: {
     list: (): Promise<IPCResponse> => invokeIpc('loops:list'),
@@ -671,6 +685,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     updateSessionPreferences: (preferences: AppConfig['sessionCreationPreferences']): Promise<IPCResponse> => invokeIpc('config:update-session-preferences', preferences),
     getMonospaceFonts: (): Promise<IPCResponse> => invokeIpc('config:get-monospace-fonts'),
     chooseApnsKey: (): Promise<IPCResponse<{ privateKey: string; keyId: string | null } | null>> => invokeIpc('dialog:open-apns-key'),
+    checkDeepgramKey: (key: string): Promise<VoiceKeyCheck> => invokeIpc('config:check-deepgram-key', key),
   },
 
   remoteDaemon: {
@@ -713,8 +728,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
     updateWorkspaceAccess: (update: WorkspaceAccessUpdate): Promise<IPCResponse<WorkspaceAccessSummary>> =>
       invokeIpc('remote-daemon:update-workspace-access', update),
     listTailnetMachines: (): Promise<IPCResponse<TailnetMachineList>> => invokeIpc('remote-daemon:list-tailnet-machines'),
+    getGlasses: (): Promise<IPCResponse<GlassesAccessState>> => invokeIpc('remote-daemon:get-glasses'),
+    revokeGlasses: (id: string): Promise<IPCResponse<GlassesAccessState>> => invokeIpc('remote-daemon:revoke-glasses', id),
+    setGlassesOrigin: (update: { origin: string; allowed: boolean }): Promise<IPCResponse<GlassesAccessState>> =>
+      invokeIpc('remote-daemon:set-glasses-origin', update),
     saveTailnetMachine: (input: { name: string; password?: string }): Promise<IPCResponse<RemotePaneConnectionProfile>> =>
       invokeIpc('remote-daemon:save-tailnet-machine', input),
+    runCheckFix: (checkId: number, stage: RemoteConnectionCheckStage): Promise<IPCResponse<RemotePaneConnectionState>> =>
+      invokeIpc('remote-daemon:run-check-fix', { checkId, stage }),
+    dismissCheck: (checkId: number): Promise<IPCResponse<RemotePaneConnectionState>> =>
+      invokeIpc('remote-daemon:dismiss-check', { checkId }),
+    onSetupProgress: (callback: (progress: RemoteHostSetupProgress) => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, progress: RemoteHostSetupProgress) => callback(progress);
+      ipcRenderer.on('remote-daemon:setup-progress', wrappedCallback);
+      return () => ipcRenderer.removeListener('remote-daemon:setup-progress', wrappedCallback);
+    },
     onConnectionStateChanged: (callback: (state: RemotePaneConnectionState) => void) => {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, state: RemotePaneConnectionState) => callback(state);
       ipcRenderer.on('remote-daemon:connection-state-changed', wrappedCallback);
@@ -1229,6 +1257,33 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Whether Dictate's watcher shows Pane's alerts, so Pane skips its desktop notification
   notifications: {
     isHandedOff: async (): Promise<boolean> => decodeBoundary(await invokeIpc('notifications:handed-off'), boundary.boolean),
+  },
+
+  // Pane Notify: the queue's snapshot and the actions every surface sends back
+  notify: {
+    getSnapshot: (): Promise<NotifySnapshot> => invokeIpc('notify:snapshot'),
+    run: (command: NotifyCommand): Promise<void> => invokeIpc('notify:command', command),
+    onSnapshot: (callback: (snapshot: NotifySnapshot) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, snapshot: NotifySnapshot) => callback(snapshot);
+      ipcRenderer.on('notify:snapshot', listener);
+      return () => ipcRenderer.removeListener('notify:snapshot', listener);
+    },
+    /** A new question arrived and Sound is on; the main window plays the beep. */
+    onChime: (callback: () => void) => {
+      const listener = () => callback();
+      ipcRenderer.on('notify:chime', listener);
+      return () => ipcRenderer.removeListener('notify:chime', listener);
+    },
+    /** Main asks the main window to show the Notify inbox or Settings → Notify. */
+    onNavigate: (callback: (target: 'inbox' | 'settings') => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, target: 'inbox' | 'settings') => callback(target);
+      ipcRenderer.on('notify:navigate', listener);
+      return () => ipcRenderer.removeListener('notify:navigate', listener);
+    },
+    /** Floating windows only: fit the window to its card. */
+    resizeWindow: (size: NotifyWindowSize): void => ipcRenderer.send('notify:window-size', size),
+    /** Floating strip only: take key focus so a text or note field can be typed in. */
+    focusWindow: (): Promise<void> => invokeIpc('notify:window-focus'),
   },
 
   // Window state queries (invoke, not event subscriptions)

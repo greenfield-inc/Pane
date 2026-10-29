@@ -501,6 +501,11 @@ body.understory {
   to { transform: translateX(-100%); }
 }
 
+/* Pane Notify: the line under an update counts down to when it hides. */
+@keyframes pane-notify-countdown {
+  to { transform: scaleX(0); }
+}
+
 @keyframes pane-scrim-enter {
   from { opacity: 0; }
   to { opacity: 1; }

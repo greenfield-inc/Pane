@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { installRunpaneShim } from './runpaneShim';
 import { execOnMachine, readMachineFile, resolveMachinePath, writeMachineFile } from './workspaceMachine';
 
 afterEach(() => {
@@ -80,6 +81,17 @@ describe('machine file and command operations', () => {
     expect(result).toMatchObject({ exitCode: 3, stdout: 'out\n', stderr: 'err\n', cwd: dir, timedOut: false });
     expect(result.shell).toMatch(/sh(\.exe)?$/);
     expect(result.os).toBe(new Map([['darwin', 'macOS'], ['win32', 'Windows']]).get(process.platform) ?? 'Linux');
+  });
+
+  // Windows terminals can also be PowerShell, which finds runpane.cmd rather than the POSIX shim.
+  it.each(process.platform === 'win32' ? ['auto', 'powershell'] : ['auto'])("finds this Pane's runpane even when it is not on the user's PATH (%s shell)", async (shell) => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'pane-machine-runpane-'));
+    const bundledCliPath = path.join(root, 'runpane.cjs');
+    await fs.writeFile(bundledCliPath, "console.log('pane-runpane ' + process.argv.slice(2).join(' '));\n");
+    expect(installRunpaneShim({ appDirectory: path.join(root, 'pane dir'), bundledCliPath, execPath: process.execPath })).not.toBeNull();
+    const result = await execOnMachine({ command: 'runpane version' }, shell);
+    expect(result, result.stderr).toMatchObject({ exitCode: 0 });
+    expect(result.stdout.trim()).toBe('pane-runpane version');
   });
 
   it('answers when the shell exits even if a background job still holds its output', async () => {

@@ -2,7 +2,13 @@
   "expo": {
     "name": "Pane",
     "slug": "pane",
-    "version": "1.0",
+    "version": "1.2",
+    "runtimeVersion": "1.4",
+    "updates": {
+      "url": "https://pane-native-updates-297294606300.us-central1.run.app/manifest",
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 0
+    },
     "orientation": "default",
     "icon": "./assets/images/icon.png",
     "scheme": [
@@ -18,9 +24,10 @@
         "NSAppTransportSecurity": {
           "NSAllowsLocalNetworking": true
         },
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSLocalNetworkUsageDescription": "Pane connects to Pane on computers on your local network."
       },
-      "buildNumber": "16",
+      "buildNumber": "19",
       "appleTeamId": "FBM5YSF467"
     },
     "android": {
@@ -30,7 +37,7 @@
         "foregroundImage": "./assets/images/adaptive-icon.png"
       },
       "predictiveBackGestureEnabled": false,
-      "versionCode": 3
+      "versionCode": 6
     },
     "plugins": [
       [
@@ -42,7 +49,12 @@
         }
       ],
       "expo-router",
-      "expo-secure-store",
+      [
+        "expo-secure-store",
+        {
+          "faceIDPermission": false
+        }
+      ],
       [
         "expo-camera",
         {
@@ -54,16 +66,23 @@
         {
           "photosPermission": "Pane lets you pick photos and videos to send to your agents.",
           "cameraPermission": "Pane uses the camera to scan the connection code shown by your Pane host and to take photos you send to your agents.",
-          "microphonePermission": false
+          "microphonePermission": "Pane uses the microphone to dictate prompts to your agents."
         }
       ],
       [
         "expo-audio",
         {
-          "microphonePermission": "Pane uses the microphone to dictate prompts to your agents."
+          "microphonePermission": "Pane uses the microphone to dictate prompts to your agents.",
+          "enableBackgroundPlayback": false
         }
       ],
-      "expo-notifications",
+      [
+        "expo-notifications",
+        {
+          "enableBackgroundRemoteNotifications": true
+        }
+      ],
+      "@bacons/apple-targets",
       [
         "expo-splash-screen",
         {

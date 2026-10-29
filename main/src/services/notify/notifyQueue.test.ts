@@ -1,0 +1,540 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { NotifyQueue } from './notifyQueue';
+import { DEFAULT_NOTIFY_SETTINGS, type NotifyQuestion, type NotifyResult, type NotifySettings } from '../../../../shared/types/notify';
+
+const claude = { paneId: 'pane-1', panelId: 'panel-1', name: 'auth-refactor', agent: 'Claude' };
+const codex = { paneId: 'pane-2', panelId: 'panel-2', name: 'billing-migration', agent: 'Codex' };
+const sessionStore: NotifyQuestion = {
+  ui: 'options',
+  title: 'Which session store should the refactor use?',
+  choices: [{ label: 'Postgres table', recommended: true }, { label: 'Keep Redis' }, { label: 'Stateless JWT' }],
+};
+const migration: NotifyQuestion = { ui: 'approve', title: 'Apply migration 0042 to staging?', detail: 'ALTER TABLE …' };
+
+function makeQueue(overrides: Partial<NotifySettings> = {}, machine?: string) {
+  let settings: NotifySettings = { ...DEFAULT_NOTIFY_SETTINGS, ...overrides };
+  const queue = new NotifyQueue({ settings: () => settings, showOutsideSupported: true, shortcutRegistered: () => true, instructionFiles: () => [], machine });
+  return {
+    queue,
+    setSettings: (next: Partial<NotifySettings>) => { settings = { ...settings, ...next }; },
+  };
+}
+
+/** Starts a call and records its result when it settles. */
+function ask(queue: NotifyQueue, question: NotifyQuestion, source = claude, extra: { returnAfterMs?: number; signal?: AbortSignal } = {}) {
+  const results: NotifyResult[] = [];
+  void queue.ask({ question, source, returnAfterMs: extra.returnAfterMs }, extra.signal).then((result) => results.push(result));
+  return { get result() { return results[0]; } };
+}
+
+function onlyId(queue: NotifyQueue): string {
+  const [id] = queue.snapshot().queue;
+  return id;
+}
+
+describe('NotifyQueue', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 9, 26, 9, 41));
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it('shows one question at a time, oldest first, and the next one after an answer', async () => {
+    const { queue } = makeQueue();
+    const first = ask(queue, sessionStore, claude);
+    vi.advanceTimersByTime(1_000);
+    ask(queue, migration, codex);
+
+    const [firstId, secondId] = queue.snapshot().queue;
+    expect(queue.snapshot().strip).toEqual({ kind: 'question', itemId: firstId });
+
+    queue.run({ type: 'answer', id: firstId, answer: { choice: 'Postgres table' } });
+    expect(queue.snapshot().strip).toEqual({ kind: 'sent', itemId: firstId });
+    expect(queue.snapshot().queue).toEqual([secondId]);
+
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(first.result).toEqual({ answer: 'Postgres table' });
+    expect(queue.snapshot().strip).toEqual({ kind: 'question', itemId: secondId });
+  });
+
+  it('holds an answer 3 seconds, and Undo brings the question back with nothing sent', async () => {
+    const { queue } = makeQueue();
+    const call = ask(queue, migration);
+    const id = onlyId(queue);
+
+    queue.run({ type: 'answer', id, answer: { approved: false, note: 'Not on a Friday' } });
+    await vi.advanceTimersByTimeAsync(2_900);
+    expect(call.result).toBeUndefined();
+    queue.run({ type: 'undo', id });
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(call.result).toBeUndefined();
+    expect(queue.snapshot().strip).toEqual({ kind: 'question', itemId: id });
+
+    queue.run({ type: 'answer', id, answer: { approved: true } });
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(call.result).toEqual({ approved: true });
+    expect(queue.snapshot().items.find(item => item.id === id)).toMatchObject({ state: 'answered', answerSummary: 'Approved' });
+  });
+
+  it('expires a question when the caller disconnects and says so on the strip for 3 seconds', async () => {
+    const { queue } = makeQueue();
+    const controller = new AbortController();
+    const call = ask(queue, sessionStore, claude, { signal: controller.signal });
+    const id = onlyId(queue);
+
+    controller.abort();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(call.result).toMatchObject({ unavailable: expect.any(String) });
+    expect(queue.snapshot().strip).toEqual({ kind: 'expired', itemId: id });
+    expect(queue.snapshot().queue).toEqual([]);
+
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(queue.snapshot().strip).toBeNull();
+    expect(queue.snapshot().items.find(item => item.id === id)?.state).toBe('expired');
+  });
+
+  it('skips a question to the back of the queue and brings a reminded one back later', async () => {
+    const { queue } = makeQueue();
+    ask(queue, sessionStore, claude);
+    ask(queue, migration, codex);
+    const [first, second] = queue.snapshot().queue;
+
+    queue.run({ type: 'skip', id: first });
+    expect(queue.snapshot().queue).toEqual([second, first]);
+
+    queue.run({ type: 'remind', id: second, after: '10m' });
+    expect(queue.snapshot().strip).toEqual({ kind: 'question', itemId: first });
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(queue.snapshot().strip).toEqual({ kind: 'question', itemId: second });
+  });
+
+  it('brings a "when I switch to Pane" reminder back when Pane comes to the front, inside Pane', () => {
+    const { queue } = makeQueue();
+    ask(queue, sessionStore);
+    const id = onlyId(queue);
+
+    queue.run({ type: 'remind', id, after: 'pane' });
+    expect(queue.snapshot().strip).toBeNull();
+    queue.setPaneFocused(true);
+    expect(queue.snapshot()).toMatchObject({ strip: { kind: 'question', itemId: id }, stripSurface: 'pane' });
+  });
+
+  it('returns unavailable at once while Notify is off, and to every waiting agent when it is turned off', async () => {
+    const { queue, setSettings } = makeQueue({ enabled: false });
+    expect(await queue.ask({ question: sessionStore, source: claude })).toEqual({ unavailable: 'Notify is off in Pane.', next: 'Ask in the terminal instead.' });
+
+    setSettings({ enabled: true });
+    const first = ask(queue, sessionStore, claude);
+    const second = ask(queue, migration, codex);
+    setSettings({ enabled: false });
+    queue.turnOff();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(first.result).toEqual({ unavailable: 'Notify was turned off in Pane.', next: 'Ask in the terminal instead.' });
+    expect(second.result).toEqual({ unavailable: 'Notify was turned off in Pane.', next: 'Ask in the terminal instead.' });
+    expect(queue.snapshot()).toMatchObject({ queue: [], strip: null });
+  });
+
+  it('shows an update on screen when nothing else is up, and sends it to the inbox while a question shows', async () => {
+    const { queue } = makeQueue({ updatesHideAfterSeconds: 6 });
+    const checks: NotifyQuestion = { ui: 'info', title: 'PR #812 checks passed' };
+
+    expect(await queue.ask({ question: checks, source: claude })).toEqual({ delivered: 'screen' });
+    expect(queue.snapshot().strip).toMatchObject({ kind: 'info' });
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(queue.snapshot().strip).toBeNull();
+
+    ask(queue, sessionStore);
+    expect(await queue.ask({ question: checks, source: claude })).toEqual({ delivered: 'inbox' });
+    expect(queue.snapshot().strip).toMatchObject({ kind: 'question' });
+  });
+
+  it('pauses the countdown of an update while it is hovered', async () => {
+    const { queue } = makeQueue({ updatesHideAfterSeconds: 6 });
+    await queue.ask({ question: { ui: 'info', title: 'Deploy finished' }, source: claude });
+    const id = queue.snapshot().items[0].id;
+
+    queue.run({ type: 'hover-info', id, hovering: true });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(queue.snapshot().strip).toMatchObject({ kind: 'info', itemId: id, hideAt: null });
+    queue.run({ type: 'hover-info', id, hovering: false });
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(queue.snapshot().strip).toBeNull();
+  });
+
+  it('keeps a short-limit client waiting through resume calls, then gives up after 15 minutes', async () => {
+    const { queue } = makeQueue();
+    let result = await (async () => {
+      const call = queue.ask({ question: sessionStore, source: claude, returnAfterMs: 50_000 });
+      await vi.advanceTimersByTimeAsync(50_000);
+      return call;
+    })();
+    expect(result).toMatchObject({ waiting: true });
+    const id = 'id' in result ? result.id : '';
+
+    for (let elapsed = 50_000; elapsed < 15 * 60_000;) {
+      const call = queue.ask({ resume: id, source: claude, returnAfterMs: 50_000 });
+      await vi.advanceTimersByTimeAsync(50_000);
+      elapsed += 50_000;
+      result = await call;
+      if (!('waiting' in result)) break;
+      expect(queue.snapshot().strip).toEqual({ kind: 'question', itemId: id });
+    }
+    expect(result).toEqual({ unavailable: 'Nobody answered within 15 minutes.', next: 'Ask in the terminal instead.' });
+    expect(queue.snapshot().items.find(item => item.id === id)?.state).toBe('expired');
+  });
+
+  it('delivers an answer sent just before the 15-minute cap instead of expiring it', async () => {
+    const { queue } = makeQueue();
+    let call = queue.ask({ question: sessionStore, source: claude, returnAfterMs: 50_000 });
+    const id = onlyId(queue);
+    // 17 resume rounds of 50 s reach 14:10; the last call then runs into the cap at 15:00.
+    for (let round = 0; round < 17; round += 1) {
+      await vi.advanceTimersByTimeAsync(50_000);
+      expect(await call).toMatchObject({ waiting: true });
+      call = queue.ask({ resume: id, source: claude, returnAfterMs: 50_000 });
+    }
+    await vi.advanceTimersByTimeAsync(49_000);
+
+    // Answered at 14:59: the 3 s Undo hold ends after the cap.
+    queue.run({ type: 'answer', id, answer: { choice: 'Keep Redis' } });
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(await call).toEqual({ answer: 'Keep Redis' });
+    expect(queue.snapshot().items.find(item => item.id === id)?.state).toBe('answered');
+  });
+
+  it('delivers an answer given between two resume calls to the next one', async () => {
+    const { queue } = makeQueue();
+    const first = queue.ask({ question: sessionStore, source: claude, returnAfterMs: 50_000 });
+    await vi.advanceTimersByTimeAsync(50_000);
+    const waiting = await first;
+    const id = 'id' in waiting ? waiting.id : '';
+
+    queue.run({ type: 'answer', id, answer: { choice: 'Keep Redis', note: 'ops is busy' } });
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(await queue.ask({ resume: id, source: claude, returnAfterMs: 50_000 })).toEqual({ answer: 'Keep Redis', note: 'ops is busy' });
+  });
+
+  it('expires a question when no resume arrives', async () => {
+    const { queue } = makeQueue();
+    const first = queue.ask({ question: sessionStore, source: claude, returnAfterMs: 50_000 });
+    await vi.advanceTimersByTimeAsync(50_000);
+    const waiting = await first;
+    const id = 'id' in waiting ? waiting.id : '';
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(queue.snapshot().items.find(item => item.id === id)?.state).toBe('expired');
+    expect(await queue.ask({ resume: id, source: claude })).toMatchObject({ unavailable: expect.any(String) });
+  });
+
+  it('expires a question whose agent sits idle at its prompt for 10 seconds', async () => {
+    const { queue } = makeQueue();
+    const call = ask(queue, sessionStore, claude);
+
+    queue.panelStatus('panel-1', true);
+    await vi.advanceTimersByTimeAsync(5_000);
+    queue.panelStatus('panel-1', false);
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(call.result).toBeUndefined();
+
+    queue.panelStatus('panel-1', true);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(call.result).toMatchObject({ unavailable: expect.any(String) });
+  });
+
+  it('clears Earlier today at local midnight', async () => {
+    const { queue } = makeQueue();
+    ask(queue, sessionStore);
+    const id = onlyId(queue);
+    queue.run({ type: 'answer', id, answer: { choice: 'Stateless JWT' } });
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(queue.snapshot().items.map(item => item.answerSummary)).toEqual(['Stateless JWT']);
+
+    vi.setSystemTime(new Date(2026, 9, 26, 23, 59, 59));
+    expect(queue.snapshot().items).toHaveLength(1);
+    vi.setSystemTime(new Date(2026, 9, 27, 0, 0, 1));
+    expect(queue.snapshot().items).toEqual([]);
+  });
+
+  it('chooses where the strip shows from focus, Show outside Pane, Pause and the round', () => {
+    const { queue, setSettings } = makeQueue();
+    ask(queue, sessionStore);
+    expect(queue.snapshot().stripSurface).toBe('window');
+
+    queue.setPaneFocused(true);
+    expect(queue.snapshot().stripSurface).toBe('pane');
+    queue.setPaneFocused(false);
+    setSettings({ showOutsidePane: false });
+    expect(queue.snapshot().stripSurface).toBeNull();
+
+    setSettings({ showOutsidePane: true });
+    queue.run({ type: 'pause', minutes: 60 });
+    expect(queue.snapshot()).toMatchObject({ stripSurface: null, pausedUntil: expect.any(Number) });
+    vi.advanceTimersByTime(60 * 60_000);
+    expect(queue.snapshot().stripSurface).toBe('window');
+
+    queue.setRoundOpen(true);
+    expect(queue.snapshot().stripSurface).toBeNull();
+  });
+
+  it('returns an overlapping resume call instead of leaving it waiting forever', async () => {
+    const { queue } = makeQueue();
+    const first = queue.ask({ question: sessionStore, source: claude, returnAfterMs: 50_000 });
+    await vi.advanceTimersByTimeAsync(50_000);
+    const waiting = await first;
+    const id = 'id' in waiting ? waiting.id : '';
+
+    const older = queue.ask({ resume: id, source: claude, returnAfterMs: 50_000 });
+    const newer = queue.ask({ resume: id, source: claude, returnAfterMs: 50_000 });
+    expect(await older).toEqual({ unavailable: 'Another notify call is now waiting on this question.', next: 'Ask in the terminal instead.' });
+
+    queue.run({ type: 'answer', id, answer: { choice: 'Keep Redis' } });
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(await newer).toEqual({ answer: 'Keep Redis' });
+  });
+
+  it('shows a new question at once even while an update is on screen and hovered', async () => {
+    const { queue } = makeQueue();
+    await queue.ask({ question: { ui: 'info', title: 'Deploy finished' }, source: claude });
+    const updateId = queue.snapshot().items[0].id;
+    queue.run({ type: 'hover-info', id: updateId, hovering: true });
+
+    ask(queue, sessionStore);
+    expect(queue.snapshot().strip).toEqual({ kind: 'question', itemId: onlyId(queue) });
+    expect(queue.snapshot().items.find(item => item.id === updateId)?.state).toBe('info');
+  });
+
+  it('refreshes once at local midnight on a daylight-saving day', async () => {
+    const previousTz = process.env.TZ;
+    process.env.TZ = 'America/Los_Angeles';
+    try {
+      // 2026-11-01 is 25 hours long in Los Angeles: clocks fall back at 02:00.
+      vi.setSystemTime(new Date('2026-11-01T22:00:00-08:00'));
+      const { queue } = makeQueue();
+      ask(queue, sessionStore);
+      let changes = 0;
+      queue.on('change', () => { changes += 1; });
+
+      await vi.advanceTimersByTimeAsync(90 * 60_000);
+      expect(changes).toBe(0);
+      await vi.advanceTimersByTimeAsync(60 * 60_000);
+      expect(changes).toBe(1);
+    } finally {
+      process.env.TZ = previousTz;
+    }
+  });
+
+  it('rejects an answer that is not one of the choices', () => {
+    const { queue } = makeQueue();
+    ask(queue, sessionStore);
+    expect(() => queue.run({ type: 'answer', id: onlyId(queue), answer: { choice: 'MongoDB' } })).toThrow(/doesn't fit/);
+  });
+});
+
+/** A host and the screens connected to it, wired the way the event stream wires them. */
+function connect(host: NotifyQueue, ...screens: NotifyQueue[]) {
+  const push = () => { for (const screen of screens) screen.setRemote({ machine: 'mac-studio', online: true, state: host.sharedState() }); };
+  host.on('change', push);
+  push();
+}
+
+describe('NotifyQueue across machines', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 9, 26, 9, 41));
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it("shows the host's question beside the screen's own, each naming its machine, and each answer reaches only its agent", async () => {
+    const { queue: host } = makeQueue({}, 'mac-studio');
+    const { queue: laptop } = makeQueue({}, 'parsa-devbox');
+    connect(host, laptop);
+    const hostCall = ask(host, sessionStore, claude);
+    vi.advanceTimersByTime(1_000);
+    const laptopCall = ask(laptop, migration, codex);
+
+    const [hostId, laptopId] = laptop.snapshot().queue;
+    expect(laptop.snapshot().items.map(item => [item.title, item.machine])).toEqual([
+      ['Apply migration 0042 to staging?', 'parsa-devbox'],
+      ['Which session store should the refactor use?', 'mac-studio'],
+    ]);
+    expect(laptop.snapshot().strip).toEqual({ kind: 'question', itemId: hostId });
+    expect(laptop.isRemote(hostId)).toBe(true);
+    expect(laptop.isRemote(laptopId)).toBe(false);
+
+    laptop.noteAnsweredHere(hostId, true);
+    host.runRemote({ type: 'answer', id: hostId, answer: { choice: 'Keep Redis' } }, 'parsa-devbox');
+    laptop.run({ type: 'answer', id: laptopId, answer: { approved: true } });
+    await vi.advanceTimersByTimeAsync(3_000);
+
+    expect(hostCall.result).toEqual({ answer: 'Keep Redis' });
+    expect(laptopCall.result).toEqual({ approved: true });
+  });
+
+  it('holds an answer from another device on every screen, and Undo from a third one brings it back everywhere', async () => {
+    const { queue: host } = makeQueue({}, 'mac-studio');
+    const { queue: answering } = makeQueue({}, 'parsa-devbox');
+    const { queue: watching } = makeQueue({}, 'parsa-air');
+    connect(host, answering, watching);
+    const call = ask(host, migration, claude);
+    const id = onlyId(host);
+
+    answering.noteAnsweredHere(id, true);
+    host.runRemote({ type: 'answer', id, answer: { approved: true } }, 'parsa-devbox');
+    for (const screen of [host, answering, watching]) expect(screen.snapshot().strip).toEqual({ kind: 'sent', itemId: id });
+    expect(host.snapshot().items[0].answeredOn).toBe('parsa-devbox');
+    expect(answering.snapshot().items[0].answeredOn).toBeUndefined();
+    expect(watching.snapshot().items[0].answeredOn).toBe('parsa-devbox');
+
+    host.runRemote({ type: 'undo', id }, "Parsa's iPhone");
+    for (const screen of [host, answering, watching]) expect(screen.snapshot().strip).toEqual({ kind: 'question', itemId: id });
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(call.result).toBeUndefined();
+
+    host.run({ type: 'answer', id, answer: { approved: false } });
+    expect(watching.snapshot().items[0].answeredOn).toBe('mac-studio');
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(call.result).toEqual({ approved: false });
+  });
+
+  it('refuses a command for a question that is no longer waiting, and the agent gets one answer', async () => {
+    const { queue: host } = makeQueue({}, 'mac-studio');
+    const call = ask(host, sessionStore, claude);
+    const id = onlyId(host);
+
+    host.runRemote({ type: 'answer', id, answer: { choice: 'Postgres table' } }, "Parsa's iPhone");
+    expect(() => host.runRemote({ type: 'answer', id, answer: { choice: 'Keep Redis' } }, 'parsa-devbox'))
+      .toThrow(expect.objectContaining({ code: 'ERR_NOTIFY_ANSWERED', message: "Already answered on Parsa's iPhone. Nothing was sent." }));
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(call.result).toEqual({ answer: 'Postgres table' });
+
+    const controller = new AbortController();
+    ask(host, migration, codex, { signal: controller.signal });
+    const expired = onlyId(host);
+    controller.abort();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(() => host.runRemote({ type: 'answer', id: expired, answer: { approved: true } }, 'parsa-devbox'))
+      .toThrow(expect.objectContaining({ code: 'ERR_NOTIFY_EXPIRED', message: 'Codex stopped waiting on this question. Nothing was sent.' }));
+    expect(() => host.runRemote({ type: 'answer', id: 'gone', answer: { approved: true } }, 'parsa-devbox'))
+      .toThrow(expect.objectContaining({ code: 'ERR_NOTIFY_GONE' }));
+  });
+
+  it("shares hide, remind and skip from another screen, and keeps a 'when I switch to Pane' reminder on that screen", async () => {
+    const { queue: host } = makeQueue({}, 'mac-studio');
+    const { queue: laptop } = makeQueue({}, 'parsa-devbox');
+    connect(host, laptop);
+    ask(host, sessionStore, claude);
+    ask(host, migration, codex);
+    const [first, second] = host.snapshot().queue;
+
+    host.runRemote({ type: 'skip', id: first }, 'parsa-devbox');
+    expect(laptop.snapshot().queue).toEqual([second, first]);
+    host.runRemote({ type: 'dismiss', id: second }, 'parsa-devbox');
+    expect(host.snapshot().strip).toEqual({ kind: 'question', itemId: first });
+    expect(laptop.snapshot().strip).toEqual({ kind: 'question', itemId: first });
+    host.runRemote({ type: 'remind', id: first, after: '10m' }, 'parsa-devbox');
+    expect(laptop.snapshot().strip).toBeNull();
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(laptop.snapshot().strip).toEqual({ kind: 'question', itemId: first });
+
+    laptop.remindHere(first);
+    expect(laptop.snapshot().strip).toBeNull();
+    expect(host.snapshot().strip).toEqual({ kind: 'question', itemId: first });
+    laptop.setPaneFocused(true);
+    expect(laptop.snapshot()).toMatchObject({ strip: { kind: 'question', itemId: first }, stripSurface: 'pane' });
+  });
+
+  it("keeps the host's questions while the connection is down, and drops them when the screen disconnects", () => {
+    const { queue: host } = makeQueue({}, 'mac-studio');
+    const { queue: laptop } = makeQueue({}, 'parsa-devbox');
+    connect(host, laptop);
+    ask(host, sessionStore, claude);
+    const id = onlyId(host);
+
+    laptop.setRemote({ machine: 'mac-studio', online: false });
+    expect(laptop.snapshot()).toMatchObject({ remote: { machine: 'mac-studio', online: false }, strip: { kind: 'question', itemId: id } });
+    laptop.setRemote(null);
+    expect(laptop.snapshot()).toMatchObject({ remote: null, strip: null, queue: [] });
+  });
+
+  it("chimes on a screen when the host's question arrives, and says on the strip when its agent stops waiting", async () => {
+    const { queue: host } = makeQueue({}, 'mac-studio');
+    const { queue: laptop } = makeQueue({}, 'parsa-devbox');
+    connect(host, laptop);
+    const chimes = vi.fn();
+    laptop.on('chime', chimes);
+    const controller = new AbortController();
+    ask(host, sessionStore, claude, { signal: controller.signal });
+    const id = onlyId(host);
+    expect(chimes).toHaveBeenCalledTimes(1);
+
+    controller.abort();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(laptop.snapshot().strip).toEqual({ kind: 'expired', itemId: id });
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(laptop.snapshot().strip).toBeNull();
+  });
+
+  it("ends Undo on every screen when the host delivers, and keeps the host's 'when I switch to Pane' to the host", async () => {
+    const { queue: host } = makeQueue({}, 'mac-studio');
+    const { queue: laptop } = makeQueue({}, 'parsa-devbox');
+    connect(host, laptop);
+    ask(host, sessionStore, claude);
+    ask(host, migration, codex);
+    const [first, second] = host.snapshot().queue;
+
+    host.run({ type: 'remind', id: second, after: 'pane' });
+    expect(laptop.snapshot().hidden).not.toContain(second);
+
+    host.run({ type: 'answer', id: first, answer: { choice: 'Keep Redis' } });
+    expect(laptop.snapshot().strip).toEqual({ kind: 'sent', itemId: first });
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(laptop.snapshot().strip).toEqual({ kind: 'question', itemId: second });
+  });
+
+  it("doesn't chime for the host's questions while this screen's Notify is off", () => {
+    const { queue: host } = makeQueue({}, 'mac-studio');
+    const { queue: laptop } = makeQueue({ enabled: false }, 'parsa-devbox');
+    connect(host, laptop);
+    const chimes = vi.fn();
+    laptop.on('chime', chimes);
+    ask(host, sessionStore, claude);
+    expect(chimes).not.toHaveBeenCalled();
+  });
+
+  it("clears the host's questions quietly on every screen when the host turns Notify off", async () => {
+    const { queue: host, setSettings } = makeQueue({}, 'mac-studio');
+    const { queue: laptop } = makeQueue({}, 'parsa-devbox');
+    connect(host, laptop);
+    const call = ask(host, sessionStore, claude);
+
+    setSettings({ enabled: false });
+    host.turnOff();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(call.result).toEqual({ unavailable: 'Notify was turned off in Pane.', next: 'Ask in the terminal instead.' });
+    expect(laptop.snapshot()).toMatchObject({ queue: [], strip: null });
+  });
+
+  it("ignores a host snapshot older than the state it already shows, and takes a restarted host's", () => {
+    const { queue: host } = makeQueue({}, 'mac-studio');
+    const { queue: laptop } = makeQueue({}, 'parsa-devbox');
+    const emptyRead = host.sharedState();
+    connect(host, laptop);
+    ask(host, sessionStore, claude);
+    const id = onlyId(host);
+
+    // The reconnect read was taken before the question; it lands after the question's event.
+    laptop.setRemote({ machine: 'mac-studio', online: true, state: emptyRead });
+    expect(laptop.snapshot().queue).toEqual([id]);
+
+    // And a read taken while it waited can't bring it back once it is answered.
+    const waitingRead = host.sharedState();
+    host.run({ type: 'answer', id, answer: { choice: 'Keep Redis' } });
+    laptop.setRemote({ machine: 'mac-studio', online: true, state: waitingRead });
+    expect(laptop.snapshot().items.find(item => item.id === id)?.state).toBe('sent');
+
+    const { queue: restarted } = makeQueue({}, 'mac-studio');
+    laptop.setRemote({ machine: 'mac-studio', online: true, state: restarted.sharedState() });
+    expect(laptop.snapshot().items).toEqual([]);
+  });
+});

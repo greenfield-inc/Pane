@@ -73,6 +73,8 @@ import { OPEN_INSPECTOR_EVENT, type InspectorRequest, type InspectorTab } from '
 import { useErrorStore } from '../stores/errorStore';
 import ProjectSettings from './ProjectSettings';
 import { LoopsView } from './loops/LoopsView';
+import { LivePreviewPrompt } from './LivePreviewPrompt';
+import { NotifyInbox } from './notify/NotifyInbox';
 import { LoopRunHeader, LoopRunsRail } from './loops/LoopRunChrome';
 import { useLoopsStore } from '../stores/loopsStore';
 
@@ -528,6 +530,11 @@ export const SessionView = memo(() => {
   useEffect(() => {
     if (activeSession?.id && activeSessionPanelsLoaded) markPaneViewShown(activeSession.id);
   }, [activeSession?.id, activeSessionPanelsLoaded]);
+
+  // Keyed by Pane so an open that failed stays with the Pane it failed in.
+  const livePreviewPrompt = activeSession?.projectId !== undefined && activeSessionPanelsLoaded ? (
+    <LivePreviewPrompt key={activeSession.id} paneId={activeSession.id} projectId={activeSession.projectId} panels={sessionPanels} />
+  ) : null;
 
   // The bottom dock holds the first plain shell, never an agent or command panel.
   const defaultTerminalPanel = useMemo(
@@ -1939,6 +1946,10 @@ export const SessionView = memo(() => {
     return <LoopsView />;
   }
 
+  if (activeView === 'notify') {
+    return <NotifyInbox />;
+  }
+
   const loadError = selectionError ?? (ownsPanelLoad ? panelLoad?.error : null);
   if (selectedPaneId && (!activeSession || !ownsPanelLoad || loadError)) {
     return <div className="flex flex-1 flex-col bg-bg-primary">
@@ -1999,6 +2010,7 @@ export const SessionView = memo(() => {
                 {/* Top: active panel content */}
                 <div className="pane-editor-stage flex-1 relative min-h-0 overflow-hidden bg-bg-editor">
                   {editorStageElement || emptyStage}
+                  {livePreviewPrompt}
                 </div>
 
                 {/* Bottom: horizontal detail panel */}
@@ -2080,6 +2092,7 @@ export const SessionView = memo(() => {
                 {/* Top: active panel content */}
                 <div className="pane-editor-stage flex-1 relative min-h-0 overflow-hidden bg-bg-editor">
                   {editorStageElement || emptyStage}
+                  {livePreviewPrompt}
                 </div>
 
                 {/* Bottom: persistent terminal (collapsible) */}

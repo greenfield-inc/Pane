@@ -26,6 +26,8 @@ import type {
   RemoteDaemonHostRuntimeState,
   RemoteHostSetupRequest,
   RemotePaneConnectionState,
+  RemoteConnectionCheckStage,
+  RemoteHostSetupProgress,
   RemotePaneConnectionProfile,
 } from '../../../shared/types/remoteDaemon';
 import type { WorkspaceAccessUpdate } from '../../../shared/types/workspaceAccess';
@@ -34,6 +36,7 @@ import type {
 } from '../../../shared/types/daemon';
 import type { ProjectDashboardSessionUpdateEvent, ProjectDashboardUpdateEvent } from '../types/projectDashboard';
 import type { DiffScope, FileDiffRequest } from '../../../shared/types/gitDiff';
+import type { SetupFile, SetupSectionId } from '../../../shared/types/setupTransfer';
 
 // Type for IPC response
 // oxlint-disable-next-line typescript/no-explicit-any -- Generic type parameter default for flexible API responses
@@ -150,6 +153,26 @@ export class API {
     async shareImage(data: string, filename: string) {
       if (!isElectron()) throw new Error('Electron API not available');
       return window.electronAPI.export.shareImage(data, filename);
+    },
+  };
+
+  // Settings › Import & Export
+  static setup = {
+    async summary() {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.setup.summary();
+    },
+    async export(sections: SetupSectionId[]) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.setup.export(sections);
+    },
+    async chooseImport() {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.setup.chooseImport();
+    },
+    async preview(file: SetupFile, fileName: string) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.setup.preview(file, fileName);
     },
   };
 
@@ -785,9 +808,39 @@ export class API {
       return window.electronAPI.remoteDaemon.listTailnetMachines();
     },
 
+    async getGlasses() {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.remoteDaemon.getGlasses();
+    },
+
+    async revokeGlasses(id: string) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.remoteDaemon.revokeGlasses(id);
+    },
+
+    async setGlassesOrigin(update: { origin: string; allowed: boolean }) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.remoteDaemon.setGlassesOrigin(update);
+    },
+
     async saveTailnetMachine(input: { name: string; password?: string }) {
       if (!isElectron()) throw new Error('Electron API not available');
       return window.electronAPI.remoteDaemon.saveTailnetMachine(input);
+    },
+
+    async runCheckFix(checkId: number, stage: RemoteConnectionCheckStage) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.remoteDaemon.runCheckFix(checkId, stage);
+    },
+
+    async dismissCheck(checkId: number) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.remoteDaemon.dismissCheck(checkId);
+    },
+
+    onSetupProgress(callback: (progress: RemoteHostSetupProgress) => void) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.remoteDaemon.onSetupProgress(callback);
     },
 
     onConnectionStateChanged(callback: (state: RemotePaneConnectionState) => void) {

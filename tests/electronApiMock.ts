@@ -12,10 +12,13 @@ import type {
 import type { SubmitFeedbackRequest } from '../shared/types/feedback';
 import type { Loop, LoopInput, LoopSchedulePreview } from '../shared/types/loop';
 import type { TailnetMachineList, WorkspaceAccessSummary } from '../shared/types/workspaceAccess';
+import type { GlassesAccessState } from '../shared/types/glasses';
 import type { JsonObject, JsonValue } from '../shared/validation/boundaryDecoder';
-import { DEFAULT_APPEARANCE, LIGHT_THEMES, normalizeAppearance, type AppearanceConfig } from '../shared/types/appearance';
+import { DEFAULT_APPEARANCE, normalizeAppearance, type AppearanceConfig } from '../shared/types/appearance';
 import type { DiffManifest, DiffScope, FileDiffResult } from '../shared/types/gitDiff';
 import type { RunpaneAgentDoctorResult, RunpanePaneCreateRequest } from '../shared/types/runpaneOrchestration';
+import type { SetupExportSummary, SetupFile, SetupImportPreview, SetupSectionId } from '../shared/types/setupTransfer';
+import type { NotifyCommand, NotifySnapshot, NotifyWindowSize } from '../shared/types/notify';
 
 type MockEventValue = JsonValue | object | undefined;
 type MockEventCallback = (...args: MockEventValue[]) => void;
@@ -111,6 +114,11 @@ export type ElectronApiMockOptions = {
   agentDoctor?: Partial<Record<'claude' | 'codex' | 'cursor' | 'opencode', { available: boolean; signIn?: 'signed-in' | 'signed-out' | 'unknown' }>>;
   /** Delay before runpane:agents:doctor answers, or `hold` to leave every check pending. */
   agentDoctorDelayMs?: number | 'hold';
+  glasses?: GlassesAccessState;
+  /** setup:choose-import fails with this PaneError text instead of previewing. */
+  setupImportError?: string;
+  /** Serves window.electronAPI.notify with this queue snapshot; absent, the API is too. */
+  notifySnapshot?: NotifySnapshot;
   /** runpane:panes:create fails with this message instead of adding the Pane. */
   paneCreateError?: string;
   /** runpane:panes:create creates the Pane, then reports a failure (ok: false) that kept it, as main does when setup fails. */
@@ -121,7 +129,7 @@ export type ElectronApiMockOptions = {
 
 export async function installElectronApiMock(page: Page, options: ElectronApiMockOptions = {}) {
   type SerializedOptions = ElectronApiMockOptions & {
-    appearance: { defaults: AppearanceConfig; lightThemes: string[]; seeded: AppearanceConfig };
+    appearance: { defaults: AppearanceConfig; seeded: AppearanceConfig };
   };
   await page.addInitScript((mockOptions: SerializedOptions) => {
     if (mockOptions.notificationsSupported === false) {
@@ -193,6 +201,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       url: 'https://devbox.tail1234.ts.net:8443',
       ...mockOptions.workspaceAccess,
     };
+    const glassesState: GlassesAccessState = clone(mockOptions.glasses ?? { devices: [], allowedOrigins: [], refusedOrigins: [] });
     const remoteConnectionState: RemotePaneConnectionState = {
       mode: 'local',
       status: 'local',
@@ -582,11 +591,73 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       return { success: true };
     };
 
-    const invoke = (channel: string, ...args: unknown[]) => {
+    const trackCall = (channel: string, args: unknown[]) => {
       const calls = invokeCalls.get(channel) ?? [];
       calls.push({ channel, args });
       if (calls.length > 500) calls.shift();
       invokeCalls.set(channel, calls);
+    };
+
+    // Settings › Import & Export: this computer's setup and one file to import.
+    const setupSummary: SetupExportSummary = {
+      rows: [
+        { id: 'agentPresets', count: 2, leftOut: [], agents: ['Claude Code', 'Codex'] },
+        { id: 'customCommands', count: 2, leftOut: [{ section: 'customCommands', name: 'deploy-prod' }] },
+        { id: 'runScripts', count: 4, leftOut: [] },
+        { id: 'skills', count: 2, leftOut: [], skills: { homeSkill: true, registerMcp: true } },
+        { id: 'terminalShortcuts', count: 4, leftOut: [] },
+        { id: 'worktreeFileSync', count: 3, leftOut: [] },
+        { id: 'appearance', count: 1, leftOut: [], appearance: { mode: 'fixed', theme: 'dark', light: 'light-rounded', dark: 'dark' } },
+        { id: 'preferences', count: 14, leftOut: [] },
+      ],
+    };
+    const setupPreview: SetupImportPreview = {
+      fileName: 'pane-setup-2026-10-26.json',
+      appVersion: '2.4.202',
+      platform: 'darwin',
+      otherPlatform: false,
+      file: {
+        kind: 'pane-setup',
+        version: 1,
+        exportedAt: '2026-10-26T22:40:00Z',
+        appVersion: '2.4.202',
+        platform: 'darwin',
+        sections: { customCommands: [{ name: 'lint-fix', command: 'pnpm lint --fix' }] },
+      },
+      sections: [
+        {
+          id: 'customCommands', changes: 2, added: 1, replaced: 1, keyInUse: 0,
+          items: [
+            { kind: 'new', name: 'lint-fix', text: 'pnpm lint --fix' },
+            { kind: 'replaces', name: 'review', text: 'claude "/review --strict"', was: 'claude "/review"' },
+          ],
+          apply: {
+            config: {
+              customCommands: [
+                { name: 'lint-fix', command: 'pnpm lint --fix' },
+                { name: 'review', command: 'claude "/review --strict"' },
+              ],
+            },
+          },
+        },
+        {
+          id: 'runScripts', changes: 1, added: 1, replaced: 0, keyInUse: 0, repositories: { matched: 1, total: 2 },
+          items: [
+            { kind: 'new', name: 'acme-web', field: 'Run Commands', text: 'pnpm dev' },
+            { kind: 'skipped', name: 'marketing-site', reason: 'not in Pane on this computer', cause: 'missing' },
+          ],
+          apply: { projects: [{ id: 1, name: 'acme-web', updates: { run_script: 'pnpm dev' } }] },
+        },
+        { id: 'terminalShortcuts', changes: 0, added: 0, replaced: 0, keyInUse: 0, items: [], apply: {} },
+        {
+          id: 'preferences', changes: 1, added: 0, replaced: 0, keyInUse: 0, items: [],
+          apply: { preferences: { sidebar_pane_row_layout: 'two-row' } },
+        },
+      ],
+    };
+
+    const invoke = (channel: string, ...args: unknown[]) => {
+      trackCall(channel, args);
       if (channel === 'terminal:ack') terminalAckedBytes += Number(args[1]);
 
       const key = args[0] === undefined ? undefined : String(args[0]);
@@ -641,6 +712,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         configState.preferredShell = String(args[0]);
         return Promise.resolve(undefined);
       }
+      if (channel === 'ports:list') {
+        return Promise.resolve({ host: 'mock-host', ports: [] });
+      }
       if (channel === 'panels:get-layout') {
         return success(clone(key && mockLayouts.has(key) ? mockLayouts.get(key) : mockOptions.initialLayout ?? null));
       }
@@ -688,7 +762,30 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     };
 
     let uncleanShutdownPending = mockOptions.uncleanShutdown === true;
+    let notifySnapshot = mockOptions.notifySnapshot ? clone(mockOptions.notifySnapshot) : null;
+    // Like main: the snapshot's settings are the saved notify settings over the defaults.
+    const applyNotifyConfig = () => {
+      if (notifySnapshot && configState.notify && !Array.isArray(configState.notify) && configState.notify instanceof Object) {
+        Object.assign(notifySnapshot.settings, configState.notify);
+      }
+    };
+    applyNotifyConfig();
+    const notifyCommands: NotifyCommand[] = [];
+    const notifyWindowSizes: NotifyWindowSize[] = [];
+    const notifyApi = notifySnapshot ? {
+      getSnapshot: () => Promise.resolve(clone(notifySnapshot)),
+      run: (command: NotifyCommand) => {
+        notifyCommands.push(clone(command));
+        return Promise.resolve();
+      },
+      onSnapshot: (callback: MockEventCallback) => subscribe('notify:snapshot', callback),
+      onChime: (callback: MockEventCallback) => subscribe('notify:chime', callback),
+      onNavigate: (callback: MockEventCallback) => subscribe('notify:navigate', callback),
+      resizeWindow: (size: NotifyWindowSize) => { notifyWindowSizes.push(clone(size)); },
+      focusWindow: () => Promise.resolve(),
+    } : undefined;
     const electronAPI = {
+      notify: notifyApi,
       preferences: {
         get: async (key: string) => preferences[key] ?? 'true',
         getAll: async () => clone(preferences),
@@ -801,6 +898,24 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         saveImage: () => success(null),
         shareImage: () => success({ method: 'clipboard' }),
       }),
+      setup: namespace({
+        summary: () => success(clone(setupSummary)),
+        export: (sections: SetupSectionId[]) => {
+          trackCall('setup:export', [sections]);
+          return success({
+            fileName: 'pane-setup-2026-10-26.json',
+            filePath: '/Users/test/pane-setup-2026-10-26.json',
+            leftOut: [{ section: 'customCommands', name: 'deploy-prod' }],
+          });
+        },
+        chooseImport: () => (mockOptions.setupImportError
+          ? Promise.resolve({ success: false, error: mockOptions.setupImportError })
+          : success(clone(setupPreview))),
+        preview: (file: SetupFile, fileName: string) => {
+          trackCall('setup:preview', [file, fileName]);
+          return success(clone(setupPreview));
+        },
+      }),
       usage: namespace({
         getReport: () => success(clone(mockOptions.initialUsageReport ?? {
           totals: {
@@ -891,6 +1006,10 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         })),
       }),
       config: namespace({
+        // Deepgram refuses any key starting dg-revoked and takes every other.
+        checkDeepgramKey: async (key: string) => (key.startsWith('dg-revoked')
+          ? { result: 'rejected', message: 'Saved, but Deepgram rejected this key (HTTP 401). Copy a current key from console.deepgram.com and paste it again.' }
+          : { result: 'accepted', message: 'Deepgram accepted this key.' }),
         get: async () => {
           configGetCount += 1;
           if (mockOptions.configReadDelayMs) {
@@ -908,14 +1027,17 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
             nextConfigUpdateError = null;
             return Promise.resolve({ success: false, error });
           }
-          if ('systemLightTheme' in updates && !mockOptions.appearance.lightThemes.includes(String(updates.systemLightTheme))) {
-            return Promise.resolve({ success: false, error: 'systemLightTheme must be a light palette' });
-          }
-          if ('systemDarkTheme' in updates && mockOptions.appearance.lightThemes.includes(String(updates.systemDarkTheme))) {
-            return Promise.resolve({ success: false, error: 'systemDarkTheme must be a dark palette' });
-          }
+          const savedNotify = configState.notify;
           Object.assign(configState, updates);
           configUpdates.push(clone(updates));
+          if (updates.notify instanceof Object && !Array.isArray(updates.notify)) {
+            // Main merges each notify field into the saved ones and sends a new snapshot.
+            const merged: JsonObject = {};
+            if (savedNotify instanceof Object && !Array.isArray(savedNotify)) Object.assign(merged, savedNotify);
+            configState.notify = Object.assign(merged, updates.notify);
+            applyNotifyConfig();
+            if (notifySnapshot) queueMicrotask(() => emit('notify:snapshot', clone(notifySnapshot)));
+          }
           const response = success(clone(configState));
           if ('terminalFontFamily' in updates || 'terminalFontSize' in updates) {
             queueMicrotask(() => emit('config:terminal-font-updated', {
@@ -1442,6 +1564,17 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           return success(clone(remoteDaemonConfig.client));
         },
         getWorkspaceAccess: () => success(clone(workspaceAccess)),
+        getGlasses: () => success(clone(glassesState)),
+        revokeGlasses: (id: string) => {
+          glassesState.devices = glassesState.devices.filter((device) => device.id !== id);
+          return success(clone(glassesState));
+        },
+        setGlassesOrigin: (update: { origin: string; allowed: boolean }) => {
+          glassesState.refusedOrigins = glassesState.refusedOrigins.filter((entry) => entry.origin !== update.origin);
+          glassesState.allowedOrigins = glassesState.allowedOrigins.filter((entry) => entry.origin !== update.origin);
+          if (update.allowed) glassesState.allowedOrigins.push({ origin: update.origin, source: 'owner' });
+          return success(clone(glassesState));
+        },
         updateWorkspaceAccess: (update: { visibility?: 'off' | 'owner' | 'tailnet'; password?: string | null }) => {
           if (update.visibility) workspaceAccess.visibility = update.visibility;
           if (update.password !== undefined) workspaceAccess.passwordProtected = update.password !== null;
@@ -1478,6 +1611,13 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           subscribe('remote-daemon:connection-state-changed', callback),
         onHostStateChanged: (callback: MockEventCallback) =>
           subscribe('remote-daemon:host-state-changed', callback),
+        onSetupProgress: (callback: MockEventCallback) =>
+          subscribe('remote-daemon:setup-progress', callback),
+        runCheckFix: () => success(clone(remoteConnectionState)),
+        dismissCheck: () => {
+          setRemoteConnectionState({ check: null });
+          return success(clone(remoteConnectionState));
+        },
       }),
       uiState: namespace({
         getExpanded: () => {
@@ -1757,13 +1897,25 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         getProjectUpdates() {
           return lastProjectUpdate ? [clone(lastProjectUpdate)] : [];
         },
+        getNotifyCommands() {
+          return clone(notifyCommands);
+        },
+        getNotifyWindowSizes() {
+          return clone(notifyWindowSizes);
+        },
+        emitNotifySnapshot(snapshot: NotifySnapshot) {
+          notifySnapshot = clone(snapshot);
+          emit('notify:snapshot', clone(snapshot));
+        },
+        emitNotifyNavigate(target: 'inbox' | 'settings') {
+          emit('notify:navigate', target);
+        },
       },
     });
   }, {
     ...options,
     appearance: {
       defaults: DEFAULT_APPEARANCE,
-      lightThemes: [...LIGHT_THEMES],
       seeded: normalizeAppearance(options.initialConfig ?? {}).appearance,
     },
   });

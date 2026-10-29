@@ -1,0 +1,25 @@
+{
+  "package_id": "com.runpane.glasses",
+  "edition": "202601",
+  "name": "Pane",
+  "version": "0.1.2",
+  "min_sdk_version": "0.0.16",
+  "entrypoint": "index.html",
+  "permissions": [
+    {
+      "name": "network",
+      "desc": "Connects only to the Pane computers you pair, over your own private Tailscale network, to show their cards and terminals and send your answers.",
+      "whitelist": [
+        "https://*.ts.net:8443",
+        "wss://*.ts.net:8443"
+      ]
+    },
+    {
+      "name": "g2-microphone",
+      "desc": "Hold to talk: your voice goes to your own Pane computer, which turns it into text for an answer or a terminal."
+    }
+  ],
+  "supported_languages": [
+    "en"
+  ]
+}

@@ -2,7 +2,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { assertUpdateQuiescence, claimUpdateLock, releaseUpdateLock, executeUpdate, readUpdateJournal, writeUpdateJson } from '../../../packages/runpane/src/updateOperation';
+import { spawn } from 'node:child_process';
+import { assertUpdateQuiescence, claimUpdateLock, releaseUpdateLock, executeUpdate, readUpdateJournal, waitForUpdateCaller, writeUpdateJson } from '../../../packages/runpane/src/updateOperation';
 
 const directories: string[] = [];
 function fixture() {
@@ -152,6 +153,26 @@ describe('durable update operation', () => {
     expect(result.phase).toBe('failed');
     expect(seen).toEqual(['stage']);
     expect(result.appUpdated).toBe(false);
+  });
+
+  // The caller may be a remote `workspace exec` served by the Pane this update stops.
+  it('lets the requesting CLI exit, so its reply is sent, before Pane is stopped', async () => {
+    const { file } = fixture();
+    const caller = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 600)'], { stdio: 'ignore' });
+    writeUpdateJson(file, { ...readUpdateJournal(file), setupPid: caller.pid });
+    await waitForUpdateCaller(readUpdateJournal(file), { timeoutMs: 10_000, graceMs: 0 });
+    expect(() => process.kill(caller.pid!, 0)).toThrow(expect.objectContaining({ code: 'ESRCH' }));
+  });
+
+  it('stops waiting for a caller that never exits', async () => {
+    const { file } = fixture();
+    const caller = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], { stdio: 'ignore' });
+    try {
+      writeUpdateJson(file, { ...readUpdateJournal(file), setupPid: caller.pid });
+      const started = Date.now();
+      await waitForUpdateCaller(readUpdateJournal(file), { timeoutMs: 300, graceMs: 0 });
+      expect(Date.now() - started).toBeLessThan(3_000);
+    } finally { caller.kill(); }
   });
 
 });

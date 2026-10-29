@@ -38,7 +38,6 @@ export const THEME_CLASSES = {
 } satisfies Record<Theme, string[]>;
 
 export type LightTheme = 'light' | 'light-rounded' | 'folio' | 'newsprint' | 'teletype' | 'haar' | 'high-legibility';
-export type DarkTheme = Exclude<Theme, LightTheme>;
 
 // oxlint-disable-next-line anti-slop/no-unknown-parameters -- This is the canonical type guard used directly at untrusted config and IPC boundaries.
 export const isTheme = (value: unknown): value is Theme =>
@@ -48,13 +47,6 @@ export const isTheme = (value: unknown): value is Theme =>
 export const isLightTheme = (theme: Theme): theme is LightTheme =>
   THEME_CLASSES[theme][0] === 'light';
 
-// oxlint-disable-next-line anti-slop/require-safety-comment-for-type-assertion -- SAFETY: THEME_CLASSES is a closed Record<Theme, ...>, so its runtime keys are Theme values.
-export const LIGHT_THEMES: readonly LightTheme[] = (Object.keys(THEME_CLASSES) as Theme[])
-  .filter(isLightTheme);
-// oxlint-disable-next-line anti-slop/require-safety-comment-for-type-assertion -- SAFETY: THEME_CLASSES is a closed Record<Theme, ...>, so its runtime keys are Theme values.
-export const DARK_THEMES: readonly DarkTheme[] = (Object.keys(THEME_CLASSES) as Theme[])
-  .filter((theme): theme is DarkTheme => !isLightTheme(theme));
-
 // oxlint-disable-next-line anti-slop/require-safety-comment-for-type-assertion -- SAFETY: THEME_CLASSES first elements are authored as the two canonical base classes.
 export const themeBase = (theme: Theme): 'light' | 'dark' => THEME_CLASSES[theme][0] as 'light' | 'dark';
 
@@ -63,15 +55,16 @@ export type AppearanceMode = 'system' | 'fixed';
 export interface AppearanceConfig {
   appearanceMode: AppearanceMode;
   theme: Theme;
-  systemLightTheme: LightTheme;
-  systemDarkTheme: DarkTheme;
+  /** Any palette: a slot is named for the OS appearance it follows, not the palette's own base. */
+  systemLightTheme: Theme;
+  systemDarkTheme: Theme;
 }
 
 export const DEFAULT_APPEARANCE: AppearanceConfig = {
   appearanceMode: 'system',
-  theme: 'light-rounded',
-  systemLightTheme: 'light-rounded',
-  systemDarkTheme: 'dark',
+  theme: 'folio',
+  systemLightTheme: 'folio',
+  systemDarkTheme: 'dusk-oled',
 };
 
 export const DEFAULT_TERMINAL_FONT_SIZE = 16;
@@ -125,24 +118,20 @@ export function normalizeAppearance(raw: unknown): NormalizedAppearance {
       ? source.appearanceMode
       : DEFAULT_APPEARANCE.appearanceMode;
     const theme = isTheme(source.theme) ? source.theme : DEFAULT_APPEARANCE.theme;
-    const systemLightTheme = isTheme(source.systemLightTheme) && isLightTheme(source.systemLightTheme)
-      ? source.systemLightTheme
-      : DEFAULT_APPEARANCE.systemLightTheme;
-    const systemDarkTheme = isTheme(source.systemDarkTheme) && !isLightTheme(source.systemDarkTheme)
-      ? source.systemDarkTheme
-      : DEFAULT_APPEARANCE.systemDarkTheme;
+    const systemLightTheme = isTheme(source.systemLightTheme) ? source.systemLightTheme : DEFAULT_APPEARANCE.systemLightTheme;
+    const systemDarkTheme = isTheme(source.systemDarkTheme) ? source.systemDarkTheme : DEFAULT_APPEARANCE.systemDarkTheme;
 
     if (Object.prototype.hasOwnProperty.call(source, 'appearanceMode') && source.appearanceMode !== 'system' && source.appearanceMode !== 'fixed') {
       diagnostics.push('invalid appearanceMode; restored system');
     }
     if (Object.prototype.hasOwnProperty.call(source, 'theme') && !isTheme(source.theme)) {
-      diagnostics.push('invalid theme; restored light-rounded');
+      diagnostics.push(`invalid theme; restored ${DEFAULT_APPEARANCE.theme}`);
     }
     if (Object.prototype.hasOwnProperty.call(source, 'systemLightTheme') && systemLightTheme !== source.systemLightTheme) {
-      diagnostics.push('invalid systemLightTheme; restored light-rounded');
+      diagnostics.push(`invalid systemLightTheme; restored ${DEFAULT_APPEARANCE.systemLightTheme}`);
     }
     if (Object.prototype.hasOwnProperty.call(source, 'systemDarkTheme') && systemDarkTheme !== source.systemDarkTheme) {
-      diagnostics.push('invalid systemDarkTheme; restored dark');
+      diagnostics.push(`invalid systemDarkTheme; restored ${DEFAULT_APPEARANCE.systemDarkTheme}`);
     }
 
     appearance = { appearanceMode, theme, systemLightTheme, systemDarkTheme };

@@ -133,6 +133,14 @@ export interface ParsedArgs {
   lockTtlMs?: number;
   lockWaitMs?: number;
   note?: string;
+  /** `runpane notify`: the question fields as given; JSON ones are parsed and checked when it runs. */
+  notifyUi?: string;
+  notifyContext?: string;
+  notifyChoices?: string;
+  notifyDetail?: string;
+  notifyDetailLabel?: string;
+  notifySuggestions?: string;
+  notifyAction?: string;
   /** loops: the loop id, its cron, and create's --paused. */
   loopId?: string;
   cron?: string;
@@ -406,7 +414,7 @@ function takeWorkspaceMachine(args: string[]): string | undefined {
   return args.splice(1, 1)[0];
 }
 
-/** `--` takes the rest of the line for exec; read and write take one path; inbox ack takes item ids. */
+/** `--` (or else the first word after exec's options) takes the rest of the line for exec; read and write take one path; inbox ack takes item ids. */
 function takeWorkspaceVerbArgs(command: string, args: string[]): Pick<ParsedArgs, 'workspacePath' | 'execCommand' | 'handoffDestination' | 'inboxIds'> {
   if (command === 'inbox ack') {
     const ids: string[] = [];
@@ -420,12 +428,27 @@ function takeWorkspaceVerbArgs(command: string, args: string[]): Pick<ParsedArgs
   }
   if (command === 'workspace exec') {
     const separator = args.indexOf('--');
-    return separator === -1 ? {} : { execCommand: args.splice(separator).slice(1) };
+    if (separator !== -1) return { execCommand: args.splice(separator).slice(1) };
+    // PowerShell drops `--` before a .ps1 shim sees it, so the first word that is not
+    // one of exec's own options (or its value) starts the command.
+    let start = 0;
+    while (args[start]?.startsWith('-')) start += LOCAL_VALUE_FLAGS.has(args[start]) ? 2 : 1;
+    return start < args.length ? { execCommand: args.splice(start) } : {};
   }
   if ((command === 'workspace read' || command === 'workspace write') && args[0] && !args[0].startsWith('-')) {
     return { workspacePath: args.shift() };
   }
   return {};
+}
+
+/** Whether runpane itself was asked for JSON: a `--json` inside an exec command belongs to that command. */
+export function wantsJsonOutput(argv: string[]): boolean {
+  try {
+    return parseRunpaneArgs(argv).json;
+  } catch {
+    const end = argv.indexOf('--');
+    return (end === -1 ? argv : argv.slice(0, end)).includes('--json');
+  }
 }
 
 /** `runpane workspace <machine> <command...>` for any command other than read, write, and exec. */
@@ -1075,6 +1098,34 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
   }
   if (flag === '--loop') {
     parsed.loopId = value;
+    return;
+  }
+  if (flag === '--ui') {
+    parsed.notifyUi = value;
+    return;
+  }
+  if (flag === '--context') {
+    parsed.notifyContext = value;
+    return;
+  }
+  if (flag === '--choices') {
+    parsed.notifyChoices = value;
+    return;
+  }
+  if (flag === '--detail') {
+    parsed.notifyDetail = value;
+    return;
+  }
+  if (flag === '--detail-label') {
+    parsed.notifyDetailLabel = value;
+    return;
+  }
+  if (flag === '--suggestions') {
+    parsed.notifySuggestions = value;
+    return;
+  }
+  if (flag === '--action') {
+    parsed.notifyAction = value;
     return;
   }
   if (flag === '--cron') {

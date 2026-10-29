@@ -18,10 +18,8 @@ import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDec
 import {
   AppearanceValidationError,
   DEFAULT_APPEARANCE,
-  isLightTheme,
   isTheme,
   normalizeAppearance,
-  type AppearanceConfig,
 } from '../../../shared/types/appearance';
 
 const DEFAULT_POSTHOG_API_KEY = 'phc_wir25CCsjr2NsZGEdlWNdvwcNG1XDjhxc9RyL5KDCf1';
@@ -61,10 +59,7 @@ export class ConfigManager extends EventEmitter {
       voiceTranscriptionMode: 'streaming',
       systemPromptAppend: undefined,
       runScript: undefined,
-      theme: 'light-rounded',
-      appearanceMode: 'system',
-      systemLightTheme: 'light-rounded',
-      systemDarkTheme: 'dark',
+      ...DEFAULT_APPEARANCE,
       highContrast: false,
       terminalFontFamily: 'Geist Mono',
       terminalFontSize: DEFAULT_TERMINAL_FONT_SIZE,
@@ -398,11 +393,14 @@ export class ConfigManager extends EventEmitter {
       const agentContext = updates.agentContext !== undefined
         ? { ...this.config.agentContext, ...updates.agentContext }
         : this.config.agentContext;
+      // Notify settings arrive one field at a time from Settings and the tray menu.
+      const notify = updates.notify !== undefined ? { ...this.config.notify, ...updates.notify } : this.config.notify;
       const next: AppConfig = {
         ...this.config,
         ...updates,
         analytics,
         agentContext,
+        notify,
         defaultOrchestratorAgent: 'defaultOrchestratorAgent' in updates
           ? normalizePaneChatAgent(updates.defaultOrchestratorAgent)
           : this.config.defaultOrchestratorAgent,
@@ -420,7 +418,7 @@ export class ConfigManager extends EventEmitter {
         }));
       }
       next.sharedCredentials = restampSharedCredentials(next, 'now') ?? next.sharedCredentials;
-      this.validateAppearanceUpdate(updates, next);
+      this.validateAppearanceUpdate(updates);
       await this.writeConfigToDisk(next);
       this.config = next;
 
@@ -433,30 +431,18 @@ export class ConfigManager extends EventEmitter {
     });
   }
 
-  private validateAppearanceUpdate(updates: Partial<AppConfig>, next: AppConfig): void {
+  private validateAppearanceUpdate(updates: Partial<AppConfig>): void {
     if ('appearanceMode' in updates && updates.appearanceMode !== 'system' && updates.appearanceMode !== 'fixed') {
       throw new AppearanceValidationError('appearanceMode must be system or fixed');
     }
     if ('theme' in updates && !isTheme(updates.theme)) {
       throw new AppearanceValidationError('theme must be a valid palette');
     }
-    if ('systemLightTheme' in updates && (!isTheme(updates.systemLightTheme) || !isLightTheme(updates.systemLightTheme))) {
-      throw new AppearanceValidationError('systemLightTheme must be a light palette');
+    if ('systemLightTheme' in updates && !isTheme(updates.systemLightTheme)) {
+      throw new AppearanceValidationError('systemLightTheme must be a valid palette');
     }
-    if ('systemDarkTheme' in updates && (!isTheme(updates.systemDarkTheme) || isLightTheme(updates.systemDarkTheme))) {
-      throw new AppearanceValidationError('systemDarkTheme must be a dark palette');
-    }
-    const appearance: AppearanceConfig = {
-      appearanceMode: next.appearanceMode ?? DEFAULT_APPEARANCE.appearanceMode,
-      theme: next.theme ?? DEFAULT_APPEARANCE.theme,
-      systemLightTheme: next.systemLightTheme ?? DEFAULT_APPEARANCE.systemLightTheme,
-      systemDarkTheme: next.systemDarkTheme ?? DEFAULT_APPEARANCE.systemDarkTheme,
-    };
-    if (!isLightTheme(appearance.systemLightTheme)) {
-      throw new AppearanceValidationError('systemLightTheme must be a light palette');
-    }
-    if (isLightTheme(appearance.systemDarkTheme)) {
-      throw new AppearanceValidationError('systemDarkTheme must be a dark palette');
+    if ('systemDarkTheme' in updates && !isTheme(updates.systemDarkTheme)) {
+      throw new AppearanceValidationError('systemDarkTheme must be a valid palette');
     }
   }
 

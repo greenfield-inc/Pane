@@ -1,3 +1,4 @@
+import type { NotifySettings } from '../../../shared/types/notify';
 import type { CustomCommandResume } from '../../../shared/types/customCommandResume';
 import type { LeaderboardConfig } from '../../../shared/types/leaderboard';
 import type { RemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
@@ -6,7 +7,7 @@ import type { PaneChatAgent } from '../../../shared/types/paneChat';
 import type { VoiceTranscriptionMode } from '../../../shared/types/voiceTranscription';
 import type { WorktreeFileSyncEntry } from '../../../shared/types/worktreeFileSync';
 import type { ApnsCredentialConfig, SharedCredentialId, SharedCredentialMeta } from '../../../shared/types/sharedCredentials';
-import type { AppearanceMode, DarkTheme, LightTheme, Theme } from '../../../shared/types/appearance';
+import type { AppearanceMode, Theme } from '../../../shared/types/appearance';
 import type { SessionRetention } from '../../../shared/types/orchestrationSession';
 
 interface TerminalShortcut {
@@ -89,8 +90,8 @@ export interface AppConfig {
   // Theme preference
   appearanceMode?: AppearanceMode;
   theme?: Theme;
-  systemLightTheme?: LightTheme;
-  systemDarkTheme?: DarkTheme;
+  systemLightTheme?: Theme;
+  systemDarkTheme?: Theme;
   // Opt-in high contrast mode: raises muted chrome text to AAA and the terminal's
   // minimumContrastRatio so dim CLI output stays legible
   highContrast?: boolean;
@@ -101,6 +102,8 @@ export interface AppConfig {
     playSound: boolean;
     enabled: boolean;
   };
+  // Pane Notify settings; absent fields take DEFAULT_NOTIFY_SETTINGS
+  notify?: Partial<NotifySettings>;
   // Dev mode for debugging
   devMode?: boolean;
   // Additional paths to add to PATH environment variable
@@ -218,14 +221,16 @@ export interface UpdateConfigRequest {
   keepAwakeOnBattery?: boolean;
   appearanceMode?: AppearanceMode;
   theme?: Theme;
-  systemLightTheme?: LightTheme;
-  systemDarkTheme?: DarkTheme;
+  systemLightTheme?: Theme;
+  systemDarkTheme?: Theme;
   highContrast?: boolean;
   uiScale?: number;
   notifications?: {
     playSound: boolean;
     enabled: boolean;
   };
+  // Pane Notify settings; absent fields take DEFAULT_NOTIFY_SETTINGS
+  notify?: Partial<NotifySettings>;
   devMode?: boolean;
   additionalPaths?: string[];
   sessionCreationPreferences?: {

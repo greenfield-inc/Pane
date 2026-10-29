@@ -6,7 +6,11 @@ import Animated, { cancelAnimation, Easing, useAnimatedStyle, useSharedValue, wi
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useDaemon } from '@/daemon';
+import { DemoBadge } from '@/features/demo/DemoBadge';
 import { ConnectionStatus } from '@/features/hosts/ConnectionStatus';
+import { useNotifyShared } from '@/features/notify/hooks';
+import { waitingQuestions } from '@/features/notify/notifyQuestions';
+import { openNotifySheet } from '@/features/notify/NotifySheet';
 import { useTheme } from '@/theme';
 import { Icon, Text } from '@/ui';
 
@@ -33,7 +37,7 @@ import { StatusBadge } from './StatusBadge';
 
 /**
  * Home: the PWA's drawer as a full screen. Pinned, Sessions, Repositories and
- * Archived, plus search and permission requests.
+ * Archived, plus search, permission requests and Notify questions.
  */
 export function PaneListScreen() {
   const theme = useTheme();
@@ -44,6 +48,7 @@ export function PaneListScreen() {
   const projects = useProjects();
   const statuses = useAgentStatuses();
   const permissions = usePendingPermissions();
+  const notify = useNotifyShared();
   const markSeen = useMarkPaneSeen();
   const toggleFavorite = useToggleFavorite();
   const archive = useArchivePane();
@@ -57,7 +62,8 @@ export function PaneListScreen() {
   const [collapsedSessions, setCollapsedSessions] = useState<ReadonlySet<string>>(new Set());
 
   const waiting = Object.values(pendingByPane(permissions.data ?? []));
-  const blocked = new Set(waiting.map(request => request.sessionId));
+  const questions = waitingQuestions(notify.data);
+  const blocked = new Set([...waiting.map(request => request.sessionId), ...questions.flatMap(item => item.source.paneId ?? [])]);
   const items = buildSidebar({
     projects: projects.data ?? [],
     sessions: sessions.unavailable ? 'unavailable' : sessions.data?.sessions ?? (sessions.isError ? [] : undefined),
@@ -105,6 +111,7 @@ export function PaneListScreen() {
       projects.refetch(),
       statuses.refetch(),
       permissions.refetch(),
+      notify.refetch(),
       sessions.refetch(),
       expanded.archived ? archived.refetch() : undefined,
     ]);
@@ -114,7 +121,7 @@ export function PaneListScreen() {
   const renderItem = ({ item, index }: { item: SidebarItem; index: number }) => {
     switch (item.type) {
       case 'section':
-        return <SidebarSectionHeader item={item} first={index === 0 && waiting.length === 0} onToggle={() => toggleSection(item.section)} />;
+        return <SidebarSectionHeader item={item} first={index === 0 && waiting.length === 0 && questions.length === 0} onToggle={() => toggleSection(item.section)} />;
       case 'repo':
         return (
           <SectionHeader
@@ -186,6 +193,7 @@ export function PaneListScreen() {
           <Text variant="headline" accessibilityRole="header" numberOfLines={1} style={styles.brandTitle}>Remote Pane</Text>
         </View>
         <ConnectionStatus updateIntent={connection.updateIntent} status={connection.status} onRetry={() => client.retryNow()} />
+        <DemoBadge />
         <View style={styles.headerActions}>
           <IconButton label="Refresh remote sessions" testID="panes-refresh" onPress={() => void refresh()}>
             <RefreshIcon spinning={loading || refreshing} />
@@ -243,13 +251,23 @@ export function PaneListScreen() {
         onRefresh={() => void refresh()}
         style={styles.fill}
         contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 12 }]}
-        ListHeaderComponent={waiting.length > 0 ? (
+        ListHeaderComponent={waiting.length > 0 || questions.length > 0 ? (
           <View>
-            <SectionHeader title="Needs approval" first />
+            {questions.length > 0 ? <SectionHeader title="Questions" first /> : null}
+            {questions.map(item => (
+              <WaitingRow
+                key={item.id}
+                testID={`notify-row-${item.id}`}
+                name={item.source.name}
+                detail={item.title}
+                onPress={() => openNotifySheet(item.id, item.source.paneId)}
+              />
+            ))}
+            {waiting.length > 0 ? <SectionHeader title="Needs approval" first={questions.length === 0} /> : null}
             {waiting.map(request => {
               const { title, target } = describePermission(request);
               return (
-                <PermissionRow
+                <WaitingRow
                   key={request.id}
                   testID={`permission-row-${request.sessionId}`}
                   name={paneNames.get(request.sessionId) ?? 'Pane'}
@@ -293,7 +311,8 @@ function RefreshIcon({ spinning }: { spinning: boolean }) {
   );
 }
 
-function PermissionRow({ name, detail, onPress, testID }: { name: string; detail: string; onPress: () => void; testID: string }) {
+/** A permission request or Notify question waiting on this phone's owner. */
+function WaitingRow({ name, detail, onPress, testID }: { name: string; detail: string; onPress: () => void; testID: string }) {
   const theme = useTheme();
   return (
     <Pressable
@@ -301,7 +320,7 @@ function PermissionRow({ name, detail, onPress, testID }: { name: string; detail
       accessibilityRole="button"
       accessibilityLabel={`${name}, ${detail}`}
       onPress={onPress}
-      style={({ pressed }) => [styles.permissionRow, { borderRadius: theme.radius.md, backgroundColor: pressed ? theme.colors.selected : theme.colors.background }]}
+      style={({ pressed }) => [styles.waitingRow, { borderRadius: theme.radius.md, backgroundColor: pressed ? theme.colors.selected : theme.colors.background }]}
     >
       <StatusBadge status="blocked" />
       <View style={styles.fill}>
@@ -364,5 +383,5 @@ const styles = StyleSheet.create({
   search: { flexDirection: 'row', alignItems: 'center', gap: 8, height: 40, paddingLeft: 12, paddingRight: 6, borderWidth: 1 },
   searchInput: { flex: 1, height: '100%', paddingVertical: 0 },
   content: { padding: 12 },
-  permissionRow: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 12, marginBottom: 4 },
+  waitingRow: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 12, marginBottom: 4 },
 });

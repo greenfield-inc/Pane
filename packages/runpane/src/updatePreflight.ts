@@ -1,4 +1,4 @@
-import { assertUpdateCapacity } from './updateCapacity';
+import { assertUpdateCapacity, updateSnapshotSkips } from './updateCapacity';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -52,6 +52,8 @@ export interface UpdatePreflight {
   npmSource?: string;
   lockDirectory: string;
   additionalLockDirectories: string[];
+  /** Folders in Pane data the recovery snapshot leaves out: unknown to Pane, or repositories. */
+  snapshotSkipped: string[];
   limitations: string[];
   disableOsIntegration?: boolean;
 }
@@ -142,11 +144,13 @@ export async function preflightUpdate(parsed: ParsedArgs, scope: UpdatePreflight
   ]);
   for (const directory of writableDirectories) assertUpdateDirectoryWritable(directory);
   assertUpdateCapacity(paneDir, host, install, cli?.prefix);
+  const snapshotSkipped = host ? updateSnapshotSkips(host.paneDir) : [];
   return {
     machine: os.hostname(), paneDir, scope, requestedVersion: parsed.paneVersion, host, cli,
     runtimeSource, npmSource: cli && cli.owner !== 'pip' ? findNpm(runtimeSource) : undefined, lockDirectory: path.join(paneDir, 'updates', '.operation-lock'),
     additionalLockDirectories: [...(host ? [path.join(path.dirname(install), `.${path.basename(install)}.update-lock`)] : []), ...(cli ? [path.join(cli.prefix, '.runpane-update-lock')] : [])],
     disableOsIntegration: process.env.PANE_DISABLE_OS_INTEGRATION === '1',
-    limitations: ['Requires the current interactive login. Logout/reboot recovery must be inspected through the durable operation status.', 'Agent turns with uncertain delivery are never replayed.'],
+    snapshotSkipped,
+    limitations: [...(snapshotSkipped.length ? [`The recovery snapshot leaves out ${snapshotSkipped.length} folder(s) in Pane data that are not Pane state (see snapshotSkipped); back them up yourself if they matter.`] : []), 'Requires the current interactive login. Logout/reboot recovery must be inspected through the durable operation status.', 'Agent turns with uncertain delivery are never replayed.'],
   };
 }

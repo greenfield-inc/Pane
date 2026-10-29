@@ -1,5 +1,6 @@
 import type { LucideIcon } from 'lucide-react';
 import {
+  ArrowUpDown,
   Bell,
   Bot,
   BrainCircuit,
@@ -59,6 +60,14 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategoryDefinition[] = [
     aliases: ['claude', 'codex', 'cursor', 'pane chat', 'agents.md', 'mcp', 'tools', 'skill', 'import', 'migrate', 'conductor'],
   },
   {
+    id: 'notify',
+    label: 'Notify',
+    description: 'Questions and updates from agents, answered from any app.',
+    icon: Bell,
+    settingIds: ['notify-enabled', 'notify-show-outside', 'notify-position', 'notify-shortcut', 'notify-updates-hide-after', 'notify-sound'],
+    aliases: ['questions', 'approve', 'answer', 'ask', 'strip', 'answer all', 'shortcut', 'updates', 'sound', 'inbox'],
+  },
+  {
     id: 'usage',
     label: 'Usage & Limits',
     description: 'Agent token usage, costs, and subscription limits.',
@@ -87,8 +96,8 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategoryDefinition[] = [
     label: 'Remote Access',
     description: 'Remote Pane hosts and saved connections.',
     icon: Link2,
-    settingIds: ['remote-machines', 'remote-visibility', 'remote-address', 'remote-password', 'remote-pane', 'remote-host-setup', 'remote-advanced-host'],
-    aliases: ['remote pane', 'daemon', 'tailscale', 'cloud vm', 'vm', 'host', 'visibility', 'password', 'my machines', 'workspaces'],
+    settingIds: ['remote-machines', 'remote-visibility', 'remote-address', 'remote-password', 'remote-glasses', 'remote-pane', 'remote-host-setup', 'remote-advanced-host'],
+    aliases: ['remote pane', 'daemon', 'tailscale', 'cloud vm', 'vm', 'host', 'visibility', 'password', 'my machines', 'workspaces', 'glasses', 'even g2'],
   },
   {
     id: 'integrations',
@@ -113,6 +122,14 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategoryDefinition[] = [
     icon: Shield,
     settingIds: ['analytics', 'browser-data'],
     aliases: ['analytics', 'telemetry', 'tracking', 'browser', 'cookies', 'logins', 'sign out'],
+  },
+  {
+    id: 'import-export',
+    label: 'Import & Export',
+    description: 'Move your Pane setup between computers.',
+    icon: ArrowUpDown,
+    settingIds: ['setup-transfer'],
+    aliases: ['export', 'import', 'backup', 'transfer', 'move', 'new computer', 'settings file'],
   },
   {
     id: 'advanced',
