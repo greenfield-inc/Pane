@@ -157,7 +157,7 @@ const INVOKE_ATTEMPTS = 4;
 const REQUEST_RETRY_DELAY_MS = 2_000;
 /** A restore that has not finished by then is treated as a broken connection. */
 const RESTORE_TIMEOUT_MS = 30_000;
-export const RECONNECT_GAVE_UP_MESSAGE = 'Could not reconnect within five minutes. Your workspace is kept. Choose Retry now.';
+const RECONNECT_GAVE_UP_MESSAGE = 'Could not reconnect within five minutes. Your workspace is kept. Choose Retry now.';
 
 /** Platform-neutral client for a Pane daemon's HTTP + SSE API. */
 export class RemoteDaemonClient {
