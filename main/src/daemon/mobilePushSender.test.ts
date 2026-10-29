@@ -9,6 +9,7 @@ import { decodeRemoteConnectionCode } from '../../../shared/remoteClient/pairing
 import { encodePaneRemoteConnection } from '../../../shared/types/remoteDaemon';
 import { ConfigManager } from '../services/configManager';
 import type { NotifyItem } from '../../../shared/types/notify';
+import type { ApnsCredentialConfig } from '../../../shared/types/sharedCredentials';
 
 const originalEnvironment = {
   team: process.env.PANE_APNS_TEAM_ID,
@@ -487,10 +488,66 @@ describe('Notify question alerts', () => {
   });
 });
 
+describe('phones registered from the owner\'s Tailscale login', () => {
+  const owner = 'tailnet:owner@example.com';
+  async function sharedKeyHost(answer: (environment: string) => number = () => 200) {
+    setEnvironment({});
+    const privateKey = generateKeyPairSync('ec', { namedCurve: 'prime256v1' }).privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
+    const manager = new ConfigManagerStub(createDefaultRemoteDaemonConfig(), { teamId: 'TEAM', keyId: 'KEY', privateKey, topic: 'com.dcouple.pane.mobile', environment: 'production' });
+    const environments: string[] = [];
+    const sender = new MobilePushSender(manager, {
+      apns: async request => {
+        environments.push(request.environment);
+        const status = answer(request.environment);
+        return { status, body: status === 200 ? '' : '{"reason":"BadDeviceToken"}' };
+      },
+      fcm: async () => ({ status: 200, body: '' }),
+    });
+    await sender.register(owner, { platform: 'ios', token: 'token', installationId: 'install-1', hostProfileId: 'profile-1' });
+    return { manager, sender, environments };
+  }
+  const ask = (id: string): NotifyItem => ({ id, ui: 'approve', title: 'Ship it?', state: 'waiting', createdAt: 0, source: { name: 'billing', agent: 'Claude' } });
+
+  it('keeps the registration through other config writes and alerts it', async () => {
+    const { manager, sender, environments } = await sharedKeyHost();
+    await sender.observeStatus({ sessionId: 'pane', panelId: 'panel', state: 'working', reason: null, agentType: 'claude' });
+    await sender.observeQuestion({ item: ask('q-1'), open: true });
+
+    expect(environments).toEqual(['production']);
+    expect(manager.config.host.mobilePush.registrations).toMatchObject([{ clientId: owner, installationId: 'install-1' }]);
+    expect(sender.getStatus(owner, 'ios', 'install-1')).toMatchObject({ registration: 'registered', provider: 'ready' });
+  });
+
+  it('tries the other APNs endpoint once on BadDeviceToken, then goes straight to the one that worked', async () => {
+    const { manager, sender, environments } = await sharedKeyHost(environment => (environment === 'sandbox' ? 200 : 400));
+    await sender.observeQuestion({ item: ask('q-1'), open: true });
+    await sender.observeQuestion({ item: ask('q-2'), open: true });
+
+    expect(environments).toEqual(['production', 'sandbox', 'sandbox']);
+    expect(manager.config.host.mobilePush.registrations[0]?.revokedAt).toBeUndefined();
+  });
+
+  it('revokes the phone when both APNs endpoints refuse its token', async () => {
+    const { manager, sender, environments } = await sharedKeyHost(() => 400);
+    await sender.observeQuestion({ item: ask('q-1'), open: true });
+    await sender.observeQuestion({ item: ask('q-2'), open: true });
+
+    expect(environments).toEqual(['production', 'sandbox']);
+    expect(manager.config.host.mobilePush.registrations[0]?.revokedAt).toEqual(expect.any(String));
+  });
+
+  it('says so in the log when a question has no phone to alert', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const sender = new MobilePushSender(new ConfigManagerStub(createDefaultRemoteDaemonConfig()));
+    await sender.observeQuestion({ item: ask('q-1'), open: true });
+    expect(log).toHaveBeenCalledWith('[Pane mobile push] No phone is registered for alerts on this computer', { kind: 'question' });
+  });
+});
+
 class ConfigManagerStub {
   config: RemoteDaemonConfig;
-  constructor(config: RemoteDaemonConfig) { this.config = config; }
-  getConfig() { return { remoteDaemon: this.config }; }
+  constructor(config: RemoteDaemonConfig, private readonly apns?: ApnsCredentialConfig) { this.config = config; }
+  getConfig() { return { remoteDaemon: this.config, apns: this.apns }; }
   async updateConfigWith(update: (current: { remoteDaemon?: RemoteDaemonConfig }) => { remoteDaemon: RemoteDaemonConfig }): Promise<{ remoteDaemon: RemoteDaemonConfig }> {
     this.config = update(this.getConfig()).remoteDaemon;
     return { remoteDaemon: this.config };

@@ -10,7 +10,7 @@ import { ConnectionDot } from '@/features/hosts/ConnectionStatus';
 import { useConnectionPresence } from '@/features/hosts/useConnectionPresence';
 import { NotificationSettings } from '@/features/notifications/NotificationSettings';
 import { AppUpdateRow } from '@/features/updates/AppUpdateRow';
-import { revokePush } from '@/features/notifications/usePushSetup';
+import { signOutPush } from '@/features/notifications/usePushSetup';
 import { useTheme } from '@/theme';
 import { Icon, ListRow, ListSection, Screen } from '@/ui';
 
@@ -30,7 +30,7 @@ export default function SettingsScreen() {
       'Pane forgets this computer on this phone. Connect again to use it.',
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Sign Out', style: 'destructive', onPress: () => void (profile.tailnetMachine ? remove(profile.id) : revokePush(client, profile.id).then(() => remove(profile.id))) },
+        { text: 'Sign Out', style: 'destructive', onPress: () => void signOutPush(profile, () => void remove(profile.id)) },
       ],
     );
   };
@@ -59,11 +59,7 @@ export default function SettingsScreen() {
         <ListRow testID="settings-glasses" title="Glasses" subtitle="Pane on Even G2" trailing="chevron" onPress={() => router.push('/settings/glasses')} />
       </ListSection>
 
-      {profile.tailnetMachine ? (
-        <ListSection title="Notifications">
-          <ListRow testID="notifications-code-required" title="Connect with a Code" subtitle="Pair this phone to receive alerts" trailing="chevron" onPress={() => router.push('/hosts/add')} />
-        </ListSection>
-      ) : <NotificationSettings />}
+      <NotificationSettings />
 
       <ListSection title="Hosts" footer="Saved in the iOS Keychain or Android Keystore.">
         {profiles.map(host => (

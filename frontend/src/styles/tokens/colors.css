@@ -643,6 +643,14 @@
   --color-terminal-bright-magenta: rgb(210 168 255);
   --color-terminal-bright-cyan: rgb(90 225 234);
   --color-terminal-bright-white: rgb(255 255 255);
+
+  /* Machine colours: one per machine, the same on the phone (shared/utils/machineColor.ts). */
+  --color-machine-1: #c4b5fd; /* violet */
+  --color-machine-2: #67e8f9; /* cyan */
+  --color-machine-3: #f9a8d4; /* pink */
+  --color-machine-4: #bef264; /* lime */
+  --color-machine-5: #fdba74; /* orange */
+  --color-machine-6: #fb7185; /* rose */
 }
 
 /* Light Theme - GitHub-inspired clean white */
@@ -804,6 +812,13 @@
   --color-terminal-bright-cyan: rgb(0 86 95);
   --color-terminal-bright-white: rgb(0 0 0);
   --color-terminal-selection-bg: #1f6dc640;
+
+  --color-machine-1: #7c3aed;
+  --color-machine-2: #0e7490;
+  --color-machine-3: #db2777;
+  --color-machine-4: #4d7c0f;
+  --color-machine-5: #c2410c;
+  --color-machine-6: #e11d48;
 }
 
 /* OLED Black Theme - True black for OLED displays */
@@ -2525,6 +2540,13 @@
 
 /* Folio Theme — paper & ink: warm cream stock, near-black ink, vermilion rubrication */
 :root.folio {
+  /* Machine colours, as the base theme defines them. */
+  --color-machine-1: #7c3aed;
+  --color-machine-2: #0e7490;
+  --color-machine-3: #db2777;
+  --color-machine-4: #4d7c0f;
+  --color-machine-5: #c2410c;
+  --color-machine-6: #e11d48;
   --status-on-tint-mix: 65%;
   /* Backgrounds — page / sheet / margin tonal steps */
   --color-bg-primary: var(--folio-paper);
@@ -2687,6 +2709,13 @@
 
 /* Newsprint Theme — cool grey-white stock, graphite ink, halftone greys, ink-blue accent */
 :root.newsprint {
+  /* Machine colours, as the base theme defines them. */
+  --color-machine-1: #7c3aed;
+  --color-machine-2: #0e7490;
+  --color-machine-3: #db2777;
+  --color-machine-4: #4d7c0f;
+  --color-machine-5: #c2410c;
+  --color-machine-6: #e11d48;
   --status-on-tint-mix: 65%;
   /* Backgrounds — stock / sheet / halftone tonal steps */
   --color-bg-primary: var(--news-paper);
@@ -2849,6 +2878,13 @@
 
 /* Walnut Theme — vellum & walnut: deep warm brown-black, parchment text, brass accent */
 :root.walnut {
+  /* Machine colours, as the base theme defines them. */
+  --color-machine-1: #c4b5fd;
+  --color-machine-2: #67e8f9;
+  --color-machine-3: #f9a8d4;
+  --color-machine-4: #bef264;
+  --color-machine-5: #fdba74;
+  --color-machine-6: #fb7185;
   --status-on-tint-mix: 65%;
   /* Backgrounds — TWO-TONE foundation, sunken editor */
   --color-bg-primary: var(--walnut-900);

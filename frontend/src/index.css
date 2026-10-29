@@ -1271,3 +1271,22 @@ body.understory {
   .pane-changes-list-stats { display: none; }
   .pane-changes-list-row { grid-template-columns: 16px minmax(0, 1fr) 18px; }
 }
+
+/* Machine marks (components/machines/MachineMark.tsx). The logo pulses while
+   its machine reconnects, on the phone's 1.6 s period; a machine that cannot be
+   reached is dimmed. Reduce Motion dims instead of pulsing. */
+@keyframes pane-machine-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.pane-machine-mark[data-presence='pulsing'] .pane-machine-logo {
+  animation: pane-machine-pulse 1.6s ease-in-out infinite;
+}
+
+.pane-machine-mark[data-presence='dimmed'] { opacity: 0.45; }
+
+@media (prefers-reduced-motion: reduce) {
+  .pane-machine-mark[data-presence='pulsing'] { opacity: 0.45; }
+  .pane-machine-mark[data-presence='pulsing'] .pane-machine-logo { animation: none; }
+}

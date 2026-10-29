@@ -4,6 +4,7 @@ import type { PaneChatAgent } from '../shared/types/paneChat';
 import type { PanePermissionRequest, PanePermissionResponse } from '../shared/types/permissions';
 import type {
   RemoteDaemonClientRecord,
+  RemoteDaemonConnectedClient,
   RemoteDaemonConfig,
   RemoteDaemonHostConfig,
   RemotePaneConnectionProfile,
@@ -115,6 +116,8 @@ export type ElectronApiMockOptions = {
   /** Delay before runpane:agents:doctor answers, or `hold` to leave every check pending. */
   agentDoctorDelayMs?: number | 'hold';
   glasses?: GlassesAccessState;
+  /** Devices connected to this computer's host right now. */
+  hostConnectedClients?: RemoteDaemonConnectedClient[];
   /** setup:choose-import fails with this PaneError text instead of previewing. */
   setupImportError?: string;
   /** Serves window.electronAPI.notify with this queue snapshot; absent, the API is too. */
@@ -217,7 +220,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       listenHost: null,
       listenPort: null,
       lastError: null,
-      connectedClients: [],
+      connectedClients: clone(mockOptions.hostConnectedClients ?? []),
       executableHealth: {
         processImage: { status: 'unknown' as const, runtimePath: null, installedPath: null, evidence: 'Executable identity has not been checked yet.' },
         restart: { status: 'unknown' as const, evidence: 'Remote daemon launcher readiness has not been checked yet.' },
@@ -1721,6 +1724,10 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         getConsoleLogCalls() {
           return clone((invokeCalls.get('console:log') ?? []).map((call) => call.args[0]));
+        },
+        /** Stands in for main pushing a connection change, such as a host that stopped answering. */
+        emitRemoteConnectionState(updates: Partial<RemotePaneConnectionState>) {
+          setRemoteConnectionState(updates);
         },
         emitNativeAppearanceUpdated(prefersDark: boolean) {
           emit('window:appearance-native-updated', { prefersDark });

@@ -2,7 +2,7 @@
 
 `runpane workspace` lets your Macs, Windows PCs, and Linux machines read files, write files, run commands, and drive each other's Pane over the Tailscale network you already use. There is no SSH, no keys, and no pairing code: each request is trusted because Tailscale says which login it comes from. Your own login is always let in; a teammate's machine lets you in when its owner shares it with everyone on the tailnet.
 
-The same listener powers codeless desktop remote mode: Settings → Remote Access → **Your computers** lists the machines on your tailnet with Pane open (a teammate's machine that accepts only its owner shows as "Owner only" and can't be connected to), and **Connect** switches the desktop app to that machine with no `pane-remote://` code. `runpane workspace` reaches the same machines. Who may connect is set under **Access to this computer** → **Who can connect** (see [Who is trusted](#who-is-trusted)).
+The same listener powers codeless desktop remote mode: the sidebar's machine menu and Settings → Remote Access → **Switch to** list the machines on your tailnet, including ones you have never connected to (a teammate's machine that accepts only its owner shows as "Owner only" and can't be picked), and picking one switches the desktop app to that machine with no `pane-remote://` code. `runpane workspace` reaches the same machines. Who may connect is set under **Access** → **Who can connect** (see [Who is trusted](#who-is-trusted)).
 
 ```
 runpane workspace list
@@ -54,7 +54,7 @@ Pane must be running on a machine for others to reach it. Pane checks Tailscale 
 
 ## Who is trusted
 
-Two settings decide, in Settings → Remote Access → **Access to this computer**. Every request must pass both: its login is allowed by **visibility**, and, when **password protection** is on, it carries the password.
+Two settings decide, in Settings → Remote Access → **Access**. Every request must pass both: its login is allowed by **visibility**, and, when **password protection** is on, it carries the password.
 
 | Visibility | Who can connect | |
 |---|---|---|

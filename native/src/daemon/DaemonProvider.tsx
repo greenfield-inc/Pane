@@ -6,6 +6,7 @@ import type { RemoteDaemonClient, RemoteDaemonConnectionState } from '@shared/re
 import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
 
 import { requestSharedCredentialSync } from '@/features/hosts/SharedCredentialSync';
+import { requestPushRegistration } from '@/features/notifications/usePushSetup';
 
 import { createDaemonClient } from './createClient';
 
@@ -36,6 +37,8 @@ export function DaemonProvider({ profile, children }: { profile: RemotePaneConne
     const unsubscribeRestore = client.onRestore(async signal => {
       await queryClient.refetchQueries({ queryKey: [profile.id], type: 'active' }, { throwOnError: true });
       if (signal.aborted) return;
+      // A switch changed while this computer was away reaches it now.
+      requestPushRegistration();
     }, 'workspace lists');
     const unsubscribeStatus = client.onStatus(setConnection);
     const connect = () => client.connect().catch(() => undefined);
