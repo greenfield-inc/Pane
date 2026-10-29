@@ -52,6 +52,15 @@ export const REMOTE_READ_CHANNELS = new Set([
 ]);
 
 
+/**
+ * Idempotent device bookkeeping a phone sends to every saved computer without opening its
+ * workspace stream: push registration (an upsert per install) and shared-key sync (newest wins).
+ */
+export const REMOTE_STREAMLESS_CHANNELS = new Set([
+  'credentials:shared:get', 'credentials:shared:apply',
+  'mobile:push-register', 'mobile:push-controls', 'mobile:push-revoke',
+]);
+
 /** Idempotent viewer bookkeeping required to restore a connected workspace. */
 export const REMOTE_RESTORE_CHANNELS = new Set([
   'terminal:resize', 'panels:resize-terminal', 'terminal:setVisibility',
