@@ -69,8 +69,7 @@ import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract
 import { withSessionFolderAccess } from '../services/agents/sessionFolderAccess';
 import { sessionWorkspacePath } from '../services/sessionWorkspace';
 import { RUNPANE_DAEMON_FEATURES } from '../../../shared/types/runpaneOrchestration';
-import { agentPreset, isAgentSupportedOnPlatform } from '../../../shared/constants/agentLaunchPresets';
-import { checkAgentSignIn } from '../services/agents/agentSignIn';
+import { isAgentSupportedOnPlatform } from '../../../shared/constants/agentLaunchPresets';
 import { getDockTerminalPanel } from '../../../shared/utils/terminalDock';
 import {
   TERMINAL_IMAGE_OPTIONS,
@@ -4051,11 +4050,6 @@ async function runAgentDoctor(
     }
   }
 
-  // The sign-in check runs beside the version and capability probes.
-  const signInCheck = executablePath
-    ? checkAgentSignIn(context.commandRunner, repo.path, agent, quoteAgentDoctorExecutable(executablePath, environment))
-    : undefined;
-
   if (executablePath) {
     try {
       const result = await context.commandRunner.execAsync(versionCommand, repo.path, {
@@ -4112,21 +4106,8 @@ async function runAgentDoctor(
     warnings.push(`Repo ${repo.name} is a WSL repo; install ${executable} inside the WSL distro Pane uses, not only on Windows.`);
   }
 
-  const signIn = await signInCheck;
-  if (signIn) {
-    checks.push({
-      name: 'sign-in',
-      ok: signIn !== 'signed-out',
-      message: signIn === 'signed-in'
-        ? `${AGENT_TEMPLATES[agent].title} is signed in.`
-        : signIn === 'signed-out'
-          ? `${AGENT_TEMPLATES[agent].title} is not signed in. Run \`${agentPreset(agent).signInCommand}\` in this repo's environment.`
-          : `Pane could not tell whether ${AGENT_TEMPLATES[agent].title} is signed in.`,
-    });
-  }
-
   const available = Boolean(executablePath);
-  const result: RunpaneAgentDoctorResult = {
+  return {
     ok: available && sessionCapabilityOk,
     agent,
     command,
@@ -4138,8 +4119,6 @@ async function runAgentDoctor(
     checks,
     warnings: warnings.length > 0 ? warnings : undefined,
   };
-  if (signIn) result.signIn = signIn;
-  return result;
 }
 
 function quoteAgentDoctorExecutable(executablePath: string, environment: ProjectEnvironment): string {

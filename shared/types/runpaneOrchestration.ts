@@ -1336,9 +1336,6 @@ export interface RunpaneAgentDoctorCheck {
   message: string;
 }
 
-/** What the agent's own status command says about its login; `unknown` on a timeout or unrecognised output. */
-export type RunpaneAgentSignIn = 'signed-in' | 'signed-out' | 'unknown';
-
 export interface RunpaneAgentDoctorResult {
   ok: boolean;
   agent: RunpaneAgentId;
@@ -1348,8 +1345,6 @@ export interface RunpaneAgentDoctorResult {
   available: boolean;
   executablePath?: string;
   version?: string;
-  /** Present when the agent is installed. */
-  signIn?: RunpaneAgentSignIn;
   checks: RunpaneAgentDoctorCheck[];
   warnings?: string[];
 }

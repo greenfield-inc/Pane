@@ -50,7 +50,6 @@ import { ipcErrorMessage } from '../../utils/ipcErrorMessage';
 import type { InterceptorState, TerminalSuggestion } from '../../services/terminalInterceptor/types';
 import { markPaneTerminalShown, markPanelOutput, startSendPrompt } from '../../utils/journeyTimings';
 import '@xterm/xterm/css/xterm.css';
-import { LaunchExitCard } from './newTab/LaunchExitCard';
 import { NotifyDock } from '../notify/NotifyInPane';
 
 interface DropdownPosition {
@@ -2140,9 +2139,6 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
           </div> : <TerminalLoadingSkeleton />}
         </div>
       )}
-
-      {/* An agent that quit right after launch: why, and the fix. Same layer as the mask, no resize. */}
-      <LaunchExitCard panel={panel} onOpenTerminal={() => xtermRef.current?.focus()} />
 
       {/* Open in Pane docks a Notify question here, over the bottom of the output. */}
       <NotifyDock panelId={panel.id} />
