@@ -28,8 +28,8 @@ import { RemoteInputQueue } from '../../../../shared/remoteInputQueue';
 import { decodeListeningPortsSnapshot, type ListeningPortsSnapshot } from '../../../../shared/types/listeningPorts';
 import { localTargetOf } from '../../../../shared/utils/browserUrl';
 import { createPortTunnel, type PortTunnel } from './portTunnel';
-import { REMOTE_READ_CHANNELS, REMOTE_RESTORE_CHANNELS } from '../../../../shared/remoteClient/readChannels';
-import { RecoveryCycle } from '../../../../shared/remoteClient/recoveryCycle';
+import { REMOTE_DEDUPLICATED_CHANNELS, REMOTE_READ_CHANNELS, REMOTE_RESTORE_CHANNELS } from '../../../../shared/remoteClient/readChannels';
+import { RecoveryCycle, backoffDelayMs } from '../../../../shared/remoteClient/recoveryCycle';
 import { PaneError } from '../../../../shared/paneError';
 import type {
   RemoteConnectionCheck,
@@ -64,7 +64,6 @@ interface RemotePaneClientOptions {
   restoreTimeoutMs?: number;
   /** How long one invoke waits for the host's answer. */
   requestTimeoutMs?: number;
-  reconnectInitialDelayMs?: number;
   reconnectMaxDelayMs?: number;
   reconnectDurationMs?: number;
   onConnectionStateChange?: (
@@ -140,8 +139,11 @@ const remoteEventEnvelopeSchema: BoundarySchema<RemoteDaemonEventEnvelope> = bou
   timestamp: boundary.string,
 });
 
-const REMOTE_DAEMON_RECONNECT_INITIAL_DELAY_MS = 1_000;
 const REMOTE_DAEMON_RECONNECT_MAX_DELAY_MS = 30_000;
+/** A request safe to repeat keeps retrying as long as an outage may last. */
+const REMOTE_DAEMON_REQUEST_RETRY_BUDGET_MS = 300_000;
+/** Answers that mean the request was cut off, not refused; only these are retried. */
+const INTERRUPTION_CODES = new Set(['ERR_REMOTE_TRANSPORT', 'ERR_REMOTE_DELIVERY_UNKNOWN', 'ERR_REMOTE_STALE_RESPONSE']);
 const REMOTE_DAEMON_HEARTBEAT_STALE_TIMEOUT_MS = 20_000;
 const REMOTE_DAEMON_INITIAL_HANDSHAKE_TIMEOUT_MS = 10_000;
 const REMOTE_DAEMON_RESTORE_TIMEOUT_MS = 30_000;
@@ -182,6 +184,7 @@ export class RemotePaneClient {
   private readonly heartbeatStaleTimeoutMs: number;
   private readonly restoreTimeoutMs: number;
   private readonly requestTimeoutMs: number;
+  private readonly maxRetryDelayMs: number;
   private failedRequestsInARow = 0;
   private readonly recovery: RecoveryCycle;
   private deadlineTimer: NodeJS.Timeout | null = null;
@@ -218,9 +221,8 @@ export class RemotePaneClient {
       ?? REMOTE_DAEMON_HEARTBEAT_STALE_TIMEOUT_MS;
     this.restoreTimeoutMs = options.restoreTimeoutMs ?? REMOTE_DAEMON_RESTORE_TIMEOUT_MS;
     this.requestTimeoutMs = options.requestTimeoutMs ?? REMOTE_DAEMON_REQUEST_TIMEOUT_MS;
-    this.recovery = new RecoveryCycle(Math.random, options.reconnectDurationMs,
-      options.reconnectInitialDelayMs ?? REMOTE_DAEMON_RECONNECT_INITIAL_DELAY_MS,
-      options.reconnectMaxDelayMs ?? REMOTE_DAEMON_RECONNECT_MAX_DELAY_MS);
+    this.maxRetryDelayMs = options.reconnectMaxDelayMs ?? REMOTE_DAEMON_RECONNECT_MAX_DELAY_MS;
+    this.recovery = new RecoveryCycle(Math.random, options.reconnectDurationMs, this.maxRetryDelayMs);
     this.onConnectionStateChange = options.onConnectionStateChange;
     this.onResyncRequired = options.onResyncRequired;
   }
@@ -291,7 +293,18 @@ export class RemotePaneClient {
   }
 
   async invoke(channel: string, args: unknown[]): Promise<JsonValue | undefined> {
-    return this.inputQueue.invoke(channel, args);
+    if (!retriesRequest(channel)) return this.inputQueue.invoke(channel, args);
+    const started = Date.now();
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await this.invokeRequest(channel, args);
+      } catch (error) {
+        const wait = backoffDelayMs(attempt, Math.random, this.maxRetryDelayMs);
+        const interrupted = error instanceof PaneError && INTERRUPTION_CODES.has(error.code);
+        if (this.closedByClient || !interrupted || Date.now() - started + wait > REMOTE_DAEMON_REQUEST_RETRY_BUDGET_MS) throw error;
+        await new Promise(resolve => setTimeout(resolve, wait));
+      }
+    }
   }
 
   /** One raw byte stream to a forwarded port on the host, signed in like every other request. */
@@ -438,7 +451,8 @@ export class RemotePaneClient {
     } catch (error) {
       if (error instanceof PaneError) throw error;
       // One failed request fails only itself while heartbeats arrive; a run of them reconnects.
-      const counts = !signal?.aborted && generation === this.streamGeneration && !this.closedByClient;
+      // A request that retries never counts: heartbeats decide liveness while it waits.
+      const counts = !retriesRequest(channel) && !signal?.aborted && generation === this.streamGeneration && !this.closedByClient;
       const reconnect = counts && ++this.failedRequestsInARow >= MAX_FAILED_REQUESTS_IN_A_ROW;
       const failure = new PaneError(nothingToCheck ? 'ERR_REMOTE_TRANSPORT' : 'ERR_REMOTE_DELIVERY_UNKNOWN',
         nothingToCheck ? `Remote connection interrupted: the host response was incomplete.${reconnect ? ' Pane is reconnecting.' : ''}`
@@ -1837,4 +1851,9 @@ function parseRemoteHeartbeatPayload(data: string): RemoteDaemonHeartbeatPayload
 
 function getErrorMessage(cause: unknown, fallback: string): string {
   return cause instanceof Error ? cause.message : fallback;
+}
+
+/** Reads and mutations the host de-duplicates retry with backoff after an interruption. */
+function retriesRequest(channel: string): boolean {
+  return REMOTE_READ_CHANNELS.has(channel) || REMOTE_DEDUPLICATED_CHANNELS.has(channel);
 }

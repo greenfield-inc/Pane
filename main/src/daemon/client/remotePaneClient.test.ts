@@ -15,7 +15,8 @@ interface TestRemoteServer {
   baseUrl: string;
   /** Answer this channel the way a host without the command does. */
   refuseChannel(channel: string): void;
-  truncateInvoke(): void;
+  /** Cut off the next `count` invoke responses mid-body; all of them by default. */
+  truncateInvoke(count?: number): void;
   /** Answer each invoke after `ms`. */
   delayInvoke(ms: number): void;
   /** Send a heartbeat on the event stream every `ms`; 0 stops them. */
@@ -101,14 +102,13 @@ describe('RemotePaneClient', () => {
     const client = new RemotePaneClient({ id: 'slow', label: 'host', baseUrl: server.baseUrl, token: '', transport: 'http+sse' }, {
       heartbeatStaleTimeoutMs: 200,
       requestTimeoutMs: 150,
-      reconnectInitialDelayMs: 1_000,
       onConnectionStateChange: status => states.push(status),
     });
     server.setHeartbeatInterval(50);
     await client.connect();
     server.delayInvoke(200);
 
-    await expect(client.invoke('sessions:get-all', [])).rejects.toMatchObject({ code: 'ERR_REMOTE_TRANSPORT' });
+    await expect(client.invoke('terminal:setVisibility', ['panel', true, 'viewer'])).rejects.toMatchObject({ code: 'ERR_REMOTE_TRANSPORT' });
     await sleep(300);
     expect(states.at(-1)).toBe('connected');
     expect(server.getEventRequestCount()).toBe(1);
@@ -123,16 +123,35 @@ describe('RemotePaneClient', () => {
     activeServers.push(server);
     const states: string[] = [];
     const client = new RemotePaneClient({ id: 'three', label: 'host', baseUrl: server.baseUrl, token: '', transport: 'http+sse' }, {
-      reconnectInitialDelayMs: 1_000,
       onConnectionStateChange: status => states.push(status),
     });
     await client.connect();
     server.truncateInvoke();
-    await expect(client.invoke('sessions:get-all', [])).rejects.toThrow('Remote connection interrupted');
-    await expect(client.invoke('sessions:get-all', [])).rejects.toThrow('Remote connection interrupted');
+    const setVisibility = () => client.invoke('terminal:setVisibility', ['panel', true, 'viewer']);
+    await expect(setVisibility()).rejects.toThrow('Remote connection interrupted');
+    await expect(setVisibility()).rejects.toThrow('Remote connection interrupted');
     expect(states.at(-1)).toBe('connected');
-    await expect(client.invoke('sessions:get-all', [])).rejects.toThrow('Pane is reconnecting');
+    await expect(setVisibility()).rejects.toThrow('Pane is reconnecting');
     expect(states.at(-1)).toBe('reconnecting');
+    await client.disconnect();
+  });
+
+  it('retries a cut-off read after 250 and 750 ms without reconnecting', async () => {
+    const server = await createTestRemoteServer();
+    activeServers.push(server);
+    const states: string[] = [];
+    const client = new RemotePaneClient({ id: 'retry', label: 'host', baseUrl: server.baseUrl, token: '', transport: 'http+sse' }, {
+      onConnectionStateChange: status => states.push(status),
+    });
+    await client.connect();
+    server.truncateInvoke(2);
+    const started = Date.now();
+
+    await expect(client.invoke('sessions:get-all', [])).resolves.toMatchObject({ channel: 'sessions:get-all' });
+    expect(Date.now() - started).toBeGreaterThanOrEqual(800);
+    expect(server.getInvokeCount()).toBe(3);
+    expect(states.at(-1)).toBe('connected');
+    expect(server.getEventRequestCount()).toBe(1);
     await client.disconnect();
   });
 
@@ -349,7 +368,6 @@ describe('RemotePaneClient', () => {
       transport: 'http+sse',
     }, {
       heartbeatStaleTimeoutMs: 20,
-      reconnectInitialDelayMs: 5,
       reconnectMaxDelayMs: 20,
       reconnectDurationMs: 160,
       onConnectionStateChange(status, errorMessage) {
@@ -385,7 +403,6 @@ describe('RemotePaneClient', () => {
       transport: 'http+sse',
     }, {
       heartbeatStaleTimeoutMs: 20,
-      reconnectInitialDelayMs: 5,
       reconnectMaxDelayMs: 20,
       onConnectionStateChange(status) {
         connectionStates.push(status);
@@ -420,7 +437,6 @@ describe('RemotePaneClient', () => {
       token: 'secret-token',
       transport: 'http+sse',
     }, {
-      reconnectInitialDelayMs: 5,
       reconnectMaxDelayMs: 20,
       onConnectionStateChange(status) {
         connectionStates.push(status);
@@ -878,7 +894,7 @@ async function createTestRemoteServer(host = '127.0.0.1', basePath = ''): Promis
   let eventsReady = true;
   let emitReadyEvent = true;
   const refusedChannels = new Set<string>();
-  let truncateInvoke = false;
+  let truncateInvokes = 0;
   let invokeDelayMs = 0;
   let invokeCount = 0;
   let heartbeatTimer: NodeJS.Timeout | null = null;
@@ -912,7 +928,7 @@ async function createTestRemoteServer(host = '127.0.0.1', basePath = ''): Promis
         return;
       }
       response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      if (truncateInvoke) { response.end('{"ok":'); return; }
+      if (truncateInvokes > 0) { truncateInvokes -= 1; response.end('{"ok":'); return; }
       response.end(JSON.stringify({
         ok: true,
         result: parsed,
@@ -969,7 +985,7 @@ async function createTestRemoteServer(host = '127.0.0.1', basePath = ''): Promis
 
   return {
     baseUrl: `http://${host.includes(':') ? `[${host}]` : host}:${address.port}${normalizedBasePath}`,
-    truncateInvoke() { truncateInvoke = true; },
+    truncateInvoke(count = Infinity) { truncateInvokes = count; },
     delayInvoke(ms: number) { invokeDelayMs = ms; },
     setHeartbeatInterval(ms: number) {
       if (heartbeatTimer) clearInterval(heartbeatTimer);

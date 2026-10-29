@@ -160,7 +160,7 @@ describe.each([
     await vi.waitFor(() => expect(requests).toHaveLength(1));
     reply(requests[0], 503);
     const message = _name === 'browser'
-      ? 'The remote action may have completed, but its result could not be confirmed. Check the current state before trying again. (Input failed)'
+      ? 'Delivery unknown: the remote action may have completed, but its result could not be confirmed. Check the current state before trying again. (Input failed)'
       : 'Input failed';
     expect(await completed).toMatchObject([
       { status: 'rejected', reason: { message } },

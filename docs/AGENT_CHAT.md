@@ -105,9 +105,11 @@ provider store on that host; Pane does not guess an owner or create a replacemen
 
 Permission cards show the adapter's exact choices. Answers bind to the runtime
 generation and request ID; the first accepted answer wins across viewers.
-Cancellation withdraws pending requests. A lost send response keeps its operation
-ID for **Check delivery** or an explicit **Retry same delivery**. Safe reads can
-retry automatically; sends, answers and configuration changes cannot.
+Cancellation withdraws pending requests. Remote clients resend a send whose
+response was lost with the same operation ID, which the host de-duplicates,
+for up to five minutes. After that the operation ID stays for **Check delivery**
+or an explicit **Retry same delivery**. Safe reads also retry automatically;
+answers and configuration changes do not.
 
 ## Display and controls
 

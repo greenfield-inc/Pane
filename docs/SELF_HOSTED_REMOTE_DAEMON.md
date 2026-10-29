@@ -354,6 +354,10 @@ minutes, and from **Retry now** on the "Can't reach <machine>" banner. That
 banner appears once the connection has been down for 10 seconds; until then
 the workspace dims and the host dot pulses while Pane reconnects.
 
+The host's 5-second heartbeat decides whether a connection is alive. One failed
+request fails only itself; three requests in a row that get no answer reconnect.
+Reconnects wait 250 ms, 750 ms and 2 s, then double up to 30 s between tries.
+
 | Stage | Fails when | Fix |
 |---|---|---|
 | Tailscale on this computer (Tailscale machines only) | Tailscale is signed out or not installed here | Open Tailscale Setup, or Download Tailscale |
@@ -420,10 +424,12 @@ Check:
 
 ### A remote action could not be confirmed
 
-The browser client automatically retries a reviewed set of read-only requests after
-transient network or server failures. It sends actions such as terminal input and
-pane creation once: the host may finish an action even if the response is lost.
-If Pane says the action may have completed, inspect the current panes or terminal
+Pane's remote clients (desktop, browser and phone) retry a reviewed set of
+read-only requests, dictation cleanup, and chat sends the host de-duplicates by
+operation ID, after transient network or server failures. They retry on the
+reconnect schedule for up to five minutes. Actions such as terminal input and
+pane creation are sent once: the host may finish an action even if the response
+is lost. If Pane says delivery is unknown, inspect the current panes or terminal
 before submitting it again. Authentication failures stop immediately.
 
 The browser normally uses native EventSource for output. Its fetch fallback and

@@ -184,7 +184,7 @@ describe('RemoteDaemonClient with the fetch event stream transport', () => {
     await client.connect();
     await flush();
 
-    for (const [index, delayMs] of [1_000, 2_000, 4_000, 8_000, 16_000, 30_000].entries()) {
+    for (const [index, delayMs] of [250, 750, 2_000, 4_000, 8_000, 16_000, 30_000].entries()) {
       expect(client.getState()).toMatchObject({
         status: 'reconnecting',
         lastError: 'Remote event stream failed with 503',
@@ -195,7 +195,7 @@ describe('RemoteDaemonClient with the fetch event stream transport', () => {
       expect(eventRequests()).toBe(index + 2);
     }
     await vi.runAllTimersAsync();
-    expect(eventRequests()).toBeGreaterThan(6);
+    expect(eventRequests()).toBeGreaterThan(7);
     expect(client.getState()).toMatchObject({ status: 'error', lastError: expect.stringContaining('five minutes') });
   });
 
@@ -421,7 +421,7 @@ describe('RemoteDaemonClient when the phone leaves and returns', () => {
     client.disconnect();
   });
 
-  it('reconnects and restores after terminal input times out', async () => {
+  it('stays connected through one unanswered terminal input and reconnects after three', async () => {
     const host = createFakeHost();
     // No heartbeats in these tests; keep the stale-stream timer out of the way.
     const client = createClient(host, 600_000);
@@ -431,11 +431,13 @@ describe('RemoteDaemonClient when the phone leaves and returns', () => {
     await flush();
     host.onInvoke(() => new Promise<Response>(() => {}));
 
-    const typed = client.invoke('terminal:input', ['panel-1', 'x']);
-    const failed = expect(typed).rejects.toThrow('Delivery unknown');
-    await vi.advanceTimersByTimeAsync(10_000);
-    await failed;
-    await vi.advanceTimersByTimeAsync(2_000);
+    for (let typedCount = 1; typedCount <= 3; typedCount += 1) {
+      const failed = expect(client.invoke('terminal:input', ['panel-1', 'x'])).rejects.toThrow('Delivery unknown');
+      await vi.advanceTimersByTimeAsync(10_000);
+      await failed;
+      expect(client.getState().status).toBe(typedCount < 3 ? 'connected' : 'reconnecting');
+    }
+    await vi.advanceTimersByTimeAsync(250);
 
     expect(client.getState().status).toBe('connected');
     expect(host.streamCount).toBe(2);
@@ -480,6 +482,66 @@ describe('RemoteDaemonClient invoke errors', () => {
     expect(host.requests.filter(request => request.url.endsWith('/invoke'))).toHaveLength(1);
   });
 
+  it('keeps the connection through one lost mutation response and reconnects after three in a row', async () => {
+    const host = createFakeHost();
+    const client = createClient(host, 600_000);
+    await client.connect();
+    await flush();
+    host.onInvoke(() => { throw new TypeError('Network connection was lost'); });
+
+    await expect(client.invoke('panels:create', [])).rejects.toBeInstanceOf(RemoteUnconfirmedResultError);
+    await expect(client.invoke('panels:create', [])).rejects.toBeInstanceOf(RemoteUnconfirmedResultError);
+    expect(client.getState().status).toBe('connected');
+    await expect(client.invoke('panels:create', [])).rejects.toBeInstanceOf(RemoteUnconfirmedResultError);
+    expect(client.getState()).toMatchObject({ status: 'reconnecting', lastError: expect.stringContaining('3 requests in a row failed') });
+    client.disconnect();
+  });
+
+  it('retries a read lost in transit until the host answers, without reconnecting', async () => {
+    const host = createFakeHost();
+    const client = createClient(host, 600_000);
+    await client.connect();
+    await flush();
+    let calls = 0;
+    host.onInvoke(() => {
+      calls += 1;
+      if (calls <= 6) throw new TypeError('Network connection was lost');
+      return Response.json({ ok: true, result: { text: 'Cleaned up.' } });
+    });
+
+    const result = client.invoke('voice:finalize-streaming', [{ rawText: 'cleaned up' }]);
+    // 250 ms, 750 ms, 2 s, 4 s, 8 s, 16 s.
+    await vi.advanceTimersByTimeAsync(31_000 - 1);
+    expect(calls).toBe(6);
+    expect(client.getState().status).toBe('connected');
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(result).resolves.toEqual({ text: 'Cleaned up.' });
+    expect(host.streamCount).toBe(1);
+    client.disconnect();
+  });
+
+  it('resends a chat prompt whose response was lost, since the host de-duplicates its operation ID', async () => {
+    const host = createFakeHost();
+    const client = createClient(host, 600_000);
+    await client.connect();
+    await flush();
+    const sent: unknown[] = [];
+    host.onInvoke(body => {
+      sent.push(body.args[1]);
+      if (sent.length === 1) throw new TypeError('Network connection was lost');
+      return Response.json({ ok: true, result: { operationId: 'op-1', state: 'accepted' } });
+    });
+
+    const receipt = client.invoke('agent-chat:send', ['panel-1', { generation: 1, operationId: 'op-1', text: 'hi' }]);
+    await vi.advanceTimersByTimeAsync(250);
+    await expect(receipt).resolves.toEqual({ operationId: 'op-1', state: 'accepted' });
+    expect(sent).toEqual([
+      { generation: 1, operationId: 'op-1', text: 'hi' },
+      { generation: 1, operationId: 'op-1', text: 'hi' },
+    ]);
+    client.disconnect();
+  });
+
   it('does not replay a mutation whose response was lost', async () => {
     const host = createFakeHost();
     host.onInvoke(() => { throw new TypeError('Network connection was lost'); });
@@ -490,12 +552,12 @@ describe('RemoteDaemonClient invoke errors', () => {
     host.fetch.mockClear();
     const error = await client.invoke('terminal:input', ['panel-1', 'ls\r']).catch((cause: Error) => cause);
 
-    expect(error.message).toMatch(/Delivery unknown.+Check the original panel/);
+    expect(error.message).toMatch(/^Delivery unknown:.+Check the current state/);
     client.disconnect();
     expect(host.fetch).toHaveBeenCalledTimes(1);
   });
 
-  it.each(['panels:list', 'runpane:workspaces:machines'])('retries the safe read %s after 2, 4 and 6 s', async channel => {
+  it.each(['panels:list', 'runpane:workspaces:machines'])('retries the safe read %s after 250 ms, 750 ms and 2 s', async channel => {
     const host = createFakeHost();
     let calls = 0;
     host.onInvoke(() => {
@@ -504,7 +566,7 @@ describe('RemoteDaemonClient invoke errors', () => {
     });
 
     const result = createClient(host).invoke(channel);
-    await vi.advanceTimersByTimeAsync(2_000 + 4_000 + 5_999);
+    await vi.advanceTimersByTimeAsync(250 + 750 + 1_999);
     expect(calls).toBe(3);
     await vi.advanceTimersByTimeAsync(1);
     await expect(result).resolves.toEqual(['panel']);
