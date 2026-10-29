@@ -16824,7 +16824,7 @@
       "workspace exec": {
         "name": "workspace exec",
         "summary": "Run a command in another machine's shell and return stdout, stderr, the exit code, OS, and shell.",
-        "details": "Runs in the shell Pane uses for terminals on that machine (PowerShell or Git Bash on Windows, the login shell elsewhere). The exit code becomes runpane's exit code. Without <machine>, a --cwd that cannot exist here picks the machine.",
+        "details": "Runs in the shell Pane uses for terminals on that machine (PowerShell or Git Bash on Windows, the login shell elsewhere), with that Pane's runpane first on PATH. The exit code becomes runpane's exit code. Without --, the command starts at the first word that is not an exec option. Without <machine>, a --cwd that cannot exist here picks the machine.",
         "requiresPaneDaemon": false,
         "mutates": true,
         "arguments": [

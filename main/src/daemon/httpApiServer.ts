@@ -18,6 +18,14 @@ import { authenticateRemoteDaemonBearerToken, authenticateWorkspaceRequest, type
 export type { WorkspaceAccessPolicy } from './auth';
 import { isPaneDaemonEventChannel } from './server';
 import {
+  GLASSES_CHANNELS,
+  GLASSES_EVENT_CHANNELS,
+  glassesSource,
+  type GlassesAccess,
+  type GlassesFailureReason,
+} from './glassesAccess';
+import { GLASSES_COMMANDS, GLASSES_TOKEN_PREFIX, GLASSES_WEBSOCKET_PROTOCOL } from '../../../shared/types/glasses';
+import {
   createDefaultRemoteDaemonConfig,
   getRemoteDaemonHostConfigValidationError,
   NATIVE_APP_WEBSOCKET_ORIGIN,
@@ -33,6 +41,8 @@ import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../share
 import type { BoundarySchema, JsonValue } from '../../../shared/validation/boundaryDecoder';
 import { serializeJsonTransport } from './jsonTransport';
 import { toPaneDaemonError } from '../../../shared/paneError';
+import type { VoiceStreamErrorCode } from '../../../shared/voice/deepgramLive';
+import { voiceKeyProblem } from '../../../shared/voice/voiceKeys';
 import { streamWorktreePreview } from '../services/mediaStream';
 
 interface RemoteHttpAddress {
@@ -63,14 +73,32 @@ interface ConnectedRemoteEventClient {
   heartbeatTimer: NodeJS.Timeout;
   /** What a workspace client signed in with, checked again before each event it receives. */
   workspaceCredentials: WorkspaceCredentials | null;
+  /**
+   * Set for the Pane glasses app to the origin it came in with: its stream carries only
+   * GLASSES_EVENT_CHANNELS, and ends when that origin is no longer allowed.
+   */
+  glassesOrigin: string | null;
 }
 
 /** Who signed in, kept so access can be checked again after the request was admitted. */
-type AdmittedIdentity = Pick<ConnectedRemoteEventClient, 'remoteClientId' | 'remoteClientTokenHash' | 'workspaceCredentials'>;
+type AdmittedIdentity = Pick<ConnectedRemoteEventClient, 'remoteClientId' | 'remoteClientTokenHash' | 'workspaceCredentials' | 'glassesOrigin'>;
 
 interface WorkspaceRefusal {
   statusCode: number;
-  error: { message: string; code: string };
+  error: { message: string; code: string; next?: string };
+}
+
+/**
+ * A request the glasses path admitted: owner identity, an allowed origin, no Funnel, and the
+ * source not locked out. `client` is the device its token names, or null for a pairing call.
+ */
+interface GlassesAdmission {
+  client: { id: string; tokenHash: string; label: string; origin: string } | null;
+  source: string;
+}
+
+function glassesIdentity(client: NonNullable<GlassesAdmission['client']>): AdmittedIdentity {
+  return { remoteClientId: client.id, remoteClientTokenHash: client.tokenHash, workspaceCredentials: null, glassesOrigin: client.origin };
 }
 
 interface WorkspaceCredentials {
@@ -198,6 +226,8 @@ interface PaneRemoteHttpApiServerOptions {
   workspace?: WorkspaceIdentityOptions;
   /** Whether a port is in the host's forwarded list; port streams reach only those. Without it, none. */
   isForwardedPort?(port: number): boolean;
+  /** Where the voice proxy reaches Deepgram's streaming API; Deepgram's own by default. */
+  deepgramListenEndpoint?: string;
   /** Sent to signed-in clients on the ready event. */
   paneVersion?: string;
 }
@@ -211,10 +241,13 @@ interface WorkspaceIdentityOptions {
   pathSecret: string;
   /** Who may connect right now; null refuses every request. */
   access(): WorkspaceAccessPolicy | null;
+  /** Admits the Pane glasses app with a per-device token; without it, every browser is refused. */
+  glasses?: GlassesAccess;
 }
 
 /** Commands that act on the whole machine: workspace identity only, never pairing tokens. */
-const WORKSPACE_ONLY_CHANNEL_PREFIX = 'runpane:machine:';
+const WORKSPACE_ONLY_CHANNEL_PREFIXES = ['runpane:machine:', 'runpane:glasses:'];
+
 const WORKSPACE_LISTEN_HOST = '127.0.0.1';
 
 type RemoteHttpConfig = Pick<ReturnType<ConfigManager['getConfig']>, 'deepgramApiKey' | 'remoteDaemon'>;
@@ -238,9 +271,9 @@ export class PaneRemoteHttpApiServer {
   private server: http.Server | null = null;
   private voiceDeepgramWss: WebSocketServer | null = null;
   private portStreamWss: WebSocketServer | null = null;
-  /** Open port streams and who opened them; each one closes when its caller loses access. */
-  private readonly portStreams = new Map<WebSocket, AdmittedIdentity>();
-  private portStreamCheckTimer: NodeJS.Timeout | null = null;
+  /** Open port and glasses voice streams and who opened them; each one closes when its caller loses access. */
+  private readonly admittedSockets = new Map<WebSocket, AdmittedIdentity>();
+  private admittedSocketCheckTimer: NodeJS.Timeout | null = null;
   private readonly eventClients = new Map<string, ConnectedRemoteEventClient>();
   private readonly deviceLabelsByRuntime = new Map<string, string>();
   private readonly daemonEventSink: PaneEventSink;
@@ -250,6 +283,9 @@ export class PaneRemoteHttpApiServer {
   private readonly analyticsSink?: RemotePaneAnalyticsSink;
   private readonly workspace?: WorkspaceIdentityOptions;
   private readonly isForwardedPort: (port: number) => boolean;
+  private readonly deepgramListenEndpoint: string;
+  private readonly glassesAdmissions = new WeakMap<IncomingMessage, GlassesAdmission>();
+  private stopWatchingGlassesRevokes: (() => void) | null = null;
   private readonly paneVersion?: string;
 
   constructor(
@@ -261,6 +297,7 @@ export class PaneRemoteHttpApiServer {
     this.analyticsSink = options.analyticsSink;
     this.workspace = options.workspace;
     this.isForwardedPort = options.isForwardedPort ?? (() => false);
+    this.deepgramListenEndpoint = options.deepgramListenEndpoint ?? DEEPGRAM_LISTEN_ENDPOINT;
     this.paneVersion = options.paneVersion;
     this.daemonEventSink = createFanoutEventSink([
       {
@@ -276,6 +313,9 @@ export class PaneRemoteHttpApiServer {
           };
 
           for (const [clientConnectionId, client] of this.eventClients) {
+            if (client.glassesOrigin !== null && !GLASSES_EVENT_CHANNELS.has(channel)) {
+              continue;
+            }
             if (!this.isStillAdmitted(client)) {
               this.dropEventClient(clientConnectionId);
               continue;
@@ -315,7 +355,7 @@ export class PaneRemoteHttpApiServer {
       this.dropEventClient(clientConnectionId);
     }
 
-    const streams = [...this.portStreams.entries()]
+    const streams = [...this.admittedSockets.entries()]
       .filter(([, identity]) => !clientIdSet || (identity.remoteClientId !== null && clientIdSet.has(identity.remoteClientId)))
       .map(([stream]) => stream);
     for (const stream of streams) {
@@ -354,7 +394,11 @@ export class PaneRemoteHttpApiServer {
     // Phones on slow links send uploads in chunks that can take minutes each;
     // Node's default 300 s per request would cut one off on a bad link.
     server.requestTimeout = REQUEST_TIMEOUT_MS;
-    const voiceDeepgramWss = new WebSocketServer({ noServer: true });
+    const voiceDeepgramWss = new WebSocketServer({
+      noServer: true,
+      // The glasses app names its token in the subprotocol list; the handshake answers with the protocol only.
+      handleProtocols: (protocols) => (protocols.has(GLASSES_WEBSOCKET_PROTOCOL) ? GLASSES_WEBSOCKET_PROTOCOL : false),
+    });
     this.voiceDeepgramWss = voiceDeepgramWss;
     this.portStreamWss = new WebSocketServer({ noServer: true });
     server.on('upgrade', (request, socket, head) => {
@@ -393,6 +437,7 @@ export class PaneRemoteHttpApiServer {
       host: listen.host,
       port: address.port,
     };
+    this.stopWatchingGlassesRevokes = this.workspace?.glasses?.onRevoked((id) => this.disconnectClients([id])) ?? null;
   }
 
   private getValidatedPairingListenAddress(): RemoteHttpAddress {
@@ -412,8 +457,10 @@ export class PaneRemoteHttpApiServer {
     const server = this.server;
     this.server = null;
     this.address = null;
-    if (this.portStreamCheckTimer) clearInterval(this.portStreamCheckTimer);
-    this.portStreamCheckTimer = null;
+    this.stopWatchingGlassesRevokes?.();
+    this.stopWatchingGlassesRevokes = null;
+    if (this.admittedSocketCheckTimer) clearInterval(this.admittedSocketCheckTimer);
+    this.admittedSocketCheckTimer = null;
     const webSocketServers = [this.voiceDeepgramWss, this.portStreamWss];
     this.voiceDeepgramWss = null;
     this.portStreamWss = null;
@@ -447,6 +494,11 @@ export class PaneRemoteHttpApiServer {
       }
     }
     const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`);
+    const glasses = this.glassesAdmissions.get(request);
+    if (glasses && (!glasses.client || url.pathname !== VOICE_DEEPGRAM_STREAM_PATH)) {
+      writeRawHttpError(socket, 403, 'Glasses reach only the voice stream, with a device token.', 'ERR_GLASSES_ENDPOINT_REFUSED');
+      return;
+    }
     const portMatch = PORT_STREAM_PATH.exec(url.pathname);
     if (portMatch) {
       this.handlePortStreamUpgrade(request, socket, head, Number(portMatch[1]), url);
@@ -457,7 +509,7 @@ export class PaneRemoteHttpApiServer {
       return;
     }
 
-    const auth = this.authenticateRequest(request, url.searchParams.get('access_token'));
+    const auth = glasses ? { ok: true as const } : this.authenticateRequest(request, url.searchParams.get('access_token'));
     if (!auth.ok) {
       writeRawHttpError(socket, auth.statusCode, auth.error.message);
       return;
@@ -476,6 +528,8 @@ export class PaneRemoteHttpApiServer {
     }
 
     wss.handleUpgrade(request, socket, head, (client) => {
+      const glassesClient = glasses?.client;
+      if (glassesClient) this.trackAdmittedSocket(client, glassesIdentity(glassesClient));
       this.handleDeepgramProxySocket(client, deepgramApiKey);
     });
   }
@@ -508,11 +562,10 @@ export class PaneRemoteHttpApiServer {
           authorization: getAuthorizationHeaderForRequest(request, url.searchParams.get('access_token')),
         }
         : null,
+      glassesOrigin: null,
     };
     wss.handleUpgrade(request, socket, head, (client) => {
-      this.portStreams.set(client, identity);
-      this.portStreamCheckTimer ??= setInterval(() => this.closeRevokedPortStreams(), this.heartbeatIntervalMs);
-      this.portStreamCheckTimer.unref?.();
+      this.trackAdmittedSocket(client, identity);
       // By name, so a service on either IPv4 or IPv6 loopback answers.
       const upstream = net.connect({ host: 'localhost', port });
       const stream = createWebSocketStream(client);
@@ -520,26 +573,44 @@ export class PaneRemoteHttpApiServer {
         upstream.destroy();
         client.terminate();
       });
-      client.once('close', () => {
-        upstream.destroy();
-        this.portStreams.delete(client);
-        if (this.portStreams.size === 0 && this.portStreamCheckTimer) {
-          clearInterval(this.portStreamCheckTimer);
-          this.portStreamCheckTimer = null;
-        }
-      });
+      client.once('close', () => upstream.destroy());
     });
   }
 
-  /** A removed pairing code, narrower visibility or a new password closes streams already open. */
-  private closeRevokedPortStreams(): void {
-    for (const [stream, identity] of this.portStreams) {
-      if (!this.isStillAdmitted(identity)) stream.terminate();
-    }
+  /**
+   * A removed pairing code, narrower visibility, a new password, a revoked glasses device or a
+   * removed glasses origin closes the socket within one heartbeat.
+   */
+  private trackAdmittedSocket(client: WebSocket, identity: AdmittedIdentity): void {
+    this.admittedSockets.set(client, identity);
+    this.admittedSocketCheckTimer ??= setInterval(() => {
+      for (const [stream, admitted] of this.admittedSockets) {
+        if (!this.isStillAdmitted(admitted)) stream.terminate();
+      }
+    }, this.heartbeatIntervalMs);
+    this.admittedSocketCheckTimer.unref?.();
+    client.once('close', () => {
+      this.admittedSockets.delete(client);
+      if (this.admittedSockets.size === 0 && this.admittedSocketCheckTimer) {
+        clearInterval(this.admittedSocketCheckTimer);
+        this.admittedSocketCheckTimer = null;
+      }
+    });
   }
 
   private handleDeepgramProxySocket(client: WebSocket, deepgramApiKey: string): void {
-    const upstream = new WebSocket(buildDeepgramListenUrl(), {
+    /** Tells the client why its stream ended, in an Error frame with a code, then closes it. */
+    const refuse = (code: VoiceStreamErrorCode, message: string) => {
+      if (client.readyState === WebSocket.OPEN) client.send(JSON.stringify({ type: 'Error', code, message }));
+      client.close(1011);
+    };
+    const fix = 'Fix it in Pane on this computer: Settings › Integrations › Voice transcription.';
+    const keyProblem = voiceKeyProblem('deepgramApiKey', deepgramApiKey);
+    if (keyProblem) {
+      refuse('ERR_VOICE_KEY_INVALID', `The Deepgram key saved on this computer can't be used. ${keyProblem.message} ${fix}`);
+      return;
+    }
+    const upstream = new WebSocket(buildDeepgramListenUrl(this.deepgramListenEndpoint), {
       headers: {
         Authorization: `Token ${deepgramApiKey}`,
       },
@@ -547,11 +618,15 @@ export class PaneRemoteHttpApiServer {
     const pendingMessages: Array<{ data: RawData; isBinary: boolean }> = [];
     let closing = false;
 
-    const closeBoth = (code?: number, reason?: Buffer) => {
+    const closeBoth = (received?: number, receivedReason?: Buffer) => {
       if (closing) {
         return;
       }
       closing = true;
+      // 1005, 1006 and 1015 only report a close that sent no code (a terminated socket); they can't be sent on.
+      const forwardable = received !== undefined && received !== 1005 && received !== 1006 && received !== 1015;
+      const code = forwardable ? received : undefined;
+      const reason = forwardable ? receivedReason : undefined;
       if (client.readyState === WebSocket.OPEN || client.readyState === WebSocket.CONNECTING) {
         client.close(code, reason);
       }
@@ -573,10 +648,21 @@ export class PaneRemoteHttpApiServer {
         client.send(data, { binary: isBinary });
       }
     });
+    // Deepgram answers a refused key with an HTTP status instead of upgrading.
+    upstream.on('unexpected-response', (request, response) => {
+      request.destroy();
+      const status = response.statusCode ?? 0;
+      if (closing) return;
+      closing = true;
+      if (status === 401 || status === 403) refuse('ERR_VOICE_KEY_REJECTED', `Deepgram rejected the key saved on this computer (HTTP ${status}). ${fix}`);
+      else refuse('ERR_VOICE_UPSTREAM', `Deepgram refused the stream (HTTP ${status}).`);
+    });
     upstream.on('error', (error) => {
+      if (closing) return;
       if (client.readyState === WebSocket.OPEN) {
         client.send(JSON.stringify({
           type: 'Error',
+          code: 'ERR_VOICE_UPSTREAM' satisfies VoiceStreamErrorCode,
           message: `Deepgram streaming connection failed: ${error.message}`,
         }));
       }
@@ -616,6 +702,12 @@ export class PaneRemoteHttpApiServer {
     if (request.method === 'OPTIONS') {
       response.writeHead(204, withCorsHeaders());
       response.end();
+      return;
+    }
+
+    const glasses = this.glassesAdmissions.get(request);
+    if (glasses) {
+      await this.handleGlassesRequest(request, response, url, glasses);
       return;
     }
 
@@ -689,7 +781,7 @@ export class PaneRemoteHttpApiServer {
       this.writeJson(response, auth.statusCode, auth);
       return;
     }
-    if (!this.workspace && invokeRequest.channel.startsWith(WORKSPACE_ONLY_CHANNEL_PREFIX)) {
+    if (!this.workspace && WORKSPACE_ONLY_CHANNEL_PREFIXES.some((prefix) => invokeRequest.channel.startsWith(prefix))) {
       this.writeJson(response, 403, {
         ok: false,
         error: {
@@ -698,6 +790,21 @@ export class PaneRemoteHttpApiServer {
         },
       } satisfies RemoteInvokeErrorPayload);
       return;
+    }
+
+    // Glasses are paired, listed and revoked by their owner; the glasses themselves pair only
+    // through the glasses path, with a pairing secret.
+    if (invokeRequest.channel.startsWith('runpane:glasses:')) {
+      if (invokeRequest.channel === GLASSES_COMMANDS.pair || !this.workspaceOwnerLogin(request)) {
+        this.writeJson(response, 403, {
+          ok: false,
+          error: {
+            message: 'Only this computer\'s owner can pair, list or revoke glasses, from their own Pane app or this computer.',
+            code: 'ERR_GLASSES_OWNER_REQUIRED',
+          },
+        } satisfies RemoteInvokeErrorPayload);
+        return;
+      }
     }
 
     // Discovery probes peers as this computer's owner, so only that same identity may
@@ -715,11 +822,15 @@ export class PaneRemoteHttpApiServer {
       }
     }
 
+    await this.respondToInvoke(request, response, () => this.commandRegistry.invokeRemote(
+      invokeRequest.channel,
+      this.getInvokeArgsForRequest(invokeRequest, auth, request),
+    ));
+  }
+
+  private async respondToInvoke(request: IncomingMessage, response: ServerResponse, run: () => ReturnType<PaneCommandRegistry['invokeRemote']>): Promise<void> {
     try {
-      const result = await this.commandRegistry.invokeRemote(
-        invokeRequest.channel,
-        this.getInvokeArgsForRequest(invokeRequest, auth, request),
-      );
+      const result = await run();
       this.writeJson(response, 200, {
         ok: true,
         result,
@@ -783,13 +894,20 @@ export class PaneRemoteHttpApiServer {
     } satisfies RemoteHealthPayload);
   }
 
-  private handleEventStreamRequest(request: IncomingMessage, response: ServerResponse, url: URL): void {
+  private handleEventStreamRequest(
+    request: IncomingMessage,
+    response: ServerResponse,
+    url: URL,
+    glassesClient?: NonNullable<GlassesAdmission['client']>,
+  ): void {
     if (request.method !== 'GET') {
       this.writeMethodNotAllowed(response, 'GET');
       return;
     }
 
-    const auth = this.authenticateRequest(request, url.searchParams.get('access_token'));
+    const auth: RemoteRequestAuthResult = glassesClient
+      ? { ok: true, client: glassesClient }
+      : this.authenticateRequest(request, url.searchParams.get('access_token'));
     if (!auth.ok) {
       this.writeJson(response, auth.statusCode, auth);
       return;
@@ -843,12 +961,13 @@ export class PaneRemoteHttpApiServer {
       connectedAt,
       lastSeenAt: connectedAt,
       heartbeatTimer,
-      workspaceCredentials: this.workspace
+      workspaceCredentials: this.workspace && !glassesClient
         ? {
           login: request.headers['tailscale-user-login'],
           authorization: getAuthorizationHeaderForRequest(request, url.searchParams.get('access_token')),
         }
         : null,
+      glassesOrigin: glassesClient?.origin ?? null,
     };
     this.eventClients.set(clientConnectionId, connectedClient);
     if (connectedClient.remoteRuntimeId && connectedClient.deviceLabel) {
@@ -877,11 +996,21 @@ export class PaneRemoteHttpApiServer {
     if (rawUrl !== prefix && !rawUrl.startsWith(`${prefix}/`) && !rawUrl.startsWith(`${prefix}?`)) {
       return { statusCode: 404, error: { message: 'Not found', code: 'ERR_REMOTE_DAEMON_HTTP_NOT_FOUND' } };
     }
+    const glasses = this.workspace?.glasses;
+    const origin = request.headers.origin;
+    const glassesToken = readGlassesToken(request);
+    if (glasses && (glassesToken !== null || glasses.allowsOrigin(origin))) {
+      const refusal = this.admitGlasses(request, glasses, glassesToken, rawUrl);
+      if (refusal) return refusal;
+      request.url = rawUrl.slice(prefix.length) || '/';
+      return null;
+    }
     // Serve signs every request from the owner's devices, including ones a web page sends from
     // the owner's browser; only Pane and the runpane CLI, which send no Origin, and the native
-    // app, whose WebSockets send an Origin no browser can, may use workspaces.
-    const origin = request.headers.origin;
+    // app, whose WebSockets send an Origin no browser can, may use workspaces. The glasses app
+    // is admitted above, with its own token.
     if ((origin !== undefined && origin !== NATIVE_APP_WEBSOCKET_ORIGIN) || request.method === 'OPTIONS') {
+      if (origin && origin !== NATIVE_APP_WEBSOCKET_ORIGIN) glasses?.noteRefusedOrigin(origin);
       return {
         statusCode: 403,
         error: { message: 'Workspaces answer the runpane CLI, not browsers.', code: 'ERR_WORKSPACE_BROWSER_REFUSED' },
@@ -889,6 +1018,157 @@ export class PaneRemoteHttpApiServer {
     }
     request.url = rawUrl.slice(prefix.length) || '/';
     return null;
+  }
+
+  /**
+   * The glasses path: a request is admitted only with the owner's Tailscale identity, an Even
+   * app origin, no Funnel, no credential in the URL, a source that is not locked out, and a valid
+   * device token (or, for pairing alone, no token). Every refusal past the lockout is logged and
+   * counted against the source.
+   */
+  private admitGlasses(request: IncomingMessage, glasses: GlassesAccess, token: string | null, rawUrl: string): WorkspaceRefusal | null {
+    const origin = getSingleHeaderValue(request.headers.origin);
+    if (request.method === 'OPTIONS') {
+      // A preflight carries no credentials: an allowed origin gets CORS headers and no data.
+      if (glasses.allowsOrigin(origin ?? undefined)) return null;
+      return { statusCode: 403, error: { message: 'Workspaces answer the runpane CLI, not browsers.', code: 'ERR_WORKSPACE_BROWSER_REFUSED' } };
+    }
+    const source = glassesSource(
+      getSingleHeaderValue(request.headers['tailscale-user-login']),
+      getSingleHeaderValue(request.headers['x-forwarded-for']),
+      request.socket.remoteAddress,
+    );
+    const lockedMs = glasses.lockedFor(source);
+    if (lockedMs > 0) {
+      const seconds = Math.ceil(lockedMs / 1000);
+      return {
+        statusCode: 429,
+        error: {
+          message: `This computer refused too many glasses requests from this device, so it is ignoring it for ${seconds} s.`,
+          code: 'ERR_GLASSES_LOCKED_OUT',
+          next: `Wait ${seconds} s. If you did not cause these, revoke the glasses in Pane's Settings › Remote Access.`,
+        },
+      };
+    }
+    const refuse = (reason: GlassesFailureReason, statusCode: number, code: string, message: string, next: string, detail?: string): WorkspaceRefusal => {
+      glasses.recordFailure(source, reason, detail);
+      return { statusCode, error: { message, code, next } };
+    };
+    if (request.headers['tailscale-funnel-request'] !== undefined || glasses.isFunnelOn()) {
+      return refuse('funnel', 403, 'ERR_GLASSES_FUNNEL_REFUSED',
+        'Tailscale Funnel is on for this computer\'s workspace port, so it is reachable from the internet; glasses work only inside your tailnet.',
+        'Turn Funnel off for this port with "tailscale funnel reset" (or "tailscale funnel --https=8443 off"); glasses reconnect on their own.');
+    }
+    if (!glasses.allowsOrigin(origin ?? undefined)) {
+      if (origin) glasses.noteRefusedOrigin(origin);
+      return refuse('origin', 403, 'ERR_GLASSES_ORIGIN_REFUSED',
+        `This computer accepts glasses tokens only from the Even app; this request came from ${origin ?? 'no origin'}.`,
+        'Open Pane from the Even app. If this is the Even app, allow this origin on the computer in Settings › Remote Access › Glasses.',
+        `origin ${origin ?? 'none'}`);
+    }
+    if (new URL(rawUrl, 'http://localhost').searchParams.has('access_token')) {
+      return refuse('credential-in-url', 400, 'ERR_GLASSES_CREDENTIAL_IN_URL',
+        'Glasses credentials go only in the Authorization header or the WebSocket subprotocol, never in a URL; this request was refused.',
+        'Update the Pane glasses app.');
+    }
+    // Serve sends exactly one login; a repeated header is not Serve's.
+    if (Array.isArray(request.headers['tailscale-user-login']) || !this.workspaceOwnerLogin(request)) {
+      return refuse('identity', 403, 'ERR_GLASSES_IDENTITY_REQUIRED',
+        'Glasses work only through your own Tailscale login; this request came without it or from someone else.',
+        'Sign the phone in to Tailscale with the same login as this computer.');
+    }
+    if (token === null) {
+      this.glassesAdmissions.set(request, { client: null, source });
+      return null;
+    }
+    const client = glasses.verifyToken(token);
+    if (!client) {
+      return refuse('token', 401, 'ERR_GLASSES_TOKEN_INVALID',
+        'These glasses are not paired with this computer, or were revoked.',
+        'Pair again from the Pane app: Settings › Glasses › Pair glasses.');
+    }
+    glasses.touch(client.id);
+    this.glassesAdmissions.set(request, { client: { id: client.id, tokenHash: client.tokenHash, label: client.label, origin: origin ?? '' }, source });
+    return null;
+  }
+
+  /** What an admitted glasses request may reach: pairing, its allowlisted commands, its scoped stream, and health. */
+  private async handleGlassesRequest(request: IncomingMessage, response: ServerResponse, url: URL, admission: GlassesAdmission): Promise<void> {
+    const glasses = this.workspace?.glasses;
+    if (url.pathname === '/health') {
+      this.handleHealthRequest(request, response);
+      return;
+    }
+    if (url.pathname === '/events' && admission.client) {
+      this.handleEventStreamRequest(request, response, url, admission.client);
+      return;
+    }
+    if (url.pathname !== '/invoke' || !glasses) {
+      this.writeJson(response, 403, {
+        ok: false,
+        error: { message: `Glasses can't use ${url.pathname} on this computer.`, code: 'ERR_GLASSES_ENDPOINT_REFUSED' },
+      } satisfies RemoteInvokeErrorPayload);
+      return;
+    }
+    if (request.method !== 'POST') {
+      this.writeMethodNotAllowed(response, 'POST');
+      return;
+    }
+    let invokeRequest: RemoteInvokeRequest;
+    try {
+      invokeRequest = await this.readInvokeRequest(request, admission.client ? MAX_AUTHENTICATED_REQUEST_BODY_BYTES : MAX_UNAUTHENTICATED_REQUEST_BODY_BYTES);
+    } catch (error) {
+      if (!(error instanceof RemoteDaemonBadRequestError)) throw error;
+      this.writeJson(response, error.statusCode, { ok: false, error: { message: error.message, code: error.code } } satisfies RemoteInvokeErrorPayload);
+      return;
+    }
+    const { channel } = invokeRequest;
+    const refuse = (statusCode: number, code: string, message: string, next?: string) => {
+      this.writeJson(response, statusCode, { ok: false, error: next ? { message, code, next } : { message, code } } satisfies RemoteInvokeErrorPayload);
+    };
+    // The body can arrive long after admission; a revoke, a removed origin or Funnel turned on meanwhile refuses it.
+    const stillAdmitted = admission.client
+      ? this.isStillAdmitted(glassesIdentity(admission.client))
+      : glasses.allowsOrigin(getSingleHeaderValue(request.headers.origin) ?? undefined) && !glasses.isFunnelOn();
+    if (!stillAdmitted) {
+      refuse(403, 'ERR_GLASSES_ACCESS_WITHDRAWN', 'These glasses lost access to this computer while the request was arriving; it was not run.',
+        'Check Settings › Remote Access › Glasses on the computer, then pair again if the glasses were revoked.');
+      return;
+    }
+
+    if (channel === GLASSES_COMMANDS.pair) {
+      const secret = decodeOptionalBoundary(decodeOptionalBoundary(invokeRequest.args[0], boundary.jsonObject)?.secret, boundary.string);
+      if (admission.client || !secret) {
+        refuse(400, 'ERR_GLASSES_PAIR_BAD_REQUEST', 'Pairing takes one pairing secret and no device token.');
+        return;
+      }
+      const paired = await glasses.pair(secret);
+      if (!paired) {
+        glasses.recordFailure(admission.source, 'pairing-secret');
+        refuse(403, 'ERR_GLASSES_PAIRING_SECRET_INVALID',
+          'This pairing code was already used or is more than 10 minutes old; these glasses were not paired with this computer.',
+          'Make a new code in the Pane app: Settings › Glasses › Pair glasses, then paste it again.');
+        return;
+      }
+      this.writeJson(response, 200, { ok: true, result: paired } satisfies RemoteInvokeSuccessPayload);
+      return;
+    }
+    if (!admission.client) {
+      glasses.recordFailure(admission.source, 'token');
+      refuse(401, 'ERR_GLASSES_TOKEN_REQUIRED', 'Glasses need their device token for this.', 'Pair again from the Pane app: Settings › Glasses › Pair glasses.');
+      return;
+    }
+    if (!GLASSES_CHANNELS.has(channel)) {
+      glasses.recordFailure(admission.source, 'channel', channel);
+      refuse(403, 'ERR_GLASSES_CHANNEL_REFUSED', `Glasses can't run ${channel}; they can list Panes, read and type into terminals, dictate, and answer Notify.`);
+      return;
+    }
+    const client = admission.client;
+    // The Notify answer is stamped with the glasses' own name, never one from the request.
+    const args = channel === 'notify:remote-command'
+      ? [invokeRequest.args[0] ?? null, { device: client.label }]
+      : invokeRequest.args;
+    await this.respondToInvoke(request, response, () => this.commandRegistry.invokeRemote(channel, args));
   }
 
   private authenticateRequest(request: IncomingMessage, token?: string | null): RemoteRequestAuthResult {
@@ -920,7 +1200,8 @@ export class PaneRemoteHttpApiServer {
 
     return authenticateRemoteDaemonBearerToken(
       getAuthorizationHeaderForRequest(request, token),
-      remoteConfig.host.clients,
+      // Glasses tokens are admitted only on the workspace listener, with their narrow scope.
+      remoteConfig.host.clients.filter((client) => client.kind !== 'glasses'),
     );
   }
 
@@ -993,6 +1274,12 @@ export class PaneRemoteHttpApiServer {
 
   private isStillAdmitted(client: AdmittedIdentity): boolean {
     const { remoteClientId, remoteClientTokenHash, workspaceCredentials } = client;
+    if (client.glassesOrigin !== null) {
+      // A revoked device, an origin the owner removed, or Funnel turned on ends the stream.
+      const glasses = this.workspace?.glasses;
+      return Boolean(glasses && remoteClientId && remoteClientTokenHash && !glasses.isFunnelOn()
+        && glasses.isCurrent(remoteClientId, remoteClientTokenHash) && glasses.allowsOrigin(client.glassesOrigin));
+    }
     if (this.workspace) {
       // Narrower visibility or a new password applies to clients that are already connected.
       return workspaceCredentials !== null && authenticateWorkspaceRequest(
@@ -1041,6 +1328,11 @@ export class PaneRemoteHttpApiServer {
   private sendHeartbeat(clientConnectionId: string): void {
     const client = this.eventClients.get(clientConnectionId);
     if (!client) {
+      return;
+    }
+    // A revoked device loses its stream within one heartbeat, even when no event is sent.
+    if (client.glassesOrigin !== null && !this.isStillAdmitted(client)) {
+      this.dropEventClient(clientConnectionId);
       return;
     }
 
@@ -1305,8 +1597,8 @@ function getHttpStatusText(statusCode: number): string {
   }
 }
 
-function buildDeepgramListenUrl(): string {
-  const url = new URL(DEEPGRAM_LISTEN_ENDPOINT);
+function buildDeepgramListenUrl(endpoint: string): string {
+  const url = new URL(endpoint);
   url.searchParams.set('model', 'nova-3');
   url.searchParams.set('language', 'en-US');
   url.searchParams.set('smart_format', 'true');
@@ -1346,6 +1638,18 @@ function getRemoteRuntimeIdFromHeaders(request: IncomingMessage): string | null 
 
 function getRemoteRuntimeIdFromRequest(request: IncomingMessage, fallback?: string | null): string | null {
   return getRemoteRuntimeIdFromHeaders(request) ?? getSingleString(fallback);
+}
+
+/**
+ * A glasses device token from the Authorization header, or from the WebSocket subprotocol list
+ * (`pane-glasses, pgt_…`), where a browser WebSocket can carry it. Never from the URL or body.
+ */
+function readGlassesToken(request: IncomingMessage): string | null {
+  const bearer = getSingleHeaderValue(request.headers.authorization)?.match(/^bearer\s+(\S+)$/i)?.[1];
+  if (bearer?.startsWith(GLASSES_TOKEN_PREFIX)) return bearer;
+  const protocols = (getSingleHeaderValue(request.headers['sec-websocket-protocol']) ?? '').split(',').map((value) => value.trim());
+  if (!protocols.includes(GLASSES_WEBSOCKET_PROTOCOL)) return null;
+  return protocols.find((value) => value.startsWith(GLASSES_TOKEN_PREFIX)) ?? null;
 }
 
 function getAuthorizationHeaderForRequest(

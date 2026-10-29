@@ -12,8 +12,9 @@ import type {
 import type { SubmitFeedbackRequest } from '../shared/types/feedback';
 import type { Loop, LoopInput, LoopSchedulePreview } from '../shared/types/loop';
 import type { TailnetMachineList, WorkspaceAccessSummary } from '../shared/types/workspaceAccess';
+import type { GlassesAccessState } from '../shared/types/glasses';
 import type { JsonObject, JsonValue } from '../shared/validation/boundaryDecoder';
-import { DEFAULT_APPEARANCE, LIGHT_THEMES, normalizeAppearance, type AppearanceConfig } from '../shared/types/appearance';
+import { DEFAULT_APPEARANCE, normalizeAppearance, type AppearanceConfig } from '../shared/types/appearance';
 import type { DiffManifest, DiffScope, FileDiffResult } from '../shared/types/gitDiff';
 import type { RunpaneAgentDoctorResult } from '../shared/types/runpaneOrchestration';
 import type { SetupExportSummary, SetupFile, SetupImportPreview, SetupSectionId } from '../shared/types/setupTransfer';
@@ -113,6 +114,7 @@ export type ElectronApiMockOptions = {
   agentDoctor?: Partial<Record<'claude' | 'codex' | 'cursor' | 'opencode', { available: boolean; signIn?: 'signed-in' | 'signed-out' | 'unknown' }>>;
   /** Delay before runpane:agents:doctor answers, or `hold` to leave every check pending. */
   agentDoctorDelayMs?: number | 'hold';
+  glasses?: GlassesAccessState;
   /** setup:choose-import fails with this PaneError text instead of previewing. */
   setupImportError?: string;
   /** Serves window.electronAPI.notify with this queue snapshot; absent, the API is too. */
@@ -121,7 +123,7 @@ export type ElectronApiMockOptions = {
 
 export async function installElectronApiMock(page: Page, options: ElectronApiMockOptions = {}) {
   type SerializedOptions = ElectronApiMockOptions & {
-    appearance: { defaults: AppearanceConfig; lightThemes: string[]; seeded: AppearanceConfig };
+    appearance: { defaults: AppearanceConfig; seeded: AppearanceConfig };
   };
   await page.addInitScript((mockOptions: SerializedOptions) => {
     if (mockOptions.notificationsSupported === false) {
@@ -193,6 +195,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       url: 'https://devbox.tail1234.ts.net:8443',
       ...mockOptions.workspaceAccess,
     };
+    const glassesState: GlassesAccessState = clone(mockOptions.glasses ?? { devices: [], allowedOrigins: [], refusedOrigins: [] });
     const remoteConnectionState: RemotePaneConnectionState = {
       mode: 'local',
       status: 'local',
@@ -974,6 +977,10 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         })),
       }),
       config: namespace({
+        // Deepgram refuses any key starting dg-revoked and takes every other.
+        checkDeepgramKey: async (key: string) => (key.startsWith('dg-revoked')
+          ? { result: 'rejected', message: 'Saved, but Deepgram rejected this key (HTTP 401). Copy a current key from console.deepgram.com and paste it again.' }
+          : { result: 'accepted', message: 'Deepgram accepted this key.' }),
         get: async () => {
           configGetCount += 1;
           if (mockOptions.configReadDelayMs) {
@@ -990,12 +997,6 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
             const error = nextConfigUpdateError;
             nextConfigUpdateError = null;
             return Promise.resolve({ success: false, error });
-          }
-          if ('systemLightTheme' in updates && !mockOptions.appearance.lightThemes.includes(String(updates.systemLightTheme))) {
-            return Promise.resolve({ success: false, error: 'systemLightTheme must be a light palette' });
-          }
-          if ('systemDarkTheme' in updates && mockOptions.appearance.lightThemes.includes(String(updates.systemDarkTheme))) {
-            return Promise.resolve({ success: false, error: 'systemDarkTheme must be a dark palette' });
           }
           const savedNotify = configState.notify;
           Object.assign(configState, updates);
@@ -1530,6 +1531,17 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           return success(clone(remoteDaemonConfig.client));
         },
         getWorkspaceAccess: () => success(clone(workspaceAccess)),
+        getGlasses: () => success(clone(glassesState)),
+        revokeGlasses: (id: string) => {
+          glassesState.devices = glassesState.devices.filter((device) => device.id !== id);
+          return success(clone(glassesState));
+        },
+        setGlassesOrigin: (update: { origin: string; allowed: boolean }) => {
+          glassesState.refusedOrigins = glassesState.refusedOrigins.filter((entry) => entry.origin !== update.origin);
+          glassesState.allowedOrigins = glassesState.allowedOrigins.filter((entry) => entry.origin !== update.origin);
+          if (update.allowed) glassesState.allowedOrigins.push({ origin: update.origin, source: 'owner' });
+          return success(clone(glassesState));
+        },
         updateWorkspaceAccess: (update: { visibility?: 'off' | 'owner' | 'tailnet'; password?: string | null }) => {
           if (update.visibility) workspaceAccess.visibility = update.visibility;
           if (update.password !== undefined) workspaceAccess.passwordProtected = update.password !== null;
@@ -1871,7 +1883,6 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     ...options,
     appearance: {
       defaults: DEFAULT_APPEARANCE,
-      lightThemes: [...LIGHT_THEMES],
       seeded: normalizeAppearance(options.initialConfig ?? {}).appearance,
     },
   });

@@ -38,7 +38,7 @@
         'high-legibility': ['light', 'high-legibility'],
       };
       try {
-        const defaults = { appearanceMode: 'system', theme: 'light-rounded', systemLightTheme: 'light-rounded', systemDarkTheme: 'dark' };
+        const defaults = { appearanceMode: 'system', theme: 'folio', systemLightTheme: 'folio', systemDarkTheme: 'dusk-oled' };
         const snapshot = window.electronAPI?.appearanceSnapshot;
         let cached;
         try {
@@ -49,8 +49,8 @@
         const hasTheme = (value) => typeof value === 'string' && Object.prototype.hasOwnProperty.call(themeClasses, value);
         const source = snapshot || cached || (hasTheme(legacy) ? { ...defaults, appearanceMode: 'fixed', theme: legacy } : defaults);
         const fixedTheme = hasTheme(source.theme) ? source.theme : defaults.theme;
-        const lightTheme = hasTheme(source.systemLightTheme) && themeClasses[source.systemLightTheme][0] === 'light' ? source.systemLightTheme : defaults.systemLightTheme;
-        const darkTheme = hasTheme(source.systemDarkTheme) && themeClasses[source.systemDarkTheme][0] === 'dark' ? source.systemDarkTheme : defaults.systemDarkTheme;
+        const lightTheme = hasTheme(source.systemLightTheme) ? source.systemLightTheme : defaults.systemLightTheme;
+        const darkTheme = hasTheme(source.systemDarkTheme) ? source.systemDarkTheme : defaults.systemDarkTheme;
         const mode = source.appearanceMode === 'fixed' ? 'fixed' : 'system';
         const prefersDark = matchMedia('(prefers-color-scheme: dark)').matches;
         const resolved = mode === 'fixed' ? fixedTheme : (prefersDark ? darkTheme : lightTheme);
@@ -59,7 +59,7 @@
         document.documentElement.style.colorScheme = themeClasses[resolved][0];
         if (localStorage.getItem('high-contrast') === 'true') document.documentElement.classList.add('high-contrast');
       } catch {
-        window.__paneBootstrapThemeClasses = ['light', 'light-rounded'];
+        window.__paneBootstrapThemeClasses = ['light', 'folio'];
         document.documentElement.classList.add(...window.__paneBootstrapThemeClasses);
         document.documentElement.style.colorScheme = 'light';
         if (localStorage.getItem('high-contrast') === 'true') document.documentElement.classList.add('high-contrast');
@@ -68,7 +68,7 @@
   </head>
   <body>
     <script>
-      const cls = window.__paneBootstrapThemeClasses || ['light', 'light-rounded'];
+      const cls = window.__paneBootstrapThemeClasses || ['light', 'folio'];
       document.body.classList.add(...cls);
       if (localStorage.getItem('high-contrast') === 'true') document.body.classList.add('high-contrast');
     </script>

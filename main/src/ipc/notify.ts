@@ -114,7 +114,10 @@ const windowSizeSchema = boundary.object({ width: boundary.number, height: bound
 const panelAgentSchema = boundary.object({ agentType: boundary.optional(boundary.string) });
 
 /** What Notify reads from the app's services: the config, Panes by id, and the main window. */
-type NotifyServices = Pick<AppServices, 'configManager' | 'getMainWindow'> & { sessionManager: Pick<AppServices['sessionManager'], 'getSession'> };
+type NotifyServices = Pick<AppServices, 'configManager' | 'getMainWindow'> & {
+  sessionManager: Pick<AppServices['sessionManager'], 'getSession'>;
+  databaseService?: Pick<AppServices['databaseService'], 'getAllProjects'>;
+};
 
 export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyServices, commandRegistry: PaneCommandRegistry): NotifyService {
   const notify = new NotifyService({
@@ -160,6 +163,8 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
       });
     },
     // A connected desktop ignores the host's pane:focus-requested; it opens Panes as pane:// links.
+    wslDistros: () => (services.databaseService?.getAllProjects() ?? [])
+      .flatMap(project => project.wsl_enabled && project.wsl_distribution ? [project.wsl_distribution] : []),
     showHostPane: (paneId, panelId) => {
       const window = services.getMainWindow();
       const target: PaneLinkTarget = panelId ? { kind: 'pane', paneId, panelId } : { kind: 'pane', paneId };

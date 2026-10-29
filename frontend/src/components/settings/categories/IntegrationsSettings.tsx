@@ -10,6 +10,7 @@ import type { AppConfig } from '../../../types/config';
 import type { VoiceTranscriptionMode } from '../../../../../shared/types/voiceTranscription';
 import type { ApnsCredentialConfig, SharedCredentialId } from '../../../../../shared/types/sharedCredentials';
 import { formatDistanceToNow } from '../../../utils/timestampUtils';
+import { VOICE_KEY_FIELDS, voiceKeyProblem, type VoiceKeyCheck, type VoiceKeyField } from '../../../../../shared/voice/voiceKeys';
 
 const SHARING_DOCS_URL = 'https://github.com/greenfield-inc/Pane/blob/main/docs/SHARED_CREDENTIALS.md';
 const DEFAULT_APNS_TOPIC = 'com.dcouple.pane.mobile';
@@ -48,6 +49,8 @@ export function IntegrationsSettings({ persistence, onDirtyChange }: Integration
   };
   const persistedKey = JSON.stringify(persisted);
   const [draft, setDraft] = useState(persisted);
+  /** Per key: why it can't be saved, or what Deepgram said about the saved one. Cleared when the key is edited. */
+  const [keyNotes, setKeyNotes] = useState<Partial<Record<VoiceKeyField, VoiceKeyCheck | { result: 'checking'; message: string }>>>({});
   const persistedApnsKey = JSON.stringify(config.apns ?? EMPTY_APNS);
   const [apnsDraft, setApnsDraft] = useState<ApnsCredentialConfig>(config.apns ?? EMPTY_APNS);
   const apnsDirty = JSON.stringify(apnsDraft) !== persistedApnsKey;
@@ -61,14 +64,37 @@ export function IntegrationsSettings({ persistence, onDirtyChange }: Integration
   useEffect(() => () => onDirtyChange(false), [onDirtyChange]);
 
   const apply = async () => {
+    const problems: typeof keyNotes = {};
+    for (const field of VOICE_KEY_FIELDS) {
+      const problem = draft[field].trim() ? voiceKeyProblem(field, draft[field].trim()) : null;
+      if (problem) problems[field] = { result: 'rejected', message: `${problem.message} ${problem.next}` };
+    }
+    setKeyNotes(problems);
+    if (Object.keys(problems).length > 0) {
+      persistence.reportSaveError('voice-transcription', 'Nothing was saved: fix the key marked below.');
+      return;
+    }
+    const deepgramApiKey = draft.deepgramApiKey.trim();
     const saved = await persistence.saveConfig('voice-transcription', {
       falApiKey: draft.falApiKey.trim() || undefined,
       openRouterApiKey: draft.openRouterApiKey.trim() || undefined,
-      deepgramApiKey: draft.deepgramApiKey.trim() || undefined,
+      deepgramApiKey: deepgramApiKey || undefined,
       voiceTranscriptionMode: draft.voiceTranscriptionMode,
     });
     if (saved && !apnsDirty) onDirtyChange(false);
+    if (!saved || !deepgramApiKey || deepgramApiKey === persisted.deepgramApiKey) return;
+    setKeyNotes({ deepgramApiKey: { result: 'checking', message: 'Saved. Checking the key with Deepgram…' } });
+    const check = await window.electronAPI.config.checkDeepgramKey(deepgramApiKey)
+      .catch((error: Error): VoiceKeyCheck => ({ result: 'unchecked', message: `Saved, but Pane couldn't check the key: ${error.message}` }));
+    setKeyNotes({ deepgramApiKey: check });
   };
+
+  const editKey = (field: VoiceKeyField, value: string) => {
+    setDraft((current) => ({ ...current, [field]: value }));
+    setKeyNotes((current) => ({ ...current, [field]: undefined }));
+  };
+  const keyError = (field: VoiceKeyField) => (keyNotes[field]?.result === 'rejected' ? keyNotes[field]?.message : undefined);
+  const keyHelper = (field: VoiceKeyField) => (keyNotes[field] && keyNotes[field]?.result !== 'rejected' ? keyNotes[field]?.message : source(field));
 
   // Only a saved key has a source; an edit in progress doesn't.
   const source = (id: 'falApiKey' | 'openRouterApiKey' | 'deepgramApiKey') => keySource(config, id, draft[id].length > 0 && draft[id] === persisted[id]);
@@ -89,25 +115,28 @@ export function IntegrationsSettings({ persistence, onDirtyChange }: Integration
               label="Fal API key"
               value={draft.falApiKey}
               placeholder="fal_..."
-              helperText={source('falApiKey')}
-              onChange={(value) => setDraft((current) => ({ ...current, falApiKey: value }))}
-              onRemove={() => setDraft((current) => ({ ...current, falApiKey: '' }))}
+              helperText={keyHelper('falApiKey')}
+              error={keyError('falApiKey')}
+              onChange={(value) => editKey('falApiKey', value)}
+              onRemove={() => editKey('falApiKey', '')}
             />
             <SecretField
               label="OpenRouter API key (optional)"
               value={draft.openRouterApiKey}
               placeholder="sk-or-..."
-              helperText={source('openRouterApiKey')}
-              onChange={(value) => setDraft((current) => ({ ...current, openRouterApiKey: value }))}
-              onRemove={() => setDraft((current) => ({ ...current, openRouterApiKey: '' }))}
+              helperText={keyHelper('openRouterApiKey')}
+              error={keyError('openRouterApiKey')}
+              onChange={(value) => editKey('openRouterApiKey', value)}
+              onRemove={() => editKey('openRouterApiKey', '')}
             />
             <SecretField
               label="Deepgram API key"
               value={draft.deepgramApiKey}
               placeholder="dg_..."
-              helperText={source('deepgramApiKey')}
-              onChange={(value) => setDraft((current) => ({ ...current, deepgramApiKey: value }))}
-              onRemove={() => setDraft((current) => ({ ...current, deepgramApiKey: '' }))}
+              helperText={keyHelper('deepgramApiKey')}
+              error={keyError('deepgramApiKey')}
+              onChange={(value) => editKey('deepgramApiKey', value)}
+              onRemove={() => editKey('deepgramApiKey', '')}
             />
             <div className="space-y-2">
               <p className="text-xs font-medium text-text-secondary">Default PWA voice mode</p>

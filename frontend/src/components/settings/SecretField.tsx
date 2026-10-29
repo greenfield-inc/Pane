@@ -8,12 +8,13 @@ interface SecretFieldProps {
   value: string;
   placeholder?: string;
   helperText?: string;
+  error?: string;
   onChange?: (value: string) => void;
   onRemove?: () => void;
   readOnly?: boolean;
 }
 
-export function SecretField({ label, value, placeholder, helperText, onChange, onRemove, readOnly = false }: SecretFieldProps) {
+export function SecretField({ label, value, placeholder, helperText, error, onChange, onRemove, readOnly = false }: SecretFieldProps) {
   const [revealed, setRevealed] = useState(false);
   const [copied, setCopied] = useState(false);
   const configured = value.trim().length > 0;
@@ -78,6 +79,7 @@ export function SecretField({ label, value, placeholder, helperText, onChange, o
           readOnly={readOnly}
           placeholder={configured ? `Replace ${label}` : placeholder}
           helperText={helperText}
+          error={error}
           autoComplete="off"
           fullWidth
         />

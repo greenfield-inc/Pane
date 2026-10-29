@@ -302,6 +302,28 @@ importers:
         specifier: ^5.0.1
         version: 5.0.1(@opentelemetry/api@1.9.1)(@types/node@22.16.5)(vite@8.3.4(@types/node@22.16.5)(esbuild@0.25.7)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.0))
 
+  glasses:
+    dependencies:
+      '@evenrealities/even_hub_sdk':
+        specifier: 0.0.16
+        version: 0.0.16
+      '@evenrealities/pretext':
+        specifier: 0.1.4
+        version: 0.1.4
+    devDependencies:
+      '@evenrealities/evenhub-cli':
+        specifier: 0.2.0
+        version: 0.2.0
+      '@evenrealities/evenhub-simulator':
+        specifier: 0.9.5
+        version: 0.9.5
+      vite:
+        specifier: ^8.3.4
+        version: 8.3.4(@types/node@24.13.3)(esbuild@0.25.7)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.0)
+      vitest:
+        specifier: ^5.0.1
+        version: 5.0.1(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(vite@8.3.4(@types/node@24.13.3)(esbuild@0.25.7)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.0))
+
   main:
     dependencies:
       '@agentclientprotocol/sdk':
@@ -516,6 +538,9 @@ importers:
       expo-task-manager:
         specifier: ~57.0.21
         version: 57.0.21(expo@57.0.23)(react-native@0.86.3(@react-native/metro-config@0.86.3)(@types/react@19.2.18)(react@19.2.3))
+      expo-updates:
+        specifier: ~57.0.26
+        version: 57.0.26(expo-dev-client@57.0.19(expo@57.0.23)(react-native@0.86.3(@react-native/metro-config@0.86.3)(@types/react@19.2.18)(react@19.2.3)))(expo@57.0.23)(react-native@0.86.3(@react-native/metro-config@0.86.3)(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)
       react:
         specifier: 19.2.3
         version: 19.2.3
@@ -1600,6 +1625,58 @@ packages:
     resolution: {integrity: sha512-1+WqvgNMhmlAambTvT3KPtCl/Ibr68VldY2XY40SL1CE0ZXiakFR/cbTspaF5HsnpDMvcYYoJHfl4980NBjGag==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
 
+  '@evenrealities/even_hub_sdk@0.0.16':
+    resolution: {integrity: sha512-8/qMR4W3vna6xAM5/dFDmKoTR98D7Vo3TDBrtS0JgdUSvBVyAnUXuhODI3H587fI2TfLbp4T+FNT3EdkB3+Big==}
+    engines: {node: ^20.0.0 || >=22.0.0}
+
+  '@evenrealities/evenhub-cli@0.2.0':
+    resolution: {integrity: sha512-OCjgPmq49LiVXX417P4Jm0z8Uz+53536UCj20HMC32BLTYlwmJrkoaGsCgEObv87+HIQYKtlLZ7UW4/Qs66RMw==}
+    engines: {node: ^20.17.0 || ^22.13.0 || >=23.5.0}
+    hasBin: true
+
+  '@evenrealities/evenhub-simulator@0.9.5':
+    resolution: {integrity: sha512-pGqNoog8BI9qatQQOwqgaz+jWHvktjIcrCIHkWNrwGpN8oCZIkz9oIFdtstpk6CG/QiO3NhFuaVpInBYb3KhfQ==}
+    hasBin: true
+
+  '@evenrealities/pretext@0.1.4':
+    resolution: {integrity: sha512-gSZk/uxIhZW3geOM5bP1IS0s1sg7cA7KLLpBDgH9T1+ZNHMIFTMcgQN1qw4+/Xi/rcxsDsWZ7UZndIS/s4fRcA==}
+
+  '@evenrealities/sim-darwin-arm64@0.9.5':
+    resolution: {integrity: sha512-BDEFOrECb/jyocMuw5LbVew/KgBElgtLAQgNngcvOf6/Rx6GLadeLDj3LMKLbbhIYHLmM5cx1HX8AgSjon3kvg==}
+    cpu: [arm64]
+    os: [darwin]
+    hasBin: true
+
+  '@evenrealities/sim-darwin-x64@0.9.5':
+    resolution: {integrity: sha512-fZ+FcZUZ0kQqY56vmUI9blPpNEQ1bGmdyrvAz/ibxpXd4dtD8ej4qjGKPl1ZI2+OSTy7b4oS512o/day+Cp+FA==}
+    cpu: [x64]
+    os: [darwin]
+    hasBin: true
+
+  '@evenrealities/sim-linux-arm64@0.9.5':
+    resolution: {integrity: sha512-HAYPupYYQ75d/+fevQtTk6ZNxNuU5/ZFJ/GUmd6mhIwsiiCAUr1rXyO1wJJwP59gQut/Y62rEdh950yzP+5oag==}
+    cpu: [arm64]
+    os: [linux]
+    hasBin: true
+
+  '@evenrealities/sim-linux-x64@0.9.5':
+    resolution: {integrity: sha512-N2Aoye8an5CWew7WaVREFXOtdt4cxta9pzpZq0ojd+IInGjBvTilqepPn5PJay8w3Al5m25G5nz+JT/KepTzgg==}
+    cpu: [x64]
+    os: [linux]
+    hasBin: true
+
+  '@evenrealities/sim-win32-arm64@0.9.5':
+    resolution: {integrity: sha512-lXCRa9cFz9YXzWhLlct3Qk7WpolUl/zbWZFfZYMYCaCnDT1i5ME1Obs4eQv65e/IPjNL7nu67Ff4Dwp1WCrG8g==}
+    cpu: [arm64]
+    os: [win32]
+    hasBin: true
+
+  '@evenrealities/sim-win32-x64@0.9.5':
+    resolution: {integrity: sha512-AwN4O1tOxFr+VwXKZjCHb353HyJOSHTlagnsgoOehabNY1p3GmlpUfwD2R30uSCKUNO4gEzEKtbkSCbncqcZ4g==}
+    cpu: [x64]
+    os: [win32]
+    hasBin: true
+
   '@excalidraw/excalidraw@0.18.1':
     resolution: {integrity: sha512-6i5Gt7IDTOH//qa0Z315Ly5iVRhjWpu2whrlQFqkuwrkKUWgRsMk0P5qdE7bpyDpai7jeLeWYkyj1eVAfni1lw==}
     peerDependencies:
@@ -2333,17 +2410,8 @@ packages:
   '@jridgewell/source-map@0.3.11':
     resolution: {integrity: sha512-ZMp1V8ZFcPG5dIWnQLr3NSI1MiCU7UETdS/A0G8V/XWHvJv3ZsFqutJn1Y5RPmAPX6F3BiE397OqveU/9NCuIA==}
 
-  '@jridgewell/sourcemap-codec@1.5.4':
-    resolution: {integrity: sha512-VT2+G1VQs/9oz078bLrYbecdZKs912zQlkelYpuf+SXF+QvZDYJlbx/LSx+meSAwdDFnF8FVXW92AVjjkVmgFw==}
-
-  '@jridgewell/sourcemap-codec@1.5.5':
-    resolution: {integrity: sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og==}
-
   '@jridgewell/sourcemap-codec@1.6.0':
     resolution: {integrity: sha512-T7jf+5zgsZHwNJ4lvQ7/aezbyk0nNX+zJVWpmHA7VYsEx7a7qr5Rg5IbtJFqkgze5Y2sruq1RUY8Q837Od7iFw==}
-
-  '@jridgewell/trace-mapping@0.3.29':
-    resolution: {integrity: sha512-uw6guiW/gcAGPDhLmd77/6lW8QLeiV5RUTsAX46Db6oLhGaVj4lhnPwb184s1bkc8kdVg/+h988dro8GRDpmYQ==}
 
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
@@ -5711,6 +5779,9 @@ packages:
       dmg-builder: 26.7.0
       electron-builder-squirrel-windows: 26.7.0
 
+  arg@4.1.3:
+    resolution: {integrity: sha512-58S9QDqG0Xx27YwPSt9fJxivjYl432YCwfDMfZ+71RAqUrZef7LrKQZ3LHLOwCS4FLNBplP533Zx895SeOCHvA==}
+
   arg@5.0.2:
     resolution: {integrity: sha512-PYjyFOLKQ9y57JvQ6QLo8dAgNqswh8M1RMJYdQduT6xbWSgK36P/Z/v+p888pM69jMMfS8Xd8F6I1kQ/I9HUGg==}
 
@@ -7113,6 +7184,9 @@ packages:
       expo: '*'
       react-native: '*'
 
+  expo-eas-client@57.0.5:
+    resolution: {integrity: sha512-7Ut6TbaYZDURHZkhKRGZdLgq4EE7sHc6VrKAcU0Pzj1Bd+Nsb/XseViYuch2+X/+RvQMlzu8Eyf4YvBVpDCivQ==}
+
   expo-file-system@57.0.7:
     resolution: {integrity: sha512-1vkZRadOsIputFDBcclqBa1pO3iXOO6iIsdqJipQWw4V5TSnWgmRTuOF7ro8IzrVue+PHbum++KCG3Tawem4cg==}
     peerDependencies:
@@ -7245,6 +7319,9 @@ packages:
       react: '*'
       react-native: '*'
 
+  expo-structured-headers@57.0.1:
+    resolution: {integrity: sha512-5VwmitVr2J716pOuHXWmEnHbZhZg63DBOZKH5tj0SR8Sps/3jSAf9wf9+UGTKcKgAxGf1PPwQ0lAQ2bG3RwjAg==}
+
   expo-symbols@57.0.3:
     resolution: {integrity: sha512-uuK5yHLVR7kExUCrO/ItBvp/kp1maQ9Nkb6KvNy5ZUQnN0NMKwuhJ4GvbfS9N3ACmvCjTT4gKvg4yH5UuKIYNA==}
     peerDependencies:
@@ -7273,6 +7350,18 @@ packages:
     resolution: {integrity: sha512-x3SA5toiHZEkW+5oeNdUM1Rvt6M3ExegQsSwS3Z1+S9gn9utGYTGBkb8MBQivhjIZiRlQYDIhauxA8kySQEWtQ==}
     peerDependencies:
       expo: '*'
+
+  expo-updates@57.0.26:
+    resolution: {integrity: sha512-Dloc9rkoR22qx2HtxzDHOZQcU5rABqsvl8QWA0gFx8N6mHicTdbaxuQ6QCK/wp5fXAK6DQnfzTiQtvJ5IfMTew==}
+    hasBin: true
+    peerDependencies:
+      expo: '*'
+      expo-dev-client: '*'
+      react: '*'
+      react-native: '*'
+    peerDependenciesMeta:
+      expo-dev-client:
+        optional: true
 
   expo@57.0.23:
     resolution: {integrity: sha512-/aBLZFTD7+BNHWV/q5XbNRFqMhW/CrHsYeq8CcS/iGz6lJHYwEMm4XFcdoaeliuMdo6ZjNrsTHkBIdGB8VMHTg==}
@@ -9457,10 +9546,6 @@ packages:
   postcss-value-parser@4.2.0:
     resolution: {integrity: sha512-1NNCs6uurfkVbeXG4S8JFT9t19m45ICnif8zWLd5oPSZ50QnwMfK+H3jv408d4jw/7Bttv5axS5IiHoLaVNHeQ==}
 
-  postcss@8.5.28:
-    resolution: {integrity: sha512-RRuzqDtt5Y9h3quz5hWhK+TPnsmVs6WwSU6LkJMeY4HstUEDuYTG8UJSdawMRzmzAtV+KEoG8N3Qg2qLy5vM/A==}
-    engines: {node: ^10 || ^12 || >=14}
-
   postcss@8.5.30:
     resolution: {integrity: sha512-zkd+e9S1AQHhmaBKye9zlFHWjOwVgqXl1q3ECYy8561K7qxR2cREf/STLskulBFd78k6AOFeA+ff1TtEzk9bAA==}
     engines: {node: ^10 || ^12 || >=14}
@@ -11469,7 +11554,7 @@ snapshots:
   '@ampproject/remapping@2.3.0':
     dependencies:
       '@jridgewell/gen-mapping': 0.3.12
-      '@jridgewell/trace-mapping': 0.3.29
+      '@jridgewell/trace-mapping': 0.3.31
 
   '@antfu/install-pkg@1.1.0':
     dependencies:
@@ -11654,7 +11739,7 @@ snapshots:
       '@babel/parser': 7.29.8
       '@babel/types': 7.29.8
       '@jridgewell/gen-mapping': 0.3.12
-      '@jridgewell/trace-mapping': 0.3.29
+      '@jridgewell/trace-mapping': 0.3.31
       jsesc: 3.1.0
 
   '@babel/helper-annotate-as-pure@7.29.7':
@@ -12277,7 +12362,7 @@ snapshots:
       env-paths: 3.0.0
       graceful-fs: 4.2.11
       progress: 2.0.3
-      semver: 7.7.4
+      semver: 7.8.5
       sumchecker: 3.0.1
     optionalDependencies:
       undici: 7.28.0
@@ -12549,6 +12634,39 @@ snapshots:
       '@eslint/core': 0.15.1
       levn: 0.4.1
 
+  '@evenrealities/even_hub_sdk@0.0.16': {}
+
+  '@evenrealities/evenhub-cli@0.2.0': {}
+
+  '@evenrealities/evenhub-simulator@0.9.5':
+    optionalDependencies:
+      '@evenrealities/sim-darwin-arm64': 0.9.5
+      '@evenrealities/sim-darwin-x64': 0.9.5
+      '@evenrealities/sim-linux-arm64': 0.9.5
+      '@evenrealities/sim-linux-x64': 0.9.5
+      '@evenrealities/sim-win32-arm64': 0.9.5
+      '@evenrealities/sim-win32-x64': 0.9.5
+
+  '@evenrealities/pretext@0.1.4': {}
+
+  '@evenrealities/sim-darwin-arm64@0.9.5':
+    optional: true
+
+  '@evenrealities/sim-darwin-x64@0.9.5':
+    optional: true
+
+  '@evenrealities/sim-linux-arm64@0.9.5':
+    optional: true
+
+  '@evenrealities/sim-linux-x64@0.9.5':
+    optional: true
+
+  '@evenrealities/sim-win32-arm64@0.9.5':
+    optional: true
+
+  '@evenrealities/sim-win32-x64@0.9.5':
+    optional: true
+
   '@excalidraw/excalidraw@0.18.1(@types/react-dom@19.1.6(@types/react@19.1.8))(@types/react@19.1.8)(immer@10.1.3)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)':
     dependencies:
       '@braintree/sanitize-url': 6.0.2
@@ -12641,7 +12759,7 @@ snapshots:
       ci-info: 3.9.0
       compression: 1.8.2
       connect: 3.7.0
-      debug: 4.4.1
+      debug: 4.4.3
       dnssd-advertise: 1.1.6
       expo: 57.0.23(@babel/core@7.29.7)(@expo/metro-runtime@57.0.15)(expo-router@57.0.21)(react-dom@19.1.0(react@19.2.3))(react-native-webview@13.16.1(react-native@0.86.3(@react-native/metro-config@0.86.3)(@types/react@19.2.18)(react@19.2.3))(react@19.2.3))(react-native-worklets@0.10.1(@babel/core@7.29.7)(@react-native/metro-config@0.86.3)(react-native@0.86.3(@react-native/metro-config@0.86.3)(@types/react@19.2.18)(react@19.2.3))(react@19.2.3))(react-native@0.86.3(@react-native/metro-config@0.86.3)(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)(typescript@6.0.3)
       expo-server: 57.0.3
@@ -12659,7 +12777,7 @@ snapshots:
       prompts: 2.4.2
       resolve-from: 5.0.0
       sandbox-cli-detector: 0.2.0
-      semver: 7.7.4
+      semver: 7.8.5
       send: 0.19.2
       slugify: 1.6.9
       stacktrace-parser: 0.1.11
@@ -12714,10 +12832,10 @@ snapshots:
       '@expo/require-utils': 57.0.5(typescript@6.0.3)
       '@expo/sdk-runtime-versions': 1.0.0
       chalk: 4.1.2
-      debug: 4.4.1
+      debug: 4.4.3
       getenv: 2.0.0
       glob: 13.0.6
-      semver: 7.7.4
+      semver: 7.8.5
       slugify: 1.6.9
       xcode: 3.0.1
       xml2js: 0.6.0
@@ -12755,7 +12873,7 @@ snapshots:
       getenv: 2.0.0
       glob: 13.0.6
       resolve-workspace-root: 2.0.1
-      semver: 7.7.4
+      semver: 7.8.5
       slugify: 1.6.9
     transitivePeerDependencies:
       - supports-color
@@ -12797,13 +12915,13 @@ snapshots:
       '@expo/spawn-async': 1.8.0
       arg: 5.0.2
       chalk: 4.1.2
-      debug: 4.4.1
+      debug: 4.4.3
       getenv: 2.0.0
       glob: 13.0.6
       ignore: 5.3.2
       minimatch: 10.2.6
       resolve-from: 5.0.0
-      semver: 7.7.4
+      semver: 7.8.5
     transitivePeerDependencies:
       - supports-color
 
@@ -12815,7 +12933,7 @@ snapshots:
       getenv: 2.0.0
       jimp-compact: 0.16.1
       parse-png: 2.1.0
-      semver: 7.7.4
+      semver: 7.8.5
     transitivePeerDependencies:
       - supports-color
       - typescript
@@ -12888,14 +13006,14 @@ snapshots:
       '@jridgewell/sourcemap-codec': 1.6.0
       browserslist: 4.25.1
       chalk: 4.1.2
-      debug: 4.4.1
+      debug: 4.4.3
       getenv: 2.0.0
       glob: 13.0.6
       hermes-parser: 0.36.1
       jsc-safe-url: 0.2.4
       lightningcss: 1.33.0
       picomatch: 4.0.7
-      postcss: 8.5.28
+      postcss: 8.5.30
       resolve-from: 5.0.0
     optionalDependencies:
       expo: 57.0.23(@babel/core@7.29.7)(@expo/metro-runtime@57.0.15)(expo-router@57.0.21)(react-dom@19.1.0(react@19.2.3))(react-native-webview@13.16.1(react-native@0.86.3(@react-native/metro-config@0.86.3)(@types/react@19.2.18)(react@19.2.3))(react@19.2.3))(react-native-worklets@0.10.1(@babel/core@7.29.7)(@react-native/metro-config@0.86.3)(react-native@0.86.3(@react-native/metro-config@0.86.3)(@types/react@19.2.18)(react@19.2.3))(react@19.2.3))(react-native@0.86.3(@react-native/metro-config@0.86.3)(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)(typescript@6.0.3)
@@ -13009,7 +13127,7 @@ snapshots:
       debug: 4.4.3
       expo-modules-autolinking: 57.0.13(typescript@6.0.3)
       resolve-from: 5.0.0
-      semver: 7.7.4
+      semver: 7.8.5
     transitivePeerDependencies:
       - supports-color
       - typescript
@@ -13650,8 +13768,8 @@ snapshots:
 
   '@jridgewell/gen-mapping@0.3.12':
     dependencies:
-      '@jridgewell/sourcemap-codec': 1.5.5
-      '@jridgewell/trace-mapping': 0.3.29
+      '@jridgewell/sourcemap-codec': 1.6.0
+      '@jridgewell/trace-mapping': 0.3.31
 
   '@jridgewell/gen-mapping@0.3.13':
     dependencies:
@@ -13661,7 +13779,7 @@ snapshots:
   '@jridgewell/remapping@2.3.5':
     dependencies:
       '@jridgewell/gen-mapping': 0.3.12
-      '@jridgewell/trace-mapping': 0.3.29
+      '@jridgewell/trace-mapping': 0.3.31
 
   '@jridgewell/resolve-uri@3.1.2': {}
 
@@ -13670,16 +13788,7 @@ snapshots:
       '@jridgewell/gen-mapping': 0.3.12
       '@jridgewell/trace-mapping': 0.3.31
 
-  '@jridgewell/sourcemap-codec@1.5.4': {}
-
-  '@jridgewell/sourcemap-codec@1.5.5': {}
-
   '@jridgewell/sourcemap-codec@1.6.0': {}
-
-  '@jridgewell/trace-mapping@0.3.29':
-    dependencies:
-      '@jridgewell/resolve-uri': 3.1.2
-      '@jridgewell/sourcemap-codec': 1.5.5
 
   '@jridgewell/trace-mapping@0.3.31':
     dependencies:
@@ -13756,7 +13865,7 @@ snapshots:
 
   '@modelcontextprotocol/core@2.0.0':
     dependencies:
-      zod: 4.4.3
+      zod: 4.6.7
 
   '@modelcontextprotocol/sdk@1.16.0':
     dependencies:
@@ -15923,12 +16032,12 @@ snapshots:
   '@react-native/community-cli-plugin@0.86.3(@react-native/metro-config@0.86.3)':
     dependencies:
       '@react-native/dev-middleware': 0.86.3
-      debug: 4.4.1
+      debug: 4.4.3
       invariant: 2.2.4
       metro: 0.84.6
       metro-config: 0.84.6
       metro-core: 0.84.6
-      semver: 7.7.4
+      semver: 7.8.5
     optionalDependencies:
       '@react-native/metro-config': 0.86.3
     transitivePeerDependencies:
@@ -16786,6 +16895,15 @@ snapshots:
     optionalDependencies:
       vite: 8.3.4(@types/node@22.16.5)(esbuild@0.25.7)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.0)
 
+  '@vitest/mocker@5.0.1(vite@8.3.4(@types/node@24.13.3)(esbuild@0.25.7)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.0))':
+    dependencies:
+      '@jridgewell/trace-mapping': 0.3.31
+      '@vitest/spy': 5.0.1
+      estree-walker: 3.0.3
+      magic-string: 1.4.1
+    optionalDependencies:
+      vite: 8.3.4(@types/node@24.13.3)(esbuild@0.25.7)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.0)
+
   '@vitest/pretty-format@2.1.9':
     dependencies:
       tinyrainbow: 1.2.0
@@ -17050,6 +17168,8 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+  arg@4.1.3: {}
+
   arg@5.0.2: {}
 
   argparse@2.0.1: {}
@@ -17260,7 +17380,7 @@ snapshots:
       babel-plugin-react-native-web: 0.21.2
       babel-plugin-syntax-hermes-parser: 0.36.1
       babel-plugin-transform-flow-enums: 0.0.2(@babel/core@7.29.7)
-      debug: 4.4.1
+      debug: 4.4.3
       react-refresh: 0.14.2
     optionalDependencies:
       '@babel/runtime': 7.27.6
@@ -18724,6 +18844,8 @@ snapshots:
       expo-dev-menu-interface: 57.0.0(expo@57.0.23)
       react-native: 0.86.3(@react-native/metro-config@0.86.3)(@types/react@19.2.18)(react@19.2.3)
 
+  expo-eas-client@57.0.5: {}
+
   expo-file-system@57.0.7(expo@57.0.23)(react-native@0.86.3(@react-native/metro-config@0.86.3)(@types/react@19.2.18)(react@19.2.3)):
     dependencies:
       expo: 57.0.23(@babel/core@7.29.7)(@expo/metro-runtime@57.0.15)(expo-router@57.0.21)(react-dom@19.1.0(react@19.2.3))(react-native-webview@13.16.1(react-native@0.86.3(@react-native/metro-config@0.86.3)(@types/react@19.2.18)(react@19.2.3))(react@19.2.3))(react-native-worklets@0.10.1(@babel/core@7.29.7)(@react-native/metro-config@0.86.3)(react-native@0.86.3(@react-native/metro-config@0.86.3)(@types/react@19.2.18)(react@19.2.3))(react@19.2.3))(react-native@0.86.3(@react-native/metro-config@0.86.3)(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)(typescript@6.0.3)
@@ -18884,6 +19006,8 @@ snapshots:
       react: 19.2.3
       react-native: 0.86.3(@react-native/metro-config@0.86.3)(@types/react@19.2.18)(react@19.2.3)
 
+  expo-structured-headers@57.0.1: {}
+
   expo-symbols@57.0.3(expo-font@57.0.4)(expo@57.0.23)(react-native@0.86.3(@react-native/metro-config@0.86.3)(@types/react@19.2.18)(react@19.2.3))(react@19.2.3):
     dependencies:
       '@expo-google-fonts/material-symbols': 0.4.48
@@ -18911,6 +19035,31 @@ snapshots:
   expo-updates-interface@57.0.2(expo@57.0.23):
     dependencies:
       expo: 57.0.23(@babel/core@7.29.7)(@expo/metro-runtime@57.0.15)(expo-router@57.0.21)(react-dom@19.1.0(react@19.2.3))(react-native-webview@13.16.1(react-native@0.86.3(@react-native/metro-config@0.86.3)(@types/react@19.2.18)(react@19.2.3))(react@19.2.3))(react-native-worklets@0.10.1(@babel/core@7.29.7)(@react-native/metro-config@0.86.3)(react-native@0.86.3(@react-native/metro-config@0.86.3)(@types/react@19.2.18)(react@19.2.3))(react@19.2.3))(react-native@0.86.3(@react-native/metro-config@0.86.3)(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)(typescript@6.0.3)
+
+  expo-updates@57.0.26(expo-dev-client@57.0.19(expo@57.0.23)(react-native@0.86.3(@react-native/metro-config@0.86.3)(@types/react@19.2.18)(react@19.2.3)))(expo@57.0.23)(react-native@0.86.3(@react-native/metro-config@0.86.3)(@types/react@19.2.18)(react@19.2.3))(react@19.2.3):
+    dependencies:
+      '@expo/code-signing-certificates': 0.0.6
+      '@expo/plist': 0.8.1
+      '@expo/spawn-async': 1.8.0
+      arg: 4.1.3
+      chalk: 4.1.2
+      debug: 4.4.3
+      expo: 57.0.23(@babel/core@7.29.7)(@expo/metro-runtime@57.0.15)(expo-router@57.0.21)(react-dom@19.1.0(react@19.2.3))(react-native-webview@13.16.1(react-native@0.86.3(@react-native/metro-config@0.86.3)(@types/react@19.2.18)(react@19.2.3))(react@19.2.3))(react-native-worklets@0.10.1(@babel/core@7.29.7)(@react-native/metro-config@0.86.3)(react-native@0.86.3(@react-native/metro-config@0.86.3)(@types/react@19.2.18)(react@19.2.3))(react@19.2.3))(react-native@0.86.3(@react-native/metro-config@0.86.3)(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)(typescript@6.0.3)
+      expo-eas-client: 57.0.5
+      expo-manifests: 57.0.2(expo@57.0.23)
+      expo-structured-headers: 57.0.1
+      expo-updates-interface: 57.0.2(expo@57.0.23)
+      getenv: 2.0.0
+      glob: 13.0.6
+      ignore: 5.3.2
+      nullthrows: 1.1.1
+      react: 19.2.3
+      react-native: 0.86.3(@react-native/metro-config@0.86.3)(@types/react@19.2.18)(react@19.2.3)
+      resolve-from: 5.0.0
+    optionalDependencies:
+      expo-dev-client: 57.0.19(expo@57.0.23)(react-native@0.86.3(@react-native/metro-config@0.86.3)(@types/react@19.2.18)(react@19.2.3))
+    transitivePeerDependencies:
+      - supports-color
 
   expo@57.0.23(@babel/core@7.29.7)(@expo/metro-runtime@57.0.15)(expo-router@57.0.21)(react-dom@19.1.0(react@19.2.3))(react-native-webview@13.16.1(react-native@0.86.3(@react-native/metro-config@0.86.3)(@types/react@19.2.18)(react@19.2.3))(react@19.2.3))(react-native-worklets@0.10.1(@babel/core@7.29.7)(@react-native/metro-config@0.86.3)(react-native@0.86.3(@react-native/metro-config@0.86.3)(@types/react@19.2.18)(react@19.2.3))(react@19.2.3))(react-native@0.86.3(@react-native/metro-config@0.86.3)(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)(typescript@6.0.3):
     dependencies:
@@ -19762,7 +19911,7 @@ snapshots:
 
   istanbul-lib-source-maps@5.0.6:
     dependencies:
-      '@jridgewell/trace-mapping': 0.3.29
+      '@jridgewell/trace-mapping': 0.3.31
       debug: 4.4.3
       istanbul-lib-coverage: 3.2.2
     transitivePeerDependencies:
@@ -20118,7 +20267,7 @@ snapshots:
 
   magic-string@0.30.17:
     dependencies:
-      '@jridgewell/sourcemap-codec': 1.5.4
+      '@jridgewell/sourcemap-codec': 1.6.0
 
   magic-string@0.30.21:
     dependencies:
@@ -20132,7 +20281,7 @@ snapshots:
     dependencies:
       '@babel/parser': 7.28.0
       '@babel/types': 7.28.1
-      source-map-js: 1.2.1
+      source-map-js: 1.2.2
 
   magicast@0.5.4:
     dependencies:
@@ -21081,14 +21230,14 @@ snapshots:
 
   node-abi@4.33.0:
     dependencies:
-      semver: 7.7.4
+      semver: 7.8.5
 
   node-addon-api@1.7.2:
     optional: true
 
   node-api-version@0.2.1:
     dependencies:
-      semver: 7.7.4
+      semver: 7.8.5
 
   node-forge@1.4.0: {}
 
@@ -21104,7 +21253,7 @@ snapshots:
       graceful-fs: 4.2.11
       nopt: 9.0.0
       proc-log: 6.1.0
-      semver: 7.7.4
+      semver: 7.8.5
       tar: 7.5.21
       tinyglobby: 0.2.17
       undici: 6.27.0
@@ -21130,7 +21279,7 @@ snapshots:
     dependencies:
       hosted-git-info: 7.0.2
       proc-log: 4.2.0
-      semver: 7.7.4
+      semver: 7.8.5
       validate-npm-package-name: 5.0.1
 
   npm-run-path@2.0.2:
@@ -21604,12 +21753,6 @@ snapshots:
       util-deprecate: 1.0.2
 
   postcss-value-parser@4.2.0: {}
-
-  postcss@8.5.28:
-    dependencies:
-      nanoid: 3.3.19
-      picocolors: 1.1.1
-      source-map-js: 1.2.1
 
   postcss@8.5.30:
     dependencies:
@@ -22190,7 +22333,7 @@ snapshots:
 
   read-binary-file-arch@1.0.6:
     dependencies:
-      debug: 4.4.1
+      debug: 4.4.3
     transitivePeerDependencies:
       - supports-color
 
@@ -22502,7 +22645,7 @@ snapshots:
     dependencies:
       chokidar: 3.6.0
       immutable: 4.3.9
-      source-map-js: 1.2.1
+      source-map-js: 1.2.2
 
   sax@1.1.4: {}
 
@@ -22741,7 +22884,7 @@ snapshots:
 
   simple-update-notifier@2.0.0:
     dependencies:
-      semver: 7.7.4
+      semver: 7.8.5
 
   sisteransi@1.0.5: {}
 
@@ -23513,7 +23656,7 @@ snapshots:
   vite@5.4.19(@types/node@22.16.5)(lightningcss@1.33.0)(sass@1.51.0)(terser@5.51.2):
     dependencies:
       esbuild: 0.21.5
-      postcss: 8.5.28
+      postcss: 8.5.30
       rollup: 4.45.1
     optionalDependencies:
       '@types/node': 22.16.5
@@ -23527,7 +23670,7 @@ snapshots:
       esbuild: 0.25.7
       fdir: 6.5.0(picomatch@4.0.7)
       picomatch: 4.0.7
-      postcss: 8.5.28
+      postcss: 8.5.30
       rollup: 4.45.1
       tinyglobby: 0.2.17
     optionalDependencies:
@@ -23548,6 +23691,21 @@ snapshots:
       tinyglobby: 0.2.17
     optionalDependencies:
       '@types/node': 22.16.5
+      esbuild: 0.25.7
+      fsevents: 2.3.3
+      jiti: 2.7.0
+      terser: 5.51.2
+      yaml: 2.9.0
+
+  vite@8.3.4(@types/node@24.13.3)(esbuild@0.25.7)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.0):
+    dependencies:
+      lightningcss: 1.33.0
+      picomatch: 4.0.7
+      postcss: 8.5.30
+      rolldown: 1.2.14
+      tinyglobby: 0.2.17
+    optionalDependencies:
+      '@types/node': 24.13.3
       esbuild: 0.25.7
       fsevents: 2.3.3
       jiti: 2.7.0
@@ -23650,6 +23808,28 @@ snapshots:
     optionalDependencies:
       '@opentelemetry/api': 1.9.1
       '@types/node': 22.16.5
+    transitivePeerDependencies:
+      - msw
+
+  vitest@5.0.1(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(vite@8.3.4(@types/node@24.13.3)(esbuild@0.25.7)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.0)):
+    dependencies:
+      '@types/chai': 5.2.3
+      '@vitest/mocker': 5.0.1(vite@8.3.4(@types/node@24.13.3)(esbuild@0.25.7)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.0))
+      chai: 6.2.2
+      es-module-lexer: 2.3.2
+      expect-type: 1.4.0
+      magic-string: 1.4.1
+      obug: 2.2.1
+      picomatch: 4.0.7
+      std-env: 4.2.0
+      tinybench: 6.1.4
+      tinyexec: 1.3.0
+      tinyglobby: 0.2.17
+      vite: 8.3.4(@types/node@24.13.3)(esbuild@0.25.7)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.0)
+      why-is-node-running: 2.3.0
+    optionalDependencies:
+      '@opentelemetry/api': 1.9.1
+      '@types/node': 24.13.3
     transitivePeerDependencies:
       - msw
 

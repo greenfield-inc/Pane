@@ -808,6 +808,21 @@ export class API {
       return window.electronAPI.remoteDaemon.listTailnetMachines();
     },
 
+    async getGlasses() {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.remoteDaemon.getGlasses();
+    },
+
+    async revokeGlasses(id: string) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.remoteDaemon.revokeGlasses(id);
+    },
+
+    async setGlassesOrigin(update: { origin: string; allowed: boolean }) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.remoteDaemon.setGlassesOrigin(update);
+    },
+
     async saveTailnetMachine(input: { name: string; password?: string }) {
       if (!isElectron()) throw new Error('Electron API not available');
       return window.electronAPI.remoteDaemon.saveTailnetMachine(input);

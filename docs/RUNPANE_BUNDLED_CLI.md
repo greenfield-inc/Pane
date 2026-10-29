@@ -43,7 +43,11 @@ same command to the end of your own `PATH`, so it works in any terminal.
     `PROMPT_COMMAND` hook.
   - **fish:** `--init-command` runs after the user's config and adds a
     `fish_prompt` handler.
-  - **Other shells, Windows, and run scripts:** `PATH` is prepended only.
+  - **Other shells, Windows, run scripts, and `runpane workspace <machine> exec`:**
+    `PATH` is prepended only. For exec this matters most: the command runs
+    with Pane's own environment, which can predate the user `PATH` entry Pane
+    adds at startup, and remote daemon hosts never get that entry (see
+    [Every other terminal](#every-other-terminal)).
   - **WSL terminals:** see below.
 
 ## WSL terminals

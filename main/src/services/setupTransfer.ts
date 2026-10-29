@@ -4,7 +4,7 @@ import type { DetectedProjectConfig } from '../../../shared/types/projectConfig'
 import { PaneError } from '../../../shared/paneError';
 import { AGENT_LAUNCH_PRESETS } from '../../../shared/constants/agentLaunchPresets';
 import { normalizePaneChatAgent } from '../../../shared/types/paneChat';
-import { isLightTheme, isTheme, normalizeAppearance, type DarkTheme, type Theme } from '../../../shared/types/appearance';
+import { isTheme, normalizeAppearance, type Theme } from '../../../shared/types/appearance';
 import { customCommandResumeSchema } from '../../../shared/types/customCommandResume';
 import { boundary, decodeBoundary, BoundaryDecodeError, formatBoundaryPath, type BoundarySchema, type JsonValue } from '../../../shared/validation/boundaryDecoder';
 import {
@@ -379,14 +379,12 @@ function sectionCount(sections: SetupSections, id: SetupSectionId): number {
 
 const booleanField = boundary.optional(boundary.boolean);
 const stringField = boundary.optional(boundary.string);
-function themeSchema<T extends Theme>(accepts: (theme: Theme) => theme is T, expected: string): BoundarySchema<T> {
-  return {
-    decode(current) {
-      const value = boundary.string.decode(current);
-      return isTheme(value) && accepts(value) ? value : current.fail(`expected ${expected}`);
-    },
-  };
-}
+const themeField = boundary.optional<Theme>({
+  decode(current) {
+    const value = boundary.string.decode(current);
+    return isTheme(value) ? value : current.fail('expected a Pane theme');
+  },
+});
 
 const resumeField = boundary.optional(boundary.nullable(customCommandResumeSchema));
 
@@ -433,9 +431,9 @@ const sectionSchemas = {
   })),
   appearance: boundary.object({
     appearanceMode: boundary.optional(boundary.enumeration('system', 'fixed')),
-    theme: boundary.optional(themeSchema((theme): theme is Theme => true, 'a Pane theme')),
-    systemLightTheme: boundary.optional(themeSchema(isLightTheme, 'a light theme')),
-    systemDarkTheme: boundary.optional(themeSchema((theme): theme is DarkTheme => !isLightTheme(theme), 'a dark theme')),
+    theme: themeField,
+    systemLightTheme: themeField,
+    systemDarkTheme: themeField,
     highContrast: booleanField,
     // The range Appearance offers; Electron's zoom throws on zero or less.
     uiScale: boundary.optional(boundary.refine(boundary.number, scale => scale >= 0.8 && scale <= 1.5, 'expected a UI scale from 0.8 to 1.5')),

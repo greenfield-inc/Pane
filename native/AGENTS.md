@@ -21,3 +21,4 @@ This is Expo SDK 57. Check APIs against https://docs.expo.dev/versions/v57.0.0/ 
 - Give interactive elements a `testID` so Maestro flows can find them.
 - Stacks use `fullScreenGestureEnabled` (swipe back from anywhere). Don't put a horizontal gesture on a pushed screen's left edge without checking it still swipes back.
 - Native config goes in `app.json` or config plugins. `ios/` and `android/` are generated and ignored.
+- A native change (a package with native code, a config plugin, native config in `app.json`, `targets/`) bumps `runtimeVersion` in `app.json`, because JavaScript ships over the air only to builds with the same runtime. The `Native Runtime` PR check enforces it.

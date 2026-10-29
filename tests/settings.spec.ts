@@ -37,21 +37,25 @@ test.describe('Settings', () => {
     await page.getByRole('button', { name: 'Appearance', exact: true }).click();
     const mode = page.getByRole('radiogroup', { name: 'Appearance mode' });
     await expect(mode.getByRole('radio', { name: 'System' })).toHaveAttribute('aria-checked', 'true');
-    await expect(page.getByRole('combobox', { name: 'Light palette' })).toHaveText('Light (rounded)');
-    await expect(page.getByRole('combobox', { name: 'Dark palette' })).toHaveText('Dark (sharp)');
+    await expect(page.getByRole('combobox', { name: 'Light palette' })).toHaveText('Folio');
+    await expect(page.getByRole('combobox', { name: 'Dark palette' })).toHaveText('Dusk (OLED)');
     await expect(page.getByText('Active now')).toBeVisible();
 
+    // Both System pickers list every theme, whatever its own base.
     await page.getByRole('combobox', { name: 'Light palette' }).click();
-    await expect(page.getByRole('option', { name: /^Forge/ })).toHaveCount(0);
+    await expect(page.getByRole('option')).toHaveCount(27);
+    await page.getByRole('option', { name: /^Abyss/ }).click();
+    await expect(page.locator('html')).toHaveClass(/\bdark\b.*\babyss\b/);
+    await page.getByRole('combobox', { name: 'Light palette' }).click();
     await page.getByRole('option', { name: /^Folio/ }).click();
     await expect(page.locator('html')).toHaveClass(/folio/);
     await page.getByRole('combobox', { name: 'Dark palette' }).click();
-    await expect(page.getByRole('option', { name: /^Folio/ })).toHaveCount(0);
+    await expect(page.getByRole('option')).toHaveCount(27);
     await page.getByRole('option', { name: /^Forge/ }).click();
     await expect(page.locator('html')).toHaveClass(/folio/);
 
     await mode.getByRole('radio', { name: 'Fixed' }).click();
-    await expect(page.getByRole('combobox', { name: 'Theme' })).toHaveText('Light (rounded)');
+    await expect(page.getByRole('combobox', { name: 'Theme' })).toHaveText('Folio');
     await page.getByRole('combobox', { name: 'Theme' }).click();
     await page.getByRole('option', { name: /^Night Owl(?! \(OLED\))/ }).click();
     await expect(page.locator('html')).toHaveClass(/night-owl/);
@@ -658,4 +662,31 @@ test.describe('Settings', () => {
     await expect(page.getByTestId('settings-page')).toHaveCount(0);
     await expect(page.getByTestId('sidebar')).toBeVisible();
   });
+
+  test('refuses a pasted paragraph as a Deepgram key, then saves a real one and shows what Deepgram said', async ({ page }) => {
+    await bootSettings(page);
+    await page.getByRole('navigation', { name: 'Settings categories' }).getByRole('button', { name: 'Integrations', exact: true }).click();
+    const key = page.getByRole('textbox', { name: 'Deepgram API key' });
+    const apply = page.getByRole('button', { name: 'Apply Voice Settings' });
+    // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
+    const mock = () => page.evaluate(() => (window as typeof window & { __paneTestElectronMock: SettingsMock }).__paneTestElectronMock.getConfigUpdates().length);
+    const updatesBefore = await mock();
+
+    await key.fill('Here is the key Deepgram gave me:\n“dg_0123456789”');
+    await apply.click();
+    await expect(page.getByText("That isn't a Deepgram key: it has spaces or line breaks. Copy only the key from Deepgram and paste it again.")).toBeVisible();
+    await expect(key).toHaveAttribute('aria-invalid', 'true');
+    expect(await mock()).toBe(updatesBefore);
+
+    await key.fill('dg-revoked-0123456789abcdef');
+    await expect(key).toHaveAttribute('aria-invalid', 'false');
+    await apply.click();
+    await expect(page.getByText('Saved, but Deepgram rejected this key (HTTP 401).', { exact: false })).toBeVisible();
+    expect(await mock()).toBe(updatesBefore + 1);
+
+    await key.fill('dg-good-0123456789abcdef');
+    await apply.click();
+    await expect(page.getByText('Deepgram accepted this key.')).toBeVisible();
+  });
 });
+

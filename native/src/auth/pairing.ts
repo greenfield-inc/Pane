@@ -3,6 +3,8 @@ import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
 
 import { createDaemonClient } from '@/daemon/createClient';
 
+import { assertSavableHost } from './hosts';
+
 /**
  * Decodes a pane-remote:// code and proves the token works with one
  * authenticated read. `/health` is unauthenticated, so connecting alone would
@@ -10,6 +12,7 @@ import { createDaemonClient } from '@/daemon/createClient';
  */
 export async function verifyConnectionCode(code: string): Promise<RemotePaneConnectionProfile> {
   const profile = decodeRemoteConnectionCode(code);
+  assertSavableHost(profile);
   const client = createDaemonClient(profile);
   try {
     await client.invoke('sessions:get-all-with-projects');

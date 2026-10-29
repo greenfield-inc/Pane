@@ -7,6 +7,7 @@ import { randomBytes } from 'crypto';
 import type { PaneEventSink } from '../core/eventSink';
 import type { WorkspaceAccessPolicy } from './auth';
 import { createWorkspacePasswordVerifier, type SecretCheck } from './workspacePassword';
+import { GlassesAccess } from './glassesAccess';
 import {
   TAILNET_HTTPS_OFF_REASON,
   TAILSCALE_DNS_ADMIN_URL,
@@ -138,6 +139,7 @@ export function readTailnetSelf(statusJson: string): TailnetSelf {
 
 interface WorkspaceConfigProvider {
   getConfig(): Pick<ReturnType<ConfigManager['getConfig']>, 'deepgramApiKey' | 'remoteDaemon' | 'workspaces'>;
+  updateConfigWith: ConfigManager['updateConfigWith'];
   on(event: 'config-updated', listener: () => void): object;
   off(event: 'config-updated', listener: () => void): object;
 }
@@ -169,6 +171,8 @@ export class PaneWorkspaceHostController {
   private readonly configUpdatedListener = () => {
     void this.sync();
   };
+  /** The Pane glasses app's device tokens and pairing secrets for this listener. */
+  readonly glasses: GlassesAccess;
 
   constructor(
     private readonly commandRegistry: PaneCommandRegistry,
@@ -177,7 +181,9 @@ export class PaneWorkspaceHostController {
     private readonly run: RemoteSetupCommandRunner = runRemoteSetupCommand,
     private readonly isForwardedPort?: (port: number) => boolean,
     private readonly paneVersion?: string,
-  ) {}
+  ) {
+    this.glasses = new GlassesAccess(configManager);
+  }
 
   getEventSink(): PaneEventSink {
     return this.eventSink;
@@ -297,8 +303,11 @@ export class PaneWorkspaceHostController {
       this.tailnet = { tailscale, dnsName: self.dnsName, machineName: self.machineName, ownerLogin: self.ownerLogin };
       this.tailnetLogins = new Set(self.tailnetLogins);
       const port = await this.ensureServer();
+      const handlers = readTailscaleServeHandlers((await this.runServe(tailscale, ['status', '--json'])).stdout);
+      // Glasses tokens are refused while Funnel publishes this port to the internet.
+      this.glasses.setFunnelOn(handlers.funnelOn(self.dnsName, WORKSPACE_HTTPS_PORT));
       // Serve handlers belong to one tailnet profile, so a tailnet switch drops this one.
-      if (this.servedPort !== port || !(await this.hasHandler(tailscale, self.dnsName))) {
+      if (this.servedPort !== port || !handlers.hasHttpsHandler(self.dnsName, WORKSPACE_HTTPS_PORT)) {
         const target = `http://127.0.0.1:${port}/${this.pathSecret}`;
         const serve = await this.runServe(tailscale, ['--bg', `--https=${WORKSPACE_HTTPS_PORT}`, target]);
         if (!serve.ok) {
@@ -341,7 +350,7 @@ export class PaneWorkspaceHostController {
     const address = this.server?.getAddress();
     if (address) return address.port;
     const server = new PaneRemoteHttpApiServer(this.commandRegistry, this.configManager, {
-      workspace: { listenPort: 0, pathSecret: this.pathSecret, access: () => this.getAccessPolicy() },
+      workspace: { listenPort: 0, pathSecret: this.pathSecret, access: () => this.getAccessPolicy(), glasses: this.glasses },
       isForwardedPort: this.isForwardedPort,
       paneVersion: this.paneVersion,
     });
@@ -373,11 +382,6 @@ export class PaneWorkspaceHostController {
     return null;
   }
 
-
-  private async hasHandler(tailscale: ResolvedCommand, dnsName: string): Promise<boolean> {
-    const status = await this.runServe(tailscale, ['status', '--json']);
-    return readTailscaleServeHandlers(status.stdout).hasHttpsHandler(dnsName, WORKSPACE_HTTPS_PORT);
-  }
 
   private runServe(tailscale: ResolvedCommand, args: string[]) {
     return runTailscaleServe(this.run, tailscale, args);

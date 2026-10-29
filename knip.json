@@ -123,6 +123,11 @@
       "project": ["index.ts", "src/**/*.{ts,tsx}", "metro.config.js", "vitest.config.ts", "terminal-web/*.ts", "scripts/*.mjs"],
       "ignoreDependencies": ["expo-updates"]
     },
+    "glasses": {
+      "entry": ["src/main.ts", "dev/gallery.ts", "test/**/*.test.ts", "scripts/*.mjs", "vite.config.ts"],
+      "project": ["src/**/*.ts", "dev/*.ts", "test/**/*.ts", "scripts/*.mjs", "vite.config.ts"],
+      "ignoreDependencies": ["@evenrealities/evenhub-cli", "@evenrealities/evenhub-simulator"]
+    },
     "shared": {
       "entry": ["types/*.ts", "remoteClient/index.ts"],
       "project": ["types/*.ts", "remoteClient/*.ts"]

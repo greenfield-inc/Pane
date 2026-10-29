@@ -69,6 +69,42 @@ describe('Pane home skill', () => {
     await expect(fs.readFile(skillPath(dirs[1]), 'utf8')).resolves.toBe(buildPaneHomeSkill());
   });
 
+  it('tells an agent how to reach Pane and the person when its tools look missing', () => {
+    const skill = buildPaneHomeSkill();
+    const description = /^description: (.*)$/m.exec(skill)?.[1] ?? '';
+    for (const trigger of ['worktree', 'Session', 'notify', 'runpane', 'machine']) expect(description).toContain(trigger);
+    expect(skill).toContain('runpane notify --ui options');
+    expect(skill).toContain('"$PANE_RUNPANE_BIN"');
+    expect(skill.indexOf('~/.pane/bin/runpane')).toBeLessThan(skill.indexOf('npx --yes runpane@latest'));
+    expect(skill).toContain('runpane docs search --query');
+    expect(skill).toContain('runpane workspace <machine> exec');
+  });
+
+  it('upgrades a copy an older Pane marked and leaves a newer one alone', async () => {
+    await installPaneHomeSkill(dirs);
+    const v1 = `---\nname: pane\n---\n<!-- pane-managed-skill v1 -->\nold text\n`;
+    const v99 = `---\nname: pane\n---\n<!-- pane-managed-skill v99 -->\nfrom a newer Pane\n`;
+    await fs.writeFile(skillPath(dirs[0]), v1);
+    await fs.writeFile(skillPath(dirs[1]), v99);
+
+    expect((await installPaneHomeSkill(dirs)).map(result => result.outcome)).toEqual(['written', 'newer']);
+    await expect(fs.readFile(skillPath(dirs[0]), 'utf8')).resolves.toBe(buildPaneHomeSkill());
+    await expect(fs.readFile(skillPath(dirs[1]), 'utf8')).resolves.toBe(v99);
+
+    await fs.writeFile(skillPath(dirs[0]), v1);
+    expect((await removePaneHomeSkill(dirs)).map(result => result.outcome)).toEqual(['removed', 'newer']);
+    await expect(fs.readFile(skillPath(dirs[1]), 'utf8')).resolves.toBe(v99);
+  });
+
+  it('leaves an old copy alone once the user removed its marker', async () => {
+    await fs.mkdir(dirs[0], { recursive: true });
+    const edited = '---\nname: pane\n---\nmy edited copy of the old Pane skill\n';
+    await fs.writeFile(skillPath(dirs[0]), edited);
+
+    expect((await installPaneHomeSkill(dirs))[0].outcome).toBe('user-owned');
+    await expect(fs.readFile(skillPath(dirs[0]), 'utf8')).resolves.toBe(edited);
+  });
+
   it('never overwrites or removes a skill the user wrote', async () => {
     await fs.mkdir(dirs[0], { recursive: true });
     await fs.writeFile(skillPath(dirs[0]), 'my own pane skill');

@@ -3,6 +3,7 @@ import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { terminateProcessTrees } from '../utils/processTree';
+import { withRunpaneBinOnPath } from './runpaneShim';
 import { getShellPath } from '../utils/shellPath';
 import { ShellDetector } from '../utils/shellDetector';
 import {
@@ -163,7 +164,9 @@ export async function execOnMachine(
   const cwd = request.cwd ? resolveMachinePath(request.cwd, await currentHost()) : os.homedir();
   const timeoutMs = Math.min(request.timeoutMs ?? DEFAULT_EXEC_TIMEOUT_MS, MAX_EXEC_TIMEOUT_MS);
   const { shell, args } = ShellDetector.getShellCommandArgs(request.command, preferredShell);
-  const env = process.platform === 'win32' ? process.env : { ...process.env, PATH: getShellPath() };
+  // This Pane's runpane comes first, as in its terminals: the user's PATH may lack it, and Pane's own
+  // environment predates the PATH entry it adds at startup.
+  const env = withRunpaneBinOnPath(process.platform === 'win32' ? process.env : { ...process.env, PATH: getShellPath() });
 
   return new Promise((resolve, reject) => {
     // Its own process group on POSIX, so a timeout can stop everything the command started.

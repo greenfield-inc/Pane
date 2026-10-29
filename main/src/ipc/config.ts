@@ -16,6 +16,9 @@ import { AppearanceValidationError } from '../../../shared/types/appearance';
 import { agentPresetsForPlatform } from '../../../shared/constants/agentLaunchPresets';
 import { normalizePaneChatAgent, type PaneChatAgent } from '../../../shared/types/paneChat';
 import { getPaneEventSink } from '../core/runtime';
+import { checkDeepgramKey } from '../services/voiceTranscriptionService';
+import { PaneError, paneErrorText } from '../../../shared/paneError';
+import { VOICE_KEY_FIELDS, voiceKeyProblem, type VoiceKeyField } from '../../../shared/voice/voiceKeys';
 
 export function registerConfigHandlers(
   ipcMain: IpcMain,
@@ -52,6 +55,7 @@ export function registerConfigHandlers(
       const decoded: RemoteSettingsPatch = decodeBoundary(patch, boundary.object(remoteSettingsFields));
       const taken = sharedShortcutLetter(decoded.terminalShortcuts ?? []);
       if (taken) throw new Error(`Two enabled shortcuts use the letter ${taken}`);
+      assertVoiceKeys(decoded);
       await configManager.updateConfig(decoded);
       notifySettingsChanged();
       return buildAffordances();
@@ -96,6 +100,7 @@ export function registerConfigHandlers(
           && updates.agentContext.mcpToolsets.join(',') !== (oldConfig.agentContext?.mcpToolsets ?? []).join(','));
       const homeSkillChanged = updates.agentContext?.homeSkill !== undefined
         && updates.agentContext.homeSkill !== isPaneHomeSkillEnabled(oldConfig);
+      assertVoiceKeys(updates);
 
       let updatedConfig = await configManager.updateConfig(
         managedAgentsMdChanged && updates.agentContext?.managedAgentsMd === false
@@ -166,9 +171,15 @@ export function registerConfigHandlers(
       if (error instanceof AppearanceValidationError) {
         return { success: false, error: error.message };
       }
+      if (error instanceof PaneError) {
+        return { success: false, error: paneErrorText(error) };
+      }
       return { success: false, error: 'Failed to update config' };
     }
   });
+
+  // Desktop Settings only, so a paired device can't make this host send keys to Deepgram.
+  ipcMain.handle('config:check-deepgram-key', async (_event, key: string) => checkDeepgramKey(key));
 
   ipcMain.handle('config:get-session-preferences', async () => {
     try {
@@ -288,6 +299,15 @@ export function registerConfigHandlers(
       return { success: false, data: [] };
     }
   });
+}
+
+/** Refuses a voice key that can't be one, such as pasted prose, before anything is saved. */
+function assertVoiceKeys(patch: Partial<Record<VoiceKeyField, string>>): void {
+  for (const field of VOICE_KEY_FIELDS) {
+    const value = patch[field];
+    const problem = value === undefined ? null : voiceKeyProblem(field, value);
+    if (problem) throw new PaneError('ERR_VOICE_KEY_INVALID', `${problem.message} No settings were saved.`, problem.next);
+  }
 }
 
 /** Tells phones and desktop to refetch `remote:pwa-affordances`. Carries no values, so no key ever rides an event. */

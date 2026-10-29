@@ -20,11 +20,17 @@ pnpm start                                                 # Metro only, once a 
 
 iOS builds use Expo's scene lifecycle through `expo-build-properties` with `ios.enableSceneSupport: true`. This requires Expo 57.0.23 or newer. Apps built with the iOS 27 SDK fail at launch on iOS 27 without it ([Apple's migration guide](https://developer.apple.com/documentation/technotes/tn3187-migrating-to-the-uikit-scene-based-life-cycle), [Expo setup](https://docs.expo.dev/versions/v57.0.0/sdk/build-properties/#pluginconfigtypeios)). Regenerate the iOS project after changing this setting; adding only a scene manifest does not move React Native startup to the scene delegate.
 
+## Try a demo
+
+**Try a demo** on the welcome screen runs the app against a sample Pane host that lives in the app (`src/features/demo/`), so App Store and Play reviewers, and anyone without a computer yet, can use every screen. `createDaemonClient` gives any profile whose address ends in `.demo.invalid` an in-memory `fetch` and event stream instead of the network, so the real client and screens run unchanged. The demo keeps its state in memory: answering a question, creating a Pane or typing in a terminal changes what later reads return. It is never saved to the Keychain, asks for no notification permission, and ends on **Exit Demo** (the **Demo** badge on the home header, or Settings), a relaunch, or pairing a real computer. Uploads, voice and glasses say they need a computer. The sample content is in `demoData.ts`. A dev build started with `EXPO_PUBLIC_PANE_CAPTURE=1` hides the **Demo** badge for store screenshots; release builds always show it.
+
+Settings and the welcome screen link to the privacy policy at `https://runpane.com/privacy#phone-app`.
+
 ## Point it at a host
 
 For your computers, sign in to Tailscale on the phone and computer, then open **Your computers** on the welcome screen (or **Settings → Your Computers** after connecting). Enter the **Address** shown in desktop **Settings → Remote Access → Access to this computer**, tap **Find Computers**, then **Connect**. Enter the computer's password when asked. **Use another computer** lets you change the address if that computer is unavailable or you switch tailnets. Saved profiles stay bound to their original tailnet.
 
-The phone asks a computer on its own Tailscale login for the tailnet list because it cannot run `tailscale status` itself. Other users cannot request that computer's discovery view, even when it allows everyone on the tailnet to connect. Native requests use the Workspaces listener on port 8443. Push notifications and shared integration keys require a code-based paired connection; codeless Settings offers **Connect with a Code** for alerts. Browsers and the PWA keep using connection codes: the Workspaces listener refuses requests with an `Origin` header.
+The phone asks a computer on its own Tailscale login for the tailnet list because it cannot run `tailscale status` itself. Other users cannot request that computer's discovery view, even when it allows everyone on the tailnet to connect. Native requests use the Workspaces listener on port 8443. Push notifications and shared integration keys require a code-based paired connection; codeless Settings offers **Connect with a Code** for alerts. Browsers and the PWA keep using connection codes: the Workspaces listener refuses requests with an `Origin` header, except the Pane glasses app, which Settings › Glasses pairs with a per-device token ([Even G2 glasses](../docs/EVEN_G2_GLASSES.md)).
 
 You can also pair with a host through a one-time `pane-remote://` connection code, pasted or scanned from a QR code. For development, run an isolated host with its own data directory and port, so you never touch the Pane you use day to day:
 
@@ -59,6 +65,8 @@ maestro --device <simulator-udid> test -e CONNECTION_CODE="$(cat ~/.pane_rn_dev/
 ```
 
 `subflows/launch-dev-client.yaml` clears app state and the Keychain, opens the dev client against `127.0.0.1:${METRO_PORT}` and gets the dev menu out of the way. `subflows/sign-in.yaml` pairs with `CONNECTION_CODE`. Start a feature flow with `- runFlow: subflows/signed-in.yaml`, which runs both. It uses Metro on port 8137 unless you pass `-e METRO_PORT=<port>`. Pressable rows merge their text for accessibility, so match rows by `testID` or a regex such as `"fix-login-bug.*"`.
+
+`demo.yaml` needs no host: it starts the demo, answers a question, uses a terminal, visits the other screens and exits. Run it without `CONNECTION_CODE`.
 
 `terminal.yaml` needs a host whose first pane has a plain `Terminal` tab and a `Claude Code` tab, which is what `runpane panes create --agent claude` gives you. On a busy machine, set `MAESTRO_DRIVER_STARTUP_TIMEOUT=240000` if Maestro reports that the iOS driver was not ready in time.
 
@@ -179,6 +187,45 @@ CI reads it from the `PANE_ANDROID_GOOGLE_SERVICES_JSON` repository secret, base
 ```bash
 base64 < native/google-services.json | tr -d '\n' | gh secret set PANE_ANDROID_GOOGLE_SERVICES_JSON -R greenfield-inc/Pane
 ```
+
+## Over-the-air updates
+
+Release builds of the app download new JavaScript from Pane's update server, so a JavaScript change reaches installed phones without a new TestFlight or store build. The app uses `expo-updates` against a small self-hosted server: the Cloud Run service `pane-native-updates` (`updates.url` in `app.json`), which serves one manifest per runtime version and platform (`deploy/native-updates/`).
+
+**What ships over the air.** Anything in the JavaScript bundle: `src/`, `../shared/`, and JavaScript-only packages. Native code needs a store build: a package with iOS or Android code, a config plugin, a setting in `app.json` that prebuild writes into the native projects, or `targets/`. A native change bumps `runtimeVersion` in `app.json`, for example from `1.2` to `1.3`, and ships in a store build with that runtime. Phones get only updates for their own `runtimeVersion`, so after a bump, OTA reaches a phone once it installs the new build.
+
+The `Native Runtime` PR check compares the Expo fingerprint of native code (`fingerprint.config.js`) at the base and the head. It fails when native code changed without a bump. With a bump it passes and adds the `native-change` label (on a fork PR, a maintainer adds it). Version and build numbers don't count as native changes.
+
+**Publishing is automatic.** Every push to `main` that touches `native/`, `shared/`, `pnpm-lock.yaml`, the update server or its workflow runs `Native OTA Updates` (`.github/workflows/native-updates.yml`). It runs `expo export`, writes the manifests with `scripts/build-updates.mts`, and deploys a new image. When a deploy fails, run that workflow again from the Actions tab on `main`.
+
+An update is dated with its commit's committer date. A phone loads only an update newer than the one it runs, including the bundle built into the app, so a successful re-run of the same commit sends phones nothing new. Make store builds from the tip of `main`: an update dated before the build never loads on it.
+
+**When it applies.** At launch, the app checks the server and downloads a new update in the background. It runs from the next cold start. Settings › App shows what is running: `Version 1.2 · Built-in` for the bundle inside the app, or `Version 1.2 · Update a1b2c3d · Oct 28`, where `a1b2c3d` starts the update id (the workflow run prints one per platform) and the date is the commit date. Tap the row to check now. Once an update is downloaded, the row says **Restart to update**, and tapping it switches to the update. Debug and dev-client builds load JavaScript from Metro and show `Development build`.
+
+**Rolling back.** Revert the change on `main`, which publishes a newer update. Shifting Cloud Run traffic to an earlier revision does nothing for phones, because they load only a newer update. If an update throws before its first screen, the phone marks it failed and reloads the last update that launched.
+
+**Testing locally.** Build a release app that asks a server on your computer, change some JavaScript, then serve an export of it:
+
+```bash
+cd native
+export PANE_UPDATES_URL=http://127.0.0.1:8099/manifest
+npx expo prebuild --clean --platform ios && npx expo run:ios --configuration Release
+# Android: npx expo prebuild --clean --platform android && npx expo run:android --variant release
+
+# Change something visible in src/, then export it.
+D=/tmp/pane-ota.noindex
+pnpm exec expo export --platform ios --platform android --output-dir $D/dist
+pnpm exec expo config --type public --json > $D/expo-config.json
+# --created-at now: phones ignore an update older than their build.
+node scripts/build-updates.mts --dist $D/dist --config $D/expo-config.json \
+  --base-url http://127.0.0.1:8099 --out $D/ctx/site --created-at "$(date -u +%FT%TZ)"
+cp ../deploy/native-updates/Dockerfile ../deploy/native-updates/nginx.conf $D/ctx/
+docker build -t pane-native-updates:local $D/ctx
+docker run -d --rm --name pane-native-updates -p 8099:8080 pane-native-updates:local   # stop: docker stop pane-native-updates
+adb reverse tcp:8099 tcp:8099   # Android emulator or USB phone; on iOS, use the Simulator
+```
+
+Launch the app once to download the update and again to run it. `PANE_UPDATES_URL` replaces `updates.url` for that build; an `http://` URL also allows plain HTTP on Android. `expo run` only regenerates `ios/` or `android/` when the folder is missing, so the `prebuild --clean` is what writes the URL into the native project, with or without the variable. Before building anything you ship, run `unset PANE_UPDATES_URL` and `npx expo prebuild --clean` again. Check the server with `curl -i -H 'expo-platform: ios' -H 'expo-runtime-version: 1.2' http://127.0.0.1:8099/manifest`: it answers `200` with `expo-protocol-version: 1` and the manifest, or `204` when it has no update for that runtime.
 
 ## How the code is organised
 
