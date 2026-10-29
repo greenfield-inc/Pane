@@ -8,6 +8,7 @@ import type { NotifyAnswer, NotifyRemoteCommand } from '../../shared/types/notif
 import { boundary, decodeBoundary, decodeOptionalBoundary, type BoundarySchema, type JsonValue } from '../../shared/validation/boundaryDecoder';
 import {
   GlassesError,
+  SCREEN_RECONNECTING,
   agentLabel,
   cardsFromNotify,
   isPaneEntry,
@@ -629,10 +630,19 @@ export class HostConnection {
   }
 
   async screen(panelId: string): Promise<TerminalScreen> {
-    const screen = await this.invoke('runpane:panels:screen', [{ panelId, limit: SCREEN_LINES }], screenSchema);
-    const known = this.statuses.get(panelId);
-    const status = !screen.state.running ? 'stopped' : known ?? (screen.state.activityStatus === 'active' ? 'working' : 'idle');
-    return { lines: stripAnsi(screen.text).split('\n'), status, agent: agentLabel(screen.state.agentType) };
+    try {
+      const screen = await this.invoke('runpane:panels:screen', [{ panelId, limit: SCREEN_LINES }], screenSchema);
+      const known = this.statuses.get(panelId);
+      const status = !screen.state.running ? 'stopped' : known ?? (screen.state.activityStatus === 'active' ? 'working' : 'idle');
+      return { lines: stripAnsi(screen.text).split('\n'), status, agent: agentLabel(screen.state.agentType) };
+    } catch (error) {
+      // Still inside its reconnect budget: a later read can succeed, so this is no problem yet.
+      const state = this.client.getState().status;
+      if (!this.refusal && (state === 'reconnecting' || state === 'connecting' || state === 'restoring')) {
+        throw new GlassesError(SCREEN_RECONNECTING, `Lost the connection to ${this.paired.name}. Reconnecting.`, 'Wait: the screen comes back by itself.');
+      }
+      throw error;
+    }
   }
 
   async scrollback(panelId: string, lines = SCROLLBACK_LINES): Promise<string[]> {

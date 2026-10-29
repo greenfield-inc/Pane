@@ -2,12 +2,13 @@ import http from 'http';
 import zlib from 'zlib';
 import WebSocket from 'ws';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createDefaultRemoteDaemonConfig, NATIVE_APP_WEBSOCKET_ORIGIN, type RemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
+import { createDefaultRemoteDaemonConfig, NATIVE_APP_WEBSOCKET_ORIGIN, type RemoteDaemonConfig, type RemoteInvokeRequest } from '../../../shared/types/remoteDaemon';
 import { PaneCommandRegistry } from './commandRegistry';
 import { hashRemoteDaemonToken } from './auth';
 import { boundary, decodeBoundary, type JsonValue } from '../../../shared/validation/boundaryDecoder';
 
 import { PaneRemoteHttpApiServer, type WorkspaceAccessPolicy } from './httpApiServer';
+import { RecentWrites } from './recentWrites';
 
 interface ConfigManagerStub {
   getConfig(): { deepgramApiKey?: string; remoteDaemon?: RemoteDaemonConfig };
@@ -818,6 +819,118 @@ describe('PaneRemoteHttpApiServer', () => {
     await expect(server.start()).rejects.toThrow(
       'Remote daemon direct HTTP only supports loopback listen hosts; keep listenHost on 127.0.0.1, ::1, or localhost and expose it through an SSH tunnel, Tailscale/VPN, or a reverse proxy.',
     );
+  });
+});
+
+describe('writes carrying a request id', () => {
+  async function startWithWrite(handler: () => Promise<JsonValue>) {
+    const registry = new PaneCommandRegistry();
+    const run = vi.fn(handler);
+    registry.register('terminal:input', run);
+    const server = new PaneRemoteHttpApiServer(registry, createConfigManagerStub(createEnabledRemoteConfig()));
+    activeServers.push(server);
+    await server.start();
+    const send = (requestId?: string, token = 'secret-token') => {
+      const body: RemoteInvokeRequest = { channel: 'terminal:input', args: ['panel-1', 'ls\r'] };
+      if (requestId) body.requestId = requestId;
+      return requestJson(server, 'POST', '/invoke', body, token);
+    };
+    return { server, run, send };
+  }
+
+  it('says so in the ready event', async () => {
+    const { server } = await startWithWrite(async () => null);
+    const ready = await (await openEventStream(server, 'secret-token')).nextEvent();
+    expect(JSON.parse(ready.data.join('\n'))).toMatchObject({ deduplicatesRequestIds: true });
+  });
+
+  it('runs a repeated id once and answers the repeat with the first answer', async () => {
+    let calls = 0;
+    const { run, send } = await startWithWrite(async () => ({ call: ++calls }));
+    await expect(send('phone:1')).resolves.toEqual({ statusCode: 200, body: { ok: true, result: { call: 1 } } });
+    await expect(send('phone:1')).resolves.toEqual({ statusCode: 200, body: { ok: true, result: { call: 1 } } });
+    await expect(send('phone:2')).resolves.toEqual({ statusCode: 200, body: { ok: true, result: { call: 2 } } });
+    expect(run).toHaveBeenCalledTimes(2);
+  });
+
+  it('makes a repeat that arrives while the first still runs wait for its answer', async () => {
+    let finish!: () => void;
+    const { run, send } = await startWithWrite(() => new Promise((resolve) => { finish = () => resolve('done'); }));
+    const received = vi.spyOn(RecentWrites.prototype, 'answer');
+    let settled = 0;
+    const first = send('phone:1').finally(() => { settled += 1; });
+    await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+    const repeat = send('phone:1').finally(() => { settled += 1; });
+    // The host has the repeat in hand while the first is still running.
+    await vi.waitFor(() => expect(received).toHaveBeenCalledTimes(2));
+    expect(settled).toBe(0);
+    expect(run).toHaveBeenCalledTimes(1);
+    finish();
+    await expect(Promise.all([first, repeat])).resolves.toEqual([
+      { statusCode: 200, body: { ok: true, result: 'done' } },
+      { statusCode: 200, body: { ok: true, result: 'done' } },
+    ]);
+    expect(run).toHaveBeenCalledTimes(1);
+    received.mockRestore();
+  });
+
+  it('refuses a new write before running it while the client\'s memory of answers is full', async () => {
+    const { run, send } = await startWithWrite(async () => 'ran');
+    const full = vi.spyOn(RecentWrites.prototype, 'answer').mockReturnValue('full');
+    await expect(send('phone:1')).resolves.toMatchObject({ statusCode: 503, body: { ok: false, error: { code: 'ERR_REMOTE_WRITES_BUSY' } } });
+    expect(run).not.toHaveBeenCalled();
+    full.mockRestore();
+  });
+
+  it('replays an error answer as the same error', async () => {
+    const { run, send } = await startWithWrite(async () => { throw new Error('No terminal panel-1'); });
+    const first = await send('phone:1');
+    expect(first).toMatchObject({ statusCode: 500, body: { ok: false, error: { message: 'No terminal panel-1' } } });
+    await expect(send('phone:1')).resolves.toEqual(first);
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it('runs every write that carries no id, as before', async () => {
+    const { run, send } = await startWithWrite(async () => null);
+    await send();
+    await send();
+    expect(run).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not remember a request refused for its credentials', async () => {
+    const { run, send } = await startWithWrite(async () => 'ran');
+    await expect(send('phone:1', 'wrong-token')).resolves.toMatchObject({ statusCode: 403, body: { ok: false } });
+    await expect(send('phone:1')).resolves.toEqual({ statusCode: 200, body: { ok: true, result: 'ran' } });
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it('runs an id again once ten minutes have passed since its answer', async () => {
+    const { run, send } = await startWithWrite(async () => null);
+    const start = Date.now();
+    const now = vi.spyOn(Date, 'now').mockReturnValue(start);
+    await send('phone:1');
+    now.mockReturnValue(start + 9 * 60_000);
+    await send('phone:1');
+    expect(run).toHaveBeenCalledTimes(1);
+    now.mockReturnValue(start + 10 * 60_000 + 1);
+    await send('phone:1');
+    expect(run).toHaveBeenCalledTimes(2);
+    now.mockRestore();
+  });
+
+  it('keeps each client\'s ids apart', async () => {
+    const config = createEnabledRemoteConfig();
+    config.host.clients.push({ ...config.host.clients[0]!, id: 'client-2', tokenHash: hashRemoteDaemonToken('other-token') });
+    const registry = new PaneCommandRegistry();
+    const run = vi.fn(async () => null);
+    registry.register('terminal:input', run);
+    const server = new PaneRemoteHttpApiServer(registry, createConfigManagerStub(config));
+    activeServers.push(server);
+    await server.start();
+    for (const token of ['secret-token', 'other-token']) {
+      await requestJson(server, 'POST', '/invoke', { channel: 'terminal:input', args: ['panel-1', 'x'], requestId: 'same-id' }, token);
+    }
+    expect(run).toHaveBeenCalledTimes(2);
   });
 });
 

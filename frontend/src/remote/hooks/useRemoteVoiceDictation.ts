@@ -23,6 +23,8 @@ const STREAM_FINALIZE_WAIT_MS = 800;
 const STREAM_OPEN_TIMEOUT_MS = 8_000;
 const STREAM_KEEPALIVE_MS = 5_000;
 const DEEPGRAM_AUTH_PROTOCOL = 'bearer';
+const DROPPED_NOTICE = 'The voice connection dropped. Kept what was heard.';
+const RAW_TEXT_NOTICE = 'Inserted the words as heard: the connection dropped before cleanup.';
 
 const PREFERRED_RECORDING_MIME_TYPES = [
   'audio/webm;codecs=opus',
@@ -76,7 +78,9 @@ export function useRemoteVoiceDictation({
   const streamingKeepaliveTimerRef = useRef<number | null>(null);
 
   const socketRef = useRef<WebSocket | null>(null);
-  const stopStreamingRef = useRef<() => Promise<void>>(async () => {});
+  const stopStreamingRef = useRef<(notice?: string) => Promise<void>>(async () => {});
+  /** The live service's own reason, shown instead of the generic drop notice. */
+  const serverErrorRef = useRef<string | null>(null);
   const finalSegmentsRef = useRef<string[]>([]);
   const interimTranscriptRef = useRef('');
   const firstTranscriptMsRef = useRef<number | undefined>(undefined);
@@ -225,6 +229,7 @@ export function useRemoteVoiceDictation({
       return;
     }
     if (message.type === 'error') {
+      serverErrorRef.current = message.message;
       setError(message.message);
       return;
     }
@@ -259,6 +264,7 @@ export function useRemoteVoiceDictation({
 
     setError(null);
     resetStreamingState();
+    serverErrorRef.current = null;
     setIsTranscribing(true);
     try {
       const selectedMimeType = selectRecordingMimeType();
@@ -280,6 +286,11 @@ export function useRemoteVoiceDictation({
       mediaStreamRef.current = stream;
       mediaRecorderRef.current = recorder;
       socketRef.current = socket;
+      // Stopping detaches the socket before closing it, so a close while it is still
+      // attached means the host, Deepgram or the network gave up: stop and keep the words.
+      socket.addEventListener('close', () => {
+        if (socketRef.current === socket) void stopStreamingRef.current(serverErrorRef.current ?? DROPPED_NOTICE);
+      });
       recordingMimeTypeRef.current = normalizeMimeType(recorder.mimeType || selectedMimeType || 'audio/webm');
       recordingStartedAtRef.current = performance.now();
 
@@ -314,12 +325,14 @@ export function useRemoteVoiceDictation({
     }
   }, [handleDeepgramMessage, onCreateStreamingSocket, onFinalizeStreamingAudio, onGetDeepgramToken, resetStreamingState, stopMediaStream]);
 
-  const stopStreaming = useCallback(async () => {
+  /** Stops and inserts the words so far; `notice` then shows in the error line. */
+  const stopStreaming = useCallback(async (notice?: string) => {
     const socket = socketRef.current;
     const recorder = mediaRecorderRef.current;
     if (!socket && !recorder) {
       return;
     }
+    socketRef.current = null;
 
     clearRecordingTimer();
     clearStreamingKeepaliveTimer();
@@ -346,23 +359,33 @@ export function useRemoteVoiceDictation({
         return;
       }
 
-      const result = await onFinalizeStreamingAudio({
-        rawText,
-        durationMs,
-        language: 'en',
-        timings: {
-          asrMs,
-          firstTranscriptMs: firstTranscriptMsRef.current,
-        },
-        metadata: deepgramMetadataRef.current,
-      });
-      if (result.text.trim()) {
-        onTranscript(result.text.trim());
+      let text = rawText;
+      let shown = notice;
+      if (rawText) {
+        try {
+          text = (await onFinalizeStreamingAudio({
+            rawText,
+            durationMs,
+            language: 'en',
+            timings: {
+              asrMs,
+              firstTranscriptMs: firstTranscriptMsRef.current,
+            },
+            metadata: deepgramMetadataRef.current,
+          })).text;
+        } catch (err) {
+          console.warn('[voice] cleanup failed; inserting the words as heard', err);
+          shown = RAW_TEXT_NOTICE;
+        }
       }
+      if (text.trim()) {
+        onTranscript(text.trim());
+      }
+      if (shown) setError(shown);
     } catch (err) {
       setError(getVoiceErrorMessage(err));
     } finally {
-      closeSocket(socketRef);
+      socket?.close();
       mediaRecorderRef.current = null;
       setIsTranscribing(false);
       setActiveMode(null);

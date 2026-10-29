@@ -11,6 +11,8 @@ const SAMPLE_RATE = 16_000;
 const OPEN_TIMEOUT_MS = 8_000;
 /** Time for Deepgram to return the last words after `Finalize`. */
 const FINALIZE_WAIT_MS = 800;
+/** How long a released dictation waits for the computer's cleanup before sending the words as heard, as the phone does. */
+const CLEANUP_WAIT_MS = 90_000;
 
 /** The voice setup a host reports in `remote:pwa-affordances`. */
 export interface HostVoice {
@@ -170,6 +172,19 @@ function streamFailure(name: string, error: LiveTranscript['error']): GlassesErr
   }
 }
 
+/** The computer's cleanup of `words`, or the words as heard when cleanup fails or takes too long. */
+async function cleanedUp(host: VoiceHost, words: string, durationMs: number): Promise<string> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const gaveUp = new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), CLEANUP_WAIT_MS); });
+  try {
+    return (await Promise.race([host.finalizeStreaming(words, durationMs), gaveUp])) ?? words;
+  } catch {
+    return words;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** Live words over the host's Deepgram stream while you hold. */
 export async function streamingDictation(host: VoiceHost, onPreview: (text: string) => void): Promise<Dictation> {
   const startedAt = host.now();
@@ -179,11 +194,13 @@ export async function streamingDictation(host: VoiceHost, onPreview: (text: stri
     onPreview(live.preview);
   });
   // Closing after CloseStream, or cancelling, marks the close as ours; any other close or
-  // error means the host or Deepgram gave up and the words so far are incomplete.
+  // error means the host, Deepgram or the network gave up. The words heard so far are kept.
   let ending = false;
   let dropped = false;
   ws.onclose = ws.onerror = () => {
-    if (!ending) dropped = true;
+    if (ending || dropped) return;
+    dropped = true;
+    if (live.rawText) onPreview(`Connection dropped. Release to send: ${live.preview}`);
   };
   return {
     push(pcm) {
@@ -196,11 +213,15 @@ export async function streamingDictation(host: VoiceHost, onPreview: (text: stri
         await new Promise((resolve) => setTimeout(resolve, FINALIZE_WAIT_MS));
         if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'CloseStream' }));
       }
-      // A drop up to here, Finalize's wait included, loses words: nothing is sent.
       ending = true;
       ws.close();
-      if (dropped || (live.error && !live.rawText)) throw streamFailure(host.name, live.error);
-      return live.rawText ? host.finalizeStreaming(live.rawText, host.now() - startedAt) : '';
+      // The words as of stopping; a late result cannot change what is sent.
+      const words = live.rawText;
+      if (!words) {
+        if (dropped || live.error) throw streamFailure(host.name, live.error);
+        return '';
+      }
+      return cleanedUp(host, words, host.now() - startedAt);
     },
     cancel() {
       ending = true;

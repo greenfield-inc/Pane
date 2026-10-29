@@ -15,7 +15,7 @@ This is Expo SDK 57. Check APIs against https://docs.expo.dev/versions/v57.0.0/ 
 - Animations and gestures use Reanimated and Gesture Handler on the UI thread, never React state.
 - Use `@/ui` components and `useTheme()` tokens. No hard-coded colors outside `src/theme/`. Support light and dark.
 - Daemon calls go through `useInvokeQuery` / `useInvokeMutation` / `invokeChannel`, which unwrap the desktop IPC `{ success, data }` envelope. Query keys start with the host's profile ID (`useDaemonQueryKey`).
-- Mutations are never retried automatically. A `RemoteUnconfirmedResultError` means the host may have applied it: refetch and show the state.
+- Screens never retry a mutation themselves. The client resends one through a dropped connection only when the host de-duplicates request ids; a `RemoteUnconfirmedResultError` is final and means the host may have applied it: refetch and show the state.
 - Live updates come from `useDaemonEvent(channel, handler)`. The stream does not replay missed events; `DaemonProvider` refetches every query on reconnect.
 - The bearer token only travels in headers. Never put it in a URL, a log or a push payload.
 - Give interactive elements a `testID` so Maestro flows can find them.

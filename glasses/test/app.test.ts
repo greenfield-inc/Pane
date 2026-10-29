@@ -4,7 +4,7 @@ import { GlassesApp } from '../src/app';
 import { DemoSource } from '../src/demo';
 import type { Page } from '../src/display';
 import type { Gesture } from '../src/input';
-import { GlassesError, orderCards, type Card, type Computer, type Dictation, type PaneEntry, type PaneRow, type PaneSource, type TerminalKey, type TerminalScreen } from '../src/model';
+import { GlassesError, SCREEN_RECONNECTING, orderCards, type Card, type Computer, type Dictation, type PaneEntry, type PaneRow, type PaneSource, type TerminalKey, type TerminalScreen } from '../src/model';
 import type { Cancel } from '../src/timers';
 
 /** Timers the test runs by hand. */
@@ -340,6 +340,31 @@ describe('opening and leaving a Pane, as the Pane apps do', () => {
     const { source, press } = await openScriptedRow([session], 0, 'idle');
     await press({ type: 'double' });
     expect(source.calls).toEqual([]);
+  });
+});
+
+describe('a terminal whose computer drops', () => {
+  it('keeps the last screen and keeps reading while the computer reconnects, then shows the new screen', async () => {
+    const { source, clock, text, output } = await openScriptedRow([paneRow('fix-login')], 0, 'idle');
+    source.screenLines = ['before the drop'];
+    await clock.advance(1_000);
+    const live = source.screen.bind(source);
+    source.screen = async () => { throw new GlassesError(SCREEN_RECONNECTING, 'Lost the connection to studio-mac. Reconnecting.'); };
+    await clock.advance(3_000);
+    expect(text()[0]).toBe('fix-login · shell · idle');
+    expect(output()).toContain('before the drop');
+    source.screen = live;
+    source.screenLines = ['after the drop'];
+    await clock.advance(1_000);
+    expect(output()).toContain('after the drop');
+  });
+
+  it('shows the problem once the computer stops reconnecting', async () => {
+    const { source, clock, text } = await openScriptedRow([paneRow('fix-login')], 0, 'idle');
+    source.screen = async () => { throw new Error('Could not reconnect to studio-mac.'); };
+    await clock.advance(1_000);
+    expect(text()[0]).toBe('fix-login');
+    expect(text()[1]).toContain('Could not reconnect to studio-mac.');
   });
 });
 

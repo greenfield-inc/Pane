@@ -424,13 +424,26 @@ Check:
 
 ### A remote action could not be confirmed
 
-Pane's remote clients (desktop, browser and phone) retry a reviewed set of
-read-only requests, dictation cleanup, and chat sends the host de-duplicates by
-operation ID, after transient network or server failures. They retry on the
-reconnect schedule for up to five minutes. Actions such as terminal input and
-pane creation are sent once: the host may finish an action even if the response
-is lost. If Pane says delivery is unknown, inspect the current panes or terminal
-before submitting it again. Authentication failures stop immediately.
+Pane's remote clients (desktop, browser, phone and glasses) retry a reviewed set
+of read-only requests and dictation cleanup after transient network or server
+failures, on the reconnect schedule for up to five minutes. Authentication
+failures stop immediately.
+
+A host on a current Pane runs each action once per request ID and says so when a
+client connects (`deduplicatesRequestIds` in the `ready` event). It remembers
+each client's recent IDs and answers for ten minutes, in memory, up to 10,000
+per client; while a client is at that limit, the host refuses its new actions
+before running them and the client sends them again. Against such a
+host, every action a client sends (terminal input, prompts, new panes and tabs,
+Notify answers) carries an ID. An action issued while the connection is
+reconnecting waits for it; one whose answer is lost is resent with the same ID
+until the host answers or five minutes pass since it was issued. Terminal
+input keeps its order per terminal. Typing into a dimmed terminal is not queued.
+
+Delivery is unknown only when no answer arrives in that time: inspect the
+current panes or terminal before submitting it again. An action that was never
+sent says so. Against an older host, actions other than chat sends (which the
+host de-duplicates by operation ID) are sent once, as before.
 
 The browser normally uses native EventSource for output. Its fetch fallback and
 the desktop transport share one SSE text parser, accepting LF, CRLF, and CR line

@@ -117,7 +117,7 @@ async function addCanvasText(text, x, y) {
   const projectScope = { kind: 'project', id: String(project.data.id) };
   const globalScope = { kind: 'global', id: 'user' };
   await page.getByRole('button', { name: 'Add tool', exact: true }).click();
-  await page.getByRole('button', { name: 'Notes', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'notes', exact: true }).click();
   await selectScope('Feature Notes');
   await page.getByRole('button', { name: 'Choose note', exact: true }).click();
   await page.getByRole('menuitem', { name: 'New note', exact: true }).click();

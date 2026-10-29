@@ -51,6 +51,12 @@ export const REMOTE_READ_CHANNELS = new Set([
   'terminal:getState',
   // Cleans up a dictation's text; the host keeps nothing, so a lost answer can be asked again.
   'voice:finalize-streaming',
+  // Read a terminal's screen or saved output; glasses poll the screen every second.
+  'runpane:panels:screen',
+  'runpane:panels:output',
+  // Read a worktree folder or text file; nothing on the host changes.
+  'file:list',
+  'file:read',
 ]);
 
 
@@ -72,3 +78,6 @@ export const REMOTE_RESTORE_CHANNELS = new Set([
   'terminal:ack', 'terminal:resetFlowControl', 'sessions:mark-viewed',
   'panels:set-active', 'terminal:reply',
 ]);
+
+/** A host that runs each request id once refuses a write with this code, before running it, while its memory of answers is full; resending is safe. */
+export const REMOTE_WRITES_BUSY_CODE = 'ERR_REMOTE_WRITES_BUSY';

@@ -5,6 +5,8 @@ import { useEffect, useEffectEvent, useRef, useState, type Dispatch, type RefObj
 import { ActionSheetIOS, ActivityIndicator, Alert, Keyboard, KeyboardAvoidingView, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { PaneError } from '@shared/paneError';
+import { RemoteUnconfirmedResultError } from '@shared/remoteClient';
 import type { OrchestrationSessionView } from '@shared/types/orchestrationSession';
 import type { TerminalPanelState, ToolPanel } from '@shared/types/panels';
 import type { RemotePwaAffordances } from '@shared/types/remoteDaemon';
@@ -217,6 +219,7 @@ function TerminalPanel({ panel, actions, draft, onChangeDraft, composer, uploads
     return () => clearTimeout(timer);
   }, [voiceSaved]);
   const [clipboardError, setClipboardError] = useState<string | null>(null);
+  const [sendError, setSendError] = useState<string | null>(null);
   // Input waits for a live terminal; until then its last screen stays up, dimmed.
   const disabled = terminal.status !== 'ready' || presence !== 'connected';
   const shown = terminal.status === 'ready' || terminal.hasContent;
@@ -241,9 +244,17 @@ function TerminalPanel({ panel, actions, draft, onChangeDraft, composer, uploads
   const submit = () => {
     const text = draft;
     onChangeDraft('');
+    setSendError(null);
     Keyboard.dismiss();
     terminal.scrollToBottom();
-    void terminal.sendInput(`${text}${KEYS.enter}`).catch(() => onChangeDraft(text));
+    // The client resends through a drop, so a failure here is final. Say whether it may have landed.
+    void terminal.sendInput(`${text}${KEYS.enter}`).catch((error: unknown) => {
+      onChangeDraft(text);
+      const mayHaveLanded = error instanceof RemoteUnconfirmedResultError || (error instanceof PaneError && error.code === 'ERR_REMOTE_DELIVERY_UNKNOWN');
+      setSendError(mayHaveLanded
+        ? 'Not confirmed: this may have reached the terminal. Check it before sending again.'
+        : 'Not sent. Your text is back in the box; send it again when connected.');
+    });
   };
   const insertText = (text: string) => {
     composer.insert(text);
@@ -330,6 +341,11 @@ function TerminalPanel({ panel, actions, draft, onChangeDraft, composer, uploads
           disabled={disabled}
         />
         {clipboardError ? <Text variant="footnote" tone="danger">{clipboardError}</Text> : null}
+        {sendError ? (
+          <Pressable testID="send-error" onPress={() => setSendError(null)} accessibilityHint="Dismiss">
+            <Text variant="footnote" tone="danger">{sendError}</Text>
+          </Pressable>
+        ) : null}
         {uploads.pickError ? (
           <Pressable testID="upload-pick-error" onPress={uploads.clearPickError} accessibilityHint="Dismiss">
             <Text variant="footnote" tone="danger">{uploads.pickError}</Text>

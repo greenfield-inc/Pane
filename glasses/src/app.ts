@@ -3,7 +3,7 @@
 import type { NotifyAnswer } from '../../shared/types/notify';
 import { BRIGHT, type Page } from './display';
 import type { Gesture } from './input';
-import { CHOICE_KEYS, GlassesError, isPaneEntry, type Card, type Computer, type Dictation, type PaneEntry, type PaneRow, type PaneSource, type TerminalKey } from './model';
+import { CHOICE_KEYS, GlassesError, SCREEN_RECONNECTING, isPaneEntry, type Card, type Computer, type Dictation, type PaneEntry, type PaneRow, type PaneSource, type TerminalKey } from './model';
 import { findMenu, type Menu } from './menu';
 import {
   HALF_PAGE,
@@ -683,7 +683,9 @@ export class GlassesApp {
         if (current.name === 'terminal' && next.hold) void this.readHeld(entry.panelId);
       }
     } catch (error) {
-      if (this.view.name === 'terminal' && read === this.reads) {
+      // A drop keeps the last screen up and reading; only a computer that stopped reconnecting is a problem.
+      const reconnecting = error instanceof GlassesError && error.code === SCREEN_RECONNECTING;
+      if (!reconnecting && this.view.name === 'terminal' && read === this.reads) {
         this.showProblem(entry.name, error, { name: 'panes', computerId, entries: null });
         void this.openPanesQuietly(computerId);
         return;

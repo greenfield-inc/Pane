@@ -16,6 +16,9 @@ interface ChatSnapshot {
   attachment?: NonNullable<AgentChatSend['images']>[number];
 }
 
+/** Reloads after events were missed; a later event that does not fit reloads again. */
+const GAP_RELOADS = 3;
+
 export type ChatTransport = Pick<AgentChatClient, 'get' | 'send' | 'receipt'>;
 
 /** A phone's view of a host conversation. Leaving this view never stops its owner. */
@@ -102,13 +105,15 @@ export class ChatSession {
         gap ||= applied.resync;
       }
       this.pendingEvents = [];
-      repair = gap && repairAttempt < 1;
+      repair = gap && repairAttempt < GAP_RELOADS;
       if ((view.conversation?.generation ?? 0) >= (this.state.view?.conversation?.generation ?? 0)) {
         this.loadedTransportRevision = transportRevision;
         const current = this.state.view;
         if (current?.transcript && transcript && current.transcript.generation === transcript.generation && current.transcript.revision > transcript.revision) transcript = current.transcript;
         const state = current && this.stateRevision > startingRevision && current.conversation?.generation === view.conversation?.generation ? current : view;
-        this.publish({ view: { ...state, transcript }, error: gap ? 'The conversation changed while reconnecting. Refresh to load the latest messages.' : this.state.pendingDelivery ? this.state.error : undefined });
+        // Out of automatic reloads with events still missing: say so, so the person can reload.
+        const unresolved = gap && !repair ? 'The conversation kept changing while it reloaded. Refresh to load the latest messages.' : undefined;
+        this.publish({ view: { ...state, transcript }, error: unresolved ?? (this.state.pendingDelivery ? this.state.error : undefined) });
       } else if (this.state.view?.conversation?.active === 'chat' && !this.state.view.transcript) {
         // A handoff can finish while the older generation's request is in
         // flight. Its response cannot supply the new owner's history.

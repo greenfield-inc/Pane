@@ -182,6 +182,34 @@ be queued), and xterm render notification is not physical display presentation.
 These independent intervals do not identify an output chunk as an input echo.
 Background browser timer throttling can affect event-loop samples.
 
+### Testing remote clients on a flapping link
+
+`scripts/flapping-link-proxy.mjs` is a TCP proxy that cuts the link on and off
+the way a weak cellular or Tailscale path does. Put it in front of an isolated
+dev host and point a phone, PWA, glasses or desktop client at the proxy's port
+instead of the host's:
+
+```bash
+node scripts/flapping-link-proxy.mjs --target 127.0.0.1:HOST_PORT --host 0.0.0.0 --seed 1
+```
+
+It prints its port, its seed, and each phase with a timestamp:
+
+- **UP** (20-60 s): bytes pass untouched, including SSE streams and WebSocket
+  upgrades.
+- **DOWN** (5-80 s): open connections stay open but no bytes move either way,
+  and new connections are accepted but never reach the host. The client sees a
+  hang, not an error.
+- **REFUSING** (1 s after each DOWN): new connections are reset. A drop shorter
+  than 15 s then delivers the held bytes on the old connections; a longer drop
+  resets them.
+
+`--seed` repeats a schedule. `--scale 0.1` runs every duration ten times faster.
+`--up`, `--down` (ranges in seconds), `--long-drop` and `--refuse` change the
+defaults. Tests import `start()` from the script and drive the phases with
+`forceDown()` and `forceUp()`; see `scripts/flapping-link-proxy.test.mjs`, run
+by `pnpm test:flapping-proxy`.
+
 ## Code Style
 
 - TypeScript throughout; no explicit `any` (use a specific type, or `unknown`

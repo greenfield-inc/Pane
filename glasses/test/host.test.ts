@@ -282,6 +282,27 @@ describe('HostHub', () => {
     one.stop();
   });
 
+  it('reads a terminal screen through a drop once the computer answers again', async () => {
+    const a = host('https://studio.tail1.ts.net:8443');
+    a.handlers.set('runpane:panels:screen', () => ({ text: '$ npm test\nok', state: { running: true } }));
+    const { hub: one, timers } = hub([a]);
+    await until(() => one.computers()[0]?.status === 'live');
+    a.unreachable = true;
+    a.closeStreams();
+    const read = one.screen(a.url, 'panel-1');
+    for (let step = 0; step < 10; step += 1) {
+      timers.advance(1_000);
+      await flush();
+    }
+    a.unreachable = false;
+    for (let step = 0; step < 20; step += 1) {
+      timers.advance(1_000);
+      await flush();
+    }
+    await expect(read).resolves.toMatchObject({ lines: ['$ npm test', 'ok'] });
+    one.stop();
+  });
+
   it("says a computer on an older Pane can't take keys yet, and keeps it live however often it refuses", async () => {
     const a = host('https://studio.tail1.ts.net:8443');
     a.refusedChannels.add('runpane:panels:input');
