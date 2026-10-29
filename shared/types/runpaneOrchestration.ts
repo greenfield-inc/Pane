@@ -371,6 +371,16 @@ export interface RunpaneRepoAddRequest {
   dryRun?: boolean;
 }
 
+export interface RunpaneRepoRenameRequest {
+  repo: string;
+  name: string;
+}
+
+export interface RunpaneRepoRenameResult {
+  ok: true;
+  repo: RunpaneRepoSummary;
+}
+
 export interface RunpaneRepoAddPreview {
   name: string;
   path: string;

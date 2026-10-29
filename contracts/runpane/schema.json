@@ -495,6 +495,7 @@
         "agents doctor",
         "repos list",
         "repos add",
+        "repos rename",
         "panes",
         "panes list",
         "panes cost",
@@ -609,6 +610,9 @@
           "$ref": "#/$defs/helpLines"
         },
         "repos add": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "repos rename": {
           "$ref": "#/$defs/helpLines"
         },
         "panes": {

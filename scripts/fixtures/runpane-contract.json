@@ -1192,6 +1192,7 @@
       "runpane agent-context",
       "runpane repos list",
       "runpane repos add",
+      "runpane repos rename",
       "runpane panes list",
       "runpane panes create",
       "runpane panes archive",
