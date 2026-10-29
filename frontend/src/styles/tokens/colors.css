@@ -813,12 +813,12 @@
   --color-terminal-bright-white: rgb(0 0 0);
   --color-terminal-selection-bg: #1f6dc640;
 
-  --color-machine-1: #8b5cf6;
-  --color-machine-2: #0891b2;
-  --color-machine-3: #ec4899;
+  --color-machine-1: #7c3aed;
+  --color-machine-2: #0e7490;
+  --color-machine-3: #db2777;
   --color-machine-4: #4d7c0f;
-  --color-machine-5: #ea580c;
-  --color-machine-6: #f43f5e;
+  --color-machine-5: #c2410c;
+  --color-machine-6: #e11d48;
 }
 
 /* OLED Black Theme - True black for OLED displays */
@@ -2541,12 +2541,12 @@
 /* Folio Theme — paper & ink: warm cream stock, near-black ink, vermilion rubrication */
 :root.folio {
   /* Machine colours, as the base theme defines them. */
-  --color-machine-1: #8b5cf6;
-  --color-machine-2: #0891b2;
-  --color-machine-3: #ec4899;
+  --color-machine-1: #7c3aed;
+  --color-machine-2: #0e7490;
+  --color-machine-3: #db2777;
   --color-machine-4: #4d7c0f;
-  --color-machine-5: #ea580c;
-  --color-machine-6: #f43f5e;
+  --color-machine-5: #c2410c;
+  --color-machine-6: #e11d48;
   --status-on-tint-mix: 65%;
   /* Backgrounds — page / sheet / margin tonal steps */
   --color-bg-primary: var(--folio-paper);
@@ -2710,12 +2710,12 @@
 /* Newsprint Theme — cool grey-white stock, graphite ink, halftone greys, ink-blue accent */
 :root.newsprint {
   /* Machine colours, as the base theme defines them. */
-  --color-machine-1: #8b5cf6;
-  --color-machine-2: #0891b2;
-  --color-machine-3: #ec4899;
+  --color-machine-1: #7c3aed;
+  --color-machine-2: #0e7490;
+  --color-machine-3: #db2777;
   --color-machine-4: #4d7c0f;
-  --color-machine-5: #ea580c;
-  --color-machine-6: #f43f5e;
+  --color-machine-5: #c2410c;
+  --color-machine-6: #e11d48;
   --status-on-tint-mix: 65%;
   /* Backgrounds — stock / sheet / halftone tonal steps */
   --color-bg-primary: var(--news-paper);

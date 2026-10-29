@@ -199,7 +199,7 @@ interface ActiveMachineCardProps {
 /** The machine agents run on now, with the way back to this computer. */
 function ActiveMachineCard({ machine, local, lastError, connectedOverTailscale, switching, onSwitchBack, onRetry, onDetails, controller }: ActiveMachineCardProps) {
   const remote = machine.kind !== 'local';
-  const detail = [machine.subtitle, connectedOverTailscale && 'Connected over Tailscale'].filter(Boolean).join(' · ');
+  const detail = [machine.subtitle, !remote && 'Agents run here', connectedOverTailscale && 'Connected over Tailscale'].filter(Boolean).join(' · ');
   return (
     <div className="rounded-lg border border-border-secondary bg-surface-primary p-4" data-testid="active-machine">
       <div className="flex flex-wrap items-center gap-3">
@@ -252,7 +252,7 @@ function MachineRow({ machine, disabled, busy, password, onPasswordChange, onPas
       className={cn('group flex flex-wrap items-center justify-between gap-3 hover:bg-surface-hover focus-within:bg-surface-hover', CARD_ROW)}
       data-testid={`machine-${machine.name}`}
     >
-      <div className={cn('flex min-w-0 items-center gap-3', machine.presence === 'dimmed' && 'text-text-tertiary')}>
+      <div className={cn('flex min-w-0 flex-1 basis-48 items-center gap-3', machine.presence === 'dimmed' && 'text-text-tertiary')}>
         <MachineMark os={machine.os} slot={machine.slot} presence={machine.presence} size="md" />
         <div className="min-w-0">
           <p className={cn('flex items-center gap-2 truncate text-sm font-medium', machine.presence === 'dimmed' ? 'text-text-tertiary' : 'text-text-primary')}>

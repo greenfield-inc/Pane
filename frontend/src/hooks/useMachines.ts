@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { create } from 'zustand';
 import { API } from '../utils/api';
 import { useConfigStore } from '../stores/configStore';
 import { buildMachineList, machineOsFromPlatform, type MachineEntry, type MachineOs } from '../utils/machineList';
@@ -18,6 +19,10 @@ interface UseMachinesOptions {
   wrapConnect?: <T>(connect: () => Promise<T>) => Promise<T>;
 }
 
+// Main does not serialize client transitions, so one switch at a time across the
+// sidebar and Settings, which each hold their own copy of this hook.
+const useSwitching = create<{ id: string | null }>(() => ({ id: null }));
+
 function errorText(cause: unknown, fallback: string): string {
   return cause instanceof Error && cause.message ? cause.message : fallback;
 }
@@ -34,8 +39,7 @@ export function useMachines({ connectionState, refreshMs, wrapConnect }: UseMach
   const [localOs, setLocalOs] = useState<MachineOs | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
-  // Main does not serialize client transitions, so one switch at a time.
-  const [switchingId, setSwitchingId] = useState<string | null>(null);
+  const switchingId = useSwitching((state) => state.id);
   const mounted = useRef(true);
 
   const refresh = useCallback(async () => {
@@ -79,11 +83,11 @@ export function useMachines({ connectionState, refreshMs, wrapConnect }: UseMach
   );
 
   const select = useCallback(async (machine: MachineEntry, password?: string): Promise<MachineSelectOutcome> => {
-    if (machine.action === 'none' || switchingId) return { ok: true };
+    if (machine.action === 'none' || useSwitching.getState().id) return { ok: true };
     if (machine.action === 'password' && password === undefined) return { ok: false, needsPassword: true };
     const connect = wrapConnect ?? (<T,>(run: () => Promise<T>) => run());
     const failure = `Could not connect to ${machine.name}.`;
-    setSwitchingId(machine.id);
+    useSwitching.setState({ id: machine.id });
     try {
       if (machine.kind === 'local') {
         const response = await API.remoteDaemon.updateClientState({ activeProfileId: null, mode: 'local' });
@@ -106,12 +110,10 @@ export function useMachines({ connectionState, refreshMs, wrapConnect }: UseMach
       return { ok: false, error: errorText(cause, failure) };
     } finally {
       await fetchConfig().catch(() => undefined);
-      if (mounted.current) {
-        setSwitchingId(null);
-        void refresh();
-      }
+      useSwitching.setState({ id: null });
+      if (mounted.current) void refresh();
     }
-  }, [fetchConfig, refresh, switchingId, wrapConnect]);
+  }, [fetchConfig, refresh, wrapConnect]);
 
   return { machines, tailnet, listError, refreshing, refresh, select, switchingId };
 }

@@ -66,7 +66,7 @@ describe('buildMachineList', () => {
   it('describes each machine with its OS and state', () => {
     const list = buildMachineList(input());
     expect(list.map((machine) => machine.subtitle)).toEqual([
-      'macOS · This computer · Agents run here',
+      'macOS · This computer',
       'Linux · Ready',
       'Windows · Ready · Never connected',
       'macOS · Offline · Never connected',
@@ -114,7 +114,7 @@ describe('buildMachineList', () => {
   it('keeps saved Tailscale machines pickable before the listing answers', () => {
     const list = buildMachineList(input({ tailnet: null, localName: null }));
     expect(list.map((machine) => [machine.name, machine.subtitle, machine.action])).toEqual([
-      ['This computer', 'macOS · Agents run here', 'none'],
+      ['This computer', 'macOS', 'none'],
       ['build-box', 'Saved', 'switch'],
       ['cloud-vm', 'Added with a code', 'switch'],
     ]);

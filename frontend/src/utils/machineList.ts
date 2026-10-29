@@ -103,7 +103,8 @@ export function buildMachineList({ connectionState, profiles, tailnet, localName
     active: !remote,
     presence: 'solid',
     stateText: remote ? THIS_COMPUTER : 'Agents run here',
-    subtitle: subtitle(localOs, localName && THIS_COMPUTER, !remote && 'Agents run here'),
+    // The active row is checked, so the subtitle stays one short line in the menu.
+    subtitle: subtitle(localOs, localName && THIS_COMPUTER),
     action: remote ? 'switch' : 'none',
   };
 

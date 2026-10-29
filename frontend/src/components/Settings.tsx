@@ -63,6 +63,15 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
   const [remoteMachineId, setRemoteMachineId] = useState<string>();
   const [passwordRequest, setPasswordRequest] = useState<{ machine: string; nonce: number }>();
   const passwordNonce = useRef(0);
+  // A request opens its field once; leaving the page drops it so coming back starts closed.
+  const clearRemoteRequests = useCallback(() => {
+    setAddCodeRequest(undefined);
+    setPasswordRequest(undefined);
+  }, []);
+  const openMachineDetails = useCallback((machineId: string) => {
+    clearRemoteRequests();
+    setRemoteMachineId(machineId);
+  }, [clearRemoteRequests]);
   const askMachinePassword = useCallback((machine: string) => {
     passwordNonce.current += 1;
     setPasswordRequest({ machine, nonce: passwordNonce.current });
@@ -114,25 +123,28 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
     requestTransition(() => {
       setRemoteSubview(undefined);
       setRemoteMachineId(undefined);
+      clearRemoteRequests();
       onCategoryChange(nextCategory);
     });
-  }, [category, onCategoryChange, remoteMachineId, remoteSubview, requestTransition]);
+  }, [category, clearRemoteRequests, onCategoryChange, remoteMachineId, remoteSubview, requestTransition]);
 
   const requestClose = useCallback(() => {
     requestTransition(() => {
       setRemoteSubview(undefined);
       setRemoteMachineId(undefined);
+      clearRemoteRequests();
       onClose();
     });
-  }, [onClose, requestTransition]);
+  }, [clearRemoteRequests, onClose, requestTransition]);
 
   // Search leaves Settings before it opens a Pane, Session or project, through the unsaved-edits guard.
   useEffect(() => registerSettingsExit(then => requestTransition(() => {
     setRemoteSubview(undefined);
     setRemoteMachineId(undefined);
+    clearRemoteRequests();
     onClose();
     then();
-  })), [onClose, requestTransition]);
+  })), [clearRemoteRequests, onClose, requestTransition]);
 
   const showKeyboardShortcuts = useCallback(() => {
     requestTransition(onShowKeyboardShortcuts);
@@ -142,14 +154,18 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
     requestTransition(() => {
       setRemoteSubview(undefined);
       setRemoteMachineId(undefined);
+      clearRemoteRequests();
       onClose();
       onUpdate(versionInfo);
     });
-  }, [onClose, onUpdate, requestTransition]);
+  }, [clearRemoteRequests, onClose, onUpdate, requestTransition]);
 
   const openRemoteSubview = useCallback((subview: RemoteAccessSubviewId) => {
-    requestTransition(() => setRemoteSubview(subview));
-  }, [requestTransition]);
+    requestTransition(() => {
+      clearRemoteRequests();
+      setRemoteSubview(subview);
+    });
+  }, [clearRemoteRequests, requestTransition]);
 
   const content = () => {
     if (!persistence.config) return null;
@@ -185,7 +201,7 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
           <RemoteAccessSettings
             controller={remote}
             onOpenSubview={openRemoteSubview}
-            onOpenMachine={setRemoteMachineId}
+            onOpenMachine={openMachineDetails}
             addCodeRequest={addCodeRequest}
             passwordRequest={passwordRequest}
           />
