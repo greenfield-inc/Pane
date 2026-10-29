@@ -9,6 +9,7 @@ import { codelessProfile, decodeMachineList } from '@/auth/computers';
 import { useHostsStore } from '@/auth/hostsStore';
 import { createDaemonClient } from '@/daemon/createClient';
 import { invokeChannel } from '@/daemon/invoke';
+import { isDemoUrl } from '@/features/demo/demoHost';
 
 /** Computers come and go, and a tailnet switch changes the whole list; refresh while it is on screen. */
 const REFRESH_MS = 30_000;
@@ -49,6 +50,7 @@ export function useConnectComputer(onConnected?: () => void) {
   const addHost = useHostsStore(state => state.add);
   return useMutation({
     mutationFn: async ({ machine, domain, password }: { machine: TailnetMachine; domain: string; password?: string }) => {
+      if (isDemoUrl(machine.url)) throw new Error('This is a sample computer. Exit the demo to connect your own.');
       const profile = codelessProfile(machine, domain, password);
       const client = createDaemonClient(profile);
       try {

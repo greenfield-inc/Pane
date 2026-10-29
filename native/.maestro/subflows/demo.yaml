@@ -1,0 +1,23 @@
+# Opens the dev build with no saved hosts and starts "Try a demo". Needs no host.
+appId: com.dcouple.pane.mobile
+---
+- runFlow: launch-dev-client.yaml
+# Android dev builds show a LogBox toast about the notification channel's sound;
+# it would take a later tap.
+- runFlow:
+    when:
+      visible: ".*Custom sound 'default'.*"
+    commands:
+      - tapOn: ".*Custom sound 'default'.*"
+      - tapOn: "Dismiss"
+- scrollUntilVisible:
+    element:
+      id: connect-try-demo
+    centerElement: true
+    timeout: 20000
+- tapOn:
+    id: connect-try-demo
+- extendedWaitUntil:
+    visible:
+      id: connection-status-connected
+    timeout: 15000
