@@ -35,7 +35,7 @@ function createFakeHost() {
   let sendReady = true;
   let hangEvents = false;
   let hostDown = false;
-  let invokeHandler: (body: { channel: string; args: unknown[] }) => Response = () =>
+  let invokeHandler: (body: { channel: string; args: unknown[] }) => Response | Promise<Response> = () =>
     Response.json({ ok: true, result: null });
 
   const fetch = vi.fn(async (url: string, init?: RequestInit): Promise<Response> => {
@@ -366,6 +366,81 @@ describe('RemoteDaemonClient with the fetch event stream transport', () => {
 
     expect(host.streamCount).toBe(1);
     expect(client.getState().status).toBe('local');
+  });
+});
+
+describe('RemoteDaemonClient when the phone leaves and returns', () => {
+  it('reconnects on return after more than five minutes in the background', async () => {
+    const host = createFakeHost();
+    // No heartbeats in these tests; keep the stale-stream timer out of the way.
+    const client = createClient(host, 600_000);
+    await client.connect();
+    await flush();
+
+    client.suspend();
+    await vi.advanceTimersByTimeAsync(6 * 60_000);
+    client.resume();
+    await flush();
+
+    expect(client.getState()).toMatchObject({ status: 'connected', lastError: null });
+    client.disconnect();
+  });
+
+  it('finishes connecting when the app was backgrounded during the handshake', async () => {
+    const host = createFakeHost();
+    // No heartbeats in these tests; keep the stale-stream timer out of the way.
+    const client = createClient(host, 600_000);
+    const connecting = client.connect();
+    client.suspend();
+    await connecting;
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(client.getState().status).not.toBe('connected');
+
+    client.resume();
+    await flush();
+    expect(client.getState().status).toBe('connected');
+    client.disconnect();
+  });
+
+  it('reconnects when restoration does not finish within 30 seconds', async () => {
+    const host = createFakeHost();
+    // No heartbeats in these tests; keep the stale-stream timer out of the way.
+    const client = createClient(host, 600_000);
+    let hang = true;
+    client.onRestore(() => (hang ? new Promise<void>(() => {}) : Promise.resolve()));
+    await client.connect();
+    await flush();
+    expect(client.getState().status).toBe('restoring');
+
+    hang = false;
+    await vi.advanceTimersByTimeAsync(29_000);
+    expect(client.getState().status).toBe('restoring');
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(client.getState().status).toBe('connected');
+    expect(host.streamCount).toBe(2);
+    client.disconnect();
+  });
+
+  it('reconnects and restores after terminal input times out', async () => {
+    const host = createFakeHost();
+    // No heartbeats in these tests; keep the stale-stream timer out of the way.
+    const client = createClient(host, 600_000);
+    const restores: number[] = [];
+    client.onRestore(async () => { restores.push(Date.now()); });
+    await client.connect();
+    await flush();
+    host.onInvoke(() => new Promise<Response>(() => {}));
+
+    const typed = client.invoke('terminal:input', ['panel-1', 'x']);
+    const failed = expect(typed).rejects.toThrow('Delivery unknown');
+    await vi.advanceTimersByTimeAsync(10_000);
+    await failed;
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    expect(client.getState().status).toBe('connected');
+    expect(host.streamCount).toBe(2);
+    expect(restores).toHaveLength(2);
+    client.disconnect();
   });
 });
 

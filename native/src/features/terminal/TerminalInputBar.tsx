@@ -33,6 +33,7 @@ export interface TerminalInputBarProps {
   onSelectionChange: (selection: { start: number; end: number }) => void;
   /** Moves the cursor after an insert; undefined leaves it to the user. */
   selection?: { start: number; end: number };
+  /** The terminal can't take input: Send and the host actions wait. Typing, Paste and Shortcuts still work. */
   disabled?: boolean;
 }
 
@@ -59,7 +60,7 @@ export function TerminalInputBar({
         onChangeText={text => !previewing && onChangeDraft(text)}
         onSelectionChange={event => onSelectionChange(event.nativeEvent.selection)}
         selection={previewing ? undefined : selection}
-        editable={!disabled && !previewing}
+        editable={!previewing}
         placeholder="Type, dictate or pick a shortcut"
         placeholderTextColor={colors.textMuted}
         multiline
@@ -70,12 +71,12 @@ export function TerminalInputBar({
         keyboardAppearance={theme.scheme}
         textAlignVertical="top"
         selectionColor={colors.accent}
-        style={[styles.input, { color: previewing ? colors.textMuted : colors.text, opacity: disabled ? 0.5 : 1 }]}
+        style={[styles.input, { color: previewing ? colors.textMuted : colors.text }]}
       />
       <View style={styles.actions}>
         <BoxAction testID="terminal-attach" label="Attach files" hint="Copies photos or files to the host and inserts their paths" ios="paperclip" android="attach_file" disabled={disabled} onPress={onAttach} />
-        <BoxAction testID="terminal-paste" label="Paste" hint="Pastes the clipboard at the cursor" ios="doc.on.clipboard" android="content_paste" tinted disabled={disabled} onPress={onPaste} />
-        <BoxAction testID="terminal-shortcuts" label="Shortcuts" hint="Inserts one of the host's shortcuts" ios="bolt" android="bolt" disabled={disabled} onPress={onShortcuts} />
+        <BoxAction testID="terminal-paste" label="Paste" hint="Pastes the clipboard at the cursor" ios="doc.on.clipboard" android="content_paste" tinted disabled={false} onPress={onPaste} />
+        <BoxAction testID="terminal-shortcuts" label="Shortcuts" hint="Inserts one of the host's shortcuts" ios="bolt" android="bolt" disabled={false} onPress={onShortcuts} />
         <BoxAction testID="terminal-copy" label="Copy from terminal" hint="Shows recent output to copy" ios="doc.on.doc" android="content_copy" disabled={disabled} onPress={onCopy} />
         <View style={styles.spacer} />
         <BoxAction

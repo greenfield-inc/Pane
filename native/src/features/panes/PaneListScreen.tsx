@@ -7,7 +7,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useDaemon } from '@/daemon';
 import { DemoBadge } from '@/features/demo/DemoBadge';
-import { ConnectionStatus } from '@/features/hosts/ConnectionStatus';
+import { ConnectionBar, ConnectionDot, Dimmed, presenceLabel } from '@/features/hosts/ConnectionStatus';
+import { useConnectionPresence } from '@/features/hosts/useConnectionPresence';
 import { useNotifyShared } from '@/features/notify/hooks';
 import { waitingQuestions } from '@/features/notify/notifyQuestions';
 import { openNotifySheet } from '@/features/notify/NotifySheet';
@@ -42,7 +43,8 @@ import { StatusBadge } from './StatusBadge';
 export function PaneListScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const { client, connection } = useDaemon();
+  const { profile } = useDaemon();
+  const { presence, notice, retry } = useConnectionPresence();
   const [query, setQuery] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const projects = useProjects();
@@ -192,7 +194,10 @@ export function PaneListScreen() {
           <Icon ios="apple.terminal" android="terminal" size={20} color={theme.colors.accent} />
           <Text variant="headline" accessibilityRole="header" numberOfLines={1} style={styles.brandTitle}>Remote Pane</Text>
         </View>
-        <ConnectionStatus updateIntent={connection.updateIntent} status={connection.status} onRetry={() => client.retryNow()} />
+        <View testID={`connection-status-${presence}`} style={styles.machine} accessible accessibilityLabel={presenceLabel(presence, profile.label)}>
+          <ConnectionDot presence={presence} />
+          <Text variant="footnote" tone="secondary" numberOfLines={1}>{profile.label}</Text>
+        </View>
         <DemoBadge />
         <View style={styles.headerActions}>
           <IconButton label="Refresh remote sessions" testID="panes-refresh" onPress={() => void refresh()}>
@@ -203,89 +208,92 @@ export function PaneListScreen() {
           </IconButton>
         </View>
       </View>
+      <ConnectionBar notice={notice} onRetry={retry} />
 
-      {/* The PWA's create buttons and, where it shows its Remote Desktop link, search: p-3 border-b. */}
-      <View style={[styles.toolbar, divider]}>
-        <View style={styles.createButtons}>
-          {sessions.unavailable ? null : (
-            <CreateButton testID="sessions-new" title="New Session" onPress={() => router.push('/session/new')}>
-              <Icon ios="bubble.left" android="chat_bubble" size={16} color={theme.colors.onAccent} />
+      <Dimmed dimmed={presence !== 'connected'} style={styles.fill}>
+        {/* The PWA's create buttons and, where it shows its Remote Desktop link, search: p-3 border-b. */}
+        <View style={[styles.toolbar, divider]}>
+          <View style={styles.createButtons}>
+            {sessions.unavailable ? null : (
+              <CreateButton testID="sessions-new" title="New Session" onPress={() => router.push('/session/new')}>
+                <Icon ios="bubble.left" android="chat_bubble" size={16} color={theme.colors.onAccent} />
+              </CreateButton>
+            )}
+            <CreateButton testID="panes-new" title="New Pane" disabled={(projects.data ?? []).length === 0} onPress={() => router.push('/pane/new')}>
+              <Icon ios="plus" android="add" size={16} color={theme.colors.onAccent} />
             </CreateButton>
-          )}
-          <CreateButton testID="panes-new" title="New Pane" disabled={(projects.data ?? []).length === 0} onPress={() => router.push('/pane/new')}>
-            <Icon ios="plus" android="add" size={16} color={theme.colors.onAccent} />
-          </CreateButton>
-        </View>
-        <View style={[styles.search, { borderRadius: theme.radius.md, borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceRaised }]}>
-          <Icon ios="magnifyingglass" android="search" size={16} />
-          <TextInput
-            testID="panes-search"
-            accessibilityLabel="Search panes"
-            placeholder="Search panes"
-            placeholderTextColor={theme.colors.textMuted}
-            selectionColor={theme.colors.accent}
-            autoCapitalize="none"
-            autoCorrect={false}
-            returnKeyType="search"
-            value={query}
-            onChangeText={setQuery}
-            style={[theme.typography.subhead, styles.searchInput, { color: theme.colors.text }]}
-          />
-          {query ? (
-            <IconButton label="Clear search" testID="panes-search-clear" size={28} onPress={() => setQuery('')}>
-              <Icon ios="xmark.circle.fill" android="cancel" size={16} />
-            </IconButton>
-          ) : null}
-        </View>
-      </View>
-
-      <LegendList
-        testID="panes-list"
-        data={loading ? [] : items}
-        keyExtractor={item => item.key}
-        getItemType={item => item.type}
-        estimatedItemSize={48}
-        keyboardDismissMode="on-drag"
-        keyboardShouldPersistTaps="handled"
-        refreshing={refreshing}
-        onRefresh={() => void refresh()}
-        style={styles.fill}
-        contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 12 }]}
-        ListHeaderComponent={waiting.length > 0 || questions.length > 0 ? (
-          <View>
-            {questions.length > 0 ? <SectionHeader title="Questions" first /> : null}
-            {questions.map(item => (
-              <WaitingRow
-                key={item.id}
-                testID={`notify-row-${item.id}`}
-                name={item.source.name}
-                detail={item.title}
-                onPress={() => openNotifySheet(item.id, item.source.paneId)}
-              />
-            ))}
-            {waiting.length > 0 ? <SectionHeader title="Needs approval" first={questions.length === 0} /> : null}
-            {waiting.map(request => {
-              const { title, target } = describePermission(request);
-              return (
-                <WaitingRow
-                  key={request.id}
-                  testID={`permission-row-${request.sessionId}`}
-                  name={paneNames.get(request.sessionId) ?? 'Pane'}
-                  detail={target ? `${title}: ${target}` : title}
-                  onPress={() => router.push({ pathname: '/pane/[paneId]/permission', params: { paneId: request.sessionId, requestId: request.id } })}
-                />
-              );
-            })}
           </View>
-        ) : null}
-        ListEmptyComponent={
-          loading ? <LoadingRows />
-            : projects.isError ? <Notice danger message={projects.error.message} action={{ title: 'Try again', onPress: () => void projects.refetch() }} />
-            : query && (projects.data ?? []).length > 0 ? <Notice testID="panes-no-results" message={`No panes match “${query}”.`} />
-            : <Notice testID="panes-empty" message="No remote panes found on this host." />
-        }
-        renderItem={renderItem}
-      />
+          <View style={[styles.search, { borderRadius: theme.radius.md, borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceRaised }]}>
+            <Icon ios="magnifyingglass" android="search" size={16} />
+            <TextInput
+              testID="panes-search"
+              accessibilityLabel="Search panes"
+              placeholder="Search panes"
+              placeholderTextColor={theme.colors.textMuted}
+              selectionColor={theme.colors.accent}
+              autoCapitalize="none"
+              autoCorrect={false}
+              returnKeyType="search"
+              value={query}
+              onChangeText={setQuery}
+              style={[theme.typography.subhead, styles.searchInput, { color: theme.colors.text }]}
+            />
+            {query ? (
+              <IconButton label="Clear search" testID="panes-search-clear" size={28} onPress={() => setQuery('')}>
+                <Icon ios="xmark.circle.fill" android="cancel" size={16} />
+              </IconButton>
+            ) : null}
+          </View>
+        </View>
+
+        <LegendList
+          testID="panes-list"
+          data={loading ? [] : items}
+          keyExtractor={item => item.key}
+          getItemType={item => item.type}
+          estimatedItemSize={48}
+          keyboardDismissMode="on-drag"
+          keyboardShouldPersistTaps="handled"
+          refreshing={refreshing}
+          onRefresh={() => void refresh()}
+          style={styles.fill}
+          contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 12 }]}
+          ListHeaderComponent={waiting.length > 0 || questions.length > 0 ? (
+            <View>
+              {questions.length > 0 ? <SectionHeader title="Questions" first /> : null}
+              {questions.map(item => (
+                <WaitingRow
+                  key={item.id}
+                  testID={`notify-row-${item.id}`}
+                  name={item.source.name}
+                  detail={item.title}
+                  onPress={() => openNotifySheet(item.id, item.source.paneId)}
+                />
+              ))}
+              {waiting.length > 0 ? <SectionHeader title="Needs approval" first={questions.length === 0} /> : null}
+              {waiting.map(request => {
+                const { title, target } = describePermission(request);
+                return (
+                  <WaitingRow
+                    key={request.id}
+                    testID={`permission-row-${request.sessionId}`}
+                    name={paneNames.get(request.sessionId) ?? 'Pane'}
+                    detail={target ? `${title}: ${target}` : title}
+                    onPress={() => router.push({ pathname: '/pane/[paneId]/permission', params: { paneId: request.sessionId, requestId: request.id } })}
+                  />
+                );
+              })}
+            </View>
+          ) : null}
+          ListEmptyComponent={
+            loading ? <LoadingRows />
+              : projects.isError ? <Notice danger message={projects.error.message} action={{ title: 'Try again', onPress: () => void projects.refetch() }} />
+              : query && (projects.data ?? []).length > 0 ? <Notice testID="panes-no-results" message={`No panes match “${query}”.`} />
+              : <Notice testID="panes-empty" message="No remote panes found on this host." />
+          }
+          renderItem={renderItem}
+        />
+      </Dimmed>
     </View>
   );
 }
@@ -373,6 +381,7 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 48, paddingHorizontal: 16, paddingBottom: 8, borderBottomWidth: 1 },
   brand: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 },
   brandTitle: { flexShrink: 1, fontSize: 18, lineHeight: 28 },
+  machine: { flexShrink: 1, flexDirection: 'row', alignItems: 'center', gap: 6 },
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   toolbar: { padding: 12, gap: 8, borderBottomWidth: 1 },
   createButtons: { flexDirection: 'row', gap: 8 },

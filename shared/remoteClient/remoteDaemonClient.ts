@@ -155,6 +155,9 @@ const invokeResponseSchema = boundary.union(
 const HEALTH_CHECK_ATTEMPTS = 5;
 const INVOKE_ATTEMPTS = 4;
 const REQUEST_RETRY_DELAY_MS = 2_000;
+/** A restore that has not finished by then is treated as a broken connection. */
+const RESTORE_TIMEOUT_MS = 30_000;
+const RECONNECT_GAVE_UP_MESSAGE = 'Could not reconnect within five minutes. Your workspace is kept. Choose Retry now.';
 
 /** Platform-neutral client for a Pane daemon's HTTP + SSE API. */
 export class RemoteDaemonClient {
@@ -172,11 +175,14 @@ export class RemoteDaemonClient {
   private deadlineTimer: RemoteTimer | null = null;
   private readonly schedule: RemoteSchedule;
   private streamController: AbortController | null = null;
-  private restoreListeners = new Set<(signal: AbortSignal) => Promise<void>>();
+  private restoreListeners = new Map<(signal: AbortSignal) => Promise<void>, string>();
   private eventListeners = new Set<(event: RemoteDaemonClientEvent) => void>();
   private statusListeners = new Set<(state: RemoteDaemonConnectionState) => void>();
-  private readonly inputQueue = new RemoteInputQueue((channel, args, signal) =>
-    this.invokeRequest(channel, args, signal));
+  private readonly inputQueue = new RemoteInputQueue(
+    (channel, args, signal) => this.invokeRequest(channel, args, signal),
+    // Input the host never answered means the connection is broken; a restore follows.
+    () => this.scheduleReconnect('Terminal input timed out'),
+  );
   private state: RemoteDaemonConnectionState = {
     status: 'local',
     lastError: null,
@@ -203,9 +209,12 @@ export class RemoteDaemonClient {
     return () => this.eventListeners.delete(listener);
   }
 
-  /** Core state owners finish their reads before the connection becomes green. */
-  onRestore(listener: (signal: AbortSignal) => Promise<void>): () => void {
-    this.restoreListeners.add(listener);
+  /**
+   * Core state owners finish their reads before the connection becomes green.
+   * `label` names the step in the timing logs.
+   */
+  onRestore(listener: (signal: AbortSignal) => Promise<void>, label = 'restore'): () => void {
+    this.restoreListeners.set(listener, label);
     return () => this.restoreListeners.delete(listener);
   }
 
@@ -238,7 +247,8 @@ export class RemoteDaemonClient {
       }
       throw error;
     }
-    if (!signal.aborted) void this.openEventStream(signal);
+    // Backgrounded mid-handshake: `resume` opens the stream on return.
+    if (!signal.aborted && !this.suspended) void this.openEventStream(signal);
   }
 
   disconnect(): void {
@@ -257,7 +267,6 @@ export class RemoteDaemonClient {
   suspend(): void {
     if (this.state.status === 'local' || this.state.status === 'error') return;
     this.suspended = true;
-    void this.recovery.remainingMs; // Start a new outage only if the connection was healthy.
     this.clearReconnectTimer();
     this.clearDeadline();
     this.streamController?.abort();
@@ -265,17 +274,20 @@ export class RemoteDaemonClient {
     this.setState({ status: 'reconnecting' });
   }
 
+  /** Time asleep is not an outage: each return gets a fresh five minutes. */
   resume(): void {
     if (!this.suspended) return;
     this.suspended = false;
-    if (!this.recovery.remainingMs) { this.stopRecovery('Could not reconnect within five minutes. Choose Retry now.'); return; }
+    this.recovery.reset();
+    this.clearDeadline();
     this.retryNow();
   }
 
   retryNow(): void {
     if (this.suspended) return;
     if (this.state.status === 'error' || this.state.status === 'local') { void this.connect().catch(() => {}); return; }
-    if (this.state.status === 'restoring' || this.state.status === 'connecting') return;
+    // Already on its way; keep its deadline armed so it cannot hang forever.
+    if (this.state.status === 'restoring' || this.state.status === 'connecting') { this.armDeadline(); return; }
     this.clearReconnectTimer();
     this.streamController?.abort();
     this.armDeadline();
@@ -441,7 +453,7 @@ export class RemoteDaemonClient {
             ready = true;
             this.setState({ status: 'restoring', lastError: null });
             this.handleSseEvent(event);
-            void Promise.all([...this.restoreListeners].map(listener => listener(stream.signal))).then(() => {
+            void this.restore(stream.signal).then(() => {
               if (stream.signal.aborted || signal.aborted) return;
               this.recovery.reset();
               this.clearDeadline();
@@ -476,6 +488,28 @@ export class RemoteDaemonClient {
     }
   }
 
+  /** Runs every restore listener, timing each, and fails if they outlast `RESTORE_TIMEOUT_MS`. */
+  private async restore(signal: AbortSignal): Promise<void> {
+    const started = Date.now();
+    const pending = new Set<string>();
+    const steps = [...this.restoreListeners].map(async ([listener, label]) => {
+      pending.add(label);
+      await listener(signal);
+      pending.delete(label);
+      console.info(`[remote] restore step ${label} took ${Date.now() - started} ms`);
+    });
+    let expire!: (error: Error) => void;
+    const timeout = new Promise<never>((_, reject) => { expire = reject; });
+    const timer = this.schedule(() => expire(new Error(
+      `Workspace restoration did not finish within ${RESTORE_TIMEOUT_MS / 1000} s (waiting on ${[...pending].join(', ')})`,
+    )), RESTORE_TIMEOUT_MS);
+    try {
+      await Promise.race([Promise.all(steps), timeout]);
+    } finally {
+      timer.cancel();
+    }
+  }
+
   private handleSseEvent(event: ParsedSseEvent): void {
     if (event.event === 'heartbeat') {
       const payload = decodeRemoteHeartbeatPayload(JSON.parse(event.data));
@@ -506,9 +540,7 @@ export class RemoteDaemonClient {
   }
 
   private armDeadline(): void {
-    this.deadlineTimer ??= this.schedule(() => {
-      this.stopRecovery('Could not reconnect within five minutes. Your workspace is kept. Choose Retry now.');
-    }, this.recovery.remainingMs);
+    this.deadlineTimer ??= this.schedule(() => this.stopRecovery(RECONNECT_GAVE_UP_MESSAGE), this.recovery.remainingMs);
   }
 
   private stopRecovery(message: string): void {
@@ -526,14 +558,14 @@ export class RemoteDaemonClient {
     this.armDeadline();
     const delayMs = this.recovery.nextDelay();
     if (delayMs === null) {
-      this.stopRecovery('Could not reconnect within five minutes. Your workspace is kept. Choose Retry now.');
+      this.stopRecovery(RECONNECT_GAVE_UP_MESSAGE);
       return;
     }
     this.setState({ status: 'reconnecting', lastError: message });
     this.reconnectTimer = this.schedule(() => {
       this.reconnectTimer = null;
       if (!this.abortController || this.abortController.signal.aborted) return;
-      if (!this.recovery.remainingMs) { this.stopRecovery('Could not reconnect within five minutes. Choose Retry now.'); return; }
+      if (!this.recovery.remainingMs) { this.stopRecovery(RECONNECT_GAVE_UP_MESSAGE); return; }
       void this.openEventStream(this.abortController.signal);
     }, delayMs);
   }
@@ -549,7 +581,11 @@ export class RemoteDaemonClient {
   }
 
   private setState(update: Partial<RemoteDaemonConnectionState>): void {
+    const previous = this.state.status;
     this.state = { ...this.state, ...update };
+    if (this.state.status !== previous) {
+      console.info(`[remote] ${new Date().toISOString()} ${previous} -> ${this.state.status}${this.state.lastError ? ` (${this.state.lastError})` : ''}`);
+    }
     for (const listener of this.statusListeners) {
       listener(this.getState());
     }

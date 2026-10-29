@@ -27,11 +27,11 @@ const inputSchema = boundary.object({ panelId: boundary.nonEmptyString, data: bo
 export class RemoteInputQueue<Result> {
   private readonly panels = new Map<string, PanelInputQueue<Result>>();
 
-  constructor(private readonly send: (
-    channel: string,
-    args: unknown[],
-    signal?: AbortSignal,
-  ) => Promise<Result>) {}
+  constructor(
+    private readonly send: (channel: string, args: unknown[], signal?: AbortSignal) => Promise<Result>,
+    /** Called when the host never answered a request, after its input is failed. */
+    private readonly onTimeout?: () => void,
+  ) {}
 
   invoke(channel: string, args: unknown[]): Promise<Result> {
     if (channel !== 'terminal:input' && channel !== 'panels:send-terminal-input') {
@@ -77,6 +77,7 @@ export class RemoteInputQueue<Result> {
     const controller = new AbortController();
     const timeout = setTimeout(() => {
       this.fail(panelId, queue, new Error('Delivery unknown: terminal input timed out. Check the original panel before resubmitting; pending input was discarded.'));
+      this.onTimeout?.();
     }, INPUT_TIMEOUT_MS);
     queue.active = { batch, controller, timeout };
 

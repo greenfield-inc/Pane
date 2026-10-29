@@ -39,15 +39,18 @@ export function DaemonProvider({ profile, children }: { profile: RemotePaneConne
       if (signal.aborted) return;
       // A switch changed while this computer was away reaches it now.
       requestPushRegistration();
-    });
+    }, 'workspace lists');
     const unsubscribeStatus = client.onStatus(setConnection);
     const connect = () => client.connect().catch(() => undefined);
     void connect();
+    // Only a real trip to the background suspends. Control Center, Notification
+    // Center and Face ID pass through 'inactive' and leave the connection live.
     const appState = AppState.addEventListener('change', status => {
-      const { status: current } = client.getState();
-      if (status !== 'active') client.suspend();
-      else if (current === 'local') void connect();
-      else client.resume();
+      if (status === 'background') client.suspend();
+      else if (status === 'active') {
+        if (client.getState().status === 'local') void connect();
+        else client.resume();
+      }
     });
     return () => {
       appState.remove();

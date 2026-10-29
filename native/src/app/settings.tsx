@@ -1,12 +1,13 @@
 import * as Linking from 'expo-linking';
 import { router } from 'expo-router';
-import { Alert } from 'react-native';
+import { Alert, View } from 'react-native';
 
 import { useHostsStore } from '@/auth/hostsStore';
 import { useDaemon } from '@/daemon';
 import { PRIVACY_POLICY_URL } from '@/features/app/privacyPolicy';
 import { isDemoProfile } from '@/features/demo/demoHost';
-import { ConnectionStatus } from '@/features/hosts/ConnectionStatus';
+import { ConnectionDot } from '@/features/hosts/ConnectionStatus';
+import { useConnectionPresence } from '@/features/hosts/useConnectionPresence';
 import { NotificationSettings } from '@/features/notifications/NotificationSettings';
 import { AppUpdateRow } from '@/features/updates/AppUpdateRow';
 import { signOutPush } from '@/features/notifications/usePushSetup';
@@ -15,7 +16,8 @@ import { Icon, ListRow, ListSection, Screen } from '@/ui';
 
 export default function SettingsScreen() {
   const theme = useTheme();
-  const { client, profile, connection } = useDaemon();
+  const { client, profile } = useDaemon();
+  const { presence, notice, retry } = useConnectionPresence();
   const profiles = useHostsStore(state => state.profiles);
   const setActive = useHostsStore(state => state.setActive);
   const remove = useHostsStore(state => state.remove);
@@ -35,13 +37,14 @@ export default function SettingsScreen() {
 
   return (
     <Screen scroll testID="settings-screen">
-      <ListSection title="Current host" footer={connection.lastError ?? undefined}>
+      <ListSection title="Current host" footer={notice?.message}>
         <ListRow
           testID="settings-current-host"
           title={profile.label}
           subtitle={profile.baseUrl}
-          trailing={<ConnectionStatus updateIntent={connection.updateIntent} status={connection.status} onRetry={() => client.retryNow()} />}
+          trailing={<View testID={`connection-status-${presence}`}><ConnectionDot presence={presence} /></View>}
         />
+        {notice?.canRetry ? <ListRow testID="settings-retry-connection" title="Retry now" onPress={retry} /> : null}
         {demo
           ? <ListRow testID="settings-exit-demo" title="Exit Demo" subtitle="Sample data only. Nothing here is real." destructive onPress={exitDemo} />
           : <ListRow testID="settings-sign-out" title="Sign Out" destructive onPress={confirmSignOut} />}

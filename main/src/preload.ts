@@ -354,6 +354,9 @@ function invokeIpc(channel: string, ...args: unknown[]) {
   return ipcRenderer.invoke(channel, ...args);
 }
 
+// Main has no network event; a reconnecting remote host retries when the renderer sees the network return.
+window.addEventListener('online', () => ipcRenderer.send('remote-daemon:network-online'));
+
 contextBridge.exposeInMainWorld('electronAPI', {
   onNotesChanged: (callback: () => void) => {
     const listener = () => callback();
@@ -690,6 +693,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   remoteDaemon: {
     restoreComplete: (restoreId: number, error?: string): Promise<void> => ipcRenderer.invoke('remote-daemon:restore-complete', restoreId, error),
+    /** The renderer now handles restorations; main resends one it sent too early. */
+    restoreReady: (): void => ipcRenderer.send('remote-daemon:restore-ready'),
     getConfig: (): Promise<IPCResponse<RemoteDaemonConfig>> => invokeIpc('remote-daemon:get-config'),
     getConnectionState: (): Promise<IPCResponse<RemotePaneConnectionState>> => invokeIpc('remote-daemon:get-connection-state'),
     getHostState: (): Promise<IPCResponse<RemoteDaemonHostRuntimeState>> => invokeIpc('remote-daemon:get-host-state'),

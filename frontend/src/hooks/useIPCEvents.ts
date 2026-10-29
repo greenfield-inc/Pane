@@ -555,6 +555,8 @@ export function useIPCEvents() {
     });
     if (unsubscribeRemoteResync) {
       unsubscribeFunctions.push(unsubscribeRemoteResync);
+      // A restoration sent while this page was loading went unheard; main sends it again.
+      window.electronAPI.remoteDaemon?.restoreReady?.();
     }
 
     // Load initial sessions

@@ -23,6 +23,7 @@ import type { Project } from '../types/project';
 import type { Session } from '../types/session';
 import { useSessionNavigationHotkeys } from '../hooks/useSessionNavigationHotkeys';
 import { useRemoteRuntimeState } from '../hooks/useRemoteRuntimeState';
+import { useConnectionPresence } from '../hooks/useConnectionPresence';
 import { useAppBuildInfo } from '../hooks/useAppBuildInfo';
 import { CompactSessionMenu, type CompactSessionMenuState } from './CompactSessionMenu';
 import { getRemoteFooterStatus } from '../utils/remoteRuntimePresentation';
@@ -156,6 +157,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
     archived: false,
   });
   const { connectionState: remoteConnectionState, hostState: remoteHostState } = useRemoteRuntimeState();
+  const { presence: remotePresence } = useConnectionPresence(remoteConnectionState);
   const hydrateExpandedProjects = useNavigationStore(s => s.hydrateExpandedProjects);
   const hydrateExpandedSessions = useNavigationStore(s => s.hydrateExpandedSessions);
   const hydrateExpandedArchivedProjects = useNavigationStore(s => s.hydrateExpandedArchivedProjects);
@@ -247,8 +249,8 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
   const activeSessionId = useSessionStore((state) => state.activeSessionId);
   const setActiveSession = useSessionStore((state) => state.setActiveSession);
   const remoteFooterStatus = useMemo(
-    () => getRemoteFooterStatus(remoteConnectionState, remoteHostState),
-    [remoteConnectionState, remoteHostState],
+    () => getRemoteFooterStatus(remoteConnectionState, remoteHostState, remotePresence),
+    [remoteConnectionState, remoteHostState, remotePresence],
   );
   const remoteFooterTooltip = (
     <div className="max-w-[260px] space-y-1">

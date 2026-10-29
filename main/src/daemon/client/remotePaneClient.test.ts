@@ -16,6 +16,10 @@ interface TestRemoteServer {
   /** Answer this channel the way a host without the command does. */
   refuseChannel(channel: string): void;
   truncateInvoke(): void;
+  /** Answer each invoke after `ms`. */
+  delayInvoke(ms: number): void;
+  /** Send a heartbeat on the event stream every `ms`; 0 stops them. */
+  setHeartbeatInterval(ms: number): void;
   close(): Promise<void>;
   closeEventStream(): void;
   emitDaemonEvent(payload: JsonValue): void;
@@ -26,6 +30,7 @@ interface TestRemoteServer {
   getLastEventsPath(): string | undefined;
   getLastEventsClientDeviceLabel(): string | undefined;
   getEventRequestCount(): number;
+  getInvokeCount(): number;
   setEmitReadyEvent(emitReadyEvent: boolean): void;
   setEventsReady(ready: boolean): void;
 }
@@ -72,7 +77,7 @@ describe('RemotePaneClient', () => {
     }));
   });
 
-  it('routes a truncated mutation response to recovery and never replays it', async () => {
+  it('fails only a truncated mutation while the stream is up, and never replays it', async () => {
     const server = await createTestRemoteServer();
     activeServers.push(server);
     const states: string[] = [];
@@ -82,7 +87,69 @@ describe('RemotePaneClient', () => {
     await client.connect();
     server.truncateInvoke();
     await expect(client.invoke('panels:input', ['panel', 'hello'])).rejects.toThrow('Delivery unknown');
+    expect(server.getInvokeCount()).toBe(1);
+    expect(states.at(-1)).toBe('connected');
+    expect(server.getEventRequestCount()).toBe(1);
+    await client.disconnect();
+  });
+
+  it('keeps the stream up through a slow request while heartbeats arrive, and drops it when they stop', async () => {
+    // Scaled from the plan: heartbeats every 5 s, silence limit 20 s, request limit 15 s, host answers after 20 s.
+    const server = await createTestRemoteServer();
+    activeServers.push(server);
+    const states: string[] = [];
+    const client = new RemotePaneClient({ id: 'slow', label: 'host', baseUrl: server.baseUrl, token: '', transport: 'http+sse' }, {
+      heartbeatStaleTimeoutMs: 200,
+      requestTimeoutMs: 150,
+      reconnectInitialDelayMs: 1_000,
+      onConnectionStateChange: status => states.push(status),
+    });
+    server.setHeartbeatInterval(50);
+    await client.connect();
+    server.delayInvoke(200);
+
+    await expect(client.invoke('sessions:get-all', [])).rejects.toMatchObject({ code: 'ERR_REMOTE_TRANSPORT' });
+    await sleep(300);
+    expect(states.at(-1)).toBe('connected');
+    expect(server.getEventRequestCount()).toBe(1);
+
+    server.setHeartbeatInterval(0);
+    await waitFor(() => states.at(-1) === 'reconnecting');
+    await client.disconnect();
+  });
+
+  it('reconnects after three failed requests in a row', async () => {
+    const server = await createTestRemoteServer();
+    activeServers.push(server);
+    const states: string[] = [];
+    const client = new RemotePaneClient({ id: 'three', label: 'host', baseUrl: server.baseUrl, token: '', transport: 'http+sse' }, {
+      reconnectInitialDelayMs: 1_000,
+      onConnectionStateChange: status => states.push(status),
+    });
+    await client.connect();
+    server.truncateInvoke();
+    await expect(client.invoke('sessions:get-all', [])).rejects.toThrow('Remote connection interrupted');
+    await expect(client.invoke('sessions:get-all', [])).rejects.toThrow('Remote connection interrupted');
+    expect(states.at(-1)).toBe('connected');
+    await expect(client.invoke('sessions:get-all', [])).rejects.toThrow('Pane is reconnecting');
     expect(states.at(-1)).toBe('reconnecting');
+    await client.disconnect();
+  });
+
+  it('finishes a restoration slower than the handshake limit instead of reconnecting', async () => {
+    // Scaled from the plan: handshake limit 10 s, restoration limit 30 s, restoration takes 15 s.
+    const server = await createTestRemoteServer();
+    activeServers.push(server);
+    const states: string[] = [];
+    const client = new RemotePaneClient({ id: 'slow-restore', label: 'host', baseUrl: server.baseUrl, token: '', transport: 'http+sse' }, {
+      initialHandshakeTimeoutMs: 100,
+      restoreTimeoutMs: 300,
+      onConnectionStateChange: status => states.push(status),
+      onResyncRequired: () => sleep(150),
+    });
+    await client.connect();
+    expect(states).toEqual(['connecting', 'restoring', 'connected']);
+    expect(server.getEventRequestCount()).toBe(1);
     await client.disconnect();
   });
 
@@ -404,6 +471,34 @@ describe('RemotePaneClientController', () => {
     await controller.switchToLocalMode();
   });
 
+  it('sends a pending restoration again to a renderer that starts listening late', async () => {
+    const server = await createTestRemoteServer();
+    activeServers.push(server);
+    const config = createDefaultRemoteDaemonConfig();
+    config.client = { mode: 'remote', activeProfileId: 'late', profiles: [
+      { id: 'late', label: 'host', baseUrl: server.baseUrl, token: 'test-token', transport: 'http+sse' },
+    ] };
+    const controller = new RemotePaneClientController();
+    const restoreIds: number[] = [];
+    controller.initialize({
+      configManager: createConfigManagerStub(config),
+      rendererIds: () => [10],
+      rendererEventSink: { send(channel, payload) {
+        if (channel === 'remote-daemon:resync-required') {
+          restoreIds.push(decodeBoundary(payload, boundary.object({ restoreId: boundary.number })).restoreId);
+        }
+      } },
+    });
+    await waitFor(() => restoreIds.length === 1);
+
+    // The window's page was still loading when the request went out.
+    controller.rendererReady(10);
+    expect(restoreIds).toEqual([restoreIds[0], restoreIds[0]]);
+    controller.acknowledgeRestore(10, restoreIds[0]);
+    await waitFor(() => controller.getConnectionState().status === 'connected');
+    await controller.switchToLocalMode();
+  });
+
   it('syncs into remote mode and suppresses local daemon renderer events', async () => {
     const server = await createTestRemoteServer();
     activeServers.push(server);
@@ -627,6 +722,28 @@ describe('RemotePaneClientController', () => {
     });
   });
 
+  it('closes a failed checklist for the host once its connection recovers on its own', async () => {
+    const server = await createTestRemoteServer();
+    activeServers.push(server);
+    const profile = { id: 'recovers', label: 'host', baseUrl: server.baseUrl, token: 'test-token', transport: 'http+sse' as const };
+    const config = createDefaultRemoteDaemonConfig();
+    config.client = { mode: 'remote', activeProfileId: profile.id, profiles: [profile] };
+    const controller = new RemotePaneClientController();
+    controller.initialize({ configManager: createConfigManagerStub(config), rendererEventSink: { send() {} } });
+    await waitFor(() => controller.getConnectionState().status === 'connected');
+
+    // Retry now while the host is not answering: the checklist fails.
+    server.setEventsReady(false);
+    await expect(controller.activateProfile(profile, { recheck: true })).rejects.toThrow();
+    expect(controller.getConnectionState().check?.outcome).toBe('failed');
+
+    server.setEventsReady(true);
+    controller.suspend();
+    controller.resume();
+    await waitFor(() => controller.getConnectionState().status === 'connected' && !controller.getConnectionState().check);
+    await controller.switchToLocalMode();
+  });
+
   it('restores the saved local state when a manual activation fails', async () => {
     const server = await createTestRemoteServer();
     activeServers.push(server);
@@ -762,6 +879,9 @@ async function createTestRemoteServer(host = '127.0.0.1', basePath = ''): Promis
   let emitReadyEvent = true;
   const refusedChannels = new Set<string>();
   let truncateInvoke = false;
+  let invokeDelayMs = 0;
+  let invokeCount = 0;
+  let heartbeatTimer: NodeJS.Timeout | null = null;
   const normalizedBasePath = normalizeTestBasePath(basePath);
   const invokePath = `${normalizedBasePath}/invoke`;
   const eventsPath = `${normalizedBasePath}/events`;
@@ -769,7 +889,10 @@ async function createTestRemoteServer(host = '127.0.0.1', basePath = ''): Promis
   const server = http.createServer(async (request: IncomingMessage, response: ServerResponse) => {
     if (request.url === invokePath) {
       lastInvokeAuth = request.headers.authorization;
+      invokeCount += 1;
       lastInvokeBody = await readRequestBody(request);
+      if (invokeDelayMs) await sleep(invokeDelayMs);
+      if (response.destroyed) return;
       lastInvokeHost = request.headers.host;
       lastInvokePath = request.url;
       const parsed = decodeBoundary(JSON.parse(lastInvokeBody), boundary.object({
@@ -847,6 +970,16 @@ async function createTestRemoteServer(host = '127.0.0.1', basePath = ''): Promis
   return {
     baseUrl: `http://${host.includes(':') ? `[${host}]` : host}:${address.port}${normalizedBasePath}`,
     truncateInvoke() { truncateInvoke = true; },
+    delayInvoke(ms: number) { invokeDelayMs = ms; },
+    setHeartbeatInterval(ms: number) {
+      if (heartbeatTimer) clearInterval(heartbeatTimer);
+      heartbeatTimer = ms ? setInterval(() => {
+        streamResponse?.write(`event: heartbeat\ndata: ${JSON.stringify({ timestamp: new Date().toISOString() })}\n\n`);
+      }, ms) : null;
+    },
+    getInvokeCount() {
+      return invokeCount;
+    },
     refuseChannel(channel: string) {
       refusedChannels.add(channel);
     },
@@ -891,6 +1024,7 @@ async function createTestRemoteServer(host = '127.0.0.1', basePath = ''): Promis
       eventsReady = nextReady;
     },
     async close() {
+      if (heartbeatTimer) clearInterval(heartbeatTimer);
       if (streamResponse && !streamResponse.writableEnded) {
         streamResponse.end();
       }
