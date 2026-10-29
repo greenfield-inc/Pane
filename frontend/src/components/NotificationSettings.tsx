@@ -11,6 +11,7 @@ export function NotificationSettings({ persistence }: { persistence: SettingsPer
   const notifications = config.notifications ?? { playSound: false, enabled: true };
   const [permissionStatus, setPermissionStatus] = useState<NotificationPermission | 'unsupported'>('default');
   const [actionResult, setActionResult] = useState<string | null>(null);
+  const [offerSettings, setOfferSettings] = useState(false);
 
   useEffect(() => {
     setPermissionStatus('Notification' in window ? Notification.permission : 'unsupported');
@@ -26,16 +27,19 @@ export function NotificationSettings({ persistence }: { persistence: SettingsPer
     setActionResult(permission === 'granted' ? 'Notification access enabled.' : 'Notification access was not granted.');
   };
 
-  const testNotification = () => {
-    if (Notification.permission !== 'granted') {
-      setActionResult('Enable notification access before sending a test.');
-      return;
+  const testNotification = async () => {
+    setOfferSettings(false);
+    const result = await window.electronAPI.notifications.test();
+    if (result.status === 'shown') setActionResult('Test notification sent.');
+    else if (result.status === 'unsupported') setActionResult('Desktop notifications are not supported in this environment.');
+    else {
+      setActionResult(result.status === 'blocked'
+        ? "macOS is blocking Pane's notifications. Allow Pane in System Settings → Notifications, then test again."
+        : result.status === 'failed'
+          ? `The system didn't show the test notification (${result.error}). Check Pane in your system's notification settings.`
+          : "Test notification sent. If it didn't appear, allow Pane in your system's notification settings.");
+      setOfferSettings(result.canOpenSettings);
     }
-    new Notification('Pane is ready to ping you', {
-      body: 'You will see notifications like this when a terminal panel finishes.',
-      icon: '/favicon.ico',
-    });
-    setActionResult('Test notification sent.');
   };
 
   const permissionLabel = permissionStatus === 'granted'
@@ -60,8 +64,13 @@ export function NotificationSettings({ persistence }: { persistence: SettingsPer
             {permissionStatus !== 'granted' && permissionStatus !== 'unsupported' && (
               <Button type="button" size="sm" onClick={requestPermission}>Enable</Button>
             )}
+            {offerSettings && (
+              <Button type="button" variant="secondary" size="sm" onClick={() => void window.electronAPI.notifications.openSettings()}>
+                Open notification settings
+              </Button>
+            )}
             {permissionStatus === 'granted' && (
-              <Button type="button" variant="secondary" size="sm" onClick={testNotification}>Test</Button>
+              <Button type="button" variant="secondary" size="sm" onClick={() => void testNotification()}>Test</Button>
             )}
           </div>
         </SettingRow>

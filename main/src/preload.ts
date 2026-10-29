@@ -1,4 +1,5 @@
 import type { LoopInput } from '../../shared/types/loop';
+import type { TestNotificationResult } from '../../shared/types/notifications';
 import type { SetupFile, SetupSectionId } from '../../shared/types/setupTransfer';
 import type { SessionImportProgress, SessionImportRunResult, SessionImportScan } from '../../shared/types/sessionImport';
 import type { AgentChatEvent, AgentChatView, AgentChatSend, AgentInterface } from '../../shared/types/agentChat';
@@ -1253,9 +1254,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
       invokeIpc('agent-usage:get', force),
   },
 
-  // Whether Dictate's watcher shows Pane's alerts, so Pane skips its desktop notification
+  // Desktop notifications: Dictate's handoff (Pane skips its own alert) and Settings' test
   notifications: {
     isHandedOff: async (): Promise<boolean> => decodeBoundary(await invokeIpc('notifications:handed-off'), boundary.boolean),
+    test: (): Promise<TestNotificationResult> => invokeIpc('notifications:test'),
+    openSettings: (): Promise<void> => invokeIpc('notifications:open-settings'),
   },
 
   // Pane Notify: the queue's snapshot and the actions every surface sends back
