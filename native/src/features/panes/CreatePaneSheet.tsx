@@ -1,4 +1,4 @@
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRef, useState, type ReactNode } from 'react';
 import { Pressable, StyleSheet, Switch, TextInput, View } from 'react-native';
 
@@ -6,7 +6,7 @@ import { AGENT_LAUNCH_PRESETS, type AgentLaunchPresetId } from '@shared/constant
 import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
 import type { RunpanePaneCreateRequest, RunpanePaneCreateResult } from '@shared/types/runpaneOrchestration';
 
-import { useMachineCommand, useMachineQuery } from '@/daemon/machines';
+import { CREATE_ON_MACHINE, useMachineCommand, useMachineQuery } from '@/daemon/machines';
 import { monoFontFamily, useTheme } from '@/theme';
 import { Button, Icon, Text } from '@/ui';
 
@@ -29,13 +29,17 @@ export function CreatePaneForm({ machine, projectId, onCreated }: {
   const theme = useTheme();
   const projects = useMachineQuery<ProjectWithPanes[]>(machine, 'sessions:get-all-with-projects');
   const send = useMachineCommand();
+  const queryClient = useQueryClient();
   const createPane = useMutation({
+    mutationKey: CREATE_ON_MACHINE,
     mutationFn: (request: RunpanePaneCreateRequest) => send<RunpanePaneCreateResult>(
       machine,
       'runpane:panes:create',
       [request],
       `The connection dropped before ${machine.label} answered. Check its list before trying again: the pane may already exist.`,
     ),
+    // Created, refused or unconfirmed: read that machine again, so its lists show whether the Pane exists.
+    onSettled: () => queryClient.invalidateQueries({ queryKey: [machine.id] }),
   });
   const branchInput = useRef<TextInput>(null);
   // A snapshot: the desktop opening another repository does not move the sheet while someone edits it.

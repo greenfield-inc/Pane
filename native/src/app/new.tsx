@@ -1,9 +1,12 @@
+import { LegendList } from '@legendapp/list/react-native';
+import { useIsMutating } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { CREATE_ON_MACHINE } from '@/daemon/machines';
 import { useMachinePrefs } from '@/features/machines/machinePrefs';
 import type { Machine } from '@/features/machines/machines';
 import { MachineMark } from '@/features/machines/MachineMark';
@@ -36,6 +39,8 @@ export default function NewSheet() {
   const [pickedKey, setPickedKey] = useState(() => (projectId === undefined && last && reachable(last) ? last.key : current?.key));
   const [kind, setKind] = useState<Kind>(params.kind ?? 'session');
   const machine = saved.find(candidate => candidate.key === pickedKey) ?? current;
+  // While a create is in flight the form stays mounted, so its answer still opens what it made.
+  const creating = useIsMutating({ mutationKey: CREATE_ON_MACHINE }) > 0;
 
   const created = (target: { paneId: string } | { sessionId: string }) => {
     if (!machine?.profile) return;
@@ -68,22 +73,33 @@ export default function NewSheet() {
       </View>
 
       <View accessibilityRole="tablist" style={[styles.toggle, { borderRadius: theme.radius.lg, backgroundColor: theme.colors.surfaceRaised }]}>
-        <Segment testID="sessions-new" title="Session" ios="bubble.left" android="chat_bubble" selected={kind === 'session'} onPress={() => setKind('session')} />
-        <Segment testID="panes-new" title="Pane" ios="arrow.triangle.branch" android="call_split" selected={kind === 'pane'} onPress={() => setKind('pane')} />
+        <Segment testID="sessions-new" title="Session" ios="bubble.left" android="chat_bubble" selected={kind === 'session'} disabled={creating} onPress={() => setKind('session')} />
+        <Segment testID="panes-new" title="Pane" ios="arrow.triangle.branch" android="call_split" selected={kind === 'pane'} disabled={creating} onPress={() => setKind('pane')} />
       </View>
 
       <View style={styles.section}>
         <Text variant="callout" tone="secondary" style={styles.bold}>Machine</Text>
-        <View accessibilityRole="radiogroup" accessibilityLabel="Machine" style={styles.machines}>
-          {saved.map(candidate => (
+        <LegendList
+          testID="new-machines"
+          accessibilityRole="radiogroup"
+          accessibilityLabel="Machine"
+          horizontal
+          data={saved}
+          keyExtractor={candidate => candidate.key}
+          extraData={[machine?.key, creating]}
+          estimatedItemSize={120}
+          showsHorizontalScrollIndicator={false}
+          style={styles.machineList}
+          contentContainerStyle={styles.machines}
+          renderItem={({ item: candidate }) => (
             <MachineOption
-              key={candidate.key}
               machine={candidate}
               selected={candidate.key === machine?.key}
+              locked={creating}
               onPress={() => setPickedKey(candidate.key)}
             />
-          ))}
-        </View>
+          )}
+        />
         {last ? <Text variant="footnote" tone="muted">{`${last.name} was your last pick.`}</Text> : null}
       </View>
 
@@ -109,11 +125,12 @@ function reachable(machine: Machine): boolean {
   return machine.current || machine.state !== 'dimmed';
 }
 
-function Segment({ title, ios, android, selected, onPress, testID }: {
+function Segment({ title, ios, android, selected, disabled, onPress, testID }: {
   title: string;
   ios: 'bubble.left' | 'arrow.triangle.branch';
   android: 'chat_bubble' | 'call_split';
   selected: boolean;
+  disabled: boolean;
   onPress: () => void;
   testID: string;
 }) {
@@ -124,7 +141,8 @@ function Segment({ title, ios, android, selected, onPress, testID }: {
       testID={testID}
       accessibilityRole="tab"
       accessibilityLabel={title}
-      accessibilityState={{ selected }}
+      accessibilityState={{ selected, disabled }}
+      disabled={disabled}
       onPress={onPress}
       style={[styles.segment, {
         borderRadius: theme.radius.md,
@@ -138,7 +156,7 @@ function Segment({ title, ios, android, selected, onPress, testID }: {
   );
 }
 
-function MachineOption({ machine, selected, onPress }: { machine: Machine; selected: boolean; onPress: () => void }) {
+function MachineOption({ machine, selected, locked, onPress }: { machine: Machine; selected: boolean; locked: boolean; onPress: () => void }) {
   const theme = useTheme();
   const offline = !reachable(machine);
   const ink = selected ? theme.colors.background : theme.colors.text;
@@ -147,8 +165,8 @@ function MachineOption({ machine, selected, onPress }: { machine: Machine; selec
       testID={`new-machine-${machine.name}`}
       accessibilityRole="radio"
       accessibilityLabel={offline ? `${machine.name}, offline` : machine.name}
-      accessibilityState={{ selected, disabled: offline }}
-      disabled={offline}
+      accessibilityState={{ selected, disabled: offline || locked }}
+      disabled={offline || locked}
       onPress={onPress}
       style={({ pressed }) => [styles.machine, {
         backgroundColor: selected ? theme.colors.text : pressed ? theme.colors.surfacePressed : theme.colors.surfaceRaised,
@@ -169,6 +187,8 @@ const styles = StyleSheet.create({
   toggle: { flexDirection: 'row', padding: 3 },
   segment: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: 40, borderWidth: 1 },
   section: { gap: 8 },
-  machines: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  // Full width, so chips scroll to the sheet's edges.
+  machineList: { flexGrow: 0, marginHorizontal: -16 },
+  machines: { gap: 8, paddingHorizontal: 16 },
   machine: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 34, borderRadius: 17, paddingHorizontal: 13, paddingVertical: 6 },
 });

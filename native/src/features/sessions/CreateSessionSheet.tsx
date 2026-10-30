@@ -12,7 +12,7 @@ import { DEFAULT_PANE_CHAT_AGENT, PANE_CHAT_AGENT_LABELS, type PaneChatAgent } f
 import type { RemotePaneConnectionProfile, RemotePwaAffordances, RemotePwaSessionAgents } from '@shared/types/remoteDaemon';
 
 import { useDaemon } from '@/daemon';
-import { useMachineCommand, useMachineQuery } from '@/daemon/machines';
+import { CREATE_ON_MACHINE, useMachineCommand, useMachineQuery } from '@/daemon/machines';
 import { Notice } from '@/features/panes/PaneKit';
 import { useTheme } from '@/theme';
 import { Button, Icon, Text } from '@/ui';
@@ -34,6 +34,7 @@ export function CreateSessionForm({ machine, onCreated }: { machine: RemotePaneC
   const affordances = useMachineQuery<RemotePwaAffordances>(machine, 'remote:pwa-affordances', [], { staleTime: 5 * 60_000 });
   const send = useMachineCommand();
   const create = useMutation({
+    mutationKey: CREATE_ON_MACHINE,
     mutationFn: (input: OrchestrationSessionCreateInput) => send<OrchestrationSessionView<{ id: string; name: string }>>(
       machine,
       'orchestration-sessions:create',
@@ -45,6 +46,8 @@ export function CreateSessionForm({ machine, onCreated }: { machine: RemotePaneC
       if (machine.id === current.id) queryClient.setQueryData([machine.id, 'orchestration-sessions:get', { sessionId: view.session.id }], view);
       onCreated(view.session.id);
     },
+    // Created, refused or unconfirmed: read that machine again, so its lists show whether the Session exists.
+    onSettled: () => queryClient.invalidateQueries({ queryKey: [machine.id] }),
   });
   const [name, setName] = useState('');
   // Follows the host default, which can arrive after the sheet opens, until the person picks one.

@@ -49,6 +49,9 @@ export function useMachineQuery<T>(
   });
 }
 
+/** New's create commands, so the sheet can hold its machine and kind while one is in flight. */
+export const CREATE_ON_MACHINE = ['create-on-machine'];
+
 /**
  * Sends a command to any saved machine: through the live connection on the machine the phone is
  * on, otherwise straight to that machine's `/invoke`, the way alert buttons answer. Never retried.
