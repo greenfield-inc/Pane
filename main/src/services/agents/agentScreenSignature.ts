@@ -222,6 +222,23 @@ const CLAUDE_TRUST_PROMPT = /Claude\s+Code'll\s+be\s+able\s+to\s+read[\s\S]*Yes,
 const CODEX_TRUST_PROMPT = /Codex\s+can\s+read,\s+edit,\s+and\s+run\s+files\s+here[\s\S]*Trust\s+and\s+continue/u;
 
 /**
+ * The next key toward "Yes, I trust this folder" when Claude's folder-trust menu
+ * asks about `folder` itself: Down while "No, exit" is selected, then Enter.
+ * Undefined on any other screen, or when the menu names another folder.
+ */
+export function claudeFolderTrustKey(text: string, folder: string): '\x1b[B' | '\r' | undefined {
+  if (!CLAUDE_TRUST_PROMPT.test(text)) return undefined;
+  // Claude wraps the path across lines; the folder and its parent name a Session folder.
+  const shown = text.replace(/\s+/g, '').replace(/\\/g, '/');
+  const target = `/${folder.split(/[\\/]/).filter(Boolean).slice(-2).join('/')}`;
+  const at = shown.indexOf(target);
+  if (at < 0 || shown[at + target.length] === '/') return undefined;
+  if (/^\s*[›❯>]\s*(?:\d+\.\s*)?Yes, I trust this folder\s*$/mu.test(text)) return '\r';
+  if (/^\s*[›❯>]\s*(?:\d+\.\s*)?No, exit\s*$/mu.test(text)) return '\x1b[B';
+  return undefined;
+}
+
+/**
  * Identify an agent from one screen: Claude's closed rule/`❯`/rule composer
  * box, or Codex's `OpenAI Codex` header with its `›` prompt, or either
  * agent's folder-trust prompt. Callers that persist the result require it on

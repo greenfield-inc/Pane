@@ -4,13 +4,17 @@ import os from 'os';
 import path from 'path';
 import { CommandRunner } from '../utils/commandRunner';
 import { escapeForBash, linuxToUNCPath } from '../utils/wslUtils';
-import { claudeConfigPath } from './loops/claudeFolderTrust';
 import { ShellDetector } from '../utils/shellDetector';
 import { agentPresetsForPlatform } from '../../../shared/constants/agentLaunchPresets';
 import { PaneError } from '../../../shared/paneError';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { resolveProjectRegistration, validateProjectRepository } from './projectRegistration';
 import type { FoundRepo, HostRepos, RepoSource, WslRepos } from '../../../shared/types/onboarding';
+
+/** Claude Code's global config, which lists the folders it has opened. */
+function claudeConfigPath(env: NodeJS.ProcessEnv, home: string): string {
+  return path.join(env.CLAUDE_CONFIG_DIR?.trim() || home, '.claude.json');
+}
 
 /**
  * Finds the repos a new user most likely wants to open, for the first-run

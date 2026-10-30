@@ -581,10 +581,13 @@ runpane panels wait --panel <panelId> --for ready --json
 runpane panels submit --panel <panelId> --text "<prompt>" --yes --json
 ```
 
-When a Session's agent is Claude, Pane marks the Session's own folder trusted
-in Claude's config before it starts, so Claude does not stop at its "trust
-this folder" prompt. Pane does this only for its Session folders, never for a
-project.
+When a Session's Claude runs on this machine, Pane answers Claude's "trust
+this folder" prompt for the Session's own folder, choosing "Yes, I trust this
+folder" in the terminal, so the agent starts without a click. Pane answers
+only for its Session folders, never for a project, and only until Claude is
+first ready. This is best effort: a prompt Pane does not recognize stays on
+screen for you to answer. A WSL Session's Claude is not answered, so it asks
+on its first launch.
 
 Use `--from-json` for structured create and update input. Keep multiline
 context, evidence, links, and reports in the JSON file or stdin; do not put

@@ -1035,24 +1035,38 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void
     }
   });
 
-  it('marks a Claude Session folder trusted before Claude starts there, and leaves other agents alone', async () => {
-    vi.stubEnv('CLAUDE_CONFIG_DIR', tempDir);
-    const configPath = path.join(tempDir, '.claude.json');
-    fs.writeFileSync(configPath, JSON.stringify({ numStartups: 3 }));
+  it('chooses "Yes, I trust this folder" in Claude\'s menu for its own Session folder, and for no other folder', async () => {
+    vi.useFakeTimers();
+    const trustMenu = (folder: string, selected: 'No' | 'Yes') => [
+      `\x1b[2J\x1b[H${'─'.repeat(60)}`, ' Accessing workspace:', '', ` ${folder}`, '',
+      " Claude Code'll be able to read, edit, and execute files here.", '',
+      ` ${selected === 'No' ? '❯' : ' '} No, exit`, ` ${selected === 'Yes' ? '❯' : ' '} Yes, I trust this folder`, '',
+      ' Enter to confirm · Esc to cancel',
+    ].join('\r\n');
+    const menuKeys = (handle: FakePtyHandle) => handle.written.filter(data => data === '\x1b[B' || data === '\r');
     try {
-      const claude = makePanel('claude-session-panel');
-      claude.state.customState = { agentType: 'claude', orchestrationSessionId: 'claude-session' };
-      const codex = makePanel('codex-session-panel');
-      codex.state.customState = { agentType: 'codex', orchestrationSessionId: 'codex-session' };
-      await startTerminal(claude);
-      await startTerminal(codex);
-      expect(JSON.parse(fs.readFileSync(configPath, 'utf8'))).toEqual({
-        numStartups: 3,
-        // Claude keys projects by forward-slash paths on every OS.
-        projects: { [sessionWorkspacePath('claude-session').replace(/\\/g, '/')]: { hasTrustDialogAccepted: true } },
-      });
+      const own = makePanel('claude-session-panel');
+      own.state.customState = { agentType: 'claude', orchestrationSessionId: 'claude-session' };
+      const { handle } = await startTerminal(own);
+      handle.emit(trustMenu(sessionWorkspacePath('claude-session'), 'No'));
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(menuKeys(handle)).toEqual(['\x1b[B']);
+      handle.emit(trustMenu(sessionWorkspacePath('claude-session'), 'Yes'));
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(menuKeys(handle)).toEqual(['\x1b[B', '\r']);
+      // Asked again later, the answer is the person's.
+      handle.emit(trustMenu(sessionWorkspacePath('claude-session'), 'Yes'));
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(menuKeys(handle)).toEqual(['\x1b[B', '\r']);
+
+      const elsewhere = makePanel('claude-session-elsewhere');
+      elsewhere.state.customState = { agentType: 'claude', orchestrationSessionId: 'other-session' };
+      const other = await startTerminal(elsewhere);
+      other.handle.emit(trustMenu(path.join(sessionWorkspacePath('other-session'), 'project'), 'Yes'));
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(menuKeys(other.handle)).toEqual([]);
     } finally {
-      vi.unstubAllEnvs();
+      vi.useRealTimers();
     }
   });
 
