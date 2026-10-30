@@ -51,6 +51,7 @@ export default function NotesPanel({ paneId, capture, viewId = 'panel' }: NotesP
     const load = () => {
       void window.electronAPI.invoke('notes:context', paneId).then(ctx => {
         if (active) {
+          setOlderHost(false);
           setContext(ctx);
           setScope(previous => previous && ctx.scopes.some(item => sameNoteScope(item.scope, previous)) ? previous : ctx.defaultScope);
         }
@@ -63,7 +64,9 @@ export default function NotesPanel({ paneId, capture, viewId = 'panel' }: NotesP
     };
     load();
     const unsubscribe = window.electronAPI.events.onOrchestrationSessionsChanged?.(load);
-    return () => { active = false; unsubscribe?.(); };
+    // A reconnect keeps this tab open; the host may have been updated meanwhile, so ask again.
+    const unsubscribeResync = window.electronAPI.events.onRemoteDaemonResyncRequested(load);
+    return () => { active = false; unsubscribe?.(); unsubscribeResync(); };
   }, [paneId]);
 
   const refresh = useCallback(async () => {
