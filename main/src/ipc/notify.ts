@@ -257,7 +257,8 @@ function linkSavedMachines(notify: NotifyService, machines: NotifyMachines): Sav
       console.warn(`[Notify] ${machine.label} sent a Notify state this Pane cannot read; its questions are not shown here.`);
       return;
     }
-    queue.setRemote(machineId, { machine: machine.label, online: true, state });
+    // A read finishing after the machine went offline must not mark its cards answerable again.
+    queue.setRemote(machineId, { machine: machine.label, online: machine.status !== 'offline', state });
   };
   const read = async (machineId: string) => {
     if (!known.has(machineId)) return;

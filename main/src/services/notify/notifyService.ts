@@ -373,7 +373,9 @@ export class NotifyService {
   /** Connected screens and phones get the shared state when it changes, not on this screen's own moves. */
   private publishShared(): void {
     const state = this.queue.sharedState();
-    const key = JSON.stringify(state);
+    // The revision also rises on changes that never reach the shared state, such as another
+    // machine's questions arriving; publishing those would echo between two machines forever.
+    const key = JSON.stringify({ ...state, revision: undefined });
     if (key === this.lastShared) return;
     const previous = this.lastStates;
     this.lastShared = key;

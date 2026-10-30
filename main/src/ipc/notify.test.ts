@@ -5,6 +5,7 @@ import { remotePaneClientController } from '../daemon/client/remotePaneClient';
 import { followSavedMachines, registerNotifyHandlers, type NotifyMachines } from './notify';
 import { PaneError } from '../../../shared/paneError';
 import { ConfigManager } from '../services/configManager';
+import { resetPaneRuntimeForTests, setPaneRuntime } from '../core/runtime';
 import type { NotifyItem, NotifyResult, NotifySharedState } from '../../../shared/types/notify';
 import type { MachineConnectionsEvent, MachineState } from '../../../shared/types/machineConnections';
 import type { PaneCommandValue } from '../daemon/commandRegistry';
@@ -26,6 +27,8 @@ const connected: RemotePaneConnectionState = {
   activeBaseUrl: 'http://127.0.0.1:47911', lastError: null, lastSeenAt: null,
 };
 const flush = () => new Promise(resolve => setTimeout(resolve, 0));
+/** Lets Notify's coalesced broadcast (one per tick) run. */
+const settle = async () => { await flush(); await new Promise(resolve => setImmediate(resolve)); };
 
 /** A waiting question as a machine shares it. */
 function question(id: string, title: string, createdAt: number): NotifyItem {
@@ -177,6 +180,49 @@ describe('Notify across machines, through the registered handlers', () => {
     finishRead(stateOf('mac-studio'));
     await flush();
     expect(pane.notify.snapshot().queue).toEqual(['studio:q-1']);
+    pane.notify.dispose();
+  });
+
+  it("publishes its own questions only, never another machine's arriving", async () => {
+    const pane = await startPane();
+    const published: unknown[] = [];
+    setPaneRuntime({
+      eventSink: { send: (channel, ...args) => { if (channel === 'notify:shared-changed') published.push(args[0]); } },
+      getConfigManager: () => new ConfigManager(),
+      getPtyHostRuntime: () => null,
+      getWebviewContextMap: () => new Map(),
+    });
+    const saved = savedMachines({ devbox: stateOf('parsa-devbox') });
+    followSavedMachines(saved.machines);
+    await settle();
+    published.length = 0;
+
+    // Two desktops saved as each other: the other's state arriving must not send one back.
+    saved.emit({ type: 'event', machineId: 'devbox', channel: 'notify:shared-changed', args: [{ ...stateOf('parsa-devbox', question('q-1', 'Ship it?', 1_000)), revision: 2 }] });
+    await settle();
+    expect(published).toEqual([]);
+
+    void pane.notify.ask({ ui: 'approve', title: 'Delete the old branch?', caller: { cwd: '/repo/api' } });
+    await settle();
+    expect(published).toMatchObject([{ items: [{ title: 'Delete the old branch?', state: 'waiting' }] }]);
+    resetPaneRuntimeForTests();
+    pane.notify.dispose();
+  });
+
+  it('keeps a machine that went offline during its read unanswerable when the read lands', async () => {
+    const pane = await startPane();
+    const saved = savedMachines({ studio: stateOf('mac-studio') });
+    followSavedMachines(saved.machines);
+    await flush();
+    let finishRead: (state: NotifySharedState) => void = () => undefined;
+    saved.machines.read = () => new Promise(resolve => { finishRead = state => resolve({ machineId: 'studio', data: state }); });
+
+    saved.emit({ type: 'resync', machineId: 'studio' });
+    saved.setStatus('studio', 'offline');
+    finishRead({ ...stateOf('mac-studio', question('q-1', 'Ship it?', 1_000)), revision: 2 });
+    await flush();
+
+    expect(pane.notify.snapshot().items).toMatchObject([{ id: 'studio:q-1', unreachable: true }]);
     pane.notify.dispose();
   });
 
