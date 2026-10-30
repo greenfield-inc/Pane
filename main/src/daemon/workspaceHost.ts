@@ -23,6 +23,7 @@ import {
   runTailscaleServe,
   type ResolvedCommand,
 } from './tailscaleSetup';
+import { inBootWindow as paneInBootWindow } from '../services/freshBoot';
 
 /**
  * Tailnet port for workspaces; the remote daemon keeps 443. `PANE_WORKSPACES_PORT` moves it for
@@ -31,6 +32,8 @@ import {
 const WORKSPACE_HTTPS_PORT = readWorkspacePort(process.env.PANE_WORKSPACES_PORT);
 /** How often Pane re-reads the tailnet: Tailscale may start after Pane, or switch tailnets under it. */
 const CHECK_INTERVAL_MS = 60_000;
+/** Right after the computer starts, Tailscale is usually still signing in. */
+const BOOT_CHECK_INTERVAL_MS = 15_000;
 const RETRIES = 'Pane retries within a minute';
 
 export function readWorkspacePort(value: string | undefined): number {
@@ -181,6 +184,7 @@ export class PaneWorkspaceHostController {
     private readonly run: RemoteSetupCommandRunner = runRemoteSetupCommand,
     private readonly isForwardedPort?: (port: number) => boolean,
     private readonly paneVersion?: string,
+    private readonly inBootWindow: () => boolean = paneInBootWindow,
   ) {
     this.glasses = new GlassesAccess(configManager);
   }
@@ -337,7 +341,7 @@ export class PaneWorkspaceHostController {
     // A sync that finishes after shutdown must not start the next one.
     if (!this.watching) return;
     this.clearCheck();
-    this.checkTimer = setTimeout(() => void this.sync(), CHECK_INTERVAL_MS);
+    this.checkTimer = setTimeout(() => void this.sync(), this.inBootWindow() ? BOOT_CHECK_INTERVAL_MS : CHECK_INTERVAL_MS);
     this.checkTimer.unref?.();
   }
 

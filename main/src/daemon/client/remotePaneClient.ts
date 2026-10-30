@@ -912,6 +912,8 @@ interface RemotePaneClientControllerOptions {
   /** This app's Pane version, compared with the host's on the checklist's version row. */
   appVersion?: string;
   checkDependencies?: Partial<ConnectionCheckDependencies>;
+  /** Pane started just after the computer did, before Tailscale could reach the saved host. */
+  freshBoot?: boolean;
 }
 
 const defaultCheckDependencies: ConnectionCheckDependencies = {
@@ -995,7 +997,8 @@ export class RemotePaneClientController extends EventEmitter {
     this.configManager.on('config-updated', this.configUpdatedListener);
     this.configListenerAttached = true;
 
-    void this.syncToConfig().catch((error) => {
+    const opening = options.freshBoot ? this.openOnThisComputer() : Promise.resolve();
+    void opening.then(() => this.syncToConfig()).catch((error) => {
       this.setConnectionState({
         ...this.state,
         mode: 'remote',
@@ -1007,6 +1010,15 @@ export class RemotePaneClientController extends EventEmitter {
 
   getConnectionState(): RemotePaneConnectionState {
     return { ...this.state, check: this.check };
+  }
+
+  /** Switches the saved mode to this computer, as picking it does; the saved host stays listed. */
+  private async openOnThisComputer(): Promise<void> {
+    const remoteDaemon = normalizeRemoteDaemonConfig(this.configManager?.getConfig().remoteDaemon);
+    if (remoteDaemon.client.mode !== 'remote') return;
+    await this.configManager?.updateConfigWith(() => ({
+      remoteDaemon: { ...remoteDaemon, client: { ...remoteDaemon.client, mode: 'local', activeProfileId: null } },
+    }));
   }
 
   isRemoteModeActive(): boolean {
@@ -1042,7 +1054,8 @@ export class RemotePaneClientController extends EventEmitter {
     }
 
     if (!this.activeClient) {
-      throw new Error(this.state.lastError ?? 'Remote Pane client is not connected');
+      // The connection banner explains why; the renderer shows "Remote connection interrupted:" failures nowhere else.
+      throw new PaneError('ERR_REMOTE_OFFLINE', `Remote connection interrupted: the action was not sent because ${this.state.activeProfileLabel ?? 'the remote host'} is not connected.`, 'Use Retry now in the connection banner, or switch to This computer.');
     }
 
     const client = this.activeClient;
@@ -1288,9 +1301,26 @@ export class RemotePaneClientController extends EventEmitter {
     const generation = ++this.connectionGeneration;
     await this.disconnectActiveClient();
     const machine = tailnetMachineRef(savedProfile);
-    const profile = machine && this.resolveTailnetMachineUrl
-      ? { ...savedProfile, baseUrl: await this.resolveTailnetMachineUrl(machine) }
-      : savedProfile;
+    let profile = savedProfile;
+    if (machine && this.resolveTailnetMachineUrl) {
+      try {
+        profile = { ...savedProfile, baseUrl: await this.resolveTailnetMachineUrl(machine) };
+      } catch (error) {
+        // Name the host, so the banner and machine list show which one Tailscale cannot find.
+        if (generation === this.connectionGeneration) {
+          this.setConnectionState({
+            mode: 'remote',
+            status: 'error',
+            activeProfileId: savedProfile.id,
+            activeProfileLabel: savedProfile.label,
+            activeBaseUrl: savedProfile.baseUrl,
+            lastError: getErrorMessage(error, `Could not find ${machine.name}`),
+            lastSeenAt: null,
+          });
+        }
+        throw error;
+      }
+    }
     if (generation !== this.connectionGeneration) return;
     const commit = options.resolveOnReady && this.rendererIds().length > 0
       ? new Promise<void>(resolve => { this.activationCommitted = resolve; })

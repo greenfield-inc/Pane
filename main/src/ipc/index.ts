@@ -55,6 +55,7 @@ import { getPaneEventSink } from '../core/runtime';
 import { remotePaneClientController } from '../daemon/client/remotePaneClient';
 import { registerWorkspaceAccessHandlers } from './workspaceAccess';
 import { readTailscaleStatus, resolveTailnetMachineUrl } from '../services/tailnetMachines';
+import { startedOnFreshBoot } from '../services/freshBoot';
 
 
 export function registerIpcHandlers(services: AppServices): PaneCommandRegistry {
@@ -79,6 +80,7 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
     analyticsManager: services.analyticsManager,
     resolveTailnetMachineUrl: (machine) => resolveTailnetMachineUrl(machine, readTailscaleStatus),
     appVersion: services.app.getVersion(),
+    freshBoot: startedOnFreshBoot,
   });
   ipcMain.handle('remote-daemon:restore-complete', (event, restoreId: PaneCommandValue, error: PaneCommandValue) => {
     const result = decodeBoundary({ restoreId, error }, boundary.object({ restoreId: boundary.number, error: boundary.optional(boundary.string) }));
