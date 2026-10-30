@@ -417,6 +417,23 @@ describe('HostHub', () => {
     one.stop();
   });
 
+  it('reads the Panes again ten seconds after a failed read', async () => {
+    const a = host('https://studio.tail1.ts.net:8443');
+    a.handlers.set('panels:list', ([paneId]) => ({ success: true, data: [{ id: `t-${String(paneId)}`, type: 'terminal', title: 'Terminal', state: { isActive: true, customState: { isInitialized: true } } }] }));
+    // An answer the glasses can't read fails the list read, while Notify and the stream stay up.
+    a.handlers.set('sessions:get-all-with-projects', () => ({ success: true, data: 'database is locked' }));
+    const { hub: one, timers } = hub([a]);
+    await until(() => one.computers()[0]?.status === 'live');
+    a.handlers.set('sessions:get-all-with-projects', () => ({ success: true, data: [{ sessions: [{ id: 'p1', name: 'api' }] }] }));
+    timers.advance(9_999);
+    await flush();
+    expect(one.computers()[0]?.entries).toEqual([]);
+    timers.advance(1);
+    await until(() => (one.computers()[0]?.entries.length ?? 0) > 0);
+    expect(one.computers()[0]?.entries.map((entry) => entry.name)).toEqual(['api']);
+    one.stop();
+  });
+
   it('opens the terminal a Pane actually runs, never a tab that was never started', async () => {
     const a = host('https://studio.tail1.ts.net:8443');
     a.handlers.set('sessions:get-all-with-projects', () => ({ success: true, data: [{ sessions: [

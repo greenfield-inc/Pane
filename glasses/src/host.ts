@@ -535,7 +535,25 @@ export class HostConnection {
 
   private async restore(): Promise<void> {
     // Notify is what home needs first; the rows and the OS mark can fill in later.
-    await Promise.all([this.readNotify(), this.readLists().catch(() => {}), this.readOs().catch(() => {})]);
+    await Promise.all([this.readNotify(), this.loadLists(), this.readOs().catch(() => {})]);
+  }
+
+  private scheduleLists(ms: number): void {
+    this.listTimer?.cancel();
+    this.listTimer = this.deps.later(() => {
+      this.listTimer = null;
+      // A reconnect reads the lists again in its restore.
+      if (this.client.getState().status === 'connected') void this.loadLists();
+    }, ms);
+  }
+
+  /** A failed read tries again later, so a live computer's rows don't stay empty. */
+  private async loadLists(): Promise<void> {
+    try {
+      await this.readLists();
+    } catch {
+      if (!this.stopped) this.scheduleLists(RETRY_MS);
+    }
   }
 
   /** The computer's OS, for its rows' logo; an older Pane leaves it unknown. */
@@ -572,13 +590,7 @@ export class HostConnection {
       this.changed();
       return;
     }
-    if (LIST_EVENTS.has(channel)) {
-      this.listTimer?.cancel();
-      this.listTimer = this.deps.later(() => {
-        this.listTimer = null;
-        void this.readLists().catch(() => {});
-      }, LIST_REFRESH_MS);
-    }
+    if (LIST_EVENTS.has(channel)) this.scheduleLists(LIST_REFRESH_MS);
   }
 
   private async invoke<T>(channel: string, args: unknown[], schema: BoundarySchema<T>): Promise<T> {
