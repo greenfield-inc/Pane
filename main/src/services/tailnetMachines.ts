@@ -12,9 +12,9 @@ import type {
 } from '../../../shared/types/workspaceAccess';
 import { runRemoteSetupCommand } from '../daemon/remote-setup-command';
 import { resolveTailscaleCommandAsync } from '../daemon/tailscaleSetup';
+import { WORKSPACE_HTTPS_PORT } from '../daemon/workspacePort';
 
 /** Tailnet port where each machine's Pane serves codeless connections (the Workspaces listener). */
-const WORKSPACE_HTTPS_PORT = 8443;
 const PROBE_TIMEOUT_MS = 4_000;
 const MAX_PROBE_RESPONSE_BYTES = 64 * 1024;
 const PROBE_CONCURRENCY = 8;
