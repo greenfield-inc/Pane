@@ -397,6 +397,18 @@ describe('NotifyQueue across machines', () => {
     expect(call.result).toEqual({ approved: false });
   });
 
+  it('takes a spoken reply to an options question: a named choice becomes that choice, anything else reaches the agent as said', async () => {
+    const { queue: host } = makeQueue({}, 'mac-studio');
+    const named = ask(host, sessionStore, claude);
+    host.runRemote({ type: 'answer', id: onlyId(host), answer: { text: ' keep redis. ' } }, 'Even G2');
+    const ownWords = ask(host, sessionStore, codex);
+    host.runRemote({ type: 'answer', id: onlyId(host), answer: { text: 'Use SQLite for now' } }, 'Even G2');
+    await vi.advanceTimersByTimeAsync(3_000);
+
+    expect(named.result).toEqual({ answer: 'Keep Redis' });
+    expect(ownWords.result).toEqual({ answer: 'Use SQLite for now' });
+  });
+
   it('refuses a command for a question that is no longer waiting, and the agent gets one answer', async () => {
     const { queue: host } = makeQueue({}, 'mac-studio');
     const call = ask(host, sessionStore, claude);
