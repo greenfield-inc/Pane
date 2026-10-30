@@ -91,21 +91,25 @@ The machine running the agent keeps the one queue. Every screen connected to
 it shows its questions, and the first answer from any of them goes back to
 the agent:
 
-- **A Pane desktop connected to another machine** (Remote Access pairing or
-  Workspaces) shows that host's questions on every surface above: the strip
-  over other apps, the round, the tray dot, the chime, the inbox, the Waiting
-  dots and Open in Pane, which opens the host's Pane in this window and leaves
-  the host's own window where it is. Questions from agents on the connected
-  desktop's own machine still show beside them, and each card names its
-  machine ("notify-remote · Claude · parsa-devbox").
+- **A Pane desktop with saved machines** (Remote Access pairing or
+  Workspaces) shows every saved machine's questions beside its own, whichever
+  machine it is on: the strip over other apps, the round, the tray dot, the
+  chime, the inbox, the sidebar count and the Waiting dots. Each card names its
+  machine ("notify-remote · Claude · parsa-devbox"), and the inbox shows the
+  machine's mark. An answer, Undo, ✕, snooze or → goes to the card's own
+  machine and clears there; nothing switches. Open in Pane shows on this
+  computer's cards and on the machine the desktop is on, where it opens the
+  host's Pane in this window and leaves the host's own window where it is.
 - **Several screens at once**: the screen you answer on says "Sent to
   <agent>", every other one says "Answered on <device>", and all of them offer
   **Undo** for the 3 seconds before the agent gets the answer. ✕, snooze, the
   reminders and → in the round apply on every screen, except "When I switch to
   Pane", which waits for the Pane you used it on.
-- **Connection loss**: while the host can't be reached its cards stay up and
-  say "Not sent: can't reach <host>. Try again when it reconnects."; the agent
-  keeps waiting. After reconnecting the screen shows what is waiting now.
+- **Connection loss**: while a machine can't be reached its cards stay up,
+  its mark dims, and they say "Not sent: can't reach <machine>. Try again
+  when it reconnects."; the agent keeps waiting. After reconnecting the screen
+  shows what is waiting there now. A machine's cards go only when it is
+  removed from the saved machines.
 - **Your phone**: each question sends one alert at once to every phone signed
   in to the host in the Pane app with notifications allowed and **Needs
   Input** on. The alert is titled with the Pane's name and says only "<Pane>

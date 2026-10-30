@@ -45,6 +45,8 @@ export interface NotifyCardProps {
   onFieldFocusRequest?: () => Promise<void>;
   /** Opens an update's link. */
   onOpenUrl?: (url: string) => void;
+  /** Inbox: the asking machine's mark, shown before its name. */
+  machineMark?: ReactNode;
   className?: string;
 }
 
@@ -276,7 +278,7 @@ function snoozedLabel(until: number): string {
   return `Back at ${new Date(until).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
 }
 
-function CardHeader({ item, form, queue, onCommand, menuPlacement }: Pick<NotifyCardProps, 'item' | 'form' | 'queue' | 'onCommand' | 'menuPlacement'>) {
+function CardHeader({ item, form, queue, onCommand, menuPlacement, machineMark }: Pick<NotifyCardProps, 'item' | 'form' | 'queue' | 'onCommand' | 'menuPlacement' | 'machineMark'>) {
   const now = useNow();
   if (form === 'inbox') {
     return (
@@ -284,7 +286,11 @@ function CardHeader({ item, form, queue, onCommand, menuPlacement }: Pick<Notify
         <span className="inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[5px] bg-text-primary text-[10px] font-bold text-bg-primary" aria-hidden="true">P</span>
         <span className="truncate font-medium text-text-secondary">{item.source.name}</span>
         <span className="shrink-0">· {item.source.agent}</span>
-        {item.machine && <span className="shrink-0">· {item.machine}</span>}
+        {item.machine && (
+          <span className="inline-flex min-w-0 shrink items-center gap-1" data-testid="notify-card-machine">
+            · {machineMark}<span className="truncate">{item.machine}</span>
+          </span>
+        )}
         <span className="ml-auto shrink-0">{relativeAge(item.createdAt, now)}</span>
       </div>
     );
@@ -480,7 +486,7 @@ function recommendedIndex(choices: NotifyChoice[]): number {
 }
 
 function QuestionCard({
-  item, form, queue, shortcutHint, showDetails, narrow, menuPlacement, onCommand, onFieldFocusRequest, className,
+  item, form, queue, shortcutHint, showDetails, narrow, menuPlacement, onCommand, onFieldFocusRequest, machineMark, className,
 }: NotifyCardProps) {
   // Details: the choices with notes, or an approval's detail.
   const [expanded, setExpanded] = useState(form === 'docked' || (form === 'strip' && Boolean(showDetails)));
@@ -549,7 +555,7 @@ function QuestionCard({
     }
     return false;
   });
-  const openInPane = item.source.paneId && form === 'strip'
+  const openInPane = item.source.paneId && !item.elsewhere && form === 'strip'
     ? () => onCommand({ type: 'open-in-pane', id: item.id })
     : undefined;
 
@@ -744,7 +750,7 @@ function QuestionCard({
       // The floating strip takes the keyboard only when clicked, so typing elsewhere never answers it.
       onPointerDown={() => void onFieldFocusRequest?.()}
     >
-      <CardHeader item={item} form={form} queue={queue} onCommand={onCommand} menuPlacement={menuPlacement} />
+      <CardHeader item={item} form={form} queue={queue} onCommand={onCommand} menuPlacement={menuPlacement} machineMark={machineMark} />
       <div className={cn(titleClass, !expanded && 'line-clamp-3')} title={item.title}>{item.title}</div>
       {showContext && <div className={contextClass}>{item.context}</div>}
       {body}
@@ -753,7 +759,7 @@ function QuestionCard({
         <div className="flex items-center gap-3 px-3.5 pb-3 text-[12.5px] text-text-tertiary">
           {item.snoozedUntil !== undefined && <span className="min-w-0 truncate">{snoozedLabel(item.snoozedUntil)}</span>}
           <div className="ml-auto flex shrink-0 items-center gap-3">
-            {item.source.paneId && (
+            {item.source.paneId && !item.elsewhere && (
               <FooterLink onClick={() => onCommand({ type: 'open-in-pane', id: item.id })}>
                 <ExternalLink className="h-3.5 w-3.5" /> Open in Pane
               </FooterLink>

@@ -28,6 +28,16 @@ describe('NotifyCard', () => {
     expect(visible).toContain('Approve');
   });
 
+  it("names another machine's question with its mark in the inbox, and offers Open in Pane only on the machine the app is on", () => {
+    const item: NotifyItem = { ...base, id: 'studio:q1', ui: 'approve', title: 'Ship the hotfix tonight?', machine: 'mac-studio', machineId: 'studio' };
+    const away = render({ ...item, elsewhere: true }, { form: 'inbox', machineMark: <span data-mark="studio" /> });
+    expect(text(away)).toContain('auth-refactor · Claude · mac-studio');
+    expect(away).toMatch(/data-testid="notify-card-machine">· <span data-mark="studio"><\/span>/);
+    expect(text(away)).not.toContain('Open in Pane');
+    expect(text(render({ ...item, elsewhere: true }))).not.toContain('Open in Pane');
+    expect(text(render(item, { form: 'inbox' }))).toContain('Open in Pane');
+  });
+
   it('says which device answered when another screen did, with Undo', () => {
     const answered = { ...base, ui: 'approve' as const, title: 'Apply migration?', state: 'sent' as const, answerSummary: 'Approved' };
     expect(text(render({ ...answered, answeredOn: 'Parsa’s iPhone' }, { view: 'sent' }))).toBe('Answered on Parsa’s iPhone · Approved Undo');

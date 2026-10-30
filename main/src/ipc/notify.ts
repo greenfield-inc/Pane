@@ -10,6 +10,8 @@ import { getMobilePushSender } from '../daemon/mobilePushSender';
 import { panelManager } from '../services/panelManager';
 import { terminalPanelManager } from '../services/terminalPanelManager';
 import { NotifyService } from '../services/notify/notifyService';
+import type { MachineConnections } from '../services/machineConnections';
+import { LOCAL_MACHINE_ID, type MachineState } from '../../../shared/types/machineConnections';
 import { buildWindowAppearanceOptions } from '../services/appearanceService';
 import { normalizeAppearance } from '../../../shared/types/appearance';
 import { PaneError } from '../../../shared/paneError';
@@ -141,22 +143,20 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
     headless: hasHeadlessDaemonLaunchArg(),
     machine: machineName(),
     publish: (state) => getPaneEventSink().send('notify:shared-changed', state),
-    sendToHost: async (command) => {
-      const send = () => remotePaneClientController.invoke('notify:remote-command', [command], () => Promise.reject(new PaneError(
-        'ERR_NOTIFY_NOT_CONNECTED',
-        'This Pane is no longer connected to the host that asked. Nothing was sent.',
-        'Reconnect to that host, then answer again.',
-      )));
+    sendToMachine: async (machineId, command) => {
+      if (!saved) throw new PaneError('ERR_MACHINE_UNKNOWN', 'Pane is still starting its machine connections. Nothing was sent.', 'Answer again in a moment.');
+      const { machines } = saved;
+      const send = () => machines.run(machineId, { type: 'notify', command });
       try {
         await send();
       } catch (error) {
-        // While the connection restores, the host's questions already show but commands wait.
-        // ERR_REMOTE_OFFLINE means nothing was sent, so the answer goes once it is connected.
-        if (!(error instanceof PaneError && error.code === 'ERR_REMOTE_OFFLINE') || !(await connectedAfterRestore())) throw error;
+        // While a machine connects, its questions already show but commands wait.
+        // ERR_MACHINE_OFFLINE means nothing was sent, so the answer goes once it is connected.
+        if (!(error instanceof PaneError && error.code === 'ERR_MACHINE_OFFLINE') || !(await saved.onlineSoon(machineId))) throw error;
         await send();
       }
     },
-    refreshHost: () => void refreshHost(),
+    refreshMachine: (machineId) => void saved?.read(machineId),
     // Every question buzzes each phone with Needs Input on (D-7), on a desktop or a headless host.
     onQuestion: (event) => {
       // Optional delivery: a failed send or config write must never take the host down.
@@ -174,64 +174,17 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
     },
   });
 
-  /** Waits up to 15 s for a connection that is restoring to finish; false if it isn't restoring or doesn't. */
-  const connectedAfterRestore = () => new Promise<boolean>((resolve) => {
-    if (remotePaneClientController.getConnectionState().status !== 'restoring') {
-      resolve(false);
-      return;
-    }
-    const done = (connected: boolean) => {
-      clearTimeout(timer);
-      remotePaneClientController.off('state-changed', check);
-      resolve(connected);
-    };
-    const check = () => {
-      const { status } = remotePaneClientController.getConnectionState();
-      if (status === 'connected') done(true);
-      else if (status !== 'restoring') done(false);
-    };
-    const timer = setTimeout(() => done(false), 15_000);
-    remotePaneClientController.on('state-changed', check);
-  });
+  /** Set once the machine connections start: every saved machine's questions then show here. */
+  let saved: SavedMachinesLink | null = null;
+  followMachines = (machines) => { saved = linkSavedMachines(notify, machines); };
 
-  // On a screen connected to another Pane: that host's questions show beside this machine's own.
-  const hostMachine = () => notify.snapshot().remote?.machine ?? remotePaneClientController.getConnectionState().activeProfileLabel ?? 'the host';
-  const showHostState = (value: PaneCommandValue) => {
-    if (!remotePaneClientController.isRemoteModeActive()) return;
-    let state: NotifySharedState;
-    try {
-      state = decodeBoundary(value, notifySharedStateSchema);
-    } catch (error) {
-      console.warn('[Notify] The host sent a Notify state this Pane cannot read; its questions are not shown here:', error);
-      return;
-    }
-    notify.queue.setRemote({ machine: state.machine, online: true, state });
-  };
-  const refreshHost = async () => {
-    if (!remotePaneClientController.isRemoteModeActive()) return;
-    try {
-      showHostState(await remotePaneClientController.invoke('notify:remote-snapshot', [], () => Promise.resolve(null)));
-    } catch (error) {
-      // An older host has no remote Notify; its questions stay on its own screen.
-      console.warn(`[Notify] Could not read ${hostMachine()}'s questions:`, error);
-    }
-  };
-  remotePaneClientController.on('notify-shared', showHostState);
-  remotePaneClientController.on('resync', () => void refreshHost());
-  let hostProfileId: string | null = null;
-  remotePaneClientController.on('state-changed', () => {
+  // Open in Pane works for the machine the app is on; another machine's card would need a switch.
+  const showActiveMachine = () => {
     const state = remotePaneClientController.getConnectionState();
-    // Another host's questions start fresh, without the last host's showing as unreachable.
-    if (state.mode !== 'remote' || state.activeProfileId !== hostProfileId) notify.queue.setRemote(null);
-    hostProfileId = state.mode === 'remote' ? state.activeProfileId : null;
-    if (state.mode !== 'remote') return;
-    if (state.status !== 'connected') {
-      notify.queue.setRemote({ machine: hostMachine(), online: false });
-      return;
-    }
-    // A stream can recover, or a new host connect, without a resync here yet: read the host again.
-    if (notify.snapshot().remote?.online !== true) void refreshHost();
-  });
+    notify.queue.setActiveMachine(state.mode === 'remote' && state.activeProfileId ? state.activeProfileId : LOCAL_MACHINE_ID);
+  };
+  remotePaneClientController.on('state-changed', showActiveMachine);
+  showActiveMachine();
 
   commandRegistry.register('runpane:notify', async (request: PaneCommandValue): Promise<NotifyResult> => {
     return notify.ask(parseNotifyRequest(request), paneCommandSignal());
@@ -269,6 +222,101 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
   for (const window of BrowserWindow.getAllWindows()) window.on('closed', () => notify.closeFloatingWindowsIfAlone());
   app.on('will-quit', () => notify.dispose());
   return notify;
+}
+
+/** What Notify uses of the machine connections (main/src/services/machineConnections.ts). */
+export type NotifyMachines = Pick<MachineConnections, 'subscribe' | 'list' | 'read' | 'run'>;
+
+interface SavedMachinesLink {
+  machines: NotifyMachines;
+  /** Reads one saved machine's questions again. */
+  read: (machineId: string) => Promise<void>;
+  /** Waits up to 15 s for a machine that is still connecting to answer; false if it isn't connecting or doesn't. */
+  onlineSoon: (machineId: string) => Promise<boolean>;
+}
+
+let followMachines: ((machines: NotifyMachines) => void) | null = null;
+
+/**
+ * Shows every saved machine's questions beside this computer's, in any mode, each slot fed by
+ * that machine's own connection, for as long as the connections run. Call after `registerNotifyHandlers`.
+ */
+export function followSavedMachines(machines: NotifyMachines): void {
+  followMachines?.(machines);
+}
+
+/** One Notify slot per saved machine: read on first sight, on reconnect and resync; kept, unanswerable, while offline. */
+function linkSavedMachines(notify: NotifyService, machines: NotifyMachines): SavedMachinesLink {
+  const queue = notify.queue;
+  const known = new Map<string, MachineState>();
+  /** `state` is undefined when the machine sent a Notify state this Pane cannot read. */
+  const show = (machineId: string, state: NotifySharedState | undefined) => {
+    const machine = known.get(machineId);
+    if (!machine) return;
+    if (!state) {
+      console.warn(`[Notify] ${machine.label} sent a Notify state this Pane cannot read; its questions are not shown here.`);
+      return;
+    }
+    queue.setRemote(machineId, { machine: machine.label, online: true, state });
+  };
+  const read = async (machineId: string) => {
+    if (!known.has(machineId)) return;
+    try {
+      show(machineId, decodeOptionalBoundary((await machines.read(machineId, 'notify:remote-snapshot')).data, notifySharedStateSchema));
+    } catch (error) {
+      // An older machine has no remote Notify, and one that is off can't answer; its questions stay on its own screen.
+      console.warn(`[Notify] Could not read ${known.get(machineId)?.label ?? machineId}'s questions:`, error);
+    }
+  };
+  const apply = (list: MachineState[]) => {
+    const listed = new Set<string>();
+    for (const machine of list) {
+      if (machine.kind === 'local') continue;
+      listed.add(machine.id);
+      const before = known.get(machine.id);
+      known.set(machine.id, { ...machine });
+      if (machine.status === 'offline') queue.setRemote(machine.id, { machine: machine.label, online: false });
+      // A stream can recover without a resync here yet: read the machine again.
+      else if (!before || (machine.status === 'online' && before.status !== 'online')) void read(machine.id);
+      else if (before.label !== machine.label) queue.setRemote(machine.id, { machine: machine.label, online: true });
+    }
+    for (const id of [...known.keys()]) {
+      if (listed.has(id)) continue;
+      known.delete(id);
+      queue.setRemote(id, null);
+    }
+  };
+  machines.subscribe((event) => {
+    if (event.type === 'machines') apply(event.machines);
+    // This computer's own questions are already in the queue.
+    else if (event.machineId === LOCAL_MACHINE_ID) return;
+    else if (event.type === 'resync') void read(event.machineId);
+    else if (event.channel === 'notify:shared-changed') show(event.machineId, decodeOptionalBoundary(event.args[0], notifySharedStateSchema));
+  });
+  apply(machines.list());
+  return {
+    machines,
+    read,
+    onlineSoon: (machineId) => new Promise<boolean>((resolve) => {
+      if (known.get(machineId)?.status !== 'connecting') {
+        resolve(false);
+        return;
+      }
+      let stopWaiting: () => void = () => undefined;
+      const timer = setTimeout(() => done(false), 15_000);
+      const done = (online: boolean) => {
+        clearTimeout(timer);
+        stopWaiting();
+        resolve(online);
+      };
+      stopWaiting = machines.subscribe((event) => {
+        if (event.type !== 'machines') return;
+        const status = event.machines.find(machine => machine.id === machineId)?.status;
+        if (status === 'online') done(true);
+        else if (status !== 'connecting') done(false);
+      });
+    }),
+  };
 }
 
 /** Checks a notify call the way the tool's schema promises, naming the field that's wrong. */

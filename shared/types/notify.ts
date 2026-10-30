@@ -121,12 +121,19 @@ export interface NotifyItem extends NotifyQuestion {
   answerSummary?: string;
   /** The device that answered, when another screen did; absent when this screen answered. */
   answeredOn?: string;
-  /** The machine whose agent asked; set while a screen shows two machines' questions. */
+  /** The machine whose agent asked; set while a screen shows more than one machine's questions. */
   machine?: string;
   /** Epoch ms when a snoozed question comes back to the strip. */
   snoozedUntil?: number;
+  /**
+   * Snapshot only, with `machine`: `local` (this computer) or the saved machine's id. A saved
+   * machine's card has the id `<machineId>:<its id there>`, as the glasses key cards.
+   */
+  machineId?: string;
   /** Snapshot only: its machine can't be reached right now, so an answer can't be sent. */
   unreachable?: boolean;
+  /** Snapshot only: from a saved machine the app isn't on, so it offers no Open in Pane. */
+  elsewhere?: boolean;
 }
 
 /** What the strip shows. Main decides; every surface renders the same thing. */
@@ -159,14 +166,6 @@ export interface NotifySnapshot {
   firstRun: boolean;
   /** Pane's Notify block in each agent's user-level instruction file. */
   instructionFiles: NotifyInstructionsFile[];
-  /** The connected host whose questions this screen also shows; null when it shows only its own. */
-  remote: NotifyRemoteHost | null;
-}
-
-export interface NotifyRemoteHost {
-  machine: string;
-  /** False while the connection is down: its questions can't be answered until it returns. */
-  online: boolean;
 }
 
 /**

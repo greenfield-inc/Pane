@@ -62,16 +62,31 @@ export interface NotifyQueueEnvironment {
   machine?: string;
 }
 
-/** A connected host's questions, shown beside this machine's own. */
+/**
+ * One saved machine's questions, shown beside this machine's own. Every id here is the card's
+ * key, `<machineId>:<id>`, as the glasses key cards: two machines can hold the same id.
+ */
 interface RemoteQueue {
+  machineId: string;
   machine: string;
   online: boolean;
   epoch: string;
   revision: number;
+  /** Each item carries its key as its id, plus its machine's id and name. */
   items: Map<string, NotifyItem>;
   queue: string[];
   hidden: Set<string>;
 }
+
+/** What `setRemote` takes for one machine: its name, whether it answers, and its shared state when read. */
+export interface NotifyRemoteUpdate {
+  machine: string;
+  online: boolean;
+  state?: NotifySharedState;
+}
+
+/** The machine id this computer's own cards carry (MachineConnections' LOCAL_MACHINE_ID). */
+const LOCAL_MACHINE = 'local';
 
 /**
  * The one place that holds every question and update, decides what shows where, and resolves
@@ -92,13 +107,16 @@ export class NotifyQueue extends EventEmitter {
   /** The first question ever on a strip carries the "Click to answer" hint for as long as it shows. */
   private hintItemId: string | undefined;
   private midnightTimer?: Timer;
-  private remote: RemoteQueue | null = null;
+  /** One slot per saved machine with Notify, by machine id. */
+  private readonly remotes = new Map<string, RemoteQueue>();
+  /** The machine the app is on: `local`, or a saved machine's id. Open in Pane works only there. */
+  private activeMachineId = LOCAL_MACHINE;
   /** Orders this machine's shared states for other screens (see NotifySharedState). */
   private readonly epoch = randomUUID();
   private revision = 0;
-  /** The host's questions this screen answered: they read "Sent to", not "Answered on". */
+  /** Other machines' questions this screen answered, by key: they read "Sent to", not "Answered on". */
   private readonly answeredHere = new Set<string>();
-  /** The host's questions reminded "when I switch to Pane": hidden on this screen only. */
+  /** Other machines' questions reminded "when I switch to Pane", by key: hidden on this screen only. */
   private readonly remindedHere = new Set<string>();
 
   constructor(private readonly env: NotifyQueueEnvironment) {
@@ -213,61 +231,84 @@ export class NotifyQueue extends EventEmitter {
     };
   }
 
-  /** Is this one of the connected host's questions? Its commands go to the host. */
-  isRemote(id: string): boolean {
-    return this.remote?.items.has(id) ?? false;
+  /**
+   * Which saved machine holds this card, and the id that machine knows it by; null for this
+   * machine's own card. Its commands go to that machine.
+   */
+  remoteTarget(key: string): { machineId: string; machine: string; online: boolean; id: string } | null {
+    for (const remote of this.remotes.values()) {
+      if (!remote.items.has(key)) continue;
+      return { machineId: remote.machineId, machine: remote.machine, online: remote.online, id: key.slice(remote.machineId.length + 1) };
+    }
+    return null;
   }
 
-  /** This screen is sending (or failed to send) an answer for the host's question; its card reads "Sent to". */
-  noteAnsweredHere(id: string, answered: boolean): void {
-    if (answered) this.answeredHere.add(id);
-    else this.answeredHere.delete(id);
+  /** This screen is sending (or failed to send) an answer for another machine's question; its card reads "Sent to". */
+  noteAnsweredHere(key: string, answered: boolean): void {
+    if (answered) this.answeredHere.add(key);
+    else this.answeredHere.delete(key);
   }
 
-  /** "When I switch to Pane" for the host's question: hidden here until this Pane comes to the front. */
-  remindHere(id: string): void {
-    if (!this.remote?.queue.includes(id)) return;
-    this.remindedHere.add(id);
+  /** "When I switch to Pane" for another machine's question: hidden here until this Pane comes to the front. */
+  remindHere(key: string): void {
+    if (![...this.remotes.values()].some(remote => remote.queue.includes(key))) return;
+    this.remindedHere.add(key);
+    this.changed();
+  }
+
+  /** The machine the app is on (`local` or a saved machine's id); other machines' cards offer no Open in Pane. */
+  setActiveMachine(machineId: string): void {
+    if (this.activeMachineId === machineId) return;
+    this.activeMachineId = machineId;
     this.changed();
   }
 
   /**
-   * The connected host's shared state (null: not connected). `online: false` keeps its questions
-   * showing but unanswerable. Each change plays out here as it does for this machine's own
-   * questions: a chime, an update on the strip, a "Sent to" or "Answered on" hold, an expiry.
+   * One saved machine's shared state (null: no longer saved, so its cards go). `online: false`
+   * keeps its questions showing but unanswerable. Each change plays out here as it does for this
+   * machine's own questions: a chime, an update on the strip, a "Sent to" or "Answered on" hold,
+   * an expiry.
    */
-  setRemote(next: { machine: string; online: boolean; state?: NotifySharedState } | null): void {
-    const previous = this.remote;
+  setRemote(machineId: string, next: NotifyRemoteUpdate | null): void {
+    const previous = this.remotes.get(machineId) ?? null;
+    // A saved machine that is this computer (the same running Pane): its cards already show once.
+    if (next?.state?.epoch === this.epoch) next = null;
     if (!next) {
       if (!previous) return;
       if (this.transient && previous.items.has(this.transient.view.itemId)) this.clearTransient();
-      this.remote = null;
-      this.answeredHere.clear();
-      this.remindedHere.clear();
+      this.remotes.delete(machineId);
+      for (const set of [this.answeredHere, this.remindedHere]) {
+        for (const key of [...set]) if (previous.items.has(key)) set.delete(key);
+      }
       this.changed();
       return;
     }
     if (!next.state) {
       if (!previous) return;
-      this.remote = { ...previous, machine: next.machine, online: next.online };
+      this.remotes.set(machineId, { ...previous, machine: next.machine, online: next.online, items: withMachine(previous.items, next.machine) });
       this.changed();
       return;
     }
     const state = next.state;
-    // A snapshot read can land after a newer event; the host's revision says which is current.
+    // A snapshot read can land after a newer event; the machine's revision says which is current.
     if (previous && previous.epoch === state.epoch && state.revision < previous.revision) {
-      if (previous.online !== next.online) this.setRemote({ machine: previous.machine, online: next.online });
+      if (previous.online !== next.online) this.setRemote(machineId, { machine: previous.machine, online: next.online });
       return;
     }
-    const items = new Map(state.items.map(item => [item.id, item]));
+    const machine = next.machine;
+    // The card key, as the glasses key cards: `<machineId>:<id>`.
+    const key = (id: string) => `${machineId}:${id}`;
+    const keyed = state.items.map(item => ({ ...item, id: key(item.id), machine, machineId }));
+    const items = new Map(keyed.map(item => [item.id, item]));
+    const queue = state.queue.map(key);
     const stripId = this.strip()?.itemId;
-    this.remote = {
-      machine: next.machine, online: next.online, epoch: state.epoch, revision: state.revision,
-      items, queue: [...state.queue], hidden: new Set(state.hidden),
-    };
+    this.remotes.set(machineId, {
+      machineId, machine, online: next.online, epoch: state.epoch, revision: state.revision,
+      items, queue, hidden: new Set(state.hidden.map(key)),
+    });
     // The first state after connecting shows what is already there, without a chime per question.
     const announce = previous !== null;
-    for (const item of state.items) {
+    for (const item of keyed) {
       const before = previous?.items.get(item.id);
       if (!before) {
         if (!announce) continue;
@@ -295,10 +336,11 @@ export class NotifyQueue extends EventEmitter {
         else if (this.transient?.view.itemId === item.id) this.clearTransient();
       }
     }
-    for (const id of [...this.answeredHere]) if (!items.has(id) || !isOpen(items.get(id)!)) this.answeredHere.delete(id);
-    for (const id of [...this.remindedHere]) if (!state.queue.includes(id)) this.remindedHere.delete(id);
+    const ours = (id: string) => id.startsWith(`${machineId}:`);
+    for (const id of [...this.answeredHere]) if (ours(id) && (!items.has(id) || !isOpen(items.get(id)!))) this.answeredHere.delete(id);
+    for (const id of [...this.remindedHere]) if (ours(id) && !queue.includes(id)) this.remindedHere.delete(id);
     if (this.transient && previous?.items.has(this.transient.view.itemId) && !items.has(this.transient.view.itemId)) this.clearTransient();
-    if (state.queue.length > 0) this.armMidnight();
+    if (queue.length > 0) this.armMidnight();
     this.changed();
   }
 
@@ -362,19 +404,19 @@ export class NotifyQueue extends EventEmitter {
   snapshot(): NotifySnapshot {
     this.pruneBeforeToday();
     const strip = this.strip();
-    const remote = this.remote;
+    const remotes = [...this.remotes.values()];
     const local = [...this.entries.values()].map(entry => entry.item);
     return {
       settings: this.env.settings(),
-      items: remote
+      items: remotes.length > 0
         ? [
-          ...local.map(item => ({ ...item, machine: this.machine() })),
-          ...[...remote.items.values()].map(item => ({
+          ...local.map(item => ({ ...item, machine: this.machine(), machineId: LOCAL_MACHINE })),
+          ...remotes.flatMap(remote => [...remote.items.values()].map(item => ({
             ...item,
-            machine: remote.machine,
             answeredOn: this.answeredHere.has(item.id) ? undefined : item.answeredOn,
             unreachable: remote.online ? undefined : true,
-          })),
+            elsewhere: remote.machineId === this.activeMachineId ? undefined : true,
+          }))),
         ]
         : local,
       queue: this.allQueued(),
@@ -387,7 +429,6 @@ export class NotifyQueue extends EventEmitter {
       showOutsideSupported: this.env.showOutsideSupported,
       instructionFiles: this.env.instructionFiles(),
       firstRun: strip?.kind === 'question' && (this.hintItemId === undefined || this.hintItemId === strip.itemId),
-      remote: remote ? { machine: remote.machine, online: remote.online } : null,
     };
   }
 
@@ -606,28 +647,37 @@ export class NotifyQueue extends EventEmitter {
   }
 
   private find(id: string): NotifyItem | undefined {
-    return this.entries.get(id)?.item ?? this.remote?.items.get(id);
+    const local = this.entries.get(id)?.item;
+    if (local) return local;
+    for (const remote of this.remotes.values()) {
+      const item = remote.items.get(id);
+      if (item) return item;
+    }
+    return undefined;
   }
 
-  /** This machine's waiting questions and the connected host's, oldest first; each keeps its own order. */
+  /** Every machine's waiting questions, oldest first; each machine keeps its own order (skip moves one back). */
   private allQueued(): string[] {
-    const remote = this.remote;
-    if (!remote || remote.queue.length === 0) return [...this.queue];
+    const queues = [this.queue, ...[...this.remotes.values()].map(remote => remote.queue)].filter(queue => queue.length > 0);
+    if (queues.length <= 1) return [...queues[0] ?? []];
+    const heads = queues.map(() => 0);
     const merged: string[] = [];
-    let local = 0;
-    let other = 0;
-    while (local < this.queue.length || other < remote.queue.length) {
-      const localAt = this.entries.get(this.queue[local])?.item.createdAt ?? Infinity;
-      const otherAt = remote.items.get(remote.queue[other])?.createdAt ?? Infinity;
-      if (other >= remote.queue.length || (local < this.queue.length && localAt <= otherAt)) merged.push(this.queue[local++]);
-      else merged.push(remote.queue[other++]);
+    for (;;) {
+      let pick = -1;
+      let pickAt = Infinity;
+      queues.forEach((queue, index) => {
+        if (heads[index] >= queue.length) return;
+        const at = this.find(queue[heads[index]])?.createdAt ?? Infinity;
+        if (pick === -1 || at < pickAt) { pick = index; pickAt = at; }
+      });
+      if (pick === -1) return merged;
+      merged.push(queues[pick][heads[pick]++]);
     }
-    return merged;
   }
 
   private allHidden(): Set<string> {
-    if (!this.remote) return this.hidden;
-    return new Set([...this.hidden, ...this.remote.hidden, ...this.remindedHere]);
+    if (this.remotes.size === 0) return this.hidden;
+    return new Set([...this.hidden, ...[...this.remotes.values()].flatMap(remote => [...remote.hidden]), ...this.remindedHere]);
   }
 
   private machine(): string {
@@ -675,6 +725,11 @@ export class NotifyQueue extends EventEmitter {
     this.armMidnight();
     this.emit('change');
   }
+}
+
+/** A machine's items under its current name, after a rename. */
+function withMachine(items: Map<string, NotifyItem>, machine: string): Map<string, NotifyItem> {
+  return new Map([...items].map(([key, item]) => [key, item.machine === machine ? item : { ...item, machine }]));
 }
 
 function isOpen(item: NotifyItem): boolean {

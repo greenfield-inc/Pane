@@ -126,6 +126,7 @@ import { usageManager } from './services/usage/usageManager';
 import { SharedCredentialSync } from './services/sharedCredentialSync';
 import { MachineConnections } from './services/machineConnections';
 import { registerMachineConnectionHandlers } from './ipc/machineConnections';
+import { followSavedMachines } from './ipc/notify';
 import { LeaderboardService } from './services/leaderboardService';
 import { registerLeaderboardHandlers } from './ipc/leaderboard';
 import { PtyHostSupervisor } from './ptyHost/ptyHostSupervisor';
@@ -1179,6 +1180,8 @@ async function initializeServices() {
     invokeLocal: (channel, args) => commandRegistry.invoke(channel, args),
   });
   registerMachineConnectionHandlers(ipcMain, machineConnections);
+  // The Notify inbox, badge and tray count cover every saved machine, in any mode.
+  followSavedMachines(machineConnections);
 
   // Read before the first identity lookup overwrites it, so the renderer can
   // tell when the desktop id changed since the last launch.
