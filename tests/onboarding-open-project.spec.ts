@@ -61,7 +61,7 @@ interface FinderSetup {
 }
 
 type OnboardingTestWindow = Window & {
-  __onboardingTest: { created: unknown[]; claudePermissionsAccepted: number };
+  __onboardingTest: { created: unknown[] };
   __paneTestElectronMock: { getPreferences(): Record<string, string> };
 };
 
@@ -84,12 +84,7 @@ async function openFirstRun(page: Page, finder: FinderSetup, options: ElectronAp
     const later = <Value>(value: Value, delayMs = 0) => new Promise<Value>(resolve => setTimeout(() => resolve(value), delayMs));
     const onboarding = window.electronAPI.onboarding;
     const created: unknown[] = [];
-    const record = { created, claudePermissionsAccepted: 0 };
-    Object.defineProperty(window, '__onboardingTest', { configurable: true, value: record });
-    onboarding.acceptClaudePermissions = async () => {
-      record.claudePermissionsAccepted += 1;
-      return { success: true, data: true };
-    };
+    Object.defineProperty(window, '__onboardingTest', { configurable: true, value: { created } });
     const create = window.electronAPI.projects.create;
     window.electronAPI.projects.create = async (request) => {
       if (setup.failCreate?.includes(request.path)) return { success: false, error: 'Path is already a project' };
@@ -130,11 +125,6 @@ async function openFirstRun(page: Page, finder: FinderSetup, options: ElectronAp
   const dialog = page.getByRole('dialog', { name: 'Open your project' });
   await expect(dialog).toBeVisible();
   return dialog;
-}
-
-async function claudePermissionsAccepted(page: Page): Promise<number> {
-  // SAFETY: openFirstRun's init script installs __onboardingTest before navigation.
-  return page.evaluate(() => (window as OnboardingTestWindow).__onboardingTest.claudePermissionsAccepted);
 }
 
 async function landedInOnboarding(page: Page): Promise<boolean> {
@@ -253,7 +243,6 @@ test('step 2 counts the sessions from the last 7 days, and Yes opens the Onboard
   const yesBox = await yes.boundingBox();
   expect({ width: yesBox?.width, height: yesBox?.height }).toEqual({ width: indicator?.width, height: indicator?.height });
 
-  expect(await claudePermissionsAccepted(page)).toBe(1);
   await yes.click();
   await expect(offer).toBeHidden();
   expect(await landedInOnboarding(page)).toBe(true);
@@ -269,7 +258,6 @@ test('Not now shows "Open your project" (J3)', async ({ page }) => {
 
   const project = page.getByRole('dialog', { name: 'Open your project' });
   await expect(project.getByRole('group', { name: 'Your repos' }).locator('label')).toHaveCount(3);
-  expect(await claudePermissionsAccepted(page)).toBe(0);
   await project.getByRole('button', { name: 'Open acme-web' }).click();
   await expect(project).toBeHidden();
   expect(await landedInOnboarding(page)).toBe(true);

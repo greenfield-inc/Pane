@@ -435,11 +435,6 @@ export default function OnboardingDialog({ isOpen, onClose }: OnboardingDialogPr
     setIsPicking(true);
     setError(null);
     try {
-      if (agent === 'claude') {
-        // Step 1 says Pane runs it with permission prompts off; without this, Claude's own warning stops the chat (D-19).
-        const accepted = await window.electronAPI.onboarding.acceptClaudePermissions();
-        if (!accepted.success) throw new Error(accepted.error);
-      }
       const saved = await API.paneChat.setAgent(agent);
       if (!saved.success) throw new Error(saved.error);
       // Runtimes without Sessions run the legacy chat, which the call above already switched.

@@ -10,12 +10,14 @@ import type { TerminalPanelState, ToolPanel } from '../../../shared/types/panels
 import { createFlowControlRecord, disposeFlowControlRecord } from '../ptyHost/flowControl';
 import { panelManager } from '../test/setup';
 import { formatWaitResult } from '../../../packages/runpane/src/watchLines';
+import { databaseService } from './database';
+import { getPaneChatPanelId, ONBOARDING_HANDOFF_PREFERENCE } from '../../../shared/types/paneChat';
 
-function createTerminal(agentType: 'claude' | 'codex' | undefined = 'codex') {
+function createTerminal(agentType: 'claude' | 'codex' | undefined = 'codex', panelId = 'p') {
   let onData: (data: string) => void = () => undefined;
   let onExit: (exit: { exitCode: number; signal?: number }) => void = () => undefined;
   const terminal = {
-    panelId: 'p', sessionId: 's', agentType, launchCwd: '/launch-origin',
+    panelId, sessionId: 's', agentType, launchCwd: '/launch-origin',
     pty: {
       onData: (listener: typeof onData) => { onData = listener; },
       onExit: (listener: typeof onExit) => { onExit = listener; },
@@ -52,11 +54,11 @@ let journal: WorkspaceJournal;
 let fixtures: TerminalFixture[];
 let events: Array<{ channel: string; payload: PaneEventArgument }>;
 
-function attach(agentType?: 'claude' | 'codex', startedAt = 0) {
-  const fixture = createTerminal(agentType);
+function attach(agentType?: 'claude' | 'codex', startedAt = 0, panelId = 'p') {
+  const fixture = createTerminal(agentType, panelId);
   fixtures.push(fixture);
-  access.terminals.set('p', fixture.terminal);
-  access.agentStatusMonitor.register('p', startedAt);
+  access.terminals.set(panelId, fixture.terminal);
+  access.agentStatusMonitor.register(panelId, startedAt);
   access.setupTerminalHandlers(fixture.terminal);
   return fixture;
 }
@@ -130,7 +132,7 @@ describe('terminal status events', () => {
 
     fixture.data(['\x1b[2J\x1b[H', rule, ' WARNING: Claude Code running in Bypass Permissions mode', '', ' ❯ No, exit', '   Yes, I accept', '', ' Enter to confirm · Esc to cancel'].join('\r\n'));
     await pollAgentStatus();
-    expect(statuses().at(-1)).toMatchObject({ state: 'blocked', reason: 'live_selection_menu' });
+    expect(statuses().at(-1)).toMatchObject({ state: 'blocked', reason: 'bypass_permissions_warning' });
     expect(journal.readAfter(0).entries).toHaveLength(journalLength);
     const count = statuses().length;
     await pollAgentStatus();
@@ -141,6 +143,41 @@ describe('terminal status events', () => {
     expect(statuses()).toHaveLength(count + 1);
     expect(statuses().at(-1)).toMatchObject({ state: 'blocked', reason: 'live_selection_menu',
       screenLines: expect.arrayContaining([expect.stringContaining('Choose a deployment target')]) });
+  });
+
+  describe("Claude's bypass-permissions warning", () => {
+    // Real Claude Code 2.1.314 menu: no numbers, "No, exit" selected first.
+    const warning = ['', '─'.repeat(60), ' WARNING: Claude Code running in Bypass Permissions mode', '', ' ❯ No, exit', '   Yes, I accept', '', ' Enter to confirm · Esc to cancel'].join('\r\n');
+    const settle = () => new Promise(resolve => setTimeout(resolve, 400));
+    const setHandoff = (value: string | null) => {
+      databaseService.getDb().prepare('DELETE FROM user_preferences WHERE key = ?').run(ONBOARDING_HANDOFF_PREFERENCE);
+      if (value) databaseService.setUserPreference(ONBOARDING_HANDOFF_PREFERENCE, value);
+    };
+    afterEach(() => setHandoff(null));
+
+    it('is accepted once in the Onboarding Session after the first-run screen', async () => {
+      setHandoff('migrate');
+      const fixture = attach('claude', 0, getPaneChatPanelId('claude'));
+      fixture.data(warning);
+      await pollAgentStatus();
+      await pollAgentStatus();
+      await settle();
+      expect(fixture.terminal.pty.write.mock.calls).toEqual([['\x1b[B'], ['\r']]);
+    });
+
+    it('is left to the person in any other terminal, or before the first-run screen', async () => {
+      setHandoff('migrate');
+      const other = attach('claude', 0, 'some-pane-tab');
+      other.data(warning);
+      await pollAgentStatus();
+      setHandoff(null);
+      const existingInstall = attach('claude', 0, getPaneChatPanelId('claude'));
+      existingInstall.data(warning);
+      await pollAgentStatus();
+      await settle();
+      expect(other.terminal.pty.write).not.toHaveBeenCalled();
+      expect(existingInstall.terminal.pty.write).not.toHaveBeenCalled();
+    });
   });
 
   it('retires destroyed terminals before old exit and data callbacks can affect a replacement', async () => {

@@ -678,7 +678,6 @@ interface ElectronAPI {
     findWslRepos: (distro: string) => Promise<IPCResponse<import('../../../shared/types/onboarding').WslRepos>>;
     checkFolder: (folder: string) => Promise<IPCResponse<{ name: string; path: string }>>;
     findAgents: () => Promise<IPCResponse<import('../../../shared/types/onboarding').FirstRunAgent[]>>;
-    acceptClaudePermissions: () => Promise<IPCResponse<boolean>>;
     firstSteps: () => Promise<IPCResponse<import('../../../shared/types/onboarding').FirstStepsState>>;
     supportProject: () => Promise<IPCResponse>;
   };

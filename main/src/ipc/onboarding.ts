@@ -20,7 +20,6 @@ import type { PaneChatAgent } from '../../../shared/types/paneChat';
 import { getDefaultWSLDistribution } from '../utils/wslUtils';
 import { checkRepoFolder, findHostRepoContext, findWslRepos } from '../services/repoFinder';
 import { samePath } from '../services/paneChatMigrateOffer';
-import { acceptClaudeBypassPermissions } from '../services/loops/claudeFolderTrust';
 
 /** Returns exec options that include the user's full shell PATH (Homebrew, nvm, etc.). */
 function shellExecOpts<Options extends object>(extra: Options): Options & { env: NodeJS.ProcessEnv } {
@@ -456,16 +455,6 @@ export function registerOnboardingHandlers(ipcMain: IpcMain, services: AppServic
     } catch (error) {
       console.error('[Onboarding] Failed to find agents:', error);
       return failure(toPaneDaemonError(error, 'ONBOARDING_FIND_AGENTS_FAILED'));
-    }
-  });
-
-  // Picking Claude Code on the first-run screen, which says Pane runs it with permission prompts off (D-19).
-  ipcMain.handle('onboarding:accept-claude-permissions', async () => {
-    try {
-      return { success: true, data: await acceptClaudeBypassPermissions() };
-    } catch (error) {
-      console.error('[Onboarding] Failed to record Claude Code\'s bypass-permissions acceptance:', error);
-      return failure(toPaneDaemonError(error, 'ONBOARDING_ACCEPT_CLAUDE_PERMISSIONS_FAILED'));
     }
   });
 
