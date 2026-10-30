@@ -10,7 +10,7 @@ import { Display, type Page } from '../src/display';
 import { homeListPage, homeRows } from '../src/homeList';
 import type { Card, Computer, PaneEntry } from '../src/model';
 import { noAnswerMessage } from '../src/host';
-import { LOCKED_OUT, ORIGIN_REFUSED, awayPage, connectingPage, infoCardPage, keysRefusedPage, noComputerPage, pairingFailedPage, pickerPage, refusedPage, terminalFooter, terminalPage, unjoinedPage } from '../src/screens';
+import { LOCKED_OUT, ORIGIN_REFUSED, awayPage, connectingPage, infoCardPage, keysRefusedPage, newSessionPage, noComputerPage, pairingFailedPage, pickerPage, refusedPage, terminalFooter, terminalPage, unjoinedPage } from '../src/screens';
 
 const now = Date.now();
 const clock = (epochMs: number) => new Date(epochMs).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -55,6 +55,8 @@ const unjoined = [
   { name: 'devbox', reason: 'not answering' },
 ];
 const unjoinedRows = homeRows(homeComputers, homeCards, unjoined);
+/** The home list as it opens: the new-Session row on studio-mac first, selected. */
+const newRows = homeRows(homeComputers, homeCards, [], homeComputers[0]);
 const firstUnjoined = unjoinedRows.findIndex((row) => row.kind === 'computer' && row.reason);
 const pages: Array<[string, Page]> = [
   ['terminal-keys-refused', keysRefusedPage(paneChat, "studio-mac's Pane can't take keys from the glasses yet.", 'Update Pane on studio-mac.')],
@@ -63,6 +65,8 @@ const pages: Array<[string, Page]> = [
     lines: ['> yes, do the dry run first', '', 'Here is what the dry run found on', 'parsa-4090m-workstation-win11pro.', '', '1. Pane 2.4.200 is installed from the Microsoft Store build, so', 'runpane update hands off to the Store instead of downloading', 'the installer itself.'],
   })],
   ['away-offline', awayPage(travel, clock, 'trip-notes')],
+  ['new-session-listening', newSessionPage('studio-mac', 'Find why checkout charges some carts twice')],
+  ['new-session-starting', newSessionPage('studio-mac', 'Find why checkout charges some carts twice', true)],
   ...unjoined.map(({ name, reason }): [string, Page] => [`unjoined-${name}`, unjoinedPage(name, reason)]),
   ['error-no-computer-reachable', noComputerPage(3)],
   ['error-no-computer-first-time', noComputerPage(1, noAnswerMessage('studio-mac', location.origin))],
@@ -92,6 +96,7 @@ const pages: Array<[string, Page]> = [
     const menu = findMenu(screen.split('\n'));
     return [name, menu ? pickerPage(paneChat, menu.question, menu.choices, false, terminalFooter(undefined)) : connectingPage(0)];
   }),
+  ['home-list-new-session', homeListPage(newRows, { selected: 0 }, clock)],
   ['home-list-top', homeListPage(rows, { selected: 0 }, clock)],
   ['home-list-selected', homeListPage(rows, { selected: 3 }, clock)],
   ['home-list-offline', homeListPage(rows, { selected: offlineAt }, clock)],

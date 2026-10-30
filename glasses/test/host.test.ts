@@ -371,6 +371,35 @@ describe('HostHub', () => {
     one.stop();
   });
 
+  it('starts a Session with only a name and a purpose, and opens its agent tab', async () => {
+    const a = host('https://studio.tail1.ts.net:8443');
+    a.handlers.set('orchestration-sessions:create', () => ({
+      success: true,
+      data: { session: { id: 's-1', name: 'Find why checkout charges', agent: 'claude' }, panel: { id: 'panel-s1' }, agent: 'claude' },
+    }));
+    const { hub: one } = hub([a]);
+    await until(() => one.computers()[0]?.status === 'live');
+    const entry = await one.createSession(a.url, { name: 'Find why checkout charges', goal: 'Find why checkout charges some carts twice' });
+    expect(entry).toMatchObject({ kind: 'session', id: 's-1', name: 'Find why checkout charges', agent: 'Claude', panelId: 'panel-s1' });
+    const sent = a.seen.find((seen) => seen.body.includes('orchestration-sessions:create'));
+    expect(JSON.parse(sent?.body ?? '{}')).toMatchObject({ args: [{ name: 'Find why checkout charges', goal: 'Find why checkout charges some carts twice' }] });
+    one.stop();
+  });
+
+  it("says a computer on an older Pane can't start a Session from the glasses, and keeps it live", async () => {
+    const a = host('https://studio.tail1.ts.net:8443');
+    a.refusedChannels.add('orchestration-sessions:create');
+    const { hub: one } = hub([a]);
+    await until(() => one.computers()[0]?.status === 'live');
+    await expect(one.createSession(a.url, { name: 'Rotate keys', goal: 'Rotate keys' })).rejects.toMatchObject({
+      code: 'ERR_GLASSES_SESSION_UNSUPPORTED',
+      message: "computer-0's Pane can't start a Session from the glasses yet, so none was started.",
+      next: 'Update Pane on computer-0.',
+    });
+    expect(one.computers()[0]?.status).toBe('live');
+    one.stop();
+  });
+
   it('lists unarchived Sessions and Panes with the terminal each opens', async () => {
     const a = host('https://studio.tail1.ts.net:8443');
     a.handlers.set('sessions:get-all-with-projects', () => ({ success: true, data: [{ sessions: [

@@ -150,6 +150,17 @@ export function voiceAnswerPage(card: Card, transcript: string): Page {
   };
 }
 
+/** Hold on the new-Session row: the words appear while you speak; release starts the Session. */
+export function newSessionPage(machine: string, transcript: string, starting = false): Page {
+  return {
+    boxes: [
+      header(`New Session on ${machine} · ${starting ? 'starting…' : 'listening'}`),
+      body(`● ${transcript || 'Listening…'}`, { y: 36, h: 220, capture: true }),
+      footer(starting ? ' ' : 'release = start   double press = cancel'),
+    ],
+  };
+}
+
 export const TERMINAL_LINES = linesFor(FOOTER_Y - BAR_H, BAR_PAD);
 /** A swipe moves half a page: the terminal shows two halves of this many lines. */
 export const HALF_PAGE = TERMINAL_LINES / 2;

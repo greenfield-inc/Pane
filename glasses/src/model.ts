@@ -103,6 +103,12 @@ export interface TerminalScreen {
   agent: string;
 }
 
+/** A Session the glasses start: a one-line name and its purpose. */
+export interface SessionRequest {
+  name: string;
+  goal: string;
+}
+
 /** A live recording that turns into text on the computer. */
 export interface Dictation {
   push(pcm: Uint8Array): void;
@@ -147,6 +153,12 @@ export interface PaneSource {
   key(computerId: string, panelId: string, key: TerminalKey): Promise<void>;
   answer(card: Card, answer: NotifyAnswer): Promise<void>;
   dictate(computerId: string, onPreview: (text: string) => void): Promise<Dictation>;
+  /**
+   * Starts a Session on the computer with its default agent, named `name`, with `goal` as its
+   * purpose; resolves to the Session to open. A computer on an older Pane refuses with
+   * ERR_GLASSES_SESSION_UNSUPPORTED.
+   */
+  createSession(computerId: string, request: SessionRequest): Promise<PaneEntry>;
   /** Try every offline computer, or one, now. */
   retry(computerId?: string): void;
 }

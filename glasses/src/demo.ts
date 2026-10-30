@@ -1,7 +1,7 @@
 // The demo: sample computers, cards and terminals that live in the app, with no network.
 // Even review needs it, and anyone can try every screen before pairing.
 import type { NotifyAnswer } from '../../shared/types/notify';
-import { CHOICE_KEYS, GlassesError, orderCards, type Card, type Computer, type Dictation, type PaneEntry, type PaneSource, type TerminalKey, type TerminalScreen, type UnjoinedComputer } from './model';
+import { CHOICE_KEYS, GlassesError, orderCards, type Card, type Computer, type Dictation, type PaneEntry, type PaneSource, type SessionRequest, type TerminalKey, type TerminalScreen, type UnjoinedComputer } from './model';
 import type { Cancel } from './timers';
 
 const MINUTE = 60_000;
@@ -86,6 +86,8 @@ export class DemoSource implements PaneSource {
   private readonly terminals = terminals();
   private items: Card[];
   private readonly started: number;
+  /** Sessions started from the glasses: name and when. */
+  private readonly created: Array<[string, number]> = [];
 
   constructor(private readonly every: (fn: () => void, ms: number) => Cancel, private readonly now: () => number = Date.now) {
     this.started = now();
@@ -111,9 +113,11 @@ export class DemoSource implements PaneSource {
   }
 
   private entries(computerId: keyof typeof DEMO_ROWS): PaneEntry[] {
-    return DEMO_ROWS[computerId].map(([kind, name, minutesAgo]): PaneEntry => {
+    const rows: Array<[PaneEntry['kind'], string, number]> = DEMO_ROWS[computerId].map(([kind, name, minutesAgo]) => [kind, name, this.started - minutesAgo * MINUTE]);
+    if (computerId === 'studio') rows.push(...this.created.map(([name, at]): [PaneEntry['kind'], string, number] => ['session', name, at]));
+    return rows.map(([kind, name, activityAt]): PaneEntry => {
       const terminal = this.terminals.get(name);
-      return { kind, id: name, name, agent: terminal?.agent ?? 'shell', status: terminal?.status ?? 'idle', panelId: name, activityAt: this.started - minutesAgo * MINUTE };
+      return { kind, id: name, name, agent: terminal?.agent ?? 'shell', status: terminal?.status ?? 'idle', panelId: name, activityAt };
     });
   }
 
@@ -216,6 +220,19 @@ export class DemoSource implements PaneSource {
       },
       cancel: () => timer.cancel(),
     };
+  }
+
+  /** Adds a sample Session on the computer, its agent reading the purpose; nothing runs. */
+  async createSession(computerId: string, request: SessionRequest): Promise<PaneEntry> {
+    if (computerId !== 'studio') {
+      throw new GlassesError('ERR_DEMO_SESSION', 'The demo starts Sessions only on studio-mac.', 'Double press to go back.');
+    }
+    this.terminals.set(request.name, { status: 'working', agent: 'Claude', earlier: [], lines: [`> ${request.goal}`, '• Reading the repository…'] });
+    this.created.push([request.name, this.now()]);
+    this.changed();
+    const entry = this.entries('studio').find((candidate) => candidate.id === request.name);
+    if (!entry) throw new GlassesError('ERR_DEMO_SESSION', 'The sample Session did not appear.');
+    return entry;
   }
 
   retry(): void {

@@ -1,9 +1,9 @@
 // The home list (design list A, D-88; marks D-94): one list across every paired computer.
-// Notify questions come first, then info cards, then every Session and Pane, newest activity first. Each row starts
+// Its first row starts a new Session by voice (D-89). Notify questions come next, then info cards, then every Session and Pane, newest activity first. Each row starts
 // with its computer's mark and the first five letters of its name.
 //
 // The API other screens build on, kept small:
-// - homeRows(computers, cards, unjoined): the merged rows, in order. Identity is `key` (computer + id).
+// - homeRows(computers, cards, unjoined, newOn): the merged rows, in order. Identity is `key` (computer + id).
 // - homeListPage(rows, view, clock): the page that shows them, in the LIST_MARKS style.
 // - outlineRowAt(rows, index): the row a native list press names (outline marks only).
 import { BRIGHT, DIM, DIMMER, LIST_PAD, MAX_LIST_ITEMS, type Box, type Brightness, type ImageBox, type Page, type TextBox } from './display';
@@ -34,6 +34,8 @@ interface RowBase {
 }
 
 export type HomeRow =
+  /** "+ New Session on studio-mac · hold to say it": hold, speak, release starts it there. */
+  | (RowBase & { kind: 'new' })
   | (RowBase & { kind: 'question'; card: Card })
   /** An info card (ui `info`): a message with nothing to answer. */
   | (RowBase & { kind: 'info'; card: Card })
@@ -55,7 +57,7 @@ function asksAbout(card: Card, entry: PaneEntry): boolean {
  * then one row for each away computer with nothing to list, then one dim row for each computer that
  * couldn't join. A computer that goes away keeps its rows, marked by `status`.
  */
-export function homeRows(computers: readonly Computer[], cards: readonly Card[], unjoined: readonly UnjoinedComputer[] = []): HomeRow[] {
+export function homeRows(computers: readonly Computer[], cards: readonly Card[], unjoined: readonly UnjoinedComputer[] = [], newOn?: Computer): HomeRow[] {
   const base = (computer: Computer, slot: number) => ({
     computerId: computer.id, machine: computer.name, os: computer.os, slot, status: computer.status, lastSeenAt: computer.lastSeenAt,
   });
@@ -85,7 +87,9 @@ export function homeRows(computers: readonly Computer[], cards: readonly Card[],
     kind: 'computer', key: `unjoined|${computer.name}`, computerId: `unjoined|${computer.name}`, machine: computer.name, os: null,
     slot: computers.length + index, status: 'offline', lastSeenAt: null, reason: computer.reason,
   }));
-  return [...questions, ...infos, ...entries, ...away, ...outside];
+  const found = newOn && slots.get(newOn.id);
+  const start: HomeRow[] = found ? [{ ...base(found.computer, found.slot), kind: 'new', key: 'new' }] : [];
+  return [...start, ...questions, ...infos, ...entries, ...away, ...outside];
 }
 
 /** What an away computer's rows say instead of their status. */
@@ -102,6 +106,8 @@ function awayText(row: HomeRow, clock: (epochMs: number) => string): string | nu
 function rowText(row: HomeRow, clock: (epochMs: number) => string): string {
   const away = awayText(row, clock);
   switch (row.kind) {
+    case 'new':
+      return `+ New Session on ${row.machine} · hold to say it`;
     case 'question':
       return `${row.card.paneName} · needs you`;
     case 'info':
@@ -116,7 +122,8 @@ function rowText(row: HomeRow, clock: (epochMs: number) => string): string {
   }
 }
 
-const letters = (row: HomeRow) => `${row.machine.slice(0, 5)}  `;
+/** The computer's first five letters; the new-Session row names its computer in full instead. */
+const letters = (row: HomeRow) => (row.kind === 'new' ? '' : `${row.machine.slice(0, 5)}  `);
 
 export interface HomeListView {
   /** The selected row's index in `rows` (logo marks; the firmware list keeps its own). */
@@ -167,7 +174,7 @@ export function homeListPage(rows: readonly HomeRow[], view: HomeListView, clock
   for (let index = 0; index < PAGE_ROWS; index += 1) {
     const row = shown[index];
     const isSelected = first + index === selected;
-    const brightness: Brightness = isSelected ? BRIGHT : row && row.status !== 'live' ? DIMMER : DIM;
+    const brightness: Brightness = isSelected ? BRIGHT : row && row.status !== 'live' && row.kind !== 'new' ? DIMMER : DIM;
     const text = row ? `${isSelected ? '> ' : '   '}${letters(row)}${rowText(row, clock)}` : ' ';
     boxes.push({
       kind: 'text', name: `row${index}`, x: TEXT_X, y: BAR_H + index * ROW_H, w: SCREEN_W - TEXT_X, h: ROW_H, pad: ROW_PAD,
@@ -175,7 +182,8 @@ export function homeListPage(rows: readonly HomeRow[], view: HomeListView, clock
     });
   }
   for (let strip = 0; strip < PAGE_ROWS / STRIP_ROWS; strip += 1) {
-    const marks: StripMark[] = shown.slice(strip * STRIP_ROWS, (strip + 1) * STRIP_ROWS).map((row) => ({ os: row.os, dim: row.status !== 'live' }));
+    const marks: StripMark[] = shown.slice(strip * STRIP_ROWS, (strip + 1) * STRIP_ROWS)
+      .map((row) => (row.kind === 'new' ? { os: null, dim: false, blank: true } : { os: row.os, dim: row.status !== 'live' }));
     boxes.push(logoStrip(`logos${strip}`, BAR_H + strip * STRIP_ROWS * ROW_H, marks));
   }
   return { boxes };
@@ -184,7 +192,7 @@ export function homeListPage(rows: readonly HomeRow[], view: HomeListView, clock
 function logoStrip(name: string, y: number, marks: StripMark[]): ImageBox {
   return {
     kind: 'image', name, x: STRIP_X, y, w: STRIP_W, h: STRIP_ROWS * ROW_H,
-    key: marks.map((mark) => `${mark.os ?? 'computer'}${mark.dim ? ':dim' : ''}`).join(','),
+    key: marks.map((mark) => (mark.blank ? 'blank' : `${mark.os ?? 'computer'}${mark.dim ? ':dim' : ''}`)).join(','),
     draw: () => drawLogoStrip(marks, { width: STRIP_W, height: STRIP_ROWS * ROW_H, rowHeight: ROW_H }),
   };
 }

@@ -62,7 +62,7 @@ computer. Allowing the origin on an older Pane lasts only until the Even app res
 | Swipe up / down | Move through a list or scroll a terminal half a page |
 | Press | Open or pick; in a terminal, open keys mode |
 | Double press | Back; on the home page, exit the app |
-| Hold, then release | Talk, then send at once: an answer on a card, input in a terminal |
+| Hold, then release | Talk, then send at once: an answer on a card, input in a terminal, a new Session on home's first row |
 
 In **keys mode** the gestures go to the terminal, one key at a time in the order you made them:
 swipe sends ↑ or ↓, press sends Enter and goes back to the output, double press leaves without sending anything, and hold opens a short list with
@@ -77,6 +77,13 @@ Esc and Tab. You can't dictate in keys mode; leave it first.
   card (hold to answer it by voice), an info card to read its message, or a Session or Pane to open
   its terminal on its own computer. An info card you read and leave with double press drops off
   the list on these glasses; it stays on your phone and computers.
+- **A new Session**: home's first row reads "+ New Session on studio-mac · hold to say it". Hold
+  it and say what the Session is for; the words appear as you speak. Release starts a Session on
+  that computer with its default agent, your words as its purpose and its first words as its name,
+  and opens it. Double press while listening cancels and starts nothing. The Session starts on the
+  computer you last started one on from the glasses, else the computer of the last Pane you opened,
+  else your first paired computer. If that computer is offline, or its Pane is too old to take a
+  Session from the glasses, the glasses say so and start nothing.
 - **A computer that stops answering** keeps its rows, dimmed with its logo, reading "offline since
   9:14". Pressing one says when it went away and offers Retry. A computer that has never answered
   gets one dim row of its own, and so does each computer that couldn't join (see Install and
