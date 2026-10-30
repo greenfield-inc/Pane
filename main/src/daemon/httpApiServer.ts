@@ -268,6 +268,7 @@ class RemoteDaemonBadRequestError extends Error {
     readonly code: string,
     message: string,
     readonly statusCode: number = 400,
+    readonly next?: string,
   ) {
     super(message);
     this.name = 'RemoteDaemonBadRequestError';
@@ -1209,15 +1210,18 @@ export class PaneRemoteHttpApiServer {
           'Update the Pane glasses app, then try again.');
         return;
       }
-      const waitMs = glasses.claim('session', client.id);
-      if (waitMs > 0) {
-        const seconds = Math.ceil(waitMs / 1000);
-        glasses.recordFailure(admission.source, 'session', `asked again within 30 s; ${seconds} s left`);
-        refuse(429, 'ERR_GLASSES_SESSION_TOO_SOON', 'These glasses started a Session on this computer less than 30 seconds ago, so this one was not created.',
-          `Try again in ${seconds} s.`);
-        return;
-      }
-      args = [input];
+      // Claimed only when the request runs, so a resend with the same requestId gets the first answer.
+      await this.respondToInvoke(request, response, invokeRequest.requestId, client.id, () => {
+        const waitMs = glasses.claim('session', client.id);
+        if (waitMs > 0) {
+          const seconds = Math.ceil(waitMs / 1000);
+          glasses.recordFailure(admission.source, 'session', `asked again within 30 s; ${seconds} s left`);
+          throw new RemoteDaemonBadRequestError('ERR_GLASSES_SESSION_TOO_SOON',
+            'These glasses started a Session on this computer less than 30 seconds ago, so this one was not created.', 429, `Try again in ${seconds} s.`);
+        }
+        return this.commandRegistry.invokeRemote(channel, [input]);
+      });
+      return;
     }
     if (channel === GLASSES_COMMANDS.vouch) {
       const waitMs = glasses.claim('vouch', client.id);
@@ -1623,7 +1627,7 @@ async function answerInvoke(run: () => ReturnType<PaneCommandRegistry['invokeRem
   } catch (error) {
     if (error instanceof RemoteDaemonBadRequestError) {
       return {
-        answer: { statusCode: error.statusCode, payload: { ok: false, error: { message: error.message, code: error.code } } satisfies RemoteInvokeErrorPayload },
+        answer: { statusCode: error.statusCode, payload: { ok: false, error: error.next ? { message: error.message, code: error.code, next: error.next } : { message: error.message, code: error.code } } satisfies RemoteInvokeErrorPayload },
         keep: false,
       };
     }

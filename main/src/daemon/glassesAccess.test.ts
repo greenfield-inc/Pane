@@ -680,6 +680,18 @@ describe('glasses limits on Sessions, vouches and revokes', () => {
     expect((await create()).status).toBe(200);
   });
 
+  it('answers a resent Session create with its first answer instead of the 30-second limit', async () => {
+    const host = await setup();
+    const { token } = await host.pair();
+    const send = (requestId: string) => host.request('POST', '/invoke', host.fromGlasses(token),
+      { channel: 'orchestration-sessions:create', args: [{ name: 'Checkout' }], requestId });
+
+    const first = await send('create-1');
+    expect((await send('create-1')).body).toEqual(first.body);
+    expect(host.calls).toHaveLength(1);
+    expect(errorCode(await send('create-2'))).toBe('ERR_GLASSES_SESSION_TOO_SOON');
+  });
+
   it('sends no pairing code when the glasses are revoked while the vouch runs', async () => {
     const host = await setup();
     const { token } = await host.pair();
