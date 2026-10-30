@@ -128,7 +128,7 @@ export const SelectionPopover: React.FC<SelectionPopoverProps> = ({
           Copy
         </span>
       </PopoverButton>
-      {sessionId && !isRemoteMode && <PopoverButton onClick={() => {
+      {sessionId && <PopoverButton onClick={() => {
         setCapture({ text, source: [panelTitle, workingDirectory, sessionId].filter(Boolean).join(' · '), at: new Date().toISOString() });
         onClose();
       }}><span className="flex items-center gap-2"><FileText className="h-4 w-4" />Add to notes</span></PopoverButton>}
