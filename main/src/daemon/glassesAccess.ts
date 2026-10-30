@@ -50,6 +50,8 @@ export const GLASSES_CHANNELS: ReadonlySet<string> = new Set([
   // Asks your other computers for pairing secrets for these same glasses: the device comes from the
   // token's own record and the computers from this computer's discovery, never from the request.
   GLASSES_COMMANDS.vouch,
+  // A name and a purpose only (`glassesSessionInput`): the Session runs this computer's default agent.
+  'orchestration-sessions:create',
 ]);
 
 /** The events a glasses stream carries: Notify, agent status and list changes, never terminal bytes. */
@@ -85,7 +87,7 @@ const MAX_REFUSED_ORIGINS = 10;
 const VOUCH_INTERVAL_MS = 5 * 60_000;
 const COUNTED_FAILURES: ReadonlySet<GlassesFailureReason> = new Set(['token', 'pairing-secret', 'identity', 'credential-in-url']);
 
-export type GlassesFailureReason = 'token' | 'pairing-secret' | 'origin' | 'identity' | 'funnel' | 'credential-in-url' | 'channel' | 'key' | 'vouch';
+export type GlassesFailureReason = 'token' | 'pairing-secret' | 'origin' | 'identity' | 'funnel' | 'credential-in-url' | 'channel' | 'key' | 'vouch' | 'session';
 
 const { up, down, enter, escape, tab } = RUNPANE_CONTRACT.terminalKeys;
 /** The keys the glasses may send, one per request: ↑ ↓ Enter Esc Tab, and a menu choice's number. */
@@ -99,6 +101,27 @@ const keyRequestSchema = boundary.object({ panelId: boundary.nonEmptyString, inp
 export function glassesKeyInput(request: JsonValue | undefined): { panelId: string; input: string; source: 'user' } | null {
   const key = decodeOptionalBoundary(request, keyRequestSchema);
   return key && GLASSES_KEYS.has(key.input) ? { panelId: key.panelId, input: key.input, source: 'user' } : null;
+}
+
+const MAX_SESSION_NAME_LENGTH = 120;
+const MAX_SESSION_GOAL_LENGTH = 2_000;
+const SESSION_FIELDS: ReadonlySet<string> = new Set(['name', 'goal']);
+const sessionRequestSchema = boundary.object({
+  name: boundary.refine(boundary.nonEmptyString, (name) => name.trim().length > 0 && name.length <= MAX_SESSION_NAME_LENGTH && !/\p{Cc}/u.test(name), 'expected a one-line name'),
+  goal: boundary.optional(boundary.refine(boundary.string, (goal) => goal.length <= MAX_SESSION_GOAL_LENGTH, 'expected a shorter purpose')),
+});
+
+/**
+ * The `orchestration-sessions:create` request the glasses may run: a name and, optionally, a
+ * purpose. Anything else (agent, launch command, resume, runtime, opening prompt, profile) is
+ * refused, so the Session starts with this computer's default agent and command. Null when refused.
+ */
+export function glassesSessionInput(request: JsonValue | undefined): { name: string; goal?: string } | null {
+  const fields = decodeOptionalBoundary(request, boundary.jsonObject);
+  if (!fields || Object.keys(fields).some((key) => !SESSION_FIELDS.has(key))) return null;
+  const input = decodeOptionalBoundary(fields, sessionRequestSchema);
+  if (!input) return null;
+  return input.goal === undefined ? { name: input.name } : { name: input.name, goal: input.goal };
 }
 
 interface GlassesConfigStore {

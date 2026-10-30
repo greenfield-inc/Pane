@@ -21,6 +21,7 @@ import {
   GLASSES_CHANNELS,
   GLASSES_EVENT_CHANNELS,
   glassesKeyInput,
+  glassesSessionInput,
   glassesSource,
   type GlassesAccess,
   type GlassesFailureReason,
@@ -1181,7 +1182,7 @@ export class PaneRemoteHttpApiServer {
     }
     if (!GLASSES_CHANNELS.has(channel)) {
       glasses.recordFailure(admission.source, 'channel', channel);
-      refuse(403, 'ERR_GLASSES_CHANNEL_REFUSED', `Glasses can't run ${channel}; they can list Panes, read and type into terminals, dictate, and answer Notify.`);
+      refuse(403, 'ERR_GLASSES_CHANNEL_REFUSED', `Glasses can't run ${channel}; they can list Panes, read and type into terminals, dictate, answer Notify and start a Session.`);
       return;
     }
     const client = admission.client;
@@ -1198,6 +1199,17 @@ export class PaneRemoteHttpApiServer {
         return;
       }
       args = [key];
+    }
+    if (channel === 'orchestration-sessions:create') {
+      const input = invokeRequest.args.length === 1 ? glassesSessionInput(invokeRequest.args[0]) : null;
+      if (!input) {
+        // Logged without the request, which could carry a command.
+        glasses.recordFailure(admission.source, 'session');
+        refuse(400, 'ERR_GLASSES_SESSION_REFUSED', 'Glasses can start a Session with only a one-line name and a purpose, and it runs this computer\'s default agent. Nothing was created.',
+          'Update the Pane glasses app, then try again.');
+        return;
+      }
+      args = [input];
     }
     if (channel === GLASSES_COMMANDS.vouch) {
       const waitMs = glasses.claimVouch(client.id);

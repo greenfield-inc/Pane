@@ -122,7 +122,8 @@ hold:
   doubling on each repeat up to an hour. Each refusal is logged with the source and reason, never
   the token.
 
-A glasses token reaches only what the glasses use: listing Sessions and Panes, reading and typing
+A glasses token reaches only what the glasses use: listing Sessions and Panes, starting a Session
+(with only a one-line name and a purpose; it runs the computer's default agent), reading and typing
 into terminals, pressing one key at a time, dictation, and Notify. The keys are ↑, ↓, Enter, Esc,
 Tab and the digits 1 to 9, one per request, and nothing else: text, two keys at once, Ctrl-C,
 Ctrl-D, ← → and 0 are refused before they reach the terminal (`ERR_GLASSES_KEY_REFUSED`), logged
@@ -140,7 +141,7 @@ the phone id, and the glasses may ask once
 every 5 minutes. A password-protected computer is asked only when this computer has its password
 saved; one whose Pane is too old to remember revokes is skipped.
 
-The token cannot pair any other device, change settings, write files, commit, run machine commands,
+The token cannot create a Pane, pair any other device, change settings, write files, commit, run machine commands,
 or choose what a terminal runs, and its event stream never carries terminal output.
 
 Typing into a terminal can run commands, so treat the glasses like your phone: whoever holds a
