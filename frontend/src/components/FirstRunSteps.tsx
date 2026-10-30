@@ -4,7 +4,8 @@ import { getCliBrandIcon } from './ui/brandIconRegistry';
 import { AGENT_LAUNCH_PRESETS } from '../../../shared/constants/agentLaunchPresets';
 import type { FirstRunAgent } from '../../../shared/types/onboarding';
 import type { PaneChatAgent } from '../../../shared/types/paneChat';
-import type { ImportSession, SessionImportSource } from '../../../shared/types/sessionImport';
+import type { ImportSession } from '../../../shared/types/sessionImport';
+import { TOOL_NAMES } from './sessionImport/sessionImportCopy';
 import { cn } from '../utils/cn';
 
 const INSTALL_URLS = {
@@ -12,17 +13,6 @@ const INSTALL_URLS = {
   codex: 'https://github.com/openai/codex',
   cursor: 'https://cursor.com/docs/cli/installation',
 } satisfies Record<PaneChatAgent, string>;
-
-const SOURCE_NAMES = {
-  claude: 'Claude Code',
-  codex: 'Codex',
-  conductor: 'Conductor',
-  superset: 'Superset',
-  herdr: 'Herdr',
-  emdash: 'Emdash',
-  orca: 'Orca',
-  t3code: 'T3 Code',
-} satisfies Record<SessionImportSource, string>;
 
 /** The Yes button and the scanning indicator share this box, so the footer never shifts. */
 const ANSWER_BOX = 'h-9 w-24';
@@ -32,7 +22,7 @@ function joinNames(names: string[]): string {
 }
 
 function sourceNames(sessions: ImportSession[]): string {
-  return joinNames([...new Set(sessions.map(session => SOURCE_NAMES[session.source]))]);
+  return joinNames([...new Set(sessions.map(session => TOOL_NAMES[session.source]))]);
 }
 
 interface AgentStepProps {

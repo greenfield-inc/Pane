@@ -2739,7 +2739,11 @@ export class TerminalPanelManager extends EventEmitter {
     // The menu has no numbers: move from "No, exit" to "Yes, I accept", then confirm.
     this.writeToTerminal(terminal.panelId, '\x1b[B');
     setTimeout(() => {
-      if (!terminal.destroying) this.writeToTerminal(terminal.panelId, '\r');
+      // Confirm only in the same live terminal, still on the warning: a restart in between gets nothing.
+      const live = this.terminals.get(terminal.panelId) === terminal && !terminal.destroying;
+      if (live && terminal.lastStatusScan?.detection.matchedRuleId === 'bypass_permissions_warning') {
+        this.writeToTerminal(terminal.panelId, '\r');
+      }
     }, BYPASS_WARNING_CONFIRM_DELAY_MS);
   }
 

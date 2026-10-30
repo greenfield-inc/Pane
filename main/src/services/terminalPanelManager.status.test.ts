@@ -165,6 +165,17 @@ describe('terminal status events', () => {
       expect(fixture.terminal.pty.write.mock.calls).toEqual([['\x1b[B'], ['\r']]);
     });
 
+    it('sends no Enter to a terminal that replaced it before the answer finished', async () => {
+      setHandoff('migrate');
+      const first = attach('claude', 0, getPaneChatPanelId('claude'));
+      first.data(warning);
+      await pollAgentStatus();
+      const replacement = attach('claude', 0, getPaneChatPanelId('claude'));
+      await settle();
+      expect(first.terminal.pty.write.mock.calls).toEqual([['\x1b[B']]);
+      expect(replacement.terminal.pty.write).not.toHaveBeenCalled();
+    });
+
     it('is left to the person in any other terminal, or before the first-run screen', async () => {
       setHandoff('migrate');
       const other = attach('claude', 0, 'some-pane-tab');
