@@ -91,7 +91,7 @@ function LocalNotesPanel({ paneId, capture, viewId = 'panel' }: NotesPanelProps)
   const retryExports = () => { void window.electronAPI.invoke('notes:mutate', paneId, { action: 'retry' }).then(result => setExports(result.exports)).catch(cause => setError(ipcErrorMessage(cause, 'Pane did not say why.'))); };
 
   return <section aria-label="Notes" className="notes-surface flex h-full min-h-0 flex-col bg-bg-primary text-text-primary">
-    <header className="flex min-h-[50px] shrink-0 flex-wrap items-center gap-x-2.5 gap-y-1.5 border-b border-border-primary px-4 py-2.5">
+    <header className="flex min-h-[50px] shrink-0 flex-wrap items-center gap-x-2.5 gap-y-1.5 border-b border-border-primary px-4 py-2">
       <Dropdown className="min-w-0" width="md" position="bottom-left" selectedId={current?.id} selectedMark="check"
         trigger={<button type="button" aria-label="Choose note" className="flex min-w-0 max-w-56 items-center gap-1 rounded-md px-1.5 py-1 text-[15px] font-semibold text-text-primary hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"><span className="truncate">{current ? current.title || 'Untitled' : 'Notes'}</span><ChevronDown size={14} className="shrink-0 text-text-tertiary" /></button>}
         items={[...notes.map(note => ({ id: note.id, label: note.title || 'Untitled', onClick: () => { void choose(undefined, note.id); } })),
@@ -131,7 +131,7 @@ function LocalNotesPanel({ paneId, capture, viewId = 'panel' }: NotesPanelProps)
           <p className="mt-1.5 text-[13px] leading-relaxed text-text-tertiary">{capture
             ? 'Start a note for this terminal excerpt.'
             : scope ? descriptions[scope.kind] : 'Loading notes…'}</p>
-          <Button className="mt-4" size="sm" aria-label="Start a note" icon={<Plus className="h-4 w-4" />} onClick={() => void create()} disabled={!scope}>New note</Button>
+          <Button className="mt-4" size="sm" icon={<Plus className="h-4 w-4" />} onClick={() => void create()} disabled={!scope}>New note</Button>
         </div>}
     </div>
   </section>;
@@ -227,7 +227,10 @@ function NoteEditor({ paneId, note, context, flush, capture, onExports, onRefres
   return <div className="notes-document">
     {toolbar && createPortal(<>
       {viewedScope && !sameNoteScope(draft.scope, viewedScope) && <span className="whitespace-nowrap px-1 text-[12px] text-text-tertiary">Reference to {scopeLabels[draft.scope.kind]}</span>}
-      <span role="status" className={error ? 'whitespace-nowrap px-1 text-[12px] text-status-error' : status === 'Saved' && !recoveryWarning ? 'sr-only' : 'whitespace-nowrap px-1 text-[12px] text-text-tertiary'}>{status}</span>
+      {/* A fixed slot, so the header never reflows as the status comes and goes. */}
+      <span className="w-24 shrink-0 truncate px-1 text-right text-[12px]">
+        <span role="status" className={error ? 'text-status-error' : status === 'Saved' && !recoveryWarning ? 'sr-only' : 'text-text-tertiary'}>{status}</span>
+      </span>
       <Dropdown position="bottom-right" width="lg" menuClassName="!z-modal"
         trigger={<IconButton aria-label="Note settings" title="Note settings" className="gap-1.5"
           icon={<>{failedExports.length > 0 && <span className="text-[12px] text-status-error">Export issue</span>}<Settings size={16} /></>} />}
