@@ -108,6 +108,22 @@ describe('NotifyQueue', () => {
     expect(queue.snapshot().strip).toEqual({ kind: 'question', itemId: second });
   });
 
+  it('snoozes a question for 3 minutes, then brings it back ahead of newer ones while its agent keeps waiting', async () => {
+    const { queue } = makeQueue();
+    const first = ask(queue, sessionStore, claude);
+    ask(queue, migration, codex);
+    const [firstId, secondId] = queue.snapshot().queue;
+
+    queue.run({ type: 'remind', id: firstId, after: '3m' });
+    expect(queue.snapshot().strip).toEqual({ kind: 'question', itemId: secondId });
+    expect(queue.snapshot().items.find(item => item.id === firstId)?.snoozedUntil).toBe(new Date(2026, 9, 26, 9, 44).getTime());
+
+    await vi.advanceTimersByTimeAsync(3 * 60_000);
+    expect(queue.snapshot().strip).toEqual({ kind: 'question', itemId: firstId });
+    expect(queue.snapshot().items.find(item => item.id === firstId)).toMatchObject({ state: 'waiting', snoozedUntil: undefined });
+    expect(first.result).toBeUndefined();
+  });
+
   it('brings a "when I switch to Pane" reminder back when Pane comes to the front, inside Pane', () => {
     const { queue } = makeQueue();
     ask(queue, sessionStore);

@@ -29,7 +29,7 @@ const NOTIFY_IDLE_BACKSTOP_MS = 10_000;
 /** Earlier today and updates keep at most this many entries. */
 const HISTORY_LIMIT = 100;
 
-const REMIND_AFTER_MS = { '10m': 10 * 60_000, '1h': 60 * 60_000 } satisfies Record<Exclude<NotifyRemindAfter, 'pane'>, number>;
+const REMIND_AFTER_MS = { '3m': 3 * 60_000, '5m': 5 * 60_000, '15m': 15 * 60_000, '10m': 10 * 60_000, '1h': 60 * 60_000 } satisfies Record<Exclude<NotifyRemindAfter, 'pane'>, number>;
 const ASK_IN_TERMINAL = 'Ask in the terminal instead.';
 
 type Timer = ReturnType<typeof setTimeout>;
@@ -467,8 +467,7 @@ export class NotifyQueue extends EventEmitter {
     entry.item.answeredOn = device;
     this.queue = this.queue.filter(other => other !== id);
     this.hidden.delete(id);
-    clearTimeout(entry.remindTimer);
-    entry.remindOnPaneFocus = false;
+    endReminder(entry);
     entry.holdTimer = setTimeout(() => this.deliver(entry, result), NOTIFY_UNDO_MS);
     this.setTransient({ kind: 'sent', itemId: id }, NOTIFY_UNDO_MS);
     this.changed();
@@ -525,6 +524,8 @@ export class NotifyQueue extends EventEmitter {
       return;
     }
     this.hidden.add(id);
+    const entry = this.entries.get(id);
+    if (entry) endReminder(entry);
     this.changed();
   }
 
@@ -532,10 +533,12 @@ export class NotifyQueue extends EventEmitter {
     const entry = this.entries.get(id);
     if (!entry || !this.queue.includes(id)) return;
     this.hidden.add(id);
-    clearTimeout(entry.remindTimer);
+    endReminder(entry);
     entry.remindOnPaneFocus = after === 'pane';
     if (after !== 'pane') {
+      entry.item.snoozedUntil = Date.now() + REMIND_AFTER_MS[after];
       entry.remindTimer = setTimeout(() => {
+        entry.item.snoozedUntil = undefined;
         this.hidden.delete(id);
         this.changed();
       }, REMIND_AFTER_MS[after]);
@@ -681,9 +684,15 @@ function isOpen(item: NotifyItem): boolean {
 function clearEntryTimers(entry: Entry): void {
   clearTimeout(entry.holdTimer);
   clearTimeout(entry.graceTimer);
-  clearTimeout(entry.remindTimer);
   clearTimeout(entry.idleTimer);
+  endReminder(entry);
+}
+
+/** Cancels a snooze or reminder; the question stays where it is. */
+function endReminder(entry: Entry): void {
+  clearTimeout(entry.remindTimer);
   entry.remindOnPaneFocus = false;
+  entry.item.snoozedUntil = undefined;
 }
 
 function unavailable(reason: string): NotifyResult {

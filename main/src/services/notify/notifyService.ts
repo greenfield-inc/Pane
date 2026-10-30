@@ -147,6 +147,7 @@ export class NotifyService {
       case 'open-round': this.openRound(command.id); return;
       case 'close-round': this.windows.closeRound(); return;
       case 'open-inbox': this.navigate('inbox'); return;
+      case 'show-details': await this.updateSettings({ showDetails: command.shown }); return;
       case 'open-in-pane': await this.openInPane(command.id); return;
       default:
         if ('id' in command && command.id && this.queue.isRemote(command.id)) await this.runOnHost(command);
@@ -169,9 +170,17 @@ export class NotifyService {
       this.queue.run(command);
       return;
     }
-    if (command.type === 'remind' && command.after === 'pane') {
-      this.queue.remindHere(command.id);
-      return;
+    let hostCommand: NotifyRemoteCommand;
+    if (command.type === 'remind') {
+      const { after } = command;
+      // "When I switch to Pane" waits for this Pane only.
+      if (after === 'pane') {
+        this.queue.remindHere(command.id);
+        return;
+      }
+      hostCommand = { ...command, after };
+    } else {
+      hostCommand = command;
     }
     // ✕ on a "Sent to" or "Stopped waiting" card only clears this screen's strip.
     if (command.type === 'dismiss' && !this.queue.snapshot().queue.includes(command.id)) {
@@ -180,7 +189,6 @@ export class NotifyService {
     }
     const remote = this.queue.snapshot().remote;
     if (remote && !remote.online) return;
-    const hostCommand: NotifyRemoteCommand = command.type === 'remind' ? { ...command, after: command.after === '1h' ? '1h' : '10m' } : command;
     // Before the send: the host's next state can arrive before its reply does.
     if (command.type === 'answer') this.queue.noteAnsweredHere(command.id, true);
     try {

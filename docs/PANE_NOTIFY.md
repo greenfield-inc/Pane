@@ -78,9 +78,12 @@ answers by accident. Keys work whatever Pane's keyboard-shortcuts setting says.
 
 ✕ hides a question from the strip; it keeps waiting in the inbox.
 Right-click ✕ to bring it back in 10 minutes, in 1 hour, or when you next
-switch to Pane. Nothing is stored on disk: questions live only while the
-agent's call is open, and Earlier today empties at midnight and when Pane
-quits.
+switch to Pane. The clock at the bottom right of a card snoozes it for 3, 5
+or 15 minutes: it leaves the strip, then comes back in its place in the
+queue, and the Notify page shows it with its return time. The agent keeps
+waiting through a snooze or reminder. Nothing is stored on disk: questions
+live only while the agent's call is open, and Earlier today empties at
+midnight and when Pane quits.
 
 ## Other screens and your phone
 
@@ -97,7 +100,7 @@ the agent:
   machine ("notify-remote · Claude · parsa-devbox").
 - **Several screens at once**: the screen you answer on says "Sent to
   <agent>", every other one says "Answered on <device>", and all of them offer
-  **Undo** for the 3 seconds before the agent gets the answer. ✕, the
+  **Undo** for the 3 seconds before the agent gets the answer. ✕, snooze, the
   reminders and → in the round apply on every screen, except "When I switch to
   Pane", which waits for the Pane you used it on.
 - **Connection loss**: while the host can't be reached its cards stay up and
@@ -120,7 +123,7 @@ the agent:
   An update from it returns `delivered: "inbox"`; connected screens still show
   it on their strips.
 
-Each screen keeps its own Position, Show outside Pane, Sound, answer-all
+Each screen keeps its own Position, Show outside Pane, Sound, Show details, answer-all
 shortcut and Pause. The host's Notify switch decides whether agents can ask:
 turning it off there returns `unavailable` to every waiting agent and clears
 its questions from every screen.
@@ -137,6 +140,7 @@ its questions from every screen.
 | Answer-all shortcut | ⌃⇧Space. Settings says so when another app already holds it. |
 | Updates hide after | 6 seconds |
 | Sound | On, for questions only |
+| Show details | Off. Cards open with details shown when on. Showing or hiding details on a card changes it. |
 
 Pause for 1 hour (tray menu) hides strips and mutes sound while questions keep
 queueing. Strips show over full-screen apps, during screen sharing, and with

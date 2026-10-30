@@ -58,20 +58,21 @@ const notifyCommandSchema = boundary.union(
   idCommand('dismiss'),
   idCommand('skip'),
   idCommand('open-in-pane'),
-  boundary.object({ type: boundary.literal('remind'), id: boundary.nonEmptyString, after: boundary.enumeration('10m', '1h', 'pane') }),
+  boundary.object({ type: boundary.literal('remind'), id: boundary.nonEmptyString, after: boundary.enumeration('3m', '5m', '15m', '10m', '1h', 'pane') }),
   boundary.object({ type: boundary.literal('hover-info'), id: boundary.nonEmptyString, hovering: boundary.boolean }),
   boundary.object({ type: boundary.literal('pause'), minutes: boundary.number }),
   boundary.object({ type: boundary.literal('resume') }),
   boundary.object({ type: boundary.literal('open-round'), id: boundary.optional(boundary.nonEmptyString) }),
   boundary.object({ type: boundary.literal('close-round') }),
   boundary.object({ type: boundary.literal('open-inbox') }),
+  boundary.object({ type: boundary.literal('show-details'), shown: boundary.boolean }),
 );
 const notifyRemoteCommandSchema = boundary.union(
   boundary.object({ type: boundary.literal('answer'), id: boundary.nonEmptyString, answer: answerSchema }),
   idCommand('undo'),
   idCommand('dismiss'),
   idCommand('skip'),
-  boundary.object({ type: boundary.literal('remind'), id: boundary.nonEmptyString, after: boundary.enumeration('10m', '1h') }),
+  boundary.object({ type: boundary.literal('remind'), id: boundary.nonEmptyString, after: boundary.enumeration('3m', '5m', '15m', '10m', '1h') }),
 );
 /** The server's name for the sender (httpApiServer fills it in), never the caller's own claim. */
 const remoteSenderSchema = boundary.object({ device: boundary.nonEmptyString });
@@ -100,6 +101,7 @@ const notifyItemSchema = boundary.object({
   resolvedAt: boundary.optional(boundary.number),
   answerSummary: boundary.optional(boundary.string),
   answeredOn: boundary.optional(boundary.string),
+  snoozedUntil: boundary.optional(boundary.number),
 });
 const notifySharedStateSchema = boundary.object({
   machine: boundary.string,

@@ -74,6 +74,15 @@ describe('NotifyCard', () => {
     expect(visible).toContain('Show details');
   });
 
+  it('opens a pop-up card with details shown when the person last left them shown', () => {
+    const choiceCard = text(render({ ...base, ui: 'options', title: 'Which store?', choices: [{ label: 'Postgres' }] }, { showDetails: true }));
+    expect(choiceCard).toContain('Click a choice, then Send');
+    expect(choiceCard).toContain('Hide details');
+    const approval = text(render({ ...base, ui: 'approve', title: 'Deploy?', detail: 'fly deploy --app web' }, { showDetails: true }));
+    expect(approval).toContain('fly deploy --app web');
+    expect(approval).toContain('Hide details');
+  });
+
   it('shows a free-text question as a field, with the agent’s suggestions above it', () => {
     const markup = render({
       ...base,
@@ -118,6 +127,15 @@ describe('NotifyCard', () => {
     expect(visible).toContain('1 of 3');
     expect(visible).toContain('Next: Apply migration 0042 to staging? · billing-migration');
     expect(visible).not.toContain('Open in Pane');
+  });
+
+  it('offers Snooze on a pop-up card, and says when a snoozed question comes back on the Notify page', () => {
+    const question: NotifyItem = { ...base, ui: 'approve', title: 'Apply migration 0042 to staging?' };
+    expect(render(question)).toContain('aria-label="Snooze"');
+    expect(render(question, { form: 'docked' })).not.toContain('aria-label="Snooze"');
+
+    const snoozed = text(render({ ...question, snoozedUntil: new Date(2026, 9, 30, 15, 42).getTime() }, { form: 'inbox' }));
+    expect(snoozed).toMatch(/Back at 3:42\sPM/);
   });
 
   it('carries the first-run hint with the answer-all shortcut', () => {

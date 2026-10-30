@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { ArrowUp, Bell, Check, Clock, ExternalLink, Info, X } from 'lucide-react';
 import type { NotifyChoice, NotifyCommand, NotifyItem, NotifyRemindAfter } from '../../../../shared/types/notify';
 import { cn } from '../../utils/cn';
@@ -35,6 +35,8 @@ export interface NotifyCardProps {
   /** Updates: when the line hides (epoch ms), or null while it is held open. */
   hideAt?: number | null;
   hideAfterMs?: number;
+  /** Strip: open with details shown. Showing or hiding them sends `show-details`. */
+  showDetails?: boolean;
   /** Top right: a narrower strip whose chips wrap. */
   narrow?: boolean;
   /** Which side of the card the "Answer later" menu opens on. */
@@ -65,7 +67,7 @@ export function NotifyCard(props: NotifyCardProps) {
 function cardShell(form: NotifyCardForm, narrow?: boolean, className?: string): string {
   if (form === 'inbox') return cn('relative w-full rounded-[18px] bg-surface-primary shadow-card ring-1 ring-border-secondary', className);
   if (form === 'docked') return cn('relative w-full rounded-[24px] bg-surface-primary shadow-modal ring-1 ring-border-secondary', className);
-  return cn('relative rounded-[24px] bg-surface-primary shadow-modal ring-1 ring-border-secondary', narrow ? 'w-[420px]' : 'w-[640px]', className);
+  return cn('relative rounded-[24px] bg-surface-primary shadow-modal ring-1 ring-border-secondary', narrow ? 'w-[504px]' : 'w-[768px]', className);
 }
 
 function KindLabel({ ui }: { ui: NotifyItem['ui'] }) {
@@ -108,15 +110,16 @@ const LATER_OPTIONS: Array<{ after: NotifyRemindAfter; label: string; icon: type
   { after: 'pane', label: 'When I switch to Pane', icon: Bell },
 ];
 
+const SNOOZE_OPTIONS: Array<{ after: NotifyRemindAfter; label: string }> = [
+  { after: '3m', label: '3 minutes' },
+  { after: '5m', label: '5 minutes' },
+  { after: '15m', label: '15 minutes' },
+];
+
 const LONG_PRESS_MS = 500;
 
-/** ✕ hides the question; right-click or a long press offers a reminder instead. */
-function CloseButton({ item, onCommand, menuPlacement = 'above' }: Pick<NotifyCardProps, 'item' | 'onCommand' | 'menuPlacement'>) {
-  const [menuOpen, setMenuOpen] = useState(false);
-  const pressTimer = useRef<number | null>(null);
-  const openedByPress = useRef(false);
-  const rootRef = useRef<HTMLDivElement>(null);
-
+/** Closes an open card menu on a click outside it or Escape. */
+function useMenuDismiss(menuOpen: boolean, setMenuOpen: (open: boolean) => void, rootRef: RefObject<HTMLDivElement | null>) {
   useEffect(() => {
     if (!menuOpen) return;
     const closeOutside = (event: MouseEvent) => {
@@ -130,7 +133,50 @@ function CloseButton({ item, onCommand, menuPlacement = 'above' }: Pick<NotifyCa
       document.removeEventListener('mousedown', closeOutside);
       document.removeEventListener('keydown', closeOnEscape);
     };
-  }, [menuOpen]);
+  }, [menuOpen, setMenuOpen, rootRef]);
+}
+
+function CardMenu({ label, placement, children }: { label: string; placement: 'above' | 'below'; children: ReactNode }) {
+  return (
+    <div
+      role="menu"
+      aria-label={label}
+      data-notify-menu=""
+      className={cn(
+        'absolute right-0 z-20 w-[250px] rounded-2xl bg-surface-primary p-1.5 text-[13px] text-text-primary shadow-modal ring-1 ring-border-secondary',
+        placement === 'above' ? 'bottom-full mb-2' : 'top-full mt-2',
+      )}
+    >
+      <div className="px-2.5 pb-0.5 pt-1.5 text-[11.5px] text-text-tertiary">{label}</div>
+      {children}
+    </div>
+  );
+}
+
+function CardMenuItem({ onClick, children }: { onClick: () => void; children: ReactNode }) {
+  return (
+    <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-[9px] px-2.5 py-[7px] text-left hover:bg-surface-hover" onClick={onClick}>
+      {children}
+    </button>
+  );
+}
+
+function KeepsWaiting({ item }: { item: NotifyItem }) {
+  return (
+    <>
+      <div className="mx-1.5 my-1 h-px bg-border-secondary" />
+      <div className="px-2.5 py-[7px] text-text-tertiary">{item.source.agent} keeps waiting meanwhile</div>
+    </>
+  );
+}
+
+/** ✕ hides the question; right-click or a long press offers a reminder instead. */
+function CloseButton({ item, onCommand, menuPlacement = 'above' }: Pick<NotifyCardProps, 'item' | 'onCommand' | 'menuPlacement'>) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const pressTimer = useRef<number | null>(null);
+  const openedByPress = useRef(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  useMenuDismiss(menuOpen, setMenuOpen, rootRef);
 
   const cancelPress = () => {
     if (pressTimer.current !== null) window.clearTimeout(pressTimer.current);
@@ -167,22 +213,10 @@ function CloseButton({ item, onCommand, menuPlacement = 'above' }: Pick<NotifyCa
         <X className="h-4 w-4" />
       </button>
       {menuOpen && (
-        <div
-          role="menu"
-          aria-label="Answer later"
-          data-notify-menu=""
-          className={cn(
-            'absolute right-0 z-20 w-[250px] rounded-2xl bg-surface-primary p-1.5 text-[13px] text-text-primary shadow-modal ring-1 ring-border-secondary',
-            menuPlacement === 'above' ? 'bottom-full mb-2' : 'top-full mt-2',
-          )}
-        >
-          <div className="px-2.5 pb-0.5 pt-1.5 text-[11.5px] text-text-tertiary">Answer later</div>
+        <CardMenu label="Answer later" placement={menuPlacement}>
           {LATER_OPTIONS.map(({ after, label, icon: Icon }) => (
-            <button
+            <CardMenuItem
               key={after}
-              type="button"
-              role="menuitem"
-              className="flex w-full items-center gap-2 rounded-[9px] px-2.5 py-[7px] text-left hover:bg-surface-hover"
               onClick={() => {
                 setMenuOpen(false);
                 onCommand({ type: 'remind', id: item.id, after });
@@ -190,14 +224,56 @@ function CloseButton({ item, onCommand, menuPlacement = 'above' }: Pick<NotifyCa
             >
               <Icon className="h-3.5 w-3.5 text-text-secondary" />
               {label}
-            </button>
+            </CardMenuItem>
           ))}
-          <div className="mx-1.5 my-1 h-px bg-border-secondary" />
-          <div className="px-2.5 py-[7px] text-text-tertiary">{item.source.agent} keeps waiting meanwhile</div>
-        </div>
+          <KeepsWaiting item={item} />
+        </CardMenu>
       )}
     </div>
   );
+}
+
+/** The footer's clock: hides the question for a few minutes, then it comes back in its place. */
+function SnoozeButton({ item, onCommand, menuPlacement = 'above' }: Pick<NotifyCardProps, 'item' | 'onCommand' | 'menuPlacement'>) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  useMenuDismiss(menuOpen, setMenuOpen, rootRef);
+  return (
+    <div ref={rootRef} className="relative shrink-0">
+      <button
+        type="button"
+        aria-label="Snooze"
+        title="Snooze"
+        aria-haspopup="menu"
+        aria-expanded={menuOpen}
+        onClick={() => setMenuOpen((open) => !open)}
+        className="inline-flex h-7 w-7 items-center justify-center rounded-md text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+      >
+        <Clock className="h-4 w-4" />
+      </button>
+      {menuOpen && (
+        <CardMenu label="Snooze" placement={menuPlacement}>
+          {SNOOZE_OPTIONS.map(({ after, label }) => (
+            <CardMenuItem
+              key={after}
+              onClick={() => {
+                setMenuOpen(false);
+                onCommand({ type: 'remind', id: item.id, after });
+              }}
+            >
+              {label}
+            </CardMenuItem>
+          ))}
+          <KeepsWaiting item={item} />
+        </CardMenu>
+      )}
+    </div>
+  );
+}
+
+/** "Back at 3:42 PM": when a snoozed question returns to the strip. */
+function snoozedLabel(until: number): string {
+  return `Back at ${new Date(until).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
 }
 
 function CardHeader({ item, form, queue, onCommand, menuPlacement }: Pick<NotifyCardProps, 'item' | 'form' | 'queue' | 'onCommand' | 'menuPlacement'>) {
@@ -311,7 +387,7 @@ function Chip({ keyLabel, label, detail, shaded, onClick, tall, inbox }: ChipPro
       aria-pressed={tall ? shaded : undefined}
       className={cn(
         'inline-flex rounded-xl text-left text-text-secondary hover:bg-surface-hover',
-        tall ? 'items-start gap-2.5 px-3 py-2.5' : 'h-[42px] items-center gap-2.5 whitespace-nowrap pl-2.5 pr-3.5',
+        tall ? 'items-start gap-2.5 px-3.5 py-3' : 'h-[42px] items-center gap-2.5 whitespace-nowrap pl-3 pr-4',
         inbox ? 'text-[14.5px]' : 'text-[15px]',
         shaded && 'bg-surface-tertiary font-medium text-text-primary hover:bg-surface-tertiary',
       )}
@@ -358,7 +434,7 @@ function QueueSegments({ queue }: { queue: NotifyQueuePosition }) {
  * was clicked and its window has the keyboard. Runs before the page's own handlers, such as a
  * terminal's, and ignores keys typed into the card's fields and chords with modifiers.
  */
-function useCardKeys(rootRef: React.RefObject<HTMLDivElement | null>, floating: boolean, onKey: (key: string) => boolean): void {
+function useCardKeys(rootRef: RefObject<HTMLDivElement | null>, floating: boolean, onKey: (key: string) => boolean): void {
   const handler = useRef(onKey);
   useEffect(() => {
     handler.current = onKey;
@@ -404,14 +480,14 @@ function recommendedIndex(choices: NotifyChoice[]): number {
 }
 
 function QuestionCard({
-  item, form, queue, shortcutHint, narrow, menuPlacement, onCommand, onFieldFocusRequest, className,
+  item, form, queue, shortcutHint, showDetails, narrow, menuPlacement, onCommand, onFieldFocusRequest, className,
 }: NotifyCardProps) {
-  const [expanded, setExpanded] = useState(form === 'docked');
+  // Details: the choices with notes, or an approval's detail.
+  const [expanded, setExpanded] = useState(form === 'docked' || (form === 'strip' && Boolean(showDetails)));
   const choices = item.choices ?? [];
   const [selected, setSelected] = useState(() => recommendedIndex(choices));
   const [note, setNote] = useState('');
   const [denying, setDenying] = useState(false);
-  const [showDetail, setShowDetail] = useState(form === 'docked');
   const [text, setText] = useState('');
   const [textFocusKey, setTextFocusKey] = useState(0);
   const titleClass = form === 'inbox'
@@ -436,6 +512,10 @@ function QuestionCard({
   const answerText = (value: string) => {
     const trimmed = value.trim();
     if (trimmed) onCommand({ type: 'answer', id: item.id, answer: { text: trimmed } });
+  };
+  const showDetailsChange = (shown: boolean) => {
+    setExpanded(shown);
+    if (form === 'strip') onCommand({ type: 'show-details', shown });
   };
   const rootRef = useRef<HTMLDivElement>(null);
   // The card's own keys, matching the key on each chip.
@@ -480,7 +560,7 @@ function QuestionCard({
   if (item.ui === 'options' && expanded) {
     body = (
       <>
-        <div className={cn('grid gap-1 px-3.5 pb-3 pt-3', narrow ? 'grid-cols-2' : 'grid-cols-3')}>
+        <div className={cn('grid gap-x-3 gap-y-2.5 px-3.5 pb-4 pt-3', narrow ? 'grid-cols-2' : 'grid-cols-3')}>
           {choices.map((choice, index) => (
             <Chip
               key={choice.label}
@@ -507,7 +587,7 @@ function QuestionCard({
   } else if (item.ui === 'options') {
     const visible = choices.slice(0, COMPACT_CHOICE_LIMIT);
     body = (
-      <div className={cn('flex flex-wrap items-center gap-1', actionsClass)}>
+      <div className={cn('flex flex-wrap items-center gap-2', actionsClass)}>
         {visible.map((choice, index) => (
           <Chip
             key={choice.label}
@@ -555,22 +635,22 @@ function QuestionCard({
             </button>
           </div>
         ) : (
-          <div className={cn('flex flex-wrap items-center gap-1', actionsClass)}>
+          <div className={cn('flex flex-wrap items-center gap-2', actionsClass)}>
             <Chip keyLabel="N" label="Deny" inbox={form === 'inbox'} onClick={() => setDenying(true)} />
             <Chip keyLabel="Y" label="Approve" shaded inbox={form === 'inbox'} onClick={() => answerApproval(true)} />
             {item.detail && (
               <button
                 type="button"
-                aria-expanded={showDetail}
-                onClick={() => setShowDetail((shown) => !shown)}
+                aria-expanded={expanded}
+                onClick={() => showDetailsChange(!expanded)}
                 className="ml-auto pr-2 text-[13px] text-text-tertiary hover:text-text-primary"
               >
-                {showDetail ? 'Hide details' : item.detailLabel?.trim() || 'Show details'}
+                {expanded ? 'Hide details' : item.detailLabel?.trim() || 'Show details'}
               </button>
             )}
           </div>
         )}
-        {item.detail && showDetail && (
+        {item.detail && expanded && (
           <pre className={cn('mb-3.5 max-h-48 overflow-auto rounded-xl bg-surface-tertiary px-3.5 py-2.5 font-mono text-[12px] leading-relaxed text-text-secondary', form === 'inbox' ? 'mx-3.5' : 'mx-[22px]')}>
             {item.detail}
           </pre>
@@ -582,7 +662,7 @@ function QuestionCard({
     body = (
       <>
         {suggestions.length > 0 && (
-          <div className={cn('flex flex-wrap items-center gap-1', form === 'inbox' ? 'px-2 pt-2.5' : 'px-3.5 pt-3')}>
+          <div className={cn('flex flex-wrap items-center gap-2', form === 'inbox' ? 'px-2 pt-2.5' : 'px-3.5 pt-3')}>
             {suggestions.map((suggestion, index) => (
               <Chip key={suggestion} keyLabel={String(index + 1)} label={suggestion} inbox={form === 'inbox'} onClick={() => {
                 // A suggestion is a starting point: it fills the field, and Send or ↵ answers.
@@ -608,6 +688,8 @@ function QuestionCard({
   }
 
   const queued = queue && queue.total > 1 ? queue : undefined;
+  // Snooze hides a card from the strip, so a card docked in its terminal has none.
+  const snooze = form === 'docked' ? null : <SnoozeButton item={item} onCommand={onCommand} menuPlacement={menuPlacement} />;
   let footer: ReactNode = null;
   if (form !== 'inbox' && item.ui === 'options' && expanded) {
     footer = (
@@ -615,7 +697,7 @@ function QuestionCard({
         left={<span>Click a choice, then Send</span>}
         right={(
           <>
-            <FooterLink onClick={() => setExpanded(false)}>Hide details</FooterLink>
+            <FooterLink onClick={() => showDetailsChange(false)}>Hide details</FooterLink>
             {openInPane && !narrow && <FooterLink onClick={openInPane}>Open in Pane</FooterLink>}
             <button
               type="button"
@@ -625,11 +707,12 @@ function QuestionCard({
             >
               Send
             </button>
+            {snooze}
           </>
         )}
       />
     );
-  } else if (form !== 'inbox' && (item.ui === 'options' || queued || shortcutHint)) {
+  } else if (form === 'strip' || (form === 'docked' && (item.ui === 'options' || queued || shortcutHint))) {
     const left = queued ? (
       <>
         <QueueSegments queue={queued} />
@@ -643,8 +726,9 @@ function QuestionCard({
         left={left}
         right={(
           <>
-            {item.ui === 'options' && <FooterLink onClick={() => setExpanded(true)}>Details</FooterLink>}
+            {item.ui === 'options' && <FooterLink onClick={() => showDetailsChange(true)}>Details</FooterLink>}
             {openInPane && !(narrow && item.ui === 'options') && <FooterLink onClick={openInPane}>Open in Pane</FooterLink>}
+            {snooze}
           </>
         )}
       />
@@ -661,15 +745,21 @@ function QuestionCard({
       onPointerDown={() => void onFieldFocusRequest?.()}
     >
       <CardHeader item={item} form={form} queue={queue} onCommand={onCommand} menuPlacement={menuPlacement} />
-      <div className={cn(titleClass, !(expanded || showDetail) && 'line-clamp-3')} title={item.title}>{item.title}</div>
+      <div className={cn(titleClass, !expanded && 'line-clamp-3')} title={item.title}>{item.title}</div>
       {showContext && <div className={contextClass}>{item.context}</div>}
       {body}
       {item.unreachable && <UnreachableNotice item={item} className={form === 'inbox' ? 'px-3.5 pb-3' : 'px-[22px] pb-3'} />}
-      {form === 'inbox' && item.source.paneId && (
-        <div className="flex justify-end px-3.5 pb-3 text-[12.5px] text-text-tertiary">
-          <FooterLink onClick={() => onCommand({ type: 'open-in-pane', id: item.id })}>
-            <ExternalLink className="h-3.5 w-3.5" /> Open in Pane
-          </FooterLink>
+      {form === 'inbox' && (
+        <div className="flex items-center gap-3 px-3.5 pb-3 text-[12.5px] text-text-tertiary">
+          {item.snoozedUntil !== undefined && <span className="min-w-0 truncate">{snoozedLabel(item.snoozedUntil)}</span>}
+          <div className="ml-auto flex shrink-0 items-center gap-3">
+            {item.source.paneId && (
+              <FooterLink onClick={() => onCommand({ type: 'open-in-pane', id: item.id })}>
+                <ExternalLink className="h-3.5 w-3.5" /> Open in Pane
+              </FooterLink>
+            )}
+            {snooze}
+          </div>
         </div>
       )}
       {footer}

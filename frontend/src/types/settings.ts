@@ -58,6 +58,7 @@ export type SettingsSettingId =
   | 'notify-shortcut'
   | 'notify-updates-hide-after'
   | 'notify-sound'
+  | 'notify-show-details'
   | 'notification-permission'
   | 'notification-sound'
   | 'desktop-notifications'

@@ -14,6 +14,8 @@ import { NotifyRound } from './NotifyRound';
 
 /** Room around the card for its shadow; included in the size sent to main. */
 const SHADOW_PADDING = 32;
+/** Main keeps the strip this far from the screen's edges. */
+const EDGE_GAP = 8;
 
 const ALL_THEME_CLASSES = [...new Set(Object.values(THEME_CLASSES).flat())];
 
@@ -97,10 +99,14 @@ export function NotifyWindow({ view, startId }: { view: 'strip' | 'round'; start
 
   const position = snapshot?.settings.position ?? 'bottom-center';
   const atTop = position === 'top-right';
+  const style: React.CSSProperties & Record<'--notify-card-max', string> = {
+    padding: SHADOW_PADDING,
+    '--notify-card-max': `${window.screen.availWidth - 2 * (SHADOW_PADDING + EDGE_GAP)}px`,
+  };
   return (
     <div
       ref={rootRef}
-      style={{ padding: SHADOW_PADDING }}
+      style={style}
       className={cn(
         // Cards keep their natural height so the window can grow to fit them instead of clipping.
         'fixed inset-0 flex flex-col [&>*]:shrink-0',
@@ -113,6 +119,8 @@ export function NotifyWindow({ view, startId }: { view: 'strip' | 'round'; start
         <NotifyStrip
           snapshot={snapshot}
           narrow={atTop}
+          // On a small screen the card narrows to fit. The window follows the card, so its width can't set the limit.
+          className="max-w-[var(--notify-card-max)]"
           menuPlacement={atTop ? 'below' : 'above'}
           onFieldFocusRequest={() => window.electronAPI.notify.focusWindow()}
         />

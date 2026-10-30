@@ -75,6 +75,8 @@ export interface NotifySettings {
   shortcut: string;
   updatesHideAfterSeconds: number;
   sound: boolean;
+  /** Whether pop-up cards open with details shown. Showing or hiding details on a card sets it. */
+  showDetails: boolean;
 }
 
 export const DEFAULT_NOTIFY_SETTINGS: NotifySettings = {
@@ -84,6 +86,7 @@ export const DEFAULT_NOTIFY_SETTINGS: NotifySettings = {
   shortcut: 'Control+Shift+Space',
   updatesHideAfterSeconds: 6,
   sound: true,
+  showDetails: false,
 };
 
 export const NOTIFY_UPDATES_HIDE_AFTER_CHOICES = [4, 6, 10, 20] as const;
@@ -120,6 +123,8 @@ export interface NotifyItem extends NotifyQuestion {
   answeredOn?: string;
   /** The machine whose agent asked; set while a screen shows two machines' questions. */
   machine?: string;
+  /** Epoch ms when a snoozed question comes back to the strip. */
+  snoozedUntil?: number;
   /** Snapshot only: its machine can't be reached right now, so an answer can't be sent. */
   unreachable?: boolean;
 }
@@ -200,7 +205,8 @@ export interface NotifyInstructionsFile {
   reason?: string;
 }
 
-export type NotifyRemindAfter = '10m' | '1h' | 'pane';
+/** Snooze takes 3m, 5m or 15m; the ✕ menu's reminders take 10m, 1h or pane. */
+export type NotifyRemindAfter = '3m' | '5m' | '15m' | '10m' | '1h' | 'pane';
 
 export type NotifyAnswer =
   | { choice: string; note?: string }
@@ -221,7 +227,9 @@ export type NotifyCommand =
   | { type: 'resume' }
   | { type: 'open-round'; id?: string }
   | { type: 'close-round' }
-  | { type: 'open-inbox' };
+  | { type: 'open-inbox' }
+  /** Show or Hide details on a pop-up card: the next card opens the same way. */
+  | { type: 'show-details'; shown: boolean };
 
 /** The floating windows report their card's size so main can fit and place them. */
 export interface NotifyWindowSize {
