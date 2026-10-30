@@ -96,16 +96,16 @@ function RowActionsMenu({ menu, onClose, onRename }: { menu: RowMenu | null; onC
   );
 }
 
-/** The badge, and on hover or focus the actions button in the same box, so neither shifts the row. */
+/** The badge, and on hover or keyboard focus the actions button in the same box, so neither shifts the row. */
 function BadgeSlot({ machine, label, onMenu }: { machine: MachineRef; label: string; onMenu: (x: number, y: number) => void }) {
   return (
-    <span className="relative z-10 flex h-[18px] w-[60px] flex-none items-center">
-      <MachineBadge machine={machine} className="group-hover/row:invisible group-focus-within/row:invisible" />
+    <span className="group/slot relative z-10 flex h-[18px] w-[60px] flex-none items-center">
+      <MachineBadge machine={machine} className="group-hover/row:invisible group-has-[:focus-visible]/slot:invisible" />
       <button
         type="button"
         aria-label={`Actions for ${label}`}
         onClick={(event) => { event.stopPropagation(); onMenu(event.clientX, event.clientY); }}
-        className="absolute inset-0 flex items-center justify-center rounded text-text-muted opacity-0 hover:bg-surface-hover hover:text-text-primary focus:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-interactive group-hover/row:opacity-100"
+        className="absolute inset-0 flex items-center justify-center rounded text-text-muted opacity-0 hover:bg-surface-hover hover:text-text-primary focus-visible:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-interactive group-hover/row:opacity-100"
       >
         <MoreHorizontal className="h-3.5 w-3.5" />
       </button>
