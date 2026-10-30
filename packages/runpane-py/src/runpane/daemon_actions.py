@@ -9,8 +9,9 @@ from urllib.parse import urlencode
 
 from .daemon_client import invoke_daemon
 from .generated_contract import RUNPANE_CONTRACT
+from .notify import RunpaneError
 
-LINK_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+LINK_ID = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$")
 REPO_ID = re.compile(r"^[1-9][0-9]{0,15}$")
 
 
@@ -66,7 +67,11 @@ def confirm_mutation(parsed: Any) -> None:
     if parsed.yes:
         return
     if parsed.json or not (sys.stdin.isatty() and sys.stdout.isatty()):
-        raise ValueError(f"runpane {parsed.command} mutates Pane state. Rerun with --yes in non-interactive shells.")
+        raise RunpaneError(
+            "ERR_RUNPANE_CONFIRMATION_REQUIRED",
+            f"runpane {parsed.command} mutates Pane state and needs confirmation, which --json or a non-interactive shell cannot give. Nothing was changed.",
+            "Rerun with --yes.",
+        )
     if input(f"Run {parsed.command}? [y/N] ").strip().lower() not in {"y", "yes"}:
         raise ValueError("Cancelled.")
 

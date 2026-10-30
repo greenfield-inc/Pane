@@ -601,7 +601,7 @@ test('serves the core toolset by default, and named toolsets or read-only on req
     'agents_send', 'agents_start', 'agents_status', 'docs_read', 'docs_search', 'doctor', 'links_create',
     'loops_create', 'loops_delete', 'loops_list', 'loops_pause', 'loops_resume', 'loops_run', 'loops_update', 'notify',
     'panels_create', 'panels_input', 'panels_open', 'panes_adopt', 'panes_archive', 'panes_git_status', 'panes_list', 'panes_rename', 'panes_restore',
-    'repos_add', 'repos_list', 'sessions_associate', 'sessions_create', 'sessions_pin',
+    'repos_add', 'repos_list', 'repos_rename', 'sessions_associate', 'sessions_create', 'sessions_pin',
     'workspace_exec', 'workspace_list', 'workspace_read', 'workspace_state', 'workspace_write',
   ]);
   const git = await names(['--toolsets', 'git']);

@@ -166,6 +166,8 @@ import type {
   RunpanePanelWaitResult,
   RunpaneRepoAddRequest,
   RunpaneRepoAddResult,
+  RunpaneRepoRenameRequest,
+  RunpaneRepoRenameResult,
   RunpaneRepoListResult,
   RunpaneRepoSelector,
   RunpaneRepoSummary,
@@ -237,6 +239,7 @@ const RUNPANE_CHANNELS = [
   'runpane:doctor',
   'runpane:repos:list',
   'runpane:repos:add',
+  'runpane:repos:rename',
   'runpane:sessions:list',
   'runpane:sessions:create',
   'runpane:sessions:get',
@@ -782,6 +785,17 @@ export function registerRunpaneHandlers(
         favoritePinnedAt: updatedSession.favoritePinnedAt,
       };
     }, result => ({ paneId: result.paneId }));
+  });
+
+  commandRegistry.register('runpane:repos:rename', async (request: PaneCommandValue): Promise<RunpaneRepoRenameResult> => {
+    return withRunpaneAction(services, 'repos:rename', {}, () => {
+      const normalized = parseRepoRenameRequest(request);
+      const project = resolveRepoSelector(databaseService.getAllProjects(), normalized.repo);
+      const renamed = databaseService.updateProject(project.id, { name: normalized.name });
+      if (!renamed) throw repoNotFound(`with id ${project.id}`);
+      sessionManager.emit('project:list-changed');
+      return { ok: true, repo: projectToRepoSummary(renamed, sessionManager.getSessionsForProject(renamed.id).length) };
+    }, result => ({ repoId: result.repo.id }));
   });
 
   commandRegistry.register('runpane:panes:rename', async (request: PaneCommandValue): Promise<RunpanePaneRenameResult> => {
@@ -5064,6 +5078,21 @@ function parseRepoAddRequest(value: PaneCommandValue): Required<Pick<RunpaneRepo
     name: providedName && providedName.length > 0 ? providedName : defaultName,
     dryRun: optionalBoolean(value.dryRun),
   };
+}
+
+function parseRepoRenameRequest(value: PaneCommandValue): RunpaneRepoRenameRequest {
+  if (!isRecord(value)) {
+    throw new Error('Repo rename request must be an object');
+  }
+  const repo = optionalString(value.repo)?.trim();
+  if (!repo) {
+    throw new Error('Repo rename request must include a repo selector');
+  }
+  const name = optionalString(value.name)?.trim();
+  if (!name) {
+    throw new Error('Repo rename request must include a non-empty name');
+  }
+  return { repo, name };
 }
 
 function resolvePane(sessionManager: AppServices['sessionManager'], paneId: string): Session {

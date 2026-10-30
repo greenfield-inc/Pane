@@ -82,5 +82,53 @@ def check_setup_terminal():
     print("Real terminal setup and cancellation checks passed")
 
 
+def check_json_mutation_in_terminal():
+    """With --json, a mutation without --yes refuses at once with a JSON error instead of prompting."""
+    if os.name == "nt":
+        return
+    import pty
+    import sys
+
+    root = Path(__file__).resolve().parents[1]
+    clis = {
+        "npm": [shutil.which("node"), str(root / "packages/runpane/dist/cli.js")],
+        "pip": [sys.executable, "-m", "runpane"],
+    }
+    with tempfile.TemporaryDirectory(prefix="pane-json-pty-") as pane_dir:
+        env = {**os.environ, "PANE_DIR": pane_dir, "PYTHONPATH": str(root / "packages/runpane-py/src"), "RUNPANE_TELEMETRY_DISABLED": "1"}
+        for name, cli in clis.items():
+            master, slave = pty.openpty()
+            process = subprocess.Popen(
+                [*cli, "repos", "rename", "--repo", "3", "--name", "Lev", "--json"],
+                stdin=slave, stdout=slave, stderr=subprocess.PIPE, env=env,
+            )
+            os.close(slave)
+            stdout = b""
+            deadline = time.monotonic() + 15
+            while True:
+                if time.monotonic() > deadline:
+                    process.kill()
+                    raise AssertionError(f"{name} repos rename --json waited for input instead of refusing: {stdout!r}")
+                if select.select([master], [], [], 0.1)[0]:
+                    try:
+                        data = os.read(master, 65536)
+                    except OSError:
+                        data = b""
+                    stdout += data
+                    if data:
+                        continue
+                if process.poll() is not None:
+                    break
+            stderr = process.stderr.read()
+            os.close(master)
+            assert process.returncode == 1, (name, process.returncode, stdout, stderr)
+            error = json.loads(stdout.decode())["error"]
+            assert error["code"] == "ERR_RUNPANE_CONFIRMATION_REQUIRED", (name, error)
+            assert error["next"] == "Rerun with --yes.", (name, error)
+            assert b"Next: Rerun with --yes." in stderr, (name, stderr)
+    print("JSON mutations refuse without prompting in a real terminal")
+
+
 if __name__ == "__main__":
     check_setup_terminal()
+    check_json_mutation_in_terminal()

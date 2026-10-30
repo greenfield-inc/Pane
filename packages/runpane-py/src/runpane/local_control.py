@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 from .daemon_actions import confirm_mutation
 from .daemon_client import PaneDaemonClientError, invoke_daemon
 from .generated_contract import RUNPANE_CONTRACT
+from .notify import RunpaneError
 
 
 def run_repos_list(parsed: Any) -> int:
@@ -43,6 +44,26 @@ def run_repos_add(parsed: Any) -> int:
         print_json(result)
     else:
         print_repo_add_result(result)
+
+    return 0
+
+
+def run_repos_rename(parsed: Any) -> int:
+    if not parsed.repo:
+        raise RunpaneError("ERR_RUNPANE_INVALID_ARGUMENT", "runpane repos rename requires --repo. Nothing was changed.", "Pass a repo id, path or name from `runpane repos list`, or `active`.")
+    name = parsed.name.strip() if parsed.name else ""
+    if not name:
+        raise RunpaneError("ERR_RUNPANE_INVALID_ARGUMENT", "runpane repos rename requires a non-empty --name. Nothing was changed.", "Pass the new name with --name.")
+
+    request = {"repo": parsed.repo, "name": name}
+    confirm_mutation(parsed)
+    result = invoke_daemon("runpane:repos:rename", [request], pane_dir=parsed.pane_dir)
+
+    if parsed.json:
+        print_json(result)
+    else:
+        repo = result.get("repo", {})
+        print(f"Renamed Pane repo {repo.get('id')} to {repo.get('name')}")
 
     return 0
 
