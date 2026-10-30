@@ -9,13 +9,13 @@ import { useTheme } from '@/theme';
 import { Button, EmptyState } from '@/ui';
 
 /**
- * Opens a pane named by a `pane://pane/…?host=` link or a notification tap
- * (a Notify question's sheet when the tap names one), switching to its host
- * first. It only ever connects to a saved host.
+ * Opens a pane named by a `pane://pane/…?host=` link, a notification tap (a Notify question's
+ * sheet when the tap names one) or a row of All machines (a pane or a Session), switching to its
+ * host first. It only ever connects to a saved host.
  */
 export default function OpenScreen() {
   const theme = useTheme();
-  const { host, paneId, panelId, notifyId } = useLocalSearchParams<{ host?: string; paneId?: string; panelId?: string; notifyId?: string }>();
+  const { host, paneId, panelId, notifyId, sessionId } = useLocalSearchParams<{ host?: string; paneId?: string; panelId?: string; notifyId?: string; sessionId?: string }>();
   const profiles = useHostsStore(state => state.profiles);
   const activeId = useHostsStore(state => state.activeId);
   const setActive = useHostsStore(state => state.setActive);
@@ -35,8 +35,9 @@ export default function OpenScreen() {
     router.dismissTo('/');
     // A Notify alert opens its question's sheet over the pane list.
     if (notifyId) openNotifySheet(notifyId, paneId);
+    else if (sessionId) router.push({ pathname: '/session/[sessionId]', params: { sessionId } });
     else if (paneId) router.push({ pathname: '/pane/[paneId]', params: panelId ? { paneId, panelId } : { paneId } });
-  }, [hostId, switchHost, paneId, panelId, notifyId, setActive]);
+  }, [hostId, switchHost, paneId, panelId, notifyId, sessionId, setActive]);
 
   if (resolved.type === 'unknown-host') {
     return (

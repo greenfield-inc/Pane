@@ -10,6 +10,9 @@ interface PaneSession {
   favoritePinnedAt?: string;
   archived?: boolean;
   isHidden?: boolean;
+  /** ISO times. Older hosts may leave either out. */
+  createdAt?: string;
+  lastActivity?: string;
 }
 
 export interface ProjectWithPanes {

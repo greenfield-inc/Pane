@@ -1,9 +1,11 @@
-import { useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
 
 import type { NotifyRemoteCommand, NotifySharedState } from '@shared/types/notify';
+import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
 
 import { useDaemon, useDaemonEvent, useInvokeMutation, useInvokeQuery } from '@/daemon';
+import { useMachineCommand, useMachineQuery } from '@/daemon/machines';
 import { dismissNotifyAlerts } from '@/features/notifications/device';
 
 import { waitingQuestions } from './notifyQuestions';
@@ -25,6 +27,32 @@ export function useNotifyShared() {
  */
 export function useNotifyCommand(onAccepted?: (command: NotifyRemoteCommand) => void) {
   return useInvokeMutation<[NotifyRemoteCommand]>('notify:remote-command', { invalidates: [SNAPSHOT], onAccepted: ([command]) => onAccepted?.(command) });
+}
+
+/**
+ * Another saved machine's questions, read without switching to it, refreshed every few seconds
+ * while a sheet shows one. Off (and empty) for `null`.
+ */
+export function useMachineNotifyShared(machine: RemotePaneConnectionProfile | null) {
+  return useMachineQuery<NotifySharedState>(machine, SNAPSHOT, [], { refetchInterval: 5_000 });
+}
+
+/**
+ * Answers and Undo for another saved machine's question, sent straight to it the way alert
+ * buttons answer, so the phone stays on the machine it's on.
+ */
+export function useMachineNotifyCommand(machine: RemotePaneConnectionProfile | null, onAccepted?: (command: NotifyRemoteCommand) => void) {
+  const queryClient = useQueryClient();
+  const send = useMachineCommand();
+  return useMutation({
+    mutationFn: async ([command]: [NotifyRemoteCommand]) => {
+      if (!machine) throw new Error('No machine to answer on. Nothing was sent.');
+      await send(machine, 'notify:remote-command', [command], `Your answer may have reached ${machine.label}. Check the question before answering again.`);
+    },
+    onSuccess: (_result, [command]) => onAccepted?.(command),
+    // The question leaves the sheet and All machines once its machine says so.
+    onSettled: () => (machine ? queryClient.invalidateQueries({ queryKey: [machine.id] }) : undefined),
+  });
 }
 
 /** Removes this host's question alerts once the snapshot shows them answered or gone (D-11's in-app half). */

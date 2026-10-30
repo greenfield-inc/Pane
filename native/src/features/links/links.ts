@@ -9,6 +9,8 @@ export interface OpenTarget {
   panelId?: string;
   /** A Notify question to answer: opens its sheet instead of the pane. */
   notifyId?: string;
+  /** An orchestrator Session to open instead of a pane. */
+  sessionId?: string;
 }
 
 export type IncomingLink =
@@ -17,7 +19,7 @@ export type IncomingLink =
   | { type: 'route' };
 
 export type ResolvedTarget =
-  | { type: 'open'; hostId: string; switchHost: boolean; paneId?: string; panelId?: string; notifyId?: string }
+  | { type: 'open'; hostId: string; switchHost: boolean; paneId?: string; panelId?: string; notifyId?: string; sessionId?: string }
   | { type: 'unknown-host' };
 
 /**
@@ -141,7 +143,8 @@ export function resolveOpenTarget(target: OpenTarget, hosts: SavedHosts): Resolv
   const profile = hosts.profiles.find(p => p.id === target.host || stripSlash(p.baseUrl) === wanted);
   if (!profile) return { type: 'unknown-host' };
   const notify = target.notifyId ? { notifyId: target.notifyId } : {};
-  return { type: 'open', hostId: profile.id, switchHost: profile.id !== hosts.activeId, ...notify, ...withPane({}, target.paneId, target.panelId) };
+  const session = target.sessionId ? { sessionId: target.sessionId } : {};
+  return { type: 'open', hostId: profile.id, switchHost: profile.id !== hosts.activeId, ...notify, ...session, ...withPane({}, target.paneId, target.panelId) };
 }
 
 function withPane<T extends object>(base: T, paneId: string | undefined, panelId: string | undefined): T & { paneId?: string; panelId?: string } {
@@ -168,7 +171,7 @@ function stripSlash(url: string): string {
 
 /** The `/open` route for a target, used by links and notification taps. */
 export function openHref(target: OpenTarget): string {
-  const params = Object.entries({ host: target.host, paneId: target.paneId, panelId: target.panelId, notifyId: target.notifyId })
+  const params = Object.entries({ host: target.host, paneId: target.paneId, panelId: target.panelId, notifyId: target.notifyId, sessionId: target.sessionId })
     .flatMap(([key, value]) => value ? [`${key}=${encodeURIComponent(value)}`] : []);
   return `/open?${params.join('&')}`;
 }

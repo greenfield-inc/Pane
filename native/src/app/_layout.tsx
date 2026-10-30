@@ -109,16 +109,8 @@ function RootStack({ signedIn }: { signedIn: boolean }) {
         />
         <Stack.Screen name="session/[sessionId]" options={{ headerShown: false }} />
         <Stack.Screen
-          name="session/new"
-          options={{ presentation: 'formSheet', sheetAllowedDetents: [0.75, 1], sheetGrabberVisible: true, headerShown: false }}
-        />
-        <Stack.Screen
           name="new"
-          options={{ presentation: 'formSheet', sheetAllowedDetents: 'fitToContents', sheetGrabberVisible: true, headerShown: false }}
-        />
-        <Stack.Screen
-          name="pane/new"
-          options={{ presentation: 'formSheet', sheetAllowedDetents: [0.75, 1], sheetGrabberVisible: true, headerShown: false }}
+          options={{ presentation: 'formSheet', sheetAllowedDetents: [0.8, 1], sheetGrabberVisible: true, headerShown: false }}
         />
         <Stack.Screen name="hosts/add" options={{ presentation: 'modal', title: 'Add with a code' }} />
         <Stack.Screen name="computers" options={{ title: 'Your computers', ...grouped }} />

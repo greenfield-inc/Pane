@@ -1,15 +1,18 @@
 import { LegendList } from '@legendapp/list/react-native';
-import { router } from 'expo-router';
+import { router, useIsFocused } from 'expo-router';
 import { useState } from 'react';
-import { Alert, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useDaemon } from '@/daemon';
+import { AllMachinesHome, type AllMachinesFeed } from '@/features/allMachines/AllMachinesHome';
+import { useOtherMachines } from '@/features/allMachines/useOtherMachines';
 import { DemoBadge } from '@/features/demo/DemoBadge';
 import { ConnectionBar, Dimmed, presenceLabel } from '@/features/hosts/ConnectionStatus';
 import { useConnectionPresence } from '@/features/hosts/useConnectionPresence';
 import { MachineChips } from '@/features/machines/MachineChips';
 import { MachineMark } from '@/features/machines/MachineMark';
+import { useMachinePrefs } from '@/features/machines/machinePrefs';
 import { PaneLogo } from '@/features/machines/PaneLogo';
 import { useMachines } from '@/features/machines/useMachines';
 import { useNotifyShared } from '@/features/notify/hooks';
@@ -31,10 +34,11 @@ import {
   useRestorePane,
   useToggleFavorite,
 } from './hooks';
-import { IconButton, LoadingRows, Notice, SectionHeader } from './PaneKit';
-import { buildSidebar, type PaneListEntry, type SidebarItem } from './paneList';
+import { LoadingRows, Notice, SectionHeader } from './PaneKit';
+import { buildSidebar, type SidebarItem } from './paneList';
 import { PaneRow } from './PaneRow';
 import { describePermission, pendingByPane } from './permissions';
+import { SearchField } from './SearchField';
 import { ArchivedRow, SessionRow, SidebarNote, SidebarSectionHeader } from './SidebarRows';
 import { useSidebarSections } from './sidebarSections';
 import { StatusBadge } from './StatusBadge';
@@ -42,6 +46,7 @@ import { StatusBadge } from './StatusBadge';
 /**
  * Home: the Pane logo and a chip per machine, then Pinned, Sessions, Repositories and Archived,
  * with search and one card of what's waiting on you (permission requests and Notify questions).
+ * With the All chip selected, one list from every saved machine instead (AllMachinesHome).
  */
 export function PaneListScreen() {
   const theme = useTheme();
@@ -67,6 +72,13 @@ export function PaneListScreen() {
   const restorePane = useRestorePane();
   const deleteArchivedPane = useDeleteArchivedPane();
   const [collapsedSessions, setCollapsedSessions] = useState<ReadonlySet<string>>(new Set());
+  const focused = useIsFocused();
+  const lastNew = useMachinePrefs(state => state.lastNew);
+  const saved = machines.filter(machine => machine.profile);
+  const showAll = saved.length >= 2;
+  const all = useMachinePrefs(state => state.all) && showAll;
+  // Other machines are read only while All machines is on screen; the timer also stops in the background.
+  const others = useOtherMachines(saved.flatMap(machine => (machine.profile && !machine.current ? [machine.profile] : [])), all && focused);
 
   const waiting = Object.values(pendingByPane(permissions.data ?? []));
   const questions = waitingQuestions(notify.data);
@@ -91,7 +103,7 @@ export function PaneListScreen() {
   const divider = { borderColor: theme.colors.border };
   const waitingCount = waiting.length + questions.length;
 
-  const confirmArchive = (pane: PaneListEntry) => {
+  const confirmArchive = (pane: { id: string; name: string }) => {
     Alert.alert(`Archive “${pane.name}”?`, 'Its agents stop and its worktree is removed. You can still find it under Archived.', [
       { text: 'Cancel', style: 'cancel' },
       {
@@ -122,8 +134,42 @@ export function PaneListScreen() {
       notify.refetch(),
       sessions.refetch(),
       expanded.archived ? archived.refetch() : undefined,
+      ...(all ? others.map(other => other.refetch()) : []),
     ]);
     setRefreshing(false);
+  };
+
+  // All machines: this machine's live lists beside the other machines' reads, in saved order.
+  const feeds: AllMachinesFeed[] = saved.map(machine => {
+    if (machine.current) {
+      return {
+        key: machine.key,
+        name: machine.name,
+        snapshot: projects.data
+          ? { projects: projects.data, statuses: statuses.data, permissions: permissions.data, notify: notify.data, sessions: sessions.data?.sessions }
+          : undefined,
+        offlineSince: presence === 'unreachable' ? projects.dataUpdatedAt : undefined,
+        retry,
+      };
+    }
+    const other = others.find(read => read.profile.id === machine.key);
+    return {
+      key: machine.key,
+      name: machine.name,
+      snapshot: other?.snapshot,
+      offlineSince: other?.unreachable ? other.readAt : undefined,
+      retry: () => void other?.refetch(),
+    };
+  });
+  // In All machines a machine that stopped answering dims, like the current one does.
+  const chipMachines = all
+    ? machines.map(machine => (others.some(read => read.profile.id === machine.key && read.unreachable)
+      ? { ...machine, state: 'dimmed' as const, status: 'Can’t reach', selectable: false }
+      : machine))
+    : machines;
+  const openPane = (paneId: string) => {
+    markSeen(paneId);
+    router.push({ pathname: '/pane/[paneId]', params: { paneId } });
   };
 
   const renderItem = ({ item, index }: { item: SidebarItem; index: number }) => {
@@ -140,7 +186,7 @@ export function PaneListScreen() {
             add={{
               label: `New pane in ${item.title}`,
               testID: `panes-new-${item.projectId}`,
-              onPress: () => router.push({ pathname: '/pane/new', params: { projectId: String(item.projectId) } }),
+              onPress: () => router.push({ pathname: '/new', params: { kind: 'pane', projectId: String(item.projectId) } }),
             }}
           />
         );
@@ -150,10 +196,7 @@ export function PaneListScreen() {
             <PaneRow
               pane={item.pane}
               label={item.label}
-              onOpen={() => {
-                markSeen(item.pane.id);
-                router.push({ pathname: '/pane/[paneId]', params: { paneId: item.pane.id } });
-              }}
+              onOpen={() => openPane(item.pane.id)}
               onTogglePinned={() => toggleFavorite(item.pane.id).catch((error: Error) => Alert.alert('Couldn’t update pinned panes', error.message))}
               onArchive={() => confirmArchive(item.pane)}
             />
@@ -225,98 +268,111 @@ export function PaneListScreen() {
           <Icon ios="gearshape" android="settings" size={17} color={theme.colors.text} />
         </Pressable>
       </View>
-      {machines.length > 1 ? <MachineChips machines={machines} /> : null}
-      <ConnectionBar notice={notice} onRetry={retry} />
+      {machines.length > 1 ? <MachineChips machines={chipMachines} showAll={showAll} /> : null}
+      {all ? (
+        <>
+          <AllMachinesHome
+            machines={chipMachines}
+            feeds={feeds}
+            currentKey={profile.id}
+            loading={feeds.every(feed => !feed.snapshot && feed.offlineSince === undefined)}
+            refreshing={refreshing}
+            onRefresh={() => void refresh()}
+            nextMachine={saved.find(machine => machine.key === lastNew)?.name ?? current?.name ?? profile.label}
+            bottomPadding={insets.bottom + 12 + NEW_BUTTON + 16}
+            actions={{
+              openPane,
+              togglePanePinned: paneId => toggleFavorite(paneId).catch((error: Error) => Alert.alert('Couldn’t update pinned panes', error.message)),
+              archivePane: confirmArchive,
+              toggleSessionPinned: (sessionId, isPinned) => updateSession(sessionId, { isPinned })
+                .catch((error: Error) => Alert.alert('Couldn’t update the Session pin', error.message)),
+              archiveSession: sessionId => updateSession(sessionId, { archived: true })
+                .catch((error: Error) => Alert.alert('Couldn’t archive the Session', error.message)),
+            }}
+          />
+          <NewButton bottom={insets.bottom + 16} />
+        </>
+      ) : (
+        <>
+          <ConnectionBar notice={notice} onRetry={retry} />
 
-      {/* The last screen stays, dimmed and untouchable, while the machine isn't connected. The chips
-          above stay live, so you can switch away from a machine that is down. */}
-      <Dimmed dimmed={presence !== 'connected'} style={styles.fill}>
-        <View style={styles.toolbar}>
-          <View style={[styles.search, { borderRadius: theme.radius.lg, backgroundColor: theme.colors.surfaceRaised }]}>
-            <Icon ios="magnifyingglass" android="search" size={16} />
-            <TextInput
-              testID="panes-search"
-              accessibilityLabel="Search panes"
-              placeholder="Search panes"
-              placeholderTextColor={theme.colors.textMuted}
-              selectionColor={theme.colors.accent}
-              autoCapitalize="none"
-              autoCorrect={false}
-              returnKeyType="search"
-              value={query}
-              onChangeText={setQuery}
-              style={[theme.typography.body, styles.searchInput, { color: theme.colors.text }]}
+          {/* The last screen stays, dimmed and untouchable, while the machine isn't connected. The chips
+              above stay live, so you can switch away from a machine that is down. */}
+          <Dimmed dimmed={presence !== 'connected'} style={styles.fill}>
+            <SearchField value={query} onChange={setQuery} />
+
+            <LegendList
+              testID="panes-list"
+              data={loading ? [] : items}
+              keyExtractor={item => item.key}
+              getItemType={item => item.type}
+              estimatedItemSize={48}
+              keyboardDismissMode="on-drag"
+              keyboardShouldPersistTaps="handled"
+              refreshing={refreshing}
+              onRefresh={() => void refresh()}
+              style={styles.fill}
+              contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 12 + NEW_BUTTON + 16 }]}
+              ListHeaderComponent={waitingCount > 0 ? (
+                <View style={styles.waitingSection}>
+                  <SectionHeader title="Waiting on you" count={waitingCount} first />
+                  <View style={[styles.waitingCard, { borderRadius: theme.radius.card, backgroundColor: withAlpha(theme.colors.warning, 0.09) }]}>
+                    {questions.map((item, index) => (
+                      <WaitingRow
+                        key={item.id}
+                        testID={`notify-row-${item.id}`}
+                        name={item.source.name}
+                        detail={item.title}
+                        divided={index > 0}
+                        onPress={() => openNotifySheet(item.id, item.source.paneId)}
+                      />
+                    ))}
+                    {waiting.map((request, index) => {
+                      const { title, target } = describePermission(request);
+                      return (
+                        <WaitingRow
+                          key={request.id}
+                          testID={`permission-row-${request.sessionId}`}
+                          name={paneNames.get(request.sessionId) ?? 'Pane'}
+                          detail={target ? `${title}: ${target}` : title}
+                          divided={questions.length + index > 0}
+                          onPress={() => router.push({ pathname: '/pane/[paneId]/permission', params: { paneId: request.sessionId, requestId: request.id } })}
+                        />
+                      );
+                    })}
+                  </View>
+                </View>
+              ) : null}
+              ListEmptyComponent={
+                loading ? <LoadingRows />
+                  : projects.isError ? <Notice danger message={projects.error.message} action={{ title: 'Try again', onPress: () => void projects.refetch() }} />
+                  : query && (projects.data ?? []).length > 0 ? <Notice testID="panes-no-results" message={`No panes match “${query}”.`} />
+                  : <Notice testID="panes-empty" message="No remote panes found on this host." />
+              }
+              renderItem={renderItem}
             />
-            {query ? (
-              <IconButton label="Clear search" testID="panes-search-clear" size={28} onPress={() => setQuery('')}>
-                <Icon ios="xmark.circle.fill" android="cancel" size={16} />
-              </IconButton>
-            ) : null}
-          </View>
-        </View>
-
-        <LegendList
-          testID="panes-list"
-          data={loading ? [] : items}
-          keyExtractor={item => item.key}
-          getItemType={item => item.type}
-          estimatedItemSize={48}
-          keyboardDismissMode="on-drag"
-          keyboardShouldPersistTaps="handled"
-          refreshing={refreshing}
-          onRefresh={() => void refresh()}
-          style={styles.fill}
-          contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 12 + NEW_BUTTON + 16 }]}
-          ListHeaderComponent={waitingCount > 0 ? (
-            <View style={styles.waitingSection}>
-              <SectionHeader title="Waiting on you" count={waitingCount} first />
-              <View style={[styles.waitingCard, { borderRadius: theme.radius.card, backgroundColor: withAlpha(theme.colors.warning, 0.09) }]}>
-                {questions.map((item, index) => (
-                  <WaitingRow
-                    key={item.id}
-                    testID={`notify-row-${item.id}`}
-                    name={item.source.name}
-                    detail={item.title}
-                    divided={index > 0}
-                    onPress={() => openNotifySheet(item.id, item.source.paneId)}
-                  />
-                ))}
-                {waiting.map((request, index) => {
-                  const { title, target } = describePermission(request);
-                  return (
-                    <WaitingRow
-                      key={request.id}
-                      testID={`permission-row-${request.sessionId}`}
-                      name={paneNames.get(request.sessionId) ?? 'Pane'}
-                      detail={target ? `${title}: ${target}` : title}
-                      divided={questions.length + index > 0}
-                      onPress={() => router.push({ pathname: '/pane/[paneId]/permission', params: { paneId: request.sessionId, requestId: request.id } })}
-                    />
-                  );
-                })}
-              </View>
-            </View>
-          ) : null}
-          ListEmptyComponent={
-            loading ? <LoadingRows />
-              : projects.isError ? <Notice danger message={projects.error.message} action={{ title: 'Try again', onPress: () => void projects.refetch() }} />
-              : query && (projects.data ?? []).length > 0 ? <Notice testID="panes-no-results" message={`No panes match “${query}”.`} />
-              : <Notice testID="panes-empty" message="No remote panes found on this host." />
-          }
-          renderItem={renderItem}
-        />
-        <Pressable
-          testID="home-new"
-          accessibilityRole="button"
-          accessibilityLabel="New"
-          accessibilityHint="Starts a Session or a Pane"
-          onPress={() => router.push('/new')}
-          style={({ pressed }) => [styles.newButton, { bottom: insets.bottom + 16, backgroundColor: theme.colors.accent, opacity: pressed ? 0.85 : 1 }]}
-        >
-          <Icon ios="plus" android="add" size={24} color={theme.colors.onAccent} />
-        </Pressable>
-      </Dimmed>
+            <NewButton bottom={insets.bottom + 16} />
+          </Dimmed>
+        </>
+      )}
     </View>
+  );
+}
+
+/** Home's +: one New sheet for a Session or a Pane, on any saved machine. */
+function NewButton({ bottom }: { bottom: number }) {
+  const theme = useTheme();
+  return (
+    <Pressable
+      testID="home-new"
+      accessibilityRole="button"
+      accessibilityLabel="New"
+      accessibilityHint="Starts a Session or a Pane"
+      onPress={() => router.push('/new')}
+      style={({ pressed }) => [styles.newButton, { bottom, backgroundColor: theme.colors.accent, opacity: pressed ? 0.85 : 1 }]}
+    >
+      <Icon ios="plus" android="add" size={24} color={theme.colors.onAccent} />
+    </Pressable>
   );
 }
 
@@ -358,14 +414,11 @@ const styles = StyleSheet.create({
   brandTitle: { flexShrink: 1, fontSize: 21, letterSpacing: -0.2, fontWeight: '700' },
   machine: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 },
   roundButton: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
-  toolbar: { paddingHorizontal: 16, paddingBottom: 4, gap: 10 },
   // Above the home indicator, in thumb reach; the list ends clear of it.
   newButton: { position: 'absolute', right: 16, width: NEW_BUTTON, height: NEW_BUTTON, borderRadius: NEW_BUTTON / 2, alignItems: 'center', justifyContent: 'center' },
   bold: { fontWeight: '600' },
   // ml-5 border-l pl-2 under the Session row.
   nested: { marginLeft: 20, paddingLeft: 8, borderLeftWidth: 1 },
-  search: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 40, paddingLeft: 12, paddingRight: 6 },
-  searchInput: { flex: 1, paddingVertical: 8 },
   shrink: { flexShrink: 1 },
   content: { padding: 12 },
   waitingSection: { marginBottom: 12 },
