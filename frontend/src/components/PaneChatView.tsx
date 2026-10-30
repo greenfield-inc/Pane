@@ -144,6 +144,15 @@ export function PaneChatView() {
             <p className="mt-2 text-sm text-text-secondary">
               Create a new Session or restore one from Archived.
             </p>
+            <Button
+              type="button"
+              variant="primary"
+              size="sm"
+              className="mt-4"
+              onClick={() => window.dispatchEvent(new Event('open-create-orchestration-session'))}
+            >
+              New Session
+            </Button>
           </>
         )}
       </div>
@@ -656,7 +665,7 @@ function LegacyPaneChatWorkspace({ state, error, onRetry }: LegacyPaneChatWorksp
       <div className="flex h-11 flex-shrink-0 items-center justify-between border-b border-border-primary px-4">
         <div className="flex min-w-0 items-center gap-2">
           <Terminal className="h-4 w-4 flex-shrink-0 text-text-tertiary" />
-          <h1 className="truncate text-sm font-semibold text-text-primary">Pane Chat</h1>
+          <h1 className="truncate text-sm font-semibold text-text-primary">{state.session.name || 'Pane Chat'}</h1>
           {error && <span role="alert" className="truncate text-xs text-status-error">{error}</span>}
         </div>
         <PaneChatAgentBadge agent={state.agent} />

@@ -121,6 +121,39 @@ describe('CLAUDE_MANIFEST', () => {
     expect(r.matchedRuleId).not.toBe('workspace_trust_prompt');
   });
 
+  // Real Claude Code 2.1.314 screen from `claude --dangerously-skip-permissions` before the person accepted it.
+  const bypassWarning = [
+    '─'.repeat(100),
+    '  WARNING: Claude Code running in Bypass Permissions mode',
+    '',
+    '  In Bypass Permissions mode, Claude Code will not ask for your approval before running',
+    '  potentially dangerous commands.',
+    '',
+    '  This mode should only be used in a sandboxed container/VM that has restricted internet access',
+    '  and can easily be restored if damaged.',
+    '',
+    '  By proceeding, you accept all responsibility for actions taken while running in Bypass',
+    '  Permissions mode.',
+    '',
+    '  https://code.claude.com/docs/en/security',
+    '',
+    '  ❯ No, exit',
+    '    Yes, I accept',
+    '',
+    '  Enter to confirm · Esc to cancel',
+  ];
+
+  it('names the bypass-permissions warning, so the Onboarding Session can answer it', () => {
+    const r = detectAgentState(CLAUDE_MANIFEST, screen(bypassWarning.join('\n')));
+    expect(r.state).toBe('blocked');
+    expect(r.matchedRuleId).toBe('bypass_permissions_warning');
+  });
+
+  it('stops naming the bypass-permissions warning once Claude exits to the shell below it', () => {
+    const r = detectAgentState(CLAUDE_MANIFEST, screen([...bypassWarning, 'parsas@host demo % '].join('\n')));
+    expect(r.matchedRuleId).not.toBe('bypass_permissions_warning');
+  });
+
   // Real Claude Code 2.1.282 startup screens: bypass-permissions warning and first-run setup.
   it.each([
     [

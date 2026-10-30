@@ -1023,6 +1023,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         findRepos: () => success({ repos: [], shells: [], wslDistro: null }),
         findWslRepos: (distro: string) => success({ distro, repos: [], agents: [] }),
         checkFolder: (folder: string) => success({ name: folder.split(/[\\/]/).pop() ?? folder, path: folder }),
+        findAgents: () => success([{ id: 'claude', found: true }, { id: 'codex', found: true }]),
         firstSteps: () => {
           const sampleProjectIds = mockProjects.filter(project => project.path === '/tmp/.pane/projects/Pane').map(project => Number(project.id));
           const archivedPaneIds = mockArchivedSessions

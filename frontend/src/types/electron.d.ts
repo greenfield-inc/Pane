@@ -206,8 +206,6 @@ interface ElectronAPI {
 
   // Bring sessions from other agent tools into Pane
   sessionImport: {
-    /** The scan for the Home card, or null when Home shouldn't show it. */
-    home: () => Promise<SessionImportScan | null>;
     scan: () => Promise<SessionImportScan>;
     run: (keys: string[]) => Promise<SessionImportRunResult>;
     progress: () => Promise<SessionImportProgress>;
@@ -679,6 +677,7 @@ interface ElectronAPI {
     findRepos: () => Promise<IPCResponse<import('../../../shared/types/onboarding').HostRepos>>;
     findWslRepos: (distro: string) => Promise<IPCResponse<import('../../../shared/types/onboarding').WslRepos>>;
     checkFolder: (folder: string) => Promise<IPCResponse<{ name: string; path: string }>>;
+    findAgents: () => Promise<IPCResponse<import('../../../shared/types/onboarding').FirstRunAgent[]>>;
     firstSteps: () => Promise<IPCResponse<import('../../../shared/types/onboarding').FirstStepsState>>;
     supportProject: () => Promise<IPCResponse>;
   };

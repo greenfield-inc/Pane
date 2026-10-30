@@ -103,9 +103,20 @@ export const CLAUDE_MANIFEST: AgentManifest = {
       regex: [/esc to cancel\s*$/i],
     },
     {
-      // Startup menus: bypass-permissions warnings ("❯ No, exit"
-      // above "Enter to confirm · Esc to cancel"), and first-run theme and login
-      // pickers ("❯ 2. Dark mode").
+      // The one-time bypass-permissions warning. Named so the Onboarding
+      // Session can answer it in the terminal (TerminalPanelManager).
+      id: 'bypass_permissions_warning',
+      state: 'blocked',
+      priority: 1040,
+      region: 'after_last_horizontal_rule',
+      visibleBlocker: true,
+      contains: ['running in bypass permissions mode', 'yes, i accept'],
+      // Live only while its footer is the last thing on screen, as for folder trust.
+      regex: [/esc to cancel\s*$/i],
+    },
+    {
+      // Other startup menus ("❯ No, exit" above "Enter to confirm · Esc to
+      // cancel"), and first-run theme and login pickers ("❯ 2. Dark mode").
       id: 'live_selection_menu',
       state: 'blocked',
       priority: 980,

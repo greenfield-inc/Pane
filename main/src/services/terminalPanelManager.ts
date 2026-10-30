@@ -57,6 +57,8 @@ const OUTPUT_BATCH_SIZE = 131072; // 128KB — timer-based flush preferred; size
 const OUTPUT_BATCH_SIZE_HIDDEN = 80_000; // 80KB — cap hidden flush size to avoid foreground backpressure churn
 const MAX_CONCURRENT_SPAWNS = 3;
 const AGENT_STATUS_POLL_MS = 500; // cadence for re-deriving blocked/working/done from the live screen
+/** Pause between moving to "Yes, I accept" and confirming, so Claude's menu takes the keys one at a time. */
+const BYPASS_WARNING_CONFIRM_DELAY_MS = 300;
 /** Consecutive status polls whose screen must show an agent's signature before Pane adopts it. */
 const SCREEN_SIGNATURE_MATCHES = 2;
 const MAX_SCROLLBACK_BUFFER_SIZE = 500_000; // 500KB of normal shell history
@@ -127,7 +129,7 @@ import {
   promptFileShellWord,
   stripTrailingNewlines,
 } from './agents/promptDelivery';
-import { PANE_ONE_TIME_PROMPT_OPENING } from '../../../shared/types/paneChat';
+import { getPaneChatPanelId, ONBOARDING_HANDOFF_PREFERENCE, PANE_ONE_TIME_PROMPT_OPENING } from '../../../shared/types/paneChat';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -313,6 +315,8 @@ interface TerminalProcess {
   workedVisibly?: boolean;
   /** Reason sent with the last `panel:agentStatus` event. */
   lastStatusPromptKey?: string;
+  /** Pane answered Claude's bypass-permissions warning in this terminal. */
+  bypassWarningAnswered?: boolean;
   /** Last status scan, reused while the emulator pushes no new screen. */
   lastStatusScan?: { screen: ScreenState; detection: AgentDetectionResult };
   /** A native Claude Session's own folder, whose trust menu the status poll answers until Claude is first ready. */
@@ -2715,6 +2719,7 @@ export class TerminalPanelManager extends EventEmitter {
           && this.agentStatusMonitor.getState(terminal.panelId) === 'blocked'
           && blockedPromptKey(detection.matchedRuleId, promptLines()) !== terminal.lastStatusPromptKey
         ) this.emitAgentStatus(terminal, 'blocked', detection.matchedRuleId, promptLines());
+        if (detection.matchedRuleId === 'bypass_permissions_warning') this.answerBypassWarning(terminal);
         if (
           terminal.agentType === 'opencode'
           && detection.matchedRuleId === 'idle_composer'
@@ -2765,6 +2770,29 @@ export class TerminalPanelManager extends EventEmitter {
     console.log(`[TerminalPanelManager] Trusted Session folder ${terminal.launchCwd} in Claude's prompt for panel ${terminal.panelId}`);
     // Claude starts for real now: drop the menu's blocked status rather than report it until the next poll.
     this.registerAgentStatusPanel(terminal);
+  }
+
+  /**
+   * Accepts Claude's one-time bypass-permissions warning in the Onboarding
+   * Session's Claude terminal, once the person has passed the first-run screen,
+   * which tells them Pane runs the agent with its permission prompts off (D-19).
+   * Answering in the terminal lets Claude record the acceptance with its own
+   * writer; Pane never rewrites Claude's config files while Claude may be
+   * running (D-21). Every other terminal leaves the warning to the person.
+   */
+  private answerBypassWarning(terminal: TerminalProcess): void {
+    if (terminal.bypassWarningAnswered || terminal.panelId !== getPaneChatPanelId('claude')) return;
+    if (!databaseService.getUserPreference(ONBOARDING_HANDOFF_PREFERENCE)) return;
+    terminal.bypassWarningAnswered = true;
+    // The menu has no numbers: move from "No, exit" to "Yes, I accept", then confirm.
+    this.writeToTerminal(terminal.panelId, '\x1b[B');
+    setTimeout(() => {
+      // Confirm only in the same live terminal, still on the warning: a restart in between gets nothing.
+      const live = this.terminals.get(terminal.panelId) === terminal && !terminal.destroying;
+      if (live && terminal.lastStatusScan?.detection.matchedRuleId === 'bypass_permissions_warning') {
+        this.writeToTerminal(terminal.panelId, '\r');
+      }
+    }, BYPASS_WARNING_CONFIRM_DELAY_MS);
   }
 
   /**

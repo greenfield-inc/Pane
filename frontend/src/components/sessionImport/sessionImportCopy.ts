@@ -93,7 +93,7 @@ export function resultHeadline(result: SessionImportRunResult): string {
 
 export const EMPTY_STATE = 'No sessions found from Claude Code, Codex, Conductor, Superset, Herdr, Emdash, Orca or T3 Code on this computer.';
 
-export type SessionImportSurface = 'home' | 'settings';
+export type SessionImportSurface = 'settings';
 
 /** Sessions found per source, for analytics. */
 function foundCounts(scan: SessionImportScan) {
@@ -122,4 +122,15 @@ export function captureSessionImport(
     properties.running_skipped = scan.sessions.filter(isRunningElsewhere).length;
   }
   capture('session_import', properties);
+}
+
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * The sessions Yes brings in (D-14): running or active in the last 7 days,
+ * and not already in Pane or impossible to bring in.
+ */
+export function sessionsToBringIn(scan: SessionImportScan): ImportSession[] {
+  return scan.sessions.filter(session => !session.alreadyInPane && !session.unavailable
+    && (session.running === 'yes' || session.lastActiveMs >= scan.scannedAt - WEEK_MS));
 }

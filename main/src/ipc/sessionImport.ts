@@ -13,7 +13,6 @@ import { SOURCE_READERS } from '../services/sessionImport/sources';
 import { claudeConfigDir, codexHome } from '../services/sessionImport/sources/common';
 import type { ReaderContext } from '../services/sessionImport/sources/types';
 import {
-  SESSION_IMPORT_HOME_RETIRED_PREFERENCE,
   type ImportSessionResult,
   type SessionImportProgress,
   type SessionImportRunResult,
@@ -29,11 +28,9 @@ import type {
   RunpaneRepoAddResult,
 } from '../../../shared/types/runpaneOrchestration';
 
-const SESSION_IMPORT_CHANNELS = ['session-import:home', 'session-import:scan', 'session-import:run', 'session-import:progress'] as const;
+const SESSION_IMPORT_CHANNELS = ['session-import:scan', 'session-import:run', 'session-import:progress'] as const;
 const LISTED_MS = 30 * 24 * 60 * 60 * 1000;
 const READY_TIMEOUT_MS = 90_000;
-/** Home shows the card only while the person has fewer Panes than this. */
-const HOME_PANE_LIMIT = 2;
 
 /**
  * "Bring your sessions into Pane": scans other agent tools' stores on the
@@ -41,12 +38,7 @@ const HOME_PANE_LIMIT = 2;
  */
 export function registerSessionImportHandlers(ipcMain: IpcMain, services: AppServices, commandRegistry: PaneCommandRegistry): void {
   const { databaseService, sessionManager } = services;
-  let latest: Promise<ScanOutcome> | undefined;
   let progress: SessionImportProgress = { running: false, done: {}, total: {} };
-
-  const homeEligible = (): boolean =>
-    databaseService.getUserPreference(SESSION_IMPORT_HOME_RETIRED_PREFERENCE) !== 'true'
-    && databaseService.getAllSessions().length < HOME_PANE_LIMIT;
 
   const alreadyInPane = (): Set<string> => {
     const keys = recordedSessionKeys(getAppDirectory());
@@ -87,9 +79,9 @@ export function registerSessionImportHandlers(ipcMain: IpcMain, services: AppSer
         return rows.map(row => row.executable);
       })),
     };
-    latest = scanSessions({ context, readers: SOURCE_READERS, alreadyInPane: alreadyInPane(), excludedRoots: excludedRoots() });
-    latest.catch(error => console.error('[SessionImport] Scan failed:', error));
-    return latest;
+    const outcome = scanSessions({ context, readers: SOURCE_READERS, alreadyInPane: alreadyInPane(), excludedRoots: excludedRoots() });
+    outcome.catch(error => console.error('[SessionImport] Scan failed:', error));
+    return outcome;
   };
 
   const port: PlacementPort = {
@@ -143,12 +135,6 @@ export function registerSessionImportHandlers(ipcMain: IpcMain, services: AppSer
     },
   };
 
-  commandRegistry.register('session-import:home', async (): Promise<SessionImportScan | null> => {
-    if (!homeEligible()) return null;
-    const { scan: result } = await (latest ?? scan());
-    return result.sessions.some(session => session.preselected) ? result : null;
-  });
-
   commandRegistry.register('session-import:scan', async (): Promise<SessionImportScan> => (await scan()).scan);
 
   commandRegistry.register('session-import:progress', (): SessionImportProgress => progress);
@@ -185,16 +171,10 @@ export function registerSessionImportHandlers(ipcMain: IpcMain, services: AppSer
       return { ...result, results: [...result.results, ...skipped] };
     } finally {
       progress = { ...progress, running: false };
-      latest = undefined;
     }
   });
 
   commandRegistry.bindChannels(ipcMain, SESSION_IMPORT_CHANNELS);
-
-  // Start reading early so the Home card is usually ready before Home first paints.
-  setImmediate(() => {
-    if (homeEligible()) void scan().catch(() => undefined);
-  });
 }
 
 function toTabCheck(result: RunpanePanelWaitResult): TabCheck {

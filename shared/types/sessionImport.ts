@@ -15,9 +15,6 @@ export function isResumableImportAgent(agent: string): agent is ResumableImportA
   return RESUMABLE_IMPORT_AGENTS.some(known => known === agent);
 }
 
-/** Preference set once the Home card was dismissed or used to finish an import. */
-export const SESSION_IMPORT_HOME_RETIRED_PREFERENCE = 'session_import_home_retired';
-
 export type ImportRunning = 'yes' | 'no' | 'unknown';
 
 /** One session as the card shows it. */

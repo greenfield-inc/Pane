@@ -1,7 +1,8 @@
 import { test, expect, type Page } from '@playwright/test';
 import { gunzipSync } from 'node:zlib';
 import type { JsonObject } from '../shared/validation/boundaryDecoder';
-import type { FoundRepo, HostRepos, WslRepos } from '../shared/types/onboarding';
+import type { FirstRunAgent, FoundRepo, HostRepos, WslRepos } from '../shared/types/onboarding';
+import type { ImportSession, SessionImportScan } from '../shared/types/sessionImport';
 import { installElectronApiMock, type ElectronApiMockOptions } from './electronApiMock';
 
 // The renderer's Content-Security-Policy only lets analytics reach the default host.
@@ -19,7 +20,36 @@ const MAC_REPOS: FoundRepo[] = [
   repo('mobile-app', '~/dev/mobile-app', 'develop', 96),
 ];
 
+const DAY = 24 * HOUR;
+
+const importSession = (key: string, source: ImportSession['source'], daysAgo: number, overrides: Partial<ImportSession> = {}): ImportSession => ({
+  key, source, agent: source, sessionId: key, lastActiveMs: NOW - daysAgo * DAY, running: 'no', alreadyInPane: false, preselected: daysAgo <= 7, ...overrides,
+});
+
+/** J1's fixture: three Claude Code sessions in two repos and one Codex session this week, one Claude Code session from 10 days ago. */
+const FOUND_SESSIONS: SessionImportScan = {
+  scannedAt: NOW,
+  sources: [],
+  sessions: [
+    importSession('claude:a', 'claude', 1, { repoName: 'acme-web' }),
+    importSession('claude:b', 'claude', 2, { repoName: 'acme-web' }),
+    importSession('claude:c', 'claude', 3, { repoName: 'billing-api' }),
+    importSession('codex:d', 'codex', 4, { repoName: 'billing-api' }),
+    importSession('claude:old', 'claude', 10, { repoName: 'acme-web' }),
+  ],
+};
+
 interface FinderSetup {
+  /** Undefined runs the default: Claude Code and Codex found. */
+  agents?: FirstRunAgent[];
+  /** null makes the scan fail; undefined finds nothing. */
+  scan?: SessionImportScan | null;
+  scanDelayMs?: number;
+  gitInstalled?: boolean;
+  /** Stop at step 1 instead of skipping to "Open your project". */
+  atFirstStep?: boolean;
+  /** The first save of the first-run answer fails. */
+  failHandoffOnce?: boolean;
   host?: HostRepos;
   hostDelayMs?: number;
   /** null makes the WSL call fail. */
@@ -40,18 +70,6 @@ type OnboardingTestWindow = Window & {
 async function createdProjects(page: Page): Promise<unknown[]> {
   // SAFETY: openFirstRun's init script installs __onboardingTest before navigation.
   return page.evaluate(() => (window as OnboardingTestWindow).__onboardingTest.created);
-}
-
-async function landedProjectName(page: Page): Promise<string | undefined> {
-  return page.evaluate(async () => {
-    const modulePath = ['/src/stores', 'navigationStore.ts'].join('/');
-    // SAFETY: Vite serves this known application module, whose exported store shape is declared here for the browser callback.
-    const navigation = await import(modulePath) as { useNavigationStore: { getState: () => { activeProjectId: number | null } } };
-    const projectId = navigation.useNavigationStore.getState().activeProjectId;
-    const projects = await window.electronAPI.projects.getAll();
-    // SAFETY: the Electron API mock answers getAll with its project records.
-    return (projects.data as Array<{ id: number; name: string }>).find(project => project.id === projectId)?.name;
-  });
 }
 
 async function preferences(page: Page): Promise<Record<string, string>> {
@@ -75,7 +93,27 @@ async function openFirstRun(page: Page, finder: FinderSetup, options: ElectronAp
       created.push({ ...request });
       return create(request);
     };
-    onboarding.detectEnvironment = async () => ({ success: true, data: { gitInstalled: true } });
+    onboarding.detectEnvironment = async () => ({ success: true, data: { gitInstalled: setup.gitInstalled ?? true } });
+    if (setup.agents) {
+      const agents = setup.agents;
+      onboarding.findAgents = async () => ({ success: true, data: agents });
+    }
+    if (setup.failHandoffOnce) {
+      const set = window.electronAPI.preferences.set;
+      let failed = false;
+      window.electronAPI.preferences.set = async (key: string, value: string) => {
+        if (key === 'onboarding_handoff' && !failed) {
+          failed = true;
+          throw new Error('database is locked');
+        }
+        return set(key, value);
+      };
+    }
+    const emptyScan: SessionImportScan = { scannedAt: Date.now(), sources: [], sessions: [] };
+    // SAFETY: the mock leaves sessionImport out; the first-run screen only calls scan.
+    (window.electronAPI as { sessionImport: unknown }).sessionImport = {
+      scan: () => setup.scan === null ? later(null, setup.scanDelayMs).then(() => { throw new Error('scan failed'); }) : later(setup.scan ?? emptyScan, setup.scanDelayMs),
+    };
     onboarding.findRepos = () => later({ success: true, data: setup.host ?? { repos: [], shells: [], wslDistro: null } }, setup.hostDelayMs);
     onboarding.findWslRepos = () => later(setup.wsl ? { success: true, data: setup.wsl } : { success: false, error: 'wsl.exe timed out' }, setup.wslDelayMs);
     if (setup.sample) {
@@ -88,9 +126,27 @@ async function openFirstRun(page: Page, finder: FinderSetup, options: ElectronAp
     }
   }, finder);
   await page.goto('/');
+  if (finder.atFirstStep) {
+    const first = page.getByRole('dialog', { name: 'Which agent do you use?' });
+    await expect(first).toBeVisible();
+    return first;
+  }
+  if (finder.gitInstalled !== false) {
+    // Nothing is found by default, so picking an agent goes straight to "Open your project".
+    await page.getByRole('dialog', { name: 'Which agent do you use?' }).getByRole('button', { name: 'Claude Code' }).click();
+  }
   const dialog = page.getByRole('dialog', { name: 'Open your project' });
   await expect(dialog).toBeVisible();
   return dialog;
+}
+
+async function landedInOnboarding(page: Page): Promise<boolean> {
+  return page.evaluate(async () => {
+    const modulePath = ['/src/stores', 'navigationStore.ts'].join('/');
+    // SAFETY: Vite serves this known application module, whose exported store shape is declared here for the browser callback.
+    const navigation = await import(modulePath) as { useNavigationStore: { getState: () => { activeView: string } } };
+    return navigation.useNavigationStore.getState().activeView === 'pane-chat';
+  });
 }
 
 async function dialogHeight(page: Page): Promise<number> {
@@ -123,10 +179,11 @@ test('lists found repos newest first with only the newest checked', async ({ pag
   await expect(dialog).toBeHidden();
   await expect(page.getByText('billing-api').first()).toBeVisible();
   expect(await createdProjects(page)).toEqual([{ name: 'billing-api', path: '/home/dev/code/billing-api', active: false }]);
-  expect(await preferences(page)).toMatchObject({ onboarding_repo_setup: 'true', onboarding_open_project_screen: 'seen' });
+  expect(await landedInOnboarding(page)).toBe(true);
+  expect(await preferences(page)).toMatchObject({ onboarding_repo_setup: 'true', onboarding_handoff: 'project' });
 });
 
-test('opens every checked repo and lands in the newest', async ({ page }) => {
+test('opens every checked repo and lands in the Onboarding Session', async ({ page }) => {
   const dialog = await openFirstRun(page, { host: { repos: MAC_REPOS, shells: [], wslDistro: null } });
   const rows = dialog.getByRole('group', { name: 'Your repos' }).locator('label');
 
@@ -138,7 +195,7 @@ test('opens every checked repo and lands in the newest', async ({ page }) => {
     { name: 'acme-web', path: '/home/dev/code/acme-web', active: false },
     { name: 'mobile-app', path: '/home/dev/dev/mobile-app', active: false },
   ]);
-  expect(await landedProjectName(page)).toBe('acme-web');
+  expect(await landedInOnboarding(page)).toBe(true);
 });
 
 test('a repo that fails to open keeps the dialog on it and still counts the ones added', async ({ page }) => {
@@ -168,6 +225,91 @@ test('arrow keys move between rows and Space checks one', async ({ page }) => {
   await page.keyboard.press('ArrowUp');
   await page.keyboard.press('ArrowUp');
   await expect(boxes.nth(2)).toBeFocused();
+});
+
+test('step 1 lists the agents this computer supports and links a missing one to its install page', async ({ page }) => {
+  const dialog = await openFirstRun(page, {
+    atFirstStep: true,
+    agents: [{ id: 'claude', found: true }, { id: 'codex', found: false }, { id: 'cursor', found: true }],
+  });
+
+  await expect(dialog.getByRole('button', { name: 'Claude Code' })).toBeEnabled();
+  await expect(dialog.getByRole('button', { name: 'Cursor' })).toBeEnabled();
+  await expect(dialog.getByRole('button', { name: 'Codex' })).toHaveCount(0);
+  await expect(dialog.getByText('Not found on this computer')).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Install' })).toBeVisible();
+  await expect(dialog.getByText('Pane runs it for you, with its permission prompts off. You can change it later in Settings.')).toBeVisible();
+});
+
+test('step 2 counts the sessions from the last 7 days, and Yes opens the Onboarding Session (J1)', async ({ page }) => {
+  const dialog = await openFirstRun(page, { atFirstStep: true, scan: FOUND_SESSIONS, scanDelayMs: 1_500 });
+
+  await dialog.getByRole('button', { name: 'Claude Code' }).click();
+  const scanning = page.getByRole('dialog', { name: 'Looking for your sessions…' });
+  await expect(scanning).toBeVisible();
+  const indicator = await scanning.getByRole('status', { name: 'Looking for your sessions' }).boundingBox();
+
+  const offer = page.getByRole('dialog', { name: 'Bring your 4 sessions into Pane?' });
+  await expect(offer).toBeVisible();
+  await expect(offer.getByText('Found in Claude Code and Codex: everything running or used in the last 7 days. Pane opens them in place and deletes nothing.')).toBeVisible();
+  const yes = offer.getByRole('button', { name: 'Yes' });
+  const yesBox = await yes.boundingBox();
+  expect({ width: yesBox?.width, height: yesBox?.height }).toEqual({ width: indicator?.width, height: indicator?.height });
+
+  await yes.click();
+  await expect(offer).toBeHidden();
+  expect(await landedInOnboarding(page)).toBe(true);
+  expect(await preferences(page)).toMatchObject({ onboarding_repo_setup: 'true', onboarding_handoff: 'migrate' });
+  await expect(page.getByRole('dialog', { name: 'Open your project' })).toHaveCount(0);
+});
+
+test('an answer that cannot be saved keeps the screen open to try again', async ({ page }) => {
+  const dialog = await openFirstRun(page, { atFirstStep: true, scan: FOUND_SESSIONS, failHandoffOnce: true });
+  await dialog.getByRole('button', { name: 'Claude Code' }).click();
+  const offer = page.getByRole('dialog', { name: 'Bring your 4 sessions into Pane?' });
+
+  await offer.getByRole('button', { name: 'Yes' }).click();
+  await expect(offer.getByRole('alert')).toHaveText("Pane couldn't save your answer (database is locked), so the Onboarding Session hasn't started. Try again.");
+  await expect(offer.getByRole('button', { name: 'Yes' })).toBeEnabled();
+  expect(await preferences(page)).toMatchObject({ onboarding_repo_setup: 'false' });
+  expect(await landedInOnboarding(page)).toBe(false);
+
+  await offer.getByRole('button', { name: 'Yes' }).click();
+  await expect(offer).toBeHidden();
+  expect(await preferences(page)).toMatchObject({ onboarding_repo_setup: 'true', onboarding_handoff: 'migrate' });
+  expect(await landedInOnboarding(page)).toBe(true);
+});
+
+test('Not now shows "Open your project" (J3)', async ({ page }) => {
+  const dialog = await openFirstRun(page, { atFirstStep: true, scan: FOUND_SESSIONS, host: { repos: MAC_REPOS, shells: [], wslDistro: null } });
+
+  await dialog.getByRole('button', { name: 'Codex' }).click();
+  await page.getByRole('dialog', { name: 'Bring your 4 sessions into Pane?' }).getByRole('button', { name: 'Not now' }).click();
+
+  const project = page.getByRole('dialog', { name: 'Open your project' });
+  await expect(project.getByRole('group', { name: 'Your repos' }).locator('label')).toHaveCount(3);
+  await project.getByRole('button', { name: 'Open acme-web' }).click();
+  await expect(project).toBeHidden();
+  expect(await landedInOnboarding(page)).toBe(true);
+  expect(await preferences(page)).toMatchObject({ onboarding_handoff: 'project' });
+});
+
+test('a scan that finds nothing or fails goes straight to "Open your project" (J4)', async ({ page }) => {
+  for (const scan of [undefined, null]) {
+    const dialog = await openFirstRun(page, { atFirstStep: true, scan });
+    await dialog.getByRole('button', { name: 'Claude Code' }).click();
+    await expect(page.getByRole('dialog', { name: 'Open your project' })).toBeVisible();
+    await expect(page.getByText(/Bring your \d+ session/)).toHaveCount(0);
+    await expect(page.getByRole('alert')).toHaveCount(0);
+  }
+});
+
+test('without Git, only the Git Required message shows and step 1 never appears (J5)', async ({ page }) => {
+  const dialog = await openFirstRun(page, { gitInstalled: false });
+
+  await expect(dialog.getByText('Git Required')).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Install Git' })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Which agent do you use?' })).toHaveCount(0);
 });
 
 test('loading, empty and three results share one dialog height', async ({ page }) => {
@@ -255,7 +397,7 @@ test('Windows with WSL shows both columns, checks the newest repo across them an
     { name: 'acme-web', path: 'C:\\code\\acme-web', active: false },
     { name: 'billing-api', path: '\\\\wsl.localhost\\Ubuntu-24.04\\home\\dev\\code\\billing-api', active: false },
   ]);
-  expect(await landedProjectName(page)).toBe('billing-api');
+  expect(await landedInOnboarding(page)).toBe(true);
 });
 
 test('a WSL column that cannot be read says so and keeps the Windows column usable', async ({ page }) => {

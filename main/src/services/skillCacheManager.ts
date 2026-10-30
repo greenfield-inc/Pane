@@ -481,6 +481,16 @@ ${SESSION_STARTUP_GUIDANCE}
 
 ${SESSION_PANE_ASSOCIATION_GUIDANCE}
 
+## The Onboarding Session
+
+When this Session is named Onboarding, it is where a new person starts, and it
+owns no work of its own. Each new task gets its own new Session, as "New tasks
+after Start here" in \`${skill('migrate-to-pane')}\` says.
+
+In this Session, call the agents in Panes sub-agents, never workers: "The Panes
+under a Session are sub-agents its orchestrator agent runs for you." Leave model
+choice and cost out.
+
 ## Resume and refresh persisted Session context
 
 Whenever this conversation starts or resumes, read
