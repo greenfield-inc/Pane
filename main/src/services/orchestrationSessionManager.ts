@@ -583,6 +583,13 @@ export class OrchestrationSessionManager extends EventEmitter {
       .map(record => record.id);
   }
 
+  /** The hidden owner Pane of each Session that is not archived, read like `activeMemberPaneIds`. */
+  ownerPaneIds(): string[] {
+    return this.store.read().sessions
+      .filter(session => session.archived !== true)
+      .map(session => session.internalSessionId);
+  }
+
   /**
    * Panes associated with a Session that is not archived, for the Session PR monitor. Reads the
    * in-memory store without taking the Session lock, like `workspaceMembership`.
