@@ -123,6 +123,8 @@ export interface NotifyItem extends NotifyQuestion {
   answeredOn?: string;
   /** The machine whose agent asked; set while a screen shows two machines' questions. */
   machine?: string;
+  /** Epoch ms when a snoozed question comes back to the strip. */
+  snoozedUntil?: number;
   /** Snapshot only: its machine can't be reached right now, so an answer can't be sent. */
   unreachable?: boolean;
 }
@@ -203,7 +205,8 @@ export interface NotifyInstructionsFile {
   reason?: string;
 }
 
-export type NotifyRemindAfter = '10m' | '1h' | 'pane';
+/** Snooze takes 3m, 5m or 15m; the ✕ menu's reminders take 10m, 1h or pane. */
+export type NotifyRemindAfter = '3m' | '5m' | '15m' | '10m' | '1h' | 'pane';
 
 export type NotifyAnswer =
   | { choice: string; note?: string }

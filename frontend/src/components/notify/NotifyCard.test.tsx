@@ -129,6 +129,15 @@ describe('NotifyCard', () => {
     expect(visible).not.toContain('Open in Pane');
   });
 
+  it('offers Snooze on a pop-up card, and says when a snoozed question comes back on the Notify page', () => {
+    const question: NotifyItem = { ...base, ui: 'approve', title: 'Apply migration 0042 to staging?' };
+    expect(render(question)).toContain('aria-label="Snooze"');
+    expect(render(question, { form: 'docked' })).not.toContain('aria-label="Snooze"');
+
+    const snoozed = text(render({ ...question, snoozedUntil: new Date(2026, 9, 30, 15, 42).getTime() }, { form: 'inbox' }));
+    expect(snoozed).toMatch(/Back at 3:42\sPM/);
+  });
+
   it('carries the first-run hint with the answer-all shortcut', () => {
     const visible = text(render({ ...base, ui: 'options', title: 'Which store?', choices: [{ label: 'Postgres' }] }, { shortcutHint: 'Ctrl+Shift+Space' }));
     expect(visible).toContain('Click to answer · Ctrl+Shift+Space to use keys');
