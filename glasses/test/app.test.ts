@@ -1,8 +1,9 @@
 import { readFileSync } from 'node:fs';
+import type { NotifyAnswer } from '../../shared/types/notify';
 import { describe, expect, it } from 'vitest';
 import { GlassesApp } from '../src/app';
 import { DemoSource } from '../src/demo';
-import type { Page } from '../src/display';
+import { BRIGHT, DIMMER, type Page } from '../src/display';
 import type { ListMarks } from '../src/homeList';
 import type { Gesture } from '../src/input';
 import { GlassesError, SCREEN_RECONNECTING, orderCards, type Card, type Computer, type Dictation, type PaneEntry, type PaneSource, type TerminalKey, type TerminalScreen, type UnjoinedComputer } from '../src/model';
@@ -292,7 +293,9 @@ class ScriptedSource implements PaneSource {
     this.onKey(key);
     this.keys.push(key);
   }
-  async answer() {}
+  /** Answers sent, as card key and answer. */
+  answers: Array<[string, NotifyAnswer]> = [];
+  async answer(card: Card, answer: NotifyAnswer) { this.answers.push([card.key, answer]); }
   dictation = 'no voice';
   async dictate(): Promise<Dictation> {
     if (this.dictation === 'no voice') throw new Error('no voice');
@@ -314,14 +317,17 @@ function card(id: string, createdAt: number, waiting = true): Card {
   return { key: `studio:${id}`, computerId: 'studio', machine: 'studio-mac', itemId: id, ui: waiting ? 'options' : 'info', waiting, title: `title ${id}`, choices: ['Yes'], suggestions: [], paneName: `pane-${id}`, createdAt };
 }
 
-function startScripted(lastSessionComputer: string | null = null, marks: ListMarks = 'logos') {
+function startScripted(options: { ambient?: boolean; cards?: Card[]; lastSessionComputer?: string | null; marks?: ListMarks } = {}) {
   const clock = new Clock();
   const source = new ScriptedSource();
+  source.cardList = options.cards ?? [];
   const pages: Page[] = [];
-  const stored = { computer: lastSessionComputer };
+  const stored = { computer: options.lastSessionComputer ?? null };
+  let exits = 0;
   const app = new GlassesApp({
-    source, show: (page) => pages.push(page), exit: () => {}, mic: async () => true, later: clock.later, now: () => clock.now, clock: () => '9:40', marks,
+    source, show: (page) => pages.push(page), exit: () => { exits += 1; }, mic: async () => true, later: clock.later, now: () => clock.now, clock: () => '9:40', marks: options.marks ?? 'logos',
     lastSessionComputer: { read: () => stored.computer, write: (computerId) => { stored.computer = computerId; } },
+    ambient: options.ambient ?? false,
   });
   const text = () => textOf(pages.at(-1));
   const press = async (gesture: Gesture) => {
@@ -329,12 +335,12 @@ function startScripted(lastSessionComputer: string | null = null, marks: ListMar
     await settle();
   };
   const page = () => pages.at(-1);
-  return { app, source, text, output: () => outputOf(pages.at(-1)), page, pages, press, clock, stored };
+  return { app, source, text, output: () => outputOf(pages.at(-1)), page, pages, press, clock, stored, exits: () => exits };
 }
 
 /** Opens `rows[index]` on a live computer from home. */
-async function openScriptedRow(rows: PaneEntry[], index: number, screenStatus: TerminalScreen['status'] = 'idle') {
-  const scripted = startScripted();
+async function openScriptedRow(rows: PaneEntry[], index: number, screenStatus: TerminalScreen['status'] = 'idle', options: { ambient?: boolean } = {}) {
+  const scripted = startScripted(options);
   scripted.source.rows = rows;
   scripted.source.screenStatus = screenStatus;
   scripted.source.changed();
@@ -917,7 +923,7 @@ describe('the open list', () => {
 
 describe('home in outline marks (the firmware list)', () => {
   function outlineHome() {
-    const scripted = startScripted(null, 'outline');
+    const scripted = startScripted({ marks: 'outline' });
     const studio: Computer = { id: 'studio', name: 'studio-mac', status: 'live', lastSeenAt: 1, os: 'macOS', entries: [] };
     const build: Computer = { id: 'build', name: 'build-box', status: 'offline', lastSeenAt: 1, os: 'Linux', entries: [{ ...paneRow('nightly-backup'), activityAt: 1 }] };
     scripted.source.computerList = [studio, build];
@@ -1048,12 +1054,12 @@ describe('a new Session from the glasses', () => {
   });
 
   it('starts on the computer last started on, else that of the last Pane opened, else the first', async () => {
-    const remembered = startScripted('build');
+    const remembered = startScripted({ lastSessionComputer: 'build' });
     remembered.source.computerList = twoComputers;
     remembered.source.changed();
     expect(remembered.text()[1]).toBe('> + New Session on build-box · hold to say it');
 
-    const opened = startScripted('a computer no longer paired');
+    const opened = startScripted({ lastSessionComputer: 'a computer no longer paired' });
     opened.source.computerList = twoComputers;
     opened.source.changed();
     expect(opened.text()[1]).toBe('> + New Session on studio-mac · hold to say it');
@@ -1064,7 +1070,7 @@ describe('a new Session from the glasses', () => {
   });
 
   it('says so and starts nothing when that computer is offline or its Pane is too old', async () => {
-    const offline = startScripted('build');
+    const offline = startScripted({ lastSessionComputer: 'build' });
     offline.source.computerList = [twoComputers[0], { ...twoComputers[1], status: 'offline' }];
     offline.source.dictation = 'Rotate the keys';
     offline.source.changed();
@@ -1153,5 +1159,251 @@ describe('a new question', () => {
     source.cardList = [card('q1', 10)];
     source.changed();
     expect(text().slice(2, 5)).toEqual(['   studi  pane-q1 · needs you', '   studi  a · Claude · stopped', '> studi  b · Claude · stopped']);
+  });
+});
+
+describe('ambient mode', () => {
+  const IDLE = 30_000;
+  const BANNER = 15_000;
+  const fromBuild = (id: string, createdAt: number, waiting = true): Card => ({ ...card(id, createdAt, waiting), key: `build:${id}`, computerId: 'build', machine: 'build-box' });
+  const twoAsking = () => [card('a', 1), fromBuild('b', 2)];
+  const raise = (source: ScriptedSource, ...cards: Card[]) => {
+    source.cardList = [...source.cardList, ...cards];
+    source.changed();
+  };
+  /** A second live computer, for cards from build-box. */
+  const build: Computer = { id: 'build', name: 'build-box', status: 'live', lastSeenAt: 1, os: 'Linux', entries: [] };
+  const begin = (options: { ambient?: boolean; cards?: Card[] }) => {
+    const started = startScripted(options);
+    started.source.computerList = [...started.source.computerList, build];
+    started.source.changed();
+    return started;
+  };
+  /** The selected home row. */
+  const selected = (lines: string[]) => lines.find((line) => line.startsWith('> '));
+  const brightness = (page: Page | undefined) => (page?.boxes ?? []).flatMap((box) => (box.kind === 'text' ? [box.brightness] : []));
+  /** Which logo each image box on the page draws. */
+  const logos = (page: Page | undefined) => (page?.boxes ?? []).flatMap((box) => (box.kind === 'image' ? [box.key] : []));
+
+  it('goes quiet after 30 s untouched, showing only the asking computers, newest first, and the count', async () => {
+    const { text, clock, page } = begin({ ambient: true, cards: twoAsking() });
+    await clock.advance(IDLE - 1);
+    expect(text()[0]).toBe('All computers · 2 need you');
+    await clock.advance(1);
+    expect(text()).toEqual(['build', 'studi', '· 2 need you']);
+    expect(brightness(page())).toEqual([DIMMER, DIMMER, DIMMER]);
+    expect(logos(page())).toEqual(['Linux', 'macOS']);
+  });
+
+  it('counts the 30 s from the last touch', async () => {
+    const { text, clock, press } = begin({ ambient: true, cards: twoAsking() });
+    await clock.advance(20_000);
+    await press({ type: 'down' });
+    await clock.advance(IDLE - 1);
+    expect(selected(text())).toBe('> build  pane-b · needs you');
+    await clock.advance(1);
+    expect(text().at(-1)).toBe('· 2 need you');
+  });
+
+  it('names questions and updates, is dark with nothing waiting, and says when no computer answers', async () => {
+    const both = begin({ ambient: true, cards: [card('a', 1), card('i', 2, false)] });
+    await both.clock.advance(IDLE);
+    expect(both.text()).toEqual(['studi', '· 1 need you · 1 update']);
+
+    const clear = begin({ ambient: true });
+    await clear.clock.advance(IDLE);
+    expect(clear.text()).toEqual(['']);
+
+    const offline = begin({ ambient: true });
+    offline.source.computerList = [{ id: 'studio', name: 'studio-mac', status: 'offline', lastSeenAt: 1, os: 'macOS', entries: [] }];
+    offline.source.changed();
+    await offline.clock.advance(IDLE);
+    expect(offline.text()).toEqual(["Can't reach your computers · Pane keeps trying"]);
+  });
+
+  it('shows at most three computers by name, then how many more', async () => {
+    const machine = (name: string, createdAt: number): Card => ({ ...card(name, createdAt), key: `${name}:q`, computerId: name, machine: name });
+    const { text, clock } = begin({ ambient: true, cards: [machine('alpha', 1), machine('bravo', 2), machine('charlie', 3), machine('delta', 4)] });
+    await clock.advance(IDLE);
+    expect(text()).toEqual(['delta', 'charl', 'bravo', '+1 · 4 need you']);
+  });
+
+  it('wakes to the page it left on any touch, and the touch does nothing else', async () => {
+    for (const type of ['press', 'double', 'up', 'down', 'hold'] as const) {
+      const { text, clock, press, exits } = begin({ ambient: true, cards: twoAsking() });
+      await press({ type: 'down' });
+      await clock.advance(IDLE);
+      await press({ type });
+      await press({ type: 'release' });
+      expect([type, selected(text())]).toEqual([type, '> build  pane-b · needs you']);
+      expect(exits()).toBe(0);
+    }
+  });
+
+  it('starts no Session when a hold wakes it on the New Session row', async () => {
+    const { text, clock, press } = begin({ ambient: true, cards: twoAsking() });
+    await clock.advance(IDLE);
+    await press({ type: 'hold' });
+    await press({ type: 'release' });
+    expect(selected(text())).toMatch(/^> \+ New Session on studio-mac/);
+  });
+
+  it('stops reading a terminal while quiet, and reads it at once on waking', async () => {
+    const { source, clock, press, output } = await openScriptedRow([paneRow('fix-login')], 0, 'idle', { ambient: true });
+    let reads = 0;
+    const screen = source.screen.bind(source);
+    source.screen = async () => {
+      reads += 1;
+      return screen('studio');
+    };
+    await clock.advance(IDLE);
+    const quietReads = reads;
+    await clock.advance(10_000);
+    expect(reads).toBe(quietReads);
+    source.screenLines = ['$ make', 'done'];
+    await press({ type: 'down' });
+    expect(reads).toBe(quietReads + 1);
+    expect(output()).toContain('done');
+  });
+
+  it('never goes quiet while you hold to talk', async () => {
+    const { text, clock, press, source } = await openScriptedRow([paneRow('fix-login')], 0, 'idle', { ambient: true });
+    source.dictation = 'run the tests';
+    await press({ type: 'hold' });
+    await clock.advance(40_000);
+    expect(text()[0]).toBe('fix-login · listening');
+    await press({ type: 'release' });
+    expect(source.submitted).toEqual(['run the tests']);
+  });
+
+  describe('a card that arrives while quiet', () => {
+    async function quiet(cards: Card[] = []) {
+      const started = begin({ ambient: true, cards });
+      await started.clock.advance(IDLE);
+      return started;
+    }
+
+    it('shows as a banner for 15 s, then the quiet line counts it', async () => {
+      const { source, text, clock, page } = await quiet([card('a', 1), card('c', 2)]);
+      raise(source, fromBuild('nightly', 10));
+      expect(text()).toEqual(['     build-box · pane-nightly needs you / title nightly', 'press = open   hold = say it']);
+      expect(page()?.boxes[0]).toMatchObject({ border: true, brightness: BRIGHT });
+      expect(logos(page())).toEqual(['Linux']);
+      await clock.advance(BANNER - 1);
+      expect(text()[1]).toBe('press = open   hold = say it');
+      await clock.advance(1);
+      expect(text()).toEqual(['build', 'studi', '· 3 need you']);
+    });
+
+    it('collapses several into one banner on the newest, up for 15 s after the last', async () => {
+      const { source, text, clock } = await quiet();
+      raise(source, fromBuild('one', 10));
+      await clock.advance(2_000);
+      raise(source, fromBuild('two', 11));
+      await clock.advance(2_000);
+      raise(source, card('three', 12));
+      expect(text()).toEqual(['     studio-mac · pane-three needs you · 3 new / title three', 'press = open newest   swipe = list']);
+      await clock.advance(BANNER - 1);
+      expect(text()[0]).toContain('3 new');
+      await clock.advance(1);
+      expect(text().at(-1)).toBe('· 3 need you');
+    });
+
+    it('press opens the newest card, and its choice reaches the computer', async () => {
+      const { source, text, press } = await quiet([card('a', 1)]);
+      raise(source, fromBuild('nightly', 10));
+      await press({ type: 'press' });
+      expect(text()[0]).toContain('title nightly');
+      await press({ type: 'select', index: 0 });
+      expect(source.answers).toEqual([['build:nightly', { choice: 'Yes' }]]);
+    });
+
+    it('hold answers the newest card by voice', async () => {
+      const { source, text, press } = await quiet();
+      source.dictation = 'restore it';
+      raise(source, fromBuild('nightly', 10));
+      await press({ type: 'hold' });
+      expect(text()[0]).toBe('Answering pane-nightly · listening');
+      await press({ type: 'release' });
+      await settle();
+      expect(source.answers).toEqual([['build:nightly', { text: 'restore it' }]]);
+    });
+
+    it('swipe or double press opens the cards on the newest', async () => {
+      for (const type of ['up', 'down', 'double'] as const) {
+        const { source, text, press, exits } = await quiet([card('a', 1)]);
+        raise(source, fromBuild('one', 10), card('two', 11));
+        await press({ type });
+        expect([type, selected(text())]).toEqual([type, '> studi  pane-two · needs you']);
+        expect(exits()).toBe(0);
+      }
+    });
+
+    it('shows an info card as an update; press opens its message, as its row in the list does', async () => {
+      const { source, text, press, clock } = await quiet();
+      raise(source, card('docs', 10, false));
+      expect(text()).toEqual(['     studio-mac · pane-docs / title docs', 'press = open']);
+      await clock.advance(BANNER);
+      expect(text()).toEqual(['studi', '· 1 update']);
+      raise(source, card('notes', 11, false));
+      await press({ type: 'press' });
+      expect(text()).toEqual(['pane-notes · studio-mac', 'title notes', 'double press = back']);
+    });
+
+    it('closes when its card is answered elsewhere', async () => {
+      const { source, text } = await quiet([card('a', 1)]);
+      raise(source, fromBuild('nightly', 10));
+      source.cardList = [card('a', 1)];
+      source.changed();
+      expect(text()).toEqual(['studi', '· 1 need you']);
+    });
+
+    it('stays quiet through count changes and banners', async () => {
+      const { source, text, clock, pages } = await quiet([card('a', 1)]);
+      for (let change = 0; change < 5; change += 1) {
+        raise(source, card(`n${change}`, 10 + change));
+        source.cardList = [card('a', 1)];
+        source.changed();
+      }
+      raise(source, card('last', 20));
+      await clock.advance(BANNER);
+      expect(text()).toEqual(['studi', '· 2 need you']);
+      expect(pages.some((shown) => shown.boxes.some((box) => box.name === 'header'))).toBe(true);
+      expect(pages.slice(-12).some((shown) => shown.boxes.some((box) => box.name === 'header'))).toBe(false);
+    });
+  });
+
+  it('shows no banner while you use the glasses', async () => {
+    const { source, text } = begin({ ambient: true });
+    raise(source, card('q', 10));
+    expect(selected(text())).toBe('> studi  pane-q · needs you');
+  });
+
+  it('turns off at once and on again without reopening', async () => {
+    const { app, text, clock } = begin({ ambient: true, cards: [card('a', 1)] });
+    await clock.advance(IDLE);
+    app.setAmbient(false);
+    expect(text()[0]).toBe('All computers · 1 needs you');
+    await clock.advance(120_000);
+    expect(text()[0]).toBe('All computers · 1 needs you');
+    app.setAmbient(true);
+    await clock.advance(IDLE);
+    expect(text()).toEqual(['studi', '· 1 need you']);
+  });
+
+  it('opens awake when the app comes back to the foreground', async () => {
+    const { text, clock, press } = begin({ ambient: true, cards: [card('a', 1)] });
+    await clock.advance(IDLE);
+    await press({ type: 'background' });
+    await press({ type: 'foreground' });
+    expect(text()[0]).toBe('All computers · 1 needs you');
+    await clock.advance(IDLE);
+    expect(text().at(-1)).toBe('· 1 need you');
+  });
+
+  it('is off unless turned on', async () => {
+    const { text, clock } = begin({ cards: [card('a', 1)] });
+    await clock.advance(120_000);
+    expect(text()[0]).toBe('All computers · 1 needs you');
   });
 });

@@ -10,7 +10,7 @@ import { Display, type Page } from '../src/display';
 import { homeListPage, homeRows } from '../src/homeList';
 import type { Card, Computer, PaneEntry } from '../src/model';
 import { noAnswerMessage } from '../src/host';
-import { LOCKED_OUT, ORIGIN_REFUSED, awayPage, connectingPage, infoCardPage, keysRefusedPage, newSessionPage, noComputerPage, pairingFailedPage, pickerPage, refusedPage, terminalFooter, terminalPage, unjoinedPage } from '../src/screens';
+import { LOCKED_OUT, ORIGIN_REFUSED, ambientPage, awayPage, bannerPage, connectingPage, infoCardPage, keysRefusedPage, newSessionPage, noComputerPage, pairingFailedPage, pickerPage, refusedPage, terminalFooter, terminalPage, unjoinedPage } from '../src/screens';
 
 const now = Date.now();
 const clock = (epochMs: number) => new Date(epochMs).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -58,7 +58,22 @@ const unjoinedRows = homeRows(homeComputers, homeCards, unjoined);
 /** The home list as it opens: the new-Session row on studio-mac first, selected. */
 const newRows = homeRows(homeComputers, homeCards, [], homeComputers[0]);
 const firstUnjoined = unjoinedRows.findIndex((row) => row.kind === 'computer' && row.reason);
+const nightly: Card = {
+  key: 'b:n', computerId: 'build', machine: 'build-box', itemId: 'n', ui: 'options', waiting: true, choices: ['Restore', 'Skip'], suggestions: [],
+  title: "Restore from Tuesday's snapshot, or skip tonight's backup?", paneName: 'nightly-backup', createdAt: now,
+};
+const darkMode: Card = {
+  key: 'a:d', computerId: 'studio', machine: 'studio-mac', itemId: 'd', ui: 'info', waiting: false, choices: [], suggestions: [],
+  title: 'PR #212 is ready for review: dark theme tokens and a toggle in Settings.', paneName: 'add-dark-mode', panelId: 'p', createdAt: now,
+};
 const pages: Array<[string, Page]> = [
+  ['ambient-two-asking', ambientPage({ machines: [{ name: 'studio-mac', os: 'macOS' }, { name: 'build-box', os: 'Linux' }], questions: 2, updates: 0 })],
+  ['ambient-both', ambientPage({ machines: [{ name: 'studio-mac', os: 'macOS' }, { name: 'build-box', os: 'Linux' }], questions: 2, updates: 1 })],
+  ['ambient-nothing-waiting', ambientPage({ machines: [], questions: 0, updates: 0 })],
+  ['ambient-unreachable', ambientPage('unreachable')],
+  ['banner-question', bannerPage(nightly, 1, 'Linux')],
+  ['banner-several', bannerPage(nightly, 3, 'Linux')],
+  ['banner-info', bannerPage(darkMode, 1, 'macOS')],
   ['terminal-keys-refused', keysRefusedPage(paneChat, "studio-mac's Pane can't take keys from the glasses yet.", 'Update Pane on studio-mac.')],
   ['terminal-held-at-your-message', terminalPage({
     entry: paneChat, scrolledUp: 0, more: 18, footer: terminalFooter(undefined),

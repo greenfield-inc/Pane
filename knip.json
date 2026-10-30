@@ -124,7 +124,7 @@
       "ignoreDependencies": ["expo-updates"]
     },
     "glasses": {
-      "entry": ["src/main.ts", "dev/gallery.ts", "test/**/*.test.ts", "scripts/*.mjs", "vite.config.ts"],
+      "entry": ["src/main.ts", "dev/gallery.ts", "dev/ambient.ts", "test/**/*.test.ts", "scripts/*.mjs", "vite.config.ts"],
       "project": ["src/**/*.ts", "dev/*.ts", "test/**/*.ts", "scripts/*.mjs", "vite.config.ts"],
       "ignoreDependencies": ["@evenrealities/evenhub-cli", "@evenrealities/evenhub-simulator"]
     },

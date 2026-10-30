@@ -1,10 +1,11 @@
 // One function per glasses screen in the design reference (mockups v2: C3 card, T3 terminal; the home
 // list is homeList.ts).
 // Each returns a page of boxes at G2 scale; nothing here touches the bridge.
-import { BRIGHT, DIM, DIMMER, LIST_PAD, type Box, type Brightness, type ListBox, type Page, type TextBox } from './display';
-import { JOIN_REASONS, type Card, type Computer, type HostRefusal, type PaneEntry } from './model';
+import { BRIGHT, DIM, DIMMER, LIST_PAD, type Box, type Brightness, type ImageBox, type ListBox, type Page, type TextBox } from './display';
+import { drawLogoStrip } from './logos';
+import { JOIN_REASONS, type Card, type Computer, type HostRefusal, type MachineOs, type PaneEntry } from './model';
 import { isRule } from './terminal';
-import { LINE_H, SCREEN_H, SCREEN_W, fitLine, wrap, wrapClamped } from './text';
+import { LINE_H, SCREEN_H, SCREEN_W, fitLine, textWidth, wrap, wrapClamped } from './text';
 
 const BAR_H = 32;
 const FOOTER_Y = SCREEN_H - BAR_H;
@@ -405,6 +406,83 @@ export function problemPage(title: string, message: string, next?: string): Page
     boxes: [
       header(title),
       body(next ? `${message}\n${next}\n\nDouble press to go back.` : `${message}\n\nDouble press to go back.`, { y: 36, h: 252, capture: true }),
+    ],
+  };
+}
+
+/** Ambient mode shows at most this many computers by name; the rest are "+N". */
+const AMBIENT_MACHINES = 3;
+
+/** Width of a computer's OS logo before its name, on the ambient line and the banner. */
+const LOGO_W = 24;
+
+/** A computer's OS logo (the list's marks, D-94), one bar high. */
+function logo(name: string, x: number, y: number, os: MachineOs | null): ImageBox {
+  return {
+    kind: 'image', name, x, y, w: LOGO_W, h: BAR_H, key: os ?? 'computer',
+    draw: () => drawLogoStrip([{ os, dim: false }], { width: LOGO_W, height: BAR_H, rowHeight: BAR_H }),
+  };
+}
+
+/** A computer on the ambient line: its OS logo and the first five letters of its name, as in the list. */
+export interface AmbientMachine {
+  name: string;
+  os: MachineOs | null;
+}
+
+export interface AmbientLine {
+  /** The computers with a card, newest card first. */
+  machines: readonly AmbientMachine[];
+  questions: number;
+  updates: number;
+}
+
+/**
+ * A1 to A3: one dim line at the top left, or a dark screen. Each computer is its own box, so the
+ * count can change in place.
+ */
+export function ambientPage(line: AmbientLine | 'unreachable'): Page {
+  const text = (name: string, x: number, lines: string[], capture = false): TextBox => ({
+    kind: 'text', name, x, y: 0, w: SCREEN_W - x, h: BAR_H, pad: BAR_PAD, lines, brightness: DIMMER, capture,
+  });
+  if (line === 'unreachable') return { boxes: [text('ambient', 0, ["Can't reach your computers · Pane keeps trying"], true)] };
+  const counts = [line.questions ? `${line.questions} need you` : '', line.updates ? plural(line.updates, 'update') : ''].filter(Boolean);
+  if (!counts.length) return { boxes: [text('ambient', 0, [''], true)] };
+  const shown = line.machines.slice(0, AMBIENT_MACHINES);
+  const more = line.machines.length - shown.length;
+  const boxes: Box[] = [];
+  let x = 0;
+  for (const [index, machine] of shown.entries()) {
+    const name = machine.name.slice(0, 5);
+    const w = Math.ceil(textWidth(name)) + 2 * BAR_PAD + 12;
+    boxes.push(logo(`logo${index}`, x, 0, machine.os), { ...text(`machine${index}`, x + LOGO_W, [name]), w });
+    x += LOGO_W + w;
+  }
+  boxes.push(text('ambient', x, [fitLine(`${more > 0 ? `+${more} ` : ''}· ${counts.join(' · ')}`, innerWidth(BAR_PAD) - x)], true));
+  return { boxes };
+}
+
+const BANNER_PAD = 6;
+const BANNER_BODY_LINES = 2;
+/** Spaces at the start of the banner's first line, wide enough for the logo. */
+const LOGO_GAP = ' '.repeat(5);
+
+/**
+ * P1: a card that arrived while ambient, framed at the top for 15 s: its computer and Pane, up to two
+ * lines of it, and what press and hold do. `count` is how many arrived; the newest shows.
+ */
+export function bannerPage(card: Card, count: number, os: MachineOs | null): Page {
+  const several = count > 1 ? ` · ${count} new` : '';
+  const head = `${LOGO_GAP}${card.machine} · ${card.paneName}${card.waiting ? ' needs you' : ''}${several}`;
+  const { lines } = wrapClamped(card.title, innerWidth(BANNER_PAD), BANNER_BODY_LINES);
+  const h = (1 + lines.length) * LINE_H + 2 * BANNER_PAD + 4;
+  const hint = count > 1 ? 'press = open newest   swipe = list' : card.waiting ? 'press = open   hold = say it' : 'press = open';
+  return {
+    boxes: [
+      { kind: 'text', name: 'banner', x: 0, y: 0, w: SCREEN_W, h, pad: BANNER_PAD, lines: [fitLine(head, innerWidth(BANNER_PAD)), ...lines], border: true, brightness: BRIGHT, capture: true },
+      // The logo sits in the frame's first line, in the room LOGO_GAP leaves.
+      logo('logo', 2, 4, os),
+      bar('hint', h + 2, hint, DIMMER),
     ],
   };
 }

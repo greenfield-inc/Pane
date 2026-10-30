@@ -25,6 +25,14 @@
       li .why:empty { display: none; }
       pre { background: #050505; color: #46f07a; border-radius: 10px; padding: 12px; font: 12px/1.5 ui-monospace, Menlo, monospace; white-space: pre-wrap; word-break: break-word; min-height: 8em; }
       .help, #origin { color: var(--muted); font-size: 13px; }
+      .setting { display: flex; gap: 12px; align-items: flex-start; padding: 12px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); margin: 16px 0; }
+      .setting .text { flex: 1; min-width: 0; }
+      .setting .label { font-weight: 600; }
+      .setting .desc { color: var(--muted); font-size: 13px; margin: 2px 0 0; }
+      .switch { flex: none; width: 46px; height: 28px; padding: 0; border-radius: 14px; background: var(--line); position: relative; margin-top: 2px; }
+      .switch::after { content: ''; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: #ffffff; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3); transition: left 0.15s; }
+      .switch[aria-checked='true'] { background: var(--live); }
+      .switch[aria-checked='true']::after { left: 21px; }
     </style>
   </head>
   <body>
@@ -38,7 +46,14 @@
       <p class="help">Paste the code from the Pane app on this phone: Settings › Glasses › Pair glasses. It works for 10 minutes.</p>
       <p><button id="demo" type="button" class="alt">Try the demo</button></p>
       <ul id="computers"></ul>
-      <p class="help"><b>Swipe</b> moves between cards or scrolls. <b>Press</b> opens or picks; in a terminal it opens keys mode, where swipes send ↑ ↓ and press sends Enter. <b>Hold</b> to talk, release to send. <b>Double press</b> goes back; on home it exits.</p>
+      <div class="setting">
+        <div class="text">
+          <div class="label" id="ambient-label">Ambient mode</div>
+          <p class="desc">After 30 s without a touch, the glasses show only which computers have cards waiting, and how many. A new card shows for 15 s. Touch the ring or temple to bring everything back.</p>
+        </div>
+        <button id="ambient" type="button" class="switch" role="switch" aria-checked="true" aria-labelledby="ambient-label"></button>
+      </div>
+      <p class="help">Ambient mode: after 30 s without a touch the glasses go quiet; touch the ring or temple to come back. <b>Swipe</b> moves between cards or scrolls. <b>Press</b> opens or picks; in a terminal it opens keys mode, where swipes send ↑ ↓ and press sends Enter. <b>Hold</b> to talk, release to send. <b>Double press</b> goes back; on home it exits.</p>
       <pre id="mirror" aria-label="What the glasses show"></pre>
       <p><button id="forget" type="button" class="alt">Forget these computers</button></p>
       <p id="origin"></p>
