@@ -1,4 +1,5 @@
-import { mkdir, stat } from 'fs/promises';
+import { appendFile, mkdir, readFile, realpath, stat } from 'fs/promises';
+import path from 'path';
 import { withLock } from '../utils/mutex';
 import type { ConfigManager } from './configManager';
 import type { AnalyticsManager } from './analyticsManager';
@@ -280,6 +281,38 @@ export class WorktreeManager {
     } catch (error) {
       console.error('Failed to create worktrees directory:', error);
     }
+    await this.excludeWorktreeFolder(projectPath, worktreeFolder, pathResolver, commandRunner);
+  }
+
+  /**
+   * Hides the worktree folder from the main checkout's `git status` with a
+   * line in the repository's `info/exclude`, never a tracked `.gitignore`.
+   * Only an existing folder inside the checkout needs it. Best effort: a
+   * failure only leaves the folder visible as untracked.
+   */
+  async excludeWorktreeFolder(projectPath: string, worktreeFolder: string | undefined, pathResolver: PathResolver, commandRunner: CommandRunner): Promise<void> {
+    const { baseDir } = this.getProjectPaths(projectPath, worktreeFolder, pathResolver);
+    try {
+      if (!(await stat(pathResolver.toFileSystem(baseDir)).catch(() => undefined))?.isDirectory()) return;
+      const { stdout } = await commandRunner.execFile('git', ['rev-parse', '--show-toplevel', '--git-path', 'info/exclude'], projectPath, { silent: true });
+      const [top, excludePath] = stdout.split(/\r?\n/u);
+      if (!top || !excludePath) return;
+      const [topDir, folder] = await Promise.all([top, baseDir].map(dir => realpath(pathResolver.toFileSystem(dir)).catch(() => pathResolver.toFileSystem(dir))));
+      // Only Windows paths use a backslash as a separator; elsewhere it is a filename character.
+      const relative = pathResolver.environment === 'windows'
+        ? pathResolver.relative(topDir, folder).replace(/\\/gu, '/')
+        : pathResolver.relative(topDir, folder);
+      if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) return;
+      // Escape ignore-pattern characters so the folder name matches literally.
+      const line = `/${relative.replace(/[\\*?[\]]/gu, '\\$&').replace(/ $/u, '\\ ')}/`;
+      const exclude = pathResolver.toFileSystem(path.posix.isAbsolute(excludePath) || path.isAbsolute(excludePath) ? excludePath : pathResolver.join(projectPath, excludePath));
+      const current = await readFile(exclude, 'utf8').catch(() => '');
+      if (current.split(/\r?\n/u).includes(line)) return;
+      await mkdir(path.dirname(exclude), { recursive: true });
+      await appendFile(exclude, `${current && !current.endsWith('\n') ? '\n' : ''}${line}\n`);
+    } catch (error) {
+      console.warn(`[WorktreeManager] Could not exclude ${baseDir} from git status:`, error);
+    }
   }
 
   getWorktreePath(projectPath: string, name: string, worktreeFolder: string | undefined, pathResolver: PathResolver): string {
@@ -400,6 +433,7 @@ export class WorktreeManager {
       }
       
       console.log(`[WorktreeManager] Worktree created successfully at: ${worktreePath}`);
+      await this.excludeWorktreeFolder(projectPath, worktreeFolder, pathResolver, commandRunner);
 
       // Track worktree creation
       if (this.analyticsManager) {
@@ -471,6 +505,7 @@ export class WorktreeManager {
         if (claimed) {
           // Detect base commit from the claimed worktree
           const { baseCommit } = await detectGitBase(claimed.worktreePath, commandRunner);
+          await this.excludeWorktreeFolder(projectPath, worktreeFolder, pathResolver, commandRunner);
           return { worktreePath: claimed.worktreePath, baseCommit, baseBranch: effectiveBase, base: describeWorktreeBase(refresh, baseCommit) };
         }
       } catch (error) {
@@ -498,6 +533,7 @@ export class WorktreeManager {
   async seedReserve(projectPath: string, worktreeFolder: string | undefined, pathResolver: PathResolver, commandRunner: CommandRunner): Promise<void> {
     const base = await resolveDefaultWorktreeBase(projectPath, commandRunner);
     await worktreePoolManager.createReserve(projectPath, base, worktreeFolder, pathResolver, commandRunner);
+    await this.excludeWorktreeFolder(projectPath, worktreeFolder, pathResolver, commandRunner);
   }
 
   async removeWorktree(projectPath: string, name: string, worktreeFolder: string | undefined, sessionCreatedAt: Date | undefined, pathResolver: PathResolver, commandRunner: CommandRunner, auditContext?: WorktreeAuditContext): Promise<WorktreeTrashDeletion> {
