@@ -4,7 +4,7 @@ import { AudioInputSource, waitForEvenAppBridge, type EvenAppBridge } from '@eve
 import { GlassesApp } from './app';
 import { DemoSource } from './demo';
 import { Display, type Page } from './display';
-import { CLIENT_LABEL, HostHub, STORAGE_KEY, mergePaired, pairComputers, readPaired, type PairingFailure } from './host';
+import { CLIENT_LABEL, HostHub, STORAGE_KEY, pairComputers, pairedSaver, readPaired, type PairingFailure } from './host';
 import { InputRouter, type Gesture } from './input';
 import type { PaneSource } from './model';
 import { firstRunPage, pairingFailedPage } from './screens';
@@ -119,14 +119,15 @@ async function main(): Promise<void> {
     start(new DemoSource(every));
   };
 
+  // Shared by a pasted code and computers that join on their own.
+  const savePaired = pairedSaver(bridge);
+
   ui.form.addEventListener('submit', (event) => {
     event.preventDefault();
     ui.status.textContent = 'Pairing…';
     void pairComputers(ui.code.value, { fetch: (url, init) => fetch(url, init), runtimeId: id, clientLabel: CLIENT_LABEL, origin: location.origin }).then(async (outcome) => {
       if (outcome.paired.length) {
-        // Read again: computers may have joined on their own since launch.
-        const stored = readPaired(await bridge.getLocalStorage(STORAGE_KEY).catch(() => ''));
-        await bridge.setLocalStorage(STORAGE_KEY, JSON.stringify(mergePaired(stored, outcome.paired)));
+        await savePaired(outcome.paired);
       }
       // Pasting the same code again after a partial pairing spends no secret twice: a computer
       // already paired here just reports its secret as used, which is not a failure.
@@ -160,9 +161,7 @@ async function main(): Promise<void> {
       now: Date.now,
       openSocket: (url, protocols) => new WebSocket(url, protocols),
       origin: location.origin,
-      savePaired: async (all) => {
-        await bridge.setLocalStorage(STORAGE_KEY, JSON.stringify(all));
-      },
+      savePaired,
     });
     start(hub);
     hub.start();

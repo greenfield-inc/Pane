@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { encodeGlassesPairingCode } from '../../shared/types/glasses';
 import type { NotifyItem, NotifySharedState } from '../../shared/types/notify';
 import { boundary, decodeBoundary, type JsonValue } from '../../shared/validation/boundaryDecoder';
-import { HostHub, pairComputers, type HostDeps, type PairedComputer } from '../src/host';
+import { HostHub, STORAGE_KEY, pairComputers, pairedSaver, readPaired, type HostDeps, type PairedComputer } from '../src/host';
 import type { Cancel } from '../src/timers';
 
 interface Seen {
@@ -118,9 +118,20 @@ function manualTimers() {
   };
 }
 
+/** The phone's local storage, answering a tick later as the bridge does. */
+function memoryStorage() {
+  const values = new Map<string, string>();
+  return {
+    values,
+    getLocalStorage: async (key: string) => { await Promise.resolve(); return values.get(key) ?? ''; },
+    setLocalStorage: async (key: string, value: string) => { await Promise.resolve(); values.set(key, value); return true; },
+  };
+}
+
 /** A hub paired with `hosts`; it can reach those and `others`, which it isn't paired with. */
-function hub(hosts: FakeHost[], timers = manualTimers(), saved: PairedComputer[][] = [], others: FakeHost[] = []) {
+function hub(hosts: FakeHost[], timers = manualTimers(), storage = memoryStorage(), others: FakeHost[] = []) {
   const paired: PairedComputer[] = hosts.map((fake, index) => ({ name: `computer-${index}`, url: fake.url, token: `pgt_token${index}`, deviceLabel: 'Even G2 · iPhone' }));
+  storage.values.set(STORAGE_KEY, JSON.stringify(paired));
   const deps: HostDeps = {
     fetch: async (url, init) => {
       const target = [...hosts, ...others].find((fake) => String(url).startsWith(fake.url));
@@ -133,7 +144,7 @@ function hub(hosts: FakeHost[], timers = manualTimers(), saved: PairedComputer[]
     now: timers.now,
     openSocket: () => { throw new Error('no sockets in tests'); },
     origin: 'https://even.example',
-    savePaired: async (all) => { saved.push(all); },
+    savePaired: pairedSaver(storage),
   };
   const result = new HostHub(paired, deps);
   result.start();
@@ -213,10 +224,10 @@ describe('joining your other computers on their own', () => {
     office.handlers.set('runpane:glasses:pair', () => ({ token: 'pgt_office', device: { id: 'glasses-9', label: 'Even G2 · iPhone', createdAt: '2026-10-30T00:00:00Z' } }));
     const code = encodeGlassesPairingCode({ v: 1, expiresAt: '2026-10-30T00:10:00Z', computers: [{ name: 'office-pc', url: office.url, secret: 'pgs_office' }] });
     studio.handlers.set('runpane:glasses:vouch', () => ({ code, expiresAt: '2026-10-30T00:10:00Z', skipped: [{ name: 'nas', reason: 'needs its password' }] }));
-    const saved: PairedComputer[][] = [];
-    const { hub: live } = hub([studio], manualTimers(), saved, [office]);
+    const storage = memoryStorage();
+    const { hub: live } = hub([studio], manualTimers(), storage, [office]);
     await until(() => live.computers().length === 2 && live.computers()[1]?.status === 'live');
-    expect(saved.at(-1)).toEqual([
+    expect(readPaired(storage.values.get(STORAGE_KEY) ?? '')).toEqual([
       { name: 'computer-0', url: studio.url, token: 'pgt_token0', deviceLabel: 'Even G2 · iPhone' },
       { name: 'office-pc', url: office.url, token: 'pgt_office', deviceLabel: 'Even G2 · iPhone' },
     ]);
@@ -226,6 +237,19 @@ describe('joining your other computers on their own', () => {
     expect(office.seen.some((seen) => seen.url.endsWith('/events') && seen.headers.Authorization === 'Bearer pgt_office')).toBe(true);
     expect(live.unjoined()).toEqual([{ name: 'nas', reason: 'needs its password' }]);
     live.stop();
+  });
+});
+
+describe('pairedSaver', () => {
+  it('keeps both computers when a pasted code and an automatic join save at once', async () => {
+    const storage = memoryStorage();
+    const studio: PairedComputer = { name: 'studio-mac', url: 'https://studio.tail1.ts.net:8443', token: 'pgt_studio', deviceLabel: 'Even G2 · iPhone' };
+    const office: PairedComputer = { name: 'office-pc', url: 'https://office.tail1.ts.net:8443', token: 'pgt_office', deviceLabel: 'Even G2 · iPhone' };
+    const nas: PairedComputer = { name: 'nas', url: 'https://nas.tail1.ts.net:8443', token: 'pgt_nas', deviceLabel: 'Even G2 · iPhone' };
+    storage.values.set(STORAGE_KEY, JSON.stringify([studio]));
+    const save = pairedSaver(storage);
+    await Promise.all([save([office]), save([nas])]);
+    expect(readPaired(storage.values.get(STORAGE_KEY) ?? '')).toEqual([studio, office, nas]);
   });
 });
 

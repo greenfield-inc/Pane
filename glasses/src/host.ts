@@ -182,9 +182,30 @@ export async function pairComputers(code: string, deps: PairingDeps): Promise<Pa
 }
 
 /** Adds newly paired computers, replacing an earlier pairing to the same URL. */
-export function mergePaired(existing: readonly PairedComputer[], added: readonly PairedComputer[]): PairedComputer[] {
+function mergePaired(existing: readonly PairedComputer[], added: readonly PairedComputer[]): PairedComputer[] {
   const urls = new Set(added.map((computer) => computer.url));
   return [...existing.filter((computer) => !urls.has(computer.url)), ...added];
+}
+
+export interface PairedStorage {
+  getLocalStorage(key: string): Promise<string>;
+  setLocalStorage(key: string, value: string): Promise<boolean>;
+}
+
+/**
+ * Adds newly paired computers to the stored list. Saves run one at a time, each merged into the
+ * list as stored then, so a pasted code and an automatic join never drop each other's computers.
+ */
+export function pairedSaver(storage: PairedStorage): (added: readonly PairedComputer[]) => Promise<void> {
+  let last: Promise<void> = Promise.resolve();
+  return (added) => {
+    const next = last.then(async () => {
+      const stored = readPaired(await storage.getLocalStorage(STORAGE_KEY).catch(() => ''));
+      await storage.setLocalStorage(STORAGE_KEY, JSON.stringify(mergePaired(stored, added)));
+    });
+    last = next.catch(() => {});
+    return next;
+  };
 }
 
 function toRemoteFetch(fetchImpl: typeof fetch): RemoteFetch {
@@ -346,8 +367,8 @@ export interface HostDeps {
   openSocket(url: string, protocols: string[]): VoiceSocket;
   /** This app's `location.origin`, named in the hint for a computer that never answered. */
   origin: string;
-  /** Stores every paired computer after more join on their own. */
-  savePaired(all: PairedComputer[]): Promise<void>;
+  /** Adds computers that joined on their own to the stored ones (see `pairedSaver`). */
+  savePaired(added: readonly PairedComputer[]): Promise<void>;
 }
 
 /** One paired computer: its connection, Notify state, Panes and agent status. */
@@ -790,8 +811,7 @@ export class HostHub implements PaneSource {
     const { fetch, runtimeId, origin } = this.deps;
     const outcome = await pairComputers(code, { fetch, runtimeId, clientLabel: CLIENT_LABEL, origin });
     if (outcome.paired.length) {
-      const all = mergePaired(this.connections.map((connection) => connection.paired), outcome.paired);
-      await this.deps.savePaired(all);
+      await this.deps.savePaired(outcome.paired);
       // A computer paired again replaces its old connection, as mergePaired replaces its record.
       const urls = new Set(outcome.paired.map((computer) => computer.url));
       for (const connection of this.connections) if (urls.has(connection.id)) connection.stop();
