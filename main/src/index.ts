@@ -124,6 +124,8 @@ import { panelManager } from './services/panelManager';
 import { worktreePoolManager } from './services/worktreePoolManager';
 import { usageManager } from './services/usage/usageManager';
 import { SharedCredentialSync } from './services/sharedCredentialSync';
+import { MachineConnections } from './services/machineConnections';
+import { registerMachineConnectionHandlers } from './ipc/machineConnections';
 import { LeaderboardService } from './services/leaderboardService';
 import { registerLeaderboardHandlers } from './ipc/leaderboard';
 import { PtyHostSupervisor } from './ptyHost/ptyHostSupervisor';
@@ -250,6 +252,7 @@ function setAppTitle() {
 // Service instances (configManager exported for shell preference access)
 export let configManager: ConfigManager;
 let sharedCredentialSync: SharedCredentialSync | null = null;
+let machineConnections: MachineConnections | null = null;
 let logger: Logger;
 export let sessionManager: SessionManager;
 let worktreeManager: WorktreeManager;
@@ -1115,6 +1118,7 @@ async function createWindow() {
 async function initializeServices() {
   const electronPaneEventSink = {
     send(channel: string, ...args: PaneEventArgument[]) {
+      machineConnections?.forwardLocal(channel, args);
       if (!remotePaneClientController.shouldForwardLocalRendererEvent(channel)) {
         return;
       }
@@ -1167,6 +1171,14 @@ async function initializeServices() {
 
   leaderboardService = new LeaderboardService(configManager);
   registerLeaderboardHandlers(ipcMain, leaderboardService);
+
+  // One connection per saved machine, shared by key sharing and All machines; started with key sharing.
+  const { commandRegistry } = paneDaemonHost;
+  machineConnections = new MachineConnections({
+    configManager,
+    invokeLocal: (channel, args) => commandRegistry.invoke(channel, args),
+  });
+  registerMachineConnectionHandlers(ipcMain, machineConnections);
 
   // Read before the first identity lookup overwrites it, so the renderer can
   // tell when the desktop id changed since the last launch.
@@ -1498,8 +1510,11 @@ if (launchRemoteSetup) {
   }, 5000); // Delay to not slow down app startup
 
   // Share integration keys with the hosts this desktop has paired with.
-  sharedCredentialSync = new SharedCredentialSync(configManager);
-  sharedCredentialSync.start();
+  if (machineConnections) {
+    machineConnections.start();
+    sharedCredentialSync = new SharedCredentialSync(configManager, machineConnections);
+    sharedCredentialSync.start();
+  }
 
   // Index agent CLI transcripts for the usage page. Read-only, and deferred so
   // a first pass over a large ~/.claude never delays window creation.
@@ -1543,6 +1558,7 @@ if (launchRemoteSetup) {
 
   usageManager.stop();
   void sharedCredentialSync?.stop();
+  void machineConnections?.stop();
 
   // Guard against multiple shutdown attempts
   if (shutdownInProgress) {

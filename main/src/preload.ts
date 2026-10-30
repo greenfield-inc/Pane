@@ -40,6 +40,7 @@ import type { PanelActivationRequest, SessionPanelLayout, ToolPanel } from '../.
 import type { DiffScope, FileDiffRequest } from '../../shared/types/gitDiff';
 import type { PanelAgentStatusEvent } from '../../shared/types/agentStatus';
 import type { NotifyCommand, NotifySnapshot, NotifyWindowSize } from '../../shared/types/notify';
+import type { MachineCommand, MachineConnectionsEvent, MachineReadChannel, MachineResult, MachineState } from '../../shared/types/machineConnections';
 import type {
   OrchestrationAssociationInput,
   OrchestrationSessionCreateInput,
@@ -354,6 +355,8 @@ function invokeIpc(channel: string, ...args: unknown[]) {
 
   return ipcRenderer.invoke(channel, ...args);
 }
+
+let machineEventListeners = 0;
 
 // Main has no network event; a reconnecting remote host retries when the renderer sees the network return.
 window.addEventListener('online', () => ipcRenderer.send('remote-daemon:network-online'));
@@ -1288,6 +1291,25 @@ contextBridge.exposeInMainWorld('electronAPI', {
     resizeWindow: (size: NotifyWindowSize): void => ipcRenderer.send('notify:window-size', size),
     /** Floating strip only: take key focus so a text or note field can be typed in. */
     focusWindow: (): Promise<void> => invokeIpc('notify:window-focus'),
+  },
+
+  // Every machine the desktop knows: this computer and each saved machine, addressed by id
+  machines: {
+    list: (): Promise<MachineState[]> => ipcRenderer.invoke('machines:list'),
+    read: (machineId: string, channel: MachineReadChannel, args: unknown[] = []): Promise<MachineResult> =>
+      ipcRenderer.invoke('machines:read', machineId, channel, args),
+    run: (machineId: string, command: MachineCommand): Promise<MachineResult> => ipcRenderer.invoke('machines:run', machineId, command),
+    retry: (machineId: string): Promise<void> => ipcRenderer.invoke('machines:retry', machineId),
+    onEvent: (callback: (event: MachineConnectionsEvent) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, event: MachineConnectionsEvent) => callback(event);
+      ipcRenderer.on('machines:event', listener);
+      // Main sends these only while a listener is subscribed.
+      if (machineEventListeners++ === 0) ipcRenderer.send('machines:subscribe', true);
+      return () => {
+        ipcRenderer.removeListener('machines:event', listener);
+        if (--machineEventListeners === 0) ipcRenderer.send('machines:subscribe', false);
+      };
+    },
   },
 
   // Window state queries (invoke, not event subscriptions)
