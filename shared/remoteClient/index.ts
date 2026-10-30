@@ -11,6 +11,7 @@ export {
   type RemoteRequestContext,
   type RemoteSchedule,
   type RemoteTimer,
+  type RemoteWakeTiming,
 } from './remoteDaemonClient';
 export {
   CONNECTION_GRACE_MS,

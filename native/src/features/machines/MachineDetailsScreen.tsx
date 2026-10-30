@@ -1,6 +1,7 @@
 import { router, Stack } from 'expo-router';
 import { Alert, StyleSheet, View } from 'react-native';
 
+import type { RemoteWakeTiming } from '@shared/remoteClient';
 import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
 import { MACHINE_COLOR_NAMES } from '@shared/utils/machineColor';
 
@@ -76,6 +77,9 @@ function Details({ machine }: { machine: Machine }) {
         <ListSection title="Connection" footer={machine.current ? connection.lastError ?? undefined : undefined}>
           <ListRow testID="machine-address" title="Address" subtitle={address} />
           <ListRow testID="machine-status" title="Status" subtitle={machine.status} />
+          {machine.current && connection.lastWake ? (
+            <ListRow testID="machine-last-wake" title="Last return to Pane" subtitle={describeWake(connection.lastWake)} />
+          ) : null}
         </ListSection>
 
         <ListSection title="On this phone" footer="Every saved machine can alert this phone. The color marks this machine everywhere in Pane.">
@@ -117,6 +121,17 @@ function Details({ machine }: { machine: Machine }) {
 function alertText(result: PushSetupResult | undefined): string {
   if (!result) return 'Checking…';
   return result.state === 'registered' ? 'On' : 'Not set up';
+}
+
+/** Slow first answer with many tries: the network. Quick first answer, slow connect: the machine. */
+function describeWake(wake: RemoteWakeTiming): string {
+  const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
+  return [
+    `Reconnected in ${seconds(wake.connectedMs)}`,
+    wake.firstAnswerMs === null ? null : `first answer at ${seconds(wake.firstAnswerMs)}`,
+    `${wake.attempts} ${wake.attempts === 1 ? 'try' : 'tries'}`,
+    wake.lastError,
+  ].filter(Boolean).join(' · ');
 }
 
 const styles = StyleSheet.create({

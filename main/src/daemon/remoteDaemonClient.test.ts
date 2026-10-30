@@ -35,6 +35,7 @@ function createFakeHost() {
   let sendReady = true;
   let hangEvents = false;
   let hostDown = false;
+  let tunnelDown = false;
   let ready = '{"replay":"none"}';
   let invokeHandler: (body: { channel: string; args: unknown[]; requestId?: string }) => Response | Promise<Response> = () =>
     Response.json({ ok: true, result: null });
@@ -43,6 +44,10 @@ function createFakeHost() {
     requests.push({ url, init });
     const path = new URL(url).pathname;
     if (hostDown) throw new TypeError('Network request failed');
+    // Like a VPN tunnel still coming back after sleep: the request goes nowhere, even once the tunnel returns.
+    if (tunnelDown) {
+      return new Promise<Response>((_, reject) => init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true }));
+    }
     if (path === '/health') return Response.json({ ok: true });
     if (path === '/invoke') {
       // Like fetch: an aborted request rejects even when the host never answers.
@@ -83,6 +88,7 @@ function createFakeHost() {
     rejectEvents(status: number) { eventsStatus = status; },
     hangEvents(hang: boolean) { hangEvents = hang; },
     goDown(down: boolean) { hostDown = down; },
+    dropTunnel(down: boolean) { tunnelDown = down; },
     onInvoke(handler: typeof invokeHandler) { invokeHandler = handler; },
   };
 }
@@ -393,6 +399,47 @@ describe('RemoteDaemonClient when the phone leaves and returns', () => {
     await flush();
 
     expect(client.getState()).toMatchObject({ status: 'connected', lastError: null });
+    client.disconnect();
+  });
+
+  it('reconnects within a second of the tunnel returning after a wake, though the first try never answers', async () => {
+    const host = createFakeHost();
+    const client = createClient(host, 20_000);
+    await client.connect();
+    await flush();
+
+    client.suspend();
+    host.dropTunnel(true);
+    await vi.advanceTimersByTimeAsync(60_000);
+    client.resume();
+    await vi.advanceTimersByTimeAsync(2_000);
+    host.dropTunnel(false);
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    const state = client.getState();
+    expect(state).toMatchObject({ status: 'connected', lastError: null });
+    // The record says the network, not the host, held it up.
+    expect(state.lastWake).toMatchObject({ lastError: 'No answer within 2 s' });
+    expect(state.lastWake?.firstAnswerMs).toBeGreaterThanOrEqual(2_000);
+    expect(state.lastWake?.connectedMs).toBeLessThan(3_000);
+    expect(state.lastWake?.attempts).toBeGreaterThan(5);
+    client.disconnect();
+  });
+
+  it('keeps probing on the backoff after the first seconds, so a longer outage still ends well before the stale-stream timer', async () => {
+    const host = createFakeHost();
+    const client = createClient(host, 20_000);
+    await client.connect();
+    await flush();
+
+    client.suspend();
+    host.dropTunnel(true);
+    client.resume();
+    await vi.advanceTimersByTimeAsync(9_000);
+    host.dropTunnel(false);
+    await vi.advanceTimersByTimeAsync(3_000);
+
+    expect(client.getState().status).toBe('connected');
     client.disconnect();
   });
 
