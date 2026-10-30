@@ -317,9 +317,11 @@ test('workspace write needs yes from the server, then writes the content it was 
         assert.match(refused.content[0].text, /refused the call and nothing ran/);
         assert.deepEqual(requests, []);
 
-        const empty = await client.callTool({ name: 'workspace_write', arguments: { path: target, yes: true } });
-        assert.equal(empty.isError, true);
-        assert.match(empty.content[0].text, /content is required/);
+        for (const content of [undefined, null, false, 0]) {
+          const missing = await client.callTool({ name: 'workspace_write', arguments: { path: target, content, yes: true } });
+          assert.equal(missing.isError, true, `content: ${content}`);
+          assert.match(missing.content[0].text, /content is required and must be a string/);
+        }
         assert.deepEqual(requests, []);
 
         const written = await client.callTool({ name: 'workspace_write', arguments: { path: target, content: '- [ ] ship\n', yes: true } });

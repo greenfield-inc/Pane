@@ -287,8 +287,12 @@ export function buildToolArgv(tool: McpTool, input: JsonObject = {}): string[] {
   }
   for (const parameter of tool.parameters) {
     const value = input[parameter.property];
-    if (STDIN_STAND_IN_FLAGS.has(parameter.flag) && (value === undefined || value === null)) {
-      throw new Error(`${parameter.property} is required. Pass the full new text; an empty string empties the file.`);
+    if (STDIN_STAND_IN_FLAGS.has(parameter.flag)) {
+      try {
+        decodeBoundary(value, boundary.string);
+      } catch {
+        throw new Error(`${parameter.property} is required and must be a string. Pass the full new text; an empty string empties the file.`);
+      }
     }
     if (parameter.positional || value === undefined || value === null || value === false) continue;
     if (!parameter.takesValue) {
