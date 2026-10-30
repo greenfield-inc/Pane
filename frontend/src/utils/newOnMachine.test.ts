@@ -23,10 +23,10 @@ const entry = (id: string, name: string, os: MachineEntry['os'], active = false)
 const entries = [entry('local', 'studio-mac', 'macOS', true), entry('build-box', 'build-box', 'Linux')];
 
 // What each machine answers, by machine and channel, as the host commands answer today.
-const replies: Record<string, Record<string, object>> = {
-  'build-box': { 'projects:get-all': { success: true, data: [{ id: 4, name: 'infra', path: '/srv/infra' }] } },
-  'office-pc': { 'projects:get-all': { success: true, data: [{ id: 1, name: 'acme-web', path: 'C:\\code\\acme-web' }, { id: 2, name: 'blog', path: 'C:\\code\\blog' }] } },
-};
+const replies = new Map([
+  ['build-box', new Map([['projects:get-all', { success: true, data: [{ id: 4, name: 'infra', path: '/srv/infra' }] }]])],
+  ['office-pc', new Map([['projects:get-all', { success: true, data: [{ id: 1, name: 'acme-web', path: 'C:\\code\\acme-web' }, { id: 2, name: 'blog', path: 'C:\\code\\blog' }] }]])],
+]);
 
 let runs: Array<{ machineId: string; command: MachineCommand }>;
 let storage: Map<string, string>;
@@ -37,7 +37,7 @@ beforeEach(() => {
   vi.stubGlobal('window', {
     localStorage: { getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => { storage.set(key, value); } },
     electronAPI: { machines: {
-      read: async (machineId: string, channel: string) => ({ machineId, data: replies[machineId]?.[channel] ?? { success: false, error: 'not served' } }),
+      read: async (machineId: string, channel: string) => ({ machineId, data: replies.get(machineId)?.get(channel) ?? { success: false, error: 'not served' } }),
       run: async (machineId: string, command: MachineCommand) => {
         runs.push({ machineId, command });
         return { machineId, data: command.type === 'create-session' ? { success: true, data: { id: 'session-7', name: 'Rotate keys' } } : { success: true, data: { jobId: 'job-1' } } };
