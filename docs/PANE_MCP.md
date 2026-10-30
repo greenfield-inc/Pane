@@ -108,7 +108,7 @@ Automated tests cover the registration and link logic on every OS. Check these b
 **macOS, Windows, and Linux**
 
 1. Install and launch Pane, with Claude Code, Codex, and Cursor installed.
-2. Run `claude mcp list`, `codex mcp list`, and `agent mcp list`. Each lists `pane`. If Cursor asks for approval, run `agent mcp enable pane`; it should report ready with 34 core tools.
+2. Run `claude mcp list`, `codex mcp list`, and `agent mcp list`. Each lists `pane`. If Cursor asks for approval, run `agent mcp enable pane`; it should report ready with 35 core tools.
 3. In a fresh `claude` session, ask "Use Pane to list my repos". It calls `repos_list`.
 4. Quit and relaunch Pane. The Claude, Codex, and Cursor configs are unchanged.
 5. Turn off **Settings → AI & Agents → Register Pane tools with Claude Code, Codex, and Cursor**. `pane` is gone from all three configs, and the other entries are unchanged.
