@@ -1048,6 +1048,9 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void
       const own = makePanel('claude-session-panel');
       own.state.customState = { agentType: 'claude', orchestrationSessionId: 'claude-session' };
       const { handle } = await startTerminal(own);
+      // The shell's prompt comes first; native Windows holds input until it shows.
+      handle.emit('$ ');
+      await vi.advanceTimersByTimeAsync(1_000);
       handle.emit(trustMenu(sessionWorkspacePath('claude-session'), 'No'));
       await vi.advanceTimersByTimeAsync(1_000);
       expect(menuKeys(handle)).toEqual(['\x1b[B']);
@@ -1064,6 +1067,8 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void
       const elsewhere = makePanel('claude-session-elsewhere');
       elsewhere.state.customState = { agentType: 'claude', orchestrationSessionId: 'other-session' };
       const other = await startTerminal(elsewhere);
+      other.handle.emit('$ ');
+      await vi.advanceTimersByTimeAsync(1_000);
       other.handle.emit(trustMenu(path.join(sessionWorkspacePath('other-session'), 'project'), 'Yes'));
       await vi.advanceTimersByTimeAsync(1_000);
       expect(menuKeys(other.handle)).toEqual([]);
