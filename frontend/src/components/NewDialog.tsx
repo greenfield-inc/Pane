@@ -93,11 +93,11 @@ async function openSession(sessionId: string): Promise<void> {
   useNavigationStore.getState().navigateToPaneChat();
 }
 
-/** Opens the new Pane once it is listed; one still being set up opens itself when it arrives. */
-async function openCreatedPane(request: CreateSessionRequest): Promise<void> {
-  const pane = useSessionStore.getState().sessions.find(session => !session.archived
-    && session.name === request.worktreeTemplate && session.projectId === request.projectId);
-  if (pane) await openPaneTarget({ paneId: pane.id });
+/** Opens the first new Pane once it is listed; one still being set up opens itself when it arrives. */
+async function openCreatedPane(createdIds: readonly string[]): Promise<void> {
+  const { sessions } = useSessionStore.getState();
+  const paneId = createdIds.find(id => sessions.some(session => session.id === id && !session.archived));
+  if (paneId) await openPaneTarget({ paneId });
   else useNavigationStore.getState().navigateToSessions();
 }
 
@@ -182,8 +182,8 @@ export function NewDialog({ projects, defaultProjectId, machines: entries, onSwi
   const otherMachine = useMemo(() => onOtherMachine && machineId && machineName ? {
     listBranches: (projectId: number) => readBranches({ id: machineId, name: machineName }, projectId),
     create: async (request: CreateSessionRequest) => {
-      const reply = await createPaneOn({ id: machineId }, request);
-      if (reply.success) void openAfterSwitch(machineName, switchTo.current, () => openCreatedPane(request));
+      const { reply, createdIds, stop } = await createPaneOn({ id: machineId }, request);
+      if (reply.success) void openAfterSwitch(machineName, switchTo.current, () => openCreatedPane(createdIds)).finally(stop);
       return reply;
     },
   } : undefined, [onOtherMachine, machineId, machineName]);

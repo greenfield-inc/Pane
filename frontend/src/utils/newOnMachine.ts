@@ -1,5 +1,5 @@
 import { preferredMachineColorSlot } from '../../../shared/utils/machineColor';
-import { boundary, decodeBoundary, type BoundarySchema, type JsonValue } from '../../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary, decodeOptionalBoundary, type BoundarySchema, type JsonValue } from '../../../shared/validation/boundaryDecoder';
 import type { MachineCommand, MachineReadChannel, MachineResult, MachineState } from '../../../shared/types/machineConnections';
 import type { OrchestrationSessionCreateInput } from '../../../shared/types/orchestrationSession';
 import type { CreateSessionRequest } from '../types/session';
@@ -38,7 +38,7 @@ export interface BranchOption {
 }
 
 /** A reply in the `{ success, data, error }` shape every listed channel answers with. */
-export interface MachineReply {
+interface MachineReply {
   success: boolean;
   error?: string;
   details?: string;
@@ -100,7 +100,9 @@ const branchesSchema = boundary.array(boundary.object({
 }));
 const runtimesSchema = boundary.object({ distributions: boundary.array(boundary.string) });
 const sessionNamesSchema = boundary.object({ sessions: boundary.array(boundary.object({ name: boundary.string })) });
-const createdSessionSchema = boundary.object({ id: boundary.nonEmptyString });
+const createdPaneSchema = boundary.object({ id: boundary.nonEmptyString, clientRequestId: boundary.optional(boundary.string) });
+/** `orchestration-sessions:create` answers with the Session's view; its record is `session`. */
+const createdSessionSchema = boundary.object({ session: boundary.object({ id: boundary.nonEmptyString }) });
 
 function machinesApi() {
   const api = window.electronAPI?.machines;
@@ -144,14 +146,37 @@ export async function readSessionNames(machine: Pick<NewMachine, 'id' | 'name'>)
   return (await read(machine.id, machine.name, 'orchestration-sessions:list', [], sessionNamesSchema)).sessions;
 }
 
-/** Creates Panes on the machine. This desktop opens them once it is on that machine. */
-export async function createPaneOn(machine: Pick<NewMachine, 'id'>, request: CreateSessionRequest): Promise<MachineReply> {
-  return run(machine.id, { type: 'create-pane', request: { ...request, clientRequestId: startOwnPaneCreation() } });
+export interface PaneCreation {
+  reply: MachineReply;
+  /** The new Panes' ids, filled as the machine reports each one created; the host may suffix their names. */
+  createdIds: string[];
+  /** Stops listening for more of them. */
+  stop: () => void;
+}
+
+/** Creates Panes on the machine and collects their ids, so this desktop opens them once it is on that machine. */
+export async function createPaneOn(machine: Pick<NewMachine, 'id'>, request: CreateSessionRequest): Promise<PaneCreation> {
+  const api = machinesApi();
+  const clientRequestId = startOwnPaneCreation();
+  const createdIds: string[] = [];
+  const stop = api.onEvent((event) => {
+    if (event.type !== 'event' || event.machineId !== machine.id || event.channel !== 'session:created') return;
+    const created = decodeOptionalBoundary(event.args[0], createdPaneSchema);
+    if (created?.clientRequestId === clientRequestId) createdIds.push(created.id);
+  });
+  try {
+    const reply = await run(machine.id, { type: 'create-pane', request: { ...request, clientRequestId } });
+    if (!reply.success) stop();
+    return { reply, createdIds, stop };
+  } catch (error) {
+    stop();
+    throw error;
+  }
 }
 
 /** Creates a Session on the machine and returns its id. */
 export async function createSessionOn(machine: Pick<NewMachine, 'id' | 'name'>, input: OrchestrationSessionCreateInput): Promise<string> {
   const reply = await run(machine.id, { type: 'create-session', input });
   if (!reply.success) throw new Error(reply.error ?? `${machine.name} did not create the Session and gave no reason. Try again.`);
-  return decodeBoundary(reply.data, createdSessionSchema).id;
+  return decodeBoundary(reply.data, createdSessionSchema).session.id;
 }

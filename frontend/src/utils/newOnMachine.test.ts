@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { MachineCommand, MachineState } from '../../../shared/types/machineConnections';
+import type { MachineCommand, MachineConnectionsEvent, MachineState } from '../../../shared/types/machineConnections';
 import type { MachineEntry } from './machineList';
+import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import {
   createPaneOn,
   createSessionOn,
@@ -29,18 +30,24 @@ const replies = new Map([
 ]);
 
 let runs: Array<{ machineId: string; command: MachineCommand }>;
+let machineEvents: Array<(event: MachineConnectionsEvent) => void>;
 let storage: Map<string, string>;
 
 beforeEach(() => {
   runs = [];
+  machineEvents = [];
   storage = new Map();
   vi.stubGlobal('window', {
     localStorage: { getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => { storage.set(key, value); } },
     electronAPI: { machines: {
+      onEvent: (listener: (event: MachineConnectionsEvent) => void) => {
+        machineEvents.push(listener);
+        return () => { machineEvents = machineEvents.filter(other => other !== listener); };
+      },
       read: async (machineId: string, channel: string) => ({ machineId, data: replies.get(machineId)?.get(channel) ?? { success: false, error: 'not served' } }),
       run: async (machineId: string, command: MachineCommand) => {
         runs.push({ machineId, command });
-        return { machineId, data: command.type === 'create-session' ? { success: true, data: { id: 'session-7', name: 'Rotate keys' } } : { success: true, data: { jobId: 'job-1' } } };
+        return { machineId, data: command.type === 'create-session' ? { success: true, data: { session: { id: 'session-7', name: 'Rotate keys' }, agent: 'codex', started: true } } : { success: true, data: { jobId: 'job-1' } } };
       },
     } },
   });
@@ -83,14 +90,25 @@ describe('reading and creating on the picked machine', () => {
       .rejects.toThrow('travel-laptop did not answer: not served. Pick the machine again to retry.');
   });
 
-  it('creates a Pane on the picked machine, tagged so this desktop opens it there', async () => {
-    const reply = await createPaneOn({ id: 'build-box' }, { prompt: '', worktreeTemplate: 'rotate-backup-keys', projectId: 4, baseBranch: 'origin/main', toolType: 'none' });
+  it('creates Panes on the picked machine and collects the ids that machine reports for this request', async () => {
+    const { reply, createdIds, stop } = await createPaneOn({ id: 'build-box' }, { prompt: '', worktreeTemplate: 'rotate-backup-keys', count: 2, projectId: 4, baseBranch: 'origin/main', toolType: 'none' });
+    const sent = runs[0].command;
+    const { clientRequestId } = decodeBoundary(sent, boundary.object({ request: boundary.object({ clientRequestId: boundary.nonEmptyString }) })).request;
+    const created = (machineId: string, id: string, name: string, requestId: string) =>
+      machineEvents.forEach(listener => listener({ type: 'event', machineId, channel: 'session:created', args: [{ id, name, clientRequestId: requestId }] }));
+
+    created('build-box', 'pane-old', 'rotate-backup-keys', 'someone-else');
+    created('studio-mac', 'pane-elsewhere', 'rotate-backup-keys-1', clientRequestId);
+    created('build-box', 'pane-21', 'rotate-backup-keys-1', clientRequestId);
+    created('build-box', 'pane-22', 'rotate-backup-keys-2', clientRequestId);
+    stop();
+    created('build-box', 'pane-23', 'rotate-backup-keys-3', clientRequestId);
 
     expect(reply.success).toBe(true);
     expect(runs).toHaveLength(1);
     expect(runs[0].machineId).toBe('build-box');
-    expect(runs[0].command).toMatchObject({ type: 'create-pane', request: { worktreeTemplate: 'rotate-backup-keys', projectId: 4, baseBranch: 'origin/main' } });
-    expect(runs[0].command.type === 'create-pane' && 'clientRequestId' in runs[0].command.request).toBe(true);
+    expect(sent).toMatchObject({ type: 'create-pane', request: { worktreeTemplate: 'rotate-backup-keys', projectId: 4, baseBranch: 'origin/main' } });
+    expect(createdIds).toEqual(['pane-21', 'pane-22']);
   });
 
   it('creates a Session on the picked machine and returns its id', async () => {
