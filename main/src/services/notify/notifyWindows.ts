@@ -7,7 +7,7 @@ type NotifyView = 'strip' | 'round';
 /** Gap between the strip and the edge of the screen's work area (above the Dock or taskbar). */
 const EDGE_GAP = 8;
 const INITIAL_SIZE = {
-  strip: { width: 680, height: 220 },
+  strip: { width: 832, height: 220 },
   round: { width: 720, height: 420 },
 } satisfies Record<NotifyView, NotifyWindowSize>;
 

@@ -74,6 +74,15 @@ describe('NotifyCard', () => {
     expect(visible).toContain('Show details');
   });
 
+  it('opens a pop-up card with details shown when the person last left them shown', () => {
+    const choiceCard = text(render({ ...base, ui: 'options', title: 'Which store?', choices: [{ label: 'Postgres' }] }, { showDetails: true }));
+    expect(choiceCard).toContain('Click a choice, then Send');
+    expect(choiceCard).toContain('Hide details');
+    const approval = text(render({ ...base, ui: 'approve', title: 'Deploy?', detail: 'fly deploy --app web' }, { showDetails: true }));
+    expect(approval).toContain('fly deploy --app web');
+    expect(approval).toContain('Hide details');
+  });
+
   it('shows a free-text question as a field, with the agent’s suggestions above it', () => {
     const markup = render({
       ...base,

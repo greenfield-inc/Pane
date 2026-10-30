@@ -37,6 +37,7 @@ export function NotifyStrip({ snapshot, narrow, menuPlacement, onFieldFocusReque
       shortcutHint={snapshot.firstRun ? shortcutLabel(snapshot.settings.shortcut, isMac()) : undefined}
       hideAt={strip.kind === 'info' ? strip.hideAt : undefined}
       hideAfterMs={snapshot.settings.updatesHideAfterSeconds * 1000}
+      showDetails={snapshot.settings.showDetails}
       narrow={narrow}
       menuPlacement={menuPlacement}
       onFieldFocusRequest={onFieldFocusRequest}

@@ -75,6 +75,8 @@ export interface NotifySettings {
   shortcut: string;
   updatesHideAfterSeconds: number;
   sound: boolean;
+  /** Whether pop-up cards open with details shown. Showing or hiding details on a card sets it. */
+  showDetails: boolean;
 }
 
 export const DEFAULT_NOTIFY_SETTINGS: NotifySettings = {
@@ -84,6 +86,7 @@ export const DEFAULT_NOTIFY_SETTINGS: NotifySettings = {
   shortcut: 'Control+Shift+Space',
   updatesHideAfterSeconds: 6,
   sound: true,
+  showDetails: false,
 };
 
 export const NOTIFY_UPDATES_HIDE_AFTER_CHOICES = [4, 6, 10, 20] as const;
@@ -221,7 +224,9 @@ export type NotifyCommand =
   | { type: 'resume' }
   | { type: 'open-round'; id?: string }
   | { type: 'close-round' }
-  | { type: 'open-inbox' };
+  | { type: 'open-inbox' }
+  /** Show or Hide details on a pop-up card: the next card opens the same way. */
+  | { type: 'show-details'; shown: boolean };
 
 /** The floating windows report their card's size so main can fit and place them. */
 export interface NotifyWindowSize {

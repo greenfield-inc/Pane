@@ -118,7 +118,7 @@ the agent:
   An update from it returns `delivered: "inbox"`; connected screens still show
   it on their strips.
 
-Each screen keeps its own Position, Show outside Pane, Sound, answer-all
+Each screen keeps its own Position, Show outside Pane, Sound, Show details, answer-all
 shortcut and Pause. The host's Notify switch decides whether agents can ask:
 turning it off there returns `unavailable` to every waiting agent and clears
 its questions from every screen.
@@ -135,6 +135,7 @@ its questions from every screen.
 | Answer-all shortcut | ⌃⇧Space. Settings says so when another app already holds it. |
 | Updates hide after | 6 seconds |
 | Sound | On, for questions only |
+| Show details | Off. Cards open with details shown when on. Showing or hiding details on a card changes it. |
 
 Pause for 1 hour (tray menu) hides strips and mutes sound while questions keep
 queueing. Strips show over full-screen apps, during screen sharing, and with

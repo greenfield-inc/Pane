@@ -194,6 +194,15 @@ export function NotifySettings({ persistence }: { persistence: SettingsPersisten
         >
           <ImmediateToggle label="Sound" value={settings.sound} disabled={off} onSave={(sound) => save('notify-sound', 'sound', sound)} />
         </SettingRow>
+        <SettingRow
+          settingId="notify-show-details"
+          label="Show details"
+          description="Cards open with details shown. Showing or hiding details on a card changes this too."
+          saveState={persistence.saveStates['notify-show-details']}
+          disabled={off}
+        >
+          <ImmediateToggle label="Show details" value={settings.showDetails} disabled={off} onSave={(showDetails) => save('notify-show-details', 'showDetails', showDetails)} />
+        </SettingRow>
       </div>
 
       {instructionFiles.length > 0 && <AgentInstructions files={instructionFiles} />}

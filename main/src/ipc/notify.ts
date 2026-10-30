@@ -65,6 +65,7 @@ const notifyCommandSchema = boundary.union(
   boundary.object({ type: boundary.literal('open-round'), id: boundary.optional(boundary.nonEmptyString) }),
   boundary.object({ type: boundary.literal('close-round') }),
   boundary.object({ type: boundary.literal('open-inbox') }),
+  boundary.object({ type: boundary.literal('show-details'), shown: boundary.boolean }),
 );
 const notifyRemoteCommandSchema = boundary.union(
   boundary.object({ type: boundary.literal('answer'), id: boundary.nonEmptyString, answer: answerSchema }),

@@ -35,6 +35,8 @@ export interface NotifyCardProps {
   /** Updates: when the line hides (epoch ms), or null while it is held open. */
   hideAt?: number | null;
   hideAfterMs?: number;
+  /** Strip: open with details shown. Showing or hiding them sends `show-details`. */
+  showDetails?: boolean;
   /** Top right: a narrower strip whose chips wrap. */
   narrow?: boolean;
   /** Which side of the card the "Answer later" menu opens on. */
@@ -65,7 +67,7 @@ export function NotifyCard(props: NotifyCardProps) {
 function cardShell(form: NotifyCardForm, narrow?: boolean, className?: string): string {
   if (form === 'inbox') return cn('relative w-full rounded-[18px] bg-surface-primary shadow-card ring-1 ring-border-secondary', className);
   if (form === 'docked') return cn('relative w-full rounded-[24px] bg-surface-primary shadow-modal ring-1 ring-border-secondary', className);
-  return cn('relative rounded-[24px] bg-surface-primary shadow-modal ring-1 ring-border-secondary', narrow ? 'w-[420px]' : 'w-[640px]', className);
+  return cn('relative rounded-[24px] bg-surface-primary shadow-modal ring-1 ring-border-secondary', narrow ? 'w-[504px]' : 'w-[768px]', className);
 }
 
 function KindLabel({ ui }: { ui: NotifyItem['ui'] }) {
@@ -404,14 +406,14 @@ function recommendedIndex(choices: NotifyChoice[]): number {
 }
 
 function QuestionCard({
-  item, form, queue, shortcutHint, narrow, menuPlacement, onCommand, onFieldFocusRequest, className,
+  item, form, queue, shortcutHint, showDetails, narrow, menuPlacement, onCommand, onFieldFocusRequest, className,
 }: NotifyCardProps) {
-  const [expanded, setExpanded] = useState(form === 'docked');
+  // Details: the choices with notes, or an approval's detail.
+  const [expanded, setExpanded] = useState(form === 'docked' || (form === 'strip' && Boolean(showDetails)));
   const choices = item.choices ?? [];
   const [selected, setSelected] = useState(() => recommendedIndex(choices));
   const [note, setNote] = useState('');
   const [denying, setDenying] = useState(false);
-  const [showDetail, setShowDetail] = useState(form === 'docked');
   const [text, setText] = useState('');
   const [textFocusKey, setTextFocusKey] = useState(0);
   const titleClass = form === 'inbox'
@@ -436,6 +438,10 @@ function QuestionCard({
   const answerText = (value: string) => {
     const trimmed = value.trim();
     if (trimmed) onCommand({ type: 'answer', id: item.id, answer: { text: trimmed } });
+  };
+  const showDetailsChange = (shown: boolean) => {
+    setExpanded(shown);
+    if (form === 'strip') onCommand({ type: 'show-details', shown });
   };
   const rootRef = useRef<HTMLDivElement>(null);
   // The card's own keys, matching the key on each chip.
@@ -561,16 +567,16 @@ function QuestionCard({
             {item.detail && (
               <button
                 type="button"
-                aria-expanded={showDetail}
-                onClick={() => setShowDetail((shown) => !shown)}
+                aria-expanded={expanded}
+                onClick={() => showDetailsChange(!expanded)}
                 className="ml-auto pr-2 text-[13px] text-text-tertiary hover:text-text-primary"
               >
-                {showDetail ? 'Hide details' : item.detailLabel?.trim() || 'Show details'}
+                {expanded ? 'Hide details' : item.detailLabel?.trim() || 'Show details'}
               </button>
             )}
           </div>
         )}
-        {item.detail && showDetail && (
+        {item.detail && expanded && (
           <pre className={cn('mb-3.5 max-h-48 overflow-auto rounded-xl bg-surface-tertiary px-3.5 py-2.5 font-mono text-[12px] leading-relaxed text-text-secondary', form === 'inbox' ? 'mx-3.5' : 'mx-[22px]')}>
             {item.detail}
           </pre>
@@ -615,7 +621,7 @@ function QuestionCard({
         left={<span>Click a choice, then Send</span>}
         right={(
           <>
-            <FooterLink onClick={() => setExpanded(false)}>Hide details</FooterLink>
+            <FooterLink onClick={() => showDetailsChange(false)}>Hide details</FooterLink>
             {openInPane && !narrow && <FooterLink onClick={openInPane}>Open in Pane</FooterLink>}
             <button
               type="button"
@@ -643,7 +649,7 @@ function QuestionCard({
         left={left}
         right={(
           <>
-            {item.ui === 'options' && <FooterLink onClick={() => setExpanded(true)}>Details</FooterLink>}
+            {item.ui === 'options' && <FooterLink onClick={() => showDetailsChange(true)}>Details</FooterLink>}
             {openInPane && !(narrow && item.ui === 'options') && <FooterLink onClick={openInPane}>Open in Pane</FooterLink>}
           </>
         )}
@@ -661,7 +667,7 @@ function QuestionCard({
       onPointerDown={() => void onFieldFocusRequest?.()}
     >
       <CardHeader item={item} form={form} queue={queue} onCommand={onCommand} menuPlacement={menuPlacement} />
-      <div className={cn(titleClass, !(expanded || showDetail) && 'line-clamp-3')} title={item.title}>{item.title}</div>
+      <div className={cn(titleClass, !expanded && 'line-clamp-3')} title={item.title}>{item.title}</div>
       {showContext && <div className={contextClass}>{item.context}</div>}
       {body}
       {item.unreachable && <UnreachableNotice item={item} className={form === 'inbox' ? 'px-3.5 pb-3' : 'px-[22px] pb-3'} />}

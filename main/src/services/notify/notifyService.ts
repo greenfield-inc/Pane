@@ -147,6 +147,7 @@ export class NotifyService {
       case 'open-round': this.openRound(command.id); return;
       case 'close-round': this.windows.closeRound(); return;
       case 'open-inbox': this.navigate('inbox'); return;
+      case 'show-details': await this.updateSettings({ showDetails: command.shown }); return;
       case 'open-in-pane': await this.openInPane(command.id); return;
       default:
         if ('id' in command && command.id && this.queue.isRemote(command.id)) await this.runOnHost(command);
