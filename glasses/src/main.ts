@@ -4,13 +4,12 @@ import { AudioInputSource, waitForEvenAppBridge, type EvenAppBridge } from '@eve
 import { GlassesApp } from './app';
 import { DemoSource } from './demo';
 import { Display, type Page } from './display';
-import { HostHub, STORAGE_KEY, mergePaired, pairComputers, readPaired, type PairedComputer, type PairingFailure } from './host';
+import { CLIENT_LABEL, HostHub, STORAGE_KEY, mergePaired, pairComputers, readPaired, type PairingFailure } from './host';
 import { InputRouter, type Gesture } from './input';
 import type { PaneSource } from './model';
 import { firstRunPage, pairingFailedPage } from './screens';
 
 const RUNTIME_KEY = 'pane.glasses.runtimeId';
-const CLIENT_LABEL = 'Pane glasses';
 
 function element<T extends HTMLElement>(id: string, type: new () => T): T {
   const found = document.getElementById(id);
@@ -125,8 +124,9 @@ async function main(): Promise<void> {
     ui.status.textContent = 'Pairing…';
     void pairComputers(ui.code.value, { fetch: (url, init) => fetch(url, init), runtimeId: id, clientLabel: CLIENT_LABEL, origin: location.origin }).then(async (outcome) => {
       if (outcome.paired.length) {
-        const all: PairedComputer[] = mergePaired(paired, outcome.paired);
-        await bridge.setLocalStorage(STORAGE_KEY, JSON.stringify(all));
+        // Read again: computers may have joined on their own since launch.
+        const stored = readPaired(await bridge.getLocalStorage(STORAGE_KEY).catch(() => ''));
+        await bridge.setLocalStorage(STORAGE_KEY, JSON.stringify(mergePaired(stored, outcome.paired)));
       }
       // Pasting the same code again after a partial pairing spends no secret twice: a computer
       // already paired here just reports its secret as used, which is not a failure.
@@ -153,7 +153,17 @@ async function main(): Promise<void> {
   if (paired.length) {
     ui.demo.hidden = true;
     ui.status.textContent = `Paired with ${paired.length} computer${paired.length === 1 ? '' : 's'}. Open Pane from the glasses menu.`;
-    const hub = new HostHub(paired, { fetch: (url, init) => fetch(url, init), runtimeId: id, later, now: Date.now, openSocket: (url, protocols) => new WebSocket(url, protocols), origin: location.origin });
+    const hub = new HostHub(paired, {
+      fetch: (url, init) => fetch(url, init),
+      runtimeId: id,
+      later,
+      now: Date.now,
+      openSocket: (url, protocols) => new WebSocket(url, protocols),
+      origin: location.origin,
+      savePaired: async (all) => {
+        await bridge.setLocalStorage(STORAGE_KEY, JSON.stringify(all));
+      },
+    });
     start(hub);
     hub.start();
     return;

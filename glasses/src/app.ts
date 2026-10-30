@@ -25,6 +25,7 @@ import {
   problemPage,
   refusedPage,
   terminalFooter,
+  unjoinedPage,
   terminalLines,
   terminalPage,
   voiceAnswerPage,
@@ -143,6 +144,8 @@ type View =
   | ({ name: 'dictation'; transcript: string } & TerminalState)
   /** A row of a computer that isn't live was pressed: why, and Retry. */
   | { name: 'away'; computerId: string; rowName?: string }
+  /** The row of a computer that couldn't join was pressed: why, and what to do. */
+  | { name: 'unjoined'; machine: string; reason: string }
   | { name: 'problem'; title: string; message: string; next?: string; back: View };
 
 /** The selected home row: its key, and where it was in case it is gone next time. */
@@ -201,7 +204,7 @@ export class GlassesApp {
 
   /** The home list's rows as the computers have them now, without cards answered here. */
   private rows(): HomeRow[] {
-    return homeRows(this.deps.source.computers(), this.cards());
+    return homeRows(this.deps.source.computers(), this.cards(), this.deps.source.unjoined());
   }
 
   /** The selected row's index: the focused row, or the one now nearest its place. */
@@ -273,6 +276,8 @@ export class GlassesApp {
         if (!computer) return this.homePage();
         return computer.refusal ? refusedPage(computer.name, computer.refusal) : awayPage(computer, this.deps.clock, view.rowName);
       }
+      case 'unjoined':
+        return unjoinedPage(view.machine, view.reason);
       case 'problem':
         return problemPage(view.title, view.message, view.next);
     }
@@ -389,6 +394,7 @@ export class GlassesApp {
         if (gesture.type === 'press') this.deps.source.retry(view.computerId);
         if (gesture.type === 'press' || gesture.type === 'double') this.go({ name: 'home' });
         break;
+      case 'unjoined': if (gesture.type === 'double' || gesture.type === 'press') this.goHome(); break;
       case 'problem': if (gesture.type === 'double' || gesture.type === 'press') this.go(view.back); break;
     }
   }
@@ -458,12 +464,16 @@ export class GlassesApp {
     }
   }
 
-  /** A question opens its card, an info card its message, a live row its terminal; a row of an away computer says why and offers Retry. */
+  /**
+   * A question opens its card, an info card its message, a live row its terminal; a row of an away
+   * computer says why and offers Retry, and one of a computer that couldn't join says why.
+   */
   private openRow(row: HomeRow, index: number): void {
     this.homeFocus = { key: row.key, index };
     this.confirmation = undefined;
     if (row.kind === 'question') this.openCard(row.card);
     else if (row.kind === 'info') this.go({ name: 'info', key: row.card.key });
+    else if (row.kind === 'computer' && row.reason) this.go({ name: 'unjoined', machine: row.machine, reason: row.reason });
     else if (row.kind === 'entry' && row.status === 'live') this.openTerminal(row.computerId, row.entry);
     else this.go(row.kind === 'entry' ? { name: 'away', computerId: row.computerId, rowName: row.entry.name } : { name: 'away', computerId: row.computerId });
   }

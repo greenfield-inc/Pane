@@ -5,7 +5,7 @@ import { DemoSource } from '../src/demo';
 import type { Page } from '../src/display';
 import type { ListMarks } from '../src/homeList';
 import type { Gesture } from '../src/input';
-import { GlassesError, SCREEN_RECONNECTING, orderCards, type Card, type Computer, type Dictation, type PaneEntry, type PaneSource, type TerminalKey, type TerminalScreen } from '../src/model';
+import { GlassesError, SCREEN_RECONNECTING, orderCards, type Card, type Computer, type Dictation, type PaneEntry, type PaneSource, type TerminalKey, type TerminalScreen, type UnjoinedComputer } from '../src/model';
 import type { Cancel } from '../src/timers';
 
 /** Timers the test runs by hand. */
@@ -241,6 +241,8 @@ class ScriptedSource implements PaneSource {
   /** The first computer lists `rows`. */
   computers() { return this.computerList.map((computer, index) => (index === 0 ? { ...computer, entries: this.rows } : computer)); }
   cards() { return orderCards(this.cardList); }
+  unjoinedList: UnjoinedComputer[] = [];
+  unjoined() { return this.unjoinedList; }
   subscribe(listener: () => void) {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
@@ -897,6 +899,40 @@ describe('home in outline marks (the firmware list)', () => {
     const { text, press } = outlineHome();
     await press({ type: 'select', index: 2 });
     expect(text()[0]).toBe('build-box · offline');
+  });
+});
+
+describe('computers that could not join', () => {
+  it('shows each as a dim row at the end of the list with its reason, and says what to do on press', async () => {
+    const { source, text, press, page } = startScripted();
+    source.rows = [{ ...paneRow('fix-checkout'), activityAt: 2 }];
+    source.unjoinedList = [
+      { name: 'office-pc', reason: 'update Pane there' },
+      { name: 'old-laptop', reason: 'revoked here · pair from phone' },
+      { name: 'nas', reason: 'needs its password' },
+      { name: 'public-box', reason: 'Funnel is on' },
+      { name: 'devbox', reason: 'not answering' },
+    ];
+    source.changed();
+    expect(text().slice(1)).toEqual([
+      '> studi  fix-checkout · Claude · stopped',
+      '   offic  office-pc · update Pane there',
+      '   old-l  old-laptop · revoked here · pair from phone',
+      '   nas  nas · needs its password',
+      '   publi  public-box · Funnel is on',
+      '   devbo  devbox · not answering',
+    ]);
+    const brightness = (page()?.boxes ?? []).flatMap((box) => (box.kind === 'text' && box.name.startsWith('row') ? [box.brightness] : []));
+    expect(brightness).toEqual([4, 1, 1, 1, 1, 1]);
+    await press({ type: 'down' });
+    await press({ type: 'press' });
+    expect(text()).toEqual([
+      "office-pc · can't join",
+      "office-pc runs an older Pane, so these glasses can't join it by / themselves. / Update Pane on office-pc. It joins within 10 minutes.",
+      'double press = back',
+    ]);
+    await press({ type: 'double' });
+    expect(text()[2]).toBe('> offic  office-pc · update Pane there');
   });
 });
 

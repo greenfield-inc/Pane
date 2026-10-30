@@ -23,7 +23,9 @@ import {
   type PaneStatus,
   type TerminalKey,
   type TerminalScreen,
+  type UnjoinedComputer,
 } from './model';
+import { AutoJoin, type VouchAnswer } from './autoJoin';
 import { stripAnsi } from './text';
 import type { Cancel } from './timers';
 import { recordedDictation, streamingDictation, voiceMode, type VoiceHost, type VoiceSocket } from './voice';
@@ -39,6 +41,10 @@ export interface PairedComputer {
 }
 
 export const STORAGE_KEY = 'pane.glasses.computers';
+/** How the glasses name themselves to a computer while they pair. */
+export const CLIENT_LABEL = 'Pane glasses';
+/** Asks a computer to get pairing secrets for these glasses from your other computers. */
+const VOUCH_COMMAND = 'runpane:glasses:vouch';
 /** How long the glasses wait before trying an unreachable computer again. */
 const RETRY_MS = 10_000;
 /** How often a computer that refused the glasses is tried again, so Allow on the desktop recovers by itself. */
@@ -309,6 +315,11 @@ const affordancesSchema = boundary.object({
 
 const transcriptSchema = boundary.object({ text: boundary.string });
 
+const vouchSchema = boundary.object({
+  code: boundary.nullable(boundary.nonEmptyString),
+  skipped: boundary.array(boundary.object({ name: boundary.nonEmptyString, reason: boundary.nonEmptyString })),
+});
+
 /** A Pane older than the OS report omits `os`; its rows show the plain monitor mark. */
 const hostOsSchema = boundary.object({ os: boundary.optional(boundary.enumeration('macOS', 'Windows', 'Linux')) });
 
@@ -335,6 +346,8 @@ export interface HostDeps {
   openSocket(url: string, protocols: string[]): VoiceSocket;
   /** This app's `location.origin`, named in the hint for a computer that never answered. */
   origin: string;
+  /** Stores every paired computer after more join on their own. */
+  savePaired(all: PairedComputer[]): Promise<void>;
 }
 
 /** One paired computer: its connection, Notify state, Panes and agent status. */
@@ -504,6 +517,25 @@ export class HostConnection {
     this.retryTimer?.cancel();
     this.listTimer?.cancel();
     this.client.disconnect();
+  }
+
+  get live(): boolean {
+    return this.client.getState().status === 'connected' && !this.refusal;
+  }
+
+  /**
+   * Asks this computer to vouch for the glasses on your other computers. It names the glasses
+   * from this token's own record, so nothing is sent but the command.
+   */
+  async vouch(): Promise<VouchAnswer> {
+    try {
+      const result = await this.invoke(VOUCH_COMMAND, [], vouchSchema);
+      return { kind: 'answered', code: result.code, skipped: result.skipped };
+    } catch (error) {
+      // An older Pane doesn't let glasses run it, or doesn't know it.
+      if (error instanceof RemoteRequestError && (error.code === CHANNEL_REFUSED || error.code === 'ERR_UNKNOWN_CHANNEL')) return { kind: 'unsupported' };
+      return { kind: 'unavailable' };
+    }
   }
 
   computer(): Computer {
@@ -722,23 +754,53 @@ export class HostConnection {
 /** Every paired computer as one source of cards, Panes and terminals. */
 export class HostHub implements PaneSource {
   readonly demo = false;
-  private readonly connections: HostConnection[];
+  private connections: HostConnection[] = [];
   private readonly listeners = new Set<() => void>();
+  private readonly autoJoin: AutoJoin;
 
-  constructor(paired: readonly PairedComputer[], deps: HostDeps) {
+  constructor(paired: readonly PairedComputer[], private readonly deps: HostDeps) {
+    this.autoJoin = new AutoJoin({
+      vouchers: () => this.connections.map((connection) => ({ id: connection.id, name: connection.paired.name, live: connection.live, vouch: () => connection.vouch() })),
+      join: (code) => this.join(code),
+      later: deps.later,
+      now: deps.now,
+      changed: () => this.emit(),
+    });
     this.connections = paired.map((computer) => new HostConnection(computer, deps, () => this.emit()));
   }
 
+  /** Connects to every paired computer, and asks them to add the glasses to the rest, now and every 10 minutes. */
   start(): void {
     for (const connection of this.connections) void connection.connect();
+    this.autoJoin.start();
   }
 
   stop(): void {
+    this.autoJoin.stop();
     for (const connection of this.connections) connection.stop();
   }
 
   private emit(): void {
     for (const listener of this.listeners) listener();
+    this.autoJoin.poke();
+  }
+
+  /** Pairs with a code a computer vouched with, exactly as a pasted code, and connects to each computer that joined. */
+  private async join(code: string): Promise<{ joined: string[]; failed: string[] }> {
+    const { fetch, runtimeId, origin } = this.deps;
+    const outcome = await pairComputers(code, { fetch, runtimeId, clientLabel: CLIENT_LABEL, origin });
+    if (outcome.paired.length) {
+      const all = mergePaired(this.connections.map((connection) => connection.paired), outcome.paired);
+      await this.deps.savePaired(all);
+      // A computer paired again replaces its old connection, as mergePaired replaces its record.
+      const urls = new Set(outcome.paired.map((computer) => computer.url));
+      for (const connection of this.connections) if (urls.has(connection.id)) connection.stop();
+      const added = outcome.paired.map((computer) => new HostConnection(computer, this.deps, () => this.emit()));
+      this.connections = [...this.connections.filter((connection) => !urls.has(connection.id)), ...added];
+      for (const connection of added) void connection.connect();
+      this.emit();
+    }
+    return { joined: outcome.paired.map((computer) => computer.name), failed: outcome.failed.map((failure) => failure.name) };
   }
 
   private connection(id: string): HostConnection {
@@ -753,6 +815,10 @@ export class HostHub implements PaneSource {
 
   cards(): Card[] {
     return orderCards(this.connections.flatMap((connection) => connection.cards()));
+  }
+
+  unjoined(): UnjoinedComputer[] {
+    return this.autoJoin.unjoined();
   }
 
   subscribe(listener: () => void): () => void {

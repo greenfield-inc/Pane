@@ -1,7 +1,7 @@
 // The demo: sample computers, cards and terminals that live in the app, with no network.
 // Even review needs it, and anyone can try every screen before pairing.
 import type { NotifyAnswer } from '../../shared/types/notify';
-import { CHOICE_KEYS, GlassesError, orderCards, type Card, type Computer, type Dictation, type PaneEntry, type PaneSource, type TerminalKey, type TerminalScreen } from './model';
+import { CHOICE_KEYS, GlassesError, orderCards, type Card, type Computer, type Dictation, type PaneEntry, type PaneSource, type TerminalKey, type TerminalScreen, type UnjoinedComputer } from './model';
 import type { Cancel } from './timers';
 
 const MINUTE = 60_000;
@@ -119,6 +119,10 @@ export class DemoSource implements PaneSource {
 
   cards(): Card[] {
     return orderCards(this.items);
+  }
+
+  unjoined(): UnjoinedComputer[] {
+    return [];
   }
 
   subscribe(listener: () => void): () => void {

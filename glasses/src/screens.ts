@@ -2,7 +2,7 @@
 // list is homeList.ts).
 // Each returns a page of boxes at G2 scale; nothing here touches the bridge.
 import { BRIGHT, DIM, DIMMER, LIST_PAD, type Box, type Brightness, type ListBox, type Page, type TextBox } from './display';
-import type { Card, Computer, HostRefusal, PaneEntry } from './model';
+import { JOIN_REASONS, type Card, type Computer, type HostRefusal, type PaneEntry } from './model';
 import { isRule } from './terminal';
 import { LINE_H, SCREEN_H, SCREEN_W, fitLine, wrap, wrapClamped } from './text';
 
@@ -307,6 +307,35 @@ export function awayPage(computer: Computer, clock: (epochMs: number) => string,
       header(`${name} · ${computer.status === 'connecting' ? 'connecting' : 'offline'}`),
       body(`${text}\n\nPress to retry now.`, { y: 36, h: 220, capture: true }),
       footer('press = retry   double press = back'),
+    ],
+  };
+}
+
+/** What a reason a computer couldn't join means, and what to do about it. */
+function unjoinedText(name: string, reason: string): string {
+  switch (reason) {
+    case JOIN_REASONS.older:
+      return `${name} runs an older Pane, so these glasses can't join it by themselves.\nUpdate Pane on ${name}. It joins within 10 minutes.`;
+    case JOIN_REASONS.revoked:
+      return `These glasses were revoked on ${name}, so your other computers don't add them there.\nTo use them on ${name} again, pair from the Pane phone app: Settings › Glasses › Pair glasses.`;
+    case JOIN_REASONS.password:
+      return `${name} has a password, and none of your paired computers has it saved.\nConnect to ${name} once from Pane on one of them to save it. It joins within 10 minutes.`;
+    case JOIN_REASONS.funnel:
+      return `Funnel is on for Pane on ${name}, so it refuses glasses.\nTurn Funnel off for port 8443 on ${name}. It joins within 10 minutes.`;
+    case JOIN_REASONS.silent:
+      return `${name} didn't answer your other computers.\nCheck that Pane is open on it and Tailscale is on. It joins within 10 minutes.`;
+    default:
+      return `These glasses can't join ${name} by themselves: ${reason}.`;
+  }
+}
+
+/** A press on the row of a computer that couldn't join: why, and what to do. */
+export function unjoinedPage(name: string, reason: string): Page {
+  return {
+    boxes: [
+      header(`${name} · can't join`),
+      body(unjoinedText(name, reason), { y: 36, h: 220, capture: true }),
+      footer('double press = back'),
     ],
   };
 }

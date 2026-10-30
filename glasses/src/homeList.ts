@@ -3,12 +3,12 @@
 // with its computer's mark and the first five letters of its name.
 //
 // The API other screens build on, kept small:
-// - homeRows(computers, cards): the merged rows, in order. Identity is `key` (computer + id).
+// - homeRows(computers, cards, unjoined): the merged rows, in order. Identity is `key` (computer + id).
 // - homeListPage(rows, view, clock): the page that shows them, in the LIST_MARKS style.
 // - outlineRowAt(rows, index): the row a native list press names (outline marks only).
 import { BRIGHT, DIM, DIMMER, LIST_PAD, MAX_LIST_ITEMS, type Box, type Brightness, type ImageBox, type Page, type TextBox } from './display';
 import { drawLogoStrip, type StripMark } from './logos';
-import type { Card, Computer, MachineOs, PaneEntry } from './model';
+import type { Card, Computer, MachineOs, PaneEntry, UnjoinedComputer } from './model';
 import { SCREEN_H, SCREEN_W, fitLine, wrapClamped, LINE_H } from './text';
 
 /**
@@ -39,8 +39,8 @@ export type HomeRow =
   | (RowBase & { kind: 'info'; card: Card })
   | (RowBase & { kind: 'entry'; entry: PaneEntry })
   /**
-   * A computer with nothing to list: one that is away and has no rows yet. `reason` replaces the
-   * status text, for a computer that can't join (1.9 adds those, one row per computer).
+   * A computer with nothing to list: one that is away and has no rows yet, or, with `reason`, one
+   * of yours that couldn't join the glasses (the reason replaces the status text).
    */
   | (RowBase & { kind: 'computer'; reason?: string });
 
@@ -52,10 +52,10 @@ function asksAbout(card: Card, entry: PaneEntry): boolean {
 /**
  * Every computer's rows merged, the way the cards merge: waiting questions first (in card order,
  * newest first), then info cards in card order, then every Session and Pane newest activity first,
- * then one row for each away computer with nothing to list. A computer that goes away keeps its
- * rows, marked by `status`.
+ * then one row for each away computer with nothing to list, then one dim row for each computer that
+ * couldn't join. A computer that goes away keeps its rows, marked by `status`.
  */
-export function homeRows(computers: readonly Computer[], cards: readonly Card[]): HomeRow[] {
+export function homeRows(computers: readonly Computer[], cards: readonly Card[], unjoined: readonly UnjoinedComputer[] = []): HomeRow[] {
   const base = (computer: Computer, slot: number) => ({
     computerId: computer.id, machine: computer.name, os: computer.os, slot, status: computer.status, lastSeenAt: computer.lastSeenAt,
   });
@@ -81,7 +81,11 @@ export function homeRows(computers: readonly Computer[], cards: readonly Card[])
   });
   // A stable sort keeps each computer's own order among rows with the same time.
   entries.sort((a, b) => (b.entry.activityAt ?? 0) - (a.entry.activityAt ?? 0));
-  return [...questions, ...infos, ...entries, ...away];
+  const outside = unjoined.map((computer, index): HomeRow => ({
+    kind: 'computer', key: `unjoined|${computer.name}`, computerId: `unjoined|${computer.name}`, machine: computer.name, os: null,
+    slot: computers.length + index, status: 'offline', lastSeenAt: null, reason: computer.reason,
+  }));
+  return [...questions, ...infos, ...entries, ...away, ...outside];
 }
 
 /** What an away computer's rows say instead of their status. */

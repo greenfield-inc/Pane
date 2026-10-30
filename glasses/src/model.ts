@@ -62,6 +62,23 @@ export interface Computer {
 
 export type PaneStatus = 'working' | 'idle' | 'needs you' | 'stopped';
 
+/** Why one of your computers couldn't join these glasses, in the vouching computer's words. */
+export const JOIN_REASONS = {
+  older: 'update Pane there',
+  revoked: 'revoked here · pair from phone',
+  password: 'needs its password',
+  funnel: 'Funnel is on',
+  silent: 'not answering',
+} as const;
+
+/** A computer of yours the glasses lack and couldn't join on their own. */
+export interface UnjoinedComputer {
+  /** Its Tailscale machine name, such as "office-pc". */
+  name: string;
+  /** One of JOIN_REASONS, or a newer Pane's own words. */
+  reason: string;
+}
+
 /** A Session or a Pane on one computer, with the terminal the glasses open for it. */
 export interface PaneEntry {
   kind: 'session' | 'pane';
@@ -113,6 +130,8 @@ export interface PaneSource {
   computers(): Computer[];
   /** Every card from every computer, in display order. */
   cards(): Card[];
+  /** Your computers that couldn't join these glasses on their own, and why. */
+  unjoined(): UnjoinedComputer[];
   subscribe(listener: () => void): () => void;
   /** Rejects with code SCREEN_RECONNECTING while the computer is still reconnecting. */
   screen(computerId: string, panelId: string): Promise<TerminalScreen>;
