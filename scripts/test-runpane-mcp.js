@@ -317,11 +317,32 @@ test('workspace write needs yes from the server, then writes the content it was 
         assert.match(refused.content[0].text, /refused the call and nothing ran/);
         assert.deepEqual(requests, []);
 
+        const empty = await client.callTool({ name: 'workspace_write', arguments: { path: target, yes: true } });
+        assert.equal(empty.isError, true);
+        assert.match(empty.content[0].text, /content is required/);
+        assert.deepEqual(requests, []);
+
         const written = await client.callTool({ name: 'workspace_write', arguments: { path: target, content: '- [ ] ship\n', yes: true } });
         assert.notEqual(written.isError, true, written.content[0].text);
         assert.deepEqual(written.structuredContent, { ok: true, machine: null, path: target, bytes: 11 });
         assert.deepEqual(requests.map((request) => request.args[0]), [{ path: target, content: '- [ ] ship\n', encoding: 'utf8' }]);
       }, { args: [], env: { PANE_DIR: paneDir } });
+    });
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
+});
+
+test('workspace read returns file contents exactly as written, CLI commands included', async () => {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-mcp-'));
+  const target = path.join(paneDir, 'notes.md');
+  const content = 'Use `runpane repos list` to find the repo.\n';
+  try {
+    await withStubDaemon(paneDir, { 'runpane:machine:read': { path: target, content, encoding: 'utf8', bytes: 44 } }, async () => {
+      const result = await withMcpClient((client) => client.callTool({ name: 'workspace_read', arguments: { path: target } }), { args: [], env: { PANE_DIR: paneDir } });
+
+      assert.notEqual(result.isError, true, result.content[0].text);
+      assert.equal(result.structuredContent.content, content);
     });
   } finally {
     fs.rmSync(paneDir, { recursive: true, force: true });

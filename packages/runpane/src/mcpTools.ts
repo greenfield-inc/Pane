@@ -93,6 +93,9 @@ const REST_PATTERN = /^-- <([a-z][a-z0-9-]*)>$/;
 // Clients sometimes send numeric flags such as timeoutMs as JSON numbers.
 const flagValueSchema = boundary.union(boundary.string, boundary.number);
 export const CONFIRM_FLAG = '--yes';
+// A tool call has no stdin, so a flag that stands in for stdin is required. Without --content,
+// workspace write would replace the file with nothing.
+const STDIN_STAND_IN_FLAGS = new Set(['--content']);
 const CONFIRM_DESCRIPTION = 'Confirm this change (the CLI\'s --yes). Pane refuses mutating calls without it.';
 
 type ContractFlag = McpToolContract['flags'][string][number];
@@ -171,9 +174,9 @@ function buildTool(
         type: parameter.takesValue ? 'string' : 'boolean',
         description: placeholder ? `${baseDescription} Expects ${placeholder}.`.trim() : baseDescription,
       };
-    const isRequired = !isConfirm
+    const isRequired = STDIN_STAND_IN_FLAGS.has(flag) || (!isConfirm
       && command.usage.every((line) => requiredFlagsIn(line).has(flag))
-      && (contextArg === undefined || contextArg.required === true);
+      && (contextArg === undefined || contextArg.required === true));
     if (isRequired) required.push(parameter.property);
   }
 
@@ -284,6 +287,9 @@ export function buildToolArgv(tool: McpTool, input: JsonObject = {}): string[] {
   }
   for (const parameter of tool.parameters) {
     const value = input[parameter.property];
+    if (STDIN_STAND_IN_FLAGS.has(parameter.flag) && (value === undefined || value === null)) {
+      throw new Error(`${parameter.property} is required. Pass the full new text; an empty string empties the file.`);
+    }
     if (parameter.positional || value === undefined || value === null || value === false) continue;
     if (!parameter.takesValue) {
       if (value !== true) throw new Error(`${parameter.property} must be a boolean.`);

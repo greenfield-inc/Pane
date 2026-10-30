@@ -2875,7 +2875,7 @@ export const RUNPANE_CONTRACT = {
         "The MCP server ships in the npm package and inside the Pane app. The Python package does not include it.",
         "",
         "Options:",
-        "  --toolsets <name,...>          core (default), all, read, repos, panes, panels, agents, sessions, git, docs, links, admin",
+        "  --toolsets <name,...>          core (default), all, read, repos, panes, panels, agents, sessions, workspace, git, docs, links, admin",
         "  --read-only                    Serve only read-only tools"
       ],
       "agents doctor": [
@@ -17258,7 +17258,7 @@ export const RUNPANE_CONTRACT = {
             "name": "--content",
             "value": "<text>",
             "required": false,
-            "description": "Text that replaces the file. Without it, stdin is written, so a caller with no stdin (an MCP tool) writes an empty file."
+            "description": "Text that replaces the file; an empty string empties it. Without it, the CLI writes stdin. The MCP tool requires it."
           },
           {
             "name": "--json",

@@ -108,7 +108,7 @@ Automated tests cover the registration and link logic on every OS. Check these b
 **macOS, Windows, and Linux**
 
 1. Install and launch Pane, with Claude Code, Codex, and Cursor installed.
-2. Run `claude mcp list`, `codex mcp list`, and `agent mcp list`. Each lists `pane`. If Cursor asks for approval, run `agent mcp enable pane`; it should report ready with 24 core tools.
+2. Run `claude mcp list`, `codex mcp list`, and `agent mcp list`. Each lists `pane`. If Cursor asks for approval, run `agent mcp enable pane`; it should report ready with 34 core tools.
 3. In a fresh `claude` session, ask "Use Pane to list my repos". It calls `repos_list`.
 4. Quit and relaunch Pane. The Claude, Codex, and Cursor configs are unchanged.
 5. Turn off **Settings → AI & Agents → Register Pane tools with Claude Code, Codex, and Cursor**. `pane` is gone from all three configs, and the other entries are unchanged.
@@ -161,7 +161,7 @@ Tools are generated from [`contracts/runpane/contract.json`](../contracts/runpan
 - Every command that has result `jsonSchemas` becomes a tool. Spaces and hyphens in the name become underscores: `repos list` → `repos_list`, `panels submit-composer` → `panels_submit_composer`.
 - The tool's inputs are the flags from the command's `usage` lines and its `agentContext` arguments, in camelCase (`--timeout-ms` → `timeoutMs`). Flags that take a value are strings and flags without one are booleans, unless the `agentContext` argument declares a JSON `schema` (an enum, array, or object); array and object values reach the CLI as JSON (`--choices=[...]`). Daemon commands also accept `paneDir`. Positional `agentContext` arguments become string inputs too: `<machine>` and `<path>` go where the first usage line puts them, and `-- <command>` becomes `command`, passed after `--`.
 - The description combines the command's summary, details, and notes from `agentContext`. The title is `runpane <command>`.
-- The output schema is the command's `*Result` JSON schema. Every call runs `runpane <command> … --json` and returns its JSON output unchanged, both as `structuredContent` and as a text block for older clients.
+- The output schema is the command's `*Result` JSON schema. Every call runs `runpane <command> … --json` and returns its JSON output, both as `structuredContent` and as a text block for older clients. Mentions of `runpane <command>` in that output are rewritten to name the tool, except in `docs` and `workspace` tools, whose file contents and command output come back unchanged.
 - A non-zero exit returns a tool error (`isError: true`). A CLI failure reads as its message, a `Next:` line that names tools instead of CLI commands, and a `Code:` line; a command's own `ok: false` result comes back as its JSON. Bad arguments are tool errors too, so the model can correct them. An unknown tool name is a JSON-RPC Invalid Params error (`-32602`).
 - Annotations come from the contract. `readOnlyHint` is the inverse of `mutates`. A mutating tool is `destructiveHint: true` unless the command is marked `additive`. `idempotentHint` and `openWorldHint` follow the `idempotent` and `openWorld` fields.
 - Values are passed as `--flag=value`, so a value may start with `-` (for example `- [ ] item`).

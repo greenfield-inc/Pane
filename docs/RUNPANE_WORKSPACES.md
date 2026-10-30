@@ -16,7 +16,7 @@ runpane workspace <machine> <runpane command>     # e.g. sessions list --json
 
 `runpane workspace list` shows your own machines first, then other people's machines on the tailnet labeled with their owner's login (`tylers-mac-mini (macOS, online, owner tbrownio@github)`). Each machine decides who it lets in. A machine set to "Only me" refuses other logins, and the error says how its owner can change that. A path shaped like another OS's (`C:\...` on a Mac) routes only to your own machines; reach someone else's machine by name.
 
-Agents can call them as MCP tools too: `workspace_list`, `workspace_read`, `workspace_write`, and `workspace_exec` are in the [Pane MCP server](PANE_MCP.md#toolsets)'s default toolset.
+Agents can call them as MCP tools too: `workspace_list`, `workspace_read`, `workspace_write`, and `workspace_exec` are in the [Pane MCP server](PANE_MCP.md#toolsets)'s default toolset. `workspace_write` requires `content`, since a tool call has no stdin, and file contents and command output come back exactly as the CLI's `--json` prints them.
 
 These commands ship in the npm CLI (`npm i -g runpane`, or `npx --yes runpane@latest workspace list`). The Python package prints the workspaces status block but does not run them.
 

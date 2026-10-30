@@ -223,12 +223,15 @@ async function callTool(
     return errorResult(`Invalid arguments for ${tool.name}: ${error instanceof Error ? error.message : String(error)}`);
   }
   const { code, stdout, stderr } = await runCli(argv, signal, env);
-  // Docs come back as written; everything else speaks in tool names.
-  const translate = tool.toolsets.includes('docs') ? (text: string) => text : rewrite;
+  // Docs come back as written; everything else speaks in tool names. Workspace results carry file
+  // contents and command output, which come back verbatim; only their errors are translated.
+  const asWritten = (text: string) => text;
+  const translate = tool.toolsets.includes('docs') ? asWritten : rewrite;
+  const translateOutput = tool.toolsets.includes('workspace') ? asWritten : translate;
   const failure = code !== 0 ? decodeFailure(stdout) : undefined;
-  const text = translate(failure
-    ? [failure.message, ...(failure.next ? [`Next: ${failure.next}`] : []), `Code: ${failure.code}`].join('\n')
-    : stdout.trim() || stderr.trim() || `runpane ${tool.command} exited with code ${code}`);
+  const text = failure
+    ? translate([failure.message, ...(failure.next ? [`Next: ${failure.next}`] : []), `Code: ${failure.code}`].join('\n'))
+    : translateOutput(stdout.trim() || stderr.trim() || `runpane ${tool.command} exited with code ${code}`);
   if (code !== 0) {
     const unconfirmed = !argv.includes(CONFIRM_FLAG) && tool.parameters.some((parameter) => parameter.flag === CONFIRM_FLAG);
     return errorResult(unconfirmed ? `${text}\nIf Pane refused the change, pass \`yes: true\` to confirm it.` : text);
