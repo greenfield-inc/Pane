@@ -85,7 +85,7 @@ export function AgentStep({ agents, disabled, onPick }: AgentStepProps) {
           );
         })}
       </div>
-      <p className="text-sm text-text-secondary">Pane runs it for you. You can change it later in Settings.</p>
+      <p className="text-sm text-text-secondary">Pane runs it for you, with its permission prompts off. You can change it later in Settings.</p>
     </div>
   );
 }

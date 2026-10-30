@@ -311,9 +311,13 @@ else:
 
 1. **Which agent do you use?** Claude Code, Codex or Cursor, showing only the
    agents this computer supports. An agent whose CLI Pane can't find says "Not
-   found on this computer", with an install link. The pick becomes the
-   Onboarding Session's agent and the default for new Sessions (Settings → AI &
-   Agents).
+   found on this computer", with an install link. The screen says Pane runs it
+   with its permission prompts off, as Pane always launches these agents.
+   Picking Claude Code records Claude's own acceptance of its one-time
+   bypass-permissions warning (`skipDangerousModePermissionPrompt` in
+   `~/.claude/settings.json`), so that warning never stops the chat. The pick
+   becomes the Onboarding Session's agent and the default for new Sessions
+   (Settings → AI & Agents).
 2. **Bring your N sessions into Pane?** Pane looks for sessions from Claude
    Code, Codex, Conductor, Superset, Herdr, Emdash, Orca and T3 Code on this
    computer and counts those running now or used in the last 7 days. Pane opens

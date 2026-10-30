@@ -825,6 +825,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     findWslRepos: (distro: string): Promise<IPCResponse> => invokeIpc('onboarding:find-wsl-repos', distro),
     checkFolder: (folder: string): Promise<IPCResponse> => invokeIpc('onboarding:check-folder', folder),
     findAgents: (): Promise<IPCResponse> => invokeIpc('onboarding:find-agents'),
+    acceptClaudePermissions: (): Promise<IPCResponse> => invokeIpc('onboarding:accept-claude-permissions'),
     firstSteps: (): Promise<IPCResponse> => invokeIpc('onboarding:first-steps'),
     supportProject: (): Promise<IPCResponse> => invokeIpc('onboarding:support-project'),
   },
