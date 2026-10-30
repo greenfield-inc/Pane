@@ -1064,14 +1064,23 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void
       await vi.advanceTimersByTimeAsync(1_000);
       expect(menuKeys(handle)).toEqual(['\x1b[B', '\r']);
 
-      const elsewhere = makePanel('claude-session-elsewhere');
-      elsewhere.state.customState = { agentType: 'claude', orchestrationSessionId: 'other-session' };
-      const other = await startTerminal(elsewhere);
-      other.handle.emit('$ ');
-      await vi.advanceTimersByTimeAsync(1_000);
-      other.handle.emit(trustMenu(path.join(sessionWorkspacePath('other-session'), 'project'), 'Yes'));
-      await vi.advanceTimersByTimeAsync(1_000);
-      expect(menuKeys(other.handle)).toEqual([]);
+      // A launcher can start Claude in a project whose path resembles the Session folder.
+      const sessionFolder = sessionWorkspacePath('other-session');
+      const projects = [
+        path.join(sessionFolder, 'project'),
+        path.join('/tmp/project/sessions', path.basename(sessionFolder)),
+        `${sessionFolder}-project`,
+      ];
+      for (const [index, project] of projects.entries()) {
+        const elsewhere = makePanel(`claude-session-elsewhere-${index}`);
+        elsewhere.state.customState = { agentType: 'claude', orchestrationSessionId: 'other-session' };
+        const other = await startTerminal(elsewhere);
+        other.handle.emit('$ ');
+        await vi.advanceTimersByTimeAsync(1_000);
+        other.handle.emit(trustMenu(project, 'Yes'));
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(menuKeys(other.handle)).toEqual([]);
+      }
     } finally {
       vi.useRealTimers();
     }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { detectAgentBackgroundWork, detectAgentComposer, detectAgentFromScreen, screenShowsQueuedMessage } from './agentScreenSignature';
+import { claudeFolderTrustKey, detectAgentBackgroundWork, detectAgentComposer, detectAgentFromScreen, screenShowsQueuedMessage } from './agentScreenSignature';
 import { CLAUDE_API_ENOTFOUND_SCREEN, CLAUDE_API_SLEEP_SCREEN } from '../agentStatus/__fixtures__/claudeApiErrorScreens';
 
 const rule = '─'.repeat(40);
@@ -191,5 +191,25 @@ describe('a Claude turn that ended on an API error', () => {
   it('shows no background work, so a missing report is not held back', () => {
     expect(detectAgentBackgroundWork(CLAUDE_API_ENOTFOUND_SCREEN, 'claude')).toBeUndefined();
     expect(detectAgentBackgroundWork(CLAUDE_API_SLEEP_SCREEN, 'claude')).toBeUndefined();
+  });
+});
+
+describe('claudeFolderTrustKey', () => {
+  const menu = (pathLines: string[], selected: 'No' | 'Yes') => [
+    ' Accessing workspace:', '', ...pathLines, '',
+    " Claude Code'll be able to read, edit, and execute files here.", '',
+    ` ${selected === 'No' ? '❯' : ' '} No, exit`, ` ${selected === 'Yes' ? '❯' : ' '} Yes, I trust this folder`,
+  ].join('\n');
+  const folder = '/Users/me/.pane/sessions/__orchestration_session_0123__';
+
+  it('moves to Yes, then confirms, for the folder itself, wrapped across lines or not', () => {
+    expect(claudeFolderTrustKey(menu([` ${folder}`], 'No'), folder)).toBe('\x1b[B');
+    expect(claudeFolderTrustKey(menu([' /Users/me/.pane/sessions/__orches', 'tration_session_0123__'], 'Yes'), folder)).toBe('\r');
+  });
+
+  it('leaves any other path unanswered', () => {
+    for (const other of ['/tmp/project/sessions/__orchestration_session_0123__', `${folder}-project`, `${folder}/project`]) {
+      expect(claudeFolderTrustKey(menu([` ${other}`], 'Yes'), folder)).toBeUndefined();
+    }
   });
 });
