@@ -217,10 +217,9 @@ the phone id, and the glasses may ask once
 every 5 minutes. A password-protected computer is asked only when this computer has its password
 saved; one whose Pane is too old to remember revokes is skipped.
 
-Beyond reading and typing, a glasses token gains exactly two commands: adding these same glasses
-to your other computers, and starting a Session. It cannot create a Pane, pair another device,
-reach anyone else's computer, change settings, write files, commit, run machine commands, or choose
-what a terminal runs, and its event stream never carries terminal output.
+A glasses token cannot create a Pane, pair any device other than these same glasses on your other
+computers, reach anyone else's computer, change settings, write files, commit, run machine
+commands, or choose what a terminal runs, and its event stream never carries terminal output.
 
 Typing into a terminal can run commands, so treat the glasses like your phone: whoever holds a
 working token on your tailnet and login can type into your shells. The Even app serves the glasses
