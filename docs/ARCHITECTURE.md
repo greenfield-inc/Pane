@@ -161,6 +161,16 @@ Preview components never enter the editable auto-save path, even on errors.
 
 ## Notes
 
+Notes is experimental and off by default: Settings → Advanced → Notes
+(`notesEnabled`). While it is off, Pane hides the Notes tab type, the add-tab
+entries and the terminal's Add to notes action, shows a one-line pointer to the
+setting in a restored Notes tab, gives new terminals an empty `PANE_NOTES_FILE`,
+leaves the scoped-notes instruction out of user agent files, and removes scoped
+notes from repository `AGENTS.md` and `CLAUDE.md` exports. Saved notes stay on
+disk. Turning it on restores the UI, the instruction and repository exports
+right away; terminals opened while it was off need reopening to get
+`PANE_NOTES_FILE`.
+
 Local Notes panels use `main/src/services/notes.ts` through `main/src/ipc/notes.ts`.
 Canonical documents live in `<PANE_DIR>/notes/notes.json`, outside disposable
 worktrees. A revision check rejects stale edits; writes atomically replace the
@@ -179,7 +189,7 @@ labels in agent-facing Markdown. Global destinations are Claude's user
 `rules/pane-memories.mdc`. Cursor CLI also receives the generated memory through
 a user `sessionStart` hook (`cursorNoteHook.ts`), preserving existing hooks.
 Scoped content is exported outside repositories to
-`<PANE_DIR>/notes/contexts/<pane-id>.md`. Each new native Pane terminal receives
+`<PANE_DIR>/notes/contexts/<pane-id>.md`. While Notes is on, each new native Pane terminal receives
 its path through `PANE_NOTES_FILE`; the user-level integration tells agents to
 read that file before each turn. Project contexts contain only that project's
 notes plus the current feature; Session contexts contain only Session notes.

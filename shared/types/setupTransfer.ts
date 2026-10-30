@@ -109,6 +109,7 @@ export interface SetupPreferenceConfig {
   voiceTranscriptionMode?: VoiceTranscriptionMode;
   missionControlEnabled?: boolean;
   experimentalChatEnabled?: boolean;
+  notesEnabled?: boolean;
   sessionCreationPreferences?: SetupSessionCreationPreferences;
 }
 

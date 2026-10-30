@@ -73,7 +73,8 @@ The tool panel system supports 9 panel types (`ToolPanelType` in `shared/types/p
 7. **Setup Tasks** (`setup-tasks`): project setup checklist. Singleton,
    permanent, projects only.
 8. **Browser** (`browser`): embedded browser. Worktrees only.
-9. **Notes** (`notes`): the Pane's notes. Singleton.
+9. **Notes** (`notes`): the Pane's notes. Singleton. Experimental: hidden
+   until Settings → Advanced → Notes is on.
 
 ## Panel Capabilities
 
