@@ -96,14 +96,14 @@ export function registerWorkspaceAccessHandlers(
     return commandRegistry.invoke(GLASSES_COMMANDS.state);
   }));
   // The phone's revoke-everywhere, from this computer: here, then each of your computers that answers.
+  // A phone already revoked here can be sent again, to reach the computers the first try missed.
   ipcMain.handle('remote-daemon:revoke-glasses-everywhere', (_event, id) => respond('revoke the glasses on your computers', async (): Promise<GlassesRevokeEverywhereResult> => {
-    const deviceId = decodeBoundary(id, boundary.nonEmptyString);
-    const { devices } = decodeBoundary(await commandRegistry.invoke(GLASSES_COMMANDS.list), glassesListSchema);
-    const phoneId = devices.find((device) => device.id === deviceId)?.phoneId;
-    if (!phoneId) {
+    const phoneId = decodeBoundary(id, boundary.nonEmptyString);
+    const { devices, revokedPhoneIds = [] } = decodeBoundary(await commandRegistry.invoke(GLASSES_COMMANDS.list), glassesListSchema);
+    if (!devices.some((device) => device.phoneId === phoneId) && !revokedPhoneIds.includes(phoneId)) {
       throw new PaneError(
         'ERR_GLASSES_NOT_FROM_PHONE',
-        'These glasses are no longer paired here, or were paired before Pane recorded which phone paired them, so no computer was asked to revoke them.',
+        'No glasses from this phone are paired or revoked here, so no computer was asked to revoke them.',
         'Revoke them from the Pane phone app: Settings › Glasses › Revoke.',
       );
     }

@@ -1518,8 +1518,8 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           glassesState.devices = glassesState.devices.filter((device) => device.id !== id);
           return success(clone(glassesState));
         },
-        revokeGlassesEverywhere: (id: string) => {
-          glassesState.devices = glassesState.devices.filter((device) => device.id !== id);
+        revokeGlassesEverywhere: (phoneId: string) => {
+          glassesState.devices = glassesState.devices.filter((device) => device.phoneId !== phoneId);
           return success(clone(mockOptions.glassesRevokeEverywhere ?? { revoked: ['this computer'], notReached: [] }));
         },
         setGlassesOrigin: (update: { origin: string; allowed: boolean }) => {

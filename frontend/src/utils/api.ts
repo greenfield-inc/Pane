@@ -814,9 +814,9 @@ export class API {
       return window.electronAPI.remoteDaemon.revokeGlasses(id);
     },
 
-    async revokeGlassesEverywhere(id: string) {
+    async revokeGlassesEverywhere(phoneId: string) {
       if (!isElectron()) throw new Error('Electron API not available');
-      return window.electronAPI.remoteDaemon.revokeGlassesEverywhere(id);
+      return window.electronAPI.remoteDaemon.revokeGlassesEverywhere(phoneId);
     },
 
     async setGlassesOrigin(update: { origin: string; allowed: boolean }) {

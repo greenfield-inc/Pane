@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { createDefaultRemoteDaemonConfig, type RemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
 import type { PaneCommandValue } from '../daemon/commandRegistry';
 import type { WorkspaceProbe } from '../services/tailnetMachines';
+import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+import { GLASSES_COMMANDS } from '../../../shared/types/glasses';
 import { registerWorkspaceAccessHandlers } from './workspaceAccess';
 
 type Handler = (_event: { readonly sender: object }, ...args: PaneCommandValue[]) => Promise<PaneCommandValue>;
@@ -19,7 +21,7 @@ interface TestConfig {
   remoteDaemon?: RemoteDaemonConfig;
 }
 
-function setup() {
+function setup(options: { invoke?: (channel: string, args?: PaneCommandValue[]) => Promise<PaneCommandValue>; readStatus?: () => Promise<string | null> } = {}) {
   const handlers = new Map<string, Handler>();
   let config: TestConfig = { remoteDaemon: createDefaultRemoteDaemonConfig() };
   const secretsSeen: Array<string | undefined> = [];
@@ -40,8 +42,8 @@ function setup() {
         },
       },
     },
-    { invoke: async () => null },
-    { readStatus: async () => JSON.stringify(status), probe, call: async () => ({ kind: 'unreachable', detail: 'not used' }) },
+    { invoke: options.invoke ?? (async () => null) },
+    { readStatus: options.readStatus ?? (async () => JSON.stringify(status)), probe, call: async () => ({ kind: 'unreachable', detail: 'not used' }) },
   );
   const call = (channel: string, ...args: PaneCommandValue[]) => {
     const handler = handlers.get(channel);
@@ -91,6 +93,47 @@ describe('codeless machine connections', () => {
     await expect(call('remote-daemon:save-tailnet-machine', { name: 'gone' })).resolves.toEqual({
       success: false,
       error: 'gone is not on your current tailnet (example.org).',
+    });
+  });
+});
+
+describe('revoking glasses on all my computers from Settings', () => {
+  it('can be sent again after discovery failed, once the row is gone, without pairing anything back', async () => {
+    let devices = [{ id: 'g2', label: 'Even G2', phoneId: 'pane-native-a', createdAt: '2026-10-29T08:00:00.000Z' }];
+    const revokedPhoneIds: string[] = [];
+    let tailscaleUp = false;
+    const { call } = setup({
+      readStatus: async () => (tailscaleUp ? JSON.stringify(status) : null),
+      invoke: async (channel, args) => {
+        if (channel === GLASSES_COMMANDS.list) return { devices, revokedPhoneIds };
+        if (channel === GLASSES_COMMANDS.revoke) {
+          devices = devices.filter((device) => device.id !== decodeBoundary(args?.[0] ?? null, boundary.object({ id: boundary.string })).id);
+          revokedPhoneIds.push('pane-native-a');
+          return { revoked: true };
+        }
+        if (channel === 'runpane:workspaces:access') return { machineName: 'devbox' };
+        throw new Error(`unexpected ${channel}`);
+      },
+    });
+
+    const first = await call('remote-daemon:revoke-glasses-everywhere', 'pane-native-a');
+    expect(first).toMatchObject({ success: false, error: expect.stringContaining('revoked the glasses on this computer only') });
+    expect(devices).toEqual([]);
+
+    tailscaleUp = true;
+    await expect(call('remote-daemon:revoke-glasses-everywhere', 'pane-native-a')).resolves.toEqual({
+      success: true,
+      data: { revoked: ['devbox'], notReached: [{ name: 'my-mac', reason: 'needs its password' }] },
+    });
+    expect(devices).toEqual([]);
+    expect(revokedPhoneIds).toEqual(['pane-native-a']);
+  });
+
+  it('refuses a phone that was never paired or revoked here', async () => {
+    const { call } = setup({ invoke: async () => ({ devices: [], revokedPhoneIds: [] }) });
+    await expect(call('remote-daemon:revoke-glasses-everywhere', 'pane-native-z')).resolves.toMatchObject({
+      success: false,
+      error: expect.stringContaining('No glasses from this phone are paired or revoked here'),
     });
   });
 });

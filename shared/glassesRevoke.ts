@@ -19,6 +19,7 @@ export const glassesListSchema: BoundarySchema<GlassesListResult> = boundary.obj
     createdAt: boundary.nonEmptyString,
     lastUsedAt: boundary.optional(boundary.nonEmptyString),
   })),
+  revokedPhoneIds: boundary.optional(boundary.array(boundary.string)),
 });
 
 /** The computer's Pane predates glasses: it doesn't know the glasses commands. */

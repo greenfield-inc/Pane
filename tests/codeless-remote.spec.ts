@@ -182,6 +182,7 @@ test.describe('Remote Access', () => {
     await glasses.getByRole('button', { name: 'Revoke Even G2 · Parsa\'s iPhone on all my computers' }).click();
     await expect(glasses.getByRole('status')).toHaveText('Revoked on Mac, devbox. Not reached: laptop (offline); revoke there when it is back.');
     await expect(glasses).toContainText('Pair from the Pane phone app');
+    await expect(glasses.getByRole('button', { name: 'Retry on my other computers' })).toBeVisible();
     await page.screenshot({ path: 'test-results/codeless-remote/glasses-revoke-everywhere-after.png', fullPage: true });
   });
 });

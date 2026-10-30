@@ -735,8 +735,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     listTailnetMachines: (): Promise<IPCResponse<TailnetMachineList>> => invokeIpc('remote-daemon:list-tailnet-machines'),
     getGlasses: (): Promise<IPCResponse<GlassesAccessState>> => invokeIpc('remote-daemon:get-glasses'),
     revokeGlasses: (id: string): Promise<IPCResponse<GlassesAccessState>> => invokeIpc('remote-daemon:revoke-glasses', id),
-    revokeGlassesEverywhere: (id: string): Promise<IPCResponse<GlassesRevokeEverywhereResult>> =>
-      invokeIpc('remote-daemon:revoke-glasses-everywhere', id),
+    revokeGlassesEverywhere: (phoneId: string): Promise<IPCResponse<GlassesRevokeEverywhereResult>> =>
+      invokeIpc('remote-daemon:revoke-glasses-everywhere', phoneId),
     setGlassesOrigin: (update: { origin: string; allowed: boolean }): Promise<IPCResponse<GlassesAccessState>> =>
       invokeIpc('remote-daemon:set-glasses-origin', update),
     saveTailnetMachine: (input: { name: string; password?: string }): Promise<IPCResponse<RemotePaneConnectionProfile>> =>

@@ -22,6 +22,8 @@ export function GlassesRows() {
   const [busy, setBusy] = useState(false);
   /** What the last revoke did, kept after its row is gone. */
   const [notice, setNotice] = useState<string | null>(null);
+  /** The phone whose revoke did not reach every computer, so it can be sent again after its row is gone. */
+  const [retryPhoneId, setRetryPhoneId] = useState<string | null>(null);
 
   const apply = useCallback(async (request: () => Promise<{ success: boolean; data?: GlassesAccessState; error?: string }>) => {
     const response = await request();
@@ -48,17 +50,19 @@ export function GlassesRows() {
     }
   };
 
-  const revokeEverywhere = async (id: string) => {
+  const revokeEverywhere = async (phoneId: string) => {
     setBusy(true);
     setNotice('Revoking on your computers…');
     try {
-      const response = await API.remoteDaemon.revokeGlassesEverywhere(id);
+      const response = await API.remoteDaemon.revokeGlassesEverywhere(phoneId);
       await apply(() => API.remoteDaemon.getGlasses());
       if (response.success && response.data) {
         setNotice(revokeEverywhereMessage(response.data));
+        setRetryPhoneId(response.data.notReached.length > 0 ? phoneId : null);
       } else {
         setNotice(null);
         setError(response.error ?? 'Could not revoke the glasses on your computers.');
+        setRetryPhoneId(phoneId);
       }
     } finally {
       setBusy(false);
@@ -72,25 +76,34 @@ export function GlassesRows() {
   return (
     <div id={settingDomId('remote-glasses')} data-setting-id="remote-glasses" tabIndex={-1} className="divide-y divide-border-secondary outline-none">
       {error && <p className={`text-sm text-status-error ${CARD_ROW}`} role="alert">{error}</p>}
-      {notice && <p className={`text-sm text-text-secondary ${CARD_ROW}`} role="status">{notice}</p>}
+      {(notice || retryPhoneId) && (
+        <div className={`flex items-center justify-between gap-3 ${CARD_ROW}`}>
+          <p className="text-sm text-text-secondary" role="status">{notice}</p>
+          {retryPhoneId && (
+            <Button type="button" variant="ghost" size="sm" className="flex-none" disabled={busy} onClick={() => void revokeEverywhere(retryPhoneId)}>
+              Retry on my other computers
+            </Button>
+          )}
+        </div>
+      )}
       {devices.length === 0 && (
         <DeviceRow title="Even G2 glasses" detail="Pair from the Pane phone app: Settings › Glasses › Pair glasses." />
       )}
-      {devices.map((device) => (
+      {devices.map(({ phoneId, ...device }) => (
         <DeviceRow
           key={device.id}
           title={device.label}
           detail={device.lastUsedAt ? `Last used ${new Date(device.lastUsedAt).toLocaleString()}` : 'Never used'}
         >
           <div className="flex flex-none items-center gap-2">
-            {device.phoneId && (
+            {phoneId && (
               <Button
                 type="button"
                 variant="ghost"
                 size="sm"
                 aria-label={`Revoke ${device.label} on all my computers`}
                 disabled={busy}
-                onClick={() => void revokeEverywhere(device.id)}
+                onClick={() => void revokeEverywhere(phoneId)}
               >
                 Revoke on all my computers
               </Button>

@@ -100,7 +100,7 @@ notification mirroring, as the title only ("planner has a question").
 - On a computer: **Settings › Remote Access › Devices**, then **Revoke** next to the glasses for
   that computer only, or **Revoke on all my computers** for this computer and every computer of
   yours it can reach. It names the computers it could not reach, such as "Not reached: laptop
-  (offline)"; revoke there when they are back.
+  (offline)", and offers **Retry on my other computers** while that page stays open.
 
 Revoking closes the glasses' connection to that computer within 5 seconds. A revoke sticks: your
 other computers can't add the glasses back to this one. Pairing the glasses again from the phone
