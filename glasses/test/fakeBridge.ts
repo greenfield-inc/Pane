@@ -1,11 +1,12 @@
-import type { CreateStartUpPageContainer, RebuildPageContainer, TextContainerUpgrade } from '@evenrealities/even_hub_sdk';
-import { StartUpPageCreateResult } from '@evenrealities/even_hub_sdk';
+import type { CreateStartUpPageContainer, ImageRawDataUpdate, RebuildPageContainer, TextContainerUpgrade } from '@evenrealities/even_hub_sdk';
+import { ImageRawDataUpdateResult, StartUpPageCreateResult } from '@evenrealities/even_hub_sdk';
 import type { GlassesBridge } from '../src/bridge';
 
 export type BridgeCall =
   | { method: 'create'; page: CreateStartUpPageContainer }
   | { method: 'rebuild'; page: RebuildPageContainer }
   | { method: 'upgrade'; update: TextContainerUpgrade }
+  | { method: 'image'; update: ImageRawDataUpdate }
   | { method: 'shutdown'; mode: number | undefined }
   | { method: 'audio'; on: boolean };
 
@@ -27,6 +28,11 @@ export class FakeBridge implements GlassesBridge {
   async textContainerUpgrade(update: TextContainerUpgrade) {
     this.calls.push({ method: 'upgrade', update });
     return true;
+  }
+
+  async updateImageRawData(update: ImageRawDataUpdate) {
+    this.calls.push({ method: 'image', update });
+    return ImageRawDataUpdateResult.success;
   }
 
   async shutDownPageContainer(mode?: number) {

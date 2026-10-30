@@ -43,14 +43,18 @@ export interface HostRefusal {
   retryAt?: number;
 }
 
+/** The computer's operating system, as its Pane reports it; null for an older Pane that doesn't. */
+export type MachineOs = 'macOS' | 'Windows' | 'Linux';
+
 export interface Computer {
   id: string;
   name: string;
   status: ComputerStatus;
   /** Epoch ms of the last sign of life, or null if never reached. */
   lastSeenAt: number | null;
-  paneCount: number;
-  workingCount: number;
+  os: MachineOs | null;
+  /** Its open Sessions and Panes as last read, kept while it is away. */
+  entries: PaneEntry[];
   refusal?: HostRefusal;
   /** For a computer that has never answered: how to allow this app on it. */
   hint?: string;
@@ -67,16 +71,8 @@ export interface PaneEntry {
   agent: string;
   status: PaneStatus;
   panelId: string;
-}
-
-/**
- * A row of a computer's Sessions and Panes, in the Pane apps' order: Pinned, then Sessions, a
- * blank `gap`, then Panes. A `note` stands in for Sessions the computer couldn't list.
- */
-export type PaneRow = PaneEntry | { kind: 'gap' } | { kind: 'note'; text: string };
-
-export function isPaneEntry(row: PaneRow): row is PaneEntry {
-  return row.kind === 'session' || row.kind === 'pane';
+  /** Epoch ms of its last activity on its computer, when known. */
+  activityAt?: number;
 }
 
 /** A menu choice's number: Claude Code and Codex pick that choice when it is pressed. */
@@ -113,11 +109,11 @@ export class GlassesError extends Error {
 /** Everything the glasses screens read and do; the demo and the paired computers both provide it. */
 export interface PaneSource {
   readonly demo: boolean;
+  /** Every paired computer with its Sessions and Panes, in pairing order. */
   computers(): Computer[];
   /** Every card from every computer, in display order. */
   cards(): Card[];
   subscribe(listener: () => void): () => void;
-  panes(computerId: string): Promise<PaneRow[]>;
   /** Rejects with code SCREEN_RECONNECTING while the computer is still reconnecting. */
   screen(computerId: string, panelId: string): Promise<TerminalScreen>;
   /** Older output, oldest line first: the last `lines` rows, or the source's own limit. */

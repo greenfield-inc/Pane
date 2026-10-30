@@ -6,6 +6,7 @@ export type GlassesBridge = Pick<
   | 'createStartUpPageContainer'
   | 'rebuildPageContainer'
   | 'textContainerUpgrade'
+  | 'updateImageRawData'
   | 'shutDownPageContainer'
   | 'audioControl'
   | 'setLocalStorage'

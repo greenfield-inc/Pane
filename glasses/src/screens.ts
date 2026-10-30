@@ -1,7 +1,8 @@
-// One function per glasses screen in the design reference (mockups v2: H3 home, C3 card, T3 terminal).
+// One function per glasses screen in the design reference (mockups v2: C3 card, T3 terminal; the home
+// list is homeList.ts).
 // Each returns a page of boxes at G2 scale; nothing here touches the bridge.
-import { BRIGHT, DIM, DIMMER, LIST_PAD, MAX_LIST_ITEMS, type Box, type Brightness, type ListBox, type Page, type TextBox } from './display';
-import type { Card, Computer, HostRefusal, PaneEntry, PaneRow } from './model';
+import { BRIGHT, DIM, DIMMER, LIST_PAD, type Box, type Brightness, type ListBox, type Page, type TextBox } from './display';
+import type { Card, Computer, HostRefusal, PaneEntry } from './model';
 import { isRule } from './terminal';
 import { LINE_H, SCREEN_H, SCREEN_W, fitLine, wrap, wrapClamped } from './text';
 
@@ -72,70 +73,6 @@ export function firstRunPage(): Page {
         'Pair with your computers once.\nOn your phone: Pane app > Settings > Glasses > Pair glasses.\nThen tap Paste in this app on your phone.\n\nPress for a demo with sample cards.',
         { y: 36, h: 252, capture: true },
       ),
-    ],
-  };
-}
-
-/** The confirmation that sits above the next home page after an answer. */
-function confirmationBox(text: string): TextBox {
-  const lines = wrap(text, innerWidth(10)).slice(0, 2);
-  return {
-    kind: 'text', name: 'confirm', x: 0, y: 36, w: SCREEN_W, h: lines.length * LINE_H + 37, pad: 10,
-    lines, border: true, brightness: BRIGHT,
-  };
-}
-
-/** The home body, below a confirmation when there is one. */
-function homeBody(text: string, confirmation: string | undefined): Box[] {
-  if (!confirmation) return [body(text, { y: 36, h: 220, capture: true })];
-  const confirm = confirmationBox(confirmation);
-  const y = confirm.y + confirm.h + 4;
-  return [confirm, body(text, { y, h: FOOTER_Y - y, capture: true })];
-}
-
-export interface HomePosition {
-  /** 1-based page number. */
-  index: number;
-  total: number;
-  computerCount: number;
-  confirmation?: string;
-}
-
-/** H3: one card per page with a page counter. */
-export function homeCardPage(card: Card, position: HomePosition): Page {
-  const kind = card.waiting ? 'needs you' : 'info';
-  const title = card.ui === 'approve' ? `Wants approval: ${card.title}` : card.title;
-  const text = card.waiting && card.context ? `${title}\n\n${card.context}` : card.context ? `${title}\n${card.context}` : title;
-  const hint = card.waiting
-    ? 'swipe = next   press = answer   hold = say it'
-    : card.panelId ? `swipe = next   press = open ${card.paneName}` : 'swipe = next';
-  return {
-    boxes: [
-      header(`${position.index}/${position.total} · ${kind} · ${card.paneName} · ${card.machine}`),
-      ...homeBody(text, position.confirmation),
-      footer(hint),
-    ],
-  };
-}
-
-/** H3's last page, the way into Panes. */
-export function openPanePage(position: HomePosition): Page {
-  return {
-    boxes: [
-      header(`${position.index}/${position.total} · ${paneTitle(position.computerCount)}`),
-      ...homeBody('Open a Pane…\n\nPick a computer, then a Pane or Session.', position.confirmation),
-      footer(position.total > 1 ? 'press = open   swipe up = back to cards' : 'press = open'),
-    ],
-  };
-}
-
-/** Nothing waiting: one page with the way into Panes. */
-export function allClearPage(computerCount: number, confirmation?: string): Page {
-  return {
-    boxes: [
-      header(`1/1 · ${paneTitle(computerCount)} · all clear`),
-      ...homeBody('Nothing needs you.\n\nOpen a Pane…', confirmation),
-      footer('press = open a Pane   double press = exit'),
     ],
   };
 }
@@ -213,87 +150,6 @@ export function voiceAnswerPage(card: Card, transcript: string): Page {
   };
 }
 
-/** What a computer row says: its Panes and work, or since when it has been away. */
-function computerRow(computer: Computer, clock: (epochMs: number) => string): string {
-  if (computer.status === 'live') {
-    const work = computer.workingCount ? `${computer.workingCount} working` : 'idle';
-    return `${computer.name} · ${plural(computer.paneCount, 'Pane')} · ${work}`;
-  }
-  if (computer.status === 'connecting') return `${computer.name} · connecting…`;
-  if (computer.status === 'refused') return `${computer.name} · refused · press for why`;
-  const since = computer.lastSeenAt ? ` since ${clock(computer.lastSeenAt)}` : '';
-  return `${computer.name} · offline${since} · press to retry`;
-}
-
-/** Where a list that starts mid-way wraps back to its first row. */
-const LIST_TOP = '· top of the list ·';
-
-/** Every row from `start` to the end, the divider (null), then the rows above `start`. */
-function rotated(count: number, start: number): Array<number | null> {
-  const all = Array.from({ length: count }, (_, index) => index);
-  if (start <= 0 || start >= count) return all;
-  return [...all.slice(start), null, ...all.slice(0, start)];
-}
-
-/**
- * The rows of a list in the order shown: from `start` to the end, the divider (null), then the
- * rows above `start`. A native list always opens on its first row, so this is how a list comes
- * back on the row you left. A native list holds 20 rows, so a longer one ends in a `more` row
- * after 19; pressing it starts the list at `moreStart`. Press on shown row i acts on rows[order[i]].
- */
-export function rowOrder(count: number, start: number): Array<number | null | 'more'> {
-  const order = rotated(count, start);
-  return order.length > MAX_LIST_ITEMS ? [...order.slice(0, MAX_LIST_ITEMS - 1), 'more'] : order;
-}
-
-/** Where the list continues after its `more` row: the first row it left out. */
-export function moreStart(count: number, start: number): number {
-  return rotated(count, start)[MAX_LIST_ITEMS - 1] ?? 0;
-}
-
-/** The text of each shown row: `text` for a row, the divider, and "· 71 more ·". */
-function shownRows(count: number, start: number, text: (index: number) => string): string[] {
-  const order = rowOrder(count, start);
-  const hidden = count - order.filter((index) => index !== null && index !== 'more').length;
-  return order.map((index) => (index === 'more' ? `· ${hidden} more ·` : index === null ? LIST_TOP : text(index)));
-}
-
-export function computersPage(computers: readonly Computer[], clock: (epochMs: number) => string, start = 0): Page {
-  const rows = shownRows(computers.length, start, (index) => computerRow(computers[index], clock));
-  return {
-    boxes: [
-      header('Open a Pane · pick a computer'),
-      list('computers', BAR_H, SCREEN_H - BAR_H, rows),
-    ],
-  };
-}
-
-function paneRowText(row: PaneRow): string {
-  switch (row.kind) {
-    case 'session': return `Session · ${row.name} · ${row.status}`;
-    case 'pane': return `${row.name} · ${row.agent} · ${row.status}`;
-    case 'note': return row.text;
-    case 'gap': return '';
-  }
-}
-
-export function panesPage(computerName: string, rows: readonly PaneRow[], start = 0): Page {
-  if (!rows.length) {
-    return {
-      boxes: [
-        header(`${computerName} · Sessions and Panes`),
-        body(`No open Sessions or Panes on ${computerName}.\n\nDouble press to go back.`, { y: 36, h: 252, capture: true }),
-      ],
-    };
-  }
-  return {
-    boxes: [
-      header(`${computerName} · Sessions and Panes`),
-      list('panes', BAR_H, SCREEN_H - BAR_H, shownRows(rows.length, start, (index) => paneRowText(rows[index]))),
-    ],
-  };
-}
-
 export const TERMINAL_LINES = linesFor(FOOTER_Y - BAR_H, BAR_PAD);
 /** A swipe moves half a page: the terminal shows two halves of this many lines. */
 export const HALF_PAGE = TERMINAL_LINES / 2;
@@ -320,7 +176,7 @@ export interface FooterLine {
 export function terminalFooter(elsewhere: Card | undefined, hint = 'all clear elsewhere'): FooterLine {
   if (!elsewhere) return { text: hint, brightness: DIMMER };
   const what = elsewhere.waiting ? `? ${elsewhere.paneName} needs you` : `• ${elsewhere.paneName}: ${elsewhere.title}`;
-  return { text: `${what} · double press for cards`, brightness: BRIGHT };
+  return { text: `${what} · double press for it`, brightness: BRIGHT };
 }
 
 export interface TerminalView {
@@ -426,11 +282,29 @@ export function dictationPage(entry: PaneEntry, lines: readonly string[], transc
   };
 }
 
+/** A press on an away computer's row: what is known, and Retry. */
+export function awayPage(computer: Computer, clock: (epochMs: number) => string, rowName?: string): Page {
+  const { name } = computer;
+  const from = rowName ? `${rowName} is from then.` : 'Its rows are from then.';
+  const text = computer.status === 'connecting'
+    ? `Connecting to ${name}…`
+    : computer.lastSeenAt === null
+      ? computer.hint ?? `Can't reach ${name}.`
+      : `${name} went offline at ${clock(computer.lastSeenAt)}.\n${from} Pane keeps trying by itself.`;
+  return {
+    boxes: [
+      header(`${name} · ${computer.status === 'connecting' ? 'connecting' : 'offline'}`),
+      body(`${text}\n\nPress to retry now.`, { y: 36, h: 220, capture: true }),
+      footer('press = retry   double press = back'),
+    ],
+  };
+}
+
 export function connectingPage(computerCount: number): Page {
   return loadingPage(paneTitle(computerCount), 'Connecting to your computers…');
 }
 
-export function loadingPage(title: string, text: string): Page {
+function loadingPage(title: string, text: string): Page {
   return { boxes: [header(title), body(text, { y: 36, h: 252, capture: true })] };
 }
 

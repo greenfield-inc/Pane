@@ -1,8 +1,10 @@
 // Adapted from GlanceCode (https://github.com/sousyllc/glancecode), MIT License, Copyright (c) 2026 Sousy LLC. See LICENSE.
 // Owns the glasses page. A screen is a list of boxes; this turns them into SDK containers and
-// sends the cheapest update: in-place text upgrades when the layout is unchanged, a rebuild otherwise.
+// sends the cheapest update: in-place text and image updates when the layout is unchanged, a rebuild otherwise.
 import {
   CreateStartUpPageContainer,
+  ImageContainerProperty,
+  ImageRawDataUpdate,
   ListContainerProperty,
   ListItemContainerProperty,
   RebuildPageContainer,
@@ -43,13 +45,23 @@ export interface ListBox extends BoxFrame {
   items: string[];
 }
 
-export type Box = TextBox | ListBox;
+/** A grayscale picture. `key` names what it shows; it is drawn and sent only when the key changes. */
+export interface ImageBox extends BoxFrame {
+  kind: 'image';
+  key: string;
+  /** Image bytes the glasses take (a PNG), drawn when the key changes. */
+  draw(): Promise<Uint8Array>;
+}
+
+export type Box = TextBox | ListBox | ImageBox;
 
 export interface Page {
   boxes: Box[];
 }
 
-const MAX_BOXES = 8;
+const MAX_BOXES = 12;
+const MAX_TEXT_BOXES = 8;
+const MAX_IMAGE_BOXES = 4;
 /** The firmware shows at most this many rows in one list. */
 export const MAX_LIST_ITEMS = 20;
 /** The simulator caps a list item at 63 UTF-8 bytes (Even's docs say 64 characters). */
@@ -73,13 +85,17 @@ export function listItems(box: ListBox): string[] {
 function layoutKey(page: Page): string {
   return JSON.stringify(page.boxes.map((box) => (box.kind === 'list'
     ? [box.kind, box.name, box.x, box.y, box.w, box.h, Boolean(box.capture), Boolean(box.border), listItems(box)]
-    : [box.kind, box.name, box.x, box.y, box.w, box.h, Boolean(box.capture), Boolean(box.border), box.pad ?? TEXT_PAD])));
+    : box.kind === 'image'
+      ? [box.kind, box.name, box.x, box.y, box.w, box.h]
+      : [box.kind, box.name, box.x, box.y, box.w, box.h, Boolean(box.capture), Boolean(box.border), box.pad ?? TEXT_PAD])));
 }
 
 /** Throws when a page breaks a G2 rule; screens are built to pass, so this guards against regressions. */
 export function checkPage(page: Page): void {
   if (page.boxes.length === 0 || page.boxes.length > MAX_BOXES) throw new Error(`A page needs 1 to ${MAX_BOXES} boxes; got ${page.boxes.length}.`);
-  if (page.boxes.filter((box) => box.capture).length !== 1) throw new Error('A page needs exactly one box that captures input.');
+  if (page.boxes.filter((box) => box.kind === 'text').length > MAX_TEXT_BOXES) throw new Error(`A page holds at most ${MAX_TEXT_BOXES} text boxes.`);
+  if (page.boxes.filter((box) => box.kind === 'image').length > MAX_IMAGE_BOXES) throw new Error(`A page holds at most ${MAX_IMAGE_BOXES} images.`);
+  if (page.boxes.filter((box) => box.capture && box.kind !== 'image').length !== 1) throw new Error('A page needs exactly one box that captures input.');
   const names = new Set(page.boxes.map((box) => box.name));
   if (names.size !== page.boxes.length || [...names].some((name) => name.length > 16)) throw new Error('Box names must be unique and at most 16 characters.');
 }
@@ -87,7 +103,12 @@ export function checkPage(page: Page): void {
 function containers(page: Page) {
   const textObject: TextContainerProperty[] = [];
   const listObject: ListContainerProperty[] = [];
+  const imageObject: ImageContainerProperty[] = [];
   page.boxes.forEach((box, index) => {
+    if (box.kind === 'image') {
+      imageObject.push(new ImageContainerProperty({ containerID: index + 1, containerName: box.name, xPosition: box.x, yPosition: box.y, width: box.w, height: box.h }));
+      return;
+    }
     const frame = {
       containerID: index + 1,
       containerName: box.name,
@@ -116,12 +137,18 @@ function containers(page: Page) {
       }));
     }
   });
-  return { containerTotalNum: page.boxes.length, textObject, listObject };
+  const built: Partial<RebuildPageContainer> = {
+    containerTotalNum: page.boxes.length, textObject, listObject,
+  };
+  if (imageObject.length) built.imageObject = imageObject;
+  return built;
 }
 
 interface Shown {
   layout: string;
   texts: Map<string, { content: string; brightness: Brightness }>;
+  /** Each image's key; an image not yet sent has none. */
+  images: Map<string, string>;
 }
 
 function shownOf(page: Page): Shown {
@@ -129,7 +156,14 @@ function shownOf(page: Page): Shown {
   for (const box of page.boxes) {
     if (box.kind === 'text') texts.set(box.name, { content: textContent(box), brightness: box.brightness ?? BRIGHT });
   }
-  return { layout: layoutKey(page), texts };
+  return { layout: layoutKey(page), texts, images: new Map() };
+}
+
+/** What the last write sent: a rebuild or not, text upgrades, and images. */
+export interface WriteSummary {
+  rebuilt: boolean;
+  texts: number;
+  images: number;
 }
 
 /** Serializes every write to the glasses; a page shown while a write is in flight replaces any older pending one. */
@@ -140,6 +174,7 @@ export class Display {
   private busy: Promise<void> | null = null;
   /** When the last write to the glasses finished; the input router ignores phantom scrolls right after it. */
   lastWriteAt = 0;
+  lastWrite: WriteSummary = { rebuilt: false, texts: 0, images: 0 };
   onPage: (page: Page) => void = () => {};
 
   constructor(private readonly bridge: GlassesBridge) {}
@@ -179,12 +214,14 @@ export class Display {
   /** Sends what changed; false when the glasses already show the page. */
   private async write(page: Page): Promise<boolean> {
     const next = shownOf(page);
+    this.lastWrite = { rebuilt: true, texts: 0, images: 0 };
     if (!this.created) {
       const result = await this.bridge.createStartUpPageContainer(new CreateStartUpPageContainer(containers(page)));
       this.created = true;
       // A second startup call is refused; a failed one leaves later pages to rebuild.
       if (Number(result) !== 0) await this.bridge.rebuildPageContainer(new RebuildPageContainer(containers(page)));
       this.shown = next;
+      await this.sendImages(page, next);
       return true;
     }
     const shown = this.shown;
@@ -198,8 +235,11 @@ export class Display {
     if (!shown || shown.layout !== next.layout || wholeScreen) {
       await this.bridge.rebuildPageContainer(new RebuildPageContainer(containers(page)));
       this.shown = next;
+      // A rebuilt image container is blank until its picture is sent.
+      await this.sendImages(page, next);
       return true;
     }
+    this.lastWrite = { rebuilt: false, texts: 0, images: 0 };
     let wrote = false;
     for (const [index, box] of page.boxes.entries()) {
       if (box.kind !== 'text') continue;
@@ -213,6 +253,28 @@ export class Display {
         textColor: want.brightness,
       }));
       shown.texts.set(box.name, want);
+      this.lastWrite.texts += 1;
+      wrote = true;
+    }
+    return (await this.sendImages(page, shown)) || wrote;
+  }
+
+  /** Sends each image whose key differs from the one `shown` holds; true when any was sent. */
+  private async sendImages(page: Page, shown: Shown): Promise<boolean> {
+    let wrote = false;
+    for (const [index, box] of page.boxes.entries()) {
+      if (box.kind !== 'image' || shown.images.get(box.name) === box.key) continue;
+      // A picture that can't be drawn stays blank; the text beside it still shows.
+      shown.images.set(box.name, box.key);
+      let imageData: Uint8Array;
+      try {
+        imageData = await box.draw();
+      } catch (error) {
+        console.error('[Pane glasses] image not drawn', error);
+        continue;
+      }
+      await this.bridge.updateImageRawData(new ImageRawDataUpdate({ containerID: index + 1, containerName: box.name, imageData }));
+      this.lastWrite.images += 1;
       wrote = true;
     }
     return wrote;

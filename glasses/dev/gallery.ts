@@ -7,9 +7,10 @@ import claudePermission from '../test/fixtures/claude-permission.txt?raw';
 import codexApproval from '../test/fixtures/codex-approval.txt?raw';
 import { findMenu } from '../src/menu';
 import { Display, type Page } from '../src/display';
-import type { Computer, PaneRow } from '../src/model';
+import { homeListPage, homeRows } from '../src/homeList';
+import type { Card, Computer, PaneEntry } from '../src/model';
 import { noAnswerMessage } from '../src/host';
-import { LOCKED_OUT, ORIGIN_REFUSED, allClearPage, computersPage, connectingPage, keysRefusedPage, noComputerPage, pairingFailedPage, panesPage, pickerPage, refusedPage, terminalFooter, terminalPage } from '../src/screens';
+import { LOCKED_OUT, ORIGIN_REFUSED, awayPage, connectingPage, keysRefusedPage, noComputerPage, pairingFailedPage, pickerPage, refusedPage, terminalFooter, terminalPage } from '../src/screens';
 
 const now = Date.now();
 const clock = (epochMs: number) => new Date(epochMs).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -18,26 +19,34 @@ const originRefusal = {
   message: 'This computer accepts glasses tokens only from the Even app; this request came from https://evenhub.example.',
   next: "Allow it in Pane on that computer: Settings › Remote Access › Glasses.",
 };
-const computers: Computer[] = [
-  { id: 'a', name: 'studio-mac', status: 'live', lastSeenAt: now, paneCount: 5, workingCount: 1 },
-  { id: 'b', name: 'devbox', status: 'refused', lastSeenAt: now, paneCount: 0, workingCount: 0, refusal: originRefusal },
-  { id: 'c', name: 'laptop', status: 'offline', lastSeenAt: now - 3_600_000, paneCount: 0, workingCount: 0 },
-];
 const paneChat = { kind: 'session' as const, id: 's', name: 'Pane Chat', agent: 'Claude', status: 'working' as const, panelId: 'p' };
-/** More Sessions and Panes than one native list holds. */
-const manyRows: PaneRow[] = [
-  ...Array.from({ length: 6 }, (_, index): PaneRow => ({ kind: 'session', id: `s${index}`, name: `session ${6 - index}`, agent: 'Claude', status: 'idle', panelId: `sp${index}` })),
-  { kind: 'gap' },
-  ...Array.from({ length: 30 }, (_, index): PaneRow => ({ kind: 'pane', id: `p${index}`, name: `pane-${30 - index}`, agent: 'Codex', status: 'idle', panelId: `pp${index}` })),
+/** Four computers, one of each mark, the travel laptop away since 9:12 and old-box on a Pane that reports no OS. */
+let minutes = 0;
+const pane = (name: string, agent = 'Claude', status: PaneEntry['status'] = 'idle', kind: PaneEntry['kind'] = 'pane'): PaneEntry => {
+  minutes += 7;
+  return { kind, id: name, name, agent, status, panelId: name, activityAt: now - minutes * 60_000 };
+};
+const travel: Computer = { id: 'travel', name: 'travel-laptop', status: 'offline', lastSeenAt: new Date(now).setHours(9, 12, 0, 0), os: 'macOS', entries: [pane('trip-notes')] };
+const homeComputers: Computer[] = [
+  { id: 'studio', name: 'studio-mac', status: 'live', lastSeenAt: now, os: 'macOS', entries: [pane('rate-limit-retries', 'Claude', 'needs you'), pane('Spring sale launch', 'Claude', 'working', 'session'), pane('add-dark-mode'), pane('upgrade-react-19', 'Codex', 'stopped')] },
+  { id: 'build', name: 'build-box', status: 'live', lastSeenAt: now, os: 'Linux', entries: [pane('nightly-backup', 'Codex', 'needs you'), pane('terraform-upgrade', 'Codex'), pane('Backup rotation', 'Codex', 'idle', 'session')] },
+  { id: 'office', name: 'office-pc', status: 'live', lastSeenAt: now, os: 'Windows', entries: [pane('windows-installer', 'Claude', 'working')] },
+  travel,
+  { id: 'old', name: 'old-box', status: 'live', lastSeenAt: now, os: null, entries: [pane('legacy-cron', 'shell')] },
 ];
+const question = (computerId: string, machine: string, paneName: string, createdAt: number): Card => ({
+  key: `${computerId}:${paneName}`, computerId, machine, itemId: paneName, ui: 'options', waiting: true, title: `${paneName} asks`, choices: ['Yes'], suggestions: [], paneName, paneId: paneName, panelId: paneName, createdAt,
+});
+const homeCards = [question('build', 'build-box', 'nightly-backup', now - 60_000), question('studio', 'studio-mac', 'rate-limit-retries', now - 120_000)];
+const rows = homeRows(homeComputers, homeCards);
+const offlineAt = rows.findIndex((row) => row.computerId === 'travel');
 const pages: Array<[string, Page]> = [
   ['terminal-keys-refused', keysRefusedPage(paneChat, "studio-mac's Pane can't take keys from the glasses yet.", 'Update Pane on studio-mac.')],
   ['terminal-held-at-your-message', terminalPage({
     entry: paneChat, scrolledUp: 0, more: 18, footer: terminalFooter(undefined),
     lines: ['> yes, do the dry run first', '', 'Here is what the dry run found on', 'parsa-4090m-workstation-win11pro.', '', '1. Pane 2.4.200 is installed from the Microsoft Store build, so', 'runpane update hands off to the Store instead of downloading', 'the installer itself.'],
   })],
-  ['home-all-clear', allClearPage(3)],
-  ['home-all-clear-after-answer', allClearPage(3, 'Answered fix-login: Loosen retry')],
+  ['away-offline', awayPage(travel, clock, 'trip-notes')],
   ['error-no-computer-reachable', noComputerPage(3)],
   ['error-no-computer-first-time', noComputerPage(1, noAnswerMessage('studio-mac', location.origin))],
   ['error-pairing-no-answer', pairingFailedPage([`${noAnswerMessage('studio-mac', location.origin)} Then paste again.`])],
@@ -63,11 +72,14 @@ const pages: Array<[string, Page]> = [
   // A native list keeps its swipes, so lists come last.
   ...([['picker-claude-permission', claudePermission], ['picker-codex-approval', codexApproval]] as const).map(([name, screen]): [string, Page] => {
     const menu = findMenu(screen.split('\n'));
-    return [name, menu ? pickerPage(paneChat, menu.question, menu.choices, false, terminalFooter(undefined)) : allClearPage(0)];
+    return [name, menu ? pickerPage(paneChat, menu.question, menu.choices, false, terminalFooter(undefined)) : connectingPage(0)];
   }),
-  ['computers-refused-and-offline', computersPage(computers, clock)],
-  ['panes-more', panesPage('studio-mac', manyRows)],
-  ['panes-more-continued', panesPage('studio-mac', manyRows, 19)],
+  ['home-list-top', homeListPage(rows, { selected: 0 }, clock)],
+  ['home-list-selected', homeListPage(rows, { selected: 3 }, clock)],
+  ['home-list-offline', homeListPage(rows, { selected: offlineAt }, clock)],
+  ['home-list-last-page', homeListPage(rows, { selected: rows.length - 1 }, clock)],
+  ['home-list-after-answer', homeListPage(rows, { selected: 0, confirmation: 'Answered nightly-backup: Yes' }, clock)],
+  ['home-list-outline', homeListPage(rows, { selected: 0, marks: 'outline' }, clock)],
 ];
 
 async function main(): Promise<void> {

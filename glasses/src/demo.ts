@@ -1,7 +1,7 @@
 // The demo: sample computers, cards and terminals that live in the app, with no network.
 // Even review needs it, and anyone can try every screen before pairing.
 import type { NotifyAnswer } from '../../shared/types/notify';
-import { CHOICE_KEYS, GlassesError, orderCards, type Card, type Computer, type Dictation, type PaneEntry, type PaneRow, type PaneSource, type TerminalKey, type TerminalScreen } from './model';
+import { CHOICE_KEYS, GlassesError, orderCards, type Card, type Computer, type Dictation, type PaneEntry, type PaneSource, type TerminalKey, type TerminalScreen } from './model';
 import type { Cancel } from './timers';
 
 const MINUTE = 60_000;
@@ -73,9 +73,12 @@ function terminals(): Map<string, DemoTerminal> {
   ]);
 }
 
-function entry(kind: PaneEntry['kind'], name: string, terminal: DemoTerminal): PaneEntry {
-  return { kind, id: name, name, agent: terminal.agent, status: terminal.status, panelId: name };
-}
+/** Each computer's Sessions and Panes: kind, name (also its terminal), and minutes since its last activity. */
+const DEMO_ROWS = {
+  studio: [['session', 'even-g2-app', 6], ['pane', 'fix-login', 2], ['pane', 'docs-pass', 9], ['pane', 'nightly', 21], ['pane', 'scratch', 95]],
+  devbox: [['pane', 'api-server', 14]],
+  laptop: [['pane', 'trip-notes', 70]],
+} satisfies Record<string, Array<[PaneEntry['kind'], string, number]>>;
 
 export class DemoSource implements PaneSource {
   readonly demo = true;
@@ -100,12 +103,18 @@ export class DemoSource implements PaneSource {
   }
 
   computers(): Computer[] {
-    const studioWorking = [...this.terminals.values()].filter((terminal) => terminal.status === 'working').length;
     return [
-      { id: 'studio', name: 'studio-mac', status: 'live', lastSeenAt: this.started, paneCount: 5, workingCount: studioWorking },
-      { id: 'devbox', name: 'devbox', status: 'live', lastSeenAt: this.started, paneCount: 2, workingCount: 0 },
-      { id: 'laptop', name: 'laptop', status: 'offline', lastSeenAt: this.started - 62 * MINUTE, paneCount: 0, workingCount: 0 },
+      { id: 'studio', name: 'studio-mac', status: 'live', lastSeenAt: this.started, os: 'macOS', entries: this.entries('studio') },
+      { id: 'devbox', name: 'devbox', status: 'live', lastSeenAt: this.started, os: 'Windows', entries: this.entries('devbox') },
+      { id: 'laptop', name: 'laptop', status: 'offline', lastSeenAt: this.started - 62 * MINUTE, os: 'Linux', entries: this.entries('laptop') },
     ];
+  }
+
+  private entries(computerId: keyof typeof DEMO_ROWS): PaneEntry[] {
+    return DEMO_ROWS[computerId].map(([kind, name, minutesAgo]): PaneEntry => {
+      const terminal = this.terminals.get(name);
+      return { kind, id: name, name, agent: terminal?.agent ?? 'shell', status: terminal?.status ?? 'idle', panelId: name, activityAt: this.started - minutesAgo * MINUTE };
+    });
   }
 
   cards(): Card[] {
@@ -125,12 +134,6 @@ export class DemoSource implements PaneSource {
     const terminal = this.terminals.get(panelId);
     if (!terminal) throw new GlassesError('ERR_DEMO_PANEL', 'This sample Pane has no terminal.');
     return terminal;
-  }
-
-  async panes(computerId: string): Promise<PaneRow[]> {
-    const names = computerId === 'studio' ? ['fix-login', 'docs-pass', 'nightly', 'scratch'] : computerId === 'devbox' ? ['api-server'] : [];
-    const panes = names.map((name) => entry('pane', name, this.terminal(name)));
-    return computerId === 'studio' ? [{ ...entry('session', 'even g2 app', this.terminal('even-g2-app')), panelId: 'even-g2-app' }, { kind: 'gap' }, ...panes] : panes;
   }
 
   async screen(_computerId: string, panelId: string): Promise<TerminalScreen> {

@@ -11,15 +11,14 @@ import {
   SCREEN_RECONNECTING,
   agentLabel,
   cardsFromNotify,
-  isPaneEntry,
   orderCards,
   type Card,
   type Computer,
   type Dictation,
   type HostRefusal,
+  type MachineOs,
   type NotifyCardState,
   type PaneEntry,
-  type PaneRow,
   type PaneSource,
   type PaneStatus,
   type TerminalKey,
@@ -225,6 +224,7 @@ const sessionsSchema = boundary.object({
       isFavorite: boundary.optional(boundary.boolean),
       favoritePinnedAt: boundary.optional(boundary.string),
       createdAt: boundary.optional(boundary.string),
+      lastActivity: boundary.optional(boundary.string),
     })),
   }))),
   error: boundary.optional(boundary.string),
@@ -241,6 +241,7 @@ const orchestrationSchema = boundary.object({
       agent: boundary.string,
       internalSessionId: boundary.string,
       panelIds: boundary.jsonObject,
+      updatedAt: boundary.optional(boundary.string),
     })),
   })),
 });
@@ -308,6 +309,15 @@ const affordancesSchema = boundary.object({
 
 const transcriptSchema = boundary.object({ text: boundary.string });
 
+/** A Pane older than the OS report omits `os`; its rows show the plain monitor mark. */
+const hostOsSchema = boundary.object({ os: boundary.optional(boundary.enumeration('macOS', 'Windows', 'Linux')) });
+
+/** Epoch ms of an ISO time from the host, or undefined. */
+function epochOf(iso: string | undefined): number | undefined {
+  const ms = iso ? Date.parse(iso) : Number.NaN;
+  return Number.isNaN(ms) ? undefined : ms;
+}
+
 function statusOf(agentState: string | undefined, running = true): PaneStatus {
   if (!running) return 'stopped';
   if (agentState === 'working') return 'working';
@@ -332,7 +342,8 @@ export class HostConnection {
   readonly id: string;
   private readonly client: RemoteDaemonClient;
   private notify: NotifyCardState | null = null;
-  private rows: PaneRow[] = [];
+  private entries: PaneEntry[] = [];
+  private os: MachineOs | null = null;
   private readonly statuses = new Map<string, PaneStatus>();
   private refusal: HostRefusal | null = null;
   private lockedUntil = 0;
@@ -505,8 +516,8 @@ export class HostConnection {
       name: this.paired.name,
       status,
       lastSeenAt: this.lastSeenAt,
-      paneCount: this.entries.length,
-      workingCount: this.entries.filter((entry) => this.statusOf(entry) === 'working').length,
+      os: this.os,
+      entries: this.entries.map((entry) => ({ ...entry, status: this.statusOf(entry) })),
     };
     if (this.refusal) computer.refusal = this.refusal;
     if (status === 'offline' && this.lastSeenAt === null) computer.hint = noAnswerMessage(this.paired.name, this.deps.origin);
@@ -523,8 +534,16 @@ export class HostConnection {
   }
 
   private async restore(): Promise<void> {
-    // Notify is what home needs; the Pane counts can fill in later.
-    await Promise.all([this.readNotify(), this.readLists().catch(() => {})]);
+    // Notify is what home needs first; the rows and the OS mark can fill in later.
+    await Promise.all([this.readNotify(), this.readLists().catch(() => {}), this.readOs().catch(() => {})]);
+  }
+
+  /** The computer's OS, for its rows' logo; an older Pane leaves it unknown. */
+  private async readOs(): Promise<void> {
+    const os = (await this.invoke('remote:pwa-affordances', [], hostOsSchema)).os ?? null;
+    if (os === this.os) return;
+    this.os = os;
+    this.changed();
   }
 
   private applyNotify(value: JsonValue): void {
@@ -566,15 +585,11 @@ export class HostConnection {
     return decodeBoundary(await this.client.invoke(channel, args), schema);
   }
 
-  private get entries(): PaneEntry[] {
-    return this.rows.filter(isPaneEntry);
-  }
-
   /**
-   * Unarchived Sessions and Panes, with the terminal each opens, in the Pane phone app's order
-   * (native/src/features/panes/paneList.ts): pinned Sessions, pinned Panes newest pin first, the
-   * other Sessions in the host's order (newest first), a gap, the other Panes newest first across
-   * every repository. Each shows once.
+   * Unarchived Sessions and Panes, with the terminal each opens and when each was last active.
+   * Rows with the same time keep the Pane phone app's order (native/src/features/panes/paneList.ts):
+   * pinned Sessions, pinned Panes newest pin first, the other Sessions in the host's order, the
+   * other Panes newest first across every repository. Each shows once.
    */
   private async readLists(): Promise<void> {
     const [sessions, orchestration, workspace] = await Promise.all([
@@ -585,7 +600,6 @@ export class HostConnection {
     for (const entry of workspace?.entries ?? []) {
       if (entry.baseline && entry.panelId) this.statuses.set(entry.panelId, statusOf(entry.to, entry.running ?? true));
     }
-    const sessionsListed = orchestration?.success === true;
     const named = (orchestration?.data?.sessions ?? []).filter((session) => !session.archived);
     const internal = new Set((orchestration?.data?.sessions ?? []).map((session) => session.internalSessionId));
     const pinnedSessions: PaneEntry[] = [];
@@ -594,6 +608,8 @@ export class HostConnection {
       const panelId = decodeOptionalBoundary(session.panelIds[session.agent], boundary.string);
       if (!panelId) continue;
       const row: PaneEntry = { kind: 'session', id: session.id, name: session.name, agent: agentLabel(session.agent), status: 'idle', panelId };
+      const activityAt = epochOf(session.updatedAt);
+      if (activityAt !== undefined) row.activityAt = activityAt;
       (session.isPinned ? pinnedSessions : sessionEntries).push(row);
     }
     const panes = (sessions.data ?? []).flatMap((project) => project.sessions)
@@ -609,24 +625,17 @@ export class HostConnection {
       });
       const chosen = ranked.reduce<(typeof ranked)[number] | undefined>((best, candidate) => (!best || candidate.rank > best.rank ? candidate : best), undefined);
       if (!chosen) return null;
-      return { kind: 'pane', id: pane.id, name: pane.name, agent: agentLabel(chosen.agentType), status: 'idle', panelId: chosen.panel.id };
+      const entry: PaneEntry = { kind: 'pane', id: pane.id, name: pane.name, agent: agentLabel(chosen.agentType), status: 'idle', panelId: chosen.panel.id };
+      const activityAt = epochOf(pane.lastActivity ?? pane.createdAt);
+      if (activityAt !== undefined) entry.activityAt = activityAt;
+      return entry;
     }));
     const listed = paneEntries.filter((entry): entry is PaneEntry => entry !== null);
     const pinnedPanes = listed.filter((entry) => pinnedAt.has(entry.id))
       .sort((a, b) => (pinnedAt.get(b.id) ?? '').localeCompare(pinnedAt.get(a.id) ?? '') || a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
     const otherPanes = listed.filter((entry) => !pinnedAt.has(entry.id));
-    const above: PaneRow[] = [
-      ...pinnedSessions,
-      ...pinnedPanes,
-      ...(sessionsListed ? sessionEntries : [{ kind: 'note' as const, text: 'Sessions unavailable' }]),
-    ];
-    this.rows = [...above, ...(above.length && otherPanes.length ? [{ kind: 'gap' as const }] : []), ...otherPanes];
+    this.entries = [...pinnedSessions, ...pinnedPanes, ...sessionEntries, ...otherPanes];
     this.changed();
-  }
-
-  async panes(): Promise<PaneRow[]> {
-    await this.readLists();
-    return this.rows.map((row) => (isPaneEntry(row) ? { ...row, status: this.statusOf(row) } : row));
   }
 
   async screen(panelId: string): Promise<TerminalScreen> {
@@ -737,10 +746,6 @@ export class HostHub implements PaneSource {
   subscribe(listener: () => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
-  }
-
-  panes(computerId: string): Promise<PaneRow[]> {
-    return this.connection(computerId).panes();
   }
 
   screen(computerId: string, panelId: string): Promise<TerminalScreen> {
