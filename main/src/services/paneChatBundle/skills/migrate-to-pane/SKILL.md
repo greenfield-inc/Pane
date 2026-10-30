@@ -237,10 +237,18 @@ together. For each workstream:
 
 - Read its transcripts' last turns and write a readable name, its goal, its
   context, and its next action. Create it with `runpane sessions create`
-  (`name`, `goal`, `context`, `nextAction`). Its chat opens on that next step
-  the first time the person opens it.
+  (`name`, `goal`, `context`, `nextAction`); its result names the Session's
+  chat tab (`panelId`).
 - Associate its Panes with `runpane sessions associate`, and pin the Sessions
   with work in the last day with `runpane sessions pin`.
+- Send its chat the catch-up, so the person finds it waiting there. A saved
+  next action is context only; the chat starts on it only when asked. Wait
+  for every new chat at once (`runpane panels wait --panel <panelId> --for
+  ready`, one per Session in the background, then `wait`), then send each
+  `runpane panels submit --panel <panelId> --text "Catch me up: in two or
+  three short lines, where does this work stand and what is the next step?
+  Use this Session's saved goal, context and next action, then wait for me."
+  --yes`.
 
 Name every Pane "<project> · <branch>" (`runpane panes rename` for any that
 already existed under another name).
@@ -250,8 +258,12 @@ already existed under another name).
 Copy the template [references/start-here.html](references/start-here.html) and
 fill it as its comments say. Save it as
 `<Pane data directory>/migrate-to-pane/start-here.html`, next to the record,
-and open it beside this chat with
-`runpane panels open --file <that path> --source agent --yes`.
+and open the rendered page beside this chat with
+`runpane panels open --url <file URL of that path> --source agent --yes`. The
+file URL is `file://` plus the absolute path with each path segment
+percent-encoded, for example `file:///Users/ana/.pane/migrate-to-pane/start-here.html`
+(on Windows, `file:///C:/Users/ana/.pane/...`). `--file` only opens files
+inside this Session's folder, and as editable source.
 
 - **Workstreams**: one row per Session from step 5, its name linked to the
   link `runpane links create --session <id> --json` returns, then its goal and
