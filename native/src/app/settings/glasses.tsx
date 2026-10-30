@@ -92,7 +92,7 @@ export default function GlassesSettingsScreen() {
           onPress={() => pair.mutate()}
         />
         <Text variant="rowDetail" tone="muted" style={styles.inset}>
-          Makes one key per computer for these glasses. You can revoke it here or on the computer.
+          Pair once. Computers you add later join on their own.
         </Text>
       </View>
 

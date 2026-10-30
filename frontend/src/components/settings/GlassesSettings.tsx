@@ -8,6 +8,7 @@ import type { GlassesAccessState, GlassesRevokeEverywhereResult } from '../../..
 
 /** The page lists newly refused origins while it is open, so allowing one needs no reload. */
 const REFRESH_MS = 5_000;
+const REVOKED_HERE = 'Revoked. These glasses stay off this computer until you pair them again from the Pane phone app.';
 /** The host keeps a loopback origin without its port and matches it on any port. */
 const LOOPBACK_ORIGIN = /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])$/;
 
@@ -25,14 +26,16 @@ export function GlassesRows() {
   /** The phone whose revoke did not reach every computer, so it can be sent again after its row is gone. */
   const [retryPhoneId, setRetryPhoneId] = useState<string | null>(null);
 
+  /** Shows the state a request answers, or its error; true when it succeeded. */
   const apply = useCallback(async (request: () => Promise<{ success: boolean; data?: GlassesAccessState; error?: string }>) => {
     const response = await request();
     if (response.success && response.data) {
       setState(response.data);
       setError(null);
-    } else {
-      setError(response.error ?? 'Could not read glasses access.');
+      return true;
     }
+    setError(response.error ?? 'Could not read glasses access.');
+    return false;
   }, []);
 
   useEffect(() => {
@@ -44,10 +47,15 @@ export function GlassesRows() {
   const run = async (request: () => Promise<{ success: boolean; data?: GlassesAccessState; error?: string }>) => {
     setBusy(true);
     try {
-      await apply(request);
+      return await apply(request);
     } finally {
       setBusy(false);
     }
+  };
+
+  const revoke = async (id: string) => {
+    setNotice(null);
+    if (await run(() => API.remoteDaemon.revokeGlasses(id))) setNotice({ text: REVOKED_HERE });
   };
 
   const revokeEverywhere = async (phoneId: string) => {
@@ -113,7 +121,7 @@ export function GlassesRows() {
               size="sm"
               aria-label={`Revoke ${device.label}`}
               disabled={busy}
-              onClick={() => void run(() => API.remoteDaemon.revokeGlasses(device.id))}
+              onClick={() => void revoke(device.id)}
             >
               Revoke
             </Button>

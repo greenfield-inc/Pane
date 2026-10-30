@@ -161,6 +161,8 @@ test.describe('Remote Access', () => {
     await expect(glasses).toContainText('Allowed for glasses on this computer.');
     await glasses.getByRole('button', { name: 'Revoke Even G2' }).click();
     await expect(glasses.getByRole('button', { name: 'Revoke Even G2' })).toHaveCount(0);
+    await expect(glasses.getByRole('status')).toHaveText('Revoked. These glasses stay off this computer until you pair them again from the Pane phone app.');
+    await page.screenshot({ path: 'test-results/codeless-remote/glasses-revoked-here.png', fullPage: true });
   });
 
   test('revokes glasses on all my computers and names the ones it did not reach', async ({ page }) => {

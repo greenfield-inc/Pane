@@ -163,8 +163,9 @@ notification mirroring, as the title only ("planner has a question").
   (offline)", and offers **Retry on my other computers** while that page stays open.
 
 Revoking closes the glasses' connection to that computer within 5 seconds. A revoke sticks: your
-other computers can't add the glasses back to this one. Pairing the glasses again from the phone
-lifts the revoke on each computer it pairs.
+other computers can't add the glasses back to it, and the glasses list it as a dim row reading
+**revoked here · pair from phone**. Pairing the glasses again from the phone lifts the revoke on
+each computer it pairs.
 
 Revoke on every computer, from the phone or from **Revoke on all my computers**, when the glasses
 are lost. Two gaps remain:
@@ -216,8 +217,10 @@ the phone id, and the glasses may ask once
 every 5 minutes. A password-protected computer is asked only when this computer has its password
 saved; one whose Pane is too old to remember revokes is skipped.
 
-The token cannot create a Pane, pair any other device, change settings, write files, commit, run machine commands,
-or choose what a terminal runs, and its event stream never carries terminal output.
+Beyond reading and typing, a glasses token gains exactly two commands: adding these same glasses
+to your other computers, and starting a Session. It cannot create a Pane, pair another device,
+reach anyone else's computer, change settings, write files, commit, run machine commands, or choose
+what a terminal runs, and its event stream never carries terminal output.
 
 Typing into a terminal can run commands, so treat the glasses like your phone: whoever holds a
 working token on your tailnet and login can type into your shells. The Even app serves the glasses
@@ -236,6 +239,10 @@ The pairing code on your clipboard holds one-time pairing secrets, not tokens, a
 | Not paired, or revoked | Pair again from Settings › Glasses in the Pane phone app. |
 | Locked out for N s | Wait. If you did not cause the refusals, revoke the glasses on that computer. |
 | Funnel is on | On the computer, run `tailscale funnel reset`, or turn Funnel off for port 8443. |
+| revoked here · pair from phone | That computer revoked the glasses. To use them there again, pair from Settings › Glasses in the Pane phone app. |
+| needs its password | The computer has a Workspaces password. Save it on one of your other computers by connecting to it once in **Settings › Remote Access**; that computer then adds the glasses. |
+| update Pane there | Update Pane on that computer. |
+| not answering | Start Pane on that computer and check that Tailscale is on there. The glasses try again within 10 minutes. |
 | Can't turn speech into text | Add a Deepgram or fal key on that computer. |
 | Deepgram rejected X's key, or X's Deepgram key isn't a valid key | On that computer, paste a current key from the Deepgram console in **Settings › Integrations › Voice transcription**. Pane checks it with Deepgram when you save. |
 | Lost the connection to X while listening | Hold to talk again. If it keeps happening, check Tailscale on the phone. |
