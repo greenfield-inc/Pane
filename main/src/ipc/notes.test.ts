@@ -6,6 +6,7 @@ import { EventEmitter } from 'events';
 import type { IpcMain } from 'electron';
 import type { AppServices } from './types';
 import { registerNotesHandlers } from './notes';
+import { PaneCommandRegistry } from '../daemon/commandRegistry';
 import { decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { noteSchema, type NoteMutation } from '../../../shared/types/notes';
 
@@ -42,12 +43,13 @@ function fixture() {
   } as AppServices;
   // SAFETY: Electron calls the registered listener with event followed by invocation arguments.
   const ipc = { handle: (name: string, handler: (...args: unknown[]) => Promise<{ note?: unknown }>) => handlers.set(name, handler) } as IpcMain;
-  registerNotesHandlers(ipc, services);
+  const registry = new PaneCommandRegistry();
+  registerNotesHandlers(ipc, services, registry);
   const mutate = async (pane: string, mutation: NoteMutation) => {
     const result = await handlers.get('notes:mutate')!(undefined, pane, mutation);
     return result.note ? decodeBoundary(result.note, noteSchema) : undefined;
   };
-  return { projects, panes, config, configManager, sessionManager, mutate };
+  return { projects, panes, config, configManager, sessionManager, mutate, registry };
 }
 
 const read = (file: string) => fs.readFileSync(path.join(root, file), 'utf8');
@@ -116,5 +118,13 @@ describe('Notes IPC delivery', () => {
     expect(read('repo-1/AGENTS.md')).not.toContain('pane-memories:start');
     expect(read('a/AGENTS.md')).not.toContain('pane-memories:start');
     expect(read('data/notes/contexts/a.md')).toContain('Updated note');
+  });
+
+  it('runs a connected desktop\'s notes commands on this machine, where its terminals read them', async () => {
+    const { registry } = fixture();
+    await registry.invokeRemote('notes:mutate', ['a', { action: 'create', scope: { kind: 'feature', id: 'a' }, title: 'Written from the other desktop' }]);
+    expect(read('data/notes/contexts/a.md')).toContain('Written from the other desktop');
+    const listed = await registry.invokeRemote('notes:list', ['a', { kind: 'feature', id: 'a' }]);
+    expect(listed).toEqual([expect.objectContaining({ title: 'Written from the other desktop' })]);
   });
 });

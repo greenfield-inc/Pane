@@ -3,19 +3,23 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import type { AppServices } from './types';
+import type { PaneCommandRegistry, PaneCommandValue } from '../daemon/commandRegistry';
+import { getPaneEventSink } from '../core/runtime';
 import { getAppDirectory } from '../utils/appDirectory';
 import { Notes } from '../services/notes';
 import { exportNoteMemories } from '../services/noteExports';
 import { exportCursorMemoryHook } from '../services/cursorNoteHook';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
-import { noteSchema, noteScopeSchema, sameNoteScope, type Note, type NoteContext, type NoteScope, type NoteExportResult, type NoteMutation } from '../../../shared/types/notes';
+import { noteSchema, noteScopeSchema, sameNoteScope, type Note, type NoteContext, type NoteScope, type NoteExportResult } from '../../../shared/types/notes';
 import { isOrchestrationInternalSessionId } from '../../../shared/types/orchestrationSession';
 import type { Session } from '../types/session';
 import { noteContextPath, SCOPED_NOTE_INSTRUCTIONS } from '../services/noteFiles';
 
 const GLOBAL: NoteScope = { kind: 'global', id: 'user' };
+const NOTES_CHANNELS = ['notes:context', 'notes:list', 'notes:mutate'] as const;
 
-export function registerNotesHandlers(ipcMain: IpcMain, services: AppServices): void {
+/** Notes are files on the machine that runs them; a desktop connected to another machine reads and writes that machine's notes. */
+export function registerNotesHandlers(ipcMain: IpcMain, services: AppServices, commandRegistry: PaneCommandRegistry): void {
   const root = path.join(getAppDirectory(), 'notes');
   const notes = new Notes(root);
   const { sessionManager, databaseService, orchestrationSessionManager } = services;
@@ -128,14 +132,14 @@ export function registerNotesHandlers(ipcMain: IpcMain, services: AppServices): 
     return results;
   }
 
-  ipcMain.handle('notes:context', async (_, paneId: string) => context(decodeBoundary(paneId, boundary.nonEmptyString)));
-  ipcMain.handle('notes:list', async (_, paneId: string, rawScope: NoteScope) => {
+  commandRegistry.register('notes:context', (paneId: PaneCommandValue) => context(decodeBoundary(paneId, boundary.nonEmptyString)));
+  commandRegistry.register('notes:list', async (paneId: PaneCommandValue, rawScope: PaneCommandValue) => {
     const ctx = await context(decodeBoundary(paneId, boundary.nonEmptyString));
     const scope = decodeBoundary(rawScope, noteScopeSchema);
     if (!ctx.scopes.some(item => sameNoteScope(item.scope, scope))) throw new Error('Notebook is outside this context.');
     return notes.list(scope);
   });
-  ipcMain.handle('notes:mutate', async (_, rawPaneId: string, raw: NoteMutation) => {
+  commandRegistry.register('notes:mutate', async (rawPaneId: PaneCommandValue, raw: PaneCommandValue) => {
     const paneId = decodeBoundary(rawPaneId, boundary.nonEmptyString);
     const ctx = await context(paneId);
     const input = decodeBoundary(raw, boundary.object({
@@ -168,9 +172,10 @@ export function registerNotesHandlers(ipcMain: IpcMain, services: AppServices): 
       } else notes.remove(id, revision);
     }
     const exports = publish(input.action === 'retry' ? undefined : changed);
-    services.getMainWindow()?.webContents.send('notes:changed');
+    getPaneEventSink().send('notes:changed');
     return { note, exports };
   });
+  commandRegistry.bindChannels(ipcMain, NOTES_CHANNELS);
   // Publication failures must not escape into unrelated host lifecycle events.
   function reconcile(changed?: NoteScope[]): void {
     if (!fs.existsSync(path.join(root, 'notes.json'))) return;

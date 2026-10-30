@@ -196,7 +196,12 @@ new agent conversation to load the scoped-reading instruction. Global-file chang
 turn, Claude resume, or a new Cursor conversation in the tested CLI versions;
 updating a file alone cannot erase context already read. Notes support native
 macOS, Windows, and Linux installations; WSL agent exports report an unsupported
-destination instead of claiming delivery. There is no cross-machine sync.
+destination instead of claiming delivery. There is no cross-machine sync: the
+`notes:` commands are daemon-owned, so a desktop connected to another machine
+reads and writes that machine's notes, and that machine's terminals read them
+through `PANE_NOTES_FILE`. The glasses cannot reach them. A machine on a Pane
+without these commands gets "Update Pane on <machine> to use its notes" in its
+Notes tab.
 
 ## Subsystems
 
