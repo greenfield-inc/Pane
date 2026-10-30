@@ -48,6 +48,8 @@ interface FinderSetup {
   gitInstalled?: boolean;
   /** Stop at step 1 instead of skipping to "Open your project". */
   atFirstStep?: boolean;
+  /** The first save of the first-run answer fails. */
+  failHandoffOnce?: boolean;
   host?: HostRepos;
   hostDelayMs?: number;
   /** null makes the WSL call fail. */
@@ -95,6 +97,17 @@ async function openFirstRun(page: Page, finder: FinderSetup, options: ElectronAp
     if (setup.agents) {
       const agents = setup.agents;
       onboarding.findAgents = async () => ({ success: true, data: agents });
+    }
+    if (setup.failHandoffOnce) {
+      const set = window.electronAPI.preferences.set;
+      let failed = false;
+      window.electronAPI.preferences.set = async (key: string, value: string) => {
+        if (key === 'onboarding_handoff' && !failed) {
+          failed = true;
+          throw new Error('database is locked');
+        }
+        return set(key, value);
+      };
     }
     const emptyScan: SessionImportScan = { scannedAt: Date.now(), sources: [], sessions: [] };
     // SAFETY: the mock leaves sessionImport out; the first-run screen only calls scan.
@@ -248,6 +261,23 @@ test('step 2 counts the sessions from the last 7 days, and Yes opens the Onboard
   expect(await landedInOnboarding(page)).toBe(true);
   expect(await preferences(page)).toMatchObject({ onboarding_repo_setup: 'true', onboarding_handoff: 'migrate' });
   await expect(page.getByRole('dialog', { name: 'Open your project' })).toHaveCount(0);
+});
+
+test('an answer that cannot be saved keeps the screen open to try again', async ({ page }) => {
+  const dialog = await openFirstRun(page, { atFirstStep: true, scan: FOUND_SESSIONS, failHandoffOnce: true });
+  await dialog.getByRole('button', { name: 'Claude Code' }).click();
+  const offer = page.getByRole('dialog', { name: 'Bring your 4 sessions into Pane?' });
+
+  await offer.getByRole('button', { name: 'Yes' }).click();
+  await expect(offer.getByRole('alert')).toHaveText("Pane couldn't save your answer (database is locked), so the Onboarding Session hasn't started. Try again.");
+  await expect(offer.getByRole('button', { name: 'Yes' })).toBeEnabled();
+  expect(await preferences(page)).toMatchObject({ onboarding_repo_setup: 'false' });
+  expect(await landedInOnboarding(page)).toBe(false);
+
+  await offer.getByRole('button', { name: 'Yes' }).click();
+  await expect(offer).toBeHidden();
+  expect(await preferences(page)).toMatchObject({ onboarding_repo_setup: 'true', onboarding_handoff: 'migrate' });
+  expect(await landedInOnboarding(page)).toBe(true);
 });
 
 test('Not now shows "Open your project" (J3)', async ({ page }) => {

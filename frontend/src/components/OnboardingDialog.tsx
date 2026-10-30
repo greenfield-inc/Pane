@@ -408,27 +408,35 @@ export default function OnboardingDialog({ isOpen, onClose }: OnboardingDialogPr
   const gitMissing = env !== null && !env.gitInstalled;
   const isBusy = isOpening || sample.status === 'running';
 
-  /** Records the answer before the Onboarding Session first opens, so its first prompt follows it. */
-  const handOff = async (handoff: OnboardingHandoff) => {
-    closedRef.current = true;
+  /**
+   * Saves the answer, then completes onboarding and opens the Onboarding
+   * Session, whose first prompt follows the answer. Without the saved answer
+   * the Session would get no task, so a failed save keeps this screen open to
+   * try again. Returns whether it handed off.
+   */
+  const handOff = async (handoff: OnboardingHandoff): Promise<boolean> => {
     try {
       await setPreference(ONBOARDING_HANDOFF_PREFERENCE, handoff);
-    } catch {
-      // The Session still opens; its agent then waits for the person.
+    } catch (cause) {
+      setError(`Pane couldn't save your answer (${reasonText(cause instanceof Error ? cause.message : undefined, 'the save failed')}), so the Onboarding Session hasn't started. Try again.`);
+      return false;
     }
+    closedRef.current = true;
     await markOnboardingComplete();
     await openOnboardingSession(navigateToPaneChat);
+    return true;
   };
 
-  const complete = async (properties: AnalyticsProperties & { entry: OnboardingEntry; wsl: boolean }) => {
-    await handOff(properties.entry === 'migrate_sessions' ? 'migrate' : 'project');
+  const complete = async (properties: AnalyticsProperties & { entry: OnboardingEntry; wsl: boolean }): Promise<boolean> => {
+    if (!(await handOff(properties.entry === 'migrate_sessions' ? 'migrate' : 'project'))) return false;
     capture('onboarding_completed', properties);
     onClose();
+    return true;
   };
 
-  const openProject = async (_projectId: number, properties: AnalyticsProperties & { entry: OnboardingEntry; wsl: boolean }) => {
+  const openProject = async (_projectId: number, properties: AnalyticsProperties & { entry: OnboardingEntry; wsl: boolean }): Promise<boolean> => {
     window.dispatchEvent(new Event('project-changed'));
-    await complete(properties);
+    return complete(properties);
   };
 
   const pickAgent = async (agent: PaneChatAgent) => {
@@ -462,7 +470,8 @@ export default function OnboardingDialog({ isOpen, onClose }: OnboardingDialogPr
   const bringSessionsIn = async () => {
     if (!bringIn) return;
     setIsHandingOff(true);
-    await complete({ entry: 'migrate_sessions', wsl: false, session_count: bringIn.length });
+    setError(null);
+    if (!(await complete({ entry: 'migrate_sessions', wsl: false, session_count: bringIn.length }))) setIsHandingOff(false);
   };
 
   const declineSessions = () => {
@@ -566,7 +575,8 @@ export default function OnboardingDialog({ isOpen, onClose }: OnboardingDialogPr
         return;
       }
       if (result.success && result.data) {
-        await openProject(result.data.projectId, { entry: 'sample_repo', wsl: false, was_already_cloned: result.data.wasAlreadyCloned });
+        // A failed hand-off shows its own error; the sample is set up, so its link comes back.
+        if (!(await openProject(result.data.projectId, { entry: 'sample_repo', wsl: false, was_already_cloned: result.data.wasAlreadyCloned }))) setSample({ status: 'idle' });
         return;
       }
       failure = reasonText(result.error, 'setup failed');
@@ -578,8 +588,8 @@ export default function OnboardingDialog({ isOpen, onClose }: OnboardingDialogPr
 
   const handleSkip = async () => {
     capture('onboarding_skipped', { step: env ? getEnvironmentStatus(env) : 'detecting' });
-    await handOff('project');
-    onClose();
+    setError(null);
+    if (await handOff('project')) onClose();
   };
 
   if (!isOpen) return null;
