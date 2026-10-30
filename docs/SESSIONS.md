@@ -573,6 +573,24 @@ runpane sessions associate --session <session-id-or-name> --pane <pane-id> --jso
 runpane sessions detach --session <session-id-or-name> --pane <pane-id> --json
 ```
 
+`sessions create` starts the Session's agent, as opening it in the app does.
+To give it a first prompt, wait for the agent, then submit:
+
+```text
+runpane panels wait --panel <panelId> --for ready --json
+runpane panels submit --panel <panelId> --text "<prompt>" --yes --json
+```
+
+When a Session's Claude runs on this machine, Pane answers Claude's "trust
+this folder" prompt for the Session's own folder, choosing "Yes, I trust this
+folder" in the terminal, so the agent starts without a click. Pane answers
+only when the Session launches a plain `claude …` command (the default, or a
+custom one with no `cd`, wrapper or shell operator), only when the prompt shows
+exactly the Session folder, never a project, and only until Claude is first
+ready. This is best effort: a prompt Pane does not recognize, or a folder path
+with a space in it, stays on screen for you to answer. A WSL Session's Claude
+is not answered, so it asks on its first launch.
+
 Use `--from-json` for structured create and update input. Keep multiline
 context, evidence, links, and reports in the JSON file or stdin; do not put
 external text into shell source. Re-read mutation results and inspect the
@@ -984,10 +1002,12 @@ the task's outcome can no longer be established from that history. Like
 `--follow`'s settling or batching, and since it exits on the event, a plain
 background task is enough (no line-delivering monitor). Claude
 Code wakes the orchestrator when the background call exits, and the line
-arrives as the tool result. To answer a blocked worker, send the answer with
-`panels submit --no-expect-report`, then watch for the original work's result.
-Report-expected work is serialized per panel: a new dispatch is refused before
-writing while an expectation or missing-output collection is outstanding.
+arrives as the tool result. Report-expected work is serialized per panel: a
+new dispatch is refused before writing while an expectation or missing-output
+collection is outstanding. A send with `--no-expect-report` (`panels submit` or
+`agents send`) is a reply, such as an answer to the worker's question or an
+addition to its current work: it is delivered while a report is outstanding,
+and Pane keeps waiting for the original work's report.
 Held starting input is reserved but does not count startup readiness as task
 completion; tracking activates immediately before the prompt's submit or launch.
 

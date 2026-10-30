@@ -9,7 +9,7 @@ import { ORCHESTRATION_SESSION_INTERNAL_ID_PREFIX } from '../../../shared/types/
 import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
 import type { RunpanePaneCreateRequest } from '../../../shared/types/runpaneOrchestration';
 import { PaneError } from '../../../shared/paneError';
-import { normalizeProcessName, tokenizeShellCommand } from '../services/agents/agentIdentity';
+import { isPlainAgentCommand, tokenizeShellCommand } from '../services/agents/agentIdentity';
 
 const LOOP_CHANNELS = [
   'loops:list',
@@ -245,9 +245,9 @@ function missingUnattendedFlags(command: string, agent: LoopAgent): string[] {
  */
 function unattendedLaunchCommand(sessionName: string, command: string, agent: LoopAgent): string {
   const spans: Array<{ start: number; end: number }> = [];
-  const words = tokenizeShellCommand(command, process.platform, spans);
+  tokenizeShellCommand(command, process.platform, spans);
   const program = agentExecutable(agent);
-  if (!words?.length || /[;&|<>`\n]|\$\(/.test(command) || normalizeProcessName(words[0]) !== program) {
+  if (!isPlainAgentCommand(command, program)) {
     throw new PaneError(
       'ERR_LOOP_INVALID',
       `Session ${sessionName} launches its agent with \`${command}\`, which Pane cannot safely change to skip permission prompts. Nothing was saved.`,
@@ -271,7 +271,6 @@ export async function prepareLoopSession(
   commandRegistry: PaneCommandRegistry,
   target: string,
   loop: { name: string; agent: LoopAgent },
-  trustClaudeSessionFolder: (sessionId: string) => Promise<void>,
 ): Promise<string> {
   // An empty launch command means the template, whatever the app's default Session command is.
   const session = target === LOOP_NEW_SESSION
@@ -290,9 +289,6 @@ export async function prepareLoopSession(
       await commandRegistry.invoke('runpane:sessions:update', [{ selector: { sessionId: session.id }, input: { launchCommand: unattended, source: 'user' } }]);
     }
   }
-  // Claude asks whether to trust every folder it has not seen, and a Session's
-  // folder is Pane's own, with no project code. Cursor's template trusts with --trust.
-  if (loop.agent === 'claude') await trustClaudeSessionFolder(session.id);
   return session.id;
 }
 

@@ -222,6 +222,43 @@ const CLAUDE_TRUST_PROMPT = /Claude\s+Code'll\s+be\s+able\s+to\s+read[\s\S]*Yes,
 const CODEX_TRUST_PROMPT = /Codex\s+can\s+read,\s+edit,\s+and\s+run\s+files\s+here[\s\S]*Trust\s+and\s+continue/u;
 
 /**
+ * The folder Claude's trust menu names under "Accessing workspace:", rows joined
+ * as Claude wrapped them. Undefined unless it is certain: every row starts with
+ * the menu's indent and holds no whitespace, and every row but the last reaches
+ * the wrap edge, so no space can hide at a line break.
+ */
+function claudeTrustMenuFolder(text: string, columns: number): string | undefined {
+  const lines = text.split('\n');
+  const header = lines.findIndex(line => /^\s*Accessing workspace:\s*$/u.test(line));
+  if (header < 0) return undefined;
+  const indent = /^[ ]*/u.exec(lines[header])?.[0] ?? '';
+  const rest = lines.slice(header + 1);
+  const start = rest.findIndex(line => line.trim());
+  const end = rest.findIndex((line, index) => index > start && !line.trim());
+  if (start < 0 || end < 0) return undefined;
+  const rows = rest.slice(start, end);
+  // Claude keeps the menu's indent as a margin on both sides.
+  const edge = columns - indent.length;
+  const certain = rows.every((row, index) => row.startsWith(indent)
+    && /^\S+$/u.test(row.slice(indent.length))
+    && (index === rows.length - 1 ? row.length < edge : row.length === edge));
+  return certain ? rows.map(row => row.slice(indent.length)).join('') : undefined;
+}
+
+/**
+ * The next key toward "Yes, I trust this folder" when Claude's folder-trust menu,
+ * drawn `columns` wide, names exactly `folder`: Down while "No, exit" is
+ * selected, then Enter. Undefined on any other screen, any other path, or a path
+ * the screen does not show for certain.
+ */
+export function claudeFolderTrustKey(text: string, folder: string, columns: number): '\x1b[B' | '\r' | undefined {
+  if (!CLAUDE_TRUST_PROMPT.test(text) || claudeTrustMenuFolder(text, columns) !== folder) return undefined;
+  if (/^\s*[›❯>]\s*(?:\d+\.\s*)?Yes, I trust this folder\s*$/mu.test(text)) return '\r';
+  if (/^\s*[›❯>]\s*(?:\d+\.\s*)?No, exit\s*$/mu.test(text)) return '\x1b[B';
+  return undefined;
+}
+
+/**
  * Identify an agent from one screen: Claude's closed rule/`❯`/rule composer
  * box, or Codex's `OpenAI Codex` header with its `›` prompt, or either
  * agent's folder-trust prompt. Callers that persist the result require it on

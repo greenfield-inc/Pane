@@ -598,6 +598,12 @@ export function registerRunpaneHandlers(
       const manager = requireOrchestrationSessionManager(services);
       const input = parseOrchestrationSessionCreateRequest(request);
       const view = await manager.create(input);
+      // Start the agent now, as opening the Session in the app would, so a caller can wait for it and send a first prompt.
+      try {
+        await terminalPanelManager.initializeTerminal(view.panel, view.internalSession.worktreePath);
+      } catch (error) {
+        throw new PaneError('ERR_SESSION_START_FAILED', `Session “${view.session.name}” was created, but its agent did not start: ${reasonOf(error)}.`, `Start it with \`runpane panels resume --panel ${view.panel.id}\`, or open the Session in Pane.`);
+      }
       return { ok: true, session: view.session, panelId: view.panel.id, internalSessionId: view.internalSession.id };
     }, result => ({ resultCount: 1, panelId: result.panelId }));
   });
@@ -3485,6 +3491,8 @@ function detectPanelBlocker(
   panelId: string,
 ): RunpanePanelBlockedState | undefined {
   if (!text) return undefined;
+  // Pane answers Claude's folder trust for a Session's own folder itself.
+  if (terminalPanelManager.answersTrustPrompt(panelId, text)) return undefined;
 
   const daemonChoice = text.match(/^\s*[›❯>]?\s*(\d+)\.\s*Run without daemon this time/im);
   if (daemonChoice && /cannot use the background server|background server has incompatible/i.test(text)) {

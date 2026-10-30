@@ -7,7 +7,7 @@ import { prepareSessionWorkspace, sessionGitCeiling } from './sessionWorkspace';
 import { OrchestrationSessionStore } from './orchestrationSessionStore';
 import { getAppDirectory } from '../utils/appDirectory';
 import { noteContextPath } from './noteFiles';
-import { codexResumeBase, claudeResumeBase, hasClaudeResumeFlag } from './agents/agentIdentity';
+import { codexResumeBase, claudeResumeBase, hasClaudeResumeFlag, isPlainAgentCommand } from './agents/agentIdentity';
 import { canReadClaudeTranscripts, findClaudeSessionTranscript } from './claudeSessionTranscript';
 import { isOrchestrationInternalSessionId } from '../../../shared/types/orchestrationSession';
 import * as pty from '@lydell/node-pty';
@@ -114,7 +114,7 @@ import {
   resolveAgentTypeFromExecutablePath,
   resolveAgentTypeFromProcessName,
 } from './agents/agentIdentity';
-import { detectAgentComposer, detectAgentFromScreen } from './agents/agentScreenSignature';
+import { claudeFolderTrustKey, detectAgentComposer, detectAgentFromScreen } from './agents/agentScreenSignature';
 import { readForegroundExecutablePath, readForegroundProcessGroup } from '../utils/foregroundProcess';
 import { buildCursorLaunchCommand, createCursorReadyDetector, extractCursorChatId } from './agents/cursorLaunch';
 import { resolveOpenCodeLaunchCommand } from './agents/opencodeLaunch';
@@ -315,6 +315,10 @@ interface TerminalProcess {
   lastStatusPromptKey?: string;
   /** Last status scan, reused while the emulator pushes no new screen. */
   lastStatusScan?: { screen: ScreenState; detection: AgentDetectionResult };
+  /** A native Claude Session's own folder, whose trust menu the status poll answers until Claude is first ready. */
+  claudeTrustFolder?: string;
+  /** The screen Pane last answered the trust menu on, so one frame gets one key. */
+  claudeTrustAnsweredScreen?: ScreenState;
   /** The CLI came up with typed initial input still to send; the status poll sends it. */
   initialInputHeld?: boolean;
   /** When Pane wrote the panel's launch command to its shell. */
@@ -1692,6 +1696,7 @@ export class TerminalPanelManager extends EventEmitter {
     }
     cwd = sessionState.orchestrationWorkspace ?? cwd;
     let sessionRuntimeRc: string | undefined;
+    let claudeTrustFolder: string | undefined;
     if (sessionState.orchestrationSessionId) {
       const record = new OrchestrationSessionStore(path.join(getAppDirectory(), 'orchestration-sessions.json'))
         .read().sessions.find(item => item.id === sessionState.orchestrationSessionId);
@@ -1701,6 +1706,10 @@ export class TerminalPanelManager extends EventEmitter {
         wslContext = sessionWSLContext(record, cwd);
         sessionRuntimeRc = sessionRuntimePath(path.join(cwd, '.pane-runtime', 'bashrc'), record);
         cwd = sessionRuntimePath(cwd, record);
+      } else if (sessionState.agentType === 'claude') {
+        // Claude asks to trust every folder it has not seen. A Session folder is
+        // Pane's own and holds no project code, so Pane answers that prompt for it.
+        claudeTrustFolder = cwd;
       }
     }
 
@@ -1985,6 +1994,7 @@ export class TerminalPanelManager extends EventEmitter {
       shellProcessName: normalizeProcessName(shellPath),
       agentSessionScrapeBuffer: '',
       heldInput: process.platform === 'win32' && !wslContext ? [] : undefined,
+      claudeTrustFolder,
     };
 
     // Store in map (ptyHost path: pid is already populated on the shim).
@@ -2712,11 +2722,49 @@ export class TerminalPanelManager extends EventEmitter {
         ) {
           terminal.onOpenCodeReady?.();
         }
+        this.answerSessionTrustPrompt(terminal, screen);
         this.releaseHeldInitialInput(terminal);
       }
     } catch (error) {
       console.error('[TerminalPanelManager] agent status poll failed:', error);
     }
+  }
+
+  /** Pane is answering the trust menu on this screen itself, for a Session's own folder. */
+  answersTrustPrompt(panelId: string, screenText: string): boolean {
+    const terminal = this.terminals.get(panelId);
+    return terminal !== undefined && this.sessionTrustKey(terminal, screenText) !== undefined;
+  }
+
+  /**
+   * The key Pane presses in Claude's trust menu on this screen, if any. Pane
+   * answers only when it launched a plain `claude` command, so Claude runs in the
+   * Session folder, and the menu shows exactly that folder.
+   */
+  private sessionTrustKey(terminal: TerminalProcess, screenText: string): '\x1b[B' | '\r' | undefined {
+    if (!terminal.claudeTrustFolder || !isPlainAgentCommand(terminal.launchedCommand ?? '', 'claude')) return undefined;
+    return claudeFolderTrustKey(screenText, terminal.claudeTrustFolder, terminal.pty.cols);
+  }
+
+  /**
+   * Choose "Yes, I trust this folder" in Claude's trust menu for a Session's own
+   * folder, one key per new frame, as a person would. Once Claude is first ready
+   * Pane stops answering, so any later trust prompt is the person's.
+   */
+  private answerSessionTrustPrompt(terminal: TerminalProcess, screen: ScreenState): void {
+    if (!terminal.claudeTrustFolder || terminal.claudeTrustAnsweredScreen === screen) return;
+    if (this.agentStatusMonitor.getState(terminal.panelId) === 'idle') {
+      terminal.claudeTrustFolder = undefined;
+      return;
+    }
+    const key = this.sessionTrustKey(terminal, screen.screenText);
+    if (!key) return;
+    terminal.claudeTrustAnsweredScreen = screen;
+    this.writeToTerminal(terminal.panelId, key);
+    if (key !== '\r') return;
+    console.log(`[TerminalPanelManager] Trusted Session folder ${terminal.launchCwd} in Claude's prompt for panel ${terminal.panelId}`);
+    // Claude starts for real now: drop the menu's blocked status rather than report it until the next poll.
+    this.registerAgentStatusPanel(terminal);
   }
 
   /**

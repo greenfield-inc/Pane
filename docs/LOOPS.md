@@ -121,11 +121,11 @@ runpane loops create --session new --name morning-standup --cron "0 9 * * 1-5" \
   `env` or variable prefix, or `&&`, `;`, a pipe or a redirect) is refused
   when you save. Picking an agent other than the Session's switches the
   Session to it.
-- **The Session's folder is trusted.** For a Claude loop, saving marks the
-  Session's own folder (Pane's Session directory, never a project) as trusted
-  in Claude's project trust setting, the record its "trust this folder" prompt
-  writes, so the first run is not stopped there. Codex can still stop at its
-  update menu when a new version is out; answer it once in the Session.
+- **The Session's folder is trusted.** When the Session's Claude runs on this
+  machine, Pane answers its "trust this folder" prompt for the Session's own
+  folder (see [Sessions](SESSIONS.md)). A WSL Session's Claude still asks on
+  its first launch, and Codex can stop at its update menu when a new version
+  is out; answer either once in the Session.
 - **Restart a running agent once.** An agent that is already running keeps
   the flags it started with. Until you exit it and start it again (it resumes
   the same conversation), runs are held and show as **needs attention**. Pane
@@ -170,8 +170,8 @@ runpane loops create --session new --name morning-standup --cron "0 9 * * 1-5" \
   not seen, and each project run is a new worktree. A run stopped at that prompt shows
   as **needs attention**. Open the run and answer it, or open the project
   folder in the agent once and trust it so later runs start on their own. Pane
-  never answers a trust prompt for you, and only pre-trusts a Session loop's own
-  folder (see [Session loops](#session-loops)).
+  answers a trust prompt only for a Session's own folder (see
+  [Session loops](#session-loops)).
 - **Run now.** `runpane loops run` starts a run immediately, even while the
   loop is paused. The schedule stays the same, and the run counts toward the 10
   kept runs.

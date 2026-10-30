@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { detectAgentBackgroundWork, detectAgentComposer, detectAgentFromScreen, screenShowsQueuedMessage } from './agentScreenSignature';
+import { claudeFolderTrustKey, detectAgentBackgroundWork, detectAgentComposer, detectAgentFromScreen, screenShowsQueuedMessage } from './agentScreenSignature';
 import { CLAUDE_API_ENOTFOUND_SCREEN, CLAUDE_API_SLEEP_SCREEN } from '../agentStatus/__fixtures__/claudeApiErrorScreens';
 
 const rule = '─'.repeat(40);
@@ -191,5 +191,36 @@ describe('a Claude turn that ended on an API error', () => {
   it('shows no background work, so a missing report is not held back', () => {
     expect(detectAgentBackgroundWork(CLAUDE_API_ENOTFOUND_SCREEN, 'claude')).toBeUndefined();
     expect(detectAgentBackgroundWork(CLAUDE_API_SLEEP_SCREEN, 'claude')).toBeUndefined();
+  });
+});
+
+describe('claudeFolderTrustKey', () => {
+  const menu = (pathRows: string[], selected: 'No' | 'Yes') => [
+    ' Accessing workspace:', '', ...pathRows, '',
+    " Claude Code'll be able to read, edit, and execute files here.", '',
+    ` ${selected === 'No' ? '❯' : ' '} No, exit`, ` ${selected === 'Yes' ? '❯' : ' '} Yes, I trust this folder`,
+  ].join('\n');
+  const folder = '/Users/me/.pane/sessions/__orchestration_session_0123__';
+  // At 40 columns Claude fits 38 path characters a row, inside a one-column margin.
+  const wrapped = [` ${folder.slice(0, 38)}`, ` ${folder.slice(38)}`];
+
+  it('moves to Yes, then confirms, for the folder itself, on one row or wrapped', () => {
+    expect(claudeFolderTrustKey(menu([` ${folder}`], 'No'), folder, 80)).toBe('\x1b[B');
+    expect(claudeFolderTrustKey(menu(wrapped, 'Yes'), folder, 40)).toBe('\r');
+  });
+
+  it('leaves any other path unanswered', () => {
+    for (const other of ['/tmp/project/sessions/__orchestration_session_0123__', `${folder}-project`, `${folder}/project`]) {
+      expect(claudeFolderTrustKey(menu([` ${other}`], 'Yes'), folder, 80)).toBeUndefined();
+    }
+  });
+
+  it('leaves the menu when a space could hide at a line break', () => {
+    // `.../__orchestr ation...`: the space ends the first row and the screen drops it.
+    expect(claudeFolderTrustKey(menu([` ${folder.slice(0, 37)} `, ` ${folder.slice(37)}`], 'Yes'), folder, 40)).toBeUndefined();
+    // The same space starting the second row.
+    expect(claudeFolderTrustKey(menu([` ${folder.slice(0, 38)}`, `  ${folder.slice(38)}`], 'Yes'), folder, 40)).toBeUndefined();
+    // Rows that do not match the terminal's width cannot be read as one path.
+    expect(claudeFolderTrustKey(menu(wrapped, 'Yes'), folder, 80)).toBeUndefined();
   });
 });

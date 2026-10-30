@@ -266,12 +266,16 @@ runpane report --state <ready|blocked|failed|done> --pr <number> --head <sha> --
 
 ## Answer or message a worker
 
-Send to the asking tab only:
+Send to the asking tab only. `--no-expect-report` marks the send as a reply to
+the worker's current work, so it gets through while the worker still owes its
+report, and that report still comes:
 
 ```sh
-runpane panels submit --panel <panel id> --text "<answer>" --yes --json
-runpane panels submit --panel <panel id> --input-file <file> --as-file-pointer --yes --json   # long or multi-line
+runpane panels submit --panel <panel id> --text "<answer>" --no-expect-report --yes --json
+runpane panels submit --panel <panel id> --input-file <file> --as-file-pointer --no-expect-report --yes --json   # long or multi-line
 ```
+
+New work for a worker goes without the flag and waits for its report.
 
 Read `delivery.state` once. `taken` (the agent started a turn with it) and
 `queued` (it was mid-turn and runs your text after that turn) both mean
