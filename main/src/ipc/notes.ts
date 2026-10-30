@@ -53,7 +53,9 @@ export function registerNotesHandlers(ipcMain: IpcMain, services: AppServices): 
     };
     // The small user-level loader is stable across scoped edits. Agents read the
     // private context file supplied by their terminal, keeping repositories clean.
-    const preamble = all.some(note => note.scope.kind !== 'global') ? SCOPED_NOTE_INSTRUCTIONS : '';
+    // While experimental Notes is off, terminals get no context file, so the loader is dropped.
+    const notesEnabled = services.configManager.getConfig().notesEnabled === true;
+    const preamble = notesEnabled && all.some(note => note.scope.kind !== 'global') ? SCOPED_NOTE_INSTRUCTIONS : '';
     const global = owned(GLOBAL);
     const codexRoot = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
     const codexOverride = path.join(codexRoot, 'AGENTS.override.md');
@@ -185,10 +187,13 @@ export function registerNotesHandlers(ipcMain: IpcMain, services: AppServices): 
   // Refresh its derived context before another agent reads the retained file.
   sessionManager.on('sessions-loaded', () => reconcile());
   let repositoryExports = services.configManager.getConfig().agentContext?.managedAgentsMd === true;
+  let notesEnabled = services.configManager.getConfig().notesEnabled === true;
   services.configManager.on('config-updated', () => {
-    const enabled = services.configManager.getConfig().agentContext?.managedAgentsMd === true;
-    if (enabled !== repositoryExports) {
+    const config = services.configManager.getConfig();
+    const enabled = config.agentContext?.managedAgentsMd === true;
+    if (enabled !== repositoryExports || (config.notesEnabled === true) !== notesEnabled) {
       repositoryExports = enabled;
+      notesEnabled = config.notesEnabled === true;
       reconcile();
     }
   });

@@ -28,7 +28,7 @@ function fixture() {
     fs.writeFileSync(path.join(directory, 'AGENTS.md'), '# Authored instructions\n');
     fs.writeFileSync(path.join(directory, 'CLAUDE.md'), '# Authored Claude instructions\n');
   }
-  const config = { agentContext: { managedAgentsMd: false } };
+  const config = { agentContext: { managedAgentsMd: false }, notesEnabled: true };
   const configManager = Object.assign(new EventEmitter(), { getConfig: () => config });
   const sessionManager = Object.assign(new EventEmitter(), {
     getSession: (id: string) => panes.find(pane => pane.id === id),
@@ -116,5 +116,19 @@ describe('Notes IPC delivery', () => {
     expect(read('repo-1/AGENTS.md')).not.toContain('pane-memories:start');
     expect(read('a/AGENTS.md')).not.toContain('pane-memories:start');
     expect(read('data/notes/contexts/a.md')).toContain('Updated note');
+  });
+
+  it('drops the scoped-notes instruction while experimental Notes is off and restores it when turned back on', async () => {
+    const { mutate, config, configManager } = fixture();
+    await mutate('a', { action: 'create', scope: { kind: 'feature', id: 'a' }, title: 'Kept feature note' });
+    await mutate('a', { action: 'create', scope: { kind: 'global', id: 'user' }, title: 'Kept global memory' });
+    config.notesEnabled = false;
+    configManager.emit('config-updated');
+    expect(read('claude/CLAUDE.md')).not.toContain('PANE_NOTES_FILE');
+    expect(read('claude/CLAUDE.md')).toContain('Kept global memory');
+    expect(read('data/notes/contexts/a.md')).toContain('Kept feature note');
+    config.notesEnabled = true;
+    configManager.emit('config-updated');
+    expect(read('claude/CLAUDE.md')).toContain('PANE_NOTES_FILE');
   });
 });

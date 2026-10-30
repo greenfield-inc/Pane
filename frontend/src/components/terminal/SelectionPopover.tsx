@@ -6,6 +6,7 @@ import { InterceptorToast } from './InterceptorToast';
 import NotesDialog from '../panels/notes/NotesDialog';
 import { resolveTerminalPath } from './resolveTerminalPath';
 import { copyTerminalText } from '../../utils/terminalClipboard';
+import { isNotesEnabled, useConfigStore } from '../../stores/configStore';
 
 const NotesPanel = lazy(() => import('../panels/notes/NotesPanel'));
 
@@ -51,6 +52,7 @@ export const SelectionPopover: React.FC<SelectionPopoverProps> = ({
   onClose,
 }) => {
   const [capture, setCapture] = useState<{ text: string; source: string; at: string }>();
+  const notesEnabled = useConfigStore(state => isNotesEnabled(state.config));
   // Stays mounted while hidden so the error toast can outlive the popover
   const [errorToast, setErrorToast] = useState<string | null>(null);
 
@@ -128,7 +130,7 @@ export const SelectionPopover: React.FC<SelectionPopoverProps> = ({
           Copy
         </span>
       </PopoverButton>
-      {sessionId && !isRemoteMode && <PopoverButton onClick={() => {
+      {notesEnabled && sessionId && !isRemoteMode && <PopoverButton onClick={() => {
         setCapture({ text, source: [panelTitle, workingDirectory, sessionId].filter(Boolean).join(' · '), at: new Date().toISOString() });
         onClose();
       }}><span className="flex items-center gap-2"><FileText className="h-4 w-4" />Add to notes</span></PopoverButton>}
@@ -161,7 +163,7 @@ export const SelectionPopover: React.FC<SelectionPopoverProps> = ({
         </PopoverButton>
       )}
     </TerminalPopover>
-    {capture && sessionId && <NotesDialog label="Add to notes" onDismiss={() => setCapture(undefined)} className="max-h-[calc(100vh-2rem)] max-w-3xl">
+    {notesEnabled && capture && sessionId && <NotesDialog label="Add to notes" onDismiss={() => setCapture(undefined)} className="max-h-[calc(100vh-2rem)] max-w-3xl">
       <div className="flex h-[50px] shrink-0 items-center justify-between border-b border-border-primary px-5">
         <h2 className="text-[15px] font-semibold text-text-primary">Add to notes</h2>
         <button type="button" aria-label="Close" title="Close" className="rounded-md p-1 text-text-tertiary hover:bg-surface-hover hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus" onClick={() => setCapture(undefined)}><X className="h-4 w-4" /></button>

@@ -1889,7 +1889,7 @@ export class TerminalPanelManager extends EventEmitter {
       LANG: process.env.LANG || 'en_US.UTF-8',
       WORKTREE_PATH: cwd,
       PANE_SESSION_ID: panel.sessionId,
-      PANE_NOTES_FILE: isWSL ? '' : noteContextPath(path.join(getAppDirectory(), 'notes'), panel.sessionId),
+      PANE_NOTES_FILE: isWSL || getRuntimeConfigManager().getConfig().notesEnabled !== true ? '' : noteContextPath(path.join(getAppDirectory(), 'notes'), panel.sessionId),
       PANE_PANEL_ID: panel.id,
       PANE_PANEL_KIND: resolveTerminalPanelKind(panel, panelManager.getPanelsForSession(panel.sessionId)),
       PANE_UPDATE_RESUME_NONCE: updateResumeNonce ?? '',

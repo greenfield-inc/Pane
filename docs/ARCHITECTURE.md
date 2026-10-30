@@ -161,6 +161,13 @@ Preview components never enter the editable auto-save path, even on errors.
 
 ## Notes
 
+Notes is experimental and off by default: Settings → Advanced → Notes
+(`notesEnabled`). While it is off, Pane hides the Notes tab type, the add-tab
+entries and the terminal's Add to notes action, shows a one-line pointer to the
+setting in a restored Notes tab, gives new terminals an empty `PANE_NOTES_FILE`,
+and leaves the scoped-notes instruction out of user agent files. Saved notes and
+their exports stay on disk, and turning it on restores everything without a restart.
+
 Local Notes panels use `main/src/services/notes.ts` through `main/src/ipc/notes.ts`.
 Canonical documents live in `<PANE_DIR>/notes/notes.json`, outside disposable
 worktrees. A revision check rejects stale edits; writes atomically replace the

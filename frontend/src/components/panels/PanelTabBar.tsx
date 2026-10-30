@@ -6,7 +6,7 @@ import { useHotkey } from '../../hooks/useHotkey';
 import { PanelTabBarProps, PanelCreateOptions } from '../../types/panelComponents';
 import { ToolPanel, ToolPanelType, PANEL_CAPABILITIES } from '../../../../shared/types/panels';
 import { useSession } from '../../contexts/SessionContext';
-import { useConfigStore } from '../../stores/configStore';
+import { isNotesEnabled, useConfigStore } from '../../stores/configStore';
 import { formatKeyDisplay } from '../../utils/hotkeyUtils';
 import { useHotkeyStore } from '../../stores/hotkeyStore';
 import { Tooltip } from '../ui/Tooltip';
@@ -371,7 +371,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
   const availablePanelTypes = (Object.keys(PANEL_CAPABILITIES) as ToolPanelType[])
     .filter(type => {
       const capabilities = PANEL_CAPABILITIES[type];
-      if (type === 'notes' && config?.remoteDaemon?.client.mode === 'remote') return false;
+      if (type === 'notes' && (!isNotesEnabled(config) || config?.remoteDaemon?.client.mode === 'remote')) return false;
 
       // Filter based on context
       if (context === 'project' && !capabilities.canAppearInProjects) return false;

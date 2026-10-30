@@ -3,7 +3,7 @@ import { PanelContainerProps } from '../../types/panelComponents';
 import { ErrorBoundary } from 'react-error-boundary';
 import { PanelLoadingFallback } from './PanelLoadingFallback';
 import { AgentPanelSurface } from '../agentChat/AgentPanelSurface';
-import { isChatEnabled, useConfigStore } from '../../stores/configStore';
+import { isChatEnabled, isNotesEnabled, useConfigStore } from '../../stores/configStore';
 import { renderLog } from '../../utils/console';
 
 // Lazy load panel components for better performance
@@ -76,6 +76,7 @@ export const PanelContainer: React.FC<PanelContainerProps> = React.memo(({
   const autoRetry = useRef<AutoRetryState>({ count: 0, lastAt: 0 });
   // Undefined until config loads, so a cold start keeps the tab's saved view.
   const chatEnabled = useConfigStore(s => s.config ? isChatEnabled(s.config) : undefined);
+  const notesEnabled = useConfigStore(s => isNotesEnabled(s.config));
   renderLog('[PanelContainer] Rendering panel:', panel.id, 'Type:', panel.type, 'Active:', isActive);
   
   // FIX: Use stable panel rendering without forcing remounts
@@ -88,6 +89,13 @@ export const PanelContainer: React.FC<PanelContainerProps> = React.memo(({
     // Panel type rendering
     switch (panel.type) {
       case 'notes':
+        if (!notesEnabled) {
+          return (
+            <div className="h-full w-full flex items-center justify-center p-8">
+              <p className="text-sm text-text-secondary">Notes is experimental; turn it on in Settings → Advanced.</p>
+            </div>
+          );
+        }
         return <NotesPanel paneId={panel.sessionId} viewId={panel.id} />;
       case 'terminal':
         return <AgentPanelSurface panel={panel} client={window.electronAPI.agentChat} chatEnabled={chatEnabled}><TerminalPanel panel={panel} isActive={isActive} autoFocus={autoFocus} /></AgentPanelSurface>;
@@ -122,7 +130,7 @@ export const PanelContainer: React.FC<PanelContainerProps> = React.memo(({
           </div>
         );
     }
-  }, [panel, isActive, isMainRepo, autoFocus, chatEnabled]); // Include panel to catch state changes
+  }, [panel, isActive, isMainRepo, autoFocus, chatEnabled, notesEnabled]); // Include panel to catch state changes
 
   return (
     <ErrorBoundary
