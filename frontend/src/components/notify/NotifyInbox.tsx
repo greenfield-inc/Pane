@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { Bell, Check } from 'lucide-react';
 import type { NotifyItem } from '../../../../shared/types/notify';
 import { cn } from '../../utils/cn';
@@ -11,6 +11,21 @@ import { useNow } from './useNow';
 type InboxTab = 'waiting' | 'earlier';
 
 const newestFirst = (a: NotifyItem, b: NotifyItem) => (b.resolvedAt ?? b.createdAt) - (a.resolvedAt ?? a.createdAt);
+const oldestFirst = (a: NotifyItem, b: NotifyItem) => a.createdAt - b.createdAt;
+
+const sameIds = (a: string[], b: string[]) => a.length === b.length && a.every((id, index) => id === b[index]);
+
+/**
+ * While the pointer is over the cards, a card that leaves (answered or expired) keeps its
+ * slot, empty, so the card under the pointer never moves. The slots close when it leaves.
+ */
+function useSteadySlots(ids: string[]) {
+  const [holding, setHolding] = useState(false);
+  const [slots, setSlots] = useState(ids);
+  const next = holding ? [...slots, ...ids.filter((id) => !slots.includes(id))] : ids;
+  if (!sameIds(next, slots)) setSlots(next);
+  return { slots: next, hold: () => setHolding(true), release: () => setHolding(false) };
+}
 
 function GroupLabel({ children }: { children: ReactNode }) {
   return <div className="mx-0.5 mb-1.5 mt-3.5 text-[12px] font-medium text-text-tertiary first:mt-0">{children}</div>;
@@ -77,9 +92,19 @@ export function NotifyInbox() {
   const [tab, setTab] = useState<InboxTab>('waiting');
   const now = useNow();
   const items = snapshot?.items ?? [];
-  const waiting = items.filter((item) => item.state === 'waiting' || item.state === 'sent').sort(newestFirst);
-  const waitingCount = waiting.filter((item) => item.state === 'waiting').length;
-  const updates = items.filter((item) => item.state === 'info').sort(newestFirst);
+  // Oldest first, so a new question lands at the bottom and never moves the one being answered.
+  // An answered question leaves its card at once; the strip shows "Sent to" with Undo as a toast.
+  const waiting = items.filter((item) => item.state === 'waiting').sort(oldestFirst);
+  const waitingCount = waiting.length;
+  const { slots, hold, release } = useSteadySlots(waiting.map((item) => item.id));
+  const slotHeights = useRef(new Map<string, number>());
+  const slotsRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    slotsRef.current?.querySelectorAll<HTMLElement>('[data-notify-slot]').forEach((slot) => {
+      if (slot.dataset.notifySlot) slotHeights.current.set(slot.dataset.notifySlot, slot.getBoundingClientRect().height);
+    });
+  });
+  const updates = items.filter((item) => item.state === 'info').sort(oldestFirst);
   const earlier = items.filter((item) => item.state === 'answered' || item.state === 'expired').sort(newestFirst);
   const shortcut = shortcutLabel(snapshot?.settings.shortcut ?? 'Control+Shift+Space', isMac());
 
@@ -120,18 +145,17 @@ export function NotifyInbox() {
       <div className="min-h-0 flex-1 overflow-y-auto bg-bg-secondary px-5 py-4">
         {tab === 'waiting' ? (
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_250px]">
-            <div className="flex min-w-0 flex-col gap-2.5">
-              {waiting.length === 0 && <EmptyState enabled={snapshot?.settings.enabled ?? true} />}
-              {waiting.map((item) => (
-                <NotifyCard
-                  key={item.id}
-                  item={item}
-                  view={item.state === 'sent' ? 'sent' : 'question'}
-                  form="inbox"
-                  menuPlacement="below"
-                  onCommand={runNotify}
-                />
-              ))}
+            <div ref={slotsRef} className="flex min-w-0 flex-col gap-2.5" onPointerEnter={hold} onPointerLeave={release}>
+              {slots.length === 0 && <EmptyState enabled={snapshot?.settings.enabled ?? true} />}
+              {slots.map((id) => {
+                const item = waiting.find((candidate) => candidate.id === id);
+                if (!item) return <div key={id} aria-hidden="true" style={{ height: slotHeights.current.get(id) }} />;
+                return (
+                  <div key={id} data-notify-slot={id}>
+                    <NotifyCard item={item} view="question" form="inbox" menuPlacement="below" onCommand={runNotify} />
+                  </div>
+                );
+              })}
             </div>
             {(updates.length > 0 || earlier.length > 0) && (
               <aside className="min-w-0">

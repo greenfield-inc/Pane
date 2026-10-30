@@ -62,7 +62,10 @@ Codex panel also expires when that panel sits idle at its prompt for 10 seconds.
 - **Inside Pane**: with Pane in front, the strip sits at the bottom of the main
   area, Panes with a waiting question show an amber dot and "Waiting" in the
   sidebar, and **Notify** in the sidebar opens the inbox: waiting questions,
-  updates, and what you answered earlier today. **Open in Pane** jumps to the
+  oldest first, updates, and what you answered earlier today. A question you
+  answer there leaves its card, and the strip shows "Sent to <agent>" with
+  **Undo**. Its space stays empty until the pointer leaves the cards, so the
+  card you go to next stays put. **Open in Pane** jumps to the
   asking terminal with the card docked under its output.
 - **The menu bar or tray icon** shows an amber dot while questions wait. Its
   menu lists them and holds Show outside Pane, Pause for 1 hour, Open Notify
