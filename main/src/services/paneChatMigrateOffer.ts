@@ -66,11 +66,14 @@ function migrateSkillPath(skillsRoot: string | undefined): string {
   return path.join(root, 'migrate-to-pane', 'SKILL.md');
 }
 
+const NEW_TASKS = 'After that, every new task the person asks for gets its own new Session, as "New tasks after Start here" in that skill says.';
+
 function migratePrompt(skillPath: string): string {
   return [
     `${PANE_CHAT_MIGRATE_OFFER_OPENING} on Pane's first-run screen the person said Yes to bringing in their agent sessions that are running or were active in the last 7 days.`,
     `That Yes is their confirmation. Follow the Migrate to Pane skill (${skillPath}) now, on its first-run path: show no list and ask nothing first.`,
     'It ends with the Start here page beside this chat.',
+    NEW_TASKS,
   ].join(' ');
 }
 
@@ -82,6 +85,7 @@ function startHerePrompt(skillPath: string): string {
   return [
     `${PANE_CHAT_MIGRATE_OFFER_OPENING} on Pane's first-run screen the person said Not now to bringing in agent sessions, or Pane found none. ${opened}`,
     `Follow "Start here without a migration" in the Migrate to Pane skill (${skillPath}): make their Start here page and open it beside this chat. Bring no sessions in.`,
+    NEW_TASKS,
   ].join(' ');
 }
 

@@ -268,6 +268,23 @@ many Sessions hold them, that Start here is open beside the chat, and then
 "Want me to do any of these now? Say the number." When the person answers with
 a number, start that rung's try-now task in this chat.
 
+## New tasks after Start here
+
+The Onboarding Session owns no work of its own. When the person asks it for new
+work, give the task its own new Session, even when it touches a repository or
+branch an existing Session already covers. Use an existing Session only when
+the person names it.
+
+1. `runpane sessions create` with a readable name, the goal, the context you
+   have, and the next action.
+2. Create the work's Pane with `--no-associate`, then
+   `runpane sessions associate --session <new session> --pane <pane>`, and send
+   the task to the Pane's agent.
+
+Onboarding and the other Sessions gain no Pane. Tell the person in one sentence
+that the task now has its own Session in the sidebar, and that its chat picks up
+from there.
+
 ## Start here without a migration
 
 When the first prompt says the person said Not now, or Pane found no sessions,

@@ -166,6 +166,7 @@ describe('the Onboarding Session first prompt', () => {
     expect(prompt).toContain('said Yes');
     expect(prompt).toContain('last 7 days');
     expect(prompt).toContain('show no list');
+    expect(prompt).toContain('every new task the person asks for gets its own new Session');
   });
 
   it('after Not now, asks for a Start here page that names the project they opened', async () => {
@@ -180,6 +181,7 @@ describe('the Onboarding Session first prompt', () => {
     expect(prompt).toContain(`app (${appPath})`);
     expect(prompt).toContain('Start here');
     expect(prompt).toContain('Bring no sessions in');
+    expect(prompt).toContain('every new task the person asks for gets its own new Session');
   });
 
   it('never sends it twice: not after a restart, and not to another agent', async () => {
