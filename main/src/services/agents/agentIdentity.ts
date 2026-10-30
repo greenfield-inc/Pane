@@ -347,6 +347,12 @@ const SHELL_PROCESS_NAMES = new Set([
 const VERSIONED_EXECUTABLE_NAME = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
 const CLAUDE_VERSIONED_EXECUTABLE_PATH = /(?:^|\/)claude\/versions\/[^/]+$/;
 
+/** A plain invocation of `program`: no wrapper, variable assignment, `cd` first or shell operator. */
+export function isPlainAgentCommand(command: string, program: string): boolean {
+  const words = tokenizeShellCommand(command, process.platform);
+  return words !== undefined && words.length > 0 && !/[;&|<>`\n]|\$\(/.test(command) && normalizeProcessName(words[0]) === program;
+}
+
 /** A process name or path as a comparable basename: `/bin/-zsh.exe` → `zsh`. */
 export function normalizeProcessName(name: string): string {
   const basename = name.trim().replace(/\\/g, '/').split('/').pop() ?? '';

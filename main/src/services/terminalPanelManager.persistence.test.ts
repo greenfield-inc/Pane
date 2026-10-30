@@ -1035,51 +1035,59 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void
     }
   });
 
-  it('chooses "Yes, I trust this folder" in Claude\'s menu for its own Session folder, and for no other folder', async () => {
+  it('chooses "Yes, I trust this folder" in Claude\'s menu only when it names exactly the Session folder', async () => {
     vi.useFakeTimers();
-    const trustMenu = (folder: string, selected: 'No' | 'Yes') => [
-      `\x1b[2J\x1b[H${'─'.repeat(60)}`, ' Accessing workspace:', '', ` ${folder}`, '',
+    // Claude wraps the path inside a one-column margin: 38 characters a row at 40 columns.
+    const pathRows = (folder: string) => folder.match(/.{1,38}/g)?.map(row => ` ${row}`) ?? [];
+    const trustMenu = (rows: string[], selected: 'No' | 'Yes') => [
+      `\x1b[2J\x1b[H${'─'.repeat(38)}`, ' Accessing workspace:', '', ...rows, '',
       " Claude Code'll be able to read, edit, and execute files here.", '',
       ` ${selected === 'No' ? '❯' : ' '} No, exit`, ` ${selected === 'Yes' ? '❯' : ' '} Yes, I trust this folder`, '',
       ' Enter to confirm · Esc to cancel',
     ].join('\r\n');
     const menuKeys = (handle: FakePtyHandle) => handle.written.filter(data => data === '\x1b[B' || data === '\r');
-    try {
-      const own = makePanel('claude-session-panel');
-      own.state.customState = { agentType: 'claude', orchestrationSessionId: 'claude-session' };
-      const { handle } = await startTerminal(own);
-      // The shell's prompt comes first; native Windows holds input until it shows.
-      handle.emit('$ ');
+    const startClaude = async (id: string, sessionId: string, initialCommand = 'claude') => {
+      const panel = makePanel(id);
+      panel.state.customState = { agentType: 'claude', orchestrationSessionId: sessionId, initialCommand };
+      const started = await startTerminal(panel);
+      started.handle.emit('$ ');
       await vi.advanceTimersByTimeAsync(1_000);
-      handle.emit(trustMenu(sessionWorkspacePath('claude-session'), 'No'));
+      await started.manager.resizeTerminal(panel.id, 40, 30);
+      return started.handle;
+    };
+    try {
+      const own = sessionWorkspacePath('claude-session');
+      expect(own.length).toBeGreaterThan(38);
+      const handle = await startClaude('claude-session-panel', 'claude-session');
+      handle.emit(trustMenu(pathRows(own), 'No'));
       await vi.advanceTimersByTimeAsync(1_000);
       expect(menuKeys(handle)).toEqual(['\x1b[B']);
-      handle.emit(trustMenu(sessionWorkspacePath('claude-session'), 'Yes'));
+      handle.emit(trustMenu(pathRows(own), 'Yes'));
       await vi.advanceTimersByTimeAsync(1_000);
       expect(menuKeys(handle)).toEqual(['\x1b[B', '\r']);
       // Once Claude has been ready, a later trust prompt is the person's.
-      handle.emit(`\x1b[2J\x1b[H${'─'.repeat(60)}\r\n❯ \r\n${'─'.repeat(60)}`);
+      handle.emit(`\x1b[2J\x1b[H${'─'.repeat(38)}\r\n❯ \r\n${'─'.repeat(38)}`);
       await vi.advanceTimersByTimeAsync(15_000);
-      handle.emit(trustMenu(sessionWorkspacePath('claude-session'), 'Yes'));
+      handle.emit(trustMenu(pathRows(own), 'Yes'));
       await vi.advanceTimersByTimeAsync(1_000);
       expect(menuKeys(handle)).toEqual(['\x1b[B', '\r']);
 
-      // A launcher can start Claude in a project whose path resembles the Session folder.
-      const sessionFolder = sessionWorkspacePath('other-session');
-      const projects = [
-        path.join(sessionFolder, 'project'),
-        path.join('/tmp/project/sessions', path.basename(sessionFolder)),
-        `${sessionFolder}-project`,
+      // Folders that resemble the Session folder, as a custom launcher could start Claude in.
+      const folder = sessionWorkspacePath('other-session');
+      const lookalikes = [
+        { command: 'claude', rows: pathRows(path.join(folder, 'project')) },
+        { command: 'claude', rows: pathRows(path.join('/tmp/project/sessions', path.basename(folder))) },
+        { command: 'claude', rows: pathRows(`${folder}-project`) },
+        // A trailing space never reaches the screen, so the menu looks like the Session's own.
+        { command: `cd '${folder} ' && claude`, rows: pathRows(folder) },
+        // A space that ends a wrapped row is dropped from the screen the same way.
+        { command: 'claude', rows: [` ${folder.slice(0, 37)} `, ` ${folder.slice(37)}`] },
       ];
-      for (const [index, project] of projects.entries()) {
-        const elsewhere = makePanel(`claude-session-elsewhere-${index}`);
-        elsewhere.state.customState = { agentType: 'claude', orchestrationSessionId: 'other-session' };
-        const other = await startTerminal(elsewhere);
-        other.handle.emit('$ ');
+      for (const [index, { command, rows }] of lookalikes.entries()) {
+        const other = await startClaude(`claude-session-lookalike-${index}`, 'other-session', command);
+        other.emit(trustMenu(rows, 'Yes'));
         await vi.advanceTimersByTimeAsync(1_000);
-        other.handle.emit(trustMenu(project, 'Yes'));
-        await vi.advanceTimersByTimeAsync(1_000);
-        expect(menuKeys(other.handle)).toEqual([]);
+        expect(menuKeys(other)).toEqual([]);
       }
     } finally {
       vi.useRealTimers();

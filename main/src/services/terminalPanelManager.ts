@@ -7,7 +7,7 @@ import { prepareSessionWorkspace, sessionGitCeiling } from './sessionWorkspace';
 import { OrchestrationSessionStore } from './orchestrationSessionStore';
 import { getAppDirectory } from '../utils/appDirectory';
 import { noteContextPath } from './noteFiles';
-import { codexResumeBase, claudeResumeBase, hasClaudeResumeFlag } from './agents/agentIdentity';
+import { codexResumeBase, claudeResumeBase, hasClaudeResumeFlag, isPlainAgentCommand } from './agents/agentIdentity';
 import { canReadClaudeTranscripts, findClaudeSessionTranscript } from './claudeSessionTranscript';
 import { isOrchestrationInternalSessionId } from '../../../shared/types/orchestrationSession';
 import * as pty from '@lydell/node-pty';
@@ -2732,8 +2732,18 @@ export class TerminalPanelManager extends EventEmitter {
 
   /** Pane is answering the trust menu on this screen itself, for a Session's own folder. */
   answersTrustPrompt(panelId: string, screenText: string): boolean {
-    const folder = this.terminals.get(panelId)?.claudeTrustFolder;
-    return folder !== undefined && claudeFolderTrustKey(screenText, folder) !== undefined;
+    const terminal = this.terminals.get(panelId);
+    return terminal !== undefined && this.sessionTrustKey(terminal, screenText) !== undefined;
+  }
+
+  /**
+   * The key Pane presses in Claude's trust menu on this screen, if any. Pane
+   * answers only when it launched a plain `claude` command, so Claude runs in the
+   * Session folder, and the menu shows exactly that folder.
+   */
+  private sessionTrustKey(terminal: TerminalProcess, screenText: string): '\x1b[B' | '\r' | undefined {
+    if (!terminal.claudeTrustFolder || !isPlainAgentCommand(terminal.launchedCommand ?? '', 'claude')) return undefined;
+    return claudeFolderTrustKey(screenText, terminal.claudeTrustFolder, terminal.pty.cols);
   }
 
   /**
@@ -2747,7 +2757,7 @@ export class TerminalPanelManager extends EventEmitter {
       terminal.claudeTrustFolder = undefined;
       return;
     }
-    const key = claudeFolderTrustKey(screen.screenText, terminal.claudeTrustFolder);
+    const key = this.sessionTrustKey(terminal, screen.screenText);
     if (!key) return;
     terminal.claudeTrustAnsweredScreen = screen;
     this.writeToTerminal(terminal.panelId, key);

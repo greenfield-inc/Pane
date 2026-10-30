@@ -9,7 +9,7 @@ import { ORCHESTRATION_SESSION_INTERNAL_ID_PREFIX } from '../../../shared/types/
 import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
 import type { RunpanePaneCreateRequest } from '../../../shared/types/runpaneOrchestration';
 import { PaneError } from '../../../shared/paneError';
-import { normalizeProcessName, tokenizeShellCommand } from '../services/agents/agentIdentity';
+import { isPlainAgentCommand, tokenizeShellCommand } from '../services/agents/agentIdentity';
 
 const LOOP_CHANNELS = [
   'loops:list',
@@ -245,9 +245,9 @@ function missingUnattendedFlags(command: string, agent: LoopAgent): string[] {
  */
 function unattendedLaunchCommand(sessionName: string, command: string, agent: LoopAgent): string {
   const spans: Array<{ start: number; end: number }> = [];
-  const words = tokenizeShellCommand(command, process.platform, spans);
+  tokenizeShellCommand(command, process.platform, spans);
   const program = agentExecutable(agent);
-  if (!words?.length || /[;&|<>`\n]|\$\(/.test(command) || normalizeProcessName(words[0]) !== program) {
+  if (!isPlainAgentCommand(command, program)) {
     throw new PaneError(
       'ERR_LOOP_INVALID',
       `Session ${sessionName} launches its agent with \`${command}\`, which Pane cannot safely change to skip permission prompts. Nothing was saved.`,
