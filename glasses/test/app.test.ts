@@ -1021,6 +1021,21 @@ describe('a new Session from the glasses', () => {
     expect(pages.length).toBe(shown);
   });
 
+  it('starts nothing on a double press while your last words are still being written down', async () => {
+    const { source, text, press } = startScripted();
+    let finish: (words: string) => void = () => {};
+    source.dictate = async () => ({ push: () => {}, finish: () => new Promise<string>((resolve) => { finish = resolve; }), cancel: () => {} });
+    source.changed();
+    await press({ type: 'hold' });
+    await press({ type: 'release' });
+    await press({ type: 'double' });
+    expect(text()[1]).toBe('> + New Session on studio-mac · hold to say it');
+    finish('Find why checkout charges some carts twice');
+    await settle();
+    expect(source.created).toEqual([]);
+    expect(text()[1]).toBe('> + New Session on studio-mac · hold to say it');
+  });
+
   it('starts on the computer last started on, else that of the last Pane opened, else the first', async () => {
     const remembered = startScripted('build');
     remembered.source.computerList = twoComputers;

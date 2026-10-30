@@ -635,13 +635,18 @@ export class GlassesApp {
 
   /** Release: starts the Session with what you said as its purpose, then opens it. Nothing said starts nothing. */
   private async finishNewSession(view: Extract<View, { name: 'new-session' }>): Promise<void> {
+    const stopping = this.stopListening();
+    // A double press while the last words are written down still cancels: it counts a newer hold.
+    const attempt = this.listening;
     let text: string;
     try {
-      text = await this.stopListening();
+      text = await stopping;
     } catch (error) {
+      if (attempt !== this.listening) return;
       this.showProblem(`New Session on ${view.machine} · not started`, error, { name: 'home' });
       return;
     }
+    if (attempt !== this.listening) return;
     if (!text) {
       this.goHome();
       return;
