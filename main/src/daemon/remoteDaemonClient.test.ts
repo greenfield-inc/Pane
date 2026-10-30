@@ -426,6 +426,23 @@ describe('RemoteDaemonClient when the phone leaves and returns', () => {
     client.disconnect();
   });
 
+  it('keeps probing on the backoff after the first seconds, so a longer outage still ends well before the stale-stream timer', async () => {
+    const host = createFakeHost();
+    const client = createClient(host, 20_000);
+    await client.connect();
+    await flush();
+
+    client.suspend();
+    host.dropTunnel(true);
+    client.resume();
+    await vi.advanceTimersByTimeAsync(9_000);
+    host.dropTunnel(false);
+    await vi.advanceTimersByTimeAsync(3_000);
+
+    expect(client.getState().status).toBe('connected');
+    client.disconnect();
+  });
+
   it('finishes connecting when the app was backgrounded during the handshake', async () => {
     const host = createFakeHost();
     // No heartbeats in these tests; keep the stale-stream timer out of the way.

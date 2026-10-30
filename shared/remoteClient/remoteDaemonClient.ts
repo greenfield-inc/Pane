@@ -181,7 +181,7 @@ const RESENT_WRITE_ATTEMPT_TIMEOUT_MS = 30_000;
 /**
  * A tunnel such as Tailscale's takes a moment to come back after sleep, and a request sent before
  * it does may never answer. For the first seconds after a wake a fresh probe goes out every 250 ms,
- * so one leaves soon after the path returns.
+ * so one leaves soon after the path returns; after that, probes follow the reconnect backoff.
  */
 const WAKE_PROBE_INTERVAL_MS = 250;
 const WAKE_PROBE_WINDOW_MS = 4_000;
@@ -333,10 +333,12 @@ export class RemoteDaemonClient {
     const probes = new AbortController();
     this.wakeProbes = probes;
     const started = Date.now();
+    // Past the quick window, continue from the backoff's 2 s step.
+    let backoffAttempt = 2;
     const live = () => !probes.signal.aborted && !connection.signal.aborted && connection === this.abortController;
     const probe = () => {
-      if (!live() || this.state.status !== 'reconnecting' || Date.now() - started >= WAKE_PROBE_WINDOW_MS) { probes.abort(); return; }
-      this.schedule(probe, WAKE_PROBE_INTERVAL_MS);
+      if (!live() || this.state.status !== 'reconnecting') { probes.abort(); return; }
+      this.schedule(probe, Date.now() - started < WAKE_PROBE_WINDOW_MS ? WAKE_PROBE_INTERVAL_MS : backoffDelayMs(backoffAttempt++));
       this.noteWakeAttempt();
       const attempt = abortSignalAny([probes.signal], this.schedule, WAKE_PROBE_TIMEOUT_MS);
       this.fetch(this.endpoint('health'), { signal: attempt.signal, cache: 'no-store' }).then(response => {
@@ -346,8 +348,9 @@ export class RemoteDaemonClient {
         this.clearReconnectTimer();
         void this.openEventStream(connection.signal);
       }, (error: Error) => {
+        // Fetch implementations word a cancel differently; the timeout is what happened.
         if (this.wake && !probes.signal.aborted) {
-          this.wake.lastError = error.name === 'AbortError' ? `No answer within ${WAKE_PROBE_TIMEOUT_MS / 1000} s` : error.message;
+          this.wake.lastError = attempt.signal?.aborted ? `No answer within ${WAKE_PROBE_TIMEOUT_MS / 1000} s` : error.message;
         }
       }).finally(attempt.done);
     };
