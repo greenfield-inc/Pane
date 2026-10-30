@@ -717,6 +717,78 @@ describe('RemotePaneClientController', () => {
     await controller.switchToLocalMode();
   });
 
+  it('opens on This computer after a fresh boot, keeping the saved host to switch to', async () => {
+    const remoteConfig = createDefaultRemoteDaemonConfig();
+    remoteConfig.client = {
+      profiles: [{
+        id: 'tailnet-my-mac',
+        label: 'my-mac',
+        baseUrl: 'https://my-mac.tail1234.ts.net:8443',
+        token: '',
+        transport: 'http+sse',
+        tailnetMachine: 'my-mac',
+        tailnetDomain: 'tail1234.ts.net',
+      }],
+      activeProfileId: 'tailnet-my-mac',
+      mode: 'remote',
+    };
+    const configManager = createConfigManagerStub(remoteConfig);
+    const resolved: string[] = [];
+    const controller = new RemotePaneClientController();
+    controller.initialize({
+      configManager,
+      rendererEventSink: { send() {} },
+      freshBoot: true,
+      resolveTailnetMachineUrl: async (machine) => {
+        resolved.push(machine.name);
+        throw new Error('Tailscale is signed out. Open Tailscale and sign in.');
+      },
+    });
+
+    await waitFor(() => configManager.getConfig().remoteDaemon.client.mode === 'local');
+    await sleep(50);
+    expect(configManager.getConfig().remoteDaemon.client).toMatchObject({ mode: 'local', activeProfileId: null });
+    expect(configManager.getConfig().remoteDaemon.client.profiles.map((profile) => profile.id)).toEqual(['tailnet-my-mac']);
+    expect(controller.getConnectionState()).toMatchObject({ mode: 'local', lastError: null });
+    expect(resolved).toEqual([]);
+  });
+
+  it('names the saved host and fails calls quietly when Tailscale has not found it yet', async () => {
+    const remoteConfig = createDefaultRemoteDaemonConfig();
+    remoteConfig.client = {
+      profiles: [{
+        id: 'tailnet-my-mac',
+        label: 'my-mac',
+        baseUrl: 'https://my-mac.tail1234.ts.net:8443',
+        token: '',
+        transport: 'http+sse',
+        tailnetMachine: 'my-mac',
+        tailnetDomain: 'tail1234.ts.net',
+      }],
+      activeProfileId: 'tailnet-my-mac',
+      mode: 'remote',
+    };
+    const controller = new RemotePaneClientController();
+    controller.initialize({
+      configManager: createConfigManagerStub(remoteConfig),
+      rendererEventSink: { send() {} },
+      resolveTailnetMachineUrl: async () => {
+        throw new Error('Tailscale is signed out. Open Tailscale and sign in.');
+      },
+    });
+
+    await waitFor(() => controller.getConnectionState().status === 'error');
+    expect(controller.getConnectionState()).toMatchObject({
+      mode: 'remote',
+      activeProfileId: 'tailnet-my-mac',
+      activeProfileLabel: 'my-mac',
+      lastError: 'Tailscale is signed out. Open Tailscale and sign in.',
+    });
+    // The renderer stays quiet on "Remote connection interrupted:" failures; the banner explains them.
+    await expect(controller.invoke('sessions:get-all', [], async () => undefined))
+      .rejects.toMatchObject({ code: 'ERR_REMOTE_OFFLINE', message: expect.stringMatching(/^Remote connection interrupted:/) });
+  });
+
   it('says which host to update when the host does not have a command', async () => {
     const server = await createTestRemoteServer();
     activeServers.push(server);
@@ -1214,6 +1286,12 @@ function createConfigManagerStub(initialConfig: RemoteDaemonConfig): ConfigManag
     setRemoteConfig(remoteDaemon: RemoteDaemonConfig): void {
       this.remoteDaemon = remoteDaemon;
       this.emit('config-updated', { remoteDaemon });
+    }
+
+    async updateConfigWith(update: (current: RemoteConfigSnapshot) => Partial<RemoteConfigSnapshot>): Promise<RemoteConfigSnapshot> {
+      const { remoteDaemon } = update(this.getConfig());
+      if (remoteDaemon) this.setRemoteConfig(remoteDaemon);
+      return this.getConfig();
     }
   }
 
