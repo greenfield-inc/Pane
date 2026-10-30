@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, lazy, Suspense } from 'react';
-import { Plus, Settings, ChevronDown, Type, Pencil, Trash2, ArrowUpRight } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { Plus, Settings, ChevronDown, Type, Pencil, Trash2, ArrowUpRight, NotebookPen, TerminalSquare } from 'lucide-react';
 import { Dropdown } from '../../ui/Dropdown';
+import { Button, IconButton } from '../../ui/Button';
+import { cn } from '../../../utils/cn';
 import './notesEditor.css';
 import type { Note, NoteBlock, NoteContext, NoteExportResult, NoteScope } from '../../../../../shared/types/notes';
 import { noteSchema, sameNoteScope } from '../../../../../shared/types/notes';
@@ -17,15 +20,15 @@ const descriptions = {
   global: 'Notes for all your projects.',
   session: 'Notes for this session.',
 };
-const button = 'rounded px-3 py-1.5 text-sm hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-interactive disabled:opacity-50';
 const field = 'w-full bg-transparent text-text-primary outline-none placeholder:text-text-tertiary';
+const alert = 'space-y-2 rounded-[10px] bg-status-error/10 px-3.5 py-3 text-[13px] text-status-error';
 
 export interface NoteCapture { text: string; source: string; at: string }
 interface NotesPanelProps { paneId: string; capture?: NoteCapture; viewId?: string }
 
 export default function NotesPanel(props: NotesPanelProps) {
   const remote = useConfigStore(state => state.config?.remoteDaemon?.client.mode === 'remote');
-  return remote ? <p className="p-4 text-text-secondary">Notes are available in local Pane workspaces.</p> : <LocalNotesPanel {...props} />;
+  return remote ? <p className="p-5 text-[13px] text-text-tertiary">Notes are available in local Pane workspaces.</p> : <LocalNotesPanel {...props} />;
 }
 
 function LocalNotesPanel({ paneId, capture, viewId = 'panel' }: NotesPanelProps) {
@@ -37,6 +40,7 @@ function LocalNotesPanel({ paneId, capture, viewId = 'panel' }: NotesPanelProps)
   const [exports, setExports] = useState<NoteExportResult[]>([]);
   const flush = useRef<(() => Promise<boolean>) | null>(null);
   const request = useRef(0);
+  const [toolbar, setToolbar] = useState<HTMLDivElement | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -84,47 +88,58 @@ function LocalNotesPanel({ paneId, capture, viewId = 'panel' }: NotesPanelProps)
     return order[a.scope.kind] - order[b.scope.kind];
   });
 
+  const retryExports = () => { void window.electronAPI.invoke('notes:mutate', paneId, { action: 'retry' }).then(result => setExports(result.exports)).catch(cause => setError(ipcErrorMessage(cause, 'Pane did not say why.'))); };
+
   return <section aria-label="Notes" className="notes-surface flex h-full min-h-0 flex-col bg-bg-primary text-text-primary">
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 text-xs">
-      <div className="flex min-w-0 items-center gap-1">
-        <Dropdown width="md" position="bottom-left" selectedId={current?.id}
-          trigger={<button type="button" aria-label="Choose note" className="flex max-w-40 items-center gap-1.5 rounded px-1 py-1 text-text-secondary hover:text-text-primary"><span className="truncate">{current?.title || 'Notes'}</span><ChevronDown size={12} className="shrink-0" /></button>}
-          items={[...notes.map(note => ({ id: note.id, label: note.title || 'Untitled', onClick: () => { void choose(undefined, note.id); } })),
-            { id: 'new', label: 'New note', icon: Plus, onClick: () => { void create(); } }]}
-          menuClassName="!z-modal" />
+    <header className="flex min-h-[50px] shrink-0 flex-wrap items-center gap-x-2.5 gap-y-1.5 border-b border-border-primary px-4 py-2">
+      <Dropdown className="min-w-0" width="md" position="bottom-left" selectedId={current?.id} selectedMark="check"
+        trigger={<button type="button" aria-label="Choose note" className="flex min-w-0 max-w-56 items-center gap-1 rounded-md px-1.5 py-1 text-[15px] font-semibold text-text-primary hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"><span className="truncate">{current ? current.title || 'Untitled' : 'Notes'}</span><ChevronDown size={14} className="shrink-0 text-text-tertiary" /></button>}
+        items={[...notes.map(note => ({ id: note.id, label: note.title || 'Untitled', onClick: () => { void choose(undefined, note.id); } })),
+          { id: 'new', label: 'New note', icon: Plus, onClick: () => { void create(); } }]}
+        menuClassName="!z-modal" />
+      <div role="group" aria-label="Note scope" className="flex min-w-0 gap-0.5 overflow-x-auto rounded-[9px] bg-surface-tertiary p-[3px] text-[12.5px] font-medium">
+        {scopes?.map(item => {
+          const active = scope && sameNoteScope(scope, item.scope);
+          const named = item.scope.kind === 'project' && context?.defaultScope.kind === 'session';
+          return <button key={`${item.scope.kind}-${item.scope.id}`} type="button"
+            aria-label={`${scopeLabels[item.scope.kind]}${named ? ` · ${item.name}` : ''}`}
+            title={`${item.name} · ${descriptions[item.scope.kind]}`}
+            aria-pressed={active}
+            className={cn('whitespace-nowrap rounded-md px-2.5 py-[3px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus', active ? 'bg-surface-primary text-text-primary shadow-sm' : 'text-text-tertiary hover:text-text-primary')}
+            onClick={() => void choose(item.scope)}>{named ? item.name : scopeLabels[item.scope.kind].replace(' Notes', '')}</button>;
+        })}
       </div>
-      <div className="ml-auto flex min-w-0 gap-0.5 overflow-x-auto" aria-label="Note scope">
-        {scopes?.map(item => <button key={`${item.scope.kind}-${item.scope.id}`} type="button"
-          aria-label={`${scopeLabels[item.scope.kind]}${item.scope.kind === 'project' && context?.defaultScope.kind === 'session' ? ` · ${item.name}` : ''}`}
-          title={`${item.name} · ${descriptions[item.scope.kind]}`}
-          aria-pressed={scope && sameNoteScope(scope, item.scope)}
-          className={`whitespace-nowrap rounded px-2 py-1 transition-colors ${scope && sameNoteScope(scope, item.scope) ? 'bg-surface-hover font-medium text-text-primary' : 'text-text-tertiary hover:text-text-primary'}`}
-          onClick={() => void choose(item.scope)}>{item.scope.kind === 'project' && context?.defaultScope.kind === 'session' ? item.name : scopeLabels[item.scope.kind].replace(' Notes', '')}</button>)}
+      <div className="ml-auto flex shrink-0 items-center gap-1">
+        <div ref={setToolbar} className="flex items-center gap-1" />
+        <IconButton aria-label="New note" title="New note" icon={<Plus size={16} />} disabled={!scope} onClick={() => void create()} />
       </div>
-    </div>
-    {error && <p role="alert" className="px-6 py-2 text-sm text-status-error">{error}</p>}
-    {!current && exports.some(result => result.error) && <div role="alert" className="px-6 py-2 text-xs text-status-error">
-      <p>Agent exports need attention.</p>
-      {exports.filter(result => result.error).map(result => <p key={result.path} className="break-words">{result.agent}: {result.error}</p>)}
-      <button type="button" className={button} onClick={() => { void window.electronAPI.invoke('notes:mutate', paneId, { action: 'retry' }).then(result => setExports(result.exports)).catch(cause => setError(ipcErrorMessage(cause, 'Pane did not say why.'))); }}>Retry exports</button>
+    </header>
+    {(error || (!current && exports.some(result => result.error))) && <div className="shrink-0 space-y-2 px-4 pt-3">
+      {error && <p role="alert" className={alert}>{error}</p>}
+      {!current && exports.some(result => result.error) && <div role="alert" className={alert}>
+        <p className="font-medium">Agent exports need attention.</p>
+        {exports.filter(result => result.error).map(result => <p key={result.path} className="break-words">{result.agent}: {result.error}</p>)}
+        <Button variant="secondary" size="sm" onClick={retryExports}>Retry exports</Button>
+      </div>}
     </div>}
-    <div className="min-h-0 flex-1 overflow-auto">
+    <div className="min-h-0 flex-1 overflow-y-auto">
       {current && context ? <NoteEditor key={current.id} paneId={paneId} note={current} context={context} flush={flush} draftKey={`pane-note-draft:${paneId}:${viewId}:${current.id}`} capture={capture}
-        viewedScope={scope} exports={exports} onExports={setExports} onRefresh={refresh} />
-        : <div className="notes-document">
-          <button type="button" aria-label="Start a note" onClick={() => void create()} disabled={!scope} className="block w-full py-8 text-left">
-            <span className="block text-3xl font-semibold tracking-tight text-text-tertiary">Untitled</span>
-            <span className="mt-5 block text-sm text-text-tertiary">{capture ? 'Start a note for this terminal excerpt…' : 'Start writing…'}</span>
-          </button>
+        viewedScope={scope} exports={exports} onExports={setExports} onRefresh={refresh} toolbar={toolbar} />
+        : <div className="mx-auto mt-16 max-w-sm px-6 text-center">
+          <span className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-surface-tertiary text-text-secondary"><NotebookPen className="h-5 w-5" /></span>
+          <h2 className="text-[15px] font-semibold text-text-primary">No notes here yet</h2>
+          <p className="mt-1.5 text-[13px] leading-relaxed text-text-tertiary">{capture
+            ? 'Start a note for this terminal excerpt.'
+            : scope ? descriptions[scope.kind] : 'Loading notes…'}</p>
+          <Button className="mt-4" size="sm" icon={<Plus className="h-4 w-4" />} onClick={() => void create()} disabled={!scope}>New note</Button>
         </div>}
     </div>
   </section>;
-
 }
 
-function NoteEditor({ paneId, note, context, flush, capture, onExports, onRefresh, draftKey, exports, viewedScope }: {
+function NoteEditor({ paneId, note, context, flush, capture, onExports, onRefresh, draftKey, exports, viewedScope, toolbar }: {
   paneId: string; note: Note; context: NoteContext; draftKey: string; flush: React.MutableRefObject<(() => Promise<boolean>) | null>;
-  exports: NoteExportResult[]; viewedScope?: NoteScope;
+  exports: NoteExportResult[]; viewedScope?: NoteScope; toolbar: HTMLElement | null;
   capture?: NoteCapture; onExports: (results: NoteExportResult[]) => void; onRefresh: () => Promise<void>;
 }) {
   const [draft, setDraft] = useState(() => {
@@ -207,14 +222,18 @@ function NoteEditor({ paneId, note, context, flush, capture, onExports, onRefres
     requestAnimationFrame(() => document.getElementById(`note-block-${block.id}`)?.focus());
   };
   const failedExports = exports.filter(result => result.error);
+  const title = useRef<HTMLTextAreaElement>(null);
+  useAutoHeight(title, draft.title);
   return <div className="notes-document">
-    <div className="mb-4 flex min-h-7 items-center justify-end gap-2 text-xs text-text-tertiary">
-      {viewedScope && !sameNoteScope(draft.scope, viewedScope) && <span className="mr-auto">Reference to {scopeLabels[draft.scope.kind]}</span>}
-      <span role="status" className={error ? 'text-status-error' : status === 'Saved' && !recoveryWarning ? 'sr-only' : ''}>{status}</span>
+    {toolbar && createPortal(<>
+      {viewedScope && !sameNoteScope(draft.scope, viewedScope) && <span className="whitespace-nowrap px-1 text-[12px] text-text-tertiary">Reference to {scopeLabels[draft.scope.kind]}</span>}
+      {/* A fixed slot, so the header never reflows as the status comes and goes. */}
+      <span className="w-24 shrink-0 truncate px-1 text-right text-[12px]">
+        <span role="status" className={error ? 'text-status-error' : status === 'Saved' && !recoveryWarning ? 'sr-only' : 'text-text-tertiary'}>{status}</span>
+      </span>
       <Dropdown position="bottom-right" width="lg" menuClassName="!z-modal"
-        trigger={<button type="button" aria-label="Note settings" title="Note settings" className="flex items-center gap-1.5 rounded p-1.5 hover:bg-surface-hover hover:text-text-primary">
-          {failedExports.length > 0 && <span className="text-status-error">Export issue</span>}<Settings size={15} />
-        </button>}
+        trigger={<IconButton aria-label="Note settings" title="Note settings" className="gap-1.5"
+          icon={<>{failedExports.length > 0 && <span className="text-[12px] text-status-error">Export issue</span>}<Settings size={16} /></>} />}
         items={[
           ...((draft.scope.kind === 'feature' || draft.scope.kind === 'session') ? (projects.length > 1
             ? projects.map(item => ({ id: `project-${item.scope.id}`, label: <span className="block whitespace-normal break-words">Move to {item.name}</span>, icon: ArrowUpRight, onClick: () => { void mutate('move', item.scope); } }))
@@ -222,34 +241,44 @@ function NoteEditor({ paneId, note, context, flush, capture, onExports, onRefres
           ...(draft.scope.kind === 'project' ? [{ id: 'global', label: 'Move to Global Notes', icon: ArrowUpRight, onClick: () => { void mutate('move', { kind: 'global', id: 'user' }); } }] : []),
           { id: 'delete', label: 'Delete note', icon: Trash2, variant: 'danger', onClick: () => { if (window.confirm('Delete this note and all its references?')) void mutate('remove'); } },
         ]}
-        footer={failedExports.length > 0 ? <div role="alert" className="space-y-2 p-3 text-xs text-status-error">
+        footer={failedExports.length > 0 ? <div role="alert" className="space-y-2 p-3 text-[13px] text-status-error">
           <p>Note saved. Agent exports need attention.</p>
           {failedExports.map(result => <p key={result.path} className="break-words">{result.agent}: {result.error}</p>)}
-          <button type="button" className={button} onClick={() => { void window.electronAPI.invoke('notes:mutate', paneId, { action: 'retry' }).then(result => onExports(result.exports)).catch(cause => setError(ipcErrorMessage(cause, 'Pane did not say why.'))); }}>Retry exports</button>
+          <Button variant="secondary" size="sm" onClick={() => { void window.electronAPI.invoke('notes:mutate', paneId, { action: 'retry' }).then(result => onExports(result.exports)).catch(cause => setError(ipcErrorMessage(cause, 'Pane did not say why.'))); }}>Retry exports</Button>
         </div> : undefined} />
-    </div>
-    {recoveryWarning && <p role="status" className="mb-3 text-xs text-status-error">{recoveryWarning}</p>}
-    {error && <div role="alert" className="mb-4 text-sm text-status-error">{error}
+    </>, toolbar)}
+    {recoveryWarning && <p role="status" className={`${alert} mb-4`}>{recoveryWarning}</p>}
+    {error && <div role="alert" className={`${alert} mb-5`}>
+      <p className="font-medium">{error}</p>
       <p>Your unsaved draft remains here. Copy it before reloading if you want to keep it.</p>
-      <button type="button" className={button} onClick={() => { localStorage.removeItem(draftKey); dirty.current = false; draftRef.current = note; setDraft(note); setError(''); setStatus('Saved'); }}>Reload saved note</button>
-      <button type="button" className={button} onClick={() => { setError(''); void save(); }}>Retry save</button>
-      <button type="button" className={button} onClick={() => { void navigator.clipboard.writeText(JSON.stringify(draftRef.current, null, 2)); }}>Copy draft</button>
+      <div className="flex flex-wrap gap-2 pt-1">
+        <Button variant="secondary" size="sm" onClick={() => { setError(''); void save(); }}>Retry save</Button>
+        <Button variant="secondary" size="sm" onClick={() => { void navigator.clipboard.writeText(JSON.stringify(draftRef.current, null, 2)); }}>Copy draft</Button>
+        <Button variant="ghost" size="sm" onClick={() => { localStorage.removeItem(draftKey); dirty.current = false; draftRef.current = note; setDraft(note); setError(''); setStatus('Saved'); }}>Reload saved note</Button>
+      </div>
     </div>}
-    <input aria-label="Note title" placeholder="Untitled" className={`${field} notes-title mb-5 font-semibold tracking-tight`} value={draft.title} onChange={event => change({ ...draftRef.current, title: event.target.value })} />
-    {capture && !captured && <button type="button" className={`${button} mb-4 text-interactive`} onClick={() => {
-      change({ ...draftRef.current, blocks: [...draftRef.current.blocks, { type: 'text', id: crypto.randomUUID(), text: `Terminal excerpt · ${capture.source} · ${capture.at}\n\n${capture.text}` }] });
-      setCaptured(true);
-    }}>Add terminal excerpt to this note</button>}
+    <textarea ref={title} aria-label="Note title" placeholder="Untitled" rows={1}
+      className={`${field} notes-title mb-4 block resize-none overflow-hidden font-semibold tracking-tight`} value={draft.title}
+      onChange={event => change({ ...draftRef.current, title: event.target.value.replace(/\n/g, ' ') })}
+      onKeyDown={event => { if (event.key === 'Enter') event.preventDefault(); }} />
+    {capture && !captured && <div className="mb-5 flex items-center gap-3 rounded-[12px] bg-surface-secondary px-3.5 py-3 ring-1 ring-border-secondary">
+      <TerminalSquare className="h-4 w-4 shrink-0 text-text-tertiary" />
+      <pre className="min-w-0 flex-1 truncate font-mono text-[12px] text-text-secondary">{capture.text.trim().split('\n')[0]}</pre>
+      <Button size="sm" className="shrink-0" onClick={() => {
+        change({ ...draftRef.current, blocks: [...draftRef.current.blocks, { type: 'text', id: crypto.randomUUID(), text: `Terminal excerpt · ${capture.source} · ${capture.at}\n\n${capture.text}` }] });
+        setCaptured(true);
+      }}>Add terminal excerpt to this note</Button>
+    </div>}
     <div className="space-y-1">
       {draft.blocks.map((block, index) => <NoteContentBlock key={block.id} block={block} index={index}
         onChange={updateBlock} onText={() => addText(block.id)} onDrawing={() => addDrawing(block.id)}
         onRemove={() => change({ ...draftRef.current, blocks: draftRef.current.blocks.filter(item => item.id !== block.id) })}
         onEditDrawing={() => { if (block.type === 'drawing') { insertAfter.current = undefined; setDrawing(block); } }} />)}
       {draft.blocks.length === 0 && <Dropdown menuClassName="!z-modal" position="bottom-left" width="sm"
-        trigger={<button type="button" aria-label="Add block" className={`${button} text-text-tertiary`}><Plus size={16} /></button>}
+        trigger={<Button variant="ghost" size="sm" aria-label="Add block" icon={<Plus className="h-4 w-4" />} className="-ml-2.5">Add a block</Button>}
         items={[{ id: 'text', label: 'Text', icon: Type, onClick: () => addText() }, { id: 'drawing', label: 'Drawing', icon: Pencil, onClick: () => addDrawing() }]} />}
     </div>
-    {drawing && <Suspense fallback={<p role="status">Loading drawing editor…</p>}><DrawingEditor block={drawing}
+    {drawing && <Suspense fallback={<p role="status" className="py-2 text-[13px] text-text-tertiary">Loading drawing editor…</p>}><DrawingEditor block={drawing}
       onCancel={() => setDrawing(undefined)}
       onSave={block => {
         const blocks = draftRef.current.blocks.slice();
@@ -265,15 +294,10 @@ function NoteEditor({ paneId, note, context, flush, capture, onExports, onRefres
   </div>;
 }
 
-function NoteContentBlock({ block, index, onChange, onText, onDrawing, onRemove, onEditDrawing }: {
-  block: NoteBlock; index: number; onChange: (block: NoteBlock) => void;
-  onText: () => void; onDrawing: () => void; onRemove: () => void; onEditDrawing: () => void;
-}) {
-  const textarea = useRef<HTMLTextAreaElement>(null);
-  const add = useRef<HTMLButtonElement>(null);
-  const slash = useRef(false);
+/** Grows a textarea to fit its text, and refits when the column width changes. */
+function useAutoHeight(ref: React.RefObject<HTMLTextAreaElement | null>, text: string) {
   useLayoutEffect(() => {
-    const element = textarea.current;
+    const element = ref.current;
     if (!element) return;
     const fit = () => { element.style.height = 'auto'; element.style.height = `${element.scrollHeight}px`; };
     fit();
@@ -283,16 +307,26 @@ function NoteContentBlock({ block, index, onChange, onText, onDrawing, onRemove,
     });
     observer.observe(element);
     return () => observer.disconnect();
-  }, [block]);
-  return <div className="group relative py-1">
-    <Dropdown className="absolute -left-7 top-1.5" menuClassName="!z-modal" position="bottom-left" width="sm"
+  }, [ref, text]);
+}
+
+function NoteContentBlock({ block, index, onChange, onText, onDrawing, onRemove, onEditDrawing }: {
+  block: NoteBlock; index: number; onChange: (block: NoteBlock) => void;
+  onText: () => void; onDrawing: () => void; onRemove: () => void; onEditDrawing: () => void;
+}) {
+  const textarea = useRef<HTMLTextAreaElement>(null);
+  const add = useRef<HTMLButtonElement>(null);
+  const slash = useRef(false);
+  useAutoHeight(textarea, block.type === 'text' ? block.text : '');
+  return <div className="group relative py-0.5">
+    <Dropdown className="absolute -left-8 top-1" menuClassName="!z-modal" position="bottom-left" width="sm"
       trigger={<button ref={add} type="button" aria-label={`Add block after block ${index + 1}`} title="Add block"
-        className="notes-block-add rounded p-1 text-text-tertiary opacity-0 hover:bg-surface-hover hover:text-text-primary focus:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"><Plus size={16} /></button>}
+        className="notes-block-add flex h-6 w-6 items-center justify-center rounded-md text-text-tertiary opacity-0 transition-opacity hover:bg-surface-hover hover:text-text-primary focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus group-hover:opacity-100 group-focus-within:opacity-100"><Plus size={16} /></button>}
       onOpenChange={open => { if (!open && slash.current) { slash.current = false; requestAnimationFrame(() => textarea.current?.focus()); } }}
       items={[{ id: 'text', label: 'Text', icon: Type, onClick: () => { slash.current = false; onText(); } }, { id: 'drawing', label: 'Drawing', icon: Pencil, onClick: () => { slash.current = false; onDrawing(); } },
         { id: 'remove', label: 'Delete block', icon: Trash2, variant: 'danger', onClick: onRemove }]} />
     {block.type === 'text' ? <textarea ref={textarea} id={`note-block-${block.id}`} aria-label={`Text block ${index + 1}`} rows={1}
-      className={`${field} notes-text block resize-none overflow-hidden py-1 leading-relaxed`} placeholder={index === 0 ? 'Write something, or type / for blocks…' : 'Write something…'}
+      className={`${field} notes-text block resize-none overflow-hidden py-1`} placeholder={index === 0 ? 'Write something, or type / for blocks…' : 'Write something…'}
       value={block.text} onChange={event => onChange({ ...block, text: event.target.value })}
       onKeyDown={event => {
         const cursor = event.currentTarget.selectionStart;
@@ -300,9 +334,9 @@ function NoteContentBlock({ block, index, onChange, onText, onDrawing, onRemove,
           event.preventDefault(); slash.current = true; add.current?.click();
         }
       }} />
-      : <button type="button" aria-label={`${block.title} · Edit drawing`} className="block w-full rounded text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-interactive" onClick={onEditDrawing}>
-        {block.png && <img src={block.png} alt={block.labels || block.title} className="mx-auto max-h-96 max-w-full" />}
-        <span className="mt-1 block text-xs text-text-tertiary opacity-0 group-hover:opacity-100 group-focus-within:opacity-100">{block.title} · Edit drawing</span>
+      : <button type="button" aria-label={`${block.title} · Edit drawing`} className="block w-full rounded-[12px] p-2 text-left ring-1 ring-transparent hover:ring-border-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus" onClick={onEditDrawing}>
+        {block.png && <img src={block.png} alt={block.labels || block.title} className="mx-auto max-h-96 max-w-full rounded-md" />}
+        <span className="mt-1.5 block text-[12px] text-text-tertiary opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">{block.title} · Edit drawing</span>
       </button>}
   </div>;
 }
