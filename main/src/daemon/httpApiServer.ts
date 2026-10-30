@@ -1578,10 +1578,18 @@ async function answerInvoke(run: () => ReturnType<PaneCommandRegistry['invokeRem
     }
     const failure = toPaneDaemonError(error, 'ERR_REMOTE_DAEMON_REQUEST_FAILED');
     return {
-      answer: { statusCode: failure.code === 'ERR_UNKNOWN_CHANNEL' ? 404 : 500, payload: { ok: false, error: failure } satisfies RemoteInvokeErrorPayload },
+      answer: { statusCode: invokeFailureStatus(failure.code), payload: { ok: false, error: failure } satisfies RemoteInvokeErrorPayload },
       keep: failure.code !== 'ERR_UNKNOWN_CHANNEL' && failure.code !== 'ERR_UPDATE_QUIESCING',
     };
   }
+}
+
+/** Notify refusals: the host checked the answer and ran nothing, so a client says "Not sent" instead of retrying. */
+const NOTIFY_REFUSAL_CODES = new Set(['ERR_NOTIFY_INVALID', 'ERR_NOTIFY_GONE', 'ERR_NOTIFY_EXPIRED', 'ERR_NOTIFY_ANSWERED', 'ERR_NOTIFY_NOT_SENT']);
+
+function invokeFailureStatus(code: string): number {
+  if (code === 'ERR_UNKNOWN_CHANNEL') return 404;
+  return NOTIFY_REFUSAL_CODES.has(code) ? 409 : 500;
 }
 
 function writeSseEvent(

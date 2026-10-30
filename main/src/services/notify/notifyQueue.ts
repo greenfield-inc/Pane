@@ -710,8 +710,18 @@ function toResult(item: NotifyItem, answer: NotifyAnswer): NotifyResult {
   if (item.ui === 'options' && 'choice' in answer && item.choices?.some(choice => choice.label === answer.choice)) {
     return note ? { answer: answer.choice, note } : { answer: answer.choice };
   }
-  if (item.ui === 'ask' && 'text' in answer && answer.text.trim()) return { answer: answer.text.trim() };
+  if ((item.ui === 'ask' || item.ui === 'options') && 'text' in answer && answer.text.trim()) {
+    // A spoken or typed reply to an options question names a choice, or answers in its own words.
+    const text = answer.text.trim();
+    const choice = item.choices?.find(candidate => spokenForm(candidate.label) === spokenForm(text));
+    return { answer: choice?.label ?? text };
+  }
   throw new Error(`That answer doesn't fit this ${item.ui} question.`);
+}
+
+/** Dictation capitalizes and ends with a period: "Keep redis." names "Keep Redis". */
+function spokenForm(text: string): string {
+  return text.trim().replace(/[.!?]+$/, '').toLowerCase();
 }
 
 function summarize(item: NotifyItem, result: NotifyResult): string {

@@ -9,6 +9,7 @@ import { boundary, decodeBoundary, type JsonValue } from '../../../shared/valida
 
 import { PaneRemoteHttpApiServer, type WorkspaceAccessPolicy } from './httpApiServer';
 import { RecentWrites } from './recentWrites';
+import { PaneError } from '../../../shared/paneError';
 
 interface ConfigManagerStub {
   getConfig(): { deepgramApiKey?: string; remoteDaemon?: RemoteDaemonConfig };
@@ -318,6 +319,23 @@ describe('PaneRemoteHttpApiServer', () => {
       'X-Pane-Remote-Runtime-Id': 'other-phone', 'X-Pane-Client-Device-Label': encodeURIComponent('Parsa’s iPad'),
     });
     expect(handler).toHaveBeenLastCalledWith(answer, { device: 'Parsa’s iPad' });
+  });
+
+  it('answers a Notify refusal as a definite 409, so a client reports it as not sent', async () => {
+    const registry = new PaneCommandRegistry();
+    registry.register('notify:remote-command', async () => {
+      throw new PaneError('ERR_NOTIFY_INVALID', "That answer doesn't fit this options question. Nothing was sent.", "Answer with one of the question's choices.");
+    });
+    const server = new PaneRemoteHttpApiServer(registry, createConfigManagerStub(createEnabledRemoteConfig()));
+    activeServers.push(server);
+    await server.start();
+
+    await expect(requestJson(server, 'POST', '/invoke', {
+      channel: 'notify:remote-command', args: [{ type: 'answer', id: 'question-1', answer: { choice: 'MongoDB' } }],
+    }, 'secret-token')).resolves.toMatchObject({
+      statusCode: 409,
+      body: { ok: false, error: { code: 'ERR_NOTIFY_INVALID', next: "Answer with one of the question's choices." } },
+    });
   });
 
   it.each(['credentials:shared:get', 'credentials:shared:apply'])(
