@@ -152,6 +152,8 @@ export interface ParsedArgs {
   workspacePath?: string;
   execCommand?: string[];
   cwd?: string;
+  /** `workspace write --content`; without it, write reads stdin. */
+  writeContent?: string;
   /** `runpane handoff <destination...>` */
   handoffDestination?: string;
   handoffTemplate?: boolean;
@@ -815,6 +817,10 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
     parsed.cwd = value;
     return;
   }
+  if (flag === '--content') {
+    parsed.writeContent = value;
+    return;
+  }
   if (flag === '--note-file') {
     parsed.handoffNoteFile = value;
     return;
@@ -1228,7 +1234,7 @@ function splitInlineValues(rawArgs: string[]): SplitArgs {
 function readValue(args: string[], index: number, flag: string, literalValues: Set<number>): string {
   const value = args[index];
   if (literalValues.has(index)) return value;
-  const freeText = ['--text', '--prompt', '--initial-input', '--title', '--name', '--name-contains'].includes(flag);
+  const freeText = ['--text', '--content', '--prompt', '--initial-input', '--title', '--name', '--name-contains'].includes(flag);
   if (!value || (!freeText && value.startsWith('-') && value !== '-')) {
     throw new Error(`${flag} requires a value.`);
   }

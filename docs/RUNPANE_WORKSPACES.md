@@ -7,7 +7,7 @@ The same listener powers codeless desktop remote mode: the sidebar's machine men
 ```
 runpane workspace list
 runpane workspace <machine> read  <path>
-runpane workspace <machine> write <path>          # content from stdin
+runpane workspace <machine> write <path>          # content from stdin, or --content <text>
 runpane workspace <machine> exec -- <command>     # runs in that machine's shell
 runpane workspace <machine> <runpane command>     # e.g. sessions list --json
 ```
@@ -15,6 +15,8 @@ runpane workspace <machine> <runpane command>     # e.g. sessions list --json
 `<machine>` is the Tailscale machine name (`parsa-devbox`), a unique prefix (`devbox`), the MagicDNS name, or a Tailscale IP.
 
 `runpane workspace list` shows your own machines first, then other people's machines on the tailnet labeled with their owner's login (`tylers-mac-mini (macOS, online, owner tbrownio@github)`). Each machine decides who it lets in. A machine set to "Only me" refuses other logins, and the error says how its owner can change that. A path shaped like another OS's (`C:\...` on a Mac) routes only to your own machines; reach someone else's machine by name.
+
+Agents can call them as MCP tools too: `workspace_list`, `workspace_read`, `workspace_write`, and `workspace_exec` are in the [Pane MCP server](PANE_MCP.md#toolsets)'s default toolset. `workspace_write` requires `content`, since a tool call has no stdin, and file contents and command output come back exactly as the CLI's `--json` prints them.
 
 These commands ship in the npm CLI (`npm i -g runpane`, or `npx --yes runpane@latest workspace list`). The Python package prints the workspaces status block but does not run them.
 
@@ -103,7 +105,7 @@ Run from a Session's terminal, whose folder is outside git, handoff moves the Se
 - Inside WSL, `C:\...` becomes `/mnt/c/...`, and runpane reads the tailnet from Windows' `tailscale.exe`.
 - `~` is the home directory of the machine that runs the request.
 
-`read` prints the file to stdout (`--json` returns `content` with `encoding` `utf8` or `base64`) and lists a directory's entries. `write` reads stdin, creates missing parent folders, and replaces the file. `exec` runs in the shell Pane uses for terminals there (Git Bash or PowerShell on Windows, your default shell elsewhere), prints its stdout and stderr, ends with a line naming the machine, OS, shell, and exit code, and exits with the command's exit code. `--json` returns all of these fields. Pass the command as one quoted string (`exec -- 'grep "a b" notes.md'`): several words after `--` are joined with spaces. Without `--` (PowerShell drops it before npm's `runpane.ps1` sees it), the command starts at the first word that is not an exec option. That machine's own `runpane` comes first on `PATH`, so `exec -- 'runpane version'` works even where its user `PATH` lacks `~/.pane/bin`. A command that starts a background job returns when the shell exits, and `--timeout-ms` stops the whole process tree. If that tree cannot be stopped, the result says so (`stillRunning` in `--json`, "may still be running" in text).
+`read` prints the file to stdout (`--json` returns `content` with `encoding` `utf8` or `base64`) and lists a directory's entries. `write` writes `--content <text>` or else stdin, creates missing parent folders, and replaces the file. `exec` runs in the shell Pane uses for terminals there (Git Bash or PowerShell on Windows, your default shell elsewhere), prints its stdout and stderr, ends with a line naming the machine, OS, shell, and exit code, and exits with the command's exit code. `--json` returns all of these fields. Pass the command as one quoted string (`exec -- 'grep "a b" notes.md'`): several words after `--` are joined with spaces. Without `--` (PowerShell drops it before npm's `runpane.ps1` sees it), the command starts at the first word that is not an exec option. That machine's own `runpane` comes first on `PATH`, so `exec -- 'runpane version'` works even where its user `PATH` lacks `~/.pane/bin`. A command that starts a background job returns when the shell exits, and `--timeout-ms` stops the whole process tree. If that tree cannot be stopped, the result says so (`stillRunning` in `--json`, "may still be running" in text).
 
 ## Without a machine name
 
