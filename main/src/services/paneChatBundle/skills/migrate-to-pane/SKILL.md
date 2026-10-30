@@ -277,7 +277,7 @@ the person names it.
 
 1. `runpane sessions create` with a readable name, the goal, the context you
    have, and the next action.
-2. Create the work's Pane with `--no-associate`, then
+2. Create the work's Pane, named "<project> · <branch>", with `--no-associate`, then
    `runpane sessions associate --session <new session> --pane <pane>`, and send
    the task to the Pane's agent.
 
