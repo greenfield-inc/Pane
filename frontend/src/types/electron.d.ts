@@ -8,6 +8,7 @@ import type { Folder } from './folder';
 import type { AppConfig, UpdateConfigRequest } from './config';
 import type { SessionCreationPreferences } from '../stores/sessionPreferencesStore';
 import type { HostNavigationMemory } from '../../../shared/types/hostNavigation';
+import type { TestNotificationResult } from '../../../shared/types/notifications';
 import type { SessionWorkspaceLayout } from '../../../shared/types/sessionWorkspaceLayout';
 import type {
   RemoteDaemonClientRecord,
@@ -701,9 +702,12 @@ interface ElectronAPI {
     get: (force?: boolean) => Promise<IPCResponse<AgentUsageSnapshot>>;
   };
 
-  // Whether Dictate's watcher shows Pane's alerts, so Pane skips its desktop notification
+  // Desktop notifications: Dictate's handoff (Pane skips its own alert) and Settings' test
   notifications: {
     isHandedOff: () => Promise<boolean>;
+    /** Shows a native test notification and reports whether the OS showed or blocked it. */
+    test: () => Promise<TestNotificationResult>;
+    openSettings: () => Promise<void>;
   };
 
   // Pane Notify: the queue's snapshot and the actions every surface sends back
