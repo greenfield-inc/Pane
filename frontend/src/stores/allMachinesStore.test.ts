@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { machineViews, startAllMachinesFeed, useAllMachinesStore } from './allMachinesStore';
-import type { MachineConnectionsEvent, MachineState } from '../../../shared/types/machineConnections';
+import type { MachineConnectionsEvent, MachineResult, MachineState } from '../../../shared/types/machineConnections';
 
 const machines: MachineState[] = [
   { id: 'local', label: 'This computer', kind: 'local', status: 'online', offlineSince: null },
@@ -9,7 +9,7 @@ const machines: MachineState[] = [
 ];
 
 let emit: (event: MachineConnectionsEvent) => void;
-const read = vi.fn((machineId: string, channel: string) => Promise.resolve({
+const read = vi.fn((machineId: string, channel: string): Promise<MachineResult> => Promise.resolve({
   machineId,
   data: { success: true, data: channel === 'sessions:get-all-with-projects' ? [{ id: 1, name: `${machineId}-repo`, sessions: [] }] : [] },
 }));
@@ -20,7 +20,7 @@ let stop: () => void;
 beforeEach(async () => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date('2026-10-30T09:20:00Z'));
-  read.mockClear();
+  read.mockReset();
   vi.stubGlobal('window', { electronAPI: { machines: {
     list: () => Promise.resolve(machines),
     read,
@@ -61,6 +61,26 @@ describe('All machines feed', () => {
       'permission:getPending',
       'sessions:get-all-with-projects',
     ]);
+  });
+
+  it('keeps the newer list when an older read of it lands later', async () => {
+    let status = 'working';
+    let answerNotify: () => void = () => undefined;
+    read.mockImplementation((machineId: string, channel: string) => {
+      if (channel === 'notify:remote-snapshot') return new Promise(resolve => { answerNotify = () => resolve({ machineId, data: { success: true, data: [] } }); });
+      return Promise.resolve({ machineId, data: { success: true, data: channel === 'panels:agent-statuses' ? [{ panelId: 'panel-1', status }] : [] } });
+    });
+
+    // A resync reads every list and waits on Notify; a status event reads statuses again meanwhile.
+    emit({ type: 'resync', machineId: 'build' });
+    await vi.advanceTimersByTimeAsync(300);
+    status = 'blocked';
+    emit({ type: 'event', machineId: 'build', channel: 'panel:agentStatus', args: [] });
+    await vi.advanceTimersByTimeAsync(300);
+    answerNotify();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(useAllMachinesStore.getState().snapshots.build?.statuses).toEqual([{ panelId: 'panel-1', status: 'blocked' }]);
   });
 
   it('keeps an offline machine\'s rows and dims them once its grace has passed', async () => {

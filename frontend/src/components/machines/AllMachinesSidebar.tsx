@@ -217,6 +217,15 @@ function SectionHeader({ label, expanded, onToggle }: { label: string; expanded:
   );
 }
 
+/** Adds the key to a set state, or removes it when it is there. */
+function toggle(set: (update: (current: ReadonlySet<string>) => ReadonlySet<string>) => void, key: string): void {
+  set((current) => {
+    const next = new Set(current);
+    if (!next.delete(key)) next.add(key);
+    return next;
+  });
+}
+
 /**
  * The sidebar in All machines: today's Sessions and Projects tree with every saved machine's
  * rows, a machine badge on each. A repository open on several machines is one project.
@@ -234,11 +243,6 @@ export function AllMachinesSidebar({ onNew }: { onNew: () => void }) {
   const [menu, setMenu] = useState<RowMenu | null>(null);
   const [renaming, setRenaming] = useState<RowMenu | null>(null);
 
-  const toggle = (set: (update: (current: ReadonlySet<string>) => ReadonlySet<string>) => void, key: string) => set((current) => {
-    const next = new Set(current);
-    if (!next.delete(key)) next.add(key);
-    return next;
-  });
   const isActivePane = (row: AllMachinesPane) => row.machine.id === activeMachineId && activeView === 'sessions' && row.pane.id === activeSessionId;
   const renderPane = (nested: boolean) => (row: AllMachinesPane) => (
     <PaneRow key={row.key} row={row} active={isActivePane(row)} nested={nested} onMenu={setMenu} />

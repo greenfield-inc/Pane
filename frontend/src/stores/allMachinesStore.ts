@@ -119,7 +119,12 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 
 const EMPTY_SNAPSHOT: MachineSnapshot = { projects: [], sessions: [], statuses: [], notify: null, permissions: [] };
 
+/** Reads in the order they started; the newest applied per machine and list, so an older one that lands later is dropped. */
+let readCount = 0;
+const appliedReads = new Map<string, number>();
+
 async function readMachine(machineId: string, keys: readonly ReadKey[]): Promise<void> {
+  const read = ++readCount;
   const update: Partial<MachineSnapshot> = {};
   // Each list is read on its own, so one that fails or times out leaves only itself as it was.
   await Promise.all(keys.map(async (key) => {
@@ -134,7 +139,15 @@ async function readMachine(machineId: string, keys: readonly ReadKey[]): Promise
   useAllMachinesStore.setState((state) => {
     // A machine removed while its read was in flight stays removed.
     if (!state.machines.some((machine) => machine.id === machineId)) return state;
-    return { snapshots: { ...state.snapshots, [machineId]: { ...EMPTY_SNAPSHOT, ...state.snapshots[machineId], ...update } } };
+    const fresh: Partial<MachineSnapshot> = {};
+    for (const key of keys) {
+      const list = `${machineId}\n${key}`;
+      if (!(key in update) || (appliedReads.get(list) ?? 0) > read) continue;
+      appliedReads.set(list, read);
+      Object.assign(fresh, { [key]: update[key] });
+    }
+    if (Object.keys(fresh).length === 0) return state;
+    return { snapshots: { ...state.snapshots, [machineId]: { ...EMPTY_SNAPSHOT, ...state.snapshots[machineId], ...fresh } } };
   });
 }
 
@@ -167,15 +180,17 @@ export function startAllMachinesFeed(): () => void {
     if (graceTimer) clearTimeout(graceTimer);
     graceTimer = null;
     const now = Date.now();
-    const ends = machines
-      .filter((machine) => machine.status === 'offline' && machine.offlineSince)
-      .map((machine) => Date.parse(machine.offlineSince ?? '') + OFFLINE_GRACE_MS - now)
-      .filter((wait) => wait > 0);
-    if (ends.length === 0) return;
+    let soonest = Infinity;
+    for (const machine of machines) {
+      if (machine.status !== 'offline' || !machine.offlineSince) continue;
+      const wait = Date.parse(machine.offlineSince) + OFFLINE_GRACE_MS - now;
+      if (wait > 0) soonest = Math.min(soonest, wait);
+    }
+    if (soonest === Infinity) return;
     graceTimer = setTimeout(() => {
       graceTimer = null;
       if (!stopped) useAllMachinesStore.setState((state) => ({ clock: state.clock + 1 }));
-    }, Math.min(...ends) + 10);
+    }, soonest + 10);
   };
 
   const setMachines = (machines: MachineState[]) => {

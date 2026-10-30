@@ -127,9 +127,10 @@ export function buildAllMachinesTree(views: readonly MachineView[]): AllMachines
     if (!snapshot) continue;
     const states = statusesBySession(snapshot.statuses);
     const statusOf = (id: string) => toAgentDisplayStatus(rollupAgentState(states.get(id) ?? []), false);
-    const waitingPanes = new Set(snapshot.notify?.items
-      .filter(item => item.state === 'waiting' && item.source.paneId)
-      .map(item => item.source.paneId));
+    const waitingPanes = new Set<string>();
+    for (const item of snapshot.notify?.items ?? []) {
+      if (item.state === 'waiting' && item.source.paneId) waitingPanes.add(item.source.paneId);
+    }
     const permissions = [...snapshot.permissions].sort((a, b) => a.timestamp - b.timestamp);
     const paneById = new Map<string, AllMachinesPane>();
 
