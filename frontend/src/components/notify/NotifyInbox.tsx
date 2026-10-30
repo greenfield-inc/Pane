@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Bell, Check } from 'lucide-react';
 import type { NotifyItem } from '../../../../shared/types/notify';
 import { cn } from '../../utils/cn';
@@ -13,18 +13,36 @@ type InboxTab = 'waiting' | 'earlier';
 const newestFirst = (a: NotifyItem, b: NotifyItem) => (b.resolvedAt ?? b.createdAt) - (a.resolvedAt ?? a.createdAt);
 const oldestFirst = (a: NotifyItem, b: NotifyItem) => a.createdAt - b.createdAt;
 
-const sameIds = (a: string[], b: string[]) => a.length === b.length && a.every((id, index) => id === b[index]);
+const sameIds = (a: NotifyItem[], b: NotifyItem[]) => a.length === b.length && a.every((item, index) => item.id === b[index].id);
+
+/** Matches .pane-notify-collapse's --duration-reveal (180ms), with a frame to spare. */
+const COLLAPSE_MS = 200;
 
 /**
- * While the pointer is over the cards, a card that leaves (answered or expired) keeps its
- * slot, empty, so the card under the pointer never moves. The slots close when it leaves.
+ * The waiting cards plus the ones that just left (answered or expired), which stay a moment
+ * marked `leaving` so they can collapse and the cards below slide up instead of jumping.
  */
-function useSteadySlots(ids: string[]) {
-  const [holding, setHolding] = useState(false);
-  const [slots, setSlots] = useState(ids);
-  const next = holding ? [...slots, ...ids.filter((id) => !slots.includes(id))] : ids;
-  if (!sameIds(next, slots)) setSlots(next);
-  return { slots: next, hold: () => setHolding(true), release: () => setHolding(false) };
+function useLeavingCards(waiting: NotifyItem[]) {
+  const [last, setLast] = useState(waiting);
+  const [leaving, setLeaving] = useState<NotifyItem[]>([]);
+  const waitingIds = new Set(waiting.map((item) => item.id));
+  if (!sameIds(last, waiting)) {
+    setLast(waiting);
+    setLeaving((current) => [
+      ...current.filter((item) => !waitingIds.has(item.id)),
+      ...last.filter((item) => !waitingIds.has(item.id) && !current.some((gone) => gone.id === item.id)),
+    ]);
+  }
+  useEffect(() => {
+    if (leaving.length === 0) return;
+    // A timer, not transitionend, which never fires when the transition is off (reduced motion, blurred window).
+    const timer = window.setTimeout(() => setLeaving([]), COLLAPSE_MS);
+    return () => window.clearTimeout(timer);
+  }, [leaving]);
+  return [
+    ...waiting.map((item) => ({ item, leaving: false })),
+    ...leaving.filter((item) => !waitingIds.has(item.id)).map((item) => ({ item, leaving: true })),
+  ].sort((a, b) => oldestFirst(a.item, b.item));
 }
 
 function GroupLabel({ children }: { children: ReactNode }) {
@@ -93,17 +111,10 @@ export function NotifyInbox() {
   const now = useNow();
   const items = snapshot?.items ?? [];
   // Oldest first, so a new question lands at the bottom and never moves the one being answered.
-  // An answered question leaves its card at once; the strip shows "Sent to" with Undo as a toast.
+  // An answered question's card collapses; the strip shows "Sent to" with Undo as a toast.
   const waiting = items.filter((item) => item.state === 'waiting').sort(oldestFirst);
   const waitingCount = waiting.length;
-  const { slots, hold, release } = useSteadySlots(waiting.map((item) => item.id));
-  const slotHeights = useRef(new Map<string, number>());
-  const slotsRef = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
-    slotsRef.current?.querySelectorAll<HTMLElement>('[data-notify-slot]').forEach((slot) => {
-      if (slot.dataset.notifySlot) slotHeights.current.set(slot.dataset.notifySlot, slot.getBoundingClientRect().height);
-    });
-  });
+  const cards = useLeavingCards(waiting);
   const updates = items.filter((item) => item.state === 'info').sort(oldestFirst);
   const earlier = items.filter((item) => item.state === 'answered' || item.state === 'expired').sort(newestFirst);
   const shortcut = shortcutLabel(snapshot?.settings.shortcut ?? 'Control+Shift+Space', isMac());
@@ -145,17 +156,26 @@ export function NotifyInbox() {
       <div className="min-h-0 flex-1 overflow-y-auto bg-bg-secondary px-5 py-4">
         {tab === 'waiting' ? (
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_250px]">
-            <div ref={slotsRef} className="flex min-w-0 flex-col gap-2.5" onPointerEnter={hold} onPointerLeave={release}>
-              {slots.length === 0 && <EmptyState enabled={snapshot?.settings.enabled ?? true} />}
-              {slots.map((id) => {
-                const item = waiting.find((candidate) => candidate.id === id);
-                if (!item) return <div key={id} aria-hidden="true" style={{ height: slotHeights.current.get(id) }} />;
-                return (
-                  <div key={id} data-notify-slot={id}>
-                    <NotifyCard item={item} view="question" form="inbox" menuPlacement="below" onCommand={runNotify} />
+            <div className="flex min-w-0 flex-col">
+              {cards.length === 0 && <EmptyState enabled={snapshot?.settings.enabled ?? true} />}
+              {cards.map(({ item, leaving }) => (
+                <div
+                  key={item.id}
+                  inert={leaving}
+                  className={cn(
+                    'pane-notify-collapse grid',
+                    leaving ? 'grid-rows-[0fr] opacity-0' : 'grid-rows-[1fr] opacity-100',
+                  )}
+                >
+                  {/* The gap is padding inside the row, so it closes with the card. Clip only while
+                      collapsing, so the card's shadow and menu show the rest of the time. */}
+                  <div className={cn('min-h-0', leaving && 'overflow-hidden')}>
+                    <div className="pb-2.5">
+                      <NotifyCard item={item} view="question" form="inbox" menuPlacement="below" onCommand={runNotify} />
+                    </div>
                   </div>
-                );
-              })}
+                </div>
+              ))}
             </div>
             {(updates.length > 0 || earlier.length > 0) && (
               <aside className="min-w-0">

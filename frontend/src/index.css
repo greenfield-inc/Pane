@@ -1200,6 +1200,17 @@ body.understory {
   transform: none;
 }
 
+/* The one exception: an answered Notify card collapses and the cards below slide
+   up, so the list doesn't jump under the pointer. A blurred window and reduced
+   motion still close it instantly. */
+.pane-notify-collapse {
+  transition: grid-template-rows var(--duration-reveal) var(--ease-out-strong), opacity var(--duration-reveal) var(--ease-out-strong) !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pane-notify-collapse { transition: none !important; }
+}
+
 .animate-dropdown-enter,
 .animate-dropdown-enter-up,
 .animate-modal-enter,
