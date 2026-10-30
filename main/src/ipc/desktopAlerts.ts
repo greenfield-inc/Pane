@@ -1,6 +1,8 @@
 import { execFile } from 'child_process';
 import { Notification, shell, type IpcMain } from 'electron';
+import { PaneError, reasonOf } from '../../../shared/paneError';
 import type { TestNotificationResult } from '../../../shared/types/notifications';
+import { rejectWithPaneErrorText } from '../daemon/commandRegistry';
 import type { WorkspaceWatchLeases } from '../services/workspaceWatchLeases';
 import type { AppServices } from './types';
 
@@ -58,18 +60,28 @@ function sendTestNotification(): Promise<TestNotificationResult> {
 async function openNotificationSettings(): Promise<void> {
   const url = notificationSettingsUrl();
   if (!url) return;
-  // Matches openExternalUrl: shell.openExternal can fail silently on macOS.
-  if (process.platform === 'darwin') {
-    await new Promise<void>((resolve, reject) => {
-      execFile('open', [url], (error) => (error ? reject(error) : resolve()));
-    });
-    return;
+  try {
+    // Matches openExternalUrl: shell.openExternal can fail silently on macOS.
+    if (process.platform === 'darwin') {
+      await new Promise<void>((resolve, reject) => {
+        execFile('open', [url], (error) => (error ? reject(error) : resolve()));
+      });
+    } else {
+      await shell.openExternal(url);
+    }
+  } catch (cause) {
+    throw new PaneError(
+      'ERR_NOTIFICATION_SETTINGS_OPEN',
+      `Pane couldn't open your system's notification settings: ${reasonOf(cause)}. Nothing was changed.`,
+      process.platform === 'darwin'
+        ? 'Open System Settings → Notifications yourself and allow Pane.'
+        : 'Open Settings → System → Notifications yourself and allow Pane.',
+    );
   }
-  await shell.openExternal(url);
 }
 
 export function registerDesktopAlertHandlers(ipcMain: IpcMain, services: AppServices): void {
   ipcMain.handle('notifications:handed-off', () => isDesktopAlertHandedOff(services.workspaceWatchLeases));
   ipcMain.handle('notifications:test', () => sendTestNotification());
-  ipcMain.handle('notifications:open-settings', () => openNotificationSettings());
+  ipcMain.handle('notifications:open-settings', () => rejectWithPaneErrorText(openNotificationSettings()));
 }

@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Bell, BellOff, Shield } from 'lucide-react';
 import { Button } from './ui/Button';
+import { ipcErrorMessage } from '../utils/ipcErrorMessage';
 import { SettingsSection } from './ui/SettingsSection';
 import { SettingRow, SettingsPage } from './settings/SettingRow';
 import { ImmediateToggle } from './settings/SettingsControls';
 import type { SettingsPersistence } from './settings/useSettingsPersistence';
+import type { TestNotificationResult } from '../../../shared/types/notifications';
 
 export function NotificationSettings({ persistence }: { persistence: SettingsPersistence }) {
   const config = persistence.config!;
@@ -31,7 +33,15 @@ export function NotificationSettings({ persistence }: { persistence: SettingsPer
   const testNotification = async () => {
     setOfferSettings(false);
     setTesting(true);
-    const result = await window.electronAPI.notifications.test().finally(() => setTesting(false));
+    let result: TestNotificationResult;
+    try {
+      result = await window.electronAPI.notifications.test();
+    } catch (error) {
+      setActionResult(`Pane couldn't send the test notification (${ipcErrorMessage(error, 'unknown error')}). Check Pane in your system's notification settings, then test again.`);
+      return;
+    } finally {
+      setTesting(false);
+    }
     if (result.status === 'shown') setActionResult('Test notification sent.');
     else if (result.status === 'unsupported') setActionResult('Desktop notifications are not supported in this environment.');
     else {
@@ -41,6 +51,14 @@ export function NotificationSettings({ persistence }: { persistence: SettingsPer
           ? `The system didn't show the test notification (${result.error}). Check Pane in your system's notification settings.`
           : "Pane sent the test, but the system didn't confirm it. If nothing appeared, allow Pane in your system's notification settings.");
       setOfferSettings(result.canOpenSettings);
+    }
+  };
+
+  const openNotificationSettings = async () => {
+    try {
+      await window.electronAPI.notifications.openSettings();
+    } catch (error) {
+      setActionResult(ipcErrorMessage(error, "Pane couldn't open your system's notification settings. Open them yourself and allow Pane."));
     }
   };
 
@@ -67,7 +85,7 @@ export function NotificationSettings({ persistence }: { persistence: SettingsPer
               <Button type="button" size="sm" onClick={requestPermission}>Enable</Button>
             )}
             {offerSettings && (
-              <Button type="button" variant="secondary" size="sm" onClick={() => void window.electronAPI.notifications.openSettings()}>
+              <Button type="button" variant="secondary" size="sm" onClick={() => void openNotificationSettings()}>
                 Open notification settings
               </Button>
             )}
