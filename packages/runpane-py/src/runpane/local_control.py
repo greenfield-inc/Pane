@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 from .daemon_actions import confirm_mutation
 from .daemon_client import PaneDaemonClientError, invoke_daemon
 from .generated_contract import RUNPANE_CONTRACT
+from .notify import RunpaneError
 
 
 def run_repos_list(parsed: Any) -> int:
@@ -49,13 +50,13 @@ def run_repos_add(parsed: Any) -> int:
 
 def run_repos_rename(parsed: Any) -> int:
     if not parsed.repo:
-        raise ValueError("runpane repos rename requires --repo. See saved repos with `runpane repos list`.")
+        raise RunpaneError("ERR_RUNPANE_INVALID_ARGUMENT", "runpane repos rename requires --repo. Nothing was changed.", "Pass a repo id, path or name from `runpane repos list`, or `active`.")
     name = parsed.name.strip() if parsed.name else ""
     if not name:
-        raise ValueError("runpane repos rename requires a non-empty --name.")
+        raise RunpaneError("ERR_RUNPANE_INVALID_ARGUMENT", "runpane repos rename requires a non-empty --name. Nothing was changed.", "Pass the new name with --name.")
 
     request = {"repo": parsed.repo, "name": name}
-    confirm_repo_rename(parsed, request)
+    confirm_mutation(parsed)
     result = invoke_daemon("runpane:repos:rename", [request], pane_dir=parsed.pane_dir)
 
     if parsed.json:
@@ -1938,17 +1939,6 @@ def confirm_repo_add(parsed: Any, request: Dict[str, Any]) -> None:
 
     label = f"{request.get('name')} at {request.get('path')}" if request.get("name") else request.get("path")
     answer = input(f"Add Pane repo {label}? [y/N] ").strip().lower()
-    if answer not in {"y", "yes"}:
-        raise ValueError("Cancelled.")
-
-
-def confirm_repo_rename(parsed: Any, request: Dict[str, Any]) -> None:
-    if parsed.yes:
-        return
-    if not is_interactive_shell():
-        raise ValueError("runpane repos rename mutates Pane state. Rerun with --yes in non-interactive shells.")
-
-    answer = input(f"Rename Pane repo {request.get('repo')} to {request.get('name')}? [y/N] ").strip().lower()
     if answer not in {"y", "yes"}:
         raise ValueError("Cancelled.")
 

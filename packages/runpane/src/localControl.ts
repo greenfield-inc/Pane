@@ -2017,14 +2017,14 @@ export async function runReposAdd(parsed: ParsedArgs): Promise<number> {
 
 export async function runReposRename(parsed: ParsedArgs): Promise<number> {
   if (!parsed.repo) {
-    throw new Error('runpane repos rename requires --repo. See saved repos with `runpane repos list`.');
+    throw new RunpaneError('ERR_RUNPANE_INVALID_ARGUMENT', 'runpane repos rename requires --repo. Nothing was changed.', 'Pass a repo id, path or name from `runpane repos list`, or `active`.');
   }
   const name = parsed.name?.trim();
   if (!name) {
-    throw new Error('runpane repos rename requires a non-empty --name.');
+    throw new RunpaneError('ERR_RUNPANE_INVALID_ARGUMENT', 'runpane repos rename requires a non-empty --name. Nothing was changed.', 'Pass the new name with --name.');
   }
   const request: RepoRenameRequest = { repo: parsed.repo, name };
-  await confirmRepoRename(parsed, request);
+  await confirmMutation(parsed);
 
   const result = await invokeDaemon('runpane:repos:rename', [request], repoRenameResultSchema, {
     paneDir: parsed.paneDir,
@@ -3913,26 +3913,6 @@ async function confirmRepoAdd(parsed: ParsedArgs, request: RepoAddRequest): Prom
   const rl = createInterface({ input, output });
   try {
     const answer = (await rl.question(`Add Pane repo ${label}? [y/N] `)).trim().toLowerCase();
-    if (answer !== 'y' && answer !== 'yes') {
-      throw new Error('Cancelled.');
-    }
-  } finally {
-    rl.close();
-  }
-}
-
-async function confirmRepoRename(parsed: ParsedArgs, request: RepoRenameRequest): Promise<void> {
-  if (parsed.yes) {
-    return;
-  }
-
-  if (!isInteractiveShell()) {
-    throw new Error('runpane repos rename mutates Pane state. Rerun with --yes in non-interactive shells.');
-  }
-
-  const rl = createInterface({ input, output });
-  try {
-    const answer = (await rl.question(`Rename Pane repo ${request.repo} to ${request.name}? [y/N] `)).trim().toLowerCase();
     if (answer !== 'y' && answer !== 'yes') {
       throw new Error('Cancelled.');
     }
