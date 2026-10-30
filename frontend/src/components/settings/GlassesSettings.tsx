@@ -4,7 +4,7 @@ import { Button } from '../ui/Button';
 import { settingDomId } from './catalog';
 import { CARD_ROW } from './CodelessRemoteSettings';
 import { API } from '../../utils/api';
-import type { GlassesAccessState } from '../../../../shared/types/glasses';
+import type { GlassesAccessState, GlassesRevokeEverywhereResult } from '../../../../shared/types/glasses';
 
 /** The page lists newly refused origins while it is open, so allowing one needs no reload. */
 const REFRESH_MS = 5_000;
@@ -20,6 +20,8 @@ export function GlassesRows() {
   const [state, setState] = useState<GlassesAccessState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /** What the last revoke did, kept after its row is gone. */
+  const [notice, setNotice] = useState<string | null>(null);
 
   const apply = useCallback(async (request: () => Promise<{ success: boolean; data?: GlassesAccessState; error?: string }>) => {
     const response = await request();
@@ -46,6 +48,23 @@ export function GlassesRows() {
     }
   };
 
+  const revokeEverywhere = async (id: string) => {
+    setBusy(true);
+    setNotice('Revoking on your computers…');
+    try {
+      const response = await API.remoteDaemon.revokeGlassesEverywhere(id);
+      await apply(() => API.remoteDaemon.getGlasses());
+      if (response.success && response.data) {
+        setNotice(revokeEverywhereMessage(response.data));
+      } else {
+        setNotice(null);
+        setError(response.error ?? 'Could not revoke the glasses on your computers.');
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const devices = state?.devices ?? [];
   const ownerOrigins = state?.allowedOrigins.filter((entry) => entry.source === 'owner') ?? [];
   const refused = state?.refusedOrigins ?? [];
@@ -53,6 +72,7 @@ export function GlassesRows() {
   return (
     <div id={settingDomId('remote-glasses')} data-setting-id="remote-glasses" tabIndex={-1} className="divide-y divide-border-secondary outline-none">
       {error && <p className={`text-sm text-status-error ${CARD_ROW}`} role="alert">{error}</p>}
+      {notice && <p className={`text-sm text-text-secondary ${CARD_ROW}`} role="status">{notice}</p>}
       {devices.length === 0 && (
         <DeviceRow title="Even G2 glasses" detail="Pair from the Pane phone app: Settings › Glasses › Pair glasses." />
       )}
@@ -62,16 +82,30 @@ export function GlassesRows() {
           title={device.label}
           detail={device.lastUsedAt ? `Last used ${new Date(device.lastUsedAt).toLocaleString()}` : 'Never used'}
         >
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            aria-label={`Revoke ${device.label}`}
-            disabled={busy}
-            onClick={() => void run(() => API.remoteDaemon.revokeGlasses(device.id))}
-          >
-            Revoke
-          </Button>
+          <div className="flex flex-none items-center gap-2">
+            {device.phoneId && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                aria-label={`Revoke ${device.label} on all my computers`}
+                disabled={busy}
+                onClick={() => void revokeEverywhere(device.id)}
+              >
+                Revoke on all my computers
+              </Button>
+            )}
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              aria-label={`Revoke ${device.label}`}
+              disabled={busy}
+              onClick={() => void run(() => API.remoteDaemon.revokeGlasses(device.id))}
+            >
+              Revoke
+            </Button>
+          </div>
         </DeviceRow>
       ))}
       {refused.map((entry) => (
@@ -98,6 +132,14 @@ export function GlassesRows() {
       ))}
     </div>
   );
+}
+
+/** Such as "Revoked on Mac, devbox. Not reached: laptop (offline); revoke there when it is back." */
+function revokeEverywhereMessage({ revoked, notReached }: GlassesRevokeEverywhereResult): string {
+  const done = `Revoked on ${revoked.join(', ')}.`;
+  if (notReached.length === 0) return done;
+  const missed = notReached.map((computer) => `${computer.name} (${computer.reason})`).join(', ');
+  return `${done} Not reached: ${missed}; revoke there when ${notReached.length === 1 ? 'it is' : 'they are'} back.`;
 }
 
 function DeviceRow({ title, detail, children }: { title: ReactNode; detail: string; children?: ReactNode }) {

@@ -41,7 +41,7 @@ function setup() {
       },
     },
     { invoke: async () => null },
-    { readStatus: async () => JSON.stringify(status), probe },
+    { readStatus: async () => JSON.stringify(status), probe, call: async () => ({ kind: 'unreachable', detail: 'not used' }) },
   );
   const call = (channel: string, ...args: PaneCommandValue[]) => {
     const handler = handlers.get(channel);

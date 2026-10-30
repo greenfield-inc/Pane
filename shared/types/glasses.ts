@@ -78,6 +78,13 @@ export type GlassesVouchSkipReason =
   | 'Funnel is on'
   | 'not answering';
 
+/** A revoke from one computer's Settings on each of your computers, and why each of the rest was not reached. */
+export interface GlassesRevokeEverywhereResult {
+  /** The computer that revoked first, then the others that answered, by name. */
+  revoked: string[];
+  notReached: { name: string; reason: GlassesVouchSkipReason | 'offline' }[];
+}
+
 export interface GlassesVouchResult {
   /** A `pane-glasses://` code with a pairing secret for each computer that minted one; null when none did. */
   code: string | null;

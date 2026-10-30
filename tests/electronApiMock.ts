@@ -13,7 +13,7 @@ import type {
 import type { SubmitFeedbackRequest } from '../shared/types/feedback';
 import type { Loop, LoopInput, LoopSchedulePreview } from '../shared/types/loop';
 import type { TailnetMachineList, WorkspaceAccessSummary } from '../shared/types/workspaceAccess';
-import type { GlassesAccessState } from '../shared/types/glasses';
+import type { GlassesAccessState, GlassesRevokeEverywhereResult } from '../shared/types/glasses';
 import type { JsonObject, JsonValue } from '../shared/validation/boundaryDecoder';
 import { DEFAULT_APPEARANCE, normalizeAppearance, type AppearanceConfig } from '../shared/types/appearance';
 import type { DiffManifest, DiffScope, FileDiffResult } from '../shared/types/gitDiff';
@@ -111,6 +111,8 @@ export type ElectronApiMockOptions = {
   /** Overrides this machine's workspace status (remote-daemon:get-workspace-access). */
   workspaceAccess?: Partial<WorkspaceAccessSummary>;
   glasses?: GlassesAccessState;
+  /** What "Revoke on all my computers" reports; it also revokes the device here. */
+  glassesRevokeEverywhere?: GlassesRevokeEverywhereResult;
   /** Devices connected to this computer's host right now. */
   hostConnectedClients?: RemoteDaemonConnectedClient[];
   /** setup:choose-import fails with this PaneError text instead of previewing. */
@@ -1515,6 +1517,10 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         revokeGlasses: (id: string) => {
           glassesState.devices = glassesState.devices.filter((device) => device.id !== id);
           return success(clone(glassesState));
+        },
+        revokeGlassesEverywhere: (id: string) => {
+          glassesState.devices = glassesState.devices.filter((device) => device.id !== id);
+          return success(clone(mockOptions.glassesRevokeEverywhere ?? { revoked: ['this computer'], notReached: [] }));
         },
         setGlassesOrigin: (update: { origin: string; allowed: boolean }) => {
           glassesState.refusedOrigins = glassesState.refusedOrigins.filter((entry) => entry.origin !== update.origin);

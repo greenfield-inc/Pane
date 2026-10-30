@@ -7,6 +7,7 @@ import { createDefaultRemoteDaemonConfig } from '../../../shared/types/remoteDae
 import { decodeGlassesPairingCode, GLASSES_COMMANDS, type GlassesVouchResult } from '../../../shared/types/glasses';
 import { boundary, decodeBoundary, type JsonValue } from '../../../shared/validation/boundaryDecoder';
 import type { WorkspaceCall, WorkspaceProbe, WorkspaceProbeResult } from './tailnetMachines';
+import { revokeGlassesEverywhere } from './glassesVouch';
 
 const PHONE = 'pane-native-phone-a';
 const GLASSES = 'Even G2 · Parsa\'s iPhone';
@@ -88,17 +89,14 @@ async function setup(options: {
 
   const vouching = computer('studio-mac', options.config);
   const peers = options.peers ?? options.siblings.map((sibling) => ({ name: sibling.name }));
-  registerWorkspaceCommands(vouching.registry, vouching.host, vouching.configManager, '2.4.211', {
-    readStatus: async () => tailscaleStatus(peers),
-    probe,
-    call,
-  });
+  const discovery = { readStatus: async () => tailscaleStatus(peers), probe, call };
+  registerWorkspaceCommands(vouching.registry, vouching.host, vouching.configManager, '2.4.211', discovery);
   const paired = await pairFromPhone(vouching);
   const vouch = async (request: PaneCommandValue = { deviceId: paired.device.id }): Promise<GlassesVouchResult> => {
     // SAFETY: the vouch command answers a GlassesVouchResult.
     return await vouching.registry.invokeRemote(GLASSES_COMMANDS.vouch, [request]) as GlassesVouchResult;
   };
-  return { vouching, paired, vouch, asked, probed };
+  return { vouching, paired, vouch, asked, probed, discovery };
 }
 
 /** What the phone does: mint a secret on the computer as the owner, then the glasses trade it. */
@@ -232,5 +230,64 @@ describe('a paired computer vouching for its siblings', () => {
     expect((await vouch()).code).not.toBeNull();
     expect(probed).toEqual([{ machine: 'devbox', secret: 'saved password' }]);
     expect(asked.map((call) => call.secret)).toEqual(['saved password', 'saved password']);
+  });
+});
+
+describe('revoking on all my computers from the desktop', () => {
+  async function revokeEverywhere(context: Awaited<ReturnType<typeof setup>>) {
+    return revokeGlassesEverywhere(PHONE, {
+      name: 'studio-mac',
+      invoke: (channel, args) => context.vouching.registry.invoke(channel, args),
+    }, { ...context.discovery, savedSecrets: new Map() });
+  }
+
+  it('revokes these glasses here and on each computer that answers, keeps them off there, and names the ones it did not reach', async () => {
+    const devbox = computer('devbox');
+    await pairFromPhone(devbox);
+    const otherPhone = await pairFromPhone(devbox, 'pane-native-phone-b');
+    const context = await setup({ siblings: [devbox], peers: [{ name: 'devbox' }, { name: 'laptop', online: false }] });
+
+    expect(await revokeEverywhere(context)).toEqual({ revoked: ['studio-mac', 'devbox'], notReached: [{ name: 'laptop', reason: 'offline' }] });
+    expect(context.vouching.host.glasses.list()).toEqual([]);
+    expect(context.vouching.host.glasses.revokedPhoneIds()).toEqual([PHONE]);
+    // Only these glasses: another phone's stay paired.
+    expect(devbox.host.glasses.list()).toEqual([otherPhone.device]);
+    expect(devbox.host.glasses.revokedPhoneIds()).toEqual([PHONE]);
+    // The marker keeps them off: a later vouch from any computer skips devbox.
+    expect(() => devbox.host.glasses.createPairingSecret(GLASSES, PHONE, { unlessRevoked: true })).toThrow(expect.objectContaining({ code: 'ERR_GLASSES_REVOKED_HERE' }));
+  });
+
+  it('asks only your own computers from discovery', async () => {
+    const devbox = computer('devbox');
+    const teammate = computer('teammate-box');
+    await pairFromPhone(teammate);
+    const context = await setup({ siblings: [devbox, teammate], peers: [{ name: 'devbox' }, { name: 'teammate-box', userId: 2 }] });
+
+    expect(await revokeEverywhere(context)).toEqual({ revoked: ['studio-mac', 'devbox'], notReached: [] });
+    expect(new Set(context.asked.map((call) => call.machine))).toEqual(new Set(['devbox']));
+    expect(teammate.host.glasses.list()).toHaveLength(1);
+  });
+
+  it('says why each computer was not reached, and leaves out one whose Pane predates glasses', async () => {
+    const context = await setup({
+      siblings: [],
+      peers: [{ name: 'locked' }, { name: 'old-pane' }, { name: 'quiet' }, { name: 'stalls' }],
+      probe: {
+        locked: { kind: 'password-required' },
+        'old-pane': { kind: 'outdated' },
+        quiet: { kind: 'unreachable' },
+        stalls: { kind: 'described', description: { machineName: 'stalls', visibility: 'owner', passwordProtected: false, paneVersion: '2.4.211' } },
+      },
+      answer: { stalls: async () => ({ kind: 'unreachable', detail: 'timed out' }) },
+    });
+
+    expect(await revokeEverywhere(context)).toEqual({
+      revoked: ['studio-mac'],
+      notReached: [
+        { name: 'locked', reason: 'needs its password' },
+        { name: 'quiet', reason: 'not answering' },
+        { name: 'stalls', reason: 'not answering' },
+      ],
+    });
   });
 });

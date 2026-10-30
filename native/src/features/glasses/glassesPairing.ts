@@ -1,15 +1,14 @@
+import { glassesListSchema, isOlderPane } from '@shared/glassesRevoke';
 import {
   encodeGlassesPairingCode,
   GLASSES_COMMANDS,
   type GlassesDevice,
-  type GlassesListResult,
   type GlassesPairingComputer,
   type GlassesPairingSecretResult,
 } from '@shared/types/glasses';
-import { RemoteRequestError } from '@shared/remoteClient';
 import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
 import type { TailnetMachine } from '@shared/types/workspaceAccess';
-import { boundary, decodeBoundary, type BoundarySchema } from '@shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary, type BoundarySchema, type JsonValue } from '@shared/validation/boundaryDecoder';
 
 import { codelessProfile } from '@/auth/computers';
 
@@ -20,7 +19,7 @@ export interface GlassesComputer {
 }
 
 /** Calls one channel on one computer and returns its decoded result. */
-export type GlassesInvoke = (profile: RemotePaneConnectionProfile, channel: string, args: unknown[]) => Promise<unknown>;
+export type GlassesInvoke = (profile: RemotePaneConnectionProfile, channel: string, args: unknown[]) => Promise<JsonValue | undefined>;
 
 export interface GlassesSkip {
   name: string;
@@ -38,15 +37,6 @@ export interface GlassesPhone {
 const secretSchema: BoundarySchema<GlassesPairingSecretResult> = boundary.object({
   secret: boundary.nonEmptyString,
   expiresAt: boundary.nonEmptyString,
-});
-const listSchema: BoundarySchema<GlassesListResult> = boundary.object({
-  devices: boundary.array(boundary.object({
-    id: boundary.nonEmptyString,
-    label: boundary.nonEmptyString,
-    phoneId: boundary.optional(boundary.nonEmptyString),
-    createdAt: boundary.nonEmptyString,
-    lastUsedAt: boundary.optional(boundary.nonEmptyString),
-  })),
 });
 
 /** What the glasses are called on every computer, such as "Even G2 · Parsa's iPhone". */
@@ -120,7 +110,7 @@ export async function listGlassesOnComputers(
 ): Promise<{ name: string; device: GlassesDevice | null; problem: string | null }[]> {
   return Promise.all(computers.map(async ({ machine, profile }) => {
     try {
-      const { devices } = decodeBoundary(await invoke(profile, GLASSES_COMMANDS.list, []), listSchema);
+      const { devices } = decodeBoundary(await invoke(profile, GLASSES_COMMANDS.list, []), glassesListSchema);
       return { name: machine.name, device: devices.find(device => device.phoneId === phoneId) ?? null, problem: null };
     } catch (cause) {
       return { name: machine.name, device: null, problem: isOlderPane(cause) ? OLDER_PANE : 'not answering' };
@@ -128,43 +118,7 @@ export async function listGlassesOnComputers(
   }));
 }
 
-/**
- * Revokes the glasses this phone paired on every computer that answers. Pending revokes are kept
- * by full DNS name, so a computer of the same name on another tailnet never settles them; the
- * ones it could not reach come back pending, to retry when they are next reachable. Each
- * computer's own Settings also revokes.
- */
-export async function revokeGlassesOnComputers(
-  computers: readonly GlassesComputer[],
-  pending: readonly string[],
-  phoneId: string,
-  invoke: GlassesInvoke,
-): Promise<{ revoked: string[]; pending: string[] }> {
-  const revoked: string[] = [];
-  const stillPending = new Set(pending);
-  await Promise.all(computers.map(async ({ machine, profile }) => {
-    try {
-      const { devices } = decodeBoundary(await invoke(profile, GLASSES_COMMANDS.list, []), listSchema);
-      for (const device of devices.filter(candidate => candidate.phoneId === phoneId)) {
-        await invoke(profile, GLASSES_COMMANDS.revoke, [{ id: device.id }]);
-      }
-      revoked.push(machine.name);
-      stillPending.delete(machine.dnsName);
-    } catch (cause) {
-      // A Pane without glasses support never held these glasses: nothing is left to revoke there.
-      if (isOlderPane(cause)) stillPending.delete(machine.dnsName);
-      else stillPending.add(machine.dnsName);
-    }
-  }));
-  return { revoked: revoked.sort(), pending: [...stillPending].sort() };
-}
-
 const OLDER_PANE = 'update Pane there to use glasses';
-
-/** The computer's Pane predates glasses: it doesn't know the glasses commands. */
-function isOlderPane(cause: unknown): boolean {
-  return cause instanceof RemoteRequestError && cause.code === 'ERR_UNKNOWN_CHANNEL';
-}
 
 function reasonOf(cause: unknown): string {
   return cause instanceof Error ? cause.message : 'did not answer';
