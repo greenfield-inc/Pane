@@ -76,7 +76,7 @@ export const PanelContainer: React.FC<PanelContainerProps> = React.memo(({
   const autoRetry = useRef<AutoRetryState>({ count: 0, lastAt: 0 });
   // Undefined until config loads, so a cold start keeps the tab's saved view.
   const chatEnabled = useConfigStore(s => s.config ? isChatEnabled(s.config) : undefined);
-  const notesEnabled = useConfigStore(s => isNotesEnabled(s.config));
+  const notesEnabled = useConfigStore(s => s.config ? isNotesEnabled(s.config) : undefined);
   renderLog('[PanelContainer] Rendering panel:', panel.id, 'Type:', panel.type, 'Active:', isActive);
   
   // FIX: Use stable panel rendering without forcing remounts
@@ -89,6 +89,7 @@ export const PanelContainer: React.FC<PanelContainerProps> = React.memo(({
     // Panel type rendering
     switch (panel.type) {
       case 'notes':
+        if (notesEnabled === undefined) return <PanelLoadingFallback panelType={panel.type} message="Loading notes panel..." />;
         if (!notesEnabled) {
           return (
             <div className="h-full w-full flex items-center justify-center p-8">

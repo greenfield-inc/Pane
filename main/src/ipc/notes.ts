@@ -53,7 +53,8 @@ export function registerNotesHandlers(ipcMain: IpcMain, services: AppServices): 
     };
     // The small user-level loader is stable across scoped edits. Agents read the
     // private context file supplied by their terminal, keeping repositories clean.
-    // While experimental Notes is off, terminals get no context file, so the loader is dropped.
+    // While experimental Notes is off, terminals get no context file and
+    // repositories get no scoped notes, so the loader and repo sections are dropped.
     const notesEnabled = services.configManager.getConfig().notesEnabled === true;
     const preamble = notesEnabled && all.some(note => note.scope.kind !== 'global') ? SCOPED_NOTE_INSTRUCTIONS : '';
     const global = owned(GLOBAL);
@@ -74,7 +75,7 @@ export function registerNotesHandlers(ipcMain: IpcMain, services: AppServices): 
       } catch (error) { results.push({ agent: 'Cursor CLI session context', path: path.join(cursorDirectory, 'hooks.json'), error: String(error) }); }
     }
     const targets = new Map<string, Note[]>();
-    const repositoryExports = services.configManager.getConfig().agentContext?.managedAgentsMd === true;
+    const repositoryExports = notesEnabled && services.configManager.getConfig().agentContext?.managedAgentsMd === true;
     for (const project of databaseService.getAllProjects()) {
       const projectScope: NoteScope = { kind: 'project', id: String(project.id) };
       const projectNotes = owned(projectScope);
@@ -186,14 +187,15 @@ export function registerNotesHandlers(ipcMain: IpcMain, services: AppServices): 
   // Restoring an archived Pane reloads sessions without emitting session-created.
   // Refresh its derived context before another agent reads the retained file.
   sessionManager.on('sessions-loaded', () => reconcile());
-  let repositoryExports = services.configManager.getConfig().agentContext?.managedAgentsMd === true;
-  let notesEnabled = services.configManager.getConfig().notesEnabled === true;
+  let previousRepositoryExports = services.configManager.getConfig().agentContext?.managedAgentsMd === true;
+  let previousNotesEnabled = services.configManager.getConfig().notesEnabled === true;
   services.configManager.on('config-updated', () => {
     const config = services.configManager.getConfig();
-    const enabled = config.agentContext?.managedAgentsMd === true;
-    if (enabled !== repositoryExports || (config.notesEnabled === true) !== notesEnabled) {
-      repositoryExports = enabled;
-      notesEnabled = config.notesEnabled === true;
+    const repositoryExports = config.agentContext?.managedAgentsMd === true;
+    const notesEnabled = config.notesEnabled === true;
+    if (repositoryExports !== previousRepositoryExports || notesEnabled !== previousNotesEnabled) {
+      previousRepositoryExports = repositoryExports;
+      previousNotesEnabled = notesEnabled;
       reconcile();
     }
   });
