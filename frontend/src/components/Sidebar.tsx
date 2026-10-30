@@ -873,7 +873,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
           </div>
         </div>
 
-        {showNewDialog && <NewDialog projects={projects} defaultProjectId={sessions.find(session => session.id === activeSessionId)?.projectId ?? activeProject?.id} onClose={() => setShowNewDialog(false)} />}
+        {showNewDialog && <NewDialog projects={projects} defaultProjectId={sessions.find(session => session.id === activeSessionId)?.projectId ?? activeProject?.id} machines={machines} onSwitchMachine={selectMachine} onClose={() => setShowNewDialog(false)} />}
 
         <CompactSessionMenu
           menu={compactSessionMenu}
@@ -1030,7 +1030,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
 
         </div>
     </div>
-    {showNewDialog && <NewDialog projects={projects} defaultProjectId={sessions.find(session => session.id === activeSessionId)?.projectId ?? activeProject?.id} onClose={() => setShowNewDialog(false)} />}
+    {showNewDialog && <NewDialog projects={projects} defaultProjectId={sessions.find(session => session.id === activeSessionId)?.projectId ?? activeProject?.id} machines={machines} onSwitchMachine={selectMachine} onClose={() => setShowNewDialog(false)} />}
     </>
   );
 }

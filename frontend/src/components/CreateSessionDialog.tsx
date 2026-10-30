@@ -37,6 +37,16 @@ interface CreateSessionDialogProps {
   initialFolderId?: string; // Folder to create the new session in
   // Callback called after session is successfully created (for "Discard and Retry" to archive old session)
   onSessionCreated?: () => void;
+  /** The machine the Pane is created on, named on the Create button when New offers several. */
+  machineName?: string;
+  /**
+   * Another machine's branch list and create. Panes made there start at the repository level
+   * and join no Session, since this desktop's folders and Sessions are on its own machine.
+   */
+  otherMachine?: {
+    listBranches: (projectId: number) => Promise<{ success: boolean; data?: BranchInfo[] }>;
+    create: (request: CreateSessionRequest) => Promise<{ success: boolean; error?: string; details?: string; command?: string }>;
+  };
 }
 
 export function CreateSessionDialog(props: CreateSessionDialogProps) {
@@ -58,7 +68,9 @@ export function CreatePaneForm({
   initialSessionName,
   initialBaseBranch,
   initialFolderId,
-  onSessionCreated
+  onSessionCreated,
+  machineName,
+  otherMachine,
 }: CreateSessionDialogProps) {
   const branchListboxId = useId();
   const advancedOptionsId = useId();
@@ -81,7 +93,7 @@ export function CreatePaneForm({
   const [addToSession, setAddToSession] = useState(true);
   const openSession = useOrchestrationSessionStore(state => state.sessions.find(session => session.id === state.selectedSessionId && session.archived !== true));
   const sessionViewShowing = useNavigationStore(state => state.activeView === 'pane-chat');
-  const targetSession = sessionViewShowing ? openSession : undefined;
+  const targetSession = sessionViewShowing && !otherMachine ? openSession : undefined;
   // A Pane that joins a Session is listed under it, so it cannot start pinned.
   const joiningSession = addToSession && targetSession !== undefined;
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -144,30 +156,20 @@ export function CreatePaneForm({
     setBranchDropdownOpen(false);
     setBranchSearch('');
     setHighlightedBranchIndex(0);
-    // First get the project to get its path
-    API.projects.getAll().then(projectsResponse => {
+    const branchList = otherMachine ? otherMachine.listBranches(projectId) : API.projects.getAll().then(projectsResponse => {
       if (!projectsResponse.success || !projectsResponse.data) {
         throw new Error('Failed to fetch projects');
       }
-      const project = projectsResponse.data.find((p: Project) => p.id === projectId);
-      if (!project) {
+      if (!projectsResponse.data.some((p: Project) => p.id === projectId)) {
         throw new Error('Project not found');
       }
-
-      return Promise.all([
-        API.projects.listBranches(projectId.toString()),
-        // Get the main branch for this project using its path
-        API.projects.detectBranch(project.path)
-      ]);
-    }).then(([branchesResponse, mainBranchResponse]) => {
+      return API.projects.listBranches(projectId.toString());
+    });
+    branchList.then(branchesResponse => {
       if (cancelled) return;
       if (branchesResponse.success && branchesResponse.data) {
         setBranches(branchesResponse.data);
         setBranchesProjectId(projectId);
-      }
-
-      if (mainBranchResponse.success && mainBranchResponse.data) {
-        // Main branch detected but not currently used in UI
       }
     }).catch((err: Error) => {
       if (!cancelled) console.error('Failed to fetch branches:', err);
@@ -178,7 +180,7 @@ export function CreatePaneForm({
     return () => {
       cancelled = true;
     };
-  }, [isOpen, projectId, initialBaseBranch, setBranchDropdownOpen]);
+  }, [isOpen, projectId, initialBaseBranch, setBranchDropdownOpen, otherMachine]);
 
   useEffect(() => {
     if (!isOpen || branchesProjectId !== projectId || formData.baseBranch || branches.length === 0) return;
@@ -359,7 +361,7 @@ export function CreatePaneForm({
       // Determine if we need to create a folder
       // Create folder when: multiple sessions (sessionCount > 1)
       // But NOT if we already have an initialFolderId (from "Discard and Retry")
-      const shouldCreateFolder = !initialFolderId && sessionCount > 1;
+      const shouldCreateFolder = !initialFolderId && sessionCount > 1 && !otherMachine;
 
       // Use initialFolderId if provided, otherwise create folder if needed
       let folderId: string | undefined = initialFolderId;
@@ -375,7 +377,7 @@ export function CreatePaneForm({
         }
       }
 
-      const response = await API.sessions.create({
+      const response = await (otherMachine?.create ?? API.sessions.create)({
         prompt: '',
         worktreeTemplate: cleanedName,
         count: sessionCount,
@@ -798,7 +800,7 @@ export function CreatePaneForm({
             undefined
           }
         >
-          {isSubmitting ? 'Creating...' : <>{`Create${sessionCount > 1 ? ` ${sessionCount} Panes` : ''}`}<span className="ml-1.5 opacity-60">↵</span></>}
+          {isSubmitting ? 'Creating...' : <>{`Create${sessionCount > 1 ? ` ${sessionCount} Panes` : machineName ? ' Pane' : ''}${machineName ? ` on ${machineName}` : ''}`}<span className="ml-1.5 opacity-60">↵</span></>}
         </Button>
       </ModalFooter>
     </>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Toggle } from '../ui/Toggle';
 import { cn } from '../../utils/cn';
 
@@ -74,7 +74,7 @@ export function ImmediateCheckbox({ value, onSave, label, description, disabled 
 
 interface SegmentedOption<T extends string | number> {
   id: T;
-  label: string;
+  label: ReactNode;
   description?: string;
 }
 
@@ -84,6 +84,7 @@ interface SegmentedControlProps<T extends string | number> {
   onChange: (value: T) => void;
   label: string;
   columns?: 2 | 3 | 4;
+  disabled?: boolean;
 }
 
 export function SegmentedControl<T extends string | number>({
@@ -92,6 +93,7 @@ export function SegmentedControl<T extends string | number>({
   onChange,
   label,
   columns = 2,
+  disabled,
 }: SegmentedControlProps<T>) {
   return (
     <div
@@ -110,6 +112,7 @@ export function SegmentedControl<T extends string | number>({
           type="button"
           role="radio"
           aria-checked={value === option.id}
+          disabled={disabled}
           title={option.description}
           onClick={() => onChange(option.id)}
           className={cn(

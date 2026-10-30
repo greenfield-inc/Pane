@@ -4,6 +4,7 @@ import type { CustomCommandResume } from '../../../shared/types/customCommandRes
 import type { OrchestrationSessionCreateInput } from '../../../shared/types/orchestrationSession';
 import { DEFAULT_PANE_CHAT_AGENT, PANE_CHAT_AGENT_LABELS, type PaneChatAgent } from '../../../shared/types/paneChat';
 import { DEFAULT_SESSION_PROFILE } from '../../../shared/types/sessionProfile';
+import type { ProjectEnvironment } from '../../../shared/types/panels';
 import type { AppConfig } from '../types/config';
 import { useConfigStore } from '../stores/configStore';
 import { visibleAgentPresets } from '../utils/agentPresets';
@@ -17,14 +18,14 @@ import { SessionLaunchFields } from './SessionLaunchFields';
 const SESSION_AGENT_OPTIONS: ReadonlyArray<{ id: PaneChatAgent; label: string }> = (['claude', 'codex', 'cursor'] as const)
   .map(id => ({ id, label: PANE_CHAT_AGENT_LABELS[id] }));
 
-function availableSessionAgents(wsl = false): ReadonlyArray<{ id: PaneChatAgent; label: string }> {
+function availableSessionAgents(wsl = false, environment?: ProjectEnvironment): ReadonlyArray<{ id: PaneChatAgent; label: string }> {
   if (wsl) return SESSION_AGENT_OPTIONS;
-  const visible = new Set(visibleAgentPresets().map(preset => preset.id));
+  const visible = new Set(visibleAgentPresets(environment).map(preset => preset.id));
   return SESSION_AGENT_OPTIONS.filter(option => visible.has(option.id));
 }
 
-function supportedSessionAgent(preferred?: PaneChatAgent): PaneChatAgent {
-  const options = availableSessionAgents();
+function supportedSessionAgent(preferred?: PaneChatAgent, environment?: ProjectEnvironment): PaneChatAgent {
+  const options = availableSessionAgents(false, environment);
   if (preferred && options.some(option => option.id === preferred)) return preferred;
   return options[0]?.id ?? DEFAULT_PANE_CHAT_AGENT;
 }
@@ -38,6 +39,12 @@ interface CreateOrchestrationSessionDialogProps {
   isOpen: boolean;
   onClose: () => void;
   onCreate: (request: SessionCreateRequest) => Promise<void>;
+  /** The machine the Session is created on, named on the Create button when New offers several. */
+  machineName?: string;
+  /** That machine's OS, which decides the agents offered; this computer's when left out. */
+  environment?: ProjectEnvironment;
+  /** Reads that machine's WSL distributions; the active host's when left out. */
+  readRuntimes?: () => Promise<{ success: boolean; data?: { distributions: string[] } }>;
 }
 
 interface SessionCreationForm {
@@ -52,12 +59,12 @@ interface SessionCreationForm {
 }
 
 type SessionCreationAction =
-  | { type: 'reset'; config: AppConfig | null }
+  | { type: 'reset'; config: AppConfig | null; environment?: ProjectEnvironment }
   | { type: 'update'; values: Partial<SessionCreationForm> };
 
-function initialSessionCreationForm(config: AppConfig | null): SessionCreationForm {
+function initialSessionCreationForm(config: AppConfig | null, environment?: ProjectEnvironment): SessionCreationForm {
   return {
-    agent: supportedSessionAgent(config?.defaultOrchestratorAgent),
+    agent: supportedSessionAgent(config?.defaultOrchestratorAgent, environment),
     name: '',
     goal: '',
     launchCommand: config?.defaultSessionCommand ?? '',
@@ -69,7 +76,7 @@ function initialSessionCreationForm(config: AppConfig | null): SessionCreationFo
 }
 
 function sessionCreationReducer(state: SessionCreationForm, action: SessionCreationAction): SessionCreationForm {
-  return action.type === 'reset' ? initialSessionCreationForm(action.config) : { ...state, ...action.values };
+  return action.type === 'reset' ? initialSessionCreationForm(action.config, action.environment) : { ...state, ...action.values };
 }
 
 export function CreateOrchestrationSessionDialog(props: CreateOrchestrationSessionDialogProps) {
@@ -78,7 +85,7 @@ export function CreateOrchestrationSessionDialog(props: CreateOrchestrationSessi
   </Modal>;
 }
 
-export function OrchestrationSessionForm({ isOpen, onClose, onCreate, header, onSubmittingChange }: CreateOrchestrationSessionDialogProps) {
+export function OrchestrationSessionForm({ isOpen, onClose, onCreate, header, onSubmittingChange, machineName, environment, readRuntimes }: CreateOrchestrationSessionDialogProps) {
   const [distributions, setDistributions] = useState<string[]>([]);
   const [wslDistribution, setWslDistribution] = useState('');
   useEffect(() => {
@@ -86,12 +93,13 @@ export function OrchestrationSessionForm({ isOpen, onClose, onCreate, header, on
     let cancelled = false;
     setWslDistribution('');
     setDistributions([]);
-    void window.electronAPI?.orchestrationSessions?.runtimes?.().then(result => {
+    const runtimes = readRuntimes ?? window.electronAPI?.orchestrationSessions?.runtimes;
+    void runtimes?.().then(result => {
       if (!cancelled && result.success) setDistributions(result.data?.distributions ?? []);
     }).catch(() => undefined);
     return () => { cancelled = true; };
-  }, [isOpen]);
-  const [{ agent, name, goal, launchCommand, customResume, profile, startPinned, error }, dispatch] = useReducer(sessionCreationReducer, null, initialSessionCreationForm);
+  }, [isOpen, readRuntimes]);
+  const [{ agent, name, goal, launchCommand, customResume, profile, startPinned, error }, dispatch] = useReducer(sessionCreationReducer, null, config => initialSessionCreationForm(config, environment));
   const userEditedLaunch = useRef(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const config = useConfigStore(state => state.config);
@@ -104,8 +112,8 @@ export function OrchestrationSessionForm({ isOpen, onClose, onCreate, header, on
     if (!isOpen || userSelectedAgent.current) return;
     dispatch({ type: 'update', values: { agent: wslDistribution
       ? config?.defaultOrchestratorAgent ?? DEFAULT_PANE_CHAT_AGENT
-      : supportedSessionAgent(config?.defaultOrchestratorAgent) } });
-  }, [isOpen, wslDistribution, config?.defaultOrchestratorAgent]);
+      : supportedSessionAgent(config?.defaultOrchestratorAgent, environment) } });
+  }, [isOpen, wslDistribution, config?.defaultOrchestratorAgent, environment]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -113,10 +121,10 @@ export function OrchestrationSessionForm({ isOpen, onClose, onCreate, header, on
     userEditedLaunch.current = false;
     userToggledPinned.current = false;
     const savedConfig = useConfigStore.getState().config;
-    dispatch({ type: 'reset', config: savedConfig });
+    dispatch({ type: 'reset', config: savedConfig, environment });
     if (!savedConfig) {
       void fetchConfig().then(nextConfig => {
-        if (!userSelectedAgent.current) dispatch({ type: 'update', values: { agent: supportedSessionAgent(nextConfig.defaultOrchestratorAgent) } });
+        if (!userSelectedAgent.current) dispatch({ type: 'update', values: { agent: supportedSessionAgent(nextConfig.defaultOrchestratorAgent, environment) } });
         if (!userToggledPinned.current) dispatch({ type: 'update', values: { startPinned: nextConfig.defaultSessionPinned ?? false } });
         if (!userEditedLaunch.current) {
           dispatch({ type: 'update', values: {
@@ -127,7 +135,7 @@ export function OrchestrationSessionForm({ isOpen, onClose, onCreate, header, on
         }
       }).catch(() => undefined);
     }
-  }, [fetchConfig, isOpen]);
+  }, [fetchConfig, isOpen, environment]);
 
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -169,7 +177,7 @@ export function OrchestrationSessionForm({ isOpen, onClose, onCreate, header, on
           <fieldset className="space-y-2">
             <legend className="text-label font-medium text-text-primary">Choose an agent</legend>
             <div className="grid gap-2" role="radiogroup" aria-label="Session agent">
-              {availableSessionAgents(Boolean(wslDistribution)).map(option => {
+              {availableSessionAgents(Boolean(wslDistribution), environment).map(option => {
                 const selected = agent === option.id;
                 const isDefault = config?.defaultOrchestratorAgent === option.id;
                 return (
@@ -207,7 +215,7 @@ export function OrchestrationSessionForm({ isOpen, onClose, onCreate, header, on
               <label htmlFor="session-runtime" className="text-label font-medium text-text-primary">Run agent in</label>
               <select id="session-runtime" value={wslDistribution} onChange={event => {
                 setWslDistribution(event.target.value);
-                if (!event.target.value) dispatch({ type: 'update', values: { agent: supportedSessionAgent(agent) } });
+                if (!event.target.value) dispatch({ type: 'update', values: { agent: supportedSessionAgent(agent, environment) } });
               }} disabled={isSubmitting}
                 className="w-full rounded border border-border-primary bg-surface-primary px-3 py-2 text-sm text-text-primary focus:ring-2 focus:ring-interactive">
                 <option value="">Windows</option>
@@ -249,7 +257,7 @@ export function OrchestrationSessionForm({ isOpen, onClose, onCreate, header, on
         </ModalBody>
         <ModalFooter className="shrink-0">
           <Button type="button" variant="secondary" disabled={isSubmitting} onClick={onClose}>Cancel</Button>
-          <Button type="submit" loading={isSubmitting} loadingText="Creating…">Create Session</Button>
+          <Button type="submit" loading={isSubmitting} loadingText="Creating…">{machineName ? `Create Session on ${machineName}` : 'Create Session'}</Button>
         </ModalFooter>
       </form>
   );

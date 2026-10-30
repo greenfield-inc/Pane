@@ -2628,7 +2628,7 @@ test('a tab dragged over a tiled neighbour Session is refused there and moves no
   await expect(tiles).toHaveCount(2);
 });
 
-test('New offers Session and Pane, keeps one dialog, and restores keyboard focus', async ({ page }) => {
+test('New offers Session and Pane in one dialog and restores keyboard focus', async ({ page }) => {
   await installSessionsFixture(page, []);
   await page.goto('/');
   await dismissStartupDialogs(page);
@@ -2636,20 +2636,16 @@ test('New offers Session and Pane, keeps one dialog, and restores keyboard focus
   await newButton.click();
   const dialog = page.getByRole('dialog');
   await expect(dialog).toHaveCount(1);
-  await dialog.getByRole('button', { name: 'Cancel', exact: true }).focus();
-  await page.keyboard.press('Tab');
-  await expect(dialog.getByRole('button', { name: 'Close modal', exact: true })).toBeFocused();
-  await page.keyboard.press('Shift+Tab');
-  await expect(dialog.getByRole('button', { name: 'Cancel', exact: true })).toBeFocused();
-  await expect(dialog.getByText('An agent that directs work across Panes.', { exact: true })).toBeVisible();
-  await expect(dialog.getByText('A workspace for one piece of work.', { exact: true })).toBeVisible();
-  await dialog.getByRole('button', { name: 'Create Session', exact: false }).click();
+  await expect(dialog.getByRole('radio', { name: 'Session', exact: true })).toBeChecked();
   await expect(dialog.getByLabel('Session name (optional)')).toBeFocused();
   await expect(dialog.getByLabel('Run agent in')).toHaveCount(0);
-  await dialog.getByRole('button', { name: 'Back', exact: true }).click();
-  await expect(dialog.getByRole('button', { name: 'Create Session', exact: false })).toBeFocused();
-  await dialog.getByRole('button', { name: 'Create Pane', exact: false }).click();
+  // One machine: no picker, and the Create button names no machine.
+  await expect(dialog.getByRole('radiogroup', { name: 'Machine' })).toHaveCount(0);
+  await expect(dialog.getByRole('button', { name: 'Create Session', exact: true })).toBeVisible();
+  await dialog.getByRole('radio', { name: 'Pane', exact: true }).click();
   await expect(dialog.getByLabel('Repository', { exact: true })).toHaveValue('1');
+  await dialog.getByRole('radio', { name: 'Session', exact: true }).click();
+  await expect(dialog.getByLabel('Session name (optional)')).toBeVisible();
   await expect(page.getByRole('dialog')).toHaveCount(1);
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
@@ -2663,7 +2659,6 @@ test('New creates a Session with its selected WSL runtime and agent', async ({ p
   await page.goto('/');
   await dismissStartupDialogs(page);
   await page.getByRole('button', { name: 'New', exact: true }).click();
-  await page.getByRole('button', { name: 'Create Session An agent' }).click();
   await page.getByLabel('Run agent in').selectOption('Ubuntu-24.04');
   await page.getByTestId('create-session-agent-cursor').click();
   await page.getByLabel('Session name (optional)').fill('Coordinate new work');
@@ -2688,7 +2683,7 @@ test('New defaults to the active repository and creates a Pane from the changed 
   await page.goto('/');
   await dismissStartupDialogs(page);
   await page.getByRole('button', { name: 'New', exact: true }).click();
-  await page.getByRole('button', { name: 'Create Pane A workspace' }).click();
+  await page.getByRole('radio', { name: 'Pane', exact: true }).click();
   await expect(page.getByLabel('Repository', { exact: true })).toHaveValue('2');
   await expect(page.getByRole('combobox', { name: 'Base Branch' })).toHaveValue('origin/main');
   await page.getByRole('button', { name: 'Advanced', exact: true }).click();
@@ -2711,11 +2706,11 @@ test('New explains the missing repository and remains available from the compact
   await page.getByRole('button', { name: 'Collapse sidebar', exact: true }).click();
   const newButton = page.getByRole('button', { name: 'New', exact: true });
   await newButton.click();
-  await page.getByRole('button', { name: 'Create Pane A workspace' }).click();
+  await page.getByRole('radio', { name: 'Pane', exact: true }).click();
   await expect(page.getByText('A Pane needs a repository. Add one with the + beside Projects.')).toBeVisible();
   await expect(page.getByRole('button', { name: /^Create/ })).toHaveCount(0);
-  await page.getByRole('button', { name: 'Back', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Create Pane A workspace' })).toBeFocused();
+  await page.getByRole('radio', { name: 'Session', exact: true }).click();
+  await expect(page.getByLabel('Session name (optional)')).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(newButton).toBeFocused();
 });
@@ -2725,7 +2720,6 @@ test('New can show Session settings when an older host has no Session API', asyn
   await page.goto('/');
   await dismissStartupDialogs(page);
   await page.getByRole('button', { name: 'New', exact: true }).click();
-  await page.getByRole('button', { name: 'Create Session An agent' }).click();
   await expect(page.getByLabel('Session name (optional)')).toBeVisible();
   await expect(page.getByLabel('Run agent in')).toHaveCount(0);
   await page.getByRole('button', { name: 'Create Session', exact: true }).click();
@@ -2743,17 +2737,16 @@ test('New keeps a pending Session creation in its dialog and enables retry after
   await page.goto('/');
   await dismissStartupDialogs(page);
   await page.getByRole('button', { name: 'New', exact: true }).click();
-  await page.getByRole('button', { name: 'Create Session An agent' }).click();
   const dialog = page.getByRole('dialog');
   await dialog.getByRole('button', { name: 'Create Session', exact: true }).click();
-  await expect(dialog.getByRole('button', { name: 'Back', exact: true })).toBeDisabled();
+  await expect(dialog.getByRole('radio', { name: 'Pane', exact: true })).toBeDisabled();
   await expect(dialog.getByRole('button', { name: 'Cancel', exact: true })).toBeDisabled();
   await dialog.getByRole('button', { name: 'Close modal', exact: true }).click();
   await page.keyboard.press('Escape');
   await expect(dialog).toBeVisible();
   await page.evaluate(() => document.dispatchEvent(new Event('test-release-create')));
   await expect(dialog.getByRole('alert')).toHaveText('Creation unavailable; retry.');
-  await expect(dialog.getByRole('button', { name: 'Back', exact: true })).toBeEnabled();
+  await expect(dialog.getByRole('radio', { name: 'Pane', exact: true })).toBeEnabled();
   await expect(dialog.getByRole('button', { name: 'Cancel', exact: true })).toBeEnabled();
 });
 
@@ -2765,7 +2758,7 @@ test('New preserves multiple-Pane options while switching repositories', async (
   await page.goto('/');
   await dismissStartupDialogs(page);
   await page.getByRole('button', { name: 'New', exact: true }).click();
-  await page.getByRole('button', { name: 'Create Pane A workspace' }).click();
+  await page.getByRole('radio', { name: 'Pane', exact: true }).click();
   await page.getByRole('button', { name: 'Advanced', exact: true }).click();
   await page.getByRole('button', { name: 'Create multiple panes', exact: true }).click();
   await page.locator('#count').fill('3');
