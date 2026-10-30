@@ -15,7 +15,7 @@ on:
         description: 'Branch, tag, or SHA to build'
         type: string
         required: true
-        default: nightly
+        default: main
 
 permissions:
   contents: write
