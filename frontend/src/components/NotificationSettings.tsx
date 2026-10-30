@@ -12,6 +12,7 @@ export function NotificationSettings({ persistence }: { persistence: SettingsPer
   const [permissionStatus, setPermissionStatus] = useState<NotificationPermission | 'unsupported'>('default');
   const [actionResult, setActionResult] = useState<string | null>(null);
   const [offerSettings, setOfferSettings] = useState(false);
+  const [testing, setTesting] = useState(false);
 
   useEffect(() => {
     setPermissionStatus('Notification' in window ? Notification.permission : 'unsupported');
@@ -29,7 +30,8 @@ export function NotificationSettings({ persistence }: { persistence: SettingsPer
 
   const testNotification = async () => {
     setOfferSettings(false);
-    const result = await window.electronAPI.notifications.test();
+    setTesting(true);
+    const result = await window.electronAPI.notifications.test().finally(() => setTesting(false));
     if (result.status === 'shown') setActionResult('Test notification sent.');
     else if (result.status === 'unsupported') setActionResult('Desktop notifications are not supported in this environment.');
     else {
@@ -70,7 +72,7 @@ export function NotificationSettings({ persistence }: { persistence: SettingsPer
               </Button>
             )}
             {permissionStatus === 'granted' && (
-              <Button type="button" variant="secondary" size="sm" onClick={() => void testNotification()}>Test</Button>
+              <Button type="button" variant="secondary" size="sm" loading={testing} loadingText="Testing…" onClick={() => void testNotification()}>Test</Button>
             )}
           </div>
         </SettingRow>
