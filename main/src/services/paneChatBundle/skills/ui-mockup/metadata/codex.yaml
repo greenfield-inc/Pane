@@ -1,7 +1,7 @@
 interface:
   display_name: "UI Mockup"
-  short_description: "Compare three UI mockups and refine your favorite"
-  default_prompt: "Use $ui-mockup to create three options from the existing UI, refine my favorite with three options per round, and save the design I approve."
+  short_description: "Compare three UI mockups side by side and refine your picks"
+  default_prompt: "Use $ui-mockup to create three options from the existing UI, let me pick per screen from a side-by-side grid each round, and save the design I approve."
 
 policy:
   allow_implicit_invocation: true
