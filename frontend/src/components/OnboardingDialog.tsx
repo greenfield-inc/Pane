@@ -15,7 +15,8 @@ import { LEGACY_ORCHESTRATION_SESSION_ID } from '../../../shared/types/orchestra
 import type { ImportSession } from '../../../shared/types/sessionImport';
 import { useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
 import { useSessionStore } from '../stores/sessionStore';
-import { AgentStep, SessionsStepBody, SessionsStepFooter, sessionsToBringIn } from './FirstRunSteps';
+import { AgentStep, SessionsStepBody, SessionsStepFooter } from './FirstRunSteps';
+import { sessionsToBringIn } from './sessionImport/sessionImportCopy';
 
 type OnboardingEnvironmentStatus = 'detecting' | 'git_missing' | 'gh_ready' | 'gh_missing' | 'gh_not_authenticated' | 'gh_missing_scopes' | 'gh_not_ready';
 

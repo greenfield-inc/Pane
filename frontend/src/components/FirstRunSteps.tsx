@@ -4,7 +4,7 @@ import { getCliBrandIcon } from './ui/brandIconRegistry';
 import { AGENT_LAUNCH_PRESETS } from '../../../shared/constants/agentLaunchPresets';
 import type { FirstRunAgent } from '../../../shared/types/onboarding';
 import type { PaneChatAgent } from '../../../shared/types/paneChat';
-import type { ImportSession, SessionImportScan, SessionImportSource } from '../../../shared/types/sessionImport';
+import type { ImportSession, SessionImportSource } from '../../../shared/types/sessionImport';
 import { cn } from '../utils/cn';
 
 const INSTALL_URLS = {
@@ -24,19 +24,8 @@ const SOURCE_NAMES = {
   t3code: 'T3 Code',
 } satisfies Record<SessionImportSource, string>;
 
-const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
-
 /** The Yes button and the scanning indicator share this box, so the footer never shifts. */
 const ANSWER_BOX = 'h-9 w-24';
-
-/**
- * The sessions Yes brings in (D-14): running or active in the last 7 days,
- * and not already in Pane or impossible to bring in.
- */
-export function sessionsToBringIn(scan: SessionImportScan): ImportSession[] {
-  return scan.sessions.filter(session => !session.alreadyInPane && !session.unavailable
-    && (session.running === 'yes' || session.lastActiveMs >= scan.scannedAt - WEEK_MS));
-}
 
 function joinNames(names: string[]): string {
   return names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;

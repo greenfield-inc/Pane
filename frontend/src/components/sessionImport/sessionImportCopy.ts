@@ -123,3 +123,14 @@ export function captureSessionImport(
   }
   capture('session_import', properties);
 }
+
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * The sessions Yes brings in (D-14): running or active in the last 7 days,
+ * and not already in Pane or impossible to bring in.
+ */
+export function sessionsToBringIn(scan: SessionImportScan): ImportSession[] {
+  return scan.sessions.filter(session => !session.alreadyInPane && !session.unavailable
+    && (session.running === 'yes' || session.lastActiveMs >= scan.scannedAt - WEEK_MS));
+}
