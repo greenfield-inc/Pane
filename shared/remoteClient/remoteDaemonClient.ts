@@ -186,6 +186,8 @@ const RESENT_WRITE_ATTEMPT_TIMEOUT_MS = 30_000;
 const WAKE_PROBE_INTERVAL_MS = 250;
 const WAKE_PROBE_WINDOW_MS = 4_000;
 const WAKE_PROBE_TIMEOUT_MS = 2_000;
+/** Phones allow only a few connections per host; the stream and restore reads need the rest. */
+const WAKE_PROBES_IN_FLIGHT = 2;
 
 /** Platform-neutral client for a Pane daemon's HTTP + SSE API. */
 export class RemoteDaemonClient {
@@ -335,10 +337,13 @@ export class RemoteDaemonClient {
     const started = Date.now();
     // Past the quick window, continue from the backoff's 2 s step.
     let backoffAttempt = 2;
+    let inFlight = 0;
     const live = () => !probes.signal.aborted && !connection.signal.aborted && connection === this.abortController;
     const probe = () => {
       if (!live() || this.state.status !== 'reconnecting') { probes.abort(); return; }
       this.schedule(probe, Date.now() - started < WAKE_PROBE_WINDOW_MS ? WAKE_PROBE_INTERVAL_MS : backoffDelayMs(backoffAttempt++));
+      if (inFlight >= WAKE_PROBES_IN_FLIGHT) return;
+      inFlight += 1;
       this.noteWakeAttempt();
       const attempt = abortSignalAny([probes.signal], this.schedule, WAKE_PROBE_TIMEOUT_MS);
       this.fetch(this.endpoint('health'), { signal: attempt.signal, cache: 'no-store' }).then(response => {
@@ -352,7 +357,7 @@ export class RemoteDaemonClient {
         if (this.wake && !probes.signal.aborted) {
           this.wake.lastError = attempt.signal?.aborted ? `No answer within ${WAKE_PROBE_TIMEOUT_MS / 1000} s` : error.message;
         }
-      }).finally(attempt.done);
+      }).finally(() => { inFlight -= 1; attempt.done(); });
     };
     probe();
   }
