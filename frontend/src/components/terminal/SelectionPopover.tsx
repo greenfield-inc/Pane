@@ -1,6 +1,6 @@
 import React, { lazy, Suspense, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Copy, ExternalLink, FolderOpen, Globe, FileText } from 'lucide-react';
+import { Copy, ExternalLink, FolderOpen, Globe, FileText, X } from 'lucide-react';
 import { TerminalPopover, PopoverButton } from './TerminalPopover';
 import { InterceptorToast } from './InterceptorToast';
 import NotesDialog from '../panels/notes/NotesDialog';
@@ -161,9 +161,12 @@ export const SelectionPopover: React.FC<SelectionPopoverProps> = ({
         </PopoverButton>
       )}
     </TerminalPopover>
-    {capture && sessionId && <NotesDialog label="Add to notes" onDismiss={() => setCapture(undefined)}>
-      <button type="button" className="self-end px-4 py-2" onClick={() => setCapture(undefined)}>Close</button>
-      <div className="min-h-0 flex-1"><Suspense fallback={<p>Loading notes…</p>}><NotesPanel paneId={sessionId} capture={capture} viewId="capture" /></Suspense></div>
+    {capture && sessionId && <NotesDialog label="Add to notes" onDismiss={() => setCapture(undefined)} className="max-h-[calc(100vh-2rem)] max-w-3xl">
+      <div className="flex h-[50px] shrink-0 items-center justify-between border-b border-border-primary px-5">
+        <h2 className="text-[15px] font-semibold text-text-primary">Add to notes</h2>
+        <button type="button" aria-label="Close" title="Close" className="rounded-md p-1 text-text-tertiary hover:bg-surface-hover hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus" onClick={() => setCapture(undefined)}><X className="h-4 w-4" /></button>
+      </div>
+      <div className="min-h-0 flex-1"><Suspense fallback={<p className="p-5 text-[13px] text-text-tertiary">Loading notes…</p>}><NotesPanel paneId={sessionId} capture={capture} viewId="capture" /></Suspense></div>
     </NotesDialog>}
     {errorToast && createPortal(
       <div className="fixed inset-0 z-[10002] pointer-events-none">
