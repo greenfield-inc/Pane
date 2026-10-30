@@ -80,11 +80,12 @@ const MAX_DEVICE_NAME_LENGTH = 60;
 const MAX_TRACKED_SOURCES = 1_000;
 const MAX_REFUSED_ORIGINS = 10;
 /**
- * How often one pair of glasses may vouch here. Each vouch mints at most one secret per computer,
- * so a looping app can't push out the 32 pending secrets a phone minted, or pile up failed trades
- * toward another computer's lockout.
+ * How often one pair of glasses may run each rate-limited command here. Each vouch mints at most
+ * one secret per computer, so a looping app can't push out the 32 pending secrets a phone minted,
+ * or pile up failed trades toward another computer's lockout. Each Session create starts an agent.
  */
-const VOUCH_INTERVAL_MS = 5 * 60_000;
+const GLASSES_RATE_LIMITS = { vouch: 5 * 60_000, session: 30_000 } as const;
+type GlassesRateLimitedAction = keyof typeof GLASSES_RATE_LIMITS;
 const COUNTED_FAILURES: ReadonlySet<GlassesFailureReason> = new Set(['token', 'pairing-secret', 'identity', 'credential-in-url']);
 
 export type GlassesFailureReason = 'token' | 'pairing-secret' | 'origin' | 'identity' | 'funnel' | 'credential-in-url' | 'channel' | 'key' | 'vouch' | 'session';
@@ -106,10 +107,11 @@ export function glassesKeyInput(request: JsonValue | undefined): { panelId: stri
 const MAX_SESSION_NAME_LENGTH = 120;
 const MAX_SESSION_GOAL_LENGTH = 2_000;
 const SESSION_FIELDS: ReadonlySet<string> = new Set(['name', 'goal']);
-const sessionRequestSchema = boundary.object({
-  name: boundary.refine(boundary.nonEmptyString, (name) => name.trim().length > 0 && name.length <= MAX_SESSION_NAME_LENGTH && !/\p{Cc}/u.test(name), 'expected a one-line name'),
-  goal: boundary.optional(boundary.refine(boundary.string, (goal) => goal.length <= MAX_SESSION_GOAL_LENGTH, 'expected a shorter purpose')),
-});
+const sessionRequestSchema = boundary.object({ name: boundary.string, goal: boundary.optional(boundary.string) });
+/** Control and format characters (zero-width, bidi overrides) and line or paragraph separators. */
+const HIDDEN_NAME_CHARACTERS = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
+/** Bidi embeddings, overrides and isolates, which can make a purpose read differently than it runs. */
+const BIDI_CONTROLS = /[\u202A-\u202E\u2066-\u2069]/u;
 
 /**
  * The `orchestration-sessions:create` request the glasses may run: a name and, optionally, a
@@ -121,7 +123,11 @@ export function glassesSessionInput(request: JsonValue | undefined): { name: str
   if (!fields || Object.keys(fields).some((key) => !SESSION_FIELDS.has(key))) return null;
   const input = decodeOptionalBoundary(fields, sessionRequestSchema);
   if (!input) return null;
-  return input.goal === undefined ? { name: input.name } : { name: input.name, goal: input.goal };
+  const name = input.name.normalize('NFKC');
+  if (!name.trim() || name.length > MAX_SESSION_NAME_LENGTH || HIDDEN_NAME_CHARACTERS.test(name)) return null;
+  if (input.goal === undefined) return { name };
+  if (input.goal.length > MAX_SESSION_GOAL_LENGTH || BIDI_CONTROLS.test(input.goal)) return null;
+  return { name, goal: input.goal };
 }
 
 interface GlassesConfigStore {
@@ -159,7 +165,9 @@ export class GlassesAccess {
   private readonly pending: PendingSecret[] = [];
   private readonly sources = new Map<string, SourceFailures>();
   private readonly lastUsedWrites = new Map<string, number>();
-  private readonly lastVouches = new Map<string, number>();
+  private readonly lastClaims = new Map<string, number>();
+  /** Phone ids revoked since Pane started, so a revoke holds before its config write lands. */
+  private readonly revokedThisRun = new Set<string>();
   private readonly revokeListeners = new Set<(id: string) => void>();
   private readonly envOrigins: ReadonlySet<string>;
   private readonly refusedOrigins: { origin: string; at: string }[] = [];
@@ -276,6 +284,7 @@ export class GlassesAccess {
       phoneId,
     };
     const replaced = this.list().filter((device) => device.phoneId === phoneId).map((device) => device.id);
+    this.revokedThisRun.delete(phoneId);
     await this.write(
       (clients) => [...clients.filter((client) => !replaced.includes(client.id)), record],
       (revoked) => revoked.filter((id) => id !== phoneId),
@@ -311,7 +320,7 @@ export class GlassesAccess {
 
   /** Phone ids whose glasses were revoked here and not paired again since. */
   revokedPhoneIds(): string[] {
-    return [...(this.config.getConfig().workspaces?.glassesRevokedPhoneIds ?? [])];
+    return [...new Set([...(this.config.getConfig().workspaces?.glassesRevokedPhoneIds ?? []), ...this.revokedThisRun])];
   }
 
   /**
@@ -323,6 +332,8 @@ export class GlassesAccess {
     if (!record) return false;
     const { phoneId } = record;
     if (phoneId) {
+      // Held in memory first: a vouched mint while the config write is queued is still refused.
+      this.revokedThisRun.add(phoneId);
       for (let index = this.pending.length - 1; index >= 0; index -= 1) {
         if (this.pending[index].phoneId === phoneId) this.pending.splice(index, 1);
       }
@@ -335,12 +346,13 @@ export class GlassesAccess {
     return true;
   }
 
-  /** Claims this device's vouch for the next 5 minutes; returns 0, or the milliseconds until it may vouch again. */
-  claimVouch(id: string): number {
+  /** Claims one run of `action` for this device; returns 0, or the milliseconds until it may run again. */
+  claim(action: GlassesRateLimitedAction, id: string): number {
     const now = this.now();
-    const wait = (this.lastVouches.get(id) ?? -Infinity) + VOUCH_INTERVAL_MS - now;
+    const key = `${action}:${id}`;
+    const wait = (this.lastClaims.get(key) ?? -Infinity) + GLASSES_RATE_LIMITS[action] - now;
     if (wait > 0) return wait;
-    this.lastVouches.set(id, now);
+    this.lastClaims.set(key, now);
     return 0;
   }
 

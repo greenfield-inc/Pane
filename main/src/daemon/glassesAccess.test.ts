@@ -27,6 +27,11 @@ interface RequestHeaders {
   [name: string]: string;
 }
 
+/** Runs while a recorded command is in flight, before it answers. */
+interface InFlightHook {
+  run?: (channel: string) => Promise<void>;
+}
+
 interface Response {
   status: number;
   headers: http.IncomingHttpHeaders;
@@ -48,8 +53,11 @@ async function setup(options: { visibility?: WorkspaceAccessPolicy['visibility']
   const glasses = new GlassesAccess(store, { now: () => now, env: { PANE_GLASSES_ORIGINS: EVEN }, log: (line) => log.push(line) });
   const registry = new PaneCommandRegistry();
   const calls: Array<{ channel: string; args: PaneCommandValue[] }> = [];
-  const record = (channel: string) => registry.register(channel, (...args: PaneCommandValue[]) => {
+  /** Runs while a recorded command is in flight, before it answers. */
+  const during: InFlightHook = {};
+  const record = (channel: string) => registry.register(channel, async (...args: PaneCommandValue[]) => {
     calls.push({ channel, args });
+    await during.run?.(channel);
     return { ran: channel };
   });
   for (const channel of ['runpane:panels:screen', 'runpane:panels:submit', 'runpane:panels:input', 'runpane:panels:resume', 'sessions:mark-viewed', 'notify:remote-command', 'file:write', 'git:commit', 'runpane:machine:exec', 'remote:settings:update', 'terminal:input', 'panels:initialize', 'terminal:setVisibility', GLASSES_COMMANDS.vouch, 'orchestration-sessions:create', 'runpane:panes:create']) {
@@ -105,7 +113,7 @@ async function setup(options: { visibility?: WorkspaceAccessPolicy['visibility']
   };
 
   return {
-    server, glasses, calls, log, port, request, invoke, fromGlasses, fromPhone, pair,
+    server, glasses, calls, log, port, request, invoke, fromGlasses, fromPhone, pair, during,
     config: () => config,
     advance: (ms: number) => { now += ms; },
   };
@@ -601,6 +609,7 @@ describe('glasses starting a Session', () => {
     const create = (input: JsonValue) => host.invoke('orchestration-sessions:create', [input], host.fromGlasses(token));
 
     expect((await create({ name: 'Double charges', goal: 'Find why checkout charges some carts twice' })).status).toBe(200);
+    host.advance(30_000);
     expect((await create({ name: 'Just a name' })).status).toBe(200);
     expect(host.calls).toEqual([
       { channel: 'orchestration-sessions:create', args: [{ name: 'Double charges', goal: 'Find why checkout charges some carts twice' }] },
@@ -625,6 +634,12 @@ describe('glasses starting a Session', () => {
       { name: '   ' },
       { name: 'x'.repeat(121) },
       { name: 'x', goal: 'x'.repeat(2_001) },
+      // Zero-width space, right-to-left override, line and paragraph separators.
+      { name: 'pay\u200Broll' },
+      { name: 'fix \u202Etxt.exe' },
+      { name: 'one\u2028two' },
+      { name: 'one\u2029two' },
+      { name: 'x', goal: 'Find why \u202Echeckout fails' },
       { goal: 'no name' },
       'not an object',
     ];
@@ -636,6 +651,72 @@ describe('glasses starting a Session', () => {
     expect(host.log.join('\n')).not.toContain('attacker.example');
     // Refusals are not guesses at a credential: no lockout.
     expect((await host.invoke('orchestration-sessions:create', [{ name: 'ok' }], host.fromGlasses(token))).status).toBe(200);
+  });
+});
+
+describe('glasses limits on Sessions, vouches and revokes', () => {
+  it('stores a Session name in its NFKC form', async () => {
+    const host = await setup();
+    const { token } = await host.pair();
+    await host.invoke('orchestration-sessions:create', [{ name: '\uFB01x \uFF23heckout' }], host.fromGlasses(token));
+    expect(host.calls).toEqual([{ channel: 'orchestration-sessions:create', args: [{ name: 'fix Checkout' }] }]);
+  });
+
+  it('starts at most one Session every 30 seconds per pair of glasses, without counting toward a lockout', async () => {
+    const host = await setup();
+    const { token } = await host.pair();
+    const create = () => host.invoke('orchestration-sessions:create', [{ name: 'Checkout' }], host.fromGlasses(token));
+
+    expect((await create()).status).toBe(200);
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const again = await create();
+      expect([again.status, errorCode(again)]).toEqual([429, 'ERR_GLASSES_SESSION_TOO_SOON']);
+    }
+    expect(host.log.filter((line) => line.startsWith('[Pane glasses] refused session'))).toHaveLength(6);
+    expect((await host.invoke('runpane:panels:screen', [{}], host.fromGlasses(token))).status).toBe(200);
+    host.advance(29_000);
+    expect((await create()).status).toBe(429);
+    host.advance(1_000);
+    expect((await create()).status).toBe(200);
+  });
+
+  it('sends no pairing code when the glasses are revoked while the vouch runs', async () => {
+    const host = await setup();
+    const { token } = await host.pair();
+    host.during.run = async (channel) => {
+      if (channel === GLASSES_COMMANDS.vouch) await host.glasses.revoke(host.glasses.list()[0].id);
+    };
+    const vouch = await host.invoke(GLASSES_COMMANDS.vouch, [], host.fromGlasses(token));
+    expect([vouch.status, errorCode(vouch)]).toEqual([403, 'ERR_GLASSES_ACCESS_WITHDRAWN']);
+    expect(JSON.stringify(vouch.body)).not.toContain('ran');
+  });
+});
+
+describe('a revoke while its config write is queued', () => {
+  it('already refuses a vouched mint for those glasses', async () => {
+    let config: Pick<AppConfig, 'remoteDaemon' | 'workspaces'> = { remoteDaemon: createDefaultRemoteDaemonConfig() };
+    let release: () => void = () => {};
+    let held = false;
+    const store = {
+      getConfig: () => config,
+      updateConfigWith: async (update: (current: AppConfig) => Partial<AppConfig>) => {
+        // The real config manager queues writes; this one holds them while `held` is set.
+        if (held) await new Promise<void>((resolve) => { release = resolve; });
+        // SAFETY: the glasses store reads and writes only remoteDaemon and workspaces.
+        config = { ...config, ...update(config as AppConfig) };
+        return config;
+      },
+    };
+    const glasses = new GlassesAccess(store, { log: () => {} });
+    const paired = await glasses.pair(glasses.createPairingSecret('Even G2 · iPhone', 'pane-native-phone-a').secret);
+    held = true;
+    const revoking = glasses.revoke(paired?.device.id ?? '');
+
+    expect(() => glasses.createPairingSecret('Even G2 · iPhone', 'pane-native-phone-a', { unlessRevoked: true }))
+      .toThrow(expect.objectContaining({ code: 'ERR_GLASSES_REVOKED_HERE' }));
+    release();
+    expect(await revoking).toBe(true);
+    expect(config.workspaces?.glassesRevokedPhoneIds).toEqual(['pane-native-phone-a']);
   });
 });
 

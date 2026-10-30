@@ -103,6 +103,13 @@ Revoking closes the glasses' connection to that computer within 5 seconds. A rev
 other computers can't add the glasses back to this one. Pairing the glasses again from the phone
 lifts the revoke on each computer it pairs.
 
+Revoke on every computer, from the phone, when the glasses are lost. Two gaps remain:
+
+- A computer that was offline during the revoke still holds the glasses, and can add them to a
+  computer you set up later, until a revoke reaches it.
+- Pairing secrets that a computer already handed the glasses for your other computers stay usable
+  there for up to 10 minutes after you revoke the glasses on it.
+
 ## Security
 
 The glasses app is a web page inside the Even app. Each computer lets it in only when all of these
@@ -123,7 +130,8 @@ hold:
   the token.
 
 A glasses token reaches only what the glasses use: listing Sessions and Panes, starting a Session
-(with only a one-line name and a purpose; it runs the computer's default agent), reading and typing
+(with only a one-line name and a purpose, at most one every 30 seconds; it runs the computer's
+default agent), reading and typing
 into terminals, pressing one key at a time, dictation, and Notify. The keys are ↑, ↓, Enter, Esc,
 Tab and the digits 1 to 9, one per request, and nothing else: text, two keys at once, Ctrl-C,
 Ctrl-D, ← → and 0 are refused before they reach the terminal (`ERR_GLASSES_KEY_REFUSED`), logged

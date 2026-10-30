@@ -1209,10 +1209,18 @@ export class PaneRemoteHttpApiServer {
           'Update the Pane glasses app, then try again.');
         return;
       }
+      const waitMs = glasses.claim('session', client.id);
+      if (waitMs > 0) {
+        const seconds = Math.ceil(waitMs / 1000);
+        glasses.recordFailure(admission.source, 'session', `asked again within 30 s; ${seconds} s left`);
+        refuse(429, 'ERR_GLASSES_SESSION_TOO_SOON', 'These glasses started a Session on this computer less than 30 seconds ago, so this one was not created.',
+          `Try again in ${seconds} s.`);
+        return;
+      }
       args = [input];
     }
     if (channel === GLASSES_COMMANDS.vouch) {
-      const waitMs = glasses.claimVouch(client.id);
+      const waitMs = glasses.claim('vouch', client.id);
       if (waitMs > 0) {
         const seconds = Math.ceil(waitMs / 1000);
         glasses.recordFailure(admission.source, 'vouch', `asked again within 5 minutes; ${seconds} s left`);
@@ -1221,7 +1229,15 @@ export class PaneRemoteHttpApiServer {
         return;
       }
       // Which glasses: the token's own record, never names, ids or computers from the request.
-      args = [{ deviceId: client.id }];
+      const { answer } = await answerInvoke(() => this.commandRegistry.invokeRemote(channel, [{ deviceId: client.id }]));
+      // The vouch takes seconds; glasses revoked meanwhile get none of the secrets it minted.
+      if (!this.isStillAdmitted(glassesIdentity(client))) {
+        refuse(403, 'ERR_GLASSES_ACCESS_WITHDRAWN', 'These glasses lost access to this computer while it asked your other computers for them; no pairing code was sent.',
+          'Check Settings › Remote Access › Devices on the computer, then pair again from the Pane phone app if the glasses were revoked.');
+        return;
+      }
+      this.writeJson(response, answer.statusCode, answer.payload, request);
+      return;
     }
     await this.respondToInvoke(request, response, invokeRequest.requestId, client.id, () => this.commandRegistry.invokeRemote(channel, args));
   }
