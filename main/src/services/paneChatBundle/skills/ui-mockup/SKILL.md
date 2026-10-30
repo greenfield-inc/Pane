@@ -1,6 +1,6 @@
 ---
 name: ui-mockup
-description: Create three UI mockup options per round, then refine the user's favorite until they approve one. Works from screenshots of the current product or from agreed references for something new, with whatever tools are available (an image model, HTML/CSS in a browser, or a wireframe). Use for "mock this up," "UI mockup," or "show me what this would look like" for interfaces. Saves the approved design with the ticket or brief.
+description: Create three UI mockup options per round, let the user pick per screen in a side-by-side comparison grid, then refine their picks until they approve a design. Works from screenshots of the current product or from agreed references for something new, with whatever tools are available (an image model, HTML/CSS in a browser, or a wireframe). Use for "mock this up," "UI mockup," or "show me what this would look like" for interfaces. Saves the approved design with the ticket or brief.
 ---
 
 # UI mockup
@@ -44,15 +44,38 @@ The same steps apply to every medium.
   the option is about them. Mark each input as an edit target or a style
   reference.
 - Make three distinct options: design directions in the first round, then
-  refinements of the favorite. Label them 1 to 3.
+  refinements of the picks. Label them 1 to 3.
+- Render every screen and state the round covers, for each option, as an
+  image file. Draw a wireframe as SVG, even when you sketched it in ASCII
+  first.
 - Check each option for garbled text, changed regions that should have stayed,
-  and anything that couldn't really be built. Open all three for the person;
-  if opening fails, show them inline with file links, and note any fidelity
-  limits.
-- Ask for a favorite and feedback, and use the favorite as the next round's
-  starting point. Keep the original screenshots, earlier options, and the
-  things that must stay the same. A favorite guides the next round; only
-  explicit approval makes a design final.
+  and anything that couldn't really be built. Note any fidelity limits.
+- Keep the original screenshots, earlier options, and the things that must
+  stay the same.
+
+## Compare and pick
+
+- Keep each round in its own folder, `round-N/`, with its images in
+  `round-N/shots/`, named `option<N>-<screen>.<ext>`.
+- End every round with a comparison grid, `round-N/compare.html`, built from
+  [references/compare.html](references/compare.html): plain HTML and CSS that
+  reads without script, in light and dark.
+- Give it one row per screen or state and one column per option. Each cell
+  shows the rendered image, links to it at full size, and carries a one-line
+  caption that starts with the option number.
+- Add one column per earlier round, showing that row's pick from that round,
+  or a render of the combined design when the person mixed options. A row
+  missing from round K gets an empty cell captioned "not in round K".
+- Set `--cols` to the label track, one track per earlier round, then three
+  option tracks. Round 1 has no earlier columns: `170px 1fr 1fr 1fr`.
+- Keep a sticky header with each option's name, a short build-effort note,
+  and your recommendation.
+- Open the grid for the person; if opening fails, give its path. Ask for a
+  pick per row, such as "library 1, empty library 3", plus feedback; a single
+  favorite for the whole round is also an answer.
+- Combine the per-row picks and the feedback into one coherent design; the
+  next round's three options are variations of it. A pick guides the next
+  round; only explicit approval makes a design final.
 
 ## Save the approved design
 
