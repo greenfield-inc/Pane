@@ -71,7 +71,7 @@ const PREFERENCE_CONFIG_KEYS = [
   'notifications', 'keyboardShortcutsEnabled', 'commandPaletteShortcutEnabled', 'kittyKeyboardEnabled',
   'htmlFileOpenMode', 'enableCommitFooter', 'gitAttributionEnabled', 'autoCheckUpdates',
   'keepAwakeWhileSessionsActive', 'keepAwakeWhilePluggedIn', 'keepAwakeOnBattery', 'terminalPowerMode',
-  'retention', 'voiceTranscriptionMode', 'missionControlEnabled', 'experimentalChatEnabled',
+  'retention', 'voiceTranscriptionMode', 'missionControlEnabled', 'experimentalChatEnabled', 'notesEnabled',
   'sessionCreationPreferences',
 ] as const satisfies readonly (keyof SetupPreferences)[];
 
@@ -125,6 +125,7 @@ const FIELD_LABELS = {
   voiceTranscriptionMode: 'Voice transcription',
   missionControlEnabled: 'Mission Control',
   experimentalChatEnabled: 'Chat interface',
+  notesEnabled: 'Notes',
   sessionCreationPreferences: 'New Pane defaults',
   auto_rename_sessions_to_pr: 'Rename Panes to their PR',
   sidebar_pane_row_layout: 'Sidebar Pane rows',
@@ -457,6 +458,7 @@ const sectionSchemas = {
     voiceTranscriptionMode: boundary.optional(boundary.enumeration('recorded', 'streaming')),
     missionControlEnabled: booleanField,
     experimentalChatEnabled: booleanField,
+    notesEnabled: booleanField,
     sessionCreationPreferences: boundary.optional(boundary.object({
       sessionCount: boundary.optional(boundary.number),
       toolType: boundary.optional(boundary.enumeration('claude', 'none')),

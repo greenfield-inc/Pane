@@ -89,7 +89,8 @@ export type SettingsSettingId =
   | 'pty-host'
   | 'additional-paths'
   | 'mission-control'
-  | 'experimental-chat';
+  | 'experimental-chat'
+  | 'notes';
 
 export interface SettingsTarget {
   category: SettingsCategoryId;

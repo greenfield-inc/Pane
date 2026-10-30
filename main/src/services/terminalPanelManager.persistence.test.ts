@@ -987,6 +987,16 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void
     }
   });
 
+  it('exports PANE_NOTES_FILE only while experimental Notes is on', async () => {
+    const spawn = vi.spyOn(ptyHost, 'spawn');
+    await startTerminal(makePanel('notes-off-panel'));
+    expect(spawn.mock.calls[0][0].env.PANE_NOTES_FILE).toBe('');
+
+    Object.assign(configManager.getConfig(), { notesEnabled: true });
+    await startTerminal(makePanel('notes-on-panel'));
+    expect(spawn.mock.calls[1][0].env.PANE_NOTES_FILE).toMatch(/[\\/]notes[\\/]contexts[\\/]session\.md$/);
+  });
+
   it('exports PANE_PANEL_KIND so shell startup can tell the dock shell from agent and shell tabs', async () => {
     const spawn = vi.spyOn(ptyHost, 'spawn');
     const agent = makePanel('kind-agent');
