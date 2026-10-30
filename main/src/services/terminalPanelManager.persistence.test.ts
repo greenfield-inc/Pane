@@ -1054,7 +1054,9 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void
       handle.emit(trustMenu(sessionWorkspacePath('claude-session'), 'Yes'));
       await vi.advanceTimersByTimeAsync(1_000);
       expect(menuKeys(handle)).toEqual(['\x1b[B', '\r']);
-      // Asked again later, the answer is the person's.
+      // Once Claude has been ready, a later trust prompt is the person's.
+      handle.emit(`\x1b[2J\x1b[H${'─'.repeat(60)}\r\n❯ \r\n${'─'.repeat(60)}`);
+      await vi.advanceTimersByTimeAsync(15_000);
       handle.emit(trustMenu(sessionWorkspacePath('claude-session'), 'Yes'));
       await vi.advanceTimersByTimeAsync(1_000);
       expect(menuKeys(handle)).toEqual(['\x1b[B', '\r']);

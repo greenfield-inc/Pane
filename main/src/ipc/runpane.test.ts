@@ -4527,6 +4527,21 @@ describe('runpane IPC handlers', () => {
       } });
   });
 
+  it('waits through a trust menu Pane answers itself and reports the agent ready', async () => {
+    vi.useFakeTimers();
+    const trust = 'Accessing workspace:\n/pane/sessions/s1\n❯ No, exit\n  Yes, I trust this folder';
+    const rule = '─'.repeat(40);
+    const startedAt = Date.now();
+    vi.mocked(terminalPanelManager.getTerminalSnapshot).mockImplementation(() =>
+      terminalSnapshot(Date.now() - startedAt < 1500 ? trust : `${rule}\n❯ \n${rule}`, 'idle', 'claude'));
+    vi.spyOn(terminalPanelManager, 'answersTrustPrompt').mockImplementation((_panelId, text) => text === trust);
+    const pending = createRegistry().invoke('runpane:panels:wait', [{
+      panelId: terminalPanel.id, condition: 'ready', timeoutMs: 5000, intervalMs: 500,
+    }]);
+    await vi.runAllTimersAsync();
+    expect(await pending).toMatchObject({ ok: true, matched: true });
+  });
+
   it('waits past a transient composer before reporting startup ready', async () => {
     const composer = terminalSnapshot('› Ask Codex to do anything', 'idle', 'codex');
     const dialog = terminalSnapshot('Cannot use the background server\n  1. Run without daemon this time\n› 2. Cancel', 'idle', 'codex');

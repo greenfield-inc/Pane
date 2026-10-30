@@ -2730,6 +2730,12 @@ export class TerminalPanelManager extends EventEmitter {
     }
   }
 
+  /** Pane is answering the trust menu on this screen itself, for a Session's own folder. */
+  answersTrustPrompt(panelId: string, screenText: string): boolean {
+    const folder = this.terminals.get(panelId)?.claudeTrustFolder;
+    return folder !== undefined && claudeFolderTrustKey(screenText, folder) !== undefined;
+  }
+
   /**
    * Choose "Yes, I trust this folder" in Claude's trust menu for a Session's own
    * folder, one key per new frame, as a person would. Once Claude is first ready
@@ -2746,8 +2752,9 @@ export class TerminalPanelManager extends EventEmitter {
     terminal.claudeTrustAnsweredScreen = screen;
     this.writeToTerminal(terminal.panelId, key);
     if (key !== '\r') return;
-    terminal.claudeTrustFolder = undefined;
     console.log(`[TerminalPanelManager] Trusted Session folder ${terminal.launchCwd} in Claude's prompt for panel ${terminal.panelId}`);
+    // Claude starts for real now: drop the menu's blocked status rather than report it until the next poll.
+    this.registerAgentStatusPanel(terminal);
   }
 
   /**

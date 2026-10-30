@@ -3491,6 +3491,8 @@ function detectPanelBlocker(
   panelId: string,
 ): RunpanePanelBlockedState | undefined {
   if (!text) return undefined;
+  // Pane answers Claude's folder trust for a Session's own folder itself.
+  if (terminalPanelManager.answersTrustPrompt(panelId, text)) return undefined;
 
   const daemonChoice = text.match(/^\s*[›❯>]?\s*(\d+)\.\s*Run without daemon this time/im);
   if (daemonChoice && /cannot use the background server|background server has incompatible/i.test(text)) {
