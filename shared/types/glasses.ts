@@ -20,6 +20,11 @@ export const GLASSES_COMMANDS = {
   setOrigin: 'runpane:glasses:set-origin',
   /** Called by the glasses app itself, with a pairing secret instead of a token. */
   pair: 'runpane:glasses:pair',
+  /**
+   * Called by paired glasses with their token: this computer asks your other computers for
+   * pairing secrets for the same glasses and returns them as one pairing code.
+   */
+  vouch: 'runpane:glasses:vouch',
 } as const;
 
 export interface GlassesDevice {
@@ -42,6 +47,13 @@ export interface GlassesAccessState {
 
 export interface GlassesListResult {
   devices: GlassesDevice[];
+  /**
+   * Phone ids whose glasses were revoked on this computer and not paired again from the phone.
+   * Missing from a Pane that predates revoke markers.
+   */
+  revokedPhoneIds?: string[];
+  /** Funnel is on for this computer's workspace port, so glasses are refused here. */
+  funnelOn?: boolean;
 }
 
 export interface GlassesRevokeResult {
@@ -56,6 +68,22 @@ export interface GlassesPairingSecretResult {
 export interface GlassesPairResult {
   token: string;
   device: GlassesDevice;
+}
+
+/** Why a vouch left one of your computers out, as the glasses show it. */
+export type GlassesVouchSkipReason =
+  | 'update Pane there'
+  | 'revoked here · pair from phone'
+  | 'needs its password'
+  | 'Funnel is on'
+  | 'not answering';
+
+export interface GlassesVouchResult {
+  /** A `pane-glasses://` code with a pairing secret for each computer that minted one; null when none did. */
+  code: string | null;
+  expiresAt: string | null;
+  /** Your computers the glasses lack and could not get a secret for. Computers that already hold the glasses are left out. */
+  skipped: { name: string; reason: GlassesVouchSkipReason }[];
 }
 
 export interface GlassesPairingComputer {

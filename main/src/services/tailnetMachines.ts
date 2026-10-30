@@ -2,7 +2,8 @@ import type http from 'http';
 import https from 'https';
 import type { LookupFunction } from 'net';
 import { isIP } from 'net';
-import { boundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
+import { boundary, decodeOptionalBoundary, type JsonValue } from '../../../shared/validation/boundaryDecoder';
+import type { RemotePaneConnectionProfile } from '../../../shared/types/remoteDaemon';
 import type {
   TailnetMachine,
   TailnetMachineList,
@@ -21,7 +22,7 @@ const PROBE_CONCURRENCY = 8;
 const MAX_PROBED_MACHINES = 64;
 
 /** A machine worth probing: online, untagged, a desktop OS, in this tailnet. */
-interface TailnetCandidate {
+export interface TailnetCandidate {
   name: string;
   dnsName: string;
   ip: string;
@@ -37,6 +38,14 @@ export type WorkspaceProbeResult =
   | { kind: 'unreachable'; detail?: string };
 
 export type WorkspaceProbe = (machine: TailnetCandidate, secret?: string) => Promise<WorkspaceProbeResult>;
+
+/** One command's answer from another machine's Workspaces listener, called as this machine's login. */
+export type WorkspaceCallResult =
+  | { kind: 'answered'; statusCode: number; ok: true; result: JsonValue | undefined }
+  | { kind: 'answered'; statusCode: number; ok: false; code?: string; message?: string }
+  | { kind: 'unreachable'; detail: string };
+
+export type WorkspaceCall = (machine: TailnetCandidate, channel: string, args: JsonValue[], secret?: string) => Promise<WorkspaceCallResult>;
 
 interface DiscoveryDependencies {
   /** `tailscale status --json`, or null when Tailscale is not installed. */
@@ -205,6 +214,13 @@ export function savedSecretKey(domain: string, name: string): string {
   return `${domain.toLowerCase()}/${name.toLowerCase()}`;
 }
 
+/** The passwords saved with this machine's codeless connections, keyed by `savedSecretKey`. */
+export function savedWorkspaceSecrets(profiles: readonly RemotePaneConnectionProfile[]): Map<string, string> {
+  return new Map(profiles.flatMap((profile): [string, string][] => (profile.tailnetMachine && profile.tailnetDomain && profile.token
+    ? [[savedSecretKey(profile.tailnetDomain, profile.tailnetMachine), profile.token]]
+    : [])));
+}
+
 /**
  * The address of a saved machine, looked up at each connect. A profile belongs to the tailnet it
  * was saved on: after a switch, a machine with the same name is a different machine, so it is
@@ -286,12 +302,13 @@ const descriptionSchema = boundary.object({
 });
 
 /**
- * Asks a machine's Workspaces listener to describe itself. Connects to the Tailscale IP directly,
- * so it works where the system resolver does not know MagicDNS, while TLS still checks the name.
+ * Runs one command on another machine's Workspaces listener. Connects to the Tailscale IP
+ * directly, so it works where the system resolver does not know MagicDNS, while TLS still checks
+ * the name. Serve on that machine signs the request with this machine's Tailscale login.
  */
-export const probeWorkspace: WorkspaceProbe = (machine, secret) => new Promise((resolve) => {
+export const callWorkspace: WorkspaceCall = (machine, channel, args, secret) => new Promise((resolve) => {
   let settled = false;
-  const finish = (result: WorkspaceProbeResult) => {
+  const finish = (result: WorkspaceCallResult) => {
     if (settled) return;
     settled = true;
     clearTimeout(deadline);
@@ -302,7 +319,7 @@ export const probeWorkspace: WorkspaceProbe = (machine, secret) => new Promise((
     if (options.all) callback(null, [{ address: machine.ip, family }]);
     else callback(null, machine.ip, family);
   };
-  const body = JSON.stringify({ channel: 'runpane:workspaces:describe', args: [] });
+  const body = JSON.stringify({ channel, args });
   const request = https.request({
     host: machine.dnsName,
     servername: machine.dnsName,
@@ -316,7 +333,7 @@ export const probeWorkspace: WorkspaceProbe = (machine, secret) => new Promise((
     let size = 0;
     response.on('data', (chunk: Buffer) => {
       size += chunk.length;
-      // A describe answer is a few hundred bytes; anything this large is not Pane.
+      // A describe or glasses answer is a few kilobytes; anything this large is not Pane.
       if (size > MAX_PROBE_RESPONSE_BYTES) {
         request.destroy();
         finish({ kind: 'unreachable', detail: 'response too large' });
@@ -324,10 +341,10 @@ export const probeWorkspace: WorkspaceProbe = (machine, secret) => new Promise((
       }
       chunks.push(chunk);
     });
-    response.on('end', () => finish(readProbeResponse(response.statusCode ?? 0, Buffer.concat(chunks).toString('utf8'))));
+    response.on('end', () => finish(readCallResponse(response.statusCode ?? 0, Buffer.concat(chunks).toString('utf8'))));
     response.on('error', (error) => finish({ kind: 'unreachable', detail: error.message }));
   });
-  // An absolute deadline: a socket timeout alone would let a peer that trickles bytes hang the list.
+  // An absolute deadline: a socket timeout alone would let a peer that trickles bytes hang the caller.
   const deadline = setTimeout(() => {
     request.destroy();
     finish({ kind: 'unreachable', detail: 'timed out' });
@@ -335,6 +352,10 @@ export const probeWorkspace: WorkspaceProbe = (machine, secret) => new Promise((
   request.on('error', (error) => finish({ kind: 'unreachable', detail: error.message }));
   request.end(body);
 });
+
+/** Asks a machine's Workspaces listener to describe itself. */
+export const probeWorkspace: WorkspaceProbe = async (machine, secret) =>
+  readProbeAnswer(await callWorkspace(machine, 'runpane:workspaces:describe', [], secret));
 
 function probeHeaders(body: string, secret: string | undefined): http.OutgoingHttpHeaders {
   const headers: http.OutgoingHttpHeaders = {
@@ -345,23 +366,29 @@ function probeHeaders(body: string, secret: string | undefined): http.OutgoingHt
   return headers;
 }
 
-function readProbeResponse(statusCode: number, text: string): WorkspaceProbeResult {
+function readCallResponse(statusCode: number, text: string): WorkspaceCallResult {
   let parsed: ReturnType<typeof probeResponseSchema.decode> | undefined;
   try {
     parsed = decodeOptionalBoundary(JSON.parse(text), probeResponseSchema);
   } catch {
     parsed = undefined;
   }
-  const code = parsed?.error?.code;
-  if (statusCode === 200 && parsed?.ok) {
-    const description = decodeOptionalBoundary(parsed.result, descriptionSchema);
+  if (statusCode === 200 && parsed?.ok) return { kind: 'answered', statusCode, ok: true, result: parsed.result };
+  return { kind: 'answered', statusCode, ok: false, code: parsed?.error?.code, message: parsed?.error?.message };
+}
+
+function readProbeAnswer(answer: WorkspaceCallResult): WorkspaceProbeResult {
+  if (answer.kind === 'unreachable') return answer;
+  if (answer.ok) {
+    const description = decodeOptionalBoundary(answer.result, descriptionSchema);
     return description ? { kind: 'described', description } : { kind: 'outdated' };
   }
+  const { statusCode, code } = answer;
   // 429: too many wrong passwords from this login; it still needs the right one.
   if (statusCode === 401 || statusCode === 429) return { kind: 'password-required' };
   if (statusCode === 403 && code?.startsWith('ERR_WORKSPACE_IDENTITY')) return { kind: 'refused' };
   if (statusCode === 404 && code === 'ERR_UNKNOWN_CHANNEL') return { kind: 'outdated' };
-  return { kind: 'unreachable', detail: parsed?.error?.message ?? `HTTP ${statusCode}` };
+  return { kind: 'unreachable', detail: answer.message ?? `HTTP ${statusCode}` };
 }
 
 function trimDot(name: string): string {

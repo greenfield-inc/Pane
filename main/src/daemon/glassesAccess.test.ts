@@ -52,7 +52,7 @@ async function setup(options: { visibility?: WorkspaceAccessPolicy['visibility']
     calls.push({ channel, args });
     return { ran: channel };
   });
-  for (const channel of ['runpane:panels:screen', 'runpane:panels:submit', 'runpane:panels:input', 'runpane:panels:resume', 'sessions:mark-viewed', 'notify:remote-command', 'file:write', 'git:commit', 'runpane:machine:exec', 'remote:settings:update', 'terminal:input', 'panels:initialize', 'terminal:setVisibility']) {
+  for (const channel of ['runpane:panels:screen', 'runpane:panels:submit', 'runpane:panels:input', 'runpane:panels:resume', 'sessions:mark-viewed', 'notify:remote-command', 'file:write', 'git:commit', 'runpane:machine:exec', 'remote:settings:update', 'terminal:input', 'panels:initialize', 'terminal:setVisibility', GLASSES_COMMANDS.vouch]) {
     record(channel);
   }
   registry.register(GLASSES_COMMANDS.createPairingSecret, (request: PaneCommandValue) => {
@@ -519,6 +519,78 @@ describe('glasses on the workspace listener', () => {
     expect(errorCode(teammate)).toBe('ERR_GLASSES_OWNER_REQUIRED');
     const pairWithoutGlassesOrigin = await host.invoke(GLASSES_COMMANDS.pair, [{ secret: 'pgs_x' }], host.fromPhone);
     expect(errorCode(pairWithoutGlassesOrigin)).toBe('ERR_GLASSES_OWNER_REQUIRED');
+  });
+});
+
+describe('glasses vouching for themselves on your other computers', () => {
+  it('runs for the calling glasses only, whatever names, ids or computers the request carries', async () => {
+    const host = await setup();
+    const { token } = await host.pair();
+    const id = host.glasses.list()[0].id;
+    const forged = await host.invoke(GLASSES_COMMANDS.vouch, [{ deviceId: 'glasses-other', deviceName: 'Evil', phoneId: 'pane-native-phone-b', computers: ['https://attacker.tail1.ts.net:8443'] }],
+      host.fromGlasses(token));
+    expect(forged.status).toBe(200);
+    expect(host.calls).toEqual([{ channel: GLASSES_COMMANDS.vouch, args: [{ deviceId: id }] }]);
+  });
+
+  it('needs both factors, logging each refusal, and locks out after five', async () => {
+    const host = await setup({ visibility: 'tailnet' });
+    const { token } = await host.pair();
+    const vouch = (headers: Record<string, string>) => host.invoke(GLASSES_COMMANDS.vouch, [], headers);
+
+    const { 'Tailscale-User-Login': _login, ...noIdentity } = host.fromGlasses(token);
+    expect(errorCode(await vouch(noIdentity))).toBe('ERR_GLASSES_IDENTITY_REQUIRED');
+    expect(errorCode(await vouch(host.fromGlasses(token, { 'Tailscale-User-Login': TEAMMATE })))).toBe('ERR_GLASSES_IDENTITY_REQUIRED');
+    await host.glasses.revoke(host.glasses.list()[0].id);
+    expect(errorCode(await vouch(host.fromGlasses(token)))).toBe('ERR_GLASSES_TOKEN_INVALID');
+    expect(errorCode(await vouch(host.fromGlasses('pgt_guess')))).toBe('ERR_GLASSES_TOKEN_INVALID');
+    expect(host.log.filter((line) => line.startsWith('[Pane glasses] refused'))).toHaveLength(4);
+
+    // Two refused tokens from the owner's login so far; three more make five in 10 minutes.
+    for (let attempt = 0; attempt < 3; attempt += 1) await vouch(host.fromGlasses('pgt_guess'));
+    expect(host.log.filter((line) => line.startsWith('[Pane glasses] locked out owner@example.com@100.101.102.103'))).toHaveLength(1);
+    expect(errorCode(await vouch(host.fromGlasses(token)))).toBe('ERR_GLASSES_LOCKED_OUT');
+    expect(host.calls).toEqual([]);
+  });
+
+  it('runs at most once every 5 minutes per pair of glasses, without counting toward a lockout', async () => {
+    const host = await setup();
+    const { token } = await host.pair();
+    const vouch = () => host.invoke(GLASSES_COMMANDS.vouch, [], host.fromGlasses(token));
+
+    expect((await vouch()).status).toBe(200);
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const again = await vouch();
+      expect([again.status, errorCode(again)]).toEqual([429, 'ERR_GLASSES_VOUCH_TOO_SOON']);
+    }
+    expect(host.log.filter((line) => line.startsWith('[Pane glasses] refused vouch'))).toHaveLength(6);
+    expect((await host.invoke('runpane:panels:screen', [{}], host.fromGlasses(token))).status).toBe(200);
+    host.advance(5 * 60_000);
+    expect((await vouch()).status).toBe(200);
+    expect(host.calls.filter((call) => call.channel === GLASSES_COMMANDS.vouch)).toHaveLength(2);
+  });
+
+  it('is refused to everyone but glasses, the owner\'s phone included', async () => {
+    const host = await setup();
+    await host.pair();
+    const fromOwner = await host.invoke(GLASSES_COMMANDS.vouch, [{ deviceId: host.glasses.list()[0].id }], host.fromPhone);
+    expect(errorCode(fromOwner)).toBe('ERR_GLASSES_VOUCH_GLASSES_ONLY');
+    expect(host.calls).toEqual([]);
+  });
+
+  it('keeps a revoke until the phone pairs again, and ends that phone\'s pending secrets', async () => {
+    const host = await setup();
+    await host.pair();
+    const pending = host.glasses.createPairingSecret('Even G2 · iPhone', 'pane-native-phone-a');
+    await host.glasses.revoke(host.glasses.list()[0].id);
+
+    expect(host.glasses.list()).toEqual([]);
+    expect(host.glasses.revokedPhoneIds()).toEqual(['pane-native-phone-a']);
+    expect(await host.glasses.pair(pending.secret)).toBeNull();
+    expect(() => host.glasses.createPairingSecret('Even G2 · iPhone', 'pane-native-phone-a', { unlessRevoked: true })).toThrow(expect.objectContaining({ code: 'ERR_GLASSES_REVOKED_HERE' }));
+
+    await host.pair();
+    expect(host.glasses.revokedPhoneIds()).toEqual([]);
   });
 });
 

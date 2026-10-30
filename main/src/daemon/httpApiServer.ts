@@ -799,8 +799,19 @@ export class PaneRemoteHttpApiServer {
       return;
     }
 
-    // Glasses are paired, listed and revoked by their owner; the glasses themselves pair only
-    // through the glasses path, with a pairing secret.
+    // Glasses are paired, listed and revoked by their owner; the glasses themselves pair and vouch
+    // only through the glasses path, with a pairing secret or their own token.
+    if (invokeRequest.channel === GLASSES_COMMANDS.vouch) {
+      this.writeJson(response, 403, {
+        ok: false,
+        error: {
+          message: 'Only paired glasses ask this computer to add them to your other computers; it was not run.',
+          code: 'ERR_GLASSES_VOUCH_GLASSES_ONLY',
+          next: 'Pair glasses from the Pane phone app: Settings › Glasses › Pair glasses.',
+        },
+      } satisfies RemoteInvokeErrorPayload);
+      return;
+    }
     if (invokeRequest.channel.startsWith('runpane:glasses:')) {
       if (invokeRequest.channel === GLASSES_COMMANDS.pair || !this.workspaceOwnerLogin(request)) {
         this.writeJson(response, 403, {
@@ -1187,6 +1198,18 @@ export class PaneRemoteHttpApiServer {
         return;
       }
       args = [key];
+    }
+    if (channel === GLASSES_COMMANDS.vouch) {
+      const waitMs = glasses.claimVouch(client.id);
+      if (waitMs > 0) {
+        const seconds = Math.ceil(waitMs / 1000);
+        glasses.recordFailure(admission.source, 'vouch', `asked again within 5 minutes; ${seconds} s left`);
+        refuse(429, 'ERR_GLASSES_VOUCH_TOO_SOON', 'These glasses asked this computer to add them to your other computers less than 5 minutes ago, so it did not ask again.',
+          `Ask again in ${seconds} s.`);
+        return;
+      }
+      // Which glasses: the token's own record, never names, ids or computers from the request.
+      args = [{ deviceId: client.id }];
     }
     await this.respondToInvoke(request, response, invokeRequest.requestId, client.id, () => this.commandRegistry.invokeRemote(channel, args));
   }

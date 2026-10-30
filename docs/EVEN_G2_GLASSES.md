@@ -99,7 +99,9 @@ notification mirroring, as the title only ("planner has a question").
   and finishes the rest when they next answer.
 - On a computer: **Settings › Remote Access › Devices**, then **Revoke** next to the glasses.
 
-Revoking closes the glasses' connection to that computer within 5 seconds.
+Revoking closes the glasses' connection to that computer within 5 seconds. A revoke sticks: your
+other computers can't add the glasses back to this one. Pairing the glasses again from the phone
+lifts the revoke on each computer it pairs.
 
 ## Security
 
@@ -126,9 +128,20 @@ Tab and the digits 1 to 9, one per request, and nothing else: text, two keys at 
 Ctrl-D, ← → and 0 are refused before they reach the terminal (`ERR_GLASSES_KEY_REFUSED`), logged
 without the input, and not counted toward the lockout. These keys are enough to answer an agent's permission menu, so the
 glasses can approve what an agent asks to do. Opening a stopped Pane restarts its saved agent or command,
-in its own folder. The token cannot pair other devices, change settings, write files, commit, run
-machine commands, or choose what a terminal runs, and its event stream never carries terminal
-output.
+in its own folder.
+
+The token can also ask the computer to add these same glasses to your other computers. The
+computer finds them with its own Tailscale discovery (your login only, never other people's or
+tagged machines), skips any that already have the glasses, revoked them or have Funnel on, and
+asks each of the others, as you, for a pairing secret for the glasses' own name and phone id (the id of
+the phone that paired them). Each computer makes its own secret and issues its own token, so no
+computer hands its tokens to another. Nothing in the request can pick the computers, the name or
+the phone id, and the glasses may ask once
+every 5 minutes. A password-protected computer is asked only when this computer has its password
+saved; one whose Pane is too old to remember revokes is skipped.
+
+The token cannot pair any other device, change settings, write files, commit, run machine commands,
+or choose what a terminal runs, and its event stream never carries terminal output.
 
 Typing into a terminal can run commands, so treat the glasses like your phone: whoever holds a
 working token on your tailnet and login can type into your shells. The Even app serves the glasses
