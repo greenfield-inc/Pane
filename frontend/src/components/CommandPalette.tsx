@@ -24,8 +24,13 @@ import { formatKeyDisplay } from '../utils/hotkeyUtils';
 import { formatTimeAgo } from '../utils/timestampUtils';
 import { API } from '../utils/api';
 import { cn } from '../utils/cn';
+import { MachineBadge } from './machines/MachineBadge';
+import { useAllMachinesTree } from '../hooks/useAllMachinesTree';
+import { useAllMachinesStore } from '../stores/allMachinesStore';
+import { openOnMachine, runOnMachine } from '../utils/machineRowActions';
+import type { MachineRef } from '../utils/allMachinesTree';
 import {
-  buildSearchItems, matchedRanges, searchItems, SEARCH_FILTERS,
+  buildMachineSearchItems, buildSearchItems, matchedRanges, searchItems, SEARCH_FILTERS,
   type SearchFilter, type SearchItem, type SearchSection,
 } from '../utils/spotlightSearch';
 import type { Project } from '../types/project';
@@ -93,7 +98,41 @@ async function reportFailure(title: string, request: Promise<{ success: boolean;
   }
 }
 
+/** A row from All machines: it opens on its machine, and pin and archive run there in place. */
+function machineActionsFor(item: SearchItem, machine: MachineRef): LauncherAction[] {
+  const open = (target: Parameters<typeof openOnMachine>[1]) => () => afterLeavingSettings(() => void openOnMachine(machine.id, target));
+  switch (item.kind) {
+    case 'pane': {
+      const target = { kind: 'pane' as const, id: item.pane.id };
+      return [
+        { id: 'open', label: 'Open Pane', icon: SquareArrowOutUpRight, run: open({ ...target, name: item.pane.name }) },
+        {
+          id: 'pin', label: item.pane.isFavorite ? 'Unpin' : 'Pin', icon: item.pane.isFavorite ? PinOff : Pin,
+          run: () => void runOnMachine(machine.id, { type: 'pin', target, pinned: !item.pane.isFavorite }, 'Could not pin or unpin the Pane'),
+        },
+        { id: 'archive', label: 'Archive', icon: Archive, run: () => void runOnMachine(machine.id, { type: 'archive', target }, 'Could not archive the Pane') },
+      ];
+    }
+    case 'session': {
+      const target = { kind: 'session' as const, id: item.session.id };
+      return [
+        { id: 'open', label: 'Open Session', icon: SquareArrowOutUpRight, run: open({ ...target, name: item.session.name }) },
+        {
+          id: 'pin', label: item.session.isPinned ? 'Unpin' : 'Pin', icon: item.session.isPinned ? PinOff : Pin,
+          run: () => void runOnMachine(machine.id, { type: 'pin', target, pinned: !item.session.isPinned }, 'Could not pin or unpin the Session'),
+        },
+        { id: 'archive', label: 'Archive', icon: Archive, run: () => void runOnMachine(machine.id, { type: 'archive', target }, 'Could not archive the Session') },
+      ];
+    }
+    case 'project':
+      return [{ id: 'open', label: 'Open Project', icon: SquareArrowOutUpRight, run: open({ kind: 'project', id: item.project.id, name: item.project.name }) }];
+    case 'command':
+      return [];
+  }
+}
+
 function actionsFor(item: SearchItem, context: { onNewPane: (projectId: number) => void; isRemote: boolean }): LauncherAction[] {
+  if (item.machine) return machineActionsFor(item, item.machine);
   switch (item.kind) {
     case 'pane': {
       const { pane, prUrl } = item;
@@ -183,8 +222,12 @@ export function CommandPalette({ isOpen, onClose, projects, onNewPane }: Command
     [agentStatus, agentStatusSession, unviewed],
   );
 
+  // In All machines the launcher searches every machine's rows, each labelled with its machine.
+  const allMachines = useAllMachinesStore(s => s.enabled);
+  const { views: machineViews } = useAllMachinesTree();
+
   // Rebuilt when the launcher opens or its sources change, never per keystroke.
-  const items = useMemo(() => isOpen
+  const localItems = useMemo(() => isOpen
     ? buildSearchItems({
       panes,
       sessions,
@@ -196,6 +239,10 @@ export function CommandPalette({ isOpen, onClose, projects, onNewPane }: Command
     : [],
   // eslint-disable-next-line react-hooks/exhaustive-deps -- getAll reads the hotkeys registry
   [isOpen, panes, sessions, projects, hotkeys, activePaneId, selectedSessionId]);
+  const items = useMemo(() => isOpen && allMachines
+    ? [...buildMachineSearchItems(machineViews), ...localItems.filter(item => item.kind === 'command')]
+    : localItems,
+  [isOpen, allMachines, machineViews, localItems]);
 
   // Actions read their item from the current sources: a rename or pin shows at once, and a removed item leaves Actions.
   const itemByKey = useMemo(() => new Map(items.map(item => [item.key, item])), [items]);
@@ -354,7 +401,7 @@ export function CommandPalette({ isOpen, onClose, projects, onNewPane }: Command
             <div
               key={row.key}
               {...optionProps}
-              aria-label={[row.item.title, row.item.detail, TYPE_LABEL[row.item.kind]].filter(Boolean).join(', ')}
+              aria-label={[row.item.title, row.item.detail, row.item.machine && `on ${row.item.machine.name}`, TYPE_LABEL[row.item.kind]].filter(Boolean).join(', ')}
               aria-disabled={isDisabled(row.item)}
               className={rowClass(isSelected, isDisabled(row.item))}
             >
@@ -598,6 +645,7 @@ function ResultRow({ item, query, selected, attention }: { item: SearchItem; que
         {pinned && <Pin className="h-3 w-3 flex-shrink-0 self-center rotate-45 text-text-tertiary" aria-label="Pinned" />}
         {detail && <span className="min-w-0 truncate text-[13px] text-text-tertiary">{detail}</span>}
       </span>
+      {item.machine && <MachineBadge machine={item.machine} />}
       {/* One fixed-height slot, so the hints and the metadata swap without moving the row. */}
       <span className="flex h-5 flex-shrink-0 items-center gap-3 text-[13px] text-text-tertiary">
         {selected ? (

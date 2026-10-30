@@ -4,6 +4,8 @@
 
 The same listener powers codeless desktop remote mode: the sidebar's machine menu and Settings → Remote Access → **Switch to** list the machines on your tailnet, including ones you have never connected to (a teammate's machine that accepts only its owner shows as "Owner only" and can't be picked), and picking one switches the desktop app to that machine with no `pane-remote://` code. `runpane workspace` reaches the same machines. Who may connect is set under **Access** → **Who can connect** (see [Who is trusted](#who-is-trusted)).
 
+**All machines**, the first item in the machine menu, fills the sidebar with the Sessions and Panes of this computer and every saved machine, live, each row marked with its machine. A repository open on several machines shows as one project. Opening a row on another machine switches the app to that machine and keeps the sidebar in All machines; pin, archive, rename and permission answers from a row's menu run on its machine without switching. Search covers every machine's rows. A machine that stops answering keeps its rows, dimmed, with when it went offline and **Retry**. Picking one machine returns to its own sidebar, and the choice is kept across relaunch.
+
 ```
 runpane workspace list
 runpane workspace <machine> read  <path>

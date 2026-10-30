@@ -29,8 +29,10 @@ import { CompactSessionMenu, type CompactSessionMenuState } from './CompactSessi
 import { getRemoteFooterStatus } from '../utils/remoteRuntimePresentation';
 import { getHostingSummary } from '../utils/machineList';
 import { useMachines } from '../hooks/useMachines';
-import { MachineMark } from './machines/MachineMark';
+import { MachineMark, MachineMarkStack } from './machines/MachineMark';
 import { RemoteHostSwitcher } from './RemoteHostSwitcher';
+import { AllMachinesSidebar } from './machines/AllMachinesSidebar';
+import { startAllMachinesFeed, useAllMachinesStore } from '../stores/allMachinesStore';
 import { isMissionControlEnabled, useConfigStore } from '../stores/configStore';
 import { usePanelStore } from '../stores/panelStore';
 import { rollupAgentDisplayStatus, rollupSessionAgentState, toAgentDisplayStatus } from '../utils/agentStatus';
@@ -270,7 +272,22 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
   const activeMachine = machines.find((machine) => machine.active) ?? machines[0];
   // Hidden only while no other machine is saved or on Tailscale.
   const switcherVisible = machines.length > 1 || remoteConnectionState.mode === 'remote';
-  const switcherLabel = `Agents run on ${activeMachine.name}. Switch machine`;
+  const allMachines = useAllMachinesStore((state) => state.enabled);
+  const setAllMachines = useAllMachinesStore((state) => state.setEnabled);
+  // Saved machines and this computer: the ones All machines lists.
+  const savedMachines = useMemo(() => machines.filter((machine) => machine.kind === 'local' || machine.profile), [machines]);
+  useEffect(() => { void useAllMachinesStore.getState().hydrate(); }, []);
+  useEffect(() => {
+    useAllMachinesStore.setState({
+      entries: machines.map(({ id, name, os, slot, active }) => ({ id, name, os, slot, active })),
+      switchMachine: async (machineId) => {
+        const machine = machines.find((entry) => entry.id === machineId);
+        return machine ? selectMachine(machine) : { ok: false, error: 'That machine is no longer saved.' };
+      },
+    });
+  }, [machines, selectMachine]);
+  useEffect(() => (allMachines ? startAllMachinesFeed() : undefined), [allMachines]);
+  const switcherLabel = allMachines ? 'Showing all machines. Switch machine' : `Agents run on ${activeMachine.name}. Switch machine`;
   const renderRemoteHostSwitcher = (trigger: React.ReactElement, position: 'bottom-left' | 'top-right') => (
     <RemoteHostSwitcher
       trigger={trigger}
@@ -278,7 +295,12 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
       machines={machines}
       switching={switchingId !== null}
       hostingSummary={getHostingSummary(remoteHostState)}
-      onSelect={selectMachine}
+      onSelect={(machine) => {
+        // Picking one machine leaves All machines for today's sidebar on it.
+        setAllMachines(false);
+        return selectMachine(machine);
+      }}
+      allMachines={{ selected: allMachines, machines: savedMachines, onSelect: () => setAllMachines(true) }}
       onNeedsPassword={(machine) => onMachinePasswordRequest(machine.name)}
       onOpenChange={(open) => { if (open) void refreshMachines(); }}
       onAddMachine={onAddMachineClick}
@@ -517,8 +539,10 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
           style={{ maxWidth: hostPillMaxWidth }}
           className="ml-1 flex h-6 min-w-0 shrink items-center gap-1.5 rounded-full border border-border-primary bg-surface-secondary pl-1 pr-1.5 text-[12px] font-medium text-text-primary hover:bg-surface-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle"
         >
-          <MachineMark os={activeMachine.os} slot={activeMachine.slot} presence={activeMachine.presence} size="sm" className="rounded-full" />
-          {showHostPillLabel && <span className="min-w-0 truncate">{activeMachine.name}</span>}
+          {allMachines
+            ? <MachineMarkStack machines={savedMachines} />
+            : <MachineMark os={activeMachine.os} slot={activeMachine.slot} presence={activeMachine.presence} size="sm" className="rounded-full" />}
+          {showHostPillLabel && <span className="min-w-0 truncate">{allMachines ? 'All machines' : activeMachine.name}</span>}
           <ChevronDown className="h-3 w-3 shrink-0 text-text-tertiary" />
         </button>,
         'bottom-left',
@@ -891,7 +915,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
           className="mx-2 mt-1 flex h-[30px] flex-shrink-0 items-center gap-2 rounded-input border border-border-primary bg-surface-primary px-2 text-[13px] text-text-muted hover:border-border-hover hover:text-text-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-interactive"
         >
           <Search className="h-3.5 w-3.5 flex-shrink-0" />
-          <span>Search</span>
+          <span>{allMachines ? 'Search all machines' : 'Search'}</span>
         </button>
 
         <button
@@ -904,7 +928,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
         </button>
 
         <div className="pane-sidebar-list flex-1 overflow-y-auto overflow-x-hidden min-h-0">
-          <ProjectSessionList
+          {allMachines ? <AllMachinesSidebar onNew={() => setShowNewDialog(true)} /> : <ProjectSessionList
             projects={projects}
             onProjectsChange={setProjects}
             onProjectsRefresh={loadProjects}
@@ -920,7 +944,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
             showRemoteDesktopLink={showRemoteDesktopLink}
             onRemoteDesktopClick={handleOpenRemoteDesktop}
             remoteDesktopTooltip={REMOTE_DESKTOP_TOOLTIP}
-          />
+          />}
         </div>
 
         {/* Archived sessions - pinned above bottom */}

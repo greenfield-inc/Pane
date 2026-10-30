@@ -19,6 +19,7 @@ import { DEFAULT_APPEARANCE, normalizeAppearance, type AppearanceConfig } from '
 import type { DiffManifest, DiffScope, FileDiffResult } from '../shared/types/gitDiff';
 import type { SetupExportSummary, SetupFile, SetupImportPreview, SetupSectionId } from '../shared/types/setupTransfer';
 import type { NotifyCommand, NotifySnapshot, NotifyWindowSize } from '../shared/types/notify';
+import type { MachineCommand, MachineConnectionsEvent, MachineState } from '../shared/types/machineConnections';
 
 type MockEventValue = JsonValue | object | undefined;
 type MockEventCallback = (...args: MockEventValue[]) => void;
@@ -121,6 +122,8 @@ export type ElectronApiMockOptions = {
   setupImportError?: string;
   /** Serves window.electronAPI.notify with this queue snapshot; absent, the API is too. */
   notifySnapshot?: NotifySnapshot;
+  /** window.electronAPI.machines: every machine and each machine's read answers by channel. Absent: this computer alone, with empty lists. */
+  machineConnections?: { machines: MachineState[]; reads: Record<string, Record<string, JsonValue>> };
 };
 
 export async function installElectronApiMock(page: Page, options: ElectronApiMockOptions = {}) {
@@ -158,6 +161,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     const preferences: MockPreferences = {
       analytics_consent_shown: mockOptions.analyticsConsentShown === false ? 'false' : 'true',
       sidebar_attention_inbox: 'false',
+      sidebar_all_machines: 'false',
       ...clone(mockOptions.initialPreferences ?? {}),
     };
     const defaultAnalyticsIdentity = {
@@ -738,8 +742,33 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
       resizeWindow: (size: NotifyWindowSize) => { notifyWindowSizes.push(clone(size)); },
       focusWindow: () => Promise.resolve(),
     } : undefined;
+    const machineConnections = mockOptions.machineConnections ?? {
+      machines: [{ id: 'local', label: 'This computer', kind: 'local' as const, status: 'online' as const, offlineSince: null }],
+      reads: {},
+    };
+    const machineRuns: Array<{ machineId: string; command: MachineCommand }> = [];
+    const machineReads: Array<{ machineId: string; channel: string }> = [];
+    const machineListeners = new Set<(event: MachineConnectionsEvent) => void>();
+    const machinesApi = {
+      list: () => Promise.resolve(clone(machineConnections.machines)),
+      read: (machineId: string, channel: string) => {
+        machineReads.push({ machineId, channel });
+        const answers = machineConnections.reads[machineId] ?? {};
+        return Promise.resolve({ machineId, data: clone(channel in answers ? answers[channel] : { success: true, data: [] }) });
+      },
+      run: (machineId: string, command: MachineCommand) => {
+        machineRuns.push({ machineId, command: clone(command) });
+        return Promise.resolve({ machineId, data: { success: true } });
+      },
+      retry: () => Promise.resolve(),
+      onEvent: (callback: (event: MachineConnectionsEvent) => void) => {
+        machineListeners.add(callback);
+        return () => { machineListeners.delete(callback); };
+      },
+    };
     const electronAPI = {
       notify: notifyApi,
+      machines: machinesApi,
       preferences: {
         get: async (key: string) => preferences[key] ?? 'true',
         getAll: async () => clone(preferences),
@@ -1866,6 +1895,20 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         emitNotifyNavigate(target: 'inbox' | 'settings') {
           emit('notify:navigate', target);
+        },
+        getMachineRuns() {
+          return clone(machineRuns);
+        },
+        getMachineReads() {
+          return clone(machineReads);
+        },
+        /** Stands in for main: one machine's event, a resync, or a machine list change. */
+        emitMachineEvent(event: MachineConnectionsEvent, reads?: Record<string, Record<string, JsonValue>>) {
+          if (event.type === 'machines') machineConnections.machines = clone(event.machines);
+          for (const [machineId, answers] of Object.entries(reads ?? {})) {
+            machineConnections.reads[machineId] = { ...machineConnections.reads[machineId], ...clone(answers) };
+          }
+          for (const listener of machineListeners) listener(clone(event));
         },
       },
     });

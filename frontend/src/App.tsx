@@ -55,6 +55,8 @@ import { Settings } from './components/Settings';
 import { CreateSessionDialog } from './components/CreateSessionDialog';
 import { AddProjectDialog } from './components/AddProjectDialog';
 import { WindowTitleBar } from './components/WindowTitleBar';
+import { MachineOfflineView } from './components/machines/AllMachinesSidebar';
+import { useAllMachinesStore } from './stores/allMachinesStore';
 import { useNavigationStore } from './stores/navigationStore';
 import {
   aliasInstallIdentity,
@@ -951,6 +953,9 @@ function App() {
     }
   }, [loadNextPendingPermission]);
 
+  // A row opened on a machine that stopped answering shows why in place of the Pane.
+  const offlineMachineShown = useAllMachinesStore(state => state.offlineNotice !== null);
+
   return (
     <ContextMenuProvider>
       <div className="pane-app-shell relative h-screen flex flex-col overflow-hidden bg-bg-primary">
@@ -1008,7 +1013,9 @@ function App() {
         <RemoteWorkspace dimmed={connectionPresence !== 'connected' && !shownConnectionCheck}>
           {shownConnectionCheck
             ? <ConnectionChecklist check={shownConnectionCheck} onOpenSettings={openSettings} onUpdatePane={() => void updatePane()} />
-            : <SessionView />}
+            : offlineMachineShown
+              ? <MachineOfflineView onMachineDetails={() => openSettings({ category: 'remote-access', setting: 'remote-machines' })} />
+              : <SessionView />}
           <PaneChatIntroOffer suppressed={isSettingsOpen || isOnboardingOpen || isWelcomeOpen} />
         </RemoteWorkspace>
         <NotifyInPaneStrip left={sidebarCollapsed ? 48 : sidebarWidth} />

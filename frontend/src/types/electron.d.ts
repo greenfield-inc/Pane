@@ -45,7 +45,7 @@ import type {
 } from '../../../shared/types/panels';
 import type { JsonValue } from '../../../shared/validation/boundaryDecoder';
 import type { PanelAgentStatusEvent } from '../../../shared/types/agentStatus';
-import type { NotifyCommand, NotifySnapshot, NotifyWindowSize } from '../../../shared/types/notify';
+import type { NotifyCommand, NotifySharedState, NotifySnapshot, NotifyWindowSize } from '../../../shared/types/notify';
 import type { DiffManifest, DiffScope, FileDiffRequest, FileDiffResult } from '../../../shared/types/gitDiff';
 import type { AgentUsageSnapshot } from '../../../shared/types/agentUsage';
 import type { PaneChatAgent, PaneChatState } from '../../../shared/types/paneChat';
@@ -94,6 +94,15 @@ interface RendererDiagnosticPayload {
   url?: string;
   line?: number;
   column?: number;
+}
+
+/** What the `machines:read` channels All machines uses answer, as each machine's own handler returns it. */
+interface MachineReadAnswers {
+  'sessions:get-all-with-projects': IPCResponse<Array<Project & { sessions: Session[] }>>;
+  'orchestration-sessions:list': IPCResponse<OrchestrationSessionListResult>;
+  'panels:agent-statuses': IPCResponse<PanelAgentStatusEvent[]>;
+  'permission:getPending': IPCResponse<PanePermissionRequest[]>;
+  'notify:remote-snapshot': NotifySharedState | null;
 }
 
 // oxlint-disable-next-line typescript/no-explicit-any -- Generic type parameter default for flexible API responses
@@ -729,8 +738,11 @@ interface ElectronAPI {
   // Every machine the desktop knows, addressed by id: LOCAL_MACHINE_ID for this computer, else a saved profile id
   machines: {
     list: () => Promise<MachineState[]>;
-    /** One of the machine's list reads, tagged with the machine. */
-    read: (machineId: string, channel: MachineReadChannel, args?: unknown[]) => Promise<MachineResult>;
+    /** One of the machine's list reads, tagged with the machine; `data` is what that channel answers. */
+    read: <Channel extends MachineReadChannel>(machineId: string, channel: Channel, args?: unknown[]) => Promise<{
+      machineId: string;
+      data: Channel extends keyof MachineReadAnswers ? MachineReadAnswers[Channel] : unknown;
+    }>;
     /** One allowed command on the machine; anything else is refused. */
     run: (machineId: string, command: MachineCommand) => Promise<MachineResult>;
     /** Reconnects an offline saved machine now. */

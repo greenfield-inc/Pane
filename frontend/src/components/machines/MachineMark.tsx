@@ -60,3 +60,20 @@ export function MachineMark({ os, slot, presence = 'solid', size, className }: M
     </span>
   );
 }
+
+/** The first three machines' marks, overlapping: All machines in the machine pill and menu. */
+export function MachineMarkStack({ machines }: { machines: ReadonlyArray<{ id: string; os: MachineOs | null; slot: number }> }) {
+  return (
+    <span className="flex flex-none items-center" aria-hidden="true">
+      {machines.slice(0, 3).map((machine, index) => (
+        <MachineMark
+          key={machine.id}
+          os={machine.os}
+          slot={machine.slot}
+          size="sm"
+          className={cn('rounded-full ring-2 ring-surface-secondary', index > 0 && '-ml-1.5')}
+        />
+      ))}
+    </span>
+  );
+}

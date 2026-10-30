@@ -126,27 +126,40 @@ export function CompactSessionMenu({ menu, onClose, onTogglePinned, onArchive }:
 
 
 function RenameWorktreeDialog({ session, onClose }: { session: Session; onClose: () => void }) {
-  const [name, setName] = useState(session.name);
+  const save = async (name: string) => {
+    const result = await API.sessions.rename(session.id, name);
+    if (!result.success) throw new Error(result.error || 'Could not rename Pane');
+    const current = useSessionStore.getState().sessions.find(item => item.id === session.id) ?? session;
+    useSessionStore.getState().updateSession({ ...current, name });
+  };
+  return <RenameDialog noun="Pane" initialName={session.name} save={save} onClose={onClose} />;
+}
+
+/** Asks for a new name and saves it with `save`, which throws to show why it failed. */
+export function RenameDialog({ noun, initialName, save, onClose }: {
+  noun: 'Pane' | 'Session';
+  initialName: string;
+  save: (name: string) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [name, setName] = useState(initialName);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  async function save() {
+  async function submit() {
     if (busy || !name.trim()) return;
     setBusy(true); setError(null);
     try {
-      const result = await API.sessions.rename(session.id, name.trim());
-      if (!result.success) throw new Error(result.error || 'Could not rename Pane');
-      const current = useSessionStore.getState().sessions.find(item => item.id === session.id) ?? session;
-      useSessionStore.getState().updateSession({ ...current, name: name.trim() });
+      await save(name.trim());
       onClose();
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : 'Could not rename Pane');
+      setError(failure instanceof Error ? failure.message : `Could not rename ${noun}`);
     } finally { setBusy(false); }
   }
-  return <Modal isOpen onClose={() => { if (!busy) onClose(); }} ariaLabel="Rename Pane">
-    <form onSubmit={event => { event.preventDefault(); void save(); }}>
-      <ModalHeader title="Rename Pane" />
+  return <Modal isOpen onClose={() => { if (!busy) onClose(); }} ariaLabel={`Rename ${noun}`}>
+    <form onSubmit={event => { event.preventDefault(); void submit(); }}>
+      <ModalHeader title={`Rename ${noun}`} />
       <ModalBody>
-        <Input label="Pane name" autoFocus value={name} disabled={busy} onChange={event => setName(event.target.value)} fullWidth />
+        <Input label={`${noun} name`} autoFocus value={name} disabled={busy} onChange={event => setName(event.target.value)} fullWidth />
         {error && <p role="alert" className="mt-2 text-sm text-status-error">{error}</p>}
       </ModalBody>
       <ModalFooter>
