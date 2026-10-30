@@ -96,6 +96,26 @@ describe('MachineConnections', () => {
     expect(result).toEqual({ machineId: 'build-box', data: { success: true } });
   });
 
+  it('sets a Pane\'s pin to the requested state in one host call', async () => {
+    const { machines, client, connect } = setup(['build-box']);
+    connect('build-box');
+
+    await machines.run('build-box', { type: 'pin', target: { kind: 'pane', id: 'pane-1' }, pinned: true });
+
+    expect(client('build-box').invoke.mock.calls).toEqual([['runpane:panes:pin', [{ paneId: 'pane-1', pinned: true }]]]);
+  });
+
+  it('drops the pending retry once the machine is back', async () => {
+    const { client, connect } = setup(['build-box']);
+    client('build-box').options.onConnectionStateChange?.('error');
+    connect('build-box');
+    vi.mocked(client('build-box').connect).mockClear();
+
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(client('build-box').connect).not.toHaveBeenCalled();
+  });
+
   it('refuses a command outside its list without sending anything', async () => {
     const { machines, client, connect } = setup(['build-box']);
     connect('build-box');

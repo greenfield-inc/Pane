@@ -41,8 +41,6 @@ interface RemoteMachine {
 interface Invocation {
   channel: string;
   args: PaneCommandValue[];
-  /** Set for a Pane's pin: the state it should end in. */
-  pinPane?: boolean;
 }
 
 const readChannels = new Set<string>(MACHINE_READ_CHANNELS);
@@ -61,7 +59,6 @@ const commandSchemas = {
   'create-pane': boundary.object({ request: boundary.jsonObject }),
   'create-session': boundary.object({ input: boundary.jsonObject }),
 };
-const favoriteSchema = boundary.object({ data: boundary.object({ isFavorite: boundary.optional(boundary.boolean) }) });
 
 /**
  * The desktop's one connection to each saved machine, shared by key sharing and All machines.
@@ -123,21 +120,14 @@ export class MachineConnections {
 
   /** Runs one allowed command on the named machine. Anything outside the list is refused before it is sent. */
   async run(machineId: string, command: PaneCommandValue): Promise<MachineResult> {
-    const invocation = toInvocation(command);
-    if (invocation.pinPane !== undefined) {
-      // A Pane's pin is a toggle on the host, so it is flipped only when it differs.
-      const current = decodeOptionalBoundary(await this.invoke(machineId, { channel: 'sessions:get', args: invocation.args }, { write: true }), favoriteSchema);
-      if ((current?.data.isFavorite ?? false) === invocation.pinPane) {
-        return { machineId, data: { success: true, data: { isFavorite: invocation.pinPane } } };
-      }
-    }
-    return { machineId, data: await this.invoke(machineId, invocation, { write: true }) };
+    return { machineId, data: await this.invoke(machineId, toInvocation(command), { write: true }) };
   }
 
   /** Reconnects a saved machine now instead of waiting for its next retry. */
   async retry(machineId: string): Promise<void> {
     const machine = this.machines.get(machineId);
     if (!machine) throw unknownMachine(machineId);
+    clearRetry(machine);
     await machine.client.retryNow();
   }
 
@@ -193,6 +183,7 @@ export class MachineConnections {
         onConnectionStateChange: (status) => {
           if (!isCurrent()) return;
           this.updateStatus(machine, status);
+          if (status === 'connected') clearRetry(machine);
           if (status === 'error' && !machine.retryTimer) {
             machine.retryTimer = setTimeout(() => {
               machine.retryTimer = null;
@@ -208,8 +199,7 @@ export class MachineConnections {
   }
 
   private async close(machine: RemoteMachine): Promise<void> {
-    if (machine.retryTimer) clearTimeout(machine.retryTimer);
-    machine.retryTimer = null;
+    clearRetry(machine);
     await machine.client.disconnect();
   }
 
@@ -261,8 +251,9 @@ function toInvocation(command: PaneCommandValue): Invocation {
       }
       case 'pin': {
         const { target, pinned } = decodeBoundary(command, commandSchemas.pin);
+        // `sessions:toggle-favorite` flips; this sets the state, so overlapping pins agree.
         return target.kind === 'pane'
-          ? { channel: 'sessions:toggle-favorite', args: [target.id], pinPane: pinned }
+          ? { channel: 'runpane:panes:pin', args: [{ paneId: target.id, pinned }] }
           : { channel: 'orchestration-sessions:update', args: [{ sessionId: target.id }, { isPinned: pinned }] };
       }
       case 'archive': {
@@ -287,6 +278,11 @@ function toInvocation(command: PaneCommandValue): Invocation {
       `Pane can't send "${type}" to another machine: ${reasonOf(error)}. Nothing was sent.`,
       'Fix the field named above and try again.');
   }
+}
+
+function clearRetry(machine: RemoteMachine): void {
+  if (machine.retryTimer) clearTimeout(machine.retryTimer);
+  machine.retryTimer = null;
 }
 
 function unknownMachine(machineId: string): PaneError {
