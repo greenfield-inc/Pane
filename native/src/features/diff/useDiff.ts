@@ -4,7 +4,7 @@ import type { DiffScope, FileDiffRequest } from '@shared/types/gitDiff';
 
 import { useDaemon, useDaemonEvent, useDaemonQueryKey } from '@/daemon';
 
-import { decodeFileDiff, decodeManifest } from './diff';
+import { decodeFileDiff, decodeManifest, refreshChanges } from './diff';
 
 /** The branch's changes, as the desktop's Changes panel shows them by default. */
 export const BRANCH_SCOPE: DiffScope = { kind: 'session' };
@@ -17,18 +17,29 @@ const MANIFEST_FRESH_MS = 30_000;
  */
 export function useChanges(sessionId: string) {
   const { client } = useDaemon();
-  const queryClient = useQueryClient();
   const queryKey = useDaemonQueryKey('sessions:get-diff-manifest', [sessionId, BRANCH_SCOPE]);
-  // The computer re-reads git status after its files change; the list follows.
-  useDaemonEvent('git-status-updated', event => {
-    const payload = event.args[0] as { sessionId?: string } | undefined;
-    if (payload?.sessionId === sessionId) void queryClient.invalidateQueries({ queryKey });
-  });
+  useFollowChanges(sessionId);
   return useQuery({
     queryKey,
     staleTime: MANIFEST_FRESH_MS,
     retry: false,
     queryFn: async () => decodeManifest(await client.invoke('sessions:get-diff-manifest', [sessionId, BRANCH_SCOPE])),
+  });
+}
+
+/** Rereads the Pane's change list and its open patches: pull to refresh. */
+export function useRefreshChanges(sessionId: string): () => void {
+  const { profile } = useDaemon();
+  const queryClient = useQueryClient();
+  return () => void refreshChanges(queryClient, profile.id, sessionId);
+}
+
+/** The computer re-reads git status after its files change; the change list and open patches follow. */
+export function useFollowChanges(sessionId: string): void {
+  const refresh = useRefreshChanges(sessionId);
+  useDaemonEvent('git-status-updated', event => {
+    const payload = event.args[0] as { sessionId?: string } | undefined;
+    if (payload?.sessionId === sessionId) refresh();
   });
 }
 

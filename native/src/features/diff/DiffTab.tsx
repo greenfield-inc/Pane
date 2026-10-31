@@ -10,8 +10,8 @@ import { monoFontFamily, useTheme, withAlpha } from '@/theme';
 import { EmptyState, ErrorState, Icon, Text } from '@/ui';
 
 import { TabFooter } from '../tabs/TabFooter';
-import { changeBadge, DiffError, parsePatch, versusLabel, type PatchRow } from './diff';
-import { BRANCH_SCOPE, useChanges, useFileDiff } from './useDiff';
+import { changeBadge, DiffError, inlinePatch, parsePatch, versusLabel, type PatchRow } from './diff';
+import { BRANCH_SCOPE, useChanges, useFileDiff, useFollowChanges, useRefreshChanges } from './useDiff';
 
 /** The branch's changes, read-only: each file with its counts, tapped open to its patch. */
 export function DiffTab({ panel }: { panel: ToolPanel }) {
@@ -19,6 +19,7 @@ export function DiffTab({ panel }: { panel: ToolPanel }) {
   const { colors } = theme;
   const { profile } = useDaemon();
   const changes = useChanges(panel.sessionId);
+  const refresh = useRefreshChanges(panel.sessionId);
   const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
   const toggle = (path: string) => setOpen(current => {
     const next = new Set(current);
@@ -26,9 +27,30 @@ export function DiffTab({ panel }: { panel: ToolPanel }) {
     else next.add(path);
     return next;
   });
+  // A patch too long to draw inside the list, open whole in its own scrolling view.
+  const [fullPath, setFullPath] = useState<string | null>(null);
+  const full = fullPath === null ? undefined : changes.data?.files.find(file => file.path === fullPath);
 
   let body;
-  if (changes.isPending) body = <View style={styles.center}><ActivityIndicator color={colors.textMuted} /></View>;
+  if (full) {
+    body = (
+      <>
+        <Pressable
+          testID="diff-full-back"
+          accessibilityRole="button"
+          accessibilityLabel="Back to all changes"
+          onPress={() => setFullPath(null)}
+          style={({ pressed }) => [styles.fileRow, styles.fullHeader, { borderBottomColor: colors.border }, pressed && { backgroundColor: colors.surfacePressed }]}
+        >
+          <Icon ios="chevron.left" android="arrow_back" size={14} color={colors.accentText} />
+          <ChangeBadge file={full} />
+          <FilePath path={full.path} />
+          <Counts additions={full.additions} deletions={full.deletions} />
+        </Pressable>
+        <FilePatch sessionId={panel.sessionId} scope={BRANCH_SCOPE} file={full} fill />
+      </>
+    );
+  } else if (changes.isPending) body = <View style={styles.center}><ActivityIndicator color={colors.textMuted} /></View>;
   else if (changes.isError) body = <ErrorState title="Couldn’t read this branch’s changes" error={changes.error} onRetry={() => void changes.refetch()} testID="diff-error" />;
   else if (changes.data.files.length === 0) body = <EmptyState testID="diff-empty" title="No changes" message={`This branch matches ${versusLabel(changes.data.resolvedBase).replace(/^vs /, '') || 'its base'}.`} />;
   else {
@@ -47,7 +69,7 @@ export function DiffTab({ panel }: { panel: ToolPanel }) {
           estimatedItemSize={48}
           extraData={open}
           refreshing={changes.isRefetching}
-          onRefresh={() => void changes.refetch()}
+          onRefresh={refresh}
           renderItem={({ item }) => (
             <View style={[styles.file, { borderBottomColor: colors.border }]}>
               <Pressable
@@ -62,7 +84,7 @@ export function DiffTab({ panel }: { panel: ToolPanel }) {
                 <FilePath path={item.path} />
                 <Counts additions={item.additions} deletions={item.deletions} />
               </Pressable>
-              {open.has(item.path) ? <FilePatch sessionId={panel.sessionId} scope={BRANCH_SCOPE} file={item} /> : null}
+              {open.has(item.path) ? <FilePatch sessionId={panel.sessionId} scope={BRANCH_SCOPE} file={item} onShowAll={() => setFullPath(item.path)} /> : null}
             </View>
           )}
         />
@@ -83,6 +105,7 @@ export function DiffEditorTab({ panel }: { panel: ToolPanel }) {
   const { profile } = useDaemon();
   const state = panel.state.customState as EditorPanelState;
   const scope: DiffScope = state.diff?.scope ?? BRANCH_SCOPE;
+  useFollowChanges(panel.sessionId);
   return (
     <View testID="diff-editor-tab" style={[styles.fill, { backgroundColor: colors.background }]}>
       <View style={styles.fill}>
@@ -93,12 +116,14 @@ export function DiffEditorTab({ panel }: { panel: ToolPanel }) {
   );
 }
 
-function FilePatch({ sessionId, scope, file, fill }: {
+function FilePatch({ sessionId, scope, file, fill, onShowAll }: {
   sessionId: string;
   scope: DiffScope;
   file: Pick<ChangedFileSummary, 'path' | 'previousPath'>;
   /** Fills the tab and scrolls on its own, instead of sitting inside the file list. */
   fill?: boolean;
+  /** Inside the file list: opens a patch too long to draw there in its own view. */
+  onShowAll?: () => void;
 }) {
   const { colors } = useTheme();
   const diff = useFileDiff(sessionId, scope, file.previousPath ? { path: file.path, previousPath: file.previousPath } : { path: file.path });
@@ -132,7 +157,17 @@ function FilePatch({ sessionId, scope, file, fill }: {
       />
     );
   }
-  return <View testID="diff-patch" style={styles.patch}>{rows.map((row, index) => <PatchLine key={index} row={row} />)}</View>;
+  const inline = inlinePatch(rows);
+  return (
+    <View testID="diff-patch" style={styles.patch}>
+      {inline.rows.map((row, index) => <PatchLine key={index} row={row} />)}
+      {inline.hidden > 0 ? (
+        <Pressable testID="diff-patch-more" accessibilityRole="button" onPress={onShowAll} style={styles.patchState}>
+          <Text variant="subhead" style={{ color: colors.accentText }}>{`${inline.hidden.toLocaleString()} more lines · Show the whole patch`}</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
 }
 
 function PatchLine({ row }: { row: PatchRow }) {
@@ -184,6 +219,7 @@ const styles = StyleSheet.create({
   versus: { marginLeft: 'auto' },
   file: { borderBottomWidth: StyleSheet.hairlineWidth },
   fileRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, minHeight: 48 },
+  fullHeader: { borderBottomWidth: 1 },
   path: { flex: 1 },
   counts: { flexDirection: 'row', gap: 8 },
   badge: { width: 20, height: 20, alignItems: 'center', justifyContent: 'center' },
