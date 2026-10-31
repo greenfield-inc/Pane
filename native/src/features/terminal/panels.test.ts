@@ -34,19 +34,24 @@ describe('stripPanels', () => {
 });
 
 describe('tabView', () => {
-  it('draws terminals, pages, Explorer and open files on the phone', () => {
+  it('draws terminals, pages, Explorer, Diff, open files and script output on the phone', () => {
     expect(tabView(panel('t', 'terminal', 0))).toBe('terminal');
     expect(tabView(panel('b', 'browser', 0))).toBe('browser');
     expect(tabView(panel('e', 'explorer', 0))).toBe('explorer');
+    expect(tabView(panel('d', 'diff', 0))).toBe('diff');
     expect(tabView(panel('f', 'editor', 0, { filePath: 'README.md' }))).toBe('editor');
+    expect(tabView(panel('l', 'logs', 0))).toBe('logs');
   });
 
-  it('shows a placeholder for tabs whose data stays on the computer, and for an editor showing a diff', () => {
-    for (const type of ['notes', 'dashboard', 'setup-tasks', 'diff', 'logs'] as const) {
+  it('opens an editor showing a file’s changes as its patch', () => {
+    const diffEditor = panel('d', 'editor', 0, { filePath: 'a.ts', diff: { kind: 'scope', scope: { kind: 'working-tree' } } });
+    expect(tabView(diffEditor)).toBe('file-diff');
+  });
+
+  it('shows a placeholder for tabs whose data stays on the computer', () => {
+    for (const type of ['notes', 'dashboard', 'setup-tasks'] as const) {
       expect(tabView(panel(type, type, 0))).toBe('placeholder');
     }
-    const diffEditor = panel('d', 'editor', 0, { filePath: 'a.ts', diff: { kind: 'scope', scope: { kind: 'working-tree' } } });
-    expect(tabView(diffEditor)).toBe('placeholder');
   });
 });
 

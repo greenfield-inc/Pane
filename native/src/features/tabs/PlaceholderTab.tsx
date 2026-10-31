@@ -14,9 +14,6 @@ const ABOUT: Partial<Record<ToolPanelType, { title: string; message: string }>> 
   notes: { title: 'Notes', message: 'Notes are written and drawn on the computer.' },
   dashboard: { title: 'Dashboard', message: 'The dashboard’s charts and lists show on the computer.' },
   'setup-tasks': { title: 'Setup tasks', message: 'Setup tasks run once, on the computer.' },
-  diff: { title: 'Diff', message: 'This branch’s changes show on the computer for now.' },
-  logs: { title: 'Script output', message: 'The Run script’s output shows on the computer for now.' },
-  editor: { title: 'Diff', message: 'This file’s changes show on the computer for now.' },
 };
 
 /** A tab whose content stays on the computer: what it is, and where it opens. */

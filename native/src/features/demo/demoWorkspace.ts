@@ -7,7 +7,7 @@ import type { RemotePwaAffordances, RemotePwaTerminalShortcut } from '@shared/ty
 import type { RunpanePaneCreateRequest, RunpanePaneCreateResult, RunpaneWorkspaceStateResult } from '@shared/types/runpaneOrchestration';
 import type { JsonValue } from '@shared/validation/boundaryDecoder';
 
-import { demoFileText, demoFolder, demoSearch } from './demoFiles';
+import { demoChanges, demoFileDiff, demoFileText, demoFolder, demoLogs, demoSearch } from './demoFiles';
 import { demoPageHtml } from './demoPages';
 import { DEMO_PANES, DEMO_PROJECTS, DEMO_SESSION, DEMO_SESSION_PAGES, demoMachines, demoNotifyItems, demoReply, shellScreen, type DemoPaneSeed, type DemoTool } from './demoData';
 
@@ -141,6 +141,9 @@ export class DemoWorkspace {
       case 'file:list': return toJson(demoFolder(String((first as { path?: string }).path ?? '')));
       case 'file:read': return toJson(demoFileText(String((first as { filePath: string }).filePath)));
       case 'file:search': return toJson(demoSearch(String((first as { pattern: string }).pattern)));
+      case 'sessions:get-diff-manifest': return toJson(demoChanges());
+      case 'sessions:get-file-diff': return toJson(demoFileDiff(String((args[2] as { path: string }).path)));
+      case 'sessions:get-logs': return toJson(demoLogs(this.startedAt));
       case 'panels:create': return toJson(this.createPanel(first as { sessionId: string; title: string }));
       case 'panels:delete': return this.deletePanel(first);
       case 'panels:checkInitialized': return true;

@@ -1,0 +1,231 @@
+import { LegendList } from '@legendapp/list/react-native';
+import { useState } from 'react';
+import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
+
+import type { ChangedFileSummary, DiffScope } from '@shared/types/gitDiff';
+import type { EditorPanelState, ToolPanel } from '@shared/types/panels';
+
+import { useDaemon } from '@/daemon';
+import { monoFontFamily, useTheme, withAlpha } from '@/theme';
+import { EmptyState, ErrorState, Icon, Text } from '@/ui';
+
+import { TabFooter } from '../tabs/TabFooter';
+import { changeBadge, DiffError, inlinePatch, parsePatch, versusLabel, type PatchRow } from './diff';
+import { BRANCH_SCOPE, useChanges, useFileDiff, useFollowChanges, useRefreshChanges } from './useDiff';
+
+/** The branch's changes, read-only: each file with its counts, tapped open to its patch. */
+export function DiffTab({ panel }: { panel: ToolPanel }) {
+  const theme = useTheme();
+  const { colors } = theme;
+  const { profile } = useDaemon();
+  const changes = useChanges(panel.sessionId);
+  const refresh = useRefreshChanges(panel.sessionId);
+  const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
+  const toggle = (path: string) => setOpen(current => {
+    const next = new Set(current);
+    if (next.has(path)) next.delete(path);
+    else next.add(path);
+    return next;
+  });
+  // A patch too long to draw inside the list, open whole in its own scrolling view.
+  const [fullPath, setFullPath] = useState<string | null>(null);
+  const full = fullPath === null ? undefined : changes.data?.files.find(file => file.path === fullPath);
+
+  let body;
+  if (full) {
+    body = (
+      <>
+        <Pressable
+          testID="diff-full-back"
+          accessibilityRole="button"
+          accessibilityLabel="Back to all changes"
+          onPress={() => setFullPath(null)}
+          style={({ pressed }) => [styles.fileRow, styles.fullHeader, { borderBottomColor: colors.border }, pressed && { backgroundColor: colors.surfacePressed }]}
+        >
+          <Icon ios="chevron.left" android="arrow_back" size={14} color={colors.accentText} />
+          <ChangeBadge file={full} />
+          <FilePath path={full.path} />
+          <Counts additions={full.additions} deletions={full.deletions} />
+        </Pressable>
+        <FilePatch sessionId={panel.sessionId} scope={BRANCH_SCOPE} file={full} fill />
+      </>
+    );
+  } else if (changes.isPending) body = <View style={styles.center}><ActivityIndicator color={colors.textMuted} /></View>;
+  else if (changes.isError) body = <ErrorState title="Couldn’t read this branch’s changes" error={changes.error} onRetry={() => void changes.refetch()} testID="diff-error" />;
+  else if (changes.data.files.length === 0) body = <EmptyState testID="diff-empty" title="No changes" message={`This branch matches ${versusLabel(changes.data.resolvedBase).replace(/^vs /, '') || 'its base'}.`} />;
+  else {
+    const { stats } = changes.data;
+    body = (
+      <>
+        <View style={[styles.summary, { borderBottomColor: colors.border }]}>
+          <Text variant="callout" style={styles.semibold}>{stats.filesChanged} {stats.filesChanged === 1 ? 'file' : 'files'}</Text>
+          <Counts additions={stats.additions} deletions={stats.deletions} />
+          <Text variant="subhead" tone="muted" style={styles.versus}>{versusLabel(changes.data.resolvedBase)}</Text>
+        </View>
+        <LegendList
+          testID="diff-list"
+          data={changes.data.files}
+          keyExtractor={file => file.path}
+          estimatedItemSize={48}
+          extraData={open}
+          refreshing={changes.isRefetching}
+          onRefresh={refresh}
+          renderItem={({ item }) => (
+            <View style={[styles.file, { borderBottomColor: colors.border }]}>
+              <Pressable
+                testID={`diff-file-${item.path}`}
+                accessibilityRole="button"
+                accessibilityState={{ expanded: open.has(item.path) }}
+                onPress={() => toggle(item.path)}
+                style={({ pressed }) => [styles.fileRow, pressed && { backgroundColor: colors.surfacePressed }]}
+              >
+                <Icon ios={open.has(item.path) ? 'chevron.down' : 'chevron.right'} android={open.has(item.path) ? 'expand_more' : 'chevron_right'} size={12} color={colors.textMuted} />
+                <ChangeBadge file={item} />
+                <FilePath path={item.path} />
+                <Counts additions={item.additions} deletions={item.deletions} />
+              </Pressable>
+              {open.has(item.path) ? <FilePatch sessionId={panel.sessionId} scope={BRANCH_SCOPE} file={item} onShowAll={() => setFullPath(item.path)} /> : null}
+            </View>
+          )}
+        />
+      </>
+    );
+  }
+  return (
+    <View testID="diff-tab" style={[styles.fill, { backgroundColor: colors.background }]}>
+      <View style={styles.fill}>{body}</View>
+      <TabFooter left="Read-only on the phone" right={`Commit and revert on ${profile.label}`} />
+    </View>
+  );
+}
+
+/** An Editor tab showing one file's changes: its patch, read-only. */
+export function DiffEditorTab({ panel }: { panel: ToolPanel }) {
+  const { colors } = useTheme();
+  const { profile } = useDaemon();
+  const state = panel.state.customState as EditorPanelState;
+  const scope: DiffScope = state.diff?.scope ?? BRANCH_SCOPE;
+  useFollowChanges(panel.sessionId);
+  return (
+    <View testID="diff-editor-tab" style={[styles.fill, { backgroundColor: colors.background }]}>
+      <View style={styles.fill}>
+        <FilePatch sessionId={panel.sessionId} scope={scope} file={{ path: state.filePath, previousPath: state.diff?.previousPath }} fill />
+      </View>
+      <TabFooter left="Read-only on the phone" right={`Commit and revert on ${profile.label}`} />
+    </View>
+  );
+}
+
+function FilePatch({ sessionId, scope, file, fill, onShowAll }: {
+  sessionId: string;
+  scope: DiffScope;
+  file: Pick<ChangedFileSummary, 'path' | 'previousPath'>;
+  /** Fills the tab and scrolls on its own, instead of sitting inside the file list. */
+  fill?: boolean;
+  /** Inside the file list: opens a patch too long to draw there in its own view. */
+  onShowAll?: () => void;
+}) {
+  const { colors } = useTheme();
+  const diff = useFileDiff(sessionId, scope, file.previousPath ? { path: file.path, previousPath: file.previousPath } : { path: file.path });
+  if (diff.isPending) return <View style={[styles.patchState, fill && styles.center]}><ActivityIndicator color={colors.textMuted} /></View>;
+  if (diff.isError) {
+    const tooLarge = diff.error instanceof DiffError && diff.error.code === 'diff-too-large';
+    return (
+      <View testID="diff-patch-error" style={[styles.patchState, fill && styles.center]}>
+        <Text variant="subhead" tone="secondary" style={styles.centerText}>
+          {tooLarge ? 'This patch is too large for the phone. Open it on the computer.' : diff.error.message}
+        </Text>
+      </View>
+    );
+  }
+  if (diff.data.status === 'no-longer-changed') {
+    return <View style={[styles.patchState, fill && styles.center]}><Text variant="subhead" tone="secondary">This file no longer has changes.</Text></View>;
+  }
+  const rows = parsePatch(diff.data.patch);
+  if (rows.length === 0) {
+    return <View style={[styles.patchState, fill && styles.center]}><Text variant="subhead" tone="secondary">No text changes (a binary file, or only its mode changed).</Text></View>;
+  }
+  if (fill) {
+    return (
+      <LegendList
+        testID="diff-patch"
+        data={rows}
+        keyExtractor={(_row, index) => String(index)}
+        estimatedItemSize={20}
+        recycleItems
+        renderItem={({ item }) => <PatchLine row={item} />}
+      />
+    );
+  }
+  const inline = inlinePatch(rows);
+  return (
+    <View testID="diff-patch" style={styles.patch}>
+      {inline.rows.map((row, index) => <PatchLine key={index} row={row} />)}
+      {inline.hidden > 0 ? (
+        <Pressable testID="diff-patch-more" accessibilityRole="button" onPress={onShowAll} style={styles.patchState}>
+          <Text variant="subhead" style={{ color: colors.accentText }}>{`${inline.hidden.toLocaleString()} more lines · Show the whole patch`}</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
+function PatchLine({ row }: { row: PatchRow }) {
+  const { colors } = useTheme();
+  const background = row.kind === 'added' ? withAlpha(colors.success, 0.14)
+    : row.kind === 'removed' ? withAlpha(colors.danger, 0.12)
+      : row.kind === 'hunk' ? colors.surfaceRaised : 'transparent';
+  const color = row.kind === 'removed' ? colors.danger : row.kind === 'hunk' || row.kind === 'note' ? colors.textMuted : colors.text;
+  return <Text selectable style={[styles.mono, styles.patchLine, { backgroundColor: background, color }]}>{row.text || ' '}</Text>;
+}
+
+/** The change's letter in a tinted box: M amber, A green, D red. */
+export function ChangeBadge({ file }: { file: Pick<ChangedFileSummary, 'kind'> }) {
+  const theme = useTheme();
+  const tone = file.kind === 'added' ? theme.colors.success : file.kind === 'deleted' ? theme.colors.danger : theme.colors.warning;
+  return (
+    <View style={[styles.badge, { borderRadius: theme.radius.sm, backgroundColor: withAlpha(tone, 0.15) }]}>
+      <Text style={[styles.mono, styles.badgeText, { color: tone }]}>{changeBadge(file.kind)}</Text>
+    </View>
+  );
+}
+
+function FilePath({ path }: { path: string }) {
+  const slash = path.lastIndexOf('/');
+  return (
+    <Text variant="subhead" numberOfLines={1} ellipsizeMode="head" style={styles.path}>
+      {slash >= 0 ? <Text variant="subhead" tone="muted">{path.slice(0, slash + 1)}</Text> : null}
+      {path.slice(slash + 1)}
+    </Text>
+  );
+}
+
+function Counts({ additions, deletions }: { additions: number | null; deletions: number | null }) {
+  const { colors } = useTheme();
+  return (
+    <View style={styles.counts}>
+      {additions ? <Text variant="callout" style={{ color: colors.success }}>+{additions}</Text> : null}
+      {deletions ? <Text variant="callout" style={{ color: colors.danger }}>−{deletions}</Text> : null}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  fill: { flex: 1 },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  centerText: { textAlign: 'center' },
+  semibold: { fontWeight: '600' },
+  summary: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1 },
+  versus: { marginLeft: 'auto' },
+  file: { borderBottomWidth: StyleSheet.hairlineWidth },
+  fileRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, minHeight: 48 },
+  fullHeader: { borderBottomWidth: 1 },
+  path: { flex: 1 },
+  counts: { flexDirection: 'row', gap: 8 },
+  badge: { width: 20, height: 20, alignItems: 'center', justifyContent: 'center' },
+  badgeText: { fontSize: 12, fontWeight: '700' },
+  mono: { fontFamily: monoFontFamily },
+  patch: { paddingBottom: 4 },
+  patchLine: { fontSize: 13, lineHeight: 20, paddingHorizontal: 10 },
+  patchState: { padding: 16 },
+});

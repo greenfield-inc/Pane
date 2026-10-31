@@ -1,3 +1,4 @@
+import type { ChangedFileSummary } from '@shared/types/gitDiff';
 import { filePreviewKind } from '@shared/utils/filePreview';
 import { boundary, decodeOptionalBoundary } from '@shared/validation/boundaryDecoder';
 import hljs from 'highlight.js/lib/core';
@@ -127,6 +128,23 @@ export function formatSize(bytes: number): string {
 
 function round(value: number): string {
   return value >= 10 ? String(Math.round(value)) : String(Math.max(0.1, Math.round(value * 10) / 10));
+}
+
+/** One row of Explorer's folder list: a section label, one of the branch's changes, or an entry. */
+export type FolderRow =
+  | { kind: 'label'; text: string }
+  | { kind: 'changed'; file: ChangedFileSummary }
+  | { kind: 'entry'; entry: FileEntry };
+
+/**
+ * Explorer's rows, as one list so every row is virtualized: at the worktree's top, the branch's
+ * changes first and then all files. The changes stay even when the folder is empty.
+ */
+export function folderRows(entries: readonly FileEntry[], changes: readonly ChangedFileSummary[], { atTop, searching }: { atTop: boolean; searching: boolean }): FolderRow[] {
+  const rows: FolderRow[] = entries.map(entry => ({ kind: 'entry', entry }));
+  if (!atTop || searching || changes.length === 0) return rows;
+  const changed: FolderRow[] = [{ kind: 'label', text: `Changed on this branch · ${changes.length}` }, ...changes.map(file => ({ kind: 'changed' as const, file }))];
+  return rows.length === 0 ? changed : [...changed, { kind: 'label', text: 'All files' }, ...rows];
 }
 
 /** The path bar: the worktree's name, then each folder down to `path`. */
