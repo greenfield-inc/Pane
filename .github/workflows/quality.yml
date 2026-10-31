@@ -142,8 +142,10 @@ jobs:
           './**/*.md'
         fail: true
 
-  # Runs beside quality-checks so the Electron smoke path does not wait on
-  # unit tests.
+  # Runs beside quality-checks so the smoke path does not wait on unit tests.
+  # The Playwright suites load the renderer from Vite with a mocked Electron
+  # API; only the sandboxed-preload check starts Electron, and it loads no
+  # native module, so nothing is rebuilt for Electron here.
   # Pinned: ubuntu-latest is Ubuntu 26.04, which Playwright 1.54.1 cannot
   # install browser dependencies for. Move back once Playwright supports it.
   functional-smoke:
@@ -158,7 +160,7 @@ jobs:
       uses: ./.github/actions/setup-pnpm
 
     - name: Install dependencies
-      run: pnpm install
+      run: pnpm install --ignore-scripts
 
     # The browser download and apt packages overlap the build steps below.
     # apt upgrades libraries Electron loads, so the wait step comes before
@@ -166,13 +168,11 @@ jobs:
     - name: Start Playwright browser dependencies install
       run: scripts/ci-background.sh start playwright pnpm exec playwright install --with-deps chromium
 
-    - name: Rebuild native modules for Electron smoke tests
-      run: pnpm run electron:rebuild
-
     - name: Configure Electron sandbox
       run: |
-        # Electron 42+ fetches its binary on first use and logs that to stdout,
-        # so fetch it first to keep require('electron') printing only the path.
+        # The install skipped Electron's binary download, and Electron 42+
+        # logs a first-use fetch to stdout, so fetch it here to keep
+        # require('electron') printing only the path.
         node node_modules/electron/install.js
         electron_path="$(node -p "require('electron')")"
         electron_dir="$(dirname "${electron_path}")"
@@ -194,9 +194,7 @@ jobs:
       run: xvfb-run -a pnpm exec electron scripts/smoke-sandboxed-preload.cjs
 
     - name: Run maintained functional smoke tests
-      run: xvfb-run -a pnpm test:ci:minimal
-      env:
-        PANE_DIR: ${{ runner.temp }}/pane-ci
+      run: pnpm test:ci:minimal
 
   # Published wrapper CLIs (npm + PyPI). Runs only when wrapper/contract files
   # change on a PR; always runs on pushes to main. Each OS is tested once at
@@ -243,8 +241,20 @@ jobs:
     - name: Build npm wrapper
       run: pnpm --filter runpane build
 
-    - name: Run wrapper contract tests
-      run: node scripts/test-runpane-contract.js
+    # The three slow suites (about 95, 40 and 120 s on Windows) use their own
+    # temp directories, so they run in the background beside the short ones.
+    # Each Finish step prints that suite's output and fails with it.
+    - name: Start wrapper contract tests
+      shell: bash
+      run: scripts/ci-background.sh start contract node scripts/test-runpane-contract.js
+
+    - name: Start package manager smoke tests
+      shell: bash
+      run: scripts/ci-background.sh start package-smoke node scripts/test-runpane-package-smoke.js
+
+    - name: Start handoff tests
+      shell: bash
+      run: scripts/ci-background.sh start handoff node --test scripts/test-runpane-handoff.js
 
     - name: Check patched Node runtime guard
       run: node --test scripts/test-runpane-node-runtime.js
@@ -252,20 +262,29 @@ jobs:
     - name: Run MCP server tests
       run: node --test scripts/test-runpane-mcp.js
 
-    - name: Run package manager smoke tests
-      run: node scripts/test-runpane-package-smoke.js
-
     - name: Run workspace routing tests
       run: node --test scripts/test-runpane-workspace.js
-
-    - name: Run handoff tests
-      run: node --test scripts/test-runpane-handoff.js
 
     - name: Run managed CLI hand-off tests
       run: node --test scripts/test-runpane-managed-cli.js
 
     - name: Run wrapper telemetry tests
       run: node --test scripts/test-runpane-telemetry.js
+
+    - name: Finish wrapper contract tests
+      if: ${{ !cancelled() }}
+      shell: bash
+      run: scripts/ci-background.sh wait contract
+
+    - name: Finish package manager smoke tests
+      if: ${{ !cancelled() }}
+      shell: bash
+      run: scripts/ci-background.sh wait package-smoke
+
+    - name: Finish handoff tests
+      if: ${{ !cancelled() }}
+      shell: bash
+      run: scripts/ci-background.sh wait handoff
 
   # Ubuntu is already covered by quality-checks above; this job only adds the
   # other platforms, and only when main-process code (or its deps) changed.

@@ -143,9 +143,10 @@ package.
   `pnpm exec playwright install chromium`. `pnpm test:ci:minimal` runs the suite
   CI runs: smoke, health check, accessibility, settings, remote sidebar and file-preview lifecycle regressions.
 - The tests load the renderer from Vite in Chromium, with a mocked Electron API
-  (`tests/electronApiMock.ts`). To start Vite, Playwright runs `pnpm electron-dev`
-  on port `4521`, which also opens an Electron window against your data
-  directory, so set `PANE_DIR` for the run. Don't run two Playwright commands on the
+  (`tests/electronApiMock.ts`). `pnpm test:ci:minimal` starts Vite alone. To
+  start Vite, `pnpm test` and `pnpm test:ci` run `pnpm electron-dev` on port
+  `4521`, which also opens an Electron window against your data directory, so
+  set `PANE_DIR` for the run. Don't run two Playwright commands on the
   same port at once: the second can attach to or kill the first one's server.
   Use `PLAYWRIGHT_PORT` to separate them:
   ```bash
