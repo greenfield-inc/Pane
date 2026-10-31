@@ -119,3 +119,85 @@ export function demoSearch(pattern: string) {
   const files = Object.keys(FILES).filter(file => file.toLowerCase().includes(needle)).map(file => ({ path: file, isDirectory: false }));
   return { success: true, files };
 }
+
+const PATCHES: Record<string, string> = {
+  'src/checkout/submitOrder.ts': `diff --git a/src/checkout/submitOrder.ts b/src/checkout/submitOrder.ts
+--- a/src/checkout/submitOrder.ts
++++ b/src/checkout/submitOrder.ts
+@@ -4,12 +4,23 @@
+-export async function submitOrder(id) {
+-  const cart = await db.carts.get(id);
++export async function submitOrder(cartId: string) {
++  return withCartLock(cartId, async () => {
++    const cart = await db.carts.get(cartId);
++    if (cart.status === 'paid') {
++      return { ok: true, duplicate: true };
++    }
+     const total = priceCart(cart);
+     await charge(cart.customerId, total);
+`,
+  'src/checkout/cartLock.ts': `diff --git a/src/checkout/cartLock.ts b/src/checkout/cartLock.ts
+new file mode 100644
+--- /dev/null
++++ b/src/checkout/cartLock.ts
+@@ -0,0 +1,13 @@
+${CART_LOCK.trimEnd().split('\n').map(line => `+${line}`).join('\n')}
+`,
+  'src/checkout/submitOrder.test.ts': `diff --git a/src/checkout/submitOrder.test.ts b/src/checkout/submitOrder.test.ts
+--- a/src/checkout/submitOrder.test.ts
++++ b/src/checkout/submitOrder.test.ts
+@@ -1,4 +1,6 @@
+ import { describe, it } from 'vitest';
+ 
+ describe('submitOrder', () => {
+-  it('charges a cart', async () => {});
++  it('charges a cart once', async () => {});
++  it('second tab sees "paid"', async () => {});
++  it('unlocks on a declined card', async () => {});
+ });
+`,
+};
+
+/** `sessions:get-diff-manifest`: the sample branch's three changes, against main. */
+export function demoChanges() {
+  const files = [
+    { path: 'src/checkout/submitOrder.ts', kind: 'modified', additions: 14, deletions: 3, isBinary: false },
+    { path: 'src/checkout/cartLock.ts', kind: 'added', additions: 13, deletions: 0, isBinary: false },
+    { path: 'src/checkout/submitOrder.test.ts', kind: 'modified', additions: 3, deletions: 1, isBinary: false },
+  ];
+  return {
+    success: true,
+    data: {
+      scope: { kind: 'session' },
+      files,
+      resolvedBase: { kind: 'comparison-base', ref: 'origin/main', hash: '4f1c2aa' },
+      resolvedTarget: { kind: 'working-tree' },
+      stats: { additions: 30, deletions: 4, filesChanged: 3 },
+    },
+  };
+}
+
+/** `sessions:get-file-diff`: one sample file's patch. */
+export function demoFileDiff(path: string) {
+  const patch = PATCHES[path];
+  if (!patch) return { success: false, error: `${path} has no changes in this sample branch.`, code: 'invalid-path' };
+  return { success: true, data: { file: demoChanges().data.files.find(file => file.path === path), patch, status: 'changed' } };
+}
+
+/** `sessions:get-logs`: the sample dev server's output, as the Run script printed it. */
+export function demoLogs(now: number) {
+  const at = (secondsAgo: number) => new Date(now - secondsAgo * 1000).toISOString();
+  const lines: Array<[number, 'info' | 'warn', string]> = [
+    [240, 'info', '$ pnpm dev'],
+    [239, 'info', ''],
+    [238, 'info', '  \x1b[32mVITE v6.2.0\x1b[0m  ready in 412 ms'],
+    [238, 'info', ''],
+    [238, 'info', '  ➜  Local:   http://localhost:5173/'],
+    [238, 'info', '  ➜  Network: use --host to expose'],
+    [120, 'info', '[vite] page reload src/checkout/submitOrder.ts'],
+    [82, 'info', '[api] POST /api/checkout 200 84ms'],
+    [81, 'warn', '[api] POST /api/checkout 200 3ms (duplicate)'],
+    [20, 'info', '[vite] hmr update /src/App.tsx'],
+  ];
+  return { success: true, data: lines.map(([secondsAgo, level, message]) => ({ timestamp: at(secondsAgo), level, message, source: 'Script' })) };
+}
