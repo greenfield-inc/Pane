@@ -96,7 +96,7 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
   const bridgeRouter = createDaemonBridgeRouter(commandRegistry);
 
   registerAppHandlers(ipcMain, services);
-  registerNotesHandlers(ipcMain, services);
+  registerNotesHandlers(ipcMain, services, commandRegistry);
   registerFeedbackHandlers(ipcMain, services);
   registerUpdaterHandlers(ipcMain, services);
   registerUpdateOperationHandlers(services, commandRegistry);

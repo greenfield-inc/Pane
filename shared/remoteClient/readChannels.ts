@@ -45,6 +45,8 @@ export const REMOTE_READ_CHANNELS = new Set([
   'runpane:loops:preview',
   'loops:list',
   'loops:preview',
+  'notes:context',
+  'notes:list',
   'permission:getPending',
   'notify:remote-snapshot',
   'sessions:get-archived-with-projects',

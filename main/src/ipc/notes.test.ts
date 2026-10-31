@@ -6,6 +6,7 @@ import { EventEmitter } from 'events';
 import type { IpcMain } from 'electron';
 import type { AppServices } from './types';
 import { registerNotesHandlers } from './notes';
+import { PaneCommandRegistry } from '../daemon/commandRegistry';
 import { decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { noteSchema, type NoteMutation } from '../../../shared/types/notes';
 
@@ -42,12 +43,13 @@ function fixture() {
   } as AppServices;
   // SAFETY: Electron calls the registered listener with event followed by invocation arguments.
   const ipc = { handle: (name: string, handler: (...args: unknown[]) => Promise<{ note?: unknown }>) => handlers.set(name, handler) } as IpcMain;
-  registerNotesHandlers(ipc, services);
+  const registry = new PaneCommandRegistry();
+  registerNotesHandlers(ipc, services, registry);
   const mutate = async (pane: string, mutation: NoteMutation) => {
     const result = await handlers.get('notes:mutate')!(undefined, pane, mutation);
     return result.note ? decodeBoundary(result.note, noteSchema) : undefined;
   };
-  return { projects, panes, config, configManager, sessionManager, mutate };
+  return { projects, panes, config, configManager, sessionManager, mutate, registry };
 }
 
 const read = (file: string) => fs.readFileSync(path.join(root, file), 'utf8');
@@ -116,6 +118,29 @@ describe('Notes IPC delivery', () => {
     expect(read('repo-1/AGENTS.md')).not.toContain('pane-memories:start');
     expect(read('a/AGENTS.md')).not.toContain('pane-memories:start');
     expect(read('data/notes/contexts/a.md')).toContain('Updated note');
+  });
+
+  it('runs a connected desktop\'s notes commands on this machine, where its terminals read them', async () => {
+    const { registry } = fixture();
+    await registry.invokeRemote('notes:mutate', ['a', { action: 'create', scope: { kind: 'feature', id: 'a' }, title: 'Written from the other desktop' }]);
+    expect(read('data/notes/contexts/a.md')).toContain('Written from the other desktop');
+    const listed = await registry.invokeRemote('notes:list', ['a', { kind: 'feature', id: 'a' }]);
+    expect(listed).toEqual([expect.objectContaining({ title: 'Written from the other desktop' })]);
+  });
+
+  it('tells the Notes tab whether Notes is on for this machine, so its agents read the notes', async () => {
+    const { registry, config } = fixture();
+    expect(await registry.invokeRemote('notes:context', ['a'])).toMatchObject({ notesEnabled: true });
+    config.notesEnabled = false;
+    expect(await registry.invokeRemote('notes:context', ['a'])).toEqual({
+      scopes: [
+        { scope: { kind: 'project', id: '1' }, name: 'Project 1' },
+        { scope: { kind: 'feature', id: 'a' }, name: 'a' },
+        { scope: { kind: 'global', id: 'user' }, name: 'All projects' },
+      ],
+      defaultScope: { kind: 'project', id: '1' },
+      notesEnabled: false,
+    });
   });
 
   it('keeps scoped notes away from agents while experimental Notes is off and restores them when turned back on', async () => {

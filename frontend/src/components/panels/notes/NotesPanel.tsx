@@ -26,12 +26,16 @@ const alert = 'space-y-2 rounded-[10px] bg-status-error/10 px-3.5 py-3 text-[13p
 export interface NoteCapture { text: string; source: string; at: string }
 interface NotesPanelProps { paneId: string; capture?: NoteCapture; viewId?: string }
 
-export default function NotesPanel(props: NotesPanelProps) {
-  const remote = useConfigStore(state => state.config?.remoteDaemon?.client.mode === 'remote');
-  return remote ? <p className="p-5 text-[13px] text-text-tertiary">Notes are available in local Pane workspaces.</p> : <LocalNotesPanel {...props} />;
-}
+/** The desktop's refusal for a command the connected machine's Pane does not have yet. */
+const OLDER_HOST = 'runs an older Pane';
 
-function LocalNotesPanel({ paneId, capture, viewId = 'panel' }: NotesPanelProps) {
+/** Notes live on the machine the desktop is on, so a connected machine answers with its own notes. */
+export default function NotesPanel({ paneId, capture, viewId = 'panel' }: NotesPanelProps) {
+  const machine = useConfigStore(state => {
+    const client = state.config?.remoteDaemon?.client;
+    return client?.mode === 'remote' ? client.profiles.find(profile => profile.id === client.activeProfileId)?.label : undefined;
+  });
+  const [olderHost, setOlderHost] = useState(false);
   const [context, setContext] = useState<NoteContext>();
   const [scope, setScope] = useState<NoteScope>();
   const [notes, setNotes] = useState<Note[]>([]);
@@ -47,14 +51,22 @@ function LocalNotesPanel({ paneId, capture, viewId = 'panel' }: NotesPanelProps)
     const load = () => {
       void window.electronAPI.invoke('notes:context', paneId).then(ctx => {
         if (active) {
+          setOlderHost(false);
           setContext(ctx);
           setScope(previous => previous && ctx.scopes.some(item => sameNoteScope(item.scope, previous)) ? previous : ctx.defaultScope);
         }
-      }).catch(cause => { if (active) setError(ipcErrorMessage(cause, 'Pane did not say why.')); });
+      }).catch(cause => {
+        if (!active) return;
+        const message = ipcErrorMessage(cause, 'Pane did not say why.');
+        if (message.includes(OLDER_HOST)) setOlderHost(true);
+        else setError(message);
+      });
     };
     load();
     const unsubscribe = window.electronAPI.events.onOrchestrationSessionsChanged?.(load);
-    return () => { active = false; unsubscribe?.(); };
+    // A reconnect keeps this tab open; the host may have been updated meanwhile, so ask again.
+    const unsubscribeResync = window.electronAPI.events.onRemoteDaemonResyncRequested(load);
+    return () => { active = false; unsubscribe?.(); unsubscribeResync(); };
   }, [paneId]);
 
   const refresh = useCallback(async () => {
@@ -90,6 +102,8 @@ function LocalNotesPanel({ paneId, capture, viewId = 'panel' }: NotesPanelProps)
 
   const retryExports = () => { void window.electronAPI.invoke('notes:mutate', paneId, { action: 'retry' }).then(result => setExports(result.exports)).catch(cause => setError(ipcErrorMessage(cause, 'Pane did not say why.'))); };
 
+  if (olderHost) return <p className="p-5 text-[13px] text-text-tertiary">Update Pane on {machine ?? 'that machine'} to use its notes.</p>;
+
   return <section aria-label="Notes" className="notes-surface flex h-full min-h-0 flex-col bg-bg-primary text-text-primary">
     <header className="flex min-h-[50px] shrink-0 flex-wrap items-center gap-x-2.5 gap-y-1.5 border-b border-border-primary px-4 py-2">
       <Dropdown className="min-w-0" width="md" position="bottom-left" selectedId={current?.id} selectedMark="check"
@@ -114,6 +128,7 @@ function LocalNotesPanel({ paneId, capture, viewId = 'panel' }: NotesPanelProps)
         <IconButton aria-label="New note" title="New note" icon={<Plus size={16} />} disabled={!scope} onClick={() => void create()} />
       </div>
     </header>
+    {context?.notesEnabled === false && <p className="shrink-0 px-4 pt-3 text-[13px] text-text-tertiary">Turn on Notes on {machine ?? 'this computer'} so its agents read these.</p>}
     {(error || (!current && exports.some(result => result.error))) && <div className="shrink-0 space-y-2 px-4 pt-3">
       {error && <p role="alert" className={alert}>{error}</p>}
       {!current && exports.some(result => result.error) && <div role="alert" className={alert}>

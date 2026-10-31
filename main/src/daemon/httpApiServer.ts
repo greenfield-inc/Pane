@@ -41,7 +41,7 @@ import { getRemotePwaAssetResponse } from './pwaStaticAssets';
 import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
 import type { BoundarySchema, JsonValue } from '../../../shared/validation/boundaryDecoder';
 import { serializeJsonTransport } from './jsonTransport';
-import { toPaneDaemonError } from '../../../shared/paneError';
+import { PaneError, toPaneDaemonError } from '../../../shared/paneError';
 import type { VoiceStreamErrorCode } from '../../../shared/voice/deepgramLive';
 import { voiceKeyProblem } from '../../../shared/voice/voiceKeys';
 import { streamWorktreePreview } from '../services/mediaStream';
@@ -1421,6 +1421,14 @@ export class PaneRemoteHttpApiServer {
     request: IncomingMessage,
   ): JsonValue[] {
     const args = [...invokeRequest.args];
+    if (invokeRequest.channel.startsWith('notes:') && this.workspace && !this.workspaceOwnerLogin(request)) {
+      // Notes are the owner's: global notes go into the owner's agent instructions on this computer.
+      throw new PaneError(
+        'ERR_NOTES_OWNER_REQUIRED',
+        'Only this computer\'s owner can read or change its notes, so nothing was read or changed.',
+        'Sign in to Tailscale as this computer\'s owner, or keep your notes on your own computer.',
+      );
+    }
     const sharesKeys = invokeRequest.channel.startsWith('credentials:shared:');
     if (sharesKeys && this.workspace) {
       // Keys belong to the owner: a teammate this workspace lets in may neither read nor replace them.

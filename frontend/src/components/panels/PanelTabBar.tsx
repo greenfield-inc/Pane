@@ -371,7 +371,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
   const availablePanelTypes = (Object.keys(PANEL_CAPABILITIES) as ToolPanelType[])
     .filter(type => {
       const capabilities = PANEL_CAPABILITIES[type];
-      if (type === 'notes' && (!isNotesEnabled(config) || config?.remoteDaemon?.client.mode === 'remote')) return false;
+      if (type === 'notes' && !isNotesEnabled(config)) return false;
 
       // Filter based on context
       if (context === 'project' && !capabilities.canAppearInProjects) return false;
