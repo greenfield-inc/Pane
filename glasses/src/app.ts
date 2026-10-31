@@ -4,7 +4,7 @@
 import type { NotifyAnswer } from '../../shared/types/notify';
 import { BRIGHT, type Page } from './display';
 import type { Gesture } from './input';
-import { LIST_MARKS, homeListPage, homeRows, outlineRowAt, type HomeRow } from './homeList';
+import { LIST_MARKS, homeListPage, homeRows, outlineRowAt, type HomeListView, type HomeRow, type ListMarks } from './homeList';
 import { CHOICE_KEYS, GlassesError, SCREEN_RECONNECTING, type Card, type Dictation, type PaneEntry, type PaneSource, type TerminalKey } from './model';
 import { findMenu, type Menu } from './menu';
 import {
@@ -76,6 +76,8 @@ export interface AppDeps {
   now(): number;
   /** "9:40" for a time of day. */
   clock(epochMs: number): string;
+  /** How home rows are marked; LIST_MARKS unless set. */
+  marks?: ListMarks;
 }
 
 /**
@@ -283,8 +285,13 @@ export class GlassesApp {
       return connectingPage(computers.length);
     }
     const rows = this.rows();
-    const view = this.confirmation ? { selected: this.selected(rows), confirmation: this.confirmation } : { selected: this.selected(rows) };
+    const view: HomeListView = { selected: this.selected(rows), marks: this.marks() };
+    if (this.confirmation) view.confirmation = this.confirmation;
     return homeListPage(rows, view, this.deps.clock);
+  }
+
+  private marks(): ListMarks {
+    return this.deps.marks ?? LIST_MARKS;
   }
 
   private computerName(id: string): string {
@@ -406,7 +413,7 @@ export class GlassesApp {
       case 'up':
       case 'down': {
         // The firmware list (outline marks) moves its own selection.
-        if (LIST_MARKS === 'outline') return;
+        if (this.marks() === 'outline') return;
         const next = Math.max(0, Math.min(rows.length - 1, index + (gesture.type === 'down' ? 1 : -1)));
         const target = rows[next];
         this.homeFocus = target ? { key: target.key, index: next } : null;
@@ -418,12 +425,14 @@ export class GlassesApp {
         if (row) this.openRow(row, index);
         return;
       case 'select': {
+        if (this.marks() !== 'outline') return;
         const pressed = outlineRowAt(rows, gesture.index, this.deps.clock);
         if (pressed) this.openRow(pressed, rows.indexOf(pressed));
         return;
       }
       case 'hold':
-        if (row?.kind === 'question' && LIST_MARKS === 'logos') void this.startVoiceAnswer(row.card);
+        // The firmware list doesn't report its selection, so outline marks answer by press only.
+        if (row?.kind === 'question' && this.marks() === 'logos') void this.startVoiceAnswer(row.card);
         return;
       case 'double':
         this.deps.exit();

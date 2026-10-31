@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { GlassesApp } from '../src/app';
 import { DemoSource } from '../src/demo';
 import type { Page } from '../src/display';
+import type { ListMarks } from '../src/homeList';
 import type { Gesture } from '../src/input';
 import { GlassesError, SCREEN_RECONNECTING, orderCards, type Card, type Computer, type Dictation, type PaneEntry, type PaneSource, type TerminalKey, type TerminalScreen } from '../src/model';
 import type { Cancel } from '../src/timers';
@@ -297,11 +298,11 @@ function card(id: string, createdAt: number, waiting = true): Card {
   return { key: `studio:${id}`, computerId: 'studio', machine: 'studio-mac', itemId: id, ui: waiting ? 'options' : 'info', waiting, title: `title ${id}`, choices: ['Yes'], suggestions: [], paneName: `pane-${id}`, createdAt };
 }
 
-function startScripted() {
+function startScripted(marks: ListMarks = 'logos') {
   const clock = new Clock();
   const source = new ScriptedSource();
   const pages: Page[] = [];
-  const app = new GlassesApp({ source, show: (page) => pages.push(page), exit: () => {}, mic: async () => true, later: clock.later, now: () => clock.now, clock: () => '9:40' });
+  const app = new GlassesApp({ source, show: (page) => pages.push(page), exit: () => {}, mic: async () => true, later: clock.later, now: () => clock.now, clock: () => '9:40', marks });
   const text = () => textOf(pages.at(-1));
   const press = async (gesture: Gesture) => {
     app.handle(gesture);
@@ -870,6 +871,32 @@ describe('the open list', () => {
     await press({ type: 'press' });
     expect(source.retried).toEqual(['build']);
     expect(text()[0]).toBe('All computers');
+  });
+});
+
+describe('home in outline marks (the firmware list)', () => {
+  function outlineHome() {
+    const scripted = startScripted('outline');
+    const studio: Computer = { id: 'studio', name: 'studio-mac', status: 'live', lastSeenAt: 1, os: 'macOS', entries: [] };
+    const build: Computer = { id: 'build', name: 'build-box', status: 'offline', lastSeenAt: 1, os: 'Linux', entries: [{ ...paneRow('nightly-backup'), activityAt: 1 }] };
+    scripted.source.computerList = [studio, build];
+    scripted.source.rows = [{ ...paneRow('a'), activityAt: 3 }, { ...paneRow('b'), activityAt: 2 }];
+    scripted.source.changed();
+    return scripted;
+  }
+
+  it('opens the terminal of the row the list press names', async () => {
+    const { source, text, press } = outlineHome();
+    expect(text()[1]).toBe('○ studi  a · Claude · stopped | ○ studi  b · Claude · stopped | □ build  offline since 9:40 · 1 Pane · retry');
+    await press({ type: 'select', index: 1 });
+    expect(source.screenReads).toEqual(['studio']);
+    expect(text()[0]).toContain('b');
+  });
+
+  it("opens an away computer's folded row on its Retry page", async () => {
+    const { text, press } = outlineHome();
+    await press({ type: 'select', index: 2 });
+    expect(text()[0]).toBe('build-box · offline');
   });
 });
 
