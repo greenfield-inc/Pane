@@ -28,7 +28,7 @@ import { Dimmed } from '../hosts/ConnectionStatus';
 import { useAffordances } from '../hosts/hostSettings';
 import { useConnectionPresence } from '../hosts/useConnectionPresence';
 import { clearPaneNotifications } from '../notifications/device';
-import { LogsTab } from '../logs/LogsTab';
+import { LogsTab } from '../runScript/LogsTab';
 import { useAgentStatuses, useMarkPaneSeen } from '../panes/hooks';
 import { ShortcutsSheet } from '../shortcuts/ShortcutsSheet';
 import { PlaceholderTab } from '../tabs/PlaceholderTab';
