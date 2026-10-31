@@ -20,6 +20,9 @@ export async function openPaneTarget(target: { paneId: string; panelId?: string 
     if (!panels.some(panel => panel.id === target.panelId)) return;
     await panelApi.setActivePanel(target.paneId, target.panelId);
     usePanelStore.getState().setActivePanel(target.paneId, target.panelId);
+    // The Pane view applies the tab once this visit's layout has loaded, so it wins over
+    // the remembered layout, and expands the terminal dock for the dock terminal.
+    usePanelStore.getState().requestActivation({ sessionId: target.paneId, panelId: target.panelId });
   }
 
   await useSessionStore.getState().setActiveSession(target.paneId);

@@ -94,6 +94,8 @@ interface SessionSelectorValue {
 interface OrchestrationPanelOverview {
   panelId: string;
   title: string;
+  /** The tab's panel type (`terminal`, `browser`, `explorer`, ...). Absent on a missing panel and from daemons that predate it. */
+  type?: string;
   agentType?: RunpaneAgent;
   state: 'blocked' | 'working' | 'idle' | 'unknown';
   initialized: boolean;
@@ -1303,6 +1305,7 @@ export const runpaneSessionResultSchema: BoundarySchema<RunpaneSessionResult> = 
 const orchestrationPanelOverviewSchema = boundary.object({
   panelId: boundary.nonEmptyString,
   title: boundary.string,
+  type: boundary.optional(boundary.string),
   agentType: boundary.optional(agentSchema),
   state: boundary.enumeration('blocked', 'working', 'idle', 'unknown'),
   initialized: boundary.boolean,
@@ -2140,7 +2143,7 @@ export async function runSessionsOverview(parsed: ParsedArgs): Promise<number> {
   }
   console.log(`${result.session.name}: ${result.status}`);
   for (const pane of result.panes) {
-    const details = pane.missing ? 'missing' : pane.archived ? 'archived' : pane.panels.map(panel => `${panel.title}=${panel.state}`).join(', ') || 'no terminal panels';
+    const details = pane.missing ? 'missing' : pane.archived ? 'archived' : pane.panels.map(panel => `${panel.title}=${panel.type === undefined || panel.type === 'terminal' ? panel.state : panel.type}`).join(', ') || 'no panels';
     console.log(`  ${pane.name}: ${details}`);
     if (pane.panels.some(panel => panel.report)) {
       for (const panel of pane.panels) console.log(`    ${describePanelOverview(panel)}`);

@@ -248,9 +248,12 @@ unchanged, and ⌘1–9 number the Inbox rows while it is shown.
 
 The right sidebar has Overview, Files, and Changes tabs. Overview shows the
 Session's blockers, goal, next step, and decisions when they are set, then its
-Panes and recent activity. Agent state changes stay out of Activity; the status
-dot shows them. Files browses the Session workspace. Changes summarizes the
-Session's Panes and opens a Pane for detailed review. The upper-right sidebar
+Panes and recent activity. Each Pane card lists the Session's tabs in that Pane
+with their type icons: every tab when the Pane is linked whole, with Files and
+Changes last, or exactly the tabs a link names. Click a tab to open the Pane on
+it; Files and Changes open in the Pane's inspector. Agent state changes stay out
+of Activity; the status dot shows them. Files browses the Session workspace.
+Changes summarizes the Session's Panes and opens a Pane for detailed review. The upper-right sidebar
 button shows or hides the selected tab. A single Session uses two rows at the
 top: the window title bar shows its name and controls, and the tab strip sits
 directly below it. Session file clicks open editor tabs beside the agent tab in

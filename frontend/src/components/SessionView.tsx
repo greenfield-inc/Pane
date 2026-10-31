@@ -498,6 +498,16 @@ export const SessionView = memo(() => {
     };
   }, [activeSession?.id, addPanel, updatePanelState, removePanel, panels, applyLayout]);
 
+  // Terminal collapse state with localStorage persistence (collapsed by default)
+  const [isTerminalCollapsed, setIsTerminalCollapsed] = useState(() => {
+    const stored = localStorage.getItem('pane-terminal-collapsed');
+    return stored === null ? true : stored === 'true';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('pane-terminal-collapsed', String(isTerminalCollapsed));
+  }, [isTerminalCollapsed]);
+
   // Apply a requested tab once this visit's layout has loaded, so it wins over
   // the remembered one. A request for a panel this Pane lacks is dropped.
   const activationRequest = usePanelStore(state => activeSession ? state.activationRequests[activeSession.id] : undefined);
@@ -511,8 +521,13 @@ export const SessionView = memo(() => {
     const sessionPanelList = store.panels[sid] || [];
     const panel = sessionPanelList.find(p => p.id === activationRequest.panelId);
     if (!current || !panel) return;
-    // The dock and the inspector panels live outside the layout tree.
-    if (getDockTerminalPanel(sessionPanelList)?.id === panel.id || isInspectorPanelType(panel.type)) return;
+    // The dock and the inspector panels live outside the layout tree. Requesting
+    // the dock terminal expands the dock.
+    if (getDockTerminalPanel(sessionPanelList)?.id === panel.id) {
+      setIsTerminalCollapsed(false);
+      return;
+    }
+    if (isInspectorPanelType(panel.type)) return;
     const focusedGid = store.focusedGroupIds[sid];
     const group = (focusedGid && findGroup(current.root, focusedGid)) || primaryGroup(current.root);
     // A split request also moves a tab out of the primary group.
@@ -1675,16 +1690,6 @@ export const SessionView = memo(() => {
       setDetailVisible(v => !v);
     }
   }, [immersiveMode, setDetailVisible, swappedLayoutRendered, toggleDetailCollapse]);
-
-  // Terminal collapse state with localStorage persistence (collapsed by default)
-  const [isTerminalCollapsed, setIsTerminalCollapsed] = useState(() => {
-    const stored = localStorage.getItem('pane-terminal-collapsed');
-    return stored === null ? true : stored === 'true';
-  });
-
-  useEffect(() => {
-    localStorage.setItem('pane-terminal-collapsed', String(isTerminalCollapsed));
-  }, [isTerminalCollapsed]);
 
   const toggleTerminalCollapse = useCallback(() => {
     setIsTerminalCollapsed(prev => !prev);

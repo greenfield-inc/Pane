@@ -5480,7 +5480,7 @@
       "`sessions set-agent` switch the durable terminal agent for a named Session.",
       "`sessions associate` associate a user-visible Pane with a named Session.",
       "`sessions detach` detach a Pane from a named Session.",
-      "`sessions overview` read a live status, activity, git, and pull request overview for a named Session. Each panel in `panes[].panels[]` carries its own latest `runpane report` as `report`, so one call shows what every worker last reported and when (`reportedAt`, next to the panel's `state` and `lastActivityAt`). When a report's summary is a complete JSON object, such as a status file sent with `--summary-file`, `report.data` holds it exactly as the worker gave it; Pane never reads, renames or validates its fields. A summary that is not a JSON object (plain text, an array, a scalar or invalid JSON), is nested more than 64 levels deep, or was truncated (`summaryTruncated`), has no `data`. A panel that never reported has no `report`. `panes[].report` is still the newest report among the Pane's panels.",
+      "`sessions overview` read a live status, activity, git, and pull request overview for a named Session. Each panel in `panes[].panels[]` carries its own latest `runpane report` as `report`, so one call shows what every worker last reported and when (`reportedAt`, next to the panel's `state` and `lastActivityAt`). When a report's summary is a complete JSON object, such as a status file sent with `--summary-file`, `report.data` holds it exactly as the worker gave it; Pane never reads, renames or validates its fields. A summary that is not a JSON object (plain text, an array, a scalar or invalid JSON), is nested more than 64 levels deep, or was truncated (`summaryTruncated`), has no `data`. A panel that never reported has no `report`. `panes[].report` is still the newest report among the Pane's panels. Each panel also has `type` (`terminal`, `browser`, `editor`, `explorer`, `diff`, ...): a Pane linked whole lists every tab, with `explorer` and `diff` last, and a link that names tabs lists exactly those.",
       "`runpane lock acquire|release|list` coordinate a resource shared between agents, such as one test account. The caller's Pane and panel own the lock; it is scoped to the owner's Session (or global outside one), renews for the same owner, and is released on TTL expiry, owner panel exit, or owner Pane archive. `--wait` blocks in the daemon until the lock comes free.",
       "`runpane loops list|create|update|run|pause|resume|delete` manage loops (scheduled tasks): a cron schedule that starts a new Pane in a fresh worktree for each run, or sends a prompt to a Session's agent. Loops are for large recurring jobs and run at most once an hour; for short waits, agents use their harness's own sleep and wake. See [LOOPS.md](LOOPS.md).",
       "`runpane agents start|status|send` finish the three common agent jobs in one call each: start an agent on a task (a new tab in the work's Pane with `--pane <id>`, or a new Pane for new work), check on it, and send it a follow-up.",
@@ -11513,6 +11513,9 @@
                 "items": {
                   "type": "object",
                   "properties": {
+                    "type": {
+                      "type": "string"
+                    },
                     "report": {
                       "$ref": "#/jsonSchemas/panelReport"
                     }
@@ -17113,6 +17116,7 @@
         ],
         "notes": [
           "The result includes `locks`: named locks scoped to the Session or held by its Panes (see `runpane lock`).",
+          "Each `panes[].panels[]` entry has `type`, the tab's panel type (`terminal`, `browser`, `editor`, `explorer`, `diff`, `logs`, `notes`, `dashboard` or `setup-tasks`). A Pane linked whole lists every tab, with `explorer` and `diff` last; a link that names tabs lists exactly those. Only terminals carry an agent `state`; other tabs report `unknown` and do not change the Session's `status`. A missing panel has no `type`, and daemons that predate it omit it.",
           "Each `panes[].panels[]` entry has `report`, that panel's latest `runpane report` (state, `pr`, `head`, `question`, `summary`, `summaryTruncated`, `summaryPath`, `reportedAt`). When the summary is a complete JSON object, `report.data` holds it exactly as the worker gave it; Pane never reads or renames its fields. A plain-text, array or scalar summary, invalid JSON, JSON nested more than 64 levels deep, or a truncated summary (`summaryTruncated`) has no `data`. A panel that never reported has no `report` but keeps `state` and `lastActivityAt`. `panes[].report` is still the newest report among the Pane's panels, with its `panelId`; daemons that predate per-panel reports omit `panels[].report`."
         ]
       },

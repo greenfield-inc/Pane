@@ -170,9 +170,9 @@ def run_sessions_overview(parsed: Any) -> int:
             details = "archived"
         else:
             details = ", ".join(
-                f"{panel.get('title')}={panel.get('state')}"
+                f"{panel.get('title')}={panel.get('state') if panel.get('type', 'terminal') == 'terminal' else panel.get('type')}"
                 for panel in pane.get("panels", [])
-            ) or "no terminal panels"
+            ) or "no panels"
         print(f"  {pane.get('name')}: {details}")
         panels = pane.get("panels", [])
         report = pane.get("report")

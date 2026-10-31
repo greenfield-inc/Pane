@@ -4,7 +4,7 @@ import type { EditorPanelState, ToolPanel, ToolPanelType } from '../../../../sha
 import { getCliBrandIcon } from '../ui/brandIconRegistry';
 
 /** The tab icon for a panel type; an agent terminal gets its CLI's brand icon. Shared by desktop and the Remote Pane PWA. */
-export function getPanelIcon(type: ToolPanelType, panel?: ToolPanel, iconClass = 'w-4 h-4'): React.ReactNode {
+export function getPanelIcon(type: ToolPanelType, panel?: Pick<ToolPanel, 'title'> & Partial<Pick<ToolPanel, 'state'>>, iconClass = 'w-4 h-4'): React.ReactNode {
   switch (type) {
     case 'terminal': {
       if (panel?.title) {
