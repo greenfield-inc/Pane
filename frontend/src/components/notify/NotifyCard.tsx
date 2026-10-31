@@ -526,6 +526,7 @@ function QuestionCard({
   const rootRef = useRef<HTMLDivElement>(null);
   // The card's own keys, matching the key on each chip.
   useCardKeys(rootRef, Boolean(onFieldFocusRequest), (key) => {
+    if (item.agentPrompt?.inTerminal) return false;
     const index = /^[1-9]$/.test(key) ? Number(key) - 1 : -1;
     if (item.ui === 'options') {
       if (index >= 0 && index < (expanded ? choices.length : Math.min(choices.length, COMPACT_CHOICE_LIMIT))) {
@@ -561,6 +562,25 @@ function QuestionCard({
 
   const showContext = Boolean(item.context) && (expanded || item.ui === 'approve' || form === 'inbox');
   const recommended = recommendedIndex(choices);
+
+  // The agent stopped waiting on Pane; its terminal still asks, and answering there clears this.
+  if (item.agentPrompt?.inTerminal) {
+    return (
+      <div ref={rootRef} className={cardShell(form, narrow, className)} data-testid="notify-card" data-notify-ui={item.ui} data-notify-view="in-terminal">
+        <CardHeader item={item} form={form} queue={queue} onCommand={onCommand} menuPlacement={menuPlacement} machineMark={machineMark} />
+        <div className={cn(titleClass, 'line-clamp-3')} title={item.title}>{item.title}</div>
+        <div className={fieldPad}>
+          <div className="flex items-center gap-2 rounded-[9px] bg-surface-tertiary px-3 py-2.5 text-[13px] text-text-secondary" data-testid="notify-in-terminal">
+            <Info className="h-3.5 w-3.5 shrink-0" />
+            <span className="min-w-0 flex-1">{item.source.agent} is asking in the terminal now.</span>
+            {item.source.paneId && !item.elsewhere && (
+              <FooterLink onClick={() => onCommand({ type: 'open-in-pane', id: item.id })}>Open</FooterLink>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   let body: ReactNode = null;
   if (item.ui === 'options' && expanded) {

@@ -16,7 +16,8 @@ import { useMachinePrefs } from '@/features/machines/machinePrefs';
 import { PaneLogo } from '@/features/machines/PaneLogo';
 import { useMachines } from '@/features/machines/useMachines';
 import { useNotifyShared } from '@/features/notify/hooks';
-import { waitingQuestions } from '@/features/notify/notifyQuestions';
+import { AgentPromptActions } from '@/features/notify/AgentPromptActions';
+import { isAgentPrompt, waitingQuestions } from '@/features/notify/notifyQuestions';
 import { openNotifySheet } from '@/features/notify/NotifySheet';
 import { useTheme, withAlpha } from '@/theme';
 import { Icon, Text } from '@/ui';
@@ -319,14 +320,17 @@ export function PaneListScreen() {
                   <SectionHeader title="Waiting on you" count={waitingCount} first />
                   <View style={[styles.waitingCard, { borderRadius: theme.radius.card, backgroundColor: withAlpha(theme.colors.warning, 0.09) }]}>
                     {questions.map((item, index) => (
-                      <WaitingRow
-                        key={item.id}
-                        testID={`notify-row-${item.id}`}
-                        name={item.source.name}
-                        detail={item.title}
-                        divided={index > 0}
-                        onPress={() => openNotifySheet(item.id, item.source.paneId)}
-                      />
+                      <View key={item.id}>
+                        <WaitingRow
+                          testID={`notify-row-${item.id}`}
+                          name={item.source.name}
+                          detail={item.title}
+                          divided={index > 0}
+                          // Only the terminal can answer it now: open its Pane.
+                          onPress={() => (item.agentPrompt?.inTerminal && item.source.paneId ? openPane(item.source.paneId) : openNotifySheet(item.id, item.source.paneId))}
+                        />
+                        {isAgentPrompt(item) ? <AgentPromptActions item={item} inset={33} /> : null}
+                      </View>
                     ))}
                     {waiting.map((request, index) => {
                       const { title, target } = describePermission(request);

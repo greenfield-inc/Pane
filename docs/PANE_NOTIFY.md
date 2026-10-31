@@ -27,6 +27,41 @@ runpane notify --ui options --title "Which session store should the refactor use
   --choices '[{"label":"Postgres table","recommended":true},{"label":"Keep Redis"}]'
 ```
 
+## Claude's own prompts
+
+Claude tabs Pane starts also ask their permission and plan prompts in Notify,
+without the agent calling `notify`. The terminal shows the prompt as usual;
+the first answer from the terminal, the inbox, the strip or the phone wins.
+
+- **Desktop Notify** shows Claude's choices: Yes, each "Yes, and don't ask
+  again for …" or "Yes, and allow access to …" that Claude suggests, and No.
+  A note on No tells Claude what to do instead; without one, Claude stops and
+  waits, as No does in the terminal. A plan shows its text with "Yes, and
+  auto-accept edits", "Yes, and manually approve edits" and "No, keep
+  planning".
+- **The phone** lists the prompt under "Waiting on you" with **Yes** and
+  **No**, and its alert carries the same two buttons. The question's sheet has
+  every choice.
+- **Answered in the terminal**: Pane closes the question and lists it in
+  Earlier today as "Answered in the terminal".
+- **After 10 minutes** Claude stops waiting on Pane. The question stays, says
+  "Claude is asking in the terminal now" with **Open**, and loses its choices;
+  answering in the terminal clears it.
+- **The first prompt** after an update adds a one-time note to the inbox.
+
+How it works: each Claude launch gets an http `PermissionRequest` hook aimed
+at a loopback endpoint on the machine running it, with a token for that tab.
+Claude reads only the last `--settings` flag, so Pane writes one settings file
+per tab (owner-only, in `claude-prompts` under Pane's data folder) that merges
+its hooks with any `--settings` the command already passes, and launches with
+that file instead. A command whose `--settings` Pane can't read launches
+unchanged. Wrapped launches, commands that don't start with `claude`, SSH tabs
+and WSL tabs keep their command, and their prompts stay in the terminal.
+
+Turn it off in **Settings → AI & Agents → Answer prompts from Pane**. Off
+takes effect at once; a tab started while it was off picks it up when it
+restarts.
+
 ## Long waits
 
 A question waits until you answer it. How the call stays open depends on the

@@ -10,7 +10,7 @@ import type { ToolPanel } from '../../../../shared/types/panels';
 import { getAppDirectory } from '../../utils/appDirectory';
 import { findExecutableInPath } from '../../utils/shellPath';
 import { getPaneEventSink, getRuntimeConfigManager } from '../../core/runtime';
-import { quoteShellWord } from '../agents/shellWord';
+import { withClaudePromptHooks } from '../claudePrompts';
 import { claudeChatProfile, codexChatProfile, type CodexChatProfile } from './launchProfile';
 import { CodexProcess, CODEX_TOKEN_ENV } from './codexProcess';
 import { hostCommand, nativeCommand, providerScript } from './hostCommand';
@@ -379,7 +379,8 @@ export class AgentChatManager {
       ...(saved.launch.additionalDirectories ?? []).flatMap(directory => ['--add-dir', directory]),
       '--resume', saved.conversation.nativeSessionId,
     ], shellType) : command;
-    const augmented = `${base} --settings ${quoteShellWord(settingsFile, shellType)}`;
+    // Claude reads one --settings flag; the Chat journal's hooks join Pane's prompt hooks in its file.
+    const augmented = withClaudePromptHooks(panel.id, base, cwd, shellType, nativeChatHookSettings(journalFile));
     this.launchInputs.set(panel.id, `${augmented}\r`);
     return augmented;
   }

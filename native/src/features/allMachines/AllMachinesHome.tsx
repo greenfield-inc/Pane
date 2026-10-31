@@ -6,6 +6,9 @@ import { Alert, Pressable, StyleSheet, View } from 'react-native';
 import { MachineBadge } from '@/features/machines/MachineBadge';
 import { MachineMark } from '@/features/machines/MachineMark';
 import type { Machine } from '@/features/machines/machines';
+import { useHostsStore } from '@/auth/hostsStore';
+import { AgentPromptActions } from '@/features/notify/AgentPromptActions';
+import { isAgentPrompt } from '@/features/notify/notifyQuestions';
 import { openNotifySheet } from '@/features/notify/NotifySheet';
 import { LoadingRows, Notice, SectionHeader } from '@/features/panes/PaneKit';
 import { describePermission } from '@/features/panes/permissions';
@@ -55,6 +58,7 @@ export function AllMachinesHome({ machines, feeds, currentKey, loading, refreshi
   bottomPadding: number;
 }) {
   const theme = useTheme();
+  const profiles = useHostsStore(state => state.profiles);
   const [query, setQuery] = useState('');
   const { waiting, recent } = buildAllMachinesList(feeds, query);
   const machineOf = (key: string) => machines.find(machine => machine.key === key);
@@ -91,6 +95,12 @@ export function AllMachinesHome({ machines, feeds, currentKey, loading, refreshi
     if (row.stale) return sayOffline(row.machineKey, row.type === 'question' ? 'question' : 'request');
     const here = row.machineKey === currentKey;
     if (row.type === 'question') {
+      // Only the terminal can answer it now: open its Pane.
+      if (row.item.agentPrompt?.inTerminal && row.item.source.paneId) {
+        if (here) actions.openPane(row.item.source.paneId);
+        else router.push({ pathname: '/open', params: { host: row.machineKey, paneId: row.item.source.paneId } });
+        return;
+      }
       // Another machine's question answers there, without switching.
       openNotifySheet(row.item.id, row.item.source.paneId, here ? undefined : row.machineKey);
     } else if (here) {
@@ -109,9 +119,10 @@ export function AllMachinesHome({ machines, feeds, currentKey, loading, refreshi
             {waiting.map((row, index) => {
               const machine = machineOf(row.machineKey);
               const permission = row.type === 'permission' ? describePermission(row.request) : null;
+              const prompt = row.type === 'question' && isAgentPrompt(row.item) ? row.item : null;
               return (
+                <View key={row.key}>
                 <AllRow
-                  key={row.key}
                   testID={row.type === 'question' ? `notify-row-${row.item.id}` : `permission-row-${row.request.sessionId}`}
                   title={row.type === 'question' ? row.item.source.name : row.paneName}
                   detail={row.type === 'question' ? row.item.title : permission?.target ? `${permission.title}: ${permission.target}` : permission?.title ?? ''}
@@ -121,6 +132,14 @@ export function AllMachinesHome({ machines, feeds, currentKey, loading, refreshi
                   leading={<StatusBadge status="blocked" />}
                   onPress={() => openWaiting(row)}
                 />
+                {prompt ? (
+                  <AgentPromptActions
+                    item={prompt}
+                    machine={row.machineKey === currentKey ? null : profiles.find(profile => profile.id === row.machineKey) ?? null}
+                    offline={row.stale ? machine?.name ?? 'Its machine' : undefined}
+                  />
+                ) : null}
+                </View>
               );
             })}
           </View>

@@ -10,6 +10,8 @@ import { getMobilePushSender } from '../daemon/mobilePushSender';
 import { panelManager } from '../services/panelManager';
 import { terminalPanelManager } from '../services/terminalPanelManager';
 import { NotifyService } from '../services/notify/notifyService';
+import { ClaudePromptBridge } from '../services/claudePrompts/claudePromptBridge';
+import { setClaudePromptBridge } from '../services/claudePrompts';
 import type { MachineConnections } from '../services/machineConnections';
 import { LOCAL_MACHINE_ID, type MachineState } from '../../../shared/types/machineConnections';
 import { buildWindowAppearanceOptions } from '../services/appearanceService';
@@ -92,6 +94,7 @@ const notifyItemSchema = boundary.object({
   detailLabel: boundary.optional(boundary.string),
   suggestions: boundary.optional(boundary.array(boundary.string)),
   action: boundary.optional(boundary.object({ label: boundary.nonEmptyString, url: boundary.nonEmptyString })),
+  agentPrompt: boundary.optional(boundary.object({ yes: boundary.string, no: boundary.string, inTerminal: boundary.optional(boundary.boolean) })),
   source: boundary.object({
     paneId: boundary.optional(boundary.string),
     panelId: boundary.optional(boundary.string),
@@ -221,7 +224,46 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
   });
   for (const window of BrowserWindow.getAllWindows()) window.on('closed', () => notify.closeFloatingWindowsIfAlone());
   app.on('will-quit', () => notify.dispose());
+  startClaudePrompts(notify, services);
   return notify;
+}
+
+/** Seconds Claude holds a prompt's hook before it stops waiting on Pane; tests shorten it. */
+const CLAUDE_PROMPT_TIMEOUT_SECONDS = Number(process.env.PANE_CLAUDE_PROMPT_TIMEOUT_SECONDS) || 600;
+
+/** Claude tabs Pane starts ask their permission and plan prompts here too (Settings → AI agents). */
+function startClaudePrompts(notify: NotifyService, services: NotifyServices): void {
+  const { configManager } = services;
+  const bridge = new ClaudePromptBridge({
+    queue: notify.queue,
+    source: (panelId) => {
+      const panel = panelManager.getPanel(panelId);
+      const pane = panel ? services.sessionManager.getSession(panel.sessionId) : undefined;
+      return panel && pane && !pane.archived ? { paneId: pane.id, panelId, name: pane.name, agent: 'Claude' } : undefined;
+    },
+    enabled: () => configManager.getConfig().answerPromptsFromPane !== false,
+    hookTimeoutSeconds: CLAUDE_PROMPT_TIMEOUT_SECONDS,
+    onPrompt: () => {
+      // The switch starts on for everyone (D-120), so the first prompt says where it came from once.
+      if (configManager.getConfig().claudePromptsNoteShown) return;
+      void configManager.updateConfig({ claudePromptsNoteShown: true });
+      void notify.queue.ask({
+        question: {
+          ui: 'info',
+          title: "Claude's prompts now show here",
+          context: 'Pane asks the permission and plan prompts of the Claude tabs it starts in Notify and on your phone. The terminal still asks too; the first answer wins. Turn it off in Settings → AI agents → Answer prompts from Pane.',
+        },
+        source: { name: 'Pane', agent: 'Pane' },
+      });
+    },
+  });
+  bridge.start().then(() => setClaudePromptBridge(bridge)).catch((error: Error) => {
+    console.warn("[Claude prompts] Pane couldn't listen for Claude's prompts; they stay in the terminal:", error);
+  });
+  app.on('will-quit', () => {
+    setClaudePromptBridge(undefined);
+    void bridge.stop();
+  });
 }
 
 /** What Notify uses of the machine connections (main/src/services/machineConnections.ts). */

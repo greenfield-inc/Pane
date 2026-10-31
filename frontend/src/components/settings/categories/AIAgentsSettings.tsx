@@ -105,6 +105,18 @@ export function AIAgentsSettings({ persistence, onDirtyChange }: AIAgentsSetting
           />
         </SettingRow>
         <SettingRow
+          settingId="answer-prompts-from-pane"
+          label="Answer prompts from Pane"
+          description="Claude tabs Pane starts also ask their permission and plan prompts in Notify and on your phone, through hooks Pane adds to each launch. The terminal still asks; the first answer wins. Turning it off takes effect at once; tabs started while it was off pick it up when they restart."
+          saveState={persistence.saveStates['answer-prompts-from-pane']}
+        >
+          <ImmediateToggle
+            label="Answer prompts from Pane"
+            value={config.answerPromptsFromPane !== false}
+            onSave={(value) => persistence.saveConfig('answer-prompts-from-pane', { answerPromptsFromPane: value })}
+          />
+        </SettingRow>
+        <SettingRow
           settingId="agent-skill"
           label="Install Pane skill for agents"
           description="Adds a Pane-managed skill to your home skill folders (~/.claude/skills and ~/.agents/skills) so agents in Pane terminals know how to use RunPane. Pane never touches skills it did not create; turning this off removes its skill."

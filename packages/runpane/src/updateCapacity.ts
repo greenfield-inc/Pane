@@ -22,7 +22,7 @@ export const PANE_STATE_FOLDERS = [
 /** Top-level folders Pane writes that the snapshot leaves out. */
 export const PANE_UNSNAPSHOTTED_FOLDERS = [
   // Rebuilt by Pane at startup or on demand.
-  '.claude', '.codex', '.cursor', 'agent-adapters', 'bin', 'shell', 'tools',
+  '.claude', '.codex', '.cursor', 'agent-adapters', 'bin', 'claude-prompts', 'shell', 'tools',
   // Live IPC endpoints, and the update operations themselves.
   'sockets', 'updates',
   // Repositories Pane clones for the person; no update migrates them.

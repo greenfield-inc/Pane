@@ -494,6 +494,8 @@ function providerReadiness(platform: RemoteMobilePlatform, apns: ApnsCredentialC
 function notifyButtons(item: NotifyItem): NotifyAlertButtons {
   if (item.ui === 'approve') return { category: NOTIFY_CATEGORIES.approve };
   if (item.ui === 'ask') return { category: NOTIFY_CATEGORIES.ask };
+  // An agent's prompt offers the phone list's Yes and No; the rest of its choices need the card.
+  if (item.agentPrompt) return { category: NOTIFY_CATEGORIES.options, choices: [item.agentPrompt.yes, item.agentPrompt.no] };
   const choices = item.choices ?? [];
   if (item.ui !== 'options' || choices.length === 0 || choices.length > NOTIFY_MAX_CHOICE_BUTTONS) return {};
   const ordered = [...choices.filter(choice => choice.recommended), ...choices.filter(choice => !choice.recommended)];

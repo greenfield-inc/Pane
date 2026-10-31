@@ -121,6 +121,7 @@ import { readForegroundExecutablePath, readForegroundProcessGroup } from '../uti
 import { buildCursorLaunchCommand, createCursorReadyDetector, extractCursorChatId } from './agents/cursorLaunch';
 import { resolveOpenCodeLaunchCommand } from './agents/opencodeLaunch';
 import { isPosixShell, quoteShellWord } from './agents/shellWord';
+import { forgetClaudePrompts, withClaudePromptHooks } from './claudePrompts';
 import {
   bracketedPaste,
   canLaunchWithPromptFile,
@@ -519,6 +520,10 @@ export class TerminalPanelManager extends EventEmitter {
         throw new PaneError('ERR_UPDATE_CONVERSATION', `Panel ${panelId} could not reopen its exact recorded conversation. No command or input was sent.`, 'Review the saved panel and resume the intended conversation manually.');
       }
       resolution.customState = { ...resolution.customState, initialInput: undefined, initialInputFile: undefined, updateResumeId: undefined };
+    }
+    const state = resolution.customState;
+    if (resolution.isCliCommand && state.agentType === 'claude' && !isWSL && !state.sshHost && state.launchMode !== 'wrapped' && !state.preserveLaunchCommand) {
+      resolution.commandToRun = withClaudePromptHooks(panelId, resolution.commandToRun, state.cwd ?? process.cwd(), shellType);
     }
     return resolution;
   }
@@ -3063,6 +3068,7 @@ export class TerminalPanelManager extends EventEmitter {
 
   private async finishDestroyTerminal(terminal: TerminalProcess, saveState: boolean): Promise<void> {
     const panelId = terminal.panelId;
+    forgetClaudePrompts(panelId);
     // Start the snapshot alongside persistence, but finish it before kill: once
     // the shell exits its surviving children may no longer be discoverable, and
     // the PTY's terminal name only identifies its session while Pane holds it.

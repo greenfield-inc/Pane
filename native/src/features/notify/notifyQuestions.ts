@@ -33,6 +33,7 @@ export function notifySheetState(shared: NotifySharedState, notifyId: string, an
   const sentTo = `Sent to ${item.source.agent}`;
   switch (item.state) {
     case 'waiting': {
+      if (item.agentPrompt?.inTerminal) return { kind: 'closed', message: `${item.source.agent} is asking in the terminal now. Open the Pane to answer.` };
       const olderThanAnswer = answeredHere !== null && shared.epoch === answeredHere.epoch && shared.revision <= answeredHere.revision;
       return olderThanAnswer ? { kind: 'held', title: sentTo } : { kind: 'question', item };
     }
@@ -52,4 +53,11 @@ export function notifySheetState(shared: NotifySharedState, notifyId: string, an
 /** Questions still waiting for an answer, oldest first. */
 export function waitingQuestions(state: NotifySharedState | undefined): NotifyItem[] {
   return (state?.items ?? []).filter(item => item.state === 'waiting').sort((a, b) => a.createdAt - b.createdAt);
+}
+
+/** A question that mirrors an agent's terminal prompt, which the phone list answers in place with Yes or No. */
+export type AgentPromptItem = NotifyItem & { agentPrompt: NonNullable<NotifyItem['agentPrompt']> };
+
+export function isAgentPrompt(item: NotifyItem): item is AgentPromptItem {
+  return item.agentPrompt !== undefined;
 }
