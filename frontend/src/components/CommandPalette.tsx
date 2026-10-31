@@ -26,7 +26,7 @@ import { API } from '../utils/api';
 import { cn } from '../utils/cn';
 import { MachineBadge } from './machines/MachineBadge';
 import { useAllMachinesTree } from '../hooks/useAllMachinesTree';
-import { useAllMachinesStore } from '../stores/allMachinesStore';
+import { isAllMachinesOn, useAllMachinesStore } from '../stores/allMachinesStore';
 import { openOnMachine, runOnMachine } from '../utils/machineRowActions';
 import type { MachineRef } from '../utils/allMachinesTree';
 import {
@@ -223,7 +223,7 @@ export function CommandPalette({ isOpen, onClose, projects, onNewPane }: Command
   );
 
   // In All machines the launcher searches every machine's rows, each labelled with its machine.
-  const allMachines = useAllMachinesStore(s => s.enabled);
+  const allMachines = useAllMachinesStore(isAllMachinesOn);
   const { views: machineViews } = useAllMachinesTree();
 
   // Rebuilt when the launcher opens or its sources change, never per keystroke.

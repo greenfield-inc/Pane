@@ -32,7 +32,7 @@ import { useMachines } from '../hooks/useMachines';
 import { MachineMark, MachineMarkStack } from './machines/MachineMark';
 import { RemoteHostSwitcher } from './RemoteHostSwitcher';
 import { AllMachinesSidebar } from './machines/AllMachinesSidebar';
-import { startAllMachinesFeed, useAllMachinesStore } from '../stores/allMachinesStore';
+import { isAllMachinesOn, startAllMachinesFeed, useAllMachinesStore } from '../stores/allMachinesStore';
 import { isMissionControlEnabled, useConfigStore } from '../stores/configStore';
 import { usePanelStore } from '../stores/panelStore';
 import { rollupAgentDisplayStatus, rollupSessionAgentState, toAgentDisplayStatus } from '../utils/agentStatus';
@@ -272,7 +272,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
   const activeMachine = machines.find((machine) => machine.active) ?? machines[0];
   // Hidden only while no other machine is saved or on Tailscale.
   const switcherVisible = machines.length > 1 || remoteConnectionState.mode === 'remote';
-  const allMachines = useAllMachinesStore((state) => state.enabled);
+  const allMachines = useAllMachinesStore(isAllMachinesOn);
   const setAllMachines = useAllMachinesStore((state) => state.setEnabled);
   // Saved machines and this computer: the ones All machines lists.
   const savedMachines = useMemo(() => machines.filter((machine) => machine.kind === 'local' || machine.profile), [machines]);
@@ -280,12 +280,13 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
   useEffect(() => {
     useAllMachinesStore.setState({
       entries: machines.map(({ id, name, os, slot, active }) => ({ id, name, os, slot, active })),
+      menuShown: switcherVisible,
       switchMachine: async (machineId) => {
         const machine = machines.find((entry) => entry.id === machineId);
         return machine ? selectMachine(machine) : { ok: false, error: 'That machine is no longer saved.' };
       },
     });
-  }, [machines, selectMachine]);
+  }, [machines, selectMachine, switcherVisible]);
   useEffect(() => (allMachines ? startAllMachinesFeed() : undefined), [allMachines]);
   const switcherLabel = allMachines ? 'Showing all machines. Switch machine' : `Agents run on ${activeMachine.name}. Switch machine`;
   const renderRemoteHostSwitcher = (trigger: React.ReactElement, position: 'bottom-left' | 'top-right') => (

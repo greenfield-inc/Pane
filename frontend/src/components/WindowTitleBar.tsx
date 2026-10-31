@@ -3,7 +3,7 @@ import { isArchivedOrchestrationSession, useOrchestrationSessionStore } from '..
 import { useNavigationStore } from '../stores/navigationStore';
 import { useSessionStore } from '../stores/sessionStore';
 import { useTitleBarSlotStore } from '../stores/titleBarSlotStore';
-import { useAllMachinesStore } from '../stores/allMachinesStore';
+import { isAllMachinesOn, useAllMachinesStore } from '../stores/allMachinesStore';
 import type { Project } from '../types/project';
 import { APP_WINDOW_TITLE, formatPaneTitle, resolvePaneStatusPills, resolvePaneTitle } from '../utils/paneTitle';
 import { isMac } from '../utils/platformUtils';
@@ -125,7 +125,7 @@ export function WindowTitleBar({ projects, sidebarWidth, sidebarCollapsed, contr
     : activeView === 'pane-chat' && orchestrationName ? { project: 'Session', pane: orchestrationName } : null;
   const windowTitle = formatPaneTitle(title);
   // In All machines every row comes from some machine, so the header names the one this is on.
-  const allMachines = useAllMachinesStore(state => state.enabled);
+  const allMachines = useAllMachinesStore(isAllMachinesOn);
   const activeMachineName = useAllMachinesStore(state => state.entries.find(entry => entry.active)?.name ?? null);
   const offlineNotice = useAllMachinesStore(state => state.offlineNotice);
   const offlineMachineName = useAllMachinesStore(state => state.entries.find(entry => entry.id === state.offlineNotice?.machineId)?.name ?? null);

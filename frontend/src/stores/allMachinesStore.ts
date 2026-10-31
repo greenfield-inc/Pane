@@ -76,6 +76,8 @@ interface AllMachinesState {
   snapshots: Record<string, MachineSnapshot>;
   /** The pill menu's machines, for names, OS and colour. */
   entries: MachineEntryRef[];
+  /** The sidebar shows the machine menu, the only control that leaves All machines. */
+  menuShown: boolean;
   /** Today's switch, registered by the sidebar that owns the machine menu. */
   switchMachine: ((machineId: string) => Promise<MachineSelectOutcome>) | null;
   /** Shown in place of the Pane view after opening a row on an offline machine. */
@@ -91,6 +93,7 @@ export const useAllMachinesStore = create<AllMachinesState>((set) => ({
   machines: [],
   snapshots: {},
   entries: [],
+  menuShown: false,
   switchMachine: null,
   offlineNotice: null,
   clock: 0,
@@ -231,6 +234,11 @@ export function startAllMachinesFeed(): () => void {
     again.clear();
     if (graceTimer) clearTimeout(graceTimer);
   };
+}
+
+/** All machines is on and its menu is shown: with the menu hidden, today's sidebar shows, so the mode can't trap you. */
+export function isAllMachinesOn(state: Pick<AllMachinesState, 'enabled' | 'menuShown'>): boolean {
+  return state.enabled && state.menuShown;
 }
 
 /** Offline past its grace: its rows dim and opening one says so. */
