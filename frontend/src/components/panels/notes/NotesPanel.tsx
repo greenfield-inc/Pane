@@ -128,6 +128,7 @@ export default function NotesPanel({ paneId, capture, viewId = 'panel' }: NotesP
         <IconButton aria-label="New note" title="New note" icon={<Plus size={16} />} disabled={!scope} onClick={() => void create()} />
       </div>
     </header>
+    {context?.notesEnabled === false && <p className="shrink-0 px-4 pt-3 text-[13px] text-text-tertiary">Turn on Notes on {machine ?? 'this computer'} so its agents read these.</p>}
     {(error || (!current && exports.some(result => result.error))) && <div className="shrink-0 space-y-2 px-4 pt-3">
       {error && <p role="alert" className={alert}>{error}</p>}
       {!current && exports.some(result => result.error) && <div role="alert" className={alert}>

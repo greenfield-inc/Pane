@@ -14,7 +14,11 @@ export interface Note {
   blocks: NoteBlock[];
   createdAt: string;
 }
-export interface NoteContext { scopes: { scope: NoteScope; name: string }[]; defaultScope: NoteScope }
+export interface NoteContext {
+  scopes: { scope: NoteScope; name: string }[]; defaultScope: NoteScope;
+  /** Whether Notes is on for the machine that answered, so its agents read the notes. Older hosts omit it. */
+  notesEnabled?: boolean;
+}
 export interface NoteExportResult { agent: string; path: string; error?: string }
 export interface NoteSaveResult { note: Note; exports: NoteExportResult[] }
 export interface NoteMutation {

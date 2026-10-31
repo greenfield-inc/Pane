@@ -43,7 +43,10 @@ export function registerNotesHandlers(ipcMain: IpcMain, services: AppServices, c
       scopes.push({ scope: { kind: 'project', id: String(project.id) }, name: project.name });
       if (!pane.isMainRepo) scopes.push({ scope: { kind: 'feature', id: paneId }, name: pane.name });
     }
-    return { scopes: [...scopes, { scope: GLOBAL, name: 'All projects' }], defaultScope: scopes[0].scope };
+    return {
+      scopes: [...scopes, { scope: GLOBAL, name: 'All projects' }], defaultScope: scopes[0].scope,
+      notesEnabled: services.configManager.getConfig().notesEnabled === true,
+    };
   }
 
   function publish(changed?: NoteScope[]): NoteExportResult[] {

@@ -128,6 +128,21 @@ describe('Notes IPC delivery', () => {
     expect(listed).toEqual([expect.objectContaining({ title: 'Written from the other desktop' })]);
   });
 
+  it('tells the Notes tab whether Notes is on for this machine, so its agents read the notes', async () => {
+    const { registry, config } = fixture();
+    expect(await registry.invokeRemote('notes:context', ['a'])).toMatchObject({ notesEnabled: true });
+    config.notesEnabled = false;
+    expect(await registry.invokeRemote('notes:context', ['a'])).toEqual({
+      scopes: [
+        { scope: { kind: 'project', id: '1' }, name: 'Project 1' },
+        { scope: { kind: 'feature', id: 'a' }, name: 'a' },
+        { scope: { kind: 'global', id: 'user' }, name: 'All projects' },
+      ],
+      defaultScope: { kind: 'project', id: '1' },
+      notesEnabled: false,
+    });
+  });
+
   it('keeps scoped notes away from agents while experimental Notes is off and restores them when turned back on', async () => {
     const { mutate, config, configManager } = fixture();
     config.agentContext.managedAgentsMd = true;
