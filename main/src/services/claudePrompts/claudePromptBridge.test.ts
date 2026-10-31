@@ -170,6 +170,32 @@ describe('ClaudePromptBridge', () => {
     expect(ctx.queue.snapshot().items[0]).toMatchObject({ state: 'answered', answerSummary: ANSWERED_IN_TERMINAL });
   });
 
+  it('drops a Notify answer still in its Undo hold when Claude stops waiting on the hook, and leaves the question to the terminal', async () => {
+    const ctx = await setup();
+    bridge = ctx.bridge;
+    const timeout = new AbortController();
+    const response = ctx.call({ hook_event_name: 'PermissionRequest', tool_name: 'Bash', tool_input: input }, { signal: timeout.signal }).catch(() => 'cancelled');
+    const item = await ctx.waiting();
+
+    ctx.queue.runRemote({ type: 'answer', id: item.id, answer: { choice: 'Yes' } }, 'iPhone');
+    expect(ctx.queue.snapshot().items[0].state).toBe('sent');
+    timeout.abort();
+    expect(await response).toBe('cancelled');
+
+    await vi.waitFor(() => expect(ctx.queue.snapshot().items[0]).toMatchObject({ state: 'waiting', agentPrompt: { inTerminal: true } }));
+    const handedOver = ctx.queue.snapshot().items[0];
+    expect(handedOver.answerSummary).toBeUndefined();
+    expect(handedOver.answeredOn).toBeUndefined();
+    expect(ctx.queue.snapshot().queue).toEqual([item.id]);
+    // Undo has nothing left to restore, and the hold never delivers.
+    expect(() => ctx.queue.runRemote({ type: 'undo', id: item.id }, 'iPhone')).toThrow();
+    await new Promise(resolve => setTimeout(resolve, 3_300));
+    expect(ctx.queue.snapshot().items[0]).toMatchObject({ state: 'waiting', agentPrompt: { inTerminal: true } });
+
+    await ctx.call({ hook_event_name: 'Stop' });
+    expect(ctx.queue.snapshot().items[0]).toMatchObject({ state: 'answered', answerSummary: ANSWERED_IN_TERMINAL });
+  });
+
   it('refuses a request without a live tab token, and asks nothing while the setting is off', async () => {
     const ctx = await setup();
     bridge = ctx.bridge;

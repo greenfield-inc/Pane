@@ -384,11 +384,13 @@ export class NotifyQueue extends EventEmitter {
 
   /**
    * An agent prompt's agent stopped waiting on Pane, but its terminal still asks: the question stays
-   * waiting, without choices, until `settle` closes it.
+   * waiting, without choices, until `settle` closes it. An answer still in its Undo hold never
+   * reached the agent, so it is dropped and the question waits on the terminal again.
    */
   handOver(id: string): void {
     const entry = this.entries.get(id);
-    if (!entry?.item.agentPrompt || entry.item.state !== 'waiting' || entry.item.agentPrompt.inTerminal) return;
+    if (!entry?.item.agentPrompt || !isOpen(entry.item) || entry.item.agentPrompt.inTerminal) return;
+    if (entry.item.state === 'sent') this.reopen(entry);
     entry.item.agentPrompt = { ...entry.item.agentPrompt, inTerminal: true };
     this.changed();
   }
@@ -554,6 +556,13 @@ export class NotifyQueue extends EventEmitter {
   private undo(id: string): void {
     const entry = this.entries.get(id);
     if (!entry || entry.item.state !== 'sent') return;
+    this.reopen(entry);
+    this.changed();
+  }
+
+  /** Cancels an answer in its Undo hold: the question waits again, first in line. */
+  private reopen(entry: Entry): void {
+    const id = entry.item.id;
     clearTimeout(entry.holdTimer);
     entry.holdTimer = undefined;
     entry.item.state = 'waiting';
@@ -561,7 +570,6 @@ export class NotifyQueue extends EventEmitter {
     entry.item.answeredOn = undefined;
     this.queue = [id, ...this.queue];
     if (this.transient?.view.itemId === id) this.clearTransient();
-    this.changed();
   }
 
   /** The caller stopped waiting: the card says so, then moves to Earlier today as Expired. */

@@ -60,6 +60,34 @@ describe('claudePromptQuestion', () => {
     expect(decide('No, keep planning', 'Split step 2')).toEqual({ behavior: 'deny', message: 'The user wants to keep planning. The user answered this prompt in Pane and wrote: Split step 2' });
   });
 
+  it('shows the whole of a long command, so Yes never approves a part the person could not read', () => {
+    const command = `${'echo step; '.repeat(410)}rm -rf ~/.ssh`;
+    const { question } = claudePromptQuestion({ ...bashPrompt, tool_input: { command, description: 'Run the generated script' } }, 'acme-web');
+
+    expect(command.length).toBeGreaterThan(4_000);
+    expect(question.context).toBe(`Run the generated script\n\n${command}`);
+    expect(question.agentPrompt?.inTerminal).toBeUndefined();
+  });
+
+  it('leaves a command too long to show in full to the terminal, with no choices in Pane', () => {
+    const command = `${'x'.repeat(40_000)} && rm -rf ~/.ssh`;
+    const { question } = claudePromptQuestion({ ...bashPrompt, tool_input: { command } }, 'acme-web');
+
+    expect(question.agentPrompt).toEqual({ yes: 'Yes', no: 'No', inTerminal: true });
+    expect(question.context).toMatch(/^This command is 40,\d{3} characters, too long to show here in full\. Answer in the terminal/);
+  });
+
+  it('applies the same rule to plans and other tools: whole details, or the terminal', () => {
+    const plan = `${'1. A step\n'.repeat(600)}2. Delete the staging database`;
+    const exitPlan = (text: string) => claudePromptQuestion({ hook_event_name: 'PermissionRequest', session_id: 's-1', cwd, tool_name: 'ExitPlanMode', tool_input: { plan: text } }, 'acme-web').question;
+    expect(exitPlan(plan).context).toBe(plan);
+    expect(exitPlan(plan.repeat(10)).agentPrompt?.inTerminal).toBe(true);
+
+    const body = 'b'.repeat(5_000);
+    const mcp = claudePromptQuestion({ hook_event_name: 'PermissionRequest', session_id: 's-1', cwd, tool_name: 'mcp__github__create_issue', tool_input: { body } }, 'acme-web').question;
+    expect(mcp.context).toBe(JSON.stringify({ body }, null, 2));
+  });
+
   it('names MCP tools by tool and server', () => {
     const { question } = claudePromptQuestion({ hook_event_name: 'PermissionRequest', session_id: 's-1', cwd, tool_name: 'mcp__github__create_issue', tool_input: { title: 'Bug' } }, 'acme-web');
     expect(question.title).toBe('Use create_issue from github?');

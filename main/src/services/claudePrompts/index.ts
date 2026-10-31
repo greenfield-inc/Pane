@@ -21,7 +21,8 @@ export function forgetClaudePrompts(panelId: string): void {
  * A direct Claude launch in `panelId` with Pane's prompt hooks, and any `extra` settings, merged
  * into the one `--settings` file Claude reads (owner-only, in Pane's app folder). A command that
  * already names that file keeps the hooks it holds. Returns the command unchanged when there is
- * nothing to add, and undefined when Pane can't merge what the command already passes.
+ * nothing to add, and undefined when Pane can't merge what the command already passes or can't
+ * write the file; the caller then launches its own command, without Pane's prompt hooks.
  */
 export function withClaudePromptHooks(panelId: string, command: string, cwd: string, shellType: string | undefined, extra?: ClaudeSettings): string | undefined {
   const directory = getAppSubdirectory('claude-prompts');
@@ -34,7 +35,12 @@ export function withClaudePromptHooks(panelId: string, command: string, cwd: str
     console.warn(`[Claude prompts] Panel ${panelId} launches without Pane's prompt hooks: its command's --settings could not be merged.`);
     return undefined;
   }
-  mkdirSync(directory, { recursive: true, mode: 0o700 });
-  writeFileSync(file, JSON.stringify(merged.settings), { mode: 0o600 });
+  try {
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
+    writeFileSync(file, JSON.stringify(merged.settings), { mode: 0o600 });
+  } catch (error) {
+    console.warn(`[Claude prompts] Panel ${panelId} launches without Pane's prompt hooks: ${file} could not be written (${error instanceof Error ? error.message : String(error)}).`);
+    return undefined;
+  }
   return merged.command;
 }

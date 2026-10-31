@@ -44,9 +44,13 @@ the first answer from the terminal, the inbox, the strip or the phone wins.
   every choice.
 - **Answered in the terminal**: Pane closes the question and lists it in
   Earlier today as "Answered in the terminal".
+- **The whole command, plan or tool input** is on the card, so Yes never
+  approves something you couldn't read. One over 32,000 characters is too long
+  to show: its question offers no choices and says to answer in the terminal.
 - **After 10 minutes** Claude stops waiting on Pane. The question stays, says
   "Claude is asking in the terminal now" with **Open**, and loses its choices;
-  answering in the terminal clears it.
+  answering in the terminal clears it. An answer still in its 3-second Undo
+  hold then never reaches Claude, so it is dropped the same way.
 - **The first prompt** after an update adds a one-time note to the inbox.
 
 How it works: each Claude launch gets an http `PermissionRequest` hook aimed
@@ -54,8 +58,8 @@ at a loopback endpoint on the machine running it, with a token for that tab.
 Claude reads only the last `--settings` flag, so Pane writes one settings file
 per tab (owner-only, in `claude-prompts` under Pane's data folder) that merges
 its hooks with any `--settings` the command already passes, and launches with
-that file instead. A command whose `--settings` Pane can't read launches
-unchanged. Wrapped launches, commands that don't start with `claude`, SSH tabs
+that file instead. A command whose `--settings` Pane can't read, or a tab
+whose settings file Pane can't write, launches unchanged. Wrapped launches, commands that don't start with `claude`, SSH tabs
 and WSL tabs keep their command, and their prompts stay in the terminal.
 
 Turn it off in **Settings → AI & Agents → Answer prompts from Pane**. Off

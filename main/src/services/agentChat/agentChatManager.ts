@@ -381,7 +381,7 @@ export class AgentChatManager {
       '--resume', saved.conversation.nativeSessionId,
     ], shellType) : command;
     // Claude reads one --settings flag; the Chat journal's hooks join Pane's prompt hooks in its file,
-    // or go on their own flag when the command's settings can't be merged.
+    // or go on their own flag when the command's settings can't be merged or Pane's file can't be written.
     const augmented = withClaudePromptHooks(panel.id, base, cwd, shellType, nativeChatHookSettings(journalFile))
       ?? `${base} --settings ${quoteShellWord(settingsFile, shellType)}`;
     this.launchInputs.set(panel.id, `${augmented}\r`);

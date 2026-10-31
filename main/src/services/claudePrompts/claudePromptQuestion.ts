@@ -21,7 +21,11 @@ interface PromptText {
 }
 
 const MAX_CHOICES = 9;
-const MAX_CONTEXT = 4_000;
+/**
+ * The longest detail (a command, a plan, a tool's input) a card carries. Yes approves all of it,
+ * so a card shows it whole or offers no choices; a longer one is answered in the terminal.
+ */
+const MAX_DETAIL = 32_000;
 const MAX_TITLE_COMMAND = 160;
 /** Claude's dialog says No; a note tells Claude what to do instead. */
 const DENY = 'No';
@@ -54,13 +58,13 @@ export function claudePromptQuestion(request: ClaudeHookEvent, project: string |
   const text = toolInputText(input);
   if (request.tool_name === 'ExitPlanMode') {
     return {
-      question: {
+      question: whole('plan', {
         ui: 'options',
         title: "Approve Claude's plan?",
-        context: clip(text.plan ?? '', MAX_CONTEXT) || undefined,
+        context: text.plan || undefined,
         choices: [...PLAN_MODES.map(({ label }) => ({ label })), { label: KEEP_PLANNING, detail: 'Add a note with what to change' }],
         agentPrompt: { yes: PLAN_MODES[0].label, no: KEEP_PLANNING },
-      },
+      }),
       decide: (choice, note) => {
         const mode = PLAN_MODES.find(candidate => candidate.label === choice)?.mode;
         // Claude needs the plan echoed back to approve it; setMode picks the mode it leaves plan mode in.
@@ -84,7 +88,7 @@ export function claudePromptQuestion(request: ClaudeHookEvent, project: string |
     { label: DENY, detail: 'Add a note to tell Claude what to do instead; without one, Claude stops and waits' },
   ];
   return {
-    question: { ui: 'options', ...describeTool(request.tool_name ?? '', text, input, request.cwd), choices, agentPrompt: { yes: 'Yes', no: DENY } },
+    question: whole(isShell(request.tool_name) ? 'command' : 'request', { ui: 'options', ...describeTool(request.tool_name ?? '', text, input, request.cwd), choices, agentPrompt: { yes: 'Yes', no: DENY } }),
     decide: (choice, note) => {
       if (choice === 'Yes') return { behavior: 'allow' };
       const suggestion = remembered.get(choice);
@@ -93,6 +97,24 @@ export function claudePromptQuestion(request: ClaudeHookEvent, project: string |
       return message ? { behavior: 'deny', message: userSaid(message, 'The user said no.') } : { behavior: 'deny', message: DENIED_IN_PANE, interrupt: true };
     },
   };
+}
+
+/**
+ * The question as asked when its detail fits on a card; otherwise one only the terminal answers,
+ * saying why, since Yes would approve what the person couldn't read.
+ */
+function whole(what: string, question: NotifyQuestion): NotifyQuestion {
+  const length = question.context?.length ?? 0;
+  if (length <= MAX_DETAIL || !question.agentPrompt) return question;
+  return {
+    ...question,
+    context: `This ${what} is ${length.toLocaleString('en-US')} characters, too long to show here in full. Answer in the terminal, where you can read all of it.`,
+    agentPrompt: { ...question.agentPrompt, inTerminal: true },
+  };
+}
+
+function isShell(tool: string | undefined): boolean {
+  return tool === 'Bash' || tool === 'PowerShell';
 }
 
 /** The card's title and context for a tool call, as the terminal dialog names it. */
@@ -107,7 +129,7 @@ function describeTool(tool: string, text: ClaudeToolInputText, input: JsonObject
       const full = oneLine.length > MAX_TITLE_COMMAND || command.includes('\n') ? command : undefined;
       return {
         title: `Run ${clip(oneLine, MAX_TITLE_COMMAND)}?`,
-        context: clip([text.description, full].filter(Boolean).join('\n\n'), MAX_CONTEXT) || undefined,
+        context: [text.description, full].filter(Boolean).join('\n\n') || undefined,
       };
     }
     case 'Edit':
@@ -124,7 +146,7 @@ function describeTool(tool: string, text: ClaudeToolInputText, input: JsonObject
       return { title: `Search the web for “${text.query ?? ''}”?` };
   }
   const mcp = /^mcp__(.+?)__(.+)$/.exec(tool);
-  const context = Object.keys(input).length > 0 ? clip(JSON.stringify(input, null, 2), MAX_CONTEXT) : undefined;
+  const context = Object.keys(input).length > 0 ? JSON.stringify(input, null, 2) : undefined;
   if (mcp) return { title: `Use ${mcp[2]} from ${mcp[1]}?`, context };
   return { title: `Use ${tool}?`, context };
 }
