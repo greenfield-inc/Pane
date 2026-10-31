@@ -2,11 +2,14 @@ import { LegendList } from '@legendapp/list/react-native';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
+import type { ChangedFileSummary } from '@shared/types/gitDiff';
 import type { ToolPanel } from '@shared/types/panels';
 
 import { useTheme } from '@/theme';
 import { EmptyState, ErrorState, Icon, Text } from '@/ui';
 
+import { ChangeBadge } from '../diff/DiffTab';
+import { useChanges } from '../diff/useDiff';
 import { FileViewer } from './FileViewer';
 import { formatSize, parentOf, pathCrumbs, type FileEntry } from './files';
 import { useFileSearch, useFolder } from './useFiles';
@@ -70,6 +73,10 @@ function FolderView({ sessionId, rootName, folder, onOpenFolder, onOpenFile }: {
     return () => clearTimeout(timer);
   }, [query]);
   const entries = useFolder(sessionId, folder);
+  // The branch's changes: listed first at the top, and marked on their rows. An older computer or a
+  // failed read just leaves them out.
+  const changes = useChanges(sessionId);
+  const changed = new Map((changes.data?.files ?? []).map(file => [file.path, file]));
   const search = useFileSearch(sessionId, pattern);
   const searching = pattern.length > 0;
   const list = searching ? search : entries;
@@ -137,14 +144,50 @@ function FolderView({ sessionId, rootName, folder, onOpenFolder, onOpenFile }: {
           keyboardShouldPersistTaps="handled"
           refreshing={list.isRefetching}
           onRefresh={() => void list.refetch()}
-          renderItem={({ item }) => <EntryRow entry={item} showFolder={searching} onPress={() => open(item)} />}
+          ListHeaderComponent={!searching && folder === '' && changed.size > 0 ? (
+            <View>
+              <SectionLabel text={`Changed on this branch · ${changed.size}`} />
+              {[...changed.values()].map(file => (
+                <ChangedRow key={file.path} file={file} onPress={() => open({ name: file.path.split('/').pop() ?? file.path, path: file.path, isDirectory: false })} />
+              ))}
+              <SectionLabel text="All files" />
+            </View>
+          ) : undefined}
+          renderItem={({ item }) => <EntryRow entry={item} change={changed.get(item.path)} showFolder={searching} onPress={() => open(item)} />}
         />
       )}
     </View>
   );
 }
 
-function EntryRow({ entry, showFolder, onPress }: { entry: FileEntry; showFolder: boolean; onPress: () => void }) {
+function SectionLabel({ text }: { text: string }) {
+  return <Text variant="caption" tone="muted" style={styles.section}>{text.toUpperCase()}</Text>;
+}
+
+function ChangedRow({ file, onPress }: { file: ChangedFileSummary; onPress: () => void }) {
+  const { colors } = useTheme();
+  const name = file.path.split('/').pop() ?? file.path;
+  const deleted = file.kind === 'deleted';
+  return (
+    <Pressable
+      testID={`explorer-changed-${file.path}`}
+      accessibilityRole="button"
+      accessibilityLabel={`${name}, ${file.kind}`}
+      accessibilityState={{ disabled: deleted }}
+      disabled={deleted}
+      onPress={onPress}
+      style={({ pressed }) => [styles.row, { backgroundColor: pressed ? colors.surfacePressed : 'transparent' }]}
+    >
+      <ChangeBadge file={file} />
+      <View style={[styles.rowBody, { borderBottomColor: colors.border }]}>
+        <Text variant="body" numberOfLines={1} style={[styles.name, deleted && { color: colors.textMuted }]}>{name}</Text>
+        <Text variant="footnote" tone="muted" numberOfLines={1} style={styles.detail}>{parentOf(file.path)}</Text>
+      </View>
+    </Pressable>
+  );
+}
+
+function EntryRow({ entry, change, showFolder, onPress }: { entry: FileEntry; change?: ChangedFileSummary; showFolder: boolean; onPress: () => void }) {
   const theme = useTheme();
   const { colors } = theme;
   const icon = entry.isDirectory
@@ -163,6 +206,7 @@ function EntryRow({ entry, showFolder, onPress }: { entry: FileEntry; showFolder
       <View style={[styles.rowBody, { borderBottomColor: colors.border }]}>
         <Text variant="body" numberOfLines={1} style={styles.name}>{entry.name}</Text>
         {showFolder && folder ? <Text variant="footnote" tone="muted" numberOfLines={1} style={styles.detail}>{folder}</Text> : null}
+        {change ? <ChangeBadge file={change} /> : null}
         {!showFolder && entry.size !== undefined ? <Text variant="footnote" tone="muted">{formatSize(entry.size)}</Text> : null}
         {entry.isDirectory ? <Icon ios="chevron.right" android="chevron_right" size={13} color={colors.textMuted} /> : null}
       </View>
@@ -183,5 +227,6 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingLeft: 16, minHeight: 46 },
   rowBody: { flex: 1, minHeight: 46, flexDirection: 'row', alignItems: 'center', gap: 10, paddingRight: 16, borderBottomWidth: StyleSheet.hairlineWidth },
   name: { flex: 1 },
+  section: { paddingHorizontal: 16, paddingTop: 14, paddingBottom: 6, letterSpacing: 0.4 },
   detail: { flexShrink: 1, maxWidth: '45%' },
 });

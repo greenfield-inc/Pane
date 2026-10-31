@@ -37,7 +37,7 @@ export interface DemoPaneSeed {
 export interface DemoTool {
   type: Exclude<ToolPanelType, 'terminal'>;
   title: string;
-  customState?: { currentUrl: string } | { filePath: string };
+  customState?: { currentUrl: string } | { filePath: string } | { isRunning: boolean; command: string };
 }
 
 /** The demo Session's own pages, as an orchestrator opens them beside its chat. */
@@ -84,7 +84,7 @@ export const DEMO_PANES: DemoPaneSeed[] = [
       { type: 'explorer', title: 'Explorer' },
       { type: 'diff', title: 'Diff' },
       { type: 'editor', title: 'submitOrder.ts', customState: { filePath: 'src/checkout/submitOrder.ts' } },
-      { type: 'logs', title: 'Run script' },
+      { type: 'logs', title: 'Run script', customState: { isRunning: true, command: 'pnpm dev' } },
       { type: 'notes', title: 'Notes' },
     ],
   },

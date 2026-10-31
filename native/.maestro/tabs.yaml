@@ -1,5 +1,5 @@
-# Every tab type in the demo: the strip, a page, Explorer, the file viewer, an
-# Editor tab and a dimmed placeholder. Needs no host: the demo runs inside the app.
+# Every tab type in the demo: the strip, a page, Explorer with the branch's
+# changes, the file viewer, Diff, script output, an Editor tab and a dimmed placeholder. Needs no host: the demo runs inside the app.
 appId: com.dcouple.pane.mobile
 ---
 - runFlow: subflows/demo.yaml
@@ -33,6 +33,8 @@ appId: com.dcouple.pane.mobile
     visible:
       id: explorer-row-src
     timeout: 10000
+- assertVisible:
+    id: explorer-changed-src/checkout/cartLock.ts
 - tapOn:
     id: explorer-row-src
 - tapOn:
@@ -92,8 +94,10 @@ appId: com.dcouple.pane.mobile
 - assertVisible: "Opens on studio-mac"
 - tapOn:
     id: panel-tab-demo-fix-checkout-race-logs-4
-- assertVisible:
-    id: tab-placeholder
+- extendedWaitUntil:
+    visible: ".*hmr update.*"
+    timeout: 10000
+- assertVisible: "Running"
 
 # An Editor tab, one step back, opens its file read-only.
 # A slow drag, so the strip doesn't fling past it.
@@ -106,4 +110,23 @@ appId: com.dcouple.pane.mobile
 - extendedWaitUntil:
     visible:
       id: file-code
+    timeout: 10000
+
+# Diff, one more step back: the branch's files with counts, one tapped open to its patch.
+- swipe:
+    start: 30%, 15%
+    end: 62%, 15%
+    duration: 2000
+- tapOn:
+    id: panel-tab-demo-fix-checkout-race-diff-2
+- extendedWaitUntil:
+    visible:
+      id: diff-list
+    timeout: 10000
+- assertVisible: "3 files"
+- tapOn:
+    id: diff-file-src/checkout/submitOrder.ts
+- extendedWaitUntil:
+    visible:
+      id: diff-patch
     timeout: 10000
