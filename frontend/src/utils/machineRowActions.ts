@@ -6,6 +6,8 @@ import { isMachineDimmed, useAllMachinesStore } from '../stores/allMachinesStore
 import { LOCAL_MACHINE_ID, type MachineCommand } from '../../../shared/types/machineConnections';
 import type { HostNavigationMemory } from '../../../shared/types/hostNavigation';
 import { boundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
+import { decodeSessionWorkspaceLayout } from '../../../shared/types/sessionWorkspaceLayout';
+import { showSessionInLayout } from './sessionWorkspaceLayout';
 
 /** A host command that answered `{ success: false }`: it ran and refused. */
 const refusedSchema = boundary.object({ success: boundary.literal(false), error: boundary.optional(boundary.string) });
@@ -48,6 +50,21 @@ function openHere(target: MachineTarget): void {
   }
 }
 
+/**
+ * A Session row also goes into the machine's remembered Session layout: the
+ * layout's focused tile picks the Session the switch lands on, so a layout still
+ * focused on the last Session viewed there would open that one instead.
+ */
+async function rememberSessionLayout(hostId: string | null, sessionId: string): Promise<void> {
+  const stored = await window.electronAPI.uiState.getSessionWorkspaceLayout(hostId);
+  const layout = stored.success ? decodeSessionWorkspaceLayout(stored.data ?? null) : null;
+  if (!layout) return;
+  const next = showSessionInLayout(layout, sessionId);
+  if (next === layout) return;
+  const saved = await window.electronAPI.uiState.saveSessionWorkspaceLayout(hostId, next);
+  if (!saved.success) throw new Error(saved.error ?? 'Pane could not remember the Session to open.');
+}
+
 function memoryFor(target: MachineTarget): HostNavigationMemory {
   if (target.kind === 'pane') return { view: 'sessions', projectId: null, paneId: target.id };
   if (target.kind === 'session') return { view: 'pane-chat', projectId: null, paneId: null, orchestrationSessionId: target.id };
@@ -57,7 +74,7 @@ function memoryFor(target: MachineTarget): HostNavigationMemory {
 /**
  * Opens a row from any machine. On the machine the app is on it opens as a click does today.
  * On another machine it makes that machine the one the app is on, after leaving the row in
- * that machine's navigation memory, which the switch restores. An offline machine says so.
+ * that machine's navigation memory and Session layout, which the switch restores. An offline machine says so.
  */
 export async function openOnMachine(machineId: string, target: MachineTarget): Promise<void> {
   const state = useAllMachinesStore.getState();
@@ -81,6 +98,7 @@ export async function openOnMachine(machineId: string, target: MachineTarget): P
     const hostId = machineId === LOCAL_MACHINE_ID ? null : machineId;
     const saved = await window.electronAPI.uiState.saveNavigationMemory(hostId, memoryFor(target));
     if (!saved.success) throw new Error(saved.error ?? 'Pane could not remember the row to open.');
+    if (target.kind === 'session') await rememberSessionLayout(hostId, target.id);
     const outcome = await state.switchMachine(machineId);
     if (!outcome.ok) showActionError(`Could not open ${target.name} on ${name}`, outcome.needsPassword ? `${name} needs its password. Enter it in Remote Access settings, then try again.` : outcome.error);
   } catch (error) {
