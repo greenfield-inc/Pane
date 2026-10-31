@@ -493,7 +493,8 @@ export class OrchestrationSessionManager extends EventEmitter {
       await this.ensureInitializedUnlocked();
       const record = this.findSession(this.store.read(), selector);
       const panes = await Promise.all(record.associations.map(association => this.readPaneOverview(association)));
-      const statuses = panes.flatMap(pane => pane.panels.filter(panel => !panel.missing).map(panel => panel.state));
+      // Only terminals carry an agent state; a page or Files tab never makes the Session's status unknown.
+      const statuses = panes.flatMap(pane => pane.panels.filter(panel => panel.type === 'terminal').map(panel => panel.state));
       const status = resolveOverallStatus(record.associations.length === 0, statuses, panes);
       const report = record.report
         ? { ...cloneReport(record.report), freshness: isReportCurrent(record) ? 'current' as const : 'stale' as const }
@@ -1093,8 +1094,9 @@ export class OrchestrationSessionManager extends EventEmitter {
         panels: association.panelIds.map(panelId => missingPanel(panelId)),
       };
     }
+    // A whole-Pane link lists every tab, with Explorer and Diff (the inspector's Files and Changes) last.
     const allPanels = association.panelIds.length === 0
-      ? panelManager.getPanelsForSession(pane.id).filter(panel => panel.type === 'terminal')
+      ? [...panelManager.getPanelsForSession(pane.id)].sort((a, b) => Number(isInspectorPanel(a)) - Number(isInspectorPanel(b)))
       : association.panelIds.map(panelId => panelManager.getPanel(panelId)).filter((panel): panel is ToolPanel => panel !== undefined);
     const panels: OrchestrationPanelOverview[] = allPanels.map(panel => {
       const customState = decodeBoundary(panel.state.customState ?? {}, boundary.object({
@@ -1107,6 +1109,7 @@ export class OrchestrationSessionManager extends EventEmitter {
       const overview: OrchestrationPanelOverview = {
         panelId: panel.id,
         title: panel.title,
+        type: panel.type,
         agentType: isPaneChatAgent(panelAgent) ? panelAgent : undefined,
         state: terminalPanelManager.getAgentStatus(panel.id) ?? 'unknown',
         initialized: initialized || customState.isInitialized === true,
@@ -1357,6 +1360,10 @@ function newestAgentReport(panels: readonly ToolPanel[]): (TerminalAgentReport &
     if (report && (!newest || report.reportedAt > newest.reportedAt)) newest = { ...report, panelId: panel.id };
   }
   return newest;
+}
+
+function isInspectorPanel(panel: ToolPanel): boolean {
+  return panel.type === 'explorer' || panel.type === 'diff';
 }
 
 function missingPanel(panelId: string): OrchestrationPanelOverview {

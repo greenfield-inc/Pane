@@ -1,7 +1,7 @@
 import type { CustomCommandResume } from './customCommandResume';
 import type { AgentState } from './agentStatus';
 import type { PaneChatAgent } from './paneChat';
-import type { TerminalAgentReport, ToolPanel } from './panels';
+import type { TerminalAgentReport, ToolPanel, ToolPanelType } from './panels';
 import { boundary, decodeOptionalBoundary, type JsonObject } from '../validation/boundaryDecoder';
 
 /** Stable identifier of the built-in orchestration session imported from Pane Chat. */
@@ -182,6 +182,8 @@ export interface OrchestrationGitSummary {
 export interface OrchestrationPanelOverview {
   panelId: string;
   title: string;
+  /** The tab's panel type; absent on a missing panel. */
+  type?: ToolPanelType;
   agentType?: PaneChatAgent;
   state: AgentState;
   initialized: boolean;

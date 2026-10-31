@@ -1157,6 +1157,37 @@ describe('OrchestrationSessionManager', () => {
       .rejects.toThrow(/OpenCode.*named Session/i);
   });
 
+  it('lists every tab of a whole-Pane link with its type, Explorer and Diff last, and only the named tabs of a tab link', async () => {
+    const fixture = createFixture();
+    const whole = paneFixture(fixture, 'all-tabs-pane', { name: 'All tabs' });
+    await panelManager.createPanel({ id: 'all-tabs-explorer', sessionId: whole.id, type: 'explorer', title: 'Explorer' });
+    await seedPanel(createPanel('all-tabs-agent', whole.id, 'Claude Code'));
+    await panelManager.createPanel({ id: 'all-tabs-diff', sessionId: whole.id, type: 'diff', title: 'Diff' });
+    await panelManager.createPanel({ id: 'all-tabs-page', sessionId: whole.id, type: 'browser', title: 'localhost:5173' });
+    await panelManager.createPanel({ id: 'all-tabs-file', sessionId: whole.id, type: 'editor', title: 'README.md' });
+    const scoped = paneFixture(fixture, 'named-tabs-pane', { name: 'Named tabs' });
+    await seedPanel(createPanel('named-tabs-agent', scoped.id, 'Codex'));
+    await panelManager.createPanel({ id: 'named-tabs-page', sessionId: scoped.id, type: 'browser', title: 'Docs' });
+    const named = await fixture.manager.create({ name: 'Every tab' });
+    await fixture.manager.associate({ sessionId: named.session.id }, { paneId: whole.id });
+    await fixture.manager.associate({ sessionId: named.session.id }, { paneId: scoped.id, panelIds: ['named-tabs-agent'] });
+    liveStates.set('all-tabs-agent', 'working');
+    liveStates.set('named-tabs-agent', 'idle');
+
+    const overview = await fixture.manager.overview({ sessionId: named.session.id });
+
+    expect(overview.panes[0].panels.map(panel => [panel.panelId, panel.type])).toEqual([
+      ['all-tabs-agent', 'terminal'],
+      ['all-tabs-page', 'browser'],
+      ['all-tabs-file', 'editor'],
+      ['all-tabs-explorer', 'explorer'],
+      ['all-tabs-diff', 'diff'],
+    ]);
+    expect(overview.panes[1].panels).toEqual([expect.objectContaining({ panelId: 'named-tabs-agent', type: 'terminal', state: 'idle' })]);
+    // Tabs without an agent leave the Session's status to its agents.
+    expect(overview.status).toBe('working');
+  });
+
   it('enforces exclusive Pane ownership, validates tab membership, and permits reassignment after detach', async () => {
     const fixture = createFixture();
     const pane = paneFixture(fixture, 'pane-1', { name: 'Feature Pane' });
