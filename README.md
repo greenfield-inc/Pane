@@ -1,5 +1,3 @@
-![Pane — a pixel-art terminal workshop with separate agent workspaces](docs/assets/pane-banner.png)
-
 <p align="center">
   <img src="frontend/src/assets/pane-logo.png" alt="Pane" width="120" height="120">
 </p>
