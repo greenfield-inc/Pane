@@ -9,7 +9,7 @@ import { useDaemon, useDaemonEvent, useDaemonQueryKey, useInvokeQuery } from '@/
 import { monoFontFamily, useTheme, withAlpha } from '@/theme';
 import { ErrorState, Icon, Text } from '@/ui';
 
-import { ReadOnlyFooter } from '../diff/DiffTab';
+import { TabFooter } from '../tabs/TabFooter';
 import { appendLog, decodeLogEntry, type LogLine, logText } from './logs';
 
 /** How close to the end, in points, still counts as at the end. */
@@ -99,7 +99,7 @@ export function LogsTab({ panel }: { panel: ToolPanel }) {
         <Text variant="subhead" style={[styles.follow, { color: terminal.brightBlack }]}>{following ? 'Follows the end' : 'Paused'}</Text>
       </View>
       <View style={styles.fill}>{body}</View>
-      <ReadOnlyFooter left="Read-only on the phone" right={`Start and stop on ${profile.label}`} />
+      <TabFooter left="Read-only on the phone" right={`Start and stop on ${profile.label}`} />
     </View>
   );
 }
