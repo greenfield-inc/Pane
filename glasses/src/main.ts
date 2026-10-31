@@ -10,6 +10,8 @@ import type { PaneSource } from './model';
 import { firstRunPage, pairingFailedPage } from './screens';
 
 const RUNTIME_KEY = 'pane.glasses.runtimeId';
+/** The computer the glasses last started a Session on. */
+const SESSION_COMPUTER_KEY = 'pane.glasses.lastSessionComputer';
 
 function element<T extends HTMLElement>(id: string, type: new () => T): T {
   const found = document.getElementById(id);
@@ -49,6 +51,7 @@ async function main(): Promise<void> {
   const bridge = await waitForEvenAppBridge();
   const paired = readPaired(await bridge.getLocalStorage(STORAGE_KEY).catch(() => ''));
   const id = await runtimeId(bridge);
+  let sessionComputer: string | null = (await bridge.getLocalStorage(SESSION_COMPUTER_KEY).catch(() => '')) || null;
   const display = new Display(bridge);
   display.onPage = (page) => {
     ui.mirror.textContent = pageText(page);
@@ -107,6 +110,13 @@ async function main(): Promise<void> {
       later,
       now: Date.now,
       clock,
+      lastSessionComputer: {
+        read: () => sessionComputer,
+        write: (computerId) => {
+          sessionComputer = computerId;
+          void bridge.setLocalStorage(SESSION_COMPUTER_KEY, computerId).catch(() => false);
+        },
+      },
     });
     target = (gesture) => app.handle(gesture);
     next.subscribe(() => renderComputers());

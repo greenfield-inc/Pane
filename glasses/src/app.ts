@@ -5,7 +5,7 @@ import type { NotifyAnswer } from '../../shared/types/notify';
 import { BRIGHT, type Page } from './display';
 import type { Gesture } from './input';
 import { LIST_MARKS, homeListPage, homeRows, outlineRowAt, type HomeListView, type HomeRow, type ListMarks } from './homeList';
-import { CHOICE_KEYS, GlassesError, SCREEN_RECONNECTING, type Card, type Dictation, type PaneEntry, type PaneSource, type TerminalKey } from './model';
+import { CHOICE_KEYS, GlassesError, SCREEN_RECONNECTING, type Card, type Computer, type Dictation, type PaneEntry, type PaneSource, type SessionRequest, type TerminalKey } from './model';
 import { findMenu, type Menu } from './menu';
 import {
   HALF_PAGE,
@@ -20,6 +20,7 @@ import {
   infoCardPage,
   keyListPage,
   keysRefusedPage,
+  newSessionPage,
   noComputerPage,
   pickerPage,
   problemPage,
@@ -53,6 +54,22 @@ const NUMBER_IGNORED = "The menu didn't take its number; answer it with keys";
 /** How long after a choice's number the menu should be gone. */
 const PICK_SETTLE_MS = 1_000;
 
+/** A new Session's name: the first words of what you said, on one line. The host takes up to 120 characters. */
+const SESSION_NAME_WORDS = 8;
+const SESSION_NAME_CHARS = 60;
+/** The host takes a purpose of up to 2,000 characters. */
+const SESSION_GOAL_CHARS = 2_000;
+/** Control and format characters (zero-width, bidi) and line breaks, which the host refuses in a name. */
+const HIDDEN_CHARACTERS = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu;
+
+/** What you said as a Session's purpose, and a short name from its first words. */
+function sessionRequest(transcript: string): SessionRequest {
+  const goal = transcript.replace(HIDDEN_CHARACTERS, ' ').replace(/\s+/g, ' ').trim().slice(0, SESSION_GOAL_CHARS);
+  const words = goal.split(' ').slice(0, SESSION_NAME_WORDS).join(' ');
+  const name = (words.length > SESSION_NAME_CHARS ? words.slice(0, SESSION_NAME_CHARS) : words).replace(/[\s.,;:!?]+$/u, '');
+  return { name, goal };
+}
+
 const menuKey = (menu: Menu) => menu.identity;
 /** The last index whose row passes `test`, or -1. */
 function lastIndex(rows: readonly string[], test: (row: string) => boolean): number {
@@ -80,6 +97,8 @@ export interface AppDeps {
   clock(epochMs: number): string;
   /** How home rows are marked; LIST_MARKS unless set. */
   marks?: ListMarks;
+  /** The computer the glasses last started a Session on, kept in the glasses' local storage. */
+  lastSessionComputer: { read(): string | null; write(computerId: string): void };
 }
 
 /**
@@ -144,6 +163,8 @@ type View =
   | ({ name: 'dictation'; transcript: string } & TerminalState)
   /** A row of a computer that isn't live was pressed: why, and Retry. */
   | { name: 'away'; computerId: string; rowName?: string }
+  /** Hold on the new-Session row: listening, then starting the Session on `computerId`. */
+  | { name: 'new-session'; computerId: string; machine: string; transcript: string; starting: boolean }
   /** The row of a computer that couldn't join was pressed: why, and what to do. */
   | { name: 'unjoined'; machine: string; reason: string }
   | { name: 'problem'; title: string; message: string; next?: string; back: View };
@@ -176,6 +197,8 @@ export class GlassesApp {
   private keyFailures = 0;
   /** The tab this open already resumed, so a tab that stops again is not restarted behind the user. */
   private resumed: string | null = null;
+  /** The computer of the last Pane opened here, where a new Session starts when none was started here yet. */
+  private lastOpenedOn: string | null = null;
   private readonly unsubscribe: () => void;
 
   /** Every card key seen so far, so a question that just arrived can be told apart. */
@@ -204,7 +227,20 @@ export class GlassesApp {
 
   /** The home list's rows as the computers have them now, without cards answered here. */
   private rows(): HomeRow[] {
-    return homeRows(this.deps.source.computers(), this.cards(), this.deps.source.unjoined());
+    const computers = this.deps.source.computers();
+    // The firmware list (outline marks) can't tell which row a hold is on, so it has no new-Session row.
+    const newOn = this.marks() === 'logos' ? this.newSessionComputer(computers) : undefined;
+    return homeRows(computers, this.cards(), this.deps.source.unjoined(), newOn);
+  }
+
+  /** Where a new Session starts: the computer last started on, else that of the last Pane opened, else the first. */
+  private newSessionComputer(computers: readonly Computer[]): Computer | undefined {
+    const preferred = [this.deps.lastSessionComputer.read(), this.lastOpenedOn];
+    for (const id of preferred) {
+      const found = id ? computers.find((computer) => computer.id === id) : undefined;
+      if (found) return found;
+    }
+    return computers[0];
   }
 
   /** The selected row's index: the focused row, or the one now nearest its place. */
@@ -229,8 +265,8 @@ export class GlassesApp {
     for (const key of this.read) if (!keys.has(key)) this.read.delete(key);
     const arrived = this.deps.source.cards().filter((card) => !this.seen.has(card.key));
     for (const card of arrived) this.seen.add(card.key);
-    // At the top of the list, a new question takes the top row (journey J2).
-    if (this.view.name === 'home' && arrived.some((card) => card.waiting) && (this.homeFocus?.index ?? 0) === 0) this.homeFocus = null;
+    // At the top of the list, a new question takes the selection (journey J2): the first row under the new-Session row.
+    if (this.view.name === 'home' && arrived.some((card) => card.waiting) && (this.homeFocus?.index ?? 0) <= 1) this.focusOn((row) => row.kind === 'question');
     const view = this.view;
     // A card answered on another screen leaves; go home rather than show a stale question.
     if ((view.name === 'card' || view.name === 'full' || view.name === 'info') && !this.card(view.key)) this.view = { name: 'home' };
@@ -276,6 +312,8 @@ export class GlassesApp {
         if (!computer) return this.homePage();
         return computer.refusal ? refusedPage(computer.name, computer.refusal) : awayPage(computer, this.deps.clock, view.rowName);
       }
+      case 'new-session':
+        return newSessionPage(view.machine, view.transcript, view.starting);
       case 'unjoined':
         return unjoinedPage(view.machine, view.reason);
       case 'problem':
@@ -394,6 +432,11 @@ export class GlassesApp {
         if (gesture.type === 'press') this.deps.source.retry(view.computerId);
         if (gesture.type === 'press' || gesture.type === 'double') this.go({ name: 'home' });
         break;
+      case 'new-session':
+        if (view.starting) break;
+        if (gesture.type === 'release') void this.finishNewSession(view);
+        else if (gesture.type === 'double') this.cancelNewSession();
+        break;
       case 'unjoined': if (gesture.type === 'double' || gesture.type === 'press') this.goHome(); break;
       case 'problem': if (gesture.type === 'double' || gesture.type === 'press') this.go(view.back); break;
     }
@@ -454,7 +497,9 @@ export class GlassesApp {
       }
       case 'hold':
         // The firmware list doesn't report its selection, so outline marks answer by press only.
-        if (row?.kind === 'question' && this.marks() === 'logos') void this.startVoiceAnswer(row.card);
+        if (this.marks() !== 'logos') return;
+        if (row?.kind === 'question') void this.startVoiceAnswer(row.card);
+        else if (row?.kind === 'new') void this.startNewSession(row.computerId, row.machine);
         return;
       case 'double':
         this.deps.exit();
@@ -471,7 +516,10 @@ export class GlassesApp {
   private openRow(row: HomeRow, index: number): void {
     this.homeFocus = { key: row.key, index };
     this.confirmation = undefined;
-    if (row.kind === 'question') this.openCard(row.card);
+    if (row.kind === 'new') {
+      this.confirmation = 'Hold, say what the Session is for, release';
+      this.render();
+    } else if (row.kind === 'question') this.openCard(row.card);
     else if (row.kind === 'info') this.go({ name: 'info', key: row.card.key });
     else if (row.kind === 'computer' && row.reason) this.go({ name: 'unjoined', machine: row.machine, reason: row.reason });
     else if (row.kind === 'entry' && row.status === 'live') this.openTerminal(row.computerId, row.entry);
@@ -511,7 +559,7 @@ export class GlassesApp {
   private async sendAnswer(card: Card, answer: NotifyAnswer, summary: string): Promise<void> {
     this.answered.add(card.key);
     this.confirmation = `Answered ${card.paneName}: ${summary}`;
-    this.homeFocus = null;
+    // The row in the answered question's place is selected: the next question, if any.
     this.go({ name: 'home' });
     try {
       await this.deps.source.answer(card, answer);
@@ -559,6 +607,73 @@ export class GlassesApp {
     else await this.sendAnswer(card, { text }, `"${text}"`);
   }
 
+  // ---------- a new Session ----------
+
+  private async startNewSession(computerId: string, machine: string): Promise<void> {
+    const title = `New Session on ${machine}`;
+    const computer = this.deps.source.computers().find((candidate) => candidate.id === computerId);
+    if (computer?.status !== 'live') {
+      const error = computer?.refusal
+        ? new GlassesError('ERR_GLASSES_SESSION_REFUSED', `${machine} refused these glasses, so no Session was started.`, computer.refusal.next)
+        : new GlassesError('ERR_GLASSES_SESSION_OFFLINE', `${machine} is offline, so no Session was started.`, 'Hold again once it is back.');
+      this.showProblem(title, error, { name: 'home' });
+      return;
+    }
+    this.go({ name: 'new-session', computerId, machine, transcript: '', starting: false });
+    try {
+      await this.startListening(computerId, (text) => {
+        const view = this.view;
+        if (view.name === 'new-session' && view.computerId === computerId && !view.starting) {
+          this.view = { ...view, transcript: text };
+          this.render();
+        }
+      });
+    } catch (error) {
+      this.showProblem(title, error, { name: 'home' });
+    }
+  }
+
+  /** Release: starts the Session with what you said as its purpose, then opens it. Nothing said starts nothing. */
+  private async finishNewSession(view: Extract<View, { name: 'new-session' }>): Promise<void> {
+    const stopping = this.stopListening();
+    // A double press while the last words are written down still cancels: it counts a newer hold.
+    const attempt = this.listening;
+    let text: string;
+    try {
+      text = await stopping;
+    } catch (error) {
+      if (attempt !== this.listening) return;
+      this.showProblem(`New Session on ${view.machine} · not started`, error, { name: 'home' });
+      return;
+    }
+    if (attempt !== this.listening) return;
+    const request = sessionRequest(text);
+    // Nothing said, or only a breath the transcriber wrote as punctuation.
+    if (!request.name) {
+      this.goHome();
+      return;
+    }
+    this.go({ ...view, transcript: text, starting: true });
+    let entry: PaneEntry;
+    try {
+      entry = await this.deps.source.createSession(view.computerId, request);
+    } catch (error) {
+      this.showProblem(`New Session on ${view.machine} · not started`, error, { name: 'home' });
+      return;
+    }
+    this.deps.lastSessionComputer.write(view.computerId);
+    this.openTerminal(view.computerId, entry);
+  }
+
+  /** Double press while listening: stops listening and starts nothing. */
+  private cancelNewSession(): void {
+    this.listening += 1;
+    this.dictation?.cancel();
+    this.dictation = null;
+    void this.deps.mic(false).catch(() => false);
+    this.goHome();
+  }
+
   // ---------- terminal ----------
 
   /**
@@ -571,6 +686,7 @@ export class GlassesApp {
 
   private openTerminal(computerId: string, entry: PaneEntry): void {
     this.resumed = null;
+    this.lastOpenedOn = computerId;
     this.markViewed(computerId, entry);
     this.go({ name: 'terminal', computerId, entry, ...NEW_TERMINAL });
     this.stopPolling();

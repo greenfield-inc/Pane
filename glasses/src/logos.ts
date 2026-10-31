@@ -12,10 +12,11 @@ const OS_LOGO_PATHS = {
 /** A monitor outline (filled with the even-odd rule), as the phone's MachineMark draws an unknown OS. */
 const COMPUTER_PATH = 'M3 4h18a1 1 0 011 1v11a1 1 0 01-1 1h-7v2h3v2H7v-2h3v-2H3a1 1 0 01-1-1V5a1 1 0 011-1zm1 2v9h16V6z';
 
-/** One row's mark on a logo strip: its OS (null for the monitor), dimmed while its computer is away. */
+/** One row's mark on a logo strip: its OS (null for the monitor), dimmed while its computer is away; `blank` draws none. */
 export interface StripMark {
   os: MachineOs | null;
   dim: boolean;
+  blank?: boolean;
 }
 
 /** The logo's size inside its row, and the grays the glasses turn into brightness levels. */
@@ -33,6 +34,7 @@ export async function drawLogoStrip(marks: readonly StripMark[], size: { width: 
   context.fillStyle = '#000';
   context.fillRect(0, 0, size.width, size.height);
   marks.forEach((mark, index) => {
+    if (mark.blank) return;
     context.save();
     context.translate((size.width - LOGO_PX) / 2, index * size.rowHeight + (size.rowHeight - LOGO_PX) / 2);
     context.scale(LOGO_PX / 24, LOGO_PX / 24);

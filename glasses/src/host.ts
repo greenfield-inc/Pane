@@ -21,6 +21,7 @@ import {
   type PaneEntry,
   type PaneSource,
   type PaneStatus,
+  type SessionRequest,
   type TerminalKey,
   type TerminalScreen,
   type UnjoinedComputer,
@@ -335,6 +336,15 @@ const affordancesSchema = boundary.object({
 });
 
 const transcriptSchema = boundary.object({ text: boundary.string });
+
+const sessionCreatedSchema = boundary.object({
+  success: boundary.boolean,
+  data: boundary.optional(boundary.object({
+    session: boundary.object({ id: boundary.string, name: boundary.string, agent: boundary.string }),
+    panel: boundary.object({ id: boundary.string }),
+  })),
+  error: boundary.optional(boundary.string),
+});
 
 const vouchSchema = boundary.object({
   code: boundary.nullable(boundary.nonEmptyString),
@@ -748,6 +758,26 @@ export class HostConnection {
     }
   }
 
+  /** Starts a Session with only a name and a purpose: the computer runs its default agent. */
+  async createSession(request: SessionRequest): Promise<PaneEntry> {
+    const { name } = this.paired;
+    let created: ReturnType<typeof sessionCreatedSchema.decode>;
+    try {
+      created = await this.invoke('orchestration-sessions:create', [request], sessionCreatedSchema);
+    } catch (error) {
+      // An older Pane doesn't let glasses start Sessions. A request it refuses says why in its own words.
+      if (error instanceof RemoteRequestError && error.code === CHANNEL_REFUSED) {
+        throw new GlassesError('ERR_GLASSES_SESSION_UNSUPPORTED', `${name}'s Pane can't start a Session from the glasses yet, so none was started.`, `Update Pane on ${name}.`);
+      }
+      throw error;
+    }
+    if (!created.success || !created.data) {
+      throw new GlassesError('ERR_GLASSES_SESSION_NOT_STARTED', `${name} didn't start the Session: ${created.error ?? 'no reason given'}.`, 'Hold the row to try again.');
+    }
+    const { session, panel } = created.data;
+    return { kind: 'session', id: session.id, name: session.name, agent: agentLabel(session.agent), status: 'idle', panelId: panel.id, activityAt: this.deps.now() };
+  }
+
   async answer(card: Card, answer: NotifyAnswer): Promise<void> {
     const command: NotifyRemoteCommand = { type: 'answer', id: card.itemId, answer };
     await this.client.invoke('notify:remote-command', [command]);
@@ -876,6 +906,10 @@ export class HostHub implements PaneSource {
 
   dictate(computerId: string, onPreview: (text: string) => void): Promise<Dictation> {
     return this.connection(computerId).dictate(onPreview);
+  }
+
+  createSession(computerId: string, request: SessionRequest): Promise<PaneEntry> {
+    return this.connection(computerId).createSession(request);
   }
 
   /**
