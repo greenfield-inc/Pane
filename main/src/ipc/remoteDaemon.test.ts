@@ -1212,7 +1212,7 @@ describe('remote daemon IPC', () => {
     });
   });
 
-  it('clears cached remote host access and revokes existing host clients without disabling the host', async () => {
+  it('clears cached remote host access and revokes existing host clients, but not glasses, without disabling the host', async () => {
     const initialConfig = createDefaultRemoteDaemonConfig();
     initialConfig.host.config = {
       ...initialConfig.host.config,
@@ -1225,6 +1225,14 @@ describe('remote daemon IPC', () => {
         label: 'Old phone',
         tokenHash: 'old-token-hash',
         createdAt: '2026-05-20T18:00:00.000Z',
+      },
+      {
+        id: 'glasses-1',
+        label: 'Even G2',
+        tokenHash: 'glasses-token-hash',
+        createdAt: '2026-05-20T18:00:00.000Z',
+        kind: 'glasses',
+        phoneId: 'pane-native-phone-a',
       },
     ];
     initialConfig.host.access = {
@@ -1246,12 +1254,12 @@ describe('remote daemon IPC', () => {
       success: true,
       data: {
         config: initialConfig.host.config,
-        clients: [],
+        clients: [expect.objectContaining({ id: 'glasses-1', kind: 'glasses' })],
         mobilePush: { registrations: [], attentionSequence: 0, panelStates: {} },
       },
     });
     expect(configManager.getConfig().remoteDaemon?.host.access).toBeUndefined();
-    expect(configManager.getConfig().remoteDaemon?.host.clients).toEqual([]);
+    expect(configManager.getConfig().remoteDaemon?.host.clients?.map((client) => client.id)).toEqual(['glasses-1']);
     expect(configManager.getConfig().remoteDaemon?.host.config).toMatchObject({
       enabled: true,
       listenPort: 42138,
