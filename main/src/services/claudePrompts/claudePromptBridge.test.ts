@@ -196,6 +196,54 @@ describe('ClaudePromptBridge', () => {
     expect(ctx.queue.snapshot().items[0]).toMatchObject({ state: 'answered', answerSummary: ANSWERED_IN_TERMINAL });
   });
 
+  it('settles 20 prompts across 5 tabs, sending a decision only for the 5 answered in Notify', async () => {
+    const queue = new NotifyQueue({ settings: () => DEFAULT_NOTIFY_SETTINGS, showOutsideSupported: true, shortcutRegistered: () => true, instructionFiles: () => [] });
+    bridge = new ClaudePromptBridge({ queue, tab: panelId => ({ source: { ...source, panelId } }), enabled: () => true, hookTimeoutSeconds: 600 });
+    await bridge.start();
+    const tabs = ['panel-1', 'panel-2', 'panel-3', 'panel-4', 'panel-5'];
+    const hooks = new Map(tabs.map(panelId => [panelId, {
+      prompt: decodeBoundary(bridge!.hookSettings(panelId), launchHooksSchema).hooks.PermissionRequest[0].hooks[0],
+      release: decodeBoundary(bridge!.hookSettings(panelId), releaseHooksSchema).hooks.Stop[0].hooks[0].url,
+    }]));
+    const post = (panelId: string, event: JsonObject, release = false) => {
+      const hook = hooks.get(panelId)!;
+      return fetch(release ? hook.release : hook.prompt.url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...hook.prompt.headers },
+        body: JSON.stringify({ session_id: `s-${panelId}`, cwd: '/work/acme-web', ...event }),
+      });
+    };
+    const waitingIn = (panelId: string) => vi.waitFor(() => {
+      const item = queue.snapshot().items.find(candidate => candidate.state === 'waiting' && candidate.source.panelId === panelId);
+      if (!item) throw new Error(`nothing waiting in ${panelId}`);
+      return item;
+    });
+    // Each tab asks four prompts in turn; each is answered a different way.
+    const ways: Array<(panelId: string, id: string, toolInput: JsonObject) => Promise<void>> = [
+      async (_panelId, id) => queue.runRemote({ type: 'answer', id, answer: { choice: 'Yes' } }, 'iPhone'),
+      async (panelId, _id, toolInput) => { await post(panelId, { hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_input: toolInput }, true); },
+      async (panelId) => { bridge!.panelStatus(panelId, 'blocked'); bridge!.panelStatus(panelId, 'working'); },
+      async (panelId) => { await post(panelId, { hook_event_name: 'Stop' }, true); },
+    ];
+    const outputs = (await Promise.all(tabs.map(async (panelId) => {
+      const results: string[] = [];
+      for (const [index, way] of ways.entries()) {
+        const toolInput = { command: `echo ${panelId} ${index}` };
+        const response = post(panelId, { hook_event_name: 'PermissionRequest', tool_name: 'Bash', tool_input: toolInput });
+        const item = await waitingIn(panelId);
+        await way(panelId, item.id, toolInput);
+        results.push(await (await response).text());
+      }
+      return results;
+    }))).flat();
+
+    expect(outputs).toHaveLength(20);
+    expect(outputs.filter(output => output === '{}')).toHaveLength(15);
+    expect(outputs.filter(output => output.includes('"behavior":"allow"'))).toHaveLength(5);
+    expect(queue.snapshot().queue).toEqual([]);
+    expect(queue.snapshot().items.filter(item => item.state !== 'answered')).toEqual([]);
+  }, 30_000);
+
   it('refuses a request without a live tab token, and asks nothing while the setting is off', async () => {
     const ctx = await setup();
     bridge = ctx.bridge;
