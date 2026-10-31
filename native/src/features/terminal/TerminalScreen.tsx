@@ -79,16 +79,16 @@ export function TerminalScreen({ paneId, session }: { paneId: string; session?: 
   const statuses = useAgentStatuses();
 
   // Tabs opened, closed or switched on the desktop show up here too. When the
-  // host or an agent brings a tab forward, the phone follows if it draws that tab.
+  // host or an agent brings a tab forward, the phone follows if it draws that tab;
+  // a tab opened that moment is followed once the refreshed list holds it.
+  const [follow, setFollow] = useState<string | null>(null);
   useEffect(() => client.onEvent(event => {
     if (event.type !== 'daemon-event' || !PANEL_EVENTS.includes(event.payload.channel)) return;
     const payload = event.payload.args[0] as { sessionId?: string; panelId?: string } | undefined;
     if (payload?.sessionId !== paneId) return;
     void queryClient.invalidateQueries({ queryKey: [profile.id, 'panels:list', paneId] });
     void queryClient.invalidateQueries({ queryKey: [profile.id, 'panels:getActive', paneId] });
-    if (event.payload.channel !== 'panel:activeChanged') return;
-    const panel = queryClient.getQueryData<ToolPanel[]>([profile.id, 'panels:list', paneId])?.find(candidate => candidate.id === payload.panelId);
-    if (panel && followsHost(panel)) router.setParams({ panelId: panel.id });
+    if (event.payload.channel === 'panel:activeChanged' && payload.panelId) setFollow(payload.panelId);
   }), [client, paneId, profile.id, queryClient]);
 
   // Watching a pane counts as seeing it: clear its Ready badge on the way in
@@ -107,6 +107,12 @@ export function TerminalScreen({ paneId, session }: { paneId: string; session?: 
   const panels = session ? sessionWorkspacePanels(session, strip) : strip;
   const panel = pickPanel(panels, panelId ?? null, hostActive.data?.id);
   const view = panel ? tabView(panel) : null;
+  const followed = follow ? panels.find(candidate => candidate.id === follow) : undefined;
+  useEffect(() => {
+    if (!followed) return;
+    if (followsHost(followed)) router.setParams({ panelId: followed.id });
+    setFollow(null);
+  }, [followed]);
   // The tab on screen stays put until the person or a host announcement moves it,
   // so the host's active tab changing to one the phone doesn't follow never jumps it.
   const shownId = panel?.id;
