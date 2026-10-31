@@ -304,7 +304,7 @@ function watchResult(generation) {
 
 function isExpectedClientDisconnect(error, socket) {
   if (error === null || error === undefined) return false;
-  if (error.code === 'EPIPE' && error.syscall === 'write') return true;
+  if ((error.code === 'EPIPE' || error.code === 'ENOTCONN') && error.syscall === 'write') return true;
   if (error.code === 'ECONNRESET' && error.syscall === 'read') return true;
   return error.code === 'ERR_STREAM_DESTROYED' && socket.destroyed;
 }
@@ -352,9 +352,15 @@ async function withFakeDaemon(paneDir, onRequest, action, onFrame = () => {}) {
           timers?.delete(timer);
           if (timers?.size === 0) pendingResponseTimers.delete(socket);
           if (!socket.destroyed) {
-            socket.end(`${JSON.stringify({ type: 'response', id: 1, ok: true, result: response.result })}\n`, (error) => {
-              if (error) rememberSocketError(error, socket);
-            });
+            // macOS throws ENOTCONN here, instead of passing it to the
+            // callback, when the client hung up during the delay.
+            try {
+              socket.end(`${JSON.stringify({ type: 'response', id: 1, ok: true, result: response.result })}\n`, (error) => {
+                if (error) rememberSocketError(error, socket);
+              });
+            } catch (error) {
+              rememberSocketError(error, socket);
+            }
           }
         }, response.delayMs || 0);
         const timers = pendingResponseTimers.get(socket) ?? new Set();
