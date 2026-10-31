@@ -241,16 +241,17 @@ jobs:
     - name: Build npm wrapper
       run: pnpm --filter runpane build
 
-    # The three slow suites (about 95, 40 and 120 s on Windows) use their own
-    # temp directories, so they run in the background beside the short ones.
-    # Each Finish step prints that suite's output and fails with it.
+    # Packing runs runpane's prepack, which rebuilds dist/, so the package
+    # smoke tests run before anything else reads dist/.
+    - name: Run package manager smoke tests
+      run: node scripts/test-runpane-package-smoke.js
+
+    # The two slow suites (about 95 and 120 s on Windows) use their own temp
+    # directories, so they run in the background beside the short ones. Each
+    # Finish step prints that suite's output and fails with it.
     - name: Start wrapper contract tests
       shell: bash
       run: scripts/ci-background.sh start contract node scripts/test-runpane-contract.js
-
-    - name: Start package manager smoke tests
-      shell: bash
-      run: scripts/ci-background.sh start package-smoke node scripts/test-runpane-package-smoke.js
 
     - name: Start handoff tests
       shell: bash
@@ -275,11 +276,6 @@ jobs:
       if: ${{ !cancelled() }}
       shell: bash
       run: scripts/ci-background.sh wait contract
-
-    - name: Finish package manager smoke tests
-      if: ${{ !cancelled() }}
-      shell: bash
-      run: scripts/ci-background.sh wait package-smoke
 
     - name: Finish handoff tests
       if: ${{ !cancelled() }}
