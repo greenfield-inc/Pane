@@ -1,3 +1,4 @@
+# BENCH ONLY (D-32, not for merge): GitHub-hosted control for the Blacksmith bench.
 name: Code Quality
 
 on:
