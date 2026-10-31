@@ -11,6 +11,7 @@ import { readChannel } from '@/daemon/invoke';
 import { withMachineClient } from '@/daemon/machines';
 import { agentStatusFromWorkspace } from '@/features/panes/agentStatus';
 import type { ProjectWithPanes } from '@/features/panes/paneList';
+import { sessionsUnavailable } from '@/features/sessions/hooks';
 
 import type { MachineSnapshot } from './allMachinesList';
 
@@ -60,22 +61,18 @@ export function useOtherMachines(profiles: readonly RemotePaneConnectionProfile[
 async function readMachine(profile: RemotePaneConnectionProfile): Promise<MachineSnapshot> {
   const previous = queryClient.getQueryData<MachineSnapshot>([profile.id, SNAPSHOT, profile.baseUrl]);
   return withMachineClient(profile, async client => {
-    // Hosts without Sessions or Notify refuse those reads; the list goes on without them.
-    const optional = <T,>(read: Promise<T>) => read.catch(() => undefined);
-    const [projects, workspace, permissions, notify, sessions] = await Promise.all([
+    // Hosts without Sessions or Notify answer those reads as unknown channels; the list goes on
+    // without them. Any other failure, such as a read that timed out, keeps the last answer.
+    const optional = <T,>(read: Promise<T>, last: T | undefined) => read.catch((error: Error) => (sessionsUnavailable(error) ? undefined : last));
+    const [projects, statuses, permissions, notify, sessions] = await Promise.all([
       readChannel<ProjectWithPanes[]>(client, 'sessions:get-all-with-projects'),
-      optional(readChannel<RunpaneWorkspaceStateResult>(client, 'runpane:workspace:state', [{}])),
-      optional(readChannel<PanePermissionRequest[]>(client, 'permission:getPending')),
-      optional(readChannel<NotifySharedState>(client, 'notify:remote-snapshot')),
-      optional(readChannel<OrchestrationSessionListResult>(client, 'orchestration-sessions:list')),
-    ]);
-    return {
-      projects,
       // Against the last read, so a Pane that finished between reads shows as Ready.
-      statuses: workspace && agentStatusFromWorkspace(workspace, previous?.statuses),
-      permissions,
-      notify,
-      sessions: sessions?.sessions,
-    };
+      optional(readChannel<RunpaneWorkspaceStateResult>(client, 'runpane:workspace:state', [{}])
+        .then(workspace => agentStatusFromWorkspace(workspace, previous?.statuses)), previous?.statuses),
+      optional(readChannel<PanePermissionRequest[]>(client, 'permission:getPending'), previous?.permissions),
+      optional(readChannel<NotifySharedState>(client, 'notify:remote-snapshot'), previous?.notify),
+      optional(readChannel<OrchestrationSessionListResult>(client, 'orchestration-sessions:list').then(list => list.sessions), previous?.sessions),
+    ]);
+    return { projects, statuses, permissions, notify, sessions };
   });
 }
