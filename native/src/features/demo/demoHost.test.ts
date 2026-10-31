@@ -125,8 +125,16 @@ describe('demo host', () => {
       ['panels:list', ['demo-dark-mode']], ['panels:getActive', ['demo-dark-mode']], ['panels:checkInitialized', ['demo-dark-mode-agent']],
       ['terminal:getState', ['demo-dark-mode-agent']], ['terminal:getScrollbackClean', ['demo-dark-mode-agent', 300]],
       ['agent-chat:get', ['demo-dark-mode-agent']],
+      ['ports:list', []], ['panels:read-browser-file', ['demo-fix-checkout-race-browser-0', 'http://localhost:5173/checkout']],
     ];
     for (const [channel, args] of reads) await expect(invokeChannel(client, channel, args), channel).resolves.toBeDefined();
+    // The file channels answer `{ success, … }` without the IPC envelope's `data`.
+    const fileReads: Array<[string, unknown[]]> = [
+      ['file:list', [{ sessionId: 'demo-fix-checkout-race', path: 'src' }]],
+      ['file:read', [{ sessionId: 'demo-fix-checkout-race', filePath: 'README.md' }]],
+      ['file:search', [{ sessionId: 'demo-fix-checkout-race', pattern: 'cart' }]],
+    ];
+    for (const [channel, args] of fileReads) await expect(client.invoke(channel, args), channel).resolves.toMatchObject({ success: true });
     const machines = decodeMachineList(await invokeChannel(client, 'runpane:workspaces:machines'));
     expect(machines.ok && machines.machines.map(machine => machine.state)).toEqual(['available', 'available', 'offline']);
     client.disconnect();

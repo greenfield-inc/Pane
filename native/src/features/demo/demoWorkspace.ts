@@ -7,7 +7,9 @@ import type { RemotePwaAffordances, RemotePwaTerminalShortcut } from '@shared/ty
 import type { RunpanePaneCreateRequest, RunpanePaneCreateResult, RunpaneWorkspaceStateResult } from '@shared/types/runpaneOrchestration';
 import type { JsonValue } from '@shared/validation/boundaryDecoder';
 
-import { DEMO_PANES, DEMO_PROJECTS, DEMO_SESSION, demoMachines, demoNotifyItems, demoReply, shellScreen, type DemoPaneSeed } from './demoData';
+import { demoFileText, demoFolder, demoSearch } from './demoFiles';
+import { demoPageHtml } from './demoPages';
+import { DEMO_PANES, DEMO_PROJECTS, DEMO_SESSION, DEMO_SESSION_PAGES, demoMachines, demoNotifyItems, demoReply, shellScreen, type DemoPaneSeed, type DemoTool } from './demoData';
 
 type Listener = (channel: string, args: JsonValue[]) => void;
 
@@ -27,6 +29,8 @@ interface DemoPane {
 interface DemoPanel {
   id: string;
   title: string;
+  /** Set on a tab that is not a terminal. */
+  tool?: DemoTool;
   agentType?: string;
   state: AgentState;
   buffer: string;
@@ -42,6 +46,7 @@ const LINE_EVERY_MS = 650;
 const FINISH_AFTER_MS = 4_000;
 export const NEEDS_COMPUTER = 'needs Pane on your own computer. The demo runs on this phone and connects to nothing.';
 const MINUTE = 60_000;
+const DEMO_PROFILE_LABEL = 'studio-mac';
 
 const SHORTCUTS: RemotePwaTerminalShortcut[] = [
   { id: 'demo-s1', key: 't', label: 'Run the tests', text: 'pnpm test', enabled: true },
@@ -124,6 +129,18 @@ export class DemoWorkspace {
       case 'panels:list': return toJson(this.panelsOf(this.pane(first)));
       case 'panels:getActive': return toJson(this.panelsOf(this.pane(first))[0] ?? null);
       case 'panels:set-active': return null;
+      case 'panels:update': return this.updatePanel(first, second as Partial<ToolPanel>);
+      case 'panels:read-browser-file': return { data: btoa(demoPageHtml(String(second))), contentType: 'text/html' };
+      // Pages in the demo are sample files the phone reads, so this computer serves none to phones.
+      case 'ports:list': return {
+        host: DEMO_PROFILE_LABEL,
+        ports: [{ port: 5173, pid: null, process: 'node', group: 'pane-terminal', kind: 'web' }],
+        phone: { state: 'off', reason: 'the demo runs on this phone' },
+      };
+      case 'ports:phone-address': return null;
+      case 'file:list': return toJson(demoFolder(String((first as { path?: string }).path ?? '')));
+      case 'file:read': return toJson(demoFileText(String((first as { filePath: string }).filePath)));
+      case 'file:search': return toJson(demoSearch(String((first as { pattern: string }).pattern)));
       case 'panels:create': return toJson(this.createPanel(first as { sessionId: string; title: string }));
       case 'panels:delete': return this.deletePanel(first);
       case 'panels:checkInitialized': return true;
@@ -188,7 +205,7 @@ export class DemoWorkspace {
     return {
       id: seed.id, name: seed.name, projectId: seed.projectId, baseBranch: seed.baseBranch,
       isFavorite: seed.favorite ?? false, favoritePinnedAt: seed.favorite ? createdAt : undefined,
-      archived: false, createdAt, panels: agent ? [agent, shell] : [shell],
+      archived: false, createdAt, panels: [...agent ? [agent, shell] : [shell], ...toolPanels(seed.id, seed.tools)],
     };
   }
 
@@ -260,7 +277,7 @@ export class DemoWorkspace {
       ok: true, epoch: this.epoch, generation: this.panes.length,
       entries: this.panes.filter(pane => !pane.archived).map(pane => ({
         gen: ++gen, at, kind: 'agent.idle', source: 'agent', paneId: pane.id, paneName: pane.name, baseline: true,
-        panels: pane.panels.map(panel => ({ panelId: panel.id, title: panel.title, agentType: panel.agentType, agentState: panel.state, running: true })),
+        panels: pane.panels.filter(panel => !panel.tool).map(panel => ({ panelId: panel.id, title: panel.title, agentType: panel.agentType, agentState: panel.state, running: true })),
       })),
     };
     return toJson(result);
@@ -277,8 +294,11 @@ export class DemoWorkspace {
 
   private panelsOf(pane: DemoPane): ToolPanel[] {
     return pane.panels.map((panel, position) => ({
-      id: panel.id, sessionId: pane.id, type: 'terminal', title: panel.title,
-      state: { isActive: position === 0, hasBeenViewed: true, ...(panel.agentType ? { customState: { agentType: panel.agentType } } : {}) },
+      id: panel.id, sessionId: pane.id, type: panel.tool?.type ?? 'terminal', title: panel.title,
+      state: {
+        isActive: position === 0, hasBeenViewed: true,
+        ...(panel.agentType ? { customState: { agentType: panel.agentType } } : panel.tool?.customState ? { customState: panel.tool.customState } : {}),
+      },
       metadata: { createdAt: pane.createdAt, lastActiveAt: pane.createdAt, position },
     }));
   }
@@ -301,6 +321,16 @@ export class DemoWorkspace {
     pane.panels.push(panel);
     this.emit('panel:created', toJson(this.panelsOf(pane).at(-1) ?? null));
     return this.panelsOf(pane).at(-1) as ToolPanel;
+  }
+
+  private updatePanel(id: unknown, updates: Partial<ToolPanel>): JsonValue {
+    const panel = this.panel(id);
+    const pane = this.paneOfPanel(panel);
+    const customState = updates.state?.customState as DemoTool['customState'] | undefined;
+    if (panel.tool && customState) panel.tool = { ...panel.tool, customState };
+    const updated = pane ? this.panelsOf(pane).find(candidate => candidate.id === panel.id) ?? null : null;
+    this.emit('panel:updated', toJson(updated));
+    return toJson(updated);
   }
 
   private deletePanel(id: unknown): null {
@@ -437,7 +467,10 @@ export class DemoWorkspace {
     return {
       id: session.internalSessionId, name: session.name, projectId: 0, baseBranch: 'main', isFavorite: false,
       archived: false, isHidden: true, createdAt: session.createdAt,
-      panels: [{ id: session.panelIds[session.agent], title, agentType: session.agent, state: 'idle', buffer: screen, pending: [], typed: '' }],
+      panels: [
+        { id: session.panelIds[session.agent], title, agentType: session.agent, state: 'idle', buffer: screen, pending: [], typed: '' },
+        ...toolPanels(session.internalSessionId, session.id === DEMO_SESSION.id ? DEMO_SESSION_PAGES : undefined),
+      ],
     };
   }
 
@@ -506,4 +539,8 @@ function stripAnsi(text: string): string {
 /** The demo's typed records travel as JSON, like a host's replies. */
 function toJson(value: unknown): JsonValue {
   return JSON.parse(JSON.stringify(value)) as JsonValue;
+}
+
+function toolPanels(paneId: string, tools: DemoTool[] = []): DemoPanel[] {
+  return tools.map((tool, index) => ({ id: `${paneId}-${tool.type}-${index}`, title: tool.title, tool, state: 'idle', buffer: '', pending: [], typed: '' }));
 }

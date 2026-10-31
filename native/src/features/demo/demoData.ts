@@ -1,6 +1,7 @@
 import type { AgentState } from '@shared/types/agentStatus';
 import type { NotifyItem } from '@shared/types/notify';
 import type { PaneChatAgent } from '@shared/types/paneChat';
+import type { ToolPanelType } from '@shared/types/panels';
 import type { TailnetMachine } from '@shared/types/workspaceAccess';
 
 // Invented sample content: a small web shop's repositories on one Mac. No real people, code or secrets.
@@ -29,7 +30,21 @@ export interface DemoPaneSeed {
   screen: string;
   /** Streamed after you open the agent tab, a line at a time; the agent then goes idle. */
   stream?: string[];
+  /** Tabs after the terminals: pages, files and the rest. */
+  tools?: DemoTool[];
 }
+
+export interface DemoTool {
+  type: Exclude<ToolPanelType, 'terminal'>;
+  title: string;
+  customState?: { currentUrl: string } | { filePath: string };
+}
+
+/** The demo Session's own pages, as an orchestrator opens them beside its chat. */
+export const DEMO_SESSION_PAGES: DemoTool[] = [
+  { type: 'browser', title: 'status.html', customState: { currentUrl: 'file:///Users/you/.pane/sessions/demo/status.html' } },
+  { type: 'browser', title: 'plan.html', customState: { currentUrl: 'file:///Users/you/.pane/sessions/demo/plan.html' } },
+];
 
 export const DEMO_PROJECTS = [
   { id: 1, name: 'acme-web', path: '/Users/you/code/acme-web' },
@@ -63,6 +78,14 @@ export const DEMO_PANES: DemoPaneSeed[] = [
       '  add a test for the retry path too?',
       '',
       `${bold('>')} `,
+    ],
+    tools: [
+      { type: 'browser', title: 'localhost:5173', customState: { currentUrl: 'http://localhost:5173/checkout' } },
+      { type: 'explorer', title: 'Explorer' },
+      { type: 'diff', title: 'Diff' },
+      { type: 'editor', title: 'submitOrder.ts', customState: { filePath: 'src/checkout/submitOrder.ts' } },
+      { type: 'logs', title: 'Run script' },
+      { type: 'notes', title: 'Notes' },
     ],
   },
   {
