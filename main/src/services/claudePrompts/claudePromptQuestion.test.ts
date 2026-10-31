@@ -38,7 +38,7 @@ describe('claudePromptQuestion', () => {
       behavior: 'allow',
       updatedPermissions: [{ type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'pnpm vitest:*' }], behavior: 'allow', destination: 'localSettings' }],
     });
-    expect(decide('No', 'Run only the unit tests')).toEqual({ behavior: 'deny', message: 'Run only the unit tests' });
+    expect(decide('No', 'Run only the unit tests')).toEqual({ behavior: 'deny', message: 'The user said no. The user answered this prompt in Pane and wrote: Run only the unit tests' });
     // Like No in the terminal: Claude stops and waits.
     expect(decide('No')).toMatchObject({ behavior: 'deny', interrupt: true });
   });
@@ -55,7 +55,7 @@ describe('claudePromptQuestion', () => {
       updatedPermissions: [{ type: 'setMode', mode: 'acceptEdits', destination: 'session' }],
     });
     expect(decide('Yes, and manually approve edits')).toMatchObject({ updatedPermissions: [{ mode: 'default' }] });
-    expect(decide('No, keep planning', 'Split step 2')).toEqual({ behavior: 'deny', message: 'Split step 2' });
+    expect(decide('No, keep planning', 'Split step 2')).toEqual({ behavior: 'deny', message: 'The user wants to keep planning. The user answered this prompt in Pane and wrote: Split step 2' });
   });
 
   it('names MCP tools by tool and server', () => {

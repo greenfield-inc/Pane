@@ -26,6 +26,8 @@ const MAX_TITLE_COMMAND = 160;
 /** Claude's dialog says No; a note tells Claude what to do instead. */
 const DENY = 'No';
 const DENIED_IN_PANE = 'The user said no in Pane. Stop and wait for their next message.';
+/** Claude reads a deny message as tool output; saying whose words these are lets it act on them. */
+const userSaid = (note: string, verdict: string) => `${verdict} The user answered this prompt in Pane and wrote: ${note}`;
 
 const PLAN_MODES = [
   { label: 'Yes, and auto-accept edits', mode: 'acceptEdits' },
@@ -44,9 +46,10 @@ const MODE_NAMES = new Map([
 
 /**
  * The Notify question for one Claude permission or plan prompt, with the choices the terminal
- * dialog offers, and the hook decision each choice sends.
+ * dialog offers, and the hook decision each choice sends. `project` names where Claude keeps a
+ * project's "don't ask again" rules: the repository, which a worktree shares.
  */
-export function claudePromptQuestion(request: ClaudeHookEvent): ClaudePromptQuestion {
+export function claudePromptQuestion(request: ClaudeHookEvent, project = request.cwd ? path.basename(request.cwd) : undefined): ClaudePromptQuestion {
   const input = request.tool_input ?? {};
   const text = toolInputText(input);
   if (request.tool_name === 'ExitPlanMode') {
@@ -62,7 +65,8 @@ export function claudePromptQuestion(request: ClaudeHookEvent): ClaudePromptQues
         const mode = PLAN_MODES.find(candidate => candidate.label === choice)?.mode;
         // Claude needs the plan echoed back to approve it; setMode picks the mode it leaves plan mode in.
         if (mode) return { behavior: 'allow', updatedInput: input, updatedPermissions: [{ type: 'setMode', mode, destination: 'session' }] };
-        return { behavior: 'deny', message: note?.trim() || 'Keep planning.' };
+        const reason = note?.trim();
+        return { behavior: 'deny', message: reason ? userSaid(reason, 'The user wants to keep planning.') : 'The user wants to keep planning.' };
       },
     };
   }
@@ -71,7 +75,7 @@ export function claudePromptQuestion(request: ClaudeHookEvent): ClaudePromptQues
   const remembered = new Map<string, JsonObject>();
   for (const raw of request.permission_suggestions ?? []) {
     const suggestion = permissionSuggestion(raw);
-    const label = suggestion && suggestionLabel(suggestion, request.cwd);
+    const label = suggestion && suggestionLabel(suggestion, request.cwd, project);
     if (label && !remembered.has(label) && remembered.size < MAX_CHOICES - 2) remembered.set(label, raw);
   }
   const choices: NotifyChoice[] = [
@@ -86,7 +90,7 @@ export function claudePromptQuestion(request: ClaudeHookEvent): ClaudePromptQues
       const suggestion = remembered.get(choice);
       if (suggestion) return { behavior: 'allow', updatedPermissions: [suggestion] };
       const message = note?.trim();
-      return message ? { behavior: 'deny', message } : { behavior: 'deny', message: DENIED_IN_PANE, interrupt: true };
+      return message ? { behavior: 'deny', message: userSaid(message, 'The user said no.') } : { behavior: 'deny', message: DENIED_IN_PANE, interrupt: true };
     },
   };
 }
@@ -127,8 +131,8 @@ function describeTool(tool: string, input: JsonObject, cwd: string | undefined):
 }
 
 /** The "don't ask again" choice for one suggestion. */
-function suggestionLabel(suggestion: ClaudePermissionSuggestion, cwd: string | undefined): string | undefined {
-  const where = destinationName(suggestion.destination, cwd);
+function suggestionLabel(suggestion: ClaudePermissionSuggestion, cwd: string | undefined, project: string | undefined): string | undefined {
+  const where = destinationName(suggestion.destination, project);
   switch (suggestion.type) {
     case 'addRules':
       return suggestion.rules.length > 0 ? `Yes, and don't ask again for ${suggestion.rules.map(ruleName).join(', ')} ${where}` : undefined;
@@ -152,10 +156,10 @@ function ruleName(rule: { toolName: string; ruleContent?: string }): string {
   return `${rule.toolName}(${rule.ruleContent})`;
 }
 
-function destinationName(destination: ClaudePermissionSuggestion['destination'], cwd: string | undefined): string {
+function destinationName(destination: ClaudePermissionSuggestion['destination'], project: string | undefined): string {
   if (destination === 'session') return 'for this session';
   if (destination === 'userSettings') return 'in every project';
-  return cwd ? `in ${path.basename(cwd)}` : 'in this project';
+  return project ? `in ${project}` : 'in this project';
 }
 
 function relativeTo(cwd: string, file: string): string {

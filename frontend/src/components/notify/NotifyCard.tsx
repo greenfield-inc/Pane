@@ -772,7 +772,8 @@ function QuestionCard({
     >
       <CardHeader item={item} form={form} queue={queue} onCommand={onCommand} menuPlacement={menuPlacement} machineMark={machineMark} />
       <div className={cn(titleClass, !expanded && 'line-clamp-3')} title={item.title}>{item.title}</div>
-      {showContext && <div className={contextClass}>{item.context}</div>}
+      {/* An agent prompt's context is a command or a plan: its line breaks carry meaning. */}
+      {showContext && <div className={cn(contextClass, item.agentPrompt && 'max-h-[40vh] overflow-y-auto whitespace-pre-line')}>{item.context}</div>}
       {body}
       {item.unreachable && <UnreachableNotice item={item} className={form === 'inbox' ? 'px-3.5 pb-3' : 'px-[22px] pb-3'} />}
       {form === 'inbox' && (

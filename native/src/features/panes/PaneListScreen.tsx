@@ -329,7 +329,7 @@ export function PaneListScreen() {
                           // Only the terminal can answer it now: open its Pane.
                           onPress={() => (item.agentPrompt?.inTerminal && item.source.paneId ? openPane(item.source.paneId) : openNotifySheet(item.id, item.source.paneId))}
                         />
-                        {isAgentPrompt(item) ? <AgentPromptActions item={item} inset={33} /> : null}
+                        {isAgentPrompt(item) ? <AgentPromptActions item={item} inset={33} offline={presence === 'unreachable' ? profile.label : undefined} /> : null}
                       </View>
                     ))}
                     {waiting.map((request, index) => {

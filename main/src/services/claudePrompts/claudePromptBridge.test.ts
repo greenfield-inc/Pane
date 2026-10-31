@@ -60,9 +60,20 @@ describe('ClaudePromptBridge', () => {
 
     // After Notify's 3-second Undo hold.
     expect(await (await response).json()).toEqual({
-      hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'deny', message: 'Only unit tests' } },
+      hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'deny', message: 'The user said no. The user answered this prompt in Pane and wrote: Only unit tests' } },
     });
     expect(ctx.queue.snapshot().items[0]).toMatchObject({ state: 'answered', answerSummary: 'No', answeredOn: 'iPhone' });
+  });
+
+  it("names a worktree's repository in a don't-ask-again choice, where Claude keeps the rule", async () => {
+    const ctx = await setup();
+    bridge = ctx.bridge;
+    const worktree = mkdtempSync(path.join(os.tmpdir(), 'pane-claude-worktree-'));
+    writeFileSync(path.join(worktree, '.git'), 'gitdir: /work/acme-web/.git/worktrees/rate-limit-retries\n');
+    const rule = { type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'pnpm vitest *' }], behavior: 'allow', destination: 'localSettings' };
+    void ctx.call({ hook_event_name: 'PermissionRequest', cwd: worktree, tool_name: 'Bash', tool_input: input, permission_suggestions: [rule] });
+
+    expect((await ctx.waiting()).choices?.map(choice => choice.label)).toContain("Yes, and don't ask again for pnpm vitest commands in acme-web");
   });
 
   it('closes the question as answered in the terminal when the tool runs first, and lets the hook go', async () => {
@@ -75,6 +86,22 @@ describe('ClaudePromptBridge', () => {
     await ctx.call({ hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_input: { command: 'ls' } });
     expect(ctx.queue.snapshot().queue).toHaveLength(1);
     await ctx.call({ hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_input: input });
+
+    expect(await (await response).json()).toEqual({});
+    expect(ctx.queue.snapshot().items[0]).toMatchObject({ state: 'answered', answerSummary: ANSWERED_IN_TERMINAL });
+  });
+
+  it('closes the question as soon as the tab stops showing the dialog, before a long command ends', async () => {
+    const ctx = await setup();
+    bridge = ctx.bridge;
+    const response = ctx.call({ hook_event_name: 'PermissionRequest', tool_name: 'Bash', tool_input: input });
+    await ctx.waiting();
+
+    // Working before the dialog is drawn says nothing about the answer.
+    ctx.bridge.panelStatus('panel-1', 'working');
+    expect(ctx.queue.snapshot().queue).toHaveLength(1);
+    ctx.bridge.panelStatus('panel-1', 'blocked');
+    ctx.bridge.panelStatus('panel-1', 'working');
 
     expect(await (await response).json()).toEqual({});
     expect(ctx.queue.snapshot().items[0]).toMatchObject({ state: 'answered', answerSummary: ANSWERED_IN_TERMINAL });

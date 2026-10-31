@@ -1,8 +1,10 @@
 import { randomBytes, randomUUID } from 'crypto';
-import { promises as fs } from 'fs';
+import { promises as fs, readFileSync } from 'fs';
 import http from 'http';
 import type { AddressInfo } from 'net';
+import path from 'path';
 import { isDeepStrictEqual } from 'util';
+import type { AgentState } from '../../../../shared/types/agentStatus';
 import type { NotifyQuestion, NotifyResult, NotifySource } from '../../../../shared/types/notify';
 import type { JsonObject } from '../../../../shared/validation/boundaryDecoder';
 import { parseClaudeHookEvent, transcriptBlocks, type ClaudeHookEvent } from './claudeHookEvent';
@@ -48,6 +50,8 @@ interface WaitingPrompt {
   transcriptPath?: string;
   /** Matching tool calls the transcript already answered when the prompt arrived. */
   answeredBefore?: Set<string>;
+  /** The tab's screen showed the dialog (agent status `blocked`). */
+  shownBlocked?: boolean;
   abort: AbortController;
   poll?: ReturnType<typeof setInterval>;
 }
@@ -114,6 +118,19 @@ export class ClaudePromptBridge {
     };
   }
 
+  /**
+   * The tab's agent status, read from its screen. A tab that showed the dialog (`blocked`) and
+   * then works or idles again was answered in its terminal; this is the first sign of it, before
+   * any hook fires for a long command.
+   */
+  panelStatus(panelId: string, state: AgentState): void {
+    for (const prompt of this.waiting.values()) {
+      if (prompt.panelId !== panelId) continue;
+      if (state === 'blocked') prompt.shownBlocked = true;
+      else if (prompt.shownBlocked && (state === 'working' || state === 'idle')) this.answeredInTerminal(prompt);
+    }
+  }
+
   /** The tab closed: its tokens stop working and its questions expire. */
   forgetPanel(panelId: string): void {
     for (const [token, owner] of this.tokens) if (owner === panelId) this.tokens.delete(token);
@@ -169,7 +186,7 @@ export class ClaudePromptBridge {
     if (!this.options.enabled() || event.tool_name === 'AskUserQuestion') return {};
     const source = this.options.source(panelId);
     if (!source) return {};
-    const { question, decide } = claudePromptQuestion(event);
+    const { question, decide } = claudePromptQuestion(event, event.cwd ? repositoryName(event.cwd) : undefined);
     const prompt: WaitingPrompt = {
       id: randomUUID(),
       panelId,
@@ -216,6 +233,21 @@ export class ClaudePromptBridge {
     }, TRANSCRIPT_POLL_MS);
     prompt.poll.unref();
   }
+}
+
+/**
+ * The repository a folder belongs to, as Claude scopes project settings: a worktree's `.git` file
+ * points into its repository's `.git/worktrees`, so the worktree shares its repository's name.
+ */
+function repositoryName(cwd: string): string {
+  try {
+    const gitdir = /^gitdir:\s*(.+)$/m.exec(readFileSync(path.join(cwd, '.git'), 'utf8'))?.[1]?.trim();
+    const repository = gitdir && /^(.*)[\\/]\.git[\\/]worktrees[\\/][^\\/]+$/.exec(gitdir)?.[1];
+    if (repository) return path.basename(repository);
+  } catch {
+    // A plain checkout has a .git folder, not a file.
+  }
+  return path.basename(cwd);
 }
 
 /** Ids of the transcript's calls to the prompt's tool, with its input, that already have a result. */
