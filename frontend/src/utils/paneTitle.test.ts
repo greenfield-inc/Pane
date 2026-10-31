@@ -50,11 +50,11 @@ describe('resolvePaneTitle', () => {
     expect(resolvePaneTitle(windowsSession, [project])?.pane).toBe('scrub-sentry');
   });
 
-  it('shows only the project for the main-repo pane', () => {
-    const mainRepo = { ...session, isMainRepo: true, worktreePath: '/repos/bloom-mono' };
+  it('names a (Main) Pane like any other Pane', () => {
+    const mainRepo = { ...session, name: '(Main) bloom-mono', isMainRepo: true, worktreePath: '/repos/bloom-mono' };
     expect(resolvePaneTitle(mainRepo, [project])).toEqual({
       project: 'bloomapi/bloom-mono',
-      pane: '',
+      pane: '(Main) bloom-mono',
     });
   });
 
@@ -128,9 +128,9 @@ describe('formatPaneTitle', () => {
       .toBe('bloomapi/bloom-mono · scrub Sentry request bodies (TM-622)');
   });
 
-  it('uses the project alone for the main-repo pane', () => {
-    const mainRepo = { ...session, isMainRepo: true };
-    expect(formatPaneTitle(resolvePaneTitle(mainRepo, [project]))).toBe('bloomapi/bloom-mono');
+  it('joins the project and a (Main) Pane name', () => {
+    const mainRepo = { ...session, name: '(Main) bloom-mono', isMainRepo: true };
+    expect(formatPaneTitle(resolvePaneTitle(mainRepo, [project]))).toBe('bloomapi/bloom-mono · (Main) bloom-mono');
   });
 
   it('falls back to the app name when no pane is open', () => {

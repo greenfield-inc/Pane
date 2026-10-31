@@ -238,9 +238,7 @@ export const useSessionView = (
     // Performance optimization: Check session status only, not entire state
     let previousStatus = activeSessionStatus;
     const unsubscribe = useSessionStore.subscribe((state) => {
-      const updatedSession = state.activeMainRepoSession?.id === activeSessionId
-        ? state.activeMainRepoSession
-        : state.sessions.find(s => s.id === activeSessionId);
+      const updatedSession = state.sessions.find(s => s.id === activeSessionId);
       
       // Only trigger update if status actually changed
       if (updatedSession && updatedSession.status !== previousStatus) {
@@ -429,9 +427,7 @@ export const useSessionView = (
     // PERFORMANCE: Adaptive reload interval based on output size
     const getMinReloadInterval = () => {
       const sessionState = useSessionStore.getState();
-      const currentSession = sessionState.activeMainRepoSession?.id === activeSessionId
-        ? sessionState.activeMainRepoSession
-        : sessionState.sessions.find(session => session.id === activeSessionId);
+      const currentSession = sessionState.sessions.find(session => session.id === activeSessionId);
       const outputSize = currentSession?.output?.length ?? 0;
       if (outputSize > 2000) return 3000; // 3 seconds for very large outputs
       if (outputSize > 1000) return 2000; // 2 seconds for large outputs  
@@ -706,7 +702,8 @@ export const useSessionView = (
     if (!activeSession) return 'No active session';
     if (isMerging) return 'Git operation already in progress';
     if (isSessionBusy) return 'Session is currently running';
-    if (activeSession.isMainRepo) return 'Only available in worktree panes';
+    // Rebase and merge move work between a worktree and main; a (Main) Pane already is the checkout.
+    if (activeSession.isMainRepo && (command === 'rebase' || command === 'merge')) return 'Only available in worktree panes';
 
     switch (command) {
       case 'commit':
@@ -737,7 +734,7 @@ export const useSessionView = (
       setDialogType('commit');
       setShowCommitMessageDialog(true);
     },
-    enabled: () => !!activeSession && !isMerging && !isSessionBusy && !activeSession.isMainRepo &&
+    enabled: () => !!activeSession && !isMerging && !isSessionBusy &&
       ((activeSession.gitStatus?.hasUncommittedChanges ?? false) || (activeSession.gitStatus?.hasUntrackedFiles ?? false)),
     disabledReason: () => getGitCommandDisabledReason('commit'),
   });
@@ -748,7 +745,7 @@ export const useSessionView = (
     keys: 'mod+shift+u',
     category: 'session',
     action: () => handleGitPush(),
-    enabled: () => !!activeSession && !isMerging && !isSessionBusy && !activeSession.isMainRepo && (activeSession.gitStatus?.ahead ?? 0) > 0,
+    enabled: () => !!activeSession && !isMerging && !isSessionBusy && (activeSession.gitStatus?.ahead ?? 0) > 0,
     disabledReason: () => getGitCommandDisabledReason('push'),
   });
 
@@ -758,7 +755,7 @@ export const useSessionView = (
     keys: 'mod+alt+z',
     category: 'session',
     action: () => handleGitSoftReset(),
-    enabled: () => !!activeSession && !isMerging && !isSessionBusy && !activeSession.isMainRepo && (activeSession.gitStatus?.ahead ?? 0) > 0,
+    enabled: () => !!activeSession && !isMerging && !isSessionBusy && (activeSession.gitStatus?.ahead ?? 0) > 0,
     disabledReason: () => getGitCommandDisabledReason('undo'),
   });
 
@@ -768,7 +765,7 @@ export const useSessionView = (
     keys: 'mod+shift+l',
     category: 'session',
     action: () => handleGitPull(),
-    enabled: () => !!activeSession && !isMerging && !isSessionBusy && !activeSession.isMainRepo,
+    enabled: () => !!activeSession && !isMerging && !isSessionBusy,
     disabledReason: () => getGitCommandDisabledReason('pull'),
   });
 

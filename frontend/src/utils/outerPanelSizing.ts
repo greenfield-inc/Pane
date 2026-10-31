@@ -2,7 +2,6 @@ import { boundary, decodeOptionalBoundary } from '../../../shared/validation/bou
 
 export type OuterPanelSurface =
   | 'worktreeInspector'
-  | 'projectInspector'
   | 'bottomTerminal'
   | 'rightTerminal'
   | 'bottomDetail';
@@ -46,16 +45,6 @@ export const OUTER_PANEL_CONFIGS = {
     axis: 'width',
     storageKey: 'pane-detail-panel-width:v2',
     legacyKey: 'pane-detail-panel-width',
-    legacyMin: 240,
-    legacyMax: 720,
-    legacyDefault: 360,
-    defaultPx: () => 360,
-    bounds: widthBounds(720, 240),
-  },
-  projectInspector: {
-    axis: 'width',
-    storageKey: 'pane-project-detail-panel-width:v2',
-    legacyKey: 'pane-project-detail-panel-width',
     legacyMin: 240,
     legacyMax: 720,
     legacyDefault: 360,

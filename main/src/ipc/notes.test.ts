@@ -39,7 +39,7 @@ function fixture() {
   // SAFETY: this fixture implements only the public service methods exercised by Notes IPC.
   const services = { sessionManager, configManager, getMainWindow: () => null,
     databaseService: { getProject: (id: number) => projects.find(project => project.id === id),
-      getAllProjects: () => projects, getMainRepoSession: () => undefined, getAllSessions: () => [] },
+      getAllProjects: () => projects, getAllSessions: () => [] },
   } as AppServices;
   // SAFETY: Electron calls the registered listener with event followed by invocation arguments.
   const ipc = { handle: (name: string, handler: (...args: unknown[]) => Promise<{ note?: unknown }>) => handlers.set(name, handler) } as IpcMain;

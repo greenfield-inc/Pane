@@ -91,10 +91,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   // The host URL of the page the guest is showing, from its last navigation.
   const lastNavigationUrlRef = useRef(currentUrlFromPanelState);
   const [shownUrl, setShownUrl] = useState(currentUrlFromPanelState);
-  const worktreePath = useSessionStore((state) => (
-    state.sessions.find(session => session.id === panel.sessionId)
-    ?? (state.activeMainRepoSession?.id === panel.sessionId ? state.activeMainRepoSession : undefined)
-  )?.worktreePath);
+  const worktreePath = useSessionStore((state) => state.sessions.find(session => session.id === panel.sessionId)?.worktreePath);
   const sourceFile = worktreeFileOf(shownUrl, worktreePath);
   const sourceUrlRef = useRef('');
   // A URL this tab asked the guest to load whose navigation hasn't landed yet.

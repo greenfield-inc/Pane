@@ -19,7 +19,7 @@ export type PaneNavigationView = (typeof PANE_NAVIGATION_VIEWS)[number];
  */
 export interface HostNavigationMemory {
   view: PaneNavigationView;
-  /** Repository view's project id, or null when no repository view was open. */
+  /** Repository being opened (its "(Main)" Pane is then selected), or null. */
   projectId: number | null;
   /** Active Pane, or null when the Panes home view was showing. */
   paneId: string | null;

@@ -61,7 +61,7 @@ async function reloadRemoteRuntimeState(loadSessions: (sessions: Session[]) => v
     useNavigationStore.getState().hydrateExpandedSessions(uiState.success ? uiState.data?.expandedSessions ?? [] : []);
     useNavigationStore.getState().hydrateExpandedArchivedProjects(uiState.success ? uiState.data?.expandedArchivedProjects ?? [] : []);
   }
-  // Repository ids are per host, so another host's repository view is meaningless.
+  // Repository ids are per host, so a repository the other host was still opening is meaningless.
   if (hostChanged && useNavigationStore.getState().activeView === 'project') {
     useNavigationStore.getState().navigateToSessions();
     await useSessionStore.getState().setActiveSession(null);
@@ -80,9 +80,8 @@ async function reloadRemoteRuntimeState(loadSessions: (sessions: Session[]) => v
     }));
     loadSessions(sessionsWithJsonMessages);
 
-    // The list leaves out repository Panes, so keep the open repository view's own Pane.
-    const { activeSessionId, activeMainRepoSession } = useSessionStore.getState();
-    if (activeSessionId && activeSessionId !== activeMainRepoSession?.id
+    const { activeSessionId } = useSessionStore.getState();
+    if (activeSessionId
       && !sessionsWithJsonMessages.some((session: Session) => session.id === activeSessionId)) {
       await useSessionStore.getState().setActiveSession(null);
       if (!ownsRuntime()) return;

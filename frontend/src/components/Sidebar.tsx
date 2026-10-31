@@ -791,7 +791,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
                         data-testid={`compact-repository-${project.id}`}
                         data-compact-rail-item
                         onClick={() => navigateToProject(project.id)}
-                        aria-label={`Open main workspace for ${project.name}`}
+                        aria-label={`Open the (Main) Pane for ${project.name}`}
                         className={`${COMPACT_RAIL_BUTTON} text-xs font-semibold ${isActiveProject ? COMPACT_RAIL_ACTIVE : COMPACT_RAIL_IDLE}`}
                       >
                         <span className="flex h-6 w-6 items-center justify-center rounded-md border border-border-primary">{initial}</span>

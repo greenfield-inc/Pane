@@ -566,7 +566,7 @@ export function ProjectSessionList({
           const projectMenuItems: DropdownItem[] = [
             {
               id: 'main-workspace',
-              label: 'Open session on main',
+              label: 'Open (Main) Pane',
               icon: GitBranch,
               onClick: () => navigateToProject(project.id),
             },
