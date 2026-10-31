@@ -3,12 +3,17 @@ name: Native Android Build
 # Builds the Expo app's Android dev client with the real Firebase config, so
 # push-capable Android builds work on any machine, not only where
 # native/google-services.json happens to exist.
+#
+# The debug APK carries no JavaScript, so only native code can change it. On a
+# PR the build runs when the Expo Android fingerprint (native/fingerprint.config.js)
+# differs from the base, or this workflow changed, and builds one ABI
+# (arm64-v8a) as a compile check. Pushes to main and manual runs build all four.
 on:
   push:
     branches: [ main ]
-    paths: [ 'native/**', 'shared/**', 'pnpm-lock.yaml', '.github/workflows/native-android.yml' ]
+    paths: [ 'native/**', 'pnpm-lock.yaml', '.github/workflows/native-android.yml' ]
   pull_request:
-    paths: [ 'native/**', 'shared/**', 'pnpm-lock.yaml', '.github/workflows/native-android.yml' ]
+    paths: [ 'native/**', 'pnpm-lock.yaml', '.github/workflows/native-android.yml', 'scripts/ci-native-fingerprint.sh' ]
   workflow_dispatch:
 
 concurrency:
@@ -16,8 +21,53 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  fingerprint:
+    name: Android fingerprint
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      build: ${{ steps.compare.outputs.build }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+      with:
+        fetch-depth: 0
+
+    - name: Setup Node.js and pnpm
+      uses: ./.github/actions/setup-pnpm
+
+    - name: Fingerprint the head and the base
+      env:
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      run: scripts/ci-native-fingerprint.sh "$BASE_SHA" android
+
+    - name: Compare
+      id: compare
+      env:
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      run: |
+        set -euo pipefail
+        if ! git diff --quiet "$BASE_SHA" HEAD -- .github/workflows/native-android.yml scripts/ci-native-fingerprint.sh; then
+          reason="This PR changes the Android build workflow; building the APK."
+          build=true
+        elif cmp -s "$RUNNER_TEMP/base-android" "$RUNNER_TEMP/head-android"; then
+          reason="The Android fingerprint is unchanged ($(cat "$RUNNER_TEMP/head-android")), so this PR cannot change the APK; skipping the build."
+          build=false
+        else
+          reason="The Android fingerprint changed ($(cat "$RUNNER_TEMP/base-android") -> $(cat "$RUNNER_TEMP/head-android")); building the APK."
+          build=true
+        fi
+        echo "$reason"
+        echo "$reason" >> "$GITHUB_STEP_SUMMARY"
+        echo "build=$build" >> "$GITHUB_OUTPUT"
+
   android:
     name: Android dev client
+    needs: fingerprint
+    # The fingerprint job is skipped outside PRs; those always build.
+    if: ${{ !cancelled() && (needs.fingerprint.result == 'skipped' || needs.fingerprint.outputs.build == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
@@ -56,6 +106,9 @@ jobs:
       working-directory: native
       run: pnpm exec expo prebuild --platform android --no-install
 
+    # A PR build is a compile check, so one ABI is enough.
     - name: Build debug APK
       working-directory: native/android
-      run: ./gradlew assembleDebug --no-daemon
+      env:
+        ABI_FLAG: ${{ github.event_name == 'pull_request' && '-PreactNativeArchitectures=arm64-v8a' || '' }}
+      run: ./gradlew assembleDebug --no-daemon $ABI_FLAG
