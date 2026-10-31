@@ -9,6 +9,7 @@ import { useDaemon } from '@/daemon';
 import { monoFontFamily, useTheme, withAlpha } from '@/theme';
 import { EmptyState, ErrorState, Icon, Text } from '@/ui';
 
+import { TabFooter } from '../tabs/TabFooter';
 import { changeBadge, DiffError, parsePatch, versusLabel, type PatchRow } from './diff';
 import { BRANCH_SCOPE, useChanges, useFileDiff } from './useDiff';
 
@@ -71,7 +72,7 @@ export function DiffTab({ panel }: { panel: ToolPanel }) {
   return (
     <View testID="diff-tab" style={[styles.fill, { backgroundColor: colors.background }]}>
       <View style={styles.fill}>{body}</View>
-      <ReadOnlyFooter left="Read-only on the phone" right={`Commit and revert on ${profile.label}`} />
+      <TabFooter left="Read-only on the phone" right={`Commit and revert on ${profile.label}`} />
     </View>
   );
 }
@@ -87,7 +88,7 @@ export function DiffEditorTab({ panel }: { panel: ToolPanel }) {
       <View style={styles.fill}>
         <FilePatch sessionId={panel.sessionId} scope={scope} file={{ path: state.filePath, previousPath: state.diff?.previousPath }} fill />
       </View>
-      <ReadOnlyFooter left="Read-only on the phone" right={`Commit and revert on ${profile.label}`} />
+      <TabFooter left="Read-only on the phone" right={`Commit and revert on ${profile.label}`} />
     </View>
   );
 }
@@ -174,21 +175,10 @@ function Counts({ additions, deletions }: { additions: number | null; deletions:
   );
 }
 
-export function ReadOnlyFooter({ left, right }: { left: string; right: string }) {
-  const { colors } = useTheme();
-  return (
-    <View style={[styles.footer, { borderTopColor: colors.border, backgroundColor: colors.surfaceRaised }]}>
-      <Text variant="footnote" tone="muted" numberOfLines={1} style={styles.shrink}>{left}</Text>
-      <Text variant="footnote" tone="muted" numberOfLines={1} style={styles.shrink}>{right}</Text>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
   fill: { flex: 1 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   centerText: { textAlign: 'center' },
-  shrink: { flexShrink: 1 },
   semibold: { fontWeight: '600' },
   summary: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1 },
   versus: { marginLeft: 'auto' },
@@ -202,5 +192,4 @@ const styles = StyleSheet.create({
   patch: { paddingBottom: 4 },
   patchLine: { fontSize: 13, lineHeight: 20, paddingHorizontal: 10 },
   patchState: { padding: 16 },
-  footer: { flexDirection: 'row', justifyContent: 'space-between', gap: 12, paddingHorizontal: 12, paddingVertical: 8, borderTopWidth: 1 },
 });
