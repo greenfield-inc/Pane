@@ -261,6 +261,10 @@ function startClaudePrompts(notify: NotifyService, services: NotifyServices): vo
     },
   });
   terminalPanelManager.on('agent-status', (change: { panelId: string; state: AgentState }) => bridge.panelStatus(change.panelId, change.state));
+  // Off takes effect at once: prompts already in Notify go back to the terminal alone.
+  configManager.on('config-updated', (config: { answerPromptsFromPane?: boolean }) => {
+    if (config.answerPromptsFromPane === false) bridge.releaseAll();
+  });
   bridge.start().then(() => setClaudePromptBridge(bridge)).catch((error: Error) => {
     console.warn("[Claude prompts] Pane couldn't listen for Claude's prompts; they stay in the terminal:", error);
   });

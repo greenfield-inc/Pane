@@ -109,6 +109,32 @@ describe('ClaudePromptBridge', () => {
     expect(ctx.queue.snapshot().items[0]).toMatchObject({ state: 'answered', answerSummary: ANSWERED_IN_TERMINAL });
   });
 
+  it("lets a terminal answer win over a Notify answer still in its Undo hold", async () => {
+    const ctx = await setup();
+    bridge = ctx.bridge;
+    const response = ctx.call({ hook_event_name: 'PermissionRequest', tool_name: 'Bash', tool_input: input });
+    const item = await ctx.waiting();
+
+    ctx.queue.runRemote({ type: 'answer', id: item.id, answer: { choice: 'Yes' } }, 'iPhone');
+    await ctx.call({ hook_event_name: 'Stop' });
+
+    expect(await (await response).json()).toEqual({});
+    expect(ctx.queue.snapshot().items[0]).toMatchObject({ state: 'answered', answerSummary: ANSWERED_IN_TERMINAL });
+    expect(ctx.queue.snapshot().items[0].answeredOn).toBeUndefined();
+  });
+
+  it('lets every open prompt go with no decision when the setting turns off', async () => {
+    const ctx = await setup();
+    bridge = ctx.bridge;
+    const response = ctx.call({ hook_event_name: 'PermissionRequest', tool_name: 'Bash', tool_input: input });
+    await ctx.waiting();
+
+    ctx.bridge.releaseAll();
+
+    expect(await (await response).json()).toEqual({});
+    expect(ctx.queue.snapshot().queue).toEqual([]);
+  });
+
   it("notices No or Esc in the terminal from Claude's transcript", async () => {
     const ctx = await setup();
     bridge = ctx.bridge;

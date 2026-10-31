@@ -60,6 +60,8 @@ export function NotifyCard(props: NotifyCardProps) {
     case 'expired':
       return <ExpiredCard {...props} />;
     case 'question':
+      // The agent stopped waiting on Pane; its terminal still asks, and answering there clears this.
+      if (props.item.agentPrompt?.inTerminal) return <InTerminalCard {...props} />;
       return <QuestionCard key={props.item.id} {...props} />;
   }
 }
@@ -526,7 +528,6 @@ function QuestionCard({
   const rootRef = useRef<HTMLDivElement>(null);
   // The card's own keys, matching the key on each chip.
   useCardKeys(rootRef, Boolean(onFieldFocusRequest), (key) => {
-    if (item.agentPrompt?.inTerminal) return false;
     const index = /^[1-9]$/.test(key) ? Number(key) - 1 : -1;
     if (item.ui === 'options') {
       if (index >= 0 && index < (expanded ? choices.length : Math.min(choices.length, COMPACT_CHOICE_LIMIT))) {
@@ -562,24 +563,6 @@ function QuestionCard({
 
   const showContext = Boolean(item.context) && (expanded || item.ui === 'approve' || form === 'inbox');
   const recommended = recommendedIndex(choices);
-
-  // The agent stopped waiting on Pane; its terminal still asks, and answering there clears this.
-  if (item.agentPrompt?.inTerminal) {
-    return (
-      <div ref={rootRef} className={cardShell(form, narrow, className)} data-testid="notify-card" data-notify-ui={item.ui} data-notify-view="in-terminal">
-        <CardHeader item={item} form={form} queue={queue} onCommand={onCommand} menuPlacement={menuPlacement} machineMark={machineMark} />
-        <div className={cn(titleClass, 'line-clamp-3')} title={item.title}>{item.title}</div>
-        <div className={fieldPad}>
-          <NoticePill testId="notify-in-terminal">
-            <span className="min-w-0 flex-1">{item.source.agent} is asking in the terminal now.</span>
-            {item.source.paneId && !item.elsewhere && (
-              <FooterLink onClick={() => onCommand({ type: 'open-in-pane', id: item.id })}>Open</FooterLink>
-            )}
-          </NoticePill>
-        </div>
-      </div>
-    );
-  }
 
   let body: ReactNode = null;
   if (item.ui === 'options' && expanded) {
@@ -838,6 +821,29 @@ export function UnreachableNotice({ item, className }: { item: NotifyItem; class
   return (
     <div className={className}>
       <NoticePill testId="notify-unreachable">{unreachableText(item)}</NoticePill>
+    </div>
+  );
+}
+
+function InTerminalCard({ item, form, queue, narrow, onCommand, menuPlacement, machineMark, className }: NotifyCardProps) {
+  const inbox = form === 'inbox';
+  return (
+    <div className={cardShell(form, narrow, className)} data-testid="notify-card" data-notify-ui={item.ui} data-notify-view="in-terminal">
+      <CardHeader item={item} form={form} queue={queue} onCommand={onCommand} menuPlacement={menuPlacement} machineMark={machineMark} />
+      <div
+        className={cn(inbox ? 'px-3.5 pt-1 text-[14.5px] font-semibold leading-snug' : 'px-[22px] pt-1.5 text-[18px] font-semibold leading-[1.35] tracking-[-0.015em]', 'line-clamp-3 text-text-primary')}
+        title={item.title}
+      >
+        {item.title}
+      </div>
+      <div className={inbox ? 'px-3.5 pb-3.5 pt-3' : 'px-[22px] pb-[18px] pt-3'}>
+        <NoticePill testId="notify-in-terminal">
+          <span className="min-w-0 flex-1">{item.source.agent} is asking in the terminal now.</span>
+          {item.source.paneId && !item.elsewhere && (
+            <FooterLink onClick={() => onCommand({ type: 'open-in-pane', id: item.id })}>Open</FooterLink>
+          )}
+        </NoticePill>
+      </div>
     </div>
   );
 }

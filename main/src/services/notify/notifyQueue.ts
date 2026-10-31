@@ -395,10 +395,13 @@ export class NotifyQueue extends EventEmitter {
 
   /**
    * An agent prompt was answered where Pane can't see the choice (its terminal): it moves to
-   * Earlier today with `summary`. An answer already sent from a screen stands.
+   * Earlier today with `summary`. An answer still in its Undo hold never reached the agent, so it
+   * is dropped; one already delivered stands.
    */
   settle(id: string, summary: string): void {
-    if (this.entries.get(id)?.item.state !== 'waiting') return;
+    const entry = this.entries.get(id);
+    if (!entry || !isOpen(entry.item)) return;
+    entry.item.answeredOn = undefined;
     this.close(id, { state: 'answered', summary }, unavailable(summary), false);
   }
 

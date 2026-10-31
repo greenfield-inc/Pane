@@ -143,6 +143,11 @@ export class ClaudePromptBridge {
     }
   }
 
+  /** The setting was turned off: every open question expires and its hook goes with no decision. */
+  releaseAll(): void {
+    for (const prompt of this.waiting.values()) prompt.abort.abort();
+  }
+
   /** The tab closed: its tokens stop working and its questions expire. */
   forgetPanel(panelId: string): void {
     for (const [token, owner] of this.tokens) if (owner === panelId) this.tokens.delete(token);
