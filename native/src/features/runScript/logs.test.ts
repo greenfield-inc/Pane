@@ -19,6 +19,15 @@ describe('appendLog', () => {
     expect(next[0].message).toBe('1');
     expect(next.at(-1)?.message).toBe('new');
   });
+
+  it('keeps no more than the computer’s 1 MiB of output, however long the lines', () => {
+    const long = 'x'.repeat(100 * 1024);
+    let lines: ReturnType<typeof appendLog> = [];
+    for (let index = 0; index < MAX_LOG_LINES; index++) lines = appendLog(lines, entry(`${index} ${long}`));
+    const bytes = lines.reduce((total, line) => total + line.message.length + (line.source?.length ?? 0), 0);
+    expect(bytes).toBeLessThanOrEqual(1024 * 1024);
+    expect(lines.at(-1)?.message.startsWith(`${MAX_LOG_LINES - 1} `)).toBe(true);
+  });
 });
 
 describe('logText', () => {
