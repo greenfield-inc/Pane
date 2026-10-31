@@ -1,3 +1,4 @@
+# BENCH ONLY (D-32, not for merge): the gate's Linux jobs run on Blacksmith 4 vCPU.
 name: Code Quality
 
 on:
@@ -16,7 +17,7 @@ concurrency:
 jobs:
   changes:
     name: Detect changed areas
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     outputs:
       runpane: ${{ steps.filter.outputs.runpane }}
       main: ${{ steps.filter.outputs.main }}
@@ -56,7 +57,7 @@ jobs:
 
   quality-checks:
     name: Quality Checks
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
 
     steps:
     - name: Checkout code
@@ -98,7 +99,7 @@ jobs:
   # parallel here; the Finish steps print each output and fail on errors.
   typecheck-lint:
     name: Type Check and Lint
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
 
     steps:
     - name: Checkout code
@@ -128,7 +129,7 @@ jobs:
   # External URLs are not fetched, so the check never flakes on the network.
   markdown-links:
     name: Markdown Links
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
     - name: Checkout code
       uses: actions/checkout@v7
@@ -150,7 +151,7 @@ jobs:
   # install browser dependencies for. Move back once Playwright supports it.
   functional-smoke:
     name: Functional Smoke
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
 
     steps:
     - name: Checkout code
@@ -206,7 +207,7 @@ jobs:
     name: Runpane Wrapper (${{ matrix.os }}, Node ${{ matrix.node-version }}, Python ${{ matrix.python-version }})
     needs: changes
     if: github.event_name != 'pull_request' || needs.changes.outputs.runpane == 'true'
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ startsWith(matrix.os, 'ubuntu') && 'blacksmith-4vcpu-ubuntu-2404' || matrix.os }}
     strategy:
       fail-fast: false
       matrix:
@@ -288,7 +289,7 @@ jobs:
     name: Main Process Tests (${{ matrix.os }})
     needs: changes
     if: github.event_name != 'pull_request' || needs.changes.outputs.main == 'true'
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ startsWith(matrix.os, 'ubuntu') && 'blacksmith-4vcpu-ubuntu-2404' || matrix.os }}
     strategy:
       fail-fast: false
       matrix:
@@ -343,7 +344,7 @@ jobs:
     name: CI result
     needs: [changes, quality-checks, typecheck-lint, functional-smoke, runpane-wrapper-tests, cross-os-main-tests]
     if: ${{ !cancelled() }}
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 5
     steps:
     - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
