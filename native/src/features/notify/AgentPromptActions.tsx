@@ -1,21 +1,22 @@
 import * as Haptics from 'expo-haptics';
 import { StyleSheet, View } from 'react-native';
 
+import type { NotifyItem } from '@shared/types/notify';
 import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
 
 import { Button, Text } from '@/ui';
 
 import { useMachineNotifyCommand, useNotifyCommand } from './hooks';
-import type { AgentPromptItem } from './notifyQuestions';
+import { inTerminalMessage } from './notifyQuestions';
 
 /**
- * Yes and No under a "Waiting on you" row for an agent's terminal prompt; its other choices are
- * in the question's sheet. `machine` is another saved machine the prompt is on, answered there
+ * Yes and No under a "Waiting on you" row for an agent's terminal prompt (nothing for other
+ * questions); its other choices are in the question's sheet. `machine` is another saved machine the prompt is on, answered there
  * without switching. An offline machine or a prompt only its terminal can answer now gets a line
  * saying so instead of buttons.
  */
 export function AgentPromptActions({ item, machine, offline, inset = 36 }: {
-  item: AgentPromptItem;
+  item: NotifyItem;
   /** Lines the buttons up with the row's title, past its status dot. */
   inset?: number;
   machine?: RemotePaneConnectionProfile | null;
@@ -26,13 +27,13 @@ export function AgentPromptActions({ item, machine, offline, inset = 36 }: {
   const live = useNotifyCommand(onAccepted);
   const remote = useMachineNotifyCommand(machine ?? null, onAccepted);
   const command = machine ? remote : live;
-  const agent = item.source.agent;
-
+  const prompt = item.agentPrompt;
+  if (!prompt) return null;
   if (offline) {
-    return <Line inset={inset} testID={`agent-prompt-offline-${item.id}`} text={`${offline} is offline. ${agent} is still waiting there; answer when it's back or in the terminal.`} />;
+    return <Line inset={inset} testID={`agent-prompt-offline-${item.id}`} text={`${offline} is offline. ${item.source.agent} is still waiting there; answer when it's back or in the terminal.`} />;
   }
-  if (item.agentPrompt.inTerminal) {
-    return <Line inset={inset} testID={`agent-prompt-in-terminal-${item.id}`} text={`${agent} is asking in the terminal now. Open the Pane to answer.`} />;
+  if (prompt.inTerminal) {
+    return <Line inset={inset} testID={`agent-prompt-in-terminal-${item.id}`} text={inTerminalMessage(item)} />;
   }
   const answer = (choice: string) => command.mutate([{ type: 'answer', id: item.id, answer: { choice } }]);
   const sending = command.isPending ? command.variables[0] : undefined;
@@ -41,10 +42,10 @@ export function AgentPromptActions({ item, machine, offline, inset = 36 }: {
     <View style={[styles.actions, { paddingLeft: inset }]}>
       <View style={styles.buttons}>
         <View style={styles.button}>
-          <Button testID={`agent-prompt-yes-${item.id}`} title="Yes" loading={sendingChoice === item.agentPrompt.yes} disabled={command.isPending} onPress={() => answer(item.agentPrompt.yes)} />
+          <Button testID={`agent-prompt-yes-${item.id}`} title="Yes" loading={sendingChoice === prompt.yes} disabled={command.isPending} onPress={() => answer(prompt.yes)} />
         </View>
         <View style={styles.button}>
-          <Button testID={`agent-prompt-no-${item.id}`} title="No" variant="secondary" loading={sendingChoice === item.agentPrompt.no} disabled={command.isPending} onPress={() => answer(item.agentPrompt.no)} />
+          <Button testID={`agent-prompt-no-${item.id}`} title="No" variant="secondary" loading={sendingChoice === prompt.no} disabled={command.isPending} onPress={() => answer(prompt.no)} />
         </View>
       </View>
       {command.isError ? <Text testID={`agent-prompt-error-${item.id}`} variant="footnote" tone="danger">{command.error.message}</Text> : null}

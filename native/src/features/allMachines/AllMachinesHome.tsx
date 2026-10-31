@@ -6,9 +6,7 @@ import { Alert, Pressable, StyleSheet, View } from 'react-native';
 import { MachineBadge } from '@/features/machines/MachineBadge';
 import { MachineMark } from '@/features/machines/MachineMark';
 import type { Machine } from '@/features/machines/machines';
-import { useHostsStore } from '@/auth/hostsStore';
 import { AgentPromptActions } from '@/features/notify/AgentPromptActions';
-import { isAgentPrompt } from '@/features/notify/notifyQuestions';
 import { openNotifySheet } from '@/features/notify/NotifySheet';
 import { LoadingRows, Notice, SectionHeader } from '@/features/panes/PaneKit';
 import { describePermission } from '@/features/panes/permissions';
@@ -58,7 +56,6 @@ export function AllMachinesHome({ machines, feeds, currentKey, loading, refreshi
   bottomPadding: number;
 }) {
   const theme = useTheme();
-  const profiles = useHostsStore(state => state.profiles);
   const [query, setQuery] = useState('');
   const { waiting, recent } = buildAllMachinesList(feeds, query);
   const machineOf = (key: string) => machines.find(machine => machine.key === key);
@@ -119,7 +116,6 @@ export function AllMachinesHome({ machines, feeds, currentKey, loading, refreshi
             {waiting.map((row, index) => {
               const machine = machineOf(row.machineKey);
               const permission = row.type === 'permission' ? describePermission(row.request) : null;
-              const prompt = row.type === 'question' && isAgentPrompt(row.item) ? row.item : null;
               return (
                 <View key={row.key}>
                 <AllRow
@@ -132,10 +128,10 @@ export function AllMachinesHome({ machines, feeds, currentKey, loading, refreshi
                   leading={<StatusBadge status="blocked" />}
                   onPress={() => openWaiting(row)}
                 />
-                {prompt ? (
+                {row.type === 'question' ? (
                   <AgentPromptActions
-                    item={prompt}
-                    machine={row.machineKey === currentKey ? null : profiles.find(profile => profile.id === row.machineKey) ?? null}
+                    item={row.item}
+                    machine={row.machineKey === currentKey ? null : machine?.profile ?? null}
                     offline={row.stale ? machine?.name ?? 'Its machine' : undefined}
                   />
                 ) : null}

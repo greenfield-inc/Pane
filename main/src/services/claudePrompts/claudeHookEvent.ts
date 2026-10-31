@@ -1,4 +1,5 @@
 import { boundary, decodeBoundary, decodeOptionalBoundary, type JsonObject } from '../../../../shared/validation/boundaryDecoder';
+import { decodeJsonLine } from '../agentTranscript/tail';
 
 /** The fields Pane reads from a Claude Code hook's JSON input (https://code.claude.com/docs/en/hooks). */
 const claudeHookEventSchema = boundary.object({
@@ -15,11 +16,7 @@ export type ClaudeHookEvent = ReturnType<typeof claudeHookEventSchema.decode>;
 
 /** One hook request body; undefined when it isn't a hook event. */
 export function parseClaudeHookEvent(text: string): ClaudeHookEvent | undefined {
-  try {
-    return decodeOptionalBoundary(JSON.parse(text), claudeHookEventSchema);
-  } catch {
-    return undefined;
-  }
+  return decodeJsonLine(text, claudeHookEventSchema);
 }
 
 /** The tool input fields the prompt card names. */
@@ -75,12 +72,6 @@ export type ClaudeTranscriptBlock = ReturnType<typeof transcriptBlockSchema.deco
 
 /** The tool calls and results on one transcript line; none for other lines. */
 export function transcriptBlocks(line: string): ClaudeTranscriptBlock[] {
-  let value: unknown;
-  try {
-    value = JSON.parse(line);
-  } catch {
-    return [];
-  }
-  const content = decodeOptionalBoundary(value, transcriptLineSchema)?.message.content ?? [];
+  const content = decodeJsonLine(line, transcriptLineSchema)?.message.content ?? [];
   return content.flatMap(block => decodeOptionalBoundary(block, transcriptBlockSchema) ?? []);
 }

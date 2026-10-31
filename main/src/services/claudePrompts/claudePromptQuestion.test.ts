@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { claudePromptQuestion, type ClaudePermissionRequest } from './claudePromptQuestion';
+import type { ClaudeHookEvent } from './claudeHookEvent';
+import { claudePromptQuestion } from './claudePromptQuestion';
 
 const cwd = '/work/acme-web';
 
 /** The shape Claude Code 2.1.314 sent for a Bash prompt, with the suggestions its dialog offers. */
-const bashPrompt: ClaudePermissionRequest = {
+const bashPrompt: ClaudeHookEvent = {
+  hook_event_name: 'PermissionRequest',
   session_id: 's-1',
   cwd,
   tool_name: 'Bash',
@@ -17,7 +19,7 @@ const bashPrompt: ClaudePermissionRequest = {
 
 describe('claudePromptQuestion', () => {
   it("offers the terminal dialog's choices for a command, and the phone's Yes and No", () => {
-    const { question } = claudePromptQuestion(bashPrompt);
+    const { question } = claudePromptQuestion(bashPrompt, 'acme-web');
 
     expect(question.title).toBe('Run pnpm vitest run src/http?');
     expect(question.context).toBe('Run the http tests');
@@ -31,7 +33,7 @@ describe('claudePromptQuestion', () => {
   });
 
   it('allows, remembers the chosen rule, or says no with or without a reason', () => {
-    const { decide } = claudePromptQuestion(bashPrompt);
+    const { decide } = claudePromptQuestion(bashPrompt, 'acme-web');
 
     expect(decide('Yes')).toEqual({ behavior: 'allow' });
     expect(decide("Yes, and don't ask again for pnpm vitest commands in acme-web")).toEqual({
@@ -45,7 +47,7 @@ describe('claudePromptQuestion', () => {
 
   it('approves a plan into the chosen mode with the plan echoed, or keeps planning with the note', () => {
     const input = { plan: '1. Add the endpoint\n2. Test it', planFilePath: '/home/me/.claude/plans/p.md' };
-    const { question, decide } = claudePromptQuestion({ session_id: 's-1', cwd, tool_name: 'ExitPlanMode', tool_input: input });
+    const { question, decide } = claudePromptQuestion({ hook_event_name: 'PermissionRequest', session_id: 's-1', cwd, tool_name: 'ExitPlanMode', tool_input: input }, 'acme-web');
 
     expect(question.title).toBe("Approve Claude's plan?");
     expect(question.context).toBe('1. Add the endpoint\n2. Test it');
@@ -59,7 +61,7 @@ describe('claudePromptQuestion', () => {
   });
 
   it('names MCP tools by tool and server', () => {
-    const { question } = claudePromptQuestion({ session_id: 's-1', cwd, tool_name: 'mcp__github__create_issue', tool_input: { title: 'Bug' } });
+    const { question } = claudePromptQuestion({ hook_event_name: 'PermissionRequest', session_id: 's-1', cwd, tool_name: 'mcp__github__create_issue', tool_input: { title: 'Bug' } }, 'acme-web');
     expect(question.title).toBe('Use create_issue from github?');
   });
 });

@@ -40,11 +40,13 @@ describe.skipIf(process.platform === 'win32')('mergeClaudeSettingsFlag', () => {
     });
   });
 
-  it("reads Pane's own earlier file as nothing, so a relaunch doesn't repeat its hooks", () => {
-    const merged = mergeClaudeSettingsFlag({ command: `claude --settings '${file.replace(/'/g, `'\\''`)}' --resume abc`, cwd, shellType: 'bash', file, extra: paneHooks });
+  it("keeps what Pane's own file already holds when more settings join it", () => {
+    writeFileSync(file, JSON.stringify(paneHooks));
+    const journal = { hooks: { Stop: [{ hooks: [{ type: 'command', command: 'journal' }] }] } };
+    const merged = mergeClaudeSettingsFlag({ command: `claude --settings '${file.replace(/'/g, `'\\''`)}' --resume abc`, cwd, shellType: 'bash', file, extra: journal });
 
     expect(words(merged!.command)).toEqual(['claude', '--settings', file, '--resume', 'abc']);
-    expect(merged!.settings).toEqual(paneHooks);
+    expect(merged!.settings).toEqual({ hooks: { ...paneHooks.hooks, ...journal.hooks } });
   });
 
   it('leaves wrappers alone, and gives up on settings it cannot read or a command it cannot parse', () => {

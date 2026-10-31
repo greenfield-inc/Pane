@@ -1,7 +1,7 @@
 import path from 'path';
 import type { NotifyChoice, NotifyQuestion } from '../../../../shared/types/notify';
 import type { JsonObject } from '../../../../shared/validation/boundaryDecoder';
-import { permissionSuggestion, toolInputText, type ClaudeHookEvent, type ClaudePermissionSuggestion } from './claudeHookEvent';
+import { permissionSuggestion, toolInputText, type ClaudeHookEvent, type ClaudePermissionSuggestion, type ClaudeToolInputText } from './claudeHookEvent';
 
 /** A PermissionRequest hook decision (hookSpecificOutput.decision). */
 export type ClaudePermissionDecision =
@@ -49,7 +49,7 @@ const MODE_NAMES = new Map([
  * dialog offers, and the hook decision each choice sends. `project` names where Claude keeps a
  * project's "don't ask again" rules: the repository, which a worktree shares.
  */
-export function claudePromptQuestion(request: ClaudeHookEvent, project = request.cwd ? path.basename(request.cwd) : undefined): ClaudePromptQuestion {
+export function claudePromptQuestion(request: ClaudeHookEvent, project: string | undefined): ClaudePromptQuestion {
   const input = request.tool_input ?? {};
   const text = toolInputText(input);
   if (request.tool_name === 'ExitPlanMode') {
@@ -84,7 +84,7 @@ export function claudePromptQuestion(request: ClaudeHookEvent, project = request
     { label: DENY, detail: 'Add a note to tell Claude what to do instead; without one, Claude stops and waits' },
   ];
   return {
-    question: { ui: 'options', ...describeTool(request.tool_name ?? '', input, request.cwd), choices, agentPrompt: { yes: 'Yes', no: DENY } },
+    question: { ui: 'options', ...describeTool(request.tool_name ?? '', text, input, request.cwd), choices, agentPrompt: { yes: 'Yes', no: DENY } },
     decide: (choice, note) => {
       if (choice === 'Yes') return { behavior: 'allow' };
       const suggestion = remembered.get(choice);
@@ -96,8 +96,7 @@ export function claudePromptQuestion(request: ClaudeHookEvent, project = request
 }
 
 /** The card's title and context for a tool call, as the terminal dialog names it. */
-function describeTool(tool: string, input: JsonObject, cwd: string | undefined): PromptText {
-  const text = toolInputText(input);
+function describeTool(tool: string, text: ClaudeToolInputText, input: JsonObject, cwd: string | undefined): PromptText {
   const file = text.file_path ?? text.notebook_path;
   const shown = file && cwd ? relativeTo(cwd, file) : file;
   switch (tool) {

@@ -11,6 +11,9 @@ const source = { paneId: 'pane-1', panelId: 'panel-1', name: 'auth-refactor', ag
 const input = { command: 'pnpm vitest run src/http', description: 'Run the http tests' };
 
 /** The PermissionRequest hook Pane registers for a launch. */
+const releaseHooksSchema = boundary.object({
+  hooks: boundary.object({ Stop: boundary.array(boundary.object({ hooks: boundary.array(boundary.object({ url: boundary.string })) })) }),
+});
 const launchHooksSchema = boundary.object({
   hooks: boundary.object({
     PermissionRequest: boundary.array(boundary.object({
@@ -23,11 +26,12 @@ const launchHooksSchema = boundary.object({
 async function setup() {
   let enabled = true;
   const queue = new NotifyQueue({ settings: () => DEFAULT_NOTIFY_SETTINGS, showOutsideSupported: true, shortcutRegistered: () => true, instructionFiles: () => [] });
-  const bridge = new ClaudePromptBridge({ queue, source: () => source, enabled: () => enabled, hookTimeoutSeconds: 600 });
+  const bridge = new ClaudePromptBridge({ queue, tab: () => ({ source, project: 'acme-web' }), enabled: () => enabled, hookTimeoutSeconds: 600 });
   await bridge.start();
   const hook = decodeBoundary(bridge.hookSettings('panel-1'), launchHooksSchema).hooks.PermissionRequest[0].hooks[0];
-  /** POSTs one hook event as Claude does; resolves with the response body. */
-  const call = (event: JsonObject, init: { token?: string; signal?: AbortSignal } = {}) => fetch(hook.url, {
+  /** POSTs one hook event as Claude does, to the URL Pane registered for it; resolves with the response. */
+  const releaseUrl = decodeBoundary(bridge.hookSettings('panel-1'), releaseHooksSchema).hooks.Stop[0].hooks[0].url;
+  const call = (event: JsonObject, init: { token?: string; signal?: AbortSignal } = {}) => fetch(event.hook_event_name === 'PermissionRequest' ? hook.url : releaseUrl, {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...(init.token === undefined ? hook.headers : { 'X-Pane-Hook-Token': init.token }) },
     body: JSON.stringify({ session_id: 's-1', cwd: '/work/acme-web', ...event }),
@@ -65,13 +69,11 @@ describe('ClaudePromptBridge', () => {
     expect(ctx.queue.snapshot().items[0]).toMatchObject({ state: 'answered', answerSummary: 'No', answeredOn: 'iPhone' });
   });
 
-  it("names a worktree's repository in a don't-ask-again choice, where Claude keeps the rule", async () => {
+  it("names the tab's project in a don't-ask-again choice, where Claude keeps the rule", async () => {
     const ctx = await setup();
     bridge = ctx.bridge;
-    const worktree = mkdtempSync(path.join(os.tmpdir(), 'pane-claude-worktree-'));
-    writeFileSync(path.join(worktree, '.git'), 'gitdir: /work/acme-web/.git/worktrees/rate-limit-retries\n');
     const rule = { type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'pnpm vitest *' }], behavior: 'allow', destination: 'localSettings' };
-    void ctx.call({ hook_event_name: 'PermissionRequest', cwd: worktree, tool_name: 'Bash', tool_input: input, permission_suggestions: [rule] });
+    void ctx.call({ hook_event_name: 'PermissionRequest', cwd: '/work/acme-web/worktrees/rate-limit-retries', tool_name: 'Bash', tool_input: input, permission_suggestions: [rule] });
 
     expect((await ctx.waiting()).choices?.map(choice => choice.label)).toContain("Yes, and don't ask again for pnpm vitest commands in acme-web");
   });

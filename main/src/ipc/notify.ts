@@ -236,10 +236,13 @@ function startClaudePrompts(notify: NotifyService, services: NotifyServices): vo
   const { configManager } = services;
   const bridge = new ClaudePromptBridge({
     queue: notify.queue,
-    source: (panelId) => {
+    tab: (panelId) => {
       const panel = panelManager.getPanel(panelId);
       const pane = panel ? services.sessionManager.getSession(panel.sessionId) : undefined;
-      return panel && pane && !pane.archived ? { paneId: pane.id, panelId, name: pane.name, agent: 'Claude' } : undefined;
+      if (!panel || !pane || pane.archived) return undefined;
+      // Claude keeps a worktree's "don't ask again" rules in its repository, which is the Pane project.
+      const project = services.databaseService?.getAllProjects().find(candidate => candidate.id === pane.projectId)?.name;
+      return { source: { paneId: pane.id, panelId, name: pane.name, agent: 'Claude' }, project };
     },
     enabled: () => configManager.getConfig().answerPromptsFromPane !== false,
     hookTimeoutSeconds: CLAUDE_PROMPT_TIMEOUT_SECONDS,

@@ -523,7 +523,7 @@ export class TerminalPanelManager extends EventEmitter {
     }
     const state = resolution.customState;
     if (resolution.isCliCommand && state.agentType === 'claude' && !isWSL && !state.sshHost && state.launchMode !== 'wrapped' && !state.preserveLaunchCommand) {
-      resolution.commandToRun = withClaudePromptHooks(panelId, resolution.commandToRun, state.cwd ?? process.cwd(), shellType);
+      resolution.commandToRun = withClaudePromptHooks(panelId, resolution.commandToRun, state.cwd ?? process.cwd(), shellType) ?? resolution.commandToRun;
     }
     return resolution;
   }

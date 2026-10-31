@@ -398,18 +398,8 @@ export class NotifyQueue extends EventEmitter {
    * Earlier today with `summary`. An answer already sent from a screen stands.
    */
   settle(id: string, summary: string): void {
-    const entry = this.entries.get(id);
-    if (!entry || entry.item.state !== 'waiting') return;
-    clearEntryTimers(entry);
-    entry.item.state = 'answered';
-    entry.item.resolvedAt = Date.now();
-    entry.item.answerSummary = summary;
-    this.queue = this.queue.filter(other => other !== id);
-    this.hidden.delete(id);
-    entry.waiter?.resolve(unavailable(summary));
-    if (this.transient?.view.itemId === id) this.clearTransient();
-    this.trimHistory();
-    this.changed();
+    if (this.entries.get(id)?.item.state !== 'waiting') return;
+    this.close(id, { state: 'answered', summary }, unavailable(summary), false);
   }
 
   /** Pane is quitting: release every open call. */
@@ -573,16 +563,21 @@ export class NotifyQueue extends EventEmitter {
 
   /** The caller stopped waiting: the card says so, then moves to Earlier today as Expired. */
   private expire(id: string, result?: NotifyResult, announce = true): void {
+    this.close(id, { state: 'expired' }, result ?? unavailable('The question expired.'), announce);
+  }
+
+  /** Ends an open question as `outcome` and returns `result` to its caller; `announce` shows an expiry on the strip. */
+  private close(id: string, outcome: { state: 'expired' | 'answered'; summary?: string }, result: NotifyResult, announce: boolean): void {
     const entry = this.entries.get(id);
     if (!entry || !isOpen(entry.item)) return;
     const wasOnStrip = this.strip()?.itemId === id;
     clearEntryTimers(entry);
-    entry.item.state = 'expired';
+    entry.item.state = outcome.state;
     entry.item.resolvedAt = Date.now();
-    entry.item.answerSummary = undefined;
+    entry.item.answerSummary = outcome.summary;
     this.queue = this.queue.filter(other => other !== id);
     this.hidden.delete(id);
-    if (entry.waiter) entry.waiter.resolve(result ?? unavailable('The question expired.'));
+    entry.waiter?.resolve(result);
     if (announce && wasOnStrip) this.setTransient({ kind: 'expired', itemId: id }, NOTIFY_EXPIRED_SHOW_MS);
     else if (this.transient?.view.itemId === id) this.clearTransient();
     this.trimHistory();

@@ -570,13 +570,12 @@ function QuestionCard({
         <CardHeader item={item} form={form} queue={queue} onCommand={onCommand} menuPlacement={menuPlacement} machineMark={machineMark} />
         <div className={cn(titleClass, 'line-clamp-3')} title={item.title}>{item.title}</div>
         <div className={fieldPad}>
-          <div className="flex items-center gap-2 rounded-[9px] bg-surface-tertiary px-3 py-2.5 text-[13px] text-text-secondary" data-testid="notify-in-terminal">
-            <Info className="h-3.5 w-3.5 shrink-0" />
+          <NoticePill testId="notify-in-terminal">
             <span className="min-w-0 flex-1">{item.source.agent} is asking in the terminal now.</span>
             {item.source.paneId && !item.elsewhere && (
               <FooterLink onClick={() => onCommand({ type: 'open-in-pane', id: item.id })}>Open</FooterLink>
             )}
-          </div>
+          </NoticePill>
         </div>
       </div>
     );
@@ -824,14 +823,21 @@ function SentLine({ item, onCommand }: NotifyCardProps) {
   );
 }
 
+/** One line of status inside a card, in place of its answers. */
+function NoticePill({ children, testId }: { children: ReactNode; testId?: string }) {
+  return (
+    <div className="flex items-center gap-2 rounded-[9px] bg-surface-tertiary px-3 py-2.5 text-[13px] text-text-secondary" data-testid={testId}>
+      <Info className="h-3.5 w-3.5 shrink-0" />
+      {children}
+    </div>
+  );
+}
+
 /** The host that asked is out of reach: an answer now would not be sent. */
 export function UnreachableNotice({ item, className }: { item: NotifyItem; className?: string }) {
   return (
     <div className={className}>
-      <div className="flex items-center gap-2 rounded-[9px] bg-surface-tertiary px-3 py-2.5 text-[13px] text-text-secondary" data-testid="notify-unreachable">
-        <Info className="h-3.5 w-3.5 shrink-0" />
-        {unreachableText(item)}
-      </div>
+      <NoticePill testId="notify-unreachable">{unreachableText(item)}</NoticePill>
     </div>
   );
 }
@@ -842,10 +848,7 @@ function ExpiredCard({ item, form, narrow, onCommand, menuPlacement, className }
       <CardHeader item={item} form={form === 'inbox' ? 'strip' : form} onCommand={onCommand} menuPlacement={menuPlacement} />
       <div className="line-clamp-3 px-[22px] pt-1.5 text-[18px] font-semibold leading-[1.35] tracking-[-0.015em] text-text-tertiary">{item.title}</div>
       <div className="px-[22px] pb-[18px] pt-3">
-        <div className="flex items-center gap-2 rounded-[9px] bg-surface-tertiary px-3 py-2.5 text-[13px] text-text-secondary">
-          <Info className="h-3.5 w-3.5 shrink-0" />
-          {item.source.agent} stopped waiting. Nothing to answer.
-        </div>
+        <NoticePill>{item.source.agent} stopped waiting. Nothing to answer.</NoticePill>
       </div>
     </div>
   );

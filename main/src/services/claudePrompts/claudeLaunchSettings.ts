@@ -14,8 +14,8 @@ const CLAUDE_EXECUTABLE = /(?:^|[\\/])claude(?:\.exe|\.cmd)?$/i;
  * every `--settings` the command already passed (a JSON value or a file), then `extra`.
  * Claude Code keeps only the last `--settings` flag it is given (measured on 2.1.314), so Pane
  * merges them instead of adding its own. Undefined when the command can't be rewritten without
- * changing what it asks for: unknown shell syntax, a command that doesn't start with `claude`, a settings value Pane can't
- * read, or a file path this shell can't quote.
+ * changing what it asks for: unknown shell syntax, a command that doesn't start with `claude`,
+ * a settings value Pane can't read, or a file path this shell can't quote.
  */
 export function mergeClaudeSettingsFlag(input: {
   command: string;
@@ -23,10 +23,9 @@ export function mergeClaudeSettingsFlag(input: {
   shellType: string | undefined;
   file: string;
   extra: ClaudeSettings;
-  platform?: NodeJS.Platform;
 }): { command: string; settings: ClaudeSettings } | undefined {
   const spans: Array<{ start: number; end: number }> = [];
-  const tokens = tokenizeShellCommand(input.command, input.platform ?? process.platform, spans);
+  const tokens = tokenizeShellCommand(input.command, process.platform, spans);
   if (!tokens) return undefined;
   // Only a command that runs Claude itself: a wrapper's own flags are its business.
   if (!CLAUDE_EXECUTABLE.test(tokens[0] ?? '')) return undefined;
@@ -50,9 +49,9 @@ export function mergeClaudeSettingsFlag(input: {
 
   const sources: ClaudeSettings[] = [];
   for (const value of values) {
-    const settings = readSettingsValue(value, input.cwd, input.file);
-    if (settings === undefined) return undefined;
-    if (settings !== null) sources.push(settings);
+    const settings = readSettingsValue(value, input.cwd);
+    if (!settings) return undefined;
+    sources.push(settings);
   }
 
   let command = input.command;
@@ -64,15 +63,13 @@ export function mergeClaudeSettingsFlag(input: {
   return { command, settings: [...sources, input.extra].reduce(mergeClaudeSettings, {}) };
 }
 
-/** A `--settings` value as settings; null for Pane's own file (rewritten from scratch); undefined when unreadable. */
-function readSettingsValue(value: string, cwd: string, ownFile: string): ClaudeSettings | null | undefined {
+/** A `--settings` value (inline JSON or a file) as settings; undefined when unreadable. */
+function readSettingsValue(value: string, cwd: string): ClaudeSettings | undefined {
   const trimmed = value.trim();
   let text = trimmed;
   if (!trimmed.startsWith('{')) {
-    const file = path.resolve(cwd, trimmed);
-    if (file === path.resolve(ownFile)) return null;
     try {
-      text = readFileSync(file, 'utf8');
+      text = readFileSync(path.resolve(cwd, trimmed), 'utf8');
     } catch {
       return undefined;
     }
@@ -89,9 +86,10 @@ export function mergeClaudeSettings(base: ClaudeSettings, next: ClaudeSettings):
   const merged = { ...base };
   for (const [key, value] of Object.entries(next)) {
     const current = merged[key];
-    const objects = [asObject(current), asObject(value)] as const;
+    const before = asObject(current);
+    const after = asObject(value);
     if (Array.isArray(current) && Array.isArray(value)) merged[key] = [...current, ...value];
-    else if (objects[0] && objects[1]) merged[key] = mergeClaudeSettings(objects[0], objects[1]);
+    else if (before && after) merged[key] = mergeClaudeSettings(before, after);
     else merged[key] = value;
   }
   return merged;

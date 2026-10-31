@@ -17,7 +17,7 @@ import { PaneLogo } from '@/features/machines/PaneLogo';
 import { useMachines } from '@/features/machines/useMachines';
 import { useNotifyShared } from '@/features/notify/hooks';
 import { AgentPromptActions } from '@/features/notify/AgentPromptActions';
-import { isAgentPrompt, waitingQuestions } from '@/features/notify/notifyQuestions';
+import { waitingQuestions } from '@/features/notify/notifyQuestions';
 import { openNotifySheet } from '@/features/notify/NotifySheet';
 import { useTheme, withAlpha } from '@/theme';
 import { Icon, Text } from '@/ui';
@@ -329,7 +329,7 @@ export function PaneListScreen() {
                           // Only the terminal can answer it now: open its Pane.
                           onPress={() => (item.agentPrompt?.inTerminal && item.source.paneId ? openPane(item.source.paneId) : openNotifySheet(item.id, item.source.paneId))}
                         />
-                        {isAgentPrompt(item) ? <AgentPromptActions item={item} inset={33} offline={presence === 'unreachable' ? profile.label : undefined} /> : null}
+                        <AgentPromptActions item={item} inset={33} offline={presence === 'unreachable' ? profile.label : undefined} />
                       </View>
                     ))}
                     {waiting.map((request, index) => {
