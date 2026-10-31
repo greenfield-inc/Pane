@@ -45,7 +45,8 @@ const READS_FOR_EVENT = {
   'panel:updated': [],
   'panel:deleted': ['statuses'],
   'panel:agentStatus': ['statuses'],
-  'panel:activityStatus': ['projects'],
+  // Emitted with each panel:agentStatus, which already re-reads statuses.
+  'panel:activityStatus': [],
   'orchestration-sessions:changed': ['sessions'],
   'project:updated': ['projects'],
   'project:list-changed': ['projects'],
@@ -119,47 +120,46 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 
 const EMPTY_SNAPSHOT: MachineSnapshot = { projects: [], sessions: [], statuses: [], notify: null, permissions: [] };
 
-/** Reads in the order they started; the newest applied per machine and list, so an older one that lands later is dropped. */
-let readCount = 0;
-const appliedReads = new Map<string, number>();
-
-async function readMachine(machineId: string, keys: readonly ReadKey[]): Promise<void> {
-  const read = ++readCount;
-  const update: Partial<MachineSnapshot> = {};
-  // Each list is read on its own, so one that fails or times out leaves only itself as it was.
-  await Promise.all(keys.map(async (key) => {
-    try {
-      const value = await withTimeout<MachineSnapshot[ReadKey]>(READERS[key](machineId), READ_TIMEOUT_MS);
-      Object.assign(update, { [key]: value });
-    } catch (error) {
-      console.warn(`[allMachines] Could not read ${key} from ${machineId}:`, error);
-    }
-  }));
-  if (Object.keys(update).length === 0) return;
-  useAllMachinesStore.setState((state) => {
-    // A machine removed while its read was in flight stays removed.
-    if (!state.machines.some((machine) => machine.id === machineId)) return state;
-    const fresh: Partial<MachineSnapshot> = {};
-    for (const key of keys) {
-      const list = `${machineId}\n${key}`;
-      if (!(key in update) || (appliedReads.get(list) ?? 0) > read) continue;
-      appliedReads.set(list, read);
-      Object.assign(fresh, { [key]: update[key] });
-    }
-    if (Object.keys(fresh).length === 0) return state;
-    return { snapshots: { ...state.snapshots, [machineId]: { ...EMPTY_SNAPSHOT, ...state.snapshots[machineId], ...fresh } } };
-  });
-}
-
 /**
  * Keeps every machine's lists current while All machines is on: reads each machine once,
  * then re-reads one machine, and only the lists its events touched, a moment after they
- * arrive. A resync re-reads that machine whole. Returns the stop function.
+ * arrive. A resync re-reads that machine whole. Each list has at most one read in flight;
+ * events that arrive meanwhile read it once more when it settles. Returns the stop function.
  */
 export function startAllMachinesFeed(): () => void {
   const pending = new Map<string, { keys: Set<ReadKey>; timer: ReturnType<typeof setTimeout> }>();
+  /** `<machine id>\n<list>` of each read in flight, and of each one asked for again meanwhile. */
+  const inFlight = new Set<string>();
+  const again = new Set<string>();
   let stopped = false;
   let graceTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const readList = async (machineId: string, key: ReadKey): Promise<void> => {
+    const list = `${machineId}\n${key}`;
+    if (inFlight.has(list)) {
+      again.add(list);
+      return;
+    }
+    inFlight.add(list);
+    try {
+      // A read that times out is dropped, so a newer read of the list never meets an older answer.
+      const value = await withTimeout<MachineSnapshot[ReadKey]>(READERS[key](machineId), READ_TIMEOUT_MS);
+      if (stopped) return;
+      useAllMachinesStore.setState((state) => {
+        // A machine removed while its read was in flight stays removed.
+        if (!state.machines.some((machine) => machine.id === machineId)) return state;
+        return { snapshots: { ...state.snapshots, [machineId]: { ...EMPTY_SNAPSHOT, ...state.snapshots[machineId], [key]: value } } };
+      });
+    } catch (error) {
+      console.warn(`[allMachines] Could not read ${key} from ${machineId}:`, error);
+    } finally {
+      inFlight.delete(list);
+      if (again.delete(list) && !stopped) void readList(machineId, key);
+    }
+  };
+  const readMachine = (machineId: string, keys: Iterable<ReadKey>) => {
+    for (const key of keys) void readList(machineId, key);
+  };
 
   const schedule = (machineId: string, keys: readonly ReadKey[]) => {
     if (stopped || keys.length === 0) return;
@@ -170,7 +170,7 @@ export function startAllMachinesFeed(): () => void {
     }
     const next = { keys: new Set(keys), timer: setTimeout(() => {
       pending.delete(machineId);
-      if (!stopped) void readMachine(machineId, [...next.keys]);
+      if (!stopped) readMachine(machineId, next.keys);
     }, MACHINE_REREAD_DEBOUNCE_MS) };
     pending.set(machineId, next);
   };
@@ -207,7 +207,7 @@ export function startAllMachinesFeed(): () => void {
     scheduleGraceTick(machines);
     for (const machine of machines) {
       // A machine seen for the first time is read at once; only events wait for their burst.
-      if (!known.has(machine.id)) void readMachine(machine.id, ALL_READS);
+      if (!known.has(machine.id)) readMachine(machine.id, ALL_READS);
     }
   };
 
@@ -228,6 +228,7 @@ export function startAllMachinesFeed(): () => void {
     unsubscribe();
     for (const entry of pending.values()) clearTimeout(entry.timer);
     pending.clear();
+    again.clear();
     if (graceTimer) clearTimeout(graceTimer);
   };
 }

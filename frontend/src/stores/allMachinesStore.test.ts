@@ -83,6 +83,24 @@ describe('All machines feed', () => {
     expect(useAllMachinesStore.getState().snapshots.build?.statuses).toEqual([{ panelId: 'panel-1', status: 'blocked' }]);
   });
 
+  it('keeps one read of a list in flight on a slow machine, and reads it once more after events arrived meanwhile', async () => {
+    const answers: Array<() => void> = [];
+    read.mockImplementation((machineId: string) => new Promise(resolve => {
+      answers.push(() => resolve({ machineId, data: { success: true, data: [] } }));
+    }));
+
+    // Status events every 250 ms for 2 s while build-box takes longer than that to answer.
+    for (let tick = 0; tick < 8; tick += 1) {
+      emit({ type: 'event', machineId: 'build', channel: 'panel:agentStatus', args: [] });
+      await vi.advanceTimersByTimeAsync(250);
+    }
+    expect(readsOf('build')).toEqual(['panels:agent-statuses']);
+
+    answers[0]();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(readsOf('build')).toEqual(['panels:agent-statuses', 'panels:agent-statuses']);
+  });
+
   it('keeps an offline machine\'s rows and dims them once its grace has passed', async () => {
     emit({ type: 'machines', machines: machines.map(machine => machine.id === 'build'
       ? { ...machine, status: 'offline', offlineSince: '2026-10-30T09:20:00Z' }
