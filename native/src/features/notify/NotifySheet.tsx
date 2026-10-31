@@ -5,29 +5,46 @@ import { Pressable, StyleSheet, View } from 'react-native';
 
 import type { NotifyAnswer, NotifyItem } from '@shared/types/notify';
 
+import { useHostsStore } from '@/auth/hostsStore';
+import { useDaemon } from '@/daemon';
+
 import { DialogSection, DialogSheet, Notice, SheetButton } from '@/features/panes/PaneKit';
 import { monoFontFamily, useTheme } from '@/theme';
 import { Icon, Text, TextField } from '@/ui';
 
-import { useNotifyCommand, useNotifyShared } from './hooks';
+import { useMachineNotifyCommand, useMachineNotifyShared, useNotifyCommand, useNotifyShared } from './hooks';
 import { type AnsweredHere, NOTIFY_KIND_LABEL, notifySheetState } from './notifyQuestions';
 
-/** Opens a question's sheet: under its Pane, or on its own for a question from outside any Pane. */
-export function openNotifySheet(notifyId: string, paneId?: string) {
-  if (paneId) router.push({ pathname: '/pane/[paneId]/notify', params: { paneId, notifyId } });
+/**
+ * Opens a question's sheet: under its Pane, or on its own for a question from outside any Pane or
+ * from another saved machine (`host`, its profile id), which answers there without switching.
+ */
+export function openNotifySheet(notifyId: string, paneId?: string, host?: string) {
+  if (host) router.push({ pathname: '/notify/[notifyId]', params: { notifyId, host } });
+  else if (paneId) router.push({ pathname: '/pane/[paneId]/notify', params: { paneId, notifyId } });
   else router.push({ pathname: '/notify/[notifyId]', params: { notifyId } });
 }
 
-/** One Notify question, drawn like the desktop card (frontend/src/components/notify/NotifyCard.tsx) in the app's sheet chrome. */
-export function NotifySheet({ notifyId }: { notifyId: string }) {
-  const shared = useNotifyShared();
+/**
+ * One Notify question, drawn like the desktop card (frontend/src/components/notify/NotifyCard.tsx) in the app's sheet chrome.
+ * `host` names another saved machine whose question this is.
+ */
+export function NotifySheet({ notifyId, host }: { notifyId: string; host?: string }) {
+  const { profile } = useDaemon();
+  const other = useHostsStore(state => (host && host !== profile.id ? state.profiles.find(candidate => candidate.id === host) ?? null : null));
+  const live = useNotifyShared();
+  const remote = useMachineNotifyShared(other);
+  const shared = other ? remote : live;
   // Set when the host accepts this phone's answer, so the sheet reads "Sent to" before the snapshot catches up.
   const [answeredHere, setAnsweredHere] = useState<AnsweredHere | null>(null);
-  const command = useNotifyCommand(sent => {
+  const onAccepted = (sent: { type: string }) => {
     if (sent.type !== 'answer' || !shared.data) return;
     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     setAnsweredHere({ epoch: shared.data.epoch, revision: shared.data.revision });
-  });
+  };
+  const liveCommand = useNotifyCommand(onAccepted);
+  const remoteCommand = useMachineNotifyCommand(other, onAccepted);
+  const command = other ? remoteCommand : liveCommand;
   const close = () => router.back();
   const state = shared.data ? notifySheetState(shared.data, notifyId, answeredHere) : null;
   // Undone on some screen: the question is open again, and a later answer from elsewhere reads "Answered on".
@@ -66,11 +83,13 @@ export function NotifySheet({ notifyId }: { notifyId: string }) {
   }
 
   const answer = (value: NotifyAnswer) => command.mutate([{ type: 'answer', id: notifyId, answer: value }]);
-  return <QuestionSheet item={state.item} answer={answer} busy={command.isPending} error={error} onClose={close} />;
+  return <QuestionSheet item={state.item} machine={other?.label} answer={answer} busy={command.isPending} error={error} onClose={close} />;
 }
 
-function QuestionSheet({ item, answer, busy, error, onClose }: {
+function QuestionSheet({ item, machine, answer, busy, error, onClose }: {
   item: NotifyItem;
+  /** The machine that asked, when it isn't the one the phone is on. */
+  machine?: string;
   answer: (value: NotifyAnswer) => void;
   busy: boolean;
   error: string | null;
@@ -99,7 +118,7 @@ function QuestionSheet({ item, answer, busy, error, onClose }: {
   return (
     <DialogSheet testID="notify-sheet" title={NOTIFY_KIND_LABEL[item.ui]} onClose={onClose} closeDisabled={busy} footer={footer}>
       <DialogSection divided={false}>
-        <Text variant="footnote" tone="muted" numberOfLines={1}>{[item.machine, item.source.name, item.source.agent].filter(Boolean).join(' · ')}</Text>
+        <Text variant="footnote" tone="muted" numberOfLines={1}>{[item.machine ?? machine, item.source.name, item.source.agent].filter(Boolean).join(' · ')}</Text>
         <Text testID="notify-title" variant="headline" selectable>{item.title}</Text>
         {item.context ? <Text variant="subhead" tone="secondary" selectable>{item.context}</Text> : null}
 

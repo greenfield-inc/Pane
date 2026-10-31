@@ -630,6 +630,32 @@ describe('RemoteDaemonClient invoke errors', () => {
   });
 });
 
+describe('RemoteDaemonClient timed reads', () => {
+  it('reads a host it never connected to, and gives up on a silent host on time, once, without holding up the other', async () => {
+    const answering = createFakeHost();
+    answering.onInvoke(() => Response.json({ ok: true, result: [{ id: 1, name: 'pane' }] }));
+    const silent = createFakeHost();
+    silent.dropTunnel(true);
+    let slowSettled = false;
+    const slow = createClient(silent).read('sessions:get-all-with-projects', [], { timeoutMs: 8_000 });
+    void slow.catch(() => undefined).finally(() => { slowSettled = true; });
+
+    await expect(createClient(answering).read('sessions:get-all-with-projects', [], { timeoutMs: 8_000 })).resolves.toEqual([{ id: 1, name: 'pane' }]);
+    await vi.advanceTimersByTimeAsync(7_999);
+    expect(slowSettled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(slow).rejects.toMatchObject({ code: 'ERR_REMOTE_READ_TIMEOUT', message: 'Remote Host did not answer within 8 s. Nothing changed there.' });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(silent.requests.filter(request => request.url.endsWith('/invoke'))).toHaveLength(1);
+  });
+
+  it('refuses to send a change as a timed read', async () => {
+    const host = createFakeHost();
+    await expect(createClient(host).read('runpane:panes:create', [{}], { timeoutMs: 8_000 })).rejects.toMatchObject({ code: 'ERR_REMOTE_NOT_A_READ' });
+    expect(host.requests).toHaveLength(0);
+  });
+});
+
 describe('RemoteDaemonClient against a host that runs each request id once', () => {
   async function connectToDeduplicatingHost() {
     const host = createFakeHost();

@@ -1,29 +1,50 @@
-import * as Haptics from 'expo-haptics';
-import { router, useLocalSearchParams } from 'expo-router';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRef, useState, type ReactNode } from 'react';
 import { Pressable, StyleSheet, Switch, TextInput, View } from 'react-native';
 
 import { AGENT_LAUNCH_PRESETS, type AgentLaunchPresetId } from '@shared/constants/agentLaunchPresets';
-import { RemoteUnconfirmedResultError } from '@shared/remoteClient';
+import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
+import type { RunpanePaneCreateRequest, RunpanePaneCreateResult } from '@shared/types/runpaneOrchestration';
 
+import { CREATE_ON_MACHINE, CREATE_TIMEOUT_MS, useMachineCommand, useMachineQuery } from '@/daemon/machines';
 import { monoFontFamily, useTheme } from '@/theme';
-import { Icon, Text } from '@/ui';
+import { Button, Icon, Text } from '@/ui';
 
-import { buildCreatePaneRequest, defaultBaseBranch, defaultProject, filterBranches, paneFromCreateResult, suggestPaneName } from './createPane';
-import { useBranches, useCreatePane, useProjects } from './hooks';
-import { DialogSection, DialogSheet, Notice, SheetButton } from './PaneKit';
+import { buildCreatePaneRequest, defaultBaseBranch, defaultProject, filterBranches, paneFromCreateResult, suggestPaneName, type BranchInfo } from './createPane';
+import { Notice } from './PaneKit';
+import type { ProjectWithPanes } from './paneList';
 
 const VISIBLE_BRANCHES = 8;
 
-/** The PWA's "New Pane in <project>" dialog, plus the agent to start. */
-export function CreatePaneSheet() {
+/**
+ * The PWA's "New Pane in <project>" dialog, plus the agent to start, for any saved machine: its
+ * repositories and branches are that machine's, and Create goes to it. `projectId` (a repository's
+ * own "+") picks the repository on the machine the phone is on.
+ */
+export function CreatePaneForm({ machine, projectId, onCreated }: {
+  machine: RemotePaneConnectionProfile;
+  projectId?: number;
+  onCreated: (paneId: string) => void;
+}) {
   const theme = useTheme();
-  const params = useLocalSearchParams<{ projectId?: string }>();
-  const projects = useProjects();
-  const createPane = useCreatePane();
+  const projects = useMachineQuery<ProjectWithPanes[]>(machine, 'sessions:get-all-with-projects');
+  const send = useMachineCommand();
+  const queryClient = useQueryClient();
+  const createPane = useMutation({
+    mutationKey: CREATE_ON_MACHINE,
+    mutationFn: (request: RunpanePaneCreateRequest) => send<RunpanePaneCreateResult>(
+      machine,
+      'runpane:panes:create',
+      [request],
+      `The connection dropped before ${machine.label} answered. Check its list before trying again: the pane may already exist.`,
+      CREATE_TIMEOUT_MS,
+    ),
+    // Created, refused or unconfirmed: read that machine again, so its lists show whether the Pane exists.
+    onSettled: () => queryClient.invalidateQueries({ queryKey: [machine.id] }),
+  });
   const branchInput = useRef<TextInput>(null);
   // A snapshot: the desktop opening another repository does not move the sheet while someone edits it.
-  const [chosenProjectId, setChosenProjectId] = useState(() => params.projectId ? Number(params.projectId) : defaultProject(projects.data ?? [])?.id);
+  const [chosenProjectId, setChosenProjectId] = useState(() => projectId ?? defaultProject(projects.data ?? [])?.id);
   const [choosingProject, setChoosingProject] = useState(false);
   const [agent, setAgent] = useState<AgentLaunchPresetId>('claude');
   const [chosenBranch, setChosenBranch] = useState<string>();
@@ -35,7 +56,7 @@ export function CreatePaneSheet() {
 
   const projectList = projects.data ?? [];
   const project = projectList.find(candidate => candidate.id === chosenProjectId) ?? defaultProject(projectList);
-  const branches = useBranches(project?.id);
+  const branches = useMachineQuery<BranchInfo[]>(machine, 'projects:list-branches', [String(project?.id)], { enabled: project !== undefined });
   const branchList = branches.data ?? [];
   const baseBranch = chosenBranch ?? defaultBaseBranch(branchList);
   const existingNames = (project?.sessions ?? []).map(session => session.name);
@@ -44,8 +65,8 @@ export function CreatePaneSheet() {
   const matchingBranches = filterBranches(branchList, branchQuery);
   const field = { borderRadius: theme.radius.md, borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceRaised };
 
-  const chooseProject = (projectId: number) => {
-    setChosenProjectId(projectId);
+  const chooseProject = (id: number) => {
+    setChosenProjectId(id);
     setChoosingProject(false);
     setChosenBranch(undefined);
     setEditedName(undefined);
@@ -64,46 +85,30 @@ export function CreatePaneSheet() {
       return;
     }
     setError(undefined);
-    createPane.mutate([draft.request], {
+    createPane.mutate(draft.request, {
       onSuccess: result => {
         try {
-          const { paneId } = paneFromCreateResult(result);
-          void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-          router.back();
-          router.push({ pathname: '/pane/[paneId]', params: { paneId } });
+          onCreated(paneFromCreateResult(result).paneId);
         } catch (createError) {
           setError((createError as Error).message);
         }
       },
-      onError: createError => setError(createError instanceof RemoteUnconfirmedResultError
-        ? 'The connection dropped before the host answered. Check the pane list before trying again: the pane may already exist.'
-        : createError.message),
+      // An unconfirmed create says to check the list before trying again.
+      onError: createError => setError(createError.message),
     });
   };
 
+  if (projects.isError) {
+    return <Notice testID="new-pane-error" danger message={projects.error.message} action={{ title: 'Try again', onPress: () => void projects.refetch() }} />;
+  }
+  if (!projects.isPending && projectList.length === 0) {
+    return <Notice testID="new-pane-no-repos" message={`${machine.label} has no repositories yet. Add one in Pane on ${machine.label}, then come back.`} />;
+  }
+
   return (
-    <DialogSheet
-      testID="new-pane-sheet"
-      title={project ? `New Pane in ${project.name}` : 'New Pane'}
-      onClose={() => router.back()}
-      closeDisabled={createPane.isPending}
-      footer={
-        <>
-          <SheetButton testID="new-pane-cancel" title="Cancel" disabled={createPane.isPending} onPress={() => router.back()} />
-          <SheetButton
-            testID="new-pane-create"
-            variant="primary"
-            title={createPane.isPending ? 'Creating...' : 'Create'}
-            disabled={createPane.isPending || branches.isPending || !baseBranch}
-            onPress={submit}
-            style={styles.create}
-          />
-        </>
-      }
-    >
-      {/* Opened from New Pane rather than a repository's own "+": the person can switch before creating. */}
-      {!params.projectId && projectList.length > 0 ? (
-        <DialogSection>
+    <View testID="new-pane-sheet" style={styles.form}>
+      {projectList.length > 0 ? (
+        <Field>
           <Label ios="folder" android="folder">Repository</Label>
           <Pressable
             testID="new-pane-repo"
@@ -122,10 +127,10 @@ export function CreatePaneSheet() {
               ))}
             </Options>
           ) : null}
-        </DialogSection>
+        </Field>
       ) : null}
 
-      <DialogSection>
+      <Field>
         <Label ios="arrow.triangle.branch" android="call_split">Base Branch</Label>
         <View style={[styles.field, field, branchOpen && { borderColor: theme.colors.accent }]}>
           <Icon ios="magnifyingglass" android="search" size={16} />
@@ -174,9 +179,9 @@ export function CreatePaneSheet() {
         {branches.isError
           ? <Text testID="new-pane-branch-error" variant="footnote" tone="danger">{branches.error.message}</Text>
           : <Text variant="footnote" tone="muted">Remote branches will track their remote for git pull/push.</Text>}
-      </DialogSection>
+      </Field>
 
-      <DialogSection>
+      <Field>
         <Label>Pane Name</Label>
         <TextInput
           testID="new-pane-name"
@@ -193,9 +198,9 @@ export function CreatePaneSheet() {
           style={[theme.typography.body, styles.field, field, { color: theme.colors.text }]}
         />
         <Text variant="footnote" tone="muted">Auto-filled from branch. Edit to customize.</Text>
-      </DialogSection>
+      </Field>
 
-      <DialogSection>
+      <Field>
         <Label ios="sparkles" android="auto_awesome">Agent</Label>
         <View style={[styles.options, { borderRadius: theme.radius.md, borderColor: theme.colors.border }]}>
           {AGENT_LAUNCH_PRESETS.map((preset, index) => (
@@ -220,9 +225,9 @@ export function CreatePaneSheet() {
             </Pressable>
           ))}
         </View>
-      </DialogSection>
+      </Field>
 
-      <DialogSection divided={Boolean(error)}>
+      <Field>
         <View style={styles.toggle}>
           <Icon ios="pin" android="keep" size={16} />
           <View style={styles.fill}>
@@ -237,11 +242,23 @@ export function CreatePaneSheet() {
             trackColor={{ true: theme.colors.accent, false: undefined }}
           />
         </View>
-      </DialogSection>
+      </Field>
 
-      {error ? <View style={styles.error}><Notice testID="new-pane-error" danger message={error} /></View> : null}
-    </DialogSheet>
+      {error ? <Notice testID="new-pane-error" danger message={error} /> : null}
+      <Button
+        testID="new-pane-create"
+        title={createPane.isPending ? 'Creating…' : `Create Pane on ${machine.label}`}
+        loading={createPane.isPending}
+        disabled={branches.isPending || !baseBranch}
+        onPress={submit}
+      />
+    </View>
   );
+}
+
+/** A label and its field. */
+function Field({ children }: { children: ReactNode }) {
+  return <View style={styles.section}>{children}</View>;
 }
 
 /** A dialog section's `text-sm font-semibold` label with its `text-text-tertiary` icon. */
@@ -294,6 +311,6 @@ const styles = StyleSheet.create({
   optionNote: { paddingHorizontal: 12, paddingVertical: 8 },
   agent: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 12, paddingVertical: 10 },
   toggle: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  error: { paddingHorizontal: 20, paddingBottom: 20 },
-  create: { paddingHorizontal: 20 },
+  form: { gap: 20 },
+  section: { gap: 8 },
 });

@@ -408,7 +408,19 @@ export class RemoteDaemonClient {
     return this.inputQueue.invoke(channel, args) as Promise<T>;
   }
 
-  private async invokeRequest<T = unknown>(channel: string, args: unknown[], inputSignal?: AbortSignal): Promise<T> {
+  /**
+   * Sends one reviewed read, connected or not, and fails once `timeoutMs` passes without an answer.
+   * It never retries: a caller that polls several hosts retries on its next poll, so one slow or
+   * offline host never holds up the others.
+   */
+  async read<T = unknown>(channel: string, args: unknown[], { timeoutMs }: { timeoutMs: number }): Promise<T> {
+    if (!REMOTE_READ_CHANNELS.has(channel)) {
+      throw new PaneError('ERR_REMOTE_NOT_A_READ', `"${channel}" changes the host, so it can't be sent as a timed read. Nothing was sent.`, 'Send it through invoke on a connected client.');
+    }
+    return this.invokeRequest<T>(channel, args, undefined, timeoutMs);
+  }
+
+  private async invokeRequest<T = unknown>(channel: string, args: unknown[], inputSignal?: AbortSignal, attemptTimeoutMs?: number): Promise<T> {
     const deduplicated = REMOTE_DEDUPLICATED_CHANNELS.has(channel);
     const mutation = !REMOTE_READ_CHANNELS.has(channel) && !REMOTE_RESTORE_CHANNELS.has(channel) && !REMOTE_STREAMLESS_CHANNELS.has(channel) && !deduplicated;
     // A host that runs each id once makes every write safe to resend, so a write waits out a drop.
@@ -427,7 +439,9 @@ export class RemoteDaemonClient {
     const signal = inputSignal ?? connection?.signal;
     const retryableRead = REMOTE_READ_CHANNELS.has(channel);
     // Reads and de-duplicated writes retry with backoff; heartbeats, not their failures, decide liveness.
-    const retries = retryableRead || deduplicated || requestId !== undefined;
+    // A timed read is sent once: its caller polls again.
+    const retries = attemptTimeoutMs === undefined && (retryableRead || deduplicated || requestId !== undefined);
+    let timedOut = false;
     const started = Date.now();
     for (let attempt = 0; ; attempt += 1) {
       let attemptSignal: LinkedSignal = { signal, done: () => {} };
@@ -440,6 +454,8 @@ export class RemoteDaemonClient {
             break;
           }
           attemptSignal = abortSignalAny([signal, this.resendAttempts.signal], this.schedule, RESENT_WRITE_ATTEMPT_TIMEOUT_MS);
+        } else if (attemptTimeoutMs !== undefined) {
+          attemptSignal = abortSignalAny([signal], this.schedule, attemptTimeoutMs);
         }
         const context = await this.requestContext();
         if (requestId !== undefined) context.requestId = requestId;
@@ -496,6 +512,7 @@ export class RemoteDaemonClient {
         }
         lastError = error instanceof Error ? error : new Error('Remote request failed');
         lostInTransit = true;
+        timedOut = attemptTimeoutMs !== undefined && attemptSignal.signal?.aborted === true;
       } finally {
         attemptSignal.done();
       }
@@ -506,8 +523,15 @@ export class RemoteDaemonClient {
     }
 
     // One failed request fails only itself while heartbeats arrive.
-    if (lostInTransit && !retries && !signal?.aborted && connection === this.abortController && !connection?.signal.aborted) {
+    if (lostInTransit && !retries && attemptTimeoutMs === undefined && !signal?.aborted && connection === this.abortController && !connection?.signal.aborted) {
       this.noteFailedRequest(lastError?.message ?? 'no response');
+    }
+    if (timedOut) {
+      throw new PaneError(
+        'ERR_REMOTE_READ_TIMEOUT',
+        `${this.profile.label} did not answer within ${Math.round((attemptTimeoutMs ?? 0) / 1000)} s. Nothing changed there.`,
+        'Check that Pane is open on it and that this device can reach it; the next refresh tries again.',
+      );
     }
     if (requestId !== undefined) {
       throw new RemoteUnconfirmedResultError(
