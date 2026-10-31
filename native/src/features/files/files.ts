@@ -49,7 +49,10 @@ const folderSchema = boundary.object({
 export function decodeFolder(response: unknown): FileEntry[] {
   const decoded = decodeOptionalBoundary(response, folderSchema);
   if (!decoded?.success || !decoded.files) throw new Error(decoded?.error ?? 'The computer sent a folder list Pane can’t read.');
-  return decoded.files.map(({ name, path, isDirectory, size }) => (size === undefined ? { name, path, isDirectory } : { name, path, isDirectory, size }));
+  return decoded.files.map(({ name, path: raw, isDirectory, size }) => {
+    const path = posixPath(raw);
+    return size === undefined ? { name, path, isDirectory } : { name, path, isDirectory, size };
+  });
 }
 
 const searchSchema = boundary.object({
@@ -62,7 +65,10 @@ const searchSchema = boundary.object({
 export function decodeSearch(response: unknown): FileEntry[] {
   const decoded = decodeOptionalBoundary(response, searchSchema);
   if (!decoded?.success || !decoded.files) throw new Error(decoded?.error ?? 'The computer sent search results Pane can’t read.');
-  return decoded.files.map(({ path, isDirectory }) => ({ name: path.split('/').pop() ?? path, path, isDirectory }));
+  return decoded.files.map(({ path: raw, isDirectory }) => {
+    const path = posixPath(raw);
+    return { name: path.split('/').pop() ?? path, path, isDirectory };
+  });
 }
 
 const binarySchema = boundary.object({ success: boundary.boolean, contentBase64: boundary.optional(boundary.string), error: boundary.optional(boundary.string) });
@@ -72,6 +78,11 @@ export function decodeBinary(response: unknown): string {
   const decoded = decodeOptionalBoundary(response, binarySchema);
   if (!decoded?.success || decoded.contentBase64 === undefined) throw new Error(decoded?.error ?? 'The computer sent a file Pane can’t read.');
   return decoded.contentBase64;
+}
+
+/** A worktree-relative path with `/`: a Windows computer answers with `\`, and accepts either. */
+export function posixPath(path: string): string {
+  return path.replaceAll('\\', '/');
 }
 
 /** The folder a path sits in, `''` for the worktree's top. */
@@ -94,15 +105,19 @@ export function decodeFileText(response: unknown): { kind: 'text'; content: stri
   return { kind: 'text', content: decoded.content };
 }
 
-/** How the phone shows a file: as code, rendered Markdown, a picture, or a card saying it stays on the computer. */
-export type FileViewer = 'code' | 'markdown' | 'image' | 'stays';
+/**
+ * How the phone shows a file: as code, rendered Markdown, a picture, or a card saying it stays on
+ * the computer. `unsized` is a text file or image whose size is unknown: it is not read, since it
+ * could be any size.
+ */
+export type FileViewer = 'code' | 'markdown' | 'image' | 'stays' | 'unsized';
 
 export function fileViewer(path: string, size: number | undefined): FileViewer {
   const kind = filePreviewKind(path);
-  if (kind === 'image') return size !== undefined && size > MAX_IMAGE_BYTES ? 'stays' : 'image';
-  if (kind && kind !== 'markdown' && kind !== 'structured' && kind !== 'table') return 'stays';
-  if (size !== undefined && size > MAX_TEXT_BYTES) return 'stays';
-  return kind === 'markdown' ? 'markdown' : 'code';
+  if (kind && kind !== 'image' && kind !== 'markdown' && kind !== 'structured' && kind !== 'table') return 'stays';
+  if (size === undefined || !Number.isFinite(size)) return 'unsized';
+  if (size > (kind === 'image' ? MAX_IMAGE_BYTES : MAX_TEXT_BYTES)) return 'stays';
+  return kind === 'image' ? 'image' : kind === 'markdown' ? 'markdown' : 'code';
 }
 
 export function formatSize(bytes: number): string {

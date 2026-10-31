@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { decodeFileText, decodeFolder, fileViewer, formatSize, highlightLines, languageOf, pathCrumbs } from './files';
+import { decodeFileText, decodeFolder, decodeSearch, fileViewer, formatSize, highlightLines, languageOf, parentOf, pathCrumbs, posixPath } from './files';
 
 describe('decodeFolder', () => {
   it('reads the computer’s folder list', () => {
@@ -13,6 +13,23 @@ describe('decodeFolder', () => {
 
   it('throws the computer’s reason when it refuses', () => {
     expect(() => decodeFolder({ success: false, error: 'Cannot list files for archived session' })).toThrow('Cannot list files for archived session');
+  });
+});
+
+describe('Windows paths', () => {
+  it('reads a Windows computer’s folder list and search matches with `/`, so folders and parents line up', () => {
+    const [entry] = decodeFolder({ success: true, files: [{ name: 'file.ts', path: 'src\\checkout\\file.ts', isDirectory: false, size: 12 }] });
+    expect(entry.path).toBe('src/checkout/file.ts');
+    expect(parentOf(entry.path)).toBe('src/checkout');
+    expect(pathCrumbs('acme-web', parentOf(entry.path)).map(crumb => crumb.path)).toEqual(['', 'src', 'src/checkout']);
+    expect(decodeSearch({ success: true, files: [{ path: 'src\\checkout\\file.ts', isDirectory: false }] })).toEqual([
+      { name: 'file.ts', path: 'src/checkout/file.ts', isDirectory: false },
+    ]);
+  });
+
+  it('reads an Editor tab’s Windows path the same way', () => {
+    expect(posixPath('src\\checkout\\file.ts')).toBe('src/checkout/file.ts');
+    expect(posixPath('src/checkout/file.ts')).toBe('src/checkout/file.ts');
   });
 });
 
@@ -38,8 +55,11 @@ describe('fileViewer', () => {
     expect(fileViewer('photo.png', 9_000_000)).toBe('stays');
   });
 
-  it('reads a file of unknown size as text, which the computer refuses when binary', () => {
-    expect(fileViewer('notes.txt', undefined)).toBe('code');
+  it('reads nothing while a text file or image has no known size, since it could be any size', () => {
+    expect(fileViewer('notes.txt', undefined)).toBe('unsized');
+    expect(fileViewer('README.md', undefined)).toBe('unsized');
+    expect(fileViewer('public/logo.png', undefined)).toBe('unsized');
+    expect(fileViewer('release.zip', undefined)).toBe('stays');
   });
 });
 

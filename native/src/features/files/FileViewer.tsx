@@ -2,7 +2,9 @@ import { LegendList } from '@legendapp/list/react-native';
 import * as Clipboard from 'expo-clipboard';
 import { useState, type ReactNode } from 'react';
 import { ActionSheetIOS, ActivityIndicator, Alert, Image, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useMarkdown } from 'react-native-marked';
+import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 
 import { filePreviewKind } from '@shared/utils/filePreview';
 
@@ -12,7 +14,7 @@ import { Button, ErrorState, Icon, Text } from '@/ui';
 
 import { StateScreen } from '../tabs/StateScreen';
 import { TabFooter } from '../tabs/TabFooter';
-import { fileViewer, formatSize, highlightLines, languageOf, MAX_IMAGE_BYTES, MAX_TEXT_BYTES, parentOf, type Token } from './files';
+import { fileViewer, formatSize, highlightLines, languageOf, MAX_IMAGE_BYTES, MAX_TEXT_BYTES, parentOf, posixPath, type Token } from './files';
 import { useFileBinary, useFileText, useFolder } from './useFiles';
 
 export interface FileViewerProps {
@@ -30,17 +32,19 @@ export interface FileViewerProps {
  * One file, read-only: code with colors and line numbers, Markdown rendered (or its source), an
  * image to pinch, or a card for files that stay on the computer. Explorer and Editor tabs share it.
  */
-export function FileViewer({ sessionId, path, size: knownSize, back }: FileViewerProps) {
+export function FileViewer({ sessionId, path: givenPath, size: knownSize, back }: FileViewerProps) {
   const theme = useTheme();
   const { colors } = theme;
   const { profile } = useDaemon();
+  const path = posixPath(givenPath);
   const name = path.split('/').pop() ?? path;
   const folder = useFolder(sessionId, parentOf(path), knownSize === undefined);
   const size = knownSize ?? folder.data?.find(entry => entry.path === path)?.size;
-  const sizeKnown = knownSize !== undefined || !folder.isPending;
+  // Only a known size within the limit lets the phone read the file.
   const viewer = fileViewer(path, size);
-  const text = useFileText(sessionId, path, sizeKnown && (viewer === 'code' || viewer === 'markdown'));
-  const image = useFileBinary(sessionId, path, sizeKnown && viewer === 'image');
+  const lookingUp = knownSize === undefined && folder.isPending;
+  const text = useFileText(sessionId, path, viewer === 'code' || viewer === 'markdown');
+  const image = useFileBinary(sessionId, path, viewer === 'image');
   const [source, setSource] = useState(false);
   const language = languageOf(path);
 
@@ -54,6 +58,26 @@ export function FileViewer({ sessionId, path, size: knownSize, back }: FileViewe
   };
 
   const markdown = viewer === 'markdown' && text.data?.kind === 'text';
+  const views = markdown ? (
+    <View style={[styles.segments, { borderRadius: theme.radius.md, backgroundColor: colors.surfaceRaised }]} accessibilityRole="tablist">
+      {(['Preview', 'Source'] as const).map(label => {
+        const selected = (label === 'Source') === source;
+        return (
+          <Pressable
+            key={label}
+            testID={`file-${label.toLowerCase()}`}
+            accessibilityRole="tab"
+            accessibilityState={{ selected }}
+            onPress={() => setSource(label === 'Source')}
+            style={[styles.segment, { borderRadius: theme.radius.sm }, selected && { backgroundColor: colors.background }]}
+          >
+            <Text variant="callout" tone={selected ? 'primary' : 'secondary'}>{label}</Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  ) : null;
+  // Explorer's row has the way back and the menu; an Editor tab's row has only Preview and Source.
   const header = back ? (
     <View style={[styles.header, { borderBottomColor: colors.border }]}>
       <Pressable testID="file-back" accessibilityRole="button" accessibilityLabel={`Back to ${back.label}`} hitSlop={6} onPress={back.onPress} style={styles.back}>
@@ -62,37 +86,38 @@ export function FileViewer({ sessionId, path, size: knownSize, back }: FileViewe
       </Pressable>
       <Text variant="headline" numberOfLines={1} style={styles.title} accessibilityRole="header">{name}</Text>
       <View style={styles.trailing}>
-        {markdown ? (
-          <View style={[styles.segments, { borderRadius: theme.radius.md, backgroundColor: colors.surfaceRaised }]} accessibilityRole="tablist">
-            {(['Preview', 'Source'] as const).map(label => {
-              const selected = (label === 'Source') === source;
-              return (
-                <Pressable
-                  key={label}
-                  testID={`file-${label.toLowerCase()}`}
-                  accessibilityRole="tab"
-                  accessibilityState={{ selected }}
-                  onPress={() => setSource(label === 'Source')}
-                  style={[styles.segment, { borderRadius: theme.radius.sm }, selected && { backgroundColor: colors.background }]}
-                >
-                  <Text variant="callout" tone={selected ? 'primary' : 'secondary'}>{label}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        ) : (
+        {views ?? (
           <Pressable testID="file-menu" accessibilityRole="button" accessibilityLabel="More" hitSlop={6} onPress={openMenu} style={styles.more}>
             <Icon ios="ellipsis" android="more_horiz" size={18} color={colors.textSecondary} />
           </Pressable>
         )}
       </View>
     </View>
+  ) : views ? (
+    <View style={[styles.header, { borderBottomColor: colors.border }]}>
+      <View style={styles.trailing}>{views}</View>
+    </View>
   ) : null;
 
   let body: ReactNode;
   let footer: string | null = null;
-  if (!sizeKnown || (viewer === 'image' ? image.isPending : viewer !== 'stays' && text.isPending)) {
+  if (lookingUp || (viewer === 'image' ? image.isPending : (viewer === 'code' || viewer === 'markdown') && text.isPending)) {
     body = <View style={styles.center}><ActivityIndicator color={colors.textMuted} /></View>;
+  } else if (viewer === 'unsized' && folder.isError) {
+    body = <ErrorState title={`Couldn’t open ${name}`} error={folder.error} onRetry={() => void folder.refetch()} testID="file-size-error" />;
+  } else if (viewer === 'unsized') {
+    body = (
+      <StateScreen
+        testID="file-unsized"
+        icon={{ ios: 'doc.text', android: 'description' }}
+        title={`${name} stays on ${profile.label}`}
+        message={`${profile.label} didn’t say how big it is, so the phone doesn’t download it. Open it there, or copy its path for an agent.`}
+        actions={<>
+          <Button title="Try again" variant="secondary" onPress={() => void folder.refetch()} />
+          <Button title="Copy path" variant="secondary" icon={<Icon ios="doc.on.doc" android="content_copy" size={16} color={colors.text} />} onPress={copyPath} />
+        </>}
+      />
+    );
   } else if (viewer === 'stays' || text.data?.kind === 'binary') {
     const limit = imageTypeOf(path) ? MAX_IMAGE_BYTES : MAX_TEXT_BYTES;
     const tooBig = size !== undefined && size > limit;
@@ -110,9 +135,7 @@ export function FileViewer({ sessionId, path, size: knownSize, back }: FileViewe
   } else if (viewer === 'image') {
     body = image.data
       ? (
-        <ScrollView testID="file-image" maximumZoomScale={6} minimumZoomScale={1} centerContent contentContainerStyle={styles.imageContent} style={{ backgroundColor: colors.surfaceRaised }}>
-          <Image source={{ uri: `data:${imageType(path)};base64,${image.data}` }} resizeMode="contain" style={styles.image} accessibilityLabel={name} />
-        </ScrollView>
+        <ZoomableImage uri={`data:${imageType(path)};base64,${image.data}`} label={name} />
       )
       : <ErrorState title={`Couldn’t open ${name}`} error={image.error} onRetry={() => void image.refetch()} />;
     footer = size !== undefined ? `Image · ${formatSize(size)}` : 'Image';
@@ -130,6 +153,56 @@ export function FileViewer({ sessionId, path, size: knownSize, back }: FileViewe
       <View style={styles.fill}>{body}</View>
       {footer ? <TabFooter left={footer} right="Read-only" /> : null}
     </View>
+  );
+}
+
+const MAX_ZOOM = 6;
+
+/** An image to pinch: two fingers zoom and move it, and a double tap fits it again. */
+function ZoomableImage({ uri, label }: { uri: string; label: string }) {
+  const { colors } = useTheme();
+  const scale = useSharedValue(1);
+  const startScale = useSharedValue(1);
+  const x = useSharedValue(0);
+  const y = useSharedValue(0);
+  const startX = useSharedValue(0);
+  const startY = useSharedValue(0);
+  const pinch = Gesture.Pinch()
+    .onStart(() => { startScale.value = scale.value; })
+    .onUpdate(event => { scale.value = Math.min(MAX_ZOOM, Math.max(1, startScale.value * event.scale)); })
+    .onEnd(() => {
+      if (scale.value > 1) return;
+      x.value = withTiming(0);
+      y.value = withTiming(0);
+    });
+  // Two fingers, so a one-finger swipe still moves between tabs.
+  const pan = Gesture.Pan()
+    .minPointers(2)
+    .onStart(() => {
+      startX.value = x.value;
+      startY.value = y.value;
+    })
+    .onUpdate(event => {
+      if (scale.value <= 1) return;
+      x.value = startX.value + event.translationX;
+      y.value = startY.value + event.translationY;
+    });
+  const fit = Gesture.Tap()
+    .numberOfTaps(2)
+    .onEnd(() => {
+      scale.value = withTiming(1);
+      x.value = withTiming(0);
+      y.value = withTiming(0);
+    });
+  const zoomed = useAnimatedStyle(() => ({ transform: [{ translateX: x.value }, { translateY: y.value }, { scale: scale.value }] }));
+  return (
+    <GestureDetector gesture={Gesture.Race(fit, Gesture.Simultaneous(pinch, pan))}>
+      <View testID="file-image" collapsable={false} style={[styles.imageContent, { backgroundColor: colors.surfaceRaised }]}>
+        <Animated.View style={[styles.imageFrame, zoomed]}>
+          <Image source={{ uri }} resizeMode="contain" style={styles.image} accessibilityLabel={label} />
+        </Animated.View>
+      </View>
+    </GestureDetector>
   );
 }
 
@@ -203,6 +276,7 @@ const styles = StyleSheet.create({
   mono: { fontFamily: monoFontFamily, fontSize: 13, lineHeight: 20 },
   number: { textAlign: 'right' },
   markdown: { padding: 16 },
-  imageContent: { flexGrow: 1, alignItems: 'center', justifyContent: 'center' },
+  imageContent: { flex: 1, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  imageFrame: { width: '100%', alignItems: 'center' },
   image: { width: '100%', aspectRatio: 1 },
 });
