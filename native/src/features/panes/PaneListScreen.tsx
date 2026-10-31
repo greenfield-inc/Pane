@@ -149,7 +149,9 @@ export function PaneListScreen() {
           ? { projects: projects.data, statuses: statuses.data, permissions: permissions.data, notify: notify.data, sessions: sessions.data?.sessions }
           : undefined,
         offlineSince: presence === 'unreachable' ? projects.dataUpdatedAt : undefined,
-        retry,
+        // Connected, but the first read failed: say why, as the single-machine list does.
+        error: presence !== 'unreachable' && !projects.data && projects.isError ? projects.error.message : undefined,
+        retry: presence === 'unreachable' ? retry : () => void projects.refetch(),
       };
     }
     const other = others.find(read => read.profile.id === machine.key);
@@ -269,13 +271,14 @@ export function PaneListScreen() {
         </Pressable>
       </View>
       {machines.length > 1 ? <MachineChips machines={chipMachines} showAll={showAll} /> : null}
+      <ConnectionBar notice={notice} onRetry={retry} />
       {all ? (
         <>
           <AllMachinesHome
             machines={chipMachines}
             feeds={feeds}
             currentKey={profile.id}
-            loading={feeds.every(feed => !feed.snapshot && feed.offlineSince === undefined)}
+            loading={feeds.every(feed => !feed.snapshot && feed.offlineSince === undefined && feed.error === undefined)}
             refreshing={refreshing}
             onRefresh={() => void refresh()}
             nextMachine={saved.find(machine => machine.key === lastNew)?.name ?? current?.name ?? profile.label}
@@ -294,8 +297,6 @@ export function PaneListScreen() {
         </>
       ) : (
         <>
-          <ConnectionBar notice={notice} onRetry={retry} />
-
           {/* The last screen stays, dimmed and untouchable, while the machine isn't connected. The chips
               above stay live, so you can switch away from a machine that is down. */}
           <Dimmed dimmed={presence !== 'connected'} style={styles.fill}>

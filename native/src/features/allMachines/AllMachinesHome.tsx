@@ -23,6 +23,8 @@ const STALE_OPACITY = 0.45;
 export interface AllMachinesFeed extends MachineFeed {
   /** Reads the machine again now. */
   retry(): void;
+  /** It answers, but its list couldn't be read: the reason, shown with Try again. */
+  error?: string;
 }
 
 /** Pin and archive on the machine the phone is on; other machines' rows don't swipe. */
@@ -179,6 +181,7 @@ export function AllMachinesHome({ machines, feeds, currentKey, loading, refreshi
 
   return (
     <View style={styles.fill}>
+      {/* Home's connection bar already says why the machine the phone is on can't be reached. */}
       {noneAnswer ? (
         <View testID="all-machines-unreachable" style={[styles.unreachable, { borderRadius: theme.radius.lg, backgroundColor: theme.colors.surfaceRaised }]}>
           <Text variant="headline">Can’t reach your machines</Text>
@@ -189,9 +192,14 @@ export function AllMachinesHome({ machines, feeds, currentKey, loading, refreshi
             <Text variant="callout" tone="accent" style={styles.bold}>Try again</Text>
           </Pressable>
         </View>
-      ) : offline.map(feed => (
+      ) : offline.filter(feed => feed.key !== currentKey).map(feed => (
         <OfflineNote key={feed.key} machine={machineOf(feed.key)} since={feed.offlineSince} hasRows={feed.snapshot !== undefined} onRetry={feed.retry} />
       ))}
+      {feeds.map(feed => (feed.error ? (
+        <View key={feed.key} style={styles.note}>
+          <Notice testID={`all-machines-error-${feed.name}`} danger message={`${feed.name}: ${feed.error}`} action={{ title: 'Try again', onPress: feed.retry }} />
+        </View>
+      ) : null))}
       <SearchField value={query} onChange={setQuery} />
       <LegendList
         testID="panes-list"
@@ -308,5 +316,6 @@ const styles = StyleSheet.create({
   divider: { position: 'absolute', top: 0, left: 36, right: 0, height: StyleSheet.hairlineWidth },
   offline: { flexDirection: 'row', alignItems: 'center', gap: 12, marginHorizontal: 16, marginBottom: 8, paddingHorizontal: 14, paddingVertical: 10 },
   unreachable: { marginHorizontal: 16, marginBottom: 8, padding: 16, gap: 6 },
+  note: { marginHorizontal: 16, marginBottom: 8 },
   empty: { alignItems: 'center', gap: 10, paddingHorizontal: 24, paddingTop: 48 },
 });
