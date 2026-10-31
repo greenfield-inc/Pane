@@ -36,6 +36,17 @@ export interface NotifyQuestion {
   suggestions?: string[];
   /** info only: one button. */
   action?: NotifyAction;
+  /** Set when the question mirrors a prompt in an agent's terminal (Claude's permission and plan prompts). */
+  agentPrompt?: NotifyAgentPrompt;
+}
+
+/** A prompt an agent shows in its terminal, asked here too; the first answer from either place wins. */
+export interface NotifyAgentPrompt {
+  /** The phone list's Yes and No buttons: each is one of the question's choices. */
+  yes: string;
+  no: string;
+  /** The agent stopped waiting on Pane (its hook timed out): only its terminal can answer now. */
+  inTerminal?: boolean;
 }
 
 /** The daemon request `runpane:notify` takes from the CLI. */

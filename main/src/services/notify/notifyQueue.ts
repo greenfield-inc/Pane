@@ -124,7 +124,7 @@ export class NotifyQueue extends EventEmitter {
   }
 
   /** Handles one notify call. Resolves when the person answers, the call must return, or the caller leaves. */
-  ask(request: { question?: NotifyQuestion; resume?: string; returnAfterMs?: number; source: NotifySource }, signal?: AbortSignal): Promise<NotifyResult> {
+  ask(request: { question?: NotifyQuestion; resume?: string; returnAfterMs?: number; source: NotifySource; id?: string }, signal?: AbortSignal): Promise<NotifyResult> {
     if (!this.env.settings().enabled) {
       return Promise.resolve(unavailable('Notify is off in Pane.'));
     }
@@ -134,7 +134,7 @@ export class NotifyQueue extends EventEmitter {
 
     const item: NotifyItem = {
       ...question,
-      id: randomUUID(),
+      id: request.id ?? randomUUID(),
       source: request.source,
       state: question.ui === 'info' ? 'info' : 'waiting',
       createdAt: Date.now(),
@@ -382,6 +382,31 @@ export class NotifyQueue extends EventEmitter {
     this.changed();
   }
 
+  /**
+   * An agent prompt's agent stopped waiting on Pane, but its terminal still asks: the question stays
+   * waiting, without choices, until `settle` closes it. An answer still in its Undo hold never
+   * reached the agent, so it is dropped and the question waits on the terminal again.
+   */
+  handOver(id: string): void {
+    const entry = this.entries.get(id);
+    if (!entry?.item.agentPrompt || !isOpen(entry.item) || entry.item.agentPrompt.inTerminal) return;
+    if (entry.item.state === 'sent') this.reopen(entry);
+    entry.item.agentPrompt = { ...entry.item.agentPrompt, inTerminal: true };
+    this.changed();
+  }
+
+  /**
+   * An agent prompt was answered where Pane can't see the choice (its terminal): it moves to
+   * Earlier today with `summary`. An answer still in its Undo hold never reached the agent, so it
+   * is dropped; one already delivered stands.
+   */
+  settle(id: string, summary: string): void {
+    const entry = this.entries.get(id);
+    if (!entry || !isOpen(entry.item)) return;
+    entry.item.answeredOn = undefined;
+    this.close(id, { state: 'answered', summary }, unavailable(summary), false);
+  }
+
   /** Pane is quitting: release every open call. */
   dispose(): void {
     for (const entry of this.entries.values()) {
@@ -502,6 +527,9 @@ export class NotifyQueue extends EventEmitter {
   private answer(id: string, answer: NotifyAnswer, device?: string): void {
     const entry = this.entries.get(id);
     if (!entry || entry.item.state !== 'waiting') return;
+    if (entry.item.agentPrompt?.inTerminal) {
+      throw new PaneError('ERR_NOTIFY_IN_TERMINAL', `${entry.item.source.agent} stopped waiting on Pane and is asking in its terminal now. Nothing was sent.`, 'Open the tab and answer in the terminal.');
+    }
     const result = toResult(entry.item, answer);
     entry.item.state = 'sent';
     entry.item.answerSummary = summarize(entry.item, result);
@@ -528,6 +556,13 @@ export class NotifyQueue extends EventEmitter {
   private undo(id: string): void {
     const entry = this.entries.get(id);
     if (!entry || entry.item.state !== 'sent') return;
+    this.reopen(entry);
+    this.changed();
+  }
+
+  /** Cancels an answer in its Undo hold: the question waits again, first in line. */
+  private reopen(entry: Entry): void {
+    const id = entry.item.id;
     clearTimeout(entry.holdTimer);
     entry.holdTimer = undefined;
     entry.item.state = 'waiting';
@@ -535,21 +570,25 @@ export class NotifyQueue extends EventEmitter {
     entry.item.answeredOn = undefined;
     this.queue = [id, ...this.queue];
     if (this.transient?.view.itemId === id) this.clearTransient();
-    this.changed();
   }
 
   /** The caller stopped waiting: the card says so, then moves to Earlier today as Expired. */
   private expire(id: string, result?: NotifyResult, announce = true): void {
+    this.close(id, { state: 'expired' }, result ?? unavailable('The question expired.'), announce);
+  }
+
+  /** Ends an open question as `outcome` and returns `result` to its caller; `announce` shows an expiry on the strip. */
+  private close(id: string, outcome: { state: 'expired' | 'answered'; summary?: string }, result: NotifyResult, announce: boolean): void {
     const entry = this.entries.get(id);
     if (!entry || !isOpen(entry.item)) return;
     const wasOnStrip = this.strip()?.itemId === id;
     clearEntryTimers(entry);
-    entry.item.state = 'expired';
+    entry.item.state = outcome.state;
     entry.item.resolvedAt = Date.now();
-    entry.item.answerSummary = undefined;
+    entry.item.answerSummary = outcome.summary;
     this.queue = this.queue.filter(other => other !== id);
     this.hidden.delete(id);
-    if (entry.waiter) entry.waiter.resolve(result ?? unavailable('The question expired.'));
+    entry.waiter?.resolve(result);
     if (announce && wasOnStrip) this.setTransient({ kind: 'expired', itemId: id }, NOTIFY_EXPIRED_SHOW_MS);
     else if (this.transient?.view.itemId === id) this.clearTransient();
     this.trimHistory();

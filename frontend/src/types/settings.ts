@@ -43,6 +43,7 @@ export type SettingsSettingId =
   | 'default-agent-interface'
   | 'mcp-registration'
   | 'mcp-toolsets'
+  | 'answer-prompts-from-pane'
   | 'agent-skill'
   | 'agent-context'
   | 'session-defaults'

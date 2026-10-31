@@ -56,8 +56,8 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategoryDefinition[] = [
     label: 'AI & Agents',
     description: 'Agent defaults, context, and CLI installations.',
     icon: Bot,
-    settingIds: ['default-agent-interface', 'default-pane-chat-agent', 'mcp-registration', 'mcp-toolsets', 'agent-skill', 'agent-context', 'session-import', 'session-defaults', 'claude-executable'],
-    aliases: ['claude', 'codex', 'cursor', 'pane chat', 'agents.md', 'mcp', 'tools', 'skill', 'import', 'migrate', 'conductor'],
+    settingIds: ['default-agent-interface', 'default-pane-chat-agent', 'mcp-registration', 'mcp-toolsets', 'answer-prompts-from-pane', 'agent-skill', 'agent-context', 'session-import', 'session-defaults', 'claude-executable'],
+    aliases: ['claude', 'codex', 'cursor', 'pane chat', 'permission', 'prompts', 'hooks', 'agents.md', 'mcp', 'tools', 'skill', 'import', 'migrate', 'conductor'],
   },
   {
     id: 'notify',

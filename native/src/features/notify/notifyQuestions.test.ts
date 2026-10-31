@@ -39,6 +39,11 @@ describe('notifySheetState', () => {
     expect(notifySheetState(at(6, { ...question, state: 'answered' }), 'q1', null)).toEqual({ kind: 'closed', message: 'Already answered on another screen' });
   });
 
+  it("sends an agent's terminal prompt to its terminal once the agent stopped waiting on Pane", () => {
+    const prompt: NotifyItem = { ...question, ui: 'options', choices: [{ label: 'Yes' }, { label: 'No' }], agentPrompt: { yes: 'Yes', no: 'No', inTerminal: true } };
+    expect(notifySheetState(at(4, prompt), 'q1', null)).toEqual({ kind: 'closed', message: 'Claude is asking in the terminal now. Open the Pane to answer.' });
+  });
+
   it('says when the agent stopped waiting', () => {
     expect(notifySheetState(at(4, { ...question, state: 'expired' }), 'q1', null)).toEqual({ kind: 'closed', message: 'Claude stopped waiting' });
   });

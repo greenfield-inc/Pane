@@ -440,6 +440,14 @@ describe('Notify question alerts', () => {
     expect(requests[1]?.payload).not.toHaveProperty('paneId');
   });
 
+  it("gives an agent's terminal prompt the phone list's Yes and No, however many choices the card has", async () => {
+    const { sender, requests } = await iosSender();
+    const choices = ['Yes', "Yes, and don't ask again for pnpm vitest commands in acme-web", 'Yes, and allow access to this folder for this session', 'No'].map(label => ({ label }));
+    await sender.observeQuestion({ item: question({ choices, agentPrompt: { yes: 'Yes', no: 'No' } }), open: true });
+
+    expect(requests[0]?.payload).toMatchObject({ notifyChoices: ['Yes', 'No'], aps: { category: 'pane.notify.options' } });
+  });
+
   it('clears the alert silently once the question stops waiting, and alerts again after an Undo', async () => {
     const { sender, requests } = await iosSender();
     await sender.observeQuestion({ item: question(), open: true });

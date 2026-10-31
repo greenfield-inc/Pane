@@ -60,6 +60,8 @@ export function NotifyCard(props: NotifyCardProps) {
     case 'expired':
       return <ExpiredCard {...props} />;
     case 'question':
+      // The agent stopped waiting on Pane; its terminal still asks, and answering there clears this.
+      if (props.item.agentPrompt?.inTerminal) return <InTerminalCard {...props} />;
       return <QuestionCard key={props.item.id} {...props} />;
   }
 }
@@ -752,7 +754,8 @@ function QuestionCard({
     >
       <CardHeader item={item} form={form} queue={queue} onCommand={onCommand} menuPlacement={menuPlacement} machineMark={machineMark} />
       <div className={cn(titleClass, !expanded && 'line-clamp-3')} title={item.title}>{item.title}</div>
-      {showContext && <div className={contextClass}>{item.context}</div>}
+      {/* An agent prompt's context is a command or a plan: its line breaks carry meaning. */}
+      {showContext && <div className={cn(contextClass, item.agentPrompt && 'max-h-[40vh] overflow-y-auto whitespace-pre-line')}>{item.context}</div>}
       {body}
       {item.unreachable && <UnreachableNotice item={item} className={form === 'inbox' ? 'px-3.5 pb-3' : 'px-[22px] pb-3'} />}
       {form === 'inbox' && (
@@ -803,13 +806,43 @@ function SentLine({ item, onCommand }: NotifyCardProps) {
   );
 }
 
+/** One line of status inside a card, in place of its answers. */
+function NoticePill({ children, testId }: { children: ReactNode; testId?: string }) {
+  return (
+    <div className="flex items-center gap-2 rounded-[9px] bg-surface-tertiary px-3 py-2.5 text-[13px] text-text-secondary" data-testid={testId}>
+      <Info className="h-3.5 w-3.5 shrink-0" />
+      {children}
+    </div>
+  );
+}
+
 /** The host that asked is out of reach: an answer now would not be sent. */
 export function UnreachableNotice({ item, className }: { item: NotifyItem; className?: string }) {
   return (
     <div className={className}>
-      <div className="flex items-center gap-2 rounded-[9px] bg-surface-tertiary px-3 py-2.5 text-[13px] text-text-secondary" data-testid="notify-unreachable">
-        <Info className="h-3.5 w-3.5 shrink-0" />
-        {unreachableText(item)}
+      <NoticePill testId="notify-unreachable">{unreachableText(item)}</NoticePill>
+    </div>
+  );
+}
+
+function InTerminalCard({ item, form, queue, narrow, onCommand, menuPlacement, machineMark, className }: NotifyCardProps) {
+  const inbox = form === 'inbox';
+  return (
+    <div className={cardShell(form, narrow, className)} data-testid="notify-card" data-notify-ui={item.ui} data-notify-view="in-terminal">
+      <CardHeader item={item} form={form} queue={queue} onCommand={onCommand} menuPlacement={menuPlacement} machineMark={machineMark} />
+      <div
+        className={cn(inbox ? 'px-3.5 pt-1 text-[14.5px] font-semibold leading-snug' : 'px-[22px] pt-1.5 text-[18px] font-semibold leading-[1.35] tracking-[-0.015em]', 'line-clamp-3 text-text-primary')}
+        title={item.title}
+      >
+        {item.title}
+      </div>
+      <div className={inbox ? 'px-3.5 pb-3.5 pt-3' : 'px-[22px] pb-[18px] pt-3'}>
+        <NoticePill testId="notify-in-terminal">
+          <span className="min-w-0 flex-1">{item.source.agent} is asking in the terminal now.</span>
+          {item.source.paneId && !item.elsewhere && (
+            <FooterLink onClick={() => onCommand({ type: 'open-in-pane', id: item.id })}>Open</FooterLink>
+          )}
+        </NoticePill>
       </div>
     </div>
   );
@@ -821,10 +854,7 @@ function ExpiredCard({ item, form, narrow, onCommand, menuPlacement, className }
       <CardHeader item={item} form={form === 'inbox' ? 'strip' : form} onCommand={onCommand} menuPlacement={menuPlacement} />
       <div className="line-clamp-3 px-[22px] pt-1.5 text-[18px] font-semibold leading-[1.35] tracking-[-0.015em] text-text-tertiary">{item.title}</div>
       <div className="px-[22px] pb-[18px] pt-3">
-        <div className="flex items-center gap-2 rounded-[9px] bg-surface-tertiary px-3 py-2.5 text-[13px] text-text-secondary">
-          <Info className="h-3.5 w-3.5 shrink-0" />
-          {item.source.agent} stopped waiting. Nothing to answer.
-        </div>
+        <NoticePill>{item.source.agent} stopped waiting. Nothing to answer.</NoticePill>
       </div>
     </div>
   );

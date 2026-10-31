@@ -156,6 +156,10 @@ export interface AppConfig {
   missionControlEnabled?: boolean;
   // Experimental: show Notes tabs and give agents their scoped notes (off by default).
   notesEnabled?: boolean;
+  // Claude tabs Pane starts ask their permission and plan prompts in Notify and on the phone too (on when absent).
+  answerPromptsFromPane?: boolean;
+  // Set once Notify has shown the one-time note about Claude prompts.
+  claudePromptsNoteShown?: boolean;
   // What a click on an .html file in Explorer opens: the browser preview (default when absent) or its source
   htmlFileOpenMode?: HtmlFileOpenMode;
   // PostHog analytics settings
@@ -262,6 +266,8 @@ export interface UpdateConfigRequest {
   missionControlEnabled?: boolean;
   // Experimental: show Notes tabs and give agents their scoped notes (off by default).
   notesEnabled?: boolean;
+  // Claude tabs Pane starts ask their permission and plan prompts in Notify and on the phone too (on when absent).
+  answerPromptsFromPane?: boolean;
   // What a click on an .html file in Explorer opens: the browser preview (default when absent) or its source
   htmlFileOpenMode?: HtmlFileOpenMode;
   // PostHog analytics settings

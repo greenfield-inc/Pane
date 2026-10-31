@@ -38,6 +38,15 @@ describe('NotifyCard', () => {
     expect(text(render(item, { form: 'inbox' }))).toContain('Open in Pane');
   });
 
+  it("drops a terminal prompt's choices once the agent asks only in its terminal, and offers Open", () => {
+    const prompt: NotifyItem = { ...base, ui: 'options', title: 'Run pnpm vitest run src/http?', choices: [{ label: 'Yes' }, { label: 'No' }], agentPrompt: { yes: 'Yes', no: 'No' } };
+    expect(text(render(prompt))).toContain('Yes');
+
+    const visible = text(render({ ...prompt, agentPrompt: { yes: 'Yes', no: 'No', inTerminal: true } }));
+    expect(visible).toContain('Claude is asking in the terminal now. Open');
+    expect(visible).not.toMatch(/\bYes\b/);
+  });
+
   it('says which device answered when another screen did, with Undo', () => {
     const answered = { ...base, ui: 'approve' as const, title: 'Apply migration?', state: 'sent' as const, answerSummary: 'Approved' };
     expect(text(render({ ...answered, answeredOn: 'Parsa’s iPhone' }, { view: 'sent' }))).toBe('Answered on Parsa’s iPhone · Approved Undo');
