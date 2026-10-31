@@ -1,22 +1,25 @@
 import type { BrowserPanelState, ToolPanel } from '@shared/types/panels';
+import { RemoteUnconfirmedResultError } from '@shared/remoteClient';
 import { normalizeUrl } from '@shared/utils/browserUrl';
+import { useQueryClient } from '@tanstack/react-query';
 import * as Linking from 'expo-linking';
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { ActivityIndicator, Platform, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { WebView } from 'react-native-webview';
 
-import { useDaemon, useInvokeMutation, useInvokeQuery } from '@/daemon';
+import { useDaemon, useDaemonQueryKey, useInvokeMutation, useInvokeQuery } from '@/daemon';
 import { useTheme } from '@/theme';
 import { Button, ErrorState, Icon, Text } from '@/ui';
 
 import { isDemoProfile } from '../demo/demoHost';
 import { useConnectionPresence } from '../hosts/useConnectionPresence';
-import { browserPage, htmlFromBase64, splitAddress, type BrowserPage } from './browserPage';
+import { AddressAsker, type AddressFailure } from './addressAsker';
+import { browserPage, htmlFromBase64, reloadFile, splitAddress, type BrowserPage } from './browserPage';
 import { StateScreen } from '../tabs/StateScreen';
 import { usePorts } from './usePorts';
 
 const TAILSCALE_APP_URL = 'tailscale://';
-const TAILSCALE_DOWNLOAD_URL = 'https://tailscale.com/download/ios';
+const TAILSCALE_DOWNLOAD_URL = Platform.OS === 'android' ? 'https://tailscale.com/download/android' : 'https://tailscale.com/download/ios';
 
 /**
  * A page tab: the address row (back, forward, address, reload, Safari) over the live page. Pages
@@ -49,12 +52,16 @@ export function BrowserTab({ panel }: { panel: ToolPanel }) {
 
   const requestAddress = useInvokeMutation<[number]>('ports:phone-address');
   const requested = page.kind === 'loading' ? page.request : undefined;
-  const asked = useRef(new Set<number>());
+  const [askFailure, setAskFailure] = useState<AddressFailure | null>(null);
+  const [asker] = useState(() => new AddressAsker(port => requestAddress.mutateAsync([port]), failure => {
+    setAskFailure(failure);
+    // The computer may have made the address anyway: read its ports to see.
+    if (failure?.error instanceof RemoteUnconfirmedResultError) read.refetch();
+  }));
   useEffect(() => {
-    if (requested === undefined || asked.current.has(requested)) return;
-    asked.current.add(requested);
-    requestAddress.mutate([requested]);
-  }, [requested, requestAddress]);
+    if (requested !== undefined) asker.ask(requested);
+  }, [requested, asker]);
+  const addressError = requested !== undefined && askFailure?.port === requested ? askFailure.error : null;
 
   const save = useInvokeMutation<[string, Partial<ToolPanel>]>('panels:update', { invalidates: ['panels:list'] });
   const submit = () => {
@@ -78,10 +85,14 @@ export function BrowserTab({ panel }: { panel: ToolPanel }) {
     });
   };
 
+  const queryClient = useQueryClient();
+  const fileKey = useDaemonQueryKey('panels:read-browser-file', [panel.id, url]);
   const reload = () => {
     setLoadError(null);
     if (page.kind === 'web') webView.current?.reload();
+    else if (page.kind === 'file') void reloadFile(queryClient, fileKey);
     else read.refetch();
+    if (requested !== undefined && addressError) asker.retry(requested);
     setReloadKey(key => key + 1);
   };
   const src = page.kind === 'web' ? page.src : null;
@@ -211,7 +222,9 @@ export function BrowserTab({ panel }: { panel: ToolPanel }) {
         ) : page.kind === 'file' ? (
           <FileView key={reloadKey} panelId={panel.id} page={page} onNavigate={setNav} webView={webView} />
         ) : page.kind === 'loading' ? (
-          read.error ? <ErrorState title="Couldn’t read the computer’s pages" error={read.error} onRetry={read.refetch} /> : <LoadingScreen address={host} from={profile.label} />
+          read.error ? <ErrorState title="Couldn’t read the computer’s pages" error={read.error} onRetry={read.refetch} />
+            : addressError ? <ErrorState title={`Couldn’t open ${host} on this phone`} error={addressError} onRetry={reload} testID="browser-address-error" />
+            : <LoadingScreen address={host} from={profile.label} />
         ) : page.kind === 'refused' ? (
           <StateScreen
             testID="browser-refused"

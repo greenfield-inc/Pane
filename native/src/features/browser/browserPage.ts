@@ -1,3 +1,5 @@
+import type { QueryClient } from '@tanstack/react-query';
+
 import type { ListeningPortsSnapshot } from '@shared/types/listeningPorts';
 import { phonePage } from '@shared/utils/phonePage';
 
@@ -65,4 +67,12 @@ export function splitAddress(address: string): [string, string] {
 /** An HTML file the computer sent as base64, as text. Throws on bytes that are not UTF-8. */
 export function htmlFromBase64(data: string): string {
   return decodeURIComponent(atob(data).replace(/[\s\S]/g, byte => `%${byte.charCodeAt(0).toString(16).padStart(2, '0')}`));
+}
+
+/**
+ * Reload reads an HTML file again, even one read moments ago: the agent may have just rewritten it.
+ * `fileKey` is the tab's `panels:read-browser-file` query.
+ */
+export function reloadFile(queryClient: QueryClient, fileKey: unknown[]): Promise<void> {
+  return queryClient.invalidateQueries({ queryKey: fileKey, exact: true });
 }

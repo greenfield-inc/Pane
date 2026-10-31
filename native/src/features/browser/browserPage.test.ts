@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { QueryClient, QueryObserver } from '@tanstack/react-query';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { ListeningPortsSnapshot } from '@shared/types/listeningPorts';
 
-import { browserPage, htmlFromBase64, splitAddress } from './browserPage';
+import { browserPage, htmlFromBase64, reloadFile, splitAddress } from './browserPage';
 
 const on: ListeningPortsSnapshot = {
   host: 'studio-mac',
@@ -76,5 +77,33 @@ describe('splitAddress', () => {
 describe('htmlFromBase64', () => {
   it('decodes the UTF-8 file the computer sends', () => {
     expect(htmlFromBase64('Y2Fmw6kg4oCU')).toBe('café —');
+  });
+});
+
+describe('reloadFile', () => {
+  it('reads the HTML file again on Reload, even while the last read is still fresh', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: 30_000, retry: false } } });
+    const key = ['studio-mac', 'panels:read-browser-file', 'panel-1', 'file:///status.html'];
+    let version = 'status-v1';
+    const reads: string[] = [];
+    const queryFn = () => {
+      reads.push(version);
+      return Promise.resolve(version);
+    };
+    // The tab's file view, mounted; Reload remounts it.
+    const watch = () => {
+      const observer = new QueryObserver(queryClient, { queryKey: key, queryFn });
+      return { observer, stop: observer.subscribe(() => {}) };
+    };
+    const first = watch();
+    await vi.waitFor(() => expect(first.observer.getCurrentResult().data).toBe('status-v1'));
+    version = 'status-v2';
+    first.stop();
+
+    await reloadFile(queryClient, key);
+    const second = watch();
+    await vi.waitFor(() => expect(second.observer.getCurrentResult().data).toBe('status-v2'));
+    second.stop();
+    expect(reads).toEqual(['status-v1', 'status-v2']);
   });
 });
