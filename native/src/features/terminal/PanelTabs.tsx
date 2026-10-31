@@ -1,6 +1,7 @@
 import type { ToolPanel, ToolPanelType } from '@shared/types/panels';
 import * as Haptics from 'expo-haptics';
 import type { AndroidSymbol, SFSymbol } from 'expo-symbols';
+import { useEffect, useRef } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { useDaemon } from '@/daemon';
@@ -43,9 +44,26 @@ export function PanelTabs({ panels, selectedId, onSelect, onAdd, onClose, chatId
   const theme = useTheme();
   const { colors } = theme;
   const { profile } = useDaemon();
+  // Where each tab sits in the strip, and the strip's visible window, so the open tab can be scrolled into view.
+  const strip = useRef<ScrollView>(null);
+  const tabFrames = useRef(new Map<string, { x: number; width: number }>());
+  const view = useRef({ offset: 0, width: 0 });
+  const revealSelected = () => {
+    const frame = selectedId ? tabFrames.current.get(selectedId) : undefined;
+    const { offset, width } = view.current;
+    if (!frame || width === 0) return;
+    if (frame.x < offset) strip.current?.scrollTo({ x: Math.max(0, frame.x - 8), animated: true });
+    else if (frame.x + frame.width > offset + width) strip.current?.scrollTo({ x: frame.x + frame.width - width + 8, animated: true });
+  };
+  // A tab opened from a link, a notification or the computer can sit outside the strip's window.
+  useEffect(revealSelected, [selectedId]);
   return (
     <View style={[styles.bar, { borderBottomColor: colors.border, backgroundColor: colors.surfaceRaised }]}>
       <ScrollView
+        ref={strip}
+        onLayout={event => { view.current.width = event.nativeEvent.layout.width; }}
+        onScroll={event => { view.current.offset = event.nativeEvent.contentOffset.x; }}
+        scrollEventThrottle={64}
         horizontal
         showsHorizontalScrollIndicator={false}
         style={styles.scroll}
@@ -62,6 +80,11 @@ export function PanelTabs({ panels, selectedId, onSelect, onAdd, onClose, chatId
             <Pressable
               key={panel.id}
               testID={`panel-tab-${panel.id}`}
+              onLayout={event => {
+                const { x, width } = event.nativeEvent.layout;
+                tabFrames.current.set(panel.id, { x, width });
+                if (selected) revealSelected();
+              }}
               accessibilityRole="tab"
               accessibilityState={{ selected }}
               accessibilityLabel={`${panel.title}, ${type.label}`}

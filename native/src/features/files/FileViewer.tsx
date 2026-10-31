@@ -99,7 +99,7 @@ export function FileViewer({ sessionId, path, size: knownSize, back }: FileViewe
       <StateScreen
         testID="file-stays"
         icon={{ ios: 'doc.text', android: 'description' }}
-        title={size !== undefined ? `${name} is ${formatSize(size)}` : name}
+        title={tooBig ? `${name} is ${formatSize(size)}` : `${name} stays on ${profile.label}`}
         message={tooBig
           ? `Files over ${formatSize(limit)} stay on ${profile.label}. Open it there, or copy its path for an agent.`
           : `The phone shows text, Markdown and images. Open it on ${profile.label}, or copy its path for an agent.`}
