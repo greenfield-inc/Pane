@@ -15,6 +15,16 @@ agent; a name you type or set later is kept. Each new Session opens as one Pane
 Chat and can be renamed later from the optional read-only overview. Expand a Session to see
 its associated Panes and open any Pane in its existing sidebar view.
 
+**New** at the top of the sidebar opens one dialog with a Session/Pane toggle
+on top and that kind's form below. When the desktop has saved other machines,
+a **Machine** picker sits between them. It starts on the machine you last
+created on from this computer (the first time, the machine the app is on) and
+dims machines that are offline or still connecting; they can't be picked until
+they answer. Repositories, branches, WSL distributions and agents come from the
+picked machine. Create runs there; Pane then switches to that machine and opens
+what you created. A Pane created on another machine starts at the repository
+level and does not join the Session you have open.
+
 The Sessions section below the divider can be collapsed from its header; the
 `+` remains available while it is collapsed. Sessions are opened from this
 section rather than from a duplicate top navigation shortcut.

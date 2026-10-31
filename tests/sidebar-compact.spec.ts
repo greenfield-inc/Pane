@@ -158,7 +158,7 @@ test.describe('compact sidebar', () => {
     await page.keyboard.press('Escape');
     await page.getByRole('button', { name: 'New', exact: true }).click();
     await expect(page.getByRole('dialog', { name: 'New', exact: true })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Create Pane A workspace' })).toBeVisible();
+    await expect(page.getByRole('radio', { name: 'Pane', exact: true })).toBeVisible();
   });
 
   for (const titleBar of [true, false]) {
