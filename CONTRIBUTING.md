@@ -143,9 +143,10 @@ package.
   `pnpm exec playwright install chromium`. `pnpm test:ci:minimal` runs the suite
   CI runs: smoke, health check, accessibility, settings, remote sidebar and file-preview lifecycle regressions.
 - The tests load the renderer from Vite in Chromium, with a mocked Electron API
-  (`tests/electronApiMock.ts`). To start Vite, Playwright runs `pnpm electron-dev`
-  on port `4521`, which also opens an Electron window against your data
-  directory, so set `PANE_DIR` for the run. Don't run two Playwright commands on the
+  (`tests/electronApiMock.ts`). `pnpm test:ci:minimal` starts Vite alone. To
+  start Vite, `pnpm test` and `pnpm test:ci` run `pnpm electron-dev` on port
+  `4521`, which also opens an Electron window against your data directory, so
+  set `PANE_DIR` for the run. Don't run two Playwright commands on the
   same port at once: the second can attach to or kill the first one's server.
   Use `PLAYWRIGHT_PORT` to separate them:
   ```bash
@@ -278,9 +279,11 @@ findings in `frontend/`; it is advisory. To see its findings before you push:
 pnpm exec react-doctor frontend --scope changed
 ```
 
-Maintainers attach PR screenshots by uploading them to the `pr-assets` release
-(`gh release upload pr-assets <file> --clobber`, named
+Maintainers attach PR screenshots by uploading them to the `pr-assets-2` release
+(`gh release upload pr-assets-2 <file> --clobber`, named
 `pr-<number>-<name>-<hash>.png`) and linking the release download URL.
+The older `pr-assets` release is full (GitHub allows 1,000 assets per
+release); images already there keep working.
 
 Releases, CI and deploys are covered in [RUNBOOK.md](RUNBOOK.md).
 

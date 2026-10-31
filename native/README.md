@@ -194,7 +194,7 @@ Use `"category": "pane.notify.approve"` with `"notifyUi": "approve"` for Approve
 
 `native/google-services.json` is gitignored. It is the Firebase Android app config for `com.dcouple.pane.mobile` in the `pane-pwa-preview` project. It identifies the app and cannot send pushes. Get it locally from the Firebase console (Project settings, Your apps, Android) or with `firebase apps:sdkconfig ANDROID <app-id> --project pane-pwa-preview -o native/google-services.json`.
 
-CI reads it from the `PANE_ANDROID_GOOGLE_SERVICES_JSON` repository secret, base64-encoded. `.github/workflows/native-android.yml` decodes it into `native/google-services.json`, then builds the Android dev client. The step fails if the secret is missing or not for this package; fork PRs, which get no secrets, build without FCM. To rotate it:
+CI reads it from the `PANE_ANDROID_GOOGLE_SERVICES_JSON` repository secret, base64-encoded. `.github/workflows/native-android.yml` decodes it into `native/google-services.json`, then builds the Android dev client. On pull requests it builds only when the Expo Android fingerprint differs from the base (or the workflow changed), and only for `arm64-v8a`; pushes to `main` and manual runs build all four ABIs. The step fails if the secret is missing or not for this package; fork PRs, which get no secrets, build without FCM. To rotate it:
 
 ```bash
 base64 < native/google-services.json | tr -d '\n' | gh secret set PANE_ANDROID_GOOGLE_SERVICES_JSON -R greenfield-inc/Pane

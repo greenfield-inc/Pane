@@ -23,7 +23,8 @@ Canonical repo: `greenfield-inc/Pane` (`dcouple/Pane` redirects to it).
   `pnpm --filter main exec vitest run` (plain `pnpm --filter main test` is watch
   mode); run `pnpm electron:rebuild` before starting the app again.
   Playwright: install the browser once with `pnpm exec playwright install
-  chromium`; `pnpm test:ci:minimal` launches the app, so set `PANE_DIR`.
+  chromium`; `pnpm test:ci:minimal` serves the renderer from Vite alone, while
+  `pnpm test` also launches the app, so set `PANE_DIR`.
 
 ## Rules
 
