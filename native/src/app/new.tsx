@@ -1,7 +1,7 @@
 import { LegendList } from '@legendapp/list/react-native';
 import { useIsMutating } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -39,7 +39,8 @@ export default function NewSheet() {
   const [pickedKey, setPickedKey] = useState(() => (projectId === undefined && last && reachable(last) ? last.key : current?.key));
   const [kind, setKind] = useState<Kind>(params.kind ?? 'session');
   const machine = saved.find(candidate => candidate.key === pickedKey) ?? current;
-  // While a create is in flight the form stays mounted, so its answer still opens what it made.
+  // While a create is in flight the sheet stays open (no Cancel, no swipe down) and the form stays
+  // mounted, so its answer still opens what it made.
   const creating = useIsMutating({ mutationKey: CREATE_ON_MACHINE }) > 0;
 
   const created = (target: { paneId: string } | { sessionId: string }) => {
@@ -64,9 +65,18 @@ export default function NewSheet() {
       keyboardShouldPersistTaps="handled"
       automaticallyAdjustKeyboardInsets
     >
+      <Stack.Screen options={{ gestureEnabled: !creating }} />
       <View style={styles.header}>
-        <Pressable testID="new-cancel" accessibilityRole="button" hitSlop={10} onPress={() => router.back()} style={styles.headerSide}>
-          <Text variant="body" tone="accent">Cancel</Text>
+        <Pressable
+          testID="new-cancel"
+          accessibilityRole="button"
+          accessibilityState={{ disabled: creating }}
+          disabled={creating}
+          hitSlop={10}
+          onPress={() => router.back()}
+          style={styles.headerSide}
+        >
+          <Text variant="body" tone={creating ? 'muted' : 'accent'}>Cancel</Text>
         </Pressable>
         <Text variant="headline" accessibilityRole="header">New</Text>
         <View style={styles.headerSide} />
