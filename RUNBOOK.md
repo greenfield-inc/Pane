@@ -124,6 +124,11 @@ the Homebrew job logs a notice and skips. npm publishes with `--provenance`.
   tag and release in place unless the maintainers decide to remove them.
 - **A publish job failed:** run `Build & Release` manually with
   `release_tag=vX.Y.Z` and `publish=true`.
+- **Only the Homebrew cask is missing** (the release itself is published):
+  don't rebuild. Download the release's `SHA256SUMS.txt`, run
+  `scripts/render-packaging.sh X.Y.Z SHA256SUMS.txt rendered`, copy
+  `rendered/homebrew/.` into a clone of `greenfield-inc/homebrew-tap`, and
+  commit `pane vX.Y.Z` there.
 - **The website wasn't notified:** run `Notify website on release` manually.
 - **Bad Remote PWA preview:** push a fix to `main`. Shifting Cloud Run traffic
   back to an earlier revision
