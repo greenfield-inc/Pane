@@ -105,6 +105,33 @@ const darkTerminal = {
   brightWhite: '#ffffff',
 };
 
+/**
+ * Code colors by highlight.js scope, from GitHub's light and dark themes (github.css,
+ * github-dark.css). Scopes not listed draw in the text color.
+ */
+export const syntaxColors = {
+  light: {
+    keyword: '#cf222e', 'meta keyword': '#cf222e', doctag: '#cf222e', 'template-tag': '#cf222e',
+    title: '#8250df', 'title.function': '#8250df',
+    type: '#953800', built_in: '#953800', 'title.class': '#953800', variable: '#953800', params: '#1f2328',
+    attr: '#0550ae', attribute: '#0550ae', literal: '#0550ae', meta: '#0550ae', number: '#0550ae', operator: '#0550ae', selector: '#0550ae', property: '#0550ae',
+    string: '#0a3069', regexp: '#0a3069', symbol: '#0a3069',
+    comment: '#6e7781', quote: '#6e7781',
+    name: '#116329', 'selector-tag': '#116329', tag: '#116329',
+    addition: '#116329', deletion: '#82071e', section: '#0550ae', bullet: '#953800',
+  },
+  dark: {
+    keyword: '#ff7b72', 'meta keyword': '#ff7b72', doctag: '#ff7b72', 'template-tag': '#ff7b72',
+    title: '#d2a8ff', 'title.function': '#d2a8ff',
+    type: '#ffa657', built_in: '#ffa657', 'title.class': '#ffa657', variable: '#ffa657', params: '#c9d1d9',
+    attr: '#79c0ff', attribute: '#79c0ff', literal: '#79c0ff', meta: '#79c0ff', number: '#79c0ff', operator: '#79c0ff', selector: '#79c0ff', property: '#79c0ff',
+    string: '#a5d6ff', regexp: '#a5d6ff', symbol: '#a5d6ff',
+    comment: '#8b949e', quote: '#8b949e',
+    name: '#7ee787', 'selector-tag': '#7ee787', tag: '#7ee787',
+    addition: '#aff5b4', deletion: '#ffdcd7', section: '#1f6feb', bullet: '#f2cc60',
+  },
+} as const satisfies Record<'light' | 'dark', Record<string, string>>;
+
 // The PWA draws its terminal dark in its light theme too (useRemoteTerminal.ts).
 export const terminalColors = { light: darkTerminal, dark: darkTerminal };
 export type ThemeColors = ColorTokens;

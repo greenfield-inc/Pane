@@ -37,6 +37,7 @@
     "expo-system-ui": "~57.0.0",
     "expo-task-manager": "~57.0.21",
     "expo-updates": "~57.0.26",
+    "highlight.js": "11.11.1",
     "react": "19.2.3",
     "react-native": "0.86.3",
     "react-native-gesture-handler": "~2.32.0",

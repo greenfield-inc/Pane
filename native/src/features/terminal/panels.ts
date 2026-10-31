@@ -1,18 +1,54 @@
 import { AGENT_LAUNCH_PRESETS } from '@shared/constants/agentLaunchPresets';
 import type { OrchestrationSessionRecord } from '@shared/types/orchestrationSession';
-import type { ToolPanel } from '@shared/types/panels';
+import type { EditorPanelState, ToolPanel, ToolPanelType } from '@shared/types/panels';
 import type { RemotePwaCustomCommand } from '@shared/types/remoteDaemon';
 
-/** The pane's terminal panels in tab order. Other panel types (diff, editor, …) are desktop-only. */
-export function terminalPanels(panels: readonly ToolPanel[]): ToolPanel[] {
-  return panels
-    .filter(panel => panel.type === 'terminal')
-    .sort((a, b) => a.metadata.position - b.metadata.position);
+/** How the phone draws a tab. A placeholder names the computer, where the tab opens. */
+export type TabView = 'terminal' | 'browser' | 'explorer' | 'editor' | 'placeholder';
+
+export function tabView(panel: ToolPanel): TabView {
+  switch (panel.type) {
+    case 'terminal':
+    case 'browser':
+    case 'explorer':
+      return panel.type;
+    case 'editor':
+      return (panel.state.customState as EditorPanelState | undefined)?.diff ? 'placeholder' : 'editor';
+    default:
+      return 'placeholder';
+  }
+}
+
+/** Strip groups, as the web phone app sorts them: agents and terminals, pages, Explorer and Diff, other tabs, desktop-only tabs. */
+const STRIP_GROUP: Record<ToolPanelType, number> = {
+  terminal: 0,
+  browser: 1,
+  explorer: 2,
+  diff: 2,
+  editor: 3,
+  logs: 3,
+  notes: 4,
+  dashboard: 4,
+  'setup-tasks': 4,
+};
+
+/** Every tab of a pane, in strip order; each group keeps the pane's tab order. */
+export function stripPanels(panels: readonly ToolPanel[]): ToolPanel[] {
+  return [...panels].sort((a, b) => STRIP_GROUP[a.type] - STRIP_GROUP[b.type] || a.metadata.position - b.metadata.position);
+}
+
+/**
+ * Whether the phone moves to this tab when the computer brings it forward: only tabs on the
+ * desktop's stage that the phone draws. Explorer and Diff live in the desktop's side panel and
+ * are often reported as active, so the phone never jumps to them.
+ */
+export function followsHost(panel: ToolPanel): boolean {
+  return panel.type !== 'explorer' && panel.type !== 'diff' && tabView(panel) !== 'placeholder';
 }
 
 /**
  * The tab to show: the one picked on this phone while it still exists, else
- * the panel active on the host, else the first terminal.
+ * the host's active tab when the phone follows it there, else the first tab.
  */
 export function pickPanel(
   panels: readonly ToolPanel[],
@@ -20,14 +56,14 @@ export function pickPanel(
   hostActiveId: string | null | undefined,
 ): ToolPanel | null {
   return panels.find(panel => panel.id === selectedId)
-    ?? panels.find(panel => panel.id === hostActiveId)
+    ?? panels.find(panel => panel.id === hostActiveId && followsHost(panel))
     ?? panels[0]
     ?? null;
 }
 
 /**
  * A Session's tabs, as on desktop: its current agent's chat first, then the
- * workspace's own terminals. Chats of agents the Session no longer uses stay hidden.
+ * workspace's own tabs. Chats of agents the Session no longer uses stay hidden.
  */
 export function sessionWorkspacePanels(
   view: { session: Pick<OrchestrationSessionRecord, 'panelIds'>; panel: ToolPanel },

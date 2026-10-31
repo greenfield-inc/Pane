@@ -8,7 +8,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PaneError } from '@shared/paneError';
 import { RemoteUnconfirmedResultError } from '@shared/remoteClient';
 import type { OrchestrationSessionView } from '@shared/types/orchestrationSession';
-import type { TerminalPanelState, ToolPanel } from '@shared/types/panels';
+import type { EditorPanelState, TerminalPanelState, ToolPanel } from '@shared/types/panels';
 import type { RemotePwaAffordances } from '@shared/types/remoteDaemon';
 
 import { useDaemon, useInvokeMutation, useInvokeQuery } from '@/daemon';
@@ -16,6 +16,9 @@ import { useTheme } from '@/theme';
 import { EmptyState, ErrorState, Icon, Text } from '@/ui';
 
 import { AgentConversationSurface } from '../agentChat/AgentConversationSurface';
+import { BrowserTab } from '../browser/BrowserTab';
+import { ExplorerTab } from '../files/ExplorerTab';
+import { FileViewer } from '../files/FileViewer';
 import { isDemoProfile } from '../demo/demoHost';
 import { explainDemoLimit } from '../demo/explainDemoLimit';
 import { draftKey } from '../composer/composerDrafts';
@@ -26,6 +29,7 @@ import { useConnectionPresence } from '../hosts/useConnectionPresence';
 import { clearPaneNotifications } from '../notifications/device';
 import { useAgentStatuses, useMarkPaneSeen } from '../panes/hooks';
 import { ShortcutsSheet } from '../shortcuts/ShortcutsSheet';
+import { PlaceholderTab } from '../tabs/PlaceholderTab';
 import { AttachSheet } from '../upload/AttachSheet';
 import { UploadReceipts } from '../upload/UploadReceipts';
 import { useUploads } from '../upload/useUploads';
@@ -36,7 +40,7 @@ import { controllerLayout } from './controllerLayout';
 import { useControllerShown } from './controllerPreference';
 import { FloatingController } from './FloatingController';
 import { KEYS } from './keys';
-import { pickPanel, sessionWorkspacePanels, terminalPanels } from './panels';
+import { followsHost, pickPanel, sessionWorkspacePanels, stripPanels, tabView } from './panels';
 import { PanelTabs } from './PanelTabs';
 import { TerminalInputBar } from './TerminalInputBar';
 import { TerminalTopBar } from './TerminalTopBar';
@@ -51,9 +55,10 @@ const NOTICE_MS = 4000;
 const PANEL_EVENTS = ['panel:created', 'panel:updated', 'panel:deleted', 'panel:activeChanged'];
 
 /**
- * A pane's terminals, laid out like the web app on a phone: the host bar and
- * tabs on top, xterm in the middle, the composer box below. With a
- * `session`, it shows that Session's workspace pane, its agent chat first.
+ * A pane's tabs, laid out like the web app on a phone: the host bar and tabs
+ * on top, then the open tab. A terminal shows xterm with the composer box
+ * below; other tabs get a view for their type. With a `session`, it shows
+ * that Session's workspace pane, its agent chat first.
  */
 export function TerminalScreen({ paneId, session }: { paneId: string; session?: OrchestrationSessionView }) {
   const { panelId } = useLocalSearchParams<{ panelId?: string }>();
@@ -73,13 +78,17 @@ export function TerminalScreen({ paneId, session }: { paneId: string; session?: 
   const deletePanel = useInvokeMutation<[string]>('panels:delete', { invalidates: ['panels:list', 'panels:getActive'] });
   const statuses = useAgentStatuses();
 
-  // Tabs opened, closed or switched on the desktop show up here too.
+  // Tabs opened, closed or switched on the desktop show up here too. When the
+  // host or an agent brings a tab forward, the phone follows if it draws that tab;
+  // a tab opened that moment is followed once the refreshed list holds it.
+  const [follow, setFollow] = useState<string | null>(null);
   useEffect(() => client.onEvent(event => {
     if (event.type !== 'daemon-event' || !PANEL_EVENTS.includes(event.payload.channel)) return;
-    const payload = event.payload.args[0] as { sessionId?: string } | undefined;
+    const payload = event.payload.args[0] as { sessionId?: string; panelId?: string } | undefined;
     if (payload?.sessionId !== paneId) return;
     void queryClient.invalidateQueries({ queryKey: [profile.id, 'panels:list', paneId] });
     void queryClient.invalidateQueries({ queryKey: [profile.id, 'panels:getActive', paneId] });
+    if (event.payload.channel === 'panel:activeChanged' && payload.panelId) setFollow(payload.panelId);
   }), [client, paneId, profile.id, queryClient]);
 
   // Watching a pane counts as seeing it: clear its Ready badge on the way in
@@ -94,11 +103,24 @@ export function TerminalScreen({ paneId, session }: { paneId: string; session?: 
     return () => markThisPaneSeen();
   }, [paneId]);
 
-  const panes = terminalPanels(panelList.data ?? []);
-  const panels = session ? sessionWorkspacePanels(session, panes) : panes;
+  const strip = stripPanels(panelList.data ?? []);
+  const panels = session ? sessionWorkspacePanels(session, strip) : strip;
   const panel = pickPanel(panels, panelId ?? null, hostActive.data?.id);
+  const view = panel ? tabView(panel) : null;
+  const followed = follow ? panels.find(candidate => candidate.id === follow) : undefined;
+  useEffect(() => {
+    if (!followed) return;
+    if (followsHost(followed)) router.setParams({ panelId: followed.id });
+    setFollow(null);
+  }, [followed]);
+  // The tab on screen stays put until the person or a host announcement moves it,
+  // so the host's active tab changing to one the phone doesn't follow never jumps it.
+  const shownId = panel?.id;
+  useEffect(() => {
+    if (!panelId && shownId) router.setParams({ panelId: shownId });
+  }, [panelId, shownId]);
   const conversation = (panel?.state.customState as TerminalPanelState | undefined)?.agentChat?.conversation;
-  const terminalActive = !!panel && (!conversation || (conversation.active === 'terminal' && !conversation.transition));
+  const terminalActive = view === 'terminal' && (!conversation || (conversation.active === 'terminal' && !conversation.transition));
   const title = session ? session.session.name || 'Untitled' : pane.data?.name ?? '';
 
   const composer = useComposerDraft(panel ? draftKey(profile.id, paneId, panel.id) : null);
@@ -143,12 +165,15 @@ export function TerminalScreen({ paneId, session }: { paneId: string; session?: 
       <TerminalTopBar paneName={title} onClearScrollback={terminalActive ? () => terminalActions.current?.clearScrollback() : undefined} />
       <PanelTabs
         panels={panels}
+        chatId={session?.panel.id}
         selectedId={panel?.id ?? null}
         onSelect={selectPanel}
         onAdd={() => router.push({ pathname: '/pane/[paneId]/new-panel', params: session ? { paneId, sessionId: session.session.id } : { paneId } })}
         onClose={closePanel}
       />
-      {panel ? (
+      {panel && view !== 'terminal' ? (
+        <TabBody panel={panel} title={title} />
+      ) : panel ? (
         <AgentConversationSurface key={panel.id} panel={panel} draft={draft} onChangeDraft={setDraft} confirmDraft={composer.confirmDelivery}>
         <TerminalPanel
           panel={panel}
@@ -173,8 +198,8 @@ export function TerminalScreen({ paneId, session }: { paneId: string; session?: 
           ) : (
             <EmptyState
               testID="terminal-empty"
-              title="No terminals"
-              message="This pane has no terminal open. Tap + to start one."
+              title="No tabs"
+              message="This pane has no tabs open. Tap + to start a terminal."
             />
           )}
         </View>
@@ -183,6 +208,20 @@ export function TerminalScreen({ paneId, session }: { paneId: string; session?: 
       <View style={{ height: keyboardVisible ? KEYBOARD_GAP : insets.bottom }} />
     </KeyboardAvoidingView>
   );
+}
+
+/** A tab that is not a terminal, drawn by its type. */
+function TabBody({ panel, title }: { panel: ToolPanel; title: string }) {
+  switch (tabView(panel)) {
+    case 'browser':
+      return <BrowserTab key={panel.id} panel={panel} />;
+    case 'explorer':
+      return <ExplorerTab key={panel.id} panel={panel} rootName={title} />;
+    case 'editor':
+      return <FileViewer key={panel.id} sessionId={panel.sessionId} path={(panel.state.customState as EditorPanelState).filePath} />;
+    default:
+      return <PlaceholderTab panel={panel} />;
+  }
 }
 
 interface TerminalActions {
