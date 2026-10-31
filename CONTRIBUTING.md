@@ -155,9 +155,10 @@ To test approvals' timers without waiting, start a dev build with
   `main/dist` (run `pnpm build:main` first) with the scripted ACP agent, each
   test in its own temporary `PANE_DIR`, and serves the renderer from plain Vite.
 - The tests load the renderer from Vite in Chromium, with a mocked Electron API
-  (`tests/electronApiMock.ts`). To start Vite, Playwright runs `pnpm electron-dev`
-  on port `4521`, which also opens an Electron window against your data
-  directory, so set `PANE_DIR` for the run. Don't run two Playwright commands on the
+  (`tests/electronApiMock.ts`). `pnpm test:ci:minimal` starts Vite alone. To
+  start Vite, `pnpm test` and `pnpm test:ci` run `pnpm electron-dev` on port
+  `4521`, which also opens an Electron window against your data directory, so
+  set `PANE_DIR` for the run. Don't run two Playwright commands on the
   same port at once: the second can attach to or kill the first one's server.
   Use `PLAYWRIGHT_PORT` to separate them:
   ```bash
