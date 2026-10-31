@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ListeningPortsSnapshot } from '../../../../shared/types/listeningPorts';
-import { phoneMediaUrl, phonePage } from './phonePage';
+import { phoneMediaUrl, phonePage } from '../../../../shared/utils/phonePage';
 
 const ports: ListeningPortsSnapshot = {
   host: 'parsas-macbook-pro',
@@ -47,17 +47,25 @@ describe('phonePage', () => {
       address: 'localhost:3000/',
       host: 'parsas-macbook-pro',
       reason: 'Pane is giving localhost:3000 a phone address…',
+      cause: 'starting',
+      port: 3000,
       request: 3000,
     });
     expect(phonePage('http://localhost:5432/', ports, 'panel-1')).toMatchObject({
       reason: 'localhost:5432 does not answer HTTP, so it opens only on desktops.',
+      cause: 'not-web',
     });
     expect(phonePage('http://localhost:8080/', ports, 'panel-1')).toMatchObject({
       reason: 'Nothing on parsas-macbook-pro listens on port 8080.',
+      cause: 'refused',
+      port: 8080,
     });
     expect(phonePage('http://localhost:5173/', { ...ports, phone: { state: 'off', reason: 'Tailscale is not installed' } }, 'panel-1')).toMatchObject({
       reason: 'Phone pages from parsas-macbook-pro are unavailable right now (Tailscale is not installed). Pane checks again every minute.',
+      cause: 'pages-off',
+      offReason: 'Tailscale is not installed',
     });
+    expect(phonePage('file:///Users/me/report.html', null, 'panel-1')).toMatchObject({ cause: 'reading' });
   });
 });
 

@@ -58,3 +58,15 @@ export function localTargetOf(hostUrl: string, snapshot: ListeningPortsSnapshot 
   if (listed?.localPort === undefined) return { kind: 'unreachable', port, listed: listed !== undefined };
   return { kind: 'load', url: remapLoopbackPort(hostUrl, new Map([[port, listed.localPort]])) };
 }
+
+/** What the address bar's text loads: a scheme added when it has none, http for the loopback host. */
+export function normalizeUrl(input: string): string {
+  let url = input.trim();
+  if (!/^(?:https?|file):\/\//i.test(url)) {
+    const isLocalHost = url.startsWith('localhost')
+      || url.startsWith('127.0.0.1')
+      || url.startsWith('[::1]');
+    url = `${isLocalHost ? 'http' : 'https'}://${url}`;
+  }
+  return url;
+}

@@ -60,8 +60,13 @@ const listeningPortsSnapshotSchema: BoundarySchema<ListeningPortsSnapshot> = bou
     kind: boundary.enumeration('web', 'tcp'),
     sessionId: boundary.optional(boundary.string),
     paneName: boundary.optional(boundary.string),
+    phoneUrl: boundary.optional(boundary.string),
     localPort: boundary.optional(boundary.number),
   })),
+  phone: boundary.optional(boundary.union(
+    boundary.object({ state: boundary.literal('on'), filesUrl: boundary.string }),
+    boundary.object({ state: boundary.literal('off'), reason: boundary.string }),
+  )),
   unsupportedHost: boundary.optional(boundary.literal(true)),
 });
 

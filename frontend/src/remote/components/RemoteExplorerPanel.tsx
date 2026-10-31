@@ -5,7 +5,7 @@ import { filePreviewKind, type FilePreviewKind } from '../../../../shared/utils/
 import { cn } from '../../utils/cn';
 import type { RemoteFileEntry, RemoteRuntimeAdapter } from '../runtime/remoteRuntimeAdapter';
 import { isNativeMobile, openNativeExternalUrl } from '../runtime/nativeMobile';
-import { phoneMediaUrl } from '../utils/phonePage';
+import { phoneMediaUrl } from '../../../../shared/utils/phonePage';
 
 interface RemoteExplorerPanelProps {
   adapter: RemoteRuntimeAdapter;
