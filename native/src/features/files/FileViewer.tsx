@@ -11,6 +11,7 @@ import { monoFontFamily, useTheme } from '@/theme';
 import { Button, ErrorState, Icon, Text } from '@/ui';
 
 import { StateScreen } from '../tabs/StateScreen';
+import { TabFooter } from '../tabs/TabFooter';
 import { fileViewer, formatSize, highlightLines, languageOf, MAX_IMAGE_BYTES, MAX_TEXT_BYTES, parentOf, type Token } from './files';
 import { useFileBinary, useFileText, useFolder } from './useFiles';
 
@@ -127,12 +128,7 @@ export function FileViewer({ sessionId, path, size: knownSize, back }: FileViewe
     <View testID="file-viewer" style={[styles.fill, { backgroundColor: colors.background }]}>
       {header}
       <View style={styles.fill}>{body}</View>
-      {footer ? (
-        <View style={[styles.footer, { borderTopColor: colors.border, backgroundColor: colors.surfaceRaised }]}>
-          <Text variant="footnote" tone="muted" numberOfLines={1} style={styles.shrink}>{footer}</Text>
-          <Text variant="footnote" tone="muted">Read-only</Text>
-        </View>
-      ) : null}
+      {footer ? <TabFooter left={footer} right="Read-only" /> : null}
     </View>
   );
 }
@@ -209,5 +205,4 @@ const styles = StyleSheet.create({
   markdown: { padding: 16 },
   imageContent: { flexGrow: 1, alignItems: 'center', justifyContent: 'center' },
   image: { width: '100%', aspectRatio: 1 },
-  footer: { flexDirection: 'row', justifyContent: 'space-between', gap: 12, paddingHorizontal: 12, paddingVertical: 8, borderTopWidth: 1 },
 });
