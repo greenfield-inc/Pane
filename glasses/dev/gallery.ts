@@ -10,7 +10,7 @@ import { Display, type Page } from '../src/display';
 import { homeListPage, homeRows } from '../src/homeList';
 import type { Card, Computer, PaneEntry } from '../src/model';
 import { noAnswerMessage } from '../src/host';
-import { LOCKED_OUT, ORIGIN_REFUSED, awayPage, connectingPage, infoCardPage, keysRefusedPage, noComputerPage, pairingFailedPage, pickerPage, refusedPage, terminalFooter, terminalPage } from '../src/screens';
+import { LOCKED_OUT, ORIGIN_REFUSED, awayPage, connectingPage, infoCardPage, keysRefusedPage, noComputerPage, pairingFailedPage, pickerPage, refusedPage, terminalFooter, terminalPage, unjoinedPage } from '../src/screens';
 
 const now = Date.now();
 const clock = (epochMs: number) => new Date(epochMs).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -46,6 +46,16 @@ const info: Card = {
 };
 const infoRows = homeRows(homeComputers, [...homeCards, info]);
 const offlineAt = rows.findIndex((row) => row.computerId === 'travel');
+/** Computers that couldn't join, one per reason, after the rows above. */
+const unjoined = [
+  { name: 'media-pc', reason: 'update Pane there' },
+  { name: 'old-laptop', reason: 'revoked here · pair from phone' },
+  { name: 'nas', reason: 'needs its password' },
+  { name: 'public-box', reason: 'Funnel is on' },
+  { name: 'devbox', reason: 'not answering' },
+];
+const unjoinedRows = homeRows(homeComputers, homeCards, unjoined);
+const firstUnjoined = unjoinedRows.findIndex((row) => row.kind === 'computer' && row.reason);
 const pages: Array<[string, Page]> = [
   ['terminal-keys-refused', keysRefusedPage(paneChat, "studio-mac's Pane can't take keys from the glasses yet.", 'Update Pane on studio-mac.')],
   ['terminal-held-at-your-message', terminalPage({
@@ -53,6 +63,7 @@ const pages: Array<[string, Page]> = [
     lines: ['> yes, do the dry run first', '', 'Here is what the dry run found on', 'parsa-4090m-workstation-win11pro.', '', '1. Pane 2.4.200 is installed from the Microsoft Store build, so', 'runpane update hands off to the Store instead of downloading', 'the installer itself.'],
   })],
   ['away-offline', awayPage(travel, clock, 'trip-notes')],
+  ...unjoined.map(({ name, reason }): [string, Page] => [`unjoined-${name}`, unjoinedPage(name, reason)]),
   ['error-no-computer-reachable', noComputerPage(3)],
   ['error-no-computer-first-time', noComputerPage(1, noAnswerMessage('studio-mac', location.origin))],
   ['error-pairing-no-answer', pairingFailedPage([`${noAnswerMessage('studio-mac', location.origin)} Then paste again.`])],
@@ -88,6 +99,7 @@ const pages: Array<[string, Page]> = [
   ['home-list-after-answer', homeListPage(rows, { selected: 0, confirmation: 'Answered nightly-backup: Yes' }, clock)],
   ['home-list-outline', homeListPage(rows, { selected: 0, marks: 'outline' }, clock)],
   ['home-list-info-row', homeListPage(infoRows, { selected: infoRows.findIndex((row) => row.kind === 'info') }, clock)],
+  ['home-list-unjoined', homeListPage(unjoinedRows, { selected: firstUnjoined }, clock)],
 ];
 
 async function main(): Promise<void> {

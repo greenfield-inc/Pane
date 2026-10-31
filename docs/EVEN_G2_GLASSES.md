@@ -28,8 +28,25 @@ It talks straight to each of your computers over Tailscale. Pane has no relay.
 4. The glasses show **Pane · N computers**. Each computer now lists the glasses under
    **Settings › Remote Access › Devices**, named after your phone, with when they were last used.
 
-To add a computer later, tap **Add computers** in Settings › Glasses and paste the new code the same
-way. Computers that are offline are skipped and named on the screen.
+Pair once; your other computers join on their own on launch and every 10 minutes. The glasses ask
+one paired computer to get pairing secrets from your other Pane computers on Tailscale (yours, with
+Workspaces on), then pair with them as with a pasted code. If that computer doesn't answer, or
+couldn't reach a computer or has no password saved for it, the glasses ask the next paired
+computer. Each computer is asked at most once every 5 minutes. A computer that still can't join
+gets a dim row at the end of the home list with the reason; press it for what to do:
+
+| Row reads | Fix |
+|---|---|
+| update Pane there | Update Pane on that computer. It joins within 10 minutes. |
+| revoked here · pair from phone | The glasses were revoked there. Pair again from the Pane phone app: Settings › Glasses › Add computers. |
+| needs its password | Connect to that computer once from Pane on a paired computer, so it saves the password. |
+| Funnel is on | Turn Funnel off for port 8443 on that computer. |
+| not answering | Check that Pane is open there and Tailscale is on. |
+
+A paired computer on an older Pane can't ask for the others; the glasses skip it until the next
+10-minute round, so once you update Pane there it asks within 10 minutes. You can still add
+a computer by hand: tap **Add computers** in Settings › Glasses and paste the new code the same way.
+Computers that are offline are skipped and named on the screen.
 
 ### The Even app's origin
 
@@ -62,7 +79,8 @@ Esc and Tab. You can't dictate in keys mode; leave it first.
   the list on these glasses; it stays on your phone and computers.
 - **A computer that stops answering** keeps its rows, dimmed with its logo, reading "offline since
   9:14". Pressing one says when it went away and offers Retry. A computer that has never answered
-  gets one dim row of its own. When no computer answers and none has rows yet, home is one page
+  gets one dim row of its own, and so does each computer that couldn't join (see Install and
+  pair). When no computer answers and none has rows yet, home is one page
   that says so.
 - **A card** shows the asking Pane's last output lines (dimmed), the question, and the choices.
   A long question is cut at three lines; the **Read the whole question** row shows all of it.
@@ -192,10 +210,11 @@ Pane at it with `PANE_GLASSES_ORIGINS=http://localhost:5173` (an exact origin, c
 several; a loopback one covers every port). The host side is `main/src/daemon/glassesAccess.ts`; the shared pairing-code format is
 `shared/types/glasses.ts`.
 
-The home list is `glasses/src/homeList.ts`. The firmware list can't show images, so the app draws its
+Joining other computers is `glasses/src/autoJoin.ts`; the host side is the `runpane:glasses:vouch`
+command. The home list is `glasses/src/homeList.ts`. The firmware list can't show images, so the app draws its
 own: six text rows beside two 28 × 120 px logo strips. A swipe rewrites the two rows that change; a
 page turn rewrites the rows and resends the strips. `LIST_MARKS = 'outline'` switches to the
 fallback: the firmware list with an outline shape per computer (○ □ △ ◇) and each away computer
 folded into one row. Each swipe logs `[Pane glasses] swipe down → display ack 12 ms (2 text, 0 image)`
 to the WebView console, so swipe speed can be measured on real G2. `dev/gallery.html` shows the list
-with every mark, an offline computer, and the outline fallback.
+with every mark, an offline computer, computers that couldn't join, and the outline fallback.

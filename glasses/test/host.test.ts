@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { encodeGlassesPairingCode } from '../../shared/types/glasses';
 import type { NotifyItem, NotifySharedState } from '../../shared/types/notify';
 import { boundary, decodeBoundary, type JsonValue } from '../../shared/validation/boundaryDecoder';
-import { HostHub, pairComputers, type HostDeps, type PairedComputer } from '../src/host';
+import { HostHub, STORAGE_KEY, pairComputers, pairedSaver, readPaired, type HostDeps, type PairedComputer } from '../src/host';
 import type { Cancel } from '../src/timers';
 
 interface Seen {
@@ -92,6 +92,8 @@ function host(url: string, items: NotifyItem[] = []): FakeHost {
   fake.handlers.set('runpane:workspace:state', () => ({ ok: true, entries: [] }));
   // A Pane older than the OS report answers without `os`.
   fake.handlers.set('remote:pwa-affordances', () => ({}));
+  // No computer of yours lacks the glasses.
+  fake.handlers.set('runpane:glasses:vouch', () => ({ code: null, expiresAt: null, skipped: [] }));
   return fake;
 }
 
@@ -116,11 +118,23 @@ function manualTimers() {
   };
 }
 
-function hub(hosts: FakeHost[], timers = manualTimers()) {
+/** The phone's local storage, answering a tick later as the bridge does. */
+function memoryStorage() {
+  const values = new Map<string, string>();
+  return {
+    values,
+    getLocalStorage: async (key: string) => { await Promise.resolve(); return values.get(key) ?? ''; },
+    setLocalStorage: async (key: string, value: string) => { await Promise.resolve(); values.set(key, value); return true; },
+  };
+}
+
+/** A hub paired with `hosts`; it can reach those and `others`, which it isn't paired with. */
+function hub(hosts: FakeHost[], timers = manualTimers(), storage = memoryStorage(), others: FakeHost[] = []) {
   const paired: PairedComputer[] = hosts.map((fake, index) => ({ name: `computer-${index}`, url: fake.url, token: `pgt_token${index}`, deviceLabel: 'Even G2 · iPhone' }));
+  storage.values.set(STORAGE_KEY, JSON.stringify(paired));
   const deps: HostDeps = {
     fetch: async (url, init) => {
-      const target = hosts.find((fake) => String(url).startsWith(fake.url));
+      const target = [...hosts, ...others].find((fake) => String(url).startsWith(fake.url));
       if (!target) throw new TypeError('Failed to fetch');
       // SAFETY: the shared client sends string headers and a string body.
       return target.fetch(String(url), init as { method?: string; headers?: Record<string, string>; body?: string });
@@ -130,6 +144,7 @@ function hub(hosts: FakeHost[], timers = manualTimers()) {
     now: timers.now,
     openSocket: () => { throw new Error('no sockets in tests'); },
     origin: 'https://even.example',
+    savePaired: pairedSaver(storage),
   };
   const result = new HostHub(paired, deps);
   result.start();
@@ -199,6 +214,42 @@ describe('pairing', () => {
       message: "studio-mac didn't answer. If this is the first time, allow the Even app on it: Pane › Settings › Remote Access › Glasses › Allow (origin https://even.example).",
       next: 'Then paste again.',
     }]);
+  });
+});
+
+describe('joining your other computers on their own', () => {
+  it('pairs with the code a paired computer vouches with as a pasted one, stores it with the others, and lists it', async () => {
+    const studio = host('https://studio.tail1.ts.net:8443');
+    const office = host('https://office.tail1.ts.net:8443');
+    office.handlers.set('runpane:glasses:pair', () => ({ token: 'pgt_office', device: { id: 'glasses-9', label: 'Even G2 · iPhone', createdAt: '2026-10-30T00:00:00Z' } }));
+    const code = encodeGlassesPairingCode({ v: 1, expiresAt: '2026-10-30T00:10:00Z', computers: [{ name: 'office-pc', url: office.url, secret: 'pgs_office' }] });
+    studio.handlers.set('runpane:glasses:vouch', () => ({ code, expiresAt: '2026-10-30T00:10:00Z', skipped: [{ name: 'nas', reason: 'needs its password' }] }));
+    const storage = memoryStorage();
+    const { hub: live } = hub([studio], manualTimers(), storage, [office]);
+    await until(() => live.computers().length === 2 && live.computers()[1]?.status === 'live');
+    expect(readPaired(storage.values.get(STORAGE_KEY) ?? '')).toEqual([
+      { name: 'computer-0', url: studio.url, token: 'pgt_token0', deviceLabel: 'Even G2 · iPhone' },
+      { name: 'office-pc', url: office.url, token: 'pgt_office', deviceLabel: 'Even G2 · iPhone' },
+    ]);
+    expect(live.computers().map((computer) => computer.name)).toEqual(['computer-0', 'office-pc']);
+    const vouch = studio.seen.find((seen) => seen.body.includes('runpane:glasses:vouch'));
+    expect(JSON.parse(vouch?.body ?? '{}')).toMatchObject({ channel: 'runpane:glasses:vouch', args: [] });
+    expect(office.seen.some((seen) => seen.url.endsWith('/events') && seen.headers.Authorization === 'Bearer pgt_office')).toBe(true);
+    expect(live.unjoined()).toEqual([{ name: 'nas', reason: 'needs its password' }]);
+    live.stop();
+  });
+});
+
+describe('pairedSaver', () => {
+  it('keeps both computers when a pasted code and an automatic join save at once', async () => {
+    const storage = memoryStorage();
+    const studio: PairedComputer = { name: 'studio-mac', url: 'https://studio.tail1.ts.net:8443', token: 'pgt_studio', deviceLabel: 'Even G2 · iPhone' };
+    const office: PairedComputer = { name: 'office-pc', url: 'https://office.tail1.ts.net:8443', token: 'pgt_office', deviceLabel: 'Even G2 · iPhone' };
+    const nas: PairedComputer = { name: 'nas', url: 'https://nas.tail1.ts.net:8443', token: 'pgt_nas', deviceLabel: 'Even G2 · iPhone' };
+    storage.values.set(STORAGE_KEY, JSON.stringify([studio]));
+    const save = pairedSaver(storage);
+    await Promise.all([save([office]), save([nas])]);
+    expect(readPaired(storage.values.get(STORAGE_KEY) ?? '')).toEqual([studio, office, nas]);
   });
 });
 
