@@ -56,15 +56,13 @@ export default defineConfig({
     },
   ],
 
-  // Run your local dev server before starting the tests
+  // The tests mock the Electron API (tests/electronApiMock.ts), so they need
+  // only the renderer from Vite, not the Electron app.
   webServer: {
-    command: 'pnpm electron-dev',
+    command: 'pnpm --filter frontend exec vite',
     port: devServerPort,
     reuseExistingServer: false,
     timeout: 45 * 1000,
-    env: getPlaywrightServerEnv(devServerPort, {
-      DISPLAY: ':99',
-      ELECTRON_DISABLE_SANDBOX: '1',
-    }),
+    env: getPlaywrightServerEnv(devServerPort),
   },
 });
