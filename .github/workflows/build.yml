@@ -380,6 +380,7 @@ jobs:
         HOMEBREW_NO_AUTO_UPDATE: '1'
       run: |
         brew tap-new --no-git local/pane
+        brew trust --tap local/pane
         tap="$(brew --repository local/pane)"
         mkdir -p "$tap/Casks"
         cp rendered/homebrew/Casks/pane.rb "$tap/Casks/"
