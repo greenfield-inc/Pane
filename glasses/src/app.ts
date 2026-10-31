@@ -17,6 +17,7 @@ import {
   connectingPage,
   dictationPage,
   fullQuestionPage,
+  infoCardPage,
   keyListPage,
   keysRefusedPage,
   noComputerPage,
@@ -136,6 +137,7 @@ type View =
   | { name: 'home' }
   | { name: 'card'; key: string; context: string[] }
   | { name: 'full'; key: string }
+  | { name: 'info'; key: string }
   | { name: 'voice-answer'; key: string; transcript: string }
   | ({ name: 'terminal' } & TerminalState)
   | ({ name: 'dictation'; transcript: string } & TerminalState)
@@ -157,6 +159,8 @@ export class GlassesApp {
   private confirmation: string | undefined;
   /** Cards answered here, hidden until the computer's next Notify state drops them. */
   private readonly answered = new Set<string>();
+  /** Info cards read here, gone from the list until the computer's next Notify state drops them. */
+  private readonly read = new Set<string>();
   private dictation: Dictation | null = null;
   /** Counts holds; a voice startup that finishes after its hold ended sees a newer number and stands down. */
   private listening = 0;
@@ -188,7 +192,7 @@ export class GlassesApp {
   }
 
   private cards(): Card[] {
-    return this.deps.source.cards().filter((card) => !this.answered.has(card.key));
+    return this.deps.source.cards().filter((card) => !this.answered.has(card.key) && !this.read.has(card.key));
   }
 
   private card(key: string): Card | undefined {
@@ -219,13 +223,14 @@ export class GlassesApp {
   private sourceChanged(): void {
     const keys = new Set(this.deps.source.cards().map((card) => card.key));
     for (const key of this.answered) if (!keys.has(key)) this.answered.delete(key);
+    for (const key of this.read) if (!keys.has(key)) this.read.delete(key);
     const arrived = this.deps.source.cards().filter((card) => !this.seen.has(card.key));
     for (const card of arrived) this.seen.add(card.key);
     // At the top of the list, a new question takes the top row (journey J2).
     if (this.view.name === 'home' && arrived.some((card) => card.waiting) && (this.homeFocus?.index ?? 0) === 0) this.homeFocus = null;
     const view = this.view;
     // A card answered on another screen leaves; go home rather than show a stale question.
-    if ((view.name === 'card' || view.name === 'full') && !this.card(view.key)) this.view = { name: 'home' };
+    if ((view.name === 'card' || view.name === 'full' || view.name === 'info') && !this.card(view.key)) this.view = { name: 'home' };
     // A computer that answers again needs no Retry page.
     if (view.name === 'away' && this.deps.source.computers().find((computer) => computer.id === view.computerId)?.status === 'live') this.view = { name: 'home' };
     this.render();
@@ -250,6 +255,10 @@ export class GlassesApp {
       case 'full': {
         const card = this.card(view.key);
         return card ? fullQuestionPage(card) : this.homePage();
+      }
+      case 'info': {
+        const card = this.card(view.key);
+        return card ? infoCardPage(card) : this.homePage();
       }
       case 'voice-answer': {
         const card = this.deps.source.cards().find((candidate) => candidate.key === view.key);
@@ -365,6 +374,13 @@ export class GlassesApp {
       case 'home': this.onHome(gesture); break;
       case 'card': this.onCard(view, gesture); break;
       case 'full': if (gesture.type === 'double' || gesture.type === 'press') this.go({ name: 'card', key: view.key, context: [] }); break;
+      case 'info':
+        // Leaving an info card marks it read, so its row leaves the list.
+        if (gesture.type === 'double') {
+          this.read.add(view.key);
+          this.goHome();
+        }
+        break;
       case 'voice-answer': if (gesture.type === 'release') void this.finishVoiceAnswer(view.key); break;
       case 'terminal': this.onTerminal(view, gesture); break;
       case 'dictation': if (gesture.type === 'release') void this.finishDictation(view); break;
@@ -442,11 +458,12 @@ export class GlassesApp {
     }
   }
 
-  /** A question opens its card, a live row its terminal; a row of an away computer says why and offers Retry. */
+  /** A question opens its card, an info card its message, a live row its terminal; a row of an away computer says why and offers Retry. */
   private openRow(row: HomeRow, index: number): void {
     this.homeFocus = { key: row.key, index };
     this.confirmation = undefined;
     if (row.kind === 'question') this.openCard(row.card);
+    else if (row.kind === 'info') this.go({ name: 'info', key: row.card.key });
     else if (row.kind === 'entry' && row.status === 'live') this.openTerminal(row.computerId, row.entry);
     else this.go(row.kind === 'entry' ? { name: 'away', computerId: row.computerId, rowName: row.entry.name } : { name: 'away', computerId: row.computerId });
   }
@@ -759,7 +776,7 @@ export class GlassesApp {
         const card = this.elsewhere(view);
         const panel = card ? card.panelId : view.entry.panelId;
         const computerId = card ? card.computerId : view.computerId;
-        this.goHome((row) => row.computerId === computerId && (row.kind === 'question' ? row.card.key === card?.key : row.kind === 'entry' && row.entry.panelId === panel));
+        this.goHome((row) => row.computerId === computerId && (row.kind === 'question' || row.kind === 'info' ? row.card.key === card?.key : row.kind === 'entry' && row.entry.panelId === panel));
         return;
       }
       default:

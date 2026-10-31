@@ -27,7 +27,7 @@ function shownRows(page: Page): string[] {
 }
 
 describe('the merged rows', () => {
-  it('puts questions first, newest first, then every Session and Pane newest activity first across computers', () => {
+  it('puts questions first, newest first, then info cards, then every Session and Pane newest activity first across computers', () => {
     const rows = homeRows(
       [
         computer('studio', 'studio-mac', [pane('add-dark-mode', 100), pane('fix-checkout', 300), pane('rate-limit', 50)]),
@@ -38,6 +38,7 @@ describe('the merged rows', () => {
     expect(rows.map((row) => row.key)).toEqual([
       'studio|card:rate-limit-q',
       'build|card:nightly-backup-q',
+      'studio|card:add-dark-mode-q',
       'studio|pane:fix-checkout',
       'build|pane:terraform',
       'studio|pane:add-dark-mode',

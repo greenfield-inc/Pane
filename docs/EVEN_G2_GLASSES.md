@@ -51,14 +51,15 @@ In **keys mode** the gestures go to the terminal, one key at a time in the order
 swipe sends ↑ or ↓, press sends Enter and goes back to the output, double press leaves without sending anything, and hold opens a short list with
 Esc and Tab. You can't dictate in keys mode; leave it first.
 
-- **Home** is one list across every paired computer: questions first, newest first, then every
-  Session and Pane, newest activity first. Each row starts with its computer's OS logo (Apple,
+- **Home** is one list across every paired computer: questions first, newest first, then info
+  cards, then every Session and Pane, newest activity first. Each row starts with its computer's OS logo (Apple,
   Windows or Linux; a plain monitor for a computer whose Pane is too old to say) and the first five
   letters of its name. The selected row starts with ">" at full brightness. The header counts the
   questions waiting ("All computers · 2 need you") and confirms an answer you just sent. The list
   updates while it is open: a new Pane shows within about a second. Press a question to open its
-  card (hold to answer it by voice), or a Session or Pane to open its terminal on its own computer.
-  Info cards don't get rows; the newest one shows in a terminal's bottom line.
+  card (hold to answer it by voice), an info card to read its message, or a Session or Pane to open
+  its terminal on its own computer. An info card you read and leave with double press drops off
+  the list on these glasses; it stays on your phone and computers.
 - **A computer that stops answering** keeps its rows, dimmed with its logo, reading "offline since
   9:14". Pressing one says when it went away and offers Retry. A computer that has never answered
   gets one dim row of its own. When no computer answers and none has rows yet, home is one page

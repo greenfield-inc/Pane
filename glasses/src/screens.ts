@@ -282,6 +282,17 @@ export function dictationPage(entry: PaneEntry, lines: readonly string[], transc
   };
 }
 
+/** A press on an info card's row: its whole message. */
+export function infoCardPage(card: Card): Page {
+  return {
+    boxes: [
+      header(`${card.paneName} · ${card.machine}`),
+      body(card.context ? `${card.title}\n\n${card.context}` : card.title, { y: 36, h: 220, capture: true }),
+      footer('double press = back'),
+    ],
+  };
+}
+
 /** A press on an away computer's row: what is known, and Retry. */
 export function awayPage(computer: Computer, clock: (epochMs: number) => string, rowName?: string): Page {
   const { name } = computer;

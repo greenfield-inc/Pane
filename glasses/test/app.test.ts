@@ -74,16 +74,16 @@ function start() {
 }
 
 describe('home', () => {
-  it('lists every computer\'s questions first, then its Sessions and Panes newest first, each marked with its computer', () => {
+  it('lists every computer\'s questions first, then its info cards, then its Sessions and Panes newest first, each marked with its computer', () => {
     const { text } = start();
     expect(text()).toEqual([
       'All computers · 3 need you',
       '> studi  fix-login · needs you',
       '   studi  token-refresh · needs you',
       '   studi  Planner · needs you',
+      '   devbo  docs-pass · PR #482 opened. Checks are running.',
+      '   studi  nightly · Tests green on studio-mac.',
       '   studi  docs-pass · Codex · needs you',
-      '   devbo  api-server · shell · idle',
-      '   studi  nightly · shell · idle',
     ]);
   });
 
@@ -92,9 +92,9 @@ describe('home', () => {
     await press({ type: 'down' });
     expect(text().slice(1, 3)).toEqual(['   studi  fix-login · needs you', '> studi  token-refresh · needs you']);
     for (let row = 1; row < 6; row += 1) await press({ type: 'down' });
-    expect(text().slice(1, 3)).toEqual(['> lapto  trip-notes · offline since 9:40', '   studi  scratch · shell · idle']);
+    expect(text().slice(1, 3)).toEqual(['> devbo  api-server · shell · idle', '   studi  nightly · shell · idle']);
     await press({ type: 'up' });
-    expect(text()[6]).toBe('> studi  nightly · shell · idle');
+    expect(text()[6]).toBe('> studi  docs-pass · Codex · needs you');
   });
 
   it('exits on double press', async () => {
@@ -164,9 +164,9 @@ describe('Panes and the terminal', () => {
     const started = start();
     const asked = started.source.cards().find((card) => card.paneName === 'fix-login');
     if (asked) await started.source.answer(asked, { choice: 'Stub the clock' });
-    await started.press({ type: 'down' });
-    await started.press({ type: 'down' });
-    expect(started.text()[3]).toBe('> studi  fix-login · Claude · working');
+    // Below token-refresh and Planner's questions and the two info cards.
+    for (let row = 0; row < 4; row += 1) await started.press({ type: 'down' });
+    expect(started.text()[5]).toBe('> studi  fix-login · Claude · working');
     await started.press({ type: 'press' });
     return started;
   }
@@ -221,7 +221,7 @@ describe('Panes and the terminal', () => {
 
   it("explains that a computer can't take dictation", async () => {
     const { text, press } = start();
-    for (let row = 0; row < 4; row += 1) await press({ type: 'down' });
+    for (let row = 0; row < 6; row += 1) await press({ type: 'down' });
     await press({ type: 'press' });
     await press({ type: 'hold' });
     expect(text()[1]).toContain("devbox can't turn speech into text.");
@@ -791,7 +791,7 @@ describe('after you speak, the view holds at your message', () => {
 describe('demo', () => {
   it('raises a menu that the picker answers with no computer', async () => {
     const { press, text, output: shown, clock } = start();
-    for (let row = 0; row < 3; row += 1) await press({ type: 'down' });
+    for (let row = 0; row < 5; row += 1) await press({ type: 'down' });
     await press({ type: 'press' });
     expect(text()[0]).toBe('docs-pass · pick one · double = dismiss');
     expect(text()[2]).toBe('1. Yes, push and open the PR | 2. Not yet');
@@ -913,6 +913,37 @@ describe('a refused computer', () => {
     source.changed();
     expect(text()[0]).toBe('Pane · 1 computer');
     expect(text()[1]).toBe('Connecting to your computers…');
+  });
+});
+
+describe('an info card', () => {
+  function withInfo() {
+    const scripted = startScripted();
+    scripted.source.rows = [paneRow('a')];
+    scripted.source.cardList = [card('q1', 20), { ...card('i1', 10, false), title: 'Tests pass', context: 'All 212 tests pass on studio-mac.' }];
+    scripted.source.changed();
+    return scripted;
+  }
+
+  it('has a row below the questions that opens its message, and the row clears once read', async () => {
+    const { text, press } = withInfo();
+    expect(text()).toEqual(['All computers · 1 needs you', '> studi  pane-q1 · needs you', '   studi  pane-i1 · Tests pass', '   studi  a · Claude · stopped', ' ', ' ', ' ']);
+    await press({ type: 'down' });
+    await press({ type: 'press' });
+    expect(text()).toEqual(['pane-i1 · studio-mac', 'Tests pass /  / All 212 tests pass on studio-mac.', 'double press = back']);
+    await press({ type: 'double' });
+    expect(text().slice(0, 4)).toEqual(['All computers · 1 needs you', '   studi  pane-q1 · needs you', '> studi  a · Claude · stopped', ' ']);
+  });
+
+  it('is what the terminal footer offers, and a double press there selects its row', async () => {
+    const { text, press, source } = withInfo();
+    source.cardList = source.cardList.filter((each) => each.waiting === false);
+    source.changed();
+    await press({ type: 'down' });
+    await press({ type: 'press' });
+    expect(text().at(-1)).toBe('• pane-i1: Tests pass · double press for it');
+    await press({ type: 'double' });
+    expect(text()[1]).toBe('> studi  pane-i1 · Tests pass');
   });
 });
 

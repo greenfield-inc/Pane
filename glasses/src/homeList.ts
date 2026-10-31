@@ -1,5 +1,5 @@
 // The home list (design list A, D-88; marks D-94): one list across every paired computer.
-// Notify questions come first, then every Session and Pane, newest activity first. Each row starts
+// Notify questions come first, then info cards, then every Session and Pane, newest activity first. Each row starts
 // with its computer's mark and the first five letters of its name.
 //
 // The API other screens build on, kept small:
@@ -35,6 +35,8 @@ interface RowBase {
 
 export type HomeRow =
   | (RowBase & { kind: 'question'; card: Card })
+  /** An info card (ui `info`): a message with nothing to answer. */
+  | (RowBase & { kind: 'info'; card: Card })
   | (RowBase & { kind: 'entry'; entry: PaneEntry })
   /**
    * A computer with nothing to list: one that is away and has no rows yet. `reason` replaces the
@@ -49,8 +51,9 @@ function asksAbout(card: Card, entry: PaneEntry): boolean {
 
 /**
  * Every computer's rows merged, the way the cards merge: waiting questions first (in card order,
- * newest first), then every Session and Pane newest activity first, then one row for each away
- * computer with nothing to list. A computer that goes away keeps its rows, marked by `status`.
+ * newest first), then info cards in card order, then every Session and Pane newest activity first,
+ * then one row for each away computer with nothing to list. A computer that goes away keeps its
+ * rows, marked by `status`.
  */
 export function homeRows(computers: readonly Computer[], cards: readonly Card[]): HomeRow[] {
   const base = (computer: Computer, slot: number) => ({
@@ -58,9 +61,13 @@ export function homeRows(computers: readonly Computer[], cards: readonly Card[])
   });
   const slots = new Map(computers.map((computer, slot) => [computer.id, { computer, slot }]));
   const questions: HomeRow[] = [];
+  const infos: HomeRow[] = [];
   for (const card of cards) {
     const found = slots.get(card.computerId);
-    if (card.waiting && found) questions.push({ ...base(found.computer, found.slot), kind: 'question', key: `${card.computerId}|card:${card.itemId}`, card });
+    if (!found) continue;
+    const row = { ...base(found.computer, found.slot), key: `${card.computerId}|card:${card.itemId}`, card };
+    if (card.waiting) questions.push({ ...row, kind: 'question' });
+    else infos.push({ ...row, kind: 'info' });
   }
   const entries: Array<HomeRow & { kind: 'entry' }> = [];
   const away: HomeRow[] = [];
@@ -74,7 +81,7 @@ export function homeRows(computers: readonly Computer[], cards: readonly Card[])
   });
   // A stable sort keeps each computer's own order among rows with the same time.
   entries.sort((a, b) => (b.entry.activityAt ?? 0) - (a.entry.activityAt ?? 0));
-  return [...questions, ...entries, ...away];
+  return [...questions, ...infos, ...entries, ...away];
 }
 
 /** What an away computer's rows say instead of their status. */
@@ -93,6 +100,8 @@ function rowText(row: HomeRow, clock: (epochMs: number) => string): string {
   switch (row.kind) {
     case 'question':
       return `${row.card.paneName} · needs you`;
+    case 'info':
+      return `${row.card.paneName} · ${row.card.title}`;
     case 'entry': {
       const { entry } = row;
       if (away) return `${entry.name} · ${away}`;

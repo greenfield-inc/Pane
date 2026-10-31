@@ -10,7 +10,7 @@ import { Display, type Page } from '../src/display';
 import { homeListPage, homeRows } from '../src/homeList';
 import type { Card, Computer, PaneEntry } from '../src/model';
 import { noAnswerMessage } from '../src/host';
-import { LOCKED_OUT, ORIGIN_REFUSED, awayPage, connectingPage, keysRefusedPage, noComputerPage, pairingFailedPage, pickerPage, refusedPage, terminalFooter, terminalPage } from '../src/screens';
+import { LOCKED_OUT, ORIGIN_REFUSED, awayPage, connectingPage, infoCardPage, keysRefusedPage, noComputerPage, pairingFailedPage, pickerPage, refusedPage, terminalFooter, terminalPage } from '../src/screens';
 
 const now = Date.now();
 const clock = (epochMs: number) => new Date(epochMs).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -39,6 +39,12 @@ const question = (computerId: string, machine: string, paneName: string, created
 });
 const homeCards = [question('build', 'build-box', 'nightly-backup', now - 60_000), question('studio', 'studio-mac', 'rate-limit-retries', now - 120_000)];
 const rows = homeRows(homeComputers, homeCards);
+const info: Card = {
+  key: 'office:installer-built', computerId: 'office', machine: 'office-pc', itemId: 'installer-built', ui: 'info', waiting: false,
+  title: 'Installer built and signed.', context: 'Pane-Setup-2.4.211.exe is in dist/. Smoke test passed on Windows 11.',
+  choices: [], suggestions: [], paneName: 'windows-installer', paneId: 'windows-installer', panelId: 'windows-installer', createdAt: now - 30_000,
+};
+const infoRows = homeRows(homeComputers, [...homeCards, info]);
 const offlineAt = rows.findIndex((row) => row.computerId === 'travel');
 const pages: Array<[string, Page]> = [
   ['terminal-keys-refused', keysRefusedPage(paneChat, "studio-mac's Pane can't take keys from the glasses yet.", 'Update Pane on studio-mac.')],
@@ -69,6 +75,7 @@ const pages: Array<[string, Page]> = [
   })],
   ['home-connecting', connectingPage(3)],
   ['home-connecting-one-computer', connectingPage(1)],
+  ['info-card', infoCardPage(info)],
   // A native list keeps its swipes, so lists come last.
   ...([['picker-claude-permission', claudePermission], ['picker-codex-approval', codexApproval]] as const).map(([name, screen]): [string, Page] => {
     const menu = findMenu(screen.split('\n'));
@@ -80,6 +87,7 @@ const pages: Array<[string, Page]> = [
   ['home-list-last-page', homeListPage(rows, { selected: rows.length - 1 }, clock)],
   ['home-list-after-answer', homeListPage(rows, { selected: 0, confirmation: 'Answered nightly-backup: Yes' }, clock)],
   ['home-list-outline', homeListPage(rows, { selected: 0, marks: 'outline' }, clock)],
+  ['home-list-info-row', homeListPage(infoRows, { selected: infoRows.findIndex((row) => row.kind === 'info') }, clock)],
 ];
 
 async function main(): Promise<void> {
