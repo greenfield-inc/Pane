@@ -10,6 +10,7 @@ import {
   readTailscaleStatus,
   locateTailnetMachine,
   savedSecretKey,
+  savedWorkspaceSecrets,
   type WorkspaceProbe,
 } from '../services/tailnetMachines';
 
@@ -63,11 +64,11 @@ export function registerWorkspaceAccessHandlers(
 
   ipcMain.handle('remote-daemon:list-tailnet-machines', () => respond('list your machines', async (): Promise<TailnetMachineList> => {
     const codeless = profiles().flatMap((profile) => (profile.tailnetMachine && profile.tailnetDomain
-      ? [{ id: profile.id, token: profile.token, key: savedSecretKey(profile.tailnetDomain, profile.tailnetMachine) }]
+      ? [{ id: profile.id, key: savedSecretKey(profile.tailnetDomain, profile.tailnetMachine) }]
       : []));
     const list = await discoverTailnetMachines({
       ...dependencies,
-      savedSecrets: new Map(codeless.flatMap((profile) => (profile.token ? [[profile.key, profile.token]] : []))),
+      savedSecrets: savedWorkspaceSecrets(profiles()),
       includeRefused: true,
     });
     if (!list.ok) return list;

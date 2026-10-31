@@ -22,6 +22,11 @@ export interface WorkspaceAccessConfig {
    * ships with. Added from Settings › Remote Access › Devices on this machine only.
    */
   glassesOrigins?: string[];
+  /**
+   * Phone ids whose glasses were revoked on this machine. Another computer never vouches them back
+   * on; a pairing from the phone removes the id.
+   */
+  glassesRevokedPhoneIds?: string[];
 }
 
 /** Where a tailnet admin turns on HTTPS Certificates, which workspaces need. */

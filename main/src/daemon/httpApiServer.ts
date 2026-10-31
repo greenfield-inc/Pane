@@ -21,6 +21,7 @@ import {
   GLASSES_CHANNELS,
   GLASSES_EVENT_CHANNELS,
   glassesKeyInput,
+  glassesSessionInput,
   glassesSource,
   type GlassesAccess,
   type GlassesFailureReason,
@@ -267,6 +268,7 @@ class RemoteDaemonBadRequestError extends Error {
     readonly code: string,
     message: string,
     readonly statusCode: number = 400,
+    readonly next?: string,
   ) {
     super(message);
     this.name = 'RemoteDaemonBadRequestError';
@@ -799,8 +801,19 @@ export class PaneRemoteHttpApiServer {
       return;
     }
 
-    // Glasses are paired, listed and revoked by their owner; the glasses themselves pair only
-    // through the glasses path, with a pairing secret.
+    // Glasses are paired, listed and revoked by their owner; the glasses themselves pair and vouch
+    // only through the glasses path, with a pairing secret or their own token.
+    if (invokeRequest.channel === GLASSES_COMMANDS.vouch) {
+      this.writeJson(response, 403, {
+        ok: false,
+        error: {
+          message: 'Only paired glasses ask this computer to add them to your other computers; it was not run.',
+          code: 'ERR_GLASSES_VOUCH_GLASSES_ONLY',
+          next: 'Pair glasses from the Pane phone app: Settings › Glasses › Pair glasses.',
+        },
+      } satisfies RemoteInvokeErrorPayload);
+      return;
+    }
     if (invokeRequest.channel.startsWith('runpane:glasses:')) {
       if (invokeRequest.channel === GLASSES_COMMANDS.pair || !this.workspaceOwnerLogin(request)) {
         this.writeJson(response, 403, {
@@ -1170,7 +1183,7 @@ export class PaneRemoteHttpApiServer {
     }
     if (!GLASSES_CHANNELS.has(channel)) {
       glasses.recordFailure(admission.source, 'channel', channel);
-      refuse(403, 'ERR_GLASSES_CHANNEL_REFUSED', `Glasses can't run ${channel}; they can list Panes, read and type into terminals, dictate, and answer Notify.`);
+      refuse(403, 'ERR_GLASSES_CHANNEL_REFUSED', `Glasses can't run ${channel}; they can list Panes, read and type into terminals, dictate, answer Notify and start a Session.`);
       return;
     }
     const client = admission.client;
@@ -1187,6 +1200,48 @@ export class PaneRemoteHttpApiServer {
         return;
       }
       args = [key];
+    }
+    if (channel === 'orchestration-sessions:create') {
+      const input = invokeRequest.args.length === 1 ? glassesSessionInput(invokeRequest.args[0]) : null;
+      if (!input) {
+        // Logged without the request, which could carry a command.
+        glasses.recordFailure(admission.source, 'session');
+        refuse(400, 'ERR_GLASSES_SESSION_REFUSED', 'Glasses can start a Session with only a one-line name and a purpose, and it runs this computer\'s default agent. Nothing was created.',
+          'Update the Pane glasses app, then try again.');
+        return;
+      }
+      // Claimed only when the request runs, so a resend with the same requestId gets the first answer.
+      await this.respondToInvoke(request, response, invokeRequest.requestId, client.id, () => {
+        const waitMs = glasses.claim('session', client.id);
+        if (waitMs > 0) {
+          const seconds = Math.ceil(waitMs / 1000);
+          glasses.recordFailure(admission.source, 'session', `asked again within 30 s; ${seconds} s left`);
+          throw new RemoteDaemonBadRequestError('ERR_GLASSES_SESSION_TOO_SOON',
+            'These glasses started a Session on this computer less than 30 seconds ago, so this one was not created.', 429, `Try again in ${seconds} s.`);
+        }
+        return this.commandRegistry.invokeRemote(channel, [input]);
+      });
+      return;
+    }
+    if (channel === GLASSES_COMMANDS.vouch) {
+      const waitMs = glasses.claim('vouch', client.id);
+      if (waitMs > 0) {
+        const seconds = Math.ceil(waitMs / 1000);
+        glasses.recordFailure(admission.source, 'vouch', `asked again within 5 minutes; ${seconds} s left`);
+        refuse(429, 'ERR_GLASSES_VOUCH_TOO_SOON', 'These glasses asked this computer to add them to your other computers less than 5 minutes ago, so it did not ask again.',
+          `Ask again in ${seconds} s.`);
+        return;
+      }
+      // Which glasses: the token's own record, never names, ids or computers from the request.
+      const { answer } = await answerInvoke(() => this.commandRegistry.invokeRemote(channel, [{ deviceId: client.id }]));
+      // The vouch takes seconds; glasses revoked meanwhile get none of the secrets it minted.
+      if (!this.isStillAdmitted(glassesIdentity(client))) {
+        refuse(403, 'ERR_GLASSES_ACCESS_WITHDRAWN', 'These glasses lost access to this computer while it asked your other computers for them; no pairing code was sent.',
+          'Check Settings › Remote Access › Devices on the computer, then pair again from the Pane phone app if the glasses were revoked.');
+        return;
+      }
+      this.writeJson(response, answer.statusCode, answer.payload, request);
+      return;
     }
     await this.respondToInvoke(request, response, invokeRequest.requestId, client.id, () => this.commandRegistry.invokeRemote(channel, args));
   }
@@ -1580,7 +1635,7 @@ async function answerInvoke(run: () => ReturnType<PaneCommandRegistry['invokeRem
   } catch (error) {
     if (error instanceof RemoteDaemonBadRequestError) {
       return {
-        answer: { statusCode: error.statusCode, payload: { ok: false, error: { message: error.message, code: error.code } } satisfies RemoteInvokeErrorPayload },
+        answer: { statusCode: error.statusCode, payload: { ok: false, error: error.next ? { message: error.message, code: error.code, next: error.next } : { message: error.message, code: error.code } } satisfies RemoteInvokeErrorPayload },
         keep: false,
       };
     }

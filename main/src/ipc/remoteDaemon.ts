@@ -471,7 +471,8 @@ export function registerRemoteDaemonHandlers(
         ...current,
         host: {
           config: current.host.config,
-          clients: [],
+          // Glasses keep their records: their own Revoke is the one path that also leaves the revoke marker.
+          clients: current.host.clients.filter((client) => client.kind === 'glasses'),
         },
       });
 

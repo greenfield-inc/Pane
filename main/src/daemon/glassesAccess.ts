@@ -4,7 +4,14 @@ import { PaneError } from '../../../shared/paneError';
 import { normalizeRemoteDaemonConfig, type RemoteDaemonClientRecord } from '../../../shared/types/remoteDaemon';
 import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
 import { boundary, decodeOptionalBoundary, type JsonValue } from '../../../shared/validation/boundaryDecoder';
-import { GLASSES_PAIRING_SECRET_PREFIX, GLASSES_TOKEN_PREFIX, type GlassesAccessState, type GlassesDevice, type GlassesPairingSecretResult } from '../../../shared/types/glasses';
+import {
+  GLASSES_COMMANDS,
+  GLASSES_PAIRING_SECRET_PREFIX,
+  GLASSES_TOKEN_PREFIX,
+  type GlassesAccessState,
+  type GlassesDevice,
+  type GlassesPairingSecretResult,
+} from '../../../shared/types/glasses';
 
 /**
  * The Origins the Even Realities app's WebView sends for the Pane glasses app. Exact values only:
@@ -40,6 +47,11 @@ export const GLASSES_CHANNELS: ReadonlySet<string> = new Set([
   'notify:remote-command',
   'runpane:workspace:state',
   'remote:pwa-affordances',
+  // Asks your other computers for pairing secrets for these same glasses: the device comes from the
+  // token's own record and the computers from this computer's discovery, never from the request.
+  GLASSES_COMMANDS.vouch,
+  // A name and a purpose only (`glassesSessionInput`): the Session runs this computer's default agent.
+  'orchestration-sessions:create',
 ]);
 
 /** The events a glasses stream carries: Notify, agent status and list changes, never terminal bytes. */
@@ -67,9 +79,16 @@ const MAX_LOCKOUT_MS = 60 * 60_000;
 const MAX_DEVICE_NAME_LENGTH = 60;
 const MAX_TRACKED_SOURCES = 1_000;
 const MAX_REFUSED_ORIGINS = 10;
+/**
+ * How often one pair of glasses may run each rate-limited command here. Each vouch mints at most
+ * one secret per computer, so a looping app can't push out the 32 pending secrets a phone minted,
+ * or pile up failed trades toward another computer's lockout. Each Session create starts an agent.
+ */
+const GLASSES_RATE_LIMITS = { vouch: 5 * 60_000, session: 30_000 } as const;
+type GlassesRateLimitedAction = keyof typeof GLASSES_RATE_LIMITS;
 const COUNTED_FAILURES: ReadonlySet<GlassesFailureReason> = new Set(['token', 'pairing-secret', 'identity', 'credential-in-url']);
 
-export type GlassesFailureReason = 'token' | 'pairing-secret' | 'origin' | 'identity' | 'funnel' | 'credential-in-url' | 'channel' | 'key';
+export type GlassesFailureReason = 'token' | 'pairing-secret' | 'origin' | 'identity' | 'funnel' | 'credential-in-url' | 'channel' | 'key' | 'vouch' | 'session';
 
 const { up, down, enter, escape, tab } = RUNPANE_CONTRACT.terminalKeys;
 /** The keys the glasses may send, one per request: ↑ ↓ Enter Esc Tab, and a menu choice's number. */
@@ -83,6 +102,32 @@ const keyRequestSchema = boundary.object({ panelId: boundary.nonEmptyString, inp
 export function glassesKeyInput(request: JsonValue | undefined): { panelId: string; input: string; source: 'user' } | null {
   const key = decodeOptionalBoundary(request, keyRequestSchema);
   return key && GLASSES_KEYS.has(key.input) ? { panelId: key.panelId, input: key.input, source: 'user' } : null;
+}
+
+const MAX_SESSION_NAME_LENGTH = 120;
+const MAX_SESSION_GOAL_LENGTH = 2_000;
+const SESSION_FIELDS: ReadonlySet<string> = new Set(['name', 'goal']);
+const sessionRequestSchema = boundary.object({ name: boundary.string, goal: boundary.optional(boundary.string) });
+/** Control and format characters (zero-width, bidi overrides) and line or paragraph separators. */
+const HIDDEN_NAME_CHARACTERS = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
+/** Bidi embeddings, overrides and isolates, which can make a purpose read differently than it runs. */
+const BIDI_CONTROLS = /[\u202A-\u202E\u2066-\u2069]/u;
+
+/**
+ * The `orchestration-sessions:create` request the glasses may run: a name and, optionally, a
+ * purpose. Anything else (agent, launch command, resume, runtime, opening prompt, profile) is
+ * refused, so the Session starts with this computer's default agent and command. Null when refused.
+ */
+export function glassesSessionInput(request: JsonValue | undefined): { name: string; goal?: string } | null {
+  const fields = decodeOptionalBoundary(request, boundary.jsonObject);
+  if (!fields || Object.keys(fields).some((key) => !SESSION_FIELDS.has(key))) return null;
+  const input = decodeOptionalBoundary(fields, sessionRequestSchema);
+  if (!input) return null;
+  const name = input.name.normalize('NFKC');
+  if (!name.trim() || name.length > MAX_SESSION_NAME_LENGTH || HIDDEN_NAME_CHARACTERS.test(name)) return null;
+  if (input.goal === undefined) return { name };
+  if (input.goal.length > MAX_SESSION_GOAL_LENGTH || BIDI_CONTROLS.test(input.goal)) return null;
+  return { name, goal: input.goal };
 }
 
 interface GlassesConfigStore {
@@ -120,6 +165,9 @@ export class GlassesAccess {
   private readonly pending: PendingSecret[] = [];
   private readonly sources = new Map<string, SourceFailures>();
   private readonly lastUsedWrites = new Map<string, number>();
+  private readonly lastClaims = new Map<string, number>();
+  /** Phone ids revoked since Pane started, so a revoke holds before its config write lands. */
+  private readonly revokedThisRun = new Set<string>();
   private readonly revokeListeners = new Set<(id: string) => void>();
   private readonly envOrigins: ReadonlySet<string>;
   private readonly refusedOrigins: { origin: string; at: string }[] = [];
@@ -191,9 +239,20 @@ export class GlassesAccess {
     return this.funnelOn;
   }
 
-  /** A single-use secret the glasses trade once, within 10 minutes, for their device token. */
-  createPairingSecret(deviceName: string, phoneId: string): GlassesPairingSecretResult {
+  /**
+   * A single-use secret the glasses trade once, within 10 minutes, for their device token.
+   * `unlessRevoked` refuses glasses revoked here: another computer vouching for them sets it, so
+   * only a pairing from the phone undoes a revoke.
+   */
+  createPairingSecret(deviceName: string, phoneId: string, options: { unlessRevoked?: boolean } = {}): GlassesPairingSecretResult {
     const label = cleanDeviceName(deviceName);
+    if (options.unlessRevoked && this.revokedPhoneIds().includes(phoneId)) {
+      throw new PaneError(
+        'ERR_GLASSES_REVOKED_HERE',
+        'These glasses were revoked on this computer, so it made no pairing secret for them.',
+        'Pair the glasses again from the Pane phone app: Settings › Glasses › Pair glasses.',
+      );
+    }
     const now = this.now();
     this.prunePending(now);
     if (this.pending.length >= MAX_PENDING_SECRETS) this.pending.shift();
@@ -205,7 +264,8 @@ export class GlassesAccess {
 
   /**
    * Trades a pairing secret for a new device token. The secret is consumed. An earlier token
-   * paired from the same phone is revoked, so pairing again replaces it.
+   * paired from the same phone is revoked, so pairing again replaces it, and a revoke of that
+   * phone's glasses here is lifted.
    */
   async pair(secret: string): Promise<{ token: string; device: GlassesDevice } | null> {
     const now = this.now();
@@ -224,7 +284,11 @@ export class GlassesAccess {
       phoneId,
     };
     const replaced = this.list().filter((device) => device.phoneId === phoneId).map((device) => device.id);
-    await this.writeClients((clients) => [...clients.filter((client) => !replaced.includes(client.id)), record]);
+    this.revokedThisRun.delete(phoneId);
+    await this.write(
+      (clients) => [...clients.filter((client) => !replaced.includes(client.id)), record],
+      (revoked) => revoked.filter((id) => id !== phoneId),
+    );
     for (const id of replaced) this.emitRevoked(id);
     return { token, device: toDevice(record) };
   }
@@ -245,15 +309,51 @@ export class GlassesAccess {
     return this.records().some((client) => client.id === id && client.tokenHash === tokenHash);
   }
 
+  /** The stored record of one pair of glasses, or null. */
+  device(id: string): RemoteDaemonClientRecord | null {
+    return this.records().find((client) => client.id === id) ?? null;
+  }
+
   list(): GlassesDevice[] {
     return this.records().map(toDevice);
   }
 
+  /** Phone ids whose glasses were revoked here and not paired again since. */
+  revokedPhoneIds(): string[] {
+    return [...new Set([...(this.config.getConfig().workspaces?.glassesRevokedPhoneIds ?? []), ...this.revokedThisRun])];
+  }
+
+  /**
+   * Removes the glasses and remembers their phone id, so no other computer can vouch them back
+   * onto this one. Their pending pairing secrets end too. Pairing from the phone lifts the revoke.
+   */
   async revoke(id: string): Promise<boolean> {
-    if (!this.records().some((client) => client.id === id)) return false;
-    await this.writeClients((clients) => clients.filter((client) => client.id !== id));
+    const record = this.device(id);
+    if (!record) return false;
+    const { phoneId } = record;
+    if (phoneId) {
+      // Held in memory first: a vouched mint while the config write is queued is still refused.
+      this.revokedThisRun.add(phoneId);
+      for (let index = this.pending.length - 1; index >= 0; index -= 1) {
+        if (this.pending[index].phoneId === phoneId) this.pending.splice(index, 1);
+      }
+    }
+    await this.write(
+      (clients) => clients.filter((client) => client.id !== id),
+      (revoked) => (phoneId && !revoked.includes(phoneId) ? [...revoked, phoneId] : revoked),
+    );
     this.emitRevoked(id);
     return true;
+  }
+
+  /** Claims one run of `action` for this device; returns 0, or the milliseconds until it may run again. */
+  claim(action: GlassesRateLimitedAction, id: string): number {
+    const now = this.now();
+    const key = `${action}:${id}`;
+    const wait = (this.lastClaims.get(key) ?? -Infinity) + GLASSES_RATE_LIMITS[action] - now;
+    if (wait > 0) return wait;
+    this.lastClaims.set(key, now);
+    return 0;
   }
 
   onRevoked(listener: (id: string) => void): () => void {
@@ -267,7 +367,7 @@ export class GlassesAccess {
     if (now - (this.lastUsedWrites.get(id) ?? 0) < LAST_USED_WRITE_INTERVAL_MS) return;
     this.lastUsedWrites.set(id, now);
     const lastUsedAt = new Date(now).toISOString();
-    void this.writeClients((clients) => clients.map((client) => (client.id === id ? { ...client, lastUsedAt } : client)))
+    void this.write((clients) => clients.map((client) => (client.id === id ? { ...client, lastUsedAt } : client)))
       .catch((error) => this.log(`[Pane glasses] could not save last use: ${error instanceof Error ? error.message : String(error)}`));
   }
 
@@ -312,10 +412,21 @@ export class GlassesAccess {
       .filter((client) => client.kind === 'glasses');
   }
 
-  private async writeClients(update: (clients: RemoteDaemonClientRecord[]) => RemoteDaemonClientRecord[]): Promise<void> {
+  /** Changes the device records and, in the same config write, the revoked phone ids. */
+  private async write(
+    updateClients: (clients: RemoteDaemonClientRecord[]) => RemoteDaemonClientRecord[],
+    updateRevoked?: (phoneIds: string[]) => string[],
+  ): Promise<void> {
     await this.config.updateConfigWith((current) => {
       const remoteDaemon = normalizeRemoteDaemonConfig(current.remoteDaemon);
-      return { remoteDaemon: { ...remoteDaemon, host: { ...remoteDaemon.host, clients: update(remoteDaemon.host.clients) } } };
+      const next: Partial<AppConfig> = {
+        remoteDaemon: { ...remoteDaemon, host: { ...remoteDaemon.host, clients: updateClients(remoteDaemon.host.clients) } },
+      };
+      if (updateRevoked) {
+        const glassesRevokedPhoneIds = updateRevoked(current.workspaces?.glassesRevokedPhoneIds ?? []);
+        next.workspaces = { ...current.workspaces, glassesRevokedPhoneIds };
+      }
+      return next;
     });
   }
 
