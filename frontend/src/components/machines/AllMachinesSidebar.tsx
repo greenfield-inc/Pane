@@ -4,6 +4,7 @@ import { AgentStatusDot } from '../ui/AgentStatusDot';
 import { Button } from '../ui/Button';
 import { PopoverButton, TerminalPopover } from '../terminal/TerminalPopover';
 import { RenameDialog } from '../CompactSessionMenu';
+import { PermissionDialog } from '../PermissionDialog';
 import { MachineBadge } from './MachineBadge';
 import { MachineMark } from './MachineMark';
 import {
@@ -58,7 +59,13 @@ interface RowMenu {
 }
 
 /** Pin, rename, permission and archive for a row, run on the row's own machine without switching. */
-function RowActionsMenu({ menu, onClose, onRename }: { menu: RowMenu | null; onClose: () => void; onRename: (menu: RowMenu) => void }) {
+function RowActionsMenu({ menu, onClose, onRename, onReviewPermission }: {
+  menu: RowMenu | null;
+  onClose: () => void;
+  onRename: (menu: RowMenu) => void;
+  /** Allow opens the permission dialog, which shows what the agent will run. */
+  onReviewPermission: (menu: RowMenu) => void;
+}) {
   const machineId = menu?.machine.id ?? '';
   const pane = menu?.target.kind === 'pane' ? menu.target.row : null;
   const session = menu?.target.kind === 'session' ? menu.target.row : null;
@@ -72,8 +79,8 @@ function RowActionsMenu({ menu, onClose, onRename }: { menu: RowMenu | null; onC
       <div role="menu" aria-label={`${noun} actions`}>
         {permission && (
           <>
-            <PopoverButton role="menuitem" onClick={() => act(() => runOnMachine(machineId, { type: 'answer-permission', requestId: permission.id, response: { behavior: 'allow' } }, `Could not allow ${permission.toolName}`))}>
-              <span className="flex items-center gap-2"><Check className="h-4 w-4" />Allow {permission.toolName}</span>
+            <PopoverButton role="menuitem" onClick={() => { if (menu) onReviewPermission(menu); onClose(); }}>
+              <span className="flex items-center gap-2"><Check className="h-4 w-4" />Allow {permission.toolName}…</span>
             </PopoverButton>
             <PopoverButton role="menuitem" onClick={() => act(() => runOnMachine(machineId, { type: 'answer-permission', requestId: permission.id, response: { behavior: 'deny' } }, `Could not deny ${permission.toolName}`))}>
               <span className="flex items-center gap-2"><X className="h-4 w-4" />Deny {permission.toolName}</span>
@@ -242,6 +249,7 @@ export function AllMachinesSidebar({ onNew }: { onNew: () => void }) {
   const [expandedSessions, setExpandedSessions] = useState<ReadonlySet<string>>(new Set());
   const [menu, setMenu] = useState<RowMenu | null>(null);
   const [renaming, setRenaming] = useState<RowMenu | null>(null);
+  const [reviewing, setReviewing] = useState<RowMenu | null>(null);
 
   const isActivePane = (row: AllMachinesPane) => row.machine.id === activeMachineId && activeView === 'sessions' && row.pane.id === activeSessionId;
   const renderPane = (nested: boolean) => (row: AllMachinesPane) => (
@@ -252,6 +260,12 @@ export function AllMachinesSidebar({ onNew }: { onNew: () => void }) {
   const loaded = views.some((view) => view.snapshot !== null);
   const empty = loaded && tree.panes.length === 0 && tree.sessions.length === 0;
   const renamingTarget = renaming?.target;
+  const reviewingPane = reviewing?.target.kind === 'pane' ? reviewing.target.row : null;
+  // The request still pending on its machine: one answered elsewhere closes the dialog.
+  const livePermission = reviewingPane ? tree.panes.find((row) => row.key === reviewingPane.key)?.permission : undefined;
+  const review = reviewing && reviewingPane && livePermission && livePermission.id === reviewingPane.permission?.id
+    ? { machine: reviewing.machine, request: livePermission, label: reviewingPane.pane.gitStatus?.prTitle || reviewingPane.pane.name || 'Untitled' }
+    : null;
 
   return (
     <div className="flex flex-col pb-2" data-testid="all-machines-sidebar">
@@ -319,7 +333,21 @@ export function AllMachinesSidebar({ onNew }: { onNew: () => void }) {
         </>
       )}
 
-      <RowActionsMenu menu={menu} onClose={() => setMenu(null)} onRename={setRenaming} />
+      <RowActionsMenu menu={menu} onClose={() => setMenu(null)} onRename={setRenaming} onReviewPermission={setReviewing} />
+      {review && (
+        <PermissionDialog
+          request={review.request}
+          session={{ name: `${review.label} on ${review.machine.name}` }}
+          onRespond={(requestId, behavior, updatedInput, message) => {
+            setReviewing(null);
+            void runOnMachine(
+              review.machine.id,
+              { type: 'answer-permission', requestId, response: { behavior, updatedInput, message } },
+              `Could not ${behavior} ${review.request.toolName} on ${review.machine.name}`,
+            );
+          }}
+        />
+      )}
       {renaming && renamingTarget && (
         <RenameDialog
           noun={renamingTarget.kind === 'pane' ? 'Pane' : 'Session'}

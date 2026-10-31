@@ -6,6 +6,7 @@ import type { JsonValue } from '../shared/validation/boundaryDecoder';
 
 type MachinesMock = {
   getMachineRuns: () => Array<{ machineId: string; command: MachineCommand }>;
+  getMachineReads: () => Array<{ machineId: string; channel: string }>;
   getPreferences: () => Record<string, string>;
   emitMachineEvent: (event: MachineConnectionsEvent, reads?: Record<string, Record<string, JsonValue>>) => void;
   getNavigationMemory: (hostId: string | null) => JsonValue;
@@ -137,6 +138,32 @@ test('row actions run on the row\'s own machine without switching', async ({ pag
   await expect.poll(async () => (await mock(page)).evaluate(api => api.getMachineRuns()))
     .toEqual([{ machineId: 'build', command: { type: 'pin', target: { kind: 'pane', id: 'a1' }, pinned: true } }]);
   await expect(page.getByRole('button', { name: 'Showing all machines. Switch machine' })).toBeVisible();
+});
+
+test('allowing a permission from the row menu shows what the agent will run on that machine first', async ({ page }, testInfo) => {
+  await openAllMachines(page);
+  const request = { id: 'req-1', sessionId: 'a1', toolName: 'Bash', input: { command: 'rm -rf /srv/releases' }, timestamp: 1 };
+  await (await mock(page)).evaluate((api, build) => api.emitMachineEvent(
+    { type: 'event', machineId: 'build', channel: 'permission:request', args: [] },
+    { build },
+  ), { 'permission:getPending': { success: true, data: [request] } });
+  // The first read of build-box's pending requests, then the one this event asks for.
+  await expect.poll(async () => (await mock(page)).evaluate(api => api.getMachineReads()
+    .filter(read => read.machineId === 'build' && read.channel === 'permission:getPending').length)).toBe(2);
+
+  await page.getByRole('button', { name: 'load-test-checkout on build-box' }).click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Allow Bash…' }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toContainText('rm -rf /srv/releases');
+  await expect(dialog).toContainText('load-test-checkout on build-box');
+  expect(await (await mock(page)).evaluate(api => api.getMachineRuns())).toEqual([]);
+  await page.screenshot({ path: testInfo.outputPath('all-machines-permission-light.png') });
+  await dialog.getByRole('button', { name: 'Allow' }).click();
+
+  await expect.poll(async () => (await mock(page)).evaluate(api => api.getMachineRuns())).toEqual([{
+    machineId: 'build',
+    command: { type: 'answer-permission', requestId: 'req-1', response: { behavior: 'allow', updatedInput: { command: 'rm -rf /srv/releases' } } },
+  }]);
 });
 
 test('opening a Pane on another machine switches to it, opens the Pane and keeps the sidebar in All machines', async ({ page }, testInfo) => {
