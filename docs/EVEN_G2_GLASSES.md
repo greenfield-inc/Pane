@@ -141,7 +141,7 @@ sends nothing. On a banner, the touch acts on its card:
 | Gesture on a banner | What it does |
 |---|---|
 | Press | Opens the card: a question its choices, an update its message |
-| Hold, then release | Answers the card by voice |
+| Hold, then release | Answers a question by voice; on an update it only wakes |
 | Swipe or double press | Opens the list with the newest card selected |
 
 The glasses never go quiet while you hold to talk or while a menu choice is being sent. Coming back to the app from the glasses menu opens it awake.
