@@ -78,7 +78,7 @@ maestro --device <simulator-udid> test -e CONNECTION_CODE="$(cat ~/.pane_rn_dev/
 
 `subflows/launch-dev-client.yaml` clears app state and the Keychain, opens the dev client against `127.0.0.1:${METRO_PORT}` and gets the dev menu out of the way. `subflows/sign-in.yaml` pairs with `CONNECTION_CODE`. Start a feature flow with `- runFlow: subflows/signed-in.yaml`, which runs both. It uses Metro on port 8137 unless you pass `-e METRO_PORT=<port>`. Pressable rows merge their text for accessibility, so match rows by `testID` or a regex such as `"fix-login-bug.*"`.
 
-`demo.yaml` needs no host: it starts the demo, answers a question, uses a terminal, visits the other screens and exits. Run it without `CONNECTION_CODE`.
+`demo.yaml` needs no host: it starts the demo, answers a question, uses a terminal, visits the other screens and exits. Run it without `CONNECTION_CODE`. `tabs.yaml` needs no host either: it opens a page, Explorer, the file viewer, an Editor tab and the placeholders in the demo.
 
 `terminal.yaml` needs a host whose first pane has a plain `Terminal` tab and a `Claude Code` tab, which is what `runpane panes create --agent claude` gives you. On a busy machine, set `MAESTRO_DRIVER_STARTUP_TIMEOUT=240000` if Maestro reports that the iOS driver was not ready in time.
 
