@@ -166,6 +166,20 @@ test('allowing a permission from the row menu shows what the agent will run on t
   }]);
 });
 
+test('a pinned Pane shows its pin at rest and sorts first in its project', async ({ page }, testInfo) => {
+  await openAllMachines(page);
+  const pinned = { ...pane('a1', 'load-test-checkout', 1, '2026-10-30T08:30:00Z'), isFavorite: true };
+  await (await mock(page)).evaluate((api, build) => api.emitMachineEvent(
+    { type: 'event', machineId: 'build', channel: 'session:updated', args: [] },
+    { build },
+  ), { 'sessions:get-all-with-projects': { success: true, data: [project(1, 'acme-web', [pinned])] } });
+
+  await expect(projectRows(page, 'acme-web').first()).toHaveText(/load-test-checkout.*build/);
+  await expect(projectRows(page, 'acme-web').first().getByRole('img', { name: 'Pinned' })).toBeVisible();
+  await expect(projectRows(page, 'acme-web').getByRole('img', { name: 'Pinned' })).toHaveCount(1);
+  await page.screenshot({ path: testInfo.outputPath('all-machines-pinned-light.png') });
+});
+
 test('opening a Pane on another machine switches to it, opens the Pane and keeps the sidebar in All machines', async ({ page }, testInfo) => {
   await openAllMachines(page);
   await page.getByRole('button', { name: 'load-test-checkout on build-box' }).click();

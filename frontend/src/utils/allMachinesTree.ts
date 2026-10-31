@@ -91,15 +91,17 @@ function repositoryKey(project: Pick<Project, 'name'>): string {
 
 const needsYou = (row: Pick<AllMachinesPane, 'waiting' | 'status'>) => row.waiting || row.status === 'blocked';
 
-/** Waiting on you first, then working, then newest activity. */
+/** Pinned first, then waiting on you, then working, then newest activity. */
 function comparePanes(a: AllMachinesPane, b: AllMachinesPane): number {
-  return Number(needsYou(b)) - Number(needsYou(a))
+  return Number(Boolean(b.pane.isFavorite)) - Number(Boolean(a.pane.isFavorite))
+    || Number(needsYou(b)) - Number(needsYou(a))
     || Number(b.status === 'working') - Number(a.status === 'working')
     || time(b.pane.lastActivity ?? b.pane.createdAt) - time(a.pane.lastActivity ?? a.pane.createdAt);
 }
 
 function compareSessions(a: AllMachinesSession, b: AllMachinesSession): number {
-  return Number(b.status === 'blocked') - Number(a.status === 'blocked')
+  return Number(Boolean(b.session.isPinned)) - Number(Boolean(a.session.isPinned))
+    || Number(b.status === 'blocked') - Number(a.status === 'blocked')
     || Number(b.status === 'working') - Number(a.status === 'working')
     || time(b.session.updatedAt) - time(a.session.updatedAt);
 }

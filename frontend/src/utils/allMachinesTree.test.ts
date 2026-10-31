@@ -64,6 +64,18 @@ describe('buildAllMachinesTree', () => {
     ]);
   });
 
+  it('puts a pinned Pane first in its project, above one that is working', () => {
+    const tree = buildAllMachinesTree([
+      view(studio, snapshot(
+        [project(1, 'acme-web', [pane('a', 'add-dark-mode'), pane('c', 'fix-checkout-race', { lastActivity: '2026-10-30T09:10:00Z' })])],
+        { statuses: [{ panelId: 'panel-a', sessionId: 'a', state: 'working', reason: null }] },
+      )),
+      view(build, snapshot([project(1, 'acme-web', [pane('b', 'load-test-checkout', { isFavorite: true, lastActivity: '2026-10-30T07:00:00Z' })])])),
+    ]);
+
+    expect(tree.projects[0].panes.map(item => item.pane.name)).toEqual(['load-test-checkout', 'add-dark-mode', 'fix-checkout-race']);
+  });
+
   it('keeps an offline machine\'s rows, marked as from when it stopped answering', () => {
     const tree = buildAllMachinesTree([
       view(build, snapshot([project(2, 'infra', [pane('n', 'nightly-backup')])]), true),

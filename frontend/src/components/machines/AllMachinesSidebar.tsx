@@ -103,6 +103,15 @@ function RowActionsMenu({ menu, onClose, onRename, onReviewPermission }: {
   );
 }
 
+/** A pinned row keeps its pin visible at rest, as today's sidebar does. */
+function PinnedMark() {
+  return (
+    <span role="img" aria-label="Pinned" className="pointer-events-none flex h-[18px] w-3.5 flex-none items-center justify-center text-text-muted">
+      <Pin className="h-3.5 w-3.5 rotate-45" />
+    </span>
+  );
+}
+
 /** The badge, and on hover or keyboard focus the actions button in the same box, so neither shifts the row. */
 function BadgeSlot({ machine, label, onMenu }: { machine: MachineRef; label: string; onMenu: (x: number, y: number) => void }) {
   return (
@@ -159,6 +168,7 @@ function PaneRow({ row, active, nested, onMenu }: { row: AllMachinesPane; active
           notifyWaiting={row.waiting}
         />
       </div>
+      {pane.isFavorite && <PinnedMark />}
       <BadgeSlot machine={machine} label={label} onMenu={openMenu} />
     </div>
   );
@@ -204,6 +214,7 @@ function SessionRow({ row, active, expanded, onToggle, onMenu, renderPane }: {
         <AgentStatusDot status={row.status} size="sm" className="pointer-events-none flex-shrink-0" />
         <span className="pointer-events-none min-w-0 flex-1 truncate text-[13px] font-semibold text-text-primary">{session.name}</span>
         {row.panes.length > 0 && <span className="pointer-events-none flex-shrink-0 text-[12px] tabular-nums text-text-tertiary">{row.panes.length}</span>}
+        {session.isPinned && <PinnedMark />}
         <BadgeSlot machine={machine} label={session.name} onMenu={openMenu} />
       </div>
       {expanded && row.panes.map(renderPane)}
