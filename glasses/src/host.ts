@@ -765,8 +765,8 @@ export class HostConnection {
     try {
       created = await this.invoke('orchestration-sessions:create', [request], sessionCreatedSchema);
     } catch (error) {
-      // An older Pane doesn't let glasses start Sessions, or takes a different request.
-      if (error instanceof RemoteRequestError && (error.code === CHANNEL_REFUSED || error.code === 'ERR_GLASSES_SESSION_REFUSED')) {
+      // An older Pane doesn't let glasses start Sessions. A request it refuses says why in its own words.
+      if (error instanceof RemoteRequestError && error.code === CHANNEL_REFUSED) {
         throw new GlassesError('ERR_GLASSES_SESSION_UNSUPPORTED', `${name}'s Pane can't start a Session from the glasses yet, so none was started.`, `Update Pane on ${name}.`);
       }
       throw error;

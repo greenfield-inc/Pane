@@ -1008,6 +1008,17 @@ describe('a new Session from the glasses', () => {
     expect(source.created).toEqual(['studio: Rotate every backup key before Friday, then tell / Rotate every backup key before Friday, then tell me which ones failed and why']);
   });
 
+  it('starts nothing and goes home when you said only punctuation', async () => {
+    const { source, text, press } = startScripted();
+    source.dictation = ' . ';
+    source.changed();
+    await press({ type: 'hold' });
+    await press({ type: 'release' });
+    await settle();
+    expect(source.created).toEqual([]);
+    expect(text()[1]).toBe('> + New Session on studio-mac · hold to say it');
+  });
+
   it('starts nothing on a double press while listening', async () => {
     const { source, text, press, pages } = startScripted();
     source.dictation = 'Find why checkout charges some carts twice';

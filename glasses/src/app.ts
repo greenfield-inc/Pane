@@ -647,14 +647,16 @@ export class GlassesApp {
       return;
     }
     if (attempt !== this.listening) return;
-    if (!text) {
+    const request = sessionRequest(text);
+    // Nothing said, or only a breath the transcriber wrote as punctuation.
+    if (!request.name) {
       this.goHome();
       return;
     }
     this.go({ ...view, transcript: text, starting: true });
     let entry: PaneEntry;
     try {
-      entry = await this.deps.source.createSession(view.computerId, sessionRequest(text));
+      entry = await this.deps.source.createSession(view.computerId, request);
     } catch (error) {
       this.showProblem(`New Session on ${view.machine} · not started`, error, { name: 'home' });
       return;
