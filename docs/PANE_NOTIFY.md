@@ -108,8 +108,9 @@ the agent:
 - **Connection loss**: while a machine can't be reached its cards stay up,
   its mark dims, and they say "Not sent: can't reach <machine>. Try again
   when it reconnects."; the agent keeps waiting. After reconnecting the screen
-  shows what is waiting there now. A machine's cards go only when it is
-  removed from the saved machines.
+  shows what is waiting there now. While Pane runs, an unreachable machine's
+  cards stay until it is removed from the saved machines or turns Notify off;
+  a machine offline when Pane starts shows its questions once it connects.
 - **Your phone**: each question sends one alert at once to every phone signed
   in to the host in the Pane app with notifications allowed and **Needs
   Input** on. The alert is titled with the Pane's name and says only "<Pane>
@@ -122,8 +123,9 @@ the agent:
   the question still waits on every screen.
 - **A headless host** (`runpane install daemon`, remote setup, workspace
   hosts) has no screen of its own: it creates no Notify window, tray icon or
-  shortcut, and its questions show on whoever is connected and on the phone.
-  With nobody connected a question waits until someone connects or answers.
+  shortcut, and its questions show on every desktop that has it saved and on
+  the phone. With none of them running, a question waits until one connects
+  or answers.
   An update from it returns `delivered: "inbox"`; connected screens still show
   it on their strips.
 
