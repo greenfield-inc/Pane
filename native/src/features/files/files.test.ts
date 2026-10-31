@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { decodeFileText, decodeFolder, decodeSearch, fileViewer, formatSize, highlightLines, languageOf, parentOf, pathCrumbs, posixPath } from './files';
+import { decodeFileText, decodeFolder, decodeSearch, fileViewer, formatSize, highlightLines, languageOf, lineCountLabel, parentOf, pathCrumbs, posixPath } from './files';
 
 describe('decodeFolder', () => {
   it('reads the computer’s folder list', () => {
@@ -100,5 +100,12 @@ describe('highlightLines', () => {
 
   it('keeps plain text as one token per line', () => {
     expect(highlightLines('a < b\n\nc', null)).toEqual([[{ text: 'a < b' }], [], [{ text: 'c' }]]);
+  });
+});
+
+describe('lineCountLabel', () => {
+  it('counts a file’s lines for the footer, singular for one', () => {
+    expect(lineCountLabel('<html></html>')).toBe('1 line');
+    expect(lineCountLabel('a\nb')).toBe('2 lines');
   });
 });

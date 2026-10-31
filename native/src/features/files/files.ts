@@ -129,6 +129,12 @@ function round(value: number): string {
   return value >= 10 ? String(Math.round(value)) : String(Math.max(0.1, Math.round(value * 10) / 10));
 }
 
+/** The footer's line count: `1 line`, `24 lines`. */
+export function lineCountLabel(content: string): string {
+  const lines = content.split('\n').length;
+  return lines === 1 ? '1 line' : `${lines} lines`;
+}
+
 /** The path bar: the worktree's name, then each folder down to `path`. */
 export function pathCrumbs(root: string, path: string): Array<{ name: string; path: string }> {
   const parts = path.split('/').filter(Boolean);

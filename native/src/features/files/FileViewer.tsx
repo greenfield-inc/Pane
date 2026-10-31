@@ -14,7 +14,7 @@ import { Button, ErrorState, Icon, Text } from '@/ui';
 
 import { StateScreen } from '../tabs/StateScreen';
 import { TabFooter } from '../tabs/TabFooter';
-import { fileViewer, formatSize, highlightLines, languageOf, MAX_IMAGE_BYTES, MAX_TEXT_BYTES, parentOf, posixPath, type Token } from './files';
+import { fileViewer, formatSize, highlightLines, languageOf, lineCountLabel, MAX_IMAGE_BYTES, MAX_TEXT_BYTES, parentOf, posixPath, type Token } from './files';
 import { useFileBinary, useFileText, useFolder } from './useFiles';
 
 export interface FileViewerProps {
@@ -142,7 +142,7 @@ export function FileViewer({ sessionId, path: givenPath, size: knownSize, back }
   } else if (text.data?.kind === 'text') {
     const content = text.data.content;
     body = markdown && !source ? <MarkdownView content={content} /> : <CodeView content={content} language={language.id} />;
-    footer = [markdown ? 'Markdown' : language.label, markdown ? null : `${content.split('\n').length} lines`, size !== undefined ? formatSize(size) : null].filter(Boolean).join(' · ');
+    footer = [markdown ? 'Markdown' : language.label, markdown ? null : lineCountLabel(content), size !== undefined ? formatSize(size) : null].filter(Boolean).join(' · ');
   } else {
     body = <ErrorState title={`Couldn’t open ${name}`} error={text.error} onRetry={() => void text.refetch()} />;
   }
