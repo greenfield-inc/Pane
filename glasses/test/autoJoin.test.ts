@@ -99,7 +99,7 @@ describe('glasses joining your other computers on their own', () => {
     expect(build.asked).toBe(1);
   });
 
-  it('skips a computer on an older Pane for the rest of the run, and waits for one that is live', async () => {
+  it('skips a computer on an older Pane until the next ten-minute round, and waits for one that is live', async () => {
     const studio = new Computer('studio', 'studio-mac', [{ kind: 'unsupported' }]);
     const build = new Computer('build', 'build-box');
     build.live = false;
@@ -110,8 +110,9 @@ describe('glasses joining your other computers on their own', () => {
     autoJoin.poke();
     await settle();
     expect([studio.asked, build.asked]).toEqual([1, 1]);
+    // Updated in the meantime, studio-mac answers the next round, so build-box isn't needed.
     await advance(10 * MINUTE);
-    expect([studio.asked, build.asked]).toEqual([1, 2]);
+    expect([studio.asked, build.asked]).toEqual([2, 1]);
   });
 
   it('asks each computer at most once in five minutes however often it is poked, and again every ten', async () => {

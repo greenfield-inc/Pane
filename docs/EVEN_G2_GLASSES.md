@@ -43,7 +43,8 @@ gets a dim row at the end of the home list with the reason; press it for what to
 | Funnel is on | Turn Funnel off for port 8443 on that computer. |
 | not answering | Check that Pane is open there and Tailscale is on. |
 
-A paired computer on an older Pane can't ask for the others; the glasses skip it. You can still add
+A paired computer on an older Pane can't ask for the others; the glasses skip it until the next
+10-minute round, so once you update Pane there it asks within 10 minutes. You can still add
 a computer by hand: tap **Add computers** in Settings › Glasses and paste the new code the same way.
 Computers that are offline are skipped and named on the screen.
 

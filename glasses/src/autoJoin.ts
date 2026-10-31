@@ -15,7 +15,7 @@ export type VouchAnswer =
   | { kind: 'answered'; code: string | null; skipped: UnjoinedComputer[] }
   /** It didn't answer, failed, or was asked less than 5 minutes ago: ask the next computer. */
   | { kind: 'unavailable' }
-  /** An older Pane with no vouch: it is not asked again until the next launch. */
+  /** An older Pane with no vouch: it is not asked again until the next 10-minute round. */
   | { kind: 'unsupported' };
 
 /** A paired computer that can vouch for the glasses. */
@@ -53,6 +53,8 @@ export class AutoJoin {
     this.timer?.cancel();
     this.timer = this.deps.later(() => {
       this.due = true;
+      // A computer on an older Pane may have been updated since.
+      this.unsupported.clear();
       this.start();
     }, JOIN_EVERY_MS);
     this.poke();
