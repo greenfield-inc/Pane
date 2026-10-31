@@ -29,7 +29,7 @@ async function runtimeId(bridge: EvenAppBridge): Promise<string> {
 const clock = (epochMs: number) => new Date(epochMs).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 
 function pageText(page: Page): string {
-  return page.boxes.map((box) => (box.kind === 'list' ? box.items.map((item) => `· ${item}`).join('\n') : box.lines.join('\n'))).join('\n────\n');
+  return page.boxes.flatMap((box) => (box.kind === 'list' ? [box.items.map((item) => `· ${item}`).join('\n')] : box.kind === 'text' ? [box.lines.join('\n')] : [])).join('\n────\n');
 }
 
 async function main(): Promise<void> {
@@ -56,10 +56,24 @@ async function main(): Promise<void> {
   };
 
   let target: (gesture: Gesture) => void = () => {};
+  // Swipe timing for real G2 (check G19): each swipe's page logs the time from the swipe event to
+  // the glasses' acknowledgment of the last write it needed, and what that write sent.
+  let swipe: { dir: string; at: number } | null = null;
   const input = new InputRouter((gesture) => {
     if (gesture.type === 'foreground') display.invalidate();
+    if (gesture.type === 'up' || gesture.type === 'down') swipe = { dir: gesture.type, at: performance.now() };
     target(gesture);
+    swipe = null;
   }, () => display.lastWriteAt);
+  const show = (page: Page) => {
+    const timed = swipe;
+    swipe = null;
+    void display.show(page).then(() => {
+      if (!timed) return;
+      const { rebuilt, texts, images } = display.lastWrite;
+      console.info(`[Pane glasses] swipe ${timed.dir} → display ack ${Math.round(performance.now() - timed.at)} ms (${rebuilt ? 'rebuild' : `${texts} text`}, ${images} image)`);
+    });
+  };
   bridge.onEvenHubEvent((event) => input.handle(event));
 
   let source: PaneSource | null = null;
@@ -88,7 +102,7 @@ async function main(): Promise<void> {
     source = next;
     const app = new GlassesApp({
       source: next,
-      show: (page) => void display.show(page),
+      show,
       exit: () => void bridge.shutDownPageContainer(1),
       mic: (on) => (on ? bridge.audioControl(true, AudioInputSource.Glasses) : bridge.audioControl(false)),
       later,

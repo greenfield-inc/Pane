@@ -1,20 +1,17 @@
 import { validateEvenHubPageContainer } from '@evenrealities/even_hub_sdk';
 import { describe, expect, it } from 'vitest';
 import { checkPage, listItems, textContent, type Page, type TextBox } from '../src/display';
+import { homeListPage, homeRows } from '../src/homeList';
 import type { Card, Computer } from '../src/model';
 import {
-  allClearPage,
+  awayPage,
   cardPage,
   cardRows,
-  computersPage,
   connectingPage,
   dictationPage,
   firstRunPage,
   fullQuestionPage,
-  homeCardPage,
   noComputerPage,
-  openPanePage,
-  panesPage,
   problemPage,
   refusedPage,
   keyListPage,
@@ -37,12 +34,11 @@ const longQuestion: Card = {
   choices: ['Stub the clock', 'Loosen retry to 2 s'],
 };
 const info: Card = { ...question, key: 'devbox:i1', itemId: 'i1', ui: 'info', waiting: false, title: 'PR #482 opened. Checks are running.', paneName: 'docs-pass', machine: 'devbox', choices: [] };
-const computers: Computer[] = [
-  { id: 'a', name: 'studio-mac', status: 'live', lastSeenAt: 0, paneCount: 5, workingCount: 1 },
-  { id: 'b', name: 'laptop', status: 'offline', lastSeenAt: 1, paneCount: 0, workingCount: 0 },
-];
 const terminal = { kind: 'pane' as const, id: 'p', name: 'fix-login', agent: 'Claude', status: 'working' as const, panelId: 'p1' };
-const position = { index: 1, total: 4, computerCount: 3 };
+const many = Array.from({ length: 30 }, (_, index) => ({ ...terminal, id: `p${index}`, name: `a-rather-long-pane-name-number-${index}`, panelId: `panel${index}` }));
+const laptop: Computer = { id: 'b', name: 'laptop', status: 'offline', lastSeenAt: 1, os: null, entries: [] };
+const computers: Computer[] = [{ id: 'a', name: 'studio-mac', status: 'live', lastSeenAt: 0, os: 'macOS', entries: [terminal, ...many] }, laptop];
+const rows = homeRows(computers, [question]);
 
 function texts(page: Page): string[] {
   return page.boxes.filter((box): box is TextBox => box.kind === 'text').map((box) => box.lines.join('\n'));
@@ -56,19 +52,16 @@ function boxNamed(page: Page, name: string) {
 
 const every: Array<[string, Page]> = [
   ['first run', firstRunPage()],
-  ['home question', homeCardPage(question, position)],
-  ['home info', homeCardPage(info, position)],
-  ['home with confirmation', homeCardPage(info, { ...position, confirmation: 'Answered fix-login: "stub the clock, and only rerun the auth suite"' })],
-  ['open a pane', openPanePage({ index: 4, total: 4, computerCount: 3 })],
-  ['all clear', allClearPage(3)],
+  ['home list', homeListPage(rows, { selected: 0 }, () => '9:40')],
+  ['home list, last page', homeListPage(rows, { selected: rows.length - 1, confirmation: 'Answered fix-login: "stub the clock, and only rerun the auth suite"' }, () => '9:40')],
+  ['home list, outline marks', homeListPage(rows, { selected: 0, marks: 'outline' }, () => '9:40')],
+  ['home list, empty', homeListPage([], { selected: 0 }, () => '9:40')],
   ['card', cardPage(question, ['expected 200, got 401', 'The refresh mock returns 401 before the retry fires.'])],
   ['long card', cardPage(longQuestion, ['expected 200, got 401'])],
   ['approve card', cardPage({ ...question, ui: 'approve', title: 'the G2 remote cover sheet.' }, [])],
   ['full question', fullQuestionPage(longQuestion)],
   ['voice answer', voiceAnswerPage(question, 'stub the clock')],
-  ['computers', computersPage(computers, () => '9:40')],
-  ['panes', panesPage('studio-mac', [terminal])],
-  ['no panes', panesPage('studio-mac', [])],
+  ['away', awayPage(laptop, () => '9:40', 'fix-login')],
   ['terminal', terminalPage({ entry: terminal, lines: Array.from({ length: 30 }, (_, index) => `line ${index}`), scrolledUp: 0, footer: terminalFooter(question) })],
   ['terminal scrolled', terminalPage({ entry: terminal, lines: Array.from({ length: 8 }, (_, index) => `line ${index}`), scrolledUp: 4, dim: 'bottom', footer: terminalFooter(undefined) })],
   ['picker', pickerPage(terminal, ['Try the new fullscreen renderer? Flicker-free output, mouse support, selected text auto-copies.'], ['1. Yes, try it', '2. Not now'], false, terminalFooter(undefined))],
@@ -104,20 +97,6 @@ describe('every screen', () => {
   });
 });
 
-describe('home (H3)', () => {
-  it('counts pages and names the kind, the Pane and the computer', () => {
-    expect(texts(homeCardPage(question, position))[0]).toBe('1/4 · needs you · fix-login · studio-mac');
-    expect(texts(homeCardPage(info, position))[0]).toBe('1/4 · info · docs-pass · devbox');
-  });
-
-  it('shows one all-clear page with the way into Panes when nothing waits', () => {
-    const page = allClearPage(3);
-    expect(texts(page)[0]).toBe('1/1 · Pane · 3 computers · all clear');
-    expect(texts(page)[1]).toContain('Open a Pane…');
-    expect(texts(page)[2]).toBe('press = open a Pane   double press = exit');
-  });
-});
-
 describe('card (C3)', () => {
   it('keeps the choices first, then the question, with the rest for dimmed context', () => {
     const page = cardPage(question, ['expected 200, got 401', 'The refresh mock returns 401 before the retry fires.', 'third line']);
@@ -147,8 +126,8 @@ describe('card (C3)', () => {
 
 describe('terminal (T3)', () => {
   it('names the newest card elsewhere at full brightness, or reads "all clear elsewhere" dimmed', () => {
-    expect(terminalFooter(info)).toEqual({ text: '• docs-pass: PR #482 opened. Checks are running. · double press for cards', brightness: 4 });
-    expect(terminalFooter(question)).toEqual({ text: '? fix-login needs you · double press for cards', brightness: 4 });
+    expect(terminalFooter(info)).toEqual({ text: '• docs-pass: PR #482 opened. Checks are running. · double press for it', brightness: 4 });
+    expect(terminalFooter(question)).toEqual({ text: '? fix-login needs you · double press for it', brightness: 4 });
     expect(terminalFooter(undefined).text).toBe('all clear elsewhere');
     expect(terminalFooter(undefined).brightness).toBeLessThan(4);
   });
@@ -184,9 +163,12 @@ describe('errors', () => {
     expect(texts(page).at(-1)).toBe('Pane tries again by itself   double press = back');
   });
 
-  it('marks an offline computer and offers a retry', () => {
-    const page = computersPage(computers, () => '9:40');
-    const rows = page.boxes[1]?.kind === 'list' ? page.boxes[1].items : [];
-    expect(rows).toEqual(['studio-mac · 5 Panes · 1 working', 'laptop · offline since 9:40 · press to retry']);
+  it('says when an offline computer went away, and offers a retry', () => {
+    const page = awayPage({ id: 'b', name: 'build-box', status: 'offline', lastSeenAt: 1, os: 'Linux', entries: [] }, () => '9:14', 'nightly-backup');
+    expect(texts(page)).toEqual([
+      'build-box · offline',
+      'build-box went offline at 9:14.\nnightly-backup is from then. Pane keeps trying by itself.\n\nPress to retry now.',
+      'press = retry   double press = back',
+    ]);
   });
 });

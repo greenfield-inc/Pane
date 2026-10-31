@@ -327,6 +327,8 @@ export interface RemotePwaAffordances {
   sessionAgents?: RemotePwaSessionAgents;
   /** The host's experimental Chat flag. Hosts older than the flag omit this. */
   chatEnabled?: boolean;
+  /** The host's operating system, for its OS logo on the glasses. Older hosts omit this. */
+  os?: 'macOS' | 'Windows' | 'Linux';
 }
 
 export interface RemotePaneConnectionState {

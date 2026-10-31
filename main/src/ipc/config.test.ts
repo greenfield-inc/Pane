@@ -129,6 +129,22 @@ describe('config IPC handlers', () => {
     }
   });
 
+  it.each([
+    { platform: 'darwin', os: 'macOS' },
+    { platform: 'linux', os: 'Linux' },
+    { platform: 'win32', os: 'Windows' },
+  ])("reports $platform as $os, for the glasses' OS logo", async ({ platform, os }) => {
+    const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue(platform);
+    try {
+      const registry = new PaneCommandRegistry();
+      // SAFETY: The stub implements the IpcMain handle surface exercised by registerConfigHandlers.
+      registerConfigHandlers(createIpcMainStub() as IpcMain, createServicesStub([]), registry);
+      await expect(registry.invoke('remote:pwa-affordances')).resolves.toMatchObject({ os });
+    } finally {
+      platformSpy.mockRestore();
+    }
+  });
+
   afterEach(async () => {
     vi.unstubAllEnvs();
     while (tempDirs.length > 0) {

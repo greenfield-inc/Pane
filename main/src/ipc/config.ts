@@ -7,6 +7,7 @@ import type { RemotePwaAffordances, RemotePwaSessionAgents, RemoteSettingsPatch 
 import { SHORTCUT_LETTER, sharedShortcutLetter } from '../../../shared/utils/terminalShortcuts';
 import type { VoiceTranscriptionMode } from '../../../shared/types/voiceTranscription';
 import { ShellDetector } from '../utils/shellDetector';
+import { machineOs } from '../services/workspaceMachine';
 import { syncAutoStartOnBoot } from '../utils/autoStart';
 import { applyManagedAgentsMdSetting } from '../services/agentContextManager';
 import { syncPaneMcpForApp } from '../services/paneMcpRegistration';
@@ -43,6 +44,7 @@ export function registerConfigHandlers(
         voiceTranscription: buildRemotePwaVoiceAffordance(config),
         sessionAgents: buildRemotePwaSessionAgents(config.defaultOrchestratorAgent),
         chatEnabled: config.experimentalChatEnabled === true,
+        os: machineOs(process.platform),
       };
     };
     commandRegistry.register('remote:pwa-affordances', buildAffordances);

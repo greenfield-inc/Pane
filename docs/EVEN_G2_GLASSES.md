@@ -42,7 +42,7 @@ computer. Allowing the origin on an older Pane lasts only until the Even app res
 
 | Gesture | What it does |
 |---|---|
-| Swipe up / down | Move through a list, scroll a terminal half a page, or turn card pages |
+| Swipe up / down | Move through a list or scroll a terminal half a page |
 | Press | Open or pick; in a terminal, open keys mode |
 | Double press | Back; on the home page, exit the app |
 | Hold, then release | Talk, then send at once: an answer on a card, input in a terminal |
@@ -51,21 +51,27 @@ In **keys mode** the gestures go to the terminal, one key at a time in the order
 swipe sends ↑ or ↓, press sends Enter and goes back to the output, double press leaves without sending anything, and hold opens a short list with
 Esc and Tab. You can't dictate in keys mode; leave it first.
 
-- **Home** shows one card per page with a page counter, questions first and then done and info
-  cards, newest first. The last page is **Open a Pane…**. With nothing waiting, home is one
-  all-clear page.
+- **Home** is one list across every paired computer: questions first, newest first, then info
+  cards, then every Session and Pane, newest activity first. Each row starts with its computer's OS logo (Apple,
+  Windows or Linux; a plain monitor for a computer whose Pane is too old to say) and the first five
+  letters of its name. The selected row starts with ">" at full brightness. The header counts the
+  questions waiting ("All computers · 2 need you") and confirms an answer you just sent. The list
+  updates while it is open: a new Pane shows within about a second. Press a question to open its
+  card (hold to answer it by voice), an info card to read its message, or a Session or Pane to open
+  its terminal on its own computer. An info card you read and leave with double press drops off
+  the list on these glasses; it stays on your phone and computers.
+- **A computer that stops answering** keeps its rows, dimmed with its logo, reading "offline since
+  9:14". Pressing one says when it went away and offers Retry. A computer that has never answered
+  gets one dim row of its own. When no computer answers and none has rows yet, home is one page
+  that says so.
 - **A card** shows the asking Pane's last output lines (dimmed), the question, and the choices.
   A long question is cut at three lines; the **Read the whole question** row shows all of it.
-- **Open a Pane…** lists your computers (live or offline), then that computer's Sessions and Panes
-  in the Pane apps' order: pinned ones first, then Sessions, a blank line, then Panes, each newest
-  first. A list longer than the 20 rows the glasses show ends in a **· N more ·** row that
-  continues it from the first row left out. Picking one
-  shows its live screen, refreshed about once a second, and marks the Pane viewed on that computer,
-  as opening it there does. A stopped Pane starts its saved agent or command. The terminal hides an
+- **A terminal** shows the Pane's live screen, refreshed about once a second. Opening it marks the
+  Pane viewed on that computer, as opening it there does. A stopped Pane starts its saved agent or command. The terminal hides an
   agent's input box and the status rows under it, so you read its output. Each swipe moves half a
   page: the half you just read stays on screen, dimmed. Swiping down to the end follows live again.
   Press opens keys mode, which shows the whole screen, input box included. The bottom line names
-  the newest card from another Pane; double press goes to it.
+  the newest card from another Pane; double press goes home with its row selected.
 - **Menus**: when a terminal shows a menu Pane is certain of (a list numbered from 1 at the bottom
   of the screen with exactly one cursor mark, such as `❯`, `>` or `›`, under a prompt whose top is
   on screen), its choices appear as a list, under the last two lines above it: the question and
@@ -78,9 +84,8 @@ Esc and Tab. You can't dictate in keys mode; leave it first.
   screen a second after its number ignores numbers: keys mode opens so you answer it with arrows
   and Enter. Double press dismisses the list. Any other prompt,
   including one taller than the screen, is answered from keys mode.
-- **Going back** from a terminal or a computer's list opens the list on the row you picked. Native
-  glasses lists always open on their first row, so the list starts there, runs to the end, then
-  continues from the top after a **· top of the list ·** row.
+- **Going back** from a terminal or a card selects the row you opened. If it is gone, the row now
+  in its place is selected.
 - **Dictation** types what you said into the Pane and presses Enter right away. A misheard line
   typed into a shell runs, so check the Pane before you talk into a plain shell. After you send,
   the view holds at your line while the reply grows below it, and the top line counts the lines
@@ -186,3 +191,11 @@ The app lives in [`glasses/`](../glasses). Run the Even simulator against it and
 Pane at it with `PANE_GLASSES_ORIGINS=http://localhost:5173` (an exact origin, comma separated for
 several; a loopback one covers every port). The host side is `main/src/daemon/glassesAccess.ts`; the shared pairing-code format is
 `shared/types/glasses.ts`.
+
+The home list is `glasses/src/homeList.ts`. The firmware list can't show images, so the app draws its
+own: six text rows beside two 28 × 120 px logo strips. A swipe rewrites the two rows that change; a
+page turn rewrites the rows and resends the strips. `LIST_MARKS = 'outline'` switches to the
+fallback: the firmware list with an outline shape per computer (○ □ △ ◇) and each away computer
+folded into one row. Each swipe logs `[Pane glasses] swipe down → display ack 12 ms (2 text, 0 image)`
+to the WebView console, so swipe speed can be measured on real G2. `dev/gallery.html` shows the list
+with every mark, an offline computer, and the outline fallback.

@@ -285,6 +285,6 @@ function isWsl(): boolean {
   return process.platform === 'linux' && Boolean(process.env.WSL_DISTRO_NAME || process.env.WSL_INTEROP);
 }
 
-function machineOs(platform: NodeJS.Platform): MachineOs {
+export function machineOs(platform: NodeJS.Platform): MachineOs {
   return platform === 'darwin' ? 'macOS' : platform === 'win32' ? 'Windows' : 'Linux';
 }

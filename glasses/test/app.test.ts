@@ -3,8 +3,9 @@ import { describe, expect, it } from 'vitest';
 import { GlassesApp } from '../src/app';
 import { DemoSource } from '../src/demo';
 import type { Page } from '../src/display';
+import type { ListMarks } from '../src/homeList';
 import type { Gesture } from '../src/input';
-import { GlassesError, SCREEN_RECONNECTING, orderCards, type Card, type Computer, type Dictation, type PaneEntry, type PaneRow, type PaneSource, type TerminalKey, type TerminalScreen } from '../src/model';
+import { GlassesError, SCREEN_RECONNECTING, orderCards, type Card, type Computer, type Dictation, type PaneEntry, type PaneSource, type TerminalKey, type TerminalScreen } from '../src/model';
 import type { Cancel } from '../src/timers';
 
 /** Timers the test runs by hand. */
@@ -44,6 +45,11 @@ function outputOf(page: Page | undefined): string {
   return halves.flatMap((box) => (box.kind === 'text' ? box.lines : [])).join(' / ');
 }
 
+/** Each text box's lines and each list's items, in page order; images have no text. */
+function textOf(page: Page | undefined): string[] {
+  return (page?.boxes ?? []).flatMap((box) => (box.kind === 'list' ? [box.items.join(' | ')] : box.kind === 'text' ? [box.lines.join(' / ')] : []));
+}
+
 function start() {
   const clock = new Clock();
   const source = new DemoSource(clock.every, () => clock.now);
@@ -59,7 +65,7 @@ function start() {
     now: () => clock.now,
     clock: () => '9:40',
   });
-  const text = () => (pages.at(-1)?.boxes ?? []).map((box) => (box.kind === 'list' ? box.items.join(' | ') : box.lines.join(' / ')));
+  const text = () => textOf(pages.at(-1));
   const press = async (gesture: Gesture) => {
     app.handle(gesture);
     await settle();
@@ -68,22 +74,27 @@ function start() {
 }
 
 describe('home', () => {
-  it('shows questions first, newest first, then info cards, then "Open a Pane…"', async () => {
-    const { text, press } = start();
-    const headers: string[] = [];
-    for (let page = 0; page < 6; page += 1) {
-      headers.push(text()[0] ?? '');
-      await press({ type: 'down' });
-    }
-    expect(headers).toEqual([
-      '1/6 · needs you · fix-login · studio-mac',
-      '2/6 · needs you · token-refresh · studio-mac',
-      '3/6 · needs you · Planner · studio-mac',
-      '4/6 · info · docs-pass · devbox',
-      '5/6 · info · nightly · studio-mac',
-      '6/6 · Pane · 3 computers',
+  it('lists every computer\'s questions first, then its info cards, then its Sessions and Panes newest first, each marked with its computer', () => {
+    const { text } = start();
+    expect(text()).toEqual([
+      'All computers · 3 need you',
+      '> studi  fix-login · needs you',
+      '   studi  token-refresh · needs you',
+      '   studi  Planner · needs you',
+      '   devbo  docs-pass · PR #482 opened. Checks are running.',
+      '   studi  nightly · Tests green on studio-mac.',
+      '   studi  docs-pass · Codex · needs you',
     ]);
-    expect(text()[0]).toBe('6/6 · Pane · 3 computers');
+  });
+
+  it('moves the selection one row per swipe and turns the page after the sixth row', async () => {
+    const { text, press } = start();
+    await press({ type: 'down' });
+    expect(text().slice(1, 3)).toEqual(['   studi  fix-login · needs you', '> studi  token-refresh · needs you']);
+    for (let row = 1; row < 6; row += 1) await press({ type: 'down' });
+    expect(text().slice(1, 3)).toEqual(['> devbo  api-server · shell · idle', '   studi  nightly · shell · idle']);
+    await press({ type: 'up' });
+    expect(text()[6]).toBe('> studi  docs-pass · Codex · needs you');
   });
 
   it('exits on double press', async () => {
@@ -101,8 +112,7 @@ describe('answering', () => {
     expect(text()[0]).toContain('The refresh mock returns 401');
     await press({ type: 'select', index: 1 });
     expect(source.cards().map((card) => card.paneName)).not.toContain('fix-login');
-    expect(text()[0]).toBe('1/5 · needs you · token-refresh · studio-mac');
-    expect(text()[1]).toBe('Answered fix-login: Loosen retry');
+    expect(text().slice(0, 2)).toEqual(['Answered fix-login: Loosen retry', '> studi  token-refresh · needs you']);
   });
 
   it('answers by voice: hold listens, release sends the words at once', async () => {
@@ -115,7 +125,7 @@ describe('answering', () => {
     await settle();
     expect(mic).toEqual([true, false]);
     expect(source.cards().map((card) => card.paneName)).not.toContain('fix-login');
-    expect(text()[1]?.replace(' / ', ' ')).toBe('Answered fix-login: "stub the clock and rerun only the auth suite"');
+    expect(text()[0]).toMatch(/^Answered fix-login: "stub the clock and rerun/);
   });
 
   it('never turns the microphone on for a hold released before the computer is ready', async () => {
@@ -144,22 +154,20 @@ describe('answering', () => {
     await press({ type: 'double' });
     expect(text().at(-1)).toContain('Read the whole question');
     await press({ type: 'double' });
-    expect(text()[0]).toBe('2/6 · needs you · token-refresh · studio-mac');
+    expect(text()[2]).toBe('> studi  token-refresh · needs you');
   });
 });
 
 describe('Panes and the terminal', () => {
+  /** fix-login's question answered on another screen, so its own row opens its terminal. */
   async function openFixLogin() {
     const started = start();
-    for (let page = 0; page < 5; page += 1) await started.press({ type: 'down' });
+    const asked = started.source.cards().find((card) => card.paneName === 'fix-login');
+    if (asked) await started.source.answer(asked, { choice: 'Stub the clock' });
+    // Below token-refresh and Planner's questions and the two info cards.
+    for (let row = 0; row < 4; row += 1) await started.press({ type: 'down' });
+    expect(started.text()[5]).toBe('> studi  fix-login · Claude · working');
     await started.press({ type: 'press' });
-    expect(started.text()[0]).toBe('Open a Pane · pick a computer');
-    await started.press({ type: 'select', index: 0 });
-    // Sessions, a blank row, then Panes; a press on the blank row opens nothing.
-    expect(started.text()[1]).toContain('Session · even g2 app · idle |  | fix-login · Claude · working');
-    await started.press({ type: 'select', index: 1 });
-    expect(started.text()[0]).toContain('Sessions and Panes');
-    await started.press({ type: 'select', index: 2 });
     return started;
   }
 
@@ -167,7 +175,7 @@ describe('Panes and the terminal', () => {
     const { text, output } = await openFixLogin();
     expect(text()[0]).toBe('fix-login · Claude · working');
     expect(output()).toContain('expected 200, got 401');
-    expect(text().at(-1)).toBe('? token-refresh needs you · double press for cards');
+    expect(text().at(-1)).toBe('? token-refresh needs you · double press for it');
   });
 
   it('scrolls back through older output half a page at a time', async () => {
@@ -205,18 +213,16 @@ describe('Panes and the terminal', () => {
     expect(reads).toBe(after);
   });
 
-  it('goes from the footer back to the card pages with that card first', async () => {
+  it('goes from the footer back home with that question selected', async () => {
     const { text, press } = await openFixLogin();
     await press({ type: 'double' });
-    expect(text()[0]).toBe('2/6 · needs you · token-refresh · studio-mac');
+    expect(text()[1]).toBe('> studi  token-refresh · needs you');
   });
 
   it("explains that a computer can't take dictation", async () => {
     const { text, press } = start();
-    for (let page = 0; page < 5; page += 1) await press({ type: 'down' });
+    for (let row = 0; row < 6; row += 1) await press({ type: 'down' });
     await press({ type: 'press' });
-    await press({ type: 'select', index: 1 });
-    await press({ type: 'select', index: 0 });
     await press({ type: 'hold' });
     expect(text()[1]).toContain("devbox can't turn speech into text.");
     await press({ type: 'double' });
@@ -227,26 +233,31 @@ describe('Panes and the terminal', () => {
 /** Computers and cards a test sets by hand. */
 class ScriptedSource implements PaneSource {
   readonly demo = false;
-  computerList: Computer[] = [{ id: 'studio', name: 'studio-mac', status: 'live', lastSeenAt: 1, paneCount: 1, workingCount: 0 }];
+  computerList: Computer[] = [{ id: 'studio', name: 'studio-mac', status: 'live', lastSeenAt: 1, os: 'macOS', entries: [] }];
   cardList: Card[] = [];
   retried: Array<string | undefined> = [];
   private readonly listeners = new Set<() => void>();
 
-  computers() { return this.computerList; }
+  /** The first computer lists `rows`. */
+  computers() { return this.computerList.map((computer, index) => (index === 0 ? { ...computer, entries: this.rows } : computer)); }
   cards() { return orderCards(this.cardList); }
   subscribe(listener: () => void) {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   }
   changed() { for (const listener of this.listeners) listener(); }
-  rows: PaneRow[] = [];
+  rows: PaneEntry[] = [];
   screenStatus: TerminalScreen['status'] = 'idle';
   /** Calls that change something on a computer, in order. */
   calls: string[] = [];
-  async panes(): Promise<PaneRow[]> { return this.rows; }
   screenLines: string[] = [];
   savedOutput: string[] = [];
-  async screen(): Promise<TerminalScreen> { return { lines: this.screenLines, status: this.screenStatus, agent: 'shell' }; }
+  /** The computer each screen read went to. */
+  screenReads: string[] = [];
+  async screen(computerId: string): Promise<TerminalScreen> {
+    this.screenReads.push(computerId);
+    return { lines: this.screenLines, status: this.screenStatus, agent: 'shell' };
+  }
   async scrollback() {
     this.savedReads += 1;
     return this.savedOutput;
@@ -287,12 +298,12 @@ function card(id: string, createdAt: number, waiting = true): Card {
   return { key: `studio:${id}`, computerId: 'studio', machine: 'studio-mac', itemId: id, ui: waiting ? 'options' : 'info', waiting, title: `title ${id}`, choices: ['Yes'], suggestions: [], paneName: `pane-${id}`, createdAt };
 }
 
-function startScripted() {
+function startScripted(marks: ListMarks = 'logos') {
   const clock = new Clock();
   const source = new ScriptedSource();
   const pages: Page[] = [];
-  const app = new GlassesApp({ source, show: (page) => pages.push(page), exit: () => {}, mic: async () => true, later: clock.later, now: () => clock.now, clock: () => '9:40' });
-  const text = () => (pages.at(-1)?.boxes ?? []).map((box) => (box.kind === 'list' ? box.items.join(' | ') : box.lines.join(' / ')));
+  const app = new GlassesApp({ source, show: (page) => pages.push(page), exit: () => {}, mic: async () => true, later: clock.later, now: () => clock.now, clock: () => '9:40', marks });
+  const text = () => textOf(pages.at(-1));
   const press = async (gesture: Gesture) => {
     app.handle(gesture);
     await settle();
@@ -302,15 +313,13 @@ function startScripted() {
 }
 
 /** Opens `rows[index]` on a live computer from home. */
-async function openScriptedRow(rows: PaneRow[], index: number, screenStatus: TerminalScreen['status'] = 'idle') {
+async function openScriptedRow(rows: PaneEntry[], index: number, screenStatus: TerminalScreen['status'] = 'idle') {
   const scripted = startScripted();
-  scripted.source.computerList = [{ id: 'studio', name: 'studio-mac', status: 'live', lastSeenAt: 1, paneCount: rows.length, workingCount: 0 }];
   scripted.source.rows = rows;
   scripted.source.screenStatus = screenStatus;
   scripted.source.changed();
+  for (let row = 0; row < index; row += 1) await scripted.press({ type: 'down' });
   await scripted.press({ type: 'press' });
-  await scripted.press({ type: 'select', index: 0 });
-  await scripted.press({ type: 'select', index });
   return scripted;
 }
 
@@ -392,8 +401,6 @@ describe('an agent terminal', () => {
     scripted.source.rows = [paneRow('fix-login')];
     scripted.source.changed();
     await scripted.press({ type: 'press' });
-    await scripted.press({ type: 'select', index: 0 });
-    await scripted.press({ type: 'select', index: 0 });
     return scripted;
   }
 
@@ -446,8 +453,6 @@ describe('keys mode', () => {
     scripted.source.rows = [paneRow('fix-login')];
     scripted.source.changed();
     await scripted.press({ type: 'press' });
-    await scripted.press({ type: 'select', index: 0 });
-    await scripted.press({ type: 'select', index: 0 });
     await scripted.press({ type: 'press' });
     return scripted;
   }
@@ -531,10 +536,10 @@ describe('keys mode', () => {
     const { source, text, press } = await openKeys();
     source.cardList = [card('q1', 10)];
     source.changed();
-    expect(text().at(-1)).toBe('? pane-q1 needs you · double press for cards');
+    expect(text().at(-1)).toBe('? pane-q1 needs you · double press for it');
     await press({ type: 'hold' });
     expect(text()[0]).toBe('KEYS · press sends · double = back');
-    expect(text().at(-1)).toBe('? pane-q1 needs you · double press for cards');
+    expect(text().at(-1)).toBe('? pane-q1 needs you · double press for it');
   });
 
   it("says when the computer's Pane can't take keys yet, and goes back on press; hold still talks", async () => {
@@ -564,8 +569,6 @@ describe('the picker', () => {
     scripted.source.rows = [paneRow('fix-login')];
     scripted.source.changed();
     await scripted.press({ type: 'press' });
-    await scripted.press({ type: 'select', index: 0 });
-    await scripted.press({ type: 'select', index: 0 });
     return scripted;
   }
 
@@ -709,8 +712,6 @@ describe('after you speak, the view holds at your message', () => {
     scripted.source.dictation = said;
     scripted.source.changed();
     await scripted.press({ type: 'press' });
-    await scripted.press({ type: 'select', index: 0 });
-    await scripted.press({ type: 'select', index: 0 });
     scripted.source.savedOutput = ['out 1', `> ${said}`, ...reply(20), ...inputBox];
     scripted.source.screenLines = [`> ${said}`, ...reply(20), ...inputBox];
     await scripted.press({ type: 'hold' });
@@ -790,10 +791,8 @@ describe('after you speak, the view holds at your message', () => {
 describe('demo', () => {
   it('raises a menu that the picker answers with no computer', async () => {
     const { press, text, output: shown, clock } = start();
-    for (let page = 0; page < 5; page += 1) await press({ type: 'down' });
+    for (let row = 0; row < 5; row += 1) await press({ type: 'down' });
     await press({ type: 'press' });
-    await press({ type: 'select', index: 0 });
-    await press({ type: 'select', index: 3 });
     expect(text()[0]).toBe('docs-pass · pick one · double = dismiss');
     expect(text()[2]).toBe('1. Yes, push and open the PR | 2. Not yet');
     await press({ type: 'select', index: 1 });
@@ -813,93 +812,158 @@ describe('demo', () => {
 });
 
 describe('going back keeps your place', () => {
-  it('opens the computer and Pane lists on the rows you picked, with the rows above after the top divider', async () => {
-    const { source, text, press } = startScripted();
-    source.computerList = [
-      { id: 'studio', name: 'studio-mac', status: 'live', lastSeenAt: 1, paneCount: 4, workingCount: 0 },
-      { id: 'devbox', name: 'devbox', status: 'live', lastSeenAt: 1, paneCount: 4, workingCount: 0 },
-    ];
-    source.rows = ['a', 'b', 'c', 'd'].map(paneRow);
-    source.changed();
-    await press({ type: 'press' });
-    await press({ type: 'select', index: 1 });
-    await press({ type: 'select', index: 2 });
+  it('comes back to the row you opened', async () => {
+    const { text, press } = await openScriptedRow(['a', 'b', 'c', 'd'].map(paneRow), 2);
     expect(text()[0]).toBe('c · shell · idle');
-
     await press({ type: 'double' });
-    expect(text()[1]).toBe('c · Claude · stopped | d · Claude · stopped | · top of the list · | a · Claude · stopped | b · Claude · stopped');
-    await press({ type: 'select', index: 3 });
-    expect(text()[0]).toBe('a · shell · idle');
-    await press({ type: 'double' });
-    expect(text()[1]).toMatch(/^a · Claude/);
-
-    await press({ type: 'double' });
-    expect(text()[1]).toBe('devbox · 4 Panes · idle | · top of the list · | studio-mac · 4 Panes · idle');
+    expect(text()[3]).toBe('> studi  c · Claude · stopped');
   });
 
-  it('starts on the next row when the Pane you left was archived', async () => {
+  it('selects the row now in its place when the Pane you left was archived', async () => {
     const { source, text, press } = await openScriptedRow(['a', 'b', 'c', 'd'].map(paneRow), 2);
     source.rows = ['a', 'b', 'd'].map(paneRow);
     await press({ type: 'double' });
-    expect(text()[1]).toBe('d · Claude · stopped | · top of the list · | a · Claude · stopped | b · Claude · stopped');
+    expect(text()[3]).toBe('> studi  d · Claude · stopped');
+  });
+});
+
+describe('the open list', () => {
+  it('shows a new Pane as soon as its computer lists it', () => {
+    const { source, text } = startScripted();
+    source.rows = [{ ...paneRow('older'), activityAt: 10 }];
+    source.changed();
+    source.rows = [{ ...paneRow('older'), activityAt: 10 }, { ...paneRow('just-made'), activityAt: 20 }];
+    source.changed();
+    expect(text().slice(1, 3)).toEqual(['> studi  just-made · Claude · stopped', '   studi  older · Claude · stopped']);
   });
 
-  it('reaches every row of a list longer than the glasses show, through a More row', async () => {
+  it("opens each row on its own computer, though two computers have a Pane with the same id", async () => {
     const { source, text, press } = startScripted();
-    source.computerList = [{ id: 'studio', name: 'studio-mac', status: 'live', lastSeenAt: 1, paneCount: 25, workingCount: 0 }];
-    source.rows = Array.from({ length: 25 }, (_, index) => paneRow(`p${index + 1}`));
+    source.computerList = [
+      { id: 'studio', name: 'studio-mac', status: 'live', lastSeenAt: 1, os: 'macOS', entries: [] },
+      { id: 'build', name: 'build-box', status: 'live', lastSeenAt: 1, os: 'Linux', entries: [{ ...paneRow('api'), activityAt: 1 }] },
+    ];
+    source.rows = [{ ...paneRow('api'), activityAt: 2 }];
     source.changed();
+    expect(text().slice(1, 3)).toEqual(['> studi  api · Claude · stopped', '   build  api · Claude · stopped']);
+    await press({ type: 'down' });
     await press({ type: 'press' });
-    await press({ type: 'select', index: 0 });
-    const shown = () => text()[1]?.split(' | ') ?? [];
-    expect(shown()).toHaveLength(20);
-    expect(shown().slice(-2)).toEqual(['p19 · Claude · stopped', '· 6 more ·']);
+    expect(source.screenReads).toEqual(['build']);
+  });
 
-    await press({ type: 'select', index: 19 });
-    expect(shown().slice(0, 7)).toEqual(['p20 · Claude · stopped', 'p21 · Claude · stopped', 'p22 · Claude · stopped', 'p23 · Claude · stopped', 'p24 · Claude · stopped', 'p25 · Claude · stopped', '· top of the list ·']);
-    await press({ type: 'select', index: 5 });
-    expect(text()[0]).toBe('p25 · shell · idle');
+  it('keeps the rows of a computer that goes offline, says since when, and offers Retry on press', async () => {
+    const { source, text, press } = startScripted();
+    const studio: Computer = { id: 'studio', name: 'studio-mac', status: 'live', lastSeenAt: 1, os: 'macOS', entries: [] };
+    const build: Computer = { id: 'build', name: 'build-box', status: 'live', lastSeenAt: 1, os: 'Linux', entries: [{ ...paneRow('nightly-backup'), activityAt: 1 }] };
+    source.computerList = [studio, build];
+    source.rows = [{ ...paneRow('a'), activityAt: 2 }];
+    source.changed();
+    source.computerList = [studio, { ...build, status: 'offline' }];
+    source.changed();
+    expect(text()[2]).toBe('   build  nightly-backup · offline since 9:40');
+    await press({ type: 'down' });
+    await press({ type: 'press' });
+    expect(text()).toEqual([
+      'build-box · offline',
+      'build-box went offline at 9:40. / nightly-backup is from then. Pane keeps trying by itself. /  / Press to retry now.',
+      'press = retry   double press = back',
+    ]);
+    await press({ type: 'press' });
+    expect(source.retried).toEqual(['build']);
+    expect(text()[0]).toBe('All computers');
+  });
+});
+
+describe('home in outline marks (the firmware list)', () => {
+  function outlineHome() {
+    const scripted = startScripted('outline');
+    const studio: Computer = { id: 'studio', name: 'studio-mac', status: 'live', lastSeenAt: 1, os: 'macOS', entries: [] };
+    const build: Computer = { id: 'build', name: 'build-box', status: 'offline', lastSeenAt: 1, os: 'Linux', entries: [{ ...paneRow('nightly-backup'), activityAt: 1 }] };
+    scripted.source.computerList = [studio, build];
+    scripted.source.rows = [{ ...paneRow('a'), activityAt: 3 }, { ...paneRow('b'), activityAt: 2 }];
+    scripted.source.changed();
+    return scripted;
+  }
+
+  it('opens the terminal of the row the list press names', async () => {
+    const { source, text, press } = outlineHome();
+    expect(text()[1]).toBe('○ studi  a · Claude · stopped | ○ studi  b · Claude · stopped | □ build  offline since 9:40 · 1 Pane · retry');
+    await press({ type: 'select', index: 1 });
+    expect(source.screenReads).toEqual(['studio']);
+    expect(text()[0]).toContain('b');
+  });
+
+  it("opens an away computer's folded row on its Retry page", async () => {
+    const { text, press } = outlineHome();
+    await press({ type: 'select', index: 2 });
+    expect(text()[0]).toBe('build-box · offline');
   });
 });
 
 describe('a refused computer', () => {
   it('is retried by a press on home, which shows it connecting rather than the same refusal', () => {
     const { app, source, text } = startScripted();
-    source.computerList = [{ id: 'studio', name: 'studio-mac', status: 'refused', lastSeenAt: 1, paneCount: 0, workingCount: 0, refusal: { code: 'ERR_GLASSES_ORIGIN_REFUSED', message: "studio-mac doesn't allow this app.", next: 'Allow it.' } }];
+    source.computerList = [{ id: 'studio', name: 'studio-mac', status: 'refused', lastSeenAt: 1, os: 'macOS', entries: [], refusal: { code: 'ERR_GLASSES_ORIGIN_REFUSED', message: "studio-mac doesn't allow this app.", next: 'Allow it.' } }];
     source.changed();
     expect(text()[0]).toBe('studio-mac · not allowed');
     app.handle({ type: 'press' });
     expect(source.retried).toEqual(['studio']);
     // Retrying clears the refusal while the computer connects.
-    source.computerList = [{ id: 'studio', name: 'studio-mac', status: 'connecting', lastSeenAt: 1, paneCount: 0, workingCount: 0 }];
+    source.computerList = [{ id: 'studio', name: 'studio-mac', status: 'connecting', lastSeenAt: 1, os: 'macOS', entries: [] }];
     source.changed();
     expect(text()[0]).toBe('Pane · 1 computer');
     expect(text()[1]).toBe('Connecting to your computers…');
   });
 });
 
-describe('a new question', () => {
-  it('takes page 1 when it arrives on the all-clear page', () => {
-    const { source, text } = startScripted();
-    expect(text()[0]).toBe('1/1 · Pane · 1 computer · all clear');
-    source.cardList = [card('q1', 10)];
-    source.changed();
-    expect(text()[0]).toBe('1/2 · needs you · pane-q1 · studio-mac');
+describe('an info card', () => {
+  function withInfo() {
+    const scripted = startScripted();
+    scripted.source.rows = [paneRow('a')];
+    scripted.source.cardList = [card('q1', 20), { ...card('i1', 10, false), title: 'Tests pass', context: 'All 212 tests pass on studio-mac.' }];
+    scripted.source.changed();
+    return scripted;
+  }
+
+  it('has a row below the questions that opens its message, and the row clears once read', async () => {
+    const { text, press } = withInfo();
+    expect(text()).toEqual(['All computers · 1 needs you', '> studi  pane-q1 · needs you', '   studi  pane-i1 · Tests pass', '   studi  a · Claude · stopped', ' ', ' ', ' ']);
+    await press({ type: 'down' });
+    await press({ type: 'press' });
+    expect(text()).toEqual(['pane-i1 · studio-mac', 'Tests pass /  / All 212 tests pass on studio-mac.', 'double press = back']);
+    await press({ type: 'double' });
+    expect(text().slice(0, 4)).toEqual(['All computers · 1 needs you', '   studi  pane-q1 · needs you', '> studi  a · Claude · stopped', ' ']);
   });
 
-  it('takes page 1 when it arrives on the last page, and leaves any other page alone', () => {
+  it('is what the terminal footer offers, and a double press there selects its row', async () => {
+    const { text, press, source } = withInfo();
+    source.cardList = source.cardList.filter((each) => each.waiting === false);
+    source.changed();
+    await press({ type: 'down' });
+    await press({ type: 'press' });
+    expect(text().at(-1)).toBe('• pane-i1: Tests pass · double press for it');
+    await press({ type: 'double' });
+    expect(text()[1]).toBe('> studi  pane-i1 · Tests pass');
+  });
+});
+
+describe('a new question', () => {
+  it('takes the top row when it arrives while you are at the top', () => {
+    const { source, text } = startScripted();
+    source.rows = [paneRow('a')];
+    source.changed();
+    source.cardList = [card('q1', 10)];
+    source.changed();
+    expect(text().slice(0, 3)).toEqual(['All computers · 1 needs you', '> studi  pane-q1 · needs you', '   studi  a · Claude · stopped']);
+  });
+
+  it('leaves the row you selected further down alone', () => {
     const { app, source, text } = startScripted();
-    source.cardList = [card('i1', 5, false)];
+    source.rows = [paneRow('a'), paneRow('b')];
     source.changed();
     app.handle({ type: 'down' });
-    expect(text()[0]).toBe('2/2 · Pane · 1 computer');
-    source.cardList = [card('i1', 5, false), card('q1', 10)];
+    source.cardList = [card('q1', 10)];
     source.changed();
-    expect(text()[0]).toBe('1/3 · needs you · pane-q1 · studio-mac');
-    app.handle({ type: 'down' });
-    expect(text()[0]).toBe('2/3 · info · pane-i1 · studio-mac');
-    source.cardList = [card('i1', 5, false), card('q1', 10), card('q2', 20)];
-    source.changed();
-    expect(text()[0]).toBe('3/4 · info · pane-i1 · studio-mac');
+    expect(text().slice(1, 4)).toEqual(['   studi  pane-q1 · needs you', '   studi  a · Claude · stopped', '> studi  b · Claude · stopped']);
   });
 });

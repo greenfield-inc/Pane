@@ -1,32 +1,28 @@
-// The glasses app's state machine: home ↔ card ↔ full question; home → computers → Panes → terminal.
+// The glasses app's state machine: home (one list across every computer) ↔ card ↔ full question;
+// home → terminal; home → an away computer's Retry page.
 // It reads and acts through a PaneSource (the demo or the paired computers) and draws through `show`.
 import type { NotifyAnswer } from '../../shared/types/notify';
 import { BRIGHT, type Page } from './display';
 import type { Gesture } from './input';
-import { CHOICE_KEYS, GlassesError, SCREEN_RECONNECTING, isPaneEntry, type Card, type Computer, type Dictation, type PaneEntry, type PaneRow, type PaneSource, type TerminalKey } from './model';
+import { LIST_MARKS, homeListPage, homeRows, outlineRowAt, type HomeListView, type HomeRow, type ListMarks } from './homeList';
+import { CHOICE_KEYS, GlassesError, SCREEN_RECONNECTING, type Card, type Dictation, type PaneEntry, type PaneSource, type TerminalKey } from './model';
 import { findMenu, type Menu } from './menu';
 import {
   HALF_PAGE,
   KEY_LIST,
   TERMINAL_LINES,
-  allClearPage,
+  awayPage,
   cardPage,
   cardRows,
-  computersPage,
   connectingPage,
   dictationPage,
   fullQuestionPage,
-  homeCardPage,
+  infoCardPage,
   keyListPage,
   keysRefusedPage,
-  loadingPage,
-  moreStart,
   noComputerPage,
-  openPanePage,
-  panesPage,
   pickerPage,
   problemPage,
-  rowOrder,
   refusedPage,
   terminalFooter,
   terminalLines,
@@ -81,6 +77,8 @@ export interface AppDeps {
   now(): number;
   /** "9:40" for a time of day. */
   clock(epochMs: number): string;
+  /** How home rows are marked; LIST_MARKS unless set. */
+  marks?: ListMarks;
 }
 
 /**
@@ -139,51 +137,30 @@ type View =
   | { name: 'home' }
   | { name: 'card'; key: string; context: string[] }
   | { name: 'full'; key: string }
+  | { name: 'info'; key: string }
   | { name: 'voice-answer'; key: string; transcript: string }
-  | { name: 'computers' }
-  | { name: 'panes'; computerId: string; entries: PaneRow[] | null }
   | ({ name: 'terminal' } & TerminalState)
   | ({ name: 'dictation'; transcript: string } & TerminalState)
-  | { name: 'refused'; computerId: string; back: View }
+  /** A row of a computer that isn't live was pressed: why, and Retry. */
+  | { name: 'away'; computerId: string; rowName?: string }
   | { name: 'problem'; title: string; message: string; next?: string; back: View };
 
-/** The home pages: every card, then "Open a Pane…"; "open" marks that last page. */
-type HomeEntry = Card | 'open';
-
-/** The row last pressed in a list: its id, and where it was in case it is gone next time. */
+/** The selected home row: its key, and where it was in case it is gone next time. */
 interface ListFocus {
-  id: string;
+  key: string;
   index: number;
 }
 
-/** Where a list starts: the remembered row, or the nearest row `idOf` can name when it is gone. */
-function startOf<T>(rows: readonly T[], focus: ListFocus | null, idOf: (row: T) => string | null): number {
-  if (!focus) return 0;
-  const found = rows.findIndex((row) => idOf(row) === focus.id);
-  if (found >= 0) return found;
-  for (let distance = 0; distance < rows.length; distance += 1) {
-    for (const index of [focus.index + distance, focus.index - distance]) {
-      const row = rows[index];
-      if (row !== undefined && idOf(row) !== null) return index;
-    }
-  }
-  return 0;
-}
-
-const computerKey = (computer: Computer) => computer.id;
-const entryKey = (entry: PaneEntry) => `${entry.kind}:${entry.id}`;
-const rowKey = (row: PaneRow) => (isPaneEntry(row) ? entryKey(row) : null);
-
 export class GlassesApp {
   private view: View = { name: 'home' };
-  private homeIndex = 0;
-  private homeFocus: string | null = null;
-  /** The computer last picked, and the Session or Pane last opened on each computer. */
-  private computerFocus: ListFocus | null = null;
-  private readonly paneFocus = new Map<string, ListFocus>();
+  /** The selected home row; null is the top of the list. */
+  private homeFocus: ListFocus | null = null;
+  /** Shown in the home header after an answer, until the next swipe. */
   private confirmation: string | undefined;
   /** Cards answered here, hidden until the computer's next Notify state drops them. */
   private readonly answered = new Set<string>();
+  /** Info cards read here, gone from the list until the computer's next Notify state drops them. */
+  private readonly read = new Set<string>();
   private dictation: Dictation | null = null;
   /** Counts holds; a voice startup that finishes after its hold ended sees a newer number and stands down. */
   private listening = 0;
@@ -215,32 +192,47 @@ export class GlassesApp {
   }
 
   private cards(): Card[] {
-    return this.deps.source.cards().filter((card) => !this.answered.has(card.key));
+    return this.deps.source.cards().filter((card) => !this.answered.has(card.key) && !this.read.has(card.key));
   }
 
   private card(key: string): Card | undefined {
     return this.cards().find((card) => card.key === key);
   }
 
-  private homeEntries(): HomeEntry[] {
-    const cards = this.cards();
-    return cards.length ? [...cards, 'open'] : ['open'];
+  /** The home list's rows as the computers have them now, without cards answered here. */
+  private rows(): HomeRow[] {
+    return homeRows(this.deps.source.computers(), this.cards());
+  }
+
+  /** The selected row's index: the focused row, or the one now nearest its place. */
+  private selected(rows: readonly HomeRow[]): number {
+    const focus = this.homeFocus;
+    if (!focus) return 0;
+    const found = rows.findIndex((row) => row.key === focus.key);
+    return found >= 0 ? found : Math.max(0, Math.min(focus.index, rows.length - 1));
+  }
+
+  /** Selects the first row `test` matches; with none, the selection stays where it was. */
+  private focusOn(test: (row: HomeRow) => boolean): void {
+    const rows = this.rows();
+    const index = rows.findIndex(test);
+    const row = rows[index];
+    if (row) this.homeFocus = { key: row.key, index };
   }
 
   private sourceChanged(): void {
     const keys = new Set(this.deps.source.cards().map((card) => card.key));
     for (const key of this.answered) if (!keys.has(key)) this.answered.delete(key);
+    for (const key of this.read) if (!keys.has(key)) this.read.delete(key);
     const arrived = this.deps.source.cards().filter((card) => !this.seen.has(card.key));
     for (const card of arrived) this.seen.add(card.key);
-    // On the all-clear or "Open a Pane…" page, a new question takes page 1 (journey J2).
-    const question = arrived.find((card) => card.waiting);
-    if (this.view.name === 'home' && this.homeFocus === 'open' && question) {
-      this.homeFocus = this.cards()[0]?.key ?? 'open';
-      this.homeIndex = 0;
-    }
+    // At the top of the list, a new question takes the top row (journey J2).
+    if (this.view.name === 'home' && arrived.some((card) => card.waiting) && (this.homeFocus?.index ?? 0) === 0) this.homeFocus = null;
     const view = this.view;
     // A card answered on another screen leaves; go home rather than show a stale question.
-    if ((view.name === 'card' || view.name === 'full') && !this.card(view.key)) this.view = { name: 'home' };
+    if ((view.name === 'card' || view.name === 'full' || view.name === 'info') && !this.card(view.key)) this.view = { name: 'home' };
+    // A computer that answers again needs no Retry page.
+    if (view.name === 'away' && this.deps.source.computers().find((computer) => computer.id === view.computerId)?.status === 'live') this.view = { name: 'home' };
     this.render();
   }
 
@@ -264,54 +256,51 @@ export class GlassesApp {
         const card = this.card(view.key);
         return card ? fullQuestionPage(card) : this.homePage();
       }
+      case 'info': {
+        const card = this.card(view.key);
+        return card ? infoCardPage(card) : this.homePage();
+      }
       case 'voice-answer': {
         const card = this.deps.source.cards().find((candidate) => candidate.key === view.key);
         return card ? voiceAnswerPage(card, view.transcript) : this.homePage();
-      }
-      case 'computers':
-        return this.computersPage();
-      case 'panes': {
-        const name = this.computerName(view.computerId);
-        return view.entries ? panesPage(name, view.entries, this.panesStart(view.computerId, view.entries)) : loadingPage(`${name} · Sessions and Panes`, 'Loading…');
       }
       case 'terminal':
         return this.terminalPage(view);
       case 'dictation':
         return dictationPage(view.entry, view.lines, view.transcript);
-      case 'refused': {
+      case 'away': {
         const computer = source.computers().find((candidate) => candidate.id === view.computerId);
-        if (!computer?.refusal) return this.computersPage();
-        return refusedPage(computer.name, computer.refusal);
+        if (!computer) return this.homePage();
+        return computer.refusal ? refusedPage(computer.name, computer.refusal) : awayPage(computer, this.deps.clock, view.rowName);
       }
       case 'problem':
         return problemPage(view.title, view.message, view.next);
     }
   }
 
-  private homePage(): Page {
+  /** No computer answers and none has rows to show: home is one page about that. */
+  private unreachable(): boolean {
     const source = this.deps.source;
     const computers = source.computers();
-    if (!source.demo && computers.length && !computers.some((computer) => computer.status === 'live')) {
+    return !source.demo && computers.length > 0 && computers.every((computer) => computer.status !== 'live' && !computer.entries.length);
+  }
+
+  private homePage(): Page {
+    const computers = this.deps.source.computers();
+    if (this.unreachable()) {
       const refused = computers.find((computer) => computer.refusal);
       if (refused?.refusal) return refusedPage(refused.name, refused.refusal);
       if (computers.some((computer) => computer.status === 'offline')) return noComputerPage(computers.length, computers.find((computer) => computer.hint)?.hint);
       return connectingPage(computers.length);
     }
-    const entries = this.homeEntries();
-    const index = this.resolveHomeIndex(entries);
-    const entry = entries[index] ?? 'open';
-    const position = { index: index + 1, total: entries.length, computerCount: computers.length, confirmation: this.confirmation };
-    if (entries.length === 1) return allClearPage(computers.length, this.confirmation);
-    return entry === 'open' ? openPanePage(position) : homeCardPage(entry, position);
+    const rows = this.rows();
+    const view: HomeListView = { selected: this.selected(rows), marks: this.marks() };
+    if (this.confirmation) view.confirmation = this.confirmation;
+    return homeListPage(rows, view, this.deps.clock);
   }
 
-  /** Keeps the page you are on when cards arrive or leave. */
-  private resolveHomeIndex(entries: HomeEntry[]): number {
-    const focused = this.homeFocus === null ? -1 : entries.findIndex((entry) => (entry === 'open' ? 'open' : entry.key) === this.homeFocus);
-    this.homeIndex = focused >= 0 ? focused : Math.min(this.homeIndex, entries.length - 1);
-    const entry = entries[this.homeIndex];
-    this.homeFocus = entry === undefined ? null : entry === 'open' ? 'open' : entry.key;
-    return this.homeIndex;
+  private marks(): ListMarks {
+    return this.deps.marks ?? LIST_MARKS;
   }
 
   private computerName(id: string): string {
@@ -385,16 +374,20 @@ export class GlassesApp {
       case 'home': this.onHome(gesture); break;
       case 'card': this.onCard(view, gesture); break;
       case 'full': if (gesture.type === 'double' || gesture.type === 'press') this.go({ name: 'card', key: view.key, context: [] }); break;
+      case 'info':
+        // Leaving an info card marks it read, so its row leaves the list.
+        if (gesture.type === 'double') {
+          this.read.add(view.key);
+          this.goHome();
+        }
+        break;
       case 'voice-answer': if (gesture.type === 'release') void this.finishVoiceAnswer(view.key); break;
-      case 'computers': this.onComputers(gesture); break;
-      case 'panes': this.onPanes(view, gesture); break;
       case 'terminal': this.onTerminal(view, gesture); break;
       case 'dictation': if (gesture.type === 'release') void this.finishDictation(view); break;
-      case 'refused':
-        if (gesture.type === 'press') {
-          this.deps.source.retry(view.computerId);
-          this.go(view.back);
-        } else if (gesture.type === 'double') this.go(view.back);
+      case 'away':
+        // Retry goes back to the list, where the computer's rows show it connecting.
+        if (gesture.type === 'press') this.deps.source.retry(view.computerId);
+        if (gesture.type === 'press' || gesture.type === 'double') this.go({ name: 'home' });
         break;
       case 'problem': if (gesture.type === 'double' || gesture.type === 'press') this.go(view.back); break;
     }
@@ -410,18 +403,16 @@ export class GlassesApp {
     this.render();
   }
 
-  private goHome(focusKey?: string): void {
-    if (focusKey) {
-      this.homeFocus = focusKey;
-      this.homeIndex = 0;
-    }
+  /** Home with the row `test` matches selected, or where you left it. */
+  private goHome(test?: (row: HomeRow) => boolean): void {
+    if (test) this.focusOn(test);
     this.go({ name: 'home' });
   }
 
   private onHome(gesture: Gesture): void {
     const source = this.deps.source;
     const computers = source.computers();
-    if (!source.demo && computers.length && !computers.some((computer) => computer.status === 'live')) {
+    if (this.unreachable()) {
       if (gesture.type === 'press') {
         // Retry now: a computer allowed again shows "Connecting…", then home, or its refusal again.
         const refused = computers.filter((computer) => computer.refusal);
@@ -431,28 +422,33 @@ export class GlassesApp {
       } else if (gesture.type === 'double') this.deps.exit();
       return;
     }
-    const entries = this.homeEntries();
-    const index = this.resolveHomeIndex(entries);
-    const entry = entries[index] ?? 'open';
+    const rows = this.rows();
+    const index = this.selected(rows);
+    const row = rows[index];
     switch (gesture.type) {
       case 'up':
       case 'down': {
-        const next = Math.max(0, Math.min(entries.length - 1, index + (gesture.type === 'down' ? 1 : -1)));
-        const target = entries[next] ?? 'open';
-        this.homeIndex = next;
-        this.homeFocus = target === 'open' ? 'open' : target.key;
+        // The firmware list (outline marks) moves its own selection.
+        if (this.marks() === 'outline') return;
+        const next = Math.max(0, Math.min(rows.length - 1, index + (gesture.type === 'down' ? 1 : -1)));
+        const target = rows[next];
+        this.homeFocus = target ? { key: target.key, index: next } : null;
         this.confirmation = undefined;
         this.render();
         return;
       }
       case 'press':
-        this.confirmation = undefined;
-        if (entry === 'open') this.go({ name: 'computers' });
-        else if (entry.waiting) this.openCard(entry);
-        else if (entry.panelId) this.openTerminal(entry.computerId, { kind: 'pane', id: entry.paneId ?? entry.panelId, name: entry.paneName, agent: '…', status: 'idle', panelId: entry.panelId });
+        if (row) this.openRow(row, index);
         return;
+      case 'select': {
+        if (this.marks() !== 'outline') return;
+        const pressed = outlineRowAt(rows, gesture.index, this.deps.clock);
+        if (pressed) this.openRow(pressed, rows.indexOf(pressed));
+        return;
+      }
       case 'hold':
-        if (entry !== 'open' && entry.waiting) void this.startVoiceAnswer(entry);
+        // The firmware list doesn't report its selection, so outline marks answer by press only.
+        if (row?.kind === 'question' && this.marks() === 'logos') void this.startVoiceAnswer(row.card);
         return;
       case 'double':
         this.deps.exit();
@@ -460,6 +456,16 @@ export class GlassesApp {
       default:
         return;
     }
+  }
+
+  /** A question opens its card, an info card its message, a live row its terminal; a row of an away computer says why and offers Retry. */
+  private openRow(row: HomeRow, index: number): void {
+    this.homeFocus = { key: row.key, index };
+    this.confirmation = undefined;
+    if (row.kind === 'question') this.openCard(row.card);
+    else if (row.kind === 'info') this.go({ name: 'info', key: row.card.key });
+    else if (row.kind === 'entry' && row.status === 'live') this.openTerminal(row.computerId, row.entry);
+    else this.go(row.kind === 'entry' ? { name: 'away', computerId: row.computerId, rowName: row.entry.name } : { name: 'away', computerId: row.computerId });
   }
 
   private openCard(card: Card): void {
@@ -481,7 +487,7 @@ export class GlassesApp {
       this.goHome();
       return;
     }
-    if (gesture.type === 'double') this.goHome(card.key);
+    if (gesture.type === 'double') this.goHome((row) => row.kind === 'question' && row.card.key === card.key);
     else if (gesture.type === 'hold') void this.startVoiceAnswer(card);
     else if (gesture.type === 'select') {
       const row = cardRows(card)[gesture.index];
@@ -496,7 +502,6 @@ export class GlassesApp {
     this.answered.add(card.key);
     this.confirmation = `Answered ${card.paneName}: ${summary}`;
     this.homeFocus = null;
-    this.homeIndex = 0;
     this.go({ name: 'home' });
     try {
       await this.deps.source.answer(card, answer);
@@ -542,73 +547,6 @@ export class GlassesApp {
     // On an approval, a spoken answer is the reason for "Not yet".
     if (card.ui === 'approve') await this.sendAnswer(card, { approved: false, note: text }, `Not yet, "${text}"`);
     else await this.sendAnswer(card, { text }, `"${text}"`);
-  }
-
-  private onComputers(gesture: Gesture): void {
-    if (gesture.type === 'double') {
-      this.goHome();
-      return;
-    }
-    if (gesture.type !== 'select') return;
-    const computers = this.deps.source.computers();
-    const start = startOf(computers, this.computerFocus, computerKey);
-    const index = rowOrder(computers.length, start)[gesture.index];
-    if (index === 'more') {
-      const next = moreStart(computers.length, start);
-      this.computerFocus = { id: computers[next]?.id ?? '', index: next };
-      this.render();
-      return;
-    }
-    const computer = index == null ? undefined : computers[index];
-    if (index == null || !computer) return;
-    this.computerFocus = { id: computer.id, index };
-    if (computer.status === 'live') void this.openPanes(computer.id);
-    else if (computer.refusal) this.go({ name: 'refused', computerId: computer.id, back: { name: 'computers' } });
-    else {
-      this.deps.source.retry(computer.id);
-      this.render();
-    }
-  }
-
-  private computersPage(): Page {
-    const computers = this.deps.source.computers();
-    return computersPage(computers, this.deps.clock, startOf(computers, this.computerFocus, computerKey));
-  }
-
-  private panesStart(computerId: string, entries: readonly PaneRow[]): number {
-    return startOf(entries, this.paneFocus.get(computerId) ?? null, rowKey);
-  }
-
-  private async openPanes(computerId: string): Promise<void> {
-    this.go({ name: 'panes', computerId, entries: null });
-    try {
-      const entries = await this.deps.source.panes(computerId);
-      const view = this.view;
-      if (view.name === 'panes' && view.computerId === computerId) this.go({ ...view, entries });
-    } catch (error) {
-      this.showProblem(this.computerName(computerId), error, { name: 'computers' });
-    }
-  }
-
-  private onPanes(view: { computerId: string; entries: PaneRow[] | null }, gesture: Gesture): void {
-    if (gesture.type === 'double') this.go({ name: 'computers' });
-    else if (gesture.type === 'select') {
-      // A press on the gap, a note or the divider opens nothing; More continues the list.
-      const entries = view.entries ?? [];
-      const start = this.panesStart(view.computerId, entries);
-      const index = rowOrder(entries.length, start)[gesture.index];
-      if (index === 'more') {
-        const next = moreStart(entries.length, start);
-        const row = entries[next];
-        this.paneFocus.set(view.computerId, { id: row ? rowKey(row) ?? '' : '', index: next });
-        this.render();
-        return;
-      }
-      const row = index == null ? undefined : entries[index];
-      if (index == null || !row || !isPaneEntry(row)) return;
-      this.paneFocus.set(view.computerId, { id: entryKey(row), index });
-      this.openTerminal(view.computerId, row);
-    }
   }
 
   // ---------- terminal ----------
@@ -686,8 +624,7 @@ export class GlassesApp {
       // A drop keeps the last screen up and reading; only a computer that stopped reconnecting is a problem.
       const reconnecting = error instanceof GlassesError && error.code === SCREEN_RECONNECTING;
       if (!reconnecting && this.view.name === 'terminal' && read === this.reads) {
-        this.showProblem(entry.name, error, { name: 'panes', computerId, entries: null });
-        void this.openPanesQuietly(computerId);
+        this.showProblem(entry.name, error, { name: 'home' });
         return;
       }
     }
@@ -728,19 +665,6 @@ export class GlassesApp {
       return;
     }
     this.update(current, { hold: { ...current.hold, lines: terminalLines(rows), start: wrapRows(rows.slice(0, at)).length, readAt: now, readScreen: screen } });
-  }
-
-  /** Fills the Panes list behind a problem page, so double press lands on a real list. */
-  private async openPanesQuietly(computerId: string): Promise<void> {
-    const view = this.view;
-    if (view.name !== 'problem' || view.back.name !== 'panes') return;
-    try {
-      const entries = await this.deps.source.panes(computerId);
-      const current = this.view;
-      if (current.name === 'problem') this.view = { ...current, back: { name: 'panes', computerId, entries } };
-    } catch {
-      // The problem page already says what failed.
-    }
   }
 
   private onTerminal(view: Extract<View, { name: 'terminal' }>, gesture: Gesture): void {
@@ -848,9 +772,11 @@ export class GlassesApp {
         this.readNow();
         return;
       case 'double': {
+        // Home, on the card named in the footer (its question, or its Pane's row), else on this Pane.
         const card = this.elsewhere(view);
-        if (card) this.goHome(card.key);
-        else void this.openPanes(view.computerId);
+        const panel = card ? card.panelId : view.entry.panelId;
+        const computerId = card ? card.computerId : view.computerId;
+        this.goHome((row) => row.computerId === computerId && (row.kind === 'question' || row.kind === 'info' ? row.card.key === card?.key : row.kind === 'entry' && row.entry.panelId === panel));
         return;
       }
       default:

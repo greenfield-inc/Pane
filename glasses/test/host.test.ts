@@ -3,7 +3,6 @@ import { encodeGlassesPairingCode } from '../../shared/types/glasses';
 import type { NotifyItem, NotifySharedState } from '../../shared/types/notify';
 import { boundary, decodeBoundary, type JsonValue } from '../../shared/validation/boundaryDecoder';
 import { HostHub, pairComputers, type HostDeps, type PairedComputer } from '../src/host';
-import { isPaneEntry } from '../src/model';
 import type { Cancel } from '../src/timers';
 
 interface Seen {
@@ -71,7 +70,7 @@ class FakeHost {
     this.streams = [];
   }
 
-  emit(channel: string, arg: NotifySharedState): void {
+  emit(channel: string, arg: NotifySharedState | JsonValue): void {
     const data = JSON.stringify({ channel, args: [arg], timestamp: new Date().toISOString() });
     for (const stream of this.streams) stream.enqueue(new TextEncoder().encode(`event: daemon-event\ndata: ${data}\n\n`));
   }
@@ -91,6 +90,8 @@ function host(url: string, items: NotifyItem[] = []): FakeHost {
   fake.handlers.set('sessions:get-all-with-projects', () => ({ success: true, data: [] }));
   fake.handlers.set('orchestration-sessions:list', () => ({ success: true, data: { sessions: [] } }));
   fake.handlers.set('runpane:workspace:state', () => ({ ok: true, entries: [] }));
+  // A Pane older than the OS report answers without `os`.
+  fake.handlers.set('remote:pwa-affordances', () => ({}));
   return fake;
 }
 
@@ -335,16 +336,16 @@ describe('HostHub', () => {
     a.handlers.set('panels:list', ([paneId]) => ({ success: true, data: paneId === 'p1' ? panels : [] }));
     a.handlers.set('runpane:workspace:state', () => ({ ok: true, entries: [{ panelId: 'term', to: 'working', running: true, baseline: true }] }));
     const { hub: one } = hub([a]);
-    await until(() => one.computers()[0]?.status === 'live');
-    expect(await one.panes(a.url)).toEqual([
+    await until(() => (one.computers()[0]?.entries.length ?? 0) > 0);
+    expect(one.computers()[0]?.entries).toEqual([
       { kind: 'session', id: 's1', name: 'even g2 app', agent: 'Claude', status: 'idle', panelId: 'sp1' },
-      { kind: 'gap' },
       { kind: 'pane', id: 'p1', name: 'fix-login', agent: 'Claude', status: 'working', panelId: 'term' },
     ]);
+    expect(one.computers()[0]?.os).toBeNull();
     one.stop();
   });
 
-  it('orders rows as the Pane apps do: Pinned, Sessions, a gap, Panes, and says when Sessions are unavailable', async () => {
+  it('keeps the Pane apps\' order among rows with no time: Pinned, Sessions, then Panes', async () => {
     const a = host('https://studio.tail1.ts.net:8443');
     const panes: JsonValue[] = [
       { id: 'p1', name: 'alpha', isFavorite: true, favoritePinnedAt: '2026-10-01T00:00:00.000Z' },
@@ -359,12 +360,8 @@ describe('HostHub', () => {
     ] } }));
     a.handlers.set('panels:list', ([paneId]) => ({ success: true, data: [{ id: `t-${String(paneId)}`, type: 'terminal', title: 'Terminal', state: { isActive: true, customState: { isInitialized: true } } }] }));
     const { hub: one } = hub([a]);
-    await until(() => one.computers()[0]?.status === 'live');
-    const names = async () => (await one.panes(a.url)).map((row) => ('name' in row ? row.name : row.kind === 'note' ? row.text : ''));
-    expect(await names()).toEqual(['starred', 'gamma', 'alpha', 'plain', '', 'beta']);
-
-    a.handlers.set('orchestration-sessions:list', () => ({ success: false, error: 'Sessions database is busy' }));
-    expect(await names()).toEqual(['gamma', 'alpha', 'Sessions unavailable', '', 'beta']);
+    await until(() => (one.computers()[0]?.entries.length ?? 0) > 0);
+    expect(one.computers()[0]?.entries.map((entry) => entry.name)).toEqual(['starred', 'gamma', 'alpha', 'plain', 'beta']);
     one.stop();
   });
 
@@ -376,8 +373,64 @@ describe('HostHub', () => {
     ] }));
     a.handlers.set('panels:list', ([paneId]) => ({ success: true, data: [{ id: `t-${String(paneId)}`, type: 'terminal', title: 'Terminal', state: { isActive: true, customState: { isInitialized: true } } }] }));
     const { hub: one } = hub([a]);
+    await until(() => (one.computers()[0]?.entries.length ?? 0) > 0);
+    expect(one.computers()[0]?.entries.map((entry) => entry.name)).toEqual(['newest', 'middle', 'oldest']);
+    one.stop();
+  });
+
+  it("reads each row's last activity, and the OS the computer reports", async () => {
+    const a = host('https://studio.tail1.ts.net:8443');
+    a.handlers.set('remote:pwa-affordances', () => ({ os: 'Linux' }));
+    const panes: JsonValue[] = [
+      { id: 'p1', name: 'busy', createdAt: '2026-10-01T00:00:00.000Z', lastActivity: '2026-10-29T10:30:00.000Z' },
+      { id: 'p2', name: 'quiet', createdAt: '2026-10-01T00:00:00.000Z' },
+    ];
+    a.handlers.set('sessions:get-all-with-projects', () => ({ success: true, data: [{ sessions: panes }] }));
+    a.handlers.set('orchestration-sessions:list', () => ({ success: true, data: { sessions: [
+      { id: 's1', name: 'planner', agent: 'claude', internalSessionId: 'i1', panelIds: { claude: 'sp1' }, updatedAt: '2026-10-28T09:00:00.000Z' },
+    ] } }));
+    a.handlers.set('panels:list', ([paneId]) => ({ success: true, data: [{ id: `t-${String(paneId)}`, type: 'terminal', title: 'Terminal', state: { isActive: true, customState: { isInitialized: true } } }] }));
+    const { hub: one } = hub([a]);
+    await until(() => one.computers()[0]?.os === 'Linux' && (one.computers()[0]?.entries.length ?? 0) > 0);
+    expect(one.computers()[0]?.entries.map((entry) => [entry.name, entry.activityAt])).toEqual([
+      ['planner', 1793178000000],
+      ['busy', 1793269800000],
+      ['quiet', 1790812800000],
+    ]);
+    one.stop();
+  });
+
+  it('lists a new Pane a second after its computer announces it', async () => {
+    const a = host('https://studio.tail1.ts.net:8443');
+    a.handlers.set('panels:list', ([paneId]) => ({ success: true, data: [{ id: `t-${String(paneId)}`, type: 'terminal', title: 'Terminal', state: { isActive: true, customState: { isInitialized: true } } }] }));
+    const { hub: one, timers } = hub([a]);
     await until(() => one.computers()[0]?.status === 'live');
-    expect((await one.panes(a.url)).filter(isPaneEntry).map((entry) => entry.name)).toEqual(['newest', 'middle', 'oldest']);
+    a.handlers.set('sessions:get-all-with-projects', () => ({ success: true, data: [{ sessions: [{ id: 'p9', name: 'just-made' }] }] }));
+    a.emit('panel:created', {});
+    await flush();
+    timers.advance(999);
+    await flush();
+    expect(one.computers()[0]?.entries).toEqual([]);
+    timers.advance(1);
+    await until(() => (one.computers()[0]?.entries.length ?? 0) > 0);
+    expect(one.computers()[0]?.entries.map((entry) => entry.name)).toEqual(['just-made']);
+    one.stop();
+  });
+
+  it('reads the Panes again ten seconds after a failed read', async () => {
+    const a = host('https://studio.tail1.ts.net:8443');
+    a.handlers.set('panels:list', ([paneId]) => ({ success: true, data: [{ id: `t-${String(paneId)}`, type: 'terminal', title: 'Terminal', state: { isActive: true, customState: { isInitialized: true } } }] }));
+    // An answer the glasses can't read fails the list read, while Notify and the stream stay up.
+    a.handlers.set('sessions:get-all-with-projects', () => ({ success: true, data: 'database is locked' }));
+    const { hub: one, timers } = hub([a]);
+    await until(() => one.computers()[0]?.status === 'live');
+    a.handlers.set('sessions:get-all-with-projects', () => ({ success: true, data: [{ sessions: [{ id: 'p1', name: 'api' }] }] }));
+    timers.advance(9_999);
+    await flush();
+    expect(one.computers()[0]?.entries).toEqual([]);
+    timers.advance(1);
+    await until(() => (one.computers()[0]?.entries.length ?? 0) > 0);
+    expect(one.computers()[0]?.entries.map((entry) => entry.name)).toEqual(['api']);
     one.stop();
   });
 
@@ -396,8 +449,8 @@ describe('HostHub', () => {
     ];
     a.handlers.set('panels:list', ([paneId]) => ({ success: true, data: paneId === 'tool' ? tool : shells }));
     const { hub: one } = hub([a]);
-    await until(() => one.computers()[0]?.status === 'live');
-    expect((await one.panes(a.url)).filter(isPaneEntry).map((entry) => [entry.name, entry.panelId])).toEqual([['dev-server', 'runner'], ['shells', 'used']]);
+    await until(() => (one.computers()[0]?.entries.length ?? 0) > 0);
+    expect(one.computers()[0]?.entries.map((entry) => [entry.name, entry.panelId])).toEqual([['dev-server', 'runner'], ['shells', 'used']]);
     one.stop();
   });
 
@@ -436,7 +489,7 @@ describe('HostHub', () => {
     const { hub: one } = hub([a]);
     await until(() => one.computers()[0]?.status === 'live');
     a.refuse = { status: 403, code: 'ERR_GLASSES_ORIGIN_REFUSED', message: 'This request came from https://even.example.', next: 'Allow it.' };
-    await one.panes(a.url).catch(() => []);
+    await one.scrollback(a.url, 'panel-1').catch(() => []);
     expect(one.computers()[0]?.status).toBe('refused');
     a.refuse = null;
     one.retry(a.url);
