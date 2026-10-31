@@ -40,11 +40,11 @@ export interface NotifyServiceDependencies {
   machine: string;
   /** Sends the shared state to every connected screen and phone (`notify:shared-changed`). */
   publish: (state: NotifySharedState) => void;
-  /** Sends a command for the connected host's question to that host. */
-  sendToHost: (command: NotifyRemoteCommand) => Promise<void>;
-  /** Reads the connected host's state again, after it refused a command. */
-  refreshHost: () => void;
-  /** Shows the host's Pane in this window, for Open in Pane on the host's question. */
+  /** Sends a command for a saved machine's question to that machine, under the id it knows the question by. */
+  sendToMachine: (machineId: string, command: NotifyRemoteCommand) => Promise<void>;
+  /** Reads a saved machine's state again, after it refused or missed a command. */
+  refreshMachine: (machineId: string) => void;
+  /** Shows the connected host's Pane in this window, for Open in Pane on the host's question. */
   showHostPane: (paneId: string, panelId?: string) => void;
   /** Hears each new question once and each one that stops waiting (the phone alert). */
   onQuestion?: (event: { item: NotifyItem; open: boolean }) => void;
@@ -150,7 +150,7 @@ export class NotifyService {
       case 'show-details': await this.updateSettings({ showDetails: command.shown }); return;
       case 'open-in-pane': await this.openInPane(command.id); return;
       default:
-        if ('id' in command && command.id && this.queue.isRemote(command.id)) await this.runOnHost(command);
+        if ('id' in command && command.id && this.queue.remoteTarget(command.id)) await this.runOnMachine(command);
         else this.queue.run(command);
     }
   }
@@ -164,13 +164,18 @@ export class NotifyService {
     return this.queue.sharedState();
   }
 
-  /** A command for the connected host's question. What stays on this screen runs here. */
-  private async runOnHost(command: Exclude<Extract<NotifyCommand, { id: string }>, { type: 'open-in-pane' }>): Promise<void> {
+  /**
+   * A command for a saved machine's question: it goes to that machine only, under the id the
+   * machine knows the question by. What stays on this screen runs here.
+   */
+  private async runOnMachine(command: Exclude<Extract<NotifyCommand, { id: string }>, { type: 'open-in-pane' }>): Promise<void> {
+    const target = this.queue.remoteTarget(command.id);
+    if (!target) return;
     if (command.type === 'hover-info') {
       this.queue.run(command);
       return;
     }
-    let hostCommand: NotifyRemoteCommand;
+    let machineCommand: NotifyRemoteCommand;
     if (command.type === 'remind') {
       const { after } = command;
       // "When I switch to Pane" waits for this Pane only.
@@ -178,33 +183,28 @@ export class NotifyService {
         this.queue.remindHere(command.id);
         return;
       }
-      hostCommand = { ...command, after };
+      machineCommand = { ...command, id: target.id, after };
     } else {
-      hostCommand = command;
+      machineCommand = { ...command, id: target.id };
     }
     // ✕ on a "Sent to" or "Stopped waiting" card only clears this screen's strip.
     if (command.type === 'dismiss' && !this.queue.snapshot().queue.includes(command.id)) {
       this.queue.run(command);
       return;
     }
-    const remote = this.queue.snapshot().remote;
-    if (remote && !remote.online) return;
-    // Before the send: the host's next state can arrive before its reply does.
+    if (!target.online) return;
+    // Before the send: the machine's next state can arrive before its reply does.
     if (command.type === 'answer') this.queue.noteAnsweredHere(command.id, true);
     try {
-      await this.deps.sendToHost(hostCommand);
+      await this.deps.sendToMachine(target.machineId, machineCommand);
     } catch (error) {
       if (command.type === 'answer') this.queue.noteAnsweredHere(command.id, false);
       const code = error instanceof Error && 'code' in error ? String(error.code) : '';
-      console.warn(`[Notify] ${command.type} was not sent to ${remote?.machine ?? 'the host'}:`, error);
-      if (UNREACHABLE_CODES.has(code)) {
-        // The cards say so until a read of the host succeeds: now, if the link is back, or on reconnect.
-        if (remote) this.queue.setRemote({ machine: remote.machine, online: false });
-        this.deps.refreshHost();
-        return;
-      }
-      // Refused (another screen got there first, or the hold ended): the host's state says how.
-      this.deps.refreshHost();
+      console.warn(`[Notify] ${command.type} was not sent to ${target.machine}:`, error);
+      // The cards say so until a read of the machine succeeds: now, if the link is back, or on reconnect.
+      if (UNREACHABLE_CODES.has(code)) this.queue.setRemote(target.machineId, { machine: target.machine, online: false });
+      // Refused (another screen got there first, or the hold ended): the machine's state says how.
+      this.deps.refreshMachine(target.machineId);
     }
   }
 
@@ -245,10 +245,11 @@ export class NotifyService {
 
   private async openInPane(itemId: string): Promise<void> {
     const item = this.queue.snapshot().items.find(candidate => candidate.id === itemId);
-    if (!item?.source.paneId) return;
+    // A Pane on a machine the app isn't on opens after switching there, which this card doesn't do.
+    if (!item?.source.paneId || item.elsewhere) return;
     this.windows.closeRound();
     this.queue.run({ type: 'dock', id: itemId });
-    if (!this.queue.isRemote(itemId)) {
+    if (!this.queue.remoteTarget(itemId)) {
       await this.deps.focusPanel(item.source.paneId, item.source.panelId);
       return;
     }
@@ -372,7 +373,9 @@ export class NotifyService {
   /** Connected screens and phones get the shared state when it changes, not on this screen's own moves. */
   private publishShared(): void {
     const state = this.queue.sharedState();
-    const key = JSON.stringify(state);
+    // The revision also rises on changes that never reach the shared state, such as another
+    // machine's questions arriving; publishing those would echo between two machines forever.
+    const key = JSON.stringify({ ...state, revision: undefined });
     if (key === this.lastShared) return;
     const previous = this.lastStates;
     this.lastShared = key;
@@ -394,8 +397,8 @@ export class NotifyService {
   }
 }
 
-/** Failures that mean the host wasn't reached, as opposed to the host refusing the command. */
-const UNREACHABLE_CODES = new Set(['ERR_REMOTE_OFFLINE', 'ERR_REMOTE_TRANSPORT', 'ERR_NOTIFY_NOT_CONNECTED']);
+/** Failures that mean the machine wasn't reached, as opposed to the machine refusing the command. */
+const UNREACHABLE_CODES = new Set(['ERR_REMOTE_OFFLINE', 'ERR_REMOTE_TRANSPORT', 'ERR_MACHINE_OFFLINE', 'ERR_MACHINE_UNKNOWN']);
 
 function notifySettings(config: AppConfig): NotifySettings {
   return { ...DEFAULT_NOTIFY_SETTINGS, ...config.notify };

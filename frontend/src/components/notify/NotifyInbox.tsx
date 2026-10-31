@@ -7,6 +7,8 @@ import { runNotify, useNotifyStore } from '../../stores/notifyStore';
 import { NotifyCard } from './NotifyCard';
 import { relativeAge, shortcutLabel } from './notifyFormat';
 import { useNow } from './useNow';
+import { MachineMark } from '../machines/MachineMark';
+import { useAllMachinesStore } from '../../stores/allMachinesStore';
 
 type InboxTab = 'waiting' | 'earlier';
 
@@ -118,6 +120,12 @@ export function NotifyInbox() {
   const updates = items.filter((item) => item.state === 'info').sort(oldestFirst);
   const earlier = items.filter((item) => item.state === 'answered' || item.state === 'expired').sort(newestFirst);
   const shortcut = shortcutLabel(snapshot?.settings.shortcut ?? 'Control+Shift+Space', isMac());
+  // Each card names its machine with the mark the sidebar publishes for it; dimmed while it can't be reached.
+  const machines = useAllMachinesStore((state) => state.entries);
+  const machineMark = (item: NotifyItem) => {
+    const machine = item.machineId ? machines.find((entry) => entry.id === item.machineId) : undefined;
+    return machine && <MachineMark os={machine.os} slot={machine.slot} presence={item.unreachable ? 'dimmed' : 'solid'} size="logo" />;
+  };
 
   const tabButton = (id: InboxTab, label: string, count: number) => (
     <button
@@ -171,7 +179,7 @@ export function NotifyInbox() {
                       collapsing, so the card's shadow and menu show the rest of the time. */}
                   <div className={cn('min-h-0', leaving && 'overflow-hidden')}>
                     <div className="pb-2.5">
-                      <NotifyCard item={item} view="question" form="inbox" menuPlacement="below" onCommand={runNotify} />
+                      <NotifyCard item={item} view="question" form="inbox" menuPlacement="below" onCommand={runNotify} machineMark={machineMark(item)} />
                     </div>
                   </div>
                 </div>

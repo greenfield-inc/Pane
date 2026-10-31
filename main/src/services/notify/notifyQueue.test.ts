@@ -347,12 +347,15 @@ describe('NotifyQueue', () => {
   });
 });
 
-/** A host and the screens connected to it, wired the way the event stream wires them. */
+/** A host and the screens that saved it as the machine `studio`, wired the way its event stream wires them. */
 function connect(host: NotifyQueue, ...screens: NotifyQueue[]) {
-  const push = () => { for (const screen of screens) screen.setRemote({ machine: 'mac-studio', online: true, state: host.sharedState() }); };
+  const push = () => { for (const screen of screens) screen.setRemote('studio', { machine: 'mac-studio', online: true, state: host.sharedState() }); };
   host.on('change', push);
   push();
 }
+
+/** The key a screen gives the studio machine's question: its machine id, then its id there. */
+const onStudio = (id: string) => `studio:${id}`;
 
 describe('NotifyQueue across machines', () => {
   beforeEach(() => {
@@ -369,16 +372,18 @@ describe('NotifyQueue across machines', () => {
     vi.advanceTimersByTime(1_000);
     const laptopCall = ask(laptop, migration, codex);
 
-    const [hostId, laptopId] = laptop.snapshot().queue;
+    const hostId = onlyId(host);
+    const [hostKey, laptopId] = laptop.snapshot().queue;
+    expect(hostKey).toBe(onStudio(hostId));
     expect(laptop.snapshot().items.map(item => [item.title, item.machine])).toEqual([
       ['Apply migration 0042 to staging?', 'parsa-devbox'],
       ['Which session store should the refactor use?', 'mac-studio'],
     ]);
-    expect(laptop.snapshot().strip).toEqual({ kind: 'question', itemId: hostId });
-    expect(laptop.isRemote(hostId)).toBe(true);
-    expect(laptop.isRemote(laptopId)).toBe(false);
+    expect(laptop.snapshot().strip).toEqual({ kind: 'question', itemId: hostKey });
+    expect(laptop.remoteTarget(hostKey)).toEqual({ machineId: 'studio', machine: 'mac-studio', online: true, id: hostId });
+    expect(laptop.remoteTarget(laptopId)).toBeNull();
 
-    laptop.noteAnsweredHere(hostId, true);
+    laptop.noteAnsweredHere(hostKey, true);
     host.runRemote({ type: 'answer', id: hostId, answer: { choice: 'Keep Redis' } }, 'parsa-devbox');
     laptop.run({ type: 'answer', id: laptopId, answer: { approved: true } });
     await vi.advanceTimersByTimeAsync(3_000);
@@ -395,15 +400,17 @@ describe('NotifyQueue across machines', () => {
     const call = ask(host, migration, claude);
     const id = onlyId(host);
 
-    answering.noteAnsweredHere(id, true);
+    answering.noteAnsweredHere(onStudio(id), true);
     host.runRemote({ type: 'answer', id, answer: { approved: true } }, 'parsa-devbox');
-    for (const screen of [host, answering, watching]) expect(screen.snapshot().strip).toEqual({ kind: 'sent', itemId: id });
+    expect(host.snapshot().strip).toEqual({ kind: 'sent', itemId: id });
+    for (const screen of [answering, watching]) expect(screen.snapshot().strip).toEqual({ kind: 'sent', itemId: onStudio(id) });
     expect(host.snapshot().items[0].answeredOn).toBe('parsa-devbox');
     expect(answering.snapshot().items[0].answeredOn).toBeUndefined();
     expect(watching.snapshot().items[0].answeredOn).toBe('parsa-devbox');
 
     host.runRemote({ type: 'undo', id }, "Parsa's iPhone");
-    for (const screen of [host, answering, watching]) expect(screen.snapshot().strip).toEqual({ kind: 'question', itemId: id });
+    expect(host.snapshot().strip).toEqual({ kind: 'question', itemId: id });
+    for (const screen of [answering, watching]) expect(screen.snapshot().strip).toEqual({ kind: 'question', itemId: onStudio(id) });
     await vi.advanceTimersByTimeAsync(10_000);
     expect(call.result).toBeUndefined();
 
@@ -456,33 +463,34 @@ describe('NotifyQueue across machines', () => {
     const [first, second] = host.snapshot().queue;
 
     host.runRemote({ type: 'skip', id: first }, 'parsa-devbox');
-    expect(laptop.snapshot().queue).toEqual([second, first]);
+    expect(laptop.snapshot().queue).toEqual([onStudio(second), onStudio(first)]);
     host.runRemote({ type: 'dismiss', id: second }, 'parsa-devbox');
     expect(host.snapshot().strip).toEqual({ kind: 'question', itemId: first });
-    expect(laptop.snapshot().strip).toEqual({ kind: 'question', itemId: first });
+    expect(laptop.snapshot().strip).toEqual({ kind: 'question', itemId: onStudio(first) });
     host.runRemote({ type: 'remind', id: first, after: '10m' }, 'parsa-devbox');
     expect(laptop.snapshot().strip).toBeNull();
     await vi.advanceTimersByTimeAsync(10 * 60_000);
-    expect(laptop.snapshot().strip).toEqual({ kind: 'question', itemId: first });
+    expect(laptop.snapshot().strip).toEqual({ kind: 'question', itemId: onStudio(first) });
 
-    laptop.remindHere(first);
+    laptop.remindHere(onStudio(first));
     expect(laptop.snapshot().strip).toBeNull();
     expect(host.snapshot().strip).toEqual({ kind: 'question', itemId: first });
     laptop.setPaneFocused(true);
-    expect(laptop.snapshot()).toMatchObject({ strip: { kind: 'question', itemId: first }, stripSurface: 'pane' });
+    expect(laptop.snapshot()).toMatchObject({ strip: { kind: 'question', itemId: onStudio(first) }, stripSurface: 'pane' });
   });
 
-  it("keeps the host's questions while the connection is down, and drops them when the screen disconnects", () => {
+  it("keeps a machine's questions while it is offline, and drops them once it is no longer saved", () => {
     const { queue: host } = makeQueue({}, 'mac-studio');
     const { queue: laptop } = makeQueue({}, 'parsa-devbox');
     connect(host, laptop);
     ask(host, sessionStore, claude);
     const id = onlyId(host);
 
-    laptop.setRemote({ machine: 'mac-studio', online: false });
-    expect(laptop.snapshot()).toMatchObject({ remote: { machine: 'mac-studio', online: false }, strip: { kind: 'question', itemId: id } });
-    laptop.setRemote(null);
-    expect(laptop.snapshot()).toMatchObject({ remote: null, strip: null, queue: [] });
+    laptop.setRemote('studio', { machine: 'mac-studio', online: false });
+    expect(laptop.snapshot()).toMatchObject({ strip: { kind: 'question', itemId: onStudio(id) }, queue: [onStudio(id)] });
+    expect(laptop.snapshot().items[0]).toMatchObject({ machine: 'mac-studio', unreachable: true });
+    laptop.setRemote('studio', null);
+    expect(laptop.snapshot()).toMatchObject({ items: [], strip: null, queue: [] });
   });
 
   it("chimes on a screen when the host's question arrives, and says on the strip when its agent stops waiting", async () => {
@@ -498,7 +506,7 @@ describe('NotifyQueue across machines', () => {
 
     controller.abort();
     await vi.advanceTimersByTimeAsync(0);
-    expect(laptop.snapshot().strip).toEqual({ kind: 'expired', itemId: id });
+    expect(laptop.snapshot().strip).toEqual({ kind: 'expired', itemId: onStudio(id) });
     await vi.advanceTimersByTimeAsync(3_000);
     expect(laptop.snapshot().strip).toBeNull();
   });
@@ -512,12 +520,12 @@ describe('NotifyQueue across machines', () => {
     const [first, second] = host.snapshot().queue;
 
     host.run({ type: 'remind', id: second, after: 'pane' });
-    expect(laptop.snapshot().hidden).not.toContain(second);
+    expect(laptop.snapshot().hidden).not.toContain(onStudio(second));
 
     host.run({ type: 'answer', id: first, answer: { choice: 'Keep Redis' } });
-    expect(laptop.snapshot().strip).toEqual({ kind: 'sent', itemId: first });
+    expect(laptop.snapshot().strip).toEqual({ kind: 'sent', itemId: onStudio(first) });
     await vi.advanceTimersByTimeAsync(3_000);
-    expect(laptop.snapshot().strip).toEqual({ kind: 'question', itemId: second });
+    expect(laptop.snapshot().strip).toEqual({ kind: 'question', itemId: onStudio(second) });
   });
 
   it("doesn't chime for the host's questions while this screen's Notify is off", () => {
@@ -552,17 +560,17 @@ describe('NotifyQueue across machines', () => {
     const id = onlyId(host);
 
     // The reconnect read was taken before the question; it lands after the question's event.
-    laptop.setRemote({ machine: 'mac-studio', online: true, state: emptyRead });
-    expect(laptop.snapshot().queue).toEqual([id]);
+    laptop.setRemote('studio', { machine: 'mac-studio', online: true, state: emptyRead });
+    expect(laptop.snapshot().queue).toEqual([onStudio(id)]);
 
     // And a read taken while it waited can't bring it back once it is answered.
     const waitingRead = host.sharedState();
     host.run({ type: 'answer', id, answer: { choice: 'Keep Redis' } });
-    laptop.setRemote({ machine: 'mac-studio', online: true, state: waitingRead });
-    expect(laptop.snapshot().items.find(item => item.id === id)?.state).toBe('sent');
+    laptop.setRemote('studio', { machine: 'mac-studio', online: true, state: waitingRead });
+    expect(laptop.snapshot().items.find(item => item.id === onStudio(id))?.state).toBe('sent');
 
     const { queue: restarted } = makeQueue({}, 'mac-studio');
-    laptop.setRemote({ machine: 'mac-studio', online: true, state: restarted.sharedState() });
+    laptop.setRemote('studio', { machine: 'mac-studio', online: true, state: restarted.sharedState() });
     expect(laptop.snapshot().items).toEqual([]);
   });
 });
