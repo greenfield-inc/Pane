@@ -61,9 +61,12 @@ jobs:
 
     steps:
     # BENCH ONLY: Blacksmith's image prints Ubuntu's "To run a command as
-    # administrator" banner in login shells, which three main tests parse.
+    # administrator" hint from /etc/bash.bashrc in login shells, which three
+    # main tests parse. They set their own HOME, so disable the hint itself.
     - name: Silence the sudo hint in login shells
-      run: touch ~/.sudo_as_admin_successful
+      run: |
+        sudo sed -i 's|if \[ -x /usr/bin/sudo \]; then|if false; then|' /etc/bash.bashrc
+        ! bash -lic true 2>&1 | grep -q "To run a command as administrator"
 
     - name: Checkout code
       uses: actions/checkout@v7
