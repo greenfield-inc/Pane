@@ -28,6 +28,7 @@ import type {
   RemotePaneConnectionProfile,
 } from '../../../shared/types/remoteDaemon';
 import type { TailnetMachineList, WorkspaceAccessSummary, WorkspaceAccessUpdate } from '../../../shared/types/workspaceAccess';
+import type { MachineCommand, MachineConnectionsEvent, MachineReadChannel, MachineResult, MachineState } from '../../../shared/types/machineConnections';
 import type { GlassesAccessState, GlassesRevokeEverywhereResult } from '../../../shared/types/glasses';
 import type {
   PanePermissionRequest,
@@ -723,6 +724,19 @@ interface ElectronAPI {
     resizeWindow: (size: NotifyWindowSize) => void;
     /** Floating strip only: take key focus so a text or note field can be typed in. */
     focusWindow: () => Promise<void>;
+  };
+
+  // Every machine the desktop knows, addressed by id: LOCAL_MACHINE_ID for this computer, else a saved profile id
+  machines: {
+    list: () => Promise<MachineState[]>;
+    /** One of the machine's list reads, tagged with the machine. */
+    read: (machineId: string, channel: MachineReadChannel, args?: unknown[]) => Promise<MachineResult>;
+    /** One allowed command on the machine; anything else is refused. */
+    run: (machineId: string, command: MachineCommand) => Promise<MachineResult>;
+    /** Reconnects an offline saved machine now. */
+    retry: (machineId: string) => Promise<void>;
+    /** Every machine's list, Notify and permission events, resyncs and online/offline changes. */
+    onEvent: (callback: (event: MachineConnectionsEvent) => void) => () => void;
   };
 
   // Window state queries (invoke, not event subscriptions)

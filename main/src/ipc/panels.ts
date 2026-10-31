@@ -603,6 +603,8 @@ export function registerPanelHandlers(
       .filter(session => !session.archived)
       .map(session => session.id));
     sessionIds.add(PANE_CHAT_SESSION_ID);
+    // Named Sessions run in hidden owner Panes, which `getAllSessions` leaves out.
+    for (const ownerId of services.orchestrationSessionManager?.ownerPaneIds() ?? []) sessionIds.add(ownerId);
     const statuses: PanelAgentStatusEvent[] = [];
     for (const sessionId of sessionIds) {
       for (const panel of panelManager.getPanelsForSession(sessionId)) {
