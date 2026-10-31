@@ -12,6 +12,8 @@ import {
   KEY_LIST,
   TERMINAL_LINES,
   awayPage,
+  ambientPage,
+  bannerPage,
   cardPage,
   cardRows,
   connectingPage,
@@ -31,6 +33,7 @@ import {
   terminalPage,
   voiceAnswerPage,
   wrapRows,
+  type AmbientMachine,
 } from './screens';
 import { isRule, trimChrome } from './terminal';
 import type { Cancel } from './timers';
@@ -53,6 +56,9 @@ const MENU_CHANGED = 'The menu changed, so nothing was sent';
 const NUMBER_IGNORED = "The menu didn't take its number; answer it with keys";
 /** How long after a choice's number the menu should be gone. */
 const PICK_SETTLE_MS = 1_000;
+/** Ambient mode: untouched this long, the glasses go quiet; a card that arrives then shows this long. */
+const IDLE_MS = 30_000;
+const BANNER_MS = 15_000;
 
 /** A new Session's name: the first words of what you said, on one line. The host takes up to 120 characters. */
 const SESSION_NAME_WORDS = 8;
@@ -99,6 +105,8 @@ export interface AppDeps {
   marks?: ListMarks;
   /** The computer the glasses last started a Session on, kept in the glasses' local storage. */
   lastSessionComputer: { read(): string | null; write(computerId: string): void };
+  /** Ambient mode at start; setAmbient changes it. Off when left out. */
+  ambient?: boolean;
 }
 
 /**
@@ -204,15 +212,32 @@ export class GlassesApp {
   /** Every card key seen so far, so a question that just arrived can be told apart. */
   private readonly seen = new Set<string>();
 
+  private ambient: boolean;
+  /**
+   * Quiet: the ambient screen replaces the page while the view underneath stays as it was.
+   * `banner` holds the cards that arrived while quiet, oldest first.
+   */
+  private quiet: { banner: string[] } | null = null;
+  /** When the glasses go quiet unless touched; one timer checks it. */
+  private idleAt = 0;
+  private idleTimer: Cancel | null = null;
+  private bannerTimer: Cancel | null = null;
+  /** The hold that woke the glasses: its release sends nothing. */
+  private wokeByHold = false;
+
   constructor(private readonly deps: AppDeps) {
+    this.ambient = deps.ambient ?? false;
     for (const card of deps.source.cards()) this.seen.add(card.key);
     this.unsubscribe = deps.source.subscribe(() => this.sourceChanged());
     this.render();
+    this.touched();
   }
 
   dispose(): void {
     this.unsubscribe();
     this.stopPolling();
+    this.idleTimer?.cancel();
+    this.bannerTimer?.cancel();
     this.listening += 1;
     this.dictation?.cancel();
   }
@@ -272,13 +297,30 @@ export class GlassesApp {
     if ((view.name === 'card' || view.name === 'full' || view.name === 'info') && !this.card(view.key)) this.view = { name: 'home' };
     // A computer that answers again needs no Retry page.
     if (view.name === 'away' && this.deps.source.computers().find((computer) => computer.id === view.computerId)?.status === 'live') this.view = { name: 'home' };
+    if (this.quiet) this.updateBanner(arrived);
     this.render();
   }
 
   // ---------- drawing ----------
 
   private render(): void {
-    this.deps.show(this.page());
+    this.deps.show(this.quiet ? this.quietPage(this.quiet) : this.page());
+  }
+
+  private quietPage(quiet: { banner: string[] }): Page {
+    const newest = this.bannerCard();
+    const source = this.deps.source;
+    const computers = source.computers();
+    const os = (computerId: string) => computers.find((computer) => computer.id === computerId)?.os ?? null;
+    if (newest) return bannerPage(newest, quiet.banner.length, os(newest.computerId));
+    if (!source.demo && computers.length && !computers.some((computer) => computer.status === 'live' || computer.status === 'connecting')) return ambientPage('unreachable');
+    const cards = this.cards();
+    const machines: AmbientMachine[] = [];
+    for (const card of [...cards].sort((a, b) => b.createdAt - a.createdAt)) {
+      if (!machines.some((machine) => machine.name === card.machine)) machines.push({ name: card.machine, os: os(card.computerId) });
+    }
+    const questions = cards.filter((card) => card.waiting).length;
+    return ambientPage({ machines, questions, updates: cards.length - questions });
   }
 
   private page(): Page {
@@ -405,13 +447,25 @@ export class GlassesApp {
     if (gesture.type === 'foreground') {
       this.deps.source.retry();
       if (this.view.name === 'terminal' || this.view.name === 'dictation') this.markViewed(this.view.computerId, this.view.entry);
-      this.render();
+      if (this.quiet) this.wake();
+      else this.render();
+      this.touched();
       return;
     }
     if (gesture.type === 'background' || gesture.type === 'exit') {
       if (this.view.name === 'terminal' || this.view.name === 'dictation') this.markViewed(this.view.computerId, this.view.entry);
       return;
     }
+    if (gesture.type === 'release' && this.wokeByHold) {
+      this.wokeByHold = false;
+      return;
+    }
+    if (this.quiet) {
+      this.onQuiet(gesture);
+      this.touched();
+      return;
+    }
+    this.touched();
     const view = this.view;
     switch (view.name) {
       case 'home': this.onHome(gesture); break;
@@ -524,6 +578,17 @@ export class GlassesApp {
     else if (row.kind === 'computer' && row.reason) this.go({ name: 'unjoined', machine: row.machine, reason: row.reason });
     else if (row.kind === 'entry' && row.status === 'live') this.openTerminal(row.computerId, row.entry);
     else this.go(row.kind === 'entry' ? { name: 'away', computerId: row.computerId, rowName: row.entry.name } : { name: 'away', computerId: row.computerId });
+  }
+
+  /** A banner's card opens as its row in the list does: a question its card, an info card its message. */
+  private openEntry(card: Card): void {
+    if (card.waiting) this.openCard(card);
+    else this.go({ name: 'info', key: card.key });
+  }
+
+  /** Matches the home row for `card`. */
+  private rowFor(card: Card): (row: HomeRow) => boolean {
+    return (row) => (row.kind === 'question' || row.kind === 'info') && row.card.key === card.key;
   }
 
   private openCard(card: Card): void {
@@ -755,7 +820,7 @@ export class GlassesApp {
       }
     }
     const still = this.view;
-    if (read === this.reads && (still.name === 'terminal' || still.name === 'dictation') && still.entry.panelId === entry.panelId) {
+    if (!this.quiet && read === this.reads && (still.name === 'terminal' || still.name === 'dictation') && still.entry.panelId === entry.panelId) {
       this.poll = this.deps.later(() => void this.refreshScreen(), working ? SCREEN_POLL_WORKING_MS : SCREEN_POLL_MS);
     }
   }
@@ -1028,6 +1093,114 @@ export class GlassesApp {
       this.readNow();
     } catch (error) {
       this.showProblem(`${view.entry.name} · not sent`, error, terminal);
+    }
+  }
+
+  // ---------- ambient ----------
+
+  /** Turns ambient mode on or off now; off wakes the glasses and stops the timer. */
+  setAmbient(on: boolean): void {
+    this.ambient = on;
+    if (on) this.touched();
+    else {
+      this.idleTimer?.cancel();
+      this.idleTimer = null;
+      if (this.quiet) this.wake();
+    }
+  }
+
+  /** Moves the quiet deadline to 30 s from now, with one timer for it: a chain of timers adds up their delays. */
+  private touched(): void {
+    this.idleAt = this.deps.now() + IDLE_MS;
+    this.idleTimer?.cancel();
+    this.idleTimer = null;
+    this.armIdle();
+  }
+
+  private armIdle(): void {
+    if (!this.ambient || this.quiet || this.idleTimer) return;
+    this.idleTimer = this.deps.later(() => {
+      this.idleTimer = null;
+      this.idleCheck();
+    }, Math.max(0, this.idleAt - this.deps.now()));
+  }
+
+  /** Runs when the timer fires, which can be late; a touch since then moved the deadline. */
+  private idleCheck(): void {
+    if (!this.ambient || this.quiet) return;
+    if (this.busy()) this.idleAt = this.deps.now() + IDLE_MS;
+    if (this.deps.now() < this.idleAt) {
+      this.armIdle();
+      return;
+    }
+    this.quiet = { banner: [] };
+    this.stopPolling();
+    this.render();
+  }
+
+  /** Listening or sending: the glasses stay as they are. */
+  private busy(): boolean {
+    const view = this.view;
+    return view.name === 'voice-answer' || view.name === 'dictation' || (view.name === 'terminal' && view.picking !== null);
+  }
+
+  /** Back to the view underneath, as it was; an open terminal reads its screen at once. */
+  private wake(): void {
+    this.endQuiet();
+    this.render();
+    if (this.view.name === 'terminal') this.readNow();
+  }
+
+  private endQuiet(): void {
+    this.quiet = null;
+    this.bannerTimer?.cancel();
+    this.bannerTimer = null;
+  }
+
+  /**
+   * Every touch wakes the glasses and does nothing else, except on a banner: press opens its card,
+   * hold answers it by voice, and swipe or double press opens the cards on it.
+   */
+  private onQuiet(gesture: Gesture): void {
+    const card = this.bannerCard();
+    if (!card) {
+      this.wokeByHold = gesture.type === 'hold';
+      this.wake();
+      return;
+    }
+    this.endQuiet();
+    if (gesture.type === 'hold' && card.waiting) void this.startVoiceAnswer(card);
+    else if (gesture.type === 'press' || gesture.type === 'select') this.openEntry(card);
+    else if (gesture.type === 'hold') {
+      this.wokeByHold = true;
+      this.wake();
+    } else this.goHome(this.rowFor(card));
+  }
+
+  /** The newest card, still on its computer, of those that arrived while quiet. */
+  private bannerCard(): Card | undefined {
+    const key = this.quiet?.banner.at(-1);
+    return key === undefined ? undefined : this.card(key);
+  }
+
+  /** Cards that arrived join the banner and keep it up 15 s more; cards that left drop out. */
+  private updateBanner(arrived: readonly Card[]): void {
+    const quiet = this.quiet;
+    if (!quiet) return;
+    const added = [...arrived].sort((a, b) => a.createdAt - b.createdAt).map((card) => card.key);
+    quiet.banner = [...quiet.banner, ...added].filter((key) => this.card(key));
+    if (arrived.length) {
+      this.bannerTimer?.cancel();
+      this.bannerTimer = this.deps.later(() => {
+        this.bannerTimer = null;
+        if (!this.quiet) return;
+        this.quiet.banner = [];
+        this.render();
+      }, BANNER_MS);
+    }
+    if (!quiet.banner.length) {
+      this.bannerTimer?.cancel();
+      this.bannerTimer = null;
     }
   }
 

@@ -120,6 +120,36 @@ Esc and Tab. You can't dictate in keys mode; leave it first.
   first key, and the glasses say so: "<computer>'s Pane can't take keys from the glasses yet."
   Update Pane there. Dictation still works.
 
+### Ambient mode
+
+After 30 s without a touch, the glasses go quiet over whatever screen is open. One dim line at the
+top left names the computers with a card waiting, newest first (each computer's OS logo and the
+first five letters of its name, as in the list, at most three, then "+N"), and how many: "studi build · 2 need you", "· 1 update", or both.
+With nothing waiting the display is dark. With no computer reachable it reads "Can't reach your
+computers · Pane keeps trying". While quiet, an open terminal stops reading its screen.
+
+A card that arrives while quiet shows as a banner for 15 s: its computer's OS logo, computer and Pane, up to two lines of
+it, and what you can do. Several cards that arrive close together share one banner on the newest
+("· 3 new"), up for 15 s after the last. Untouched, the banner goes away and the quiet line counts
+the card. A card answered elsewhere leaves the banner at once. While you use the glasses, new
+cards never pop up; they join the list as before.
+
+Any touch on the ring or a temple wakes the glasses to the screen you left, with a terminal read
+again at once, and does nothing else: no row opens, no exit, no voice, and the release of a hold
+sends nothing. On a banner, the touch acts on its card:
+
+| Gesture on a banner | What it does |
+|---|---|
+| Press | Opens the card: a question its choices, an update its message |
+| Hold, then release | Answers a question by voice; on an update it only wakes |
+| Swipe or double press | Opens the list with the newest card selected |
+
+The glasses never go quiet while you hold to talk or while a menu choice is being sent. Coming back to the app from the glasses menu opens it awake.
+
+Ambient mode is on by default. To turn it off, open Pane in the Even app on the phone and switch off
+**Ambient mode**; it applies at once and stays off after the app restarts. Off, the glasses behave as
+before: they stay on the screen you left and show no banners.
+
 With the app closed, Pane's phone alerts still reach the glasses through the Even app's
 notification mirroring, as the title only ("planner has a question").
 
@@ -214,7 +244,9 @@ The pairing code on your clipboard holds one-time pairing secrets, not tokens, a
 
 The app lives in [`glasses/`](../glasses). Run the Even simulator against it and point a dev build of
 Pane at it with `PANE_GLASSES_ORIGINS=http://localhost:5173` (an exact origin, comma separated for
-several; a loopback one covers every port). The host side is `main/src/daemon/glassesAccess.ts`; the shared pairing-code format is
+several; a loopback one covers every port). `glasses/dev/gallery.html` shows the screens the demo
+can't reach, and `glasses/dev/ambient.html?at=35:q,60:answer` runs the demo with ambient mode on and
+raises or answers cards on a schedule (see the top of `glasses/dev/ambient.ts`). The host side is `main/src/daemon/glassesAccess.ts`; the shared pairing-code format is
 `shared/types/glasses.ts`.
 
 Joining other computers is `glasses/src/autoJoin.ts`; the host side is the `runpane:glasses:vouch`

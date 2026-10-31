@@ -12,6 +12,8 @@ import { firstRunPage, pairingFailedPage } from './screens';
 const RUNTIME_KEY = 'pane.glasses.runtimeId';
 /** The computer the glasses last started a Session on. */
 const SESSION_COMPUTER_KEY = 'pane.glasses.lastSessionComputer';
+/** "off" turns ambient mode off; anything else, including nothing saved yet, leaves it on. */
+const AMBIENT_KEY = 'pane.glasses.ambient';
 
 function element<T extends HTMLElement>(id: string, type: new () => T): T {
   const found = document.getElementById(id);
@@ -43,6 +45,7 @@ async function main(): Promise<void> {
     computers: element('computers', HTMLUListElement),
     forget: element('forget', HTMLButtonElement),
     mirror: element('mirror', HTMLPreElement),
+    ambient: element('ambient', HTMLButtonElement),
   };
   // The Origin the Even app's WebView sends; each computer must allow it (Settings › Remote Access › Glasses).
   console.info(`[Pane glasses] location.origin ${location.origin}`);
@@ -52,6 +55,15 @@ async function main(): Promise<void> {
   const paired = readPaired(await bridge.getLocalStorage(STORAGE_KEY).catch(() => ''));
   const id = await runtimeId(bridge);
   let sessionComputer: string | null = (await bridge.getLocalStorage(SESSION_COMPUTER_KEY).catch(() => '')) || null;
+  let ambient = (await bridge.getLocalStorage(AMBIENT_KEY).catch(() => '')) !== 'off';
+  let app: GlassesApp | null = null;
+  ui.ambient.setAttribute('aria-checked', String(ambient));
+  ui.ambient.addEventListener('click', () => {
+    ambient = !ambient;
+    ui.ambient.setAttribute('aria-checked', String(ambient));
+    app?.setAmbient(ambient);
+    void bridge.setLocalStorage(AMBIENT_KEY, ambient ? 'on' : 'off').catch(() => false);
+  });
   const display = new Display(bridge);
   display.onPage = (page) => {
     ui.mirror.textContent = pageText(page);
@@ -102,7 +114,7 @@ async function main(): Promise<void> {
 
   const start = (next: PaneSource) => {
     source = next;
-    const app = new GlassesApp({
+    const started = new GlassesApp({
       source: next,
       show,
       exit: () => void bridge.shutDownPageContainer(1),
@@ -117,8 +129,10 @@ async function main(): Promise<void> {
           void bridge.setLocalStorage(SESSION_COMPUTER_KEY, computerId).catch(() => false);
         },
       },
+      ambient,
     });
-    target = (gesture) => app.handle(gesture);
+    app = started;
+    target = (gesture) => started.handle(gesture);
     next.subscribe(() => renderComputers());
     renderComputers();
   };
