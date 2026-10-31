@@ -32,7 +32,9 @@ export function isOlderPane(cause: unknown): boolean {
  * computer's revoke keeps them off it until the phone pairs them there again. Pending revokes
  * are kept by full DNS name, so a computer of the same name on another tailnet never settles
  * them; the ones that did not answer come back pending, to retry when they are next reachable.
- * A computer whose Pane predates glasses never held them, so it is neither revoked nor pending.
+ * A computer that answers without holding them is settled but not counted as revoked: it gets no
+ * revoke marker, so another computer that still holds the glasses could vouch them onto it. A
+ * computer whose Pane predates glasses never held them, so it is neither revoked nor pending.
  */
 export async function revokeGlassesOnComputers<Profile>(
   computers: readonly GlassesRevokeComputer<Profile>[],
@@ -45,10 +47,11 @@ export async function revokeGlassesOnComputers<Profile>(
   await Promise.all(computers.map(async ({ machine, profile }) => {
     try {
       const { devices } = decodeBoundary(await invoke(profile, GLASSES_COMMANDS.list, []), glassesListSchema);
-      for (const device of devices.filter(candidate => candidate.phoneId === phoneId)) {
+      const held = devices.filter(candidate => candidate.phoneId === phoneId);
+      for (const device of held) {
         await invoke(profile, GLASSES_COMMANDS.revoke, [{ id: device.id }]);
       }
-      revoked.push(machine.name);
+      if (held.length > 0) revoked.push(machine.name);
       stillPending.delete(machine.dnsName);
     } catch (cause) {
       if (isOlderPane(cause)) stillPending.delete(machine.dnsName);

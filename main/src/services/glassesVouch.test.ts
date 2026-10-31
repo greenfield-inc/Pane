@@ -257,13 +257,15 @@ describe('revoking on all my computers from the desktop', () => {
     expect(() => devbox.host.glasses.createPairingSecret(GLASSES, PHONE, { unlessRevoked: true })).toThrow(expect.objectContaining({ code: 'ERR_GLASSES_REVOKED_HERE' }));
   });
 
-  it('asks only your own computers from discovery', async () => {
+  it('asks only your own computers from discovery, and counts one as revoked only when it held these glasses', async () => {
     const devbox = computer('devbox');
     const teammate = computer('teammate-box');
     await pairFromPhone(teammate);
     const context = await setup({ siblings: [devbox, teammate], peers: [{ name: 'devbox' }, { name: 'teammate-box', userId: 2 }] });
 
-    expect(await revokeEverywhere(context)).toEqual({ revoked: ['studio-mac', 'devbox'], notReached: [] });
+    // devbox answers but never held these glasses, so it gets no revoke marker and is not named.
+    expect(await revokeEverywhere(context)).toEqual({ revoked: ['studio-mac'], notReached: [] });
+    expect(devbox.host.glasses.revokedPhoneIds()).toEqual([]);
     expect(new Set(context.asked.map((call) => call.machine))).toEqual(new Set(['devbox']));
     expect(teammate.host.glasses.list()).toHaveLength(1);
   });
