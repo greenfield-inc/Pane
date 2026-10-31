@@ -223,9 +223,13 @@ How a host page reaches the phone:
 
 Who can open these pages: the devices that **Who can connect** admits (see [Who is trusted](RUNPANE_WORKSPACES.md#who-is-trusted)). Phone pages need that setting on, Tailscale running on the host, and the phone on the same tailnet. A page in a frame cannot send the machine's password, so phone pages are off while password protection is on. A refused device sees "This page runs on &lt;host&gt;. Open it from a device signed in as &lt;login&gt;." A pairing code or SSH tunnel does not grant access to these pages: they need the phone on this tailnet, signed in with a login that setting admits. Navigation inside a page stays on the phone; the tab saves only the addresses you enter or pick.
 
+The Pane phone app shows page tabs with an address row (back, forward, address, reload, Open in Safari) and loads them through the same phone addresses. When the files address is off or the phone can't reach it, the app reads an HTML file through its own connection instead (`panels:read-browser-file`), so a self-contained page opens over a pairing code too; pages that load other files from their folder need the phone address. Entering an address saves it to the tab. Each case that can't load names its reason: nothing listens on the port, phone pages are off on that computer (with its reason), the phone is not on Tailscale, the computer is offline, or its Pane predates phone pages.
+
 ### Files on the phone
 
 Each pane's Explorer tab shows its worktree as a tree. Tap a text file to read and edit it; Save writes it to the host. Text files over 1 MB, and binary files that are not images, PDFs, video or audio, stay on the desktop. Images, PDFs, video and audio of any size preview on the phone, and video seeks without downloading the whole file. Open in Safari opens a preview outside the app.
+
+In the Pane phone app, Explorer opens one folder at a time with a path bar and search, and files are read-only: code with syntax colours, Markdown rendered or as source, and images up to 5 MB. Text over 1 MB and other binaries stay on the computer, with Copy path. Everything, images included, comes through the app's own connection, so it works over every connection the app supports. Editor tabs open their file in the same viewer.
 
 Browsing and editing go through the PWA's own connection, so they work over every connection the PWA supports. Previews load from the same Serve address as HTML files in browser tabs, so they need what [browser tabs on the phone](#browser-tabs-on-the-phone) need: Tailscale on the host, password protection off, and a phone signed in to a login that **Who can connect** admits. Without that, a preview explains why it cannot load. Files outside the worktree are refused.
 

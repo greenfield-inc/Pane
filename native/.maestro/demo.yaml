@@ -39,7 +39,8 @@ name: Try the demo
     timeout: 15000
 # The shell tab's screen is short enough to read back in full (long screens
 # are cut in the accessibility tree).
-- tapOn: "Terminal"
+- tapOn:
+    id: panel-tab-demo-fix-checkout-race-shell
 - tapOn:
     id: terminal-input
 - inputText: "pnpm build"

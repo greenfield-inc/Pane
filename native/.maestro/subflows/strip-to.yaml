@@ -1,0 +1,11 @@
+# Swipes the tab strip about one tab to the left, then opens tab ${TAB}.
+# (iOS reports a tab scrolled out of the strip as visible, so a visibility check can't stop the swipes.)
+appId: com.dcouple.pane.mobile
+---
+- swipe:
+    start: 60%, 15%
+    end: 25%, 15%
+    duration: 500
+- tapOn:
+    id: ${TAB}
+- waitForAnimationToEnd

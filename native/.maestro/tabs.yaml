@@ -1,0 +1,109 @@
+# Every tab type in the demo: the strip, a page, Explorer, the file viewer, an
+# Editor tab and a dimmed placeholder. Needs no host: the demo runs inside the app.
+appId: com.dcouple.pane.mobile
+---
+- runFlow: subflows/demo.yaml
+- tapOn:
+    id: "pane-row-demo-fix-checkout-race"
+    index: 0
+- extendedWaitUntil:
+    visible:
+      id: terminal-panel-tabs
+    timeout: 20000
+# Agents and terminals first, then the page.
+- assertVisible: "Claude Code, terminal"
+- assertVisible: "localhost:5173, page"
+
+# A page tab: the address row over the page.
+- tapOn: "localhost:5173, page"
+- extendedWaitUntil:
+    visible:
+      id: browser-webview
+    timeout: 10000
+- assertVisible:
+    id: browser-address
+- assertVisible: ".*Checkout.*"
+
+# Explorer: folders first, a folder, a file, search.
+- runFlow:
+    file: subflows/strip-to.yaml
+    env:
+      TAB: panel-tab-demo-fix-checkout-race-explorer-1
+- extendedWaitUntil:
+    visible:
+      id: explorer-row-src
+    timeout: 10000
+- tapOn:
+    id: explorer-row-src
+- tapOn:
+    id: explorer-row-src/checkout
+- tapOn:
+    id: explorer-row-src/checkout/submitOrder.ts
+- extendedWaitUntil:
+    visible:
+      id: file-code
+    timeout: 10000
+- assertVisible: ".*TypeScript · 24 lines.*"
+- tapOn:
+    id: file-back
+- tapOn:
+    id: explorer-crumb-root
+- tapOn:
+    id: explorer-row-README.md
+- extendedWaitUntil:
+    visible:
+      id: file-markdown
+    timeout: 10000
+- tapOn:
+    id: file-source
+- assertVisible:
+    id: file-code
+- tapOn:
+    id: file-back
+- tapOn:
+    id: explorer-row-dist
+- tapOn:
+    id: explorer-row-dist/app.min.js
+- assertVisible:
+    id: file-stays
+- tapOn:
+    id: file-back
+- tapOn:
+    id: explorer-search
+- inputText: "cart"
+- extendedWaitUntil:
+    visible:
+      id: explorer-row-src/checkout/cartLock.ts
+    timeout: 10000
+- hideKeyboard
+
+# The strip's end: Run script and Notes stay on the computer, and say which one.
+- repeat:
+    times: 3
+    commands:
+      - swipe:
+          start: 70%, 15%
+          end: 5%, 15%
+          duration: 300
+- tapOn:
+    id: panel-tab-demo-fix-checkout-race-notes-5
+- assertVisible:
+    id: tab-placeholder
+- assertVisible: "Opens on studio-mac"
+- tapOn:
+    id: panel-tab-demo-fix-checkout-race-logs-4
+- assertVisible:
+    id: tab-placeholder
+
+# An Editor tab, one step back, opens its file read-only.
+# A slow drag, so the strip doesn't fling past it.
+- swipe:
+    start: 30%, 15%
+    end: 62%, 15%
+    duration: 2000
+- tapOn:
+    id: panel-tab-demo-fix-checkout-race-editor-3
+- extendedWaitUntil:
+    visible:
+      id: file-code
+    timeout: 10000

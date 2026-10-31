@@ -82,6 +82,16 @@ maestro --device <simulator-udid> test -e CONNECTION_CODE="$(cat ~/.pane_rn_dev/
 
 `terminal.yaml` needs a host whose first pane has a plain `Terminal` tab and a `Claude Code` tab, which is what `runpane panes create --agent claude` gives you. On a busy machine, set `MAESTRO_DRIVER_STARTUP_TIMEOUT=240000` if Maestro reports that the iOS driver was not ready in time.
 
+## Tabs
+
+A Pane or Session screen shows every tab in one strip, each with its type's icon: agents and terminals, then pages, then Explorer and Diff, then other tabs, then tabs that open only on the computer. A Session's agent chat comes first. Each type has its own view (`src/features/terminal/panels.ts` picks it):
+
+- **Pages** (`src/features/browser/`) load in a WebView under an address row with back, forward, the address, reload and Open in Safari. A computer's dev server and HTML files load through the phone addresses it creates over Tailscale ([Browser tabs on the phone](../docs/SELF_HOSTED_REMOTE_DAEMON.md#browser-tabs-on-the-phone)). When those addresses are off or out of reach, an HTML file is read through the phone's own connection instead (`panels:read-browser-file`), so a self-contained page loads with a pairing code too. Entering an address saves it to the tab, so the computer's tab moves with it. Each case that can't load has its own screen: nothing listens on the port, pages are off on that computer, the phone is off Tailscale, the computer is offline, or its Pane is too old.
+- **Explorer** (`src/features/files/`) browses the worktree one folder at a time, with a path bar back up and a search box. Files open read-only: code with syntax colours (highlight.js) and line numbers, Markdown rendered or as source, images up to 5 MB. Text over 1 MB and other binaries stay on the computer, with Copy path. **Editor** tabs open their file in the same viewer.
+- **Notes, Dashboard, Setup tasks, Diff and Run script** tabs are dimmed and say which computer they open on.
+
+The phone follows the computer to a tab it brings forward (an agent's `runpane panels open`, for example) only when the phone draws that tab and it sits on the desktop's stage; Explorer and Diff live in the desktop's side panel, so the phone never jumps to them. Demo mode has a sample of every tab type (`src/features/demo/demoFiles.ts`, `demoPages.ts`).
+
 ## Agent Chat
 
 Compatible agent panels offer **Chat** and **Terminal** below the tab strip. Both
