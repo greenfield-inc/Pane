@@ -97,16 +97,23 @@ notification mirroring, as the title only ("planner has a question").
 
 - On the phone: **Settings › Glasses › Revoke Glasses** revokes them on every computer it can reach,
   and finishes the rest when they next answer.
-- On a computer: **Settings › Remote Access › Devices**, then **Revoke** next to the glasses.
+- On a computer: **Settings › Remote Access › Devices**, then **Revoke** next to the glasses for
+  that computer only, or **Revoke on all my computers** for this computer and every computer of
+  yours it can reach. It names the computers it could not reach, such as "Not reached: laptop
+  (offline)", and offers **Retry on my other computers** while that page stays open.
 
 Revoking closes the glasses' connection to that computer within 5 seconds. A revoke sticks: your
 other computers can't add the glasses back to this one. Pairing the glasses again from the phone
 lifts the revoke on each computer it pairs.
 
-Revoke on every computer, from the phone, when the glasses are lost. Two gaps remain:
+Revoke on every computer, from the phone or from **Revoke on all my computers**, when the glasses
+are lost. Two gaps remain:
 
-- A computer that was offline during the revoke still holds the glasses, and can add them to a
-  computer you set up later, until a revoke reaches it.
+- A computer that was offline during the revoke still holds the glasses, and can add them to
+  another of your computers until a revoke reaches it. That covers a computer you set up later,
+  and one that answered the revoke without holding the glasses (for example, because Funnel was on
+  there): a revoke marks only the computers that held them, and only those are listed under
+  "Revoked on".
 - Pairing secrets that a computer already handed the glasses for your other computers stay usable
   there for up to 10 minutes after you revoke the glasses on it.
 

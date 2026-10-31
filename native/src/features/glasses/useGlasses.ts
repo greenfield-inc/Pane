@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as Clipboard from 'expo-clipboard';
 import { Platform } from 'react-native';
 
+import { revokeGlassesOnComputers } from '@shared/glassesRevoke';
 import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
 import { boundary, decodeOptionalBoundary } from '@shared/validation/boundaryDecoder';
 
@@ -16,7 +17,6 @@ import {
   glassesDeviceName,
   listGlassesOnComputers,
   pairableComputers,
-  revokeGlassesOnComputers,
   type GlassesInvoke,
 } from './glassesPairing';
 

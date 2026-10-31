@@ -1,16 +1,17 @@
 import { describe, expect, it } from 'vitest';
 
 import { RemoteRequestError } from '@shared/remoteClient';
+import { revokeGlassesOnComputers } from '@shared/glassesRevoke';
 import { decodeGlassesPairingCode } from '@shared/types/glasses';
 import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
 import type { TailnetMachine } from '@shared/types/workspaceAccess';
+import type { JsonValue } from '@shared/validation/boundaryDecoder';
 
 import {
   createGlassesPairingCode,
   glassesDeviceName,
   listGlassesOnComputers,
   pairableComputers,
-  revokeGlassesOnComputers,
   type GlassesInvoke,
 } from './glassesPairing';
 
@@ -76,7 +77,7 @@ describe('revokeGlassesOnComputers', () => {
   it('revokes the glasses this phone paired where it can, by install id, and keeps unreachable computers pending', async () => {
     const { computers } = pairableComputers([machine('studio-mac', 'available'), machine('devbox', 'available')], DOMAIN, []);
     const revoked: string[] = [];
-    const invoke: GlassesInvoke = async (profile, channel, args) => {
+    const invoke: GlassesInvoke = async (profile, channel, args): Promise<JsonValue> => {
       if (profile.label === 'devbox') throw new Error('offline');
       if (channel === 'runpane:glasses:list') {
         return { devices: [

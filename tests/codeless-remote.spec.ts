@@ -162,4 +162,50 @@ test.describe('Remote Access', () => {
     await glasses.getByRole('button', { name: 'Revoke Even G2' }).click();
     await expect(glasses.getByRole('button', { name: 'Revoke Even G2' })).toHaveCount(0);
   });
+
+  test('revokes glasses on all my computers and names the ones it did not reach', async ({ page }) => {
+    await installElectronApiMock(page, {
+      tailnetMachines,
+      glasses: {
+        devices: [{ id: 'g2', label: 'Even G2 · Parsa\'s iPhone', phoneId: 'pane-native-a', createdAt: '2026-10-29T08:00:00.000Z', lastUsedAt: '2026-10-29T09:14:00.000Z' }],
+        allowedOrigins: [],
+        refusedOrigins: [],
+      },
+      glassesRevokeEverywhere: { revoked: ['Mac', 'devbox'], notReached: [{ name: 'laptop', reason: 'offline' }] },
+    });
+    await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+    await page.getByRole('button', { name: 'Settings' }).first().click();
+    await page.getByRole('button', { name: 'Remote Access', exact: true }).click();
+    const glasses = page.locator('[data-setting-id="remote-glasses"]');
+    await glasses.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: 'test-results/codeless-remote/glasses-revoke-everywhere-before.png', fullPage: true });
+    await glasses.getByRole('button', { name: 'Revoke Even G2 · Parsa\'s iPhone on all my computers' }).click();
+    await expect(glasses.getByRole('status')).toHaveText('Revoked on Mac, devbox. Not reached: laptop (offline); revoke there when it is back.');
+    await expect(glasses).toContainText('Pair from the Pane phone app');
+    await expect(glasses.getByRole('button', { name: 'Retry on my other computers' })).toBeVisible();
+    await page.screenshot({ path: 'test-results/codeless-remote/glasses-revoke-everywhere-after.png', fullPage: true });
+  });
+
+  test('keeps the reason a revoke on all my computers failed past the next refresh', async ({ page }) => {
+    const failure = 'This computer could not list your other computers (Tailscale is signed out), so it revoked the glasses on this computer only. Next: Sign in to Tailscale, then retry.';
+    await installElectronApiMock(page, {
+      tailnetMachines,
+      glasses: {
+        devices: [{ id: 'g2', label: 'Even G2 · Parsa\'s iPhone', phoneId: 'pane-native-a', createdAt: '2026-10-29T08:00:00.000Z' }],
+        allowedOrigins: [],
+        refusedOrigins: [],
+      },
+      glassesRevokeEverywhereError: failure,
+    });
+    await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+    await page.getByRole('button', { name: 'Settings' }).first().click();
+    await page.getByRole('button', { name: 'Remote Access', exact: true }).click();
+    const glasses = page.locator('[data-setting-id="remote-glasses"]');
+    await glasses.getByRole('button', { name: 'Revoke Even G2 · Parsa\'s iPhone on all my computers' }).click();
+    await expect(glasses.getByRole('status')).toHaveText(failure);
+    // The list refreshes every 5 seconds; the reason and its Retry outlast that.
+    await page.waitForTimeout(6_000);
+    await expect(glasses.getByRole('status')).toHaveText(failure);
+    await expect(glasses.getByRole('button', { name: 'Retry on my other computers' })).toBeVisible();
+  });
 });

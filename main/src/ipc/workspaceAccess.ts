@@ -3,14 +3,19 @@ import type { AppConfig } from '../types/config';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { normalizeRemoteDaemonConfig, type RemotePaneConnectionProfile } from '../../../shared/types/remoteDaemon';
 import type { TailnetMachineList } from '../../../shared/types/workspaceAccess';
-import { GLASSES_COMMANDS } from '../../../shared/types/glasses';
+import { GLASSES_COMMANDS, type GlassesRevokeEverywhereResult } from '../../../shared/types/glasses';
+import { PaneError, paneErrorText } from '../../../shared/paneError';
+import { glassesListSchema } from '../../../shared/glassesRevoke';
+import { revokeGlassesEverywhere } from '../services/glassesVouch';
 import {
+  callWorkspace,
   discoverTailnetMachines,
   probeWorkspace,
   readTailscaleStatus,
   locateTailnetMachine,
   savedSecretKey,
   savedWorkspaceSecrets,
+  type WorkspaceCall,
   type WorkspaceProbe,
 } from '../services/tailnetMachines';
 
@@ -31,6 +36,7 @@ interface WorkspaceAccessServices {
 interface WorkspaceAccessDependencies {
   readStatus: () => Promise<string | null>;
   probe: WorkspaceProbe;
+  call: WorkspaceCall;
 }
 
 const saveMachineSchema = boundary.object({
@@ -52,7 +58,7 @@ export function registerWorkspaceAccessHandlers(
   ipcMain: IpcMainHandleLike,
   { configManager }: WorkspaceAccessServices,
   commandRegistry: Pick<PaneCommandRegistry, 'invoke'>,
-  dependencies: WorkspaceAccessDependencies = { readStatus: readTailscaleStatus, probe: probeWorkspace },
+  dependencies: WorkspaceAccessDependencies = { readStatus: readTailscaleStatus, probe: probeWorkspace, call: callWorkspace },
 ): void {
   const profiles = () => normalizeRemoteDaemonConfig(configManager.getConfig().remoteDaemon).client.profiles;
 
@@ -88,6 +94,24 @@ export function registerWorkspaceAccessHandlers(
   ipcMain.handle('remote-daemon:revoke-glasses', (_event, id) => respond('revoke the glasses', async () => {
     await commandRegistry.invoke(GLASSES_COMMANDS.revoke, [{ id: decodeBoundary(id, boundary.nonEmptyString) }]);
     return commandRegistry.invoke(GLASSES_COMMANDS.state);
+  }));
+  // The phone's revoke-everywhere, from this computer: here, then each of your computers that answers.
+  // A phone already revoked here can be sent again, to reach the computers the first try missed.
+  ipcMain.handle('remote-daemon:revoke-glasses-everywhere', (_event, id) => respond('revoke the glasses on your computers', async (): Promise<GlassesRevokeEverywhereResult> => {
+    const phoneId = decodeBoundary(id, boundary.nonEmptyString);
+    const { devices, revokedPhoneIds = [] } = decodeBoundary(await commandRegistry.invoke(GLASSES_COMMANDS.list), glassesListSchema);
+    if (!devices.some((device) => device.phoneId === phoneId) && !revokedPhoneIds.includes(phoneId)) {
+      throw new PaneError(
+        'ERR_GLASSES_NOT_FROM_PHONE',
+        'No glasses from this phone are paired or revoked here, so no computer was asked to revoke them.',
+        'Revoke them from the Pane phone app: Settings › Glasses › Revoke.',
+      );
+    }
+    const access = decodeBoundary(await commandRegistry.invoke('runpane:workspaces:access'), boundary.object({ machineName: boundary.optional(boundary.string) }));
+    return revokeGlassesEverywhere(phoneId, {
+      name: access.machineName || 'this computer',
+      invoke: (channel, args) => commandRegistry.invoke(channel, args),
+    }, { ...dependencies, savedSecrets: savedWorkspaceSecrets(profiles()) });
   }));
   ipcMain.handle('remote-daemon:set-glasses-origin', (_event, update) => respond('change glasses origins', () =>
     commandRegistry.invoke(GLASSES_COMMANDS.setOrigin, [update])));
@@ -127,6 +151,7 @@ async function respond<Result>(action: string, work: () => Promise<Result>): Pro
   try {
     return { success: true, data: await work() };
   } catch (error) {
+    if (error instanceof PaneError) return { success: false, error: paneErrorText(error) };
     return { success: false, error: error instanceof Error ? error.message : `Failed to ${action}` };
   }
 }

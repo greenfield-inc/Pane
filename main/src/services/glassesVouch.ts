@@ -1,14 +1,18 @@
+import type { PaneCommandValue } from '../daemon/commandRegistry';
 import { PaneError } from '../../../shared/paneError';
 import {
   encodeGlassesPairingCode,
   GLASSES_COMMANDS,
   GLASSES_PAIRING_SECRET_PREFIX,
   type GlassesPairingComputer,
+  type GlassesRevokeEverywhereResult,
   type GlassesVouchResult,
   type GlassesVouchSkipReason,
 } from '../../../shared/types/glasses';
-import type { TailnetMachine } from '../../../shared/types/workspaceAccess';
-import { boundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
+import type { TailnetMachine, TailnetMachineList } from '../../../shared/types/workspaceAccess';
+import { boundary, decodeBoundary, decodeOptionalBoundary, type JsonValue } from '../../../shared/validation/boundaryDecoder';
+import { glassesListSchema, revokeGlassesOnComputers, type GlassesRevokeComputer } from '../../../shared/glassesRevoke';
+import { RemoteRequestError } from '../../../shared/remoteClient/remoteDaemonClient';
 import {
   discoverTailnetMachines,
   savedSecretKey,
@@ -31,6 +35,9 @@ export interface GlassesVouchDependencies {
   /** This computer's saved passwords, keyed by `savedSecretKey`. */
   savedSecrets: ReadonlyMap<string, string>;
 }
+
+/** Runs one command on this computer and returns its answer. */
+export type LocalInvoke = (channel: string, args: JsonValue[]) => Promise<PaneCommandValue>;
 
 type Outcome =
   | { kind: 'minted'; entry: GlassesPairingComputer; expiresAt: string }
@@ -58,23 +65,7 @@ const secretSchema = boundary.object({ secret: boundary.nonEmptyString, expiresA
  */
 export async function vouchForGlasses(glasses: VouchedGlasses, dependencies: GlassesVouchDependencies): Promise<GlassesVouchResult> {
   const { call, savedSecrets } = dependencies;
-  // Discovery probes each machine at its Tailscale address; the calls below reuse that address.
-  const candidates = new Map<string, TailnetCandidate>();
-  const list = await discoverTailnetMachines({
-    readStatus: dependencies.readStatus,
-    probe: (machine, secret) => {
-      candidates.set(machine.dnsName, machine);
-      return dependencies.probe(machine, secret);
-    },
-    savedSecrets,
-  });
-  if (!list.ok) {
-    throw new PaneError(
-      'ERR_GLASSES_VOUCH_DISCOVERY_FAILED',
-      `This computer could not list your other computers (${list.reason}), so it asked none of them for the glasses.`,
-      list.fix,
-    );
-  }
+  const { list, candidates } = await discoverMyComputers(dependencies, 'asked none of them for the glasses');
 
   const ask = async (machine: TailnetMachine): Promise<Outcome> => {
     const stateReason = skipReasonForState(machine.state);
@@ -118,6 +109,76 @@ export async function vouchForGlasses(glasses: VouchedGlasses, dependencies: Gla
     expiresAt,
     skipped,
   };
+}
+
+/**
+ * Revokes one phone's glasses on this computer and on each of your other computers that answers,
+ * as the phone's revoke-everywhere does. Each revoke keeps the glasses off that computer until the
+ * phone pairs them there again. The computers come only from this computer's own discovery: yours,
+ * online, with Pane answering. A computer whose Pane predates glasses never held them, so it is
+ * left out of both lists.
+ */
+export async function revokeGlassesEverywhere(
+  phoneId: string,
+  self: { name: string; invoke: LocalInvoke },
+  dependencies: GlassesVouchDependencies,
+): Promise<GlassesRevokeEverywhereResult> {
+  const { devices } = decodeBoundary(await self.invoke(GLASSES_COMMANDS.list, []), glassesListSchema);
+  for (const device of devices.filter((candidate) => candidate.phoneId === phoneId)) {
+    await self.invoke(GLASSES_COMMANDS.revoke, [{ id: device.id }]);
+  }
+  const { list, candidates } = await discoverMyComputers(dependencies, 'revoked the glasses on this computer only');
+
+  const computers: GlassesRevokeComputer<{ candidate: TailnetCandidate; secret?: string }>[] = [];
+  const notReached: GlassesRevokeEverywhereResult['notReached'] = [];
+  for (const machine of list.machines.filter((candidate) => candidate.mine)) {
+    // A Pane that predates describe predates glasses too.
+    if (machine.state === 'outdated') continue;
+    const candidate = candidates.get(machine.dnsName);
+    if (machine.state !== 'available' || !candidate) {
+      notReached.push({ name: machine.name, reason: machine.state === 'offline' ? 'offline' : skipReasonForState(machine.state) ?? NOT_ANSWERING });
+      continue;
+    }
+    computers.push({ machine, profile: { candidate, secret: dependencies.savedSecrets.get(savedSecretKey(list.domain, machine.name)) } });
+  }
+
+  const result = await revokeGlassesOnComputers(computers, [], phoneId, async ({ candidate, secret }, channel, args) => {
+    const answer = await dependencies.call(candidate, channel, args, secret);
+    if (answer.kind === 'answered' && answer.ok) return answer.result;
+    throw answer.kind === 'answered'
+      ? new RemoteRequestError(answer.message ?? `refused with ${answer.statusCode}`, answer.statusCode, answer.code ?? null)
+      : new Error(answer.detail);
+  });
+  const names = new Map(computers.map(({ machine }) => [machine.dnsName, machine.name]));
+  for (const dnsName of result.pending) notReached.push({ name: names.get(dnsName) ?? dnsName, reason: NOT_ANSWERING });
+  return {
+    revoked: [self.name, ...result.revoked],
+    notReached: notReached.sort((left, right) => left.name.localeCompare(right.name)),
+  };
+}
+
+/** This computer's discovery, keeping the address each machine was probed at for the calls that follow. */
+async function discoverMyComputers(
+  dependencies: GlassesVouchDependencies,
+  outcome: string,
+): Promise<{ list: Extract<TailnetMachineList, { ok: true }>; candidates: Map<string, TailnetCandidate> }> {
+  const candidates = new Map<string, TailnetCandidate>();
+  const list = await discoverTailnetMachines({
+    readStatus: dependencies.readStatus,
+    probe: (machine, secret) => {
+      candidates.set(machine.dnsName, machine);
+      return dependencies.probe(machine, secret);
+    },
+    savedSecrets: dependencies.savedSecrets,
+  });
+  if (!list.ok) {
+    throw new PaneError(
+      'ERR_GLASSES_DISCOVERY_FAILED',
+      `This computer could not list your other computers (${list.reason}), so it ${outcome}.`,
+      list.fix,
+    );
+  }
+  return { list, candidates };
 }
 
 function skipReasonForState(state: TailnetMachine['state']): GlassesVouchSkipReason | null {

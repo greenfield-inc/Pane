@@ -28,7 +28,7 @@ import type {
   RemotePaneConnectionProfile,
 } from '../../../shared/types/remoteDaemon';
 import type { TailnetMachineList, WorkspaceAccessSummary, WorkspaceAccessUpdate } from '../../../shared/types/workspaceAccess';
-import type { GlassesAccessState } from '../../../shared/types/glasses';
+import type { GlassesAccessState, GlassesRevokeEverywhereResult } from '../../../shared/types/glasses';
 import type {
   PanePermissionRequest,
   PanePermissionResolvedEvent,
@@ -427,6 +427,7 @@ interface ElectronAPI {
     listTailnetMachines: () => Promise<IPCResponse<TailnetMachineList>>;
     getGlasses: () => Promise<IPCResponse<GlassesAccessState>>;
     revokeGlasses: (id: string) => Promise<IPCResponse<GlassesAccessState>>;
+    revokeGlassesEverywhere: (phoneId: string) => Promise<IPCResponse<GlassesRevokeEverywhereResult>>;
     setGlassesOrigin: (update: { origin: string; allowed: boolean }) => Promise<IPCResponse<GlassesAccessState>>;
     saveTailnetMachine: (input: { name: string; password?: string }) => Promise<IPCResponse<RemotePaneConnectionProfile>>;
     runCheckFix: (checkId: number, stage: RemoteConnectionCheckStage) => Promise<IPCResponse<RemotePaneConnectionState>>;
