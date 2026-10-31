@@ -1186,6 +1186,9 @@ describe('OrchestrationSessionManager', () => {
     expect(overview.panes[1].panels).toEqual([expect.objectContaining({ panelId: 'named-tabs-agent', type: 'terminal', state: 'idle' })]);
     // Tabs without an agent leave the Session's status to its agents.
     expect(overview.status).toBe('working');
+    // An idle agent keeps the Session idle even with pages and editors present.
+    liveStates.set('all-tabs-agent', 'idle');
+    expect((await fixture.manager.overview({ sessionId: named.session.id })).status).toBe('idle');
   });
 
   it('enforces exclusive Pane ownership, validates tab membership, and permits reassignment after detach', async () => {
