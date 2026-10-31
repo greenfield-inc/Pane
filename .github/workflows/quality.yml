@@ -60,6 +60,11 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
 
     steps:
+    # BENCH ONLY: Blacksmith's image prints Ubuntu's "To run a command as
+    # administrator" banner in login shells, which three main tests parse.
+    - name: Silence the sudo hint in login shells
+      run: touch ~/.sudo_as_admin_successful
+
     - name: Checkout code
       uses: actions/checkout@v7
 
