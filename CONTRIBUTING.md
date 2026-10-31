@@ -279,9 +279,11 @@ findings in `frontend/`; it is advisory. To see its findings before you push:
 pnpm exec react-doctor frontend --scope changed
 ```
 
-Maintainers attach PR screenshots by uploading them to the `pr-assets` release
-(`gh release upload pr-assets <file> --clobber`, named
+Maintainers attach PR screenshots by uploading them to the `pr-assets-2` release
+(`gh release upload pr-assets-2 <file> --clobber`, named
 `pr-<number>-<name>-<hash>.png`) and linking the release download URL.
+The older `pr-assets` release is full (GitHub allows 1,000 assets per
+release); images already there keep working.
 
 Releases, CI and deploys are covered in [RUNBOOK.md](RUNBOOK.md).
 
