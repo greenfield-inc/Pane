@@ -1346,7 +1346,7 @@ async function handOffSession({ parsed, sessionId, destination, machines, self, 
   const { session: source } = await invokeDaemon('runpane:sessions:get', [{ sessionId }], runpaneSessionResultSchema, { paneDir: parsed.paneDir });
   const remote = workspaceTarget(target);
   const listed = await invokeRemoteDaemon(remote, 'runpane:sessions:list', [], runpaneSessionListResultSchema);
-  const name = nextFreeName(source.name, listed.sessions.map((session) => session.name));
+  const name = nextFreeName(source.name, listed.sessions.filter((session) => session.archived !== true).map((session) => session.name));
   if (parsed.handoffPush) warnings.push('--push does nothing from a Session: its folder is not a git checkout, so nothing was committed or pushed.');
   const result: HandoffResult = {
     ok: true,
@@ -1460,7 +1460,7 @@ async function sessionResumeId(remote: ReturnType<typeof workspaceTarget>, creat
   return listed.panels.find(panel => panel.id === created.panelId || panel.panelId === created.panelId)?.resumeId;
 }
 
-/** Pane's numbering for a taken Session name: "<name> 2", "<name> 3", compared without case. */
+/** Pane's numbering for a name an active Session holds: "<name> 2", "<name> 3", compared without case. */
 function nextFreeName(name: string, taken: readonly string[]): string {
   const normalize = (value: string): string => value.trim().toLocaleLowerCase();
   const names = new Set(taken.map(normalize));

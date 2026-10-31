@@ -78,7 +78,7 @@ test('main repository commit dialog submits title and description with Ctrl+Ente
   });
   await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
   await page.getByRole('button', { name: `Project actions for ${project.name}`, exact: true }).click();
-  await page.getByText('Open session on main', { exact: true }).click();
+  await page.getByText('Open (Main) Pane', { exact: true }).click();
   await page.locator('.pane-detail-panel-vertical').getByRole('button', { name: 'Commit 1 file', exact: true }).click();
 
   const dialog = page.getByRole('dialog');
