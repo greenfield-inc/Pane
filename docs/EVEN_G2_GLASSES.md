@@ -38,7 +38,7 @@ gets a dim row at the end of the home list with the reason; press it for what to
 | Row reads | Fix |
 |---|---|
 | update Pane there | Update Pane on that computer. It joins within 10 minutes. |
-| revoked here · pair from phone | The glasses were revoked there. Pair again from the Pane phone app. |
+| revoked here · pair from phone | The glasses were revoked there. Pair again from the Pane phone app: Settings › Glasses › Add computers. |
 | needs its password | Connect to that computer once from Pane on a paired computer, so it saves the password. |
 | Funnel is on | Turn Funnel off for port 8443 on that computer. |
 | not answering | Check that Pane is open there and Tailscale is on. |

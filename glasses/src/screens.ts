@@ -317,7 +317,7 @@ function unjoinedText(name: string, reason: string): string {
     case JOIN_REASONS.older:
       return `${name} runs an older Pane, so these glasses can't join it by themselves.\nUpdate Pane on ${name}. It joins within 10 minutes.`;
     case JOIN_REASONS.revoked:
-      return `These glasses were revoked on ${name}, so your other computers don't add them there.\nTo use them on ${name} again, pair from the Pane phone app: Settings › Glasses › Pair glasses.`;
+      return `These glasses were revoked on ${name}, so your other computers don't add them there.\nTo use them on ${name} again, pair from the Pane phone app: Settings › Glasses › Add computers.`;
     case JOIN_REASONS.password:
       return `${name} has a password, and none of your paired computers has it saved.\nConnect to ${name} once from Pane on one of them to save it. It joins within 10 minutes.`;
     case JOIN_REASONS.funnel:
