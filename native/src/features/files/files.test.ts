@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { decodeFileText, decodeFolder, decodeSearch, fileViewer, formatSize, highlightLines, languageOf, parentOf, pathCrumbs, posixPath } from './files';
+import { decodeFileText, decodeFolder, decodeSearch, fileViewer, folderRows, formatSize, highlightLines, languageOf, parentOf, pathCrumbs, posixPath } from './files';
 
 describe('decodeFolder', () => {
   it('reads the computer’s folder list', () => {
@@ -100,5 +100,29 @@ describe('highlightLines', () => {
 
   it('keeps plain text as one token per line', () => {
     expect(highlightLines('a < b\n\nc', null)).toEqual([[{ text: 'a < b' }], [], [{ text: 'c' }]]);
+  });
+});
+
+describe('folderRows', () => {
+  const src = { name: 'src', path: 'src', isDirectory: true };
+  const readme = { name: 'README.md', path: 'README.md', isDirectory: false, size: 10 };
+  const change = (path: string, kind: 'modified' | 'deleted') => ({ path, kind, additions: 1, deletions: 0, isBinary: false });
+
+  it('lists the branch’s changes first at the worktree’s top, each as its own row, then all files', () => {
+    const rows = folderRows([src, readme], [change('src/a.ts', 'modified'), change('old.ts', 'deleted')], { atTop: true, searching: false });
+    expect(rows.map(row => row.kind === 'label' ? row.text : row.kind === 'changed' ? `changed:${row.file.path}` : `entry:${row.entry.path}`)).toEqual([
+      'Changed on this branch · 2', 'changed:src/a.ts', 'changed:old.ts', 'All files', 'entry:src', 'entry:README.md',
+    ]);
+  });
+
+  it('still lists the changes when the folder is empty, as when its last file was deleted', () => {
+    const rows = folderRows([], [change('old.ts', 'deleted')], { atTop: true, searching: false });
+    expect(rows.map(row => row.kind)).toEqual(['label', 'changed']);
+  });
+
+  it('lists only the entries inside a folder or while searching', () => {
+    expect(folderRows([readme], [change('README.md', 'modified')], { atTop: false, searching: false }).map(row => row.kind)).toEqual(['entry']);
+    expect(folderRows([readme], [change('README.md', 'modified')], { atTop: true, searching: true }).map(row => row.kind)).toEqual(['entry']);
+    expect(folderRows([], [], { atTop: true, searching: false })).toEqual([]);
   });
 });

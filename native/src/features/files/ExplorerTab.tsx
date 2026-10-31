@@ -11,7 +11,7 @@ import { EmptyState, ErrorState, Icon, Text } from '@/ui';
 import { ChangeBadge } from '../diff/DiffTab';
 import { useChanges } from '../diff/useDiff';
 import { FileViewer } from './FileViewer';
-import { formatSize, parentOf, pathCrumbs, type FileEntry } from './files';
+import { folderRows, formatSize, parentOf, pathCrumbs, type FileEntry, type FolderRow } from './files';
 import { useFileSearch, useFolder } from './useFiles';
 
 /** How long typing pauses before Explorer searches the worktree. */
@@ -76,10 +76,12 @@ function FolderView({ sessionId, rootName, folder, onOpenFolder, onOpenFile }: {
   // The branch's changes: listed first at the top, and marked on their rows. An older computer or a
   // failed read just leaves them out.
   const changes = useChanges(sessionId);
-  const changed = new Map((changes.data?.files ?? []).map(file => [file.path, file]));
+  const changedFiles = changes.data?.files ?? [];
+  const changed = new Map(changedFiles.map(file => [file.path, file]));
   const search = useFileSearch(sessionId, pattern);
   const searching = pattern.length > 0;
   const list = searching ? search : entries;
+  const rows = list.data ? folderRows(list.data, changedFiles, { atTop: folder === '', searching }) : [];
   const crumbs = pathCrumbs(rootName, folder);
 
   const open = (entry: FileEntry) => {
@@ -131,33 +133,32 @@ function FolderView({ sessionId, rootName, folder, onOpenFolder, onOpenFile }: {
         <View style={styles.center}><ActivityIndicator color={colors.textMuted} /></View>
       ) : list.isError ? (
         <ErrorState title={searching ? 'Search didn’t finish' : 'Couldn’t open this folder'} error={list.error} onRetry={() => void list.refetch()} testID="explorer-error" />
-      ) : list.data.length === 0 ? (
+      ) : rows.length === 0 ? (
         <EmptyState testID="explorer-empty" title={searching ? 'No matches' : 'Empty folder'} message={searching ? `No file name in ${rootName} contains “${pattern}”.` : undefined} />
       ) : (
         <LegendList
           testID="explorer-list"
-          data={list.data}
-          keyExtractor={entry => entry.path}
+          data={rows}
+          keyExtractor={rowKey}
+          getItemType={row => row.kind}
           estimatedItemSize={46}
           recycleItems
           keyboardDismissMode="on-drag"
           keyboardShouldPersistTaps="handled"
           refreshing={list.isRefetching}
           onRefresh={() => void list.refetch()}
-          ListHeaderComponent={!searching && folder === '' && changed.size > 0 ? (
-            <View>
-              <SectionLabel text={`Changed on this branch · ${changed.size}`} />
-              {[...changed.values()].map(file => (
-                <ChangedRow key={file.path} file={file} onPress={() => open({ name: file.path.split('/').pop() ?? file.path, path: file.path, isDirectory: false })} />
-              ))}
-              <SectionLabel text="All files" />
-            </View>
-          ) : undefined}
-          renderItem={({ item }) => <EntryRow entry={item} change={changed.get(item.path)} showFolder={searching} onPress={() => open(item)} />}
+          renderItem={({ item }) => item.kind === 'label' ? <SectionLabel text={item.text} />
+            : item.kind === 'changed' ? <ChangedRow file={item.file} onPress={() => open({ name: item.file.path.split('/').pop() ?? item.file.path, path: item.file.path, isDirectory: false })} />
+            : <EntryRow entry={item.entry} change={changed.get(item.entry.path)} showFolder={searching} onPress={() => open(item.entry)} />}
         />
       )}
     </View>
   );
+}
+
+function rowKey(row: FolderRow): string {
+  if (row.kind === 'label') return `label:${row.text}`;
+  return row.kind === 'changed' ? `changed:${row.file.path}` : row.entry.path;
 }
 
 function SectionLabel({ text }: { text: string }) {
