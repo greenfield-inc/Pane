@@ -19,6 +19,7 @@ import { API } from '../utils/api';
 import { ipcErrorMessage } from '../utils/ipcErrorMessage';
 import { showActionError } from '../stores/errorStore';
 import { cn } from '../utils/cn';
+import { paneIconColor } from '../utils/paneIconColor';
 import type { Session, GitStatus } from '../types/session';
 import type { AgentDisplayStatus } from '../../../shared/types/agentStatus';
 import type { Project } from '../types/project';
@@ -47,9 +48,9 @@ import {
 const SIDEBAR_ROW_BASE = 'flex w-[calc(100%-1rem)] items-center text-left transition-colors';
 const SIDEBAR_ROW_PADDING = 'mx-2 px-2';
 const SIDEBAR_ROW_GAP = 'gap-2';
-const SIDEBAR_SECTION_ROW = 'pane-sidebar-projects-header sticky bottom-0 z-30 mt-3 flex h-8 w-full shrink-0 items-center justify-between gap-2 bg-surface-secondary pl-4 pr-3 py-1';
-const SIDEBAR_SECTION_LABEL = 'truncate text-[10px] font-semibold uppercase tracking-wider leading-4 text-text-tertiary';
-const SIDEBAR_SECTION_TOGGLE = 'group/section relative z-20 flex min-h-4 min-w-0 flex-1 items-center justify-between gap-2 text-left text-text-tertiary transition-colors hover:text-text-primary focus-visible:text-text-primary';
+export const SIDEBAR_SECTION_ROW = 'pane-sidebar-projects-header sticky bottom-0 z-30 mt-3 flex h-8 w-full shrink-0 items-center justify-between gap-2 bg-surface-secondary pl-4 pr-3 py-1';
+export const SIDEBAR_SECTION_LABEL = 'truncate text-[10px] font-semibold uppercase tracking-wider leading-4 text-text-tertiary';
+export const SIDEBAR_SECTION_TOGGLE = 'group/section relative z-20 flex min-h-4 min-w-0 flex-1 items-center justify-between gap-2 text-left text-text-tertiary transition-colors hover:text-text-primary focus-visible:text-text-primary';
 
 interface ProjectSessionListProps {
   projects: Project[];
@@ -715,7 +716,7 @@ export function ProjectSessionList({
 // --- Notify nav entry ---
 
 /** Opens the Notify inbox; the count is waiting questions only, never updates. */
-function NotifyNavRow({ active }: { active: boolean }) {
+export function NotifyNavRow({ active }: { active: boolean }) {
   const available = useNotifyStore(s => s.snapshot !== null);
   const count = useNotifyStore(s => waitingCount(s.snapshot));
   const navigateToNotify = useNavigationStore(s => s.navigateToNotify);
@@ -754,7 +755,7 @@ function NotifyNavRow({ active }: { active: boolean }) {
 // --- Loops nav entry ---
 
 /** Opens the Loops page; shows how many loops exist and a blue dot while any run is working. */
-function LoopsNavRow({ active }: { active: boolean }) {
+export function LoopsNavRow({ active }: { active: boolean }) {
   const loops = useLoopsStore(s => s.loops);
   const running = useAnyLoopRunning(loops);
   return (
@@ -913,7 +914,7 @@ function NotifyWaitingLabel() {
   return <span className="ml-auto shrink-0 pl-1 text-[11px] text-status-warning-on-tint">Waiting</span>;
 }
 
-function SessionRowContent({
+export function SessionRowContent({
   session,
   gs,
   iconColor,
@@ -1082,15 +1083,7 @@ function SessionRow({
 
   const gs = session.gitStatus;
 
-  const iconColor = gs?.prState
-    ? gs.prState === 'MERGED' ? 'text-purple-400'
-    : gs.prState === 'CLOSED' ? 'text-red-400'
-    : 'text-green-400'
-    : session.status === 'running' || session.status === 'initializing'
-    ? 'text-status-success'
-    : session.status === 'error'
-    ? 'text-status-error'
-    : 'text-text-tertiary';
+  const iconColor = paneIconColor(session);
 
   const adds = (gs?.commitAdditions ?? 0) + (gs?.additions ?? 0);
   const dels = (gs?.commitDeletions ?? 0) + (gs?.deletions ?? 0);

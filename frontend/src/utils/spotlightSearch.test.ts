@@ -3,7 +3,7 @@ import type { OrchestrationSessionRecord } from '../../../shared/types/orchestra
 import type { HotkeyDefinition } from '../stores/hotkeyStore';
 import type { Project } from '../types/project';
 import type { Session } from '../types/session';
-import { buildSearchItems, searchItems, type SearchItem, type SearchResults, type SearchSources } from './spotlightSearch';
+import { buildMachineSearchItems, buildSearchItems, searchItems, type SearchItem, type SearchResults, type SearchSources } from './spotlightSearch';
 
 const NOW = Date.parse('2026-10-26T12:00:00Z');
 const ago = (minutes: number) => new Date(NOW - minutes * 60_000).toISOString();
@@ -208,5 +208,20 @@ describe('matchedRanges', () => {
     const { matchedRanges } = await import('./spotlightSearch');
     expect(matchedRanges('wsl-runpane', 'pane')).toEqual([[7, 11]]);
     expect(matchedRanges('runpane-update-fix', 'rpuf')).toEqual([[0, 1], [3, 4], [8, 9], [15, 16]]);
+  });
+});
+
+describe('search in All machines', () => {
+  const snapshot = (projects: Array<Project & { sessions: Session[] }>) => ({ projects, sessions: [], statuses: [], notify: null, permissions: [] });
+  const views = [
+    { machine: { id: 'local', name: 'studio-mac', os: 'macOS' as const, slot: 0 }, offline: false,
+      snapshot: snapshot([{ ...project(1, 'acme-web'), sessions: [pane('p1', 'fix-checkout-race', 1)] }]) },
+    { machine: { id: 'devbox', name: 'parsa-devbox', os: 'Windows' as const, slot: 2 }, offline: false,
+      snapshot: snapshot([{ ...project(1, 'pane'), sessions: [pane('p1', 'windows-installer', 1)] }]) },
+  ];
+
+  it('finds a Pane that exists only on another machine, labelled with that machine', () => {
+    const found = searchItems(buildMachineSearchItems(views), { query: 'windows-inst', filter: 'panes' }).sections[0].items;
+    expect(found.map(item => [item.key, item.title, item.machine?.name])).toEqual([['devbox:pane:p1', 'windows-installer', 'parsa-devbox']]);
   });
 });

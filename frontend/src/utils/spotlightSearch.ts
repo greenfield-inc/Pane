@@ -8,6 +8,7 @@ import type { OrchestrationSessionRecord } from '../../../shared/types/orchestra
 import type { HotkeyDefinition } from '../stores/hotkeyStore';
 import type { Project } from '../types/project';
 import type { Session } from '../types/session';
+import type { MachineRef, MachineView } from './allMachinesTree';
 
 export type SearchFilter = 'all' | 'panes' | 'sessions' | 'projects' | 'commands';
 
@@ -27,6 +28,8 @@ interface SearchItemBase {
   recency: number;
   /** Extra text that finds the item but is not its title. */
   terms: string[];
+  /** Set in All machines: the machine the row is on. */
+  machine?: MachineRef;
 }
 
 export type SearchItem =
@@ -152,6 +155,24 @@ export function buildSearchItems(sources: SearchSources): SearchItem[] {
     });
   }
   return items;
+}
+
+/**
+ * Every machine's Panes, Sessions and projects, for search in All machines. Keys carry the
+ * machine, since ids repeat across machines, and the machine's name finds its rows.
+ */
+export function buildMachineSearchItems(views: readonly MachineView[]): SearchItem[] {
+  return views.flatMap(({ machine, snapshot }) => {
+    if (!snapshot) return [];
+    const items = buildSearchItems({
+      panes: snapshot.projects.flatMap(project => project.sessions),
+      sessions: snapshot.sessions,
+      projects: snapshot.projects.map(({ sessions: _panes, ...project }) => project),
+      commands: [],
+      activePaneId: null,
+    });
+    return items.map(item => ({ ...item, key: `${machine.id}:${item.key}`, terms: [...item.terms, machine.name], machine }));
+  });
 }
 
 // Detail text finds an item, but a title match of the same strength wins.
