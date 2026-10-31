@@ -4,16 +4,18 @@ import type { EditorPanelState, ToolPanel, ToolPanelType } from '@shared/types/p
 import type { RemotePwaCustomCommand } from '@shared/types/remoteDaemon';
 
 /** How the phone draws a tab. A placeholder names the computer, where the tab opens. */
-export type TabView = 'terminal' | 'browser' | 'explorer' | 'editor' | 'placeholder';
+export type TabView = 'terminal' | 'browser' | 'explorer' | 'diff' | 'editor' | 'file-diff' | 'logs' | 'placeholder';
 
 export function tabView(panel: ToolPanel): TabView {
   switch (panel.type) {
     case 'terminal':
     case 'browser':
     case 'explorer':
+    case 'diff':
+    case 'logs':
       return panel.type;
     case 'editor':
-      return (panel.state.customState as EditorPanelState | undefined)?.diff ? 'placeholder' : 'editor';
+      return (panel.state.customState as EditorPanelState | undefined)?.diff ? 'file-diff' : 'editor';
     default:
       return 'placeholder';
   }

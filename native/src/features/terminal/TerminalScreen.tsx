@@ -17,6 +17,7 @@ import { EmptyState, ErrorState, Icon, Text } from '@/ui';
 
 import { AgentConversationSurface } from '../agentChat/AgentConversationSurface';
 import { BrowserTab } from '../browser/BrowserTab';
+import { DiffEditorTab, DiffTab } from '../diff/DiffTab';
 import { ExplorerTab } from '../files/ExplorerTab';
 import { FileViewer } from '../files/FileViewer';
 import { isDemoProfile } from '../demo/demoHost';
@@ -27,6 +28,7 @@ import { Dimmed } from '../hosts/ConnectionStatus';
 import { useAffordances } from '../hosts/hostSettings';
 import { useConnectionPresence } from '../hosts/useConnectionPresence';
 import { clearPaneNotifications } from '../notifications/device';
+import { LogsTab } from '../logs/LogsTab';
 import { useAgentStatuses, useMarkPaneSeen } from '../panes/hooks';
 import { ShortcutsSheet } from '../shortcuts/ShortcutsSheet';
 import { PlaceholderTab } from '../tabs/PlaceholderTab';
@@ -217,8 +219,14 @@ function TabBody({ panel, title }: { panel: ToolPanel; title: string }) {
       return <BrowserTab key={panel.id} panel={panel} />;
     case 'explorer':
       return <ExplorerTab key={panel.id} panel={panel} rootName={title} />;
+    case 'diff':
+      return <DiffTab panel={panel} />;
     case 'editor':
       return <FileViewer key={panel.id} sessionId={panel.sessionId} path={(panel.state.customState as EditorPanelState).filePath} />;
+    case 'file-diff':
+      return <DiffEditorTab key={panel.id} panel={panel} />;
+    case 'logs':
+      return <LogsTab key={panel.id} panel={panel} />;
     default:
       return <PlaceholderTab panel={panel} />;
   }
