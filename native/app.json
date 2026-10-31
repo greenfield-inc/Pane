@@ -3,7 +3,7 @@
     "name": "Pane",
     "slug": "pane",
     "version": "1.2",
-    "runtimeVersion": "1.4",
+    "runtimeVersion": "1.5",
     "updates": {
       "url": "https://pane-native-updates-297294606300.us-central1.run.app/manifest",
       "checkAutomatically": "ON_LOAD",
@@ -37,7 +37,10 @@
         "foregroundImage": "./assets/images/adaptive-icon.png"
       },
       "predictiveBackGestureEnabled": false,
-      "versionCode": 6
+      "versionCode": 6,
+      "permissions": [
+        "android.permission.VIBRATE"
+      ]
     },
     "plugins": [
       [
