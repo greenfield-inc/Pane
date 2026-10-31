@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it, type TestContext } from 'vitest';
 import { createDefaultRemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
 import { RemoteDaemonClient, createFetchEventStreamTransport } from '../../../shared/remoteClient';
 // SAFETY: test tooling in scripts/, typed with JSDoc.
@@ -12,13 +12,19 @@ import { RemotePaneClient } from './client/remotePaneClient';
 // C1: every write sent through a link that keeps dropping lands on the host exactly once, in order.
 // PANE_FLAP_SECONDS=180 runs the plan's full three minutes; CI runs a shorter stretch of the same schedule.
 const RUN_MS = Number(process.env.PANE_FLAP_SECONDS ?? 40) * 1000;
-const cleanups: Array<() => Promise<void> | void> = [];
 
-afterEach(async () => {
-  for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
-});
+type Cleanups = Array<() => Promise<void> | void>;
 
-async function startHost() {
+/** Collects one test's cleanups and runs them, newest first, when that test finishes. */
+function cleanupsFor({ onTestFinished }: TestContext): Cleanups {
+  const cleanups: Cleanups = [];
+  onTestFinished(async () => {
+    for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
+  });
+  return cleanups;
+}
+
+async function startHost(cleanups: Cleanups) {
   const applied = new Map<string, string>();
   const created: string[] = [];
   const registry = new PaneCommandRegistry();
@@ -49,8 +55,8 @@ interface WritingClient {
 }
 
 /** Sends a steady stream of keys to two terminals plus pane creates through the proxy, and checks what landed. */
-async function runThroughFlappingLink(connect: (baseUrl: string) => Promise<WritingClient>): Promise<void> {
-  const host = await startHost();
+async function runThroughFlappingLink(cleanups: Cleanups, connect: (baseUrl: string) => Promise<WritingClient>): Promise<void> {
+  const host = await startHost(cleanups);
   const phases: string[] = [];
   // The bug report's shape, compressed: up 3-8 s, down 1-12 s, drops past 5 s reset open connections.
   const proxy = await startFlappingProxy({
@@ -91,9 +97,11 @@ async function runThroughFlappingLink(connect: (baseUrl: string) => Promise<Writ
   expect(client.statuses.has('reconnecting')).toBe(true);
 }
 
-describe('writes through a flapping link reach the host exactly once, in order per terminal, and the client never gives up', () => {
-  it('from the phone, PWA and glasses client', async () => {
-    await runThroughFlappingLink(async (baseUrl) => {
+// The two clients soak through separate hosts and proxies, so they run at the same time.
+describe.concurrent('writes through a flapping link reach the host exactly once, in order per terminal, and the client never gives up', () => {
+  it('from the phone, PWA and glasses client', async (context) => {
+    const cleanups = cleanupsFor(context);
+    await runThroughFlappingLink(cleanups, async (baseUrl) => {
       const client = new RemoteDaemonClient({
         profile: { id: 'flap', label: 'Host', baseUrl, token: 'secret-token', transport: 'http+sse' },
         transport: createFetchEventStreamTransport((url, init) => globalThis.fetch(url, init)),
@@ -109,8 +117,9 @@ describe('writes through a flapping link reach the host exactly once, in order p
     });
   }, RUN_MS + 180_000);
 
-  it('from a second desktop', async () => {
-    await runThroughFlappingLink(async (baseUrl) => {
+  it('from a second desktop', async (context) => {
+    const cleanups = cleanupsFor(context);
+    await runThroughFlappingLink(cleanups, async (baseUrl) => {
       const statuses = new Set<string>();
       let status = '';
       const client = new RemotePaneClient({ id: 'flap', label: 'Host', baseUrl, token: 'secret-token', transport: 'http+sse' }, {
