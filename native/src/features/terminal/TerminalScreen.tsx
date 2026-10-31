@@ -214,7 +214,7 @@ export function TerminalScreen({ paneId, session }: { paneId: string; session?: 
 function TabBody({ panel, title }: { panel: ToolPanel; title: string }) {
   switch (tabView(panel)) {
     case 'browser':
-      return <BrowserTab panel={panel} />;
+      return <BrowserTab key={panel.id} panel={panel} />;
     case 'explorer':
       return <ExplorerTab key={panel.id} panel={panel} rootName={title} />;
     case 'editor':
