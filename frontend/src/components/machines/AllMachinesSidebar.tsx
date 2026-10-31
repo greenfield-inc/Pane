@@ -246,7 +246,7 @@ function toggle(set: (update: (current: ReadonlySet<string>) => ReadonlySet<stri
 
 /**
  * The sidebar in All machines: today's Sessions and Projects tree with every saved machine's
- * rows, a machine badge on each. A repository open on several machines is one project.
+ * rows, a machine badge on each. A project with the same name on several machines is one project.
  */
 export function AllMachinesSidebar({ onNew }: { onNew: () => void }) {
   const { views, tree, activeMachineId } = useAllMachinesTree();
