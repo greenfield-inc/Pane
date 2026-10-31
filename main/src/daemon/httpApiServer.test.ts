@@ -1200,6 +1200,32 @@ describe('workspace identity mode', () => {
     },
   );
 
+  it.each(['notes:list', 'notes:mutate'])(
+    'keeps notes over %s with the owner, even when teammates can connect', async (channel) => {
+      const registry = new PaneCommandRegistry();
+      const handler = vi.fn(async () => []);
+      registry.register(channel, handler);
+      const server = new PaneRemoteHttpApiServer(registry, createConfigManagerStub(), {
+        workspace: { listenPort: 0, pathSecret: 'serve-secret', access: () => ownerOnly({ visibility: 'tailnet' }) },
+      });
+      activeServers.push(server);
+      await server.start();
+      const request = { channel, args: ['pane-1', { kind: 'global', id: 'user' }] };
+
+      const refused = await requestJson(server, 'POST', invokePath, request, undefined, as(teammate));
+      expect(refused.body).toEqual({ ok: false, error: {
+        code: 'ERR_NOTES_OWNER_REQUIRED',
+        message: 'Only this computer\'s owner can read or change its notes, so nothing was read or changed.',
+        next: 'Sign in to Tailscale as this computer\'s owner, or keep your notes on your own computer.',
+      } });
+      expect(handler).not.toHaveBeenCalled();
+
+      const allowed = await requestJson(server, 'POST', invokePath, request, undefined, as(owner));
+      expect(allowed).toEqual({ statusCode: 200, body: { ok: true, result: [] } });
+      expect(handler).toHaveBeenCalledWith('pane-1', { kind: 'global', id: 'user' });
+    },
+  );
+
   it('admits the voice stream upgrade, checking the same identity', async () => {
     vi.stubEnv('DEEPGRAM_API_KEY', '');
     const server = await startOwnerServer(owner);
