@@ -113,6 +113,8 @@ export type ElectronApiMockOptions = {
   glasses?: GlassesAccessState;
   /** What "Revoke on all my computers" reports; it also revokes the device here. */
   glassesRevokeEverywhere?: GlassesRevokeEverywhereResult;
+  /** "Revoke on all my computers" revokes the device here, then fails with this PaneError text. */
+  glassesRevokeEverywhereError?: string;
   /** Devices connected to this computer's host right now. */
   hostConnectedClients?: RemoteDaemonConnectedClient[];
   /** setup:choose-import fails with this PaneError text instead of previewing. */
@@ -1520,6 +1522,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         revokeGlassesEverywhere: (phoneId: string) => {
           glassesState.devices = glassesState.devices.filter((device) => device.phoneId !== phoneId);
+          if (mockOptions.glassesRevokeEverywhereError) return Promise.resolve({ success: false, error: mockOptions.glassesRevokeEverywhereError });
           return success(clone(mockOptions.glassesRevokeEverywhere ?? { revoked: ['this computer'], notReached: [] }));
         },
         setGlassesOrigin: (update: { origin: string; allowed: boolean }) => {

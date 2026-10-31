@@ -20,8 +20,8 @@ export function GlassesRows() {
   const [state, setState] = useState<GlassesAccessState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  /** What the last revoke did, kept after its row is gone. */
-  const [notice, setNotice] = useState<string | null>(null);
+  /** What the last revoke did, kept after its row is gone; the poll never clears it. */
+  const [notice, setNotice] = useState<{ text: string; failed?: boolean } | null>(null);
   /** The phone whose revoke did not reach every computer, so it can be sent again after its row is gone. */
   const [retryPhoneId, setRetryPhoneId] = useState<string | null>(null);
 
@@ -52,16 +52,15 @@ export function GlassesRows() {
 
   const revokeEverywhere = async (phoneId: string) => {
     setBusy(true);
-    setNotice('Revoking on your computers…');
+    setNotice({ text: 'Revoking on your computers…' });
     try {
       const response = await API.remoteDaemon.revokeGlassesEverywhere(phoneId);
       await apply(() => API.remoteDaemon.getGlasses());
       if (response.success && response.data) {
-        setNotice(revokeEverywhereMessage(response.data));
+        setNotice({ text: revokeEverywhereMessage(response.data) });
         setRetryPhoneId(response.data.notReached.length > 0 ? phoneId : null);
       } else {
-        setNotice(null);
-        setError(response.error ?? 'Could not revoke the glasses on your computers.');
+        setNotice({ text: response.error ?? 'Could not revoke the glasses on your computers.', failed: true });
         setRetryPhoneId(phoneId);
       }
     } finally {
@@ -78,7 +77,7 @@ export function GlassesRows() {
       {error && <p className={`text-sm text-status-error ${CARD_ROW}`} role="alert">{error}</p>}
       {(notice || retryPhoneId) && (
         <div className={`flex items-center justify-between gap-3 ${CARD_ROW}`}>
-          <p className="text-sm text-text-secondary" role="status">{notice}</p>
+          {notice && <p className={`text-sm ${notice.failed ? 'text-status-error' : 'text-text-secondary'}`} role="status">{notice.text}</p>}
           {retryPhoneId && (
             <Button type="button" variant="ghost" size="sm" className="flex-none" disabled={busy} onClick={() => void revokeEverywhere(retryPhoneId)}>
               Retry on my other computers
