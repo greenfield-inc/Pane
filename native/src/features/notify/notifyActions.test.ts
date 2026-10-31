@@ -6,7 +6,7 @@ import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
 
 import type { NotifyPush } from '@/features/links/links';
 
-import { commandForAction, notifyCategories, optionsCategory, sendNotifyCommand, type NotifySender } from './notifyActions';
+import { commandForAction, notifyCategories, optionsCategory, sendDirect, sendNotifyCommand, type NotifySender } from './notifyActions';
 
 const work: RemotePaneConnectionProfile = { id: 'Work Mac:http://127.0.0.1:42157:abcd1234', label: 'Work Mac', baseUrl: 'http://127.0.0.1:42157', token: 'secret', transport: 'http+sse' };
 const options: NotifyPush = { host: work.id, notifyId: 'q1', ui: 'options', choices: ['Ship it', 'Wait', 'Cancel'], clear: false };
@@ -135,5 +135,25 @@ describe('sendNotifyCommand', () => {
         vi.useRealTimers();
       }
     });
+  });
+});
+
+describe('sendDirect', () => {
+  it('waits as long as the caller says, so a create that takes 20 seconds still returns what it made', async () => {
+    vi.useFakeTimers();
+    try {
+      const slowCreate = vi.fn<RemoteFetch>(() => new Promise(resolve => {
+        setTimeout(() => resolve({ ok: true, status: 200, body: null, json: async () => ({ ok: true, result: { paneId: 'p7' } }) as never }), 20_000);
+      }));
+      const sent = sendDirect({ fetch: slowCreate, runtimeId: 'pane-native-1', clientLabel: 'Pane for iOS' }, work, 'runpane:panes:create', [{}], {
+        unconfirmed: 'may exist',
+        refused: 'refused',
+        timeoutMs: 130_000,
+      });
+      await vi.advanceTimersByTimeAsync(20_000);
+      await expect(sent).resolves.toEqual({ status: 'sent', result: { paneId: 'p7' } });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

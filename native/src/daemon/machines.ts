@@ -53,13 +53,20 @@ export function useMachineQuery<T>(
 export const CREATE_ON_MACHINE = ['create-on-machine'];
 
 /**
+ * How long a create on another machine waits for its reply: the host allows `runpane:panes:create`
+ * 120 seconds for the worktree and its setup, plus 10 for the network.
+ */
+export const CREATE_TIMEOUT_MS = 130_000;
+
+/**
  * Sends a command to any saved machine: through the live connection on the machine the phone is
  * on, otherwise straight to that machine's `/invoke`, the way alert buttons answer. Never retried.
- * A lost reply throws `RemoteUnconfirmedResultError` with `unconfirmed` as its message.
+ * A lost reply throws `RemoteUnconfirmedResultError` with `unconfirmed` as its message. On another
+ * machine the reply is awaited for `timeoutMs`, 15 seconds by default.
  */
 export function useMachineCommand() {
   const { profile: current, client } = useDaemon();
-  return async <T>(machine: RemotePaneConnectionProfile, channel: string, args: unknown[], unconfirmed: string): Promise<T> => {
+  return async <T>(machine: RemotePaneConnectionProfile, channel: string, args: unknown[], unconfirmed: string, timeoutMs?: number): Promise<T> => {
     if (machine.id === current.id) return invokeChannel<T>(client, channel, args);
     const sender = {
       // The demo's sample machines answer in the app.
@@ -70,6 +77,7 @@ export function useMachineCommand() {
     };
     const sent = await sendDirect(sender, machine, channel, args, {
       unconfirmed,
+      timeoutMs,
       refused: `${machine.label} refused it without saying why. Nothing changed. Open Pane on ${machine.label} to do it there.`,
     });
     if (sent.status === 'sent') return unwrap<T>(sent.result, channel);

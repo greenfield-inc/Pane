@@ -12,7 +12,7 @@ import { DEFAULT_PANE_CHAT_AGENT, PANE_CHAT_AGENT_LABELS, type PaneChatAgent } f
 import type { RemotePaneConnectionProfile, RemotePwaAffordances, RemotePwaSessionAgents } from '@shared/types/remoteDaemon';
 
 import { useDaemon } from '@/daemon';
-import { CREATE_ON_MACHINE, useMachineCommand, useMachineQuery } from '@/daemon/machines';
+import { CREATE_ON_MACHINE, CREATE_TIMEOUT_MS, useMachineCommand, useMachineQuery } from '@/daemon/machines';
 import { Notice } from '@/features/panes/PaneKit';
 import { useTheme } from '@/theme';
 import { Button, Icon, Text } from '@/ui';
@@ -40,6 +40,7 @@ export function CreateSessionForm({ machine, onCreated }: { machine: RemotePaneC
       'orchestration-sessions:create',
       [input],
       `The connection dropped before ${machine.label} answered. Check its Sessions before trying again: the Session may already exist.`,
+      CREATE_TIMEOUT_MS,
     ),
     onSuccess: view => {
       // The Session opens without another fetch on the machine the phone is on.

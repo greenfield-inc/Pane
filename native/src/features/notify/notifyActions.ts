@@ -118,17 +118,18 @@ export type DirectSendResult = { status: 'sent'; result: unknown } | Exclude<Not
  * Sends one command straight to a machine's `/invoke`, without opening its event stream: alert
  * buttons, and answers and creates aimed at a machine the phone isn't on. The token travels only
  * in a header. It never retries: once the host may have the request, a lost reply is
- * `unconfirmed`, as with `RemoteUnconfirmedResultError` in the app's live connection. `messages`
- * says what to check then, and what to do when the host refuses without saying why.
+ * `unconfirmed`, as with `RemoteUnconfirmedResultError` in the app's live connection. `options`
+ * says what to check then, what to do when the host refuses without saying why, and how long to
+ * wait for the reply (15 seconds unless `timeoutMs` says otherwise).
  */
 export async function sendDirect(
   sender: NotifySender,
   profile: RemotePaneConnectionProfile,
   channel: string,
   args: unknown[],
-  messages: { unconfirmed: string; refused: string },
+  options: { unconfirmed: string; refused: string; timeoutMs?: number },
 ): Promise<DirectSendResult> {
-  const unconfirmed = { status: 'unconfirmed' as const, message: messages.unconfirmed };
+  const unconfirmed = { status: 'unconfirmed' as const, message: options.unconfirmed };
   const { headers, body } = createFetchEventStreamTransport(sender.fetch).invokeRequest({
     baseUrl: profile.baseUrl,
     token: profile.token,
@@ -137,7 +138,7 @@ export async function sendDirect(
     deviceLabel: sender.deviceLabel,
   }, channel, args);
   const abort = new AbortController();
-  const timer = setTimeout(() => abort.abort(), SEND_TIMEOUT_MS);
+  const timer = setTimeout(() => abort.abort(), options.timeoutMs ?? SEND_TIMEOUT_MS);
   try {
     const response = await sender.fetch(`${profile.baseUrl.replace(/\/+$/, '')}/invoke`, { method: 'POST', headers, body, signal: abort.signal })
       .catch(() => null);
@@ -153,7 +154,7 @@ export async function sendDirect(
     if (!payload) return unconfirmed;
     if (payload.ok) return { status: 'sent', result: payload.result };
     // The host's own words, such as "Already answered on Parsa's MacBook. Nothing was sent."
-    return { status: 'refused', message: payload.error?.message ?? messages.refused };
+    return { status: 'refused', message: payload.error?.message ?? options.refused };
   } finally {
     clearTimeout(timer);
   }
