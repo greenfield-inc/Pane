@@ -29,6 +29,7 @@ import * as processTree from '../utils/processTree';
 import { ArchiveProcessTracker } from './archiveProcessTracker';
 import { ExpectedReportTracker } from './expectedReports';
 import { WorkspaceJournal } from './workspaceJournal';
+import { writeUpdateJson } from '../../../packages/runpane/src/updateOperation';
 
 /** In-process stand-in for a ptyHost PTY: output is whatever the test emits. */
 class FakePtyHandle implements PtyHandleLike {
@@ -1147,6 +1148,43 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void
       vi.clearAllTimers();
       vi.useRealTimers();
     }
+  });
+
+  describe('a panel held by an update', () => {
+    function writeUpdateJournal(id: string, phase: 'restore' | 'needs-attention', helperPid?: number): void {
+      writeUpdateJson(path.join(getAppDirectory(), 'updates', id, 'status.json'), {
+        id, host: 'host', scope: 'both', version: '2.4.212', phase, completed: ['stage', 'checkpoint', 'stop'], helperPid,
+        updatedAt: '2026-10-31T07:02:43.500Z', appUpdated: true, cliUpdated: true, hostReachable: true, restored: [],
+      });
+    }
+
+    function heldPanel(id: string, updateId: string): ToolPanel {
+      const panel = makePanel(id);
+      panel.state.customState = { agentType: 'claude', agentSessionId: 'conversation-1', hasClaudeSessionId: true, initialCommand: 'claude', updateResumeHold: updateId };
+      return panel;
+    }
+
+    it('starts once the update has finished, and releases the hold', async () => {
+      writeUpdateJournal('finished-update', 'needs-attention');
+      const panel = heldPanel('held-after-finished-update', 'finished-update');
+
+      await startTerminal(panel);
+
+      expect(ptyHost.spawnOptions).toHaveLength(1);
+      expect(databaseService.getPanel(panel.id)?.state.customState).not.toHaveProperty('updateResumeHold', 'finished-update');
+    });
+
+    it('stays stopped while the update can still restore it', async () => {
+      writeUpdateJournal('running-update', 'restore', process.pid);
+      vi.mocked(processTree.isProcessAlive).mockReturnValue(true);
+      const panel = heldPanel('held-during-restore', 'running-update');
+      const manager = new TerminalPanelManager(inProcessEmulatorHost);
+      managers.push(manager);
+      panelManagerMock.getPanel.mockReturnValue(panel);
+
+      await expect(manager.initializeTerminal(panel, tempDir)).rejects.toThrow(/waiting for update running-update/);
+      expect(ptyHost.spawnOptions).toHaveLength(0);
+    });
   });
 
   it('passes an explicit Claude id literally instead of selecting a different conversation', async () => {

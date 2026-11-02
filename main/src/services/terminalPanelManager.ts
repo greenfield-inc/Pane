@@ -6,6 +6,7 @@ import { validateCustomCommandResume, customResumeAgentType, effectiveCustomResu
 import { prepareSessionWorkspace, sessionGitCeiling } from './sessionWorkspace';
 import { OrchestrationSessionStore } from './orchestrationSessionStore';
 import { getAppDirectory } from '../utils/appDirectory';
+import { updateHoldIsLive } from './updateRestoration';
 import { noteContextPath } from './noteFiles';
 import { codexResumeBase, claudeResumeBase, hasClaudeResumeFlag, isPlainAgentCommand } from './agents/agentIdentity';
 import { canReadClaudeTranscripts, findClaudeSessionTranscript } from './claudeSessionTranscript';
@@ -1738,9 +1739,17 @@ export class TerminalPanelManager extends EventEmitter {
       throw new Error(`Panel ${panel.id} not found during terminal initialization`);
     }
     panel = authoritativePanel;
-    const updateHold = terminalCustomState(panel.state).updateResumeHold;
+    const heldState = terminalCustomState(panel.state);
+    const updateHold = heldState.updateResumeHold;
     if (updateHold && updateHold !== updateOperationId) {
-      throw new PaneError('ERR_UPDATE_PANEL_HELD', `Panel ${panel.id} is preserved after update ${updateHold}; its command was not restarted.`, `Review its saved conversation, then run runpane panels resume --panel ${panel.id} --yes when ready.`);
+      if (updateHoldIsLive(path.join(getAppDirectory(), 'updates', updateHold))) {
+        throw new PaneError('ERR_UPDATE_PANEL_HELD', `Panel ${panel.id} is waiting for update ${updateHold} to restore it; its command was not restarted.`, `Retry when the update finishes, or run runpane panels resume --panel ${panel.id} --yes to start it now.`);
+      }
+      // The update is over, so nothing else will restore this panel: it starts like any stopped
+      // panel. The update's stop already cleared its saved input, so none is replayed.
+      const state = { ...panel.state, customState: { ...heldState, updateResumeHold: undefined, updateResumeId: undefined } };
+      await panelManager.updatePanel(panel.id, { state });
+      panel = { ...panel, state };
     }
     if (this.sessionTerminations.has(panel.sessionId)) {
       throw new PaneError(

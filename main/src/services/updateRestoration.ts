@@ -2,8 +2,19 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { ToolPanel, TerminalPanelState } from '../../../shared/types/panels';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
-import { writeUpdateJson } from '../../../packages/runpane/src/updateOperation';
+import { readUpdateJournal, writeUpdateJson } from '../../../packages/runpane/src/updateOperation';
+import { isProcessAlive } from '../utils/processTree';
 import { checkpointSchema } from './updateContinuation';
+
+/** A hold guards its panel only while the update's helper can still restore it. */
+export function updateHoldIsLive(directory: string): boolean {
+  try {
+    const journal = readUpdateJournal(path.join(directory, 'status.json'));
+    return !['complete', 'needs-attention', 'failed'].includes(journal.phase) && journal.helperPid !== undefined && isProcessAlive(journal.helperPid);
+  } catch {
+    return false;
+  }
+}
 
 interface RestorationDependencies {
   getPanel(id: string): ToolPanel | undefined;
