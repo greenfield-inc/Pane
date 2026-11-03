@@ -10,7 +10,7 @@ import { describeFailure, RunpaneError, type RunpaneFailure } from './errors';
 import { assertUpdateOptions, preflightUpdate, updateHostSchema, type UpdatePreflight } from './updatePreflight';
 import { stageUpdateRuntime } from './updateRuntime';
 import { checkUpdateSupervisor, startUpdateSupervisor, removeUpdateSupervisor } from './updateSupervisor';
-import { assertUpdateQuiescence, claimUpdateLock, releaseUpdateLock, executeUpdate, readUpdateJournal, updateLockReleasable, waitForUpdateCaller, writeUpdateJson, type UpdateJournal } from './updateOperation';
+import { assertUpdateQuiescence, claimUpdateLock, releaseUpdateLock, executeUpdate, readUpdateJournal, updateEnded, updateLockReleasable, UPDATE_ID_PATTERN, waitForUpdateCaller, writeUpdateJson } from './updateOperation';
 import { activateManagedCli, runNpm, stageCliPackage, stageUpdateCode, type StagedCli } from './updatePackage';
 import { identifyPythonCli, stagePythonCli, installPythonCli } from './updatePython';
 import { stageApp, installStagedApp, type StagedApp } from './updateArtifacts';
@@ -31,10 +31,9 @@ const stagedSchema = boundary.object({
   cli: boundary.nullable(boundary.object({ version: boundary.string, archive: boundary.string, packageRoot: boundary.string })),
   npm: boundary.optional(boundary.string),
 });
-const terminal = (journal: UpdateJournal) => ['complete', 'needs-attention', 'failed'].includes(journal.phase);
 const pause = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 function operationDirectory(paneDir: string, id: string): string {
-  if (!/^[a-zA-Z0-9-]{1,80}$/.test(id)) throw new RunpaneError('ERR_UPDATE_ID', 'Invalid update operation ID. Nothing was changed.', 'Use the ID returned by runpane update.');
+  if (!UPDATE_ID_PATTERN.test(id)) throw new RunpaneError('ERR_UPDATE_ID', 'Invalid update operation ID. Nothing was changed.', 'Use the ID returned by runpane update.');
   return path.join(paneDir, 'updates', id);
 }
 function processExists(pid: number): boolean {
@@ -165,7 +164,7 @@ async function waitForRelaunch(paneDir: string, version: string): Promise<void> 
 async function presentUpdate(file: string, parsed: ParsedArgs): Promise<number> {
   let journal = readUpdateJournal(file);
   if (parsed.updateWait) {
-    while (!terminal(journal)) { await pause(500); journal = readUpdateJournal(file); }
+    while (!updateEnded(journal)) { await pause(500); journal = readUpdateJournal(file); }
   }
   console.log(JSON.stringify({ ...journal, statusFile: file, next: `runpane update --status ${journal.id} --pane-dir ${JSON.stringify(path.dirname(path.dirname(path.dirname(file))))} --wait --json` }, null, 2));
   return journal.phase === 'failed' || journal.phase === 'needs-attention' ? 1 : 0;
@@ -304,7 +303,7 @@ export async function runUpdateHelper(directory: string, artifacts: UpdateArtifa
     }
     return {};
   } });
-  if (terminal(result)) {
+  if (updateEnded(result)) {
     // A new operation gets its own directory, so this journal and snapshot stay.
     if (updateLockReleasable(result)) for (const lock of [preflight.lockDirectory, ...preflight.additionalLockDirectories]) releaseUpdateLock(lock, id);
     try { removeUpdateSupervisor(id); } catch { /* terminal journal prevents another execution */ }

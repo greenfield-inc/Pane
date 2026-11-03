@@ -1151,11 +1151,13 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void
   });
 
   describe('a panel held by an update', () => {
-    function writeUpdateJournal(id: string, phase: 'restore' | 'needs-attention', helperPid?: number): void {
-      writeUpdateJson(path.join(getAppDirectory(), 'updates', id, 'status.json'), {
+    function writeUpdateJournal(id: string, phase: 'restore' | 'needs-attention', helperPid?: number): string {
+      const file = path.join(getAppDirectory(), 'updates', id, 'status.json');
+      writeUpdateJson(file, {
         id, host: 'host', scope: 'both', version: '2.4.212', phase, completed: ['stage', 'checkpoint', 'stop'], helperPid,
         updatedAt: '2026-10-31T07:02:43.500Z', appUpdated: true, cliUpdated: true, hostReachable: true, restored: [],
       });
+      return file;
     }
 
     function heldPanel(id: string, updateId: string): ToolPanel {
@@ -1164,14 +1166,23 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void
       return panel;
     }
 
-    it('starts once the update has finished, and releases the hold', async () => {
-      writeUpdateJournal('finished-update', 'needs-attention');
-      const panel = heldPanel('held-after-finished-update', 'finished-update');
+    it.each([
+      { why: 'its helper died mid-restore', phase: 'restore' as const, helperAlive: false, writtenBeforeBoot: false },
+      { why: 'it finished, though its helper PID is still alive', phase: 'needs-attention' as const, helperAlive: true, writtenBeforeBoot: false },
+      { why: 'its journal predates this boot, though its helper PID is now reused', phase: 'restore' as const, helperAlive: true, writtenBeforeBoot: true },
+    ])('starts and releases the hold when the update is over: $why', async ({ phase, helperAlive, writtenBeforeBoot }) => {
+      const file = writeUpdateJournal('ended-update', phase, 4242);
+      if (writtenBeforeBoot) {
+        const beforeBoot = (Date.now() - os.uptime() * 1000 - 60_000) / 1000;
+        fs.utimesSync(file, beforeBoot, beforeBoot);
+      }
+      vi.mocked(processTree.isProcessAlive).mockReturnValue(helperAlive);
+      const panel = heldPanel('held-after-ended-update', 'ended-update');
 
       await startTerminal(panel);
 
       expect(ptyHost.spawnOptions).toHaveLength(1);
-      expect(databaseService.getPanel(panel.id)?.state.customState).not.toHaveProperty('updateResumeHold', 'finished-update');
+      expect(databaseService.getPanel(panel.id)?.state.customState?.updateResumeHold).toBeUndefined();
     });
 
     it('stays stopped while the update can still restore it', async () => {

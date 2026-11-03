@@ -1742,7 +1742,7 @@ export class TerminalPanelManager extends EventEmitter {
     const heldState = terminalCustomState(panel.state);
     const updateHold = heldState.updateResumeHold;
     if (updateHold && updateHold !== updateOperationId) {
-      if (updateHoldIsLive(path.join(getAppDirectory(), 'updates', updateHold))) {
+      if (updateHoldIsLive(updateHold)) {
         throw new PaneError('ERR_UPDATE_PANEL_HELD', `Panel ${panel.id} is waiting for update ${updateHold} to restore it; its command was not restarted.`, `Retry when the update finishes, or run runpane panels resume --panel ${panel.id} --yes to start it now.`);
       }
       // The update is over, so nothing else will restore this panel: it starts like any stopped
