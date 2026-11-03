@@ -66,12 +66,12 @@ import { getCliBrandIcon } from './ui/brandIconRegistry';
 import { visibleAgentPresets } from '../utils/agentPresets';
 import type { Project } from '../types/project';
 import { devLog, renderLog } from '../utils/console';
-import { isMissionControlEnabled, useConfigStore } from '../stores/configStore';
+import { isChatTabsEnabled, isMissionControlEnabled, useConfigStore } from '../stores/configStore';
 import { cycleIndex } from '../utils/arrayUtils';
 import { formatKeyDisplay } from '../utils/hotkeyUtils';
 import { Kbd } from './ui/Kbd';
 import { OPEN_INSPECTOR_EVENT, type InspectorRequest, type InspectorTab } from './InspectorTabs';
-import { useErrorStore } from '../stores/errorStore';
+import { showActionError, useErrorStore } from '../stores/errorStore';
 import ProjectSettings from './ProjectSettings';
 import { LoopsView } from './loops/LoopsView';
 import { LivePreviewPrompt } from './LivePreviewPrompt';
@@ -1332,6 +1332,7 @@ export const SessionView = memo(() => {
     setDropZones(new Map());
   }, [primaryGroupId, primaryGroupNode, activeSession, isSplitLayout, topBarPanels, applyLayout]);
 
+  const chatTabs = useConfigStore((s) => isChatTabsEnabled(s.config));
   const hotkeys = useHotkeyStore((s) => s.hotkeys);
   const hotkeyDisplay = useCallback((id: string) => {
     const keys = hotkeys.get(id)?.keys;
@@ -1345,10 +1346,18 @@ export const SessionView = memo(() => {
       <div className="w-64">
         <div className="mb-2 px-2 text-[11px] font-semibold uppercase tracking-wide text-text-muted">Open</div>
         {[
+          // Chat tabs on (D-15): agents open as chats first; their terminal versions follow.
+          ...(chatTabs && activeSession ? (['claude', 'codex'] as const).map(agent => ({
+            key: `chat-${agent}`,
+            label: agent === 'claude' ? 'Claude' : 'Codex',
+            icon: getCliBrandIcon(agent, 'h-3.5 w-3.5'),
+            hotkeyId: '',
+            onClick: () => { void window.electronAPI.chatTab.create({ sessionId: activeSession.id, agent }).catch(error => showActionError(`Could not open a ${agent === 'claude' ? 'Claude' : 'Codex'} chat`, error)); },
+          })) : []),
           { key: 'terminal', label: 'Terminal', icon: <Terminal className="h-3.5 w-3.5" />, hotkeyId: 'add-tool-terminal', onClick: () => handlePanelCreate('terminal') },
           ...agentPresets.map(preset => ({
             key: preset.id,
-            label: preset.title,
+            label: chatTabs ? `${preset.title} in Terminal` : preset.title,
             icon: getCliBrandIcon(preset.iconKey, 'h-3.5 w-3.5'),
             hotkeyId: preset.hotkeyId,
             onClick: () => handlePanelCreate('terminal', { initialCommand: preset.command, title: preset.title }),
@@ -1374,7 +1383,7 @@ export const SessionView = memo(() => {
         ))}
       </div>
     </div>
-  ), [agentPresets, customCommands, handlePanelCreate, hotkeyDisplay]);
+  ), [activeSession, agentPresets, chatTabs, customCommands, handlePanelCreate, hotkeyDisplay]);
 
   // --- Editor stage element (shared by both layouts) ---
   const editorStageElement = useMemo(() => {
