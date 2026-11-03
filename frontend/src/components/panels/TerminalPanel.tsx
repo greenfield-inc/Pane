@@ -15,7 +15,6 @@ import {
   isFineSurfaceScrollKey,
   isPageSurfaceScrollKey,
   resolveTerminalKeyHandling,
-  shouldOpenTerminalSearch,
   terminalClaimsFineSurfaceScroll,
 } from '../../utils/terminalKeyHandling';
 import { isMac } from '../../utils/platformUtils';
@@ -31,9 +30,12 @@ import { PANE_LINK_REGEX } from '../terminal/paneLink';
 import { TerminalLinkTooltip } from '../terminal/TerminalLinkTooltip';
 import { TerminalPopover, PopoverButton } from '../terminal/TerminalPopover';
 import { SelectionPopover } from '../terminal/SelectionPopover';
-import { useTerminalSearch } from '../../hooks/useTerminalSearch';
 import { useScrollSurface } from '../../hooks/useScrollSurface';
-import { TerminalSearchOverlay } from '../terminal/TerminalSearchOverlay';
+import { SearchAddon } from '@xterm/addon-search';
+import { FindBar } from '../find/FindBar';
+import { reportFindResult, useFindBar, type FindAdapter } from '../find/findController';
+import { usePanelFind } from '../find/usePanelFind';
+import { createTerminalFindAdapter, HIGHLIGHT_LIMIT } from '../terminal/terminalFindAdapter';
 import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
 import { DEFAULT_TERMINAL_FONT_SIZE } from '../../../../shared/types/appearance';
 import {
@@ -249,6 +251,13 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
   const isNearBottomRef = useRef(true); // Track if user is scrolled near the bottom
   const [showScrollDown, setShowScrollDown] = useState(false); // Show jump-to-bottom pill
   const tuiActiveRef = useRef(false);
+  const findOpen = useFindBar(panel.id).open;
+  const findOpenRef = useRef(findOpen);
+  useLayoutEffect(() => {
+    findOpenRef.current = findOpen;
+  }, [findOpen]);
+  // The find target's root: focus or clicks anywhere in this terminal route Cmd/Ctrl+F here.
+  const findRootRef = useRef<HTMLDivElement | null>(null);
   const scrollLineRemainderRef = useRef(0);
   const [isInitialized, setIsInitialized] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -629,19 +638,35 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
     workingDirectory: workingDirectory || '',
     sessionId: sessionId || panel.sessionId,
     onCopyError: handleClipboardError,
+    // Find selects each match; that is not a selection to offer copying.
+    suppressSelectionPopover: () => findOpenRef.current,
   });
 
-  // Terminal search hook
-  const {
-    isSearchOpen,
-    searchQuery,
-    searchStatus,
-    searchInputRef,
-    openSearch,
-    closeSearch,
-    onQueryChange,
-    onStep,
-  } = useTerminalSearch(xtermRef);
+  // Pane find (Cmd/Ctrl+F): highlights from @xterm/addon-search, the bar
+  // and key routing from components/find. The addon re-searches on new output
+  // and after the activation replay, so highlights and the count stay current.
+  const [findAdapter, setFindAdapter] = useState<FindAdapter | null>(null);
+  useEffect(() => {
+    if (!terminalInstance) return;
+    const searchAddon = new SearchAddon({ highlightLimit: HIGHLIGHT_LIMIT });
+    terminalInstance.loadAddon(searchAddon);
+    const adapter = createTerminalFindAdapter({
+      terminal: terminalInstance,
+      search: searchAddon,
+      report: (result) => reportFindResult(panel.id, result),
+    });
+    setFindAdapter(adapter);
+    return () => {
+      setFindAdapter(null);
+      adapter.dispose();
+      searchAddon.dispose();
+    };
+  }, [terminalInstance, panel.id]);
+  usePanelFind(panel.id, findRootRef, findAdapter);
+  const setTerminalSurfaceRef = useCallback((element: HTMLDivElement | null) => {
+    findRootRef.current = element;
+    terminalScrollSurfaceRef(element);
+  }, [terminalScrollSurfaceRef]);
 
   const resizePtyToFit = useCallback(async (force = false): Promise<void> => {
     if (!fitAddonRef.current || !terminalRef.current) return;
@@ -853,14 +878,6 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
   const repaintTerminal = useCallback(() => {
     void reconcileMountedTerminal();
   }, [reconcileMountedTerminal]);
-
-  // Open search on Ctrl/Cmd+F from the container div
-  const handleTerminalKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (shouldOpenTerminalSearch(e, keyboardShortcutsEnabled)) {
-      e.preventDefault();
-      openSearch();
-    }
-  }, [keyboardShortcutsEnabled, openSearch]);
 
   const getDropdownPosition = useCallback((): DropdownPosition => {
     const container = terminalRef.current;
@@ -1103,6 +1120,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
             isCliPanel: isCliPanelRef.current,
             isMac: isMac(),
             keyboardShortcutsEnabled: keyboardShortcutsEnabledRef.current,
+            findOpen: findOpenRef.current,
           });
 
           // Shift+Enter sends the same ESC+CR sequence as Alt+Enter for CLI
@@ -1130,9 +1148,6 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
           // Right Alt: let OS/browser handle (e.g. voice transcription, IME)
           // Use e.code for physical key (e.key may report 'AltGraph' on some layouts)
           if (e.code === 'AltRight') return false;
-
-          // Ctrl/Cmd+F: terminal search
-          if (ctrlOrMeta && e.key.toLowerCase() === 'f') return false;
 
           // Ctrl/Cmd+V: stop xterm from sending raw \x16 to PTY
           // Returning false lets the browser trigger a native paste event instead,
@@ -2025,10 +2040,9 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
   // Always render the terminal div to keep XTerm instance alive
   return (
     <div
-      ref={terminalScrollSurfaceRef}
+      ref={setTerminalSurfaceRef}
       className="h-full w-full relative group/terminal"
       onMouseMove={onMouseMove}
-      onKeyDown={handleTerminalKeyDown}
     >
       {/* ph-no-capture keeps xterm out of session recordings: its WebGL canvas
           never replays, and replaying scrollback rewrites the scrollbar
@@ -2039,16 +2053,8 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
         <button type="button" className="ml-3 text-text-primary" onClick={() => void handleManualRefresh()}>Retry snapshot</button>
       </div>}
 
-      {/* Terminal search overlay */}
-      <TerminalSearchOverlay
-        isOpen={isSearchOpen}
-        searchQuery={searchQuery}
-        searchStatus={searchStatus}
-        searchInputRef={searchInputRef}
-        onQueryChange={onQueryChange}
-        onStep={onStep}
-        onClose={closeSearch}
-      />
+      {/* Pane find bar: overlays the terminal, never resizes it (no refit) */}
+      <FindBar panelId={panel.id} className="top-5 right-3" />
 
       {/* Terminal scroll buttons — compact, revealed on hover or keyboard focus */}
       {isInitialized && (

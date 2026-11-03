@@ -3,9 +3,9 @@ import {
   isFineSurfaceScrollKey,
   isPageSurfaceScrollKey,
   resolveTerminalKeyHandling,
-  shouldOpenTerminalSearch,
   terminalClaimsFineSurfaceScroll,
   TERMINAL_MULTILINE_NEWLINE_SEQUENCE,
+  type TerminalKeyHandlingState,
   type TerminalKeyLike,
 } from './terminalKeyHandling';
 
@@ -49,12 +49,7 @@ describe('focused surface terminal key boundary', () => {
   });
 });
 
-const tui = (overrides: Partial<{
-  isTuiActive: boolean;
-  isCliPanel: boolean;
-  isMac: boolean;
-  keyboardShortcutsEnabled: boolean;
-}> = {}) => ({
+const tui = (overrides: Partial<TerminalKeyHandlingState> = {}): TerminalKeyHandlingState => ({
   isTuiActive: true,
   isCliPanel: true,
   isMac: false,
@@ -201,10 +196,59 @@ describe('resolveTerminalKeyHandling', () => {
   });
 });
 
-describe('shouldOpenTerminalSearch', () => {
-  it('only opens search when Pane keyboard shortcuts are enabled', () => {
-    const event = key({ key: 'f', code: 'KeyF', ctrlKey: true });
-    expect(shouldOpenTerminalSearch(event, true)).toBe(true);
-    expect(shouldOpenTerminalSearch(event, false)).toBe(false);
+describe('find keys in the terminal (D-9)', () => {
+  const plainShell = (overrides: Partial<TerminalKeyHandlingState> = {}) =>
+    tui({ isTuiActive: false, isCliPanel: false, ...overrides });
+  const cmd = (k: string, shiftKey = false) => key({ key: shiftKey ? k.toUpperCase() : k, code: `Key${k.toUpperCase()}`, metaKey: true, shiftKey });
+  const ctrl = (k: string, shiftKey = false) => key({ key: shiftKey ? k.toUpperCase() : k, code: `Key${k.toUpperCase()}`, ctrlKey: true, shiftKey });
+
+  describe('macOS', () => {
+    it.each([
+      ['Cmd+F', cmd('f')],
+      ['Cmd+G', cmd('g')],
+      ['Shift+Cmd+G', cmd('g', true)],
+    ])('%s opens Pane find in a plain shell and over a full-screen program (kitty on or off)', (_label, event) => {
+      // The decision is made before xterm's kitty encoder sees the key.
+      expect(resolveTerminalKeyHandling(event, plainShell({ isMac: true }))).toEqual({ action: 'release-to-app' });
+      expect(resolveTerminalKeyHandling(event, tui({ isMac: true, isCliPanel: false }))).toEqual({ action: 'release-to-app' });
+      expect(resolveTerminalKeyHandling(event, tui({ isMac: true }))).toEqual({ action: 'release-to-app' });
+    });
+
+    it('leaves Ctrl+F and Ctrl+G to the terminal (readline, vim, less)', () => {
+      expect(resolveTerminalKeyHandling(ctrl('f'), plainShell({ isMac: true }))).toEqual({ action: 'pass-through' });
+      expect(resolveTerminalKeyHandling(ctrl('f'), tui({ isMac: true, isCliPanel: false }))).toEqual({ action: 'pass-through' });
+      expect(resolveTerminalKeyHandling(ctrl('g'), plainShell({ isMac: true, findOpen: true }))).toEqual({ action: 'pass-through' });
+    });
+  });
+
+  describe('Windows and Linux', () => {
+    it('opens find on Ctrl+F in a plain shell', () => {
+      expect(resolveTerminalKeyHandling(ctrl('f'), plainShell())).toEqual({ action: 'release-to-app' });
+    });
+
+    it('gives Ctrl+F to a full-screen program first (kitty on or off)', () => {
+      expect(resolveTerminalKeyHandling(ctrl('f'), tui({ isCliPanel: false }))).toEqual({ action: 'pass-through' });
+      expect(resolveTerminalKeyHandling(ctrl('f'), tui())).toEqual({ action: 'pass-through' });
+    });
+
+    it('uses Ctrl+G and Ctrl+Shift+G for find only while the bar is open', () => {
+      expect(resolveTerminalKeyHandling(ctrl('g'), plainShell())).toEqual({ action: 'pass-through' });
+      expect(resolveTerminalKeyHandling(ctrl('g'), plainShell({ findOpen: true }))).toEqual({ action: 'release-to-app' });
+      expect(resolveTerminalKeyHandling(ctrl('g', true), plainShell({ findOpen: true }))).toEqual({ action: 'release-to-app' });
+      expect(resolveTerminalKeyHandling(ctrl('g'), tui({ isCliPanel: false, findOpen: true }))).toEqual({ action: 'pass-through' });
+    });
+  });
+
+  it('passes every find key through when keyboard shortcuts are off', () => {
+    for (const isMac of [true, false]) {
+      const event = isMac ? cmd('f') : ctrl('f');
+      expect(resolveTerminalKeyHandling(event, plainShell({ isMac, keyboardShortcutsEnabled: false }))).toEqual({ action: 'pass-through' });
+      expect(resolveTerminalKeyHandling(event, tui({ isMac, keyboardShortcutsEnabled: false }))).toEqual({ action: 'pass-through' });
+    }
+  });
+
+  it('does not treat Shift+Cmd+F or Alt combinations as find', () => {
+    expect(resolveTerminalKeyHandling(cmd('f', true), plainShell({ isMac: true }))).toEqual({ action: 'continue' });
+    expect(resolveTerminalKeyHandling(key({ key: 'f', code: 'KeyF', ctrlKey: true, altKey: true }), plainShell())).toEqual({ action: 'continue' });
   });
 });

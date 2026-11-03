@@ -188,6 +188,9 @@ importers:
       '@xterm/addon-image':
         specifier: 0.10.0-beta.299
         version: 0.10.0-beta.299(@xterm/xterm@6.1.0-beta.302)
+      '@xterm/addon-search':
+        specifier: 0.17.0-beta.299
+        version: 0.17.0-beta.299(@xterm/xterm@6.1.0-beta.302)
       '@xterm/addon-serialize':
         specifier: 0.15.0-beta.299
         version: 0.15.0-beta.299(@xterm/xterm@6.1.0-beta.302)
@@ -5658,6 +5661,11 @@ packages:
 
   '@xterm/addon-image@0.10.0-beta.299':
     resolution: {integrity: sha512-odxXWWAKh2KRIUgXTvQejzkzlvIbpV3aepkkS6uaQKUVYf9HUqWEhECUsUvm2pMgZtqLqGuhmynw/qvKWmHrBQ==}
+    peerDependencies:
+      '@xterm/xterm': ^6.1.0-beta.301
+
+  '@xterm/addon-search@0.17.0-beta.299':
+    resolution: {integrity: sha512-We4bbjOuLY9oZD5WN93P6STqwlJg3Q7ECSE4UIuzEmWG009yEu4di5HPW/8u7UERUdrg0+8Ds+wGWrDR0687jw==}
     peerDependencies:
       '@xterm/xterm': ^6.1.0-beta.301
 
@@ -16995,6 +17003,10 @@ snapshots:
       '@xterm/xterm': 6.1.0-beta.302
 
   '@xterm/addon-image@0.10.0-beta.299(@xterm/xterm@6.1.0-beta.302)':
+    dependencies:
+      '@xterm/xterm': 6.1.0-beta.302
+
+  '@xterm/addon-search@0.17.0-beta.299(@xterm/xterm@6.1.0-beta.302)':
     dependencies:
       '@xterm/xterm': 6.1.0-beta.302
 
