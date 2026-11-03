@@ -1301,3 +1301,13 @@ body.understory {
   .pane-machine-mark[data-presence='pulsing'] { opacity: 0.45; }
   .pane-machine-mark[data-presence='pulsing'] .pane-machine-logo { animation: none; }
 }
+
+/* Pane find (Cmd/Ctrl+F) in file previews and other page text. Drawn with the
+   CSS Custom Highlight API, so the page's own elements are never rewritten. */
+::highlight(pane-find-match) {
+  background-color: color-mix(in srgb, var(--color-status-warning) 35%, transparent);
+}
+::highlight(pane-find-current) {
+  background-color: var(--color-status-warning);
+  color: var(--color-text-on-status-warning);
+}
