@@ -129,7 +129,7 @@ export function toStep(part: Extract<AgentChatPart, { type: 'tool' }>): ChatStep
   }
   step.path ??= location ?? input?.file_path ?? input?.path;
   if (kind === 'run') step.command = Array.isArray(input?.command) ? input.command.join(' ') : input?.command ?? input?.cmd ?? part.title;
-  const output = outputText(part.output, part.content);
+  const output = part.terminal ?? outputText(part.output, part.content);
   if (output) step.output = output;
   if (part.input !== undefined) step.input = part.input;
   return step;

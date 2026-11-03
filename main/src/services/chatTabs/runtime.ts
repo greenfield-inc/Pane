@@ -113,7 +113,8 @@ export class ChatTabRuntime {
         protocolVersion: 1,
         clientInfo: { name: 'pane', version: '1' },
         // Form elicitation lets Claude ask AskUserQuestion and plan questions as cards.
-        clientCapabilities: { elicitation: { form: {} } },
+        // terminal_output_delta: claude-agent-acp streams command output into the step's row.
+        clientCapabilities: { elicitation: { form: {} }, _meta: { terminal_output_delta: true } },
       }));
     } catch (error) {
       const stderr = this.process.stderrTail().split('\n').filter(Boolean).at(-1);

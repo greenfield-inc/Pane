@@ -82,4 +82,16 @@ describe('chat tab transcript', () => {
     expect(transcript.history(10, 2)).toHaveLength(2);
     expect(Date.now() - started).toBeLessThan(10_000);
   });
+
+  it('streams command output as small appends into the step', () => {
+    const transcript = new ChatTranscript('panel', 1, { spoolFile: spool() });
+    transcript.accept({ sessionUpdate: 'tool_call', toolCallId: 'x', title: 'pnpm test', kind: 'execute', status: 'in_progress' });
+    const viewer = transcript.snapshot(10);
+    const first = transcript.accept({ sessionUpdate: 'tool_call_update', toolCallId: 'x', _meta: { terminal_output_delta: 'RUN v3\n' } });
+    const second = transcript.accept({ sessionUpdate: 'tool_call_update', toolCallId: 'x', _meta: { terminal_output_delta: '✓ 6 tests\n' } });
+    expect(second?.change).toEqual({ type: 'tool', id: 'tool:x', patch: { terminalAppend: '✓ 6 tests\n' } });
+    const followed = [first!, second!].reduce((current, event) => applyChatTabEvent(current, event).transcript, viewer);
+    expect(followed.messages[0].parts[0]).toMatchObject({ terminal: 'RUN v3\n✓ 6 tests\n' });
+    expect(transcript.snapshot(10).messages[0].parts[0]).toMatchObject({ terminal: 'RUN v3\n✓ 6 tests\n' });
+  });
 });

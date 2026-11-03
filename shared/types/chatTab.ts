@@ -109,7 +109,17 @@ export type ChatTabChange =
   /** Only the fields of a tool step that changed. */
   | { type: 'tool'; id: string; patch: ChatToolPatch };
 
-export type ChatToolPatch = Partial<Omit<Extract<AgentChatPart, { type: 'tool' }>, 'type' | 'id'>>;
+/** `terminalAppend` adds live command output to the step's `terminal` text (bounded to its last 64 KiB). */
+export type ChatToolPatch = Partial<Omit<Extract<AgentChatPart, { type: 'tool' }>, 'type' | 'id'>> & { terminalAppend?: string };
+
+export const CHAT_TERMINAL_LIMIT = 64 * 1024;
+
+/** Applies a tool patch to a step in place, as host and viewers both do. */
+export function patchTool(part: Extract<AgentChatPart, { type: 'tool' }>, patch: ChatToolPatch): void {
+  const { terminalAppend, ...fields } = patch;
+  Object.assign(part, structuredClone(fields));
+  if (terminalAppend) part.terminal = ((part.terminal ?? '') + terminalAppend).slice(-CHAT_TERMINAL_LIMIT);
+}
 
 export interface ChatTabEvent {
   panelId: string;
@@ -178,7 +188,7 @@ export function applyChatTabEvent(transcript: ChatTabTranscript, event: ChatTabE
     const message = structuredClone(existing);
     const part = message.parts[0];
     if (part?.type !== 'tool') return { transcript, resync: true };
-    Object.assign(part, structuredClone(change.patch));
+    patchTool(part, change.patch);
     messages[local] = message;
   }
   return { transcript: { ...next, messages }, resync: false };

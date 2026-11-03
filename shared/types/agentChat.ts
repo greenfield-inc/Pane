@@ -2,7 +2,7 @@ import type { JsonValue } from '../validation/boundaryDecoder';
 
 export type AgentChatPart =
   | { type: 'text' | 'thought'; text: string }
-  | { type: 'tool'; id: string; title: string; status: 'pending' | 'in_progress' | 'completed' | 'failed'; input?: JsonValue; output?: JsonValue; content?: JsonValue[]; kind?: string; locations?: JsonValue }
+  | { type: 'tool'; id: string; title: string; status: 'pending' | 'in_progress' | 'completed' | 'failed'; input?: JsonValue; output?: JsonValue; content?: JsonValue[]; kind?: string; locations?: JsonValue; terminal?: string }
   | { type: 'content'; content: JsonValue };
 
 export interface AgentChatMessage {

@@ -8,7 +8,7 @@ const part: BoundarySchema<AgentChatPart> = boundary.union(
   boundary.object({
     type: boundary.literal('tool'), id: boundary.string, title: boundary.string, status,
     input: boundary.optional(boundary.json), output: boundary.optional(boundary.json), content: boundary.optional(boundary.array(boundary.json)),
-    kind: boundary.optional(boundary.string), locations: boundary.optional(boundary.json),
+    kind: boundary.optional(boundary.string), locations: boundary.optional(boundary.json), terminal: boundary.optional(boundary.string),
   }),
   boundary.object({ type: boundary.literal('content'), content: boundary.json }),
 );
@@ -16,7 +16,8 @@ export const chatMessageSchema: BoundarySchema<AgentChatMessage> = boundary.obje
 const patch: BoundarySchema<ChatToolPatch> = boundary.object({
   title: boundary.optional(boundary.string), status: boundary.optional(status),
   input: boundary.optional(boundary.json), output: boundary.optional(boundary.json), content: boundary.optional(boundary.array(boundary.json)),
-  kind: boundary.optional(boundary.string), locations: boundary.optional(boundary.json),
+  kind: boundary.optional(boundary.string), locations: boundary.optional(boundary.json), terminal: boundary.optional(boundary.string),
+  terminalAppend: boundary.optional(boundary.string),
 });
 const event: BoundarySchema<ChatTabEvent> = boundary.object({
   panelId: boundary.string, generation: boundary.number, revision: boundary.number, index: boundary.number,

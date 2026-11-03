@@ -1,10 +1,13 @@
 import { appendFileSync, closeSync, mkdirSync, openSync, readSync, rmSync } from 'fs';
 import path from 'path';
 import type { ContentBlock, SessionUpdate } from '@agentclientprotocol/sdk';
-import { boundary, decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
+import { CHAT_TERMINAL_LIMIT } from '../../../../shared/types/chatTab';
+
+const terminalMeta = boundary.object({ terminal_output_delta: boundary.optional(boundary.string), terminal_output: boundary.optional(boundary.string) });
 import type { AgentChatMessage, AgentChatPart } from '../../../../shared/types/agentChat';
 import { chatMessageSchema } from '../../../../shared/types/chatTabDecoders';
-import type { ChatTabChange, ChatTabEvent, ChatTabTranscript, ChatToolPatch } from '../../../../shared/types/chatTab';
+import { patchTool, type ChatTabChange, type ChatTabEvent, type ChatTabTranscript, type ChatToolPatch } from '../../../../shared/types/chatTab';
 
 export interface ChatTranscriptOptions {
   /** Where messages that leave the memory window are kept for paging. */
@@ -141,6 +144,10 @@ export class ChatTranscript {
         if (update.rawOutput !== undefined) patch.output = decodeBoundary(update.rawOutput, boundary.json);
         if (update.content != null) patch.content = decodeBoundary(update.content, boundary.array(boundary.json));
         if (update.locations != null) patch.locations = decodeBoundary(update.locations, boundary.json);
+        // claude-agent-acp's terminal extension: live command output for the step's own row.
+        const terminal = decodeOptionalBoundary(update._meta, terminalMeta);
+        if (terminal?.terminal_output_delta) patch.terminalAppend = terminal.terminal_output_delta;
+        else if (terminal?.terminal_output !== undefined) patch.terminal = terminal.terminal_output.slice(-CHAT_TERMINAL_LIMIT);
         if (!this.indexes.has(id)) {
           return this.commit({ type: 'replace', message: { id, role: 'assistant', parts: [{ type: 'tool', id: update.toolCallId, title: patch.title ?? 'Tool', status: patch.status ?? 'pending', ...patch }] } });
         }
@@ -186,7 +193,7 @@ export class ChatTranscript {
         else message.parts.push(structuredClone(change.part));
       } else {
         const part = message.parts[0];
-        if (part?.type === 'tool') Object.assign(part, structuredClone(change.patch));
+        if (part?.type === 'tool') patchTool(part, change.patch);
       }
       this.residentMessages[local] = message;
     }
