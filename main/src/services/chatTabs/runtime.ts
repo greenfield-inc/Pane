@@ -198,6 +198,15 @@ export class ChatTabRuntime {
     this.options.onState();
   }
 
+  /** Selects a session mode (ACP session/set_mode), such as a profile's bypassPermissions. */
+  async setMode(modeId: string): Promise<void> {
+    if (!this.sessionId) throw new PaneError('CHAT_NOT_READY', 'The conversation has not started yet. The mode was not set.', 'Wait for the tab to finish starting.');
+    await this.bounded(this.agent().request(methods.agent.session.setMode, { sessionId: this.sessionId, modeId })).catch(error => {
+      throw chatFailure(error, { code: 'CHAT_MODE_REFUSED', next: 'Press Restart. If it fails again, check the profile\'s permission mode.' });
+    });
+    this.options.onState();
+  }
+
   controls(): AgentChatConfigOption[] {
     return this.configOptions.flatMap(option => option.type === 'select' ? [{
       id: option.id, name: option.name, currentValue: option.currentValue,

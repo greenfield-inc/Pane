@@ -17,8 +17,10 @@ export interface ResolvedLaunch {
   /** `_meta` for session/new and session/load (Claude's `claudeCode.options`). */
   meta?: JsonObject;
   mcpServers?: McpServer[];
-  /** Session settings to apply once, on a new conversation (for example the profile's mode). */
+  /** Session settings to apply once, on a new conversation. */
   initialSettings?: Record<string, string>;
+  /** The session mode to select after every session/new and session/load (an Agent Farm profile's permission mode). */
+  mode?: string;
 }
 
 /** Events a chat tab sends to every viewer. */
@@ -255,6 +257,7 @@ export class ChatTabManager {
         const created = await runtime.create(request);
         this.update(panelId, current => ({ ...current, acpSessionId: created.sessionId, settings: { ...launch.initialSettings, ...current.settings } }));
       }
+      if (launch.mode) await runtime.setMode(launch.mode);
       await this.applySettings(panelId, runtime);
       const interrupted = this.required(panelId).turn;
       if (interrupted) {

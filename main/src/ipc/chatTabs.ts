@@ -2,19 +2,24 @@ import type { IpcMain } from 'electron';
 import type { PaneCommandRegistry, PaneCommandValue } from '../daemon/commandRegistry';
 import type { AppServices } from './types';
 import type { ChatAgent, ChatPanelState, ChatTabAnswer, ChatTabCreate } from '../../../shared/types/chatTab';
+import type { ToolPanel } from '../../../shared/types/panels';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { PaneError } from '../../../shared/paneError';
 import { getRuntimeConfigManager } from '../core/runtime';
 import { panelManager } from '../services/panelManager';
 import { configureChatTabs, getChatTabManager } from '../services/chatTabs';
 import { chatTabSecrets } from '../services/chatTabs/secrets';
+import { AgentFarmProfiles } from '../services/chatTabs/agentFarm';
+import { chatTabEnv } from '../services/chatTabs/launch';
+import { adapterEntry, installAdapter } from '../services/agentChat/adapterSetup';
+import { findExecutableInPath } from '../utils/shellPath';
 
 const agentSchema = boundary.enumeration('claude', 'codex');
 const imageSchema = boundary.object({ mimeType: boundary.string, data: boundary.string });
 const sendSchema = boundary.object({ operationId: boundary.nonEmptyString, text: boundary.string, images: boundary.optional(boundary.array(imageSchema)) });
 const createSchema = boundary.object({
   sessionId: boundary.nonEmptyString,
-  agent: agentSchema,
+  agent: boundary.optional(agentSchema),
   launch: boundary.optional(boundary.union(
     boundary.object({ kind: boundary.literal('agent') }),
     boundary.object({ kind: boundary.literal('profile'), profile: boundary.nonEmptyString, args: boundary.optional(boundary.record(boundary.string)) }),
@@ -30,6 +35,17 @@ const answerSchema = boundary.union(
 );
 const panelId = (value: PaneCommandValue) => decodeBoundary(value, boundary.nonEmptyString);
 
+/** Agent Farm profiles (package 2's run --print-acp) with Pane's pinned adapters. */
+const agentFarmProfiles = new AgentFarmProfiles({
+  executable: () => findExecutableInPath('agent-farm') ?? undefined,
+  adapter: async agent => {
+    await installAdapter(agent);
+    const entry = adapterEntry(agent);
+    if (!entry) throw new PaneError('CHAT_ADAPTER_INSTALL_FAILED', 'The chat adapter was not usable after setup.', 'Press Restart to set it up again.');
+    return entry;
+  },
+});
+
 export const CHAT_TAB_CHANNELS = ['create', 'get', 'history', 'send', 'receipt', 'unqueue', 'configure', 'cancel', 'permission', 'answer', 'restart', 'sign-in', 'keys', 'set-key'] as const;
 
 export function chatTabsEnabled(): boolean { return getRuntimeConfigManager().getConfig().chatTabsEnabled === true; }
@@ -39,6 +55,7 @@ const AGENT_TITLES = { claude: 'Claude', codex: 'Codex' } satisfies Record<ChatA
 /** One command surface for Electron, daemon clients, the remote PWA and the phone. */
 export function registerChatTabHandlers(ipcMain: IpcMain, services: AppServices, registry: PaneCommandRegistry): void {
   configureChatTabs({
+    profiles: agentFarmProfiles,
     context: {
       unsupportedHost: panel => {
         const context = services.sessionManager.getProjectContext(panel.sessionId);
@@ -89,9 +106,18 @@ export async function createChatTab(services: AppServices, request: ChatTabCreat
   if (!chatTabsEnabled()) throw new PaneError('CHAT_TABS_DISABLED', 'Chat tabs are turned off on this machine. No tab was created.', 'Turn on Chat tabs in Settings > Advanced > Experimental, or open a terminal agent tab.');
   const session = services.sessionManager.getSession(request.sessionId);
   if (!session?.worktreePath) throw new PaneError('CHAT_PANE_MISSING', 'That Pane was not found, so no chat tab was created.', 'Open the Pane first, then add the tab.');
-  const state: ChatPanelState = { agent: request.agent, launch: request.launch ?? { kind: 'agent' }, cwd: session.worktreePath, status: 'starting' };
+  const launch = request.launch ?? { kind: 'agent' as const };
+  // A profile names its own harness; Agent Farm says which when the caller did not.
+  let agent = request.agent;
+  if (!agent && launch.kind === 'profile') {
+    const probe: ChatPanelState = { agent: 'claude', launch, cwd: session.worktreePath, status: 'starting' };
+    const placeholder: ToolPanel = { id: 'new', sessionId: request.sessionId, type: 'chat', title: '', state: { isActive: false }, metadata: { createdAt: '', lastActiveAt: '', position: 0 } };
+    agent = (await agentFarmProfiles.print(launch.profile, launch.args ?? {}, 'claude', session.worktreePath, chatTabEnv(placeholder, probe))).harness;
+  }
+  if (!agent) throw new PaneError('CHAT_AGENT_REQUIRED', 'No agent was named for the chat tab, so none was created.', 'Choose Claude or Codex, or name an Agent Farm profile.');
+  const state: ChatPanelState = { agent, launch, cwd: session.worktreePath, status: 'starting' };
   if (request.initialInput) state.initialInput = request.initialInput;
-  const title = request.title ?? (request.launch?.kind === 'profile' ? request.launch.profile.split('/').pop() ?? AGENT_TITLES[request.agent] : AGENT_TITLES[request.agent]);
+  const title = request.title ?? (launch.kind === 'profile' ? launch.profile.split('/').pop() ?? AGENT_TITLES[agent] : AGENT_TITLES[agent]);
   const panel = await panelManager.createPanel({ sessionId: request.sessionId, type: 'chat', title, initialState: { customState: state }, activate: request.activate, announceActivation: request.activate !== false });
   void getChatTabManager().ensure(panel.id).catch(error => console.warn(`[ChatTabs] ${panel.id} did not start: ${error instanceof Error ? error.message : String(error)}`));
   return { panelId: panel.id };

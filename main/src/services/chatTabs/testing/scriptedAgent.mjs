@@ -11,7 +11,7 @@
 //   plan                sends a todo list (plan update)
 //   edit                a completed edit step with a diff
 //   env NAME [NAME...]  replies with those environment variables as JSON
-//   caps                replies with the client capabilities from initialize
+//   caps                replies with the client capabilities, session _meta and mode
 //   steps N             N completed steps of mixed kinds, then a reply
 //
 // SCRIPTED_AGENT_SIGNED_OUT=1 refuses every session with ACP authRequired.
@@ -62,6 +62,12 @@ const app = agent()
     session.config[params.configId] = params.value;
     persist(params.sessionId);
     return { configOptions: configOptions(session) };
+  })
+  .onRequest(methods.agent.session.setMode, ({ params }) => {
+    const session = sessions.get(params.sessionId);
+    session.config.mode = params.modeId;
+    persist(params.sessionId);
+    return {};
   })
   .onRequest(methods.agent.session.close, () => ({}))
   .onNotification(methods.agent.session.cancel, ({ params }) => { const session = sessions.get(params.sessionId); if (session) session.cancelled = true; })
@@ -114,7 +120,7 @@ const app = agent()
       return { stopReason: 'end_turn' };
     }
     if (word === 'env') { await say(JSON.stringify(Object.fromEntries(rest.map(name => [name, process.env[name] ?? null])))); return { stopReason: 'end_turn' }; }
-    if (word === 'caps') { await say(JSON.stringify({ clientCapabilities, meta: session.meta })); return { stopReason: 'end_turn' }; }
+    if (word === 'caps') { await say(JSON.stringify({ clientCapabilities, meta: session.meta, mode: session.config.mode })); return { stopReason: 'end_turn' }; }
     if (word === 'steps') {
       const kinds = ['read', 'search', 'execute', 'edit'];
       for (let index = 0; index < Number(rest[0] ?? 3); index++) {

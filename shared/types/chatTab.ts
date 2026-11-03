@@ -132,7 +132,8 @@ export interface ChatTabEvent {
 
 export interface ChatTabCreate {
   sessionId: string;
-  agent: ChatAgent;
+  /** Required for a plain agent; a profile's harness comes from Agent Farm when left out. */
+  agent?: ChatAgent;
   launch?: ChatTabLaunch;
   title?: string;
   initialInput?: string;
