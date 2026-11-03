@@ -1,4 +1,6 @@
 import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
+import type { ChatTabClient, ChatTabCreate } from '../../../../shared/types/chatTab';
+import { decodeChatMessages, decodeChatReceipt, decodeChatTabEvent, decodeChatTabView } from '../../../../shared/types/chatTabDecoders';
 import type {
   OrchestrationSessionCreateInput,
   OrchestrationSessionListResult,
@@ -109,6 +111,29 @@ export class RemoteRuntimeAdapter {
     // SAFETY: The adapter method selects T from the invoked channel contract.
     return response as T;
   }
+
+  /** Chat tabs on the connected host: the agent runs there, under that machine's own sign-in. */
+  readonly chatTab: ChatTabClient & { create(request: ChatTabCreate): Promise<{ panelId: string }> } = {
+    create: request => this.invoke('chat-tab:create', [request]),
+    get: async (panelId, limit) => decodeChatTabView(await this.invoke('chat-tab:get', limit === undefined ? [panelId] : [panelId, limit])),
+    history: async (panelId, before, limit) => decodeChatMessages(await this.invoke('chat-tab:history', [panelId, before, limit])),
+    send: async (panelId, request) => {
+      const receipt = decodeChatReceipt(await this.invoke('chat-tab:send', [panelId, request]));
+      if (!receipt) throw new Error('The host did not confirm the message. Check delivery before sending again.');
+      return receipt;
+    },
+    receipt: async (panelId, operationId) => decodeChatReceipt(await this.invoke('chat-tab:receipt', [panelId, operationId])),
+    unqueue: (panelId, operationId) => this.invoke('chat-tab:unqueue', [panelId, operationId]),
+    configure: (panelId, configId, value) => this.invoke('chat-tab:configure', [panelId, configId, value]),
+    cancel: panelId => this.invoke('chat-tab:cancel', [panelId]),
+    permission: (panelId, requestId, optionId) => this.invoke('chat-tab:permission', [panelId, requestId, optionId]),
+    answer: (panelId, questionId, response) => this.invoke('chat-tab:answer', [panelId, questionId, response]),
+    restart: panelId => this.invoke('chat-tab:restart', [panelId]),
+    signIn: panelId => this.invoke('chat-tab:sign-in', [panelId]),
+    onEvent: callback => this.onEvent(event => { if (event.channel === 'chat-tab:event') callback(decodeChatTabEvent(event.args[0])); }),
+    onState: callback => this.onEvent(event => { if (event.channel === 'chat-tab:state') callback(decodeChatTabView(event.args[0])); }),
+    onReconnect: callback => this.onStatus(state => { if (state.status === 'connected') callback(); }),
+  };
 
   getProjectsWithSessions(): Promise<RemoteProjectWithSessions[]> {
     return this.invoke<RemoteProjectWithSessions[]>('sessions:get-all-with-projects');

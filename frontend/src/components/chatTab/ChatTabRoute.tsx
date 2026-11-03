@@ -4,6 +4,7 @@ import type { ChatPanelState } from '../../../../shared/types/chatTab';
 import { useActiveMachineStore } from '../../stores/activeMachineStore';
 import { openFileInEditor } from '../../services/openFileInEditor';
 import { showActionError } from '../../stores/errorStore';
+import { isSessionChat } from './sessionChat';
 
 const ChatTabPanel = lazy(() => import('./ChatTabPanel'));
 
@@ -23,7 +24,7 @@ export function ChatTabRoute({ panel }: { panel: ToolPanel }) {
     panelId={panel.id}
     client={window.electronAPI.chatTab}
     machine={machine}
-    quiet={!!state?.orchestrationSessionId}
+    quiet={isSessionChat(panel)}
     placeholder={state?.orchestrationSessionId ? 'Message the Session…' : undefined}
     actions={{
       onViewDiff: file => void openFileInEditor({ sessionId: panel.sessionId, filePath: worktreeRelative(file, state?.cwd), pin: true, diff: { kind: 'scope', scope: { kind: 'session' } } })

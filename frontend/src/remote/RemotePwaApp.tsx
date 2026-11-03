@@ -1,4 +1,7 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { isSessionChat } from '../components/chatTab/sessionChat';
+
+const ChatTabPanel = lazy(() => import('../components/chatTab/ChatTabPanel'));
 import * as Dialog from '@radix-ui/react-dialog';
 import type { OrchestrationSessionRecord, OrchestrationSessionView } from '../../../shared/types/orchestrationSession';
 import { pausedMarkOf, type PanelActivationRequest, type ToolPanel, type ToolPanelType } from '../../../shared/types/panels';
@@ -653,6 +656,29 @@ export function RemotePwaApp() {
     }
   }, [adapter, selectedSessionId, setSelectedPanel, upsertPanel, setLastError]);
 
+  const createChat = useCallback(async (agent: 'claude' | 'codex') => {
+    if (!adapter || !selectedSessionId) return;
+    setCreatingTerminal(true);
+    const runtime = adapter;
+    const sessionId = selectedSessionId;
+    const requestedFrom = useRemoteSessionStore.getState().selectedPanelId;
+    const drops = dropsRef.current;
+    try {
+      const { panelId } = await runtime.chatTab.create({ sessionId, agent });
+      if (runtime !== activeRuntimeRef.current) return;
+      const panels = await runtime.getPanels(sessionId);
+      const panel = panels.find(entry => entry.id === panelId);
+      if (panel) upsertPanel(panel);
+      if (drops !== dropsRef.current || !stillOn(sessionId, requestedFrom)) return;
+      setSelectedPanel(panelId);
+      await runtime.setActivePanel(sessionId, panelId);
+    } catch (error) {
+      if (runtime === activeRuntimeRef.current) setLastError(error instanceof Error ? error.message : 'Failed to open a chat tab');
+    } finally {
+      setCreatingTerminal(false);
+    }
+  }, [adapter, selectedSessionId, setSelectedPanel, upsertPanel, setLastError]);
+
   const createBrowser = useCallback(async () => {
     if (!adapter || !selectedSessionId) return;
     setCreatingTerminal(true);
@@ -1050,6 +1076,7 @@ export function RemotePwaApp() {
           onSelectPanel={selectPanel}
           onCreateTerminal={createTerminal}
           onCreateBrowser={createBrowser}
+          onCreateChat={affordances.chatTabsEnabled && adapter ? agent => void createChat(agent) : undefined}
         />
 
         <RemoteSessionList
@@ -1100,7 +1127,13 @@ export function RemotePwaApp() {
             {selectedPanel.type === 'explorer' && adapter && (
               <RemoteExplorerPanel key={selectedPanel.id} adapter={adapter} panelId={selectedPanel.id} sessionId={selectedPanel.sessionId} ports={listeningPorts} onError={setLastError} />
             )}
-            {selectedPanel.type !== 'browser' && selectedPanel.type !== 'explorer' && <UnsupportedPanel session={selectedSession} panel={selectedPanel} />}
+            {selectedPanel.type === 'chat' && adapter && (
+              <Suspense fallback={null}>
+                <ChatTabPanel key={selectedPanel.id} panelId={selectedPanel.id} client={adapter.chatTab} connected={connectionStatus === 'connected'}
+                  quiet={isSessionChat(selectedPanel)} />
+              </Suspense>
+            )}
+            {selectedPanel.type !== 'browser' && selectedPanel.type !== 'explorer' && selectedPanel.type !== 'chat' && <UnsupportedPanel session={selectedSession} panel={selectedPanel} />}
           </div>
         )}
       </section>
