@@ -1,6 +1,6 @@
 # Dependency patches
 
-pnpm applies these through `pnpm.patchedDependencies` in the root `package.json`.
+pnpm applies these through `patchedDependencies` in `pnpm-workspace.yaml`.
 
 ## @xterm/addon-webgl
 
@@ -25,3 +25,19 @@ Measure with `scripts/benchmark-webgl-atlas.js`. After bumping the addon,
 check whether upstream now clamps the texture size (search the bundle for
 `Math.min(4096`); if not, regenerate with `pnpm patch @xterm/addon-webgl@<version>`,
 reapply the two edits above, and `pnpm patch-commit <dir>`.
+
+## @xterm/xterm
+
+Find in a terminal (`@xterm/addon-search`) adds a decoration per match, each
+tied to a marker on its buffer line. When the line goes away first (the
+activation refresh's `terminal.reset()`, Cmd+K, `clear`, or scrollback
+trimming), the marker's line becomes -1 before the decoration is disposed.
+`SortedList.delete` looks decorations up by that line, misses, and the
+decoration service never drops it, so its highlight stays painted on screen
+for the life of the terminal.
+
+The patch, in both `lib/` bundles, renames `SortedList.delete` to
+`_deleteByKey` and makes `delete` fall back to finding the value by identity
+when the keyed lookup misses. Regenerate it the same way as the WebGL patch
+when bumping `@xterm/xterm`, after checking whether upstream fixed
+`SortedList.delete` (or `DecorationService`'s dispose path) itself.

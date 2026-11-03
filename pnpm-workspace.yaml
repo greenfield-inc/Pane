@@ -38,6 +38,7 @@ packageExtensions:
       vscode-jsonrpc: 8.2.0
 patchedDependencies:
   '@xterm/addon-webgl@0.20.0-beta.298': patches/@xterm__addon-webgl@0.20.0-beta.298.patch
+  '@xterm/xterm@6.1.0-beta.302': patches/@xterm__xterm@6.1.0-beta.302.patch
 minimumReleaseAge: 10080
 minimumReleaseAgeExclude:
   # Exact ACP and assistant-ui releases validated together by the Chat fixtures.
