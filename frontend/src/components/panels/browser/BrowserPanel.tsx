@@ -16,6 +16,10 @@ import { useRemoteRuntimeState } from '../../../hooks/useRemoteRuntimeState';
 import { Dropdown } from '../../ui/Dropdown';
 import { PortsList } from './PortsList';
 import { RefusedFilesNotice, type FileRefusal } from './RefusedFilesNotice';
+import { FindBar } from '../../find/FindBar';
+import { usePanelFind } from '../../find/usePanelFind';
+import { closeFind, getFindBar, reportFindResult, setFindQuery, useFindBar } from '../../find/findController';
+import { createBrowserFindAdapter } from './browserFind';
 
 const COPIED_FEEDBACK_MS = 1500;
 
@@ -132,6 +136,47 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
 
   // Track the page webContentsId for DevTools IPC calls
   const pageWcIdRef = useRef<number | null>(null);
+
+  // Pane find (Cmd/Ctrl+F). The root holds both the URL bar and the page, so
+  // Cmd+F from either routes here. findInPage only works after dom-ready.
+  const findRootRef = useRef<HTMLDivElement>(null);
+  const webviewReadyRef = useRef(false);
+  const hasPageRef = useRef(false);
+  hasPageRef.current = url !== '';
+  const findAdapter = useMemo(() => createBrowserFindAdapter({
+    getWebview: () => webviewRef.current,
+    isReady: () => webviewReadyRef.current,
+    hasPage: () => hasPageRef.current,
+    report: result => reportFindResult(panel.id, result),
+    findInputHasFocus: () => document.activeElement instanceof HTMLElement && document.activeElement.dataset.findInput === panel.id,
+    focusFindInput: () => document.querySelector<HTMLInputElement>(`[data-find-input="${CSS.escape(panel.id)}"]`)?.focus(),
+  }), [panel.id]);
+  usePanelFind(panel.id, findRootRef, findAdapter);
+  const findOpen = useFindBar(panel.id).open;
+  // Main forwards Escape from the page only while this tab's bar is open.
+  const syncFindActive = useCallback((open: boolean) => {
+    const wcId = pageWcIdRef.current;
+    if (wcId !== null) void window.electronAPI?.invoke('browser-panel:set-find-active', wcId, open);
+  }, []);
+  useEffect(() => {
+    syncFindActive(findOpen);
+  }, [findOpen, syncFindActive]);
+  useEffect(() => () => syncFindActive(false), [syncFindActive]);
+  // A new page (or a remounted guest) gets the open search run again, so the
+  // count is this page's and no stale highlight remains.
+  const rerunOpenFind = useCallback(() => {
+    const bar = getFindBar(panel.id);
+    if (bar.open && bar.query && !bar.noText) setFindQuery(panel.id, bar.query);
+  }, [panel.id]);
+  // Escape pressed in the page (main sends it only while this bar is open).
+  useEffect(() => {
+    const handler = (event: Event) => {
+      if (!(event instanceof CustomEvent) || event.detail?.panelId !== panel.id) return;
+      closeFind(panel.id);
+    };
+    window.addEventListener('browser-panel:find-escape', handler);
+    return () => window.removeEventListener('browser-panel:find-escape', handler);
+  }, [panel.id]);
   // Track whether we've already created the WebContentsView for the current open session
   const devToolsInitializedRef = useRef(false);
 
@@ -363,6 +408,11 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
       const wcId = webview.getWebContentsId();
       pageWcIdRef.current = wcId;
       window.electronAPI?.invoke('browser-panel:register-webview', wcId, panel.id, panel.sessionId);
+      webviewReadyRef.current = true;
+      syncFindActive(getFindBar(panel.id).open);
+    };
+    const onFoundInPage = (event: Electron.FoundInPageEvent) => {
+      findAdapter.handleFoundInPage(event.result);
     };
 
     const onDidNavigate = () => {
@@ -404,8 +454,15 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
     webview.addEventListener('did-start-loading', onDidStartLoading);
     webview.addEventListener('did-fail-load', onDidFailLoad);
     webview.addEventListener('did-stop-loading', onDidStopLoading);
+    webview.addEventListener('found-in-page', onFoundInPage);
+    webview.addEventListener('did-finish-load', rerunOpenFind);
+    webview.addEventListener('did-navigate-in-page', rerunOpenFind);
 
     return () => {
+      webviewReadyRef.current = false;
+      webview.removeEventListener('found-in-page', onFoundInPage);
+      webview.removeEventListener('did-finish-load', rerunOpenFind);
+      webview.removeEventListener('did-navigate-in-page', rerunOpenFind);
       webview.removeEventListener('dom-ready', onDomReady);
       webview.removeEventListener('did-navigate', onDidNavigateDocument);
       webview.removeEventListener('did-navigate', onDidNavigate);
@@ -504,7 +561,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   }, [isActive, devToolsOpen]);
 
   return (
-    <div className="flex flex-col h-full bg-bg-primary">
+    <div ref={findRootRef} className="flex flex-col h-full bg-bg-primary">
       {/* Browser chrome */}
       <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-border-primary bg-bg-chrome flex-shrink-0">
         <button
@@ -672,7 +729,15 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
           </div>
         </div>
       ) : (
-        <div className="flex-1 flex flex-row min-h-0">
+        <div className="relative flex-1 flex flex-row min-h-0">
+          {/* Pane find bar, top right of the page and clear of docked DevTools
+              (a native view drawn above everything in its bounds). */}
+          <div
+            className="pointer-events-none absolute inset-y-0 left-0 z-30"
+            style={{ right: devToolsOpen ? devToolsWidth + 4 : 0 }}
+          >
+            <FindBar panelId={panel.id} className="pointer-events-auto" />
+          </div>
           {/* Page webview */}
           {target.kind === 'waiting' && (
             <div className="flex flex-1 items-center justify-center text-xs text-text-tertiary">
