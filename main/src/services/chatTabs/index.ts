@@ -3,6 +3,7 @@ import { PaneError } from '../../../../shared/paneError';
 import { getAppDirectory } from '../../utils/appDirectory';
 import { getPaneEventSink } from '../../core/runtime';
 import { panelManager } from '../panelManager';
+import { terminalPanelManager } from '../terminalPanelManager';
 import { app } from 'electron';
 import { ChatTabManager, type ChatTabLauncher, type ChatTabStore } from './manager';
 import { AgentChatLauncher, chatTabEnv, type ChatLaunchContext, type ChatProfileResolver } from './launch';
@@ -59,6 +60,9 @@ export function getChatTabManager(): ChatTabManager {
     }),
     send: (channel, payload) => getPaneEventSink().send(channel, payload),
     spoolDirectory: path.join(getAppDirectory(), 'chat-tabs'),
+    // The same agent-status stream terminal agent tabs feed: Session live activity,
+    // update holds and keep-awake follow chat tabs too.
+    onStatus: event => terminalPanelManager.emit('agent-status', event),
   });
   return manager;
 }

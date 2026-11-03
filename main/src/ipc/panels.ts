@@ -20,7 +20,7 @@ import { PANE_CHAT_SESSION_ID } from '../../../shared/types/paneChat';
 import { getAppSubdirectory } from '../utils/appDirectory';
 import { sanitizeTerminalOutput } from '../utils/terminalOutputSanitizer';
 import { getWSLHome, linuxToUNCPath, posixJoin, windowsPathToWSLMount } from '../utils/wslUtils';
-import { boundary, decodeBoundary, type BoundarySchema } from '../../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary, decodeOptionalBoundary, type BoundarySchema } from '../../../shared/validation/boundaryDecoder';
 import { PaneError, paneErrorText, reasonOf } from '../../../shared/paneError';
 import { readBrowserPanelFile } from '../services/browserPanelFiles';
 import { prepareRemoteBrowserFiles } from '../daemon/client/remoteBrowserFiles';
@@ -613,6 +613,10 @@ export function registerPanelHandlers(
     const statuses: PanelAgentStatusEvent[] = [];
     for (const sessionId of sessionIds) {
       for (const panel of panelManager.getPanelsForSession(sessionId)) {
+        if (panel.type === 'chat') {
+          statuses.push({ panelId: panel.id, sessionId, state: getChatTabManager().agentState(panel.id), reason: null });
+          continue;
+        }
         if (panel.type !== 'terminal') continue;
         statuses.push({
           panelId: panel.id,
@@ -625,9 +629,12 @@ export function registerPanelHandlers(
     return { success: true, data: statuses };
   });
 
-  commandRegistry.register('panels:list', async (sessionId: string) => {
+  // Phone apps released before chat tabs crash on a tab kind they do not know, and
+  // send no version: clients list chat tabs only when they say they understand them.
+  commandRegistry.register('panels:list', async (sessionId: string, options?: PaneCommandValue) => {
     try {
-      const panels = panelManager.getPanelsForSession(sessionId);
+      const chatTabs = decodeOptionalBoundary(options, boundary.object({ chatTabs: boundary.optional(boundary.boolean) }))?.chatTabs === true;
+      const panels = panelManager.getPanelsForSession(sessionId).filter(panel => chatTabs || panel.type !== 'chat');
       return { success: true, data: panels };
     } catch (error) {
       console.error('[IPC] Failed to list panels:', error);

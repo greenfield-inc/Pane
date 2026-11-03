@@ -95,9 +95,20 @@ export class ChatTabManager {
     return this.tab(panelId).transcript?.last(role);
   }
 
+  /** The tab's status as agent status (sidebar, tabs, runpane), without starting it. */
+  agentState(panelId: string): AgentState {
+    const state = this.options.store.state(panelId);
+    if (!state) return 'unknown';
+    return toAgentState(this.snapshot(panelId, state, this.tab(panelId), 0));
+  }
+
   isRunning(panelId: string): boolean { return !!this.tabs.get(panelId)?.runtime?.isAlive(); }
   runningPanelIds(): string[] { return [...this.tabs.entries()].flatMap(([panelId, tab]) => tab.runtime?.isAlive() ? [panelId] : []); }
   processId(panelId: string): number | undefined { return this.tabs.get(panelId)?.runtime?.pid; }
+  /** Adapter process IDs of a Pane's running chat tabs, for archive cleanup. */
+  sessionPids(sessionId: string): number[] {
+    return [...this.tabs.entries()].flatMap(([panelId, tab]) => tab.runtime?.pid && this.options.store.panel(panelId)?.sessionId === sessionId ? [tab.runtime.pid] : []);
+  }
 
   /** Starts the tab's agent once; concurrent callers share the same start. */
   ensure(panelId: string): Promise<void> {
@@ -322,7 +333,7 @@ export class ChatTabManager {
       this.drain(panelId);
     };
     this.publish(panelId);
-    void runtime.prompt(content).then(result => finish('completed', result.stopReason), error => finish('failed', tab.runtime?.isAlive() ? 'error' : 'exited', chatFailure(error)));
+    void runtime.prompt(content).then(result => finish('completed', result.stopReason), error => { void runtime.exitsWithin(250).then(exited => finish('failed', exited ? 'exited' : 'error', chatFailure(error))); });
   }
 
   private exited(panelId: string, generation: number, exit: RuntimeExit): void {
@@ -394,7 +405,7 @@ export class ChatTabManager {
     const tab = this.tab(panelId);
     const view = this.snapshot(panelId, state, tab, 0);
     this.options.send('chat-tab:state', view);
-    const agentState: AgentState = view.status === 'blocked' || (view.status === 'stopped' && view.problem) ? 'blocked' : view.status === 'working' || view.status === 'starting' ? 'working' : view.status === 'idle' ? 'idle' : 'unknown';
+    const agentState = toAgentState(view);
     if (tab.published === agentState) return;
     const previous = tab.published;
     tab.published = agentState;
@@ -424,6 +435,12 @@ export class ChatTabManager {
   private update(panelId: string, change: (state: ChatPanelState) => ChatPanelState): void {
     this.options.store.commit(panelId, change(this.required(panelId)));
   }
+}
+
+function toAgentState(view: ChatTabView): AgentState {
+  if (view.status === 'blocked' || (view.status === 'stopped' && view.problem)) return 'blocked';
+  if (view.status === 'working' || view.status === 'starting') return 'working';
+  return view.status === 'idle' ? 'idle' : 'unknown';
 }
 
 function safeName(panelId: string): string { return createHash('sha256').update(panelId).digest('hex').slice(0, 32); }

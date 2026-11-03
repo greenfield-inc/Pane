@@ -1213,7 +1213,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   panels: {
     createPanel: (sessionId: string, type: string, name: string, config?: JsonObject): Promise<IPCResponse> =>
       invokeIpc('panels:create', { sessionId, type, title: name, initialState: config }),
-    getSessionPanels: (sessionId: string): Promise<IPCResponse> => invokeIpc('panels:list', sessionId),
+    getSessionPanels: (sessionId: string): Promise<IPCResponse> => invokeIpc('panels:list', sessionId, { chatTabs: true }),
     deletePanel: (panelId: string): Promise<IPCResponse> => invokeIpc('panels:delete', panelId),
     renamePanel: (panelId: string, name: string): Promise<IPCResponse> => invokeIpc('panels:update', panelId, { title: name }),
     setActivePanel: (sessionId: string, panelId: string): Promise<IPCResponse> => invokeIpc('panels:set-active', sessionId, panelId),

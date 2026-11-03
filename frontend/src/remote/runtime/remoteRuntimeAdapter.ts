@@ -119,7 +119,7 @@ export class RemoteRuntimeAdapter {
   }
 
   getPanels(sessionId: string): Promise<ToolPanel[]> {
-    return this.invoke<ToolPanel[]>('panels:list', [sessionId]);
+    return this.invoke<ToolPanel[]>('panels:list', [sessionId, { chatTabs: true }]);
   }
 
   getActivePanel(sessionId: string): Promise<ToolPanel | null> {

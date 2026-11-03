@@ -1,3 +1,4 @@
+import { getChatTabManager } from '../services/chatTabs';
 /**
  * Session IPC handlers for Pane.
  * Note: "Sessions" are called "Panes" in the UI. Internally they remain
@@ -384,12 +385,14 @@ export function registerSessionHandlers(
       ...(terminalPanelManager.getSessionPids().get(sessionId) ?? []),
       ...sessionManager.getArchiveProcessPids(sessionId),
       ...runCommandManager.getArchiveProcessPids(sessionId),
+      ...getChatTabManager().sessionPids(sessionId),
   ];
   services.archiveCleanupManager?.setProcessRootsHandler(archiveProcessRoots);
   const teardownArchivedSession = async (sessionId: string, tracker: import('../services/archiveProcessTracker').ArchiveProcessTracker): Promise<void> => {
     await tracker.capture(archiveProcessRoots(sessionId));
     if (databaseService.getSession(sessionId)) await sessionManager.archiveSession(sessionId, { trackedTeardown: true });
     await terminalPanelManager.retireSessionTerminalsForArchive(sessionId);
+    await getChatTabManager().stopSession(sessionId);
     await panelManager.cleanupSessionPanelsInMemory(sessionId);
     gitStatusManager.clearSessionCache(sessionId);
     await runCommandManager.retireRunCommandsForArchive(sessionId);
@@ -465,6 +468,8 @@ export function registerSessionHandlers(
           console.error(`[Session IPC] terminateSessionTerminals failed for ${sessionId}:`, panelError);
         });
 
+      // Chat tabs end their agents too; each keeps its own session store.
+      await getChatTabManager().stopSession(sessionId);
       // Release in-memory panel state (does NOT hard-delete DB rows — archive-safe)
       try {
         await panelManager.cleanupSessionPanelsInMemory(sessionId);
@@ -698,6 +703,7 @@ export function registerSessionHandlers(
         console.error(`[Session IPC] clearSessionCache failed for permanently deleted session ${sessionId}:`, err);
       }
 
+      await getChatTabManager().stopSession(sessionId);
       try {
         await panelManager.cleanupSessionPanelsInMemory(sessionId);
       } catch (err) {

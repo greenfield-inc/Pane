@@ -388,6 +388,7 @@ describe('daemon registry IPC bindings', () => {
       },
       // Cursor depends on the host platform, so only the agents every host runs are pinned.
       sessionAgents: { agents: expect.arrayContaining(['claude', 'codex']), defaultAgent: 'codex' },
+      chatTabsEnabled: false,
       os: expect.stringMatching(/^(macOS|Windows|Linux)$/),
       resumePausedOnOpen: false,
     });

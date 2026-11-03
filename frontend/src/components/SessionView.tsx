@@ -1664,8 +1664,8 @@ export const SessionView = memo(() => {
   // Unless the user has explicitly closed it previously
   const hasTriedCreatingTerminal = useRef(false);
   useEffect(() => {
-    // Any terminal counts, so an agent-only pane gains no shell.
-    if (!ownsPanelLoad || panelLoad?.error || !activeSession?.id || sessionPanels.some(p => p.type === 'terminal') || hasTriedCreatingTerminal.current) return;
+    // Any terminal or chat tab counts, so an agent-only pane gains no shell.
+    if (!ownsPanelLoad || panelLoad?.error || !activeSession?.id || sessionPanels.some(p => p.type === 'terminal' || p.type === 'chat') || hasTriedCreatingTerminal.current) return;
     // Only attempt once per session to avoid loops
     hasTriedCreatingTerminal.current = true;
 

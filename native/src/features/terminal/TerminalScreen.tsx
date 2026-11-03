@@ -72,7 +72,8 @@ export function TerminalScreen({ paneId, session }: { paneId: string; session?: 
   const queryClient = useQueryClient();
 
   const pane = useInvokeQuery<{ name: string }>('sessions:get', [paneId], { enabled: !session });
-  const panelList = useInvokeQuery<ToolPanel[]>('panels:list', [paneId]);
+  // Chat tabs are listed only for clients that say they understand them.
+  const panelList = useInvokeQuery<ToolPanel[]>('panels:list', [paneId, { chatTabs: true }]);
   // A Session opens on its agent chat, wherever the desktop left the workspace.
   const hostActive = useInvokeQuery<ToolPanel | null>('panels:getActive', [paneId], { enabled: !session });
   const affordances = useAffordances();

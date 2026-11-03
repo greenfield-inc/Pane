@@ -72,8 +72,9 @@ export function registerChatTabHandlers(ipcMain: IpcMain, services: AppServices,
     const state = manager.view(panelId(id), 0, false);
     if (!panel) throw new PaneError('CHAT_PANEL_MISSING', 'This chat tab no longer exists.', 'Open another chat tab.');
     // Sign-in always happens in the agent's own flow on this machine; Pane never sees the login.
+    // A wrapped launch runs exactly this command, without the agent-session flags Pane adds to claude.
     const command = state.agent === 'claude' ? 'claude auth login' : 'codex login';
-    const terminal = await panelManager.createPanel({ sessionId: panel.sessionId, type: 'terminal', title: `Sign in to ${AGENT_TITLES[state.agent]}`, initialState: { initialCommand: command }, announceActivation: true });
+    const terminal = await panelManager.createPanel({ sessionId: panel.sessionId, type: 'terminal', title: `Sign in to ${AGENT_TITLES[state.agent]}`, initialState: { initialCommand: command, launchCommand: command, launchMode: 'wrapped', preserveLaunchCommand: true }, announceActivation: true });
     return { panelId: terminal.id };
   });
   registry.register('chat-tab:keys', () => chatTabSecrets.status());

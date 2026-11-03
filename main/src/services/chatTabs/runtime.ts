@@ -222,6 +222,14 @@ export class ChatTabRuntime {
 
   stderr(): string { return this.process.stderrTail(); }
 
+  /** Whether the adapter process ends within `ms`: a turn that fails as its process dies stopped because it exited. */
+  async exitsWithin(ms: number): Promise<boolean> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const exited = await Promise.race([this.process.exited.then(() => true), new Promise<boolean>(resolve => { timer = setTimeout(() => resolve(false), ms); })]);
+    if (timer) clearTimeout(timer);
+    return exited;
+  }
+
   private receive(params: SessionNotification): void {
     if (params.sessionId !== this.sessionId) return;
     const update = params.update;

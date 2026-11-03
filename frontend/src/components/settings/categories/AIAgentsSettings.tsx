@@ -8,6 +8,8 @@ import { SettingRow, SettingsPage } from '../SettingRow';
 import { ImmediateToggle, SegmentedControl } from '../SettingsControls';
 import type { SettingsPersistence } from '../useSettingsPersistence';
 import { API } from '../../../utils/api';
+import { isChatTabsEnabled } from '../../../stores/configStore';
+import { ChatTabKeys } from '../ChatTabKeys';
 import { PANE_CHAT_AGENT_LABELS, type PaneChatAgent } from '../../../../../shared/types/paneChat';
 import { SessionLaunchFields } from '../../SessionLaunchFields';
 import { DEFAULT_SESSION_PROFILE } from '../../../../../shared/types/sessionProfile';
@@ -60,6 +62,10 @@ export function AIAgentsSettings({ persistence, onDirtyChange }: AIAgentsSetting
   return (
     <SettingsPage title="AI & Agents" description="Application-wide defaults for Sessions and coding-agent integrations.">
       <SettingsSection title="Agent defaults">
+        {isChatTabsEnabled(config) && <SettingRow settingId="chat-tab-keys" label="Chat tab sign-in" description="How Claude and Codex chat tabs sign in on this machine." saveState={persistence.saveStates['chat-tab-keys']} details={<ChatTabKeys />}>
+          {null}
+        </SettingRow>}
+
         <SettingRow
           settingId="default-pane-chat-agent"
           label="Default Sessions agent"

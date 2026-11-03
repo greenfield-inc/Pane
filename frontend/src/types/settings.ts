@@ -44,6 +44,7 @@ export type SettingsSettingId =
   | 'terminal-reference-line-count'
   | 'terminal-shell'
   | 'default-pane-chat-agent'
+  | 'chat-tab-keys'
   | 'mcp-registration'
   | 'mcp-toolsets'
   | 'answer-prompts-from-pane'
