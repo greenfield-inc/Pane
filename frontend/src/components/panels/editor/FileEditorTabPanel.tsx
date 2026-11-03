@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { FileEditorView } from './FileEditorView';
 import { DiffTabView } from '../diff/DiffTabView';
 import { EditorPanelState, ToolPanel } from '../../../../../shared/types/panels';
@@ -6,6 +6,8 @@ import { panelApi } from '../../../services/panelApi';
 import { createEditorStateWriter } from './editorStateWriter';
 import { usePanelStore } from '../../../stores/panelStore';
 import { editorTitleFor, pinEditorPanel } from '../../../services/openFileInEditor';
+import { FindBar } from '../../find/FindBar';
+import { usePageTextFind } from '../../find/usePageTextFind';
 
 interface FileEditorTabPanelProps {
   panel: ToolPanel;
@@ -17,6 +19,10 @@ const FileEditorTabPanel: React.FC<FileEditorTabPanelProps> = ({ panel, isActive
   // SAFETY: The panel type discriminator determines the corresponding custom-state shape.
   const editorState = panel.state?.customState as EditorPanelState | undefined;
   const filePath = editorState?.filePath ?? '';
+  // Previews (markdown, notebook, tables, the single-file diff) use Pane's
+  // find; Monaco keeps its own, and media tabs say there is nothing to search.
+  const findRootRef = useRef<HTMLDivElement>(null);
+  usePageTextFind(panel.id, findRootRef);
 
   useEffect(() => {
     if (isActive && !panel.state?.hasBeenViewed) {
@@ -86,14 +92,16 @@ const FileEditorTabPanel: React.FC<FileEditorTabPanelProps> = ({ panel, isActive
 
   if (editorState?.diff) {
     return (
-      <div className="h-full w-full">
+      <div ref={findRootRef} tabIndex={-1} className="relative h-full w-full outline-none">
         <DiffTabView sessionId={panel.sessionId} filePath={filePath} diffRef={editorState.diff} />
+        <FindBar panelId={panel.id} className="top-12" />
       </div>
     );
   }
 
   return (
-    <div className="h-full w-full">
+    <div ref={findRootRef} tabIndex={-1} className="relative h-full w-full outline-none">
+      <FindBar panelId={panel.id} className="top-[5.25rem]" />
       <FileEditorView
         sessionId={panel.sessionId}
         filePath={filePath}

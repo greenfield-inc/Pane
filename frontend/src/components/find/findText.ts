@@ -37,17 +37,7 @@ export function foldCase(text: string): string {
 /** Where `query` occurs in `text` (case-insensitive, non-overlapping). */
 export function findOffsets(text: string, query: string): number[] {
   if (!query) return [];
-  const haystack = foldCase(text);
-  const needle = foldCase(query);
-  const offsets: number[] = [];
-  let from = 0;
-  while (from <= haystack.length - needle.length) {
-    const index = haystack.indexOf(needle, from);
-    if (index === -1) break;
-    offsets.push(index);
-    from = index + needle.length;
-  }
-  return offsets;
+  return scanFolded(foldCase(text), query);
 }
 
 export function countOccurrences(text: string, query: string): number {
@@ -66,8 +56,13 @@ function locate(starts: number[], position: number): number {
   return low;
 }
 
-export function findInSegments(segments: readonly TextSegment[], query: string): TextMatch[] {
-  if (!query || segments.length === 0) return [];
+/** Segments joined and case-folded once, so each keystroke only scans. */
+export interface PreparedText {
+  starts: number[];
+  folded: string;
+}
+
+export function prepareSegments(segments: readonly TextSegment[]): PreparedText {
   const starts: number[] = [];
   let joined = '';
   segments.forEach((segment, index) => {
@@ -77,8 +72,26 @@ export function findInSegments(segments: readonly TextSegment[], query: string):
     starts.push(joined.length);
     joined += segment.text;
   });
+  return { starts, folded: foldCase(joined) };
+}
 
-  return findOffsets(joined, query).map((offset) => {
+function scanFolded(folded: string, query: string): number[] {
+  const needle = foldCase(query);
+  const offsets: number[] = [];
+  let from = 0;
+  while (from <= folded.length - needle.length) {
+    const index = folded.indexOf(needle, from);
+    if (index === -1) break;
+    offsets.push(index);
+    from = index + needle.length;
+  }
+  return offsets;
+}
+
+export function findInPrepared(prepared: PreparedText, query: string): TextMatch[] {
+  const { starts, folded } = prepared;
+  if (!query || starts.length === 0) return [];
+  return scanFolded(folded, query).map((offset) => {
     const endOffset = offset + query.length;
     const startSegment = locate(starts, offset);
     // The end is exclusive, so place it in the segment holding its last character.
@@ -88,6 +101,11 @@ export function findInSegments(segments: readonly TextSegment[], query: string):
       end: { segment: endSegment, offset: endOffset - starts[endSegment] },
     };
   });
+}
+
+export function findInSegments(segments: readonly TextSegment[], query: string): TextMatch[] {
+  if (!query || segments.length === 0) return [];
+  return findInPrepared(prepareSegments(segments), query);
 }
 
 /** Move a 1-based match index, wrapping at both ends. 0 means no match. */

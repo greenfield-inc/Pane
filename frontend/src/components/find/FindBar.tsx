@@ -3,24 +3,7 @@ import { ChevronDown, ChevronUp, X } from 'lucide-react';
 import { cn } from '../../utils/cn';
 import { formatKeyDisplay } from '../../utils/hotkeyUtils';
 import { closeFind, setFindQuery, stepFind, useFindBar, type FindBarState } from './findController';
-
-export const NO_TEXT_MESSAGE = 'No text to search in this tab';
-
-export type FindBarKeyAction = 'next' | 'prev' | 'close' | null;
-
-/** Enter and Shift+Enter move between matches; Esc closes. */
-export function findBarKeyAction(event: Pick<KeyboardEvent, 'key' | 'shiftKey' | 'nativeEvent'>): FindBarKeyAction {
-  if (event.nativeEvent?.isComposing) return null;
-  if (event.key === 'Enter') return event.shiftKey ? 'prev' : 'next';
-  if (event.key === 'Escape') return 'close';
-  return null;
-}
-
-/** "3 of 12", "0 of 0", or nothing before a query is typed. */
-export function findCountLabel(bar: Pick<FindBarState, 'query' | 'result' | 'noText'>): string {
-  if (bar.noText || !bar.query) return '';
-  return `${bar.result.current} of ${bar.result.total}`;
-}
+import { NO_TEXT_MESSAGE, findBarKeyAction, findCountLabel } from './findBarLogic';
 
 interface FindBarProps {
   panelId: string;
@@ -88,7 +71,7 @@ export function FindBarView({ panelId, className, bar }: FindBarProps & { bar: F
           'h-6 w-48 rounded border px-2 text-xs outline-none',
           'bg-surface-primary text-text-primary placeholder:text-text-tertiary border-border-primary focus:border-interactive',
           bar.noText && 'w-56 cursor-default',
-          noMatches && 'bg-status-warning/15 border-status-warning',
+          noMatches && 'bg-status-warning/15 border-status-warning focus:border-status-warning',
         )}
       />
       <span aria-live="polite" className="w-[5.5rem] shrink-0 text-center text-xs tabular-nums text-text-tertiary select-none">

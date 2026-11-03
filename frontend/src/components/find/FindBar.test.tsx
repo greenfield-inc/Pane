@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { FindBar, FindBarView, NO_TEXT_MESSAGE, findBarKeyAction, findCountLabel } from './FindBar';
+import { FindBar, FindBarView } from './FindBar';
+import { NO_TEXT_MESSAGE, findBarKeyAction, findCountLabel } from './findBarLogic';
 import { getFindBar, openFind, registerFindTarget, resetFindForTests, setFindQuery, type FindAdapter, type FindMode } from './findController';
 
 function adapter(mode: FindMode, total: number): FindAdapter {
