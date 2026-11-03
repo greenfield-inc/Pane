@@ -40,8 +40,9 @@ export function ChatPermissionCard({ permission, agent, machine, disabled, compo
       ? <div className="chat-approval-plan chat-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]}>{summary.plan}</ReactMarkdown></div>
       : summary.detail && <pre className="chat-approval-detail">{summary.detail}</pre>}
     <div className="chat-approval-options">{permission.options.map((option, index) => <button key={option.optionId} type="button" disabled={disabled}
+      aria-label={option.name} aria-keyshortcuts={index < 9 ? String(index + 1) : undefined}
       className={`chat-button ${index === 0 ? 'chat-button-primary' : 'chat-button-outline'}`} onClick={() => onAnswer(permission, option.optionId)}>
-      <span>{option.name}</span>{index < 9 && <kbd className="chat-key">{index + 1}</kbd>}
+      <span>{option.name}</span>{index < 9 && <kbd className="chat-key" aria-hidden="true">{index + 1}</kbd>}
     </button>)}</div>
     <p className="chat-approval-hint">or type to tell {agent} what to do instead</p>
   </section>;
