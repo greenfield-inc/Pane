@@ -220,6 +220,17 @@ export function chatTurns(messages: readonly AgentChatMessage[], options: { runn
   return turns;
 }
 
+const STOPPED = new Map([
+  ['cancelled', 'Stopped.'], ['interrupted', 'Stopped when Pane closed.'], ['exited', 'Stopped: the agent exited.'],
+  ['refusal', 'The agent declined this request.'], ['max_tokens', 'Stopped at the length limit.'], ['max_turn_requests', 'Stopped at the step limit.'], ['error', 'Stopped by an error.'],
+]);
+
+/** How a turn that did not end normally ended, in words; undefined for a normal end. */
+export function stoppedText(turn: ChatTurn): string | undefined {
+  if (!turn.stopReason || turn.stopReason === 'end_turn') return undefined;
+  return STOPPED.get(turn.stopReason) ?? 'Stopped.';
+}
+
 export function formatDuration(ms: number): string {
   const seconds = Math.max(0, Math.round(ms / 1000));
   if (seconds < 60) return `${seconds} s`;

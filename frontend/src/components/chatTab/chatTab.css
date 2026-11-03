@@ -81,3 +81,4 @@
 .chat-command-name { font-family:var(--font-mono,ui-monospace,monospace); flex-shrink:0; }
 .chat-command-description { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--chat-muted-foreground); }
 .chat-machine { display:inline-flex; align-items:center; gap:6px; margin-left:6px; font-size:12px; color:var(--chat-muted-foreground); }
+.chat-turn-stopped { font-size:13px; font-style:italic; color:var(--chat-muted-foreground); }

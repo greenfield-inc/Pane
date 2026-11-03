@@ -5,7 +5,7 @@ import remarkGfm from 'remark-gfm';
 import type { AgentChatPermission } from '../../../../shared/types/agentChat';
 import { describeChatContent, permissionToolId } from '../../../../shared/agentChatPresentation';
 import type { JsonValue } from '../../../../shared/validation/boundaryDecoder';
-import { imageOf, turnSummary, type ChatStep, type ChatTurn, type PlanEntry, type StepGroup, type TurnItem } from '../../../../shared/chatTabPresentation';
+import { imageOf, stoppedText, turnSummary, type ChatStep, type ChatTurn, type PlanEntry, type StepGroup, type TurnItem } from '../../../../shared/chatTabPresentation';
 
 export interface ChatTurnActions {
   /** Opens the file's diff in Pane's diff view. A diff never renders in the thread by itself. */
@@ -137,5 +137,6 @@ export const ChatTurnView = memo(function ChatTurnView({ turn, quiet, permission
         {open && <div className="chat-fold-body"><Item item={item} waiting={waiting} actions={actions} /></div>}
       </div>;
     })}
+    {stoppedText(turn) && <p className="chat-turn-stopped">{stoppedText(turn)}</p>}
   </div>;
 });
