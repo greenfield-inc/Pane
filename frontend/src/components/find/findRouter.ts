@@ -14,7 +14,7 @@ export interface FindRouteInput<N> {
   active: N | null;
   /** Focus is in a text field, editor or embedded page. */
   activeIsEditable: boolean;
-  /** Focus is in a widget with its own find (Monaco). */
+  /** Focus is in a widget with its own Cmd+F (Monaco, the Files tree filter). */
   activeOwnsFind: boolean;
   targets: Array<{ id: string; root: { contains(other: N): boolean } | null; visible: boolean }>;
   /** The searchable tab last clicked or focused, if any. */
@@ -73,7 +73,8 @@ function resolveFocusedFindPanelId(): string | null {
   const id = resolveFindPanelId<Node>({
     active,
     activeIsEditable: active ? isEditable(active) : false,
-    activeOwnsFind: !!active?.closest('.monaco-editor'),
+    // Monaco has its own find; the Files tree uses Cmd/Ctrl+F as its filter.
+    activeOwnsFind: !!active?.closest('.monaco-editor, [data-native-find]'),
     targets: Array.from(getFindTargets(), ([targetId, target]) => {
       const root = target.root();
       return { id: targetId, root, visible: isShownElement(root) };

@@ -11,7 +11,7 @@ interface FindBarProps {
   className?: string;
 }
 
-const iconButton = 'h-6 w-6 inline-flex items-center justify-center rounded text-text-secondary hover:bg-surface-hover hover:text-text-primary disabled:opacity-40 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle';
+const iconButton = 'h-6 w-6 shrink-0 inline-flex items-center justify-center rounded text-text-secondary hover:bg-surface-hover hover:text-text-primary disabled:opacity-40 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle';
 
 /** The Chrome-style find bar every searchable tab shows at its top right. */
 export function FindBar({ panelId, className }: FindBarProps) {
@@ -50,7 +50,8 @@ export function FindBarView({ panelId, className, bar }: FindBarProps & { bar: F
       aria-label="Find in tab"
       data-find-bar={panelId}
       className={cn(
-        'absolute top-2 right-3 z-30 flex items-center gap-1 p-1 rounded-md border border-border-primary bg-surface-secondary shadow-dropdown-elevated',
+        // Never wider than the tab: a narrow split group shrinks the input.
+        'absolute top-2 right-3 z-30 flex max-w-[calc(100%-1.5rem)] items-center gap-1 p-1 rounded-md border border-border-primary bg-surface-secondary shadow-dropdown-elevated',
         className,
       )}
     >
@@ -68,13 +69,13 @@ export function FindBarView({ panelId, className, bar }: FindBarProps & { bar: F
         onChange={(event) => setFindQuery(panelId, event.target.value)}
         onKeyDown={handleKeyDown}
         className={cn(
-          'h-6 w-48 rounded border px-2 text-xs outline-none',
+          'h-6 w-48 min-w-0 shrink rounded border px-2 text-xs outline-none',
           'bg-surface-primary text-text-primary placeholder:text-text-tertiary border-border-primary focus:border-interactive',
-          bar.noText && 'w-56 cursor-default',
+          bar.noText && 'w-56 cursor-default text-ellipsis',
           noMatches && 'bg-status-warning/15 border-status-warning focus:border-status-warning',
         )}
       />
-      <span aria-live="polite" className="w-[5.5rem] shrink-0 text-center text-xs tabular-nums text-text-tertiary select-none">
+      <span aria-live="polite" className="w-[5.5rem] min-w-[3.5rem] shrink text-center truncate text-xs tabular-nums text-text-tertiary select-none">
         {findCountLabel(bar)}
       </span>
       <button

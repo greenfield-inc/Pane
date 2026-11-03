@@ -773,6 +773,8 @@ export function HeadlessFileTree({
   return (
     <div
       ref={keyboardScopeRef}
+      // Cmd/Ctrl+F here toggles the file-name filter, not Pane's find bar.
+      data-native-find=""
       className={`h-full flex flex-col ${isDragOver ? 'ring-2 ring-interactive ring-inset bg-interactive/10' : ''}`}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
