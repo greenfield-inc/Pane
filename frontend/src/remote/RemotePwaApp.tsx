@@ -1015,7 +1015,6 @@ export function RemotePwaApp() {
         {openOrchestrationSession && <SessionBlockers sessionId={openOrchestrationSession.session.id} fallback={openOrchestrationSession.session.blockers} />}
 
         <RemotePanelTabs
-          agentChat={affordances.chatEnabled ? adapter.agentChat : undefined}
           panels={selectedPanels}
           selectedPanelId={selectedPanel?.id ?? null}
           creating={creatingTerminal}
@@ -1050,7 +1049,6 @@ export function RemotePwaApp() {
                   panel={panel}
                   sessionId={selectedSession.id}
                   connectionStatus={connectionStatus}
-                  chatEnabled={affordances.chatEnabled}
                   shortcuts={affordances.terminalShortcuts}
                   shortcutsLoading={affordancesLoading}
                   voiceTranscription={affordances.voiceTranscription}

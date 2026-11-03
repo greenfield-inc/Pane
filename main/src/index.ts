@@ -2,7 +2,6 @@
 import './versionQuery';
 // Load ReadableStream polyfill before any other imports
 import './polyfills/readablestream';
-import { agentChatManager } from './services/agentChat/agentChatManager';
 import { acknowledgeUpdateQuiescence } from './services/updateShutdown';
 
 import { registerStartupNotice } from './ipc/startup-notice';
@@ -1368,7 +1367,7 @@ if (launchRemoteSetup) {
   // legacy in-main `pty.spawn` path with zero ptyHost code executing.
   if (configManager.getUsePtyHost()) {
     try {
-      ptyHostSupervisor = new PtyHostSupervisor((ptyId, data) => terminalPanelManager.authorizePtyHostInput(ptyId, data));
+      ptyHostSupervisor = new PtyHostSupervisor();
       await ptyHostSupervisor.start();
 
       ptyHostSupervisor.on('renderer-ack', (ptyId: string, bytes: number) => {
@@ -1637,15 +1636,6 @@ if (launchRemoteSetup) {
     // Terminals exiting because Pane is quitting are not owners releasing their
     // named locks; resumed agents still hold them after the restart.
     paneDaemonHost?.services.namedLockService?.suspendAutoRelease();
-
-    // A Chat tab that refuses to stop must not skip marking the other agents
-    // interrupted below, or the next launch has nothing to resume.
-    try {
-      await agentChatManager.stopAll();
-    } catch (error) {
-      logToFile(`Agent Chat stop failed: ${error}`);
-      console.error('[Main] Agent Chat could not stop every conversation; continuing shutdown:', error);
-    }
 
     // Phase 1: Send Ctrl+C to all terminals to gracefully exit Claude instances
     // Claude needs to exit cleanly so it releases the session ID lock, allowing

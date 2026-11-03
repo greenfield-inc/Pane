@@ -162,7 +162,6 @@ export class DemoWorkspace {
         const content = stripAnsi(this.panel(first).buffer);
         return { content, lineCount: content.split('\n').length, panelTitle: this.panel(first).title };
       }
-      case 'agent-chat:get': return { panelId: String(first), available: false, setupRequired: false, running: false, permissions: [] };
       case 'terminal:upload-start':
       case 'terminal:paste-image':
       case 'terminal:paste-file': throw new Error(`Sending files ${NEEDS_COMPUTER}`);
@@ -508,7 +507,6 @@ export class DemoWorkspace {
       terminalShortcuts: this.shortcuts,
       customCommands: [{ name: 'review-bot', command: './bin/review-bot' }],
       sessionAgents: { agents: ['claude', 'codex', 'cursor'], defaultAgent: 'claude' },
-      chatEnabled: false,
       voiceTranscription: {
         availableModes: [], defaultMode: 'streaming',
         configured: { cleanup: false, recorded: false, streaming: false, fal: false, deepgram: false, openRouter: false },

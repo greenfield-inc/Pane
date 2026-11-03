@@ -14924,8 +14924,7 @@ export const RUNPANE_CONTRACT = {
           "Default output is bounded to the latest 200 lines or records. Use a larger --limit only when hasMore is true and more history is needed.",
           "Use --json when an agent needs timestamps, record types, returnedCount, or hasMore.",
           "The output is intended to be agent-readable, but terminal prompts and shell echoes may still appear; use the newest relevant lines before concluding success.",
-          "Prefer `panels screen` for a smaller current-state read before increasing output limits.",
-          "In Chat, returns ACP transcript output records instead of stale PTY scrollback."
+          "Prefer `panels screen` for a smaller current-state read before increasing output limits."
         ]
       },
       "panels input": {
@@ -14993,8 +14992,7 @@ export const RUNPANE_CONTRACT = {
           "If interrupting a running process, send Ctrl-C first, validate/read output, then send the next command in a separate `panels input` call so bytes are not dropped.",
           "After sending input, validate with `runpane panels output --panel <panel-id> --json` before reporting success.",
           "Runpane records action metadata and errors for observability, but should not log full input text by default.",
-          "For ordinary text plus Enter, prefer `panels submit` so the terminal receives a CR Enter byte.",
-          "Chat-owned tabs reject raw keystrokes. Use panels submit, or switch to Terminal."
+          "For ordinary text plus Enter, prefer `panels submit` so the terminal receives a CR Enter byte."
         ]
       },
       "agents doctor": {
@@ -15079,8 +15077,7 @@ export const RUNPANE_CONTRACT = {
         "notes": [
           "Use this before `panels output` when an agent only needs the latest visible/current state.",
           "The composer object reports whether a Claude or Codex composer is present and whether it holds undelivered text. Placeholder and suggestion text (drawn dim or grey, such as Claude's suggested next prompt) does not count as undelivered text; `composer.ghostText` carries it, and text output marks its line with `⟨suggestion⟩`.",
-          "If hasMore is true and context is missing, rerun with a larger --limit or use `panels output`.",
-          "Chat-owned tabs return CHAT_RAW_TERMINAL_UNSUPPORTED. Use panels last-message/output, or switch to Terminal."
+          "If hasMore is true and context is missing, rerun with a larger --limit or use `panels output`."
         ]
       },
       "panels submit": {
@@ -15181,8 +15178,7 @@ export const RUNPANE_CONTRACT = {
           "For Claude, text starting with `!`, `#`, `/` or `@` is sent unchanged and the result carries a `warnings` entry (for example `leading-bang-runs-shell`), because Claude Code gives those characters a meaning of its own.",
           "`--as-file-pointer` writes the text to a prompt file readable only by you, inside the Pane's git worktree at `.pane/prompts/` (hidden by the repository's `.git/info/exclude`, never committed) when it has one, otherwise under `<pane-dir>/prompts/<pane-id>/`, so an agent limited to its working directories reads it without a permission prompt, and sends the one line `Read and follow <path>`, with the path relative to the worktree (where the agent starts) when the file is inside it; the result's `promptFile` is always absolute. Prefer it for long prompts.",
           "`--attach <file>` (repeatable, with `--as-file-pointer`) copies each file into a folder beside the prompt file and sends `Read and follow <path> (attached: <copy>, ...)`; the result lists the copies in `attachments`.",
-          "With --interrupt, Pane sends the stop key only while the agent is active, waits for an empty idle composer, then submits. If readiness times out, replacement text is not sent. A queued result is not read yet: delivery.message explains the delay; never resend queued text. Interrupt success requires delivery.state: taken. Unknown agents and occupied composers are rejected without typing.",
-          "In Chat, submit routes to the host ACP session and returns sequenceName=acp, enter=none, operationId and acp-receipt delivery evidence. Do not blindly resend after a lost response."
+          "With --interrupt, Pane sends the stop key only while the agent is active, waits for an empty idle composer, then submits. If readiness times out, replacement text is not sent. A queued result is not read yet: delivery.message explains the delay; never resend queued text. Interrupt success requires delivery.state: taken. Unknown agents and occupied composers are rejected without typing."
         ]
       },
       "panels resume": {
@@ -15360,8 +15356,7 @@ export const RUNPANE_CONTRACT = {
         ],
         "notes": [
           "Without a transcript (a shell panel, another agent, or no reply yet) the result is `{ ok: false, reason: \"transcript-unavailable\" }` and the command exits 1. Use `panels screen` then.",
-          "A worker that ran `runpane report` already handed back its state, PR, head, and summary; read those with `agents status` before reading the whole reply.",
-          "In Chat, read the active host transcript projection."
+          "A worker that ran `runpane report` already handed back its state, PR, head, and summary; read those with `agents status` before reading the whole reply."
         ]
       },
       "panels create": {
@@ -15632,8 +15627,7 @@ export const RUNPANE_CONTRACT = {
           "Use `panels input` or `panels submit` to write prompt text first; this command only submits the current composer.",
           "Use --strategy auto for agent workflows; explicit strategies are diagnostic escape hatches.",
           "The JSON result includes sequenceName, verifiedSubmitted and, for Claude and Codex, delivery (`taken`, `queued`, `in-composer` or `unknown`, with `transcript` or `screen` evidence). If ok is false, follow blocked.suggestedCommand instead of assuming submission happened.",
-          "With `--strategy auto`, if the staged text is still visible in the composer after the first attempt, Pane retries once and checks again: Tab for working Codex, Enter otherwise. It never retries an empty composer.",
-          "Chat-owned tabs have no native composer to submit. Use panels submit instead."
+          "With `--strategy auto`, if the staged text is still visible in the composer after the first attempt, Pane retries once and checks again: Tab for working Codex, Enter otherwise. It never retries an empty composer."
         ]
       },
       "workspace state": {

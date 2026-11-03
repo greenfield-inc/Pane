@@ -43,7 +43,6 @@ export function registerConfigHandlers(
         })),
         voiceTranscription: buildRemotePwaVoiceAffordance(config),
         sessionAgents: buildRemotePwaSessionAgents(config.defaultOrchestratorAgent),
-        chatEnabled: config.experimentalChatEnabled === true,
         os: machineOs(process.platform),
       };
     };

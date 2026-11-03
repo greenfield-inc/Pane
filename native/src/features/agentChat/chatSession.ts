@@ -132,8 +132,8 @@ export class ChatSession {
   async send(request: AgentChatSend, confirmed?: () => void): Promise<AgentChatReceipt | undefined> {
     if (this.state.pendingDelivery || this.state.delivering) return;
     const view = this.state.view;
-    if (this.loadedTransportRevision !== this.transportRevision || view?.conversation?.active !== 'chat' || view.conversation.transition || view.running || view.permissions.length || request.generation !== view.conversation.generation) {
-      this.setError('This conversation cannot accept a message yet. Refresh and wait for the current turn or switch to finish.');
+    if (this.loadedTransportRevision !== this.transportRevision || view?.conversation?.active !== 'chat' || view.running || view.permissions.length || request.generation !== view.conversation.generation) {
+      this.setError('This conversation cannot accept a message yet. Refresh and wait for the current turn to finish.');
       return;
     }
     this.confirmation = confirmed;

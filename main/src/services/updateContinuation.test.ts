@@ -11,6 +11,12 @@ describe('update continuation eligibility', () => {
     expect(updateContinuation({ agentType: 'codex', agentSessionId: 'exact-id', launchMode: 'wrapped' }, 'working').eligible).toBe(false);
     expect(updateContinuation({ agentType: 'codex', agentSessionId: 'exact-id', agentReport: { state: 'done', reportedAt: 'now' } }, 'working').eligible).toBe(false);
   });
+  it('resumes a tab saved by the removed experimental Chat as a terminal, from its terminal resume id', () => {
+    // Databases from releases with the Chat still hold its record on the tab; it is ignored.
+    const saved = { agentType: 'claude' as const, agentSessionId: 'adopted-fork', agentChat: { conversation: { active: 'chat', nativeSessionId: 'adopted-fork' } } };
+    expect(updateContinuation(saved, 'working')).toMatchObject({ eligible: true, requiresAttention: false });
+    expect(checkpointUpdatePanel(saved, 'working', '/repo/worktree')).toMatchObject({ eligible: true, resumeId: 'adopted-fork' });
+  });
   it('preserves an explicit custom resume profile', () => {
     expect(updateContinuation({ agentSessionId: 'exact-id', initialCommand: 'wrapper profile', launchMode: 'wrapped', customResume: { mode: 'reported', initialTemplate: '{command}', resumeTemplate: '{command} --resume {sessionId}' } }, 'working').eligible).toBe(true);
   });

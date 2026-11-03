@@ -16,8 +16,6 @@ import { sessionWorkspacePath } from './sessionWorkspace';
 import { getAppDirectory } from '../utils/appDirectory';
 import { withSessionFolderAccess } from './agents/sessionFolderAccess';
 import { reasonOf } from '../../../shared/paneError';
-import { PaneError } from '../../../shared/paneError';
-import type { AgentChatPanelState } from '../../../shared/types/agentChat';
 
 function logsPanelState(panel: ToolPanel): LogsPanelState {
   // SAFETY: Callers first discriminate `panel.type === 'logs'`; this state is
@@ -126,7 +124,6 @@ class PanelManager {
         // CLI launches may already carry it for prompt/staged-command preparation.
         // SAFETY: This branch creates terminal panels; their custom state uses TerminalPanelState.
         const terminalState = customState as TerminalPanelState;
-        delete terminalState.agentChat;
         if (!terminalState.orchestrationSessionId && !terminalState.sessionFolder) {
           try {
             const sessions = new OrchestrationSessionStore(path.join(getAppDirectory(), 'orchestration-sessions.json')).read().sessions;
@@ -337,13 +334,6 @@ class PanelManager {
         console.warn(`[PanelManager] Panel ${panelId} not found for update`);
         return;
       }
-      if (panel.type === 'terminal' && updates.state?.customState) {
-        // Runtime identity is committed only by the host controller. A stale
-        // terminal snapshot or remote viewer must never undo a handoff fence.
-        // SAFETY: This database row belongs to the terminal panel above.
-        const current = databaseService.getPanel(panelId)?.state.customState as TerminalPanelState | undefined;
-        updates = { ...updates, state: { ...updates.state, customState: { ...updates.state.customState, agentChat: current?.agentChat } } };
-      }
       
       // Update in database. A refused write (state over the ceiling) is
       // already logged there with the panel, size and largest key; the cache
@@ -369,25 +359,6 @@ class PanelManager {
     });
   }
 
-  /** Synchronous durable fence: callers may release a writer only after this
-   * returns. Normal panel updates cannot replace this host-owned field. */
-  commitAgentChat(panelId: string, chat: AgentChatPanelState | undefined): void {
-    const panel = this.getPanel(panelId);
-    if (!panel || panel.type !== 'terminal') throw new PaneError('CHAT_PANEL_MISSING', 'The agent tab no longer exists. No runtime was acquired.', 'Open an existing agent tab.');
-    // SAFETY: The terminal panel type was checked above; customState is its persisted terminal state.
-    const previous = panel.state.customState as TerminalPanelState | undefined;
-    const customState: TerminalPanelState = { ...previous, agentChat: structuredClone(chat) };
-    if (chat?.conversation.nativeSessionId) { customState.agentSessionId = chat.conversation.nativeSessionId; customState.agentType = chat.conversation.provider; }
-    const state = { ...panel.state, customState };
-    if (!databaseService.updatePanel(panelId, { state })) throw new PaneError('CHAT_STATE_NOT_SAVED', 'The runtime ownership record could not be saved. The switch did not proceed.', 'Resolve the storage error before switching.');
-    const saved = databaseService.getPanel(panelId);
-    // SAFETY: The row was just written as a terminal panel with host-owned chat state.
-    const savedChat = (saved?.state.customState as TerminalPanelState | undefined)?.agentChat;
-    if (JSON.stringify(savedChat) !== JSON.stringify(chat)) throw new PaneError('CHAT_STATE_NOT_SAVED', 'The saved runtime record did not match the requested transition.', 'Inspect storage before recovering this conversation.');
-    panel.state = state;
-    this.sendRendererEvent('panel:updated', panel);
-  }
-  
   /**
    * Host- or agent-initiated activation: records the tab as last used and asks
    * clients already showing this Pane to bring it forward.
