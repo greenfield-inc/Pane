@@ -14,6 +14,7 @@ import { tabView } from './panels';
 /** Each tab type's icon and the word VoiceOver reads after its title. */
 export const TAB_TYPES: Record<ToolPanelType, { ios: SFSymbol; android: AndroidSymbol; label: string }> = {
   terminal: { ios: 'apple.terminal', android: 'terminal', label: 'terminal' },
+  chat: { ios: 'bubble.left', android: 'chat_bubble', label: 'chat' },
   browser: { ios: 'globe', android: 'language', label: 'page' },
   explorer: { ios: 'folder', android: 'folder', label: 'files' },
   diff: { ios: 'plus.forwardslash.minus', android: 'difference', label: 'diff' },

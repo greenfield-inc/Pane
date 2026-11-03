@@ -7,6 +7,7 @@ import { OrchestrationSessionStore } from './orchestrationSessionStore';
 import { getAppDirectory } from '../utils/appDirectory';
 import { updateHoldIsLive } from './updateRestoration';
 import { noteContextPath } from './noteFiles';
+import { panePortFor } from './panePort';
 import { codexResumeBase, claudeResumeBase, hasClaudeResumeFlag, isPlainAgentCommand } from './agents/agentIdentity';
 import { canReadClaudeTranscripts, findClaudeSessionTranscript } from './claudeSessionTranscript';
 import { isOrchestrationInternalSessionId } from '../../../shared/types/orchestrationSession';
@@ -1824,18 +1825,7 @@ export class TerminalPanelManager extends EventEmitter {
     if (this.terminals.has(panel.id)) return;
     const enhancedPath = isLinux ? (process.env.PATH || '') : getShellPath();
 
-    /**
-     * PANE_PORT: deterministic port block per session (10 consecutive ports).
-     * Avoids port conflicts when running parallel worktree dev servers.
-     * Hash the sessionId to a port in the 3000–8990 range (600 blocks of 10).
-     * Usage in pane.json: { "scripts": { "run": "PORT=$PANE_PORT pnpm dev" } }
-     */
-    let portHash = 0;
-    for (let i = 0; i < panel.sessionId.length; i++) {
-      portHash = ((portHash << 5) - portHash) + panel.sessionId.charCodeAt(i);
-      portHash |= 0;
-    }
-    const panePort = 3000 + (Math.abs(portHash) % 600) * 10;
+    const panePort = panePortFor(panel.sessionId);
 
     /**
      * When spawning into WSL, pty.spawn's `env` sets variables on the wsl.exe

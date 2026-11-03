@@ -24,6 +24,7 @@ export function tabView(panel: ToolPanel): TabView {
 /** Strip groups, as the web phone app sorts them: agents and terminals, pages, Explorer and Diff, other tabs, desktop-only tabs. */
 const STRIP_GROUP: Record<ToolPanelType, number> = {
   terminal: 0,
+  chat: 0,
   browser: 1,
   explorer: 2,
   diff: 2,

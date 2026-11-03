@@ -5,7 +5,7 @@ import { SettingsSection } from '../../ui/SettingsSection';
 import { SettingRow, SettingsPage } from '../SettingRow';
 import { ImmediateToggle } from '../SettingsControls';
 import type { SettingsPersistence } from '../useSettingsPersistence';
-import { isMissionControlEnabled, isNotesEnabled } from '../../../stores/configStore';
+import { isChatTabsEnabled, isMissionControlEnabled, isNotesEnabled } from '../../../stores/configStore';
 import type { Journey, JourneyTimingSummary } from '../../../../../shared/types/journeyTimings';
 import type { IPCResponse } from '../../../utils/api';
 
@@ -159,6 +159,18 @@ export function AdvancedSettings({ persistence, platform, onDirtyChange }: Advan
             label="Mission Control"
             value={isMissionControlEnabled(config)}
             onSave={(value) => persistence.saveConfig('mission-control', { missionControlEnabled: value })}
+          />
+        </SettingRow>
+        <SettingRow
+          settingId="chat-tabs"
+          label="Chat tabs"
+          description="Add Claude and Codex chat tabs to the + menu. They run your own installed claude or codex, signed in on this machine, with no terminal. Turning it off keeps open chat tabs."
+          saveState={persistence.saveStates['chat-tabs']}
+        >
+          <ImmediateToggle
+            label="Chat tabs"
+            value={isChatTabsEnabled(config)}
+            onSave={(value) => persistence.saveConfig('chat-tabs', { chatTabsEnabled: value })}
           />
         </SettingRow>
         <SettingRow

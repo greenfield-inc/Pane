@@ -1,3 +1,4 @@
+import { getChatTabManager } from '../services/chatTabs';
 import { clipboard } from 'electron';
 import type { IpcMain } from 'electron';
 import { existsSync, readdirSync } from 'fs';
@@ -569,6 +570,7 @@ export function registerPanelHandlers(
       if (panel?.type === 'terminal') {
         await terminalPanelManager.destroyTerminal(panelId, { saveState: false });
       }
+      if (panel?.type === 'chat') await getChatTabManager().close(panelId);
 
       await panelManager.deletePanel(panelId);
       if (panel && pausedPane) terminalPanelManager.emit('pause-changed', { panelIds: [], paneIds: [panel.sessionId], paused: false });

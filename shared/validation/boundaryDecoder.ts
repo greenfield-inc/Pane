@@ -244,6 +244,24 @@ export const boundary = {
       },
     };
   },
+  /** A plain object whose every value matches `schema` (a string-keyed map). */
+  record<Value>(schema: BoundarySchema<Value>): BoundarySchema<Record<string, Value>> {
+    return {
+      decode(current) {
+        if (typeof current.value !== "object" || current.value === null || Array.isArray(current.value)) {
+          current.fail("expected object");
+        }
+        // SAFETY: The object/null/array checks above establish an indexable plain object.
+        const source = current.value as ObjectValue;
+        const result: Record<string, Value> = {};
+        for (const key of Object.keys(source)) {
+          // SAFETY: decodeChild returns undefined only after recording an issue, and decodeBoundaryAll then throws.
+          result[key] = decodeChild(current, key, source[key], schema) as Value;
+        }
+        return result;
+      },
+    };
+  },
   object<const Fields extends ObjectFields>(fields: Fields): BoundarySchema<InferObject<Fields>> {
     return {
       decode(current) {

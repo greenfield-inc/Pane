@@ -26,6 +26,11 @@ export function isMissionControlEnabled(config: AppConfig | null): boolean {
   return config?.missionControlEnabled === true;
 }
 
+/** Chat tabs are experimental: the + menu offers them only after this opt-in. */
+export function isChatTabsEnabled(config: AppConfig | null): boolean {
+  return config?.chatTabsEnabled === true;
+}
+
 /** Notes is experimental: every entry point and the agents' notes file wait for this opt-in. */
 export function isNotesEnabled(config: AppConfig | null): boolean {
   return config?.notesEnabled === true;

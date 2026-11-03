@@ -94,6 +94,7 @@ export type SettingsSettingId =
   | 'pty-host'
   | 'additional-paths'
   | 'mission-control'
+  | 'chat-tabs'
   | 'notes';
 
 export interface SettingsTarget {

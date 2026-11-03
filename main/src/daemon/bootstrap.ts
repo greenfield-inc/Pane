@@ -1,3 +1,4 @@
+import { getChatTabManager } from '../services/chatTabs';
 import { installRunpaneShimBestEffort } from '../services/runpaneShim';
 import os from 'os';
 import path from 'path';
@@ -553,6 +554,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
       await archiveCleanupManager.stop();
       // Before terminals stop: their exits during shutdown must not release locks.
       namedLockService.dispose();
+      await getChatTabManager().stopAll();
       resourceMonitorService.stop();
       listeningPortMonitor.stop();
       await spotlightManager.disableAll();

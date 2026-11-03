@@ -190,6 +190,11 @@ interface ElectronAPI {
     rendererFatal: (payload: RendererDiagnosticPayload) => Promise<IPCResponse>;
   };
 
+  chatTab: import('../../../shared/types/chatTab').ChatTabClient & {
+    create(request: import('../../../shared/types/chatTab').ChatTabCreate): Promise<{ panelId: string }>;
+    keys(): Promise<Record<'claude' | 'codex', boolean>>;
+    setKey(agent: 'claude' | 'codex', key: string | null): Promise<Record<'claude' | 'codex', boolean>>;
+  };
 
   paneChat: {
     getOrCreate: () => Promise<IPCResponse<PaneChatState<Session>>>;

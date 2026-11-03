@@ -1105,7 +1105,7 @@ const INSPECTOR_TABS = {
 } satisfies Record<string, { tab: InspectorTab; label: string }>;
 /** What a tab is, shown when it has no live agent state. A terminal's title already says it; Files and Changes are their own label. */
 const PANEL_TYPE_LABELS = {
-  terminal: null, explorer: null, diff: null,
+  terminal: null, chat: null, explorer: null, diff: null,
   browser: 'Page', editor: 'File', logs: 'Logs', notes: 'Notes', dashboard: 'Dashboard', 'setup-tasks': 'Setup tasks',
 } satisfies Record<ToolPanelType, string | null>;
 

@@ -2,6 +2,7 @@ import type { LoopInput } from '../../shared/types/loop';
 import type { TestNotificationResult } from '../../shared/types/notifications';
 import type { SetupFile, SetupSectionId } from '../../shared/types/setupTransfer';
 import type { SessionImportProgress, SessionImportRunResult, SessionImportScan } from '../../shared/types/sessionImport';
+import type { ChatTabAnswer, ChatTabCreate, ChatTabEvent, ChatTabSend, ChatTabView } from '../../shared/types/chatTab';
 import type { RestartToUpdateSource, RestartToUpdateState, UpdateRestoreResult } from '../../shared/types/updater';
 import { contextBridge, ipcRenderer } from 'electron';
 import { createPreferencesApi } from '../../shared/types/preferences';
@@ -443,6 +444,37 @@ contextBridge.exposeInMainWorld('electronAPI', {
     }): Promise<IPCResponse> => invokeIpc('diagnostics:renderer-fatal', payload),
   },
 
+  chatTab: {
+    onReconnect: (callback: () => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, state: RemotePaneConnectionState) => { if (state.status === 'connected') callback(); };
+      ipcRenderer.on('remote-daemon:connection-state-changed', listener);
+      return () => ipcRenderer.removeListener('remote-daemon:connection-state-changed', listener);
+    },
+    create: (request: ChatTabCreate) => invokeIpc('chat-tab:create', request),
+    get: (panelId: string, limit?: number) => invokeIpc('chat-tab:get', panelId, limit),
+    history: (panelId: string, before: number, limit: number) => invokeIpc('chat-tab:history', panelId, before, limit),
+    send: (panelId: string, request: ChatTabSend) => invokeIpc('chat-tab:send', panelId, request),
+    receipt: (panelId: string, operationId: string) => invokeIpc('chat-tab:receipt', panelId, operationId).then(receipt => receipt ?? undefined),
+    unqueue: (panelId: string, operationId: string) => invokeIpc('chat-tab:unqueue', panelId, operationId),
+    configure: (panelId: string, configId: string, value: string) => invokeIpc('chat-tab:configure', panelId, configId, value),
+    cancel: (panelId: string) => invokeIpc('chat-tab:cancel', panelId),
+    permission: (panelId: string, requestId: string, optionId: string) => invokeIpc('chat-tab:permission', panelId, requestId, optionId),
+    answer: (panelId: string, questionId: string, response: ChatTabAnswer) => invokeIpc('chat-tab:answer', panelId, questionId, response),
+    restart: (panelId: string) => invokeIpc('chat-tab:restart', panelId),
+    signIn: (panelId: string) => invokeIpc('chat-tab:sign-in', panelId),
+    keys: () => invokeIpc('chat-tab:keys'),
+    setKey: (agent: 'claude' | 'codex', key: string | null) => invokeIpc('chat-tab:set-key', agent, key),
+    onEvent: (callback: (event: ChatTabEvent) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, event: ChatTabEvent) => callback(event);
+      ipcRenderer.on('chat-tab:event', listener);
+      return () => ipcRenderer.removeListener('chat-tab:event', listener);
+    },
+    onState: (callback: (view: ChatTabView) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, view: ChatTabView) => callback(view);
+      ipcRenderer.on('chat-tab:state', listener);
+      return () => ipcRenderer.removeListener('chat-tab:state', listener);
+    },
+  },
   paneChat: {
     getOrCreate: (): Promise<IPCResponse> => invokeIpc('pane-chat:get-or-create'),
     setAgent: (agent: PaneChatAgent): Promise<IPCResponse> => invokeIpc('pane-chat:set-agent', agent),

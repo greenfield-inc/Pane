@@ -16,6 +16,7 @@ import { sessionWorkspacePath } from './sessionWorkspace';
 import { getAppDirectory } from '../utils/appDirectory';
 import { withSessionFolderAccess } from './agents/sessionFolderAccess';
 import { PaneError, reasonOf } from '../../../shared/paneError';
+import type { ChatPanelState } from '../../../shared/types/chatTab';
 import { teammatePaneCaller } from '../daemon/commandRegistry';
 
 function logsPanelState(panel: ToolPanel): LogsPanelState {
@@ -341,6 +342,10 @@ class PanelManager {
         // SAFETY: This database row belongs to the terminal panel above.
         const current = databaseService.getPanel(panelId)?.state.customState as TerminalPanelState | undefined;
         updates = { ...updates, state: { ...updates.state, customState: { ...updates.state.customState, paused: current?.paused } } };
+      } else if (panel.type === 'chat' && updates.state?.customState) {
+        // A chat tab's state belongs to the host's chat runtime (commitChatTab);
+        // a viewer's panel update must never replace it.
+        updates = { ...updates, state: { ...updates.state, customState: databaseService.getPanel(panelId)?.state.customState } };
       }
       
       // Update in database. A refused write (state over the ceiling) is
@@ -366,6 +371,16 @@ class PanelManager {
       
       console.log(`[PanelManager] Updated panel ${panelId}`);
     });
+  }
+
+  /** Synchronous: the chat runtime's state is durable before this returns. Only the chat tab manager calls it. */
+  commitChatTab(panelId: string, chat: ChatPanelState): void {
+    const panel = this.getPanel(panelId);
+    if (!panel || panel.type !== 'chat') throw new PaneError('CHAT_PANEL_MISSING', 'This chat tab no longer exists. Its state was not saved.', 'Open another chat tab.');
+    const state = { ...panel.state, customState: structuredClone(chat) };
+    if (!databaseService.updatePanel(panelId, { state })) throw new PaneError('CHAT_STATE_NOT_SAVED', 'The chat tab\'s state could not be saved.', 'Check free disk space, then press Restart in the tab.');
+    panel.state = state;
+    this.sendRendererEvent('panel:updated', panel);
   }
 
   /**
