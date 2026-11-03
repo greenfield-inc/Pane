@@ -56,13 +56,14 @@ test('terminal: Cmd+F finds every match in scrollback and Esc gives the keys bac
   await expect(tab.getByRole('status', { name: 'Loading terminal' })).toHaveCount(0);
   await tab.locator('.xterm-helper-textarea').first().focus();
 
-  // The terminal's find adapter attaches once xterm and its search addon load.
+  // The terminal's find adapter attaches once xterm and its search addon load,
+  // and a terminal still restoring can take focus back. Cmd/Ctrl+F with the
+  // bar open puts focus back in its input, so press until it holds.
+  const input = findBar(page).getByRole('textbox', { name: 'Find' });
   await expect(async () => {
     await page.keyboard.press('ControlOrMeta+f');
-    await expect(findBar(page)).toBeVisible({ timeout: 500 });
+    await expect(input).toBeFocused({ timeout: 500 });
   }).toPass();
-  const input = findBar(page).getByRole('textbox', { name: 'Find' });
-  await expect(input).toBeFocused();
   await input.fill('needle');
   await expect(findBar(page)).toContainText('of 12');
   // The search addon re-runs 200 ms after output is parsed; let the restored
