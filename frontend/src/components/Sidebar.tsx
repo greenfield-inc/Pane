@@ -1,3 +1,4 @@
+import { useActiveMachineStore } from '../stores/activeMachineStore';
 import { NewDialog } from './NewDialog';
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
@@ -274,6 +275,16 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
   // Tailscale machines are listed once after start-up and again each time the menu opens.
   const { machines, select: selectMachine, switchingId, refresh: refreshMachines } = useMachines({ connectionState: remoteConnectionState });
   const activeMachine = machines.find((machine) => machine.active) ?? machines[0];
+  const setActiveMachine = useActiveMachineStore((state) => state.set);
+  // Chat tabs show the machine they run on in their composer.
+  const machineId = activeMachine?.id;
+  const machineName = activeMachine?.name;
+  const machineOs = activeMachine?.os ?? null;
+  const machineSlot = activeMachine?.slot ?? 0;
+  const machineLocal = activeMachine?.kind === 'local';
+  useEffect(() => {
+    setActiveMachine(machineId && machineName ? { id: machineId, name: machineName, os: machineOs, slot: machineSlot, local: machineLocal } : null);
+  }, [machineId, machineName, machineOs, machineSlot, machineLocal, setActiveMachine]);
   // Hidden only while no other machine is saved or on Tailscale.
   const switcherVisible = machines.length > 1 || remoteConnectionState.mode === 'remote';
   const allMachines = useAllMachinesStore(isAllMachinesOn);

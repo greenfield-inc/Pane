@@ -1,21 +1,24 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import {
   AssistantRuntimeProvider, AttachmentPrimitive, ComposerPrimitive, ThreadPrimitive,
-  SimpleImageAttachmentAdapter, useAuiState, useExternalStoreRuntime, useThreadViewport, useThreadViewportStore,
+  SimpleImageAttachmentAdapter, useExternalStoreRuntime, useThreadViewport, useThreadViewportStore,
 } from '@assistant-ui/react';
 import { ArrowDown, ArrowUp, Plus, Square, X } from 'lucide-react';
-import type { AgentChatMessage, AgentChatPermission } from '../../../../shared/types/agentChat';
-import type { ChatTabClient, ChatTabSend } from '../../../../shared/types/chatTab';
-import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
+import type { AgentChatPermission } from '../../../../shared/types/agentChat';
+import type { ChatTabClient, ChatTabCommand, ChatTabSend } from '../../../../shared/types/chatTab';
+import { chatTurns } from '../../../../shared/chatTabPresentation';
+import { rejectOption } from '../../../../shared/chatTabPermissions';
 import { chatTabViewer, type ChatTabViewer } from '../../services/chatTabViewer';
 import { toAssistantMessage } from '../agentChat/convertMessage';
-import { AgentChatPermissions } from '../agentChat/AgentChatPermissions';
 import { AgentChatConfiguration } from '../agentChat/AgentChatConfiguration';
-import { MessageRow } from '../agentChat/AgentChatParts';
-import { ChatPermissionContext } from '../agentChat/chatPermissionContext';
+import { MachineBadge } from '../machines/MachineBadge';
+import type { ActiveMachine } from '../../stores/activeMachineStore';
+import { ipcErrorMessage } from '../../utils/ipcErrorMessage';
 import { ChatProblem } from './ChatProblem';
 import { ChatQuestionCard } from './ChatQuestionCard';
-import { ipcErrorMessage } from '../../utils/ipcErrorMessage';
+import { ChatPermissionCard } from './ChatPermissionCard';
+import { ChatTurnView, type ChatTurnActions } from './ChatTurns';
+import { ChatCommandMenu, matchingCommands } from './ChatCommandMenu';
 import '../agentChat/agentChat.css';
 import './chatTab.css';
 
@@ -33,56 +36,42 @@ class ChatImageAdapter extends SimpleImageAttachmentAdapter {
   }
 }
 
-const turnMarker = boundary.object({ type: boundary.literal('pane_turn'), stopReason: boundary.string });
-const STOPPED = new Map([
-  ['cancelled', 'Stopped.'], ['interrupted', 'Stopped when Pane closed.'], ['exited', 'Stopped: the agent exited.'],
-  ['refusal', 'The agent declined this request.'], ['max_tokens', 'Stopped at the length limit.'], ['max_turn_requests', 'Stopped at the step limit.'], ['error', 'Stopped by an error.'],
-]);
-
-/** Turn-end markers become a short line when a turn did not end normally; otherwise they are not shown. */
-export function visibleMessages(messages: AgentChatMessage[]): AgentChatMessage[] {
-  return messages.flatMap(message => {
-    const part = message.parts[0];
-    const marker = message.parts.length === 1 && part?.type === 'content' ? decodeOptionalBoundary(part.content, turnMarker) : undefined;
-    if (!marker) return [message];
-    if (marker.stopReason === 'end_turn') return [];
-    return [{ ...message, parts: [{ type: 'text', text: `_${STOPPED.get(marker.stopReason) ?? 'Stopped.'}_` }] }];
-  });
-}
-
 function ScrollToLatest() {
   const isAtBottom = useThreadViewport(state => state.isAtBottom);
   const viewport = useThreadViewportStore();
   return <button type="button" disabled={isAtBottom} onClick={() => viewport.getState().scrollToBottom({ behavior: 'instant' })} className="chat-latest" aria-label="Scroll to latest message"><ArrowDown className="h-4 w-4" /></button>;
 }
 
-function Viewport({ viewer, loading }: { viewer: ChatTabViewer; loading: boolean }) {
-  const messages = useAuiState(state => state.thread.messages);
-  const snapshot = useSyncExternalStore(viewer.subscribe, viewer.snapshot, viewer.snapshot);
-  const earlier = snapshot.transcript?.start ?? 0;
-  return <ThreadPrimitive.Viewport aria-label="Conversation messages" role="region" className="chat-viewport" scrollToBottomOnRunStart={false}>
-    <div className="chat-column">
-      <ThreadPrimitive.Empty><p className="py-8 text-sm text-text-tertiary">{loading ? 'Loading conversation…' : ''}</p></ThreadPrimitive.Empty>
-      {earlier > 0 && <button type="button" className="chat-button chat-button-outline self-center" disabled={snapshot.loadingEarlier} onClick={() => void viewer.loadEarlier()}>
-        {snapshot.loadingEarlier ? 'Loading…' : `Earlier messages (${earlier})`}
-      </button>}
-      {messages.map((message, index) => <ThreadPrimitive.MessageByIndex key={message.id} index={index} components={{ Message: MessageRow }} />)}
-    </div>
-  </ThreadPrimitive.Viewport>;
-}
-
 const AGENT_NAMES = { claude: 'Claude', codex: 'Codex' } as const;
 
+export interface ChatTabPanelProps {
+  panelId: string;
+  client: ChatTabClient;
+  connected?: boolean;
+  /** The Session orchestrator's chat (D-18): finished turns fold to one line and only the current step shows. */
+  quiet?: boolean;
+  /** The machine the tab's agent runs on, shown in the composer. */
+  machine?: ActiveMachine | null;
+  actions?: ChatTurnActions;
+  placeholder?: string;
+}
+
 /** A chat tab: one agent conversation over ACP, with no terminal (D-20). */
-export default function ChatTabPanel({ panelId, client, connected = true }: { panelId: string; client: ChatTabClient; connected?: boolean }) {
-  const viewer = useMemo(() => chatTabViewer(client, panelId), [client, panelId]);
+export default function ChatTabPanel({ panelId, client, connected = true, quiet = false, machine, actions = {}, placeholder }: ChatTabPanelProps) {
+  const viewer: ChatTabViewer = useMemo(() => chatTabViewer(client, panelId), [client, panelId]);
   const snapshot = useSyncExternalStore(viewer.subscribe, viewer.snapshot, viewer.snapshot);
   const view = snapshot.view;
   const [busy, setBusy] = useState(false);
-  const messages = useMemo(() => visibleMessages(snapshot.transcript?.messages ?? []), [snapshot.transcript?.messages]);
+  const [commandIndex, setCommandIndex] = useState(0);
+  const messages = useMemo(() => snapshot.transcript?.messages ?? [], [snapshot.transcript?.messages]);
+  const working = view?.status === 'working' || view?.status === 'blocked';
+  const turns = useMemo(() => chatTurns(messages, { running: working }), [messages, working]);
   const images = useMemo(() => new ChatImageAdapter(), []);
   const stopped = view?.status === 'stopped';
   const disabled = !connected || stopped || !view;
+  const agentName = view ? AGENT_NAMES[view.agent] : 'the agent';
+  const commands = matchingCommands(snapshot.draft, view?.commands ?? []);
+  const activeCommand = commands[Math.min(commandIndex, commands.length - 1)];
 
   const deliver = async (request: ChatTabSend, retry: boolean) => {
     viewer.setPendingDelivery(request);
@@ -103,7 +92,6 @@ export default function ChatTabPanel({ panelId, client, connected = true }: { pa
     // for a running turn; Stop is Pane's own button below.
     isRunning: false,
     isLoading: !snapshot.transcript && view?.status !== 'stopped',
-    // A message sent while the agent works is queued on the host and sent next.
     isSendDisabled: disabled || !!snapshot.pendingDelivery,
     unstable_persistsHistory: true, unstable_enableToolInvocations: false,
     adapters: view?.canAttachImages ? { attachments: images } : undefined,
@@ -119,6 +107,11 @@ export default function ChatTabPanel({ panelId, client, connected = true }: { pa
       viewer.setDraft(text);
       // The composer clears before onNew; keep the text until the host confirms it.
       runtime.thread.composer.setText(text);
+      // Typing while an approval waits tells the agent what to do instead (round 2).
+      for (const permission of view?.permissions ?? []) {
+        const reject = rejectOption(permission);
+        if (reject) await client.permission(panelId, permission.id, reject).catch(() => undefined);
+      }
       await deliver({ operationId: crypto.randomUUID(), text, images: imageParts }, true);
     },
   });
@@ -128,55 +121,79 @@ export default function ChatTabPanel({ panelId, client, connected = true }: { pa
     setBusy(true);
     try { await operation(); viewer.setError(undefined); } catch (error) { viewer.setError(ipcErrorMessage(error, 'Pane did not say why.')); } finally { setBusy(false); }
   };
-  const answerPermission = (permission: AgentChatPermission, optionId: string) => act(() => client.permission(panelId, permission.id, optionId));
-  const agentName = view ? AGENT_NAMES[view.agent] : 'the agent';
+  const answerPermission = (permission: AgentChatPermission, optionId: string) => void act(() => client.permission(panelId, permission.id, optionId));
+  const pickCommand = (command: ChatTabCommand) => {
+    const text = `/${command.name} `;
+    viewer.setDraft(text);
+    runtime.thread.composer.setText(text);
+    setCommandIndex(0);
+  };
 
   return <AssistantRuntimeProvider runtime={runtime}>
-    {/* Approvals dock above the composer (round 2), so tool rows never repeat them. */}
-    <ChatPermissionContext.Provider value={{ permissions: [], disabled: true, onAnswer: answerPermission }}>
-      <ThreadPrimitive.Root className="agent-chat chat-tab flex h-full min-h-0 flex-col" data-status={view?.status ?? 'starting'}>
-        {view?.problem && <ChatProblem problem={view.problem} agent={agentName} busy={busy || !connected}
-          onRestart={() => act(() => client.restart(panelId))}
-          onSignIn={() => act(() => client.signIn(panelId))}
-          onInstall={url => void window.electronAPI.openExternal(url)} />}
-        {snapshot.error && <div role="alert" className="chat-alert">{snapshot.error}</div>}
-        {view?.notice && <p role="status" className="chat-notice">{view.notice}</p>}
-        {view?.status === 'starting' && !snapshot.transcript && <p role="status" className="chat-notice">Starting {agentName}…</p>}
-        <Viewport viewer={viewer} loading={!snapshot.transcript} />
-        <div className="chat-composer-footer">
-          <ScrollToLatest />
-          {snapshot.pendingDelivery && <div className="chat-dock" role="status">
-            <span>Delivery is unconfirmed.</span>
-            <button type="button" className="chat-button chat-button-outline" disabled={!connected} onClick={() => void deliver(snapshot.pendingDelivery!, false)}>Check delivery</button>
-            <button type="button" className="chat-button chat-button-outline" disabled={!connected} onClick={() => void deliver(snapshot.pendingDelivery!, true)}>Retry same message</button>
-          </div>}
-          {view?.questions.map(question => <ChatQuestionCard key={question.id} question={question} disabled={disabled || busy} onAnswer={answer => act(() => client.answer(panelId, question.id, answer))} />)}
-          <AgentChatPermissions permissions={view?.permissions ?? []} disabled={disabled || busy} onAnswer={answerPermission} />
-          {!!view?.queue.length && <ul className="chat-queue" aria-label="Queued messages">
-            {view.queue.map(item => <li key={item.operationId}>
-              <span className="chat-queue-text">{item.text || 'Image'}</span>
-              <span className="chat-queue-label">Sends next</span>
-              <button type="button" className="chat-icon" aria-label="Remove from queue" title="Remove from queue" onClick={() => void act(() => client.unqueue(panelId, item.operationId))}><X className="h-3.5 w-3.5" /></button>
-            </li>)}
-          </ul>}
-          <ComposerPrimitive.Root className="chat-composer">
-            <div className="flex flex-wrap gap-2 empty:hidden"><ComposerPrimitive.Attachments components={{ Attachment }} /></div>
-            <ComposerPrimitive.Input readOnly={!!snapshot.pendingDelivery} aria-label={`Message ${agentName}`} placeholder={`Message ${agentName} — / commands`} rows={1} onChange={event => viewer.setDraft(event.target.value)} className="chat-input" />
-            <div className="chat-composer-actions">
-              <div className="chat-configs">
-                {view?.canAttachImages && <ComposerPrimitive.AddAttachment aria-label="Attach image" title="Attach image" className="chat-icon rounded-full"><Plus className="h-4 w-4" /></ComposerPrimitive.AddAttachment>}
-                {!!view?.controls.length && <AgentChatConfiguration controls={view.controls} disabled={disabled || view.status !== 'idle'} configure={(id, value) => void act(() => client.configure(panelId, id, value))} />}
-              </div>
-              {view?.status === 'working' || view?.status === 'blocked'
-                ? <div className="flex items-center gap-1">
-                  <ComposerPrimitive.Send aria-label="Queue message" title="Queue message (sends after this turn)" className="chat-icon"><ArrowUp className="h-4 w-4" /></ComposerPrimitive.Send>
-                  <button type="button" aria-label="Stop agent turn" title="Stop" className="chat-send" onClick={() => void act(() => client.cancel(panelId))}><Square className="h-3.5 w-3.5 fill-current" /></button>
-                </div>
-                : <ComposerPrimitive.Send aria-label="Send message" title="Send message" className="chat-send"><ArrowUp className="h-4 w-4" /></ComposerPrimitive.Send>}
-            </div>
-          </ComposerPrimitive.Root>
+    <ThreadPrimitive.Root className="agent-chat chat-tab flex h-full min-h-0 flex-col" data-status={view?.status ?? 'starting'}>
+      {view?.problem && <ChatProblem problem={view.problem} agent={agentName} busy={busy || !connected}
+        onRestart={() => void act(() => client.restart(panelId))}
+        onSignIn={() => void act(() => client.signIn(panelId))}
+        onInstall={url => void window.electronAPI?.openExternal(url)} />}
+      {snapshot.error && <div role="alert" className="chat-alert">{snapshot.error}</div>}
+      <ThreadPrimitive.Viewport aria-label="Conversation messages" role="region" className="chat-viewport" scrollToBottomOnRunStart={false}>
+        <div className="chat-column">
+          {(snapshot.transcript?.start ?? 0) > 0 && <button type="button" className="chat-button chat-button-outline self-center" disabled={snapshot.loadingEarlier} onClick={() => void viewer.loadEarlier()}>
+            {snapshot.loadingEarlier ? 'Loading…' : `Earlier messages (${snapshot.transcript?.start})`}
+          </button>}
+          {!snapshot.transcript && !view?.problem && <p role="status" className="chat-notice">{view?.status === 'starting' || !view ? `Starting ${agentName}…` : 'Loading conversation…'}</p>}
+          {turns.map(turn => <ChatTurnView key={turn.id} turn={turn} quiet={quiet} permissions={view?.permissions ?? []} actions={actions} />)}
+          {view?.notice && <p role="status" className="chat-notice">{view.notice}</p>}
         </div>
-      </ThreadPrimitive.Root>
-    </ChatPermissionContext.Provider>
+      </ThreadPrimitive.Viewport>
+      <div className="chat-composer-footer">
+        <ScrollToLatest />
+        {snapshot.pendingDelivery && <div className="chat-dock" role="status">
+          <span>Delivery is unconfirmed.</span>
+          <button type="button" className="chat-button chat-button-outline" disabled={!connected} onClick={() => void deliver(snapshot.pendingDelivery!, false)}>Check delivery</button>
+          <button type="button" className="chat-button chat-button-outline" disabled={!connected} onClick={() => void deliver(snapshot.pendingDelivery!, true)}>Retry same message</button>
+        </div>}
+        {view?.questions.map(question => <ChatQuestionCard key={question.id} question={question} disabled={disabled || busy} onAnswer={answer => void act(() => client.answer(panelId, question.id, answer))} />)}
+        {view?.permissions.map(permission => <ChatPermissionCard key={permission.id} permission={permission} agent={agentName} machine={machine && !machine.local ? machine.name : undefined}
+          disabled={disabled || busy} composerEmpty={!snapshot.draft.trim()} onAnswer={answerPermission} />)}
+        {!!view?.queue.length && <ul className="chat-queue" aria-label="Queued messages">
+          {view.queue.map(item => <li key={item.operationId}>
+            <span className="chat-queue-text">{item.text || 'Image'}</span>
+            <span className="chat-queue-label">Sends next</span>
+            <button type="button" className="chat-icon" aria-label="Remove from queue" title="Remove from queue" onClick={() => void act(() => client.unqueue(panelId, item.operationId))}><X className="h-3.5 w-3.5" /></button>
+          </li>)}
+        </ul>}
+        <ComposerPrimitive.Root className="chat-composer">
+          <ChatCommandMenu commands={commands} active={Math.min(commandIndex, commands.length - 1)} onPick={pickCommand} />
+          <div className="flex flex-wrap gap-2 empty:hidden"><ComposerPrimitive.Attachments components={{ Attachment }} /></div>
+          <ComposerPrimitive.Input readOnly={!!snapshot.pendingDelivery} aria-label={`Message ${agentName}`} placeholder={placeholder ?? `Message ${agentName} — / commands`} rows={1}
+            onChange={event => { viewer.setDraft(event.target.value); setCommandIndex(0); }}
+            onKeyDown={event => {
+              if (!activeCommand) return;
+              if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                event.preventDefault();
+                setCommandIndex(index => (index + (event.key === 'ArrowDown' ? 1 : commands.length - 1)) % commands.length);
+              } else if (event.key === 'Tab' || (event.key === 'Enter' && !event.shiftKey && snapshot.draft !== `/${activeCommand.name}`)) {
+                event.preventDefault();
+                pickCommand(activeCommand);
+              }
+            }}
+            className="chat-input" />
+          <div className="chat-composer-actions">
+            <div className="chat-configs">
+              {view?.canAttachImages && <ComposerPrimitive.AddAttachment aria-label="Attach image" title="Attach image" className="chat-icon rounded-full"><Plus className="h-4 w-4" /></ComposerPrimitive.AddAttachment>}
+              {!!view?.controls.length && <AgentChatConfiguration controls={view.controls} disabled={disabled || view.status !== 'idle'} configure={(id, value) => void act(() => client.configure(panelId, id, value))} />}
+              {machine && <span className="chat-machine"><MachineBadge machine={machine} /><span>{machine.local ? 'this computer' : 'remote'}</span></span>}
+            </div>
+            {working
+              ? <div className="flex items-center gap-1">
+                <ComposerPrimitive.Send aria-label="Queue message" title="Queue message (sends after this turn)" className="chat-icon"><ArrowUp className="h-4 w-4" /></ComposerPrimitive.Send>
+                <button type="button" aria-label="Stop agent turn" title="Stop" className="chat-send" onClick={() => void act(() => client.cancel(panelId))}><Square className="h-3.5 w-3.5 fill-current" /></button>
+              </div>
+              : <ComposerPrimitive.Send aria-label="Send message" title="Send message" className="chat-send"><ArrowUp className="h-4 w-4" /></ComposerPrimitive.Send>}
+          </div>
+        </ComposerPrimitive.Root>
+      </div>
+    </ThreadPrimitive.Root>
   </AssistantRuntimeProvider>;
 }

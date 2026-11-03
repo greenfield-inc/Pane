@@ -4,6 +4,7 @@ import { ErrorBoundary } from 'react-error-boundary';
 import { PanelLoadingFallback } from './PanelLoadingFallback';
 import { PausedTerminalView } from './PausedTabView';
 import { pausedMarkOf } from '../../../../shared/types/panels';
+import { ChatTabRoute } from '../chatTab/ChatTabRoute';
 import { isNotesEnabled, useConfigStore } from '../../stores/configStore';
 import { renderLog } from '../../utils/console';
 
@@ -18,7 +19,6 @@ const SetupTasksPanel = lazy(() => import('./SetupTasksPanel'));
 const BrowserPanel = lazy(() => import('./browser/BrowserPanel'));
 
 const NotesPanel = lazy(() => import('./notes/NotesPanel'));
-const ChatTabPanel = lazy(() => import('../chatTab/ChatTabPanel'));
 
 // Transient failures (a webview not ready yet after a pane switch) clear on remount,
 // so retry quietly a few times before showing the error.
@@ -105,7 +105,7 @@ export const PanelContainer: React.FC<PanelContainerProps> = React.memo(({
         return paused ? <PausedTerminalView panel={panel} mark={paused} /> : <TerminalPanel panel={panel} isActive={isActive} autoFocus={autoFocus} />;
       }
       case 'chat':
-        return <ChatTabPanel panelId={panel.id} client={window.electronAPI.chatTab} />;
+        return <ChatTabRoute panel={panel} />;
       case 'diff':
         return <DiffPanel panel={panel} isActive={isActive} sessionId={panel.sessionId} isMainRepo={isMainRepo} />;
       case 'explorer':

@@ -92,7 +92,7 @@ export async function createChatTab(services: AppServices, request: ChatTabCreat
   const state: ChatPanelState = { agent: request.agent, launch: request.launch ?? { kind: 'agent' }, cwd: session.worktreePath, status: 'starting' };
   if (request.initialInput) state.initialInput = request.initialInput;
   const title = request.title ?? (request.launch?.kind === 'profile' ? request.launch.profile.split('/').pop() ?? AGENT_TITLES[request.agent] : AGENT_TITLES[request.agent]);
-  const panel = await panelManager.createPanel({ sessionId: request.sessionId, type: 'chat', title, initialState: { customState: state }, activate: request.activate });
+  const panel = await panelManager.createPanel({ sessionId: request.sessionId, type: 'chat', title, initialState: { customState: state }, activate: request.activate, announceActivation: request.activate !== false });
   void getChatTabManager().ensure(panel.id).catch(error => console.warn(`[ChatTabs] ${panel.id} did not start: ${error instanceof Error ? error.message : String(error)}`));
   return { panelId: panel.id };
 }
