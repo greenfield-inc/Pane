@@ -35,7 +35,7 @@ export function FindBarView({ panelId, className, bar }: FindBarProps & { bar: F
   const canStep = !bar.noText && bar.result.total > 0;
 
   const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-    const action = findBarKeyAction(event);
+    const action = findBarKeyAction({ key: event.key, shiftKey: event.shiftKey, isComposing: event.nativeEvent.isComposing });
     if (!action) return;
     event.preventDefault();
     // The tab underneath (terminal, Logs) must not see these keys.

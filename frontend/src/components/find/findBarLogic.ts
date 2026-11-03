@@ -1,4 +1,3 @@
-import type { KeyboardEvent } from 'react';
 import type { FindBarState } from './findController';
 
 export const NO_TEXT_MESSAGE = 'No text to search in this tab';
@@ -6,8 +5,8 @@ export const NO_TEXT_MESSAGE = 'No text to search in this tab';
 export type FindBarKeyAction = 'next' | 'prev' | 'close' | null;
 
 /** Enter and Shift+Enter move between matches; Esc closes. */
-export function findBarKeyAction(event: Pick<KeyboardEvent, 'key' | 'shiftKey' | 'nativeEvent'>): FindBarKeyAction {
-  if (event.nativeEvent?.isComposing) return null;
+export function findBarKeyAction(event: { key: string; shiftKey: boolean; isComposing: boolean }): FindBarKeyAction {
+  if (event.isComposing) return null;
   if (event.key === 'Enter') return event.shiftKey ? 'prev' : 'next';
   if (event.key === 'Escape') return 'close';
   return null;

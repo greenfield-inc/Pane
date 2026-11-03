@@ -57,7 +57,7 @@ describe('FindBar', () => {
 });
 
 describe('findBarKeyAction', () => {
-  const key = (k: string, shiftKey = false) => ({ key: k, shiftKey, nativeEvent: { isComposing: false } as KeyboardEvent });
+  const key = (k: string, shiftKey = false) => ({ key: k, shiftKey, isComposing: false });
 
   it('maps Enter, Shift+Enter and Esc', () => {
     expect(findBarKeyAction(key('Enter'))).toBe('next');
@@ -67,7 +67,7 @@ describe('findBarKeyAction', () => {
   });
 
   it('ignores Enter while an IME is composing', () => {
-    expect(findBarKeyAction({ key: 'Enter', shiftKey: false, nativeEvent: { isComposing: true } as KeyboardEvent })).toBeNull();
+    expect(findBarKeyAction({ key: 'Enter', shiftKey: false, isComposing: true })).toBeNull();
   });
 });
 

@@ -34,7 +34,7 @@ const FIND_EMPTY_ATTRIBUTE = 'data-find-empty';
 const highlightsByTab = new Map<string, { all: Range[]; current: Range | null }>();
 
 function syncHighlights(): void {
-  if (typeof CSS === 'undefined' || !('highlights' in CSS)) return;
+  if (!('CSS' in globalThis) || !('highlights' in CSS)) return;
   const all: Range[] = [];
   const current: Range[] = [];
   for (const entry of highlightsByTab.values()) {
@@ -71,9 +71,7 @@ function blockOf(element: Element, root: Element, cache: Map<Element, Element>):
 function isRendered(element: Element, cache: Map<Element, boolean>): boolean {
   const cached = cache.get(element);
   if (cached !== undefined) return cached;
-  const rendered = typeof element.checkVisibility === 'function'
-    ? element.checkVisibility()
-    : true;
+  const rendered = 'checkVisibility' in element ? element.checkVisibility() : true;
   cache.set(element, rendered);
   return rendered;
 }

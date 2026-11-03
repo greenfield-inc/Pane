@@ -16,11 +16,16 @@ const session = {
   toolType: 'none', archived: false,
 };
 
-function panel(id: string, type: string, title: string, position: number, active: boolean, customState: object) {
+interface PanelCustomState {
+  isInitialized?: boolean;
+  filePath?: string;
+}
+
+function panel(id: string, type: string, title: string, position: number, active: boolean, customState: PanelCustomState, permanent = false) {
   return {
     id, sessionId: session.id, type, title,
     state: { isActive: active, hasBeenViewed: true, customState },
-    metadata: { createdAt: new Date(position).toISOString(), lastActiveAt: new Date(position).toISOString(), position },
+    metadata: { createdAt: new Date(position).toISOString(), lastActiveAt: new Date(position).toISOString(), position, permanent },
   };
 }
 
@@ -38,9 +43,11 @@ async function openPane(page: Page) {
 const findBar = (page: Page) => page.getByRole('search', { name: 'Find in tab' });
 
 test('terminal: Cmd+F finds every match in scrollback and Esc gives the keys back to the shell', async ({ page }) => {
-  const terminal = panel('find-terminal', 'terminal', 'Terminal', 0, true, { isInitialized: true });
+  // The mock workspace needs its permanent bottom terminal to render tabs.
+  const bottom = panel('find-bottom-terminal', 'terminal', 'Bottom Terminal', 0, false, { isInitialized: true }, true);
+  const terminal = panel('find-terminal', 'terminal', 'Terminal', 1, true, { isInitialized: true });
   await installElectronApiMock(page, {
-    initialProjects: [project], initialSessions: [session], initialPanels: [terminal],
+    initialProjects: [project], initialSessions: [session], initialPanels: [bottom, terminal],
     initialTerminalStates: { [terminal.id]: { scrollbackBuffer: scrollback } },
     activeProjectId: project.id,
   });
@@ -49,11 +56,18 @@ test('terminal: Cmd+F finds every match in scrollback and Esc gives the keys bac
   await expect(tab.getByRole('status', { name: 'Loading terminal' })).toHaveCount(0);
   await tab.locator('.xterm-helper-textarea').first().focus();
 
-  await page.keyboard.press('ControlOrMeta+f');
+  // The terminal's find adapter attaches once xterm and its search addon load.
+  await expect(async () => {
+    await page.keyboard.press('ControlOrMeta+f');
+    await expect(findBar(page)).toBeVisible({ timeout: 500 });
+  }).toPass();
   const input = findBar(page).getByRole('textbox', { name: 'Find' });
   await expect(input).toBeFocused();
   await input.fill('needle');
   await expect(findBar(page)).toContainText('of 12');
+  // The search addon re-runs 200 ms after output is parsed; let the restored
+  // scrollback's re-search land before stepping.
+  await page.waitForTimeout(400);
 
   const counter = findBar(page).locator('[aria-live="polite"]');
   const before = await counter.textContent();

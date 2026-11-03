@@ -1,7 +1,8 @@
 import { findOffsets } from '../../find/findText';
 
 // CSI sequences (colours, cursor moves) and OSC sequences (titles, links).
-const ANSI_PATTERN = /\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
+// oxlint-disable-next-line eslint/no-control-regex -- matching terminal escape bytes is the point
+const ANSI_PATTERN = /\u001b\[[0-?]*[ -/]*[@-~]|\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)/g;
 
 export function stripAnsi(text: string): string {
   return text.replace(ANSI_PATTERN, '');
