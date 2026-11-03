@@ -3,8 +3,9 @@ import { PaneError } from '../../../../shared/paneError';
 import { getAppDirectory } from '../../utils/appDirectory';
 import { getPaneEventSink } from '../../core/runtime';
 import { panelManager } from '../panelManager';
-import { ChatTabManager, type ChatTabStore } from './manager';
-import { AgentChatLauncher, type ChatLaunchContext, type ChatProfileResolver } from './launch';
+import { app } from 'electron';
+import { ChatTabManager, type ChatTabLauncher, type ChatTabStore } from './manager';
+import { AgentChatLauncher, chatTabEnv, type ChatLaunchContext, type ChatProfileResolver } from './launch';
 import { chatTabSecrets } from './secrets';
 import { decodeChatPanelState } from './state';
 
@@ -28,10 +29,27 @@ export function configureChatTabs(options: { context: ChatLaunchContext; profile
   profiles = options.profiles;
 }
 
+/**
+ * Development and end-to-end tests only: PANE_CHAT_TEST_AGENT names a scripted
+ * ACP agent (testing/scriptedAgent.mjs) that chat tabs run instead of the real
+ * adapters, so journeys never touch a real Claude or Codex account. A packaged
+ * Pane ignores it.
+ */
+function scriptedAgentLauncher(): ChatTabLauncher | undefined {
+  const script = process.env.PANE_CHAT_TEST_AGENT;
+  if (!script || app.isPackaged) return undefined;
+  return {
+    resolve: async (panel, state) => {
+      const env = chatTabEnv(panel, state);
+      return { command: { executable: process.execPath, args: [script], cwd: state.cwd, env: { ...env, ELECTRON_RUN_AS_NODE: '1', SCRIPTED_AGENT_STORE: path.join(getAppDirectory(), 'scripted-agent') } } };
+    },
+  };
+}
+
 export function getChatTabManager(): ChatTabManager {
   manager ??= new ChatTabManager({
     store,
-    launcher: new AgentChatLauncher({
+    launcher: scriptedAgentLauncher() ?? new AgentChatLauncher({
       secrets: chatTabSecrets,
       context: { unsupportedHost: panel => context.unsupportedHost(panel) },
       profiles: { resolve: (panel, state, env) => {

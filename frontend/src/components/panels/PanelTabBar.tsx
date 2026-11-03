@@ -6,7 +6,10 @@ import { useHotkey } from '../../hooks/useHotkey';
 import { PanelTabBarProps, PanelCreateOptions } from '../../types/panelComponents';
 import { ToolPanel, ToolPanelType, PANEL_CAPABILITIES } from '../../../../shared/types/panels';
 import { useSession } from '../../contexts/SessionContext';
-import { isNotesEnabled, useConfigStore } from '../../stores/configStore';
+import { isChatTabsEnabled, isNotesEnabled, useConfigStore } from '../../stores/configStore';
+import { showActionError } from '../../stores/errorStore';
+
+const CHAT_AGENTS = [{ id: 'claude', title: 'Claude' }, { id: 'codex', title: 'Codex' }] as const;
 import { formatKeyDisplay } from '../../utils/hotkeyUtils';
 import { useHotkeyStore } from '../../stores/hotkeyStore';
 import { Tooltip } from '../ui/Tooltip';
@@ -99,6 +102,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
   const session = sessionContext?.session;
   const [resolvedRunScript, setResolvedRunScript] = useState<{ command: string; source: string } | null>(null);
   const { config, fetchConfig, updateConfig } = useConfigStore();
+  const chatTabs = isChatTabsEnabled(config);
   const [showDropdown, setShowDropdown] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const addToolButtonRef = useRef<HTMLButtonElement>(null);
@@ -577,7 +581,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
             };
             const menuItemClass = "flex items-center gap-2 w-full h-7 px-2.5 rounded text-[13px] text-text-secondary hover:bg-bg-hover hover:text-text-primary focus:bg-bg-hover focus:text-text-primary focus:outline-none text-left";
             const separator = <hr className="my-1 border-t border-border-primary" />;
-            const otherPanelTypes = availablePanelTypes.filter(t => t !== 'terminal' && t !== 'explorer' && t !== 'browser');
+            const otherPanelTypes = availablePanelTypes.filter(t => t !== 'terminal' && t !== 'chat' && t !== 'explorer' && t !== 'browser');
             const groupLabel = (label: string) => (
               <div role="presentation" className="px-2.5 pt-1.5 pb-0.5 text-[10px] font-semibold uppercase tracking-wide text-text-muted">{label}</div>
             );
@@ -597,6 +601,44 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
                 if (index >= 0 && index !== focusedDropdownIndex) setFocusedDropdownIndex(index);
               }}
             >
+              {/* Chat tabs (D-15): agents open as chats first; terminal agents and a shell follow under "In a terminal". */}
+              {chatTabs && session && (
+                <>
+                  {groupLabel('New tab')}
+                  {CHAT_AGENTS.map(agent => (
+                    <button
+                      key={`chat-${agent.id}`}
+                      type="button"
+                      ref={itemRef()}
+                      role="menuitem"
+                      className={menuItemClass}
+                      onClick={() => {
+                        setShowDropdown(false);
+                        void window.electronAPI.chatTab.create({ sessionId: session.id, agent: agent.id }).catch(error => showActionError(`Could not open a ${agent.title} chat`, error));
+                      }}
+                    >
+                      {getCliBrandIcon(agent.id, 'w-3.5 h-3.5 flex-shrink-0')}
+                      <span className="truncate">{agent.title}</span>
+                    </button>
+                  ))}
+                  {separator}
+                  {groupLabel('In a terminal')}
+                  {availablePanelTypes.includes('terminal') && agentPresets.map(preset => (
+                    <button
+                      key={`terminal-${preset.id}`}
+                      type="button"
+                      ref={itemRef()}
+                      role="menuitem"
+                      className={menuItemClass}
+                      onClick={() => handleAddPanel('terminal', { initialCommand: preset.command, title: preset.title })}
+                    >
+                      <Terminal className="w-3.5 h-3.5 flex-shrink-0" />
+                      <span className="truncate">{preset.title} in Terminal</span>
+                      {shortcut(preset.hotkeyId)}
+                    </button>
+                  ))}
+                </>
+              )}
               {/* Terminal - plain terminal */}
               {availablePanelTypes.includes('terminal') && (
                 <button
@@ -640,14 +682,14 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
                   <span className="truncate">Browser</span>
                 </button>
               )}
-              {availablePanelTypes.includes('terminal') && agentPresets.length > 0 && (
+              {!chatTabs && availablePanelTypes.includes('terminal') && agentPresets.length > 0 && (
                 <>
                   {separator}
                   {groupLabel('Presets')}
                 </>
               )}
               {/* Built-in agents */}
-              {availablePanelTypes.includes('terminal') && agentPresets.map(preset => (
+              {!chatTabs && availablePanelTypes.includes('terminal') && agentPresets.map(preset => (
                 <button
                   key={preset.id}
                   type="button"

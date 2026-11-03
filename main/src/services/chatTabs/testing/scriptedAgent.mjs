@@ -1,3 +1,4 @@
+/* global process, setTimeout */
 // A scripted ACP agent for chat tab tests. It never calls a model: each prompt's
 // first word picks a behaviour. Conversations persist in SCRIPTED_AGENT_STORE so a
 // new process can load (replay) them, as claude-agent-acp and codex-acp do.

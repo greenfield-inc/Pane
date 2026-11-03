@@ -103,7 +103,8 @@ export class ChatTabManager {
   ensure(panelId: string): Promise<void> {
     const tab = this.tab(panelId);
     if (tab.runtime?.isAlive()) return Promise.resolve();
-    tab.starting ??= this.start(panelId, tab).finally(() => { tab.starting = undefined; });
+    // Publish after the start settles: while it runs, every view says `starting`.
+    tab.starting ??= this.start(panelId, tab).finally(() => { tab.starting = undefined; this.publish(panelId); this.drain(panelId); });
     return tab.starting;
   }
 
@@ -374,7 +375,8 @@ export class ChatTabManager {
       canAttachImages: tab.runtime?.supportsImages() ?? false,
       controls: runtime?.controls() ?? [], commands: runtime?.commands() ?? [],
       permissions, questions, queue: state.queue ?? [],
-      transcript: tab.transcript && limit > 0 ? tab.transcript.snapshot(limit) : undefined,
+      // While history replays the window is incomplete; viewers fetch it once the tab has started.
+      transcript: tab.transcript && limit > 0 && !tab.loading && !tab.starting ? tab.transcript.snapshot(limit) : undefined,
       messageCount: tab.transcript?.count() ?? 0,
     };
   }

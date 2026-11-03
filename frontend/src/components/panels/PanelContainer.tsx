@@ -18,6 +18,7 @@ const SetupTasksPanel = lazy(() => import('./SetupTasksPanel'));
 const BrowserPanel = lazy(() => import('./browser/BrowserPanel'));
 
 const NotesPanel = lazy(() => import('./notes/NotesPanel'));
+const ChatTabPanel = lazy(() => import('../chatTab/ChatTabPanel'));
 
 // Transient failures (a webview not ready yet after a pane switch) clear on remount,
 // so retry quietly a few times before showing the error.
@@ -103,6 +104,8 @@ export const PanelContainer: React.FC<PanelContainerProps> = React.memo(({
         const paused = pausedMarkOf(panel);
         return paused ? <PausedTerminalView panel={panel} mark={paused} /> : <TerminalPanel panel={panel} isActive={isActive} autoFocus={autoFocus} />;
       }
+      case 'chat':
+        return <ChatTabPanel panelId={panel.id} client={window.electronAPI.chatTab} />;
       case 'diff':
         return <DiffPanel panel={panel} isActive={isActive} sessionId={panel.sessionId} isMainRepo={isMainRepo} />;
       case 'explorer':

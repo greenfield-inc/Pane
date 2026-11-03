@@ -1,0 +1,21 @@
+/* Chat tab additions on top of agentChat.css. Theme tokens only (--chat-*). */
+.chat-problem { margin:12px 16px 0; padding:12px 14px; border:1px solid var(--chat-border); border-radius:12px; background:color-mix(in oklab,var(--chat-destructive) 6%,transparent); font-size:14px; }
+.chat-problem-title { font-weight:600; }
+.chat-problem-next { margin-top:4px; color:var(--chat-muted-foreground); }
+.chat-problem-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+.chat-notice { margin:8px auto 0; width:100%; max-width:var(--thread-max-width); padding:0 24px; font-size:13px; color:var(--chat-muted-foreground); }
+.chat-dock { display:flex; flex-wrap:wrap; align-items:center; gap:8px; font-size:13px; }
+.chat-queue { display:flex; flex-direction:column; gap:4px; }
+.chat-queue li { display:flex; align-items:center; gap:8px; padding:6px 6px 6px 12px; border:1px dashed var(--chat-border); border-radius:12px; font-size:13px; }
+.chat-queue-text { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.chat-queue-label { flex-shrink:0; font-size:12px; color:var(--chat-muted-foreground); }
+.chat-question { display:flex; flex-direction:column; gap:12px; padding:12px 14px; border:1px solid var(--chat-border); border-radius:12px; background:color-mix(in oklab,var(--chat-muted) 40%,transparent); font-size:14px; }
+.chat-question-message { font-weight:600; }
+.chat-question-field { display:flex; flex-direction:column; gap:6px; min-width:0; border:0; padding:0; margin:0; }
+.chat-question-field legend { margin-bottom:6px; }
+.chat-question-label { display:flex; flex-direction:column; font-weight:500; }
+.chat-question-hint { display:block; font-weight:400; font-size:12px; color:var(--chat-muted-foreground); }
+.chat-question-choice { display:flex; align-items:flex-start; gap:8px; cursor:pointer; }
+.chat-question-choice input { margin-top:4px; accent-color:var(--chat-primary); }
+.chat-question-input { width:100%; padding:6px 10px; border:1px solid var(--chat-border); border-radius:8px; background:var(--chat-background); color:var(--chat-foreground); }
+.chat-question-actions { display:flex; gap:8px; }

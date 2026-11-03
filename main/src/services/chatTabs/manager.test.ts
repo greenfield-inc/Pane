@@ -60,6 +60,14 @@ describe('chat tab manager', () => {
     expect(followed.messages).toEqual(view.transcript!.messages);
   });
 
+  it('tells viewers when it has finished starting, so they fetch the replayed history', async () => {
+    const { manager, store, directory, states } = harness();
+    store.add('p1', newTab(directory));
+    expect(manager.view('p1').transcript).toBeUndefined();
+    await manager.ensure('p1');
+    expect(states().at(-1)?.status).toBe('idle');
+  });
+
   it('queues a message sent while the agent works and sends it next', async () => {
     const { manager, store, directory } = harness();
     store.add('p1', newTab(directory));
