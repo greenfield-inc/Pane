@@ -50,7 +50,7 @@ const FALLBACK_WARNING: Rgb = { r: 210, g: 153, b: 34 };
 const FALLBACK_BACKGROUND: Rgb = { r: 17, g: 24, b: 39 };
 
 /** Highlight colours from the current theme's tokens. */
-export function readFindDecorationColors(): ISearchDecorationOptions {
+function readFindDecorationColors(): ISearchDecorationOptions {
   const style = getComputedStyle(document.documentElement);
   const warning = parseCssColor(style.getPropertyValue('--color-status-warning')) ?? FALLBACK_WARNING;
   const background = parseCssColor(style.getPropertyValue('--color-terminal-bg')) ?? FALLBACK_BACKGROUND;

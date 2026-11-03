@@ -65,7 +65,7 @@ function focusedGroupActivePanelId(): string | null {
 }
 
 /** The tab Pane's find acts on right now, or null to leave the keys alone. */
-export function resolveFocusedFindPanelId(): string | null {
+function resolveFocusedFindPanelId(): string | null {
   const activeElement = document.activeElement;
   const active = activeElement && activeElement !== document.body && activeElement !== document.documentElement
     ? activeElement

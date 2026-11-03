@@ -10,7 +10,7 @@ export interface TextSegment {
   breakBefore: boolean;
 }
 
-export interface TextPosition {
+interface TextPosition {
   segment: number;
   offset: number;
 }
@@ -25,7 +25,7 @@ export interface TextMatch {
  * Lower-case one character at a time so offsets in the folded string stay
  * aligned with the original (some characters change length when lowered).
  */
-export function foldCase(text: string): string {
+function foldCase(text: string): string {
   let folded = '';
   for (const char of text) {
     const lower = char.toLocaleLowerCase();

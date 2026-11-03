@@ -52,7 +52,7 @@ function syncHighlights(): void {
   }
 }
 
-export function pageTextFindMode(root: Element | null): FindMode {
+function pageTextFindMode(root: Element | null): FindMode {
   if (!root) return 'text';
   if (root.querySelector('.monaco-editor')) return 'native';
   if (root.querySelector(`[${FIND_EMPTY_ATTRIBUTE}]`)) return 'none';
@@ -81,7 +81,7 @@ interface CollectedText {
   segments: TextSegment[];
 }
 
-export function collectPageText(root: Element): CollectedText {
+function collectPageText(root: Element): CollectedText {
   const nodes: Text[] = [];
   const segments: TextSegment[] = [];
   const blockCache = new Map<Element, Element>();

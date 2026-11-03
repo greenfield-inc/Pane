@@ -54,7 +54,7 @@ interface FindStore {
   bars: Record<string, FindBarState>;
 }
 
-export const useFindStore = create<FindStore>(() => ({ bars: {} }));
+const useFindStore = create<FindStore>(() => ({ bars: {} }));
 
 const targets = new Map<string, FindTarget>();
 
