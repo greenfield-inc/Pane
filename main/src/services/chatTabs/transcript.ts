@@ -47,6 +47,8 @@ export class ChatTranscript {
 
   count(): number { return this.base + this.residentMessages.length; }
   resident(): number { return this.residentMessages.length; }
+  /** Estimated bytes of the messages held in memory. */
+  residentSize(): number { return this.residentBytes; }
   currentRevision(): number { return this.revision; }
 
   snapshot(limit: number): ChatTabTranscript {

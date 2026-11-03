@@ -67,4 +67,19 @@ describe('chat tab transcript', () => {
     expect(older.map(message => message.parts[0].type === 'text' ? message.parts[0].text.slice(0, 10) : '')).toEqual(['question 0', 'answer 0 x']);
     expect(transcript.history(11000, 2).map(message => message.role)).toEqual(['user', 'assistant']);
   });
+
+  it('replays the largest session seen (6,000 messages, 45 MB) inside a bounded memory window', () => {
+    const transcript = new ChatTranscript('panel', 1, { spoolFile: spool() });
+    const reply = 'y'.repeat(7_500);
+    const started = Date.now();
+    for (let index = 0; index < 3000; index++) {
+      transcript.accept({ sessionUpdate: 'user_message_chunk', content: { type: 'text', text: `question ${index}` } });
+      transcript.accept({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: reply } });
+    }
+    expect(transcript.count()).toBe(6000);
+    // Under the 64 MB per-tab budget (J16), counting text as UTF-16 in memory.
+    expect(transcript.residentSize()).toBeLessThanOrEqual(24 * 1024 * 1024);
+    expect(transcript.history(10, 2)).toHaveLength(2);
+    expect(Date.now() - started).toBeLessThan(10_000);
+  });
 });
