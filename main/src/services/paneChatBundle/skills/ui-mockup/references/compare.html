@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Round 2 compared</title>
+<style>
+:root{--bg:#f6f5fb;--ink:#1d1b2e;--mut:#6b6880;--line:#e2e0ec;--acc:#6658c8;--pick:#e9e6fb;--cols:170px 1fr 1fr 1fr 1fr}
+@media (prefers-color-scheme:dark){:root{--bg:#15141c;--ink:#ecebf3;--mut:#a3a0b5;--line:#2d2b3a;--acc:#a99ef0;--pick:#25223a}}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,sans-serif}
+header,section{display:grid;grid-template-columns:var(--cols);gap:14px;padding:14px 20px;border-bottom:1px solid var(--line)}
+header{position:sticky;top:0;z-index:1;background:var(--bg);align-items:end}
+h1{font-size:18px;margin:0} h2{font-size:15px;margin:0} b{font-size:15px}
+small{display:block;font-size:13px;color:var(--mut)} .rec{color:var(--acc);font-weight:600}
+figure{margin:0} .earlier{background:var(--pick);border-radius:10px;padding:6px}
+img{display:block;width:100%;border:1px solid var(--line);border-radius:10px;background:#fff}
+figcaption{font-size:13px;color:var(--mut);margin-top:6px} a{color:inherit}
+@media (max-width:700px){header,section{grid-template-columns:1fr} header{position:static}}
+</style>
+</head>
+<body>
+<!-- One "Round N pick" column per earlier round, each with its own --cols track. Round 1 has none. -->
+<header>
+  <h1>Round 2<small>Pick per row. Click an image for full size.</small></h1>
+  <div><b>Round 1 pick</b><small>What this round started from</small></div>
+  <div><b>1 · Option name</b><small class="rec">Recommended · smallest build</small></div>
+  <div><b>2 · Option name</b><small>+ about half a day</small></div>
+  <div><b>3 · Option name</b><small>+ about a day</small></div>
+</header>
+<section>
+  <h2>Screen or state</h2>
+  <figure class="earlier"><a href="../round-1/shots/option2-screen.png"><img src="../round-1/shots/option2-screen.png" alt="Round 1 pick, option 2: Screen or state" loading="lazy"></a><figcaption>Round 1 pick · option 2</figcaption></figure>
+  <figure><a href="shots/option1-screen.png"><img src="shots/option1-screen.png" alt="Option 1: Screen or state" loading="lazy"></a><figcaption>1 · One line on what differs</figcaption></figure>
+  <figure><a href="shots/option2-screen.png"><img src="shots/option2-screen.png" alt="Option 2: Screen or state" loading="lazy"></a><figcaption>2 · One line on what differs</figcaption></figure>
+  <figure><a href="shots/option3-screen.png"><img src="shots/option3-screen.png" alt="Option 3: Screen or state" loading="lazy"></a><figcaption>3 · One line on what differs</figcaption></figure>
+</section>
+</body>
+</html>
