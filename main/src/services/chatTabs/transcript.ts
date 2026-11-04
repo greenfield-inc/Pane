@@ -1,4 +1,4 @@
-import { appendFileSync, closeSync, mkdirSync, openSync, readSync, rmSync } from 'fs';
+import { appendFileSync, closeSync, mkdirSync, openSync, readSync, rmSync, truncateSync } from 'fs';
 import path from 'path';
 import type { ContentBlock, SessionUpdate } from '@agentclientprotocol/sdk';
 import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
@@ -34,6 +34,8 @@ export class ChatTranscript {
   private residentBytes = 0;
   private readonly offsets: Array<{ at: number; length: number }> = [];
   private spoolBytes = 0;
+  /** The spool file could not be repaired after a failed write; messages stay in memory until the next start. */
+  private spoolBroken = false;
   private readonly indexes = new Map<string, number>();
   private chunk?: { id: string; role: AgentChatMessage['role'] };
   private echo?: { text: string; received: string };
@@ -212,16 +214,25 @@ export class ChatTranscript {
 
   private evict(): void {
     // Keep at least the newest message resident, so a streaming reply is never paged out mid-turn.
-    while (this.residentMessages.length > 1 && (this.residentMessages.length > this.windowMessages || this.residentBytes > this.windowBytes)) {
-      const message = this.residentMessages.shift()!;
-      this.residentBytes -= this.residentSizes.shift()!;
-      const line = `${JSON.stringify(message)}\n`;
+    while (!this.spoolBroken && this.residentMessages.length > 1 && (this.residentMessages.length > this.windowMessages || this.residentBytes > this.windowBytes)) {
+      const line = `${JSON.stringify(this.residentMessages[0])}\n`;
       const length = Buffer.byteLength(line);
-      appendFileSync(this.options.spoolFile, line, { mode: 0o600 });
+      // Written before it leaves memory: a failed write keeps the message resident and the indexes unchanged.
+      try { appendFileSync(this.options.spoolFile, line, { mode: 0o600 }); }
+      catch (error) { this.spoolFailed(error); return; }
+      this.residentMessages.shift();
+      this.residentBytes -= this.residentSizes.shift()!;
       this.offsets.push({ at: this.spoolBytes, length });
       this.spoolBytes += length;
       this.base++;
     }
+  }
+
+  /** Cuts a partly written line off, then tries again on the next eviction; holds everything in memory if even that fails. */
+  private spoolFailed(error: unknown): void {
+    console.warn(`[ChatTabs] Older messages of ${this.panelId} could not be written to disk; they stay in memory: ${error instanceof Error ? error.message : String(error)}`);
+    try { truncateSync(this.options.spoolFile, this.spoolBytes); }
+    catch { this.spoolBroken = true; }
   }
 
   private readSpool(start: number, end: number): AgentChatMessage[] {

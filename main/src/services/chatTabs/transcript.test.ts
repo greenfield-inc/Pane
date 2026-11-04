@@ -1,7 +1,7 @@
-import { mkdtempSync, rmSync } from 'fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { applyChatTabEvent, type ChatTabEvent } from '../../../../shared/types/chatTab';
 import { ChatTranscript } from './transcript';
 
@@ -66,6 +66,19 @@ describe('chat tab transcript', () => {
     const older = transcript.history(2, 4);
     expect(older.map(message => message.parts[0].type === 'text' ? message.parts[0].text.slice(0, 10) : '')).toEqual(['question 0', 'answer 0 x']);
     expect(transcript.history(11000, 2).map(message => message.role)).toEqual(['user', 'assistant']);
+  });
+
+  it('keeps a message in memory, with its index, when writing it to disk fails', () => {
+    const file = spool();
+    const transcript = new ChatTranscript('panel', 1, { spoolFile: file, windowMessages: 2, windowBytes: 64 * 1024 * 1024 });
+    // A directory where the spool file should be: every write fails, as on a full or failing disk.
+    mkdirSync(file, { recursive: true });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    for (let index = 0; index < 4; index++) transcript.userMessage(`op-${index}`, [{ type: 'text', text: `question ${index}` }]);
+    warn.mockRestore();
+    expect(transcript.count()).toBe(4);
+    expect(transcript.history(4, 4).map(message => message.parts[0].type === 'text' ? message.parts[0].text : '')).toEqual(['question 0', 'question 1', 'question 2', 'question 3']);
+    expect(transcript.userMessage('op-0', [{ type: 'text', text: ' again' }])[0]?.index).toBe(0);
   });
 
   it('replays the largest session seen (6,000 messages, 45 MB) inside a bounded memory window', () => {
