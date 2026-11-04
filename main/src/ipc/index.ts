@@ -127,7 +127,7 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
   registerWorkspaceAccessHandlers(ipcMain, services, commandRegistry);
   registerRunpaneHandlers(ipcMain, services, commandRegistry);
   registerDesktopAlertHandlers(ipcMain, services);
-  registerNotifyHandlers(ipcMain, services, commandRegistry);
+  services.notifyService = registerNotifyHandlers(ipcMain, services, commandRegistry);
   registerPaneLinkHandler(commandRegistry, {
     repoExists: (repoId) => Boolean(services.databaseService.getProject(repoId)),
     navigate: (target) => {
