@@ -60,6 +60,19 @@ test('OpenCode creation sends the API payload and keeps the named Session agent 
   expect(await page.evaluate(() => window.selectionTest.transportCalls().filter(call => call.method === 'orchestrationSessions.select').map(call => call.payload))).toEqual([{ sessionId: 'b' }, { sessionId: 'created' }]);
 });
 
+test('a refused Session create leaves the saved Session defaults unchanged', async ({ page }) => {
+  await page.goto('/renderer-tests/selection.html?compact');
+  await page.getByRole('button', { name: 'New Session', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Create Session', exact: true });
+  await dialog.getByTestId('create-session-agent-opencode').click();
+  await dialog.getByText('Launch command and behavior', { exact: true }).click();
+  await dialog.getByLabel('Launch command', { exact: true }).selectOption('custom');
+  await dialog.getByLabel('Custom command and arguments').fill('bash -c opencode');
+  await dialog.getByRole('button', { name: 'Create Session', exact: true }).click();
+  await expect(dialog.getByText(/OpenCode Session launch was refused/)).toBeVisible();
+  expect(await page.evaluate(() => window.selectionTest.transportCalls().filter(call => call.method === 'config.update'))).toEqual([]);
+});
+
 test('OpenCode default saves through the production settings persistence and reloads from mock config', async ({ page }) => {
   await page.goto('/renderer-tests/selection.html?settings');
   const agents = page.getByRole('radiogroup', { name: 'Default Pane Chat agent', exact: true });

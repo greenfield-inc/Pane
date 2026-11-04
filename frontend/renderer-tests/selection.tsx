@@ -58,6 +58,10 @@ const api = {
   invoke: (channel: string, id: string) => channel === 'panels:shouldAutoCreate' ? Promise.resolve(false) : channel === 'panels:get-layout' ? wait('layout', id) : channel === 'ports:list' ? Promise.resolve({ host: 'test', ports: [] }) : defaultMethod(),
   events: new Proxy({}, { get: (_target, key) => (listener: (event: RuntimeEvent) => void) => { const listeners = handlers.get(key) ?? new Set(); listeners.add(listener); handlers.set(key, listeners); return () => { listeners.delete(listener); }; } }),
   orchestrationSessions: { create: (input: OrchestrationSessionCreateInput) => {
+    if (input.launchCommand === 'bash -c opencode') {
+      transportCalls.push({ method: 'orchestrationSessions.create', payload: input });
+      return Promise.resolve({ success: false, error: 'OpenCode Session launch was refused' });
+    }
     records.push({ ...records[0], id: 'created', internalSessionId: 'internal-created', name: input.name, agent: input.agent ?? 'claude', panelIds: { claude: 'claude-created', codex: 'codex-created', cursor: 'cursor-created', opencode: 'opencode-created' }, associations: [] });
     const data = sessionView('created');
     transportCalls.push({ method: 'orchestrationSessions.create', payload: input, data });
