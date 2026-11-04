@@ -713,7 +713,7 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void
     }
   });
 
-  it('starts a new OpenCode conversation bare and saves the id OpenCode prints when it exits', async () => {
+  it('starts a new OpenCode conversation bare and saves only the id OpenCode prints when it exits', async () => {
     vi.useFakeTimers();
     try {
       const panel = makeOpenCodePanel('opencode-capture');
@@ -723,8 +723,13 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void
       expect(handle.written.join('')).toContain('opencode --auto');
       expect(handle.written.join('')).not.toContain('--session');
 
-      // OpenCode 1.18's exit screen, as its TUI prints it.
-      handle.emit('\r\n  \x1b[90mSession   \x1b[0m\x1b[1mFix the build\x1b[0m\r\n  \x1b[90mContinue  \x1b[0m\x1b[1mopencode -s ses_e579a29faffeH5iFWLRgE503S4\x1b[0m\r\n\r\n$ ');
+      // Inside the TUI, another tab's exit line (read with `runpane panels read`) is only text.
+      handle.emit('\x1b[?1049h\x1b[2J  the other tab printed:\r\n  Continue  opencode -s ses_OtherTab123\r\n');
+      await vi.advanceTimersByTimeAsync(100);
+      expect(lastPersisted?.customState?.agentSessionId).toBeUndefined();
+
+      // OpenCode 1.18.14 leaving its TUI and printing its exit lines, copied from its output.
+      handle.emit('\x1b[?1049l\r\n\r\n  \x1b[90mSession   \x1b[0m\x1b[1mNew session - 2026-11-04T21:10:08.645Z\x1b[0m\r\n  \x1b[90mContinue  \x1b[0m\x1b[1mopencode -s ses_e579a29faffeH5iFWLRgE503S4\x1b[0m\r\n\r\n$ ');
       await vi.advanceTimersByTimeAsync(100);
 
       expect(lastPersisted?.customState?.agentSessionId).toBe('ses_e579a29faffeH5iFWLRgE503S4');

@@ -222,4 +222,9 @@ describe('extractOpenCodeSessionId', () => {
     expect(extractOpenCodeSessionId('Continue  opencode -s ses_first\r\n$ opencode\r\nContinue  opencode -s ses_second\r\n')).toBe('ses_second');
     expect(extractOpenCodeSessionId('$ opencode --auto\r\n')).toBeUndefined();
   });
+
+  it('ignores the command quoted inside other text, and an id that does not end the line', () => {
+    expect(extractOpenCodeSessionId('Resume it with opencode -s ses_Quoted123 later\r\n')).toBeUndefined();
+    expect(extractOpenCodeSessionId('  Continue  opencode -s ses_abc-def\r\n')).toBeUndefined();
+  });
 });
