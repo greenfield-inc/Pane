@@ -37,6 +37,7 @@ packageExtensions:
     dependencies:
       vscode-jsonrpc: 8.2.0
 patchedDependencies:
+  '@xterm/addon-search@0.17.0-beta.299': patches/@xterm__addon-search@0.17.0-beta.299.patch
   '@xterm/addon-webgl@0.20.0-beta.298': patches/@xterm__addon-webgl@0.20.0-beta.298.patch
   '@xterm/xterm@6.1.0-beta.302': patches/@xterm__xterm@6.1.0-beta.302.patch
 minimumReleaseAge: 10080

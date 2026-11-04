@@ -2,6 +2,30 @@
 
 pnpm applies these through `patchedDependencies` in `pnpm-workspace.yaml`.
 
+## @xterm/addon-search
+
+Find in a terminal searches a soft-wrapped line (a long log line, minified
+JSON) as one string. Unpatched, every wrapped row of that line walked back to
+its first row, recursively, and re-read every earlier row's cells to place the
+search start. A 500,000-character line (2,500 rows) took about 625 million
+cell reads per keystroke for a query with no match, seconds of frozen UI, and
+overflowed the stack. The patch, in both `lib/` bundles:
+
+1. Skips soft-wrapped continuation rows in the forward search loops (`find`
+   and `findNextWithSelection`), because the search from the line's first row
+   already covered them. Whole-word search keeps the old path, since it stops
+   at the first non-whole-word hit in a line.
+2. Takes a wrapped row's string offset from the line cache's row offsets
+   instead of re-walking the cells of every earlier row.
+3. Walks back to a wrapped line's first row in a loop instead of one
+   recursive call per row.
+
+`frontend/src/components/terminal/searchAddonWrappedLines.test.ts` runs the
+patched addon over such a line. When bumping the addon, run that test against
+the new version unpatched first; if it passes, drop the patch. Otherwise
+regenerate it with `pnpm patch @xterm/addon-search@<version>` and reapply the
+three edits.
+
 ## @xterm/addon-webgl
 
 Output that keeps changing 24-bit colors, such as Claude Code's animated
