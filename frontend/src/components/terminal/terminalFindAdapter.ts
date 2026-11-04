@@ -67,9 +67,21 @@ function readFindDecorationColors(): ISearchDecorationOptions {
 interface BufferPosition { row: number; col: number }
 
 /** The parts of xterm's buffer, terminal and SearchAddon this adapter uses. */
+export interface FindCell {
+  getWidth(): number;
+  getChars(): string;
+  getCode(): number;
+}
+
+export interface FindBufferLine {
+  isWrapped: boolean;
+  translateToString(): string;
+  getCell(x: number): FindCell | undefined;
+}
+
 export interface FindBuffer {
   length: number;
-  getLine(row: number): { isWrapped: boolean; translateToString(): string } | undefined;
+  getLine(row: number): FindBufferLine | undefined;
 }
 
 export interface FindTerminal {
@@ -89,8 +101,26 @@ export interface FindSearchAddon {
 }
 
 /**
+ * The offset in `line.translateToString()` of the cell at column `col`. Cells
+ * and string offsets differ when a row holds wide characters (CJK: two cells,
+ * one char), surrogate pairs or combining marks (one cell, several chars).
+ * Same rule as the search addon, so the selection it makes maps back exactly.
+ */
+export function cellColumnToStringOffset(line: FindBufferLine, col: number): number {
+  let offset = 0;
+  for (let x = 0; x < col; x++) {
+    const cell = line.getCell(x);
+    if (!cell) break;
+    if (cell.getWidth() === 0) continue;
+    offset += cell.getCode() === 0 ? 1 : cell.getChars().length;
+  }
+  return offset;
+}
+
+/**
  * Count matches in the buffer (case-insensitive, non-overlapping, soft-wrapped
- * rows joined) and the 1-based index of the one starting at `current`.
+ * rows joined) and the 1-based index of the one starting at `current`, a cell
+ * position. One pass over the buffer.
  */
 export function countBufferMatches(
   buffer: FindBuffer,
@@ -98,34 +128,27 @@ export function countBufferMatches(
   current: BufferPosition | null,
 ): FindResult {
   if (!query) return { current: 0, total: 0 };
+  const currentLine = current ? buffer.getLine(current.row) : undefined;
+  const currentRowOffset = current && currentLine ? cellColumnToStringOffset(currentLine, current.col) : -1;
   let total = 0;
   let currentIndex = 0;
   let row = 0;
   while (row < buffer.length) {
     const line = buffer.getLine(row);
     if (!line) { row++; continue; }
-    const startRow = row;
     let text = line.translateToString();
-    const rowLengths = [text.length];
+    // The current match's offset in this wrapped run, when the run holds its row.
+    let target = current && row === current.row ? currentRowOffset : -1;
     while (row + 1 < buffer.length) {
       const next = buffer.getLine(row + 1);
       if (!next?.isWrapped) break;
       row++;
-      const nextText = next.translateToString();
-      rowLengths.push(nextText.length);
-      text += nextText;
+      if (current && row === current.row) target = text.length + currentRowOffset;
+      text += next.translateToString();
     }
     for (const offset of findOffsets(text, query)) {
       total++;
-      if (current && currentIndex === 0) {
-        let remaining = offset;
-        let physicalRow = startRow;
-        for (let i = 0; i < rowLengths.length; i++) {
-          if (remaining < rowLengths[i] || i === rowLengths.length - 1) { physicalRow = startRow + i; break; }
-          remaining -= rowLengths[i];
-        }
-        if (physicalRow === current.row && remaining === current.col) currentIndex = total;
-      }
+      if (offset === target) currentIndex = total;
     }
     row++;
   }
@@ -145,6 +168,9 @@ export function createTerminalFindAdapter(options: {
   const { terminal, search, report } = options;
   const readColors = options.readColors ?? readFindDecorationColors;
   let query = '';
+  // findNext/findPrevious fire onDidChangeResults synchronously; search() and
+  // step() count once themselves instead of counting twice.
+  let inCall = false;
 
   const currentResult = (): FindResult => {
     const selection = terminal.hasSelection() ? terminal.getSelectionPosition() : undefined;
@@ -157,7 +183,7 @@ export function createTerminalFindAdapter(options: {
 
   // Fires after every search, including the addon's own re-search on new output.
   const subscription = search.onDidChangeResults(() => {
-    if (query) report(currentResult());
+    if (query && !inCall) report(currentResult());
   });
 
   const searchOptions = (incremental: boolean): ISearchOptions => ({
@@ -170,13 +196,17 @@ export function createTerminalFindAdapter(options: {
     mode: () => 'text',
     search(next) {
       query = next;
-      search.findNext(next, searchOptions(true));
+      inCall = true;
+      try { search.findNext(next, searchOptions(true)); } finally { inCall = false; }
       return currentResult();
     },
     step(direction) {
       if (!query) return { current: 0, total: 0 };
-      if (direction === 'next') search.findNext(query, searchOptions(false));
-      else search.findPrevious(query, searchOptions(false));
+      inCall = true;
+      try {
+        if (direction === 'next') search.findNext(query, searchOptions(false));
+        else search.findPrevious(query, searchOptions(false));
+      } finally { inCall = false; }
       return currentResult();
     },
     clear() {

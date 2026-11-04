@@ -1,20 +1,37 @@
 import { describe, expect, it } from 'vitest';
 import {
-  blendHex, countBufferMatches, createTerminalFindAdapter, parseCssColor,
-  type FindBuffer, type FindSearchAddon, type FindTerminal,
+  blendHex, cellColumnToStringOffset, countBufferMatches, createTerminalFindAdapter, parseCssColor,
+  type FindBuffer, type FindBufferLine, type FindCell, type FindSearchAddon, type FindTerminal,
 } from './terminalFindAdapter';
+
+const WIDE = /[\u3000-\u9fff\uff00-\uffef]/u;
+const COMBINING = /[\u0300-\u036f]/u;
+
+/** Cells the way xterm stores them: a wide char takes two cells (the second is width 0), a combining mark joins the cell before. */
+function fakeLine(text: string, isWrapped: boolean): FindBufferLine {
+  const cells: Array<{ chars: string; width: number }> = [];
+  for (const char of text) {
+    const last = cells.at(-1);
+    if (COMBINING.test(char) && last) { last.chars += char; continue; }
+    if (WIDE.test(char)) { cells.push({ chars: char, width: 2 }, { chars: '', width: 0 }); continue; }
+    cells.push({ chars: char, width: 1 });
+  }
+  const toCell = (cell: { chars: string; width: number }): FindCell => ({
+    getWidth: () => cell.width,
+    getChars: () => cell.chars,
+    getCode: () => cell.chars.codePointAt(0) ?? 0,
+  });
+  return {
+    isWrapped,
+    translateToString: () => cells.filter(cell => cell.width > 0).map(cell => cell.chars).join(''),
+    getCell: (x: number) => (cells[x] ? toCell(cells[x]) : undefined),
+  };
+}
 
 /** Rows of text; a row starting with "~" continues the previous one (soft wrap). */
 function fakeBuffer(rows: string[]): FindBuffer {
-  const lines = rows.map(row => row.startsWith('~') ? { text: row.slice(1), wrapped: true } : { text: row, wrapped: false });
-  return {
-    length: lines.length,
-    getLine: (index: number) => {
-      const line = lines[index];
-      if (!line) return undefined;
-      return { isWrapped: line.wrapped, translateToString: () => line.text };
-    },
-  };
+  const lines = rows.map(row => row.startsWith('~') ? fakeLine(row.slice(1), true) : fakeLine(row, false));
+  return { length: lines.length, getLine: (index: number) => lines[index] };
 }
 
 describe('countBufferMatches', () => {
@@ -28,6 +45,34 @@ describe('countBufferMatches', () => {
     const buffer = fakeBuffer(['abc nee', '~dle xyz', 'needle']);
     expect(countBufferMatches(buffer, 'needle', { row: 2, col: 0 })).toEqual({ current: 2, total: 2 });
     expect(countBufferMatches(buffer, 'needle', { row: 0, col: 4 })).toEqual({ current: 1, total: 2 });
+  });
+
+  it('maps the selection cell column through wide, surrogate-pair and combining characters', () => {
+    // "你" takes two cells, so "needle" starts at cell 3 but string offset 2.
+    expect(countBufferMatches(fakeBuffer(['你 needle']), 'needle', { row: 0, col: 3 })).toEqual({ current: 1, total: 1 });
+    // A surrogate pair in one cell: "needle" starts at cell 2, string offset 3.
+    expect(countBufferMatches(fakeBuffer(['😀 needle']), 'needle', { row: 0, col: 2 })).toEqual({ current: 1, total: 1 });
+    // "e\u0301" is one cell holding two chars: "needle" starts at cell 2, offset 3.
+    expect(countBufferMatches(fakeBuffer(['e\u0301 needle']), 'needle', { row: 0, col: 2 })).toEqual({ current: 1, total: 1 });
+    // On a soft-wrapped continuation row.
+    expect(countBufferMatches(fakeBuffer(['ab needle', '~你 needle']), 'needle', { row: 1, col: 3 })).toEqual({ current: 2, total: 2 });
+  });
+
+  it('cellColumnToStringOffset skips the second cell of a wide char', () => {
+    const line = fakeLine('你好 x', false);
+    expect(cellColumnToStringOffset(line, 0)).toBe(0);
+    expect(cellColumnToStringOffset(line, 2)).toBe(1);
+    expect(cellColumnToStringOffset(line, 5)).toBe(3);
+  });
+
+  it('counts a late current match in one long soft-wrapped line quickly (C5: 2,500 x 200)', () => {
+    const buffer = fakeBuffer(['a'.repeat(200), ...Array.from({ length: 2499 }, () => '~' + 'a'.repeat(200))]);
+    const start = performance.now();
+    const result = countBufferMatches(buffer, 'a', { row: 2499, col: 199 });
+    const elapsed = performance.now() - start;
+    expect(result).toEqual({ current: 500_000, total: 500_000 });
+    // The old per-hit row walk took 625 million steps here (seconds); one pass takes tens of ms.
+    expect(elapsed).toBeLessThan(250);
   });
 
   it('counts past the highlight limit (one letter over a full 2,500 x 200 scrollback)', () => {
@@ -93,6 +138,13 @@ describe('createTerminalFindAdapter', () => {
     expect(adapter.search('needle')).toEqual({ current: 1, total: 2 });
     expect(calls).toEqual(['next:needle:inc']);
     expect(adapter.step('next')).toEqual({ current: 2, total: 2 });
+  });
+
+  it('counts once per search or step, not again from the addon\'s synchronous callback', () => {
+    const { adapter, reports } = setup();
+    adapter.search('needle');
+    adapter.step('next');
+    expect(reports).toEqual([]);
   });
 
   it('reports again when the addon re-searches after new output', () => {
