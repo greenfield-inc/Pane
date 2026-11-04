@@ -3709,6 +3709,7 @@ async function checkRepoSettingsParity() {
     [['repos', 'update', '--build-script', 'pnpm install', '--yes'], /requires --repo/],
     [['repos', 'update', '--repo', 'Cura', '--clear', 'env-vars', '--yes'], /Unknown setting "env-vars" for --clear/],
     [['repos', 'update', '--repo', 'Cura', '--run-script', 'pnpm dev', '--clear', 'run-script', '--yes'], /both sets and clears run-script/],
+    [['repos', 'update', '--repo', 'Cura', '--run-script', '--json', '--yes'], /--run-script requires a value/],
   ];
 
   const originalInvokeDaemon = daemonClient.invokeDaemon;

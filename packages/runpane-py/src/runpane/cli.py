@@ -1196,10 +1196,12 @@ def read_value(args: List[str], index: int, flag: str, literal_values: Set[int])
     if index in literal_values:
         return args[index]
     # repos update settings take any text, and an empty value clears the setting.
+    # A bare long flag (--json) means the value was left out; --flag=value passes one literally.
     clearable = flag in REPO_SETTING_FLAGS
     if clearable and index < len(args) and args[index] == "":
         return ""
-    free_text = clearable or flag in {"--text", "--prompt", "--initial-input", "--title", "--name", "--name-contains"}
+    bare_flag = index < len(args) and re.fullmatch(r"--[a-z][a-z-]*", args[index]) is not None
+    free_text = (clearable and not bare_flag) or flag in {"--text", "--prompt", "--initial-input", "--title", "--name", "--name-contains"}
     if index >= len(args) or not args[index] or (not free_text and args[index].startswith("-") and args[index] != "-"):
         raise ValueError(f"{flag} requires a value.")
     return args[index]

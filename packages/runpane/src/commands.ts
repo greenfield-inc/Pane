@@ -1273,9 +1273,11 @@ function readValue(args: string[], index: number, flag: string, literalValues: S
   const value = args[index];
   if (literalValues.has(index)) return value;
   // repos update settings take any text, and an empty value clears the setting.
+  // A bare long flag (--json) means the value was left out; --flag=value passes one literally.
   const clearable = REPO_SETTING_FLAGS.includes(flag);
   if (clearable && value === '') return value;
-  const freeText = clearable || ['--text', '--content', '--prompt', '--initial-input', '--title', '--name', '--name-contains'].includes(flag);
+  const freeText = (clearable && !/^--[a-z][a-z-]*$/.test(value ?? ''))
+    || ['--text', '--content', '--prompt', '--initial-input', '--title', '--name', '--name-contains'].includes(flag);
   if (!value || (!freeText && value.startsWith('-') && value !== '-')) {
     throw new Error(`${flag} requires a value.`);
   }
