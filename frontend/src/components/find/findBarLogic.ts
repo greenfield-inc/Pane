@@ -12,6 +12,14 @@ export function findBarKeyAction(event: { key: string; shiftKey: boolean; isComp
   return null;
 }
 
+/**
+ * Keys on the bar's buttons: Esc closes from any control. Enter and Space keep
+ * their ordinary button behaviour.
+ */
+export function findBarControlKeyAction(event: { key: string; isComposing: boolean }): 'close' | null {
+  return !event.isComposing && event.key === 'Escape' ? 'close' : null;
+}
+
 /** "3 of 12", "0 of 0", or nothing before a query is typed. */
 export function findCountLabel(bar: Pick<FindBarState, 'query' | 'result' | 'noText'>): string {
   if (bar.noText || !bar.query) return '';

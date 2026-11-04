@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { FindBar, FindBarView } from './FindBar';
-import { NO_TEXT_MESSAGE, findBarKeyAction, findCountLabel } from './findBarLogic';
+import { NO_TEXT_MESSAGE, findBarControlKeyAction, findBarKeyAction, findCountLabel } from './findBarLogic';
 import { getFindBar, openFind, registerFindTarget, resetFindForTests, setFindQuery, type FindAdapter, type FindMode } from './findController';
 
 function adapter(mode: FindMode, total: number): FindAdapter {
@@ -68,6 +68,14 @@ describe('findBarKeyAction', () => {
 
   it('ignores Enter while an IME is composing', () => {
     expect(findBarKeyAction({ key: 'Enter', shiftKey: false, isComposing: true })).toBeNull();
+  });
+});
+
+describe('findBarControlKeyAction', () => {
+  it('closes on Esc from a button and leaves Enter and Space to the button', () => {
+    expect(findBarControlKeyAction({ key: 'Escape', isComposing: false })).toBe('close');
+    expect(findBarControlKeyAction({ key: 'Enter', isComposing: false })).toBeNull();
+    expect(findBarControlKeyAction({ key: ' ', isComposing: false })).toBeNull();
   });
 });
 

@@ -3,7 +3,7 @@ import { ChevronDown, ChevronUp, X } from 'lucide-react';
 import { cn } from '../../utils/cn';
 import { formatKeyDisplay } from '../../utils/hotkeyUtils';
 import { closeFind, setFindQuery, stepFind, useFindBar, type FindBarState } from './findController';
-import { NO_TEXT_MESSAGE, findBarKeyAction, findCountLabel } from './findBarLogic';
+import { NO_TEXT_MESSAGE, findBarControlKeyAction, findBarKeyAction, findCountLabel } from './findBarLogic';
 
 interface FindBarProps {
   panelId: string;
@@ -44,11 +44,21 @@ export function FindBarView({ panelId, className, bar }: FindBarProps & { bar: F
     else stepFind(panelId, action);
   };
 
+  // Esc from a button (after clicking Next, or tabbing out of the input).
+  // The input's own handler stops its keys before they get here.
+  const handleControlKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (!findBarControlKeyAction({ key: event.key, isComposing: event.nativeEvent.isComposing })) return;
+    event.preventDefault();
+    event.stopPropagation();
+    closeFind(panelId);
+  };
+
   return (
     <div
       role="search"
       aria-label="Find in tab"
       data-find-bar={panelId}
+      onKeyDown={handleControlKeyDown}
       className={cn(
         // Never wider than the tab: a narrow split group shrinks the input.
         'absolute top-2 right-3 z-30 flex max-w-[calc(100%-1.5rem)] items-center gap-1 p-1 rounded-md border border-border-primary bg-surface-secondary shadow-dropdown-elevated',
