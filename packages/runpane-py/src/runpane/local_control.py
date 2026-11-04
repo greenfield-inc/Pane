@@ -62,15 +62,6 @@ CLEARABLE_REPO_SETTINGS = [flag[2:] for key, flag, _ in REPO_SETTINGS if key != 
 REPO_SETTINGS_NEXT = "See the settings with `runpane repos get --repo <selector> --json`, and the flags with `runpane help repos update`."
 
 
-class RunpaneError(ValueError):
-    """A failure with a stable code and the next step, as the npm CLI's RunpaneError reports it."""
-
-    def __init__(self, code: str, message: str, next_step: Optional[str] = None) -> None:
-        super().__init__(message)
-        self.code = code
-        self.next = next_step
-
-
 def invalid_repo_settings(message: str) -> RunpaneError:
     return RunpaneError("ERR_RUNPANE_REPO_SETTINGS_INVALID", f"{message} Nothing was changed.", REPO_SETTINGS_NEXT)
 
@@ -96,7 +87,7 @@ def run_repos_update(parsed: Any) -> int:
     if parsed.dry_run:
         request["dryRun"] = True
     else:
-        confirm_repo_update(parsed)
+        confirm_mutation(parsed)
 
     result = invoke_daemon("runpane:repos:update", [request], pane_dir=parsed.pane_dir)
     if parsed.json:
@@ -106,16 +97,6 @@ def run_repos_update(parsed: Any) -> int:
     print(f"{'Would update' if result.get('dryRun') else 'Updated'} {result['repo']['name']}{changed}")
     print_repo_settings(result["repo"], result["settings"])
     return 0
-
-
-def confirm_repo_update(parsed: Any) -> None:
-    if parsed.yes:
-        return
-    if parsed.json or not is_interactive_shell():
-        raise ValueError("runpane repos update mutates Pane state. Rerun with --yes in non-interactive shells.")
-    answer = input("Run repos update? [y/N] ").strip().lower()
-    if answer not in {"y", "yes"}:
-        raise ValueError("Cancelled.")
 
 
 def build_repo_settings_update(parsed: Any) -> Dict[str, Any]:

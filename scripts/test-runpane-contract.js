@@ -3702,7 +3702,7 @@ async function checkRepoSettingsParity() {
     ['repos', 'update', '--repo', '7', '--from-json', settingsFile, '--run-script', 'from flag', '--name', '  Cura Monorepo ', '--dry-run'],
   ];
   const failures = [
-    [['repos', 'update', '--repo', 'Cura', '--run-script', 'pnpm dev'], /Rerun with --yes in non-interactive shells/],
+    [['repos', 'update', '--repo', 'Cura', '--run-script', 'pnpm dev'], /needs confirmation/],
     [['repos', 'update', '--repo', 'Cura', '--yes'], /at least one setting/],
     [['repos', 'update', '--build-script', 'pnpm install', '--yes'], /requires --repo/],
     [['repos', 'update', '--repo', 'Cura', '--clear', 'env-vars', '--yes'], /Unknown setting "env-vars" for --clear/],
@@ -3789,7 +3789,7 @@ with contextlib.redirect_stdout(stdout):
         try:
             local_control.run_repos_update(parse_args(argv))
             errors.append("")
-        except ValueError as error:
+        except Exception as error:
             errors.append(str(error))
 print(json.dumps({"calls": calls, "stdout": stdout.getvalue(), "errors": errors}))
 `));
