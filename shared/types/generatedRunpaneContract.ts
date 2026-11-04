@@ -15250,8 +15250,7 @@ export const RUNPANE_CONTRACT = {
         "notes": [
           "If readiness.blocked is present, the agent is at a startup prompt (trust, update, [y/n]); inspect `panels screen` or follow blocked.suggestedCommand. Ask the user before answering trust or permission prompts.",
           "A Claude panel resumes the conversation whose session id Pane launched it with; a Codex panel resumes the session id Pane captured from its output. Without one, the panel relaunches its original command.",
-          "A bulk resume is ok only when every panel resumed and, with --wait-ready, became ready. Check items[].readiness.blocked and items[].error per panel.",
-          "Stopped Chat-capable tabs recover their exact saved conversation explicitly. After host restart, recover in Terminal first to restore the workspace launch environment."
+          "A bulk resume is ok only when every panel resumed and, with --wait-ready, became ready. Check items[].readiness.blocked and items[].error per panel."
         ]
       },
       "panels wait": {
@@ -15313,8 +15312,7 @@ export const RUNPANE_CONTRACT = {
         "notes": [
           "If blocked is present, do not assume success. Use blocked.suggestedCommand or inspect `panels screen`.",
           "If stopped is true, the panel's terminal is not running (for example after a Pane restart); run nextCommand (`panels resume`) instead of waiting again.",
-          "The default timeout and screen are intentionally small for agent context safety.",
-          "For Chat, status comes from the host session; the legacy screen field has source=acpTranscript and contains transcript text, not a terminal screen."
+          "The default timeout and screen are intentionally small for agent context safety."
         ]
       },
       "panels last-message": {
