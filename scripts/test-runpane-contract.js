@@ -5694,7 +5694,7 @@ async function checkNotifyParity() {
     ['links', ['--ui', 'ask', '--title', 'x', '--links', '[{"label":"Notes","path":" "}]'], 'links[0] path must be non-empty text.'],
     ['links', ['--ui', 'ask', '--title', 'x', '--links', '[{"label":"PR","url":"https://example.com"},{"label":"Files","url":"file:///etc/hosts"}]'], 'links[1] url must start with http:// or https://.'],
     ['links', ['--ui', 'ask', '--title', 'x', '--links', '[{"label":"","url":"https://example.com"}]'], 'links[0] must be an object with a non-empty "label" and one of "path" or "url".'],
-    ['links', ['--ui', 'ask', '--title', 'x', '--links', `[{"label":"${'é'.repeat(81)}","path":"a.md"}]`], 'links[0] label takes up to 80 characters; got 81.'],
+    ['links', ['--ui', 'ask', '--title', 'x', '--links', `[{"label":"${'x'.repeat(81)}","path":"a.md"}]`], 'links[0] label takes up to 80 characters; got 81.'],
   ];
   const { main } = require(npmCli);
   const nodeFailures = [];

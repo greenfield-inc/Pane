@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ipcMain } from 'electron';
+import path from 'path';
+import { pathToFileURL } from 'url';
 import { PaneCommandRegistry } from '../daemon/commandRegistry';
 import { remotePaneClientController } from '../daemon/client/remotePaneClient';
 import { followSavedMachines, registerNotifyHandlers, type NotifyMachines } from './notify';
@@ -357,8 +359,9 @@ describe('Approvals items, through the registered handlers', () => {
       links: [{ label: 'Notes', path: 'docs/RELEASE.md' }, { label: 'Plan', path: '/tmp/plan.html' }, { label: 'PR #812', url: 'https://github.com/org/repo/pull/812' }],
     }]);
     await flush();
+    // Resolved the way the host's platform resolves paths (a drive letter on Windows).
     expect(pane.notify.snapshot().items[0].links).toEqual([
-      { label: 'Notes', path: '/repo/api/docs/RELEASE.md' },
+      { label: 'Notes', path: path.resolve('/repo/api', 'docs/RELEASE.md') },
       { label: 'Plan', path: '/tmp/plan.html' },
       { label: 'PR #812', url: 'https://github.com/org/repo/pull/812' },
     ]);
@@ -437,12 +440,13 @@ describe('Approvals related links, through the registered handlers', () => {
     }]);
     await flush();
     const id = notify.snapshot().items[0].id;
+    const planPath = path.resolve('/work/api', 'plan.md');
 
     await notify.run({ type: 'open-link', id, index: 0, paneId: 'session-pane' });
     await notify.run({ type: 'open-link', id, index: 1, paneId: 'session-pane' });
     expect(opened).toEqual([
-      { paneId: 'session-pane', filePath: '/work/api/plan.md', placement: 'tab', source: 'user' },
-      { paneId: 'session-pane', url: 'file:///work/api/plan.md', title: 'Plan', placement: 'tab', source: 'user' },
+      { paneId: 'session-pane', filePath: planPath, placement: 'tab', source: 'user' },
+      { paneId: 'session-pane', url: pathToFileURL(planPath).href, title: 'Plan', placement: 'tab', source: 'user' },
       { paneId: 'session-pane', url: 'https://github.com/org/repo/pull/1', placement: 'tab', source: 'user' },
     ]);
 
