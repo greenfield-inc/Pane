@@ -86,12 +86,28 @@ const archiveSession = async (page: Page, name: string) => {
 
 test('a pane opens on the host\'s active tab only when the phone can show it, with desktop-only tabs last', async ({ page }) => {
   await openConnectedRemotePwa(page, {
-    panelTitles: ['Diff', 'claude', 'Explorer', 'shell'],
-    panelTypes: ['diff', 'terminal', 'explorer', 'terminal'],
+    panelTitles: ['Notes', 'claude', 'Explorer', 'shell'],
+    panelTypes: ['notes', 'terminal', 'explorer', 'terminal'],
     activePanelIndex: 0,
   });
-  await expect(page.getByRole('tab')).toHaveText(['claude', 'Explorer', 'shell', 'Diff']);
+  await expect(page.getByRole('tab')).toHaveText(['claude', 'Explorer', 'shell', 'Notes']);
   await expect(page.getByRole('tab', { name: 'claude', exact: true })).toHaveAttribute('aria-selected', 'true');
+});
+
+test('the Diff tab shows the branch\'s changes read-only, each file opening to its patch', async ({ page }) => {
+  await openConnectedRemotePwa(page, {
+    panelTitles: ['claude', 'Diff'],
+    panelTypes: ['terminal', 'diff'],
+    activePanelIndex: 1,
+  });
+  await expect(page.getByRole('tab', { name: 'Diff', exact: true })).toHaveAttribute('aria-selected', 'true');
+  const diff = page.getByTestId('remote-diff');
+  await expect(diff).toContainText('1 file');
+  await expect(diff).toContainText('vs main');
+  await diff.getByRole('button', { name: /src\/app\.ts/ }).click();
+  await expect(diff).toContainText('+const answer = 42;');
+  await expect(diff).toContainText('-const answer = 41;');
+  await expect(page.getByText('panels are visible in desktop Pane')).toHaveCount(0);
 });
 
 test('archiving a Session from its row menu can be undone from the toast', async ({ page }) => {
