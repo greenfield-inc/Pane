@@ -20958,7 +20958,7 @@ export const RUNPANE_CONTRACT = {
       "",
       "1 feature = 1 worktree = 1 branch = 1 Pane; reviews, audits, fixes and QA for it are tabs in that Pane. Open later agents with `runpane panels create --pane <id>` (MCP: `panels_create` or `agents_start` with `pane`), not a new Pane.",
       "",
-      "When you need the person (a choice, an approval, a short answer), call the `notify` MCP tool (or `runpane notify`) instead of asking in the terminal. If it returns `waiting`, call it again with `resume`; if it returns `unavailable`, ask in the terminal. For an API key, token or password, call `secrets_request` (or `runpane secrets request`), never `ask`; if that returns `unavailable`, ask the person to save it in Pane under Settings > Secrets.",
+      "When you need the person (a choice, an approval, a short answer), call the `notify` MCP tool (or `runpane notify`) instead of asking in the terminal. If it returns `waiting`, call it again with `resume`; if it returns `unavailable`, ask in the terminal. A worker in a Pane Session (`PANE_SESSION_DIR` set, `PANE_ORCHESTRATION_SESSION_ID` unset) doesn't call `notify`: it reports blocked to its orchestrator with `runpane report --state blocked --question \"<question>\"`. For an API key, token or password, call `secrets_request` (or `runpane secrets request`), never `ask`; if that returns `unavailable`, ask the person to save it in Pane under Settings > Secrets.",
       "",
       "CLI: `npm i -g runpane` (or `npx --yes runpane@latest`), then `runpane doctor --json`. Full command reference: `runpane agent-context --json`.",
       "",
@@ -20966,6 +20966,7 @@ export const RUNPANE_CONTRACT = {
     ],
     "notifyGuidance": {
       "rules": [
+        "In a Session, only its orchestrator asks the person. A worker in a Session (`PANE_SESSION_DIR` is set and `PANE_ORCHESTRATION_SESSION_ID` isn't, or your brief names an orchestrator or a parent status file) doesn't call `notify`: it reports blocked with `runpane report --state blocked --question \"<question>\"`, and its orchestrator asks for it. A Session orchestrator (`PANE_ORCHESTRATION_SESSION_ID` is set) posts each item that waits on the person once, as a background `runpane notify ... --json`, as its pane-orchestration guide says. Any other agent calls `notify`.",
         "Ask only what you can't find out yourself.",
         "Put related questions in one card.",
         "Send `info` rarely, only for what the person must know now.",

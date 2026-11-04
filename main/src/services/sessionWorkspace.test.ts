@@ -135,6 +135,19 @@ describe('Session workspace instructions', () => {
     expect(agents).toContain(path.join(root, 'skills', 'pane-chat', 'pane-orchestrator', 'SKILL.md'));
   });
 
+  it('keeps what waits on the person posted to Approvals without blocking the orchestrator', async () => {
+    const cwd = prepareSessionWorkspace('approvals');
+    const agents = await fs.readFile(path.join(cwd, 'AGENTS.md'), 'utf8');
+    expect(agents).toContain('## What waits on the person (while Approvals is on)');
+    expect(agents).toContain("posted to Pane's Approvals, exactly once. Workers in this Session don't post; they report blocked to you.");
+    expect(agents).toContain('with runpane notify ... --json as a background command (in Claude Code, Bash with run_in_background), not the MCP notify tool or AskUserQuestion');
+    expect(agents).toContain('title it with its Q-n and pass the worker\'s files and PR as --links');
+    expect(agents).toContain('runpane inbox ack <id>');
+    expect(agents).toContain('Stop the background call of an item that went stale; that expires its card.');
+    expect(agents).toContain('Pane keeps no approvals across a restart, so after one, post each item that still waits again, exactly once.');
+    expect(agents).toContain('If notify returns unavailable because Approvals is off, ask in this tab as before.');
+  });
+
   it('removes the legacy progress switch but keeps user documents', async () => {
     const cwd = sessionWorkspacePath('legacy-progress');
     await fs.mkdir(cwd, { recursive: true });

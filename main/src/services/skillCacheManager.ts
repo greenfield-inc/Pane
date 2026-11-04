@@ -115,6 +115,51 @@ wrapper named by the runtime context or Pane checkout, after checking its
 version and doctor result and repeating the command check. If no verified
 wrapper is available, report one concise blocker and wait.`;
 
+const APPROVALS_SECTION = `## Approvals: what waits on the person (while Approvals is on)
+
+This section applies while Approvals is on in Pane (its Settings switch, on by
+default). Workers in this Session don't post; they report blocked to you, and
+you post for them.
+
+Keep every item that waits on the person posted to Pane's Approvals, exactly
+once. That covers a worker's needs_you or blocked question, a plan or design
+approval, a PR ready to merge, and a next step only they can take.
+
+- Post it when it appears, titled with its Q-n, with the files it is about
+  (the worker's status file, plan or page) and its PR as \`--links\`. Post
+  with the CLI as a background command, one per item, so you stay free to
+  talk: in Claude Code, Bash with \`run_in_background\`; elsewhere, whatever
+  re-invokes you when a process exits.
+
+\`\`\`text
+runpane notify --ui options --title "Q-7: <the question>" --context "<what it is for, what you need>" --choices '[{"label":"<choice>","recommended":true},{"label":"<choice>"}]' --links '[{"label":"Plan","path":"<absolute file>"},{"label":"PR #12","url":"https://..."}]' --json
+\`\`\`
+
+  The CLI call waits until the person answers. The MCP \`notify\` tool returns
+  \`waiting\` after a while instead, so don't use it for this, and don't block
+  your turn on \`AskUserQuestion\`.
+- Once you have posted a worker's question, acknowledge its inbox item
+  (\`runpane inbox ack <id>\`). An unacknowledged blocked report shows in
+  Approvals by itself after 10 minutes, as "Waiting on the <Session>
+  orchestrator", so the person never misses it while you are down.
+- Stay free to talk. When the person asks about an item, answer in this tab;
+  the card keeps waiting.
+- When a call returns, it carries the answer. Record it (your D-n) and send
+  it only to the asking worker (\`panels submit --no-expect-report\`).
+- Stop waiting on an item that is superseded or no longer needed: stop its
+  background command (TaskStop in Claude Code), which expires the card. Never
+  leave a stale card up.
+- When you start, resume or wake, reconcile your open background calls
+  against the status files, your ledger and \`runpane inbox\`: post what is
+  missing and stop what is stale. Pane keeps no approvals across a restart,
+  so after one, post each item that still waits again, exactly once.
+- If notify returns \`unavailable\` because Approvals is off ("Approvals are
+  off in Pane."), ask in this tab as before.
+
+Claude's permission and plan prompts, and a chat tab's own prompts, reach the
+person from the asking tab by themselves, filed under this Session. Don't
+post them again.`;
+
 const UNATTENDED_RESILIENCE_SECTION = `## Unattended resilience (when enabled)
 
 This section applies only after the user explicitly turns unattended
@@ -803,6 +848,8 @@ another monitor has taken over: keep the replacement and do not re-arm the old o
 For other failures, re-arm once. If it dies again, save the last 20 output lines to a file, run
 \`runpane doctor --report --title "runpane watch failed" --body-file <evidence-file> --json\`,
 and tell the human.
+
+${APPROVALS_SECTION}
 
 ${UNATTENDED_RESILIENCE_SECTION}
 

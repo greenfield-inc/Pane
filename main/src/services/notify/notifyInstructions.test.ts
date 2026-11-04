@@ -50,6 +50,10 @@ describe('Pane Notify instructions in the agents\' user-level files', () => {
     expect(written.startsWith(`${own}${BEGIN}\r\n## Pane\r\n`)).toBe(true);
     expect(written).toContain('\r\n## Pane Notify\r\n');
     expect(written).toContain("call the `pane` MCP's `notify` instead of asking in the terminal");
+    // A Session worker relays through its orchestrator; only the orchestrator posts, in the background.
+    expect(written).toContain("- In a Session, only its orchestrator asks the person. A worker in a Session (`PANE_SESSION_DIR` is set and `PANE_ORCHESTRATION_SESSION_ID` isn't");
+    expect(written).toContain("doesn't call `notify`: it reports blocked with `runpane report --state blocked --question \"<question>\"`");
+    expect(written).toContain('posts each item that waits on the person once, as a background `runpane notify ... --json`');
     expect(written).toContain('- For an API key, token or password, call `secrets_request` (or `runpane secrets request`), never `ask`.\r\n');
     expect(written.endsWith(`${END}\r\n`)).toBe(true);
     // Codex's folder had no AGENTS.md, so Pane created one holding only the block.

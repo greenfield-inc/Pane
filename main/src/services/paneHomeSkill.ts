@@ -17,7 +17,7 @@ import { linuxToUNCPath } from '../utils/wslUtils';
  * Bump the version when the skill changes shape: a copy marked by an older Pane
  * is rewritten, and a copy marked by a newer Pane is left for that Pane.
  */
-const PANE_MANAGED_SKILL_VERSION = 2;
+const PANE_MANAGED_SKILL_VERSION = 3;
 export const PANE_MANAGED_SKILL_MARKER = `<!-- pane-managed-skill v${PANE_MANAGED_SKILL_VERSION} -->`;
 const MANAGED_MARKER_PATTERN = /<!-- pane-managed-skill v(\d+) -->/;
 const SKILL_DIR_NAME = 'pane';
@@ -325,6 +325,23 @@ call through the CLI:
 \`--ui\` is \`options\`, \`approve\` (\`--detail\`), \`ask\` (\`--suggestions\`) or
 \`info\`. On \`waiting\`, run \`runpane notify --resume <id> --json\`; on
 \`unavailable\`, ask in the terminal.
+
+Who asks depends on your role:
+
+- **A worker in a Session** (\`PANE_SESSION_DIR\` is set and
+  \`PANE_ORCHESTRATION_SESSION_ID\` isn't, or your brief names an orchestrator
+  or a parent status file) doesn't call \`notify\`. Run
+  \`runpane report --state blocked --question "<question>"\` (with
+  \`--summary-file <status file>\` when you keep one, after writing the
+  question there); your orchestrator asks the person for you and sends you the answer. If it
+  doesn't pick the question up within 10 minutes, Pane shows it in Approvals
+  by itself.
+- **A Session orchestrator** (\`PANE_ORCHESTRATION_SESSION_ID\` is set) keeps
+  each item that waits on the person posted once, as a background
+  \`runpane notify ... --links '<files>' --json\` titled with its Q-n, and
+  stays free to talk: follow "What waits on the person" in
+  \`runpane docs read --doc skills/pane-orchestration/SKILL.md\`.
+- **Any other agent** calls \`notify\` as above.
 
 For an API key, token or password, call the \`secrets_request\` tool (or
 \`runpane secrets request --project <project> --name <NAME> --title "<text>" --reason "<what it is for>"\`),
