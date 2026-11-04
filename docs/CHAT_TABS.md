@@ -79,7 +79,13 @@ the chat tab suites against the new version.
   ("Opus 5.5 · Medium"). That menu also holds every other setting the adapter
   offers (such as Claude's Fast mode, Ultracode and Agent), each under its own
   name. Pane places a setting by its ACP category (`mode`, `model`,
-  `thought_level`), or by its id when the adapter sends none. The `/` menu lists
+  `thought_level`), or by its id when the adapter sends none. At phone width
+  (the phone app, and the PWA when the composer is under 480px) the row is
+  sparer: **+**, then the model as plain text with its effort muted ("Opus 5.5
+  Medium"), then send. The permission mode moves into that button's sheet as
+  **Permissions**, below Model, Effort and the other settings; each choice shows
+  a check and On/Off settings are switches. A mode that never asks (Bypass)
+  leaves a small shield on the row. The `/` menu lists
   the agent's own commands and skills; **Stop** cancels the turn. A message sent
   while the agent works is queued and sent next; **Remove** takes it out of the
   queue.

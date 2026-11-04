@@ -18,8 +18,8 @@ import { ChatPermissionCard } from './ChatPermissionCard';
 import { ChatTurnView, WorkerLine, type ChatTurnActions } from './ChatTurns';
 import { ChatCommandMenu } from './ChatCommandMenu';
 import { matchingCommands } from './chatCommands';
-import { ChatModeChip, ChatModelMenu } from './ChatComposerControls';
-import { arrangeComposerControls } from './composerControls';
+import { ChatModeChip, ChatModelMenu, ChatPhoneModelMenu, ChatRiskyModeMarker, usePhoneWidth } from './ChatComposerControls';
+import { arrangeComposerControls } from '../../../../shared/chatComposerControls';
 import '../agentChat/agentChat.css';
 import './chatTab.css';
 
@@ -162,6 +162,8 @@ export default function ChatTabPanel({ panelId, client, connected = true, quiet 
   const activeCommand = commands[Math.min(commandIndex, commands.length - 1)];
   const composerRow = useMemo(() => arrangeComposerControls(view?.controls ?? []), [view?.controls]);
   const settingsLocked = disabled || view?.status !== 'idle';
+  const actionsRef = useRef<HTMLDivElement>(null);
+  const phone = usePhoneWidth(actionsRef);
 
   const deliver = async (request: ChatTabSend, retry: boolean) => {
     viewer.setPendingDelivery(request);
@@ -280,11 +282,15 @@ export default function ChatTabPanel({ panelId, client, connected = true, quiet 
               }
             }}
             className="chat-input" />
-          <div className="chat-composer-actions">
+          <div ref={actionsRef} className="chat-composer-actions" data-layout={phone ? 'phone' : 'desktop'}>
             {view?.canAttachImages && <ComposerPrimitive.AddAttachment aria-label="Attach image" title="Attach image" className="chat-icon"><Plus className="h-4 w-4" /></ComposerPrimitive.AddAttachment>}
-            {composerRow.mode && <ChatModeChip control={composerRow.mode} disabled={settingsLocked} configure={configure} />}
+            {phone
+              ? <ChatRiskyModeMarker mode={composerRow.mode} />
+              : composerRow.mode && <ChatModeChip control={composerRow.mode} disabled={settingsLocked} configure={configure} />}
             <div className="chat-composer-end">
-              <ChatModelMenu arranged={composerRow} disabled={settingsLocked} configure={configure} />
+              {phone
+                ? <ChatPhoneModelMenu arranged={composerRow} disabled={settingsLocked} configure={configure} />
+                : <ChatModelMenu arranged={composerRow} disabled={settingsLocked} configure={configure} />}
               {working
                 ? <>
                   <ComposerPrimitive.Send aria-label="Queue message" title="Queue message (sends after this turn)" className="chat-icon"><ArrowUp className="h-4 w-4" /></ComposerPrimitive.Send>

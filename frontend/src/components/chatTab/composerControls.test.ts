@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AgentChatConfigOption } from '../../../../shared/types/agentChat';
-import { arrangeComposerControls, modelSummary } from './composerControls';
+import { arrangeComposerControls, isRiskyMode, modelSummary, onOffValues, phoneSettingsOrder } from '../../../../shared/chatComposerControls';
 
 function select(id: string, name: string, currentValue: string, category?: string): AgentChatConfigOption {
   const control: AgentChatConfigOption = { id, name, currentValue, options: [{ value: currentValue, name: currentValue === 'off' ? 'Off' : `${name} ${currentValue}` }] };
@@ -37,5 +37,21 @@ describe('the composer row', () => {
     expect(row.mode).toBeUndefined();
     expect(row.more.map(control => control.name)).toEqual(['Output style']);
     expect(modelSummary(row)).toBe('Options');
+  });
+
+  it('lists the phone\'s settings as Model, Effort, the others, then Permissions; marks a mode that never asks', () => {
+    const row = arrangeComposerControls([
+      select('mode', 'Mode', 'bypassPermissions', 'mode'), select('model', 'Model', 'opus', 'model'),
+      select('effort', 'Effort', 'medium', 'thought_level'), select('agent', 'Agent', 'default'),
+    ]);
+    expect(phoneSettingsOrder(row).map(entry => entry.title)).toEqual(['Model', 'Effort', 'Agent', 'Permissions']);
+    expect(isRiskyMode(row.mode)).toBe(true);
+    expect(isRiskyMode(arrangeComposerControls([select('mode', 'Mode', 'plan', 'mode')]).mode)).toBe(false);
+  });
+
+  it('treats a setting offering exactly On and Off as a switch', () => {
+    const fast: AgentChatConfigOption = { id: 'fast_mode', name: 'Fast mode', currentValue: 'off', options: [{ value: 'on', name: 'On' }, { value: 'off', name: 'Off' }] };
+    expect(onOffValues(fast)).toEqual({ on: 'on', off: 'off' });
+    expect(onOffValues({ ...fast, options: [{ value: 'a', name: 'Default' }, { value: 'b', name: 'explorer' }] })).toBeUndefined();
   });
 });

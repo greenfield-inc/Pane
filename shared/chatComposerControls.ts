@@ -1,4 +1,4 @@
-import type { AgentChatConfigOption } from '../../../../shared/types/agentChat';
+import type { AgentChatConfigOption } from './types/agentChat';
 
 /**
  * The agent's settings, sorted into the composer's one row: the permission mode
@@ -42,4 +42,27 @@ export function choiceName(control: AgentChatConfigOption): string {
 /** What the model menu's button reads: "Opus 5.5 · Medium", or "Options" when the agent names no model. */
 export function modelSummary({ model, effort }: ComposerControls): string {
   return [model, effort].flatMap(control => control ? [choiceName(control)] : []).join(' · ') || 'Options';
+}
+
+/** Permission modes that let the agent act without asking: the phone marks them on the composer row. */
+const RISKY_MODES = new Set(['bypassPermissions', 'dontAsk', 'full-access']);
+
+export function isRiskyMode(mode: AgentChatConfigOption | undefined): boolean {
+  return !!mode && RISKY_MODES.has(mode.currentValue);
+}
+
+/** A setting whose only choices are On and Off (Claude's Fast mode, Ultracode): the phone shows it as a switch. */
+export function onOffValues(control: AgentChatConfigOption): { on: string; off: string } | undefined {
+  if (control.options.length !== 2) return undefined;
+  const on = control.options.find(option => option.name.toLowerCase() === 'on');
+  const off = control.options.find(option => option.name.toLowerCase() === 'off');
+  return on && off ? { on: on.value, off: off.value } : undefined;
+}
+
+/** The phone's settings list, top to bottom: Model, Effort, the agent's other settings, then Permissions. */
+export function phoneSettingsOrder({ mode, model, effort, more }: ComposerControls): Array<{ control: AgentChatConfigOption; title: string }> {
+  return [
+    ...[model, effort, ...more].flatMap(control => control ? [{ control, title: control.name }] : []),
+    ...(mode ? [{ control: mode, title: 'Permissions' }] : []),
+  ];
 }

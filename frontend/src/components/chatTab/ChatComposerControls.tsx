@@ -1,8 +1,9 @@
-import type { KeyboardEvent } from 'react';
-import { ChevronDown, FilePen, Hand, ListTodo, Shield, ShieldOff, Sparkles, type LucideIcon } from 'lucide-react';
+import { useEffect, useState, type KeyboardEvent, type RefObject } from 'react';
+import { Check, ChevronDown, FilePen, Hand, ListTodo, Shield, ShieldOff, Sparkles, type LucideIcon } from 'lucide-react';
 import type { AgentChatConfigOption } from '../../../../shared/types/agentChat';
 import { Dropdown } from '../ui/Dropdown';
-import { choiceName, modelSummary, type ComposerControls } from './composerControls';
+import { Toggle } from '../ui/Toggle';
+import { choiceName, isRiskyMode, modelSummary, onOffValues, phoneSettingsOrder, type ComposerControls } from '../../../../shared/chatComposerControls';
 
 type Configure = (id: string, value: string) => void;
 
@@ -26,8 +27,13 @@ export function ChatModeChip({ control, disabled, configure }: { control: AgentC
 /** Every setting in the model menu is a named field; Tab moves between them and leaves at either edge. */
 function stayInFields(event: KeyboardEvent<HTMLElement>) {
   if (event.key !== 'Tab') return;
-  const fields = [...event.currentTarget.querySelectorAll('select:not(:disabled)')];
-  const current = fields.findIndex(field => field === document.activeElement);
+  // A radio group is one stop (its checked choice); arrows move inside it.
+  const fields = [...event.currentTarget.querySelectorAll('select:not(:disabled), [role=switch]:not(:disabled), input[type=radio]:checked:not(:disabled)')];
+  const active = document.activeElement;
+  const stop = active instanceof HTMLInputElement && active.type === 'radio'
+    ? fields.find(field => field instanceof HTMLInputElement && field.name === active.name)
+    : active;
+  const current = fields.findIndex(field => field === stop);
   const next = current + (event.shiftKey ? -1 : 1);
   if (current >= 0 && next >= 0 && next < fields.length) event.stopPropagation();
 }
@@ -57,5 +63,77 @@ export function ChatModelMenu({ arranged, disabled, configure }: { arranged: Com
       {primary.map(control => <Field key={control.id} control={control} disabled={disabled} configure={configure} />)}
       {!!primary.length && !!arranged.more.length && <hr className="chat-fields-rule" />}
       {arranged.more.map(control => <Field key={control.id} control={control} disabled={disabled} configure={configure} />)}
+    </div>} />;
+}
+
+/** A composer narrower than this is laid out for a phone (D-118): the PWA on a phone, or a very narrow panel. */
+const PHONE_WIDTH = 480;
+
+/** Whether the element is phone-narrow, following its size. */
+export function usePhoneWidth(ref: RefObject<HTMLElement | null>): boolean {
+  const [phone, setPhone] = useState(false);
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    const observer = new ResizeObserver(([entry]) => setPhone(entry.contentRect.width < PHONE_WIDTH));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [ref]);
+  return phone;
+}
+
+/** On a phone the mode leaves the row; a mode that never asks keeps a small marker so it is never forgotten. */
+export function ChatRiskyModeMarker({ mode }: { mode: AgentChatConfigOption | undefined }) {
+  if (!mode || !isRiskyMode(mode)) return null;
+  const label = `Permissions: ${choiceName(mode)}`;
+  return <span role="img" aria-label={label} title={label} className="chat-risk"><ShieldOff aria-hidden /></span>;
+}
+
+function PhoneSetting({ control, title, first, disabled, configure }: { control: AgentChatConfigOption; title: string; first: boolean; disabled: boolean; configure: Configure }) {
+  const toggle = onOffValues(control);
+  if (toggle) {
+    const on = control.currentValue === toggle.on;
+    const id = `chat-setting-${control.id}`;
+    // The whole row is the switch's label, so the row is the target and names it.
+    return <label htmlFor={id} className="chat-choice">
+      <span>{title}</span>
+      <Toggle id={id} checked={on} disabled={disabled} onChange={next => configure(control.id, next ? toggle.on : toggle.off)} />
+    </label>;
+  }
+  return <fieldset className="chat-choice-group" disabled={disabled}>
+    <legend>{title}</legend>
+    {control.options.map(option => {
+      const checked = option.value === control.currentValue;
+      return <label key={option.value} className="chat-choice">
+        <input type="radio" className="sr-only" name={`chat-setting-${control.id}`} checked={checked}
+          // The sheet opens on the current model, not the first choice in the list.
+          data-autofocus={first && checked ? '' : undefined}
+          onChange={() => configure(control.id, option.value)}
+          // The menu moves between items with the arrows; inside a group they pick a choice.
+          onKeyDown={event => { if (event.key.startsWith('Arrow')) event.stopPropagation(); }} />
+        <span>{option.name}</span>
+        {checked && <Check className="chat-choice-check" aria-hidden />}
+      </label>;
+    })}
+  </fieldset>;
+}
+
+/**
+ * The phone's model button (D-118): plain text, the model then its effort muted, like ChatGPT's.
+ * Its sheet lists Model, Effort, the agent's other settings and Permissions, each choice with a check.
+ */
+export function ChatPhoneModelMenu({ arranged, disabled, configure }: { arranged: ComposerControls; disabled: boolean; configure: Configure }) {
+  const settings = phoneSettingsOrder(arranged);
+  if (!settings.length) return null;
+  const summary = modelSummary(arranged);
+  return <Dropdown position="top-right" width="auto" items={[]} formLabel="Model and options" menuClassName="chat-phone-menu"
+    trigger={<button type="button" disabled={disabled} title={summary} className="chat-phone-model">
+      <span className="sr-only">Model and options: </span>
+      {arranged.model || arranged.effort
+        ? <>{arranged.model && <span className="chat-phone-model-name">{choiceName(arranged.model)}</span>}{arranged.effort && <span className="chat-phone-model-effort">{choiceName(arranged.effort)}</span>}</>
+        : <span className="chat-phone-model-name">{summary}</span>}
+    </button>}
+    footer={<div className="chat-choices" onKeyDown={stayInFields}>
+      {settings.map(({ control, title }, index) => <PhoneSetting key={control.id} control={control} title={title} first={index === 0} disabled={disabled} configure={configure} />)}
     </div>} />;
 }
