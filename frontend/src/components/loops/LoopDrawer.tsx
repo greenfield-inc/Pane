@@ -118,7 +118,8 @@ function LoopDrawerForm({ loop, onClose }: { loop: Loop | undefined; onClose: ()
   // An existing Session keeps its own agent unless the person picks another.
   const chooseSession = (sessionTarget: string) => {
     const agent = sessions.find(session => session.id === sessionTarget)?.agent;
-    update(agent ? { sessionTarget, runner: agent } : { sessionTarget });
+    const runner = SESSION_RUNNERS.find(candidate => candidate.id === agent)?.id;
+    update(runner ? { sessionTarget, runner } : { sessionTarget });
   };
 
   const handleSave = async () => {

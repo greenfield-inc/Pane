@@ -1435,7 +1435,7 @@ export const RUNPANE_CONTRACT = {
       "name": "sessions set-agent",
       "summary": "Switch the durable terminal agent for a named Session.",
       "usage": [
-        "runpane sessions set-agent --session <id|name> --agent <codex|claude|cursor> [--json] [--pane-dir <path>]"
+        "runpane sessions set-agent --session <id|name> --agent <codex|claude|cursor|opencode> [--json] [--pane-dir <path>]"
       ],
       "mutates": true,
       "idempotent": true,
@@ -2416,7 +2416,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane sessions update --session <id|name> --from-json <path|-> [--json] [--pane-dir <path>]",
         "  runpane sessions pin --session <id|name> [--json] [--pane-dir <path>]",
         "  runpane sessions unpin --session <id|name> [--json] [--pane-dir <path>]",
-        "  runpane sessions set-agent --session <id|name> --agent <codex|claude|cursor> [--json] [--pane-dir <path>]",
+        "  runpane sessions set-agent --session <id|name> --agent <codex|claude|cursor|opencode> [--json] [--pane-dir <path>]",
         "  runpane sessions associate --session <id|name> --pane <pane-id> [--json] [--pane-dir <path>]",
         "  runpane sessions detach --session <id|name> [--pane <pane-id>] [--json] [--pane-dir <path>]",
         "  runpane sessions overview --session <id|name> [--json] [--pane-dir <path>]",
@@ -3199,7 +3199,7 @@ export const RUNPANE_CONTRACT = {
       ],
       "sessions set-agent": [
         "Usage:",
-        "runpane sessions set-agent --session <id|name> --agent <codex|claude|cursor> [--json] [--pane-dir <path>]",
+        "runpane sessions set-agent --session <id|name> --agent <codex|claude|cursor|opencode> [--json] [--pane-dir <path>]",
         "",
         "Options:",
         "  --session <id|name>         Named Session id or exact name.",
@@ -4758,7 +4758,7 @@ export const RUNPANE_CONTRACT = {
       ],
       "sessions set-agent": [
         "Usage:",
-        "python -m runpane sessions set-agent --session <id|name> --agent <codex|claude|cursor> [--json] [--pane-dir <path>]",
+        "python -m runpane sessions set-agent --session <id|name> --agent <codex|claude|cursor|opencode> [--json] [--pane-dir <path>]",
         "",
         "Options:",
         "  --session <id|name>         Named Session id or exact name.",
@@ -5548,7 +5548,7 @@ export const RUNPANE_CONTRACT = {
       "runpane sessions update --session <id|name> --from-json <path|-> [--json] [--pane-dir <path>]",
       "runpane sessions pin --session <id|name> [--json] [--pane-dir <path>]",
       "runpane sessions unpin --session <id|name> [--json] [--pane-dir <path>]",
-      "runpane sessions set-agent --session <id|name> --agent <codex|claude|cursor> [--json] [--pane-dir <path>]",
+      "runpane sessions set-agent --session <id|name> --agent <codex|claude|cursor|opencode> [--json] [--pane-dir <path>]",
       "runpane sessions associate --session <id|name> --pane <pane-id> [--json] [--pane-dir <path>]",
       "runpane sessions detach --session <id|name> [--pane <pane-id>] [--json] [--pane-dir <path>]",
       "runpane sessions overview --session <id|name> [--json] [--pane-dir <path>]",
@@ -17786,7 +17786,7 @@ export const RUNPANE_CONTRACT = {
           }
         ],
         "examples": [
-          "runpane sessions set-agent --session <id|name> --agent <codex|claude|cursor> [--json] [--pane-dir <path>]"
+          "runpane sessions set-agent --session <id|name> --agent <codex|claude|cursor|opencode> [--json] [--pane-dir <path>]"
         ],
         "jsonSchemas": [
           "sessionResult"

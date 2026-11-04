@@ -14,6 +14,7 @@ import { archiveFs, directoryIdentity, purgeArchiveBatch } from '../archiveClean
 import { WorktreeManager } from '../worktreeManager';
 import { withArchiveRepositoryLock } from '../archiveRepositoryLock';
 import { worktreePoolManager } from '../worktreePoolManager';
+import type { ArchiveProgressSnapshot, ArchiveProgressTask } from '../../../../shared/types/archiveProgress';
 
 const fixtures: Array<{ root: string; close: () => Promise<void> }> = [];
 const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
@@ -70,7 +71,8 @@ afterEach(async () => {
   vi.unstubAllEnvs();
 });
 
-describe('durable archive cleanup', () => {
+// Git, SQLite and filesystem fixtures use the integration budget; internal retry bounds stay exact.
+describe('durable archive cleanup', { timeout: 15000 }, () => {
   it('queues pool background creation and orphan cleanup behind repository mutations', async () => {
     const f = fixture();
     const calls = vi.spyOn(f.runner, 'execFile');
@@ -324,6 +326,7 @@ describe('durable archive cleanup', () => {
     expect(f.db.getArchiveCleanupJobs()[0].externalRemovalApproved).toBe(false);
   });
 
+  // Two real-Git repositories use the integration budget; the fake-clock retry boundary stays exact.
   it('lets another repository complete while a busy job waits for its next attempt', async () => {
     const f = fixture();
     const otherRepo = path.join(f.root, 'other-repo');
@@ -345,14 +348,54 @@ describe('durable archive cleanup', () => {
     const realRename = archiveFs.rename.bind(archiveFs);
     const rename = vi.spyOn(archiveFs, 'rename').mockImplementation((from, to) => from === f.source
       ? Promise.reject(Object.assign(new Error('busy repository'), { code: 'EBUSY' })) : realRename(from, to));
-    f.manager.enqueue(first, () => Promise.resolve());
-    f.manager.enqueue(second, () => Promise.resolve());
-    await vi.waitFor(() => expect(f.db.getArchiveCleanupJobs().find(job => job.sessionId === otherSession.id)?.status).toBe('completed'), { timeout: 4000 });
-    expect(f.db.getArchiveCleanupJobs().find(job => job.sessionId === f.session.id)?.status).toBe('queued');
-    expect(existsSync(f.source)).toBe(true);
-    rename.mockRestore();
-    await settled(f, 'completed');
-  });
+    const listeners: Array<(snapshot: ArchiveProgressSnapshot) => void> = [];
+    const observe = (sessionId: string, status: 'queued' | 'completed', attempts?: number): Promise<ArchiveProgressTask> => {
+      const observed = new Promise<ArchiveProgressTask>((resolve, reject) => {
+        const listener = (snapshot: ArchiveProgressSnapshot) => {
+          const task = snapshot.tasks.find(task => task.sessionId === sessionId);
+          if (task?.status === 'failed') reject(new Error(task.error ?? 'Archive cleanup failed'));
+          else if (task?.status === status && (attempts === undefined || task.attempts === attempts)) resolve(task);
+        };
+        listeners.push(listener);
+        f.progress.on('archive-progress', listener);
+      });
+      void observed.catch(() => {});
+      return observed;
+    };
+    const firstRetry = observe(f.session.id, 'queued', 1);
+    const secondCompleted = observe(otherSession.id, 'completed');
+    const firstCompleted = observe(f.session.id, 'completed');
+    const now = Date.now();
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    vi.setSystemTime(now);
+    try {
+      f.manager.enqueue(first, () => Promise.resolve());
+      f.manager.enqueue(second, () => Promise.resolve());
+      expect(await firstRetry).toMatchObject({ sessionId: f.session.id, status: 'queued', attempts: 1, nextAttempt: now + 2000 });
+      await secondCompleted;
+      expect(f.db.getArchiveCleanupJobs().find(job => job.sessionId === otherSession.id)?.status).toBe('completed');
+      expect(f.db.getArchiveCleanupJobs().find(job => job.sessionId === f.session.id)?.status).toBe('queued');
+      expect(existsSync(f.source)).toBe(true);
+      expect(rename.mock.calls.filter(([from]) => from === f.source)).toHaveLength(1);
+      rename.mockImplementation(realRename);
+      await vi.advanceTimersByTimeAsync(1999);
+      expect(f.db.getArchiveCleanupJobs().find(job => job.sessionId === f.session.id)?.status).toBe('queued');
+      expect(rename.mock.calls.filter(([from]) => from === f.source)).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(1);
+      await firstCompleted;
+      expect(f.db.getArchiveCleanupJobs().find(job => job.sessionId === f.session.id)?.status).toBe('completed');
+      expect(existsSync(f.source)).toBe(false);
+      expect(rename.mock.calls.filter(([from]) => from === f.source)).toHaveLength(2);
+    } finally {
+      try {
+        await f.manager.stop();
+      } finally {
+        for (const listener of listeners) f.progress.off('archive-progress', listener);
+        vi.useRealTimers();
+        rename.mockRestore();
+      }
+    }
+  }, 15000);
 
   it('reconciles a crash after rename and before its checkpoint', async () => {
     const f = fixture();
@@ -419,15 +462,18 @@ describe('durable archive cleanup', () => {
     let release = () => {};
     const teardown = new Promise<void>(resolve => { release = resolve; });
     f.manager.enqueue(job, () => teardown);
-    const worktrees = new WorktreeManager();
-    worktrees.setArchivePathGuard(target => f.manager.assertPathAvailable(target));
-    await expect(worktrees.createWorktree(f.repo, 'feature', undefined, undefined, undefined, new PathResolver(f.project), f.runner)).rejects.toThrow(/reserved/);
-    await expect(worktrees.resolveWorkingDirectory(f.repo, 'feature', undefined, true, undefined, new PathResolver(f.project), f.runner)).rejects.toThrow(/reserved/);
-    await expect(f.manager.assertPathAvailable(path.join(f.source, 'nested'))).rejects.toThrow(/reserved/);
-    expect(() => f.manager.assertRestorable(f.session.id)).toThrow();
-    expect(existsSync(path.join(f.source, 'keep.txt'))).toBe(true);
-    release();
-    await settled(f, 'completed');
+    try {
+      const worktrees = new WorktreeManager();
+      worktrees.setArchivePathGuard(target => f.manager.assertPathAvailable(target));
+      await expect(worktrees.createWorktree(f.repo, 'feature', undefined, undefined, undefined, new PathResolver(f.project), f.runner)).rejects.toThrow(/reserved/);
+      await expect(worktrees.resolveWorkingDirectory(f.repo, 'feature', undefined, true, undefined, new PathResolver(f.project), f.runner)).rejects.toThrow(/reserved/);
+      await expect(f.manager.assertPathAvailable(path.join(f.source, 'nested'))).rejects.toThrow(/reserved/);
+      expect(() => f.manager.assertRestorable(f.session.id)).toThrow();
+      expect(existsSync(path.join(f.source, 'keep.txt'))).toBe(true);
+    } finally {
+      release();
+      await settled(f, 'completed');
+    }
     expect(() => f.manager.assertRestorable(f.session.id)).not.toThrow();
   });
 

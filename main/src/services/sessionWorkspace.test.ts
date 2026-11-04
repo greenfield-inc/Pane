@@ -36,7 +36,7 @@ describe('Session workspace instructions', () => {
   it.each(['runtime-context.md', '.pane-runtime/runpane', '.pane-runtime/notes.txt', 'notes.txt'])('retains failed WSL scaffolds with user content in %s', async fileName => {
     const record: OrchestrationSessionRecord = {
       id: 'failed-wsl', name: 'WSL', agent: 'codex', internalSessionId: 'owner', runtime: 'wsl', wslDistribution: 'Ubuntu',
-      panelIds: { claude: 'claude', codex: 'codex', cursor: 'cursor' },
+      panelIds: { claude: 'claude', codex: 'codex', cursor: 'cursor', opencode: 'opencode' },
       goal: '', context: '', decisions: [], blockers: [], nextAction: '', evidence: [], outputs: [],
       associations: [], activity: [], revision: 1, createdAt: '2026-09-21', updatedAt: '2026-09-21',
     };
@@ -52,7 +52,7 @@ describe('Session workspace instructions', () => {
   it.each(['AGENTS.md', 'CLAUDE.md', 'progress.html', 'notes.txt'])('preserves imports with user content in %s', async fileName => {
     const record: OrchestrationSessionRecord = {
       id: 'imported', name: 'Pane Chat · Codex', agent: 'codex', internalSessionId: 'owner',
-      panelIds: { claude: 'claude', codex: 'codex', cursor: 'cursor' },
+      panelIds: { claude: 'claude', codex: 'codex', cursor: 'cursor', opencode: 'opencode' },
       goal: '', context: '', decisions: [], blockers: [], nextAction: '', evidence: [], outputs: [],
       associations: [], activity: [], revision: 1, createdAt: '2026-09-21', updatedAt: '2026-09-21',
     };

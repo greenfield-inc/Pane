@@ -45,7 +45,7 @@ interface OrchestrationActivity {
   panelId?: string;
 }
 
-type OrchestrationAgent = 'claude' | 'codex' | 'cursor';
+type OrchestrationAgent = 'claude' | 'codex' | 'cursor' | 'opencode';
 
 interface OrchestrationSessionRecord {
   runtime?: 'windows' | 'wsl';
@@ -56,7 +56,8 @@ interface OrchestrationSessionRecord {
   isPinned?: boolean;
   agent: OrchestrationAgent;
   internalSessionId: string;
-  panelIds: Record<OrchestrationAgent, string>;
+  /** Pane versions before OpenCode Sessions send no `opencode` panel id. */
+  panelIds: Record<Exclude<OrchestrationAgent, 'opencode'>, string> & { opencode?: string };
   goal: string;
   context: string;
   decisions: string[];
@@ -1081,7 +1082,7 @@ interface PaneAdoptRequestInput extends Omit<PaneAdoptRequest, 'panes'> {
 }
 
 const agentSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.agents);
-const orchestrationAgentSchema = boundary.enumeration('claude', 'codex', 'cursor');
+const orchestrationAgentSchema = boundary.enumeration('claude', 'codex', 'cursor', 'opencode');
 const repoSummarySchema: BoundarySchema<RepoSummary> = boundary.object({
   id: boundary.number,
   name: boundary.string,
@@ -1354,6 +1355,7 @@ const orchestrationSessionRecordSchema: BoundarySchema<OrchestrationSessionRecor
     claude: boundary.nonEmptyString,
     codex: boundary.nonEmptyString,
     cursor: boundary.nonEmptyString,
+    opencode: boundary.optional(boundary.nonEmptyString),
   }),
   launchCommand: boundary.optional(boundary.string),
   profile: boundary.optional(boundary.string),

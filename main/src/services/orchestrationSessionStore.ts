@@ -12,6 +12,7 @@ import {
   type JsonValue,
 } from '../../../shared/validation/boundaryDecoder';
 import {
+  LEGACY_ORCHESTRATION_SESSION_ID,
   ORCHESTRATION_SESSION_STORE_VERSION,
   type OrchestrationActivity,
   type OrchestrationAssociation,
@@ -20,8 +21,9 @@ import {
   type OrchestrationSessionRecord,
   type OrchestrationSessionStoreData,
 } from '../../../shared/types/orchestrationSession';
+import { getPaneChatPanelId } from '../../../shared/types/paneChat';
 
-const paneChatAgentSchema = boundary.enumeration('claude', 'codex', 'cursor');
+const paneChatAgentSchema = boundary.enumeration('claude', 'codex', 'cursor', 'opencode');
 const sourceSchema = boundary.enumeration('user', 'agent', 'system');
 const activityKindSchema = boundary.enumeration(
   'created',
@@ -73,7 +75,7 @@ const activitySchema: BoundarySchema<OrchestrationActivity> = boundary.object({
   panelId: boundary.optional(boundary.nonEmptyString),
 });
 
-const sessionSchema: BoundarySchema<OrchestrationSessionRecord> = boundary.object({
+const sessionSchema = boundary.object({
   runtime: boundary.optional(boundary.enumeration('windows', 'wsl')),
   wslDistribution: boundary.optional(boundary.nonEmptyString),
   promotedFrom: boundary.optional(boundary.object({ paneId: boundary.nonEmptyString, panelId: boundary.nonEmptyString })),
@@ -93,6 +95,7 @@ const sessionSchema: BoundarySchema<OrchestrationSessionRecord> = boundary.objec
     claude: boundary.nonEmptyString,
     codex: boundary.nonEmptyString,
     cursor: boundary.nonEmptyString,
+    opencode: boundary.optional(boundary.nonEmptyString),
   }),
   goal: boundary.string,
   context: boundary.string,
@@ -252,6 +255,12 @@ function sanitizeSession(value: JsonValue, index: number, problems: string[]): O
     delete fields.reportActivityId;
     delete fields.reportAcceptedAt;
   }
+  // A bad OpenCode panel id is replaced by the derived one rather than dropping the Session.
+  const panelIds = decodeOptionalBoundary(fields.panelIds, boundary.jsonObject);
+  if (panelIds?.opencode !== undefined && decodeOptionalBoundary(panelIds.opencode, boundary.nonEmptyString) === undefined) {
+    problems.push(`${label}: replaced an invalid OpenCode panel id`);
+    fields.panelIds = Object.fromEntries(Object.entries(panelIds).filter(([agent]) => agent !== 'opencode'));
+  }
   if (fields.runtime === 'wsl' && decodeOptionalBoundary(fields.wslDistribution, boundary.nonEmptyString) === undefined) {
     problems.push(`dropped ${label}: a WSL Session requires a distribution`);
     return undefined;
@@ -263,7 +272,11 @@ function sanitizeSession(value: JsonValue, index: number, problems: string[]): O
     delete fields.wslDistribution;
   }
   try {
-    return decodeBoundary(fields, sessionSchema);
+    const session = decodeBoundary(fields, sessionSchema);
+    // Sessions saved before OpenCode joined get its derived panel id.
+    const opencode = session.panelIds.opencode ?? (session.id === LEGACY_ORCHESTRATION_SESSION_ID
+      ? getPaneChatPanelId('opencode') : `__orchestration_panel_${session.id}_opencode`);
+    return { ...session, panelIds: { ...session.panelIds, opencode } };
   } catch (error) {
     if (!(error instanceof BoundaryDecodeError)) throw error;
     problems.push(`dropped ${label}: ${error.message}`);

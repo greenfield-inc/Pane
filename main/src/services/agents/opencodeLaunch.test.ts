@@ -1,17 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
-  allocateOpenCodeSessionId,
+  extractOpenCodeSessionId,
   isValidOpenCodeSessionId,
   OPENCODE_SESSION_ID_PATTERN,
   resolveOpenCodeLaunchCommand,
 } from './opencodeLaunch';
 
 describe('OpenCode session ids', () => {
-  it('allocates an OpenCode session id from a UUID', () => {
-    expect(allocateOpenCodeSessionId(() => '123e4567-e89b-12d3-a456-426614174000'))
-      .toBe('ses_123e4567e89b12d3a456426614174000');
-  });
-
   it.each([
     'ses_a',
     'ses_ABC123',
@@ -66,13 +61,8 @@ describe('resolveOpenCodeLaunchCommand', () => {
   it.each([
     'bash -lc "opencode --auto"',
     'env -- opencode --auto',
-  ])('rejects unsupported wrapper argv before allocating an identity: %s', (baseCommand) => {
-    let allocations = 0;
-    expect(() => resolveOpenCodeLaunchCommand({
-      baseCommand,
-      allocateSessionId: () => { allocations += 1; return 'ses_generated'; },
-    })).toThrow(/unsupported.*wrapper/i);
-    expect(allocations).toBe(0);
+  ])('rejects unsupported wrapper argv: %s', (baseCommand) => {
+    expect(() => resolveOpenCodeLaunchCommand({ baseCommand })).toThrow(/unsupported.*wrapper/i);
   });
 
   it.each([
@@ -81,19 +71,20 @@ describe('resolveOpenCodeLaunchCommand', () => {
     'env opencode --auto',
     '"/opt/Open Code/bin/opencode" --model "large model"',
   ])('preserves supported direct executable and environment prefixes: %s', (baseCommand) => {
-    expect(resolveOpenCodeLaunchCommand({ baseCommand, allocateSessionId: () => 'ses_generated' })).toEqual({
+    expect(resolveOpenCodeLaunchCommand({ baseCommand, persistedSessionId: 'ses_generated' })).toEqual({
       commandToRun: `${baseCommand} --session "ses_generated"`, sessionId: 'ses_generated',
     });
   });
 
-  it('allocates and appends a session selector', () => {
+  it('starts a new conversation without a selector, since OpenCode refuses ids it has not created', () => {
+    expect(resolveOpenCodeLaunchCommand({ baseCommand: 'opencode --auto' })).toEqual({ commandToRun: 'opencode --auto' });
+  });
+
+  it('starts fresh instead of resuming an id that Pane allocated before OpenCode created any', () => {
     expect(resolveOpenCodeLaunchCommand({
       baseCommand: 'opencode --auto',
-      allocateSessionId: () => 'ses_generated',
-    })).toEqual({
-      commandToRun: 'opencode --auto --session "ses_generated"',
-      sessionId: 'ses_generated',
-    });
+      persistedSessionId: 'ses_ba586d4622f44c55b6f595aec9b95fb7',
+    })).toEqual({ commandToRun: 'opencode --auto' });
   });
 
   it.each([
@@ -123,7 +114,7 @@ describe('resolveOpenCodeLaunchCommand', () => {
     const baseCommand = 'opencode --model "large model" \'describe --session ses_not_a_selector\'';
     expect(resolveOpenCodeLaunchCommand({
       baseCommand,
-      allocateSessionId: () => 'ses_generated',
+      persistedSessionId: 'ses_generated',
     })).toEqual({
       commandToRun: `${baseCommand} --session "ses_generated"`,
       sessionId: 'ses_generated',
@@ -133,7 +124,7 @@ describe('resolveOpenCodeLaunchCommand', () => {
   it('inserts the selector before the first argument terminator', () => {
     expect(resolveOpenCodeLaunchCommand({
       baseCommand: 'opencode --auto -- --session positional',
-      allocateSessionId: () => 'ses_generated',
+      persistedSessionId: 'ses_generated',
     })).toEqual({
       commandToRun: 'opencode --auto --session "ses_generated" -- --session positional',
       sessionId: 'ses_generated',
@@ -155,7 +146,7 @@ describe('resolveOpenCodeLaunchCommand', () => {
   ])('rejects unsupported shell syntax: %s', (_reason, baseCommand) => {
     expect(() => resolveOpenCodeLaunchCommand({
       baseCommand,
-      allocateSessionId: () => 'ses_generated',
+      persistedSessionId: 'ses_generated',
     })).toThrow();
   });
 
@@ -165,7 +156,7 @@ describe('resolveOpenCodeLaunchCommand', () => {
   ])('separates an inserted selector after %s', (_reason, baseCommand, commandToRun) => {
     expect(resolveOpenCodeLaunchCommand({
       baseCommand,
-      allocateSessionId: () => 'ses_generated',
+      persistedSessionId: 'ses_generated',
     })).toEqual({ commandToRun, sessionId: 'ses_generated' });
   });
 
@@ -184,7 +175,7 @@ describe('resolveOpenCodeLaunchCommand', () => {
   it('allows continue text after the argument terminator', () => {
     expect(resolveOpenCodeLaunchCommand({
       baseCommand: 'opencode -- --continue',
-      allocateSessionId: () => 'ses_generated',
+      persistedSessionId: 'ses_generated',
     })).toEqual({
       commandToRun: 'opencode --session "ses_generated" -- --continue',
       sessionId: 'ses_generated',
@@ -198,13 +189,6 @@ describe('resolveOpenCodeLaunchCommand', () => {
     expect(() => resolveOpenCodeLaunchCommand({ baseCommand })).toThrow();
   });
 
-  it.each(['\n', '\r', '\u2028', '\u2029'])('rejects an allocated id with a trailing line terminator', (terminator) => {
-    expect(() => resolveOpenCodeLaunchCommand({
-      baseCommand: 'opencode --auto',
-      allocateSessionId: () => `ses_generated${terminator}`,
-    })).toThrow();
-  });
-
   it.each([
     ['a missing operand', 'opencode --session'],
     ['an empty equals operand', 'opencode --session='],
@@ -216,7 +200,7 @@ describe('resolveOpenCodeLaunchCommand', () => {
   ])('rejects %s', (_reason, baseCommand) => {
     expect(() => resolveOpenCodeLaunchCommand({
       baseCommand,
-      allocateSessionId: () => 'ses_generated',
+      persistedSessionId: 'ses_generated',
     })).toThrow();
   });
 
@@ -225,5 +209,17 @@ describe('resolveOpenCodeLaunchCommand', () => {
       baseCommand: 'opencode --session ses_command',
       persistedSessionId: 'ses_persisted',
     })).toThrow();
+  });
+});
+
+describe('extractOpenCodeSessionId', () => {
+  it('reads the id from the line OpenCode 1.18 prints when its TUI exits', () => {
+    const exitScreen = '  Session   New session - 2026-11-04T21:10:08.645Z\r\n  Continue  opencode -s ses_e579a29faffeH5iFWLRgE503S4\r\n\r\n';
+    expect(extractOpenCodeSessionId(exitScreen)).toBe('ses_e579a29faffeH5iFWLRgE503S4');
+  });
+
+  it('takes the latest exit line and ignores text without one', () => {
+    expect(extractOpenCodeSessionId('Continue  opencode -s ses_first\r\n$ opencode\r\nContinue  opencode -s ses_second\r\n')).toBe('ses_second');
+    expect(extractOpenCodeSessionId('$ opencode --auto\r\n')).toBeUndefined();
   });
 });

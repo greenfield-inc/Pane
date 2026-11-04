@@ -256,7 +256,7 @@ export const boundary = {
         for (const key of Object.keys(fields)) {
           const schema = fields[key];
           if (schema === undefined) current.fail(`missing schema for ${key}`);
-          decoded.push([key, decodeChild(current, key, source[key], schema)]);
+          decoded.push([key, decodeChild(current, key, Object.prototype.hasOwnProperty.call(source, key) ? source[key] : undefined, schema)]);
         }
         return materializeObject<Fields>(decoded);
       },

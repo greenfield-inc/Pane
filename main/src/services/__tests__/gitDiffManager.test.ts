@@ -58,7 +58,8 @@ afterEach(() => {
   for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
 });
 
-describe('GitDiffManager asynchronous history and execution capture', () => {
+// Real-Git history capture uses the integration budget, not a latency contract.
+describe('GitDiffManager asynchronous history and execution capture', { timeout: 15000 }, () => {
   it('keeps history, graph, commit diffs, and working changes usable through the async runner', async () => {
     const cwd = repository();
     const before = head(cwd);
@@ -86,7 +87,8 @@ describe('GitDiffManager asynchronous history and execution capture', () => {
   });
 });
 
-describe('GitDiffManager manifests', () => {
+// Real-Git manifest coverage uses the integration budget, not a latency contract.
+describe('GitDiffManager manifests', { timeout: 15000 }, () => {
   it('lists the complete net session diff across 60 commits plus staged, unstaged, and untracked work', async () => {
     const cwd = repository();
     const committedPaths: string[] = [];
@@ -279,7 +281,8 @@ describe('GitDiffManager manifests', () => {
   });
 });
 
-describe('GitDiffManager file diffs', () => {
+// Real-Git file-state coverage uses the integration budget, not a latency contract.
+describe('GitDiffManager file diffs', { timeout: 15000 }, () => {
   it('returns isolated real-git patches for every supported file state', async () => {
     const cwd = repository();
     write(cwd, 'modified.txt', 'before modified\n');

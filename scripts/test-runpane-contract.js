@@ -4177,6 +4177,22 @@ async function checkOverviewReportsAndLocks() {
   assertIncludes(text, 'report ready pr#747 fc5dce9 (panel panel-a');
   assertIncludes(text, 'lock testing-account');
 
+  // An OpenCode Session reads like any other; older Pane versions send no opencode panel id.
+  const opencodeOverview = structuredClone(overview);
+  opencodeOverview.session.agent = 'opencode';
+  opencodeOverview.session.panelIds.opencode = 'orch-opencode';
+  const { decodeBoundary } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'boundaryDecoder.js'));
+  daemonClient.invokeDaemon = async (_channel, _args, schema) => decodeBoundary(opencodeOverview, schema);
+  console.log = (line) => printed.push(String(line));
+  printed.length = 0;
+  try {
+    assert.strictEqual(await runSessionsOverview(parseRunpaneArgs(['sessions', 'overview', '--session', 'Release QA', '--json'])), 0);
+    assert.deepStrictEqual(JSON.parse(printed.join('\n')).session.panelIds.opencode, 'orch-opencode');
+  } finally {
+    daemonClient.invokeDaemon = originalInvokeDaemon;
+    console.log = originalConsoleLog;
+  }
+
   const pythonText = runPythonSnippet(`
 import json
 import sys

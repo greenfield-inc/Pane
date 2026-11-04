@@ -15,7 +15,7 @@ import { Input, Textarea } from './ui/Input';
 import { Toggle } from './ui/Toggle';
 import { SessionLaunchFields } from './SessionLaunchFields';
 
-const SESSION_AGENT_OPTIONS: ReadonlyArray<{ id: PaneChatAgent; label: string }> = (['claude', 'codex', 'cursor'] as const)
+const SESSION_AGENT_OPTIONS: ReadonlyArray<{ id: PaneChatAgent; label: string }> = (['claude', 'codex', 'cursor', 'opencode'] as const)
   .map(id => ({ id, label: PANE_CHAT_AGENT_LABELS[id] }));
 
 function availableSessionAgents(wsl = false, environment?: ProjectEnvironment): ReadonlyArray<{ id: PaneChatAgent; label: string }> {
@@ -148,7 +148,6 @@ export function OrchestrationSessionForm({ isOpen, onClose, onCreate, header, on
       if (config?.defaultOrchestratorAgent !== agent) defaults.defaultOrchestratorAgent = agent;
       if ((config?.defaultSessionCommand ?? '') !== launchCommand) defaults.defaultSessionCommand = launchCommand;
       if (JSON.stringify(config?.defaultSessionResume ?? null) !== JSON.stringify(customResume)) defaults.defaultSessionResume = customResume;
-      if (Object.keys(defaults).length > 0) await updateConfig(defaults);
       await onCreate({
         agent,
         name: name.trim() || undefined,
@@ -160,6 +159,8 @@ export function OrchestrationSessionForm({ isOpen, onClose, onCreate, header, on
         wslDistribution: wslDistribution || undefined,
         isPinned: startPinned,
       });
+      // Defaults change only once a Session was created, so a refused launch is not offered again.
+      if (Object.keys(defaults).length > 0) await updateConfig(defaults);
     } catch (cause) {
       dispatch({ type: 'update', values: { error: cause instanceof Error ? cause.message : 'Failed to create Session' } });
     } finally {

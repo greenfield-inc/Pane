@@ -452,7 +452,7 @@ export class DemoWorkspace {
     return {
       id, name, agent, archived: false, isPinned: false,
       internalSessionId: `${id}terminal__`,
-      panelIds: { claude: `${id}claude`, codex: `${id}codex`, cursor: `${id}cursor` },
+      panelIds: { claude: `${id}claude`, codex: `${id}codex`, cursor: `${id}cursor`, opencode: `${id}opencode` },
       goal: '', context: '', decisions: [], blockers: [], nextAction: '', evidence: [], outputs: [],
       associations: [
         { paneId: 'demo-fix-checkout-race', panelIds: [], attachedAt: at },
