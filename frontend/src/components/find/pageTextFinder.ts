@@ -5,18 +5,20 @@
  * never rewritten.
  */
 import { findInPrepared, prepareSegments, stepMatchIndex, type PreparedText, type TextMatch, type TextSegment } from './findText';
-import { reportFindResult, type FindAdapter, type FindMode, type FindResult } from './findController';
+import { reportFindResult, syncFindMode, type FindAdapter, type FindMode, type FindResult } from './findController';
 
 const MATCH_HIGHLIGHT = 'pane-find-match';
 const CURRENT_HIGHLIGHT = 'pane-find-current';
 /** Re-search this long after the content stops changing. */
 const RERUN_DELAY_MS = 150;
 /**
- * Highlight at most this many matches either side of the current one; the
- * count still covers every match. Painting 100k ranges (a one-letter query in
- * a 1 MB file) would stall typing.
+ * Highlight at most this many matches either side of the current one, plus
+ * the matches on screen; the count still covers every match. Painting 100k
+ * ranges (a one-letter query in a 1 MB file) would stall typing.
  */
 const HIGHLIGHT_WINDOW = 500;
+/** At most this many on-screen matches are painted beyond the window. */
+const VISIBLE_LIMIT = 2000;
 
 const INLINE_TAGS = new Set([
   'A', 'ABBR', 'B', 'BDI', 'BDO', 'CITE', 'CODE', 'DATA', 'DEL', 'DFN', 'EM', 'FONT', 'I', 'INS', 'KBD',
@@ -131,6 +133,27 @@ function scrollRangeIntoView(range: Range, root: Element): void {
   }
 }
 
+/**
+ * While the tab's bar is open, fit it to content that switches mode (Preview
+ * to Source puts Monaco in the tab; a reused tab swaps an image for text).
+ * Returns a stop function.
+ */
+export function watchFindMode(panelId: string, root: HTMLElement): () => void {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const observer = new MutationObserver(() => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => {
+      timer = null;
+      syncFindMode(panelId);
+    }, RERUN_DELAY_MS);
+  });
+  observer.observe(root, { childList: true, subtree: true });
+  return () => {
+    observer.disconnect();
+    if (timer) clearTimeout(timer);
+  };
+}
+
 export interface PageTextAdapter extends FindAdapter {
   dispose(): void;
 }
@@ -143,6 +166,10 @@ export function createPageTextAdapter(panelId: string, getRoot: () => HTMLElemen
   let text: { root: HTMLElement; nodes: Text[]; prepared: PreparedText } | null = null;
   let observer: MutationObserver | null = null;
   let rerunTimer: ReturnType<typeof setTimeout> | null = null;
+  // Match indexes painted now, as [from, to) intervals.
+  let painted: Array<[number, number]> = [];
+  let scrollRoot: HTMLElement | null = null;
+  let scrollFrame: number | null = null;
 
   const result = (): FindResult => ({ current, total: matches.length });
 
@@ -157,26 +184,93 @@ export function createPageTextAdapter(panelId: string, getRoot: () => HTMLElemen
     return range;
   };
 
+  const rectOf = (index: number): DOMRect | null => toRange(matches[index])?.getBoundingClientRect() ?? null;
+
+  /** The matches inside the tab's visible area, found by binary search (matches are in page order). */
+  const visibleInterval = (): [number, number] | null => {
+    if (!text || !matches.length) return null;
+    const view = text.root.getBoundingClientRect();
+    const top = Math.max(view.top, 0);
+    const bottom = Math.min(view.bottom, text.root.ownerDocument.defaultView?.innerHeight ?? view.bottom);
+    if (bottom <= top) return null;
+    let low = 0;
+    let high = matches.length;
+    while (low < high) {
+      const mid = (low + high) >> 1;
+      const rect = rectOf(mid);
+      if (!rect || rect.bottom < top) low = mid + 1;
+      else high = mid;
+    }
+    let end = low;
+    while (end < matches.length && end - low < VISIBLE_LIMIT) {
+      const rect = rectOf(end);
+      if (rect && rect.top > bottom) break;
+      end += 1;
+    }
+    return end > low ? [low, end] : null;
+  };
+
+  const isPainted = ([from, to]: [number, number]) => painted.some(([a, b]) => a <= from && to <= b);
+
   const paint = (scroll: boolean) => {
     if (!matches.length) {
+      painted = [];
       highlightsByTab.delete(panelId);
       syncHighlights();
       return;
     }
     const center = Math.max(current - 1, 0);
-    const from = Math.max(0, center - HIGHLIGHT_WINDOW);
-    const to = Math.min(matches.length, center + HIGHLIGHT_WINDOW + 1);
+    const around: [number, number] = [Math.max(0, center - HIGHLIGHT_WINDOW), Math.min(matches.length, center + HIGHLIGHT_WINDOW + 1)];
     const all: Range[] = [];
     let currentRange: Range | null = null;
-    for (let index = from; index < to; index += 1) {
-      const range = toRange(matches[index]);
-      if (!range) continue;
-      all.push(range);
-      if (index === current - 1) currentRange = range;
+    const addInterval = ([from, to]: [number, number], skip: [number, number] | null) => {
+      for (let index = from; index < to; index += 1) {
+        if (skip && index >= skip[0] && index < skip[1]) continue;
+        const range = toRange(matches[index]);
+        if (!range) continue;
+        all.push(range);
+        if (index === current - 1) currentRange = range;
+      }
+    };
+    addInterval(around, null);
+    painted = [around];
+    if (scroll && current > 0) {
+      // Moving to a match scrolls it into view, which is inside `around`.
+      const currentMatch = toRange(matches[current - 1]);
+      if (currentMatch && text) scrollRangeIntoView(currentMatch, text.root);
+    }
+    const visible = visibleInterval();
+    if (visible && !isPainted(visible)) {
+      addInterval(visible, around);
+      painted.push(visible);
     }
     highlightsByTab.set(panelId, { all, current: currentRange });
     syncHighlights();
-    if (scroll && currentRange && text) scrollRangeIntoView(currentRange, text.root);
+  };
+
+  // Scrolling by hand brings matches outside the window on screen: paint them.
+  const onScroll = () => {
+    if (scrollFrame !== null) return;
+    scrollFrame = requestAnimationFrame(() => {
+      scrollFrame = null;
+      const visible = visibleInterval();
+      if (visible && !isPainted(visible)) paint(false);
+    });
+  };
+
+  const watchScroll = (root: HTMLElement) => {
+    if (scrollRoot === root) return;
+    unwatchScroll();
+    scrollRoot = root;
+    // Scroll events don't bubble; capture sees every scroller inside the tab.
+    root.addEventListener('scroll', onScroll, { capture: true, passive: true });
+  };
+
+  const unwatchScroll = () => {
+    scrollRoot?.removeEventListener('scroll', onScroll, { capture: true });
+    scrollRoot = null;
+    if (scrollFrame !== null) cancelAnimationFrame(scrollFrame);
+    scrollFrame = null;
   };
 
   const pageText = (root: HTMLElement) => {
@@ -188,6 +282,7 @@ export function createPageTextAdapter(panelId: string, getRoot: () => HTMLElemen
   };
 
   const stopObserving = () => {
+    unwatchScroll();
     observer?.disconnect();
     observer = null;
     if (rerunTimer) clearTimeout(rerunTimer);
@@ -205,6 +300,11 @@ export function createPageTextAdapter(panelId: string, getRoot: () => HTMLElemen
         rerunTimer = null;
         const latest = getRoot();
         if (!query || !latest) return;
+        // The tab now shows the code editor or a no-text preview: don't search it.
+        if (pageTextFindMode(latest) !== 'text') {
+          syncFindMode(panelId);
+          return;
+        }
         const previous = current;
         matches = findInPrepared(pageText(latest).prepared, query);
         current = matches.length ? Math.min(Math.max(previous, 1), matches.length) : 0;
@@ -238,6 +338,7 @@ export function createPageTextAdapter(panelId: string, getRoot: () => HTMLElemen
       current = matches.length ? 1 : 0;
       paint(true);
       observe(root);
+      watchScroll(root);
       return result();
     },
     step(direction) {

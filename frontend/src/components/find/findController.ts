@@ -66,6 +66,11 @@ export function useFindBar(panelId: string): FindBarState {
   return useFindStore((state) => state.bars[panelId] ?? CLOSED);
 }
 
+/** Whether the tab's bar is open, without re-rendering on every result. */
+export function useFindBarOpen(panelId: string): boolean {
+  return useFindStore((state) => state.bars[panelId]?.open ?? false);
+}
+
 function updateBar(panelId: string, patch: Partial<FindBarState>): void {
   useFindStore.setState((state) => ({
     bars: { ...state.bars, [panelId]: { ...(state.bars[panelId] ?? CLOSED), ...patch } },
@@ -92,14 +97,43 @@ export function getFindTargets(): ReadonlyMap<string, FindTarget> {
 export function registerFindTarget(panelId: string, target: FindTarget): () => void {
   targets.set(panelId, target);
   // A tab that remounts (browser and editor tabs unmount when hidden) picks
-  // its open search back up.
+  // its open search back up, or changes the bar to suit its new content.
   const bar = getFindBar(panelId);
   if (bar.open && bar.query && !bar.noText && target.adapter.mode() === 'text') {
     applyResult(panelId, target.adapter.search(bar.query));
+  } else {
+    syncFindMode(panelId);
   }
   return () => {
     if (targets.get(panelId) === target) targets.delete(panelId);
   };
+}
+
+/**
+ * The tab's content changed what it offers (a preview switched to the code
+ * editor, an image tab now shows text): fit the open bar to it. Monaco takes
+ * over find, so Pane's bar closes; a tab with no text says so; text that
+ * appears re-runs the remembered query.
+ */
+export function syncFindMode(panelId: string): void {
+  const target = targets.get(panelId);
+  const bar = getFindBar(panelId);
+  if (!target || !bar.open) return;
+  const mode = target.adapter.mode();
+  if (mode === 'native') {
+    target.adapter.clear();
+    updateBar(panelId, { open: false, result: EMPTY_RESULT, noText: false });
+    return;
+  }
+  if (mode === 'none') {
+    if (bar.noText) return;
+    target.adapter.clear();
+    updateBar(panelId, { noText: true, result: EMPTY_RESULT });
+    return;
+  }
+  if (!bar.noText) return;
+  updateBar(panelId, { noText: false, result: EMPTY_RESULT });
+  if (bar.query) applyResult(panelId, target.adapter.search(bar.query));
 }
 
 function seedFromSelection(adapter: FindAdapter): string | null {
@@ -108,8 +142,11 @@ function seedFromSelection(adapter: FindAdapter): string | null {
   return selection;
 }
 
-/** Open (or refocus) the tab's bar. Returns false when the tab has no Pane find. */
-export function openFind(panelId: string): boolean {
+/**
+ * Open (or refocus) the tab's bar. Returns false when the tab has no Pane find.
+ * `seed: false` keeps the remembered query instead of the selected text.
+ */
+export function openFind(panelId: string, options: { seed?: boolean } = {}): boolean {
   const target = targets.get(panelId);
   if (!target) return false;
   const mode = target.adapter.mode();
@@ -117,7 +154,7 @@ export function openFind(panelId: string): boolean {
 
   const bar = getFindBar(panelId);
   const noText = mode === 'none';
-  const seed = noText ? null : seedFromSelection(target.adapter);
+  const seed = noText || options.seed === false ? null : seedFromSelection(target.adapter);
   const query = seed ?? bar.query;
   const rerun = !noText && query !== '' && (!bar.open || seed !== null);
   updateBar(panelId, { open: true, query, noText, focusRequest: bar.focusRequest + 1 });
@@ -138,14 +175,18 @@ export function setFindQuery(panelId: string, query: string): void {
   applyResult(panelId, target.adapter.search(query));
 }
 
-/** Cmd+G / Shift+Cmd+G. With the bar closed, reopens it on the last query. */
+/**
+ * Cmd+G / Shift+Cmd+G. With the bar closed, reopens it on the last query
+ * (not the selection) and moves once: Next to the second match, Previous to
+ * the last, as a reopened search starts on the first.
+ */
 export function stepFind(panelId: string, direction: 'next' | 'prev'): boolean {
   const target = targets.get(panelId);
   if (!target) return false;
   const bar = getFindBar(panelId);
   if (!bar.open) {
     if (!bar.query || target.adapter.mode() !== 'text') return false;
-    return openFind(panelId);
+    if (!openFind(panelId, { seed: false })) return false;
   }
   if (bar.noText || !bar.query) return true;
   applyResult(panelId, target.adapter.step(direction));

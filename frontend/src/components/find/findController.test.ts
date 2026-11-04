@@ -8,6 +8,7 @@ import {
   resetFindForTests,
   setFindQuery,
   stepFind,
+  syncFindMode,
   type FindAdapter,
   type FindMode,
 } from './findController';
@@ -117,7 +118,79 @@ describe('find controller', () => {
     expect(stepFind('term', 'next')).toBe(true);
 
     expect(getFindBar('term').open).toBe(true);
+    expect(adapter.calls).toEqual(['search:needle', 'step:next']);
+    expect(getFindBar('term').result).toEqual({ current: 2, total: 3 });
+  });
+
+  it('reopens and moves back with Previous when the bar is closed', () => {
+    const adapter = fakeAdapter(3);
+    register('preview', adapter);
+    openFind('preview');
+    setFindQuery('preview', 'needle');
+    closeFind('preview');
+
+    stepFind('preview', 'prev');
+
+    expect(getFindBar('preview').result).toEqual({ current: 3, total: 3 });
+  });
+
+  it('keeps the remembered query, not the selection, when Cmd+G reopens', () => {
+    const adapter = fakeAdapter();
+    register('preview', adapter);
+    openFind('preview');
+    setFindQuery('preview', 'needle');
+    closeFind('preview');
+    adapter.selection = 'other';
+    adapter.calls.length = 0;
+
+    stepFind('preview', 'next');
+
+    expect(getFindBar('preview').query).toBe('needle');
+    expect(adapter.calls).toEqual(['search:needle', 'step:next']);
+  });
+
+  it('closes the bar when the tab switches to an editor with its own find', () => {
+    const adapter = fakeAdapter();
+    register('file', adapter);
+    openFind('file');
+    setFindQuery('file', 'needle');
+    adapter.calls.length = 0;
+
+    adapter.currentMode = 'native';
+    syncFindMode('file');
+
+    expect(adapter.calls).toEqual(['clear']);
+    expect(getFindBar('file')).toMatchObject({ open: false, query: 'needle' });
+  });
+
+  it('switches an open bar to the no-text notice and back as the content changes', () => {
+    const adapter = fakeAdapter(4);
+    register('file', adapter);
+    openFind('file');
+    setFindQuery('file', 'needle');
+
+    adapter.currentMode = 'none';
+    syncFindMode('file');
+    expect(getFindBar('file')).toMatchObject({ open: true, noText: true, result: { current: 0, total: 0 } });
+
+    adapter.calls.length = 0;
+    adapter.currentMode = 'text';
+    syncFindMode('file');
     expect(adapter.calls).toEqual(['search:needle']);
+    expect(getFindBar('file')).toMatchObject({ open: true, noText: false, result: { current: 1, total: 4 } });
+  });
+
+  it('fits an open bar to a remounted tab whose content changed', () => {
+    const image = fakeAdapter();
+    image.currentMode = 'none';
+    const unregister = register('file', image);
+    openFind('file');
+    expect(getFindBar('file').noText).toBe(true);
+    unregister();
+
+    const markdown = fakeAdapter(2);
+    register('file', markdown);
+    expect(getFindBar('file').noText).toBe(false);
   });
 
   it('does nothing on step with the bar closed and no query', () => {
