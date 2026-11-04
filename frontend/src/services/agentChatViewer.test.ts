@@ -8,7 +8,6 @@ it('repairs a viewer event gap and detaches without cancelling or stopping the h
   const stopped = vi.fn();
   const client: AgentChatClient = {
     get: async () => structuredClone(host), setup: async () => ({ installed: true }),
-    switch: async () => { throw Error('unused'); }, recover: async () => { throw Error('unused'); },
     send: async () => { throw Error('unused'); }, receipt: async () => undefined,
     cancel: stopped, permission: async () => undefined, stop: stopped,
     onEvent: callback => { event = callback; return () => { event = undefined; }; }, onState: () => () => undefined,
@@ -37,7 +36,7 @@ it('preserves newer host state when a delayed refresh completes', async () => {
   let receive: ((view: AgentChatView) => void) | undefined;
   const get = vi.fn(async () => structuredClone(host));
   const unused = async (): Promise<never> => { throw Error('unused'); };
-  const client: AgentChatClient = { get, setup: unused, switch: unused, recover: unused, send: unused, receipt: unused, cancel: unused, permission: unused, stop: unused, onEvent: () => () => undefined, onState: callback => { receive = callback; return () => undefined; } };
+  const client: AgentChatClient = { get, setup: unused, send: unused, receipt: unused, cancel: unused, permission: unused, stop: unused, onEvent: () => () => undefined, onState: callback => { receive = callback; return () => undefined; } };
   const viewer = new AgentChatViewer(client, 'a');
   const detach = viewer.subscribe(() => undefined);
   await viewer.refresh();

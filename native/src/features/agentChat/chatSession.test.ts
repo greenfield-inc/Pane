@@ -23,14 +23,6 @@ function fixture() {
 }
 
 describe('native Chat viewer', () => {
-  it('retains host identification requirements and native startup through snapshot and event decoding', async () => {
-    const { session, setHost, getHost } = fixture();
-    setHost({ ...getHost(), identificationRequired: true, identificationSocketRequired: false });
-    await session.refresh();
-    expect(session.snapshot().view?.identificationSocketRequired).toBe(false);
-    session.receiveState(decodeAgentChatView({ ...getHost(), conversation: { ...getHost().conversation!, nativeStartup: true } }));
-    expect(session.snapshot().view?.conversation?.nativeStartup).toBe(true);
-  });
   it('loads the new generation when a handoff overtakes an older snapshot', async () => {
     const { session, transport, getHost } = fixture();
     let resolve: ((view: AgentChatView) => void) | undefined;

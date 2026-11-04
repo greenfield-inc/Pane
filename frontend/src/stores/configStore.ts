@@ -26,11 +26,6 @@ export function isMissionControlEnabled(config: AppConfig | null): boolean {
   return config?.missionControlEnabled === true;
 }
 
-/** Chat is experimental: agent tabs stay in Terminal until the user opts in. */
-export function isChatEnabled(config: AppConfig | null): boolean {
-  return config?.experimentalChatEnabled === true;
-}
-
 /** Notes is experimental: every entry point and the agents' notes file wait for this opt-in. */
 export function isNotesEnabled(config: AppConfig | null): boolean {
   return config?.notesEnabled === true;

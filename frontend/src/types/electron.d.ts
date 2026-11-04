@@ -178,7 +178,6 @@ interface ElectronAPI {
     rendererFatal: (payload: RendererDiagnosticPayload) => Promise<IPCResponse>;
   };
 
-  agentChat: import('../../../shared/types/agentChat').AgentChatClient;
 
   paneChat: {
     getOrCreate: () => Promise<IPCResponse<PaneChatState<Session>>>;

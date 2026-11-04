@@ -4922,12 +4922,6 @@ export class DatabaseService {
     });
   }
 
-  getAgentChatPanelIds(): string[] {
-    // SAFETY: The fixed projection selects IDs of terminal rows with host-owned chat state.
-    const rows = this.db.prepare("SELECT id FROM tool_panels WHERE type = 'terminal' AND json_extract(state, '$.customState.agentChat') IS NOT NULL").all() as Array<{ id: string }>;
-    return rows.map(row => row.id);
-  }
-
   // Only these panel types need restart cleanup. Terminal history stays on disk
   // until its session is opened, including stopped and archived sessions.
   getPanelsForStartup(): ToolPanel[] {
