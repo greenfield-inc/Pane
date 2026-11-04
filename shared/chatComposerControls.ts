@@ -63,8 +63,8 @@ export function modelSummary(controls: ComposerControls): string {
   return [model, effort].filter(Boolean).join(' · ') || 'Options';
 }
 
-/** Permission modes that let the agent act without asking: the phone marks them on the composer row. */
-const RISKY_MODES = new Set(['bypassPermissions', 'dontAsk', 'full-access']);
+/** Permission modes that let the agent act without asking (Claude Code's and codex-acp's ids): the phone marks them on the composer row. */
+const RISKY_MODES = new Set(['bypassPermissions', 'dontAsk', 'agent-full-access']);
 
 export function isRiskyMode(mode: AgentChatConfigOption | undefined): boolean {
   return !!mode && RISKY_MODES.has(mode.currentValue);

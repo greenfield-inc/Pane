@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AgentChatConfigOption } from '../../../../shared/types/agentChat';
+import { decodeChatTabView } from '../../../../shared/types/chatTabDecoders';
 import { arrangeComposerControls, isRiskyMode, modelSummary, onOffValues, phoneSettingsOrder, triggerLabels } from '../../../../shared/chatComposerControls';
 
 function select(id: string, name: string, currentValue: string, category?: string): AgentChatConfigOption {
@@ -46,6 +47,8 @@ describe('the composer row', () => {
     ]);
     expect(phoneSettingsOrder(row).map(entry => entry.title)).toEqual(['Model', 'Effort', 'Agent', 'Permissions']);
     expect(isRiskyMode(row.mode)).toBe(true);
+    // Codex's Full access mode, as codex-acp 2.5.0 names it (F-17).
+    expect(isRiskyMode(arrangeComposerControls([select('mode', 'Mode', 'agent-full-access', 'mode')]).mode)).toBe(true);
     expect(isRiskyMode(arrangeComposerControls([select('mode', 'Mode', 'plan', 'mode')]).mode)).toBe(false);
   });
 
@@ -60,5 +63,16 @@ describe('the composer row', () => {
     expect(modelSummary(arrangeComposerControls([named('model', 'model', 'Default (recommended)'), named('effort', 'thought_level', 'Default')]))).toBe('Default');
     expect(triggerLabels(arrangeComposerControls([named('model', 'model', 'Opus 5.5'), named('effort', 'thought_level', 'Medium')]))).toEqual({ model: 'Opus 5.5', effort: 'Medium' });
     expect(triggerLabels(arrangeComposerControls([named('model', 'model', 'Sonnet 5.5'), named('effort', 'thought_level', 'High (default)')]))).toEqual({ model: 'Sonnet 5.5', effort: 'High' });
+  });
+
+  it('keeps a setting\'s category through the view the PWA and phone decode (F-19)', () => {
+    const view = decodeChatTabView({
+      panelId: 'p', agent: 'claude', generation: 1, status: 'idle', canAttachImages: false, commands: [], permissions: [], questions: [], queue: [], messageCount: 0,
+      controls: [select('permissions_v2', 'Approval', 'plan', 'mode'), select('llm', 'Engine', 'fast', 'model'), select('verbosity', 'Verbosity', 'low')],
+    });
+    const row = arrangeComposerControls(view.controls);
+    expect(row.mode?.id).toBe('permissions_v2');
+    expect(row.model?.id).toBe('llm');
+    expect(row.more.map(control => control.id)).toEqual(['verbosity']);
   });
 });

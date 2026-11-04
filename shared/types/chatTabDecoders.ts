@@ -39,7 +39,7 @@ const view: BoundarySchema<ChatTabView> = boundary.object({
   panelId: boundary.string, agent: boundary.enumeration('claude', 'codex'), generation: boundary.number,
   status: boundary.enumeration('starting', 'idle', 'working', 'blocked', 'stopped'),
   problem: boundary.optional(problem), notice: boundary.optional(boundary.string), canAttachImages: boundary.boolean,
-  controls: boundary.array(boundary.object({ id: boundary.string, name: boundary.string, currentValue: boundary.string, options: boundary.array(boundary.object({ value: boundary.string, name: boundary.string })) })),
+  controls: boundary.array(boundary.object({ id: boundary.string, name: boundary.string, category: boundary.optional(boundary.string), currentValue: boundary.string, options: boundary.array(boundary.object({ value: boundary.string, name: boundary.string })) })),
   commands: boundary.array(boundary.object({ name: boundary.string, description: boundary.optional(boundary.string), hint: boundary.optional(boundary.string) })),
   permissions: boundary.array(boundary.object({ id: boundary.string, generation: boundary.number, title: boundary.string, toolCall: boundary.json, options: boundary.array(boundary.object({ optionId: boundary.string, name: boundary.string, kind: boundary.string })) })),
   questions: boundary.array(question),

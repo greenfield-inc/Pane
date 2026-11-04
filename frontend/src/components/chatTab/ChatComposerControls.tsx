@@ -9,8 +9,8 @@ type Configure = (id: string, value: string) => void;
 
 /** Claude Code's and Codex's permission modes; any other mode shows the plain shield. */
 const MODE_ICONS = new Map<string, LucideIcon>([
-  ['default', Hand], ['read-only', Hand], ['acceptEdits', FilePen], ['plan', ListTodo], ['auto', Sparkles],
-  ['bypassPermissions', ShieldOff], ['dontAsk', ShieldOff], ['full-access', ShieldOff],
+  ['default', Hand], ['read-only', Hand], ['acceptEdits', FilePen], ['plan', ListTodo], ['auto', Sparkles], ['agent', Sparkles],
+  ['bypassPermissions', ShieldOff], ['dontAsk', ShieldOff], ['agent-full-access', ShieldOff],
 ]);
 
 /** The permission mode, as a quiet chip that opens the mode list. */
