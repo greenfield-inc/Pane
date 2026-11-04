@@ -1,7 +1,10 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { worktreeFileSyncService } from '../worktreeFileSyncService';
 import { DEFAULT_WORKTREE_FILE_SYNC_ENTRIES, type WorktreeFileSyncEntry } from '../../../../shared/types/worktreeFileSync';
-import type { CommandRunner } from '../../utils/commandRunner';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { CommandRunner } from '../../utils/commandRunner';
 import type { ProjectEnvironment } from '../../utils/pathResolver';
 
 type MockCommandRunner = CommandRunner & { execAsync: ReturnType<typeof vi.fn> };
@@ -110,8 +113,11 @@ const codexEntry: WorktreeFileSyncEntry = {
 // ---------------------------------------------------------------------------
 
 describe('worktreeFileSyncService', () => {
+  const tempRoots: string[] = [];
+
   afterEach(() => {
     vi.clearAllMocks();
+    for (const root of tempRoots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
   });
 
   it('keeps the .cursor entry in the default sync list so Cursor rules reach worktrees', () => {
@@ -414,24 +420,33 @@ describe('worktreeFileSyncService', () => {
       return commandRunnerWith(execAsync);
     }
 
-    it('copies .claude contents without entering nested worktrees', async () => {
-      const copyCommands: string[] = [];
-      const runner = makeRootDirectoryRunner('.claude', copyCommands);
+    it.skipIf(process.platform === 'win32')('copies .claude contents, dotfiles included, without nested worktrees', async () => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-file-sync-'));
+      tempRoots.push(root);
+      const repo = path.join(root, 'repo');
+      const worktree = path.join(root, 'worktree');
+      fs.mkdirSync(path.join(repo, '.claude', 'commands'), { recursive: true });
+      fs.mkdirSync(path.join(repo, '.claude', 'worktrees', 'other'), { recursive: true });
+      fs.mkdirSync(worktree);
+      fs.writeFileSync(path.join(repo, '.claude', 'settings.local.json'), '{"a":1}');
+      fs.writeFileSync(path.join(repo, '.claude', '.hidden'), 'h');
+      fs.writeFileSync(path.join(repo, '.claude', 'commands', 'go.md'), 'go');
+      const shellEnvironment: ProjectEnvironment = process.platform === 'darwin' ? 'macos' : 'linux';
 
       const result = await worktreeFileSyncService.syncWorktree(
-        mainRepoPath,
-        worktreePath,
-        runner,
-        environment,
+        repo,
+        worktree,
+        new CommandRunner({ path: repo }),
+        shellEnvironment,
         [claudeEntry],
       );
 
-      expect(result.failures).toHaveLength(0);
-      expect(copyCommands).toHaveLength(1);
-      expect(copyCommands[0]).toContain('/home/user/repo/.claude');
-      expect(copyCommands[0]).toContain('case "$base" in worktrees) continue ;; esac');
-      expect(copyCommands[0]).toContain('cp -rp "$item"');
-      expect(copyCommands[0]).not.toBe('cp -rp "/home/user/repo/.claude" "/home/user/worktree/.claude"');
+      expect(result.failures).toEqual([]);
+      const copied = path.join(worktree, '.claude');
+      expect(fs.readFileSync(path.join(copied, 'settings.local.json'), 'utf8')).toBe('{"a":1}');
+      expect(fs.readFileSync(path.join(copied, '.hidden'), 'utf8')).toBe('h');
+      expect(fs.readFileSync(path.join(copied, 'commands', 'go.md'), 'utf8')).toBe('go');
+      expect(fs.existsSync(path.join(copied, 'worktrees'))).toBe(false);
     });
 
     it('applies the generated worktrees exclusion to other agent config roots', async () => {
