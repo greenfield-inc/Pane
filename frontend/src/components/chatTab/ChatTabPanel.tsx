@@ -51,7 +51,7 @@ function ScrollToLatest({ viewer, hasNewer }: { viewer: ChatTabViewer; hasNewer:
 interface ScrollAnchor {
   /** Rows on screen, nearest the middle first, each with its offset from the viewport's top. */
   rows: Array<{ id: string; offset: number }>;
-  /** Following the live end: nothing to keep. */
+  /** Following the live end (the bottom of a window with nothing newer): nothing to keep. */
   atBottom: boolean;
 }
 
@@ -60,7 +60,7 @@ interface ScrollAnchor {
  * finer is there), nearest the middle first. Several are kept because a page added
  * to the start of a turn can merge into the first visible step group and rename it.
  */
-function readAnchor(viewport: HTMLElement): ScrollAnchor {
+function readAnchor(viewport: HTMLElement, hasNewer: boolean): ScrollAnchor {
   const box = viewport.getBoundingClientRect();
   const middle = box.top + box.height / 2;
   const visible = (selector: string) => [...viewport.querySelectorAll<HTMLElement>(selector)].flatMap(element => {
@@ -71,7 +71,7 @@ function readAnchor(viewport: HTMLElement): ScrollAnchor {
   });
   const rows = visible('[data-anchor-id]:not(.chat-turn)');
   const candidates = (rows.length ? rows : visible('.chat-turn[data-anchor-id]')).sort((a, b) => a.distance - b.distance).slice(0, 12);
-  return { rows: candidates.map(({ id, offset }) => ({ id, offset })), atBottom: viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 4 };
+  return { rows: candidates.map(({ id, offset }) => ({ id, offset })), atBottom: !hasNewer && viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 4 };
 }
 
 /**
@@ -80,9 +80,11 @@ function readAnchor(viewport: HTMLElement): ScrollAnchor {
  * Whether the reader was at the live end is read before the change: once the
  * window shrinks, the browser has already clamped the scroll position to the bottom.
  */
-function useWindowAnchor(viewport: RefObject<HTMLElement | null>, start: number | undefined, length: number) {
+function useWindowAnchor(viewport: RefObject<HTMLElement | null>, start: number | undefined, length: number, hasNewer: boolean) {
   const anchor = useRef<ScrollAnchor | undefined>(undefined);
-  const record = useCallback(() => { if (viewport.current) anchor.current = readAnchor(viewport.current); }, [viewport]);
+  const newer = useRef(hasNewer);
+  newer.current = hasNewer;
+  const record = useCallback(() => { if (viewport.current) anchor.current = readAnchor(viewport.current, newer.current); }, [viewport]);
   const previous = useRef({ start, length });
   useLayoutEffect(() => {
     const element = viewport.current;
@@ -128,7 +130,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, quiet 
   const [commandIndex, setCommandIndex] = useState(0);
   const messages = useMemo(() => snapshot.transcript?.messages ?? [], [snapshot.transcript?.messages]);
   const viewportRef = useRef<HTMLDivElement>(null);
-  const recordAnchor = useWindowAnchor(viewportRef, snapshot.transcript?.start, messages.length);
+  const recordAnchor = useWindowAnchor(viewportRef, snapshot.transcript?.start, messages.length, !!snapshot.hasNewer);
   const working = view?.status === 'working' || view?.status === 'blocked';
   const turns = useMemo(() => chatTurns(messages, { running: working }), [messages, working]);
   const placedWorkers = useMemo(() => placeWorkers(turns, workers ?? []), [turns, workers]);
