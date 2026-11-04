@@ -219,7 +219,7 @@ export class ChatTranscript {
       const length = Buffer.byteLength(line);
       // Written before it leaves memory: a failed write keeps the message resident and the indexes unchanged.
       try { appendFileSync(this.options.spoolFile, line, { mode: 0o600 }); }
-      catch (error) { this.spoolFailed(error); return; }
+      catch (error) { this.spoolFailed(error instanceof Error ? error.message : String(error)); return; }
       this.residentMessages.shift();
       this.residentBytes -= this.residentSizes.shift()!;
       this.offsets.push({ at: this.spoolBytes, length });
@@ -229,8 +229,8 @@ export class ChatTranscript {
   }
 
   /** Cuts a partly written line off, then tries again on the next eviction; holds everything in memory if even that fails. */
-  private spoolFailed(error: unknown): void {
-    console.warn(`[ChatTabs] Older messages of ${this.panelId} could not be written to disk; they stay in memory: ${error instanceof Error ? error.message : String(error)}`);
+  private spoolFailed(reason: string): void {
+    console.warn(`[ChatTabs] Older messages of ${this.panelId} could not be written to disk; they stay in memory: ${reason}`);
     try { truncateSync(this.options.spoolFile, this.spoolBytes); }
     catch { this.spoolBroken = true; }
   }

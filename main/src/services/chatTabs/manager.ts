@@ -169,10 +169,8 @@ export class ChatTabManager {
     // The full prompt goes beside the state first; the receipt and queue entry are then saved together.
     try { this.bodies.write(panelId, request.operationId, { text: request.text, images: request.images }); }
     catch (error) { throw new PaneError('CHAT_PROMPT_NOT_SAVED', `The message could not be saved on this machine (${reasonOf(error)}). Nothing was sent.`, 'Check free disk space, then send it again.'); }
-    const queued: ChatTabQueuedPrompt = {
-      operationId: request.operationId, text: request.text.slice(0, QUEUE_PREVIEW), queuedAt: new Date().toISOString(), stored: true,
-      ...(request.images?.length ? { imageCount: request.images.length } : {}),
-    };
+    const queued: ChatTabQueuedPrompt = { operationId: request.operationId, text: request.text.slice(0, QUEUE_PREVIEW), queuedAt: new Date().toISOString(), stored: true };
+    if (request.images?.length) queued.imageCount = request.images.length;
     try { this.update(panelId, current => ({ ...current, receipts: [...(current.receipts ?? []), receipt].slice(-RECEIPT_LIMIT), queue: [...(current.queue ?? []), queued] })); }
     catch (error) { this.bodies.remove(panelId, request.operationId); throw error; }
     this.publish(panelId);
