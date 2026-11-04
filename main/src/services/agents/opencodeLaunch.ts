@@ -1,5 +1,3 @@
-import { randomUUID } from 'node:crypto';
-
 export const OPENCODE_SESSION_ID_PATTERN = /^ses_[A-Za-z0-9]+(?![\s\S])/;
 
 const MAX_COMMAND_LENGTH = 65_536;
@@ -15,13 +13,19 @@ interface OpenCodeLaunchOptions {
   baseCommand: string;
   shellType?: string;
   persistedSessionId?: string;
-  allocateSessionId?: () => string;
 }
 
 interface OpenCodeLaunchCommand {
   commandToRun: string;
-  sessionId: string;
+  /** Absent for a new conversation: OpenCode creates the id, and Pane captures it from the exit line. */
+  sessionId?: string;
 }
+
+/** Ids from Pane's earlier allocator (`ses_` + a dashless lowercase UUID). OpenCode never creates these, so they never resume. */
+const PANE_ALLOCATED_SESSION_ID = /^ses_[0-9a-f]{32}$/;
+
+/** OpenCode prints `Continue  opencode -s <id>` when its TUI exits. */
+const OPENCODE_CONTINUE_LINE = /\bopencode\s+(?:-s|--session)\s+(ses_[A-Za-z0-9]+)\b/g;
 
 function isShellWhitespace(character: string): boolean {
   return character === ' ' || character === '\t';
@@ -152,12 +156,13 @@ function requireValidSessionId(value: string, source: string): string {
   return value;
 }
 
-export function allocateOpenCodeSessionId(uuidFactory: () => string = randomUUID): string {
-  return requireValidSessionId(`ses_${uuidFactory().replaceAll('-', '')}`, 'allocator');
-}
-
 export function isValidOpenCodeSessionId(value: string): boolean {
   return OPENCODE_SESSION_ID_PATTERN.test(value);
+}
+
+/** The session id in the last OpenCode exit line of ANSI-free terminal text. */
+export function extractOpenCodeSessionId(text: string): string | undefined {
+  return Array.from(text.matchAll(OPENCODE_CONTINUE_LINE)).at(-1)?.[1];
 }
 
 function scanDirectOpenCodeTokens(command: string, windowsPaths = false): ShellToken[] {
@@ -228,9 +233,10 @@ export function resolveOpenCodeLaunchCommand(options: OpenCodeLaunchOptions): Op
     throw new Error('OpenCode launch command contains multiple session selectors');
   }
 
-  const persistedSessionId = options.persistedSessionId === undefined
+  const savedSessionId = options.persistedSessionId === undefined
     ? undefined
     : requireValidSessionId(options.persistedSessionId.trim(), 'persisted state');
+  const persistedSessionId = savedSessionId && PANE_ALLOCATED_SESSION_ID.test(savedSessionId) ? undefined : savedSessionId;
   const commandSessionId = commandSessionIds[0];
 
   if (commandSessionId) {
@@ -240,11 +246,9 @@ export function resolveOpenCodeLaunchCommand(options: OpenCodeLaunchOptions): Op
     return { commandToRun: baseCommand, sessionId: commandSessionId };
   }
 
-  const sessionId = persistedSessionId
-    ?? requireValidSessionId(
-      (options.allocateSessionId ?? allocateOpenCodeSessionId)(),
-      'allocator',
-    );
+  // OpenCode refuses `--session` for an id it has not created, so a new conversation starts bare.
+  if (!persistedSessionId) return { commandToRun: baseCommand };
+  const sessionId = persistedSessionId;
   const selector = `--session "${sessionId}"`;
 
   if (terminatorIndex !== -1) {

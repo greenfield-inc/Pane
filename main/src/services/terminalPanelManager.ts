@@ -120,7 +120,7 @@ import {
 import { claudeFolderTrustKey, detectAgentComposer, detectAgentFromScreen } from './agents/agentScreenSignature';
 import { readForegroundExecutablePath, readForegroundProcessGroup } from '../utils/foregroundProcess';
 import { buildCursorLaunchCommand, createCursorReadyDetector, extractCursorChatId } from './agents/cursorLaunch';
-import { assertDirectOpenCodeLaunchCommand, resolveOpenCodeLaunchCommand } from './agents/opencodeLaunch';
+import { assertDirectOpenCodeLaunchCommand, extractOpenCodeSessionId, resolveOpenCodeLaunchCommand } from './agents/opencodeLaunch';
 import { isPosixShell, quoteShellWord } from './agents/shellWord';
 import { forgetClaudePrompts, withClaudePromptHooks } from './claudePrompts';
 import {
@@ -1092,6 +1092,7 @@ export class TerminalPanelManager extends EventEmitter {
   private extractAgentSessionId(agentType: CliAgentType | undefined, output: string): string | undefined {
     if (agentType === 'codex') return this.extractCodexResumeId(output);
     if (agentType === 'cursor') return extractCursorChatId(output);
+    if (agentType === 'opencode') return extractOpenCodeSessionId(this.stripAnsiSequences(output));
     return undefined;
   }
 
@@ -1108,7 +1109,7 @@ export class TerminalPanelManager extends EventEmitter {
     if (!panel) return;
     const customState = terminalCustomState(panel.state);
     const resume = effectiveCustomResume(customState);
-    if (!resume && terminal.agentType !== 'codex' && terminal.agentType !== 'cursor') return;
+    if (!resume && terminal.agentType !== 'codex' && terminal.agentType !== 'cursor' && terminal.agentType !== 'opencode') return;
     // Agent Farm prints one ID line before the agent starts; anything later is agent output.
     const firstLineOnly = resume?.source === 'agent-farm';
     if (firstLineOnly && terminal.reportedSessionIdLocked) return;
@@ -1672,9 +1673,6 @@ export class TerminalPanelManager extends EventEmitter {
     state: ToolPanel['state'],
     sessionId: string | undefined,
   ): Promise<ToolPanel> {
-    if (!sessionId) {
-      throw new Error(`OpenCode session persistence was not acknowledged for panel ${panelId}`);
-    }
     await panelManager.updatePanel(panelId, { state });
     const durableWriteAcknowledged = databaseService.updatePanel(panelId, { state });
     const persistedPanel = databaseService.getPanel(panelId);
@@ -1880,7 +1878,7 @@ export class TerminalPanelManager extends EventEmitter {
         stateToPersist,
         launchResolution.customState.agentSessionId,
       );
-      // Do not expose the allocated identity in memory until durable read-back
+      // Do not expose the launch identity in memory until durable read-back
       // confirms it. This also keeps test doubles and cache implementations in
       // sync with the exact state that reconstruction will read.
       panel.state = persistedPanel.state;

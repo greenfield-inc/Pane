@@ -218,10 +218,10 @@ their resume template (see
 [Resuming custom launchers](SESSIONS.md#resuming-custom-launchers)). For the same
 reason, `--resume` is rejected for wrapper commands.
 
-Direct OpenCode launches use Pane's durable session id and readiness-gated input.
+Direct OpenCode launches start without a selector, capture the session id from OpenCode's exit line (`opencode -s <id>`), resume it with `--session`, and use readiness-gated input. OpenCode refuses `--session` for an id it did not create, so Pane never invents one.
 Native selector insertion accepts literal direct commands and simple assignment or
 `env NAME=value` prefixes, not recognized shell wrappers or `env --` forms. Those
-forms fail before native identity allocation; explicitly wrapped launches remain opaque.
+forms fail before spawn; explicitly wrapped launches remain opaque.
 Native commands reject both `--continue` and `-c`, and reject OpenCode's
 `--prompt` argument because it would replay on every restore. Supply initial
 input through Pane (or RunPane's `--prompt`) instead.

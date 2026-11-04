@@ -405,7 +405,7 @@ The shell installers and the other one-shot commands are at the top of this READ
 5. **Review diffs** — see what changed with the built-in diff viewer
 6. **Ship** — commit, rebase, and merge from keyboard shortcuts
 
-OpenCode's native terminal integration reuses its exact saved conversation ID in project tabs, Pane Chat, and named Sessions. An allocated ID is not proof of existing history. OpenCode Sessions require supported direct commands, not wrappers or custom-resume templates.
+OpenCode's native terminal integration starts a new conversation bare, saves the ID OpenCode prints when it exits (`opencode -s <id>`), and resumes that exact ID in project tabs, Pane Chat, and named Sessions. A conversation still running when Pane quits has no saved ID yet, so it starts fresh next time. OpenCode Sessions require supported direct commands, not wrappers or custom-resume templates.
 
 The default `opencode --auto` auto-approves non-denied operations; it is not a sandbox. Closing, archiving, and switching retain existing lifecycle behavior, and PTY exit does not prove that agent work was cancelled.
 

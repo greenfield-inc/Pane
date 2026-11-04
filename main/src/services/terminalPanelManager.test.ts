@@ -1173,18 +1173,15 @@ describe('TerminalPanelManager hidden output delivery', () => {
     });
   });
 
-  it('allocates one stable selector for a fresh native OpenCode launch', () => {
+  it('starts a fresh native OpenCode launch without a session selector', () => {
     const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
 
     const result = manager.resolveCliLaunchCommand('panel-1', 'opencode --auto', {
       agentType: 'opencode',
     });
 
-    expect(result.customState.agentSessionId).toMatch(/^ses_[A-Za-z0-9]+$/);
-    expect(result.commandToRun).toBe(
-      `opencode --auto --session "${result.customState.agentSessionId}"`,
-    );
-    expect(result.commandToRun.match(/--session/g)).toHaveLength(1);
+    expect(result.commandToRun).toBe('opencode --auto');
+    expect(result.customState.agentSessionId).toBeUndefined();
     expect(result.customState).toMatchObject({
       agentType: 'opencode',
       isCliPanel: true,
@@ -1247,7 +1244,7 @@ describe('TerminalPanelManager hidden output delivery', () => {
   it.each([
     { launchMode: 'wrapped' as const },
     { customResume: { mode: 'generated' as const, initialTemplate: '{command} {sessionId}', resumeTemplate: '{command} {sessionId}' } },
-  ])('rejects incompatible OpenCode Session update launches before allocation/spawn: %j', async incompatibleState => {
+  ])('rejects incompatible OpenCode Session update launches before spawn: %j', async incompatibleState => {
     const manager = new TerminalPanelManager(inProcessEmulatorHost);
     const command = 'opencode --auto';
     const state: TerminalPanelState = {
@@ -1271,7 +1268,6 @@ describe('TerminalPanelManager hidden output delivery', () => {
     const warmup = vi.spyOn(shellPathUtils, 'warmShellPath').mockResolvedValue();
     const shellPath = vi.spyOn(shellPathUtils, 'getShellPath').mockReturnValue(process.env.PATH ?? '');
     const shell = vi.spyOn(ShellDetector, 'getDefaultShell').mockReturnValue({ path: '/bin/sh', name: 'sh', args: [] });
-    const allocate = vi.spyOn(openCodeLaunch, 'allocateOpenCodeSessionId');
     const resolve = vi.spyOn(openCodeLaunch, 'resolveOpenCodeLaunchCommand');
     const legacySpawn = vi.spyOn(pty, 'spawn').mockImplementation(() => { throw new Error('Unexpected legacy PTY spawn'); });
     try {
@@ -1280,7 +1276,6 @@ describe('TerminalPanelManager hidden output delivery', () => {
         .toThrowError(refusal);
       await expect(manager.initializeTerminal(panel, process.cwd())).rejects.toThrowError(refusal);
       expect(state).toEqual(before);
-      expect(allocate).not.toHaveBeenCalled();
       expect(resolve).not.toHaveBeenCalled();
       expect(spawn).not.toHaveBeenCalled();
       expect(legacySpawn).not.toHaveBeenCalled();
@@ -1289,7 +1284,6 @@ describe('TerminalPanelManager hidden output delivery', () => {
     } finally {
       legacySpawn.mockRestore();
       resolve.mockRestore();
-      allocate.mockRestore();
       shell.mockRestore();
       shellPath.mockRestore();
       warmup.mockRestore();
@@ -1374,14 +1368,13 @@ describe('TerminalPanelManager hidden output delivery', () => {
     }));
   });
 
-  it('reports the OpenCode Session parser cause without changing state or allocating identity', () => {
+  it('reports the OpenCode Session parser cause without changing state', () => {
     const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
     const state: TerminalPanelState = {
       agentType: 'opencode', orchestrationSessionId: 'session', agentSessionId: 'ses_Saved123',
       scrollbackBuffer: 'Saved history', initialInputSentAt: '2026-10-06T12:00:00.000Z',
     };
     const before = structuredClone(state);
-    const allocate = vi.spyOn(openCodeLaunch, 'allocateOpenCodeSessionId');
     const resolve = vi.spyOn(openCodeLaunch, 'resolveOpenCodeLaunchCommand');
     expect(() => manager.resolveCliLaunchCommand('panel', 'opencode "unterminated', state)).toThrowError(expect.objectContaining({
       code: 'ERR_SESSION_OPENCODE_LAUNCH',
@@ -1389,7 +1382,6 @@ describe('TerminalPanelManager hidden output delivery', () => {
       next: expect.stringContaining('opencode --auto'),
     }));
     expect(state).toEqual(before);
-    expect(allocate).not.toHaveBeenCalled();
     expect(resolve).not.toHaveBeenCalled();
   });
 
@@ -1425,26 +1417,18 @@ describe('TerminalPanelManager hidden output delivery', () => {
     ['opencode --prompt replay', 'avoid replaying'],
     ['opencode --session', 'selector is missing its operand'],
     ['opencode --session invalid', 'Invalid OpenCode session id from --session'],
-  ])('rejects incompatible Session selectors before native allocation despite preservation: %s', (command, error) => {
+  ])('rejects incompatible Session selectors despite preservation: %s', (command, error) => {
     const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
-    const allocate = vi.fn(() => 'ses_New123');
-    const original = openCodeLaunch.resolveOpenCodeLaunchCommand;
-    const resolver = vi.spyOn(openCodeLaunch, 'resolveOpenCodeLaunchCommand').mockImplementation(options => original({ ...options, allocateSessionId: allocate }));
-    try {
-      const state: TerminalPanelState = {
-        agentType: 'opencode', orchestrationSessionId: 'session', preserveLaunchCommand: true, agentSessionId: 'ses_Saved123',
-      };
-      const before = structuredClone(state);
-      expect(() => manager.resolveCliLaunchCommand('panel', command, state)).toThrow(error);
-      expect(() => manager.resolveCliLaunchCommand('panel', command, state)).toThrowError(expect.objectContaining({
-        code: 'ERR_SESSION_OPENCODE_LAUNCH',
-        message: expect.stringContaining(error), next: expect.stringContaining('opencode --auto'),
-      }));
-      expect(state).toEqual(before);
-      expect(allocate).not.toHaveBeenCalled();
-    } finally {
-      resolver.mockRestore();
-    }
+    const state: TerminalPanelState = {
+      agentType: 'opencode', orchestrationSessionId: 'session', preserveLaunchCommand: true, agentSessionId: 'ses_Saved123',
+    };
+    const before = structuredClone(state);
+    expect(() => manager.resolveCliLaunchCommand('panel', command, state)).toThrow(error);
+    expect(() => manager.resolveCliLaunchCommand('panel', command, state)).toThrowError(expect.objectContaining({
+      code: 'ERR_SESSION_OPENCODE_LAUNCH',
+      message: expect.stringContaining(error), next: expect.stringContaining('opencode --auto'),
+    }));
+    expect(state).toEqual(before);
   });
 
   it('escapes shell-sensitive startup prompt arguments without changing ordinary prompts', () => {
