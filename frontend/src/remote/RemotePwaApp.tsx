@@ -1,7 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
-import { isSessionChat } from '../components/chatTab/sessionChat';
-
-const ChatTabPanel = lazy(() => import('../components/chatTab/ChatTabPanel'));
+import { Suspense, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import type { OrchestrationSessionRecord, OrchestrationSessionView } from '../../../shared/types/orchestrationSession';
 import { pausedMarkOf, type PanelActivationRequest, type ToolPanel, type ToolPanelType } from '../../../shared/types/panels';
@@ -24,6 +21,9 @@ import { RemoteStatusBar } from './components/RemoteStatusBar';
 import { RemoteTerminalPanel } from './components/RemoteTerminalPanel';
 import { RemoteBrowserPanel } from './components/RemoteBrowserPanel';
 import { RemoteExplorerPanel } from './components/RemoteExplorerPanel';
+import { RemoteChatTab } from './components/RemoteChatTab';
+import { AgentFarmProfileDialog } from '../components/chatTab/AgentFarmProfileDialog';
+import type { ChatTabCreate } from '../../../shared/types/chatTab';
 import { useRemoteListeningPorts } from './hooks/useRemoteListeningPorts';
 import { decodeRemoteConnectionCode } from '../../../shared/remoteClient/pairing';
 import { RemoteRuntimeAdapter, type RemoteProjectWithSessions } from './runtime/remoteRuntimeAdapter';
@@ -119,6 +119,7 @@ export function RemotePwaApp() {
   const [sidebarActionId, setSidebarActionId] = useState<string | null>(null);
   const [createSessionProject, setCreateSessionProject] = useState<RemoteProjectWithSessions | null>(null);
   const [createOrchestrationOpen, setCreateOrchestrationOpen] = useState(false);
+  const [profileDialogOpen, setProfileDialogOpen] = useState(false);
   const [creationFailure, setCreationFailure] = useState<{ name: string; error: string } | null>(null);
   const [mountedTerminalPanelIds, setMountedTerminalPanelIds] = useState<string[]>([]);
   /** The sidebar row the open Pane was tapped in, so only that copy is highlighted. */
@@ -656,7 +657,8 @@ export function RemotePwaApp() {
     }
   }, [adapter, selectedSessionId, setSelectedPanel, upsertPanel, setLastError]);
 
-  const createChat = useCallback(async (agent: 'claude' | 'codex') => {
+  /** Opens a chat tab on the host: a plain agent, or an Agent Farm profile (`launch`). Rejects with the host's reason. */
+  const createChat = useCallback(async (request: Pick<ChatTabCreate, 'agent' | 'launch'>) => {
     if (!adapter || !selectedSessionId) return;
     setCreatingTerminal(true);
     const runtime = adapter;
@@ -664,7 +666,7 @@ export function RemotePwaApp() {
     const requestedFrom = useRemoteSessionStore.getState().selectedPanelId;
     const drops = dropsRef.current;
     try {
-      const { panelId } = await runtime.chatTab.create({ sessionId, agent });
+      const { panelId } = await runtime.chatTab.create({ sessionId, ...request });
       if (runtime !== activeRuntimeRef.current) return;
       const panels = await runtime.getPanels(sessionId);
       const panel = panels.find(entry => entry.id === panelId);
@@ -673,6 +675,8 @@ export function RemotePwaApp() {
       setSelectedPanel(panelId);
       await runtime.setActivePanel(sessionId, panelId);
     } catch (error) {
+      // The profile dialog shows the reason itself and stays open.
+      if (request.launch?.kind === 'profile') throw error;
       if (runtime === activeRuntimeRef.current) setLastError(error instanceof Error ? error.message : 'Failed to open a chat tab');
     } finally {
       setCreatingTerminal(false);
@@ -734,6 +738,11 @@ export function RemotePwaApp() {
     selectSession(sessionId);
     setSidebarOpen(false);
   }, [requestView, selectSession]);
+
+  /** A worker line's Open in the Session orchestrator's chat: that worker's Pane, as its row under the Session. */
+  const openWorkerPane = useCallback((paneId: string, orchestrationSessionId: string) => {
+    selectRemoteSession(paneId, `sessions:${orchestrationSessionId}`);
+  }, [selectRemoteSession]);
 
   /** Runs one pin, archive or restore at a time, marking its row busy. */
   const runSidebarAction = useCallback(async (id: string, failure: string, action: (runtime: RemoteRuntimeAdapter) => Promise<void>) => {
@@ -1076,8 +1085,13 @@ export function RemotePwaApp() {
           onSelectPanel={selectPanel}
           onCreateTerminal={createTerminal}
           onCreateBrowser={createBrowser}
-          onCreateChat={affordances.chatTabsEnabled && adapter ? agent => void createChat(agent) : undefined}
+          onCreateChat={affordances.chatTabsEnabled && adapter ? agent => void createChat({ agent }) : undefined}
+          onCreateProfileChat={affordances.chatTabsEnabled && adapter ? () => setProfileDialogOpen(true) : undefined}
         />
+
+        {profileDialogOpen && (
+          <AgentFarmProfileDialog onClose={() => setProfileDialogOpen(false)} onCreate={launch => createChat({ launch })} />
+        )}
 
         <RemoteSessionList
           session={selectedSession}
@@ -1129,8 +1143,8 @@ export function RemotePwaApp() {
             )}
             {selectedPanel.type === 'chat' && adapter && (
               <Suspense fallback={null}>
-                <ChatTabPanel key={selectedPanel.id} panelId={selectedPanel.id} client={adapter.chatTab} connected={connectionStatus === 'connected'}
-                  quiet={isSessionChat(selectedPanel)} />
+                <RemoteChatTab key={selectedPanel.id} adapter={adapter} panel={selectedPanel} panels={selectedPanels} connected={connectionStatus === 'connected'}
+                  onOpenWorker={openWorkerPane} onSelectPanel={selectPanel} />
               </Suspense>
             )}
             {selectedPanel.type !== 'browser' && selectedPanel.type !== 'explorer' && selectedPanel.type !== 'chat' && <UnsupportedPanel session={selectedSession} panel={selectedPanel} />}

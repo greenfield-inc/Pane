@@ -1,4 +1,4 @@
-import { lazy, useEffect, useState } from 'react';
+import { lazy } from 'react';
 import type { ToolPanel } from '../../../../shared/types/panels';
 import type { ChatPanelState } from '../../../../shared/types/chatTab';
 import { useActiveMachineStore } from '../../stores/activeMachineStore';
@@ -8,31 +8,17 @@ import { isSessionChat } from './sessionChat';
 import { API } from '../../utils/api';
 import { useSessionStore } from '../../stores/sessionStore';
 import { useNavigationStore } from '../../stores/navigationStore';
-import { workerLines, type ChatWorkerLine } from '../../../../shared/chatTabPresentation';
+import { useSessionWorkers, type SessionWorkerSource } from './sessionWorkers';
 
-/** The Session's workers from Pane's own overview, kept current as their states and reports change. */
-function useSessionWorkers(sessionId: string | undefined): ChatWorkerLine[] | undefined {
-  const [workers, setWorkers] = useState<ChatWorkerLine[]>();
-  useEffect(() => {
-    if (!sessionId) return;
-    let live = true;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const refresh = () => {
-      void API.orchestrationSessions.overview({ sessionId }).then(response => {
-        if (!live || !response.success || !response.data) return;
-        const attached = new Map(response.data.session.associations.map(association => [association.paneId, association.attachedAt]));
-        setWorkers(workerLines(response.data.panes, attached));
-      }).catch(() => undefined);
-    };
-    // Status changes arrive in bursts; one read covers each burst.
-    const soon = () => { if (timer) clearTimeout(timer); timer = setTimeout(refresh, 300); };
-    refresh();
-    window.addEventListener('orchestration-sessions-overview-updated', soon);
-    window.addEventListener('orchestration-sessions-changed', soon);
-    return () => { live = false; if (timer) clearTimeout(timer); window.removeEventListener('orchestration-sessions-overview-updated', soon); window.removeEventListener('orchestration-sessions-changed', soon); };
-  }, [sessionId]);
-  return workers;
-}
+/** The desktop reads the Session overview over IPC and hears its updates as window events. */
+const DESKTOP_WORKERS: SessionWorkerSource = {
+  overview: sessionId => API.orchestrationSessions.overview({ sessionId }).then(response => response.success ? response.data : undefined),
+  onChange: callback => {
+    window.addEventListener('orchestration-sessions-overview-updated', callback);
+    window.addEventListener('orchestration-sessions-changed', callback);
+    return () => { window.removeEventListener('orchestration-sessions-overview-updated', callback); window.removeEventListener('orchestration-sessions-changed', callback); };
+  },
+};
 
 const ChatTabPanel = lazy(() => import('./ChatTabPanel'));
 
@@ -50,7 +36,7 @@ export function ChatTabRoute({ panel }: { panel: ToolPanel }) {
   const navigateToSessions = useNavigationStore(store => store.navigateToSessions);
   // SAFETY: the panel type 'chat' carries ChatPanelState as its custom state.
   const state = panel.state.customState as ChatPanelState | undefined;
-  const workers = useSessionWorkers(state?.orchestrationSessionId);
+  const workers = useSessionWorkers(DESKTOP_WORKERS, state?.orchestrationSessionId);
   return <ChatTabPanel
     workers={workers}
     panelId={panel.id}
