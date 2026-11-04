@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { NotifyItem } from '../../../../shared/types/notify';
-import { groupApprovals } from './approvalGroups';
+import { besideOf, groupApprovals } from './approvalGroups';
 
 const launch = { id: 'session-1', name: 'Pane Fixes', paneId: 'session-pane' };
 const infra = { id: 'session-2', name: 'Infra', paneId: 'infra-pane' };
@@ -50,5 +50,25 @@ describe('groupApprovals', () => {
     const answered = groupApprovals(items, 'answered');
     expect(answered.answered).toBe(4);
     expect(answered.groups.map(group => group.items.map(entry => entry.id))).toEqual([['new', 'old'], ['gone', 'update']]);
+  });
+});
+
+describe('besideOf', () => {
+  const worker = item('q', 1, { source: { paneId: 'pane-1', panelId: 'tab-a', name: 'api-fix', agent: 'Claude', session: launch } });
+
+  it("shows this machine's item beside its Pane, on the asking tab", () => {
+    expect(besideOf(worker, 'local')).toEqual({ kind: 'pane', paneId: 'pane-1', panelId: 'tab-a', name: 'api-fix' });
+    expect(besideOf({ ...worker, machineId: 'local', machine: 'macbook' }, 'local')).toMatchObject({ kind: 'pane' });
+  });
+
+  it('offers to switch for an item from any other machine, this computer included while another is active', () => {
+    expect(besideOf({ ...worker, machineId: 'local', machine: 'macbook' }, 'studio')).toEqual({ kind: 'machine', machineId: 'local', machine: 'macbook' });
+    expect(besideOf({ ...worker, machineId: 'studio', machine: 'studio' }, 'local')).toEqual({ kind: 'machine', machineId: 'studio', machine: 'studio' });
+    expect(besideOf({ ...worker, machineId: 'studio', machine: 'studio' }, 'studio')).toMatchObject({ kind: 'pane' });
+  });
+
+  it("shows the Session for an orchestrator's item and for a fallback item", () => {
+    expect(besideOf(item('o', 1, { source: { name: 'Launch', agent: 'Claude', session: { ...launch, orchestrator: true } } }), 'local')).toMatchObject({ kind: 'session', sessionId: 'session-1' });
+    expect(besideOf({ ...worker, relay: { inboxItemId: 'in-1', worker: 'api-fix', question: 'q' } }, 'local')).toMatchObject({ kind: 'session', paneId: 'session-pane' });
   });
 });

@@ -98,6 +98,7 @@ const notifyCommandSchema = boundary.union(
 );
 const notifyRemoteCommandSchema = boundary.union(
   boundary.object({ type: boundary.literal('answer'), id: boundary.nonEmptyString, answer: answerSchema }),
+  boundary.object({ type: boundary.literal('open-link'), id: boundary.nonEmptyString, index: boundary.number, paneId: boundary.optional(boundary.nonEmptyString) }),
   idCommand('undo'),
   idCommand('dismiss'),
   idCommand('skip'),
@@ -155,7 +156,10 @@ type NotifyServices = Pick<AppServices, 'configManager' | 'getMainWindow'> & {
   sessionManager: Pick<AppServices['sessionManager'], 'getSession'>;
   databaseService?: Pick<AppServices['databaseService'], 'getAllProjects'>;
   /** Files each Approvals item under its Session. */
-  orchestrationSessionManager?: { approvalSession(paneId: string, panelId?: string): NotifySession | undefined };
+  orchestrationSessionManager?: {
+    approvalSession(paneId: string, panelId?: string): NotifySession | undefined;
+    approvalSessionsById(): Map<string, NotifySession>;
+  };
   /** Approvals' fallback reads workers' blocked reports from it. */
   sessionInbox?: { all(): RunpaneInboxItem[]; subscribe(listener: () => void): () => void };
 };
@@ -210,6 +214,7 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
     wslDistros: () => (services.databaseService?.getAllProjects() ?? [])
       .flatMap(project => project.wsl_enabled && project.wsl_distribution ? [project.wsl_distribution] : []),
     sessionOf: (paneId, panelId) => services.orchestrationSessionManager?.approvalSession(paneId, panelId),
+    sessionsById: () => services.orchestrationSessionManager?.approvalSessionsById() ?? new Map(),
     inbox: services.sessionInbox,
   });
 

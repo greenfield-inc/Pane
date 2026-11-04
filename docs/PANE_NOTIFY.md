@@ -268,7 +268,7 @@ its questions from every screen.
 | Setting | Default |
 | --- | --- |
 | Approvals | On. Off hides the badge, expires open cards, returns `unavailable` ("Approvals are off in Pane.") to every waiting agent, and drops fallback items. Agents, Session orchestrators included, then ask in their own tab. |
-| Show outside Pane | On. Off shows strips only while Pane is in front; the tray dot still shows. |
+| Show outside Pane | On. It controls the floating cards over other apps. Off shows no floating card; inside Pane you answer from the Approvals badge and screen, and the tray dot still shows. |
 | Position | Bottom center. Also top right or bottom right. |
 | Answer-all shortcut | ⌃⇧Space. Settings says so when another app already holds it. |
 | Updates hide after | 6 seconds |

@@ -256,7 +256,16 @@ export interface NotifySharedState {
 export type NotifyRemoteCommand =
   | { type: 'answer'; id: string; answer: NotifyAnswer }
   | { type: 'undo' | 'dismiss' | 'skip'; id: string }
-  | { type: 'remind'; id: string; after: Exclude<NotifyRemindAfter, 'pane'> };
+  | { type: 'remind'; id: string; after: Exclude<NotifyRemindAfter, 'pane'> }
+  /** A phone opens an item's link `index` beside its card, with the host's fallbacks (`paneId` is the Pane shown there). */
+  | NotifyRemoteOpenLink;
+
+export interface NotifyRemoteOpenLink {
+  type: 'open-link';
+  id: string;
+  index: number;
+  paneId?: string;
+}
 
 /** Pane's Notify block in one agent's user-level instruction file (~/.claude/CLAUDE.md, ~/.codex/AGENTS.md). */
 export interface NotifyInstructionsFile {

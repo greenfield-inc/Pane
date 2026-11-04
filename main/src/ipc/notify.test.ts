@@ -292,8 +292,10 @@ describe('Approvals items, through the registered handlers', () => {
     ['loose', { id: 'loose', name: 'docs' }],
   ]);
   const launch = { id: 'session-1', name: 'Launch', paneId: 'session-pane' };
+  const later = { id: 'session-2', name: 'Later', paneId: 'later-pane' };
   const sessions = {
     approvalSession: (paneId: string) => paneId === 'session-pane' ? { ...launch, orchestrator: true } : paneId === 'worker' ? launch : undefined,
+    approvalSessionsById: () => new Map([[launch.id, launch], [later.id, later]]),
   };
 
   /** A Pane with Sessions and, optionally, a Session inbox. */
@@ -412,6 +414,14 @@ describe('Approvals items, through the registered handlers', () => {
     pane.notify.dispose();
   });
 
+  it('files a fallback under the Session the worker reported to, even after the worker moved, and under none once that Session is gone', async () => {
+    const moved = { ...blocked(Date.now() - 11 * 60_000), sessionId: 'session-2' };
+    const gone = { ...blocked(Date.now() - 11 * 60_000), id: 'in-2', sessionId: 'session-archived' };
+    const pane = await startWithSessions(inboxOf([moved, gone]));
+    expect(pane.notify.snapshot().items.map(item => [item.relay?.inboxItemId, item.source.session?.id])).toEqual([['in-1', 'session-2'], ['in-2', undefined]]);
+    pane.notify.dispose();
+  });
+
   it('never shows the fallback while Approvals is off', async () => {
     const inbox = inboxOf([blocked(Date.now() - 11 * 60_000)]);
     const pane = await startWithSessions(inbox);
@@ -468,6 +478,15 @@ describe('Approvals related links, through the registered handlers', () => {
     await notify.run({ type: 'open-link', id, index: 0, paneId: 'session-pane' });
     expect(opened.map(request => decodeBoundary(request, boundary.object({ paneId: boundary.string })).paneId)).toEqual(['session-pane', 'session-pane', 'worker']);
     await expect(notify.run({ type: 'open-link', id, index: 5, paneId: 'session-pane' })).rejects.toMatchObject({ code: 'ERR_APPROVALS_LINK_GONE' });
+
+    // A phone opens a link the same way, through the remote command, so it gets the same fallback.
+    opened.length = 0;
+    pageRefused = false;
+    await registry.invoke('notify:remote-command', [{ type: 'open-link', id, index: 0, paneId: 'session-pane' }, { device: 'iPhone' }]);
+    expect(opened).toEqual([
+      { paneId: 'session-pane', filePath: planPath, placement: 'tab', source: 'user' },
+      { paneId: 'session-pane', url: pathToFileURL(planPath).href, title: 'Plan', placement: 'tab', source: 'user' },
+    ]);
     notify.dispose();
   });
 });

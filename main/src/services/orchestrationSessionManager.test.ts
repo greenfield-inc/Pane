@@ -1266,6 +1266,17 @@ describe('OrchestrationSessionManager', () => {
     expect(fixture.manager.approvalSession('loose', 'loose-panel')).toBeUndefined();
   });
 
+  it('lists open Sessions for Approvals by id in one read, leaving archived ones out', async () => {
+    const fixture = createFixture();
+    const kept = await fixture.manager.create({ name: 'Launch' });
+    const gone = await fixture.manager.create({ name: 'Old' });
+    await fixture.manager.update({ sessionId: gone.session.id }, { archived: true, expectedRevision: gone.session.revision });
+
+    const byId = fixture.manager.approvalSessionsById();
+    expect(byId.get(kept.session.id)).toEqual({ id: kept.session.id, name: 'Launch', paneId: kept.session.internalSessionId });
+    expect(byId.has(gone.session.id)).toBe(false);
+  });
+
   it('unpins first-time Session children and preserves later manual pins', async () => {
     const fixture = createFixture();
     const created = await fixture.manager.create({ name: 'Coordinator' });

@@ -124,6 +124,16 @@ const SESSION_LIST_FIELDS: ReadonlyArray<[string, BoundarySchema<unknown>]> = [
   ['activity', activitySchema],
 ];
 
+/** A Session's identity and membership, without its history (see `memberships`). */
+export interface OrchestrationSessionMembership {
+  id: string;
+  name: string;
+  internalSessionId: string;
+  archived: boolean;
+  panelIds: string[];
+  associations: Array<{ paneId: string; panelIds: string[] }>;
+}
+
 export class OrchestrationSessionStore {
   private loaded = false;
   private data: OrchestrationSessionStoreData = emptyStore();
@@ -135,6 +145,22 @@ export class OrchestrationSessionStore {
   read(): OrchestrationSessionStoreData {
     this.ensureLoaded();
     return cloneStore(this.data);
+  }
+
+  /**
+   * Who each Session is and which Panes it owns, copied without its history: Approvals looks
+   * Sessions up on hot paths, where cloning every Session's activity would cost far more.
+   */
+  memberships(): OrchestrationSessionMembership[] {
+    this.ensureLoaded();
+    return this.data.sessions.map(session => ({
+      id: session.id,
+      name: session.name,
+      internalSessionId: session.internalSessionId,
+      archived: session.archived === true,
+      panelIds: Object.values(session.panelIds),
+      associations: session.associations.map(association => ({ paneId: association.paneId, panelIds: [...association.panelIds] })),
+    }));
   }
 
   /**

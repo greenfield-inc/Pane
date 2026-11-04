@@ -643,13 +643,20 @@ export class OrchestrationSessionManager extends EventEmitter {
    * with. Archived Sessions don't count. Reads the in-memory store, like `alertSubject`.
    */
   approvalSession(paneId: string, panelId?: string): NotifySession | undefined {
-    const sessions = this.store.read().sessions.filter(session => session.archived !== true);
+    const sessions = this.store.memberships().filter(session => !session.archived);
     const own = sessions.find(session => session.internalSessionId === paneId
-      || (panelId !== undefined && Object.values(session.panelIds).includes(panelId)));
+      || (panelId !== undefined && session.panelIds.includes(panelId)));
     if (own) return { id: own.id, name: own.name, paneId: own.internalSessionId, orchestrator: true };
     const parent = sessions.find(session => session.associations.some(association => association.paneId === paneId
       && (association.panelIds.length === 0 || panelId === undefined || association.panelIds.includes(panelId))));
     return parent ? { id: parent.id, name: parent.name, paneId: parent.internalSessionId } : undefined;
+  }
+
+  /** Every open Session for Approvals, by id, from one read: a fallback item keeps the Session its report was filed in. */
+  approvalSessionsById(): Map<string, NotifySession> {
+    return new Map(this.store.memberships()
+      .filter(session => !session.archived)
+      .map(session => [session.id, { id: session.id, name: session.name, paneId: session.internalSessionId }]));
   }
 
   /**

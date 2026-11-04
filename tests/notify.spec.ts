@@ -44,10 +44,15 @@ async function boot(
   snapshot: NotifySnapshot = notifyFixture(),
   initialConfig: JsonObject = {},
   paneSecrets?: { secrets: PaneSecretSummary[]; storage: PaneSecretStorage },
+  initialPanels: JsonObject[] = [],
+  initialLayout: JsonObject | null = null,
 ) {
   await installElectronApiMock(page, {
     initialConfig,
     paneSecrets,
+    initialPanels,
+    initialLayout,
+    rememberPaneLayouts: initialLayout !== null,
     initialProjects: [project],
     initialSessions: [pane('pane-auth', 'auth-refactor'), pane('pane-billing', 'billing-migration'), pane('pane-sms', 'sms-retry')],
     initialUiState: { expandedProjects: [1], repositoriesSectionExpanded: true },
@@ -117,6 +122,26 @@ test.describe('Approvals in the main window', () => {
     const beside = page.getByTestId('approvals-beside');
     await expect(beside).toContainText('Pane');
     await expect(beside).toContainText('auth-refactor');
+  });
+
+  test("a worker item shows its Pane on the asking tab, not the tab the Pane last showed", async ({ page }) => {
+    const tab = (id: string, title: string, active: boolean) => ({
+      id, sessionId: 'pane-auth', type: 'logs', title,
+      state: { isActive: active, hasBeenViewed: true },
+      metadata: { createdAt: '2026-01-01T00:00:00.000Z', lastActiveAt: '2026-01-01T00:00:00.000Z', position: active ? 1 : 0 },
+    });
+    // panel-auth asked (the fixture's source); panel-other is the tab this Pane remembers as shown.
+    const remembered = { version: 1, root: { type: 'group', id: 'g1', panelIds: ['panel-auth', 'panel-other'], activePanelId: 'panel-other' }, focusedGroupId: 'g1' };
+    await boot(page, notifyFixture(), {}, undefined, [tab('panel-auth', 'Asking tab', false), tab('panel-other', 'Other tab', true)], remembered);
+    // Visit the Pane and leave it on the other tab, so this desktop remembers that tab.
+    await page.locator('.group\\/session', { hasText: 'auth-refactor' }).first().click();
+    await page.getByRole('tab', { name: /Other tab/ }).click();
+    await expect(page.getByRole('tab', { name: /Other tab/ })).toHaveAttribute('aria-selected', 'true');
+    await page.getByRole('button', { name: 'Home' }).first().click();
+
+    await page.getByTestId('approvals-badge').click();
+    const beside = page.getByTestId('approvals-beside');
+    await expect(beside.getByRole('tab', { name: /Asking tab/ })).toHaveAttribute('aria-selected', 'true');
   });
 
   test('a suggestion fills the answer field and waits for Enter', async ({ page }) => {

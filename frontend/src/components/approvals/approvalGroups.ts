@@ -66,3 +66,25 @@ export function groupApprovals(items: NotifyItem[], tab: ApprovalsTab): Approval
     groups: [...groups.values(), ...(loose ? [loose] : [])],
   };
 }
+
+/** What shows beside the selected item. */
+export type Beside =
+  | { kind: 'session'; sessionId: string; paneId: string; name: string }
+  | { kind: 'pane'; paneId: string; panelId?: string; name: string }
+  | { kind: 'machine'; machineId: string; machine: string }
+  | { kind: 'none' };
+
+/**
+ * An orchestrator's item (and a stuck worker question, which waits on the orchestrator) shows
+ * its Session; a worker's prompt or a standalone Pane's question shows the asking Pane. An item
+ * from any machine other than the one the app is on (`activeMachineId`, `local` for this
+ * computer) offers to switch there instead, in both directions.
+ */
+export function besideOf(item: NotifyItem, activeMachineId: string): Beside {
+  const machineId = item.machineId ?? 'local';
+  if (machineId !== activeMachineId) return { kind: 'machine', machineId, machine: item.machine ?? 'this computer' };
+  const session = item.source.session;
+  if (session && (session.orchestrator || item.relay)) return { kind: 'session', sessionId: session.id, paneId: session.paneId, name: session.name };
+  if (item.source.paneId) return { kind: 'pane', paneId: item.source.paneId, panelId: item.source.panelId, name: item.source.name };
+  return { kind: 'none' };
+}

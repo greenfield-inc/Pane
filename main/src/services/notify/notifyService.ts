@@ -59,6 +59,8 @@ export interface NotifyServiceDependencies {
   wslDistros?: () => string[];
   /** The Session a Pane (and tab) works in; Approvals files each item under it. */
   sessionOf?: (paneId: string, panelId?: string) => NotifySession | undefined;
+  /** Every open Session by id, read once per fallback refresh. */
+  sessionsById?: () => Map<string, NotifySession>;
   /** Every Session's unacknowledged worker reports (Approvals' fallback reads the blocked ones). */
   inbox?: { all(): RunpaneInboxItem[]; subscribe(listener: () => void): () => void };
 }
@@ -163,6 +165,7 @@ export class NotifyService {
     const after = relayAfterMs();
     let nextDue = Infinity;
     const relays: NotifyItem[] = [];
+    let sessions: Map<string, NotifySession> | undefined;
     for (const entry of this.settings().enabled ? inbox.all() : []) {
       const question = entry.kind === 'report' && entry.report?.state === 'blocked' ? entry.report.question?.trim() : undefined;
       const at = Date.parse(entry.at);
@@ -171,7 +174,9 @@ export class NotifyService {
         nextDue = Math.min(nextDue, at + after);
         continue;
       }
-      const session = this.deps.sessionOf?.(entry.paneId, entry.panelId);
+      // The Session the report was filed in, even if the worker has moved since; none once it's gone.
+      sessions ??= this.deps.sessionsById?.() ?? new Map();
+      const session = sessions.get(entry.sessionId);
       const source: NotifySource = { paneId: entry.paneId, panelId: entry.panelId, name: entry.paneName, agent: agentName(entry.agentType) };
       if (session) source.session = session;
       const relay: NotifyItem = {
@@ -237,6 +242,10 @@ export class NotifyService {
 
   /** The `notify:remote-command` daemon command: another screen or a phone acts on this machine's question. */
   async runRemote(command: NotifyRemoteCommand, device: string, teammate: string | null): Promise<void> {
+    if (command.type === 'open-link') {
+      await this.openLink(command.id, command.index, command.paneId);
+      return;
+    }
     await this.queue.runRemote(command, device, teammate);
   }
 

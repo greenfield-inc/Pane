@@ -8,7 +8,6 @@ import { useNavigationStore } from '../../stores/navigationStore';
 import { useSessionStore } from '../../stores/sessionStore';
 import { useOrchestrationSessionStore } from '../../stores/orchestrationSessionStore';
 import { useAllMachinesStore } from '../../stores/allMachinesStore';
-import { panelApi } from '../../services/panelApi';
 import { usePanelStore } from '../../stores/panelStore';
 import { showActionError } from '../../stores/errorStore';
 import { openOnMachine } from '../../utils/machineRowActions';
@@ -17,30 +16,13 @@ import { NotifyCard } from '../notify/NotifyCard';
 import { relativeAge } from '../notify/notifyFormat';
 import { useNow } from '../notify/useNow';
 import { SessionBeside } from '../PaneChatView';
-import { groupApprovals, type ApprovalGroup, type ApprovalsTab } from './approvalGroups';
-
-/** What shows beside the selected item. */
-type Beside =
-  | { kind: 'session'; sessionId: string; paneId: string; name: string }
-  | { kind: 'pane'; paneId: string; panelId?: string; name: string }
-  | { kind: 'machine'; machineId: string; machine: string }
-  | { kind: 'none' };
+import { besideOf, groupApprovals, type ApprovalGroup, type ApprovalsTab, type Beside } from './approvalGroups';
 
 /**
- * An orchestrator's item (and a stuck worker question, which waits on the orchestrator) shows
- * its Session; a worker's prompt or a standalone Pane's question shows the asking Pane; another
- * machine's item offers to open there.
+ * Links open as tabs through this computer's Pane, so only for this computer's items while the
+ * app is on this computer; another machine's file lives there.
  */
-function besideOf(item: NotifyItem): Beside {
-  if (item.elsewhere && item.machineId) return { kind: 'machine', machineId: item.machineId, machine: item.machine ?? 'the other machine' };
-  const session = item.source.session;
-  if (session && (session.orchestrator || item.relay)) return { kind: 'session', sessionId: session.id, paneId: session.paneId, name: session.name };
-  if (item.source.paneId) return { kind: 'pane', paneId: item.source.paneId, panelId: item.source.panelId, name: item.source.name };
-  return { kind: 'none' };
-}
-
-/** Links open as tabs only for this machine's items; another machine's file lives there. */
-const linksOpenHere = (item: NotifyItem) => !item.machineId || item.machineId === LOCAL_MACHINE_ID;
+const linksOpenHere = (item: NotifyItem, activeMachineId: string) => (item.machineId ?? LOCAL_MACHINE_ID) === LOCAL_MACHINE_ID && activeMachineId === LOCAL_MACHINE_ID;
 
 function ItemIcon({ item }: { item: NotifyItem }) {
   const className = 'mt-0.5 h-4 w-4 shrink-0';
@@ -104,9 +86,10 @@ function ItemRow({ item, now, selected = false, onSelect }: { item: NotifyItem; 
 }
 
 function RelatedLinks({ item, paneId }: { item: NotifyItem; paneId?: string }) {
+  const activeMachineId = useAllMachinesStore((state) => state.entries.find((entry) => entry.active)?.id ?? LOCAL_MACHINE_ID);
   const links = item.links ?? [];
   if (links.length === 0) return null;
-  const here = linksOpenHere(item);
+  const here = linksOpenHere(item, activeMachineId);
   return (
     <div className="px-3.5 pb-3" data-testid="approvals-related">
       <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary">Related</div>
@@ -210,7 +193,7 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
   const shown = groups.flatMap((group) => group.items);
   // The selection follows its item into its Undo hold; once it leaves the tab, the first item takes over.
   const selected = shown.find((item) => item.id === selectedId) ?? (tab === 'waiting' ? shown[0] : undefined);
-  const beside: Beside = selected ? besideOf(selected) : { kind: 'none' };
+  const beside: Beside = selected ? besideOf(selected, activeMachineId) : { kind: 'none' };
   const besidePaneId = beside.kind === 'pane' ? beside.paneId : undefined;
   const besidePanelId = beside.kind === 'pane' ? beside.panelId : undefined;
   // A Session's item is about its orchestrator: show the orchestrator's tab (the asking one,
@@ -224,12 +207,14 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
   const sessionPaneId = beside.kind === 'session' ? beside.paneId : undefined;
   const shownItemId = selected?.id;
 
-  // A Pane's item shows that Pane's own shell on the right, on the asking tab.
+  // A Pane's item shows that Pane's own shell on the right, on the asking tab. The shell applies
+  // an activation request once its layout has loaded, so it wins over the tab the Pane remembers;
+  // re-run per selection, since a link opened since then may have taken the front.
   useEffect(() => {
     if (!besidePaneId) return;
-    if (besidePanelId) void panelApi.setActivePanel(besidePaneId, besidePanelId).catch(() => undefined);
+    if (besidePanelId) usePanelStore.getState().requestActivation({ sessionId: besidePaneId, panelId: besidePanelId });
     if (useSessionStore.getState().activeSessionId !== besidePaneId) void useSessionStore.getState().setActiveSession(besidePaneId);
-  }, [besidePaneId, besidePanelId]);
+  }, [besidePaneId, besidePanelId, selected?.id]);
 
   useEffect(() => {
     if (!sessionPaneId || !orchestratorPanelId) return;
@@ -307,7 +292,7 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
             <p>This item&rsquo;s Session runs on {beside.machine}.</p>
             <button
               type="button"
-              onClick={() => selected && openInPane(selected, { ...besideOf({ ...selected, elsewhere: undefined }) })}
+              onClick={() => selected && openInPane(selected, besideOf(selected, selected.machineId ?? LOCAL_MACHINE_ID))}
               className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-lg bg-interactive px-3 font-medium text-text-on-interactive hover:bg-interactive-hover"
             >
               Open on {beside.machine}
