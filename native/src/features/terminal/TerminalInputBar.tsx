@@ -6,6 +6,8 @@ import { ActivityIndicator, Pressable, StyleSheet, TextInput, View } from 'react
 import { useTheme } from '@/theme';
 import { Icon, Text } from '@/ui';
 
+import { useAutocorrect } from '../composer/autocorrectPreference';
+import { straightenSmartPunctuation } from '../composer/smartPunctuation';
 import { recordingClock } from '../voice/recordingLimits';
 import type { useVoiceDictation } from '../voice/useVoiceDictation';
 
@@ -50,6 +52,8 @@ export function TerminalInputBar({
   const { colors } = theme;
   const voiceBusy = voice.phase !== 'idle';
   const previewing = voiceBusy && voice.preview.length > 0;
+  // Settings › Autocorrect. On, iOS also turns on smart punctuation, which the box undoes so commands still parse.
+  const autocorrect = useAutocorrect(state => state.enabled);
   const shown = previewing ? (draft.trim() ? `${draft}${/\s$/.test(draft) ? '' : ' '}${voice.preview}` : voice.preview) : draft;
 
   return (
@@ -57,7 +61,7 @@ export function TerminalInputBar({
       <TextInput
         testID="terminal-input"
         value={shown}
-        onChangeText={text => !previewing && onChangeDraft(text)}
+        onChangeText={text => !previewing && onChangeDraft(autocorrect ? straightenSmartPunctuation(text) : text)}
         onSelectionChange={event => onSelectionChange(event.nativeEvent.selection)}
         selection={previewing ? undefined : selection}
         editable={!previewing}
@@ -68,9 +72,10 @@ export function TerminalInputBar({
         returnKeyType="send"
         submitBehavior="blurAndSubmit"
         onSubmitEditing={() => { if (!disabled && !voiceBusy) onSubmit(); }}
+        // No capitals even with autocorrect on: a capitalized first word breaks a command.
         autoCapitalize="none"
-        autoCorrect={false}
-        spellCheck={false}
+        autoCorrect={autocorrect}
+        spellCheck={autocorrect}
         smartInsertDelete={false}
         keyboardAppearance={theme.scheme}
         textAlignVertical="top"

@@ -9,6 +9,7 @@ import { permissionToolId, toAssistantMessage } from '@shared/agentChatPresentat
 import { useTheme } from '@/theme';
 import { Icon, Text } from '@/ui';
 
+import { useAutocorrectInputProps } from '../composer/autocorrectPreference';
 import { ComposerSheet } from '../composer/ComposerSheet';
 import { Dimmed } from '../hosts/ConnectionStatus';
 import { ChatButton } from './ChatButton';
@@ -81,6 +82,7 @@ function ChatSettings({ chat, visible, onClose }: { chat: Chat; visible: boolean
 
 export function AgentChatPanel({ chat, draft, onChangeDraft, confirmDraft }: { chat: Chat; draft: string; onChangeDraft: (text: string) => void; confirmDraft: () => void }) {
   const theme = useTheme();
+  const autocorrectProps = useAutocorrectInputProps();
   const { view } = chat;
   const image = chat.attachment;
   const setImage = chat.setAttachment;
@@ -127,7 +129,7 @@ export function AgentChatPanel({ chat, draft, onChangeDraft, confirmDraft }: { c
         {!!unmatchedPermissions.length && <PermissionChoices permissions={unmatchedPermissions} />}
         <View style={[styles.composer, { backgroundColor: theme.chat.card, borderColor: theme.chat.border }]}>
           {image && <View style={styles.attachment}><Image accessibilityLabel="Attached image" source={{ uri: `data:${image.mimeType};base64,${image.data}` }} style={styles.thumbnail} /><ChatButton testID="chat-remove-image" title="Remove image" disabled={!!chat.pendingDelivery} onPress={() => setImage(undefined)} /></View>}
-          <TextInput testID="chat-input" accessibilityLabel="Message agent" placeholder="Send a message..." placeholderTextColor={theme.chat.mutedForeground} value={draft} onChangeText={onChangeDraft} editable={!chat.pendingDelivery} multiline returnKeyType="send" submitBehavior="blurAndSubmit" onSubmitEditing={() => void send()} style={[styles.input, { color: theme.chat.foreground }]} />
+          <TextInput {...autocorrectProps} testID="chat-input" accessibilityLabel="Message agent" placeholder="Send a message..." placeholderTextColor={theme.chat.mutedForeground} value={draft} onChangeText={onChangeDraft} editable={!chat.pendingDelivery} multiline returnKeyType="send" submitBehavior="blurAndSubmit" onSubmitEditing={() => void send()} style={[styles.input, { color: theme.chat.foreground }]} />
           <View style={styles.composerActions}>
             {view?.canAttachImages && <Pressable testID="chat-attach" accessibilityRole="button" accessibilityLabel="Attach image" disabled={sendDisabled} onPress={() => { void pickChatImage().then(picked => { if (picked) setImage(picked); }).catch(reason => chat.setError(reason instanceof Error ? reason.message : String(reason))); }} style={styles.target}><Icon ios="plus" android="add" size={20} color={theme.chat.mutedForeground} /></Pressable>}
             <Pressable testID="chat-settings" accessibilityRole="button" accessibilityLabel="Agent settings" disabled={!view?.controls?.length || disabled} onPress={() => setSettings(true)} style={styles.config}><Text numberOfLines={1} variant="footnote" style={{ color: theme.chat.foreground }}>{configLabel || 'Agent settings'}</Text><Icon ios="chevron.down" android="expand_more" size={14} color={theme.chat.mutedForeground} /></Pressable>
