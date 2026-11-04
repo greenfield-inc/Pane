@@ -181,7 +181,7 @@ function scanDirectOpenCodeTokens(command: string, windowsPaths = false): ShellT
   }
   const executable = tokens[executableIndex]?.value.replace(/\\/g, '/').split('/').pop()?.toLowerCase();
   if (executable !== 'opencode') {
-    throw new Error('OpenCode native launch contains an unsupported command wrapper; use an explicit wrapped launch');
+    throw new Error('OpenCode native launch contains an unsupported command wrapper; run `opencode` directly');
   }
   return tokens.slice(executableIndex);
 }
