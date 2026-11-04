@@ -113,6 +113,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
     });
   }, [activePanelId, panels]);
 
+  const [menuPanelId, setMenuPanelId] = useState<string | null>(null);
   const hotkeys = useHotkeyStore(s => s.hotkeys);
   const hotkeyDisplay = useCallback((id: string) => {
     const keys = hotkeys.get(id)?.keys;
@@ -362,7 +363,9 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
           />
         ) : null;
 
-        const tooltipTab = tooltipContent && tabButton ? <Tooltip content={tooltipContent} side="bottom">{tabButton}</Tooltip> : tabButton;
+        // The hover tooltip stays hidden while this tab's right-click menu is open, so it never covers the menu.
+        const tooltipTab = tooltipContent && tabButton ? <Tooltip content={menuPanelId === panel.id ? null : tooltipContent} side="bottom">{tabButton}</Tooltip> : tabButton;
+        const onMenuOpenChange = (open: boolean) => setMenuPanelId(open ? panel.id : current => (current === panel.id ? null : current));
         // Right-click: rename, pause or resume, then close past a divider. A disabled tab offers none.
         const menuItems: DropdownItem[] = isDisabled ? [] : [
           ...(!isPermanent && !isDiffPanel ? [{ id: 'rename', label: 'Rename tab…', icon: Pencil, onClick: () => startRename(panel) }] : []),
@@ -372,7 +375,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
           ...(!isPermanent ? [{ id: 'close', label: 'Close tab', icon: X, separatorBefore: true, onClick: () => closePanel(panel) }] : []),
         ];
         const contextualTab = tooltipTab && menuItems.length > 0
-          ? <Dropdown className="contents" contextMenu menuLabel={`${displayTitle} actions`} width="sm" trigger={tooltipTab} items={menuItems} />
+          ? <Dropdown className="contents" contextMenu menuLabel={`${displayTitle} actions`} width="sm" trigger={tooltipTab} items={menuItems} onOpenChange={onMenuOpenChange} />
           : tooltipTab;
         const tab = (
           <div
@@ -433,6 +436,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
               <span className={cn(
                 "relative z-10 pointer-events-none inline-flex items-center justify-center min-w-0",
                 compact ? "gap-1" : "gap-2",
+                isPaused && !isActive && "opacity-60",
               )}>
                 {panel.type === 'terminal' && (
                   <PanelTabStatusDot panelId={panel.id} sessionId={panel.sessionId} paused={isPaused} />
