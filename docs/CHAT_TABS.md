@@ -80,8 +80,9 @@ one line with its state, PR and **Open**, drawn from Pane's own Session state
 (its Panes, their agent states and `runpane report`s), never from what the agent
 wrote.
 
-Approvals and single-choice questions are also asked in Notify and on the phone
-(see [PANE_NOTIFY.md](PANE_NOTIFY.md)). The first answer wins everywhere.
+Approvals and questions are also asked in Notify and on the phone (see
+[PANE_NOTIFY.md](PANE_NOTIFY.md)), a question form one field at a time. The
+first answer wins everywhere.
 
 ## Restart and resume
 

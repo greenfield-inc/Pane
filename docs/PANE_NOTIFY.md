@@ -74,10 +74,15 @@ restarts.
 
 [Chat tabs](CHAT_TABS.md) ask their ACP approvals in Notify too, with exactly
 the choices the adapter sent (the phone's Yes and No are its allow and reject
-choices). A question with one single-choice field, such as most AskUserQuestion
-prompts, is asked as options and answers with the chosen value; a richer form
-stays in the chat tab. The first answer wins: an answer from Notify reaches the
-agent, and a card the chat tab answered first closes as "Answered in the chat".
+choices). A question (ACP form) is asked one field at a time, titled "(1 of 3)"
+with the field's title when it has more than one: single choice and yes/no as
+options, multiple choice as free text naming the choices (comma-separated, with
+each choice as a chip), text and numbers as free text. A typed answer to a
+choice fills the form's matching free-text field (AskUserQuestion's
+`question_0_custom`). The last field sends the whole form as one answer; "Skip
+question" declines it. The first answer wins: an answer from Notify reaches the
+agent, and a card the chat tab answered first closes as "Answered in the chat",
+along with the rest of its form.
 The same Settings switch turns this off. A chat tab waiting on a prompt reports
 `blocked`, so phone alerts follow it like a terminal agent's.
 
