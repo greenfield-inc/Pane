@@ -776,7 +776,7 @@ export function ApprovalsNavRow() {
       <Inbox className="h-3.5 w-3.5" aria-hidden="true" />
       <span>Approvals</span>
       {nav.count > 0 && (
-        <span className="ml-auto inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-status-warning px-1.5 text-[11px] font-semibold tabular-nums text-text-on-status-warning" aria-hidden="true">
+        <span className="ml-auto inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-status-warning px-[5px] text-[11px] font-semibold tabular-nums text-text-on-status-warning" aria-hidden="true">
           {nav.count}
         </span>
       )}
