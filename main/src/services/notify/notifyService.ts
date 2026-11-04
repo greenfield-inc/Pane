@@ -196,11 +196,21 @@ export class NotifyService {
   /** The `runpane:notify` daemon command. */
   ask(request: NotifyRequest, signal?: AbortSignal): Promise<NotifyResult> {
     const { resume, returnAfterMs, caller, ...question } = request;
+    const source = this.describeSource(caller);
+    // D-79: in a Pane Session only the orchestrator asks the person; a worker asks its orchestrator.
+    // Claude's and chat tabs' own prompts (the tool asking) don't come through here, so they still reach you.
+    const session = !resume && source.paneId ? this.deps.sessionOf?.(source.paneId, source.panelId) : undefined;
+    if (session && !session.orchestrator && this.settings().enabled) {
+      return Promise.resolve({
+        unavailable: 'Not shown to the person: in a Pane Session, only the orchestrator asks the person.',
+        next: `Ask the ${session.name} orchestrator instead: run runpane report --state blocked --question "<your question>", then wait for its answer or carry on with anything that doesn't depend on it.`,
+      });
+    }
     return this.queue.ask({
       question: question.ui && question.title !== undefined ? { ...question, ui: question.ui, title: question.title } : undefined,
       resume,
       returnAfterMs,
-      source: this.describeSource(caller),
+      source,
     }, signal);
   }
 

@@ -96,7 +96,6 @@ export function notifyFixture(now = Date.now()): NotifySnapshot {
       { agent: 'Codex', file: '~/.codex/AGENTS.md', state: 'not-found' },
     ],
     firstRun: true,
-    remote: null,
   };
 }
 

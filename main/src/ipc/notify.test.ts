@@ -327,19 +327,29 @@ describe('Approvals items, through the registered handlers', () => {
     report: { state: 'blocked', question: 'Use the invoice id or number in the PDF filename?', reportedAt: new Date(at).toISOString() },
   });
 
-  it('files each question under the Session its Pane works in, and a standalone Pane under none', async () => {
+  it("files the orchestrator's question under its Session, and a standalone Pane's under none", async () => {
     const pane = await startWithSessions();
     void pane.registry.invoke('runpane:notify', [{ ui: 'approve', title: 'Post Q-3?', caller: { paneId: 'session-pane', panelId: 'orchestrator-panel' } }]);
-    void pane.registry.invoke('runpane:notify', [{ ui: 'approve', title: 'Run the migration?', caller: { paneId: 'worker', panelId: 'worker-panel' } }]);
     void pane.registry.invoke('runpane:notify', [{ ui: 'approve', title: 'Rename the guide?', caller: { paneId: 'loose' } }]);
     await flush();
 
     const sources = (await pane.registry.invoke<NotifySharedState>('notify:remote-snapshot', [])).items.map(item => [item.title, item.source.session]);
     expect(sources).toEqual([
       ['Post Q-3?', { ...launch, orchestrator: true }],
-      ['Run the migration?', launch],
       ['Rename the guide?', undefined],
     ]);
+    pane.notify.dispose();
+  });
+
+  it("sends a Session worker's notify back to its orchestrator instead of showing it", async () => {
+    const pane = await startWithSessions();
+    const result = await pane.registry.invoke<NotifyResult>('runpane:notify', [{ ui: 'approve', title: 'Run the migration?', caller: { paneId: 'worker', panelId: 'worker-panel' } }]);
+
+    expect(result).toEqual({
+      unavailable: 'Not shown to the person: in a Pane Session, only the orchestrator asks the person.',
+      next: 'Ask the Launch orchestrator instead: run runpane report --state blocked --question "<your question>", then wait for its answer or carry on with anything that doesn\'t depend on it.',
+    });
+    expect(pane.notify.snapshot().items).toEqual([]);
     pane.notify.dispose();
   });
 

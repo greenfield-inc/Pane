@@ -46,9 +46,15 @@ Pane files each item under the Session its Pane belongs to (a Session's own
 orchestrator tab is marked as the orchestrator). Items from a Pane in no
 Session go under "Not in a Session".
 
-- **Workers in a Session don't call `notify`.** A worker reports blocked to
-  its orchestrator (`runpane report --state blocked --question "<question>"`),
-  and the orchestrator decides what reaches you.
+- **Workers in a Session don't call `notify`.** Approvals come from the
+  Session's orchestrator, not from the agents in its Panes. A worker reports
+  blocked to its orchestrator (`runpane report --state blocked --question
+  "<question>"`), and the orchestrator answers it or asks you. A worker's
+  `notify` call isn't shown: it returns `unavailable`, "Not shown to the
+  person: in a Pane Session, only the orchestrator asks the person.", with a
+  `next` that says to report blocked. Claude's own permission and plan
+  prompts and a chat tab's prompts on a worker tab are the tool asking, so
+  they still reach you, filed under the Session.
 - **A Session orchestrator** keeps every item that waits on you posted to
   Approvals exactly once, titled with its Q-n and with the worker's files as
   links. It posts each one with `runpane notify ... --json` as a background
@@ -155,7 +161,11 @@ Codex panel also expires when that panel sits idle at its prompt for 10 seconds.
   shows how many items wait; clicking it, or pressing ⌃⇧Space while Pane is in
   front, opens the Approvals screen in the main area, and clicking the badge
   again returns you to the view you left. The sidebar keeps the Sessions list,
-  and Panes and Sessions with a waiting item show an amber "Waiting". Beside
+  Panes with a waiting item show an amber "Waiting", and each Session row
+  shows an amber count of the approvals waiting from it (its fallback items
+  included). The badge is the sum of every Session's count plus items not in a
+  Session, across saved machines; in the one-machine sidebar its tooltip says
+  how many of them wait on other machines. Beside
   it, the queue has **Waiting** and **Answered** tabs and groups items by
   Session, with counts and machine marks, "Not in a Session" last. The
   selected item opens in place as a card (its title, context, links and

@@ -1,3 +1,4 @@
+import { SessionApprovalsCount } from '../approvals/ApprovalsCount';
 import { useEffect, useState } from 'react';
 import { Archive, Check, ChevronDown, ChevronRight, MoreHorizontal, Pause, Pencil, Pin, Play, Plus, RefreshCw, X } from 'lucide-react';
 import { AgentStatusDot, PausedGlyph } from '../ui/AgentStatusDot';
@@ -218,7 +219,11 @@ function SessionRow({ row, active, expanded, onToggle, onMenu, renderPane }: {
           ? <PausedGlyph size="sm" className="pointer-events-none flex-shrink-0" />
           : <AgentStatusDot status={row.status} size="sm" className="pointer-events-none flex-shrink-0" />}
         <span className={cn('pointer-events-none min-w-0 flex-1 truncate text-[13px]', session.paused ? 'text-text-muted' : 'font-semibold text-text-primary')}>{session.name}</span>
-        {row.panes.length > 0 && <span className="pointer-events-none flex-shrink-0 text-[12px] tabular-nums text-text-tertiary">{row.panes.length}</span>}
+        <SessionApprovalsCount
+          sessionId={session.id}
+          machineId={machine.id}
+          otherwise={row.panes.length > 0 && <span className="text-[12px] tabular-nums text-text-tertiary">{row.panes.length}</span>}
+        />
         {session.isPinned && <PinnedMark />}
         <BadgeSlot machine={machine} label={session.name} onMenu={openMenu} />
       </div>

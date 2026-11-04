@@ -79,7 +79,12 @@ describe('Pane Chat skill bundle', () => {
     const guide = (await fs.readFile(path.join(bundleRoot, 'skills', 'pane-orchestration', 'SKILL.md'), 'utf8')).replace(/\s+/g, ' ');
     expect(guide).toContain('## What waits on the person: Approvals');
     expect(guide).toContain("Keep every item that waits on the person posted to Pane's Approvals, exactly once.");
-    expect(guide).toContain("Workers in your Session don't post; they report blocked to you, and you post for them.");
+    expect(guide).toContain('You are in orchestrator mode');
+    expect(guide).toContain('Approvals come from you, not from the agents in');
+    expect(guide).toContain('either have an approval waiting for the person');
+    expect(guide).toContain('or be done and say so.');
+    expect(guide).toContain('pass the related files, PRs and pages as `--links`.');
+    expect(guide).not.toMatch(/never (be )?stalled|Nothing left to do in this Session/i);
     expect(guide).toContain('Post with the CLI as a background command, one per item, so you stay free to talk');
     expect(guide).toContain('runpane notify --ui options --title "Q-7: <the question>"');
     expect(guide).toContain('(`runpane inbox ack <id>`)');

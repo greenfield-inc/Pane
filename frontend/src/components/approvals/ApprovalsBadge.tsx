@@ -1,6 +1,8 @@
 import { Inbox } from 'lucide-react';
 import { useNavigationStore } from '../../stores/navigationStore';
-import { useNotifyStore, waitingCount } from '../../stores/notifyStore';
+import { useNotifyStore, waitingCount, waitingElsewhere } from '../../stores/notifyStore';
+import { useAllMachinesStore } from '../../stores/allMachinesStore';
+import { LOCAL_MACHINE_ID } from '../../../../shared/types/machineConnections';
 import { cn } from '../../utils/cn';
 import { toggleApprovals } from './approvalsNavigation';
 
@@ -12,6 +14,10 @@ export function ApprovalsBadge({ compact = false }: { compact?: boolean }) {
   const enabled = useNotifyStore((state) => state.snapshot?.settings.enabled ?? false);
   const count = useNotifyStore((state) => waitingCount(state.snapshot));
   const open = useNavigationStore((state) => state.activeView === 'notify');
+  // The count covers every saved machine; the one-machine sidebar shows only this machine's rows.
+  const activeMachineId = useAllMachinesStore((state) => state.entries.find((entry) => entry.active)?.id ?? LOCAL_MACHINE_ID);
+  const allMachines = useAllMachinesStore((state) => state.enabled);
+  const elsewhere = useNotifyStore((state) => (allMachines ? 0 : waitingElsewhere(state.snapshot, activeMachineId)));
   if (!enabled) return null;
   const waiting = count > 0;
   return (
@@ -20,7 +26,7 @@ export function ApprovalsBadge({ compact = false }: { compact?: boolean }) {
       data-testid="approvals-badge"
       aria-pressed={open}
       aria-label={waiting ? `Approvals, ${count} waiting` : 'Approvals'}
-      title={open ? 'Back to where you were' : 'Approvals'}
+      title={open ? 'Back to where you were' : elsewhere > 0 ? `Approvals · ${elsewhere} waiting on other machines` : 'Approvals'}
       onClick={toggleApprovals}
       className={cn(
         'ml-1 inline-flex h-6 shrink-0 items-center gap-1.5 rounded-full border px-2 text-[12px] font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle',

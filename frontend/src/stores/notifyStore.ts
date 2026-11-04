@@ -45,9 +45,18 @@ export function waitingCount(snapshot: NotifySnapshot | null): number {
   return snapshot?.items.filter((item) => item.state === 'waiting').length ?? 0;
 }
 
-/** Something from this Session (its orchestrator or a worker Pane) waits on you. */
-export function sessionHasWaitingQuestion(snapshot: NotifySnapshot | null, sessionId: string): boolean {
-  return snapshot?.items.some((item) => item.state === 'waiting' && item.source.session?.id === sessionId) ?? false;
+/**
+ * How many items from this Session (its orchestrator, worker prompts, fallback items) wait on you;
+ * with `machineId`, only that machine's (`local` for this computer).
+ */
+export function sessionWaitingCount(snapshot: NotifySnapshot | null, sessionId: string, machineId?: string): number {
+  return snapshot?.items.filter((item) => item.state === 'waiting' && item.source.session?.id === sessionId
+    && (machineId === undefined || (item.machineId ?? 'local') === machineId)).length ?? 0;
+}
+
+/** Waiting items from machines other than the one the app is on (`local` for this computer). */
+export function waitingElsewhere(snapshot: NotifySnapshot | null, activeMachineId: string): number {
+  return snapshot?.items.filter((item) => item.state === 'waiting' && (item.machineId ?? 'local') !== activeMachineId).length ?? 0;
 }
 
 export function paneHasWaitingQuestion(snapshot: NotifySnapshot | null, paneId: string): boolean {

@@ -1236,15 +1236,25 @@ turns: worker output reaches it only as the result of a tool call it made.
 While Approvals is on (Settings → Approvals, saved as `notify.enabled`, on by
 default), a Session has one voice to the person: its orchestrator.
 
-- **Workers don't call `notify`.** A worker in a Session's Pane gets
+- **Workers don't call `notify`.** Approvals come from the orchestrator, not
+  from the agents in the Session's Panes. A worker in a Session's Pane gets
   `PANE_SESSION_DIR` and no `PANE_ORCHESTRATION_SESSION_ID`; Pane's
   instructions (the user-level Notify block, the MCP server instructions and
   the `pane` home skill) tell such a worker to report blocked with
-  `runpane report --state blocked --question "<question>"` instead.
-- **The orchestrator posts.** The generated orchestrator skill, the Session's
+  `runpane report --state blocked --question "<question>"` instead. A
+  worker's `notify` call isn't shown to the person; it returns `unavailable`
+  with a `next` that says to report blocked.
+- **Orchestrator mode.** The generated orchestrator skill, the Session's
   `AGENTS.md` and the orchestrator guide
   (`paneChatBundle/skills/pane-orchestration/SKILL.md`, "What waits on the
-  person") carry the same rule: keep every item that waits on the person (a
+  person") tell the orchestrator that only it asks the person; to keep a
+  running list and keep the work moving; when the person asks about one
+  thing while other work is open, to remind them and offer the next step; at
+  the end of a turn, to have an approval waiting or be done; and to ask
+  through Approvals with context (why, the options with the recommended one
+  first, related files and links). These are instructions; Pane doesn't
+  check turns.
+- **The orchestrator posts.** The same three carry the posting rule: keep every item that waits on the person (a
   worker's needs_you or blocked question, a plan or design approval, a PR
   ready to merge, a next step only they can take) posted to Approvals exactly
   once, titled with its Q-n and with the worker's files and PR as `--links`.

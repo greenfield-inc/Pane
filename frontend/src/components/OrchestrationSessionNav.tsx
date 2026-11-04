@@ -1,7 +1,7 @@
 import { CreateOrchestrationSessionDialog, type SessionCreateRequest } from './CreateOrchestrationSessionDialog';
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { Archive, ArrowRightLeft, ChevronDown, ChevronRight, MoreHorizontal, Pause, Pin, PinOff, Play, Plus, Pencil, RefreshCw, Terminal } from 'lucide-react';
-import { sessionHasWaitingQuestion, useNotifyStore } from '../stores/notifyStore';
+import { SessionApprovalsCount } from './approvals/ApprovalsCount';
 import { useNavigationStore } from '../stores/navigationStore';
 import { useSessionStore } from '../stores/sessionStore';
 import {
@@ -68,12 +68,6 @@ interface SessionListDrop extends SessionDropTarget {
 }
 
 /** What a failed reorder tells the person: what happened, what changed, why, and the next step. */
-/** A Session with something waiting on you says so in amber, in place of its activity. */
-function SessionWaiting({ sessionId, fallback }: { sessionId: string; fallback: ReactNode }) {
-  const waiting = useNotifyStore(state => sessionHasWaitingQuestion(state.snapshot, sessionId));
-  return waiting ? <span className="ml-auto shrink-0 pl-1 text-[11px] text-status-warning-on-tint">Waiting</span> : <>{fallback}</>;
-}
-
 function sessionOrderError(cause: unknown): string {
   const reason = ipcErrorMessage(cause, 'The host did not answer.').trim();
   const sentence = /[.!?]$/.test(reason) ? reason : `${reason}.`;
@@ -459,7 +453,7 @@ export function OrchestrationSessionNav({
           <>
             <SessionActivityDot session={session} paneIds={visiblePaneIds} />
             <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-text-primary">{label}</span>
-            <SessionWaiting sessionId={session.id} fallback={<SessionActivitySummary session={session} paneIds={visiblePaneIds} />} />
+            <SessionApprovalsCount sessionId={session.id} otherwise={<SessionActivitySummary session={session} paneIds={visiblePaneIds} />} />
           </>
         )}
       </button>
