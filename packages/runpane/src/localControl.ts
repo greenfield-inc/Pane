@@ -54,6 +54,8 @@ interface OrchestrationSessionRecord {
   name: string;
   archived?: boolean;
   isPinned?: boolean;
+  /** Set while the Session's chat and every Pane in it are paused. */
+  paused?: PausedMark;
   agent: OrchestrationAgent;
   internalSessionId: string;
   /** Pane versions before OpenCode Sessions send no `opencode` panel id. */
@@ -1405,6 +1407,7 @@ const orchestrationSessionRecordSchema: BoundarySchema<OrchestrationSessionRecor
   name: boundary.nonEmptyString,
   archived: boundary.optional(boundary.boolean),
   isPinned: boundary.optional(boundary.boolean),
+  paused: boundary.optional(pausedMarkSchema),
   agent: orchestrationAgentSchema,
   internalSessionId: boundary.nonEmptyString,
   panelIds: boundary.object({

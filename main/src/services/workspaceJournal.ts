@@ -28,6 +28,8 @@ interface WorkspacePanelMetadata {
   agentType?: string;
   panelTitle?: string;
   lastActivityAt?: string;
+  /** Pause stopped this panel: its exit is journalled as `panel.paused`, not `panel.exited`. */
+  paused?: boolean;
   /** The live viewport and its typed layer; held input is read from the typed layer only. */
   screen?: WorkspaceHeldInputScreen;
 }
@@ -448,6 +450,11 @@ export class WorkspaceJournal implements PaneEventSink {
       const pane = this.lookupPane(paneId);
       if (!pane) return;
       const panel = this.resolvePanel?.(panelId);
+      if (panel?.paused) {
+        this.stateByPanel.delete(panelId);
+        this.readySinceByPanel.delete(panelId);
+        return;
+      }
       this.append({
         ...pane,
         kind: 'panel.exited',
