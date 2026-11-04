@@ -817,7 +817,24 @@ restart uses (see "Agent Farm" above). The bulk form restarts `--concurrency` pa
 time (default 3), leaves running panels alone, waits on the resumed panels
 together, and returns one result per panel with its readiness, blocker, or
 error; `--all-stopped` does the same for every Pane. It relaunches finished
-workers too, so resume single panels when only some should continue.
+workers too, so resume single panels when only some should continue. Both
+bulk forms skip paused tabs.
+
+Pause stops a tab's process the way quitting Pane does, without asking, and
+keeps its panel and conversation: `runpane panels pause --panel <panel-id>
+--yes`, `runpane panes pause --pane <pane-id> --yes`, or `runpane sessions
+pause --session <session-id>` for the Session's chat and every Pane in it. A
+paused tab stays stopped through clicks, app restarts and updates until
+`runpane panels resume --panel <panel-id>`, `runpane panes resume --pane
+<pane-id> --yes` or `runpane sessions resume --session <session-id>` restarts
+it in its conversation. The watch reports each paused tab once as
+`panel.paused` (`PAUSED <pane-name> pane <pane-id> panel <panel-id>`) and each
+resumed one as `panel.unpaused` (`UNPAUSED ...`), followed by its usual ready
+signal. An orchestrator leaves paused workers paused unless the person asks.
+`runpane panes list --json` reports each Pane's `paused` mark (`{ at, by:
+"manual" | "auto", idleHours? }`) and `inactiveSince`, the latest terminal
+output or input in its tabs or the last time the person selected it;
+`runpane panels list` reports each tab's `paused`.
 
 If a stopped panel's previous shell or agent process is still exiting, resume
 returns a `still stopping` error instead of starting a second process. Retry
@@ -1026,7 +1043,7 @@ An orchestrator whose harness wakes only when a process exits (Claude Code
 background Bash, Codex) waits with the one wait primitive from the
 [orchestrator guide](#orchestrator-guide): `runpane watch --session <S> --as
 <name> --until-event --json --kinds
-agent.report,agent.report.missing,agent.blocked,agent.ready,panel.exited,panel.stopped,pane.gone` (`--pane <pane-id>` outside a Session), run as a background
+agent.report,agent.report.missing,agent.blocked,agent.ready,panel.exited,panel.stopped,panel.paused,pane.gone` (`--pane <pane-id>` outside a Session), run as a background
 task and run again after each event. `--until-event` exits 0 on the first
 event (124 at a `--timeout-ms` deadline, if you give one); a `RESET` and the caller's own panel never end
 the wait. When a worker keeps richer state in a status file, it writes the file

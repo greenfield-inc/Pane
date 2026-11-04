@@ -1,4 +1,4 @@
-import type { ProjectEnvironment, TerminalAgentReport, TerminalAgentReportState, TerminalExpectedReport, ToolPanelType } from './panels';
+import type { ProjectEnvironment, TerminalAgentReport, TerminalAgentReportState, TerminalExpectedReport, TerminalPausedMark, ToolPanelType } from './panels';
 import type { RunpaneAgent } from './generatedRunpaneContract';
 import type { RemoteDaemonExecutableHealth } from './remoteDaemon';
 import type { TerminalGraphicsProtocol } from '../constants/terminalGraphics';
@@ -741,6 +741,10 @@ export interface RunpanePaneSummary {
   pinned: boolean;
   createdAt?: string;
   lastActivity?: string;
+  /** When the Pane was last used: the latest terminal output or input in its tabs, or the last time the person selected it. */
+  inactiveSince: string;
+  /** Set while every terminal tab of the Pane is paused: the latest tab's pause mark. */
+  paused?: TerminalPausedMark;
   archived?: boolean;
   ownership: 'pane' | 'external';
 }
@@ -1026,6 +1030,8 @@ export interface RunpanePanelSummary {
   lastActiveAt?: string;
   /** Latest `runpane report` from this panel's agent. */
   report?: TerminalAgentReport;
+  /** Set while the tab is paused; it stays stopped until `panels resume --panel` or its Pane or Session resumes. */
+  paused?: TerminalPausedMark;
   /** The agent session ID Pane saved for reopening this panel; omitted when none is saved. */
   resumeId?: string;
   /**

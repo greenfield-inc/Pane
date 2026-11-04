@@ -739,6 +739,12 @@ What each line means under follow (the JSON \`kind\` is in parentheses):
   To drop a worker tab you no longer need, finished or stuck, close it with
   \`runpane panels close --panel <panel-id> --yes --json\`, which stops its
   process as closing the tab in the app does.
+- PAUSED (\`panel.paused\`): the person, or auto-pause after hours without
+  use, paused the worker. Its panel and conversation are intact. Leave it
+  paused unless the person asks you to resume it; then run \`runpane panels
+  resume --panel <panel-id> --wait-ready --yes --json\`. \`panels resume
+  --session\` and \`--all-stopped\` skip paused tabs. UNPAUSED
+  (\`panel.unpaused\`) means it was resumed; READY follows as usual.
 - BLOCKED (\`agent.blocked\`): the agent is waiting on a human, such as an
   AskUserQuestion picker, a permission or trust prompt, or Codex's update
   screen, even if it never reported. \`screenLines\` holds the prompt. It

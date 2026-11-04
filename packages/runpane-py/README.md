@@ -225,6 +225,17 @@ when blocked. READY alone is activity evidence. Read the full report with
 `runpane agents status --panel <id> --json`. Resume stopped workers in the same
 panel with `runpane panels resume --panel <id> --wait-ready --yes --json`.
 
+`runpane panels pause --panel <id> --yes`, `runpane panes pause --pane <id>
+--yes` and `runpane sessions pause --session <id|name>` stop a tab, a Pane, or
+a Session's chat and Panes, keeping each agent's conversation. Paused tabs stay
+stopped until `runpane panels resume --panel <id>`, `runpane panes resume
+--pane <id> --yes` or `runpane sessions resume --session <id|name>`;
+`panels resume --session` and `--all-stopped` skip them. The watch reports
+`PAUSED` (`panel.paused`) and `UNPAUSED` (`panel.unpaused`). Leave paused
+workers paused unless the person asks. `runpane panes list --json` shows each
+Pane's `paused` mark and `inactiveSince` (its last terminal output, input or
+selection).
+
 Work an agent sends with `panels create`, `panes create` (with a prompt), or
 `panels submit` expects that report; `--no-expect-report` sends without
 waiting, and `--expect-report` asks for one on `--source user` work. If the

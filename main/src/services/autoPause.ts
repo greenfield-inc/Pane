@@ -6,7 +6,7 @@ import { paneInactiveSince, type PaneActivityInput } from './paneInactivity';
 
 const HOUR_MS = 60 * 60 * 1000;
 /** How often auto-pause looks for idle Panes. */
-export const AUTO_PAUSE_SWEEP_MS = 5 * 60 * 1000;
+const AUTO_PAUSE_SWEEP_MS = 5 * 60 * 1000;
 
 export interface AutoPausePane extends Omit<PaneActivityInput, 'panels'> {
   id: string;

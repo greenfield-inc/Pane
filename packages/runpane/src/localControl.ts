@@ -418,8 +418,27 @@ interface PaneSummary {
   pinned: boolean;
   createdAt?: string;
   lastActivity?: string;
+  inactiveSince?: string;
+  paused?: PausedMark;
   archived?: boolean;
   ownership: 'pane' | 'external';
+}
+
+interface PausedMark {
+  at: string;
+  by: 'manual' | 'auto';
+  idleHours?: number;
+}
+
+interface PauseResult {
+  ok: boolean;
+  action: 'paused' | 'resumed';
+  scope: { kind: 'panel' | 'pane' | 'session'; panelId?: string; paneId?: string; paneName?: string; sessionId?: string; sessionName?: string };
+  panelIds: string[];
+  unchanged: number;
+  failed: Array<{ panelId: string; error: string }>;
+  message: string;
+  nextCommand: string;
 }
 
 interface PaneListResult {
@@ -703,6 +722,7 @@ interface PanelSummary {
   createdAt?: string;
   lastActiveAt?: string;
   report?: AgentReport;
+  paused?: PausedMark;
   /** Saved agent session ID that reopens this panel. */
   resumeId?: string;
   /** Which rule resumes with resumeId: derived Agent Farm, the panel's configured command, or built-in agent capture. */
@@ -972,6 +992,8 @@ type WorkspaceEntryKind =
   | 'pane.gone'
   | 'panel.exited'
   | 'panel.stopped'
+  | 'panel.paused'
+  | 'panel.unpaused'
   | 'agent.report'
   | 'agent.report.missing'
   | 'pane.associated'
@@ -1107,6 +1129,28 @@ const repoAddPreviewSchema: BoundarySchema<RepoAddPreview> = boundary.object({
   wouldCreate: boundary.boolean,
   environment: boundary.optional(boundary.string),
 });
+const pausedMarkSchema: BoundarySchema<PausedMark> = boundary.object({
+  at: boundary.string,
+  by: boundary.enumeration('manual', 'auto'),
+  idleHours: boundary.optional(boundary.number),
+});
+const pauseResultSchema: BoundarySchema<PauseResult> = boundary.object({
+  ok: boundary.boolean,
+  action: boundary.enumeration('paused', 'resumed'),
+  scope: boundary.object({
+    kind: boundary.enumeration('panel', 'pane', 'session'),
+    panelId: boundary.optional(boundary.string),
+    paneId: boundary.optional(boundary.string),
+    paneName: boundary.optional(boundary.string),
+    sessionId: boundary.optional(boundary.string),
+    sessionName: boundary.optional(boundary.string),
+  }),
+  panelIds: boundary.array(boundary.string),
+  unchanged: boundary.number,
+  failed: boundary.array(boundary.object({ panelId: boundary.string, error: boundary.string })),
+  message: boundary.string,
+  nextCommand: boundary.string,
+});
 const paneSummarySchema: BoundarySchema<PaneSummary> = boundary.object({
   id: boundary.string,
   paneId: boundary.string,
@@ -1121,6 +1165,8 @@ const paneSummarySchema: BoundarySchema<PaneSummary> = boundary.object({
   pinned: boundary.boolean,
   createdAt: boundary.optional(boundary.string),
   lastActivity: boundary.optional(boundary.string),
+  inactiveSince: boundary.optional(boundary.string),
+  paused: boundary.optional(pausedMarkSchema),
   archived: boundary.optional(boundary.boolean),
   ownership: boundary.enumeration('pane', 'external'),
 });
@@ -1264,6 +1310,7 @@ const panelSummarySchema: BoundarySchema<PanelSummary> = boundary.object({
   createdAt: boundary.optional(boundary.string),
   lastActiveAt: boundary.optional(boundary.string),
   report: boundary.optional(agentReportSchema),
+  paused: boundary.optional(pausedMarkSchema),
   resumeId: boundary.optional(boundary.string),
   resumeSource: boundary.optional(boundary.enumeration('agent-farm', 'configured', 'agent')),
 });
@@ -1937,6 +1984,8 @@ const workspaceEntryKindSchema = boundary.enumeration(
   'pane.gone',
   'panel.exited',
   'panel.stopped',
+  'panel.paused',
+  'panel.unpaused',
   'pane.associated',
   'pane.detached',
   'pr.conflicted',
@@ -3935,6 +3984,29 @@ export async function runPanelsResume(parsed: ParsedArgs): Promise<number> {
   return result.ok ? 0 : 1;
 }
 
+/** `panels pause`, `panes pause|resume` and `sessions pause|resume`: one daemon call each, printed alike. */
+export async function runPause(parsed: ParsedArgs, scope: 'panel' | 'pane' | 'session', action: 'pause' | 'resume'): Promise<number> {
+  const [flag, key, id] = scope === 'panel' ? ['--panel', 'panelId', parsed.panelId]
+    : scope === 'pane' ? ['--pane', 'paneId', parsed.paneId] : ['--session', 'sessionId', parsed.sessionId?.trim()];
+  if (!id) throw new Error(`runpane ${parsed.command} requires ${flag}.`);
+  // Like the other Session updates, Session pause and resume need no --yes.
+  if (scope !== 'session') await confirmMutation(parsed);
+  const channel = `runpane:${scope === 'panel' ? 'panels' : scope === 'pane' ? 'panes' : 'sessions'}:${action}`;
+  const result = await invokeDaemon(channel, [{ [key]: id }], pauseResultSchema, {
+    paneDir: parsed.paneDir,
+    // Pause waits for every tab's processes to exit; resume restarts them a few at a time.
+    timeoutMs: RESUME_MANY_RESTART_BUDGET_MS,
+  });
+  if (parsed.json) {
+    printJson(result);
+  } else {
+    console.log(result.message);
+    for (const item of result.failed) console.log(`FAIL panel ${item.panelId}: ${item.error}`);
+    console.log(`Next: ${result.nextCommand}`);
+  }
+  return result.ok ? 0 : 1;
+}
+
 export async function runAgentsDoctor(parsed: ParsedArgs): Promise<number> {
   if (!parsed.agent) {
     throw new Error(`runpane agents doctor requires --agent ${RUNPANE_CONTRACT.enums.agents.join('|')}.`);
@@ -4522,6 +4594,8 @@ function workspaceLabel(kind: WorkspaceEntryKind): string {
     'pane.gone': 'GONE',
     'panel.exited': 'EXIT',
     'panel.stopped': 'STOPPED',
+    'panel.paused': 'PAUSED',
+    'panel.unpaused': 'UNPAUSED',
     'pane.associated': 'JOINED',
     'pane.detached': 'LEFT',
     'pr.conflicted': 'PR CONFLICTED',
@@ -4570,7 +4644,8 @@ function printPaneListResult(result: PaneListResult): void {
   for (const pane of result.panes) {
     const repo = pane.repoName ? ` ${pane.repoName}` : '';
     const pinned = pane.pinned ? ' pinned' : '';
-    console.log(`${pane.id}\t${pane.name}\t${pane.status}${pinned}\t${pane.panelCount} panels\t${pane.worktreePath}${repo}`);
+    const paused = pane.paused ? ' paused' : '';
+    console.log(`${pane.id}\t${pane.name}\t${pane.status}${pinned}${paused}\t${pane.panelCount} panels\t${pane.worktreePath}${repo}`);
   }
 }
 
@@ -4844,7 +4919,7 @@ function printPanelListResult(result: PanelListResult): void {
   for (const panel of result.panels) {
     const marker = panel.active ? '*' : ' ';
     const initialized = panel.initialized === undefined ? '' : panel.initialized ? ' initialized' : ' not-initialized';
-    const stopped = panel.running === false ? ' stopped' : '';
+    const stopped = panel.paused ? ' paused' : panel.running === false ? ' stopped' : '';
     const agent = panel.agentType ? ` ${panel.agentType}` : '';
     const detection = panel.agentDetection && panel.agentDetection !== 'command' ? ` (${panel.agentDetection})` : '';
     const resume = panel.resumeId ? ` resume ${panel.resumeId}` : '';

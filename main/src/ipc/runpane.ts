@@ -12,7 +12,7 @@ import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { browserFileContext } from '../services/browserFileContext';
 import { PaneError, paneErrorText, reasonOf } from '../../../shared/paneError';
-import { parseSessionTimestampMs } from '../services/paneInactivity';
+import { paneInactiveSince, parseSessionTimestampMs } from '../services/paneInactivity';
 import { isOrchestrationInternalSessionId, resolveSessionRetention } from '../../../shared/types/orchestrationSession';
 import type { IpcMain } from 'electron';
 import type { AppServices } from './types';
@@ -2135,6 +2135,9 @@ function sessionToPaneSummary(session: Session, project: Project): RunpanePaneSu
     pinned: Boolean(session.isFavorite),
     createdAt: toIsoString(session.createdAt),
     lastActivity: toIsoString(session.lastActivity),
+    inactiveSince: paneInactiveSince({ createdAt: session.createdAt, lastViewedAt: session.lastViewedAt, panels },
+      panelId => terminalPanelManager.getLastActivity(panelId)).toISOString(),
+    paused: session.paused,
     archived: session.archived || undefined,
     ownership: session.worktreeOwnership ?? 'pane',
   };
@@ -2236,6 +2239,7 @@ function panelToSummary(panel: ToolPanel, dockPanelId?: string, launchExited = f
     createdAt: toIsoString(panel.metadata.createdAt),
     lastActiveAt: toIsoString(panel.metadata.lastActiveAt),
     report: readPanelAgentReport(panel),
+    paused: pausedMarkOf(panel),
     ...panelResumeSummary(customState, initialCommand),
   };
 }
@@ -3247,7 +3251,7 @@ function pauseScopeLabel(scope: RunpanePauseScope): string {
 
 function pauseScopeArgument(scope: RunpanePauseScope): string {
   if (scope.kind === 'panel') return `panels resume --panel ${scope.panelId} --yes`;
-  return scope.kind === 'pane' ? `panes resume --pane ${scope.paneId}` : `sessions resume --session ${scope.sessionId}`;
+  return scope.kind === 'pane' ? `panes resume --pane ${scope.paneId} --yes` : `sessions resume --session ${scope.sessionId}`;
 }
 
 async function pauseTabs(services: AppServices, scope: RunpanePauseScope, panelIds: string[]): Promise<RunpanePauseResult> {
@@ -4601,6 +4605,8 @@ const workspaceEntryKindSchema = boundary.enumeration(
   'pane.gone',
   'panel.exited',
   'panel.stopped',
+  'panel.paused',
+  'panel.unpaused',
   'pane.associated',
   'pane.detached',
   'pr.conflicted',
