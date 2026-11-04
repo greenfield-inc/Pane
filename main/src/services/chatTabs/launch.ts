@@ -69,7 +69,7 @@ export class AgentChatLauncher implements ChatTabLauncher {
     const env = chatTabEnv(panel, state);
     const executable = findExecutableInPath(state.agent);
     if (!executable) {
-      throw new PaneError('CHAT_AGENT_NOT_INSTALLED', `${AGENT_NAMES[state.agent]} is not installed on this machine, or not on its PATH.`, `Install ${AGENT_NAMES[state.agent]}, then press Restart. Pane never uses a bundled copy.`);
+      throw new PaneError('CHAT_AGENT_NOT_INSTALLED', `${AGENT_NAMES[state.agent]} is not installed on this machine, or not on its PATH.`, `Install ${AGENT_NAMES[state.agent]}, then press Retry. Pane never uses a bundled copy.`);
     }
     // Claude chat tabs always run the person's installed, unmodified claude.
     if (state.agent === 'claude') env.CLAUDE_CODE_EXECUTABLE = providerScript(executable, 'claude') ?? executable;

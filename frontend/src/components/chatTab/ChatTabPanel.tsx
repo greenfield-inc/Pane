@@ -164,9 +164,9 @@ export default function ChatTabPanel({ panelId, client, connected = true, quiet 
         {view?.permissions.map(permission => <ChatPermissionCard key={permission.id} permission={permission} agent={agentName} machine={machine && !machine.local ? machine.name : undefined}
           disabled={disabled || busy} composerEmpty={!snapshot.draft.trim()} onAnswer={answerPermission} />)}
         {!!view?.queue.length && <ul className="chat-queue" aria-label="Queued messages">
-          {view.queue.map(item => <li key={item.operationId}>
+          {view.queue.map((item, index) => <li key={item.operationId}>
             <span className="chat-queue-text">{item.text || 'Image'}</span>
-            <span className="chat-queue-label">Sends next</span>
+            <span className="chat-queue-label">{index === 0 ? 'Sends next' : 'Queued'}</span>
             <button type="button" className="chat-icon" aria-label="Remove from queue" title="Remove from queue" onClick={() => void act(() => client.unqueue(panelId, item.operationId))}><X className="h-3.5 w-3.5" /></button>
           </li>)}
         </ul>}
@@ -190,7 +190,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, quiet 
             <div className="chat-configs">
               {view?.canAttachImages && <ComposerPrimitive.AddAttachment aria-label="Attach image" title="Attach image" className="chat-icon rounded-full"><Plus className="h-4 w-4" /></ComposerPrimitive.AddAttachment>}
               {!!view?.controls.length && <AgentChatConfiguration controls={view.controls} disabled={disabled || view.status !== 'idle'} configure={(id, value) => void act(() => client.configure(panelId, id, value))} />}
-              {machine && <span className="chat-machine"><MachineBadge machine={machine} /><span>{machine.local ? 'this computer' : 'remote'}</span></span>}
+              {machine && <span className="chat-machine" title={`Runs on ${machine.name}`}><MachineBadge machine={machine} /></span>}
             </div>
             {working
               ? <div className="flex items-center gap-1">

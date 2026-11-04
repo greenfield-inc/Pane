@@ -84,9 +84,9 @@ export function QuestionCard({ question, disabled, onAnswer }: { question: ChatT
 
 export function QueueList({ queue, onRemove }: { queue: ChatTabQueuedPrompt[]; onRemove: (operationId: string) => void }) {
   const theme = useTheme();
-  return <View style={styles.queue}>{queue.map(item => <View key={item.operationId} testID="chat-queued" style={[styles.queued, { borderColor: theme.chat.border }]}>
+  return <View style={styles.queue}>{queue.map((item, index) => <View key={item.operationId} testID="chat-queued" style={[styles.queued, { borderColor: theme.chat.border }]}>
     <Text variant="subhead" numberOfLines={1} style={{ color: theme.chat.foreground, flex: 1 }}>{item.text || 'Image'}</Text>
-    <Text variant="footnote" style={{ color: theme.chat.mutedForeground }}>Sends next</Text>
+    <Text variant="footnote" style={{ color: theme.chat.mutedForeground }}>{index === 0 ? 'Sends next' : 'Queued'}</Text>
     <Pressable testID="chat-unqueue" accessibilityRole="button" accessibilityLabel="Remove from queue" onPress={() => onRemove(item.operationId)} style={styles.icon}><Icon ios="xmark" android="close" size={14} color={theme.chat.mutedForeground} /></Pressable>
   </View>)}</View>;
 }

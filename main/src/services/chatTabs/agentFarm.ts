@@ -54,7 +54,7 @@ export class AgentFarmProfiles implements ChatProfileResolver {
   /** Prints a profile's launch. `agent` picks the adapter to pass; the printed harness is the truth. */
   async print(profile: string, args: Record<string, string>, agent: ChatAgent, cwd: string, env: ChatAgentEnv): Promise<PrintedAcpLaunch> {
     const cli = this.options.executable();
-    if (!cli) throw new PaneError('CHAT_AGENT_NOT_INSTALLED', 'Agent Farm is not installed on this machine, so the profile cannot start.', 'Install the agent-farm CLI, then press Restart.');
+    if (!cli) throw new PaneError('CHAT_AGENT_NOT_INSTALLED', 'Agent Farm is not installed on this machine, so the profile cannot start.', 'Install the agent-farm CLI, then press Retry.');
     const adapter = await this.options.adapter(agent);
     const argv = ['run', profile, '--print-acp', '--acp-adapter', adapter, ...Object.entries(args).flatMap(([key, value]) => ['--arg', `${key}=${value}`])];
     let stdout: string;

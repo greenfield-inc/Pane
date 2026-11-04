@@ -458,12 +458,12 @@ function safeName(panelId: string): string { return createHash('sha256').update(
 
 function signedOut(agent: ChatPanelState['agent']): ChatTabProblem {
   const name = agent === 'claude' ? 'Claude Code' : 'Codex';
-  return { code: 'signed-out', message: `${name} is not signed in on this machine.`, next: `Sign in with ${agent === 'claude' ? 'claude auth login' : 'codex login'} in a terminal tab, then press Restart.`, action: 'sign-in' };
+  return { code: 'signed-out', message: `${name} is not signed in on this machine.`, next: `Sign in with ${agent === 'claude' ? 'claude auth login' : 'codex login'} in a terminal tab, then press Retry.`, action: 'sign-in' };
 }
 
 function problemFrom(error: PaneError, agent: ChatPanelState['agent']): ChatTabProblem {
   if (isAuthRequired(error)) return signedOut(agent);
-  if (error.code === 'CHAT_AGENT_NOT_INSTALLED') return { code: 'not-installed', message: error.message, next: error.next ?? 'Install it, then press Restart.', action: 'install', url: agent === 'claude' ? 'https://docs.anthropic.com/en/docs/claude-code/setup' : 'https://developers.openai.com/codex/cli' };
+  if (error.code === 'CHAT_AGENT_NOT_INSTALLED') return { code: 'not-installed', message: error.message, next: error.next ?? 'Install it, then press Retry.', action: 'install', url: agent === 'claude' ? 'https://docs.anthropic.com/en/docs/claude-code/setup' : 'https://developers.openai.com/codex/cli' };
   if (error.code === 'CHAT_UNSUPPORTED_HOST') return { code: 'unsupported-host', message: error.message, next: error.next ?? 'Open a terminal agent tab instead.' };
   if (error.code === 'CHAT_ADAPTER_INSTALL_FAILED') return { code: 'adapter-setup', message: error.message, next: error.next ?? 'Check your network, then press Restart.', action: 'restart' };
   return { code: 'failed', message: error.message, next: error.next ?? 'Press Restart.', action: 'restart' };

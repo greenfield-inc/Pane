@@ -15,8 +15,11 @@ async function launch(paneDir: string, baseURL: string | undefined): Promise<{ a
     args: [path.resolve('main/dist/main/src/index.js')],
     env: { ...process.env, PANE_DIR: paneDir, NODE_ENV: 'development', VITE_PORT: new URL(baseURL ?? 'http://localhost:4521').port, PANE_CHAT_TEST_AGENT: AGENT },
   });
-  const page = await app.firstWindow();
-  await page.waitForLoadState('domcontentloaded');
+  // Notify's floating windows (notify.html) can open before the main window, so pick the main one by its address.
+  const isMain = (candidate: Page): boolean => /^https?:|^file:/.test(candidate.url()) && !candidate.url().includes('notify.html');
+  await expect.poll(() => app.windows().some(isMain), { timeout: 30_000 }).toBe(true);
+  const page = app.windows().find(isMain)!;
+  await page.waitForFunction(() => !!window.electronAPI?.config, undefined, { timeout: 30_000, polling: 250 });
   return { app, page };
 }
 
@@ -59,7 +62,13 @@ test('a chat tab streams, asks for approval, and comes back after a restart with
 
     await box.fill('permission');
     await box.press('Enter');
-    await page.getByRole('button', { name: 'Yes', exact: true }).click();
+    const yes = page.getByRole('button', { name: 'Yes', exact: true });
+    await expect(yes).toBeVisible();
+    // The tab docks its own card, so Notify's pop-up stays away instead of covering the composer.
+    await expect.poll(() => page.evaluate(async () => (await window.electronAPI.notify.getSnapshot())?.strip?.itemId ?? null)).not.toBeNull();
+    await expect(page.getByTestId('notify-in-pane-strip')).toHaveCount(0);
+    await page.screenshot({ path: testInfo.outputPath('j1-approval.png') });
+    await yes.click();
     await expect(conversation).toContainText('Permission: allow');
     await page.screenshot({ path: testInfo.outputPath('j1-chat.png') });
 
