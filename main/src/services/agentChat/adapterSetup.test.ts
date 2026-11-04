@@ -1,47 +1,67 @@
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import path from 'path';
 import { tmpdir } from 'os';
-import { createServer } from 'http';
-import { once } from 'events';
-import { createHash } from 'crypto';
-import { execFile } from 'child_process';
-import { promisify } from 'util';
-import { expect, it, vi } from 'vitest';
-import { boundary, decodeBoundary } from '../../../../shared/validation/boundaryDecoder';
-import { adapterEntry, installAdapter } from './adapterSetup';
+import { spawn } from 'child_process';
+import { afterEach, beforeEach, expect, it } from 'vitest';
+import { adapterEntry, CODEX_ADAPTER_VERSION, compareVersions, installAdapter } from './adapterSetup';
 
-it('provisions the pinned adapter with bundled npm and shares simultaneous host setup', async () => {
-  const directory = mkdtempSync(path.join(tmpdir(), 'pane-adapter-registry-'));
-  const packageName = '@agentclientprotocol/codex-acp';
-  mkdirSync(path.join(directory, 'dist'));
-  writeFileSync(path.join(directory, 'package.json'), JSON.stringify({ name: packageName, version: '2.2.2' }));
-  writeFileSync(path.join(directory, 'dist', 'index.js'), '// controlled registry package');
-  const npm = path.join(path.dirname(require.resolve('npm/package.json')), 'bin', 'npm-cli.js');
-  await promisify(execFile)(process.execPath, [npm, 'pack', '--ignore-scripts', '--json'], { cwd: directory, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } });
-  const tarball = readFileSync(path.join(directory, 'agentclientprotocol-codex-acp-2.2.2.tgz'));
-  const integrity = `sha512-${createHash('sha512').update(tarball).digest('base64')}`;
-  let downloads = 0;
-  let registry = '';
-  const server = createServer((request, response) => {
-    if (request.url?.endsWith('.tgz')) { downloads++; response.end(tarball); return; }
-    response.setHeader('content-type', 'application/json');
-    response.end(JSON.stringify({ name: packageName, 'dist-tags': { latest: '2.2.2' }, versions: { '2.2.2': { name: packageName, version: '2.2.2', dist: { tarball: `${registry}/adapter.tgz`, integrity } } } }));
-  });
-  server.listen(0, '127.0.0.1'); await once(server, 'listening');
-  const address = decodeBoundary(server.address(), boundary.object({ port: boundary.number }));
-  registry = `http://127.0.0.1:${address.port}`;
-  vi.stubEnv('npm_config_registry', registry);
-  vi.stubEnv('npm_config_cache', path.join(directory, 'cache'));
+let directory = '';
+beforeEach(() => { directory = mkdtempSync(path.join(tmpdir(), 'pane-adapter-cli-')); });
+afterEach(() => { rmSync(directory, { recursive: true, force: true }); });
+
+/** A POSIX stand-in for the person's CLI that prints `version` and counts its runs. */
+function fakeCli(name: string, version: string): string {
+  const executable = path.join(directory, name);
+  writeFileSync(executable, `#!/bin/sh\necho run >> "${executable}.runs"\necho "${version}"\n`, { mode: 0o700 });
+  return executable;
+}
+const runs = (executable: string) => readFileSync(`${executable}.runs`, 'utf8').trim().split('\n').length;
+
+it('resolves both bundled adapters at their pinned versions, with no download folder', () => {
+  expect(adapterEntry('claude')).toMatch(/claude-agent-acp[/\\]dist[/\\]index\.js$/);
+  const codex = adapterEntry('codex')!;
+  expect(codex).toMatch(/codex-acp[/\\]dist[/\\]index\.js$/);
+  expect(JSON.parse(readFileSync(path.join(codex, '..', '..', 'package.json'), 'utf8'))).toMatchObject({ version: CODEX_ADAPTER_VERSION });
+});
+
+it.skipIf(process.platform === 'win32').each(['claude', 'codex'] as const)('starts the bundled %s adapter and completes ACP initialize', async provider => {
+  // codex-acp starts `codex app-server` first; this stand-in answers every request.
+  const appServer = path.join(directory, 'app-server.js');
+  writeFileSync(appServer, "let b='';process.stdin.on('data',c=>{b+=c;let e;while((e=b.indexOf('\\n'))>=0){const m=JSON.parse(b.slice(0,e));b=b.slice(e+1);if(m.id!==undefined)process.stdout.write(JSON.stringify({id:m.id,result:{}})+'\\n');}});");
+  const codex = path.join(directory, 'codex');
+  writeFileSync(codex, `#!/bin/sh\nexec "${process.execPath}" "${appServer}" "$@"\n`, { mode: 0o700 });
+  const child = spawn(process.execPath, [adapterEntry(provider)!], { env: { ...process.env, CLAUDE_CODE_EXECUTABLE: '/missing', CODEX_PATH: codex }, stdio: 'pipe' });
   try {
-    expect(adapterEntry('codex')).toBeUndefined();
-    await Promise.all([installAdapter('codex'), installAdapter('codex')]);
-    expect(downloads).toBe(1);
-    expect(adapterEntry('codex')).toMatch(/codex-acp[/\\]dist[/\\]index\.js$/);
-    await installAdapter('codex');
-    expect(downloads).toBe(1);
-  } finally {
-    vi.unstubAllEnvs();
-    await new Promise<void>(resolve => server.close(() => resolve()));
-    rmSync(directory, { recursive: true, force: true });
-  }
+    child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: 1, clientCapabilities: {} } })}\n`);
+    const line = await new Promise<string>((resolve, reject) => {
+      let buffer = '';
+      child.stdout.on('data', chunk => { buffer += chunk; const end = buffer.indexOf('\n'); if (end >= 0) resolve(buffer.slice(0, end)); });
+      child.on('exit', code => reject(new Error(`adapter exited with ${code}`)));
+    });
+    expect(JSON.parse(line)).toMatchObject({ id: 1, result: { protocolVersion: 1 } });
+  } finally { child.kill(); }
+}, 30_000);
+
+it('tells the person how to install a missing CLI', async () => {
+  await expect(installAdapter('codex', null)).rejects.toMatchObject({ code: 'CHAT_AGENT_NOT_INSTALLED', next: expect.stringContaining('npm install -g @openai/codex@latest') });
+});
+
+it.skipIf(process.platform === 'win32')('rejects a CLI older than the adapter needs with the upgrade command', async () => {
+  const executable = fakeCli('claude', '2.1.315 (Claude Code)');
+  await expect(installAdapter('claude', executable)).rejects.toMatchObject({
+    code: 'CHAT_AGENT_OUTDATED', message: expect.stringContaining('2.1.315'), next: expect.stringContaining('npm install -g @anthropic-ai/claude-code@latest'),
+  });
+});
+
+it.skipIf(process.platform === 'win32')('accepts a CLI at the minimum version and checks it once', async () => {
+  const executable = fakeCli('codex', 'codex-cli 0.165.0');
+  await installAdapter('codex', executable);
+  await installAdapter('codex', executable);
+  expect(runs(executable)).toBe(1);
+});
+
+it('compares dotted versions numerically', () => {
+  expect(compareVersions('2.1.316', '2.1.316')).toBe(0);
+  expect(compareVersions('2.1.40', '2.1.316')).toBeLessThan(0);
+  expect(compareVersions('2.10.0', '2.9.9')).toBeGreaterThan(0);
 });

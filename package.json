@@ -92,6 +92,8 @@
     "test:headed": "playwright test --headed"
   },
   "dependencies": {
+    "@agentclientprotocol/claude-agent-acp": "0.100.0",
+    "@agentclientprotocol/codex-acp": "2.5.0",
     "@agentclientprotocol/sdk": "2.0.1",
     "@anthropic-ai/sdk": "^0.60.0",
     "@lydell/node-pty": "1.2.0-beta.3",
@@ -105,13 +107,13 @@
     "croner": "10.0.1",
     "electron-updater": "^6.6.8",
     "glob": "^11.0.0",
-    "npm": "10.9.4",
     "smol-toml": "1.7.1",
     "web-streams-polyfill": "^3.3.3",
     "ws": "^8.22.0"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.10.2",
+    "@electron/asar": "3.4.1",
     "@electron/rebuild": "4.2.0",
     "@oxlint/plugins": "1.76.0",
     "@playwright/test": "^1.64.1",
@@ -152,6 +154,8 @@
       "frontend/dist/**/*",
       "package.json",
       "node_modules/**/*",
+      "!**/node_modules/@anthropic-ai/claude-agent-sdk-*/**",
+      "!**/node_modules/@openai/codex-*/**",
       "build/**/*",
       "LICENSE",
       "NOTICES"

@@ -25,11 +25,19 @@ Chat is on.
 ## Provider connections
 
 Claude Code uses the pinned upstream `@agentclientprotocol/claude-agent-acp`
-adapter on the workspace host. Pane installs it automatically in its own data
-directory using bundled npm. Setup uses the existing provider login and leaves
-global provider configuration alone. Authentication or installation failures are
-reported explicitly. Runtime support depends on provider capabilities, rather
-than an operating-system or exact CLI-version allowlist.
+adapter on the workspace host. Pane ships it, and `@agentclientprotocol/codex-acp`,
+as pinned dependencies (`main/src/services/agentChat/adapterSetup.ts`), without
+the native agent binaries their SDKs bundle: each adapter runs the person's own
+installed `claude` or `codex`, found on the same login-shell PATH terminal agent
+tabs use and passed as `CLAUDE_CODE_EXECUTABLE` or `CODEX_PATH`. Nothing is
+downloaded at first use. Chat uses the existing provider login and leaves global
+provider configuration alone. A missing CLI, or one older than the adapter needs
+(Claude Code 2.1.316, Codex 0.165.0), is reported with the install or upgrade
+command; terminal tabs are unaffected. Change a pin only with its minimum
+version, the `minimumReleaseAgeExclude` entries in `pnpm-workspace.yaml`, and a
+packaged build: `scripts/after-pack.js` runs `scripts/verify-chat-adapters.js`,
+which fails the build unless each packaged adapter starts and answers ACP
+`initialize`.
 
 Direct Claude launches preserve model, effort, permission mode,
 `--strict-mcp-config` and `--add-dir`. Native lifecycle hooks establish the

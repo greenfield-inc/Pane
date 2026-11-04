@@ -39,6 +39,8 @@ export interface NativeChatPort {
 }
 export interface AgentChatManagerOptions {
   enabled?: () => boolean;
+  /** The adapter script to run; defaults to the one bundled with Pane. */
+  adapterEntry?: typeof adapterEntry;
 }
 
 /** The host owns runtime lifetime; desktop and remote callers share this instance. */
@@ -572,10 +574,10 @@ export class AgentChatManager {
   }
 
   private async startAdapter(record: ConversationRecord): Promise<AcpProcess> {
-    await installAdapter(record.provider);
-    const entry = adapterEntry(record.provider);
-    if (!entry) throw new PaneError('CHAT_ADAPTER_MISSING', 'Chat setup finished without a usable adapter. The conversation was not replaced.', 'Retry Chat setup on the workspace host.');
     const saved = this.required(record.panelId);
+    await installAdapter(record.provider, saved.launch.executable);
+    const entry = (this.options.adapterEntry ?? adapterEntry)(record.provider);
+    if (!entry) throw new PaneError('CHAT_ADAPTER_MISSING', 'This Pane build is missing its bundled chat adapter. The conversation was not replaced.', 'Reinstall Pane from runpane.com. Terminal agent tabs are not affected.');
     const projection = new TranscriptProjection(record.panelId, record.generation + 1);
     this.transcripts.set(record.panelId, projection);
     panelManager.commitAgentChat(record.panelId, { ...saved, processes: { ...saved.processes, unverifiedSpawn: 'chat' } });
