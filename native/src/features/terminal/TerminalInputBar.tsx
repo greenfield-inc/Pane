@@ -7,7 +7,7 @@ import { useTheme } from '@/theme';
 import { Icon, Text } from '@/ui';
 
 import { useAutocorrect } from '../composer/autocorrectPreference';
-import { straightenSmartPunctuation } from '../composer/smartPunctuation';
+import { straightenKeyboardEdit } from '../composer/smartPunctuation';
 import { recordingClock } from '../voice/recordingLimits';
 import type { useVoiceDictation } from '../voice/useVoiceDictation';
 
@@ -61,7 +61,7 @@ export function TerminalInputBar({
       <TextInput
         testID="terminal-input"
         value={shown}
-        onChangeText={text => !previewing && onChangeDraft(autocorrect ? straightenSmartPunctuation(text) : text)}
+        onChangeText={text => !previewing && onChangeDraft(autocorrect ? straightenKeyboardEdit(draft, text) : text)}
         onSelectionChange={event => onSelectionChange(event.nativeEvent.selection)}
         selection={previewing ? undefined : selection}
         editable={!previewing}
