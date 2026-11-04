@@ -44,6 +44,16 @@ describe('session selection ordering', () => {
 
   afterEach(() => vi.unstubAllGlobals());
 
+  it('keeps main-repository updates when switching away and back', async () => {
+    const main = session({ id: 'main', isMainRepo: true, name: 'Old name' });
+    useSessionStore.setState({ sessions: [main, session({ id: 'other' })], activeMainRepoSession: main, activeSessionId: 'main' });
+    useSessionStore.getState().updateSession({ ...main, name: 'Updated name' });
+    await useSessionStore.getState().setActiveSession('other');
+    await useSessionStore.getState().setActiveSession('main');
+    expect(useSessionStore.getState().activeMainRepoSession?.name).toBe('Updated name');
+    expect(useSessionStore.getState().sessions.find(pane => pane.id === 'main')?.name).toBe('Updated name');
+  });
+
   it('keeps the last selection when IPC replies arrive in reverse order', async () => {
     const first = deferred<unknown>();
     const second = deferred<unknown>();

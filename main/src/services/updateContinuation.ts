@@ -5,6 +5,7 @@ import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDec
 import { effectiveCustomResume } from '../../../shared/types/customCommandResume';
 
 export function updateContinuation(state: TerminalPanelState, activity: AgentState | undefined) {
+  if (state.agentChat?.conversation.active === 'chat') return { eligible: false, requiresAttention: true, reason: 'Chat ownership and launch environment require explicit recovery after the host restarts. Recover this exact conversation in Terminal first; no prompt is replayed.' };
   if (activity !== 'working') return { eligible: false, requiresAttention: false, reason: activity === 'blocked' ? 'Approval or input was pending; review the saved conversation.' : 'The panel was not actively working; it remains stopped.' };
   if (state.agentReport?.state === 'done' || state.agentReport?.state === 'blocked' || state.agentReport?.state === 'failed') return { eligible: false, requiresAttention: false, reason: `The agent reported ${state.agentReport.state}; it remains stopped.` };
   if (!state.agentSessionId) return { eligible: false, requiresAttention: true, reason: 'No exact conversation ID was recorded; choose the conversation manually.' };

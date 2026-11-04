@@ -6,7 +6,7 @@ import type { BoundarySchema } from '../validation/boundaryDecoder';
  * aliases this, because a host's remembered location crosses the IPC boundary
  * and has to be decodable in main.
  */
-export const PANE_NAVIGATION_VIEWS = ['sessions', 'project', 'pane-chat', 'mission-control', 'ssh'] as const;
+export const PANE_NAVIGATION_VIEWS = ['sessions', 'project', 'pane-chat', 'mission-control', 'ssh', 'loops', 'notify'] as const;
 
 export type PaneNavigationView = (typeof PANE_NAVIGATION_VIEWS)[number];
 
@@ -35,6 +35,7 @@ const hostNavigationMemorySchema: BoundarySchema<HostNavigationMemory> = boundar
 });
 
 /** Returns null for anything that is not a usable memory, including older shapes. */
-export function decodeHostNavigationMemory<Value>(value: Value): HostNavigationMemory | null {
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- External saved data is decoded immediately with hostNavigationMemorySchema.
+export function decodeHostNavigationMemory(value: unknown): HostNavigationMemory | null {
   return decodeOptionalBoundary(value, hostNavigationMemorySchema) ?? null;
 }

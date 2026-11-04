@@ -3,15 +3,34 @@ import os from 'os';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import { boundary, decodeBoundary } from './boundaryDecoder';
+import { describeFailure } from './errors';
 import { matchCommand } from './commands';
 import type { ArtifactFormat, InstallTarget, RunpaneCommand } from './commands';
-import type { JsonObject, JsonValue } from './boundaryDecoder';
+import type { BoundarySchema, JsonObject, JsonValue } from './boundaryDecoder';
 import type { PanePlatform } from './platform';
 import { getWrapperVersion } from './version';
 
 const TELEMETRY_ENDPOINT = 'https://runpane.com/api/runpane/telemetry';
 const INSTALL_ID_PATTERN = /^install_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const TELEMETRY_TIMEOUT_MS = 1500;
+const ERROR_CODE_PATTERN = /^[A-Z][A-Z0-9_]{1,63}$/;
+/** Shared by both wrappers: a failure loop sends each cause once an hour and at most 10 failures an hour. */
+const FAILURE_LIMIT_FILE = 'runpane-wrapper-telemetry.json';
+const FAILURE_WINDOW_MS = 60 * 60 * 1000;
+const MAX_FAILURES_PER_WINDOW = 10;
+const CI_ENVIRONMENT_KEYS = ['CI', 'GITHUB_ACTIONS', 'BUILDKITE', 'GITLAB_CI', 'CIRCLECI', 'TF_BUILD', 'JENKINS_URL', 'TEAMCITY_VERSION', 'CODEBUILD_BUILD_ID'];
+
+interface FailureLimitState {
+  windowStart: number;
+  count: number;
+  sent: Array<{ signature: string; at: number }>;
+}
+
+const failureLimitSchema: BoundarySchema<FailureLimitState> = boundary.object({
+  windowStart: boundary.number,
+  count: boundary.number,
+  sent: boundary.array(boundary.object({ signature: boundary.string, at: boundary.number })),
+});
 
 export type WrapperTelemetryEventName =
   | 'runpane_wrapper_download_requested'
@@ -65,6 +84,7 @@ export interface WrapperTelemetryContext {
   usedFallback?: boolean;
   failureStage?: WrapperFailureStage;
   failureCategory?: WrapperFailureCategory;
+  errorCode?: string;
   exitCode?: number;
 }
 
@@ -141,9 +161,21 @@ export function setSetupSelection(
   context.target = target;
 }
 
+/** Records a thrown failure's code (the one its `--json` error prints) and, unless already set, its category. */
+export function recordFailureCause(context: WrapperTelemetryContext, cause: unknown): void {
+  context.errorCode = describeFailure(cause).code;
+  context.failureCategory ??= categorizeFailure(cause);
+}
+
+/** Reads the error code first, then only the message's first line, so appended help text cannot skew it. */
 export function categorizeFailure(cause: unknown): WrapperFailureCategory {
+  const { code } = describeFailure(cause);
+  if (code === 'EACCES' || code === 'EPERM') return 'permission';
+  if (code === 'ENOENT') return 'not_found';
+  if (code === 'ETIMEDOUT' || code.endsWith('_TIMEOUT')) return 'timeout';
+  if (/^(ECONN[A-Z]+|ENOTFOUND|EAI_AGAIN|EHOSTUNREACH|ENETUNREACH|EPIPE|ERR_RUNPANE_DAEMON_CONNECT_FAILED)$/.test(code)) return 'network';
   const message = cause instanceof Error ? cause.message : String(cause);
-  const normalized = message.toLowerCase();
+  const normalized = message.split('\n', 1)[0].toLowerCase();
   if (normalized.includes('checksum')) return 'checksum';
   if (normalized.includes('timeout') || normalized.includes('timed out')) return 'timeout';
   if (normalized.includes('enoent') || normalized.includes('not found') || normalized.includes('404')) return 'not_found';
@@ -215,6 +247,7 @@ export function buildWrapperTelemetryProperties(input: WrapperTelemetryInput): W
   setIfDefined(properties, 'used_fallback', context.usedFallback);
   setIfDefined(properties, 'failure_stage', context.failureStage);
   setIfDefined(properties, 'failure_category', context.failureCategory);
+  setIfDefined(properties, 'error_code', context.errorCode && ERROR_CODE_PATTERN.test(context.errorCode) ? context.errorCode : undefined);
   setIfDefined(properties, 'exit_code', sanitizeExitCode(context.exitCode));
 
   return properties;
@@ -238,10 +271,32 @@ export async function trackWrapperEvent(
       invocation: detectNpmInvocation(),
       context,
     });
+    if (event.endsWith('_failed') && !(await allowFailureEvent(event, properties))) return;
     await postTelemetry({ event, properties });
   } catch {
     // Telemetry must not affect wrapper behavior.
   }
+}
+
+async function allowFailureEvent(event: string, properties: WrapperTelemetryProperties): Promise<boolean> {
+  const file = path.join(appDirectory(), FAILURE_LIMIT_FILE);
+  const now = Date.now();
+  const signature = [event, properties.command, properties.failure_stage, properties.failure_category, properties.error_code, properties.exit_code].join(':');
+  let state: FailureLimitState = { windowStart: now, count: 0, sent: [] };
+  try {
+    const saved = decodeBoundary(JSON.parse(await fs.readFile(file, 'utf8')), failureLimitSchema);
+    if (saved.windowStart <= now && now - saved.windowStart < FAILURE_WINDOW_MS) state = saved;
+    else state.sent = saved.sent;
+  } catch {
+    // A missing or unreadable file starts a new window.
+  }
+  const sent = state.sent.filter(entry => now - entry.at < FAILURE_WINDOW_MS);
+  if (state.count >= MAX_FAILURES_PER_WINDOW || sent.some(entry => entry.signature === signature)) return false;
+  const temporary = `${file}.${process.pid}.tmp`;
+  const next = { windowStart: state.windowStart, count: state.count + 1, sent: [...sent, { signature, at: now }] };
+  await fs.writeFile(temporary, `${JSON.stringify(next)}\n`, 'utf8');
+  await fs.rename(temporary, file);
+  return true;
 }
 
 function appDirectory(): string {
@@ -332,7 +387,7 @@ async function postTelemetry(payload: { event: WrapperTelemetryEventName; proper
 }
 
 function isTelemetryDisabled(): boolean {
-  return Boolean(process.env.CI || process.env.RUNPANE_TELEMETRY_DISABLED);
+  return process.env.DO_NOT_TRACK === '1' || Boolean(process.env.RUNPANE_TELEMETRY_DISABLED) || CI_ENVIRONMENT_KEYS.some(key => process.env[key]);
 }
 
 function createInstallId(): string {

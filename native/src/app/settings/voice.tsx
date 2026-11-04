@@ -47,8 +47,8 @@ export default function VoiceSettingsScreen() {
   };
 
   return (
-    <Screen scroll testID="voice-settings">
-      <Text variant="subhead" tone="secondary">
+    <Screen scroll grouped testID="voice-settings">
+      <Text variant="subhead" tone="secondary" style={styles.inset}>
         Dictation runs on <Text variant="subhead" style={styles.bold}>{profile.label}</Text>. Live mode needs a Deepgram key and recorded mode a fal key. With an OpenRouter key, the host also cleans up the text.
       </Text>
       {affordances.isPending ? (
@@ -73,16 +73,16 @@ export default function VoiceSettingsScreen() {
             />
           ))}
           {needsUpdate ? (
-            <Text variant="footnote" tone="secondary" testID="voice-settings-update">
+            <Text variant="rowDetail" tone="secondary" testID="voice-settings-update" style={styles.inset}>
               Update Pane on {profile.label} to use voice without OpenRouter.
             </Text>
           ) : null}
           {error ? (
-            <Text variant="footnote" tone="danger" testID="voice-settings-error" accessibilityLiveRegion="polite">{error}</Text>
+            <Text variant="rowDetail" tone="danger" testID="voice-settings-error" accessibilityLiveRegion="polite" style={styles.inset}>{error}</Text>
           ) : saved ? (
-            <Text variant="footnote" tone="secondary" testID="voice-settings-saved" accessibilityLiveRegion="polite">Saved to {profile.label}.</Text>
+            <Text variant="rowDetail" tone="secondary" testID="voice-settings-saved" accessibilityLiveRegion="polite" style={styles.inset}>Saved to {profile.label}.</Text>
           ) : (
-            <Text variant="footnote" tone="muted">
+            <Text variant="rowDetail" tone="muted" style={styles.inset}>
               Sent once over this phone's connection and stored on {profile.label}. Pane never shows a saved key again.
             </Text>
           )}
@@ -97,5 +97,6 @@ export default function VoiceSettingsScreen() {
 
 const styles = StyleSheet.create({
   bold: { fontWeight: '600' },
-  form: { gap: 14 },
+  form: { gap: 20 },
+  inset: { paddingHorizontal: 4 },
 });

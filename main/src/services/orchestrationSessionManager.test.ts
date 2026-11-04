@@ -26,6 +26,9 @@ import { OrchestrationSessionStore } from './orchestrationSessionStore';
 import { terminalPanelManager, TerminalPanelManager } from './terminalPanelManager';
 import { sessionWorkspacePath, prepareSessionWorkspace } from './sessionWorkspace';
 import { OrchestrationSessionManager } from './orchestrationSessionManager';
+import { normalizeAgentReport } from './agentReport';
+import { serializeJsonTransport } from '../daemon/jsonTransport';
+import { boundary } from '../../../shared/validation/boundaryDecoder';
 import * as wslUtils from '../utils/wslUtils';
 import { PaneError, toPaneDaemonError } from '../../../shared/paneError';
 
@@ -289,6 +292,115 @@ describe('OrchestrationSessionManager', () => {
     expect(databaseService.getActivePanel(view.internalSession.id)?.id).toBe(view.panel.id);
     expect(send.mock.calls.filter(([channel]) => channel === 'panel:activeChanged')).toEqual([]);
     setPaneRuntime(partialRuntime({ eventSink: { send: () => undefined } }));
+  });
+
+  it('creates a Session whose agent tab resumes a native conversation when it opens', async () => {
+    const fixture = createFixture();
+    const created = await fixture.manager.create({ name: 'Moved here', agent: 'claude', resume: '5d0c7a1e-2b9f-4e3a-8c61-0f7d2e4b9a35' });
+    expect(created.panel.state.customState).toMatchObject({
+      agentType: 'claude', agentSessionId: '5d0c7a1e-2b9f-4e3a-8c61-0f7d2e4b9a35', hasClaudeSessionId: true,
+    });
+    await expect(fixture.manager.create({ name: 'Bad id', agent: 'codex', resume: 'not an id; rm -rf' }))
+      .rejects.toThrow('Session resume must be a native session id');
+  });
+
+  it('saves the resumed conversation with the Session, so a tab created after an interrupted create still resumes it', async () => {
+    const fixture = createFixture();
+    const id = '0e5c1b2a-7d3f-4a69-9b84-3c2d1e0f9a87';
+    // The durable record is written, then the tab can't be created (the app exits, or a write fails).
+    vi.spyOn(panelManager, 'createPanel').mockRejectedValueOnce(new Error('interrupted'));
+    await expect(fixture.manager.create({ name: 'Moved mid-create', agent: 'codex', resume: id })).rejects.toThrow('was saved but could not be opened');
+    const restarted = new OrchestrationSessionManager(fixture.configManager, fixture.sessionManager,
+      fixture.skillCacheManager, fixture.paneChatManager, undefined, fixture.store);
+    const [saved] = (await restarted.list()).sessions.filter(session => session.name === 'Moved mid-create');
+    expect(saved.resume).toBe(id);
+    // Startup repair creates the missing tab from the record: with the conversation, not a fresh one.
+    const repaired = await restarted.getView({ sessionId: saved.id });
+    expect(repaired.panel.state.customState).toMatchObject({ agentType: 'codex', agentSessionId: id });
+    expect(repaired.panel.state.customState?.initialInput).toBeUndefined();
+  });
+
+  it('repairs a resumed Session\'s tab without replacing a conversation the tab has moved on to', async () => {
+    const fixture = createFixture();
+    const created = await fixture.manager.create({ name: 'Moved on', agent: 'claude', resume: '5d0c7a1e-2b9f-4e3a-8c61-0f7d2e4b9a35' });
+    // The tab lost its id (a crash before it was saved), so repair fills it in from the record.
+    await panelManager.updatePanel(created.panel.id, { state: { ...created.panel.state, customState: { ...created.panel.state.customState, agentSessionId: undefined } } });
+    const filled = await fixture.manager.getView({ sessionId: created.session.id });
+    expect(filled.panel.state.customState?.agentSessionId).toBe('5d0c7a1e-2b9f-4e3a-8c61-0f7d2e4b9a35');
+    // Later the conversation moved on (Claude /clear); repair keeps the tab's own id.
+    await panelManager.updatePanel(created.panel.id, { state: { ...filled.panel.state, customState: { ...filled.panel.state.customState, agentSessionId: '9a9a9a9a-0000-4000-8000-000000000000' } } });
+    const kept = await fixture.manager.getView({ sessionId: created.session.id });
+    expect(kept.panel.state.customState?.agentSessionId).toBe('9a9a9a9a-0000-4000-8000-000000000000');
+  });
+
+  it('drops the resumed conversation when the Session changes agent', async () => {
+    const fixture = createFixture();
+    const created = await fixture.manager.create({ name: 'Switching', agent: 'claude', resume: '5d0c7a1e-2b9f-4e3a-8c61-0f7d2e4b9a35' });
+    const updated = await fixture.manager.update({ sessionId: created.session.id }, { agent: 'codex' });
+    expect(updated.resume).toBeUndefined();
+  });
+
+  it('sends a Session\'s opening prompt as its first message, even from a tab repaired before launch, and only once', async () => {
+    const fixture = createFixture();
+    const openingPrompt = 'Pane sent this once, to introduce Pane Chat. Suggest two tasks.';
+    vi.spyOn(panelManager, 'createPanel').mockRejectedValueOnce(new Error('interrupted'));
+    await expect(fixture.manager.create({ name: 'Intro', agent: 'claude', openingPrompt })).rejects.toThrow('was saved but could not be opened');
+    const restart = () => new OrchestrationSessionManager(fixture.configManager, fixture.sessionManager,
+      fixture.skillCacheManager, fixture.paneChatManager, undefined, fixture.store);
+
+    const repairedManager = restart();
+    const [saved] = (await repairedManager.list()).sessions.filter(session => session.name === 'Intro');
+    const repaired = await repairedManager.getView({ sessionId: saved.id });
+    expect(repaired.panel.state.customState).toMatchObject({ initialInput: openingPrompt, initialInputMode: 'argument' });
+
+    // The terminal launch passes it to the agent and marks it sent.
+    await panelManager.updatePanel(repaired.panel.id, { state: { ...repaired.panel.state, customState: {
+      ...repaired.panel.state.customState, initialInputSentAt: '2026-10-26T12:00:00.000Z', hasClaudeSessionId: true,
+    } } });
+    const relaunched = await restart().getView({ sessionId: saved.id });
+    expect(relaunched.panel.state.customState?.initialInput).toBeUndefined();
+    expect(relaunched.session.openingPrompt).toBeUndefined();
+
+    // A later rebuild that loses the terminal's sent marker still sends nothing.
+    await panelManager.updatePanel(relaunched.panel.id, { state: { ...relaunched.panel.state, customState: {
+      ...relaunched.panel.state.customState, initialInputSentAt: undefined,
+    } } });
+    expect((await restart().getView({ sessionId: saved.id })).panel.state.customState?.initialInput).toBeUndefined();
+  });
+
+  it('does not send the opening prompt again to another agent after one agent sent it', async () => {
+    const fixture = createFixture();
+    const openingPrompt = 'Pane sent this once, to introduce Pane Chat. Suggest two tasks.';
+    const created = await fixture.manager.create({ name: 'Switch after intro', agent: 'claude', openingPrompt });
+    await panelManager.updatePanel(created.panel.id, { state: { ...created.panel.state, customState: {
+      ...created.panel.state.customState, initialInputSentAt: '2026-10-26T12:00:00.000Z', hasClaudeSessionId: true,
+    } } });
+
+    const switched = await fixture.manager.setAgent({ sessionId: created.session.id }, 'codex');
+
+    expect(switched.agent).toBe('codex');
+    expect(switched.panel.state.customState?.initialInput).toBeUndefined();
+    expect(switched.session.openingPrompt).toBeUndefined();
+  });
+
+  it('refuses an opening prompt for a resumed conversation or one that does not say Pane sends it once', async () => {
+    const fixture = createFixture();
+    await expect(fixture.manager.create({ name: 'Resumed', agent: 'claude', resume: '5d0c7a1e-2b9f-4e3a-8c61-0f7d2e4b9a35', openingPrompt: 'Pane sent this once, hello' }))
+      .rejects.toThrow('A resumed conversation cannot take an opening prompt');
+    await expect(fixture.manager.create({ name: 'Unmarked', openingPrompt: 'Run the tests' }))
+      .rejects.toThrow('must begin with "Pane sent this once"');
+  });
+
+  it('keeps the newest activity entries up to the configured retention', async () => {
+    const fixture = createFixture();
+    Object.assign(fixture.configManager.getConfig(), { retention: { sessionActivity: 2 } });
+    const created = await fixture.manager.create({ name: 'Busy' });
+    const selector = { sessionId: created.session.id };
+    for (const goal of ['one', 'two', 'three']) await fixture.manager.update(selector, { goal });
+
+    const { activity } = await fixture.manager.get(selector);
+    expect(activity).toHaveLength(2);
+    expect(activity.every(entry => entry.kind === 'updated')).toBe(true);
   });
 
   it('creates a pinned Session and persists declarative pin updates', async () => {
@@ -1466,6 +1578,40 @@ describe('OrchestrationSessionManager', () => {
     expect((await fixture.manager.update({ sessionId: named.session.id }, { launchCommand: 'opencode --auto' })).agent).toBe('opencode');
   });
 
+  it('lists every tab of a whole-Pane link with its type, Explorer and Diff last, and only the named tabs of a tab link', async () => {
+    const fixture = createFixture();
+    const whole = paneFixture(fixture, 'all-tabs-pane', { name: 'All tabs' });
+    await panelManager.createPanel({ id: 'all-tabs-explorer', sessionId: whole.id, type: 'explorer', title: 'Explorer' });
+    await seedPanel(createPanel('all-tabs-agent', whole.id, 'Claude Code'));
+    await panelManager.createPanel({ id: 'all-tabs-diff', sessionId: whole.id, type: 'diff', title: 'Diff' });
+    await panelManager.createPanel({ id: 'all-tabs-page', sessionId: whole.id, type: 'browser', title: 'localhost:5173' });
+    await panelManager.createPanel({ id: 'all-tabs-file', sessionId: whole.id, type: 'editor', title: 'README.md' });
+    const scoped = paneFixture(fixture, 'named-tabs-pane', { name: 'Named tabs' });
+    await seedPanel(createPanel('named-tabs-agent', scoped.id, 'Codex'));
+    await panelManager.createPanel({ id: 'named-tabs-page', sessionId: scoped.id, type: 'browser', title: 'Docs' });
+    const named = await fixture.manager.create({ name: 'Every tab' });
+    await fixture.manager.associate({ sessionId: named.session.id }, { paneId: whole.id });
+    await fixture.manager.associate({ sessionId: named.session.id }, { paneId: scoped.id, panelIds: ['named-tabs-agent'] });
+    liveStates.set('all-tabs-agent', 'working');
+    liveStates.set('named-tabs-agent', 'idle');
+
+    const overview = await fixture.manager.overview({ sessionId: named.session.id });
+
+    expect(overview.panes[0].panels.map(panel => [panel.panelId, panel.type])).toEqual([
+      ['all-tabs-agent', 'terminal'],
+      ['all-tabs-page', 'browser'],
+      ['all-tabs-file', 'editor'],
+      ['all-tabs-explorer', 'explorer'],
+      ['all-tabs-diff', 'diff'],
+    ]);
+    expect(overview.panes[1].panels).toEqual([expect.objectContaining({ panelId: 'named-tabs-agent', type: 'terminal', state: 'idle' })]);
+    // Tabs without an agent leave the Session's status to its agents.
+    expect(overview.status).toBe('working');
+    // An idle agent keeps the Session idle even with pages and editors present.
+    liveStates.set('all-tabs-agent', 'idle');
+    expect((await fixture.manager.overview({ sessionId: named.session.id })).status).toBe('idle');
+  });
+
   it('enforces exclusive Pane ownership, validates tab membership, and permits reassignment after detach', async () => {
     const fixture = createFixture();
     const pane = paneFixture(fixture, 'pane-1', { name: 'Feature Pane' });
@@ -1583,8 +1729,8 @@ describe('OrchestrationSessionManager', () => {
   });
 
   it('records a worker report as Session activity and shows the newest one under its Pane in the overview', async () => {
-    vi.useFakeTimers({ toFake: ['Date'] });
-    vi.setSystemTime(new Date('2026-09-27T18:00:00.000Z'));
+    // Association and report can be recorded in the same millisecond.
+    vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-09-27T18:00:00.000Z') });
     const fixture = createFixture();
     const named = await fixture.manager.create({ name: 'Reports' });
     const other = await fixture.manager.create({ name: 'Unrelated' });
@@ -1617,6 +1763,79 @@ describe('OrchestrationSessionManager', () => {
     const untouched = await fixture.manager.overview({ sessionId: other.session.id });
     expect(untouched.activity.some(activity => activity.kind === 'report')).toBe(false);
     await expect(fixture.manager.recordAgentReport('missing-panel', newer)).resolves.toEqual([]);
+  });
+
+  it('J-2: gives each panel its own latest report, with data only for a complete JSON object summary', async () => {
+    const fixture = createFixture();
+    const named = await fixture.manager.create({ name: 'Panel reports' });
+    const pane = paneFixture(fixture, 'panel-report-pane', { name: 'Panel Report Pane' });
+    const planner = createPanel('panel-report-planner', pane.id, 'Planner');
+    const plain = createPanel('panel-report-plain', pane.id, 'Plain');
+    const list = createPanel('panel-report-list', pane.id, 'List');
+    const truncated = createPanel('panel-report-truncated', pane.id, 'Truncated');
+    const silent = createPanel('panel-report-silent', pane.id, 'Silent');
+    for (const panel of [planner, plain, list, truncated, silent]) await seedPanel(panel);
+    await fixture.manager.associate({ sessionId: named.session.id }, { paneId: pane.id });
+    const status = { profile: 'planner', state: 'running', checks: { pass: ['S-1'] }, pr: null };
+    const reports = {
+      [planner.id]: { state: 'ready' as const, pr: 412, head: '3f9c2ab', summary: JSON.stringify(status), summaryPath: '/tmp/status.json', reportedAt: '2026-10-17T16:00:00.000Z' },
+      [plain.id]: { state: 'blocked' as const, question: 'Which filename?', summary: 'Waiting on a filename.', reportedAt: '2026-10-17T16:01:00.000Z' },
+      [list.id]: { state: 'done' as const, summary: '["a","b"]', reportedAt: '2026-10-17T16:02:00.000Z' },
+      [truncated.id]: { state: 'ready' as const, summary: '{"long":"…\n[summary truncated]', summaryTruncated: true as const, reportedAt: '2026-10-17T16:03:00.000Z' },
+    };
+    for (const panel of [planner, plain, list, truncated]) {
+      await panelManager.updatePanel(panel.id, { state: { ...panel.state, customState: { ...panel.state.customState, agentReport: reports[panel.id] } } });
+    }
+    liveStates.set(silent.id, 'working');
+    vi.mocked(terminalPanelManager.getTerminalSnapshot).mockImplementation(panelId => panelId === silent.id ? {
+      initialized: true,
+      scrollbackBuffer: '',
+      alternateScreenBuffer: '',
+      isAlternateScreen: false,
+      activityStatus: 'active',
+      lastActivityTime: '2026-10-17T16:05:00.000Z',
+      currentCommand: '',
+    } : null);
+
+    const overview = await fixture.manager.overview({ sessionId: named.session.id });
+    const panels = new Map(overview.panes[0].panels.map(panel => [panel.panelId, panel]));
+
+    expect(panels.get(planner.id)?.report).toEqual({ ...reports[planner.id], data: status });
+    expect(panels.get(plain.id)?.report).toEqual(reports[plain.id]);
+    expect(panels.get(list.id)?.report).toEqual(reports[list.id]);
+    expect(panels.get(truncated.id)?.report).toEqual(reports[truncated.id]);
+    expect(panels.get(silent.id)).toMatchObject({ state: 'working', lastActivityAt: '2026-10-17T16:05:00.000Z' });
+    expect(panels.get(silent.id)).not.toHaveProperty('report');
+    // The per-Pane report keeps its shape: the newest report, its panel, and no data.
+    expect(overview.panes[0].report).toEqual({ ...reports[truncated.id], panelId: truncated.id });
+  });
+
+  it('F-1, F-2: a deeply nested summary leaves the overview readable, and __proto__ keys survive in data', async () => {
+    const fixture = createFixture();
+    const named = await fixture.manager.create({ name: 'Hostile reports' });
+    const pane = paneFixture(fixture, 'hostile-report-pane', { name: 'Hostile Report Pane' });
+    const nested = createPanel('hostile-report-nested', pane.id, 'Nested');
+    const proto = createPanel('hostile-report-proto', pane.id, 'Proto');
+    await seedPanel(nested);
+    await seedPanel(proto);
+    await fixture.manager.associate({ sessionId: named.session.id }, { paneId: pane.id });
+    const nestedReport = normalizeAgentReport({ state: 'ready', summary: `{"x":${'['.repeat(2000)}0${']'.repeat(2000)}}` }, '2026-10-17T16:00:00.000Z');
+    const protoSummary = '{"__proto__":{"state":"changed","__proto__":{"deep":true}},"ok":true}';
+    const protoReport = normalizeAgentReport({ state: 'ready', summary: protoSummary }, '2026-10-17T16:01:00.000Z');
+    expect(nestedReport.summaryTruncated).toBeUndefined();
+    await panelManager.updatePanel(nested.id, { state: { ...nested.state, customState: { ...nested.state.customState, agentReport: nestedReport } } });
+    await panelManager.updatePanel(proto.id, { state: { ...proto.state, customState: { ...proto.state.customState, agentReport: protoReport } } });
+
+    const overview = await fixture.manager.overview({ sessionId: named.session.id });
+    const panels = new Map(overview.panes[0].panels.map(panel => [panel.panelId, panel]));
+
+    expect(panels.get(nested.id)?.report).toEqual(nestedReport);
+    const data = panels.get(proto.id)?.report?.data;
+    expect(data && Object.hasOwn(data, '__proto__')).toBe(true);
+    expect(JSON.stringify(data)).toBe(protoSummary);
+    // The daemon serializes the overview through the JSON transport; the result survives it unchanged.
+    expect(serializeJsonTransport(overview, boundary.json)).toEqual(JSON.parse(JSON.stringify(overview)));
+    expect(JSON.stringify(serializeJsonTransport(overview, boundary.json))).toBe(JSON.stringify(overview));
   });
 
   it('supports exact-name selectors and rejects lost updates with an optimistic revision guard', async () => {
@@ -1772,14 +1991,14 @@ describe('OrchestrationSessionManager Session order', () => {
     return listed.sessions.filter(filter).filter(session => session.id !== LEGACY_ORCHESTRATION_SESSION_ID).map(session => session.name);
   }
 
-  it('lists Sessions oldest first when no order was saved', async () => {
+  it('lists Sessions newest first when no order was saved', async () => {
     const fixture = createFixture();
     await createInOrder(fixture, ['A', 'B', 'C', 'D']);
 
-    expect(await namesInOrder(fixture)).toEqual(['A', 'B', 'C', 'D']);
+    expect(await namesInOrder(fixture)).toEqual(['D', 'C', 'B', 'A']);
   });
 
-  it('lists and selects in the saved order, and adds a new Session at the bottom', async () => {
+  it('lists and selects in the saved order, and adds a new Session at the top', async () => {
     const fixture = createFixture();
     const ids = await createInOrder(fixture, ['A', 'B', 'C', 'D']);
 
@@ -1790,7 +2009,7 @@ describe('OrchestrationSessionManager Session order', () => {
     expect(selected.sessions.map(session => session.name).filter(name => name !== 'Pane Chat')).toEqual(['A', 'D', 'B', 'C']);
     vi.setSystemTime(start + 60_000);
     await fixture.manager.create({ name: 'E' });
-    expect(await namesInOrder(fixture)).toEqual(['A', 'D', 'B', 'C', 'E']);
+    expect(await namesInOrder(fixture)).toEqual(['E', 'A', 'D', 'B', 'C']);
   });
 
   it('changes no Session revision, timestamp or activity, and tells clients the order changed', async () => {
@@ -1813,9 +2032,9 @@ describe('OrchestrationSessionManager Session order', () => {
     const ids = await createInOrder(fixture, ['A', 'B', 'C', 'D', 'E']);
 
     // A list that shows only B and D (such as Pinned) swaps them; A, C and E stay where they are.
-    await fixture.manager.reorder([ids.D, ids.B]);
+    await fixture.manager.reorder([ids.B, ids.D]);
 
-    expect(await namesInOrder(fixture)).toEqual(['A', 'D', 'C', 'B', 'E']);
+    expect(await namesInOrder(fixture)).toEqual(['E', 'B', 'C', 'D', 'A']);
   });
 
   it('ignores unknown and repeated ids', async () => {
@@ -1855,11 +2074,11 @@ describe('OrchestrationSessionManager Session order', () => {
     const first = { ...orchestrationRecord('session-first', 'First'), createdAt: '2026-10-01T00:00:00.000Z' };
     const second = { ...orchestrationRecord('session-second', 'Second'), createdAt: '2026-10-02T00:00:00.000Z' };
     const unordered = createFixture('codex', { version: 1, sessions: [second, first] });
-    expect(await namesInOrder(unordered)).toEqual(['First', 'Second']);
+    expect(await namesInOrder(unordered)).toEqual(['Second', 'First']);
 
-    const stale = createFixture('codex', { version: 1, order: ['session-gone', 'session-second', 'session-first'], sessions: [first, second] });
-    expect(await namesInOrder(stale)).toEqual(['Second', 'First']);
-    expect(stale.store.read().order).toEqual(['session-second', 'session-first']);
+    const stale = createFixture('codex', { version: 1, order: ['session-gone', 'session-first', 'session-second'], sessions: [second, first] });
+    expect(await namesInOrder(stale)).toEqual(['First', 'Second']);
+    expect(stale.store.read().order).toEqual(['session-first', 'session-second']);
   });
 });
 

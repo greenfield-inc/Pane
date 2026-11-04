@@ -7,6 +7,7 @@ import { Kbd } from './Kbd';
 import { initialActiveIndex } from './dropdownNavigation';
 import { usePortalContainer } from '../../contexts/PortalContainerContext';
 import { Tooltip } from './Tooltip';
+import { Check } from 'lucide-react';
 
 export interface DropdownItem {
   id: string;
@@ -14,6 +15,8 @@ export interface DropdownItem {
   description?: ReactNode;
   descriptionInTooltip?: boolean;
   icon?: React.ComponentType<{ className?: string }>;
+  /** Drawn in place of `icon` at its own size, such as a machine tile. */
+  leading?: ReactNode;
   iconColor?: string;
   onClick?: () => void;
   disabled?: boolean;
@@ -31,6 +34,10 @@ export interface DropdownProps {
   // Items
   items: DropdownItem[];
   selectedId?: string;
+  /** How the selected item is marked: a dot (default) or a check. */
+  selectedMark?: 'dot' | 'check';
+  /** A small label above the items. */
+  header?: ReactNode;
   
   // Appearance
   position?: 'auto' | 'bottom-left' | 'bottom-right' | 'top-left' | 'top-right';
@@ -40,9 +47,14 @@ export interface DropdownProps {
   closeOnSelect?: boolean;
   separateVariants?: boolean;
   onOpenChange?: (open: boolean) => void;
+  /** Use the supplied surface itself for right-click, keyboard and touch actions. */
+  contextMenu?: boolean;
+  menuLabel?: string;
   
   // Optional footer content (e.g., settings button)
   footer?: ReactNode | ((controls: { close: () => void }) => ReactNode);
+  /** Accessible name for a footer-only form; exposes a nonmodal dialog. */
+  formLabel?: string;
   
   // Custom styles
   className?: string;
@@ -60,17 +72,18 @@ const widthClasses = {
 };
 
 const variantStyles = {
-  default: 'text-text-secondary hover:bg-interactive/10 hover:text-text-primary hover:shadow-[inset_0_1px_2px_rgba(0,0,0,0.05)]',
-  success: 'text-status-success hover:bg-interactive/10 hover:text-text-primary hover:shadow-[inset_0_1px_2px_rgba(0,0,0,0.05)]',
-  warning: 'text-status-warning hover:bg-interactive/10 hover:text-text-primary hover:shadow-[inset_0_1px_2px_rgba(0,0,0,0.05)]',
-  danger: 'text-status-error hover:bg-interactive/10 hover:text-text-primary hover:shadow-[inset_0_1px_2px_rgba(0,0,0,0.05)]',
+  default: 'text-text-secondary hover:bg-bg-hover hover:text-text-primary',
+  success: 'text-status-success hover:bg-bg-hover hover:text-text-primary',
+  warning: 'text-status-warning hover:bg-bg-hover hover:text-text-primary',
+  danger: 'text-status-error hover:bg-bg-hover hover:text-text-primary',
 };
 
+// The selection dot carries the state; primary text stays readable on the selected fill in every theme.
 const selectedVariantStyles = {
-  default: 'bg-interactive/15 text-interactive shadow-[inset_0_1px_2px_rgba(0,0,0,0.1)] border border-interactive/30',
-  success: 'bg-interactive/15 text-status-success shadow-[inset_0_1px_2px_rgba(0,0,0,0.1)] border border-status-success/30',
-  warning: 'bg-interactive/15 text-status-warning shadow-[inset_0_1px_2px_rgba(0,0,0,0.1)] border border-status-warning/30',
-  danger: 'bg-interactive/15 text-status-error shadow-[inset_0_1px_2px_rgba(0,0,0,0.1)] border border-status-error/30',
+  default: 'bg-surface-selected text-text-primary',
+  success: 'bg-surface-selected text-text-primary',
+  warning: 'bg-surface-selected text-text-primary',
+  danger: 'bg-surface-selected text-text-primary',
 };
 
 function getMenuControls(content: HTMLElement | null): HTMLElement[] {
@@ -78,7 +91,7 @@ function getMenuControls(content: HTMLElement | null): HTMLElement[] {
 
   return Array.from(content.querySelectorAll<HTMLElement>(
     'button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
-  ));
+  )).filter(control => !control.matches(':disabled, [aria-disabled="true"]'));
 }
 
 export function Dropdown({
@@ -86,12 +99,17 @@ export function Dropdown({
   triggerClassName,
   items,
   selectedId,
+  selectedMark = 'dot',
+  header,
   position = 'auto',
   width = 'md',
   closeOnSelect = true,
   separateVariants = true,
   onOpenChange,
+  contextMenu = false,
+  menuLabel,
   footer,
+  formLabel,
   className,
   menuClassName,
   itemClassName,
@@ -105,6 +123,17 @@ export function Dropdown({
   const dropdownRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLElement>(null);
+  const contextFocus = useRef<HTMLElement | null>(null);
+  const touchTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  const openContextMenu = () => {
+    contextFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setActiveIndex(initialActiveIndex(items, selectedId));
+    setIsOpen(true);
+    onOpenChange?.(true);
+  };
+  const clearTouch = () => { clearTimeout(touchTimer.current); touchTimer.current = undefined; };
+  useEffect(() => () => clearTimeout(touchTimer.current), []);
 
   const handleToggle = () => {
     const newState = !isOpen;
@@ -122,9 +151,9 @@ export function Dropdown({
     onOpenChange?.(false);
 
     if (focusWasInMenu) {
-      triggerRef.current?.focus();
+      (contextMenu ? contextFocus.current ?? triggerRef.current : triggerRef.current)?.focus();
     }
-  }, [onOpenChange]);
+  }, [onOpenChange, contextMenu]);
 
   const handleItemClick = (item: DropdownItem) => {
     if (item.disabled) return;
@@ -157,14 +186,15 @@ export function Dropdown({
   useLayoutEffect(() => {
     if (!isOpen) return;
     const controls = getMenuControls(contentRef.current);
-    const target = controls[activeIndex] ?? controls[0];
+    const target = controls.find(control => control.dataset.dropdownItemIndex === String(activeIndex)) ?? controls[0];
     target?.focus();
-  }, [isOpen, activeIndex]);
+  }, [isOpen, activeIndex, formLabel]);
 
   const handleMenuKeyDown = (event: React.KeyboardEvent) => {
     switch (event.key) {
       case 'ArrowDown':
       case 'ArrowUp': {
+        if (event.target instanceof HTMLElement && event.target.matches('input, select, textarea')) return;
         event.preventDefault();
         const controls = getMenuControls(contentRef.current);
         if (controls.length === 0) break;
@@ -175,7 +205,11 @@ export function Dropdown({
         const next = current === -1
           ? (step === 1 ? 0 : controls.length - 1)
           : (current + step + controls.length) % controls.length;
-        setActiveIndex(next);
+        const itemIndex = controls[next].dataset.dropdownItemIndex;
+        if (itemIndex !== undefined) setActiveIndex(Number(itemIndex));
+        // Returning from a footer control can select the same item index;
+        // React then skips the focus effect, so move DOM focus here as well.
+        controls[next].focus();
         break;
       }
       case 'Enter':
@@ -216,7 +250,7 @@ export function Dropdown({
 
     let lastRectKey = '';
     const computePosition = () => {
-      const el = dropdownRef.current;
+      const el = contextMenu ? triggerRef.current : dropdownRef.current;
       if (!el) return;
       const rect = el.getBoundingClientRect();
       const rectKey = `${rect.top},${rect.left},${rect.width},${rect.height}`;
@@ -278,7 +312,7 @@ export function Dropdown({
       raf = requestAnimationFrame(track);
     });
     return () => cancelAnimationFrame(raf);
-  }, [isOpen, position, width]);
+  }, [isOpen, position, width, contextMenu]);
 
   // Handle click outside
   useEffect(() => {
@@ -324,13 +358,24 @@ export function Dropdown({
       {/* Trigger */}
       <Slot
         ref={triggerRef}
-        onClick={handleToggle}
+        onClick={contextMenu ? undefined : handleToggle}
+        onContextMenu={contextMenu ? event => { event.preventDefault(); triggerRef.current?.focus(); openContextMenu(); } : undefined}
+        onPointerDown={contextMenu ? event => {
+          clearTouch();
+          if (event.pointerType === 'touch') touchTimer.current = setTimeout(openContextMenu, 500);
+        } : undefined}
+        onPointerUp={contextMenu ? clearTouch : undefined}
+        onPointerCancel={contextMenu ? clearTouch : undefined}
+        onPointerMove={contextMenu ? clearTouch : undefined}
         className={triggerClassName}
-        aria-haspopup="menu"
+        aria-haspopup={formLabel ? 'dialog' : 'menu'}
         aria-expanded={isOpen}
         aria-controls={isOpen ? menuId : undefined}
         onKeyDown={(e) => {
-          if (e.key === 'ArrowDown' && !isOpen) {
+          if (contextMenu && (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10'))) {
+            e.preventDefault();
+            openContextMenu();
+          } else if (!contextMenu && e.key === 'ArrowDown' && !isOpen) {
             e.preventDefault();
             handleToggle();
           }
@@ -344,12 +389,13 @@ export function Dropdown({
         <div
           id={menuId}
           ref={contentRef}
-          role="menu"
-          aria-orientation="vertical"
+          role={formLabel ? 'dialog' : 'menu'}
+          aria-label={formLabel ?? menuLabel}
+          aria-orientation={formLabel ? undefined : 'vertical'}
           onKeyDown={handleMenuKeyDown}
           className={cn(
             'z-[10000] pointer-events-auto',
-            'bg-surface-primary rounded-md shadow-dropdown',
+            'bg-surface-primary rounded-lg shadow-dropdown',
             'border border-border-primary',
             'overflow-hidden',
             width !== 'full' && widthClasses[width],
@@ -365,7 +411,8 @@ export function Dropdown({
             transformOrigin: `${fixedStyle.bottom !== undefined ? 'bottom' : 'top'} ${fixedStyle.right !== undefined ? 'right' : 'left'}`,
           }}
         >
-            <div className="py-1 max-h-[70vh] overflow-y-auto">
+            <div className="p-1 max-h-[70vh] overflow-y-auto">
+              {header && <div className="px-2.5 pb-1 pt-1.5 text-[11px] font-medium text-text-tertiary">{header}</div>}
               {items.map((item, index) => {
                 const Icon = item.icon;
                 const isSelectable = selectedId !== undefined;
@@ -382,7 +429,7 @@ export function Dropdown({
                       onMouseEnter={() => !item.disabled && setActiveIndex(index)}
                       disabled={item.disabled}
                       className={cn(
-                        'w-full text-left px-2.5 py-1',
+                        'w-full text-left px-2.5 py-1 rounded',
                         'flex items-center gap-2',
                         'focus:outline-none focus:ring-2 focus:ring-inset focus:ring-focus-ring-subtle',
                         'min-h-[1.75rem] group relative',
@@ -392,19 +439,23 @@ export function Dropdown({
                         itemClassName
                       )}
                     >
-                      {Icon && (
+                      {item.leading ?? (Icon && (
                         <div className="flex items-center justify-center w-4 h-4 flex-shrink-0">
                           <Icon className={cn('w-3.5 h-3.5', 'stroke-[1.5]', item.iconColor || 'text-current')} />
                         </div>
-                      )}
+                      ))}
                       <div className="flex-1 min-w-0">
                         <div className={cn('text-[13px] leading-tight truncate', 'group-hover:text-inherit')}>{item.label}</div>
                         {item.description && !item.descriptionInTooltip && (
-                          <div className="text-[11px] text-text-tertiary mt-0.5 leading-tight">{item.description}</div>
+                          <div className={cn('text-[11px] mt-0.5 leading-tight', isSelected ? 'text-text-secondary' : 'text-text-tertiary group-hover:text-text-secondary')}>{item.description}</div>
                         )}
                       </div>
                       {item.shortcut && <Kbd variant="inline" className="shrink-0 pl-3">{formatKeyDisplay(item.shortcut)}</Kbd>}
-                      {(isSelected || item.showDot) && (
+                      {isSelected && selectedMark === 'check' ? (
+                        <div className="flex items-center justify-center w-5 h-5 flex-shrink-0">
+                          <Check className="w-3.5 h-3.5 text-interactive" aria-hidden="true" />
+                        </div>
+                      ) : (isSelected || item.showDot) && (
                         <div className="flex items-center justify-center w-5 h-5 flex-shrink-0">
                           <div className={cn('w-2 h-2 rounded-full', isSelected && 'bg-interactive shadow-sm', item.showDot && !isSelected && item.dotColor)} />
                         </div>
@@ -456,8 +507,8 @@ export function DropdownMenuItem({
     <button
       onClick={onClick}
       className={cn(
-        'w-full text-left px-2.5 py-1',
-        'text-text-secondary hover:bg-surface-hover hover:text-text-primary',
+        'w-full text-left px-2.5 py-1 rounded',
+        'text-text-secondary hover:bg-bg-hover hover:text-text-primary',
         'flex items-center gap-2',
         'focus:outline-none focus:ring-2 focus:ring-inset focus:ring-focus-ring-subtle',
         'min-h-[1.75rem] group',

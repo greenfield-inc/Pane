@@ -273,7 +273,7 @@ export function registerProjectHandlers(
         sessionManager.setActiveProject(project);
         const ctx = sessionManager.getProjectContextByProjectId(parseInt(projectId));
         if (ctx) {
-          await worktreeManager.initializeProject(project.path, undefined, ctx.pathResolver, ctx.commandRunner);
+          await worktreeManager.initializeProject(project.path, project.worktree_folder || undefined, ctx.pathResolver, ctx.commandRunner);
         }
 
         await updateProjectAgentContextBestEffort(project, configManager, 'project activate');

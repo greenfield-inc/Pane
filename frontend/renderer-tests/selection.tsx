@@ -55,7 +55,7 @@ function runtimeConfig(): AppConfig {
 let runtimeRefreshes = 0;
 window.addEventListener('project-sessions-refresh', () => { runtimeRefreshes += 1; });
 const api = {
-  invoke: (channel: string, id: string) => channel === 'panels:shouldAutoCreate' ? Promise.resolve(false) : channel === 'panels:get-layout' ? wait('layout', id) : defaultMethod(),
+  invoke: (channel: string, id: string) => channel === 'panels:shouldAutoCreate' ? Promise.resolve(false) : channel === 'panels:get-layout' ? wait('layout', id) : channel === 'ports:list' ? Promise.resolve({ host: 'test', ports: [] }) : defaultMethod(),
   events: new Proxy({}, { get: (_target, key) => (listener: (event: RuntimeEvent) => void) => { const listeners = handlers.get(key) ?? new Set(); listeners.add(listener); handlers.set(key, listeners); return () => { listeners.delete(listener); }; } }),
   orchestrationSessions: { create: (input: OrchestrationSessionCreateInput) => {
     records.push({ ...records[0], id: 'created', internalSessionId: 'internal-created', name: input.name, agent: input.agent ?? 'claude', panelIds: { claude: 'claude-created', codex: 'codex-created', cursor: 'cursor-created', opencode: 'opencode-created' }, associations: [] });
@@ -64,6 +64,7 @@ const api = {
     return Promise.resolve({ success: true, data });
   }, runtimes: () => Promise.resolve({ success: true, data: { distributions: [] } }), update: (selector: { sessionId: string }) => wait('update', selector.sessionId), list: () => location.search.includes('events') ? wait('list', 'a') : Promise.resolve(list()), select: (selector: { sessionId: string }) => { transportCalls.push({ method: 'orchestrationSessions.select', payload: selector }); return wait('select', selector.sessionId); }, get: (selector: { sessionId: string }) => wait('get', selector.sessionId), overview: (selector: { sessionId: string }) => Promise.resolve({ success: true, data: { session: records.find(record => record.id === selector.sessionId), status: { state: 'idle' }, panes: [], activity: [], refreshedAt: '2026-01-01' } }) },
   terminal: methods,
+  remoteDaemon: { getConnectionState: defaultMethod, getHostState: defaultMethod, onConnectionStateChanged: () => () => {}, onHostStateChanged: () => () => {} },
   panels: { ...methods, getSessionPanels: (id: string) => wait('panels', id), setActivePanel: defaultMethod },
   config: { get: () => {
     const data = location.search.includes('lists') ? runtimeConfig() : mockConfig;

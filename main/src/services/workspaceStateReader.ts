@@ -77,7 +77,7 @@ export class WorkspaceStateReader {
           title: panel.title,
           agentType: customState.agentType,
           agentState: resolveAgentState(panel.id),
-          running: terminalPanelManager.isTerminalInitialized(panel.id),
+          running: terminalPanelManager.isAgentRuntimeInitialized(panel.id),
         });
 
       }
@@ -133,7 +133,7 @@ export class WorkspaceStateReader {
           repoName: project?.name,
           worktreePath: session.worktreePath,
           agentState: resolveAgentState(panel.id),
-          running: terminalPanelManager.isTerminalInitialized(panel.id),
+          running: terminalPanelManager.isAgentRuntimeInitialized(panel.id),
           lastActivityTime: snapshot?.lastActivityTime,
           // Typed cells only, so a dim or grey prompt suggestion is not held input.
           heldInputPresent: snapshot
@@ -151,7 +151,7 @@ export class WorkspaceStateReader {
 
 function resolveAgentState(panelId: string): AgentState {
   // A panel whose terminal is not running has no agent to be idle or ready.
-  if (!terminalPanelManager.isTerminalInitialized(panelId)) return 'unknown';
+  if (!terminalPanelManager.isAgentRuntimeInitialized(panelId)) return 'unknown';
   return terminalPanelManager.getAgentStatus(panelId) ?? 'unknown';
 }
 

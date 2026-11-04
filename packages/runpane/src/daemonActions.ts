@@ -3,6 +3,7 @@ import { createInterface } from 'node:readline/promises';
 import { boundary, decodeBoundary, type JsonObject, type JsonValue } from './boundaryDecoder';
 import type { ParsedArgs } from './commands';
 import { invokeDaemon } from './daemonClient';
+import { RunpaneError } from './errors';
 import { RUNPANE_CONTRACT } from './generated/contract';
 import { buildPaneLink, parseRepoId } from './links';
 
@@ -90,7 +91,7 @@ function normalizeResponse(response: JsonValue): DaemonActionResult {
 export async function confirmMutation(parsed: ParsedArgs): Promise<void> {
   if (parsed.yes) return;
   if (parsed.json || !input.isTTY || !output.isTTY) {
-    throw new Error(`runpane ${parsed.command} mutates Pane state. Rerun with --yes in non-interactive shells.`);
+    throw new RunpaneError('ERR_RUNPANE_CONFIRMATION_REQUIRED', `runpane ${parsed.command} mutates Pane state and needs confirmation, which --json or a non-interactive shell cannot give. Nothing was changed.`, 'Rerun with --yes.');
   }
   const rl = createInterface({ input, output });
   try {

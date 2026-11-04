@@ -92,7 +92,7 @@ describe('WatchCadence', () => {
     expect(kinds(cadence.flush(T0 + 3_000))).toEqual(['pr.conflicted']);
   });
 
-  it.each(['pr.head', 'pr.closed', 'pr.stopped', 'github.unavailable', 'github.recovered'] as const)(
+  it.each(['pr.head', 'pr.base_changed', 'pr.base_deleted', 'pr.closed', 'pr.stopped', 'github.unavailable', 'github.recovered'] as const)(
     'flushes %s immediately and carries a held merge with it', kind => {
       const cadence = new WatchCadence({ settleMs: 0, blockedSettleMs: 0, minIntervalMs: 300_000, key: '' });
       cadence.ingest([entry('agent.ready', T0)], T0);

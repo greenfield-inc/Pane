@@ -17,7 +17,22 @@ export interface WorkspaceAccessConfig {
   /** Unset means "owner". */
   visibility?: Exclude<WorkspaceVisibility, 'off'>;
   password?: WorkspacePasswordHash;
+  /**
+   * Exact Origins the owner allowed for the Pane glasses app on this machine, beside the ones Pane
+   * ships with. Added from Settings › Remote Access › Devices on this machine only.
+   */
+  glassesOrigins?: string[];
+  /**
+   * Phone ids whose glasses were revoked on this machine. Another computer never vouches them back
+   * on; a pairing from the phone removes the id.
+   */
+  glassesRevokedPhoneIds?: string[];
 }
+
+/** Where a tailnet admin turns on HTTPS Certificates, which workspaces need. */
+export const TAILSCALE_DNS_ADMIN_URL = 'https://login.tailscale.com/admin/dns';
+/** The `reason` workspaces report while the tailnet has HTTPS Certificates turned off. */
+export const TAILNET_HTTPS_OFF_REASON = 'this tailnet has HTTPS certificates turned off';
 
 export interface WorkspaceAccessSummary {
   visibility: WorkspaceVisibility;

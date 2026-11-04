@@ -10,7 +10,7 @@ Pane is an open source project created by [Dcouple Inc](https://dcouple.ai). Dco
 
 ## Getting Started
 
-You need Node 22.18 or newer (`.nvmrc` pins 22.18.0) and pnpm 10. If you don't
+You need patched Node 22.23.4+ (22.x), 24.22.1+ (24.x), or 26.12.1+ (26.x), and pnpm 10. `.nvmrc` pins 22.23.4. If you don't
 have pnpm 10, `corepack enable` provides the version pinned in `package.json`.
 
 1. Fork the repository on GitHub and clone your fork.
@@ -63,7 +63,10 @@ install's data:
   default policy from enabling analytics when neither `analytics_consent_shown`
   nor `analytics_default_applied` records a choice. Native QA must establish an
   explicit analytics choice and its persisted preference before the first UI
-  render, or isolate analytics with a test-runtime guard.
+  render, or isolate analytics with a test-runtime guard. Instances with their
+  own `PANE_DIR` or `--pane-dir`, and unpackaged builds, send no install
+  heartbeat. Packaged QA on the default data directory should set
+  `RUNPANE_TELEMETRY_DISABLED=1`.
 - **Pane data** (`sessions.db`, `config.json`, skills) lives in `~/.pane`
   unless you set `PANE_DIR` or pass `--pane-dir`. Always set one for `pnpm dev`,
   Playwright runs and scripts. Keep the path short, like `~/.pane_test`: a long
@@ -84,6 +87,11 @@ install's data:
   ```
   `NODE_ENV=production` loads the built renderer from `frontend/dist`, so no
   Vite server is needed. Rebuild after changes.
+- **Agent instruction files** are not covered by `PANE_DIR`. While Notify is
+  on, the dev build keeps Pane's Notify block in `~/.claude/CLAUDE.md` and
+  `~/.codex/AGENTS.md`, as the installed app does. Point `CLAUDE_CONFIG_DIR`
+  and `CODEX_HOME` at temporary folders, or set
+  `PANE_DISABLE_OS_INTEGRATION=1` to leave them alone.
 - A copy of a real `sessions.db` makes the dev build reconcile reserve worktrees
   in the real repositories it lists. Use a fresh data directory unless you need
   real data.
@@ -119,6 +127,11 @@ pnpm --filter frontend test
 pnpm --filter main exec vitest run
 pnpm test:ci:minimal
 ```
+
+`pnpm typecheck` checks `frontend`, `mobile` and `native` with TypeScript 7
+(the `@typescript/native` alias), and `main` and `packages/runpane` with their
+own `typescript` 5.x, which also builds them. ESLint and editors use the 5.x
+package.
 
 - `pnpm --filter main test` runs Vitest in watch mode; use `exec vitest run`
   for a single pass, as CI does. Main tests live next to the code as
@@ -168,6 +181,34 @@ Input round-trip ends when the input handler returns (PTY-host writes may still
 be queued), and xterm render notification is not physical display presentation.
 These independent intervals do not identify an output chunk as an input echo.
 Background browser timer throttling can affect event-loop samples.
+
+### Testing remote clients on a flapping link
+
+`scripts/flapping-link-proxy.mjs` is a TCP proxy that cuts the link on and off
+the way a weak cellular or Tailscale path does. Put it in front of an isolated
+dev host and point a phone, PWA, glasses or desktop client at the proxy's port
+instead of the host's:
+
+```bash
+node scripts/flapping-link-proxy.mjs --target 127.0.0.1:HOST_PORT --host 0.0.0.0 --seed 1
+```
+
+It prints its port, its seed, and each phase with a timestamp:
+
+- **UP** (20-60 s): bytes pass untouched, including SSE streams and WebSocket
+  upgrades.
+- **DOWN** (5-80 s): open connections stay open but no bytes move either way,
+  and new connections are accepted but never reach the host. The client sees a
+  hang, not an error.
+- **REFUSING** (1 s after each DOWN): new connections are reset. A drop shorter
+  than 15 s then delivers the held bytes on the old connections; a longer drop
+  resets them.
+
+`--seed` repeats a schedule. `--scale 0.1` runs every duration ten times faster.
+`--up`, `--down` (ranges in seconds), `--long-drop` and `--refuse` change the
+defaults. Tests import `start()` from the script and drive the phases with
+`forceDown()` and `forceUp()`; see `scripts/flapping-link-proxy.test.mjs`, run
+by `pnpm test:flapping-proxy`.
 
 ## Code Style
 
@@ -246,7 +287,8 @@ Releases, CI and deploys are covered in [RUNBOOK.md](RUNBOOK.md).
 ### Manual Testing
 
 Test UI and packaging changes in a packaged build for your platform
-(`pnpm build:mac`, `pnpm build:linux` or `pnpm build:win:x64`; output in
+(`pnpm build:mac`, `pnpm build:linux:x64` on x64 Linux,
+`pnpm build:linux:arm64` on ARM64 Linux, or `pnpm build:win:x64`; output in
 `dist-electron/`). The packaged app can show problems that development mode
 hides. Check that you can create a pane, run an agent, use git operations and
 run scripts, and that settings persist after a restart.
@@ -309,4 +351,4 @@ The rebuild targets the host architecture. Use `npm rebuild
 better-sqlite3-multiple-ciphers` for Node tests, then `pnpm electron:rebuild`
 before running Electron again; only one ABI can be installed at a time.
 
-For native update/reconnect QA, set `PANE_DISABLE_OS_INTEGRATION=1` as well as an isolated `PANE_DIR` and `--user-data-dir`. This disables login-item, URL-protocol, and MCP-registration writes. Use an isolated app/install target; it does not make a real user installation a safe test target. Close every test app and supervisor after collecting evidence.
+For native update/reconnect QA, set `PANE_DISABLE_OS_INTEGRATION=1` as well as an isolated `PANE_DIR` and `--user-data-dir`. This disables login-item, URL-protocol, MCP-registration, and managed home-skill writes (including removal when the setting is off). Use an isolated app/install target; it does not make a real user installation a safe test target. Close every test app and supervisor after collecting evidence.

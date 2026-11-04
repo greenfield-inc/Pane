@@ -16,6 +16,10 @@ const contractFixture = JSON.parse(fs.readFileSync(contractFixturePath, 'utf8'))
 const parserSamples = contractFixture.parserSamples;
 
 process.env.RUNPANE_TELEMETRY_DISABLED = '1';
+// Run as a caller outside any Pane terminal; checks that need Pane's env set it themselves.
+for (const key of Object.keys(process.env)) {
+  if (key.startsWith('PANE_') && key !== 'PANE_DIR') delete process.env[key];
+}
 
 const platformCases = [
   { platform: { os: 'darwin', arch: 'arm64' }, target: 'client' },
@@ -206,6 +210,16 @@ print(json.dumps([effective_watch_heartbeat_ms(180), effective_watch_heartbeat_m
     ],
     ['pr.merged', 'PR Issue 538 pane pane-1 #747 MERGED', { panelId: undefined, pr }],
     [
+      'pr.base_changed',
+      'PR Issue 538 pane pane-1 #747 BASE CHANGED: The base changed from release/monday to main.',
+      { panelId: undefined, pr, base: { from: 'release/monday', to: 'main' }, reason: 'The base changed from release/monday to main.' },
+    ],
+    [
+      'pr.base_deleted',
+      'PR Issue 538 pane pane-1 #747 BASE DELETED: The base branch release/monday was deleted.',
+      { panelId: undefined, pr, base: { from: 'release/monday', to: 'release/monday' }, reason: 'The base branch release/monday was deleted.' },
+    ],
+    [
       'agent.report',
       'REPORT Issue 538 pane pane-1 panel panel-1 ready pr#747 fc5dce9',
       { source: 'agent', report: { state: 'ready', pr: 747, head: 'fc5dce9a0b1c', reportedAt: 'T' } },
@@ -216,6 +230,8 @@ print(json.dumps([effective_watch_heartbeat_ms(180), effective_watch_heartbeat_m
       { source: 'agent', report: { state: 'blocked', question: `Which API\nversion? ${'x'.repeat(400)}`, reportedAt: 'T' } },
     ],
     ['agent.report', 'REPORT Issue 538 pane pane-1 panel panel-1 done', { source: 'agent', report: { state: 'done', reportedAt: 'T' } }],
+    ['agent.report.missing', 'MISSING REPORT Issue 538 pane pane-1 panel panel-1 ready', { source: 'agent', reason: 'ready', lastOutput: 'Done.' }],
+    ['agent.report.missing', 'MISSING REPORT Issue 538 pane pane-1 panel panel-1 exited', { source: 'agent', reason: 'exited' }],
   ];
   for (const [kind, line, extra = {}] of expected) {
     assert.deepStrictEqual(
@@ -851,6 +867,108 @@ function scriptedWatch(responses, requests) {
   };
 }
 
+/** `panels submit --wait`: deliver, then follow the journal from the daemon's pre-delivery position, on that panel only. */
+async function checkDispatchWait() {
+  const submitted = {
+    ok: true, epoch: 'dispatch-epoch', generation: 10, panelId: 'panel-2', paneId: 'pane-1', inputBytes: 7, enter: 'cr', sequenceName: 'enter-cr',
+    verifiedSubmitted: true, sentAt: '2026-10-16T19:00:00.000Z', expectedReport: { since: '2026-10-16T19:00:00.000Z' },
+  };
+  const at = '2026-10-16T19:01:00.000Z';
+  const otherPanel = { gen: 11, at, kind: 'agent.blocked', paneId: 'pane-1', paneName: 'Worker', panelId: 'panel-9', source: 'agent', screenLines: ['Allow?'] };
+  const missing = {
+    gen: 12, at, kind: 'agent.report.missing', paneId: 'pane-1', paneName: 'Worker', panelId: 'panel-2', source: 'agent',
+    reason: 'ready', lastOutput: 'DONE', lastOutputSource: 'transcript', expectedSince: submitted.expectedReport.since,
+  };
+  const report = { ...reportEntry(12, 'panel-2'), report: { state: 'done', pr: 7, head: 'abc1234', summary: 'Shipped.', summaryPath: '/tmp/s.md', reportedAt: at } };
+  const dispatch = ['panels', 'submit', '--panel', 'panel-2', '--text', 'ship it', '--wait', '--yes'];
+  for (const runtime of ['npm', 'pip']) {
+    const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), `runpane-dispatch-${runtime}-`));
+    try {
+      const daemon = (waits, requests) => (frame) => {
+        requests.push({ channel: frame.channel, ...frame.args[0] });
+        if (frame.channel === 'runpane:panels:submit') return { result: submitted };
+        const index = requests.filter(request => request.channel === 'runpane:workspace:wait').length;
+        return waits[Math.min(index, waits.length) - 1];
+      };
+
+      let requests = [];
+      let run = await withFakeDaemon(paneDir, daemon([
+        { result: { ...watchResult(11), timedOut: false, entries: [otherPanel] } },
+        { result: { ...watchResult(12), timedOut: false, entries: [missing] }, delayMs: 100 },
+      ], requests), () => runCliOnce(runtime, dispatch, paneDir));
+      assert.strictEqual(run.code, 3, `${runtime} --wait exits 3 for a missing report. stdout=${run.stdout} stderr=${run.stderr}`);
+      assert.deepStrictEqual(JSON.parse(run.stdout), {
+        ok: false, outcome: 'missing', paneId: 'pane-1', paneName: 'Worker', generation: 12, at, panelId: 'panel-2',
+        lastOutput: 'DONE', lastOutputSource: 'transcript', reason: 'ready',
+      }, `${runtime} prints one compact line and skips another panel's prompt`);
+      assert.strictEqual(lf(run.stdout).split('\n').filter(Boolean).length, 1);
+      assert.strictEqual(requests[0].expectReport, true, `${runtime} --wait turns the expected report on`);
+      const waits = requests.filter(request => request.channel === 'runpane:workspace:wait');
+      assert.deepStrictEqual(waits.map(request => request.since), [10, 11], `${runtime} follows from the pre-delivery generation`);
+      assert.strictEqual(waits[0].epoch, 'dispatch-epoch');
+      assert.strictEqual(waits[1].epoch, 'test-epoch');
+      assert.deepStrictEqual(waits[0].paneIds, ['pane-1']);
+      assert.deepStrictEqual(waits[0].kinds, ['agent.report', 'agent.report.missing', 'agent.blocked', 'panel.exited', 'pane.gone']);
+
+      requests = [];
+      run = await withFakeDaemon(paneDir, daemon([{ result: { ...watchResult(12), timedOut: false, entries: [report] } }], requests),
+        () => runCliOnce(runtime, dispatch, paneDir));
+      assert.strictEqual(run.code, 0, `${runtime} --wait exits 0 for a report. stderr=${run.stderr}`);
+      assert.deepStrictEqual(JSON.parse(run.stdout).report, { state: 'done', pr: 7, head: 'abc1234', summary: 'Shipped.', summaryPath: '/tmp/s.md' });
+
+      // Dispatch promises one JSON record even when its watch reconnects.
+      for (const flags of [[], ['--json']]) {
+        requests = [];
+        run = await withFakeDaemon(paneDir, daemon([
+          { destroy: true },
+          { result: { ...watchResult(12), timedOut: false, entries: [report] } },
+        ], requests), () => runCliOnce(runtime, [...dispatch, ...flags], paneDir));
+        assert.strictEqual(run.code, 0, `${runtime} reconnects dispatch successfully: ${run.stderr}`);
+        assert.strictEqual(lf(run.stdout).split('\n').filter(Boolean).length, 1,
+          `${runtime} reconnect diagnostics must not pollute the single dispatch result: ${run.stdout}`);
+        assert.strictEqual(JSON.parse(run.stdout).outcome, 'report');
+        assert.strictEqual(requests.filter(request => request.channel === 'runpane:workspace:wait').length, 2);
+      }
+
+      requests = [];
+      run = await withFakeDaemon(paneDir, daemon([{ result: { ...watchResult(10), timedOut: true }, delayMs: 50 }], requests),
+        () => runCliOnce(runtime, [...dispatch, '--timeout', '1s'], paneDir));
+      assert.strictEqual(run.code, 124, `${runtime} --wait --timeout exits 124. stdout=${run.stdout} stderr=${run.stderr}`);
+      assert.strictEqual(JSON.parse(run.stdout).outcome, 'timeout');
+
+      for (const reset of ['cursor-truncated', 'epoch-changed']) {
+        requests = [];
+        run = await withFakeDaemon(paneDir, daemon([{ result: {
+          ...watchResult(20), reset: { reason: reset }, dropped: reset === 'cursor-truncated' ? 4 : undefined,
+          entries: [{ ...report, replay: true }],
+        } }], requests), () => runCliOnce(runtime, [...dispatch, '--timeout', '1s'], paneDir));
+        assert.strictEqual(run.code, 6, `${runtime} reports lost history without accepting replay or timing out: ${run.stdout} ${run.stderr}`);
+        assert.strictEqual(JSON.parse(run.stdout).outcome, 'indeterminate');
+        assert.match(JSON.parse(run.stdout).nextCommand, /inbox|screen/);
+        assert.strictEqual(requests.filter(request => request.channel === 'runpane:workspace:wait').length, 1);
+      }
+      requests = [];
+      const multiPaneFile = path.join(paneDir, 'multi.json');
+      fs.writeFileSync(multiPaneFile, JSON.stringify({ repo: 'active', panes: [
+        { name: 'one', tool: { agent: 'claude' } }, { name: 'two', tool: { agent: 'claude' } },
+      ] }));
+      run = await withFakeDaemon(paneDir, daemon([], requests), () => runCliOnce(runtime, [
+        'panes', 'create', '--from-json', multiPaneFile, '--wait', '--yes',
+      ], paneDir));
+      assert.notStrictEqual(run.code, 0);
+      assert.match(run.stderr, /accepts one Pane/);
+      assert.deepStrictEqual(requests, [], `${runtime} rejects multi-Pane wait before any daemon mutation`);
+
+      for (const args of [[...dispatch, '--no-expect-report'], ['panels', 'submit', '--panel', 'panel-2', '--text', 'x', '--timeout', '1s', '--yes']]) {
+        run = await runCliOnce(runtime, args, paneDir);
+        assert.notStrictEqual(run.code, 0, `${runtime} refuses ${args.slice(-2).join(' ')}`);
+      }
+    } finally {
+      fs.rmSync(paneDir, { recursive: true, force: true });
+    }
+  }
+}
+
 async function checkWatchUntilEvent() {
   const quietJson = ['watch', '--as', 'orch', '--until-event', '--json', '--kinds', 'agent.report'];
   for (const runtime of ['npm', 'pip']) {
@@ -1073,9 +1191,10 @@ const PARSER_DEFAULT_DIFFERENCES = {
   force: false, follow: false, untilEvent: false, agentsOnly: false, ackNow: false,
   includeHeldInput: false, idleBackoff: false, allManaged: false, allStopped: false,
   includeShells: false, noHeldInput: false, selfTest: false, report: false,
-  watchKinds: [], watchPaneIds: [], watchExcludePaneIds: [],
+  watchKinds: [], watchPaneIds: [], watchExcludePaneIds: [], attachments: [],
   asFilePointer: false, interrupt: false, noAssociate: false, removeWorktree: false, merged: false,
   quiet: false, readOnly: false, launch: false,
+  all: false, inboxIds: [], waitForResult: false, paused: false,
 };
 
 function normalizeParsedArgs(value) {
@@ -1425,6 +1544,42 @@ print(json.dumps(normalized))
 `, JSON.stringify({ release: artifactRelease, cases: artifactCases }));
 
   assert.deepStrictEqual(JSON.parse(pythonOutput), nodeOutput);
+}
+
+/** With Pane not running, update installs the release instead; --cli-only and --status never reach that path. */
+async function checkUpdateInstallsWhenPaneIsNotRunning() {
+  const { main } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'cli.js'));
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-update-fallback-'));
+  const originalFetch = global.fetch;
+  const originalLog = console.log;
+  const originalTelemetry = process.env.RUNPANE_TELEMETRY_DISABLED;
+  const lines = [];
+  let fetches = 0;
+  global.fetch = async () => {
+    fetches += 1;
+    return { ok: true, json: async () => artifactRelease };
+  };
+  console.log = (...args) => lines.push(args.join(' '));
+  process.env.RUNPANE_TELEMETRY_DISABLED = '1';
+  const fellBack = () => lines.some((line) => line.includes('Pane is not running on this machine'));
+  try {
+    assert.strictEqual(await main(['update', '--pane-only', '--dry-run', '--pane-dir', paneDir]), 0);
+    assert.ok(fellBack(), lines.join('\n'));
+    assert.ok(lines.some((line) => line.includes('Artifact: Pane-2.2.8-')), lines.join('\n'));
+
+    lines.length = 0;
+    fetches = 0;
+    await assert.rejects(main(['update', '--status', 'no-such-operation', '--pane-dir', paneDir]));
+    await main(['update', '--cli-only', '--dry-run', '--pane-dir', paneDir]).catch(() => 1);
+    assert.ok(!fellBack(), lines.join('\n'));
+    assert.strictEqual(fetches, 0);
+  } finally {
+    global.fetch = originalFetch;
+    console.log = originalLog;
+    if (originalTelemetry === undefined) delete process.env.RUNPANE_TELEMETRY_DISABLED;
+    else process.env.RUNPANE_TELEMETRY_DISABLED = originalTelemetry;
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
 }
 
 async function checkPreferredDownloadUrls() {
@@ -2583,7 +2738,10 @@ async function checkFilePointerParity() {
   assert.strictEqual(adoptCall.request.panes[0].launch, true);
   assert.strictEqual(adoptCall.request.waitReady, true);
   const submitCalls = wireCalls.filter(call => call.channel === 'runpane:panels:submit');
-  assert.deepStrictEqual(submitCalls[0].request, { panelId: 'panel-1', input: 'Line one\nLine two', asFilePointer: true });
+  assert.match(submitCalls[0].request.operationId, /^[0-9a-f-]{36}$/);
+  assert.notStrictEqual(submitCalls[0].request.operationId, submitCalls[1].request.operationId);
+  const { operationId: _npmOperationId, ...npmSubmit } = submitCalls[0].request;
+  assert.deepStrictEqual(npmSubmit, { panelId: 'panel-1', input: 'Line one\nLine two', asFilePointer: true });
   assert.strictEqual(submitCalls[2].request.asFilePointer, undefined);
   const createCall = wireCalls.find(call => call.channel === 'runpane:panes:create');
   assert.deepStrictEqual(createCall.request.panes[0].tool, { agent: 'claude', initialInput: 'Line one\nLine two', initialInputAsFilePointer: true });
@@ -2633,11 +2791,69 @@ except ValueError as error:
 print(json.dumps({"calls": calls, "stdout": stdout.getvalue().splitlines(), "refused": refused}))
 `);
   const python = JSON.parse(pythonOutput);
-  assert.deepStrictEqual(python.calls[0].request, { panelId: 'panel-1', input: 'Line one\nLine two', asFilePointer: true });
+  assert.match(python.calls[0].request.operationId, /^[0-9a-f-]{36}$/);
+  const { operationId: _pythonOperationId, ...pythonSubmit } = python.calls[0].request;
+  assert.deepStrictEqual(pythonSubmit, { panelId: 'panel-1', input: 'Line one\nLine two', asFilePointer: true });
   assert.deepStrictEqual(python.calls[1].request.panes[0].tool, { agent: 'claude', initialInput: 'Line one\nLine two', initialInputAsFilePointer: true });
   assert.ok(python.stdout.includes(`Prompt file: ${promptFile}`), python.stdout.join('\n'));
   assert.ok(python.stdout.includes('Warning (leading-bang-runs-shell): The text starts with `!`.'), python.stdout.join('\n'));
   assert.strictEqual(python.refused, true);
+}
+
+function checkAttachParity() {
+  const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
+  const { buildPanelInputRequest, buildPanelCreateRequest } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'localControl.js'));
+  const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-attach-')));
+  const mockup = path.join(directory, 'mockup.png');
+  const plan = path.join(directory, 'plan.html');
+  fs.writeFileSync(mockup, 'png');
+  fs.writeFileSync(plan, '<p>plan</p>');
+  const submitArgs = ['panels', 'submit', '--panel', 'panel-1', '--text', 'Build it', '--as-file-pointer', '--attach', 'mockup.png', '--attach', plan, '--yes'];
+  const originalCwd = process.cwd();
+  process.chdir(directory);
+  try {
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(buildPanelInputRequest(parseRunpaneArgs(submitArgs), 'submit'))), {
+      panelId: 'panel-1', input: 'Build it', asFilePointer: true, attachments: [mockup, plan],
+    });
+    assert.throws(
+      () => buildPanelInputRequest(parseRunpaneArgs(['panels', 'submit', '--panel', 'panel-1', '--text', 'x', '--attach', plan, '--yes']), 'submit'),
+      /--attach needs --as-file-pointer/,
+    );
+    assert.throws(
+      () => buildPanelInputRequest(parseRunpaneArgs(['panels', 'submit', '--panel', 'panel-1', '--text', 'x', '--as-file-pointer', '--attach', 'missing.png', '--yes']), 'submit'),
+      /--attach missing\.png: no such file/,
+    );
+  } finally {
+    process.chdir(originalCwd);
+  }
+  return buildPanelCreateRequest(parseRunpaneArgs([
+    'panels', 'create', '--pane', 'pane-1', '--agent', 'claude', '--prompt', 'Build it', '--as-file-pointer', '--attach', mockup, '--yes',
+  ])).then((request) => {
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(request.tool)), { agent: 'claude', initialInput: 'Build it', initialInputAsFilePointer: true, initialInputAttachments: [mockup] });
+    const python = JSON.parse(runPythonSnippet(`
+import json, os
+import runpane.local_control as local_control
+from runpane.cli import parse_args
+
+os.chdir(${JSON.stringify(directory)})
+submit = local_control.build_panel_input_request(parse_args(${JSON.stringify(submitArgs)}), "submit")
+tool = local_control.build_tool_spec(parse_args([
+    "panels", "create", "--pane", "pane-1", "--agent", "claude", "--prompt", "Build it", "--as-file-pointer", "--attach", ${JSON.stringify(mockup)}, "--yes"
+]), "panels create")
+refused = []
+for args in (["panels", "submit", "--panel", "panel-1", "--text", "x", "--attach", "plan.html", "--yes"],
+             ["panels", "submit", "--panel", "panel-1", "--text", "x", "--as-file-pointer", "--attach", "missing.png", "--yes"]):
+    try:
+        local_control.build_panel_input_request(parse_args(args), "submit")
+    except ValueError as error:
+        refused.append(str(error))
+print(json.dumps({"submit": submit, "tool": tool, "refused": refused}))
+`));
+    assert.deepStrictEqual(python.submit, { panelId: 'panel-1', input: 'Build it', asFilePointer: true, attachments: [mockup, plan] });
+    assert.deepStrictEqual(python.tool, JSON.parse(JSON.stringify(request.tool)));
+    assert.match(python.refused[0], /--attach needs --as-file-pointer/);
+    assert.match(python.refused[1], /--attach missing\.png: no such file/);
+  });
 }
 
 async function checkDeliveryParity() {
@@ -3138,6 +3354,107 @@ print(json.dumps({"calls": calls, "jsonOutputs": json_outputs, "textOutput": std
   assert.deepStrictEqual(python.incompleteTextOutput, incompleteTextOutput);
 }
 
+function checkComposerStrategyRequests() {
+  const python = JSON.parse(runPythonSnippet(`
+import contextlib
+import io
+import json
+import runpane.local_control as local_control
+from runpane.cli import parse_args
+
+requests = []
+def fake_invoke(channel, args, **kwargs):
+    assert channel == "runpane:panels:submit-composer"
+    requests.append(args[0])
+    return {"ok": True}
+
+local_control.invoke_daemon = fake_invoke
+with contextlib.redirect_stdout(io.StringIO()):
+    for flags in [[], ["--strategy", "enter"], ["--strategy", "auto"], ["--strategy", "codex-ctrl-enter"]]:
+        result = local_control.run_panels_submit_composer(parse_args([
+            "panels", "submit-composer", "--panel", "panel-1", "--yes", "--json", *flags
+        ]))
+        assert result == 0
+print(json.dumps(requests))
+`));
+  assert.deepStrictEqual(python, [
+    { panelId: 'panel-1' },
+    { panelId: 'panel-1', strategy: 'enter' },
+    { panelId: 'panel-1', strategy: 'auto' },
+    { panelId: 'panel-1', strategy: 'codex-ctrl-enter' },
+  ], 'omitting --strategy must leave selection to the daemon, while explicit strategies are preserved');
+}
+
+async function checkPaneAdoptOverrides() {
+  const daemonClient = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'daemonClient.js'));
+  const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
+  const { runPanesAdopt } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'localControl.js'));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-adopt-'));
+  const inputPath = path.join(directory, 'adopt.json');
+  const payload = {
+    repo: 'active', dryRun: false, noFocus: true, focus: false, source: 'agent',
+    panes: [
+      { name: 'Existing work', path: '/work/tree', pinned: true, launch: false, tool: { agent: 'codex' } },
+      { name: 'Other work', path: '/work/other', pinned: true, launch: false, tool: { command: 'echo ready' } },
+    ],
+  };
+  const originalInvokeDaemon = daemonClient.invokeDaemon;
+  const originalConsoleLog = console.log;
+  const requests = [];
+  daemonClient.invokeDaemon = async (channel, args) => {
+    assert.strictEqual(channel, 'runpane:panes:adopt');
+    requests.push(JSON.parse(JSON.stringify(args[0])));
+    return { ok: true, repo: {}, items: [] };
+  };
+  console.log = () => {};
+  try {
+    fs.writeFileSync(inputPath, JSON.stringify(payload));
+    // No --yes: dry-run must be forwarded when it bypasses confirmation.
+    await runPanesAdopt(parseRunpaneArgs([
+      'panes', 'adopt', '--from-json', inputPath, '--dry-run', '--focus', '--source', 'user',
+      '--no-pinned', '--launch', '--json',
+    ]));
+    assert.deepStrictEqual(requests.pop(), {
+      repo: 'active', dryRun: true, noFocus: false, focus: true, source: 'user',
+      panes: [
+        { name: 'Existing work', path: '/work/tree', pinned: false, launch: true, tool: { agent: 'codex' } },
+        { name: 'Other work', path: '/work/other', pinned: false, launch: true, tool: { command: 'echo ready' } },
+      ],
+    });
+    await runPanesAdopt(parseRunpaneArgs(['panes', 'adopt', '--from-json', inputPath, '--yes', '--json']));
+    assert.deepStrictEqual(requests.pop(), payload, 'absent flags preserve the JSON request');
+
+    fs.writeFileSync(inputPath, JSON.stringify({
+      ...payload, noFocus: false, focus: true, source: 'user',
+      panes: payload.panes.map(pane => ({ ...pane, pinned: false })),
+    }));
+    await runPanesAdopt(parseRunpaneArgs([
+      'panes', 'adopt', '--from-json', inputPath, '--dry-run', '--no-focus', '--source', 'agent',
+      '--pinned', '--json',
+    ]));
+    assert.deepStrictEqual(requests.pop(), { ...payload, dryRun: true });
+    await assert.rejects(runPanesAdopt(parseRunpaneArgs([
+      'panes', 'adopt', '--from-json', inputPath, '--dry-run', '--focus', '--no-focus',
+    ])), /Use either --focus or --no-focus/);
+    await assert.rejects(runPanesAdopt(parseRunpaneArgs([
+      'panes', 'adopt', '--from-json', inputPath, '--dry-run', '--pinned', '--no-pinned',
+    ])), /Use either --pinned or --no-pinned/);
+    assert.strictEqual(requests.length, 0, 'conflicting overrides must not reach the daemon');
+    await runPanesAdopt(parseRunpaneArgs([
+      'panes', 'adopt', '--repo', 'active', '--path', '/work/tree', '--name', 'Existing work',
+      '--agent', 'codex', '--dry-run', '--no-pinned', '--no-focus', '--source', 'agent', '--launch', '--json',
+    ]));
+    assert.deepStrictEqual(requests.pop(), {
+      repo: 'active', dryRun: true, noFocus: true, focus: false, source: 'agent',
+      panes: [{ name: 'Existing work', path: '/work/tree', pinned: false, launch: true, tool: { agent: 'codex' } }],
+    });
+  } finally {
+    daemonClient.invokeDaemon = originalInvokeDaemon;
+    console.log = originalConsoleLog;
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+}
+
 async function checkPaneArchiveDryRunParity() {
   const daemonClient = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'daemonClient.js'));
   const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
@@ -3473,6 +3790,184 @@ print(json.dumps({"calls": calls, "codes": codes, "errors": errors}))
   assert.deepStrictEqual(python.errors, [true, true, true]);
 }
 
+/** Both wrappers send the same loops requests: --repo resolves through the daemon, --session passes through, update merges onto the saved loop. */
+async function checkLoopsParity() {
+  const { decodeBoundary } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'boundaryDecoder.js'));
+  const daemonClient = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'daemonClient.js'));
+  const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
+  const localControl = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'localControl.js'));
+  const loop = {
+    id: 'loop-1', name: 'nightly', projectId: 7, cron: '0 3 * * *', agent: 'claude', initialInput: 'Sweep',
+    enabled: true, createdAtMs: 1, nextRunAtMs: 2, scheduleText: 'Daily at 3:00 AM', runs: [],
+  };
+  const failedRun = { id: 'run-1', loopId: 'loop-1', slotAtMs: 3, trigger: 'manual', status: 'failed', error: 'boom', sessionId: null };
+  const warnedRun = { ...failedRun, id: 'run-2', status: 'started', error: 'Stopped at the trust prompt.', sessionId: 'pane-2' };
+  const repoList = { ok: true, repo: { id: 7, name: 'Pane', path: '/repo', active: true, sessionCount: 0 }, panes: [] };
+  const sessionLoop = {
+    id: 'loop-2', name: 'triage', orchestrationSessionId: '__orchestration_session_a', cron: '0 9 * * *', agent: 'claude', initialInput: 'Triage',
+    enabled: true, createdAtMs: 1, nextRunAtMs: 2, scheduleText: 'Daily at 9:00 AM', runs: [],
+  };
+  const sessionRun = { ...failedRun, id: 'run-3', loopId: 'loop-2', status: 'started', error: null };
+  const sessionList = {
+    ok: true,
+    sessions: [{
+      id: '__orchestration_session_a', name: 'Inbox', agent: 'claude', internalSessionId: 'owner',
+      panelIds: { claude: 'claude-panel', codex: 'codex-panel', cursor: 'cursor-panel' },
+      goal: '', context: '', decisions: [], blockers: [], nextAction: '', evidence: [], outputs: [], associations: [],
+      activity: [], revision: 1, createdAt: '2026-10-06T03:00:00Z', updatedAt: '2026-10-06T03:00:00Z',
+    }],
+  };
+  const scripted = [
+    repoList, { ok: true, loop },
+    { ok: true, loops: [loop] }, { ok: true, loop: { ...loop, cron: '0 4 * * *' } },
+    repoList, { ok: true, scheduleText: 'Daily at 3:00 AM', nextRunAtMs: 2 },
+    { ok: true, loop: { ...loop, runs: [failedRun] } },
+    { ok: true, loop: { ...loop, enabled: false, nextRunAtMs: null } },
+    { ok: true, loop },
+    { ok: true, deleted: 'loop-1' },
+    { ok: true, loops: [{ ...loop, runs: [warnedRun] }] }, { ok: true, repos: [repoList.repo] },
+    { ok: true, loop: { ...loop, runs: [warnedRun] } },
+    { ok: true, loop: sessionLoop },
+    { ok: true, loops: [loop] }, { ok: true, loop: sessionLoop },
+    { ok: true, loops: [sessionLoop] },
+    { ok: true, loops: [sessionLoop] }, sessionList,
+    { ok: true, loop: { ...sessionLoop, runs: [sessionRun] } }, sessionList,
+    { throws: 'No loop has id loop-9. Nothing was changed.' },
+  ];
+  const argvs = [
+    ['loops', 'create', '--repo', 'active', '--name', 'nightly', '--cron', '0 3 * * *', '--agent', 'claude', '--prompt', 'Sweep', '--yes', '--json'],
+    ['loops', 'update', '--loop', 'loop-1', '--cron', '0 4 * * *', '--tool-command', 'agent-farm run sweep', '--yes', '--json'],
+    ['loops', 'create', '--repo', 'active', '--name', 'nightly', '--cron', '0 3 * * *', '--agent', 'codex', '--paused', '--dry-run', '--json'],
+    ['loops', 'run', '--loop', 'loop-1', '--yes', '--json'],
+    ['loops', 'pause', '--loop', 'loop-1', '--yes', '--json'],
+    ['loops', 'resume', '--loop', 'loop-1', '--yes', '--json'],
+    ['loops', 'delete', '--loop', 'loop-1', '--yes', '--json'],
+    // Plain text: a run started with a warning needs attention.
+    ['loops', 'list'],
+    ['loops', 'run', '--loop', 'loop-1', '--yes'],
+    // Session loops: --session passes through, and replaces the repo on update.
+    ['loops', 'create', '--session', 'new', '--name', 'triage', '--cron', '0 9 * * *', '--agent', 'claude', '--prompt', 'Triage', '--yes', '--json'],
+    ['loops', 'update', '--loop', 'loop-1', '--session', 'Inbox', '--yes', '--json'],
+    ['loops', 'list', '--json'],
+    ['loops', 'list'],
+    ['loops', 'run', '--loop', 'loop-2', '--yes'],
+  ];
+  const handlers = {
+    'loops create': localControl.runLoopsSave,
+    'loops update': localControl.runLoopsSave,
+    'loops run': localControl.runLoopsRun,
+    'loops pause': (parsed) => localControl.runLoopsSetEnabled(parsed, false),
+    'loops resume': (parsed) => localControl.runLoopsSetEnabled(parsed, true),
+    'loops delete': localControl.runLoopsDelete,
+    'loops list': localControl.runLoopsList,
+  };
+  const originalInvokeDaemon = daemonClient.invokeDaemon;
+  const originalConsoleLog = console.log;
+  const calls = [];
+  const codes = [];
+  daemonClient.invokeDaemon = async (channel, args, schema) => {
+    calls.push({ channel, args });
+    const response = scripted[calls.length - 1];
+    if (response.throws) throw new Error(response.throws);
+    return decodeBoundary(response, schema);
+  };
+  const lines = [];
+  console.log = (line) => { lines.push(line); };
+  try {
+    for (const argv of argvs) {
+      const parsed = parseRunpaneArgs(argv);
+      codes.push(await handlers[parsed.command](parsed));
+    }
+    await assert.rejects(localControl.runLoopsRun(parseRunpaneArgs(['loops', 'run', '--loop', 'loop-9', '--yes'])), /No loop has id loop-9/);
+    await assert.rejects(localControl.runLoopsSave(parseRunpaneArgs(['loops', 'create', '--repo', 'active', '--name', 'x', '--cron', '0 3 * * *', '--agent', 'claude', '--tool-command', 'x'])), /takes either --agent or --tool-command, not both/);
+    await assert.rejects(localControl.runLoopsSave(parseRunpaneArgs(['loops', 'create', '--repo', 'active', '--name', 'x', '--cron', '0 3 * * *', '--agent', 'opencode'])), /Loops run claude, codex, cursor/);
+    await assert.rejects(localControl.runLoopsSave(parseRunpaneArgs(['loops', 'create', '--repo', 'active', '--session', 'new', '--name', 'x', '--cron', '0 3 * * *', '--agent', 'claude'])), /takes either --repo or --session, not both/);
+  } finally {
+    daemonClient.invokeDaemon = originalInvokeDaemon;
+    console.log = originalConsoleLog;
+  }
+
+  assert.deepStrictEqual(codes, [0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+  assert.deepStrictEqual(calls, [
+    { channel: 'runpane:panes:list', args: [{ repo: 'active' }] },
+    { channel: 'runpane:loops:save', args: [{ name: 'nightly', projectId: 7, cron: '0 3 * * *', agent: 'claude', initialInput: 'Sweep', enabled: true }] },
+    { channel: 'runpane:loops:list', args: [] },
+    { channel: 'runpane:loops:save', args: [{ id: 'loop-1', name: 'nightly', projectId: 7, cron: '0 4 * * *', toolCommand: 'agent-farm run sweep', initialInput: 'Sweep', enabled: true }] },
+    { channel: 'runpane:panes:list', args: [{ repo: 'active' }] },
+    { channel: 'runpane:loops:preview', args: [{ cron: '0 3 * * *' }] },
+    { channel: 'runpane:loops:run-now', args: [{ loopId: 'loop-1' }] },
+    { channel: 'runpane:loops:set-enabled', args: [{ loopId: 'loop-1', enabled: false }] },
+    { channel: 'runpane:loops:set-enabled', args: [{ loopId: 'loop-1', enabled: true }] },
+    { channel: 'runpane:loops:delete', args: [{ loopId: 'loop-1' }] },
+    { channel: 'runpane:loops:list', args: [] },
+    { channel: 'runpane:repos:list', args: [] },
+    { channel: 'runpane:loops:run-now', args: [{ loopId: 'loop-1' }] },
+    { channel: 'runpane:loops:save', args: [{ name: 'triage', orchestrationSessionId: 'new', cron: '0 9 * * *', agent: 'claude', initialInput: 'Triage', enabled: true }] },
+    { channel: 'runpane:loops:list', args: [] },
+    { channel: 'runpane:loops:save', args: [{ id: 'loop-1', name: 'nightly', orchestrationSessionId: 'Inbox', cron: '0 3 * * *', agent: 'claude', initialInput: 'Sweep', enabled: true }] },
+    { channel: 'runpane:loops:list', args: [] },
+    { channel: 'runpane:loops:list', args: [] },
+    { channel: 'runpane:sessions:list', args: [] },
+    { channel: 'runpane:loops:run-now', args: [{ loopId: 'loop-2' }] },
+    { channel: 'runpane:sessions:list', args: [] },
+    { channel: 'runpane:loops:run-now', args: [{ loopId: 'loop-9' }] },
+  ]);
+
+  const python = JSON.parse(runPythonSnippet(`
+import contextlib
+import io
+import json
+import sys
+import runpane.local_control as local_control
+from runpane.cli import COMMAND_HANDLERS, parse_args
+
+data = json.loads(sys.stdin.read())
+scripted = data["scripted"]
+calls = []
+def fake_invoke(channel, args=None, **kwargs):
+    calls.append({"channel": channel, "args": args or []})
+    response = scripted[len(calls) - 1]
+    if "throws" in response:
+        raise local_control.PaneDaemonClientError(response["throws"], "ERR_LOOP_NOT_FOUND", "")
+    return response
+
+local_control.invoke_daemon = fake_invoke
+codes = []
+errors = []
+stdout = io.StringIO()
+with contextlib.redirect_stdout(stdout):
+    for argv in data["argvs"]:
+        parsed = parse_args(argv)
+        codes.append(COMMAND_HANDLERS[parsed.command](parsed, {}))
+    for argv in (
+        ["loops", "run", "--loop", "loop-9", "--yes"],
+        ["loops", "create", "--repo", "active", "--name", "x", "--cron", "0 3 * * *", "--agent", "claude", "--tool-command", "x"],
+        ["loops", "create", "--repo", "active", "--name", "x", "--cron", "0 3 * * *", "--agent", "opencode"],
+        ["loops", "create", "--repo", "active", "--session", "new", "--name", "x", "--cron", "0 3 * * *", "--agent", "claude"],
+    ):
+        try:
+            parsed = parse_args(argv)
+            COMMAND_HANDLERS[parsed.command](parsed, {})
+        except Exception as error:
+            errors.append(str(error))
+print(json.dumps({"calls": calls, "codes": codes, "errors": errors, "stdout": stdout.getvalue()}))
+`, JSON.stringify({ scripted, argvs })));
+  assert.deepStrictEqual(python.calls, calls);
+  assert.deepStrictEqual(python.codes, codes);
+  // Both wrappers print the same --json bytes.
+  assert.strictEqual(python.stdout, lines.map((line) => `${line}\n`).join(''));
+  assert.match(python.errors[0], /No loop has id loop-9/);
+  assert.match(lines[7], /^nightly \(loop-1\) · Pane · Daily at 3:00 AM · next run .+ · last needs attention /);
+  assert.strictEqual(lines[8], 'Started a run of nightly in Pane pane-2; it needs attention: Stopped at the trust prompt.');
+  // A Session loop's JSON carries orchestrationSessionId and no projectId, after the required fields.
+  assert.strictEqual(lines[11], '{\n  "ok": true,\n  "loops": [\n    {\n      "id": "loop-2",\n      "name": "triage",\n      "cron": "0 9 * * *",\n      "enabled": true,\n      "createdAtMs": 1,\n      "nextRunAtMs": 2,\n      "scheduleText": "Daily at 9:00 AM",\n      "runs": [],\n      "orchestrationSessionId": "__orchestration_session_a",\n      "agent": "claude",\n      "initialInput": "Triage"\n    }\n  ]\n}');
+  assert.match(lines[12], /^triage \(loop-2\) · Session Inbox · Daily at 9:00 AM · next run /);
+  assert.strictEqual(lines[13], 'Sent a run of triage to Session Inbox.');
+  assert.match(python.errors[1], /takes either --agent or --tool-command, not both/);
+  assert.match(python.errors[2], /Loops run claude, codex, cursor/);
+  assert.match(python.errors[3], /takes either --repo or --session, not both/);
+}
+
 /** `sessions overview` carries both a Pane's worker report (#839) and the Session's named locks (#834). */
 async function checkOverviewReportsAndLocks() {
   const daemonClient = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'daemonClient.js'));
@@ -3558,6 +4053,56 @@ local_control.run_sessions_overview(parse_args(["sessions", "overview", "--sessi
 `, JSON.stringify(overview));
   assertIncludes(pythonText, 'report ready pr#747 fc5dce9 (panel panel-a');
   assertIncludes(pythonText, 'lock testing-account');
+
+  // Each panel carries its own report; a JSON object summary also comes back as `data`, as given.
+  const status = { profile: 'implementer', state: 'running', checks: { pass: ['S-1'] } };
+  const panelReport = { state: 'ready', pr: 747, head: 'fc5dce9', summary: JSON.stringify(status), reportedAt: at, data: status };
+  const withPanelReports = structuredClone(overview);
+  withPanelReports.panes[0].panels = [
+    { ...overview.panes[0].panels[0], report: panelReport },
+    { panelId: 'panel-b', title: 'Reviewer', agentType: 'codex', state: 'working', initialized: true, lastActivityAt: at },
+  ];
+  assert.ok(matchesJsonSchema(panelReport, contract.jsonSchemas.panelReport), 'panel report fixture matches the contract schema');
+  daemonClient.invokeDaemon = async () => withPanelReports;
+  console.log = (line) => printed.push(String(line));
+  printed.length = 0;
+  try {
+    assert.strictEqual(await runSessionsOverview(parseRunpaneArgs(['sessions', 'overview', '--session', 'Release QA', '--json'])), 0);
+    const decoded = JSON.parse(printed.join('\n'));
+    assert.deepStrictEqual(decoded.panes[0].panels[0].report, panelReport);
+    assert.deepStrictEqual(decoded.panes[0].report, report);
+    printed.length = 0;
+    // F-2: JSON keys named __proto__, top level and nested, survive the CLI's decoder and printing.
+    const protoSummary = '{"__proto__":{"state":"changed","__proto__":{"deep":true}},"ok":true}';
+    withPanelReports.panes[0].panels[0].report = { ...panelReport, summary: protoSummary, data: JSON.parse(protoSummary) };
+    assert.strictEqual(await runSessionsOverview(parseRunpaneArgs(['sessions', 'overview', '--session', 'Release QA', '--json'])), 0);
+    const protoData = JSON.parse(printed.join('\n')).panes[0].panels[0].report.data;
+    assert.ok(Object.hasOwn(protoData, '__proto__'), 'report.data keeps a __proto__ key');
+    assert.strictEqual(JSON.stringify(protoData), protoSummary);
+    withPanelReports.panes[0].panels[0].report = panelReport;
+    printed.length = 0;
+    assert.strictEqual(await runSessionsOverview(parseRunpaneArgs(['sessions', 'overview', '--session', 'Release QA'])), 0);
+  } finally {
+    daemonClient.invokeDaemon = originalInvokeDaemon;
+    console.log = originalConsoleLog;
+  }
+  const panelText = printed.join('\n');
+  const pythonPanelText = runPythonSnippet(`
+import json
+import sys
+import runpane.local_control as local_control
+from runpane.cli import parse_args
+
+overview = json.loads(sys.stdin.read())
+local_control.invoke_daemon = lambda channel, args, **kwargs: overview
+local_control.run_sessions_overview(parse_args(["sessions", "overview", "--session", "Release QA"]))
+`, JSON.stringify(withPanelReports));
+  for (const output of [panelText, pythonPanelText]) {
+    assertIncludes(output, `Claude Code (panel panel-a): idle, report ready pr#747 fc5dce9 at ${at}`);
+    assertIncludes(output, 'Reviewer (panel panel-b): working');
+    assert.ok(!output.includes('Reviewer (panel panel-b): working, report'), 'a panel without a report shows only its state');
+  }
+  assert.strictEqual(pythonPanelText.replace(/\r\n/g, '\n').trim(), panelText.trim());
 }
 
 function checkHelpOutput() {
@@ -4538,6 +5083,157 @@ async function checkDryRunMessages() {
   }
 }
 
+async function checkNotifyParity() {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-notify-'));
+  const insidePane = {
+    PANE_SESSION_ID: 'session-1', PANE_PANEL_ID: 'panel-1', RUNPANE_NOTIFY_AGENT: 'Cursor', RUNPANE_NOTIFY_RETURN_AFTER_MS: '50000',
+  };
+  const outsidePane = { PANE_SESSION_ID: '', PANE_PANEL_ID: '', RUNPANE_NOTIFY_AGENT: '', RUNPANE_NOTIFY_RETURN_AFTER_MS: '' };
+  const ask = [
+    'notify', '--ui', 'options', '--title', 'Which database?', '--context', 'For the cache.',
+    '--choices=[{"label":"Redis","recommended":true},{"label":"SQLite","detail":"No server"}]',
+  ];
+  // Each daemon result and the one line a person sees for it.
+  const results = [
+    [{ answer: 'Redis', note: 'Keep it small.' }, 'Answer: Redis. Note: Keep it small.'],
+    [{ approved: false }, 'Denied'],
+    [{ delivered: 'inbox' }, 'Added to the Notify inbox.'],
+    [{ waiting: true, id: 'n-1', next: 'Call `runpane notify --resume n-1` now.' }, 'Still waiting (id n-1). Call `runpane notify --resume n-1` now.'],
+  ];
+  const frames = { npm: [], pip: [] };
+  try {
+    for (const runtime of ['npm', 'pip']) {
+      for (const [result, line] of results) {
+        for (const json of [true, false]) {
+          const run = await withFakeDaemon(paneDir, (frame) => {
+            frames[runtime].push(frame);
+            return { result };
+          }, () => runCliOnce(runtime, json ? [...ask, '--json'] : ask, paneDir, 20_000, insidePane));
+          assert.strictEqual(run.code, 0, `${runtime} notify exited ${run.code}. stdout=${run.stdout} stderr=${run.stderr}`);
+          if (json) assert.deepStrictEqual(JSON.parse(run.stdout), result, `${runtime} notify --json printed the wrong result`);
+          else assert.strictEqual(run.stdout.trim(), line, `${runtime} notify printed the wrong line`);
+        }
+      }
+      const approval = await withFakeDaemon(paneDir, (frame) => {
+        frames[runtime].push(frame);
+        return { result: { approved: true } };
+      }, () => runCliOnce(runtime, [
+        'notify', '--ui', 'approve', '--title', 'Drop the table?', '--detail', 'DROP TABLE t;', '--detail-label', 'Show the SQL', '--json',
+      ], paneDir, 20_000, outsidePane));
+      assert.deepStrictEqual(JSON.parse(approval.stdout), { approved: true });
+      const resumed = await withFakeDaemon(paneDir, (frame) => {
+        frames[runtime].push(frame);
+        return { result: { approved: true } };
+      }, () => runCliOnce(runtime, ['notify', '--resume', 'n-1', '--json'], paneDir, 20_000, outsidePane));
+      assert.deepStrictEqual(JSON.parse(resumed.stdout), { approved: true });
+
+      // No Pane is listening: an unavailable result, not an error, so the agent asks in its terminal.
+      const offline = await runCliOnce(runtime, [...ask, '--json'], paneDir, 20_000, insidePane);
+      assert.strictEqual(offline.code, 0, `${runtime} notify without Pane exited ${offline.code}. stderr=${offline.stderr}`);
+      assert.deepStrictEqual(JSON.parse(offline.stdout), { unavailable: 'Pane is not running.', next: 'Ask in the terminal instead.' });
+    }
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
+  const question = {
+    ui: 'options', title: 'Which database?', context: 'For the cache.',
+    choices: [{ label: 'Redis', recommended: true }, { label: 'SQLite', detail: 'No server' }],
+    returnAfterMs: 50000,
+    caller: { paneId: 'session-1', panelId: 'panel-1', cwd: rootDir, agent: 'Cursor' },
+  };
+  assert.deepStrictEqual(frames.npm.map((frame) => frame.channel), Array(results.length * 2 + 2).fill('runpane:notify'));
+  assert.deepStrictEqual(frames.npm[0].args, [question]);
+  assert.deepStrictEqual(frames.npm.at(-2).args, [{
+    ui: 'approve', title: 'Drop the table?', detail: 'DROP TABLE t;', detailLabel: 'Show the SQL', caller: { cwd: rootDir },
+  }]);
+  assert.deepStrictEqual(frames.npm.at(-1).args, [{ resume: 'n-1', caller: { cwd: rootDir } }]);
+  assert.deepStrictEqual(frames.pip.map((frame) => frame.args), frames.npm.map((frame) => frame.args), 'Python and Node notify sent different requests');
+
+  // Invalid input fails before any request, naming the field, the same way in both wrappers.
+  const tenChoices = JSON.stringify(Array.from({ length: 10 }, (_, index) => ({ label: `c${index}` })));
+  const invalid = [
+    ['ui', ['--title', 'x'], 'ui is required: options, approve, ask, or info.'],
+    ['ui', ['--ui', 'poll', '--title', 'x'], 'ui must be options, approve, ask, or info; got "poll".'],
+    ['title', ['--ui', 'ask'], 'title is required: one line saying what you need.'],
+    ['choices', ['--ui', 'ask', '--title', 'x', '--choices', '[{"label":"a"}]'], 'choices is only for ui options; this call is ui ask.'],
+    ['detail', ['--ui', 'info', '--title', 'x', '--detail', 'DROP TABLE t;'], 'detail is only for ui approve; this call is ui info.'],
+    ['detailLabel', ['--ui', 'ask', '--title', 'x', '--detail-label', 'Show the SQL'], 'detailLabel is only for ui approve; this call is ui ask.'],
+    ['detailLabel', ['--ui', 'approve', '--title', 'x', '--detail-label', 'Show the SQL'], 'detailLabel names the disclosure that reveals detail, so it needs detail too.'],
+    ['detailLabel', ['--ui', 'approve', '--title', 'x', '--detail', 'DROP TABLE t;', '--detail-label', 'x'.repeat(41)], 'detailLabel takes up to 40 characters; got 41.'],
+    ['choices', ['--ui', 'options', '--title', 'x'], undefined],
+    ['choices', ['--ui', 'options', '--title', 'x', '--choices', tenChoices], 'choices takes 1 to 9 choices; got 10.'],
+    ['choices', ['--ui', 'options', '--title', 'x', '--choices', '{"label":"a"}'], undefined],
+    ['choices', ['--ui', 'options', '--title', 'x', '--choices', 'Redis, SQLite'], undefined],
+    ['choices', ['--ui', 'options', '--title', 'x', '--choices', '[{"label":""}]'], undefined],
+    ['choices', ['--ui', 'options', '--title', 'x', '--choices', '[{"label":"a","recommended":"yes"}]'], undefined],
+    ['choices', ['--ui', 'options', '--title', 'x', '--choices', '[{"label":"a","detail":null}]'], undefined],
+    ['choices', ['--ui', 'options', '--title', 'x', '--choices', '[{"label":"a"},{"label":"a"}]'], 'choices[1] repeats the label "a"; each choice needs its own label.'],
+    ['suggestions', ['--ui', 'ask', '--title', 'x', '--suggestions', '["main",""]'], 'suggestions[1] must be non-empty text.'],
+    ['action', ['--ui', 'info', '--title', 'x', '--action', '{"label":"Open"}'], undefined],
+    ['resume', ['--resume', 'n-1', '--ui', 'ask'], 'resume keeps waiting on an earlier question, so it takes no other fields; remove ui.'],
+  ];
+  const { main } = require(npmCli);
+  const nodeFailures = [];
+  for (const [, args] of invalid) {
+    await assert.rejects(main(['notify', ...args]), (error) => {
+      nodeFailures.push([error.code, error.message, error.next]);
+      return true;
+    });
+  }
+  const pythonFailures = JSON.parse(runPythonSnippet(`
+import json, sys
+from runpane.cli import parse_args
+from runpane.notify import RunpaneError, build_notify_request
+failures = []
+for args in json.load(sys.stdin):
+    try:
+        build_notify_request(parse_args(["notify", *args]), {}, "/")
+        failures.append(None)
+    except RunpaneError as error:
+        failures.append([error.code, str(error), error.next])
+print(json.dumps(failures))
+`, JSON.stringify(invalid.map(([, args]) => args))));
+  assert.deepStrictEqual(pythonFailures, nodeFailures, 'Python and Node reject notify input differently');
+  invalid.forEach(([field, args, problem], index) => {
+    const [code, message, next] = nodeFailures[index];
+    assert.strictEqual(code, 'ERR_NOTIFY_INVALID', args.join(' '));
+    assert.ok(message.startsWith(field), `notify ${args.join(' ')} must name ${field}: ${message}`);
+    assert.ok(message.endsWith('Nothing was shown to the person.'), message);
+    if (problem) assert.strictEqual(message, `${problem} Nothing was shown to the person.`);
+    assert.strictEqual(next, args[0] === '--resume' ? 'Call notify again with only resume.' : `Fix ${field} and call notify again.`);
+  });
+
+  // A Pane without the notify channel (older, or the headless daemon) is unavailable too.
+  const daemonClient = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'daemonClient.js'));
+  const { runNotify } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'notify.js'));
+  const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
+  const originalInvoke = daemonClient.invokeDaemon;
+  const originalLog = console.log;
+  const printed = [];
+  daemonClient.invokeDaemon = async () => {
+    throw new daemonClient.PaneDaemonClientError('No Pane daemon command registered', 'ERR_UNKNOWN_CHANNEL');
+  };
+  console.log = (line) => printed.push(line);
+  try {
+    assert.strictEqual(await runNotify(parseRunpaneArgs(['notify', '--ui', 'info', '--title', 'Done', '--json']), {}), 0);
+  } finally {
+    daemonClient.invokeDaemon = originalInvoke;
+    console.log = originalLog;
+  }
+  const pythonUnknownChannel = runPythonSnippet(`
+import runpane.notify as notify
+from runpane.cli import parse_args
+from runpane.daemon_client import PaneDaemonClientError
+def fake_invoke(*args, **kwargs):
+    raise PaneDaemonClientError("No Pane daemon command registered", "ERR_UNKNOWN_CHANNEL")
+notify.invoke_daemon = fake_invoke
+assert notify.run_notify(parse_args(["notify", "--ui", "info", "--title", "Done", "--json"]), {}) == 0
+`);
+  const unsupported = { unavailable: 'This Pane doesn\'t support notify yet.', next: 'Ask in the terminal instead.' };
+  assert.deepStrictEqual(JSON.parse(printed.join('\n')), unsupported);
+  assert.deepStrictEqual(JSON.parse(pythonUnknownChannel), unsupported);
+}
+
 async function checkPaneCreateResultFields() {
   const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-result-fields-'));
   const result = {
@@ -4573,6 +5269,7 @@ async function runChecks() {
   checkWatchFormatterGoldens();
   await checkWatchStreamParity();
   await checkWatchUntilEvent();
+  await checkDispatchWait();
   checkPythonWatchReaderClosedErrnos();
   compareLegacyRemoteDaemonHealthParity();
   compareDaemonRepairJsonParity();
@@ -4582,6 +5279,7 @@ async function runChecks() {
   checkPythonUnixEndpointSeparatorsAreHostIndependent();
   compareArtifactSelectionParity();
   await checkPreferredDownloadUrls();
+  await checkUpdateInstallsWhenPaneIsNotRunning();
   compareWrapperTelemetrySanitizers();
   compareExistingReusePolicy();
   compareDaemonLaunchEnvironmentParity();
@@ -4594,19 +5292,24 @@ async function runChecks() {
   checkWindowsPaneVersionDoesNotLaunchExecutable();
   await checkFromJsonAcceptsBom();
   await checkCreateAssociationSource();
+  checkComposerStrategyRequests();
+  await checkPaneAdoptOverrides();
   await checkPaneArchiveDryRunParity();
   await checkPanePinParity();
   await checkWrapperAgentParity();
   await checkFilePointerParity();
+  await checkAttachParity();
   await checkDeliveryParity();
   await checkReportParity();
   await checkReportDeliveryLine();
+  await checkNotifyParity();
   await checkPaneCreateBlockedReadiness();
   await checkPanelResumeCommandExitedReadiness();
   await checkSessionChildPinDefaults();
   await checkPanesCostParity();
   await checkPaneRenameParity();
   await checkLockParity();
+  await checkLoopsParity();
   await checkOverviewReportsAndLocks();
   await checkSessionRuntime();
   checkBoundaryDecoderCollectsEveryIssue();

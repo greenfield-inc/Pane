@@ -1,0 +1,41 @@
+name: Linux ARM64 Build
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/after-pack.js'
+      - 'scripts/test-packaged-native-architecture.js'
+      - 'scripts/test-packaged-headless-remote-setup.sh'
+      - 'main/package.json'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - '.npmrc'
+      - '.github/workflows/build.yml'
+      - '.github/workflows/nightly-release.yml'
+      - '.github/workflows/linux-arm64-build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: node --test scripts/test-packaged-native-architecture.js
+      - name: Build native ARM64 Linux packages
+        run: pnpm run build:linux:arm64
+      - name: Exercise packaged ARM64 headless runtime
+        run: scripts/test-packaged-headless-remote-setup.sh "$(find dist-electron -maxdepth 1 -name '*arm64.AppImage' -print -quit)"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pane-linux-arm64-validation
+          path: |
+            dist-electron/*arm64.deb
+            dist-electron/*arm64.AppImage
+          if-no-files-found: error

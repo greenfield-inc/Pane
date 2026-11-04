@@ -80,6 +80,10 @@ export interface RemoteDaemonClientRecord {
   createdAt: string;
   tokenHash: string;
   lastUsedAt?: string;
+  /** "glasses": a Pane glasses app token, admitted only on the workspace listener with its narrow scope. Absent: a paired client with full access. */
+  kind?: 'glasses';
+  /** Glasses only: the install id of the phone that paired them; pairing again from that phone replaces them. */
+  phoneId?: string;
 }
 
 export interface RemotePaneConnectionProfile {
@@ -211,6 +215,7 @@ export type RemoteMobilePlatform = 'ios' | 'android';
 
 export interface RemoteMobilePushRegistration {
   id: string;
+  /** A paired client's id, or `tailnet:<login>` for the owner's phone registered over Tailscale with no code. */
   clientId: string;
   platform: RemoteMobilePlatform;
   token: string;
@@ -219,6 +224,10 @@ export interface RemoteMobilePushRegistration {
   hostProfileId: string;
   needsInputEnabled: boolean;
   completedEnabled: boolean;
+  /** The app build draws Notify's answer buttons from a data-only Android message (Pane app 1.1+). */
+  notifyButtons?: boolean;
+  /** The APNs endpoint that accepted this token after the key's own environment refused it. */
+  apnsEnvironment?: 'sandbox' | 'production';
   createdAt: string;
   updatedAt: string;
   revokedAt?: string;
@@ -316,6 +325,10 @@ export interface RemotePwaAffordances {
   voiceTranscription: RemotePwaVoiceTranscriptionAffordance;
   /** Hosts older than the PWA's Sessions support omit this. */
   sessionAgents?: RemotePwaSessionAgents;
+  /** The host's experimental Chat flag. Hosts older than the flag omit this. */
+  chatEnabled?: boolean;
+  /** The host's operating system, for its OS logo on the glasses. Older hosts omit this. */
+  os?: 'macOS' | 'Windows' | 'Linux';
 }
 
 export interface RemotePaneConnectionState {
@@ -327,6 +340,73 @@ export interface RemotePaneConnectionState {
   activeBaseUrl: string | null;
   lastError: string | null;
   lastSeenAt: string | null;
+  /** The latest connection checklist, while a connect the user started runs, failed or warns. */
+  check?: RemoteConnectionCheck | null;
+}
+
+/** The stages of connecting to a remote Pane, in checklist order. `tailscale` runs only for codeless hosts. */
+export type RemoteConnectionCheckStage = 'tailscale' | 'reachable' | 'running' | 'signed-in' | 'version' | 'workspace';
+
+export type RemoteConnectionCheckRowStatus = 'waiting' | 'running' | 'passed' | 'failed' | 'warning';
+
+/**
+ * What a row's button does. `run-on-host` asks main to run the row's fixed command on the host over
+ * the user's SSH config (Start it, Update it); `copy-command` copies `command` to run there by hand.
+ */
+export type RemoteConnectionCheckFixKind =
+  | 'run-on-host'
+  | 'copy-command'
+  | 'open-tailscale'
+  | 'download-tailscale'
+  | 'paste-code'
+  | 'enter-password'
+  | 'update-pane';
+
+export interface RemoteConnectionCheckFix {
+  kind: RemoteConnectionCheckFixKind;
+  label: string;
+  /** The exact command a `run-on-host` or `copy-command` fix runs on the host. */
+  command?: string;
+}
+
+export interface RemoteConnectionCheckRow {
+  stage: RemoteConnectionCheckStage;
+  status: RemoteConnectionCheckRowStatus;
+  /** The row's text: the stage name once it passes or while it waits, the problem when it fails or warns. */
+  label: string;
+  /** A short value on the right of a passed row, such as "38 ms" or a version. */
+  metric?: string;
+  /** One more line under a failed or warning row. */
+  detail?: string;
+  fix?: RemoteConnectionCheckFix;
+}
+
+export interface RemoteConnectionCheck {
+  /** Increases with each check run; a fix names the run it belongs to. */
+  id: number;
+  profileId: string;
+  hostLabel: string;
+  /** How this computer reaches the host, for the card's subtitle. */
+  route: 'Tailscale' | 'SSH tunnel' | 'URL';
+  address: string;
+  /** `warning`: connected, but a row warns, so the card waits for "Continue to workspace". */
+  outcome: 'running' | 'failed' | 'warning' | 'passed';
+  rows: RemoteConnectionCheckRow[];
+  /** When this app last heard from the host since it launched; not saved. */
+  lastConnectedAt: string | null;
+  /** The host's Pane version, when this app saw it since it launched; not saved. */
+  hostVersion: string | null;
+}
+
+/** The steps of setting up this computer as a host, in order. */
+export type RemoteHostSetupStep = 'service' | 'port' | 'tailscale' | 'https' | 'code' | 'daemon';
+
+/** Pushed on `remote-daemon:setup-progress` as Set Up Host moves through its steps. */
+export interface RemoteHostSetupProgress {
+  step: RemoteHostSetupStep;
+  status: 'running' | 'passed' | 'failed';
+  /** The error text, for a failed step. */
+  detail?: string;
 }
 
 export interface RemoteInvokeRequest {
@@ -335,6 +415,11 @@ export interface RemoteInvokeRequest {
   token?: string;
   runtimeId?: string;
   clientLabel?: string;
+  /**
+   * Chosen by the client, unique per install. A host that sends `deduplicatesRequestIds` in its
+   * ready event runs a write once per id and answers a repeat with the first answer.
+   */
+  requestId?: string;
 }
 
 export interface RemoteDaemonHeartbeatPayload {
@@ -357,11 +442,13 @@ const remoteDaemonEventEnvelopeSchema = boundary.object({
   timestamp: boundary.string,
 });
 
-export function decodeRemoteHeartbeatPayload<Value>(value: Value): RemoteDaemonHeartbeatPayload {
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- This boundary validates external data with its named schema before use.
+export function decodeRemoteHeartbeatPayload(value: unknown): RemoteDaemonHeartbeatPayload {
   return decodeBoundary(value, remoteHeartbeatPayloadSchema);
 }
 
-export function decodeRemoteDaemonEventEnvelope<Value>(value: Value): RemoteDaemonEventEnvelope {
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- This boundary validates external data with its named schema before use.
+export function decodeRemoteDaemonEventEnvelope(value: unknown): RemoteDaemonEventEnvelope {
   return decodeBoundary(value, remoteDaemonEventEnvelopeSchema);
 }
 
@@ -464,6 +551,8 @@ const remoteClientRecordSchema: BoundarySchema<RemoteDaemonClientRecord> = bound
   createdAt: boundary.nonEmptyString,
   tokenHash: boundary.nonEmptyString,
   lastUsedAt: boundary.optional(boundary.nonEmptyString),
+  kind: boundary.optional(boundary.literal('glasses')),
+  phoneId: boundary.optional(boundary.nonEmptyString),
 });
 const remoteTunnelSchema: BoundarySchema<NonNullable<PaneRemoteConnectionImportPayload['tunnel']>> = boundary.object({
   kind: boundary.enumeration('ssh', 'tailscale', 'manual'),
@@ -504,11 +593,13 @@ const remoteImportSchema = boundary.object({
   tunnel: boundary.optional(remoteTunnelSchema),
 });
 
-export function isRemoteDaemonClientRecord<Value>(value: Value): value is Value & RemoteDaemonClientRecord {
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- This schema-backed type guard validates external records at their boundary.
+export function isRemoteDaemonClientRecord(value: unknown): value is RemoteDaemonClientRecord {
   return matchesSchema(value, remoteClientRecordSchema);
 }
 
-export function isRemotePaneConnectionProfile<Value>(value: Value): value is Value & RemotePaneConnectionProfile {
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- This schema-backed type guard validates external records at their boundary.
+export function isRemotePaneConnectionProfile(value: unknown): value is RemotePaneConnectionProfile {
   return matchesSchema(value, remoteProfileSchema);
 }
 
@@ -556,8 +647,9 @@ export function remoteImportPayloadToProfile(
   return profile;
 }
 
-export function normalizePaneRemoteConnectionImportPayload<Value>(
-  value: Value,
+export function normalizePaneRemoteConnectionImportPayload(
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Connection imports are validated with the named import schema at this boundary.
+  value: unknown,
 ): PaneRemoteConnectionImportPayload {
   const decoded = decodeBoundary(value, remoteImportSchema);
   const baseUrl = normalizeRemoteImportBaseUrl(decoded.baseUrl.trim());
@@ -580,12 +672,14 @@ export function normalizePaneRemoteConnectionImportPayload<Value>(
  * Names the host whose runtime is active: a saved remote profile id, or null for
  * this computer. Per-host state keys off this on both sides of the IPC boundary.
  */
-export function getActiveRemoteHostId<Value>(value: Value): string | null {
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- This boundary normalizes external data with its named schema before use.
+export function getActiveRemoteHostId(value: unknown): string | null {
   const { client } = normalizeRemoteDaemonConfig(value);
   return client.mode === 'remote' ? client.activeProfileId : null;
 }
 
-export function normalizeRemoteDaemonConfig<Value>(value: Value): RemoteDaemonConfig {
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- This boundary validates external data with its named schema before use.
+export function normalizeRemoteDaemonConfig(value: unknown): RemoteDaemonConfig {
   const defaults = createDefaultRemoteDaemonConfig();
   const config = readJsonObject(value);
   if (config === undefined) {
@@ -672,6 +766,8 @@ function normalizeRemoteMobilePushSettings(value: JsonValue | undefined): Remote
     };
     const revokedAt = readOptionalString(raw.revokedAt);
     if (revokedAt) normalized.revokedAt = revokedAt;
+    if (raw.notifyButtons === true) normalized.notifyButtons = true;
+    if (raw.apnsEnvironment === 'sandbox' || raw.apnsEnvironment === 'production') normalized.apnsEnvironment = raw.apnsEnvironment;
     return [normalized];
   });
   const decodedAttentionSequence = decodeOptionalBoundary(settings.attentionSequence, boundary.number);
@@ -839,7 +935,8 @@ function readOptionalString(value: JsonValue | undefined): string | undefined {
   }
 }
 
-function readJsonObject<Value>(value: Value): JsonObject | undefined {
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- This boundary validates external data with its named schema before use.
+function readJsonObject(value: unknown): JsonObject | undefined {
   try {
     return decodeBoundary(value, boundary.jsonObject);
   } catch {
@@ -855,8 +952,9 @@ function readJsonArray(value: JsonValue | undefined): JsonValue[] {
   }
 }
 
-function matchesSchema<Input, Output>(
-  value: Input,
+function matchesSchema<Output>(
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- The supplied schema establishes the input contract at this parsing boundary.
+  value: unknown,
   schema: BoundarySchema<Output>,
 ): boolean {
   try {
@@ -867,7 +965,7 @@ function matchesSchema<Input, Output>(
   }
 }
 
-function base64UrlEncode(input: string): string {
+export function base64UrlEncode(input: string): string {
   const bytes = new TextEncoder().encode(input);
   let binary = '';
   for (const byte of bytes) {
@@ -880,7 +978,7 @@ function base64UrlEncode(input: string): string {
     .replace(/=+$/g, '');
 }
 
-function base64UrlDecode(input: string): string {
+export function base64UrlDecode(input: string): string {
   const normalizedInput = input.replace(/-/g, '+').replace(/_/g, '/');
   const paddingLength = (4 - (normalizedInput.length % 4)) % 4;
   const binary = atob(`${normalizedInput}${'='.repeat(paddingLength)}`);

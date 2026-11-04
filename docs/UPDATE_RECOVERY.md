@@ -3,8 +3,57 @@
 `runpane update` defaults to the running Pane app and the CLI that received the
 command, on the machine where the command runs. A remote host selected in the UI
 does not change that target. Use `--pane-only` or `--cli-only` for one component.
+The Update button in Settings uses the app's built-in updater instead, and does
+not need the prerequisites below; see [Built-in updater](#built-in-updater). When a prerequisite is missing, `runpane update`
+hands off to that built-in updater: the running Pane downloads the latest release,
+quits and installs it, and the command prints `"mode": "in-app"`. The handoff
+skips the checkpoint, snapshot and panel restoration described here, and it
+leaves an npm or pip CLI as it was (`cliUpdated: false`). It returns `"phase": "installing"` once the
+install starts; with `--wait` it returns `"phase": "complete"` only after the relaunched Pane
+reports the new version, and fails with `ERR_UPDATE_IN_APP_TIMEOUT` after 10 minutes. Pinned versions,
+`--pane-path`, `--cli-only` and `--dry-run` still report the refusal.
 Run `runpane update --dry-run --json` first to see the executable, data directory,
 CLI owner and supervisor capability without starting an update.
+When Pane is not running on the machine, for example because a failed update
+left it unable to start, `runpane update` installs the requested release
+(latest by default) instead, like `runpane install`. If even `runpane` fails, see
+[Bundled runpane](RUNPANE_BUNDLED_CLI.md#how-it-works) for its fallback to `node`.
+
+## Built-in updater
+
+Packaged Pane on Windows, Linux and signed macOS installs checks for a new
+release at launch and every 4 hours and downloads it in the background. When
+the download finishes, a **Restart to update** button appears above the sidebar
+footer (a blue refresh icon when the sidebar is collapsed). After 5 minutes with
+no agent working or waiting for you, no run script running and no worktree being
+removed, a toast offers **Tonight**, **Later** or **Restart now**:
+
+- **Restart now** quits Pane the normal way, installs the update and relaunches.
+  The next launch resumes every interrupted agent in every project on its saved
+  conversation, reopens the Pane that was open and skips the Resume dialog. It
+  relaunches each agent with its resume command and types nothing into it. A
+  Pane whose agent cannot resume stays interrupted and the toast says so; the
+  Resume dialog offers it when it belongs to the active project.
+- **Later** hides the toast for 4 hours. The sidebar button stays.
+- **Tonight** restarts between 2:00 and 5:00 local time, once nothing has run for
+  an hour and the keyboard and mouse have been idle for 30 minutes. To cancel,
+  click the sidebar button (now **Restarts tonight**), then **Don't restart
+  tonight**.
+
+Clicking the sidebar button while something runs says what is running and offers
+**Restart anyway**. A macOS install whose signature cannot be verified downloads
+nothing in the background; its button reads **Update available** and opens the
+Software Update dialog. Turning off **Settings → General → Check for updates
+automatically** stops the checks and the downloads, hides the button and
+cancels Tonight.
+
+To test locally, serve a newer build from a generic feed and start a dev build
+with `TEST_UPDATES=true UPDATE_SERVER_URL=<feed url>`. The dev build downloads
+from that feed and **Restart now** relaunches in place instead of installing.
+These test-only variables shorten the timers: `PANE_TEST_UPDATE_IDLE_SECONDS`,
+`PANE_TEST_UPDATE_TONIGHT_IDLE_SECONDS`,
+`PANE_TEST_UPDATE_TONIGHT_INPUT_IDLE_SECONDS` and
+`PANE_TEST_UPDATE_TONIGHT_HOURS` (for example `0-24`).
 
 ## Prerequisites
 
@@ -21,7 +70,7 @@ System package installations on Linux require their package manager. App updates
 require platform signature verification on macOS and Windows. The official
 Windows 2.4.182 installer is unsigned and is refused by this verifier.
 
-Install standalone Node 22 or newer and make it available on PATH to the process
+Install standalone patched Node 22.23.4+ (22.x), 24.22.1+ (24.x), or 26.12.1+ (26.x) and make it available on PATH to the process
 starting the update. The helper copies this runtime before shutdown; Electron
 inside the app being replaced is insufficient. npm must also be available when
 updating a JavaScript CLI. The supported CLI owners are:
@@ -42,6 +91,20 @@ space on each affected volume. Windows can exclusively lock live browser-profile
 files; their sizes are counted before shutdown, and the snapshot must successfully
 read them after clean shutdown before installation is allowed. It stages downloads
 before shutting down Pane.
+
+The snapshot holds Pane's own state, not everything in the data folder: every
+top-level file (config, databases, journals) and the folders Pane keeps state in
+(`PANE_STATE_FOLDERS` in `packages/runpane/src/updateCapacity.ts`). Folders Pane
+rebuilds or doesn't migrate (`bin`, `shell`, `agent-adapters`, `projects` and
+others in `PANE_UNSNAPSHOTTED_FOLDERS`), git checkouts, and folders Pane does
+not know are left out. Preflight lists the last two in `snapshotSkipped`, so a
+dry run shows them; back them up yourself if they matter. A test fails when the
+code writes a top-level folder that is on neither list.
+
+The CLI that requested an update may be answering a remote
+`runpane workspace <machine> exec` through the Pane it is about to stop. The
+helper waits up to 60 seconds for that CLI to exit, and 2 seconds more, before
+stopping Pane, so the reply with the operation `id` arrives.
 A successful dry run checks local prerequisites; it does not download or prove
 that the requested release passes artifact verification.
 
@@ -94,8 +157,9 @@ can still be in progress. `failed` and `needs-attention` return exit 1. Command 
 preflight errors also return nonzero. `--wait` has no overall timeout. Ctrl+C stops
 the waiting caller, not the independent operation; inspect status before retrying.
 There is no supported operation cancellation command. A fresh update runs
-preflight before checking locks. If preflight succeeds and an existing lock is
-found, it returns that operation's status instead of starting another install.
+preflight before checking locks. If preflight succeeds and another operation
+holds the lock, it returns that operation's status instead of starting another
+install.
 During downtime, preflight may fail before reaching the lock. Use `--status`
 (which bypasses preflight), or read the journal directly, to inspect recovery.
 
@@ -136,6 +200,13 @@ Reopening the conversation does not submit the interrupted task again. The agent
 may return to its prompt; review it and decide what to send. Idle, completed and
 approval-blocked work stays stopped. The updater sends no `continue`, prompt,
 queued mutation, or draft input.
+
+A panel the update left stopped starts when you open it, like any stopped panel,
+once the update has ended: it finished, its helper process exited, or the
+computer restarted since the update last made progress. Its agent reopens on its
+saved conversation and nothing is typed into it. While the update is still
+running, opening the panel reports that it is waiting for the update; retry when
+the update finishes.
 
 Before shutdown, the checkpoint saves each panel's prior state, activity, launch
 profile, conversation ID and launch/worktree/Session cwd. Unsubmitted composer
@@ -204,15 +275,19 @@ leave locks and snapshots intact and ask a maintainer to inspect them.
    updater does not automate or validate such a rollback. Get maintainer help
    when compatibility or installer state is uncertain.
 
-A post-shutdown `needs-attention` operation deliberately keeps its locks. There
-is no automated recovery/lock-clear command. After recovery is verified and all
-operation-owned helpers/installers have exited, the installation owner or a
-maintainer can archive the operation and move aside only locks whose `owner.json`
-contains this exact operation ID. Lock directories are listed in
-`preflight.json` as `lockDirectory` and `additionalLockDirectories`. Preserve the
-journal/checkpoint/snapshot; do not delete another operation's locks or infer
-ownership from a reused PID. Incomplete or ambiguous locks require the same
-manual inspection. If recovery of a crashed lock cleanup is itself interrupted,
-its persistent cleanup claim also requires manual inspection; another caller
-will not steal it or report a new update as completed. Logout/reboot continuation
-is not guaranteed.
+An operation releases its locks when it ends `complete` or `failed`, or ends
+`needs-attention` after its `install` step completed (for example, a failed
+health check or panel restoration). The next `runpane update` also reclaims a
+lock left by such an operation. It runs in a new operation directory, so the
+old journal, checkpoint and snapshot stay in place.
+
+A `needs-attention` operation that stopped before or during `install` keeps
+its locks, because an installer child may still be running. A lock owned by an
+operation that has not ended is not reclaimed either. To recover, verify that no
+operation-owned helper or installer is running, then move aside only locks whose
+`owner.json` contains this exact operation ID. Lock directories are listed in
+`preflight.json` as `lockDirectory` and `additionalLockDirectories`. Do not
+infer ownership from a reused PID. If recovery of a crashed lock cleanup is
+itself interrupted, its persistent cleanup claim also requires manual
+inspection; another caller will not steal it or report a new update as
+completed. Logout/reboot continuation is not guaranteed.

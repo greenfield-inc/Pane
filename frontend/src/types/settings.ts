@@ -5,11 +5,13 @@ export type SettingsCategoryId =
   | 'ai-agents'
   | 'usage'
   | 'worktrees-git'
+  | 'notify'
   | 'notifications'
   | 'remote-access'
   | 'integrations'
   | 'shortcuts'
   | 'privacy'
+  | 'import-export'
   | 'advanced';
 
 export type RemoteAccessSubviewId = 'host-setup' | 'advanced-host';
@@ -20,6 +22,8 @@ export type SettingsSettingId =
   | 'send-feedback'
   | 'start-on-login'
   | 'keep-awake'
+  | 'keep-awake-plugged-in'
+  | 'keep-awake-on-battery'
   | 'html-file-open-mode'
   | 'theme'
   | 'appearance-mode'
@@ -36,24 +40,36 @@ export type SettingsSettingId =
   | 'terminal-reference-line-count'
   | 'terminal-shell'
   | 'default-pane-chat-agent'
+  | 'default-agent-interface'
   | 'mcp-registration'
   | 'mcp-toolsets'
+  | 'answer-prompts-from-pane'
   | 'agent-skill'
   | 'agent-context'
   | 'session-defaults'
   | 'claude-executable'
+  | 'session-import'
   | 'commit-footer'
   | 'git-attribution'
   | 'auto-rename-pr'
   | 'worktree-file-sync'
+  | 'notify-enabled'
+  | 'notify-show-outside'
+  | 'notify-position'
+  | 'notify-shortcut'
+  | 'notify-updates-hide-after'
+  | 'notify-sound'
+  | 'notify-show-details'
   | 'notification-permission'
   | 'notification-sound'
   | 'desktop-notifications'
   | 'remote-pane'
+  | 'remote-add-code'
   | 'remote-machines'
   | 'remote-visibility'
   | 'remote-password'
   | 'remote-address'
+  | 'remote-glasses'
   | 'remote-host-setup'
   | 'remote-host-mode'
   | 'remote-advanced-host'
@@ -67,17 +83,22 @@ export type SettingsSettingId =
   | 'terminal-shortcuts'
   | 'analytics'
   | 'browser-data'
+  | 'setup-transfer'
   | 'verbose-logging'
   | 'developer-mode'
   | 'journey-timings'
   | 'pty-host'
   | 'additional-paths'
-  | 'mission-control';
+  | 'mission-control'
+  | 'experimental-chat'
+  | 'notes';
 
 export interface SettingsTarget {
   category: SettingsCategoryId;
   setting?: SettingsSettingId;
   subview?: RemoteAccessSubviewId;
+  /** Remote Access: the Tailscale machine whose password field opens. */
+  machine?: string;
 }
 
 export interface SettingsOpenRequest {
@@ -101,7 +122,8 @@ export const SETTINGS_PREFERENCE_KEYS = {
 
 export type SidebarPaneRowLayout = 'single' | 'two-row';
 type AtTerminalPasteMode = 'raw' | 'embed';
-type AtTerminalLineCount = 100 | 300 | 500 | -1;
+export const AT_TERMINAL_LINE_COUNT_PRESETS = [100, 300, 500, -1] as const;
+type AtTerminalLineCount = typeof AT_TERMINAL_LINE_COUNT_PRESETS[number];
 
 export interface SettingsPreferenceValues {
   autoRenameSessionsToPr: boolean;
@@ -130,9 +152,8 @@ export function parseSettingsPreferences(raw: Record<string, string | null | und
     sidebarPaneRowLayout: normalizeSidebarPaneRowLayout(raw[SETTINGS_PREFERENCE_KEYS.sidebarPaneRowLayout]),
     sidebarAttentionInbox: raw[SETTINGS_PREFERENCE_KEYS.sidebarAttentionInbox] === 'true',
     atTerminalPasteMode: raw[SETTINGS_PREFERENCE_KEYS.atTerminalPasteMode] === 'embed' ? 'embed' : 'raw',
-    atTerminalLineCount: lineCount === 100 || lineCount === 300 || lineCount === 500 || lineCount === -1
-      ? lineCount
-      : 500,
+    atTerminalLineCount: AT_TERMINAL_LINE_COUNT_PRESETS.find(preset => preset === lineCount)
+      ?? DEFAULT_SETTINGS_PREFERENCES.atTerminalLineCount,
   };
 }
 

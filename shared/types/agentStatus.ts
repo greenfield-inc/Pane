@@ -53,4 +53,6 @@ export interface PanelAgentStatusEvent {
   agentType?: string;
   /** On idle: the agent showed its own working signal (spinner, working chrome) since its last idle. */
   workedVisibly?: boolean;
+  /** On blocked: the screen lines of the prompt the agent waits on. */
+  screenLines?: string[];
 }

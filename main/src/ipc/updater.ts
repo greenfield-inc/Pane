@@ -8,10 +8,64 @@ import { commandExecutor } from '../utils/commandExecutor';
 import { getCurrentWorktreeName } from '../utils/worktreeUtils';
 import { getAppDirectory } from '../utils/appDirectory';
 import { getUpdateCapabilities } from '../utils/updateCapabilities';
+import {
+  getRestartToUpdateState,
+  restartToUpdate,
+  setRestartToUpdateTonight,
+  snoozeRestartToUpdate,
+  takeUpdateRestoreResult,
+} from '../services/restartToUpdate/restartToUpdate';
+import type { RestartToUpdateSource } from '../../../shared/types/updater';
+import { paneErrorText, PaneError } from '../../../shared/paneError';
 
-const MAC_UPDATE_COMMAND = 'runpane update --wait';
+export const MAC_UPDATE_COMMAND = 'curl -fsSL https://runpane.com/install.sh | sh';
 
-export function registerUpdaterHandlers(ipcMain: IpcMain, { app, versionChecker }: AppServices): void {
+const RESTART_SOURCES: readonly RestartToUpdateSource[] = ['toast', 'pill', 'tonight', 'runpane'];
+
+export function registerUpdaterHandlers(ipcMain: IpcMain, { app, versionChecker, sessionManager, databaseService, analyticsManager }: AppServices): void {
+  ipcMain.handle('updater:get-restart-state', () => {
+    try {
+      return { success: true, data: getRestartToUpdateState() };
+    } catch (error) {
+      return { success: false, error: error instanceof PaneError ? paneErrorText(error) : 'Failed to read the update state' };
+    }
+  });
+
+  ipcMain.handle('updater:snooze', () => {
+    try {
+      return { success: true, data: snoozeRestartToUpdate() };
+    } catch (error) {
+      return { success: false, error: error instanceof PaneError ? paneErrorText(error) : 'Failed to snooze the update' };
+    }
+  });
+
+  ipcMain.handle('updater:set-tonight', (_event, enabled: boolean) => {
+    try {
+      return { success: true, data: setRestartToUpdateTonight(enabled === true) };
+    } catch (error) {
+      return { success: false, error: error instanceof PaneError ? paneErrorText(error) : 'Failed to schedule the update' };
+    }
+  });
+
+  ipcMain.handle('updater:restart-to-update', (_event, source: RestartToUpdateSource) => {
+    try {
+      restartToUpdate(RESTART_SOURCES.includes(source) ? source : 'pill');
+      return { success: true };
+    } catch (error) {
+      console.error('Failed to restart to update:', error);
+      return { success: false, error: error instanceof PaneError ? paneErrorText(error) : 'Failed to restart to update' };
+    }
+  });
+
+  ipcMain.handle('updater:take-restore-result', async () => {
+    try {
+      return { success: true, data: await takeUpdateRestoreResult({ sessionManager, databaseService, analyticsManager }) };
+    } catch (error) {
+      console.error('Failed to restore after the update restart:', error);
+      return { success: false, error: 'Failed to restore after the update restart' };
+    }
+  });
+
   ipcMain.handle('updater:get-capabilities', async () => ({
     success: true,
     data: await getUpdateCapabilities({
@@ -198,24 +252,19 @@ export function registerUpdaterHandlers(ipcMain: IpcMain, { app, versionChecker 
     }
   });
 
-  ipcMain.handle('updater:install-update', async () => {
+  ipcMain.handle('updater:install-update', () => {
     try {
       if (!app.isPackaged && !process.env.TEST_UPDATES) {
         return { success: false, error: 'Auto-update is only available in packaged apps' };
       }
 
-      getAutoUpdater().autoInstallOnAppQuit = false;
-      const paneDir = getAppDirectory();
-      const engine = path.join(paneDir, 'bin', 'runpane.cjs');
-      const output = await new Promise<string>((resolve, reject) => {
-        execFile(process.execPath, [engine, 'update', '--pane-dir', paneDir, '--json'], {
-          env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, encoding: 'utf8', timeout: 60_000,
-        }, (error, stdout, stderr) => error ? reject(new Error(stderr.trim() || error.message)) : resolve(stdout));
-      });
-      return { success: true, message: 'Independent update started. Pane will restart after staging and checkpointing.', data: JSON.parse(output) };
+      // Quit and install the update
+      getAutoUpdater().quitAndInstall(false, true);
+
+      return { success: true, message: 'Installing update...' };
     } catch (error) {
       console.error('Failed to install update:', error);
-      return { success: false, error: error instanceof Error ? error.message : 'Failed to start the independent update' };
+      return { success: false, error: 'Failed to install update' };
     }
   });
 }

@@ -8,11 +8,13 @@ import { SettingRow, SettingsPage } from '../SettingRow';
 import { ImmediateToggle, SegmentedControl } from '../SettingsControls';
 import type { SettingsPersistence } from '../useSettingsPersistence';
 import { API } from '../../../utils/api';
+import { isChatEnabled } from '../../../stores/configStore';
 import { PANE_CHAT_AGENT_LABELS, type PaneChatAgent } from '../../../../../shared/types/paneChat';
 import { SessionLaunchFields } from '../../SessionLaunchFields';
 import { DEFAULT_SESSION_PROFILE } from '../../../../../shared/types/sessionProfile';
 import { visibleAgentPresets } from '../../../utils/agentPresets';
 import type { AgentLaunchPresetId } from '../../../../../shared/constants/agentLaunchPresets';
+import { SessionImportSettingsRow } from '../../sessionImport/SessionImportSettingsRow';
 
 function isPaneChatAgent(id: AgentLaunchPresetId): id is PaneChatAgent {
   return id === 'claude' || id === 'codex' || id === 'cursor' || id === 'opencode';
@@ -59,6 +61,10 @@ export function AIAgentsSettings({ persistence, onDirtyChange }: AIAgentsSetting
   return (
     <SettingsPage title="AI & Agents" description="Application-wide defaults for Sessions and coding-agent integrations.">
       <SettingsSection title="Agent defaults">
+        {isChatEnabled(config) && <SettingRow settingId="default-agent-interface" label="Default agent interface" description="Choose the interface for new agent tabs. Switching a tab also updates this default; existing tabs keep their choice. Pane sets up required adapters automatically on the workspace host." saveState={persistence.saveStates['default-agent-interface']}>
+          <SegmentedControl<'terminal' | 'chat'> label="Default agent interface" value={config.defaultAgentInterface ?? 'terminal'} options={[{ id: 'terminal', label: 'Terminal' }, { id: 'chat', label: 'Chat' }]} onChange={value => void persistence.saveConfig('default-agent-interface', { defaultAgentInterface: value })} />
+        </SettingRow>}
+
         <SettingRow
           settingId="default-pane-chat-agent"
           label="Default Sessions agent"
@@ -88,7 +94,7 @@ export function AIAgentsSettings({ persistence, onDirtyChange }: AIAgentsSetting
         <SettingRow
           settingId="mcp-toolsets"
           label="Pane tools to register"
-          description="Core covers the common jobs: start an agent on a task, check on it, send it a follow-up, git status, docs, and links. All adds every Pane command, which can make smaller models pick tools less accurately."
+          description="Core covers the common jobs: start an agent on a task, check on it, send it a follow-up, git status, docs, links, and loops. All adds every Pane command, which can make smaller models pick tools less accurately."
           saveState={persistence.saveStates['mcp-toolsets']}
         >
           <SegmentedControl<McpToolsetChoice>
@@ -96,6 +102,18 @@ export function AIAgentsSettings({ persistence, onDirtyChange }: AIAgentsSetting
             value={config.agentContext?.mcpToolsets?.includes('all') ? 'all' : 'core'}
             options={mcpToolsetOptions}
             onChange={(value) => void persistence.saveConfig('mcp-toolsets', { agentContext: { mcpToolsets: [value] } })}
+          />
+        </SettingRow>
+        <SettingRow
+          settingId="answer-prompts-from-pane"
+          label="Answer prompts from Pane"
+          description="Claude tabs Pane starts also ask their permission and plan prompts in Notify and on your phone, through hooks Pane adds to each launch. The terminal still asks; the first answer wins. Turning it off takes effect at once; tabs started while it was off pick it up when they restart."
+          saveState={persistence.saveStates['answer-prompts-from-pane']}
+        >
+          <ImmediateToggle
+            label="Answer prompts from Pane"
+            value={config.answerPromptsFromPane !== false}
+            onSave={(value) => persistence.saveConfig('answer-prompts-from-pane', { answerPromptsFromPane: value })}
           />
         </SettingRow>
         <SettingRow
@@ -113,7 +131,7 @@ export function AIAgentsSettings({ persistence, onDirtyChange }: AIAgentsSetting
         <SettingRow
           settingId="agent-context"
           label="Publish Pane instructions to AGENTS.md"
-          description="Edits repository files: adds Pane instructions to AGENTS.md and exports scoped Notes to AGENTS.md and CLAUDE.md in their workspaces. These edits can appear in Git changes. Off by default; turning it off removes Pane's managed sections. Notes remain available through native Pane terminals."
+          description="Edits repository files: adds Pane instructions to AGENTS.md and, with experimental Notes on, exports scoped Notes to AGENTS.md and CLAUDE.md in their workspaces. These edits can appear in Git changes. Off by default; turning it off removes Pane's managed sections. With experimental Notes on, Notes remain available through native Pane terminals."
           saveState={persistence.saveStates['agent-context']}
         >
           <ImmediateToggle
@@ -122,6 +140,10 @@ export function AIAgentsSettings({ persistence, onDirtyChange }: AIAgentsSetting
             onSave={(value) => persistence.saveConfig('agent-context', { agentContext: { managedAgentsMd: value } })}
           />
         </SettingRow>
+      </SettingsSection>
+
+      <SettingsSection title="Your other agent tools">
+        <SessionImportSettingsRow />
       </SettingsSection>
 
       <SettingsSection title="Session defaults">

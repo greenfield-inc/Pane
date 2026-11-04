@@ -5,7 +5,7 @@ import type { ListeningPortsSnapshot } from '../../../../shared/types/listeningP
 import { PortsList } from '../../components/panels/browser/PortsList';
 import { normalizeUrl } from '../../components/panels/browser/browserUrl';
 import { cn } from '../../utils/cn';
-import { phonePage, type PhonePage } from '../utils/phonePage';
+import { phonePage, type PhonePage } from '../../../../shared/utils/phonePage';
 import { isNativeMobile, openNativeExternalUrl } from '../runtime/nativeMobile';
 
 interface RemoteBrowserPanelProps {
@@ -40,7 +40,7 @@ export function RemoteBrowserPanel({ panel, ports, onNavigate, onRequestAddress,
     try {
       page = phonePage(url, ports, panel.id);
     } catch {
-      page = { kind: 'unavailable', address: url, host: ports?.host ?? 'the host', reason: 'This address is not a valid URL.' };
+      page = { kind: 'unavailable', address: url, host: ports?.host ?? 'the host', reason: 'This address is not a valid URL.', cause: 'invalid' };
     }
   }
   const src = page?.kind === 'frame' ? page.src : null;

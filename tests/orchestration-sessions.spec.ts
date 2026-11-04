@@ -2628,7 +2628,7 @@ test('a tab dragged over a tiled neighbour Session is refused there and moves no
   await expect(tiles).toHaveCount(2);
 });
 
-test('New offers Session and Pane, keeps one dialog, and restores keyboard focus', async ({ page }) => {
+test('New offers Session and Pane in one dialog and restores keyboard focus', async ({ page }) => {
   await installSessionsFixture(page, []);
   await page.goto('/');
   await dismissStartupDialogs(page);
@@ -2636,20 +2636,16 @@ test('New offers Session and Pane, keeps one dialog, and restores keyboard focus
   await newButton.click();
   const dialog = page.getByRole('dialog');
   await expect(dialog).toHaveCount(1);
-  await dialog.getByRole('button', { name: 'Cancel', exact: true }).focus();
-  await page.keyboard.press('Tab');
-  await expect(dialog.getByRole('button', { name: 'Close modal', exact: true })).toBeFocused();
-  await page.keyboard.press('Shift+Tab');
-  await expect(dialog.getByRole('button', { name: 'Cancel', exact: true })).toBeFocused();
-  await expect(dialog.getByText('An agent that directs work across Panes.', { exact: true })).toBeVisible();
-  await expect(dialog.getByText('A workspace for one piece of work.', { exact: true })).toBeVisible();
-  await dialog.getByRole('button', { name: 'Create Session', exact: false }).click();
+  await expect(dialog.getByRole('radio', { name: 'Session', exact: true })).toBeChecked();
   await expect(dialog.getByLabel('Session name (optional)')).toBeFocused();
   await expect(dialog.getByLabel('Run agent in')).toHaveCount(0);
-  await dialog.getByRole('button', { name: 'Back', exact: true }).click();
-  await expect(dialog.getByRole('button', { name: 'Create Session', exact: false })).toBeFocused();
-  await dialog.getByRole('button', { name: 'Create Pane', exact: false }).click();
+  // One machine: no picker, and the Create button names no machine.
+  await expect(dialog.getByRole('radiogroup', { name: 'Machine' })).toHaveCount(0);
+  await expect(dialog.getByRole('button', { name: 'Create Session', exact: true })).toBeVisible();
+  await dialog.getByRole('radio', { name: 'Pane', exact: true }).click();
   await expect(dialog.getByLabel('Repository', { exact: true })).toHaveValue('1');
+  await dialog.getByRole('radio', { name: 'Session', exact: true }).click();
+  await expect(dialog.getByLabel('Session name (optional)')).toBeVisible();
   await expect(page.getByRole('dialog')).toHaveCount(1);
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
@@ -2663,7 +2659,6 @@ test('New creates a Session with its selected WSL runtime and agent', async ({ p
   await page.goto('/');
   await dismissStartupDialogs(page);
   await page.getByRole('button', { name: 'New', exact: true }).click();
-  await page.getByRole('button', { name: 'Create Session An agent' }).click();
   await page.getByLabel('Run agent in').selectOption('Ubuntu-24.04');
   await page.getByTestId('create-session-agent-cursor').click();
   await page.getByLabel('Session name (optional)').fill('Coordinate new work');
@@ -2688,7 +2683,7 @@ test('New defaults to the active repository and creates a Pane from the changed 
   await page.goto('/');
   await dismissStartupDialogs(page);
   await page.getByRole('button', { name: 'New', exact: true }).click();
-  await page.getByRole('button', { name: 'Create Pane A workspace' }).click();
+  await page.getByRole('radio', { name: 'Pane', exact: true }).click();
   await expect(page.getByLabel('Repository', { exact: true })).toHaveValue('2');
   await expect(page.getByRole('combobox', { name: 'Base Branch' })).toHaveValue('origin/main');
   await page.getByRole('button', { name: 'Advanced', exact: true }).click();
@@ -2711,11 +2706,11 @@ test('New explains the missing repository and remains available from the compact
   await page.getByRole('button', { name: 'Collapse sidebar', exact: true }).click();
   const newButton = page.getByRole('button', { name: 'New', exact: true });
   await newButton.click();
-  await page.getByRole('button', { name: 'Create Pane A workspace' }).click();
+  await page.getByRole('radio', { name: 'Pane', exact: true }).click();
   await expect(page.getByText('A Pane needs a repository. Add one with the + beside Projects.')).toBeVisible();
   await expect(page.getByRole('button', { name: /^Create/ })).toHaveCount(0);
-  await page.getByRole('button', { name: 'Back', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Create Pane A workspace' })).toBeFocused();
+  await page.getByRole('radio', { name: 'Session', exact: true }).click();
+  await expect(page.getByLabel('Session name (optional)')).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(newButton).toBeFocused();
 });
@@ -2725,7 +2720,6 @@ test('New can show Session settings when an older host has no Session API', asyn
   await page.goto('/');
   await dismissStartupDialogs(page);
   await page.getByRole('button', { name: 'New', exact: true }).click();
-  await page.getByRole('button', { name: 'Create Session An agent' }).click();
   await expect(page.getByLabel('Session name (optional)')).toBeVisible();
   await expect(page.getByLabel('Run agent in')).toHaveCount(0);
   await page.getByRole('button', { name: 'Create Session', exact: true }).click();
@@ -2743,17 +2737,16 @@ test('New keeps a pending Session creation in its dialog and enables retry after
   await page.goto('/');
   await dismissStartupDialogs(page);
   await page.getByRole('button', { name: 'New', exact: true }).click();
-  await page.getByRole('button', { name: 'Create Session An agent' }).click();
   const dialog = page.getByRole('dialog');
   await dialog.getByRole('button', { name: 'Create Session', exact: true }).click();
-  await expect(dialog.getByRole('button', { name: 'Back', exact: true })).toBeDisabled();
+  await expect(dialog.getByRole('radio', { name: 'Pane', exact: true })).toBeDisabled();
   await expect(dialog.getByRole('button', { name: 'Cancel', exact: true })).toBeDisabled();
   await dialog.getByRole('button', { name: 'Close modal', exact: true }).click();
   await page.keyboard.press('Escape');
   await expect(dialog).toBeVisible();
   await page.evaluate(() => document.dispatchEvent(new Event('test-release-create')));
   await expect(dialog.getByRole('alert')).toHaveText('Creation unavailable; retry.');
-  await expect(dialog.getByRole('button', { name: 'Back', exact: true })).toBeEnabled();
+  await expect(dialog.getByRole('radio', { name: 'Pane', exact: true })).toBeEnabled();
   await expect(dialog.getByRole('button', { name: 'Cancel', exact: true })).toBeEnabled();
 });
 
@@ -2765,7 +2758,7 @@ test('New preserves multiple-Pane options while switching repositories', async (
   await page.goto('/');
   await dismissStartupDialogs(page);
   await page.getByRole('button', { name: 'New', exact: true }).click();
-  await page.getByRole('button', { name: 'Create Pane A workspace' }).click();
+  await page.getByRole('radio', { name: 'Pane', exact: true }).click();
   await page.getByRole('button', { name: 'Advanced', exact: true }).click();
   await page.getByRole('button', { name: 'Create multiple panes', exact: true }).click();
   await page.locator('#count').fill('3');
@@ -3384,4 +3377,118 @@ test('Move to host… with Tailscale signed out passes on the reason and the fix
   const dialog = page.getByRole('dialog', { name: 'Move Session to another host' });
   await expect(dialog).toContainText('Tailscale is signed out. Sign in to Tailscale, then try again.');
   await expect(dialog.getByRole('button', { name: 'Move Session' })).toBeDisabled();
+});
+
+/** How the first create fails: before anything is saved, or after main saved the Session but couldn't open it. */
+type CreateFailure = 'before-save' | 'after-save';
+type PaneChatOfferRecord = { preferences: string[]; creates: Array<{ name: string; openingPrompt?: string; launchCommand?: string }>; firstCreateFails: CreateFailure | null };
+declare global {
+  interface Window {
+    __paneChatOffer?: PaneChatOfferRecord;
+  }
+}
+
+async function installPaneChatOfferFixture(page: Page, firstCreateFails: CreateFailure | null = 'before-save', openingPromptAtLaunch = true): Promise<void> {
+  await installSessionsFixture(page, [], [paneFixture('pane-copy', 'checkout-copy'), paneFixture('pane-timeouts', 'api-timeouts')]);
+  await page.addInitScript(({ failure, promptAtLaunch }: { failure: CreateFailure | null; promptAtLaunch: boolean }) => {
+    const api = window.electronAPI;
+    const record: PaneChatOfferRecord = { preferences: [], creates: [], firstCreateFails: failure };
+    window.__paneChatOffer = record;
+    api.paneChat.introOffer = async () => ({ success: true, data: { eligible: true, openingPromptAtLaunch: promptAtLaunch } });
+    const setPreference = api.preferences.set;
+    api.preferences.set = async (key: string, value: string) => {
+      record.preferences.push(`${key}=${value}`);
+      return setPreference(key, value);
+    };
+    const create = api.orchestrationSessions.create;
+    api.orchestrationSessions.create = async input => {
+      record.creates.push({ name: input.name, openingPrompt: input.openingPrompt, launchCommand: input.launchCommand });
+      const failure = record.firstCreateFails;
+      record.firstCreateFails = null;
+      if (failure === null) return create(input);
+      if (failure === 'after-save') await create(input);
+      return { success: false, error: failure === 'after-save' ? 'Session saved but could not be opened' : 'Session storage is busy' };
+    };
+  }, { failure: firstCreateFails, promptAtLaunch: openingPromptAtLaunch });
+  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await dismissStartupDialogs(page);
+  await page.getByRole('button', { name: 'Expand project Pane fixtures', exact: true }).click();
+}
+
+function paneChatOfferRecord(page: Page) {
+  return page.evaluate(() => {
+    if (!window.__paneChatOffer) throw new Error('The Pane Chat offer fixture is not installed');
+    return window.__paneChatOffer;
+  });
+}
+
+test('the Pane Chat offer shows over a Pane, retries a failed start, and follows the user into the new Session', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await installPaneChatOfferFixture(page);
+  const offer = page.getByRole('region', { name: 'Pane Chat offer' });
+  // Never on Home.
+  await expect(page.getByRole('button', { name: 'checkout-copy', exact: true })).toBeVisible();
+  await expect(offer).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'checkout-copy', exact: true }).click();
+  await expect(offer).toBeVisible();
+  await expect(offer).toContainText('NewLet an agent run your PanesPane Chat starts Panes, sends tasks and checks on them for you.');
+  await expect.poll(async () => (await paneChatOfferRecord(page)).preferences).toContain('pane_chat_intro_offer_shown=true');
+
+  await offer.getByRole('button', { name: 'Try it', exact: true }).click();
+  await expect(offer.getByRole('alert')).toHaveText('Pane Chat could not start: Session storage is busy. No Session was opened. Try again.');
+  await offer.getByRole('button', { name: 'Try it', exact: true }).click();
+
+  await expect(page.getByRole('heading', { name: 'Pane fixtures tasks', exact: true })).toBeAttached({ timeout: 10_000 });
+  await expect(offer).toBeVisible();
+  await expect(offer.getByRole('button', { name: 'Try it' })).toHaveCount(0);
+  const creates = (await paneChatOfferRecord(page)).creates;
+  expect(creates.map(input => input.name)).toEqual(['Pane fixtures tasks', 'Pane fixtures tasks']);
+  expect(creates[1].openingPrompt).toMatch(/^Pane sent this once, to introduce Pane Chat .* repository Pane fixtures \(\/tmp\/pane-fixtures\)\./);
+
+  await offer.getByRole('button', { name: 'Close', exact: true }).click();
+  await expect(offer).toHaveCount(0);
+});
+
+test('the Pane Chat offer opens a Session that was saved before its tab failed, instead of creating it again', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await installPaneChatOfferFixture(page, 'after-save');
+  const offer = page.getByRole('region', { name: 'Pane Chat offer' });
+  await page.getByRole('button', { name: 'checkout-copy', exact: true }).click();
+  await offer.getByRole('button', { name: 'Try it', exact: true }).click();
+
+  await expect(page.getByRole('heading', { name: 'Pane fixtures tasks', exact: true })).toBeAttached({ timeout: 10_000 });
+  await expect(offer.getByRole('button', { name: 'Try it' })).toHaveCount(0);
+  expect((await paneChatOfferRecord(page)).creates).toEqual([
+    { name: 'Pane fixtures tasks', launchCommand: '', openingPrompt: expect.stringMatching(/^Pane sent this once/) },
+  ]);
+});
+
+test('where the launch shell can\'t carry the opening prompt, Try it offers it to paste instead', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await installPaneChatOfferFixture(page, null, false);
+  const offer = page.getByRole('region', { name: 'Pane Chat offer' });
+  await page.getByRole('button', { name: 'checkout-copy', exact: true }).click();
+  await offer.getByRole('button', { name: 'Try it', exact: true }).click();
+
+  await expect(page.getByRole('heading', { name: 'Pane fixtures tasks', exact: true })).toBeAttached({ timeout: 10_000 });
+  expect((await paneChatOfferRecord(page)).creates).toEqual([{ name: 'Pane fixtures tasks', launchCommand: '', openingPrompt: undefined }]);
+  await expect(offer).toContainText('Paste its first message into Pane Chat to start.');
+  await offer.getByRole('button', { name: 'Copy first message', exact: true }).click();
+  await expect(offer.getByRole('button', { name: 'Copied', exact: true })).toBeVisible();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toMatch(/^Pane sent this once, to introduce Pane Chat .* repository Pane fixtures \(\/tmp\/pane-fixtures\)\./);
+});
+
+test('Not now hides the Pane Chat offer for the rest of the run', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await installPaneChatOfferFixture(page);
+  const offer = page.getByRole('region', { name: 'Pane Chat offer' });
+  await page.getByRole('button', { name: 'checkout-copy', exact: true }).click();
+  await offer.getByRole('button', { name: 'Not now', exact: true }).click();
+  await expect(offer).toHaveCount(0);
+  await page.getByRole('button', { name: 'api-timeouts', exact: true }).click();
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await expect(offer).toHaveCount(0);
+  expect((await paneChatOfferRecord(page)).creates).toEqual([]);
 });

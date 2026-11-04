@@ -227,7 +227,7 @@ export const useOrchestrationSessionStore = create<OrchestrationSessionState>((s
     const view = ensureSuccess(await API.orchestrationSessions.create(input), 'Failed to create Session');
     if (generation !== operationGeneration) return view;
     set((state) => ({
-      sessions: [...state.sessions.filter(session => session.id !== view.session.id), view.session],
+      sessions: [view.session, ...state.sessions.filter(session => session.id !== view.session.id)],
       selectedSessionId: view.session.id,
       availability: 'ready',
       error: null,

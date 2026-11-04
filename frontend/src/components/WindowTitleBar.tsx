@@ -3,6 +3,7 @@ import { isArchivedOrchestrationSession, useOrchestrationSessionStore } from '..
 import { useNavigationStore } from '../stores/navigationStore';
 import { useSessionStore } from '../stores/sessionStore';
 import { useTitleBarSlotStore } from '../stores/titleBarSlotStore';
+import { isAllMachinesOn, useAllMachinesStore } from '../stores/allMachinesStore';
 import type { Project } from '../types/project';
 import { APP_WINDOW_TITLE, formatPaneTitle, resolvePaneStatusPills, resolvePaneTitle } from '../utils/paneTitle';
 import { isMac } from '../utils/platformUtils';
@@ -123,6 +124,12 @@ export function WindowTitleBar({ projects, sidebarWidth, sidebarCollapsed, contr
   const title = activeView === 'sessions' ? resolvePaneTitle(activeSession, projects) ?? (activeSessionId ? { project: 'Pane', pane: activeSession?.name ?? activeSessionId } : null)
     : activeView === 'pane-chat' && orchestrationName ? { project: 'Session', pane: orchestrationName } : null;
   const windowTitle = formatPaneTitle(title);
+  // In All machines every row comes from some machine, so the header names the one this is on.
+  const allMachines = useAllMachinesStore(isAllMachinesOn);
+  const activeMachineName = useAllMachinesStore(state => state.entries.find(entry => entry.active)?.name ?? null);
+  const offlineNotice = useAllMachinesStore(state => state.offlineNotice);
+  const offlineMachineName = useAllMachinesStore(state => state.entries.find(entry => entry.id === state.offlineNotice?.machineId)?.name ?? null);
+  const machineName = offlineNotice ? offlineMachineName : allMachines && title ? activeMachineName : null;
 
   // Runs before the platform gate below: naming the window is the part of this
   // that a native-framed Windows or Linux window still uses.
@@ -174,7 +181,13 @@ export function WindowTitleBar({ projects, sidebarWidth, sidebarCollapsed, contr
         style={{ ...NO_DRAG, ...(isMac() ? MAC_CONTROLS_RIGHT : OVERLAY_CONTROLS_RIGHT) }}
         data-testid="window-title-bar-trailing-controls"
       />
-      {title && (
+      {offlineNotice && (
+        <div className="relative flex min-w-0 items-center gap-1.5 text-xs" data-testid="window-title-bar-label">
+          <span className="truncate font-medium text-text-secondary">{offlineNotice.title}</span>
+          <span className="flex-shrink-0 text-text-tertiary">on {offlineMachineName}</span>
+        </div>
+      )}
+      {title && !offlineNotice && (
         <div className="relative flex min-w-0 items-center">
           <div
             className="flex min-w-0 items-center gap-1.5 text-xs"
@@ -207,6 +220,7 @@ export function WindowTitleBar({ projects, sidebarWidth, sidebarCollapsed, contr
                 </span>
               </>
             )}
+            {machineName && <span className="flex-shrink-0 text-text-tertiary" data-testid="window-title-bar-machine">on {machineName}</span>}
           </div>
           {pills.length > 0 && (
             // Anchored past the end of the title rather than laid out after it, so a

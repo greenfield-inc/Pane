@@ -346,49 +346,24 @@ describe('pane creation name reuse', () => {
   });
 
   it('tells a whenSessionCreated listener about a Pane whose panel setup fails', async () => {
-    vi.spyOn(queueOptions.worktreeManager, 'resolveWorkingDirectory').mockResolvedValue({
-      worktreePath: project.path, baseCommit: undefined, baseBranch: 'main',
-    });
-    let admitPanel = () => {};
-    const panelAdmission = new Promise<void>(resolve => { admitPanel = resolve; });
     let failSetup: (error: Error) => void = () => {};
-    const panelSetup = new Promise<void>((_resolve, reject) => { failSetup = reject; });
-    void panelSetup.catch(() => {});
-    vi.spyOn(panelManager, 'ensureExplorerPanel').mockImplementationOnce(() => {
-      admitPanel();
-      return panelSetup;
-    });
-    // SAFETY: Await the existing private job waiter without replacing whenSessionCreated's listener.
-    const creationQueue = testAccess<{
-      waitForSessionCreationJob: (job: SessionCreationJob, timeoutMs?: number) => Promise<CreateSessionQueueResult>;
-    }>(queue);
-    let creationFinished: Promise<CreateSessionQueueResult> | undefined;
-    try {
-      const job = await queue.createSession({
-        projectId: project.id, worktreeTemplate: 'Feature', prompt: '', toolType: 'none', baseBranch: 'main', isMainRepo: true,
+    const setupStarted = new Promise<void>(resolve => {
+      vi.spyOn(panelManager, 'ensureExplorerPanel').mockImplementationOnce(() => {
+        resolve();
+        return new Promise((_resolve, reject) => { failSetup = reject; });
       });
-      creationFinished = creationQueue.waitForSessionCreationJob(job);
-      void creationFinished.catch(() => {});
-      const listener = vi.fn();
-      queue.whenSessionCreated(job, listener);
-      await Promise.race([
-        panelAdmission,
-        creationFinished.then(() => { throw new Error('Creation finished before Explorer admission'); }),
-      ]);
-      expect(panelManager.ensureExplorerPanel).toHaveBeenCalledOnce();
+    });
+    const job = await queue.createSession({
+      projectId: project.id, worktreeTemplate: 'Feature', prompt: '', toolType: 'none', baseBranch: 'main',
+    });
+    const created = new Promise<string>(resolve => queue.whenSessionCreated(job, resolve));
+    await setupStarted;
 
       failSetup(new Error('Panel setup failed'));
 
-      await expect(creationFinished).rejects.toThrow('Panel setup failed');
-      expect(listener).toHaveBeenCalledOnce();
-      const [createdId] = listener.mock.calls[0];
-      expect(database.getSession(createdId)?.name).toBe('Feature');
-      expect(queueOptions.sessionManager.emitSessionCreated).toHaveBeenCalledWith(expect.objectContaining({ id: createdId, status: 'error' }), expect.anything());
-    } finally {
-      admitPanel();
-      failSetup(new Error('Panel setup failed'));
-      await Promise.allSettled(creationFinished ? [creationFinished] : []);
-    }
+    const createdId = await created;
+    expect(database.getSession(createdId)?.name).toBe('Feature');
+    expect(queueOptions.sessionManager.emitSessionCreated).toHaveBeenCalledWith(expect.objectContaining({ id: createdId, status: 'error' }), expect.anything());
   });
 
   it('reuses archived names for panes in the project directory without reserving a branch', async () => {

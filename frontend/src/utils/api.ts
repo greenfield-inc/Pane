@@ -4,6 +4,7 @@ import type { Project } from '../types/project';
 import type { UpdateConfigRequest } from '../types/config';
 import type { SessionCreationPreferences } from '../stores/sessionPreferencesStore';
 import type { PaneChatAgent, PaneChatState } from '../../../shared/types/paneChat';
+import type { LoopInput } from '../../../shared/types/loop';
 import { startOwnPaneCreation } from './ownPaneCreations';
 import type { MissionControlSnapshotRequest } from '../../../shared/types/missionControl';
 import type {
@@ -25,6 +26,8 @@ import type {
   RemoteDaemonHostRuntimeState,
   RemoteHostSetupRequest,
   RemotePaneConnectionState,
+  RemoteConnectionCheckStage,
+  RemoteHostSetupProgress,
   RemotePaneConnectionProfile,
 } from '../../../shared/types/remoteDaemon';
 import type { WorkspaceAccessUpdate } from '../../../shared/types/workspaceAccess';
@@ -33,6 +36,7 @@ import type {
 } from '../../../shared/types/daemon';
 import type { ProjectDashboardSessionUpdateEvent, ProjectDashboardUpdateEvent } from '../types/projectDashboard';
 import type { DiffScope, FileDiffRequest } from '../../../shared/types/gitDiff';
+import type { SetupFile, SetupSectionId } from '../../../shared/types/setupTransfer';
 
 // Type for IPC response
 // oxlint-disable-next-line typescript/no-explicit-any -- Generic type parameter default for flexible API responses
@@ -70,6 +74,18 @@ const isElectron = () => {
 
 // Wrapper class for API calls that provides error handling and consistent interface
 export class API {
+  static preferences = {
+    async get(key: string): Promise<string | null> {
+      return window.electronAPI.preferences.get(key);
+    },
+    async getAll(): Promise<Record<string, string>> {
+      return window.electronAPI.preferences.getAll();
+    },
+    async set(key: string, value: string): Promise<void> {
+      return window.electronAPI.preferences.set(key, value);
+    },
+  };
+
   static paneChat = {
     async getOrCreate(): Promise<IPCResponse<PaneChatState<Session>>> {
       if (!isElectron()) throw new Error('Electron API not available');
@@ -78,6 +94,10 @@ export class API {
     async setAgent(agent: PaneChatAgent): Promise<IPCResponse<PaneChatState<Session>>> {
       if (!isElectron()) throw new Error('Electron API not available');
       return window.electronAPI.paneChat.setAgent(agent);
+    },
+    async introOffer(): Promise<IPCResponse<{ eligible: boolean; openingPromptAtLaunch: boolean }>> {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.paneChat.introOffer();
     },
   };
 
@@ -136,6 +156,26 @@ export class API {
     },
   };
 
+  // Settings › Import & Export
+  static setup = {
+    async summary() {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.setup.summary();
+    },
+    async export(sections: SetupSectionId[]) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.setup.export(sections);
+    },
+    async chooseImport() {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.setup.chooseImport();
+    },
+    async preview(file: SetupFile, fileName: string) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.setup.preview(file, fileName);
+    },
+  };
+
   // Token usage, cost and rate limits
   static usage = {
     /** Totals, time series, per-model breakdown and rolling-window state. */
@@ -151,6 +191,22 @@ export class API {
     async rescan() {
       if (!isElectron()) throw new Error('Electron API not available');
       return window.electronAPI.usage.rescan();
+    },
+  };
+
+  // Bring sessions from other agent tools into Pane
+  static sessionImport = {
+    async scan() {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.sessionImport.scan();
+    },
+    async run(keys: string[]) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.sessionImport.run(keys);
+    },
+    async progress() {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.sessionImport.progress();
     },
   };
 
@@ -178,6 +234,35 @@ export class API {
     },
   };
 
+  // Loops (scheduled tasks)
+  static loops = {
+    async list() {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.loops.list();
+    },
+    async save(input: LoopInput) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.loops.save(input);
+    },
+    async remove(id: string) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.loops.delete(id);
+    },
+    async setEnabled(id: string, enabled: boolean) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.loops.setEnabled(id, enabled);
+    },
+    /** Start one run now; the schedule is unchanged. */
+    async runNow(id: string) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.loops.runNow(id);
+    },
+    /** The cron as a sentence and its next run, or why it is rejected. */
+    async preview(cron: string) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.loops.preview(cron);
+    },
+  };
   // Mission Control
   static missionControl = {
     /** Every agent pane across all sessions and projects. */
@@ -719,9 +804,44 @@ export class API {
       return window.electronAPI.remoteDaemon.listTailnetMachines();
     },
 
+    async getGlasses() {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.remoteDaemon.getGlasses();
+    },
+
+    async revokeGlasses(id: string) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.remoteDaemon.revokeGlasses(id);
+    },
+
+    async revokeGlassesEverywhere(phoneId: string) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.remoteDaemon.revokeGlassesEverywhere(phoneId);
+    },
+
+    async setGlassesOrigin(update: { origin: string; allowed: boolean }) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.remoteDaemon.setGlassesOrigin(update);
+    },
+
     async saveTailnetMachine(input: { name: string; password?: string }) {
       if (!isElectron()) throw new Error('Electron API not available');
       return window.electronAPI.remoteDaemon.saveTailnetMachine(input);
+    },
+
+    async runCheckFix(checkId: number, stage: RemoteConnectionCheckStage) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.remoteDaemon.runCheckFix(checkId, stage);
+    },
+
+    async dismissCheck(checkId: number) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.remoteDaemon.dismissCheck(checkId);
+    },
+
+    onSetupProgress(callback: (progress: RemoteHostSetupProgress) => void) {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.remoteDaemon.onSetupProgress(callback);
     },
 
     onConnectionStateChanged(callback: (state: RemotePaneConnectionState) => void) {

@@ -3,7 +3,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { ProjectSessionList, ArchivedSessions } from './ProjectSessionList';
 import { ArchiveProgress } from './ArchiveProgress';
-import { ArrowUpDown, BookOpen, ChevronDown, ChevronRight, Info, LayoutGrid, FolderGit2, Home, Laptop, Monitor, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pin, Settings as SettingsIcon, Plus, RefreshCw, MessageSquare, Server, SquareTerminal } from 'lucide-react';
+import { ArrowUpDown, Bell, BookOpen, ChevronDown, ChevronRight, Info, LayoutGrid, FolderGit2, Home, Monitor, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pin, Settings as SettingsIcon, Plus, RefreshCw, MessageSquare, Repeat, Search, Server, SquareTerminal } from 'lucide-react';
 import { SessionDetailTooltip } from './SessionDetailTooltip';
 import { IconButton } from './ui/Button';
 import { Tooltip } from './ui/Tooltip';
@@ -23,10 +23,16 @@ import type { Project } from '../types/project';
 import type { Session } from '../types/session';
 import { useSessionNavigationHotkeys } from '../hooks/useSessionNavigationHotkeys';
 import { useRemoteRuntimeState } from '../hooks/useRemoteRuntimeState';
+import { useConnectionPresence } from '../hooks/useConnectionPresence';
 import { useAppBuildInfo } from '../hooks/useAppBuildInfo';
 import { CompactSessionMenu, type CompactSessionMenuState } from './CompactSessionMenu';
-import { getRemoteFooterStatus, getRemoteHostSwitcherModel } from '../utils/remoteRuntimePresentation';
+import { getRemoteFooterStatus } from '../utils/remoteRuntimePresentation';
+import { getHostingSummary } from '../utils/machineList';
+import { useMachines } from '../hooks/useMachines';
+import { MachineMark, MachineMarkStack } from './machines/MachineMark';
 import { RemoteHostSwitcher } from './RemoteHostSwitcher';
+import { AllMachinesSidebar } from './machines/AllMachinesSidebar';
+import { isAllMachinesOn, startAllMachinesFeed, useAllMachinesStore } from '../stores/allMachinesStore';
 import { isMissionControlEnabled, useConfigStore } from '../stores/configStore';
 import { usePanelStore } from '../stores/panelStore';
 import { rollupAgentDisplayStatus, rollupSessionAgentState, toAgentDisplayStatus } from '../utils/agentStatus';
@@ -35,6 +41,11 @@ import { DiscordIcon } from './DiscordIcon';
 import { OrchestrationSessionNav } from './OrchestrationSessionNav';
 import { useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
 import { useSshHostsRefresh, useSshHostsStore } from '../stores/sshHostsStore';
+import { navigateToLoops, useLoopsStore } from '../stores/loopsStore';
+import { useNotifyStore, waitingCount } from '../stores/notifyStore';
+import { useAnyLoopRunning } from './loops/loopRunView';
+import { useRestartToUpdateStore } from '../stores/restartToUpdateStore';
+import { RESTART_PILL_LABELS, restartPillDescription, restartPillLabel } from './restartToUpdateCopy';
 
 // --- Collapsed sidebar tooltip content ---
 
@@ -97,7 +108,9 @@ interface SidebarProps {
   onAboutClick: () => void;
   onSettingsClick: () => void;
   onRemoteSettingsClick: () => void;
-  onManageRemoteConnectionsClick: () => void;
+  onAddMachineClick: () => void;
+  /** Opens Remote Access with this Tailscale machine's password field. */
+  onMachinePasswordRequest: (machineName: string) => void;
   width: number;
   onResize: (e: React.MouseEvent) => void;
   collapsed?: boolean;
@@ -108,6 +121,8 @@ interface SidebarProps {
   onDocsClick: () => void;
   onFeedbackClick: () => void;
   onDiscordClick: () => void;
+  /** Opens the Software Update dialog when a release can only be installed by hand. */
+  onUpdateAvailableClick: () => void;
 }
 
 const REMOTE_DESKTOP_URL = 'https://remotedesktop.google.com/access';
@@ -124,7 +139,7 @@ const HelpCircleIcon = ({ className }: { className?: string }) => (
   </svg>
 );
 
-export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, onManageRemoteConnectionsClick, width, onResize, collapsed, onToggleCollapse, titleBarControlsSlot, onHelpClick, onDocsClick, onFeedbackClick, onDiscordClick }: SidebarProps) {
+export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, onAddMachineClick, onMachinePasswordRequest, width, onResize, collapsed, onToggleCollapse, titleBarControlsSlot, onHelpClick, onDocsClick, onFeedbackClick, onDiscordClick, onUpdateAvailableClick }: SidebarProps) {
   const useCompactFooterActions = width < 260;
   const showFooterHomeLabel = width >= 230;
   const hotkeys = useHotkeyStore((s) => s.hotkeys);
@@ -132,8 +147,10 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
     const keys = hotkeys.get(id)?.keys;
     return keys ? formatKeyDisplay(keys) : null;
   }, [hotkeys]);
+  // The sidebar's search opens the same launcher as its shortcut.
+  const openSearch = useCallback(() => hotkeys.get('open-command-palette')?.action(), [hotkeys]);
   const { version, gitCommit, worktreeName } = useAppBuildInfo();
-  const [sessionSortAscending, setSessionSortAscending] = useState<boolean>(true); // Default to ascending (newest at bottom)
+  const [sessionSortAscending, setSessionSortAscending] = useState<boolean>(false); // Newest first until the host says otherwise
   const [sidebarSectionExpansion, setSidebarSectionExpansion] = useState<Record<SidebarSection, boolean>>({
     pinned: true,
     repositories: true,
@@ -142,6 +159,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
     archived: false,
   });
   const { connectionState: remoteConnectionState, hostState: remoteHostState } = useRemoteRuntimeState();
+  const { presence: remotePresence } = useConnectionPresence(remoteConnectionState);
   const hydrateExpandedProjects = useNavigationStore(s => s.hydrateExpandedProjects);
   const hydrateExpandedSessions = useNavigationStore(s => s.hydrateExpandedSessions);
   const hydrateExpandedArchivedProjects = useNavigationStore(s => s.hydrateExpandedArchivedProjects);
@@ -154,7 +172,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
         const result = await window.electronAPI.uiState.getExpanded();
         if (cancelled) return;
         if (result.success && result.data) {
-          setSessionSortAscending(result.data.sessionSortAscending ?? true);
+          setSessionSortAscending(result.data.sessionSortAscending ?? false);
           hydrateExpandedProjects(result.data.expandedProjects ?? []);
           hydrateExpandedSessions(result.data.expandedSessions ?? []);
           hydrateExpandedArchivedProjects(result.data.expandedArchivedProjects ?? []);
@@ -225,11 +243,16 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
 
 
   const sessions = useSessionStore((state) => state.sessions);
+  const restartState = useRestartToUpdateStore((state) => state.state);
+  const toggleRestartToast = useRestartToUpdateStore((state) => state.togglePillToast);
+  const restartLabel = restartPillLabel(restartState);
+  const restartDescription = restartPillDescription(restartState) ?? '';
+  const openRestartToUpdate = restartState?.readyVersion ? toggleRestartToast : onUpdateAvailableClick;
   const activeSessionId = useSessionStore((state) => state.activeSessionId);
   const setActiveSession = useSessionStore((state) => state.setActiveSession);
   const remoteFooterStatus = useMemo(
-    () => getRemoteFooterStatus(remoteConnectionState, remoteHostState),
-    [remoteConnectionState, remoteHostState],
+    () => getRemoteFooterStatus(remoteConnectionState, remoteHostState, remotePresence),
+    [remoteConnectionState, remoteHostState, remotePresence],
   );
   const remoteFooterTooltip = (
     <div className="max-w-[260px] space-y-1">
@@ -238,37 +261,64 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
     </div>
   );
   const showRemoteDesktopLink = remoteConnectionState.mode === 'remote' && remoteConnectionState.status === 'connected';
-  const remoteProfiles = useConfigStore((state) => state.config?.remoteDaemon?.client.profiles);
   const fetchConfig = useConfigStore((state) => state.fetchConfig);
   // Profiles live in the config store; a host imported or connected outside
   // Settings shows up here once the connection it caused is pushed.
   useEffect(() => {
     void fetchConfig().catch(() => undefined);
   }, [fetchConfig, remoteConnectionState.mode, remoteConnectionState.activeProfileId]);
-  const remoteHostSwitcher = useMemo(
-    () => getRemoteHostSwitcherModel(remoteConnectionState, remoteHostState, remoteProfiles ?? []),
-    [remoteConnectionState, remoteHostState, remoteProfiles],
-  );
+  // Tailscale machines are listed once after start-up and again each time the menu opens.
+  const { machines, select: selectMachine, switchingId, refresh: refreshMachines } = useMachines({ connectionState: remoteConnectionState });
+  const activeMachine = machines.find((machine) => machine.active) ?? machines[0];
+  // Hidden only while no other machine is saved or on Tailscale.
+  const switcherVisible = machines.length > 1 || remoteConnectionState.mode === 'remote';
+  const allMachines = useAllMachinesStore(isAllMachinesOn);
+  const setAllMachines = useAllMachinesStore((state) => state.setEnabled);
+  // Saved machines and this computer: the ones All machines lists.
+  const savedMachines = useMemo(() => machines.filter((machine) => machine.kind === 'local' || machine.profile), [machines]);
+  useEffect(() => { void useAllMachinesStore.getState().hydrate(); }, []);
+  useEffect(() => {
+    useAllMachinesStore.setState({
+      entries: machines.map(({ id, name, os, slot, active }) => ({ id, name, os, slot, active })),
+      menuShown: switcherVisible,
+      switchMachine: async (machineId) => {
+        const machine = machines.find((entry) => entry.id === machineId);
+        return machine ? selectMachine(machine) : { ok: false, error: 'That machine is no longer saved.' };
+      },
+    });
+  }, [machines, selectMachine, switcherVisible]);
+  useEffect(() => (allMachines ? startAllMachinesFeed() : undefined), [allMachines]);
+  const switcherLabel = allMachines ? 'Showing all machines. Switch machine' : `Agents run on ${activeMachine.name}. Switch machine`;
   const renderRemoteHostSwitcher = (trigger: React.ReactElement, position: 'bottom-left' | 'top-right') => (
     <RemoteHostSwitcher
       trigger={trigger}
       position={position}
-      model={remoteHostSwitcher}
-      profiles={remoteProfiles ?? []}
-      connectionState={remoteConnectionState}
-      onManageConnections={onManageRemoteConnectionsClick}
-      onOpenHosting={onRemoteSettingsClick}
+      machines={machines}
+      switching={switchingId !== null}
+      hostingSummary={getHostingSummary(remoteHostState)}
+      onSelect={(machine) => {
+        // Picking one machine leaves All machines for today's sidebar on it.
+        setAllMachines(false);
+        return selectMachine(machine);
+      }}
+      allMachines={{ selected: allMachines, machines: savedMachines, onSelect: () => setAllMachines(true) }}
+      onNeedsPassword={(machine) => onMachinePasswordRequest(machine.name)}
+      onOpenChange={(open) => { if (open) void refreshMachines(); }}
+      onAddMachine={onAddMachineClick}
+      onOpenRemoteAccess={onRemoteSettingsClick}
     />
   );
-  const railRemoteDot = (
+  const railRemoteButton = (
     <button
       type="button"
       data-compact-rail-item
-      onClick={remoteHostSwitcher.visible ? undefined : onRemoteSettingsClick}
-      aria-label={remoteFooterStatus.ariaLabel}
+      onClick={switcherVisible ? undefined : onRemoteSettingsClick}
+      aria-label={switcherVisible ? switcherLabel : remoteFooterStatus.ariaLabel}
       className={`${COMPACT_RAIL_BUTTON} ${COMPACT_RAIL_IDLE}`}
     >
-      <span className={`h-2.5 w-2.5 rounded-full ${remoteFooterStatus.dotClassName}`} />
+      {switcherVisible
+        ? <MachineMark os={activeMachine.os} slot={activeMachine.slot} presence={activeMachine.presence} size="rail" />
+        : <span className={`h-2.5 w-2.5 rounded-full ${remoteFooterStatus.dotClassName}`} />}
     </button>
   );
   const handleOpenRemoteDesktop = useCallback(() => {
@@ -289,6 +339,9 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
   const navigateToPaneChat = useNavigationStore((state) => state.navigateToPaneChat);
   const navigateToMissionControl = useNavigationStore((state) => state.navigateToMissionControl);
   const navigateToSsh = useNavigationStore((state) => state.navigateToSsh);
+  const navigateToNotify = useNavigationStore((state) => state.navigateToNotify);
+  const notifyAvailable = useNotifyStore((state) => state.snapshot !== null);
+  const notifyWaitingCount = useNotifyStore((state) => waitingCount(state.snapshot));
   const hasSshHosts = useSshHostsStore((state) => state.rows.length > 0);
   const missionControlEnabled = useConfigStore((state) => isMissionControlEnabled(state.config));
   const paneChatStatus = useSessionAgentDisplayStatus(PANE_CHAT_SESSION_ID);
@@ -297,6 +350,8 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
   const setSidebarNavigationScope = useNavigationStore((state) => state.setSidebarNavigationScope);
   /** Agents waiting on the user, anywhere — surfaced on the Mission Control rail button. */
   const blockedAgentCount = useBlockedAgentCount();
+  const loops = useLoopsStore((state) => state.loops);
+  const loopRunning = useAnyLoopRunning(loops);
   useSessionNavigationHotkeys({ projects, sessionSortAscending });
   useSshHostsRefresh();
 
@@ -460,7 +515,15 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
   const headerControls = (
     <>
       {onToggleCollapse && (
-        <Tooltip content={hotkeyDisplay('toggle-sidebar') ? <Kbd>{hotkeyDisplay('toggle-sidebar')}</Kbd> : undefined} side="bottom">
+        <Tooltip
+          content={(
+            <span className="flex items-center gap-2">
+              <span>{collapsed ? 'Expand sidebar' : 'Collapse sidebar'}</span>
+              {hotkeyDisplay('toggle-sidebar') && <Kbd size="xs" variant="muted">{hotkeyDisplay('toggle-sidebar')}</Kbd>}
+            </span>
+          )}
+          side="bottom"
+        >
           <IconButton
             type="button"
             onClick={onToggleCollapse}
@@ -470,17 +533,17 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
           />
         </Tooltip>
       )}
-      {!collapsed && remoteHostSwitcher.visible && renderRemoteHostSwitcher(
+      {!collapsed && switcherVisible && renderRemoteHostSwitcher(
         <button
           type="button"
-          aria-label={`Agents run on ${remoteHostSwitcher.label}. Switch host`}
+          aria-label={switcherLabel}
           style={{ maxWidth: hostPillMaxWidth }}
-          className="ml-1 flex h-6 min-w-0 shrink items-center gap-1.5 rounded-full border border-border-primary bg-surface-secondary pl-2 pr-1.5 text-[12px] text-text-primary hover:bg-surface-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle"
+          className="ml-1 flex h-6 min-w-0 shrink items-center gap-1.5 rounded-full border border-border-primary bg-surface-secondary pl-1 pr-1.5 text-[12px] font-medium text-text-primary hover:bg-surface-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring-subtle"
         >
-          {remoteHostSwitcher.dotClassName
-            ? <span className={`h-2 w-2 shrink-0 rounded-full ${remoteHostSwitcher.dotClassName}`} />
-            : <Laptop className="h-3.5 w-3.5 shrink-0 text-text-tertiary" />}
-          {showHostPillLabel && <span className="min-w-0 truncate">{remoteHostSwitcher.label}</span>}
+          {allMachines
+            ? <MachineMarkStack machines={savedMachines} />
+            : <MachineMark os={activeMachine.os} slot={activeMachine.slot} presence={activeMachine.presence} size="sm" className="rounded-full" />}
+          {showHostPillLabel && <span className="min-w-0 truncate">{allMachines ? 'All machines' : activeMachine.name}</span>}
           <ChevronDown className="h-3 w-3 shrink-0 text-text-tertiary" />
         </button>,
         'bottom-left',
@@ -510,6 +573,9 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
                 </button>
               </Tooltip>
             )}
+            <Tooltip content={<span className="flex items-center gap-2">Search{hotkeyDisplay('open-command-palette') && <Kbd>{hotkeyDisplay('open-command-palette')}</Kbd>}</span>} side="right">
+              <button type="button" data-compact-rail-item aria-label="Search" onClick={openSearch} className={`${COMPACT_RAIL_BUTTON} ${COMPACT_RAIL_IDLE}`}><Search className="h-4 w-4" /></button>
+            </Tooltip>
             <Tooltip content="New" side="right">
               <button type="button" data-compact-rail-item aria-label="New" onClick={() => setShowNewDialog(true)} className={`${COMPACT_RAIL_BUTTON} ${COMPACT_RAIL_IDLE}`}><Plus className="h-4 w-4" /></button>
             </Tooltip>
@@ -544,6 +610,29 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
               </button>
             </Tooltip>
 
+            {notifyAvailable && (
+              <Tooltip content="Notify" side="right">
+                <button
+                  type="button"
+                  data-testid="compact-notify"
+                  data-compact-rail-item
+                  onClick={() => {
+                    setSidebarNavigationScope('repositories');
+                    navigateToNotify();
+                  }}
+                  aria-label={notifyWaitingCount > 0 ? `Notify, ${notifyWaitingCount} waiting` : 'Notify'}
+                  className={`${COMPACT_RAIL_BUTTON} ${activeView === 'notify' ? COMPACT_RAIL_ACTIVE : COMPACT_RAIL_IDLE}`}
+                >
+                  <Bell className="h-4 w-4" />
+                  {notifyWaitingCount > 0 && (
+                    <span className="absolute right-0 top-0 flex h-3 w-3 items-center justify-center" aria-hidden="true">
+                      <span className="h-1.5 w-1.5 rounded-full bg-status-warning" />
+                    </span>
+                  )}
+                </button>
+              </Tooltip>
+            )}
+
             {(orchestrationAvailability === 'unavailable' || orchestrationAvailability === 'idle') && (
               <Tooltip content="Pane Chat" side="right">
                 <button
@@ -563,6 +652,25 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
                 </button>
               </Tooltip>
             )}
+
+            {/* Like SSH hosts, the rail lists Loops once there is one; the full sidebar always does. */}
+            {loops.length > 0 && <Tooltip content="Loops" side="right">
+              <button
+                type="button"
+                data-testid="compact-loops"
+                data-compact-rail-item
+                onClick={() => navigateToLoops()}
+                aria-label="Loops"
+                className={`${COMPACT_RAIL_BUTTON} ${activeView === 'loops' ? COMPACT_RAIL_ACTIVE : COMPACT_RAIL_IDLE}`}
+              >
+                <Repeat className="h-4 w-4" />
+                {loopRunning && (
+                  <span className="absolute right-0 top-0 flex h-3 w-3 items-center justify-center" aria-hidden="true">
+                    <span className="h-1.5 w-1.5 rounded-full bg-status-info" />
+                  </span>
+                )}
+              </button>
+            </Tooltip>}
 
             {missionControlEnabled && (
               <Tooltip content="Mission Control" side="right">
@@ -720,8 +828,21 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
 
           {/* Bottom actions stay reachable even with a long Session list. */}
           <div className="flex shrink-0 flex-col items-center gap-1 border-t border-border-primary py-2">
+            {restartLabel && (
+              <Tooltip content={restartDescription} side="right">
+                <button
+                  type="button"
+                  data-compact-rail-item
+                  onClick={openRestartToUpdate}
+                  aria-label={restartDescription}
+                  className={`${COMPACT_RAIL_BUTTON} bg-interactive/15 text-interactive hover:bg-interactive/25`}
+                >
+                  <RefreshCw className="h-4 w-4" />
+                </button>
+              </Tooltip>
+            )}
             <Tooltip content={remoteFooterTooltip} side="right" interactive delay={250}>
-              {remoteHostSwitcher.visible ? renderRemoteHostSwitcher(railRemoteDot, 'top-right') : railRemoteDot}
+              {switcherVisible ? renderRemoteHostSwitcher(railRemoteButton, 'top-right') : railRemoteButton}
             </Tooltip>
             <Tooltip content={hotkeyDisplay('open-settings') ? <Kbd>{hotkeyDisplay('open-settings')}</Kbd> : undefined} side="right">
               <button
@@ -752,7 +873,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
           </div>
         </div>
 
-        {showNewDialog && <NewDialog projects={projects} defaultProjectId={sessions.find(session => session.id === activeSessionId)?.projectId ?? activeProject?.id} onClose={() => setShowNewDialog(false)} />}
+        {showNewDialog && <NewDialog projects={projects} defaultProjectId={sessions.find(session => session.id === activeSessionId)?.projectId ?? activeProject?.id} machines={machines} onSwitchMachine={selectMachine} onClose={() => setShowNewDialog(false)} />}
 
         <CompactSessionMenu
           menu={compactSessionMenu}
@@ -791,6 +912,15 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
 
         <button
           type="button"
+          onClick={openSearch}
+          className="mx-2 mt-1 flex h-[30px] flex-shrink-0 items-center gap-2 rounded-input border border-border-primary bg-surface-primary px-2 text-[13px] text-text-muted hover:border-border-hover hover:text-text-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-interactive"
+        >
+          <Search className="h-3.5 w-3.5 flex-shrink-0" />
+          <span>{allMachines ? 'Search all machines' : 'Search'}</span>
+        </button>
+
+        <button
+          type="button"
           onClick={() => setShowNewDialog(true)}
           className="mx-2 mt-1 flex h-7 flex-shrink-0 items-center gap-2 rounded-md bg-surface-hover px-2 text-[13px] font-medium text-text-secondary hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-interactive"
         >
@@ -799,7 +929,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
         </button>
 
         <div className="pane-sidebar-list flex-1 overflow-y-auto overflow-x-hidden min-h-0">
-          <ProjectSessionList
+          {allMachines ? <AllMachinesSidebar onNew={() => setShowNewDialog(true)} /> : <ProjectSessionList
             projects={projects}
             onProjectsChange={setProjects}
             onProjectsRefresh={loadProjects}
@@ -815,7 +945,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
             showRemoteDesktopLink={showRemoteDesktopLink}
             onRemoteDesktopClick={handleOpenRemoteDesktop}
             remoteDesktopTooltip={REMOTE_DESKTOP_TOOLTIP}
-          />
+          />}
         </div>
 
         {/* Archived sessions - pinned above bottom */}
@@ -823,6 +953,26 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
           <ArchivedSessions expanded={sidebarSectionExpansion.archived} onExpandedChange={handleArchivedSectionExpandedChange} />
         </div>
 
+        {restartLabel && (
+          <div className="flex flex-shrink-0 px-2 pt-1">
+            <button
+              type="button"
+              onClick={openRestartToUpdate}
+              aria-label={restartDescription}
+              className="flex h-6 items-center gap-1.5 rounded-full bg-interactive/15 px-2.5 text-[11px] font-semibold text-interactive hover:bg-interactive/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-interactive"
+            >
+              <RefreshCw className="h-3 w-3 shrink-0" />
+              {/* Every label shares one grid cell, so the pill keeps the widest one's width. */}
+              <span className="grid">
+                {RESTART_PILL_LABELS.map(label => (
+                  <span key={label} aria-hidden="true" className={`col-start-1 row-start-1 whitespace-nowrap ${label === restartLabel ? '' : 'invisible'}`}>
+                    {label}
+                  </span>
+                ))}
+              </span>
+            </button>
+          </div>
+        )}
         <div className="flex h-12 flex-shrink-0 items-center gap-1 px-2">
           <button
             type="button"
@@ -880,7 +1030,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
 
         </div>
     </div>
-    {showNewDialog && <NewDialog projects={projects} defaultProjectId={sessions.find(session => session.id === activeSessionId)?.projectId ?? activeProject?.id} onClose={() => setShowNewDialog(false)} />}
+    {showNewDialog && <NewDialog projects={projects} defaultProjectId={sessions.find(session => session.id === activeSessionId)?.projectId ?? activeProject?.id} machines={machines} onSwitchMachine={selectMachine} onClose={() => setShowNewDialog(false)} />}
     </>
   );
 }

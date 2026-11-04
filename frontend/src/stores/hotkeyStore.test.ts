@@ -90,13 +90,13 @@ describe('hotkeyStore keyboard shortcut preference', () => {
     expect(isCommandPaletteShortcutEnabled({ keyboardShortcutsEnabled: false })).toBe(true);
   });
 
-  it('allows only the Command Palette shortcut when configured as an exception', () => {
+  it('allows only the Search shortcut when configured as an exception', () => {
     const paletteAction = vi.fn();
     const preventDefault = vi.fn();
     useConfigStore.setState({ config: { keyboardShortcutsEnabled: false } });
     useHotkeyStore.getState().register({
       id: 'open-command-palette',
-      label: 'Open Command Palette',
+      label: 'Open Search',
       keys: 'mod+shift+p',
       category: 'navigation',
       action: paletteAction,

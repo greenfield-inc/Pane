@@ -1,3 +1,6 @@
+import type { AgentChatClient } from '../../../../shared/types/agentChat';
+import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
+import { decodeAgentChatEvent, decodeAgentChatView } from '../../../../shared/types/agentChatDecoders';
 import type {
   OrchestrationSessionCreateInput,
   OrchestrationSessionListResult,
@@ -107,6 +110,23 @@ export class RemoteRuntimeAdapter {
     // SAFETY: The adapter method selects T from the invoked channel contract.
     return response as T;
   }
+
+  readonly agentChat: AgentChatClient = {
+    get: async panelId => decodeAgentChatView(await this.invoke('agent-chat:get', [panelId])),
+    setup: () => this.invoke('agent-chat:setup'),
+    identify: async (panelId, nativeId, socketPath) => decodeAgentChatView(await this.invoke('agent-chat:identify', [panelId, nativeId, socketPath])),
+    switch: (panelId, mode, generation) => this.invoke('agent-chat:switch', [panelId, mode, generation]),
+    recover: (panelId, mode, generation) => this.invoke('agent-chat:recover', [panelId, mode, generation]),
+    send: (panelId, request) => this.invoke('agent-chat:send', [panelId, request]),
+    receipt: (panelId, operationId) => this.invoke('agent-chat:receipt', [panelId, operationId]),
+    configure: (panelId, generation, configId, value) => this.invoke('agent-chat:configure', [panelId, generation, configId, value]),
+    cancel: (panelId, generation) => this.invoke('agent-chat:cancel', [panelId, generation]),
+    permission: (panelId, generation, requestId, optionId) => this.invoke('agent-chat:permission', [panelId, generation, requestId, optionId]),
+    stop: panelId => this.invoke('agent-chat:stop', [panelId]),
+    onEvent: callback => this.onEvent(event => { if (event.channel === 'agent-chat:event') callback(decodeAgentChatEvent(event.args[0])); }),
+    onState: callback => this.onEvent(event => { if (event.channel === 'agent-chat:state') callback(decodeAgentChatView(event.args[0])); }),
+    onReconnect: callback => this.onStatus(state => { if (state.status === 'connected') callback(); }),
+  };
 
   getProjectsWithSessions(): Promise<RemoteProjectWithSessions[]> {
     return this.invoke<RemoteProjectWithSessions[]>('sessions:get-all-with-projects');
@@ -287,5 +307,5 @@ export class RemoteRuntimeAdapter {
 }
 
 function isIpcResponse<T>(value: IpcLikeResponse<T> | T): value is IpcLikeResponse<T> {
-  return Boolean(value && value instanceof Object && ('success' in value || 'data' in value || 'error' in value));
+  return decodeOptionalBoundary(value, boundary.object({ success: boundary.boolean })) !== undefined;
 }

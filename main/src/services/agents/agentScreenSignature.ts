@@ -176,16 +176,100 @@ export function screenShowsQueuedMessage(text: string, agentType: CliAgentType |
   return lines.slice(0, composerRow).some(line => /^(?:❯|↳)\s/u.test(line) && line.includes(marker));
 }
 
+// Background work an idle agent will come back to. Claude 2.1.301 counts running background
+// shells in the footer under its composer (`⏵⏵ bypass permissions on · 1 shell`) and lists each
+// running background subagent below that (`◯ general-purpose  Count lines …  14s · ↓ 35.4k
+// tokens`); it takes a new turn when one finishes. Codex 0.160+ prints `1 background terminal
+// running · /ps to view · /stop to close` just above its prompt. Each line goes when the work ends.
+const CLAUDE_BACKGROUND_SHELLS = /(?:^|·)\s*(\d+ shells?)\s*(?:·|$)/u;
+const CLAUDE_BACKGROUND_AGENT = /^◯\s+(\S+)\s.*\b\d+[smh]\b/u;
+const CODEX_BACKGROUND_TERMINALS = /^(\d+ background terminals? running)\b/u;
+/** Codex draws its background-terminal line within this many rows above the prompt. */
+const CODEX_BACKGROUND_ROWS = 6;
+
+/**
+ * What a known agent still runs in the background while its turn has ended ("1 shell",
+ * "background agent general-purpose", "1 background terminal running"), or undefined when its
+ * screen shows nothing running.
+ */
+export function detectAgentBackgroundWork(text: string, agentType: CliAgentType | undefined): string | undefined {
+  const lines = screenLines(text);
+  if (agentType === 'claude') {
+    const box = findClaudeComposerBox(lines);
+    if (!box?.closed) return undefined;
+    for (const line of lines.slice(box.rows.end + 1)) {
+      const shells = line.match(CLAUDE_BACKGROUND_SHELLS);
+      if (shells) return shells[1];
+      const agent = line.match(CLAUDE_BACKGROUND_AGENT);
+      if (agent) return `background agent ${agent[1]}`;
+    }
+    return undefined;
+  }
+  if (agentType === 'codex') {
+    const prompt = findCodexPrompt(lines);
+    if (!prompt) return undefined;
+    for (const line of lines.slice(Math.max(0, prompt.row - CODEX_BACKGROUND_ROWS), prompt.row)) {
+      const terminals = line.match(CODEX_BACKGROUND_TERMINALS);
+      if (terminals) return terminals[1];
+    }
+  }
+  return undefined;
+}
+
+// Each agent's folder-trust prompt names the agent and offers its own answer,
+// so a wrapper that starts the agent in an untrusted folder is identified there.
+const CLAUDE_TRUST_PROMPT = /Claude\s+Code'll\s+be\s+able\s+to\s+read[\s\S]*Yes,\s+I\s+trust\s+this\s+folder/u;
+const CODEX_TRUST_PROMPT = /Codex\s+can\s+read,\s+edit,\s+and\s+run\s+files\s+here[\s\S]*Trust\s+and\s+continue/u;
+
+/**
+ * The folder Claude's trust menu names under "Accessing workspace:", rows joined
+ * as Claude wrapped them. Undefined unless it is certain: every row starts with
+ * the menu's indent and holds no whitespace, and every row but the last reaches
+ * the wrap edge, so no space can hide at a line break.
+ */
+function claudeTrustMenuFolder(text: string, columns: number): string | undefined {
+  const lines = text.split('\n');
+  const header = lines.findIndex(line => /^\s*Accessing workspace:\s*$/u.test(line));
+  if (header < 0) return undefined;
+  const indent = /^[ ]*/u.exec(lines[header])?.[0] ?? '';
+  const rest = lines.slice(header + 1);
+  const start = rest.findIndex(line => line.trim());
+  const end = rest.findIndex((line, index) => index > start && !line.trim());
+  if (start < 0 || end < 0) return undefined;
+  const rows = rest.slice(start, end);
+  // Claude keeps the menu's indent as a margin on both sides.
+  const edge = columns - indent.length;
+  const certain = rows.every((row, index) => row.startsWith(indent)
+    && /^\S+$/u.test(row.slice(indent.length))
+    && (index === rows.length - 1 ? row.length < edge : row.length === edge));
+  return certain ? rows.map(row => row.slice(indent.length)).join('') : undefined;
+}
+
+/**
+ * The next key toward "Yes, I trust this folder" when Claude's folder-trust menu,
+ * drawn `columns` wide, names exactly `folder`: Down while "No, exit" is
+ * selected, then Enter. Undefined on any other screen, any other path, or a path
+ * the screen does not show for certain.
+ */
+export function claudeFolderTrustKey(text: string, folder: string, columns: number): '\x1b[B' | '\r' | undefined {
+  if (!CLAUDE_TRUST_PROMPT.test(text) || claudeTrustMenuFolder(text, columns) !== folder) return undefined;
+  if (/^\s*[›❯>]\s*(?:\d+\.\s*)?Yes, I trust this folder\s*$/mu.test(text)) return '\r';
+  if (/^\s*[›❯>]\s*(?:\d+\.\s*)?No, exit\s*$/mu.test(text)) return '\x1b[B';
+  return undefined;
+}
+
 /**
  * Identify an agent from one screen: Claude's closed rule/`❯`/rule composer
- * box, or Codex's `OpenAI Codex` header with its `›` prompt. Callers that
- * persist the result require it on consecutive polls, since one frame can
- * be anything.
+ * box, or Codex's `OpenAI Codex` header with its `›` prompt, or either
+ * agent's folder-trust prompt. Callers that persist the result require it on
+ * consecutive polls, since one frame can be anything.
  */
 export function detectAgentFromScreen(text: string | undefined): CliAgentType | undefined {
   if (!text) return undefined;
   const lines = screenLines(text);
   if (findClaudeComposerBox(lines)?.closed) return 'claude';
   if (CODEX_HEADER.test(text) && lines.some(line => /^›(?:\s|$)/u.test(line))) return 'codex';
+  if (CLAUDE_TRUST_PROMPT.test(text)) return 'claude';
+  if (CODEX_TRUST_PROMPT.test(text)) return 'codex';
   return undefined;
 }

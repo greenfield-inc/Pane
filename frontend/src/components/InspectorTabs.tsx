@@ -1,7 +1,15 @@
+import { useRef } from 'react';
 import type { ToolPanel } from '../../../shared/types/panels';
 import { cn } from '../utils/cn';
 
 export type InspectorTab = 'details' | 'files' | 'changes';
+
+/** A window CustomEvent<InspectorRequest>: show the inspector on a tab once the Pane is active. */
+export const OPEN_INSPECTOR_EVENT = 'inspector:open';
+export interface InspectorRequest {
+  sessionId: string;
+  tab: InspectorTab;
+}
 
 interface InspectorTabsProps {
   tab: InspectorTab;
@@ -18,6 +26,7 @@ interface InspectorTabsProps {
  * Changes only appear once their panel exists for the session.
  */
 export function InspectorTabs({ tab, onTabChange, filesPanel, changesPanel, changesCount, className }: InspectorTabsProps) {
+  const buttons = useRef<Partial<Record<InspectorTab, HTMLButtonElement | null>>>({});
   const tabs: Array<{ id: InspectorTab; label: string; badge?: number }> = [
     { id: 'details', label: 'Details' },
     ...(filesPanel ? [{ id: 'files' as const, label: 'Files' }] : []),
@@ -30,6 +39,8 @@ export function InspectorTabs({ tab, onTabChange, filesPanel, changesPanel, chan
         return (
           <button
             key={item.id}
+            ref={button => { buttons.current[item.id] = button; }}
+            tabIndex={selected ? 0 : -1}
             type="button"
             role="tab"
             aria-selected={selected}
@@ -38,20 +49,21 @@ export function InspectorTabs({ tab, onTabChange, filesPanel, changesPanel, chan
             onKeyDown={(event) => {
               if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
               event.preventDefault();
-              const index = tabs.findIndex(t => t.id === item.id);
+              const index = tabs.findIndex(t => t.id === tab);
               const next = tabs[(index + (event.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
               onTabChange(next.id);
+              buttons.current[next.id]?.focus();
             }}
             className={cn(
-              'flex flex-1 items-center justify-center gap-1.5 rounded-t-md border border-transparent px-2 text-[12px] font-medium focus:outline-none focus:ring-0',
+              'flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-t-md border border-transparent px-2 text-[12px] font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-border-focus',
               selected
                 ? 'border-border-primary border-b-surface-primary bg-surface-primary text-text-primary -mb-px'
                 : 'text-text-tertiary hover:text-text-primary hover:bg-surface-hover',
             )}
           >
-            <span>{item.label}</span>
+            <span className="truncate">{item.label}</span>
             {!!item.badge && (
-              <span aria-hidden="true" className="rounded-full bg-surface-tertiary px-1.5 text-[10px] leading-4 text-text-secondary tabular-nums">{item.badge}</span>
+              <span aria-hidden="true" className="flex-shrink-0 rounded-full bg-surface-tertiary px-1.5 text-[10px] leading-4 text-text-secondary tabular-nums">{item.badge}</span>
             )}
           </button>
         );

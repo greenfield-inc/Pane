@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { CommandRunner } from '../../utils/commandRunner';
+import { mkdir, mkdtemp, rm, writeFile } from 'fs/promises';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import { CommandRunner } from '../../utils/commandRunner';
 
 function partialMock<Contract>(implementation: Partial<Contract>): Contract {
   // SAFETY: Each test fixture implements every dependency member reached by
@@ -425,5 +428,70 @@ describe('WorktreeManager.getSessionLocalBaseBranch', () => {
     );
 
     expect(localBaseBranch).toBe('release');
+  });
+});
+
+describe('WorktreeManager.initializeProject', () => {
+  async function initRepo(): Promise<{ repo: string; runner: CommandRunner }> {
+    const repo = await mkdtemp(join(tmpdir(), 'pane-worktree-exclude-'));
+    const runner = new CommandRunner({ path: repo });
+    await runner.execFile('git', ['init', '--initial-branch=main'], repo);
+    await runner.execFile('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', '-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-m', 'init'], repo);
+    return { repo, runner };
+  }
+
+  it("keeps Pane's worktree folder out of the main checkout's git status", async () => {
+    const { repo, runner } = await initRepo();
+    try {
+      await new WorktreeManager().initializeProject(repo, undefined, new PathResolver({ path: repo }), runner);
+      await runner.execFile('git', ['worktree', 'add', '-b', 'feature', join(repo, 'worktrees', 'feature')], repo);
+
+      const { stdout } = await runner.execFile('git', ['status', '--porcelain'], repo);
+      expect(stdout).toBe('');
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('hides a worktree folder named with ignore-pattern characters literally', async () => {
+    const { repo, runner } = await initRepo();
+    try {
+      await new WorktreeManager().initializeProject(repo, 'trees[1]', new PathResolver({ path: repo }), runner);
+      await runner.execFile('git', ['worktree', 'add', '-b', 'feature', join(repo, 'trees[1]', 'feature')], repo);
+      await mkdir(join(repo, 'trees1'));
+      await writeFile(join(repo, 'trees1', 'source.ts'), '');
+
+      const { stdout } = await runner.execFile('git', ['status', '--porcelain'], repo);
+      expect(stdout).toBe('?? trees1/\n');
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('keeps a backslash in a POSIX folder name literal', async () => {
+    const { repo, runner } = await initRepo();
+    try {
+      await new WorktreeManager().initializeProject(repo, 'trees\\1', new PathResolver({ path: repo }), runner);
+      await runner.execFile('git', ['worktree', 'add', '-b', 'feature', join(repo, 'trees\\1', 'feature')], repo);
+      await mkdir(join(repo, 'trees', '1'), { recursive: true });
+      await writeFile(join(repo, 'trees', '1', 'source.ts'), '');
+
+      const { stdout } = await runner.execFile('git', ['status', '--porcelain'], repo);
+      expect(stdout).toBe('?? trees/\n');
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('hides a custom worktree folder that a reserve worktree creates', async () => {
+    const { repo, runner } = await initRepo();
+    try {
+      await new WorktreeManager().seedReserve(repo, 'custom-trees', new PathResolver({ path: repo }), runner);
+
+      const { stdout } = await runner.execFile('git', ['status', '--porcelain'], repo);
+      expect(stdout).toBe('');
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
   });
 });

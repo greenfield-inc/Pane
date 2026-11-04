@@ -1,5 +1,4 @@
 import type { Theme } from '../contexts/themeContextValue';
-import { isLightTheme } from '../contexts/themeContextValue';
 
 export type ThemeFamily = 'Standard' | 'Neon' | 'Editorial' | 'Retro' | 'Atmosphere' | 'Accessibility';
 
@@ -56,8 +55,11 @@ const THEME_LABELS: Record<Theme, string> = Object.fromEntries(
 
 export const getThemeLabel = (theme: Theme): string => THEME_LABELS[theme];
 
+/** Every theme, in picker order. Any theme can fill either System slot, so pickers never filter. */
+export const ALL_THEME_OPTIONS: readonly ThemeOption[] = THEME_OPTIONS;
+
 /** THEME_OPTIONS partitioned by family, in first-appearance order. */
-const THEME_OPTION_GROUPS: ReadonlyArray<{ family: ThemeFamily; options: readonly ThemeOption[] }> = (() => {
+export const THEME_OPTION_GROUPS: ReadonlyArray<{ family: ThemeFamily; options: readonly ThemeOption[] }> = (() => {
   const groups: Array<{ family: ThemeFamily; options: ThemeOption[] }> = [];
   for (const option of THEME_OPTIONS) {
     const group = groups.find((g) => g.family === option.family);
@@ -67,12 +69,3 @@ const THEME_OPTION_GROUPS: ReadonlyArray<{ family: ThemeFamily; options: readonl
   return groups;
 })();
 
-export type ThemeSlot = 'light' | 'dark' | 'any';
-
-export const themeOptionsForSlot = (slot: ThemeSlot): readonly ThemeOption[] =>
-  slot === 'any' ? THEME_OPTIONS : THEME_OPTIONS.filter((option) => isLightTheme(option.id) === (slot === 'light'));
-
-export const themeOptionGroupsForSlot = (slot: ThemeSlot): ReadonlyArray<{ family: ThemeFamily; options: readonly ThemeOption[] }> =>
-  THEME_OPTION_GROUPS
-    .map((group) => ({ ...group, options: group.options.filter((option) => slot === 'any' || isLightTheme(option.id) === (slot === 'light')) }))
-    .filter((group) => group.options.length > 0);

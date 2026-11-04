@@ -1,11 +1,11 @@
+import { isPrintable } from '../input';
 import type {
   AtTerminalHandlerState,
   InterceptAction,
   InterceptHandler,
   TerminalSuggestion,
 } from '../types';
-import { LINE_COUNT_PRESETS } from '../types';
-import { SETTINGS_PREFERENCE_KEYS } from '../../../types/settings';
+import { AT_TERMINAL_LINE_COUNT_PRESETS as LINE_COUNT_PRESETS, DEFAULT_SETTINGS_PREFERENCES, parseSettingsPreferences, SETTINGS_PREFERENCE_KEYS } from '../../../types/settings';
 
 interface AtTerminalHandlerOptions {
   sessionId: string;
@@ -22,7 +22,7 @@ interface AtTerminalHandlerOptions {
   setPreference: (key: string, value: string) => void;
 }
 
-const DEFAULT_PRESET_INDEX = 2; // 500 lines
+const DEFAULT_PRESET_INDEX = LINE_COUNT_PRESETS.indexOf(DEFAULT_SETTINGS_PREFERENCES.atTerminalLineCount);
 
 function createDefaultState(): AtTerminalHandlerState {
   return {
@@ -30,7 +30,7 @@ function createDefaultState(): AtTerminalHandlerState {
     selectedIndex: 0,
     lineCountPresetIndex: DEFAULT_PRESET_INDEX,
     lineCount: LINE_COUNT_PRESETS[DEFAULT_PRESET_INDEX],
-    pasteMode: 'raw',
+    pasteMode: DEFAULT_SETTINGS_PREFERENCES.atTerminalPasteMode,
   };
 }
 
@@ -87,21 +87,16 @@ export function createAtTerminalHandler(
         getPreference(SETTINGS_PREFERENCE_KEYS.atTerminalPasteMode),
         getPreference(SETTINGS_PREFERENCE_KEYS.atTerminalLineCount),
       ]).then(([savedMode, savedLineCount]) => {
-        let changed = false;
-        if (savedMode === 'raw' || savedMode === 'embed') {
-          state = { ...state, pasteMode: savedMode };
-          changed = true;
-        }
-        if (savedLineCount) {
-          const val = parseInt(savedLineCount, 10);
-          // SAFETY: The value comes from the adjacent finite domain definition.
-          const idx = LINE_COUNT_PRESETS.indexOf(val as typeof LINE_COUNT_PRESETS[number]);
-          if (idx !== -1) {
-            state = { ...state, lineCountPresetIndex: idx, lineCount: LINE_COUNT_PRESETS[idx] };
-            changed = true;
-          }
-        }
-        if (changed) onStateChange();
+        const preferences = parseSettingsPreferences({
+          [SETTINGS_PREFERENCE_KEYS.atTerminalPasteMode]: savedMode,
+          [SETTINGS_PREFERENCE_KEYS.atTerminalLineCount]: savedLineCount,
+        });
+        state = { ...state,
+          pasteMode: preferences.atTerminalPasteMode,
+          lineCount: preferences.atTerminalLineCount,
+          lineCountPresetIndex: LINE_COUNT_PRESETS.indexOf(preferences.atTerminalLineCount),
+        };
+        onStateChange();
       }).catch(() => { /* ignore */ });
 
       // Fire-and-forget: load terminals async, update state when done
@@ -194,8 +189,8 @@ export function createAtTerminalHandler(
         }
 
         case '\x1b': {
-          // Bare Escape
-          return { type: 'cancel' };
+          // Escape closes our picker, so it must not become a shell Meta prefix.
+          return { type: 'cancel', consumeInput: true };
         }
 
         case ' ': {
@@ -217,8 +212,7 @@ export function createAtTerminalHandler(
 
         default: {
           // Printable character — update filter buffer
-          const isPrintable = data.length === 1 && data >= ' ';
-          if (isPrintable) {
+          if (isPrintable(data)) {
             const newBuffer = buffer + data;
             updateFiltered(newBuffer);
             // Auto-cancel when filter matches zero terminals (only after terminals loaded).

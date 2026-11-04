@@ -22,6 +22,24 @@ trap 'rm -rf "$pane_dir" "$output_file" "$extract_dir"' EXIT
   test "$(readlink squashfs-root/Pane)" = pane
 )
 
+# Exercise the actual packaged Electron/SQLite ABI on the native runner before
+# accepting the print-only setup path as proof that the package can run.
+case "$(uname -m)" in
+  x86_64) expected_arch=x64 ;;
+  aarch64|arm64) expected_arch=arm64 ;;
+  *) echo 'Unsupported native runner architecture' >&2; exit 2 ;;
+esac
+env ELECTRON_RUN_AS_NODE=1 PANE_DIR="$pane_dir" PANE_EXPECTED_ARCH="$expected_arch" \
+  "$extract_dir/squashfs-root/pane" -e '
+    const { createRequire } = require("node:module");
+    const packed = createRequire(process.argv[1]);
+    if (process.arch !== process.env.PANE_EXPECTED_ARCH) throw new Error("Packaged runtime architecture differs from runner");
+    const db = new (packed("better-sqlite3-multiple-ciphers"))(":memory:");
+    if (db.prepare("SELECT 42 AS value").get().value !== 42) throw new Error("Packaged SQLite round trip failed");
+    db.close();
+    console.log(JSON.stringify({ packagedVersion: packed("./package.json").version, electron: process.versions.electron, node: process.versions.node, arch: process.arch, sqliteRoundTrip: true }));
+  ' "$extract_dir/squashfs-root/resources/app.asar/package.json"
+
 # Bounded: remote setup is a print-and-exit path that takes seconds. Without a
 # limit a packaged app that never exits hangs the release job until the runner
 # times out, with the app's own output still trapped in $output_file and never

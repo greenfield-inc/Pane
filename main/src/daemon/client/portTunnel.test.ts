@@ -1,5 +1,8 @@
+import fs from 'fs/promises';
 import http from 'http';
 import net from 'net';
+import os from 'os';
+import path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
 import WebSocket, { WebSocketServer } from 'ws';
 import { createDefaultRemoteDaemonConfig } from '../../../../shared/types/remoteDaemon';
@@ -163,6 +166,28 @@ describe('port tunnel', () => {
     expect(new Set(localPorts.values()).size).toBe(2);
     expect(await echoThrough('127.0.0.1', localPorts.get(taken + 1)!, 'second app')).toBe('second app');
     expect(host.requestedPorts).toEqual([taken + 1]);
+  });
+
+  it('does not keep a listener it cannot record for hosts to leave out', async () => {
+    // A home whose registry folder is a file.
+    const home = await fs.mkdtemp(path.join(os.tmpdir(), 'pane-home-'));
+    await fs.mkdir(path.join(home, '.cache'));
+    await fs.writeFile(path.join(home, '.cache', 'pane-port-tunnels'), 'not a folder');
+    const saved = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
+    Object.assign(process.env, { HOME: home, USERPROFILE: home });
+    cleanups.push(async () => {
+      for (const [name, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+      await fs.rm(home, { recursive: true, force: true });
+    });
+    const host = await startEchoHost();
+    const port = await freePort();
+    const tunnel = track(createPortTunnel(host.openStream));
+
+    await expect(tunnel.sync([port])).rejects.toMatchObject({ code: 'ERR_PORT_TUNNEL_REGISTRY' });
+    expect(await refuses(port)).toBe(true);
   });
 
   it('closes every listener on close', async () => {

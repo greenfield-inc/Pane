@@ -14,14 +14,18 @@ import { linuxToUNCPath } from '../utils/wslUtils';
  * RunPane. It lives in the user's home skill folders (like Superset's) instead
  * of repository AGENTS.md files, so Pane never edits a user's repo to be found.
  * Only files carrying this marker are Pane's; everything else is left alone.
+ * Bump the version when the skill changes shape: a copy marked by an older Pane
+ * is rewritten, and a copy marked by a newer Pane is left for that Pane.
  */
-export const PANE_MANAGED_SKILL_MARKER = '<!-- pane-managed-skill v1 -->';
+const PANE_MANAGED_SKILL_VERSION = 2;
+export const PANE_MANAGED_SKILL_MARKER = `<!-- pane-managed-skill v${PANE_MANAGED_SKILL_VERSION} -->`;
+const MANAGED_MARKER_PATTERN = /<!-- pane-managed-skill v(\d+) -->/;
 const SKILL_DIR_NAME = 'pane';
 const SKILL_FILE = 'SKILL.md';
 const execFileAsync = promisify(execFile);
 let syncQueue: Promise<void> = Promise.resolve();
 
-type PaneHomeSkillOutcome = 'written' | 'unchanged' | 'removed' | 'absent' | 'user-owned' | 'unsafe';
+type PaneHomeSkillOutcome = 'written' | 'unchanged' | 'removed' | 'absent' | 'user-owned' | 'newer' | 'unsafe';
 
 export interface PaneHomeSkillResult {
   skillPath: string;
@@ -87,6 +91,9 @@ export function syncPaneHomeSkill(
   dirs: string[] = paneHomeSkillDirs(),
   wslDistros: string[] = [],
 ): Promise<PaneHomeSkillResult[]> {
+  // PANE_DIR isolates app data, not the user's agent configuration. Test/dev
+  // runtimes that disable OS integration must also leave these home files alone.
+  if (process.env.PANE_DISABLE_OS_INTEGRATION === '1') return Promise.resolve([]);
   const result = syncQueue.then(() => syncPaneHomeSkillNow(config, dirs, wslDistros));
   syncQueue = result.then(() => {}, () => {});
   return result;
@@ -198,6 +205,7 @@ type ManagedFile =
   | { kind: 'missing' }
   | { kind: 'managed'; content: string }
   | { kind: 'user-owned' }
+  | { kind: 'newer' }
   | { kind: 'unsafe' };
 
 async function readManagedFile(filePath: string): Promise<ManagedFile> {
@@ -220,7 +228,9 @@ async function readManagedFile(filePath: string): Promise<ManagedFile> {
   try {
     if (!(await handle.stat()).isFile()) return { kind: 'unsafe' };
     const content = await handle.readFile('utf8');
-    return content.includes(PANE_MANAGED_SKILL_MARKER) ? { kind: 'managed', content } : { kind: 'user-owned' };
+    const version = MANAGED_MARKER_PATTERN.exec(content)?.[1];
+    if (version === undefined) return { kind: 'user-owned' };
+    return Number(version) > PANE_MANAGED_SKILL_VERSION ? { kind: 'newer' } : { kind: 'managed', content };
   } finally {
     await handle.close();
   }
@@ -250,7 +260,7 @@ const decodeErrorCode = (error: Parameters<typeof decodeBoundary>[0]): string | 
 export function buildPaneHomeSkill(): string {
   return `---
 name: pane
-description: Use Pane from inside a Pane terminal (PANE_SESSION_ID is set) through the runpane CLI. Use when starting new features in their own Panes, adding agent tabs (review, audit, fix, QA) to an existing Pane, showing a page or file when supported, reading or sending input to another panel, or coordinating Panes from a Session orchestrator.
+description: Use whenever you work with Pane, the desktop app that runs coding agents in parallel git worktrees, through the runpane CLI or the pane MCP tools. Use in a Pane terminal (PANE_SESSION_ID is set), when a task mentions Panes, panels, Sessions or Pane worktrees, when you need the person's answer or approval (notify), when runpane or the pane MCP tools seem missing, when starting features in their own Panes or adding agent tabs (review, audit, fix, QA) to one, showing a page or file, reading or sending input to another panel, reaching another machine in the person's workspace, or coordinating Panes from a Session orchestrator.
 ---
 ${PANE_MANAGED_SKILL_MARKER}
 
@@ -262,18 +272,21 @@ of it through the \`runpane\` CLI.
 
 ## Establish the control surface
 
-1. Check for \`runpane\` on PATH. If it is absent, use
+1. Check for \`runpane\` on PATH. If it is absent, use Pane's bundled CLI in
+   its place: \`"$PANE_RUNPANE_BIN"\`, else \`~/.pane/bin/runpane\` (or
+   \`$PANE_DIR/bin\`; \`runpane.cmd\` on Windows). Only when neither exists, use
    \`npx --yes runpane@latest\` in place of \`runpane\` in every command below.
 2. Run \`runpane doctor --json\`, then \`runpane agent-context --json\`. For a
    command's exact schema, run \`runpane agent-context --command "<command>" --json\`.
 3. If runpane cannot be reached or doctor fails, stop and tell the user what
    failed. Do not substitute raw \`git worktree\` checkouts or built-in
    subagents for work that belongs in a Pane, and do not invent commands.
-   From WSL when Pane runs on Windows, use the Windows wrapper through
-   PowerShell from a Windows directory, for example
-   \`powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane doctor --json'\`.
-   Use that form for subsequent commands too. A Linux wrapper cannot reach
-   the Windows named-pipe daemon; a Windows-mounted shim can also fail in WSL.
+   From WSL when Pane runs on Windows, a Linux wrapper cannot reach the
+   Windows named-pipe daemon. Use Pane's own shim, which runs the Windows CLI
+   through WSL interop: \`/mnt/c/Users/<you>/.pane/bin/runpane doctor --json\`
+   (Pane's WSL terminals already have it on PATH). With an older Pane, use
+   \`powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane doctor --json'\`
+   and that form for subsequent commands.
 
 ## Common commands
 
@@ -292,13 +305,48 @@ of it through the \`runpane\` CLI.
 - Read or wait on a panel: \`runpane panels screen --panel <panel-id> --limit 80 --json\`,
   \`runpane panels wait --panel <panel-id> --for idle --json\`
 - Send a message: \`runpane panels submit --panel <panel-id> --text "<message>" --yes --json\`
-- Wait for a tab's report (\`runpane report\`), with or without a Session. Run this
-  as a background task; it exits with the event's line. Act on it, then run it
-  again (the named cursor misses nothing in between). Use \`--pane <pane-id>\`
-  for workers in another Pane:
-  \`runpane watch --pane "$PANE_SESSION_ID" --as <your-name> --until-event --quiet --json --kinds agent.report,agent.blocked,panel.exited,pane.gone\`
+- Wait for workers with the one wait primitive, run as a background task that
+  wakes you when it exits; act on its event, then run it again (the named
+  cursor misses nothing in between). Use \`--pane <pane-id>\` instead of
+  \`--session\` outside a Session:
+  \`runpane watch --session <session> --as <your-name> --until-event --json --kinds agent.report,agent.report.missing,agent.blocked,agent.ready,panel.exited,panel.stopped,pane.gone\`
   Never pipe \`runpane watch --follow\` into \`grep -m1\` or \`head\` to wait:
-  \`--follow\` never exits on its own.
+  \`--follow\` never exits on news.
+- Workers end with \`runpane report --state <ready|blocked|failed|done> --summary-file <path>\`
+  (\`--question\` when blocked, \`--pr\` and \`--head\` when there is a PR).
+
+## Asking the person
+
+When you need a choice, an approval or a short answer, use the \`pane\` MCP
+\`notify\` tool instead of asking in the terminal. If the \`pane\` MCP tools are
+not loaded (some launchers start agents with a strict MCP config), run the same
+call through the CLI:
+\`runpane notify --ui options --title "<question>" --context "<what it is for>" --choices '[{"label":"Ship it","detail":"<consequence>","recommended":true},{"label":"Wait"}]' --json\`.
+\`--ui\` is \`options\`, \`approve\` (\`--detail\`), \`ask\` (\`--suggestions\`) or
+\`info\`. On \`waiting\`, run \`runpane notify --resume <id> --json\`; on
+\`unavailable\`, ask in the terminal.
+
+## When something looks missing
+
+- Pane keeps its data in \`~/.pane\` (or \`$PANE_DIR\`): \`bin/\` the CLI shims,
+  \`logs/\` app logs, \`sessions/<id>/\` each Session's folder (plans, prompts,
+  \`status/\` worker status files), \`skills/\` Pane's bundled skills, \`updates/\`.
+- Which Pane and Session you are in: \`PANE_SESSION_ID\` (your Pane),
+  \`PANE_PANEL_ID\`, \`PANE_ORCHESTRATION_SESSION_ID\`; then \`runpane panes list --json\`
+  or \`runpane sessions overview --session <id> --json\` shows who owns what.
+- Health and setup: \`runpane doctor --json\` names what is wrong and the fix.
+- How something in Pane works: \`runpane docs search --query "<words>"\`, then
+  \`runpane docs read --doc <path>\`.
+- Another machine in the person's workspace: \`runpane workspace list\`, then
+  \`runpane workspace <machine> exec -- <command>\`.
+
+## Orchestrating workers
+
+To launch, wait on, answer or resume workers (including wrappers launched with
+\`--tool-command\`, such as \`agent-farm run\`), read and follow Pane's
+orchestrator guide: \`runpane docs read --doc skills/pane-orchestration/SKILL.md\`.
+It covers delivery checks, what each wake means, worker reports and status
+files, resume after a restart, showing pages, and shared-checkout etiquette.
 
 ## Sessions
 

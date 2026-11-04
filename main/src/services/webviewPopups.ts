@@ -1,4 +1,5 @@
 import type { WebContents } from 'electron';
+import { externalUrlOrNull } from '../utils/externalUrl';
 
 interface WebviewPopupRouting {
   /** The panel a webview belongs to, once the renderer has registered it. */
@@ -6,14 +7,44 @@ interface WebviewPopupRouting {
   /** Opens a regular link as a new browser tab next to its source panel. */
   openBrowserTab(request: { url: string; sourceSessionId: string; sourcePanelId: string }): void;
   openExternal(url: string): void;
+  /** Opens a Pane, Session or repository the way an OS-level pane:// link does. */
+  openPaneLink(url: string): void;
+}
+
+/**
+ * A pane:// link opens a Pane, Session or repository. Only pages loaded from a
+ * local file (pages Pane or an agent opened, like Start here) may follow one;
+ * a web page can't steer the app.
+ */
+function followPaneLink(pageUrl: string, url: string, routing: WebviewPopupRouting): boolean {
+  if (!url.toLowerCase().startsWith('pane://')) return false;
+  if (pageUrl.toLowerCase().startsWith('file:')) routing.openPaneLink(url);
+  else console.warn('[BrowserPanel] Ignored a pane:// link from a web page');
+  return true;
 }
 
 /**
  * Routes a browser tab's window.open calls. Sign-in popups become real windows in
  * the tab's own store, so they share its logins; other links open as Pane tabs.
  */
-export function routeWebviewPopups(wvContents: WebContents, routing: WebviewPopupRouting): void {
+export function routeWebviewPopups(
+  wvContents: Pick<WebContents, 'id' | 'getURL' | 'setWindowOpenHandler' | 'on' | 'once'>,
+  routing: WebviewPopupRouting,
+): void {
+  wvContents.on('will-navigate', (event, url) => {
+    if (followPaneLink(wvContents.getURL(), url, routing)) event.preventDefault();
+  });
+
   wvContents.setWindowOpenHandler(({ url, disposition }) => {
+    if (followPaneLink(wvContents.getURL(), url, routing)) return { action: 'deny' };
+    // Pages in a browser tab are untrusted: only web links may leave it. A file: or
+    // app-scheme URL would otherwise reach the OS through a popup, tab or openExternal.
+    // about:blank stays allowed for popups that a sign-in script navigates after opening.
+    if (url !== 'about:blank' && externalUrlOrNull(url) === null) {
+      console.warn('[BrowserPanel] Blocked window.open to a non-web URL scheme, wcId:', wvContents.id);
+      return { action: 'deny' };
+    }
+
     // Auth popups (Firebase signInWithPopup, OAuth providers, etc.) use window.open()
     // with explicit features (width, height, toolbar=no), which Chromium reports as
     // disposition 'new-window'. Let these open as real BrowserWindows so the

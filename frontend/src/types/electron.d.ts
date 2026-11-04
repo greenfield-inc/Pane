@@ -1,4 +1,6 @@
 /// <reference types="electron" />
+import type { PreferencesApi } from '../../../shared/types/preferences';
+import type { VoiceKeyCheck } from '../../../shared/voice/voiceKeys';
 // Type definitions for Electron preload API
 import type { Session, SessionOutput, GitStatus, VersionInfo, VersionUpdateInfo } from './session';
 import type { Project } from './project';
@@ -6,6 +8,7 @@ import type { Folder } from './folder';
 import type { AppConfig, UpdateConfigRequest } from './config';
 import type { SessionCreationPreferences } from '../stores/sessionPreferencesStore';
 import type { HostNavigationMemory } from '../../../shared/types/hostNavigation';
+import type { TestNotificationResult } from '../../../shared/types/notifications';
 import type { SessionWorkspaceLayout } from '../../../shared/types/sessionWorkspaceLayout';
 import type {
   RemoteDaemonClientRecord,
@@ -20,9 +23,13 @@ import type {
   RemoteHostSetupResult,
   RemoteHostSetupTerminalCommandResult,
   RemotePaneConnectionState,
+  RemoteConnectionCheckStage,
+  RemoteHostSetupProgress,
   RemotePaneConnectionProfile,
 } from '../../../shared/types/remoteDaemon';
 import type { TailnetMachineList, WorkspaceAccessSummary, WorkspaceAccessUpdate } from '../../../shared/types/workspaceAccess';
+import type { MachineCommand, MachineConnectionsEvent, MachineReadChannel, MachineResult, MachineState } from '../../../shared/types/machineConnections';
+import type { GlassesAccessState, GlassesRevokeEverywhereResult } from '../../../shared/types/glasses';
 import type {
   PanePermissionRequest,
   PanePermissionResolvedEvent,
@@ -38,6 +45,7 @@ import type {
 } from '../../../shared/types/panels';
 import type { JsonValue } from '../../../shared/validation/boundaryDecoder';
 import type { PanelAgentStatusEvent } from '../../../shared/types/agentStatus';
+import type { NotifyCommand, NotifySharedState, NotifySnapshot, NotifyWindowSize } from '../../../shared/types/notify';
 import type { DiffManifest, DiffScope, FileDiffRequest, FileDiffResult } from '../../../shared/types/gitDiff';
 import type { AgentUsageSnapshot } from '../../../shared/types/agentUsage';
 import type { PaneChatAgent, PaneChatState } from '../../../shared/types/paneChat';
@@ -54,6 +62,8 @@ import type {
 } from '../../../shared/types/orchestrationSession';
 import type { UsageIndexStatus, UsageReport, UsageReportRequest } from '../../../shared/types/usage';
 import type { LeaderboardResponse, LeaderboardStatus, LeaderboardSubmitResult } from '../../../shared/types/leaderboard';
+import type { Loop, LoopInput, LoopSchedulePreview } from '../../../shared/types/loop';
+import type { SetupExportResult, SetupExportSummary, SetupFile, SetupImportPreview, SetupSectionId } from '../../../shared/types/setupTransfer';
 import type { MissionControlAgentPanel, MissionControlSnapshotRequest, MissionControlSnapshotResult } from '../../../shared/types/missionControl';
 import type { CreateSessionRequest } from './session';
 import type { DetectedProjectConfig } from '../../../shared/types/projectConfig';
@@ -62,6 +72,7 @@ import type { PaneLinkTarget } from '../../../shared/types/paneLinks';
 import type { ArchiveProgressSnapshot } from '../../../shared/types/archiveProgress';
 import type { ListeningPortsSnapshot } from '../../../shared/types/listeningPorts';
 import type { UpdateCapabilities } from '../../../shared/types/updater';
+import type { SessionImportProgress, SessionImportRunResult, SessionImportScan } from '../../../shared/types/sessionImport';
 import type {
   ProjectDashboardData,
   ProjectDashboardSessionUpdateEvent,
@@ -85,6 +96,15 @@ interface RendererDiagnosticPayload {
   column?: number;
 }
 
+/** What the `machines:read` channels All machines uses answer, as each machine's own handler returns it. */
+interface MachineReadAnswers {
+  'sessions:get-all-with-projects': IPCResponse<Array<Project & { sessions: Session[] }>>;
+  'orchestration-sessions:list': IPCResponse<OrchestrationSessionListResult>;
+  'panels:agent-statuses': IPCResponse<PanelAgentStatusEvent[]>;
+  'permission:getPending': IPCResponse<PanePermissionRequest[]>;
+  'notify:remote-snapshot': NotifySharedState | null;
+}
+
 // oxlint-disable-next-line typescript/no-explicit-any -- Generic type parameter default for flexible API responses
 interface IPCResponse<T = any> {
   success: boolean;
@@ -97,6 +117,7 @@ interface IPCResponse<T = any> {
 
 interface ElectronAPI {
   onNotesChanged: (callback: () => void) => () => void;
+  preferences: PreferencesApi;
   // Generic invoke method. Daemon-owned channels route through the main-process
   // daemon bridge while adapter-only channels stay on direct Electron IPC.
   invoke: {
@@ -137,6 +158,11 @@ interface ElectronAPI {
     installUpdate: () => Promise<IPCResponse>;
     copyUpdateCommand: () => Promise<IPCResponse<{ command: string }>>;
     openTerminalWithCommand: () => Promise<IPCResponse<{ command: string }>>;
+    getRestartState: () => Promise<IPCResponse<import('../../../shared/types/updater').RestartToUpdateState>>;
+    restartToUpdate: (source: import('../../../shared/types/updater').RestartToUpdateSource) => Promise<IPCResponse>;
+    snooze: () => Promise<IPCResponse<import('../../../shared/types/updater').RestartToUpdateState>>;
+    setTonight: (enabled: boolean) => Promise<IPCResponse<import('../../../shared/types/updater').RestartToUpdateState>>;
+    takeRestoreResult: () => Promise<IPCResponse<import('../../../shared/types/updater').UpdateRestoreResult | null>>;
   };
 
   // System utilities
@@ -152,9 +178,13 @@ interface ElectronAPI {
     rendererFatal: (payload: RendererDiagnosticPayload) => Promise<IPCResponse>;
   };
 
+  agentChat: import('../../../shared/types/agentChat').AgentChatClient;
+
   paneChat: {
     getOrCreate: () => Promise<IPCResponse<PaneChatState<Session>>>;
     setAgent: (agent: PaneChatAgent) => Promise<IPCResponse<PaneChatState<Session>>>;
+    /** Whether to offer Pane Chat now; see main/src/services/paneChatIntroOffer.ts. */
+    introOffer: () => Promise<IPCResponse<{ eligible: boolean; openingPromptAtLaunch: boolean }>>;
   };
 
   sshHosts: {
@@ -184,6 +214,13 @@ interface ElectronAPI {
     rescan: () => Promise<IPCResponse<UsageIndexStatus>>;
   };
 
+  // Bring sessions from other agent tools into Pane
+  sessionImport: {
+    scan: () => Promise<SessionImportScan>;
+    run: (keys: string[]) => Promise<SessionImportRunResult>;
+    progress: () => Promise<SessionImportProgress>;
+  };
+
   // Leaderboard opt-in and submission
   leaderboard: {
     getStatus: () => Promise<IPCResponse<LeaderboardStatus>>;
@@ -199,6 +236,26 @@ interface ElectronAPI {
     shareImage: (data: string, filename: string) => Promise<IPCResponse<{ method: 'share' | 'clipboard' }>>;
   };
 
+  // Settings › Import & Export: always this computer's setup
+  setup: {
+    summary: () => Promise<IPCResponse<SetupExportSummary>>;
+    /** Opens a save dialog; null when the person cancels. */
+    export: (sections: SetupSectionId[]) => Promise<IPCResponse<SetupExportResult | null>>;
+    /** Opens a file dialog and previews the chosen file; null when the person cancels. */
+    chooseImport: () => Promise<IPCResponse<SetupImportPreview | null>>;
+    /** Recomputes a preview against the current setup. */
+    preview: (file: SetupFile, fileName: string) => Promise<IPCResponse<SetupImportPreview>>;
+  };
+
+  // Loops (scheduled tasks)
+  loops: {
+    list: () => Promise<IPCResponse<Loop[]>>;
+    save: (input: LoopInput) => Promise<IPCResponse<Loop>>;
+    delete: (id: string) => Promise<IPCResponse<void>>;
+    setEnabled: (id: string, enabled: boolean) => Promise<IPCResponse<Loop>>;
+    runNow: (id: string) => Promise<IPCResponse<Loop>>;
+    preview: (cron: string) => Promise<IPCResponse<LoopSchedulePreview>>;
+  };
   // Mission Control — every agent pane across all sessions
   missionControl: {
     listAgents: (options?: { includeArchived?: boolean }) => Promise<IPCResponse<MissionControlAgentPanel[]>>;
@@ -294,7 +351,6 @@ interface ElectronAPI {
     // Log operations
     getLogs: (sessionId: string) => Promise<IPCResponse>;
     clearLogs: (sessionId: string) => Promise<IPCResponse>;
-    addLog: (sessionId: string, entry: LogEntry) => Promise<IPCResponse>;
     
     // Large text operations
     saveLargeText: (sessionId: string, text: string) => Promise<string>;
@@ -353,10 +409,12 @@ interface ElectronAPI {
     updateSessionPreferences: (preferences: SessionCreationPreferences) => Promise<IPCResponse>;
     getMonospaceFonts: () => Promise<IPCResponse>;
     chooseApnsKey: () => Promise<IPCResponse<{ privateKey: string; keyId: string | null } | null>>;
+    checkDeepgramKey: (key: string) => Promise<VoiceKeyCheck>;
   };
 
   remoteDaemon: {
     restoreComplete: (restoreId: number, error?: string) => Promise<void>;
+    restoreReady?: () => void;
     getConfig: () => Promise<IPCResponse<RemoteDaemonConfig>>;
     getConnectionState: () => Promise<IPCResponse<RemotePaneConnectionState>>;
     getHostState: () => Promise<IPCResponse<RemoteDaemonHostRuntimeState>>;
@@ -377,7 +435,14 @@ interface ElectronAPI {
     getWorkspaceAccess: () => Promise<IPCResponse<WorkspaceAccessSummary>>;
     updateWorkspaceAccess: (update: WorkspaceAccessUpdate) => Promise<IPCResponse<WorkspaceAccessSummary>>;
     listTailnetMachines: () => Promise<IPCResponse<TailnetMachineList>>;
+    getGlasses: () => Promise<IPCResponse<GlassesAccessState>>;
+    revokeGlasses: (id: string) => Promise<IPCResponse<GlassesAccessState>>;
+    revokeGlassesEverywhere: (phoneId: string) => Promise<IPCResponse<GlassesRevokeEverywhereResult>>;
+    setGlassesOrigin: (update: { origin: string; allowed: boolean }) => Promise<IPCResponse<GlassesAccessState>>;
     saveTailnetMachine: (input: { name: string; password?: string }) => Promise<IPCResponse<RemotePaneConnectionProfile>>;
+    runCheckFix: (checkId: number, stage: RemoteConnectionCheckStage) => Promise<IPCResponse<RemotePaneConnectionState>>;
+    dismissCheck: (checkId: number) => Promise<IPCResponse<RemotePaneConnectionState>>;
+    onSetupProgress: (callback: (progress: RemoteHostSetupProgress) => void) => () => void;
     onConnectionStateChanged: (callback: (state: RemotePaneConnectionState) => void) => () => void;
     onHostStateChanged: (callback: (state: RemoteDaemonHostRuntimeState) => void) => () => void;
   };
@@ -451,6 +516,8 @@ interface ElectronAPI {
     onSessionCreationFailed: (callback: (failure: { name: string; error: string }) => void) => () => void;
     onSessionCreated: (callback: (session: Session) => void) => () => void;
     onSessionUpdated: (callback: (session: Session) => void) => () => void;
+    /** Loops or their runs changed; read them again with `loops.list`. */
+    onLoopsChanged: (callback: () => void) => () => void;
     onPaneFocusRequested: (callback: (data: RunpanePaneFocusRequestedEvent) => void) => () => void;
     onArchiveProgress: (callback: (progress: ArchiveProgressSnapshot) => void) => () => void;
     onListeningPortsChanged: (callback: (snapshot: ListeningPortsSnapshot) => void) => () => void;
@@ -500,7 +567,6 @@ interface ElectronAPI {
      * Re-fires on auto-reattach after a supervisor restart with a new ptyId.
      */
     onTerminalPtyReady: (callback: (data: { sessionId: string; panelId: string; ptyId: string }) => void) => () => void;
-    onUncleanShutdownDetected: (callback: () => void) => () => void;
     onMainLog: (callback: (level: string, message: string) => void) => () => void;
     onVersionUpdateAvailable: (callback: (versionInfo: VersionUpdateInfo) => void) => () => void;
     
@@ -510,6 +576,7 @@ interface ElectronAPI {
     onUpdaterUpdateNotAvailable: (callback: (info: { version: string }) => void) => () => void;
     onUpdaterDownloadProgress: (callback: (progressInfo: { bytesPerSecond: number; percent: number; transferred: number; total: number }) => void) => () => void;
     onUpdaterUpdateDownloaded: (callback: (info: { version: string; files: string[]; path: string; sha512: string; releaseDate: string }) => void) => () => void;
+    onRestartToUpdateState: (callback: (state: import('../../../shared/types/updater').RestartToUpdateState) => void) => () => void;
     onUpdaterError: (callback: (error: Error) => void) => () => void;
     
     // Process management events
@@ -617,7 +684,12 @@ interface ElectronAPI {
     killGitHubAuthTerminal: (terminalId: string) => Promise<IPCResponse>;
     onGitHubAuthTerminalOutput: (callback: (data: { terminalId: string; data: string }) => void) => () => void;
     onGitHubAuthTerminalExit: (callback: (data: { terminalId: string; exitCode: number; signal: number | null }) => void) => () => void;
-    setupDefaultRepo: () => Promise<IPCResponse>;
+    setupDefaultRepo: () => Promise<IPCResponse<import('../../../shared/types/onboarding').SampleRepoSetup>>;
+    findRepos: () => Promise<IPCResponse<import('../../../shared/types/onboarding').HostRepos>>;
+    findWslRepos: (distro: string) => Promise<IPCResponse<import('../../../shared/types/onboarding').WslRepos>>;
+    checkFolder: (folder: string) => Promise<IPCResponse<{ name: string; path: string }>>;
+    findAgents: () => Promise<IPCResponse<import('../../../shared/types/onboarding').FirstRunAgent[]>>;
+    firstSteps: () => Promise<IPCResponse<import('../../../shared/types/onboarding').FirstStepsState>>;
     supportProject: () => Promise<IPCResponse>;
   };
 
@@ -640,9 +712,51 @@ interface ElectronAPI {
     get: (force?: boolean) => Promise<IPCResponse<AgentUsageSnapshot>>;
   };
 
+  // Desktop notifications: Dictate's handoff (Pane skips its own alert) and Settings' test
+  notifications: {
+    isHandedOff: () => Promise<boolean>;
+    /** Shows a native test notification and reports whether the OS showed or blocked it. */
+    test: () => Promise<TestNotificationResult>;
+    openSettings: () => Promise<void>;
+  };
+
+  // Pane Notify: the queue's snapshot and the actions every surface sends back
+  notify: {
+    getSnapshot: () => Promise<NotifySnapshot>;
+    run: (command: NotifyCommand) => Promise<void>;
+    onSnapshot: (callback: (snapshot: NotifySnapshot) => void) => () => void;
+    /** A new question arrived and Sound is on; the main window plays the beep. */
+    onChime: (callback: () => void) => () => void;
+    /** Main asks the main window to show the Notify inbox or Settings → Notify. */
+    onNavigate: (callback: (target: 'inbox' | 'settings') => void) => () => void;
+    /** Floating windows only: fit the window to its card. */
+    resizeWindow: (size: NotifyWindowSize) => void;
+    /** Floating strip only: take key focus so a text or note field can be typed in. */
+    focusWindow: () => Promise<void>;
+  };
+
+  // Every machine the desktop knows, addressed by id: LOCAL_MACHINE_ID for this computer, else a saved profile id
+  machines: {
+    list: () => Promise<MachineState[]>;
+    /** One of the machine's list reads, tagged with the machine; `data` is what that channel answers. */
+    read: <Channel extends MachineReadChannel>(machineId: string, channel: Channel, args?: unknown[]) => Promise<{
+      machineId: string;
+      data: Channel extends keyof MachineReadAnswers ? MachineReadAnswers[Channel] : unknown;
+    }>;
+    /** One allowed command on the machine; anything else is refused. */
+    run: (machineId: string, command: MachineCommand) => Promise<MachineResult>;
+    /** Reconnects an offline saved machine now. */
+    retry: (machineId: string) => Promise<void>;
+    /** Every machine's list, Notify and permission events, resyncs and online/offline changes. */
+    onEvent: (callback: (event: MachineConnectionsEvent) => void) => () => void;
+  };
+
   // Window state queries (invoke, not event subscriptions)
   window: {
+    consumeUncleanShutdown: () => Promise<boolean>;
     isFocused: () => Promise<boolean>;
+    /** Raises the window and opens a pane:// link, like one opened from the OS. */
+    openPaneLink: (link: string) => Promise<void>;
   };
 
   // ptyHost: typed wrapper over the per-window MessagePort installed by the

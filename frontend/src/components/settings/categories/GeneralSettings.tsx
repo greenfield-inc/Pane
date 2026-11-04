@@ -9,6 +9,7 @@ import type { VersionInfo } from '../../../types/session';
 import { API } from '../../../utils/api';
 import type { HtmlFileOpenMode } from '../../../types/config';
 import { htmlFileOpenModeOf } from '../../../stores/configStore';
+import { KeepAwakeSetting } from './KeepAwakeSetting';
 
 interface GeneralSettingsProps {
   persistence: SettingsPersistence;
@@ -42,11 +43,11 @@ export function GeneralSettings({ persistence, onUpdate, onSendFeedback }: Gener
 
   return (
     <SettingsPage title="General" description="Application startup, update, feedback, and file-opening behavior.">
-      <SettingsSection title="Updates" description="Keep Pane current with release checks from GitHub.">
+      <SettingsSection title="Updates" description="Keep Pane current. New releases download in the background.">
         <SettingRow
           settingId="automatic-updates"
           label="Check for updates automatically"
-          description="Pane checks for a new release every 24 hours. Installation remains manual."
+          description="Pane checks for a new release at launch and every few hours and downloads it in the background. Restart to update when you're ready."
           saveState={persistence.saveStates['automatic-updates']}
         >
           <ImmediateToggle
@@ -110,18 +111,7 @@ export function GeneralSettings({ persistence, onUpdate, onSendFeedback }: Gener
       </SettingsSection>
 
       <SettingsSection title="Power" description="System sleep behavior while sessions are active.">
-        <SettingRow
-          settingId="keep-awake"
-          label="Keep computer awake while sessions are active"
-          description="Prevents the system from idle-sleeping while any session is active. The display can still turn off; closing the lid or choosing Sleep still sleeps the machine."
-          saveState={persistence.saveStates['keep-awake']}
-        >
-          <ImmediateToggle
-            label="Keep computer awake while sessions are active"
-            value={config.keepAwakeWhileSessionsActive !== false}
-            onSave={(value) => persistence.saveConfig('keep-awake', { keepAwakeWhileSessionsActive: value })}
-          />
-        </SettingRow>
+        <KeepAwakeSetting persistence={persistence} />
       </SettingsSection>
 
       <SettingsSection title="Files" description="How Pane opens files you click in Explorer.">

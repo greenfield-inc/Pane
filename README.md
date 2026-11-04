@@ -1,5 +1,3 @@
-![Pane — a pixel-art terminal workshop with separate agent workspaces](docs/assets/pane-banner.png)
-
 <p align="center">
   <img src="frontend/src/assets/pane-logo.png" alt="Pane" width="120" height="120">
 </p>
@@ -121,12 +119,15 @@ Each of these is a small thing. Together they compound fast.
 |---|---|---|
 | **Pane Chat** | A global orchestrator terminal that starts in the Pane data directory, reads local orchestration instructions, and can coordinate Claude, Codex, Cursor, or OpenCode across repositories, panes, tabs, worktrees, and review loops. | <a href="#pane-chat">Details</a> |
 | **Remote Pane** | Run panes, worktrees, terminals, files, git state, and approval prompts on a self-hosted remote machine while controlling them from desktop Pane or the browser app at [runpane.com/app](https://runpane.com/app/). | <a href="#remote-pane">Setup</a> |
-| **Pane Workspaces** | Let an agent on one of your machines read files, run commands, and drive Pane on another over Tailscale. Hand off a task to a fresh agent with its branch and a written note. | [Workspaces](#pane-workspaces) · [Handoff](#hand-off-a-task) |
+| **Pane Workspaces** | Let an agent on one of your machines read files, run commands, and drive Pane on another over Tailscale. Hand off a task with its branch and a written note; a handoff to the same agent continues your own session there. | [Workspaces](#pane-workspaces) · [Handoff](#hand-off-a-task) |
 | **Agent-Operable CLI** | Pane ships with `runpane agent-context`, `runpane repos add`, and `runpane panes create`, so a coding agent can discover Pane's command schema, register a repo, open a Pane for each new issue, and add agent tabs to existing Panes for review and fixes (1 feature = 1 worktree = 1 branch = 1 Pane). Claude Code, Codex, and Cursor get the same commands as MCP tools. | [Contract](docs/RUNPANE_CLI_CONTRACT.md) · [MCP](docs/PANE_MCP.md) |
+| **Pane Notify** | Agents ask you through the `notify` MCP tool instead of waiting in their terminal. Pane shows the question in a strip over whatever app you're in, and one click sends the answer back as the tool's result. ⌃⇧Space answers the whole queue by keyboard, and the Notify inbox holds everything. A Pane desktop shows the questions of every machine it has saved, and your phone gets an alert. | [Notify](docs/PANE_NOTIFY.md) |
+| **Pane on Even G2 glasses** | See every Notify card from all your computers on Even Realities G2 glasses, answer with the R1 ring or your voice, and open any Pane's live terminal to read it and dictate into it. Pair once from the Pane phone app. | [Even G2 glasses](docs/EVEN_G2_GLASSES.md) |
+| **Loops** | Run an agent or command on a cron schedule, such as a nightly bug sweep. Each run is a new Pane in a fresh worktree, ready to review. Loops are for large recurring jobs and run at most once an hour. | [Loops](docs/LOOPS.md) |
 | **@mention Terminals** | Type `@` in any terminal to pull the last 500 lines from another pane's terminal directly into your context, no copy-paste required. | <img src="images/qol-at-mention.png" alt="Cross-terminal @mention picker" width="420"> |
 | **Clipboard Shortcuts** | `Ctrl+Alt+[key]` pastes any saved text snippet instantly, so your most-used prompts are one keystroke away forever. | <img src="images/qol-clipboard.png" alt="Terminal clipboard shortcuts popover" width="280"> |
 | **Terminal Popover** | Highlight any text in a terminal and an intelligent popover offers the right action: copy, open in browser, or show in explorer. | <img src="images/qol-terminal-popover.png" alt="Terminal text selection popover" width="420"> |
-| **Built-in Browser** | Preview any URL in a tab next to your terminals so every pane can see its own running dev server without alt-tabbing. A new tab, or the address bar's Ports button, lists every port listening on the machine, grouped by the Pane that started it. On your phone, the Remote Pane app opens the same ports and HTML pages over Tailscale ([how](docs/SELF_HOSTED_REMOTE_DAEMON.md#browser-tabs-on-the-phone)), and its Explorer tab browses, edits and previews the worktree's files ([how](docs/SELF_HOSTED_REMOTE_DAEMON.md#files-on-the-phone)). | <img src="images/qol-browser.png" alt="Built-in browser tab previewing a local dev server" width="420"> |
+| **Built-in Browser** | Preview any URL in a tab next to your terminals so every pane can see its own running dev server without alt-tabbing. When a Pane's terminal or agent starts a web server, Pane offers to open a live preview of it beside the agent; the preview is that Pane's tab, so it follows the Pane. A new tab, or the address bar's Ports button, lists every port listening on the machine, grouped by the Pane that started it. On your phone, the Remote Pane app opens the same ports and HTML pages over Tailscale ([how](docs/SELF_HOSTED_REMOTE_DAEMON.md#browser-tabs-on-the-phone)), and its Explorer tab browses, edits and previews the worktree's files ([how](docs/SELF_HOSTED_REMOTE_DAEMON.md#files-on-the-phone)). | <img src="images/qol-browser.png" alt="Built-in browser tab previewing a local dev server" width="420"> |
 | **Resource Manager** | Built-in CPU and memory monitor broken down per pane and per process, so you can catch a runaway agent before it eats your laptop. | <img src="images/qol-resource-manager.png" alt="Built-in resource manager" width="420"> |
 | **Status Cues** | Every AI pane reports its state at a glance — a red dot when an agent is blocked waiting on your approval, an amber pulse while it works, and a "done" cue when it finishes while you're looking elsewhere. The same rollup colors the project dots and pane tabs, on the desktop and in the phone app, so a whole screen of parallel agents reads in one glance. | <img src="images/qol-status-dots.png" alt="Session agent status dots: blocked, working, done" width="280"> |
 | **Jump + Refresh** | Jump to top, jump to bottom, or hard-refresh any terminal from the toolbar to unstick a frozen state in one click. | <img src="images/qol-jump-refresh.png" alt="Terminal jump and refresh controls" width="120"> |
@@ -233,9 +234,9 @@ See [Workspaces setup, trust, and troubleshooting](docs/RUNPANE_WORKSPACES.md) f
 
 ### Hand off a task
 
-“Continue this on my Windows machine with Codex.” `runpane handoff` starts a fresh agent in a new Pane on the other machine (or a new tab in your Pane on this one), using your pushed branch and a note about the task. The note carries the goal, decisions, verified state, and next steps. Live processes and agent session memory stay on the original machine.
+“Continue this on my Windows machine with Codex.” `runpane handoff` starts the agent in a new Pane on the other machine (or a new tab in your Pane on this one), using your pushed branch and a note about the task. When the sending tab runs Claude, Codex, Cursor or OpenCode and the receiver is the same agent, it carries the agent's own session: another machine gets a copy of the session's files and resumes it, and this machine resumes a fork of it. The CLI then checks that the receiver continued the conversation, and reports `continued`, `inconclusive` (with a question to ask the receiver), or `not-continued` (the receiver is kept, never replaced). With `--note-only`, a different agent, or no session to carry, a fresh agent starts with the note instead, and the output says so. The note carries the goal, decisions, verified state, and next steps either way. Live processes stay on the original machine.
 
-To move a whole Session instead, right-click it and choose **Move to host…**: its agent hands it off, and a Session with the same name, goal and agent appears on the other machine, ready to read the note. See [Move a Session to another machine](docs/SESSIONS.md#move-a-session-to-another-machine).
+To move a whole Session instead, right-click it and choose **Move to host…**: its agent hands it off, and a Session with the same name, goal and agent appears on the other machine. With the same agent it resumes the Session's conversation when you open it; otherwise it starts by reading the note. See [Move a Session to another machine](docs/SESSIONS.md#move-a-session-to-another-machine).
 
 To hand off a Pane's task, run from the repository you're handing off. On the destination, clone the same GitHub repository if needed and add that checkout to Pane. Install and sign in to the receiving agent there. Keep Pane running there. Use the npm CLI. On the destination, choose a repository outside WSL; WSL receivers are not supported.
 
@@ -251,7 +252,7 @@ runpane handoff "codex on devbox" --note-file ~/handoff.md
 
 You can choose Claude, Codex, or Cursor, with a model and, for Claude or Codex, an effort level. Optional `--push` commits remaining changes except the note as WIP and pushes without forcing, so review your working tree first.
 
-The receiver gets instructions to verify the starting commit, continue the note's next steps, push to your original branch, and report back to your sending panel with `runpane workspace <sender> panels submit`. Stop editing that branch after handing it off. If you sent from outside a Pane panel, the instructions use a PR comment or commit message instead.
+The receiver gets instructions to verify the starting commit, continue the note's next steps, push to your original branch, and report back to your sending panel with `runpane workspace <sender> panels submit`. Stop editing that branch after handing it off; when the session continues on the receiver, the sending agent ends its turn and you can close its tab. Carrying a Cursor chat to another machine is best effort, since Cursor's store is undocumented (on the same machine it isn't carried: a copied Cursor chat still writes to the original), and the destination's agent store is assumed at its default location (`~/.claude`, `~/.codex`, `~/.cursor`). If you sent from outside a Pane panel, the instructions use a PR comment or commit message instead.
 
 See the [handoff guide](main/src/services/paneChatBundle/skills/handoff/SKILL.md) and [CLI options](packages/runpane/README.md#handing-work-to-another-machine).
 
@@ -267,7 +268,7 @@ Use it for the work that spans panes:
 Add this repo, create three worktree panes for the next features, start Codex in each one, and keep a separate review tab ready for every PR.
 ```
 
-Already working in other agent tools? Say "migrate to Pane" and Pane Chat finds your Claude Code, Codex, OpenCode, Cursor and Conductor sessions (or anything similar), opens each one in a Pane tab with its own agent's resume, and checks that it continues where it left off. On a fresh install with no repositories, Pane Chat offers this once by itself. See [Bring your existing sessions into Pane](docs/SESSIONS.md#bring-your-existing-sessions-into-pane).
+Already working in other agent tools? Say "migrate to Pane" and Pane Chat finds your Claude Code, Codex, OpenCode, Cursor and Conductor sessions (or anything similar), opens each one in a Pane tab with its own agent's resume, and checks that it continues where it left off. On a new install, the first-run screen asks which agent you use and offers to bring your recent sessions in; Yes opens the Onboarding Session, which brings them in, groups them into Sessions, and opens a Start here page. See [Bring your existing sessions into Pane](docs/SESSIONS.md#bring-your-existing-sessions-into-pane).
 
 Pane Chat keeps the human discussion at the orchestrator level, captures work as tickets or briefs, then hands authorized implementation to Claude, Codex, Cursor, or OpenCode agents in Panes through RunPane.
 
@@ -278,7 +279,7 @@ The prompt stays small because Pane ships its skills and installs them into the 
 - `skills/pane-chat/skills/`: the bundled skills, also installed in `.claude/skills/` and `.codex/skills/`
 - `.claude/agents/` and `.codex/agents/`: helper subagents (explorer, cold-reader, qa-and-verify, reviewer)
 
-The bundle lives in `main/src/services/paneChatBundle/`. It is built on Agent Farm's raw profile (`prepare-pr`, `create-ticket`, `tdd`, `quick-verify`, `babysit-pr`, `investigate`, and others), general primitives such as `orchestrate-sessions`, `verify-app`, `options`, and `brief`, and three Pane-specific skills, `runpane`, `pane-work`, and `migrate-to-pane`. Pane generates the `pane-orchestrator` entry point at install time. Nothing is downloaded at runtime.
+The bundle lives in `main/src/services/paneChatBundle/`. It is built on Agent Farm's raw profile (`prepare-pr`, `create-ticket`, `tdd`, `quick-verify`, `babysit-pr`, `investigate`, and others), general primitives such as `orchestrate-sessions`, `verify-app`, `options`, and `brief`, and four Pane-specific skills, `runpane`, `pane-orchestration` (the orchestrator guide), `pane-work`, and `migrate-to-pane`. Pane generates the `pane-orchestrator` entry point at install time. Nothing is downloaded at runtime.
 
 Pane Chat and named Sessions support Claude, Codex, Cursor, and OpenCode. Choose the agent when creating a Session, and set the default in AI & Agents settings. OpenCode reads the generated Session `AGENTS.md`; this does not install OpenCode skills or MCP configuration.
 
@@ -299,9 +300,9 @@ runpane panes create --repo active --name issue-252 --agent codex --prompt "Kick
 
 `runpane agent-context` is token-efficient by default and prints only command names, arguments, and safe usage notes. Agents can lazy-load full details for a specific command with `runpane agent-context --command "panes create" --json`.
 
-Pane also registers a `pane` MCP server with Claude Code, Codex, and Cursor, so agents in every repository can get these commands as tools. Cursor may ask you to approve the server. The default core toolset covers the common jobs in one call each: start an agent on a task, check on it, and send it a follow-up. It also has git status, docs search, and `pane://` links that open a Pane in the app. You can turn this off, or register every tool, in Settings → AI & Agents. Other MCP clients (VS Code and any stdio client) can run `npx --yes runpane@latest mcp`. See [Pane MCP Server](docs/PANE_MCP.md).
+Pane also registers a `pane` MCP server with Claude Code, Codex, and Cursor, so agents in every repository can get these commands as tools. Cursor may ask you to approve the server. The default core toolset covers the common jobs in one call each: start an agent on a task, check on it, and send it a follow-up. It also adopts and renames Panes, creates and pins Sessions, opens a page or file beside the agent, reaches your other machines (list them, read and write files, run commands), and has git status, docs search, `pane://` links that open a Pane in the app, loops that run an agent on a schedule, and `notify`, which asks you a question on screen wherever you are and gives the agent your answer. You can turn this off, or register every tool, in Settings → AI & Agents. Other MCP clients (VS Code and any stdio client) can run `npx --yes runpane@latest mcp`. See [Pane MCP Server](docs/PANE_MCP.md).
 
-Pane teaches agents about RunPane without editing your repositories. It installs a small Pane-managed `pane` skill in your home skill folders (`~/.claude/skills/pane`, or under `CLAUDE_CONFIG_DIR`, and `~/.agents/skills/pane`), including saved WSL distros on Windows. The skill is marked `<!-- pane-managed-skill v1 -->`. Pane never overwrites or removes a skill it did not write, and **Settings → AI & Agents → Install Pane skill for agents** removes it again.
+Pane teaches agents about RunPane without editing your repositories. It installs a small Pane-managed `pane` skill in your home skill folders (`~/.claude/skills/pane`, or under `CLAUDE_CONFIG_DIR`, and `~/.agents/skills/pane`), including saved WSL distros on Windows. The skill is marked `<!-- pane-managed-skill v2 -->`; Pane rewrites a copy an older Pane marked and leaves one a newer Pane marked. It tells agents how to reach Pane when its CLI or MCP tools look missing, including asking you through `runpane notify` when the `pane` MCP tools are not loaded. Pane never overwrites or removes a skill it did not write, and **Settings → AI & Agents → Install Pane skill for agents** removes it again.
 
 Publishing a Pane section into each repository's `AGENTS.md` is still available under **Settings → AI & Agents → Publish Pane instructions to AGENTS.md**, but it is off by default because it edits files in your repositories. Upgrading turns it off once and removes only Pane's marked section; turning it back on afterward sticks.
 
@@ -327,7 +328,7 @@ Other tools build custom chat UIs that only work with agents they've explicitly 
 
 | Shortcut | Action |
 |----------|--------|
-| `⌘⇧P` / `Ctrl+Shift+P` | Open command palette |
+| `⌘⇧P` / `Ctrl+Shift+P` | Open Search: find any Pane, Session, project or command |
 | `⌘K` / `Ctrl+K` | Clear terminal scrollback |
 | `⌘N` / `Ctrl+N` | New pane |
 | `⌘⇧W` / `Ctrl+Shift+W` | Archive pane |
@@ -385,10 +386,11 @@ The shell installers and the other one-shot commands are at the top of this READ
 ### Requirements
 
 - **Git** installed and available in PATH
-- At least one AI coding agent CLI installed:
-  - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) — `npm install -g @anthropic-ai/claude-code`
-  - [Codex](https://github.com/openai/codex) — `npm install -g @openai/codex`
-  - [Cursor Agent](https://cursor.com/docs/cli) — `curl https://cursor.com/install -fsS | bash` (macOS/Linux, or inside WSL on Windows)
+- At least one AI coding agent CLI installed and signed in:
+  - [Claude Code](https://code.claude.com/docs/en/setup) — `curl -fsSL https://claude.ai/install.sh | bash` (on Windows, `npm install -g @anthropic-ai/claude-code`), then `claude auth login`
+  - [Codex](https://github.com/openai/codex) — `curl -fsSL https://chatgpt.com/codex/install.sh | sh` (on Windows, `npm install -g @openai/codex`), then `codex login`
+  - [Cursor Agent](https://cursor.com/docs/cli/installation) — `curl https://cursor.com/install -fsS | bash` (macOS/Linux, or inside WSL on Windows), then `cursor-agent login`
+  - [OpenCode](https://opencode.ai/docs) — `curl -fsSL https://opencode.ai/install | bash` (on Windows, `npm install -g opencode-ai`), then `opencode auth login`
   - [Aider](https://aider.chat/) — `pip install aider-chat`
   - [Goose](https://github.com/block/goose) — or any other CLI agent
 
@@ -406,6 +408,8 @@ The shell installers and the other one-shot commands are at the top of this READ
 OpenCode's native terminal integration reuses its exact saved conversation ID in project tabs, Pane Chat, and named Sessions. An allocated ID is not proof of existing history. OpenCode Sessions require supported direct commands, not wrappers or custom-resume templates.
 
 The default `opencode --auto` auto-approves non-denied operations; it is not a sandbox. Closing, archiving, and switching retain existing lifecycle behavior, and PTY exit does not prove that agent work was cancelled.
+
+Moving to a new computer? **Settings → Import & Export** saves your commands, run scripts, agent defaults, shortcuts, skill and MCP choices and look to a file, and imports it after showing what would change. Keys and tokens stay behind. See [Export and import your Pane setup](docs/SETUP_EXPORT_IMPORT.md).
 
 You can reuse an archived or deleted pane's name. Pane keeps any old worktree
 identity and Git branches separate, choosing a free worktree name for the new
@@ -491,7 +495,7 @@ Pane is the only tool that is a real desktop app, agent-agnostic, cross-platform
 ## FAQ
 
 **"Isn't this just tmux with extra steps?"**
-tmux is from 2007. Pane is a modern desktop app with a built-in diff viewer, file explorer, git workflow, command palette, browser tab, resource manager, persistent state, cross-terminal context sharing, and (unlike tmux) it works on Windows. tmux is a terminal multiplexer; Pane is a workstation for managing AI coding agents.
+tmux is from 2007. Pane is a modern desktop app with a built-in diff viewer, file explorer, git workflow, Search launcher, browser tab, resource manager, persistent state, cross-terminal context sharing, and (unlike tmux) it works on Windows. tmux is a terminal multiplexer; Pane is a workstation for managing AI coding agents.
 
 **"What if a new AI agent comes out tomorrow?"**
 You just run it. Pane doesn't bundle agents or lock you in. If it runs in a terminal, it runs in Pane, instantly. No plugins, no SDK, no waiting for support.
@@ -519,7 +523,7 @@ pnpm run setup
 PANE_DIR=~/.pane_test pnpm dev
 ```
 
-You need Node 22.18 or newer and pnpm 10 (`corepack enable`). `PANE_DIR` keeps
+You need patched Node 22.23.4+ (22.x), 24.22.1+ (24.x), or 26.12.1+ (26.x), and pnpm 10 (`corepack enable`). `PANE_DIR` keeps
 the dev build away from an installed Pane's data in `~/.pane`. It doesn't
 isolate Electron's browser profile; see
 [Running a dev build safely](CONTRIBUTING.md#running-a-dev-build-safely).
@@ -530,7 +534,8 @@ isolate Electron's browser profile; see
 pnpm build:win:x64    # Windows (x64)
 pnpm build:win:arm64  # Windows (ARM64)
 pnpm build:mac        # macOS (Apple Silicon + Intel)
-pnpm build:linux      # Linux (x64 + ARM64)
+pnpm build:linux:x64  # Linux x64 (run on an x64 Linux host)
+pnpm build:linux:arm64 # Linux ARM64 (run on an ARM64 Linux host)
 ```
 
 ### Releasing

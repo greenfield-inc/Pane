@@ -1,6 +1,6 @@
 import { decodeUpdateIntent, type RemoteUpdateIntent } from './updateIntent';
-import { REMOTE_READ_CHANNELS, REMOTE_RESTORE_CHANNELS } from './readChannels';
-import { RecoveryCycle } from './recoveryCycle';
+import { REMOTE_DEDUPLICATED_CHANNELS, REMOTE_READ_CHANNELS, REMOTE_RESTORE_CHANNELS, REMOTE_STREAMLESS_CHANNELS, REMOTE_WRITES_BUSY_CODE } from './readChannels';
+import { RecoveryCycle, backoffDelayMs } from './recoveryCycle';
 import type { ParsedSseEvent } from '../sseParser';
 import {
   decodeRemoteDaemonEventEnvelope,
@@ -42,6 +42,10 @@ export interface RemoteRequestContext {
   token: string;
   runtimeId: string;
   clientLabel: string;
+  /** This device's own name, such as the phone's; the host names answers from it. */
+  deviceLabel?: string;
+  /** Set on writes to a host that de-duplicates them; the transport sends it in the invoke body. */
+  requestId?: string;
 }
 
 export interface RemoteEventStreamContext extends RemoteRequestContext {
@@ -74,6 +78,19 @@ export interface RemoteDaemonConnectionState {
   status: RemotePaneConnectionStatus;
   lastError: string | null;
   lastSeenAt: string | null;
+  /** How the last return from the background went, once it reconnected. */
+  lastWake?: RemoteWakeTiming;
+}
+
+/** Tells a slow network apart from a slow host after a return from the background. */
+export interface RemoteWakeTiming {
+  wokeAt: string;
+  /** Until the host first answered a probe or accepted the event stream. */
+  firstAnswerMs: number | null;
+  connectedMs: number;
+  /** Health probes and event stream opens since the wake. */
+  attempts: number;
+  lastError: string | null;
 }
 
 export interface RemoteDaemonClientOptions {
@@ -82,6 +99,8 @@ export interface RemoteDaemonClientOptions {
   /** Stable per-install ID; see `getOrCreateRuntimeId`. */
   runtimeId: () => string | Promise<string>;
   clientLabel: string;
+  /** This device's own name, such as the phone's; the host names answers from it. */
+  deviceLabel?: string;
   fetch?: RemoteFetch;
   /**
    * Reconnect when the stream delivers nothing (the host sends a heartbeat
@@ -89,6 +108,24 @@ export interface RemoteDaemonClientOptions {
    * error, so native clients should set it. Off by default.
    */
   staleStreamTimeoutMs?: number;
+  /**
+   * Schedules the client's own timers (retry delays, reconnects, the stale-stream and recovery
+   * deadlines). Defaults to the global `setTimeout`. A host that replaces the globals with timers
+   * that stall while idle, as the Even Hub SDK does, passes timers that keep firing.
+   */
+  schedule?: RemoteSchedule;
+}
+
+/** A scheduled callback that can be cancelled. */
+export interface RemoteTimer {
+  cancel(): void;
+}
+
+export type RemoteSchedule = (callback: () => void, ms: number) => RemoteTimer;
+
+function scheduleWithGlobals(callback: () => void, ms: number): RemoteTimer {
+  const handle = setTimeout(callback, ms);
+  return { cancel: () => clearTimeout(handle) };
 }
 
 /** The host rejected the connection code. Retrying cannot help. */
@@ -131,8 +168,26 @@ const invokeResponseSchema = boundary.union(
 );
 
 const HEALTH_CHECK_ATTEMPTS = 5;
-const INVOKE_ATTEMPTS = 4;
 const REQUEST_RETRY_DELAY_MS = 2_000;
+/** A request safe to repeat keeps retrying as long as an outage may last. */
+const REQUEST_RETRY_BUDGET_MS = 300_000;
+/** A restore that has not finished by then is treated as a broken connection. */
+const RESTORE_TIMEOUT_MS = 30_000;
+/** The heartbeat decides liveness; this many failed requests in a row with no answer between also reconnect. */
+const MAX_FAILED_REQUESTS_IN_A_ROW = 3;
+const RECONNECT_GAVE_UP_MESSAGE = 'Could not reconnect within five minutes. Your workspace is kept. Choose Retry now.';
+/** A resent write's attempt with no answer by then is sent again; a repeat of a slow write waits for the first on the host. */
+const RESENT_WRITE_ATTEMPT_TIMEOUT_MS = 30_000;
+/**
+ * A tunnel such as Tailscale's takes a moment to come back after sleep, and a request sent before
+ * it does may never answer. For the first seconds after a wake a fresh probe goes out every 250 ms,
+ * so one leaves soon after the path returns; after that, probes follow the reconnect backoff.
+ */
+const WAKE_PROBE_INTERVAL_MS = 250;
+const WAKE_PROBE_WINDOW_MS = 4_000;
+const WAKE_PROBE_TIMEOUT_MS = 2_000;
+/** Phones allow only a few connections per host; the stream and restore reads need the rest. */
+const WAKE_PROBES_IN_FLIGHT = 2;
 
 /** Platform-neutral client for a Pane daemon's HTTP + SSE API. */
 export class RemoteDaemonClient {
@@ -140,19 +195,34 @@ export class RemoteDaemonClient {
   private readonly transport: RemoteDaemonTransport;
   private readonly fetch: RemoteFetch;
   private readonly clientLabel: string;
+  private readonly deviceLabel: string | undefined;
   private readonly resolveRuntimeId: () => string | Promise<string>;
   private readonly staleStreamTimeoutMs: number | undefined;
   private runtimeId: string | null = null;
   private abortController: AbortController | null = null;
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectTimer: RemoteTimer | null = null;
   private readonly recovery = new RecoveryCycle();
-  private deadlineTimer: ReturnType<typeof setTimeout> | null = null;
+  private wakeProbes: AbortController | null = null;
+  private wake: { wokeAt: number; firstAnswerAt: number | null; attempts: number; lastError: string | null } | null = null;
+  private deadlineTimer: RemoteTimer | null = null;
+  private failedRequestsInARow = 0;
+  /** From the host's last ready event: it runs a write once per request id, so writes may be resent. */
+  private hostDeduplicates = false;
+  private readonly requestIdPrefix = Math.random().toString(36).slice(2, 10);
+  private nextRequestNumber = 0;
+  /** Aborted when the connection drops, so resent writes stop waiting on a dead request. */
+  private resendAttempts = new AbortController();
+  private readonly schedule: RemoteSchedule;
   private streamController: AbortController | null = null;
-  private restoreListeners = new Set<(signal: AbortSignal) => Promise<void>>();
+  private restoreListeners = new Map<(signal: AbortSignal) => Promise<void>, string>();
   private eventListeners = new Set<(event: RemoteDaemonClientEvent) => void>();
   private statusListeners = new Set<(state: RemoteDaemonConnectionState) => void>();
-  private readonly inputQueue = new RemoteInputQueue((channel, args, signal) =>
-    this.invokeRequest(channel, args, signal));
+  private readonly inputQueue = new RemoteInputQueue(
+    (channel, args, signal) => this.invokeRequest(channel, args, signal),
+    // Unanswered input counts as one failed request; only a run of them reconnects.
+    () => this.noteFailedRequest('terminal input timed out'),
+    () => this.hostDeduplicates,
+  );
   private state: RemoteDaemonConnectionState = {
     status: 'local',
     lastError: null,
@@ -164,8 +234,10 @@ export class RemoteDaemonClient {
     this.transport = options.transport;
     this.fetch = options.fetch ?? ((url, init) => globalThis.fetch(url, init));
     this.clientLabel = options.clientLabel;
+    this.deviceLabel = options.deviceLabel;
     this.resolveRuntimeId = options.runtimeId;
     this.staleStreamTimeoutMs = options.staleStreamTimeoutMs;
+    this.schedule = options.schedule ?? scheduleWithGlobals;
   }
 
   getState(): RemoteDaemonConnectionState {
@@ -177,9 +249,12 @@ export class RemoteDaemonClient {
     return () => this.eventListeners.delete(listener);
   }
 
-  /** Core state owners finish their reads before the connection becomes green. */
-  onRestore(listener: (signal: AbortSignal) => Promise<void>): () => void {
-    this.restoreListeners.add(listener);
+  /**
+   * Core state owners finish their reads before the connection becomes green.
+   * `label` names the step in the timing logs.
+   */
+  onRestore(listener: (signal: AbortSignal) => Promise<void>, label = 'restore'): () => void {
+    this.restoreListeners.set(listener, label);
     return () => this.restoreListeners.delete(listener);
   }
 
@@ -212,10 +287,12 @@ export class RemoteDaemonClient {
       }
       throw error;
     }
-    if (!signal.aborted) void this.openEventStream(signal);
+    // Backgrounded mid-handshake: `resume` opens the stream on return.
+    if (!signal.aborted && !this.suspended) void this.openEventStream(signal);
   }
 
   disconnect(): void {
+    this.stopWakeProbes();
     this.inputQueue.cancel(new Error('Remote Pane disconnected; pending terminal input was discarded'));
     this.clearReconnectTimer();
     this.abortController?.abort();
@@ -231,25 +308,95 @@ export class RemoteDaemonClient {
   suspend(): void {
     if (this.state.status === 'local' || this.state.status === 'error') return;
     this.suspended = true;
-    void this.recovery.remainingMs; // Start a new outage only if the connection was healthy.
+    this.stopWakeProbes();
     this.clearReconnectTimer();
     this.clearDeadline();
     this.streamController?.abort();
-    this.inputQueue.cancel(new Error('The client went to sleep.'));
+    this.interruptWrites(new Error('The client went to sleep.'));
     this.setState({ status: 'reconnecting' });
   }
 
+  /** Time asleep is not an outage: each return gets a fresh five minutes. */
   resume(): void {
     if (!this.suspended) return;
     this.suspended = false;
-    if (!this.recovery.remainingMs) { this.stopRecovery('Could not reconnect within five minutes. Choose Retry now.'); return; }
+    this.recovery.reset();
+    this.clearDeadline();
+    this.wake = { wokeAt: Date.now(), firstAnswerAt: null, attempts: 0, lastError: null };
     this.retryNow();
+    this.probeAfterWake();
+  }
+
+  /** Probes the host until the event stream opens; the first answer replaces a stream attempt stuck on the old path. */
+  private probeAfterWake(): void {
+    const connection = this.abortController;
+    if (!connection || connection.signal.aborted || this.state.status !== 'reconnecting') return;
+    this.stopWakeProbes();
+    const probes = new AbortController();
+    this.wakeProbes = probes;
+    const started = Date.now();
+    // Past the quick window, continue from the backoff's 2 s step.
+    let backoffAttempt = 2;
+    let inFlight = 0;
+    const live = () => !probes.signal.aborted && !connection.signal.aborted && connection === this.abortController;
+    const probe = () => {
+      if (!live() || this.state.status !== 'reconnecting') { probes.abort(); return; }
+      this.schedule(probe, Date.now() - started < WAKE_PROBE_WINDOW_MS ? WAKE_PROBE_INTERVAL_MS : backoffDelayMs(backoffAttempt++));
+      if (inFlight >= WAKE_PROBES_IN_FLIGHT) return;
+      inFlight += 1;
+      this.noteWakeAttempt();
+      const attempt = abortSignalAny([probes.signal], this.schedule, WAKE_PROBE_TIMEOUT_MS);
+      this.fetch(this.endpoint('health'), { signal: attempt.signal, cache: 'no-store' }).then(response => {
+        if (!live() || !response.ok) return;
+        probes.abort();
+        this.noteWakeAnswer();
+        this.clearReconnectTimer();
+        void this.openEventStream(connection.signal);
+      }, (error: Error) => {
+        // Fetch implementations word a cancel differently; the timeout is what happened.
+        if (this.wake && !probes.signal.aborted) {
+          this.wake.lastError = attempt.signal?.aborted ? `No answer within ${WAKE_PROBE_TIMEOUT_MS / 1000} s` : error.message;
+        }
+      }).finally(() => { inFlight -= 1; attempt.done(); });
+    };
+    probe();
+  }
+
+  private stopWakeProbes(): void {
+    this.wakeProbes?.abort();
+    this.wakeProbes = null;
+  }
+
+  private noteWakeAttempt(): void {
+    if (this.wake) this.wake.attempts += 1;
+  }
+
+  private noteWakeAnswer(): void {
+    if (this.wake) this.wake.firstAnswerAt ??= Date.now();
+  }
+
+  /** Logs and returns how the wake in progress went, once it reconnected. */
+  private finishWake(): Pick<RemoteDaemonConnectionState, 'lastWake'> {
+    const { wake } = this;
+    if (!wake) return {};
+    this.wake = null;
+    const now = Date.now();
+    const lastWake: RemoteWakeTiming = {
+      wokeAt: new Date(wake.wokeAt).toISOString(),
+      firstAnswerMs: wake.firstAnswerAt === null ? null : wake.firstAnswerAt - wake.wokeAt,
+      connectedMs: now - wake.wokeAt,
+      attempts: wake.attempts,
+      lastError: wake.lastError,
+    };
+    console.info(`[remote] wake at ${lastWake.wokeAt}: first answer ${lastWake.firstAnswerMs ?? '-'} ms, connected ${lastWake.connectedMs} ms, ${lastWake.attempts} attempts${lastWake.lastError ? `, last error: ${lastWake.lastError}` : ''}`);
+    return { lastWake };
   }
 
   retryNow(): void {
     if (this.suspended) return;
     if (this.state.status === 'error' || this.state.status === 'local') { void this.connect().catch(() => {}); return; }
-    if (this.state.status === 'restoring' || this.state.status === 'connecting') return;
+    // Already on its way; keep its deadline armed so it cannot hang forever.
+    if (this.state.status === 'restoring' || this.state.status === 'connecting') { this.armDeadline(); return; }
     this.clearReconnectTimer();
     this.streamController?.abort();
     this.armDeadline();
@@ -261,27 +408,64 @@ export class RemoteDaemonClient {
     return this.inputQueue.invoke(channel, args) as Promise<T>;
   }
 
-  private async invokeRequest<T = unknown>(channel: string, args: unknown[], inputSignal?: AbortSignal): Promise<T> {
-    if (this.state.status !== 'connected' && !REMOTE_READ_CHANNELS.has(channel) && !REMOTE_RESTORE_CHANNELS.has(channel)) {
+  /**
+   * Sends one reviewed read, connected or not, and fails once `timeoutMs` passes without an answer.
+   * It never retries: a caller that polls several hosts retries on its next poll, so one slow or
+   * offline host never holds up the others.
+   */
+  async read<T = unknown>(channel: string, args: unknown[], { timeoutMs }: { timeoutMs: number }): Promise<T> {
+    if (!REMOTE_READ_CHANNELS.has(channel)) {
+      throw new PaneError('ERR_REMOTE_NOT_A_READ', `"${channel}" changes the host, so it can't be sent as a timed read. Nothing was sent.`, 'Send it through invoke on a connected client.');
+    }
+    return this.invokeRequest<T>(channel, args, undefined, timeoutMs);
+  }
+
+  private async invokeRequest<T = unknown>(channel: string, args: unknown[], inputSignal?: AbortSignal, attemptTimeoutMs?: number): Promise<T> {
+    const deduplicated = REMOTE_DEDUPLICATED_CHANNELS.has(channel);
+    const mutation = !REMOTE_READ_CHANNELS.has(channel) && !REMOTE_RESTORE_CHANNELS.has(channel) && !REMOTE_STREAMLESS_CHANNELS.has(channel) && !deduplicated;
+    // A host that runs each id once makes every write safe to resend, so a write waits out a drop.
+    // One issued while restoring is still refused: restore steps rely on that.
+    const requestId = (mutation || deduplicated) && this.hostDeduplicates && this.state.status !== 'restoring'
+      ? `${this.requestIdPrefix}:${(this.nextRequestNumber++).toString(36)}`
+      : undefined;
+    if (this.state.status !== 'connected' && (mutation || deduplicated) && !requestId) {
       throw new PaneError('ERR_REMOTE_OFFLINE', 'The action was not sent while the workspace is disconnected or restoring.', 'Wait for restoration before submitting it.');
     }
     let lastError: Error | null = null;
     let dispatched = false;
+    let lostInTransit = false;
     const connection = this.abortController;
     const stream = this.streamController;
-    const mutation = !REMOTE_READ_CHANNELS.has(channel) && !REMOTE_RESTORE_CHANNELS.has(channel);
     const signal = inputSignal ?? connection?.signal;
     const retryableRead = REMOTE_READ_CHANNELS.has(channel);
-    const attempts = retryableRead ? INVOKE_ATTEMPTS : 1;
-    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    // Reads and de-duplicated writes retry with backoff; heartbeats, not their failures, decide liveness.
+    // A timed read is sent once: its caller polls again.
+    const retries = attemptTimeoutMs === undefined && (retryableRead || deduplicated || requestId !== undefined);
+    let timedOut = false;
+    const started = Date.now();
+    for (let attempt = 0; ; attempt += 1) {
+      let attemptSignal: LinkedSignal = { signal, done: () => {} };
       try {
-        const { headers, body } = this.transport.invokeRequest(await this.requestContext(), channel, args);
+        if (requestId !== undefined) {
+          await this.waitUntilConnected(started + REQUEST_RETRY_BUDGET_MS, signal);
+          if (!this.hostDeduplicates) {
+            // The host came back without de-duplication: resending is no longer safe.
+            if (!dispatched) throw new PaneError('ERR_REMOTE_OFFLINE', 'The action was not sent: the host that came back cannot take a resent action safely.', 'Send it again now that the workspace is connected.');
+            break;
+          }
+          attemptSignal = abortSignalAny([signal, this.resendAttempts.signal], this.schedule, RESENT_WRITE_ATTEMPT_TIMEOUT_MS);
+        } else if (attemptTimeoutMs !== undefined) {
+          attemptSignal = abortSignalAny([signal], this.schedule, attemptTimeoutMs);
+        }
+        const context = await this.requestContext();
+        if (requestId !== undefined) context.requestId = requestId;
+        const { headers, body } = this.transport.invokeRequest(context, channel, args);
         const request: RemoteFetchInit = { method: 'POST', headers, body };
-        if (signal) {
-          request.signal = signal;
+        if (attemptSignal.signal) {
+          request.signal = attemptSignal.signal;
         }
 
-        if (mutation && (this.state.status !== 'connected' || stream !== this.streamController || stream?.signal.aborted || connection !== this.abortController)) {
+        if (mutation && !requestId && (this.state.status !== 'connected' || stream !== this.streamController || stream?.signal.aborted || connection !== this.abortController)) {
           throw new PaneError('ERR_REMOTE_OFFLINE', 'The action was not sent because the connection changed before dispatch.', 'Wait for restoration before submitting it.');
         }
         if (signal?.aborted || connection !== this.abortController || connection?.signal.aborted) throw createAbortError();
@@ -294,6 +478,8 @@ export class RemoteDaemonClient {
           }
           throw cause;
         }));
+        // The host answered, so the connection works.
+        this.failedRequestsInARow = 0;
         if (signal?.aborted || connection !== this.abortController || connection?.signal.aborted) throw createAbortError();
         const failure = payload?.ok === false ? payload.error : undefined;
         if (isAuthFailureResponse(response.status)) {
@@ -307,11 +493,16 @@ export class RemoteDaemonClient {
         const message = payload?.ok
           ? `Remote request failed with ${response.status}`
           : paneErrorText({ message: failure?.message ?? 'Remote request failed', next: failure?.next });
-        if (!isRetryableResponse(response.status)) {
+        // A de-duplicating host's own error envelope is the write's answer; a repeat would replay it.
+        if (!isRetryableResponse(response.status) || (requestId !== undefined && payload?.ok === false && failure?.code !== REMOTE_WRITES_BUSY_CODE)) {
           throw new RemoteRequestError(message, response.status, failure?.code ?? null);
         }
         lastError = new Error(message);
       } catch (error) {
+        if (error instanceof RecoveryEndedError) {
+          if (!dispatched) throw new PaneError('ERR_REMOTE_OFFLINE', `The action was not sent. ${error.message}`, 'Send it again once the workspace reconnects.');
+          break;
+        }
         if (!dispatched && error instanceof PaneError && error.code === 'ERR_REMOTE_OFFLINE') throw error;
         if (error instanceof RemoteAuthError) this.stopRecovery(error.message);
         if (error instanceof RemoteAuthError || error instanceof RemoteRequestError) throw error;
@@ -320,17 +511,39 @@ export class RemoteDaemonClient {
           throw error;
         }
         lastError = error instanceof Error ? error : new Error('Remote request failed');
-        if (this.abortController && !this.abortController.signal.aborted) this.scheduleReconnect('Remote response interrupted');
+        lostInTransit = true;
+        timedOut = attemptTimeoutMs !== undefined && attemptSignal.signal?.aborted === true;
+      } finally {
+        attemptSignal.done();
       }
 
-      if (attempt < attempts) {
-        await delay(REQUEST_RETRY_DELAY_MS * attempt, signal);
-      }
+      const wait = backoffDelayMs(attempt);
+      if (!retries || Date.now() - started + wait > REQUEST_RETRY_BUDGET_MS) break;
+      await delay(this.schedule, wait, signal);
     }
 
+    // One failed request fails only itself while heartbeats arrive.
+    if (lostInTransit && !retries && attemptTimeoutMs === undefined && !signal?.aborted && connection === this.abortController && !connection?.signal.aborted) {
+      this.noteFailedRequest(lastError?.message ?? 'no response');
+    }
+    if (timedOut) {
+      throw new PaneError(
+        'ERR_REMOTE_READ_TIMEOUT',
+        `${this.profile.label} did not answer within ${Math.round((attemptTimeoutMs ?? 0) / 1000)} s. Nothing changed there.`,
+        'Check that Pane is open on it and that this device can reach it; the next refresh tries again.',
+      );
+    }
+    if (requestId !== undefined) {
+      throw new RemoteUnconfirmedResultError(
+        'Delivery unknown: Pane resent this action for up to five minutes, but the host never confirmed it. ' +
+        'Check the current state before trying again.' +
+        (lastError ? ` (${lastError.message})` : ''),
+      );
+    }
     if (!retryableRead) {
       throw new RemoteUnconfirmedResultError(
-        'The remote action may have completed, but its result could not be confirmed. ' +
+        // The prefix lets text-only error boundaries tell unknown delivery apart (frontend remoteFailure.ts).
+        'Delivery unknown: the remote action may have completed, but its result could not be confirmed. ' +
         'Check the current state before trying again.' +
         (lastError ? ` (${lastError.message})` : ''),
       );
@@ -339,12 +552,14 @@ export class RemoteDaemonClient {
   }
 
   private async requestContext(): Promise<RemoteRequestContext> {
-    return {
+    const context: RemoteRequestContext = {
       baseUrl: this.profile.baseUrl,
       token: this.profile.token,
       runtimeId: this.runtimeId ??= await this.resolveRuntimeId(),
       clientLabel: this.clientLabel,
     };
+    if (this.deviceLabel) context.deviceLabel = this.deviceLabel;
+    return context;
   }
 
   private async checkHealth(signal: AbortSignal): Promise<void> {
@@ -365,7 +580,7 @@ export class RemoteDaemonClient {
       }
 
       if (attempt < HEALTH_CHECK_ATTEMPTS) {
-        await delay(REQUEST_RETRY_DELAY_MS * attempt, signal);
+        await delay(this.schedule, REQUEST_RETRY_DELAY_MS * attempt, signal);
       }
     }
 
@@ -377,15 +592,18 @@ export class RemoteDaemonClient {
     // on the connection signal survive the reconnect.
     if (signal.aborted) return;
     this.streamController?.abort();
+    this.failedRequestsInARow = 0;
     const stream = new AbortController();
     this.streamController = stream;
+    this.noteWakeAttempt();
     let ready = false;
     const abortStream = () => stream.abort();
     signal.addEventListener('abort', abortStream, { once: true });
-    let staleTimer: ReturnType<typeof setTimeout> | null = null;
+    let staleTimer: RemoteTimer | null = null;
+    const cancelStaleTimer = () => staleTimer?.cancel();
     const armStaleTimer = () => {
-      if (staleTimer !== null) clearTimeout(staleTimer);
-      staleTimer = setTimeout(() => {
+      cancelStaleTimer();
+      staleTimer = this.schedule(() => {
         if (stream.signal.aborted) return;
         stream.abort();
         this.scheduleReconnect('Remote event stream stopped responding');
@@ -402,6 +620,8 @@ export class RemoteDaemonClient {
         onOpen: () => {
           if (stream.signal.aborted) return;
           armStaleTimer();
+          this.stopWakeProbes();
+          this.noteWakeAnswer();
           // HTTP acceptance is not restoration; wait for the ready event.
         },
         onEvent: (event) => {
@@ -412,11 +632,11 @@ export class RemoteDaemonClient {
             ready = true;
             this.setState({ status: 'restoring', lastError: null });
             this.handleSseEvent(event);
-            void Promise.all([...this.restoreListeners].map(listener => listener(stream.signal))).then(() => {
+            void this.restore(stream.signal).then(() => {
               if (stream.signal.aborted || signal.aborted) return;
               this.recovery.reset();
               this.clearDeadline();
-              this.setState({ status: 'connected', lastError: null });
+              this.setState({ status: 'connected', lastError: null, ...this.finishWake() });
               if (this.state.updateIntent) this.setState({ updateIntent: null });
             }, error => {
               if (!stream.signal.aborted && !signal.aborted) this.scheduleReconnect(error instanceof Error ? error.message : 'Workspace restoration failed');
@@ -441,9 +661,31 @@ export class RemoteDaemonClient {
 
       this.scheduleReconnect(message);
     } finally {
-      if (staleTimer !== null) clearTimeout(staleTimer);
+      cancelStaleTimer();
       signal.removeEventListener('abort', abortStream);
       stream.abort();
+    }
+  }
+
+  /** Runs every restore listener, timing each, and fails if they outlast `RESTORE_TIMEOUT_MS`. */
+  private async restore(signal: AbortSignal): Promise<void> {
+    const started = Date.now();
+    const pending = new Set<string>();
+    const steps = [...this.restoreListeners].map(async ([listener, label]) => {
+      pending.add(label);
+      await listener(signal);
+      pending.delete(label);
+      console.info(`[remote] restore step ${label} took ${Date.now() - started} ms`);
+    });
+    let expire!: (error: Error) => void;
+    const timeout = new Promise<never>((_, reject) => { expire = reject; });
+    const timer = this.schedule(() => expire(new Error(
+      `Workspace restoration did not finish within ${RESTORE_TIMEOUT_MS / 1000} s (waiting on ${[...pending].join(', ')})`,
+    )), RESTORE_TIMEOUT_MS);
+    try {
+      await Promise.race([Promise.all(steps), timeout]);
+    } finally {
+      timer.cancel();
     }
   }
 
@@ -465,6 +707,7 @@ export class RemoteDaemonClient {
     }
 
     if (event.event === 'ready') {
+      this.hostDeduplicates = readyDeduplicatesRequestIds(event.data);
       const now = new Date().toISOString();
       this.setState({ lastSeenAt: now });
       this.emitEvent({ type: 'ready', timestamp: now });
@@ -472,39 +715,83 @@ export class RemoteDaemonClient {
   }
 
   private clearDeadline(): void {
-    if (this.deadlineTimer !== null) clearTimeout(this.deadlineTimer);
+    this.deadlineTimer?.cancel();
     this.deadlineTimer = null;
   }
 
   private armDeadline(): void {
-    this.deadlineTimer ??= setTimeout(() => {
-      this.stopRecovery('Could not reconnect within five minutes. Your workspace is kept. Choose Retry now.');
-    }, this.recovery.remainingMs);
+    this.deadlineTimer ??= this.schedule(() => this.stopRecovery(RECONNECT_GAVE_UP_MESSAGE), this.recovery.remainingMs);
   }
 
   private stopRecovery(message: string): void {
     this.clearReconnectTimer();
     this.clearDeadline();
+    // State first, so writes waiting for the connection learn why it ended before their signal aborts.
+    this.setState({ status: 'error', lastError: message });
     this.abortController?.abort();
     this.streamController?.abort();
-    this.setState({ status: 'error', lastError: message });
+  }
+
+  /** Writes a de-duplicating host answers once are resent after the drop; without it, queued input fails. */
+  private interruptWrites(error: Error): void {
+    this.resendAttempts.abort();
+    this.resendAttempts = new AbortController();
+    if (!this.hostDeduplicates) this.inputQueue.cancel(error);
+  }
+
+  /**
+   * Resolves once connected and before `deadline`; rejects with `RecoveryEndedError` when reconnecting
+   * gave up, the client disconnected, or the deadline passed. The deadline is checked again at the
+   * moment the connection returns, since time asleep passes it without any timer firing.
+   */
+  private waitUntilConnected(deadline: number, signal?: AbortSignal): Promise<void> {
+    return new Promise((resolve, reject) => {
+      let stop = () => {};
+      const settle = (state: RemoteDaemonConnectionState): boolean => {
+        if (Date.now() >= deadline) reject(new RecoveryEndedError('The connection did not come back within five minutes.'));
+        else if (state.status === 'connected') resolve();
+        else if (state.status === 'error' || state.status === 'local') reject(new RecoveryEndedError(state.lastError ?? 'The workspace disconnected.'));
+        else return false;
+        stop();
+        return true;
+      };
+      if (settle(this.state)) return;
+      if (signal?.aborted) { reject(createAbortError()); return; }
+      const onAbort = () => { stop(); reject(createAbortError()); };
+      const listener = (state: RemoteDaemonConnectionState) => { settle(state); };
+      const timer = this.schedule(() => settle(this.state), deadline - Date.now());
+      this.statusListeners.add(listener);
+      signal?.addEventListener('abort', onAbort, { once: true });
+      stop = () => {
+        timer.cancel();
+        this.statusListeners.delete(listener);
+        signal?.removeEventListener('abort', onAbort);
+      };
+    });
+  }
+
+  private noteFailedRequest(reason: string): void {
+    this.failedRequestsInARow += 1;
+    if (this.failedRequestsInARow < MAX_FAILED_REQUESTS_IN_A_ROW) return;
+    this.scheduleReconnect(`${MAX_FAILED_REQUESTS_IN_A_ROW} requests in a row failed: ${reason}`);
   }
 
   private scheduleReconnect(message: string): void {
     if (this.suspended || !this.abortController || this.abortController.signal.aborted || this.reconnectTimer !== null) return;
+    if (this.wake) this.wake.lastError = message;
     this.streamController?.abort();
-    this.inputQueue.cancel(new RemoteUnconfirmedResultError('Delivery unknown: input may have reached the host. Check it before trying again.'));
+    this.interruptWrites(new RemoteUnconfirmedResultError('Delivery unknown: input may have reached the host. Check it before trying again.'));
     this.armDeadline();
     const delayMs = this.recovery.nextDelay();
     if (delayMs === null) {
-      this.stopRecovery('Could not reconnect within five minutes. Your workspace is kept. Choose Retry now.');
+      this.stopRecovery(RECONNECT_GAVE_UP_MESSAGE);
       return;
     }
     this.setState({ status: 'reconnecting', lastError: message });
-    this.reconnectTimer = setTimeout(() => {
+    this.reconnectTimer = this.schedule(() => {
       this.reconnectTimer = null;
       if (!this.abortController || this.abortController.signal.aborted) return;
-      if (!this.recovery.remainingMs) { this.stopRecovery('Could not reconnect within five minutes. Choose Retry now.'); return; }
+      if (!this.recovery.remainingMs) { this.stopRecovery(RECONNECT_GAVE_UP_MESSAGE); return; }
       void this.openEventStream(this.abortController.signal);
     }, delayMs);
   }
@@ -520,7 +807,11 @@ export class RemoteDaemonClient {
   }
 
   private setState(update: Partial<RemoteDaemonConnectionState>): void {
+    const previous = this.state.status;
     this.state = { ...this.state, ...update };
+    if (this.state.status !== previous) {
+      console.info(`[remote] ${new Date().toISOString()} ${previous} -> ${this.state.status}${this.state.lastError ? ` (${this.state.lastError})` : ''}`);
+    }
     for (const listener of this.statusListeners) {
       listener(this.getState());
     }
@@ -528,7 +819,7 @@ export class RemoteDaemonClient {
 
   private clearReconnectTimer(): void {
     if (this.reconnectTimer !== null) {
-      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer.cancel();
       this.reconnectTimer = null;
     }
   }
@@ -540,7 +831,8 @@ export function isAuthFailureResponse(status: number): boolean {
 
 export function getRemoteAuthFailureMessage(serverMessage?: string, code?: string | null): string {
   // A codeless host explains itself (wrong login, password needed); no code is involved.
-  if (code?.startsWith('ERR_WORKSPACE_') && serverMessage) return serverMessage;
+  // So does a host refusing one command to someone other than its owner.
+  if ((code?.startsWith('ERR_WORKSPACE_') || code?.endsWith('_OWNER_REQUIRED')) && serverMessage) return serverMessage;
   const detail = serverMessage && serverMessage !== 'Remote request failed'
     ? ` (${serverMessage})`
     : '';
@@ -556,6 +848,44 @@ function decodeInvokeResponse(body: JsonValue) {
   }
 }
 
+/** Reconnecting gave up, or the client disconnected, while a write waited to be sent. */
+class RecoveryEndedError extends Error {
+  override name = 'RecoveryEndedError';
+}
+
+function readyDeduplicatesRequestIds(data: string): boolean {
+  try {
+    return decodeBoundary(JSON.parse(data), boundary.object({ deduplicatesRequestIds: boundary.optional(boundary.boolean) })).deduplicatesRequestIds === true;
+  } catch {
+    return false;
+  }
+}
+
+/** A request's abort signal and the cleanup that releases what it listens to. */
+interface LinkedSignal {
+  signal: AbortSignal | undefined;
+  done(): void;
+}
+
+/** One signal that aborts when any of `signals` does or `timeoutMs` passes; call `done` to release it. */
+function abortSignalAny(signals: Array<AbortSignal | undefined>, schedule: RemoteSchedule, timeoutMs: number): LinkedSignal {
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  const live = signals.filter((signal): signal is AbortSignal => signal !== undefined);
+  for (const signal of live) {
+    if (signal.aborted) abort();
+    else signal.addEventListener('abort', abort, { once: true });
+  }
+  const timer = schedule(abort, timeoutMs);
+  return {
+    signal: controller.signal,
+    done: () => {
+      timer.cancel();
+      for (const signal of live) signal.removeEventListener('abort', abort);
+    },
+  };
+}
+
 function isRetryableResponse(status: number): boolean {
   return status === 408 || status === 425 || status === 429 || status >= 500;
 }
@@ -566,19 +896,19 @@ function createAbortError(): Error {
   return error;
 }
 
-function delay(ms: number, signal?: AbortSignal): Promise<void> {
+function delay(schedule: RemoteSchedule, ms: number, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) {
     return Promise.reject(createAbortError());
   }
 
   return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
+    const timeout = schedule(() => {
       signal?.removeEventListener('abort', onAbort);
       resolve();
     }, ms);
 
     const onAbort = () => {
-      clearTimeout(timeout);
+      timeout.cancel();
       reject(createAbortError());
     };
 

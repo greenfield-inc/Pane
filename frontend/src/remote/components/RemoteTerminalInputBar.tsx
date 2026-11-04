@@ -215,7 +215,7 @@ export function RemoteTerminalInputBar({
             disabled={(!voice.isRecording && (disabled || voice.isTranscribing || !canUseSelectedVoiceMode))}
             className={`pane-press pane-press-touch absolute right-3 top-3 flex h-9 w-9 items-center justify-center rounded-md border bg-bg-primary disabled:cursor-not-allowed disabled:opacity-50 ${
               voice.isRecording
-                ? 'border-status-error/50 text-status-error hover:bg-status-error/10'
+                ? 'border-status-error/50 text-status-error hover:bg-status-error/10 hover:text-text-primary'
                 : 'border-border-secondary text-text-secondary hover:bg-surface-hover hover:text-text-primary'
             }`}
             aria-label={voice.isRecording ? 'Stop voice recording' : 'Start voice recording'}

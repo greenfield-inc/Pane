@@ -465,3 +465,43 @@ test('active file selection is scope-gated', async ({ page }) => {
   await page.getByRole('button', { name: 'All changes', exact: true }).click();
   await expect(alpha).toHaveAttribute('aria-selected', 'true');
 });
+
+test('a failed Restore stays in Review and reports the git error locally', async ({ page }, testInfo) => {
+  await openChanges(page, { executions: [execution(0, 'UNCOMMITTED', 'Uncommitted changes')] });
+  await page.evaluate(() => {
+    const invoke = window.electronAPI.invoke;
+    window.electronAPI.invoke = async (channel, ...args) => channel === 'git:restore'
+      ? { success: false, error: 'Cannot restore while index.lock exists' }
+      : invoke(channel, ...args);
+  });
+  page.on('dialog', dialog => dialog.accept());
+  await page.getByRole('button', { name: 'Restore', exact: true }).click();
+  const review = page.locator('.combined-diff-view');
+  await expect(review.getByRole('alert')).toHaveText('Cannot restore while index.lock exists');
+  await expect(page.getByText(/application may need to be restarted/)).toHaveCount(0);
+  await page.screenshot({ path: testInfo.outputPath('restore-error.png') });
+  await review.getByTitle('Refresh').click();
+  await expect(page.getByRole('listbox', { name: 'Changed files' })).toBeVisible();
+});
+
+test('a rejected Revert request reports the transport error in Review', async ({ page }, testInfo) => {
+  const hash = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+  await openChanges(page, {
+    executions: [execution(1, hash, 'Commit to revert')],
+    manifests: { session: manifest, [`commit:${hash}`]: createManifest({ kind: 'commit', hash }, [changed('revert.ts')]) },
+  });
+  await viewCommit(page, session.id, hash);
+  await expect(page.getByRole('option', { name: 'Open diff for revert.ts' })).toBeVisible();
+  await page.evaluate(() => {
+    const invoke = window.electronAPI.invoke;
+    window.electronAPI.invoke = async (channel, ...args) => {
+      if (channel === 'git:revert') throw new Error('Git process disconnected during revert');
+      return invoke(channel, ...args);
+    };
+  });
+  page.on('dialog', dialog => dialog.accept());
+  await page.getByRole('button', { name: 'Revert this commit' }).click();
+  await expect(page.locator('.combined-diff-view').getByRole('alert')).toHaveText('Git process disconnected during revert');
+  await expect(page.getByText(/application may need to be restarted/)).toHaveCount(0);
+  await page.screenshot({ path: testInfo.outputPath('revert-error.png') });
+});

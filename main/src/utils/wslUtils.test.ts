@@ -24,6 +24,7 @@ describe('getWSLShellSpawn', () => {
   ])('runs bash directly and single-quotes %s', (cwd, script) => {
     expect(getWSLShellSpawn('Ubuntu', cwd).args).toEqual(['-d', 'Ubuntu', '--exec', 'bash', '-c', script]);
   });
+
 });
 
 describe('validateWSLAvailable', () => {

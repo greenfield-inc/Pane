@@ -110,11 +110,12 @@ class UIStateManager {
 
   getSessionSortAscending(): boolean {
     const value = this.db.getUIState('treeView.sessionSortAscending');
-    if (!value) return true; // Default to ascending (newest at bottom)
+    // Unset means the person never chose: newest first. A saved value is their choice.
+    if (!value) return false;
     try {
       return JSON.parse(value);
     } catch {
-      return true;
+      return false;
     }
   }
 

@@ -15,7 +15,7 @@ import type { Project } from '../database/models';
 import type { Session } from '../types/session';
 import type { AppServices } from './types';
 import type { CreatePanelRequest, TerminalPanelState, ToolPanel } from '../../../shared/types/panels';
-import type { RunpanePaneListResult, RunpanePanelListResult, RunpaneToolSpec } from '../../../shared/types/runpaneOrchestration';
+import type { RunpaneCommandToolSpec, RunpanePaneListResult, RunpanePanelListResult, RunpaneToolSpec } from '../../../shared/types/runpaneOrchestration';
 import type { OrchestrationSessionCreateInput } from '../../../shared/types/orchestrationSession';
 
 import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
@@ -37,6 +37,9 @@ import { PathResolver } from '../utils/pathResolver';
 import { agentTranscripts } from '../services/agentTranscript';
 import { claudeProjectDirName } from '../services/agentTranscript/claude';
 import { registerRunpaneHandlers } from './runpane';
+import { LoopManager } from '../services/loops/loopManager';
+import { LoopRepository } from '../services/loops/loopRepository';
+import { createLoopTestDb } from '../services/loops/loopTestDb';
 import type { TaskQueue } from '../services/taskQueue';
 import { PaneError } from '../../../shared/paneError';
 
@@ -68,6 +71,7 @@ vi.spyOn(terminalPanelManager, 'hasLaunchCommandExited');
 vi.spyOn(terminalPanelManager, 'relaunchInShell');
 vi.spyOn(terminalPanelManager, 'isBracketedPasteEnabled');
 vi.spyOn(terminalPanelManager, 'launchShellReadsPromptFile');
+vi.spyOn(terminalPanelManager, 'launchShellIsPosix');
 vi.spyOn(panelDatabase, 'getPanelBuffers');
 vi.spyOn(usageManager, 'getPaneCosts');
 
@@ -181,7 +185,6 @@ function terminalSnapshot(
     isAlternateScreen: false,
     activityStatus,
     lastActivityTime,
-    currentCommand: agentType,
     isCliPanel: true,
     isCliReady: true,
     agentType,
@@ -198,6 +201,17 @@ function createServices(overrides: Partial<AppServices> = {}): AppServices {
     } as AppServices['app'],
     getMainWindow: () => null,
     databaseService: {
+      getSession: vi.fn((id: string) => {
+        const pane = overrides.sessionManager?.getSession(id) ?? session;
+        return {
+          id: pane.id,
+          worktree_name: 'fixture-worktree',
+          worktree_path: pane.worktreePath,
+          project_id: pane.projectId,
+          is_main_repo: pane.isMainRepo,
+          worktree_ownership: pane.worktreeOwnership,
+        };
+      }),
       getAllProjects: vi.fn(() => [project]),
       createProject: vi.fn((name: string, repoPath: string): Project => ({
         ...project,
@@ -278,6 +292,15 @@ function idleSetupQueue(): Pick<TaskQueue, 'setupQueuePosition' | 'waitForSetup'
 }
 
 const tempDirs: string[] = [];
+const registryServices: AppServices[] = [];
+afterEach(() => {
+  for (const services of registryServices.splice(0)) {
+    services.expectedReportTracker?.dispose();
+    services.sessionInbox?.dispose();
+    services.workspaceJournal?.dispose();
+  }
+  fs.rmSync(path.join(process.env.PANE_DIR!, 'expected-reports.json'), { force: true });
+});
 
 function createTempGitRepo(name = 'repo'): string {
   const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-runpane-test-'));
@@ -295,6 +318,7 @@ function createRegistry(services = createServices()): PaneCommandRegistry {
   const registry = new PaneCommandRegistry();
   // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
   registerRunpaneHandlers({} as never, services, registry);
+  registryServices.push(services);
   return registry;
 }
 
@@ -352,6 +376,7 @@ describe('runpane IPC handlers', () => {
     vi.mocked(terminalPanelManager.relaunchInShell).mockReset().mockResolvedValue(undefined);
     vi.mocked(terminalPanelManager.isBracketedPasteEnabled).mockReset().mockReturnValue(false);
     vi.mocked(terminalPanelManager.launchShellReadsPromptFile).mockReset().mockReturnValue(true);
+    vi.mocked(terminalPanelManager.launchShellIsPosix).mockReset().mockReturnValue(true);
     vi.mocked(terminalPanelManager.getOutputGeneration).mockReturnValue(0);
     vi.mocked(terminalPanelManager.getAgentStatus).mockReturnValue('idle');
     findUserTurnSince.mockReset().mockResolvedValue({ state: null });
@@ -385,6 +410,27 @@ describe('runpane IPC handlers', () => {
     vi.mocked(terminalPanelManager.isTerminalInitialized).mockReturnValue(true);
     vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(null);
     vi.mocked(terminalPanelManager.getCleanTerminalScrollback).mockResolvedValue(null);
+  });
+
+  it('starts a created Session\'s agent so a first prompt can follow without opening it', async () => {
+    const panel = { id: 'coordinator-panel' };
+    const create = vi.fn(async () => ({ session: { id: 'coordinator' }, panel, internalSession: { id: 'coordinator-owner', worktreePath: '/sessions/coordinator' } }));
+    // SAFETY: This command only reaches create; the stub reports a Session result.
+    const registry = createRegistry(createServices({ orchestrationSessionManager: { create } as never }));
+    await registry.invoke('runpane:sessions:create', [{ name: 'Coordinator' }]);
+    expect(terminalPanelManager.initializeTerminal).toHaveBeenCalledWith(panel, '/sessions/coordinator');
+  });
+
+  it('keeps a created Session and names the resume command when its agent cannot start', async () => {
+    const create = vi.fn(async () => ({ session: { id: 'coordinator', name: 'Coordinator' }, panel: { id: 'coordinator-panel' }, internalSession: { id: 'coordinator-owner', worktreePath: '/sessions/coordinator' } }));
+    vi.mocked(terminalPanelManager.initializeTerminal).mockRejectedValueOnce(new Error('spawn claude ENOENT.'));
+    // SAFETY: This command only reaches create; the stub reports a Session result.
+    const registry = createRegistry(createServices({ orchestrationSessionManager: { create } as never }));
+    await expect(registry.invoke('runpane:sessions:create', [{ name: 'Coordinator' }])).rejects.toMatchObject({
+      code: 'ERR_SESSION_START_FAILED',
+      message: 'Session “Coordinator” was created, but its agent did not start: spawn claude ENOENT.',
+      next: expect.stringContaining('runpane panels resume --panel coordinator-panel'),
+    });
   });
 
   it('preserves the requested Session pin through daemon create decoding', async () => {
@@ -684,7 +730,7 @@ describe('runpane IPC handlers', () => {
       expect(result, JSON.stringify(result)).toMatchObject({ ok: true, items: [{ ok: true, sessionId: session.id }] });
       expect(panelManager.createPanel).toHaveBeenCalledTimes(1);
       expect(panelManager.createPanel).toHaveBeenCalledWith(expect.objectContaining({
-        initialState: expect.objectContaining({ agentType: 'codex', agentSessionId: 'thread-1', initialCommand: launch ? 'codex --yolo' : undefined }),
+        initialState: expect.objectContaining({ agentType: 'codex', agentSessionId: 'thread-1', initialCommand: launch ? 'codex --yolo' : undefined, resumeDirectory: worktreePath }),
       }));
       if (!launch) {
         expect(terminalPanelManager.writeToTerminal).toHaveBeenCalledWith(terminalPanel.id, 'codex --yolo resume "thread-1"');
@@ -863,7 +909,7 @@ describe('runpane IPC handlers', () => {
       execFileSync('git', ['worktree', 'add', '-b', 'associate-adopt', worktreePath], { cwd: repoPath, stdio: 'ignore' });
       const associate = vi.fn(async () => ({}));
       // SAFETY: The handler only calls associate on the Sessions manager.
-      const services = { ...adoptionServices(repoPath, worktreePath), orchestrationSessionManager: { associate } as never };
+      const services = { ...adoptionServices(repoPath, worktreePath), orchestrationSessionManager: { associate, sessionIdForPane: async () => undefined } as never };
       vi.mocked(panelManager.createPanel).mockResolvedValue(terminalPanel);
       vi.mocked(terminalPanelManager.initializeTerminal).mockImplementation(async () => {
         expect(associate).toHaveBeenCalledWith({ sessionId: 'orchestrator-1' }, { paneId: session.id });
@@ -897,7 +943,7 @@ describe('runpane IPC handlers', () => {
       execFileSync('git', ['worktree', 'add', '-b', 'associate-missing', worktreePath], { cwd: repoPath, stdio: 'ignore' });
       const associate = vi.fn(async () => { throw new PaneError('ERR_SESSION_NOT_FOUND', 'Session typo not found'); });
       // SAFETY: The handler only calls associate on the Sessions manager.
-      const services = { ...adoptionServices(repoPath, worktreePath), orchestrationSessionManager: { associate } as never };
+      const services = { ...adoptionServices(repoPath, worktreePath), orchestrationSessionManager: { associate, sessionIdForPane: async () => undefined } as never };
       vi.mocked(panelManager.createPanel).mockResolvedValue(terminalPanel);
 
       const result = await createRegistry(services).invoke('runpane:panes:adopt', [{
@@ -919,7 +965,7 @@ describe('runpane IPC handlers', () => {
       execFileSync('git', ['worktree', 'add', '-b', 'no-associate-adopt', worktreePath], { cwd: repoPath, stdio: 'ignore' });
       const associate = vi.fn(async () => ({}));
       // SAFETY: The handler only calls associate on the Sessions manager.
-      const services = { ...adoptionServices(repoPath, worktreePath), orchestrationSessionManager: { associate } as never };
+      const services = { ...adoptionServices(repoPath, worktreePath), orchestrationSessionManager: { associate, sessionIdForPane: async () => undefined } as never };
       vi.mocked(panelManager.createPanel).mockResolvedValue(terminalPanel);
       vi.mocked(terminalPanelManager.initializeTerminal).mockResolvedValue(undefined);
 
@@ -1014,6 +1060,7 @@ describe('runpane IPC handlers', () => {
       const initialState = vi.mocked(panelManager.createPanel).mock.calls[0][0].initialState;
       expect(initialState).toMatchObject({
         initialCommand: RUNPANE_CONTRACT.agentTemplates.codex.command,
+        resumeDirectory: expect.any(String),
         initialInput: 'Continue with step 2',
         initialInputSubmitStrategy: 'codex-ctrl-enter',
         agentSessionId: 'thread-1',
@@ -1248,7 +1295,9 @@ describe('runpane IPC handlers', () => {
       },
     });
     // SAFETY: The doctor result shape is asserted immediately above before its channels are inspected.
-    const daemon = (result as { daemon: { channels: string[] } }).daemon;
+    const daemon = (result as { daemon: { channels: string[]; features: string[] } }).daemon;
+    // runpane handoff carries a session only to a Pane that says create honours resume.
+    expect(daemon.features).toContain('resume-on-create');
     expect(daemon.channels).toContain('runpane:doctor');
     expect(daemon.channels).toContain('runpane:panes:rename');
     expect(daemon.channels).toContain('runpane:panes:focus');
@@ -1629,6 +1678,32 @@ describe('runpane IPC handlers', () => {
 
     expect(result.entries).toContainEqual(expect.objectContaining({ kind: 'agent.idle', agentType: 'claude' }));
     expect(result.entries.filter(entry => entry.kind === 'agent.idle')[0]).not.toHaveProperty('heldInputPresent');
+  });
+
+  it('reminds about an idle agent panel whose wrapped agent is not identified yet', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T12:00:00.000Z'));
+    // `agent-farm run` left at its shell after the agent stopped, before Pane named the agent.
+    vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue({
+      ...terminalSnapshot('$ ', 'idle', 'claude', '2026-01-01T11:49:00.000Z'),
+      currentCommand: 'agent-farm',
+      agentType: undefined,
+    });
+    const wrapperPanel: ToolPanel = {
+      ...terminalPanel,
+      title: 'agent-farm run bigbrain/implementer',
+      state: { isActive: true, customState: { isCliPanel: true, initialCommand: 'agent-farm run bigbrain/implementer' } },
+    };
+    vi.mocked(panelManager.getPanelsForSession).mockImplementation((sessionId: string) =>
+      sessionId === session.id ? [wrapperPanel] : []);
+    const registry = createRegistry(createServices({ workspaceJournal: new WorkspaceJournal() }));
+
+    const result = await registry.invoke('runpane:workspace:wait', [{
+      since: 0, timeoutMs: 0, idleAfterMs: 600_000, kinds: ['agent.idle'], agentsOnly: true,
+    }]);
+
+    expect(result.entries).toEqual([expect.objectContaining({ kind: 'agent.idle', panelId: terminalPanel.id, idleCount: 1 })]);
+    expect(result.entries[0]?.agentType).toBeUndefined();
   });
 
   it('keeps idle disabled for old clients and applies workspace filters', async () => {
@@ -2333,6 +2408,22 @@ describe('runpane IPC handlers', () => {
     }])).rejects.toThrow('Repo path must be an existing git repository');
   });
 
+  it('renames a repo found by any selector and announces the update', async () => {
+    const updateProject = vi.fn((id: number, updates: Partial<Project>): Project => ({ ...project, id, ...updates }));
+    const services = createServices();
+    // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
+    services.databaseService = { ...services.databaseService, updateProject } as never;
+    const registry = createRegistry(services);
+
+    const result = await registry.invoke('runpane:repos:rename', [{ repo: 'Pane', name: '  Lev web  ' }]);
+
+    expect(updateProject).toHaveBeenCalledWith(1, { name: 'Lev web' });
+    expect(services.sessionManager.emit).toHaveBeenCalledWith('project:list-changed');
+    expect(result).toMatchObject({ ok: true, repo: { id: 1, name: 'Lev web', path: '/repo/pane' } });
+    await expect(registry.invoke('runpane:repos:rename', [{ repo: '1', name: '   ' }])).rejects.toThrow('non-empty name');
+    await expect(registry.invoke('runpane:repos:rename', [{ repo: 'missing', name: 'x' }])).rejects.toThrow(/missing/);
+  });
+
   it('dry-runs pane creation with contract-backed agent templates', async () => {
     const services = createServices();
     const registry = createRegistry(services);
@@ -2574,6 +2665,68 @@ describe('runpane IPC handlers', () => {
       }],
     });
     expect(terminalPanelManager.isTerminalInitialized).toHaveBeenCalledWith(terminalPanel.id);
+  });
+
+  it('expects a report by default from an agent-farm panel given a prompt, and not from a person\'s', async () => {
+    const farmPanel: ToolPanel = {
+      ...terminalPanel,
+      id: 'panel-farm',
+      title: 'agent-farm',
+      state: { isActive: false, customState: { initialCommand: 'agent-farm run bigbrain/implementer:opus', isCliPanel: false } },
+    };
+    vi.mocked(panelManager.createPanel).mockResolvedValue(farmPanel);
+    const services = createServices({ workspaceJournal: new WorkspaceJournal() });
+    const registry = createRegistry(services);
+    const create = (extra: Record<string, string | boolean>, initialInput?: string) => {
+      // No --agent: Pane learns it is Claude Code only once it sees it behind the wrapper.
+      const tool: RunpaneCommandToolSpec = { command: 'agent-farm run bigbrain/implementer:opus' };
+      if (initialInput) tool.initialInput = initialInput;
+      return registry.invoke('runpane:panels:create', [{ paneId: session.id, tool, noFocus: true, ...extra }]);
+    };
+
+    const dispatched = await create({}, 'Implement P-1, then run runpane report.');
+    expect(dispatched.expectedReport).toEqual({ since: expect.any(String) });
+    expect(services.expectedReportTracker?.expectation('panel-farm')).toEqual(dispatched.expectedReport);
+    // Expectations are saved under PANE_DIR, which the tests in this file share.
+    services.expectedReportTracker?.delivered('panel-farm');
+    services.workspaceJournal?.appendPaneEntry(session.id, { kind: 'agent.report', panelId: 'panel-farm', source: 'agent' });
+
+    expect((await create({ source: 'user' }, 'Have a look.')).expectedReport).toBeUndefined();
+    expect((await create({})).expectedReport).toBeUndefined();
+    expect(services.expectedReportTracker?.expectation('panel-farm')).toBeUndefined();
+  });
+
+  it('opens a tab that resumes a native session id, recording it as the tab\'s id', async () => {
+    vi.mocked(panelManager.createPanel).mockResolvedValue(terminalPanel);
+    await createRegistry(createServices()).invoke('runpane:panels:create', [{
+      paneId: session.id, tool: { agent: 'claude' }, resume: '0b6f2a8e-3d6c-4f0a-9a43-6c2a3f0e9d11', noFocus: true,
+    }]);
+    expect(panelManager.createPanel).toHaveBeenCalledWith(expect.objectContaining({
+      initialState: expect.objectContaining({
+        agentType: 'claude', agentSessionId: '0b6f2a8e-3d6c-4f0a-9a43-6c2a3f0e9d11', hasClaudeSessionId: true,
+      }),
+    }));
+  });
+
+  it('creates a Pane whose agent resumes a native session id', async () => {
+    const panel = { ...terminalPanel, state: { ...terminalPanel.state, customState: { agentType: 'codex' as const, agentSessionId: 'thread-7' } } };
+    vi.mocked(panelManager.createPanel).mockResolvedValue(panel);
+    vi.mocked(panelManager.getPanel).mockReturnValue(panel);
+    await createRegistry(createServices()).invoke('runpane:panes:create', [{
+      repo: { id: project.id }, panes: [{ name: 'handoff-feature', tool: { agent: 'codex' }, resume: 'thread-7' }],
+    }]);
+    expect(panelManager.createPanel).toHaveBeenCalledWith(expect.objectContaining({
+      // The resumed conversation recorded another folder; the terminal pins it with --cd so Codex does not ask which to use.
+      initialState: expect.objectContaining({ agentType: 'codex', agentSessionId: 'thread-7', initialCommand: 'codex --yolo', resumeDirectory: expect.any(String) }),
+    }));
+  });
+
+  it('rejects a resume id for a wrapper command before opening a tab', async () => {
+    vi.mocked(panelManager.createPanel).mockResolvedValue(terminalPanel);
+    await expect(createRegistry(createServices()).invoke('runpane:panels:create', [{
+      paneId: session.id, tool: { command: 'agent-farm claude', agentType: 'claude' }, resume: 'abc',
+    }])).rejects.toThrow('--resume needs a built-in agent command');
+    expect(panelManager.createPanel).not.toHaveBeenCalled();
   });
 
   it('creates a background terminal panel inside an existing pane', async () => {
@@ -2876,7 +3029,7 @@ describe('runpane IPC handlers', () => {
     const arm = vi.spyOn(getMobilePushSender(services.configManager), 'arm');
     const send = async (channel: string, input: string, source?: 'user' | 'agent') => {
       arm.mockClear();
-      await registry.invoke(channel, [{ panelId: terminalPanel.id, input, source }]);
+      await registry.invoke(channel, [{ panelId: terminalPanel.id, input, source, expectReport: false }]);
       return arm.mock.calls.length > 0;
     };
 
@@ -3301,7 +3454,6 @@ describe('runpane IPC handlers', () => {
         isAlternateScreen: false,
         activityStatus: 'idle',
         lastActivityTime: '2026-01-01T00:02:00.000Z',
-        currentCommand: 'codex',
         isCliPanel: true,
         isCliReady: true,
         agentType: 'codex',
@@ -3313,7 +3465,6 @@ describe('runpane IPC handlers', () => {
         isAlternateScreen: false,
         activityStatus: 'active',
         lastActivityTime: '2026-01-01T00:02:01.000Z',
-        currentCommand: 'codex',
         isCliPanel: true,
         isCliReady: false,
         agentType: 'codex',
@@ -3360,7 +3511,6 @@ describe('runpane IPC handlers', () => {
       isAlternateScreen: false,
       activityStatus: 'idle',
       lastActivityTime: '2026-01-01T00:02:00.000Z',
-      currentCommand: 'codex',
       isCliPanel: true,
       isCliReady: true,
       agentType: 'codex',
@@ -3621,7 +3771,6 @@ describe('runpane IPC handlers', () => {
       isAlternateScreen: true,
       activityStatus: 'idle',
       lastActivityTime: '2026-01-01T00:02:00.000Z',
-      currentCommand: 'codex',
       isCliPanel: true,
       isCliReady: true,
       agentType: 'codex',
@@ -3760,7 +3909,6 @@ describe('runpane IPC handlers', () => {
       isAlternateScreen: false,
       activityStatus: 'idle',
       lastActivityTime: '2026-01-01T00:02:00.000Z',
-      currentCommand: 'codex',
       isCliPanel: true,
       isCliReady: true,
       agentType: 'codex',
@@ -4417,6 +4565,21 @@ describe('runpane IPC handlers', () => {
       } });
   });
 
+  it('waits through a trust menu Pane answers itself and reports the agent ready', async () => {
+    vi.useFakeTimers();
+    const trust = 'Accessing workspace:\n/pane/sessions/s1\n❯ No, exit\n  Yes, I trust this folder';
+    const rule = '─'.repeat(40);
+    const startedAt = Date.now();
+    vi.mocked(terminalPanelManager.getTerminalSnapshot).mockImplementation(() =>
+      terminalSnapshot(Date.now() - startedAt < 1500 ? trust : `${rule}\n❯ \n${rule}`, 'idle', 'claude'));
+    vi.spyOn(terminalPanelManager, 'answersTrustPrompt').mockImplementation((_panelId, text) => text === trust);
+    const pending = createRegistry().invoke('runpane:panels:wait', [{
+      panelId: terminalPanel.id, condition: 'ready', timeoutMs: 5000, intervalMs: 500,
+    }]);
+    await vi.runAllTimersAsync();
+    expect(await pending).toMatchObject({ ok: true, matched: true });
+  });
+
   it('waits past a transient composer before reporting startup ready', async () => {
     const composer = terminalSnapshot('› Ask Codex to do anything', 'idle', 'codex');
     const dialog = terminalSnapshot('Cannot use the background server\n  1. Run without daemon this time\n› 2. Cancel', 'idle', 'codex');
@@ -4493,7 +4656,6 @@ describe('runpane IPC handlers', () => {
       isAlternateScreen: false,
       activityStatus: 'idle',
       lastActivityTime: '2026-01-01T00:02:00.000Z',
-      currentCommand: 'codex',
       isCliPanel: true,
       isCliReady: true,
       agentType: 'codex',
@@ -5095,7 +5257,7 @@ describe('runpane IPC handlers', () => {
 
     const associate = vi.fn(async () => ({}));
     // SAFETY: The handler only calls associate on the Sessions manager.
-    const services = createServices({ orchestrationSessionManager: { associate } as never });
+    const services = createServices({ orchestrationSessionManager: { associate, sessionIdForPane: async () => undefined } as never });
     vi.mocked(terminalPanelManager.initializeTerminal).mockImplementation(async () => {
       expect(associate).toHaveBeenCalledWith({ sessionId: 'orchestrator-1' }, { paneId: session.id });
     });
@@ -5209,6 +5371,9 @@ describe('runpane IPC handlers', () => {
         }],
       });
       expect(services.taskQueue?.createSessionAndWait).not.toHaveBeenCalled();
+      expect(services.analyticsManager?.track).toHaveBeenCalledWith('runpane_local_control_failed', expect.objectContaining({
+        action: 'panes:create', failure_kind: 'handled', error_code: 'ERR_RUNPANE_BRANCH_HAS_PANE',
+      }));
     });
 
     it('passes the exact requested branch and base to pane creation', async () => {
@@ -5504,112 +5669,17 @@ describe('runpane IPC handlers', () => {
     });
   });
 
-  it('sets pinned state declaratively and idempotently', async () => {
-    const databaseRow = {
-      id: session.id,
-      is_favorite: 0,
-      // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
-      favorite_pinned_at: null as string | null,
-    };
-    const setSessionFavorite = vi.fn((_id: string, pinned: boolean) => {
-      databaseRow.is_favorite = pinned ? 1 : 0;
-      databaseRow.favorite_pinned_at = pinned
-        ? databaseRow.favorite_pinned_at ?? '2026-07-21 12:00:00'
-        : null;
-      return databaseRow;
-    });
-    const emit = vi.fn();
+  it('dry-runs pinned state changes without changing the session', async () => {
+    const setFavorite = vi.fn();
     const services = createServices({
-      // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
-      databaseService: {
-        ...createServices().databaseService,
-        setSessionFavorite,
-      } as never,
-      // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
-      sessionManager: {
-        ...createServices().sessionManager,
-        emit,
-      } as never,
+      // SAFETY: This fixture only exercises the pin command's SessionManager boundary.
+      sessionManager: { ...createServices().sessionManager, setFavorite } as never,
     });
-    const registry = createRegistry(services);
-
-    const firstPin = await registry.invoke('runpane:panes:pin', [{ paneId: session.id, pinned: true }]);
-    const pinTimestamp = databaseRow.favorite_pinned_at;
-    const secondPin = await registry.invoke('runpane:panes:pin', [{ paneId: session.id, pinned: true }]);
-    const listedPinned = await registry.invoke('runpane:panes:list', [{ repo: 'active' }]);
-
-    expect(firstPin).toEqual({
-      ok: true,
-      paneId: session.id,
-      pinned: true,
-      favoritePinnedAt: pinTimestamp,
-      generation: 0,
-    });
-    expect(secondPin).toEqual(firstPin);
-    expect(databaseRow.favorite_pinned_at).toBe(pinTimestamp);
-    expect(listedPinned).toMatchObject({ panes: [{ paneId: session.id, pinned: true }] });
-
-    const firstUnpin = await registry.invoke('runpane:panes:pin', [{ paneId: session.id, pinned: false }]);
-    const secondUnpin = await registry.invoke('runpane:panes:pin', [{ paneId: session.id, pinned: false }]);
-
-    expect(firstUnpin).toEqual({ ok: true, paneId: session.id, pinned: false, favoritePinnedAt: undefined, generation: 0 });
-    expect(secondUnpin).toEqual(firstUnpin);
-    expect(databaseRow).toMatchObject({ is_favorite: 0, favorite_pinned_at: null });
-    expect(setSessionFavorite).toHaveBeenCalledTimes(4);
-    expect(emit).toHaveBeenCalledTimes(4);
-    expect(emit).toHaveBeenLastCalledWith('session-updated', expect.objectContaining({
-      id: session.id,
-      isFavorite: false,
-      favoritePinnedAt: undefined,
-    }));
-  });
-
-  it('dry-runs pinned state changes without mutating or emitting', async () => {
-    session.isFavorite = false;
-    session.favoritePinnedAt = undefined;
-    const databaseRow = {
-      id: session.id,
-      is_favorite: 0,
-      // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
-      favorite_pinned_at: null as string | null,
-    };
-    const setSessionFavorite = vi.fn((_id: string, pinned: boolean) => {
-      databaseRow.is_favorite = pinned ? 1 : 0;
-      databaseRow.favorite_pinned_at = pinned ? '2026-07-21 12:00:00' : null;
-      return databaseRow;
-    });
-    const emit = vi.fn();
-    const services = createServices({
-      // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
-      databaseService: {
-        ...createServices().databaseService,
-        setSessionFavorite,
-      } as never,
-      // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
-      sessionManager: {
-        ...createServices().sessionManager,
-        emit,
-      } as never,
-    });
-    const registry = createRegistry(services);
-
-    const result = await registry.invoke('runpane:panes:pin', [{
-      paneId: session.id,
-      pinned: true,
-      dryRun: true,
+    const result = await createRegistry(services).invoke('runpane:panes:pin', [{
+      paneId: session.id, pinned: true, dryRun: true,
     }]);
-
-    expect(result).toEqual({
-      ok: true,
-      dryRun: true,
-      paneId: session.id,
-      pinned: true,
-      favoritePinnedAt: undefined,
-    });
-    expect(databaseRow).toMatchObject({ is_favorite: 0, favorite_pinned_at: null });
-    expect(session.isFavorite).toBe(false);
-    expect(setSessionFavorite).not.toHaveBeenCalled();
-    expect(emit).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ ok: true, dryRun: true, paneId: session.id, pinned: true });
+    expect(setFavorite).not.toHaveBeenCalled();
   });
 
   it('rejects missing and non-boolean pinned state', async () => {
@@ -5621,100 +5691,35 @@ describe('runpane IPC handlers', () => {
       .rejects.toThrow('pinned as a boolean');
   });
 
-  it('renames a pane, trims the name, emits an update, and returns the updated pane', async () => {
-    const renamedSession = { ...session };
-    const updateSession = vi.fn(() => ({ id: session.id, name: 'renamed pane' }));
-    const emit = vi.fn();
+  it('dry-runs pane rename without changing the session', async () => {
+    const renameSession = vi.fn();
     const services = createServices({
-      // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
-      databaseService: {
-        ...createServices().databaseService,
-        updateSession,
-      } as never,
-      // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
-      sessionManager: {
-        ...createServices().sessionManager,
-        getSession: vi.fn(() => renamedSession),
-        emit,
-      } as never,
+      // SAFETY: This fixture only exercises the rename command's SessionManager boundary.
+      sessionManager: { ...createServices().sessionManager, renameSession } as never,
     });
-    const registry = createRegistry(services);
-
-    const result = await registry.invoke('runpane:panes:rename', [{
-      paneId: session.id,
-      name: '  renamed pane  ',
+    const result = await createRegistry(services).invoke('runpane:panes:rename', [{
+      paneId: session.id, name: 'preview name', dryRun: true,
     }]);
-
-    expect(updateSession).toHaveBeenCalledWith(session.id, { name: 'renamed pane' });
-    expect(renamedSession.name).toBe('renamed pane');
-    expect(emit).toHaveBeenCalledWith('session-updated', renamedSession);
-    expect(result).toMatchObject({
-      ok: true,
-      pane: { paneId: session.id, name: 'renamed pane' },
-    });
-  });
-
-  it('dry-runs pane rename without persisting, mutating, or emitting', async () => {
-    const originalSession = { ...session };
-    const updateSession = vi.fn();
-    const emit = vi.fn();
-    const services = createServices({
-      // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
-      databaseService: {
-        ...createServices().databaseService,
-        updateSession,
-      } as never,
-      // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
-      sessionManager: {
-        ...createServices().sessionManager,
-        getSession: vi.fn(() => originalSession),
-        emit,
-      } as never,
-    });
-    const registry = createRegistry(services);
-
-    const result = await registry.invoke('runpane:panes:rename', [{
-      paneId: session.id,
-      name: 'preview name',
-      dryRun: true,
-    }]);
-
-    expect(result).toMatchObject({
-      ok: true,
-      dryRun: true,
-      pane: { paneId: session.id, name: 'preview name' },
-    });
-    expect(originalSession.name).toBe(session.name);
-    expect(updateSession).not.toHaveBeenCalled();
-    expect(emit).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ ok: true, dryRun: true, pane: { name: 'preview name' } });
+    expect(renameSession).not.toHaveBeenCalled();
   });
 
   it('rejects empty rename names and accepts names without a new length limit', async () => {
     const longName = 'x'.repeat(10_000);
-    const renamedSession = { ...session };
-    const updateSession = vi.fn(() => ({ id: session.id, name: longName }));
     const services = createServices({
-      // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
-      databaseService: {
-        ...createServices().databaseService,
-        updateSession,
-      } as never,
-      // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
+      // SAFETY: Name persistence is exercised by the public command tests with real SessionManager.
       sessionManager: {
         ...createServices().sessionManager,
-        getSession: vi.fn(() => renamedSession),
-        emit: vi.fn(),
+        renameSession: vi.fn(() => ({ ...session, name: longName })),
       } as never,
     });
     const registry = createRegistry(services);
-
     await expect(registry.invoke('runpane:panes:rename', [{ paneId: session.id, name: '' }]))
       .rejects.toThrow('non-empty name');
     await expect(registry.invoke('runpane:panes:rename', [{ paneId: session.id, name: '   ' }]))
       .rejects.toThrow('non-empty name');
-
-    const result = await registry.invoke('runpane:panes:rename', [{ paneId: session.id, name: longName }]);
-    expect(result).toMatchObject({ pane: { name: longName } });
+    expect(await registry.invoke('runpane:panes:rename', [{ paneId: session.id, name: longName }]))
+      .toMatchObject({ pane: { name: longName } });
   });
 
   it('rejects rename for a pane id that does not exist', async () => {
@@ -5799,7 +5804,6 @@ describe('runpane IPC handlers', () => {
       isAlternateScreen: false,
       activityStatus: 'idle',
       lastActivityTime: '2026-01-01T00:02:00.000Z',
-      currentCommand: 'codex',
       isCliPanel: true,
       isCliReady: true,
       agentType: 'codex',
@@ -5866,7 +5870,6 @@ describe('runpane IPC handlers', () => {
       isAlternateScreen: false,
       activityStatus: 'idle',
       lastActivityTime: '2026-01-01T00:02:00.000Z',
-      currentCommand: 'claude',
       isCliPanel: true,
       isCliReady: true,
       agentType: 'claude',
@@ -5914,6 +5917,9 @@ describe('runpane IPC handlers', () => {
       }],
     });
 
+    // The fixture reuses one panel id for two creates; finish its first expectation.
+    terminalPanelManager.emit('initial-input-delivery', claudePanel.id);
+    await registry.invoke('runpane:report', [{ panelId: claudePanel.id, state: 'done' }]);
     // Once Claude has recorded the turn, the transcript is the evidence.
     findUserTurnSince.mockResolvedValue({ state: 'taken', file: '/t.jsonl' });
     const recorded = await registry.invoke('runpane:panes:create', [{
@@ -6027,7 +6033,6 @@ describe('runpane IPC handlers', () => {
       isAlternateScreen: false,
       activityStatus: 'idle',
       lastActivityTime: '2026-01-01T00:02:00.000Z',
-      currentCommand: 'claude',
       isCliPanel: true,
       isCliReady: true,
       agentType: 'claude',
@@ -6412,7 +6417,6 @@ describe('runpane IPC handlers', () => {
                 isCliPanel: false,
                 isCliReady: false,
                 agentType: undefined,
-                currentCommand: 'echo',
               };
             }
             if (toolKind === 'codex' && inputCase.name === 'slash' && snapshotCalls >= 4) {
@@ -6748,6 +6752,19 @@ describe('runpane IPC handlers', () => {
       expect(state).toMatchObject({ initialInput: 'Line one\nLine two', initialInputSubmitStrategy: strategy });
     });
 
+    it('hands even a short create prompt to the composer when the launch shell is not POSIX', async () => {
+      vi.mocked(terminalPanelManager.launchShellIsPosix).mockReturnValue(false);
+      vi.mocked(panelManager.createPanel).mockImplementation(async request => createdTerminalPanel(request));
+
+      await createRegistry().invoke('runpane:panes:create', [{
+        repo: { id: project.id },
+        panes: [{ name: 'pwsh', tool: { agent: 'claude', initialInput: 'Fix "quoted" names' } }],
+      }]);
+
+      expect(createdInitialState().initialInputMode).toBeUndefined();
+      expect(createdInitialState()).toMatchObject({ initialInput: 'Fix "quoted" names', initialInputSubmitStrategy: 'enter' });
+    });
+
     it('sends a create prompt as a pointer to its file with --as-file-pointer', async () => {
       vi.mocked(panelManager.createPanel).mockImplementation(async request => createdTerminalPanel(request));
 
@@ -6767,6 +6784,59 @@ describe('runpane IPC handlers', () => {
         initialInputMode: 'argument',
       });
       expect(createdInitialState().initialInputFile).toBeUndefined();
+    });
+
+    it('writes a Session worker\'s prompt and attachments into its worktree, hidden from git, and grants read access to the Session folder', async () => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-pointer-'));
+      const worktree = path.join(root, 'worktree');
+      fs.mkdirSync(worktree);
+      execFileSync('git', ['init', '-q'], { cwd: worktree });
+      const mockup = path.join(root, 'mockup.png');
+      fs.writeFileSync(mockup, 'png bytes');
+      const sessionFolder = path.join(process.env.PANE_DIR ?? '', 'sessions', 'orch-1');
+      fs.mkdirSync(sessionFolder, { recursive: true });
+      const base = createServices();
+      const services = createServices({
+        // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
+        sessionManager: { ...base.sessionManager, getSession: vi.fn(() => ({ ...session, worktreePath: worktree })) } as never,
+        // SAFETY: The handler under test reads only sessionIdForPane from the Sessions manager.
+        orchestrationSessionManager: { sessionIdForPane: async () => 'orch-1' } as never,
+      });
+      vi.mocked(panelManager.createPanel).mockImplementation(async request => createdTerminalPanel(request));
+
+      // SAFETY: The panels:create handler resolves to a RunpanePanelCreateResult.
+      const result = await createRegistry(services).invoke('runpane:panels:create', [{
+        paneId: session.id,
+        tool: { agent: 'claude', initialInput: 'Build it', initialInputAsFilePointer: true, initialInputAttachments: [mockup] },
+      }]) as { promptFile?: string; attachments?: string[] };
+
+      const promptFile = result.promptFile ?? '';
+      const [copy = ''] = result.attachments ?? [];
+      expect(path.dirname(promptFile)).toBe(path.join(fs.realpathSync.native(worktree), '.pane', 'prompts'));
+      expect(fs.readFileSync(promptFile, 'utf8')).toBe('Build it\n');
+      expect(path.dirname(copy)).toBe(promptFile.replace(/\.md$/u, ''));
+      expect(fs.readFileSync(copy, 'utf8')).toBe('png bytes');
+      expect(execFileSync('git', ['status', '--porcelain', '--untracked-files=all'], { cwd: worktree, encoding: 'utf8' })).toBe('');
+      const state = createdInitialState();
+      // The pointer line names the files relative to the worktree, where the agent starts; promptFile stays absolute.
+      const relative = (file: string): string => path.relative(fs.realpathSync.native(worktree), file);
+      expect(relative(promptFile)).toMatch(/^\.pane[\\/]prompts[\\/]/u);
+      expect(state.initialInput).toBe(`Read and follow ${relative(promptFile)} (attached: ${relative(copy)})`);
+      expect(state.sessionFolder).toBe(sessionFolder);
+      // Windows launches get only PANE_SESSION_DIR.
+      expect(state.launchCommand).toBe(process.platform === 'win32' ? 'claude --dangerously-skip-permissions' : `claude --dangerously-skip-permissions --settings '${JSON.stringify({
+        permissions: {
+          additionalDirectories: [sessionFolder],
+          deny: [`Edit(/${sessionFolder}/**)`],
+        },
+      })}'`);
+    });
+
+    it('refuses attachments without a prompt file to list them in', async () => {
+      await expect(createRegistry().invoke('runpane:panels:create', [{
+        paneId: session.id,
+        tool: { agent: 'claude', initialInput: 'Build it', initialInputAttachments: ['/tmp/mockup.png'] },
+      }])).rejects.toMatchObject({ code: 'ERR_ATTACHMENT_NEEDS_FILE_POINTER' });
     });
 
     it('stages a wrapped Claude\'s long create prompt as a paste and submits it with its own Enter', async () => {
@@ -6935,6 +7005,21 @@ describe('runpane IPC handlers', () => {
           initialInput: { delivered: false, verifiedSubmitted: false, error: { message: expect.stringContaining('not sent') } },
         }],
       });
+    });
+
+    it('reports why the agent was not ready in failure telemetry', async () => {
+      vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue({
+        ...terminalSnapshot('Building agent bundle...\n', 'idle'), isCliPanel: false, isCliReady: false, agentType: undefined,
+      });
+      const services = createServices();
+      await createRegistry(services).invoke('runpane:panes:create', [{
+        repo: { id: project.id }, waitReady: true, readyTimeoutMs: 30,
+        panes: [{ name: 'farm', tool: { command: 'agent-farm run greenfield/planner:opus', initialInput: 'say hi' } }],
+      }]);
+
+      expect(services.analyticsManager?.track).toHaveBeenCalledWith('runpane_local_control_failed', expect.objectContaining({
+        action: 'panes:create', failure_kind: 'handled', error_code: 'no-agent-detected',
+      }));
     });
 
     it('holds the message for the agent when a startup prompt blocks it', async () => {
@@ -7137,6 +7222,203 @@ describe('runpane IPC handlers', () => {
         entries: [{ kind: 'agent.report', panelId: terminalPanel.id, report: { state: 'blocked', question: 'q' } }],
       });
       await expect(otherKinds).resolves.toMatchObject({ timedOut: true, entries: [] });
+    });
+
+    it('expects a report for work sent to an agent unless a person sent it or the sender opted out', async () => {
+      vi.mocked(terminalPanelManager.getForegroundProcess).mockReturnValue({ name: 'zsh', isShell: true });
+      const services = createServices({ workspaceJournal: new WorkspaceJournal() });
+      const registry = createRegistry(services);
+      const submit = async (request: Record<string, string | boolean>) => {
+        stored = structuredClone(terminalPanel);
+        services.expectedReportTracker?.delivered(terminalPanel.id);
+        services.workspaceJournal?.appendPaneEntry(session.id, { kind: 'agent.report', panelId: terminalPanel.id, source: 'agent' });
+        const result = await registry.invoke('runpane:panels:submit', [{ panelId: terminalPanel.id, input: 'ship it', ...request }]);
+        return { result, expectation: services.expectedReportTracker?.expectation(terminalPanel.id) };
+      };
+
+      const byDefault = await submit({});
+      expect(byDefault.result.expectedReport).toEqual({ since: expect.any(String) });
+      expect(byDefault.expectation).toEqual(byDefault.result.expectedReport);
+      expect((await submit({ source: 'agent' })).expectation).toEqual({ since: expect.any(String) });
+      for (const optedOut of [{ source: 'user' }, { expectReport: false }]) {
+        const { result, expectation } = await submit(optedOut);
+        expect(result.expectedReport).toBeUndefined();
+        expect(expectation).toBeUndefined();
+      }
+      expect((await submit({ source: 'user', expectReport: true })).expectation).toEqual({ since: expect.any(String) });
+      // Expectations are saved under PANE_DIR, which the tests in this file share.
+      services.workspaceJournal?.appendPaneEntry(session.id, { kind: 'agent.report', panelId: terminalPanel.id, source: 'agent' });
+    });
+
+    it('expects a report by default for work sent to an agent-farm panel before Pane identifies its agent', async () => {
+      vi.mocked(terminalPanelManager.getForegroundProcess).mockReturnValue({ name: 'zsh', isShell: true });
+      stored = structuredClone(terminalPanel);
+      stored.state.customState = { initialCommand: 'agent-farm run bigbrain/implementer:opus', isCliPanel: false };
+      vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue({ ...terminalSnapshot('$ ', 'idle'), agentType: undefined, currentCommand: 'agent-farm', isCliPanel: false });
+      const services = createServices({ workspaceJournal: new WorkspaceJournal() });
+      const registry = createRegistry(services);
+
+      const result = await registry.invoke('runpane:panels:submit', [{ panelId: terminalPanel.id, input: 'Continue with P-2.' }]);
+      expect(result.expectedReport).toEqual({ since: expect.any(String) });
+      services.workspaceJournal?.appendPaneEntry(session.id, { kind: 'agent.report', panelId: terminalPanel.id, source: 'agent' });
+    });
+
+    it('expects no report by default from a panel with no agent', async () => {
+      vi.mocked(terminalPanelManager.getForegroundProcess).mockReturnValue({ name: 'zsh', isShell: true });
+      stored = structuredClone(terminalPanel);
+      stored.state.customState = { isCliPanel: false };
+      vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue({ ...terminalSnapshot('$ ', 'idle'), agentType: undefined, currentCommand: 'zsh', isCliPanel: false });
+      const services = createServices({ workspaceJournal: new WorkspaceJournal() });
+      const registry = createRegistry(services);
+
+      const result = await registry.invoke('runpane:panels:submit', [{ panelId: terminalPanel.id, input: 'npm test' }]);
+      expect(result.expectedReport).toBeUndefined();
+      expect(services.expectedReportTracker?.expectation(terminalPanel.id)).toBeUndefined();
+    });
+
+    it('submits an in-worktree prompt file with attachments and still expects a report', async () => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-submit-pointer-'));
+      const worktree = path.join(root, 'worktree');
+      fs.mkdirSync(worktree);
+      execFileSync('git', ['init', '-q'], { cwd: worktree });
+      const plan = path.join(root, 'plan.md');
+      fs.writeFileSync(plan, '# Plan');
+      vi.mocked(terminalPanelManager.getForegroundProcess).mockReturnValue({ name: 'zsh', isShell: true });
+      stored = structuredClone(terminalPanel);
+      const base = createServices();
+      const services = createServices({
+        workspaceJournal: new WorkspaceJournal(),
+        // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
+        sessionManager: { ...base.sessionManager, getSession: vi.fn(() => ({ ...session, worktreePath: worktree })) } as never,
+      });
+
+      // SAFETY: The panels:submit handler resolves to a RunpanePanelSubmitResult.
+      const result = await createRegistry(services).invoke('runpane:panels:submit', [{
+        panelId: terminalPanel.id, input: 'Continue with P-2.', asFilePointer: true, attachments: [plan],
+      }]) as { promptFile?: string; attachments?: string[]; expectedReport?: { since: string } };
+
+      const promptFile = result.promptFile ?? '';
+      const [copy = ''] = result.attachments ?? [];
+      const relative = (file: string): string => path.relative(fs.realpathSync.native(worktree), file);
+      expect(relative(promptFile)).toMatch(/^\.pane[\\/]prompts[\\/]/u);
+      expect(fs.readFileSync(copy, 'utf8')).toBe('# Plan');
+      expect(terminalPanelManager.writeToTerminal).toHaveBeenCalledWith(
+        terminalPanel.id,
+        `Read and follow ${relative(promptFile)} (attached: ${relative(copy)})\r`,
+      );
+      expect(result.expectedReport).toEqual({ since: expect.any(String) });
+      expect(services.expectedReportTracker?.expectation(terminalPanel.id)).toEqual(result.expectedReport);
+      // Expectations are saved under PANE_DIR, which the tests in this file share.
+      services.workspaceJournal?.appendPaneEntry(session.id, { kind: 'agent.report', panelId: terminalPanel.id, source: 'agent' });
+    });
+
+    it('rejects overlapping report-expected dispatches before writing any replacement input', async () => {
+      stored = structuredClone(terminalPanel);
+      vi.mocked(terminalPanelManager.getForegroundProcess).mockReturnValue({ name: 'zsh', isShell: true });
+      const services = createServices({ workspaceJournal: new WorkspaceJournal() });
+      const registry = createRegistry(services);
+      await registry.invoke('runpane:panels:submit', [{ panelId: terminalPanel.id, input: 'Task A', expectReport: true }]);
+      vi.mocked(terminalPanelManager.writeToTerminal).mockClear();
+      await expect(registry.invoke('runpane:panels:submit', [{ panelId: terminalPanel.id, input: 'Task B', expectReport: true }]))
+        .rejects.toMatchObject({ code: 'ERR_RUNPANE_REPORT_OUTSTANDING', next: expect.stringContaining('--no-expect-report') });
+      expect(terminalPanelManager.writeToTerminal).not.toHaveBeenCalled();
+    });
+
+    it('delivers a reply to a worker that owes a report and keeps waiting for that report', async () => {
+      stored = structuredClone(terminalPanel);
+      vi.mocked(terminalPanelManager.getForegroundProcess).mockReturnValue({ name: 'zsh', isShell: true });
+      const services = createServices({ workspaceJournal: new WorkspaceJournal() });
+      const registry = createRegistry(services);
+      // SAFETY: The panels:submit handler resolves to a RunpanePanelSubmitResult.
+      const task = await registry.invoke('runpane:panels:submit', [{ panelId: terminalPanel.id, input: 'Task A', expectReport: true }]) as { expectedReport?: { since: string } };
+      vi.mocked(terminalPanelManager.writeToTerminal).mockClear();
+
+      await registry.invoke('runpane:panels:submit', [{ panelId: terminalPanel.id, input: 'answer: Q-1 → invoice id', expectReport: false }]);
+
+      expect(terminalPanelManager.writeToTerminal).toHaveBeenCalledWith(terminalPanel.id, expect.stringContaining('answer: Q-1 → invoice id'));
+      expect(services.expectedReportTracker?.expectation(terminalPanel.id)).toEqual(task.expectedReport);
+      services.workspaceJournal?.appendPaneEntry(session.id, { kind: 'agent.report', panelId: terminalPanel.id, source: 'agent' });
+    });
+
+    it('tracks completion during the delivery call before verification returns', async () => {
+      stored = structuredClone(terminalPanel);
+      vi.mocked(terminalPanelManager.getForegroundProcess).mockReturnValue({ name: 'zsh', isShell: true });
+      const services = createServices({ workspaceJournal: new WorkspaceJournal() });
+      const registry = createRegistry(services);
+      vi.mocked(terminalPanelManager.writeToTerminal).mockImplementation(() => {
+        services.workspaceJournal?.appendPaneEntry(session.id, { kind: 'agent.ready', panelId: terminalPanel.id, source: 'agent' });
+      });
+      const result = await registry.invoke('runpane:panels:submit', [{ panelId: terminalPanel.id, input: 'Finish quickly', expectReport: true }]);
+      await new Promise(resolve => setTimeout(resolve, 0));
+      expect(result.expectedReport).toEqual({ since: expect.any(String) });
+      await vi.waitFor(() => expect(services.workspaceJournal?.readAfter(0, { kinds: ['agent.report.missing'] }).entries)
+        .toEqual([expect.objectContaining({ panelId: terminalPanel.id, reason: 'ready' })]));
+      expect(services.expectedReportTracker?.expectation(terminalPanel.id)).toBeUndefined();
+    });
+
+    it('releases a create reservation when terminal setup refuses before prompt delivery', async () => {
+      const services = createServices({ workspaceJournal: new WorkspaceJournal() });
+      const registry = createRegistry(services);
+      vi.mocked(panelManager.createPanel).mockResolvedValue(terminalPanel);
+      vi.mocked(terminalPanelManager.initializeTerminal).mockRejectedValue(new Error('PTY refused'));
+      await expect(registry.invoke('runpane:panels:create', [{ paneId: session.id,
+        tool: { command: 'agent-farm run worker', initialInput: 'Task A' } }])).rejects.toThrow('PTY refused');
+      expect(services.expectedReportTracker?.expectation(terminalPanel.id)).toBeUndefined();
+    });
+
+    it('keeps held create work expected through startup readiness until the prompt is delivered', async () => {
+      stored = { ...terminalPanel, state: { isActive: true, customState: { initialCommand: 'agent-farm run worker' } } };
+      const services = createServices({ workspaceJournal: new WorkspaceJournal() });
+      const registry = createRegistry(services);
+      vi.mocked(panelManager.createPanel).mockResolvedValue(terminalPanel);
+      const ready = () => services.workspaceJournal?.appendPaneEntry(session.id, { kind: 'agent.ready', panelId: terminalPanel.id, source: 'agent' });
+      vi.mocked(terminalPanelManager.initializeTerminal).mockImplementation(async () => { ready(); });
+      await registry.invoke('runpane:panels:create', [{ paneId: session.id, tool: { command: 'agent-farm run worker', initialInput: 'Task A' } }]);
+      await new Promise(resolve => setTimeout(resolve, 0));
+      expect(services.workspaceJournal?.readAfter(0, { kinds: ['agent.report.missing'] }).entries).toEqual([]);
+      expect(services.expectedReportTracker?.expectation(terminalPanel.id)).toBeDefined();
+      terminalPanelManager.emit('initial-input-delivery', terminalPanel.id);
+      ready();
+      await new Promise(resolve => setTimeout(resolve, 0));
+      await vi.waitFor(() => expect(services.workspaceJournal?.readAfter(0, { kinds: ['agent.report.missing'] }).entries)
+        .toEqual([expect.objectContaining({ panelId: terminalPanel.id, reason: 'ready' })]));
+    });
+
+    it('arms an expected report on submit and puts the missing report in the Session inbox', async () => {
+      // A plain shell takes the submission without waiting for an agent composer.
+      stored = structuredClone(terminalPanel);
+      vi.mocked(terminalPanelManager.getForegroundProcess).mockReturnValue({ name: 'zsh', isShell: true });
+      // SAFETY: Only the Session lookups the inbox handlers reach are used, and they are stubbed below.
+      const orchestrationSessionManager = Object.create(OrchestrationSessionManager.prototype) as OrchestrationSessionManager;
+      vi.spyOn(orchestrationSessionManager, 'memberSessionIds').mockReturnValue(['session-a']);
+      vi.spyOn(orchestrationSessionManager, 'get').mockResolvedValue(
+        // SAFETY: The inbox handlers read only the record's id and name.
+        { id: 'session-a', name: 'Release' } as Awaited<ReturnType<OrchestrationSessionManager['get']>>,
+      );
+      const services = createServices({ orchestrationSessionManager, workspaceJournal: new WorkspaceJournal() });
+      const registry = createRegistry(services);
+
+      const submitted = await registry.invoke('runpane:panels:submit', [{ panelId: terminalPanel.id, input: 'ship it', expectReport: true }]);
+      expect(submitted.expectedReport).toEqual({ since: expect.any(String) });
+      expect(services.expectedReportTracker?.expectation(terminalPanel.id)).toEqual(submitted.expectedReport);
+
+      vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(terminalSnapshot('Opened PR #12.\n$ ', 'idle'));
+      services.workspaceJournal?.appendPaneEntry(session.id, { kind: 'agent.ready', panelId: terminalPanel.id, agentType: 'claude', source: 'agent' });
+      const waited = await registry.invoke('runpane:workspace:wait', [{ since: 0, timeoutMs: 1_000, kinds: ['agent.report.missing'] }]);
+      expect(waited.entries).toEqual([expect.objectContaining({
+        kind: 'agent.report.missing',
+        panelId: terminalPanel.id,
+        reason: 'ready',
+        expectedSince: submitted.expectedReport.since,
+      })]);
+      expect(services.expectedReportTracker?.expectation(terminalPanel.id)).toBeUndefined();
+
+      const inbox = await registry.invoke('runpane:inbox:list', [{ session: 'Release' }]);
+      expect(inbox).toMatchObject({ ok: true, session: { id: 'session-a', name: 'Release' }, items: [{ kind: 'report.missing', panelId: terminalPanel.id }] });
+      const id = inbox.items[0].id;
+      expect(await registry.invoke('runpane:inbox:ack', [{ ids: [id, 'in-gone'] }])).toEqual({ ok: true, acknowledged: [id], unknown: ['in-gone'] });
+      expect((await registry.invoke('runpane:inbox:list', [{ session: 'session-a' }])).items).toEqual([]);
+      await expect(registry.invoke('runpane:inbox:ack', [{ all: true }])).rejects.toThrow('needs a Session');
     });
 
     it('refuses a blocked report without a question, a bad head, and a panel from another Pane', async () => {
@@ -9137,5 +9419,44 @@ describe('runpane IPC handlers', () => {
         .rejects.toThrow('exactly one of url or filePath');
       expect(panelManager.createPanel).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe('runpane loops', () => {
+  function loopServices(): AppServices {
+    const db = createLoopTestDb();
+    const services = createServices();
+    services.loopManager = new LoopManager({
+      repo: new LoopRepository(() => db),
+      startRun: async () => ({ sessionId: 'run-pane' }),
+      archiveRun: async () => true,
+      projectExists: id => id === 1,
+      prepareSession: async target => target,
+    });
+    return services;
+  }
+
+  it('saves, pauses and deletes a loop by request object', async () => {
+    const services = loopServices();
+    const registry = createRegistry(services);
+
+    await expect(registry.invoke('runpane:loops:save', [{ name: 'Nightly', projectId: 1, cron: '0 3 * * *', agent: 'claude', enabled: true }]))
+      .resolves.toMatchObject({ ok: true, loop: { name: 'Nightly', scheduleText: 'Daily at 3:00 AM' } });
+    const [loop] = services.loopManager?.list() ?? [];
+    if (!loop) throw new Error('runpane:loops:save stored no loop');
+
+    await expect(registry.invoke('runpane:loops:set-enabled', [{ loopId: loop.id, enabled: false }]))
+      .resolves.toMatchObject({ ok: true, loop: { id: loop.id, enabled: false, nextRunAtMs: null } });
+    await expect(registry.invoke('runpane:loops:delete', [{ loopId: loop.id }])).resolves.toEqual({ ok: true, deleted: loop.id });
+    await expect(registry.invoke('runpane:loops:list')).resolves.toEqual({ ok: true, loops: [] });
+  });
+
+  it('rejects unknown loops, bad requests, and a Pane without loops with coded errors', async () => {
+    const registry = createRegistry(loopServices());
+    await expect(registry.invoke('runpane:loops:run-now', [{ loopId: 'loop-9' }])).rejects.toMatchObject({ code: 'ERR_LOOP_NOT_FOUND' });
+    await expect(registry.invoke('runpane:loops:run-now', ['loop-9'])).rejects.toThrow('expected object');
+    await expect(registry.invoke('runpane:loops:preview', [{ cron: 'not cron' }])).resolves.toMatchObject({ ok: false });
+
+    await expect(createRegistry().invoke('runpane:loops:list')).rejects.toMatchObject({ code: 'ERR_LOOPS_UNAVAILABLE' });
   });
 });

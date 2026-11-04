@@ -1,15 +1,6 @@
 import { SHARED_BROWSER_PARTITION } from '../../../../../shared/constants/browserPartitions';
 
-export function normalizeUrl(input: string): string {
-  let url = input.trim();
-  if (!/^(?:https?|file):\/\//i.test(url)) {
-    const isLocalHost = url.startsWith('localhost')
-      || url.startsWith('127.0.0.1')
-      || url.startsWith('[::1]');
-    url = `${isLocalHost ? 'http' : 'https'}://${url}`;
-  }
-  return url;
-}
+export { normalizeUrl } from '../../../../../shared/utils/browserUrl';
 
 /**
  * The store a tab's webview loads in: the isolated one main prepared for a remote

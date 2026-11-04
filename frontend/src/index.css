@@ -72,6 +72,14 @@ code,
   user-select: text;
 }
 
+/* Keyboard focus on a control that draws no ring of its own gets the theme's
+   ring instead of the browser's. `:where` keeps this at zero specificity, so any
+   component ring or `outline-none` still wins. */
+:where(:is(button, a[href], [role="button"], [role="tab"], [role="menuitem"], [role="option"], summary, input[type="checkbox"], input[type="radio"]):focus-visible) {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+}
+
 /* Rings on buttons and menu items appear for keyboard focus only. */
 :is(button, [role="button"], [role="tab"], [role="menuitem"], [role="option"], summary):focus:not(:focus-visible) {
   outline: none !important;
@@ -493,6 +501,11 @@ body.understory {
   to { transform: translateX(-100%); }
 }
 
+/* Pane Notify: the line under an update counts down to when it hides. */
+@keyframes pane-notify-countdown {
+  to { transform: scaleX(0); }
+}
+
 @keyframes pane-scrim-enter {
   from { opacity: 0; }
   to { opacity: 1; }
@@ -795,7 +808,7 @@ body.understory {
 
 .thinking-content blockquote {
   color: inherit;
-  border-color: rgba(var(--color-interactive-rgb), 0.2);
+  border-color: rgb(var(--color-interactive-rgb) / 0.2);
   @apply pl-3 py-1;
 }
 
@@ -1187,6 +1200,17 @@ body.understory {
   transform: none;
 }
 
+/* The one exception: an answered Notify card collapses and the cards below slide
+   up, so the list doesn't jump under the pointer. A blurred window and reduced
+   motion still close it instantly. */
+.pane-notify-collapse {
+  transition: grid-template-rows var(--duration-reveal) var(--ease-out-strong), opacity var(--duration-reveal) var(--ease-out-strong) !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pane-notify-collapse { transition: none !important; }
+}
+
 .animate-dropdown-enter,
 .animate-dropdown-enter-up,
 .animate-modal-enter,
@@ -1228,8 +1252,12 @@ body.understory {
 .pane-changes-list-row:hover { background: var(--color-surface-hover); }
 .pane-changes-list-row.is-active { background: var(--color-surface-hover); }
 .pane-changes-list-row.is-selected { background: var(--color-surface-selected); }
+/* The list owns focus and points at a row with aria-activedescendant, so the
+   keyboard ring goes on that row. */
+.pane-changes-list:focus-visible .pane-changes-list-row.is-active { outline: 2px solid var(--color-focus-ring); outline-offset: -2px; }
 
-/* The dir prefix absorbs all truncation; the basename always renders in full. */
+/* The dir prefix absorbs truncation first (its shrink factor dwarfs the
+   basename's); the basename truncates only when it alone overflows the row. */
 .pane-changes-list-path {
   display: flex;
   align-items: baseline;
@@ -1238,14 +1266,14 @@ body.understory {
   font-family: theme('fontFamily.mono');
 }
 .pane-changes-list-dir {
-  flex: 0 1 auto;
+  flex: 0 1000 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--color-text-secondary);
 }
-.pane-changes-list-name { flex: 0 0 auto; white-space: nowrap; color: var(--color-text-primary); }
+.pane-changes-list-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-text-primary); }
 
 .pane-changes-list-stats { color: var(--color-text-secondary); font-size: 10px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .pane-changes-list-status { color: var(--color-text-secondary); font-size: 10px; font-weight: 600; }
@@ -1253,4 +1281,23 @@ body.understory {
 @container (max-width: 320px) {
   .pane-changes-list-stats { display: none; }
   .pane-changes-list-row { grid-template-columns: 16px minmax(0, 1fr) 18px; }
+}
+
+/* Machine marks (components/machines/MachineMark.tsx). The logo pulses while
+   its machine reconnects, on the phone's 1.6 s period; a machine that cannot be
+   reached is dimmed. Reduce Motion dims instead of pulsing. */
+@keyframes pane-machine-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.pane-machine-mark[data-presence='pulsing'] .pane-machine-logo {
+  animation: pane-machine-pulse 1.6s ease-in-out infinite;
+}
+
+.pane-machine-mark[data-presence='dimmed'] { opacity: 0.45; }
+
+@media (prefers-reduced-motion: reduce) {
+  .pane-machine-mark[data-presence='pulsing'] { opacity: 0.45; }
+  .pane-machine-mark[data-presence='pulsing'] .pane-machine-logo { animation: none; }
 }

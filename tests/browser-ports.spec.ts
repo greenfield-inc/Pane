@@ -1,6 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { build } from 'esbuild';
-import path from 'node:path';
+import { bundleFixture } from './fixtures/bundle';
 import type { ListeningPortsSnapshot } from '../shared/types/listeningPorts';
 import type {} from './fixtures/browser-ports';
 
@@ -10,14 +9,11 @@ const snapshot = (...ports: number[]): ListeningPortsSnapshot => ({
 });
 
 async function openBrowserPanel(page: Page, url = ''): Promise<void> {
-  const { outputFiles } = await build({
-    entryPoints: [path.resolve('tests/fixtures/browser-ports.tsx')],
-    bundle: true, write: false, format: 'iife', jsx: 'automatic', define: { 'process.env.NODE_ENV': '"test"' },
-  });
+  const fixture = await bundleFixture('browser-ports');
   // A real origin: the panel's stores read localStorage, which about:blank denies.
   await page.route('https://pane.test/', route => route.fulfill({ contentType: 'text/html', body: '<div id="root" style="height: 100vh"></div>' }));
   await page.goto(`https://pane.test/#${new URLSearchParams({ url })}`);
-  await page.addScriptTag({ content: outputFiles[0].text });
+  await page.addScriptTag({ content: fixture });
 }
 
 const answerPortsList = (page: Page, ports: ListeningPortsSnapshot) => page.evaluate(value => window.portsTest.answerPortsList(value), ports);

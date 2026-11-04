@@ -11,8 +11,9 @@ import { daemonActionFor, runDaemonAction } from './daemonActions';
 import { runDocsRead, runDocsSearch } from './docs';
 import { runHandoff } from './handoff';
 import { runLinksCreate } from './links';
-import { helpText, parseRunpaneArgs, splitWorkspacePassThrough, type ParsedArgs, type RunpaneCommand } from './commands';
-import { routeDaemonCallsTo } from './daemonClient';
+import { runNotify } from './notify';
+import { helpText, parseRunpaneArgs, splitWorkspacePassThrough, wantsJsonOutput, type ParsedArgs, type RunpaneCommand } from './commands';
+import { PaneDaemonClientError, routeDaemonCallsTo } from './daemonClient';
 import { describeFailure, printFailure, RunpaneError } from './errors';
 import { boundary, decodeBoundary } from './boundaryDecoder';
 import { downloadArtifact } from './download';
@@ -46,6 +47,8 @@ import {
   runPanesRename,
   runPanesFocus,
   runReport,
+  runInbox,
+  runInboxAck,
   runPanelsOpen,
   runSessionsAssociate,
   runSessionsCreate,
@@ -56,10 +59,16 @@ import {
   runLockAcquire,
   runLockList,
   runLockRelease,
+  runLoopsDelete,
+  runLoopsList,
+  runLoopsRun,
+  runLoopsSave,
+  runLoopsSetEnabled,
   runSessionsSetAgent,
   runSessionsUpdate,
   runSessionsPin,
   runReposAdd,
+  runReposRename,
   runReposList,
   runWatch,
   runPrWatchCommand,
@@ -71,11 +80,14 @@ import {
   applyParsedArgsToTelemetryContext,
   categorizeFailure,
   createInitialTelemetryContext,
+  recordFailureCause,
   setSetupSelection,
   trackWrapperEvent,
   type WrapperTelemetryContext
 } from './telemetry';
 import { printVersion } from './version';
+import { handOffToManagedCli } from './managedCli';
+import { assertSupportedCliRuntime } from './nodeRuntime';
 import {
   readTailnet,
   readWorkspaceSummary,
@@ -92,7 +104,10 @@ import {
 const SOURCE = 'npm' as const;
 
 export async function main(argv: string[]): Promise<number> {
+  assertSupportedCliRuntime(process.versions.node, process.versions.electron);
   if (argv[0] === '__update-runner' && argv.length === 2) return runUpdateHelper(argv[1]);
+  const handedOff = await handOffToManagedCli(argv);
+  if (handedOff !== null) return handedOff;
   const telemetryContext = createInitialTelemetryContext(argv);
   if (argv.length === 0) {
     return runTrackedCommand(telemetryContext, () => runNoArgsEntrypoint(telemetryContext));
@@ -107,7 +122,8 @@ export async function main(argv: string[]): Promise<number> {
     parsed = parseRunpaneArgs(argv);
   } catch (error) {
     telemetryContext.failureStage = 'parse';
-    telemetryContext.failureCategory = categorizeFailure(error);
+    telemetryContext.failureCategory = 'validation';
+    recordFailureCause(telemetryContext, error);
     await trackWrapperEvent('runpane_wrapper_command_failed', telemetryContext);
     if (argv[0] === 'watch') {
       const normalized = error instanceof Error ? error : new Error(String(error));
@@ -215,6 +231,9 @@ const commandHandlers = new Map<string, CommandHandler>(Object.entries({
   'repos add': async (parsed, telemetryContext) => {
     return runReposAdd(parsed);
   },
+  'repos rename': async (parsed, telemetryContext) => {
+    return runReposRename(parsed);
+  },
   'panes list': async (parsed, telemetryContext) => {
     return runPanesList(parsed);
   },
@@ -256,6 +275,13 @@ const commandHandlers = new Map<string, CommandHandler>(Object.entries({
   'lock list': async (parsed, telemetryContext) => {
     return runLockList(parsed);
   },
+  'loops list': async (parsed) => runLoopsList(parsed),
+  'loops create': async (parsed) => runLoopsSave(parsed),
+  'loops update': async (parsed) => runLoopsSave(parsed),
+  'loops run': async (parsed) => runLoopsRun(parsed),
+  'loops pause': async (parsed) => runLoopsSetEnabled(parsed, false),
+  'loops resume': async (parsed) => runLoopsSetEnabled(parsed, true),
+  'loops delete': async (parsed) => runLoopsDelete(parsed),
   'workspace state': async (parsed, telemetryContext) => {
     return runWorkspaceState(parsed);
   },
@@ -329,6 +355,9 @@ const commandHandlers = new Map<string, CommandHandler>(Object.entries({
   'report': async (parsed, telemetryContext) => {
     return runReport(parsed);
   },
+  'notify': async (parsed) => runNotify(parsed),
+  'inbox': async (parsed) => runInbox(parsed),
+  'inbox ack': async (parsed) => runInboxAck(parsed),
   'agents doctor': async (parsed, telemetryContext) => {
     return runAgentsDoctor(parsed);
   },
@@ -336,7 +365,7 @@ const commandHandlers = new Map<string, CommandHandler>(Object.entries({
     return installOrUpdate(parsed, telemetryContext);
   },
   'update': async (parsed, telemetryContext) => {
-    return runUpdate(parsed);
+    return updateOrReinstall(parsed, telemetryContext);
   },
   'panes git-status': (parsed) => { const action = daemonActionFor(parsed.command); if (!action) throw new Error('Missing daemon action'); return runDaemonAction(parsed, action); },
   'panes commit': (parsed) => { const action = daemonActionFor(parsed.command); if (!action) throw new Error('Missing daemon action'); return runDaemonAction(parsed, action); },
@@ -419,6 +448,11 @@ async function confirmDaemonRepair(parsed: ParsedArgs): Promise<void> {
   }
 }
 
+/**
+ * Reports real failures only: anything thrown, and a non-zero exit from the wrapper's own install or
+ * update work. Other commands' exit codes are documented results (panels wait not ready, doctor
+ * findings, watch timeouts) and send nothing.
+ */
 async function runTrackedCommand(
   telemetryContext: WrapperTelemetryContext,
   execute: () => Promise<number>
@@ -426,7 +460,7 @@ async function runTrackedCommand(
   try {
     const code = await execute();
     telemetryContext.exitCode = code;
-    if (code !== 0) {
+    if (code !== 0 && (telemetryContext.resolvedCommand === 'install' || telemetryContext.resolvedCommand === 'update')) {
       telemetryContext.failureStage ??= inferFailureStage(telemetryContext);
       telemetryContext.failureCategory ??= 'process_exit';
       await trackWrapperEvent('runpane_wrapper_command_failed', telemetryContext);
@@ -434,7 +468,7 @@ async function runTrackedCommand(
     return code;
   } catch (error) {
     telemetryContext.failureStage ??= 'unknown';
-    telemetryContext.failureCategory ??= categorizeFailure(error);
+    recordFailureCause(telemetryContext, error);
     await trackWrapperEvent('runpane_wrapper_command_failed', telemetryContext);
     throw error;
   }
@@ -515,7 +549,7 @@ async function runInteractiveWizard(telemetryContext: WrapperTelemetryContext): 
 
   // All prompts have finished before the child inherits stdin for login/sudo.
   setSetupSelection(telemetryContext, action === 'update' ? 'update' : 'install', parsed.target);
-  const code = parsed.command === 'update' ? await runUpdate(parsed) : await installOrUpdate(parsed, telemetryContext);
+  const code = parsed.command === 'update' ? await updateOrReinstall(parsed, telemetryContext) : await installOrUpdate(parsed, telemetryContext);
   if (code === 0) {
     if (parsed.target === 'daemon') {
       prompts.log.success('Remote host setup finished.');
@@ -543,6 +577,22 @@ function createParsedArgs(command: ParsedArgs['command'], overrides: Partial<Par
     remoteSetupArgs: [],
     ...overrides
   };
+}
+
+/**
+ * An update hands the running Pane's panels to the new release. When Pane is
+ * not running here (for example after a failed update left it unable to
+ * start), there is nothing to hand over, so install the release instead.
+ */
+async function updateOrReinstall(parsed: ParsedArgs, telemetryContext: WrapperTelemetryContext): Promise<number> {
+  try {
+    return await runUpdate(parsed);
+  } catch (error) {
+    // Only the Pane host lookup connects to the daemon; --cli-only and --status never reach it.
+    if (!(error instanceof PaneDaemonClientError && error.connectionFailure)) throw error;
+    console.log('runpane: Pane is not running on this machine, so runpane installs the release instead of updating it in place.');
+    return installOrUpdate(parsed, telemetryContext);
+  }
 }
 
 export async function installOrUpdate(parsed: ParsedArgs, telemetryContext?: WrapperTelemetryContext): Promise<number> {
@@ -702,16 +752,11 @@ function printDryRun(
 }
 
 /** `--json` for runpane itself; anything after `--` belongs to the command it runs elsewhere. */
-function wantsJson(argv: string[]): boolean {
-  const end = argv.indexOf('--');
-  return (end === -1 ? argv : argv.slice(0, end)).includes('--json');
-}
-
 if (require.main === module) {
   main(process.argv.slice(2)).then((code) => {
     process.exitCode = code;
   }).catch((error) => {
-    printFailure(error, wantsJson(process.argv.slice(2)));
+    printFailure(error, wantsJsonOutput(process.argv.slice(2)));
     process.exitCode = 1;
   });
 }

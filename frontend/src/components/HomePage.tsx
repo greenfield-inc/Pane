@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { ChevronDown, ChevronUp, Terminal, X } from 'lucide-react';
+import { ChevronDown, Minus, Plus, Terminal, X } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useConfigStore } from '../stores/configStore';
 import { useSessionStore } from '../stores/sessionStore';
@@ -8,10 +8,11 @@ import { API } from '../utils/api';
 import { Dropdown } from './ui/Dropdown';
 import { Badge } from './ui/Badge';
 import { Toggle } from './ui/Toggle';
+import { IconButton } from './ui/Button';
 import { AddProjectDialog } from './AddProjectDialog';
 import { CloneFromGitHubDialog } from './CloneFromGitHubDialog';
 import { formatDistanceToNow, isValidTimestamp } from '../utils/timestampUtils';
-import { getThemeLabel, themeOptionsForSlot } from '../utils/themeOptions';
+import { ALL_THEME_OPTIONS, getThemeLabel } from '../utils/themeOptions';
 import type { Project } from '../types/project';
 import type { Session } from '../types/session';
 import type { PreferredShell } from '../types/config';
@@ -177,9 +178,9 @@ function DiscordBanner() {
 
   useEffect(() => {
     let cancelled = false;
-    void window.electron?.invoke('preferences:get', HIDE_DISCORD_PREFERENCE)
-      .then((result) => {
-        if (!cancelled) setIsVisible(result?.success === true && result.data !== 'true');
+    void API.preferences.get(HIDE_DISCORD_PREFERENCE)
+      .then((value) => {
+        if (!cancelled) setIsVisible(value !== 'true');
       })
       .catch(() => {});
     return () => { cancelled = true; };
@@ -187,7 +188,7 @@ function DiscordBanner() {
 
   const dismiss = useCallback(() => {
     setIsVisible(false);
-    void window.electron?.invoke('preferences:set', HIDE_DISCORD_PREFERENCE, 'true');
+    void API.preferences.set(HIDE_DISCORD_PREFERENCE, 'true').catch(() => setIsVisible(true));
   }, []);
 
   const handleJoin = useCallback(async () => {
@@ -230,8 +231,7 @@ function DiscordBanner() {
 }
 
 export function HomePage() {
-  const { theme, appearance, activeSystemSlot, setTheme } = useTheme();
-  const homeThemeOptions = themeOptionsForSlot(appearance.appearanceMode === 'fixed' ? 'any' : activeSystemSlot ?? 'light');
+  const { theme, setTheme } = useTheme();
   const { config, updateConfig } = useConfigStore();
   const sessions = useSessionStore(state => state.sessions);
   const setActiveSession = useSessionStore(state => state.setActiveSession);
@@ -363,7 +363,7 @@ export function HomePage() {
                     <ChevronDown className="w-3 h-3 text-text-tertiary" />
                   </button>
                 }
-                items={homeThemeOptions.map((option) => ({
+                items={ALL_THEME_OPTIONS.map((option) => ({
                   id: option.id,
                   label: option.label,
                   description: option.description,
@@ -378,36 +378,36 @@ export function HomePage() {
             <div className="flex items-center justify-between rounded-lg bg-surface-secondary p-4">
               <span className="text-text-primary">UI Scale</span>
               <div className="flex items-center gap-2">
-                <button
+                <IconButton
                   type="button"
                   aria-label="Decrease UI scale"
-                  onClick={() => void handleScaleChange(-0.1)}
+                  icon={<Minus className="h-4 w-4" />}
+                  variant="secondary"
+                  size="sm"
                   disabled={uiScale <= 0.8}
-                  className="rounded-md bg-surface-tertiary p-1 hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  <ChevronDown className="w-4 h-4" />
-                </button>
-                <span className="w-10 text-center text-sm text-text-secondary">{uiScale.toFixed(1)}x</span>
-                <button
+                  onClick={() => void handleScaleChange(-0.1)}
+                />
+                <span className="w-10 text-center text-sm text-text-secondary tabular-nums">{uiScale.toFixed(1)}x</span>
+                <IconButton
                   type="button"
                   aria-label="Increase UI scale"
-                  onClick={() => void handleScaleChange(0.1)}
+                  icon={<Plus className="h-4 w-4" />}
+                  variant="secondary"
+                  size="sm"
                   disabled={uiScale >= 1.5}
-                  className="rounded-md bg-surface-tertiary p-1 hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  <ChevronUp className="w-4 h-4" />
-                </button>
+                  onClick={() => void handleScaleChange(0.1)}
+                />
               </div>
             </div>
 
             <div
               className="flex items-center justify-between rounded-lg bg-surface-secondary p-4"
-              title="Prevents the system from idle-sleeping while any session is active. The display can still turn off; closing the lid or choosing Sleep still sleeps the machine."
+              title="Stops idle sleep while an agent is running or waiting. Choose when it applies, plugged in or on battery, in Settings → General → Power."
             >
               <span className="text-text-primary">Keep Awake</span>
               <Toggle
                 checked={config?.keepAwakeWhileSessionsActive !== false}
-                aria-label="Keep computer awake while sessions are active"
+                aria-label="Keep awake while sessions are active"
                 onChange={(value) => void updateConfig({ keepAwakeWhileSessionsActive: value }).catch(() => {})}
               />
             </div>

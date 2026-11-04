@@ -3,19 +3,23 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import type { AppServices } from './types';
+import type { PaneCommandRegistry, PaneCommandValue } from '../daemon/commandRegistry';
+import { getPaneEventSink } from '../core/runtime';
 import { getAppDirectory } from '../utils/appDirectory';
 import { Notes } from '../services/notes';
 import { exportNoteMemories } from '../services/noteExports';
 import { exportCursorMemoryHook } from '../services/cursorNoteHook';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
-import { noteSchema, noteScopeSchema, sameNoteScope, type Note, type NoteContext, type NoteScope, type NoteExportResult, type NoteMutation } from '../../../shared/types/notes';
+import { noteSchema, noteScopeSchema, sameNoteScope, type Note, type NoteContext, type NoteScope, type NoteExportResult } from '../../../shared/types/notes';
 import { isOrchestrationInternalSessionId } from '../../../shared/types/orchestrationSession';
 import type { Session } from '../types/session';
 import { noteContextPath, SCOPED_NOTE_INSTRUCTIONS } from '../services/noteFiles';
 
 const GLOBAL: NoteScope = { kind: 'global', id: 'user' };
+const NOTES_CHANNELS = ['notes:context', 'notes:list', 'notes:mutate'] as const;
 
-export function registerNotesHandlers(ipcMain: IpcMain, services: AppServices): void {
+/** Notes are files on the machine that runs them; a desktop connected to another machine reads and writes that machine's notes. */
+export function registerNotesHandlers(ipcMain: IpcMain, services: AppServices, commandRegistry: PaneCommandRegistry): void {
   const root = path.join(getAppDirectory(), 'notes');
   const notes = new Notes(root);
   const { sessionManager, databaseService, orchestrationSessionManager } = services;
@@ -39,7 +43,10 @@ export function registerNotesHandlers(ipcMain: IpcMain, services: AppServices): 
       scopes.push({ scope: { kind: 'project', id: String(project.id) }, name: project.name });
       if (!pane.isMainRepo) scopes.push({ scope: { kind: 'feature', id: paneId }, name: pane.name });
     }
-    return { scopes: [...scopes, { scope: GLOBAL, name: 'All projects' }], defaultScope: scopes[0].scope };
+    return {
+      scopes: [...scopes, { scope: GLOBAL, name: 'All projects' }], defaultScope: scopes[0].scope,
+      notesEnabled: services.configManager.getConfig().notesEnabled === true,
+    };
   }
 
   function publish(changed?: NoteScope[]): NoteExportResult[] {
@@ -53,7 +60,10 @@ export function registerNotesHandlers(ipcMain: IpcMain, services: AppServices): 
     };
     // The small user-level loader is stable across scoped edits. Agents read the
     // private context file supplied by their terminal, keeping repositories clean.
-    const preamble = all.some(note => note.scope.kind !== 'global') ? SCOPED_NOTE_INSTRUCTIONS : '';
+    // While experimental Notes is off, terminals get no context file and
+    // repositories get no scoped notes, so the loader and repo sections are dropped.
+    const notesEnabled = services.configManager.getConfig().notesEnabled === true;
+    const preamble = notesEnabled && all.some(note => note.scope.kind !== 'global') ? SCOPED_NOTE_INSTRUCTIONS : '';
     const global = owned(GLOBAL);
     const codexRoot = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
     const codexOverride = path.join(codexRoot, 'AGENTS.override.md');
@@ -72,7 +82,7 @@ export function registerNotesHandlers(ipcMain: IpcMain, services: AppServices): 
       } catch (error) { results.push({ agent: 'Cursor CLI session context', path: path.join(cursorDirectory, 'hooks.json'), error: String(error) }); }
     }
     const targets = new Map<string, Note[]>();
-    const repositoryExports = services.configManager.getConfig().agentContext?.managedAgentsMd === true;
+    const repositoryExports = notesEnabled && services.configManager.getConfig().agentContext?.managedAgentsMd === true;
     for (const project of databaseService.getAllProjects()) {
       const projectScope: NoteScope = { kind: 'project', id: String(project.id) };
       const projectNotes = owned(projectScope);
@@ -128,14 +138,14 @@ export function registerNotesHandlers(ipcMain: IpcMain, services: AppServices): 
     return results;
   }
 
-  ipcMain.handle('notes:context', async (_, paneId: string) => context(decodeBoundary(paneId, boundary.nonEmptyString)));
-  ipcMain.handle('notes:list', async (_, paneId: string, rawScope: NoteScope) => {
+  commandRegistry.register('notes:context', (paneId: PaneCommandValue) => context(decodeBoundary(paneId, boundary.nonEmptyString)));
+  commandRegistry.register('notes:list', async (paneId: PaneCommandValue, rawScope: PaneCommandValue) => {
     const ctx = await context(decodeBoundary(paneId, boundary.nonEmptyString));
     const scope = decodeBoundary(rawScope, noteScopeSchema);
     if (!ctx.scopes.some(item => sameNoteScope(item.scope, scope))) throw new Error('Notebook is outside this context.');
     return notes.list(scope);
   });
-  ipcMain.handle('notes:mutate', async (_, rawPaneId: string, raw: NoteMutation) => {
+  commandRegistry.register('notes:mutate', async (rawPaneId: PaneCommandValue, raw: PaneCommandValue) => {
     const paneId = decodeBoundary(rawPaneId, boundary.nonEmptyString);
     const ctx = await context(paneId);
     const input = decodeBoundary(raw, boundary.object({
@@ -168,9 +178,10 @@ export function registerNotesHandlers(ipcMain: IpcMain, services: AppServices): 
       } else notes.remove(id, revision);
     }
     const exports = publish(input.action === 'retry' ? undefined : changed);
-    services.getMainWindow()?.webContents.send('notes:changed');
+    getPaneEventSink().send('notes:changed');
     return { note, exports };
   });
+  commandRegistry.bindChannels(ipcMain, NOTES_CHANNELS);
   // Publication failures must not escape into unrelated host lifecycle events.
   function reconcile(changed?: NoteScope[]): void {
     if (!fs.existsSync(path.join(root, 'notes.json'))) return;
@@ -184,11 +195,15 @@ export function registerNotesHandlers(ipcMain: IpcMain, services: AppServices): 
   // Restoring an archived Pane reloads sessions without emitting session-created.
   // Refresh its derived context before another agent reads the retained file.
   sessionManager.on('sessions-loaded', () => reconcile());
-  let repositoryExports = services.configManager.getConfig().agentContext?.managedAgentsMd === true;
+  let previousRepositoryExports = services.configManager.getConfig().agentContext?.managedAgentsMd === true;
+  let previousNotesEnabled = services.configManager.getConfig().notesEnabled === true;
   services.configManager.on('config-updated', () => {
-    const enabled = services.configManager.getConfig().agentContext?.managedAgentsMd === true;
-    if (enabled !== repositoryExports) {
-      repositoryExports = enabled;
+    const config = services.configManager.getConfig();
+    const repositoryExports = config.agentContext?.managedAgentsMd === true;
+    const notesEnabled = config.notesEnabled === true;
+    if (repositoryExports !== previousRepositoryExports || notesEnabled !== previousNotesEnabled) {
+      previousRepositoryExports = repositoryExports;
+      previousNotesEnabled = notesEnabled;
       reconcile();
     }
   });

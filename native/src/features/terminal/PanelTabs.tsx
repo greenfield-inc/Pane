@@ -1,29 +1,69 @@
-import type { ToolPanel } from '@shared/types/panels';
+import type { ToolPanel, ToolPanelType } from '@shared/types/panels';
 import * as Haptics from 'expo-haptics';
+import type { AndroidSymbol, SFSymbol } from 'expo-symbols';
+import { useEffect, useRef } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
+import { useDaemon } from '@/daemon';
 import { useTheme } from '@/theme';
 import { Icon, Text } from '@/ui';
+
+import { tabView } from './panels';
+
+/** Each tab type's icon and the word VoiceOver reads after its title. */
+export const TAB_TYPES: Record<ToolPanelType, { ios: SFSymbol; android: AndroidSymbol; label: string }> = {
+  terminal: { ios: 'apple.terminal', android: 'terminal', label: 'terminal' },
+  browser: { ios: 'globe', android: 'language', label: 'page' },
+  explorer: { ios: 'folder', android: 'folder', label: 'files' },
+  diff: { ios: 'plus.forwardslash.minus', android: 'difference', label: 'diff' },
+  editor: { ios: 'doc.text', android: 'description', label: 'file' },
+  logs: { ios: 'text.alignleft', android: 'notes', label: 'script output' },
+  notes: { ios: 'note.text', android: 'sticky_note_2', label: 'notes' },
+  dashboard: { ios: 'square.grid.2x2', android: 'dashboard', label: 'dashboard' },
+  'setup-tasks': { ios: 'checklist', android: 'checklist', label: 'setup tasks' },
+};
+const CHAT = { ios: 'bubble.left', android: 'chat_bubble', label: 'chat' } as const;
 
 export interface PanelTabsProps {
   panels: readonly ToolPanel[];
   selectedId: string | null;
   onSelect: (panel: ToolPanel) => void;
   onAdd: () => void;
-  /** Sends Ctrl+C to the open terminal; hidden when there is none. */
-  onStop?: () => void;
+  /** A long press on a tab, or the VoiceOver and TalkBack action, offers to close it. */
+  onClose: (panel: ToolPanel) => void;
+  /** A Session's agent chat, drawn with a chat icon. */
+  chatId?: string;
 }
 
 /**
- * The web app's tool tabs: bordered tabs on a raised strip, a square + that
- * adds one, and Stop (Ctrl+C) in red at the end, always fully visible.
+ * The web app's tool tabs: bordered tabs on a raised strip and a square + at
+ * the end that adds one. Each tab shows its type's icon; a tab that opens only
+ * on the computer is dimmed. Ctrl+C lives on the floating controller.
  */
-export function PanelTabs({ panels, selectedId, onSelect, onAdd, onStop }: PanelTabsProps) {
+export function PanelTabs({ panels, selectedId, onSelect, onAdd, onClose, chatId }: PanelTabsProps) {
   const theme = useTheme();
   const { colors } = theme;
+  const { profile } = useDaemon();
+  // Where each tab sits in the strip, and the strip's visible window, so the open tab can be scrolled into view.
+  const strip = useRef<ScrollView>(null);
+  const tabFrames = useRef(new Map<string, { x: number; width: number }>());
+  const view = useRef({ offset: 0, width: 0 });
+  const revealSelected = () => {
+    const frame = selectedId ? tabFrames.current.get(selectedId) : undefined;
+    const { offset, width } = view.current;
+    if (!frame || width === 0) return;
+    if (frame.x < offset) strip.current?.scrollTo({ x: Math.max(0, frame.x - 8), animated: true });
+    else if (frame.x + frame.width > offset + width) strip.current?.scrollTo({ x: frame.x + frame.width - width + 8, animated: true });
+  };
+  // A tab opened from a link, a notification or the computer can sit outside the strip's window.
+  useEffect(revealSelected, [selectedId]);
   return (
     <View style={[styles.bar, { borderBottomColor: colors.border, backgroundColor: colors.surfaceRaised }]}>
       <ScrollView
+        ref={strip}
+        onLayout={event => { view.current.width = event.nativeEvent.layout.width; }}
+        onScroll={event => { view.current.offset = event.nativeEvent.contentOffset.x; }}
+        scrollEventThrottle={64}
         horizontal
         showsHorizontalScrollIndicator={false}
         style={styles.scroll}
@@ -33,18 +73,32 @@ export function PanelTabs({ panels, selectedId, onSelect, onAdd, onStop }: Panel
       >
         {panels.map(panel => {
           const selected = panel.id === selectedId;
-          const tint = selected ? colors.text : colors.textSecondary;
+          const dimmed = tabView(panel) === 'placeholder';
+          const tint = selected ? colors.text : dimmed ? colors.textMuted : colors.textSecondary;
+          const type = panel.id === chatId ? CHAT : TAB_TYPES[panel.type];
           return (
             <Pressable
               key={panel.id}
               testID={`panel-tab-${panel.id}`}
+              onLayout={event => {
+                const { x, width } = event.nativeEvent.layout;
+                tabFrames.current.set(panel.id, { x, width });
+                if (selected) revealSelected();
+              }}
               accessibilityRole="tab"
               accessibilityState={{ selected }}
-              accessibilityLabel={panel.title}
+              accessibilityLabel={`${panel.title}, ${type.label}`}
+              accessibilityHint={dimmed ? `Opens on ${profile.label}` : undefined}
+              accessibilityActions={[{ name: 'close', label: 'Close' }]}
+              onAccessibilityAction={event => { if (event.nativeEvent.actionName === 'close') onClose(panel); }}
               onPress={() => {
                 if (selected) return;
                 void Haptics.selectionAsync();
                 onSelect(panel);
+              }}
+              onLongPress={() => {
+                void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                onClose(panel);
               }}
               style={({ pressed }) => [
                 styles.tab,
@@ -56,8 +110,8 @@ export function PanelTabs({ panels, selectedId, onSelect, onAdd, onStop }: Panel
                 },
               ]}
             >
-              <Icon ios="apple.terminal" android="terminal" size={16} color={tint} />
-              <Text variant="callout" style={[styles.label, { color: tint }]} numberOfLines={1}>
+              <Icon ios={type.ios} android={type.android} size={16} color={tint} />
+              <Text variant="callout" style={[styles.label, { color: tint }, dimmed && !selected && styles.dimmed]} numberOfLines={1}>
                 {panel.title}
               </Text>
             </Pressable>
@@ -81,26 +135,6 @@ export function PanelTabs({ panels, selectedId, onSelect, onAdd, onStop }: Panel
       >
         <Icon ios="plus" android="add" size={16} color={colors.textSecondary} />
       </Pressable>
-      {onStop ? (
-        <Pressable
-          testID="terminal-stop"
-          accessibilityRole="button"
-          accessibilityLabel="Stop"
-          accessibilityHint="Sends Ctrl+C to stop the running command"
-          hitSlop={6}
-          onPress={() => {
-            void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-            onStop();
-          }}
-          style={({ pressed }) => [
-            styles.stop,
-            { borderColor: colors.danger, backgroundColor: pressed ? colors.surfacePressed : colors.dangerSoft },
-          ]}
-        >
-          <Icon ios="stop.fill" android="stop" size={10} color={colors.danger} />
-          <Text variant="footnote" tone="danger" style={styles.stopLabel}>Stop</Text>
-        </Pressable>
-      ) : null}
     </View>
   );
 }
@@ -129,16 +163,6 @@ const styles = StyleSheet.create({
     borderBottomWidth: 0,
   },
   label: { flexShrink: 1 },
-  stop: {
-    height: 28,
-    marginBottom: 4,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 10,
-    borderRadius: 15,
-    borderWidth: 1,
-  },
-  stopLabel: { fontWeight: '600' },
+  dimmed: { fontWeight: '400' },
   add: { width: 30, height: 30, marginBottom: 3, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
 });

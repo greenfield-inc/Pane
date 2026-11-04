@@ -38,10 +38,12 @@ jobs:
             - 'scripts/generate-runpane-contract.js'
             - 'scripts/sync-runpane-package-versions.js'
             - 'scripts/test-runpane-contract.js'
+            - 'scripts/test-runpane-node-runtime.js'
             - 'scripts/test-runpane-mcp.js'
             - 'scripts/test-runpane-package-smoke.js'
             - 'scripts/test-runpane-workspace.js'
             - 'scripts/test-runpane-handoff.js'
+            - 'scripts/test-runpane-managed-cli.js'
             - 'scripts/fixtures/**'
             - '.github/workflows/quality.yml'
           main:
@@ -68,14 +70,6 @@ jobs:
     - name: Install dependencies
       run: pnpm install --ignore-scripts
 
-    # Type checking and lint run in the background beside the tests; their
-    # Finish steps print the output and fail the job on errors.
-    - name: Start type checking
-      run: scripts/ci-background.sh start typecheck pnpm typecheck
-
-    - name: Start consolidated lint harness
-      run: scripts/ci-background.sh start lint pnpm lint
-
     - name: Verify GitHub release publication behavior
       run: bash scripts/test-publish-github-release.sh
 
@@ -87,6 +81,40 @@ jobs:
 
     - name: Run frontend unit tests
       run: CI=1 pnpm --filter frontend test
+
+    # Catches hand edits to the generated contract files (docs, TS, Python,
+    # fixture). It needs no dependencies, and runs even if the tests above
+    # failed so it never hides behind them.
+    - name: Check runpane contract generated files
+      if: ${{ !cancelled() }}
+      run: |
+        node scripts/generate-runpane-contract.js --check || {
+          echo "::error title=runpane contract drift::Generated runpane contract files differ from contracts/runpane/contract.json. Edit contract.json, not the generated files, then run: node scripts/generate-runpane-contract.js and commit the result."
+          exit 1
+        }
+
+  # Type checking and lint get their own runner: beside the unit tests they
+  # competed for its CPUs and slowed the tests by about 30s. They run in
+  # parallel here; the Finish steps print each output and fail on errors.
+  typecheck-lint:
+    name: Type Check and Lint
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7
+
+    - name: Setup Node.js and pnpm
+      uses: ./.github/actions/setup-pnpm
+
+    - name: Install dependencies
+      run: pnpm install --ignore-scripts
+
+    - name: Start type checking
+      run: scripts/ci-background.sh start typecheck pnpm typecheck
+
+    - name: Start consolidated lint harness
+      run: scripts/ci-background.sh start lint pnpm lint
 
     - name: Finish type checking
       if: ${{ !cancelled() }}
@@ -115,7 +143,9 @@ jobs:
         fail: true
 
   # Runs beside quality-checks so the Electron smoke path does not wait on
-  # typecheck, lint, and unit tests.
+  # unit tests.
+  # Pinned: ubuntu-latest is Ubuntu 26.04, which Playwright 1.54.1 cannot
+  # install browser dependencies for. Move back once Playwright supports it.
   functional-smoke:
     name: Functional Smoke
     runs-on: ubuntu-24.04
@@ -141,6 +171,9 @@ jobs:
 
     - name: Configure Electron sandbox
       run: |
+        # Electron 42+ fetches its binary on first use and logs that to stdout,
+        # so fetch it first to keep require('electron') printing only the path.
+        node node_modules/electron/install.js
         electron_path="$(node -p "require('electron')")"
         electron_dir="$(dirname "${electron_path}")"
         sudo chown root "${electron_dir}/chrome-sandbox"
@@ -167,8 +200,10 @@ jobs:
 
   # Published wrapper CLIs (npm + PyPI). Runs only when wrapper/contract files
   # change on a PR; always runs on pushes to main. Each OS is tested once at
-  # the runtime floors (Node 20 / Python 3.8) and once at current (Node 22 /
-  # Python 3.13) instead of the full Node x Python cross product.
+  # the runtime floors (Node 22.23.4 / Python 3.8) and once at current (Node 24.22.1 /
+  # Python 3.13) instead of the full Node x Python cross product. The Linux
+  # floor entry is pinned to ubuntu-24.04: setup-python has no Python 3.8 build
+  # for Ubuntu 26.04 (ubuntu-latest).
   runpane-wrapper-tests:
     name: Runpane Wrapper (${{ matrix.os }}, Node ${{ matrix.node-version }}, Python ${{ matrix.python-version }})
     needs: changes
@@ -178,12 +213,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-22.04, node-version: '20.0.0', python-version: '3.8' }
-          - { os: ubuntu-latest, node-version: '22.18.0', python-version: '3.13' }
-          - { os: macos-latest, node-version: '20.0.0', python-version: '3.8' }
-          - { os: macos-latest, node-version: '22.18.0', python-version: '3.13' }
-          - { os: windows-2022, node-version: '20.0.0', python-version: '3.8' }
-          - { os: windows-2022, node-version: '22.18.0', python-version: '3.13' }
+          - { os: ubuntu-24.04, node-version: '22.23.4', python-version: '3.8' }
+          - { os: ubuntu-latest, node-version: '24.22.1', python-version: '3.13' }
+          - { os: macos-latest, node-version: '22.23.4', python-version: '3.8' }
+          - { os: macos-latest, node-version: '24.22.1', python-version: '3.13' }
+          - { os: windows-2022, node-version: '22.23.4', python-version: '3.8' }
+          - { os: windows-2022, node-version: '24.22.1', python-version: '3.13' }
 
     steps:
     - name: Checkout code
@@ -211,6 +246,9 @@ jobs:
     - name: Run wrapper contract tests
       run: node scripts/test-runpane-contract.js
 
+    - name: Check patched Node runtime guard
+      run: node --test scripts/test-runpane-node-runtime.js
+
     - name: Run MCP server tests
       run: node --test scripts/test-runpane-mcp.js
 
@@ -222,6 +260,12 @@ jobs:
 
     - name: Run handoff tests
       run: node --test scripts/test-runpane-handoff.js
+
+    - name: Run managed CLI hand-off tests
+      run: node --test scripts/test-runpane-managed-cli.js
+
+    - name: Run wrapper telemetry tests
+      run: node --test scripts/test-runpane-telemetry.js
 
   # Ubuntu is already covered by quality-checks above; this job only adds the
   # other platforms, and only when main-process code (or its deps) changed.
@@ -282,7 +326,7 @@ jobs:
   # cancelled ones fail it.
   ci-result:
     name: CI result
-    needs: [changes, quality-checks, functional-smoke, runpane-wrapper-tests, cross-os-main-tests]
+    needs: [changes, quality-checks, typecheck-lint, functional-smoke, runpane-wrapper-tests, cross-os-main-tests]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5

@@ -24,6 +24,23 @@ interface SessionEventData {
 
 type ValidatedEventData = SessionEventData | SessionOutput;
 
+/** Fired once the window shows a machine it just switched to: that machine's lists, config and place are loaded. */
+const HOST_RESTORED_EVENT = 'pane:host-restored';
+
+/** Resolves true when the next machine switch has finished loading, or false after `timeoutMs`. */
+export function nextHostRestored(timeoutMs: number): Promise<boolean> {
+  return new Promise(resolve => {
+    const finish = (restored: boolean) => {
+      window.removeEventListener(HOST_RESTORED_EVENT, onRestored);
+      window.clearTimeout(timer);
+      resolve(restored);
+    };
+    const onRestored = () => finish(true);
+    const timer = window.setTimeout(() => finish(false), timeoutMs);
+    window.addEventListener(HOST_RESTORED_EVENT, onRestored);
+  });
+}
+
 // Initial reads and all resyncs share ownership. A later runtime event retires
 // the whole outgoing continuation, including lists, restoration and events.
 let runtimeGeneration = 0;
@@ -412,7 +429,7 @@ export function useIPCEvents() {
     });
     if (unsubscribeOrchestrationChanged) unsubscribeFunctions.push(unsubscribeOrchestrationChanged);
 
-    // Every project create or delete (dialogs, onboarding, runpane CLI, MCP) reaches the project-changed listeners.
+    // Every project create, CLI rename or delete (dialogs, onboarding, runpane CLI, MCP) reaches the project-changed listeners.
     const unsubscribeProjectListChanged = window.electronAPI.events.onProjectListChanged?.(() => {
       window.dispatchEvent(new Event('project-changed'));
     });
@@ -543,6 +560,7 @@ export function useIPCEvents() {
       void (async () => {
         try {
           await resyncRemoteRuntimeState(loadSessions, hostChanged, ownsRuntime);
+          if (hostChanged && ownsRuntime()) window.dispatchEvent(new Event(HOST_RESTORED_EVENT));
           if (ownsRuntime()) await restoreRemoteTerminals();
           if (ownsRuntime() && restoreId !== undefined) await window.electronAPI.remoteDaemon.restoreComplete(restoreId);
         } catch (error) {
@@ -555,6 +573,8 @@ export function useIPCEvents() {
     });
     if (unsubscribeRemoteResync) {
       unsubscribeFunctions.push(unsubscribeRemoteResync);
+      // A restoration sent while this page was loading went unheard; main sends it again.
+      window.electronAPI.remoteDaemon?.restoreReady?.();
     }
 
     // Load initial sessions

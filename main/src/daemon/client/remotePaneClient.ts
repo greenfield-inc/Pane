@@ -28,19 +28,42 @@ import { RemoteInputQueue } from '../../../../shared/remoteInputQueue';
 import { decodeListeningPortsSnapshot, type ListeningPortsSnapshot } from '../../../../shared/types/listeningPorts';
 import { localTargetOf } from '../../../../shared/utils/browserUrl';
 import { createPortTunnel, type PortTunnel } from './portTunnel';
-import { REMOTE_READ_CHANNELS, REMOTE_RESTORE_CHANNELS } from '../../../../shared/remoteClient/readChannels';
-import { RecoveryCycle } from '../../../../shared/remoteClient/recoveryCycle';
+import { REMOTE_DEDUPLICATED_CHANNELS, REMOTE_READ_CHANNELS, REMOTE_RESTORE_CHANNELS, REMOTE_WRITES_BUSY_CODE } from '../../../../shared/remoteClient/readChannels';
+import { RecoveryCycle, backoffDelayMs } from '../../../../shared/remoteClient/recoveryCycle';
 import { PaneError } from '../../../../shared/paneError';
+import type {
+  RemoteConnectionCheck,
+  RemoteConnectionCheckRow,
+  RemoteConnectionCheckStage,
+} from '../../../../shared/types/remoteDaemon';
+import type { RemotePaneFailedCheck } from '../../services/remoteAnalytics';
+import { lookupTailnetMachine, probeWorkspace, readTailscaleStatus } from '../../services/tailnetMachines';
+import { listSshConfigHosts } from '../../services/sshConfigHosts';
+import {
+  addressOf,
+  copyCommandRow,
+  initialRows,
+  probeHost,
+  routeOf,
+  runSshCommand,
+  versionRow,
+  type ConnectionCheckDependencies,
+} from './connectionChecks';
 
 interface RemoteConnectionStateMetadata {
   lastSeenAt?: string | null;
+  /** The host's Pane version from its ready event; absent before ready and from older hosts. */
+  hostVersion?: string;
 }
 
 interface RemotePaneClientOptions {
   eventSink?: PaneEventSink;
   initialHandshakeTimeoutMs?: number;
   heartbeatStaleTimeoutMs?: number;
-  reconnectInitialDelayMs?: number;
+  /** How long restoration may take after the host's ready event. */
+  restoreTimeoutMs?: number;
+  /** How long one invoke waits for the host's answer. */
+  requestTimeoutMs?: number;
   reconnectMaxDelayMs?: number;
   reconnectDurationMs?: number;
   onConnectionStateChange?: (
@@ -81,6 +104,9 @@ interface RemoteReadyEventPayload {
   replay: 'none';
   resync: 'refetch-state-after-reconnect';
   timestamp: string;
+  paneVersion?: string;
+  /** The host runs a write once per request id and answers a repeat with the first answer. Older hosts omit it. */
+  deduplicatesRequestIds?: boolean;
 }
 
 const remoteInvokeResponseSchema: BoundarySchema<RemoteInvokeResponsePayload> = boundary.union(
@@ -104,6 +130,8 @@ const remoteReadyEventSchema: BoundarySchema<RemoteReadyEventPayload> = boundary
   replay: boundary.literal('none'),
   resync: boundary.literal('refetch-state-after-reconnect'),
   timestamp: boundary.string,
+  paneVersion: boundary.optional(boundary.string),
+  deduplicatesRequestIds: boundary.optional(boundary.boolean),
 });
 const remoteHeartbeatSchema: BoundarySchema<RemoteDaemonHeartbeatPayload> = boundary.object({
   timestamp: boundary.nonEmptyString,
@@ -114,10 +142,17 @@ const remoteEventEnvelopeSchema: BoundarySchema<RemoteDaemonEventEnvelope> = bou
   timestamp: boundary.string,
 });
 
-const REMOTE_DAEMON_RECONNECT_INITIAL_DELAY_MS = 1_000;
 const REMOTE_DAEMON_RECONNECT_MAX_DELAY_MS = 30_000;
+/** A request safe to repeat keeps retrying as long as an outage may last. */
+const REMOTE_DAEMON_REQUEST_RETRY_BUDGET_MS = 300_000;
+/** Answers that mean the request was cut off, not refused; only these are retried. */
+const INTERRUPTION_CODES = new Set(['ERR_REMOTE_TRANSPORT', 'ERR_REMOTE_DELIVERY_UNKNOWN', 'ERR_REMOTE_STALE_RESPONSE']);
 const REMOTE_DAEMON_HEARTBEAT_STALE_TIMEOUT_MS = 20_000;
 const REMOTE_DAEMON_INITIAL_HANDSHAKE_TIMEOUT_MS = 10_000;
+const REMOTE_DAEMON_RESTORE_TIMEOUT_MS = 30_000;
+const REMOTE_DAEMON_REQUEST_TIMEOUT_MS = 15_000;
+/** The heartbeat decides liveness; this many failed requests in a row with no success between also reconnect. */
+const MAX_FAILED_REQUESTS_IN_A_ROW = 3;
 const TAILSCALE_MAGIC_DNS_SERVER = '100.100.100.100';
 const PORTS_LIST_CHANNEL = 'ports:list';
 const PORTS_CHANGED_CHANNEL = 'ports:changed';
@@ -132,6 +167,14 @@ const MEDIA_RESPONSE_HEADERS = [
   'access-control-allow-origin', 'access-control-expose-headers',
 ] as const;
 const NULL_BODY_STATUSES = new Set([204, 205, 304]);
+const CONNECTION_CHECK_TIMEOUT_MS = 5_000;
+/** What a reverse proxy such as Tailscale Serve answers when nothing listens behind it. */
+const PROXY_BACKEND_DOWN_STATUSES = new Set([502, 503, 504]);
+
+export type HostHealthCheck =
+  | { kind: 'running'; elapsedMs: number }
+  | { kind: 'not-running'; elapsedMs: number; detail: string }
+  | { kind: 'unreachable'; detail: string };
 
 type RemoteRequestOptions = RequestOptions & {
   servername?: string;
@@ -142,6 +185,12 @@ export class RemotePaneClient {
   private readonly eventSink: PaneEventSink;
   private readonly initialHandshakeTimeoutMs: number;
   private readonly heartbeatStaleTimeoutMs: number;
+  private readonly restoreTimeoutMs: number;
+  private readonly requestTimeoutMs: number;
+  private readonly maxRetryDelayMs: number;
+  /** How long a write whose answer was lost is resent with its id, from when it was issued: the reconnect budget. */
+  private readonly writeResendBudgetMs: number;
+  private failedRequestsInARow = 0;
   private readonly recovery: RecoveryCycle;
   private deadlineTimer: NodeJS.Timeout | null = null;
   private recoveryStopped = false;
@@ -162,8 +211,19 @@ export class RemotePaneClient {
   private suspended = false;
   /** Bumped per stream and on suspend; callbacks from an older stream are ignored. */
   private streamGeneration = 0;
-  private readonly inputQueue = new RemoteInputQueue((channel, args, signal) =>
-    this.invokeRequest(channel, args, signal));
+  private status: RemotePaneConnectionStatus = 'connecting';
+  /** From the most recent ready event: the host de-duplicates writes by request id, so a lost write is resent. */
+  private deduplicatesRequestIds = false;
+  private requestCount = 0;
+  /** Writes waiting for the connection; each is told about every status change. */
+  private readonly statusWaiters = new Set<() => void>();
+  private readonly inputQueue = new RemoteInputQueue(
+    (channel, args, signal) => this.resendsWrite(channel)
+      ? this.sendWrite(channel, args, signal)
+      : this.invokeRequest(channel, args, signal),
+    undefined,
+    () => this.deduplicatesRequestIds,
+  );
 
   constructor(
     readonly profile: RemotePaneConnectionProfile,
@@ -175,9 +235,11 @@ export class RemotePaneClient {
       ?? REMOTE_DAEMON_INITIAL_HANDSHAKE_TIMEOUT_MS;
     this.heartbeatStaleTimeoutMs = options.heartbeatStaleTimeoutMs
       ?? REMOTE_DAEMON_HEARTBEAT_STALE_TIMEOUT_MS;
-    this.recovery = new RecoveryCycle(Math.random, options.reconnectDurationMs,
-      options.reconnectInitialDelayMs ?? REMOTE_DAEMON_RECONNECT_INITIAL_DELAY_MS,
-      options.reconnectMaxDelayMs ?? REMOTE_DAEMON_RECONNECT_MAX_DELAY_MS);
+    this.restoreTimeoutMs = options.restoreTimeoutMs ?? REMOTE_DAEMON_RESTORE_TIMEOUT_MS;
+    this.requestTimeoutMs = options.requestTimeoutMs ?? REMOTE_DAEMON_REQUEST_TIMEOUT_MS;
+    this.maxRetryDelayMs = options.reconnectMaxDelayMs ?? REMOTE_DAEMON_RECONNECT_MAX_DELAY_MS;
+    this.writeResendBudgetMs = options.reconnectDurationMs ?? REMOTE_DAEMON_REQUEST_RETRY_BUDGET_MS;
+    this.recovery = new RecoveryCycle(Math.random, this.writeResendBudgetMs, this.maxRetryDelayMs);
     this.onConnectionStateChange = options.onConnectionStateChange;
     this.onResyncRequired = options.onResyncRequired;
   }
@@ -210,7 +272,7 @@ export class RemotePaneClient {
       if (options.retryOnInitialFailure ?? true) {
         this.scheduleReconnect(message);
       } else {
-        this.onConnectionStateChange?.('error', message, { lastSeenAt: this.lastSeenAt });
+        this.reportStatus('error', message, message);
       }
       throw error;
     }
@@ -232,6 +294,7 @@ export class RemotePaneClient {
     this.streamGeneration += 1;
     this.clearDeadline();
     this.inputQueue.cancel(new Error('Remote Pane disconnected; pending terminal input was discarded'));
+    for (const waiter of [...this.statusWaiters]) waiter();
     this.clearReconnectTimer();
     this.clearHeartbeatStaleTimer();
     this.eventParser.reset();
@@ -247,8 +310,24 @@ export class RemotePaneClient {
     this.eventRequest = null;
   }
 
+  /** True while the host de-duplicates writes: a write issued while reconnecting waits instead of being refused. */
+  get resendsWrites(): boolean {
+    return this.deduplicatesRequestIds;
+  }
+
   async invoke(channel: string, args: unknown[]): Promise<JsonValue | undefined> {
-    return this.inputQueue.invoke(channel, args);
+    if (!retriesRequest(channel) || this.resendsWrite(channel)) return this.inputQueue.invoke(channel, args);
+    const started = Date.now();
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await this.invokeRequest(channel, args);
+      } catch (error) {
+        const wait = backoffDelayMs(attempt, Math.random, this.maxRetryDelayMs);
+        const interrupted = error instanceof PaneError && INTERRUPTION_CODES.has(error.code);
+        if (this.closedByClient || !interrupted || Date.now() - started + wait > REMOTE_DAEMON_REQUEST_RETRY_BUDGET_MS) throw error;
+        await new Promise(resolve => setTimeout(resolve, wait));
+      }
+    }
   }
 
   /** One raw byte stream to a forwarded port on the host, signed in like every other request. */
@@ -297,6 +376,54 @@ export class RemotePaneClient {
     });
   }
 
+  /**
+   * A timed GET /health. A refusal, or a proxy answering 502-504, means nothing serves Pane on a
+   * host that answered; a timeout or failed lookup means the host itself was not reached.
+   */
+  async checkHealth(timeoutMs = CONNECTION_CHECK_TIMEOUT_MS): Promise<HostHealthCheck> {
+    const endpoint = new URL('health', this.normalizedBaseUrl);
+    const startedAt = Date.now();
+    const result = await this.timedGet(endpoint, {}, timeoutMs);
+    const elapsedMs = Date.now() - startedAt;
+    if ('statusCode' in result) {
+      return PROXY_BACKEND_DOWN_STATUSES.has(result.statusCode)
+        ? { kind: 'not-running', elapsedMs, detail: `HTTP ${result.statusCode}` }
+        : { kind: 'running', elapsedMs };
+    }
+    return result.code === 'ECONNREFUSED'
+      ? { kind: 'not-running', elapsedMs, detail: result.message }
+      : { kind: 'unreachable', detail: result.message };
+  }
+
+  /** Whether the host accepts this profile's sign-in, without opening an event stream. */
+  async checkSignIn(timeoutMs = CONNECTION_CHECK_TIMEOUT_MS): Promise<'accepted' | 'rejected'> {
+    const endpoint = buildRemoteEndpoint(this.normalizedBaseUrl, 'events');
+    endpoint.searchParams.set('auth_check', '1');
+    const result = await this.timedGet(endpoint, this.authorizationHeader(), timeoutMs);
+    // Anything else is left to the real connect, which reports it on the workspace row.
+    return 'statusCode' in result && (result.statusCode === 401 || result.statusCode === 403) ? 'rejected' : 'accepted';
+  }
+
+  private timedGet(
+    endpoint: URL,
+    headers: http.OutgoingHttpHeaders,
+    timeoutMs: number,
+  ): Promise<{ statusCode: number } | { code: string | undefined; message: string }> {
+    return new Promise((resolve) => {
+      const request = createRequest(endpoint, this.buildRequestOptions(endpoint, { method: 'GET', headers }), (response) => {
+        response.resume();
+        resolve({ statusCode: response.statusCode ?? 0 });
+      });
+      // An absolute deadline, so a host that accepts the connection and never answers still fails.
+      const deadline = setTimeout(() => {
+        request.destroy(Object.assign(new Error(`no answer within ${Math.round(timeoutMs / 1000)} s`), { code: 'ETIMEDOUT' }));
+      }, timeoutMs);
+      request.on('error', (error: NodeJS.ErrnoException) => resolve({ code: error.code, message: error.message }));
+      request.on('close', () => clearTimeout(deadline));
+      request.end();
+    });
+  }
+
   /** Drops the event stream for system sleep so it neither times out nor retries. */
   suspend(): void {
     if (this.closedByClient || this.suspended) return;
@@ -323,10 +450,85 @@ export class RemotePaneClient {
     });
   }
 
-  private async invokeRequest(channel: string, args: unknown[], signal?: AbortSignal): Promise<JsonValue | undefined> {
+  private resendsWrite(channel: string): boolean {
+    return this.deduplicatesRequestIds && !REMOTE_READ_CHANNELS.has(channel) && !REMOTE_RESTORE_CHANNELS.has(channel);
+  }
+
+  /**
+   * Sends a write with one request id for its whole life. It waits while the connection recovers
+   * and, when its answer is lost, is resent with the same id, which the host runs only once.
+   */
+  private async sendWrite(channel: string, args: unknown[], signal?: AbortSignal): Promise<JsonValue | undefined> {
+    const requestId = `${REMOTE_RUNTIME_ID}:${Date.now().toString(36)}:${++this.requestCount}:${Math.random().toString(36).slice(2, 8)}`;
+    const started = Date.now();
+    let sent = false;
+    for (let attempt = 0; ; attempt += 1) {
+      const waited = await this.whenConnected(this.writeResendBudgetMs - (Date.now() - started), signal);
+      // Checked again before every send: time asleep can pass the deadline without any timer firing.
+      const outcome = waited === 'connected' && Date.now() - started >= this.writeResendBudgetMs ? 'timeout' : waited;
+      if (outcome !== 'connected' && !sent) {
+        throw new PaneError('ERR_REMOTE_OFFLINE',
+          `Remote connection interrupted: the action was not sent because the connection to ${this.profile.label} was not restored. Nothing was changed.`,
+          'Reconnect with Retry now, then submit it again.');
+      }
+      if (outcome !== 'connected') throw this.unconfirmedWrite(outcome === 'timeout' ? 'for five minutes' : 'until the connection gave up');
+      if (sent && !this.deduplicatesRequestIds) {
+        throw new PaneError('ERR_REMOTE_DELIVERY_UNKNOWN',
+          `Delivery unknown: the answer was lost, and ${this.profile.label} now runs an older Pane that could run the action twice, so Pane did not resend it. It may have completed.`,
+          `Check ${this.profile.label} before trying again.`);
+      }
+      sent = true;
+      try {
+        return await this.invokeRequest(channel, args, signal, requestId);
+      } catch (error) {
+        // A host whose memory of answers is full refused the write before running it.
+        const interrupted = error instanceof PaneError && (INTERRUPTION_CODES.has(error.code) || error.code === REMOTE_WRITES_BUSY_CODE);
+        if (!interrupted || signal?.aborted || this.closedByClient) throw error;
+        const wait = backoffDelayMs(attempt, Math.random, this.maxRetryDelayMs);
+        if (Date.now() - started + wait > this.writeResendBudgetMs) throw this.unconfirmedWrite('for five minutes');
+        await new Promise(resolve => setTimeout(resolve, wait));
+      }
+    }
+  }
+
+  private unconfirmedWrite(howLong: string): PaneError {
+    return new PaneError('ERR_REMOTE_DELIVERY_UNKNOWN',
+      `Delivery unknown: Pane resent the action to ${this.profile.label} ${howLong} without a confirmation. It may have completed.`,
+      `Check ${this.profile.label} before trying again.`);
+  }
+
+  /** Resolves once connected, when recovery gives up or the write is canceled ('stopped'), or after `timeoutMs`. */
+  private whenConnected(timeoutMs: number, signal?: AbortSignal): Promise<'connected' | 'stopped' | 'timeout'> {
+    const current = (): 'connected' | 'stopped' | null => {
+      if (this.closedByClient || this.recoveryStopped || this.status === 'error' || signal?.aborted) return 'stopped';
+      return this.status === 'connected' ? 'connected' : null;
+    };
+    const now = current();
+    if (now) return Promise.resolve(now);
+    if (timeoutMs <= 0) return Promise.resolve('timeout');
+    return new Promise((resolve) => {
+      const finish = (outcome: 'connected' | 'stopped' | 'timeout'): void => {
+        clearTimeout(timer);
+        this.statusWaiters.delete(check);
+        signal?.removeEventListener('abort', check);
+        resolve(outcome);
+      };
+      const check = (): void => {
+        const outcome = current();
+        if (outcome) finish(outcome);
+      };
+      const timer = setTimeout(() => finish('timeout'), timeoutMs);
+      this.statusWaiters.add(check);
+      signal?.addEventListener('abort', check);
+    });
+  }
+
+  private async invokeRequest(channel: string, args: unknown[], signal?: AbortSignal, requestId?: string): Promise<JsonValue | undefined> {
     const endpoint = buildRemoteEndpoint(this.normalizedBaseUrl, 'invoke');
     let payload: RemoteInvokeResponsePayload;
     const generation = this.streamGeneration;
+    // Reads and viewer bookkeeping change nothing the person must check, so losing one is only an interruption.
+    const nothingToCheck = REMOTE_READ_CHANNELS.has(channel) || REMOTE_RESTORE_CHANNELS.has(channel);
     try {
       const response = await requestJson(endpoint, this.buildRequestOptions(endpoint, {
         method: 'POST', signal,
@@ -335,26 +537,37 @@ export class RemotePaneClient {
           'Content-Type': 'application/json; charset=utf-8',
           'X-Pane-Remote-Runtime-Id': REMOTE_RUNTIME_ID,
         },
-      }), JSON.stringify({ channel, args }));
+      }), JSON.stringify(requestId ? { channel, args, requestId } : { channel, args }), this.requestTimeoutMs);
       if (response.statusCode === 401 || response.statusCode === 403) {
         this.stopRecovery('The host rejected your credentials. Open connection settings to sign in again.');
         throw new PaneError('ERR_REMOTE_AUTH', 'The host rejected your credentials.', 'Open connection settings to sign in again.');
       }
-      payload = parseJsonResponse(response, 'Remote daemon returned an invalid invoke response', remoteInvokeResponseSchema);
+      try {
+        payload = parseJsonResponse(response, 'Remote daemon returned an invalid invoke response', remoteInvokeResponseSchema);
+      } catch (error) {
+        // A host that de-duplicates answers every write with an envelope; a 5xx without one came from the path to it.
+        if (requestId && response.statusCode >= 500) throw new Error(`HTTP ${response.statusCode} without an answer`);
+        throw error;
+      }
+      this.failedRequestsInARow = 0;
     } catch (error) {
       if (error instanceof PaneError) throw error;
-      const isRead = REMOTE_READ_CHANNELS.has(channel);
-      const failure = new PaneError(isRead ? 'ERR_REMOTE_TRANSPORT' : 'ERR_REMOTE_DELIVERY_UNKNOWN',
-        isRead ? 'Remote connection interrupted: the host response was incomplete. Pane is reconnecting.'
-          : 'Delivery unknown: the remote response was interrupted. The action may have completed; it was not replayed.',
-        'Wait for reconnection and check the destination before trying again.');
-      if (!signal?.aborted && generation === this.streamGeneration && !this.closedByClient) {
-        this.handleUnexpectedDisconnect(failure.message, true);
+      // One failed request fails only itself while heartbeats arrive; a run of them reconnects.
+      // A request that retries never counts: heartbeats decide liveness while it waits.
+      const counts = !retriesRequest(channel) && !requestId && !signal?.aborted && generation === this.streamGeneration && !this.closedByClient;
+      const reconnect = counts && ++this.failedRequestsInARow >= MAX_FAILED_REQUESTS_IN_A_ROW;
+      const failure = new PaneError(nothingToCheck ? 'ERR_REMOTE_TRANSPORT' : 'ERR_REMOTE_DELIVERY_UNKNOWN',
+        nothingToCheck ? `Remote connection interrupted: the host response was incomplete.${reconnect ? ' Pane is reconnecting.' : ''}`
+          : `Delivery unknown: the remote response was interrupted. The action may have completed${retriesRequest(channel) ? '' : '; it was not replayed'}.`,
+        reconnect ? 'Wait for reconnection and check the destination before trying again.' : 'Check the destination before trying again.');
+      if (reconnect) {
+        this.handleUnexpectedDisconnect(`${MAX_FAILED_REQUESTS_IN_A_ROW} requests in a row failed: ${getErrorMessage(error, 'no response')}`, true);
       }
       throw failure;
     }
-    if (generation !== this.streamGeneration || this.closedByClient) {
-      throw new PaneError('ERR_REMOTE_STALE_RESPONSE', REMOTE_READ_CHANNELS.has(channel) ? 'Remote connection interrupted: the host changed before its response arrived.' : `Delivery unknown: ${this.profile.label} changed connection before the response arrived.`, 'Check the original destination before trying again.');
+    // An answer to a request id is the command's own answer, whichever stream it arrived on.
+    if (this.closedByClient || (!requestId && generation !== this.streamGeneration)) {
+      throw new PaneError('ERR_REMOTE_STALE_RESPONSE', nothingToCheck ? 'Remote connection interrupted: the host changed before its response arrived.' : `Delivery unknown: ${this.profile.label} changed connection before the response arrived.`, 'Check the original destination before trying again.');
     }
 
     if (!payload.ok) {
@@ -367,10 +580,9 @@ export class RemotePaneClient {
   private async openEventStream(isReconnect: boolean, resolveOnReady = false): Promise<void> {
     this.clearReconnectTimer();
     const generation = ++this.streamGeneration;
+    this.failedRequestsInARow = 0;
     const isStale = (): boolean => generation !== this.streamGeneration || this.closedByClient || this.recoveryStopped;
-    this.onConnectionStateChange?.(isReconnect ? 'reconnecting' : 'connecting', null, {
-      lastSeenAt: this.lastSeenAt,
-    });
+    this.reportStatus(isReconnect ? 'reconnecting' : 'connecting', 'opening the event stream');
 
     const endpoint = buildRemoteEndpoint(this.normalizedBaseUrl, 'events');
 
@@ -419,14 +631,16 @@ export class RemotePaneClient {
         reject(new Error(message));
       };
 
-      handshakeTimer = setTimeout(() => {
-        if (isStale()) { resolve(); return; }
-        if (settled) { this.handleUnexpectedDisconnect('Workspace restoration timed out', true); return; }
-        rejectBeforeReady(
-          `Timed out waiting for remote daemon ready event after ${this.initialHandshakeTimeoutMs}ms`,
-          true,
-        );
-      }, Math.min(this.initialHandshakeTimeoutMs, this.recovery.remainingMs));
+      // The handshake waits for the ready event; restoration then gets its own, longer limit.
+      const armTimeout = (timeoutMs: number, message: string): void => {
+        clearHandshakeTimer();
+        handshakeTimer = setTimeout(() => {
+          if (isStale()) { resolve(); return; }
+          if (settled) { this.handleUnexpectedDisconnect(message, true); return; }
+          rejectBeforeReady(message, true);
+        }, Math.min(timeoutMs, this.recovery.remainingMs));
+      };
+      armTimeout(this.initialHandshakeTimeoutMs, `Timed out waiting for remote daemon ready event after ${this.initialHandshakeTimeoutMs}ms`);
 
       request = createRequest(endpoint, this.buildRequestOptions(endpoint, {
         method: 'GET',
@@ -471,15 +685,17 @@ export class RemotePaneClient {
               const readyPayload = parseRemoteReadyEventPayload(event.data);
               if (!readyPayload) { rejectBeforeReady('Invalid remote ready event', true); return; }
               readyReceived = true;
+              this.deduplicatesRequestIds = readyPayload.deduplicatesRequestIds === true;
               this.markRemoteSeen();
+              armTimeout(this.restoreTimeoutMs, `Workspace restoration timed out after ${this.restoreTimeoutMs}ms`);
               if (resolveOnReady && !settled) { settled = true; resolve(); }
-              this.onConnectionStateChange?.('restoring', null, { lastSeenAt: this.lastSeenAt });
+              this.reportStatus('restoring', 'host ready', null, readyPayload.paneVersion);
               void Promise.resolve().then(() => this.onResyncRequired?.()).then(() => {
                 if (!isStale()) {
                   clearHandshakeTimer();
                   this.clearDeadline();
                   this.recovery.reset();
-                  this.onConnectionStateChange?.('connected', null, { lastSeenAt: this.lastSeenAt });
+                  this.reportStatus('connected', 'workspace restored');
                 }
                 if (!settled) { settled = true; resolve(); }
               }, error => {
@@ -577,7 +793,8 @@ export class RemotePaneClient {
 
   private handleUnexpectedDisconnect(message: string, destroyStream: boolean): void {
     this.streamGeneration += 1;
-    this.inputQueue.cancel(new Error(message));
+    // A host that de-duplicates gets the in-flight input resent with its id, then the queued input in order.
+    if (!this.deduplicatesRequestIds) this.inputQueue.cancel(new Error(message));
     const activeResponse = this.eventResponse;
     const activeRequest = this.eventRequest;
 
@@ -625,7 +842,7 @@ export class RemotePaneClient {
     this.clearHeartbeatStaleTimer();
     this.eventResponse?.destroy();
     this.eventRequest?.destroy();
-    this.onConnectionStateChange?.('error', message, { lastSeenAt: this.lastSeenAt });
+    this.reportStatus('error', message, message);
   }
 
   private scheduleReconnect(message: string): void {
@@ -633,7 +850,7 @@ export class RemotePaneClient {
     this.armDeadline();
     const delay = this.recovery.nextDelay();
     if (delay === null) { this.expireRecovery(); return; }
-    this.onConnectionStateChange?.('reconnecting', message, { lastSeenAt: this.lastSeenAt });
+    this.reportStatus('reconnecting', `${message}; retrying in ${delay}ms`, message);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       if (!this.recovery.remainingMs) { this.expireRecovery(); return; }
@@ -641,6 +858,19 @@ export class RemotePaneClient {
         this.scheduleReconnect(getErrorMessage(error, 'Failed to reconnect to remote daemon event stream'));
       });
     }, delay);
+  }
+
+  /** Each status change is logged with its reason, so a reported drop can be traced. */
+  private reportStatus(
+    status: RemotePaneConnectionStatus,
+    reason: string,
+    errorMessage: string | null = null,
+    hostVersion?: string,
+  ): void {
+    console.info(`[Pane remote daemon] ${this.profile.label}: ${status} (${reason})`);
+    this.status = status;
+    this.onConnectionStateChange?.(status, errorMessage, { lastSeenAt: this.lastSeenAt, hostVersion });
+    for (const waiter of [...this.statusWaiters]) waiter();
   }
 
   private clearReconnectTimer(): void {
@@ -679,8 +909,31 @@ interface RemotePaneClientControllerOptions {
   analyticsManager?: Pick<AnalyticsManager, 'track'>;
   /** Looks up a codeless profile's machine on its tailnet; see `tailnetMachine`. */
   resolveTailnetMachineUrl?: (machine: TailnetMachineRef) => Promise<string>;
+  /** This app's Pane version, compared with the host's on the checklist's version row. */
+  appVersion?: string;
+  checkDependencies?: Partial<ConnectionCheckDependencies>;
+  /** Pane started just after the computer did, before Tailscale could reach the saved host. */
+  freshBoot?: boolean;
 }
 
+const defaultCheckDependencies: ConnectionCheckDependencies = {
+  readTailscaleStatus,
+  lookupTailnetMachine,
+  probeWorkspace,
+  listSshHosts: () => listSshConfigHosts(),
+  runSsh: runSshCommand,
+};
+/** How long a host gets to start serving after a fix ran on it. */
+const HOST_FIX_SETTLE_MS = 30_000;
+const HOST_FIX_POLL_MS = 2_000;
+
+/** The host's Notify state; the controller emits it as `notify-shared` instead of sending it to the window. */
+const NOTIFY_SHARED_CHANNEL = 'notify:shared-changed';
+
+/**
+ * Events: `state-changed` (connection state), `resync` (after each connect: refetch host state),
+ * `notify-shared` (the host's Notify state).
+ */
 export class RemotePaneClientController extends EventEmitter {
   private configManager: ConfigManager | null = null;
   private rendererEventSink: PaneEventSink = noopPaneEventSink;
@@ -690,7 +943,7 @@ export class RemotePaneClientController extends EventEmitter {
   private rendererIds: () => number[] = () => [];
   private restoreSequence = 0;
   private pendingRestore: {
-    id: number; waiting: Set<number>; resolve: () => void; reject: (error: Error) => void;
+    id: number; hostChanged: boolean; waiting: Set<number>; resolve: () => void; reject: (error: Error) => void;
   } | null = null;
   private activationCommitted: (() => void) | null = null;
   private connectionGeneration = 0;
@@ -705,6 +958,17 @@ export class RemotePaneClientController extends EventEmitter {
   private state = createDefaultRemotePaneConnectionState();
   private configListenerAttached = false;
   private remoteRuntimeUsageTracked = false;
+  private appVersion: string | undefined;
+  private checkDependencies = defaultCheckDependencies;
+  /** The checklist of the latest connect the user started, or of a connection that failed. */
+  private check: RemoteConnectionCheck | null = null;
+  private checkProfile: RemotePaneConnectionProfile | null = null;
+  private checkSequence = 0;
+  /** The SSH host and command behind each of the current check's run-on-host fixes. */
+  private hostFixes = new Map<RemoteConnectionCheckStage, { alias: string; command: string }>();
+  private versionRowReady: Promise<void> = Promise.resolve();
+  /** When this app last heard from each host, and its version; kept in memory only. */
+  private readonly sightings = new Map<string, { at: string | null; version: string | null }>();
 
   private readonly configUpdatedListener = () => {
     void this.syncToConfig().catch((error) => {
@@ -728,10 +992,13 @@ export class RemotePaneClientController extends EventEmitter {
     this.rendererEventSink = options.rendererEventSink;
     this.analyticsManager = options.analyticsManager;
     this.resolveTailnetMachineUrl = options.resolveTailnetMachineUrl;
+    this.appVersion = options.appVersion;
+    this.checkDependencies = { ...defaultCheckDependencies, ...options.checkDependencies };
     this.configManager.on('config-updated', this.configUpdatedListener);
     this.configListenerAttached = true;
 
-    void this.syncToConfig().catch((error) => {
+    const opening = options.freshBoot ? this.openOnThisComputer() : Promise.resolve();
+    void opening.then(() => this.syncToConfig()).catch((error) => {
       this.setConnectionState({
         ...this.state,
         mode: 'remote',
@@ -742,7 +1009,16 @@ export class RemotePaneClientController extends EventEmitter {
   }
 
   getConnectionState(): RemotePaneConnectionState {
-    return { ...this.state };
+    return { ...this.state, check: this.check };
+  }
+
+  /** Switches the saved mode to this computer, as picking it does; the saved host stays listed. */
+  private async openOnThisComputer(): Promise<void> {
+    const remoteDaemon = normalizeRemoteDaemonConfig(this.configManager?.getConfig().remoteDaemon);
+    if (remoteDaemon.client.mode !== 'remote') return;
+    await this.configManager?.updateConfigWith(() => ({
+      remoteDaemon: { ...remoteDaemon, client: { ...remoteDaemon.client, mode: 'local', activeProfileId: null } },
+    }));
   }
 
   isRemoteModeActive(): boolean {
@@ -778,11 +1054,14 @@ export class RemotePaneClientController extends EventEmitter {
     }
 
     if (!this.activeClient) {
-      throw new Error(this.state.lastError ?? 'Remote Pane client is not connected');
+      // The connection banner explains why; the renderer shows "Remote connection interrupted:" failures nowhere else.
+      throw new PaneError('ERR_REMOTE_OFFLINE', `Remote connection interrupted: the action was not sent because ${this.state.activeProfileLabel ?? 'the remote host'} is not connected.`, 'Use Retry now in the connection banner, or switch to This computer.');
     }
 
     const client = this.activeClient;
-    if (this.state.status !== 'connected' && !REMOTE_READ_CHANNELS.has(channel)
+    // A host that de-duplicates writes lets one issued while reconnecting wait for the connection.
+    const waits = this.state.status === 'reconnecting' && client.resendsWrites;
+    if (this.state.status !== 'connected' && !waits && !REMOTE_READ_CHANNELS.has(channel)
       && !REMOTE_RESTORE_CHANNELS.has(channel)) {
       throw new PaneError('ERR_REMOTE_OFFLINE', 'Remote connection interrupted: the action was not sent while the workspace is disconnected.', 'Wait for restoration before submitting it.');
     }
@@ -812,10 +1091,28 @@ export class RemotePaneClientController extends EventEmitter {
     return result;
   }
 
-  async activateProfile(profile: RemotePaneConnectionProfile): Promise<RemotePaneConnectionState> {
-    if (this.activeClient?.isSameProfile(profile)) {
+  /**
+   * Connects to a profile the user chose, running the connection checklist first. A failed check
+   * throws and leaves the current connection as it was; `recheck` reconnects even when connected.
+   */
+  async activateProfile(
+    profile: RemotePaneConnectionProfile,
+    options: { recheck?: boolean } = {},
+  ): Promise<RemotePaneConnectionState> {
+    const sameProfile = this.activeClient?.isSameProfile(profile) === true;
+    if (sameProfile && this.state.status === 'connected' && !options.recheck) {
+      // Choosing the connected host again closes a card left by a failed switch to another host.
+      if (this.check && this.check.outcome !== 'running') {
+        this.check = null;
+        this.publishState();
+      }
+      return this.getConnectionState();
+    }
+    await this.runProbes(profile);
+    const activeClient = this.activeClient;
+    if (sameProfile && activeClient && !options.recheck) {
       const machine = tailnetMachineRef(profile);
-      if (this.state.status === 'error' && machine) await this.reresolveTailnetMachine(profile, machine, this.activeClient);
+      if (this.state.status === 'error' && machine) await this.reresolveTailnetMachine(profile, machine, activeClient);
       await this.activeClient?.retryNow();
       return this.getConnectionState();
     }
@@ -848,12 +1145,22 @@ export class RemotePaneClientController extends EventEmitter {
     if (!pending.waiting.size) { this.pendingRestore = null; pending.resolve(); }
   }
 
+  /**
+   * A renderer started listening for restorations. One sent while its page was
+   * still loading went unheard, so it gets that one again.
+   */
+  rendererReady(rendererId: number): void {
+    const pending = this.pendingRestore;
+    if (!pending?.waiting.has(rendererId)) return;
+    this.rendererEventSink.send('remote-daemon:resync-required', { hostChanged: pending.hostChanged, restoreId: pending.id });
+  }
+
   private restoreRenderers(hostChanged: boolean): Promise<void> {
     this.pendingRestore?.reject(new Error('Restoration superseded'));
     const id = ++this.restoreSequence;
     const waiting = new Set(this.rendererIds());
     const result = waiting.size ? new Promise<void>((resolve, reject) => {
-      this.pendingRestore = { id, waiting, resolve, reject };
+      this.pendingRestore = { id, hostChanged, waiting, resolve, reject };
     }) : Promise.resolve();
     this.rendererEventSink.send('remote-daemon:resync-required', { hostChanged, restoreId: id });
     return result;
@@ -869,7 +1176,56 @@ export class RemotePaneClientController extends EventEmitter {
     this.activeClient?.resume();
   }
 
+  /** Retries a reconnecting host at once, instead of waiting out the backoff, when `reason` suggests it is back. */
+  retryIfReconnecting(reason: string): void {
+    if (this.state.status !== 'reconnecting') return;
+    console.info(`[Pane remote daemon] retrying now: ${reason}`);
+    void this.activeClient?.retryNow();
+  }
+
+  /** Closes the checklist, as "Continue to workspace" does. */
+  dismissCheck(checkId: number): RemotePaneConnectionState {
+    if (this.check?.id === checkId) {
+      this.check = null;
+      this.publishState();
+    }
+    return this.getConnectionState();
+  }
+
+  /**
+   * Runs a row's fixed command on the host over the user's SSH config, then waits for the host to
+   * serve again. Returns the profile to reconnect to, or null when the command failed; the row then
+   * offers the command to copy instead.
+   */
+  async runCheckFix(checkId: number, stage: RemoteConnectionCheckStage): Promise<RemotePaneConnectionProfile | null> {
+    const target = this.hostFixes.get(stage);
+    const profile = this.checkProfile;
+    const row = this.check?.rows.find((candidate) => candidate.stage === stage);
+    if (this.check?.id !== checkId || !target || !profile || !row) {
+      throw new PaneError('ERR_REMOTE_CHECK_STALE', 'This connection check is out of date, so the fix did not run.', 'Retry the connection, then use the fix again.');
+    }
+    this.updateCheck(checkId, { rows: this.withRow({ ...row, status: 'running' }) });
+    try {
+      await this.checkDependencies.runSsh(target.alias, target.command);
+    } catch (error) {
+      this.hostFixes.delete(stage);
+      this.updateCheck(checkId, { rows: this.withRow({
+        ...row,
+        ...copyCommandRow(profile, target.command, `ssh ${target.alias} failed: ${getErrorMessage(error, 'unknown error')}.`),
+      }) });
+      return null;
+    }
+    const deadline = Date.now() + HOST_FIX_SETTLE_MS;
+    while (Date.now() < deadline && this.check?.id === checkId) {
+      const outcome = await probeHost(profile, new RemotePaneClient(profile), this.checkDependencies, () => {});
+      if (outcome.failedCheck !== 'pane_not_running' && outcome.failedCheck !== 'host_unreachable') break;
+      await new Promise((resolve) => setTimeout(resolve, HOST_FIX_POLL_MS));
+    }
+    return this.check?.id === checkId ? profile : null;
+  }
+
   async switchToLocalMode(): Promise<RemotePaneConnectionState> {
+    this.check = null;
     this.connectionGeneration += 1;
     await this.disconnectActiveClient();
     this.setConnectionState(createDefaultRemotePaneConnectionState());
@@ -945,9 +1301,26 @@ export class RemotePaneClientController extends EventEmitter {
     const generation = ++this.connectionGeneration;
     await this.disconnectActiveClient();
     const machine = tailnetMachineRef(savedProfile);
-    const profile = machine && this.resolveTailnetMachineUrl
-      ? { ...savedProfile, baseUrl: await this.resolveTailnetMachineUrl(machine) }
-      : savedProfile;
+    let profile = savedProfile;
+    if (machine && this.resolveTailnetMachineUrl) {
+      try {
+        profile = { ...savedProfile, baseUrl: await this.resolveTailnetMachineUrl(machine) };
+      } catch (error) {
+        // Name the host, so the banner and machine list show which one Tailscale cannot find.
+        if (generation === this.connectionGeneration) {
+          this.setConnectionState({
+            mode: 'remote',
+            status: 'error',
+            activeProfileId: savedProfile.id,
+            activeProfileLabel: savedProfile.label,
+            activeBaseUrl: savedProfile.baseUrl,
+            lastError: getErrorMessage(error, `Could not find ${machine.name}`),
+            lastSeenAt: null,
+          });
+        }
+        throw error;
+      }
+    }
     if (generation !== this.connectionGeneration) return;
     const commit = options.resolveOnReady && this.rendererIds().length > 0
       ? new Promise<void>(resolve => { this.activationCommitted = resolve; })
@@ -975,11 +1348,17 @@ export class RemotePaneClientController extends EventEmitter {
             void this.publishTunnelledPorts(client, args[0]);
             return;
           }
+          // Notify merges the host's questions in this main process, beside this machine's own.
+          if (channel === NOTIFY_SHARED_CHANNEL) {
+            this.emit('notify-shared', args[0]);
+            return;
+          }
           this.rendererEventSink.send(channel, ...args);
         },
       },
       onConnectionStateChange: (status, errorMessage, metadata) => {
         if (this.activeClient !== client) return;
+        this.advanceCheck(savedProfile, status, errorMessage, metadata?.hostVersion);
         if (status === 'error' || status === 'reconnecting') {
           this.pendingRestore?.reject(new Error('Connection interrupted'));
           this.pendingRestore = null;
@@ -1019,6 +1398,7 @@ export class RemotePaneClientController extends EventEmitter {
       onResyncRequired: async () => {
         await commit;
         if (this.activeClient !== client) return;
+        this.emit('resync');
         await this.restoreRenderers(hostChanged);
         hostChanged = false;
         void this.refreshTunnelledPorts(client);
@@ -1087,12 +1467,13 @@ export class RemotePaneClientController extends EventEmitter {
    * Tunnels every port in a host's Ports list and returns the list with where each port is
    * reachable here. Null for a list of an unknown shape, or from a client that is no longer active.
    */
-  private async tunnelPorts<Value>(client: RemotePaneClient, value: Value): Promise<ListeningPortsSnapshot | null> {
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Host port lists are decoded with decodeListeningPortsSnapshot before use.
+  private async tunnelPorts(client: RemotePaneClient, value: unknown): Promise<ListeningPortsSnapshot | null> {
     const snapshot = decodeListeningPortsSnapshot(value);
     const tunnel = this.portTunnel;
     if (!snapshot || !tunnel || this.activeClient !== client) return null;
-    // When host and client share a machine, the host also lists this desktop's own tunnel
-    // listeners; tunnelling those would connect each one back to itself.
+    // Hosts leave tunnel listeners out of the list (readTunnelListeners). An older host on this
+    // machine still lists this desktop's own; tunnelling those would connect each one back to itself.
     const hostPorts = snapshot.ports
       .filter(port => !(snapshot.host === getOsHostname() && port.pid === process.pid))
       .map(port => port.port);
@@ -1136,7 +1517,8 @@ export class RemotePaneClientController extends EventEmitter {
     return await this.tunnelPorts(client, listed) ?? listed;
   }
 
-  private async publishTunnelledPorts<Value>(client: RemotePaneClient, value: Value): Promise<void> {
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- Host port events pass through tunnelPorts, which decodes them before use.
+  private async publishTunnelledPorts(client: RemotePaneClient, value: unknown): Promise<void> {
     try {
       const snapshot = await this.tunnelPorts(client, value);
       if (snapshot && this.activeClient === client) this.rendererEventSink.send(PORTS_CHANGED_CHANNEL, snapshot);
@@ -1192,8 +1574,160 @@ export class RemotePaneClientController extends EventEmitter {
 
   private setConnectionState(nextState: RemotePaneConnectionState): void {
     this.state = nextState;
+    if (nextState.activeProfileId && nextState.lastSeenAt) {
+      const sighting = this.sightings.get(nextState.activeProfileId);
+      this.sightings.set(nextState.activeProfileId, { at: nextState.lastSeenAt, version: sighting?.version ?? null });
+    }
+    this.publishState();
+  }
+
+  private publishState(): void {
     this.emit('state-changed', this.getConnectionState());
     this.rendererEventSink.send('remote-daemon:connection-state-changed', this.getConnectionState());
+  }
+
+  /**
+   * Starts a checklist for `profile` and runs its probe stages. Throws when one fails, naming the
+   * stage, so the connect stops before it touches the current connection.
+   */
+  private async runProbes(profile: RemotePaneConnectionProfile): Promise<void> {
+    const id = ++this.checkSequence;
+    const sighting = this.sightings.get(profile.id);
+    this.checkProfile = profile;
+    this.hostFixes = new Map();
+    this.check = {
+      id,
+      profileId: profile.id,
+      hostLabel: profile.label,
+      route: routeOf(profile),
+      address: addressOf(profile),
+      outcome: 'running',
+      rows: initialRows(profile),
+      lastConnectedAt: sighting?.at ?? null,
+      hostVersion: sighting?.version ?? null,
+    };
+    this.publishState();
+    const outcome = await probeHost(profile, new RemotePaneClient(profile), this.checkDependencies, (rows) => this.updateCheck(id, { rows }));
+    if (this.check?.id !== id) {
+      throw new PaneError('ERR_REMOTE_CHECK_SUPERSEDED', `The connection to ${profile.label} was replaced by a newer one.`, 'Wait for the newer connection to finish.');
+    }
+    this.hostFixes = outcome.hostFixes;
+    if (outcome.hostVersion) this.recordHostVersion(profile.id, outcome.hostVersion);
+    const failed = outcome.rows.find((row) => row.status === 'failed');
+    if (failed && outcome.failedCheck) {
+      this.updateCheck(id, { rows: outcome.rows, address: outcome.address, outcome: 'failed' });
+      this.trackCheckFailure(outcome.failedCheck);
+      throw new PaneError('ERR_REMOTE_CHECK_FAILED', `${failed.label}.`, failed.detail ?? 'Use the fix on the connection checklist, then retry.');
+    }
+    this.updateCheck(id, {
+      address: outcome.address,
+      rows: outcome.rows.map((row) => (row.stage === 'version' ? { ...row, status: 'running' } : row)),
+    });
+  }
+
+  /**
+   * Moves the active checklist along with the real connect: the ready event fills the version row
+   * and a restored workspace closes it. A connection that fails with no checklist running gets one,
+   * so the card names the failed stage.
+   */
+  private advanceCheck(
+    profile: RemotePaneConnectionProfile,
+    status: RemotePaneConnectionStatus,
+    errorMessage: string | null | undefined,
+    hostVersion: string | undefined,
+  ): void {
+    const check = this.check;
+    // A codeless host already described its version to the probe; older hosts omit it on ready.
+    const version = hostVersion ?? (profile.tailnetMachine && check?.profileId === profile.id ? check.hostVersion : null);
+    if (status === 'restoring') this.recordHostVersion(profile.id, version);
+    // The host came back on its own, so a failed card about it would only show a stale failure.
+    if (status === 'connected' && check?.profileId === profile.id && check.outcome === 'failed') {
+      this.check = null;
+      return;
+    }
+    if (!check || check.profileId !== profile.id || check.outcome !== 'running') {
+      if (status === 'error') void this.diagnoseFailure(profile, errorMessage);
+      return;
+    }
+    const id = check.id;
+    if (status === 'restoring') {
+      this.versionRowReady = this.resolveVersionRow(id, profile, version);
+      return;
+    }
+    if (status === 'connected') {
+      void this.versionRowReady.then(() => {
+        const current = this.check;
+        if (current?.id !== id || current.outcome !== 'running') return;
+        const rows = this.withRow({ stage: 'workspace', status: 'passed', label: 'Workspace loaded' });
+        this.updateCheck(id, { rows, outcome: rows.some((row) => row.status === 'warning') ? 'warning' : 'passed' });
+      });
+      return;
+    }
+    // A reconnecting state with no error is a new attempt starting, not a failure.
+    if (status === 'error' || (status === 'reconnecting' && errorMessage)) {
+      this.updateCheck(id, {
+        rows: this.withRow({ stage: 'workspace', status: 'failed', label: 'Workspace did not load', detail: errorMessage ?? 'The host stopped answering.' }),
+        outcome: 'failed',
+      });
+      this.trackCheckFailure('workspace_restore');
+    }
+  }
+
+  private async resolveVersionRow(id: number, profile: RemotePaneConnectionProfile, hostVersion: string | null): Promise<void> {
+    // Without this app's version there is nothing to compare; the row passes.
+    const { row, target } = this.appVersion
+      ? await versionRow(profile, hostVersion, this.appVersion, this.checkDependencies)
+      : { row: { stage: 'version' as const, status: 'passed' as const, label: 'Versions match', metric: hostVersion ?? undefined }, target: null };
+    if (this.check?.id !== id) return;
+    if (target) this.hostFixes.set('version', target);
+    this.updateCheck(id, { rows: this.withRow(row) });
+    if (this.check?.id === id) this.updateCheck(id, { rows: this.withRow({ stage: 'workspace', status: 'running', label: 'Workspace loaded' }) });
+  }
+
+  /** Runs the probe stages once after a connection fails on its own, to name the stage. */
+  private async diagnoseFailure(profile: RemotePaneConnectionProfile, errorMessage: string | null | undefined): Promise<void> {
+    try {
+      await this.runProbes(profile);
+    } catch {
+      return;
+    }
+    const id = this.check?.id;
+    if (id === undefined) return;
+    this.updateCheck(id, {
+      rows: this.withRow({ stage: 'workspace', status: 'failed', label: 'Workspace did not load', detail: errorMessage ?? 'The host stopped answering.' })
+        .map((row) => (row.stage === 'version' ? { ...row, status: 'waiting' } : row)),
+      outcome: 'failed',
+    });
+    this.trackCheckFailure('workspace_restore');
+  }
+
+  private recordHostVersion(profileId: string, version: string | null): void {
+    const sighting = this.sightings.get(profileId);
+    this.sightings.set(profileId, { at: sighting?.at ?? null, version });
+    if (this.check?.profileId === profileId && version) this.check = { ...this.check, hostVersion: version };
+  }
+
+  /** The current check's rows with `row` in its stage's place. */
+  private withRow(row: RemoteConnectionCheckRow): RemoteConnectionCheckRow[] {
+    return (this.check?.rows ?? []).map((candidate) => (candidate.stage === row.stage ? row : candidate));
+  }
+
+  private updateCheck(id: number, update: Partial<Pick<RemoteConnectionCheck, 'rows' | 'outcome' | 'address'>>): void {
+    if (this.check?.id !== id) return;
+    this.check = { ...this.check, ...update };
+    this.publishState();
+  }
+
+  private trackCheckFailure(failedCheck: RemotePaneFailedCheck): void {
+    trackRemotePaneEvent(this.analyticsManager, 'remote_pane_client_connection_failed', {
+      surface: 'desktop',
+      role: 'client',
+      flow: 'connect',
+      result: 'failed',
+      failure_stage: 'connection_check',
+      failed_check: failedCheck,
+      client_kind: 'desktop',
+    });
   }
 }
 
@@ -1328,6 +1862,7 @@ async function requestJson(
   url: URL,
   options: RemoteRequestOptions,
   body: string,
+  timeoutMs: number,
 ): Promise<JsonResponse> {
   return await new Promise<JsonResponse>((resolve, reject) => {
     const request = createRequest(url, {
@@ -1345,7 +1880,7 @@ async function requestJson(
       }).catch(reject);
     });
 
-    request.setTimeout(15_000, () => request.destroy(new Error('Remote response timed out')));
+    request.setTimeout(timeoutMs, () => request.destroy(new Error(`Remote response timed out after ${timeoutMs}ms`)));
     request.on('error', reject);
     request.write(body);
     request.end();
@@ -1455,4 +1990,9 @@ function parseRemoteHeartbeatPayload(data: string): RemoteDaemonHeartbeatPayload
 
 function getErrorMessage(cause: unknown, fallback: string): string {
   return cause instanceof Error ? cause.message : fallback;
+}
+
+/** Reads and mutations the host de-duplicates retry with backoff after an interruption. */
+function retriesRequest(channel: string): boolean {
+  return REMOTE_READ_CHANNELS.has(channel) || REMOTE_DEDUPLICATED_CHANNELS.has(channel);
 }

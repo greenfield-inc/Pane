@@ -1,16 +1,16 @@
-import { assertUpdateCapacity } from './updateCapacity';
+import { assertUpdateCapacity, copyUpdateSnapshot } from './updateCapacity';
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import type { ParsedArgs } from './commands';
 import { boundary, decodeBoundary } from './boundaryDecoder';
-import { invokeDaemon, resolvePaneDirectory } from './daemonClient';
-import { RunpaneError } from './errors';
-import { preflightUpdate, updateHostSchema } from './updatePreflight';
+import { invokeDaemon, PaneDaemonClientError, resolvePaneDirectory } from './daemonClient';
+import { describeFailure, RunpaneError, type RunpaneFailure } from './errors';
+import { assertUpdateOptions, preflightUpdate, updateHostSchema, type UpdatePreflight } from './updatePreflight';
 import { stageUpdateRuntime } from './updateRuntime';
 import { checkUpdateSupervisor, startUpdateSupervisor, removeUpdateSupervisor } from './updateSupervisor';
-import { assertUpdateQuiescence, claimUpdateLock, releaseUpdateLock, executeUpdate, readUpdateJournal, writeUpdateJson, type UpdateJournal } from './updateOperation';
+import { assertUpdateQuiescence, claimUpdateLock, releaseUpdateLock, executeUpdate, readUpdateJournal, updateEnded, updateLockReleasable, UPDATE_ID_PATTERN, waitForUpdateCaller, writeUpdateJson } from './updateOperation';
 import { activateManagedCli, runNpm, stageCliPackage, stageUpdateCode, type StagedCli } from './updatePackage';
 import { identifyPythonCli, stagePythonCli, installPythonCli } from './updatePython';
 import { stageApp, installStagedApp, type StagedApp } from './updateArtifacts';
@@ -22,6 +22,7 @@ const preflightSchema = boundary.object({
   cli: boundary.nullable(boundary.object({ owner: boundary.enumeration('managed', 'npm', 'pip'), entrypoint: boundary.nonEmptyString, version: boundary.nonEmptyString, prefix: boundary.nonEmptyString, packageManager: boundary.optional(boundary.nonEmptyString), pipUser: boundary.optional(boundary.boolean) })),
   disableOsIntegration: boundary.optional(boundary.boolean),
   npmSource: boundary.optional(boundary.nonEmptyString),
+  snapshotSkipped: boundary.optional(boundary.array(boundary.string)),
   runtimeSource: boundary.nonEmptyString, lockDirectory: boundary.nonEmptyString, additionalLockDirectories: boundary.array(boundary.nonEmptyString),
   limitations: boundary.array(boundary.string),
 });
@@ -30,10 +31,9 @@ const stagedSchema = boundary.object({
   cli: boundary.nullable(boundary.object({ version: boundary.string, archive: boundary.string, packageRoot: boundary.string })),
   npm: boundary.optional(boundary.string),
 });
-const terminal = (journal: UpdateJournal) => ['complete', 'needs-attention', 'failed'].includes(journal.phase);
 const pause = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 function operationDirectory(paneDir: string, id: string): string {
-  if (!/^[a-zA-Z0-9-]{1,80}$/.test(id)) throw new RunpaneError('ERR_UPDATE_ID', 'Invalid update operation ID. Nothing was changed.', 'Use the ID returned by runpane update.');
+  if (!UPDATE_ID_PATTERN.test(id)) throw new RunpaneError('ERR_UPDATE_ID', 'Invalid update operation ID. Nothing was changed.', 'Use the ID returned by runpane update.');
   return path.join(paneDir, 'updates', id);
 }
 function processExists(pid: number): boolean {
@@ -47,7 +47,15 @@ function processExists(pid: number): boolean {
 export async function runUpdate(parsed: ParsedArgs): Promise<number> {
   const paneDir = path.resolve(resolvePaneDirectory(parsed.paneDir));
   if (parsed.updateStatus) return presentUpdate(path.join(operationDirectory(paneDir, parsed.updateStatus), 'status.json'), parsed);
-  const preflight = await preflightUpdate(parsed, parsed.updateScope ?? 'both');
+  assertUpdateOptions(parsed);
+  let preflight: UpdatePreflight;
+  try {
+    preflight = await preflightUpdate(parsed, parsed.updateScope ?? 'both');
+  } catch (error) {
+    // A pinned release or a named --pane-path is the caller's request; the in-app updater installs only the latest release into the running Pane.
+    if (parsed.dryRun || parsed.updateScope === 'cli' || parsed.paneVersion !== 'latest' || parsed.panePath) throw error;
+    return updateInApp(parsed, paneDir, describeFailure(error));
+  }
   if (parsed.dryRun) { console.log(JSON.stringify({ preflight, changed: false }, null, 2)); return 0; }
   if (!parsed.json) console.log(`Updating ${preflight.scope} on ${preflight.machine}. Pane: ${preflight.host?.executable ?? 'not selected'}; CLI: ${preflight.cli ? `${preflight.cli.owner} ${preflight.cli.entrypoint}` : 'not selected'}.`);
   const id = randomUUID();
@@ -75,7 +83,7 @@ export async function runUpdate(parsed: ParsedArgs): Promise<number> {
     writeUpdateJson(path.join(directory, 'preflight.json'), { ...preflight, runtimeSource: runtime });
     // Verify the staged helper can load every runtime import without depending
     // on the active npm package or the installed Electron executable.
-    execFileSync(runtime, [helper, '--version'], { timeout: 15_000, env: { ...process.env, ELECTRON_RUN_AS_NODE: '' } });
+    execFileSync(runtime, [helper, '--version'], { timeout: 15_000, env: { ...process.env, ELECTRON_RUN_AS_NODE: '', RUNPANE_NO_HANDOFF: '1' } });
     startUpdateSupervisor({ id, directory, executable: runtime, args: [helper, '__update-runner', directory] });
     const deadline = Date.now() + 20_000;
     while (!readUpdateJournal(file).helperPid && Date.now() < deadline) await pause(100);
@@ -97,10 +105,66 @@ export async function runUpdate(parsed: ParsedArgs): Promise<number> {
   return presentUpdate(file, parsed);
 }
 
+const inAppSchema = boundary.object({ state: boundary.enumeration('installing', 'current'), fromVersion: boundary.nonEmptyString, version: boundary.nonEmptyString });
+
+/**
+ * The independent update refused this host before changing anything, most
+ * often because the managed CLI runs inside Electron with no standalone Node.
+ * The running Pane installs the release itself with electron-updater instead.
+ */
+async function updateInApp(parsed: ParsedArgs, paneDir: string, refusal: RunpaneFailure): Promise<number> {
+  let result: ReturnType<typeof inAppSchema.decode>;
+  try {
+    result = await invokeDaemon('runpane:update:in-app', [], inAppSchema, { paneDir, timeoutMs: 15 * 60_000 });
+  } catch (error) {
+    // Pane not running: the caller installs the release instead (updateOrReinstall).
+    if (error instanceof PaneDaemonClientError && error.connectionFailure) throw error;
+    const failure = describeFailure(error);
+    if (failure.code !== 'ERR_UNKNOWN_CHANNEL') throw new RunpaneError(failure.code, `${failure.message} The independent update had already refused this host: ${refusal.message}`, failure.next);
+    throw new RunpaneError('ERR_UPDATE_IN_APP_UNAVAILABLE', `Updating from runpane is unsupported by this Pane: it is older than the in-app update handoff, and the independent update refused this host (${refusal.message}).`, 'Open Pane, go to Settings, and click Update. Then runpane update works directly next time.');
+  }
+  // Pane rewrites its managed copy of the CLI at startup, so the new app brings
+  // the matching CLI. A pinned managed, npm or pip CLI is its own installation;
+  // a pip CLI delegates here through the managed engine, so check its owner first.
+  const pipCli = Boolean(process.env.PANE_UPDATE_PYTHON && process.env.PANE_UPDATE_PYTHON_ENTRYPOINT);
+  const bundled = path.join(paneDir, 'bin', 'runpane.cjs');
+  const cliFollowsApp = !pipCli && fs.existsSync(bundled) && fs.realpathSync(process.argv[1]) === fs.realpathSync(bundled);
+  let phase: 'installing' | 'complete' | 'current' = result.state;
+  if (phase === 'installing' && parsed.updateWait) {
+    await waitForRelaunch(paneDir, result.version);
+    phase = 'complete';
+  }
+  const next = phase === 'installing'
+    ? `Pane ${result.version} installs and relaunches in about a minute; run runpane doctor --json afterwards to confirm.`
+    : phase === 'complete' ? `Pane ${result.version} is running.` : `Pane ${result.version} is the latest release.`;
+  const cliNext = cliFollowsApp || parsed.updateScope === 'pane' ? '' : ` This CLI was not updated; update it with ${pipCli ? 'pip install --upgrade runpane' : 'its package manager (npm install --global runpane@latest or pip install --upgrade runpane)'}.`;
+  if (parsed.json) {
+    console.log(JSON.stringify({ mode: 'in-app', phase, fromVersion: result.fromVersion, version: result.version, cliUpdated: phase !== 'current' && cliFollowsApp, independentRefusal: refusal, next: next + cliNext }, null, 2));
+  } else {
+    console.log(`The independent update cannot run here (${refusal.message}), so Pane's built-in updater is handling it.`);
+    console.log(`${phase === 'current' ? 'Pane is up to date.' : `Pane is updating itself from ${result.fromVersion} to ${result.version}.`} ${next}${cliNext}`);
+  }
+  return 0;
+}
+
+const RELAUNCH_TIMEOUT_MS = 10 * 60_000;
+
+/** --wait: return once the relaunched Pane answers with the new version. */
+async function waitForRelaunch(paneDir: string, version: string): Promise<void> {
+  const deadline = Date.now() + RELAUNCH_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    try {
+      if ((await invokeDaemon('runpane:update:host', [], updateHostSchema, { paneDir, timeoutMs: 5_000 })).version === version) return;
+    } catch { /* Pane is quitting, installing or starting */ }
+    await pause(2_000);
+  }
+  throw new RunpaneError('ERR_UPDATE_IN_APP_TIMEOUT', `Timed out after 10 minutes waiting for Pane to come back as ${version} from its built-in update. The install may still be running, or it may have failed and left the previous version.`, 'Open Pane and check its version in Settings, then run runpane doctor --json.');
+}
+
 async function presentUpdate(file: string, parsed: ParsedArgs): Promise<number> {
   let journal = readUpdateJournal(file);
   if (parsed.updateWait) {
-    while (!terminal(journal)) { await pause(500); journal = readUpdateJournal(file); }
+    while (!updateEnded(journal)) { await pause(500); journal = readUpdateJournal(file); }
   }
   console.log(JSON.stringify({ ...journal, statusFile: file, next: `runpane update --status ${journal.id} --pane-dir ${JSON.stringify(path.dirname(path.dirname(path.dirname(file))))} --wait --json` }, null, 2));
   return journal.phase === 'failed' || journal.phase === 'needs-attention' ? 1 : 0;
@@ -147,6 +211,7 @@ export async function runUpdateHelper(directory: string, artifacts: UpdateArtifa
       await invokeDaemon('runpane:update:checkpoint', [request], boundary.jsonObject, options);
     }
     if (step === 'stop' && host) {
+      await waitForUpdateCaller(journal);
       // Reconcile an acknowledged stop after a helper restart. Never kill a
       // reused PID, another Pane installation, or a replacement daemon.
       if (processExists(host.pid)) {
@@ -164,14 +229,8 @@ export async function runUpdateHelper(directory: string, artifacts: UpdateArtifa
       if (!fs.existsSync(ready)) {
         fs.rmSync(snapshot, { recursive: true, force: true });
         fs.mkdirSync(snapshot, { recursive: true, mode: 0o700 });
-        for (const [name, source] of [['data', host.paneDir], ['profile', host.userData]]) {
-          const target = path.join(snapshot, name);
-          fs.mkdirSync(target, { recursive: true, mode: 0o700 });
-          for (const entry of fs.readdirSync(source)) {
-            if (source === host.paneDir && entry === 'updates') continue;
-            fs.cpSync(path.join(source, entry), path.join(target, entry), { recursive: true, verbatimSymlinks: true, filter: file => !fs.lstatSync(file).isSocket() && !path.basename(file).startsWith('Singleton') });
-          }
-        }
+        copyUpdateSnapshot(host.paneDir, path.join(snapshot, 'data'), true);
+        copyUpdateSnapshot(host.userData, path.join(snapshot, 'profile'), false);
         writeUpdateJson(ready, { version: host.version, createdAt: new Date().toISOString() });
       }
     }
@@ -216,7 +275,7 @@ export async function runUpdateHelper(directory: string, artifacts: UpdateArtifa
     if (step === 'health' && staged.cli && preflight.cli) {
       const actual = preflight.cli.owner === 'pip'
         ? identifyPythonCli(preflight.cli.packageManager!, preflight.cli.entrypoint).version
-        : execFileSync(preflight.runtimeSource, [preflight.cli.owner === 'managed' ? path.join(preflight.cli.prefix, 'cli', id, 'package/dist/cli.js') : preflight.cli.entrypoint, '--version'], { encoding: 'utf8', timeout: 15_000 }).trim().split(/\s+/).pop();
+        : execFileSync(preflight.runtimeSource, [preflight.cli.owner === 'managed' ? path.join(preflight.cli.prefix, 'cli', id, 'package/dist/cli.js') : preflight.cli.entrypoint, '--version'], { encoding: 'utf8', timeout: 15_000, env: { ...process.env, RUNPANE_NO_HANDOFF: '1' } }).trim().split(/\s+/).pop();
       if (actual !== staged.cli.version) throw new Error(`The active CLI reports ${actual}, expected ${staged.cli.version}.`);
     }
     if (step === 'health' && host) {
@@ -244,10 +303,9 @@ export async function runUpdateHelper(directory: string, artifacts: UpdateArtifa
     }
     return {};
   } });
-  if (terminal(result)) {
-    // Keep failed-after-shutdown ownership for inspection; a new operation must
-    // not overwrite the recovery evidence or start a second installer.
-    if (result.phase === 'complete' || result.phase === 'failed') for (const lock of [preflight.lockDirectory, ...preflight.additionalLockDirectories]) releaseUpdateLock(lock, id);
+  if (updateEnded(result)) {
+    // A new operation gets its own directory, so this journal and snapshot stay.
+    if (updateLockReleasable(result)) for (const lock of [preflight.lockDirectory, ...preflight.additionalLockDirectories]) releaseUpdateLock(lock, id);
     try { removeUpdateSupervisor(id); } catch { /* terminal journal prevents another execution */ }
   }
   return result.phase === 'complete' ? 0 : 1;

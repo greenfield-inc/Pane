@@ -13,6 +13,10 @@ interface SettingRowProps {
   disabled?: boolean;
   className?: string;
   align?: 'center' | 'start';
+  /** Shown before the label, such as a disclosure chevron. */
+  leading?: ReactNode;
+  /** Shown under the row across its full width, such as the options a chevron reveals. */
+  details?: ReactNode;
 }
 export function SettingRow({
   settingId,
@@ -23,6 +27,8 @@ export function SettingRow({
   disabled = false,
   className,
   align = 'center',
+  leading,
+  details,
 }: SettingRowProps) {
   return (
     <div
@@ -36,17 +42,21 @@ export function SettingRow({
         className,
       )}
     >
-      <div className="min-w-0">
-        <div className="text-sm font-medium text-text-primary">{label}</div>
-        {description && <p className="mt-1 max-w-2xl text-xs leading-relaxed text-text-tertiary">{description}</p>}
-        <SaveState state={saveState} />
+      <div className="flex min-w-0 items-start gap-2">
+        {leading}
+        <div className="min-w-0">
+          <div className="text-sm font-medium text-text-primary">{label}</div>
+          {description && <p className="mt-1 max-w-2xl text-xs leading-relaxed text-text-tertiary">{description}</p>}
+          <SaveState state={saveState} />
+        </div>
       </div>
       <div className="min-w-0 sm:justify-self-end">{children}</div>
+      {details && <div className="min-w-0 sm:col-span-2">{details}</div>}
     </div>
   );
 }
 
-function SaveState({ state }: { state: SettingSaveState }) {
+export function SaveState({ state }: { state: SettingSaveState }) {
   if (state.state === 'idle') return null;
   if (state.state === 'saving') {
     return (

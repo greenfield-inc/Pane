@@ -28,7 +28,7 @@ Object.assign(env, {
 });
 const authored = { 'AGENTS.md': '# Authored instructions\nKeep this file unchanged.\n', 'CLAUDE.md': '# Authored Claude instructions\nNative QA fixture.\n' };
 function git(args, cwd = repo) { return execFileSync('git', args, { cwd, env, encoding: 'utf8' }).trim(); }
-fs.writeFileSync(path.join(data, 'config.json'), JSON.stringify({ analytics: { enabled: false }, onboardingCompleted: true, autoCheckUpdates: false }));
+fs.writeFileSync(path.join(data, 'config.json'), JSON.stringify({ analytics: { enabled: false }, onboardingCompleted: true, autoCheckUpdates: false, notesEnabled: true }));
 git(['init', '-b', 'main']);
 fs.writeFileSync(path.join(repo, '.gitignore'), 'worktrees/\n');
 for (const [file, content] of Object.entries(authored)) fs.writeFileSync(path.join(repo, file), content);

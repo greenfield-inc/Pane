@@ -34,7 +34,7 @@ const OBSERVED_KINDS: readonly RunpaneWorkspaceEntryKind[] = [...SETTLE_CANCELLI
  * Per-consumer shaping of workspace entries: READY/BLOCKED settle windows that a
  * state change cancels silently, and a minimum flush interval that batches
  * non-urgent lines. BLOCKED bypasses the interval once its settle matures, and so do a
- * conflicting PR, failed PR checks, and a worker's report.
+ * conflicting PR, failed PR checks, and a worker's report or missing report.
  */
 export class WatchCadence {
   /** Journal position this instance has read up to; the durable cursor may trail it. */
@@ -128,8 +128,8 @@ export class WatchCadence {
 
 /** Entries that need action now, so they flush without waiting for the minimum interval. */
 function isUrgentEntry(entry: RunpaneWorkspaceEntry): boolean {
-  return entry.kind === 'agent.blocked' || entry.kind === 'agent.report'
-    || ['pr.conflicted', 'pr.head', 'pr.closed', 'pr.stopped', 'github.unavailable', 'github.recovered'].includes(entry.kind)
+  return entry.kind === 'agent.blocked' || entry.kind === 'agent.report' || entry.kind === 'agent.report.missing'
+    || ['pr.conflicted', 'pr.head', 'pr.base_changed', 'pr.base_deleted', 'pr.closed', 'pr.stopped', 'github.unavailable', 'github.recovered'].includes(entry.kind)
     || (entry.kind === 'pr.checks' && entry.checks === 'failed');
 }
 

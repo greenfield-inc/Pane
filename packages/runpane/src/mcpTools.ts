@@ -5,7 +5,9 @@ import { RUNPANE_CONTRACT } from './generated/contract';
  * The slice of the runpane contract that MCP tools are generated from. Every
  * command with result `jsonSchemas` becomes a tool; its inputs are the union of
  * the flags in its `usage` lines and its `agentContext` arguments, plus
- * `--pane-dir` for daemon commands. Its output schema is the command's `*Result` schema.
+ * `--pane-dir` for daemon commands. Arguments named `<word>` become inputs placed where the first
+ * usage line puts them, and `-- <word>` the text after `--`. Inputs are strings or booleans unless
+ * the argument declares a `schema`. Its output schema is the command's `*Result` schema.
  */
 export interface McpToolContract {
   commands: readonly {
@@ -27,28 +29,47 @@ export interface McpToolContract {
       details?: string;
       requiresPaneDaemon?: boolean;
       notes?: readonly string[];
-      arguments: readonly { name: string; value?: string; required?: boolean; description?: string }[];
+      arguments: readonly {
+        name: string;
+        value?: string;
+        required?: boolean;
+        description?: string;
+        /** JSON Schema for the tool input; `#/jsonSchemas/...` refs resolve against the contract root. */
+        schema?: unknown;
+      }[];
     }>>;
   };
 }
 
 interface McpToolParameter {
+  /** The CLI flag, or the `<word>` placeholder of a positional argument. */
   flag: string;
   property: string;
   takesValue: boolean;
+  /** Array and object values reach the CLI as JSON text. */
+  json: boolean;
+  /** `word`: a positional in the command words (`workspace <machine> exec`); `rest`: the text after `--`. */
+  positional?: 'word' | 'rest';
 }
 
 export interface McpTool {
   name: string;
   title: string;
   command: string;
+  /** The command words with `<word>` placeholders for positional inputs, as the first usage line orders them. */
+  words: readonly string[];
+  /**
+   * The command changes state but has no --yes of its own (it never reaches Pane's daemon), so this
+   * server refuses the call unless `yes` is true.
+   */
+  confirmsInServer: boolean;
   /** Contract toolsets that serve this tool (`runpane mcp --toolsets`). */
   toolsets: readonly string[];
   description: string;
   parameters: McpToolParameter[];
   inputSchema: {
     type: 'object';
-    properties: Record<string, { type: 'string' | 'boolean'; description: string }>;
+    properties: Record<string, JsonObject>;
     required?: string[];
     additionalProperties: false;
   };
@@ -67,9 +88,14 @@ export interface McpTool {
 // than one result and can wait without limit, which a single tool call cannot return.
 const OMITTED_FLAGS = new Set(['--json', '--follow', '--until-event', '--help']);
 const FLAG_PATTERN = /--[a-z][a-z0-9-]*/g;
+const POSITIONAL_PATTERN = /^<([a-z][a-z0-9-]*)>$/;
+const REST_PATTERN = /^-- <([a-z][a-z0-9-]*)>$/;
 // Clients sometimes send numeric flags such as timeoutMs as JSON numbers.
 const flagValueSchema = boundary.union(boundary.string, boundary.number);
 export const CONFIRM_FLAG = '--yes';
+// A tool call has no stdin, so a flag that stands in for stdin is required. Without --content,
+// workspace write would replace the file with nothing.
+const STDIN_STAND_IN_FLAGS = new Set(['--content']);
 const CONFIRM_DESCRIPTION = 'Confirm this change (the CLI\'s --yes). Pane refuses mutating calls without it.';
 
 type ContractFlag = McpToolContract['flags'][string][number];
@@ -95,14 +121,34 @@ function buildTool(
   const flagNames = new Set<string>();
   for (const flag of usage.match(FLAG_PATTERN) ?? []) flagNames.add(flag);
   for (const arg of context?.arguments ?? []) {
-    if (arg.name.startsWith('--')) flagNames.add(arg.name);
+    if (/^--[a-z]/.test(arg.name)) flagNames.add(arg.name);
   }
   // Every daemon command accepts --pane-dir, even where its usage line omits it.
   if (context?.requiresPaneDaemon) flagNames.add('--pane-dir');
+  const mutates = command.mutates === true;
+  const confirmsInServer = mutates && context?.requiresPaneDaemon === false && !flagNames.has(CONFIRM_FLAG);
+  if (confirmsInServer) flagNames.add(CONFIRM_FLAG);
 
   const parameters: McpToolParameter[] = [];
   const properties: McpTool['inputSchema']['properties'] = {};
   const required: string[] = [];
+  for (const arg of context?.arguments ?? []) {
+    const word = POSITIONAL_PATTERN.exec(arg.name);
+    const rest = REST_PATTERN.exec(arg.name);
+    const name = word?.[1] ?? rest?.[1];
+    if (!name) continue;
+    const parameter: McpToolParameter = { flag: arg.name, property: toProperty(`--${name}`), takesValue: true, json: false, positional: word ? 'word' : 'rest' };
+    parameters.push(parameter);
+    properties[parameter.property] = { type: 'string', description: arg.description ?? '' };
+    if (arg.required === true) required.push(parameter.property);
+  }
+  const wordNames = new Set(parameters.filter((parameter) => parameter.positional === 'word').map((parameter) => parameter.flag));
+  const commandWords = new Set(command.name.split(' '));
+  const usageTokens = (command.usage[0] ?? '').split(/\s+/).slice(1);
+  const firstOption = usageTokens.findIndex((token) => /^[[(]?-/.test(token));
+  const words = usageTokens.slice(0, firstOption === -1 ? undefined : firstOption)
+    .map((token) => token.replace(/^\[(.*)\]$/, '$1'))
+    .filter((token) => commandWords.has(token) || wordNames.has(token));
   for (const flag of flagNames) {
     if (OMITTED_FLAGS.has(flag)) continue;
     const contextArg = contextArgs.get(flag);
@@ -112,27 +158,38 @@ function buildTool(
     const baseDescription = isConfirm
       ? CONFIRM_DESCRIPTION
       : contextArg?.description ?? globalFlag?.description ?? '';
-    const parameter = { flag, property: toProperty(flag), takesValue: placeholder !== undefined };
-    parameters.push(parameter);
-    properties[parameter.property] = {
-      type: parameter.takesValue ? 'string' : 'boolean',
-      description: placeholder ? `${baseDescription} Expects ${placeholder}.`.trim() : baseDescription,
+    const schema = contextArg?.schema === undefined
+      ? undefined
+      : decodeBoundary(inlineContractRefs(decodeBoundary(contextArg.schema, boundary.json), schemas), boundary.jsonObject);
+    const parameter = {
+      flag,
+      property: toProperty(flag),
+      takesValue: placeholder !== undefined || schema !== undefined,
+      json: schema?.type === 'array' || schema?.type === 'object',
     };
-    const isRequired = !isConfirm
+    parameters.push(parameter);
+    properties[parameter.property] = schema
+      ? { ...schema, description: baseDescription }
+      : {
+        type: parameter.takesValue ? 'string' : 'boolean',
+        description: placeholder ? `${baseDescription} Expects ${placeholder}.`.trim() : baseDescription,
+      };
+    const isRequired = STDIN_STAND_IN_FLAGS.has(flag) || (!isConfirm
       && command.usage.every((line) => requiredFlagsIn(line).has(flag))
-      && (contextArg === undefined || contextArg.required === true);
+      && (contextArg === undefined || contextArg.required === true));
     if (isRequired) required.push(parameter.property);
   }
 
   const inputSchema: McpTool['inputSchema'] = { type: 'object', properties, additionalProperties: false };
   if (required.length > 0) inputSchema.required = required;
 
-  const mutates = command.mutates === true;
   const title = `runpane ${command.name}`;
   return {
     name: toToolName(command.name),
     title,
     command: command.name,
+    words,
+    confirmsInServer,
     toolsets: command.toolsets ?? [],
     description: [
       command.summary,
@@ -215,7 +272,14 @@ function asRef(value: JsonObject): string | undefined {
 
 /** Builds the argv for one tool call; the result is `runpane <argv>` with `--json`. */
 export function buildToolArgv(tool: McpTool, input: JsonObject = {}): string[] {
-  const argv = tool.command.split(' ');
+  const positionalValue = (parameter: McpToolParameter | undefined) => {
+    const value = parameter && input[parameter.property];
+    return value === undefined || value === null ? undefined : String(decodeBoundary(value, flagValueSchema));
+  };
+  const argv = tool.words.flatMap((word) => {
+    const parameter = tool.parameters.find((candidate) => candidate.positional === 'word' && candidate.flag === word);
+    return parameter ? positionalValue(parameter) ?? [] : [word];
+  });
   const known = new Set(tool.parameters.map((parameter) => parameter.property));
   const unknown = Object.keys(input).filter((key) => !known.has(key));
   if (unknown.length > 0) {
@@ -223,16 +287,28 @@ export function buildToolArgv(tool: McpTool, input: JsonObject = {}): string[] {
   }
   for (const parameter of tool.parameters) {
     const value = input[parameter.property];
-    if (value === undefined || value === null || value === false) continue;
+    if (STDIN_STAND_IN_FLAGS.has(parameter.flag)) {
+      try {
+        decodeBoundary(value, boundary.string);
+      } catch {
+        throw new Error(`${parameter.property} is required and must be a string. Pass the full new text; an empty string empties the file.`);
+      }
+    }
+    if (parameter.positional || value === undefined || value === null || value === false) continue;
     if (!parameter.takesValue) {
       if (value !== true) throw new Error(`${parameter.property} must be a boolean.`);
       argv.push(parameter.flag);
       continue;
     }
     // `--flag=value` keeps values that start with "-" (like "- [ ] item") from reading as flags.
-    argv.push(`${parameter.flag}=${String(decodeBoundary(value, flagValueSchema))}`);
+    const text = parameter.json && (Array.isArray(value) || asObject(value))
+      ? JSON.stringify(value)
+      : String(decodeBoundary(value, flagValueSchema));
+    argv.push(`${parameter.flag}=${text}`);
   }
   argv.push('--json');
+  const rest = positionalValue(tool.parameters.find((parameter) => parameter.positional === 'rest'));
+  if (rest !== undefined) argv.push('--', rest);
   return argv;
 }
 

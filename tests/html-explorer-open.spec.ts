@@ -1,16 +1,12 @@
 import { expect, test, type Page } from '@playwright/test';
-import { build } from 'esbuild';
-import path from 'node:path';
+import { bundleFixture } from './fixtures/bundle';
 
 interface Log { calls: string[]; panels: string[]; active: string | null; shown: string | null }
 
 async function mount(page: Page) {
-  const { outputFiles } = await build({
-    entryPoints: [path.resolve('tests/fixtures/html-explorer-open.tsx')],
-    bundle: true, write: false, format: 'iife', jsx: 'automatic', define: { 'process.env.NODE_ENV': '"test"' },
-  });
+  const fixture = await bundleFixture('html-explorer-open');
   await page.setContent('<div id="root" style="height:400px"></div><output id="ipc-log"></output>');
-  await page.addScriptTag({ content: outputFiles[0].text });
+  await page.addScriptTag({ content: fixture });
   await expect(page.getByText('index.html')).toBeVisible();
 }
 

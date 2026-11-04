@@ -10,10 +10,13 @@ Explicit choices from older versions must never be overwritten.
 Import the SDK through `posthog-js/dist/module.no-external` and keep
 `disable_external_dependency_loading` enabled. This is PostHog's
 [supported entry point for Electron](https://posthog.com/docs/libraries/js):
-analytics requests and JSON configuration remain available, while executable
-configuration, session replay, surveys, and other remote extensions cannot load.
-All executable dependencies must come from the reviewed, lockfile-pinned build.
-Do not add a second import from the default SDK entry point.
+executable configuration, session replay, surveys, and other remote extensions
+cannot load. All executable dependencies must come from the reviewed,
+lockfile-pinned build. Do not add a second import from the default SDK entry point.
+
+Keep `advanced_disable_flags` enabled. Pane uses no feature flags, and the SDK
+then makes no `/array/<token>/config` or `/flags` requests. Those requests carry
+the identity stored in localStorage, including after opt-out.
 
 ## Identity Comes First
 
@@ -75,7 +78,26 @@ describe this telemetry as anonymous while those person properties are sent.
 Capture `analytics_opted_out` with identity context before disabling analytics.
 After that capture, discard queued usage events and keep analytics disabled.
 
-This records who opted out without sending their later product usage.
+This records who opted out without sending their later product usage. After
+opt-out, the only request Pane still sends is the install heartbeat.
+
+## Install Heartbeat
+
+The main process sends `app_heartbeat` at launch and every 24 hours while Pane
+runs, whether analytics is on or off, so active installs stay countable
+(`startHeartbeat` in `main/src/services/analyticsManager.ts`). Its properties
+are exactly `distinct_id: install:<installId>`, `app_version`, `platform` and
+`$process_person_profile: false`. It creates an install ID if the install has
+none, and never sends `$set`, account or Git details. PostHog still shows it on
+an existing person already linked to that install ID, and derives location from
+the request IP.
+
+Only the installed app sends it: a packaged build on the default data directory
+(no `PANE_DIR`, `FOOZOL_DIR` or `--pane-dir`). `DO_NOT_TRACK=1` or a non-empty
+`RUNPANE_TELEMETRY_DISABLED` turns it off.
+
+Settings › Privacy discloses the payload. Adding a property means changing that
+copy and this section in the same PR.
 
 ## Config Saves Preserve Analytics Fields
 
@@ -96,6 +118,23 @@ When web attribution is present, emit attribution events with the same
 App version should come from the running app context and be attached to disclosure,
 first-open, usage, attribution, and close events. This lets PostHog distinguish
 current users from older installs.
+
+The app joins the web visitor id and the install id to the desktop id with
+`$create_alias`. PostHog merges the `alias` id into the `distinct_id` person and
+refuses an `alias` id whose person is already identified, so the `alias` is
+always the id that is new:
+
+- Web visitor id: `distinct_id` = desktop id, `alias` = web visitor id.
+- Install id, desktop id unchanged since the last launch (or first launch):
+  `distinct_id` = desktop id, `alias` = `install:<id>`.
+- Install id, desktop id changed since the last launch: `distinct_id` =
+  `install:<id>`, `alias` = new desktop id. The main process reads the stored
+  desktop id before this launch overwrites it and passes it as
+  `previousDistinctId`.
+- No install alias when the desktop id is `install:<id>`.
+
+The SDK path (`posthog.alias(alias, original)`) and the direct HTTP path used
+when opting out send the same pairs.
 
 ## Remote Pane Privacy
 
@@ -124,8 +163,16 @@ Remote Pane events must never include:
 
 Allowed properties should stay enum-like: `surface`, `role`, `flow`, `result`,
 `tunnel_preference`, `tunnel_kind`, `data_mode`, `client_kind`,
-`connection_mode`, `failure_stage`, `failure_category`, and connected-client
-count buckets.
+`connection_mode`, `failure_stage`, `failure_category`, `failed_check`, and
+connected-client count buckets.
+
+`failed_check` names the checklist row that failed. Connect checks send it on
+`remote_pane_client_connection_failed` with `failure_stage: connection_check`:
+`tailscale_here`, `host_offline`, `host_unreachable`, `pane_not_running`,
+`sign_in_rejected`, `password_required`, `owner_only`, `workspace_restore`.
+Set Up Host sends it on `remote_pane_host_setup_failed`: `setup_service`,
+`setup_port`, `setup_tailscale`, `setup_https`, `setup_code`, `setup_daemon`.
+The sanitizer drops any other value.
 
 ## Remote Pane Event Catalog
 
@@ -157,12 +204,26 @@ count buckets.
 Keep core desktop activity (`app_opened`, `app_closed`, `session_created`,
 `panel_switched`, `terminal_panel_created`). Neither wrapper emits routine
 command starts or successes. Preserve sanitized wrapper failures and download
-lifecycle events; honor explicit local analytics opt-out as well as CI and
-`RUNPANE_TELEMETRY_DISABLED`.
+lifecycle events; honor explicit local analytics opt-out as well as CI,
+`DO_NOT_TRACK=1` and `RUNPANE_TELEMETRY_DISABLED`.
+
+`runpane_wrapper_command_failed` reports thrown errors, and non-zero exits from
+`install` or `update` only (also when setup runs them) (`runTrackedCommand` in
+`packages/runpane/src/cli.ts` and `run_tracked_command` in the pip `cli.py`).
+Other exit codes are documented results and send nothing. The event carries
+`error_code` (the code the `--json` error prints) and a `failure_category` read
+from that code and the message's first line. Both wrappers share
+`<PANE_DIR>/runpane-wrapper-telemetry.json`: one failure event per cause per
+hour and at most 10 failure events per hour per install.
 
 Local control emits only `runpane_local_control_failed` for thrown failures or
 handled `ok: false` results. Normal wait deadlines and optional agent
-unavailability are excluded. Its properties are `action`, `status`, `command_ok`,
+unavailability are excluded. A `panes create` or `panels create` result reports
+its first failed item's error code, or why the agent was not ready
+(`no-agent-detected`, `agent-not-ready`, `command-exited`, `agent-blocked`,
+`readiness-timeout`) or that the starting message was not confirmed
+(`delivery-unverified`). `error_code` is one of those, a listed errno, or a
+Pane `ERR_*` code; anything else is `unknown`. Its properties are `action`, `status`, `command_ok`,
 `failure_kind`, `error_type`, `error_code`, and `failure_category`, plus app version,
 platform and Electron version. Each coarse operation/category/code combination
 reports at most once per five minutes, with an overall cap of 20 per hour per
@@ -212,8 +273,9 @@ Changes to disclosure, analytics config, or first-run event ordering should upda
 or add coverage in:
 
 - `main/src/services/analyticsIdentity.test.ts`
+- `main/src/services/analyticsManager.test.ts` (error events and the heartbeat)
 - `tests/analytics-consent.spec.ts`
 
 The Playwright test should verify both event order and payload shape, including
-SDK identity and interaction events, and reject external script requests even
-when remote configuration enables extensions.
+SDK identity and interaction events, and reject external script, `/config` and
+`/flags` requests.

@@ -486,6 +486,15 @@
   /* Selected row (sidebar). Mixed from the theme's own text colour so every
      theme gets a fitting shade without a per-theme override. */
   --color-surface-selected: color-mix(in srgb, var(--color-text-primary) 9%, transparent);
+  /* Status text on its own 15-20% tint (badges, pills). Mixed toward the text
+     colour in OKLCH, which keeps the status hue; a theme lowers the mix when
+     its status colours sit too close to their tint to reach 4.5:1. */
+  --status-on-tint-mix: 65%;
+  --color-status-success-on-tint: color-mix(in oklch, var(--color-status-success) var(--status-on-tint-mix), var(--color-text-primary));
+  --color-status-warning-on-tint: color-mix(in oklch, var(--color-status-warning) var(--status-on-tint-mix), var(--color-text-primary));
+  --color-status-error-on-tint: color-mix(in oklch, var(--color-status-error) var(--status-on-tint-mix), var(--color-text-primary));
+  --color-status-info-on-tint: color-mix(in oklch, var(--color-status-info) var(--status-on-tint-mix), var(--color-text-primary));
+  --color-interactive-on-tint: color-mix(in oklch, var(--color-interactive-primary) var(--status-on-tint-mix), var(--color-text-primary));
 
   /* Structural tokens for theme-aware layout */
   --color-bg-chrome: var(--color-bg-primary);
@@ -525,20 +534,20 @@
   /* Interactive surface tokens */
   --color-surface-interactive: var(--gh-800);
   --color-surface-interactive-hover: var(--gh-700);
-  --color-interactive-surface: rgba(var(--color-interactive-rgb), 0.15);
-  --color-interactive-surface-hover: rgba(var(--color-interactive-rgb), 0.25);
+  --color-interactive-surface: rgb(var(--color-interactive-rgb) / 0.15);
+  --color-interactive-surface-hover: rgb(var(--color-interactive-rgb) / 0.25);
 
   /* Interactive border tokens */
   --color-border-interactive-subtle: rgba(255, 255, 255, 0.05);
   --color-border-interactive: rgba(255, 255, 255, 0.08);
-  --color-interactive-border: rgba(var(--color-interactive-rgb), 0.5);
-  --color-interactive-border-hover: rgba(var(--color-interactive-rgb), 0.7);
+  --color-interactive-border: rgb(var(--color-interactive-rgb) / 0.5);
+  --color-interactive-border-hover: rgb(var(--color-interactive-rgb) / 0.7);
 
   /* Interactive text tokens */
   --color-text-interactive-muted: rgb(114 122 133);  /* #727a85 — 4.7:1 on bg-primary (AA) */
 
   /* Focus ring variations */
-  --color-focus-ring-subtle: rgba(var(--color-interactive-rgb), 0.4);
+  --color-focus-ring-subtle: rgb(var(--color-interactive-rgb) / 0.4);
 
   /* Semantic Tokens - Status */
   --color-status-success: rgb(63 185 80);        /* GitHub #3fb950 */
@@ -594,8 +603,8 @@
   --color-surface-navigation: var(--gh-black);
   --color-surface-navigation-hover: var(--gh-800);
   --color-surface-navigation-active: var(--gh-700);
-  --color-surface-navigation-selected: rgba(var(--color-interactive-rgb), 0.15);
-  --color-surface-navigation-selected-hover: rgba(var(--color-interactive-rgb), 0.2);
+  --color-surface-navigation-selected: rgb(var(--color-interactive-rgb) / 0.15);
+  --color-surface-navigation-selected-hover: rgb(var(--color-interactive-rgb) / 0.2);
 
   --color-text-navigation-primary: rgb(200 208 217);
   --color-text-navigation-secondary: rgb(125 133 144);
@@ -634,6 +643,14 @@
   --color-terminal-bright-magenta: rgb(210 168 255);
   --color-terminal-bright-cyan: rgb(90 225 234);
   --color-terminal-bright-white: rgb(255 255 255);
+
+  /* Machine colours: one per machine, the same on the phone (shared/utils/machineColor.ts). */
+  --color-machine-1: #c4b5fd; /* violet */
+  --color-machine-2: #67e8f9; /* cyan */
+  --color-machine-3: #f9a8d4; /* pink */
+  --color-machine-4: #bef264; /* lime */
+  --color-machine-5: #fdba74; /* orange */
+  --color-machine-6: #fb7185; /* rose */
 }
 
 /* Light Theme - GitHub-inspired clean white */
@@ -697,7 +714,7 @@
   --color-interactive-border: var(--blue-500);      /* 3.7:1 — passes 3:1 UI threshold */
   --color-interactive-border-hover: var(--blue-600);
   --color-text-interactive-muted: var(--gray-500);
-  --color-focus-ring-subtle: rgba(var(--color-interactive-rgb), 0.4);
+  --color-focus-ring-subtle: rgb(var(--color-interactive-rgb) / 0.4);
 
   /* Context-Aware Text Tokens - Light Mode */
   --color-text-on-primary: rgb(31 35 40);
@@ -795,6 +812,13 @@
   --color-terminal-bright-cyan: rgb(0 86 95);
   --color-terminal-bright-white: rgb(0 0 0);
   --color-terminal-selection-bg: #1f6dc640;
+
+  --color-machine-1: #7c3aed;
+  --color-machine-2: #0e7490;
+  --color-machine-3: #db2777;
+  --color-machine-4: #4d7c0f;
+  --color-machine-5: #c2410c;
+  --color-machine-6: #e11d48;
 }
 
 /* OLED Black Theme - True black for OLED displays */
@@ -864,6 +888,7 @@
 
 /* Dusk Theme — Emdash-inspired achromatic navy-gray */
 :root.dusk {
+  --status-on-tint-mix: 45%;
   /* Backgrounds */
   --color-bg-primary: var(--dusk-900);
   --color-bg-secondary: var(--dusk-800);
@@ -1131,6 +1156,7 @@
 
 /* Forge Theme — IntelliJ-inspired two-tone with blue accent */
 :root.forge {
+  --status-on-tint-mix: 40%;
   /* Backgrounds — TWO-TONE foundation */
   --color-bg-primary: var(--forge-gray2);
   --color-bg-secondary: var(--forge-gray2);
@@ -1425,6 +1451,7 @@
 
 /* Aurora Theme — Rosé Pine-inspired romantic dark */
 :root.aurora {
+  --status-on-tint-mix: 40%;
   --color-bg-primary: #232136;
   --color-bg-secondary: #2a273f;
   --color-bg-tertiary: #393552;
@@ -1877,6 +1904,7 @@
 
 /* Terracotta Theme — warm dusty earth-tone, zero blue light */
 :root.terracotta {
+  --status-on-tint-mix: 55%;
   /* Backgrounds — TWO-TONE foundation */
   --color-bg-primary: var(--terra-900);
   --color-bg-secondary: var(--terra-850);
@@ -2512,6 +2540,14 @@
 
 /* Folio Theme — paper & ink: warm cream stock, near-black ink, vermilion rubrication */
 :root.folio {
+  /* Machine colours, as the base theme defines them. */
+  --color-machine-1: #7c3aed;
+  --color-machine-2: #0e7490;
+  --color-machine-3: #db2777;
+  --color-machine-4: #4d7c0f;
+  --color-machine-5: #c2410c;
+  --color-machine-6: #e11d48;
+  --status-on-tint-mix: 65%;
   /* Backgrounds — page / sheet / margin tonal steps */
   --color-bg-primary: var(--folio-paper);
   --color-bg-secondary: var(--folio-chrome);
@@ -2673,6 +2709,14 @@
 
 /* Newsprint Theme — cool grey-white stock, graphite ink, halftone greys, ink-blue accent */
 :root.newsprint {
+  /* Machine colours, as the base theme defines them. */
+  --color-machine-1: #7c3aed;
+  --color-machine-2: #0e7490;
+  --color-machine-3: #db2777;
+  --color-machine-4: #4d7c0f;
+  --color-machine-5: #c2410c;
+  --color-machine-6: #e11d48;
+  --status-on-tint-mix: 65%;
   /* Backgrounds — stock / sheet / halftone tonal steps */
   --color-bg-primary: var(--news-paper);
   --color-bg-secondary: var(--news-chrome);
@@ -2834,6 +2878,14 @@
 
 /* Walnut Theme — vellum & walnut: deep warm brown-black, parchment text, brass accent */
 :root.walnut {
+  /* Machine colours, as the base theme defines them. */
+  --color-machine-1: #c4b5fd;
+  --color-machine-2: #67e8f9;
+  --color-machine-3: #f9a8d4;
+  --color-machine-4: #bef264;
+  --color-machine-5: #fdba74;
+  --color-machine-6: #fb7185;
+  --status-on-tint-mix: 65%;
   /* Backgrounds — TWO-TONE foundation, sunken editor */
   --color-bg-primary: var(--walnut-900);
   --color-bg-secondary: var(--walnut-850);
@@ -3154,6 +3206,7 @@
 
 /* Teletype Theme — 1970s terminal on paper: warm off-white, brown ink, burnt-orange & olive accents */
 :root.teletype {
+  --status-on-tint-mix: 60%;
   /* Backgrounds — paper primary, beige chrome */
   --color-bg-primary: var(--tty-paper-100);
   --color-bg-secondary: var(--tty-paper-200);
@@ -3464,6 +3517,7 @@
 
 /* Haar Theme — cold pre-dawn sea fog: blue-white surfaces, ink text (light base) */
 :root.haar {
+  --status-on-tint-mix: 55%;
   /* Backgrounds — fog bank (chrome) vs. clearing (editor) */
   --color-bg-primary: var(--haar-100);
   --color-bg-secondary: var(--haar-150);
@@ -3784,6 +3838,7 @@
 
 /* Understory Theme — forest floor: moss greens, bark-brown chrome, lichen accent (dark base) */
 :root.understory {
+  --status-on-tint-mix: 60%;
   /* Backgrounds — TWO-TONE: bark chrome, moss floor editor */
   --color-bg-primary: var(--under-900);
   --color-bg-secondary: var(--under-850);
@@ -3964,6 +4019,7 @@
    diff add/remove, terminal ANSI) come from the Okabe-Ito palette so they stay
    distinguishable under protanopia, deuteranopia and tritanopia. */
 :root.colorblind-safe {
+  --status-on-tint-mix: 50%;
   /* Backgrounds */
   --color-bg-primary: var(--cbs-900);
   --color-bg-secondary: var(--cbs-850);
@@ -4137,6 +4193,7 @@
    parchment text (never pure white), a honey-gold accent and a desaturated,
    low-blue palette. Text stays ≥ 4.5:1 but avoids the 18:1 glare of black/white. */
 :root.low-fatigue {
+  --status-on-tint-mix: 40%;
   /* Backgrounds */
   --color-bg-primary: var(--lf-900);
   --color-bg-secondary: var(--lf-850);

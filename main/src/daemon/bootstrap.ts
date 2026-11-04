@@ -1,3 +1,4 @@
+import { agentChatManager } from '../services/agentChat/agentChatManager';
 import { installRunpaneShimBestEffort } from '../services/runpaneShim';
 import os from 'os';
 import path from 'path';
@@ -58,6 +59,9 @@ import { PhonePreviewHost } from './phonePreviews';
 import { createPreviewFiles } from './previewProxy';
 import { WorkspaceJournal } from '../services/workspaceJournal';
 import { SessionPrMonitor } from '../services/sessionPrMonitor';
+import { LoopManager } from '../services/loops/loopManager';
+import { LoopRepository } from '../services/loops/loopRepository';
+import { archiveLoopRun, prepareLoopSession, startLoopRun } from '../ipc/loops';
 import { NamedLockService } from '../services/namedLockService';
 import { NamedLockStore } from '../services/namedLockStore';
 import { WorkspaceStateReader } from '../services/workspaceStateReader';
@@ -199,8 +203,13 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   if (activeProject) {
     const context = sessionManager.getProjectContextByProjectId(activeProject.id);
     if (context) {
-      await worktreeManager.initializeProject(activeProject.path, undefined, context.pathResolver, context.commandRunner);
+      await worktreeManager.initializeProject(activeProject.path, activeProject.worktree_folder || undefined, context.pathResolver, context.commandRunner);
     }
+  }
+  // Repositories whose worktree folder predates this hide it from their own git status.
+  for (const project of databaseService.getAllProjects()) {
+    const context = sessionManager.getProjectContextByProjectId(project.id);
+    if (context) void worktreeManager.excludeWorktreeFolder(project.path, project.worktree_folder || undefined, context.pathResolver, context.commandRunner);
   }
 
   const cliManagerFactory = CliManagerFactory.getInstance(logger, configManager);
@@ -316,6 +325,16 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     journal: workspaceJournal,
     logger,
   });
+  // Loop runs go through the registry's `runpane panes create`, which exists once handlers are registered.
+  const loopManager = new LoopManager({
+    repo: new LoopRepository(() => databaseService.getDb()),
+    startRun: (loop, slotAtMs) => startLoopRun(commandRegistry, loop, slotAtMs, { launchedCommand: panelId => terminalPanelManager.launchedCommand(panelId) }),
+    archiveRun: sessionId => archiveLoopRun(commandRegistry, sessionId),
+    projectExists: projectId => Boolean(databaseService.getProject(projectId)),
+    prepareSession: (target, loop) => prepareLoopSession(commandRegistry, target, loop),
+    onChange: () => getPaneEventSink().send('loops:changed'),
+    logger,
+  });
   const workspaceStateReader = new WorkspaceStateReader(
     sessionManager,
     () => workspaceJournal.epoch,
@@ -357,6 +376,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     workspaceJournal,
     workspaceStateReader,
     sessionPrMonitor,
+    loopManager,
     workspaceCursorStore,
     namedLockService,
   };
@@ -389,6 +409,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     mode === 'desktop' && path.resolve(getAppDirectory()) === path.join(os.homedir(), '.pane'),
     runRemoteSetupCommand,
     isForwardedPort,
+    options.app.getVersion(),
   );
   registerWorkspaceCommands(commandRegistry, workspaceHost, configManager, options.app.getVersion());
   const phonePreviews = new PhonePreviewHost({
@@ -412,7 +433,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   commandRegistry.register('ports:phone-address', async (port: number) => { await phonePreviews.request(port); });
 
   let paneDaemonServer: PaneDaemonServer | null = null;
-  const remoteTransportController = new PaneRemoteTransportController(commandRegistry, configManager, analyticsManager, isForwardedPort);
+  const remoteTransportController = new PaneRemoteTransportController(commandRegistry, configManager, analyticsManager, isForwardedPort, options.app.getVersion());
   const remoteHostTailnetMonitor = new RemoteHostTailnetMonitor(configManager);
   try {
     paneDaemonServer = new PaneDaemonServer(commandRegistry, getAppDirectory());
@@ -466,6 +487,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
 
   gitStatusManager.startPolling();
   sessionPrMonitor.start();
+  loopManager.start();
   listeningPortMonitor.start();
   if (mode === 'desktop') {
     versionChecker.startPeriodicCheck();
@@ -499,9 +521,12 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     },
     permissionIpcServer,
     async shutdown(): Promise<void> {
+      // First, so no run starts while the services it needs are closing.
+      loopManager.stop();
       await archiveCleanupManager.stop();
       // Before terminals stop: their exits during shutdown must not release locks.
       namedLockService.dispose();
+      await agentChatManager.stopAll();
       resourceMonitorService.stop();
       listeningPortMonitor.stop();
       await spotlightManager.disableAll();

@@ -25,6 +25,10 @@ const journalSchema = boundary.object({
   error: boundary.optional(boundary.string),
 });
 export type UpdateJournal = ReturnType<typeof journalSchema.decode>;
+/** The pattern every update operation ID matches; it also keeps IDs safe as path segments. */
+export const UPDATE_ID_PATTERN = /^[a-zA-Z0-9-]{1,80}$/;
+/** The operation has ended: no step runs again. */
+export const updateEnded = (journal: UpdateJournal): boolean => ['complete', 'needs-attention', 'failed'].includes(journal.phase);
 
 /** Commit one complete journal image; a crash leaves either the old or new image. */
 export function writeUpdateJson<T extends object>(file: string, value: T): void {
@@ -51,7 +55,7 @@ export interface UpdateSteps {
 
 export async function executeUpdate(file: string, steps: UpdateSteps): Promise<UpdateJournal> {
   let journal = readUpdateJournal(file);
-  if (['complete', 'needs-attention', 'failed'].includes(journal.phase)) return journal;
+  if (updateEnded(journal)) return journal;
   const canceled = () => fs.existsSync(path.join(path.dirname(file), 'canceled.json'));
   if (canceled()) { journal = { ...journal, phase: 'failed', error: 'Operation setup was canceled before shutdown.' }; writeUpdateJson(file, journal); return journal; }
   journal = { ...journal, helperPid: process.pid, updatedAt: new Date().toISOString() };
@@ -60,13 +64,13 @@ export async function executeUpdate(file: string, steps: UpdateSteps): Promise<U
     for (const step of UPDATE_STEPS) {
       if (canceled()) throw new Error('Operation canceled before this stage.');
       const persisted = readUpdateJournal(file);
-      if (['complete', 'needs-attention', 'failed'].includes(persisted.phase)) return persisted;
+      if (updateEnded(persisted)) return persisted;
       if (journal.completed.includes(step)) continue;
       journal = { ...journal, phase: step, updatedAt: new Date().toISOString() };
       writeUpdateJson(file, journal);
       const outcome = await steps.run(step, journal);
       const after = readUpdateJournal(file);
-      if (['complete', 'needs-attention', 'failed'].includes(after.phase)) return after;
+      if (updateEnded(after)) return after;
       journal = { ...journal, ...outcome, completed: [...journal.completed, step], updatedAt: new Date().toISOString() };
       writeUpdateJson(file, journal);
     }
@@ -78,6 +82,12 @@ export async function executeUpdate(file: string, steps: UpdateSteps): Promise<U
   }
   writeUpdateJson(file, journal);
   return journal;
+}
+
+/** No owned installer can still be writing. A needs-attention operation that
+ *  stopped before finishing install may have a surviving installer child. */
+export function updateLockReleasable(journal: UpdateJournal): boolean {
+  return journal.phase === 'complete' || journal.phase === 'failed' || (journal.phase === 'needs-attention' && journal.completed.includes('install'));
 }
 
 /** Publish a fully durable owner directory atomically; never expose an empty lock. */
@@ -104,7 +114,7 @@ export function claimUpdateLock(directory: string, id: string, statusFile: strin
         writeUpdateJson(owner.statusFile, journal);
       }
     }
-    if (journal.id === owner.id && ['complete', 'failed'].includes(journal.phase)) {
+    if (journal.id === owner.id && updateLockReleasable(journal)) {
       releaseUpdateLock(directory, owner.id);
       if (!fs.existsSync(directory)) return claimUpdateLock(directory, id, statusFile);
       const current = decodeBoundary(JSON.parse(fs.readFileSync(file, 'utf8')), boundary.object({ id: boundary.string }));
@@ -113,6 +123,21 @@ export function claimUpdateLock(directory: string, id: string, statusFile: strin
     }
     return { ...owner, acquired: false };
   } finally { fs.rmSync(candidate, { recursive: true, force: true }); }
+}
+
+/**
+ * The CLI that requested the update may be answering a remote `runpane workspace
+ * exec` through the Pane this update stops. Wait for it to exit, then a moment
+ * more for that reply (the operation id) to leave, before stopping Pane. Bounded:
+ * a caller that never exits does not hold the update.
+ */
+export async function waitForUpdateCaller(journal: UpdateJournal, { timeoutMs = 60_000, graceMs = 2_000 } = {}): Promise<void> {
+  const pid = journal.setupPid;
+  if (!pid || pid === process.pid) return;
+  const alive = () => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  const deadline = Date.now() + timeoutMs;
+  while (alive() && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 100));
+  await new Promise(resolve => setTimeout(resolve, graceMs));
 }
 
 /** Elect one releaser. A terminal journal plus a dead recorded releaser repairs a crashed cleanup. */
@@ -125,7 +150,7 @@ export function releaseUpdateLock(directory: string, id: string): void {
     if (fs.existsSync(marker)) {
       const journal = readUpdateJournal(owner.statusFile);
       const releasing = decodeBoundary(JSON.parse(fs.readFileSync(marker, 'utf8')), boundary.object({ id: boundary.string, pid: boundary.number }));
-      if (journal.id !== id || !['complete', 'failed'].includes(journal.phase) || releasing.id !== id || releasing.pid <= 0) return;
+      if (journal.id !== id || !updateLockReleasable(journal) || releasing.id !== id || releasing.pid <= 0) return;
       try { process.kill(releasing.pid, 0); return; } catch (error) {
         if (decodeBoundary(error, boundary.object({ code: boundary.string })).code !== 'ESRCH') return;
       }

@@ -1,6 +1,7 @@
 import * as claudeTranscripts from './claudeSessionTranscript';
 import * as pty from '@lydell/node-pty';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ConfigManager } from './configManager';
 import { resetPaneRuntimeForTests, setPaneRuntime, type PtyHostRuntime } from '../core/runtime';
 import { createFanoutEventSink } from '../core/eventSink';
@@ -18,7 +19,9 @@ import * as shellPathUtils from '../utils/shellPath';
 import { panelManager } from '../test/setup';
 import { RunCommandManager } from './runCommandManager';
 import type { DatabaseService } from '../database/database';
+import * as processTree from '../utils/processTree';
 import { ArchiveProcessTracker, type ArchiveProcessIdentity, type ArchiveProcessObservation } from './archiveProcessTracker';
+import { spawnDetachedWorkerPty, type DetachedWorkerPty } from '../test/detachedWorkerPty';
 
 vi.spyOn(panelManager, 'emitPanelEvent');
 vi.spyOn(panelManager, 'getPanel');
@@ -45,8 +48,6 @@ type TerminalUnderTest = {
   scrollbackBuffer: string;
   alternateScreenBuffer: string;
   screenEmulator?: RemoteTerminalEmulator;
-  commandHistory: string[];
-  currentCommand: string;
   lastActivity: Date;
   lastOutputAt?: Date;
   outputGeneration: number;
@@ -177,8 +178,6 @@ function createTerminal(overrides: Partial<TerminalUnderTest> = {}): TerminalUnd
     sessionId: 'session-1',
     scrollbackBuffer: '',
     alternateScreenBuffer: '',
-    commandHistory: [],
-    currentCommand: '',
     lastActivity: new Date(),
     outputGeneration: 0,
     wslContext: null,
@@ -892,7 +891,6 @@ describe('TerminalPanelManager hidden output delivery', () => {
       alternateScreenBuffer: 'screen',
       screenEmulator,
       isAlternateScreen: true,
-      currentCommand: 'codex',
       capturedAgentSessionId: 'agent-session-1',
     });
     manager.terminals.set(terminal.panelId, terminal);
@@ -925,7 +923,6 @@ describe('TerminalPanelManager hidden output delivery', () => {
       screenText: 'agent screen',
       isAlternateScreen: true,
       activityStatus: 'idle',
-      currentCommand: 'codex',
       isCliPanel: true,
       isCliReady: true,
       agentType: 'codex',
@@ -1474,6 +1471,26 @@ describe('TerminalPanelManager hidden output delivery', () => {
     expect(ordinaryPrompt.commandToRun).toBe('codex --yolo "Read the guide and initialize Pane Chat."');
   });
 
+  it('never puts a startup prompt on a PowerShell or cmd command line, and drops it rather than typing it later', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    // Windows PowerShell drops the embedded quotes when it passes an argument to a native program,
+    // which would turn this repository name into agent options; typed later, it could reach a shell.
+    const prompt: TerminalPanelState = { initialInputMode: 'argument', initialInput: 'Repo demo" --dangerously-skip-permissions --append-system-prompt "$(Write-Output X);Write-Output Y' };
+
+    for (const shellType of ['powershell', 'pwsh.exe', 'cmd']) {
+      const codex = manager.resolveCliLaunchCommand('panel-1', 'codex --yolo', { agentType: 'codex', ...prompt }, shellType);
+      const claude = manager.resolveCliLaunchCommand('11111111-1111-4111-8111-111111111111', 'claude', { agentType: 'claude', ...prompt }, shellType);
+
+      expect(codex.commandToRun).toBe('codex --yolo');
+      expect(claude.commandToRun).toBe('claude --session-id 11111111-1111-4111-8111-111111111111');
+      for (const { customState } of [codex, claude]) {
+        expect(customState.initialInput).toBeUndefined();
+        expect(customState.initialInputSentAt).toBeUndefined();
+        expect(customState.initialInputError).toContain('The starting message was not sent');
+      }
+    }
+  });
+
   it('passes fresh Claude slash input as a quoted startup argument', () => {
     const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
 
@@ -1557,9 +1574,66 @@ describe('TerminalPanelManager hidden output delivery', () => {
     const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
     const state: TerminalPanelState = { agentType: 'codex', orchestrationSessionId: 'session', orchestrationWorkspace: '/tmp/new session', agentSessionId: 'saved-thread' };
     expect(manager.resolveCliLaunchCommand('panel', 'codex --yolo', state).commandToRun)
-      .toBe('codex --yolo resume "saved-thread" --cd "/tmp/new session"');
+      .toBe(`codex --yolo resume "saved-thread" --cd '/tmp/new session'`);
     expect(manager.resolveCliLaunchCommand('panel', 'codex --cd /custom', state).commandToRun)
       .toBe('codex --cd /custom resume "saved-thread"');
+  });
+
+  describe('quotes the resumed Codex folder for the terminal\'s own shell', () => {
+    // A legal folder name that each shell would expand if it were quoted for another shell.
+    const hostile = 'C:\\repos\\a b\\$(Write-Output PANE_SECURITY_SENTINEL)\\it\'s ’q’ `tick\\wt';
+    const resumeWord = (shellType: string | undefined, directory = hostile, field: 'resumeDirectory' | 'orchestrationWorkspace' = 'resumeDirectory'): string | undefined => {
+      const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+      const state: TerminalPanelState = { agentType: 'codex', agentSessionId: 'saved-thread', [field]: directory };
+      const { commandToRun } = manager.resolveCliLaunchCommand('panel', 'codex --yolo', state, shellType);
+      const prefix = 'codex --yolo resume "saved-thread"';
+      expect(commandToRun.startsWith(prefix)).toBe(true);
+      const rest = commandToRun.slice(prefix.length);
+      if (!rest) return undefined;
+      expect(rest.startsWith(' --cd ')).toBe(true);
+      return rest.slice(' --cd '.length);
+    };
+
+    it.each(['powershell', 'pwsh', 'powershell.exe', 'pwsh.exe'])('single-quotes it for %s, doubling straight and typographic single quotes', shell => {
+      expect(resumeWord(shell)).toBe('\'C:\\repos\\a b\\$(Write-Output PANE_SECURITY_SENTINEL)\\it\'\'s ’’q’’ `tick\\wt\'');
+      expect(resumeWord(shell, 'C:\\x‘y‚z‛w')).toBe('\'C:\\x‘‘y‚‚z‛‛w\'');
+    });
+
+    it('double-quotes it for cmd, and skips pinning a folder cmd would expand', () => {
+      expect(resumeWord('cmd.exe')).toBe('"C:\\repos\\a b\\$(Write-Output PANE_SECURITY_SENTINEL)\\it\'s ’q’ `tick\\wt"');
+      expect(resumeWord('cmd', 'C:\\repos\\%PATH%\\wt')).toBeUndefined();
+      expect(resumeWord('cmd', 'C:\\repos\\a!b\\wt')).toBeUndefined();
+      expect(resumeWord('cmd', 'C:\\repos\\a"b\\wt')).toBeUndefined();
+      expect(resumeWord('cmd', 'C:\\repos\\a\nb\\wt')).toBeUndefined();
+    });
+
+    it('single-quotes it for fish, escaping backslashes and single quotes', () => {
+      expect(resumeWord('fish')).toBe('\'C:\\\\repos\\\\a b\\\\$(Write-Output PANE_SECURITY_SENTINEL)\\\\it\\\'s ’q’ `tick\\\\wt\'');
+    });
+
+    it.each(['bash', 'zsh', 'sh', 'gitbash', '/bin/zsh', undefined])('single-quotes it for POSIX shells (%s)', shell => {
+      expect(resumeWord(shell)).toBe('\'C:\\repos\\a b\\$(Write-Output PANE_SECURITY_SENTINEL)\\it\'\\\'\'s ’q’ `tick\\wt\'');
+    });
+
+    it('quotes a managed orchestration workspace the same way', () => {
+      expect(resumeWord('powershell', hostile, 'orchestrationWorkspace')).toBe(resumeWord('powershell'));
+    });
+
+    it.skipIf(process.platform !== 'win32')('passes the folder through PowerShell as one literal word', () => {
+      // A managed workspace takes the same path, and was quoted for a POSIX shell before.
+      const word = resumeWord('powershell', hostile, 'orchestrationWorkspace');
+      expect(word).toBeDefined();
+      const result = spawnSync('powershell.exe', [
+        '-NoProfile', '-NonInteractive', '-Command',
+        `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Write-Output ${word}`,
+      ], { encoding: 'utf8' });
+      expect(result.status).toBe(0);
+      const stdout = result.stdout.replace(/\r?\n$/, '');
+      expect(stdout).toBe(hostile);
+      // The sentinel appears only inside the literal text, never as the output of an expansion.
+      expect(stdout.split('PANE_SECURITY_SENTINEL').length).toBe(2);
+      expect(stdout).toContain('$(Write-Output PANE_SECURITY_SENTINEL)');
+    });
   });
 
   it('uses generic templates to allocate and resume a wrapper conversation without changing its saved command', () => {
@@ -2155,6 +2229,10 @@ type DetectionAccess = AgentStatusAccess & {
 
 describe('TerminalPanelManager wrapper agent detection', () => {
   const rule = '─'.repeat(40);
+  // The fake shell pid 4242 may be a real process here: destroy must not track it.
+  let capture: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => { capture = vi.spyOn(ArchiveProcessTracker.prototype, 'capture').mockResolvedValue(); });
+  afterEach(() => { capture.mockRestore(); });
 
   function wrapperPanel(customState: TerminalPanelState = { initialCommand: 'agent-farm run free-range' }) {
     const panel = {
@@ -2650,4 +2728,105 @@ describe('TerminalPanelManager Agent Farm resume', () => {
     expect(terminal.capturedAgentSessionId).toBe(LAUNCH_ID);
     disposeFlowControlRecord(terminal.flowControl);
   });
+});
+
+type DestroyTerminalAccess = {
+  terminals: Map<string, TerminalUnderTest>;
+  stoppingProcesses: Map<string, ArchiveProcessTracker>;
+  destroyTerminal(panelId: string): Promise<void>;
+  terminateAllTerminals(): Promise<void>;
+  flushOutputBuffer(terminal: TerminalUnderTest): void;
+};
+
+describe('TerminalPanelManager destroyTerminal teardown', () => {
+  afterEach(() => {
+    vi.mocked(panelManager.getPanel).mockReset();
+  });
+
+  it('arms the WSL kill even when the graceful exit write throws', async () => {
+    const manager = testAccess<DestroyTerminalAccess>(new TerminalPanelManager());
+    const terminal = createTerminal({ isWSL: true, outputBuffer: '' });
+    terminal.pty.write.mockImplementation(() => { throw new Error('EPIPE'); });
+    manager.terminals.set(terminal.panelId, terminal);
+
+    await manager.destroyTerminal(terminal.panelId).catch(() => undefined);
+    expect(terminal.pty.write).toHaveBeenCalledWith('exit\r');
+    await new Promise(resolve => setTimeout(resolve, 600));
+
+    expect(terminal.pty.kill).toHaveBeenCalled();
+    expect(manager.terminals.has(terminal.panelId)).toBe(false);
+  });
+
+  it('kills the PTY when the final output flush throws', async () => {
+    const manager = testAccess<DestroyTerminalAccess>(new TerminalPanelManager());
+    const terminal = createTerminal({ outputBuffer: '' });
+    manager.terminals.set(terminal.panelId, terminal);
+    vi.spyOn(manager, 'flushOutputBuffer').mockImplementation(() => { throw new Error('event sink exploded'); });
+
+    await expect(manager.destroyTerminal(terminal.panelId)).rejects.toThrow('event sink exploded');
+
+    expect(terminal.pty.kill).toHaveBeenCalled();
+    expect(manager.terminals.has(terminal.panelId)).toBe(false);
+  });
+});
+
+describe.skipIf(process.platform === 'win32')('TerminalPanelManager orphan reaping', () => {
+  const terminals: DetachedWorkerPty[] = [];
+  const bystanders: ChildProcess[] = [];
+
+  afterEach(() => {
+    for (const terminal of terminals.splice(0)) {
+      terminal.close();
+      if (processTree.isProcessAlive(terminal.workerPid)) process.kill(terminal.workerPid, 'SIGKILL');
+    }
+    for (const bystander of bystanders.splice(0)) bystander.kill('SIGKILL');
+  });
+
+  /** A real PTY shell with a worker that double-forked away from it, open in `panelId`. */
+  async function openTerminal(manager: DestroyTerminalAccess, panelId: string): Promise<DetachedWorkerPty> {
+    const terminal = await spawnDetachedWorkerPty();
+    terminals.push(terminal);
+    const record = createTerminal({ panelId, outputBuffer: '' });
+    record.pty.pid = terminal.shellPid;
+    record.pty.kill.mockImplementation(() => terminal.close());
+    manager.terminals.set(panelId, record);
+    return terminal;
+  }
+
+  /** An unrelated process, plus a leftover entry naming its pid with another process's start time. */
+  function bystanderWithStaleEntry() {
+    const bystander = spawn('sleep', ['600'], { stdio: 'ignore' });
+    bystanders.push(bystander);
+    // SAFETY: spawn of an existing binary yields a pid synchronously.
+    const pid = bystander.pid!;
+    return { pid, stale: new ArchiveProcessTracker([{ pid, parent: 1, started: 'Thu Jan  1 00:00:00 2015' }], () => undefined) };
+  }
+
+  it('on tab delete, kills what the terminal left running, but not a stale pid that now belongs to another process', async () => {
+    const manager = testAccess<DestroyTerminalAccess>(new TerminalPanelManager());
+    // A panel whose terminal was destroyed earlier, leaving an entry whose pid was since reused.
+    const bystander = bystanderWithStaleEntry();
+    manager.stoppingProcesses.set('panel-old', bystander.stale);
+    const terminal = await openTerminal(manager, 'panel-1');
+
+    await manager.destroyTerminal('panel-old');
+    await manager.destroyTerminal('panel-1');
+
+    await vi.waitFor(() => expect(manager.stoppingProcesses.has('panel-1')).toBe(false), { timeout: 15_000 });
+    expect(processTree.isProcessAlive(terminal.workerPid)).toBe(false);
+    expect(processTree.isProcessAlive(bystander.pid)).toBe(true);
+  }, 30_000);
+
+  it('on quit, kills what outlived the hangup, but not a stale pid that now belongs to another process', async () => {
+    const manager = testAccess<DestroyTerminalAccess>(new TerminalPanelManager());
+    const bystander = bystanderWithStaleEntry();
+    manager.stoppingProcesses.set('panel-deleted', bystander.stale);
+    const terminal = await openTerminal(manager, 'panel-1');
+
+    await manager.terminateAllTerminals();
+
+    expect(manager.terminals.size).toBe(0);
+    expect(processTree.isProcessAlive(terminal.workerPid)).toBe(false);
+    expect(processTree.isProcessAlive(bystander.pid)).toBe(true);
+  }, 30_000);
 });

@@ -359,6 +359,41 @@ describe('remote daemon IPC', () => {
     expect(configManager.getConfig().remoteDaemon).toEqual(createDefaultRemoteDaemonConfig());
   });
 
+  it('shows setup progress and reports the Tailscale step when Tailscale is missing', async () => {
+    const ipcMain = createIpcMainStub();
+    const configManager = createConfigManagerStub();
+    const send = vi.fn();
+    const track = vi.fn();
+    vi.mocked(setupRemoteHost).mockImplementation((options) => setupRemoteHostImpl({
+      ...options,
+      asyncCommandRunner: async () => ({ ok: false, stdout: '', stderr: 'not found' }),
+    }));
+
+    registerTestRemoteDaemonHandlers(ipcMain, {
+      configManager,
+      // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
+      getMainWindow: () => ({ isDestroyed: () => false, webContents: { send } }) as never,
+      // SAFETY: The handler only calls track on the analytics manager.
+      analyticsManager: { track } as never,
+    });
+
+    const response = await ipcMain.handlers.get('remote-daemon:setup-host')?.({}, { label: 'Office Mac mini' });
+
+    expect(response).toMatchObject({ success: false, error: expect.stringContaining('Tailscale is not installed.') });
+    expect(send).toHaveBeenCalledWith('remote-daemon:setup-progress', { step: 'port', status: 'passed' });
+    expect(send).toHaveBeenLastCalledWith('remote-daemon:setup-progress', {
+      step: 'tailscale',
+      status: 'failed',
+      detail: expect.stringContaining('Tailscale is not installed.'),
+    });
+    const failures = track.mock.calls.filter(([eventName]) => eventName === 'remote_pane_host_setup_failed');
+    expect(failures).toEqual([['remote_pane_host_setup_failed', expect.objectContaining({
+      result: 'failed',
+      failure_stage: 'setup_host',
+      failed_check: 'setup_tailscale',
+    })]]);
+  });
+
   it('builds an interactive Tailscale setup command for the current Pane data directory', async () => {
     const ipcMain = createIpcMainStub();
     const configManager = createConfigManagerStub();
@@ -1177,7 +1212,7 @@ describe('remote daemon IPC', () => {
     });
   });
 
-  it('clears cached remote host access and revokes existing host clients without disabling the host', async () => {
+  it('clears cached remote host access and revokes existing host clients, but not glasses, without disabling the host', async () => {
     const initialConfig = createDefaultRemoteDaemonConfig();
     initialConfig.host.config = {
       ...initialConfig.host.config,
@@ -1190,6 +1225,14 @@ describe('remote daemon IPC', () => {
         label: 'Old phone',
         tokenHash: 'old-token-hash',
         createdAt: '2026-05-20T18:00:00.000Z',
+      },
+      {
+        id: 'glasses-1',
+        label: 'Even G2',
+        tokenHash: 'glasses-token-hash',
+        createdAt: '2026-05-20T18:00:00.000Z',
+        kind: 'glasses',
+        phoneId: 'pane-native-phone-a',
       },
     ];
     initialConfig.host.access = {
@@ -1211,12 +1254,12 @@ describe('remote daemon IPC', () => {
       success: true,
       data: {
         config: initialConfig.host.config,
-        clients: [],
+        clients: [expect.objectContaining({ id: 'glasses-1', kind: 'glasses' })],
         mobilePush: { registrations: [], attentionSequence: 0, panelStates: {} },
       },
     });
     expect(configManager.getConfig().remoteDaemon?.host.access).toBeUndefined();
-    expect(configManager.getConfig().remoteDaemon?.host.clients).toEqual([]);
+    expect(configManager.getConfig().remoteDaemon?.host.clients?.map((client) => client.id)).toEqual(['glasses-1']);
     expect(configManager.getConfig().remoteDaemon?.host.config).toMatchObject({
       enabled: true,
       listenPort: 42138,

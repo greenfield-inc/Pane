@@ -1,3 +1,4 @@
+import { router } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
@@ -28,9 +29,15 @@ export function ComputersScreen({ onConnected, connected = false }: { onConnecte
       connected={connected}
       onDirectoryChange={setTyped}
       onConnected={onConnected}
-      header={directory
-        ? <Button testID="computers-change-address" title="Use another computer" variant="plain" onPress={() => setTyped(null)} />
-        : <FindComputersForm onFind={setTyped} />}
+      header={(
+        <View style={styles.header}>
+          {/* Pairing codes need a signed-in stack; the first-launch screen offers its own. */}
+          {active ? <Button testID="computers-add-code" title="Add with a code" variant="plain" onPress={() => router.push('/hosts/add')} /> : null}
+          {directory
+            ? <Button testID="computers-change-address" title="Use another computer" variant="plain" onPress={() => setTyped(null)} />
+            : <FindComputersForm onFind={setTyped} />}
+        </View>
+      )}
     />
   );
 }
@@ -65,11 +72,12 @@ function FindComputersForm({ onFind }: { onFind: (directory: RemotePaneConnectio
         returnKeyType="search"
         onSubmitEditing={find}
       />
-      <Button testID="computers-find" title="Find Computers" onPress={find} />
+      <Button testID="computers-find" title="Find computers" onPress={find} />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  header: { gap: 4 },
   form: { gap: 12, marginBottom: 8 },
 });

@@ -1,6 +1,7 @@
+import { registerAgentChatHandlers } from './agentChat';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import type { PaneCommandValue } from '../daemon/commandRegistry';
-import { ipcMain, powerMonitor } from 'electron';
+import { app, ipcMain, powerMonitor } from 'electron';
 import type { AppServices } from './types';
 import { registerAppHandlers } from './app';
 import { registerNotesHandlers } from './notes';
@@ -20,12 +21,15 @@ import { registerUIStateHandlers } from './uiState';
 import { registerDashboardHandlers } from './dashboard';
 import { setupLogHandlers } from './logs';
 import { registerPanelHandlers } from './panels';
+import { registerTerminalPathHandlers } from './terminalPaths';
 import { registerEditorPanelHandlers } from './editorPanel';
 import { registerNimbalystHandlers } from './nimbalyst';
 import { registerSpotlightHandlers } from './spotlight';
 import { registerJourneyTimingHandlers } from './journeyTimings';
 import { registerRemoteDaemonHandlers } from './remoteDaemon';
 import { registerRunpaneHandlers } from './runpane';
+import { registerNotifyHandlers } from './notify';
+import { registerDesktopAlertHandlers } from './desktopAlerts';
 import { registerClipboardHandlers } from './clipboard';
 import { registerResourceMonitorHandlers } from './resourceMonitor';
 import { registerOnboardingHandlers } from './onboarding';
@@ -33,8 +37,11 @@ import { registerVoiceHandlers } from './voice';
 import { registerPaneChatHandlers } from './paneChat';
 import { registerSshHostHandlers } from './sshHosts';
 import { registerUsageHandlers } from './usage';
+import { registerSessionImportHandlers } from './sessionImport';
 import { registerOrchestrationSessionHandlers } from './orchestrationSessions';
 import { registerExportHandlers } from './export';
+import { registerSetupHandlers } from './setup';
+import { registerLoopHandlers } from './loops';
 import { registerMissionControlHandlers } from './missionControl';
 import { createDaemonBridgeRouter, registerDaemonBridgeHandlers } from './daemon';
 import { registerPermissionHandlers } from './permissions';
@@ -48,6 +55,7 @@ import { getPaneEventSink } from '../core/runtime';
 import { remotePaneClientController } from '../daemon/client/remotePaneClient';
 import { registerWorkspaceAccessHandlers } from './workspaceAccess';
 import { readTailscaleStatus, resolveTailnetMachineUrl } from '../services/tailnetMachines';
+import { startedOnFreshBoot } from '../services/freshBoot';
 
 
 export function registerIpcHandlers(services: AppServices): PaneCommandRegistry {
@@ -71,18 +79,24 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
     },
     analyticsManager: services.analyticsManager,
     resolveTailnetMachineUrl: (machine) => resolveTailnetMachineUrl(machine, readTailscaleStatus),
+    appVersion: services.app.getVersion(),
+    freshBoot: startedOnFreshBoot,
   });
   ipcMain.handle('remote-daemon:restore-complete', (event, restoreId: PaneCommandValue, error: PaneCommandValue) => {
     const result = decodeBoundary({ restoreId, error }, boundary.object({ restoreId: boundary.number, error: boundary.optional(boundary.string) }));
     remotePaneClientController.acknowledgeRestore(event.sender.id, result.restoreId, result.error);
   });
+  ipcMain.on('remote-daemon:restore-ready', event => remotePaneClientController.rendererReady(event.sender.id));
   // Pause the remote connection while the system sleeps and reconnect on wake.
   powerMonitor.on('suspend', () => remotePaneClientController.suspend());
   powerMonitor.on('resume', () => remotePaneClientController.resume());
+  // While reconnecting, the window regaining focus or the network coming back retries at once.
+  app.on('browser-window-focus', () => remotePaneClientController.retryIfReconnecting('window focused'));
+  ipcMain.on('remote-daemon:network-online', () => remotePaneClientController.retryIfReconnecting('network online'));
   const bridgeRouter = createDaemonBridgeRouter(commandRegistry);
 
   registerAppHandlers(ipcMain, services);
-  registerNotesHandlers(ipcMain, services);
+  registerNotesHandlers(ipcMain, services, commandRegistry);
   registerFeedbackHandlers(ipcMain, services);
   registerUpdaterHandlers(ipcMain, services);
   registerUpdateOperationHandlers(services, commandRegistry);
@@ -93,6 +107,7 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
   registerSharedCredentialHandlers(services, commandRegistry);
   registerDialogHandlers(ipcMain, services);
   registerExportHandlers(ipcMain, services);
+  registerSetupHandlers(ipcMain, services);
   registerPermissionHandlers(ipcMain, services, commandRegistry);
   registerGitHandlers(ipcMain, services, commandRegistry);
   registerScriptHandlers(ipcMain, services, commandRegistry);
@@ -104,6 +119,7 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
   registerDashboardHandlers(ipcMain, services);
   setupLogHandlers(ipcMain, services.sessionManager, commandRegistry);
   registerPanelHandlers(ipcMain, services, commandRegistry);
+  registerTerminalPathHandlers(ipcMain, services, commandRegistry);
   registerEditorPanelHandlers(ipcMain, services);
   registerNimbalystHandlers(ipcMain, services);
   registerSpotlightHandlers(ipcMain, services);
@@ -111,6 +127,8 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
   registerRemoteDaemonHandlers(ipcMain, services);
   registerWorkspaceAccessHandlers(ipcMain, services, commandRegistry);
   registerRunpaneHandlers(ipcMain, services, commandRegistry);
+  registerDesktopAlertHandlers(ipcMain, services);
+  registerNotifyHandlers(ipcMain, services, commandRegistry);
   registerPaneLinkHandler(commandRegistry, {
     repoExists: (repoId) => Boolean(services.databaseService.getProject(repoId)),
     navigate: (target) => {
@@ -128,9 +146,12 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
   registerAgentUsageHandlers(ipcMain, services, commandRegistry);
   registerVoiceHandlers(ipcMain, services, commandRegistry);
   registerPaneChatHandlers(ipcMain, services, commandRegistry);
+  registerAgentChatHandlers(ipcMain, commandRegistry);
   registerSshHostHandlers(ipcMain, services, commandRegistry);
   registerOrchestrationSessionHandlers(ipcMain, services, commandRegistry);
   registerUsageHandlers(ipcMain, commandRegistry);
+  registerSessionImportHandlers(ipcMain, services, commandRegistry);
+  if (services.loopManager) registerLoopHandlers(ipcMain, services.loopManager, commandRegistry);
   registerMissionControlHandlers(ipcMain, services, commandRegistry);
   registerOnboardingHandlers(ipcMain, services);
   registerDaemonBridgeHandlers(ipcMain, bridgeRouter);

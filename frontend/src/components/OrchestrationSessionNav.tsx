@@ -1,6 +1,5 @@
 import { CreateOrchestrationSessionDialog, type SessionCreateRequest } from './CreateOrchestrationSessionDialog';
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
-import { create as createStore } from 'zustand';
 import { Archive, ArrowRightLeft, ChevronDown, ChevronRight, MoreHorizontal, Pin, PinOff, Plus, Pencil, RefreshCw, Terminal } from 'lucide-react';
 import { useNavigationStore } from '../stores/navigationStore';
 import { useSessionStore } from '../stores/sessionStore';
@@ -24,6 +23,7 @@ import { readDraggedSessionId, startSessionDrag, useDraggedSessionId } from '../
 import { dropOrder, stepOrder, type SessionDropTarget } from '../utils/sessionReorder';
 import { ipcErrorMessage } from '../utils/ipcErrorMessage';
 import { MoveSessionToHostDialog } from './MoveSessionToHostDialog';
+import { archiveOrchestrationSession, clearArchivedToast, setArchivedToast, setOrchestrationSessionPinned, useArchivedSessionToastStore } from './orchestrationSessionActions';
 import { useMoveToHostBlockedReason } from '../hooks/useMoveToHostBlockedReason';
 
 interface OrchestrationSessionNavProps {
@@ -81,19 +81,6 @@ function dropEdge(event: { clientY: number; currentTarget: Element }): SessionDr
   return event.clientY < bounds.top + bounds.height / 2 ? 'before' : 'after';
 }
 
-interface ArchivedSessionToast {
-  sessionId: string;
-  sessionName: string;
-  wasOpen: boolean;
-  /** The host that archived the Session; Undo is offered only while that host is current. */
-  hostRevision: number;
-}
-
-/** The pending archive Undo, shared so the toast survives a switch between the rail and the tree. */
-const useArchivedSessionToastStore = createStore<{ toast: ArchivedSessionToast | null }>(() => ({ toast: null }));
-const setArchivedToast = (toast: ArchivedSessionToast | null) => useArchivedSessionToastStore.setState({ toast });
-const clearArchivedToast = () => setArchivedToast(null);
-
 function statusLabel(session: OrchestrationSessionRecord): string {
   if (session.blockers.length > 0) return 'Blocked';
   if (session.report) return 'Report available';
@@ -135,7 +122,6 @@ export function OrchestrationSessionNav({
   const update = useOrchestrationSessionStore(state => state.update);
   const reorder = useOrchestrationSessionStore(state => state.reorder);
   const navigateToPaneChat = useNavigationStore(state => state.navigateToPaneChat);
-  const navigateToSessions = useNavigationStore(state => state.navigateToSessions);
   const activeView = useNavigationStore(state => state.activeView);
   const setActiveSession = useSessionStore(state => state.setActiveSession);
   const [showCreate, setShowCreate] = useState(false);
@@ -177,7 +163,7 @@ export function OrchestrationSessionNav({
     void load();
   }, [load]);
 
-  // The command palette's New Session. Sidebar mounts exactly one nav (rail or tree), so one dialog opens.
+  // Search's New Session command. Sidebar mounts exactly one nav (rail or tree), so one dialog opens.
   useEffect(() => {
     const openCreate = () => setShowCreate(true);
     window.addEventListener('open-create-orchestration-session', openCreate);
@@ -350,30 +336,14 @@ export function OrchestrationSessionNav({
   const archiveSession = useCallback(async () => {
     if (!sessionMenu) return;
     const { sessionId, sessionName } = sessionMenu;
-    const before = useOrchestrationSessionStore.getState();
-    const wasOpen = useNavigationStore.getState().activeView === 'pane-chat' && before.selectedSessionId === sessionId;
     setSessionMenu(null);
     setActionError(null);
-    // Archiving the open Session lands on Home, never on a Session the server or the
-    // auto-selection picks. Leaving before the request means a person who opens something
-    // else while it is in flight keeps what they opened.
-    if (wasOpen) {
-      void setActiveSession(null);
-      navigateToSessions();
-    }
     try {
-      await update(
-        { sessionId },
-        { archived: true } satisfies OrchestrationSessionUpdateInput,
-      );
-      // A host switch during the request leaves nothing on the new host to undo.
-      if (useOrchestrationSessionStore.getState().hostRevision !== before.hostRevision) return;
-      setArchivedToast({ sessionId, sessionName, wasOpen, hostRevision: before.hostRevision });
-      await refresh();
+      await archiveOrchestrationSession(sessionId, sessionName);
     } catch (cause) {
       setActionError(cause instanceof Error ? cause.message : 'Failed to archive Session');
     }
-  }, [navigateToSessions, refresh, sessionMenu, setActiveSession, update]);
+  }, [sessionMenu]);
 
   const undoArchive = useCallback(async () => {
     if (!archivedToast) return;
@@ -413,12 +383,11 @@ export function OrchestrationSessionNav({
     setSessionMenu(null);
     setActionError(null);
     try {
-      await update({ sessionId }, { isPinned: !isPinned } satisfies OrchestrationSessionUpdateInput);
-      await refresh();
+      await setOrchestrationSessionPinned(sessionId, !isPinned);
     } catch (cause) {
       setActionError(cause instanceof Error ? cause.message : 'Failed to update Session pin');
     }
-  }, [refresh, sessionMenu, update]);
+  }, [sessionMenu]);
 
   const sessionsVisible = availabilityIsVisible(availability);
   const hasPinnedContent = pinnedSessions.length > 0 || Boolean(pinnedPaneRows);
@@ -482,7 +451,7 @@ export function OrchestrationSessionNav({
           </button>
           {/* Same masked hover slot as Pane rows; it covers the activity summary while shown. */}
           <div className={cn(
-            'absolute inset-y-0 right-2 z-10 flex items-center bg-surface-secondary pr-0.5 opacity-0 transition-opacity group-hover/orchestration-row:opacity-100 group-focus-within/orchestration-row:opacity-100',
+            'absolute inset-y-0.5 right-2 z-10 flex items-center bg-surface-secondary pr-0.5 opacity-0 transition-opacity group-hover/orchestration-row:opacity-100 group-focus-within/orchestration-row:opacity-100',
             isOpen
               ? 'bg-[linear-gradient(var(--color-surface-selected),var(--color-surface-selected))]'
               : 'group-hover/orchestration-row:bg-[linear-gradient(var(--color-surface-hover),var(--color-surface-hover))]',
@@ -538,7 +507,7 @@ export function OrchestrationSessionNav({
               type="button"
               data-testid={sessionTestId(session, 'rail')}
               data-compact-rail-item
-              aria-label={session.id === LEGACY_ORCHESTRATION_SESSION_ID ? 'Pane Chat' : `Open Session ${session.name}`}
+              aria-label={session.id === LEGACY_ORCHESTRATION_SESSION_ID ? session.name || 'Pane Chat' : `Open Session ${session.name}`}
               title={session.name}
               {...drag.source}
               {...drag.target}
@@ -671,7 +640,7 @@ export function OrchestrationSessionNav({
         </div>
         <div id="orchestration-sessions-list" hidden={!sectionExpanded}>
         {sessionError && (
-          <div className="mx-3 mb-1 rounded border border-status-error/40 bg-status-error/10 px-2 py-1.5 text-[11px] text-status-error" role="alert">
+          <div className="mx-3 mb-1 rounded border border-status-error/40 bg-status-error/10 px-2 py-1.5 text-[11px] text-text-primary" role="alert">
             <p>{sessionError}</p>
             <button type="button" className="mt-1 underline" onClick={() => {
               if (selectionError && selectedSessionId) void openSession(selectedSessionId);
@@ -680,7 +649,7 @@ export function OrchestrationSessionNav({
           </div>
         )}
         {actionError && (
-          <div className="mx-3 mb-1 rounded border border-status-error/40 bg-status-error/10 px-2 py-1.5 text-[11px] text-status-error" role="alert">
+          <div className="mx-3 mb-1 rounded border border-status-error/40 bg-status-error/10 px-2 py-1.5 text-[11px] text-text-primary" role="alert">
             {actionError}
           </div>
         )}

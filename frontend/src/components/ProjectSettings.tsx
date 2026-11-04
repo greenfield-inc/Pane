@@ -121,7 +121,7 @@ export default function ProjectSettings({ project, isOpen, onClose, onUpdate, on
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} size="xl">
+    <Modal isOpen={isOpen} onClose={onClose} size="xl" showCloseButton={false}>
       <ModalHeader 
         title="Project Settings" 
         icon={<Settings className="w-5 h-5" />}
@@ -143,7 +143,7 @@ export default function ProjectSettings({ project, isOpen, onClose, onUpdate, on
 
       <ModalBody>
         {error && (
-          <div className="mb-6 p-4 bg-status-error/10 border border-status-error/30 rounded-lg text-status-error">
+          <div className="mb-6 p-4 bg-status-error/10 border border-status-error/30 rounded-lg text-text-primary">
             {error}
           </div>
         )}
@@ -186,7 +186,7 @@ export default function ProjectSettings({ project, isOpen, onClose, onUpdate, on
                   size="lg"
                   fullWidth
                 />
-                {project.wsl_enabled && project.wsl_distribution && (
+                {!!project.wsl_enabled && project.wsl_distribution && (
                   <div className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-blue-500/10 border border-blue-500/20 text-blue-400 text-sm">
                     <span className="font-semibold">WSL</span>
                     <span className="text-blue-300/70">|</span>
@@ -333,7 +333,7 @@ export default function ProjectSettings({ project, isOpen, onClose, onUpdate, on
             {detectedConfig && (
               <div className="rounded-lg border border-border-secondary bg-surface-secondary/30 px-3 py-2.5 text-xs text-text-tertiary">
                 <p className="font-medium text-text-secondary mb-1">
-                  Auto-detected: <span className="font-mono text-text-accent">{detectedConfig.source}</span>
+                  Auto-detected: <span className="font-mono text-interactive">{detectedConfig.source}</span>
                 </p>
                 <p className="leading-relaxed">
                   Pane found a config file in your repo root and will use its scripts as defaults.
@@ -342,7 +342,7 @@ export default function ProjectSettings({ project, isOpen, onClose, onUpdate, on
                     ? ' This file uses the pane.json format: { "scripts": { "setup": "...", "run": "...", "archive": "..." } }'
                     : ''}
                 </p>
-                <p className="mt-1 text-[10px] text-text-quaternary">
+                <p className="mt-1 text-[10px] text-text-muted">
                   Detection priority: pane.json → conductor.json → .gitpod.yml → devcontainer.json
                 </p>
               </div>

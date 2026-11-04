@@ -1,7 +1,8 @@
-import { assertUpdateCapacity } from './updateCapacity';
+import { assertUpdateCapacity, updateSnapshotSkips } from './updateCapacity';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { boundary, decodeBoundary } from './boundaryDecoder';
 import { invokeDaemon, resolvePaneDirectory } from './daemonClient';
 import { RunpaneError } from './errors';
@@ -9,6 +10,7 @@ import { getWrapperVersion } from './version';
 import { identifyPythonCli } from './updatePython';
 import { findNpm, runNpm } from './updatePackage';
 import { checkUpdateSupervisor } from './updateSupervisor';
+import { assertSupportedNodeRuntime } from './nodeRuntime';
 import type { ParsedArgs } from './commands';
 
 export const updateHostSchema = boundary.object({
@@ -50,6 +52,8 @@ export interface UpdatePreflight {
   npmSource?: string;
   lockDirectory: string;
   additionalLockDirectories: string[];
+  /** Folders in Pane data the recovery snapshot leaves out: unknown to Pane, or repositories. */
+  snapshotSkipped: string[];
   limitations: string[];
   disableOsIntegration?: boolean;
 }
@@ -97,17 +101,26 @@ function identifyUpdateCli(paneDir: string, entrypoint = process.argv[1]): Updat
   return { owner: 'npm', entrypoint: real, version: pkg.version, prefix, packageManager: npmRoot };
 }
 
-function findUpdateRuntime(): string {
+export function findUpdateRuntime(): string {
   if (!process.versions.electron) return process.execPath;
   const candidates = (process.env.PATH ?? '').split(path.delimiter).map(directory => path.join(directory, process.platform === 'win32' ? 'node.exe' : 'node'));
   const node = candidates.find(file => fs.existsSync(file) && fs.realpathSync(file) !== fs.realpathSync(process.execPath));
-  if (!node) fail('No independent Node runtime is available; the managed CLI is running inside Electron.', 'Install standalone Node 22 or newer, then retry.');
+  if (!node) fail('No independent Node runtime is available; the managed CLI is running inside Electron.', 'Install standalone patched Node 22.23.4+ (22.x), 24.22.1+ (24.x), or 26.12.1+ (26.x), then retry.');
+  const environment = { ...process.env };
+  delete environment.ELECTRON_RUN_AS_NODE;
+  assertSupportedNodeRuntime(execFileSync(node, ['-p', 'process.versions.node'], { encoding: 'utf8', env: environment, timeout: 10_000, stdio: ['ignore', 'pipe', 'pipe'] }).trim());
   return node;
 }
 
-export async function preflightUpdate(parsed: ParsedArgs, scope: UpdatePreflight['scope']): Promise<UpdatePreflight> {
+/** Refuse options the independent update cannot honor; these are the caller's to fix, so no fallback applies. */
+export function assertUpdateOptions(parsed: ParsedArgs): void {
   if (parsed.channel !== 'stable' || parsed.target !== 'client' || parsed.downloadDir || (parsed.format !== 'auto' && parsed.format !== (process.platform === 'darwin' ? 'zip' : process.platform === 'win32' ? 'exe' : 'appimage'))) fail('These installer options are not supported by independent updates.', 'Use the stable client release with automatic format and operation-owned staging, or use runpane install for other installer options.');
   if (!/^(?:latest|v?\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?)$/.test(parsed.paneVersion)) fail('The requested version is invalid.', 'Use --version latest or a released version such as 2.4.182.');
+}
+
+/** Callers run assertUpdateOptions first: option errors never fall back to the in-app updater. */
+export async function preflightUpdate(parsed: ParsedArgs, scope: UpdatePreflight['scope']): Promise<UpdatePreflight> {
+  const runtimeSource = findUpdateRuntime();
   const paneDir = path.resolve(resolvePaneDirectory(parsed.paneDir));
   const cli = scope === 'pane' ? null : process.env.PANE_UPDATE_PYTHON && process.env.PANE_UPDATE_PYTHON_ENTRYPOINT
     ? identifyPythonCli(process.env.PANE_UPDATE_PYTHON, process.env.PANE_UPDATE_PYTHON_ENTRYPOINT) : identifyUpdateCli(paneDir);
@@ -131,12 +144,13 @@ export async function preflightUpdate(parsed: ParsedArgs, scope: UpdatePreflight
   ]);
   for (const directory of writableDirectories) assertUpdateDirectoryWritable(directory);
   assertUpdateCapacity(paneDir, host, install, cli?.prefix);
-  const runtimeSource = findUpdateRuntime();
+  const snapshotSkipped = host ? updateSnapshotSkips(host.paneDir) : [];
   return {
     machine: os.hostname(), paneDir, scope, requestedVersion: parsed.paneVersion, host, cli,
     runtimeSource, npmSource: cli && cli.owner !== 'pip' ? findNpm(runtimeSource) : undefined, lockDirectory: path.join(paneDir, 'updates', '.operation-lock'),
     additionalLockDirectories: [...(host ? [path.join(path.dirname(install), `.${path.basename(install)}.update-lock`)] : []), ...(cli ? [path.join(cli.prefix, '.runpane-update-lock')] : [])],
     disableOsIntegration: process.env.PANE_DISABLE_OS_INTEGRATION === '1',
-    limitations: ['Requires the current interactive login. Logout/reboot recovery must be inspected through the durable operation status.', 'Agent turns with uncertain delivery are never replayed.'],
+    snapshotSkipped,
+    limitations: [...(snapshotSkipped.length ? [`The recovery snapshot leaves out ${snapshotSkipped.length} folder(s) in Pane data that are not Pane state (see snapshotSkipped); back them up yourself if they matter.`] : []), 'Requires the current interactive login. Logout/reboot recovery must be inspected through the durable operation status.', 'Agent turns with uncertain delivery are never replayed.'],
   };
 }

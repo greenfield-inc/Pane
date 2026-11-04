@@ -451,8 +451,9 @@ export function SessionWorkspacePanels({
             <button type="button" disabled={!loaded} aria-label={showTerminal ? 'Collapse terminal' : 'Expand terminal'}
               aria-expanded={showTerminal} onClick={() => { void toggleTool('terminal'); }}
               className="flex h-8 flex-shrink-0 items-center gap-2 px-3 text-xs text-text-secondary hover:bg-surface-hover">
-              {showTerminal ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronUp className="h-3.5 w-3.5" />}
-              <Terminal className="h-3.5 w-3.5" /> Terminal
+              {showTerminal ? <ChevronDown className="h-3.5 w-3.5 text-text-tertiary" /> : <ChevronUp className="h-3.5 w-3.5 text-text-tertiary" />}
+              <Terminal className="h-3.5 w-3.5 text-text-tertiary" />
+              <span className="text-[11px] font-medium uppercase tracking-wider">Terminal</span>
             </button>
             {terminal && <div className="relative min-h-0 flex-1" style={{ display: showTerminal ? 'block' : 'none' }}>
               <PanelContainer panel={terminal} isActive={showTerminal} autoFocus={false} />
@@ -474,7 +475,7 @@ export function SessionWorkspacePanels({
                   const offset = event.key === 'ArrowRight' ? 1 : SESSION_INSPECTOR_TABS.length - 1;
                   selectSidebarTab(SESSION_INSPECTOR_TABS[(index + offset) % SESSION_INSPECTOR_TABS.length]);
                 }}
-                className={`flex flex-1 items-center justify-center rounded-t-md border border-transparent px-2 text-[12px] font-medium focus:outline-none focus:ring-0 ${sidebarTab === tab ? 'border-border-primary border-b-surface-primary bg-surface-primary text-text-primary -mb-px' : 'text-text-tertiary hover:text-text-primary hover:bg-surface-hover'}`}>
+                className={`flex flex-1 items-center justify-center rounded-t-md border border-transparent px-2 text-[12px] font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-border-focus ${sidebarTab === tab ? 'border-border-primary border-b-surface-primary bg-surface-primary text-text-primary -mb-px' : 'text-text-tertiary hover:text-text-primary hover:bg-surface-hover'}`}>
                 {tab === 'overview' ? 'Overview' : tab === 'files' ? 'Files' : 'Changes'}
               </button>
             ))}

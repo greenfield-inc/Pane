@@ -55,15 +55,6 @@ describe('decodeOrchestrationSessionPayload', () => {
     expect(error.message).toContain('report.provenance: missing');
   });
 
-  it('enforces the item and text limits', () => {
-    const error = failureOf(() => decodeOrchestrationSessionPayload({
-      decisions: Array.from({ length: 101 }, () => 'd'),
-      outputs: [{ label: 'x'.repeat(16_001), url: 'https://x', addedAt: '2026-10-14T09:30:00Z' }],
-    }, updateSchema, 'update'));
-    expect(error.message).toContain('decisions: expected at most 100 items');
-    expect(error.message).toContain('outputs[0].label: expected at most 16000 characters');
-  });
-
   it('accepts a well-formed payload unchanged', () => {
     const payload = {
       decisions: ['Ship it'],

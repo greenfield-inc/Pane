@@ -64,8 +64,8 @@ test('legacy theme is fixed and an invalid legacy value falls back to defaults',
   await invalidPage.addInitScript(() => localStorage.setItem('theme', 'invalid'));
   await installElectronApiMock(invalidPage, { appearanceSnapshot: false });
   await invalidPage.goto('/', { waitUntil: 'domcontentloaded' });
-  await expect(invalidPage.locator('html')).toHaveClass(/\blight\b.*\blight-rounded\b/);
-  expect(await readBootstrapThemeClasses(invalidPage)).toEqual(['light', 'light-rounded']);
+  await expect(invalidPage.locator('html')).toHaveClass(/\blight\b.*\bfolio\b/);
+  expect(await readBootstrapThemeClasses(invalidPage)).toEqual(['light', 'folio']);
   await invalidContext.close();
 });
 

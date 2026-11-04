@@ -176,6 +176,32 @@ describe('PaneWorkspaceHostController', () => {
     }
   });
 
+  it('comes on within 15 seconds of Tailscale starting right after the computer did', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const tailscale = createFakeTailscale({ tailnet: TAILNET_A });
+    const host = new PaneWorkspaceHostController(
+      new PaneCommandRegistry(),
+      { getConfig: () => ({ workspaces: { enabled: true } }), on: () => ({}), off: () => ({}) },
+      true,
+      tailscale.run,
+      undefined,
+      undefined,
+      () => true,
+    );
+    try {
+      tailscale.failStatus('failed to connect to local tailscaled; it doesn\'t appear to be running');
+      await host.start();
+      expect(host.getStatus()).toMatchObject({ state: 'off' });
+
+      tailscale.failStatus('');
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(host.getStatus()).toMatchObject({ state: 'on', url: 'https://parsa-devbox.taila5e94c.ts.net:8443' });
+    } finally {
+      await host.shutdown();
+      vi.useRealTimers();
+    }
+  });
+
   it('names the step that fixes a stopped Tailscale or a refused Serve change', async () => {
     const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform');
     Object.defineProperty(process, 'platform', { value: 'win32' });

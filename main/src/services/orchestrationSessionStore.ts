@@ -4,14 +4,15 @@ import path from 'path';
 import { randomUUID } from 'crypto';
 import {
   boundary,
+  BoundaryDecodeError,
   decodeBoundary,
+  decodeOptionalBoundary,
   type BoundarySchema,
+  type JsonObject,
+  type JsonValue,
 } from '../../../shared/validation/boundaryDecoder';
 import {
   LEGACY_ORCHESTRATION_SESSION_ID,
-  MAX_ORCHESTRATION_ACTIVITY,
-  MAX_ORCHESTRATION_ITEMS,
-  MAX_ORCHESTRATION_TEXT_LENGTH,
   ORCHESTRATION_SESSION_STORE_VERSION,
   type OrchestrationActivity,
   type OrchestrationAssociation,
@@ -21,10 +22,8 @@ import {
   type OrchestrationSessionStoreData,
 } from '../../../shared/types/orchestrationSession';
 import { getPaneChatPanelId } from '../../../shared/types/paneChat';
-import type { JsonValue } from '../../../shared/validation/boundaryDecoder';
 
 const paneChatAgentSchema = boundary.enumeration('claude', 'codex', 'cursor', 'opencode');
-const MAX_STORE_BYTES = 2_000_000;
 const sourceSchema = boundary.enumeration('user', 'agent', 'system');
 const activityKindSchema = boundary.enumeration(
   'created',
@@ -38,34 +37,39 @@ const activityKindSchema = boundary.enumeration(
   'report',
 );
 const linkKindSchema = boundary.enumeration('evidence', 'output', 'ticket', 'pull-request', 'other');
+const timestampSchema = boundary.refine(boundary.nonEmptyString, value => Number.isFinite(Date.parse(value)), 'expected a timestamp');
 
 const linkSchema: BoundarySchema<OrchestrationLink> = boundary.object({
   label: boundary.nonEmptyString,
-  url: boundary.nonEmptyString,
+  url: boundary.refine(
+    boundary.nonEmptyString,
+    value => /^(?:https?:\/\/|file:\/\/|grain:\/\/)/i.test(value),
+    'URL must use https, file, or grain scheme',
+  ),
   kind: boundary.optional(linkKindSchema),
   provenance: boundary.optional(boundary.string),
-  addedAt: boundary.nonEmptyString,
+  addedAt: timestampSchema,
 });
 
 const reportSchema: BoundarySchema<OrchestrationReport> = boundary.object({
   summary: boundary.nonEmptyString,
   status: boundary.enumeration('reported', 'verified'),
-  evidence: boundary.array(linkSchema),
-  reportedAt: boundary.nonEmptyString,
+  evidence: boundary.refine(boundary.array(linkSchema), links => links.length > 0, 'report needs evidence'),
+  reportedAt: timestampSchema,
   provenance: boundary.nonEmptyString,
 });
 
 const associationSchema: BoundarySchema<OrchestrationAssociation> = boundary.object({
   paneId: boundary.nonEmptyString,
   panelIds: boundary.array(boundary.nonEmptyString),
-  attachedAt: boundary.nonEmptyString,
+  attachedAt: timestampSchema,
 });
 
 const activitySchema: BoundarySchema<OrchestrationActivity> = boundary.object({
   id: boundary.nonEmptyString,
   kind: activityKindSchema,
   message: boundary.string,
-  at: boundary.nonEmptyString,
+  at: timestampSchema,
   source: sourceSchema,
   paneId: boundary.optional(boundary.nonEmptyString),
   panelId: boundary.optional(boundary.nonEmptyString),
@@ -83,6 +87,8 @@ const sessionSchema = boundary.object({
   agent: paneChatAgentSchema,
   launchCommand: boundary.optional(boundary.string),
   customResume: boundary.optional(boundary.nullable(customCommandResumeSchema)),
+  resume: boundary.optional(boundary.nonEmptyString),
+  openingPrompt: boundary.optional(boundary.nonEmptyString),
   profile: boundary.optional(boundary.string),
   internalSessionId: boundary.nonEmptyString,
   panelIds: boundary.object({
@@ -102,25 +108,25 @@ const sessionSchema = boundary.object({
   activity: boundary.array(activitySchema),
   report: boundary.optional(reportSchema),
   reportActivityId: boundary.optional(boundary.nonEmptyString),
-  reportAcceptedAt: boundary.optional(boundary.nonEmptyString),
-  revision: boundary.number,
-  createdAt: boundary.nonEmptyString,
-  updatedAt: boundary.nonEmptyString,
+  reportAcceptedAt: boundary.optional(timestampSchema),
+  revision: boundary.refine(boundary.number, value => Number.isInteger(value) && value >= 0, 'expected a non-negative integer'),
+  createdAt: timestampSchema,
+  updatedAt: timestampSchema,
 });
 
-const storeSchema = boundary.object({
-  version: boundary.literal(ORCHESTRATION_SESSION_STORE_VERSION),
-  selectedSessionId: boundary.optional(boundary.nonEmptyString),
-  order: boundary.optional(boundary.array(boundary.nonEmptyString)),
-  sessions: boundary.array(sessionSchema),
-});
+/** Session list fields whose bad entries are dropped one by one. */
+const SESSION_LIST_FIELDS: ReadonlyArray<[string, BoundarySchema<unknown>]> = [
+  ['decisions', boundary.string],
+  ['blockers', boundary.string],
+  ['evidence', linkSchema],
+  ['outputs', linkSchema],
+  ['associations', associationSchema],
+  ['activity', activitySchema],
+];
 
 export class OrchestrationSessionStore {
   private loaded = false;
-  private data: OrchestrationSessionStoreData = {
-    version: ORCHESTRATION_SESSION_STORE_VERSION,
-    sessions: [],
-  };
+  private data: OrchestrationSessionStoreData = emptyStore();
 
   constructor(
     private readonly filePath: string,
@@ -138,15 +144,13 @@ export class OrchestrationSessionStore {
    */
   write(next: OrchestrationSessionStoreData): void {
     this.ensureLoaded();
-    const validated = validateStore(next);
+    const problems: string[] = [];
+    const validated = sanitizeStore(next, problems);
+    if (problems.length > 0) throw new Error(`Invalid orchestration Session store write: ${problems.join('; ')}`);
     const temporaryPath = `${this.filePath}.tmp-${process.pid}-${randomUUID()}`;
     fs.mkdirSync(path.dirname(this.filePath), { recursive: true, mode: 0o700 });
     try {
-      const payload = `${JSON.stringify(validated, null, 2)}\n`;
-      if (Buffer.byteLength(payload, 'utf8') > MAX_STORE_BYTES) {
-        throw new Error(`orchestration Session store exceeds ${MAX_STORE_BYTES} bytes`);
-      }
-      fs.writeFileSync(temporaryPath, payload, { mode: 0o600 });
+      fs.writeFileSync(temporaryPath, `${JSON.stringify(validated, null, 2)}\n`, { mode: 0o600 });
       fs.renameSync(temporaryPath, this.filePath);
       this.data = cloneStore(validated);
     } finally {
@@ -154,141 +158,148 @@ export class OrchestrationSessionStore {
     }
   }
 
+  /**
+   * Loads fail open: every Session that decodes is kept and bad entries are dropped. Only a file
+   * that is not JSON starts empty. Either way the original is copied aside first and stays in
+   * place until the next write.
+   */
   private ensureLoaded(): void {
     if (this.loaded) return;
+    let raw: string;
     try {
-      const raw = fs.readFileSync(this.filePath, 'utf8');
-      if (Buffer.byteLength(raw, 'utf8') > MAX_STORE_BYTES) {
-        throw new Error(`orchestration Session store exceeds ${MAX_STORE_BYTES} bytes`);
-      }
-      const parsed = decodeBoundary(JSON.parse(raw), boundary.json);
-      this.data = validateStore(parsed);
+      raw = fs.readFileSync(this.filePath, 'utf8');
     } catch (error) {
-      if (error instanceof Error && isFileMissing(error)) {
-        this.data = {
-          version: ORCHESTRATION_SESSION_STORE_VERSION,
-          sessions: [],
-        };
-      } else {
-        const message = error instanceof Error ? errorMessage(error) : String(error);
+      if (!(error instanceof Error && isFileMissing(error))) {
+        const message = error instanceof Error ? error.message : String(error);
         throw new Error(`Unable to read orchestration Session store ${this.filePath}: ${message}`);
       }
+      this.data = emptyStore();
+      this.loaded = true;
+      return;
+    }
+    const problems: string[] = [];
+    try {
+      this.data = sanitizeStore(decodeBoundary(JSON.parse(raw), boundary.json), problems);
+    } catch (error) {
+      if (!(error instanceof SyntaxError || error instanceof BoundaryDecodeError)) throw error;
+      problems.push(`the file is not JSON (${error.message}); starting with no Sessions`);
+      this.data = emptyStore();
+    }
+    if (problems.length > 0) {
+      const backupPath = `${this.filePath}.corrupt-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+      fs.copyFileSync(this.filePath, backupPath);
+      console.warn(`[OrchestrationSessionStore] Loaded ${this.filePath} with problems; the original is saved as ${backupPath}: ${problems.join('; ')}`);
     }
     this.loaded = true;
   }
 }
 
-function validateStore(value: JsonValue | OrchestrationSessionStoreData): OrchestrationSessionStoreData {
-  const decoded = decodeBoundary(value, storeSchema);
-  const normalized: OrchestrationSessionStoreData = {
-    ...decoded,
-    sessions: decoded.sessions.map(session => ({
-      ...session,
-      panelIds: {
-        ...session.panelIds,
-        opencode: session.panelIds.opencode ?? (session.id === LEGACY_ORCHESTRATION_SESSION_ID
-          ? getPaneChatPanelId('opencode') : `__orchestration_panel_${session.id}_opencode`),
-      },
-    })),
-  };
-  if (decoded.sessions.length > MAX_ORCHESTRATION_ITEMS) {
-    throw new Error(`orchestration Session store contains more than ${MAX_ORCHESTRATION_ITEMS} Sessions`);
+/**
+ * Decodes a store, dropping or repairing each bad entry and describing it in `problems`. The
+ * sessions array is taken whatever the version or other envelope fields say.
+ */
+function sanitizeStore(value: JsonValue | OrchestrationSessionStoreData, problems: string[]): OrchestrationSessionStoreData {
+  const envelope = decodeOptionalBoundary(value, boundary.jsonObject) ?? {};
+  if (envelope.version !== ORCHESTRATION_SESSION_STORE_VERSION) {
+    problems.push(`read a store marked version ${JSON.stringify(envelope.version) ?? 'missing'} as version ${ORCHESTRATION_SESSION_STORE_VERSION}`);
   }
+  const entries = decodeOptionalBoundary(envelope.sessions, boundary.array(boundary.json));
+  if (!entries) problems.push('found no sessions array');
+  const selectedSessionId = optionalField(envelope.selectedSessionId, boundary.nonEmptyString, 'selectedSessionId', problems);
+  const order = optionalField(envelope.order, boundary.array(boundary.nonEmptyString), 'order', problems);
+  const sessions: OrchestrationSessionRecord[] = [];
   const ids = new Set<string>();
-  for (const session of normalized.sessions) {
-    // Omitted runtime means the native host; 'windows' is a legacy alias for it.
-    if (session.runtime === 'windows') delete session.runtime;
-    validateSession(session);
-    if (ids.has(session.id)) throw new Error(`orchestration Session store contains duplicate id ${session.id}`);
+  (entries ?? []).forEach((entry, index) => {
+    const session = sanitizeSession(entry, index, problems);
+    if (!session) return;
+    if (ids.has(session.id)) {
+      problems.push(`dropped a duplicate of Session ${session.id}`);
+      return;
+    }
     ids.add(session.id);
-  }
-  if (decoded.selectedSessionId && !ids.has(decoded.selectedSessionId)) {
-    throw new Error(`orchestration Session store selects missing Session ${decoded.selectedSessionId}`);
+    sessions.push(session);
+  });
+  const data: OrchestrationSessionStoreData = { version: ORCHESTRATION_SESSION_STORE_VERSION, sessions };
+  if (selectedSessionId !== undefined) {
+    if (ids.has(selectedSessionId)) data.selectedSessionId = selectedSessionId;
+    else problems.push(`cleared the selection of missing Session ${selectedSessionId}`);
   }
   // The order is a preference, not a record: forget ids of Sessions that no longer exist.
-  if (normalized.order) normalized.order = [...new Set(normalized.order)].filter(id => ids.has(id));
-  return normalized;
+  if (order) data.order = [...new Set(order)].filter(id => ids.has(id));
+  return data;
 }
 
-function validateSession(session: OrchestrationSessionRecord): void {
-  if (session.runtime === 'wsl' && !session.wslDistribution?.trim()) throw new Error('WSL Session requires a distribution');
-  if (session.runtime !== 'wsl' && session.wslDistribution) throw new Error('A native Session cannot specify a WSL distribution');
-  validateText(session.id, `Session ${session.id} id`);
-  validateText(session.name, `Session ${session.id} name`);
-  validateText(session.internalSessionId, `Session ${session.id} internal id`);
-  for (const [agent, panelId] of Object.entries(session.panelIds)) {
-    // The validated Session id bounds this exact derived mapping, including its fixed overhead.
-    if (agent === 'opencode' && panelId === `__orchestration_panel_${session.id}_opencode`) continue;
-    validateText(panelId, `Session ${session.id} panel id`);
-  }
-  if (!Number.isInteger(session.revision) || session.revision < 0) {
-    throw new Error(`Session ${session.id} has an invalid revision`);
-  }
-  for (const value of [session.goal, session.context, session.nextAction, session.launchCommand ?? '', session.profile ?? '']) {
-    validateText(value, `Session ${session.id}`);
-  }
-  validateTextArray(session.decisions, `Session ${session.id} decisions`);
-  validateTextArray(session.blockers, `Session ${session.id} blockers`);
-  validateLinks(session.evidence, `Session ${session.id} evidence`);
-  validateLinks(session.outputs, `Session ${session.id} outputs`);
-  if (session.report) {
-    validateText(session.report.summary, `Session ${session.id} report`);
-    validateLinks(session.report.evidence, `Session ${session.id} report evidence`);
-    if (session.report.evidence.length === 0) throw new Error(`Session ${session.id} report needs evidence`);
-    validateTimestamp(session.report.reportedAt, `Session ${session.id} report timestamp`);
-  }
-  if (session.reportActivityId !== undefined) {
-    if (!session.report) throw new Error(`Session ${session.id} has a report activity marker without a report`);
-    validateText(session.reportActivityId, `Session ${session.id} report activity id`);
-  }
-  if (session.reportAcceptedAt !== undefined) {
-    if (!session.report) throw new Error(`Session ${session.id} has a report acceptance timestamp without a report`);
-    validateTimestamp(session.reportAcceptedAt, `Session ${session.id} report acceptance timestamp`);
-  }
-  if (session.associations.length > MAX_ORCHESTRATION_ITEMS) {
-    throw new Error(`Session ${session.id} has too many Pane associations`);
-  }
-  for (const association of session.associations) {
-    if (association.panelIds.length > MAX_ORCHESTRATION_ITEMS) {
-      throw new Error(`Session ${session.id} has too many associated panels`);
-    }
-    validateTimestamp(association.attachedAt, `Session ${session.id} association timestamp`);
-  }
-  if (session.activity.length > MAX_ORCHESTRATION_ACTIVITY) {
-    throw new Error(`Session ${session.id} has more than ${MAX_ORCHESTRATION_ACTIVITY} activity entries`);
-  }
-  for (const activity of session.activity) {
-    validateText(activity.message, `Session ${session.id} activity`);
-    validateTimestamp(activity.at, `Session ${session.id} activity timestamp`);
-  }
-  validateTimestamp(session.createdAt, `Session ${session.id} created timestamp`);
-  validateTimestamp(session.updatedAt, `Session ${session.id} updated timestamp`);
+/** An optional envelope field; a present value that fails `schema` is dropped. */
+function optionalField<Value>(value: JsonValue | undefined, schema: BoundarySchema<Value>, label: string, problems: string[]): Value | undefined {
+  if (value === undefined) return undefined;
+  const decoded = decodeOptionalBoundary(value, schema);
+  if (decoded === undefined) problems.push(`dropped an invalid ${label}`);
+  return decoded;
 }
 
-function validateLinks(links: OrchestrationLink[], label: string): void {
-  if (links.length > MAX_ORCHESTRATION_ITEMS) throw new Error(`${label} contains too many links`);
-  for (const link of links) {
-    validateText(link.label, `${label} label`);
-    validateText(link.url, `${label} URL`);
-    validateTimestamp(link.addedAt, `${label} timestamp`);
-    if (!/^(?:https?:\/\/|file:\/\/|grain:\/\/)/i.test(link.url)) {
-      throw new Error(`${label} URL must use https, file, or grain scheme`);
-    }
-    if (link.provenance !== undefined) validateText(link.provenance, `${label} provenance`);
+function sanitizeSession(value: JsonValue, index: number, problems: string[]): OrchestrationSessionRecord | undefined {
+  const entry = decodeOptionalBoundary(value, boundary.jsonObject);
+  if (!entry) {
+    problems.push(`dropped Session entry ${index}: expected an object`);
+    return undefined;
+  }
+  const label = `Session ${decodeOptionalBoundary(entry.id, boundary.nonEmptyString) ?? `entry ${index}`}`;
+  const fields: JsonObject = { ...entry };
+  for (const [key, schema] of SESSION_LIST_FIELDS) {
+    fields[key] = keepValidEntries(entry[key], schema, `${label} ${key}`, problems);
+  }
+  if (fields.report !== undefined && !decodes(fields.report, reportSchema, `${label} report`, problems)) delete fields.report;
+  if (fields.report === undefined) {
+    if (fields.reportActivityId !== undefined) problems.push(`${label}: dropped a report activity marker without a report`);
+    if (fields.reportAcceptedAt !== undefined) problems.push(`${label}: dropped a report acceptance timestamp without a report`);
+    delete fields.reportActivityId;
+    delete fields.reportAcceptedAt;
+  }
+  if (fields.runtime === 'wsl' && decodeOptionalBoundary(fields.wslDistribution, boundary.nonEmptyString) === undefined) {
+    problems.push(`dropped ${label}: a WSL Session requires a distribution`);
+    return undefined;
+  }
+  // Omitted runtime means the native host; 'windows' is a legacy alias for it.
+  if (fields.runtime === 'windows') delete fields.runtime;
+  if (fields.runtime !== 'wsl' && fields.wslDistribution !== undefined) {
+    problems.push(`${label}: dropped the WSL distribution of a native Session`);
+    delete fields.wslDistribution;
+  }
+  try {
+    const session = decodeBoundary(fields, sessionSchema);
+    // Sessions saved before OpenCode joined get its derived panel id.
+    const opencode = session.panelIds.opencode ?? (session.id === LEGACY_ORCHESTRATION_SESSION_ID
+      ? getPaneChatPanelId('opencode') : `__orchestration_panel_${session.id}_opencode`);
+    return { ...session, panelIds: { ...session.panelIds, opencode } };
+  } catch (error) {
+    if (!(error instanceof BoundaryDecodeError)) throw error;
+    problems.push(`dropped ${label}: ${error.message}`);
+    return undefined;
   }
 }
 
-function validateTextArray(values: string[], label: string): void {
-  if (values.length > MAX_ORCHESTRATION_ITEMS) throw new Error(`${label} contains too many entries`);
-  values.forEach(value => validateText(value, label));
+/** A missing or non-array list becomes empty; entries that fail `schema` are dropped. */
+function keepValidEntries(value: JsonValue | undefined, schema: BoundarySchema<unknown>, label: string, problems: string[]): JsonValue[] {
+  if (!Array.isArray(value)) {
+    problems.push(`${label}: replaced a missing or non-list value with an empty list`);
+    return [];
+  }
+  return value.filter((item, index) => decodes(item, schema, `${label}[${index}]`, problems));
 }
 
-function validateText(value: string, label: string): void {
-  if (value.length > MAX_ORCHESTRATION_TEXT_LENGTH) throw new Error(`${label} exceeds text limit`);
+function decodes(value: JsonValue, schema: BoundarySchema<unknown>, label: string, problems: string[]): boolean {
+  try {
+    decodeBoundary(value, schema);
+    return true;
+  } catch (error) {
+    if (!(error instanceof BoundaryDecodeError)) throw error;
+    problems.push(`dropped ${label}: ${error.message}`);
+    return false;
+  }
 }
 
-function validateTimestamp(value: string, label: string): void {
-  if (!Number.isFinite(Date.parse(value))) throw new Error(`${label} is invalid`);
+function emptyStore(): OrchestrationSessionStoreData {
+  return { version: ORCHESTRATION_SESSION_STORE_VERSION, sessions: [] };
 }
 
 function cloneStore(value: OrchestrationSessionStoreData): OrchestrationSessionStoreData {
@@ -303,8 +314,4 @@ interface FileSystemError extends Error {
 function isFileMissing(error: Error): error is FileSystemError {
   // SAFETY: Node filesystem errors expose an optional string `code` property.
   return (error as FileSystemError).code === 'ENOENT';
-}
-
-function errorMessage(error: Error): string {
-  return error.message;
 }

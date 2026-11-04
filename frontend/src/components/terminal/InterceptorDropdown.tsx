@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { cn } from '../../utils/cn';
 import { Kbd } from '../ui/Kbd';
 import type { TerminalSuggestion, PasteMode } from '../../services/terminalInterceptor/types';
-import { LINE_COUNT_PRESETS } from '../../services/terminalInterceptor/types';
+import { AT_TERMINAL_LINE_COUNT_PRESETS as LINE_COUNT_PRESETS } from '../../types/settings';
 import { LiveRegion } from '../ui/LiveRegion';
 
 interface InterceptorDropdownProps {
@@ -97,7 +97,7 @@ export const InterceptorDropdown: React.FC<InterceptorDropdownProps> = ({
     >
       {/* Filter header — only when filtering */}
       {filterText && (
-        <div className="px-3 py-1.5 text-xs text-text-tertiary border-b border-border-subtle">
+        <div className="px-3 py-1.5 text-xs text-text-tertiary border-b border-border-primary">
           <span className="font-mono text-text-secondary">@{filterText}</span>
         </div>
       )}
@@ -139,10 +139,10 @@ export const InterceptorDropdown: React.FC<InterceptorDropdownProps> = ({
       </div>
 
       {/* Line count + mode controls */}
-      <div className="px-3 py-2 border-t border-border-subtle flex items-center justify-between">
+      <div className="px-3 py-2 border-t border-border-primary flex items-center justify-between">
         {/* Line count */}
         <div className="flex items-center gap-1">
-          <span className="text-[11px] text-text-quaternary mr-0.5">Lines</span>
+          <span className="text-[11px] text-text-muted mr-0.5">Lines</span>
           {LINE_COUNT_PRESETS.map((preset, i) => (
             <span
               key={preset}
@@ -164,7 +164,7 @@ export const InterceptorDropdown: React.FC<InterceptorDropdownProps> = ({
               'text-[11px] px-2 py-0.5 rounded-md transition-all duration-75',
               pasteMode === 'raw'
                 ? 'bg-surface-tertiary text-text-primary font-medium'
-                : 'text-text-quaternary',
+                : 'text-text-muted',
             )}
           >
             Raw
@@ -174,7 +174,7 @@ export const InterceptorDropdown: React.FC<InterceptorDropdownProps> = ({
               'text-[11px] px-2 py-0.5 rounded-md transition-all duration-75',
               pasteMode === 'embed'
                 ? 'bg-surface-tertiary text-text-primary font-medium'
-                : 'text-text-quaternary',
+                : 'text-text-muted',
             )}
           >
             Embed
@@ -183,7 +183,7 @@ export const InterceptorDropdown: React.FC<InterceptorDropdownProps> = ({
       </div>
 
       {/* Footer hints with kbd */}
-      <div className="px-3 py-1.5 border-t border-border-subtle flex items-center justify-center gap-2.5 text-[11px] text-text-quaternary">
+      <div className="px-3 py-1.5 border-t border-border-primary flex items-center justify-center gap-2.5 text-[11px] text-text-muted">
         <span className="inline-flex items-center gap-1">
           <Kbd size="xs" variant="muted">↑↓</Kbd>
           <span>select</span>

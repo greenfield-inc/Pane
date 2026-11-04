@@ -30,6 +30,11 @@ from .local_control import (
     run_lock_acquire,
     run_lock_list,
     run_lock_release,
+    run_loops_delete,
+    run_loops_list,
+    run_loops_run,
+    run_loops_save,
+    run_loops_set_enabled,
     run_panels_create,
     run_panels_input,
     run_panels_last_message,
@@ -51,7 +56,10 @@ from .local_control import (
     run_panes_rename,
     run_repos_add,
     run_repos_list,
+    run_repos_rename,
     run_report,
+    run_inbox,
+    run_inbox_ack,
     run_sessions_associate,
     run_sessions_create,
     run_sessions_detach,
@@ -65,6 +73,7 @@ from .local_control import (
     run_pr_watch_command,
     run_workspace_state,
 )
+from .notify import run_notify
 from .platforms import detect_platform
 from .releases import resolve_release
 from .telemetry import (
@@ -72,6 +81,7 @@ from .telemetry import (
     apply_parsed_args_to_telemetry_context,
     categorize_failure,
     create_initial_telemetry_context,
+    record_failure_cause,
     set_setup_selection,
     track_wrapper_event,
 )
@@ -87,6 +97,7 @@ AGENTS = set(RUNPANE_CONTRACT["enums"]["agents"])
 COMMAND_GROUP_HELP_TOPICS = {"panes", "panels", "workspace"}
 COMMAND_GROUP_HELP_TOPICS.add("sessions")
 COMMAND_GROUP_HELP_TOPICS.add("lock")
+COMMAND_GROUP_HELP_TOPICS.add("loops")
 LOCK_DURATION_PATTERN = re.compile(r"^(\d+)(ms|s|m|h)?$")
 LOCK_DURATION_UNIT_MS = {"ms": 1, "s": 1_000, "m": 60_000, "h": 3_600_000}
 MAX_LOCK_DURATION_MS = 86_400_000
@@ -110,6 +121,15 @@ INLINE_VALUE_FLAGS = {
 }
 DEFAULTS = RUNPANE_CONTRACT["defaults"]
 REPORT_STATES = ["ready", "blocked", "failed", "done"]
+NOTIFY_VALUE_FLAGS = {
+    "--ui": "notify_ui",
+    "--context": "notify_context",
+    "--choices": "notify_choices",
+    "--detail": "notify_detail",
+    "--detail-label": "notify_detail_label",
+    "--suggestions": "notify_suggestions",
+    "--action": "notify_action",
+}
 HEAD_PATTERN = re.compile(r"[0-9a-fA-F]{7,40}")
 
 
@@ -152,6 +172,7 @@ class ParsedArgs:
     initial_input: Optional[str] = None
     initial_input_file: Optional[str] = None
     as_file_pointer: bool = False
+    attachments: List[str] = field(default_factory=list)
     interrupt: bool = False
     panel_input: Optional[str] = None
     panel_input_file: Optional[str] = None
@@ -217,9 +238,25 @@ class ParsedArgs:
     summary: Optional[str] = None
     summary_file: Optional[str] = None
     question: Optional[str] = None
+    expect_report: Optional[bool] = None
+    wait_for_result: bool = False
+    wait_timeout_ms: Optional[int] = None
+    all: bool = False
+    inbox_ids: List[str] = field(default_factory=list)
     lock_ttl_ms: Optional[int] = None
     lock_wait_ms: Optional[int] = None
     note: Optional[str] = None
+    # `runpane notify`: the question fields as given; JSON ones are parsed and checked when it runs.
+    notify_ui: Optional[str] = None
+    notify_context: Optional[str] = None
+    notify_choices: Optional[str] = None
+    notify_detail: Optional[str] = None
+    notify_detail_label: Optional[str] = None
+    notify_suggestions: Optional[str] = None
+    notify_action: Optional[str] = None
+    loop_id: Optional[str] = None
+    cron: Optional[str] = None
+    paused: bool = False
     help_topic: Optional[str] = None
     remote_setup_args: List[str] = field(default_factory=list)
 
@@ -238,7 +275,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             parsed = parse_args(effective_argv)
         except Exception as error:
             telemetry_context["failure_stage"] = "parse"
-            telemetry_context["failure_category"] = categorize_failure(error)
+            telemetry_context["failure_category"] = "validation"
+            record_failure_cause(telemetry_context, error)
             track_wrapper_event("runpane_wrapper_command_failed", telemetry_context)
             raise
         apply_parsed_args_to_telemetry_context(telemetry_context, parsed)
@@ -281,17 +319,20 @@ def dispatch_parsed_command(parsed: ParsedArgs, telemetry_context: WrapperTeleme
 
 
 def run_tracked_command(telemetry_context: WrapperTelemetryContext, execute: Callable[[], int]) -> int:
+    """Reports real failures only: anything raised, and a non-zero exit from the wrapper's own install or
+    update work. Other commands' exit codes are documented results (panels wait not ready, doctor
+    findings, watch timeouts) and send nothing."""
     try:
         code = execute()
         telemetry_context["exit_code"] = code
-        if code != 0:
+        if code != 0 and telemetry_context.get("resolved_command") in {"install", "update"}:
             telemetry_context.setdefault("failure_stage", infer_failure_stage(telemetry_context))
             telemetry_context.setdefault("failure_category", "process_exit")
             track_wrapper_event("runpane_wrapper_command_failed", telemetry_context)
         return code
     except Exception as error:
         telemetry_context.setdefault("failure_stage", "unknown")
-        telemetry_context.setdefault("failure_category", categorize_failure(error))
+        record_failure_cause(telemetry_context, error)
         track_wrapper_event("runpane_wrapper_command_failed", telemetry_context)
         raise
 
@@ -442,6 +483,9 @@ def parse_args(argv: List[str]) -> ParsedArgs:
     del args[:len(tokens)]
 
     parsed = ParsedArgs(command=command)
+    if parsed.command == "inbox ack":
+        while args and not args[0].startswith("-"):
+            parsed.inbox_ids.append(args.pop(0))
     if parsed.command == "install" and args and not args[0].startswith("-"):
         target = args.pop(0)
         if target not in TARGETS:
@@ -483,7 +527,26 @@ def parse_args(argv: List[str]) -> ParsedArgs:
         apply_watch_defaults(parsed)
     if parsed.command == "report":
         validate_report_args(parsed)
+    validate_wait_for_result_args(parsed)
+    if parsed.command == "inbox ack" and not parsed.all and not parsed.inbox_ids:
+        raise ValueError("runpane inbox ack needs the item ids to clear, or --all --session <id|name>.")
+    if parsed.command == "inbox ack" and parsed.all and parsed.inbox_ids:
+        raise ValueError("runpane inbox ack accepts either item ids or --all, not both.")
     return parsed
+
+
+# The commands that dispatch work and accept `--wait` for its result.
+WAIT_FOR_RESULT_COMMANDS = {"panels submit", "panels create", "panes create"}
+
+
+def validate_wait_for_result_args(parsed: ParsedArgs) -> None:
+    if parsed.wait_timeout_ms is not None and not parsed.wait_for_result:
+        raise ValueError("--timeout only applies with --wait.")
+    if not parsed.wait_for_result:
+        return
+    if parsed.expect_report is False:
+        raise ValueError("--wait waits for the worker's report, so it cannot be combined with --no-expect-report.")
+    parsed.expect_report = True
 
 
 def parse_watch_duration(flag: str, value: str, bare_unit: int = 1) -> int:
@@ -651,6 +714,9 @@ def parse_flags(raw_args: List[str], parsed: ParsedArgs) -> None:
             # Offline commands accept --pane-dir and ignore it, so one --pane-dir works for every command.
             index += 1
             parsed.pane_dir = read_value(args, index, arg, literal_values)
+        elif is_local_command and arg == "--wait" and parsed.command in WAIT_FOR_RESULT_COMMANDS:
+            # `lock acquire --wait <ms>` takes a value; on a dispatch command `--wait` is a switch.
+            parsed.wait_for_result = True
         elif is_local_command and arg in LOCAL_BOOLEAN_FLAGS:
             parse_local_boolean_flag(parsed, arg)
         elif is_local_command and arg in LOCAL_VALUE_FLAGS:
@@ -785,8 +851,22 @@ def parse_local_boolean_flag(parsed: ParsedArgs, flag: str) -> None:
     if flag == "--report":
         parsed.report = True
         return
+    if flag == "--fix":
+        raise ValueError("runpane doctor --fix updates npm installs of runpane, so it runs only in the npm CLI. Run: npx --yes runpane@latest doctor --fix")
     if flag == "--read-only":
         parsed.read_only = True
+        return
+    if flag in ("--expect-report", "--no-expect-report"):
+        expect_report = flag == "--expect-report"
+        if parsed.expect_report is (not expect_report):
+            raise ValueError("Pass either --expect-report or --no-expect-report, not both.")
+        parsed.expect_report = expect_report
+        return
+    if flag == "--all":
+        parsed.all = True
+        return
+    if flag == "--paused":
+        parsed.paused = True
         return
     raise ValueError(f"Unknown option for {parsed.command}: {flag}")
 
@@ -806,6 +886,9 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
         return
     if flag == "--session":
         parsed.session_id = value
+        return
+    if flag == "--attach":
+        parsed.attachments.append(value)
         return
     if flag == "--exclude-pane":
         parsed.watch_exclude_pane_ids.append(value)
@@ -1041,6 +1124,9 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
     if flag == "--ttl":
         parsed.lock_ttl_ms = parse_lock_ttl(value)
         return
+    if flag == "--timeout":
+        parsed.wait_timeout_ms = parse_watch_duration(flag, value)
+        return
     if flag == "--wait":
         wait_ms = parse_non_negative_int_flag(flag, value)
         if wait_ms > MAX_LOCK_DURATION_MS:
@@ -1049,6 +1135,15 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
         return
     if flag == "--note":
         parsed.note = value
+        return
+    if flag == "--loop":
+        parsed.loop_id = value
+        return
+    if flag in NOTIFY_VALUE_FLAGS:
+        setattr(parsed, NOTIFY_VALUE_FLAGS[flag], value)
+        return
+    if flag == "--cron":
+        parsed.cron = value
         return
     raise ValueError(f"Unknown option for {parsed.command}: {flag}")
 
@@ -1280,6 +1375,7 @@ COMMAND_HANDLERS: Dict[str, Callable[[ParsedArgs, WrapperTelemetryContext], int]
     "links create": lambda parsed, context: run_links_create(parsed),
     "repos list": lambda parsed, context: run_repos_list(parsed),
     "repos add": lambda parsed, context: run_repos_add(parsed),
+    "repos rename": lambda parsed, context: run_repos_rename(parsed),
     "sessions list": lambda parsed, context: run_sessions_list(parsed),
     "sessions create": lambda parsed, context: run_sessions_create(parsed),
     "sessions get": lambda parsed, context: run_sessions_get(parsed),
@@ -1293,6 +1389,13 @@ COMMAND_HANDLERS: Dict[str, Callable[[ParsedArgs, WrapperTelemetryContext], int]
     "lock acquire": lambda parsed, context: run_lock_acquire(parsed),
     "lock release": lambda parsed, context: run_lock_release(parsed),
     "lock list": lambda parsed, context: run_lock_list(parsed),
+    "loops list": lambda parsed, context: run_loops_list(parsed),
+    "loops create": lambda parsed, context: run_loops_save(parsed),
+    "loops update": lambda parsed, context: run_loops_save(parsed),
+    "loops run": lambda parsed, context: run_loops_run(parsed),
+    "loops pause": lambda parsed, context: run_loops_set_enabled(parsed, False),
+    "loops resume": lambda parsed, context: run_loops_set_enabled(parsed, True),
+    "loops delete": lambda parsed, context: run_loops_delete(parsed),
     "panes list": lambda parsed, context: run_panes_list(parsed),
     "panes cost": lambda parsed, context: run_panes_cost(parsed),
     "workspace state": lambda parsed, context: run_workspace_state(parsed),
@@ -1325,6 +1428,9 @@ COMMAND_HANDLERS: Dict[str, Callable[[ParsedArgs, WrapperTelemetryContext], int]
     "panels resume": lambda parsed, context: run_panels_resume(parsed),
     "panels last-message": lambda parsed, context: run_panels_last_message(parsed),
     "report": lambda parsed, context: run_report(parsed),
+    "notify": lambda parsed, context: run_notify(parsed),
+    "inbox": lambda parsed, context: run_inbox(parsed),
+    "inbox ack": lambda parsed, context: run_inbox_ack(parsed),
     "agents doctor": lambda parsed, context: run_agents_doctor(parsed),
     "panes adopt": lambda parsed, context: run_panes_adopt(parsed),
     "help": lambda parsed, context: print_help(parsed),

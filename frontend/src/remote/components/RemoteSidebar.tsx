@@ -280,7 +280,7 @@ export function RemoteSidebar({
             )}
           >
             {sessionsError && (
-              <div role="alert" className="mx-2 rounded-md border border-status-error/40 bg-status-error/10 px-3 py-2 text-xs text-status-error">
+              <div role="alert" className="mx-2 rounded-md border border-status-error/40 bg-status-error/10 px-3 py-2 text-xs text-text-primary">
                 <p>{sessionsError}</p>
                 <button type="button" onClick={actions.reloadSessions} className="mt-1 underline">Retry</button>
               </div>

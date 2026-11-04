@@ -40,6 +40,10 @@ export function useRemoteTerminal({
   const snapshotGenerationRef = useRef(0);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const [statusText, setStatusText] = useState('Starting terminal...');
+  const connectedRef = useRef(connectionStatus === 'connected');
+  useEffect(() => {
+    connectedRef.current = connectionStatus === 'connected';
+  }, [connectionStatus]);
 
   const focusTerminal = () => {
     terminalRef.current?.focus();
@@ -128,6 +132,8 @@ export function useRemoteTerminal({
     visualViewport?.addEventListener('scroll', handleViewportChange);
 
     const inputDisposable = terminal.onData(data => {
+      // Keys typed while the terminal is dimmed are dropped, as the input bar is disabled then.
+      if (!connectedRef.current) return;
       void sendInput(data).catch(() => {});
     });
 

@@ -2,9 +2,9 @@
 
 Pane can follow the operating system or stay on a fixed palette. **System** remembers one light palette and one dark palette and selects between them as the OS appearance changes. **Fixed** uses a third, independent palette. Switching modes never replaces any remembered selection.
 
-New installations default to System with Light (rounded) for the light slot and Dark (sharp) for the dark slot; the remembered Fixed palette is Light (rounded). Existing configurations that only contain `theme` migrate to Fixed so their current palette remains exact. The legacy palette also seeds the matching System slot, while the opposite slot keeps its default.
+New installations default to System with Folio for the light slot and Dusk (OLED) for the dark slot; the remembered Fixed palette is Folio. A saved appearance keeps whatever it holds, including the earlier defaults (Light (rounded) and Dark (sharp)); only missing or invalid fields take the new defaults. Existing configurations that only contain `theme` migrate to Fixed so their current palette remains exact. The legacy palette also seeds the matching System slot, while the opposite slot keeps its default.
 
-Palette slots are validated at load, renderer, IPC, and persistence boundaries. Only palettes whose canonical base class is `light` can occupy the light slot, and only palettes whose base is `dark` can occupy the dark slot. Invalid stored fields are repaired independently and reported by the main process.
+Either System slot accepts any palette: each picker lists every theme, so a dark palette can follow a light OS and the reverse. Slots are named for the OS appearance they follow, not for the palette's own base. Palettes are validated at load, renderer, IPC, and persistence boundaries; invalid stored fields are repaired independently and reported by the main process.
 
 ## First paint
 

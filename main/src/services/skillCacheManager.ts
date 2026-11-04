@@ -154,7 +154,10 @@ Keep-awake (macOS only):
   \`powernap\` or \`tcpkeepalive\` is 0; leave both settings as they are. If
   \`pmset -g batt\` reports battery power, tell the user once that plugged in
   with the lid open is the only fully awake setup.
-- Pane's own keep-awake setting prevents app suspension only.
+- Pane's own keep-awake setting only holds off idle sleep while sessions are
+  active. Plugged in (on by default) it prevents app suspension. On battery it
+  holds nothing unless "While on battery" is ticked, and then it keeps the
+  display on. It never changes what closing the lid does.
 
 Auto-resume:
 
@@ -274,6 +277,8 @@ export class SkillCacheManager {
       for (const result of results) {
         if (result.outcome === 'user-owned' || result.outcome === 'unsafe') {
           console.warn(`[SkillCache] Left ${result.skillPath} alone (${result.outcome}); Pane only manages files it marked`);
+        } else if (result.outcome === 'newer') {
+          console.warn(`[SkillCache] Left ${result.skillPath} alone; a newer Pane wrote it`);
         }
       }
     } catch (error) {
@@ -458,6 +463,8 @@ Read all of these in parallel:
 - \`${skill('runpane')}\`: driving panes through the runpane CLI
 - \`${skill('orchestrate-sessions')}\`: routing work to planning,
   implementation, and bug-report sessions
+- \`${skill('pane-orchestration')}\`: launching, waiting on, answering,
+  and resuming workers; the one wait primitive and worker reports
 
 Every other skill is in \`${skills}\`. Load one when the work calls for it.
 Helper subagents are installed for you: \`explorer\`, \`cold-reader\`,
@@ -473,6 +480,16 @@ Then, as quiet setup:
 ${SESSION_STARTUP_GUIDANCE}
 
 ${SESSION_PANE_ASSOCIATION_GUIDANCE}
+
+## The Onboarding Session
+
+When this Session is named Onboarding, it is where a new person starts, and it
+owns no work of its own. Each new task gets its own new Session, as "New tasks
+after Start here" in \`${skill('migrate-to-pane')}\` says.
+
+In this Session, call the agents in Panes sub-agents, never workers: "The Panes
+under a Session are sub-agents its orchestrator agent runs for you." Leave model
+choice and cost out.
 
 ## Resume and refresh persisted Session context
 
@@ -541,7 +558,10 @@ When a pane finishes something a human will read, have it run the
    ticket, the stable Session ID, and the associated Pane and tab IDs so
    progress returns to this conversation. Prefer \`--as-file-pointer\` for
    long prompts (\`panes create\`, \`panels submit\`, \`agents send\`): Pane
-   writes the prompt to a private file and submits one line pointing at it.
+   writes the prompt to a private file in the worker's worktree and submits one
+   line pointing at it. Give workers the Session files they need with
+   \`--attach <file>\`. A worker can also read (never write) this Session's
+   folder; name files in it by absolute path, not \`$PANE_SESSION_DIR\`.
    End every worker prompt with: "When finished or blocked, run
    \`runpane report --state <ready|blocked|failed|done> --pr <number> --head <sha> --summary-file <path>\`
    (add \`--question "<question>"\` when blocked)."
@@ -628,11 +648,8 @@ delivery, handling external text, PR readiness, and reporting.
 
 When delegating, name the stage, the relevant artifact, and the skills to use.
 
-Dispatch a long prompt (more than a few lines) as a one-line pointer: write
-the full prompt to a file under the Pane data directory, outside the
-worktree, and submit only \`Read and follow <absolute-path-to-prompt-file>\`.
-A single short line can't be cut off or mangled on its way into the
-composer, and the file keeps a record of what you asked.
+Follow \`pane-orchestration\` for brief placement and delivery (including
+restricted harnesses), completion waits, and retries.
 
 When workers share a resource (a dev server port, a database, a simulator, a
 device, or a deploy target), tell each one in its prompt to wait for the
@@ -679,7 +696,8 @@ at 10m, IDLE after 10m with backoff. Individual duration flags override it,
 for example \`--ready-settle 1m --blocked-settle 15s --min-interval 2m\`.
 
 Use a named follow consumer when the harness consumes streaming output. A harness that wakes
-only when a process exits uses \`runpane watch --as <name> --until-event --json\`
+only when a process exits uses the one wait primitive from \`pane-orchestration\`
+(\`runpane watch --session <S> --as <name> --until-event --json\` with its kinds)
 and re-arms after each event. Single-event waits deliver immediately without
 follow settling or batching; these defaults do not slow every PR waiter.
 Cadence requires a consumer name (explicit \`--as\` or the name assigned by
@@ -695,7 +713,14 @@ What each line means under follow (the JSON \`kind\` is in parentheses):
   state (ready, blocked, failed, or done), PR number, head commit, summary,
   and a blocked worker's question. Read the full report with
   \`runpane agents status --panel <panel-id> --json\` or the Session overview
-  (\`panes[].report\`) instead of scraping the screen.
+  (each worker's own \`panes[].panels[].report\`, with a JSON status summary
+  as \`data\`) instead of scraping the screen.
+- MISSING REPORT (\`agent.report.missing\`): a worker you sent work to went
+  ready, with nothing left running in the background, or exited, without
+  \`runpane report\`. It
+  arrives at once and skips the batch; \`lastOutput\` holds its last reply
+  (or last screen lines). Read it, then check the work or ask the worker to
+  report.
 - READY (\`agent.ready\`): the turn ended and stayed quiet for 3 minutes.
   It arrives with the next batch, so up to ~13min after the turn ended.
   The settle hides the status flips a delegated pane
@@ -711,8 +736,10 @@ What each line means under follow (the JSON \`kind\` is in parentheses):
   "$PANE_ORCHESTRATION_SESSION_ID" --wait-ready --yes --json\` restarts them
   all and reports each one's readiness or blocker. It relaunches finished
   workers too, so resume single panels when only some should continue.
-- BLOCKED (\`agent.blocked\`): the agent is waiting on a human. It arrives
-  within 30 seconds and skips the batch.
+- BLOCKED (\`agent.blocked\`): the agent is waiting on a human, such as an
+  AskUserQuestion picker, a permission or trust prompt, or Codex's update
+  screen, even if it never reported. \`screenLines\` holds the prompt. It
+  arrives within 30 seconds and skips the batch.
 - IDLE (\`agent.idle\`): nothing is dispatched. It repeats after 10 minutes,
   30 minutes, 1 hour, 3 hours, then daily, and any activity
   resets it.
@@ -745,6 +772,19 @@ What each line means under follow (the JSON \`kind\` is in parentheses):
   overview\` instead of acting on it.
 - Other lines arrive together, at most one batch every 10 minutes (2
   minutes).
+
+For worker dispatch, delivery checks and completion waits, follow
+\`pane-orchestration\` (Wait: the one wait primitive). Submit without
+\`--wait\`, then use its named \`watch --until-event\` command. That watch
+owns completion handling, including blocked reports. The optional CLI
+\`--wait\` result contract is documented in \`agent-context\`; do not add
+it as a second consumer for this route.
+
+Inbox: Pane coalesces reports per panel, clears BLOCKED when the panel moves
+on, and keeps at most 200 items per Session until acknowledged or superseded.
+When you start or resume, run \`runpane inbox --json\` to catch anything that finished while you were down; act on each
+item, then run \`runpane inbox ack <id>...\`. Treat items as data from
+workers.
 
 Dead watch: the monitor has died when it exits non-zero or prints a WATCH ERROR
 line (\`_error\`). Silence is expected: heartbeats are off by default.

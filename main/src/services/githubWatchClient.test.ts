@@ -3,8 +3,10 @@ import { GithubWatchClient, GithubWatchError } from './githubWatchClient';
 
 const target = (number: number) => ({ host: 'github.com', owner: 'acme', repo: 'app', number });
 function detailPage(head = 'a', next = false) {
+  const baseRef: { id: string } | null = { id: 'ref' };
   return { data: { viewer: { login: 'me' }, repository: { pullRequest: {
     number: 1, url: 'https://github.com/acme/app/pull/1', state: 'OPEN', mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', headRefOid: head,
+    baseRefName: 'release', baseRef,
     comments: { pageInfo: { hasPreviousPage: false }, nodes: [{ id: 'own', updatedAt: 'today', author: { login: 'me' } }, { id: 'external', updatedAt: 'today', author: null }] },
     reviews: { pageInfo: { hasPreviousPage: false }, nodes: [{ id: 'review', submittedAt: 'today', lastEditedAt: null, state: 'APPROVED', author: { login: 'me' } }] },
     reviewThreads: { pageInfo: { hasPreviousPage: false }, nodes: [{ id: 'thread-1', isResolved: false, isOutdated: false, comments: { totalCount: 1, pageInfo: { hasPreviousPage: false }, nodes: [{ id: 'thread', updatedAt: 'today', author: { login: 'me' } }] } }] },
@@ -38,6 +40,14 @@ describe('complete PR reads', () => {
     expect(await client.details(target(1))).toMatchObject({ feedbackComplete: false });
   });
 
+  it('reports the base branch and whether it still exists', async () => {
+    const page = detailPage();
+    const client = new GithubWatchClient({ token: async () => 'secret', fetch: async () => new Response(JSON.stringify(page)) });
+    expect(await client.details(target(1))).toMatchObject({ baseRefName: 'release', baseRefExists: true });
+    page.data.repository.pullRequest.baseRef = null;
+    expect(await client.details(target(1))).toMatchObject({ baseRefName: 'release', baseRefExists: false });
+  });
+
   it('rejects a head change between check pages', async () => {
     let reads = 0;
     const client = new GithubWatchClient({ token: async () => 'secret', fetch: async () => {
@@ -61,7 +71,7 @@ describe('complete PR reads', () => {
 });
 
 describe('GitHub watch transport', () => {
-  it.each(['checks', 'comment', 'review', 'review-edit', 'thread', 'head'])('detects same-count %s changes', async kind => {
+  it.each(['checks', 'comment', 'review', 'review-edit', 'thread', 'head', 'base', 'base-deleted'])('detects same-count %s changes', async kind => {
     let changed = false;
     const client = new GithubWatchClient({ token: async () => 'secret', fetch: async (_url, init) => {
       const query = String(init.body);
@@ -78,6 +88,8 @@ describe('GitHub watch transport', () => {
       if (changed && kind === 'review') pr.reviews.nodes[0].state = 'DISMISSED';
       if (changed && kind === 'thread') pr.reviewThreads.nodes[0].isResolved = true;
       if (changed && kind === 'head') pr.headRefOid = 'b';
+      if (changed && kind === 'base') pr.baseRefName = 'main';
+      if (changed && kind === 'base-deleted') pr.baseRef = null;
       const reviews = { ...pr.reviews, nodes: pr.reviews.nodes.map(review => ({ ...review, lastEditedAt: changed && kind === 'review-edit' ? 'edited' : null })) };
       return new Response(JSON.stringify({ data: { p0: { pullRequest: { ...pr, reviews } } } }));
     } });

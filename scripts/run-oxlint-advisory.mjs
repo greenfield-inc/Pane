@@ -6,23 +6,11 @@ import { fileURLToPath } from 'node:url';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const oxlintBin = path.join(repoRoot, 'node_modules', 'oxlint', 'bin', 'oxlint');
-const targets = [
-  'frontend',
-  'main',
-  'packages/runpane',
-  'shared',
-  'tests',
-  'scripts',
-  'tools',
-  'playwright.config.ts',
-  'playwright.shared.ts',
-  'playwright.ci.config.ts',
-  'playwright.ci.minimal.config.ts'
-];
+
 
 const result = spawnSync(
   process.execPath,
-  [oxlintBin, '--config', '.oxlintrc.advisory.json', '--format', 'json', ...targets],
+  [oxlintBin, '--config', '.oxlintrc.advisory.json', '--format', 'json', '.'],
   { cwd: repoRoot, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }
 );
 

@@ -48,6 +48,8 @@ export interface ParsedArgs {
   initialInput?: string;
   initialInputFile?: string;
   asFilePointer?: boolean;
+  /** `--attach`, repeatable: files copied beside the prompt file. */
+  attachments?: string[];
   interrupt?: boolean;
   panelInput?: string;
   panelInputFile?: string;
@@ -102,6 +104,8 @@ export interface ParsedArgs {
   /** Watch only: drop the _ok, _heartbeat, and _reconnected control lines. */
   quiet?: boolean;
   report?: boolean;
+  /** Doctor only: update stale npm installs of runpane to the Pane-managed version. */
+  fix?: boolean;
   bodyFile?: string;
   message?: string;
   query?: string;
@@ -115,14 +119,41 @@ export interface ParsedArgs {
   summary?: string;
   summaryFile?: string;
   question?: string;
+  /** panels create|submit, panes create `--wait`: block until that panel reports, misses its report, is blocked, or exits. */
+  waitForResult?: boolean;
+  /** `--timeout` with `--wait`: give up after this long (exit 124). */
+  waitTimeoutMs?: number;
+  /**
+   * panels create|submit, panes create: whether the sender waits for a `runpane report`.
+   * Unset leaves it to the daemon, which expects one for work an agent sent.
+   */
+  expectReport?: boolean;
+  /** inbox ack: clear every item of the Session. */
+  all?: boolean;
+  /** inbox ack: the item ids to clear. */
+  inboxIds?: string[];
   lockTtlMs?: number;
   lockWaitMs?: number;
   note?: string;
+  /** `runpane notify`: the question fields as given; JSON ones are parsed and checked when it runs. */
+  notifyUi?: string;
+  notifyContext?: string;
+  notifyChoices?: string;
+  notifyDetail?: string;
+  notifyDetailLabel?: string;
+  notifySuggestions?: string;
+  notifyAction?: string;
+  /** loops: the loop id, its cron, and create's --paused. */
+  loopId?: string;
+  cron?: string;
+  paused?: boolean;
   /** `runpane workspace <machine> ...` */
   workspaceMachine?: string;
   workspacePath?: string;
   execCommand?: string[];
   cwd?: string;
+  /** `workspace write --content`; without it, write reads stdin. */
+  writeContent?: string;
   /** `runpane handoff <destination...>` */
   handoffDestination?: string;
   handoffTemplate?: boolean;
@@ -131,6 +162,8 @@ export interface ParsedArgs {
   handoffModel?: string;
   handoffEffort?: string;
   handoffPush?: boolean;
+  /** Start a fresh agent with the note instead of carrying the sender's own session. */
+  handoffNoteOnly?: boolean;
   remoteSetupArgs: string[];
 }
 
@@ -152,7 +185,7 @@ const targetSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.installTarge
 const formatSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.artifactFormats);
 const channelSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.channels);
 const agentSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.agents);
-const COMMAND_GROUP_HELP_TOPICS = new Set(['panes', 'panels', 'sessions', 'workspace', 'lock']);
+const COMMAND_GROUP_HELP_TOPICS = new Set(['panes', 'panels', 'sessions', 'workspace', 'lock', 'loops']);
 const LOCK_DURATION_PATTERN = /^(\d+)(ms|s|m|h)?$/u;
 const LOCK_DURATION_UNIT_MS = { ms: 1, s: 1_000, m: 60_000, h: 3_600_000 } as const;
 const MAX_LOCK_DURATION_MS = 86_400_000;
@@ -301,7 +334,28 @@ export function parseRunpaneArgs(argv: string[]): ParsedArgs {
   }
   if (parsed.command === 'watch') applyWatchDefaults(parsed);
   if (parsed.command === 'report') validateReportArgs(parsed);
+  validateWaitForResultArgs(parsed);
+  if (parsed.command === 'inbox ack' && !parsed.all && !parsed.inboxIds?.length) {
+    throw new Error('runpane inbox ack needs the item ids to clear, or --all --session <id|name>.');
+  }
+  if (parsed.command === 'inbox ack' && parsed.all && parsed.inboxIds?.length) {
+    throw new Error('runpane inbox ack accepts either item ids or --all, not both.');
+  }
   return parsed;
+}
+
+/** The commands that dispatch work and accept `--wait` for its result. */
+const WAIT_FOR_RESULT_COMMANDS: ReadonlySet<string> = new Set(['panels submit', 'panels create', 'panes create']);
+
+function validateWaitForResultArgs(parsed: ParsedArgs): void {
+  if (parsed.waitTimeoutMs !== undefined && !parsed.waitForResult) {
+    throw new Error('--timeout only applies with --wait.');
+  }
+  if (!parsed.waitForResult) return;
+  if (parsed.expectReport === false) {
+    throw new Error('--wait waits for the worker\'s report, so it cannot be combined with --no-expect-report.');
+  }
+  parsed.expectReport = true;
 }
 
 /** Bare values preserve the old millisecond convention (heartbeat: seconds). */
@@ -364,8 +418,13 @@ function takeWorkspaceMachine(args: string[]): string | undefined {
   return args.splice(1, 1)[0];
 }
 
-/** `--` takes the rest of the line for exec; read and write take one path. */
-function takeWorkspaceVerbArgs(command: string, args: string[]): Pick<ParsedArgs, 'workspacePath' | 'execCommand' | 'handoffDestination'> {
+/** `--` (or else the first word after exec's options) takes the rest of the line for exec; read and write take one path; inbox ack takes item ids. */
+function takeWorkspaceVerbArgs(command: string, args: string[]): Pick<ParsedArgs, 'workspacePath' | 'execCommand' | 'handoffDestination' | 'inboxIds'> {
+  if (command === 'inbox ack') {
+    const ids: string[] = [];
+    while (args[0] !== undefined && !args[0].startsWith('-')) ids.push(args.shift() ?? '');
+    return ids.length ? { inboxIds: ids } : {};
+  }
   if (command === 'handoff') {
     const words: string[] = [];
     while (args[0] !== undefined && !args[0].startsWith('-')) words.push(args.shift() ?? '');
@@ -373,12 +432,27 @@ function takeWorkspaceVerbArgs(command: string, args: string[]): Pick<ParsedArgs
   }
   if (command === 'workspace exec') {
     const separator = args.indexOf('--');
-    return separator === -1 ? {} : { execCommand: args.splice(separator).slice(1) };
+    if (separator !== -1) return { execCommand: args.splice(separator).slice(1) };
+    // PowerShell drops `--` before a .ps1 shim sees it, so the first word that is not
+    // one of exec's own options (or its value) starts the command.
+    let start = 0;
+    while (args[start]?.startsWith('-')) start += LOCAL_VALUE_FLAGS.has(args[start]) ? 2 : 1;
+    return start < args.length ? { execCommand: args.splice(start) } : {};
   }
   if ((command === 'workspace read' || command === 'workspace write') && args[0] && !args[0].startsWith('-')) {
     return { workspacePath: args.shift() };
   }
   return {};
+}
+
+/** Whether runpane itself was asked for JSON: a `--json` inside an exec command belongs to that command. */
+export function wantsJsonOutput(argv: string[]): boolean {
+  try {
+    return parseRunpaneArgs(argv).json;
+  } catch {
+    const end = argv.indexOf('--');
+    return (end === -1 ? argv : argv.slice(0, end)).includes('--json');
+  }
 }
 
 /** `runpane workspace <machine> <command...>` for any command other than read, write, and exec. */
@@ -466,6 +540,11 @@ function parseFlags(rawArgs: string[], parsed: ParsedArgs): void {
     // Offline commands accept --pane-dir and ignore it, so one --pane-dir works for every command.
     if ((isAgentContextCommand || parsed.command === 'version') && arg === '--pane-dir') {
       parsed.paneDir = readValue(args, ++index, arg, literalValues);
+      continue;
+    }
+    // `lock acquire --wait <ms>` takes a value; on a dispatch command `--wait` is a switch.
+    if (isLocalCommand && arg === '--wait' && WAIT_FOR_RESULT_COMMANDS.has(parsed.command)) {
+      parsed.waitForResult = true;
       continue;
     }
     if (isLocalCommand && LOCAL_BOOLEAN_FLAGS.has(arg)) {
@@ -656,6 +735,13 @@ function parseLocalBooleanFlag(flag: string, parsed: ParsedArgs): void {
     parsed.report = true;
     return;
   }
+  if (flag === '--fix') {
+    if (parsed.command !== 'doctor') {
+      throw new Error('--fix is only valid with runpane doctor.');
+    }
+    parsed.fix = true;
+    return;
+  }
   if (flag === '--read-only') {
     parsed.readOnly = true;
     return;
@@ -664,8 +750,26 @@ function parseLocalBooleanFlag(flag: string, parsed: ParsedArgs): void {
     parsed.handoffTemplate = true;
     return;
   }
+  if (flag === '--expect-report' || flag === '--no-expect-report') {
+    const expectReport = flag === '--expect-report';
+    if (parsed.expectReport === !expectReport) throw new Error('Pass either --expect-report or --no-expect-report, not both.');
+    parsed.expectReport = expectReport;
+    return;
+  }
+  if (flag === '--all') {
+    parsed.all = true;
+    return;
+  }
   if (flag === '--push') {
     parsed.handoffPush = true;
+    return;
+  }
+  if (flag === '--note-only') {
+    parsed.handoffNoteOnly = true;
+    return;
+  }
+  if (flag === '--paused') {
+    parsed.paused = true;
     return;
   }
 
@@ -697,6 +801,10 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
     (parsed.watchExcludePaneIds ??= []).push(value);
     return;
   }
+  if (flag === '--attach') {
+    (parsed.attachments ??= []).push(value);
+    return;
+  }
   if (flag === '--panel') {
     parsed.panelId = value;
     return;
@@ -707,6 +815,10 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
   }
   if (flag === '--cwd') {
     parsed.cwd = value;
+    return;
+  }
+  if (flag === '--content') {
+    parsed.writeContent = value;
     return;
   }
   if (flag === '--note-file') {
@@ -985,6 +1097,10 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
     parsed.lockTtlMs = parseLockTtl(value);
     return;
   }
+  if (flag === '--timeout') {
+    parsed.waitTimeoutMs = parseWatchDuration(flag, value);
+    return;
+  }
   if (flag === '--wait') {
     const waitMs = parseNonNegativeIntegerFlag(flag, value);
     if (waitMs > MAX_LOCK_DURATION_MS) throw new Error('--wait must be at most 86400000 (24h).');
@@ -993,6 +1109,42 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
   }
   if (flag === '--note') {
     parsed.note = value;
+    return;
+  }
+  if (flag === '--loop') {
+    parsed.loopId = value;
+    return;
+  }
+  if (flag === '--ui') {
+    parsed.notifyUi = value;
+    return;
+  }
+  if (flag === '--context') {
+    parsed.notifyContext = value;
+    return;
+  }
+  if (flag === '--choices') {
+    parsed.notifyChoices = value;
+    return;
+  }
+  if (flag === '--detail') {
+    parsed.notifyDetail = value;
+    return;
+  }
+  if (flag === '--detail-label') {
+    parsed.notifyDetailLabel = value;
+    return;
+  }
+  if (flag === '--suggestions') {
+    parsed.notifySuggestions = value;
+    return;
+  }
+  if (flag === '--action') {
+    parsed.notifyAction = value;
+    return;
+  }
+  if (flag === '--cron') {
+    parsed.cron = value;
     return;
   }
 
@@ -1082,7 +1234,7 @@ function splitInlineValues(rawArgs: string[]): SplitArgs {
 function readValue(args: string[], index: number, flag: string, literalValues: Set<number>): string {
   const value = args[index];
   if (literalValues.has(index)) return value;
-  const freeText = ['--text', '--prompt', '--initial-input', '--title', '--name', '--name-contains'].includes(flag);
+  const freeText = ['--text', '--content', '--prompt', '--initial-input', '--title', '--name', '--name-contains'].includes(flag);
   if (!value || (!freeText && value.startsWith('-') && value !== '-')) {
     throw new Error(`${flag} requires a value.`);
   }

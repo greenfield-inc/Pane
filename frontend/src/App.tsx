@@ -1,4 +1,9 @@
 import { RemoteConnectionBanner } from './components/RemoteConnectionBanner';
+import { ConnectionChecklist } from './components/ConnectionChecklist';
+import { useRemoteRuntimeState } from './hooks/useRemoteRuntimeState';
+import { useConnectionPresence } from './hooks/useConnectionPresence';
+import { RemoteWorkspace } from './components/RemoteWorkspace';
+import { TailnetHttpsBanner } from './components/TailnetHttpsBanner';
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useIPCEvents } from './hooks/useIPCEvents';
 import { useNotifications } from './hooks/useNotifications';
@@ -11,6 +16,7 @@ import { useFocusedSurfaceScrolling } from './hooks/useFocusedSurfaceScrolling';
 import { ShortcutHintsOverlay } from './components/ShortcutHintsOverlay';
 import { Sidebar } from './components/Sidebar';
 import { SessionView } from './components/SessionView';
+import { PaneChatIntroOffer } from './components/PaneChatIntroOffer';
 import Welcome from './components/Welcome';
 import Help from './components/Help';
 import OnboardingDialog, {
@@ -27,14 +33,19 @@ import { ErrorDialog } from './components/ErrorDialog';
 import { PermissionDialog } from './components/PermissionDialog';
 import { DISCORD_INVITE_URL } from './components/DiscordIcon';
 import { ResumeSessionsDialog } from './components/ResumeSessionsDialog';
-import { useErrorStore } from './stores/errorStore';
+import { showActionError, useErrorStore } from './stores/errorStore';
 import { useSessionStore } from './stores/sessionStore';
 import { subscribePanelStatus } from './services/panelStatusSync';
 import { subscribeAttentionInbox, useAttentionInboxStore } from './stores/attentionInboxStore';
+import { runNotify, subscribeNotify, useNotifyStore } from './stores/notifyStore';
+import { acceleratorFromKeys } from './components/notify/notifyFormat';
+import { NotifyInPaneStrip } from './components/notify/NotifyInPane';
 import { useConfigStore } from './stores/configStore';
 import { usePanelStore } from './stores/panelStore';
 import { API } from './utils/api';
-import { restoreSessionSelection, startHostNavigationMemoryWrites } from './utils/hostNavigationMemory';
+import { restoreHostNavigation, restoreSessionSelection, startHostNavigationMemoryWrites } from './utils/hostNavigationMemory';
+import { RestartToUpdateToast } from './components/RestartToUpdateToast';
+import { useRestartToUpdateStore, useRestartToUpdateSync } from './stores/restartToUpdateStore';
 import { createVisibilityAwareInterval } from './utils/performanceUtils';
 import { useWindowActive } from './hooks/useWindowActive';
 import { ContextMenuProvider } from './contexts/ContextMenuContext';
@@ -44,6 +55,8 @@ import { Settings } from './components/Settings';
 import { CreateSessionDialog } from './components/CreateSessionDialog';
 import { AddProjectDialog } from './components/AddProjectDialog';
 import { WindowTitleBar } from './components/WindowTitleBar';
+import { MachineOfflineView } from './components/machines/AllMachinesSidebar';
+import { useAllMachinesStore } from './stores/allMachinesStore';
 import { useNavigationStore } from './stores/navigationStore';
 import {
   aliasInstallIdentity,
@@ -59,6 +72,8 @@ import {
 import type { VersionInfo, VersionUpdateInfo } from './types/session';
 import type { AnalyticsIdentity, TerminalShortcut } from './types/config';
 import type { ResumableSession } from '../../shared/types/panels';
+import { useLoopsRefresh } from './stores/loopsStore';
+import { LoopDrawer } from './components/loops/LoopDrawer';
 import type { Project } from './types/project';
 import type { SettingsCategoryId, SettingsOpenRequest, SettingsTarget } from './types/settings';
 import type {
@@ -71,11 +86,6 @@ import { boundary, decodeOptionalBoundary } from '../../shared/validation/bounda
 // Stable empty array to avoid creating new references in render
 const EMPTY_TERMINAL_SHORTCUTS: TerminalShortcut[] = [];
 
-const preferenceResponseSchema = boundary.object({
-  success: boundary.boolean,
-  data: boundary.optional(boundary.string),
-  error: boundary.optional(boundary.string),
-});
 function App() {
   const [isWelcomeOpen, setIsWelcomeOpen] = useState(false);
   const [hasCheckedAnalyticsDefault, setHasCheckedAnalyticsDefault] = useState(false);
@@ -98,6 +108,8 @@ function App() {
   const supportPromptCheckStarted = useRef(false);
 
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  // Each opening mounts a fresh launcher: empty query, All, nothing selected.
+  const [searchOpenCount, setSearchOpenCount] = useState(0);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [settingsCategory, setSettingsCategory] = useState<SettingsCategoryId>('general');
   const [settingsOpenRequest, setSettingsOpenRequest] = useState<SettingsOpenRequest>();
@@ -111,6 +123,7 @@ function App() {
   const [showAddProjectDialog, setShowAddProjectDialog] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const activeProjectId = useNavigationStore(s => s.activeProjectId);
+  const navigateToProject = useNavigationStore(s => s.navigateToProject);
   const sidebarCollapsed = useNavigationStore(s => s.sidebarCollapsed);
   const [titleBarControlsSlot, setTitleBarControlsSlot] = useState<HTMLDivElement | null>(null);
   const setSidebarCollapsed = useNavigationStore(s => s.setSidebarCollapsed);
@@ -130,6 +143,9 @@ function App() {
   const terminalShortcuts = appConfig?.terminalShortcuts ?? EMPTY_TERMINAL_SHORTCUTS;
   const { isVisible: shortcutHintsVisible } = useShortcutHintsOverlay();
   useFocusedSurfaceScrolling(activeSessionId);
+  const { connectionState } = useRemoteRuntimeState();
+  const shownConnectionCheck = connectionState.check?.outcome !== 'passed' ? connectionState.check ?? null : null;
+  const { presence: connectionPresence } = useConnectionPresence(connectionState);
 
   const openSettings = useCallback((target?: SettingsTarget) => {
     if (target) {
@@ -153,6 +169,7 @@ function App() {
 
 
   useIPCEvents();
+  useLoopsRefresh();
   const { showNotification } = useNotifications();
 
   // Subscribe to live statuses and reconcile the daemon baseline on attach/reconnect.
@@ -161,6 +178,31 @@ function App() {
     void useAttentionInboxStore.getState().loadEnabled();
     return subscribeAttentionInbox();
   }, []);
+
+  // Pane Notify: keep the queue's snapshot, and open the inbox or its settings when main asks.
+  useEffect(() => subscribeNotify(), []);
+  // Native Wayland may never deliver the answer-all shortcut to Pane, even while it is in front
+  // (GNOME 46 has no global-shortcut portal), so the window answers it itself there.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const snapshot = useNotifyStore.getState().snapshot;
+      if (!snapshot || snapshot.showOutsideSupported || !snapshot.settings.enabled) return;
+      if (acceleratorFromKeys(event, false) !== snapshot.settings.shortcut) return;
+      event.preventDefault();
+      event.stopPropagation();
+      runNotify({ type: 'open-round' });
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, []);
+  useEffect(() => window.electronAPI?.notify?.onNavigate((target) => {
+    if (target === 'settings') {
+      openSettings({ category: 'notify' });
+      return;
+    }
+    closeSettings();
+    useNavigationStore.getState().navigateToNotify();
+  }), [closeSettings, openSettings]);
 
   /**
    * Forget a pane's status when the pane itself goes.
@@ -207,10 +249,13 @@ function App() {
 
   useHotkey({
     id: 'open-command-palette',
-    label: 'Open Command Palette',
+    label: 'Open Search',
     keys: 'mod+shift+p',
     category: 'navigation',
-    action: () => setIsCommandPaletteOpen(true),
+    action: () => {
+      setSearchOpenCount(count => count + 1);
+      setIsCommandPaletteOpen(true);
+    },
   });
 
   useHotkey({
@@ -287,6 +332,9 @@ function App() {
   // Register terminal shortcuts (hotkey-triggered clipboard paste)
   useTerminalShortcuts();
 
+  // Follow main's restart-to-update state for the sidebar pill and the toast.
+  useRestartToUpdateSync();
+
   // Load config on app startup
   useEffect(() => {
     fetchConfig();
@@ -299,16 +347,18 @@ function App() {
     return stopWrites;
   }, []);
 
-  // Detect unclean shutdown from previous session and notify user
+  // Pull after mount: the page may already have loaded before it can subscribe.
   useEffect(() => {
-    if (!window.electronAPI?.events?.onUncleanShutdownDetected) return;
-
-    return window.electronAPI.events.onUncleanShutdownDetected(() => {
-      showNotification(
-        'Pane didn\'t shut down cleanly',
-        'Your OS may have been overloaded. Check RAM usage if this keeps happening.'
-      );
-    });
+    const consume = window.electronAPI?.window?.consumeUncleanShutdown;
+    if (!consume) return;
+    void consume().then(detected => {
+      if (detected) {
+        showNotification(
+          'Pane didn\'t shut down cleanly',
+          'Your OS may have been overloaded. Check RAM usage if this keeps happening.'
+        );
+      }
+    }).catch(error => console.error('Failed to read startup notice:', error));
   }, [showNotification]);
 
   // Fetch projects for global shortcuts
@@ -326,6 +376,11 @@ function App() {
       window.removeEventListener('project-sessions-refresh', handle);
     };
   }, []);
+
+  const handleNewPaneInProject = useCallback((projectId: number) => {
+    navigateToProject(projectId);
+    setShowCreateSessionDialog(true);
+  }, [navigateToProject]);
 
   const activeProject = useMemo(() => {
     if (activeProjectId) return projects.find(p => p.id === activeProjectId);
@@ -367,21 +422,24 @@ function App() {
     let cancelled = false;
 
     const checkAnalyticsDefault = async () => {
-      if (!window.electron?.invoke) {
+      if (!window.electronAPI?.preferences) {
         if (!cancelled) setHasCheckedAnalyticsDefault(true);
         return;
       }
 
       try {
         const [legacyConsentResult, defaultAppliedResult] = await Promise.all([
-          window.electron.invoke('preferences:get', 'analytics_consent_shown'),
-          window.electron.invoke('preferences:get', 'analytics_default_applied'),
+          API.preferences.get('analytics_consent_shown'),
+          API.preferences.get('analytics_default_applied'),
         ]);
-        const hasLegacyChoice = decodeOptionalBoundary(legacyConsentResult, preferenceResponseSchema)?.data === 'true';
-        const hasAppliedDefault = decodeOptionalBoundary(defaultAppliedResult, preferenceResponseSchema)?.data === 'true';
+        const hasLegacyChoice = legacyConsentResult === 'true';
+        const hasAppliedDefault = defaultAppliedResult === 'true';
 
         if (!hasLegacyChoice && !hasAppliedDefault) {
           const identity = await resolveAnalyticsIdentity();
+          // A config change during the identity lookup restarts this effect;
+          // only the latest run captures and aliases.
+          if (cancelled) return;
 
           initPostHog({
             enabled: true,
@@ -399,7 +457,7 @@ function App() {
           await captureUnconditionally('analytics_default_enabled', { experiment: 'analytics_default_on' }, identity);
           await captureFirstOpenOnce(identity);
           flushPendingEvents();
-          await window.electron.invoke('preferences:set', 'analytics_default_applied', 'true');
+          await API.preferences.set('analytics_default_applied', 'true');
           if (appConfig.analytics?.enabled !== true) {
             await useConfigStore.getState().updateConfig({
               analytics: { ...appConfig.analytics, enabled: true },
@@ -434,11 +492,11 @@ function App() {
 
       try {
         const [legacyConsentResult, defaultAppliedResult] = await Promise.all([
-          window.electron?.invoke?.('preferences:get', 'analytics_consent_shown'),
-          window.electron?.invoke?.('preferences:get', 'analytics_default_applied'),
+          API.preferences.get('analytics_consent_shown'),
+          API.preferences.get('analytics_default_applied'),
         ]);
         consentDecided = [legacyConsentResult, defaultAppliedResult].some((result) =>
-          decodeOptionalBoundary(result, preferenceResponseSchema)?.data === 'true'
+          result === 'true'
         );
       } catch (error) {
         console.error('[App] Error resolving analytics consent state:', error);
@@ -530,16 +588,13 @@ function App() {
     let cancelled = false;
 
     const checkOnboarding = async () => {
-      if (!window.electron?.invoke) {
+      if (!window.electronAPI?.preferences) {
         if (!cancelled) setHasCheckedOnboarding(true);
         return;
       }
       try {
-        const result = decodeOptionalBoundary(
-          await window.electron.invoke('preferences:get', ONBOARDING_REPO_SETUP_PREFERENCE),
-          preferenceResponseSchema,
-        );
-        if (result?.data !== 'true') {
+        const result = await API.preferences.get(ONBOARDING_REPO_SETUP_PREFERENCE);
+        if (result !== 'true') {
           // Only show onboarding for truly new users (no existing projects).
           // Existing users who upgrade won't have this preference but already have projects.
           const projectsRes = await API.projects.getAll();
@@ -573,17 +628,17 @@ function App() {
     let cancelled = false;
 
     const checkInitialState = async () => {
-      if (!window.electron?.invoke) {
+      if (!window.electronAPI?.preferences) {
         if (!cancelled) setHasResolvedStartupDialogs(true);
         return;
       }
 
       try {
         // Get preferences from database
-        const hideWelcomeResult = decodeOptionalBoundary(await window.electron.invoke('preferences:get', 'hide_welcome'), preferenceResponseSchema);
-        const welcomeShownResult = decodeOptionalBoundary(await window.electron.invoke('preferences:get', 'welcome_shown'), preferenceResponseSchema);
-        const hideWelcome = hideWelcomeResult?.data === 'true';
-        const hasSeenWelcome = welcomeShownResult?.data === 'true';
+        const hideWelcomeResult = await API.preferences.get('hide_welcome');
+        const welcomeShownResult = await API.preferences.get('welcome_shown');
+        const hideWelcome = hideWelcomeResult === 'true';
+        const hasSeenWelcome = welcomeShownResult === 'true';
 
 
         // If user explicitly said "don't show again", respect that preference
@@ -605,7 +660,7 @@ function App() {
             if (isFirstTimeUser || isReturningUserWithNoData) {
               if (!cancelled) setIsWelcomeOpen(true);
               // Mark that welcome has been shown at least once
-              await window.electron.invoke('preferences:set', 'welcome_shown', 'true');
+              await API.preferences.set('welcome_shown', 'true');
             }
           } catch (error) {
             console.error('Error checking initial state:', error);
@@ -624,6 +679,58 @@ function App() {
     };
   }, [isLoaded, hasCheckedOnboarding, isOnboardingOpen, completedOnboardingThisSession]);
 
+  /**
+   * The once-only Support Pane dialog, for users past the first screen with GitHub CLI ready.
+   * It shows on a later launch or right after the first archive, whichever comes first.
+   */
+  const showSupportPromptOnce = useCallback(async (
+    source: 'future_launch' | 'first_archive',
+    isCancelled: () => boolean,
+    isTrigger: () => Promise<boolean> = async () => true,
+  ) => {
+    if (!window.electronAPI?.preferences || !window.electronAPI?.onboarding?.detectEnvironment) {
+      return;
+    }
+
+    try {
+      const onboardingResult = await API.preferences.get(ONBOARDING_REPO_SETUP_PREFERENCE);
+      if (onboardingResult !== 'true') return;
+
+      const promptResult = await API.preferences.get(ONBOARDING_GH_PROMPT_SHOWN_PREFERENCE);
+      if (promptResult === 'true') return;
+      if (!(await isTrigger())) return;
+
+      const envResult = await window.electronAPI.onboarding.detectEnvironment();
+      if (!envResult.success || envResult.data?.ghReady !== true) return;
+
+      await API.preferences.set(ONBOARDING_GH_PROMPT_SHOWN_PREFERENCE, 'true');
+      capture('onboarding_support_prompt_shown', {
+        source,
+        gh_status: 'gh_ready',
+      });
+      if (!isCancelled()) setIsSupportPaneOpen(true);
+    } catch (error) {
+      console.error('[App] Failed to check onboarding support prompt:', error);
+    }
+  }, []);
+
+  // A Pane leaves the session store when it is archived or deleted; only the first archive outside the sample repo counts.
+  useEffect(() => {
+    const handleSessionDeleted = (event: CustomEvent<{ id?: string }>) => {
+      const id = event.detail?.id;
+      if (!id) return;
+      void showSupportPromptOnce('first_archive', () => false, async () => {
+        const response = await window.electronAPI.onboarding.firstSteps();
+        const archived = response.success ? response.data?.archivedPaneIds ?? [] : [];
+        return archived.length === 1 && archived[0] === id;
+      });
+    };
+    // SAFETY: useIPCEvents dispatches session-deleted as a CustomEvent carrying { id }.
+    window.addEventListener('session-deleted', handleSessionDeleted as EventListener);
+    // SAFETY: Same listener and event shape as registered above.
+    return () => window.removeEventListener('session-deleted', handleSessionDeleted as EventListener);
+  }, [showSupportPromptOnce]);
+
   useEffect(() => {
     if (
       supportPromptCheckStarted.current ||
@@ -641,33 +748,7 @@ function App() {
     supportPromptCheckStarted.current = true;
     let cancelled = false;
 
-    const checkDeferredSupportPrompt = async () => {
-      if (!window.electron?.invoke || !window.electronAPI?.onboarding?.detectEnvironment) {
-        return;
-      }
-
-      try {
-        const onboardingResult = decodeOptionalBoundary(await window.electron.invoke('preferences:get', ONBOARDING_REPO_SETUP_PREFERENCE), preferenceResponseSchema);
-        if (onboardingResult?.data !== 'true') return;
-
-        const promptResult = decodeOptionalBoundary(await window.electron.invoke('preferences:get', ONBOARDING_GH_PROMPT_SHOWN_PREFERENCE), preferenceResponseSchema);
-        if (promptResult?.data === 'true') return;
-
-        const envResult = await window.electronAPI.onboarding.detectEnvironment();
-        if (!envResult.success || envResult.data?.ghReady !== true) return;
-
-        await window.electron.invoke('preferences:set', ONBOARDING_GH_PROMPT_SHOWN_PREFERENCE, 'true');
-        capture('onboarding_support_prompt_shown', {
-          source: 'future_launch',
-          gh_status: 'gh_ready',
-        });
-        if (!cancelled) setIsSupportPaneOpen(true);
-      } catch (error) {
-        console.error('[App] Failed to check deferred onboarding support prompt:', error);
-      }
-    };
-
-    void checkDeferredSupportPrompt();
+    void showSupportPromptOnce('future_launch', () => cancelled);
     return () => {
       cancelled = true;
       supportPromptCheckStarted.current = false;
@@ -680,15 +761,41 @@ function App() {
     completedOnboardingThisSession,
     hasResolvedStartupDialogs,
     isWelcomeOpen,
+    showSupportPromptOnce,
   ]);
 
   // Check for resumable sessions on startup and on each host switch (auto-resume feature).
-  // A reconnect to the same host does not prompt again.
+  // A reconnect to the same host does not prompt again. The launch after a restart to
+  // update skips the prompt: main has already resumed every agent, so reopen the
+  // remembered Pane and say what came back instead.
   useEffect(() => {
     if (!isLoaded) return;
     let cancelled = false;
+    let firstCheck = true;
+
+    const takeRestoreResult = async () => {
+      try {
+        const result = await window.electronAPI.updater?.takeRestoreResult?.();
+        return result?.success ? result.data ?? null : null;
+      } catch (error) {
+        console.error('[App] Failed to read the restart-to-update result:', error);
+        return null;
+      }
+    };
 
     const checkResumableSessions = async () => {
+      if (firstCheck) {
+        firstCheck = false;
+        const restored = await takeRestoreResult();
+        if (cancelled) return;
+        if (restored) {
+          useRestartToUpdateStore.getState().showRestoreResult(restored);
+          if (!useConfigStore.getState().config) await useConfigStore.getState().fetchConfig();
+          if (!cancelled) await restoreHostNavigation(() => true, restored.navigation);
+          // Panes whose agents could not resume stay interrupted; offer them as on any launch.
+          if (cancelled || restored.panesFailed === 0) return;
+        }
+      }
       let sessions: ResumableSession[] = [];
       try {
         const result = await window.electronAPI.sessions.getResumable();
@@ -769,16 +876,9 @@ function App() {
     // Set up version update listener
     if (!window.electronAPI?.events) return;
 
+    // Remembered for the "Update available" pill; the dialog opens only when asked.
     const handleVersionUpdate = (versionInfo: VersionUpdateInfo) => {
       setUpdateVersionInfo(versionInfo);
-      setIsUpdateDialogOpen(true);
-      showNotification(
-        `🚀 Update Available - Pane v${versionInfo.latest}`,
-        'A new version of Pane is available!',
-        '/favicon.ico',
-        'version_update',
-        `update:${versionInfo.latest}` // Deduplicate by version - only track once per version
-      );
     };
 
     // Set up the listener using the events API
@@ -789,7 +889,7 @@ function App() {
         removeListener();
       }
     };
-  }, [showNotification]);
+  }, []);
 
   const handleUpdateRequest = useCallback((versionInfo: VersionInfo) => {
     setUpdateVersionInfo({
@@ -799,6 +899,38 @@ function App() {
     setIsAboutOpen(false);
     setIsUpdateDialogOpen(true);
   }, []);
+
+  // Pane's own update dialog, for a host that runs a newer Pane; Settings → General when the check fails.
+  const updatePane = useCallback(async () => {
+    try {
+      const response = await API.checkForUpdates();
+      if (response.success && response.data) {
+        handleUpdateRequest(response.data);
+        return;
+      }
+    } catch (error) {
+      console.warn('Update check failed:', error);
+    }
+    openSettings({ category: 'general', setting: 'check-updates-now' });
+  }, [handleUpdateRequest, openSettings]);
+
+  // The release the version check found; a renderer reload loses it, so ask again.
+  const openAvailableUpdate = useCallback(async () => {
+    if (updateVersionInfo) {
+      setIsUpdateDialogOpen(true);
+      return;
+    }
+    try {
+      const response = await window.electronAPI.checkForUpdates();
+      if (!response.success || !response.data) {
+        showActionError('Could not check for updates', response);
+        return;
+      }
+      handleUpdateRequest(response.data);
+    } catch (error) {
+      showActionError('Could not check for updates', error);
+    }
+  }, [updateVersionInfo, handleUpdateRequest]);
 
   const handlePermissionResponse = useCallback(async (
     requestId: string,
@@ -821,14 +953,19 @@ function App() {
     }
   }, [loadNextPendingPermission]);
 
+  // A row opened on a machine that stopped answering shows why in place of the Pane.
+  const offlineMachineShown = useAllMachinesStore(state => state.offlineNotice !== null);
+
   return (
     <ContextMenuProvider>
       <div className="pane-app-shell relative h-screen flex flex-col overflow-hidden bg-bg-primary">
         <div className={isSettingsOpen ? 'hidden' : 'contents'}>
           <WindowTitleBar projects={projects} sidebarWidth={sidebarWidth} sidebarCollapsed={sidebarCollapsed} controlsSlotRef={setTitleBarControlsSlot} />
+          {/* Settings draws its own title-bar spacer, which the window controls overlap. */}
+          <TailnetHttpsBanner />
         </div>
         <RemoteConnectionBanner onSettings={() => openSettings({ category: 'remote-access' })} />
-        <div className="pane-main-layout flex flex-1 min-h-0">
+        <div className="pane-main-layout relative flex flex-1 min-h-0">
         <MainProcessLogger />
         {isSettingsOpen && (
           <Settings
@@ -855,7 +992,8 @@ function App() {
             onAboutClick={() => setIsAboutOpen(true)}
             onSettingsClick={() => openSettings()}
             onRemoteSettingsClick={() => openSettings({ category: 'remote-access' })}
-            onManageRemoteConnectionsClick={() => openSettings({ category: 'remote-access' })}
+            onAddMachineClick={() => openSettings({ category: 'remote-access', setting: 'remote-add-code' })}
+            onMachinePasswordRequest={(machine) => openSettings({ category: 'remote-access', setting: 'remote-machines', machine })}
             width={sidebarWidth}
             onResize={startResize}
             collapsed={sidebarCollapsed}
@@ -868,9 +1006,19 @@ function App() {
               capture('discord_clicked', { source: 'sidebar' });
               void window.electronAPI.openExternal(DISCORD_INVITE_URL);
             }}
+            onUpdateAvailableClick={() => void openAvailableUpdate()}
           />
         </div>
-        <SessionView />
+        {/* The checklist carries its own fix buttons, so it never dims. */}
+        <RemoteWorkspace dimmed={connectionPresence !== 'connected' && !shownConnectionCheck}>
+          {shownConnectionCheck
+            ? <ConnectionChecklist check={shownConnectionCheck} onOpenSettings={openSettings} onUpdatePane={() => void updatePane()} />
+            : offlineMachineShown
+              ? <MachineOfflineView onMachineDetails={() => openSettings({ category: 'remote-access', setting: 'remote-machines' })} />
+              : <SessionView />}
+          <PaneChatIntroOffer suppressed={isSettingsOpen || isOnboardingOpen || isWelcomeOpen} />
+        </RemoteWorkspace>
+        <NotifyInPaneStrip left={sidebarCollapsed ? 48 : sidebarWidth} />
         </div>
         <OnboardingDialog
           isOpen={isOnboardingOpen}
@@ -887,6 +1035,8 @@ function App() {
         <Welcome isOpen={isWelcomeOpen} onClose={() => setIsWelcomeOpen(false)} />
         <AboutDialog isOpen={isAboutOpen} onClose={() => setIsAboutOpen(false)} onUpdate={handleUpdateRequest} />
         <FeedbackDialog isOpen={isFeedbackOpen} onClose={() => setIsFeedbackOpen(false)} />
+        <LoopDrawer />
+        <RestartToUpdateToast />
         <UpdateDialog
           isOpen={isUpdateDialogOpen}
           onClose={() => setIsUpdateDialogOpen(false)}
@@ -905,14 +1055,19 @@ function App() {
           onRespond={handlePermissionResponse}
           session={currentPermissionRequest ? sessions.find(s => s.id === currentPermissionRequest.sessionId) : undefined}
         />
-        <ResumeSessionsDialog
-          isOpen={isResumeDialogOpen}
-          onClose={() => setIsResumeDialogOpen(false)}
-          sessions={resumableSessions}
-        />
+        {isResumeDialogOpen && (
+          <ResumeSessionsDialog
+            isOpen={isResumeDialogOpen}
+            onClose={() => setIsResumeDialogOpen(false)}
+            sessions={resumableSessions}
+          />
+        )}
         <CommandPalette
+          key={searchOpenCount}
           isOpen={isCommandPaletteOpen}
           onClose={() => setIsCommandPaletteOpen(false)}
+          projects={projects}
+          onNewPane={handleNewPaneInProject}
         />
         {showCreateSessionDialog && activeProject && (
           <CreateSessionDialog

@@ -1,6 +1,7 @@
 import type { ParsedArgs } from './commands';
 import { confirmMutation } from './daemonActions';
 import { invokeDaemon } from './daemonClient';
+import { RunpaneError } from './errors';
 import { buildPaneLink } from './links';
 import { describeReport } from './watchLines';
 import {
@@ -178,6 +179,9 @@ export async function runAgentsSend(parsed: ParsedArgs): Promise<number> {
     throw new Error('runpane agents send types a message and presses Enter, so it cannot send keys such as arrows, Escape, or Ctrl-C. '
       + `To answer a menu, press keys with \`runpane panels input --panel <panel-id> --keys down,enter --yes\`, then check the screen with \`runpane agents status\`.`);
   }
+  if (parsed.attachments?.length) {
+    throw new RunpaneError('ERR_ATTACH_UNSUPPORTED', '--attach is not supported by runpane agents send. Nothing was sent.', 'Use runpane panels submit --panel <panel-id> --as-file-pointer --attach <file>.');
+  }
   const { paneId, panelId } = await resolveAgentPanel(parsed);
   await confirmMutation(parsed);
   const request = buildPanelInputRequest({ ...parsed, panelId }, 'submit');
@@ -220,7 +224,8 @@ async function resolveAgentPanel(parsed: ParsedArgs): Promise<{ paneId: string; 
   return { paneId, panelId: panel.panelId };
 }
 
-function print<Result>(parsed: ParsedArgs, result: Result, text: string): void {
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- This output serializer receives results already decoded by the named daemon response schemas.
+function print(parsed: ParsedArgs, result: unknown, text: string): void {
   console.log(parsed.json ? JSON.stringify(result, null, 2) : text);
 }
 

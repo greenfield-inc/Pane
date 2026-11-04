@@ -16,4 +16,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
     onHostStateChanged: () => () => {},
   },
 });
+ipcRenderer.on('browser-panel:file-refused', (_event, detail) => window.dispatchEvent(new CustomEvent('browser-panel:file-refused', { detail })));
 contextBridge.exposeInMainWorld('electron', { invoke: (channel, ...args) => ipcRenderer.invoke(channel, ...args) });

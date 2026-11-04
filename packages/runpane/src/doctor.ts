@@ -17,6 +17,7 @@ import { detectPlatform, type PanePlatform } from './platform';
 import { RUNPANE_CONTRACT } from './generated/contract';
 import { resolveRelease } from './releases';
 import { getPaneVersion, getWrapperVersion } from './version';
+import { checkCliInstalls, fixCliInstalls, type CliInstallsCheck } from './managedCli';
 import type { BoundarySchema } from './boundaryDecoder';
 
 const DOCTOR_DAEMON_TIMEOUT_MS = 5_000;
@@ -187,6 +188,7 @@ interface DoctorReport {
   daemon: DoctorDaemonCheck;
   remoteDaemonService: RemoteDaemonServiceDoctorCheck;
   remoteSetup: RemoteSetupDoctorCheck;
+  cliInstalls: CliInstallsCheck;
   watchDefaults: DoctorWatchDefaults;
   workspaces: WorkspaceSummary;
   nextCommands: string[];
@@ -290,6 +292,7 @@ export function prepareDoctorFailureReport(parsed: ParsedArgs, doctor: DoctorRep
       error: doctor.daemon.error,
     },
     remoteSetup: doctor.remoteSetup,
+    cliInstalls: doctor.cliInstalls,
   };
   const diagnosticsText = JSON.stringify(diagnostics, null, 2);
   const fence = markdownFence(requestedTitle, evidence, diagnosticsText);
@@ -447,9 +450,10 @@ async function buildDoctorReport(parsed: ParsedArgs, source: 'npm' | 'pip'): Pro
     'format' in release ? release.format : undefined,
   );
   addRemoteDaemonHealthDiagnostic(remoteSetup, remoteDaemonService);
+  const cliInstalls = parsed.fix ? fixCliInstalls(checkCliInstalls(parsed.paneDir), parsed.paneDir) : checkCliInstalls(parsed.paneDir);
 
   return {
-    ok: release.ok && daemon.reachable && remoteSetup.ready,
+    ok: release.ok && daemon.reachable && remoteSetup.ready && (cliInstalls.fixed ?? []).every(result => result.ok),
     source,
     wrapper: {
       runtime: 'node',
@@ -463,6 +467,7 @@ async function buildDoctorReport(parsed: ParsedArgs, source: 'npm' | 'pip'): Pro
     daemon,
     remoteDaemonService,
     remoteSetup,
+    cliInstalls,
     watchDefaults: watchDefaults(),
     workspaces,
     nextCommands: [
@@ -978,10 +983,31 @@ function renderDoctorText(report: DoctorReport): void {
     }
   }
 
+  renderCliInstalls(report.cliInstalls);
   console.log(formatWatchDefaults(report.watchDefaults));
   for (const line of report.workspaces.lines) console.log(line);
   console.log('Agent discovery: run "runpane doctor --json" before Pane actions, then "runpane agent-context --json" for full CLI context.');
   console.log('Remote setup: run "runpane setup" for guided setup, or "runpane install daemon --label <name>" for scripting.');
+}
+
+function renderCliInstalls(check: CliInstallsCheck): void {
+  console.log('runpane on PATH, first wins:');
+  if (check.installs.length === 0) console.log('  none');
+  for (const install of check.installs) {
+    const origin = install.origin === 'pane' ? 'Pane-managed'
+      : install.origin === 'npm' ? `npm global, prefix ${install.npmPrefix}` : 'other';
+    console.log(`  ${install.path}  ${install.version ?? 'unknown version'}  (${origin})`);
+  }
+  for (const result of check.fixed ?? []) {
+    console.log(result.ok ? `  Fixed: ${result.command}` : `  Fix failed: ${result.command} - ${result.error}`);
+  }
+  for (const warning of check.warnings) {
+    console.log(`  Warning ${warning.code}: ${warning.message}`);
+    console.log(`  Fix: ${warning.fix}`);
+  }
+  if (check.warnings.some(warning => warning.code === 'RUNPANE_STALE_INSTALL')) {
+    console.log('  Run "runpane doctor --fix" to update the stale npm installs.');
+  }
 }
 
 function errorMessage(cause: unknown): string {

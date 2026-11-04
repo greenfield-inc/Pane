@@ -6,6 +6,7 @@ import {
   type RemoteDaemonConfig,
   type RemoteDaemonHostConfig,
   type RemoteDaemonHostRuntimeState,
+  type RemoteHostSetupProgress,
   type RemoteHostSetupRequest,
   type RemoteHostSetupResult,
   type RemotePaneConnectionProfile,
@@ -61,6 +62,8 @@ export function useRemoteAccessSettings(isOpen: boolean, closeSettings: () => vo
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<string | null>(null);
   const [setupResult, setSetupResult] = useState<RemoteHostSetupResult | null>(null);
+  /** Set Up Host's steps in the order they ran, each at its latest status. */
+  const [setupSteps, setSetupSteps] = useState<RemoteHostSetupProgress[]>([]);
 
   const [setupDataMode, setSetupDataMode] = useState<RemoteSetupDataDirectoryMode>('current');
   const [setupLabel, setSetupLabel] = useState('');
@@ -127,18 +130,36 @@ export function useRemoteAccessSettings(isOpen: boolean, closeSettings: () => vo
     }
   }, [refresh]);
 
+  // While a connect started here runs, the id of the check it replaces; a newer check closes Settings so its card shows.
+  const checkBeforeConnect = useRef<number | null | undefined>(undefined);
+
   useEffect(() => {
     if (!isOpen) return;
     setError(null);
     setResult(null);
     void reload();
-    const unsubscribeConnection = window.electronAPI.remoteDaemon.onConnectionStateChanged(setConnectionState);
+    const unsubscribeConnection = window.electronAPI.remoteDaemon.onConnectionStateChanged((state) => {
+      setConnectionState(state);
+      if (checkBeforeConnect.current === undefined || !state.check || state.check.id === checkBeforeConnect.current) return;
+      checkBeforeConnect.current = undefined;
+      closeSettings();
+    });
     const unsubscribeHost = window.electronAPI.remoteDaemon.onHostStateChanged(setHostState);
     return () => {
       unsubscribeConnection();
       unsubscribeHost();
     };
-  }, [isOpen, reload]);
+  }, [closeSettings, isOpen, reload]);
+
+  /** Runs a connect; once main publishes its checklist, Settings closes. Errors before that stay inline. */
+  const showChecklist = useCallback(async <T,>(connect: () => Promise<T>): Promise<T> => {
+    checkBeforeConnect.current = connectionState.check?.id ?? null;
+    try {
+      return await connect();
+    } finally {
+      checkBeforeConnect.current = undefined;
+    }
+  }, [connectionState.check?.id]);
 
   const runRemoteRequest = useCallback(async <T,>(action: () => Promise<T>): Promise<RemoteActionOutcome<T>> => {
     setBusy(true);
@@ -183,11 +204,21 @@ export function useRemoteAccessSettings(isOpen: boolean, closeSettings: () => vo
   });
 
   const setupHost = async () => {
+    setSetupSteps([]);
+    let stepFailed = false;
+    const unsubscribe = API.remoteDaemon.onSetupProgress((progress) => {
+      stepFailed ||= progress.status === 'failed';
+      setSetupSteps((steps) => (steps.some((step) => step.step === progress.step)
+        ? steps.map((step) => (step.step === progress.step ? progress : step))
+        : [...steps, progress]));
+    });
     const outcome = await runRemoteRequest(async () => {
       const response = await API.remoteDaemon.setupHost(buildSetupRequest());
       if (!response.success || !response.data) throw new Error(response.error || 'Failed to set up this machine');
       return response.data;
-    });
+    }).finally(unsubscribe);
+    // The failed step shows the error with its fix.
+    if (!outcome.success && stepFailed) setError(null);
     if (!outcome.success) return false;
     setSetupResult(outcome.value);
     setSetupLabel('');
@@ -269,7 +300,7 @@ export function useRemoteAccessSettings(isOpen: boolean, closeSettings: () => vo
 
   const importConnection = async () => {
     const outcome = await runRemoteRequest(async () => {
-      const response = await API.remoteDaemon.importConnectionCode(connectionCode, { connect: true });
+      const response = await showChecklist(() => API.remoteDaemon.importConnectionCode(connectionCode, { connect: true }));
       if (!response.success || !response.data) throw new Error(response.error || 'Failed to import connection code');
       return response.data;
     });
@@ -282,7 +313,7 @@ export function useRemoteAccessSettings(isOpen: boolean, closeSettings: () => vo
   };
 
   const useProfile = (profileId: string) => runRemoteAction(async () => {
-    const response = await API.remoteDaemon.updateClientState({ activeProfileId: profileId, mode: 'remote' });
+    const response = await showChecklist(() => API.remoteDaemon.updateClientState({ activeProfileId: profileId, mode: 'remote' }));
     if (!response.success) throw new Error(response.error || 'Failed to connect to profile');
     return 'Remote runtime connected.';
   });
@@ -380,6 +411,7 @@ export function useRemoteAccessSettings(isOpen: boolean, closeSettings: () => vo
     error,
     result,
     setupResult,
+    setupSteps,
     setupDataMode,
     setSetupDataMode,
     setupLabel,
@@ -413,6 +445,7 @@ export function useRemoteAccessSettings(isOpen: boolean, closeSettings: () => vo
     reload,
     setupHost,
     openSetupTerminal,
+    showChecklist,
     copyText,
     createHostCode,
     stopHost,

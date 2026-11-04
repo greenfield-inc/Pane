@@ -59,7 +59,8 @@ export function stageCliPackage(runtime: string, npm: string, requested: string,
   const packageRoot = path.join(directory, 'package');
   const metadata = decodeBoundary(JSON.parse(fs.readFileSync(path.join(packageRoot, 'package.json'), 'utf8')), boundary.object({ name: boundary.string, version: boundary.string }));
   if (metadata.name !== 'runpane' || metadata.version !== result[0].version) throw new Error('The staged CLI identity does not match npm metadata.');
-  const actual = execFileSync(runtime, [path.join(packageRoot, 'dist', 'cli.js'), '--version'], { encoding: 'utf8', timeout: 15_000 }).trim();
+  // RUNPANE_NO_HANDOFF: the version check asks this package, not a newer Pane-managed CLI.
+  const actual = execFileSync(runtime, [path.join(packageRoot, 'dist', 'cli.js'), '--version'], { encoding: 'utf8', timeout: 15_000, env: { ...process.env, RUNPANE_NO_HANDOFF: '1' } }).trim();
   if (!actual.includes(metadata.version)) throw new Error('The staged CLI failed its version check.');
   return { version: metadata.version, archive, packageRoot };
 }

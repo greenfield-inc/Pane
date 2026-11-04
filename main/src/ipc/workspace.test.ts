@@ -76,6 +76,7 @@ describe('workspace access commands', () => {
     registerWorkspaceCommands(registry, host, { getConfig: () => ({}), updateConfigWith: async () => ({}) }, '2.5.0', {
       readStatus: async () => JSON.stringify(status),
       probe: async () => ({ kind: 'outdated' }),
+      call: async () => ({ kind: 'unreachable', detail: 'not called' }),
     });
     await expect(registry.invoke('runpane:workspaces:machines')).resolves.toMatchObject({
       ok: true,

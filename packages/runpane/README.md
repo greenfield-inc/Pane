@@ -12,7 +12,7 @@ with `runpane watch`. See the
 
 ## Quick Start
 
-Run the guided setup (Node 20 or newer):
+Run the guided setup (patched Node 22.23.4+ (22.x), 24.22.1+ (24.x), or 26.12.1+ (26.x)):
 
 ```bash
 npx --yes runpane@latest
@@ -51,7 +51,7 @@ See [docs/PANE_MCP.md](https://github.com/greenfield-inc/Pane/blob/main/docs/PAN
 
 When debugging RunPane from a Pane repository checkout, prefer the built local
 wrapper over `npx --yes runpane@latest` so diagnostics exercise local changes.
-Use Node 22 or newer:
+Use patched Node 22.23.4+ (22.x), 24.22.1+ (24.x), or 26.12.1+ (26.x):
 
 ```bash
 node packages/runpane/dist/cli.js doctor --json
@@ -60,6 +60,12 @@ node packages/runpane/dist/cli.js doctor --json
 `doctor` remains the first diagnostic command before local-control actions. On
 macOS it reads installed app bundle metadata and must not launch
 `Pane.app/Contents/MacOS/Pane --version`.
+
+When Pane is installed and its managed CLI is newer than this package, every
+`runpane` command runs Pane's CLI instead, so a stale global install still
+gets current commands. `doctor` lists each `runpane` on `PATH` and warns about
+stale ones; `runpane doctor --fix` updates stale npm installs. See
+[docs/RUNPANE_BUNDLED_CLI.md](https://github.com/greenfield-inc/Pane/blob/main/docs/RUNPANE_BUNDLED_CLI.md#existing-global-installs).
 
 ## Advanced
 
@@ -123,14 +129,23 @@ not count as updating either package.
 Run `runpane update --dry-run --json` to inspect the machine, executable, CLI
 owner, and supervisor capability. App updates require a running host supporting
 the continuity protocol and a release with a matching `continuity.json` manifest.
+When Pane is not running on this machine, `runpane update` installs the
+requested release (latest by default) instead, like `runpane install`.
 Both the running app and the requested target must support this protocol.
 Existing 2.4.182 releases do not provide this upgrade path; install a
 continuity-capable release manually first. See the
-[prerequisites and recovery guide](../../docs/UPDATE_RECOVERY.md). Cached/local npm installs,
-system-managed Linux packages, non-stable/daemon installer options, custom download
-directories, missing standalone Node, and unwritable targets
-are refused before downtime. Python delegates to the managed engine installed
-by Pane and records the invoking Python environment.
+[prerequisites and recovery guide](../../docs/UPDATE_RECOVERY.md). Non-stable/daemon
+installer options and custom download directories are refused. When this host
+cannot run the independent update (no standalone Node, an unwritable install, a
+system-managed Linux package, a cached/local npm install), `runpane update`
+asks the running Pane to install the latest release with its built-in updater
+instead, the same path as the Settings Update button. That handoff updates the
+app and its managed CLI; an npm or pip CLI is reported as not updated. With
+`--wait`, it returns once the relaunched Pane reports the new version. It
+applies to `--version latest` without `--pane-path`, `--cli-only` or `--dry-run`, and needs
+Pane open. Python delegates to the managed engine installed by Pane and records
+the invoking Python environment; without that engine or Node it hands off the
+same way.
 
 The command returns an operation ID after the independent helper acknowledges
 startup. That is acceptance, not completion. The
@@ -141,8 +156,8 @@ installed components, host health, and each panel's restoration outcome. A
 current-user launchd, Task Scheduler, or systemd service owns the helper; its
 code and standalone runtime are staged outside the files being replaced.
 
-Settings installation uses this same operation; downloaded legacy updates never
-install implicitly on quit. Before downtime, Pane fences new mutations, waits for
+The app's own Update button in Settings uses the built-in electron-updater
+instead, and does not need these prerequisites. Before downtime, Pane fences new mutations, waits for
 in-flight work, checks snapshot readability and capacity on every affected volume,
 and records a clean-shutdown acknowledgment after persistence and service cleanup.
 A forced exit or missing acknowledgment never authorizes installation.
@@ -245,6 +260,29 @@ when blocked. READY alone is activity evidence. Read the full report with
 `runpane agents status --panel <id> --json`. Resume stopped workers in the same
 panel with `runpane panels resume --panel <id> --wait-ready --yes --json`.
 
+Work an agent sends with `panels create`, `panes create` (with a prompt), or
+`panels submit` expects that report; `--no-expect-report` sends without
+waiting, and `--expect-report` asks for one on `--source user` work. If the
+agent goes ready, with nothing left running in the background, or exits
+without one,
+watchers that list `agent.report.missing` get `MISSING REPORT <pane> pane
+<pane-id> panel <panel-id> ready` with its last reply; add it to `--kinds`, for
+example `--until-event --kinds
+agent.report,agent.report.missing,agent.blocked,panel.exited,pane.gone`.
+`runpane inbox [--session <id|name>]` lists the reports, missing reports, and
+on-screen questions a Session has not acknowledged (an orchestrator reads it
+when it starts or resumes), and `runpane inbox ack <id>...` clears them.
+
+To dispatch and get the result in one call, add `--wait`. It blocks on that
+panel and prints one line of JSON when the worker reports (exit 0), ends
+without a report (3, with `lastOutput`), waits on a prompt (4, with
+`screenLines`), or exits (5); `--timeout 30m` gives up with exit 124. Run it as
+a background task:
+
+```bash
+runpane panels submit --panel <panel-id> --input-file prompt.md --as-file-pointer --wait --yes
+```
+
 Do not pipe follow through `head` or `grep -m1` to wait. Run `--until-event` as
 a supported background task, act on its events, then re-arm with its cursor.
 Never sleep-poll your own background task output. WATCH ERROR/nonzero exit
@@ -255,7 +293,7 @@ replacement. A normal expiry means re-arm with the next dispatch.
 
 ```bash
 runpane pr watch --pane <pane-id> --url https://github.com/owner/repo/pull/123 --head <full-sha> --json
-runpane watch --pane <pane-id> --since <generation-returned-above> --epoch <epoch-returned-above> --until-event --json --kinds pr.checks,pr.conflicted,pr.head,pr.review,pr.comment,pr.closed,pr.merged,pr.stopped,github.unavailable,github.recovered
+runpane watch --pane <pane-id> --since <generation-returned-above> --epoch <epoch-returned-above> --until-event --json --kinds pr.checks,pr.conflicted,pr.base_changed,pr.base_deleted,pr.head,pr.review,pr.comment,pr.closed,pr.merged,pr.stopped,github.unavailable,github.recovered
 runpane pr list --pane <pane-id> --json
 runpane pr unwatch --pane <pane-id> --url https://github.com/owner/repo/pull/123 --json
 ```
@@ -281,6 +319,13 @@ host/repository/number identity. It pins success to `--head`, or the first
 observed head; a new head emits `pr.head` and needs a fresh registration before
 success can be reported. Read existing discussions before arming. A wake
 means inspect the change; it never authorizes merging.
+
+The watch also reports when the ground under the PR moves. `pr.base_changed`
+(`BASE CHANGED`) fires when the base branch is retargeted, by a person or by
+GitHub after a stack parent merges and its branch is deleted; `base.from` and
+`base.to` name the old and new base. `pr.base_deleted` (`BASE DELETED`) fires
+when the base branch no longer exists; GitHub may close the PR right after.
+Both arrive at once under `--follow`. Rebase onto the new base and recheck CI.
 
 The daemon batches up to 25 fingerprints per host every two minutes (plus up
 to ten seconds of jitter), reads details on changes and at a 30-minute
@@ -319,11 +364,33 @@ quiet/no-control-lines, and idle-backoff are covered by defaults or profiles.
 
 ### Handing Work to Another Machine
 
-`runpane handoff` passes a task to a fresh agent on this or another of your
+`runpane handoff` passes a task to another agent on this or another of your
 machines. Write the note from the template, then name the agent and machine in
 plain words. The CLI checks every section is filled in, needs the branch pushed
 (`--push` commits uncommitted work as WIP and pushes, never forcing), and starts
 the agent in a new Pane there, branched from yours. It reports back to you.
+
+When you run it from a Pane tab with a Claude, Codex, Cursor or OpenCode session and the
+receiver is the same agent, it carries that session. Another machine gets a copy
+of the session's files in its agent store and resumes the same id; this machine
+resumes a fork, so two agents never share one session. The CLI checks the
+receiver resumed it and shows its last message, then reports `continuity.result`:
+`continued`, `inconclusive` (exit 0; `next` gives a question to ask the
+receiver), or `not-continued` (exit 1; the receiver is kept and `next` gives the
+`--note-only` command). After `continued` or `inconclusive`, stop working on the
+branch; the session continues there. `--note-only`, a different agent, or no
+session to carry starts a fresh agent with the note, and the output says so.
+OpenCode keeps sessions in a database, so its session travels as `opencode export`
+and is brought in with `opencode import` inside the receiving repository; an
+OpenCode receiver is accepted only to continue an OpenCode session. Carrying a
+Cursor chat to another machine is best effort, since Cursor's store is
+undocumented; on the same machine it isn't carried (`not-continued`), because a
+copied Cursor chat still writes to the original. The destination's agent store
+is assumed at its default location (`~/.claude`, `~/.codex`, `~/.cursor`). A
+copy already there is replaced only when yours holds all of it and no agent
+there runs it; otherwise nothing is copied and the result is `not-continued`.
+A destination Pane too old to resume a carried session
+(`ERR_HANDOFF_RESUME_UNSUPPORTED`) is refused before anything is sent.
 
 ```bash
 runpane handoff --template > ~/handoff.md
@@ -333,7 +400,9 @@ runpane handoff "claude opus on parsas-macbook-pro" --note-file ~/handoff.md --p
 From a Session's terminal (its folder is outside git), handoff moves the Session:
 it skips git, writes the note to the other machine, and creates a Session there
 with the same name (numbered if taken), goal and agent, whose next action is to
-read the note. It refuses this machine before sending, and `--json` reports
+read the note. With the same agent it also copies your agent session, and the new
+Session resumes it when first opened (`continuity.result` is `inconclusive` until
+then). It refuses this machine before sending, and `--json` reports
 `receiver.route: "session"` and the new `session`.
 
 `--dry-run` checks destination daemon reachability and resolves its saved repository
@@ -362,10 +431,14 @@ npm package downloads use `source=npm` when requesting release artifacts from
 matching GitHub release assets and prints a warning.
 
 The wrapper sends best-effort command failures and download lifecycle telemetry
-with a persisted anonymous `install_id`. Successful routine commands emit nothing.
+with a persisted anonymous `install_id`. Successful routine commands emit nothing,
+and neither do documented result exits such as `panels wait` not ready or `doctor`
+findings. A failure loop sends each cause at most once an hour, and at most 10
+failures an hour.
 Distinct `install_id` counts on `runpane_wrapper_*` events measure installs that
 report failures or download activity, not all CLI users. Telemetry is disabled in
-CI, when local analytics is explicitly opted out, or with `RUNPANE_TELEMETRY_DISABLED=1`.
+CI, when local analytics is explicitly opted out, or with `DO_NOT_TRACK=1` or
+`RUNPANE_TELEMETRY_DISABLED=1`.
 
 ## Maintenance Notes
 
@@ -380,7 +453,7 @@ shared installer behavior:
   behavior.
 - If daemon setup flags change, update docs, README files, and wrapper tests
   together.
-- Keep the CI wrapper matrix green: Linux, macOS, Windows, Node 20/22, and
+- Keep the CI wrapper matrix green: Linux, macOS, Windows, Node 22.23.4/24.22.1, and
   Python 3.8/3.13 (runs on PRs that touch the wrappers or contract).
 
 ## Publishing

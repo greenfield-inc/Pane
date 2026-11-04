@@ -1,4 +1,5 @@
-import { mkdir } from 'fs/promises';
+import { appendFile, mkdir, readFile, realpath, stat } from 'fs/promises';
+import path from 'path';
 import { withLock } from '../utils/mutex';
 import type { ConfigManager } from './configManager';
 import type { AnalyticsManager } from './analyticsManager';
@@ -61,6 +62,13 @@ class GitOperationError extends Error {
   workingDirectory?: string;
   projectPath?: string;
   originalError?: { message?: string; stderr?: string; stdout?: string };
+}
+
+export interface RebaseConflictCheck {
+  hasConflicts: boolean;
+  conflictingFiles?: string[];
+  conflictingCommits?: { ours: string[]; theirs: string[] };
+  canAutoMerge?: boolean;
 }
 
 // Interface for raw commit data
@@ -273,6 +281,38 @@ export class WorktreeManager {
     } catch (error) {
       console.error('Failed to create worktrees directory:', error);
     }
+    await this.excludeWorktreeFolder(projectPath, worktreeFolder, pathResolver, commandRunner);
+  }
+
+  /**
+   * Hides the worktree folder from the main checkout's `git status` with a
+   * line in the repository's `info/exclude`, never a tracked `.gitignore`.
+   * Only an existing folder inside the checkout needs it. Best effort: a
+   * failure only leaves the folder visible as untracked.
+   */
+  async excludeWorktreeFolder(projectPath: string, worktreeFolder: string | undefined, pathResolver: PathResolver, commandRunner: CommandRunner): Promise<void> {
+    const { baseDir } = this.getProjectPaths(projectPath, worktreeFolder, pathResolver);
+    try {
+      if (!(await stat(pathResolver.toFileSystem(baseDir)).catch(() => undefined))?.isDirectory()) return;
+      const { stdout } = await commandRunner.execFile('git', ['rev-parse', '--show-toplevel', '--git-path', 'info/exclude'], projectPath, { silent: true });
+      const [top, excludePath] = stdout.split(/\r?\n/u);
+      if (!top || !excludePath) return;
+      const [topDir, folder] = await Promise.all([top, baseDir].map(dir => realpath(pathResolver.toFileSystem(dir)).catch(() => pathResolver.toFileSystem(dir))));
+      // Only Windows paths use a backslash as a separator; elsewhere it is a filename character.
+      const relative = pathResolver.environment === 'windows'
+        ? pathResolver.relative(topDir, folder).replace(/\\/gu, '/')
+        : pathResolver.relative(topDir, folder);
+      if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) return;
+      // Escape ignore-pattern characters so the folder name matches literally.
+      const line = `/${relative.replace(/[\\*?[\]]/gu, '\\$&').replace(/ $/u, '\\ ')}/`;
+      const exclude = pathResolver.toFileSystem(path.posix.isAbsolute(excludePath) || path.isAbsolute(excludePath) ? excludePath : pathResolver.join(projectPath, excludePath));
+      const current = await readFile(exclude, 'utf8').catch(() => '');
+      if (current.split(/\r?\n/u).includes(line)) return;
+      await mkdir(path.dirname(exclude), { recursive: true });
+      await appendFile(exclude, `${current && !current.endsWith('\n') ? '\n' : ''}${line}\n`);
+    } catch (error) {
+      console.warn(`[WorktreeManager] Could not exclude ${baseDir} from git status:`, error);
+    }
   }
 
   getWorktreePath(projectPath: string, name: string, worktreeFolder: string | undefined, pathResolver: PathResolver): string {
@@ -393,6 +433,7 @@ export class WorktreeManager {
       }
       
       console.log(`[WorktreeManager] Worktree created successfully at: ${worktreePath}`);
+      await this.excludeWorktreeFolder(projectPath, worktreeFolder, pathResolver, commandRunner);
 
       // Track worktree creation
       if (this.analyticsManager) {
@@ -464,6 +505,7 @@ export class WorktreeManager {
         if (claimed) {
           // Detect base commit from the claimed worktree
           const { baseCommit } = await detectGitBase(claimed.worktreePath, commandRunner);
+          await this.excludeWorktreeFolder(projectPath, worktreeFolder, pathResolver, commandRunner);
           return { worktreePath: claimed.worktreePath, baseCommit, baseBranch: effectiveBase, base: describeWorktreeBase(refresh, baseCommit) };
         }
       } catch (error) {
@@ -491,6 +533,7 @@ export class WorktreeManager {
   async seedReserve(projectPath: string, worktreeFolder: string | undefined, pathResolver: PathResolver, commandRunner: CommandRunner): Promise<void> {
     const base = await resolveDefaultWorktreeBase(projectPath, commandRunner);
     await worktreePoolManager.createReserve(projectPath, base, worktreeFolder, pathResolver, commandRunner);
+    await this.excludeWorktreeFolder(projectPath, worktreeFolder, pathResolver, commandRunner);
   }
 
   async removeWorktree(projectPath: string, name: string, worktreeFolder: string | undefined, sessionCreatedAt: Date | undefined, pathResolver: PathResolver, commandRunner: CommandRunner, auditContext?: WorktreeAuditContext): Promise<WorktreeTrashDeletion> {
@@ -846,12 +889,15 @@ export class WorktreeManager {
     }
   }
 
-  async checkForRebaseConflicts(worktreePath: string, mainBranch: string, commandRunner: CommandRunner): Promise<{
-    hasConflicts: boolean;
-    conflictingFiles?: string[];
-    conflictingCommits?: { ours: string[]; theirs: string[] };
-    canAutoMerge?: boolean;
-  }> {
+  private async listDivergentCommits(worktreePath: string, base: string, mainBranch: string, commandRunner: CommandRunner): Promise<{ ours: string[]; theirs: string[] }> {
+    const log = async (range: string) => {
+      const { stdout } = await commandRunner.execFile('git', ['log', '--oneline', range, '--'], worktreePath);
+      return stdout.trim().split('\n').filter(c => c);
+    };
+    return { ours: await log(`${base}..HEAD`), theirs: await log(`${base}..${mainBranch}`) };
+  }
+
+  async checkForRebaseConflicts(worktreePath: string, mainBranch: string, commandRunner: CommandRunner): Promise<RebaseConflictCheck> {
     try {
 
       // First check if there are any changes to rebase
@@ -861,8 +907,8 @@ export class WorktreeManager {
       }
 
       // Get the merge base
-      const { stdout: mergeBase } = await commandRunner.execAsync(
-        `git merge-base HEAD ${mainBranch}`,
+      const { stdout: mergeBase } = await commandRunner.execFile(
+        'git', ['merge-base', '--', 'HEAD', mainBranch],
         worktreePath
       );
       const base = mergeBase.trim();
@@ -870,51 +916,22 @@ export class WorktreeManager {
       // Try a dry-run merge to detect conflicts
       // We use merge-tree to check for conflicts without modifying the working tree
       try {
-        const { stdout: mergeTreeOutput } = await commandRunner.execAsync(
-          `git merge-tree ${base} HEAD ${mainBranch}`,
-          worktreePath
+        // Exit 1 means conflicts (text, binary, rename or delete); stdout is the tree OID, then one conflicted path per line.
+        const { stdout: mergeTreeOutput, exitCode } = await commandRunner.execFile(
+          'git', ['merge-tree', '--write-tree', '--name-only', '--no-messages', '--', 'HEAD', mainBranch],
+          worktreePath,
+          { okExitCodes: [1] }
         );
 
-        // Parse merge-tree output for conflicts
-        const conflictMarkers = mergeTreeOutput.match(/<<<<<<< /g);
-        const hasConflicts = conflictMarkers && conflictMarkers.length > 0;
-
-        if (hasConflicts) {
-          // Get list of files that would conflict
-          const { stdout: diffOutput } = await commandRunner.execAsync(
-            `git diff --name-only ${base}...HEAD`,
-            worktreePath
-          );
-          const ourFiles = diffOutput.trim().split('\n').filter(f => f);
-
-          const { stdout: theirDiffOutput } = await commandRunner.execAsync(
-            `git diff --name-only ${base}...${mainBranch}`,
-            worktreePath
-          );
-          const theirFiles = theirDiffOutput.trim().split('\n').filter(f => f);
-
-          // Find files modified in both branches
-          const conflictingFiles = ourFiles.filter(f => theirFiles.includes(f));
-
-          // Get commit info for better error reporting
-          const { stdout: ourCommits } = await commandRunner.execAsync(
-            `git log --oneline ${base}..HEAD`,
-            worktreePath
-          );
-          const { stdout: theirCommits } = await commandRunner.execAsync(
-            `git log --oneline ${base}..${mainBranch}`,
-            worktreePath
-          );
+        if (exitCode === 1) {
+          const conflictingFiles = mergeTreeOutput.trim().split('\n').slice(1).filter(f => f);
 
           console.log(`[WorktreeManager] Found conflicts in files: ${conflictingFiles.join(', ')}`);
 
           return {
             hasConflicts: true,
             conflictingFiles,
-            conflictingCommits: {
-              ours: ourCommits.trim().split('\n').filter(c => c),
-              theirs: theirCommits.trim().split('\n').filter(c => c)
-            },
+            conflictingCommits: await this.listDivergentCommits(worktreePath, base, mainBranch, commandRunner),
             canAutoMerge: false
           };
         }
@@ -926,14 +943,14 @@ export class WorktreeManager {
         console.log(`[WorktreeManager] merge-tree not available, using fallback conflict detection`);
 
         // Get files changed in both branches
-        const { stdout: diffOutput } = await commandRunner.execAsync(
-          `git diff --name-only ${base}...HEAD`,
+        const { stdout: diffOutput } = await commandRunner.execFile(
+          'git', ['diff', '--name-only', `${base}...HEAD`, '--'],
           worktreePath
         );
         const ourFiles = diffOutput.trim().split('\n').filter(f => f);
 
-        const { stdout: theirDiffOutput } = await commandRunner.execAsync(
-          `git diff --name-only ${base}...${mainBranch}`,
+        const { stdout: theirDiffOutput } = await commandRunner.execFile(
+          'git', ['diff', '--name-only', `${base}...${mainBranch}`, '--'],
           worktreePath
         );
         const theirFiles = theirDiffOutput.trim().split('\n').filter(f => f);
@@ -942,25 +959,12 @@ export class WorktreeManager {
         const conflictingFiles = ourFiles.filter(f => theirFiles.includes(f));
 
         if (conflictingFiles.length > 0) {
-          // Get commit info
-          const { stdout: ourCommits } = await commandRunner.execAsync(
-            `git log --oneline ${base}..HEAD`,
-            worktreePath
-          );
-          const { stdout: theirCommits } = await commandRunner.execAsync(
-            `git log --oneline ${base}..${mainBranch}`,
-            worktreePath
-          );
-
           console.log(`[WorktreeManager] Potential conflicts in files: ${conflictingFiles.join(', ')}`);
 
           return {
             hasConflicts: true,
             conflictingFiles,
-            conflictingCommits: {
-              ours: ourCommits.trim().split('\n').filter(c => c),
-              theirs: theirCommits.trim().split('\n').filter(c => c)
-            },
+            conflictingCommits: await this.listDivergentCommits(worktreePath, base, mainBranch, commandRunner),
             canAutoMerge: false
           };
         }
@@ -977,18 +981,35 @@ export class WorktreeManager {
     }
   }
 
-  async rebaseMainIntoWorktree(worktreePath: string, mainBranch: string, commandRunner: CommandRunner): Promise<void> {
+  /** Rebase metadata works in linked worktrees and does not depend on Git's locale. */
+  async isRebaseInProgress(worktreePath: string, pathResolver: PathResolver, commandRunner: CommandRunner): Promise<boolean> {
+    for (const stateDirectory of ['rebase-merge', 'rebase-apply']) {
+      const { stdout } = await commandRunner.execFile('git',
+        ['rev-parse', '--path-format=absolute', '--git-path', stateDirectory], worktreePath);
+      try {
+        if ((await stat(pathResolver.toFileSystem(stdout.trim()))).isDirectory()) return true;
+      } catch (error) {
+        const { code } = decodeBoundary(error, boundary.object({ code: boundary.optional(boundary.string) }));
+        if (code !== 'ENOENT') throw error;
+      }
+    }
+    return false;
+  }
+
+  /** Returns the conflict, with the worktree restored, when replaying a commit conflicts even though the tips merge cleanly. */
+  async rebaseMainIntoWorktree(worktreePath: string, mainBranch: string, pathResolver: PathResolver, commandRunner: CommandRunner): Promise<RebaseConflictCheck> {
     return await withLock(`git-rebase-${worktreePath}`, async () => {
       const executedCommands: string[] = [];
       let lastOutput = '';
       const startTime = Date.now();
       let conflictOccurred = false;
+      const rebaseAlreadyInProgress = await this.isRebaseInProgress(worktreePath, pathResolver, commandRunner);
 
       try {
         // Rebase the current worktree branch onto local main branch
         const command = `git rebase ${mainBranch}`;
         executedCommands.push(`${command} (in ${worktreePath})`);
-        const rebaseResult = await commandRunner.execAsync(command, worktreePath, { timeout: 120000 });
+        const rebaseResult = await commandRunner.execFile('git', ['rebase', '--no-rerere-autoupdate', '--', mainBranch], worktreePath, { timeout: 120000 });
         lastOutput = rebaseResult.stdout || rebaseResult.stderr || '';
 
         // Track successful rebase
@@ -1000,13 +1021,18 @@ export class WorktreeManager {
             conflict_occurred: false
           });
         }
+        return { hasConflicts: false, canAutoMerge: true };
       } catch (error: unknown) {
         const err = decodeBoundary(error, commandErrorSchema);
         console.error(`[WorktreeManager] Failed to rebase ${mainBranch} into worktree:`, err);
 
-        // Check if conflict occurred
-        const errorOutput = err.stderr || err.stdout || err.message || '';
-        conflictOccurred = errorOutput.includes('CONFLICT');
+        // This call's rebase stopped partway on a conflict, even one rerere resolved; its unmerged paths name the files
+        conflictOccurred = !rebaseAlreadyInProgress && await this.isRebaseInProgress(worktreePath, pathResolver, commandRunner);
+        const { stdout: unmergedOutput } = await commandRunner.execFile(
+          'git', ['diff', '--name-only', '--diff-filter=U', '--'],
+          worktreePath
+        ).catch(() => ({ stdout: '' }));
+        const conflictingFiles = unmergedOutput.trim().split('\n').filter(f => f);
 
         // Track failed rebase
         if (this.analyticsManager) {
@@ -1023,6 +1049,17 @@ export class WorktreeManager {
             operation_type: 'rebase_from_main',
             error_category: errorCategory
           });
+        }
+
+        if (conflictOccurred) {
+          await commandRunner.execFile('git', ['rebase', '--abort'], worktreePath);
+          const { stdout: mergeBase } = await commandRunner.execFile('git', ['merge-base', '--', 'HEAD', mainBranch], worktreePath);
+          return {
+            hasConflicts: true,
+            conflictingFiles,
+            conflictingCommits: await this.listDivergentCommits(worktreePath, mergeBase.trim(), mainBranch, commandRunner),
+            canAutoMerge: false
+          };
         }
 
         // Create detailed error with git command output
@@ -1066,40 +1103,38 @@ export class WorktreeManager {
       try {
         console.log(`[WorktreeManager] Squashing and merging worktree to ${mainBranch}: ${worktreePath}`);
 
+        await commandRunner.execFile('git', ['check-ref-format', '--branch', mainBranch], projectPath);
+
         // Get current branch name in worktree
-        let command = `git branch --show-current`;
         executedCommands.push(`git branch --show-current (in ${worktreePath})`);
-        const { stdout: currentBranch, stderr: stderr1 } = await commandRunner.execAsync(command, worktreePath);
+        const { stdout: currentBranch, stderr: stderr1 } = await commandRunner.execFile('git', ['branch', '--show-current'], worktreePath);
         lastOutput = currentBranch || stderr1 || '';
         const branchName = currentBranch.trim();
 
         // Get the base commit (where the worktree branch diverged from main)
-        command = `git merge-base ${mainBranch} HEAD`;
         executedCommands.push(`git merge-base ${mainBranch} HEAD (in ${worktreePath})`);
-        const { stdout: baseCommit, stderr: stderr2 } = await commandRunner.execAsync(command, worktreePath);
+        const { stdout: baseCommit, stderr: stderr2 } = await commandRunner.execFile('git', ['merge-base', '--', mainBranch, 'HEAD'], worktreePath);
         lastOutput = baseCommit || stderr2 || '';
         const base = baseCommit.trim();
 
         // Check if there are any changes to squash
-        command = `git log --oneline ${base}..HEAD`;
-        const { stdout: commits, stderr: stderr3 } = await commandRunner.execAsync(command, worktreePath);
+        const { stdout: commits, stderr: stderr3 } = await commandRunner.execFile('git', ['log', '--oneline', `${base}..HEAD`, '--'], worktreePath);
         lastOutput = commits || stderr3 || '';
         if (!commits.trim()) {
           throw new Error(`No commits to squash. The branch is already up to date with ${mainBranch}.`);
         }
 
         // SAFETY CHECK 1: Rebase worktree onto main FIRST before squashing
-        command = `git rebase ${mainBranch}`;
         executedCommands.push(`git rebase ${mainBranch} (in ${worktreePath})`);
         try {
-          const rebaseWorktreeResult = await commandRunner.execAsync(command, worktreePath, { timeout: 120000 });
+          const rebaseWorktreeResult = await commandRunner.execFile('git', ['rebase', '--', mainBranch], worktreePath, { timeout: 120000 });
           lastOutput = rebaseWorktreeResult.stdout || rebaseWorktreeResult.stderr || '';
           console.log(`[WorktreeManager] Successfully rebased worktree onto ${mainBranch} before squashing`);
         } catch (error: unknown) {
           const err = decodeBoundary(error, commandErrorSchema);
           // If rebase fails, abort it in the worktree
           try {
-            await commandRunner.execAsync(`git rebase --abort`, worktreePath);
+            await commandRunner.execFile('git', ['rebase', '--abort'], worktreePath);
           } catch {
             // Ignore abort errors
           }
@@ -1111,9 +1146,8 @@ export class WorktreeManager {
         }
 
         // Now squash all commits since base into one
-        command = `git reset --soft ${base}`;
         executedCommands.push(`git reset --soft ${base} (in ${worktreePath})`);
-        const resetResult = await commandRunner.execAsync(command, worktreePath);
+        const resetResult = await commandRunner.execFile('git', ['reset', '--soft', base], worktreePath);
         lastOutput = resetResult.stdout || resetResult.stderr || '';
 
         executedCommands.push(`git commit -m "..." (in ${worktreePath})`);
@@ -1121,17 +1155,15 @@ export class WorktreeManager {
         lastOutput = commitResult.stdout || commitResult.stderr || '';
 
         // Switch to main branch in the main repository
-        command = `git checkout ${mainBranch}`;
         executedCommands.push(`git checkout ${mainBranch} (in ${projectPath})`);
-        const checkoutResult = await commandRunner.execAsync(command, projectPath);
+        const checkoutResult = await commandRunner.execFile('git', ['checkout', mainBranch, '--'], projectPath);
         lastOutput = checkoutResult.stdout || checkoutResult.stderr || '';
 
         // SAFETY CHECK 2: Use --ff-only merge to prevent history rewriting
         // This will fail if local main has diverged from the worktree branch
-        command = `git merge --ff-only ${branchName}`;
         executedCommands.push(`git merge --ff-only ${branchName} (in ${projectPath})`);
         try {
-          const mergeResult = await commandRunner.execAsync(command, projectPath);
+          const mergeResult = await commandRunner.execFile('git', ['merge', '--ff-only', '--', branchName], projectPath);
           lastOutput = mergeResult.stdout || mergeResult.stderr || '';
           console.log(`[WorktreeManager] Successfully fast-forwarded ${mainBranch} to ${branchName}`);
         } catch (error: unknown) {
@@ -1205,33 +1237,32 @@ export class WorktreeManager {
       try {
         console.log(`[WorktreeManager] Merging worktree to ${mainBranch} (without squashing): ${worktreePath}`);
 
+        await commandRunner.execFile('git', ['check-ref-format', '--branch', mainBranch], projectPath);
+
         // Get current branch name in worktree
-        let command = `git branch --show-current`;
         executedCommands.push(`git branch --show-current (in ${worktreePath})`);
-        const { stdout: currentBranch, stderr: stderr1 } = await commandRunner.execAsync(command, worktreePath);
+        const { stdout: currentBranch, stderr: stderr1 } = await commandRunner.execFile('git', ['branch', '--show-current'], worktreePath);
         lastOutput = currentBranch || stderr1 || '';
         const branchName = currentBranch.trim();
 
         // Check if there are any changes to merge
-        command = `git log --oneline ${mainBranch}..HEAD`;
-        const { stdout: commits, stderr: stderr2 } = await commandRunner.execAsync(command, worktreePath);
+        const { stdout: commits, stderr: stderr2 } = await commandRunner.execFile('git', ['log', '--oneline', `${mainBranch}..HEAD`, '--'], worktreePath);
         lastOutput = commits || stderr2 || '';
         if (!commits.trim()) {
           throw new Error(`No commits to merge. The branch is already up to date with ${mainBranch}.`);
         }
 
         // SAFETY CHECK 1: Rebase worktree onto main FIRST (resolves conflicts in worktree, not main)
-        command = `git rebase ${mainBranch}`;
         executedCommands.push(`git rebase ${mainBranch} (in ${worktreePath})`);
         try {
-          const rebaseWorktreeResult = await commandRunner.execAsync(command, worktreePath, { timeout: 120000 });
+          const rebaseWorktreeResult = await commandRunner.execFile('git', ['rebase', '--', mainBranch], worktreePath, { timeout: 120000 });
           lastOutput = rebaseWorktreeResult.stdout || rebaseWorktreeResult.stderr || '';
           console.log(`[WorktreeManager] Successfully rebased worktree onto ${mainBranch}`);
         } catch (error: unknown) {
           const err = decodeBoundary(error, commandErrorSchema);
           // If rebase fails, abort it in the worktree
           try {
-            await commandRunner.execAsync(`git rebase --abort`, worktreePath);
+            await commandRunner.execFile('git', ['rebase', '--abort'], worktreePath);
           } catch {
             // Ignore abort errors
           }
@@ -1243,17 +1274,15 @@ export class WorktreeManager {
         }
 
         // Switch to main branch in the main repository
-        command = `git checkout ${mainBranch}`;
         executedCommands.push(`git checkout ${mainBranch} (in ${projectPath})`);
-        const checkoutResult = await commandRunner.execAsync(command, projectPath);
+        const checkoutResult = await commandRunner.execFile('git', ['checkout', mainBranch, '--'], projectPath);
         lastOutput = checkoutResult.stdout || checkoutResult.stderr || '';
 
         // SAFETY CHECK 2: Use --ff-only merge to prevent history rewriting
         // This will fail if local main has diverged from the worktree branch
-        command = `git merge --ff-only ${branchName}`;
         executedCommands.push(`git merge --ff-only ${branchName} (in ${projectPath})`);
         try {
-          const mergeResult = await commandRunner.execAsync(command, projectPath);
+          const mergeResult = await commandRunner.execFile('git', ['merge', '--ff-only', '--', branchName], projectPath);
           lastOutput = mergeResult.stdout || mergeResult.stderr || '';
           console.log(`[WorktreeManager] Successfully fast-forwarded ${mainBranch} to ${branchName}`);
         } catch (error: unknown) {

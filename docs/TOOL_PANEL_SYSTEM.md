@@ -38,6 +38,9 @@ The tool panel system consists of several key components:
 - XTerm.js instances mount/unmount based on panel visibility to save memory
 - Working directories are maintained independently per panel
 - Command history and environment variables can be preserved across restarts
+- Each shell gets `PANE_PANEL_KIND`, set when it starts so shell startup files can branch on it: `dock` (the first
+  plain shell, pinned to the bottom terminal dock), `shell` (another plain shell tab), `agent` (an agent CLI such as
+  Claude Code or Codex) or `command` (any other launch command)
 - Cmd-click on macOS or Ctrl-click on Windows/Linux opens `pane://open?pane=<pane-id>&panel=<panel-id>` links in terminal output inside Pane. The panel parameter is optional.
 
 ## Database Schema
@@ -56,7 +59,7 @@ The tool panel system consists of several key components:
 
 ## Implemented Panel Types
 
-The tool panel system supports 8 panel types (`ToolPanelType` in `shared/types/panels.ts`):
+The tool panel system supports 9 panel types (`ToolPanelType` in `shared/types/panels.ts`):
 
 1. **Terminal** (`terminal`): PTY shells, several per pane. Agent CLIs such as
    Claude Code, Codex and Cursor Agent run in terminal panels
@@ -70,6 +73,8 @@ The tool panel system supports 8 panel types (`ToolPanelType` in `shared/types/p
 7. **Setup Tasks** (`setup-tasks`): project setup checklist. Singleton,
    permanent, projects only.
 8. **Browser** (`browser`): embedded browser. Worktrees only.
+9. **Notes** (`notes`): the Pane's notes. Singleton. Experimental: hidden
+   until Settings → Advanced → Notes is on.
 
 ## Panel Capabilities
 

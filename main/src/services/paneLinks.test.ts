@@ -37,10 +37,16 @@ describe('pane:// links', () => {
   it('navigates to a saved repository or a Session', async () => {
     const { navigated, open } = setup();
 
+    const sessionId = '__orchestration_session_a729189d-ca54-47d8-b998-10c823d6ce9a__';
     await open('pane://open?repo=7');
-    await open('pane://open/?session=sess-abc');
+    await open(`pane://open/?session=${sessionId}`);
+    await open('pane://open?session=legacy-pane-chat');
 
-    expect(navigated).toEqual([{ kind: 'repo', repoId: 7 }, { kind: 'session', sessionId: 'sess-abc' }]);
+    expect(navigated).toEqual([
+      { kind: 'repo', repoId: 7 },
+      { kind: 'session', sessionId },
+      { kind: 'session', sessionId: 'legacy-pane-chat' },
+    ]);
   });
 
   it.each([

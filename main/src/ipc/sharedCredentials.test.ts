@@ -45,10 +45,10 @@ describe('shared credentials on a host', () => {
     const { registry, read } = await registerHost();
     const before = Date.now();
 
-    await registry.invokeRemote('remote:settings:update', [{ deepgramApiKey: 'dg-fake-1' }]);
+    await registry.invokeRemote('remote:settings:update', [{ deepgramApiKey: 'dg-fake-0123456789abcdef' }]);
 
     const credentials = await read();
-    expect(credentials.deepgramApiKey?.value).toBe('dg-fake-1');
+    expect(credentials.deepgramApiKey?.value).toBe('dg-fake-0123456789abcdef');
     expect(credentials.deepgramApiKey?.source).toEqual(expect.any(String));
     expect(Date.parse(credentials.deepgramApiKey?.updatedAt ?? '')).toBeGreaterThanOrEqual(before);
     expect(credentials.falApiKey).toBeUndefined();
@@ -63,14 +63,14 @@ describe('shared credentials on a host', () => {
 
   it('takes a newer key from another host and keeps its own newer key', async () => {
     const { registry, configManager, read, apply } = await registerHost();
-    await registry.invokeRemote('remote:settings:update', [{ deepgramApiKey: 'dg-local' }]);
+    await registry.invokeRemote('remote:settings:update', [{ deepgramApiKey: 'dg-local-0123456789abcdef' }]);
 
     await apply({
       deepgramApiKey: { value: 'dg-stale', updatedAt: '2020-01-01T00:00:00.000Z', source: 'Mac' },
       falApiKey: { value: 'fal-from-mac', updatedAt: '2020-01-01T00:00:00.000Z', source: 'Mac' },
     });
 
-    expect(configManager.getConfig().deepgramApiKey).toBe('dg-local');
+    expect(configManager.getConfig().deepgramApiKey).toBe('dg-local-0123456789abcdef');
     expect(configManager.getConfig().falApiKey).toBe('fal-from-mac');
     expect((await read()).falApiKey).toEqual({ value: 'fal-from-mac', updatedAt: '2020-01-01T00:00:00.000Z', source: 'Mac' });
   });

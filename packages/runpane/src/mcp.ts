@@ -25,14 +25,50 @@ const INSTRUCTIONS = [
   '- For the common jobs, prefer the composite tools: `agents_start` starts an agent on a task (in a new Pane for new work, or as a tab in an existing Pane with `pane: <id>`) and returns its pane and panel ids and a pane:// link; `agents_status` checks on it; `agents_send` sends it a follow-up message.',
   '- `agents_send` types text, queues with Tab while Codex is working, and submits with Enter when ready. To answer a menu or prompt in an agent\'s terminal, send exact keys with `panels_input` (Down arrow \\u001b[B, Enter \\r, Escape \\u001b) and check the screen with `agents_status` afterwards. Ask the user before answering trust or permission prompts.',
   '- Discover before you change anything. Repo selectors come from `repos_list` (or `active`); pane ids come from `panes_list`, `workspace_state`, or `agents_start`; panel ids from `agents_start` or `panels_list`.',
-  '- Tools with a `yes` input change Pane state. Pass `yes: true` only when the user asked for that change; without it the call is refused and nothing happens.',
-  '- `panes_archive` removes a Pane\'s worktree; `panes_restore` undoes it. `links_create` returns a pane:// link the user can click to see any Pane, panel, repo, or Session.',
+  '- Tools with a `yes` input change state. Pass `yes: true` only when the user asked for that change; without it the call is refused and nothing happens.',
+  '- `panes_archive` removes a Pane\'s worktree; `panes_restore` undoes it. `panes_adopt` makes a Pane for a git worktree that already exists, without changing it; `panes_rename` renames a Pane. `links_create` returns a pane:// link the user can click to see any Pane, panel, repo, or Session.',
+  '- To show the user a page, plan, report, file, or local dev server, open it as a tab beside the agent with `panels_open` instead of the system browser.',
+  '- A Session groups the Panes of one larger piece of work: `sessions_create` makes one, `sessions_associate` adds a Pane to it, and `sessions_pin` pins it in the sidebar.',
+  '- To run work on another machine in the user\'s tailnet, find it with `workspace_list`, then `workspace_exec` runs a command in its shell (its own `runpane` is first on PATH, so `runpane agents start ...` there starts an agent in that machine\'s Pane). `workspace_write` stages a file there (a prompt file, say) and `workspace_read` reads one back; both take any path form.',
+  '- `loops_create` schedules an agent or command to run on a cron schedule; `loops_list` shows each loop\'s next run and recent runs.',
   '- Before guessing how Pane works, call `docs_search`, then `docs_read` on a path it returns. The same docs are available as `runpane-docs:` resources.',
   '- Tools have no stdin: send exact terminal bytes (newlines, Ctrl-C as \\u0003) as text instead of a file.',
+  '- When you need the person (a choice, an approval, a short answer), call `notify` instead of asking in the terminal.',
+  '',
+  notifyGuidance(),
 ].join('\n');
+
+/** When and how to write a notify card; Pane writes the same rules into the agents' user-level instruction files. */
+function notifyGuidance(): string {
+  const { rules, cardRule, results, examples } = RUNPANE_CONTRACT.agentContext.notifyGuidance;
+  const card = ({ title, context, choices }: { title: string; context: string; choices?: readonly string[] }) =>
+    `title "${title}" / context "${context}"${choices ? ` / choices ${choices.map((choice) => `"${choice}"`).join(', ')}` : ''}`;
+  return [
+    'Writing a notify card:',
+    ...rules.map((rule) => `- ${rule}`),
+    `- ${results}`,
+    cardRule,
+    ...examples.map(({ name, ui, bad, good }) =>
+      `${name} (ui ${ui}). ${bad.map((example) => `Bad: ${card(example)}`).join(' ')} Good: ${card(good)}`),
+  ].join('\n');
+}
 
 // The lists only change with a new runpane version, which restarts this server.
 const LIST_CACHE = { ttlMs: 3_600_000, cacheScope: 'public' } as const;
+
+// A call that waits on the person reports progress this often, which keeps Claude Code's
+// 30-minute idle window for stdio servers open.
+const PROGRESS_INTERVAL_MS = 60_000;
+// Clients other than these end a tool call after a fixed limit (Cursor's CLI: 60 s), so notify
+// returns `waiting` before then and the agent resumes.
+const LONG_WAIT_CLIENTS = /claude-code|codex/i;
+const NOTIFY_RETURN_AFTER_MS = 50_000;
+const AGENT_NAMES: readonly [RegExp, string][] = [[/claude/i, 'Claude'], [/codex/i, 'Codex'], [/cursor/i, 'Cursor']];
+
+// 2026-07-28 requests carry the client's name; 2025 clients gave it at initialize.
+const clientInfoEnvelope = boundary.optional(boundary.object({
+  'io.modelcontextprotocol/clientInfo': boundary.optional(boundary.object({ name: boundary.string })),
+}));
 
 interface McpServerOptions {
   toolsets?: readonly string[];
@@ -105,7 +141,15 @@ export async function runMcpServer(options: McpServerOptions = {}): Promise<numb
       } catch (error) {
         return errorResult(`Invalid arguments for ${tool.name}: ${error instanceof Error ? error.message : String(error)}`);
       }
-      return callTool(tool, input, ctx.mcpReq.signal, rewrite);
+      const clientName = decodeBoundary(ctx.mcpReq.envelope, clientInfoEnvelope)?.['io.modelcontextprotocol/clientInfo']?.name
+        ?? server.getClientVersion()?.name ?? '';
+      const progressToken = ctx.mcpReq._meta?.progressToken;
+      let progress = 0;
+      const ticker = progressToken === undefined ? undefined : setInterval(() => {
+        progress += 1;
+        ctx.mcpReq.notify({ method: 'notifications/progress', params: { progressToken, progress } }).catch(() => {});
+      }, PROGRESS_INTERVAL_MS);
+      return callTool(tool, input, ctx.mcpReq.signal, rewrite, notifyEnv(clientName)).finally(() => clearInterval(ticker));
     });
     server.setRequestHandler('resources/list', () => ({
       resources: loadDocs(undefined).map((doc) => ({
@@ -131,6 +175,15 @@ export async function runMcpServer(options: McpServerOptions = {}): Promise<numb
   return 0;
 }
 
+/** What `runpane notify` needs to know about the client: its friendly name, and whether its calls time out. */
+function notifyEnv(clientName: string): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  const agent = AGENT_NAMES.find(([pattern]) => pattern.test(clientName))?.[1] ?? clientName;
+  if (agent) env.RUNPANE_NOTIFY_AGENT = agent;
+  if (!LONG_WAIT_CLIENTS.test(clientName)) env.RUNPANE_NOTIFY_RETURN_AFTER_MS = String(NOTIFY_RETURN_AFTER_MS);
+  return env;
+}
+
 function docUri(docPath: string): string {
   return `${DOCS_URI_PREFIX}${docPath.split('/').map(encodeURIComponent).join('/')}`;
 }
@@ -152,7 +205,16 @@ function rewriteCliHints(text: string, allTools: readonly McpTool[], served: Rea
   });
 }
 
-async function callTool(tool: McpTool, input: JsonObject, signal: AbortSignal, rewrite: (text: string) => string): Promise<ToolResult> {
+async function callTool(
+  tool: McpTool,
+  input: JsonObject,
+  signal: AbortSignal,
+  rewrite: (text: string) => string,
+  env: NodeJS.ProcessEnv,
+): Promise<ToolResult> {
+  if (tool.confirmsInServer && input.yes !== true) {
+    return errorResult(`${tool.name} changes state on a machine, so this server refused the call and nothing ran. Pass \`yes: true\` only when the user asked for this change.`);
+  }
   let argv: string[];
   try {
     argv = buildToolArgv(tool, input);
@@ -160,13 +222,16 @@ async function callTool(tool: McpTool, input: JsonObject, signal: AbortSignal, r
     // Bad arguments are tool execution errors, so the model can correct them and retry.
     return errorResult(`Invalid arguments for ${tool.name}: ${error instanceof Error ? error.message : String(error)}`);
   }
-  const { code, stdout, stderr } = await runCli(argv, signal);
-  // Docs come back as written; everything else speaks in tool names.
-  const translate = tool.toolsets.includes('docs') ? (text: string) => text : rewrite;
+  const { code, stdout, stderr } = await runCli(argv, signal, env);
+  // Docs come back as written; everything else speaks in tool names. Workspace results carry file
+  // contents and command output, which come back verbatim; only their errors are translated.
+  const asWritten = (text: string) => text;
+  const translate = tool.toolsets.includes('docs') ? asWritten : rewrite;
+  const translateOutput = tool.toolsets.includes('workspace') ? asWritten : translate;
   const failure = code !== 0 ? decodeFailure(stdout) : undefined;
-  const text = translate(failure
-    ? [failure.message, ...(failure.next ? [`Next: ${failure.next}`] : []), `Code: ${failure.code}`].join('\n')
-    : stdout.trim() || stderr.trim() || `runpane ${tool.command} exited with code ${code}`);
+  const text = failure
+    ? translate([failure.message, ...(failure.next ? [`Next: ${failure.next}`] : []), `Code: ${failure.code}`].join('\n'))
+    : translateOutput(stdout.trim() || stderr.trim() || `runpane ${tool.command} exited with code ${code}`);
   if (code !== 0) {
     const unconfirmed = !argv.includes(CONFIRM_FLAG) && tool.parameters.some((parameter) => parameter.flag === CONFIRM_FLAG);
     return errorResult(unconfirmed ? `${text}\nIf Pane refused the change, pass \`yes: true\` to confirm it.` : text);
@@ -202,12 +267,13 @@ function parseJsonObject(text: string): JsonObject | undefined {
 /**
  * Runs this same runpane entrypoint in a child so each call gets the CLI's exact behavior and
  * output. A cancelled request (notifications/cancelled) aborts the signal, which kills the child.
+ * `env` adds to this server's environment.
  */
-function runCli(argv: string[], signal: AbortSignal): Promise<{ code: number; stdout: string; stderr: string }> {
+function runCli(argv: string[], signal: AbortSignal, env: NodeJS.ProcessEnv): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [process.argv[1], ...argv], {
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: process.env,
+      env: { ...process.env, ...env },
       windowsHide: true,
       signal,
     });

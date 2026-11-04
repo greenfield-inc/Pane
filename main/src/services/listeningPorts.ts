@@ -2,6 +2,7 @@ import { execFile } from 'child_process';
 import http from 'http';
 import os from 'os';
 import path from 'path';
+import { readTunnelListeners } from '../daemon/client/portTunnel';
 import { readProcessTable, type ProcessTableRow } from '../utils/processTree';
 import {
   LISTENING_PORT_GROUP_ORDER,
@@ -64,8 +65,8 @@ interface Owner {
 }
 
 /**
- * Lists every listening TCP port on this machine with the process that owns it,
- * which group that process belongs to, and whether the port speaks HTTP.
+ * Lists every listening TCP port on this machine, except Pane's port tunnels, with the
+ * process that owns it, which group that process belongs to, and whether the port speaks HTTP.
  */
 export function createListeningPortMonitor(options: ListeningPortMonitorOptions): ListeningPortMonitor {
   const panePid = options.panePid ?? process.pid;
@@ -83,8 +84,13 @@ export function createListeningPortMonitor(options: ListeningPortMonitorOptions)
 
   const read = async (): Promise<ListeningPortsSnapshot> => {
     const readStartedAt = Date.now();
-    const sockets = await readListeningSockets();
+    const allSockets = await readListeningSockets();
     socketReadMs = Date.now() - readStartedAt;
+    // A remote desktop's tunnel listeners mirror another host's ports; listing them would let
+    // desktops mirror each other's mirrors. Read after the sockets, so a tunnel that was
+    // listening by then has recorded its port.
+    const tunnels = await readTunnelListeners();
+    const sockets = allSockets.filter(socket => socket.pid === null || !tunnels.get(socket.pid)?.has(socket.port));
     const key = (socket: ListeningSocket) => `${socket.port}:${socket.pid ?? ''}:${socket.process}`;
     const unknownOwners = sockets.filter(socket => !owners.has(key(socket)));
     const provisional = new Map<string, Owner>();

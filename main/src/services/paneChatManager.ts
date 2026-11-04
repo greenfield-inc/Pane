@@ -11,13 +11,14 @@ import type { TerminalPanelState, ToolPanel } from '../../../shared/types/panels
 import {
   getPaneChatPanelId,
   normalizePaneChatAgent,
+  ONBOARDING_SESSION_NAME,
   PANE_CHAT_SESSION_ID,
   type PaneChatAgent,
   type PaneChatState,
 } from '../../../shared/types/paneChat';
 import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
 import { isAgentSupportedOnPlatform } from '../../../shared/constants/agentLaunchPresets';
-import { paneChatFirstPrompt } from './paneChatMigrateOffer';
+import { paneChatFirstPrompt, paneIsEmpty } from './paneChatMigrateOffer';
 
 const PANE_CHAT_TITLE = 'Pane Chat';
 const PANE_CHAT_BOOTSTRAP_VERSION = 10;
@@ -60,7 +61,7 @@ export class PaneChatManager {
     const config = this.configManager.getConfig();
     const cwd = prepareSessionWorkspace('legacy-pane-chat', config.defaultSessionProfile, undefined);
     const session = this.ensureSession(cwd);
-    const panel = await this.ensurePanel(session.id, agent);
+    const panel = await this.ensurePanel(session, agent);
     await panelManager.setActivePanel(session.id, panel.id);
     const resolvedAgent = this.resolvePanelAgent(panel) ?? agent;
 
@@ -94,9 +95,10 @@ export class PaneChatManager {
       return existingSession;
     }
 
+    // Named once, when first created: a new data folder starts with the Onboarding Session.
     const session = this.sessionManager.createSessionWithId(
       PANE_CHAT_SESSION_ID,
-      PANE_CHAT_TITLE,
+      paneIsEmpty() ? ONBOARDING_SESSION_NAME : PANE_CHAT_TITLE,
       cwd,
       '',
       'pane-chat',
@@ -114,7 +116,7 @@ export class PaneChatManager {
     return this.sessionManager.getSession(session.id) ?? session;
   }
 
-  private async ensurePanel(sessionId: string, agent: PaneChatAgent): Promise<ToolPanel> {
+  private async ensurePanel(session: Session, agent: PaneChatAgent): Promise<ToolPanel> {
     const panelId = getPaneChatPanelId(agent);
     const existingPanel = panelManager.getPanel(panelId);
     if (existingPanel) {
@@ -134,11 +136,11 @@ export class PaneChatManager {
 
     return panelManager.createPanel({
       id: panelId,
-      sessionId,
+      sessionId: session.id,
       type: 'terminal',
       title: agent === 'claude'
-        ? PANE_CHAT_TITLE
-        : `${PANE_CHAT_TITLE} - ${RUNPANE_CONTRACT.agentTemplates[agent].title}`,
+        ? session.name
+        : `${session.name} - ${RUNPANE_CONTRACT.agentTemplates[agent].title}`,
       initialState: this.buildTerminalState(agent),
       metadata: { permanent: true },
     });

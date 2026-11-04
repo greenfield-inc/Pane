@@ -15,6 +15,7 @@ import { useConfigStore } from '../../../stores/configStore';
 import { useRemoteRuntimeState } from '../../../hooks/useRemoteRuntimeState';
 import { Dropdown } from '../../ui/Dropdown';
 import { PortsList } from './PortsList';
+import { RefusedFilesNotice, type FileRefusal } from './RefusedFilesNotice';
 
 const COPIED_FEEDBACK_MS = 1500;
 
@@ -29,6 +30,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   const [inputUrl, setInputUrl] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [urlError, setUrlError] = useState('');
+  const [refusals, setRefusals] = useState<FileRefusal[]>([]);
   const [canGoBack, setCanGoBack] = useState(false);
   const [canGoForward, setCanGoForward] = useState(false);
   const [devToolsOpen, setDevToolsOpen] = useState(false);
@@ -377,6 +379,11 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
       setIsLoading(false);
     };
 
+    // A new document drops the previous page's load errors.
+    const onDidNavigateDocument = () => {
+      setUrlError('');
+      setRefusals([]);
+    };
     const onDidStartLoading = () => setIsLoading(true);
     const onDidFailLoad = (event: Electron.DidFailLoadEvent) => {
       if (!event.isMainFrame || event.errorCode === -3) return;
@@ -391,6 +398,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
     };
 
     webview.addEventListener('dom-ready', onDomReady);
+    webview.addEventListener('did-navigate', onDidNavigateDocument);
     webview.addEventListener('did-navigate', onDidNavigate);
     webview.addEventListener('did-navigate-in-page', onDidNavigate);
     webview.addEventListener('did-start-loading', onDidStartLoading);
@@ -399,6 +407,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
 
     return () => {
       webview.removeEventListener('dom-ready', onDomReady);
+      webview.removeEventListener('did-navigate', onDidNavigateDocument);
       webview.removeEventListener('did-navigate', onDidNavigate);
       webview.removeEventListener('did-navigate-in-page', onDidNavigate);
       webview.removeEventListener('did-start-loading', onDidStartLoading);
@@ -436,6 +445,19 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
     window.addEventListener('browser-panel:popup-requested', handler);
     return () => window.removeEventListener('browser-panel:popup-requested', handler);
   }, [panel.id, panel.sessionId, addPanel, setActivePanelInStore]);
+
+  // A host file this page asked for and did not get, often a script or stylesheet the page
+  // never shows. Main names the file and why, so the person sees what to fix.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      // SAFETY: The preload bridge is the only sender of this event.
+      const { panelId, message, next } = (e as CustomEvent<FileRefusal & { panelId: string }>).detail;
+      if (panelId !== panel.id) return;
+      setRefusals(current => (current.some(refusal => refusal.message === message) ? current : [...current, { message, next }]));
+    };
+    window.addEventListener('browser-panel:file-refused', handler);
+    return () => window.removeEventListener('browser-panel:file-refused', handler);
+  }, [panel.id]);
 
   // Navigate requests (terminal links, "Open in Browser") name the tab they target;
   // only that tab acts, and it takes focus so the person sees the page.
@@ -489,7 +511,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
           onClick={handleBack}
           disabled={!canGoBack}
           className={cn(
-            'p-1 rounded hover:bg-surface-hover transition-colors',
+            'p-1 rounded enabled:hover:bg-surface-hover transition-colors',
             !canGoBack && 'opacity-30 cursor-not-allowed'
           )}
           title="Back"
@@ -500,7 +522,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
           onClick={handleForward}
           disabled={!canGoForward}
           className={cn(
-            'p-1 rounded hover:bg-surface-hover transition-colors',
+            'p-1 rounded enabled:hover:bg-surface-hover transition-colors',
             !canGoForward && 'opacity-30 cursor-not-allowed'
           )}
           title="Forward"
@@ -511,7 +533,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
           onClick={handleRefresh}
           disabled={!url}
           className={cn(
-            'p-1 rounded hover:bg-surface-hover transition-colors',
+            'p-1 rounded enabled:hover:bg-surface-hover transition-colors',
             !url && 'opacity-30 cursor-not-allowed'
           )}
           title="Refresh"
@@ -526,7 +548,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
           onClick={handleToggleDevTools}
           disabled={!url}
           className={cn(
-            'p-1 rounded hover:bg-surface-hover transition-colors',
+            'p-1 rounded enabled:hover:bg-surface-hover transition-colors',
             !url && 'opacity-30 cursor-not-allowed',
             devToolsOpen && 'bg-surface-hover text-text-primary'
           )}
@@ -566,7 +588,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
           onClick={handleCopyUrl}
           disabled={!url}
           className={cn(
-            'p-1 rounded hover:bg-surface-hover transition-colors',
+            'p-1 rounded enabled:hover:bg-surface-hover transition-colors',
             !url && 'opacity-30 cursor-not-allowed'
           )}
           title="Copy URL"
@@ -630,6 +652,7 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
           {urlError}
         </div>
       )}
+      {refusals.length > 0 && <RefusedFilesNotice refusals={refusals} onDismiss={() => setRefusals([])} />}
 
       {/* Content area */}
       {!url ? (

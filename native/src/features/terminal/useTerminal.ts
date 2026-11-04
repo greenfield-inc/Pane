@@ -26,6 +26,8 @@ export function useTerminal(panelId: string, sessionId: string) {
   const webView = useRef<WebView>(null);
   const [status, setStatus] = useState<TerminalStatus>('loading');
   const [error, setError] = useState<unknown>(null);
+  // Whether the page shows a screen from the host, which stays up while it reloads.
+  const [hasContent, setHasContent] = useState(false);
   const [atBottom, setAtBottom] = useState(true);
   const [screenText, setScreenText] = useState('');
   const [size, setSize] = useState<TerminalSize | null>(null);
@@ -55,6 +57,7 @@ export function useTerminal(panelId: string, sessionId: string) {
         if (pending.current) session.ack(pending.current.length);
         pending.current = '';
         send({ type: 'reset', data });
+        setHasContent(true);
         setStatus('ready');
         setError(null);
       },
@@ -64,6 +67,8 @@ export function useTerminal(panelId: string, sessionId: string) {
       },
     },
     onError: cause => {
+      // A restore cut short by a reconnect is retried once the connection is back.
+      if (client.getState().status !== 'connected') return;
       setError(cause);
       setStatus('error');
     },
@@ -77,7 +82,7 @@ export function useTerminal(panelId: string, sessionId: string) {
 
   useEffect(() => client.onRestore(async signal => {
     if (!signal.aborted && size) await session.restore(size);
-  }), [client, session, size]);
+  }, 'terminal'), [client, session, size]);
 
   // Restore once the page has measured itself, and again after every
   // reconnect: the event stream does not replay output missed while offline.
@@ -130,6 +135,7 @@ export function useTerminal(panelId: string, sessionId: string) {
         send(themeCommand);
         const next = { cols: message.cols, rows: message.rows };
         // A page that loads again (after iOS reclaimed it) starts blank.
+        setHasContent(false);
         if (size && connected) {
           setStatus('loading');
           void session.restore(next);
@@ -143,7 +149,10 @@ export function useTerminal(panelId: string, sessionId: string) {
           : { cols: message.cols, rows: message.rows });
         break;
       case 'input':
-        void session.sendInput(message.data).catch(cause => { setError(cause); setStatus('error'); });
+        // The page only generates input: replies to the agent's terminal queries and
+        // scroll reports. One that cannot be sent while reconnecting is dropped; a
+        // broken connection shows in the header, not over the terminal.
+        void session.sendInput(message.data).catch(() => undefined);
         break;
       case 'written':
         session.ack(message.units);
@@ -166,6 +175,7 @@ export function useTerminal(panelId: string, sessionId: string) {
       webView.current?.reload();
     },
     status,
+    hasContent,
     error,
     atBottom,
     screenText,

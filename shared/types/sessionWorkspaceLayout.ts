@@ -122,7 +122,8 @@ function measure(node: SessionLayoutNode, depth: number, census: LayoutCensus): 
  * past the tile or depth bounds, duplicate node or Session ids, split nodes
  * whose sizes do not line up with their children.
  */
-export function decodeSessionWorkspaceLayout<Value>(value: Value): SessionWorkspaceLayout | null {
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- External saved data is decoded immediately with layoutSchema, then measured for structural bounds.
+export function decodeSessionWorkspaceLayout(value: unknown): SessionWorkspaceLayout | null {
   const decoded = decodeOptionalBoundary(value, layoutSchema) ?? null;
   if (!decoded) return null;
   const census: LayoutCensus = { tiles: 0, depth: 1, nodeIds: new Set(), sessionIds: new Set() };
