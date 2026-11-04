@@ -5106,7 +5106,7 @@ async function checkPauseCommands() {
 
       const text = await withFakeDaemon(paneDir, () => ({ result: partlyResumed }), () => run(runtime, ['sessions', 'resume', '--session', 'Release']));
       assert.strictEqual(text.code, 1, `${runtime} exits 1 when a tab could not resume`);
-      assert.deepStrictEqual(text.stdout.split('\n'), [
+      assert.deepStrictEqual(text.stdout.split(/\r?\n/), [
         'Session Release: 1 tab(s) resumed, 1 could not start.',
         'FAIL panel panel-2: codex is not installed',
         'Next: runpane watch --session session-1 --until-event --json',
