@@ -336,7 +336,9 @@ matching GitHub release assets and prints a warning.
 The wrapper sends best-effort command failures and download lifecycle telemetry
 with a persisted anonymous `install_id`. Successful routine commands emit nothing,
 and neither do documented result exits such as `panels wait` not ready or `doctor`
-findings. A failure loop sends each cause at most once an hour, and at most 10
+findings. Polling and status commands (`panes list`, `panels wait`, `watch`,
+`panes archive`, `workspace state`, `agents status`, `doctor`) and `not_found`
+failures outside `install` and `update` emit nothing. A failure loop sends each cause at most once an hour, and at most 10
 failures an hour.
 Distinct `install_id` counts on `runpane_wrapper_*` events measure installs that
 report failures or download activity, not all CLI users. Telemetry is disabled in

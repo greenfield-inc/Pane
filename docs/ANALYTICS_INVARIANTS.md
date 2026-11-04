@@ -188,7 +188,7 @@ The sanitizer drops any other value.
 | `remote_pane_connection_code_import_failed` | `main/src/ipc/remoteDaemon.ts` | Client import failed |
 | `remote_pane_client_connect_started` | `main/src/daemon/client/remotePaneClient.ts` | Desktop client connection started |
 | `remote_pane_client_connected` | `main/src/daemon/client/remotePaneClient.ts`, `main/src/daemon/httpApiServer.ts` | Desktop client connected |
-| `remote_pane_client_connection_failed` | `main/src/daemon/client/remotePaneClient.ts`, `main/src/ipc/remoteDaemon.ts` | Desktop client connection failed |
+| `remote_pane_client_connection_failed` | `main/src/daemon/client/remotePaneClient.ts` | Desktop client initial connect or connection check failed; background state refreshes send nothing |
 | `remote_pane_client_disconnected` | `main/src/daemon/client/remotePaneClient.ts`, `main/src/daemon/httpApiServer.ts` | Desktop client disconnected |
 | `remote_pane_profile_deleted` | `main/src/ipc/remoteDaemon.ts` | Client profile removed |
 | `remote_pane_host_access_cleared` | `main/src/ipc/remoteDaemon.ts` | Host access revoked |
@@ -210,7 +210,12 @@ lifecycle events; honor explicit local analytics opt-out as well as CI,
 `runpane_wrapper_command_failed` reports thrown errors, and non-zero exits from
 `install` or `update` only (also when setup runs them) (`runTrackedCommand` in
 `packages/runpane/src/cli.ts` and `run_tracked_command` in the pip `cli.py`).
-Other exit codes are documented results and send nothing. The event carries
+Other exit codes are documented results and send nothing. Polling and status
+commands (`panes list`, `panels wait`, `watch`, `panes archive`,
+`workspace state`, `agents status`, `doctor`) send no failure events, and
+neither does a `not_found` failure outside `install` and `update`
+(`isExpectedFailure` in `packages/runpane/src/telemetry.ts`,
+`_is_expected_failure` in the pip `telemetry.py`). The event carries
 `error_code` (the code the `--json` error prints) and a `failure_category` read
 from that code and the message's first line. Both wrappers share
 `<PANE_DIR>/runpane-wrapper-telemetry.json`: one failure event per cause per

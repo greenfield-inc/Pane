@@ -136,11 +136,11 @@ for (const wrapper of WRAPPERS) {
   test(`${wrapper}: a daemon failure sends one event with its code, category and command`, async () => {
     const paneDir = freshPaneDir();
     const { codes, events } = await withFakeDaemon(paneDir, () => ({ error: permissionDenied }),
-      () => run(wrapper, [['panes', 'list', '--json']], telemetryEnv(paneDir)));
+      () => run(wrapper, [['repos', 'list', '--json']], telemetryEnv(paneDir)));
     assert.deepEqual(codes, [1]);
     assert.equal(events.length, 1);
     assert.equal(events[0].event, 'runpane_wrapper_command_failed');
-    assert.equal(events[0].properties.command, 'panes list');
+    assert.equal(events[0].properties.command, 'repos list');
     assert.equal(events[0].properties.error_code, 'EACCES');
     assert.equal(events[0].properties.failure_category, 'permission');
     assert.doesNotMatch(JSON.stringify(events[0]), /private-repo|\/Users\//);
@@ -158,13 +158,13 @@ for (const wrapper of WRAPPERS) {
   test(`${wrapper}: a loop of failures sends one event per cause and at most 10 an hour`, async () => {
     const paneDir = freshPaneDir();
     const sameCause = await withFakeDaemon(paneDir, () => ({ error: permissionDenied }),
-      () => run(wrapper, Array.from({ length: 20 }, () => ['panes', 'list', '--json']), telemetryEnv(paneDir)));
+      () => run(wrapper, Array.from({ length: 20 }, () => ['repos', 'list', '--json']), telemetryEnv(paneDir)));
     assert.equal(sameCause.codes.length, 20);
     assert.equal(sameCause.events.length, 1);
 
     const otherPaneDir = freshPaneDir();
     const distinctCauses = await withFakeDaemon(otherPaneDir, (_channel, n) => ({ error: { code: `ERR_TEST_${n}`, message: 'failed' } }),
-      () => run(wrapper, Array.from({ length: 15 }, () => ['panes', 'list', '--json']), telemetryEnv(otherPaneDir)));
+      () => run(wrapper, Array.from({ length: 15 }, () => ['repos', 'list', '--json']), telemetryEnv(otherPaneDir)));
     assert.equal(distinctCauses.events.length, 10);
   });
 

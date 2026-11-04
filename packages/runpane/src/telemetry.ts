@@ -253,11 +253,25 @@ export function buildWrapperTelemetryProperties(input: WrapperTelemetryInput): W
   return properties;
 }
 
+/** Polling and status commands agents run in loops: their failures are routine and send nothing. */
+const QUIET_COMMANDS = new Set<string>([
+  'panes list', 'panels wait', 'watch', 'panes archive', 'workspace state', 'agents status', 'doctor',
+]);
+
+/** Install and update failures always report; elsewhere quiet commands and `not_found` are expected outcomes. */
+function isExpectedFailure(context: WrapperTelemetryContext): boolean {
+  if (context.resolvedCommand === 'install' || context.resolvedCommand === 'update') return false;
+  return QUIET_COMMANDS.has(context.command) || context.failureCategory === 'not_found';
+}
+
 export async function trackWrapperEvent(
   event: WrapperTelemetryEventName,
   context: WrapperTelemetryContext
 ): Promise<void> {
   if (isTelemetryDisabled()) {
+    return;
+  }
+  if (event === 'runpane_wrapper_command_failed' && isExpectedFailure(context)) {
     return;
   }
 
