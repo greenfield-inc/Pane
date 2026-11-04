@@ -142,7 +142,9 @@ const BrowserPanel: React.FC<BrowserPanelProps> = ({ panel, isActive }) => {
   const findRootRef = useRef<HTMLDivElement>(null);
   const webviewReadyRef = useRef(false);
   const hasPageRef = useRef(false);
-  hasPageRef.current = url !== '';
+  useEffect(() => {
+    hasPageRef.current = url !== '';
+  }, [url]);
   const findAdapter = useMemo(() => createBrowserFindAdapter({
     getWebview: () => webviewRef.current,
     isReady: () => webviewReadyRef.current,

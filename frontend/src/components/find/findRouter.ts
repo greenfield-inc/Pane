@@ -86,6 +86,14 @@ function resolveFocusedFindPanelId(): string | null {
   return getFindTarget(id)?.adapter.mode() === 'native' ? null : id;
 }
 
+/** Cmd/Ctrl+G applies when the focused tab's bar is open or remembers a query. */
+function canStep(): boolean {
+  const id = resolveFocusedFindPanelId();
+  if (!id) return false;
+  const bar = getFindBar(id);
+  return bar.open || bar.query !== '';
+}
+
 /** Mount once, at the app root. */
 export function useFindHotkeys(): void {
   useEffect(() => {
@@ -111,13 +119,6 @@ export function useFindHotkeys(): void {
       if (id) openFind(id);
     },
   });
-
-  const canStep = () => {
-    const id = resolveFocusedFindPanelId();
-    if (!id) return false;
-    const bar = getFindBar(id);
-    return bar.open || bar.query !== '';
-  };
 
   useHotkey({
     id: 'find-next',

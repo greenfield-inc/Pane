@@ -46,7 +46,7 @@ export function FindBarView({ panelId, className, bar }: FindBarProps & { bar: F
 
   // Esc from a button (after clicking Next, or tabbing out of the input).
   // The input's own handler stops its keys before they get here.
-  const handleControlKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+  const handleControlKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     if (!findBarControlKeyAction({ key: event.key, isComposing: event.nativeEvent.isComposing })) return;
     event.preventDefault();
     event.stopPropagation();
@@ -54,8 +54,7 @@ export function FindBarView({ panelId, className, bar }: FindBarProps & { bar: F
   };
 
   return (
-    <div
-      role="search"
+    <search
       aria-label="Find in tab"
       data-find-bar={panelId}
       onKeyDown={handleControlKeyDown}
@@ -117,6 +116,6 @@ export function FindBarView({ panelId, className, bar }: FindBarProps & { bar: F
       >
         <X className="h-4 w-4" />
       </button>
-    </div>
+    </search>
   );
 }
