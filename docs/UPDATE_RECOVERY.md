@@ -95,7 +95,8 @@ before shutting down Pane.
 The snapshot holds Pane's own state, not everything in the data folder: every
 top-level file (config, databases, journals) and the folders Pane keeps state in
 (`PANE_STATE_FOLDERS` in `packages/runpane/src/updateCapacity.ts`). Folders Pane
-rebuilds or doesn't migrate (`bin`, `shell`, `agent-adapters`, `projects` and
+rebuilds or doesn't migrate (`bin`, `shell`, `projects`, the `agent-adapters`
+folder older versions downloaded chat adapters into, and
 others in `PANE_UNSNAPSHOTTED_FOLDERS`), git checkouts, and folders Pane does
 not know are left out. Preflight lists the last two in `snapshotSkipped`, so a
 dry run shows them; back them up yourself if they matter. A test fails when the

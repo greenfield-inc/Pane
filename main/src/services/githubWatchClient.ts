@@ -143,8 +143,11 @@ export class GithubWatchClient {
         if (!value) throw new Error('empty credential');
         credential = { value, expires: this.now() + TOKEN_TTL_MS };
         this.credentials.set(host, credential);
-      } catch {
-        throw new GithubWatchError(`Cannot authenticate to ${host}. Install gh and run gh auth login --hostname ${host}; watching will retry.`);
+      } catch (error) {
+        if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+          throw new GithubWatchError("gh was not found on the Pane daemon's PATH. Add the directory containing gh to the daemon's PATH; watching will retry.");
+        }
+        throw new GithubWatchError(`Could not read GitHub CLI credentials for ${host} from the Pane daemon. Run gh auth status --hostname ${host} in the daemon's environment to check config or keyring access; watching will retry.`);
       }
     }
     const url = host === 'github.com' ? 'https://api.github.com/graphql' : `https://${host}/api/graphql`;

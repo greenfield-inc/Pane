@@ -1,3 +1,6 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { GithubWatchClient, GithubWatchError } from './githubWatchClient';
 
@@ -71,6 +74,29 @@ describe('complete PR reads', () => {
 });
 
 describe('GitHub watch transport', () => {
+  it('identifies when the daemon cannot find gh on its PATH', async () => {
+    const bin = await mkdtemp(join(tmpdir(), 'pane-no-gh-'));
+    const fetcher = vi.fn();
+    vi.stubEnv('PATH', bin);
+    try {
+      const client = new GithubWatchClient({ fetch: fetcher });
+      await expect(client.fingerprints([target(1)])).rejects.toThrow("gh was not found on the Pane daemon's PATH");
+      expect(fetcher).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllEnvs();
+      await rm(bin, { recursive: true, force: true });
+    }
+  });
+
+  it('reports unavailable daemon credentials without exposing command output', async () => {
+    const client = new GithubWatchClient({
+      token: async () => { throw new Error('private command output'); },
+    });
+    await expect(client.fingerprints([target(1)])).rejects.toMatchObject({
+      message: "Could not read GitHub CLI credentials for github.com from the Pane daemon. Run gh auth status --hostname github.com in the daemon's environment to check config or keyring access; watching will retry.",
+    });
+  });
+
   it.each(['checks', 'comment', 'review', 'review-edit', 'thread', 'head', 'base', 'base-deleted'])('detects same-count %s changes', async kind => {
     let changed = false;
     const client = new GithubWatchClient({ token: async () => 'secret', fetch: async (_url, init) => {

@@ -773,6 +773,34 @@ test('parity tools call the app daemon channel with the pane id and keep the --y
   }
 });
 
+test('workspace_state accepts panel summaries and titles in the daemon snapshot', async () => {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-mcp-'));
+  const entry = { gen: 4, at: '2026-09-25T00:00:00.000Z', paneId: 'pane-7', paneName: 'fix-login', baseline: true };
+  const snapshot = {
+    ok: true, epoch: 'epoch-1', generation: 4,
+    entries: [
+      { ...entry, kind: 'pane.created', source: 'session', panels: [
+        { panelId: 'panel-8', title: 'Claude Code', agentType: 'claude', agentState: 'unknown', running: true },
+        { panelId: 'panel-9', title: 'Terminal' },
+      ] },
+      { ...entry, kind: 'agent.unknown', source: 'agent', panelId: 'panel-8', panelTitle: 'Claude Code', to: 'unknown', running: true },
+    ],
+  };
+  try {
+    await withStubDaemon(paneDir, { 'runpane:workspace:state': snapshot }, async () => {
+      await withMcpClient(async (client) => {
+        const tool = (await client.listTools()).tools.find((item) => item.name === 'workspace_state');
+        const result = await client.callTool({ name: 'workspace_state', arguments: { paneDir } });
+        assert.equal(result.isError, undefined, result.content[0].text);
+        assertMatchesAdvertisedSchema(tool, result.structuredContent);
+        assert.deepEqual(result.structuredContent, snapshot);
+      });
+    });
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
+});
+
 test('agent tasks start, check on, and message an agent in one call each', async () => {
   const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-mcp-'));
   const repo = { id: 3, name: 'app', path: '/work/app', active: true, environment: 'linux', sessionCount: 1 };
