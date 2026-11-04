@@ -1196,7 +1196,7 @@ const PARSER_DEFAULT_DIFFERENCES = {
   includeShells: false, noHeldInput: false, selfTest: false, report: false,
   watchKinds: [], watchPaneIds: [], watchExcludePaneIds: [], attachments: [],
   asFilePointer: false, interrupt: false, noAssociate: false, removeWorktree: false, merged: false,
-  quiet: false, readOnly: false, launch: false,
+  quiet: false, readOnly: false, launch: false, chat: false, launchArgs: {},
   all: false, inboxIds: [], waitForResult: false, paused: false,
 };
 
@@ -2908,6 +2908,38 @@ print(json.dumps({"submit": submit, "tool": tool, "refused": refused}))
     assert.match(python.refused[0], /--attach needs --as-file-pointer/);
     assert.match(python.refused[1], /--attach missing\.png: no such file/);
   });
+}
+
+/** `panels create --chat` and `--agent-farm`: npm and Python send the same chat tab request and refuse the same mistakes. */
+async function checkChatTabCreateParity() {
+  const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
+  const { buildPanelCreateRequest } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'localControl.js'));
+  const cases = [
+    ['panels', 'create', '--pane', 'pane-1', '--chat', '--agent', 'codex', '--initial-input', 'Fix it', '--yes'],
+    ['panels', 'create', '--pane', 'pane-1', '--agent-farm', 'greenfield/implementer:opus', '--arg', 'docs=grain', '--arg', 'task=a=b', '--title', 'Implementer', '--source', 'agent', '--yes'],
+  ];
+  const npm = [];
+  for (const args of cases) npm.push(JSON.parse(JSON.stringify(await buildPanelCreateRequest(parseRunpaneArgs(args)))));
+  assert.deepStrictEqual(npm[0], { paneId: 'pane-1', type: 'chat', chat: { agent: 'codex', initialInput: 'Fix it' } });
+  assert.deepStrictEqual(npm[1], { paneId: 'pane-1', type: 'chat', chat: { profile: 'greenfield/implementer:opus', args: { docs: 'grain', task: 'a=b' }, title: 'Implementer' }, noFocus: true, source: 'agent' });
+  await assert.rejects(buildPanelCreateRequest(parseRunpaneArgs(['panels', 'create', '--pane', 'p', '--chat', '--agent', 'cursor', '--yes'])), /--chat opens Claude or Codex/);
+  await assert.rejects(buildPanelCreateRequest(parseRunpaneArgs(['panels', 'create', '--pane', 'p', '--agent', 'claude', '--arg', 'a=b', '--yes'])), /--arg is a launch argument for --agent-farm/);
+  const python = JSON.parse(runPythonSnippet(`
+import json
+import runpane.local_control as local_control
+from runpane.cli import parse_args
+built = [local_control.build_panel_create_request(parse_args(args)) for args in ${JSON.stringify(cases)}]
+refused = []
+for args in (["panels", "create", "--pane", "p", "--chat", "--agent", "cursor", "--yes"], ["panels", "create", "--pane", "p", "--agent", "claude", "--arg", "a=b", "--yes"]):
+    try:
+        local_control.build_panel_create_request(parse_args(args))
+    except ValueError as error:
+        refused.append(str(error))
+print(json.dumps({"built": built, "refused": refused}))
+`));
+  assert.deepStrictEqual(python.built, npm);
+  assert.match(python.refused[0], /--chat opens Claude or Codex/);
+  assert.match(python.refused[1], /--arg is a launch argument for --agent-farm/);
 }
 
 async function checkDeliveryParity() {
@@ -5772,6 +5804,7 @@ async function runChecks() {
   await checkWrapperAgentParity();
   await checkFilePointerParity();
   await checkAttachParity();
+  await checkChatTabCreateParity();
   await checkDeliveryParity();
   await checkReportParity();
   await checkReportDeliveryLine();
