@@ -159,6 +159,8 @@ type NotifyServices = Pick<AppServices, 'configManager' | 'getMainWindow'> & {
   orchestrationSessionManager?: {
     approvalSession(paneId: string, panelId?: string): NotifySession | undefined;
     approvalSessionsById(): Map<string, NotifySession>;
+    on(event: 'changed', listener: () => void): void;
+    off(event: 'changed', listener: () => void): void;
   };
   /** Approvals' fallback reads workers' blocked reports from it. */
   sessionInbox?: { all(): RunpaneInboxItem[]; subscribe(listener: () => void): () => void };
@@ -215,6 +217,11 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
       .flatMap(project => project.wsl_enabled && project.wsl_distribution ? [project.wsl_distribution] : []),
     sessionOf: (paneId, panelId) => services.orchestrationSessionManager?.approvalSession(paneId, panelId),
     sessionsById: () => services.orchestrationSessionManager?.approvalSessionsById() ?? new Map(),
+    onSessionsChanged: (listener) => {
+      const sessions = services.orchestrationSessionManager;
+      sessions?.on('changed', listener);
+      return () => { sessions?.off('changed', listener); };
+    },
     inbox: services.sessionInbox,
   });
 

@@ -128,10 +128,16 @@ function RelayCard({ item, paneId }: { item: NotifyItem; paneId?: string }) {
   return (
     <div className="rounded-[18px] bg-surface-primary p-3.5 shadow-card ring-1 ring-status-warning" data-testid="approvals-relay">
       <div className="text-[12px] text-text-tertiary">
-        Waiting on the {item.source.session?.name ?? 'Session'} orchestrator: <b className="font-medium text-text-secondary">{item.relay?.worker}</b> asks
+        {item.source.session
+          ? <>Waiting on the {item.source.session.name} orchestrator: <b className="font-medium text-text-secondary">{item.relay?.worker}</b> asks</>
+          : <>Its Session is closed: <b className="font-medium text-text-secondary">{item.relay?.worker}</b> asks</>}
       </div>
       <div className="mt-1 text-[14px] font-semibold text-text-primary">{item.relay?.question ?? item.title}</div>
-      <div className="mt-1.5 text-[12.5px] text-text-tertiary">Its orchestrator hasn&rsquo;t picked this up. Answer in the orchestrator&rsquo;s tab on the right.</div>
+      <div className="mt-1.5 text-[12.5px] text-text-tertiary">
+        {item.source.session
+          ? <>Its orchestrator hasn&rsquo;t picked this up. Answer in the orchestrator&rsquo;s tab on the right.</>
+          : <>Nobody picked this up. Answer in {item.relay?.worker}&rsquo;s tab on the right.</>}
+      </div>
       <div className="-mx-3.5 -mb-3.5 mt-3"><RelatedLinks item={item} paneId={paneId} /></div>
     </div>
   );

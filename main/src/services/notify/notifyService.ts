@@ -61,6 +61,8 @@ export interface NotifyServiceDependencies {
   sessionOf?: (paneId: string, panelId?: string) => NotifySession | undefined;
   /** Every open Session by id, read once per fallback refresh. */
   sessionsById?: () => Map<string, NotifySession>;
+  /** Hears Session changes (archived, renamed), which move or rename fallback items. */
+  onSessionsChanged?: (listener: () => void) => () => void;
   /** Every Session's unacknowledged worker reports (Approvals' fallback reads the blocked ones). */
   inbox?: { all(): RunpaneInboxItem[]; subscribe(listener: () => void): () => void };
 }
@@ -93,6 +95,7 @@ export class NotifyService {
   private relayTimer?: ReturnType<typeof setTimeout>;
   private mainWindowFocused = false;
   private stopInbox?: () => void;
+  private stopSessions?: () => void;
 
   constructor(private readonly deps: NotifyServiceDependencies) {
     this.lastSettings = this.settings();
@@ -145,6 +148,7 @@ export class NotifyService {
     this.applyShortcut(this.lastSettings);
     this.syncInstructions(this.lastSettings.enabled);
     this.stopInbox = deps.inbox?.subscribe(() => this.refreshRelays());
+    this.stopSessions = deps.onSessionsChanged?.(() => this.refreshRelays());
     deps.configManager.on('config-updated', () => this.refreshRelays());
     this.refreshRelays();
     this.scheduleBroadcast();
@@ -183,7 +187,10 @@ export class NotifyService {
         id: `relay:${entry.id}`,
         ui: 'info',
         title: question,
-        context: `Waiting on the ${session?.name ?? 'Session'} orchestrator: ${entry.paneName} asked this and it hasn't been picked up. Answer in the orchestrator's tab.`,
+        // With its Session closed there is no orchestrator to answer it; the worker's own tab shows beside it.
+        context: session
+          ? `Waiting on the ${session.name} orchestrator: ${entry.paneName} asked this and it hasn't been picked up. Answer in the orchestrator's tab.`
+          : `Its Session is closed: ${entry.paneName} asked this and nobody picked it up. Answer in ${entry.paneName}'s tab on the right.`,
         source,
         state: 'waiting',
         createdAt: at,
@@ -323,6 +330,7 @@ export class NotifyService {
   dispose(): void {
     clearTimeout(this.relayTimer);
     this.stopInbox?.();
+    this.stopSessions?.();
     this.queue.dispose();
     if (this.shortcut) globalShortcut.unregister(this.shortcut);
     this.tray.destroy();

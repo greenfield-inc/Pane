@@ -293,10 +293,20 @@ describe('Approvals items, through the registered handlers', () => {
   ]);
   const launch = { id: 'session-1', name: 'Launch', paneId: 'session-pane' };
   const later = { id: 'session-2', name: 'Later', paneId: 'later-pane' };
+  let openSessions = [launch, later];
+  const sessionListeners = new Set<() => void>();
   const sessions = {
     approvalSession: (paneId: string) => paneId === 'session-pane' ? { ...launch, orchestrator: true } : paneId === 'worker' ? launch : undefined,
-    approvalSessionsById: () => new Map([[launch.id, launch], [later.id, later]]),
+    approvalSessionsById: () => new Map(openSessions.map(session => [session.id, session])),
+    on: (_event: 'changed', listener: () => void) => { sessionListeners.add(listener); },
+    off: (_event: 'changed', listener: () => void) => { sessionListeners.delete(listener); },
   };
+  /** Archives a Session the way the manager reports it: the list changes, then 'changed'. */
+  const archive = (sessionId: string) => {
+    openSessions = openSessions.filter(session => session.id !== sessionId);
+    for (const listener of sessionListeners) listener();
+  };
+  afterEach(() => { openSessions = [launch, later]; });
 
   /** A Pane with Sessions and, optionally, a Session inbox. */
   async function startWithSessions(inbox?: ReturnType<typeof inboxOf>) {
@@ -419,6 +429,12 @@ describe('Approvals items, through the registered handlers', () => {
     const gone = { ...blocked(Date.now() - 11 * 60_000), id: 'in-2', sessionId: 'session-archived' };
     const pane = await startWithSessions(inboxOf([moved, gone]));
     expect(pane.notify.snapshot().items.map(item => [item.relay?.inboxItemId, item.source.session?.id])).toEqual([['in-1', 'session-2'], ['in-2', undefined]]);
+    const orphan = pane.notify.snapshot().items[1];
+    expect(orphan.context).toBe("Its Session is closed: api-fix asked this and nobody picked it up. Answer in api-fix's tab on the right.");
+
+    // Archiving a Session moves its fallback items at once, not at the next inbox change.
+    archive('session-2');
+    expect(pane.notify.snapshot().items.map(item => item.source.session?.id)).toEqual([undefined, undefined]);
     pane.notify.dispose();
   });
 
