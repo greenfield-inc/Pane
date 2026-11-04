@@ -8,6 +8,7 @@ const args = process.argv.slice(2);
 if (args[0] !== 'run' || !args.includes('--print-acp')) { process.stderr.write('fake agent-farm: expected run --print-acp\n'); process.exit(2); }
 const profile = args[1];
 const launchArgs = Object.fromEntries(args.flatMap((arg, index) => arg === '--arg' ? [args[index + 1].split('=')] : []));
+if (profile === 'old/agent-farm') { process.stderr.write("error: Unknown option '--print-acp'\n"); process.exit(1); }
 if (profile === 'missing/profile') { process.stderr.write('Unknown profile: missing/profile\n'); process.exit(1); }
 const harness = process.env.FAKE_AGENT_FARM_HARNESS ?? 'claude';
 const launchContext = ['LAUNCH CONTEXT', 'headless: false', ...Object.entries(launchArgs).map(([key, value]) => `${key}: ${value}`)].join('\n');

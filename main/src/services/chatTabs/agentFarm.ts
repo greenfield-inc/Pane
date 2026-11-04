@@ -65,13 +65,15 @@ export class AgentFarmProfiles implements ChatProfileResolver {
     } catch (error) {
       if (error instanceof PaneError) throw error;
       const stderr = decodeOptionalBoundary(error, boundary.object({ stderr: boundary.string }))?.stderr.trim().split('\n').at(-1);
-      throw new PaneError('CHAT_PROFILE_FAILED', `Agent Farm could not prepare ${profile}: ${stderr || reasonOf(error)}.`, 'Check the profile name and its launch arguments, then press Restart.');
+      // Agent Farm before package 2 has no --print-acp.
+      const outdated = !!stderr && /unknown option.*--print-acp/i.test(stderr);
+      throw new PaneError('CHAT_PROFILE_FAILED', `Agent Farm could not prepare ${profile}: ${stderr || reasonOf(error)}.`, outdated ? 'Update Agent Farm to a version with run --print-acp, then try again.' : 'Check the profile name and its launch arguments, then try again.');
     }
     let decoded;
     try { decoded = decodeBoundary(JSON.parse(stdout), printedLaunch); }
-    catch (error) { throw new PaneError('CHAT_PROFILE_OUTPUT_INVALID', `Agent Farm's ACP launch for ${profile} was not readable: ${reasonOf(error)}.`, 'Update Agent Farm to a version with run --print-acp, then press Restart.'); }
+    catch (error) { throw new PaneError('CHAT_PROFILE_OUTPUT_INVALID', `Agent Farm's ACP launch for ${profile} was not readable: ${reasonOf(error)}.`, 'Update Agent Farm to a version with run --print-acp, then try again.'); }
     // The contract keeps MCP servers in each harness's own config so secrets stay references.
-    if (decoded.session.mcpServers.length) throw new PaneError('CHAT_PROFILE_OUTPUT_INVALID', 'Agent Farm sent MCP servers as ACP session entries, which could carry secrets in plain text.', 'Update Agent Farm, then press Restart.');
+    if (decoded.session.mcpServers.length) throw new PaneError('CHAT_PROFILE_OUTPUT_INVALID', 'Agent Farm sent MCP servers as ACP session entries, which could carry secrets in plain text.', 'Update Agent Farm, then try again.');
     const [executable, ...rest] = decoded.argv;
     const launch: ResolvedLaunch = { command: { executable, args: rest, cwd: decoded.cwd, env: { ...env, ...decoded.env } } };
     if (decoded.session._meta) launch.meta = decoded.session._meta;

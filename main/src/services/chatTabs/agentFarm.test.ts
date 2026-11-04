@@ -79,6 +79,7 @@ describe('Agent Farm profiles in chat tabs', () => {
     const directory = scratch();
     const profiles = new AgentFarmProfiles({ executable: () => fakeCli(directory), adapter: async () => '/adapter.js' });
     await expect(profiles.print('missing/profile', {}, 'claude', directory, { PATH: process.env.PATH ?? '' })).rejects.toMatchObject({ code: 'CHAT_PROFILE_FAILED', message: expect.stringContaining('Unknown profile: missing/profile') });
+    await expect(profiles.print('old/agent-farm', {}, 'claude', directory, { PATH: process.env.PATH ?? '' })).rejects.toMatchObject({ code: 'CHAT_PROFILE_FAILED', next: expect.stringContaining('Update Agent Farm') });
     const absent = new AgentFarmProfiles({ executable: () => undefined, adapter: async () => '/adapter.js' });
     await expect(absent.print('x', {}, 'claude', directory, {})).rejects.toMatchObject({ code: 'CHAT_AGENT_NOT_INSTALLED' });
   });
