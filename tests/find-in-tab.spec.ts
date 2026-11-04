@@ -69,9 +69,13 @@ test('terminal: Cmd+F finds every match in scrollback and Esc gives the keys bac
   await page.keyboard.type('needle');
   const counter = findBar(page).locator('[aria-live="polite"]');
   await expect(counter).toHaveText(/^\d+ of 12$/);
-  // The search addon re-runs 200 ms after output is parsed; let the restored
-  // scrollback's re-search land before stepping.
-  await page.waitForTimeout(400);
+  // The search addon re-runs 200 ms after output is parsed; wait until the
+  // restored scrollback's re-search has landed (the count holds for 600 ms).
+  await expect(async () => {
+    const before = await counter.textContent();
+    await page.waitForTimeout(600);
+    expect(await counter.textContent()).toBe(before);
+  }).toPass();
   const ordinal = async () => Number((await counter.textContent())?.split(' of ')[0]);
   const first = await ordinal();
   const after = (steps: number) => `${((first - 1 + steps + 12 * 4) % 12) + 1} of 12`;
