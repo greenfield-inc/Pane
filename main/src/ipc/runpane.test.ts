@@ -2503,11 +2503,12 @@ describe('runpane IPC handlers', () => {
       expect(services.databaseService.updateProject).toHaveBeenCalledWith(7, { run_script: null });
     });
 
-    it('previews an update without saving it', async () => {
+    it('previews an update without saving it, listing only the settings that change', async () => {
       const { services } = createSettingsServices();
 
+      // The name is already Cura, so only the build script changes.
       const result = await createRegistry(services).invoke('runpane:repos:update', [{
-        repo: '7', settings: { buildScript: 'pnpm install' }, dryRun: true,
+        repo: '7', settings: { name: 'Cura', buildScript: 'pnpm install' }, dryRun: true,
       }]);
 
       expect(result).toMatchObject({ ok: true, dryRun: true, changed: ['buildScript'], settings: { buildScript: { value: 'pnpm install' } } });

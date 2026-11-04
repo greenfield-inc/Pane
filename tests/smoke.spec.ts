@@ -184,13 +184,7 @@ test.describe('Smoke Tests', () => {
       return mock?.getProjectUpdates() ?? [];
     });
 
-    expect(projectUpdates).toHaveLength(1);
-    expect(projectUpdates[0]).toMatchObject({
-      projectId: '1',
-      updates: {
-        worktree_folder: '/tmp/pane-worktrees',
-      },
-    });
+    expect(projectUpdates).toEqual([{ projectId: '1', updates: { worktree_folder: '/tmp/pane-worktrees' } }]);
     await expect(page.getByText('Something went wrong')).toHaveCount(0);
   });
 
