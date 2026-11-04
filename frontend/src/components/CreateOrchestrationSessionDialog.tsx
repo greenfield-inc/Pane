@@ -30,6 +30,19 @@ function supportedSessionAgent(preferred?: PaneChatAgent, environment?: ProjectE
   return options[0]?.id ?? DEFAULT_PANE_CHAT_AGENT;
 }
 
+/** A command OpenCode Sessions accept: `opencode` itself, after optional `NAME=value` or `env` prefixes. */
+const DIRECT_OPENCODE_COMMAND = /^(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*(?:env\s+(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*)?(?:\S*[\\/])?opencode(?:\.exe)?(?:\s|$)/i;
+
+/**
+ * The app's default launch settings as offered for `agent`. OpenCode Sessions refuse wrappers and
+ * custom resume, so those defaults are left out for OpenCode rather than offered and then refused.
+ */
+function defaultLaunch(config: AppConfig | null, agent: PaneChatAgent): Pick<SessionCreationForm, 'launchCommand' | 'customResume'> {
+  const launchCommand = config?.defaultSessionCommand ?? '';
+  if (agent !== 'opencode') return { launchCommand, customResume: config?.defaultSessionResume ?? null };
+  return { launchCommand: !launchCommand.trim() || DIRECT_OPENCODE_COMMAND.test(launchCommand.trim()) ? launchCommand : '', customResume: null };
+}
+
 /** The name is left out when the person did not type one. */
 export type SessionCreateRequest = Omit<OrchestrationSessionCreateInput, 'name'> & { name?: string };
 
@@ -63,12 +76,12 @@ type SessionCreationAction =
   | { type: 'update'; values: Partial<SessionCreationForm> };
 
 function initialSessionCreationForm(config: AppConfig | null, environment?: ProjectEnvironment): SessionCreationForm {
+  const agent = supportedSessionAgent(config?.defaultOrchestratorAgent, environment);
   return {
-    agent: supportedSessionAgent(config?.defaultOrchestratorAgent, environment),
+    agent,
     name: '',
     goal: '',
-    launchCommand: config?.defaultSessionCommand ?? '',
-    customResume: config?.defaultSessionResume ?? null,
+    ...defaultLaunch(config, agent),
     profile: config?.defaultSessionProfile ?? DEFAULT_SESSION_PROFILE,
     startPinned: config?.defaultSessionPinned ?? false,
     error: null,
@@ -128,14 +141,19 @@ export function OrchestrationSessionForm({ isOpen, onClose, onCreate, header, on
         if (!userToggledPinned.current) dispatch({ type: 'update', values: { startPinned: nextConfig.defaultSessionPinned ?? false } });
         if (!userEditedLaunch.current) {
           dispatch({ type: 'update', values: {
-            launchCommand: nextConfig.defaultSessionCommand ?? '',
-            customResume: nextConfig.defaultSessionResume ?? null,
+            ...defaultLaunch(nextConfig, supportedSessionAgent(nextConfig.defaultOrchestratorAgent, environment)),
             profile: nextConfig.defaultSessionProfile ?? DEFAULT_SESSION_PROFILE,
           } });
         }
       }).catch(() => undefined);
     }
   }, [fetchConfig, isOpen, environment]);
+
+  // Until the person edits the launch fields, they show the app defaults that suit the chosen agent.
+  useEffect(() => {
+    if (!isOpen || userEditedLaunch.current) return;
+    dispatch({ type: 'update', values: defaultLaunch(config, agent) });
+  }, [isOpen, agent, config]);
 
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -146,8 +164,9 @@ export function OrchestrationSessionForm({ isOpen, onClose, onCreate, header, on
     try {
       const defaults: Partial<AppConfig> = {};
       if (config?.defaultOrchestratorAgent !== agent) defaults.defaultOrchestratorAgent = agent;
-      if ((config?.defaultSessionCommand ?? '') !== launchCommand) defaults.defaultSessionCommand = launchCommand;
-      if (JSON.stringify(config?.defaultSessionResume ?? null) !== JSON.stringify(customResume)) defaults.defaultSessionResume = customResume;
+      // Launch fields the person left alone are the defaults (filtered for OpenCode), not new ones.
+      if (userEditedLaunch.current && (config?.defaultSessionCommand ?? '') !== launchCommand) defaults.defaultSessionCommand = launchCommand;
+      if (userEditedLaunch.current && JSON.stringify(config?.defaultSessionResume ?? null) !== JSON.stringify(customResume)) defaults.defaultSessionResume = customResume;
       await onCreate({
         agent,
         name: name.trim() || undefined,
