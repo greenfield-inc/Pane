@@ -87,6 +87,8 @@ export interface NewPanelOption {
   initialCommand?: string;
   /** A chat tab for this agent instead of a terminal. */
   chat?: 'claude' | 'codex';
+  /** A chat tab running an Agent Farm profile, asked for before it opens. */
+  chatProfile?: true;
 }
 
 /** The web app's Add tool menu: a shell, the agent presets, then the host's custom commands. */
@@ -95,6 +97,7 @@ export function newPanelOptions(customCommands: readonly RemotePwaCustomCommand[
   const chats: NewPanelOption[] = chatTabs ? [
     { id: 'chat-claude', title: 'Claude', description: 'Chat with Claude on the computer', chat: 'claude' },
     { id: 'chat-codex', title: 'Codex', description: 'Chat with Codex on the computer', chat: 'codex' },
+    { id: 'chat-profile', title: 'Agent Farm profile…', description: 'Chat with an Agent Farm profile on the computer', chatProfile: true },
   ] : [];
   return [
     ...chats,

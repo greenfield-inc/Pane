@@ -1,5 +1,5 @@
 import React, { useCallback, memo, useState, useRef, useEffect, useMemo } from 'react';
-import { Plus, X, Terminal, PanelRight, FolderTree, TerminalSquare, Play, Globe, Pencil } from 'lucide-react';
+import { Plus, X, Terminal, PanelRight, FolderTree, TerminalSquare, Play, Globe, Pencil, Sprout } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { cn } from '../../utils/cn';
 import { useHotkey } from '../../hooks/useHotkey';
@@ -21,6 +21,7 @@ import { PanelTabStrip } from './PanelTabStrip';
 import { getPanelIcon } from './panelIcon';
 import { PromoteChatButton } from './PromoteChatButton';
 import { CustomCommandForm } from './CustomCommandForm';
+import { AgentFarmProfileDialog } from '../chatTab/AgentFarmProfileDialog';
 import type { WorktreeFileSyncEntry } from '../../../../shared/types/worktreeFileSync';
 
 const ADD_TOOL_MENU_WIDTH = 280;
@@ -104,6 +105,7 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
   const { config, fetchConfig, updateConfig } = useConfigStore();
   const chatTabs = isChatTabsEnabled(config);
   const [showDropdown, setShowDropdown] = useState(false);
+  const [profileDialogOpen, setProfileDialogOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const addToolButtonRef = useRef<HTMLButtonElement>(null);
   const dropdownMenuRef = useRef<HTMLDivElement>(null);
@@ -621,6 +623,16 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
                       <span className="truncate">{agent.title}</span>
                     </button>
                   ))}
+                  <button
+                    type="button"
+                    ref={itemRef()}
+                    role="menuitem"
+                    className={menuItemClass}
+                    onClick={() => { setShowDropdown(false); setProfileDialogOpen(true); }}
+                  >
+                    <Sprout className="w-3.5 h-3.5 flex-shrink-0" />
+                    <span className="truncate">Agent Farm profile…</span>
+                  </button>
                   {separator}
                   {groupLabel('In a terminal')}
                   {availablePanelTypes.includes('terminal') && agentPresets.map(preset => (
@@ -841,6 +853,12 @@ export const PanelTabBar: React.FC<PanelTabBarProps> = memo(({
         {controlsOnTitlePlane && trailingSlot ? createPortal(rightActions, trailingSlot) : rightActions}
       </div>
     </div>
+    {profileDialogOpen && session && (
+      <AgentFarmProfileDialog
+        onClose={() => setProfileDialogOpen(false)}
+        onCreate={async launch => { await window.electronAPI.chatTab.create({ sessionId: session.id, launch }); }}
+      />
+    )}
 
     </>
   );

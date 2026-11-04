@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { ToolPanel } from '@shared/types/panels';
 
-import { followsHost, pickPanel, sessionWorkspacePanels, stripPanels, tabView } from './panels';
+import { followsHost, newPanelOptions, pickPanel, sessionWorkspacePanels, stripPanels, tabView } from './panels';
 
 function panel(id: string, type: ToolPanel['type'], position: number, customState?: object): ToolPanel {
   return {
@@ -112,5 +112,17 @@ describe('sessionWorkspacePanels', () => {
   it('shows the chat the host returned before the panel list includes it', () => {
     const tabs = sessionWorkspacePanels({ session, panel: panel('cursor-chat', 'terminal', 9) }, [panel('shell', 'terminal', 0)]);
     expect(tabs.map(p => p.id)).toEqual(['cursor-chat', 'shell']);
+  });
+});
+
+describe('newPanelOptions', () => {
+  it('lists Claude, Codex and Agent Farm profile chats before the terminal group when chat tabs are on', () => {
+    const ids = newPanelOptions([], true).map(option => option.id);
+    expect(ids.slice(0, 4)).toEqual(['chat-claude', 'chat-codex', 'chat-profile', 'terminal']);
+    expect(newPanelOptions([], true).find(option => option.id === 'chat-profile')).toMatchObject({ title: 'Agent Farm profile…', chatProfile: true });
+  });
+
+  it('offers no chats while chat tabs are off', () => {
+    expect(newPanelOptions([], false).some(option => option.id.startsWith('chat-'))).toBe(false);
   });
 });

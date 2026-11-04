@@ -1,4 +1,4 @@
-import { ChevronDown, Globe, Plus, TerminalSquare, MessageSquare } from 'lucide-react';
+import { ChevronDown, Globe, Plus, Sprout, TerminalSquare, MessageSquare } from 'lucide-react';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { RemotePwaCustomCommand } from '../../../../shared/types/remoteDaemon';
@@ -31,6 +31,8 @@ interface RemotePanelTabsProps {
   onCreateBrowser: () => void;
   /** Set when the host offers chat tabs (D-15): Claude and Codex chats come first. */
   onCreateChat?: (agent: 'claude' | 'codex') => void;
+  /** Set with `onCreateChat`: asks for an Agent Farm profile and opens a chat tab running it. */
+  onCreateProfileChat?: () => void;
 }
 
 export function RemotePanelTabs({
@@ -42,9 +44,10 @@ export function RemotePanelTabs({
   onCreateTerminal,
   onCreateBrowser,
   onCreateChat,
+  onCreateProfileChat,
 }: RemotePanelTabsProps) {
   const chatAgents = onCreateChat ? CHAT_AGENTS : [];
-  const offset = chatAgents.length;
+  const offset = chatAgents.length + (onCreateProfileChat ? 1 : 0);
   const [showAddMenu, setShowAddMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const addTriggerRef = useRef<HTMLButtonElement | null>(null);
@@ -194,6 +197,15 @@ export function RemotePanelTabs({
                 onClick={() => { onCreateChat?.(agent.id); setShowAddMenu(false); }}
               />
             ))}
+            {onCreateProfileChat && (
+              <AddToolMenuItem
+                buttonRef={(element) => { menuItemRefs.current[chatAgents.length] = element; }}
+                icon={<Sprout className="h-4 w-4" />}
+                title="Agent Farm profile…"
+                description="Chat with an Agent Farm profile on the remote host"
+                onClick={() => { onCreateProfileChat(); setShowAddMenu(false); }}
+              />
+            )}
             <AddToolMenuItem
               buttonRef={(element) => { menuItemRefs.current[offset] = element; }}
               icon={<TerminalSquare className="h-4 w-4" />}

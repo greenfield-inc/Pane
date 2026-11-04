@@ -51,6 +51,7 @@ test('a chat tab streams, asks for approval, and comes back after a restart with
     await page.getByText('New Task').first().click();
     await page.getByRole('button', { name: 'Add tool', exact: true }).first().click();
     await expect(page.getByRole('menuitem', { name: 'Claude', exact: true })).toBeVisible();
+    await expect(page.getByRole('menuitem', { name: 'Agent Farm profile…', exact: true })).toBeVisible();
     await expect(page.getByText('In a terminal', { exact: true })).toBeVisible();
     await page.getByRole('menuitem', { name: 'Claude', exact: true }).click();
 

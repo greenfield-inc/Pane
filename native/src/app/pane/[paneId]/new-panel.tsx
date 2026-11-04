@@ -1,6 +1,9 @@
 import type { AndroidSymbol, SFSymbol } from 'expo-symbols';
 import { router, useLocalSearchParams } from 'expo-router';
+import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
+
+import { chatTabProfileLaunch } from '@shared/chatTabProfileLaunch';
 
 import type { ChatTabCreate } from '@shared/types/chatTab';
 import type { ToolPanel } from '@shared/types/panels';
@@ -9,13 +12,14 @@ import { useInvokeMutation } from '@/daemon';
 import { createPanelRequest, newPanelOptions, type NewPanelOption } from '@/features/terminal/panels';
 import { useAffordances } from '@/features/hosts/hostSettings';
 import { useTheme } from '@/theme';
-import { ErrorState, Icon, Sheet, Text } from '@/ui';
+import { Button, ErrorState, Icon, Sheet, Text, TextField } from '@/ui';
 
 // Stand-ins for the web app's brand icons, which have no system symbol.
 const ICONS: Record<string, { ios: SFSymbol; android: AndroidSymbol }> = {
   claude: { ios: 'asterisk', android: 'asterisk' },
   codex: { ios: 'hexagon', android: 'hexagon' },
   cursor: { ios: 'cube', android: 'deployed_code' },
+  'chat-profile': { ios: 'leaf', android: 'eco' },
 };
 const TERMINAL_ICON = { ios: 'apple.terminal', android: 'terminal' } as const;
 
@@ -32,6 +36,15 @@ export default function NewPanelSheet() {
   const createChat = useInvokeMutation<[ChatTabCreate], { panelId: string }>('chat-tab:create', { invalidates: ['panels:list'] });
   const setActive = useInvokeMutation<[string, string]>('panels:set-active');
   const pending = create.isPending || createChat.isPending;
+  // "Agent Farm profile…" asks for the profile and its arguments in the sheet before the tab opens.
+  const [profileForm, setProfileForm] = useState<{ profile: string; args: string; field?: 'profile' | 'args'; error?: string } | null>(null);
+  const openProfile = () => {
+    if (!profileForm) return;
+    const parsed = chatTabProfileLaunch(profileForm.profile, profileForm.args);
+    if (!parsed.ok) { setProfileForm({ ...profileForm, field: parsed.field, error: parsed.error }); return; }
+    setProfileForm({ ...profileForm, field: undefined, error: undefined });
+    createChat.mutate([{ sessionId: paneId, launch: parsed.launch }], { onSuccess: result => opened(result.panelId) });
+  };
 
   const opened = (panelId: string) => {
     setActive.mutate([paneId, panelId]);
@@ -39,6 +52,11 @@ export default function NewPanelSheet() {
     else router.dismissTo({ pathname: '/pane/[paneId]', params: { paneId, panelId } });
   };
   const open = (option: NewPanelOption) => {
+    if (option.chatProfile) {
+      createChat.reset();
+      setProfileForm(form => form ?? { profile: '', args: '' });
+      return;
+    }
     if (option.chat) {
       createChat.mutate([{ sessionId: paneId, agent: option.chat }], { onSuccess: result => opened(result.panelId) });
       return;
@@ -74,6 +92,19 @@ export default function NewPanelSheet() {
           );
         })}
       </View>
+      {profileForm ? (
+        <View style={styles.form} testID="new-panel-profile-form">
+          <TextField testID="new-panel-profile-name" label="Agent Farm profile" placeholder="greenfield/implementer" autoCapitalize="none" autoCorrect={false} autoFocus
+            value={profileForm.profile} editable={!pending} error={profileForm.field === 'profile' ? profileForm.error : null}
+            hint="A name from agent-farm profiles list on the computer."
+            onChangeText={profile => setProfileForm({ ...profileForm, profile })} />
+          <TextField testID="new-panel-profile-args" label="Arguments (optional)" placeholder="ticket=PANE-12" autoCapitalize="none" autoCorrect={false} multiline mono
+            value={profileForm.args} editable={!pending} error={profileForm.field === 'args' ? profileForm.error : null}
+            hint="One key=value per line."
+            onChangeText={args => setProfileForm({ ...profileForm, args })} />
+          <Button testID="new-panel-profile-open" title="Open chat" onPress={openProfile} loading={createChat.isPending} />
+        </View>
+      ) : null}
       {create.isError ? <ErrorState title="Couldn’t open the tab" error={create.error} /> : null}
       {createChat.isError ? <ErrorState title="Couldn’t open the chat" error={createChat.error} /> : null}
     </Sheet>
@@ -81,6 +112,7 @@ export default function NewPanelSheet() {
 }
 
 const styles = StyleSheet.create({
+  form: { gap: 12, marginTop: 16 },
   menu: { overflow: 'hidden', borderWidth: 1 },
   item: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, paddingHorizontal: 12, paddingVertical: 10 },
   icon: { marginTop: 2 },

@@ -13,11 +13,16 @@ orchestrator in a terminal. Open chat tabs keep working.
 
 ## Opening one
 
-- **Desktop**: the + menu lists **Claude** and **Codex** under *New tab*, then
-  *In a terminal*: the terminal agents and a plain Terminal. The empty Pane
-  screen offers the same.
-- **Remote PWA**: *Add Tool* lists Claude and Codex chats first when the host
-  has chat tabs on.
+- **Desktop**: the + menu lists **Claude**, **Codex** and **Agent Farm
+  profile…** under *New tab*, then *In a terminal*: the terminal agents and a
+  plain Terminal. The empty Pane screen offers the same.
+- **Remote PWA** and **phone**: *Add Tool* lists the same three chats first
+  when the host has chat tabs on.
+- **Agent Farm profile…** asks for a profile name and optional arguments, one
+  `key=value` per line, and opens the chat tab on the Pane's machine exactly as
+  `--agent-farm <profile> --arg key=value` does. The name is typed, not picked:
+  `agent-farm profiles list` prints no machine-readable list. An unknown profile
+  shows Agent Farm's error in the dialog and opens nothing.
 - **runpane**: `runpane panels create --pane <id> --chat --agent claude|codex`,
   or `--agent-farm <profile> [--arg key=value …]` for an Agent Farm profile.
   `--initial-input` is the first prompt, sent once.
@@ -58,7 +63,8 @@ the chat tab suites against the new version.
 - Replies stream as markdown; thinking is collapsed.
 - The agent's steps are grouped by kind: *Explored 2 files, 1 search*,
   *Edit file +18 −4* with **View diff** (which opens Pane's diff view; a diff
-  never renders in the thread by itself), *Run* with the command's output
+  never renders in the thread by itself; the PWA, which draws no diffs, and the
+  phone bring the Pane's Diff tab forward), *Run* with the command's output
   streaming in its own row, *Ran 9 commands*.
 - To-do lists from the agent's plan updates.
 - **Approvals** dock above the composer with exactly the choices the adapter
@@ -104,8 +110,12 @@ loads the same conversation.
   and stops the adapter's whole process group when the tab closes.
 - No cap stops a conversation: the newest messages stay in memory (up to 1,000
   or 24 MiB per tab) and older ones go to a per-tab file under `chat-tabs/` in
-  Pane's data folder, rebuilt at every start. Viewers keep a window of messages
-  and page older ones in with **Earlier messages** (`chat-tab:history`).
+  Pane's data folder, rebuilt at every start. Viewers keep a window of at most
+  about 700 messages: **Earlier messages** pages older ones in
+  (`chat-tab:history`) and drops the newest, **Newer messages** pages back
+  down, and the jump-to-latest arrow returns to the live end.
+- A queued message keeps only a preview in the tab's saved state; its full text
+  and images wait in a file beside it until they are sent.
 - A tool step's update sends only the fields that changed; command output is sent
   as appends.
 
@@ -136,8 +146,9 @@ CONFIGURATION.md, *ACP sessions*.
 Phone apps released before chat tabs would crash on a tab kind they don't know,
 and send no version. `panels:list` lists chat tabs only to clients that pass
 `{ chatTabs: true }` (this desktop, the PWA and the current phone app), so older
-apps don't see chat tabs. The phone app shows chat tabs as "open on the
-computer" until its chat view ships.
+apps don't show chat tabs at all; to use them, update Pane on the phone (D-100).
+Released apps have no channel that could say so: their "Update Pane" notices
+are about an older computer, and Notify `info` items are not pushed.
 
 ## Code
 
@@ -147,7 +158,9 @@ computer" until its chat view ships.
 | Commands (`chat-tab:*`) | `main/src/ipc/chatTabs.ts` |
 | runpane | `main/src/ipc/runpaneChatTabs.ts`, `main/src/ipc/runpane.ts` |
 | Shared types, presentation, decoders | `shared/types/chatTab.ts`, `shared/chatTabPresentation.ts`, `shared/chatTabPermissions.ts`, `shared/chatTabQuestions.ts`, `shared/types/chatTabDecoders.ts` |
-| Desktop and PWA UI | `frontend/src/components/chatTab/`, `frontend/src/services/chatTabViewer.ts` |
+| Viewer (window, paging, catch-up), shared by every client | `shared/chatTabViewer.ts` |
+| Desktop and PWA UI | `frontend/src/components/chatTab/`, `frontend/src/remote/components/RemoteChatTab.tsx` |
+| Phone UI | `native/src/features/chatTab/` |
 
 ## Testing
 

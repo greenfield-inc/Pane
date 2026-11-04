@@ -61,7 +61,8 @@ import {
   mergeAllGroups,
   type DropZone,
 } from '../utils/panelLayout';
-import { Download, Upload, GitMerge, GitPullRequestArrow, Terminal, ChevronDown, ChevronUp, RefreshCw, Archive, ArchiveRestore, GitCommitHorizontal, TerminalSquare, Undo2 } from 'lucide-react';
+import { Download, Upload, GitMerge, GitPullRequestArrow, Terminal, ChevronDown, ChevronUp, RefreshCw, Archive, ArchiveRestore, GitCommitHorizontal, TerminalSquare, Undo2, Sprout } from 'lucide-react';
+import { AgentFarmProfileDialog } from './chatTab/AgentFarmProfileDialog';
 import { getCliBrandIcon } from './ui/brandIconRegistry';
 import { visibleAgentPresets } from '../utils/agentPresets';
 import type { Project } from '../types/project';
@@ -1339,6 +1340,7 @@ export const SessionView = memo(() => {
     return keys ? formatKeyDisplay(keys) : null;
   }, [hotkeys]);
 
+  const [profileDialogOpen, setProfileDialogOpen] = useState(false);
   // The empty stage is the "+" menu laid out inline: one click (or the
   // shortcut beside it) from a running tool, instead of a placeholder.
   const emptyStage = useMemo(() => (
@@ -1354,6 +1356,7 @@ export const SessionView = memo(() => {
             hotkeyId: '',
             onClick: () => { void window.electronAPI.chatTab.create({ sessionId: activeSession.id, agent }).catch(error => showActionError(`Could not open a ${agent === 'claude' ? 'Claude' : 'Codex'} chat`, error)); },
           })) : []),
+          ...(chatTabs && activeSession ? [{ key: 'chat-profile', label: 'Agent Farm profile…', icon: <Sprout className="h-3.5 w-3.5" />, hotkeyId: '', onClick: () => setProfileDialogOpen(true) }] : []),
           { key: 'terminal', label: 'Terminal', icon: <Terminal className="h-3.5 w-3.5" />, hotkeyId: 'add-tool-terminal', onClick: () => handlePanelCreate('terminal') },
           ...agentPresets.map(preset => ({
             key: preset.id,
@@ -1382,8 +1385,15 @@ export const SessionView = memo(() => {
           </button>
         ))}
       </div>
+      {profileDialogOpen && activeSession && (
+        <AgentFarmProfileDialog
+          onClose={() => setProfileDialogOpen(false)}
+          // The new tab replaces this empty stage, so the parent closes the dialog itself.
+          onCreate={async launch => { await window.electronAPI.chatTab.create({ sessionId: activeSession.id, launch }); setProfileDialogOpen(false); }}
+        />
+      )}
     </div>
-  ), [activeSession, agentPresets, chatTabs, customCommands, handlePanelCreate, hotkeyDisplay]);
+  ), [activeSession, agentPresets, chatTabs, customCommands, handlePanelCreate, hotkeyDisplay, profileDialogOpen]);
 
   // --- Editor stage element (shared by both layouts) ---
   const editorStageElement = useMemo(() => {
