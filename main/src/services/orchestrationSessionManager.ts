@@ -597,7 +597,10 @@ export class OrchestrationSessionManager extends EventEmitter {
   /** The Session's chat Pane and its Panes that are not archived: what Pause and Resume act on. */
   pausablePaneIds(sessionId: string): string[] {
     const record = this.store.read().sessions.find(session => session.id === sessionId);
-    if (!record) return [];
+    return record ? this.pausablePaneIdsOf(record) : [];
+  }
+
+  private pausablePaneIdsOf(record: OrchestrationSessionRecord): string[] {
     const members = record.associations.map(association => association.paneId)
       .filter(paneId => this.sessionManager.getSession(paneId)?.archived === false);
     return [...new Set([record.internalSessionId, ...members])];
@@ -615,7 +618,7 @@ export class OrchestrationSessionManager extends EventEmitter {
   /** A Session is paused when its chat and every Pane in it are paused; computed on read, never stored. */
   private withPaused(record: OrchestrationSessionRecord): OrchestrationSessionRecord {
     let latest: TerminalPausedMark | undefined;
-    for (const paneId of this.pausablePaneIds(record.id)) {
+    for (const paneId of this.pausablePaneIdsOf(record)) {
       const mark = this.sessionManager.getSession(paneId)?.paused;
       if (!mark) return { ...record, paused: undefined };
       if (!latest || mark.at > latest.at) latest = mark;

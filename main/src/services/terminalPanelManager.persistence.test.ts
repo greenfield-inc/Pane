@@ -1352,6 +1352,24 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void
       expect(ptyHost.spawnOptions).toHaveLength(0);
     });
 
+    it('stops a start that was already under way when the pause landed', async () => {
+      const panel = makePanel('starting-tab');
+      panel.state.customState = { agentType: 'claude', agentSessionId: 'conversation-1', hasClaudeSessionId: true, initialCommand: 'claude' };
+      const manager = new TerminalPanelManager(inProcessEmulatorHost);
+      managers.push(manager);
+      panelManagerMock.getPanel.mockReturnValue(panel);
+      databaseService.createPanel({ id: panel.id, sessionId: panel.sessionId, type: 'terminal', title: panel.title, state: panel.state });
+
+      // Pause lands while the PTY spawns, after this start already passed the gate.
+      let pausing: Promise<string[]> | undefined;
+      ptyHost.onSpawn = () => { pausing = manager.pausePanels([panel.id], mark); };
+      await manager.initializeTerminal(panel, tempDir);
+      expect(await pausing).toEqual([panel.id]);
+
+      expect(ptyHost.spawnOptions).toHaveLength(1);
+      expect(manager.isTerminalInitialized(panel.id)).toBe(false);
+    }, 15_000);
+
     it('stops a running tab with Ctrl+C, keeps its conversation, and starts it again only after resume', async () => {
       vi.useFakeTimers();
       try {

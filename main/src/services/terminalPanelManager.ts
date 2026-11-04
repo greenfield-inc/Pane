@@ -13,7 +13,7 @@ import { isOrchestrationInternalSessionId } from '../../../shared/types/orchestr
 import * as pty from '@lydell/node-pty';
 import { EventEmitter } from 'events';
 import { filterSyncBlockClears } from './syncBlockClearFilter';
-import { ToolPanel, TerminalPanelState, type TerminalPausedMark } from '../../../shared/types/panels';
+import { ToolPanel, TerminalPanelState, pausedMarkOf, type TerminalPausedMark } from '../../../shared/types/panels';
 import { MISSION_CONTROL_VIEWER_PREFIX } from '../../../shared/types/missionControl';
 import { getPaneDaemonEventSink, getPaneEventSink, getPtyHostRuntime, getRuntimeConfigManager, type PtyHandleLike, type PtyHostRuntime } from '../core/runtime';
 import { panelManager } from './panelManager';
@@ -1654,6 +1654,10 @@ export class TerminalPanelManager extends EventEmitter {
     sessionId: string | undefined,
   ): Promise<ToolPanel> {
     await panelManager.updatePanel(panelId, { state });
+    // Pause owns its mark: this direct write keeps whatever the database holds now.
+    const saved = databaseService.getPanel(panelId);
+    const savedPaused = saved ? pausedMarkOf(saved) : undefined;
+    state = { ...state, customState: { ...terminalCustomState(state), paused: savedPaused } };
     const durableWriteAcknowledged = databaseService.updatePanel(panelId, { state });
     const persistedPanel = databaseService.getPanel(panelId);
     const persistedCustomState = persistedPanel ? terminalCustomState(persistedPanel.state) : undefined;
@@ -3179,6 +3183,8 @@ export class TerminalPanelManager extends EventEmitter {
       .filter((panel): panel is ToolPanel => panel?.type === 'terminal' && !terminalCustomState(panel.state).paused);
     if (targets.length === 0) return [];
     for (const panel of targets) await panelManager.commitPaused(panel.id, mark);
+    // A start that passed the gate before the mark landed finishes first, then is stopped with the rest.
+    await Promise.all(targets.map(panel => this.terminalInitializations.get(panel.id)?.catch(() => undefined)));
     const live = targets.flatMap(panel => this.terminals.get(panel.id) ?? []);
     const interrupt = () => {
       for (const terminal of live) {
