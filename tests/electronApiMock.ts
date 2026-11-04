@@ -19,6 +19,7 @@ import { DEFAULT_APPEARANCE, normalizeAppearance, type AppearanceConfig } from '
 import type { DiffManifest, DiffScope, FileDiffResult } from '../shared/types/gitDiff';
 import type { SetupExportSummary, SetupFile, SetupImportPreview, SetupSectionId } from '../shared/types/setupTransfer';
 import type { NotifyCommand, NotifySnapshot, NotifyWindowSize } from '../shared/types/notify';
+import type { PaneSecretStorage, PaneSecretSummary } from '../shared/types/paneSecrets';
 import type { MachineCommand, MachineConnectionsEvent, MachineState } from '../shared/types/machineConnections';
 
 type MockEventValue = JsonValue | object | undefined;
@@ -122,6 +123,8 @@ export type ElectronApiMockOptions = {
   setupImportError?: string;
   /** Serves window.electronAPI.notify with this queue snapshot; absent, the API is too. */
   notifySnapshot?: NotifySnapshot;
+  /** window.electronAPI.paneSecrets: the saved secrets and this host's store. Absent: none saved, in the keychain. */
+  paneSecrets?: { secrets: PaneSecretSummary[]; storage: PaneSecretStorage };
   /** window.electronAPI.machines: every machine and each machine's read answers by channel. Absent: this computer alone, with empty lists. */
   machineConnections?: { machines: MachineState[]; reads: Record<string, Record<string, JsonValue>> };
 };
@@ -766,8 +769,28 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         return () => { machineListeners.delete(callback); };
       },
     };
+    const paneSecrets = clone(mockOptions.paneSecrets ?? { secrets: [], storage: { kind: 'keychain' as const, encrypted: true } });
+    const paneSecretCalls: Array<{ action: 'set' | 'delete'; project: string; name: string }> = [];
+    const paneSecretsApi = {
+      list: () => Promise.resolve({ success: true, data: clone(paneSecrets) }),
+      set: (project: string, name: string, _value: string) => {
+        paneSecretCalls.push({ action: 'set', project, name });
+        const replaced = paneSecrets.secrets.some((secret) => secret.project === project && secret.name === name);
+        paneSecrets.secrets = [
+          ...paneSecrets.secrets.filter((secret) => !(secret.project === project && secret.name === name)),
+          { project, name, updatedAt: new Date().toISOString(), machine: 'this-mac' },
+        ];
+        return Promise.resolve({ success: true, data: replaced });
+      },
+      delete: (project: string, name: string) => {
+        paneSecretCalls.push({ action: 'delete', project, name });
+        paneSecrets.secrets = paneSecrets.secrets.filter((secret) => !(secret.project === project && secret.name === name));
+        return Promise.resolve({ success: true, data: true });
+      },
+    };
     const electronAPI = {
       notify: notifyApi,
+      paneSecrets: paneSecretsApi,
       machines: machinesApi,
       preferences: {
         get: async (key: string) => preferences[key] ?? 'true',
@@ -1885,6 +1908,10 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         getNotifyCommands() {
           return clone(notifyCommands);
+        },
+        /** Which secrets Settings set or deleted; values are never recorded. */
+        getPaneSecretCalls() {
+          return clone(paneSecretCalls);
         },
         getNotifyWindowSizes() {
           return clone(notifyWindowSizes);

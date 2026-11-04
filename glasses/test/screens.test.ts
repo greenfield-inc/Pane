@@ -59,6 +59,7 @@ const every: Array<[string, Page]> = [
   ['card', cardPage(question, ['expected 200, got 401', 'The refresh mock returns 401 before the retry fires.'])],
   ['long card', cardPage(longQuestion, ['expected 200, got 401'])],
   ['approve card', cardPage({ ...question, ui: 'approve', title: 'the G2 remote cover sheet.' }, [])],
+  ['secret card', cardPage({ ...question, ui: 'secret', title: 'Stripe test secret key' }, [])],
   ['full question', fullQuestionPage(longQuestion)],
   ['voice answer', voiceAnswerPage(question, 'stub the clock')],
   ['away', awayPage(laptop, () => '9:40', 'fix-login')],
@@ -117,6 +118,10 @@ describe('card (C3)', () => {
     const context = boxNamed(page, 'context');
     expect(context.kind === 'text' && context.lines).toEqual(['three']);
     expect(cardRows(longQuestion).map((row) => row.label)).toEqual(['Stub the clock', 'Loosen retry to 2 s', 'Read the whole question', 'Something else (hold to say it)']);
+  });
+
+  it('sends a secret request to the phone or computer, with no answer or voice row', () => {
+    expect(cardRows({ ...question, ui: 'secret', title: 'Stripe test secret key' }).map((row) => row.label)).toEqual(['Answer on your phone or computer']);
   });
 
   it('gives an approval Approve, Not yet and a spoken reason', () => {

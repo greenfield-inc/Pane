@@ -2,11 +2,25 @@ import { KeyRound, Plus, Trash2 } from 'lucide-react';
 import { Input } from './ui/Input';
 import { Button, IconButton } from './ui/Button';
 import { cn } from '../utils/cn';
-import { emptyProjectEnvRow, projectEnvRowProblem, type ProjectEnvRow } from './projectEnvRows';
+import { isMac } from '../utils/platformUtils';
+import { emptyProjectEnvRow, projectEnvRowProblem, rowSecretAddress, type ProjectEnvRow } from './projectEnvRows';
 
 interface ProjectEnvVarsSectionProps {
   rows: ProjectEnvRow[];
   onChange: (rows: ProjectEnvRow[]) => void;
+  /** The secret project a new Pane secret row defaults to: the repo's name, made valid. */
+  defaultProject: string;
+}
+
+const SOURCE_OPTIONS = [
+  { value: 'plain', label: 'Plain text' },
+  { value: 'secret', label: 'Pane secret' },
+  { value: 'keychain', label: 'macOS Keychain' },
+] as const;
+
+/** Keychain items exist only on macOS; a row saved with one elsewhere still shows it. */
+function sourceOptions(row: ProjectEnvRow) {
+  return isMac() || row.source === 'keychain' ? SOURCE_OPTIONS : SOURCE_OPTIONS.filter(option => option.value !== 'keychain');
 }
 
 function Segment<Value extends string>({ value, options, onChange, label }: {
@@ -36,8 +50,12 @@ function Segment<Value extends string>({ value, options, onChange, label }: {
   );
 }
 
-/** Project Settings → Environment Variables. Keychain values are write-only: a saved secret is never shown. */
-export function ProjectEnvVarsSection({ rows, onChange }: ProjectEnvVarsSectionProps) {
+/** Project Settings → Environment Variables. Secret and keychain values are write-only: a saved value is never shown. */
+export function ProjectEnvVarsSection({ rows, onChange, defaultProject }: ProjectEnvVarsSectionProps) {
+  const secretLabel = (row: ProjectEnvRow) => {
+    const { project, name } = rowSecretAddress(row, defaultProject);
+    return `${project}/${name || 'NAME'}`;
+  };
   const update = (id: string, patch: Partial<ProjectEnvRow>) => {
     onChange(rows.map(row => row.id === id ? { ...row, ...patch } : row));
   };
@@ -59,7 +77,7 @@ export function ProjectEnvVarsSection({ rows, onChange }: ProjectEnvVarsSectionP
           <p className="text-sm text-text-tertiary">No variables. Pane&apos;s own variables (PATH, WORKTREE_PATH, PANE_*) are always set.</p>
         )}
         {rows.map((row, index) => {
-          const problem = row.key.trim() || row.value || row.secret || row.service || row.account
+          const problem = row.key.trim() || row.value || row.secretProject || row.secretName || row.secretValue || row.service || row.account
             ? projectEnvRowProblem(row, rows.slice(0, index))
             : null;
           return (
@@ -79,10 +97,7 @@ export function ProjectEnvVarsSection({ rows, onChange }: ProjectEnvVarsSectionP
                   label={`Where ${row.key || 'this variable'} comes from`}
                   value={row.source}
                   onChange={(source) => update(row.id, { source })}
-                  options={[
-                    { value: 'plain', label: 'Plain text' },
-                    { value: 'keychain', label: 'macOS Keychain' },
-                  ]}
+                  options={sourceOptions(row)}
                 />
                 <IconButton
                   type="button"
@@ -105,65 +120,76 @@ export function ProjectEnvVarsSection({ rows, onChange }: ProjectEnvVarsSectionP
                 />
               )}
 
-              {row.source === 'keychain' && (
-                <div className="space-y-2">
-                  {row.keychainMode === 'stored' ? (
-                    <div className="flex flex-wrap items-center gap-2 text-sm text-text-secondary">
-                      <span className="font-mono tracking-widest text-text-tertiary" aria-hidden="true">••••••••</span>
-                      <span>Stored in Pane&apos;s keychain item</span>
-                      <span className="font-mono text-xs text-text-tertiary">{row.service} / {row.account}</span>
-                      <Button type="button" variant="secondary" size="sm" onClick={() => update(row.id, { keychainMode: 'secret', secret: '' })}>
-                        Replace
-                      </Button>
-                    </div>
-                  ) : (
-                    <>
-                      <Segment
-                        label={`How ${row.key || 'this variable'} uses the keychain`}
-                        value={row.keychainMode}
-                        onChange={(keychainMode) => update(row.id, { keychainMode })}
-                        options={[
-                          { value: 'secret', label: 'New secret' },
-                          { value: 'reference', label: 'Existing item' },
-                        ]}
-                      />
-                      {row.keychainMode === 'secret' ? (
+              {row.source === 'secret' && (
+                row.secretStored ? (
+                  <div className="flex flex-wrap items-center gap-2 text-sm text-text-secondary">
+                    <span className="font-mono tracking-widest text-text-tertiary" aria-hidden="true">••••••••</span>
+                    <span>Pane secret <span className="font-mono">{secretLabel(row)}</span></span>
+                    <Button type="button" variant="secondary" size="sm" onClick={() => update(row.id, { secretStored: false, secretValue: '' })}>
+                      Replace
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap gap-2">
+                      <div className="min-w-[10rem] flex-1">
                         <Input
-                          type="password"
-                          autoComplete="off"
-                          aria-label={`Secret value of ${row.key || 'variable'}`}
-                          value={row.secret}
-                          onChange={(e) => update(row.id, { secret: e.target.value })}
-                          placeholder="Pane stores this in your keychain"
+                          aria-label="Secret project"
+                          value={row.secretProject}
+                          onChange={(e) => update(row.id, { secretProject: e.target.value })}
+                          placeholder={`Project: ${defaultProject}`}
                           className="font-mono text-sm"
                           fullWidth
                         />
-                      ) : (
-                        <div className="flex flex-wrap gap-2">
-                          <div className="min-w-[10rem] flex-1">
-                            <Input
-                              aria-label="Keychain service"
-                              value={row.service}
-                              onChange={(e) => update(row.id, { service: e.target.value })}
-                              placeholder="Service (Where)"
-                              className="font-mono text-sm"
-                              fullWidth
-                            />
-                          </div>
-                          <div className="min-w-[10rem] flex-1">
-                            <Input
-                              aria-label="Keychain account"
-                              value={row.account}
-                              onChange={(e) => update(row.id, { account: e.target.value })}
-                              placeholder="Account"
-                              className="font-mono text-sm"
-                              fullWidth
-                            />
-                          </div>
-                        </div>
-                      )}
-                    </>
-                  )}
+                      </div>
+                      <div className="min-w-[10rem] flex-1">
+                        <Input
+                          aria-label="Secret name"
+                          value={row.secretName}
+                          onChange={(e) => update(row.id, { secretName: e.target.value })}
+                          placeholder={`Name: ${row.key.trim() || 'NAME'}`}
+                          className="font-mono text-sm"
+                          fullWidth
+                        />
+                      </div>
+                    </div>
+                    <Input
+                      type="password"
+                      autoComplete="off"
+                      spellCheck={false}
+                      aria-label={`Secret value of ${row.key || 'variable'}`}
+                      value={row.secretValue}
+                      onChange={(e) => update(row.id, { secretValue: e.target.value })}
+                      placeholder={`Type a value to save it as ${secretLabel(row)}, or leave empty to use the saved one`}
+                      className="font-mono text-sm"
+                      fullWidth
+                    />
+                  </div>
+                )
+              )}
+
+              {row.source === 'keychain' && (
+                <div className="flex flex-wrap gap-2">
+                  <div className="min-w-[10rem] flex-1">
+                    <Input
+                      aria-label="Keychain service"
+                      value={row.service}
+                      onChange={(e) => update(row.id, { service: e.target.value })}
+                      placeholder="Service (Where)"
+                      className="font-mono text-sm"
+                      fullWidth
+                    />
+                  </div>
+                  <div className="min-w-[10rem] flex-1">
+                    <Input
+                      aria-label="Keychain account"
+                      value={row.account}
+                      onChange={(e) => update(row.id, { account: e.target.value })}
+                      placeholder="Account"
+                      className="font-mono text-sm"
+                      fullWidth
+                    />
+                  </div>
                 </div>
               )}
 

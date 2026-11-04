@@ -11,7 +11,7 @@ import { EnhancedInput } from './ui/EnhancedInput';
 import { FieldWithTooltip } from './ui/FieldWithTooltip';
 import { Card } from './ui/Card';
 import { ProjectEnvVarsSection } from './ProjectEnvVarsSection';
-import { projectEnvInputsFrom, projectEnvRowProblem, projectEnvRowsFrom, type ProjectEnvRow } from './projectEnvRows';
+import { projectEnvInputsFrom, projectEnvRowProblem, projectEnvRowsFrom, secretProjectFor, type ProjectEnvRow } from './projectEnvRows';
 
 /** The editable fields, as the form holds them: an unset setting is ''. */
 interface SettingsForm {
@@ -151,11 +151,11 @@ export default function ProjectSettings({ project, isOpen, onClose, onUpdate, on
       const envProblem = envRows.map((row, index) => projectEnvRowProblem(row, envRows.slice(0, index))).find(Boolean);
       if (envProblem) throw new Error(`${envProblem} Nothing was saved.`);
       if (loadedEnvRows !== null && envRows !== loadedEnvRows) {
-        const envResponse = await window.electronAPI.projects.setEnvVars(project.id, projectEnvInputsFrom(envRows));
+        const envResponse = await window.electronAPI.projects.setEnvVars(project.id, projectEnvInputsFrom(envRows, secretProjectFor(project.name)));
         if (!envResponse.success || !envResponse.data) {
           throw new Error(envResponse.error || 'Pane could not save the environment variables.');
         }
-        // Typed secrets are now in the keychain; show the stored references.
+        // Typed values are now Pane secrets; show the saved references.
         const savedRows = projectEnvRowsFrom(envResponse.data);
         setEnvRows(savedRows);
         setLoadedEnvRows(savedRows);
@@ -518,7 +518,7 @@ export default function ProjectSettings({ project, isOpen, onClose, onUpdate, on
           </div>
 
           {loadedEnvRows !== null && (
-            <ProjectEnvVarsSection rows={envRows} onChange={setEnvRows} />
+            <ProjectEnvVarsSection rows={envRows} onChange={setEnvRows} defaultProject={secretProjectFor(project.name)} />
           )}
 
           {/* AI Prompt Customization */}

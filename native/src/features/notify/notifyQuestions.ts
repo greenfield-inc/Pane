@@ -5,6 +5,7 @@ export const NOTIFY_KIND_LABEL = {
   options: 'Needs a choice',
   approve: 'Needs approval',
   ask: 'Needs an answer',
+  secret: 'Asking for a secret',
   info: 'Update',
 } satisfies Record<NotifyUi, string>;
 
@@ -30,12 +31,15 @@ export type NotifySheetState =
 export function notifySheetState(shared: NotifySharedState, notifyId: string, answeredHere: AnsweredHere | null): NotifySheetState {
   const item = shared.items.find(candidate => candidate.id === notifyId);
   if (!item) return { kind: 'closed', message: 'This question is no longer waiting.' };
-  const sentTo = `Sent to ${item.source.agent}`;
+  // A secret's answer goes to the host's store, not to the agent; its summary says where.
+  const sentTo = item.ui === 'secret' ? 'Answered' : `Sent to ${item.source.agent}`;
   switch (item.state) {
     case 'waiting': {
       if (item.agentPrompt?.inTerminal) return { kind: 'closed', message: inTerminalMessage(item) };
       const olderThanAnswer = answeredHere !== null && shared.epoch === answeredHere.epoch && shared.revision <= answeredHere.revision;
-      return olderThanAnswer ? { kind: 'held', title: sentTo } : { kind: 'question', item };
+      if (!olderThanAnswer) return { kind: 'question', item };
+      // The host saves a secret and delivers at once, with no Undo to hold for.
+      return item.ui === 'secret' ? { kind: 'done', title: sentTo } : { kind: 'held', title: sentTo };
     }
     case 'sent':
       return { kind: 'held', title: answeredHere ? sentTo : `Answered on ${item.answeredOn ?? 'another screen'}`, summary: item.answerSummary };

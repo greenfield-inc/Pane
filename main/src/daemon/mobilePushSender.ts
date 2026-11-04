@@ -490,8 +490,10 @@ function providerReadiness(platform: RemoteMobilePlatform, apns: ApnsCredentialC
 /**
  * The buttons an alert offers, chosen so each makes sense without the question shown: Approve and
  * Deny, Reply, or up to three choices by label, recommended first. Anything else opens the sheet.
+ * A secret gets none: the system's reply field isn't a secure field, so a tap opens the app's sheet.
  */
 function notifyButtons(item: NotifyItem): NotifyAlertButtons {
+  if (item.ui === 'secret') return {};
   if (item.ui === 'approve') return { category: NOTIFY_CATEGORIES.approve };
   if (item.ui === 'ask') return { category: NOTIFY_CATEGORIES.ask };
   // An agent's prompt offers the phone list's Yes and No; the rest of its choices need the card.

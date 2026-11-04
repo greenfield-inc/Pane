@@ -423,19 +423,27 @@ describe('Notify question alerts', () => {
     expect(JSON.stringify(requests[0]?.payload)).not.toContain('users table');
   });
 
-  it('gives approve and ask their fixed buttons, more than three choices none, and an update no alert', async () => {
+  it('gives approve and ask their fixed buttons, a secret and more than three choices none, and an update no alert', async () => {
     const { sender, requests } = await iosSender();
     await sender.observeQuestion({ item: question({ id: 'approve', ui: 'approve', choices: undefined }), open: true });
     await sender.observeQuestion({ item: question({ id: 'ask', ui: 'ask', choices: undefined, source: { name: 'scratch', agent: 'Codex' } }), open: true });
     await sender.observeQuestion({ item: question({ id: 'many', choices: ['A', 'B', 'C', 'D'].map(label => ({ label })) }), open: true });
     await sender.observeQuestion({ item: question({ id: 'info', ui: 'info', state: 'info', choices: undefined }), open: true });
+    await sender.observeQuestion({
+      item: question({ id: 'secret', ui: 'secret', title: 'Stripe test secret key', choices: undefined, secret: { project: 'stripe', name: 'STRIPE_SECRET_KEY' } }),
+      open: true,
+    });
 
     expect(requests).toMatchObject([
       { payload: { aps: { category: 'pane.notify.approve' } } },
       { payload: { aps: { category: 'pane.notify.ask' } } },
       { payload: { aps: expect.not.objectContaining({ category: expect.anything() }) } },
+      // No Reply field: tapping the alert opens the app's secure sheet.
+      { payload: { notifyUi: 'secret', aps: { alert: { title: 'billing-migration', body: 'billing-migration has a question' } } } },
     ]);
-    expect(requests).toHaveLength(3);
+    expect(requests[3]?.payload.aps).not.toHaveProperty('category');
+    expect(JSON.stringify(requests[3]?.payload)).not.toMatch(/Stripe|STRIPE/);
+    expect(requests).toHaveLength(4);
     expect(requests[1]?.payload).toMatchObject({ aps: { alert: { body: 'scratch has a question' } } });
     expect(requests[1]?.payload).not.toHaveProperty('paneId');
   });

@@ -5,7 +5,7 @@ import type { Project } from '../src/types/project';
 import '../src/index.css';
 
 // Only the Electron transport is faked: project updates are recorded, and the
-// branch and config-file lookups answer per path.
+// branch and config-file lookups answer per path, and each repo has two variables.
 type ProjectUpdate = { projectId: string; updates: Partial<Project> };
 const updates: ProjectUpdate[] = [];
 const branchFor = (path: string) => (path.endsWith('repo-a') ? 'main-a' : 'main-b');
@@ -13,6 +13,10 @@ Object.defineProperty(window, 'electronAPI', { configurable: true, value: {
   git: { detectBranch: async (path: string) => ({ success: true, data: branchFor(path) }) },
   projects: {
     detectConfig: async () => ({ success: true, data: null }),
+    getEnvVars: async () => ({ success: true, data: [
+      { key: 'NODE_ENV', source: 'plain', value: 'development' },
+      { key: 'STRIPE_SECRET_KEY', source: 'secret', project: 'stripe', name: 'STRIPE_SECRET_KEY' },
+    ] }),
     update: async (projectId: string, change: Partial<Project>) => { updates.push({ projectId, updates: change }); return { success: true, data: null }; },
   },
 } });

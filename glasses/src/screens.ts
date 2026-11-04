@@ -82,7 +82,9 @@ export type CardRow =
   | { kind: 'choice'; label: string }
   | { kind: 'approve'; approved: boolean; label: string }
   | { kind: 'read-all'; label: string }
-  | { kind: 'voice'; label: string };
+  | { kind: 'voice'; label: string }
+  /** secret: the glasses answer by voice through a transcription provider, so a secret is typed elsewhere. */
+  | { kind: 'elsewhere'; label: string };
 
 /** "fix-login: stub the clock or loosen retry?" */
 function questionText(card: Card): string {
@@ -96,6 +98,11 @@ function questionCut(card: Card): boolean {
 /** The rows of a card's choice list, in order; press on row i acts on rows[i]. */
 export function cardRows(card: Card): CardRow[] {
   const rows: CardRow[] = [];
+  if (card.ui === 'secret') {
+    rows.push({ kind: 'elsewhere', label: 'Answer on your phone or computer' });
+    if (questionCut(card)) rows.push({ kind: 'read-all', label: 'Read the whole question' });
+    return rows;
+  }
   if (card.ui === 'approve') {
     rows.push({ kind: 'approve', approved: true, label: 'Approve' }, { kind: 'approve', approved: false, label: 'Not yet' });
   } else {
