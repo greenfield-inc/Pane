@@ -7,7 +7,9 @@ const stoppedByPause = new Set<string>();
 /** Pausing a Pane stops its run script (the Logs panel process) too. */
 export async function stopRunScriptsForPause(registry: PaneCommandRegistry, paneIds: readonly string[]): Promise<void> {
   for (const paneId of paneIds) {
-    if (!(await logsManager.isRunning(paneId))) continue;
+    // The live process is the truth; the Logs panel's saved flag can lag a script that just restarted.
+    const running = (await logsManager.getRunningProcess(paneId)) !== undefined || (await logsManager.isRunning(paneId));
+    if (!running) continue;
     await registry.invoke('sessions:stop-script', [paneId]);
     stoppedByPause.add(paneId);
   }
