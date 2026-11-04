@@ -33,7 +33,7 @@ function session(id: string, name: string, updatedMinutesAgo: number, paneIds: s
     name,
     agent: 'claude',
     internalSessionId: `${id}-terminal`,
-    panelIds: { claude: `${id}-claude`, codex: `${id}-codex`, cursor: `${id}-cursor` },
+    panelIds: { claude: `${id}-claude`, codex: `${id}-codex`, cursor: `${id}-cursor`, opencode: `${id}-opencode` },
     goal: '', context: '', decisions: [], blockers: [], nextAction: '', evidence: [], outputs: [],
     associations: paneIds.map(paneId => ({ paneId, panelIds: [], attachedAt: ago(100) })),
     activity: [],

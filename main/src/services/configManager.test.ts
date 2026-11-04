@@ -32,6 +32,15 @@ describe('ConfigManager appearance persistence', () => {
     });
   });
 
+  it('preserves the OpenCode default orchestrator agent across reload', async () => {
+    const manager = new ConfigManager();
+    await manager.initialize();
+    await manager.updateConfig({ defaultOrchestratorAgent: 'opencode' });
+    await manager.reloadFromDisk();
+    expect(manager.getConfig().defaultOrchestratorAgent).toBe('opencode');
+    expect(JSON.parse(await fs.readFile(configPath, 'utf8')).defaultOrchestratorAgent).toBe('opencode');
+  });
+
   it('ships agent-neutral terminal shortcuts and keeps awake only while sessions are active', async () => {
     const manager = new ConfigManager();
     await manager.initialize();

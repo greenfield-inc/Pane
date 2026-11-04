@@ -31,7 +31,7 @@ import { getWSLShellSpawn, buildWSLENV, WSLContext } from '../utils/wslUtils';
 import { getGitAttributionEnv } from '../utils/attribution';
 import { interactiveTerminalEnv } from '../utils/inheritedProcessEnv';
 import { createShellStartupPromptWatcher } from './shellStartupPrompts';
-import { PaneError, paneErrorText } from '../../../shared/paneError';
+import { PaneError, paneErrorText, reasonOf } from '../../../shared/paneError';
 import { isProcessAlive, waitForProcessesToExit } from '../utils/processTree';
 import { ArchiveProcessTracker, type ArchiveProcessIdentity } from './archiveProcessTracker';
 import {
@@ -119,7 +119,7 @@ import {
 import { claudeFolderTrustKey, detectAgentComposer, detectAgentFromScreen } from './agents/agentScreenSignature';
 import { readForegroundExecutablePath, readForegroundProcessGroup } from '../utils/foregroundProcess';
 import { buildCursorLaunchCommand, createCursorReadyDetector, extractCursorChatId } from './agents/cursorLaunch';
-import { resolveOpenCodeLaunchCommand } from './agents/opencodeLaunch';
+import { assertDirectOpenCodeLaunchCommand, extractOpenCodeSessionId, resolveOpenCodeLaunchCommand } from './agents/opencodeLaunch';
 import { isPosixShell, quoteShellWord } from './agents/shellWord';
 import { forgetClaudePrompts, withClaudePromptHooks } from './claudePrompts';
 import {
@@ -136,6 +136,14 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3
 
 function isValidUuid(value: string | undefined): value is string {
   return value !== undefined && UUID_PATTERN.test(value);
+}
+
+function openCodeSessionLaunchError(cause: unknown): PaneError {
+  return new PaneError(
+    'ERR_SESSION_OPENCODE_LAUNCH',
+    `OpenCode Session launch was refused: "${reasonOf(cause)}". No OpenCode terminal launch was started; saved conversation identity was kept.`,
+    'Set the Session launch command to `opencode --auto` and remove wrapped-launch/custom-resume settings, or choose the agent that matches the command.',
+  );
 }
 
 function terminalCustomState(state: ToolPanel['state']): TerminalPanelState {
@@ -511,6 +519,17 @@ export class TerminalPanelManager extends EventEmitter {
     shellType?: string,
     isWSL = false,
   ): CliLaunchResolution {
+    const commandAgentType = resolveAgentTypeFromCommand(initialCommand);
+    if (customState.orchestrationSessionId && (customState.agentType === 'opencode' || commandAgentType === 'opencode')) {
+      try {
+        if (customState.customResume) throw new Error('OpenCode Sessions cannot use custom resume settings');
+        if (customState.launchMode === 'wrapped') throw new Error('OpenCode Sessions cannot use wrapped launches');
+        assertDirectOpenCodeLaunchCommand(initialCommand, !isWSL && /^(?:powershell|pwsh|cmd)(?:\.exe)?$/iu.test(shellType ?? ''));
+      } catch (cause) {
+        throw openCodeSessionLaunchError(cause);
+      }
+      customState = { ...customState, agentType: 'opencode', preserveLaunchCommand: false };
+    }
     const resume = effectiveCustomResume({ initialCommand, customResume: customState.customResume });
     if (resume) {
       const config = validateCustomCommandResume(resume.config);
@@ -561,7 +580,6 @@ export class TerminalPanelManager extends EventEmitter {
       };
     }
 
-    const commandAgentType = resolveAgentTypeFromCommand(initialCommand);
     const agentType = customState.agentType ?? commandAgentType;
     if (customState.preserveLaunchCommand) {
       return { commandToRun: initialCommand, customState, isCliCommand: Boolean(agentType) };
@@ -598,24 +616,29 @@ export class TerminalPanelManager extends EventEmitter {
     nextState: TerminalPanelState,
     shellType?: string,
   ): CliLaunchResolution {
-    const launch = resolveOpenCodeLaunchCommand({
-      baseCommand: initialCommand,
-      shellType,
-      persistedSessionId: customState.agentSessionId,
-    });
-    return {
-      commandToRun: launch.commandToRun,
-      customState: {
-        ...nextState,
-        agentType: 'opencode',
-        agentSessionId: launch.sessionId,
-        isCliPanel: true,
-        isCliReady: false,
-        launchCommand: nextState.launchCommand ?? initialCommand,
-        wasInterrupted: undefined,
-      },
-      isCliCommand: true,
-    };
+    try {
+      const launch = resolveOpenCodeLaunchCommand({
+        baseCommand: initialCommand,
+        shellType,
+        persistedSessionId: customState.agentSessionId,
+      });
+      return {
+        commandToRun: launch.commandToRun,
+        customState: {
+          ...nextState,
+          agentType: 'opencode',
+          agentSessionId: launch.sessionId,
+          isCliPanel: true,
+          isCliReady: false,
+          launchCommand: nextState.launchCommand ?? initialCommand,
+          wasInterrupted: undefined,
+        },
+        isCliCommand: true,
+      };
+    } catch (cause) {
+      if (customState.orchestrationSessionId) throw openCodeSessionLaunchError(cause);
+      throw cause;
+    }
   }
 
   private resolveClaudeLaunch(
@@ -1044,6 +1067,7 @@ export class TerminalPanelManager extends EventEmitter {
   private extractAgentSessionId(agentType: CliAgentType | undefined, output: string): string | undefined {
     if (agentType === 'codex') return this.extractCodexResumeId(output);
     if (agentType === 'cursor') return extractCursorChatId(output);
+    if (agentType === 'opencode') return extractOpenCodeSessionId(this.stripAnsiSequences(output));
     return undefined;
   }
 
@@ -1060,7 +1084,7 @@ export class TerminalPanelManager extends EventEmitter {
     if (!panel) return;
     const customState = terminalCustomState(panel.state);
     const resume = effectiveCustomResume(customState);
-    if (!resume && terminal.agentType !== 'codex' && terminal.agentType !== 'cursor') return;
+    if (!resume && terminal.agentType !== 'codex' && terminal.agentType !== 'cursor' && terminal.agentType !== 'opencode') return;
     // Agent Farm prints one ID line before the agent starts; anything later is agent output.
     const firstLineOnly = resume?.source === 'agent-farm';
     if (firstLineOnly && terminal.reportedSessionIdLocked) return;
@@ -1612,9 +1636,6 @@ export class TerminalPanelManager extends EventEmitter {
     state: ToolPanel['state'],
     sessionId: string | undefined,
   ): Promise<ToolPanel> {
-    if (!sessionId) {
-      throw new Error(`OpenCode session persistence was not acknowledged for panel ${panelId}`);
-    }
     await panelManager.updatePanel(panelId, { state });
     const durableWriteAcknowledged = databaseService.updatePanel(panelId, { state });
     const persistedPanel = databaseService.getPanel(panelId);
@@ -1787,17 +1808,21 @@ export class TerminalPanelManager extends EventEmitter {
      */
     const isWSL = !!wslContext && process.platform === 'win32';
     // Resolve native OpenCode while the spawn slot is held and hard-persist its
-    // exact identity before either PTY backend can create a process. Wrappers
-    // and custom/preserved launchers remain opaque and use the legacy path.
+    // exact identity before either PTY backend can create a process. Session
+    // OpenCode policy runs here even for incompatible custom/preserved launches;
+    // generic wrappers and custom launchers retain their legacy path.
     let existingState = terminalCustomState(panel.state);
     const initialCommand = existingState.initialCommand;
     const initialInput = existingState.initialInput;
     let launchResolution: CliLaunchResolution | undefined;
     let launchStatePersistedBeforeSpawn = false;
-    const directNativeOpenCode = existingState.launchMode !== 'wrapped'
-      && !effectiveCustomResume(existingState)
-      && !existingState.preserveLaunchCommand
-      && (existingState.agentType ?? resolveAgentTypeFromCommand(initialCommand)) === 'opencode';
+    const commandAgent = resolveAgentTypeFromCommand(initialCommand);
+    const directNativeOpenCode = (Boolean(existingState.orchestrationSessionId)
+      && (existingState.agentType === 'opencode' || commandAgent === 'opencode'))
+      || (existingState.launchMode !== 'wrapped'
+        && !effectiveCustomResume(existingState)
+        && !existingState.preserveLaunchCommand
+        && (existingState.agentType ?? commandAgent) === 'opencode');
     if (initialCommand && directNativeOpenCode) {
       launchResolution = this.resolveCliLaunchCommand(
         panel.id,
@@ -1815,7 +1840,7 @@ export class TerminalPanelManager extends EventEmitter {
         stateToPersist,
         launchResolution.customState.agentSessionId,
       );
-      // Do not expose the allocated identity in memory until durable read-back
+      // Do not expose the launch identity in memory until durable read-back
       // confirms it. This also keeps test doubles and cache implementations in
       // sync with the exact state that reconstruction will read.
       panel.state = persistedPanel.state;

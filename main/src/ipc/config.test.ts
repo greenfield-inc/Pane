@@ -111,10 +111,10 @@ function createServicesStub(projects: Project[]): AppServices {
 
 describe('config IPC handlers', () => {
   it.each([
-    { platform: 'darwin', agents: ['claude', 'codex', 'cursor'] },
-    { platform: 'linux', agents: ['claude', 'codex', 'cursor'] },
-    { platform: 'win32', agents: ['claude', 'codex'] },
-  ])('keeps terminal-only OpenCode out of remote Session agents on $platform', async ({ platform, agents }) => {
+    { platform: 'darwin', agents: ['claude', 'codex', 'cursor', 'opencode'] },
+    { platform: 'linux', agents: ['claude', 'codex', 'cursor', 'opencode'] },
+    { platform: 'win32', agents: ['claude', 'codex', 'opencode'] },
+  ])('includes OpenCode in remote Session agents on $platform', async ({ platform, agents }) => {
     const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue(platform);
     try {
       const ipcMain = createIpcMainStub();
@@ -123,6 +123,14 @@ describe('config IPC handlers', () => {
       registerConfigHandlers(ipcMain as IpcMain, createServicesStub([]), registry);
       await expect(registry.invoke('remote:pwa-affordances')).resolves.toMatchObject({
         sessionAgents: { agents, defaultAgent: 'claude' },
+      });
+      const services = createServicesStub([]);
+      await services.configManager.updateConfig({ defaultOrchestratorAgent: 'opencode' });
+      const configuredRegistry = new PaneCommandRegistry();
+      // SAFETY: The stub implements the IpcMain handle surface exercised by registerConfigHandlers.
+      registerConfigHandlers(ipcMain as IpcMain, services, configuredRegistry);
+      await expect(configuredRegistry.invoke('remote:pwa-affordances')).resolves.toMatchObject({
+        sessionAgents: { agents, defaultAgent: 'opencode' },
       });
     } finally {
       platformSpy.mockRestore();

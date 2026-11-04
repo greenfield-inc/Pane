@@ -12,6 +12,7 @@ const INSTALL_URLS = {
   claude: 'https://code.claude.com/docs/en/setup',
   codex: 'https://github.com/openai/codex',
   cursor: 'https://cursor.com/docs/cli/installation',
+  opencode: 'https://opencode.ai/docs',
 } satisfies Record<PaneChatAgent, string>;
 
 /** The Yes button and the scanning indicator share this box, so the footer never shifts. */

@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { PaneCommandRegistry } from '../daemon/commandRegistry';
 import { GitDiffManager } from '../services/gitDiffManager';
 import { CommandRunner } from '../utils/commandRunner';
@@ -85,6 +85,28 @@ describe('git diff request boundary', () => {
     expect(isHexHash('a'.repeat(65))).toBe(false);
     expect(isHexHash('not-a-hash')).toBe(false);
     expect(decodeBoundary({ path: '[literal]*.ts', previousPath: 'old.ts' }, fileDiffRequestSchema)).toEqual({ path: '[literal]*.ts', previousPath: 'old.ts' });
+  });
+
+  it('preserves JSON prototype keys as own data with ordinary object prototypes', () => {
+    const input = JSON.parse('{"path":"file.ts","__proto__":{"previousPath":"foreign.ts"},"nested":{"__proto__":{"kind":"commit"}}}');
+    const decoded = decodeBoundary(input, boundary.jsonObject);
+    expect(Object.getPrototypeOf(decoded)).toBe(Object.prototype);
+    expect(Object.hasOwn(decoded, '__proto__')).toBe(true);
+    expect(decoded).toEqual(input);
+    const nested = decodeBoundary(decoded.nested, boundary.jsonObject);
+    expect(Object.getPrototypeOf(nested)).toBe(Object.prototype);
+    expect(Object.hasOwn(nested, '__proto__')).toBe(true);
+    expect(decodeBoundary(decoded, fileDiffRequestSchema)).toEqual({ path: 'file.ts' });
+    expect(decodeBoundary({ path: 'file.ts', omitted: undefined }, boundary.jsonObject)).toEqual({ path: 'file.ts' });
+  });
+
+  it('ignores inherited optional request fields and rejects inherited required scope fields', () => {
+    const request = { path: 'file.ts' };
+    Object.setPrototypeOf(request, { previousPath: 'foreign.ts' });
+    expect(decodeBoundary(request, fileDiffRequestSchema)).toEqual({ path: 'file.ts' });
+    const scope = { hash: 'abcd' };
+    Object.setPrototypeOf(scope, { kind: 'commit' });
+    expect(() => decodeBoundary(scope, diffScopeSchema)).toThrow('did not match any allowed shape');
   });
 });
 

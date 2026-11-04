@@ -1,11 +1,12 @@
 import { type ChildProcess, spawn } from 'child_process';
-import { mkdtempSync, promises as fs, realpathSync, rmSync } from 'fs';
+import { mkdtempSync, promises as fs, realpathSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { isProcessAlive, listDescendantPids, terminateProcessTrees, waitForProcessesToExit } from './processTree';
 
 const spawned: ChildProcess[] = [];
+const reportedChildren = new Set<number>();
 const directories: string[] = [];
 
 /**
@@ -14,12 +15,12 @@ const directories: string[] = [];
  * pids rather than counting the tree: under a loaded Windows runner the table
  * has shown one to five extra short-lived descendants, so a count flakes.
  */
-function idleProcess(cwd: string, children = 0): ChildProcess & { childPids: Promise<number[]> } {
+function idleProcess(cwd: string, children = 0, detachedChildren = false): ChildProcess & { childPids: Promise<number[]> } {
   const script = `
     const { spawn } = require('child_process');
     const pids = [];
     for (let i = 0; i < ${children}; i++) {
-      pids.push(spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { cwd: process.cwd(), stdio: 'ignore' }).pid);
+      pids.push(spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { cwd: process.cwd(), stdio: 'ignore', detached: ${detachedChildren} }).pid);
     }
     process.stdout.write(JSON.stringify(pids) + '\\n');
     setInterval(() => {}, 1000);
@@ -33,10 +34,18 @@ function idleProcess(cwd: string, children = 0): ChildProcess & { childPids: Pro
       output += chunk;
       if (!output.includes('\n')) return;
       const line = output.split('\n')[0];
-      const pids: unknown = JSON.parse(line);
-      if (Array.isArray(pids) && pids.every(Number.isInteger)) resolve(pids);
-      else reject(new Error(`idle process reported ${line}, not a list of pids`));
+      try {
+        const pids: unknown = JSON.parse(line);
+        if (!Array.isArray(pids) || pids.length !== children || !pids.every(pid => Number.isInteger(pid) && pid > 0 && pid !== process.pid && pid !== child.pid)) {
+          throw new Error(`idle process reported ${line}, not its children's pids`);
+        }
+        for (const pid of pids) reportedChildren.add(pid);
+        resolve(pids);
+      } catch (error) {
+        reject(error);
+      }
     });
+    child.once('error', reject);
     child.once('exit', code => reject(new Error(`idle process exited (${code}) before reporting its children`)));
   });
   // A test that never reads the pids must not fail on the rejection when teardown kills the process.
@@ -67,9 +76,17 @@ async function waitForDescendants(pid: number, expected: readonly number[]): Pro
 
 afterEach(async () => {
   // One call, so teardown costs one process-table read rather than one each.
-  const pids = spawned.splice(0).flatMap(child => child.pid ? [child.pid] : []);
-  if (pids.length > 0) await terminateProcessTrees(pids, { timeoutMs: 15_000 });
-  for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
+  const roots = spawned.flatMap(child => child.pid && child.exitCode === null && child.signalCode === null ? [child.pid] : []);
+  // Keep reported children even after their parent exits and a tree walk loses them.
+  const pids = [...new Set([...roots, ...reportedChildren])].filter(isProcessAlive);
+  if (pids.length > 0) expect(await terminateProcessTrees(pids, { timeoutMs: 15_000 })).toEqual([]);
+  expect(pids.filter(isProcessAlive)).toEqual([]);
+  spawned.length = 0;
+  reportedChildren.clear();
+  for (const directory of directories.splice(0)) {
+    // Windows can release a dead process's cwd handle after it leaves the table.
+    await fs.rm(directory, { recursive: true, force: true, maxRetries: process.platform === 'win32' ? 5 : 0, retryDelay: 100 });
+  }
 });
 
 describe('isProcessAlive', () => {
@@ -118,6 +135,17 @@ describe('listDescendantPids', () => {
 });
 
 describe('terminateProcessTrees', () => {
+  it('retains a reported child for teardown after its parent exits', async () => {
+    // Escape the helper's Windows kill-on-close job so its child really survives.
+    const child = idleProcess(temporaryDirectory(), 1, true);
+    if (!child.pid) throw new Error('spawn reported no pid');
+    const [grandchild] = await child.childPids;
+
+    child.kill();
+    expect(await waitForProcessesToExit([child.pid], 5000)).toEqual([]);
+    expect(isProcessAlive(grandchild)).toBe(true);
+  });
+
   it('kills a process and its children, which frees the directory they were sitting in', async () => {
     const parent = temporaryDirectory();
     const held = join(parent, 'held');

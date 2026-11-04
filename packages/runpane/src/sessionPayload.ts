@@ -36,7 +36,7 @@ const reportSchema = boundary.object({
   reportedAt: isoDateSchema,
   provenance: boundary.nonEmptyString,
 });
-const agentSchema = boundary.enumeration('codex', 'claude', 'cursor');
+const agentSchema = boundary.enumeration('codex', 'claude', 'cursor', 'opencode');
 
 const sessionCreatePayloadSchema = boundary.object({
   runtime: boundary.optional(boundary.enumeration('windows', 'wsl')),
