@@ -70,6 +70,17 @@ Turn it off in **Settings → AI & Agents → Answer prompts from Pane**. Off
 takes effect at once; a tab started while it was off picks it up when it
 restarts.
 
+## Chat tab prompts
+
+[Chat tabs](CHAT_TABS.md) ask their ACP approvals in Notify too, with exactly
+the choices the adapter sent (the phone's Yes and No are its allow and reject
+choices). A question with one single-choice field, such as most AskUserQuestion
+prompts, is asked as options and answers with the chosen value; a richer form
+stays in the chat tab. The first answer wins: an answer from Notify reaches the
+agent, and a card the chat tab answered first closes as "Answered in the chat".
+The same Settings switch turns this off. A chat tab waiting on a prompt reports
+`blocked`, so phone alerts follow it like a terminal agent's.
+
 ## Long waits
 
 A question waits until you answer it. How the call stays open depends on the

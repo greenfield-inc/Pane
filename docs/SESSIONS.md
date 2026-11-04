@@ -15,6 +15,15 @@ agent; a name you type or set later is kept. Each new Session opens as one Pane
 Chat and can be renamed later from the optional read-only overview. Expand a Session to see
 its associated Panes and open any Pane in its existing sidebar view.
 
+With [chat tabs](CHAT_TABS.md) on (Settings → Advanced → Chat tabs), a new Claude
+or Codex Session runs its orchestrator in a chat tab instead of a terminal, from
+the plain agent or the Session's `agent-farm run <profile>` launch, and sends its
+opening prompt once. That chat is quiet: finished turns fold to one line, and
+each worker Pane is one line with its state, PR and **Open**. Workers the
+orchestrator starts stay terminal tabs. Sessions that resume or promote a
+terminal conversation, run in WSL, use a custom resume command or a wrapper
+launch, and Cursor Sessions, keep their terminal.
+
 **New** at the top of the sidebar opens one dialog with a Session/Pane toggle
 on top and that kind's form below. When the desktop has saved other machines,
 a **Machine** picker sits between them. It starts on the machine you last
