@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { ProjectSessionList, ArchivedSessions } from './ProjectSessionList';
 import { ArchiveProgress } from './ArchiveProgress';
-import { ArrowUpDown, BookOpen, ChevronDown, ChevronRight, Info, LayoutGrid, FolderGit2, Home, Monitor, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pin, Settings as SettingsIcon, Plus, RefreshCw, MessageSquare, Repeat, Search, Server, SquareTerminal } from 'lucide-react';
+import { ArrowUpDown, BookOpen, ChevronDown, ChevronRight, Info, LayoutGrid, FolderGit2, Home, Monitor, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Pin, Settings as SettingsIcon, Plus, RefreshCw, MessageSquare, Repeat, Search, Inbox, Server, SquareTerminal } from 'lucide-react';
 import { SessionDetailTooltip } from './SessionDetailTooltip';
 import { IconButton } from './ui/Button';
 import { Tooltip } from './ui/Tooltip';
@@ -45,7 +45,8 @@ import { OrchestrationSessionNav } from './OrchestrationSessionNav';
 import { useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
 import { useSshHostsRefresh, useSshHostsStore } from '../stores/sshHostsStore';
 import { navigateToLoops, useLoopsStore } from '../stores/loopsStore';
-import { ApprovalsBadge } from './approvals/ApprovalsBadge';
+import { useApprovalsNav } from './approvals/useApprovalsNav';
+import { toggleApprovals } from './approvals/approvalsNavigation';
 import { useAnyLoopRunning } from './loops/loopRunView';
 import { useRestartToUpdateStore } from '../stores/restartToUpdateStore';
 import { RESTART_PILL_LABELS, restartPillDescription, restartPillLabel } from './restartToUpdateCopy';
@@ -364,6 +365,7 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
   const blockedAgentCount = useBlockedAgentCount();
   const loops = useLoopsStore((state) => state.loops);
   const loopRunning = useAnyLoopRunning(loops);
+  const approvals = useApprovalsNav();
   useSessionNavigationHotkeys({ projects, sessionSortAscending });
   useSshHostsRefresh();
 
@@ -546,7 +548,6 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
           />
         </Tooltip>
       )}
-      <ApprovalsBadge compact={collapsed} />
       {!collapsed && switcherVisible && renderRemoteHostSwitcher(
         <button
           type="button"
@@ -587,7 +588,6 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
                 </button>
               </Tooltip>
             )}
-            <ApprovalsBadge compact />
             <Tooltip content={<span className="flex items-center gap-2">Search{hotkeyDisplay('open-command-palette') && <Kbd>{hotkeyDisplay('open-command-palette')}</Kbd>}</span>} side="right">
               <button type="button" data-compact-rail-item aria-label="Search" onClick={openSearch} className={`${COMPACT_RAIL_BUTTON} ${COMPACT_RAIL_IDLE}`}><Search className="h-4 w-4" /></button>
             </Tooltip>
@@ -660,6 +660,25 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
                 {loopRunning && (
                   <span className="absolute right-0 top-0 flex h-3 w-3 items-center justify-center" aria-hidden="true">
                     <span className="h-1.5 w-1.5 rounded-full bg-status-info" />
+                  </span>
+                )}
+              </button>
+            </Tooltip>}
+
+            {approvals.enabled && <Tooltip content={approvals.title} side="right">
+              <button
+                type="button"
+                data-testid="compact-approvals"
+                data-compact-rail-item
+                onClick={toggleApprovals}
+                aria-pressed={approvals.open}
+                aria-label={approvals.label}
+                className={`${COMPACT_RAIL_BUTTON} ${approvals.open ? COMPACT_RAIL_ACTIVE : COMPACT_RAIL_IDLE}`}
+              >
+                <Inbox className="h-4 w-4" />
+                {approvals.count > 0 && (
+                  <span className="absolute -right-0.5 -top-0.5 inline-flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-status-warning px-0.5 text-[9px] font-semibold tabular-nums text-text-on-status-warning" aria-hidden="true">
+                    {approvals.count}
                   </span>
                 )}
               </button>

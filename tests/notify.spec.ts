@@ -70,12 +70,14 @@ const commands = (page: Page) => page.evaluate(() => (window as MockWindow).__pa
 const configUpdates = (page: Page) => page.evaluate(() => (window as MockWindow).__paneTestElectronMock.getConfigUpdates());
 
 test.describe('Approvals in the main window', () => {
-  test('the badge counts what waits, Panes and Sessions say Waiting, and nothing covers the work', async ({ page }) => {
+  test('the sidebar row counts what waits, Panes and Sessions say Waiting, and nothing covers the work', async ({ page }) => {
     // Main says the strip would show inside Pane: Approvals draws no strip or docked card there.
     await boot(page, { ...notifyFixture(), stripSurface: 'pane' });
-    const badge = page.getByTestId('approvals-badge');
+    const badge = page.getByTestId('approvals-nav');
     await expect(badge).toHaveAccessibleName('Approvals, 3 waiting');
     await expect(badge).toContainText('3');
+    // The row sits in the sidebar's top list, below Loops; the title bar keeps only the machine pill.
+    await expect(page.locator('[data-testid="loops-nav"] + [data-testid="approvals-nav"]')).toHaveCount(1);
     await expect(page.getByTestId('notify-nav')).toHaveCount(0);
     await expect(page.getByTestId('notify-in-pane-strip')).toHaveCount(0);
     await expect(page.getByTestId('notify-dock')).toHaveCount(0);
@@ -88,7 +90,7 @@ test.describe('Approvals in the main window', () => {
 
   test('Approvals groups by Session, opens the selected item in place, and answers it', async ({ page }) => {
     await boot(page);
-    await page.getByTestId('approvals-badge').click();
+    await page.getByTestId('approvals-nav').click();
     const queue = page.getByTestId('approvals-queue');
     await expect(queue.getByRole('heading', { name: 'Approvals' })).toBeVisible();
     await expect(queue.getByRole('tab', { name: 'Waiting 3' })).toHaveAttribute('aria-selected', 'true');
@@ -118,7 +120,7 @@ test.describe('Approvals in the main window', () => {
 
   test('a worker item shows its Pane beside it', async ({ page }) => {
     await boot(page);
-    await page.getByTestId('approvals-badge').click();
+    await page.getByTestId('approvals-nav').click();
     const beside = page.getByTestId('approvals-beside');
     await expect(beside).toContainText('Pane');
     await expect(beside).toContainText('auth-refactor');
@@ -139,14 +141,14 @@ test.describe('Approvals in the main window', () => {
     await expect(page.getByRole('tab', { name: /Other tab/ })).toHaveAttribute('aria-selected', 'true');
     await page.getByRole('button', { name: 'Home' }).first().click();
 
-    await page.getByTestId('approvals-badge').click();
+    await page.getByTestId('approvals-nav').click();
     const beside = page.getByTestId('approvals-beside');
     await expect(beside.getByRole('tab', { name: /Asking tab/ })).toHaveAttribute('aria-selected', 'true');
   });
 
   test('a suggestion fills the answer field and waits for Enter', async ({ page }) => {
     await boot(page);
-    await page.getByTestId('approvals-badge').click();
+    await page.getByTestId('approvals-nav').click();
     await page.getByTestId('approvals-row').filter({ hasText: 'release headline' }).click();
     const card = page.getByTestId('approvals-selected');
     await card.getByRole('button', { name: /Notify is here/ }).click();
@@ -164,20 +166,22 @@ test.describe('Approvals in the main window', () => {
   test('says nothing waits in one line, and main can open it', async ({ page }) => {
     const empty = { ...notifyFixture(), items: [], queue: [], strip: null, stripSurface: null };
     await boot(page, empty);
-    await expect(page.getByTestId('approvals-badge')).toHaveAccessibleName('Approvals');
+    await expect(page.getByTestId('approvals-nav')).toHaveAccessibleName('Approvals');
+    await expect(page.getByTestId('approvals-nav')).toHaveText('Approvals');
     // SAFETY: installElectronApiMock installs these test-only IPC controls on the page.
     await page.evaluate(() => (window as MockWindow).__paneTestElectronMock.emitNotifyNavigate('inbox'));
     await expect(page.getByTestId('notify-empty')).toHaveText('Nothing is waiting on you.');
   });
 
-  test('the badge clicked again returns to the view you left', async ({ page }) => {
+  test('the Approvals row clicked again returns to the view you left', async ({ page }) => {
     await boot(page);
     await page.getByRole('button', { name: 'Loops' }).first().click();
-    await page.getByTestId('approvals-badge').click();
+    await page.getByTestId('approvals-nav').click();
     await expect(page.getByTestId('approvals-queue')).toBeVisible();
-    await page.getByTestId('approvals-badge').click();
+    await expect(page.getByTestId('approvals-nav')).toHaveAttribute('aria-pressed', 'true');
+    await page.getByTestId('approvals-nav').click();
     await expect(page.getByTestId('approvals-queue')).toHaveCount(0);
-    await expect(page.getByTestId('approvals-badge')).toHaveAttribute('aria-pressed', 'false');
+    await expect(page.getByTestId('approvals-nav')).toHaveAttribute('aria-pressed', 'false');
   });
 });
 

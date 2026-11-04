@@ -157,13 +157,14 @@ Codex panel also expires when that panel sits idle at its prompt for 10 seconds.
 
 ## Where questions show
 
-- **Inside Pane: Approvals.** An amber **Approvals** badge in the title bar
-  shows how many items wait; clicking it, or pressing ⌃⇧Space while Pane is in
-  front, opens the Approvals screen in the main area, and clicking the badge
-  again returns you to the view you left. The sidebar keeps the Sessions list,
+- **Inside Pane: Approvals.** An **Approvals** row in the sidebar's top list,
+  below Loops, shows an amber count of the items waiting (none at zero);
+  clicking it, or pressing ⌃⇧Space while Pane is in front, opens the Approvals
+  screen in the main area, and clicking the row again returns you to the view
+  you left. The sidebar keeps the Sessions list,
   Panes with a waiting item show an amber "Waiting", and each Session row
   shows an amber count of the approvals waiting from it (its fallback items
-  included). The badge is the sum of every Session's count plus items not in a
+  included). The row's count is the sum of every Session's count plus items not in a
   Session, across saved machines; in the one-machine sidebar its tooltip says
   how many of them wait on other machines. Beside
   it, the queue has **Waiting** and **Answered** tabs and groups items by
@@ -219,7 +220,7 @@ the agent:
 - **A Pane desktop with saved machines** (Remote Access pairing or
   Workspaces) shows every saved machine's questions beside its own, whichever
   machine it is on: the strip over other apps, the round, the tray dot, the
-  chime, Approvals, the badge count and the Waiting dots. Each card names its
+  chime, Approvals, its sidebar count and the Waiting dots. Each card names its
   machine ("notify-remote · Claude · parsa-devbox"), and Approvals shows the
   machine's mark in its Session's group; beside it, **Open on <machine>**
   switches to that host instead of a live Session view. An answer, Undo, ✕, snooze or → goes to the card's own
@@ -267,8 +268,8 @@ its questions from every screen.
 
 | Setting | Default |
 | --- | --- |
-| Approvals | On. Off hides the badge, expires open cards, returns `unavailable` ("Approvals are off in Pane.") to every waiting agent, and drops fallback items. Agents, Session orchestrators included, then ask in their own tab. |
-| Show outside Pane | On. It controls the floating cards over other apps. Off shows no floating card; inside Pane you answer from the Approvals badge and screen, and the tray dot still shows. |
+| Approvals | On. Off hides the sidebar's Approvals row, expires open cards, returns `unavailable` ("Approvals are off in Pane.") to every waiting agent, and drops fallback items. Agents, Session orchestrators included, then ask in their own tab. |
+| Show outside Pane | On. It controls the floating cards over other apps. Off shows no floating card; inside Pane you answer from the Approvals row and screen, and the tray dot still shows. |
 | Position | Bottom center. Also top right or bottom right. |
 | Answer-all shortcut | ⌃⇧Space. Settings says so when another app already holds it. |
 | Updates hide after | 6 seconds |
@@ -344,7 +345,7 @@ Pane still works: its card shows the folder name and hides Open in Pane.
 macOS, Windows and Linux on X11 show the strip over other apps. In a Wayland
 session Pane runs as a native Wayland app and can't place a window over other
 apps, so Show outside Pane is unavailable there (in Settings and the tray menu).
-Questions show in Approvals inside Pane, with the badge, Waiting dots and
+Questions show in Approvals inside Pane, with its sidebar count, Waiting dots and
 the chime. The tray icon and its dot work; GNOME needs the AppIndicator
 extension, which Ubuntu turns on by default. On GNOME 46 (Ubuntu 24.04), which
 has no global-shortcut portal, ⌃⇧Space doesn't reach Pane from other apps;
