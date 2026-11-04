@@ -124,7 +124,6 @@ describe('demo host', () => {
       ['mobile:push-status', [{ platform: 'ios', installationId: 'demo' }]], ['runpane:glasses:list', []],
       ['panels:list', ['demo-dark-mode']], ['panels:getActive', ['demo-dark-mode']], ['panels:checkInitialized', ['demo-dark-mode-agent']],
       ['terminal:getState', ['demo-dark-mode-agent']], ['terminal:getScrollbackClean', ['demo-dark-mode-agent', 300]],
-      ['agent-chat:get', ['demo-dark-mode-agent']],
       ['ports:list', []], ['panels:read-browser-file', ['demo-fix-checkout-race-browser-0', 'http://localhost:5173/checkout']],
     ];
     for (const [channel, args] of reads) await expect(invokeChannel(client, channel, args), channel).resolves.toBeDefined();

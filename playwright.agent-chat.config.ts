@@ -4,7 +4,7 @@ import { defineConfig } from '@playwright/test';
 const port = Number(process.env.PANE_CHAT_TEST_PORT ?? 54865);
 export default defineConfig({
   testDir: './tests',
-  testMatch: ['agent-chat-remote.spec.ts', 'agent-chat-lifecycle.spec.ts'],
+  testMatch: ['agent-chat-lifecycle.spec.ts'],
   timeout: 45000,
   workers: 1,
   projects: [

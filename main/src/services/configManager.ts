@@ -67,9 +67,7 @@ export class ConfigManager extends EventEmitter {
       defaultPermissionMode: 'ignore',
       defaultModel: 'sonnet',
       defaultOrchestratorAgent: DEFAULT_PANE_CHAT_AGENT,
-      experimentalChatEnabled: false,
       notesEnabled: false,
-      defaultAgentInterface: 'terminal',
       autoStartOnBoot: true,
       keepAwakeWhileSessionsActive: true,
       keepAwakeWhilePluggedIn: false,
@@ -205,7 +203,6 @@ export class ConfigManager extends EventEmitter {
         defaultOrchestratorAgent: normalizePaneChatAgent(
           loadedConfig.defaultOrchestratorAgent ?? this.config.defaultOrchestratorAgent,
         ),
-        defaultAgentInterface: loadedConfig.defaultAgentInterface === 'chat' ? 'chat' : 'terminal',
         // Configs saved before this setting existed kept the machine awake while plugged in.
         keepAwakeWhilePluggedIn: loadedConfig.keepAwakeWhilePluggedIn ?? true,
         remoteDaemon: normalizeRemoteDaemonConfig(loadedConfig.remoteDaemon),
@@ -405,7 +402,6 @@ export class ConfigManager extends EventEmitter {
         defaultOrchestratorAgent: 'defaultOrchestratorAgent' in updates
           ? normalizePaneChatAgent(updates.defaultOrchestratorAgent)
           : this.config.defaultOrchestratorAgent,
-        defaultAgentInterface: 'defaultAgentInterface' in updates ? updates.defaultAgentInterface === 'chat' ? 'chat' : 'terminal' : this.config.defaultAgentInterface,
         remoteDaemon: 'remoteDaemon' in updates
           ? normalizeRemoteDaemonConfig(updates.remoteDaemon)
           : this.config.remoteDaemon,

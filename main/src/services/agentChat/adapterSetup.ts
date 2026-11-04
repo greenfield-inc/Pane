@@ -16,6 +16,10 @@ type Provider = 'claude' | 'codex';
  * agent binaries their SDKs bundle. Each runs the person's own installed CLI,
  * which must be at least `minimum`: claude-agent-sdk 0.3.316 pairs with Claude
  * Code 2.1.316, and codex-acp 2.5.0 depends on @openai/codex ^0.165.0.
+ * Change a pin only with its `minimum`, its `minimumReleaseAgeExclude` entries
+ * in pnpm-workspace.yaml, and a packaged build: scripts/after-pack.js runs
+ * scripts/verify-chat-adapters.js, which fails the build unless each packaged
+ * adapter starts and answers ACP `initialize`.
  */
 const adapters = {
   claude: { packageName: '@agentclientprotocol/claude-agent-acp', version: CLAUDE_ADAPTER_VERSION, name: 'Claude Code', minimum: '2.1.316', upgrade: 'npm install -g @anthropic-ai/claude-code@latest' },
@@ -35,8 +39,6 @@ export function adapterEntry(provider: Provider): string | undefined {
   const entry = path.join(root, 'dist', 'index.js');
   return metadata?.version === version && existsSync(entry) ? entry : undefined;
 }
-
-export async function installClaudeAdapter(): Promise<void> { return installAdapter('claude'); }
 
 /** Where the adapter will run the CLI: the tab's project folder and launch environment. */
 export interface LaunchContext { cwd?: string; env?: NodeJS.ProcessEnv }

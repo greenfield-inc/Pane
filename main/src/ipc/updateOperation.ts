@@ -1,4 +1,3 @@
-import { agentChatManager } from '../services/agentChat/agentChatManager';
 import { UpdatePanelRestorer } from '../services/updateRestoration';
 import { getPaneEventSink } from '../core/runtime';
 import { beginUpdateShutdown } from '../services/updateShutdown';
@@ -111,13 +110,12 @@ export function registerUpdateOperationHandlers(services: AppServices, registry:
   const restorer = new UpdatePanelRestorer(directory, bootId, {
     getPanel: id => panelManager.getPanel(id),
     updatePanel: async (id, update) => { await panelManager.updatePanel(id, update); },
-    isInitialized: id => terminalPanelManager.isAgentRuntimeInitialized(id),
+    isInitialized: id => terminalPanelManager.isTerminalInitialized(id),
     initialize: async (panel, cwd, operationId) => {
-      if (agentChatManager.manages(panel.id)) return agentChatManager.restoreAfterUpdate(panel.id, operationId);
       const context = services.sessionManager.getProjectContext(panel.sessionId)?.commandRunner.wslContext;
       await terminalPanelManager.initializeTerminal(panel, cwd, context, 1, undefined, operationId);
     },
-    verify: async (panelId, resumeId) => agentChatManager.manages(panelId) ? agentChatManager.verifyNativeResume(panelId, resumeId) : terminalPanelManager.verifyUpdateResume(panelId, resumeId),
+    verify: async (panelId, resumeId) => terminalPanelManager.verifyUpdateResume(panelId, resumeId),
   });
   // runpane update hands off here when this host cannot run the independent
   // update (no standalone Node, an unwritable install, the bundled CLI). It is

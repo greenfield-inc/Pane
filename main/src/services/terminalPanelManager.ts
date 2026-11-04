@@ -1,4 +1,3 @@
-import { agentChatManager, type AgentChatManager } from './agentChat/agentChatManager';
 import { getRunpaneShimState, withRunpaneOnPath } from './runpaneShim';
 import { sessionRuntimePath, sessionWSLContext } from './sessionRuntime';
 import { escapeForBash, windowsPathToWSLMount } from '../utils/wslUtils';
@@ -400,7 +399,6 @@ interface CliLaunchResolution {
 }
 
 export class TerminalPanelManager extends EventEmitter {
-  private agentChat?: AgentChatManager;
   private terminals = new Map<string, TerminalProcess>();
   // Retiring a PTY is not proof its shell or agent exited. Keep their identities
   // (pid and start time) until the OS confirms exit; a pid alone may since
@@ -435,29 +433,6 @@ export class TerminalPanelManager extends EventEmitter {
   ) {
     super();
     this.setMaxListeners(100);
-  }
-
-  attachAgentChat(manager: AgentChatManager): void {
-    this.agentChat = manager;
-    manager.attachNative({
-      publishStatus: event => this.emit('agent-status', event),
-      executable: async panelId => { const pid = this.terminals.get(panelId)?.pty.pid; return pid ? this.readForegroundExecutable(pid) : undefined; },
-      pid: panelId => this.terminals.get(panelId)?.pty.pid,
-      writeControl: (panelId, data) => {
-        const terminal = this.terminals.get(panelId);
-        if (!terminal || terminal.destroying || terminal.heldInput?.length) throw new PaneError('CHAT_NATIVE_INPUT_UNAVAILABLE', 'The native terminal cannot accept the handoff control command.', 'Wait for queued terminal input to drain before switching.');
-        terminal.pty.write(data);
-      },
-      destroy: panelId => this.destroyTerminal(panelId, { chatInternal: true }),
-      initialize: async (panelId, cwd, updateOperationId) => {
-        const panel = panelManager.getPanel(panelId);
-        if (!panel) throw new PaneError('CHAT_PANEL_MISSING', 'The saved agent tab no longer exists.', 'Open an existing agent tab.');
-        const state = terminalCustomState(panel.state);
-        await panelManager.updatePanel(panel.id, { state: { ...panel.state, customState: { ...state, initialInput: undefined, initialInputFile: undefined, updateResumeId: undefined } } });
-        const restored = panelManager.getPanel(panelId);
-        if (restored) await this.initializeTerminal(restored, cwd, undefined, 1, undefined, updateOperationId);
-      },
-    });
   }
 
   private quoteCommandArgument(value: string): string {
@@ -1171,9 +1146,6 @@ export class TerminalPanelManager extends EventEmitter {
       pids.push(terminal.pty.pid);
       result.set(terminal.sessionId, pids);
     }
-    for (const [sessionId, pids] of this.agentChat?.processIds() ?? []) {
-      result.set(sessionId, [...new Set([...(result.get(sessionId) ?? []), ...pids])]);
-    }
     return result;
   }
 
@@ -1366,15 +1338,6 @@ export class TerminalPanelManager extends EventEmitter {
     // clears the safety timer, and invokes the resume callback only when the
     // record is actually paused and bytes drop below `LOW_WATERMARK`.
     flowControlOnAck(terminal.flowControl, bytesConsumed, () => this.resumePty(terminal));
-  }
-
-  authorizePtyHostInput(ptyId: string, data: string): void {
-    for (const [panelId, terminal] of this.terminals) {
-      if (terminal.ptyId === ptyId) {
-        this.agentChat?.guardNativeInput(panelId, data);
-        return;
-      }
-    }
   }
 
   acknowledgePtyHostBytes(ptyId: string, bytesConsumed: number): void {
@@ -1710,7 +1673,6 @@ export class TerminalPanelManager extends EventEmitter {
   }
 
   private async initializeTerminalOnce(panel: ToolPanel, cwd: string, wslContext?: WSLContext | null, priority: number = 1, initialDimensions?: { cols: number; rows: number }, updateOperationId?: string): Promise<void> {
-    if (!this.terminals.has(panel.id)) this.agentChat?.assertNativeInitialize(panel.id);
     if (this.terminals.has(panel.id)) {
       return;
     }
@@ -1945,9 +1907,6 @@ export class TerminalPanelManager extends EventEmitter {
     const launch = isWSL ? { args: shellArgs, env: roleEnv } : withRunpaneOnPath({ name: shellType, args: shellArgs }, roleEnv);
     shellArgs = launch.args;
     const spawnEnv = launch.env;
-    if (await this.agentChat?.prepareFreshChat(panel, cwd, spawnEnv, shellType, isWSL)) return;
-    // A host-owned Codex server may allocate the identity before its TUI starts.
-    // Resolve the native command from that durable state, not the pre-spawn copy.
     existingState = terminalCustomState(panel.state);
 
     // Read the setting once per spawn so we don't scatter config reads.
@@ -2086,10 +2045,6 @@ export class TerminalPanelManager extends EventEmitter {
       }
 
       if (this.terminals.get(panel.id) !== terminalProcess || terminalProcess.destroying) return;
-
-      if (this.agentChat) {
-        commandToRun = await this.agentChat.prepareNativeLaunch(panel, cwd, spawnEnv, commandToRun, shellType, terminalProcess.isWSL === true);
-      }
 
       // Detect the interactive prompt before injecting the command.
       // Previous approaches (fixed 500ms delay, then fire-on-any-data + 300ms) failed
@@ -2306,7 +2261,6 @@ export class TerminalPanelManager extends EventEmitter {
   }
 
   writeToTerminal(panelId: string, data: string): void {
-    this.agentChat?.guardNativeInput(panelId, data);
     const terminal = this.terminals.get(panelId);
     if (!terminal) {
       console.warn(`[TerminalPanelManager] Terminal ${panelId} not found`);
@@ -2634,13 +2588,8 @@ export class TerminalPanelManager extends EventEmitter {
     return state === 'working' || state === 'blocked' ? 'active' : 'idle';
   }
 
-  isAgentRuntimeInitialized(panelId: string): boolean {
-    const mode = this.agentChat?.mode(panelId);
-    return mode === 'chat' || ((mode !== 'stopped' || !!this.agentChat?.isNativeStarting(panelId)) && this.isTerminalInitialized(panelId));
-  }
-
   getAgentStatus(panelId: string): AgentState | undefined {
-    return this.agentChat?.status(panelId) ?? this.agentStatusMonitor.getState(panelId);
+    return this.agentStatusMonitor.getState(panelId);
   }
 
   private emitActivityStatus(terminal: TerminalProcess): void {
@@ -2682,8 +2631,6 @@ export class TerminalPanelManager extends EventEmitter {
     reason: string | null,
     screenLines?: string[],
   ): void {
-    const owner = this.agentChat?.mode(terminal.panelId);
-    if (owner && owner !== 'terminal') return;
     terminal.lastStatusPromptKey = state === 'blocked' ? blockedPromptKey(reason, screenLines) : undefined;
     const payload: PanelAgentStatusEvent = {
       panelId: terminal.panelId,
@@ -3044,7 +2991,6 @@ export class TerminalPanelManager extends EventEmitter {
   }
 
   private async finishTerminateSessionTerminals(sessionId: string): Promise<void> {
-    await this.agentChat?.stopSession(sessionId);
     const terminals = [...this.terminals.values()].filter(terminal => terminal.sessionId === sessionId);
     await Promise.all(terminals.map(terminal => this.destroyTerminal(terminal.panelId).catch(error => {
       console.error(`[TerminalPanelManager] Destroy failed for ${terminal.panelId}:`, error);
@@ -3055,7 +3001,6 @@ export class TerminalPanelManager extends EventEmitter {
   /** Preserve normal terminal resource retirement. ArchiveProcessTracker
    * captures beforehand, then escalates and verifies matching survivors. */
   async retireSessionTerminalsForArchive(sessionId: string): Promise<void> {
-    await this.agentChat?.stopSession(sessionId);
     const terminals = [...this.terminals.values()].filter(terminal => terminal.sessionId === sessionId);
     await Promise.all(terminals.map(terminal => this.destroyTerminal(terminal.panelId)));
   }
@@ -3092,8 +3037,7 @@ export class TerminalPanelManager extends EventEmitter {
     return tracker.processes;
   }
 
-  destroyTerminal(panelId: string, options: { saveState?: boolean; chatInternal?: boolean } = {}): Promise<void> {
-    if (!options.chatInternal && this.agentChat?.manages(panelId)) return this.agentChat.stop(panelId);
+  destroyTerminal(panelId: string, options: { saveState?: boolean } = {}): Promise<void> {
     const terminal = this.terminals.get(panelId);
     if (!terminal) return Promise.resolve();
     terminal.destroying ??= this.finishDestroyTerminal(terminal, options.saveState !== false);
@@ -3194,7 +3138,7 @@ export class TerminalPanelManager extends EventEmitter {
    * Get all active terminal panel IDs.
    */
   getAllPanelIds(): string[] {
-    return [...new Set([...this.terminals.keys(), ...(this.agentChat?.activePanelIds() ?? [])])];
+    return Array.from(this.terminals.keys());
   }
 
   /**
@@ -3496,4 +3440,3 @@ export class TerminalPanelManager extends EventEmitter {
 // Export singleton instance
 export const terminalPanelManager = new TerminalPanelManager();
 
-terminalPanelManager.attachAgentChat(agentChatManager);

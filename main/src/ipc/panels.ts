@@ -24,7 +24,6 @@ import { PaneError, paneErrorText, reasonOf } from '../../../shared/paneError';
 import { readBrowserPanelFile } from '../services/browserPanelFiles';
 import { prepareRemoteBrowserFiles } from '../daemon/client/remoteBrowserFiles';
 import { clearPaneBrowserData } from '../services/browserData';
-import { assertRawTerminal } from './runpaneChat';
 import { ChunkedUploadStore, type UploadStart } from '../services/chunkedUploadStore';
 
 const execFileAsync = promisify(execFile);
@@ -832,7 +831,6 @@ export function registerPanelHandlers(
   });
   
   commandRegistry.register('terminal:getState', async (panelId: string) => {
-    assertRawTerminal(panelId);
     return terminalPanelManager.getTerminalState(panelId);
   });
 
@@ -880,13 +878,11 @@ export function registerPanelHandlers(
 
   // Get alternate screen state for TUI detection on panel mount
   commandRegistry.register('terminal:getAltScreenState', async (panelId: string) => {
-    assertRawTerminal(panelId);
     return terminalPanelManager.getAltScreenState(panelId);
   });
 
   commandRegistry.register('terminal:getScrollbackClean', async (panelId: string, lines: number) => {
     try {
-      assertRawTerminal(panelId);
       const content = await readCleanTerminalScrollback(panelId, lines);
       if (content === null) {
         return { success: false, error: `No scrollback available for panel ${panelId}` };

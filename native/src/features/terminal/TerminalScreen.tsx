@@ -8,14 +8,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PaneError } from '@shared/paneError';
 import { RemoteUnconfirmedResultError } from '@shared/remoteClient';
 import type { OrchestrationSessionView } from '@shared/types/orchestrationSession';
-import type { EditorPanelState, TerminalPanelState, ToolPanel } from '@shared/types/panels';
+import type { EditorPanelState, ToolPanel } from '@shared/types/panels';
 import type { RemotePwaAffordances } from '@shared/types/remoteDaemon';
 
 import { useDaemon, useInvokeMutation, useInvokeQuery } from '@/daemon';
 import { useTheme } from '@/theme';
 import { EmptyState, ErrorState, Icon, Text } from '@/ui';
 
-import { AgentConversationSurface } from '../agentChat/AgentConversationSurface';
 import { BrowserTab } from '../browser/BrowserTab';
 import { DiffEditorTab, DiffTab } from '../diff/DiffTab';
 import { ExplorerTab } from '../files/ExplorerTab';
@@ -121,8 +120,7 @@ export function TerminalScreen({ paneId, session }: { paneId: string; session?: 
   useEffect(() => {
     if (!panelId && shownId) router.setParams({ panelId: shownId });
   }, [panelId, shownId]);
-  const conversation = (panel?.state.customState as TerminalPanelState | undefined)?.agentChat?.conversation;
-  const terminalActive = view === 'terminal' && (!conversation || (conversation.active === 'terminal' && !conversation.transition));
+  const terminalActive = view === 'terminal';
   const title = session ? session.session.name || 'Untitled' : pane.data?.name ?? '';
 
   const composer = useComposerDraft(panel ? draftKey(profile.id, paneId, panel.id) : null);
@@ -176,8 +174,8 @@ export function TerminalScreen({ paneId, session }: { paneId: string; session?: 
       {panel && view !== 'terminal' ? (
         <TabBody panel={panel} title={title} />
       ) : panel ? (
-        <AgentConversationSurface key={panel.id} panel={panel} draft={draft} onChangeDraft={setDraft} confirmDraft={composer.confirmDelivery}>
         <TerminalPanel
+          key={panel.id}
           panel={panel}
           actions={terminalActions}
           draft={draft}
@@ -190,7 +188,6 @@ export function TerminalScreen({ paneId, session }: { paneId: string; session?: 
           // Older hosts send no change events, so read the list fresh each time.
           onOpenShortcuts={() => void affordances.refetch()}
         />
-        </AgentConversationSurface>
       ) : (
         <View style={[styles.fill, { backgroundColor: theme.terminal.background }]}>
           {panelList.isPending ? (

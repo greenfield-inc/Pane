@@ -2,7 +2,6 @@ import type { LoopInput } from '../../shared/types/loop';
 import type { TestNotificationResult } from '../../shared/types/notifications';
 import type { SetupFile, SetupSectionId } from '../../shared/types/setupTransfer';
 import type { SessionImportProgress, SessionImportRunResult, SessionImportScan } from '../../shared/types/sessionImport';
-import type { AgentChatEvent, AgentChatView, AgentChatSend, AgentInterface } from '../../shared/types/agentChat';
 import type { RestartToUpdateSource, RestartToUpdateState, UpdateRestoreResult } from '../../shared/types/updater';
 import { contextBridge, ipcRenderer } from 'electron';
 import { createPreferencesApi } from '../../shared/types/preferences';
@@ -428,34 +427,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     }): Promise<IPCResponse> => invokeIpc('diagnostics:renderer-fatal', payload),
   },
 
-  agentChat: {
-    onReconnect: (callback: () => void) => {
-      const listener = (_event: Electron.IpcRendererEvent, state: RemotePaneConnectionState) => { if (state.status === 'connected') callback(); };
-      ipcRenderer.on('remote-daemon:connection-state-changed', listener);
-      return () => ipcRenderer.removeListener('remote-daemon:connection-state-changed', listener);
-    },
-    get: (panelId: string) => invokeIpc('agent-chat:get', panelId),
-    setup: () => invokeIpc('agent-chat:setup'),
-    identify: (panelId: string, nativeId: string, socketPath: string) => invokeIpc('agent-chat:identify', panelId, nativeId, socketPath),
-    switch: (panelId: string, mode: AgentInterface, generation: number) => invokeIpc('agent-chat:switch', panelId, mode, generation),
-    recover: (panelId: string, mode: AgentInterface, generation: number) => invokeIpc('agent-chat:recover', panelId, mode, generation),
-    send: (panelId: string, request: AgentChatSend) => invokeIpc('agent-chat:send', panelId, request),
-    receipt: (panelId: string, operationId: string) => invokeIpc('agent-chat:receipt', panelId, operationId),
-    configure: (panelId: string, generation: number, configId: string, value: string) => invokeIpc('agent-chat:configure', panelId, generation, configId, value),
-    cancel: (panelId: string, generation: number) => invokeIpc('agent-chat:cancel', panelId, generation),
-    permission: (panelId: string, generation: number, requestId: string, optionId: string) => invokeIpc('agent-chat:permission', panelId, generation, requestId, optionId),
-    stop: (panelId: string) => invokeIpc('agent-chat:stop', panelId),
-    onEvent: (callback: (event: AgentChatEvent) => void) => {
-      const listener = (_event: Electron.IpcRendererEvent, event: AgentChatEvent) => callback(event);
-      ipcRenderer.on('agent-chat:event', listener);
-      return () => ipcRenderer.removeListener('agent-chat:event', listener);
-    },
-    onState: (callback: (state: AgentChatView) => void) => {
-      const listener = (_event: Electron.IpcRendererEvent, state: AgentChatView) => callback(state);
-      ipcRenderer.on('agent-chat:state', listener);
-      return () => ipcRenderer.removeListener('agent-chat:state', listener);
-    },
-  },
   paneChat: {
     getOrCreate: (): Promise<IPCResponse> => invokeIpc('pane-chat:get-or-create'),
     setAgent: (agent: PaneChatAgent): Promise<IPCResponse> => invokeIpc('pane-chat:set-agent', agent),

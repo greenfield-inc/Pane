@@ -249,12 +249,3 @@ Notes tab.
 - Production builds must never include React Scan (`pnpm perf:scan` is dev
   only).
 
-### Agent Chat
-
-[Agent Chat](AGENT_CHAT.md) connects agent tabs to host-owned Claude ACP or native
-Codex app-server runtimes. The same panel keeps a durable conversation identity
-and generation across interfaces, using provider-native history forks when exact
-transfer is unavailable. Codex views can share one running provider owner. Desktop and remote
-viewers share the command registry and ordered projection events; viewer lifetime
-does not control the agent process. See the compatibility and recovery limits in
-the linked guide.

@@ -1266,11 +1266,6 @@ Version: 0.15.31
 Author: AgentbaseAI Inc.
 Homepage: https://www.assistant-ui.com/
 
-Package: @assistant-ui/react-native
-Version: 0.1.50
-Author: AgentbaseAI Inc.
-Homepage: https://www.assistant-ui.com/
-
 Package: @assistant-ui/store
 Version: 0.3.22
 Author: AgentbaseAI Inc.

@@ -8,7 +8,6 @@ import { SettingRow, SettingsPage } from '../SettingRow';
 import { ImmediateToggle, SegmentedControl } from '../SettingsControls';
 import type { SettingsPersistence } from '../useSettingsPersistence';
 import { API } from '../../../utils/api';
-import { isChatEnabled } from '../../../stores/configStore';
 import { PANE_CHAT_AGENT_LABELS, type PaneChatAgent } from '../../../../../shared/types/paneChat';
 import { SessionLaunchFields } from '../../SessionLaunchFields';
 import { DEFAULT_SESSION_PROFILE } from '../../../../../shared/types/sessionProfile';
@@ -61,10 +60,6 @@ export function AIAgentsSettings({ persistence, onDirtyChange }: AIAgentsSetting
   return (
     <SettingsPage title="AI & Agents" description="Application-wide defaults for Sessions and coding-agent integrations.">
       <SettingsSection title="Agent defaults">
-        {isChatEnabled(config) && <SettingRow settingId="default-agent-interface" label="Default agent interface" description="Choose the interface for new agent tabs. Switching a tab also updates this default; existing tabs keep their choice. Pane sets up required adapters automatically on the workspace host." saveState={persistence.saveStates['default-agent-interface']}>
-          <SegmentedControl<'terminal' | 'chat'> label="Default agent interface" value={config.defaultAgentInterface ?? 'terminal'} options={[{ id: 'terminal', label: 'Terminal' }, { id: 'chat', label: 'Chat' }]} onChange={value => void persistence.saveConfig('default-agent-interface', { defaultAgentInterface: value })} />
-        </SettingRow>}
-
         <SettingRow
           settingId="default-pane-chat-agent"
           label="Default Sessions agent"

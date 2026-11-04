@@ -27,7 +27,7 @@ const client: AgentChatClient = {
  configure: async(_panel,_generation,id,value)=>{window.qaConfigurationCalls.push({id,value});const control=view.controls?.find(option=>option.id===id);if(control)control.currentValue=value;},
  onEvent:()=>()=>{},onState:()=>()=>{},
  send:async()=>{throw new Error('QA fixture has no send')},receipt:async()=>undefined,
- setup:async()=>({installed:true}),stop:async()=>{},cancel:async()=>{},permission:async()=>{},switch:async()=>{throw new Error('QA fixture has no switch')},recover:async()=>{throw new Error('QA fixture has no recovery')}
+ setup:async()=>({installed:true}),stop:async()=>{},cancel:async()=>{},permission:async()=>{}
 };
 const viewer=agentChatViewer(client,'qa-dom');
 Object.assign(window,{qaViewer:viewer,qaReadCount:()=>reads});

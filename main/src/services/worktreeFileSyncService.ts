@@ -409,6 +409,17 @@ async function execCopyCommand(
   }
 }
 
+/** Why a copy failed: a shell command's stderr when it wrote one, since its message starts with the whole command. */
+function failureReason(err: Error): string {
+  let stderr = '';
+  try {
+    stderr = decodeBoundary(err, boundary.object({ stderr: boundary.optional(boundary.string) })).stderr?.trim() ?? '';
+  } catch {
+    // Errors that did not come from a shell command have no stderr.
+  }
+  return stderr || err.message;
+}
+
 async function copyRootDirectoryExcludingGeneratedChildren(
   srcPath: string,
   destPath: string,
@@ -441,7 +452,7 @@ async function copyRootDirectoryExcludingGeneratedChildren(
     `  case "$base" in ${excludedCasePatterns}) continue ;; esac`,
     `  ${copyCommand} "$item" ${escapedDest}/`,
     'done',
-  ].join('; ');
+  ].join('\n');
 
   await commandRunner.execAsync(command, srcPath, { timeout: COPY_TIMEOUT_MS });
 }
@@ -520,7 +531,7 @@ async function copyRecursiveMatches(
       await execCopyCommand(cmd, mainRepoPath, commandRunner, environment);
     } catch (err) {
       console.error(`[WorktreeFileSync] Failed to copy match "${matchPath}":`, err);
-      failures.push({ path: relativePath, reason: err instanceof Error ? err.message : String(err) });
+      failures.push({ path: relativePath, reason: err instanceof Error ? failureReason(err) : String(err) });
       // Continue with remaining matches, best effort
     }
   }
@@ -619,7 +630,7 @@ export const worktreeFileSyncService = {
           }
         } catch (err) {
           console.error(`[WorktreeFileSync] Failed to sync entry "${entry.path}":`, err);
-          failures.push({ path: entry.path, reason: err instanceof Error ? err.message : String(err) });
+          failures.push({ path: entry.path, reason: err instanceof Error ? failureReason(err) : String(err) });
           // Continue with next entry, best effort
         }
       }
@@ -628,7 +639,7 @@ export const worktreeFileSyncService = {
       return { installCommand, failures };
     } catch (err) {
       console.error('[WorktreeFileSync] syncWorktree failed:', err);
-      failures.push({ path: 'worktree files', reason: err instanceof Error ? err.message : String(err) });
+      failures.push({ path: 'worktree files', reason: err instanceof Error ? failureReason(err) : String(err) });
       return { installCommand: null, failures };
     }
   },

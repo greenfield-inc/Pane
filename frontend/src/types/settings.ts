@@ -40,7 +40,6 @@ export type SettingsSettingId =
   | 'terminal-reference-line-count'
   | 'terminal-shell'
   | 'default-pane-chat-agent'
-  | 'default-agent-interface'
   | 'mcp-registration'
   | 'mcp-toolsets'
   | 'answer-prompts-from-pane'
@@ -90,7 +89,6 @@ export type SettingsSettingId =
   | 'pty-host'
   | 'additional-paths'
   | 'mission-control'
-  | 'experimental-chat'
   | 'notes';
 
 export interface SettingsTarget {

@@ -58,7 +58,7 @@ export interface SetupSources {
 const SETUP_FILE_MAX_BYTES = 1024 * 1024;
 
 const AGENT_PRESET_KEYS = [
-  'defaultOrchestratorAgent', 'defaultAgentInterface', 'defaultSessionCommand', 'defaultSessionResume',
+  'defaultOrchestratorAgent', 'defaultSessionCommand', 'defaultSessionResume',
   'defaultSessionProfile', 'defaultSessionPinned', 'defaultPermissionMode', 'defaultModel',
 ] as const satisfies readonly (keyof SetupAgentPresets)[];
 
@@ -71,7 +71,7 @@ const PREFERENCE_CONFIG_KEYS = [
   'notifications', 'keyboardShortcutsEnabled', 'commandPaletteShortcutEnabled', 'kittyKeyboardEnabled',
   'htmlFileOpenMode', 'enableCommitFooter', 'gitAttributionEnabled', 'autoCheckUpdates',
   'keepAwakeWhileSessionsActive', 'keepAwakeWhilePluggedIn', 'keepAwakeOnBattery', 'terminalPowerMode',
-  'retention', 'voiceTranscriptionMode', 'missionControlEnabled', 'experimentalChatEnabled', 'notesEnabled',
+  'retention', 'voiceTranscriptionMode', 'missionControlEnabled', 'notesEnabled',
   'sessionCreationPreferences',
 ] as const satisfies readonly (keyof SetupPreferences)[];
 
@@ -94,7 +94,6 @@ const SECTION_LABELS = {
 
 const FIELD_LABELS = {
   defaultOrchestratorAgent: 'Pane Chat agent',
-  defaultAgentInterface: 'Agent interface',
   defaultSessionCommand: 'Session command',
   defaultSessionResume: 'Session resume',
   defaultSessionProfile: 'Session profile',
@@ -124,7 +123,6 @@ const FIELD_LABELS = {
   retention: 'Session retention',
   voiceTranscriptionMode: 'Voice transcription',
   missionControlEnabled: 'Mission Control',
-  experimentalChatEnabled: 'Chat interface',
   notesEnabled: 'Notes',
   sessionCreationPreferences: 'New Pane defaults',
   auto_rename_sessions_to_pr: 'Rename Panes to their PR',
@@ -392,7 +390,6 @@ const resumeField = boundary.optional(boundary.nullable(customCommandResumeSchem
 const sectionSchemas = {
   agentPresets: boundary.object({
     defaultOrchestratorAgent: boundary.optional(boundary.enumeration('claude', 'codex', 'cursor')),
-    defaultAgentInterface: boundary.optional(boundary.enumeration('terminal', 'chat')),
     defaultSessionCommand: stringField,
     defaultSessionResume: resumeField,
     defaultSessionProfile: stringField,
@@ -457,7 +454,6 @@ const sectionSchemas = {
     retention: boundary.optional(boundary.object({ sessionActivity: boundary.optional(boundary.number), sessionInbox: boundary.optional(boundary.number) })),
     voiceTranscriptionMode: boundary.optional(boundary.enumeration('recorded', 'streaming')),
     missionControlEnabled: booleanField,
-    experimentalChatEnabled: booleanField,
     notesEnabled: booleanField,
     sessionCreationPreferences: boundary.optional(boundary.object({
       sessionCount: boundary.optional(boundary.number),
