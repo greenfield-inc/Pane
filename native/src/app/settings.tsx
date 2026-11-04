@@ -1,6 +1,6 @@
 import * as Linking from 'expo-linking';
 import { router } from 'expo-router';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, Switch, View } from 'react-native';
 
 import { useDaemon } from '@/daemon';
 import { PRIVACY_POLICY_URL } from '@/features/app/privacyPolicy';
@@ -8,6 +8,7 @@ import { useAffordances } from '@/features/hosts/hostSettings';
 import { useConnectionPresence } from '@/features/hosts/useConnectionPresence';
 import type { Machine } from '@/features/machines/machines';
 import { MachineMark } from '@/features/machines/MachineMark';
+import { useAutocorrect } from '@/features/composer/autocorrectPreference';
 import { useMachines, useSelectMachine } from '@/features/machines/useMachines';
 import { usePushStore } from '@/features/notifications/usePushSetup';
 import { AppUpdateRow } from '@/features/updates/AppUpdateRow';
@@ -57,10 +58,11 @@ export default function SettingsScreen() {
         />
       </ListSection>
 
-      {/* Alerts and glasses reach every saved machine, so this section names none. */}
+      {/* Alerts, glasses and autocorrect reach every saved machine, so this section names none. */}
       <ListSection title="General">
         <NotificationsRow />
         <ListRow testID="settings-glasses" title="Glasses" value="Even G2" leading={<RowIcon ios="eyeglasses" android="eyeglasses" />} trailing="chevron" onPress={() => router.push('/settings/glasses')} />
+        <AutocorrectRow />
       </ListSection>
 
       <ListSection title="Composer" titleSuffix={on} footer="Saved on the machine, so desktop sees the same settings.">
@@ -155,6 +157,28 @@ function NotificationsRow() {
       leading={<RowIcon ios="bell" android="notifications" />}
       trailing="chevron"
       onPress={() => router.push('/settings/notifications')}
+    />
+  );
+}
+
+/** Kept on this phone: the keyboard's corrections in the terminal and chat boxes. */
+function AutocorrectRow() {
+  const theme = useTheme();
+  const enabled = useAutocorrect(state => state.enabled);
+  const setEnabled = useAutocorrect(state => state.setEnabled);
+  return (
+    <ListRow
+      title="Autocorrect"
+      leading={<RowIcon ios="textformat.abc.dottedunderline" android="spellcheck" />}
+      trailing={(
+        <Switch
+          testID="settings-autocorrect"
+          accessibilityLabel="Autocorrect"
+          trackColor={{ true: theme.colors.accent, false: undefined }}
+          value={enabled}
+          onValueChange={setEnabled}
+        />
+      )}
     />
   );
 }
