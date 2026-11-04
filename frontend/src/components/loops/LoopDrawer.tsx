@@ -87,7 +87,8 @@ function LoopDrawerForm({ loop, onClose }: { loop: Loop | undefined; onClose: ()
   const remove = useLoopsStore(state => state.remove);
   const projects = useProjectList();
   const allSessions = useOrchestrationSessionStore(state => state.sessions);
-  const sessions = useMemo(() => allSessions.filter(session => !isArchivedOrchestrationSession(session)), [allSessions]);
+  // Loops run Claude, Codex or Cursor, so OpenCode Sessions are not offered.
+  const sessions = useMemo(() => allSessions.filter(session => !isArchivedOrchestrationSession(session) && session.agent !== 'opencode'), [allSessions]);
   const loadSessions = useOrchestrationSessionStore(state => state.load);
   useEffect(() => { void loadSessions().catch(() => undefined); }, [loadSessions]);
   const [form, setForm] = useState<LoopForm>(() => formFrom(loop));

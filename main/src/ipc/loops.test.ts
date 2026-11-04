@@ -301,6 +301,15 @@ describe('prepareLoopSession', () => {
     }
   });
 
+  it('refuses an OpenCode Session instead of switching it to the loop\'s agent', async () => {
+    const { registry, calls } = sessionRegistry({ session: { agent: 'opencode', launchCommand: 'opencode --auto' } });
+    await expect(prepareLoopSession(registry, SESSION_ID, { name: 'Standup', agent: 'claude' })).rejects.toMatchObject({
+      code: 'ERR_LOOP_INVALID',
+      message: 'Session Standups runs OpenCode, which loops cannot run yet. Nothing was saved.',
+    });
+    expect(calls.map(call => call.channel)).toEqual(['runpane:sessions:get']);
+  });
+
   it('leaves a command that already skips prompts alone, and switches a Session to the loop\'s agent', async () => {
     const unattended = sessionRegistry({ session: { agent: 'cursor', launchCommand: 'cursor-agent --trust --force' } });
     await prepareLoopSession(unattended.registry, SESSION_ID, { name: 'Standup', agent: 'cursor' });
