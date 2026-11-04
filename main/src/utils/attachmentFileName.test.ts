@@ -21,7 +21,25 @@ describe('the name a chat attachment keeps on the host (D-162)', () => {
 
   it('shortens a very long name but keeps its extension', () => {
     const name = attachmentFileName(`${'x'.repeat(300)}.tar.gz`);
-    expect(name.length).toBeLessThanOrEqual(120);
+    expect(Buffer.byteLength(name)).toBeLessThanOrEqual(200);
     expect(name.endsWith('.gz')).toBe(true);
+  });
+
+  it('bounds a name by its encoded bytes, never splitting a character (F-22)', () => {
+    const name = attachmentFileName(`${'文'.repeat(100)}.txt`);
+    expect(Buffer.byteLength(name)).toBeLessThanOrEqual(200);
+    expect(name.endsWith('.txt')).toBe(true);
+    expect(name).not.toContain('\ufffd');
+    const emoji = attachmentFileName(`${'😀'.repeat(100)}.png`);
+    expect(Buffer.byteLength(emoji)).toBeLessThanOrEqual(200);
+    expect([...emoji.replace(/\.png$/, '')].every(char => char === '😀')).toBe(true);
+  });
+
+  it('rewrites the base names Windows reserves, in any case and with any extension (F-22)', () => {
+    expect(attachmentFileName('CON.txt')).toBe('_CON.txt');
+    expect(attachmentFileName('nul')).toBe('_nul');
+    expect(attachmentFileName('Aux.tar.gz')).toBe('_Aux.tar.gz');
+    expect(attachmentFileName('COM1.log')).toBe('_COM1.log');
+    expect(attachmentFileName('console.txt')).toBe('console.txt');
   });
 });
