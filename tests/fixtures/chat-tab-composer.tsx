@@ -14,13 +14,13 @@ const labels = params.get('labels');
 const longLabels = labels === 'default';
 const option = (value: string, name: string) => ({ value, name });
 const controls: AgentChatConfigOption[] = [
-  { id: 'mode', name: 'Mode', category: 'mode', currentValue: 'bypassPermissions', options: [option('default', 'Default'), option('acceptEdits', 'Accept edits'), option('plan', 'Plan mode'), option('bypassPermissions', 'Bypass permissions')] },
+  { id: 'mode', name: 'Mode', category: 'mode', currentValue: params.get('mode') ?? 'bypassPermissions', options: [option('default', 'Default'), option('acceptEdits', 'Accept edits'), option('plan', 'Plan mode'), option('bypassPermissions', 'Bypass permissions'), option('agent-full-access', 'Full access')] },
   { id: 'model', name: 'Model', category: 'model', currentValue: longLabels ? 'default' : labels === 'long' ? 'long' : 'opus', options: [option('default', 'Default (recommended)'), option('opus', 'Opus 5.5'), option('sonnet', 'Sonnet 5.5'), option('long', 'Claude Opus 5.5 with the extended one-million-token context window')] },
   { id: 'effort', name: 'Effort', category: 'thought_level', currentValue: longLabels ? 'default' : 'medium', options: [option('default', 'Default'), option('low', 'Low'), option('medium', 'Medium'), option('high', 'High')] },
   { id: 'fast_mode', name: 'Fast mode', category: 'model_config', currentValue: 'off', options: [option('on', 'On'), option('off', 'Off')] },
 ];
 const view: ChatTabView = {
-  panelId: 'composer', agent: 'claude', generation: 1, status: 'idle', canAttachImages: true, commands: [], permissions: [], questions: [], queue: [], messageCount: 1, controls,
+  panelId: 'composer', agent: 'claude', generation: 1, status: params.has('working') ? 'working' : 'idle', canAttachImages: true, commands: [], permissions: [], questions: [], queue: [], messageCount: 1, controls,
   // ?conversation=1: a turn with steps and a code block, for copying (D-140).
   transcript: { panelId: 'composer', generation: 1, revision: 0, start: 0, messages: params.has('conversation') ? [
     { id: 'user:1', role: 'user', parts: [{ type: 'text', text: 'Why does pnpm test fail?' }] },

@@ -95,6 +95,9 @@
 .chat-model,.chat-phone-model { min-width:4.5rem; }
 @container chat-composer (max-width:200px) { .chat-composer-actions .chat-anchor,.chat-composer-actions .chat-risk { display:none; } }
 @container chat-composer (max-width:100px) { .chat-composer-actions .chat-icon { display:none; } }
+/* A working agent adds Queue to the row, so everything but Stop gives way sooner (F-18). */
+@container chat-composer (max-width:250px) { .chat-composer-actions[data-working] .chat-anchor,.chat-composer-actions[data-working] .chat-risk { display:none; } }
+@container chat-composer (max-width:140px) { .chat-composer-actions[data-working] > .chat-icon { display:none; } }
 .chat-model { max-width:16rem; }
 @container chat-composer (max-width:560px) { .chat-anchor-mode .chat-chip-label { display:none; } .chat-anchor-mode .chat-chip { padding:0 7px; } }
 .chat-chip { display:inline-flex; align-items:center; gap:6px; height:28px; min-width:0; max-width:15rem; padding:0 8px; border-radius:999px; font-size:13px; color:var(--chat-muted-foreground); }

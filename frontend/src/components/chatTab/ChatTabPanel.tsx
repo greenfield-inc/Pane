@@ -377,7 +377,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, quiet 
               }
             }}
             className="chat-input" />
-          <div ref={actionsRef} className="chat-composer-actions" data-layout={phone ? 'phone' : 'desktop'}>
+          <div ref={actionsRef} className="chat-composer-actions" data-layout={phone ? 'phone' : 'desktop'} data-working={working || undefined}>
             {attachments && <ComposerPrimitive.AddAttachment aria-label={saveFile ? 'Attach files' : 'Attach image'} title={saveFile ? 'Attach photos or files' : 'Attach image'} className="chat-icon"><Plus className="h-4 w-4" /></ComposerPrimitive.AddAttachment>}
             {phone
               ? <ChatRiskyModeMarker mode={composerRow.mode} />

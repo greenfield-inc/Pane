@@ -5,10 +5,10 @@ import path from 'node:path';
 // overflows: + and send stay inside the box, and the model label truncates instead.
 const fixture = path.resolve('tests/fixtures/chat-tab-composer.tsx');
 
-async function open(page: Page, query: string) {
+async function open(page: Page, query: string, ready = 'Send message') {
   await page.route('**/chat-tab-composer.html*', route => route.fulfill({ contentType: 'text/html', body: `<html><head><meta charset="UTF-8"></head><body><div id="root"></div><script type="module">import RefreshRuntime from "/@react-refresh"; RefreshRuntime.injectIntoGlobalHook(window); window.$RefreshReg$ = () => {}; window.$RefreshSig$ = () => type => type; window.__vite_plugin_react_preamble_installed__ = true;</script><script type="module" src="/@vite/client"></script><script type="module" src="/@fs/${fixture}"></script></body></html>` }));
   await page.goto(`/chat-tab-composer.html?${query}`);
-  await expect(page.getByRole('button', { name: 'Send message' })).toBeVisible();
+  await expect(page.getByRole('button', { name: ready })).toBeVisible();
 }
 
 async function box(page: Page, name: string | RegExp) {
@@ -48,14 +48,15 @@ for (const width of [300, 360, 440, 520, 640]) for (const labels of ['default', 
 
 // QA of D-120: a window can be dragged down to ~100px. The row then keeps send and drops the rest,
 // instead of overlapping controls.
-for (const width of [120, 150, 200, 240, 300, 360]) {
-  test(`no two controls overlap in a ${width}px column, and send is always there`, async ({ page }) => {
+// A working agent adds Queue and Stop to the row (F-18).
+for (const working of [false, true]) for (const width of [120, 150, 170, 200, 240, 260, 280, 300, 360]) {
+  test(`no two controls overlap in a ${width}px column${working ? ' while the agent works' : ''}, and ${working ? 'Stop' : 'send'} is always there`, async ({ page }) => {
     await page.setViewportSize({ width: 900, height: 700 });
-    await open(page, `width=${width}&labels=long`);
+    await open(page, `width=${width}&labels=long${working ? '&working=1' : ''}`, working ? 'Stop agent turn' : 'Send message');
     const composer = await page.locator('.chat-composer').boundingBox();
     if (!composer) throw new Error('No composer');
     const controls = await rowControls(page);
-    expect(controls.map(control => control.name)).toContain('Send message');
+    expect(controls.map(control => control.name)).toContain(working ? 'Stop agent turn' : 'Send message');
     for (const control of controls) {
       expect(control.x, `${control.name} starts inside`).toBeGreaterThanOrEqual(composer.x);
       expect(control.x + control.width, `${control.name} ends inside`).toBeLessThanOrEqual(composer.x + composer.width + 0.5);
@@ -66,6 +67,12 @@ for (const width of [120, 150, 200, 240, 300, 360]) {
     }
   });
 }
+
+test('Codex Full access keeps its marker on the phone row (F-17)', async ({ page }) => {
+  await page.setViewportSize({ width: 900, height: 700 });
+  await open(page, 'width=390&labels=opus&mode=agent-full-access');
+  await expect(page.getByRole('img', { name: 'Permissions: Full access' })).toBeVisible();
+});
 
 test('the model button drops "(recommended)" and a Default effort, keeping the full name in its menu', async ({ page }) => {
   await page.setViewportSize({ width: 900, height: 700 });
