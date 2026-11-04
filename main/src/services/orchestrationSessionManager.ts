@@ -19,7 +19,7 @@ import type { Session } from '../types/session';
 import type { SkillCacheManager } from './skillCacheManager';
 import type { PaneChatManager } from './paneChatManager';
 import type { GitStatusManager } from './gitStatusManager';
-import type { TerminalAgentReport, ToolPanel, TerminalPanelState } from '../../../shared/types/panels';
+import type { TerminalAgentReport, ToolPanel, TerminalPanelState, TerminalPausedMark } from '../../../shared/types/panels';
 import type { AgentState } from '../../../shared/types/agentStatus';
 import {
   LEGACY_ORCHESTRATION_SESSION_ID,
@@ -108,7 +108,7 @@ export class OrchestrationSessionManager extends EventEmitter {
       await this.ensureInitializedUnlocked();
       const data = this.store.read();
       return {
-        sessions: orderedSessions(data).map(clone),
+        sessions: orderedSessions(data).map(record => this.withPaused(clone(record))),
         selectedSessionId: data.selectedSessionId,
       };
     });
@@ -153,7 +153,7 @@ export class OrchestrationSessionManager extends EventEmitter {
   async get(selector: OrchestrationSessionSelector): Promise<OrchestrationSessionRecord> {
     return withLock('orchestration-sessions', async () => {
       await this.ensureInitializedUnlocked();
-      return clone(this.findSession(this.store.read(), selector));
+      return this.withPaused(clone(this.findSession(this.store.read(), selector)));
     });
   }
 
@@ -592,6 +592,35 @@ export class OrchestrationSessionManager extends EventEmitter {
       .filter(record => record.associations.some(association => association.paneId === paneId
         && (association.panelIds.length === 0 || association.panelIds.includes(panelId))))
       .map(record => record.id);
+  }
+
+  /** The Session's chat Pane and its Panes that are not archived: what Pause and Resume act on. */
+  pausablePaneIds(sessionId: string): string[] {
+    const record = this.store.read().sessions.find(session => session.id === sessionId);
+    if (!record) return [];
+    const members = record.associations.map(association => association.paneId)
+      .filter(paneId => this.sessionManager.getSession(paneId)?.archived === false);
+    return [...new Set([record.internalSessionId, ...members])];
+  }
+
+  /** Tells clients that the Sessions holding these Panes may have paused or resumed. */
+  notifyPausedChange(paneIds: readonly string[]): void {
+    for (const record of this.store.read().sessions) {
+      if (paneIds.includes(record.internalSessionId) || record.associations.some(association => paneIds.includes(association.paneId))) {
+        this.emit('changed', { sessionId: record.id, kind: 'paused' });
+      }
+    }
+  }
+
+  /** A Session is paused when its chat and every Pane in it are paused; computed on read, never stored. */
+  private withPaused(record: OrchestrationSessionRecord): OrchestrationSessionRecord {
+    let latest: TerminalPausedMark | undefined;
+    for (const paneId of this.pausablePaneIds(record.id)) {
+      const mark = this.sessionManager.getSession(paneId)?.paused;
+      if (!mark) return { ...record, paused: undefined };
+      if (!latest || mark.at > latest.at) latest = mark;
+    }
+    return { ...record, paused: latest };
   }
 
   /** The hidden owner Pane of each Session that is not archived, read like `activeMemberPaneIds`. */

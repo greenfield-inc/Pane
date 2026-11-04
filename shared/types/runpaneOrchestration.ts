@@ -142,6 +142,10 @@ export type RunpaneWorkspaceEntryKind =
    * Opt-in like the Session kinds; other consumers get `agent.unknown` with `running: false`.
    */
   | 'panel.stopped'
+  /** Pause stopped the panel; it stays stopped until someone resumes it. Opt-in like `panel.stopped`. */
+  | 'panel.paused'
+  /** An explicit resume cleared the panel's pause; its agent restarts and reports ready as usual. Opt-in. */
+  | 'panel.unpaused'
   /** A worker report, delivered only when explicitly requested in kinds. */
   | 'agent.report'
   /**
@@ -1090,6 +1094,27 @@ export interface RunpanePanelResumeManyResult {
   concurrency: number;
   items: RunpanePanelResumeManyItem[];
   nextCommand?: string;
+}
+
+/** What a pause or resume command acted on. */
+export type RunpanePauseScope =
+  | { kind: 'panel'; panelId: string; paneId: string }
+  | { kind: 'pane'; paneId: string; paneName: string }
+  | { kind: 'session'; sessionId: string; sessionName: string };
+
+/** The result of `runpane panels pause`, `panes pause|resume` and `sessions pause|resume`. */
+export interface RunpanePauseResult {
+  ok: boolean;
+  action: 'paused' | 'resumed';
+  scope: RunpanePauseScope;
+  /** Tabs this call paused or resumed. */
+  panelIds: string[];
+  /** Terminal tabs in scope that were already paused (or already running, for resume). */
+  unchanged: number;
+  /** Tabs that could not be resumed, with why; the others still were. */
+  failed: Array<{ panelId: string; error: string }>;
+  message: string;
+  nextCommand: string;
 }
 
 export interface RunpanePanelResumeResult {

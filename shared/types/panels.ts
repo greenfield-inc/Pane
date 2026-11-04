@@ -56,6 +56,36 @@ export interface TerminalAgentReport {
   reportedAt: string;
 }
 
+/** Why and when a tab was paused. */
+export interface TerminalPausedMark {
+  at: string;
+  by: 'manual' | 'auto';
+  /** The auto-pause threshold in hours when `by` is `auto`. */
+  idleHours?: number;
+}
+
+/** The pause mark of a terminal tab, if Pause stopped it. */
+export function pausedMarkOf(panel: Pick<ToolPanel, 'type' | 'state'>): TerminalPausedMark | undefined {
+  if (panel.type !== 'terminal') return undefined;
+  // SAFETY: a terminal panel's custom state is the TerminalPanelState contract.
+  return (panel.state.customState as TerminalPanelState | undefined)?.paused;
+}
+
+/**
+ * A Pane is paused when it has terminal tabs and every one of them is paused. Returns the
+ * latest of their marks, so a Pane reads as paused since its last tab paused.
+ */
+export function panePausedMark(panels: readonly Pick<ToolPanel, 'type' | 'state'>[]): TerminalPausedMark | undefined {
+  let latest: TerminalPausedMark | undefined;
+  for (const panel of panels) {
+    if (panel.type !== 'terminal') continue;
+    const mark = pausedMarkOf(panel);
+    if (!mark) return undefined;
+    if (!latest || mark.at > latest.at) latest = mark;
+  }
+  return latest;
+}
+
 export interface TerminalPanelState {
   // Basic state (implemented in Phase 1-2)
   isInitialized?: boolean;       // Whether PTY process has been started
@@ -98,6 +128,8 @@ export interface TerminalPanelState {
 
   // Auto-resume state (for graceful shutdown/restart)
   wasInterrupted?: boolean;          // Whether this terminal was active when app shutdown occurred
+  /** Set by Pause and cleared only by an explicit resume; while set, nothing starts this tab. Host-owned. */
+  paused?: TerminalPausedMark;
   updateResumeHold?: string;         // Update operation that stopped the panel; released by explicit resume, or when the panel starts after that update ended.
   updateResumeId?: string;           // Exact identity required by automatic update restoration.
   hasClaudeSessionId?: boolean;      // Whether --session-id was already passed to Claude (use --resume next time)
@@ -341,6 +373,8 @@ export interface PanelEvent {
 export type PanelEventType = 
   // Terminal panel events
   | 'terminal:exit'              // When terminal process exits
+  | 'terminal:paused'            // When Pause stopped the tab
+  | 'terminal:resumed'           // When an explicit resume cleared the tab's pause
   | 'diff:refreshed'             // When diff panel refreshes its content
   // Explorer panel events
   | 'explorer:file_saved'        // When a file is saved in explorer

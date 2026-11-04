@@ -13,7 +13,7 @@ import { isOrchestrationInternalSessionId } from '../../../shared/types/orchestr
 import * as pty from '@lydell/node-pty';
 import { EventEmitter } from 'events';
 import { filterSyncBlockClears } from './syncBlockClearFilter';
-import { ToolPanel, TerminalPanelState } from '../../../shared/types/panels';
+import { ToolPanel, TerminalPanelState, type TerminalPausedMark } from '../../../shared/types/panels';
 import { MISSION_CONTROL_VIEWER_PREFIX } from '../../../shared/types/missionControl';
 import { getPaneDaemonEventSink, getPaneEventSink, getPtyHostRuntime, getRuntimeConfigManager, type PtyHandleLike, type PtyHostRuntime } from '../core/runtime';
 import { panelManager } from './panelManager';
@@ -52,6 +52,9 @@ import type { PaneEventArgument } from '../core/eventSink';
 const OUTPUT_BATCH_INTERVAL = 32; // ms (~30fps) — wider window reduces TUI flicker
 const OUTPUT_BATCH_INTERVAL_INTERACTIVE = 8;
 const INTERACTIVE_OUTPUT_WINDOW_MS = 200;
+/** Pause sends Ctrl+C twice, this far apart, then waits for agents to exit before stopping the tab (as quit does). */
+const PAUSE_SECOND_INTERRUPT_MS = 200;
+const PAUSE_EXIT_WAIT_MS = 2000;
 const OUTPUT_BATCH_INTERVAL_HIDDEN = 250; // ms — background / hidden cadence to cut IPC wake-up cost
 const OUTPUT_BATCH_SIZE = 131072; // 128KB — timer-based flush preferred; size trigger is safety net
 const OUTPUT_BATCH_SIZE_HIDDEN = 80_000; // 80KB — cap hidden flush size to avoid foreground backpressure churn
@@ -1748,6 +1751,9 @@ export class TerminalPanelManager extends EventEmitter {
       await panelManager.updatePanel(panel.id, { state });
       panel = { ...panel, state };
     }
+    if (heldState.paused) {
+      throw new PaneError('ERR_PANEL_PAUSED', `Tab ${panel.title} is paused, so it was not started.`, `Resume it from the tab, or run \`runpane panels resume --panel ${panel.id} --yes\`.`);
+    }
     if (this.sessionTerminations.has(panel.sessionId)) {
       throw new PaneError(
         'ERR_PANEL_STILL_STOPPING',
@@ -3153,6 +3159,58 @@ export class TerminalPanelManager extends EventEmitter {
    */
   getAllPanelIds(): string[] {
     return Array.from(this.terminals.keys());
+  }
+
+  /**
+   * Pause: stop these tabs the way quit does, and mark them so nothing starts them until an
+   * explicit resume. The mark is written first, so no mount or retry restarts a tab mid-stop.
+   * Ctrl+C twice lets an agent exit cleanly (Claude releases its session-id lock); then the
+   * state is saved, the terminal destroyed and its processes reaped. Agent Chat tabs stop
+   * through their own controller. Returns the tabs this call paused.
+   */
+  async pausePanels(panelIds: readonly string[], mark: TerminalPausedMark): Promise<string[]> {
+    const targets = panelIds
+      .map(panelId => panelManager.getPanel(panelId))
+      .filter((panel): panel is ToolPanel => panel?.type === 'terminal' && !terminalCustomState(panel.state).paused);
+    if (targets.length === 0) return [];
+    for (const panel of targets) await panelManager.commitPaused(panel.id, mark);
+    const live = targets.flatMap(panel => this.terminals.get(panel.id) ?? []);
+    const interrupt = () => {
+      for (const terminal of live) {
+        try { if (!terminal.destroying) terminal.pty.write('\x03'); }
+        catch (error) { console.warn(`[TerminalPanelManager] Ctrl+C before pause failed for ${terminal.panelId}:`, error); }
+      }
+    };
+    if (live.length > 0) {
+      interrupt();
+      await new Promise(resolve => setTimeout(resolve, PAUSE_SECOND_INTERRUPT_MS));
+      interrupt();
+      await new Promise(resolve => setTimeout(resolve, PAUSE_EXIT_WAIT_MS));
+    }
+    await Promise.all(targets.map(panel => this.destroyTerminal(panel.id).catch(error => {
+      console.error(`[TerminalPanelManager] Pause could not stop ${panel.id}:`, error);
+    })));
+    await Promise.all(live.map(terminal => terminal.reaped));
+    for (const panel of targets) void panelManager.emitPanelEvent(panel.id, 'terminal:paused', { by: mark.by, at: mark.at });
+    this.emit('pause-changed', { panelIds: targets.map(panel => panel.id), paneIds: [...new Set(targets.map(panel => panel.sessionId))], paused: true });
+    return targets.map(panel => panel.id);
+  }
+
+  /** Clears the pause mark of these tabs, without starting them. Returns the tabs that were paused. */
+  async clearPaused(panelIds: readonly string[]): Promise<string[]> {
+    const paused = panelIds.filter(panelId => {
+      const panel = panelManager.getPanel(panelId);
+      return panel?.type === 'terminal' && !!terminalCustomState(panel.state).paused;
+    });
+    for (const panelId of paused) {
+      await panelManager.commitPaused(panelId, undefined);
+      void panelManager.emitPanelEvent(panelId, 'terminal:resumed', { at: new Date().toISOString() });
+    }
+    if (paused.length > 0) {
+      const paneIds = [...new Set(paused.flatMap(panelId => panelManager.getPanel(panelId)?.sessionId ?? []))];
+      this.emit('pause-changed', { panelIds: paused, paneIds, paused: false });
+    }
+    return paused;
   }
 
   /**

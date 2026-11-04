@@ -12,7 +12,7 @@ import type { Session, SessionUpdate, SessionOutput } from '../types/session';
 import type { DatabaseService } from '../database/database';
 import type { Session as DbSession, CreateSessionData, UpdateSessionData, ConversationMessage, PromptMarker, ExecutionDiff, CreateExecutionDiffData, Project } from '../database/models';
 import { TerminalSessionManager } from './terminalSessionManager';
-import type { TerminalPanelState, ToolPanelState, ResumableSession } from '../../../shared/types/panels';
+import { panePausedMark, pausedMarkOf, type TerminalPanelState, type ToolPanelState, type ResumableSession } from '../../../shared/types/panels';
 import { formatForDisplay } from '../utils/timestampUtils';
 import { isCliAgentType, resolveAgentTypeFromCommand } from './agents/agentIdentity';
 import { resolveResumeId } from './agents/agentResume';
@@ -338,6 +338,7 @@ export class SessionManager extends EventEmitter {
       // Model is now managed at panel level
       toolType: normalizedToolType,
       archived: dbSession.archived || false,
+      paused: panePausedMark(this.db.getPanelsForSession(dbSession.id)),
       isHidden: !!dbSession.is_hidden,
       baseCommit: dbSession.base_commit,
       baseBranch: dbSession.base_branch,
@@ -614,6 +615,12 @@ export class SessionManager extends EventEmitter {
 
   setFavorite(id: string, pinned: boolean): Session {
     return this.publishSessionMetadata(id, this.db.setSessionFavorite(id, pinned));
+  }
+
+  /** Re-sends a Pane after its tabs paused or resumed, so every client grays it out or back. */
+  publishPausedChange(id: string): void {
+    const dbSession = this.db.getSession(id);
+    if (dbSession) this.publishSessionMetadata(id, dbSession);
   }
 
   private publishSessionMetadata(id: string, updated: DbSession | undefined): Session {
@@ -1473,7 +1480,7 @@ export class SessionManager extends EventEmitter {
       for (const panel of panels) {
         if (panel.type === 'terminal') {
           const termState = parseTerminalResumeState(panel.state?.customState);
-          if (termState?.wasInterrupted && termState?.initialCommand) {
+          if (termState?.wasInterrupted && termState?.initialCommand && !pausedMarkOf(panel)) {
             const agentType = termState.agentType ?? resolveAgentTypeFromCommand(termState.initialCommand);
             const resumeId = resolveResumeId(agentType, panel.id, termState);
             if (resumeId) {
@@ -1523,7 +1530,7 @@ export class SessionManager extends EventEmitter {
         if (panel.type === 'terminal') {
           const termState = parseTerminalResumeState(panel.state?.customState);
 
-          if (termState?.wasInterrupted && termState?.initialCommand) {
+          if (termState?.wasInterrupted && termState?.initialCommand && !pausedMarkOf(panel)) {
             const state = panel.state;
             const customState: TerminalPanelState = { ...terminalCustomState(state.customState), ...termState };
             const agentType = customState.agentType ?? resolveAgentTypeFromCommand(customState.initialCommand);
