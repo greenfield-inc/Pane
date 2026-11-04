@@ -13,6 +13,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import { browserFileContext } from '../services/browserFileContext';
 import { PaneError, paneErrorText, reasonOf } from '../../../shared/paneError';
 import { paneInactiveSince, parseSessionTimestampMs } from '../services/paneInactivity';
+import { restartRunScriptsAfterResume, stopRunScriptsForPause } from '../services/pausedRunScripts';
 import { isOrchestrationInternalSessionId, resolveSessionRetention } from '../../../shared/types/orchestrationSession';
 import type { IpcMain } from 'electron';
 import type { AppServices } from './types';
@@ -1386,14 +1387,18 @@ export function registerRunpaneHandlers(
   commandRegistry.register('runpane:panes:pause', async (request: PaneCommandValue): Promise<RunpanePauseResult> => {
     return withRunpaneAction(services, 'panes:pause', {}, async () => {
       const pane = resolvePane(sessionManager, parsePauseTarget(request, 'paneId', 'Pane pause'));
-      return pauseTabs(services, { kind: 'pane', paneId: pane.id, paneName: pane.name }, terminalPanelIdsOf([pane.id]));
+      const result = await pauseTabs(services, { kind: 'pane', paneId: pane.id, paneName: pane.name }, terminalPanelIdsOf([pane.id]));
+      await stopRunScriptsForPause(commandRegistry, [pane.id]);
+      return result;
     }, pauseActionMetrics);
   });
 
   commandRegistry.register('runpane:panes:resume', async (request: PaneCommandValue): Promise<RunpanePauseResult> => {
     return withRunpaneAction(services, 'panes:resume', {}, async () => {
       const pane = resolvePane(sessionManager, parsePauseTarget(request, 'paneId', 'Pane resume'));
-      return resumeTabs(services, { kind: 'pane', paneId: pane.id, paneName: pane.name }, terminalPanelIdsOf([pane.id]));
+      const result = await resumeTabs(services, { kind: 'pane', paneId: pane.id, paneName: pane.name }, terminalPanelIdsOf([pane.id]));
+      await restartRunScriptsAfterResume(commandRegistry, [pane.id]);
+      return result;
     }, pauseActionMetrics);
   });
 
@@ -1401,7 +1406,9 @@ export function registerRunpaneHandlers(
     return withRunpaneAction(services, 'sessions:pause', {}, async () => {
       const record = await requireOrchestrationSessionManager(services).get({ sessionId: parsePauseTarget(request, 'sessionId', 'Session pause') });
       const paneIds = requireOrchestrationSessionManager(services).pausablePaneIds(record.id);
-      return pauseTabs(services, { kind: 'session', sessionId: record.id, sessionName: record.name }, terminalPanelIdsOf(paneIds));
+      const result = await pauseTabs(services, { kind: 'session', sessionId: record.id, sessionName: record.name }, terminalPanelIdsOf(paneIds));
+      await stopRunScriptsForPause(commandRegistry, paneIds);
+      return result;
     }, pauseActionMetrics);
   });
 
@@ -1412,7 +1419,9 @@ export function registerRunpaneHandlers(
         throw new PaneError('ERR_RUNPANE_SESSION_ARCHIVED', `Session ${record.name} is archived, so it was not resumed. Nothing was changed.`, 'Restore the Session in Pane, then resume it.');
       }
       const paneIds = requireOrchestrationSessionManager(services).pausablePaneIds(record.id);
-      return resumeTabs(services, { kind: 'session', sessionId: record.id, sessionName: record.name }, terminalPanelIdsOf(paneIds));
+      const result = await resumeTabs(services, { kind: 'session', sessionId: record.id, sessionName: record.name }, terminalPanelIdsOf(paneIds));
+      await restartRunScriptsAfterResume(commandRegistry, paneIds);
+      return result;
     }, pauseActionMetrics);
   });
 
@@ -6420,6 +6429,7 @@ function createWorkspaceJournal(services: AppServices): WorkspaceJournal {
         isCliPanel: snapshot?.isCliPanel ?? optionalBoolean(customState.isCliPanel) ?? false,
         agentType: snapshot?.agentType ?? optionalString(customState.agentType),
         lastActivityAt: snapshot?.lastActivityTime,
+        paused: !!pausedMarkOf(panel),
         screenText: snapshot?.screenText,
       };
     },

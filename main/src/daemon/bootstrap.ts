@@ -51,7 +51,7 @@ import { resourceMonitorService } from '../services/resourceMonitorService';
 import type { PaneCommandRegistry } from './commandRegistry';
 import { syncRemoteTransportForMode } from './remoteTransportStartup';
 import { panelManager } from '../services/panelManager';
-import type { TerminalPanelState } from '../../../shared/types/panels';
+import { pausedMarkOf, type TerminalPanelState } from '../../../shared/types/panels';
 import { terminalPanelManager } from '../services/terminalPanelManager';
 import { createListeningPortMonitor } from '../services/listeningPorts';
 import type { ListeningPortsSnapshot } from '../../../shared/types/listeningPorts';
@@ -61,6 +61,7 @@ import { WorkspaceJournal } from '../services/workspaceJournal';
 import { SessionPrMonitor } from '../services/sessionPrMonitor';
 import { LoopManager } from '../services/loops/loopManager';
 import { AutoPauser } from '../services/autoPause';
+import { stopRunScriptsForPause } from '../services/pausedRunScripts';
 import { updateHoldIsLive } from '../services/updateRestoration';
 import { LoopRepository } from '../services/loops/loopRepository';
 import { archiveLoopRun, prepareLoopSession, startLoopRun } from '../ipc/loops';
@@ -303,6 +304,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
         agentType: snapshot?.agentType ?? customState.agentType,
         panelTitle: panel.title,
         lastActivityAt: snapshot?.lastActivityTime,
+        paused: !!pausedMarkOf(panel),
         // Typed cells only, so a dim or grey prompt suggestion is not held input.
         screen: { screenText: snapshot?.screenText, typedText: terminalPanelManager.getInputScreenText(panelId) },
       };
@@ -406,7 +408,12 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
       const hold = (panel.state.customState as TerminalPanelState | undefined)?.updateResumeHold;
       return !!hold && updateHoldIsLive(hold);
     },
-    pause: (panelIds, mark) => terminalPanelManager.pausePanels(panelIds, mark),
+    pause: async (panelIds, mark) => {
+      const paused = await terminalPanelManager.pausePanels(panelIds, mark);
+      const paneIds = [...new Set(paused.flatMap(panelId => panelManager.getPanel(panelId)?.sessionId ?? []))];
+      await stopRunScriptsForPause(commandRegistry, paneIds);
+      return paused;
+    },
     testThresholdMs: Number(process.env.PANE_AUTO_PAUSE_TEST_THRESHOLD_MS) || undefined,
   });
   configManager.on('config-updated', () => autoPauser.sync());
