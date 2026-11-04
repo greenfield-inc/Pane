@@ -1,0 +1,49 @@
+import { createHash } from 'crypto';
+import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeSync } from 'fs';
+import path from 'path';
+import type { ChatTabSend } from '../../../../shared/types/chatTab';
+import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
+
+export type QueuedBody = Pick<ChatTabSend, 'text' | 'images'>;
+
+const bodySchema = boundary.object({
+  text: boundary.string,
+  images: boundary.optional(boundary.array(boundary.object({ mimeType: boundary.string, data: boundary.string }))),
+});
+
+/**
+ * The full text and images of queued prompts, one file each. A tab's saved state
+ * holds only a short preview, because a panel's state row has a 256 KiB ceiling
+ * and a prompt may carry megabytes of images.
+ */
+export class QueuedBodies {
+  constructor(private readonly directory: (panelId: string) => string) {}
+
+  /** Durable before it returns. */
+  write(panelId: string, operationId: string, body: QueuedBody): void {
+    const directory = this.directory(panelId);
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
+    const file = this.file(panelId, operationId);
+    const partial = `${file}.partial`;
+    const descriptor = openSync(partial, 'w', 0o600);
+    try {
+      writeSync(descriptor, JSON.stringify(body));
+      fsyncSync(descriptor);
+    } finally { closeSync(descriptor); }
+    renameSync(partial, file);
+  }
+
+  read(panelId: string, operationId: string): QueuedBody | undefined {
+    let json: string;
+    try { json = readFileSync(this.file(panelId, operationId), 'utf8'); } catch { return undefined; }
+    try { return decodeOptionalBoundary(JSON.parse(json), bodySchema); } catch { return undefined; }
+  }
+
+  remove(panelId: string, operationId: string): void { rmSync(this.file(panelId, operationId), { force: true }); }
+
+  clear(panelId: string): void { rmSync(this.directory(panelId), { recursive: true, force: true }); }
+
+  private file(panelId: string, operationId: string): string {
+    return path.join(this.directory(panelId), `${createHash('sha256').update(operationId).digest('hex').slice(0, 32)}.json`);
+  }
+}

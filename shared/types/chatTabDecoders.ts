@@ -33,7 +33,7 @@ const problem: BoundarySchema<ChatTabProblem> = boundary.object({
   action: boundary.optional(boundary.enumeration('sign-in', 'install', 'restart')), url: boundary.optional(boundary.string),
 });
 const image = boundary.object({ mimeType: boundary.string, data: boundary.string });
-const queued: BoundarySchema<ChatTabQueuedPrompt> = boundary.object({ operationId: boundary.string, text: boundary.string, images: boundary.optional(boundary.array(image)), queuedAt: boundary.string });
+const queued: BoundarySchema<ChatTabQueuedPrompt> = boundary.object({ operationId: boundary.string, text: boundary.string, images: boundary.optional(boundary.array(image)), queuedAt: boundary.string, stored: boundary.optional(boundary.literal(true)), imageCount: boundary.optional(boundary.number) });
 const question: BoundarySchema<ChatTabQuestion> = boundary.object({ id: boundary.string, generation: boundary.number, message: boundary.string, schema: boundary.json, toolCallId: boundary.optional(boundary.string) });
 const view: BoundarySchema<ChatTabView> = boundary.object({
   panelId: boundary.string, agent: boundary.enumeration('claude', 'codex'), generation: boundary.number,

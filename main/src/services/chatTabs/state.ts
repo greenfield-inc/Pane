@@ -29,7 +29,7 @@ const schema: BoundarySchema<ChatPanelState> = boundary.object({
     operationId: boundary.string, generation: boundary.number, fingerprint: boundary.string,
     state: boundary.enumeration('accepted', 'completed', 'failed'), error: boundary.optional(boundary.string),
   }))),
-  queue: boundary.optional(boundary.array(boundary.object({ operationId: boundary.string, text: boundary.string, images: boundary.optional(boundary.array(image)), queuedAt: boundary.string }))),
+  queue: boundary.optional(boundary.array(boundary.object({ operationId: boundary.string, text: boundary.string, images: boundary.optional(boundary.array(image)), queuedAt: boundary.string, stored: boundary.optional(boundary.literal(true)), imageCount: boundary.optional(boundary.number) }))),
   initialInput: boundary.optional(boundary.string),
   initialInputSentAt: boundary.optional(boundary.string),
   orchestrationSessionId: boundary.optional(boundary.string),

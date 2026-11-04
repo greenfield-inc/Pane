@@ -55,7 +55,11 @@ export interface ChatPanelState {
   agentReport?: TerminalAgentReport;
 }
 
-export interface ChatTabQueuedPrompt { operationId: string; text: string; images?: Array<{ mimeType: string; data: string }>; queuedAt: string }
+/**
+ * A prompt waiting for the agent. With `stored`, `text` is a preview and the full
+ * text and images are kept on the host beside the tab's state.
+ */
+export interface ChatTabQueuedPrompt { operationId: string; text: string; images?: Array<{ mimeType: string; data: string }>; queuedAt: string; stored?: true; imageCount?: number }
 
 /** An agent's question (ACP form elicitation), shown as a card on every surface. */
 export interface ChatTabQuestion {

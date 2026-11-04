@@ -10,6 +10,7 @@ import { PaneError, reasonOf } from '../../../../shared/paneError';
 import type { AgentCommand } from './agentProcess';
 import { ChatTabRuntime, chatFailure, isAuthRequired, type RuntimeExit } from './runtime';
 import { ChatTranscript } from './transcript';
+import { QueuedBodies } from './queuedBodies';
 
 /** Everything the agent process needs, rebuilt at every start. Never saved. */
 export interface ResolvedLaunch {
@@ -50,7 +51,10 @@ export interface ChatTabManagerOptions {
 }
 
 interface Tab {
+  /** The public generation: viewers drop any state older than the newest they saw, so it only grows. */
   generation: number;
+  /** The live runtime's generation; 0 once released, so late callbacks from a stopped runtime are ignored. */
+  run: number;
   runtime?: ChatTabRuntime;
   transcript?: ChatTranscript;
   starting?: Promise<void>;
@@ -64,6 +68,8 @@ interface Tab {
 const DEFAULT_VIEW_LIMIT = 200;
 const RECEIPT_LIMIT = 256;
 const PROMPT_BYTES_LIMIT = 8 * 1024 * 1024;
+/** Characters of a queued prompt kept in the tab's saved state for the queue list. */
+const QUEUE_PREVIEW = 500;
 
 /**
  * Host owner of every chat tab on this machine. Desktop, the remote PWA, the
@@ -73,8 +79,11 @@ const PROMPT_BYTES_LIMIT = 8 * 1024 * 1024;
 export class ChatTabManager {
   private readonly tabs = new Map<string, Tab>();
   private lastGeneration = 0;
+  private readonly bodies: QueuedBodies;
 
-  constructor(private readonly options: ChatTabManagerOptions) {}
+  constructor(private readonly options: ChatTabManagerOptions) {
+    this.bodies = new QueuedBodies(panelId => path.join(options.spoolDirectory, safeName(panelId), 'queue'));
+  }
 
   /** The tab's view. Opening a tab that is not running starts it, unless it stopped for a reason. */
   view(panelId: string, limit = DEFAULT_VIEW_LIMIT, start = true): ChatTabView {
@@ -157,8 +166,15 @@ export class ChatTabManager {
       throw new PaneError('CHAT_STOPPED', `This chat is stopped${state.problem ? `: ${state.problem.message}` : '.'} Nothing was sent.`, state.problem?.next ?? 'Press Restart to start it again.');
     }
     const receipt: AgentChatReceipt = { operationId: request.operationId, generation: tab.generation, fingerprint, state: 'accepted' };
-    const queued: ChatTabQueuedPrompt = { operationId: request.operationId, text: request.text, images: request.images, queuedAt: new Date().toISOString() };
-    this.update(panelId, current => ({ ...current, receipts: [...(current.receipts ?? []), receipt].slice(-RECEIPT_LIMIT), queue: [...(current.queue ?? []), queued] }));
+    // The full prompt goes beside the state first; the receipt and queue entry are then saved together.
+    try { this.bodies.write(panelId, request.operationId, { text: request.text, images: request.images }); }
+    catch (error) { throw new PaneError('CHAT_PROMPT_NOT_SAVED', `The message could not be saved on this machine (${reasonOf(error)}). Nothing was sent.`, 'Check free disk space, then send it again.'); }
+    const queued: ChatTabQueuedPrompt = {
+      operationId: request.operationId, text: request.text.slice(0, QUEUE_PREVIEW), queuedAt: new Date().toISOString(), stored: true,
+      ...(request.images?.length ? { imageCount: request.images.length } : {}),
+    };
+    try { this.update(panelId, current => ({ ...current, receipts: [...(current.receipts ?? []), receipt].slice(-RECEIPT_LIMIT), queue: [...(current.queue ?? []), queued] })); }
+    catch (error) { this.bodies.remove(panelId, request.operationId); throw error; }
     this.publish(panelId);
     if (tab.runtime?.isAlive()) this.drain(panelId);
     else void this.ensure(panelId).catch(() => undefined);
@@ -173,6 +189,7 @@ export class ChatTabManager {
       queue: current.queue?.filter(item => item.operationId !== operationId),
       receipts: current.receipts?.map(receipt => receipt.operationId === operationId ? { ...receipt, state: 'failed', error: 'Removed from the queue before it was sent.' } : receipt),
     }));
+    this.bodies.remove(panelId, operationId);
     this.publish(panelId);
   }
 
@@ -209,6 +226,7 @@ export class ChatTabManager {
     await tab.starting?.catch(() => undefined);
     await this.release(tab);
     tab.transcript?.dispose();
+    this.bodies.clear(panelId);
     this.tabs.delete(panelId);
   }
 
@@ -224,7 +242,7 @@ export class ChatTabManager {
   private async start(panelId: string, tab: Tab): Promise<void> {
     const panel = this.options.store.panel(panelId);
     if (!panel) throw new PaneError('CHAT_PANEL_MISSING', 'This chat tab no longer exists.', 'Open another chat tab.');
-    tab.generation = this.lastGeneration = Math.max(Date.now(), this.lastGeneration + 1);
+    tab.generation = tab.run = this.lastGeneration = Math.max(Date.now(), this.lastGeneration + 1);
     tab.transcript?.dispose();
     tab.transcript = new ChatTranscript(panelId, tab.generation, { spoolFile: path.join(this.options.spoolDirectory, safeName(panelId), 'transcript.jsonl'), windowMessages: this.options.windowMessages });
     tab.notice = undefined;
@@ -245,10 +263,17 @@ export class ChatTabManager {
       command: launch.command,
       generation,
       onUpdate: update => {
-        const event = transcript.accept(update);
-        if (event && !tab.loading && tab.generation === generation) this.options.send('chat-tab:event', event);
+        let event: ChatTabEvent | undefined;
+        try { event = transcript.accept(update); }
+        catch (error) {
+          // The agent's own session keeps the update; viewers are told the window may be incomplete.
+          console.warn(`[ChatTabs] An update for ${panelId} could not be shown: ${reasonOf(error)}`);
+          if (tab.run === generation) { tab.notice = 'Part of this conversation could not be shown. Press Restart to reload it from the agent.'; this.publish(panelId); }
+          return;
+        }
+        if (event && !tab.loading && tab.run === generation) this.options.send('chat-tab:event', event);
       },
-      onState: () => { if (tab.generation === generation && !tab.loading) this.publish(panelId); },
+      onState: () => { if (tab.run === generation && !tab.loading) this.publish(panelId); },
       onExit: exit => this.exited(panelId, generation, exit),
     });
     tab.runtime = runtime;
@@ -280,7 +305,7 @@ export class ChatTabManager {
       this.sendInitialInput(panelId);
       this.drain(panelId);
     } catch (error) {
-      if (tab.generation !== generation) return;
+      if (tab.run !== generation) return;
       tab.runtime = undefined;
       await runtime.stop().catch(() => undefined);
       const failure = chatFailure(error, { code: 'CHAT_START_FAILED', next: 'Press Restart. If it fails again, check the agent is installed and signed in on this machine.' });
@@ -303,9 +328,16 @@ export class ChatTabManager {
     const state = this.required(panelId);
     if (!state.initialInput || state.initialInputSentAt) return;
     const operationId = `initial:${panelId}`;
-    this.update(panelId, current => ({ ...current, initialInputSentAt: new Date().toISOString() }));
+    // Marked only once the prompt is accepted. A start that dies in between sends it
+    // again with the same ID, which returns the first receipt instead of a second prompt.
     try { this.send(panelId, { operationId, text: state.initialInput }); }
-    catch (error) { console.warn(`[ChatTabs] The first message for ${panelId} was not sent: ${reasonOf(error)}.`); }
+    catch (error) {
+      console.warn(`[ChatTabs] The first message for ${panelId} was not sent: ${reasonOf(error)}.`);
+      this.tab(panelId).notice = `The opening message was not sent: ${error instanceof PaneError ? `${error.message} ${error.next ?? ''}`.trim() : reasonOf(error)} Press Restart to try it again.`;
+      this.publish(panelId);
+      return;
+    }
+    this.update(panelId, current => ({ ...current, initialInputSentAt: new Date().toISOString() }));
   }
 
   /** Delivers the next queued prompt when the agent is free. */
@@ -316,18 +348,29 @@ export class ChatTabManager {
     if (!runtime?.isAlive() || runtime.isRunning() || tab.delivering || tab.loading || state.status === 'starting' || state.status === 'stopped') return;
     const next = state.queue?.[0];
     if (!next) return;
+    const body = next.stored ? this.bodies.read(panelId, next.operationId) : { text: next.text, images: next.images };
+    if (!body) {
+      this.update(panelId, current => ({
+        ...current, queue: current.queue?.slice(1),
+        receipts: current.receipts?.map(receipt => receipt.operationId === next.operationId ? { ...receipt, state: 'failed', error: 'The saved copy of this queued message is missing, so it was not sent.' } : receipt),
+      }));
+      this.publish(panelId);
+      this.drain(panelId);
+      return;
+    }
     tab.delivering = true;
     const generation = tab.generation;
     const content: ContentBlock[] = [
-      ...(next.text ? [{ type: 'text' as const, text: next.text }] : []),
-      ...(next.images ?? []).map(image => ({ type: 'image' as const, mimeType: image.mimeType, data: image.data })),
+      ...(body.text ? [{ type: 'text' as const, text: body.text }] : []),
+      ...(body.images ?? []).map(image => ({ type: 'image' as const, mimeType: image.mimeType, data: image.data })),
     ];
     const startedAt = new Date().toISOString();
     for (const event of tab.transcript?.userMessage(next.operationId, content) ?? []) this.options.send('chat-tab:event', event);
     this.update(panelId, current => ({ ...current, queue: current.queue?.slice(1), turn: { operationId: next.operationId, startedAt }, status: 'working' }));
+    this.bodies.remove(panelId, next.operationId);
     const finish = (outcome: 'completed' | 'failed', stopReason: string, error?: PaneError) => {
       tab.delivering = false;
-      if (tab.generation !== generation || !this.options.store.state(panelId)) return;
+      if (tab.run !== generation || !this.options.store.state(panelId)) return;
       const marker = tab.transcript?.endTurn({ type: 'pane_turn', stopReason, startedAt, endedAt: new Date().toISOString() });
       if (marker) this.options.send('chat-tab:event', marker);
       tab.notice = stopReason === 'refusal' ? 'The agent declined this request.' : stopReason === 'max_tokens' ? 'The reply hit the length limit.' : stopReason === 'max_turn_requests' ? 'The turn hit its step limit.' : undefined;
@@ -348,7 +391,7 @@ export class ChatTabManager {
 
   private exited(panelId: string, generation: number, exit: RuntimeExit): void {
     const tab = this.tabs.get(panelId);
-    if (!tab || tab.generation !== generation || exit.expected) return;
+    if (!tab || tab.run !== generation || exit.expected) return;
     tab.runtime = undefined;
     if (!this.options.store.state(panelId)) return;
     const detail = exit.stderr.split('\n').filter(Boolean).at(-1);
@@ -365,9 +408,10 @@ export class ChatTabManager {
     const runtime = tab.runtime;
     tab.runtime = undefined;
     tab.delivering = false;
-    // Outcomes that arrive while stopping belong to no generation: a turn cut off by a
-    // quit stays recorded, so the next start can say it stopped.
-    tab.generation = 0;
+    // Outcomes that arrive while stopping belong to no runtime: a turn cut off by a
+    // quit stays recorded, so the next start can say it stopped. The public generation
+    // is kept, so viewers accept the stopped state published next.
+    tab.run = 0;
     await runtime?.stop();
   }
 
@@ -433,7 +477,7 @@ export class ChatTabManager {
 
   private tab(panelId: string): Tab {
     let tab = this.tabs.get(panelId);
-    if (!tab) { tab = { generation: 0, loading: false, delivering: false }; this.tabs.set(panelId, tab); }
+    if (!tab) { tab = { generation: 0, run: 0, loading: false, delivering: false }; this.tabs.set(panelId, tab); }
     return tab;
   }
 

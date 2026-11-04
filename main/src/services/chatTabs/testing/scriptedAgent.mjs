@@ -8,6 +8,7 @@
 //   question            asks a form question (elicitation); replies with the answer
 //   slow                streams until cancelled, then stops with stopReason "cancelled"
 //   crash               exits the process mid-turn
+//   signout             fails the turn with ACP authRequired (sign-in expired mid-conversation)
 //   plan                sends a todo list (plan update)
 //   edit                a completed edit step with a diff
 //   env NAME [NAME...]  replies with those environment variables as JSON
@@ -82,6 +83,7 @@ const app = agent()
     const say = async reply => { for (const chunk of reply.match(/[\s\S]{1,12}/g) ?? []) await send({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: chunk } }); };
     await send({ sessionUpdate: 'user_message_chunk', content: { type: 'text', text } });
     const [word, ...rest] = text.trim().split(/\s+/);
+    if (word === 'signout') throw RequestError.authRequired();
     if (word === 'crash') { await say('About to stop.'); process.exit(3); }
     if (word === 'slow') {
       while (!session.cancelled) { await say('.'); await new Promise(resolve => setTimeout(resolve, 30)); }

@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ToolPanel } from '../../../../shared/types/panels';
 import { applyChatTabEvent, type ChatPanelState, type ChatTabEvent, type ChatTabView } from '../../../../shared/types/chatTab';
 import { PaneError } from '../../../../shared/paneError';
@@ -22,6 +22,16 @@ class MemoryStore implements ChatTabStore {
   panel(panelId: string) { return this.panels.get(panelId); }
   state(panelId: string): ChatPanelState | undefined { const json = this.saved.get(panelId); return json ? JSON.parse(json) : undefined; }
   commit(panelId: string, state: ChatPanelState): void { this.saved.set(panelId, JSON.stringify(state)); }
+}
+
+/** Refuses a write over the panel state row's ceiling, as panelManager.commitChatTab does. */
+class CeilingStore extends MemoryStore {
+  refuseQueue = false;
+  override commit(panelId: string, state: ChatPanelState): void {
+    const json = JSON.stringify(state);
+    if (Buffer.byteLength(json) > 256 * 1024 || (this.refuseQueue && state.queue?.length)) throw new PaneError('CHAT_STATE_NOT_SAVED', 'The chat tab\'s state could not be saved.', 'Check free disk space, then press Restart in the tab.');
+    super.commit(panelId, state);
+  }
 }
 
 function harness(store = new MemoryStore(), env: NodeJS.ProcessEnv = {}, directory = mkdtempSync(path.join(tmpdir(), 'pane-chat-manager-'))) {
@@ -168,6 +178,61 @@ describe('chat tab manager', () => {
     expect(replyText(manager.view('p1'))).toContain('secret-token-value');
     expect(store.saved.get('p1')).not.toContain('secret-token-value');
     expect(Object.keys(store.state('p1')!)).not.toContain('env');
+  });
+
+  it('keeps a signed-out state visible to viewers when sign-in expires mid-conversation', async () => {
+    const { manager, store, directory, states } = harness();
+    store.add('p1', newTab(directory));
+    await manager.ensure('p1');
+    const generation = manager.view('p1').generation;
+    manager.send('p1', { operationId: 'op-1', text: 'signout' });
+    await expect.poll(() => states().at(-1)?.problem?.code).toBe('signed-out');
+    // A viewer drops any state older than the newest it saw; the stopped state must not look older.
+    expect(states().at(-1)).toMatchObject({ status: 'stopped', generation });
+    expect(manager.view('p1').generation).toBe(generation);
+    await manager.restart('p1');
+    expect(manager.view('p1').generation).toBeGreaterThan(generation);
+  });
+
+  it('sends a large opening message and only then marks it sent', async () => {
+    const { manager, store, directory } = harness(new CeilingStore());
+    const opening = `hello ${'x'.repeat(150 * 1024)}`;
+    store.add('p1', { ...newTab(directory), initialInput: opening });
+    await manager.ensure('p1');
+    expect(manager.receipt('p1', 'initial:p1')?.state).toBeDefined();
+    expect(store.state('p1')?.initialInputSentAt).toBeDefined();
+    // Delivered from the saved copy: the agent got the whole message, not the queue's preview.
+    await expect.poll(() => manager.view('p1').transcript?.messages.find(message => message.role === 'user')?.parts[0]).toEqual({ type: 'text', text: opening });
+    await manager.cancel('p1').catch(() => undefined);
+  });
+
+  it('shows an opening message that could not be queued and sends it on Restart', async () => {
+    const store = new CeilingStore();
+    const { manager, directory } = harness(store);
+    store.add('p1', { ...newTab(directory), initialInput: 'hello there' });
+    store.refuseQueue = true;
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    await manager.ensure('p1');
+    warn.mockRestore();
+    expect(store.state('p1')?.initialInputSentAt).toBeUndefined();
+    expect(manager.view('p1').notice).toMatch(/opening message was not sent/);
+    store.refuseQueue = false;
+    await manager.restart('p1');
+    await expect.poll(() => manager.receipt('p1', 'initial:p1')?.state).toBe('completed');
+  });
+
+  it('queues an image larger than a panel state row holds', async () => {
+    const { manager, store, directory } = harness(new CeilingStore());
+    store.add('p1', newTab(directory));
+    await manager.ensure('p1');
+    manager.send('p1', { operationId: 'op-1', text: 'permission' });
+    await expect.poll(() => manager.view('p1').permissions.length).toBe(1);
+    const data = Buffer.alloc(1024 * 1024, 7).toString('base64');
+    expect(manager.send('p1', { operationId: 'op-2', text: 'look', images: [{ mimeType: 'image/png', data }] }).state).toBe('accepted');
+    expect(manager.view('p1').queue).toEqual([expect.objectContaining({ operationId: 'op-2', text: 'look', imageCount: 1, stored: true })]);
+    const [permission] = manager.view('p1').permissions;
+    manager.answerPermission('p1', permission.id, permission.options[0].optionId);
+    await expect.poll(() => manager.receipt('p1', 'op-2')?.state).toBe('completed');
   });
 
   it('keeps chosen settings across a restart', async () => {
