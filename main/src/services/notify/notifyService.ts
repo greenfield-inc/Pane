@@ -174,7 +174,7 @@ export class NotifyService {
       const session = this.deps.sessionOf?.(entry.paneId, entry.panelId);
       const source: NotifySource = { paneId: entry.paneId, panelId: entry.panelId, name: entry.paneName, agent: agentName(entry.agentType) };
       if (session) source.session = session;
-      relays.push({
+      const relay: NotifyItem = {
         id: `relay:${entry.id}`,
         ui: 'info',
         title: question,
@@ -183,9 +183,10 @@ export class NotifyService {
         state: 'waiting',
         createdAt: at,
         relay: { inboxItemId: entry.id, worker: entry.paneName, question },
-        // D-81: the worker's status file, which its report named, opens beside the card.
-        ...(entry.report?.summaryPath ? { links: [{ label: `${entry.paneName} status`, path: entry.report.summaryPath }] } : {}),
-      });
+      };
+      // D-81: the worker's status file, which its report named, opens beside the card.
+      if (entry.report?.summaryPath) relay.links = [{ label: `${entry.paneName} status`, path: entry.report.summaryPath }];
+      relays.push(relay);
     }
     this.queue.setRelays(relays);
     if (nextDue < Infinity) this.relayTimer = setTimeout(() => this.refreshRelays(), Math.max(0, nextDue - now));
