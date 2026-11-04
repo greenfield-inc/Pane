@@ -31,8 +31,8 @@ let clientCapabilities = {};
 function persist(id) { writeFileSync(file(id), JSON.stringify(sessions.get(id))); }
 function configOptions(session) {
   return [
-    { id: 'model', name: 'Model', type: 'select', currentValue: session.config.model, options: [{ value: 'default', name: 'Default' }, { value: 'fast', name: 'Fast' }] },
-    { id: 'mode', name: 'Mode', type: 'select', currentValue: session.config.mode, options: [{ value: 'default', name: 'Ask' }, { value: 'plan', name: 'Plan' }, { value: 'bypassPermissions', name: 'Bypass' }] },
+    { id: 'model', name: 'Model', category: 'model', type: 'select', currentValue: session.config.model, options: [{ value: 'default', name: 'Default' }, { value: 'fast', name: 'Fast' }] },
+    { id: 'mode', name: 'Mode', category: 'mode', type: 'select', currentValue: session.config.mode, options: [{ value: 'default', name: 'Ask' }, { value: 'plan', name: 'Plan' }, { value: 'bypassPermissions', name: 'Bypass' }] },
   ];
 }
 

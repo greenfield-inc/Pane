@@ -208,10 +208,16 @@ export class ChatTabRuntime {
   }
 
   controls(): AgentChatConfigOption[] {
-    return this.configOptions.flatMap(option => option.type === 'select' ? [{
-      id: option.id, name: option.name, currentValue: option.currentValue,
-      options: option.options.flatMap(entry => 'group' in entry ? entry.options : [entry]).map(choice => ({ value: choice.value, name: choice.name })),
-    }] : []);
+    return this.configOptions.flatMap(option => {
+      if (option.type !== 'select') return [];
+      const control: AgentChatConfigOption = {
+        id: option.id, name: option.name, currentValue: option.currentValue,
+        options: option.options.flatMap(entry => 'group' in entry ? entry.options : [entry]).map(choice => ({ value: choice.value, name: choice.name })),
+      };
+      // The composer places mode, model and effort by ACP's category.
+      if (option.category) control.category = option.category;
+      return [control];
+    });
   }
 
   commands(): ChatTabCommand[] { return this.availableCommands; }

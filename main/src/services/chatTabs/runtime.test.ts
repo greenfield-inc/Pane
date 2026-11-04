@@ -41,7 +41,7 @@ describe('chat tab runtime against a scripted ACP agent', () => {
     expect(result.stopReason).toBe('end_turn');
     expect(text(updates)).toBe('You said: hello there');
     await expect.poll(() => runtime.commands().map(command => command.name)).toEqual(['compact', 'review']);
-    expect(runtime.controls().map(control => control.id)).toEqual(['model', 'mode']);
+    expect(runtime.controls().map(control => [control.id, control.category])).toEqual([['model', 'model'], ['mode', 'mode']]);
   });
 
   it('holds an approval until it is answered with one of the offered choices', async () => {

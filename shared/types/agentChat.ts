@@ -72,7 +72,8 @@ export interface AgentChatPermission {
   options: Array<{ optionId: string; name: string; kind: string }>;
 }
 
-export interface AgentChatConfigOption { id: string; name: string; currentValue: string; options: Array<{ value: string; name: string }> }
+/** An agent setting (an ACP select config option). `category` is ACP's hint: mode, model, thought_level, model_config or the adapter's own. */
+export interface AgentChatConfigOption { id: string; name: string; category?: string; currentValue: string; options: Array<{ value: string; name: string }> }
 
 export interface AgentChatView {
   panelId: string;
