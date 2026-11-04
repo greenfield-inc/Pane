@@ -9,6 +9,7 @@ import { ChatTabManager, type ChatTabLauncher, type ChatTabStore } from './manag
 import { AgentChatLauncher, chatTabEnv, type ChatLaunchContext, type ChatProfileResolver } from './launch';
 import { chatTabSecrets } from './secrets';
 import { decodeChatPanelState } from './state';
+import type { ChatTabNotifyBridge } from './notifyBridge';
 
 /** Chat tab state lives in the panel's custom state; only the host writes it. */
 const store: ChatTabStore = {
@@ -23,6 +24,10 @@ const store: ChatTabStore = {
 let manager: ChatTabManager | undefined;
 let context: ChatLaunchContext = { unsupportedHost: () => undefined };
 let profiles: ChatProfileResolver | undefined;
+let notifyBridge: ChatTabNotifyBridge | undefined;
+
+/** Chat tab approvals and questions in Notify and on the phone (#1215's queue); set once Notify starts. */
+export function setChatTabNotify(bridge: ChatTabNotifyBridge | undefined): void { notifyBridge = bridge; }
 
 /** Called once at startup with what only the IPC layer knows (project hosts, Agent Farm). */
 export function configureChatTabs(options: { context: ChatLaunchContext; profiles?: ChatProfileResolver }): void {
@@ -63,6 +68,7 @@ export function getChatTabManager(): ChatTabManager {
     // The same agent-status stream terminal agent tabs feed: Session live activity,
     // update holds and keep-awake follow chat tabs too.
     onStatus: event => terminalPanelManager.emit('agent-status', event),
+    onView: view => notifyBridge?.observe(view),
   });
   return manager;
 }

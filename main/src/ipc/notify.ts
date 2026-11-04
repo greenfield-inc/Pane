@@ -1,3 +1,5 @@
+import { ChatTabNotifyBridge } from '../services/chatTabs/notifyBridge';
+import { getChatTabManager, setChatTabNotify } from '../services/chatTabs';
 import { app, BrowserWindow, type IpcMain } from 'electron';
 import os from 'os';
 import type { AppServices } from './types';
@@ -241,7 +243,28 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
   for (const window of BrowserWindow.getAllWindows()) window.on('closed', () => notify.closeFloatingWindowsIfAlone());
   app.on('will-quit', () => notify.dispose());
   startClaudePrompts(notify, services);
+  startChatTabPrompts(notify, services);
   return notify;
+}
+
+/** Chat tabs ask their approvals and single-choice questions in Notify too; the first answer wins. */
+function startChatTabPrompts(notify: NotifyService, services: NotifyServices): void {
+  const { configManager } = services;
+  const bridge = new ChatTabNotifyBridge({
+    queue: notify.queue,
+    source: panelId => {
+      const panel = panelManager.getPanel(panelId);
+      const pane = panel ? services.sessionManager.getSession(panel.sessionId) : undefined;
+      if (!panel || panel.type !== 'chat' || !pane || pane.archived) return undefined;
+      const agent = getChatTabManager().view(panelId, 0, false).agent;
+      return { paneId: pane.id, panelId, name: pane.name, agent: agent === 'claude' ? 'Claude' : 'Codex' };
+    },
+    enabled: () => configManager.getConfig().answerPromptsFromPane !== false,
+    answerPermission: (panelId, requestId, optionId) => getChatTabManager().answerPermission(panelId, requestId, optionId),
+    answerQuestion: (panelId, questionId, answer) => getChatTabManager().answerQuestion(panelId, questionId, answer),
+  });
+  setChatTabNotify(bridge);
+  app.on('will-quit', () => setChatTabNotify(undefined));
 }
 
 /** Seconds Claude holds a prompt's hook before it stops waiting on Pane; tests shorten it. */

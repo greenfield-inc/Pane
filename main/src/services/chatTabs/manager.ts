@@ -44,6 +44,8 @@ export interface ChatTabManagerOptions {
   send: (channel: ChatTabChannel, payload: ChatTabEvent | ChatTabView | PanelAgentStatusEvent) => void;
   spoolDirectory: string;
   onStatus?: (event: PanelAgentStatusEvent) => void;
+  /** Every view the host publishes (approvals and questions for Notify). */
+  onView?: (view: ChatTabView) => void;
   windowMessages?: number;
 }
 
@@ -413,6 +415,7 @@ export class ChatTabManager {
     const tab = this.tab(panelId);
     const view = this.snapshot(panelId, state, tab, 0);
     this.options.send('chat-tab:state', view);
+    this.options.onView?.(view);
     const agentState = toAgentState(view);
     if (tab.published === agentState) return;
     const previous = tab.published;
