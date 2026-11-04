@@ -2059,8 +2059,8 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
         <button type="button" className="ml-3 text-text-primary" onClick={() => void handleManualRefresh()}>Retry snapshot</button>
       </div>}
 
-      {/* Pane find bar: overlays the terminal, never resizes it (no refit) */}
-      <FindBar panelId={panel.id} className="top-5 right-3" />
+      {/* Pane find bar: overlays the terminal, never resizes it (no refit); sits below the toolbar (top-1, h-6) */}
+      <FindBar panelId={panel.id} className="top-8 right-3" />
 
       {/* Terminal scroll buttons — compact, revealed on hover or keyboard focus */}
       {isInitialized && (

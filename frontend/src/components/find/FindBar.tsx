@@ -85,7 +85,7 @@ export function FindBarView({ panelId, className, bar }: FindBarProps & { bar: F
           noMatches && 'bg-status-warning/15 border-status-warning focus:border-status-warning',
         )}
       />
-      <span aria-live="polite" className="w-[5.5rem] min-w-[3.5rem] shrink text-center truncate text-xs tabular-nums text-text-tertiary select-none">
+      <span aria-live="polite" className="w-[7.5rem] min-w-[3.5rem] shrink text-center truncate text-xs tabular-nums text-text-tertiary select-none">
         {findCountLabel(bar)}
       </span>
       <button
