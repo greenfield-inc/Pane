@@ -198,6 +198,12 @@ jobs:
       env:
         PANE_DIR: ${{ runner.temp }}/pane-ci
 
+    # Launches Electron from the build above with a scripted ACP agent; never a real account.
+    - name: Run chat tab journeys
+      run: xvfb-run -a pnpm test:chat-tabs
+      env:
+        PANE_DIR: ${{ runner.temp }}/pane-chat-tabs
+
   # Published wrapper CLIs (npm + PyPI). Runs only when wrapper/contract files
   # change on a PR; always runs on pushes to main. Each OS is tested once at
   # the runtime floors (Node 22.23.4 / Python 3.8) and once at current (Node 24.22.1 /

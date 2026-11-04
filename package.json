@@ -87,6 +87,7 @@
     "test": "playwright test",
     "test:ci": "playwright test --config=playwright.ci.config.ts",
     "test:ci:minimal": "playwright test --config=playwright.ci.minimal.config.ts",
+    "test:chat-tabs": "playwright test --config=playwright.chat-tabs.config.ts",
     "test:renderer-selection": "pnpm --filter frontend exec tsc --noEmit -p ../tests/renderer/tsconfig.json && playwright test --config=tests/renderer/playwright.config.ts",
     "test:ui": "playwright test --ui",
     "test:headed": "playwright test --headed"

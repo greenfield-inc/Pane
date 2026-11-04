@@ -155,4 +155,5 @@ is a scripted ACP agent (each prompt's first word picks a behaviour: `permission
 `question`, `slow`, `crash`, `steps 6`, `edit`, `plan`, …), and `fakeAgentFarm.mjs`
 prints a `--print-acp` launch for it. An unpackaged Pane started with
 `PANE_CHAT_TEST_AGENT=<path to scriptedAgent.mjs>` runs it in every chat tab;
-`tests/chat-tabs.spec.ts` uses that for journeys J1 and J5.
+`tests/chat-tabs.spec.ts` uses that for journeys J1 and J5: run it with
+`pnpm build:main && pnpm test:chat-tabs` (CI runs it in Functional Smoke).

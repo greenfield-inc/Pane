@@ -147,6 +147,9 @@ package.
 - Playwright tests live in `tests/*.spec.ts`. Install the browser once with
   `pnpm exec playwright install chromium`. `pnpm test:ci:minimal` runs the suite
   CI runs: smoke, health check, accessibility, settings, remote sidebar and file-preview lifecycle regressions.
+- `pnpm test:chat-tabs` runs the chat tab journeys: it launches Electron from
+  `main/dist` (run `pnpm build:main` first) with the scripted ACP agent, each
+  test in its own temporary `PANE_DIR`, and serves the renderer from plain Vite.
 - The tests load the renderer from Vite in Chromium, with a mocked Electron API
   (`tests/electronApiMock.ts`). To start Vite, Playwright runs `pnpm electron-dev`
   on port `4521`, which also opens an Electron window against your data

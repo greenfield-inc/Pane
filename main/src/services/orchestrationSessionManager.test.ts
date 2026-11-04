@@ -295,10 +295,21 @@ describe('OrchestrationSessionManager', () => {
         initialInput: 'Pane sent this once, to start. Plan the work.',
       });
       expect(chatEnsure).toHaveBeenCalledWith(created.panel.id);
-      const cursor = await fixture.manager.create({ name: 'Cursor stays a terminal', agent: 'cursor' });
-      expect(cursor.panel.type).toBe('terminal');
       const resumed = await fixture.manager.create({ name: 'Resumed stays a terminal', agent: 'claude', resume: '5d0c7a1e-2b9f-4e3a-8c61-0f7d2e4b9a35' });
       expect(resumed.panel.type).toBe('terminal');
+    } finally {
+      Object.assign(fixture.configManager.getConfig(), { chatTabsEnabled: false });
+    }
+  });
+
+  // Cursor runs no Session on Windows, so there is nothing to check there.
+  it.skipIf(process.platform === 'win32')('keeps a Cursor Session orchestrator in a terminal when chat tabs are on', async () => {
+    const fixture = createFixture();
+    fixture.manager.attachChatTabs({ ensure: vi.fn(async () => undefined), isRunning: () => false, agentState: () => 'unknown' });
+    Object.assign(fixture.configManager.getConfig(), { chatTabsEnabled: true });
+    try {
+      const cursor = await fixture.manager.create({ name: 'Cursor stays a terminal', agent: 'cursor' });
+      expect(cursor.panel.type).toBe('terminal');
     } finally {
       Object.assign(fixture.configManager.getConfig(), { chatTabsEnabled: false });
     }
