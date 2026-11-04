@@ -697,7 +697,7 @@ export function ProjectSessionList({
 
       {settingsProject && (
         <ProjectSettings
-          project={settingsProject}
+          project={projectById.get(settingsProject.id) ?? settingsProject}
           isOpen={showProjectSettings}
           onClose={() => {
             setShowProjectSettings(false);

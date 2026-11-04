@@ -107,6 +107,9 @@ runpane agent-context --command "panes create" --json
 runpane mcp
 runpane repos list --json
 runpane repos add --path /path/to/repo --name Pane --yes --json
+runpane repos get --repo Pane --json
+runpane repos update --repo Pane --build-script "pnpm install" --run-script "pnpm dev" --worktree-folder ../pane-worktrees --yes --json
+runpane repos update --repo Pane --clear run-script --yes --json
 runpane repos rename --repo 3 --name Lev --yes --json
 runpane panes list --repo active --json
 runpane panes cost --pane <pane-id> --json
@@ -182,6 +185,10 @@ The wrapper must stream Pane stdout/stderr without reformatting because `pane --
 `runpane repos list` connects to the running local Pane daemon and prints saved repository records.
 
 `runpane repos add` registers an existing git repository with the running local Pane daemon. It does not create directories or initialize git repositories by default.
+
+`runpane repos get` prints a saved repository's Project Settings. Each script shows its saved value, the fallback from the repository's config file, and the one Pane will run.
+
+`runpane repos update` changes a saved repository's Project Settings through the same save as the Project Settings dialog. It requires `--yes`, supports `--dry-run`, and clears settings with `--clear`.
 
 `runpane repos rename` trims and sets a saved repository's display name, the same rename as the repository settings in the app, and returns the updated repository record.
 
@@ -291,6 +298,8 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `mcp`: Run the Pane MCP server over stdio so coding agents can call runpane commands as tools.
 - `repos list`: List repositories saved in the running Pane app.
 - `repos add`: Register an existing git repository with the running Pane app.
+- `repos get`: Show a saved repository's Project Settings and the scripts Pane will run.
+- `repos update`: Change a saved repository's Project Settings: scripts, worktree folder, name, IDE command, and system prompt.
 - `repos rename`: Rename a repository saved in the running Pane app.
 - `panes list`: List Pane sessions in a saved repository.
 - `panes cost`: Report estimated token cost per Pane, with per-model breakdown and cache efficiency.
@@ -390,6 +399,8 @@ runpane agent-context --command <command> [--json]
 runpane mcp [--toolsets <name,...>] [--read-only]
 runpane repos list [--json] [--pane-dir <path>]
 runpane repos add --path <path> [--name <name>] [--json] [--yes] [--pane-dir <path>]
+runpane repos get [--repo <selector>] [--json] [--pane-dir <path>]
+runpane repos update --repo <selector> [--name <name>] [--build-script <script>] [--run-script <script>] [--archive-script <script>] [--worktree-folder <path>] [--open-ide-command <command>] [--system-prompt <text>] [--clear <setting,...>] [--from-json <path|->] --yes [--dry-run] [--json] [--pane-dir <path>]
 runpane repos rename --repo <selector> --name <name> --yes [--json] [--pane-dir <path>]
 runpane panes list [--repo <selector>] [--json] [--pane-dir <path>]
 runpane panes cost [--repo <selector>] [--pane <pane-id>] [--json] [--pane-dir <path>]
@@ -513,6 +524,8 @@ Brief tools:
 - `agents doctor`: Check whether Codex or Claude is available in the repo environment Pane will use.
 - `repos list`: List repositories saved in the running Pane app.
 - `repos add`: Register an existing git repository with the running Pane app.
+- `repos get`: Show a saved repository's Project Settings and the scripts Pane will run.
+- `repos update`: Change a saved repository's Project Settings: scripts, worktree folder, name, IDE command, and system prompt.
 - `repos rename`: Rename a repository saved in the running Pane app.
 - `panes list`: List Pane sessions, optionally scoped to a saved repository.
 - `panes cost`: Report estimated token cost per Pane, with per-model breakdown and cache efficiency.
@@ -639,6 +652,13 @@ These flags are consumed by local daemon-control commands:
 --machine <name>
 --model <model>
 --effort <level>
+--build-script <script>
+--run-script <script>
+--archive-script <script>
+--worktree-folder <path>
+--open-ide-command <command>
+--system-prompt <text>
+--clear <setting,...>
 --epoch <epoch>
 --ui <options|approve|ask|info>
 --context <text>

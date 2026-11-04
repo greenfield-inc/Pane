@@ -848,6 +848,30 @@
       "--json"
     ],
     [
+      "repos",
+      "get",
+      "--repo",
+      "Pane",
+      "--json"
+    ],
+    [
+      "repos",
+      "update",
+      "--repo",
+      "Pane",
+      "--build-script",
+      "pnpm install",
+      "--run-script",
+      "pnpm dev",
+      "--worktree-folder",
+      "../wt",
+      "--clear",
+      "archive-script,system-prompt",
+      "--yes",
+      "--dry-run",
+      "--json"
+    ],
+    [
       "watch",
       "--as",
       "orch",

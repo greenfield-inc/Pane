@@ -495,6 +495,8 @@
         "agents doctor",
         "repos list",
         "repos add",
+        "repos get",
+        "repos update",
         "repos rename",
         "panes",
         "panes list",
@@ -610,6 +612,12 @@
           "$ref": "#/$defs/helpLines"
         },
         "repos add": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "repos get": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "repos update": {
           "$ref": "#/$defs/helpLines"
         },
         "repos rename": {

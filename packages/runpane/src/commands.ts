@@ -54,6 +54,14 @@ export interface ParsedArgs {
   panelInput?: string;
   panelInputFile?: string;
   fromJson?: string;
+  /** `repos update`: Project Settings values, and the settings to clear. */
+  buildScript?: string;
+  runScript?: string;
+  archiveScript?: string;
+  worktreeFolder?: string;
+  openIdeCommand?: string;
+  systemPrompt?: string;
+  clear?: string[];
   timeoutMs?: number;
   waitReady?: boolean;
   readyTimeoutMs?: number;
@@ -904,6 +912,34 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
     parsed.fromJson = value;
     return;
   }
+  if (flag === '--build-script') {
+    parsed.buildScript = value;
+    return;
+  }
+  if (flag === '--run-script') {
+    parsed.runScript = value;
+    return;
+  }
+  if (flag === '--archive-script') {
+    parsed.archiveScript = value;
+    return;
+  }
+  if (flag === '--worktree-folder') {
+    parsed.worktreeFolder = value;
+    return;
+  }
+  if (flag === '--open-ide-command') {
+    parsed.openIdeCommand = value;
+    return;
+  }
+  if (flag === '--system-prompt') {
+    parsed.systemPrompt = value;
+    return;
+  }
+  if (flag === '--clear') {
+    (parsed.clear ??= []).push(...value.split(',').map((setting) => setting.trim()).filter(Boolean));
+    return;
+  }
   if (flag === '--timeout-ms') {
     const timeoutMs = parsed.command === 'watch' ? parseWatchDuration(flag, value) : Number(value);
     if (!Number.isFinite(timeoutMs) || timeoutMs < 0 || (timeoutMs === 0 && parsed.command !== 'watch')) {
@@ -1231,10 +1267,17 @@ function splitInlineValues(rawArgs: string[]): SplitArgs {
   return { args, literalValues };
 }
 
+const REPO_SETTING_FLAGS = ['--build-script', '--run-script', '--archive-script', '--worktree-folder', '--open-ide-command', '--system-prompt'];
+
 function readValue(args: string[], index: number, flag: string, literalValues: Set<number>): string {
   const value = args[index];
   if (literalValues.has(index)) return value;
-  const freeText = ['--text', '--content', '--prompt', '--initial-input', '--title', '--name', '--name-contains'].includes(flag);
+  // repos update settings take any text, and an empty value clears the setting.
+  // A bare long flag (--json) means the value was left out; --flag=value passes one literally.
+  const clearable = REPO_SETTING_FLAGS.includes(flag);
+  if (clearable && value === '') return value;
+  const freeText = (clearable && !/^--[a-z][a-z-]*$/.test(value ?? ''))
+    || ['--text', '--content', '--prompt', '--initial-input', '--title', '--name', '--name-contains'].includes(flag);
   if (!value || (!freeText && value.startsWith('-') && value !== '-')) {
     throw new Error(`${flag} requires a value.`);
   }

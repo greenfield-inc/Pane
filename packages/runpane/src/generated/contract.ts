@@ -294,6 +294,38 @@ export const RUNPANE_CONTRACT = {
       "localControl": true
     },
     {
+      "name": "repos get",
+      "summary": "Show a saved repository's Project Settings and the scripts Pane will run.",
+      "usage": [
+        "runpane repos get [--repo <selector>] [--json] [--pane-dir <path>]"
+      ],
+      "toolsets": [
+        "repos"
+      ],
+      "jsonSchemas": [
+        "repoGetRequest",
+        "repoGetResult"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "repos update",
+      "summary": "Change a saved repository's Project Settings: scripts, worktree folder, name, IDE command, and system prompt.",
+      "usage": [
+        "runpane repos update --repo <selector> [--name <name>] [--build-script <script>] [--run-script <script>] [--archive-script <script>] [--worktree-folder <path>] [--open-ide-command <command>] [--system-prompt <text>] [--clear <setting,...>] [--from-json <path|->] --yes [--dry-run] [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "idempotent": true,
+      "toolsets": [
+        "repos"
+      ],
+      "jsonSchemas": [
+        "repoUpdateRequest",
+        "repoUpdateResult"
+      ],
+      "localControl": true
+    },
+    {
       "name": "repos rename",
       "summary": "Rename a repository saved in the running Pane app.",
       "usage": [
@@ -2143,6 +2175,41 @@ export const RUNPANE_CONTRACT = {
         "description": "Reasoning effort for the receiving agent (minimal, low, medium, high, xhigh, max); overrides the destination text."
       },
       {
+        "name": "--build-script",
+        "value": "<script>",
+        "description": "Project Settings build (setup) script; runs in each new worktree. Newline-separated commands."
+      },
+      {
+        "name": "--run-script",
+        "value": "<script>",
+        "description": "Project Settings run script; runs on the Play button. Newline-separated commands."
+      },
+      {
+        "name": "--archive-script",
+        "value": "<script>",
+        "description": "Project Settings archive script; runs before a worktree is removed. Newline-separated commands."
+      },
+      {
+        "name": "--worktree-folder",
+        "value": "<path>",
+        "description": "Folder new worktrees go in: absolute, or relative to the repository. Defaults to worktrees/ in the repository."
+      },
+      {
+        "name": "--open-ide-command",
+        "value": "<command>",
+        "description": "Command the Open in IDE button runs in a worktree."
+      },
+      {
+        "name": "--system-prompt",
+        "value": "<text>",
+        "description": "Project system prompt."
+      },
+      {
+        "name": "--clear",
+        "value": "<setting,...>",
+        "description": "Settings to clear, comma-separated: build-script, run-script, archive-script, worktree-folder, open-ide-command, system-prompt."
+      },
+      {
         "name": "--epoch",
         "value": "<epoch>",
         "description": "Journal epoch paired with --since; a mismatch emits _reset instead of silently skipping events."
@@ -2340,6 +2407,8 @@ export const RUNPANE_CONTRACT = {
         "  runpane agents doctor --agent <codex|claude|cursor> [--repo <selector>] [--json]",
         "  runpane repos list [--json]",
         "  runpane repos add --path <path> [--name <name>]",
+        "  runpane repos get [--repo <selector>] [--json]",
+        "  runpane repos update --repo <selector> [setting flags] --yes [--dry-run] [--json]",
         "  runpane repos rename --repo <selector> --name <name>",
         "  runpane sessions list [--json] [--pane-dir <path>]",
         "  runpane sessions create --from-json <path|-> [--json] [--pane-dir <path>]",
@@ -2543,6 +2612,39 @@ export const RUNPANE_CONTRACT = {
         "  --json                         Print machine-readable output",
         "  --dry-run                      Validate and preview without adding the repo",
         "  --yes                          Skip confirmation for mutating commands"
+      ],
+      "repos get": [
+        "Usage:",
+        "  runpane repos get [--repo <selector>] [--json] [--pane-dir <path>]",
+        "",
+        "Shows a saved repository's Project Settings. For the build, run, and archive scripts it shows the saved value, the fallback from the repository's config file (pane.json, conductor.json, .gitpod.yml, or devcontainer.json), and which of the two Pane will run.",
+        "",
+        "Options:",
+        "  --repo <selector>              active, id, exact path, or saved repository name; defaults to active",
+        "  --json                         Print machine-readable output",
+        "  --pane-dir <path>              Connect to a specific Pane data directory"
+      ],
+      "repos update": [
+        "Usage:",
+        "  runpane repos update --repo <selector> [setting flags] [--clear <setting,...>] [--from-json <path|->] --yes [--dry-run] [--json]",
+        "",
+        "Changes a saved repository's Project Settings through the same save as the Project Settings dialog, so open Pane windows show the new values. Settings you do not pass keep their value. A cleared script falls back to the repository's config file.",
+        "",
+        "Options:",
+        "  --repo <selector>              active, id, exact path, or saved repository name",
+        "  --name <name>                  Repository display name",
+        "  --build-script <script>        Build (setup) script; runs in each new worktree",
+        "  --run-script <script>          Run script; runs on the Play button",
+        "  --archive-script <script>      Archive script; runs before a worktree is removed",
+        "  --worktree-folder <path>       Folder for new worktrees, absolute or relative to the repository",
+        "  --open-ide-command <command>   Command the Open in IDE button runs",
+        "  --system-prompt <text>         Project system prompt",
+        "  --clear <setting,...>          Clear settings, e.g. run-script,archive-script; cleared scripts fall back to the repo's config file",
+        "  --from-json <path|->           Settings object: {\"runScript\": \"pnpm dev\", \"archiveScript\": null, ...}; flags override it",
+        "  --dry-run                      Show the result without saving",
+        "  --yes                          Skip confirmation for mutating commands",
+        "  --json                         Print machine-readable output",
+        "  --pane-dir <path>              Connect to a specific Pane data directory"
       ],
       "repos rename": [
         "Usage:",
@@ -3892,6 +3994,8 @@ export const RUNPANE_CONTRACT = {
         "  runpane agents doctor --agent <codex|claude|cursor> [--repo <selector>] [--json]",
         "  runpane repos list [--json]",
         "  runpane repos add --path <path> [--name <name>]",
+        "  runpane repos get [--repo <selector>] [--json]",
+        "  runpane repos update --repo <selector> [setting flags] --yes [--dry-run] [--json]",
         "  runpane repos rename --repo <selector> --name <name>",
         "  runpane panes list [--repo <selector>] [--json]",
         "  runpane panes cost [--repo <selector>] [--pane <pane-id>] [--json]",
@@ -4083,6 +4187,39 @@ export const RUNPANE_CONTRACT = {
         "  --json",
         "  --dry-run",
         "  --yes"
+      ],
+      "repos get": [
+        "Usage:",
+        "  runpane repos get [--repo <selector>] [--json] [--pane-dir <path>]",
+        "",
+        "Shows a saved repository's Project Settings. For the build, run, and archive scripts it shows the saved value, the fallback from the repository's config file (pane.json, conductor.json, .gitpod.yml, or devcontainer.json), and which of the two Pane will run.",
+        "",
+        "Options:",
+        "  --repo <selector>",
+        "  --json",
+        "  --pane-dir <path>"
+      ],
+      "repos update": [
+        "Usage:",
+        "  runpane repos update --repo <selector> [setting flags] [--clear <setting,...>] [--from-json <path|->] --yes [--dry-run] [--json]",
+        "",
+        "Changes a saved repository's Project Settings through the same save as the Project Settings dialog, so open Pane windows show the new values. Settings you do not pass keep their value. A cleared script falls back to the repository's config file.",
+        "",
+        "Options:",
+        "  --repo <selector>",
+        "  --name <name>",
+        "  --build-script <script>",
+        "  --run-script <script>",
+        "  --archive-script <script>",
+        "  --worktree-folder <path>",
+        "  --open-ide-command <command>",
+        "  --system-prompt <text>",
+        "  --clear <setting,...>",
+        "  --from-json <path|->",
+        "  --dry-run",
+        "  --yes",
+        "  --json",
+        "  --pane-dir <path>"
       ],
       "repos rename": [
         "Usage:",
@@ -5392,6 +5529,9 @@ export const RUNPANE_CONTRACT = {
       "runpane mcp",
       "runpane repos list --json",
       "runpane repos add --path /path/to/repo --name Pane --yes --json",
+      "runpane repos get --repo Pane --json",
+      "runpane repos update --repo Pane --build-script \"pnpm install\" --run-script \"pnpm dev\" --worktree-folder ../pane-worktrees --yes --json",
+      "runpane repos update --repo Pane --clear run-script --yes --json",
       "runpane repos rename --repo 3 --name Lev --yes --json",
       "runpane panes list --repo active --json",
       "runpane panes cost --pane <pane-id> --json",
@@ -5454,6 +5594,8 @@ export const RUNPANE_CONTRACT = {
       "`runpane mcp` runs a stdio MCP server whose tools are generated from this contract: every command with result `jsonSchemas` becomes a tool that runs `runpane <command> --json` and returns its output. Only the npm package and the Pane app include it; the Python wrapper prints how to run it with Node and exits non-zero.",
       "`runpane repos list` connects to the running local Pane daemon and prints saved repository records.",
       "`runpane repos add` registers an existing git repository with the running local Pane daemon. It does not create directories or initialize git repositories by default.",
+      "`runpane repos get` prints a saved repository's Project Settings. Each script shows its saved value, the fallback from the repository's config file, and the one Pane will run.",
+      "`runpane repos update` changes a saved repository's Project Settings through the same save as the Project Settings dialog. It requires `--yes`, supports `--dry-run`, and clears settings with `--clear`.",
       "`runpane repos rename` trims and sets a saved repository's display name, the same rename as the repository settings in the app, and returns the updated repository record.",
       "`runpane panes list` lists Pane sessions, optionally scoped to one saved repository.",
       "`runpane panes cost` reports estimated token costs per Pane for the last 30 days, including per-model breakdowns and cache efficiency; unscoped output includes an Unattributed bucket that reconciles against workspace totals.",
@@ -6366,6 +6508,30 @@ export const RUNPANE_CONTRACT = {
         "correction",
         "--interrupt",
         "--yes",
+        "--json"
+      ],
+      [
+        "repos",
+        "get",
+        "--repo",
+        "Pane",
+        "--json"
+      ],
+      [
+        "repos",
+        "update",
+        "--repo",
+        "Pane",
+        "--build-script",
+        "pnpm install",
+        "--run-script",
+        "pnpm dev",
+        "--worktree-folder",
+        "../wt",
+        "--clear",
+        "archive-script,system-prompt",
+        "--yes",
+        "--dry-run",
         "--json"
       ],
       [
@@ -7562,6 +7728,386 @@ export const RUNPANE_CONTRACT = {
         }
       },
       "additionalProperties": false
+    },
+    "repoGetRequest": {
+      "type": "object",
+      "properties": {
+        "repo": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "object"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "repoGetResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "repo",
+        "settings"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "repo": {
+          "$ref": "#/jsonSchemas/repoListResult/properties/repos/items"
+        },
+        "settings": {
+          "$ref": "#/$defs/settings"
+        }
+      },
+      "additionalProperties": false,
+      "$defs": {
+        "scriptSource": {
+          "type": "object",
+          "required": [
+            "command",
+            "source"
+          ],
+          "properties": {
+            "command": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "scriptSetting": {
+          "type": "object",
+          "required": [
+            "value",
+            "fallback",
+            "effective"
+          ],
+          "properties": {
+            "value": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "fallback": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/scriptSource"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "effective": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/scriptSource"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "settings": {
+          "type": "object",
+          "required": [
+            "name",
+            "path",
+            "currentBranch",
+            "worktreeFolder",
+            "openIdeCommand",
+            "systemPrompt",
+            "configFile",
+            "buildScript",
+            "runScript",
+            "archiveScript"
+          ],
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "currentBranch": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "worktreeFolder": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "openIdeCommand": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "systemPrompt": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "configFile": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "buildScript": {
+              "$ref": "#/$defs/scriptSetting"
+            },
+            "runScript": {
+              "$ref": "#/$defs/scriptSetting"
+            },
+            "archiveScript": {
+              "$ref": "#/$defs/scriptSetting"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "repoUpdateRequest": {
+      "type": "object",
+      "required": [
+        "repo",
+        "settings"
+      ],
+      "properties": {
+        "repo": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "object"
+            }
+          ]
+        },
+        "settings": {
+          "type": "object",
+          "minProperties": 1,
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "buildScript": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "runScript": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "archiveScript": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "worktreeFolder": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "openIdeCommand": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "systemPrompt": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "dryRun": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "repoUpdateResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "changed",
+        "repo",
+        "settings"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "dryRun": {
+          "const": true
+        },
+        "changed": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "name",
+              "buildScript",
+              "runScript",
+              "archiveScript",
+              "worktreeFolder",
+              "openIdeCommand",
+              "systemPrompt"
+            ]
+          }
+        },
+        "repo": {
+          "$ref": "#/jsonSchemas/repoListResult/properties/repos/items"
+        },
+        "settings": {
+          "$ref": "#/$defs/settings"
+        }
+      },
+      "additionalProperties": false,
+      "$defs": {
+        "scriptSource": {
+          "type": "object",
+          "required": [
+            "command",
+            "source"
+          ],
+          "properties": {
+            "command": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "scriptSetting": {
+          "type": "object",
+          "required": [
+            "value",
+            "fallback",
+            "effective"
+          ],
+          "properties": {
+            "value": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "fallback": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/scriptSource"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "effective": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/scriptSource"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "settings": {
+          "type": "object",
+          "required": [
+            "name",
+            "path",
+            "currentBranch",
+            "worktreeFolder",
+            "openIdeCommand",
+            "systemPrompt",
+            "configFile",
+            "buildScript",
+            "runScript",
+            "archiveScript"
+          ],
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "currentBranch": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "worktreeFolder": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "openIdeCommand": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "systemPrompt": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "configFile": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "buildScript": {
+              "$ref": "#/$defs/scriptSetting"
+            },
+            "runScript": {
+              "$ref": "#/$defs/scriptSetting"
+            },
+            "archiveScript": {
+              "$ref": "#/$defs/scriptSetting"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
     },
     "repoRenameRequest": {
       "type": "object",
@@ -13348,6 +13894,7 @@ export const RUNPANE_CONTRACT = {
         "Use `runpane agent-context --json` for the full agent-facing CLI context, or `runpane agent-context --command <command> --json` for one detailed command definition.",
         "For `agent-context --command`, use canonical spaced names like `panes create`; copied forms like `panes.create` or `runpane panes create` are accepted too.",
         "Use `runpane repos list --json` to find the saved repository when unsure after doctor shows the daemon is reachable.",
+        "Read and change a repo's Project Settings (build, run, and archive scripts, worktree folder) with `runpane repos get` and `runpane repos update`; never edit Pane's database by hand.",
         "If WSL cannot reach Pane, the user may be running Windows Pane; try `/mnt/c/Users/<you>/.pane/bin/runpane doctor --json`, or with an older Pane build `powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane doctor --json'`.",
         "If the repository exists on disk but is not saved in Pane, use `runpane repos add --path <repo> --yes --json` before creating panes.",
         "Use `runpane agents doctor --agent <codex|claude|cursor> --repo <selector> --json` when agent availability differs across host, Windows, WSL, or repo environments.",
@@ -13405,6 +13952,32 @@ export const RUNPANE_CONTRACT = {
             "--json",
             "--dry-run",
             "--pane-dir <path>"
+          ]
+        },
+        {
+          "name": "repos get",
+          "summary": "Show a saved repository's Project Settings and the scripts Pane will run.",
+          "arguments": [
+            "--repo <selector>",
+            "--json",
+            "--pane-dir <path>"
+          ]
+        },
+        {
+          "name": "repos update",
+          "summary": "Change a saved repository's Project Settings: scripts, worktree folder, name, IDE command, and system prompt.",
+          "arguments": [
+            "--repo <selector>",
+            "--build-script <script>",
+            "--run-script <script>",
+            "--archive-script <script>",
+            "--worktree-folder <path>",
+            "--name <name>",
+            "--clear <setting,...>",
+            "--from-json <path|->",
+            "--yes",
+            "--dry-run",
+            "--json"
           ]
         },
         {
@@ -14074,6 +14647,146 @@ export const RUNPANE_CONTRACT = {
         "notes": [
           "It does not create directories or initialize git repositories by default.",
           "For a Windows Pane app managing WSL repositories, prefer a saved WSL repo from `repos list` when possible. Adding a brand-new WSL repo from Windows may require WSL-aware path handling."
+        ]
+      },
+      "repos get": {
+        "name": "repos get",
+        "summary": "Show a saved repository's Project Settings and the scripts Pane will run.",
+        "details": "Use this before changing a repo's settings, or to find out what a new Pane will run. Each script reports `value` (saved in Project Settings), `fallback` (from the repo's config file), and `effective` (what Pane runs: the saved value when set, otherwise the fallback).",
+        "requiresPaneDaemon": true,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "--repo",
+            "value": "<selector>",
+            "required": false,
+            "description": "Repository selector: active, id, exact path, or saved repository name. Defaults to active."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable settings."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane repos get --repo Pane --json"
+        ],
+        "jsonSchemas": [
+          "repoGetRequest",
+          "repoGetResult"
+        ],
+        "notes": [
+          "Config-file fallbacks are read from the repository root. At run time Pane reads them from each Pane's worktree, so a branch that changes its config file can run something else.",
+          "`currentBranch` is detected from the repository; it is not a setting."
+        ]
+      },
+      "repos update": {
+        "name": "repos update",
+        "summary": "Change a saved repository's Project Settings: scripts, worktree folder, name, IDE command, and system prompt.",
+        "details": "Saves through the same path as the Project Settings dialog: Pane drops its cached project context, rebuilds the run commands, and open windows reload the repo. Settings you do not pass keep their value. Clear a setting with `--clear` or an empty value; a cleared script falls back to the repo's config file.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--repo",
+            "value": "<selector>",
+            "required": true,
+            "description": "Repository selector: active, id, exact path, or saved repository name."
+          },
+          {
+            "name": "--name",
+            "value": "<name>",
+            "required": false,
+            "description": "Repository display name. It cannot be cleared."
+          },
+          {
+            "name": "--build-script",
+            "value": "<script>",
+            "required": false,
+            "description": "Build (setup) script; runs in each new worktree. Newline-separated commands."
+          },
+          {
+            "name": "--run-script",
+            "value": "<script>",
+            "required": false,
+            "description": "Run script; runs on the Play button. Newline-separated commands."
+          },
+          {
+            "name": "--archive-script",
+            "value": "<script>",
+            "required": false,
+            "description": "Archive script; runs before a worktree is removed. Newline-separated commands."
+          },
+          {
+            "name": "--worktree-folder",
+            "value": "<path>",
+            "required": false,
+            "description": "Folder new worktrees go in: absolute, or relative to the repository."
+          },
+          {
+            "name": "--open-ide-command",
+            "value": "<command>",
+            "required": false,
+            "description": "Command the Open in IDE button runs in a worktree."
+          },
+          {
+            "name": "--system-prompt",
+            "value": "<text>",
+            "required": false,
+            "description": "Project system prompt."
+          },
+          {
+            "name": "--clear",
+            "value": "<setting,...>",
+            "required": false,
+            "description": "Settings to clear, comma-separated: build-script, run-script, archive-script, worktree-folder, open-ide-command, system-prompt."
+          },
+          {
+            "name": "--from-json",
+            "value": "<path|->",
+            "required": false,
+            "description": "JSON settings object with keys name, buildScript, runScript, archiveScript, worktreeFolder, openIdeCommand, systemPrompt; null clears. Flags override it."
+          },
+          {
+            "name": "--yes",
+            "required": false,
+            "description": "Skip confirmation for mutating commands."
+          },
+          {
+            "name": "--dry-run",
+            "required": false,
+            "description": "Return the settings as they would be after the update without saving."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane repos update --repo Pane --build-script \"pnpm install\" --run-script \"pnpm dev\" --yes --json",
+          "runpane repos update --repo Pane --clear archive-script --dry-run --json",
+          "runpane repos update --repo Pane --from-json settings.json --yes --json"
+        ],
+        "jsonSchemas": [
+          "repoUpdateRequest",
+          "repoUpdateResult"
+        ],
+        "notes": [
+          "`changed` lists the settings whose saved value differs from before.",
+          "The worktree folder applies to Panes created after the update; existing worktrees stay where they are."
         ]
       },
       "repos rename": {

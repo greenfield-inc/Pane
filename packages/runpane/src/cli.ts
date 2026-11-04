@@ -68,8 +68,10 @@ import {
   runSessionsUpdate,
   runSessionsPin,
   runReposAdd,
+  runReposGet,
   runReposRename,
   runReposList,
+  runReposUpdate,
   runWatch,
   runPrWatchCommand,
   runWorkspaceState
@@ -230,6 +232,12 @@ const commandHandlers = new Map<string, CommandHandler>(Object.entries({
   },
   'repos add': async (parsed, telemetryContext) => {
     return runReposAdd(parsed);
+  },
+  'repos get': async (parsed, telemetryContext) => {
+    return runReposGet(parsed);
+  },
+  'repos update': async (parsed, telemetryContext) => {
+    return runReposUpdate(parsed);
   },
   'repos rename': async (parsed, telemetryContext) => {
     return runReposRename(parsed);

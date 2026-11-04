@@ -55,7 +55,9 @@ from .local_control import (
     run_panes_pin,
     run_panes_rename,
     run_repos_add,
+    run_repos_get,
     run_repos_list,
+    run_repos_update,
     run_repos_rename,
     run_report,
     run_inbox,
@@ -177,6 +179,13 @@ class ParsedArgs:
     panel_input: Optional[str] = None
     panel_input_file: Optional[str] = None
     from_json: Optional[str] = None
+    build_script: Optional[str] = None
+    run_script: Optional[str] = None
+    archive_script: Optional[str] = None
+    worktree_folder: Optional[str] = None
+    open_ide_command: Optional[str] = None
+    system_prompt: Optional[str] = None
+    clear: Optional[List[str]] = None
     timeout_ms: Optional[float] = None
     wait_ready: bool = False
     ready_timeout_ms: Optional[float] = None
@@ -949,6 +958,27 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
     if flag == "--from-json":
         parsed.from_json = value
         return
+    if flag == "--build-script":
+        parsed.build_script = value
+        return
+    if flag == "--run-script":
+        parsed.run_script = value
+        return
+    if flag == "--archive-script":
+        parsed.archive_script = value
+        return
+    if flag == "--worktree-folder":
+        parsed.worktree_folder = value
+        return
+    if flag == "--open-ide-command":
+        parsed.open_ide_command = value
+        return
+    if flag == "--system-prompt":
+        parsed.system_prompt = value
+        return
+    if flag == "--clear":
+        parsed.clear = [*(parsed.clear or []), *(setting.strip() for setting in value.split(",") if setting.strip())]
+        return
     if flag == "--timeout-ms":
         if parsed.command == "watch":
             parsed.timeout_ms = parse_watch_duration(flag, value)
@@ -1159,10 +1189,19 @@ def append_remote_arg(parsed: ParsedArgs, flag: str, value: Optional[str] = None
     raise ValueError(f'{flag} is only valid with "runpane install daemon".')
 
 
+REPO_SETTING_FLAGS = {"--build-script", "--run-script", "--archive-script", "--worktree-folder", "--open-ide-command", "--system-prompt"}
+
+
 def read_value(args: List[str], index: int, flag: str, literal_values: Set[int]) -> str:
     if index in literal_values:
         return args[index]
-    free_text = flag in {"--text", "--prompt", "--initial-input", "--title", "--name", "--name-contains"}
+    # repos update settings take any text, and an empty value clears the setting.
+    # A bare long flag (--json) means the value was left out; --flag=value passes one literally.
+    clearable = flag in REPO_SETTING_FLAGS
+    if clearable and index < len(args) and args[index] == "":
+        return ""
+    bare_flag = index < len(args) and re.fullmatch(r"--[a-z][a-z-]*", args[index]) is not None
+    free_text = (clearable and not bare_flag) or flag in {"--text", "--prompt", "--initial-input", "--title", "--name", "--name-contains"}
     if index >= len(args) or not args[index] or (not free_text and args[index].startswith("-") and args[index] != "-"):
         raise ValueError(f"{flag} requires a value.")
     return args[index]
@@ -1375,6 +1414,8 @@ COMMAND_HANDLERS: Dict[str, Callable[[ParsedArgs, WrapperTelemetryContext], int]
     "links create": lambda parsed, context: run_links_create(parsed),
     "repos list": lambda parsed, context: run_repos_list(parsed),
     "repos add": lambda parsed, context: run_repos_add(parsed),
+    "repos get": lambda parsed, context: run_repos_get(parsed),
+    "repos update": lambda parsed, context: run_repos_update(parsed),
     "repos rename": lambda parsed, context: run_repos_rename(parsed),
     "sessions list": lambda parsed, context: run_sessions_list(parsed),
     "sessions create": lambda parsed, context: run_sessions_create(parsed),
