@@ -71,16 +71,6 @@ describe('NotifyQueue', () => {
     expect(queue.snapshot().strip).toEqual({ kind: 'question', itemId: secondId });
   });
 
-  it('keeps the answer given here when the asking tab clears the card during the Undo hold', async () => {
-    const { queue } = makeQueue();
-    ask(queue, sessionStore);
-    const id = onlyId(queue);
-    queue.run({ type: 'answer', id, answer: { choice: 'Keep Redis' } });
-    // A chat tab's docked card sees the answer and closes its own prompt before the hold ends.
-    queue.settle(id, 'Answered in the chat');
-    expect(queue.snapshot().items).toMatchObject([{ id, state: 'answered', answerSummary: 'Keep Redis' }]);
-  });
-
   it('holds an answer 3 seconds, and Undo brings the question back with nothing sent', async () => {
     const { queue } = makeQueue();
     const call = ask(queue, migration);

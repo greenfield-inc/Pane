@@ -491,11 +491,8 @@ export class NotifyQueue extends EventEmitter {
   settle(id: string, summary: string): void {
     const entry = this.entries.get(id);
     if (!entry || !isOpen(entry.item)) return;
-    // Answered here and still in its Undo hold: the asking tab cleared its card because of
-    // that answer, so the answer's own summary stands.
-    const answeredHere = entry.item.state === 'sent' ? entry.item.answerSummary : undefined;
-    if (!answeredHere) entry.item.answeredOn = undefined;
-    this.close(id, { state: 'answered', summary: answeredHere ?? summary }, unavailable(summary), false);
+    entry.item.answeredOn = undefined;
+    this.close(id, { state: 'answered', summary }, unavailable(summary), false);
   }
 
   /** Pane is quitting: release every open call. */
