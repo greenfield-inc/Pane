@@ -136,8 +136,15 @@ export default function ChatTabPanel({ panelId, client, connected = true, quiet 
   const [paged, setPaged] = useState(false);
   const [commandIndex, setCommandIndex] = useState(0);
   const messages = useMemo(() => snapshot.transcript?.messages ?? [], [snapshot.transcript?.messages]);
-  const viewportRef = useRef<HTMLDivElement>(null);
   const followLiveEnd = useRef<(() => void) | undefined>(undefined);
+  /** The sent message's transcript ID: when the host's copy of it renders, the chat follows the live end once more. */
+  const followSent = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!followSent.current || !messages.some(message => message.id === followSent.current)) return;
+    followSent.current = undefined;
+    followLiveEnd.current?.();
+  }, [messages]);
+  const viewportRef = useRef<HTMLDivElement>(null);
   const recordAnchor = useWindowAnchor(viewportRef, snapshot.transcript?.start, messages.length, !!snapshot.hasNewer);
   const onViewportScroll = () => {
     recordAnchor();
@@ -197,7 +204,9 @@ export default function ChatTabPanel({ panelId, client, connected = true, quiet 
       setPaged(false);
       if (viewer.snapshot().hasNewer) await viewer.jumpToLatest();
       requestAnimationFrame(() => followLiveEnd.current?.());
-      await deliver({ operationId: crypto.randomUUID(), text, images: imageParts }, true);
+      const operationId = crypto.randomUUID();
+      followSent.current = `user:${operationId}`;
+      await deliver({ operationId, text, images: imageParts }, true);
     },
   });
   useEffect(() => { runtime.thread.composer.setText(viewer.snapshot().draft); }, [runtime, viewer]);
