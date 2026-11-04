@@ -67,7 +67,8 @@ describe('session metadata through UI and CLI commands', () => {
       const stored = db.getSession('pane');
       const session = manager.getSession('pane');
       expect(session?.name).toBe(channel === 'sessions:rename' ? 'UI name' : 'CLI name');
-      expect(session?.lastActivity).toEqual(new Date(stored!.updated_at));
+      // SQLite writes UTC without a zone ("2026-11-04 21:41:13"); Pane reads it as that UTC instant.
+      expect(session?.lastActivity?.toISOString()).toBe(`${stored!.updated_at.replace(' ', 'T')}.000Z`);
       expect(event).toHaveBeenLastCalledWith(session);
     }
     expect(event).toHaveBeenCalledTimes(2);
