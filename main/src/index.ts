@@ -608,6 +608,9 @@ async function createWindow() {
     });
 
     wvContents.setBackgroundThrottling(true);
+    // One cleanup per guest, however many times its find bar opens and closes.
+    const guestId = wvContents.id;
+    wvContents.once('destroyed', () => findActiveWebviews.delete(guestId));
 
     // Forward Pane's hotkeys from webview to renderer (see webviewKeyForwarding.ts).
     // Webviews are separate processes — keyboard events inside them never reach
@@ -680,13 +683,10 @@ async function createWindow() {
   if (!devToolsHandlersRegistered) {
   devToolsHandlersRegistered = true;
   ipcMain.handle('browser-panel:set-find-active', (_, wcId: number, active: boolean) => {
-    if (active) {
-      if (findActiveWebviews.has(wcId)) return { success: true };
-      findActiveWebviews.add(wcId);
-      webContents.fromId(wcId)?.once('destroyed', () => findActiveWebviews.delete(wcId));
-    } else {
-      findActiveWebviews.delete(wcId);
-    }
+    // The guest's 'destroyed' handler (did-attach-webview) removes it when it goes.
+    const guest = webContents.fromId(wcId);
+    if (active && guest && !guest.isDestroyed()) findActiveWebviews.add(wcId);
+    else findActiveWebviews.delete(wcId);
     return { success: true };
   });
   ipcMain.handle('browser-panel:open-devtools-inline', async (_, pageWcId: number, bounds: { x: number; y: number; width: number; height: number }) => {
