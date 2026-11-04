@@ -63,10 +63,12 @@ const app = agent()
     persist(params.sessionId);
     return { configOptions: configOptions(session) };
   })
-  .onRequest(methods.agent.session.setMode, ({ params }) => {
+  .onRequest(methods.agent.session.setMode, async ({ params, client }) => {
     const session = sessions.get(params.sessionId);
     session.config.mode = params.modeId;
     persist(params.sessionId);
+    // Like the real adapters, report the changed setting to the client.
+    await client.notify(methods.client.session.update, { sessionId: params.sessionId, update: { sessionUpdate: 'config_option_update', configOptions: configOptions(session) } });
     return {};
   })
   .onRequest(methods.agent.session.close, () => ({}))
