@@ -4,6 +4,7 @@ import { Image, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useTheme } from '@/theme';
 import { Icon, Text } from '@/ui';
 
+import { useAutocorrectInputProps } from '../composer/autocorrectPreference';
 import { attachmentPreview } from './chatThread';
 
 /** One attached image in the composer, in assistant-ui's attachment scope. */
@@ -50,11 +51,14 @@ export function ChatTabComposer({ agent, placeholder, disabled, pending, working
   const empty = useAuiState(state => state.composer.isEmpty);
   const attached = useAuiState(state => state.composer.attachments.length > 0);
   const sendDisabled = disabled || pending || empty;
+  // Settings › Autocorrect (D-155). A message is prose, so it keeps sentence capitals and
+  // smart punctuation, unlike the terminal's box.
+  const autocorrect = useAutocorrectInputProps();
   return <ComposerPrimitive.Root style={[styles.composer, { backgroundColor: theme.chat.card, borderColor: theme.chat.border }]}>
     {attached && <ScrollView horizontal testID="chat-images" keyboardShouldPersistTaps="handled" contentContainerStyle={styles.thumbs}>
       <ComposerPrimitive.Attachments>{() => <ChatAttachment locked={pending} />}</ComposerPrimitive.Attachments>
     </ScrollView>}
-    <ComposerPrimitive.Input testID="chat-input" accessibilityLabel={`Message ${agent}`} placeholder={placeholder} placeholderTextColor={theme.chat.mutedForeground}
+    <ComposerPrimitive.Input {...autocorrect} autoCapitalize="sentences" testID="chat-input" accessibilityLabel={`Message ${agent}`} placeholder={placeholder} placeholderTextColor={theme.chat.mutedForeground}
       onChange={event => onDraft(event.nativeEvent.text)} editable={!pending} multiline style={[styles.input, { color: theme.chat.foreground }]} />
     <View style={styles.actions}>
       {canAttach && <ComposerPrimitive.AddAttachment testID="chat-attach" accessibilityLabel="Attach image" disabled={disabled || pending} onPress={onAttach}
