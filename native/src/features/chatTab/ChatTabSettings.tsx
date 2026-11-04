@@ -61,6 +61,7 @@ export function ChatTabSettings({ arranged, disabled, configure }: ChatTabSettin
     if (onOffValues(entry.control) && last && onOffValues(last[0].control)) last.push(entry);
     else groups.push([entry]);
   }
+  // A short grouped form, as in Settings' screens (Screen scroll), not a data list: Legend List doesn't apply.
   return <ScrollView testID="chat-settings-list" style={{ maxHeight: height * 0.75 }} contentContainerStyle={styles.list}>
     {groups.map(group => onOffValues(group[0].control)
       ? <ListSection key={group[0].control.id}>{group.map(({ control, title }) => <SwitchRow key={control.id} control={control} title={title} disabled={disabled} configure={configure} />)}</ListSection>

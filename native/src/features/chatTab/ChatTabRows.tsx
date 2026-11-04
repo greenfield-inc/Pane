@@ -50,6 +50,22 @@ function CopyAction({ label, text, testID }: { label: string; text: string; test
   </Pressable>;
 }
 
+/** Rendered Markdown isn't selectable on the phone; a long press copies the text and says how it went. */
+function LongPressCopy({ text }: { text: string }) {
+  const theme = useTheme();
+  const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle');
+  useEffect(() => {
+    if (state === 'idle') return;
+    const timer = setTimeout(() => setState('idle'), 1500);
+    return () => clearTimeout(timer);
+  }, [state]);
+  return <Pressable accessibilityHint="Long press to copy" delayLongPress={400}
+    onLongPress={() => { Clipboard.setStringAsync(text).then(() => setState('copied'), () => setState('failed')); }}>
+    <Markdown text={text} />
+    {state !== 'idle' && <Text accessibilityLiveRegion="polite" variant="footnote" style={{ color: state === 'copied' ? theme.colors.success : theme.colors.danger }}>{state === 'copied' ? 'Copied' : 'Could not copy'}</Text>}
+  </Pressable>;
+}
+
 const STEP_ICONS = {
   explore: { ios: 'eye', android: 'visibility' },
   edit: { ios: 'pencil', android: 'edit' },
@@ -130,8 +146,7 @@ export function ChatRowView({ row, actions }: { row: ChatRow; actions: ChatRowAc
         {copy ? <CopyAction testID="chat-copy-message" label="Copy message" text={copy} /> : null}
       </View>;
     }
-    // Rendered Markdown isn't selectable on the phone; a long press copies the paragraph's text.
-    case 'text': return <Pressable accessibilityHint="Long press to copy" onLongPress={() => void Clipboard.setStringAsync(row.text)} delayLongPress={400}><Markdown text={row.text} /></Pressable>;
+    case 'text': return <LongPressCopy text={row.text} />;
     case 'copy': return <CopyAction testID="chat-copy-response" label="Copy response" text={row.text} />;
     case 'thought': return <Text variant="footnote" style={{ color: theme.chat.mutedForeground }} numberOfLines={3}>Thinking: {row.text}</Text>;
     case 'image': return <Image accessibilityLabel="Image from the agent" source={{ uri: `data:${row.mimeType};base64,${row.data}` }} style={styles.image} />;
