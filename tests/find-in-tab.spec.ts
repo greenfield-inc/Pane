@@ -54,37 +54,45 @@ test('terminal: Cmd+F finds every match in scrollback and Esc gives the keys bac
   await openPane(page);
   const tab = page.getByRole('tabpanel');
   await expect(tab.getByRole('status', { name: 'Loading terminal' })).toHaveCount(0);
-  await tab.locator('.xterm-helper-textarea').first().focus();
-
-  // The terminal's find adapter attaches once xterm and its search addon load,
-  // and a terminal still restoring can take focus back. Cmd/Ctrl+F with the
-  // bar open puts focus back in its input, so press until it holds.
-  const input = findBar(page).getByRole('textbox', { name: 'Find' });
+  // Ready: a terminal still restoring its scrollback can move focus, so wait
+  // until focus put in it stays there. Find is then pressed once.
+  const xterm = tab.locator('.xterm-helper-textarea').first();
   await expect(async () => {
-    await page.keyboard.press('ControlOrMeta+f');
-    await expect(input).toBeFocused({ timeout: 500 });
+    await xterm.focus();
+    await page.waitForTimeout(300);
+    await expect(xterm).toBeFocused({ timeout: 100 });
   }).toPass();
-  await input.fill('needle');
-  await expect(findBar(page)).toContainText('of 12');
+
+  await page.keyboard.press('ControlOrMeta+f');
+  const input = findBar(page).getByRole('textbox', { name: 'Find' });
+  await expect(input).toBeFocused();
+  await page.keyboard.type('needle');
+  const counter = findBar(page).locator('[aria-live="polite"]');
+  await expect(counter).toHaveText(/^\d+ of 12$/);
   // The search addon re-runs 200 ms after output is parsed; let the restored
   // scrollback's re-search land before stepping.
   await page.waitForTimeout(400);
+  const ordinal = async () => Number((await counter.textContent())?.split(' of ')[0]);
+  const first = await ordinal();
+  const after = (steps: number) => `${((first - 1 + steps + 12 * 4) % 12) + 1} of 12`;
 
-  const counter = findBar(page).locator('[aria-live="polite"]');
-  const before = await counter.textContent();
   await page.keyboard.press('Enter');
-  await expect(counter).not.toHaveText(before ?? '');
+  await expect(counter).toHaveText(after(1));
   await page.keyboard.press('ControlOrMeta+g');
+  await expect(counter).toHaveText(after(2));
   await page.keyboard.press('Shift+Enter');
+  await expect(counter).toHaveText(after(1));
   await page.keyboard.press('ControlOrMeta+Shift+g');
-  await expect(counter).toHaveText(before ?? '');
+  await expect(counter).toHaveText(after(0));
+  await page.keyboard.press('ControlOrMeta+Shift+g');
+  await expect(counter).toHaveText(after(-1));
 
   await page.keyboard.press('Escape');
   await expect(findBar(page)).toHaveCount(0);
-  await expect(tab.locator('.xterm-helper-textarea').first()).toBeFocused();
+  await expect(xterm).toBeFocused();
 });
 
-test('markdown preview: Cmd+F highlights a heading, a paragraph and a code block', async ({ page }) => {
+async function openMarkdownPreview(page: Page, content: string) {
   const filePath = `${project.path}/README.md`;
   const editor = panel('find-readme', 'editor', 'README.md', 0, true, { filePath });
   await installElectronApiMock(page, {
@@ -94,9 +102,9 @@ test('markdown preview: Cmd+F highlights a heading, a paragraph and a code block
   // Same origin as the app, so the Range fetch needs no CORS preflight.
   await page.route('**/__find-preview/**', route => route.fulfill({
     status: 206,
-    body: markdown,
+    body: content,
     contentType: 'text/markdown',
-    headers: { 'Content-Range': `bytes 0-${markdown.length - 1}/${markdown.length}` },
+    headers: { 'Content-Range': `bytes 0-${Buffer.byteLength(content) - 1}/${Buffer.byteLength(content)}` },
   }));
   await page.addInitScript(() => {
     const wrap = () => {
@@ -113,7 +121,11 @@ test('markdown preview: Cmd+F highlights a heading, a paragraph and a code block
     if (!wrap()) document.addEventListener('DOMContentLoaded', wrap, { once: true });
   });
   await openPane(page);
-  const tab = page.getByRole('tabpanel');
+  return page.getByRole('tabpanel');
+}
+
+test('markdown preview: Cmd+F highlights a heading, a paragraph and a code block', async ({ page }) => {
+  const tab = await openMarkdownPreview(page, markdown);
   await expect(tab.getByRole('heading', { name: 'Install' })).toBeVisible();
   await tab.getByText('Run the install step first.').click();
 
@@ -135,4 +147,43 @@ test('markdown preview: Cmd+F highlights a heading, a paragraph and a code block
   await page.keyboard.press('Escape');
   await expect(findBar(page)).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => CSS.highlights.has('pane-find-match'))).toBe(false);
+
+  // With the bar closed, Shift+Cmd+G reopens on the last query and moves back
+  // from the first match; Cmd+G moves forward.
+  await page.keyboard.press('ControlOrMeta+Shift+g');
+  await expect(findBar(page)).toContainText('3 of 3');
+  await page.keyboard.press('Escape');
+  await expect(findBar(page)).toHaveCount(0);
+  await page.keyboard.press('ControlOrMeta+g');
+  await expect(findBar(page)).toContainText('2 of 3');
+
+  // Esc closes the bar from its buttons too, not only from the input.
+  await findBar(page).getByRole('button', { name: 'Next match' }).click();
+  await expect(findBar(page)).toContainText('3 of 3');
+  await expect(findBar(page).getByRole('button', { name: 'Next match' })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(findBar(page)).toHaveCount(0);
+});
+
+test('markdown preview: matches scrolled into view by hand are highlighted', async ({ page }) => {
+  // 1,100 matches: more than the 500 painted either side of the current one.
+  const many = Array.from({ length: 1100 }, (_, index) => `Paragraph ${index} has a kiwi.`).join('\n\n');
+  const tab = await openMarkdownPreview(page, many);
+  const last = tab.getByText('Paragraph 1099 has a kiwi.');
+  await expect(last).toBeAttached();
+  await tab.getByText('Paragraph 0 has a kiwi.').click();
+
+  await page.keyboard.press('ControlOrMeta+f');
+  await findBar(page).getByRole('textbox', { name: 'Find' }).fill('kiwi');
+  await expect(findBar(page)).toContainText('1 of 1100');
+
+  await last.scrollIntoViewIfNeeded();
+  await expect(last).toBeInViewport();
+  await expect.poll(() => page.evaluate(() => {
+    const target = Array.from(document.querySelectorAll('p')).find(p => p.textContent === 'Paragraph 1099 has a kiwi.');
+    const highlight = CSS.highlights.get('pane-find-match');
+    if (!target || !highlight) return false;
+    return Array.from(highlight.keys()).some(range => range instanceof Range && target.contains(range.startContainer));
+  })).toBe(true);
+  await expect(findBar(page)).toContainText('1 of 1100');
 });

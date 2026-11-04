@@ -117,6 +117,11 @@ const TERMINAL_ACTIVATION_MASK_AFTER_PAINT_MS = 200;
 const TERMINAL_VISIBILITY_REFRESH_MS = 60_000;
 const SNAPSHOT_MIN_INTERVAL_MS = 10_000;
 const MIN_VIABLE_RECT_PX = 100; // below this the container is hidden or mid-layout (Allotment minSize is 120)
+
+/** Focus is in this terminal's find bar (FindBar marks itself with data-find-bar). */
+function findBarHasFocus(panelId: string): boolean {
+  return !!document.activeElement?.closest(`[data-find-bar="${CSS.escape(panelId)}"]`);
+}
 const MIN_PTY_COLS = 20;        // mirrors main-process floor
 const MIN_PTY_ROWS = 5;
 const NEAR_BOTTOM_THRESHOLD_ROWS = 3;
@@ -1934,7 +1939,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
       if (containerWidth < MIN_VIABLE_RECT_PX) {
         forwardToMainLog('warn', `[TerminalPanel] Activation refresh bailed for panel ${panel.id}: container ${containerWidth}px`);
         setIsRefreshing(false);
-        if (autoFocus && fullRefresh) xtermRef.current?.focus();
+        if (autoFocus && fullRefresh && !findBarHasFocus(panel.id)) xtermRef.current?.focus();
         return;
       }
 
@@ -1960,7 +1965,8 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
         // Masked activations report from the overlay linger timer when the mask lifts.
         if (!fullRefresh && !hotActivation) markPaneTerminalShown(panel.sessionId);
 
-        if (autoFocus && (fullRefresh || hotActivation)) {
+        // Cmd+F pressed while the terminal was restoring: keep focus in the find bar.
+        if (autoFocus && (fullRefresh || hotActivation) && !findBarHasFocus(panel.id)) {
           xtermRef.current?.focus();
         }
 
