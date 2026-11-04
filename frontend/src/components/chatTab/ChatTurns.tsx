@@ -46,7 +46,7 @@ function StepGroupRow({ group, waiting, actions }: { group: StepGroup; waiting: 
   const verb = VERBS[group.kind][state === 'running' || state === 'waiting' ? 0 : 1];
   const liveOutput = single?.kind === 'run' && state === 'running' && single.output;
   const expandable = group.kind !== 'edit' && (group.steps.length > 1 || !!single?.output || (group.kind === 'other' && single?.input !== undefined));
-  return <div className="chat-step" data-kind={group.kind} data-state={state}>
+  return <div className="chat-step" data-anchor-id={group.id} data-kind={group.kind} data-state={state}>
     <div className="chat-step-line">
       <StepIcon kind={group.kind} state={state} />
       <span className="chat-step-verb">{verb}</span>
@@ -85,7 +85,7 @@ function TodoList({ entries }: { entries: PlanEntry[] }) {
 
 function Item({ item, waiting, actions }: { item: TurnItem; waiting: Set<string>; actions: ChatTurnActions }) {
   switch (item.type) {
-    case 'text': return <Markdown text={item.text} />;
+    case 'text': return <div data-anchor-id={item.id}><Markdown text={item.text} /></div>;
     case 'thought': return <details className="chat-thought"><summary><Brain aria-hidden="true" />Thinking</summary><div className="whitespace-pre-wrap">{item.text}</div></details>;
     case 'image': return <img className="chat-image" alt="Sent by the agent" src={`data:${item.mimeType};base64,${item.data}`} />;
     case 'plan': return <TodoList entries={item.entries} />;
@@ -104,7 +104,7 @@ function UserImage({ content }: { content: JsonValue }) {
 
 function UserMessage({ turn }: { turn: ChatTurn }) {
   if (!turn.user) return null;
-  return <div className="chat-user">{turn.user.parts.map((part, index) => part.type === 'text'
+  return <div className="chat-user" data-anchor-id={turn.user.id}>{turn.user.parts.map((part, index) => part.type === 'text'
     ? <span key={`${turn.id}:${index}`} className="whitespace-pre-wrap">{part.text}</span>
     : part.type === 'content' ? <UserImage key={`${turn.id}:${index}`} content={part.content} /> : null)}</div>;
 }
@@ -133,7 +133,7 @@ export const ChatTurnView = memo(function ChatTurnView({ turn, quiet, permission
   const hasSteps = turn.items.some(item => item.type === 'steps');
   const foldSteps = quiet && hasSteps;
   let foldShown = false;
-  return <div className="chat-turn" data-turn-id={turn.id} data-running={turn.running}>
+  return <div className="chat-turn" data-anchor-id={turn.id} data-running={turn.running}>
     <UserMessage turn={turn} />
     {turn.items.map(item => {
       if (item.type !== 'steps' || !foldSteps) return <Item key={item.id} item={item} waiting={waiting} actions={actions} />;

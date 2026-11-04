@@ -48,25 +48,37 @@ function ScrollToLatest({ viewer, hasNewer }: { viewer: ChatTabViewer; hasNewer:
   return <button type="button" disabled={isAtBottom && !hasNewer} onClick={() => void jump()} className="chat-latest" aria-label="Scroll to latest message"><ArrowDown className="h-4 w-4" /></button>;
 }
 
-interface ScrollAnchor { id: string; offset: number }
+interface ScrollAnchor {
+  /** Rows on screen, nearest the middle first, each with its offset from the viewport's top. */
+  rows: Array<{ id: string; offset: number }>;
+  /** Following the live end: nothing to keep. */
+  atBottom: boolean;
+}
 
-/** The turn under the middle of the viewport and its offset from the top, so a page added or trimmed elsewhere does not move it. */
-function readAnchor(viewport: HTMLElement): ScrollAnchor | undefined {
+/**
+ * The rows on screen (steps, replies, user messages; whole turns only when nothing
+ * finer is there), nearest the middle first. Several are kept because a page added
+ * to the start of a turn can merge into the first visible step group and rename it.
+ */
+function readAnchor(viewport: HTMLElement): ScrollAnchor {
   const box = viewport.getBoundingClientRect();
   const middle = box.top + box.height / 2;
-  let best: { id: string; top: number; distance: number } | undefined;
-  for (const element of viewport.querySelectorAll<HTMLElement>('[data-turn-id]')) {
+  const visible = (selector: string) => [...viewport.querySelectorAll<HTMLElement>(selector)].flatMap(element => {
     const rect = element.getBoundingClientRect();
+    if (rect.bottom < box.top || rect.top > box.bottom) return [];
     const distance = rect.top <= middle && rect.bottom >= middle ? 0 : Math.min(Math.abs(rect.top - middle), Math.abs(rect.bottom - middle));
-    if (!best || distance < best.distance) best = { id: element.dataset.turnId!, top: rect.top, distance };
-    if (distance === 0) break;
-  }
-  return best && { id: best.id, offset: best.top - box.top };
+    return [{ id: element.dataset.anchorId!, offset: rect.top - box.top, distance }];
+  });
+  const rows = visible('[data-anchor-id]:not(.chat-turn)');
+  const candidates = (rows.length ? rows : visible('.chat-turn[data-anchor-id]')).sort((a, b) => a.distance - b.distance).slice(0, 12);
+  return { rows: candidates.map(({ id, offset }) => ({ id, offset })), atBottom: viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 4 };
 }
 
 /**
  * Keeps the reader's place while the bounded window pages in or trims messages
  * at either end (the viewport sets overflow-anchor:none, so the browser will not).
+ * Whether the reader was at the live end is read before the change: once the
+ * window shrinks, the browser has already clamped the scroll position to the bottom.
  */
 function useWindowAnchor(viewport: RefObject<HTMLElement | null>, start: number | undefined, length: number) {
   const anchor = useRef<ScrollAnchor | undefined>(undefined);
@@ -76,10 +88,13 @@ function useWindowAnchor(viewport: RefObject<HTMLElement | null>, start: number 
     const element = viewport.current;
     const moved = previous.current.start !== start || (previous.current.length > length);
     previous.current = { start, length };
-    if (element && moved && anchor.current) {
-      const atBottom = element.scrollHeight - element.scrollTop - element.clientHeight < 4;
-      const target = element.querySelector<HTMLElement>(`[data-turn-id="${CSS.escape(anchor.current.id)}"]`);
-      if (target && !atBottom) element.scrollTop += target.getBoundingClientRect().top - element.getBoundingClientRect().top - anchor.current.offset;
+    if (element && moved && anchor.current && !anchor.current.atBottom) {
+      for (const row of anchor.current.rows) {
+        const target = element.querySelector<HTMLElement>(`[data-anchor-id="${CSS.escape(row.id)}"]`);
+        if (!target) continue;
+        element.scrollTop += target.getBoundingClientRect().top - element.getBoundingClientRect().top - row.offset;
+        break;
+      }
     }
     record();
   }, [viewport, start, length, record]);
