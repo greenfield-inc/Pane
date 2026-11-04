@@ -171,6 +171,23 @@ describe('chat tab manager', () => {
     expect(manager.view('p1').problem).toMatchObject({ code: 'not-installed', action: 'install' });
   });
 
+  // #1236 checks the installed CLI against the bundled adapter instead of downloading one.
+  it.each([
+    ['CHAT_AGENT_OUTDATED', 'Claude Code 2.0.1 at /usr/local/bin/claude is older than 2.1.316, the oldest version chat supports.', { code: 'not-installed', action: 'install' }],
+    ['CHAT_ADAPTER_MISSING', 'This Pane build is missing its bundled Claude Code chat adapter.', { code: 'adapter-setup' }],
+  ])('turns %s into a stopped state with its next step', async (code, message, problem) => {
+    const store = new MemoryStore();
+    const directory = mkdtempSync(path.join(tmpdir(), 'pane-chat-manager-'));
+    cleanup.push(() => rmSync(directory, { recursive: true, force: true }));
+    const manager = new ChatTabManager({
+      store, send: () => undefined, spoolDirectory: directory,
+      launcher: { resolve: async () => { throw new PaneError(code, message, 'The next step.'); } },
+    });
+    store.add('p1', newTab(directory));
+    await expect(manager.ensure('p1')).rejects.toBeDefined();
+    expect(manager.view('p1').problem).toMatchObject({ ...problem, message, next: 'The next step.' });
+  });
+
   it('saves no environment or secret in the tab\'s state', async () => {
     const { manager, store, directory } = harness();
     store.add('p1', { ...newTab(directory), initialInput: 'env PANE_TEST_TOKEN' });

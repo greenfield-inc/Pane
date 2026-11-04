@@ -41,7 +41,7 @@ const agentFarmProfiles = new AgentFarmProfiles({
   adapter: async agent => {
     await installAdapter(agent);
     const entry = adapterEntry(agent);
-    if (!entry) throw new PaneError('CHAT_ADAPTER_INSTALL_FAILED', 'The chat adapter was not usable after setup.', 'Press Restart to set it up again.');
+    if (!entry) throw new PaneError('CHAT_ADAPTER_MISSING', 'This Pane build is missing its bundled chat adapter.', 'Reinstall Pane from runpane.com. Terminal agent tabs are not affected.');
     return entry;
   },
 });

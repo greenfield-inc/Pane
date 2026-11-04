@@ -81,9 +81,10 @@ export class AgentChatLauncher implements ChatTabLauncher {
       if (!this.options.profiles) throw new PaneError('CHAT_PROFILE_UNSUPPORTED', 'This Pane cannot start Agent Farm profiles in chat tabs yet.', 'Start the profile in a terminal tab.');
       return this.options.profiles.resolve(panel, state, env);
     }
-    await installAdapter(state.agent);
+    // The bundled adapter checks the same CLI, in the folder and environment it will run in (#1236).
+    await installAdapter(state.agent, executable, { cwd: state.cwd, env });
     const entry = adapterEntry(state.agent);
-    if (!entry) throw new PaneError('CHAT_ADAPTER_INSTALL_FAILED', 'The chat adapter was not usable after setup.', 'Press Restart to set it up again.');
+    if (!entry) throw new PaneError('CHAT_ADAPTER_MISSING', `This Pane build is missing its bundled ${AGENT_NAMES[state.agent]} chat adapter.`, 'Reinstall Pane from runpane.com. Terminal agent tabs are not affected.');
     const launch: ResolvedLaunch = { command: { executable: process.execPath, args: [entry], cwd: state.cwd, env: { ...env, ELECTRON_RUN_AS_NODE: '1' } } };
     if (state.launch.mode) launch.mode = state.launch.mode;
     return launch;

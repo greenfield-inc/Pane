@@ -28,7 +28,7 @@ export interface ResolvedLaunch {
 type ChatTabChannel = 'chat-tab:event' | 'chat-tab:state' | 'panel:agentStatus';
 
 export interface ChatTabLauncher {
-  /** Throws a PaneError; `CHAT_NOT_SIGNED_IN`, `CHAT_AGENT_NOT_INSTALLED` and `CHAT_UNSUPPORTED_HOST` become their stopped states. */
+  /** Throws a PaneError; `CHAT_NOT_SIGNED_IN`, `CHAT_AGENT_NOT_INSTALLED`, `CHAT_AGENT_OUTDATED`, `CHAT_ADAPTER_MISSING` and `CHAT_UNSUPPORTED_HOST` become their stopped states. */
   resolve(panel: ToolPanel, state: ChatPanelState): Promise<ResolvedLaunch>;
 }
 
@@ -507,6 +507,8 @@ function problemFrom(error: PaneError, agent: ChatPanelState['agent']): ChatTabP
   if (isAuthRequired(error)) return signedOut(agent);
   if (error.code === 'CHAT_AGENT_NOT_INSTALLED') return { code: 'not-installed', message: error.message, next: error.next ?? 'Install it, then press Retry.', action: 'install', url: agent === 'claude' ? 'https://docs.anthropic.com/en/docs/claude-code/setup' : 'https://developers.openai.com/codex/cli' };
   if (error.code === 'CHAT_UNSUPPORTED_HOST') return { code: 'unsupported-host', message: error.message, next: error.next ?? 'Open a terminal agent tab instead.' };
-  if (error.code === 'CHAT_ADAPTER_INSTALL_FAILED') return { code: 'adapter-setup', message: error.message, next: error.next ?? 'Check your network, then press Restart.', action: 'restart' };
+  // #1236: the adapters ship with Pane and check the installed CLI. Too old a CLI is fixed by installing a newer one.
+  if (error.code === 'CHAT_AGENT_OUTDATED') return { code: 'not-installed', message: error.message, next: error.next ?? 'Update it, then press Retry.', action: 'install', url: agent === 'claude' ? 'https://docs.anthropic.com/en/docs/claude-code/setup' : 'https://developers.openai.com/codex/cli' };
+  if (error.code === 'CHAT_ADAPTER_MISSING') return { code: 'adapter-setup', message: error.message, next: error.next ?? 'Reinstall Pane from runpane.com.' };
   return { code: 'failed', message: error.message, next: error.next ?? 'Press Restart.', action: 'restart' };
 }

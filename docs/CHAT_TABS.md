@@ -53,10 +53,14 @@ Chat tabs don't run in WSL projects or on SSH hosts.
 
 ## Adapters
 
-Pane installs the pinned adapters on first use, under `agent-adapters/` in its
-data folder: `claude-agent-acp` 0.100.0 and `codex-acp` 2.5.0
-(`main/src/services/agentChat/adapterSetup.ts`). Change a pin only after running
-the chat tab suites against the new version.
+The adapters ship inside Pane as pinned dependencies: `claude-agent-acp` 0.100.0
+and `codex-acp` 2.5.0 (`main/src/services/agentChat/adapterSetup.ts`). Nothing is
+downloaded. Before a chat tab starts, Pane checks that the installed CLI it will
+run, in the tab's folder and environment, is at least the version the adapter
+needs (Claude Code 2.1.316, Codex 0.165.0); an older one stops the tab with the
+command that updates it. A build missing its adapter says to reinstall Pane.
+Change a pin only with its minimum version, as the comment in `adapterSetup.ts`
+says, and after running the chat tab suites against it.
 
 ## What the chat shows
 
