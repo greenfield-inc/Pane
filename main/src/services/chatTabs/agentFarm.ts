@@ -30,8 +30,19 @@ export interface PrintedAcpLaunch { harness: ChatAgent; launch: ResolvedLaunch }
 export interface AgentFarmOptions {
   /** The agent-farm CLI; undefined when it is not installed on this machine. */
   executable: () => string | undefined;
-  /** The pinned adapter entry for a harness, installing it on first use. */
+  /** The bundled adapter's entry for a harness. */
   adapter: (agent: ChatAgent) => Promise<string>;
+  /** Checks the CLI a printed launch will run, in that launch's folder and environment (#1236). */
+  checkCli: (agent: ChatAgent, context: { cwd: string; env: ChatAgentEnv }) => Promise<void>;
+}
+
+/**
+ * The CLI a launch runs: the one its environment selects, or the one on PATH. A selected
+ * script (a Windows npm shim's cli.js) cannot answer `--version` by itself, so PATH's stands in.
+ */
+export function printedCli(agent: ChatAgent, env: ChatAgentEnv, lookup: (name: string) => string | null): string | null {
+  const selected = agent === 'claude' ? env.CLAUDE_CODE_EXECUTABLE : env.CODEX_PATH;
+  return selected && !/\.[cm]?js$/i.test(selected) ? selected : lookup(agent);
 }
 
 /**
@@ -75,7 +86,10 @@ export class AgentFarmProfiles implements ChatProfileResolver {
     // The contract keeps MCP servers in each harness's own config so secrets stay references.
     if (decoded.session.mcpServers.length) throw new PaneError('CHAT_PROFILE_OUTPUT_INVALID', 'Agent Farm sent MCP servers as ACP session entries, which could carry secrets in plain text.', 'Update Agent Farm, then try again.');
     const [executable, ...rest] = decoded.argv;
-    const launch: ResolvedLaunch = { command: { executable, args: rest, cwd: decoded.cwd, env: { ...env, ...decoded.env } } };
+    const launchEnv = { ...env, ...decoded.env };
+    // Only now is it known which harness and CLI this launch runs, and where.
+    await this.options.checkCli(decoded.harness, { cwd: decoded.cwd, env: launchEnv });
+    const launch: ResolvedLaunch = { command: { executable, args: rest, cwd: decoded.cwd, env: launchEnv } };
     if (decoded.session._meta) launch.meta = decoded.session._meta;
     if (decoded.mode) launch.mode = decoded.mode;
     return { harness: decoded.harness, launch };

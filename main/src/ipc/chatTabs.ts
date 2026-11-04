@@ -9,7 +9,7 @@ import { getRuntimeConfigManager } from '../core/runtime';
 import { panelManager } from '../services/panelManager';
 import { configureChatTabs, getChatTabManager } from '../services/chatTabs';
 import { chatTabSecrets } from '../services/chatTabs/secrets';
-import { AgentFarmProfiles } from '../services/chatTabs/agentFarm';
+import { AgentFarmProfiles, printedCli } from '../services/chatTabs/agentFarm';
 import { chatTabEnv } from '../services/chatTabs/launch';
 import { adapterEntry, installAdapter } from '../services/agentChat/adapterSetup';
 import { findExecutableInPath } from '../utils/shellPath';
@@ -35,15 +35,15 @@ const answerSchema = boundary.union(
 );
 const panelId = (value: PaneCommandValue) => decodeBoundary(value, boundary.nonEmptyString);
 
-/** Agent Farm profiles (package 2's run --print-acp) with Pane's pinned adapters. */
+/** Agent Farm profiles (package 2's run --print-acp) with Pane's bundled adapters. */
 const agentFarmProfiles = new AgentFarmProfiles({
   executable: () => findExecutableInPath('agent-farm') ?? undefined,
   adapter: async agent => {
-    await installAdapter(agent);
     const entry = adapterEntry(agent);
     if (!entry) throw new PaneError('CHAT_ADAPTER_MISSING', 'This Pane build is missing its bundled chat adapter.', 'Reinstall Pane from runpane.com. Terminal agent tabs are not affected.');
     return entry;
   },
+  checkCli: (agent, context) => installAdapter(agent, printedCli(agent, context.env, findExecutableInPath), context),
 });
 
 const CHAT_TAB_CHANNELS = ['create', 'get', 'history', 'send', 'receipt', 'unqueue', 'configure', 'cancel', 'permission', 'answer', 'restart', 'sign-in', 'keys', 'set-key'] as const;

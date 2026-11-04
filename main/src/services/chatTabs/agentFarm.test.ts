@@ -1,10 +1,11 @@
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { chmodSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ToolPanel } from '../../../../shared/types/panels';
 import type { ChatPanelState, ChatTabView } from '../../../../shared/types/chatTab';
-import { AgentFarmProfiles, agentFarmCommand } from './agentFarm';
+import { PaneError } from '../../../../shared/paneError';
+import { AgentFarmProfiles, agentFarmCommand, printedCli } from './agentFarm';
 import { ChatTabManager, type ChatTabStore } from './manager';
 
 const FAKE = path.join(__dirname, 'testing', 'fakeAgentFarm.mjs');
@@ -44,7 +45,7 @@ describe('Agent Farm profiles in chat tabs', () => {
   it('starts a profile with its printed settings, selects its mode and keeps env out of saved state', async () => {
     const directory = scratch();
     const cli = fakeCli(directory);
-    const profiles = new AgentFarmProfiles({ executable: () => cli, adapter: async () => '/adapters/claude/dist/index.js' });
+    const profiles = new AgentFarmProfiles({ executable: () => cli, adapter: async () => '/adapters/claude/dist/index.js', checkCli: async () => undefined });
     const saved = new Map<string, string>();
     const panel: ToolPanel = { id: 'p1', sessionId: 'pane', type: 'chat', title: 'implementer', state: { isActive: true }, metadata: { createdAt: '', lastActiveAt: '', position: 0 } };
     const store: ChatTabStore = {
@@ -75,12 +76,37 @@ describe('Agent Farm profiles in chat tabs', () => {
     await expect.poll(() => manager.receipt('p1', 'c')?.state).toBe('completed');
   });
 
+  // F-20: a project's wrapper or version manager answers only in its folder and environment.
+  it('checks the CLI of the harness Agent Farm printed, in the printed folder and environment', async () => {
+    const directory = realpathSync(scratch());
+    const checks: Array<{ agent: string; cwd?: string; profile?: string; path?: string }> = [];
+    const profiles = new AgentFarmProfiles({ executable: () => fakeCli(directory), adapter: async () => '/adapter.js', checkCli: async (agent, context) => { checks.push({ agent, cwd: context.cwd, profile: context.env?.AGENT_FARM_PROFILE, path: context.env?.PATH }); } });
+    // The caller guessed claude; Agent Farm says this profile runs Codex, so Codex is what gets checked.
+    const printed = await profiles.print('team/codex', {}, 'claude', directory, { PATH: process.env.PATH ?? '', FAKE_AGENT_FARM_HARNESS: 'codex' });
+    expect(printed.harness).toBe('codex');
+    expect(checks).toEqual([{ agent: 'codex', cwd: directory, profile: 'team/codex', path: process.env.PATH ?? '' }]);
+  });
+
+  it('stops a profile whose CLI is too old, with that error', async () => {
+    const directory = scratch();
+    const profiles = new AgentFarmProfiles({ executable: () => fakeCli(directory), adapter: async () => '/adapter.js', checkCli: async () => { throw new PaneError('CHAT_AGENT_OUTDATED', 'Claude Code 2.0.1 is older than 2.1.316.', 'Update it.'); } });
+    await expect(profiles.print('team/claude', {}, 'claude', directory, { PATH: process.env.PATH ?? '' })).rejects.toMatchObject({ code: 'CHAT_AGENT_OUTDATED' });
+  });
+
+  it('checks the CLI the printed launch selects, or the one on PATH when it selects none or a script', () => {
+    const lookup = (name: string) => `/usr/local/bin/${name}`;
+    expect(printedCli('codex', { CODEX_PATH: '/project/bin/codex' }, lookup)).toBe('/project/bin/codex');
+    expect(printedCli('claude', { CLAUDE_CODE_EXECUTABLE: '/opt/claude' }, lookup)).toBe('/opt/claude');
+    expect(printedCli('claude', { CLAUDE_CODE_EXECUTABLE: 'C:/npm/node_modules/@anthropic-ai/claude-code/cli.js' }, lookup)).toBe('/usr/local/bin/claude');
+    expect(printedCli('codex', {}, lookup)).toBe('/usr/local/bin/codex');
+  });
+
   it('names the profile and the next step when Agent Farm refuses it', async () => {
     const directory = scratch();
-    const profiles = new AgentFarmProfiles({ executable: () => fakeCli(directory), adapter: async () => '/adapter.js' });
+    const profiles = new AgentFarmProfiles({ executable: () => fakeCli(directory), adapter: async () => '/adapter.js', checkCli: async () => undefined });
     await expect(profiles.print('missing/profile', {}, 'claude', directory, { PATH: process.env.PATH ?? '' })).rejects.toMatchObject({ code: 'CHAT_PROFILE_FAILED', message: expect.stringContaining('Unknown profile: missing/profile') });
     await expect(profiles.print('old/agent-farm', {}, 'claude', directory, { PATH: process.env.PATH ?? '' })).rejects.toMatchObject({ code: 'CHAT_PROFILE_FAILED', next: expect.stringContaining('Update Agent Farm') });
-    const absent = new AgentFarmProfiles({ executable: () => undefined, adapter: async () => '/adapter.js' });
+    const absent = new AgentFarmProfiles({ executable: () => undefined, adapter: async () => '/adapter.js', checkCli: async () => undefined });
     await expect(absent.print('x', {}, 'claude', directory, {})).rejects.toMatchObject({ code: 'CHAT_AGENT_NOT_INSTALLED' });
   });
 });
