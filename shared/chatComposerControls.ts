@@ -39,9 +39,28 @@ export function choiceName(control: AgentChatConfigOption): string {
   return control.options.find(option => option.value === control.currentValue)?.name ?? control.currentValue;
 }
 
+/** A choice's name without a trailing "(recommended)" or "(default)": the menu keeps the full name. */
+function shortName(name: string): string {
+  return name.replace(/\s*\((recommended|default)\)\s*$/i, '');
+}
+
+/**
+ * What the model button shows (D-120): the model, then its effort, short. An effort of
+ * "Default", or one that only repeats the model, is left out.
+ */
+export interface TriggerLabels { model?: string; effort?: string }
+
+export function triggerLabels({ model, effort }: ComposerControls): TriggerLabels {
+  const modelLabel = model ? shortName(choiceName(model)) : undefined;
+  const effortLabel = effort ? shortName(choiceName(effort)) : undefined;
+  const repeats = !effortLabel || /^default$/i.test(effortLabel) || effortLabel === modelLabel;
+  return { model: modelLabel, effort: repeats ? undefined : effortLabel };
+}
+
 /** What the model menu's button reads: "Opus 5.5 · Medium", or "Options" when the agent names no model. */
-export function modelSummary({ model, effort }: ComposerControls): string {
-  return [model, effort].flatMap(control => control ? [choiceName(control)] : []).join(' · ') || 'Options';
+export function modelSummary(controls: ComposerControls): string {
+  const { model, effort } = triggerLabels(controls);
+  return [model, effort].filter(Boolean).join(' · ') || 'Options';
 }
 
 /** Permission modes that let the agent act without asking: the phone marks them on the composer row. */

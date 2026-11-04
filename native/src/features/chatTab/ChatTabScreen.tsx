@@ -3,7 +3,7 @@ import { LegendList } from '@legendapp/list/react-native';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Keyboard, StyleSheet, View } from 'react-native';
 
-import { arrangeComposerControls, choiceName, isRiskyMode } from '@shared/chatComposerControls';
+import { arrangeComposerControls, choiceName, isRiskyMode, triggerLabels } from '@shared/chatComposerControls';
 import { chatTurns, type ChatWorkerLine } from '@shared/chatTabPresentation';
 import { rejectOption } from '@shared/chatTabPermissions';
 import type { ChatTabCommand, ChatTabSend } from '@shared/types/chatTab';
@@ -140,6 +140,7 @@ export function ChatTabScreen({ panelId, quiet = false, workers, onOpenWorker, o
 
   const error = snapshot.error;
   const arranged = arrangeComposerControls(view?.controls ?? []);
+  const labels = triggerLabels(arranged);
   const footer = snapshot.hasNewer
     ? <DockButton testID="chat-newer" title={snapshot.loadingNewer ? 'Loading…' : 'Newer messages'} disabled={snapshot.loadingNewer} onPress={() => void viewer.loadNewer()} style={styles.newer} />
     : view?.notice ? <Text variant="footnote" style={{ color: theme.chat.mutedForeground }}>{view.notice}</Text> : null;
@@ -176,7 +177,7 @@ export function ChatTabScreen({ panelId, quiet = false, workers, onOpenWorker, o
         <ChatCommandList commands={commands} onPick={pickCommand} />
         <ChatTabComposer agent={agent} placeholder={placeholder ?? 'Ask anything'}
           disabled={disabled} pending={pending} working={working} canStop={!busy && connected} canAttach={!!view?.canAttachImages}
-          model={arranged.model && choiceName(arranged.model)} effort={arranged.effort && choiceName(arranged.effort)}
+          model={labels.model} effort={labels.effort}
           riskyMode={arranged.mode && isRiskyMode(arranged.mode) ? choiceName(arranged.mode) : undefined} canConfigure={!!view?.controls.length}
           onDraft={text => viewer.setDraft(text)} onAttach={() => void attach()} onSettings={() => setSettings(true)} onStop={() => void act(() => chat.cancel(panelId))} />
       </View>

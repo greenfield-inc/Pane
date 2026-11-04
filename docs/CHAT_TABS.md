@@ -76,7 +76,10 @@ the chat tab suites against the new version.
   AskUserQuestion off.
 - The composer is the input over one row of controls: attach image, the
   permission mode chip, then one menu showing model and effort together
-  ("Opus 5.5 · Medium"). That menu also holds every other setting the adapter
+  ("Opus 5.5 · Medium"; a trailing "(recommended)" and an effort of "Default"
+  are left off the button, never from the menu). The row never overflows a
+  narrow column: the model label truncates and the mode chip drops to its icon
+  first, while attach and send keep their size. That menu also holds every other setting the adapter
   offers (such as Claude's Fast mode, Ultracode and Agent), each under its own
   name. Pane places a setting by its ACP category (`mode`, `model`,
   `thought_level`), or by its id when the adapter sends none. At phone width

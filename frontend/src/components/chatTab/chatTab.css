@@ -84,7 +84,14 @@
 .chat-tab .chat-composer { gap:4px; padding:10px 10px 8px; border-radius:20px; background:var(--chat-background); box-shadow:0 1px 2px color-mix(in oklab,var(--chat-foreground) 6%,transparent); }
 .chat-tab .chat-input { min-height:24px; padding:2px 6px; font-size:15px; }
 .chat-tab .chat-composer-actions { justify-content:flex-start; flex-wrap:nowrap; gap:2px; min-width:0; }
-.chat-composer-end { display:flex; align-items:center; gap:4px; min-width:0; margin-left:auto; }
+.chat-composer-end { display:flex; flex:0 1 auto; justify-content:flex-end; align-items:center; gap:4px; min-width:0; margin-left:auto; }
+/* The row never overflows (D-120): each menu's anchor may shrink, the mode chip first, and labels
+   truncate; attach and send never shrink. */
+.chat-anchor { display:flex; min-width:0; flex:0 1 auto; }
+.chat-anchor-mode { flex-shrink:100; }
+.chat-composer-actions .chat-icon,.chat-composer-actions .chat-send { flex-shrink:0; }
+.chat-model { max-width:16rem; }
+@container chat-composer (max-width:560px) { .chat-anchor-mode .chat-chip-label { display:none; } .chat-anchor-mode .chat-chip { padding:0 7px; } }
 .chat-chip { display:inline-flex; align-items:center; gap:6px; height:28px; min-width:0; max-width:15rem; padding:0 8px; border-radius:999px; font-size:13px; color:var(--chat-muted-foreground); }
 .chat-chip:hover:not(:disabled),.chat-chip[aria-expanded=true] { background:var(--chat-muted); color:var(--chat-foreground); }
 .chat-chip:disabled { opacity:.55; }
@@ -105,10 +112,11 @@
 .chat-composer-actions[data-layout=phone] .chat-send { width:44px; height:44px; padding:4px; background-clip:content-box; }
 .chat-risk { display:inline-flex; align-items:center; justify-content:center; width:28px; height:44px; color:var(--color-status-warning); }
 .chat-risk svg { width:15px; height:15px; }
-.chat-phone-model { display:inline-flex; align-items:baseline; gap:6px; min-width:0; min-height:44px; padding:0 8px; align-self:stretch; align-items:center; border-radius:10px; font-size:15px; color:var(--chat-foreground); }
+.chat-phone-model { display:inline-flex; gap:6px; min-width:0; max-width:16rem; min-height:44px; padding:0 8px; align-self:stretch; align-items:center; border-radius:10px; font-size:15px; color:var(--chat-foreground); }
 .chat-phone-model:disabled { opacity:.55; }
 .chat-phone-model:active:not(:disabled) { background:var(--chat-muted); }
-.chat-phone-model-name,.chat-phone-model-effort { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.chat-phone-model-name,.chat-phone-model-effort { min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.chat-phone-model-effort { flex-shrink:2; }
 .chat-phone-model-effort { color:var(--chat-muted-foreground); }
 .chat-phone-menu { width:min(20rem, calc(100vw - 24px)); }
 /* On a phone screen the menu is a bottom sheet. The Dropdown pins it beside its trigger with inline

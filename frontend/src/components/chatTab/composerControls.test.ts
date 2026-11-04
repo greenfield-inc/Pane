@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AgentChatConfigOption } from '../../../../shared/types/agentChat';
-import { arrangeComposerControls, isRiskyMode, modelSummary, onOffValues, phoneSettingsOrder } from '../../../../shared/chatComposerControls';
+import { arrangeComposerControls, isRiskyMode, modelSummary, onOffValues, phoneSettingsOrder, triggerLabels } from '../../../../shared/chatComposerControls';
 
 function select(id: string, name: string, currentValue: string, category?: string): AgentChatConfigOption {
   const control: AgentChatConfigOption = { id, name, currentValue, options: [{ value: currentValue, name: currentValue === 'off' ? 'Off' : `${name} ${currentValue}` }] };
@@ -53,5 +53,12 @@ describe('the composer row', () => {
     const fast: AgentChatConfigOption = { id: 'fast_mode', name: 'Fast mode', currentValue: 'off', options: [{ value: 'on', name: 'On' }, { value: 'off', name: 'Off' }] };
     expect(onOffValues(fast)).toEqual({ on: 'on', off: 'off' });
     expect(onOffValues({ ...fast, options: [{ value: 'a', name: 'Default' }, { value: 'b', name: 'explorer' }] })).toBeUndefined();
+  });
+
+  it('keeps the model button short: no "(recommended)", and no effort that is Default or repeats the model', () => {
+    const named = (id: string, category: string, name: string): AgentChatConfigOption => ({ id, name: id, category, currentValue: 'v', options: [{ value: 'v', name }] });
+    expect(modelSummary(arrangeComposerControls([named('model', 'model', 'Default (recommended)'), named('effort', 'thought_level', 'Default')]))).toBe('Default');
+    expect(triggerLabels(arrangeComposerControls([named('model', 'model', 'Opus 5.5'), named('effort', 'thought_level', 'Medium')]))).toEqual({ model: 'Opus 5.5', effort: 'Medium' });
+    expect(triggerLabels(arrangeComposerControls([named('model', 'model', 'Sonnet 5.5'), named('effort', 'thought_level', 'High (default)')]))).toEqual({ model: 'Sonnet 5.5', effort: 'High' });
   });
 });

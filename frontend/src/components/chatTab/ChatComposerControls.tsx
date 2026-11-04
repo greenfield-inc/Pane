@@ -3,7 +3,7 @@ import { Check, ChevronDown, FilePen, Hand, ListTodo, Shield, ShieldOff, Sparkle
 import type { AgentChatConfigOption } from '../../../../shared/types/agentChat';
 import { Dropdown } from '../ui/Dropdown';
 import { Toggle } from '../ui/Toggle';
-import { choiceName, isRiskyMode, modelSummary, onOffValues, phoneSettingsOrder, type ComposerControls } from '../../../../shared/chatComposerControls';
+import { choiceName, isRiskyMode, modelSummary, onOffValues, phoneSettingsOrder, triggerLabels, type ComposerControls } from '../../../../shared/chatComposerControls';
 
 type Configure = (id: string, value: string) => void;
 
@@ -16,7 +16,7 @@ const MODE_ICONS = new Map<string, LucideIcon>([
 /** The permission mode, as a quiet chip that opens the mode list. */
 export function ChatModeChip({ control, disabled, configure }: { control: AgentChatConfigOption; disabled: boolean; configure: Configure }) {
   const Icon = MODE_ICONS.get(control.currentValue) ?? Shield;
-  return <Dropdown position="top-left" width="md" selectedId={control.currentValue} selectedMark="check" menuLabel={control.name}
+  return <Dropdown className="chat-anchor chat-anchor-mode" position="top-left" width="md" selectedId={control.currentValue} selectedMark="check" menuLabel={control.name}
     items={control.options.map(option => ({ id: option.value, label: option.name, onClick: () => { if (option.value !== control.currentValue) configure(control.id, option.value); } }))}
     trigger={<button type="button" disabled={disabled} title={`${control.name}: ${choiceName(control)}`} className="chat-chip">
       <Icon className="chat-chip-icon" aria-hidden />
@@ -54,7 +54,7 @@ export function ChatModelMenu({ arranged, disabled, configure }: { arranged: Com
   const primary = [arranged.model, arranged.effort].flatMap(control => control ? [control] : []);
   if (!primary.length && !arranged.more.length) return null;
   const summary = modelSummary(arranged);
-  return <Dropdown position="top-right" width="lg" items={[]} formLabel="Model and options"
+  return <Dropdown className="chat-anchor" position="top-right" width="lg" items={[]} formLabel="Model and options"
     trigger={<button type="button" disabled={disabled} title={summary} className="chat-chip chat-model">
       <span className="sr-only">Model and options: </span><span className="chat-chip-label">{summary}</span>
       <ChevronDown className="chat-chip-chevron" aria-hidden />
@@ -126,11 +126,12 @@ export function ChatPhoneModelMenu({ arranged, disabled, configure }: { arranged
   const settings = phoneSettingsOrder(arranged);
   if (!settings.length) return null;
   const summary = modelSummary(arranged);
-  return <Dropdown position="top-right" width="auto" items={[]} formLabel="Model and options" menuClassName="chat-phone-menu"
+  const labels = triggerLabels(arranged);
+  return <Dropdown className="chat-anchor" position="top-right" width="auto" items={[]} formLabel="Model and options" menuClassName="chat-phone-menu"
     trigger={<button type="button" disabled={disabled} title={summary} className="chat-phone-model">
       <span className="sr-only">Model and options: </span>
-      {arranged.model || arranged.effort
-        ? <>{arranged.model && <span className="chat-phone-model-name">{choiceName(arranged.model)}</span>}{arranged.effort && <span className="chat-phone-model-effort">{choiceName(arranged.effort)}</span>}</>
+      {labels.model || labels.effort
+        ? <>{labels.model && <span className="chat-phone-model-name">{labels.model}</span>}{labels.effort && <span className="chat-phone-model-effort">{labels.effort}</span>}</>
         : <span className="chat-phone-model-name">{summary}</span>}
     </button>}
     footer={<div className="chat-choices" onKeyDown={stayInFields}>
