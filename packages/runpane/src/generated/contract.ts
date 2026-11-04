@@ -300,7 +300,6 @@ export const RUNPANE_CONTRACT = {
         "runpane repos get [--repo <selector>] [--json] [--pane-dir <path>]"
       ],
       "toolsets": [
-        "core",
         "repos"
       ],
       "jsonSchemas": [
@@ -318,7 +317,6 @@ export const RUNPANE_CONTRACT = {
       "mutates": true,
       "idempotent": true,
       "toolsets": [
-        "core",
         "repos"
       ],
       "jsonSchemas": [

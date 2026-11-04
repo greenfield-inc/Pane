@@ -117,7 +117,7 @@ Archive Script: empty → uses pane.json scripts.archive
 
 ### From the CLI or MCP
 
-Agents read and change Project Settings with `runpane repos get` and `runpane repos update` (MCP tools `repos_get` and `repos_update`). `repos get` shows each script's saved value, the config-file fallback, and which one Pane will run:
+Agents read and change Project Settings with `runpane repos get` and `runpane repos update` (MCP tools `repos_get` and `repos_update`, in the opt-in `repos` toolset). `repos get` shows each script's saved value, the config-file fallback, and which one Pane will run:
 
 ```bash
 runpane repos get --repo my-app --json
