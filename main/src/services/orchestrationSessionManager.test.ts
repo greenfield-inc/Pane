@@ -630,6 +630,19 @@ describe('OrchestrationSessionManager', () => {
     expect(created.panel.id).toBe(`__orchestration_panel_${created.session.id}_opencode`);
   });
 
+  it.each([
+    { defaultSessionCommand: 'my-launcher run' },
+    { defaultSessionResume: { mode: 'reported' as const, initialTemplate: '{command}', resumeTemplate: '{command} --resume {sessionId}' } },
+    { defaultSessionResume: { mode: 'generated' as const, initialTemplate: '{command} {sessionId}', resumeTemplate: '{command} {sessionId}' } },
+  ])('creates an explicit OpenCode Session when the app default does not suit OpenCode: %j', async defaults => {
+    const fixture = createFixture();
+    Object.assign(fixture.configManager.getConfig(), defaults);
+    const created = await fixture.manager.create({ name: 'OpenCode despite defaults', agent: 'opencode' });
+    expect(created.session).toMatchObject({ agent: 'opencode', launchCommand: '' });
+    expect(created.session.customResume ?? null).toBeNull();
+    expect(created.panel.state.customState).toMatchObject({ agentType: 'opencode', initialCommand: 'opencode --auto' });
+  });
+
   it('accepts native OpenCode through default commands, default agents and updates', async () => {
     const fixture = createFixture();
     Object.assign(fixture.configManager.getConfig(), { defaultSessionCommand: 'opencode --auto' });

@@ -227,9 +227,13 @@ export class OrchestrationSessionManager extends EventEmitter {
       const internalSessionId = `${id}terminal__`;
       const config = this.configManager.getConfig();
       const explicitAgent = input.agent ? normalizePaneChatAgent(input.agent) : undefined;
-      // App defaults apply only when they fit the agent the caller asked for.
-      const fits = (command: string, resume?: CustomCommandResume | null) =>
-        !explicitAgent || [explicitAgent, undefined].includes(launchAgent(command, resume));
+      // App defaults apply only when they fit the agent the caller asked for. OpenCode Sessions refuse
+      // wrappers and custom resume, so such a default is left out instead of refusing the create.
+      const fits = (command: string, resume?: CustomCommandResume | null) => {
+        if (explicitAgent === 'opencode') return !resume && (!command.trim() || isDirectOpenCodeCommand(command));
+        const commandAgent = launchAgent(command, resume);
+        return !explicitAgent || commandAgent === undefined || commandAgent === explicitAgent;
+      };
       const defaultCommand = config.defaultSessionCommand ?? '';
       const launchCommand = sourceState?.agentType ? sourceState.initialCommand!
         : input.launchCommand ?? (fits(defaultCommand) ? defaultCommand : '');
@@ -1250,6 +1254,15 @@ function resolveSessionAgent(explicit: PaneChatAgent | undefined, command: strin
     throw openCodeSessionLaunchError(cause);
   }
   return explicit ?? commandAgent;
+}
+
+function isDirectOpenCodeCommand(command: string): boolean {
+  try {
+    assertDirectOpenCodeLaunchCommand(command, process.platform === 'win32');
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function openCodeSessionLaunchError(cause: unknown): PaneError {
