@@ -4,6 +4,7 @@ import type { IpcMain } from 'electron';
 import { existsSync, readdirSync } from 'fs';
 import fs from 'fs/promises';
 import path from 'path';
+import { attachmentFileName } from '../utils/attachmentFileName';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { pathToFileURL } from 'url';
@@ -126,13 +127,18 @@ async function landPastedImage(sessionId: string, buffer: Buffer, mimeType: stri
   return { filePath: resolvedPath, imageNumber: count };
 }
 
-/** Save a pasted or uploaded file (any type) to the session's files folder and return its path. */
-async function landPastedFile(sessionId: string, buffer: Buffer, originalFileName: string) {
+/**
+ * Save a pasted or uploaded file (any type) to the session's files folder and return its path.
+ * With `keepName` (a chat attachment, D-162) the file keeps its own name, inside a folder of
+ * its own so two files with one name never collide; otherwise it gets a generated name.
+ */
+async function landPastedFile(sessionId: string, buffer: Buffer, originalFileName: string, keepName = false) {
   const extMatch = originalFileName.match(/\.([a-zA-Z0-9]+)$/);
   const extension = extMatch ? extMatch[1].toLowerCase() : 'bin';
   const timestamp = Date.now();
   const randomStr = Math.random().toString(36).substring(2, 9);
-  const filename = `${sessionId}_${timestamp}_${randomStr}.${extension}`;
+  const unique = `${sessionId}_${timestamp}_${randomStr}`;
+  const filename = keepName ? `${unique}/${attachmentFileName(originalFileName)}` : `${unique}.${extension}`;
 
   if (buffer.length > MAX_PASTE_BYTES) {
     throw new Error('File too large (max 50 MB)');
@@ -141,6 +147,8 @@ async function landPastedFile(sessionId: string, buffer: Buffer, originalFileNam
   const resolvedPath = await saveFileForSession(sessionId, 'files', filename, buffer);
   return { filePath: resolvedPath };
 }
+
+const pasteFileOptionsSchema = boundary.object({ keepName: boundary.optional(boundary.boolean) });
 
 const uploadStartSchema: BoundarySchema<UploadStart> = boundary.object({
   uploadId: boundary.nonEmptyString,
@@ -194,8 +202,9 @@ async function saveFileForSession(
         if (wslHome) {
           const linuxDir = posixJoin(wslHome, '.pane', subdir);
           const linuxPath = posixJoin(linuxDir, filename);
-          const uncDir = linuxToUNCPath(linuxDir, distro);
           const uncPath = linuxToUNCPath(linuxPath, distro);
+          // The file's own folder, when it keeps its name (D-162).
+          const uncDir = path.win32.dirname(uncPath);
           if (!existsSync(uncDir)) {
             await fs.mkdir(uncDir, { recursive: true });
           }
@@ -211,11 +220,11 @@ async function saveFileForSession(
 
   // Fallback: save to the host's .pane/<subdir>/ and let resolveImagePathForSession
   // convert to /mnt/c/... if the session happens to be WSL-enabled.
-  const hostDir = getAppSubdirectory(subdir);
+  const hostPath = path.join(getAppSubdirectory(subdir), filename);
+  const hostDir = path.dirname(hostPath);
   if (!existsSync(hostDir)) {
     await fs.mkdir(hostDir, { recursive: true });
   }
-  const hostPath = path.join(hostDir, filename);
   await fs.writeFile(hostPath, bytes);
   return resolveImagePathForSession(hostPath, sessionId);
 }
@@ -972,16 +981,19 @@ export function registerPanelHandlers(
   });
 
   // Save a dropped file (any type) to .pane/files/ and return the resolved path
+  // `{ keepName: true }` (a chat attachment, D-162) keeps the file's own name.
   commandRegistry.register('terminal:paste-file', async (
     sessionId: string,
     dataUrl: string,
-    originalFileName: string
+    originalFileName: string,
+    options?: PaneCommandValue,
   ) => {
     const base64Data = dataUrl.split(',')[1];
     if (!base64Data) {
       throw new Error('Invalid data URL');
     }
-    return landPastedFile(sessionId, Buffer.from(base64Data, 'base64'), originalFileName);
+    const keepName = decodeOptionalBoundary(options, pasteFileOptionsSchema)?.keepName === true;
+    return landPastedFile(sessionId, Buffer.from(base64Data, 'base64'), originalFileName, keepName);
   });
 
   // Uploads from a phone on a slow link arrive in chunks and land exactly

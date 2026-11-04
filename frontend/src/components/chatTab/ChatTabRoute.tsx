@@ -40,7 +40,7 @@ export function ChatTabRoute({ panel }: { panel: ToolPanel }) {
   const workers = useSessionWorkers(DESKTOP_WORKERS, state?.orchestrationSessionId);
   // Dropped and pasted files land in the Pane's folder on its machine, local or remote, as the terminal's do.
   const saveFile = useMemo(() => async (file: { name: string; dataUrl: string }) =>
-    savedFilePath(await window.electronAPI.invoke('terminal:paste-file', panel.sessionId, file.dataUrl, file.name)), [panel.sessionId]);
+    savedFilePath(await window.electronAPI.invoke('terminal:paste-file', panel.sessionId, file.dataUrl, file.name, { keepName: true })), [panel.sessionId]);
   return <ChatTabPanel
     saveFile={saveFile}
     workers={workers}

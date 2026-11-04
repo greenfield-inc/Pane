@@ -300,7 +300,7 @@ export class RemoteRuntimeAdapter {
 
   /** Copies a file dropped or pasted into a chat to the Pane's machine, as the terminal's upload does (D-139). */
   async saveFile(sessionId: string, file: { name: string; dataUrl: string }): Promise<string> {
-    return savedFilePath(await this.invoke('terminal:paste-file', [sessionId, file.dataUrl, file.name]));
+    return savedFilePath(await this.invoke('terminal:paste-file', [sessionId, file.dataUrl, file.name, { keepName: true }]));
   }
 
   /** The branch's changes, read-only, as the phone's Diff tab reads them. */

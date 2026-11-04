@@ -107,7 +107,8 @@ says, and after running the chat tab suites against it.
 - **Attachments** (desktop and PWA): drop photos and files anywhere on the chat,
   paste them into the composer, or pick them with **+**. An image the agent
   takes (PNG, JPEG, WebP or GIF up to 5 MB) is sent as an image. Any other file,
-  up to 10 MB, is copied to the Pane's folder on the chat's machine, the same
+  up to 10 MB, is copied to the Pane's folder on the chat's machine under its own
+  name (in a folder of its own, so two files with one name never collide), the same
   way a terminal tab's upload works (`terminal:paste-file`, so a remote host
   receives it too), and its path is sent with the message. Each attachment is a
   chip that can be removed before sending, and sending waits until every file
