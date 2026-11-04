@@ -100,8 +100,10 @@ function useWindowAnchor(viewport: RefObject<HTMLElement | null>, start: number 
         element.scrollTop += target.getBoundingClientRect().top - element.getBoundingClientRect().top - row.offset;
         break;
       }
+      record();
     }
-    record();
+    // Not re-read otherwise: right after new content renders, a chat that follows the
+    // live end has not scrolled yet, and reading then would mistake it for a reader.
   }, [viewport, start, length, record]);
   return record;
 }
