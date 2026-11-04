@@ -117,6 +117,18 @@ runpane panels create --pane <feature pane id> --title <role> \
   and checks the agent took it. It never types into a shell, a wrapper's own
   prompt, or a trust or permission menu.
 
+### Chat-tab workers
+
+Workers stay terminal tabs by default. Where the host has chat tabs on, a worker
+can run as a chat tab instead (Claude or Codex over ACP, no terminal):
+`runpane panels create --pane <id> --chat --agent <claude|codex>`, or
+`--agent-farm <profile>:<variant> --arg key=value …` for an Agent Farm profile,
+with `--initial-input` (no `--as-file-pointer`) as its first prompt. `submit`,
+`wait`, `screen`, `output`, `last-message`, `report` and `resume` work the same;
+`panels input` and `submit-composer` fail with `CHAT_TAB_NO_TERMINAL`. A chat
+tab's approvals and questions reach the person in Notify and on the phone, so a
+`wait` that returns `blocked` there is answered like a terminal prompt.
+
 ### Read the result once
 
 The result is JSON (`panes create` puts each Pane under `items[]`). Check, in
