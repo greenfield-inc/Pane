@@ -6,6 +6,7 @@ import { PaneError, reasonOf } from '../../../../shared/paneError';
 import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
 import type { ChatAgentEnv, ChatProfileResolver } from './launch';
 import type { ResolvedLaunch } from './manager';
+import { hostCommand, type HostCommand } from '../agentChat/hostCommand';
 
 const execFileAsync = promisify(execFile);
 
@@ -59,8 +60,10 @@ export class AgentFarmProfiles implements ChatProfileResolver {
     const argv = ['run', profile, '--print-acp', '--acp-adapter', adapter, ...Object.entries(args).flatMap(([key, value]) => ['--arg', `${key}=${value}`])];
     let stdout: string;
     try {
-      ({ stdout } = await execFileAsync(cli, argv, { cwd, env, timeout: 60_000, maxBuffer: 16 * 1024 * 1024, windowsHide: true }));
+      const command = agentFarmCommand(cli, argv);
+      ({ stdout } = await execFileAsync(command.executable, command.args, { cwd, env, timeout: 60_000, maxBuffer: 16 * 1024 * 1024, windowsHide: true, windowsVerbatimArguments: command.windowsVerbatimArguments }));
     } catch (error) {
+      if (error instanceof PaneError) throw error;
       const stderr = decodeOptionalBoundary(error, boundary.object({ stderr: boundary.string }))?.stderr.trim().split('\n').at(-1);
       throw new PaneError('CHAT_PROFILE_FAILED', `Agent Farm could not prepare ${profile}: ${stderr || reasonOf(error)}.`, 'Check the profile name and its launch arguments, then press Restart.');
     }
@@ -75,4 +78,9 @@ export class AgentFarmProfiles implements ChatProfileResolver {
     if (decoded.mode) launch.mode = decoded.mode;
     return { harness: decoded.harness, launch };
   }
+}
+
+/** The agent-farm CLI as a process to start; npm installs it on Windows as a .cmd shim, which runs through cmd. */
+export function agentFarmCommand(cli: string, args: string[], platform: NodeJS.Platform = process.platform): HostCommand {
+  return hostCommand(cli, args, platform);
 }

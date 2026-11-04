@@ -4,7 +4,7 @@ import path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ToolPanel } from '../../../../shared/types/panels';
 import type { ChatPanelState, ChatTabView } from '../../../../shared/types/chatTab';
-import { AgentFarmProfiles } from './agentFarm';
+import { AgentFarmProfiles, agentFarmCommand } from './agentFarm';
 import { ChatTabManager, type ChatTabStore } from './manager';
 
 const FAKE = path.join(__dirname, 'testing', 'fakeAgentFarm.mjs');
@@ -18,14 +18,29 @@ function scratch(): string {
 }
 const inherited = (): Record<string, string> => Object.fromEntries(Object.entries(process.env).flatMap(([key, value]) => value === undefined ? [] : [[key, value]]));
 
+/** The CLI as npm installs it: a shell script, or on Windows a .cmd shim, which Node cannot exec directly. */
 function fakeCli(directory: string): string {
+  if (process.platform === 'win32') {
+    const shim = path.join(directory, 'agent-farm.cmd');
+    writeFileSync(shim, `@ECHO off\r\n"${process.execPath}" "${FAKE}" %*\r\n`);
+    return shim;
+  }
   const shim = path.join(directory, 'agent-farm');
   writeFileSync(shim, `#!/bin/sh\nexec "${process.execPath}" "${FAKE}" "$@"\n`);
   chmodSync(shim, 0o755);
   return shim;
 }
 
-describe.skipIf(process.platform === 'win32')('Agent Farm profiles in chat tabs', () => {
+describe('the agent-farm command', () => {
+  it('runs a Windows npm shim through cmd with its arguments passed literally', () => {
+    expect(agentFarmCommand('C:\\npm\\agent-farm.cmd', ['run', 'greenfield/implementer', '--arg', 'docs=grain'], 'win32')).toEqual({
+      executable: 'cmd.exe', args: ['/d', '/s', '/c', '""C:\\npm\\agent-farm.cmd" "run" "greenfield/implementer" "--arg" "docs=grain""'], windowsVerbatimArguments: true,
+    });
+    expect(agentFarmCommand('/usr/local/bin/agent-farm', ['run', 'p'], 'darwin')).toEqual({ executable: '/usr/local/bin/agent-farm', args: ['run', 'p'] });
+  });
+});
+
+describe('Agent Farm profiles in chat tabs', () => {
   it('starts a profile with its printed settings, selects its mode and keeps env out of saved state', async () => {
     const directory = scratch();
     const cli = fakeCli(directory);
