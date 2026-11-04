@@ -228,6 +228,9 @@ export interface UpdateConfigRequest {
   keepAwakeWhileSessionsActive?: boolean;
   keepAwakeWhilePluggedIn?: boolean;
   keepAwakeOnBattery?: boolean;
+  resumePausedOnOpen?: boolean;
+  autoPauseEnabled?: boolean;
+  autoPauseAfterHours?: number;
   appearanceMode?: AppearanceMode;
   theme?: Theme;
   systemLightTheme?: Theme;
