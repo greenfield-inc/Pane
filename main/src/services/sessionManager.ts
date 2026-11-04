@@ -1504,7 +1504,6 @@ export class SessionManager extends EventEmitter {
   async resumeInterruptedSessions(sessionIds: string[]): Promise<{ failedSessionIds: string[] }> {
     console.log(`[SessionManager] resumeInterruptedSessions called with ${sessionIds.length} session(s): ${sessionIds.join(', ')}`);
     const { terminalPanelManager } = await import('./terminalPanelManager');
-    const { agentChatManager } = await import('./agentChat/agentChatManager');
     const failedSessionIds: string[] = [];
 
     for (const sessionId of sessionIds) {
@@ -1549,12 +1548,7 @@ export class SessionManager extends EventEmitter {
             const reloadedPanel = panelManager.getPanel(panel.id) ?? this.db.getPanel(panel.id);
             if (reloadedPanel) {
               try {
-                // An Agent Chat tab owns its conversation and refuses a native launch.
-                if (agentChatManager.manages(panel.id)) {
-                  await agentChatManager.resumeSaved(panel.id);
-                } else {
-                  await terminalPanelManager.initializeTerminal(reloadedPanel, worktreePath);
-                }
+                await terminalPanelManager.initializeTerminal(reloadedPanel, worktreePath);
                 console.log(`[SessionManager] Resumed terminal panel ${panel.id} via launch-time ${agentType} resolver`);
                 resumedPanelCount++;
               } catch (error) {

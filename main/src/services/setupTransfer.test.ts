@@ -192,6 +192,18 @@ describe('readSetupFile', () => {
 
     expect(file.sections).toEqual({ agentPresets: { defaultModel: 'opus' } });
   });
+
+  it('still imports a file from a Pane that had the experimental Chat, ignoring its Chat settings', () => {
+    const file = readSetupFile(JSON.stringify({
+      ...setupFile({}),
+      sections: {
+        agentPresets: { defaultModel: 'opus', defaultAgentInterface: 'chat' },
+        preferences: { notesEnabled: true, experimentalChatEnabled: true },
+      },
+    }), 'pane-setup.json');
+
+    expect(file.sections).toEqual({ agentPresets: { defaultModel: 'opus' }, preferences: { notesEnabled: true } });
+  });
 });
 
 describe('previewSetupImport', () => {

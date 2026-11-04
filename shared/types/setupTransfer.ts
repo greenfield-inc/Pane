@@ -42,7 +42,6 @@ export interface SetupTerminalShortcut {
 
 export interface SetupAgentPresets {
   defaultOrchestratorAgent?: PaneChatAgent;
-  defaultAgentInterface?: 'terminal' | 'chat';
   defaultSessionCommand?: string;
   defaultSessionResume?: CustomCommandResume | null;
   defaultSessionProfile?: string;
@@ -108,7 +107,6 @@ export interface SetupPreferenceConfig {
   retention?: Partial<SessionRetention>;
   voiceTranscriptionMode?: VoiceTranscriptionMode;
   missionControlEnabled?: boolean;
-  experimentalChatEnabled?: boolean;
   notesEnabled?: boolean;
   sessionCreationPreferences?: SetupSessionCreationPreferences;
 }

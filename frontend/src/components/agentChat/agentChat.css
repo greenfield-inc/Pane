@@ -5,16 +5,9 @@
 @import '../../styles/tokens/agentChat.css';
 
 .agent-chat { --thread-max-width: 44rem; --composer-radius: 1rem; background: var(--chat-background); color: var(--chat-foreground); font-size: 16px; line-height: 1.5; }
-.chat-header { display:grid; grid-template-columns:auto minmax(0,1fr) auto; flex-shrink:0; align-items:center; gap:8px; min-height:44px; padding:6px 12px; container:chat-header / inline-size; }
-.chat-header>.chat-switch { grid-column:1; grid-row:1; }
-.chat-header>.chat-menu { grid-column:3; grid-row:1; }
-.chat-header-state { grid-column:2; grid-row:1; display:flex; flex-wrap:wrap; align-items:center; gap:4px 8px; min-width:0; }
-.chat-header-state>.chat-button { flex-shrink:0; white-space:nowrap; }
+.chat-header { display:grid; grid-template-columns:minmax(0,1fr); flex-shrink:0; align-items:center; gap:8px; min-height:44px; padding:6px 12px; }
+.chat-header-state { display:flex; flex-wrap:wrap; align-items:center; gap:4px 8px; min-width:0; }
 .chat-status { min-width:0; flex:1 1 140px; font-size:12px; color:var(--chat-muted-foreground); }
-@container chat-header (max-width:480px) { .chat-header-state { grid-column:1 / -1; grid-row:2; } }
-.chat-switch { display:inline-flex; gap:2px; padding:2px; border-radius:10px; background:color-mix(in oklab,var(--chat-muted) 50%,transparent); }
-.chat-switch button { display:flex; align-items:center; gap:4px; height:28px; padding:0 10px; border-radius:8px; font-size:13px; font-weight:500; color:var(--chat-muted-foreground); }
-.chat-switch button[aria-checked=true] { background:var(--chat-muted); color:var(--chat-foreground); }
 .chat-button { display:inline-flex; align-items:center; justify-content:center; gap:4px; min-height:28px; padding:4px 10px; border-radius:8px; font-size:13px; font-weight:500; line-height:1.25; color:var(--chat-foreground); }
 .chat-button:hover,.chat-icon:hover,.chat-config:hover { background:var(--chat-muted); }
 .chat-button-primary { background:var(--chat-primary); color:var(--chat-primary-foreground); }
@@ -81,9 +74,6 @@
 .chat-recovery p+p { margin-top:8px; color:var(--chat-muted-foreground); }
 .chat-attachment { display:inline-flex; align-items:center; gap:8px; padding:4px 8px; border:1px solid var(--chat-border); border-radius:12px; font-size:12px; }
 .chat-attachment img { width:40px; height:40px; object-fit:cover; border-radius:6px; }
-.chat-menu { position:relative; }
-.chat-menu>summary { list-style:none; cursor:pointer; }
-.chat-menu-popover { position:absolute; right:0; top:32px; z-index:40; width:260px; padding:8px; border:1px solid var(--chat-border); border-radius:12px; background:var(--chat-background); }
 .chat-diagnostics { max-height:45vh; overflow:auto; font-size:12px; }
 @media (prefers-reduced-motion:no-preference) {
   .agent-chat :is(button,select),.chat-composer { transition:background-color 150ms,border-color 150ms,color 150ms,opacity 150ms; }

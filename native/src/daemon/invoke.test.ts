@@ -24,9 +24,7 @@ describe('invokeChannel', () => {
   });
 
   it('preserves domain data and errors without a boolean IPC envelope marker', async () => {
-    const view = { panelId: 'chat-a', error: 'Provider authentication expired', running: false };
-    await expect(invokeChannel(clientReturning(view), 'agent-chat:get', ['chat-a'])).resolves.toEqual(view);
-    const receipt = { operationId: 'send-a', state: 'failed', error: 'Rejected prompt' };
-    await expect(invokeChannel(clientReturning(receipt), 'agent-chat:receipt', ['chat-a', 'send-a'])).resolves.toEqual(receipt);
+    const view = { panelId: 'panel-a', error: 'Provider authentication expired', running: false };
+    await expect(invokeChannel(clientReturning(view), 'panels:get', ['panel-a'])).resolves.toEqual(view);
   });
 });

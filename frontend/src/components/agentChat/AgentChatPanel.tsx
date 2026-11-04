@@ -93,12 +93,11 @@ export default function AgentChatPanel({ panelId, client, connected = true }: { 
   const snapshot = useSyncExternalStore(viewer.subscribe, viewer.snapshot, viewer.snapshot);
   const pendingDelivery = snapshot.pendingDelivery;
   const [answering, setAnswering] = useState(false);
-  const [recovering, setRecovering] = useState(false);
   const [delivering, setDelivering] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const view = snapshot.view;
   const generation = view?.conversation?.generation ?? 0;
-  const disabled = !connected || view?.conversation?.active !== 'chat' || !!view.conversation.transition;
+  const disabled = !connected || view?.conversation?.active !== 'chat';
   const messages = useMemo(() => (view?.transcript?.messages ?? []).filter(message => !message.id.startsWith('update:')), [view?.transcript?.messages]);
   const images = useMemo(() => new ChatImageAdapter(), []);
   const runtime = useExternalStoreRuntime({
@@ -159,12 +158,6 @@ export default function AgentChatPanel({ panelId, client, connected = true }: { 
     } catch (error) { viewer.setError(error instanceof Error ? error.message : String(error)); }
     finally { setDelivering(false); }
   };
-  const recover = async () => {
-    setRecovering(true);
-    try { await client.recover(panelId, 'terminal', generation); await viewer.refresh(); }
-    catch (error) { viewer.setError(error instanceof Error ? error.message : String(error)); }
-    finally { setRecovering(false); }
-  };
 
   const answer = async (permission: NonNullable<typeof view>['permissions'][number], optionId: string) => {
     setAnswering(true);
@@ -184,8 +177,6 @@ export default function AgentChatPanel({ panelId, client, connected = true }: { 
       {view?.conversation?.active === 'stopped' && <div className="chat-recovery">
         <p>{view.conversation.recovery ?? 'This conversation is stopped.'}</p>
         <p className="break-all text-xs">Conversation {view.conversation.nativeSessionId}</p>
-        <p>Recovery opens Terminal to restore this conversation’s launch environment.</p>
-        <button type="button" disabled={recovering || !connected} onClick={() => void recover()} className="chat-button chat-button-outline mt-3">{recovering ? 'Recovering…' : 'Recover exact conversation'}</button>
       </div>}
       <ChatViewport viewer={viewer} loading={!view || (view.conversation?.active === 'chat' && !view.transcript)} />
       <div className="chat-composer-footer">

@@ -50,8 +50,6 @@ type HtmlFileOpenMode = 'preview' | 'source';
 
 export interface AppConfig {
   // Experimental: open Claude and Codex agent tabs as Chat (off by default).
-  experimentalChatEnabled?: boolean;
-  defaultAgentInterface?: 'terminal' | 'chat';
   verbose?: boolean;
   anthropicApiKey?: string;
   openaiApiKey?: string;

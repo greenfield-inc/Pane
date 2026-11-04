@@ -18,11 +18,16 @@
     "enumMembers": "error",
     "namespaceMembers": "error"
   },
+  "ignoreIssues": {
+    "tests/fixtures/agent-chat-lifecycle.tsx": ["unlisted"],
+    "native/src/features/composer/autocorrectPreference.ts": ["exports"]
+  },
   "workspaces": {
     ".": {
       "entry": [
         "scripts/**/*.{js,mjs}",
         "tests/**/*.spec.ts",
+        "tests/fixtures/agent-chat-lifecycle.tsx",
         "playwright*.ts"
       ],
       "project": [
@@ -73,7 +78,6 @@
         "src/daemon/headless.ts",
         "src/ptyHost/ptyHostMain.ts",
         "src/services/mcpPermissionBridge.ts",
-        "src/services/agentChat/hookWriter.ts",
         "src/**/*.test.ts",
         "src/**/__tests__/**/*.ts",
         "build-mcp-bridge.js"

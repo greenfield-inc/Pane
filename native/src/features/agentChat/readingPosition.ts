@@ -1,7 +1,7 @@
 import type { LegendListState } from '@legendapp/list/react-native';
 import { boundary, decodeOptionalBoundary } from '@shared/validation/boundaryDecoder';
 
-export const MESSAGE_TOP_PADDING = 16;
+const MESSAGE_TOP_PADDING = 16;
 export interface ChatReadingPosition {
   conversationId?: string;
   atBottom: boolean;

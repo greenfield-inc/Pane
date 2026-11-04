@@ -94,27 +94,6 @@ A Pane or Session screen shows every tab in one strip, each with its type's icon
 
 The phone follows the computer to a tab it brings forward (an agent's `runpane panels open`, for example) only when the phone draws that tab and it sits on the desktop's stage; Explorer and Diff live in the desktop's side panel, so the phone never jumps to them. Demo mode has a sample of every tab type (`src/features/demo/demoFiles.ts`, `demoPages.ts`).
 
-## Agent Chat
-
-Compatible agent panels offer **Chat** and **Terminal** below the tab strip. Both
-continue the active conversation on the host, with provider-native history copy
-in the same tab when exact transfer is unavailable. Chat uses `@assistant-ui/react-native`
-with the default appearance, adapted to theme tokens and a virtualized Legend
-List. There is no model process or chat cloud on the phone. See
-[Agent Chat](../docs/AGENT_CHAT.md) for host compatibility and recovery.
-
-Chat supports streamed Markdown, reasoning, expandable tools/diffs, the host’s
-permission choices, images up to 5 MiB, and advertised model/mode/effort settings.
-Its Send and Cancel controls dispatch semantic host commands; Terminal retains
-its keyboard, controller and upload behavior. Switching preserves a shared
-Codex turn; a change of runtime stops the current turn before transferring
-history. A stopped conversation offers explicit recovery
-in Terminal. Disconnecting or leaving the screen never stops the host agent.
-
-Draft text uses the existing per-host/pane/panel device storage. Uncertain sends
-retain their operation ID during navigation/reconnect and require **Check
-delivery** or **Retry same delivery**; no mutation is replayed automatically.
-
 ## The terminal page
 
 The pane screen runs xterm in a WebView. The page source is `terminal-web/page.ts`. `pnpm build:terminal-web` bundles it, with xterm and its CSS, into `src/features/terminal/terminalHtml.generated.ts`, so the WebView needs no network. Run it after changing the page or upgrading xterm, and commit the generated file. The page and the screen talk through the messages in `src/features/terminal/bridge.ts`. The scroll joystick scrolls the page's own buffer, except when a full-screen app is on the alternate screen or has asked for mouse events (Claude Code with `"tui": "fullscreen"`, less, vim, tmux): those keep no scrollback here, so the page sends them wheel input instead, as xterm does for a desktop mouse wheel.
@@ -124,7 +103,7 @@ The pane screen runs xterm in a WebView. The page source is `terminal-web/page.t
 
 ## The composer
 
-The pane screen's text box holds every action: Attach, Paste, Shortcuts and Copy on the left, the mic and one Send/Enter button on the right. An empty box sends a bare Enter, which answers an agent's menu; with text, the button sends the text and then Enter. Each terminal tab keeps its own unsent text on the phone (per host, pane and tab, in `composer-drafts.json` in the app's documents folder), so it survives leaving the pane and restarting the app; sending clears it. Return on the phone keyboard sends too, the way Enter does in a terminal, and sending either way closes the keyboard; text with line breaks still arrives through Paste, dictation or Shortcuts. The agent chat box works the same way. **Settings → General → Autocorrect** (on by default, kept on the phone) turns the keyboard's autocorrect and spell check on or off in both boxes. The terminal box never capitalizes the first word, and swaps iOS smart punctuation (curly quotes, `—` for `--`, `…` for `...`) back to plain characters as you type, so commands still run. Only the keys you just typed are swapped, so text already in the box (such as a path from Paste) keeps its exact characters. Hold a tab for Close; a tab whose agent is still working asks first. Clear scrollback sits in the "…" menu. Copy shows the terminal's recent output as selectable text. Last 300 lines copies the host's clean scrollback (`terminal:getScrollbackClean`) to the clipboard and shows it.
+The pane screen's text box holds every action: Attach, Paste, Shortcuts and Copy on the left, the mic and one Send/Enter button on the right. An empty box sends a bare Enter, which answers an agent's menu; with text, the button sends the text and then Enter. Each terminal tab keeps its own unsent text on the phone (per host, pane and tab, in `composer-drafts.json` in the app's documents folder), so it survives leaving the pane and restarting the app; sending clears it. Return on the phone keyboard sends too, the way Enter does in a terminal, and sending either way closes the keyboard; text with line breaks still arrives through Paste, dictation or Shortcuts. **Settings → General → Autocorrect** (on by default, kept on the phone) turns the keyboard's autocorrect and spell check on or off in the terminal box. The terminal box never capitalizes the first word, and swaps iOS smart punctuation (curly quotes, `—` for `--`, `…` for `...`) back to plain characters as you type, so commands still run. Only the keys you just typed are swapped, so text already in the box (such as a path from Paste) keeps its exact characters. Hold a tab for Close; a tab whose agent is still working asks first. Clear scrollback sits in the "…" menu. Copy shows the terminal's recent output as selectable text. Last 300 lines copies the host's clean scrollback (`terminal:getScrollbackClean`) to the clipboard and shows it.
 
 Shortcuts live on the host, in its `terminalShortcuts` config, the same list desktop binds to ⌘⌥ (Ctrl+Alt) plus a letter. The bolt opens them as a filterable sheet; Settings › Shortcuts adds, edits, reorders, turns off and deletes them. The phone saves through `remote:settings:update`, which takes only `terminalShortcuts` (the whole list) and the voice keys, refuses any other field, and returns the refreshed `remote:pwa-affordances`. Every save emits `remote:settings-changed`, so open phones and desktop refetch. Hosts without the channel still serve the list to insert; saving there asks you to update Pane on the host.
 

@@ -62,45 +62,6 @@ export interface AgentConversationRecord {
   active: AgentInterface | 'stopped';
   preferred: AgentInterface;
   recovery?: string;
-  /** Only incomplete transfers need disclosure; successful full forks are quiet. */
-  transferNotice?: string;
-  /** Provider may have copied history before its fork response was lost. */
-  forkUnconfirmed?: boolean;
-  /** Show the native startup surface while its own attachment is unconfirmed. */
-  nativeStartup?: boolean;
-  pendingSwitch?: { target: AgentInterface; reason: string };
-  transition?: { source: AgentInterface; target: AgentInterface; phase: 'releasing' | 'loading' };
-}
-
-export interface AgentChatLaunch {
-  command: string;
-  cwd: string;
-  shellType: string;
-  executable: string;
-  version: string;
-  model?: string;
-  effort?: string;
-  permissionMode?: string;
-  additionalDirectories?: string[];
-  strictMcpConfig: boolean;
-  journalFile: string;
-  settingsFile: string;
-  codexConfigArgs?: string[];
-  codexEndpoint?: string;
-  codexSocketPath?: string;
-  codexRemote?: { endpoint: string; authTokenEnv?: string };
-}
-
-export interface AgentChatProcessIdentity { pid: number; parent: number; started: string }
-export interface AgentChatStartAttempt { operationId: string; clientId: string; inputHash: string }
-
-export interface AgentChatPanelState {
-  receipts?: AgentChatReceipt[];
-  pendingCodexStart?: AgentChatStartAttempt;
-  codexDelivery?: { operationId: string; turnId: string };
-  conversation: AgentConversationRecord;
-  launch: AgentChatLaunch;
-  processes: { terminal: AgentChatProcessIdentity[]; chat: AgentChatProcessIdentity[]; unverifiedSpawn?: AgentInterface };
 }
 
 export interface AgentChatPermission {
@@ -117,8 +78,6 @@ export interface AgentChatView {
   panelId: string;
   conversation?: AgentConversationRecord;
   available: boolean;
-  identificationRequired?: boolean;
-  identificationSocketRequired?: boolean;
   unavailableReason?: string;
   setupRequired: boolean;
   running: boolean;
@@ -149,9 +108,6 @@ export interface AgentChatClient {
   onReconnect?(callback: () => void): () => void;
   get(panelId: string): Promise<AgentChatView>;
   setup(): Promise<{ installed: boolean }>;
-  identify?(panelId: string, nativeId: string, socketPath: string): Promise<AgentChatView>;
-  switch(panelId: string, mode: AgentInterface, generation: number): Promise<AgentConversationRecord>;
-  recover(panelId: string, mode: AgentInterface, generation: number): Promise<AgentConversationRecord>;
   send(panelId: string, request: AgentChatSend): Promise<AgentChatReceipt>;
   receipt(panelId: string, operationId: string): Promise<AgentChatReceipt | undefined>;
   configure?(panelId: string, generation: number, configId: string, value: string): Promise<void>;
