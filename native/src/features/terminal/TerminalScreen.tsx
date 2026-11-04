@@ -8,7 +8,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { PaneError } from '@shared/paneError';
 import { RemoteUnconfirmedResultError } from '@shared/remoteClient';
 import type { OrchestrationSessionView } from '@shared/types/orchestrationSession';
-import type { EditorPanelState, ToolPanel } from '@shared/types/panels';
+import { pausedMarkOf, type EditorPanelState, type ToolPanel } from '@shared/types/panels';
 import type { RemotePwaAffordances } from '@shared/types/remoteDaemon';
 
 import { useDaemon, useInvokeMutation, useInvokeQuery } from '@/daemon';
@@ -43,6 +43,7 @@ import { FloatingController } from './FloatingController';
 import { KEYS } from './keys';
 import { followsHost, pickPanel, sessionWorkspacePanels, stripPanels, tabView } from './panels';
 import { PanelTabs } from './PanelTabs';
+import { PausedTerminal } from './PausedTerminal';
 import { TerminalInputBar } from './TerminalInputBar';
 import { TerminalTopBar } from './TerminalTopBar';
 import { TerminalTouchSurface } from './TerminalTouchSurface';
@@ -78,6 +79,10 @@ export function TerminalScreen({ paneId, session }: { paneId: string; session?: 
   const setActive = useInvokeMutation<[string, string]>('panels:set-active');
   const deletePanel = useInvokeMutation<[string]>('panels:delete', { invalidates: ['panels:list', 'panels:getActive'] });
   const statuses = useAgentStatuses();
+  const resumePanel = useInvokeMutation<[{ panelId: string }]>('runpane:panels:resume', { invalidates: ['panels:list'] });
+  const resume = (tab: ToolPanel) => resumePanel.mutate([{ panelId: tab.id }], {
+    onError: error => Alert.alert('Couldn’t resume the tab', error.message),
+  });
 
   // Tabs opened, closed or switched on the desktop show up here too. When the
   // host or an agent brings a tab forward, the phone follows if it draws that tab;
@@ -108,6 +113,7 @@ export function TerminalScreen({ paneId, session }: { paneId: string; session?: 
   const panels = session ? sessionWorkspacePanels(session, strip) : strip;
   const panel = pickPanel(panels, panelId ?? null, hostActive.data?.id);
   const view = panel ? tabView(panel) : null;
+  const paused = panel ? pausedMarkOf(panel) : undefined;
   const followed = follow ? panels.find(candidate => candidate.id === follow) : undefined;
   useEffect(() => {
     if (!followed) return;
@@ -120,7 +126,7 @@ export function TerminalScreen({ paneId, session }: { paneId: string; session?: 
   useEffect(() => {
     if (!panelId && shownId) router.setParams({ panelId: shownId });
   }, [panelId, shownId]);
-  const terminalActive = view === 'terminal';
+  const terminalActive = view === 'terminal' && !paused;
   const title = session ? session.session.name || 'Untitled' : pane.data?.name ?? '';
 
   const composer = useComposerDraft(panel ? draftKey(profile.id, paneId, panel.id) : null);
@@ -131,10 +137,22 @@ export function TerminalScreen({ paneId, session }: { paneId: string; session?: 
   // Clear scrollback sits in the bar above the open terminal, which owns it.
   const terminalActions = useRef<TerminalActions | null>(null);
 
+  // With the host's resume-on-open setting, a paused tab the person opens resumes. Only the tab
+  // shown when the screen opens, or one they pick, counts; a tab paused while on screen stays paused.
+  const resumeOnOpen = affordances.data?.resumePausedOnOpen === true;
+  const openChecked = useRef(false);
+  useEffect(() => {
+    if (openChecked.current || !panel || affordances.isPending) return;
+    openChecked.current = true;
+    if (resumeOnOpen && pausedMarkOf(panel)) resume(panel);
+  });
+
   const selectPanel = (next: ToolPanel) => {
     router.setParams({ panelId: next.id });
     setActive.mutate([paneId, next.id]);
+    if (resumeOnOpen && next.id !== panel?.id && pausedMarkOf(next)) resume(next);
   };
+
 
   // A long press on a tab offers Close; a tab whose agent is still at work asks once more.
   const closePanel = (tab: ToolPanel) => {
@@ -173,6 +191,8 @@ export function TerminalScreen({ paneId, session }: { paneId: string; session?: 
       />
       {panel && view !== 'terminal' ? (
         <TabBody panel={panel} title={title} />
+      ) : panel && paused ? (
+        <PausedTerminal key={panel.id} panelId={panel.id} mark={paused} resuming={resumePanel.isPending} onResume={() => resume(panel)} />
       ) : panel ? (
         <TerminalPanel
           key={panel.id}

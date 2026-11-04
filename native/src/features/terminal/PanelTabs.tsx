@@ -1,4 +1,4 @@
-import type { ToolPanel, ToolPanelType } from '@shared/types/panels';
+import { pausedMarkOf, type ToolPanel, type ToolPanelType } from '@shared/types/panels';
 import * as Haptics from 'expo-haptics';
 import type { AndroidSymbol, SFSymbol } from 'expo-symbols';
 import { useEffect, useRef } from 'react';
@@ -8,6 +8,7 @@ import { useDaemon } from '@/daemon';
 import { useTheme } from '@/theme';
 import { Icon, Text } from '@/ui';
 
+import { PausedBadge } from '../panes/StatusBadge';
 import { tabView } from './panels';
 
 /** Each tab type's icon and the word VoiceOver reads after its title. */
@@ -38,7 +39,7 @@ export interface PanelTabsProps {
 /**
  * The web app's tool tabs: bordered tabs on a raised strip and a square + at
  * the end that adds one. Each tab shows its type's icon; a tab that opens only
- * on the computer is dimmed. Ctrl+C lives on the floating controller.
+ * on the computer is dimmed, and a paused tab is grayed out behind a pause glyph. Ctrl+C lives on the floating controller.
  */
 export function PanelTabs({ panels, selectedId, onSelect, onAdd, onClose, chatId }: PanelTabsProps) {
   const theme = useTheme();
@@ -73,7 +74,8 @@ export function PanelTabs({ panels, selectedId, onSelect, onAdd, onClose, chatId
       >
         {panels.map(panel => {
           const selected = panel.id === selectedId;
-          const dimmed = tabView(panel) === 'placeholder';
+          const paused = Boolean(pausedMarkOf(panel));
+          const dimmed = tabView(panel) === 'placeholder' || paused;
           const tint = selected ? colors.text : dimmed ? colors.textMuted : colors.textSecondary;
           const type = panel.id === chatId ? CHAT : TAB_TYPES[panel.type];
           return (
@@ -87,8 +89,8 @@ export function PanelTabs({ panels, selectedId, onSelect, onAdd, onClose, chatId
               }}
               accessibilityRole="tab"
               accessibilityState={{ selected }}
-              accessibilityLabel={`${panel.title}, ${type.label}`}
-              accessibilityHint={dimmed ? `Opens on ${profile.label}` : undefined}
+              accessibilityLabel={`${panel.title}, ${type.label}${paused ? ', paused' : ''}`}
+              accessibilityHint={tabView(panel) === 'placeholder' ? `Opens on ${profile.label}` : undefined}
               accessibilityActions={[{ name: 'close', label: 'Close' }]}
               onAccessibilityAction={event => { if (event.nativeEvent.actionName === 'close') onClose(panel); }}
               onPress={() => {
@@ -110,6 +112,7 @@ export function PanelTabs({ panels, selectedId, onSelect, onAdd, onClose, chatId
                 },
               ]}
             >
+              {paused ? <PausedBadge /> : null}
               <Icon ios={type.ios} android={type.android} size={16} color={tint} />
               <Text variant="callout" style={[styles.label, { color: tint }, dimmed && !selected && styles.dimmed]} numberOfLines={1}>
                 {panel.title}

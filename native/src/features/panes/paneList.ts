@@ -1,5 +1,6 @@
 import type { AgentDisplayStatus } from '@shared/types/agentStatus';
 import type { OrchestrationSessionRecord } from '@shared/types/orchestrationSession';
+import type { TerminalPausedMark } from '@shared/types/panels';
 
 /** The fields of `sessions:get-all-with-projects` the app reads (main/src/types/session.ts). */
 interface PaneSession {
@@ -13,6 +14,8 @@ interface PaneSession {
   /** ISO times. Older hosts may leave either out. */
   createdAt?: string;
   lastActivity?: string;
+  /** Set while every terminal tab is paused. Older hosts leave it out. */
+  paused?: TerminalPausedMark;
 }
 
 export interface ProjectWithPanes {
@@ -32,6 +35,7 @@ export interface PaneListEntry {
   isFavorite: boolean;
   status: AgentDisplayStatus;
   agent?: string;
+  paused?: TerminalPausedMark;
 }
 
 export type SidebarSection = 'pinned' | 'sessions' | 'repositories' | 'archived';
@@ -108,6 +112,7 @@ export function buildSidebar(input: SidebarInput): SidebarItem[] {
         isFavorite: Boolean(session.isFavorite),
         status: input.lookup.status(session.id),
         agent: input.lookup.agent(session.id),
+        paused: session.paused,
       };
       paneById.set(pane.id, pane);
       if (!matches(`${session.name} ${project.name} ${session.baseBranch ?? ''}`)) continue;
@@ -205,4 +210,12 @@ export function toggleFavorite(projects: ProjectWithPanes[], paneId: string, now
 
 export function removePane(projects: ProjectWithPanes[], paneId: string): ProjectWithPanes[] {
   return projects.map(project => ({ ...project, sessions: project.sessions?.filter(session => session.id !== paneId) }));
+}
+
+/** Optimistic copy of a Pane pause or resume, until the host's update lands. */
+export function setPanePaused(projects: ProjectWithPanes[], paneId: string, paused: TerminalPausedMark | undefined): ProjectWithPanes[] {
+  return projects.map(project => ({
+    ...project,
+    sessions: project.sessions?.map(session => session.id === paneId ? { ...session, paused } : session),
+  }));
 }

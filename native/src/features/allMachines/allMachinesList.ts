@@ -1,6 +1,7 @@
 import type { AgentDisplayStatus } from '@shared/types/agentStatus';
 import type { NotifyItem, NotifySharedState } from '@shared/types/notify';
 import type { OrchestrationSessionRecord } from '@shared/types/orchestrationSession';
+import type { TerminalPausedMark } from '@shared/types/panels';
 import type { PanePermissionRequest } from '@shared/types/permissions';
 
 import { waitingQuestions } from '@/features/notify/notifyQuestions';
@@ -49,6 +50,7 @@ export interface AllPane {
   pinned: boolean;
   status: AgentDisplayStatus;
   agent?: string;
+  paused?: TerminalPausedMark;
   /** Epoch ms of its last activity, or its creation. */
   activeAt: number;
 }
@@ -107,6 +109,7 @@ export function buildAllMachinesList(machines: readonly MachineFeed[], query: st
             pinned: Boolean(pane.isFavorite),
             status: blocked.has(pane.id) ? 'blocked' : snapshot.statuses ? paneDisplayStatus(snapshot.statuses, pane.id) : 'unknown',
             agent: snapshot.statuses ? paneAgent(snapshot.statuses, pane.id) : undefined,
+            paused: pane.paused,
             activeAt: timeOf(pane.lastActivity) ?? timeOf(pane.createdAt) ?? 0,
           },
         });

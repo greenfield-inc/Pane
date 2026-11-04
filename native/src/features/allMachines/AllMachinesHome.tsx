@@ -11,7 +11,7 @@ import { openNotifySheet } from '@/features/notify/NotifySheet';
 import { LoadingRows, Notice, SectionHeader } from '@/features/panes/PaneKit';
 import { describePermission } from '@/features/panes/permissions';
 import { SearchField } from '@/features/panes/SearchField';
-import { StatusBadge, statusPresentation } from '@/features/panes/StatusBadge';
+import { PausedBadge, StatusBadge, statusPresentation } from '@/features/panes/StatusBadge';
 import { SwipeRow, swipeRowAccessibility } from '@/features/panes/SwipeRow';
 import { useTheme, withAlpha } from '@/theme';
 import { Button, Icon, Text } from '@/ui';
@@ -28,13 +28,15 @@ export interface AllMachinesFeed extends MachineFeed {
   error?: string;
 }
 
-/** Pin and archive on the machine the phone is on; other machines' rows don't swipe. */
+/** Pin, pause and archive on the machine the phone is on; other machines' rows don't swipe. */
 export interface CurrentMachineActions {
   openPane(paneId: string): void;
   togglePanePinned(paneId: string): void;
   archivePane(pane: { id: string; name: string }): void;
   toggleSessionPinned(sessionId: string, pinned: boolean): void;
   archiveSession(sessionId: string): void;
+  setPanePaused(paneId: string, paused: boolean): void;
+  setSessionPaused(sessionId: string, paused: boolean): void;
 }
 
 /**
@@ -156,12 +158,14 @@ export function AllMachinesHome({ machines, feeds, currentKey, loading, refreshi
         label={paneLabel(row.pane, machine?.name)}
         machine={machine}
         stale={row.stale}
-        leading={<StatusBadge status={row.pane.status} />}
+        paused={Boolean(row.pane.paused)}
+        leading={row.pane.paused ? <PausedBadge /> : <StatusBadge status={row.pane.status} />}
         onPress={() => openRecent(row)}
         swipe={row.machineKey === currentKey && !row.stale ? {
           pinned: row.pane.pinned,
           onTogglePinned: () => actions.togglePanePinned(row.pane.id),
           onArchive: () => actions.archivePane(row.pane),
+          pause: { paused: Boolean(row.pane.paused), onToggle: () => actions.setPanePaused(row.pane.id, !row.pane.paused) },
         } : undefined}
       />
     ) : (
@@ -171,12 +175,14 @@ export function AllMachinesHome({ machines, feeds, currentKey, loading, refreshi
         detail={['Session', row.paneCount === 1 ? '1 Pane' : row.paneCount > 1 ? `${row.paneCount} Panes` : undefined, time].filter(Boolean).join(' · ')}
         machine={machine}
         stale={row.stale}
-        leading={<Icon ios="bubble.left" android="chat_bubble" size={12} />}
+        paused={Boolean(row.session.paused)}
+        leading={row.session.paused ? <PausedBadge /> : <Icon ios="bubble.left" android="chat_bubble" size={12} />}
         onPress={() => openRecent(row)}
         swipe={row.machineKey === currentKey && !row.stale ? {
           pinned: Boolean(row.session.isPinned),
           onTogglePinned: () => actions.toggleSessionPinned(row.session.id, !row.session.isPinned),
           onArchive: () => actions.archiveSession(row.session.id),
+          pause: { paused: Boolean(row.session.paused), onToggle: () => actions.setSessionPaused(row.session.id, !row.session.paused) },
         } : undefined}
       />
     );
@@ -237,7 +243,7 @@ export function AllMachinesHome({ machines, feeds, currentKey, loading, refreshi
 }
 
 function paneLabel(pane: AllPane, machine: string | undefined): string {
-  return [pane.name, pane.repository, pane.session, statusPresentation[pane.status].label, machine].filter(Boolean).join(', ');
+  return [pane.name, pane.repository, pane.session, pane.paused ? 'Paused' : statusPresentation[pane.status].label, machine].filter(Boolean).join(', ');
 }
 
 /** "9:14 AM" in the phone's own clock format. */
@@ -277,17 +283,19 @@ function OfflineNote({ machine, since, hasRows, onRetry }: { machine: Machine | 
 }
 
 /** A row of All machines: status, name, what it is, and its machine's badge. */
-function AllRow({ title, detail, label, machine, stale, divided = false, leading, onPress, swipe, testID }: {
+function AllRow({ title, detail, label, machine, stale, paused = false, divided = false, leading, onPress, swipe, testID }: {
   title: string;
   detail: string;
   /** Spoken instead of title and detail. */
   label?: string;
   machine: Machine | undefined;
   stale: boolean;
+  /** Grays the title out. */
+  paused?: boolean;
   divided?: boolean;
   leading: ReactNode;
   onPress: () => void;
-  swipe?: { pinned: boolean; onTogglePinned: () => void; onArchive: () => void };
+  swipe?: { pinned: boolean; onTogglePinned: () => void; onArchive: () => void; pause?: { paused: boolean; onToggle: () => void } };
   testID: string;
 }) {
   const theme = useTheme();
@@ -295,7 +303,7 @@ function AllRow({ title, detail, label, machine, stale, divided = false, leading
     <Pressable
       testID={testID}
       accessibilityRole="button"
-      accessibilityLabel={label ?? [title, detail, machine?.name].filter(Boolean).join(', ')}
+      accessibilityLabel={label ?? [title, paused ? 'Paused' : undefined, detail, machine?.name].filter(Boolean).join(', ')}
       accessibilityHint={stale ? `${machine?.name ?? 'Its machine'} is offline` : undefined}
       {...(swipe ? swipeRowAccessibility(swipe) : {})}
       onPress={onPress}
@@ -308,7 +316,7 @@ function AllRow({ title, detail, label, machine, stale, divided = false, leading
       {divided ? <View style={[styles.divider, { backgroundColor: theme.colors.border }]} /> : null}
       <View style={styles.leading}>{leading}</View>
       <View style={styles.fill}>
-        <Text variant="body" numberOfLines={1}>{title}</Text>
+        <Text variant="body" tone={paused ? 'muted' : 'primary'} numberOfLines={1}>{title}</Text>
         <Text variant="footnote" tone="muted" numberOfLines={1}>{detail}</Text>
       </View>
       {machine ? <MachineBadge machine={machine} /> : null}
