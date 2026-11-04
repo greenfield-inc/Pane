@@ -280,7 +280,7 @@ export class AgentChatManager {
       let cleanup = '';
       try { await this.release(panel.id, 'chat'); } catch (releaseError) { cleanup = ` Release remains unverified: ${reasonOf(releaseError)}.`; }
       const current = this.required(panel.id);
-      panelManager.commitAgentChat(panel.id, { ...current, conversation: { ...current.conversation, active: 'stopped', recovery: `Chat startup failed: ${reasonOf(error)}.${cleanup}` } });
+      panelManager.commitAgentChat(panel.id, { ...current, conversation: { ...current.conversation, active: 'stopped', recovery: `Chat startup failed: ${reasonOf(error)}.${error instanceof PaneError && error.next ? ` ${error.next}` : ''}${cleanup}` } });
       this.publish(panel.id);
       // A created identity is never replaced by a native fallback after failure.
       return true;

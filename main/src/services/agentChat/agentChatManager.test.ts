@@ -269,6 +269,28 @@ it.skipIf(process.platform === 'win32')('keeps a new Codex tab in its native Ter
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
+it.skipIf(process.platform === 'win32')('tells a new Chat tab how to update a claude too old for chat', async () => {
+  const { mkdtempSync, writeFileSync, rmSync } = await import('fs');
+  const { tmpdir } = await import('os');
+  const { join } = await import('path');
+  const { getRuntimeConfigManager } = await import('../../core/runtime');
+  await getRuntimeConfigManager().updateConfig({ defaultAgentInterface: 'chat' });
+  const directory = mkdtempSync(join(tmpdir(), 'pane-outdated-claude-'));
+  const executable = join(directory, 'claude');
+  writeFileSync(executable, '#!/bin/sh\necho "2.1.200 (Claude Code)"\n', { mode: 0o700 });
+  const id = randomUUID();
+  databaseService.createSession({ id, name: id, initial_prompt: '', worktree_name: id, worktree_path: directory, project_id: null, tool_type: 'none' });
+  const panel = await panelManager.createPanel({ sessionId: id, type: 'terminal', initialState: { agentType: 'claude', initialCommand: executable } });
+  const manager = new AgentChatManager({ enabled: () => true });
+  try {
+    expect(await manager.prepareFreshChat(panel, directory, process.env, 'bash', false)).toBe(true);
+    const recovery = manager.view(panel.id).conversation?.recovery ?? '';
+    expect(recovery).toContain('2.1.200');
+    expect(recovery).toContain('npm install -g @anthropic-ai/claude-code@latest');
+    expect(recovery).not.toMatch(/network/i);
+  } finally { manager.detachObservers(); rmSync(directory, { recursive: true, force: true }); }
+});
+
 it.skipIf(process.platform === 'win32')('shares one Codex owner between native and Chat and remembers the last selected interface', async () => {
   const { mkdtempSync, writeFileSync, rmSync } = await import('fs');
   const { tmpdir } = await import('os');

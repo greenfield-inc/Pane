@@ -46,11 +46,11 @@ export async function installClaudeAdapter(): Promise<void> { return installAdap
 export async function installAdapter(provider: Provider, executable: string | null = findExecutableInPath(provider)): Promise<void> {
   const { name, minimum, upgrade } = adapters[provider];
   if (!adapterEntry(provider)) throw new PaneError('CHAT_ADAPTER_MISSING', `This Pane build is missing its bundled ${name} chat adapter.`, 'Reinstall Pane from runpane.com. Terminal agent tabs are not affected.');
-  if (!executable) throw new PaneError('CHAT_AGENT_NOT_INSTALLED', `${name} is not installed on this machine, or not on its PATH.`, `Install it with \`${upgrade}\`, then press Retry. Terminal agent tabs are not affected.`);
+  if (!executable) throw new PaneError('CHAT_AGENT_NOT_INSTALLED', `${name} is not installed on this machine, or not on its PATH.`, `Install it with \`${upgrade}\`, then start Chat again. Terminal agent tabs are not affected.`);
   if (checked.has(executable)) return;
   const version = await installedVersion(executable);
   if (!version || compareVersions(version, minimum) < 0) {
-    throw new PaneError('CHAT_AGENT_OUTDATED', `${name} ${version ?? '(unknown version)'} at ${executable} is older than ${minimum}, the oldest version chat supports.`, `Update it with \`${upgrade}\`, then press Retry. Terminal agent tabs are not affected.`);
+    throw new PaneError('CHAT_AGENT_OUTDATED', `${name} ${version ?? '(unknown version)'} at ${executable} is older than ${minimum}, the oldest version chat supports.`, `Update it with \`${upgrade}\`, then start Chat again. Terminal agent tabs are not affected.`);
   }
   checked.add(executable);
 }
