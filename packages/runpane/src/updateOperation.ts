@@ -25,6 +25,10 @@ const journalSchema = boundary.object({
   error: boundary.optional(boundary.string),
 });
 export type UpdateJournal = ReturnType<typeof journalSchema.decode>;
+/** The pattern every update operation ID matches; it also keeps IDs safe as path segments. */
+export const UPDATE_ID_PATTERN = /^[a-zA-Z0-9-]{1,80}$/;
+/** The operation has ended: no step runs again. */
+export const updateEnded = (journal: UpdateJournal): boolean => ['complete', 'needs-attention', 'failed'].includes(journal.phase);
 
 /** Commit one complete journal image; a crash leaves either the old or new image. */
 export function writeUpdateJson<T extends object>(file: string, value: T): void {
@@ -51,7 +55,7 @@ export interface UpdateSteps {
 
 export async function executeUpdate(file: string, steps: UpdateSteps): Promise<UpdateJournal> {
   let journal = readUpdateJournal(file);
-  if (['complete', 'needs-attention', 'failed'].includes(journal.phase)) return journal;
+  if (updateEnded(journal)) return journal;
   const canceled = () => fs.existsSync(path.join(path.dirname(file), 'canceled.json'));
   if (canceled()) { journal = { ...journal, phase: 'failed', error: 'Operation setup was canceled before shutdown.' }; writeUpdateJson(file, journal); return journal; }
   journal = { ...journal, helperPid: process.pid, updatedAt: new Date().toISOString() };
@@ -60,13 +64,13 @@ export async function executeUpdate(file: string, steps: UpdateSteps): Promise<U
     for (const step of UPDATE_STEPS) {
       if (canceled()) throw new Error('Operation canceled before this stage.');
       const persisted = readUpdateJournal(file);
-      if (['complete', 'needs-attention', 'failed'].includes(persisted.phase)) return persisted;
+      if (updateEnded(persisted)) return persisted;
       if (journal.completed.includes(step)) continue;
       journal = { ...journal, phase: step, updatedAt: new Date().toISOString() };
       writeUpdateJson(file, journal);
       const outcome = await steps.run(step, journal);
       const after = readUpdateJournal(file);
-      if (['complete', 'needs-attention', 'failed'].includes(after.phase)) return after;
+      if (updateEnded(after)) return after;
       journal = { ...journal, ...outcome, completed: [...journal.completed, step], updatedAt: new Date().toISOString() };
       writeUpdateJson(file, journal);
     }

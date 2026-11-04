@@ -367,7 +367,8 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
       return;
     }
     const timeout = setTimeout(() => {
-      setInitError('Terminal loading timed out. Check the host connection and retry.');
+      // Keep a reported failure: it says why loading stopped and what to do next.
+      setInitError(current => current ?? 'Terminal loading timed out. Check the host connection and retry.');
     }, TERMINAL_LOADING_TIMEOUT_MS);
     return () => clearTimeout(timeout);
   }, [overlayActive, initAttempt]);

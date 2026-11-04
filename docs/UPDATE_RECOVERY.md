@@ -193,6 +193,13 @@ may return to its prompt; review it and decide what to send. Idle, completed and
 approval-blocked work stays stopped. The updater sends no `continue`, prompt,
 queued mutation, or draft input.
 
+A panel the update left stopped starts when you open it, like any stopped panel,
+once the update has ended: it finished, its helper process exited, or the
+computer restarted since the update last made progress. Its agent reopens on its
+saved conversation and nothing is typed into it. While the update is still
+running, opening the panel reports that it is waiting for the update; retry when
+the update finishes.
+
 Before shutdown, the checkpoint saves each panel's prior state, activity, launch
 profile, conversation ID and launch/worktree/Session cwd. Unsubmitted composer
 text detected in the terminal prevents automatic reopening. Inspect that panel's

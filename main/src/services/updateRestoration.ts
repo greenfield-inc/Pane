@@ -1,9 +1,26 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import type { ToolPanel, TerminalPanelState } from '../../../shared/types/panels';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
-import { writeUpdateJson } from '../../../packages/runpane/src/updateOperation';
+import { readUpdateJournal, updateEnded, UPDATE_ID_PATTERN, writeUpdateJson } from '../../../packages/runpane/src/updateOperation';
+import { getAppDirectory } from '../utils/appDirectory';
+import { isProcessAlive } from '../utils/processTree';
 import { checkpointSchema } from './updateContinuation';
+
+/** A hold guards its panel only while the update's helper can still restore it. A journal last
+ *  written before this boot belongs to a helper the reboot ended, whatever now holds its PID. */
+export function updateHoldIsLive(id: string): boolean {
+  try {
+    if (!UPDATE_ID_PATTERN.test(id)) return false;
+    const file = path.join(getAppDirectory(), 'updates', id, 'status.json');
+    const journal = readUpdateJournal(file);
+    const writtenThisBoot = fs.statSync(file).mtimeMs >= Date.now() - os.uptime() * 1000;
+    return writtenThisBoot && !updateEnded(journal) && journal.helperPid !== undefined && isProcessAlive(journal.helperPid);
+  } catch {
+    return false;
+  }
+}
 
 interface RestorationDependencies {
   getPanel(id: string): ToolPanel | undefined;
