@@ -11,6 +11,7 @@ import {
   type NotifyRemoteCommand,
   type NotifyRequest,
   type NotifyResult,
+  type NotifySession,
   type NotifySettings,
   type NotifySharedState,
   type NotifySnapshot,
@@ -22,8 +23,10 @@ import { canFloatOverOtherApps, NotifyWindows } from './notifyWindows';
 import { NotifyTray } from './notifyTray';
 import { syncNotifyInstructions, syncWslNotifyInstructions } from './notifyInstructions';
 import { isPaneHomeSkillEnabled } from '../paneHomeSkill';
+import type { RunpaneInboxItem } from '../../../../shared/types/runpaneOrchestration';
 
 const AGENT_NAMES = new Map([['claude', 'Claude'], ['codex', 'Codex'], ['cursor', 'Cursor'], ['opencode', 'OpenCode']]);
+const agentName = (agentType: string | undefined): string => (agentType ? AGENT_NAMES.get(agentType) : undefined) ?? 'Agent';
 
 export interface NotifyServiceDependencies {
   configManager: ConfigManager;
@@ -52,6 +55,16 @@ export interface NotifyServiceDependencies {
   onQuestion?: (event: { item: NotifyItem; open: boolean }) => void;
   /** WSL distros Pane runs agents in (its WSL projects'), whose homes get the instructions too. */
   wslDistros?: () => string[];
+  /** The Session a Pane (and tab) works in; Approvals files each item under it. */
+  sessionOf?: (paneId: string, panelId?: string) => NotifySession | undefined;
+  /** Every Session's unacknowledged worker reports (Approvals' fallback reads the blocked ones). */
+  inbox?: { all(): RunpaneInboxItem[]; subscribe(listener: () => void): () => void };
+}
+
+/** A worker's blocked question shows in Approvals once its orchestrator has left it this long (tests shorten it). */
+function relayAfterMs(): number {
+  const configured = Number(process.env.PANE_APPROVALS_RELAY_AFTER_MS);
+  return Number.isFinite(configured) && configured > 0 ? configured : 10 * 60_000;
 }
 
 /**
@@ -73,6 +86,8 @@ export class NotifyService {
   private wslSync: Promise<void> = Promise.resolve();
   private lastShared = '';
   private lastStates = new Map<string, NotifyItem['state']>();
+  private relayTimer?: ReturnType<typeof setTimeout>;
+  private stopInbox?: () => void;
 
   constructor(private readonly deps: NotifyServiceDependencies) {
     this.lastSettings = this.settings();
@@ -85,6 +100,7 @@ export class NotifyService {
       instructionFiles: () => this.instructionFiles,
       machine: deps.machine,
       secrets: deps.secrets,
+      sessionOf: deps.sessionOf,
     });
     this.windows = new NotifyWindows({
       rendererArguments: deps.rendererArguments,
@@ -96,7 +112,7 @@ export class NotifyService {
       setShowOutsidePane: (show) => {
         this.updateSettings({ showOutsidePane: show }).catch((error: Error) => {
           // The menu flipped its checkbox; redraw it from the setting that is still saved.
-          console.error(`[Notify] Show outside Pane was not saved because Pane could not write its config (${error.message}). The setting is unchanged. Free disk space or fix the config folder's permissions, then try again in Settings → Notify.`);
+          console.error(`[Notify] Show outside Pane was not saved because Pane could not write its config (${error.message}). The setting is unchanged. Free disk space or fix the config folder's permissions, then try again in Settings → Approvals.`);
           this.scheduleBroadcast();
         });
       },
@@ -123,7 +139,51 @@ export class NotifyService {
     });
     this.applyShortcut(this.lastSettings);
     this.syncInstructions(this.lastSettings.enabled);
+    this.stopInbox = deps.inbox?.subscribe(() => this.refreshRelays());
+    deps.configManager.on('config-updated', () => this.refreshRelays());
+    this.refreshRelays();
     this.scheduleBroadcast();
+  }
+
+  /**
+   * Approvals' fallback: each worker's blocked question that its orchestrator has left
+   * unacknowledged for 10 minutes shows read-only, so it is never invisible while the
+   * orchestrator is down. It goes when the inbox item does (an ack, or the worker reports again),
+   * and none show while Approvals is off.
+   */
+  private refreshRelays(): void {
+    clearTimeout(this.relayTimer);
+    this.relayTimer = undefined;
+    const inbox = this.deps.inbox;
+    if (!inbox) return;
+    const now = Date.now();
+    const after = relayAfterMs();
+    let nextDue = Infinity;
+    const relays: NotifyItem[] = [];
+    for (const entry of this.settings().enabled ? inbox.all() : []) {
+      const question = entry.kind === 'report' && entry.report?.state === 'blocked' ? entry.report.question?.trim() : undefined;
+      const at = Date.parse(entry.at);
+      if (!question || !Number.isFinite(at)) continue;
+      if (at + after > now) {
+        nextDue = Math.min(nextDue, at + after);
+        continue;
+      }
+      const session = this.deps.sessionOf?.(entry.paneId, entry.panelId);
+      const source: NotifySource = { paneId: entry.paneId, panelId: entry.panelId, name: entry.paneName, agent: agentName(entry.agentType) };
+      if (session) source.session = session;
+      relays.push({
+        id: `relay:${entry.id}`,
+        ui: 'info',
+        title: question,
+        context: `Waiting on the ${session?.name ?? 'Session'} orchestrator: ${entry.paneName} asked this and it hasn't been picked up. Answer in the orchestrator's tab.`,
+        source,
+        state: 'waiting',
+        createdAt: at,
+        relay: { inboxItemId: entry.id, worker: entry.paneName, question },
+      });
+    }
+    this.queue.setRelays(relays);
+    if (nextDue < Infinity) this.relayTimer = setTimeout(() => this.refreshRelays(), Math.max(0, nextDue - now));
   }
 
   settings(): NotifySettings {
@@ -234,6 +294,8 @@ export class NotifyService {
   }
 
   dispose(): void {
+    clearTimeout(this.relayTimer);
+    this.stopInbox?.();
     this.queue.dispose();
     if (this.shortcut) globalShortcut.unregister(this.shortcut);
     this.tray.destroy();

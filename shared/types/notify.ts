@@ -33,6 +33,16 @@ export interface NotifyAction {
   url: string;
 }
 
+/**
+ * A related link on a card (Approvals): a file on the asking machine, or an http(s) URL. A file
+ * opens as a tab of the item's Pane; a URL opens as a browser tab there. Older agents send none.
+ */
+export type NotifyLink = { label: string; path: string } | { label: string; url: string };
+
+/** Up to this many links per card; a label takes up to NOTIFY_LINK_LABEL_MAX characters. */
+export const NOTIFY_LINKS_MAX = 6;
+export const NOTIFY_LINK_LABEL_MAX = 80;
+
 /** What the agent asks for; the tool's input minus `resume`. */
 export interface NotifyQuestion {
   ui: NotifyUi;
@@ -48,6 +58,8 @@ export interface NotifyQuestion {
   suggestions?: string[];
   /** info only: one button. */
   action?: NotifyAction;
+  /** Any ui: related files and pages, shown as chips on the card. */
+  links?: NotifyLink[];
   /** secret only: the Pane secret the answer is saved as. The card's title and context are the agent's label and reason. */
   secret?: NotifySecretTarget;
   /** secret only, set by the host: why the last save failed (never contains the value). The card stays waiting for another try. */
@@ -137,6 +149,30 @@ export interface NotifySource {
   name: string;
   /** Claude, Codex, Cursor, or the client's own name. */
   agent: string;
+  /** The Session the asking Pane works in, resolved by the host when the item is made. Absent: "Not in a Session". */
+  session?: NotifySession;
+}
+
+/** The Session an item belongs to (Approvals groups by it). */
+export interface NotifySession {
+  id: string;
+  name: string;
+  /** The Session's own workspace Pane, which holds its orchestrator tabs. */
+  paneId: string;
+  /** The asking tab is one of the Session's orchestrator tabs (not a worker Pane's). */
+  orchestrator?: boolean;
+}
+
+/**
+ * A worker's blocked question its orchestrator hasn't acknowledged for a while (Approvals'
+ * fallback): shown read-only, so a question is never invisible while its orchestrator is down.
+ */
+export interface NotifyRelay {
+  /** The Session inbox item it mirrors. */
+  inboxItemId: string;
+  /** The worker Pane's name. */
+  worker: string;
+  question: string;
 }
 
 export interface NotifyItem extends NotifyQuestion {
@@ -164,6 +200,8 @@ export interface NotifyItem extends NotifyQuestion {
   unreachable?: boolean;
   /** Snapshot only: from a saved machine the app isn't on, so it offers no Open in Pane. */
   elsewhere?: boolean;
+  /** Set on a fallback item (state `waiting`, never in `queue`): it takes no answer. */
+  relay?: NotifyRelay;
 }
 
 /** What the strip shows. Main decides; every surface renders the same thing. */

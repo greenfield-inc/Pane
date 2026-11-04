@@ -1209,6 +1209,14 @@
     ],
     [
       "notify",
+      "--ui",
+      "approve",
+      "--title",
+      "Ship the notes?",
+      "--links=[{\"label\":\"Notes\",\"path\":\"docs/RELEASE.md\"},{\"label\":\"PR\",\"url\":\"https://example.com/pr/1\"}]"
+    ],
+    [
+      "notify",
       "--resume",
       "n-1",
       "--json"

@@ -13,11 +13,15 @@ from .daemon_client import PaneDaemonClientError, invoke_daemon
 UIS = ["options", "approve", "ask", "info"]
 MAX_CHOICES = 9
 MAX_DETAIL_LABEL = 40
+MAX_LINKS = 6
+MAX_LINK_LABEL = 80
+LINK_URL = re.compile(r"https?://\S+")
 # Each optional field and the one ui it belongs to.
 FIELD_UI = [("choices", "options"), ("detail", "approve"), ("detailLabel", "approve"), ("suggestions", "ask"), ("action", "info")]
 CHOICES_EXPECTED = 'choices must be a JSON array of choices, such as [{"label":"Ship it","recommended":true},{"label":"Wait"}].'
 SUGGESTIONS_EXPECTED = 'suggestions must be a JSON array of strings, such as ["main","release"].'
 ACTION_EXPECTED = 'action must be a JSON object with a non-empty "label" and "url", such as {"label":"Open PR","url":"https://github.com/org/repo/pull/1"}.'
+LINKS_EXPECTED = 'links must be a JSON array of links, such as [{"label":"Notes","path":"docs/RELEASE.md"},{"label":"PR #1","url":"https://github.com/org/repo/pull/1"}].'
 UNAVAILABLE_NEXT = "Ask in the terminal instead."
 _MISSING = object()
 
@@ -46,6 +50,7 @@ def build_notify_request(parsed: Any, env: Mapping[str, str], cwd: str) -> Dict[
         "detailLabel": parsed.notify_detail_label,
         "suggestions": parsed.notify_suggestions,
         "action": parsed.notify_action,
+        "links": parsed.notify_links,
     }
     caller, timing = notify_caller_fields(env, cwd)
 
@@ -88,6 +93,8 @@ def build_notify_request(parsed: Any, env: Mapping[str, str], cwd: str) -> Dict[
         request["suggestions"] = parse_suggestions(given["suggestions"])
     if given["action"] is not None:
         request["action"] = parse_action(given["action"])
+    if given["links"] is not None:
+        request["links"] = parse_links(given["links"])
     return request
 
 
@@ -149,6 +156,42 @@ def parse_action(text: str) -> Dict[str, str]:
     if not isinstance(value, dict) or not is_text(value.get("label")) or not is_text(value.get("url")):
         raise invalid("action", ACTION_EXPECTED)
     return {"label": value["label"], "url": value["url"]}
+
+
+def parse_links(text: str) -> List[Dict[str, str]]:
+    """Related files and pages for any ui: a label and exactly one of a path or an http(s) url."""
+    value = parse_json(text)
+    if not isinstance(value, list):
+        raise invalid("links", LINKS_EXPECTED)
+    if len(value) > MAX_LINKS:
+        raise invalid("links", f"links takes up to {MAX_LINKS} links; got {len(value)}.")
+    links: List[Dict[str, str]] = []
+    for index, item in enumerate(value):
+        path = item.get("path", _MISSING) if isinstance(item, dict) else _MISSING
+        url = item.get("url", _MISSING) if isinstance(item, dict) else _MISSING
+        if (
+            not isinstance(item, dict)
+            or not is_text(item.get("label"))
+            or (path is not _MISSING and not isinstance(path, str))
+            or (url is not _MISSING and not isinstance(url, str))
+        ):
+            raise invalid("links", f'links[{index}] must be an object with a non-empty "label" and one of "path" or "url".')
+        label = item["label"]
+        if len(label) > MAX_LINK_LABEL:
+            raise invalid("links", f"links[{index}] label takes up to {MAX_LINK_LABEL} characters; got {len(label)}.")
+        if path is not _MISSING and url is not _MISSING:
+            raise invalid("links", f'links[{index}] has both "path" and "url"; give one.')
+        if path is not _MISSING:
+            if not is_text(path):
+                raise invalid("links", f"links[{index}] path must be non-empty text.")
+            links.append({"label": label, "path": path})
+            continue
+        if url is _MISSING:
+            raise invalid("links", f'links[{index}] needs one of "path" (a file) or "url" (a web page).')
+        if not LINK_URL.fullmatch(url):
+            raise invalid("links", f"links[{index}] url must start with http:// or https://.")
+        links.append({"label": label, "url": url})
+    return links
 
 
 def parse_json(text: str) -> Any:

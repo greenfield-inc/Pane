@@ -2,6 +2,7 @@ import { ChatTabNotifyBridge } from '../services/chatTabs/notifyBridge';
 import { getChatTabManager, setChatTabNotify } from '../services/chatTabs';
 import { app, BrowserWindow, type IpcMain } from 'electron';
 import os from 'os';
+import path from 'path';
 import type { AppServices } from './types';
 import type { PaneCommandRegistry, PaneCommandValue } from '../daemon/commandRegistry';
 import { paneCommandSignal, teammatePaneCaller } from '../daemon/commandRegistry';
@@ -21,7 +22,8 @@ import { normalizeAppearance } from '../../../shared/types/appearance';
 import { PaneError } from '../../../shared/paneError';
 import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
 import type { PaneLinkTarget } from '../../../shared/types/paneLinks';
-import type { NotifyCommand, NotifyRemoteCommand, NotifyRequest, NotifyResult, NotifySharedState } from '../../../shared/types/notify';
+import { NOTIFY_LINK_LABEL_MAX, NOTIFY_LINKS_MAX, type NotifyCommand, type NotifyLink, type NotifyRemoteCommand, type NotifyRequest, type NotifyResult, type NotifySession, type NotifySharedState } from '../../../shared/types/notify';
+import type { RunpaneInboxItem } from '../../../shared/types/runpaneOrchestration';
 import type { AgentState } from '../../../shared/types/agentStatus';
 import { paneSecretNameProblem, paneSecretProjectProblem, teammateSecretRefusal } from '../../../shared/types/paneSecrets';
 import { paneSecretStore } from '../services/paneSecrets';
@@ -30,6 +32,23 @@ const MAX_CHOICES = 9;
 const MAX_TEXT = 4_000;
 const MAX_DETAIL = 20_000;
 const MAX_DETAIL_LABEL = 40;
+
+/** A related link as an agent sends it: checked further in parseLinks. */
+const linkInputSchema = boundary.object({
+  label: boundary.string,
+  path: boundary.optional(boundary.string),
+  url: boundary.optional(boundary.string),
+});
+const linkSchema = boundary.union(
+  boundary.object({ label: boundary.nonEmptyString, path: boundary.nonEmptyString }),
+  boundary.object({ label: boundary.nonEmptyString, url: boundary.nonEmptyString }),
+);
+const sessionSchema = boundary.object({
+  id: boundary.nonEmptyString,
+  name: boundary.string,
+  paneId: boundary.string,
+  orchestrator: boundary.optional(boundary.boolean),
+});
 
 const notifyRequestSchema = boundary.object({
   ui: boundary.optional(boundary.enumeration('options', 'approve', 'ask', 'secret', 'info')),
@@ -45,6 +64,7 @@ const notifyRequestSchema = boundary.object({
   suggestions: boundary.optional(boundary.array(boundary.string)),
   action: boundary.optional(boundary.object({ label: boundary.nonEmptyString, url: boundary.nonEmptyString })),
   secret: boundary.optional(boundary.object({ project: boundary.string, name: boundary.string })),
+  links: boundary.optional(boundary.array(linkInputSchema)),
   resume: boundary.optional(boundary.nonEmptyString),
   returnAfterMs: boundary.optional(boundary.number),
   caller: boundary.object({
@@ -102,12 +122,15 @@ const notifyItemSchema = boundary.object({
   agentPrompt: boundary.optional(boundary.object({ yes: boundary.string, no: boundary.string, inTerminal: boundary.optional(boundary.boolean) })),
   secret: boundary.optional(boundary.object({ project: boundary.string, name: boundary.string, replaces: boundary.optional(boundary.boolean) })),
   secretError: boundary.optional(boundary.string),
+  links: boundary.optional(boundary.array(linkSchema)),
   source: boundary.object({
     paneId: boundary.optional(boundary.string),
     panelId: boundary.optional(boundary.string),
     name: boundary.string,
     agent: boundary.string,
+    session: boundary.optional(sessionSchema),
   }),
+  relay: boundary.optional(boundary.object({ inboxItemId: boundary.nonEmptyString, worker: boundary.string, question: boundary.string })),
   state: boundary.enumeration('waiting', 'sent', 'answered', 'expired', 'info'),
   createdAt: boundary.number,
   resolvedAt: boundary.optional(boundary.number),
@@ -131,6 +154,10 @@ const panelAgentSchema = boundary.object({ agentType: boundary.optional(boundary
 type NotifyServices = Pick<AppServices, 'configManager' | 'getMainWindow'> & {
   sessionManager: Pick<AppServices['sessionManager'], 'getSession'>;
   databaseService?: Pick<AppServices['databaseService'], 'getAllProjects'>;
+  /** Files each Approvals item under its Session. */
+  orchestrationSessionManager?: { approvalSession(paneId: string, panelId?: string): NotifySession | undefined };
+  /** Approvals' fallback reads workers' blocked reports from it. */
+  sessionInbox?: { all(): RunpaneInboxItem[]; subscribe(listener: () => void): () => void };
 };
 
 export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyServices, commandRegistry: PaneCommandRegistry): NotifyService {
@@ -181,6 +208,8 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
     // A connected desktop ignores the host's pane:focus-requested; it opens Panes as pane:// links.
     wslDistros: () => (services.databaseService?.getAllProjects() ?? [])
       .flatMap(project => project.wsl_enabled && project.wsl_distribution ? [project.wsl_distribution] : []),
+    sessionOf: (paneId, panelId) => services.orchestrationSessionManager?.approvalSession(paneId, panelId),
+    inbox: services.sessionInbox,
     showHostPane: (paneId, panelId) => {
       const window = services.getMainWindow();
       const target: PaneLinkTarget = panelId ? { kind: 'pane', paneId, panelId } : { kind: 'pane', paneId };
@@ -411,12 +440,14 @@ function linkSavedMachines(notify: NotifyService, machines: NotifyMachines): Sav
 
 /** Checks a notify call the way the tool's schema promises, naming the field that's wrong. */
 function parseNotifyRequest(value: PaneCommandValue): NotifyRequest {
-  let request: NotifyRequest;
+  let decoded: ReturnType<typeof notifyRequestSchema.decode>;
   try {
-    request = decodeBoundary(value, notifyRequestSchema);
+    decoded = decodeBoundary(value, notifyRequestSchema);
   } catch (error) {
     throw invalid(error instanceof Error ? error.message : String(error));
   }
+  const { links, ...rest } = decoded;
+  const request: NotifyRequest = rest;
   if (request.resume) return request;
   const { ui } = request;
   if (!ui) throw invalid('ui is required: options, approve, ask or info.');
@@ -446,7 +477,30 @@ function parseNotifyRequest(value: PaneCommandValue): NotifyRequest {
   if (request.suggestions !== undefined && ui !== 'ask') throw invalid(`suggestions only goes with ui: ask, not ${ui}.`);
   if (request.action !== undefined && ui !== 'info') throw invalid(`action only goes with ui: info, not ${ui}.`);
   if (request.action && !/^https?:\/\//i.test(request.action.url)) throw invalid('action.url must be an http(s) URL.');
+  if (links !== undefined) request.links = parseLinks(links, request.caller.cwd);
   return request;
+}
+
+/**
+ * Related links: up to 6, each a label and exactly one of a file path (relative to the asking
+ * folder) or an http(s) URL.
+ */
+function parseLinks(links: Array<{ label: string; path?: string; url?: string }>, cwd: string | undefined): NotifyLink[] {
+  if (links.length > NOTIFY_LINKS_MAX) throw invalid(`links takes up to ${NOTIFY_LINKS_MAX} entries; it has ${links.length}.`);
+  return links.map((link, index): NotifyLink => {
+    const label = link.label.trim();
+    const where = `links[${index}]`;
+    if (!label) throw invalid(`${where}.label is required.`);
+    if ([...label].length > NOTIFY_LINK_LABEL_MAX) throw invalid(`${where}.label takes up to ${NOTIFY_LINK_LABEL_MAX} characters.`);
+    const filePath = link.path?.trim();
+    const url = link.url?.trim();
+    if (Boolean(filePath) === Boolean(url)) throw invalid(`${where} needs exactly one of path or url.`);
+    if (url) {
+      if (!/^https?:\/\/\S+$/i.test(url)) throw invalid(`${where}.url must be an http(s) URL.`);
+      return { label, url };
+    }
+    return { label, path: cwd && !path.isAbsolute(filePath ?? '') ? path.resolve(cwd, filePath ?? '') : filePath ?? '' };
+  });
 }
 
 /** The name other screens and phones show for this machine, as a connected client labels itself. */

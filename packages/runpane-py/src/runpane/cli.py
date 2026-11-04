@@ -135,6 +135,7 @@ NOTIFY_VALUE_FLAGS = {
     "--detail-label": "notify_detail_label",
     "--suggestions": "notify_suggestions",
     "--action": "notify_action",
+    "--links": "notify_links",
 }
 HEAD_PATTERN = re.compile(r"[0-9a-fA-F]{7,40}")
 
@@ -279,6 +280,7 @@ class ParsedArgs:
     notify_detail_label: Optional[str] = None
     notify_suggestions: Optional[str] = None
     notify_action: Optional[str] = None
+    notify_links: Optional[str] = None
     loop_id: Optional[str] = None
     cron: Optional[str] = None
     paused: bool = False

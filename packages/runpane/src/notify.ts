@@ -21,6 +21,8 @@ interface NotifyAction {
 
 interface NotifyCaller { paneId?: string; panelId?: string; cwd?: string; agent?: string }
 
+type NotifyLink = { label: string; path: string } | { label: string; url: string };
+
 export interface NotifyRequest {
   ui?: NotifyRequestUi;
   title?: string;
@@ -31,6 +33,7 @@ export interface NotifyRequest {
   suggestions?: string[];
   action?: NotifyAction;
   secret?: { project: string; name: string };
+  links?: NotifyLink[];
   resume?: string;
   returnAfterMs?: number;
   caller: NotifyCaller;
@@ -48,11 +51,15 @@ export type NotifyResult =
 const UIS: readonly NotifyUi[] = ['options', 'approve', 'ask', 'info'];
 const MAX_CHOICES = 9;
 const MAX_DETAIL_LABEL = 40;
+const MAX_LINKS = 6;
+const MAX_LINK_LABEL = 80;
+const LINK_URL = /^https?:\/\/\S+$/;
 /** Each optional field and the one ui it belongs to. */
 const FIELD_UI = [['choices', 'options'], ['detail', 'approve'], ['detailLabel', 'approve'], ['suggestions', 'ask'], ['action', 'info']] as const;
 const CHOICES_EXPECTED = 'choices must be a JSON array of choices, such as [{"label":"Ship it","recommended":true},{"label":"Wait"}].';
 const SUGGESTIONS_EXPECTED = 'suggestions must be a JSON array of strings, such as ["main","release"].';
 const ACTION_EXPECTED = 'action must be a JSON object with a non-empty "label" and "url", such as {"label":"Open PR","url":"https://github.com/org/repo/pull/1"}.';
+const LINKS_EXPECTED = 'links must be a JSON array of links, such as [{"label":"Notes","path":"docs/RELEASE.md"},{"label":"PR #1","url":"https://github.com/org/repo/pull/1"}].';
 const NOTIFY_UNAVAILABLE_NEXT = 'Ask in the terminal instead.';
 
 const choiceSchema = boundary.object({
@@ -61,6 +68,11 @@ const choiceSchema = boundary.object({
   recommended: boundary.optional(boundary.boolean),
 });
 const actionSchema = boundary.object({ label: boundary.nonEmptyString, url: boundary.nonEmptyString });
+const linkSchema = boundary.object({
+  label: boundary.nonEmptyString,
+  path: boundary.optional(boundary.string),
+  url: boundary.optional(boundary.string),
+});
 const note = boundary.optional(boundary.string);
 export const notifyResultSchema: BoundarySchema<NotifyResult> = boundary.union(
   boundary.object({ waiting: boundary.literal(true), id: boundary.nonEmptyString, next: boundary.string }),
@@ -91,6 +103,7 @@ function buildNotifyRequest(parsed: ParsedArgs, env: NodeJS.ProcessEnv, cwd: str
     detailLabel: parsed.notifyDetailLabel,
     suggestions: parsed.notifySuggestions,
     action: parsed.notifyAction,
+    links: parsed.notifyLinks,
   };
   const { caller, timing } = notifyCallerFields(env, cwd);
 
@@ -127,6 +140,7 @@ function buildNotifyRequest(parsed: ParsedArgs, env: NodeJS.ProcessEnv, cwd: str
   if (given.detailLabel !== undefined) request.detailLabel = given.detailLabel;
   if (given.suggestions !== undefined) request.suggestions = parseSuggestions(given.suggestions);
   if (given.action !== undefined) request.action = decodeOr(parseJson(given.action), actionSchema, invalid('action', ACTION_EXPECTED));
+  if (given.links !== undefined) request.links = parseLinks(given.links);
   return request;
 }
 
@@ -149,6 +163,27 @@ export function notifyCallerFields(env: NodeJS.ProcessEnv, cwd: string): NotifyC
   const returnAfter = env.RUNPANE_NOTIFY_RETURN_AFTER_MS?.trim() ?? '';
   const timing = /^\d+$/.test(returnAfter) && Number(returnAfter) > 0 ? { returnAfterMs: Number(returnAfter) } : {};
   return { caller, timing };
+}
+
+/** Related files and pages for any ui: a label and exactly one of a path or an http(s) url. */
+function parseLinks(text: string): NotifyLink[] {
+  const value = parseJson(text);
+  if (!Array.isArray(value)) throw invalid('links', LINKS_EXPECTED);
+  if (value.length > MAX_LINKS) throw invalid('links', `links takes up to ${MAX_LINKS} links; got ${value.length}.`);
+  return value.map((item, index): NotifyLink => {
+    const link = decodeOr(item, linkSchema, invalid('links', `links[${index}] must be an object with a non-empty "label" and one of "path" or "url".`));
+    // Counts characters as Python does, so both wrappers accept the same labels.
+    const length = [...link.label].length;
+    if (length > MAX_LINK_LABEL) throw invalid('links', `links[${index}] label takes up to ${MAX_LINK_LABEL} characters; got ${length}.`);
+    if (link.path !== undefined && link.url !== undefined) throw invalid('links', `links[${index}] has both "path" and "url"; give one.`);
+    if (link.path !== undefined) {
+      if (!link.path.trim()) throw invalid('links', `links[${index}] path must be non-empty text.`);
+      return { label: link.label, path: link.path };
+    }
+    if (link.url === undefined) throw invalid('links', `links[${index}] needs one of "path" (a file) or "url" (a web page).`);
+    if (!LINK_URL.test(link.url)) throw invalid('links', `links[${index}] url must start with http:// or https://.`);
+    return { label: link.label, url: link.url };
+  });
 }
 
 function parseChoices(text: string): NotifyChoice[] {

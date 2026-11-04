@@ -151,7 +151,7 @@ describe('NotifyQueue', () => {
 
   it('returns unavailable at once while Notify is off, and to every waiting agent when it is turned off', async () => {
     const { queue, setSettings } = makeQueue({ enabled: false });
-    expect(await queue.ask({ question: sessionStore, source: claude })).toEqual({ unavailable: 'Notify is off in Pane.', next: 'Ask in the terminal instead.' });
+    expect(await queue.ask({ question: sessionStore, source: claude })).toEqual({ unavailable: 'Approvals are off in Pane.', next: 'Ask in the terminal instead.' });
 
     setSettings({ enabled: true });
     const first = ask(queue, sessionStore, claude);
@@ -160,8 +160,8 @@ describe('NotifyQueue', () => {
     queue.turnOff();
     await vi.advanceTimersByTimeAsync(0);
 
-    expect(first.result).toEqual({ unavailable: 'Notify was turned off in Pane.', next: 'Ask in the terminal instead.' });
-    expect(second.result).toEqual({ unavailable: 'Notify was turned off in Pane.', next: 'Ask in the terminal instead.' });
+    expect(first.result).toEqual({ unavailable: 'Approvals were turned off in Pane.', next: 'Ask in the terminal instead.' });
+    expect(second.result).toEqual({ unavailable: 'Approvals were turned off in Pane.', next: 'Ask in the terminal instead.' });
     expect(queue.snapshot()).toMatchObject({ queue: [], strip: null });
   });
 
@@ -561,7 +561,7 @@ describe('NotifyQueue across machines', () => {
     setSettings({ enabled: false });
     host.turnOff();
     await vi.advanceTimersByTimeAsync(0);
-    expect(call.result).toEqual({ unavailable: 'Notify was turned off in Pane.', next: 'Ask in the terminal instead.' });
+    expect(call.result).toEqual({ unavailable: 'Approvals were turned off in Pane.', next: 'Ask in the terminal instead.' });
     expect(laptop.snapshot()).toMatchObject({ queue: [], strip: null });
   });
 

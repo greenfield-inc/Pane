@@ -79,7 +79,7 @@ export class NotifyTray {
         : { label: 'Pause for 1 hour', click: () => this.actions.pause() },
       { label: 'Open Notify inbox', click: () => this.actions.openInbox() },
       { type: 'separator' },
-      { label: 'Notify settings…', click: () => this.actions.openSettings() },
+      { label: 'Approvals settings…', click: () => this.actions.openSettings() },
     ];
   }
 }

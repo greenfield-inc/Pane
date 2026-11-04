@@ -8,6 +8,7 @@ import type {
   NotifyRemindAfter,
   NotifyRemoteCommand,
   NotifyResult,
+  NotifySession,
   NotifySettings,
   NotifySharedState,
   NotifySnapshot,
@@ -75,6 +76,8 @@ export interface NotifyQueueEnvironment {
     exists(project: string, name: string): boolean;
     save(project: string, name: string, value: string): Promise<void>;
   };
+  /** The Session a Pane (and tab) works in, filed on each new item; Approvals groups by it. */
+  sessionOf?: (paneId: string, panelId?: string) => NotifySession | undefined;
 }
 
 /**
@@ -133,6 +136,8 @@ export class NotifyQueue extends EventEmitter {
   private readonly answeredHere = new Set<string>();
   /** Other machines' questions reminded "when I switch to Pane", by key: hidden on this screen only. */
   private readonly remindedHere = new Set<string>();
+  /** Approvals' fallback: workers' blocked questions their orchestrator hasn't picked up. Read-only, never queued. */
+  private relays: NotifyItem[] = [];
 
   constructor(private readonly env: NotifyQueueEnvironment) {
     super();
@@ -147,7 +152,7 @@ export class NotifyQueue extends EventEmitter {
 
   private askOnce(request: { question?: NotifyQuestion; resume?: string; returnAfterMs?: number; source: NotifySource; id?: string }, signal?: AbortSignal): Promise<NotifyResult> {
     if (!this.env.settings().enabled) {
-      return Promise.resolve(unavailable('Notify is off in Pane.'));
+      return Promise.resolve(unavailable('Approvals are off in Pane.'));
     }
     if (request.resume) return this.resume(request.resume, request.returnAfterMs, signal);
     const question = request.question;
@@ -159,7 +164,7 @@ export class NotifyQueue extends EventEmitter {
     const item: NotifyItem = {
       ...question,
       id: request.id ?? randomUUID(),
-      source: request.source,
+      source: this.withSession(request.source),
       state: question.ui === 'info' ? 'info' : 'waiting',
       createdAt: Date.now(),
     };
@@ -258,6 +263,17 @@ export class NotifyQueue extends EventEmitter {
     this.run(command);
   }
 
+  /**
+   * Approvals' fallback items (see NotifyRelay), replacing the last set. The caller decides
+   * which are due and drops them all while Approvals is off.
+   */
+  setRelays(relays: NotifyItem[]): void {
+    const key = (items: NotifyItem[]) => JSON.stringify(items);
+    if (key(relays) === key(this.relays)) return;
+    this.relays = relays.map(item => ({ ...item }));
+    this.changed();
+  }
+
   /** What every connected screen and phone shares: the questions, their order and who answered. */
   sharedState(): NotifySharedState {
     this.pruneBeforeToday();
@@ -269,9 +285,9 @@ export class NotifyQueue extends EventEmitter {
       enabled: this.env.settings().enabled,
       // A secret card is shared only while it waits: Pane versions before secrets can't read one,
       // so a finished card left in today's history would keep them from showing this machine's cards.
-      items: [...this.entries.values()].filter(({ item }) => item.ui !== 'secret' || item.state === 'waiting').map(({ item }) => (
+      items: [...[...this.entries.values()].filter(({ item }) => item.ui !== 'secret' || item.state === 'waiting').map(({ item }) => (
         item.state === 'sent' || item.state === 'answered' ? { ...item, answeredOn: item.answeredOn ?? machine } : { ...item }
-      )),
+      )), ...this.relays.map(item => ({ ...item }))],
       queue: [...this.queue],
       // "When I switch to Pane" waits for this Pane only; other screens keep showing the question.
       hidden: [...this.hidden].filter(id => !this.entries.get(id)?.remindOnPaneFocus),
@@ -450,7 +466,7 @@ export class NotifyQueue extends EventEmitter {
   /** Notify was turned off: every waiting agent gets `unavailable` and every surface clears. */
   turnOff(): void {
     for (const entry of [...this.entries.values()]) {
-      if (isOpen(entry.item)) this.expire(entry.item.id, unavailable('Notify was turned off in Pane.'), false);
+      if (isOpen(entry.item)) this.expire(entry.item.id, unavailable('Approvals were turned off in Pane.'), false);
     }
     this.clearTransient();
     this.changed();
@@ -504,7 +520,7 @@ export class NotifyQueue extends EventEmitter {
     this.pruneBeforeToday();
     const strip = this.strip();
     const remotes = [...this.remotes.values()];
-    const local = [...this.entries.values()].map(entry => entry.item);
+    const local = [...[...this.entries.values()].map(entry => entry.item), ...this.relays];
     return {
       settings: this.env.settings(),
       items: remotes.length > 0
@@ -800,6 +816,13 @@ export class NotifyQueue extends EventEmitter {
     const hidden = this.allHidden();
     const id = this.allQueued().find(other => !hidden.has(other));
     return id ? { kind: 'question', itemId: id } : null;
+  }
+
+  /** Files the item under its Pane's Session, unless the asker already named one. */
+  private withSession(source: NotifySource): NotifySource {
+    if (source.session || !source.paneId) return source;
+    const session = this.env.sessionOf?.(source.paneId, source.panelId);
+    return session ? { ...source, session } : source;
   }
 
   private find(id: string): NotifyItem | undefined {
