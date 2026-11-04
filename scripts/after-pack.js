@@ -24,7 +24,7 @@ function verifyLinuxSqliteArchitecture(appOutDir, arch) {
 // generic x86-64 baseline. SQLite3 Multiple Ciphers compiles its AEGIS cipher
 // for several CPU levels and picks one at runtime, so only `aegis` functions
 // may use them (issue #1226).
-const NEWER_CPU_INSTRUCTION = /^(v[a-z]|(andn|bextr|blsi|blsmsk|blsr|bzhi|mulx|pdep|pext|rorx|sarx|shlx|shrx)$)/;
+const NEWER_CPU_INSTRUCTION = /^(v[a-z]|(andn|bextr|blsi|blsmsk|blsr|bzhi|mulx|pdep|pext|rorx|sarx|shlx|shrx)[lq]?$)/;
 const RUNTIME_DISPATCHED_FUNCTION = /aegis/i;
 
 function functionsNeedingNewerX64Cpu(file) {
