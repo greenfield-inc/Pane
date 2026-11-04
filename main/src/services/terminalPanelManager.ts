@@ -390,16 +390,6 @@ interface CliLaunchResolution {
   isCliCommand: boolean;
 }
 
-/**
- * A Claude tab the removed experimental Chat created saved its conversation id
- * and the Chat's own record, but never hasClaudeSessionId. It still has a
- * conversation to resume natively. The dormant record is left in place.
- */
-function isClaudeConversationFromRemovedChat(state: TerminalPanelState): boolean {
-  const conversation = state.agentChat?.conversation;
-  return Boolean(state.agentSessionId) && conversation?.provider === 'claude' && conversation.nativeSessionId === state.agentSessionId;
-}
-
 export class TerminalPanelManager extends EventEmitter {
   private terminals = new Map<string, TerminalProcess>();
   // Retiring a PTY is not proof its shell or agent exited. Keep their identities
@@ -640,8 +630,7 @@ export class TerminalPanelManager extends EventEmitter {
       !initialCommand.includes('--session-id') &&
       !hasClaudeResumeFlag(initialCommand)
     ) {
-      const hasClaudeSession = customState.hasClaudeSessionId === true || isClaudeConversationFromRemovedChat(customState);
-      const existingClaudeSessionId = hasClaudeSession && customState.agentSessionId
+      const existingClaudeSessionId = customState.hasClaudeSessionId && customState.agentSessionId
         ? customState.agentSessionId
         : isValidUuid(customState.agentSessionId)
           ? customState.agentSessionId
@@ -657,7 +646,7 @@ export class TerminalPanelManager extends EventEmitter {
       const transcript = checkTranscript && existingClaudeSessionId
         ? findClaudeSessionTranscript(existingClaudeSessionId)
         : undefined;
-      const canResumeClaudeSession = hasClaudeSession && Boolean(existingClaudeSessionId)
+      const canResumeClaudeSession = customState.hasClaudeSessionId === true && Boolean(existingClaudeSessionId)
         && (!checkTranscript || Boolean(transcript));
       const promptWord = customState.initialInputMode === 'argument' && customState.initialInput?.trim()
         ? this.initialPromptWord(customState, shellType)

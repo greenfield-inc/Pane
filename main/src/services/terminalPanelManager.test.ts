@@ -1342,32 +1342,6 @@ describe('TerminalPanelManager hidden output delivery', () => {
     expect(result.customState.initialInputSentAt).toEqual(expect.any(String));
   });
 
-  it('resumes a Claude conversation the removed experimental Chat created, from the shape it saved', () => {
-    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
-    const id = '33333333-3333-4333-8333-333333333333';
-    // The removed Chat saved the conversation id and its own record, without hasClaudeSessionId.
-    const savedByChat = {
-      initialCommand: 'claude', agentType: 'claude' as const, agentSessionId: id, isCliPanel: true,
-      agentChat: { conversation: { panelId: 'panel', workspaceId: 'workspace', provider: 'claude', nativeSessionId: id, active: 'chat', preferred: 'chat', generation: 1 } },
-    };
-
-    const result = manager.resolveCliLaunchCommand('panel', 'claude', savedByChat);
-
-    expect(result.commandToRun).toBe(`claude --resume "${id}"`);
-    expect(result.customState).toMatchObject({ hasClaudeSessionId: true, agentSessionId: id, agentChat: savedByChat.agentChat });
-  });
-
-  it('starts a fresh Claude conversation for a saved Chat record of another conversation', () => {
-    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
-    const id = '33333333-3333-4333-8333-333333333333';
-    const state = {
-      initialCommand: 'claude', agentType: 'claude' as const, agentSessionId: id,
-      agentChat: { conversation: { provider: 'claude', nativeSessionId: '44444444-4444-4444-8444-444444444444' } },
-    };
-
-    expect(manager.resolveCliLaunchCommand('panel', 'claude', state).commandToRun).toBe(`claude --session-id ${id}`);
-  });
-
   it('preserves custom native arguments on resume without submitting input', () => {
     const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
     const id = '22222222-2222-4222-8222-222222222222';
