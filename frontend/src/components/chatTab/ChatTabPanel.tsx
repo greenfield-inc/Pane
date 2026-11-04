@@ -127,10 +127,17 @@ export default function ChatTabPanel({ panelId, client, connected = true, quiet 
   const snapshot = useSyncExternalStore(viewer.subscribe, viewer.snapshot, viewer.snapshot);
   const view = snapshot.view;
   const [busy, setBusy] = useState(false);
+  /** Paged with Earlier or Newer messages: stay put until the reader scrolls back to the live end, even once the window reaches it. */
+  const [paged, setPaged] = useState(false);
   const [commandIndex, setCommandIndex] = useState(0);
   const messages = useMemo(() => snapshot.transcript?.messages ?? [], [snapshot.transcript?.messages]);
   const viewportRef = useRef<HTMLDivElement>(null);
   const recordAnchor = useWindowAnchor(viewportRef, snapshot.transcript?.start, messages.length, !!snapshot.hasNewer);
+  const onViewportScroll = () => {
+    recordAnchor();
+    const element = viewportRef.current;
+    if (paged && element && !snapshot.hasNewer && element.scrollHeight - element.scrollTop - element.clientHeight < 4) setPaged(false);
+  };
   const working = view?.status === 'working' || view?.status === 'blocked';
   const turns = useMemo(() => chatTurns(messages, { running: working }), [messages, working]);
   const placedWorkers = useMemo(() => placeWorkers(turns, workers ?? []), [turns, workers]);
@@ -204,15 +211,15 @@ export default function ChatTabPanel({ panelId, client, connected = true, quiet 
         onSignIn={() => void act(() => client.signIn(panelId))}
         onInstall={url => void window.electronAPI?.openExternal(url)} />}
       {snapshot.error && <div role="alert" className="chat-alert">{snapshot.error}</div>}
-      <ThreadPrimitive.Viewport ref={viewportRef} onScroll={recordAnchor} aria-label="Conversation messages" role="region" className="chat-viewport" scrollToBottomOnRunStart={false} autoScroll={!snapshot.hasNewer}>
+      <ThreadPrimitive.Viewport ref={viewportRef} onScroll={onViewportScroll} aria-label="Conversation messages" role="region" className="chat-viewport" scrollToBottomOnRunStart={false} autoScroll={!snapshot.hasNewer && !paged}>
         <div className="chat-column">
-          {(snapshot.transcript?.start ?? 0) > 0 && <button type="button" className="chat-button chat-button-outline self-center" disabled={snapshot.loadingEarlier} onClick={() => { recordAnchor(); void viewer.loadEarlier(); }}>
+          {(snapshot.transcript?.start ?? 0) > 0 && <button type="button" className="chat-button chat-button-outline self-center" disabled={snapshot.loadingEarlier} onClick={() => { recordAnchor(); setPaged(true); void viewer.loadEarlier(); }}>
             {snapshot.loadingEarlier ? 'Loading…' : `Earlier messages (${snapshot.transcript?.start})`}
           </button>}
           {!snapshot.transcript && !view?.problem && <p role="status" className="chat-notice">{view?.status === 'starting' || !view ? `Starting ${agentName}…` : 'Loading conversation…'}</p>}
           {turns.map(turn => <ChatTurnView key={turn.id} turn={turn} quiet={quiet} permissions={view?.permissions ?? []} actions={actions} workers={placedWorkers.byTurn.get(turn.id)} />)}
           {placedWorkers.trailing.map(worker => <WorkerLine key={worker.paneId} worker={worker} onOpen={actions.onOpenWorker} />)}
-          {snapshot.hasNewer && <button type="button" className="chat-button chat-button-outline self-center" disabled={snapshot.loadingNewer} onClick={() => { recordAnchor(); void viewer.loadNewer(); }}>
+          {snapshot.hasNewer && <button type="button" className="chat-button chat-button-outline self-center" disabled={snapshot.loadingNewer} onClick={() => { recordAnchor(); setPaged(true); void viewer.loadNewer(); }}>
             {snapshot.loadingNewer ? 'Loading…' : 'Newer messages'}
           </button>}
           {!snapshot.hasNewer && view?.notice && <p role="status" className="chat-notice">{view.notice}</p>}
