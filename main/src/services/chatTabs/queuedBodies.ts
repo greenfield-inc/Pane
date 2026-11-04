@@ -39,9 +39,19 @@ export class QueuedBodies {
     try { return decodeOptionalBoundary(JSON.parse(json), bodySchema); } catch { return undefined; }
   }
 
-  remove(panelId: string, operationId: string): void { rmSync(this.file(panelId, operationId), { force: true }); }
+  /**
+   * Best-effort: a file left behind is only wasted space, so a failed delete never
+   * stops a prompt from being sent or a tab from closing.
+   */
+  remove(panelId: string, operationId: string): void { this.tryRemove(this.file(panelId, operationId), {}); }
 
-  clear(panelId: string): void { rmSync(this.directory(panelId), { recursive: true, force: true }); }
+  /** Best-effort, as remove is. */
+  clear(panelId: string): void { this.tryRemove(this.directory(panelId), { recursive: true }); }
+
+  private tryRemove(target: string, options: { recursive?: boolean }): void {
+    try { rmSync(target, { ...options, force: true }); }
+    catch (error) { console.warn(`[ChatTabs] A queued message's saved copy was not deleted (${target}): ${error instanceof Error ? error.message : String(error)}.`); }
+  }
 
   private file(panelId: string, operationId: string): string {
     return path.join(this.directory(panelId), `${createHash('sha256').update(operationId).digest('hex').slice(0, 32)}.json`);

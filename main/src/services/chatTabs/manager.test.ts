@@ -1,4 +1,5 @@
-import { mkdtempSync, rmSync } from 'fs';
+import { createHash } from 'crypto';
+import { chmodSync, mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -233,6 +234,26 @@ describe('chat tab manager', () => {
     const [permission] = manager.view('p1').permissions;
     manager.answerPermission('p1', permission.id, permission.options[0].optionId);
     await expect.poll(() => manager.receipt('p1', 'op-2')?.state).toBe('completed');
+  });
+
+  // A read-only queue folder makes deleting a sent prompt's file fail with EACCES.
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('delivers queued prompts even when their saved copies cannot be deleted', async () => {
+    const { manager, store, directory } = harness();
+    store.add('p1', newTab(directory));
+    await manager.ensure('p1');
+    manager.send('p1', { operationId: 'op-1', text: 'permission' });
+    await expect.poll(() => manager.view('p1').permissions.length).toBe(1);
+    manager.send('p1', { operationId: 'op-2', text: 'second' });
+    manager.send('p1', { operationId: 'op-3', text: 'third' });
+    const queue = path.join(directory, 'spool', createHash('sha256').update('p1').digest('hex').slice(0, 32), 'queue');
+    chmodSync(queue, 0o500);
+    cleanup.push(() => chmodSync(queue, 0o700));
+    const [permission] = manager.view('p1').permissions;
+    manager.answerPermission('p1', permission.id, 'allow');
+    await expect.poll(() => manager.receipt('p1', 'op-3')?.state).toBe('completed');
+    expect(manager.receipt('p1', 'op-2')?.state).toBe('completed');
+    expect(replyText(manager.view('p1'))).toBe('Permission: allow|You said: second|You said: third');
+    expect(manager.view('p1').queue).toEqual([]);
   });
 
   it('keeps chosen settings across a restart', async () => {
