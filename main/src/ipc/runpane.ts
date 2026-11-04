@@ -1,3 +1,6 @@
+import { getChatTabManager } from '../services/chatTabs';
+import { createChatTab } from './chatTabs';
+import { chatTabLastMessage, chatTabNoTerminal, chatTabOutput, chatTabScreen, submitChatTab, waitForChatTab } from './runpaneChatTabs';
 import { paneCommandSignal } from '../daemon/commandRegistry';
 import { MAX_WORKSPACE_WAIT_TIMEOUT_MS, WorkspaceWatchCancelledError, WorkspaceWatchLeases } from '../services/workspaceWatchLeases';
 import { failureDetails, FailureLimiter } from '../utils/failureTelemetry';
@@ -142,6 +145,7 @@ import type {
   RunpaneReadinessReason,
   RunpaneDelivery,
   RunpanePanelCreateRequest,
+  RunpaneChatTabSpec,
   RunpanePanelCreateResult,
   RunpanePanelOpenRequest,
   RunpanePaneArchiveBusyAgent,
@@ -1199,10 +1203,12 @@ export function registerRunpaneHandlers(
     return withRunpaneAction(services, 'panels:create', {}, async () => {
       const normalized = parsePanelCreateRequest(request);
       const pane = resolvePane(sessionManager, normalized.paneId);
+      if (normalized.type === 'chat' && normalized.chat) return createRunpaneChatTab(services, pane.id, normalized, normalized.chat);
       const repo = sessionManager.getProjectForSession(pane.id);
       if (!repo) {
         throw new Error(`No Pane repo found for pane ${pane.id}`);
       }
+      if (!normalized.tool) throw new Error('Panel create request must include tool');
       const tool = resolveToolSpec(normalized.tool, new PathResolver(repo).environment);
       assertResumableTool(tool, normalized.resume);
       const { panel, readiness, initialInput, promptFile, attachments, warnings } = await createTerminalPanelForSession(services, pane, tool, {
@@ -1305,6 +1311,7 @@ export function registerRunpaneHandlers(
       const normalized = parsePanelOutputRequest(request);
       const panel = resolvePanel(normalized.panelId);
       const limit = normalized.limit ?? DEFAULT_PANEL_OUTPUT_LIMIT;
+      if (panel.type === 'chat') return chatTabOutput(getChatTabManager(), panel, limit);
       const scrollbackResult = panel.type === 'terminal' ? await panelScrollbackOutput(panel, limit) : null;
 
       if (scrollbackResult) {
@@ -1353,6 +1360,7 @@ export function registerRunpaneHandlers(
     return withRunpaneAction(services, 'panels:input', {}, () => {
       const normalized = parsePanelInputRequest(request);
       const panel = resolvePanel(normalized.panelId);
+      if (panel.type === 'chat') throw chatTabNoTerminal(panel, 'input');
 
       if (panel.type !== 'terminal') {
         throw new Error(`Panel ${panel.id} is a ${panel.type} panel, not a terminal panel`);
@@ -1382,6 +1390,8 @@ export function registerRunpaneHandlers(
   commandRegistry.register('runpane:panels:resume', async (request: PaneCommandValue): Promise<RunpanePanelResumeResult> => {
     return withRunpaneAction(services, 'panels:resume', {}, async () => {
       const normalized = parsePanelResumeRequest(request);
+      const target = resolveAgentPanel(normalized.panelId);
+      if (target.type === 'chat') return resumeChatTab(target);
       return resumeTerminalPanel(services, resolveTerminalPanel(normalized.panelId), normalized);
     }, result => ({
       paneId: result.paneId,
@@ -1510,6 +1520,8 @@ export function registerRunpaneHandlers(
   commandRegistry.register('runpane:panels:screen', async (request: PaneCommandValue): Promise<RunpanePanelScreenResult> => {
     return withRunpaneAction(services, 'panels:screen', {}, async () => {
       const normalized = parsePanelScreenRequest(request);
+      const target = resolveAgentPanel(normalized.panelId);
+      if (target.type === 'chat') return chatTabScreen(getChatTabManager(), target, normalized.limit ?? DEFAULT_PANEL_SCREEN_LIMIT);
       const panel = resolveTerminalPanel(normalized.panelId);
       return await buildPanelScreenResult(panel, normalized.limit ?? DEFAULT_PANEL_SCREEN_LIMIT);
     }, result => ({
@@ -1523,7 +1535,20 @@ export function registerRunpaneHandlers(
   commandRegistry.register('runpane:panels:submit', async (request: PaneCommandValue): Promise<RunpanePanelSubmitResult> => {
     return withRunpaneAction(services, 'panels:submit', {}, async () => {
       const normalized = parsePanelSubmitRequest(request);
-      const panel = resolveTerminalPanel(normalized.panelId);
+      const panel = resolveAgentPanel(normalized.panelId);
+      if (panel.type === 'chat') {
+        if (normalized.source === 'user') getMobilePushSender(configManager).arm(panel.id);
+        const pointer = normalized.asFilePointer ? await writeAgentPromptFile(panel.sessionId, normalized.input, {
+          worktreePath: localWorktreePath(services, panel.sessionId, sessionWslContext(services, panel.sessionId)), attachments: normalized.attachments,
+        }) : undefined;
+        const expected = shouldExpectReport(normalized, true) ? services.expectedReportTracker?.arm(panel.id, new Date().toISOString(), true) : undefined;
+        try {
+          const text = pointer ? pointerLine(pointer, sessionWslContext(services, panel.sessionId)) : normalized.input;
+          const result = await submitChatTab(getChatTabManager(), panel, text, { interrupt: normalized.interrupt ?? false, operationId: normalized.operationId });
+          if (expected) { services.expectedReportTracker?.delivered(panel.id); result.expectedReport = { since: expected.since }; }
+          return { ...result, ...pointerResultFields(pointer) };
+        } catch (error) { if (expected) services.expectedReportTracker?.cancelPending(panel.id, expected); throw error; }
+      }
       if (!terminalPanelManager.isTerminalInitialized(panel.id)) {
         throw new Error(`Terminal panel ${panel.id} is not initialized`);
       }
@@ -1715,6 +1740,8 @@ export function registerRunpaneHandlers(
   commandRegistry.register('runpane:panels:submit-composer', async (request: PaneCommandValue): Promise<RunpanePanelSubmitComposerResult> => {
     return withRunpaneAction(services, 'panels:submit-composer', {}, async () => {
       const normalized = parsePanelSubmitComposerRequest(request);
+      const target = resolveAgentPanel(normalized.panelId);
+      if (target.type === 'chat') throw chatTabNoTerminal(target, 'submit-composer');
       const panel = resolveTerminalPanel(normalized.panelId);
       if (!terminalPanelManager.isTerminalInitialized(panel.id)) {
         throw new Error(`Terminal panel ${panel.id} is not initialized`);
@@ -1750,6 +1777,8 @@ export function registerRunpaneHandlers(
   commandRegistry.register('runpane:panels:wait', async (request: PaneCommandValue): Promise<RunpanePanelWaitResult> => {
     return withRunpaneAction(services, 'panels:wait', {}, async () => {
       const normalized = parsePanelWaitRequest(request);
+      const target = resolveAgentPanel(normalized.panelId);
+      if (target.type === 'chat') return waitForChatTab(getChatTabManager(), target, normalized);
       const panel = resolveTerminalPanel(normalized.panelId);
       return waitForPanel(panel, normalized);
     }, result => ({
@@ -1765,6 +1794,8 @@ export function registerRunpaneHandlers(
   commandRegistry.register('runpane:panels:last-message', async (request: PaneCommandValue): Promise<RunpanePanelLastMessageResult> => {
     return withRunpaneAction(services, 'panels:last-message', {}, async () => {
       const normalized = parsePanelLastMessageRequest(request);
+      const target = resolveAgentPanel(normalized.panelId);
+      if (target.type === 'chat') return chatTabLastMessage(getChatTabManager(), target, normalized.limit ?? DEFAULT_LAST_MESSAGE_LIMIT);
       const panel = resolveTerminalPanel(normalized.panelId);
       const cwd = sessionManager.getSession(panel.sessionId)?.worktreePath;
       return readPanelLastMessage(panel, cwd, normalized.limit ?? DEFAULT_LAST_MESSAGE_LIMIT);
@@ -1778,12 +1809,13 @@ export function registerRunpaneHandlers(
   commandRegistry.register('runpane:report', async (request: PaneCommandValue): Promise<RunpaneReportResult> => {
     return withRunpaneAction(services, 'report', {}, async () => {
       const normalized = parseReportRequest(request);
-      const panel = resolveTerminalPanel(normalized.panelId);
+      const panel = resolveAgentPanel(normalized.panelId);
       if (normalized.paneId && normalized.paneId !== panel.sessionId) {
         throw new Error(`Panel ${panel.id} belongs to Pane ${panel.sessionId}, not ${normalized.paneId}.`);
       }
       const report = normalizeAgentReport(normalized, new Date().toISOString());
-      await storePanelAgentReport(panel, report);
+      if (panel.type === 'chat') getChatTabManager().setReport(panel.id, report);
+      else await storePanelAgentReport(panel, report);
       const panelSummary = panelToSummary(panelManager.getPanel(panel.id) ?? panel);
       const { liveWatchers } = workspaceJournal.deliverPaneEntry(panel.sessionId, {
         kind: 'agent.report',
@@ -2245,10 +2277,11 @@ function panelToSummary(panel: ToolPanel, dockPanelId?: string, launchExited = f
   const customState = isRecord(panel.state.customState) ? panel.state.customState : {};
   const initialCommand = optionalString(customState.initialCommand);
   const commandAgentType = resolveAgentTypeFromCommand(initialCommand);
-  const agentType = optionalAgentId(customState.agentType) ?? commandAgentType;
+  const agentType = optionalAgentId(customState.agentType) ?? (panel.type === 'chat' ? optionalAgentId(customState.agent) : undefined) ?? commandAgentType;
   const agentDetection = optionalAgentDetection(customState.agentDetection) ??
     (agentType ? (agentType === commandAgentType ? 'command' : 'declared') : undefined);
   const isCliPanel = optionalBoolean(customState.isCliPanel) ?? (agentType ? true : undefined);
+  const chatRunning = panel.type === 'chat' ? getChatTabManager().agentState(panel.id) !== 'unknown' && getChatTabManager().isRunning(panel.id) : undefined;
 
   return {
     id: panel.id,
@@ -2257,8 +2290,8 @@ function panelToSummary(panel: ToolPanel, dockPanelId?: string, launchExited = f
     type: panel.type,
     title: panel.title,
     active: Boolean(panel.state.isActive),
-    initialized: panel.type === 'terminal' ? terminalPanelManager.isTerminalInitialized(panel.id) : undefined,
-    running: panel.type === 'terminal' ? terminalPanelManager.isTerminalInitialized(panel.id) && !launchExited : undefined,
+    initialized: panel.type === 'terminal' ? terminalPanelManager.isTerminalInitialized(panel.id) : chatRunning,
+    running: panel.type === 'terminal' ? terminalPanelManager.isTerminalInitialized(panel.id) && !launchExited : chatRunning,
     agentType,
     agentDetection,
     launchCommand: optionalString(customState.launchCommand) ?? initialCommand,
@@ -3410,6 +3443,60 @@ async function mapSequentially<T, R>(
   }
 
   return results;
+}
+
+/** `panels create --chat` / `--agent-farm`: a chat tab whose first prompt is the initial input. */
+async function createRunpaneChatTab(services: AppServices, paneId: string, request: RunpanePanelCreateRequest, chat: RunpaneChatTabSpec): Promise<RunpanePanelCreateResult> {
+  const activate = request.focus === true || (request.noFocus !== true && request.source !== 'agent');
+  const created = await createChatTab(services, {
+    sessionId: paneId, agent: chat.agent, title: chat.title, initialInput: chat.initialInput, activate,
+    launch: chat.profile ? { kind: 'profile', profile: chat.profile, args: chat.args } : { kind: 'agent' },
+  });
+  const manager = getChatTabManager();
+  const expected = shouldExpectReport(request, Boolean(chat.initialInput)) ? services.expectedReportTracker?.arm(created.panelId, new Date().toISOString(), true) : undefined;
+  if (request.waitReady) {
+    const deadline = Date.now() + (request.readyTimeoutMs ?? 30_000);
+    while (Date.now() < deadline && manager.view(created.panelId, 0, false).status === 'starting') await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  const view = manager.view(created.panelId, 0, false);
+  if (expected && chat.initialInput) services.expectedReportTracker?.delivered(created.panelId);
+  const panel = panelManager.getPanel(created.panelId);
+  return {
+    ok: view.status !== 'stopped', paneId, panelId: created.panelId, title: panel?.title ?? chat.title ?? view.agent,
+    active: activate, focused: activate,
+    tool: { title: panel?.title ?? view.agent, command: chat.profile ? `agent-farm ${chat.profile} (chat)` : `${view.agent} (chat)`, agent: view.agent },
+    expectedReport: services.expectedReportTracker?.expectation(created.panelId),
+    // A stopped tab says why in `panels wait` (blocked.message) and restarts with `panels resume`.
+    nextCommand: view.status === 'stopped' ? `runpane panels wait --panel ${created.panelId} --json` : chat.initialInput ? `runpane panels wait --panel ${created.panelId} --for idle --json` : `runpane panels submit --panel ${created.panelId} --text "<message>" --json`,
+  };
+}
+
+/** An agent tab: a terminal panel or a chat tab. */
+function resolveAgentPanel(panelId: string): ToolPanel {
+  const panel = resolvePanel(panelId);
+  if (panel.type !== 'terminal' && panel.type !== 'chat') {
+    throw new Error(`Panel ${panel.id} is a ${panel.type} panel, not a terminal or chat tab`);
+  }
+  return panel;
+}
+
+/** A chat tab restarts its agent and loads the same conversation; there is no terminal to relaunch. */
+async function resumeChatTab(panel: ToolPanel): Promise<RunpanePanelResumeResult> {
+  const manager = getChatTabManager();
+  const before = manager.view(panel.id, 0, false);
+  if (manager.isRunning(panel.id) && before.status !== 'stopped') {
+    return { ok: true, panelId: panel.id, paneId: panel.sessionId, action: 'already-running', message: 'The chat tab\'s agent is already running.', agentType: before.agent, panel: panelToSummary(panel), nextCommand: `runpane panels wait --panel ${panel.id} --for idle --json` };
+  }
+  await (before.status === 'stopped' ? manager.restart(panel.id) : manager.ensure(panel.id));
+  const after = manager.view(panel.id, 0, false);
+  if (after.status === 'stopped') {
+    throw new PaneError('CHAT_RESUME_FAILED', `Chat tab ${panel.id} did not start: ${after.problem?.message ?? 'its agent stopped'}.`, after.problem?.next ?? `Open the chat tab and press Restart, or run \`runpane panels resume --panel ${panel.id}\` again.`);
+  }
+  return {
+    ok: true, panelId: panel.id, paneId: panel.sessionId, action: 'resumed', agentType: after.agent,
+    message: 'The chat tab\'s agent started again and loaded its conversation.',
+    panel: panelToSummary(panelManager.getPanel(panel.id) ?? panel), nextCommand: `runpane panels wait --panel ${panel.id} --for idle --json`,
+  };
 }
 
 function resolveTerminalPanel(panelId: string): ToolPanel {
@@ -4902,14 +4989,32 @@ function parsePanelCreateRequest(value: PaneCommandValue): RunpanePanelCreateReq
   if (!paneId) {
     throw new Error('Panel create request must include paneId');
   }
-  if (value.type !== undefined && value.type !== 'terminal') {
-    throw new Error('Panel create request currently supports only type "terminal"');
+  if (value.type !== undefined && value.type !== 'terminal' && value.type !== 'chat') {
+    throw new Error('Panel create request supports type "terminal" or "chat"');
   }
   if (value.source !== undefined && value.source !== 'user' && value.source !== 'agent') {
     throw new Error('Panel create source must be user or agent');
   }
   if (value.noFocus === true && value.focus === true) {
     throw new Error('Panel create request cannot include both noFocus and focus');
+  }
+
+  if (value.type === 'chat') {
+    const chat = decodeBoundary(value.chat ?? {}, boundary.object({
+      agent: boundary.optional(boundary.enumeration('claude', 'codex')),
+      profile: boundary.optional(boundary.nonEmptyString),
+      args: boundary.optional(boundary.record(boundary.string)),
+      initialInput: boundary.optional(boundary.string),
+      title: boundary.optional(boundary.string),
+    }));
+    if (!chat.agent && !chat.profile) throw new PaneError('ERR_RUNPANE_CHAT_AGENT_REQUIRED', 'A chat tab needs an agent (claude or codex) or an Agent Farm profile. No tab was created.', 'Pass --agent claude, --agent codex or --agent-farm <profile> with --chat.');
+    return {
+      paneId, type: 'chat', chat,
+      noFocus: optionalBoolean(value.noFocus), focus: optionalBoolean(value.focus),
+      source: value.source === 'user' || value.source === 'agent' ? value.source : undefined,
+      waitReady: optionalBoolean(value.waitReady), readyTimeoutMs: parsePositiveInteger(value.readyTimeoutMs, 'readyTimeoutMs'),
+      expectReport: optionalBoolean(value.expectReport),
+    };
   }
 
   return {

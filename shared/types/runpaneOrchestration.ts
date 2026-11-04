@@ -577,7 +577,7 @@ export type RunpanePanelActivityStatus = 'active' | 'idle';
 /** Rolled-up agent state for a Pane: the most urgent state of its live agent panels. */
 export type RunpanePaneAgentState = 'ready' | 'working' | 'blocked' | 'none';
 export type RunpaneAgentDetection = 'declared' | 'command' | 'process' | 'screen';
-export type RunpanePanelScreenSource = 'alternateScreen' | 'scrollback' | 'persistedOutput' | 'empty';
+export type RunpanePanelScreenSource = 'alternateScreen' | 'scrollback' | 'persistedOutput' | 'empty' | 'acpTranscript';
 export type RunpanePanelWaitCondition = 'initialized' | 'ready' | 'idle' | 'text';
 export type RunpanePanelBlockerKind =
   | 'first-run-dialog'
@@ -1174,10 +1174,23 @@ export interface RunpanePanelResumeResult {
 
 export type RunpanePanelCreateSource = 'user' | 'agent';
 
+/** `panels create --chat` / `--agent-farm`: a chat tab instead of a terminal panel. */
+export interface RunpaneChatTabSpec {
+  agent?: 'claude' | 'codex';
+  /** An Agent Farm profile, started through `agent-farm run --print-acp`. */
+  profile?: string;
+  args?: Record<string, string>;
+  /** The first prompt, sent once when the conversation starts. */
+  initialInput?: string;
+  title?: string;
+}
+
 export interface RunpanePanelCreateRequest {
   paneId: string;
-  type?: 'terminal';
-  tool: RunpaneToolSpec;
+  type?: 'terminal' | 'chat';
+  /** Required for a terminal panel. */
+  tool?: RunpaneToolSpec;
+  chat?: RunpaneChatTabSpec;
   /**
    * A native agent session id to resume, as `panes adopt --resume`: Pane launches the agent's own
    * resume for this id and records it as the tab's id, so a restart resumes the same conversation.

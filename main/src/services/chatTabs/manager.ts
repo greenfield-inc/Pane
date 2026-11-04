@@ -93,8 +93,8 @@ export class ChatTabManager {
     return this.tab(panelId).transcript?.all() ?? [];
   }
 
-  lastMessage(panelId: string, role: AgentChatMessage['role'] = 'assistant'): AgentChatMessage | undefined {
-    return this.tab(panelId).transcript?.last(role);
+  lastMessage(panelId: string, role: AgentChatMessage['role'] = 'assistant', accept: (message: AgentChatMessage) => boolean = () => true): AgentChatMessage | undefined {
+    return this.tab(panelId).transcript?.last(role, accept);
   }
 
   /** The tab's status as agent status (sidebar, tabs, runpane), without starting it. */
@@ -193,6 +193,11 @@ export class ChatTabManager {
     await runtime.configure(configId, value);
     this.update(panelId, state => ({ ...state, settings: { ...state.settings, [configId]: value } }));
     this.publish(panelId);
+  }
+
+  /** `runpane report` from the tab's agent; kept in its state like a terminal agent tab's report. */
+  setReport(panelId: string, report: NonNullable<ChatPanelState['agentReport']>): void {
+    this.update(panelId, state => ({ ...state, agentReport: report }));
   }
 
   /** The tab was closed: end its agent and forget its runtime. The agent keeps its own session. */

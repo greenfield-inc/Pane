@@ -800,8 +800,10 @@ interface PanelResumeResult {
 
 interface PanelCreateRequest {
   paneId: string;
-  type?: 'terminal';
-  tool: PaneToolSpec;
+  type?: 'terminal' | 'chat';
+  tool?: PaneToolSpec;
+  /** A chat tab: a plain agent, or an Agent Farm profile with its launch arguments. */
+  chat?: { agent?: 'claude' | 'codex'; profile?: string; args?: Record<string, string>; initialInput?: string; title?: string };
   /** A native session id the new tab resumes, as panes adopt --resume. */
   resume?: string;
   noFocus?: boolean;
@@ -927,7 +929,7 @@ interface PanelScreenResult {
   ok: true;
   panelId: string;
   paneId?: string;
-  source: 'alternateScreen' | 'scrollback' | 'persistedOutput' | 'empty';
+  source: 'alternateScreen' | 'scrollback' | 'persistedOutput' | 'empty' | 'acpTranscript';
   limit: number;
   returnedLineCount: number;
   hasMore: boolean;
@@ -1940,7 +1942,7 @@ export const panelScreenResultSchema: BoundarySchema<PanelScreenResult> = bounda
   ok: boundary.literal(true),
   panelId: boundary.string,
   paneId: boundary.optional(boundary.string),
-  source: boundary.enumeration('alternateScreen', 'scrollback', 'persistedOutput', 'empty'),
+  source: boundary.enumeration('alternateScreen', 'scrollback', 'persistedOutput', 'empty', 'acpTranscript'),
   limit: boundary.number,
   returnedLineCount: boundary.number,
   hasMore: boundary.boolean,
@@ -4182,6 +4184,30 @@ export async function buildPanelCreateRequest(parsed: ParsedArgs): Promise<Panel
     throw new Error('Use either --focus or --no-focus, not both.');
   }
   const source = parsed.source === 'user' || parsed.source === 'agent' ? parsed.source : undefined;
+  if (parsed.launchArgs && !parsed.agentFarm) throw new Error('--arg is a launch argument for --agent-farm; pass --agent-farm <profile> too.');
+  if (parsed.chat || parsed.agentFarm) {
+    if (parsed.toolCommand) throw new Error('A chat tab runs its agent over ACP, so it takes --agent or --agent-farm, not --tool-command.');
+    if (parsed.agentFarm && parsed.agent && parsed.agent !== 'claude' && parsed.agent !== 'codex') throw new Error('An Agent Farm profile chooses its own agent; drop --agent.');
+    if (!parsed.agentFarm && parsed.agent !== 'claude' && parsed.agent !== 'codex') throw new Error('--chat opens Claude or Codex: pass --agent claude or --agent codex, or --agent-farm <profile>.');
+    if (parsed.asFilePointer || parsed.attachments?.length) throw new Error('--as-file-pointer and --attach are for terminal tabs; send the first prompt with --initial-input.');
+    const initialInput = parsed.initialInputFile ? stripUtf8Bom(readInputSource(parsed.initialInputFile)) : parsed.initialInput;
+    const chat: NonNullable<PanelCreateRequest['chat']> = {};
+    if (parsed.agent === 'claude' || parsed.agent === 'codex') chat.agent = parsed.agent;
+    if (parsed.agentFarm) chat.profile = parsed.agentFarm;
+    if (parsed.launchArgs) chat.args = parsed.launchArgs;
+    if (initialInput) chat.initialInput = initialInput;
+    if (parsed.title) chat.title = parsed.title;
+    return {
+      paneId: parsed.paneId,
+      type: 'chat',
+      chat,
+      noFocus: !parsed.focus && (parsed.noFocus || source === 'agent') ? true : undefined,
+      focus: parsed.focus || undefined,
+      source,
+      waitReady: parsed.waitReady || undefined,
+      readyTimeoutMs: parsed.readyTimeoutMs,
+    };
+  }
 
   return {
     paneId: parsed.paneId,
@@ -4544,10 +4570,11 @@ async function confirmPanelCreate(parsed: ParsedArgs, request: PanelCreateReques
     throw new Error('runpane panels create mutates Pane state. Rerun with --yes in non-interactive shells.');
   }
 
-  const label = 'agent' in request.tool ? request.tool.agent : request.tool.command;
+  const label = request.chat ? request.chat.profile ?? request.chat.agent ?? 'chat' : request.tool && 'agent' in request.tool ? request.tool.agent : request.tool?.command;
+  const kind = request.type === 'chat' ? 'chat tab' : 'terminal panel';
   const rl = createInterface({ input, output });
   try {
-    const answer = (await rl.question(`Create a terminal panel for ${label} in pane ${request.paneId}? [y/N] `)).trim().toLowerCase();
+    const answer = (await rl.question(`Create a ${kind} for ${label} in pane ${request.paneId}? [y/N] `)).trim().toLowerCase();
     if (answer !== 'y' && answer !== 'yes') {
       throw new Error('Cancelled.');
     }

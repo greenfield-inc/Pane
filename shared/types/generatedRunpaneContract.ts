@@ -2444,6 +2444,16 @@ export const RUNPANE_CONTRACT = {
         "name": "--content",
         "value": "<text>",
         "description": "Text that workspace write writes instead of stdin."
+      },
+      {
+        "name": "--agent-farm",
+        "value": "<profile>",
+        "description": "Start an Agent Farm profile (such as greenfield/implementer:opus) in a chat tab."
+      },
+      {
+        "name": "--arg",
+        "value": "<key=value>",
+        "description": "A launch argument for --agent-farm, shown to the agent in its LAUNCH CONTEXT; repeatable."
       }
     ],
     "localBoolean": [
@@ -2578,6 +2588,10 @@ export const RUNPANE_CONTRACT = {
       {
         "name": "--paused",
         "description": "loops create only: create the loop paused."
+      },
+      {
+        "name": "--chat",
+        "description": "Open the agent as a chat tab (Claude or Codex over ACP, no terminal) instead of a terminal tab."
       }
     ]
   },
@@ -11465,7 +11479,8 @@ export const RUNPANE_CONTRACT = {
             "alternateScreen",
             "scrollback",
             "persistedOutput",
-            "empty"
+            "empty",
+            "acpTranscript"
           ]
         },
         "limit": {
@@ -17244,7 +17259,7 @@ export const RUNPANE_CONTRACT = {
       "panels input": {
         "name": "panels input",
         "summary": "Send input bytes to a terminal panel.",
-        "details": "Use this to answer prompts or continue an agent inside an existing Pane terminal panel. Input is byte-oriented; choose --input-file for exact control over newlines and control characters.",
+        "details": "Use this to answer prompts or continue an agent inside an existing Pane terminal panel. Input is byte-oriented; choose --input-file for exact control over newlines and control characters. A chat tab has no terminal: input fails with CHAT_TAB_NO_TERMINAL; use panels submit.",
         "requiresPaneDaemon": true,
         "mutates": true,
         "arguments": [
@@ -17354,7 +17369,7 @@ export const RUNPANE_CONTRACT = {
       "panels screen": {
         "name": "panels screen",
         "summary": "Read a compact current-screen view from a terminal panel.",
-        "details": "Use this for token-safe current terminal state. It prefers active alternate-screen/TUI output, then live scrollback, then persisted output. Default output is bounded to 80 lines.",
+        "details": "Use this for token-safe current terminal state. It prefers active alternate-screen/TUI output, then live scrollback, then persisted output. On a chat tab it returns the newest transcript lines with source acpTranscript. Default output is bounded to 80 lines.",
         "requiresPaneDaemon": true,
         "mutates": false,
         "arguments": [
@@ -17492,7 +17507,8 @@ export const RUNPANE_CONTRACT = {
           "For Claude, text starting with `!`, `#`, `/` or `@` is sent unchanged and the result carries a `warnings` entry (for example `leading-bang-runs-shell`), because Claude Code gives those characters a meaning of its own.",
           "`--as-file-pointer` writes the text to a prompt file readable only by you, inside the Pane's git worktree at `.pane/prompts/` (hidden by the repository's `.git/info/exclude`, never committed) when it has one, otherwise under `<pane-dir>/prompts/<pane-id>/`, so an agent limited to its working directories reads it without a permission prompt, and sends the one line `Read and follow <path>`, with the path relative to the worktree (where the agent starts) when the file is inside it; the result's `promptFile` is always absolute. Prefer it for long prompts.",
           "`--attach <file>` (repeatable, with `--as-file-pointer`) copies each file into a folder beside the prompt file and sends `Read and follow <path> (attached: <copy>, ...)`; the result lists the copies in `attachments`.",
-          "With --interrupt, Pane sends the stop key only while the agent is active, waits for an empty idle composer, then submits. If readiness times out, replacement text is not sent. A queued result is not read yet: delivery.message explains the delay; never resend queued text. Interrupt success requires delivery.state: taken. Unknown agents and occupied composers are rejected without typing."
+          "With --interrupt, Pane sends the stop key only while the agent is active, waits for an empty idle composer, then submits. If readiness times out, replacement text is not sent. A queued result is not read yet: delivery.message explains the delay; never resend queued text. Interrupt success requires delivery.state: taken. Unknown agents and occupied composers are rejected without typing.",
+          "On a chat tab, submit sends an ACP prompt and returns sequenceName=acp, enter=none, operationId and acp-receipt delivery evidence; a prompt sent while the agent works is queued and sent next. Do not blindly resend after a lost response."
         ]
       },
       "panels resume": {
@@ -17709,7 +17725,8 @@ export const RUNPANE_CONTRACT = {
         "notes": [
           "If blocked is present, do not assume success. Use blocked.suggestedCommand or inspect `panels screen`.",
           "If stopped is true, the panel's terminal is not running (for example after a Pane restart); run nextCommand (`panels resume`) instead of waiting again.",
-          "The default timeout and screen are intentionally small for agent context safety."
+          "The default timeout and screen are intentionally small for agent context safety.",
+          "On a chat tab, status comes from the host ACP session (a turn that ended is ready, a pending approval or question is blocked) and the screen field has source=acpTranscript: transcript text, not a terminal screen."
         ]
       },
       "panels last-message": {
@@ -17778,6 +17795,23 @@ export const RUNPANE_CONTRACT = {
             "value": "<command>",
             "required": false,
             "description": "Custom terminal command to launch instead of a built-in agent."
+          },
+          {
+            "name": "--chat",
+            "required": false,
+            "description": "Open --agent claude or codex as a chat tab (ACP, no terminal) instead of a terminal tab. Needs chat tabs on in Settings > Advanced."
+          },
+          {
+            "name": "--agent-farm",
+            "value": "<profile>",
+            "required": false,
+            "description": "Start this Agent Farm profile in a chat tab; Agent Farm prints its ACP launch (agent-farm run --print-acp)."
+          },
+          {
+            "name": "--arg",
+            "value": "<key=value>",
+            "required": false,
+            "description": "A launch argument for --agent-farm; repeatable."
           },
           {
             "name": "--title",
@@ -17887,7 +17921,8 @@ export const RUNPANE_CONTRACT = {
           "Panels share the existing Pane's worktree and branch.",
           "`panels create` is for visible helper/reviewer tabs, not the agent's default private delegation mechanism.",
           "For agent-created panels, prefer --source agent or --no-focus to avoid stealing focus from the user or implementation tab.",
-          "With --tool-command, --agent names the agent the command runs (a wrapper such as `agent-farm run`): Pane launches the command unchanged and treats the panel as that agent. Without --agent, Pane detects Claude Code, Codex and Cursor from the foreground process or the agent's screen, and --wait-ready waits for the detected agent's input box; a command that never shows a supported agent is not ready and nothing is typed into it."
+          "With --tool-command, --agent names the agent the command runs (a wrapper such as `agent-farm run`): Pane launches the command unchanged and treats the panel as that agent. Without --agent, Pane detects Claude Code, Codex and Cursor from the foreground process or the agent's screen, and --wait-ready waits for the detected agent's input box; a command that never shows a supported agent is not ready and nothing is typed into it.",
+          "`--chat` or `--agent-farm` creates a chat tab: --initial-input is its first prompt, sent once when the conversation starts; --wait-ready waits for the agent to start. `panels submit`, `wait`, `screen`, `output`, `last-message`, `report` and `resume` work on chat tabs; `panels input` and `submit-composer` do not."
         ]
       },
       "panels open": {
@@ -17977,7 +18012,7 @@ export const RUNPANE_CONTRACT = {
       "panels submit-composer": {
         "name": "panels submit-composer",
         "summary": "Submit an agent composer using the panel-appropriate key sequence.",
-        "details": "Use this after sending text into an agent composer. Auto uses Tab to queue while Codex is working and Enter when ready; Pane verifies that the text left the composer.",
+        "details": "Use this after sending text into an agent composer. Auto uses Tab to queue while Codex is working and Enter when ready; Pane verifies that the text left the composer. A chat tab has no composer to submit: it fails with CHAT_TAB_NO_TERMINAL; use panels submit.",
         "requiresPaneDaemon": true,
         "mutates": true,
         "arguments": [

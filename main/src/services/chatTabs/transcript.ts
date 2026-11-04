@@ -78,8 +78,11 @@ export class ChatTranscript {
   }
 
   /** The newest message of a role, without copying the conversation. */
-  last(role: AgentChatMessage['role']): AgentChatMessage | undefined {
-    for (let index = this.residentMessages.length - 1; index >= 0; index--) if (this.residentMessages[index].role === role) return this.residentMessages[index];
+  last(role: AgentChatMessage['role'], accept: (message: AgentChatMessage) => boolean = () => true): AgentChatMessage | undefined {
+    for (let index = this.residentMessages.length - 1; index >= 0; index--) {
+      const message = this.residentMessages[index];
+      if (message.role === role && accept(message)) return structuredClone(message);
+    }
     return undefined;
   }
 

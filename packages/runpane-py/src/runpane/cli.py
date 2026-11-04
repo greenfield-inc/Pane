@@ -171,6 +171,9 @@ class ParsedArgs:
     launch: bool = False
     agent: Optional[str] = None
     tool_command: Optional[str] = None
+    chat: bool = False
+    agent_farm: Optional[str] = None
+    launch_args: Dict[str, str] = field(default_factory=dict)
     title: Optional[str] = None
     url: Optional[str] = None
     file: Optional[str] = None
@@ -847,6 +850,9 @@ def parse_local_boolean_flag(parsed: ParsedArgs, flag: str) -> None:
     if flag == "--as-file-pointer":
         parsed.as_file_pointer = True
         return
+    if flag == "--chat":
+        parsed.chat = True
+        return
     if flag == "--remove-worktree":
         parsed.remove_worktree = True
         return
@@ -976,6 +982,15 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
         return
     if flag == "--tool-command":
         parsed.tool_command = value
+        return
+    if flag == "--agent-farm":
+        parsed.agent_farm = value
+        return
+    if flag == "--arg":
+        key, separator, rest = value.partition("=")
+        if not separator or not key:
+            raise ValueError(f'Invalid --arg "{value}". Expected key=value.')
+        parsed.launch_args[key] = rest
         return
     if flag == "--title":
         parsed.title = value

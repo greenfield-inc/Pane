@@ -41,6 +41,12 @@ export interface ParsedArgs {
   baseBranch?: string;
   agent?: RunpaneAgent;
   toolCommand?: string;
+  /** `--chat`: open the agent as a chat tab. */
+  chat?: boolean;
+  /** `--agent-farm <profile>`: start an Agent Farm profile in a chat tab. */
+  agentFarm?: string;
+  /** `--arg key=value`, repeatable: launch arguments for --agent-farm. */
+  launchArgs?: Record<string, string>;
   title?: string;
   url?: string;
   file?: string;
@@ -697,6 +703,10 @@ function parseLocalBooleanFlag(flag: string, parsed: ParsedArgs): void {
     parsed.asFilePointer = true;
     return;
   }
+  if (flag === '--chat') {
+    parsed.chat = true;
+    return;
+  }
   if (flag === '--follow') {
     parsed.follow = true;
     return;
@@ -896,6 +906,16 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
   }
   if (flag === '--tool-command') {
     parsed.toolCommand = value;
+    return;
+  }
+  if (flag === '--agent-farm') {
+    parsed.agentFarm = value;
+    return;
+  }
+  if (flag === '--arg') {
+    const separator = value.indexOf('=');
+    if (separator <= 0) throw new Error(`Invalid --arg "${value}". Expected key=value.`);
+    (parsed.launchArgs ??= {})[value.slice(0, separator)] = value.slice(separator + 1);
     return;
   }
   if (flag === '--title') {
