@@ -6,6 +6,8 @@ import type { AgentChatPermission } from '../../../../shared/types/agentChat';
 import { describeChatContent, permissionToolId } from '../../../../shared/agentChatPresentation';
 import type { JsonValue } from '../../../../shared/validation/boundaryDecoder';
 import { imageOf, planEntryKeys, stoppedText, turnSummary, type ChatWorkerLine, type ChatStep, type ChatTurn, type PlanEntry, type StepGroup, type TurnItem } from '../../../../shared/chatTabPresentation';
+import { responseMarkdown, userMarkdown } from '../../../../shared/chatTabMarkdown';
+import { ChatCopyButton } from './ChatCopyButton';
 
 export interface ChatTurnActions {
   /** Opens the file's diff in Pane's diff view. A diff never renders in the thread by itself. */
@@ -14,7 +16,16 @@ export interface ChatTurnActions {
   onOpenWorker?: (paneId: string) => void;
 }
 
-const Markdown = memo(({ text }: { text: string }) => <div className="chat-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: ({ children, ...props }) => <a {...props} target="_blank" rel="noopener noreferrer">{children}</a> }}>{text}</ReactMarkdown></div>);
+/** A code block keeps its own copy button, for the code alone. */
+function CodeBlock({ children, ...props }: React.ComponentProps<'pre'>) {
+  const [element, setElement] = useState<HTMLPreElement | null>(null);
+  return <div className="chat-code">
+    <pre ref={setElement} {...props}>{children}</pre>
+    <ChatCopyButton label="Copy code" className="chat-copy chat-code-copy" text={() => element?.innerText.replace(/\n$/, '') ?? ''} />
+  </div>;
+}
+
+const Markdown = memo(({ text }: { text: string }) => <div className="chat-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: ({ children, ...props }) => <a {...props} target="_blank" rel="noopener noreferrer">{children}</a>, pre: CodeBlock }}>{text}</ReactMarkdown></div>);
 Markdown.displayName = 'Markdown';
 
 const VERBS = { explore: ['Exploring', 'Explored'], edit: ['Edit', 'Edited'], run: ['Run', 'Ran'], think: ['Thinking', 'Thought'], other: ['Using', 'Used'] } satisfies Record<ChatStep['kind'], [string, string]>;
@@ -104,9 +115,12 @@ function UserImage({ content }: { content: JsonValue }) {
 
 function UserMessage({ turn }: { turn: ChatTurn }) {
   if (!turn.user) return null;
-  return <div className="chat-user" data-anchor-id={turn.user.id}>{turn.user.parts.map((part, index) => part.type === 'text'
-    ? <span key={`${turn.id}:${index}`} className="whitespace-pre-wrap">{part.text}</span>
-    : part.type === 'content' ? <UserImage key={`${turn.id}:${index}`} content={part.content} /> : null)}</div>;
+  return <div className="chat-user-row">
+    <div className="chat-user" data-anchor-id={turn.user.id}>{turn.user.parts.map((part, index) => part.type === 'text'
+      ? <span key={`${turn.id}:${index}`} className="whitespace-pre-wrap">{part.text}</span>
+      : part.type === 'content' ? <UserImage key={`${turn.id}:${index}`} content={part.content} /> : null)}</div>
+    {userMarkdown(turn) && <div className="chat-message-actions"><ChatCopyButton label="Copy message" text={() => userMarkdown(turn)} /></div>}
+  </div>;
 }
 
 const WORKER_ICONS = { running: LoaderCircle, waiting: AlertCircle, done: CircleCheck, failed: XCircle, idle: Circle, missing: XCircle };
@@ -154,6 +168,7 @@ export const ChatTurnView = memo(function ChatTurnView({ turn, quiet, permission
         {open && <div className="chat-fold-body"><Item item={item} waiting={waiting} actions={actions} /></div>}
       </div>;
     })}
+    {!turn.running && responseMarkdown(turn) && <div className="chat-message-actions chat-response-actions"><ChatCopyButton label="Copy response" text={() => responseMarkdown(turn)} /></div>}
     {stoppedText(turn) && <p className="chat-turn-stopped">{stoppedText(turn)}</p>}
     {workers.map(worker => <WorkerLine key={worker.paneId} worker={worker} onOpen={actions.onOpenWorker} />)}
   </div>;

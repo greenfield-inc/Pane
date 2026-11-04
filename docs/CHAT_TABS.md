@@ -97,6 +97,13 @@ says, and after running the chat tab suites against it.
   the agent's own commands and skills; **Stop** cancels the turn. A message sent
   while the agent works is queued and sent next; **Remove** takes it out of the
   queue.
+- **Copying**: message text can be selected and copied like any page. Each
+  message and each finished response has a copy button (on hover with a mouse,
+  always on touch) that copies it as Markdown, with each tool step as one short
+  line and no raw output. **Copy conversation** above the thread copies the
+  loaded conversation under **You:** and the agent's name. Code blocks have
+  their own copy button. On the phone app, each message has a copy action, and a
+  long press on a reply copies it.
 - **Attachments** (desktop and PWA): drop photos and files anywhere on the chat,
   paste them into the composer, or pick them with **+**. An image the agent
   takes (PNG, JPEG, WebP or GIF up to 5 MB) is sent as an image. Any other file,

@@ -174,3 +174,30 @@
 .chat-attach-alert { display:flex; align-items:flex-start; gap:8px; }
 .chat-attach-alert ul { flex:1; min-width:0; display:flex; flex-direction:column; gap:4px; overflow-wrap:anywhere; }
 @media (prefers-reduced-motion:reduce) { .chat-spin { animation:none; } }
+/* Copying (D-140). The app's chrome is not selectable (index.css); the conversation is. */
+.chat-tab .chat-viewport { user-select:text; }
+.chat-tab .chat-viewport :is(button,[role=button],.chat-step-icon,.chat-message-actions) { user-select:none; }
+.chat-user-row { align-self:flex-end; display:flex; flex-direction:column; align-items:flex-end; gap:2px; max-width:min(85%, 40rem); }
+.chat-user-row .chat-user { align-self:auto; max-width:100%; }
+.chat-message-actions { display:flex; min-height:28px; }
+.chat-response-actions { margin-top:-4px; }
+.chat-copy { display:inline-flex; align-items:center; gap:6px; height:28px; min-width:28px; padding:0 6px; border-radius:8px; font-size:12px; color:var(--chat-muted-foreground); }
+.chat-copy:hover { background:var(--chat-muted); color:var(--chat-foreground); }
+.chat-copy[data-state=copied] { color:var(--color-status-success, var(--chat-foreground)); }
+.chat-copy[data-state=failed] { color:var(--chat-destructive); }
+.chat-copy-icon { display:inline-flex; width:16px; height:16px; align-items:center; justify-content:center; flex-shrink:0; }
+.chat-copy-icon svg { width:15px; height:15px; }
+/* Per-message buttons appear on hover or focus with a mouse, and stay visible on touch screens. */
+@media (hover:hover) {
+  .chat-message-actions .chat-copy { opacity:0; transition:opacity 150ms; }
+  .chat-user-row:hover .chat-copy,.chat-turn:hover .chat-response-actions .chat-copy,.chat-message-actions .chat-copy:focus-visible,.chat-message-actions .chat-copy[data-state=copied],.chat-message-actions .chat-copy[data-state=failed] { opacity:1; }
+}
+.chat-header-bar { display:flex; flex-shrink:0; justify-content:flex-end; padding:4px 12px 0; }
+.chat-code { position:relative; }
+.chat-code .chat-code-copy { position:absolute; top:6px; right:6px; background:var(--chat-background); }
+@media (hover:hover) {
+  .chat-code .chat-code-copy { opacity:0; transition:opacity 150ms; }
+  .chat-code:hover .chat-code-copy,.chat-code .chat-code-copy:focus-visible,.chat-code .chat-code-copy[data-state=copied] { opacity:1; }
+}
+@media (prefers-reduced-motion:reduce) { .chat-message-actions .chat-copy,.chat-code .chat-code-copy { transition:none; } }
+@media (hover:none) { .chat-message-actions .chat-copy,.chat-code .chat-code-copy { min-width:44px; height:44px; justify-content:center; } }

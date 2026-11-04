@@ -1,3 +1,4 @@
+import { responseMarkdown } from '@shared/chatTabMarkdown';
 import { placeWorkers, stoppedText, turnSummary, type ChatStep, type ChatTurn, type ChatWorkerLine, type PlanEntry, type StepGroup } from '@shared/chatTabPresentation';
 import type { AgentChatMessage } from '@shared/types/agentChat';
 import type { JsonValue } from '@shared/validation/boundaryDecoder';
@@ -13,7 +14,9 @@ export type ChatRow =
   | { key: string; kind: 'plan'; entries: PlanEntry[] }
   | { key: string; kind: 'content'; content: JsonValue }
   | { key: string; kind: 'stopped'; text: string }
-  | { key: string; kind: 'worker'; worker: ChatWorkerLine };
+  | { key: string; kind: 'worker'; worker: ChatWorkerLine }
+  /** Copies a finished response as Markdown (D-140). */
+  | { key: string; kind: 'copy'; text: string };
 
 /**
  * The conversation as rows. A quiet chat (the Session orchestrator, D-18) shows only
@@ -47,6 +50,8 @@ export function chatRows(turns: readonly ChatTurn[], options: { quiet: boolean; 
       else if (item.type === 'plan') rows.push({ key: item.id, kind: 'plan', entries: item.entries });
       else rows.push({ key: item.id, kind: 'content', content: item.content });
     }
+    const response = turn.running ? '' : responseMarkdown(turn);
+    if (response) rows.push({ key: `${turn.id}:copy`, kind: 'copy', text: response });
     const stopped = stoppedText(turn);
     if (stopped) rows.push({ key: `${turn.id}:stopped`, kind: 'stopped', text: stopped });
     for (const worker of placed.byTurn.get(turn.id) ?? []) rows.push({ key: `worker:${worker.paneId}`, kind: 'worker', worker });

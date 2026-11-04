@@ -1,10 +1,12 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import * as Clipboard from 'expo-clipboard';
 import { Image, Pressable, StyleSheet, View } from 'react-native';
 import { useMarkdown } from 'react-native-marked';
 
 import type { ChatStep, ChatWorkerLine, PlanEntry, StepGroup } from '@shared/chatTabPresentation';
 import { describeChatContent } from '@shared/agentChatPresentation';
 import { imageOf, planEntryKeys } from '@shared/chatTabPresentation';
+import { userMarkdown } from '@shared/chatTabMarkdown';
 
 import { monoFontFamily, useTheme } from '@/theme';
 import { Icon, Text } from '@/ui';
@@ -29,6 +31,23 @@ function Markdown({ text }: { text: string }) {
     paragraph: { marginTop: 0, marginBottom: 10 },
   } });
   return <View>{content}</View>;
+}
+
+/** Copies a message as Markdown; the icon turns into a check for a moment (D-140). */
+function CopyAction({ label, text, testID }: { label: string; text: string; testID: string }) {
+  const theme = useTheme();
+  const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle');
+  useEffect(() => {
+    if (state === 'idle') return;
+    const timer = setTimeout(() => setState('idle'), 1500);
+    return () => clearTimeout(timer);
+  }, [state]);
+  const done = state === 'copied';
+  return <Pressable testID={testID} accessibilityRole="button" accessibilityLabel={label} accessibilityHint={done ? 'Copied' : undefined}
+    onPress={() => { Clipboard.setStringAsync(text).then(() => setState('copied'), () => setState('failed')); }} hitSlop={6} style={styles.copy}>
+    <Icon ios={done ? 'checkmark' : state === 'failed' ? 'xmark' : 'doc.on.doc'} android={done ? 'check' : state === 'failed' ? 'close' : 'content_copy'} size={15}
+      color={done ? theme.colors.success : state === 'failed' ? theme.colors.danger : theme.chat.mutedForeground} />
+  </Pressable>;
 }
 
 const STEP_ICONS = {
@@ -100,13 +119,20 @@ function WorkerRow({ worker, onOpen }: { worker: ChatWorkerLine; onOpen?: (paneI
 export function ChatRowView({ row, actions }: { row: ChatRow; actions: ChatRowActions }) {
   const theme = useTheme();
   switch (row.kind) {
-    case 'user':
-      return <View style={[styles.user, { backgroundColor: theme.chat.muted }]}>{row.message.parts.map((part, index) => {
-        if (part.type === 'text') return <Text key={index} selectable style={{ color: theme.chat.foreground }}>{part.text}</Text>;
-        const picture = part.type === 'content' ? imageOf(part.content) : undefined;
-        return picture ? <Image key={index} accessibilityLabel="Attached image" source={{ uri: `data:${picture.mimeType};base64,${picture.data}` }} style={styles.image} /> : null;
-      })}</View>;
-    case 'text': return <Markdown text={row.text} />;
+    case 'user': {
+      const copy = userMarkdown({ id: row.key, user: row.message, items: [], running: false });
+      return <View style={styles.userRow}>
+        <View style={[styles.user, { backgroundColor: theme.chat.muted }]}>{row.message.parts.map((part, index) => {
+          if (part.type === 'text') return <Text key={index} selectable style={{ color: theme.chat.foreground }}>{part.text}</Text>;
+          const picture = part.type === 'content' ? imageOf(part.content) : undefined;
+          return picture ? <Image key={index} accessibilityLabel="Attached image" source={{ uri: `data:${picture.mimeType};base64,${picture.data}` }} style={styles.image} /> : null;
+        })}</View>
+        {copy ? <CopyAction testID="chat-copy-message" label="Copy message" text={copy} /> : null}
+      </View>;
+    }
+    // Rendered Markdown isn't selectable on the phone; a long press copies the paragraph's text.
+    case 'text': return <Pressable accessibilityHint="Long press to copy" onLongPress={() => void Clipboard.setStringAsync(row.text)} delayLongPress={400}><Markdown text={row.text} /></Pressable>;
+    case 'copy': return <CopyAction testID="chat-copy-response" label="Copy response" text={row.text} />;
     case 'thought': return <Text variant="footnote" style={{ color: theme.chat.mutedForeground }} numberOfLines={3}>Thinking: {row.text}</Text>;
     case 'image': return <Image accessibilityLabel="Image from the agent" source={{ uri: `data:${row.mimeType};base64,${row.data}` }} style={styles.image} />;
     case 'steps': return <StepLine group={row.group} actions={actions} />;
@@ -124,7 +150,9 @@ export function ChatRowView({ row, actions }: { row: ChatRow; actions: ChatRowAc
 }
 
 const styles = StyleSheet.create({
-  user: { alignSelf: 'flex-end', maxWidth: '88%', borderRadius: 18, paddingHorizontal: 14, paddingVertical: 8, gap: 6 },
+  userRow: { alignSelf: 'flex-end', alignItems: 'flex-end', maxWidth: '88%', gap: 2 },
+  user: { borderRadius: 18, paddingHorizontal: 14, paddingVertical: 8, gap: 6 },
+  copy: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center', alignSelf: 'flex-start' },
   image: { width: 220, height: 160, borderRadius: 10, resizeMode: 'cover' },
   stepLine: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 32 },
   stepIcon: { width: 18, height: 18, alignItems: 'center', justifyContent: 'center' },

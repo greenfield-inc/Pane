@@ -16,16 +16,19 @@ const messages: AgentChatMessage[] = [
 describe('phone chat rows', () => {
   it('shows every step group in a worker chat', () => {
     const rows = chatRows(chatTurns(messages, { running: false }), { quiet: false, open: new Set() });
-    expect(rows.map(row => row.kind)).toEqual(['user', 'steps', 'steps', 'text']);
+    expect(rows.map(row => row.kind)).toEqual(['user', 'steps', 'steps', 'text', 'copy']);
+    // D-140: the finished response copies as Markdown, its steps one line each.
+    const copy = rows.at(-1);
+    expect(copy?.kind === 'copy' && copy.text).toContain('- Ran `git fetch`');
   });
 
   it('folds a finished turn to one line in the Session chat, and opens it on request', () => {
     const turns = chatTurns(messages, { running: false });
     const folded = chatRows(turns, { quiet: true, open: new Set() });
-    expect(folded.map(row => row.kind)).toEqual(['user', 'fold', 'text']);
+    expect(folded.map(row => row.kind)).toEqual(['user', 'fold', 'text', 'copy']);
     expect(folded[1]).toMatchObject({ summary: 'Worked 2 m 40 s · 2 steps · ran 1 command', open: false });
     const opened = chatRows(turns, { quiet: true, open: new Set([turns[0].id]) });
-    expect(opened.map(row => row.kind)).toEqual(['user', 'fold', 'steps', 'steps', 'text']);
+    expect(opened.map(row => row.kind)).toEqual(['user', 'fold', 'steps', 'steps', 'text', 'copy']);
   });
 
   it('shows only the current step while the Session chat works, and worker lines after their turn', () => {

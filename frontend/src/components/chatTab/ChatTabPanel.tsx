@@ -21,6 +21,8 @@ import { matchingCommands } from './chatCommands';
 import { ChatModeChip, ChatModelMenu, ChatPhoneModelMenu, ChatRiskyModeMarker, usePhoneWidth } from './ChatComposerControls';
 import { arrangeComposerControls } from '../../../../shared/chatComposerControls';
 import { ChatAttachmentAdapter, dragHasFiles, MAX_FILE_BYTES, MAX_IMAGE_BYTES, type SaveChatFile } from './chatAttachments';
+import { ChatCopyButton } from './ChatCopyButton';
+import { conversationMarkdown } from '../../../../shared/chatTabMarkdown';
 import '../agentChat/agentChat.css';
 import './chatTab.css';
 
@@ -316,6 +318,9 @@ export default function ChatTabPanel({ panelId, client, connected = true, quiet 
       {!!attachProblems.length && <div role="alert" className="chat-alert chat-attach-alert">
         <ul>{attachProblems.map((problem, index) => <li key={index}>{problem}</li>)}</ul>
         <button type="button" className="chat-icon" aria-label="Dismiss" title="Dismiss" onClick={() => setAttachProblems([])}><X className="h-3.5 w-3.5" /></button>
+      </div>}
+      {turns.length > 0 && <div className="chat-header-bar">
+        <ChatCopyButton label="Copy conversation" className="chat-copy chat-copy-all" showLabel text={() => conversationMarkdown(turns, agentName)} />
       </div>}
       <ThreadPrimitive.Viewport ref={viewportRef} onScroll={onViewportScroll} aria-label="Conversation messages" role="region" className="chat-viewport" scrollToBottomOnRunStart={false} autoScroll={!snapshot.hasNewer && !paged}>
         <div className="chat-column">
