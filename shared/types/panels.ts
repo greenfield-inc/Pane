@@ -101,6 +101,12 @@ export interface TerminalPanelState {
   updateResumeHold?: string;         // Update operation that stopped the panel; released by explicit resume, or when the panel starts after that update ended.
   updateResumeId?: string;           // Exact identity required by automatic update restoration.
   hasClaudeSessionId?: boolean;      // Whether --session-id was already passed to Claude (use --resume next time)
+  /**
+   * Left by the removed experimental Chat; nothing writes it any more.
+   * Read only to resume a Claude conversation that Chat created (it saved
+   * agentSessionId without hasClaudeSessionId), and kept as saved.
+   */
+  agentChat?: { conversation?: { provider?: string; nativeSessionId?: string } };
   agentType?: 'claude' | 'codex' | 'cursor' | 'opencode'; // CLI agent type for panel-local resume behavior
   /** How Pane learned `agentType`: declared with the launch, from the launch command, the foreground process, or the screen. */
   agentDetection?: TerminalAgentDetection;
