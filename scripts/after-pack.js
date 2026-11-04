@@ -3,6 +3,7 @@ const path = require('path');
 const { Arch } = require('electron-builder');
 
 const { verifyPackedApp } = require('./verify-packaged-icon');
+const { verifyChatAdapters } = require('./verify-chat-adapters');
 
 function verifyLinuxSqliteArchitecture(appOutDir, arch) {
   const name = Arch[arch];
@@ -45,6 +46,8 @@ async function afterPack(context) {
   // checked here — rcedit writes it after this hook — scripts/build-win.js
   // checks it once electron-builder has finished.
   verifyPackedApp(context.appOutDir, context.electronPlatformName, { checkExecutable: false });
+  // Chat tabs run the bundled ACP adapters; a build that cannot start them fails here.
+  await verifyChatAdapters(context.appOutDir, context.electronPlatformName, Arch[context.arch]);
 
   if (context.electronPlatformName !== 'linux') return;
   verifyLinuxSqliteArchitecture(context.appOutDir, context.arch);
