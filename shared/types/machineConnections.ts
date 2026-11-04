@@ -70,6 +70,8 @@ export type MachineCommand =
   | { type: 'answer-permission'; requestId: string; response: PanePermissionResponse }
   | { type: 'pin'; target: MachineItemRef; pinned: boolean }
   | { type: 'archive'; target: MachineItemRef }
+  /** Pause stops every tab of the Pane, or the Session's chat and Panes; resume restarts them. */
+  | { type: 'pause' | 'resume'; target: MachineItemRef }
   | { type: 'rename'; target: MachineItemRef; name: string }
   /** `request` is the `CreateSessionRequest` that `sessions:create` takes. */
   | { type: 'create-pane'; request: object }

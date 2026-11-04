@@ -48,13 +48,15 @@ const eventChannels = new Set<string>(MACHINE_EVENT_CHANNELS);
 const isMachineEventChannel = (channel: string): channel is MachineEventChannel => eventChannels.has(channel);
 const itemSchema = boundary.object({ kind: boundary.enumeration('pane', 'session'), id: boundary.nonEmptyString });
 const commandTypeSchema = boundary.object({
-  type: boundary.enumeration('notify', 'answer-permission', 'pin', 'archive', 'rename', 'create-pane', 'create-session'),
+  type: boundary.enumeration('notify', 'answer-permission', 'pin', 'pause', 'resume', 'archive', 'rename', 'create-pane', 'create-session'),
 });
 const commandSchemas = {
   notify: boundary.object({ command: boundary.jsonObject }),
   'answer-permission': boundary.object({ requestId: boundary.nonEmptyString, response: boundary.jsonObject }),
   pin: boundary.object({ target: itemSchema, pinned: boundary.boolean }),
   archive: boundary.object({ target: itemSchema }),
+  pause: boundary.object({ target: itemSchema }),
+  resume: boundary.object({ target: itemSchema }),
   rename: boundary.object({ target: itemSchema, name: boundary.nonEmptyString }),
   'create-pane': boundary.object({ request: boundary.jsonObject }),
   'create-session': boundary.object({ input: boundary.jsonObject }),
@@ -238,7 +240,7 @@ function toInvocation(command: PaneCommandValue): Invocation {
   if (!type) {
     const named = decodeOptionalBoundary(command, boundary.object({ type: boundary.string }))?.type;
     throw new PaneError('ERR_MACHINE_COMMAND_REFUSED',
-      `Pane can't run ${named ? `"${named}"` : 'that command'} on another machine: only answering Notify and permissions, pin, archive, rename and create are allowed. Nothing was sent.`,
+      `Pane can't run ${named ? `"${named}"` : 'that command'} on another machine: only answering Notify and permissions, pin, pause, resume, archive, rename and create are allowed. Nothing was sent.`,
       'Switch to that machine to do this there.');
   }
   try {
@@ -255,6 +257,13 @@ function toInvocation(command: PaneCommandValue): Invocation {
         return target.kind === 'pane'
           ? { channel: 'runpane:panes:pin', args: [{ paneId: target.id, pinned }] }
           : { channel: 'orchestration-sessions:update', args: [{ sessionId: target.id }, { isPinned: pinned }] };
+      }
+      case 'pause':
+      case 'resume': {
+        const { target } = decodeBoundary(command, commandSchemas[type]);
+        return target.kind === 'pane'
+          ? { channel: `runpane:panes:${type}`, args: [{ paneId: target.id }] }
+          : { channel: `runpane:sessions:${type}`, args: [{ sessionId: target.id }] };
       }
       case 'archive': {
         const { target } = decodeBoundary(command, commandSchemas.archive);

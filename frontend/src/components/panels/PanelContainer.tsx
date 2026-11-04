@@ -2,6 +2,8 @@ import React, { Suspense, lazy, useEffect, useMemo, useRef } from 'react';
 import { PanelContainerProps } from '../../types/panelComponents';
 import { ErrorBoundary } from 'react-error-boundary';
 import { PanelLoadingFallback } from './PanelLoadingFallback';
+import { PausedTerminalView } from './PausedTabView';
+import { pausedMarkOf } from '../../../../shared/types/panels';
 import { isNotesEnabled, useConfigStore } from '../../stores/configStore';
 import { renderLog } from '../../utils/console';
 
@@ -96,7 +98,11 @@ export const PanelContainer: React.FC<PanelContainerProps> = React.memo(({
         }
         return <NotesPanel paneId={panel.sessionId} viewId={panel.id} />;
       case 'terminal':
-        return <TerminalPanel panel={panel} isActive={isActive} autoFocus={autoFocus} />;
+      {
+        // A paused tab never mounts its terminal, so nothing starts it: it shows its last screen.
+        const paused = pausedMarkOf(panel);
+        return paused ? <PausedTerminalView panelId={panel.id} mark={paused} /> : <TerminalPanel panel={panel} isActive={isActive} autoFocus={autoFocus} />;
+      }
       case 'diff':
         return <DiffPanel panel={panel} isActive={isActive} sessionId={panel.sessionId} isMainRepo={isMainRepo} />;
       case 'explorer':

@@ -110,3 +110,16 @@ export const AgentStatusDot: React.FC<AgentStatusDotProps> = ({ status, size = '
     </span>
   );
 };
+
+/**
+ * A paused tab, Pane or Session: two muted bars in the status dot's fixed box, so pausing
+ * never shifts the row.
+ */
+export const PausedGlyph: React.FC<{ size?: 'sm' | 'md'; className?: string }> = ({ size = 'md', className }) => (
+  <span className={cn('inline-flex items-center justify-center', containerSizeClasses[size], className)} role="img" aria-label="Paused">
+    <span className="flex h-2 gap-0.5" aria-hidden="true">
+      <span className="h-2 w-[2.5px] rounded-[1px] bg-text-muted" />
+      <span className="h-2 w-[2.5px] rounded-[1px] bg-text-muted" />
+    </span>
+  </span>
+);
