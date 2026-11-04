@@ -28,7 +28,8 @@ describe('project environment variables storage', () => {
     const other = first.createProject('other', '/repos/other');
 
     first.replaceProjectEnvVars(cura.id, [
-      { key: 'UIVERIFY_API_KEY', source: 'keychain', service: 'Pane', account: `${cura.id}:UIVERIFY_API_KEY`, managed: true },
+      { key: 'UIVERIFY_API_KEY', source: 'secret', project: 'cura', name: 'UIVERIFY' },
+      { key: 'CONDUCTOR_KEY', source: 'keychain', service: 'Conductor', account: 'cura' },
       { key: 'NODE_ENV', source: 'plain', value: 'development' },
     ]);
     first.replaceProjectEnvVars(other.id, [{ key: 'OTHER', source: 'plain', value: '1' }]);
@@ -37,7 +38,8 @@ describe('project environment variables storage', () => {
     const second = new DatabaseService(databasePath);
     second.initialize();
     expect(second.getProjectEnvVars(cura.id)).toEqual([
-      { key: 'UIVERIFY_API_KEY', source: 'keychain', service: 'Pane', account: `${cura.id}:UIVERIFY_API_KEY`, managed: true },
+      { key: 'UIVERIFY_API_KEY', source: 'secret', project: 'cura', name: 'UIVERIFY' },
+      { key: 'CONDUCTOR_KEY', source: 'keychain', service: 'Conductor', account: 'cura' },
       { key: 'NODE_ENV', source: 'plain', value: 'development' },
     ]);
     expect(second.getProjectEnvVars(other.id)).toEqual([{ key: 'OTHER', source: 'plain', value: '1' }]);
@@ -56,19 +58,6 @@ describe('project environment variables storage', () => {
     db.replaceProjectEnvVars(project.id, [{ key: 'B', source: 'plain', value: '3' }]);
 
     expect(db.getProjectEnvVars(project.id)).toEqual([{ key: 'B', source: 'plain', value: '3' }]);
-    db.close();
-  });
-
-  it('keeps whether Pane created each keychain item', () => {
-    const db = new DatabaseService(tempDatabasePath());
-    db.initialize();
-    const project = db.createProject('repo', '/repos/repo');
-    db.replaceProjectEnvVars(project.id, [
-      { key: 'OWN', source: 'keychain', service: 'Pane', account: `${project.id}:OWN`, managed: true },
-      { key: 'LOOKALIKE', source: 'keychain', service: 'Pane', account: `${project.id}:LOOKALIKE`, managed: false },
-    ]);
-
-    expect(db.getProjectEnvVars(project.id).map(variable => variable.source === 'keychain' && variable.managed)).toEqual([true, false]);
     db.close();
   });
 

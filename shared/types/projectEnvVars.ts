@@ -2,32 +2,27 @@
  * Per-project environment variables. Pane sets them in every terminal, agent and
  * setup/run/archive script it starts for a Pane of that project.
  *
- * A keychain variable holds only a reference (service + account) to a macOS
- * keychain generic-password item; its value is read when a process starts and is
- * never stored by Pane or sent to the renderer.
+ * A variable is plain text, a reference to an existing macOS keychain item, or a
+ * reference to a Pane secret (`<project>/<NAME>`, see docs/PANE_SECRETS.md). Values
+ * of the last two are read when a process starts and never stored with the project
+ * or sent to the renderer.
  */
 
 /** A stored variable as main and the renderer see it. Never carries a secret value. */
 export type ProjectEnvVar =
   | { key: string; source: 'plain'; value: string }
-  | {
-      key: string;
-      source: 'keychain';
-      service: string;
-      account: string;
-      /** True when Pane created the item from a typed secret, so Pane deletes it when no variable uses it. */
-      managed: boolean;
-    };
+  | { key: string; source: 'keychain'; service: string; account: string }
+  | { key: string; source: 'secret'; project: string; name: string };
 
 /**
- * What the renderer sends to save a variable. A keychain variable either references
- * an existing item (`service` + `account`) or carries a new `secret`, which main
- * writes to Pane's own keychain item and drops.
+ * What the renderer and `runpane repos update` send to save a variable. A `secret`
+ * variable with a `value` creates or replaces that Pane secret first; main stores
+ * the value in the secret store and drops it.
  */
 export type ProjectEnvVarInput =
   | { key: string; source: 'plain'; value: string }
   | { key: string; source: 'keychain'; service: string; account: string }
-  | { key: string; source: 'keychain'; secret: string };
+  | { key: string; source: 'secret'; project: string; name: string; value?: string };
 
 const KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 

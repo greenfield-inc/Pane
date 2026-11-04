@@ -848,18 +848,19 @@ export class DatabaseService {
     }
 
     // Per-project environment variables. A keychain row stores only the item's
-    // service and account; the secret itself never reaches this database.
+    // service and account, and a secret row only the Pane secret's address; no
+    // secret value ever reaches this database.
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS project_env_vars (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         project_id INTEGER NOT NULL,
         key TEXT NOT NULL,
-        source TEXT NOT NULL CHECK(source IN ('plain', 'keychain')),
+        source TEXT NOT NULL CHECK(source IN ('plain', 'keychain', 'secret')),
         value TEXT,
         keychain_service TEXT,
         keychain_account TEXT,
-        -- 1 when Pane created the item from a typed secret and may delete it.
-        keychain_managed INTEGER NOT NULL DEFAULT 0,
+        secret_project TEXT,
+        secret_name TEXT,
         order_index INTEGER NOT NULL DEFAULT 0,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         UNIQUE(project_id, key),
@@ -2793,42 +2794,36 @@ export class DatabaseService {
     // SAFETY: This fixed SQLite query projection matches the declared row type at this database boundary.
     const rows = this.db
       .prepare(
-        "SELECT key, source, value, keychain_service, keychain_account, keychain_managed FROM project_env_vars WHERE project_id = ? ORDER BY order_index ASC, id ASC",
+        "SELECT key, source, value, keychain_service, keychain_account, secret_project, secret_name FROM project_env_vars WHERE project_id = ? ORDER BY order_index ASC, id ASC",
       )
       .all(projectId) as Array<{
       key: string;
-      source: 'plain' | 'keychain';
+      source: 'plain' | 'keychain' | 'secret';
       value: string | null;
       keychain_service: string | null;
       keychain_account: string | null;
-      keychain_managed: number;
+      secret_project: string | null;
+      secret_name: string | null;
     }>;
     return rows.map((row): ProjectEnvVar => {
       if (row.source === 'plain') return { key: row.key, source: 'plain', value: row.value ?? '' };
-      return {
-        key: row.key,
-        source: 'keychain',
-        service: row.keychain_service ?? '',
-        account: row.keychain_account ?? '',
-        managed: row.keychain_managed === 1,
-      };
+      if (row.source === 'secret') return { key: row.key, source: 'secret', project: row.secret_project ?? '', name: row.secret_name ?? '' };
+      return { key: row.key, source: 'keychain', service: row.keychain_service ?? '', account: row.keychain_account ?? '' };
     });
   }
 
   /** Replace a project's variables with `variables`, in that order. */
   replaceProjectEnvVars(projectId: number, variables: readonly ProjectEnvVar[]): void {
     const insert = this.db.prepare(`
-      INSERT INTO project_env_vars (project_id, key, source, value, keychain_service, keychain_account, keychain_managed, order_index)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO project_env_vars (project_id, key, source, value, keychain_service, keychain_account, secret_project, secret_name, order_index)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     this.db.transaction(() => {
       this.db.prepare("DELETE FROM project_env_vars WHERE project_id = ?").run(projectId);
       variables.forEach((variable, index) => {
-        if (variable.source === 'plain') {
-          insert.run(projectId, variable.key, 'plain', variable.value, null, null, 0, index);
-        } else {
-          insert.run(projectId, variable.key, 'keychain', null, variable.service, variable.account, variable.managed ? 1 : 0, index);
-        }
+        if (variable.source === 'plain') insert.run(projectId, variable.key, 'plain', variable.value, null, null, null, null, index);
+        else if (variable.source === 'keychain') insert.run(projectId, variable.key, 'keychain', null, variable.service, variable.account, null, null, index);
+        else insert.run(projectId, variable.key, 'secret', null, null, null, variable.project, variable.name, index);
       });
     })();
   }

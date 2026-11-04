@@ -21,6 +21,8 @@ import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../share
 import type { PaneLinkTarget } from '../../../shared/types/paneLinks';
 import type { NotifyCommand, NotifyRemoteCommand, NotifyRequest, NotifyResult, NotifySharedState } from '../../../shared/types/notify';
 import type { AgentState } from '../../../shared/types/agentStatus';
+import { paneSecretNameProblem, paneSecretProjectProblem } from '../../../shared/types/paneSecrets';
+import { paneSecretStore } from '../services/paneSecrets';
 
 const MAX_CHOICES = 9;
 const MAX_TEXT = 4_000;
@@ -28,7 +30,7 @@ const MAX_DETAIL = 20_000;
 const MAX_DETAIL_LABEL = 40;
 
 const notifyRequestSchema = boundary.object({
-  ui: boundary.optional(boundary.enumeration('options', 'approve', 'ask', 'info')),
+  ui: boundary.optional(boundary.enumeration('options', 'approve', 'ask', 'secret', 'info')),
   title: boundary.optional(boundary.string),
   context: boundary.optional(boundary.string),
   choices: boundary.optional(boundary.array(boundary.object({
@@ -40,6 +42,7 @@ const notifyRequestSchema = boundary.object({
   detailLabel: boundary.optional(boundary.string),
   suggestions: boundary.optional(boundary.array(boundary.string)),
   action: boundary.optional(boundary.object({ label: boundary.nonEmptyString, url: boundary.nonEmptyString })),
+  secret: boundary.optional(boundary.object({ project: boundary.string, name: boundary.string })),
   resume: boundary.optional(boundary.nonEmptyString),
   returnAfterMs: boundary.optional(boundary.number),
   caller: boundary.object({
@@ -82,7 +85,7 @@ const notifyRemoteCommandSchema = boundary.union(
 const remoteSenderSchema = boundary.object({ device: boundary.nonEmptyString });
 const notifyItemSchema = boundary.object({
   id: boundary.nonEmptyString,
-  ui: boundary.enumeration('options', 'approve', 'ask', 'info'),
+  ui: boundary.enumeration('options', 'approve', 'ask', 'secret', 'info'),
   title: boundary.string,
   context: boundary.optional(boundary.string),
   choices: boundary.optional(boundary.array(boundary.object({
@@ -95,6 +98,8 @@ const notifyItemSchema = boundary.object({
   suggestions: boundary.optional(boundary.array(boundary.string)),
   action: boundary.optional(boundary.object({ label: boundary.nonEmptyString, url: boundary.nonEmptyString })),
   agentPrompt: boundary.optional(boundary.object({ yes: boundary.string, no: boundary.string, inTerminal: boundary.optional(boundary.boolean) })),
+  secret: boundary.optional(boundary.object({ project: boundary.string, name: boundary.string, replaces: boundary.optional(boundary.boolean) })),
+  secretError: boundary.optional(boundary.string),
   source: boundary.object({
     paneId: boundary.optional(boundary.string),
     panelId: boundary.optional(boundary.string),
@@ -145,6 +150,10 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
     rendererArguments: () => buildWindowAppearanceOptions(normalizeAppearance(services.configManager.getConfig()).appearance, false, {}).additionalArguments,
     headless: hasHeadlessDaemonLaunchArg(),
     machine: machineName(),
+    secrets: {
+      exists: (project, name) => paneSecretStore().has(project, name),
+      save: async (project, name, value) => { await paneSecretStore().set(project, name, value); },
+    },
     publish: (state) => getPaneEventSink().send('notify:shared-changed', state),
     sendToMachine: async (machineId, command) => {
       if (!saved) throw new PaneError('ERR_MACHINE_UNKNOWN', 'Pane is still starting its machine connections. Nothing was sent.', 'Answer again in a moment.');
@@ -197,7 +206,7 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
   commandRegistry.register('notify:remote-command', async (command: PaneCommandValue, sender: PaneCommandValue) => {
     // A Mac names itself "studio.local" on its event stream; cards call it "studio".
     const device = decodeBoundary(sender, remoteSenderSchema).device.replace(/\.local$/i, '');
-    notify.runRemote(decodeBoundary(command, notifyRemoteCommandSchema) satisfies NotifyRemoteCommand, device);
+    await notify.runRemote(decodeBoundary(command, notifyRemoteCommandSchema) satisfies NotifyRemoteCommand, device);
     return null;
   });
 
@@ -381,6 +390,14 @@ function parseNotifyRequest(value: PaneCommandValue): NotifyRequest {
   if (request.resume) return request;
   const { ui } = request;
   if (!ui) throw invalid('ui is required: options, approve, ask or info.');
+  if (ui === 'secret') {
+    // Created only by `runpane secrets request`, which names where the value is saved.
+    if (!request.secret) throw invalid('secret is required for ui: secret: the project and name the value is saved as.');
+    const problem = paneSecretProjectProblem(request.secret.project) ?? paneSecretNameProblem(request.secret.name);
+    if (problem) throw invalid(problem);
+  } else if (request.secret) {
+    throw invalid(`secret only goes with ui: secret, not ${ui}.`);
+  }
   if (!request.title?.trim()) throw invalid('title is required.');
   if (request.title.length > MAX_TEXT || (request.context?.length ?? 0) > MAX_TEXT) throw invalid(`title and context take up to ${MAX_TEXT} characters.`);
   if ((request.detail?.length ?? 0) > MAX_DETAIL) throw invalid(`detail takes up to ${MAX_DETAIL} characters.`);

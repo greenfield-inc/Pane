@@ -363,6 +363,12 @@ let machineEventListeners = 0;
 window.addEventListener('online', () => ipcRenderer.send('remote-daemon:network-online'));
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  /** Settings → Secrets: this computer's Pane secret store. Values go in only; nothing returns one. */
+  paneSecrets: {
+    list: (): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:list'),
+    set: (project: string, name: string, value: string): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:set', project, name, value),
+    delete: (project: string, name: string): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:delete', project, name),
+  },
   onNotesChanged: (callback: () => void) => {
     const listener = () => callback();
     ipcRenderer.on('notes:changed', listener);

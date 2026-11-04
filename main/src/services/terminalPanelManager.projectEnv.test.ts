@@ -12,6 +12,7 @@ import { inProcessEmulatorHost } from '../test/inProcessEmulatorHost';
 import { TerminalPanelManager } from './terminalPanelManager';
 import { ProjectEnvService } from './projectEnvVars';
 import { FakeKeychain } from '../test/fakeKeychain';
+import { memorySecretStore } from '../test/memorySecretStore';
 
 class FakePtyHandle implements PtyHandleLike {
   readonly pid = 4242;
@@ -65,7 +66,8 @@ describe('terminal panels and project environment variables', () => {
     ptyHost = new FakePtyHost();
     managers = [];
     keychain = new FakeKeychain();
-    projectEnv = new ProjectEnvService(databaseService, () => keychain, 'Pane');
+    const secrets = memorySecretStore(keychain);
+    projectEnv = new ProjectEnvService(databaseService, () => keychain, () => secrets);
     const configManager = new ConfigManager();
     vi.spyOn(configManager, 'getUsePtyHost').mockReturnValue(true);
     setPaneRuntime({
@@ -86,7 +88,7 @@ describe('terminal panels and project environment variables', () => {
       databaseService.createSession({ id, name: id, initial_prompt: '', worktree_name: id, worktree_path: path.join(tempDir, id), project_id: projectId, tool_type: 'none' });
     }
     await projectEnv.save(cura.id, [
-      { key: 'UIVERIFY_API_KEY', source: 'keychain', secret: 'sk-test-secret' },
+      { key: 'UIVERIFY_API_KEY', source: 'secret', project: 'cura', name: 'UIVERIFY', value: 'sk-test-secret' },
       { key: 'NODE_ENV', source: 'plain', value: 'development' },
     ]);
   });
@@ -114,7 +116,7 @@ describe('terminal panels and project environment variables', () => {
   }
 
   async function start(panel: ToolPanel, wslContext?: { enabled: boolean; distribution: string; linuxPath: string }): Promise<PtyHostSpawnOpts> {
-    const manager = new TerminalPanelManager(inProcessEmulatorHost, undefined, projectEnv);
+    const manager = new TerminalPanelManager(inProcessEmulatorHost, undefined, undefined, projectEnv);
     managers.push(manager);
     lastManager = manager;
     panelManagerMock.getPanel.mockReturnValue(panel);
@@ -151,8 +153,8 @@ describe('terminal panels and project environment variables', () => {
     expect(spawned.env.PANE_PANEL_ID).toBe(panel.id);
   });
 
-  it('opens the terminal without a variable whose keychain item cannot be read, and says so in the pane', async () => {
-    keychain.fail('Pane', `${curaId}:UIVERIFY_API_KEY`, 'User interaction is not allowed.');
+  it('opens the terminal without a variable whose secret cannot be read, and says so in the pane', async () => {
+    keychain.fail('Pane', 'secret:cura/UIVERIFY', 'User interaction is not allowed.');
 
     const panel = panelIn('cura', 'terminal');
     const spawned = await start(panel);

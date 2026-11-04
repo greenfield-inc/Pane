@@ -159,8 +159,13 @@ Preview components never enter the editable auto-save path, even on errors.
   (`services/setupTransfer.ts`); the renderer applies it through Settings' own
   save calls: [SETUP_EXPORT_IMPORT.md](SETUP_EXPORT_IMPORT.md).
 - Per-project environment variables (`main/src/services/projectEnvVars.ts`) are
-  read at spawn time by the terminal, script and legacy CLI spawners; keychain
-  values stay in the macOS keychain: [PROJECT_ENV_VARS.md](PROJECT_ENV_VARS.md).
+  read at spawn time by the terminal, script and legacy CLI spawners; Pane secret
+  and keychain values are read then and never stored with the project:
+  [PROJECT_ENV_VARS.md](PROJECT_ENV_VARS.md).
+- Pane secrets (`main/src/services/paneSecrets.ts`, `main/src/ipc/paneSecrets.ts`)
+  keep an index in `config.json` and values in the keychain or an encrypted 0600
+  file, sync with the shared keys, and reach commands only through
+  `runpane secrets exec`: [PANE_SECRETS.md](PANE_SECRETS.md).
 
 ## Notes
 
@@ -231,7 +236,7 @@ Notes tab.
 | Pane Chat and orchestration sessions | `paneChatManager.ts`, `skillCacheManager.ts`, `paneChatBundle/` | [SESSIONS.md](SESSIONS.md) |
 | Loops (scheduled tasks) | `main/src/services/loops/`, `main/src/ipc/loops.ts`, `shared/types/loop.ts` | [LOOPS.md](LOOPS.md) |
 | Pane Notify (agent questions) | In-memory queue, floating strip and round windows, tray icon in `main/src/services/notify/`; `main/src/ipc/notify.ts`, `shared/types/notify.ts`; the floating windows load `frontend/notify.html`. Desktops (one slot per saved machine, fed by `main/src/services/machineConnections.ts`) and phones read each host's queue over `notify:remote-snapshot`, `notify:remote-command` and the `notify:shared-changed` event; phone alerts go through `main/src/daemon/mobilePushSender.ts` | [PANE_NOTIFY.md](PANE_NOTIFY.md) |
-| Machine connections | `main/src/services/machineConnections.ts` holds the desktop's one connection to each saved machine; key sharing (`sharedCredentialSync.ts`) and the renderer use it; the sidebar's All machines view (`frontend/src/stores/allMachinesStore.ts`, `frontend/src/components/machines/AllMachinesSidebar.tsx`) reads every machine through it and re-reads one machine when its events arrive. `main/src/ipc/machineConnections.ts` and `shared/types/machineConnections.ts` give the renderer `machines:list`, `machines:read` (list reads), `machines:run` (a short command list) and `machines:retry`, and push `machines:event` (events tagged with their machine, never terminal output) to windows that subscribe. This computer is the machine `local` | |
+| Machine connections | `main/src/services/machineConnections.ts` holds the desktop's one connection to each saved machine; key and Pane secret sharing (`sharedCredentialSync.ts`) and the renderer use it; the sidebar's All machines view (`frontend/src/stores/allMachinesStore.ts`, `frontend/src/components/machines/AllMachinesSidebar.tsx`) reads every machine through it and re-reads one machine when its events arrive. `main/src/ipc/machineConnections.ts` and `shared/types/machineConnections.ts` give the renderer `machines:list`, `machines:read` (list reads), `machines:run` (a short command list) and `machines:retry`, and push `machines:event` (events tagged with their machine, never terminal output) to windows that subscribe. This computer is the machine `local` | |
 | SSH hosts view | `sshConfigHosts.ts`, `ipc/sshHosts.ts`, `SshView.tsx` | [SSH_HOSTS.md](SSH_HOSTS.md) |
 | `runpane` CLI contract | `contracts/runpane/` | [RUNPANE_CLI_CONTRACT.md](RUNPANE_CLI_CONTRACT.md) |
 | Analytics | `analyticsManager.ts`, `frontend/src/services/posthog.ts` | [ANALYTICS_INVARIANTS.md](ANALYTICS_INVARIANTS.md) |

@@ -1,3 +1,4 @@
+import type { ProjectEnvVar } from './projectEnvVars';
 import type { ProjectEnvironment, TerminalAgentReport, TerminalAgentReportState, TerminalExpectedReport, ToolPanelType } from './panels';
 import type { RunpaneAgent } from './generatedRunpaneContract';
 import type { RemoteDaemonExecutableHealth } from './remoteDaemon';
@@ -427,6 +428,14 @@ export interface RunpaneRepoSettings {
   buildScript: RunpaneRepoScriptSetting;
   runScript: RunpaneRepoScriptSetting;
   archiveScript: RunpaneRepoScriptSetting;
+  /** Project environment variables: plain values in full, keychain items and Pane secrets as references only. */
+  envVars: ProjectEnvVar[];
+}
+
+/** Adds or replaces variables by key, then removes the named ones. Pane secret values are set with `runpane secrets`, never here. */
+export interface RunpaneRepoEnvVarsUpdate {
+  set?: ProjectEnvVar[];
+  remove?: string[];
 }
 
 /** The settings `repos update` changes. A null or empty value clears the setting; `name` cannot be cleared. */
@@ -438,9 +447,12 @@ export interface RunpaneRepoSettingsUpdate {
   worktreeFolder?: string | null;
   openIdeCommand?: string | null;
   systemPrompt?: string | null;
+  envVars?: RunpaneRepoEnvVarsUpdate;
 }
 
 export type RunpaneRepoSettingField = keyof RunpaneRepoSettingsUpdate;
+/** The settings stored as one nullable text column each. */
+export type RunpaneRepoTextSettingField = Exclude<RunpaneRepoSettingField, 'envVars'>;
 
 export interface RunpaneRepoGetRequest {
   repo?: RunpaneRepoSelector;

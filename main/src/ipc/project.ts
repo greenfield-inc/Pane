@@ -169,7 +169,7 @@ const DAEMON_PROJECT_CHANNELS = [
 ] as const;
 
 const projectEnvVarInputsSchema = boundary.array(boundary.union(
-  boundary.object({ key: boundary.string, source: boundary.literal('keychain'), secret: boundary.string }),
+  boundary.object({ key: boundary.string, source: boundary.literal('secret'), project: boundary.string, name: boundary.string, value: boundary.optional(boundary.string) }),
   boundary.object({ key: boundary.string, source: boundary.literal('keychain'), service: boundary.string, account: boundary.string }),
   boundary.object({ key: boundary.string, source: boundary.literal('plain'), value: boundary.string }),
 ));
@@ -183,8 +183,8 @@ export function registerProjectHandlers(
 ): void {
   const { databaseService, sessionManager, worktreeManager, analyticsManager, configManager } = services;
 
-  // Values of keychain variables never leave main: both channels return only
-  // references (service + account).
+  // Values of keychain and Pane secret variables never leave main: both channels
+  // return only references.
   commandRegistry.register('projects:get-env-vars', async (projectId: number) => {
     try {
       return { success: true, data: projectEnv.list(decodeBoundary(projectId, boundary.number)) };
@@ -505,12 +505,6 @@ export function registerProjectHandlers(
           project_age_days: projectAge
         });
       }
-
-      // Delete the keychain items Pane created for this project's variables.
-      // Best effort: a project is never kept because its keychain is locked.
-      await projectEnv.clear(projectIdNum).catch(error => {
-        console.warn(`[Main] Could not remove project ${projectIdNum}'s keychain items:`, reasonOf(error));
-      });
 
       // Now safe to delete the project
       const success = databaseService.deleteProject(projectIdNum);

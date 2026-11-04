@@ -1,3 +1,4 @@
+import type { ProjectEnvVar } from '../../../shared/types/projectEnvVars';
 import net from 'net';
 import { once } from 'events';
 import { PaneDaemonServer } from '../daemon/server';
@@ -2414,8 +2415,11 @@ describe('runpane IPC handlers', () => {
       const repoPath = createTempGitRepo('settings-repo');
       const projects: Project[] = [{ ...project, id: 7, name: 'Cura', path: repoPath, active: false, ...saved }];
       const runCommands: string[] = [];
+      const envVars: ProjectEnvVar[] = [];
       const base = createServices();
       const databaseService = {
+        getProjectEnvVars: vi.fn(() => envVars.map(variable => ({ ...variable }))),
+        replaceProjectEnvVars: vi.fn((_projectId: number, next: readonly ProjectEnvVar[]) => { envVars.splice(0, envVars.length, ...next); }),
         getAllProjects: vi.fn(() => projects),
         getProject: vi.fn((id: number) => projects.find(candidate => candidate.id === id)),
         updateProject: vi.fn((id: number, updates: Partial<Project>) => {
@@ -2440,7 +2444,7 @@ describe('runpane IPC handlers', () => {
         // SAFETY: Branch detection is the only worktree call the settings handlers make.
         worktreeManager: { getProjectMainBranch: vi.fn(async () => 'main') } as never,
       });
-      return { services, repoPath, projects, runCommands };
+      return { services, repoPath, projects, runCommands, envVars };
     }
 
     it('reports each script as saved, as a config-file fallback, and as what will run', async () => {
@@ -2473,8 +2477,43 @@ describe('runpane IPC handlers', () => {
             effective: { command: 'conductor run', source: 'conductor.json' },
           },
           archiveScript: { value: null, fallback: null, effective: null },
+          envVars: [],
         },
       });
+    });
+
+    it('adds, replaces and removes project variables, returning Pane secrets and keychain items as references only', async () => {
+      const { services, envVars } = createSettingsServices();
+      envVars.push({ key: 'NODE_ENV', source: 'plain', value: 'development' }, { key: 'OLD', source: 'plain', value: 'x' });
+      const registry = createRegistry(services);
+
+      const result = await registry.invoke('runpane:repos:update', [{ repo: '7', settings: { envVars: {
+        set: [
+          { key: 'NODE_ENV', source: 'plain', value: 'test' },
+          { key: 'STRIPE_KEY', source: 'secret', project: 'stripe', name: 'STRIPE_SECRET_KEY' },
+        ],
+        remove: ['OLD'],
+      } } }]);
+
+      const expected = [
+        { key: 'NODE_ENV', source: 'plain', value: 'test' },
+        { key: 'STRIPE_KEY', source: 'secret', project: 'stripe', name: 'STRIPE_SECRET_KEY' },
+      ];
+      expect(result).toMatchObject({ ok: true, changed: ['envVars'], settings: { envVars: expected } });
+      await expect(registry.invoke('runpane:repos:get', [{ repo: '7' }])).resolves.toMatchObject({ settings: { envVars: expected } });
+    });
+
+    it('refuses a Pane secret value in repos update and saves nothing', async () => {
+      const { services, envVars } = createSettingsServices();
+
+      await expect(createRegistry(services).invoke('runpane:repos:update', [{ repo: '7', settings: { envVars: {
+        set: [{ key: 'STRIPE_KEY', source: 'secret', project: 'stripe', name: 'STRIPE_SECRET_KEY', value: 'sk_canary' }],
+      } } }])).rejects.toMatchObject({
+        code: 'ERR_RUNPANE_REPO_SETTINGS_INVALID',
+        message: expect.stringContaining('runpane secrets set'),
+        next: expect.not.stringContaining('sk_canary'),
+      });
+      expect(envVars).toEqual([]);
     });
 
     it('saves settings through the Project Settings save path and returns them', async () => {

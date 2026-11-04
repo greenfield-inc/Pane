@@ -26,6 +26,8 @@ import {
 import { panelManager } from '../services/panelManager';
 import { terminalPanelManager, type TerminalPanelSnapshot } from '../services/terminalPanelManager';
 import { databaseService as panelDatabase } from '../services/database';
+import { ProjectEnvService } from '../services/projectEnvVars';
+import type { ProjectEnvVar } from '../../../shared/types/projectEnvVars';
 import { ensureProjectAgentContext } from '../services/agentContextManager';
 import { getPaneEventSink } from '../core/runtime';
 import { syncPaneHomeSkill } from '../services/paneHomeSkill';
@@ -171,6 +173,8 @@ import type {
   RunpaneRepoGetResult,
   RunpaneRepoScriptSetting,
   RunpaneRepoSettingField,
+  RunpaneRepoTextSettingField,
+  RunpaneRepoEnvVarsUpdate,
   RunpaneRepoSettings,
   RunpaneRepoSettingsUpdate,
   RunpaneRepoUpdateRequest,
@@ -292,6 +296,10 @@ const RUNPANE_CHANNELS = [
   'runpane:loops:set-enabled',
   'runpane:loops:run-now',
   'runpane:loops:preview',
+  'runpane:secrets:list',
+  'runpane:secrets:set',
+  'runpane:secrets:delete',
+  'runpane:secrets:resolve',
 ] as const;
 
 const AGENT_TEMPLATES = RUNPANE_CONTRACT.agentTemplates;
@@ -613,14 +621,20 @@ export function registerRunpaneHandlers(
       const normalized = parseRepoUpdateRequest(request);
       const project = resolveRepoSelector(databaseService.getAllProjects(), normalized.repo);
       const updates = toProjectSettingsUpdate(normalized.settings);
-      const changed = changedRepoSettings(project, updates);
+      const changed: RunpaneRepoSettingField[] = changedRepoSettings(project, updates);
+      const projectEnv = repoProjectEnv(services);
+      const currentEnv = projectEnv.list(project.id);
+      const nextEnv = normalized.settings.envVars ? applyRepoEnvVarsUpdate(currentEnv, normalized.settings.envVars) : currentEnv;
+      if (JSON.stringify(nextEnv) !== JSON.stringify(currentEnv)) changed.push('envVars');
+      // Variables first: they are the part that can be refused (a keychain variable off macOS).
+      if (!normalized.dryRun && changed.includes('envVars')) await projectEnv.save(project.id, nextEnv);
       const saved = normalized.dryRun ? { ...project, ...updates } : saveProjectSettings(services, project.id, updates);
       if (!saved) throw repoNotFound(`with id ${project.id}`);
       const result: RunpaneRepoUpdateResult = {
         ok: true,
         changed,
         repo: projectToRepoSummary(saved, sessionManager.getSessionsForProject(saved.id).length),
-        settings: await readRepoSettings(services, saved),
+        settings: { ...await readRepoSettings(services, saved), envVars: nextEnv },
       };
       if (normalized.dryRun) result.dryRun = true;
       return result;
@@ -5101,6 +5115,11 @@ function parseRepoAddRequest(value: PaneCommandValue): Required<Pick<RunpaneRepo
 }
 
 /** Project Settings columns, by the name `repos get` and `repos update` use for them. */
+/** The project's variables, through the service Project Settings uses. */
+function repoProjectEnv(services: AppServices): ProjectEnvService {
+  return new ProjectEnvService(services.databaseService);
+}
+
 const REPO_SETTING_COLUMNS = {
   name: 'name',
   buildScript: 'build_script',
@@ -5109,19 +5128,56 @@ const REPO_SETTING_COLUMNS = {
   worktreeFolder: 'worktree_folder',
   openIdeCommand: 'open_ide_command',
   systemPrompt: 'system_prompt',
-} as const satisfies Record<RunpaneRepoSettingField, keyof UpdateProjectRequest & keyof Project>;
+} as const satisfies Record<RunpaneRepoTextSettingField, keyof UpdateProjectRequest & keyof Project>;
 
-const REPO_SETTING_FIELDS: readonly RunpaneRepoSettingField[] = [
+const REPO_SETTING_FIELDS: readonly RunpaneRepoTextSettingField[] = [
   'name', 'buildScript', 'runScript', 'archiveScript', 'worktreeFolder', 'openIdeCommand', 'systemPrompt',
 ];
 
 const repoSettingValueSchema = boundary.nullable(boundary.string);
 
 function isRepoSettingField(key: string): key is RunpaneRepoSettingField {
-  return REPO_SETTING_FIELDS.some(field => field === key);
+  return key === 'envVars' || REPO_SETTING_FIELDS.some(field => field === key);
 }
 
-function parseRepoSettingValue(field: RunpaneRepoSettingField, value: PaneCommandValue): string | null {
+const repoEnvVarSchema = boundary.union(
+  boundary.object({ key: boundary.string, source: boundary.literal('plain'), value: boundary.string }),
+  boundary.object({ key: boundary.string, source: boundary.literal('keychain'), service: boundary.string, account: boundary.string }),
+  boundary.object({ key: boundary.string, source: boundary.literal('secret'), project: boundary.string, name: boundary.string }),
+);
+const repoEnvVarsUpdateSchema = boundary.object({
+  set: boundary.optional(boundary.array(repoEnvVarSchema)),
+  remove: boundary.optional(boundary.array(boundary.string)),
+});
+
+function parseRepoEnvVarsUpdate(value: PaneCommandValue): RunpaneRepoEnvVarsUpdate {
+  // Values in `set` are never echoed: an agent may have put a secret in a plain variable.
+  if (isRecord(value) && Array.isArray(value.set) && value.set.some(entry => isRecord(entry) && entry.source === 'secret' && 'value' in entry)) {
+    throw invalidRepoSettings('envVars cannot set a Pane secret\'s value; set it with `runpane secrets set` and reference it here by project and name.');
+  }
+  let update: RunpaneRepoEnvVarsUpdate;
+  try {
+    update = decodeBoundary(value, repoEnvVarsUpdateSchema);
+  } catch {
+    throw invalidRepoSettings('envVars must be { set?: [{key, source: plain|keychain|secret, ...}], remove?: [NAME] }.');
+  }
+  if (!update.set?.length && !update.remove?.length) throw invalidRepoSettings('envVars changes no variables.');
+  return update;
+}
+
+/** `current` with each `set` entry added or replacing the same key in place, then each `remove` key dropped. */
+function applyRepoEnvVarsUpdate(current: readonly ProjectEnvVar[], update: RunpaneRepoEnvVarsUpdate): ProjectEnvVar[] {
+  const next = [...current];
+  for (const variable of update.set ?? []) {
+    const index = next.findIndex(existing => existing.key === variable.key);
+    if (index >= 0) next[index] = variable;
+    else next.push(variable);
+  }
+  const removed = new Set(update.remove ?? []);
+  return next.filter(variable => !removed.has(variable.key));
+}
+
+function parseRepoSettingValue(field: RunpaneRepoTextSettingField, value: PaneCommandValue): string | null {
   try {
     return decodeBoundary(value, repoSettingValueSchema);
   } catch {
@@ -5145,6 +5201,7 @@ function parseRepoUpdateRequest(value: PaneCommandValue): RunpaneRepoUpdateReque
   const unknown = Object.keys(raw).filter(key => !isRepoSettingField(key));
   if (unknown.length > 0) throw invalidRepoSettings(`Unknown repo setting(s): ${unknown.join(', ')}.`);
   const settings: RunpaneRepoSettingsUpdate = {};
+  if (raw.envVars !== undefined) settings.envVars = parseRepoEnvVarsUpdate(raw.envVars);
   for (const field of REPO_SETTING_FIELDS) {
     if (raw[field] === undefined) continue;
     const setting = parseRepoSettingValue(field, raw[field]);
@@ -5176,7 +5233,7 @@ function toProjectSettingsUpdate(settings: RunpaneRepoSettingsUpdate): UpdatePro
   return updates;
 }
 
-function changedRepoSettings(project: Project, updates: UpdateProjectRequest): RunpaneRepoSettingField[] {
+function changedRepoSettings(project: Project, updates: UpdateProjectRequest): RunpaneRepoTextSettingField[] {
   return REPO_SETTING_FIELDS.filter(field => {
     const column = REPO_SETTING_COLUMNS[field];
     return updates[column] !== undefined && (updates[column] ?? null) !== (project[column] ?? null);
@@ -5202,6 +5259,7 @@ async function readRepoSettings(services: AppServices, project: Project): Promis
     buildScript: repoScriptSetting(project.build_script, detected?.setup, detected),
     runScript: repoScriptSetting(project.run_script, detected?.run, detected),
     archiveScript: repoScriptSetting(project.archive_script, detected?.archive, detected),
+    envVars: repoProjectEnv(services).list(project.id),
   };
 }
 

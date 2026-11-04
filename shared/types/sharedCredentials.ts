@@ -11,7 +11,10 @@ export interface SharedCredential {
   source: string;
 }
 
-export type SharedCredentials = Partial<Record<SharedCredentialId, SharedCredential>>;
+export type SharedCredentials = Partial<Record<SharedCredentialId, SharedCredential>> & {
+  /** Pane secrets by `<project>/<NAME>`, with the same newest-wins and tombstone rules. Hosts and phones from before secrets drop this field. */
+  paneSecrets?: Record<string, SharedCredential>;
+};
 
 /** When and where a host's copy of a key was set; stored next to the key in host config. */
 export interface SharedCredentialMeta extends Pick<SharedCredential, 'updatedAt' | 'source'> {
@@ -40,6 +43,8 @@ function isNewerCredential(candidate: SharedCredential, current: SharedCredentia
 export interface SharedCredentialMerge {
   credentials: SharedCredentials;
   changed: SharedCredentialId[];
+  /** Pane secret keys (`<project>/<NAME>`) that changed. */
+  changedSecrets: string[];
 }
 
 /** `current` with every newer key from `incoming`, and the ids that changed. */
@@ -53,7 +58,18 @@ export function mergeSharedCredentials(current: SharedCredentials, incoming: Sha
       changed.push(id);
     }
   }
-  return { credentials, changed };
+  const changedSecrets: string[] = [];
+  if (incoming.paneSecrets) {
+    const secrets = { ...current.paneSecrets };
+    for (const [key, candidate] of Object.entries(incoming.paneSecrets)) {
+      if (isNewerCredential(candidate, secrets[key])) {
+        secrets[key] = candidate;
+        changedSecrets.push(key);
+      }
+    }
+    if (changedSecrets.length > 0 || current.paneSecrets) credentials.paneSecrets = secrets;
+  }
+  return { credentials, changed, changedSecrets };
 }
 
 /** A host a device can reach with its pairing token. */
@@ -71,7 +87,10 @@ export async function syncSharedCredentials(hosts: readonly SharedCredentialHost
   const reads = await Promise.all(hosts.map(host => host.read().then(credentials => ({ host, credentials }), () => null)));
   const reached = reads.filter(read => read !== null);
   const newest = reached.reduce<SharedCredentials>((merged, read) => mergeSharedCredentials(merged, read.credentials).credentials, {});
-  const behind = reached.filter(read => mergeSharedCredentials(read.credentials, newest).changed.length > 0);
+  const behind = reached.filter(read => {
+    const merge = mergeSharedCredentials(read.credentials, newest);
+    return merge.changed.length + merge.changedSecrets.length > 0;
+  });
   const applied = await Promise.all(behind.map(read => read.host.apply(newest).then(() => true, () => false)));
   return { reached: reached.length, updated: applied.filter(Boolean).length };
 }

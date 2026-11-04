@@ -68,6 +68,7 @@ import type { MissionControlAgentPanel, MissionControlSnapshotRequest, MissionCo
 import type { CreateSessionRequest } from './session';
 import type { DetectedProjectConfig } from '../../../shared/types/projectConfig';
 import type { ProjectEnvVar, ProjectEnvVarInput } from '../../../shared/types/projectEnvVars';
+import type { PaneSecretStorage, PaneSecretSummary } from '../../../shared/types/paneSecrets';
 import type { RunpanePaneFocusRequestedEvent } from '../../../shared/types/runpaneOrchestration';
 import type { PaneLinkTarget } from '../../../shared/types/paneLinks';
 import type { ArchiveProgressSnapshot } from '../../../shared/types/archiveProgress';
@@ -117,6 +118,13 @@ interface IPCResponse<T = any> {
 }
 
 interface ElectronAPI {
+  /** Settings → Secrets: this computer's Pane secret store. Values go in only; nothing returns one. */
+  paneSecrets: {
+    list: () => Promise<IPCResponse<{ secrets: PaneSecretSummary[]; storage: PaneSecretStorage }>>;
+    /** Data is true when it replaced a saved value. */
+    set: (project: string, name: string, value: string) => Promise<IPCResponse<boolean>>;
+    delete: (project: string, name: string) => Promise<IPCResponse<boolean>>;
+  };
   onNotesChanged: (callback: () => void) => () => void;
   preferences: PreferencesApi;
   // Generic invoke method. Daemon-owned channels route through the main-process
