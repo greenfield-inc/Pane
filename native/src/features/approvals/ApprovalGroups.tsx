@@ -7,7 +7,7 @@ import { SectionHeader } from '@/features/panes/PaneKit';
 import { useTheme, withAlpha } from '@/theme';
 import { Text } from '@/ui';
 
-import { groupBySession, type ApprovalEntry } from './approvals';
+import { groupBySession, waitingCounts, type ApprovalEntry } from './approvals';
 
 /**
  * Home's Approvals: one card per Session (its name and its machine's mark above it), oldest
@@ -23,7 +23,8 @@ export function ApprovalGroups<T extends ApprovalEntry>({ entries, machineOf, re
   if (entries.length === 0) return null;
   return (
     <View testID="approvals-section" style={styles.section}>
-      <SectionHeader title="Approvals" count={entries.length} first />
+      {/* What waits from every Session plus what waits outside one; answers held for Undo don't count. */}
+      <SectionHeader title="Approvals" count={waitingCounts(entries).total} first />
       {groupBySession(entries).map(group => {
         const machine = group.machineKey ? machineOf(group.machineKey) : undefined;
         return (

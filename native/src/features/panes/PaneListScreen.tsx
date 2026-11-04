@@ -10,7 +10,7 @@ import type { PanePermissionRequest } from '@shared/types/permissions';
 import { useDaemon } from '@/daemon';
 import { AllMachinesHome, type AllMachinesFeed } from '@/features/allMachines/AllMachinesHome';
 import { ApprovalGroups } from '@/features/approvals/ApprovalGroups';
-import { approvalItems, itemEntry, questionDetail, sessionsByPane, type ApprovalEntry } from '@/features/approvals/approvals';
+import { approvalItems, itemEntry, questionDetail, sessionKey, sessionsByPane, waitingCounts, type ApprovalEntry } from '@/features/approvals/approvals';
 import { openApproval } from '@/features/approvals/ApprovalScreen';
 import { useOtherMachines } from '@/features/allMachines/useOtherMachines';
 import { DemoBadge } from '@/features/demo/DemoBadge';
@@ -116,10 +116,11 @@ export function PaneListScreen() {
     ...approvalItems(notify.data).map(item => ({ ...itemEntry(item, profile.id), kind: 'question' as const })),
     ...waiting.map(request => {
       const session = sessionOfPane.get(request.sessionId);
-      return { key: `${profile.id}:permission:${request.id}`, machineKey: profile.id, at: request.timestamp, kind: 'permission' as const, request, ...(session ? { session } : {}) };
+      return { key: `${profile.id}:permission:${request.id}`, machineKey: profile.id, at: request.timestamp, waiting: true, kind: 'permission' as const, request, ...(session ? { session } : {}) };
     }),
   ];
   const waitingCount = approvals.length;
+  const waitingBySession = waitingCounts(approvals).bySession;
 
   const confirmArchive = (pane: { id: string; name: string }) => {
     Alert.alert(`Archive “${pane.name}”?`, 'Its agents stop and its worktree is removed. You can still find it under Archived.', [
@@ -235,6 +236,7 @@ export function PaneListScreen() {
         return (
           <SessionRow
             item={item}
+            waiting={waitingBySession.get(sessionKey(profile.id, item.session.id)) ?? 0}
             onOpen={() => router.push({ pathname: '/session/[sessionId]', params: { sessionId: item.session.id } })}
             onToggleNested={() => setCollapsedSessions(current => toggleMember(current, item.nestedKey))}
             onTogglePinned={() => updateSession(item.session.id, { isPinned: !item.session.isPinned })

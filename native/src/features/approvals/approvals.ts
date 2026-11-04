@@ -13,6 +13,8 @@ export interface ApprovalEntry {
   session?: { id: string; name: string };
   /** Epoch ms it was asked: each group lists oldest first. */
   at: number;
+  /** It waits on you: an open question, a fallback item, or a permission request. False for an answer held for Undo. */
+  waiting: boolean;
 }
 
 export interface ApprovalGroup<T extends ApprovalEntry> {
@@ -37,7 +39,7 @@ export function groupBySession<T extends ApprovalEntry>(entries: readonly T[]): 
       loose.entries.push(entry);
       continue;
     }
-    const key = `${entry.machineKey}:${entry.session.id}`;
+    const key = sessionKey(entry.machineKey, entry.session.id);
     let group = groups.get(key);
     if (!group) {
       group = { key, label: entry.session.name || 'Untitled', machineKey: entry.machineKey, entries: [] };
@@ -46,6 +48,35 @@ export function groupBySession<T extends ApprovalEntry>(entries: readonly T[]): 
     group.entries.push(entry);
   }
   return [...groups.values(), ...(loose ? [loose] : [])];
+}
+
+/** A Session on one machine: Session ids can repeat from one machine to the next. */
+export function sessionKey(machineKey: string, sessionId: string): string {
+  return `${machineKey}:${sessionId}`;
+}
+
+export interface WaitingCounts {
+  /** What waits from each Session, by `sessionKey`; a Session with none isn't listed. */
+  bySession: ReadonlyMap<string, number>;
+  /** Approvals' header: every Session's count plus what waits outside any Session. */
+  total: number;
+}
+
+/**
+ * Home's amber counts (D-38): what waits on you from each Session row, and the total on the
+ * Approvals header. Answers held for Undo don't count; fallback items count toward their Session.
+ */
+export function waitingCounts(entries: readonly ApprovalEntry[]): WaitingCounts {
+  const bySession = new Map<string, number>();
+  let total = 0;
+  for (const entry of entries) {
+    if (!entry.waiting) continue;
+    total += 1;
+    if (!entry.session) continue;
+    const key = sessionKey(entry.machineKey, entry.session.id);
+    bySession.set(key, (bySession.get(key) ?? 0) + 1);
+  }
+  return { bySession, total };
 }
 
 /**
@@ -59,7 +90,7 @@ export function approvalItems(state: NotifySharedState | undefined): NotifyItem[
 /** A Notify item as an Approvals entry. */
 export function itemEntry(item: NotifyItem, machineKey: string): ApprovalEntry & { item: NotifyItem } {
   const session = item.source.session;
-  return { key: `${machineKey}:question:${item.id}`, machineKey, at: item.createdAt, item, ...(session ? { session: { id: session.id, name: session.name } } : {}) };
+  return { key: `${machineKey}:question:${item.id}`, machineKey, at: item.createdAt, waiting: item.state === 'waiting', item, ...(session ? { session: { id: session.id, name: session.name } } : {}) };
 }
 
 /** The approval screen's order, the same as home's: item ids group by group. "1 of N" counts these. */

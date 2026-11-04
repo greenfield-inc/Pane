@@ -14,7 +14,9 @@ import {
   questionDetail,
   relayLine,
   resolveSelection,
+  sessionKey,
   sessionsByPane,
+  waitingCounts,
 } from './approvals';
 
 const launch = { id: 'sess-launch', name: 'Spring launch', paneId: 'ws-launch' };
@@ -73,6 +75,38 @@ describe('Approvals grouping', () => {
     ]);
     expect(lookup.get('p1')).toEqual({ id: 's1', name: 'Launch' });
     expect(lookup.has('p2')).toBe(false);
+  });
+});
+
+describe('waiting counts on home', () => {
+  const counts = (entries: Parameters<typeof waitingCounts>[0]) => {
+    const { bySession, total } = waitingCounts(entries);
+    return { bySession: Object.fromEntries(bySession), total };
+  };
+
+  it('counts what waits from each Session, a fallback item included, and leaves answers held for Undo out', () => {
+    const heldInLaunch = item('held-launch', 7_000, { state: 'sent', source: { name: 'docs', agent: 'Claude', session: launch } });
+    expect(counts([...approvalItems(state), heldInLaunch].map(entry => itemEntry(entry, 'mac')))).toEqual({
+      // worker + later; orch + relay (the fallback); held and held-launch are in their Undo hold.
+      bySession: { 'mac:sess-launch': 2, 'mac:sess-fixes': 2 },
+      // Both Sessions' 4, plus the loose question outside any Session.
+      total: 5,
+    });
+  });
+
+  it('counts permission requests as waiting, in their Session or outside one', () => {
+    const request = (key: string, session?: { id: string; name: string }) => ({ key, machineKey: 'mac', at: 1, waiting: true, ...(session ? { session } : {}) });
+    expect(counts([request('p1', launch), request('p2')])).toEqual({ bySession: { 'mac:sess-launch': 1 }, total: 2 });
+  });
+
+  it('keeps the same Session id on two machines apart', () => {
+    const result = counts([itemEntry(worker, 'studio'), itemEntry(later, 'studio'), itemEntry({ ...worker, id: 'w2' }, 'build')]);
+    expect(result).toEqual({ bySession: { [sessionKey('studio', 'sess-launch')]: 2, [sessionKey('build', 'sess-launch')]: 1 }, total: 3 });
+  });
+
+  it('shows no count when nothing waits', () => {
+    expect(counts([itemEntry(held, 'mac')])).toEqual({ bySession: {}, total: 0 });
+    expect(counts([])).toEqual({ bySession: {}, total: 0 });
   });
 });
 

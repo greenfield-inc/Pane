@@ -4,7 +4,7 @@ import type { OrchestrationSessionRecord } from '@shared/types/orchestrationSess
 import type { TerminalPausedMark } from '@shared/types/panels';
 import type { PanePermissionRequest } from '@shared/types/permissions';
 
-import { approvalItems } from '@/features/approvals/approvals';
+import { approvalItems, sessionKey, waitingCounts } from '@/features/approvals/approvals';
 import { paneAgent, paneDisplayStatus, type AgentStatusSnapshot } from '@/features/panes/agentStatus';
 import type { ProjectWithPanes } from '@/features/panes/paneList';
 
@@ -41,6 +41,8 @@ interface RowBase {
 interface WaitingBase extends RowBase {
   session?: { id: string; name: string };
   at: number;
+  /** False for an answer held for Undo: it shows, but doesn't count. */
+  waiting: boolean;
 }
 
 export type WaitingRow =
@@ -63,7 +65,14 @@ export interface AllPane {
 
 export type RecentRow =
   | RowBase & { type: 'pane'; pane: AllPane }
-  | RowBase & { type: 'session'; session: OrchestrationSessionRecord; paneCount: number; activeAt: number };
+  | RowBase & {
+    type: 'session';
+    session: OrchestrationSessionRecord;
+    paneCount: number;
+    activeAt: number;
+    /** The approvals waiting from this Session on its machine: the row's amber count. */
+    waiting: number;
+  };
 
 export interface AllMachinesList {
   /** Every machine's questions (with answers held for Undo), oldest first, then its permission requests. */
@@ -124,11 +133,11 @@ export function buildAllMachinesList(machines: readonly MachineFeed[], query: st
     for (const session of sessions) {
       if (!matches(session.name, machine.name)) continue;
       const paneCount = session.associations.filter(association => paneNames.has(association.paneId)).length;
-      recent.push({ ...base('session', session.id), type: 'session', session, paneCount, activeAt: timeOf(session.updatedAt) ?? 0 });
+      recent.push({ ...base('session', session.id), type: 'session', session, paneCount, activeAt: timeOf(session.updatedAt) ?? 0, waiting: 0 });
     }
     questions.push(...asked.map(item => {
       const session = item.source.session;
-      return { ...base('question', item.id), type: 'question' as const, item, at: item.createdAt, ...(session ? { session: { id: session.id, name: session.name } } : {}) };
+      return { ...base('question', item.id), type: 'question' as const, item, at: item.createdAt, waiting: item.state === 'waiting', ...(session ? { session: { id: session.id, name: session.name } } : {}) };
     }));
     permissions.push(...pending.map(request => {
       const session = sessionOf.get(request.sessionId);
@@ -138,6 +147,7 @@ export function buildAllMachinesList(machines: readonly MachineFeed[], query: st
         request,
         paneName: paneNames.get(request.sessionId) ?? 'Pane',
         at: request.timestamp,
+        waiting: true,
         ...(session ? { session } : {}),
       };
     }));
@@ -145,9 +155,13 @@ export function buildAllMachinesList(machines: readonly MachineFeed[], query: st
 
   const questionTime = (row: WaitingRow) => (row.type === 'question' ? row.item.createdAt : 0);
   const recentTime = (row: RecentRow) => (row.type === 'pane' ? row.pane.activeAt : row.activeAt);
+  const waiting = [...questions.sort((a, b) => questionTime(a) - questionTime(b)), ...permissions];
+  const counts = waitingCounts(waiting).bySession;
   return {
-    waiting: [...questions.sort((a, b) => questionTime(a) - questionTime(b)), ...permissions],
-    recent: recent.sort((a, b) => recentTime(b) - recentTime(a)),
+    waiting,
+    recent: recent
+      .map(row => (row.type === 'session' ? { ...row, waiting: counts.get(sessionKey(row.machineKey, row.session.id)) ?? 0 } : row))
+      .sort((a, b) => recentTime(b) - recentTime(a)),
   };
 }
 

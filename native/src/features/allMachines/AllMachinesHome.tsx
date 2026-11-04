@@ -6,6 +6,7 @@ import { Alert, Pressable, StyleSheet, View } from 'react-native';
 import { ApprovalGroups } from '@/features/approvals/ApprovalGroups';
 import { questionDetail } from '@/features/approvals/approvals';
 import { openApproval } from '@/features/approvals/ApprovalScreen';
+import { WaitingCount } from '@/features/approvals/WaitingCount';
 import { MachineBadge } from '@/features/machines/MachineBadge';
 import { MachineMark } from '@/features/machines/MachineMark';
 import type { Machine } from '@/features/machines/machines';
@@ -169,8 +170,10 @@ export function AllMachinesHome({ machines, feeds, currentKey, loading, refreshi
         detail={['Session', row.paneCount === 1 ? '1 Pane' : row.paneCount > 1 ? `${row.paneCount} Panes` : undefined, time].filter(Boolean).join(' · ')}
         machine={machine}
         stale={row.stale}
+        label={[row.session.name || 'Untitled', 'Session', row.waiting > 0 ? `${row.waiting} waiting` : undefined, machine?.name].filter(Boolean).join(', ')}
         paused={Boolean(row.session.paused)}
         leading={row.session.paused ? <PausedBadge /> : <Icon ios="bubble.left" android="chat_bubble" size={12} />}
+        trailing={<WaitingCount testID={`all-session-waiting-${row.key}`} count={row.waiting} />}
         onPress={() => openRecent(row)}
         swipe={row.machineKey === currentKey && !row.stale ? {
           pinned: Boolean(row.session.isPinned),
@@ -277,7 +280,7 @@ function OfflineNote({ machine, since, hasRows, onRetry }: { machine: Machine | 
 }
 
 /** A row of All machines: status, name, what it is, and its machine's badge. */
-function AllRow({ title, detail, label, machine, stale, paused = false, divided = false, leading, onPress, swipe, testID }: {
+function AllRow({ title, detail, label, machine, stale, paused = false, divided = false, leading, trailing, onPress, swipe, testID }: {
   title: string;
   detail: string;
   /** Spoken instead of title and detail. */
@@ -288,6 +291,8 @@ function AllRow({ title, detail, label, machine, stale, paused = false, divided 
   paused?: boolean;
   divided?: boolean;
   leading: ReactNode;
+  /** Before the machine badge: a Session row's waiting count. */
+  trailing?: ReactNode;
   onPress: () => void;
   swipe?: { pinned: boolean; onTogglePinned: () => void; onArchive: () => void; pause?: { paused: boolean; onToggle: () => void } };
   testID: string;
@@ -313,6 +318,7 @@ function AllRow({ title, detail, label, machine, stale, paused = false, divided 
         <Text variant="body" tone={paused ? 'muted' : 'primary'} numberOfLines={1}>{title}</Text>
         <Text variant="footnote" tone="muted" numberOfLines={1}>{detail}</Text>
       </View>
+      {trailing}
       {machine ? <MachineBadge machine={machine} /> : null}
     </Pressable>
   );
