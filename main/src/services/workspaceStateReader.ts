@@ -1,7 +1,9 @@
 import type { SessionManager } from './sessionManager';
+import { getChatTabManager } from './chatTabs';
 import { panelManager } from './panelManager';
 import { terminalPanelManager } from './terminalPanelManager';
-import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
+import type { ToolPanelState } from '../../../shared/types/panels';
 import type { AgentState } from '../../../shared/types/agentStatus';
 import { extractWorkspaceHeldInput } from './workspaceHeldInput';
 import { isAgentFarmLaunchCommand } from '../../../shared/types/customCommandResume';
@@ -67,6 +69,11 @@ export class WorkspaceStateReader {
       const panelSummaries: RunpaneWorkspacePanelSummary[] = [];
 
       for (const panel of panelManager.getPanelsForSession(session.id)) {
+        if (panel.type === 'chat') {
+          const chat = chatTabSummary(panel.id, panel.state.customState);
+          panelSummaries.push({ panelId: panel.id, title: panel.title, agentType: chat.agentType, agentState: chat.agentState, running: chat.running });
+          continue;
+        }
         if (panel.type !== 'terminal') continue;
         const customState = decodeBoundary(panel.state.customState ?? {}, boundary.object({
           isCliPanel: boundary.optional(boundary.boolean),
@@ -110,6 +117,16 @@ export class WorkspaceStateReader {
       if (session.archived || session.isHidden) continue;
       const project = this.sessionManager.getProjectForSession(session.id);
       for (const panel of panelManager.getPanelsForSession(session.id)) {
+        if (panel.type === 'chat') {
+          const chat = chatTabSummary(panel.id, panel.state.customState);
+          result.push({
+            panelId: panel.id, paneId: session.id, paneName: session.name, panelTitle: panel.title, agentType: chat.agentType,
+            repoId: project?.id, repoName: project?.name, worktreePath: session.worktreePath, agentState: chat.agentState, running: chat.running,
+            // A chat tab's composer is local to each client; nothing is held on the host.
+            heldInputPresent: false,
+          });
+          continue;
+        }
         if (panel.type !== 'terminal') continue;
         const customState = decodeBoundary(panel.state.customState ?? {}, boundary.object({
           isCliPanel: boundary.optional(boundary.boolean),
@@ -147,6 +164,16 @@ export class WorkspaceStateReader {
     }
     return result;
   }
+}
+
+/** A chat tab as runpane's workspace state sees it: running while its adapter runs. */
+interface ChatTabSummary { agentType?: string; agentState: AgentState; running: boolean }
+
+function chatTabSummary(panelId: string, customState: ToolPanelState['customState']): ChatTabSummary {
+  const agentType = decodeOptionalBoundary(customState, boundary.object({ agent: boundary.enumeration('claude', 'codex') }))?.agent;
+  const manager = getChatTabManager();
+  const running = manager.isRunning(panelId);
+  return { agentType, running, agentState: running ? manager.agentState(panelId) : 'unknown' };
 }
 
 function resolveAgentState(panelId: string): AgentState {

@@ -1482,7 +1482,8 @@ export function registerRunpaneHandlers(
           agentType: candidate.agentType,
         };
         try {
-          const result = await resumeTerminalPanel(services, resolveTerminalPanel(candidate.panelId), { waitReady: false });
+          const target = resolveAgentPanel(candidate.panelId);
+          const result = target.type === 'chat' ? await resumeChatTab(target) : await resumeTerminalPanel(services, resolveTerminalPanel(candidate.panelId), { waitReady: false });
           return { ...base, ok: result.ok, action: result.action, message: result.message, agentSessionId: result.agentSessionId };
         } catch (error) {
           return { ...base, ok: false, error: error instanceof PaneError ? paneErrorText(error) : error instanceof Error ? error.message : String(error) };
