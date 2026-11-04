@@ -101,7 +101,7 @@ export const PanelContainer: React.FC<PanelContainerProps> = React.memo(({
       {
         // A paused tab never mounts its terminal, so nothing starts it: it shows its last screen.
         const paused = pausedMarkOf(panel);
-        return paused ? <PausedTerminalView panelId={panel.id} mark={paused} /> : <TerminalPanel panel={panel} isActive={isActive} autoFocus={autoFocus} />;
+        return paused ? <PausedTerminalView panel={panel} mark={paused} /> : <TerminalPanel panel={panel} isActive={isActive} autoFocus={autoFocus} />;
       }
       case 'diff':
         return <DiffPanel panel={panel} isActive={isActive} sessionId={panel.sessionId} isMainRepo={isMainRepo} />;

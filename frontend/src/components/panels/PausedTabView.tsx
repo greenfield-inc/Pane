@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Pause, Play } from 'lucide-react';
-import type { TerminalPausedMark } from '../../../../shared/types/panels';
+import type { TerminalPanelState, TerminalPausedMark, ToolPanel } from '../../../../shared/types/panels';
 import { DEFAULT_TERMINAL_FONT_SIZE } from '../../../../shared/types/appearance';
 import { Button } from '../ui/Button';
 import { useConfigStore } from '../../stores/configStore';
@@ -54,22 +54,30 @@ export function PausedBanner({ panelId, mark, detail }: { panelId: string; mark:
  * A paused terminal tab: its saved last screen, dimmed, under the paused banner. It never starts
  * the terminal; Resume does, and the tab then mounts its live terminal as usual.
  */
-export function PausedTerminalView({ panelId, mark }: { panelId: string; mark: TerminalPausedMark }) {
-  const [screen, setScreen] = useState<string | null>(null);
+export function PausedTerminalView({ panel, mark }: { panel: ToolPanel; mark: TerminalPausedMark }) {
+  const panelId = panel.id;
+  // SAFETY: only terminal tabs are paused; their custom state is the TerminalPanelState contract.
+  const saved = panel.state.customState as TerminalPanelState | undefined;
+  // A full-screen agent (Claude, Codex) paints with cursor moves, so its byte log reads as
+  // fragments; the emulator's saved screen text is the screen as the person saw it.
+  const savedScreen = saved?.isAlternateScreen ? saved.screenText : undefined;
+  const [fetched, setFetched] = useState<string | null>(null);
+  const screen = savedScreen ?? fetched;
   const scrollRef = useRef<HTMLPreElement>(null);
   const fontFamily = useConfigStore(state => state.config?.terminalFontFamily) || DEFAULT_TERMINAL_FONT_FAMILY;
   const fontSize = useConfigStore(state => state.config?.terminalFontSize) || DEFAULT_TERMINAL_FONT_SIZE;
 
   useEffect(() => {
+    if (savedScreen !== undefined) return;
     let disposed = false;
     void window.electronAPI.invoke('terminal:getScrollbackClean', panelId, LAST_SCREEN_LINES).then(
       response => {
-        if (!disposed) setScreen(decodeOptionalBoundary(response, scrollbackSchema)?.data?.content ?? '');
+        if (!disposed) setFetched(decodeOptionalBoundary(response, scrollbackSchema)?.data?.content ?? '');
       },
-      () => { if (!disposed) setScreen(''); },
+      () => { if (!disposed) setFetched(''); },
     );
     return () => { disposed = true; };
-  }, [panelId, mark.at]);
+  }, [panelId, mark.at, savedScreen]);
 
   useLayoutEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
