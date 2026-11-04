@@ -38,9 +38,12 @@ class ChatImageAdapter extends SimpleImageAttachmentAdapter {
 }
 
 /** A window scrolled back from the newest message reads the newest window again first. */
-function ScrollToLatest({ viewer, hasNewer }: { viewer: ChatTabViewer; hasNewer: boolean }) {
+/** `follow` is set to a function that makes the thread follow its live end again (used when sending). */
+function ScrollToLatest({ viewer, hasNewer, follow }: { viewer: ChatTabViewer; hasNewer: boolean; follow: RefObject<(() => void) | undefined> }) {
   const isAtBottom = useThreadViewport(state => state.isAtBottom);
   const viewport = useThreadViewportStore();
+  // The viewport's own scroll-to-bottom also resets its follow state, which setting scrollTop does not.
+  useEffect(() => { follow.current = () => viewport.getState().scrollToBottom({ behavior: 'instant' }); return () => { follow.current = undefined; }; }, [viewport, follow]);
   const jump = async () => {
     if (hasNewer) await viewer.jumpToLatest();
     requestAnimationFrame(() => viewport.getState().scrollToBottom({ behavior: 'instant' }));
@@ -132,6 +135,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, quiet 
   const [commandIndex, setCommandIndex] = useState(0);
   const messages = useMemo(() => snapshot.transcript?.messages ?? [], [snapshot.transcript?.messages]);
   const viewportRef = useRef<HTMLDivElement>(null);
+  const followLiveEnd = useRef<(() => void) | undefined>(undefined);
   const recordAnchor = useWindowAnchor(viewportRef, snapshot.transcript?.start, messages.length, !!snapshot.hasNewer);
   const onViewportScroll = () => {
     recordAnchor();
@@ -190,7 +194,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, quiet 
       // Sending returns to the live end, wherever the reader had paged to.
       setPaged(false);
       if (viewer.snapshot().hasNewer) await viewer.jumpToLatest();
-      requestAnimationFrame(() => { const element = viewportRef.current; if (element) element.scrollTop = element.scrollHeight; });
+      requestAnimationFrame(() => followLiveEnd.current?.());
       await deliver({ operationId: crypto.randomUUID(), text, images: imageParts }, true);
     },
   });
@@ -230,7 +234,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, quiet 
         </div>
       </ThreadPrimitive.Viewport>
       <div className="chat-composer-footer">
-        <ScrollToLatest viewer={viewer} hasNewer={snapshot.hasNewer} />
+        <ScrollToLatest viewer={viewer} hasNewer={snapshot.hasNewer} follow={followLiveEnd} />
         {snapshot.pendingDelivery && <div className="chat-dock" role="status">
           <span>Delivery is unconfirmed.</span>
           <button type="button" className="chat-button chat-button-outline" disabled={!connected} onClick={() => void deliver(snapshot.pendingDelivery!, false)}>Check delivery</button>
