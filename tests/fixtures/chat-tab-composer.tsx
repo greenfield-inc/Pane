@@ -1,7 +1,7 @@
 import { createRoot } from 'react-dom/client';
 import ChatTabPanel from '../../frontend/src/components/chatTab/ChatTabPanel';
 import type { AgentChatConfigOption } from '../../shared/types/agentChat';
-import type { ChatTabClient, ChatTabView } from '../../shared/types/chatTab';
+import type { ChatTabClient, ChatTabSend, ChatTabView } from '../../shared/types/chatTab';
 import '../../frontend/src/index.css';
 
 // A chat tab's composer in a column of a chosen width (?width=360), with Claude's settings.
@@ -25,8 +25,21 @@ const view: ChatTabView = {
     { id: 'a1', role: 'assistant', parts: [{ type: 'text', text: 'Nothing is waiting on you right now.' }] },
   ] },
 };
+// ?files=1 copies dropped files "to the host" (D-139); what was copied and sent is kept for the test.
+declare global { interface Window { qaCopied: string[]; qaSent: ChatTabSend[]; qaReleaseCopies?: () => void } }
+window.qaCopied = [];
+window.qaSent = [];
+const holdCopies = params.has('holdCopies');
+let release: Promise<void> = Promise.resolve();
+if (holdCopies) release = new Promise(resolve => { window.qaReleaseCopies = resolve; });
+const saveFile = params.has('files') ? async ({ name }: { name: string; dataUrl: string }) => {
+  await release;
+  if (name.startsWith('fail')) throw new Error('the host is offline');
+  window.qaCopied.push(name);
+  return `/repo/.pane/files/${name}`;
+} : undefined;
 const client: ChatTabClient = {
-  get: async () => structuredClone(view), history: async () => [], send: async () => ({ operationId: 'x', state: 'accepted' }), receipt: async () => undefined,
+  get: async () => structuredClone(view), history: async () => [], send: async (_panel, request) => { window.qaSent.push(request); return { operationId: request.operationId, state: 'accepted' }; }, receipt: async () => undefined,
   unqueue: async () => {}, cancel: async () => {}, permission: async () => {}, answer: async () => {}, restart: async () => {}, signIn: async () => ({ panelId: 'composer' }),
   configure: async () => {}, onEvent: () => () => {}, onState: () => () => {},
 };
@@ -34,7 +47,7 @@ const width = Number(params.get('width') ?? 360);
 createRoot(document.getElementById('root')!).render(
   <div className="bg-bg-secondary" style={{ height: '100vh', display: 'flex' }}>
     <div data-testid="column" className="bg-bg-primary" style={{ width, height: '100%', borderRight: '1px solid var(--color-border-primary)' }}>
-      <ChatTabPanel panelId="composer" client={client} placeholder={params.get('placeholder') ?? 'Message Autopilot…'} />
+      <ChatTabPanel panelId="composer" client={client} saveFile={saveFile} placeholder={params.get('placeholder') ?? 'Message Autopilot…'} />
     </div>
   </div>,
 );

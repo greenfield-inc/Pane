@@ -1,4 +1,4 @@
-import { lazy } from 'react';
+import { lazy, useMemo } from 'react';
 import type { ToolPanel } from '../../../../shared/types/panels';
 import type { ChatPanelState } from '../../../../shared/types/chatTab';
 import { useActiveMachineStore } from '../../stores/activeMachineStore';
@@ -9,6 +9,7 @@ import { API } from '../../utils/api';
 import { useSessionStore } from '../../stores/sessionStore';
 import { useNavigationStore } from '../../stores/navigationStore';
 import { useSessionWorkers, type SessionWorkerSource } from './sessionWorkers';
+import { savedFilePath } from './chatAttachments';
 
 /** The desktop reads the Session overview over IPC and hears its updates as window events. */
 const DESKTOP_WORKERS: SessionWorkerSource = {
@@ -37,7 +38,11 @@ export function ChatTabRoute({ panel }: { panel: ToolPanel }) {
   // SAFETY: the panel type 'chat' carries ChatPanelState as its custom state.
   const state = panel.state.customState as ChatPanelState | undefined;
   const workers = useSessionWorkers(DESKTOP_WORKERS, state?.orchestrationSessionId);
+  // Dropped and pasted files land in the Pane's folder on its machine, local or remote, as the terminal's do.
+  const saveFile = useMemo(() => async (file: { name: string; dataUrl: string }) =>
+    savedFilePath(await window.electronAPI.invoke('terminal:paste-file', panel.sessionId, file.dataUrl, file.name)), [panel.sessionId]);
   return <ChatTabPanel
+    saveFile={saveFile}
     workers={workers}
     panelId={panel.id}
     client={window.electronAPI.chatTab}

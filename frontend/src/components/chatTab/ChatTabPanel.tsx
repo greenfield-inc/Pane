@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type RefObject } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type RefObject } from 'react';
 import {
   AssistantRuntimeProvider, AttachmentPrimitive, ComposerPrimitive, ThreadPrimitive,
-  SimpleImageAttachmentAdapter, useExternalStoreRuntime, useThreadViewport, useThreadViewportStore,
+  useAuiState, useExternalStoreRuntime, useThreadViewport, useThreadViewportStore,
 } from '@assistant-ui/react';
-import { ArrowDown, ArrowUp, Plus, Square, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, FileText, Image as ImageIcon, LoaderCircle, Paperclip, Plus, Square, X } from 'lucide-react';
 import type { AgentChatPermission } from '../../../../shared/types/agentChat';
 import type { ChatTabClient, ChatTabCommand, ChatTabSend } from '../../../../shared/types/chatTab';
 import { chatTurns, placeWorkers, type ChatWorkerLine } from '../../../../shared/chatTabPresentation';
@@ -20,22 +20,36 @@ import { ChatCommandMenu } from './ChatCommandMenu';
 import { matchingCommands } from './chatCommands';
 import { ChatModeChip, ChatModelMenu, ChatPhoneModelMenu, ChatRiskyModeMarker, usePhoneWidth } from './ChatComposerControls';
 import { arrangeComposerControls } from '../../../../shared/chatComposerControls';
+import { ChatAttachmentAdapter, dragHasFiles, MAX_FILE_BYTES, MAX_IMAGE_BYTES, type SaveChatFile } from './chatAttachments';
 import '../agentChat/agentChat.css';
 import './chatTab.css';
 
+/** A small preview of an attached image, read from the dropped or pasted file itself. */
+function ImagePreview() {
+  const file = useAuiState(state => state.attachment.file);
+  const [url, setUrl] = useState<string>();
+  useEffect(() => {
+    if (!file) return;
+    const objectUrl = URL.createObjectURL(file);
+    setUrl(objectUrl);
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [file]);
+  return url ? <img className="chat-attachment-preview" src={url} alt="" /> : <span className="chat-attachment-icon" aria-hidden><ImageIcon /></span>;
+}
+
+/** An attached image or file before sending; a file shows "Copying…" until it is on the chat's machine. */
 function Attachment() {
-  return <AttachmentPrimitive.Root className="chat-attachment">
-    <AttachmentPrimitive.unstable_Thumb /><AttachmentPrimitive.Name /><AttachmentPrimitive.Remove aria-label="Remove attachment"><X className="h-3 w-3" /></AttachmentPrimitive.Remove>
+  const kind = useAuiState(state => state.attachment.type);
+  const copying = useAuiState(state => state.attachment.status.type === 'running');
+  return <AttachmentPrimitive.Root className="chat-attachment" data-kind={kind} aria-busy={copying}>
+    {kind === 'image' ? <ImagePreview /> : <span className="chat-attachment-icon" aria-hidden>{copying ? <LoaderCircle className="chat-spin" /> : <FileText />}</span>}
+    <span className="chat-attachment-name"><AttachmentPrimitive.Name /></span>
+    {copying && <span className="chat-attachment-status">Copying…</span>}
+    <AttachmentPrimitive.Remove aria-label="Remove attachment" title="Remove attachment"><X className="h-3 w-3" /></AttachmentPrimitive.Remove>
   </AttachmentPrimitive.Root>;
 }
 
-class ChatImageAdapter extends SimpleImageAttachmentAdapter {
-  override async add(input: { file: File }) {
-    if (input.file.size > 5 * 1024 * 1024) throw new Error('Choose an image smaller than 5 MiB.');
-    if (!/^image\/(png|jpeg|webp|gif)$/.test(input.file.type)) throw new Error('Choose a PNG, JPEG, WebP or GIF image.');
-    return super.add(input);
-  }
-}
+const megabytes = (bytes: number) => `${Math.round(bytes / (1024 * 1024))} MB`;
 
 /** A window scrolled back from the newest message reads the newest window again first. */
 /** `follow` is set to a function that makes the thread follow its live end again (used when sending). */
@@ -122,12 +136,14 @@ export interface ChatTabPanelProps {
   placeholder?: string;
   /** The Session's workers, one line each (the orchestrator's chat). */
   workers?: ChatWorkerLine[];
+  /** Copies a dropped, pasted or picked file to the chat's machine (D-139); without it only images attach. */
+  saveFile?: SaveChatFile;
 }
 
 /** A chat tab: one agent conversation over ACP, with no terminal (D-20). */
 const NO_ACTIONS: ChatTurnActions = {};
 
-export default function ChatTabPanel({ panelId, client, connected = true, quiet = false, machine, actions = NO_ACTIONS, placeholder, workers }: ChatTabPanelProps) {
+export default function ChatTabPanel({ panelId, client, connected = true, quiet = false, machine, actions = NO_ACTIONS, placeholder, workers, saveFile }: ChatTabPanelProps) {
   const viewer: ChatTabViewer = useMemo(() => chatTabViewer(client, panelId), [client, panelId]);
   const snapshot = useSyncExternalStore(viewer.subscribe, viewer.snapshot, viewer.snapshot);
   const view = snapshot.view;
@@ -154,7 +170,16 @@ export default function ChatTabPanel({ panelId, client, connected = true, quiet 
   const working = view?.status === 'working' || view?.status === 'blocked';
   const turns = useMemo(() => chatTurns(messages, { running: working }), [messages, working]);
   const placedWorkers = useMemo(() => placeWorkers(turns, workers ?? []), [turns, workers]);
-  const images = useMemo(() => new ChatImageAdapter(), []);
+  const [copying, setCopying] = useState(0);
+  const canAttachImages = !!view?.canAttachImages;
+  const attachments = useMemo(() => {
+    const options = { images: canAttachImages, saveFile, onCopying: (delta: 1 | -1) => setCopying(count => count + delta) };
+    return ChatAttachmentAdapter.available(options) ? new ChatAttachmentAdapter(options) : undefined;
+  }, [canAttachImages, saveFile]);
+  /** Why dropped, pasted or picked files were not attached; shown until dismissed or the next attempt. */
+  const [attachProblems, setAttachProblems] = useState<string[]>([]);
+  const [dragging, setDragging] = useState(false);
+  const dragDepth = useRef(0);
   const stopped = view?.status === 'stopped';
   const disabled = !connected || stopped || !view;
   const agentName = view ? AGENT_NAMES[view.agent] : 'the agent';
@@ -184,9 +209,10 @@ export default function ChatTabPanel({ panelId, client, connected = true, quiet 
     // for a running turn; Stop is Pane's own button below.
     isRunning: false,
     isLoading: !snapshot.transcript && view?.status !== 'stopped',
-    isSendDisabled: disabled || !!snapshot.pendingDelivery,
+    // A file still copying to the chat's machine has no path yet to send.
+    isSendDisabled: disabled || !!snapshot.pendingDelivery || copying > 0,
     unstable_persistsHistory: true, unstable_enableToolInvocations: false,
-    adapters: view?.canAttachImages ? { attachments: images } : undefined,
+    adapters: attachments ? { attachments } : undefined,
     onNew: async message => {
       const parts = [...message.content, ...(message.attachments ?? []).flatMap(attachment => attachment.content)];
       const text = parts.flatMap(part => part.type === 'text' ? [part.text] : []).join('\n');
@@ -214,6 +240,49 @@ export default function ChatTabPanel({ panelId, client, connected = true, quiet 
     },
   });
   useEffect(() => { runtime.thread.composer.setText(viewer.snapshot().draft); }, [runtime, viewer]);
+  // Every refusal is shown (assistant-ui's own paste and picker swallow them), and a file
+  // that failed while copying leaves no chip behind.
+  useEffect(() => runtime.thread.composer.unstable_on('attachmentAddError', event => {
+    setAttachProblems(problems => [...problems, event.message]);
+    const composer = runtime.thread.composer;
+    // From the end, so removing one leaves the indexes still to check unchanged.
+    for (let index = composer.getState().attachments.length - 1; index >= 0; index -= 1) {
+      if (composer.getState().attachments[index]?.status.type === 'incomplete') void composer.getAttachmentByIndex(index).remove().catch(() => undefined);
+    }
+  }), [runtime]);
+
+  const attachFiles = (files: File[]) => {
+    if (!files.length) return;
+    setAttachProblems([]);
+    if (!attachments || disabled) {
+      setAttachProblems([disabled ? 'Nothing was attached: this chat is not running.' : `Nothing was attached: ${agentName} can't take files or images in this chat.`]);
+      return;
+    }
+    // Each file is checked and attached on its own; a refusal arrives as attachmentAddError.
+    for (const file of files) void runtime.thread.composer.addAttachment(file).catch(() => undefined);
+  };
+  const dragProps = {
+    onDragEnter: (event: DragEvent) => {
+      if (!dragHasFiles(event.dataTransfer.types)) return;
+      dragDepth.current += 1;
+      setDragging(true);
+    },
+    onDragOver: (event: DragEvent) => {
+      // Always allow the drop: some platforms hide the drag's types until it lands.
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'copy';
+    },
+    onDragLeave: () => {
+      dragDepth.current = Math.max(0, dragDepth.current - 1);
+      if (!dragDepth.current) setDragging(false);
+    },
+    onDrop: (event: DragEvent) => {
+      event.preventDefault();
+      dragDepth.current = 0;
+      setDragging(false);
+      attachFiles([...event.dataTransfer.files]);
+    },
+  };
 
   const act = async <Result,>(operation: () => Promise<Result>) => {
     setBusy(true);
@@ -229,12 +298,25 @@ export default function ChatTabPanel({ panelId, client, connected = true, quiet 
   };
 
   return <AssistantRuntimeProvider runtime={runtime}>
-    <ThreadPrimitive.Root className="agent-chat chat-tab flex h-full min-h-0 flex-col" data-status={view?.status ?? 'starting'}>
+    <ThreadPrimitive.Root className="agent-chat chat-tab relative flex h-full min-h-0 flex-col" data-status={view?.status ?? 'starting'} {...dragProps}>
+      {dragging && <div className="chat-drop" aria-hidden>
+        <div className="chat-drop-card">
+          <Paperclip className="chat-drop-icon" />
+          <p className="chat-drop-title">Drop to attach</p>
+          <p className="chat-drop-detail">{saveFile
+            ? `Images up to ${megabytes(MAX_IMAGE_BYTES)}; other files up to ${megabytes(MAX_FILE_BYTES)} are copied to the chat's machine.`
+            : `PNG, JPEG, WebP or GIF images up to ${megabytes(MAX_IMAGE_BYTES)}.`}</p>
+        </div>
+      </div>}
       {view?.problem && <ChatProblem problem={view.problem} agent={agentName} busy={busy || !connected}
         onRestart={() => void act(() => client.restart(panelId))}
         onSignIn={() => void act(() => client.signIn(panelId))}
         onInstall={url => void window.electronAPI?.openExternal(url)} />}
       {snapshot.error && <div role="alert" className="chat-alert">{snapshot.error}</div>}
+      {!!attachProblems.length && <div role="alert" className="chat-alert chat-attach-alert">
+        <ul>{attachProblems.map((problem, index) => <li key={index}>{problem}</li>)}</ul>
+        <button type="button" className="chat-icon" aria-label="Dismiss" title="Dismiss" onClick={() => setAttachProblems([])}><X className="h-3.5 w-3.5" /></button>
+      </div>}
       <ThreadPrimitive.Viewport ref={viewportRef} onScroll={onViewportScroll} aria-label="Conversation messages" role="region" className="chat-viewport" scrollToBottomOnRunStart={false} autoScroll={!snapshot.hasNewer && !paged}>
         <div className="chat-column">
           {(snapshot.transcript?.start ?? 0) > 0 && <button type="button" className="chat-button chat-button-outline self-center" disabled={snapshot.loadingEarlier} onClick={() => { recordAnchor(); setPaged(true); void viewer.loadEarlier(); }}>
@@ -270,6 +352,14 @@ export default function ChatTabPanel({ panelId, client, connected = true, quiet 
           <ChatCommandMenu commands={commands} active={Math.min(commandIndex, commands.length - 1)} onPick={pickCommand} />
           <div className="flex flex-wrap gap-2 empty:hidden"><ComposerPrimitive.Attachments components={{ Attachment }} /></div>
           <ComposerPrimitive.Input readOnly={!!snapshot.pendingDelivery} aria-label={`Message ${agentName}`} placeholder={placeholder ?? 'Ask anything'} rows={1}
+            // Pasted images and files attach through attachFiles, which shows any refusal.
+            addAttachmentOnPaste={false}
+            onPaste={event => {
+              const files = [...event.clipboardData.files];
+              if (!files.length) return;
+              event.preventDefault();
+              attachFiles(files);
+            }}
             onChange={event => { viewer.setDraft(event.target.value); setCommandIndex(0); }}
             onKeyDown={event => {
               if (!activeCommand) return;
@@ -283,7 +373,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, quiet 
             }}
             className="chat-input" />
           <div ref={actionsRef} className="chat-composer-actions" data-layout={phone ? 'phone' : 'desktop'}>
-            {view?.canAttachImages && <ComposerPrimitive.AddAttachment aria-label="Attach image" title="Attach image" className="chat-icon"><Plus className="h-4 w-4" /></ComposerPrimitive.AddAttachment>}
+            {attachments && <ComposerPrimitive.AddAttachment aria-label={saveFile ? 'Attach files' : 'Attach image'} title={saveFile ? 'Attach photos or files' : 'Attach image'} className="chat-icon"><Plus className="h-4 w-4" /></ComposerPrimitive.AddAttachment>}
             {phone
               ? <ChatRiskyModeMarker mode={composerRow.mode} />
               : composerRow.mode && <ChatModeChip control={composerRow.mode} disabled={settingsLocked} configure={configure} />}

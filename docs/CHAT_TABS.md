@@ -97,6 +97,15 @@ says, and after running the chat tab suites against it.
   the agent's own commands and skills; **Stop** cancels the turn. A message sent
   while the agent works is queued and sent next; **Remove** takes it out of the
   queue.
+- **Attachments** (desktop and PWA): drop photos and files anywhere on the chat,
+  paste them into the composer, or pick them with **+**. An image the agent
+  takes (PNG, JPEG, WebP or GIF up to 5 MB) is sent as an image. Any other file,
+  up to 10 MB, is copied to the Pane's folder on the chat's machine, the same
+  way a terminal tab's upload works (`terminal:paste-file`, so a remote host
+  receives it too), and its path is sent with the message. Each attachment is a
+  chip that can be removed before sending, and sending waits until every file
+  has finished copying. Every refusal says why, and nothing is attached for it.
+  The phone app keeps its **+** photo picker.
 - The composer does not show the machine: the window's machine picker does, and
   an approval from a remote machine names it.
 
