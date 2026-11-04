@@ -470,7 +470,7 @@ export function Dropdown({
                 return (
                   <React.Fragment key={item.id}>
                     {item.separatorBefore && index > 0 ? (
-                      <div role="separator" className="my-1 border-t border-border-primary" />
+                      <hr className="my-1 border-0 border-t border-border-primary" />
                     ) : separateVariants && index > 0 && items[index - 1].variant !== item.variant && (
                       <div className="h-2" />
                     )}

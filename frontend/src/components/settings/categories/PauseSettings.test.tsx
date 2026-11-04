@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { PauseSettings, parseAutoPauseHours } from './PauseSettings';
+import { PauseSettings } from './PauseSettings';
+import { parseAutoPauseHours } from '../../../../../shared/types/autoPause';
 import type { SettingsPersistence } from '../useSettingsPersistence';
 import { DEFAULT_SETTINGS_PREFERENCES } from '../../../types/settings';
 import type { AppConfig } from '../../../types/config';

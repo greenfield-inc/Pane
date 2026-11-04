@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from 'react';
+import { useId, useState } from 'react';
 import { SaveState, SettingRow } from '../SettingRow';
 import { ImmediateToggle } from '../SettingsControls';
 import type { SettingsPersistence } from '../useSettingsPersistence';
@@ -7,20 +7,12 @@ import {
   DEFAULT_AUTO_PAUSE_HOURS,
   MAX_AUTO_PAUSE_HOURS,
   MIN_AUTO_PAUSE_HOURS,
-  isValidAutoPauseHours,
+  parseAutoPauseHours,
 } from '../../../../../shared/types/autoPause';
 
 const RESUME_LABEL = 'Resume a paused Pane when you open it';
 const AUTO_PAUSE_LABEL = 'Pause idle Panes';
 const HOURS_ERROR = `Enter whole hours from ${MIN_AUTO_PAUSE_HOURS} to ${MAX_AUTO_PAUSE_HOURS}.`;
-
-/** The hours typed into the auto-pause field, or null when Settings refuses them. */
-export function parseAutoPauseHours(text: string): number | null {
-  const trimmed = text.trim();
-  if (!/^\d+$/.test(trimmed)) return null;
-  const hours = Number(trimmed);
-  return isValidAutoPauseHours(hours) ? hours : null;
-}
 
 /**
  * Resume-on-open (off by default) and auto-pause (on by default), with the idle threshold
@@ -51,7 +43,7 @@ export function PauseSettings({ persistence }: { persistence: SettingsPersistenc
         description="Stops the agents and scripts of a Pane nobody has used for this long. Panes waiting on you are skipped. Resume brings them back in the same conversations."
         saveState={persistence.saveStates['auto-pause']}
         align="start"
-        details={<AutoPauseHoursField persistence={persistence} savedHours={savedHours} disabled={!autoPauseEnabled} />}
+        details={<AutoPauseHoursField key={savedHours} persistence={persistence} savedHours={savedHours} disabled={!autoPauseEnabled} />}
       >
         <ImmediateToggle
           label={AUTO_PAUSE_LABEL}
@@ -67,7 +59,6 @@ function AutoPauseHoursField({ persistence, savedHours, disabled }: { persistenc
   const [text, setText] = useState(String(savedHours));
   const inputId = useId();
   const errorId = `${inputId}-error`;
-  useEffect(() => setText(String(savedHours)), [savedHours]);
   const hours = parseAutoPauseHours(text);
   const invalid = hours === null;
 
