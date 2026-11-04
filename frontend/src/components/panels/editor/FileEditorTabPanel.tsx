@@ -3,7 +3,7 @@ import { FileEditorView } from './FileEditorView';
 import { DiffTabView } from '../diff/DiffTabView';
 import { EditorPanelState, ToolPanel } from '../../../../../shared/types/panels';
 import { panelApi } from '../../../services/panelApi';
-import { debounce } from '../../../utils/debounce';
+import { createEditorStateWriter } from './editorStateWriter';
 import { usePanelStore } from '../../../stores/panelStore';
 import { editorTitleFor, pinEditorPanel } from '../../../services/openFileInEditor';
 
@@ -24,7 +24,7 @@ const FileEditorTabPanel: React.FC<FileEditorTabPanelProps> = ({ panel, isActive
     }
   }, [isActive, panel.id, panel.state]);
 
-  const [debouncedUpdate] = useState(() => debounce((panelId: string, sessionId: string, newState: Partial<EditorPanelState>) => {
+  const [stateWriter] = useState(() => createEditorStateWriter((panelId: string, sessionId: string, newState: Partial<EditorPanelState>) => {
     const current = usePanelStore.getState().getSessionPanels(sessionId).find((p) => p.id === panelId);
     if (!current) return;
     // SAFETY: The panel type discriminator determines the corresponding custom-state shape.
@@ -41,25 +41,25 @@ const FileEditorTabPanel: React.FC<FileEditorTabPanelProps> = ({ panel, isActive
     });
   }, 500));
 
-  useEffect(() => () => { debouncedUpdate.flush?.(); }, [debouncedUpdate]);
+  useEffect(() => () => { stateWriter.flush(); }, [stateWriter]);
   useEffect(() => {
-    const flush = () => debouncedUpdate.flush?.();
+    const flush = () => stateWriter.flush();
     window.addEventListener('session-switched', flush);
     return () => window.removeEventListener('session-switched', flush);
-  }, [debouncedUpdate]);
+  }, [stateWriter]);
   useEffect(() => {
-    if (!isActive) debouncedUpdate.flush?.();
-  }, [debouncedUpdate, isActive]);
+    if (!isActive) stateWriter.flush();
+  }, [stateWriter, isActive]);
   // A preview tab re-targeted to another file: whatever the previous file had
   // queued (cursor, scroll, dirty flag, its own path) must not land on the
   // new target's state.
   useEffect(() => {
-    debouncedUpdate.cancel?.();
-  }, [debouncedUpdate, filePath]);
+    stateWriter.cancel();
+  }, [stateWriter, filePath]);
 
   const handleStateChange = useCallback((newState: Partial<EditorPanelState>) => {
-    debouncedUpdate(panel.id, panel.sessionId, newState);
-  }, [debouncedUpdate, panel.id, panel.sessionId]);
+    stateWriter.update(panel.id, panel.sessionId, newState);
+  }, [stateWriter, panel.id, panel.sessionId]);
 
   const handleFileChange = useCallback((changedPath: string | undefined, isDirty: boolean) => {
     if (!changedPath) return;
