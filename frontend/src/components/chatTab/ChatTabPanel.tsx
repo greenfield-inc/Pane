@@ -136,7 +136,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, quiet 
   const onViewportScroll = () => {
     recordAnchor();
     const element = viewportRef.current;
-    if (paged && element && !snapshot.hasNewer && element.scrollHeight - element.scrollTop - element.clientHeight < 4) setPaged(false);
+    if (paged && element && !snapshot.hasNewer && element.scrollHeight - element.scrollTop - element.clientHeight < 2) setPaged(false);
   };
   const working = view?.status === 'working' || view?.status === 'blocked';
   const turns = useMemo(() => chatTurns(messages, { running: working }), [messages, working]);
@@ -187,6 +187,10 @@ export default function ChatTabPanel({ panelId, client, connected = true, quiet 
         const reject = rejectOption(permission);
         return reject ? client.permission(panelId, permission.id, reject).catch(() => undefined) : undefined;
       }));
+      // Sending returns to the live end, wherever the reader had paged to.
+      setPaged(false);
+      if (viewer.snapshot().hasNewer) await viewer.jumpToLatest();
+      requestAnimationFrame(() => { const element = viewportRef.current; if (element) element.scrollTop = element.scrollHeight; });
       await deliver({ operationId: crypto.randomUUID(), text, images: imageParts }, true);
     },
   });
