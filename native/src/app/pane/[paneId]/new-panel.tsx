@@ -2,6 +2,7 @@ import type { AndroidSymbol, SFSymbol } from 'expo-symbols';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Pressable, StyleSheet, View } from 'react-native';
 
+import type { ChatTabCreate } from '@shared/types/chatTab';
 import type { ToolPanel } from '@shared/types/panels';
 
 import { useInvokeMutation } from '@/daemon';
@@ -28,31 +29,36 @@ export default function NewPanelSheet() {
   const create = useInvokeMutation<[ReturnType<typeof createPanelRequest>], ToolPanel>('panels:create', {
     invalidates: ['panels:list'],
   });
+  const createChat = useInvokeMutation<[ChatTabCreate], { panelId: string }>('chat-tab:create', { invalidates: ['panels:list'] });
   const setActive = useInvokeMutation<[string, string]>('panels:set-active');
+  const pending = create.isPending || createChat.isPending;
 
+  const opened = (panelId: string) => {
+    setActive.mutate([paneId, panelId]);
+    if (sessionId) router.dismissTo({ pathname: '/session/[sessionId]', params: { sessionId, panelId } });
+    else router.dismissTo({ pathname: '/pane/[paneId]', params: { paneId, panelId } });
+  };
   const open = (option: NewPanelOption) => {
-    create.mutate([createPanelRequest(paneId, option)], {
-      onSuccess: panel => {
-        setActive.mutate([paneId, panel.id]);
-        if (sessionId) router.dismissTo({ pathname: '/session/[sessionId]', params: { sessionId, panelId: panel.id } });
-        else router.dismissTo({ pathname: '/pane/[paneId]', params: { paneId, panelId: panel.id } });
-      },
-    });
+    if (option.chat) {
+      createChat.mutate([{ sessionId: paneId, agent: option.chat }], { onSuccess: result => opened(result.panelId) });
+      return;
+    }
+    create.mutate([createPanelRequest(paneId, option)], { onSuccess: panel => opened(panel.id) });
   };
 
   return (
     <Sheet title="Add tool" testID="new-panel-sheet">
       <View style={[styles.menu, { borderRadius: theme.radius.lg, borderColor: colors.border, backgroundColor: colors.surface }]}>
-        {newPanelOptions(affordances.data?.customCommands ?? []).map(option => {
-          const icon = ICONS[option.id] ?? TERMINAL_ICON;
+        {newPanelOptions(affordances.data?.customCommands ?? [], affordances.data?.chatTabsEnabled === true).map(option => {
+          const icon = ICONS[option.chat ?? option.id] ?? TERMINAL_ICON;
           return (
             <Pressable
               key={option.id}
               testID={`new-panel-${option.id}`}
               accessibilityRole="button"
               accessibilityLabel={`${option.title}, ${option.description}`}
-              accessibilityState={{ disabled: create.isPending }}
-              disabled={create.isPending}
+              accessibilityState={{ disabled: pending }}
+              disabled={pending}
               onPress={() => open(option)}
               android_ripple={{ color: colors.surfacePressed }}
               style={({ pressed }) => [styles.item, { backgroundColor: pressed ? colors.surfacePressed : 'transparent' }]}
@@ -69,6 +75,7 @@ export default function NewPanelSheet() {
         })}
       </View>
       {create.isError ? <ErrorState title="Couldn’t open the tab" error={create.error} /> : null}
+      {createChat.isError ? <ErrorState title="Couldn’t open the chat" error={createChat.error} /> : null}
     </Sheet>
   );
 }

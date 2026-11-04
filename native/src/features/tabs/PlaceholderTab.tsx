@@ -11,7 +11,6 @@ import { TAB_TYPES } from '../terminal/PanelTabs';
 
 /** What each tab the phone doesn't draw holds, said where the person looks for it. */
 const ABOUT: Partial<Record<ToolPanelType, { title: string; message: string }>> = {
-  chat: { title: 'Chat', message: 'Chat tabs open on the computer for now.' },
   notes: { title: 'Notes', message: 'Notes are written and drawn on the computer.' },
   dashboard: { title: 'Dashboard', message: 'The dashboard’s charts and lists show on the computer.' },
   'setup-tasks': { title: 'Setup tasks', message: 'Setup tasks run once, on the computer.' },

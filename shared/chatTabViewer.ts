@@ -1,4 +1,4 @@
-import { applyChatTabEvent, type ChatTabClient, type ChatTabEvent, type ChatTabSend, type ChatTabTranscript, type ChatTabView } from '../../../shared/types/chatTab';
+import { applyChatTabEvent, type ChatTabClient, type ChatTabEvent, type ChatTabSend, type ChatTabTranscript, type ChatTabView } from './types/chatTab';
 
 export interface ChatTabViewerState {
   view?: ChatTabView;

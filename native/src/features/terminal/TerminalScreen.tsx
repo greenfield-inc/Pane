@@ -31,6 +31,7 @@ import { LogsTab } from '../runScript/LogsTab';
 import { useAgentStatuses, useMarkPaneSeen } from '../panes/hooks';
 import { ShortcutsSheet } from '../shortcuts/ShortcutsSheet';
 import { PlaceholderTab } from '../tabs/PlaceholderTab';
+import { ChatTabBody } from '../chatTab/ChatTabBody';
 import { AttachSheet } from '../upload/AttachSheet';
 import { UploadReceipts } from '../upload/UploadReceipts';
 import { useUploads } from '../upload/useUploads';
@@ -191,7 +192,7 @@ export function TerminalScreen({ paneId, session }: { paneId: string; session?: 
         onClose={closePanel}
       />
       {panel && view !== 'terminal' ? (
-        <TabBody panel={panel} title={title} />
+        <TabBody panel={panel} title={title} panels={panels} />
       ) : panel && paused ? (
         <PausedTerminal key={panel.id} panelId={panel.id} mark={paused} resuming={resumePanel.isPending} onResume={() => resume(panel)} />
       ) : panel ? (
@@ -231,8 +232,10 @@ export function TerminalScreen({ paneId, session }: { paneId: string; session?: 
 }
 
 /** A tab that is not a terminal, drawn by its type. */
-function TabBody({ panel, title }: { panel: ToolPanel; title: string }) {
+function TabBody({ panel, title, panels }: { panel: ToolPanel; title: string; panels: readonly ToolPanel[] }) {
   switch (tabView(panel)) {
+    case 'chat':
+      return <ChatTabBody panel={panel} panels={panels} />;
     case 'browser':
       return <BrowserTab key={panel.id} panel={panel} />;
     case 'explorer':

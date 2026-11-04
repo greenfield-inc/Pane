@@ -8,7 +8,7 @@ import type { AgentChatPermission } from '../../../../shared/types/agentChat';
 import type { ChatTabClient, ChatTabCommand, ChatTabSend } from '../../../../shared/types/chatTab';
 import { chatTurns, placeWorkers, type ChatWorkerLine } from '../../../../shared/chatTabPresentation';
 import { rejectOption } from '../../../../shared/chatTabPermissions';
-import { chatTabViewer, type ChatTabViewer } from '../../services/chatTabViewer';
+import { chatTabViewer, type ChatTabViewer } from '../../../../shared/chatTabViewer';
 import { toAssistantMessage } from '../agentChat/convertMessage';
 import { AgentChatConfiguration } from '../agentChat/AgentChatConfiguration';
 import { MachineBadge } from '../machines/MachineBadge';
