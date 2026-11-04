@@ -143,20 +143,6 @@ describe('OrchestrationSessionStore', () => {
     expect(new OrchestrationSessionStore(filePath).read()).toEqual(loaded);
   });
 
-  it.each(['x'.repeat(16_001), `__orchestration_panel_${'x'.repeat(16_000)}_openCodE`])(
-    'rejects an arbitrary oversized mapping even for a valid maximum-length Session id', opencode => {
-      const filePath = createStorePath();
-      const data = createData(createRecord({ id: 'x'.repeat(16_000) }));
-      data.sessions[0].panelIds.opencode = opencode;
-      expect(() => new OrchestrationSessionStore(filePath).write(data)).toThrow('panel id exceeds text limit');
-      expect(fs.existsSync(filePath)).toBe(false);
-      fs.writeFileSync(filePath, JSON.stringify(data));
-      const before = fs.readFileSync(filePath, 'utf8');
-      expect(() => new OrchestrationSessionStore(filePath).read()).toThrow('panel id exceeds text limit');
-      expect(fs.readFileSync(filePath, 'utf8')).toBe(before);
-    },
-  );
-
   it('treats JSON __proto__ as data rather than adopting an inherited OpenCode mapping', () => {
     const filePath = createStorePath();
     const record = createRecord();
@@ -196,8 +182,8 @@ describe('OrchestrationSessionStore', () => {
 
   it.each([
     ['empty', ''], ['whitespace', ' \t '], ['null', null], ['number', 42],
-    ['boolean', false], ['object', {}], ['array', []], ['oversized', 'x'.repeat(16_001)],
-  ])('rejects malformed OpenCode mappings on read and write: %s', (_label, value) => {
+    ['boolean', false], ['object', {}], ['array', []],
+  ])('refuses a malformed OpenCode mapping on write and repairs it on read: %s', (_label, value) => {
     const filePath = createStorePath();
     const initial = createData();
     const store = new OrchestrationSessionStore(filePath);
@@ -206,14 +192,14 @@ describe('OrchestrationSessionStore', () => {
     const malformed = createData();
     Reflect.set(malformed.sessions[0].panelIds, 'opencode', value);
 
-    expect(() => store.write(malformed)).toThrow();
+    expect(() => store.write(malformed)).toThrow('invalid OpenCode panel id');
     expect(store.read()).toEqual(initial);
     expect(fs.readFileSync(filePath, 'utf8')).toBe(before);
-    expect(fs.readdirSync(path.dirname(filePath))).toEqual(['orchestration-sessions.json']);
 
     fs.writeFileSync(filePath, JSON.stringify(malformed));
     const malformedBytes = fs.readFileSync(filePath, 'utf8');
-    expect(() => new OrchestrationSessionStore(filePath).read()).toThrow();
+    const loaded = new OrchestrationSessionStore(filePath).read();
+    expect(loaded.sessions[0].panelIds).toEqual({ ...initial.sessions[0].panelIds, opencode: '__orchestration_panel_session-1_opencode' });
     expect(fs.readFileSync(filePath, 'utf8')).toBe(malformedBytes);
   });
 

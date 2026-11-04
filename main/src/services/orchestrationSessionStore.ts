@@ -255,6 +255,12 @@ function sanitizeSession(value: JsonValue, index: number, problems: string[]): O
     delete fields.reportActivityId;
     delete fields.reportAcceptedAt;
   }
+  // A bad OpenCode panel id is replaced by the derived one rather than dropping the Session.
+  const panelIds = decodeOptionalBoundary(fields.panelIds, boundary.jsonObject);
+  if (panelIds?.opencode !== undefined && decodeOptionalBoundary(panelIds.opencode, boundary.nonEmptyString) === undefined) {
+    problems.push(`${label}: replaced an invalid OpenCode panel id`);
+    fields.panelIds = Object.fromEntries(Object.entries(panelIds).filter(([agent]) => agent !== 'opencode'));
+  }
   if (fields.runtime === 'wsl' && decodeOptionalBoundary(fields.wslDistribution, boundary.nonEmptyString) === undefined) {
     problems.push(`dropped ${label}: a WSL Session requires a distribution`);
     return undefined;

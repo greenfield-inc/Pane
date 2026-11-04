@@ -166,13 +166,14 @@ function decodeJsonValue(current: BoundaryCursor): JsonValue {
   if (typeof current.value === "object") {
     // SAFETY: The null and array branches above leave only indexable JSON objects.
     const source = current.value as ObjectValue;
-    const decoded: Array<[string, JsonValue]> = [];
+    const decoded: { [key: string]: JsonValue } = {};
     for (const [key, value] of Object.entries(source)) {
       // Match JSON.stringify: an undefined property is an absent key, not an invalid value.
       if (value === undefined) continue;
-      decoded.push([key, decodeJsonValue(current.child(key, value))]);
+      // Define, not assign: a JSON key named __proto__ must stay an own key, not set the prototype.
+      Object.defineProperty(decoded, key, { value: decodeJsonValue(current.child(key, value)), enumerable: true, writable: true, configurable: true });
     }
-    return Object.fromEntries(decoded);
+    return decoded;
   }
   return current.fail("expected JSON value");
 }
