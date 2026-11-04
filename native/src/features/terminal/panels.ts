@@ -52,14 +52,17 @@ export function followsHost(panel: ToolPanel): boolean {
 
 /**
  * The tab to show: the one picked on this phone while it still exists, else
- * the host's active tab when the phone follows it there, else the first tab.
+ * `initialId` (an approval's asking tab), else the host's active tab when the
+ * phone follows it there, else the first tab.
  */
 export function pickPanel(
   panels: readonly ToolPanel[],
   selectedId: string | null,
   hostActiveId: string | null | undefined,
+  initialId?: string,
 ): ToolPanel | null {
   return panels.find(panel => panel.id === selectedId)
+    ?? (initialId === undefined ? undefined : panels.find(panel => panel.id === initialId))
     ?? panels.find(panel => panel.id === hostActiveId && followsHost(panel))
     ?? panels[0]
     ?? null;

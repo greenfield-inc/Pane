@@ -80,6 +80,13 @@ describe('pickPanel', () => {
     expect(pickPanel(strip, null, 'page')?.id).toBe('page');
   });
 
+  it('opens an approval on its asking tab, not the host’s active one, until the phone picks another', () => {
+    expect(pickPanel(panels, null, 'shell', 'claude')?.id).toBe('claude');
+    expect(pickPanel(panels, 'shell', 'claude', 'claude')?.id).toBe('shell');
+    // The asking tab closed: as without one.
+    expect(pickPanel(panels, null, 'shell', 'closed')?.id).toBe('shell');
+  });
+
   it('opens a tab picked on the phone whatever its type', () => {
     const strip = [panel('claude', 'terminal', 0), panel('files', 'explorer', 1)];
     expect(pickPanel(strip, 'files', 'claude')?.id).toBe('files');

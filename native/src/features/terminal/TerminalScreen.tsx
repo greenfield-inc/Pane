@@ -64,9 +64,11 @@ const PANEL_EVENTS = ['panel:created', 'panel:updated', 'panel:deleted', 'panel:
  * that Session's workspace pane, its agent chat first. The approval screen
  * passes its own `topBar` and puts its card `above` the tabs.
  */
-export function TerminalScreen({ paneId, session, topBar, above }: {
+export function TerminalScreen({ paneId, session, topBar, above, initialPanelId }: {
   paneId: string;
   session?: OrchestrationSessionView;
+  /** The tab to open on until the person picks one (an approval's asking tab). */
+  initialPanelId?: string;
   /** Replaces the host bar. */
   topBar?: ReactNode;
   /** Sits between the bar and the tabs. */
@@ -121,7 +123,7 @@ export function TerminalScreen({ paneId, session, topBar, above }: {
 
   const strip = stripPanels(panelList.data ?? []);
   const panels = session ? sessionWorkspacePanels(session, strip) : strip;
-  const panel = pickPanel(panels, panelId ?? null, hostActive.data?.id);
+  const panel = pickPanel(panels, panelId ?? null, hostActive.data?.id, initialPanelId);
   const view = panel ? tabView(panel) : null;
   const paused = panel ? pausedMarkOf(panel) : undefined;
   const followed = follow ? panels.find(candidate => candidate.id === follow) : undefined;

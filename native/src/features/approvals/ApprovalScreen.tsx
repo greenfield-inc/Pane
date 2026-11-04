@@ -1,13 +1,14 @@
 import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
+import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState, type ReactNode } from 'react';
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import type { NotifyItem, NotifyLink, NotifySharedState } from '@shared/types/notify';
-import type { RunpanePanelOpenRequest, RunpanePanelOpenResult } from '@shared/types/runpaneOrchestration';
+import type { NotifyItem, NotifyRemoteCommand, NotifySharedState } from '@shared/types/notify';
+import type { ToolPanel } from '@shared/types/panels';
 
-import { useInvokeMutation } from '@/daemon';
+import { invokeChannel, useDaemon, useInvokeMutation } from '@/daemon';
 import { ConnectionBar } from '@/features/hosts/ConnectionStatus';
 import { useConnectionPresence } from '@/features/hosts/useConnectionPresence';
 import { MachineBadge } from '@/features/machines/MachineBadge';
@@ -23,7 +24,7 @@ import { TerminalScreen } from '@/features/terminal/TerminalScreen';
 import { useTheme } from '@/theme';
 import { Button, ErrorState, Icon, Text } from '@/ui';
 
-import { approvalOrder, approvalPosition, approvalWorkspace, approvalMeta, nextApproval, relayLine, resolveSelection, type ApprovalWorkspace } from './approvals';
+import { approvalOrder, approvalParams, approvalPosition, approvalWorkspace, approvalMeta, nextApproval, openApprovalLink, relayLine, resolveSelection, type ApprovalWorkspace } from './approvals';
 
 /** The card never takes more than this share of the screen; the Session below keeps the rest. */
 const CARD_MAX_SHARE = 0.45;
@@ -50,7 +51,7 @@ export function ApprovalScreen({ notifyId, hintPaneId }: { notifyId: string; hin
   const moveTo = selection?.kind === 'move' ? selection.id : null;
   const goHome = selection?.kind === 'home';
   useEffect(() => {
-    if (moveTo) router.setParams({ notifyId: moveTo, panelId: undefined });
+    if (moveTo) router.setParams(approvalParams(moveTo));
     else if (goHome) {
       if (router.canGoBack()) router.back();
       else router.replace('/');
@@ -60,11 +61,12 @@ export function ApprovalScreen({ notifyId, hintPaneId }: { notifyId: string; hin
   const item = selection?.kind === 'show' ? shared.data?.items.find(candidate => candidate.id === selection.id) : undefined;
   const position = item ? approvalPosition(order, item.id) : null;
   const next = item ? nextApproval(order, item.id) : null;
-  const topBar = <ApprovalTopBar position={position} onNext={next ? () => router.setParams({ notifyId: next, panelId: undefined }) : undefined} />;
+  const onNext = next ? () => router.setParams(approvalParams(next)) : undefined;
+  const topBar = <ApprovalTopBar position={position} onNext={onNext} />;
 
   let card: ReactNode;
   if (item && shared.data) {
-    card = <ApprovalCard key={item.id} item={item} shared={shared.data} onNext={next ? () => router.setParams({ notifyId: next, panelId: undefined }) : undefined} />;
+    card = <ApprovalCard key={item.id} item={item} shared={shared.data} onNext={onNext} />;
   } else if (selection?.kind === 'gone') {
     card = <CardFrame testID="approval-gone"><Text variant="subhead" tone="secondary">This question is no longer waiting. Nothing else is waiting on you.</Text></CardFrame>;
   } else if (shared.isError) {
@@ -81,7 +83,7 @@ export function ApprovalScreen({ notifyId, hintPaneId }: { notifyId: string; hin
 /** The card above the workspace: a Session's (with its chat), a Pane's tabs, or nothing for a question asked outside Pane. */
 function Workspace({ workspace, topBar, card, loading }: { workspace: ApprovalWorkspace; topBar: ReactNode; card: ReactNode; loading: boolean }) {
   if (workspace.kind === 'session') return <SessionWorkspace key={workspace.sessionId} sessionId={workspace.sessionId} paneId={workspace.paneId} topBar={topBar} card={card} />;
-  if (workspace.kind === 'pane') return <TerminalScreen key={workspace.paneId} paneId={workspace.paneId} topBar={topBar} above={card} />;
+  if (workspace.kind === 'pane') return <TerminalScreen key={workspace.paneId} paneId={workspace.paneId} initialPanelId={workspace.panelId} topBar={topBar} above={card} />;
   return (
     <Bare topBar={topBar} card={card}>
       {loading ? null : <Text testID="approval-no-pane" variant="footnote" tone="muted" style={styles.bareNote}>Asked from outside Pane, so there are no tabs to show.</Text>}
@@ -278,30 +280,40 @@ function ApprovalCard({ item, shared, onNext }: { item: NotifyItem; shared: Noti
 }
 
 /**
- * The card's related files and pages. Tapping one opens it as a tab of the workspace below (the
- * way the desktop card does), or of the asking Pane when the workspace can't open it.
+ * The card's related files and pages. Tapping one asks the host to open it as a tab of the
+ * workspace below (the way the desktop card does), with the host's fallbacks: a file page there,
+ * then the asking Pane. One command per tap; a lost reply is never sent again.
  */
 function LinkChips({ item, shownPaneId }: { item: NotifyItem; shownPaneId?: string }) {
   const theme = useTheme();
-  const open = useInvokeMutation<[RunpanePanelOpenRequest], RunpanePanelOpenResult>('runpane:panels:open', { invalidates: ['panels:list', 'panels:getActive'] });
+  const { client, profile } = useDaemon();
+  const queryClient = useQueryClient();
+  // No `invalidates`: `readPanels` reads the shown Pane's tabs again once the host answers.
+  const open = useInvokeMutation<[NotifyRemoteCommand]>('notify:remote-command');
   const links = item.links ?? [];
   if (links.length === 0) return null;
-  const panes = [...new Set([shownPaneId, item.source.paneId].filter((paneId): paneId is string => Boolean(paneId)))];
+  const canOpen = Boolean(shownPaneId || item.source.paneId);
+  // The same query the tabs below read, so reading it again refreshes them too.
+  const panelsKey = [profile.id, 'panels:list', shownPaneId, { chatTabs: true }];
 
-  const openLink = async (link: NotifyLink) => {
-    const target = 'url' in link ? { url: link.url } : { filePath: link.path };
-    let failure: unknown = new Error('the card names no Pane');
-    for (const paneId of panes) {
-      try {
-        const opened = await open.mutateAsync([{ paneId, ...target, placement: 'tab', source: 'user' }]);
-        if (opened.paneId === shownPaneId) router.setParams({ panelId: opened.panelId });
-        else router.push({ pathname: '/pane/[paneId]', params: { paneId: opened.paneId, panelId: opened.panelId } });
-        return;
-      } catch (error) {
-        failure = error;
-      }
+  const readPanels = async (): Promise<readonly string[]> => {
+    void queryClient.invalidateQueries({ queryKey: [profile.id, 'panels:getActive'] });
+    if (!shownPaneId) return [];
+    const panels = await queryClient.fetchQuery({ queryKey: panelsKey, queryFn: () => invokeChannel<ToolPanel[]>(client, 'panels:list', [shownPaneId, { chatTabs: true }]), staleTime: 0 });
+    return panels.map(panel => panel.id);
+  };
+
+  const openLink = async (index: number) => {
+    const before = queryClient.getQueryData<ToolPanel[]>(panelsKey)?.map(panel => panel.id);
+    const outcome = await openApprovalLink(item, index, shownPaneId, before, { send: command => open.mutateAsync([command]), readPanels });
+    const label = links[index]?.label ?? 'the link';
+    if (outcome.kind === 'opened') {
+      if (outcome.panelId) router.setParams({ panelId: outcome.panelId });
+    } else if (outcome.kind === 'unknown') {
+      Alert.alert(`${label} may have opened`, outcome.message);
+    } else {
+      Alert.alert(`Couldn’t open ${label}`, outcome.message);
     }
-    Alert.alert(`Couldn’t open ${link.label}`, `${failure instanceof Error ? failure.message : String(failure)} Nothing was opened.`);
   };
 
   return (
@@ -314,8 +326,8 @@ function LinkChips({ item, shownPaneId }: { item: NotifyItem; shownPaneId?: stri
             testID={`approval-link-${index}`}
             accessibilityRole="link"
             accessibilityLabel={`Open ${link.label}`}
-            disabled={open.isPending || panes.length === 0}
-            onPress={() => void openLink(link)}
+            disabled={open.isPending || !canOpen}
+            onPress={() => void openLink(index)}
             style={({ pressed }) => [styles.chip, { borderRadius: theme.radius.md, backgroundColor: pressed ? theme.colors.surfacePressed : theme.colors.surfaceRaised }]}
           >
             <Icon ios={'url' in link ? 'globe' : 'doc.text'} android={'url' in link ? 'language' : 'description'} size={14} color={theme.colors.textSecondary} />
