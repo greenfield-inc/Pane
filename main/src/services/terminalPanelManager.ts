@@ -3178,8 +3178,7 @@ export class TerminalPanelManager extends EventEmitter {
    * Pause: stop these tabs the way quit does, and mark them so nothing starts them until an
    * explicit resume. The mark is written first, so no mount or retry restarts a tab mid-stop.
    * Ctrl+C twice lets an agent exit cleanly (Claude releases its session-id lock); then the
-   * state is saved, the terminal destroyed and its processes reaped. Agent Chat tabs stop
-   * through their own controller. Returns the tabs this call paused.
+   * state is saved, the terminal destroyed and its processes reaped. Returns the tabs this call paused.
    */
   async pausePanels(panelIds: readonly string[], mark: TerminalPausedMark): Promise<string[]> {
     const targets = panelIds

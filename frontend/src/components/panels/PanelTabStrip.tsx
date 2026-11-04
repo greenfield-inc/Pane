@@ -406,7 +406,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
             onDragOver={(e) => handleStripDragOver(e, index)}
             onDrop={handleStripDrop}
           >
-            {tooltipTab}
+            {contextualTab}
             {/* Strip drop indicator line. Between-tab boundaries render as the
                 next tab's left edge; only the strip's end renders a right edge. */}
             {isTabDragging && stripDropIndex === index && (

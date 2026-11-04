@@ -17,7 +17,7 @@ const scrollbackSchema = boundary.object({
 });
 
 /** The slim bar over a paused tab: when it paused, and Resume, which starts it again in its saved conversation. */
-export function PausedBanner({ panelId, mark, detail }: { panelId: string; mark: TerminalPausedMark; detail?: string }) {
+function PausedBanner({ panelId, mark, detail }: { panelId: string; mark: TerminalPausedMark; detail?: string }) {
   const [resuming, setResuming] = useState(false);
   const reason = pausedReason(mark);
   return (
