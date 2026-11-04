@@ -36,14 +36,16 @@ appId: com.dcouple.pane.mobile
     id: terminal-screen
 - takeScreenshot: terminal-shell
 
-# Stop in the tab bar sends Ctrl-C.
+# ^C on the floating controller sends Ctrl-C. Send closes the keyboard, so the controller shows.
 - tapOn:
     id: terminal-input
 - inputText: "sleep 120"
 - tapOn:
     id: terminal-send
 - tapOn:
-    id: terminal-stop
+    id: terminal-key-ctrl-c
+- tapOn:
+    id: terminal-input
 - inputText: "echo after-$((40+2))"
 - tapOn:
     id: terminal-send

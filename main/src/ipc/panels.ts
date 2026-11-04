@@ -5,13 +5,14 @@ import fs from 'fs/promises';
 import path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import type { PaneCommandRegistry, PaneCommandValue } from '../daemon/commandRegistry';
+import { pathToFileURL } from 'url';
+import { rejectWithPaneErrorText, type PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
 import { getPaneWebviewContextMap } from '../core/runtime';
 import { panelManager } from '../services/panelManager';
 import { terminalPanelManager } from '../services/terminalPanelManager';
 import { getMobilePushSender } from '../daemon/mobilePushSender';
 import { databaseService } from '../services/database';
-import { CreatePanelRequest, PanelEventType, SessionPanelLayout, ToolPanel, decodeSessionPanelLayout } from '../../../shared/types/panels';
+import { BrowserPanelState, CreatePanelRequest, PanelEventType, SessionPanelLayout, ToolPanel, decodeSessionPanelLayout } from '../../../shared/types/panels';
 import type { AppServices } from './types';
 import type { PanelAgentStatusEvent } from '../../../shared/types/agentStatus';
 import { PANE_CHAT_SESSION_ID } from '../../../shared/types/paneChat';
@@ -19,8 +20,11 @@ import { getAppSubdirectory } from '../utils/appDirectory';
 import { sanitizeTerminalOutput } from '../utils/terminalOutputSanitizer';
 import { getWSLHome, linuxToUNCPath, posixJoin, windowsPathToWSLMount } from '../utils/wslUtils';
 import { boundary, decodeBoundary, type BoundarySchema } from '../../../shared/validation/boundaryDecoder';
+import { PaneError, paneErrorText, reasonOf } from '../../../shared/paneError';
 import { readBrowserPanelFile } from '../services/browserPanelFiles';
 import { prepareRemoteBrowserFiles } from '../daemon/client/remoteBrowserFiles';
+import { clearPaneBrowserData } from '../services/browserData';
+import { assertRawTerminal } from './runpaneChat';
 import { ChunkedUploadStore, type UploadStart } from '../services/chunkedUploadStore';
 
 const execFileAsync = promisify(execFile);
@@ -415,8 +419,70 @@ async function readClipboardImageFallback(sessionId: string): Promise<{ filePath
   return { filePath: resolveImagePathForSession(filePath, sessionId), imageNumber: count };
 }
 
+const openHtmlFileRequestSchema = boundary.object({ sessionId: boundary.string, filePath: boundary.string });
+const worktreePathResultSchema = boundary.object({
+  success: boundary.boolean,
+  path: boundary.optional(boundary.string),
+  error: boundary.optional(boundary.string),
+});
+
+/**
+ * Show a worktree HTML file in a browser tab: the tab already showing it, or
+ * else a new one. A tab showing anything else is never retargeted. The host
+ * resolves the file inside the Session's worktree (the `file:getPath` boundary)
+ * and makes the file:// grant itself, so a remote desktop can preview worktree
+ * pages while its own panels:create/panels:update still cannot point a tab at a file.
+ */
+async function openHtmlFileInBrowserPanel(commandRegistry: PaneCommandRegistry, raw: PaneCommandValue): Promise<ToolPanel> {
+  const { sessionId, filePath } = decodeBoundary(raw, openHtmlFileRequestSchema);
+  if (!/\.html?$/i.test(filePath)) {
+    throw new PaneError(
+      'ERR_HTML_PREVIEW_FILE_TYPE',
+      `Pane can only open .html or .htm files in a browser tab, and "${filePath}" is neither. No tab was opened.`,
+      'Choose an .html or .htm file in this worktree.',
+    );
+  }
+  const resolved = decodeBoundary(await commandRegistry.invoke('file:getPath', [{ sessionId, filePath }]), worktreePathResultSchema);
+  if (!resolved.success || !resolved.path) {
+    throw new PaneError(
+      'ERR_HTML_PREVIEW_OUTSIDE_WORKTREE',
+      `Pane cannot open "${filePath}" because it is not a file in this Session's worktree (${resolved.error ?? 'unresolved path'}). No tab was opened.`,
+      'Choose an HTML file inside the worktree.',
+    );
+  }
+  const fullPath = resolved.path;
+  const stat = await fs.stat(fullPath).catch((cause: unknown) => {
+    throw new PaneError(
+      'ERR_HTML_PREVIEW_MISSING',
+      `Pane cannot open "${filePath}" because it could not be read: ${reasonOf(cause)}. No tab was opened.`,
+      'Check that the file still exists in the worktree, then open it again.',
+    );
+  });
+  if (!stat.isFile()) {
+    throw new PaneError(
+      'ERR_HTML_PREVIEW_NOT_FILE',
+      `Pane cannot open "${filePath}" because it is not a regular file. No tab was opened.`,
+      'Choose an HTML file inside the worktree.',
+    );
+  }
+  const currentUrl = pathToFileURL(fullPath).href;
+  const open = panelManager.getPanelsForSession(sessionId).find((panel) =>
+    // SAFETY: The browser panel type discriminator establishes BrowserPanelState.
+    panel.type === 'browser' && (panel.state.customState as BrowserPanelState | undefined)?.currentUrl === currentUrl);
+  if (open) return open;
+  // A client's own new tab moves no other client, as with panels:create.
+  return panelManager.createPanel({
+    sessionId,
+    type: 'browser',
+    title: path.basename(fullPath),
+    initialState: { customState: { currentUrl } },
+    announceActivation: false,
+  }, { hostFileGrant: true });
+}
+
 const DAEMON_PANEL_CHANNELS = [
   'panels:read-browser-file',
+  'panels:open-html-file',
   'panels:create',
   'panels:delete',
   'panels:update',
@@ -461,7 +527,20 @@ export function registerPanelHandlers(
   commandRegistry.register('panels:read-browser-file', async (panelId: string, url: string) => {
     return readBrowserPanelFile(panelManager.getPanel(panelId), url);
   });
+  commandRegistry.register('panels:open-html-file', async (request: PaneCommandValue) => {
+    try {
+      return { success: true, data: await openHtmlFileInBrowserPanel(commandRegistry, request) };
+    } catch (error) {
+      console.error('[IPC] Failed to open HTML file in a browser panel:', error);
+      return {
+        success: false,
+        error: error instanceof PaneError ? paneErrorText(error) : error instanceof Error ? error.message : String(error),
+      };
+    }
+  });
   ipcMain.handle('browser-panel:prepare-file', (_event, panelId: string) => prepareRemoteBrowserFiles(panelId));
+  // Browser data lives on the machine showing the browser, so this is never forwarded to a remote host.
+  ipcMain.handle('browser-data:clear', () => rejectWithPaneErrorText(clearPaneBrowserData()));
   // Panel CRUD operations
   commandRegistry.register('panels:create', async (request: CreatePanelRequest) => {
     try {
@@ -524,6 +603,8 @@ export function registerPanelHandlers(
       .filter(session => !session.archived)
       .map(session => session.id));
     sessionIds.add(PANE_CHAT_SESSION_ID);
+    // Named Sessions run in hidden owner Panes, which `getAllSessions` leaves out.
+    for (const ownerId of services.orchestrationSessionManager?.ownerPaneIds() ?? []) sessionIds.add(ownerId);
     const statuses: PanelAgentStatusEvent[] = [];
     for (const sessionId of sessionIds) {
       for (const panel of panelManager.getPanelsForSession(sessionId)) {
@@ -751,6 +832,7 @@ export function registerPanelHandlers(
   });
   
   commandRegistry.register('terminal:getState', async (panelId: string) => {
+    assertRawTerminal(panelId);
     return terminalPanelManager.getTerminalState(panelId);
   });
 
@@ -798,11 +880,13 @@ export function registerPanelHandlers(
 
   // Get alternate screen state for TUI detection on panel mount
   commandRegistry.register('terminal:getAltScreenState', async (panelId: string) => {
+    assertRawTerminal(panelId);
     return terminalPanelManager.getAltScreenState(panelId);
   });
 
   commandRegistry.register('terminal:getScrollbackClean', async (panelId: string, lines: number) => {
     try {
+      assertRawTerminal(panelId);
       const content = await readCleanTerminalScrollback(panelId, lines);
       if (content === null) {
         return { success: false, error: `No scrollback available for panel ${panelId}` };

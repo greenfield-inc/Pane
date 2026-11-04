@@ -8,8 +8,10 @@ interface RemoteStatusBarProps {
   openName: string | null;
   status: RemotePaneConnectionStatus;
   lastError: string | null;
+  updateIntent?: import('../../../../shared/remoteClient/updateIntent').RemoteUpdateIntent | null;
   lastSeenAt: string | null;
   onDisconnect: () => void;
+  onRetry: () => void;
   onOpenSidebar: () => void;
 }
 
@@ -19,7 +21,9 @@ export function RemoteStatusBar({
   status,
   lastError,
   lastSeenAt,
+  updateIntent,
   onDisconnect,
+  onRetry,
   onOpenSidebar,
 }: RemoteStatusBarProps) {
   const connected = status === 'connected';
@@ -75,11 +79,12 @@ export function RemoteStatusBar({
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold text-text-primary">{title}</p>
           <p className="truncate text-xs text-text-tertiary">
-            {lastError || hostDetail}
+            {lastError || (updateIntent ? `Updating remote Pane. Session saved; reconnecting automatically. Operation ${updateIntent.id}, checkpoint confirmed.` : hostDetail)}
             {lastSeenAt ? ` · seen ${formatLastSeen(lastSeenAt)}` : ''}
           </p>
         </div>
       </div>
+      {(status === 'error' || status === 'reconnecting') && <button type="button" onClick={onRetry} className="shrink-0 rounded-md border border-border-primary px-3 py-2 text-sm text-text-primary">Retry now</button>}
       <button
         type="button"
         onClick={onDisconnect}
@@ -99,6 +104,8 @@ function getStatusLabel(status: RemotePaneConnectionStatus): string {
       return 'Connected to';
     case 'connecting':
       return 'Connecting to';
+    case 'restoring':
+      return 'Restoring workspace on';
     case 'reconnecting':
       return 'Reconnecting to';
     case 'error':

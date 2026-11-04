@@ -1,6 +1,6 @@
 import * as Haptics from 'expo-haptics';
 import { useRef, useState } from 'react';
-import { Pressable, StyleSheet, Switch, View } from 'react-native';
+import { Pressable, StyleSheet, Switch, useWindowDimensions, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
@@ -14,7 +14,10 @@ import { KeyBadge } from './KeyBadge';
 
 type Shortcut = RemotePwaTerminalShortcut;
 
+/** Row height at the default text size; it grows with the text so nothing clips. */
 const ROW = 64;
+/** The title and subtitle lines (rowTitle 22 + 1 gap + rowDetail 18) plus 9 above and below. */
+const rowHeight = (fontScale: number) => Math.max(ROW, Math.ceil(41 * fontScale + 18));
 
 export interface ShortcutListProps {
   shortcuts: readonly Shortcut[];
@@ -30,6 +33,7 @@ export interface ShortcutListProps {
  */
 export function ShortcutList({ shortcuts, disabled, onReorder, onToggle, onOpen }: ShortcutListProps) {
   const theme = useTheme();
+  const height = rowHeight(useWindowDimensions().fontScale);
   // While dragging, the order shown here; it saves on release.
   const [dragOrder, setDragOrder] = useState<Shortcut[] | null>(null);
   const dragging = useRef<Shortcut[] | null>(null);
@@ -66,7 +70,7 @@ export function ShortcutList({ shortcuts, disabled, onReorder, onToggle, onOpen 
   };
 
   return (
-    <View style={[styles.group, { borderRadius: theme.radius.md, backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+    <View style={[styles.group, { borderRadius: theme.radius.card, backgroundColor: theme.colors.card, borderColor: theme.colors.cardBorder }]}>
       {shown.map((shortcut, at) => {
         const pan = Gesture.Pan()
           .enabled(!disabled)
@@ -79,14 +83,14 @@ export function ShortcutList({ shortcuts, disabled, onReorder, onToggle, onOpen 
           })
           .onUpdate(event => {
             translation.value = event.translationY;
-            const target = Math.max(0, Math.min(last, startIndex.value + Math.round(event.translationY / ROW)));
+            const target = Math.max(0, Math.min(last, startIndex.value + Math.round(event.translationY / height)));
             if (target !== index.value) {
               scheduleOnRN(shift, index.value, target);
               index.value = target;
             }
           })
           .onFinalize(() => {
-            translation.value = withSpring((index.value - startIndex.value) * ROW, { damping: 20, stiffness: 300 }, () => {
+            translation.value = withSpring((index.value - startIndex.value) * height, { damping: 20, stiffness: 300 }, () => {
               draggingId.value = null;
               translation.value = 0;
             });
@@ -97,6 +101,8 @@ export function ShortcutList({ shortcuts, disabled, onReorder, onToggle, onOpen 
             key={shortcut.id}
             shortcut={shortcut}
             first={at === 0}
+            lastRow={at === last}
+            height={height}
             pan={pan}
             lift={{ draggingId, translation, startIndex, index }}
             disabled={disabled}
@@ -112,9 +118,11 @@ export function ShortcutList({ shortcuts, disabled, onReorder, onToggle, onOpen 
   );
 }
 
-function Row({ shortcut, first, pan, lift, disabled, canMoveUp, canMoveDown, onMove, onToggle, onOpen }: {
+function Row({ shortcut, first, lastRow, height, pan, lift, disabled, canMoveUp, canMoveDown, onMove, onToggle, onOpen }: {
   shortcut: Shortcut;
   first: boolean;
+  lastRow: boolean;
+  height: number;
   pan: ReturnType<typeof Gesture.Pan>;
   lift: {
     draggingId: ReturnType<typeof useSharedValue<string | null>>;
@@ -138,7 +146,7 @@ function Row({ shortcut, first, pan, lift, disabled, canMoveUp, canMoveDown, onM
     const dragging = lift.draggingId.value === id;
     return {
       zIndex: dragging ? 1 : 0,
-      transform: [{ translateY: dragging ? lift.translation.value - (lift.index.value - lift.startIndex.value) * ROW : 0 }],
+      transform: [{ translateY: dragging ? lift.translation.value - (lift.index.value - lift.startIndex.value) * height : 0 }],
       opacity: dragging ? 0.92 : 1,
     };
   });
@@ -146,10 +154,23 @@ function Row({ shortcut, first, pan, lift, disabled, canMoveUp, canMoveDown, onM
   return (
     <Animated.View
       testID={`shortcut-row-${id}`}
-      style={[styles.row, { backgroundColor: colors.surface, borderTopColor: colors.border, borderTopWidth: first ? 0 : StyleSheet.hairlineWidth }, style]}
+      // The card can't clip (a dragged row lifts out of it), so the end rows round themselves.
+      style={[
+        styles.row,
+        {
+          height,
+          backgroundColor: colors.card,
+          borderTopLeftRadius: first ? theme.radius.card : 0,
+          borderTopRightRadius: first ? theme.radius.card : 0,
+          borderBottomLeftRadius: lastRow ? theme.radius.card : 0,
+          borderBottomRightRadius: lastRow ? theme.radius.card : 0,
+        },
+        style,
+      ]}
     >
+      {first ? null : <View style={[styles.separator, { backgroundColor: colors.border }]} />}
       <GestureDetector gesture={pan}>
-        <View testID={`shortcut-handle-${id}`} style={styles.handle} hitSlop={8} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
+        <View testID={`shortcut-handle-${id}`} style={[styles.handle, { height }]} hitSlop={8} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
           <Icon ios="line.3.horizontal" android="drag_indicator" size={16} color={colors.textMuted} />
         </View>
       </GestureDetector>
@@ -159,7 +180,7 @@ function Row({ shortcut, first, pan, lift, disabled, canMoveUp, canMoveDown, onM
         accessibilityLabel={`${shortcut.label}, hotkey letter ${shortcut.key.toUpperCase()}`}
         accessibilityHint="Opens it to edit"
         onPress={onOpen}
-        style={styles.body}
+        style={[styles.body, { height }]}
         accessibilityActions={[
         { name: 'activate', label: 'Edit' },
         ...(canMoveUp ? [{ name: 'moveUp', label: 'Move up' }] : []),
@@ -172,12 +193,12 @@ function Row({ shortcut, first, pan, lift, disabled, canMoveUp, canMoveDown, onM
         else if (action === 'moveDown') onMove(1);
       }}
       >
-        <Text variant="body" numberOfLines={1}>{shortcut.label}</Text>
-        <Text variant="footnote" tone="muted" numberOfLines={1}>{shortcut.text}</Text>
+        <Text variant="rowTitle" numberOfLines={1}>{shortcut.label}</Text>
+        <Text variant="rowDetail" tone="muted" numberOfLines={1}>{shortcut.text}</Text>
       </Pressable>
       <KeyBadge letter={shortcut.key} />
       {/* A box of the row's height keeps the iOS switch centered. */}
-      <View style={styles.switchBox}>
+      <View style={[styles.switchBox, { height }]}>
         <Switch
           testID={`shortcut-toggle-${id}`}
           accessibilityLabel={`${shortcut.label} on`}
@@ -192,15 +213,16 @@ function Row({ shortcut, first, pan, lift, disabled, canMoveUp, canMoveDown, onM
 }
 
 const styles = StyleSheet.create({
-  group: { overflow: 'visible', borderWidth: 1 },
+  group: { overflow: 'visible', borderWidth: StyleSheet.hairlineWidth },
   row: {
-    height: ROW,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    paddingRight: 14,
+    paddingRight: 16,
   },
-  handle: { width: 36, height: ROW, alignItems: 'center', justifyContent: 'center' },
-  body: { flex: 1, minWidth: 0, gap: 2, justifyContent: 'center', height: ROW },
-  switchBox: { height: ROW, justifyContent: 'center' },
+  handle: { width: 40, alignItems: 'center', justifyContent: 'center' },
+  body: { flex: 1, minWidth: 0, gap: 1, justifyContent: 'center' },
+  switchBox: { justifyContent: 'center' },
+  // Inset to the label, past the drag handle (40 + 10).
+  separator: { position: 'absolute', top: 0, left: 50, right: 0, height: StyleSheet.hairlineWidth },
 });

@@ -1,52 +1,22 @@
 /**
- * Opens (or re-targets) the session's Browser panel at an HTML file.
+ * Shows an HTML file rendered in a browser tab: the tab already showing it, or a new
+ * one. It never retargets a tab showing something else.
  */
-import type { BrowserPanelState, ToolPanel } from '../../../../../shared/types/panels';
-import { boundary, decodeBoundary } from '../../../../../shared/validation/boundaryDecoder';
+import type { BrowserPanelState } from '../../../../../shared/types/panels';
 import { panelApi } from '../../../services/panelApi';
+import { activatePanel } from '../../../services/openFileInEditor';
 import { usePanelStore } from '../../../stores/panelStore';
-
-const filePathResponseSchema = boundary.object({
-  success: boundary.boolean,
-  url: boundary.optional(boundary.string),
-  error: boundary.optional(boundary.string),
-});
+import { requestBrowserNavigation } from '../browser/browserNavigation';
 
 export async function previewHtmlFileInBrowser(sessionId: string, filePath: string): Promise<void> {
-  const result = decodeBoundary(
-    await window.electronAPI.invoke('file:getPath', { sessionId, filePath }),
-    filePathResponseSchema,
-  );
-  if (!result.success || !result.url) {
-    throw new Error(result.error || 'Failed to resolve HTML preview URL');
-  }
-
+  const browserPanel = await panelApi.openHtmlFile(sessionId, filePath);
   const store = usePanelStore.getState();
-  const existingPanel = store.getSessionPanels(sessionId).find((candidate) => candidate.type === 'browser');
-  const title = filePath.split('/').pop() || 'Browser';
-  let browserPanel: ToolPanel;
-
-  if (existingPanel) {
-    // SAFETY: The browser panel type discriminator establishes BrowserPanelState.
-    const existingCustomState = (existingPanel.state.customState ?? {}) as BrowserPanelState;
-    browserPanel = {
-      ...existingPanel,
-      title,
-      state: { ...existingPanel.state, customState: { ...existingCustomState, currentUrl: result.url } },
-    };
-    await panelApi.updatePanel(browserPanel.id, { title, state: browserPanel.state });
-    store.updatePanelState(browserPanel);
-  } else {
-    browserPanel = await panelApi.createPanel({
-      sessionId,
-      type: 'browser',
-      title,
-      initialState: { customState: { currentUrl: result.url } },
-    });
-    store.addPanel(browserPanel);
-  }
-
-  store.setActivePanel(sessionId, browserPanel.id);
-  await panelApi.setActivePanel(sessionId, browserPanel.id);
-  window.dispatchEvent(new CustomEvent('browser-panel:navigate', { detail: { url: result.url, sessionId } }));
+  const alreadyOpen = store.getSessionPanels(sessionId).some((panel) => panel.id === browserPanel.id);
+  store.addPanel(browserPanel);
+  await activatePanel(sessionId, browserPanel.id);
+  // A tab already showing the file keeps its old render; reload it so a saved edit
+  // appears. A new tab's first load already reads the current file.
+  // SAFETY: The browser panel type discriminator establishes BrowserPanelState.
+  const url = (browserPanel.state.customState as BrowserPanelState | undefined)?.currentUrl;
+  if (alreadyOpen && url) requestBrowserNavigation({ url, sessionId, panelId: browserPanel.id });
 }

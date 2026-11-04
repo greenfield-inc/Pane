@@ -1,0 +1,143 @@
+import { execFileSync } from 'child_process';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import { afterEach, beforeEach, expect, it } from 'vitest';
+import { CommandRunner } from '../utils/commandRunner';
+import { PathResolver } from '../utils/pathResolver';
+import { WorktreeManager } from './worktreeManager';
+
+const base = 'main$PANE_OP_LITERAL;branch&ref';
+const feature = 'feature%PATH%$PANE_OP_LITERAL;branch&ref';
+let root: string;
+let project: string;
+let worktree: string;
+let runner: CommandRunner;
+let pathResolver: PathResolver;
+const manager = new WorktreeManager();
+
+function git(cwd: string, ...args: string[]): string {
+  return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
+}
+function commit(cwd: string, file: string, content: string, message: string): void {
+  writeFileSync(join(cwd, file), content);
+  git(cwd, 'add', '--', file);
+  git(cwd, 'commit', '-m', message);
+}
+beforeEach(() => {
+  root = mkdtempSync(join(tmpdir(), 'pane-git-operations-'));
+  project = join(root, 'project $literal;path&name');
+  worktree = join(root, 'worktree $literal;path&name');
+  mkdirSync(project);
+  git(project, 'init', '-b', base);
+  git(project, 'config', 'core.autocrlf', 'false');
+  git(project, 'config', 'user.name', 'Fixture');
+  git(project, 'config', 'user.email', 'fixture@example.invalid');
+  git(project, 'config', 'commit.gpgsign', 'false');
+  commit(project, 'shared.txt', 'initial\n', 'Initial');
+  git(project, 'worktree', 'add', '-b', feature, worktree, base);
+  runner = new CommandRunner({ path: project });
+  pathResolver = new PathResolver({ path: project });
+});
+afterEach(() => rmSync(root, { recursive: true, force: true }));
+
+it('reports a real conflict against the literal comparison ref without modifying either checkout', async () => {
+  commit(project, 'shared.txt', 'base edit\n', 'Base change');
+  commit(worktree, 'shared.txt', 'feature edit\n', 'Feature change');
+  expect(await manager.checkForRebaseConflicts(worktree, base, runner))
+    .toMatchObject({ hasConflicts: true, canAutoMerge: false, conflictingFiles: ['shared.txt'] });
+  expect(readFileSync(join(worktree, 'shared.txt'), 'utf8')).toBe('feature edit\n');
+  expect(git(worktree, 'status', '--porcelain')).toBe('');
+  expect(readFileSync(join(project, 'shared.txt'), 'utf8')).toBe('base edit\n');
+});
+
+it('reports no conflict when both branches edit separate lines of the same file', async () => {
+  commit(project, 'shared.txt', 'one\ntwo\nthree\nfour\nfive\n', 'Lines');
+  git(worktree, 'reset', '--hard', base);
+  commit(project, 'shared.txt', 'one base\ntwo\nthree\nfour\nfive\n', 'Base change');
+  commit(worktree, 'shared.txt', 'one\ntwo\nthree\nfour\nfive feature\n', 'Feature change');
+  expect(await manager.checkForRebaseConflicts(worktree, base, runner))
+    .toEqual({ hasConflicts: false, canAutoMerge: true });
+});
+
+it('reports a conflict when both branches change the same binary file', async () => {
+  commit(project, 'image.bin', 'header\0base\n', 'Binary');
+  git(worktree, 'reset', '--hard', base);
+  commit(project, 'image.bin', 'header\0base edit\n', 'Base change');
+  commit(worktree, 'image.bin', 'header\0feature edit\n', 'Feature change');
+  expect(await manager.checkForRebaseConflicts(worktree, base, runner))
+    .toMatchObject({ hasConflicts: true, canAutoMerge: false, conflictingFiles: ['image.bin'] });
+});
+
+it('rebases onto the literal base while preserving both branches changes', async () => {
+  commit(project, 'base.txt', 'base content\n', 'Base change');
+  commit(worktree, 'feature.txt', 'feature content\n', 'Feature change');
+  await manager.rebaseMainIntoWorktree(worktree, base, pathResolver, runner);
+  expect(readFileSync(join(worktree, 'base.txt'), 'utf8')).toBe('base content\n');
+  expect(readFileSync(join(worktree, 'feature.txt'), 'utf8')).toBe('feature content\n');
+  expect(git(worktree, 'branch', '--show-current')).toBe(feature);
+  expect(git(worktree, 'log', '-3', '--format=%s')).toBe('Feature change\nBase change\nInitial');
+});
+
+for (const savedResolution of [false, true]) {
+  it(`aborts a rebase that conflicts mid-replay${savedResolution ? ' even when rerere stages a saved resolution' : ''}, leaving the worktree untouched`, async () => {
+    commit(worktree, 'shared.txt', 'B\n', 'Feature to B');
+    commit(worktree, 'shared.txt', 'C\n', 'Feature to C');
+    commit(project, 'shared.txt', 'C\n', 'Base to C');
+    const head = git(worktree, 'rev-parse', 'HEAD');
+    if (savedResolution) {
+      git(project, 'config', 'rerere.enabled', 'true');
+      git(project, 'config', 'rerere.autoupdate', 'true');
+      expect(() => git(worktree, 'rebase', base)).toThrow();
+      writeFileSync(join(worktree, 'shared.txt'), 'resolved\n');
+      git(worktree, 'add', 'shared.txt');
+      git(worktree, 'rerere');
+      git(worktree, 'rebase', '--abort');
+    }
+    // Both tips hold C, so the tip check passes; replaying "Feature to B" onto C conflicts.
+    expect(await manager.checkForRebaseConflicts(worktree, base, runner)).toEqual({ hasConflicts: false, canAutoMerge: true });
+    expect(await manager.rebaseMainIntoWorktree(worktree, base, pathResolver, runner))
+      .toMatchObject({ hasConflicts: true, canAutoMerge: false, conflictingFiles: ['shared.txt'] });
+    expect(() => git(worktree, 'rev-parse', '--verify', '--quiet', 'REBASE_HEAD')).toThrow();
+    expect(git(worktree, 'rev-parse', 'HEAD')).toBe(head);
+    expect(git(worktree, 'status', '--porcelain')).toBe('');
+    expect(readFileSync(join(worktree, 'shared.txt'), 'utf8')).toBe('C\n');
+  });
+}
+
+it('fast-forwards the literal target after rebasing the literal feature branch', async () => {
+  commit(project, 'base.txt', 'base content\n', 'Base change');
+  commit(worktree, 'feature.txt', 'feature content\n', 'Feature change');
+  await manager.mergeWorktreeToMain(project, worktree, base, runner);
+  expect(git(project, 'branch', '--show-current')).toBe(base);
+  expect(git(project, 'log', '-3', '--format=%s')).toBe('Feature change\nBase change\nInitial');
+  expect(readFileSync(join(project, 'base.txt'), 'utf8')).toBe('base content\n');
+  expect(readFileSync(join(project, 'feature.txt'), 'utf8')).toBe('feature content\n');
+});
+
+it('squashes the literal feature branch with an unchanged literal message and attribution footer', async () => {
+  commit(worktree, 'feature.txt', 'first content\n', 'First feature change');
+  commit(worktree, 'feature.txt', 'final content\n', 'Second feature change');
+  const message = 'Literal "$PANE_OP_LITERAL" `%PATH%`\n\nBody with ; and &';
+  await manager.squashAndMergeWorktreeToMain(project, worktree, base, message, runner);
+  expect(git(project, 'rev-list', '--count', 'HEAD')).toBe('2');
+  expect(readFileSync(join(project, 'feature.txt'), 'utf8')).toBe('final content\n');
+  expect(git(project, 'log', '-1', '--format=%B')).toBe(message + '\n\nCo-Authored-By: Pane <runpane@users.noreply.github.com>');
+  expect(git(project, 'branch', '--show-current')).toBe(base);
+});
+
+for (const squash of [false, true]) {
+  it(`aborts a conflicting ${squash ? 'squash' : 'regular'} merge without changing either branch`, async () => {
+    commit(project, 'shared.txt', 'base edit\n', 'Base change');
+    commit(worktree, 'shared.txt', 'feature edit\n', 'Feature change');
+    const operation = squash
+      ? manager.squashAndMergeWorktreeToMain(project, worktree, base, 'Must not commit', runner)
+      : manager.mergeWorktreeToMain(project, worktree, base, runner);
+    await expect(operation).rejects.toThrow(squash ? 'Failed to squash and merge' : 'Failed to merge');
+    expect(git(worktree, 'status', '--porcelain')).toBe('');
+    expect(git(worktree, 'log', '-1', '--format=%s')).toBe('Feature change');
+    expect(git(project, 'log', '-1', '--format=%s')).toBe('Base change');
+    expect(readFileSync(join(worktree, 'shared.txt'), 'utf8')).toBe('feature edit\n');
+    expect(readFileSync(join(project, 'shared.txt'), 'utf8')).toBe('base edit\n');
+  });
+}

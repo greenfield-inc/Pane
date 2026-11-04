@@ -10,7 +10,7 @@ function getStatusIcon(status: ArchiveProgressTask['status']) {
     case 'failed':
       return <AlertCircle className="w-3 h-3 text-status-error" />;
     case 'queued':
-      return <Archive className="w-3 h-3 text-status-waiting" />;
+      return <Archive className="w-3 h-3 text-status-neutral" />;
     default:
       return <Loader2 className="w-3 h-3 text-status-info animate-spin" />;
   }
@@ -147,12 +147,12 @@ export function ArchiveProgress() {
             Archive Tasks
           </span>
           {progress.activeCount > 0 && (
-            <span className="px-1.5 py-0.5 bg-status-info/20 text-status-info text-xs rounded-full animate-pulse">
+            <span className="px-1.5 py-0.5 bg-status-info/20 text-status-info-on-tint text-xs rounded-full animate-pulse">
               {progress.activeCount} active
             </span>
           )}
           {progress.tasks.filter(t => t.status === 'queued').length > 0 && (
-            <span className="px-1.5 py-0.5 bg-status-waiting/20 text-status-waiting text-xs rounded-full">
+            <span className="px-1.5 py-0.5 bg-status-neutral/20 text-status-neutral text-xs rounded-full">
               {progress.tasks.filter(t => t.status === 'queued').length} queued
             </span>
           )}
@@ -224,7 +224,7 @@ export function ArchiveProgress() {
                     </div>
                   )}
                   {task.status === 'removing-worktree' && (
-                    <div className="text-xs text-status-warning/80 pl-5 mt-1 italic">
+                    <div className="text-xs text-status-warning pl-5 mt-1 italic">
                       ⚠️ Worktree removal can take several minutes for large repositories
                     </div>
                   )}

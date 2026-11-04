@@ -1,0 +1,34 @@
+name: Windows ARM64 Build
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/build-win.js'
+      - 'scripts/after-pack.js'
+      - 'scripts/verify-packaged-icon.js'
+      - 'package.json'
+      - 'main/package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - '.npmrc'
+      - '.github/workflows/windows-arm64-build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build ARM64 installer with target-native SQLite validation
+        run: node scripts/build-win.js arm64
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pane-windows-arm64-validation
+          path: dist-electron/*-Windows-arm64.exe
+          if-no-files-found: error

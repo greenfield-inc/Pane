@@ -4,7 +4,18 @@ import type { PaneWorkspaceHostController, WorkspaceHostStatus } from '../daemon
 import { describeMachine, execOnMachine, readMachineFile, writeMachineFile } from '../services/workspaceMachine';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { hashWorkspacePassword } from '../daemon/workspacePassword';
-import { discoverTailnetMachines, probeWorkspace, readTailscaleStatus, type WorkspaceProbe } from '../services/tailnetMachines';
+import {
+  callWorkspace,
+  discoverTailnetMachines,
+  probeWorkspace,
+  readTailscaleStatus,
+  savedWorkspaceSecrets,
+  type WorkspaceCall,
+  type WorkspaceProbe,
+} from '../services/tailnetMachines';
+import { vouchForGlasses } from '../services/glassesVouch';
+import { PaneError } from '../../../shared/paneError';
+import { normalizeRemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
 import {
   WORKSPACE_PASSWORD_MIN_LENGTH,
   type WorkspaceAccessSummary,
@@ -12,6 +23,14 @@ import {
   type WorkspaceAccessUpdate,
   type WorkspaceMachineDescription,
 } from '../../../shared/types/workspaceAccess';
+import {
+  GLASSES_COMMANDS,
+  type GlassesAccessState,
+  type GlassesListResult,
+  type GlassesPairingSecretResult,
+  type GlassesRevokeResult,
+  type GlassesVouchResult,
+} from '../../../shared/types/glasses';
 
 const readRequestSchema = boundary.object({ path: boundary.nonEmptyString });
 const writeRequestSchema = boundary.object({
@@ -25,13 +44,21 @@ const execRequestSchema = boundary.object({
   timeoutMs: boundary.optional(boundary.number),
 });
 const setEnabledRequestSchema = boundary.object({ enabled: boundary.boolean });
+const pairingSecretRequestSchema = boundary.object({
+  deviceName: boundary.string,
+  phoneId: boundary.nonEmptyString,
+  unlessRevoked: boundary.optional(boundary.boolean),
+});
+const vouchRequestSchema = boundary.object({ deviceId: boundary.nonEmptyString });
+const revokeGlassesRequestSchema = boundary.object({ id: boundary.nonEmptyString });
+const setGlassesOriginRequestSchema = boundary.object({ origin: boundary.nonEmptyString, allowed: boundary.boolean });
 const setAccessRequestSchema = boundary.object({
   visibility: boundary.optional(boundary.enumeration('off', 'owner', 'tailnet')),
   password: boundary.optional(boundary.nullable(boundary.string)),
 });
 
 interface WorkspaceCommandConfig {
-  getConfig(): Pick<AppConfig, 'preferredShell' | 'workspaces'>;
+  getConfig(): Pick<AppConfig, 'preferredShell' | 'workspaces' | 'remoteDaemon'>;
   updateConfigWith(update: (current: Pick<AppConfig, 'workspaces'>) => Pick<AppConfig, 'workspaces'>): Promise<object>;
 }
 
@@ -49,7 +76,7 @@ export function registerWorkspaceCommands(
   host: PaneWorkspaceHostController,
   configManager: WorkspaceCommandConfig,
   paneVersion: string,
-  discovery: { readStatus: () => Promise<string | null>; probe: WorkspaceProbe } = { readStatus: readTailscaleStatus, probe: probeWorkspace },
+  discovery: { readStatus: () => Promise<string | null>; probe: WorkspaceProbe; call: WorkspaceCall } = { readStatus: readTailscaleStatus, probe: probeWorkspace, call: callWorkspace },
 ): void {
   const preferredShell = () => configManager.getConfig().preferredShell;
   const status = (): WorkspaceStatusResult => ({ enabled: host.isEnabled(), ...host.getStatus() });
@@ -100,6 +127,40 @@ export function registerWorkspaceCommands(
   };
   // Describe answers clients admitted by visibility and password checks.
   registry.register('runpane:workspaces:describe', describe);
+  // The HTTP transport serves these only to the owner's own devices without a glasses token.
+  registry.register(GLASSES_COMMANDS.createPairingSecret, (request: PaneCommandValue): GlassesPairingSecretResult => {
+    const { deviceName, phoneId, unlessRevoked } = decodeBoundary(request, pairingSecretRequestSchema);
+    return host.glasses.createPairingSecret(deviceName, phoneId, { unlessRevoked });
+  });
+  registry.register(GLASSES_COMMANDS.list, (): GlassesListResult => ({
+    devices: host.glasses.list(),
+    revokedPhoneIds: host.glasses.revokedPhoneIds(),
+    funnelOn: host.glasses.isFunnelOn(),
+  }));
+  // The HTTP transport serves this only to glasses, and sends only the calling token's own device id.
+  registry.register(GLASSES_COMMANDS.vouch, async (request: PaneCommandValue): Promise<GlassesVouchResult> => {
+    const device = host.glasses.device(decodeBoundary(request, vouchRequestSchema).deviceId);
+    if (!device?.phoneId) {
+      throw new PaneError(
+        'ERR_GLASSES_VOUCH_NOT_PAIRED',
+        'These glasses are not paired from a Pane phone app on this computer, so it asked no other computer for them.',
+        'Pair the glasses again from the Pane phone app: Settings › Glasses › Pair glasses.',
+      );
+    }
+    const { profiles } = normalizeRemoteDaemonConfig(configManager.getConfig().remoteDaemon).client;
+    const result = await vouchForGlasses({ label: device.label, phoneId: device.phoneId }, { ...discovery, savedSecrets: savedWorkspaceSecrets(profiles) });
+    console.info(`[Pane glasses] vouched for ${device.label}: ${result.code ? 'made a pairing code' : 'no computer to add'}${result.skipped.length ? `; skipped ${result.skipped.map((entry) => `${entry.name} (${entry.reason})`).join(', ')}` : ''}`);
+    return result;
+  });
+  registry.register(GLASSES_COMMANDS.revoke, async (request: PaneCommandValue): Promise<GlassesRevokeResult> =>
+    ({ revoked: await host.glasses.revoke(decodeBoundary(request, revokeGlassesRequestSchema).id) }));
+  registry.register(GLASSES_COMMANDS.state, (): GlassesAccessState => host.glasses.state());
+  registry.register(GLASSES_COMMANDS.setOrigin, (request: PaneCommandValue): Promise<GlassesAccessState> => {
+    // Which web origins may carry glasses tokens is decided on this machine only.
+    refuseRemoteCaller();
+    const { origin, allowed } = decodeBoundary(request, setGlassesOriginRequestSchema);
+    return host.glasses.setOwnerOrigin(origin, allowed);
+  });
   // A phone cannot read `tailscale status`; it asks a computer on its own login.
   // The HTTP transport restricts discovery to the signed owner identity before invoking this.
   registry.register('runpane:workspaces:machines', (): Promise<TailnetMachineList> => {

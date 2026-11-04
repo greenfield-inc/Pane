@@ -168,7 +168,7 @@ export function RemoteCreateOrchestrationSessionDialog({
               />
 
               {error && (
-                <div role="alert" className="rounded-md border border-status-error/40 bg-status-error/10 p-3 text-sm text-status-error">
+                <div role="alert" className="rounded-md border border-status-error/40 bg-status-error/10 p-3 text-sm text-text-primary">
                   {error}
                 </div>
               )}

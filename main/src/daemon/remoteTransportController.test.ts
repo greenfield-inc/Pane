@@ -236,6 +236,11 @@ describe('PaneRemoteTransportController', () => {
         timestamp: expect.any(String),
     });
 
+    daemonEventSink.send('agent-chat:event', { panelId: 'panel-1', generation: 2, revision: 1, change: { type: 'append', id: 'reply-1', role: 'assistant', part: { type: 'text', text: 'Remote Chat reply' } } });
+    const chatEvent = await stream.nextEvent();
+    expect(chatEvent.event).toBe('daemon-event');
+    expect(JSON.parse(chatEvent.data.join('\n'))).toMatchObject({ channel: 'agent-chat:event', args: [{ panelId: 'panel-1', generation: 2, revision: 1 }] });
+
     stream.close();
     await waitFor(() => remoteHostRuntimeStateStore.getState().connectedClients.length === 0);
     await configManager.updateRemoteDaemonConfig(createDefaultRemoteDaemonConfig());

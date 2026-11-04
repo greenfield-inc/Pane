@@ -103,9 +103,20 @@ export const CLAUDE_MANIFEST: AgentManifest = {
       regex: [/esc to cancel\s*$/i],
     },
     {
-      // Startup menus: bypass-permissions warnings ("❯ No, exit"
-      // above "Enter to confirm · Esc to cancel"), and first-run theme and login
-      // pickers ("❯ 2. Dark mode").
+      // The one-time bypass-permissions warning. Named so the Onboarding
+      // Session can answer it in the terminal (TerminalPanelManager).
+      id: 'bypass_permissions_warning',
+      state: 'blocked',
+      priority: 1040,
+      region: 'after_last_horizontal_rule',
+      visibleBlocker: true,
+      contains: ['running in bypass permissions mode', 'yes, i accept'],
+      // Live only while its footer is the last thing on screen, as for folder trust.
+      regex: [/esc to cancel\s*$/i],
+    },
+    {
+      // Other startup menus ("❯ No, exit" above "Enter to confirm · Esc to
+      // cancel"), and first-run theme and login pickers ("❯ 2. Dark mode").
       id: 'live_selection_menu',
       state: 'blocked',
       priority: 980,
@@ -268,6 +279,36 @@ export const CODEX_MANIFEST: AgentManifest = {
         { contains: ['enter continue', 'esc quit'] },
       ],
     },
+    // Full-screen startup prompts that hold the composer back. Each is live only while its footer
+    // is the last thing on screen, and each has its own id so the next one reads as a new question.
+    {
+      id: 'update_prompt',
+      state: 'blocked',
+      priority: 1000,
+      region: 'whole_recent',
+      visibleBlocker: true,
+      contains: ['update available', 'skip until next version'],
+      regex: [/enter continue · esc skip\s*$/i],
+    },
+    {
+      id: 'sign_in_prompt',
+      state: 'blocked',
+      priority: 1000,
+      region: 'whole_recent',
+      visibleBlocker: true,
+      contains: ['sign in with chatgpt'],
+      regex: [/press enter to continue\s*$/i],
+    },
+    {
+      // Folder trust since 0.160 ("esc back"); the 0.156 footer is in live_strong_blocker.
+      id: 'folder_trust_prompt',
+      state: 'blocked',
+      priority: 1000,
+      region: 'whole_recent',
+      visibleBlocker: true,
+      contains: ['trust this folder?'],
+      regex: [/enter continue · esc (?:back|quit)\s*$/i],
+    },
     {
       id: 'weak_blocker',
       state: 'blocked',
@@ -334,6 +375,17 @@ export const GENERIC_MANIFEST: AgentManifest = {
         { lineRegex: [/allow command\?\s*$/i] },
         { lineRegex: [/waiting for permission\.{0,3}\s*$/i] },
       ],
+    },
+    {
+      // A clack-style prompt still open at the bottom (Agent Farm's variant
+      // picker, for one): `◆` heads it, `│` rows follow, `└` closes it.
+      // Answered prompts turn `◆` into `◇`.
+      id: 'live_choice_prompt',
+      state: 'blocked',
+      priority: 590,
+      region: 'whole_recent',
+      visibleBlocker: true,
+      regex: [/(?:^|\n)[^\S\n]*◆[^\S\n][^\n]*\n(?:[^\S\n]*│[^\n]*\n)*[^\S\n]*└[^\S\n]*\s*$/u],
     },
   ],
 };

@@ -16,6 +16,8 @@ import { registerPromptHandlers } from './prompt';
 import { registerScriptHandlers } from './script';
 import { registerSessionHandlers } from './session';
 import { registerVoiceHandlers } from './voice';
+import { registerLoopHandlers } from './loops';
+import type { LoopManager } from '../services/loops/loopManager';
 import { registerUsageHandlers } from './usage';
 import { registerMissionControlHandlers } from './missionControl';
 import type { AppServices } from './types';
@@ -25,6 +27,14 @@ const USAGE_CHANNELS = [
   'usage:get-report',
   'usage:get-status',
   'usage:rescan',
+] as const;
+const LOOP_CHANNELS = [
+  'loops:list',
+  'loops:save',
+  'loops:delete',
+  'loops:set-enabled',
+  'loops:run-now',
+  'loops:preview',
 ] as const;
 const MISSION_CONTROL_CHANNELS = [
   'mission-control:list-agents',
@@ -71,6 +81,7 @@ const PROMPT_CHANNELS = [
 const PANE_CHAT_CHANNELS = [
   'pane-chat:get-or-create',
   'pane-chat:set-agent',
+  'pane-chat:intro-offer',
 ] as const;
 const ORCHESTRATION_SESSION_CHANNELS = [
   'orchestration-sessions:runtimes',
@@ -80,6 +91,7 @@ const ORCHESTRATION_SESSION_CHANNELS = [
   'orchestration-sessions:create',
   'orchestration-sessions:get',
   'orchestration-sessions:update',
+  'orchestration-sessions:reorder',
   'orchestration-sessions:set-agent',
   'orchestration-sessions:associate',
   'orchestration-sessions:detach',
@@ -119,6 +131,7 @@ const FILE_CHANNELS = [
 
 const PANEL_CHANNELS = [
   'panels:read-browser-file',
+  'panels:open-html-file',
   'panels:create',
   'panels:delete',
   'panels:update',
@@ -370,6 +383,8 @@ describe('daemon registry IPC bindings', () => {
       },
       // Cursor depends on the host platform, so only the agents every host runs are pinned.
       sessionAgents: { agents: expect.arrayContaining(['claude', 'codex']), defaultAgent: 'codex' },
+      chatEnabled: false,
+      os: expect.stringMatching(/^(macOS|Windows|Linux)$/),
     });
   });
 
@@ -396,6 +411,17 @@ describe('daemon registry IPC bindings', () => {
 
     expect(registry.listChannels()).toEqual([...USAGE_CHANNELS].sort());
     expect(ipcMain.boundChannels.sort()).toEqual([...USAGE_CHANNELS].sort());
+  });
+
+  it('binds daemon-owned loop channels through the shared registry', () => {
+    const registry = new PaneCommandRegistry();
+    const ipcMain = createIpcMainStub();
+
+    // SAFETY: Binding never calls the manager.
+    registerLoopHandlers(ipcMain, {} as LoopManager, registry);
+
+    expect(registry.listChannels()).toEqual([...LOOP_CHANNELS].sort());
+    expect(ipcMain.boundChannels.sort()).toEqual([...LOOP_CHANNELS].sort());
   });
 
   it('binds daemon-owned missionControl channels through the shared registry', () => {
@@ -517,10 +543,21 @@ describe('daemon registry IPC bindings', () => {
     expect(
       ipcMain.boundChannels.filter(
         channel => channel !== 'terminal:clipboard-paste-image' && channel !== 'browser-panel:register-webview'
-          && channel !== 'browser-panel:prepare-file',
+          && channel !== 'browser-panel:prepare-file' && channel !== 'browser-data:clear',
       ).sort(),
     ).toEqual([...PANEL_CHANNELS].sort());
     expect(registry.has('terminal:clipboard-paste-image')).toBe(false);
+  });
+
+  it('clears browser data on the machine showing the browser, never on a remote host', () => {
+    const registry = new PaneCommandRegistry();
+    const ipcMain = createIpcMainStub();
+
+    registerPanelHandlers(ipcMain, createServicesStub(), registry);
+
+    expect(ipcMain.boundChannels).toContain('browser-data:clear');
+    expect(registry.has('browser-data:clear')).toBe(false);
+    expect(isDaemonOwnedChannel('browser-data:clear')).toBe(false);
   });
 
   it('keeps local IDE launching outside the daemon registry surface', () => {

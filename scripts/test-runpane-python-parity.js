@@ -91,6 +91,45 @@ print(json.dumps(results))
   ]);
 });
 
+test('Python reports every Session create payload problem in one ERR_SESSION_PAYLOAD_INVALID, like Node', () => {
+  // A create payload missing its name and two link fields: Node names all three at once.
+  const payload = { outputs: [{ label: 'result' }] };
+  // PANE_DIR points nowhere, so the Node CLI fails before any daemon request if it does not reject locally.
+  const nodeResult = spawnSync(process.execPath, [path.join(root, 'packages/runpane/dist/cli.js'), 'sessions', 'create', '--from-json', '-', '--json'], {
+    cwd: root, encoding: 'utf8', input: JSON.stringify(payload), timeout: 10000,
+    env: { ...process.env, PANE_DIR: path.join(root, 'tmp', 'runpane-parity-no-daemon'), RUNPANE_TELEMETRY_DISABLED: '1' },
+  });
+  assert.equal(nodeResult.status, 1, nodeResult.stderr);
+  const nodeFailure = JSON.parse(nodeResult.stdout).error;
+  assert.equal(nodeFailure.code, 'ERR_SESSION_PAYLOAD_INVALID');
+  assert.equal(nodeFailure.message, 'The Session create payload has 3 problems: name: missing; '
+    + 'outputs[0].url: missing; outputs[0].addedAt: missing. Nothing was changed.');
+
+  // Python leaves validation to the daemon, whose decoder keeps the same rules and wording
+  // (main/src/ipc/runpane.test.ts); the fake answers the way that decoder does.
+  const output = JSON.parse(runPython(`
+import contextlib, io, json, sys
+import runpane.local_control as local
+from runpane.cli import main
+from runpane.daemon_client import PaneDaemonClientError
+fixture = json.load(sys.stdin)
+requests = []
+def fake_invoke(channel, args, **kwargs):
+    requests.append([channel, args[0]])
+    failure = fixture["daemonFailure"]
+    raise PaneDaemonClientError(failure["message"], failure["code"], failure["next"])
+local.invoke_daemon = fake_invoke
+sys.stdin = io.StringIO(json.dumps(fixture["payload"]))
+stdout, stderr = io.StringIO(), io.StringIO()
+with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+    code = main(["sessions", "create", "--from-json", "-", "--json"])
+print(json.dumps({"code": code, "requests": requests, "failure": json.loads(stdout.getvalue())["error"]}))
+`, { payload, daemonFailure: nodeFailure }));
+  assert.equal(output.code, 1);
+  assert.deepEqual(output.failure, nodeFailure);
+  assert.deepEqual(output.requests, [['runpane:sessions:create', payload]]);
+});
+
 test('Python daemon diagnostics distinguish stale Unix sockets from unopened Pane', () => {
   const output = JSON.parse(runPython(`
 import json, os, tempfile
@@ -167,3 +206,69 @@ for delivery in json.load(sys.stdin):
     ]);
   });
 }
+
+test('Python forwards update installer options so the shared preflight can reject unsupported choices', () => {
+  const argv = JSON.parse(runPython(`
+import json
+from unittest.mock import patch
+from runpane.cli import parse_args
+from runpane.update import run_update
+parsed = parse_args(['update', '--pane-only', '--format', 'dmg', '--download-dir', 'custom cache'])
+with patch('runpane.update.Path.is_file', return_value=True), patch('runpane.update.shutil.which', return_value='node'), patch('runpane.update.subprocess.call', return_value=0) as call:
+    run_update(parsed)
+    print(json.dumps(call.call_args[0][0]))
+`, null));
+  assert.equal(argv[argv.indexOf('--format') + 1], 'dmg');
+  assert.equal(argv[argv.indexOf('--download-dir') + 1], 'custom cache');
+  assert.ok(argv.includes('--pane-only'));
+});
+
+test('Python update without the engine refuses installer options before handing off, like the npm CLI', () => {
+  const cases = [['update', '--download-dir', 'downloads'], ['update', '--format', 'dmg']];
+  const output = JSON.parse(runPython(`
+import json, sys, tempfile
+from runpane import update
+from runpane.cli import parse_args
+calls = []
+update.invoke_daemon = lambda channel, *args, **kwargs: calls.append(channel)
+results = []
+for args in json.load(sys.stdin):
+    parsed = parse_args(args + ['--pane-dir', tempfile.mkdtemp()])
+    try:
+        update.run_update(parsed)
+        results.append('handed off')
+    except update.PaneDaemonClientError as error:
+        results.append([error.code, str(error)])
+print(json.dumps({'results': results, 'calls': calls}))
+`, cases));
+  const { parseRunpaneArgs } = require(path.join(root, 'packages/runpane/dist/commands'));
+  const { assertUpdateOptions } = require(path.join(root, 'packages/runpane/dist/updatePreflight'));
+  const nodeOutput = cases.map(args => {
+    try {
+      assertUpdateOptions(parseRunpaneArgs(args));
+      return 'accepted';
+    } catch (error) {
+      return [error.code, error.message];
+    }
+  });
+  assert.deepEqual(output, { results: nodeOutput, calls: [] });
+});
+
+test('Python update without the engine waits for the relaunched Pane with --wait', () => {
+  const stdout = runPython(`
+import json, tempfile
+from runpane import update
+from runpane.cli import parse_args
+versions = iter(['2.4.201', '2.4.201', '2.4.202'])
+def fake(channel, *args, **kwargs):
+    if channel == 'runpane:update:in-app':
+        return {'state': 'installing', 'fromVersion': '2.4.201', 'version': '2.4.202'}
+    return {'version': next(versions)}
+update.invoke_daemon = fake
+update.time.sleep = lambda seconds: None
+update.run_update(parse_args(['update', '--wait', '--json', '--pane-dir', tempfile.mkdtemp()]))
+print(json.dumps(next(versions, 'all versions read')))
+`, {});
+  assert.match(stdout, /"phase": "complete"/);
+  assert.equal(JSON.parse(stdout.split('\n').slice(-1)[0]), 'all versions read');
+});

@@ -36,9 +36,12 @@ export function readRemoteView(hostId: string): RemoteViewMemory {
   }
 }
 
-/** Records the Pane on screen and, when given, its tab. */
-export function rememberRemoteView(hostId: string, view: { paneId: string; sessionId: string | null; panelId?: string }): void {
+/** Records a selection; restoration only fills a missing tab default without promoting the view. */
+export function rememberRemoteView(hostId: string, view: { paneId: string; sessionId: string | null; panelId?: string }, options: { restore?: boolean } = {}): void {
   const memory = readRemoteView(hostId);
+  // A background load can finish after another browser tab chose a Pane, Session,
+  // or tab. Merge only a missing default into the latest memory; never replace a choice.
+  if (options.restore && (!view.panelId || memory.panelIdByPaneId[view.paneId])) return;
   const panelIdByPaneId = { ...memory.panelIdByPaneId };
   if (view.panelId) {
     delete panelIdByPaneId[view.paneId];
@@ -48,7 +51,9 @@ export function rememberRemoteView(hostId: string, view: { paneId: string; sessi
   for (const paneId of paneIds.slice(0, Math.max(0, paneIds.length - MAX_REMEMBERED_PANES))) delete panelIdByPaneId[paneId];
   try {
     const panels = Object.entries(panelIdByPaneId).map(([paneId, panelId]) => ({ paneId, panelId }));
-    window.localStorage.setItem(STORAGE_KEY_PREFIX + hostId, JSON.stringify({ paneId: view.paneId, sessionId: view.sessionId, panels }));
+    const paneId = options.restore ? memory.paneId ?? view.paneId : view.paneId;
+    const sessionId = options.restore && memory.paneId ? memory.sessionId : view.sessionId;
+    window.localStorage.setItem(STORAGE_KEY_PREFIX + hostId, JSON.stringify({ paneId, sessionId, panels }));
   } catch {
     // Storage can be unavailable (private mode); the view still works, it is just not remembered.
   }

@@ -1,5 +1,5 @@
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
-import { customCommandResumeSchema } from '../../../shared/types/customCommandResume';
+import { customCommandResumeSchema, effectiveCustomResume } from '../../../shared/types/customCommandResume';
 import type { ToolPanel } from '../../../shared/types/panels';
 import { isCliAgentType, resolveAgentTypeFromCommand } from './agents/agentIdentity';
 
@@ -28,7 +28,7 @@ export async function markTerminalPanelsInterrupted(
       const customState = decodeBoundary(panel.state?.customState ?? {}, boundary.jsonObject);
       const resumeState = decodeBoundary(customState, shutdownResumeStateSchema);
       const agentType = resumeState.agentType ?? resolveAgentTypeFromCommand(resumeState.initialCommand);
-      if (!isCliAgentType(agentType) && !resumeState.customResume) continue;
+      if (!isCliAgentType(agentType) && !effectiveCustomResume(resumeState)) continue;
 
       panel.state.customState = { ...customState, wasInterrupted: true, agentType };
       await updatePanel(panelId, { state: panel.state });

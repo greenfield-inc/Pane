@@ -53,10 +53,16 @@ interface DeepgramTranscriptUpdate {
   speechFinal: boolean;
 }
 
+/**
+ * Why a Pane host ended a voice stream, sent as `code` on its Error frame: the saved key can't be
+ * one, Deepgram refused the key, or Deepgram failed otherwise. Deepgram's own Error frames have none.
+ */
+export type VoiceStreamErrorCode = 'ERR_VOICE_KEY_INVALID' | 'ERR_VOICE_KEY_REJECTED' | 'ERR_VOICE_UPSTREAM';
+
 export type DeepgramLiveMessage =
   | { type: 'transcript'; update: DeepgramTranscriptUpdate }
   | { type: 'metadata'; metadata: VoiceDeepgramStreamingMetadata }
-  | { type: 'error'; message: string }
+  | { type: 'error'; message: string; code?: VoiceStreamErrorCode }
   | { type: 'other' };
 
 const transcriptMessageSchema = boundary.object({
@@ -77,7 +83,14 @@ const metadataMessageSchema = boundary.object({
 const errorMessageSchema = boundary.object({
   type: boundary.literal('Error'),
   message: boundary.optional(boundary.string),
+  code: boundary.optional(boundary.string),
 });
+
+const VOICE_STREAM_ERROR_CODES: ReadonlySet<string> = new Set<VoiceStreamErrorCode>(['ERR_VOICE_KEY_INVALID', 'ERR_VOICE_KEY_REJECTED', 'ERR_VOICE_UPSTREAM']);
+
+function isVoiceStreamErrorCode(code: string | undefined): code is VoiceStreamErrorCode {
+  return code !== undefined && VOICE_STREAM_ERROR_CODES.has(code);
+}
 
 const resultsMetadataSchema = boundary.object({
   metadata: boundary.object({
@@ -143,10 +156,7 @@ export function parseDeepgramLiveMessage(data: string): DeepgramLiveMessage {
     const message = errorMessage.message?.trim()
       ? errorMessage.message.trim()
       : 'Deepgram live transcription failed.';
-    return {
-      type: 'error',
-      message,
-    };
+    return isVoiceStreamErrorCode(errorMessage.code) ? { type: 'error', message, code: errorMessage.code } : { type: 'error', message };
   }
 
   return { type: 'other' };

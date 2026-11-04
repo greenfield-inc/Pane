@@ -29,15 +29,18 @@ export function useInvokeQuery<T>(
  * @public
  * Calls a mutating daemon channel. Mutations are never retried: the host may
  * have applied one whose response was lost (RemoteUnconfirmedResultError).
+ * The mutation stays pending until its `invalidates` queries refetch;
+ * `onAccepted` runs as soon as the host accepts it, before that refetch.
  */
 export function useInvokeMutation<TArgs extends unknown[], TResult = unknown>(
   channel: string,
-  options?: { invalidates?: string[] },
+  options?: { invalidates?: string[]; onAccepted?: (args: TArgs) => void },
 ) {
   const { client, profile } = useDaemon();
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (args: TArgs) => invokeChannel<TResult>(client, channel, args),
+    onSuccess: (_result, args) => options?.onAccepted?.(args),
     onSettled: () => Promise.all((options?.invalidates ?? []).map(invalidated =>
       queryClient.invalidateQueries({ queryKey: [profile.id, invalidated] }))),
   });

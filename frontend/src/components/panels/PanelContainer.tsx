@@ -2,6 +2,8 @@ import React, { Suspense, lazy, useEffect, useMemo, useRef } from 'react';
 import { PanelContainerProps } from '../../types/panelComponents';
 import { ErrorBoundary } from 'react-error-boundary';
 import { PanelLoadingFallback } from './PanelLoadingFallback';
+import { AgentPanelSurface } from '../agentChat/AgentPanelSurface';
+import { isChatEnabled, isNotesEnabled, useConfigStore } from '../../stores/configStore';
 import { renderLog } from '../../utils/console';
 
 // Lazy load panel components for better performance
@@ -72,6 +74,9 @@ export const PanelContainer: React.FC<PanelContainerProps> = React.memo(({
   autoFocus
 }) => {
   const autoRetry = useRef<AutoRetryState>({ count: 0, lastAt: 0 });
+  // Undefined until config loads, so a cold start keeps the tab's saved view.
+  const chatEnabled = useConfigStore(s => s.config ? isChatEnabled(s.config) : undefined);
+  const notesEnabled = useConfigStore(s => s.config ? isNotesEnabled(s.config) : undefined);
   renderLog('[PanelContainer] Rendering panel:', panel.id, 'Type:', panel.type, 'Active:', isActive);
   
   // FIX: Use stable panel rendering without forcing remounts
@@ -84,9 +89,17 @@ export const PanelContainer: React.FC<PanelContainerProps> = React.memo(({
     // Panel type rendering
     switch (panel.type) {
       case 'notes':
+        if (notesEnabled === undefined) return <PanelLoadingFallback panelType={panel.type} message="Loading notes panel..." />;
+        if (!notesEnabled) {
+          return (
+            <div className="h-full w-full flex items-center justify-center p-8">
+              <p className="text-sm text-text-secondary">Notes is experimental; turn it on in Settings → Advanced.</p>
+            </div>
+          );
+        }
         return <NotesPanel paneId={panel.sessionId} viewId={panel.id} />;
       case 'terminal':
-        return <TerminalPanel panel={panel} isActive={isActive} autoFocus={autoFocus} />;
+        return <AgentPanelSurface panel={panel} client={window.electronAPI.agentChat} chatEnabled={chatEnabled}><TerminalPanel panel={panel} isActive={isActive} autoFocus={autoFocus} /></AgentPanelSurface>;
       case 'diff':
         return <DiffPanel panel={panel} isActive={isActive} sessionId={panel.sessionId} isMainRepo={isMainRepo} />;
       case 'explorer':
@@ -118,7 +131,7 @@ export const PanelContainer: React.FC<PanelContainerProps> = React.memo(({
           </div>
         );
     }
-  }, [panel, isActive, isMainRepo, autoFocus]); // Include panel to catch state changes
+  }, [panel, isActive, isMainRepo, autoFocus, chatEnabled, notesEnabled]); // Include panel to catch state changes
 
   return (
     <ErrorBoundary

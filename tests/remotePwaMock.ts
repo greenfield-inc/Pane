@@ -1,7 +1,7 @@
 import type { Page } from '@playwright/test';
 import type { OrchestrationSessionRecord } from '../shared/types/orchestrationSession';
 import { PANE_CHAT_AGENT_LABELS } from '../shared/types/paneChat';
-import type { JsonValue } from '../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary, type JsonValue } from '../shared/validation/boundaryDecoder';
 import type { ListeningPortsSnapshot } from '../shared/types/listeningPorts';
 
 // Test harness for the Remote Pane PWA — the browser-served surface at
@@ -12,6 +12,8 @@ import type { ListeningPortsSnapshot } from '../shared/types/listeningPorts';
 export interface RemotePwaMockOptions {
   /** Panes the mock host reports, in sidebar order. */
   sessionNames?: string[];
+  /** The host's experimental Chat flag; omitted like a host older than the flag. */
+  chatEnabled?: boolean;
   /** Panels the selected pane reports, in host order. */
   panelTitles?: string[];
   /** Each panel's type, by index into panelTitles; terminal when absent. */
@@ -158,6 +160,7 @@ function buildFixtures(options: RemotePwaMockOptions) {
       { name: 'Codex', command: 'codex' },
     ],
     sessionAgents: { agents: ['claude', 'codex'], defaultAgent: 'codex' },
+    chatEnabled: options.chatEnabled,
     voiceTranscription: {
       availableModes: [],
       defaultMode: 'streaming',
@@ -278,7 +281,7 @@ function installClientMocks(profile: typeof PROFILE): void {
       // which is what keeps `reconnecting` on screen for as long as a caller
       // needs rather than for one backoff interval.
       if (!held) {
-        window.setTimeout(() => this.onopen?.(new Event('open')), 0);
+        window.setTimeout(() => this.open(), 0);
       }
     }
     readonly listeners = new Map<string, Array<(event: MessageEvent) => void>>();
@@ -286,7 +289,14 @@ function installClientMocks(profile: typeof PROFILE): void {
       this.listeners.set(name, [...(this.listeners.get(name) ?? []), listener]);
     }
     removeEventListener(): void {}
-    close(): void {}
+    private closed = false;
+    open(): void {
+      if (this.closed) return;
+      this.onopen?.(new Event('open'));
+      const data = JSON.stringify({ timestamp: new Date().toISOString(), replay: 'none' });
+      for (const listener of this.listeners.get('ready') ?? []) listener(new MessageEvent('ready', { data }));
+    }
+    close(): void { this.closed = true; }
   }
 
   let live: MockEventSource | undefined;
@@ -321,7 +331,7 @@ function installClientMocks(profile: typeof PROFILE): void {
     configurable: true,
     value: () => {
       held = false;
-      live?.onopen?.(new Event('open'));
+      live?.open();
     },
   });
 }
@@ -337,6 +347,7 @@ export async function openConnectedRemotePwa(
 ): Promise<RemotePwaMockHost> {
   const fixtures = buildFixtures(options);
   hostFixtures.set(fixtures.host, fixtures);
+  pageHosts.set(page, fixtures.host);
 
   await page.addInitScript(installClientMocks, PROFILE);
 
@@ -344,6 +355,7 @@ export async function openConnectedRemotePwa(
 
   await page.goto('/remote.html', { waitUntil: 'domcontentloaded', timeout: 30_000 });
   await page.getByRole('tablist', { name: 'Remote tool panels' }).waitFor();
+  await page.getByRole('status').filter({ hasText: /^Connected to/ }).waitFor();
   return fixtures.host;
 }
 
@@ -364,6 +376,7 @@ export async function dropRemoteConnection(page: Page): Promise<void> {
   });
 }
 
+const pageHosts = new WeakMap<Page, RemotePwaMockHost>();
 const hostFixtures = new WeakMap<RemotePwaMockHost, ReturnType<typeof buildFixtures>>();
 
 /**
@@ -374,14 +387,21 @@ const hostFixtures = new WeakMap<RemotePwaMockHost, ReturnType<typeof buildFixtu
 export async function connectAnotherRemoteClient(page: Page, host: RemotePwaMockHost): Promise<void> {
   const fixtures = hostFixtures.get(host);
   if (!fixtures) throw new Error('Open the host with openConnectedRemotePwa first.');
+  pageHosts.set(page, host);
   await page.addInitScript(installClientMocks, PROFILE);
   await installRemoteHostRoute(page, fixtures);
   await page.goto('/remote.html', { waitUntil: 'domcontentloaded', timeout: 30_000 });
   await page.getByRole('tablist', { name: 'Remote tool panels' }).waitFor();
+  await page.getByRole('status').filter({ hasText: /^Connected to/ }).waitFor();
 }
 
 /** Sends one host event to this client, the way the daemon's event stream does. */
 export async function emitRemoteHostEvent(page: Page, channel: string, ...args: JsonValue[]): Promise<void> {
+  const host = pageHosts.get(page);
+  if (host && channel === 'panel:agentStatus') {
+    const status = decodeBoundary(args[0], boundary.object({ panelId: boundary.string, sessionId: boundary.string, state: boundary.enumeration('blocked', 'working', 'idle', 'unknown') }));
+    host.agentStatuses = [...host.agentStatuses.filter(item => item.panelId !== status.panelId), status];
+  }
   await page.evaluate(({ channel, args }) => {
     const emit = window.__paneRemoteEmit;
     if (!emit) throw new Error('Remote PWA mock is not installed on this page.');

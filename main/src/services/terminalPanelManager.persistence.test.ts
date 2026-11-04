@@ -1,17 +1,20 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { EventEmitter } from 'events';
 import * as pty from '@lydell/node-pty';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetPaneRuntimeForTests, setPaneRuntime, type PtyHandleLike, type PtyHostRuntime } from '../core/runtime';
 import type { PaneEventArgument } from '../core/eventSink';
 import type { PtyHostSpawnOpts } from '../ptyHost/types';
 import type { TerminalPanelState, ToolPanel } from '../../../shared/types/panels';
+import { PANE_CHAT_MIGRATE_OFFER_OPENING } from '../../../shared/types/paneChat';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { DatabaseService, PANEL_STATE_CEILING_BYTES } from '../database/database';
 import { splitPanelBufferState } from '../database/panelBuffers';
 import { trimAnsiSafe } from '../utils/ansiTrim';
 import { ConfigManager } from './configManager';
+import { PowerSaveManager } from './powerSaveManager';
 import { databaseService } from './database';
 import { panelManager as panelManagerMock } from '../test/setup';
 import { inProcessEmulatorHost } from '../test/inProcessEmulatorHost';
@@ -22,6 +25,11 @@ import { sessionWorkspacePath } from './sessionWorkspace';
 import { windowsPathToWSLMount } from '../utils/wslUtils';
 import * as shellPathUtils from '../utils/shellPath';
 import { ShellDetector } from '../utils/shellDetector';
+import * as processTree from '../utils/processTree';
+import { ArchiveProcessTracker } from './archiveProcessTracker';
+import { ExpectedReportTracker } from './expectedReports';
+import { WorkspaceJournal } from './workspaceJournal';
+import { writeUpdateJson } from '../../../packages/runpane/src/updateOperation';
 
 /** In-process stand-in for a ptyHost PTY: output is whatever the test emits. */
 class FakePtyHandle implements PtyHandleLike {
@@ -167,6 +175,9 @@ describe('terminal panel persistence', () => {
   let configManager: ConfigManager;
 
   beforeEach(() => {
+    // The fake PTY pids may belong to real processes here: never track them.
+    vi.spyOn(ArchiveProcessTracker.prototype, 'capture').mockResolvedValue();
+    vi.spyOn(processTree, 'isProcessAlive').mockReturnValue(false);
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-terminal-persistence-'));
     ptyHost = new FakePtyHost();
     events = [];
@@ -205,6 +216,7 @@ describe('terminal panel persistence', () => {
     panelManagerMock.updatePanel.mockReset();
     panelManagerMock.getPanel.mockReset();
     resetPaneRuntimeForTests();
+    vi.restoreAllMocks();
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
@@ -641,6 +653,48 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void
     }
   });
 
+  it.each(['typed', 'argument'] as const)('records a deferred %s-delivery activation failure without submitting the prompt', async (mode) => {
+    vi.useFakeTimers();
+    const journal = new WorkspaceJournal();
+    let tracker: ExpectedReportTracker | undefined;
+    try {
+      const panel = mode === 'typed'
+        ? makeOpenCodePanel('typed-activation-failure', { agentSessionId: 'ses_ActivationFailure', initialInput: 'Task' })
+        : makePanel('argument-activation-failure');
+      if (mode === 'argument') panel.state.customState = {
+        agentType: 'codex', initialCommand: 'codex --yolo', initialInputMode: 'argument', initialInput: 'Task',
+      };
+      const { manager, handle } = await startTerminal(panel);
+      const filePath = path.join(tempDir, 'expected.json');
+      tracker = new ExpectedReportTracker({ journal, filePath,
+        lastReportAt: () => undefined, lastOutput: async () => undefined,
+        subscribeDelivery: listener => {
+          manager.on('initial-input-delivery', listener);
+          return () => { manager.off('initial-input-delivery', listener); };
+        },
+      });
+      tracker.arm(panel.id, new Date().toISOString(), true);
+      // Reservation succeeds; activation cannot replace the expectation file.
+      fs.unlinkSync(filePath);
+      fs.mkdirSync(filePath);
+      handle.emit('$ ');
+      await vi.advanceTimersByTimeAsync(500);
+      if (mode === 'typed') emitOpenCodeIdleFrame(handle);
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      if (mode === 'typed') expect(handle.written).toContain('Task');
+      else expect(handle.written).toEqual([]);
+      expect(handle.written).not.toContain('\r');
+      expect(databaseService.getPanel(panel.id)?.state.customState?.initialInputError).toMatch(/Next:.*Check permissions/);
+      expect(tracker.expectation(panel.id)).toBeUndefined();
+    } finally {
+      tracker?.dispose();
+      journal.dispose();
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+  });
+
   it('keeps OpenCode initial input pending when the readiness timeout has no output', async () => {
     vi.useFakeTimers();
     try {
@@ -662,6 +716,36 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void
       expect(handle.written.filter(write => write === 'Wait for actual readiness')).toHaveLength(1);
       expect(databaseService.getPanel(panel.id)?.state.customState?.initialInputSentAt).toEqual(expect.any(String));
       await manager.destroyTerminal(panel.id);
+    } finally {
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    ['an Agent Farm wrapper', { initialCommand: 'agent-farm run greenfield/implementer:opus', launchMode: 'wrapped' as const, agentType: 'claude' as const }],
+    ['Claude', { initialCommand: 'claude', agentType: 'claude' as const }],
+  ])('marks %s ready again after it is relaunched in the same shell', async (_name, customState) => {
+    vi.useFakeTimers();
+    try {
+      const panel = { ...makePanel(`relaunch-ready-${customState.initialCommand.length}`), state: { isActive: false, hasBeenViewed: true, customState: { ...customState, isCliPanel: true } } };
+      const { manager, handle } = await startTerminal(panel);
+      const cliReadyEvents = () => events.filter(event => event.channel === 'terminal:cliReady').length;
+      handle.emit('$ ');
+      await vi.advanceTimersByTimeAsync(500);
+      handle.emit('Agent starting...\r\n');
+      await vi.advanceTimersByTimeAsync(400);
+      expect(cliReadyEvents()).toBe(1);
+
+      // The agent exited back to the shell; resume runs its command there again.
+      handle.emit('$ ');
+      await manager.relaunchInShell(panel.id);
+      expect(manager.getTerminalSnapshot(panel.id)?.isCliReady).toBe(false);
+      handle.emit('Agent starting again...\r\n');
+      await vi.advanceTimersByTimeAsync(400);
+
+      expect(cliReadyEvents()).toBe(2);
+      expect(manager.getTerminalSnapshot(panel.id)?.isCliReady).toBe(true);
     } finally {
       vi.clearAllTimers();
       vi.useRealTimers();
@@ -714,6 +798,70 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void
     expect(panel.state.customState?.agentSessionId).toBe('ses_PersistedBuffer123');
   });
 
+  /** What destroy's capture reports as the terminal's processes. */
+  function trackProcesses(pids: number[]): void {
+    vi.spyOn(ArchiveProcessTracker.prototype, 'processes', 'get').mockReturnValue(pids.map(pid => ({ pid, parent: 0, started: 'Thu Jan  1 00:00:00 2015' })));
+  }
+
+  it('refuses to restart a destroyed panel until its old shell and agent have exited', async () => {
+    const panel = makePanel('resume-during-teardown');
+    trackProcesses([4242, 4243]);
+    // The reap is still in its grace period.
+    vi.spyOn(processTree, 'waitForProcessesToExit').mockReturnValue(new Promise(() => undefined));
+    const alive = new Set([4242, 4243]);
+    vi.mocked(processTree.isProcessAlive).mockImplementation(pid => alive.has(pid));
+    const { manager } = await startTerminal(panel);
+    await manager.destroyTerminal(panel.id);
+    expect(manager.isTerminalInitialized(panel.id)).toBe(false);
+
+    await expect(manager.initializeTerminal(panel, tempDir)).rejects.toThrow('still stopping');
+    expect(ptyHost.handles.size).toBe(1);
+    alive.delete(4242);
+    await expect(manager.initializeTerminal(panel, tempDir)).rejects.toThrow('still stopping');
+    expect(ptyHost.handles.size).toBe(1);
+
+    alive.clear();
+    await manager.initializeTerminal(panel, tempDir);
+    expect(ptyHost.handles.size).toBe(2);
+  });
+
+  it('keeps the old terminal registered until its process snapshot completes', async () => {
+    const panel = makePanel('resume-during-snapshot');
+    let finishSnapshot!: () => void;
+    vi.mocked(ArchiveProcessTracker.prototype.capture).mockReturnValue(new Promise(resolve => { finishSnapshot = resolve; }));
+    const { manager, handle } = await startTerminal(panel);
+    const kill = vi.spyOn(handle, 'kill');
+    const destroying = manager.destroyTerminal(panel.id, { saveState: false });
+    await manager.initializeTerminal(panel, tempDir);
+    expect(ptyHost.handles.size).toBe(1);
+    expect(kill).not.toHaveBeenCalled();
+    finishSnapshot();
+    await destroying;
+    expect(kill).toHaveBeenCalledOnce();
+    expect(manager.isTerminalInitialized(panel.id)).toBe(false);
+  });
+
+  it('blocks resume while session teardown kills a surviving agent, and after it gives up', async () => {
+    const panel = makePanel('resume-after-teardown-budget');
+    trackProcesses([4243]);
+    vi.mocked(processTree.isProcessAlive).mockImplementation(pid => pid === 4243);
+    vi.spyOn(processTree, 'waitForProcessesToExit').mockResolvedValue([4243]);
+    let finishKill!: () => void;
+    const kill = vi.spyOn(ArchiveProcessTracker.prototype, 'terminateSurvivors').mockReturnValue(new Promise(resolve => { finishKill = resolve; }));
+    vi.spyOn(ArchiveProcessTracker.prototype, 'verifyExited').mockRejectedValue(new Error('PIDs 4243 still running'));
+    const { manager } = await startTerminal(panel);
+    const termination = manager.terminateSessionTerminals(panel.sessionId);
+    expect(manager.terminateSessionTerminals(panel.sessionId)).toBe(termination);
+    await vi.waitFor(() => expect(kill).toHaveBeenCalledOnce());
+    await expect(manager.initializeTerminal(panel, tempDir)).rejects.toThrow('still stopping');
+    expect(ptyHost.handles.size).toBe(1);
+    finishKill();
+    await termination;
+    expect(manager.isTerminalInitialized(panel.id)).toBe(false);
+    await expect(manager.initializeTerminal(panel, tempDir)).rejects.toThrow('still stopping');
+    expect(ptyHost.handles.size).toBe(1);
+  });
+
   it('streams an unviewed terminal without pausing, then applies backpressure while viewed', async () => {
     vi.useFakeTimers();
     try {
@@ -744,6 +892,39 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void
       await vi.advanceTimersByTimeAsync(300);
       expect(pause).toHaveBeenCalledTimes(2);
     } finally {
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(['failed spawn', 'missing panel'])('releases keep-awake when PTY recovery leaves no terminal (%s)', async (failure) => {
+    vi.useFakeTimers();
+    const panel = makePanel(`keep-awake-recovery-${failure}`);
+    const { manager, handle } = await startTerminal(panel);
+    const sessions = Object.assign(new EventEmitter(), { getPowerSaveSnapshotSessions: () => [] });
+    const blocker = { start: vi.fn(() => 42), stop: vi.fn() };
+    Object.assign(configManager.getConfig(), { keepAwakeWhilePluggedIn: true });
+    const power = new PowerSaveManager(configManager, sessions, manager, { blocker, helper: null });
+    try {
+      handle.emit('Agent working...\r\n');
+      await vi.advanceTimersByTimeAsync(500);
+      expect(manager.getAgentStatus(panel.id)).toBe('working');
+      expect(blocker.start).toHaveBeenCalledWith('prevent-app-suspension');
+      expect(blocker.stop).not.toHaveBeenCalled();
+
+      if (failure === 'failed spawn') ptyHost.spawnError = new Error('PTY host spawn failed');
+      else panelManagerMock.getPanel.mockReturnValue(undefined);
+      panelManagerMock.emitPanelEvent.mockClear();
+
+      await manager.respawnAll();
+
+      expect(manager.getActiveTerminals()).toEqual([]);
+      expect(blocker.stop).toHaveBeenCalledTimes(1);
+      expect(blocker.stop).toHaveBeenCalledWith(42);
+      expect(panelManagerMock.emitPanelEvent).not.toHaveBeenCalledWith(panel.id, 'terminal:exit', expect.anything());
+      expect(events.some(event => event.channel === 'terminal:exited')).toBe(false);
+    } finally {
+      power.dispose();
       vi.clearAllTimers();
       vi.useRealTimers();
     }
@@ -784,6 +965,57 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void
     manager.acknowledgeBytes(panel.id, output.length);
   });
 
+  it('exports a worker\'s Session folder as PANE_SESSION_DIR without giving it the orchestrator role', async () => {
+    const spawn = vi.spyOn(ptyHost, 'spawn');
+    const panel = makePanel('session-worker-panel');
+    panel.state.customState = { sessionFolder: '/home/me/.pane/sessions/orch-1' };
+    const previous = process.env.PANE_SESSION_DIR;
+    process.env.PANE_SESSION_DIR = '/home/me/.pane/sessions/parent';
+    try {
+      await startTerminal(panel);
+      const env = spawn.mock.calls[0][0].env;
+      expect(env.PANE_SESSION_DIR).toBe('/home/me/.pane/sessions/orch-1');
+      expect(env.PANE_ORCHESTRATION_SESSION_ID).toBeUndefined();
+
+      const plain = makePanel('plain-panel');
+      await startTerminal(plain);
+      // A Pane launched from a Session terminal does not inherit its folder.
+      expect(spawn.mock.calls[1][0].env.PANE_SESSION_DIR).toBeUndefined();
+    } finally {
+      if (previous === undefined) delete process.env.PANE_SESSION_DIR;
+      else process.env.PANE_SESSION_DIR = previous;
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('exports PANE_NOTES_FILE only while experimental Notes is on', async () => {
+    const spawn = vi.spyOn(ptyHost, 'spawn');
+    await startTerminal(makePanel('notes-off-panel'));
+    expect(spawn.mock.calls[0][0].env.PANE_NOTES_FILE).toBe('');
+
+    Object.assign(configManager.getConfig(), { notesEnabled: true });
+    await startTerminal(makePanel('notes-on-panel'));
+    expect(spawn.mock.calls[1][0].env.PANE_NOTES_FILE).toMatch(/[\\/]notes[\\/]contexts[\\/]session\.md$/);
+  });
+
+  it('exports PANE_PANEL_KIND so shell startup can tell the dock shell from agent and shell tabs', async () => {
+    const spawn = vi.spyOn(ptyHost, 'spawn');
+    const agent = makePanel('kind-agent');
+    agent.state.customState = { initialCommand: 'claude' };
+    const dock = makePanel('kind-dock');
+    const shell = makePanel('kind-shell');
+    panelManagerMock.getPanelsForSession.mockReturnValue([agent, dock, shell]);
+    try {
+      await startTerminal(agent);
+      await startTerminal(dock);
+      await startTerminal(shell);
+      expect(spawn.mock.calls.map(([opts]) => opts.env.PANE_PANEL_KIND)).toEqual(['agent', 'dock', 'shell']);
+    } finally {
+      panelManagerMock.getPanelsForSession.mockReturnValue([]);
+      vi.restoreAllMocks();
+    }
+  });
+
   it('launches and respawns a saved WSL Session inside its distro with Linux cwd and role environment', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
     const spawn = vi.spyOn(ptyHost, 'spawn');
@@ -814,6 +1046,88 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void
     }
   });
 
+  it('chooses "Yes, I trust this folder" in Claude\'s menu only when it names exactly the Session folder', async () => {
+    vi.useFakeTimers();
+    // Claude wraps the path inside a one-column margin: 38 characters a row at 40 columns.
+    const pathRows = (folder: string) => folder.match(/.{1,38}/g)?.map(row => ` ${row}`) ?? [];
+    const trustMenu = (rows: string[], selected: 'No' | 'Yes') => [
+      `\x1b[2J\x1b[H${'─'.repeat(38)}`, ' Accessing workspace:', '', ...rows, '',
+      " Claude Code'll be able to read, edit, and execute files here.", '',
+      ` ${selected === 'No' ? '❯' : ' '} No, exit`, ` ${selected === 'Yes' ? '❯' : ' '} Yes, I trust this folder`, '',
+      ' Enter to confirm · Esc to cancel',
+    ].join('\r\n');
+    const menuKeys = (handle: FakePtyHandle) => handle.written.filter(data => data === '\x1b[B' || data === '\r');
+    const startClaude = async (id: string, sessionId: string, initialCommand = 'claude') => {
+      const panel = makePanel(id);
+      panel.state.customState = { agentType: 'claude', orchestrationSessionId: sessionId, initialCommand };
+      const started = await startTerminal(panel);
+      started.handle.emit('$ ');
+      await vi.advanceTimersByTimeAsync(1_000);
+      await started.manager.resizeTerminal(panel.id, 40, 30);
+      return started.handle;
+    };
+    try {
+      const own = sessionWorkspacePath('claude-session');
+      expect(own.length).toBeGreaterThan(38);
+      const handle = await startClaude('claude-session-panel', 'claude-session');
+      handle.emit(trustMenu(pathRows(own), 'No'));
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(menuKeys(handle)).toEqual(['\x1b[B']);
+      handle.emit(trustMenu(pathRows(own), 'Yes'));
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(menuKeys(handle)).toEqual(['\x1b[B', '\r']);
+      // Once Claude has been ready, a later trust prompt is the person's.
+      handle.emit(`\x1b[2J\x1b[H${'─'.repeat(38)}\r\n❯ \r\n${'─'.repeat(38)}`);
+      await vi.advanceTimersByTimeAsync(15_000);
+      handle.emit(trustMenu(pathRows(own), 'Yes'));
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(menuKeys(handle)).toEqual(['\x1b[B', '\r']);
+
+      // Folders that resemble the Session folder, as a custom launcher could start Claude in.
+      const folder = sessionWorkspacePath('other-session');
+      const lookalikes = [
+        { command: 'claude', rows: pathRows(path.join(folder, 'project')) },
+        { command: 'claude', rows: pathRows(path.join('/tmp/project/sessions', path.basename(folder))) },
+        { command: 'claude', rows: pathRows(`${folder}-project`) },
+        // A trailing space never reaches the screen, so the menu looks like the Session's own.
+        { command: `cd '${folder} ' && claude`, rows: pathRows(folder) },
+        // A space that ends a wrapped row is dropped from the screen the same way.
+        { command: 'claude', rows: [` ${folder.slice(0, 37)} `, ` ${folder.slice(37)}`] },
+      ];
+      for (const [index, { command, rows }] of lookalikes.entries()) {
+        const other = await startClaude(`claude-session-lookalike-${index}`, 'other-session', command);
+        other.emit(trustMenu(rows, 'Yes'));
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(menuKeys(other)).toEqual([]);
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    { input: `${PANE_CHAT_MIGRATE_OFFER_OPENING} Ask whether to bring existing sessions in.`, delivered: true },
+    { input: 'Read the guide and initialize Pane Chat.', delivered: false },
+  ])('launches the built-in Pane Chat with its one-time migrate offer, and no other saved Session input (delivered: $delivered)', async ({ input, delivered }) => {
+    vi.useFakeTimers();
+    try {
+      const panel = makePanel(`pane-chat-offer-${String(delivered)}`);
+      panel.state.customState = {
+        agentType: 'codex', initialCommand: 'codex --yolo', orchestrationSessionId: 'legacy-pane-chat',
+        initialInputMode: 'argument', initialInput: input,
+      };
+      const { handle } = await startTerminal(panel);
+      handle.emit('$ ');
+      await vi.advanceTimersByTimeAsync(500);
+      const launch = handle.written.find(line => line.startsWith('codex --yolo'));
+      expect(launch).toBeDefined();
+      if (delivered) expect(launch).toContain(PANE_CHAT_MIGRATE_OFFER_OPENING);
+      else expect(launch).toBe(['codex --yolo', ''].join(String.fromCharCode(13)));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it.each([
     { agentType: 'claude', initialCommand: 'claude --dangerously-skip-permissions', agentSessionId: '22222222-2222-4222-8222-222222222222', expected: 'claude --dangerously-skip-permissions --resume "22222222-2222-4222-8222-222222222222"' },
     { agentType: 'codex', initialCommand: 'codex --yolo', agentSessionId: 'thread-1', expected: 'codex --yolo resume "thread-1"' },
@@ -834,6 +1148,54 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void
       vi.clearAllTimers();
       vi.useRealTimers();
     }
+  });
+
+  describe('a panel held by an update', () => {
+    function writeUpdateJournal(id: string, phase: 'restore' | 'needs-attention', helperPid?: number): string {
+      const file = path.join(getAppDirectory(), 'updates', id, 'status.json');
+      writeUpdateJson(file, {
+        id, host: 'host', scope: 'both', version: '2.4.212', phase, completed: ['stage', 'checkpoint', 'stop'], helperPid,
+        updatedAt: '2026-10-31T07:02:43.500Z', appUpdated: true, cliUpdated: true, hostReachable: true, restored: [],
+      });
+      return file;
+    }
+
+    function heldPanel(id: string, updateId: string): ToolPanel {
+      const panel = makePanel(id);
+      panel.state.customState = { agentType: 'claude', agentSessionId: 'conversation-1', hasClaudeSessionId: true, initialCommand: 'claude', updateResumeHold: updateId };
+      return panel;
+    }
+
+    it.each([
+      { why: 'its helper died mid-restore', phase: 'restore' as const, helperAlive: false, writtenBeforeBoot: false },
+      { why: 'it finished, though its helper PID is still alive', phase: 'needs-attention' as const, helperAlive: true, writtenBeforeBoot: false },
+      { why: 'its journal predates this boot, though its helper PID is now reused', phase: 'restore' as const, helperAlive: true, writtenBeforeBoot: true },
+    ])('starts and releases the hold when the update is over: $why', async ({ phase, helperAlive, writtenBeforeBoot }) => {
+      const file = writeUpdateJournal('ended-update', phase, 4242);
+      if (writtenBeforeBoot) {
+        const beforeBoot = (Date.now() - os.uptime() * 1000 - 60_000) / 1000;
+        fs.utimesSync(file, beforeBoot, beforeBoot);
+      }
+      vi.mocked(processTree.isProcessAlive).mockReturnValue(helperAlive);
+      const panel = heldPanel('held-after-ended-update', 'ended-update');
+
+      await startTerminal(panel);
+
+      expect(ptyHost.spawnOptions).toHaveLength(1);
+      expect(databaseService.getPanel(panel.id)?.state.customState?.updateResumeHold).toBeUndefined();
+    });
+
+    it('stays stopped while the update can still restore it', async () => {
+      writeUpdateJournal('running-update', 'restore', process.pid);
+      vi.mocked(processTree.isProcessAlive).mockReturnValue(true);
+      const panel = heldPanel('held-during-restore', 'running-update');
+      const manager = new TerminalPanelManager(inProcessEmulatorHost);
+      managers.push(manager);
+      panelManagerMock.getPanel.mockReturnValue(panel);
+
+      await expect(manager.initializeTerminal(panel, tempDir)).rejects.toThrow(/waiting for update running-update/);
+      expect(ptyHost.spawnOptions).toHaveLength(0);
+    });
   });
 
   it('passes an explicit Claude id literally instead of selecting a different conversation', async () => {
@@ -890,8 +1252,6 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void
       if (index % 256 === 0) await manager.waitForTerminalState(panel.id);
     }
 
-    expect(manager.getTerminalSnapshot(panel.id)?.currentCommand.length ?? 0).toBeLessThanOrEqual(4096);
-
     await manager.saveTerminalState(panel.id);
     expect(lastPersisted).not.toBeNull();
     const persisted = lastPersisted ?? { isActive: false };
@@ -907,18 +1267,6 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void
     expect(storedBytes).toBeLessThan(PANEL_STATE_CEILING_BYTES);
     expect(databaseService.getPanelBuffers(panel.id)?.alternate?.length ?? 0).toBeGreaterThan(0);
   }, 120_000);
-
-  it('caps the in-memory command accumulator at 4 KB on the normal screen', async () => {
-    const panel = makePanel('panel-accumulator');
-    const { manager, handle } = await startTerminal(panel);
-    manager.setVisibility(panel.id, false);
-
-    for (let index = 0; index < 512; index += 1) handle.emit('\x1b[2K\x1b[Gprogress '.padEnd(1024, '.'));
-    expect(manager.getTerminalSnapshot(panel.id)?.currentCommand.length ?? Infinity).toBeLessThanOrEqual(4096);
-
-    handle.emit('git status\r\n');
-    expect(manager.getTerminalSnapshot(panel.id)?.currentCommand).toBe('');
-  });
 
   it.each(['normal', 'alternate'] as const)('replays the same bytes after a manager restart (%s screen)', async (mode) => {
     const panel = makePanel(`panel-restore-${mode}`);

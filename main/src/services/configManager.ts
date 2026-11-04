@@ -2,6 +2,7 @@ import { validateCustomCommandResume } from '../../../shared/types/customCommand
 import { EventEmitter } from 'events';
 import type { AnalyticsIdentity, AppConfig } from '../types/config';
 import { DEFAULT_PANE_CHAT_AGENT, normalizePaneChatAgent } from '../../../shared/types/paneChat';
+import { DEFAULT_TERMINAL_FONT_SIZE } from '../../../shared/types/appearance';
 import { createDefaultRemoteDaemonConfig, normalizeRemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
 import type { WorktreeFileSyncEntry } from '../../../shared/types/worktreeFileSync';
 import { DEFAULT_WORKTREE_FILE_SYNC_ENTRIES } from '../../../shared/types/worktreeFileSync';
@@ -17,10 +18,8 @@ import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDec
 import {
   AppearanceValidationError,
   DEFAULT_APPEARANCE,
-  isLightTheme,
   isTheme,
   normalizeAppearance,
-  type AppearanceConfig,
 } from '../../../shared/types/appearance';
 
 const DEFAULT_POSTHOG_API_KEY = 'phc_wir25CCsjr2NsZGEdlWNdvwcNG1XDjhxc9RyL5KDCf1';
@@ -60,21 +59,23 @@ export class ConfigManager extends EventEmitter {
       voiceTranscriptionMode: 'streaming',
       systemPromptAppend: undefined,
       runScript: undefined,
-      theme: 'light-rounded',
-      appearanceMode: 'system',
-      systemLightTheme: 'light-rounded',
-      systemDarkTheme: 'dark',
+      ...DEFAULT_APPEARANCE,
       highContrast: false,
       terminalFontFamily: 'Geist Mono',
-      terminalFontSize: 14,
+      terminalFontSize: DEFAULT_TERMINAL_FONT_SIZE,
       terminalPowerMode: 'performance',
       defaultPermissionMode: 'ignore',
       defaultModel: 'sonnet',
       defaultOrchestratorAgent: DEFAULT_PANE_CHAT_AGENT,
+      experimentalChatEnabled: false,
+      notesEnabled: false,
+      defaultAgentInterface: 'terminal',
       autoStartOnBoot: true,
       keepAwakeWhileSessionsActive: true,
+      keepAwakeWhilePluggedIn: false,
+      keepAwakeOnBattery: false,
       notifications: {
-        playSound: true,
+        playSound: false,
         enabled: true
       },
       sessionCreationPreferences: {
@@ -110,24 +111,24 @@ export class ConfigManager extends EventEmitter {
           enabled: true
         },
         {
-          id: 'default-codex-review',
-          label: 'Codex review loop',
+          id: 'default-plan-first',
+          label: 'Plan before editing',
+          key: 'p',
+          text: 'Before you change any code, explain your plan in a few short steps and wait for my go-ahead.',
+          enabled: true
+        },
+        {
+          id: 'default-review-diff',
+          label: 'Review your own diff',
           key: 'r',
-          text: "Prepare a PR once done with changes, then run in a subagent 'codex review --base main' and wait for it to respond. Read its response and make the fixes it suggests. Continue in a loop until it says there are no longer any issues.",
+          text: "Before you say you're done, review your own diff. Fix any bugs, leftover debug code, or missed edge cases.",
           enabled: true
         },
         {
-          id: 'default-rebase-merge-release',
-          label: 'Rebase, merge & release',
-          key: 'd',
-          text: 'Rebase main and merge the PR to main, then bump a release patch.',
-          enabled: true
-        },
-        {
-          id: 'default-review-and-release',
-          label: 'Review and release loop',
-          key: 's',
-          text: "Prepare a PR once done with changes, then run in a subagent 'codex review --base main' and wait for it to respond. Read its response and make the fixes it suggests. Continue in a loop until it says there are no longer any issues. Once there are no issues, rebase main and merge the PR to main, then bump a release patch.",
+          id: 'default-show-it-works',
+          label: 'Show it works',
+          key: 't',
+          text: 'Show me it works: run the relevant tests or the app and share the real output.',
           enabled: true
         }
       ],
@@ -204,6 +205,9 @@ export class ConfigManager extends EventEmitter {
         defaultOrchestratorAgent: normalizePaneChatAgent(
           loadedConfig.defaultOrchestratorAgent ?? this.config.defaultOrchestratorAgent,
         ),
+        defaultAgentInterface: loadedConfig.defaultAgentInterface === 'chat' ? 'chat' : 'terminal',
+        // Configs saved before this setting existed kept the machine awake while plugged in.
+        keepAwakeWhilePluggedIn: loadedConfig.keepAwakeWhilePluggedIn ?? true,
         remoteDaemon: normalizeRemoteDaemonConfig(loadedConfig.remoteDaemon),
         // Use !== undefined to distinguish "user cleared all entries" (empty array → preserve)
         // from "field absent in config file" (→ use defaults)
@@ -390,14 +394,18 @@ export class ConfigManager extends EventEmitter {
       const agentContext = updates.agentContext !== undefined
         ? { ...this.config.agentContext, ...updates.agentContext }
         : this.config.agentContext;
+      // Notify settings arrive one field at a time from Settings and the tray menu.
+      const notify = updates.notify !== undefined ? { ...this.config.notify, ...updates.notify } : this.config.notify;
       const next: AppConfig = {
         ...this.config,
         ...updates,
         analytics,
         agentContext,
+        notify,
         defaultOrchestratorAgent: 'defaultOrchestratorAgent' in updates
           ? normalizePaneChatAgent(updates.defaultOrchestratorAgent)
           : this.config.defaultOrchestratorAgent,
+        defaultAgentInterface: 'defaultAgentInterface' in updates ? updates.defaultAgentInterface === 'chat' ? 'chat' : 'terminal' : this.config.defaultAgentInterface,
         remoteDaemon: 'remoteDaemon' in updates
           ? normalizeRemoteDaemonConfig(updates.remoteDaemon)
           : this.config.remoteDaemon,
@@ -411,7 +419,7 @@ export class ConfigManager extends EventEmitter {
         }));
       }
       next.sharedCredentials = restampSharedCredentials(next, 'now') ?? next.sharedCredentials;
-      this.validateAppearanceUpdate(updates, next);
+      this.validateAppearanceUpdate(updates);
       await this.writeConfigToDisk(next);
       this.config = next;
 
@@ -424,30 +432,18 @@ export class ConfigManager extends EventEmitter {
     });
   }
 
-  private validateAppearanceUpdate(updates: Partial<AppConfig>, next: AppConfig): void {
+  private validateAppearanceUpdate(updates: Partial<AppConfig>): void {
     if ('appearanceMode' in updates && updates.appearanceMode !== 'system' && updates.appearanceMode !== 'fixed') {
       throw new AppearanceValidationError('appearanceMode must be system or fixed');
     }
     if ('theme' in updates && !isTheme(updates.theme)) {
       throw new AppearanceValidationError('theme must be a valid palette');
     }
-    if ('systemLightTheme' in updates && (!isTheme(updates.systemLightTheme) || !isLightTheme(updates.systemLightTheme))) {
-      throw new AppearanceValidationError('systemLightTheme must be a light palette');
+    if ('systemLightTheme' in updates && !isTheme(updates.systemLightTheme)) {
+      throw new AppearanceValidationError('systemLightTheme must be a valid palette');
     }
-    if ('systemDarkTheme' in updates && (!isTheme(updates.systemDarkTheme) || isLightTheme(updates.systemDarkTheme))) {
-      throw new AppearanceValidationError('systemDarkTheme must be a dark palette');
-    }
-    const appearance: AppearanceConfig = {
-      appearanceMode: next.appearanceMode ?? DEFAULT_APPEARANCE.appearanceMode,
-      theme: next.theme ?? DEFAULT_APPEARANCE.theme,
-      systemLightTheme: next.systemLightTheme ?? DEFAULT_APPEARANCE.systemLightTheme,
-      systemDarkTheme: next.systemDarkTheme ?? DEFAULT_APPEARANCE.systemDarkTheme,
-    };
-    if (!isLightTheme(appearance.systemLightTheme)) {
-      throw new AppearanceValidationError('systemLightTheme must be a light palette');
-    }
-    if (isLightTheme(appearance.systemDarkTheme)) {
-      throw new AppearanceValidationError('systemDarkTheme must be a dark palette');
+    if ('systemDarkTheme' in updates && !isTheme(updates.systemDarkTheme)) {
+      throw new AppearanceValidationError('systemDarkTheme must be a valid palette');
     }
   }
 

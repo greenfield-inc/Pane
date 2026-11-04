@@ -122,49 +122,92 @@
         "watch": {
           "type": "object",
           "required": [
-            "format",
-            "heartbeatSeconds",
-            "idleAfterMs",
-            "settleMs",
-            "blockedSettleMs",
-            "minIntervalMs",
-            "idleBackoff",
-            "agentsOnly",
-            "includeHeldInputPresence"
+            "follow",
+            "untilEvent"
           ],
+          "additionalProperties": false,
           "properties": {
-            "format": {
-              "enum": [
-                "lines",
-                "json"
-              ]
+            "follow": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "summary",
+                "kinds",
+                "readySettle",
+                "blockedSettle",
+                "minInterval",
+                "idleAfter",
+                "idleBackoff",
+                "expireAfter",
+                "heartbeat",
+                "includeShells",
+                "heldInputDetection"
+              ],
+              "properties": {
+                "summary": {
+                  "type": "string"
+                },
+                "kinds": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "readySettle": {
+                  "type": "string",
+                  "pattern": "^(off|[0-9]+(ms|s|m|h))$"
+                },
+                "blockedSettle": {
+                  "type": "string",
+                  "pattern": "^(off|[0-9]+(ms|s|m|h))$"
+                },
+                "minInterval": {
+                  "type": "string",
+                  "pattern": "^(off|[0-9]+(ms|s|m|h))$"
+                },
+                "idleAfter": {
+                  "type": "string",
+                  "pattern": "^(off|[0-9]+(ms|s|m|h))$"
+                },
+                "idleBackoff": {
+                  "type": "boolean"
+                },
+                "expireAfter": {
+                  "type": "string",
+                  "pattern": "^(off|[0-9]+(ms|s|m|h))$"
+                },
+                "heartbeat": {
+                  "type": "string",
+                  "pattern": "^(off|[0-9]+(ms|s|m|h))$"
+                },
+                "includeShells": {
+                  "type": "boolean"
+                },
+                "heldInputDetection": {
+                  "type": "boolean"
+                }
+              }
             },
-            "heartbeatSeconds": {
-              "type": "number"
-            },
-            "idleAfterMs": {
-              "type": "number"
-            },
-            "settleMs": {
-              "type": "number"
-            },
-            "blockedSettleMs": {
-              "type": "number"
-            },
-            "minIntervalMs": {
-              "type": "number"
-            },
-            "idleBackoff": {
-              "type": "boolean"
-            },
-            "agentsOnly": {
-              "type": "boolean"
-            },
-            "includeHeldInputPresence": {
-              "type": "boolean"
+            "untilEvent": {
+              "type": "object",
+              "required": [
+                "summary",
+                "kinds"
+              ],
+              "properties": {
+                "summary": {
+                  "type": "string"
+                },
+                "kinds": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "additionalProperties": false
             }
-          },
-          "additionalProperties": false
+          }
         }
       },
       "additionalProperties": false
@@ -454,6 +497,7 @@
         "repos add",
         "repos get",
         "repos update",
+        "repos rename",
         "panes",
         "panes list",
         "panes cost",
@@ -484,6 +528,7 @@
         "panels submit",
         "panels submit-composer",
         "panels wait",
+        "panels resume",
         "panels last-message",
         "agent-context",
         "mcp",
@@ -511,6 +556,9 @@
         "agents status",
         "agents send",
         "report",
+        "notify",
+        "inbox",
+        "inbox ack",
         "sessions",
         "sessions list",
         "sessions create",
@@ -525,7 +573,15 @@
         "lock",
         "lock acquire",
         "lock release",
-        "lock list"
+        "lock list",
+        "loops",
+        "loops list",
+        "loops create",
+        "loops update",
+        "loops run",
+        "loops pause",
+        "loops resume",
+        "loops delete"
       ],
       "properties": {
         "default": {
@@ -562,6 +618,9 @@
           "$ref": "#/$defs/helpLines"
         },
         "repos update": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "repos rename": {
           "$ref": "#/$defs/helpLines"
         },
         "panes": {
@@ -654,6 +713,9 @@
         "panels wait": {
           "$ref": "#/$defs/helpLines"
         },
+        "panels resume": {
+          "$ref": "#/$defs/helpLines"
+        },
         "panels last-message": {
           "$ref": "#/$defs/helpLines"
         },
@@ -735,6 +797,15 @@
         "report": {
           "$ref": "#/$defs/helpLines"
         },
+        "notify": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "inbox": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "inbox ack": {
+          "$ref": "#/$defs/helpLines"
+        },
         "sessions": {
           "$ref": "#/$defs/helpLines"
         },
@@ -774,10 +845,43 @@
         "lock list": {
           "$ref": "#/$defs/helpLines"
         },
+        "loops": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "loops list": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "loops create": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "loops update": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "loops run": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "loops pause": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "loops resume": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "loops delete": {
+          "$ref": "#/$defs/helpLines"
+        },
         "sessions pin": {
           "$ref": "#/$defs/helpLines"
         },
         "sessions unpin": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "pr watch": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "pr unwatch": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "pr list": {
           "$ref": "#/$defs/helpLines"
         }
       },
@@ -813,7 +917,45 @@
             "type": "string"
           },
           "minItems": 1
+        },
+        "notifyGuidance": {
+          "$ref": "#/$defs/notifyGuidance"
         }
+      },
+      "additionalProperties": false
+    },
+    "notifyGuidance": {
+      "description": "How agents should write notify cards: Pane's user-level instruction block and the MCP server instructions both read it.",
+      "type": "object",
+      "required": ["rules", "cardRule", "results", "examples"],
+      "properties": {
+        "rules": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "cardRule": { "type": "string" },
+        "results": { "type": "string" },
+        "examples": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "ui", "bad", "good"],
+            "properties": {
+              "name": { "type": "string" },
+              "ui": { "enum": ["options", "approve", "ask", "info"] },
+              "bad": { "type": "array", "items": { "$ref": "#/$defs/notifyExampleCard" }, "minItems": 1 },
+              "good": { "$ref": "#/$defs/notifyExampleCard" }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "notifyExampleCard": {
+      "type": "object",
+      "required": ["title", "context"],
+      "properties": {
+        "title": { "type": "string" },
+        "context": { "type": "string" },
+        "choices": { "type": "array", "items": { "type": "string" } }
       },
       "additionalProperties": false
     },
@@ -945,6 +1087,10 @@
         "description": {
           "type": "string",
           "minLength": 1
+        },
+        "schema": {
+          "description": "JSON Schema for this argument's MCP tool input when it takes an array, object, or enum. Array and object values reach the CLI as JSON.",
+          "type": "object"
         }
       },
       "additionalProperties": false

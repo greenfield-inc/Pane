@@ -63,7 +63,7 @@ interface HelpProps {
 
 export default function Help({ isOpen, onClose, shortcutsOnly = false }: HelpProps) {
   return (
-    <Modal isOpen={isOpen} onClose={onClose} size="xl" showCloseButton={false}>
+    <Modal isOpen={isOpen} onClose={onClose} size="xl">
       <ModalHeader title={shortcutsOnly ? 'Keyboard Shortcuts' : 'Pane Help'} />
       <ModalBody>
         {shortcutsOnly ? (

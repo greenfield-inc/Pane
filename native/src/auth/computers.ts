@@ -60,7 +60,7 @@ const machineSchema: BoundarySchema<TailnetMachine> = boundary.object({
   os: boundary.enumeration('macOS', 'Windows', 'Linux'),
   ownerLogin: boundary.string,
   mine: boundary.boolean,
-  state: boundary.enumeration('available', 'password-required', 'outdated', 'unreachable', 'offline'),
+  state: boundary.enumeration('available', 'password-required', 'outdated', 'refused', 'unreachable', 'offline'),
   visibility: boundary.optional(boundary.enumeration('owner', 'tailnet')),
   paneVersion: boundary.optional(boundary.string),
   profileId: boundary.optional(boundary.string),

@@ -20,6 +20,7 @@ interface WatchEntry {
   sessionId?: string;
   pr?: { number: number };
   checks?: string;
+  reason?: string | null;
   failingChecks?: string[];
   idleMs?: number;
   idleCount?: number;
@@ -59,7 +60,7 @@ function formatEntryLine(entry: WatchEntry): string | undefined {
   const name = sanitizeName(entry.paneName);
   const pane = `pane ${sanitizeName(entry.paneId)}`;
   const panel = entry.panelId ? ` panel ${sanitizeName(entry.panelId)}` : '';
-  if (entry.changedWhileAway) return `CHANGED ${name} ${pane}${panel}`;
+  if (entry.changedWhileAway && entry.kind !== 'panel.stopped') return `CHANGED ${name} ${pane}${panel}`;
   switch (entry.kind) {
     case 'agent.ready': return `READY ${name} ${pane}${panel}`;
     case 'agent.busy': return `BUSY ${name} ${pane}${panel}`;
@@ -73,11 +74,22 @@ function formatEntryLine(entry: WatchEntry): string | undefined {
     case 'pane.gone': return `GONE ${name} ${pane}`;
     case 'pane.associated': return `JOINED ${name} ${pane} session ${sanitizeName(entry.sessionId ?? '')}`;
     case 'pane.detached': return `LEFT ${name} ${pane} session ${sanitizeName(entry.sessionId ?? '')}`;
+    case 'panel.stopped': return `STOPPED ${name} ${pane}${panel}`;
     case 'panel.exited': return `EXIT ${name} ${pane}${panel} code ${entry.exitCode ?? 'unknown'}`;
     case 'pr.conflicted': return `PR ${name} ${pane} #${entry.pr?.number ?? '?'} CONFLICTED`;
     case 'pr.checks': return formatChecksLine(`PR ${name} ${pane} #${entry.pr?.number ?? '?'}`, entry);
     case 'pr.merged': return `PR ${name} ${pane} #${entry.pr?.number ?? '?'} MERGED`;
+    case 'pr.closed': return `PR ${name} ${pane} #${entry.pr?.number ?? '?'} CLOSED${entry.reason ? ': ' + sanitizeName(entry.reason) : ''}`;
+    case 'pr.head': return `PR ${name} ${pane} #${entry.pr?.number ?? '?'} HEAD CHANGED${entry.reason ? ': ' + sanitizeName(entry.reason) : ''}`;
+    case 'pr.base_changed': return `PR ${name} ${pane} #${entry.pr?.number ?? '?'} BASE CHANGED${entry.reason ? ': ' + sanitizeName(entry.reason) : ''}`;
+    case 'pr.base_deleted': return `PR ${name} ${pane} #${entry.pr?.number ?? '?'} BASE DELETED${entry.reason ? ': ' + sanitizeName(entry.reason) : ''}`;
+    case 'pr.review': return `PR ${name} ${pane} #${entry.pr?.number ?? '?'} REVIEW${entry.reason ? ': ' + sanitizeName(entry.reason) : ''}`;
+    case 'pr.comment': return `PR ${name} ${pane} #${entry.pr?.number ?? '?'} COMMENT${entry.reason ? ': ' + sanitizeName(entry.reason) : ''}`;
+    case 'pr.stopped': return `PR ${name} ${pane} #${entry.pr?.number ?? '?'} WATCH STOPPED${entry.reason ? ': ' + sanitizeName(entry.reason) : ''}`;
+    case 'github.unavailable': return `PR ${name} ${pane} #${entry.pr?.number ?? '?'} GITHUB UNAVAILABLE${entry.reason ? ': ' + sanitizeName(entry.reason) : ''}`;
+    case 'github.recovered': return `PR ${name} ${pane} #${entry.pr?.number ?? '?'} GITHUB RECOVERED${entry.reason ? ': ' + sanitizeName(entry.reason) : ''}`;
     case 'agent.report': return `REPORT ${name} ${pane}${panel} ${entry.report ? describeReport(entry.report) : 'unknown'}`;
+    case 'agent.report.missing': return `MISSING REPORT ${name} ${pane}${panel} ${sanitizeName(entry.reason ?? 'ready')}`;
     default: return `UNKNOWN ${name} ${pane}${panel}`;
   }
 }
@@ -107,10 +119,10 @@ export function formatWaitResult(result: WatchResult, format: WatchFormat): stri
   if (format === 'json') {
     const lines: string[] = [];
     if (result.reset) {
-      lines.push(JSON.stringify({ kind: '_reset', reason: result.reset.reason, epoch: result.epoch }));
+      lines.push(JSON.stringify({ kind: '_reset', reason: result.reset.reason, epoch: result.epoch, generation: result.generation }));
     }
-    if (result.dropped !== undefined) lines.push(JSON.stringify({ kind: '_dropped', count: result.dropped }));
-    lines.push(...result.entries.map(entry => JSON.stringify(entry)));
+    if (result.dropped !== undefined) lines.push(JSON.stringify({ kind: '_dropped', count: result.dropped, epoch: result.epoch, generation: result.generation }));
+    lines.push(...result.entries.map(entry => JSON.stringify({ ...entry, epoch: result.epoch })));
     return lines;
   }
 
@@ -128,7 +140,7 @@ export function formatWaitResult(result: WatchResult, format: WatchFormat): stri
 }
 
 export function formatNonEntry(
-  kind: '_ok' | '_heartbeat' | '_error' | '_reconnected',
+  kind: '_ok' | '_heartbeat' | '_error' | '_reconnected' | '_timeout' | '_expired',
   fields: Record<string, string | number | undefined>,
   format: WatchFormat,
 ): string {
@@ -136,5 +148,7 @@ export function formatNonEntry(
   if (kind === '_ok') return `WATCH OK gen ${fields.generation} epoch ${sanitizeName(String(fields.epoch))}`;
   if (kind === '_heartbeat') return `HEARTBEAT gen ${fields.generation} at ${fields.at}`;
   if (kind === '_reconnected') return `WATCH RECONNECTED gen ${fields.generation}`;
+  if (kind === '_timeout') return `WATCH TIMEOUT after ${fields.timeoutMs}ms`;
+  if (kind === '_expired') return `WATCH EXPIRED after ${fields.expireAfterMs}ms quiet`;
   return `WATCH ERROR ${sanitizeName(String(fields.code))}: ${sanitizeName(String(fields.message))}`;
 }

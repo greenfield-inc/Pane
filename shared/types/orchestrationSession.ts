@@ -1,15 +1,30 @@
 import type { CustomCommandResume } from './customCommandResume';
 import type { AgentState } from './agentStatus';
 import type { PaneChatAgent } from './paneChat';
-import type { TerminalAgentReport, ToolPanel } from './panels';
+import type { TerminalAgentReport, ToolPanel, ToolPanelType } from './panels';
+import { boundary, decodeOptionalBoundary, type JsonObject } from '../validation/boundaryDecoder';
 
 /** Stable identifier of the built-in orchestration session imported from Pane Chat. */
 export const LEGACY_ORCHESTRATION_SESSION_ID = 'legacy-pane-chat';
 export const ORCHESTRATION_SESSION_INTERNAL_ID_PREFIX = '__orchestration_session_';
 export const ORCHESTRATION_SESSION_STORE_VERSION = 1 as const;
-export const MAX_ORCHESTRATION_ACTIVITY = 100;
-export const MAX_ORCHESTRATION_ITEMS = 100;
-export const MAX_ORCHESTRATION_TEXT_LENGTH = 16_000;
+
+/** How many entries each Session keeps before the oldest are dropped; `retention` in config.json overrides each one. */
+export interface SessionRetention {
+  /** Activity entries kept per Session. */
+  sessionActivity: number;
+  /** Inbox items kept per Session. */
+  sessionInbox: number;
+}
+const positiveIntegerSchema = boundary.refine(boundary.number, value => Number.isInteger(value) && value > 0, 'expected a positive integer');
+export const DEFAULT_SESSION_RETENTION: SessionRetention = { sessionActivity: 500, sessionInbox: 1000 };
+
+/** The configured retention, with the default for any value that is missing or not a positive integer. */
+export function resolveSessionRetention(configured: Partial<SessionRetention> | undefined): SessionRetention {
+  const pick = (key: keyof SessionRetention): number =>
+    decodeOptionalBoundary(configured?.[key], positiveIntegerSchema) ?? DEFAULT_SESSION_RETENTION[key];
+  return { sessionActivity: pick('sessionActivity'), sessionInbox: pick('sessionInbox') };
+}
 
 export function isOrchestrationInternalSessionId(sessionId: string): boolean {
   return sessionId === '__pane_chat_session__' || sessionId.startsWith(ORCHESTRATION_SESSION_INTERNAL_ID_PREFIX);
@@ -73,7 +88,7 @@ export interface OrchestrationActivity {
 }
 
 export interface OrchestrationSessionRecord {
-  /** Omitted in older stores; migrated to the host runtime on read. */
+  /** Omitted means the native host. 'windows' is a legacy alias for native and is dropped on read. */
   runtime?: 'windows' | 'wsl';
   wslDistribution?: string;
   /** Durable recovery anchor for an in-place conversation transfer. */
@@ -90,6 +105,16 @@ export interface OrchestrationSessionRecord {
   /** Empty uses the selected built-in agent command. */
   launchCommand?: string;
   customResume?: CustomCommandResume | null;
+  /**
+   * A native conversation of `agent` the Session's tab resumes (`runpane handoff` moving a
+   * Session). Saved with the record, so a tab created or repaired at startup still resumes it.
+   */
+  resume?: string;
+  /**
+   * The agent's first message in a new conversation, kept until a terminal has sent it
+   * so a tab created or repaired before launch still sends it. Dropped once sent.
+   */
+  openingPrompt?: string;
   /** Snapshot of the behavior profile, independent of app defaults. */
   profile?: string;
   /** Hidden detached Pane session that owns the durable terminal conversation. */
@@ -118,6 +143,12 @@ export interface OrchestrationSessionRecord {
 export interface OrchestrationSessionStoreData {
   version: typeof ORCHESTRATION_SESSION_STORE_VERSION;
   selectedSessionId?: string;
+  /**
+   * The order people arranged Sessions in, oldest first when absent. Sessions it does not name
+   * (new ones, or any written by a Pane that predates ordering) follow it by creation time.
+   * Optional so the store stays at version 1: an older Pane ignores it and drops it on its next write.
+   */
+  order?: string[];
   sessions: OrchestrationSessionRecord[];
 }
 
@@ -151,11 +182,24 @@ export interface OrchestrationGitSummary {
 export interface OrchestrationPanelOverview {
   panelId: string;
   title: string;
+  /** The tab's panel type; absent on a missing panel. */
+  type?: ToolPanelType;
   agentType?: PaneChatAgent;
   state: AgentState;
   initialized: boolean;
   lastActivityAt?: string;
   missing?: boolean;
+  /** This panel's latest `runpane report`. */
+  report?: OrchestrationPanelReport;
+}
+
+/**
+ * A panel's report as the overview returns it. `data` is the summary parsed as
+ * given when it is a complete JSON object; a plain-text, array, scalar, invalid,
+ * truncated, or more than 64 levels deep summary has no `data`.
+ */
+export interface OrchestrationPanelReport extends TerminalAgentReport {
+  data?: JsonObject;
 }
 
 export interface OrchestrationPaneOverview {
@@ -181,6 +225,7 @@ export interface OrchestrationSessionOverview {
 }
 
 export interface OrchestrationSessionCreateInput {
+  /** Omit for the native host. 'windows' is accepted as a legacy alias for native. */
   runtime?: 'windows' | 'wsl';
   wslDistribution?: string;
   name: string;
@@ -190,6 +235,16 @@ export interface OrchestrationSessionCreateInput {
   agent?: PaneChatAgent;
   launchCommand?: string;
   customResume?: CustomCommandResume | null;
+  /**
+   * A native session id of `agent` to resume: the Session's agent tab resumes that conversation
+   * when it first opens, instead of starting a new one. `runpane handoff` uses it to move a Session.
+   */
+  resume?: string;
+  /**
+   * Sent once as the agent's first message; must begin with `PANE_ONE_TIME_PROMPT_OPENING`.
+   * The desktop's Pane Chat offer uses it; it is not part of the runpane contract.
+   */
+  openingPrompt?: string;
   profile?: string;
   goal?: string;
   context?: string;

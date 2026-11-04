@@ -14,7 +14,7 @@ Canonical repo: `greenfield-inc/Pane` (`dcouple/Pane` redirects to it).
 
 ## Commands
 
-- Node >= 22.18 (`.nvmrc`), pnpm 10. Setup `pnpm run setup`; run
+- Node 22.23.4+ (22.x), 24.22.1+ (24.x), or 26.12.1+ (26.x); `.nvmrc` pins 22.23.4. Use pnpm 10. Setup `pnpm run setup`; run
   `PANE_DIR=~/.pane_test pnpm dev` (not `electron-dev`: its watcher overwrites
   the bundled preload). Build the local CLI with `pnpm --filter runpane build`.
 - Before a PR: `pnpm typecheck && pnpm lint`, plus the tests your change touches.
@@ -35,10 +35,12 @@ Canonical repo: `greenfield-inc/Pane` (`dcouple/Pane` redirects to it).
   ([docs/lint/anti-slop.md](docs/lint/anti-slop.md)).
 - Dependencies changed: run `pnpm run generate-notices` and commit `NOTICES`.
 - Don't change build targets without discussion.
-- `runpane` CLI defaults stay responsive. Anything that makes output quieter or
-  slower for the Pane Chat orchestrator (e.g. `watch --settle`, `--min-interval`)
-  is an opt-in flag; the orchestrator's values live in the "Liveness Contract"
-  text in `main/src/services/skillCacheManager.ts`.
+- `runpane watch --follow` has one default cadence (READY 3m, BLOCKED 30s,
+  batch 10m, IDLE after 10m with backoff, 3h quiet expiry, heartbeats off).
+  Explicit duration flags override it; `--until-event` delivers immediately
+  without follow settling or batching. Cadence requires a named follow consumer;
+  `--follow --since <generation>` also bypasses it. Keep npm/Python,
+  contract/doctor docs, and the Liveness Contract in `skillCacheManager.ts` aligned.
 - The full terminal refresh on panel activation is load-bearing: read the
   comment above `TerminalPanel` (`frontend/src/components/panels/TerminalPanel.tsx`)
   first, and keep refits hidden behind its loading overlay (`isRefreshing`).
@@ -66,6 +68,10 @@ hand here.
 ## Pane
 
 This repository is used with [Pane](https://runpane.com). Drive it with the CLI or the `pane` MCP server.
+
+1 feature = 1 worktree = 1 branch = 1 Pane; reviews, audits, fixes and QA for it are tabs in that Pane. Open later agents with `runpane panels create --pane <id>` (MCP: `panels_create` or `agents_start` with `pane`), not a new Pane.
+
+When you need the person (a choice, an approval, a short answer), call the `notify` MCP tool (or `runpane notify`) instead of asking in the terminal. If it returns `waiting`, call it again with `resume`; if it returns `unavailable`, ask in the terminal.
 
 CLI: `npm i -g runpane` (or `npx --yes runpane@latest`), then `runpane doctor --json`. Full command reference: `runpane agent-context --json`.
 

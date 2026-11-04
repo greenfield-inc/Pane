@@ -5,6 +5,8 @@
  */
 
 import type { IpcMain } from 'electron';
+import { cleanupSessionLogs } from '../services/session-logs';
+import { ownsRemovableWorktree } from '../utils/owns-removable-worktree';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import { existsSync } from 'fs';
@@ -137,7 +139,7 @@ export function registerSessionHandlers(
       const worktreeName = dbSession.worktree_name || '';
       const projectId = dbSession.project_id;
       const worktreePath = dbSession.worktree_path || '';
-      if (worktreeName && projectId && !dbSession.is_main_repo && dbSession.worktree_ownership !== 'external' && worktreePath) {
+      if (ownsRemovableWorktree(dbSession) && projectId && worktreePath) {
         const project = databaseService.getProject(projectId);
         const ctx = sessionManager.getProjectContextByProjectId(projectId);
         if (project && ctx) {
@@ -221,7 +223,10 @@ export function registerSessionHandlers(
     try {
       const allProjects = databaseService.getAllProjects();
       const projectsWithSessions = allProjects.map(project => {
-        const sessions = sessionManager.getSessionsForProject(project.id).map(attachCachedGitStatus);
+        // Newest first: the order the phone and glasses show a repository's Panes in.
+        const sessions = sessionManager.getSessionsForProject(project.id)
+          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+          .map(attachCachedGitStatus);
         const folders = databaseService.getFoldersForProject(project.id);
         const convertedFolders = folders.map(convertDbFolderToRendererFolder);
         return {
@@ -401,8 +406,9 @@ export function registerSessionHandlers(
       }
       const isExternalWorktree = dbSession.worktree_ownership === 'external';
       // Adopted worktrees are only removed when the caller opts in (`runpane panes archive --remove-worktree`).
-      const removesWorktree = Boolean(dbSession.worktree_name && dbSession.project_id && !dbSession.is_main_repo)
-        && (!isExternalWorktree || options?.removeExternalWorktree === true);
+      const removesWorktree = ownsRemovableWorktree(dbSession)
+        || (Boolean(dbSession.worktree_name && dbSession.project_id && !dbSession.is_main_repo)
+          && isExternalWorktree && options?.removeExternalWorktree === true);
 
       // Check if session is already archived
       if (dbSession.archived) {
@@ -705,6 +711,7 @@ export function registerSessionHandlers(
         return { success: false, error: 'Session not found or not archived' };
       }
 
+      cleanupSessionLogs(sessionId);
       const allSessions = sessionManager.getAllSessions();
       sessionManager.emit('sessions-loaded', allSessions);
       return { success: true };
@@ -734,6 +741,7 @@ export function registerSessionHandlers(
       }
 
       const deletedCount = databaseService.deleteArchivedSessionsPermanently();
+      for (const session of archivedSessions) cleanupSessionLogs(session.id);
       const allSessions = sessionManager.getAllSessions();
       sessionManager.emit('sessions-loaded', allSessions);
       return { success: true, data: { deletedCount } };
@@ -1495,20 +1503,8 @@ export function registerSessionHandlers(
 
   commandRegistry.register('sessions:rename', async (sessionId: string, newName: string) => {
     try {
-      // Update the session name in the database
-      const updatedSession = databaseService.updateSession(sessionId, { name: newName });
-      if (!updatedSession) {
-        return { success: false, error: 'Session not found' };
-      }
-
-      // Emit update event so frontend gets notified
-      const session = sessionManager.getSession(sessionId);
-      if (session) {
-        session.name = newName;
-        sessionManager.emit('session-updated', session);
-      }
-
-      return { success: true, data: updatedSession };
+      const session = sessionManager.renameSession(sessionId, newName);
+      return { success: true, data: session };
     } catch (error) {
       console.error('Failed to rename session:', error);
       return { success: false, error: 'Failed to rename session' };
@@ -1517,44 +1513,10 @@ export function registerSessionHandlers(
 
   commandRegistry.register('sessions:toggle-favorite', async (sessionId: string) => {
     try {
-      console.log('[IPC] sessions:toggle-favorite called for sessionId:', sessionId);
-      
-      // Get current session to check current favorite status
-      const currentSession = databaseService.getSession(sessionId);
-      if (!currentSession) {
-        console.error('[IPC] Session not found in database:', sessionId);
-        return { success: false, error: 'Session not found' };
-      }
-      
-      console.log('[IPC] Current session favorite status:', currentSession.is_favorite);
-
-      // Toggle the favorite status
-      const newFavoriteStatus = !currentSession.is_favorite;
-      console.log('[IPC] Toggling favorite status to:', newFavoriteStatus);
-      
-      const updatedSession = databaseService.updateSession(sessionId, {
-        is_favorite: newFavoriteStatus,
-        favorite_pinned_at: newFavoriteStatus ? 'CURRENT_TIMESTAMP' : null,
-      });
-      if (!updatedSession) {
-        console.error('[IPC] Failed to update session in database');
-        return { success: false, error: 'Failed to update session' };
-      }
-      
-      console.log('[IPC] Database updated successfully. Updated session:', updatedSession.is_favorite);
-
-      // Emit update event so frontend gets notified
-      const session = sessionManager.getSession(sessionId);
-      if (session) {
-        session.isFavorite = newFavoriteStatus;
-        session.favoritePinnedAt = updatedSession.favorite_pinned_at ?? undefined;
-        console.log('[IPC] Emitting session-updated event with favorite status:', session.isFavorite);
-        sessionManager.emit('session-updated', session);
-      } else {
-        console.warn('[IPC] Session not found in session manager:', sessionId);
-      }
-
-      return { success: true, data: { isFavorite: newFavoriteStatus, favoritePinnedAt: updatedSession.favorite_pinned_at } };
+      const currentSession = sessionManager.getSession(sessionId);
+      if (!currentSession) return { success: false, error: 'Session not found' };
+      const session = sessionManager.setFavorite(sessionId, !currentSession.isFavorite);
+      return { success: true, data: { isFavorite: session.isFavorite, favoritePinnedAt: session.favoritePinnedAt ?? null } };
     } catch (error) {
       console.error('Failed to toggle favorite status:', error);
       if (error instanceof Error) {
@@ -1676,7 +1638,7 @@ export function registerSessionHandlers(
       // `worktree_path` dangling and every panel spawn fails with ENOENT.
       // Recreate the worktree before un-archiving; if that fails, leave the
       // session archived and report why.
-      if (dbSession.worktree_name && dbSession.project_id && !dbSession.is_main_repo && dbSession.worktree_ownership !== 'external' && !existsSync(dbSession.worktree_path)) {
+      if (ownsRemovableWorktree(dbSession) && !existsSync(dbSession.worktree_path)) {
         const project = databaseService.getProject(dbSession.project_id);
         const ctx = project ? sessionManager.getProjectContextByProjectId(dbSession.project_id) : null;
         if (!project || !ctx) {
@@ -1889,7 +1851,10 @@ export function registerSessionHandlers(
 
   commandRegistry.register('sessions:resume-interrupted', async (sessionIds: string[]) => {
     try {
-      await sessionManager.resumeInterruptedSessions(sessionIds);
+      const { failedSessionIds } = await sessionManager.resumeInterruptedSessions(sessionIds);
+      if (failedSessionIds.length > 0) {
+        return { success: false, error: `${failedSessionIds.length} Pane${failedSessionIds.length === 1 ? '' : 's'} could not resume an agent and stay interrupted. Open the Pane to start its agent.` };
+      }
       return { success: true };
     } catch (error) {
       console.error('Failed to resume interrupted sessions:', error);

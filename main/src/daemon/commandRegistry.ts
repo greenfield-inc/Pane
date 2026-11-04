@@ -1,3 +1,4 @@
+import { REMOTE_READ_CHANNELS } from '../../../shared/remoteClient/readChannels';
 import { isDaemonOwnedChannel } from './daemonChannels';
 import type { IpcMainInvokeEvent } from 'electron';
 import { AsyncLocalStorage } from 'async_hooks';
@@ -37,6 +38,23 @@ interface IpcMainHandleLike {
 }
 
 export class PaneCommandRegistry {
+  private updateQuiescing = false;
+  private readonly mutations = new Set<Promise<PaneCommandValue>>();
+
+  async quiesceForUpdate(): Promise<void> {
+    this.updateQuiescing = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        Promise.allSettled([...this.mutations]),
+        new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('In-flight work did not settle; Pane remains running.')), 10_000); }),
+      ]);
+    } catch (error) { this.updateQuiescing = false; throw error; }
+    finally { if (timer) clearTimeout(timer); }
+  }
+
+  cancelUpdateQuiescence(): void { this.updateQuiescing = false; }
+
   private readonly handlers = new Map<string, RegisteredPaneCommandHandler>();
   private readonly boundChannels = new Set<string>();
 
@@ -73,7 +91,12 @@ export class PaneCommandRegistry {
       );
     }
 
-    return handler(...args);
+    // A notify call waits for a person for hours; an update ends it like any other disconnect.
+    const mutation = !REMOTE_READ_CHANNELS.has(channel) && !channel.startsWith('runpane:update:') && channel !== 'runpane:notify';
+    if (mutation && this.updateQuiescing) throw new PaneError('ERR_UPDATE_QUIESCING', 'Pane is saving this workspace for an update. The action was not sent.', 'Wait for the update to reconnect before submitting it.');
+    const result = Promise.resolve(handler(...args));
+    if (mutation) this.mutations.add(result);
+    try { return await result; } finally { this.mutations.delete(result); }
   }
 
   /** Transport-owned cancellation cannot be supplied through request arguments. */

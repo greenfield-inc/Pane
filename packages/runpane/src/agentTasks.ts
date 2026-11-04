@@ -1,6 +1,7 @@
 import type { ParsedArgs } from './commands';
 import { confirmMutation } from './daemonActions';
 import { invokeDaemon } from './daemonClient';
+import { RunpaneError } from './errors';
 import { buildPaneLink } from './links';
 import { describeReport } from './watchLines';
 import {
@@ -84,13 +85,14 @@ export async function runAgentsStart(parsed: ParsedArgs): Promise<number> {
     print(parsed, queued, `Created ${queued.name ?? queued.paneId}: ${queued.link}\n${item.setupQueue.message}\n${queued.next}`);
     return 0;
   }
-  if (!item || !item.ok || !item.sessionId || !item.panelId) {
+  // An item can be created yet not ok (agent not ready, prompt unverified); only a missing panel is a failure to start.
+  if (!item || 'error' in item || !item.sessionId || !item.panelId) {
     const reason = item && 'error' in item ? item.error.message : 'Pane did not report a created panel.';
     throw new Error(`Could not start the agent: ${reason}`);
   }
   const newPaneId = item.sessionId;
   const ready = item.readiness?.ok ?? false;
-  const promptDelivered = item.initialInput?.delivered ?? false;
+  const promptDelivered = isPromptDelivered(item.initialInput);
   const result = {
     ok: ready && promptDelivered,
     paneId: newPaneId,
@@ -122,7 +124,7 @@ async function startAgentInPane(parsed: ParsedArgs, paneId: string): Promise<num
     throw new Error(`Could not open the agent as a tab in Pane ${paneId}: ${reason} Nothing else was changed. Check the Pane id with \`runpane panes list --json\`; if the work's branch has no Pane yet, start it with --repo and --name instead.`);
   }
   const ready = created.readiness?.ok ?? false;
-  const promptDelivered = created.initialInput?.delivered ?? false;
+  const promptDelivered = isPromptDelivered(created.initialInput);
   const result = {
     ok: ready && promptDelivered,
     paneId,
@@ -177,6 +179,9 @@ export async function runAgentsSend(parsed: ParsedArgs): Promise<number> {
     throw new Error('runpane agents send types a message and presses Enter, so it cannot send keys such as arrows, Escape, or Ctrl-C. '
       + `To answer a menu, press keys with \`runpane panels input --panel <panel-id> --keys down,enter --yes\`, then check the screen with \`runpane agents status\`.`);
   }
+  if (parsed.attachments?.length) {
+    throw new RunpaneError('ERR_ATTACH_UNSUPPORTED', '--attach is not supported by runpane agents send. Nothing was sent.', 'Use runpane panels submit --panel <panel-id> --as-file-pointer --attach <file>.');
+  }
   const { paneId, panelId } = await resolveAgentPanel(parsed);
   await confirmMutation(parsed);
   const request = buildPanelInputRequest({ ...parsed, panelId }, 'submit');
@@ -219,6 +224,12 @@ async function resolveAgentPanel(parsed: ParsedArgs): Promise<{ paneId: string; 
   return { paneId, panelId: panel.panelId };
 }
 
-function print<Result>(parsed: ParsedArgs, result: Result, text: string): void {
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- This output serializer receives results already decoded by the named daemon response schemas.
+function print(parsed: ParsedArgs, result: unknown, text: string): void {
   console.log(parsed.json ? JSON.stringify(result, null, 2) : text);
+}
+
+/** A task prompt counts as delivered when Pane verified it, or sent it to an agent it cannot verify (Cursor, OpenCode). */
+function isPromptDelivered(input: { submitted: boolean; verifiedSubmitted?: boolean; verification?: string } | undefined): boolean {
+  return Boolean(input && (input.verifiedSubmitted === true || (input.verification === 'unverifiable' && input.submitted)));
 }

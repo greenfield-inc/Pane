@@ -113,7 +113,7 @@ describe('uploadInChunks', () => {
   });
 
   it('recognizes a refusal wrapped by the remote client', async () => {
-    const wrapped = 'The remote action may have completed, but its result could not be confirmed. '
+    const wrapped = 'Delivery unknown: the remote action may have completed, but its result could not be confirmed. '
       + 'Check the current state before trying again. (Upload checksum mismatch)';
     const host = fakeHost({}, wrapped);
 

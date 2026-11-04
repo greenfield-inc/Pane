@@ -45,7 +45,7 @@ export function LimitStatusBanners({ limits }: { limits: UsageRateLimitSample[] 
   return (
     <div className="space-y-1.5">
       {blocked && (
-        <div className="rounded border border-status-error/30 bg-status-error/10 px-3 py-1.5 text-[11px] text-status-error">
+        <div className="rounded border border-status-error/30 bg-status-error/10 px-3 py-1.5 text-[11px] text-text-primary">
           Rate limited — {blocked.rateLimitReachedType}
           {blocked.resetsAtMs && blocked.resetsAtMs > Date.now() && (
             <span className="text-text-tertiary"> · resets {formatReset(blocked.resetsAtMs)}</span>
@@ -53,7 +53,7 @@ export function LimitStatusBanners({ limits }: { limits: UsageRateLimitSample[] 
         </div>
       )}
       {spendControl && (
-        <div className="rounded border border-status-warning/30 bg-status-warning/10 px-3 py-1.5 text-[11px] text-status-warning">
+        <div className="rounded border border-status-warning/30 bg-status-warning/10 px-3 py-1.5 text-[11px] text-text-primary">
           Organisation spend control reached
         </div>
       )}

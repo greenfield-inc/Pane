@@ -3,284 +3,306 @@ import type { OrchestrationSessionManager } from './orchestrationSessionManager'
 import type { SessionManager } from './sessionManager';
 import type { WorkspaceJournal } from './workspaceJournal';
 import type { Logger } from '../utils/logger';
-import type { RunpaneWorkspacePullRequest } from '../../../shared/types/runpaneOrchestration';
-import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
+import type { RunpaneWorkspaceEntry } from '../../../shared/types/runpaneOrchestration';
+import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
+import { PaneError } from '../../../shared/paneError';
+import { GithubWatchClient, GithubWatchError, githubPrKey, type GithubPrDetails, type GithubPrTarget } from './githubWatchClient';
 
-/** How often Session members' open PRs are polled (decision D7), before jitter. */
-export const SESSION_PR_POLL_INTERVAL_MS = 3 * 60_000;
-const POLL_JITTER_MS = 30_000;
-/** Ceiling for the doubling delay after `gh` is missing, signed out, rate limited, or timing out. */
-const MAX_BACKOFF_MS = 60 * 60_000;
-const GH_TIMEOUT_MS = 10_000;
-const MAX_FAILING_CHECKS = 5;
-const PR_VIEW_FIELDS = 'number,url,state,mergeable,statusCheckRollup,headRefOid';
-/** Completed check-run conclusions that fail a PR; SUCCESS, NEUTRAL, SKIPPED, and STALE pass. */
-const FAILED_CONCLUSIONS = new Set(['FAILURE', 'TIMED_OUT', 'CANCELLED', 'ACTION_REQUIRED', 'STARTUP_FAILURE']);
-
-// `statusCheckRollup` mixes check runs (name/status/conclusion) and commit statuses (context/state).
-const prCheckSchema = boundary.object({
-  __typename: boundary.optional(boundary.string),
-  name: boundary.optional(boundary.nullable(boundary.string)),
-  context: boundary.optional(boundary.nullable(boundary.string)),
-  status: boundary.optional(boundary.nullable(boundary.string)),
-  conclusion: boundary.optional(boundary.nullable(boundary.string)),
-  state: boundary.optional(boundary.nullable(boundary.string)),
+const SESSION_PR_POLL_INTERVAL_MS = 2 * 60_000;
+const FULL_READ_BACKSTOP_MS = 30 * 60_000;
+const MAX_ERRORS = 8;
+const MAX_COMMENT_WAKES = 10;
+const MAX_WATCHES = 512;
+const failedConclusions = new Set(['FAILURE', 'TIMED_OUT', 'CANCELLED', 'ACTION_REQUIRED', 'STARTUP_FAILURE', 'STALE']);
+const targetSchema = boundary.object({ host: boundary.string, owner: boundary.string, repo: boundary.string, number: boundary.number });
+const discoverySchema = boundary.object({ paneId: boundary.string, failures: boundary.number, retryAt: boundary.number });
+const baselineSchema = boundary.object({
+  state: boundary.string, head: boundary.string, mergeable: boundary.string,
+  failed: boundary.array(boundary.string), passed: boundary.boolean,
+  feedbackComplete: boundary.optional(boundary.boolean),
+  base: boundary.optional(boundary.string), baseExists: boundary.optional(boundary.boolean),
+  comments: boundary.array(boundary.string), reviews: boundary.array(boundary.string),
 });
-const prViewSchema = boundary.object({
-  number: boundary.number,
-  url: boundary.string,
-  state: boundary.string,
-  mergeable: boundary.optional(boundary.nullable(boundary.string)),
-  statusCheckRollup: boundary.optional(boundary.nullable(boundary.array(prCheckSchema))),
-  headRefOid: boundary.string,
+const recordSchema = boundary.object({
+  paneId: boundary.string, target: targetSchema, explicit: boundary.boolean,
+  registrationGeneration: boundary.optional(boundary.number),
+  head: boundary.optional(boundary.string), fingerprint: boundary.optional(boundary.string),
+  baseline: boundary.optional(baselineSchema), fullReadAt: boundary.number,
+  errors: boundary.number, commentWakes: boundary.number, unavailable: boundary.boolean,
+  retryAt: boundary.number, stopped: boundary.optional(boundary.string),
 });
-
-// A failed `gh` call: Node's execFile rejection carries the spawn code, a timeout kill, and stderr.
-const ghFailureSchema = boundary.object({
-  code: boundary.optional(boundary.union(boundary.string, boundary.number)),
-  killed: boundary.optional(boundary.boolean),
-  stderr: boundary.optional(boundary.string),
-});
-
-type PrCheck = ReturnType<typeof prCheckSchema.decode>;
-type GhFailure = ReturnType<typeof ghFailureSchema.decode>;
-
-/** A PR's checks rolled up: `pending` until every check on the head commit has finished. */
-interface ChecksSummary {
-  state: 'none' | 'pending' | 'passed' | 'failed';
-  /** Failing check names, deduplicated and capped, when `state` is `failed`. */
-  failing: string[];
-}
-
-/** What the monitor last saw of a Pane's PR; transitions are measured against it. */
-interface TrackedPr {
-  number: number;
-  state: string;
-  /** Last definite answer; GitHub's transient UNKNOWN never replaces it. */
-  mergeable?: 'MERGEABLE' | 'CONFLICTING';
-  /** `<headOid>:<passed|failed>` of the last settled checks. */
-  settledChecks?: string;
-}
-
-interface SessionPrMonitorOptions {
+type DecodedRecord = ReturnType<typeof recordSchema.decode>;
+type WatchRecord = { -readonly [K in keyof DecodedRecord]: DecodedRecord[K] };
+interface WatchRegistration { epoch: string; generation: number; watch: WatchRecord }
+type Event = Omit<RunpaneWorkspaceEntry, 'gen' | 'at' | 'paneName'>;
+interface Options {
   sessions: Pick<OrchestrationSessionManager, 'activeMemberPaneIds'>;
-  panes: Pick<SessionManager, 'getSession' | 'getProjectContext'>;
-  gitStatus: Pick<GitStatusManager, 'getCachedStatus' | 'lookupPrForPane' | 'withGithubSlot'>;
-  journal: Pick<WorkspaceJournal, 'appendPaneEntry'>;
+  panes: Pick<SessionManager, 'getSession'>;
+  gitStatus: Pick<GitStatusManager, 'getCachedStatus' | 'lookupPrForPane'>;
+  journal: WorkspaceJournal;
+  client?: Pick<GithubWatchClient, 'fingerprints' | 'details'>;
   logger?: Pick<Logger, 'info' | 'warn'>;
   intervalMs?: number;
   random?: () => number;
+  now?: () => number;
 }
 
-class GithubUnavailableError extends Error {}
+function parseGithubPrUrl(value: string): GithubPrTarget {
+  let url: URL;
+  try { url = new URL(value); } catch { throw invalidUrl(); }
+  const match = /^\/([^/]+)\/([^/]+)\/pull\/([1-9]\d*)\/?$/u.exec(url.pathname);
+  if (url.protocol !== 'https:' || url.username || url.password || url.port || url.search || url.hash || !match
+    || !/^[a-z0-9.-]+$/iu.test(url.hostname) || !Number.isSafeInteger(Number(match[3]))
+    || !/^[\w.-]+$/u.test(match[1]) || !/^[\w.-]+$/u.test(match[2])) throw invalidUrl();
+  return { host: url.hostname.toLowerCase(), owner: match[1], repo: match[2], number: Number(match[3]) };
+}
+function invalidUrl(): PaneError {
+  return new PaneError('ERR_PR_WATCH_URL', 'The PR watch URL is invalid. Nothing was registered.', 'Use https://github.com/owner/repo/pull/123 (or your GitHub Enterprise host).');
+}
+function key(paneId: string, target: GithubPrTarget): string { return `${paneId}:${githubPrKey(target)}`; }
 
-/**
- * Reports PR conflicts, settled checks, and merges for Panes in a live named Session (decision
- * D7). Every ~3 minutes, for each Session member only, it runs `gh pr view` on the member's open
- * PR and appends `pr.conflicted`, `pr.checks`, and `pr.merged` journal entries on transitions only.
- * A member with no known open PR (never looked at, or its PR closed or merged) is first looked up
- * by branch through GitStatusManager's PR lookup, so a background worker's new or reopened PR is
- * found without waiting for a git status refresh. Every `gh` call goes through GitStatusManager's
- * one-at-a-time slot.
- *
- * The first poll of a PR seeds its state without an entry, so a daemon restart does not restate
- * every conflict. A missing, signed-out, rate-limited, or timing-out `gh` doubles the delay (up to
- * an hour) and is logged once per outage.
- */
+/** Session discovery and explicit standalone watches share batched reads and durable transitions. */
 export class SessionPrMonitor {
-  private readonly tracked = new Map<string, TrackedPr>();
-  private readonly intervalMs: number;
-  private readonly random: () => number;
-  private timer: ReturnType<typeof setTimeout> | undefined;
+  private records: Map<string, WatchRecord>;
+  private discoveryFailures = new Map<string, ReturnType<typeof discoverySchema.decode>>();
+  private readonly client: Pick<GithubWatchClient, 'fingerprints' | 'details'>;
+  private readonly now: () => number;
+  private timer?: ReturnType<typeof setTimeout>;
   private running = false;
   private stopped = true;
-  /** Bumped by `stop`, so a round in flight stops at its next Pane. */
   private stopCount = 0;
-  private failures = 0;
 
-  constructor(private readonly options: SessionPrMonitorOptions) {
-    this.intervalMs = options.intervalMs ?? SESSION_PR_POLL_INTERVAL_MS;
-    this.random = options.random ?? Math.random;
+  constructor(private readonly options: Options) {
+    this.client = options.client ?? new GithubWatchClient();
+    this.now = options.now ?? Date.now;
+    const saved = options.journal.githubState.watches;
+    const records = saved === undefined ? [] : decodeBoundary(saved, boundary.array(recordSchema));
+    this.records = new Map(records.map(record => [key(record.paneId, record.target), record]));
+    this.restoreDiscovery();
   }
 
-  start(): void {
-    if (!this.stopped) return;
-    this.stopped = false;
-    this.schedule();
+  watch(paneId: string, url: string, head?: string): WatchRegistration {
+    const pane = this.options.panes.getSession(paneId);
+    if (!pane || pane.archived) throw new PaneError('ERR_PR_WATCH_PANE', 'The Pane is missing or archived. No watch was registered.', 'Select an active Pane with runpane panes list.');
+    if (head !== undefined && !/^[a-f0-9]{40}$/iu.test(head)) throw new PaneError('ERR_PR_WATCH_HEAD', 'The head pin must be a full 40-character commit SHA. Nothing was registered.', 'Read the PR head SHA and pass it with --head.');
+    const target = parseGithubPrUrl(url);
+    const identity = key(paneId, target);
+    const existing = this.records.get(identity);
+    if (existing?.explicit && !existing.stopped && ((!head && existing.head === existing.baseline?.head) || head?.toLowerCase() === existing.head)) {
+      // An idempotent retry may follow a lost response: never acknowledge unread events.
+      // Legacy records have no watermark; replay from zero so retention loss is explicit.
+      return { epoch: this.options.journal.epoch, generation: existing.registrationGeneration ?? 0, watch: existing };
+    }
+    if (!existing && this.records.size >= MAX_WATCHES) {
+      const finished = [...this.records].find(([, value]) => value.stopped);
+      if (finished) this.records.delete(finished[0]);
+    }
+    if (!existing && this.records.size >= MAX_WATCHES) throw new PaneError('ERR_PR_WATCH_CAPACITY', 'The watch registry is full. Nothing was registered.', 'Remove unused registrations with runpane pr unwatch.');
+    const record: WatchRecord = { paneId, target, explicit: true, registrationGeneration: this.options.journal.generation, head: head?.toLowerCase(), fingerprint: undefined, baseline: undefined,
+      fullReadAt: 0, errors: 0, commentWakes: 0, unavailable: false, retryAt: 0, stopped: undefined };
+    this.records.set(identity, record);
+    this.commit([]);
+    const generation = this.options.journal.generation;
+    // Registration returns its cursor before the first observation; no network call blocks the CLI.
+    if (!this.stopped) this.schedule(0);
+    return { epoch: this.options.journal.epoch, generation, watch: record };
   }
 
-  stop(): void {
-    this.stopped = true;
-    this.stopCount += 1;
-    if (this.timer) clearTimeout(this.timer);
-    this.timer = undefined;
+  unwatch(paneId: string, url: string): boolean {
+    const removed = this.records.delete(key(paneId, parseGithubPrUrl(url)));
+    this.commit([]);
+    return removed;
   }
 
-  /** One polling round. Runs no `gh` when there is no live Session member. */
+  list(paneId?: string): WatchRecord[] {
+    return [...this.records.values()].filter(record => !paneId || record.paneId === paneId).map(record => structuredClone(record));
+  }
+
+  start(): void { if (this.stopped) { this.stopped = false; this.schedule(0); } }
+  stop(): void { this.stopped = true; this.stopCount++; if (this.timer) clearTimeout(this.timer); this.timer = undefined; }
+
   async pollOnce(): Promise<void> {
     if (this.running) return;
     this.running = true;
     const stopCount = this.stopCount;
     try {
-      const members = this.members();
-      for (const paneId of members) {
-        if (this.stopCount !== stopCount) return;
-        const prNumber = this.knownOpenPr(paneId) ?? await this.discoverOpenPr(paneId);
-        if (prNumber === undefined || this.stopCount !== stopCount) continue;
-        const observed = await this.view(paneId, prNumber);
-        if (observed) this.observe(paneId, observed);
+      await this.discover();
+      if (stopCount !== this.stopCount) return;
+      const hosts = new Map<string, WatchRecord[]>();
+      const members = new Set(this.options.sessions.activeMemberPaneIds());
+      for (const [identity, record] of this.records) {
+        const pane = this.options.panes.getSession(record.paneId);
+        if (!pane || pane.archived || (!record.explicit && !members.has(record.paneId))) {
+          this.records.delete(identity); continue;
+        }
+        if (record.stopped || record.retryAt > this.now()) continue;
+        hosts.set(record.target.host, [...(hosts.get(record.target.host) ?? []), record]);
       }
-      if (members.length > 0 && this.failures > 0) {
-        this.options.logger?.info('[SessionPrMonitor] GitHub CLI is reachable again; PR polling resumed');
+      this.commit([]);
+      for (const records of hosts.values()) {
+        if (stopCount !== this.stopCount) return;
+        const targets = [...new Map(records.map(record => [githubPrKey(record.target), record.target])).values()];
+        let fingerprints: Map<string, string>;
+        try { fingerprints = await this.client.fingerprints(targets); }
+        catch (error) { for (const record of records) this.failure(record, error instanceof GithubWatchError ? error : new GithubWatchError('GitHub PR read failed; watching will retry.')); continue; }
+        const details = new Map<string, GithubPrDetails>();
+        for (const record of records) {
+          if (stopCount !== this.stopCount) return;
+          // An unwatch during a request must not resurrect its registration or emit another event.
+          if (this.records.get(key(record.paneId, record.target)) !== record) continue;
+          const fingerprint = fingerprints.get(githubPrKey(record.target));
+          try {
+            if (!fingerprint) throw new GithubWatchError('The PR no longer exists or is inaccessible. Check repository access.');
+            if (record.fingerprint !== fingerprint || this.now() - record.fullReadAt >= FULL_READ_BACKSTOP_MS) {
+              const identity = githubPrKey(record.target);
+              const pr = details.get(identity) ?? await this.client.details(record.target);
+              if (stopCount !== this.stopCount || this.records.get(key(record.paneId, record.target)) !== record) continue;
+              details.set(identity, pr);
+              this.observe(record, pr, fingerprint);
+            } else if (record.unavailable) {
+              record.errors = 0; record.unavailable = false;
+              this.commit([this.event(record, 'github.recovered', 'GitHub reads resumed.')]);
+            }
+          } catch (error) { this.failure(record, error instanceof GithubWatchError ? error : new GithubWatchError('GitHub PR read failed; watching will retry.')); }
+        }
       }
-      if (members.length > 0) this.failures = 0;
-    } catch (error) {
-      if (!(error instanceof GithubUnavailableError)) throw error;
-      if (this.failures === 0) {
-        this.options.logger?.warn(`[SessionPrMonitor] Pausing PR polling: ${error.message}`);
-      }
-      this.failures += 1;
-    } finally {
-      this.running = false;
-    }
+    } finally { this.running = false; }
   }
 
-  /** Live, unarchived Session members. Forgets Panes that left every Session. */
-  private members(): string[] {
+  private async discover(): Promise<void> {
     const members = new Set(this.options.sessions.activeMemberPaneIds());
-    for (const paneId of this.tracked.keys()) {
-      if (!members.has(paneId)) this.tracked.delete(paneId);
-    }
-    return [...members].filter(paneId => {
+    for (const paneId of this.discoveryFailures.keys()) if (!members.has(paneId)) this.discoveryFailures.delete(paneId);
+    for (const paneId of members) {
       const pane = this.options.panes.getSession(paneId);
-      return pane !== undefined && pane.archived !== true;
+      if (!pane || pane.archived) continue;
+      if ([...this.records.values()].some(record => record.paneId === paneId && !record.explicit && !record.stopped)) continue;
+      const cached = this.options.gitStatus.getCachedStatus(paneId)?.status;
+      let url = cached?.prState === 'OPEN' ? cached.prUrl : undefined;
+      if (!url || [...this.records.values()].some(record => record.paneId === paneId && record.stopped)) {
+        const failure = this.discoveryFailures.get(paneId);
+        if (failure && failure.retryAt > this.now()) continue;
+        const result = await this.options.gitStatus.lookupPrForPane(paneId);
+        if (result && !result.ok) {
+          const failures = (failure?.failures ?? 0) + 1;
+          this.discoveryFailures.set(paneId, { paneId, failures, retryAt: this.now() + Math.min(3600000, SESSION_PR_POLL_INTERVAL_MS * 2 ** Math.min(failures, 5)) });
+          this.commit(failure ? [] : [{ paneId, source: 'github', kind: 'github.unavailable', reason: 'GitHub branch discovery failed. Check gh authentication and repository access; discovery will retry.' }]);
+          continue;
+        }
+        if (result?.ok && failure) {
+          this.discoveryFailures.delete(paneId);
+          this.commit([{ paneId, source: 'github', kind: 'github.recovered', reason: 'GitHub branch discovery resumed.' }]);
+        }
+        if (!result?.ok || result.pr?.prState !== 'OPEN') continue;
+        url = result.pr.prUrl;
+      }
+      if (!url) continue;
+      const target = parseGithubPrUrl(url);
+      const identity = key(paneId, target);
+      const existing = this.records.get(identity);
+      if (existing && (existing.explicit || existing.stopped !== 'closed')) continue;
+      if (this.records.size >= MAX_WATCHES) continue;
+      this.records.set(identity, { paneId, target, explicit: false, registrationGeneration: undefined, head: undefined, fingerprint: undefined,
+        baseline: existing?.baseline, fullReadAt: 0, errors: 0, commentWakes: 0, unavailable: false, retryAt: 0, stopped: undefined });
+    }
+  }
+
+  private observe(record: WatchRecord, pr: GithubPrDetails, fingerprint: string): void {
+    const previous = record.baseline;
+    const failures = [...new Set(pr.checks.filter(check => check.__typename === 'StatusContext'
+      ? check.state === 'FAILURE' || check.state === 'ERROR'
+      : Boolean(check.conclusion && failedConclusions.has(check.conclusion))).map(check => check.name ?? check.context ?? 'check'))].sort();
+    const required = pr.checks.filter(check => check.isRequired);
+    const relevant = required.length ? required : pr.checks;
+    const passed = pr.complete && pr.feedbackComplete && relevant.length > 0 && ['CLEAN', 'UNSTABLE'].includes(pr.mergeStateStatus)
+      && relevant.every(check => check.__typename === 'StatusContext' ? check.state === 'SUCCESS'
+        : check.status === 'COMPLETED' && ['SUCCESS', 'NEUTRAL', 'SKIPPED'].includes(check.conclusion ?? ''));
+    if (record.explicit && !record.head) record.head = pr.headRefOid;
+    const events: Event[] = [];
+    const event = (kind: Event['kind'], reason?: string): Event => ({ ...this.event(record, kind, reason), pr: { number: pr.number, url: pr.url, headOid: pr.headRefOid } });
+    if (record.unavailable) events.push(event('github.recovered', 'GitHub reads resumed.'));
+    const previousHead = previous?.head ?? record.head;
+    if (previousHead && previousHead !== pr.headRefOid) events.push(event('pr.head', 'The PR head changed. Recheck this commit and register its SHA before accepting success.'));
+    // Baselines written before base tracking have no base; their first read records it silently.
+    const previousBase = previous?.base;
+    if (previousBase !== undefined && previousBase !== pr.baseRefName) events.push({
+      ...event('pr.base_changed', `The base changed from ${previousBase} to ${pr.baseRefName}. Rebase onto ${pr.baseRefName}, resolve conflicts, and recheck CI.`),
+      base: { from: previousBase, to: pr.baseRefName },
     });
-  }
-
-  /**
-   * The open PR to view without a lookup: one this monitor still has open (even after the cache
-   * moved on, so its merge is reported), or one the git status cache has open. A cached OPEN for a
-   * PR this monitor saw close or merge is stale, so that Pane is looked up again instead.
-   */
-  private knownOpenPr(paneId: string): number | undefined {
-    const tracked = this.tracked.get(paneId);
-    if (tracked?.state === 'OPEN') return tracked.number;
-    const cached = this.options.gitStatus.getCachedStatus(paneId)?.status;
-    if (cached?.prNumber === undefined || cached.prState !== 'OPEN') return undefined;
-    return tracked?.number === cached.prNumber ? undefined : cached.prNumber;
-  }
-
-  /** Looks the Pane's PR up by branch (`gh pr list --head`); its number when that PR is open. */
-  private async discoverOpenPr(paneId: string): Promise<number | undefined> {
-    const lookup = await this.options.gitStatus.lookupPrForPane(paneId);
-    if (!lookup) return undefined;
-    if (!lookup.ok) {
-      const unavailable = githubUnavailableReason(decodeOptionalBoundary(lookup.error, ghFailureSchema));
-      if (unavailable) throw new GithubUnavailableError(unavailable);
-      return undefined;
+    if (previousBase !== undefined && !pr.baseRefExists && (previous?.baseExists !== false || previousBase !== pr.baseRefName)) events.push({
+      ...event('pr.base_deleted', `The base branch ${pr.baseRefName} was deleted. GitHub may close the PR; retarget it to a live branch, rebase, and recheck CI.`),
+      base: { from: previousBase, to: pr.baseRefName },
+    });
+    if (pr.state === 'MERGED' || pr.state === 'CLOSED') {
+      if (previous?.state !== pr.state) events.push(event(pr.state === 'MERGED' ? 'pr.merged' : 'pr.closed'));
+      record.stopped = pr.state === 'MERGED' ? 'merged' : 'closed';
+    } else {
+      if (!pr.feedbackComplete && previous?.feedbackComplete !== false) events.push(event('pr.review', 'Discussion exceeds the watch read limit. Feedback is incomplete and success is withheld; read the full PR discussion on GitHub.'));
+      if (pr.mergeable === 'CONFLICTING' && previous?.mergeable !== 'CONFLICTING') events.push(event('pr.conflicted'));
+      const newFailures = failures.filter(name => previous?.head !== pr.headRefOid || !previous.failed.includes(name));
+      if (newFailures.length) events.push({ ...event('pr.checks'), checks: 'failed', failingChecks: newFailures });
+      if (passed && (!record.head || record.head === pr.headRefOid) && (!previous?.passed || previous.head !== pr.headRefOid)) events.push({
+        ...event('pr.checks', 'Checks passed on the pinned head. Review any optional failures and remaining merge requirements.'), checks: 'passed',
+      });
+      if (previous && pr.reviews.some(review => !previous.reviews.includes(review))) events.push(event('pr.review', 'A review changed; read the PR review before acting.'));
+      if (previous && pr.comments.some(comment => !previous.comments.includes(comment))) events.push(event('pr.comment', 'A comment changed; read the PR discussion before acting.'));
+      const news = events.filter(entry => !entry.kind.startsWith('github.'));
+      if (news.length) record.commentWakes = news.every(entry => entry.kind === 'pr.comment') ? record.commentWakes + 1 : 0;
+      if (record.commentWakes >= MAX_COMMENT_WAKES) {
+        record.stopped = 'comment-limit';
+        events.push(event('pr.stopped', 'Watch stopped after 10 comment-only updates. Read the discussion, then register again if more work remains.'));
+      }
     }
-    return lookup.pr?.prState === 'OPEN' ? lookup.pr.prNumber : undefined;
+    record.baseline = { state: pr.state, head: pr.headRefOid, mergeable: pr.mergeable === 'UNKNOWN' ? previous?.mergeable ?? 'UNKNOWN' : pr.mergeable,
+      failed: failures, passed: passed && (!record.head || record.head === pr.headRefOid), feedbackComplete: pr.feedbackComplete,
+      base: pr.baseRefName, baseExists: pr.baseRefExists, comments: pr.comments, reviews: pr.reviews };
+    record.fingerprint = fingerprint; record.fullReadAt = this.now(); record.errors = 0; record.retryAt = 0; record.unavailable = false;
+    this.commit(events);
   }
 
-  private async view(paneId: string, prNumber: number): Promise<ReturnType<typeof prViewSchema.decode> | undefined> {
-    const context = this.options.panes.getProjectContext(paneId);
-    const cwd = this.options.panes.getSession(paneId)?.worktreePath ?? context?.project.path;
-    if (!context || !cwd) return undefined;
+  private event(record: WatchRecord, kind: Event['kind'], reason?: string): Event {
+    return { paneId: record.paneId, source: 'github', kind, reason,
+      pr: { number: record.target.number, url: `https://${record.target.host}/${record.target.owner}/${record.target.repo}/pull/${record.target.number}`, headOid: record.baseline?.head ?? record.head ?? '' } };
+  }
+
+  private failure(record: WatchRecord, failure: GithubWatchError): void {
+    if (this.records.get(key(record.paneId, record.target)) !== record) return;
+    const events: Event[] = [];
+    if (!record.unavailable) events.push(this.event(record, 'github.unavailable', failure.message));
+    record.unavailable = true;
+    if (!failure.rateLimited) record.errors++;
+    record.retryAt = failure.rateLimited ? failure.retryAt : this.now() + Math.min(60 * 60_000, (this.options.intervalMs ?? SESSION_PR_POLL_INTERVAL_MS) * 2 ** record.errors);
+    if (record.errors >= MAX_ERRORS) {
+      record.stopped = 'error-limit';
+      events.push(this.event(record, 'pr.stopped', 'Watch stopped after 8 failed reads. Check GitHub access, then register again.'));
+    }
+    this.commit(events);
+  }
+
+  private commit(events: Event[]): void {
     try {
-      const result = await this.options.gitStatus.withGithubSlot(() => context.commandRunner.execFile(
-        'gh',
-        ['pr', 'view', String(prNumber), '--json', PR_VIEW_FIELDS],
-        cwd,
-        { timeout: GH_TIMEOUT_MS, silent: true },
-      ));
-      return decodeBoundary(JSON.parse(result.stdout), prViewSchema);
+      this.options.journal.commitGithubState(decodeBoundary(JSON.parse(JSON.stringify({ watches: [...this.records.values()], discoveryFailures: [...this.discoveryFailures.values()] })), boundary.jsonObject), events);
     } catch (error) {
-      const unavailable = githubUnavailableReason(decodeOptionalBoundary(error, ghFailureSchema));
-      if (unavailable) throw new GithubUnavailableError(unavailable);
-      // One PR failing (deleted, or its repo moved) must not stop the others.
-      return undefined;
+      // A failed durable write cannot consume a transition in memory.
+      const saved = decodeBoundary(this.options.journal.githubState.watches ?? [], boundary.array(recordSchema));
+      this.records = new Map(saved.map(record => [key(record.paneId, record.target), record]));
+      this.restoreDiscovery();
+      throw error;
     }
   }
 
-  private observe(paneId: string, pr: ReturnType<typeof prViewSchema.decode>): void {
-    const previous = this.tracked.get(paneId);
-    const known = previous?.number === pr.number ? previous : undefined;
-    const checks = summarizeChecks(pr.statusCheckRollup ?? []);
-    const mergeable = pr.mergeable === 'MERGEABLE' || pr.mergeable === 'CONFLICTING' ? pr.mergeable : known?.mergeable;
-    const settledChecks = checks.state === 'passed' || checks.state === 'failed'
-      ? `${pr.headRefOid}:${checks.state}`
-      : known?.settledChecks;
-    this.tracked.set(paneId, { number: pr.number, state: pr.state, mergeable, settledChecks });
-    if (!known) return;
-
-    const reference: RunpaneWorkspacePullRequest = { number: pr.number, url: pr.url, headOid: pr.headRefOid };
-    if (pr.state === 'MERGED') {
-      if (known.state !== 'MERGED') this.append(paneId, { kind: 'pr.merged', pr: reference });
-      return;
-    }
-    if (pr.state !== 'OPEN') return;
-    if (mergeable === 'CONFLICTING' && known.mergeable !== 'CONFLICTING') {
-      this.append(paneId, { kind: 'pr.conflicted', pr: reference });
-    }
-    if ((checks.state === 'passed' || checks.state === 'failed') && settledChecks !== known.settledChecks) {
-      this.append(paneId, checks.state === 'failed'
-        ? { kind: 'pr.checks', pr: reference, checks: 'failed', failingChecks: checks.failing }
-        : { kind: 'pr.checks', pr: reference, checks: 'passed' });
-    }
+  private restoreDiscovery(): void {
+    const failures = decodeBoundary(this.options.journal.githubState.discoveryFailures ?? [], boundary.array(discoverySchema));
+    this.discoveryFailures = new Map(failures.map(failure => [failure.paneId, failure]));
   }
 
-  private append(
-    paneId: string,
-    entry: Pick<Parameters<WorkspaceJournal['appendPaneEntry']>[1], 'kind' | 'pr' | 'checks' | 'failingChecks'>,
-  ): void {
-    this.options.journal.appendPaneEntry(paneId, { ...entry, source: 'github' });
-  }
-
-  private schedule(): void {
+  private schedule(delay = this.options.intervalMs ?? SESSION_PR_POLL_INTERVAL_MS): void {
     if (this.stopped) return;
-    const base = this.failures === 0 ? this.intervalMs : Math.min(this.intervalMs * 2 ** this.failures, MAX_BACKOFF_MS);
-    const delay = base + Math.floor(this.random() * POLL_JITTER_MS);
+    if (this.timer) clearTimeout(this.timer);
     this.timer = setTimeout(() => {
       this.timer = undefined;
-      void this.pollOnce()
-        .catch(error => {
-          this.options.logger?.warn('[SessionPrMonitor] PR poll failed', error instanceof Error ? error : undefined);
-        })
+      void this.pollOnce().catch(error => this.options.logger?.warn('[SessionPrMonitor] Poll failed', error instanceof Error ? error : undefined))
         .finally(() => this.schedule());
-    }, delay);
+    }, delay + Math.floor((this.options.random ?? Math.random)() * (delay ? 10_000 : 0)));
     this.timer.unref?.();
   }
-}
-
-/** Rolls check runs and commit statuses up to one state; failed only once every check has finished. */
-function summarizeChecks(rollup: readonly PrCheck[]): ChecksSummary {
-  if (rollup.length === 0) return { state: 'none', failing: [] };
-  let pending = false;
-  const failing: string[] = [];
-  for (const check of rollup) {
-    const isStatus = check.__typename === 'StatusContext' || (check.status == null && check.state != null);
-    const name = (isStatus ? check.context : check.name) ?? check.name ?? check.context ?? 'check';
-    if (isStatus) {
-      if (check.state === 'PENDING' || check.state === 'EXPECTED') pending = true;
-      else if (check.state === 'FAILURE' || check.state === 'ERROR') failing.push(name);
-    } else if (check.status !== 'COMPLETED') {
-      pending = true;
-    } else if (check.conclusion && FAILED_CONCLUSIONS.has(check.conclusion)) {
-      failing.push(name);
-    }
-  }
-  if (pending) return { state: 'pending', failing: [] };
-  if (failing.length > 0) return { state: 'failed', failing: [...new Set(failing)].slice(0, MAX_FAILING_CHECKS) };
-  return { state: 'passed', failing: [] };
-}
-
-/** A reason every `gh` call will fail for now (not just this PR), or undefined. */
-function githubUnavailableReason(failure: GhFailure | undefined): string | undefined {
-  if (!failure) return undefined;
-  const stderr = failure.stderr ?? '';
-  if (failure.code === 'ENOENT') return 'the GitHub CLI (gh) is not installed';
-  if (failure.killed) return `gh did not answer within ${GH_TIMEOUT_MS / 1000}s`;
-  if (/rate limit/iu.test(stderr)) return 'GitHub API rate limit reached';
-  if (/gh auth login|not logged in|authentication/iu.test(stderr)) return 'gh is not signed in (run gh auth login)';
-  return undefined;
 }

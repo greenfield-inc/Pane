@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import errno
 import json
 import os
 import re
 import sys
+import time
 import urllib.request
 import uuid
 from typing import Any, Dict, List, Optional
@@ -14,6 +16,12 @@ from .command_matching import match_command
 TELEMETRY_ENDPOINT = "https://runpane.com/api/runpane/telemetry"
 TELEMETRY_TIMEOUT_SECONDS = 1.5
 INSTALL_ID_PREFIX = "install_"
+ERROR_CODE_PATTERN = re.compile(r"[A-Z][A-Z0-9_]{1,63}")
+# Shared by both wrappers: a failure loop sends each cause once an hour and at most 10 failures an hour.
+FAILURE_LIMIT_FILE = "runpane-wrapper-telemetry.json"
+FAILURE_WINDOW_MS = 60 * 60 * 1000
+MAX_FAILURES_PER_WINDOW = 10
+CI_ENVIRONMENT_KEYS = ("CI", "GITHUB_ACTIONS", "BUILDKITE", "GITLAB_CI", "CIRCLECI", "TF_BUILD", "JENKINS_URL", "TEAMCITY_VERSION", "CODEBUILD_BUILD_ID")
 
 WrapperTelemetryContext = Dict[str, Any]
 WrapperTelemetryProperties = Dict[str, object]
@@ -66,8 +74,34 @@ def set_setup_selection(
         context["target"] = target
 
 
+def error_code_of(error: object) -> str:
+    """The code `print_failure` shows: the error's own code, an OSError's errno name, else ERR_RUNPANE_FAILED."""
+    code = getattr(error, "code", None)
+    if isinstance(code, str):
+        return code
+    if isinstance(error, OSError) and error.errno in errno.errorcode:
+        return errno.errorcode[error.errno]
+    return "ERR_RUNPANE_FAILED"
+
+
+def record_failure_cause(context: WrapperTelemetryContext, error: object) -> None:
+    """Records a raised failure's code (the one its --json error prints) and, unless already set, its category."""
+    context["error_code"] = error_code_of(error)
+    context.setdefault("failure_category", categorize_failure(error))
+
+
 def categorize_failure(error: object) -> str:
-    normalized = str(error).lower()
+    """Reads the error code first, then only the message's first line, so appended help text cannot skew it."""
+    code = error_code_of(error)
+    if code in {"EACCES", "EPERM"}:
+        return "permission"
+    if code == "ENOENT":
+        return "not_found"
+    if code == "ETIMEDOUT" or code.endswith("_TIMEOUT"):
+        return "timeout"
+    if re.fullmatch(r"ECONN[A-Z]+|ENOTFOUND|EAI_AGAIN|EHOSTUNREACH|ENETUNREACH|EPIPE|ERR_RUNPANE_DAEMON_CONNECT_FAILED", code):
+        return "network"
+    normalized = str(error).split("\n", 1)[0].lower()
     if "checksum" in normalized:
         return "checksum"
     if "timeout" in normalized or "timed out" in normalized:
@@ -139,6 +173,8 @@ def build_wrapper_telemetry_properties(
     _set_if_defined(properties, "used_fallback", context.get("used_fallback"))
     _set_if_defined(properties, "failure_stage", context.get("failure_stage"))
     _set_if_defined(properties, "failure_category", context.get("failure_category"))
+    error_code = context.get("error_code")
+    _set_if_defined(properties, "error_code", error_code if isinstance(error_code, str) and ERROR_CODE_PATTERN.fullmatch(error_code) else None)
     _set_if_defined(properties, "exit_code", _sanitize_exit_code(context.get("exit_code")))
     return properties
 
@@ -158,9 +194,39 @@ def track_wrapper_event(event: str, context: WrapperTelemetryContext) -> None:
             invocation=detect_python_invocation(),
             context=context,
         )
+        if event.endswith("_failed") and not _allow_failure_event(event, properties):
+            return
         _post_telemetry({"event": event, "properties": properties})
     except Exception:
         return
+
+
+def _allow_failure_event(event: str, properties: WrapperTelemetryProperties) -> bool:
+    path = os.path.join(_app_directory(), FAILURE_LIMIT_FILE)
+    now = int(time.time() * 1000)
+    signature = ":".join(str(properties.get(key, "")) for key in ("command", "failure_stage", "failure_category", "error_code", "exit_code"))
+    signature = f"{event}:{signature}"
+    window_start, count, sent = now, 0, []
+    try:
+        with open(path, "r", encoding="utf-8") as source:
+            saved = json.load(source)
+        saved_sent = [(str(entry["signature"]), int(entry["at"])) for entry in saved["sent"]]
+        saved_start, saved_count = int(saved["windowStart"]), int(saved["count"])
+        sent = saved_sent
+        if saved_start <= now and now - saved_start < FAILURE_WINDOW_MS:
+            window_start, count = saved_start, saved_count
+    except Exception:
+        pass  # A missing or unreadable file starts a new window.
+    sent = [(key, sent_at) for key, sent_at in sent if now - sent_at < FAILURE_WINDOW_MS]
+    if count >= MAX_FAILURES_PER_WINDOW or any(key == signature for key, _ in sent):
+        return False
+    sent.append((signature, now))
+    temporary = f"{path}.{os.getpid()}.tmp"
+    with open(temporary, "w", encoding="utf-8") as target:
+        json.dump({"windowStart": window_start, "count": count + 1, "sent": [{"signature": key, "at": at} for key, at in sent]}, target)
+        target.write("\n")
+    os.replace(temporary, path)
+    return True
 
 
 def get_or_create_wrapper_install_id() -> str:
@@ -243,7 +309,11 @@ def _app_directory() -> str:
 
 
 def _telemetry_disabled() -> bool:
-    return bool(os.environ.get("CI") or os.environ.get("RUNPANE_TELEMETRY_DISABLED"))
+    return (
+        os.environ.get("DO_NOT_TRACK") == "1"
+        or bool(os.environ.get("RUNPANE_TELEMETRY_DISABLED"))
+        or any(os.environ.get(key) for key in CI_ENVIRONMENT_KEYS)
+    )
 
 
 def _create_install_id() -> str:

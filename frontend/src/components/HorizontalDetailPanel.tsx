@@ -201,7 +201,7 @@ export function HorizontalDetailPanel({
                   </Tooltip>
                 )}
                 items={ideItems}
-                footer={onConfigureIDE ? <DropdownMenuItem icon={Settings} label="Configure..." onClick={onConfigureIDE} /> : undefined}
+                footer={onConfigureIDE ? <DropdownMenuItem icon={Settings} label="Configure…" onClick={onConfigureIDE} /> : undefined}
                 position="auto"
                 width="sm"
               />
@@ -230,7 +230,7 @@ export function HorizontalDetailPanel({
             role="region"
             tabIndex={0}
             aria-label="Commit history"
-            className="flex-1 min-h-0 overflow-y-auto px-2 py-2"
+            className="flex-1 min-h-0 overflow-y-auto px-2 py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-border-focus"
           >
             <GitHistoryGraph
               sessionId={session.id}

@@ -1,0 +1,26 @@
+# Answer a Notify question from the pane list's sheet. Before running, ask one
+# on the dev host and leave it waiting: `PANE_SESSION_ID=<pane-id> node
+# packages/runpane/dist/cli.js notify --pane-dir <pane-dir> --ui approve
+# --title "Run the migration?"` (see native/README.md).
+appId: com.dcouple.pane.mobile
+name: Answer a Notify question
+---
+- runFlow: subflows/signed-in.yaml
+- extendedWaitUntil:
+    visible: "QUESTIONS"
+    timeout: 20000
+- tapOn:
+    id: "notify-row-.*"
+- extendedWaitUntil:
+    visible:
+      id: notify-sheet
+    timeout: 10000
+- assertVisible:
+    id: notify-title
+- tapOn:
+    id: notify-approve
+- assertVisible:
+    id: notify-sent
+- extendedWaitUntil:
+    notVisible: "QUESTIONS"
+    timeout: 15000

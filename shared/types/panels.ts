@@ -1,3 +1,4 @@
+import type { AgentChatPanelState } from './agentChat';
 import type { CustomCommandResume } from './customCommandResume';
 import type { DiffScope } from './gitDiff';
 import { boundary, decodeOptionalBoundary } from '../validation/boundaryDecoder';
@@ -33,6 +34,12 @@ export type TerminalAgentDetection = 'declared' | 'command' | 'process' | 'scree
 /** What a worker says about its task when it runs `runpane report`. */
 export type TerminalAgentReportState = 'ready' | 'blocked' | 'failed' | 'done';
 
+/** A report the sender of a panel's work is waiting for (`--expect-report`); kept in `expected-reports.json`. */
+export interface TerminalExpectedReport {
+  /** When the work was sent; a report at or after this time fulfils it. */
+  since: string;
+}
+
 /** The latest `runpane report` from an agent panel, kept in its custom state so it survives restarts. */
 export interface TerminalAgentReport {
   state: TerminalAgentReportState;
@@ -51,6 +58,8 @@ export interface TerminalAgentReport {
 }
 
 export interface TerminalPanelState {
+  /** Host-owned chat runtime identity and handoff journal. Viewers cannot mutate it. */
+  agentChat?: AgentChatPanelState;
   // Basic state (implemented in Phase 1-2)
   isInitialized?: boolean;       // Whether PTY process has been started
   cwd?: string;                  // Current working directory
@@ -92,6 +101,8 @@ export interface TerminalPanelState {
 
   // Auto-resume state (for graceful shutdown/restart)
   wasInterrupted?: boolean;          // Whether this terminal was active when app shutdown occurred
+  updateResumeHold?: string;         // Update operation that stopped the panel; released by explicit resume, or when the panel starts after that update ended.
+  updateResumeId?: string;           // Exact identity required by automatic update restoration.
   hasClaudeSessionId?: boolean;      // Whether --session-id was already passed to Claude (use --resume next time)
   agentType?: 'claude' | 'codex' | 'cursor' | 'opencode'; // CLI agent type for panel-local resume behavior
   /** How Pane learned `agentType`: declared with the launch, from the launch command, the foreground process, or the screen. */
@@ -110,8 +121,16 @@ export interface TerminalPanelState {
   orchestrationSessionId?: string;
   /** Session-owned working directory, also used by legacy shared terminal owners. */
   orchestrationWorkspace?: string;
+  /**
+   * The folder a resumed Codex conversation is pinned to with `--cd`, because the
+   * conversation was recorded in another checkout or machine. Quoted for the
+   * terminal's own shell at launch.
+   */
+  resumeDirectory?: string;
   /** Applied when the terminal next starts, not while its agent is running. */
   orchestrationProfile?: string;
+  /** Folder of the Session this worker's Pane belongs to, as the agent sees it; exported as PANE_SESSION_DIR. */
+  sessionFolder?: string;
   /** Wrapper/custom commands own their flags and resume behavior. */
   preserveLaunchCommand?: boolean;
   customResume?: CustomCommandResume | null;
@@ -322,27 +341,9 @@ export interface PanelEvent {
   timestamp: string;
 }
 
-// ⚠️ IMPORTANT: Event Types Implementation Status
-// ================================================
-// For Phase 1-2, ONLY terminal events will be implemented.
-// The full list below shows the FUTURE event system design to demonstrate
-// how different panel types will communicate once migrated.
-//
-// IMPLEMENTED IN PHASE 1-2:
-//   - terminal:command_executed
-//   - terminal:exit  
-//   - files:changed (emitted by terminal when file operations detected)
-//
-// NOT IMPLEMENTED (shown for future reference only):
-//   - All claude:* events
-//   - All diff:* events
-//   - All git:* events
-
 export type PanelEventType = 
-  // Terminal panel events (✅ IMPLEMENTED IN PHASE 1-2)
-  | 'terminal:command_executed'  // When a command is run in terminal
+  // Terminal panel events
   | 'terminal:exit'              // When terminal process exits
-  | 'files:changed'              // When terminal detects file system changes
   | 'diff:refreshed'             // When diff panel refreshes its content
   // Explorer panel events
   | 'explorer:file_saved'        // When a file is saved in explorer
@@ -388,7 +389,7 @@ interface PanelCapabilityRegistry {
 export const PANEL_CAPABILITIES: PanelCapabilityRegistry = {
   notes: { canEmit: [], canConsume: [], singleton: true, canAppearInProjects: true, canAppearInWorktrees: true },
   terminal: {
-    canEmit: ['terminal:command_executed', 'terminal:exit', 'files:changed'],
+    canEmit: ['terminal:exit'],
     canConsume: [], // Terminal doesn't consume events in Phase 1-2
     requiresProcess: true,
     singleton: false,
@@ -397,7 +398,7 @@ export const PANEL_CAPABILITIES: PanelCapabilityRegistry = {
   },
   diff: {
     canEmit: ['diff:refreshed'],
-    canConsume: ['files:changed', 'terminal:command_executed'],
+    canConsume: ['git:operation_completed'],
     requiresProcess: false,           // No background process
     singleton: true,                  // Only one diff panel
     permanent: true,                  // Cannot be closed
@@ -406,7 +407,7 @@ export const PANEL_CAPABILITIES: PanelCapabilityRegistry = {
   },
   explorer: {
     canEmit: ['explorer:file_saved', 'explorer:file_changed'],
-    canConsume: ['files:changed'],  // React to file system changes
+    canConsume: [],
     requiresProcess: false,          // No background process needed
     singleton: false,                // Multiple explorers allowed
     canAppearInProjects: true,       // Explorer can appear in projects
@@ -414,7 +415,7 @@ export const PANEL_CAPABILITIES: PanelCapabilityRegistry = {
   },
   editor: {
     canEmit: ['explorer:file_saved', 'explorer:file_changed'],
-    canConsume: ['files:changed'],
+    canConsume: ['git:operation_completed', 'diff:refreshed'],
     requiresProcess: false,
     singleton: false,                // One tab per open file
     canAppearInProjects: true,
@@ -430,7 +431,7 @@ export const PANEL_CAPABILITIES: PanelCapabilityRegistry = {
   },
   dashboard: {
     canEmit: [],                     // Dashboard doesn't emit events
-    canConsume: ['files:changed'],   // Refresh on file changes
+    canConsume: [],
     requiresProcess: false,          // No background process
     singleton: true,                 // Only one dashboard panel
     permanent: true,                 // Cannot be closed (like diff panel)
@@ -439,7 +440,7 @@ export const PANEL_CAPABILITIES: PanelCapabilityRegistry = {
   },
   'setup-tasks': {
     canEmit: [],                     // Setup tasks doesn't emit events
-    canConsume: ['files:changed'],   // Refresh when files change (e.g., gitignore)
+    canConsume: [],
     requiresProcess: false,          // No background process
     singleton: true,                 // Only one setup tasks panel
     permanent: true,                 // Cannot be closed (like dashboard)
@@ -533,6 +534,7 @@ const sessionPanelLayoutSchema: BoundarySchema<SessionPanelLayout> = boundary.ob
 });
 
 /** Returns null for anything that is not a version 1 layout tree. */
-export function decodeSessionPanelLayout<Value>(value: Value): SessionPanelLayout | null {
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- External saved data is decoded immediately with sessionPanelLayoutSchema.
+export function decodeSessionPanelLayout(value: unknown): SessionPanelLayout | null {
   return decodeOptionalBoundary(value, sessionPanelLayoutSchema) ?? null;
 }

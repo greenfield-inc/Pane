@@ -32,7 +32,7 @@ jobs:
         # advisory so this workflow identifies regressions without gating debt.
         with:
           version: '0.9.2'
-          node-version: '22.18.0'
+          node-version: '22.23.4'
           directory: frontend
           scope: changed
           blocking: none

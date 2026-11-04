@@ -209,19 +209,20 @@ test.describe('Smoke Tests', () => {
 
     await expect(page.getByText('Latest generated remote token')).toBeVisible();
     await clickDomNode(page.getByRole('button', { name: 'Back to Remote Access' }));
-    const host = page.locator('[data-testid^="code-host-"]').filter({ hasText: 'Office Mac mini' });
-    await expect(host).toBeVisible();
+    const host = page.getByTestId('machine-Office Mac mini');
+    await expect(host).toContainText('Added with a code');
 
-    await clickDomNode(host.getByRole('button', { name: 'Connect', exact: true }));
+    await clickDomNode(host.getByRole('button', { name: 'Switch to Office Mac mini' }));
 
-    await expect(page.getByText('Connected to Office Mac mini').first()).toBeVisible();
+    const active = page.getByTestId('active-machine');
+    await expect(active).toContainText('Office Mac mini');
 
-    const useThisComputerButton = page.getByRole('button', { name: 'Use This Computer' }).first();
-    await expect(useThisComputerButton).toBeEnabled();
-    await clickDomNode(useThisComputerButton);
+    const switchBack = active.getByRole('button', { name: /^Switch back to / });
+    await expect(switchBack).toBeEnabled();
+    await clickDomNode(switchBack);
 
-    await expect(page.getByText('Connected to Office Mac mini')).toHaveCount(0);
-    await expect(host.getByRole('button', { name: 'Connect', exact: true })).toBeEnabled();
+    await expect(active).not.toContainText('Office Mac mini');
+    await expect(host.getByRole('button', { name: 'Switch to Office Mac mini' })).toBeEnabled();
     await expect(page.getByText('Something went wrong')).toHaveCount(0);
   });
 

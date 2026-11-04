@@ -1,5 +1,5 @@
 import { defineRule } from "@oxlint/plugins";
-import type { ESTree } from "@oxlint/plugins";
+import type { ESTree, SourceCode } from "@oxlint/plugins";
 
 type Parameter = ESTree.ParamPattern;
 type ParameterOwner =
@@ -39,13 +39,29 @@ function parameterName(parameter: Parameter, sourceText: string): string {
     : sourceText.replace(/\s*:\s*unknown\s*$/u, "");
 }
 
-/** Disallow unknown inputs except explicitly named error-cause enrichment. */
+function isUnconstrainedParserInput(node: ParameterOwner, type: ESTree.TSType, sourceCode: SourceCode): boolean {
+  if (type.type !== "TSTypeReference" || type.typeName.type !== "Identifier" || !node.returnType) return false;
+  const name = type.typeName.name;
+  const parameter = node.typeParameters?.params.find((candidate) => candidate.name.name === name);
+  if (!parameter || parameter.constraint) return false;
+  const referencesParameter = (annotation: ESTree.Node) =>
+    sourceCode.getTokens(annotation).some((token) => token.type === "Identifier" && token.value === name);
+  if (referencesParameter(node.returnType)) return false;
+  if (node.typeParameters?.params.some((other) =>
+    other.constraint && referencesParameter(other.constraint))) return false;
+  return !node.params.some((other) => {
+    const annotation = parameterAnnotation(other)?.typeAnnotation;
+    return annotation && annotation !== type && referencesParameter(annotation);
+  });
+}
+
+/** Disallow unknown inputs and unconstrained parser-only generics except named error causes. */
 export const noUnknownParametersRule = defineRule({
   meta: {
     type: "problem",
     docs: {
       description:
-        "Disallow explicitly unknown function parameters except `cause`; decode unknown input at its I/O boundary instead.",
+        "Disallow unknown parameters and parser-only unconstrained generics except `cause`; validate external inputs at their boundary.",
     },
     messages: {
       unknownParameter:
@@ -56,7 +72,9 @@ export const noUnknownParametersRule = defineRule({
     const checkParameters = (node: ParameterOwner) => {
       for (const parameter of node.params) {
         const annotation = parameterAnnotation(parameter);
-        if (annotation?.typeAnnotation.type !== "TSUnknownKeyword") continue;
+        if (!annotation) continue;
+        if (annotation.typeAnnotation.type !== "TSUnknownKeyword" &&
+          !isUnconstrainedParserInput(node, annotation.typeAnnotation, context.sourceCode)) continue;
         const name = parameterName(parameter, context.sourceCode.getText(parameter));
         if (name === "cause") continue;
         context.report({

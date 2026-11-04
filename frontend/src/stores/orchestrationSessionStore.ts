@@ -9,6 +9,7 @@ import type {
   OrchestrationSessionView,
 } from '../../../shared/types/orchestrationSession';
 import type { Session } from '../types/session';
+import { moveWithinOwnPlaces } from '../../../shared/utils/sessionOrder';
 
 export function isArchivedOrchestrationSession(session: OrchestrationSessionRecord): boolean {
   return session.archived === true;
@@ -28,12 +29,17 @@ interface OrchestrationSessionState {
   hostRevision: number;
   invalidateHost: () => void;
   load: () => Promise<void>;
-  refresh: (options?: { adoptServerSelection?: boolean }) => Promise<void>;
+  refresh: (options?: { adoptServerSelection?: boolean; throwOnError?: boolean }) => Promise<void>;
   /** This desktop's remembered Session for the current host, preferred over the host's last-used one. */
   preferSelection: (sessionId: string | undefined) => void;
   select: (selector: OrchestrationSessionSelector) => Promise<void>;
   create: (input: OrchestrationSessionCreateInput) => Promise<OrchestrationSessionView<Session>>;
   update: (selector: OrchestrationSessionSelector, input: OrchestrationSessionUpdateInput) => Promise<OrchestrationSessionRecord>;
+  /**
+   * Shows the listed Sessions in this order at once, within the places they hold, and saves it on
+   * the host. If the host does not save it, the previous order comes back and the error is thrown.
+   */
+  reorder: (sessionIds: string[]) => Promise<void>;
 }
 
 let loadPromise: Promise<void> | null = null;
@@ -138,7 +144,10 @@ export const useOrchestrationSessionStore = create<OrchestrationSessionState>((s
 
     try {
       const data = ensureSuccess(await API.orchestrationSessions.list(), 'Failed to refresh Sessions');
-      if (generation !== operationGeneration || sequence !== refreshSequence) return;
+      if (generation !== operationGeneration || sequence !== refreshSequence) {
+        if (options?.throwOnError && generation === operationGeneration) throw new Error('Session list changed during restoration; retrying the current view.');
+        return;
+      }
       set((state) => {
         // Adopting starts from this desktop's own choice and falls back to the
         // host's last-used Session only when it has none.
@@ -159,11 +168,16 @@ export const useOrchestrationSessionStore = create<OrchestrationSessionState>((s
         };
       });
     } catch (error) {
-      if (generation !== operationGeneration || sequence !== refreshSequence) return;
+      if (generation !== operationGeneration) return;
+      if (sequence !== refreshSequence) {
+        if (options?.throwOnError) throw error;
+        return;
+      }
       set((state) => ({
         error: error instanceof Error ? error.message : 'Failed to refresh Sessions',
         availability: state.availability === 'idle' ? 'error' : state.availability,
       }));
+      if (options?.throwOnError) throw error;
     }
   },
 
@@ -213,7 +227,7 @@ export const useOrchestrationSessionStore = create<OrchestrationSessionState>((s
     const view = ensureSuccess(await API.orchestrationSessions.create(input), 'Failed to create Session');
     if (generation !== operationGeneration) return view;
     set((state) => ({
-      sessions: [...state.sessions.filter(session => session.id !== view.session.id), view.session],
+      sessions: [view.session, ...state.sessions.filter(session => session.id !== view.session.id)],
       selectedSessionId: view.session.id,
       availability: 'ready',
       error: null,
@@ -235,5 +249,27 @@ export const useOrchestrationSessionStore = create<OrchestrationSessionState>((s
       error: null,
     }));
     return record;
+  },
+
+  reorder: async (sessionIds) => {
+    const orchestrationApi = getOrchestrationApi();
+    if (!orchestrationApi) throw new Error('Sessions are unavailable in this Pane runtime');
+    const generation = operationGeneration;
+    const listed = new Set(sessionIds);
+    const previous = get().sessions.flatMap(session => listed.has(session.id) ? [session.id] : []);
+    // A list read before this move must not briefly put the old order back.
+    refreshSequence += 1;
+    set(state => ({ sessions: moveWithinOwnPlaces(state.sessions, sessionIds, session => session.id) }));
+    try {
+      const data = ensureSuccess(await API.orchestrationSessions.reorder(sessionIds), 'Failed to save the Session order');
+      if (generation !== operationGeneration) return;
+      refreshSequence += 1;
+      set(state => ({ sessions: data.sessions, selectedSessionId: activeSessionIdFromList(data.sessions, state.selectedSessionId) }));
+    } catch (error) {
+      if (generation === operationGeneration) {
+        set(state => ({ sessions: moveWithinOwnPlaces(state.sessions, previous, session => session.id) }));
+      }
+      throw error;
+    }
   },
 }));

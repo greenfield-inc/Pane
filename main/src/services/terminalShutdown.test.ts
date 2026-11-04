@@ -54,4 +54,19 @@ describe('markTerminalPanelsInterrupted', () => {
     expect(panels[1].state.customState).toMatchObject({ agentType: 'claude', wasInterrupted: true });
     expect(panels[3].state.customState).toEqual({ agentType: 'not-an-agent' });
   });
+
+  it('marks a recognized Agent Farm panel but not another wrapper', async () => {
+    const panels = [
+      panel('farm', 'session-farm', { initialCommand: 'agent-farm run greenfield/implementer' }),
+      panel('wrapper', 'session-wrapper', { initialCommand: 'my-wrapper run greenfield/implementer' }),
+    ];
+    const getPanel = (id: string) => panels.find(candidate => candidate.id === id);
+    const updatePanel = vi.fn(async () => undefined);
+
+    const interrupted = await markTerminalPanelsInterrupted(panels.map(candidate => candidate.id), getPanel, updatePanel);
+
+    expect(interrupted).toEqual(new Map([['session-farm', ['farm']]]));
+    expect(panels[0].state.customState).toMatchObject({ wasInterrupted: true });
+    expect(panels[0].state.customState).not.toHaveProperty('customResume');
+  });
 });

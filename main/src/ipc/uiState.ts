@@ -90,14 +90,14 @@ export function registerUIStateHandlers(services: AppServices) {
     }
   });
 
-  ipcMain.handle('ui-state:save-collapsed-sessions', async (_, sessionIds: string[]) => {
+  ipcMain.handle('ui-state:save-expanded-sessions', async (_, sessionIds: string[]) => {
     try {
-      uiStateManager.saveCollapsedSessions(sessionIds);
+      uiStateManager.saveExpandedSessions(sessionIds);
       return {
         success: true
       };
     } catch (error) {
-      console.error('Error saving collapsed Sessions:', error);
+      console.error('Error saving opened Sessions:', error);
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error'

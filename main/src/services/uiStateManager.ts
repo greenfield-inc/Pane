@@ -25,7 +25,7 @@ interface ExpandedUiState {
   repositoriesSectionExpanded: boolean;
   sshHostsSectionExpanded: boolean;
   sessionsSectionExpanded: boolean;
-  collapsedSessions: string[];
+  expandedSessions: string[];
   archivedSectionExpanded: boolean;
   expandedArchivedProjects: number[];
 }
@@ -56,14 +56,16 @@ class UIStateManager {
     }
   }
 
-  // Session ids are per host too, so each host keeps the Sessions whose Panes are hidden.
-  private collapsedSessionsKey(): string {
+  // Session ids are per host too, so each host keeps the Sessions you opened. A Session not in
+  // the list shows collapsed. The older `treeView.collapsedSessions` rows are left unread: they
+  // only recorded collapses, so they cannot say which Sessions were opened on purpose.
+  private expandedSessionsKey(): string {
     const hostId = this.getRemoteHostId();
-    return hostId ? `treeView.collapsedSessions@${hostId}` : 'treeView.collapsedSessions';
+    return hostId ? `treeView.expandedSessions@${hostId}` : 'treeView.expandedSessions';
   }
 
-  getCollapsedSessions(): string[] {
-    const value = this.db.getUIState(this.collapsedSessionsKey());
+  getExpandedSessions(): string[] {
+    const value = this.db.getUIState(this.expandedSessionsKey());
     if (!value) return [];
     try {
       return decodeBoundary(JSON.parse(value), boundary.array(boundary.string));
@@ -72,8 +74,8 @@ class UIStateManager {
     }
   }
 
-  saveCollapsedSessions(sessionIds: string[]): void {
-    this.db.setUIState(this.collapsedSessionsKey(), JSON.stringify(sessionIds));
+  saveExpandedSessions(sessionIds: string[]): void {
+    this.db.setUIState(this.expandedSessionsKey(), JSON.stringify(sessionIds));
   }
 
   // Archived groups are keyed by repository id, so they are per host like expanded repositories.
@@ -108,11 +110,12 @@ class UIStateManager {
 
   getSessionSortAscending(): boolean {
     const value = this.db.getUIState('treeView.sessionSortAscending');
-    if (!value) return true; // Default to ascending (newest at bottom)
+    // Unset means the person never chose: newest first. A saved value is their choice.
+    if (!value) return false;
     try {
       return JSON.parse(value);
     } catch {
-      return true;
+      return false;
     }
   }
 
@@ -235,7 +238,7 @@ class UIStateManager {
       repositoriesSectionExpanded: this.getSidebarSectionExpanded('repositories'),
       sshHostsSectionExpanded: this.getSidebarSectionExpanded('sshHosts'),
       sessionsSectionExpanded: this.getSidebarSectionExpanded('sessions'),
-      collapsedSessions: this.getCollapsedSessions(),
+      expandedSessions: this.getExpandedSessions(),
       archivedSectionExpanded: this.getSidebarSectionExpanded('archived'),
       expandedArchivedProjects: this.getExpandedArchivedProjects()
     };
@@ -249,6 +252,7 @@ class UIStateManager {
     this.db.deleteUIState(SIDEBAR_SECTION_KEYS.repositories);
     this.db.deleteUIState(SIDEBAR_SECTION_KEYS.sshHosts);
     this.db.deleteUIState(SIDEBAR_SECTION_KEYS.sessions);
+    this.db.deleteUIState('treeView.expandedSessions');
     this.db.deleteUIState('treeView.collapsedSessions');
     this.db.deleteUIState(SIDEBAR_SECTION_KEYS.archived);
     this.db.deleteUIState('treeView.expandedArchivedProjects');

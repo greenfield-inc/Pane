@@ -31,7 +31,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-2022]
+        # Pinned: Playwright 1.54.1 cannot install dependencies on Ubuntu 26.04
+        # (ubuntu-latest).
+        os: [ubuntu-24.04, windows-2022]
     env:
       AGENT_FARM_ARTIFACT_BUNDLE: ${{ github.workspace }}/tmp/greenfield/pane-notes
     steps:
@@ -58,6 +60,9 @@ jobs:
         if: runner.os == 'Linux'
         shell: bash
         run: |
+          # Electron 42+ fetches its binary on first use and logs that to stdout,
+          # so fetch it first to keep require('electron') printing only the path.
+          node node_modules/electron/install.js
           electron_path="$(node -p "require('electron')")"
           sudo chown root "$(dirname "$electron_path")/chrome-sandbox"
           sudo chmod 4755 "$(dirname "$electron_path")/chrome-sandbox"

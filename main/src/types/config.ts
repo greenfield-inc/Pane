@@ -1,3 +1,4 @@
+import type { NotifySettings } from '../../../shared/types/notify';
 import type { CustomCommandResume } from '../../../shared/types/customCommandResume';
 import type { LeaderboardConfig } from '../../../shared/types/leaderboard';
 import type { RemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
@@ -6,7 +7,8 @@ import type { PaneChatAgent } from '../../../shared/types/paneChat';
 import type { VoiceTranscriptionMode } from '../../../shared/types/voiceTranscription';
 import type { WorktreeFileSyncEntry } from '../../../shared/types/worktreeFileSync';
 import type { ApnsCredentialConfig, SharedCredentialId, SharedCredentialMeta } from '../../../shared/types/sharedCredentials';
-import type { AppearanceMode, DarkTheme, LightTheme, Theme } from '../../../shared/types/appearance';
+import type { AppearanceMode, Theme } from '../../../shared/types/appearance';
+import type { SessionRetention } from '../../../shared/types/orchestrationSession';
 
 interface TerminalShortcut {
   id: string;
@@ -26,6 +28,8 @@ type TerminalPowerMode = 'performance' | 'batterySaver';
 
 export interface AnalyticsIdentity {
   distinctId: string;
+  // The desktop id stored before this launch, when one was stored.
+  previousDistinctId?: string;
   identitySource: 'email' | 'github' | 'git_name' | 'posthog' | 'anonymous';
   installId?: string;
   appVersion?: string;
@@ -42,7 +46,12 @@ export interface AnalyticsIdentity {
   gitUserName?: string;
 }
 
+type HtmlFileOpenMode = 'preview' | 'source';
+
 export interface AppConfig {
+  // Experimental: open Claude and Codex agent tabs as Chat (off by default).
+  experimentalChatEnabled?: boolean;
+  defaultAgentInterface?: 'terminal' | 'chat';
   verbose?: boolean;
   anthropicApiKey?: string;
   openaiApiKey?: string;
@@ -73,13 +82,16 @@ export interface AppConfig {
   autoCheckUpdates?: boolean;
   // Start Pane automatically when the user logs in
   autoStartOnBoot?: boolean;
-  // Prevent idle sleep while Pane sessions are active
+  // Master toggle: prevent idle sleep while Pane sessions are active
   keepAwakeWhileSessionsActive?: boolean;
+  // Under the master toggle: hold keep-awake on AC power (default on) and on battery (default off)
+  keepAwakeWhilePluggedIn?: boolean;
+  keepAwakeOnBattery?: boolean;
   // Theme preference
   appearanceMode?: AppearanceMode;
   theme?: Theme;
-  systemLightTheme?: LightTheme;
-  systemDarkTheme?: DarkTheme;
+  systemLightTheme?: Theme;
+  systemDarkTheme?: Theme;
   // Opt-in high contrast mode: raises muted chrome text to AAA and the terminal's
   // minimumContrastRatio so dim CLI output stays legible
   highContrast?: boolean;
@@ -90,6 +102,8 @@ export interface AppConfig {
     playSound: boolean;
     enabled: boolean;
   };
+  // Pane Notify settings; absent fields take DEFAULT_NOTIFY_SETTINGS
+  notify?: Partial<NotifySettings>;
   // Dev mode for debugging
   devMode?: boolean;
   // Additional paths to add to PATH environment variable
@@ -136,8 +150,18 @@ export interface AppConfig {
   // Route PTY spawns through an isolated ptyHost UtilityProcess for crash isolation.
   // On by default on Windows. Requires app restart; the supervisor is forked once at `app.whenReady`.
   usePtyHost?: boolean;
+  // Entries each Session keeps before the oldest are dropped; a missing value uses the default
+  retention?: Partial<SessionRetention>;
   // Experimental: show Mission Control, the grid of every agent pane (off by default).
   missionControlEnabled?: boolean;
+  // Experimental: show Notes tabs and give agents their scoped notes (off by default).
+  notesEnabled?: boolean;
+  // Claude tabs Pane starts ask their permission and plan prompts in Notify and on the phone too (on when absent).
+  answerPromptsFromPane?: boolean;
+  // Set once Notify has shown the one-time note about Claude prompts.
+  claudePromptsNoteShown?: boolean;
+  // What a click on an .html file in Explorer opens: the browser preview (default when absent) or its source
+  htmlFileOpenMode?: HtmlFileOpenMode;
   // PostHog analytics settings
   analytics?: {
     enabled: boolean;
@@ -158,7 +182,7 @@ export interface AppConfig {
   terminalShortcuts?: TerminalShortcut[];
   // Whether Pane intercepts application keyboard shortcuts
   keyboardShortcutsEnabled?: boolean;
-  // Whether the Command Palette shortcut remains active when other shortcuts are disabled
+  // Whether the Search shortcut (open-command-palette) remains active when other shortcuts are disabled
   commandPaletteShortcutEnabled?: boolean;
   // Whether the terminal answers kitty keyboard protocol requests (CSI = | ? | > | < u)
   kittyKeyboardEnabled?: boolean;
@@ -199,16 +223,20 @@ export interface UpdateConfigRequest {
   autoCheckUpdates?: boolean;
   autoStartOnBoot?: boolean;
   keepAwakeWhileSessionsActive?: boolean;
+  keepAwakeWhilePluggedIn?: boolean;
+  keepAwakeOnBattery?: boolean;
   appearanceMode?: AppearanceMode;
   theme?: Theme;
-  systemLightTheme?: LightTheme;
-  systemDarkTheme?: DarkTheme;
+  systemLightTheme?: Theme;
+  systemDarkTheme?: Theme;
   highContrast?: boolean;
   uiScale?: number;
   notifications?: {
     playSound: boolean;
     enabled: boolean;
   };
+  // Pane Notify settings; absent fields take DEFAULT_NOTIFY_SETTINGS
+  notify?: Partial<NotifySettings>;
   devMode?: boolean;
   additionalPaths?: string[];
   sessionCreationPreferences?: {
@@ -236,6 +264,12 @@ export interface UpdateConfigRequest {
   usePtyHost?: boolean;
   // Experimental: show Mission Control, the grid of every agent pane (off by default).
   missionControlEnabled?: boolean;
+  // Experimental: show Notes tabs and give agents their scoped notes (off by default).
+  notesEnabled?: boolean;
+  // Claude tabs Pane starts ask their permission and plan prompts in Notify and on the phone too (on when absent).
+  answerPromptsFromPane?: boolean;
+  // What a click on an .html file in Explorer opens: the browser preview (default when absent) or its source
+  htmlFileOpenMode?: HtmlFileOpenMode;
   // PostHog analytics settings
   analytics?: AppConfig['analytics'];
   // User-defined custom commands for the Add Tool picker
@@ -244,7 +278,7 @@ export interface UpdateConfigRequest {
   terminalShortcuts?: TerminalShortcut[];
   // Whether Pane intercepts application keyboard shortcuts
   keyboardShortcutsEnabled?: boolean;
-  // Whether the Command Palette shortcut remains active when other shortcuts are disabled
+  // Whether the Search shortcut (open-command-palette) remains active when other shortcuts are disabled
   commandPaletteShortcutEnabled?: boolean;
   // Whether the terminal answers kitty keyboard protocol requests (CSI = | ? | > | < u)
   kittyKeyboardEnabled?: boolean;

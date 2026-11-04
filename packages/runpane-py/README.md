@@ -44,7 +44,7 @@ Pane desktop app, not in this package. Run it with Node:
 pipx run runpane setup
 pipx run runpane install client
 pipx run runpane install daemon --label "My Server"
-pipx run runpane update
+pipx run runpane update --pane-only
 pipx run runpane doctor
 ```
 
@@ -83,7 +83,76 @@ runpane doctor
 runpane --help
 ```
 
-### Common Options
+### Independent updates
+
+`runpane update` updates both the running Pane installation on this machine and
+the CLI installation that received the command. Use `--pane-only` or
+`--cli-only` to select one; these flags are mutually exclusive. `--version`
+continues to select the requested release. A managed CLI update stays pinned
+when an older Pane starts again. Global npm and supported pip environments are
+updated through their owning package manager; changing the bundled shim does
+not count as updating either package.
+
+Run `runpane update --dry-run --json` to inspect the machine, executable, CLI
+owner, and supervisor capability. App updates require a running host supporting
+the continuity protocol and a release with a matching `continuity.json` manifest.
+Both the running app and the requested target must support this protocol.
+Existing 2.4.182 releases do not provide this upgrade path; install a
+continuity-capable release manually first. See the
+[prerequisites and recovery guide](../../docs/UPDATE_RECOVERY.md). Non-stable/daemon
+installer options and custom download directories are refused. When this host
+cannot run the independent update (no standalone Node, an unwritable install, a
+system-managed Linux package, a cached/local npm install), `runpane update`
+asks the running Pane to install the latest release with its built-in updater
+instead, the same path as the Settings Update button. That handoff updates the
+app and its managed CLI; an npm or pip CLI is reported as not updated. With
+`--wait`, it returns once the relaunched Pane reports the new version. It
+applies to `--version latest` without `--pane-path`, `--cli-only` or `--dry-run`, and needs
+Pane open. Python delegates to the managed engine installed by Pane and records
+the invoking Python environment; without that engine or Node it hands off the
+same way.
+
+The command returns an operation ID after the independent helper acknowledges
+startup. That is acceptance, not completion. The
+[status fields, terminal phases and exit codes](../../docs/UPDATE_RECOVERY.md#status-and-exit-codes)
+distinguish installed components from a healthy host and restored panels. Use
+`runpane update --status <id> --wait --json` with the same `--pane-dir` to inspect
+installed components, host health, and each panel's restoration outcome. A
+current-user launchd, Task Scheduler, or systemd service owns the helper; its
+code and standalone runtime are staged outside the files being replaced.
+
+Settings installation uses this same operation; downloaded legacy updates never
+install implicitly on quit. Before downtime, Pane fences new mutations, waits for
+in-flight work, checks snapshot readability and capacity on every affected volume,
+and records a clean-shutdown acknowledgment after persistence and service cleanup.
+A forced exit or missing acknowledgment never authorizes installation.
+
+The helper stages and verifies packages before shutdown, preserves a data and
+browser-profile snapshot, replaces the identified installation, and checks the
+new host's version, endpoint/auth configuration, and data/profile identity.
+Active agents receive only their recorded resume command with the saved launch
+profile. A panel reports `resumed` only after the harness confirms that conversation
+identity and readiness; a launched shell or readiness timeout is not confirmation.
+Harnesses that cannot provide fresh identity evidence report `needs-attention`. It never sends a prompt or `continue`, guesses a conversation, or
+replays an uncertain action. Idle/completed/approval-blocked panels stay stopped;
+ambiguous active runs report `needs-attention`. Review a stopped panel before
+explicitly resuming it. A failed post-shutdown operation retains its lock and
+snapshot for inspection; it never downgrades a migrated database automatically.
+
+Updates need the current interactive login. Logout/reboot recovery and a
+`needs-attention` operation require inspecting durable status before further
+installation work. To choose another machine explicitly, run
+`runpane workspace <machine> exec -- runpane update`; the UI's selected host does
+not change the default update target.
+
+### Installer options
+
+The following options apply to `install client` and `install daemon`. For
+`update`, `--version` and `--dry-run` apply; `--pane-path` only verifies the
+running executable and cannot select another installation. `--download-dir`
+is refused; `--format` must be `auto` or the native update format (`zip` on
+macOS, `exe` on Windows, `appimage` on Linux).
+
 
 ```bash
 --version <latest|vX.Y.Z>
@@ -108,73 +177,155 @@ Daemon setup also forwards Pane remote-host options:
 polling. Under `--follow` it prints one line per event: `READY` (a turn ended),
 `BLOCKED` (the agent is waiting on a human), `IDLE`, `STUCK` (real unsubmitted
 composer text; an agent prompt suggestion never counts), `NEW`, `GONE`, `EXIT`,
-plus `HEARTBEAT` every 60 seconds as proof of life.
+and optional `HEARTBEAT` lines when enabled with `--heartbeat`.
 
 ```bash
 runpane watch --self-test
 runpane watch --follow
 ```
 
-The defaults are responsive: no settle, no batching, all event kinds, `IDLE`
-every 10 minutes. Panes and shell users see every event immediately.
+`--follow` has one default cadence: READY settles for 3 minutes, BLOCKED
+for 30 seconds, and non-urgent events batch every 10 minutes. IDLE starts at
+10 minutes and backs off to 30 minutes, 1 hour, 3 hours, then daily. Heartbeats
+are off. WATCH OK prints once when armed; WATCH EXPIRED and exit 0 end a watch
+after 3 quiet hours. Meaningful events reset expiry; IDLE and replay do not.
 
-A consumer that pays for every line (an orchestrator that re-reads its whole
-context per wake-up) opts into cadence shaping instead. This is the recommended
-orchestrator invocation, budgeted at about 6 wake-ups per active pane per hour
-worst case, usually 1 to 3:
+Individual duration overrides accept `30s`, `3m`, `3h`, or `0`: `--ready-settle`, `--blocked-settle`,
+`--min-interval`, `--idle-after`, `--expire-after`, `--heartbeat`, and
+watch `--timeout-ms` (for example, `--until-event --timeout-ms 30s`).
+`--expire-after 0` disables natural expiry. Bare values retain milliseconds,
+except heartbeat's legacy seconds. `--json` selects NDJSON; otherwise lines.
 
-```bash
-runpane watch --self-test
-runpane watch --follow --quiet --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff
-```
-
-When someone is waiting on the result, use the user-present profile instead:
-`--settle 60000 --blocked-settle 15000 --min-interval 120000` with no
-`--idle-backoff`, so `READY` arrives within about 3 minutes rather than 13.
-
-A Session orchestrator watches its whole Session with one command instead of
-one `--pane` per Pane. The daemon re-reads the Session's Panes on every read,
-so `sessions associate` and `sessions detach` need no re-arm, and `JOINED` and
-`LEFT` (`pane.associated`, `pane.detached`) report the change. For Session
-members with an open PR, the daemon also polls GitHub about every 3 minutes
-and reports `PR <pane-name> pane <pane-id> #<number> CONFLICTED`, `CHECKS
-PASSED` or `CHECKS FAILED <names>`, and `MERGED` (`pr.conflicted`,
-`pr.checks`, `pr.merged`) on transitions only. The cursor defaults to
-`session-<uuid>`:
+`--present` and `--profile` were removed. Use individual timing flags such as
+`--ready-settle 1m --blocked-settle 15s --min-interval 2m` to override the defaults.
 
 ```bash
-runpane watch --session <session-id> --follow --quiet --json --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone,pane.associated,pane.detached,pr.conflicted,pr.checks,pr.merged --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff
+runpane watch --session <session-id> --follow --json
+runpane watch --session <session-id> --follow --ready-settle 1m --blocked-settle 15s --min-interval 2m --json
+runpane watch --pane <pane-id> --until-event --json
 ```
 
-After a `RESET`, JSON baseline entries carry `replay: true`. They restate
-current state, so a replayed `agent.ready` is never `READY`.
+Session membership changes need no re-arm. Named cursors survive daemon
+restarts; the journal and PR baselines are saved together. RESET/DROPPED mean
+refresh the overview; replayed baseline entries never mean a new READY.
+`--until-event` waits for REPORT, BLOCKED, EXIT or GONE by default and exits 0
+when one arrives, immediately without follow settling or batching. A harness
+that consumes a named follow stream gets its cadence; a process-exit waiter
+keeps these immediate single-event semantics. Cadence requires a named consumer
+(explicit `--as` or the name assigned by follow). `--follow --since <generation>`
+has no consumer name and also bypasses settling and batching. Named `--as`
+cannot be combined with numeric `--since`; switching only the wait mode does
+not enable cadence for a numeric generation/epoch cursor.
+Override `--kinds` for PR events. Its `--timeout-ms` is a
+total deadline (exit 124); under follow it bounds each daemon request.
 
-- `--kinds` drops `agent.busy`; `BUSY` carries no action.
-- `--settle <ms>` emits `READY` only after the panel stays idle that long. A
-  `BUSY` inside the window cancels it silently, which removes the idle/working
-  flips a pane makes while it waits on subagents.
-- `--blocked-settle <ms>` does the same for `BLOCKED`, so a prompt answered in
-  the pane within seconds wakes nobody.
-- `--min-interval <ms>` holds non-urgent lines and flushes them together at
-  most once per interval. `BLOCKED` bypasses it.
-- `--idle-backoff` fires `IDLE` at `--idle-after`, then 30m, 1h, 3h, then
-  daily, and resets on any activity.
+REPORT remains the completion signal: workers use `runpane report --state
+ready|blocked|failed|done --summary-file <path>`, adding a PR/head and a question
+when blocked. READY alone is activity evidence. Read the full report with
+`runpane agents status --panel <id> --json`. Resume stopped workers in the same
+panel with `runpane panels resume --panel <id> --wait-ready --yes --json`.
 
-These flags require `--follow`. Pane Chat arms them automatically through its
-pane-orchestrator skill, so you only need them for your own scripts. Pass
-`--quiet` to any monitor that wakes an agent: it drops `WATCH OK`, `HEARTBEAT`,
-and `WATCH RECONNECTED` (`_ok`, `_heartbeat`, `_reconnected` in JSON), while
-`WATCH ERROR`, `RESET`, and `DROPPED` always print. Judge a dead watch by a
-non-zero exit or a `WATCH ERROR` line, not by silence. `runpane agent-context
---command watch --json` lists every flag with its default.
+Work an agent sends with `panels create`, `panes create` (with a prompt), or
+`panels submit` expects that report; `--no-expect-report` sends without
+waiting, and `--expect-report` asks for one on `--source user` work. If the
+agent goes ready, with nothing left running in the background, or exits
+without one,
+watchers that list `agent.report.missing` get `MISSING REPORT <pane> pane
+<pane-id> panel <panel-id> ready` with its last reply; add it to `--kinds`, for
+example `--until-event --kinds
+agent.report,agent.report.missing,agent.blocked,panel.exited,pane.gone`.
+`runpane inbox [--session <id|name>]` lists the reports, missing reports, and
+on-screen questions a Session has not acknowledged (an orchestrator reads it
+when it starts or resumes), and `runpane inbox ack <id>...` clears them.
 
-Workers can hand back a structured report with `runpane report --state
-ready|blocked|failed|done [--pr <n>] [--head <sha>] [--summary-file <path>]
-[--question <text>]`. Watchers receive it as `agent.report`
-(`REPORT <pane> pane <pane-id> panel <panel-id> ready pr#747 fc5dce9`) only
-when `--kinds` lists it, and it skips the `--min-interval` batch.
-`runpane panels last-message --panel <panel-id>` reads an agent's last reply
-from its transcript.
+To dispatch and get the result in one call, add `--wait`. It blocks on that
+panel and prints one line of JSON when the worker reports (exit 0), ends
+without a report (3, with `lastOutput`), waits on a prompt (4, with
+`screenLines`), or exits (5); `--timeout 30m` gives up with exit 124. Run it as
+a background task:
+
+```bash
+runpane panels submit --panel <panel-id> --input-file prompt.md --as-file-pointer --wait --yes
+```
+
+Do not pipe follow through `head` or `grep -m1` to wait. Run `--until-event` as
+a supported background task, act on its events, then re-arm with its cursor.
+Never sleep-poll your own background task output. WATCH ERROR/nonzero exit
+means failure: report it and re-arm once. A superseded cursor means keep the
+replacement. A normal expiry means re-arm with the next dispatch.
+
+### Watching a PR from any Pane
+
+```bash
+runpane pr watch --pane <pane-id> --url https://github.com/owner/repo/pull/123 --head <full-sha> --json
+runpane watch --pane <pane-id> --since <generation-returned-above> --epoch <epoch-returned-above> --until-event --json --kinds pr.checks,pr.conflicted,pr.base_changed,pr.base_deleted,pr.head,pr.review,pr.comment,pr.closed,pr.merged,pr.stopped,github.unavailable,github.recovered
+runpane pr list --pane <pane-id> --json
+runpane pr unwatch --pane <pane-id> --url https://github.com/owner/repo/pull/123 --json
+```
+
+Inside a Pane, registration defaults to its `PANE_SESSION_ID`. Registration
+returns `generation` and `epoch`; use both for the first wait, including events
+that arrived between registration and arming. An identical active registration
+retry returns its original generation, including after daemon restart, so a
+lost response cannot skip an unread event. A new head pin or unwatch/re-register
+starts a new registration. Process every returned NDJSON
+event, then persist its `gen` and `epoch`. Rearm with `--since <gen> --epoch
+<epoch>`; use `--limit 1` for one event per invocation. Never reuse the initial
+registration generation after delivering an event, and never combine `--as`
+with `--since` or `--epoch`. A named cursor is a separate daemon-managed mode.
+
+Ordinary daemon restarts preserve the epoch and unread retained events. On
+`_reset` or `_dropped`, resynchronize current GitHub state before accepting
+success, then persist the control record's `generation` and `epoch`. Ignore
+`replay`/`baseline` records as new events. Retention is bounded; a journal reset
+cannot recover lost history. A consumer crash before saving its cursor can
+replay an event, so actions must be idempotent. Registration uses the full
+host/repository/number identity. It pins success to `--head`, or the first
+observed head; a new head emits `pr.head` and needs a fresh registration before
+success can be reported. Read existing discussions before arming. A wake
+means inspect the change; it never authorizes merging.
+
+The watch also reports when the ground under the PR moves. `pr.base_changed`
+(`BASE CHANGED`) fires when the base branch is retargeted, by a person or by
+GitHub after a stack parent merges and its branch is deleted; `base.from` and
+`base.to` name the old and new base. `pr.base_deleted` (`BASE DELETED`) fires
+when the base branch no longer exists; GitHub may close the PR right after.
+Both arrive at once under `--follow`. Rebase onto the new base and recheck CI.
+
+The daemon batches up to 25 fingerprints per host every two minutes (plus up
+to ten seconds of jitter), reads details on changes and at a 30-minute
+backstop, and keeps 10% of GitHub quota for interactive work. It uses `gh auth
+token` for cached authentication and direct GraphQL for reads. Session PR
+branch discovery still uses Pane's existing `gh pr list` lookup.
+
+Failures emit immediately, even while other checks run. Success requires a
+complete, nonempty set of checks on the pinned head and all required checks
+passing (all checks when none are marked required). BLOCKED/UNKNOWN merge
+status conservatively withholds success, including when reviews are missing.
+Feedback from every account is included: agents and people can share a login.
+Checks passing is a signal to inspect the PR, not proof of complete readiness;
+optional failures can still produce a separate failure event. Merge/close,
+eight non-rate-limit failures, or ten comment-only updates stop registration;
+archiving/deleting the Pane removes it. Rate limits pause instead of consuming
+the failure budget. Outages and recovery are journal events.
+
+Fingerprints include individual check outcomes and thread resolution state, so
+equal aggregate counts do not hide swaps or edits. When the fingerprint window
+is truncated (over 100 checks/discussion items or multiple comments in a review
+thread), the daemon reads details each round. Detail reads page through up to
+2,000 checks and retain the latest 100 comments, reviews, threads, and comments
+per thread. Truncated discussions emit `pr.review` with an incomplete-feedback
+reason and withhold success; read the full discussion on GitHub.
+
+Baselines and events are replaced atomically before readers wake. This prevents
+a process crash from advancing a baseline without its event. Delivery remains
+bounded by journal retention and cursor acknowledgments; replay after a consumer
+crash before acknowledgment is possible. This is not an exactly-once or
+power-loss durability guarantee.
+
+Removed flags fail with replacement guidance: `--settle` became
+`--ready-settle`; `--format` became `--json`; all-managed/agents-only,
+quiet/no-control-lines, and idle-backoff are covered by defaults or profiles.
 
 ## Attribution
 
@@ -183,10 +334,14 @@ PyPI package downloads use `source=pip` when requesting release artifacts from
 matching GitHub release assets and prints a warning.
 
 The wrapper sends best-effort command failures and download lifecycle telemetry
-with a persisted anonymous `install_id`. Successful routine commands emit nothing.
+with a persisted anonymous `install_id`. Successful routine commands emit nothing,
+and neither do documented result exits such as `panels wait` not ready or `doctor`
+findings. A failure loop sends each cause at most once an hour, and at most 10
+failures an hour.
 Distinct `install_id` counts on `runpane_wrapper_*` events measure installs that
 report failures or download activity, not all CLI users. Telemetry is disabled in
-CI, when local analytics is explicitly opted out, or with `RUNPANE_TELEMETRY_DISABLED=1`.
+CI, when local analytics is explicitly opted out, or with `DO_NOT_TRACK=1` or
+`RUNPANE_TELEMETRY_DISABLED=1`.
 
 ## Maintenance Notes
 
@@ -201,7 +356,7 @@ shared installer behavior:
   behavior.
 - If daemon setup flags change, update docs, README files, and wrapper tests
   together.
-- Keep the CI wrapper matrix green: Linux, macOS, Windows, Node 20/22, and
+- Keep the CI wrapper matrix green: Linux, macOS, Windows, Node 22.23.4/24.22.1, and
   Python 3.8/3.13 (runs on PRs that touch the wrappers or contract).
 
 ## Publishing

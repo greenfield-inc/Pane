@@ -1,0 +1,198 @@
+<!doctype html>
+<!--
+  Start here: the template Migrate to Pane fills at the end of onboarding.
+
+  How to fill it:
+  - Replace every {{PLACEHOLDER}} and every block between FILL comments with
+    the person's data. Delete every comment, and every example row you did not
+    replace, before saving.
+  - Keep the fixed copy (anything outside a FILL block) word for word.
+  - Without a migration (the person said Not now, or nothing was found),
+    delete the section with id="receipt" and its entry in the contents line,
+    delete the "Is my real chat the old one or the new one?" question and its
+    answer, and renumber the section headings 1 to 5.
+  - The page stays one file with no network requests and no script.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Start here</title>
+<style>
+:root {
+  --bg: #fbfaf6; --panel: #ffffff; --ink: #1d2420; --muted: #5d6861; --line: #dcdfd6;
+  --accent: #2f7d4f; --accent-soft: #e4f1e7;
+  --warn: #9a5b00; --warn-soft: #fbefd9;
+  --bad: #a23a2f; --bad-soft: #f9e4e1;
+  --code: #f0f1eb;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #141815; --panel: #1b211d; --ink: #e7ebe6; --muted: #9aa69e; --line: #2e3731;
+    --accent: #6fc38d; --accent-soft: #1e3327;
+    --warn: #e5b566; --warn-soft: #352a15;
+    --bad: #ef9388; --bad-soft: #3a1f1c;
+    --code: #232a25;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+main { max-width: 46rem; margin: 0 auto; padding: 40px 16px 64px; }
+h1 { font-size: 1.75rem; line-height: 1.25; margin: 0 0 4px; }
+h2 { font-size: 1.2rem; margin: 40px 0 8px; }
+h3 { font-size: 1rem; margin: 20px 0 4px; }
+p { margin: 8px 0; }
+a { color: var(--accent); }
+.summary { color: var(--muted); margin: 0 0 16px; }
+.contents { font-size: 0.875rem; color: var(--muted); }
+.contents a { margin-right: 12px; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; margin: 12px 0; }
+.callout { border-left: 4px solid var(--accent); background: var(--accent-soft); border-radius: 6px; padding: 12px 16px; margin: 12px 0; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; margin: 8px 0; }
+.card .meta { color: var(--muted); font-size: 0.875rem; }
+table { width: 100%; border-collapse: collapse; font-size: 0.9375rem; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--muted); font-weight: 600; font-size: 0.8125rem; }
+.chip { display: inline-block; border-radius: 999px; padding: 0 8px; font-size: 0.8125rem; white-space: nowrap; }
+.chip.ok { background: var(--accent-soft); color: var(--accent); }
+.chip.warn { background: var(--warn-soft); color: var(--warn); }
+.chip.bad { background: var(--bad-soft); color: var(--bad); }
+code, .prompt { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.875rem; background: var(--code); border-radius: 4px; padding: 1px 5px; }
+.prompt { display: block; padding: 8px 10px; margin-top: 6px; white-space: pre-wrap; }
+ol.ladder { padding-left: 1.25rem; }
+ol.ladder li { margin: 14px 0; }
+.ladder .roadblock { font-weight: 600; }
+svg { width: 100%; height: auto; display: block; margin: 12px 0; }
+svg text { font: 13px -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; fill: var(--ink); }
+svg .muted { fill: var(--muted); }
+dt { font-weight: 600; margin-top: 10px; }
+dd { margin: 2px 0 0; }
+</style>
+</head>
+<body>
+<main>
+
+<h1>Start here</h1>
+<!-- FILL: one sentence. With a migration: "{{N}} of your agent sessions are in Pane, grouped into {{M}} Sessions." Without: "Pane is set up for {{PROJECT}}." -->
+<p class="summary">{{SUMMARY}}</p>
+
+<svg viewBox="0 0 640 170" role="img" aria-label="A Session holds the Panes doing one task; each Pane holds tabs">
+  <rect x="1" y="1" width="638" height="168" rx="12" fill="none" stroke="var(--accent)" stroke-width="2"/>
+  <text x="18" y="26">Session: one task, with its own chat</text>
+  <rect x="18" y="40" width="290" height="112" rx="8" fill="var(--panel)" stroke="var(--line)"/>
+  <text x="32" y="62">Pane: one branch in its own folder</text>
+  <rect x="32" y="76" width="122" height="30" rx="6" fill="var(--accent-soft)" stroke="var(--line)"/>
+  <text x="44" y="96">tab: an agent</text>
+  <rect x="166" y="76" width="128" height="30" rx="6" fill="var(--accent-soft)" stroke="var(--line)"/>
+  <text x="178" y="96">tab: a page</text>
+  <text x="32" y="138" class="muted">project · branch</text>
+  <rect x="332" y="40" width="290" height="112" rx="8" fill="var(--panel)" stroke="var(--line)" stroke-dasharray="5 4"/>
+  <text x="346" y="62">another Pane, another branch</text>
+  <rect x="346" y="76" width="122" height="30" rx="6" fill="var(--accent-soft)" stroke="var(--line)"/>
+  <text x="358" y="96">tab: a sub-agent</text>
+  <text x="346" y="138" class="muted">project · other-branch</text>
+</svg>
+
+<p class="contents">
+  <a href="#how">How to use Pane</a><a href="#workstreams">Your workstreams</a><a href="#receipt">What came over</a><a href="#reversible">Is it reversible?</a><a href="#words">The words</a><a href="#next">What to try next</a>
+</p>
+
+<section id="how">
+<h2>1. How to use Pane</h2>
+<div class="callout">
+  <p><strong>One Session per task.</strong> Tell it what you want, and its agent sets up the rest.</p>
+</div>
+<p>Start a new Session with the <strong>+</strong> beside <strong>Sessions</strong> in the left sidebar, or ask this chat to start one for you. When a task is done, archive its Session from the <strong>⋯</strong> button on its row.</p>
+</section>
+
+<section id="workstreams">
+<h2>2. Your workstreams</h2>
+<p>Each one is a Session in the left sidebar. Open it to pick up where you left off.</p>
+<!-- FILL: one card per workstream Session, most recently active first. The link is the url `runpane links create --session <id> --json` returns. With no workstreams, replace the cards with one line: "No work in Pane yet. Try one of the prompts at the end of this page." -->
+<div class="card">
+  <a href="{{SESSION_LINK}}"><strong>{{SESSION_NAME}}</strong></a>
+  <div>{{GOAL}}</div>
+  <div class="meta">Next: {{NEXT_ACTION}} · {{PANE_NAMES}}</div>
+</div>
+<!-- /FILL -->
+</section>
+
+<section id="receipt">
+<h2>3. What came over, and what didn't</h2>
+<!-- FILL: one sentence: "{{COUNT_CONTINUED}} sessions came over, {{COUNT_NOT}} did not, and {{COUNT_LEFT_OUT}} older ones were left out." -->
+<p>{{RECEIPT_SUMMARY}}</p>
+<!-- FILL: one table per repository, every session from the migration record, in the record's order. Result chip: ok for "continued", ok for "continued as a fork" (say "as a fork, on branch <branch>"), bad for "not continued" with what happened and the next step. -->
+<h3>{{REPOSITORY}}</h3>
+<table>
+  <tr><th>Session</th><th>From</th><th>Result</th></tr>
+  <tr><td>{{TITLE}}</td><td>{{TOOL}} · {{BRANCH}}</td><td><span class="chip ok">continued</span> in {{PANE_NAME}}</td></tr>
+</table>
+<!-- /FILL -->
+<h3>Left out</h3>
+<!-- FILL: every session the scan found that was not brought in, with why: last active more than 7 days ago, already in Pane, no folder, or outside any git repository. -->
+<table>
+  <tr><th>Session</th><th>From</th><th>Why</th></tr>
+  <tr><td>{{TITLE}}</td><td>{{TOOL}} · {{REPOSITORY}}</td><td>Last used {{DATE}}, more than 7 days ago</td></tr>
+</table>
+<!-- /FILL -->
+<p>To bring in anything left out, say <strong>"migrate to Pane"</strong> in any Session's chat. It shows the full list and lets you pick.</p>
+</section>
+
+<section id="reversible">
+<h2>4. Are my mistakes reversible?</h2>
+<dl>
+  <dt>If I delete my original folder, does it disappear here?</dt>
+  <dd>Pane opened your projects where they already were, so your folders are still yours. If you delete one outside Pane, Pane deletes nothing because of it: its Pane stays in the sidebar pointing at the missing folder, and archiving that Pane clears it from the list.</dd>
+  <dt>Is my real chat the old one or the new one?</dt>
+  <dd>The same conversation. Each session was resumed by its own id with Claude Code's or Codex's own resume, so what you say here continues it. A session that was still running elsewhere came over as a fork: a copy with its own id on a new branch, while the original kept running untouched. A session kept by another tool (Superset, Orca or T3 Code, for example) was copied into your own Claude Code or Codex folder, and continues in that copy. The table above says which happened to each.</dd>
+  <dt>What does archiving do?</dt>
+  <dd>Archiving a Session hides it from the list and keeps its chat and its Panes. Undo shows for a few seconds, and Archived in the sidebar restores it any time. Archiving a Pane that opened one of your own folders leaves that folder and its branch exactly as they are. Archiving a Pane that Pane created (a fork, or a new task) deletes its folder and keeps its branch: commit first, because uncommitted files in it are not kept.</dd>
+</dl>
+</section>
+
+<section id="words">
+<h2>5. The words</h2>
+<dl>
+  <dt>Session</dt>
+  <dd>One task's home: its chat, and the Panes doing the work. Sessions are listed in the left sidebar.</dd>
+  <dt>Pane</dt>
+  <dd>A Pane is a branch: one branch of one project, in its own folder, so agents on different tasks never edit the same files. Panes sit under their Session in the sidebar, named "project · branch".</dd>
+  <dt>Tab</dt>
+  <dd>One agent or page inside a Pane, shown along the top of the main area. A Pane can run several agents side by side.</dd>
+  <dt>Sub-agents</dt>
+  <dd>The Panes under a Session are sub-agents its orchestrator agent runs for you. The Session's chat starts them, checks on them and nudges them, so you don't flip between tabs.</dd>
+</dl>
+</section>
+
+<section id="next">
+<h2>6. What to try next</h2>
+<!-- FILL: 3 to 5 of the rungs below that fit what you saw, in this order. Keep each rung's roadblock and what removes it word for word; write the try-now prompt for the person's own repos and branches. Delete the rungs you leave out.
+
+  1. Roadblock: You wait on one agent and keep checking whether it needs you.
+     Removes it: Pane notifies you on your desktop and phone, and opens pages beside the chat.
+  2. Roadblock: You keep three copies of each repo so agents don't collide.
+     Removes it: Each task is a Pane on its own branch, archived when it's done.
+  3. Roadblock: You flip between tabs to see who's stuck.
+     Removes it: One Session per task; the Panes under it are sub-agents its orchestrator agent runs for you, checking on them and nudging them.
+  4. Roadblock: You push, rebase and watch CI by hand.
+     Removes it: The Session's agent handles git and watches the PR, with localhost open beside you.
+  5. Roadblock: Nothing happens unless you start it.
+     Removes it: Scheduled jobs, and keeping the computer awake for them.
+  6. Roadblock: Your laptop runs out of memory and agents freeze.
+     Removes it: Pane runs work on another connected machine, and its agent finds what's slowing this one and cleans it up.
+     Try now (always this shape): "Find what's slowing my machine and clean it up, then make that a job that runs every morning."
+-->
+<ol class="ladder">
+  <li>
+    <div class="roadblock">{{ROADBLOCK}}</div>
+    <div>{{WHAT_REMOVES_IT}}</div>
+    <span class="prompt">Try now: {{PROMPT_NAMING_A_REPO_OR_BRANCH}}</span>
+  </li>
+</ol>
+<!-- /FILL -->
+<p><strong>Want me to do any of these now? Say the number</strong> in the chat beside this page.</p>
+</section>
+
+</main>
+</body>
+</html>

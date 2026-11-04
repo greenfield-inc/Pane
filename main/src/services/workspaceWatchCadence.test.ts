@@ -92,6 +92,31 @@ describe('WatchCadence', () => {
     expect(kinds(cadence.flush(T0 + 3_000))).toEqual(['pr.conflicted']);
   });
 
+  it.each(['pr.head', 'pr.base_changed', 'pr.base_deleted', 'pr.closed', 'pr.stopped', 'github.unavailable', 'github.recovered'] as const)(
+    'flushes %s immediately and carries a held merge with it', kind => {
+      const cadence = new WatchCadence({ settleMs: 0, blockedSettleMs: 0, minIntervalMs: 300_000, key: '' });
+      cadence.ingest([entry('agent.ready', T0)], T0);
+      cadence.flush(T0);
+      cadence.ingest([entry('pr.merged', T0 + 1_000)], T0 + 1_000);
+      expect(cadence.flush(T0 + 1_000)).toEqual([]);
+      cadence.ingest([entry(kind, T0 + 2_000)], T0 + 2_000);
+      expect(cadence.nextDeadline(T0 + 2_000)).toBe(T0 + 2_000);
+      expect(kinds(cadence.flush(T0 + 2_000))).toEqual(['pr.merged', kind]);
+    },
+  );
+
+  it.each(['pr.merged', 'pr.review', 'pr.comment', 'pr.checks'] as const)(
+    'keeps %s in the ordinary batch until the interval ends', kind => {
+      const cadence = new WatchCadence({ settleMs: 0, blockedSettleMs: 0, minIntervalMs: 300_000, key: '' });
+      cadence.ingest([entry('agent.ready', T0)], T0);
+      cadence.flush(T0);
+      cadence.ingest([entry(kind, T0 + 1_000, kind === 'pr.checks' ? { checks: 'passed' } : {})], T0 + 1_000);
+      expect(cadence.nextDeadline(T0 + 1_000)).toBe(T0 + 300_000);
+      expect(cadence.flush(T0 + 299_999)).toEqual([]);
+      expect(kinds(cadence.flush(T0 + 300_000))).toEqual([kind]);
+    },
+  );
+
   it('batches non-urgent lines into one flush per interval', () => {
     const cadence = new WatchCadence({ settleMs: 0, blockedSettleMs: 0, minIntervalMs: 300_000, key: '' });
     cadence.ingest([entry('agent.ready', T0)], T0);

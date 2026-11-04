@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeUrl } from './browserUrl';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { normalizeUrl, WEBVIEW_ALLOW_POPUPS, webviewPartition } from './browserUrl';
 import { hasFileProtocol, localTargetOf, remapLoopbackPort } from '../../../../../shared/utils/browserUrl';
 import type { ListeningPort, ListeningPortsSnapshot } from '../../../../../shared/types/listeningPorts';
 
@@ -9,6 +11,21 @@ describe('browser file protocol selection', () => {
   });
   it.each([undefined, '', 'https://example.com/file:', 'not a URL'])('does not classify %j as a file URL', (url) => {
     expect(hasFileProtocol(url)).toBe(false);
+  });
+});
+
+describe('webviewPartition', () => {
+  it('puts every ordinary tab in the one shared login store, with no project or Session in its name', () => {
+    expect(webviewPartition(null)).toBe('persist:pane-browser');
+    expect(webviewPartition({ partition: null })).toBe('persist:pane-browser');
+  });
+
+  it('writes allowpopups to the webview, without which Electron blocks every sign-in popup', () => {
+    expect(renderToStaticMarkup(createElement('webview', WEBVIEW_ALLOW_POPUPS))).toBe('<webview allowpopups="true"></webview>');
+  });
+
+  it('keeps the isolated store main returns for a remote host file preview', () => {
+    expect(webviewPartition({ partition: 'remote-browser:host:url:panel-1' })).toBe('remote-browser:host:url:panel-1');
   });
 });
 

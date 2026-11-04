@@ -47,4 +47,31 @@ describe('WorkspaceWatchLeases', () => {
     expect(live.signal.aborted).toBe(false);
     live.release();
   });
+
+  it('counts a named watcher as attached while it polls and briefly between polls', () => {
+    vi.useFakeTimers();
+    const leases = new WorkspaceWatchLeases();
+    expect(leases.isAttached('dictate', 30_000)).toBe(false);
+
+    const poll = leases.acquire('dictate');
+    expect(leases.isAttached('dictate', 30_000)).toBe(true);
+    expect(leases.isAttached('monitor', 30_000)).toBe(false);
+
+    poll.release();
+    vi.advanceTimersByTime(29_000);
+    expect(leases.isAttached('dictate', 30_000)).toBe(true);
+    vi.advanceTimersByTime(2_000);
+    expect(leases.isAttached('dictate', 30_000)).toBe(false);
+  });
+
+  it('keeps the newest watcher attached when a superseded one releases', () => {
+    vi.useFakeTimers();
+    const leases = new WorkspaceWatchLeases();
+    const old = leases.acquire('dictate');
+    const replacement = leases.acquire('dictate');
+    old.release();
+    vi.advanceTimersByTime(60_000);
+    expect(leases.isAttached('dictate', 30_000)).toBe(true);
+    replacement.release();
+  });
 });

@@ -3,8 +3,9 @@ import {
   type BoundarySchema,
 } from '../../../shared/validation/boundaryDecoder';
 
-export function serializeJsonTransport<Value, Decoded>(
-  value: Value,
+export function serializeJsonTransport<Decoded>(
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- JSON transport serializes an external value, then validates the result with the supplied schema.
+  value: unknown,
   schema: BoundarySchema<Decoded>,
 ): Decoded {
   const serialized = JSON.stringify(value);

@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { API } from '../utils/api';
-import type { AppConfig, UpdateConfigRequest } from '../types/config';
+import type { AppConfig, HtmlFileOpenMode, UpdateConfigRequest } from '../types/config';
 
 interface ConfigStore {
   config: AppConfig | null;
@@ -24,6 +24,21 @@ export function isCommandPaletteShortcutEnabled(config: AppConfig | null): boole
 /** Mission Control is experimental: every entry point waits for this opt-in. */
 export function isMissionControlEnabled(config: AppConfig | null): boolean {
   return config?.missionControlEnabled === true;
+}
+
+/** Chat is experimental: agent tabs stay in Terminal until the user opts in. */
+export function isChatEnabled(config: AppConfig | null): boolean {
+  return config?.experimentalChatEnabled === true;
+}
+
+/** Notes is experimental: every entry point and the agents' notes file wait for this opt-in. */
+export function isNotesEnabled(config: AppConfig | null): boolean {
+  return config?.notesEnabled === true;
+}
+
+/** What a click on an .html file in Explorer opens; the browser preview unless the user chose source. */
+export function htmlFileOpenModeOf(config: AppConfig | null): HtmlFileOpenMode {
+  return config?.htmlFileOpenMode === 'source' ? 'source' : 'preview';
 }
 
 export const useConfigStore = create<ConfigStore>((set, get) => ({

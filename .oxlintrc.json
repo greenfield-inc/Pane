@@ -20,7 +20,8 @@
     "**/node_modules/**",
     "dist-electron/**",
     "tools/oxlint/anti-slop/**",
-    "main/src/services/paneChatBundle/**"
+    "main/src/services/paneChatBundle/**",
+    "native/**"
   ],
   "rules": {
     "eslint/for-direction": "error",

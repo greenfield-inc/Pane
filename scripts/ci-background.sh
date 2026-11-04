@@ -14,7 +14,8 @@ case "${action}" in
   start)
     rm -f "${dir}/${name}.exit"
     # Detach every stream so the step does not wait on an inherited pipe.
-    ( set +e; "$@"; echo $? >"${dir}/${name}.exit" ) </dev/null >"${dir}/${name}.log" 2>&1 &
+    ( set +e; start=$(date +%s); "$@"; status=$?
+      echo "${name} took $(( $(date +%s) - start ))s"; echo "${status}" >"${dir}/${name}.exit" ) </dev/null >"${dir}/${name}.log" 2>&1 &
     echo $! >"${dir}/${name}.pid"
     ;;
   wait)

@@ -3,12 +3,11 @@ import { useRef } from 'react';
 
 import type { PanelAgentStatusEvent } from '@shared/types/agentStatus';
 import type { PanePermissionRequest, PanePermissionResponse } from '@shared/types/permissions';
-import type { RunpanePaneCreateRequest, RunpanePaneCreateResult, RunpaneWorkspaceStateResult } from '@shared/types/runpaneOrchestration';
+import type { RunpaneWorkspaceStateResult } from '@shared/types/runpaneOrchestration';
 
 import { invokeChannel, useDaemon, useDaemonEvent, useDaemonQueryKey, useInvokeMutation, useInvokeQuery } from '@/daemon';
 
 import { agentStatusFromWorkspace, applyAgentStatusEvent, markSeen, type AgentStatusSnapshot } from './agentStatus';
-import type { BranchInfo } from './createPane';
 import { removePane, toggleFavorite, type ProjectWithPanes } from './paneList';
 
 const PANES = 'sessions:get-all-with-projects';
@@ -136,13 +135,4 @@ function useOptimisticRemoval(channel: string, list: string, invalidates: string
     queryClient.setQueryData<ProjectWithPanes[]>(queryKey, projects => projects && removePane(projects, paneId));
     await mutation.mutateAsync([paneId]);
   };
-}
-
-export function useBranches(projectId: number | undefined) {
-  return useInvokeQuery<BranchInfo[]>('projects:list-branches', [String(projectId)], { enabled: projectId !== undefined });
-}
-
-/** Creates the worktree and starts the agent in one host call. */
-export function useCreatePane() {
-  return useInvokeMutation<[RunpanePaneCreateRequest], RunpanePaneCreateResult>('runpane:panes:create', { invalidates: [PANES, WORKSPACE] });
 }

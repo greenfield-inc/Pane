@@ -47,7 +47,8 @@ interface RemoteSessionState extends RemoteHostState {
   setOrchestrationFailure: (availability: 'unavailable' | 'error', error: string | null) => void;
   setArchivedProjects: (projects: RemoteProjectWithSessions[]) => void;
   setPanels: (sessionId: string, panels: ToolPanel[]) => void;
-  setSelectedPanel: (panelId: string | null) => void;
+  /** Background restoration updates this page and caches only an unremembered default. */
+  setSelectedPanel: (panelId: string | null, options?: { restore?: boolean }) => void;
   upsertPanel: (panel: ToolPanel) => void;
   removePanel: (sessionId: string, panelId: string) => void;
 }
@@ -132,14 +133,14 @@ export const useRemoteSessionStore = create<RemoteSessionState>((set, get) => ({
     selectedPanelId: state.selectedPanelId ?? panels[0]?.id ?? null,
   })),
 
-  setSelectedPanel: (panelId) => {
+  setSelectedPanel: (panelId, options) => {
     set({ selectedPanelId: panelId });
     const { hostId, selectedSessionId, openOrchestrationSession, panelsBySessionId } = get();
     if (hostId && selectedSessionId && panelId) {
       // A tab the phone cannot show stays viewable, but only its Pane is remembered, so the phone never comes back to it.
       const panel = panelsBySessionId[selectedSessionId]?.find(candidate => candidate.id === panelId);
       const remembered = !panel || phoneShows(panel) ? panelId : undefined;
-      rememberRemoteView(hostId, { paneId: selectedSessionId, sessionId: openOrchestrationSession?.session.id ?? null, panelId: remembered });
+      rememberRemoteView(hostId, { paneId: selectedSessionId, sessionId: openOrchestrationSession?.session.id ?? null, panelId: remembered }, options);
     }
   },
 

@@ -20,6 +20,9 @@ esbuild.buildSync({
     'process.env.RUNPANE_BUNDLED_VERSION': JSON.stringify(version),
     'process.env.RUNPANE_BUNDLED_DOCS_INDEX': JSON.stringify(docsIndex),
   },
+  // npm runpane reads this line to hand off to a newer Pane-managed CLI
+  // (packages/runpane/src/managedCli.ts).
+  banner: { js: `// runpane-version ${version}` },
   logLevel: 'warning',
 });
 console.log(`Bundled runpane ${version} -> dist/runpane/runpane.cjs`);

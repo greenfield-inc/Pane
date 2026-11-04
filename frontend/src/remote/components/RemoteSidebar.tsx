@@ -1,5 +1,5 @@
 import { Archive, ArchiveRestore, ChevronDown, ChevronRight, MessageSquare, Monitor, MoreHorizontal, Pin, PinOff, Plus, RefreshCw, TerminalSquare, X } from 'lucide-react';
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, type ReactNode } from 'react';
 import type { OrchestrationSessionRecord } from '../../../../shared/types/orchestrationSession';
 import type { RemoteProjectWithSessions } from '../runtime/remoteRuntimeAdapter';
 import type { Session } from '../../types/session';
@@ -10,6 +10,7 @@ import { SessionStatusBadge } from '../../components/SessionStatusBadge';
 import { createProjectById, getPinnedSessions } from '../../utils/sessionOrdering';
 import { useRemoteSessionStore } from '../stores/remoteSessionStore';
 import { useRemoteSidebarSectionsStore, type RemoteSidebarSection } from '../stores/remoteSidebarSectionsStore';
+import { useRemoteExpandedSessionsStore } from '../stores/remoteExpandedSessionsStore';
 
 /** Sidebar actions. Panes are the PWA's "sessions"; Sessions are orchestration Sessions. */
 export interface RemoteSidebarActions {
@@ -61,7 +62,10 @@ export function RemoteSidebar({
   const archivedProjects = useRemoteSessionStore(state => state.archivedProjects);
   const expanded = useRemoteSidebarSectionsStore(state => state.expanded);
   const toggleSection = useRemoteSidebarSectionsStore(state => state.toggle);
-  const [collapsedSessionIds, setCollapsedSessionIds] = useState<ReadonlySet<string>>(new Set());
+  const hostId = useRemoteSessionStore(state => state.hostId);
+  const expandedSessionIds = useRemoteExpandedSessionsStore(state => state.expanded);
+  const loadExpandedSessions = useRemoteExpandedSessionsStore(state => state.load);
+  const toggleSessionExpanded = useRemoteExpandedSessionsStore(state => state.toggle);
   const sessionsSupported = sessionsAvailability !== 'unavailable';
 
   const paneById = useMemo(
@@ -79,6 +83,11 @@ export function RemoteSidebar({
     [sessions],
   );
 
+  // Each host has its own opened Sessions on this device.
+  useEffect(() => {
+    loadExpandedSessions(hostId);
+  }, [hostId, loadExpandedSessions]);
+
   // Loaded up front so the collapsed Archived header can show its count.
   useEffect(() => {
     if (archivedProjects === null) actions.loadArchived();
@@ -91,6 +100,8 @@ export function RemoteSidebar({
     const scopes: string[] = [];
     const addSessionScopes = (list: OrchestrationSessionRecord[], placement: 'pinned' | 'sessions') => {
       for (const session of list) {
+        // A collapsed Session's Pane rows are hidden, so they cannot carry the highlight.
+        if (!expandedSessionIds.has(session.id)) continue;
         if (session.associations.some(association => association.paneId === selectedPaneId)) scopes.push(`${placement}:${session.id}`);
       }
     };
@@ -100,7 +111,7 @@ export function RemoteSidebar({
     if (paneById.has(selectedPaneId)) scopes.push('repositories');
     const tapped = selectedPane?.paneId === selectedPaneId ? selectedPane.scope : null;
     return tapped && scopes.includes(tapped) ? tapped : scopes[0] ?? null;
-  }, [activeSessions, openSessionId, paneById, pinnedPanes, pinnedSessions, selectedPane, selectedPaneId]);
+  }, [activeSessions, expandedSessionIds, openSessionId, paneById, pinnedPanes, pinnedSessions, selectedPane, selectedPaneId]);
 
   const paneRow = (pane: Session, label: string, scope: string, detail?: string) => (
     <RemotePaneRow
@@ -122,7 +133,8 @@ export function RemoteSidebar({
       .filter((pane): pane is Session => pane !== undefined);
     const paneIds = panes.map(pane => pane.id);
     const nestedKey = `${placement}:${session.id}`;
-    const nestedExpanded = !collapsedSessionIds.has(nestedKey);
+    // Collapsed until the person opens it with the chevron; nothing else expands a Session.
+    const nestedExpanded = expandedSessionIds.has(session.id);
     const nestedId = `remote-session-panes-${placement}-${session.id}`;
     const name = session.name || 'Untitled';
     return (
@@ -135,7 +147,7 @@ export function RemoteSidebar({
           {panes.length > 0 ? (
             <button
               type="button"
-              onClick={() => setCollapsedSessionIds(current => toggleSetMember(current, nestedKey))}
+              onClick={() => toggleSessionExpanded(session.id)}
               aria-expanded={nestedExpanded}
               aria-controls={nestedId}
               aria-label={`${nestedExpanded ? 'Hide' : 'Show'} panes in ${name}`}
@@ -268,7 +280,7 @@ export function RemoteSidebar({
             )}
           >
             {sessionsError && (
-              <div role="alert" className="mx-2 rounded-md border border-status-error/40 bg-status-error/10 px-3 py-2 text-xs text-status-error">
+              <div role="alert" className="mx-2 rounded-md border border-status-error/40 bg-status-error/10 px-3 py-2 text-xs text-text-primary">
                 <p>{sessionsError}</p>
                 <button type="button" onClick={actions.reloadSessions} className="mt-1 underline">Retry</button>
               </div>
@@ -369,13 +381,6 @@ export function RemoteSidebar({
       </div>
     </aside>
   );
-}
-
-function toggleSetMember(current: ReadonlySet<string>, member: string): ReadonlySet<string> {
-  const next = new Set(current);
-  if (next.has(member)) next.delete(member);
-  else next.add(member);
-  return next;
 }
 
 interface SidebarSectionProps {

@@ -183,6 +183,22 @@ export function placePanelInSplit(root: PanelLayoutNode, panelId: string, activa
     : splitGroup(root, primary.id, panelId, 'row', true);
 }
 
+/**
+ * Show a panel beside the primary group for an agent's split request. Unlike
+ * placePanelInSplit, a tab already in the primary group moves out to the side
+ * group (shown there), unless it is that group's only tab. A tab already in a
+ * side group stays where it is.
+ */
+export function showPanelInSplit(root: PanelLayoutNode, panelId: string): PanelLayoutNode {
+  const primary = primaryGroup(root);
+  if (!primary.panelIds.includes(panelId)) return placePanelInSplit(root, panelId);
+  if (primary.panelIds.length === 1) return root;
+  const side = allGroups(root).filter(group => group.id !== primary.id).pop();
+  return side
+    ? movePanel(root, panelId, { groupId: side.id, index: side.panelIds.length })
+    : movePanel(root, panelId, { groupId: primary.id, edge: 'right' });
+}
+
 // ---------------------------------------------------------------------------
 // Normalize
 // ---------------------------------------------------------------------------

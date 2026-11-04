@@ -55,6 +55,8 @@ export const Tooltip = React.forwardRef<HTMLElement, TooltipProps>(({
   onBlur,
   onKeyDown,
   onPointerDown,
+  onPointerEnter,
+  onPointerLeave,
   ...triggerProps
 }, forwardedRef) => {
   const [isOpen, setIsOpen] = useState(false);
@@ -179,6 +181,16 @@ export const Tooltip = React.forwardRef<HTMLElement, TooltipProps>(({
           onMouseLeave?.(event);
           if (!event.defaultPrevented) hide();
         }}
+        // Chromium sends no mouse events to a disabled button, only pointer
+        // events, so these carry the hover for a disabled trigger's tooltip.
+        onPointerEnter={(event) => {
+          onPointerEnter?.(event);
+          if (!event.defaultPrevented && event.pointerType === 'mouse' && event.currentTarget.matches(':disabled')) show();
+        }}
+        onPointerLeave={(event) => {
+          onPointerLeave?.(event);
+          if (!event.defaultPrevented && event.pointerType === 'mouse' && event.currentTarget.matches(':disabled')) hide();
+        }}
         onPointerDown={(event) => {
           onPointerDown?.(event);
           // Clicking or right-clicking the trigger means the pointer is busy with
@@ -188,7 +200,9 @@ export const Tooltip = React.forwardRef<HTMLElement, TooltipProps>(({
         }}
         onFocus={(event) => {
           onFocus?.(event);
-          if (!event.defaultPrevented) show();
+          // Keyboard focus only: a press also focuses the trigger, and reopening
+          // here would undo the dismissal in onPointerDown.
+          if (!event.defaultPrevented && event.currentTarget.matches(':focus-visible')) show();
         }}
         onBlur={(event) => {
           onBlur?.(event);

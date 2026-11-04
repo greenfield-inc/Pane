@@ -14,8 +14,26 @@ import { SettingRow, SettingsPage } from '../SettingRow';
 import { ImmediateToggle, SegmentedControl } from '../SettingsControls';
 import type { SettingsPersistence } from '../useSettingsPersistence';
 import { useTheme } from '../../../contexts/ThemeContext';
-import { isLightTheme, isTheme, type AppearanceMode, type Theme } from '../../../../../shared/types/appearance';
-import { themeOptionGroupsForSlot, type ThemeSlot } from '../../../utils/themeOptions';
+import { isTheme, type AppearanceMode, type Theme } from '../../../../../shared/types/appearance';
+import { THEME_OPTION_GROUPS } from '../../../utils/themeOptions';
+
+const paletteSelect = (label: string, value: Theme, onChange: (theme: Theme) => void) => (
+  <div className="w-full min-w-[220px] sm:w-60">
+    <Select value={value} onValueChange={(next) => { if (isTheme(next)) onChange(next); }}>
+      <SelectTrigger aria-label={label}><SelectValue /></SelectTrigger>
+      <SelectContent>
+        {THEME_OPTION_GROUPS.map((group) => (
+          <SelectGroup key={group.family}>
+            <SelectLabel>{group.family}</SelectLabel>
+            {group.options.map((theme) => (
+              <SelectItem key={theme.id} value={theme.id} description={theme.description}>{theme.label}</SelectItem>
+            ))}
+          </SelectGroup>
+        ))}
+      </SelectContent>
+    </Select>
+  </div>
+);
 
 export function AppearanceSettings({ persistence }: { persistence: SettingsPersistence }) {
   const config = persistence.config!;
@@ -26,24 +44,6 @@ export function AppearanceSettings({ persistence }: { persistence: SettingsPersi
   const saveAppearance = (settingId: 'appearance-mode' | 'theme' | 'system-light-theme' | 'system-dark-theme', patch: Parameters<typeof setAppearance>[0]) => {
     return persistence.runSave(settingId, () => setAppearance(patch));
   };
-
-  const paletteSelect = (label: string, value: Theme, slot: ThemeSlot, onChange: (theme: Theme) => void) => (
-    <div className="w-full min-w-[220px] sm:w-60">
-      <Select value={value} onValueChange={(next) => { if (isTheme(next)) onChange(next); }}>
-        <SelectTrigger aria-label={label}><SelectValue /></SelectTrigger>
-        <SelectContent>
-          {themeOptionGroupsForSlot(slot).map((group) => (
-            <SelectGroup key={group.family}>
-              <SelectLabel>{group.family}</SelectLabel>
-              {group.options.map((theme) => (
-                <SelectItem key={theme.id} value={theme.id} description={theme.description}>{theme.label}</SelectItem>
-              ))}
-            </SelectGroup>
-          ))}
-        </SelectContent>
-      </Select>
-    </div>
-  );
 
   return (
     <SettingsPage title="Appearance" description="Application-wide interface and sidebar presentation.">
@@ -64,8 +64,8 @@ export function AppearanceSettings({ persistence }: { persistence: SettingsPersi
               description={activeSystemSlot === 'light' ? 'Active now' : 'Saved for when the system switches'}
               saveState={persistence.saveStates['system-light-theme']}
             >
-              {paletteSelect('Light palette', appearance.systemLightTheme, 'light', (theme) => {
-                if (isLightTheme(theme)) void saveAppearance('system-light-theme', { systemLightTheme: theme });
+              {paletteSelect('Light palette', appearance.systemLightTheme, (theme) => {
+                void saveAppearance('system-light-theme', { systemLightTheme: theme });
               })}
             </SettingRow>
             <SettingRow
@@ -74,14 +74,14 @@ export function AppearanceSettings({ persistence }: { persistence: SettingsPersi
               description={activeSystemSlot === 'dark' ? 'Active now' : 'Saved for when the system switches'}
               saveState={persistence.saveStates['system-dark-theme']}
             >
-              {paletteSelect('Dark palette', appearance.systemDarkTheme, 'dark', (theme) => {
-                if (!isLightTheme(theme)) void saveAppearance('system-dark-theme', { systemDarkTheme: theme });
+              {paletteSelect('Dark palette', appearance.systemDarkTheme, (theme) => {
+                void saveAppearance('system-dark-theme', { systemDarkTheme: theme });
               })}
             </SettingRow>
           </>
         ) : (
           <SettingRow settingId="theme" label="Theme" description="Choose Pane's color and surface treatment." saveState={persistence.saveStates.theme}>
-            {paletteSelect('Theme', appearance.theme, 'any', (theme) => { void saveAppearance('theme', { theme }); })}
+            {paletteSelect('Theme', appearance.theme, (theme) => { void saveAppearance('theme', { theme }); })}
           </SettingRow>
         )}
         <SettingRow

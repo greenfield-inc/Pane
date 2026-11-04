@@ -4,13 +4,45 @@ export interface JsonObject { [key: string]: JsonValue }
 
 export class BoundaryDecodeError extends Error {
   readonly path: DecodePath;
+  /** The problem without its location, such as "expected string". */
+  readonly reason: string;
 
   constructor(message: string, path: DecodePath = []) {
     const location = path.length === 0 ? "input" : `input.${path.join(".")}`;
     super(`${location}: ${message}`);
     this.name = "BoundaryDecodeError";
     this.path = path;
+    this.reason = message;
   }
+}
+
+/** One problem found by `decodeBoundaryAll`; `where` reads like `outputs[0].label` ("input" for the root). */
+export interface BoundaryIssue {
+  readonly path: DecodePath;
+  readonly where: string;
+  readonly message: string;
+}
+
+/** Every problem `decodeBoundaryAll` found, in schema field order; the message lists them as `where: message; ...`. */
+export class BoundaryDecodeIssues extends BoundaryDecodeError {
+  readonly issues: readonly BoundaryIssue[];
+
+  constructor(issues: readonly BoundaryIssue[]) {
+    const text = issues.map(issue => `${issue.where}: ${issue.message}`).join("; ");
+    super(text, []);
+    this.name = "BoundaryDecodeIssues";
+    this.message = text;
+    this.issues = issues;
+  }
+}
+
+/** `outputs[0].label` notation for a decode path; the root is "input". */
+export function formatBoundaryPath(path: DecodePath): string {
+  if (path.length === 0) return "input";
+  return path.reduce<string>((text, key) => {
+    if (typeof key === "number") return `${text}[${key}]`;
+    return text.length === 0 ? key : `${text}.${key}`;
+  }, "");
 }
 
 export interface BoundaryCursor {
@@ -18,6 +50,13 @@ export interface BoundaryCursor {
   readonly path: DecodePath;
   child(key: string | number, value: unknown): BoundaryCursor;
   fail(message: string): never;
+  /**
+   * Records a child's failure when decoding with `decodeBoundaryAll` and returns true, so the
+   * caller moves on to the next field; returns false otherwise, and the caller rethrows.
+   */
+  collect(error: BoundaryDecodeError): boolean;
+  /** The same position without collecting, for schemas that must see the first failure (unions). */
+  strict(): BoundaryCursor;
 }
 
 export interface BoundarySchema<T> {
@@ -31,17 +70,47 @@ type InferObject<Fields extends ObjectFields> = {
   [Key in keyof Fields]: InferSchema<Fields[Key]>;
 };
 
-function cursor(value: unknown, path: DecodePath = []): BoundaryCursor {
+function cursor(value: unknown, path: DecodePath = [], issues?: BoundaryIssue[]): BoundaryCursor {
   return {
     value,
     path,
     child(key, childValue) {
-      return cursor(childValue, [...path, key]);
+      return cursor(childValue, [...path, key], issues);
     },
     fail(message) {
       throw new BoundaryDecodeError(message, path);
     },
+    collect(error) {
+      if (!issues) return false;
+      issues.push(issueFrom(error));
+      return true;
+    },
+    strict() {
+      return cursor(value, path);
+    },
   };
+}
+
+function issueFrom(error: BoundaryDecodeError): BoundaryIssue {
+  return { path: error.path, where: formatBoundaryPath(error.path), message: error.reason };
+}
+
+/** Decodes one child; in collecting mode a failure is recorded (an absent value as "missing") and undefined returned. */
+function decodeChild<Value>(
+  current: BoundaryCursor,
+  key: string | number,
+  value: unknown,
+  schema: BoundarySchema<Value>,
+): Value | undefined {
+  const child = current.child(key, value);
+  try {
+    return schema.decode(child);
+  } catch (error) {
+    if (!(error instanceof BoundaryDecodeError)) throw error;
+    const reported = value === undefined ? new BoundaryDecodeError("missing", child.path) : error;
+    if (!current.collect(reported)) throw error;
+    return undefined;
+  }
 }
 
 function primitive<T extends string | number | boolean>(
@@ -70,7 +139,7 @@ function decodeUnion<Schemas extends readonly BoundarySchema<unknown>[]>(
   for (const schema of schemas) {
     try {
       // SAFETY: Schemas[number] is the schema being decoded in this iteration.
-      return schema.decode(current) as InferSchema<Schemas[number]>;
+      return schema.decode(current.strict()) as InferSchema<Schemas[number]>;
     } catch (error) {
       if (!(error instanceof BoundaryDecodeError)) throw error;
     }
@@ -78,7 +147,11 @@ function decodeUnion<Schemas extends readonly BoundarySchema<unknown>[]>(
   return current.fail("did not match any allowed shape");
 }
 
+/** Past this nesting a JSON value fails to decode, rather than overflowing the stack. */
+const MAX_JSON_DEPTH = 512;
+
 function decodeJsonValue(current: BoundaryCursor): JsonValue {
+  if (current.path.length > MAX_JSON_DEPTH) return current.fail(`JSON nesting is deeper than ${MAX_JSON_DEPTH} levels`);
   if (
     current.value === null ||
     typeof current.value === "string" ||
@@ -97,7 +170,8 @@ function decodeJsonValue(current: BoundaryCursor): JsonValue {
     for (const [key, value] of Object.entries(source)) {
       // Match JSON.stringify: an undefined property is an absent key, not an invalid value.
       if (value === undefined) continue;
-      decoded[key] = decodeJsonValue(current.child(key, value));
+      // Define, not assign: a JSON key named __proto__ must stay an own key, not set the prototype.
+      Object.defineProperty(decoded, key, { value: decodeJsonValue(current.child(key, value)), enumerable: true, writable: true, configurable: true });
     }
     return decoded;
   }
@@ -163,7 +237,8 @@ export const boundary = {
       decode(current) {
         const values = current.value;
         if (Array.isArray(values)) {
-          return values.map((value, index) => schema.decode(current.child(index, value)));
+          // SAFETY: decodeChild returns undefined only after recording an issue, and decodeBoundaryAll then throws.
+          return values.map((value, index) => decodeChild(current, index, value, schema) as Value);
         }
         return current.fail("expected array");
       },
@@ -181,9 +256,22 @@ export const boundary = {
         for (const key of Object.keys(fields)) {
           const schema = fields[key];
           if (schema === undefined) current.fail(`missing schema for ${key}`);
-          decoded.push([key, schema.decode(current.child(key, source[key]))]);
+          decoded.push([key, decodeChild(current, key, source[key], schema)]);
         }
         return materializeObject<Fields>(decoded);
+      },
+    };
+  },
+  /** Accepts a decoded value only when `test` holds; otherwise fails with `message`. */
+  refine<Value>(
+    schema: BoundarySchema<Value>,
+    test: (value: Value) => boolean,
+    message: string,
+  ): BoundarySchema<Value> {
+    return {
+      decode(current) {
+        const value = schema.decode(current);
+        return test(value) ? value : current.fail(message);
       },
     };
   },
@@ -203,6 +291,28 @@ export function decodeBoundary<Value>(
   schema: BoundarySchema<Value>,
 ): Value {
   return schema.decode(cursor(value));
+}
+
+/**
+ * Like `decodeBoundary`, but reports every problem at once: object fields and array items are all
+ * decoded, an absent required field reads "missing", and a failure throws `BoundaryDecodeIssues`.
+ * Opt-in, for payloads people and agents write by hand.
+ */
+export function decodeBoundaryAll<Value>(
+  value: unknown,
+  schema: BoundarySchema<Value>,
+): Value {
+  const issues: BoundaryIssue[] = [];
+  let decoded: Value;
+  try {
+    decoded = schema.decode(cursor(value, [], issues));
+  } catch (error) {
+    if (!(error instanceof BoundaryDecodeError)) throw error;
+    issues.push(issueFrom(error));
+    throw new BoundaryDecodeIssues(issues);
+  }
+  if (issues.length > 0) throw new BoundaryDecodeIssues(issues);
+  return decoded;
 }
 
 export function decodeOptionalBoundary<Value>(

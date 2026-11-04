@@ -1,3 +1,4 @@
+import { AgentPanelSurface } from '../../components/agentChat/AgentPanelSurface';
 import type { ToolPanel } from '../../../../shared/types/panels';
 import type {
   RemotePaneConnectionStatus,
@@ -14,13 +15,19 @@ interface RemoteTerminalPanelProps {
   panel: ToolPanel;
   sessionId: string;
   connectionStatus: RemotePaneConnectionStatus;
+  /** Undefined until the host reports its Chat flag. */
+  chatEnabled?: boolean;
   shortcuts: RemotePwaTerminalShortcut[];
   voiceTranscription: RemotePwaVoiceTranscriptionAffordance;
   shortcutsLoading?: boolean;
   onRefreshShortcuts: () => void;
 }
 
-export function RemoteTerminalPanel({
+export function RemoteTerminalPanel(props: RemoteTerminalPanelProps) {
+  return <AgentPanelSurface panel={props.panel} client={props.adapter.agentChat} connected={props.connectionStatus === 'connected'} chatEnabled={props.chatEnabled}><NativeRemoteTerminalPanel {...props} /></AgentPanelSurface>;
+}
+
+function NativeRemoteTerminalPanel({
   adapter,
   panel,
   sessionId,
@@ -71,10 +78,9 @@ export function RemoteTerminalPanel({
         onCreateStreamingSocket={() => adapter.createDeepgramStreamingSocket()}
         onGetDeepgramToken={() => adapter.getDeepgramStreamingToken()}
         onFinalizeStreamingAudio={(request) => adapter.finalizeStreamingVoice(request)}
-        onSendInput={(data) => {
-          void sendInput(data).then(() => {
-            window.requestAnimationFrame(focusTerminal);
-          });
+        onSendInput={async (data) => {
+          await sendInput(data);
+          window.requestAnimationFrame(focusTerminal);
         }}
       />
     </div>

@@ -259,3 +259,38 @@ export function detectAgentState(
     matchedRuleId: winner.id,
   };
 }
+
+/** At most this many lines describe the prompt a blocked agent waits on. */
+const MAX_BLOCKED_SCREEN_LINES = 20;
+/**
+ * At least this many: a picker's last rule can sit just above its footer, so the region alone
+ * may miss the question above it.
+ */
+const MIN_BLOCKED_SCREEN_LINES = 12;
+
+/**
+ * The screen lines of the prompt a blocked panel waits on: the bottom of the screen, covering the
+ * region the winning rule matched (prompts are live at the bottom), 12 to 20 non-empty lines.
+ */
+export function blockedScreenLines(
+  manifest: AgentManifest,
+  ruleId: string | null,
+  input: AgentDetectionInput,
+): string[] {
+  const nonEmptyLines = (text: string) => text
+    .split('\n')
+    .map(line => line.trimEnd())
+    .filter(line => line.trim().length > 0);
+  const rule = manifest.rules.find(candidate => candidate.id === ruleId);
+  const regionLineCount = rule && !rule.region.startsWith('osc_')
+    ? nonEmptyLines(extractRegion(input, rule.region)).length
+    : 0;
+  const count = Math.min(MAX_BLOCKED_SCREEN_LINES, Math.max(MIN_BLOCKED_SCREEN_LINES, regionLineCount));
+  return nonEmptyLines(input.screen).slice(-count);
+}
+
+/** Prompt identity ignores focus markers and layout whitespace, but retains the question and choices. */
+export function blockedPromptKey(reason: string | null | undefined, lines: readonly string[] = []): string {
+  return JSON.stringify([reason ?? null, lines.map(line => line.trim()
+    .replace(/^[❯›>→●○◉◯✓✔]\s*/u, '').replace(/\s+/gu, ' ').trim()).filter(Boolean)]);
+}

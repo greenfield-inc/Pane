@@ -14,7 +14,7 @@ export const PANE_LINK_SCHEME = 'pane';
 export const OPEN_PANE_LINK_CHANNEL = 'runpane:links:open';
 
 
-const LINK_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+const LINK_ID = /^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$/;
 const REPO_ID = /^[1-9][0-9]{0,15}$/;
 const ALLOWED_PARAMS = new Set(['pane', 'panel', 'repo', 'session']);
 const MAX_LINK_LENGTH = 2048;

@@ -64,7 +64,7 @@ export function DocumentFilePreview({ sessionId, filePath, fileName, kind }: Pre
   const [document, setDocument] = useState<{ text: string; truncated: boolean } | null>(null);
   const [listing, setListing] = useState<FilePreviewListing | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const isText = ['markdown', 'html', 'table', 'structured'].includes(kind);
+  const isText = ['markdown', 'table', 'structured'].includes(kind);
   useEffect(() => {
     if (!url) return;
     const controller = new AbortController();
@@ -105,9 +105,9 @@ export function DocumentFilePreview({ sessionId, filePath, fileName, kind }: Pre
   return (
     <div className="h-full flex flex-col bg-surface-primary">
       <div className="flex flex-wrap items-center gap-3 px-4 py-2 border-b border-border-primary text-xs text-text-secondary">
-        <span>{kind === 'html' ? 'Read-only HTML source' : 'Read-only preview'}</span>
+        <span>Read-only preview</span>
         {kind === 'pdf' && <FilePreviewActions sessionId={sessionId} filePath={filePath} />}
-        {isText && kind !== 'html' && <div className="flex gap-2">
+        {isText && <div className="flex gap-2">
           <button type="button" aria-pressed={!source} onClick={() => setSource(false)} className="px-2 py-1 rounded bg-surface-secondary text-text-primary">Preview</button>
           <button type="button" aria-pressed={source} onClick={() => setSource(true)} className="px-2 py-1 rounded bg-surface-secondary text-text-primary">Source</button>
         </div>}

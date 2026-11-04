@@ -9,6 +9,7 @@ import type {
   VoiceTranscriptionUsage,
   VoiceStreamingFinalizeRequest,
 } from '../../../shared/types/voiceTranscription';
+import { voiceKeyProblem, type VoiceKeyCheck } from '../../../shared/voice/voiceKeys';
 import {
   boundary,
   decodeBoundary,
@@ -21,6 +22,8 @@ const FAL_WIZPER_ENDPOINT = 'https://fal.run/fal-ai/wizper';
 const FAL_STORAGE_UPLOAD_INITIATE_ENDPOINT = 'https://rest.alpha.fal.ai/storage/upload/initiate?storage_type=fal-cdn-v3';
 const OPENROUTER_CHAT_COMPLETIONS_ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
 const DEEPGRAM_AUTH_GRANT_ENDPOINT = 'https://api.deepgram.com/v1/auth/grant';
+const DEEPGRAM_PROJECTS_ENDPOINT = 'https://api.deepgram.com/v1/projects';
+const KEY_CHECK_TIMEOUT_MS = 8_000;
 const CLEANUP_MODEL = 'google/gemini-3.1-flash-lite' as const;
 const MAX_AUDIO_BYTES = 10 * 1024 * 1024;
 const MAX_AUDIO_DURATION_MS = 15 * 60_000;
@@ -811,4 +814,28 @@ function firstNonEmpty(...values: Array<string | undefined>): string | undefined
     }
   }
   return undefined;
+}
+
+/**
+ * Asks Deepgram whether it takes `key`, by listing the key's projects. A refusal is 401; a 403
+ * can be a working key scoped without project access, so it and any other non-success mean Pane
+ * couldn't tell. Never logs or returns the key.
+ */
+export async function checkDeepgramKey(key: string): Promise<VoiceKeyCheck> {
+  const problem = voiceKeyProblem('deepgramApiKey', key);
+  if (problem) return { result: 'rejected', message: `${problem.message} ${problem.next}` };
+  let status: number;
+  try {
+    status = (await fetch(DEEPGRAM_PROJECTS_ENDPOINT, {
+      headers: { Authorization: `Token ${key}` },
+      signal: AbortSignal.timeout(KEY_CHECK_TIMEOUT_MS),
+    })).status;
+  } catch (error) {
+    return { result: 'unchecked', message: `Saved, but Pane couldn't reach Deepgram to check the key (${error instanceof Error ? error.message : String(error)}). Live dictation will say if Deepgram refuses it.` };
+  }
+  if (status >= 200 && status < 300) return { result: 'accepted', message: 'Deepgram accepted this key.' };
+  if (status === 401) {
+    return { result: 'rejected', message: 'Saved, but Deepgram rejected this key (HTTP 401). Copy a current key from console.deepgram.com and paste it again.' };
+  }
+  return { result: 'unchecked', message: `Saved, but Deepgram answered HTTP ${status}, so Pane couldn't check the key. Live dictation will say if Deepgram refuses it.` };
 }

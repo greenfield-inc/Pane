@@ -330,8 +330,9 @@ function renderMarkdown(contract) {
   lines.push('');
 
   lines.push('## Compatibility Floors', '');
-  lines.push(`The npm wrapper should run on Node.js \`${contract.compatibility.node}\` and newer. The root Electron app`);
-  lines.push('may require a newer Node.js version for development and packaging.', '');
+  lines.push(`The npm wrapper requires Node.js \`${contract.compatibility.node}\`, matching the root development baseline.`);
+  lines.push('The CLI rejects unsupported runtimes before dispatching commands and before staging an independent updater runtime.', '');
+  lines.push('The Pane-managed CLI also accepts the audited Electron 43.8.3 / embedded Node 24.22.0 pair, whose CA backport passed actual TLS probes. This does not support standalone Node 24.22.0; independent updater runtimes must satisfy the standalone ranges.', '');
   lines.push(`The PyPI wrapper should run on Python \`${contract.compatibility.python}\` and newer. Keep runtime dependencies`);
   lines.push('out of the wrapper unless a compatibility test covers the new dependency.', '');
 

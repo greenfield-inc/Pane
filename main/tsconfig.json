@@ -10,6 +10,9 @@
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "moduleResolution": "node",
+    "paths": {
+      "@agentclientprotocol/sdk/unstable": ["./node_modules/@agentclientprotocol/sdk/dist/v1/unstable/acp.d.ts"]
+    },
     "allowSyntheticDefaultImports": true,
     "declaration": true,
     "declarationMap": true,

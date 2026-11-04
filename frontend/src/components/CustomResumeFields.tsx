@@ -1,8 +1,10 @@
-import type { CustomCommandResume } from '../../../shared/types/customCommandResume';
+import { isAgentFarmLaunchCommand, type CustomCommandResume } from '../../../shared/types/customCommandResume';
 import { Input } from './ui/Input';
 
-export function CustomResumeFields({ value, onChange }: {
+export function CustomResumeFields({ value, onChange, command }: {
   value?: CustomCommandResume | null;
+  /** The command this resume config applies to; an Agent Farm command resumes without one. */
+  command?: string;
   onChange: (value: CustomCommandResume | null) => void;
 }) {
   return <fieldset className="space-y-3 border-t border-border-primary pt-3">
@@ -11,6 +13,7 @@ export function CustomResumeFields({ value, onChange }: {
         ? { mode: 'reported', initialTemplate: '{command}', resumeTemplate: '{command} --resume {sessionId}' } : null)} />
       Enable custom command resume
     </label>
+    {!value && isAgentFarmLaunchCommand(command) && <p className="text-xs text-text-secondary">Agent Farm commands resume automatically: Pane saves the session ID Agent Farm prints and reopens it with <code className="whitespace-nowrap">--resume</code>. Tick the box only to use different templates.</p>}
     {value && <>
       <label className="block text-sm text-text-primary">Session ID source
         <select className="mt-1 w-full rounded border border-border-primary bg-surface-primary p-2" value={value.mode}

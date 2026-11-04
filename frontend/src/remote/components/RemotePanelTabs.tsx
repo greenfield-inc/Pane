@@ -1,3 +1,5 @@
+import type { AgentChatClient } from '../../../../shared/types/agentChat';
+import { AgentViewMenu } from '../../components/agentChat/AgentViewMenu';
 import { ChevronDown, Globe, Plus, TerminalSquare } from 'lucide-react';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
@@ -20,6 +22,7 @@ export interface RemoteTerminalCreateOptions {
 }
 
 interface RemotePanelTabsProps {
+  agentChat?: AgentChatClient;
   panels: ToolPanel[];
   selectedPanelId: string | null;
   creating: boolean;
@@ -31,6 +34,7 @@ interface RemotePanelTabsProps {
 
 export function RemotePanelTabs({
   panels: hostPanels,
+  agentChat,
   selectedPanelId,
   creating,
   customCommands,
@@ -122,9 +126,8 @@ export function RemotePanelTabs({
   return (
     <div className="flex min-h-12 shrink-0 items-end gap-2 border-b border-border-primary bg-bg-secondary px-2 pt-2">
       <div className="flex min-w-0 flex-1 items-end gap-1 overflow-x-auto" role="tablist" aria-label="Remote tool panels">
-        {panels.map((panel, index) => (
-          <button
-            key={panel.id}
+        {panels.map((panel, index) => {
+          const tab = <button
             ref={(element) => { tabRefs.current[index] = element; }}
             type="button"
             role="tab"
@@ -145,8 +148,10 @@ export function RemotePanelTabs({
             {panel.type === 'terminal' && <PanelTabStatusDot panelId={panel.id} sessionId={panel.sessionId} />}
             <span className="flex h-4 w-4 shrink-0 items-center justify-center" aria-hidden="true">{getPanelIcon(panel.type, panel, 'h-4 w-4')}</span>
             <span className="truncate">{panel.title}</span>
-          </button>
-        ))}
+          </button>;
+          return <div key={panel.id} className="relative shrink-0">{panel.type === 'terminal' && agentChat
+            ? <AgentViewMenu panelId={panel.id} title={panel.title} client={agentChat} trigger={tab} /> : tab}</div>;
+        })}
       </div>
 
       <div ref={menuRef} className="relative shrink-0">
@@ -169,7 +174,7 @@ export function RemotePanelTabs({
         {showAddMenu && (
           <div
             id={addMenuId}
-            className="animate-dropdown-enter absolute right-0 top-full z-40 mt-2 w-[min(20rem,calc(100vw-1rem))] origin-top-right overflow-hidden rounded-lg border border-border-primary bg-surface-primary shadow-dropdown"
+            className="animate-dropdown-enter absolute right-0 top-full z-40 mt-2 w-[min(20rem,calc(100vw-1rem))] origin-top-right overflow-hidden rounded-lg border border-border-primary bg-surface-primary p-1 shadow-dropdown"
             role="menu"
             aria-label="Add tool"
             onKeyDown={handleMenuKeyDown}
@@ -244,7 +249,7 @@ function AddToolMenuItem({
       role="menuitem"
       tabIndex={-1}
       onClick={onClick}
-      className="flex w-full items-start gap-3 px-3 py-2.5 text-left text-sm text-text-secondary transition-colors hover:bg-surface-hover hover:text-text-primary"
+      className="flex w-full items-start gap-3 rounded px-3 py-2.5 text-left text-sm text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary"
     >
       <span className="mt-0.5 shrink-0 text-text-tertiary" aria-hidden="true">{icon}</span>
       <span className="min-w-0">

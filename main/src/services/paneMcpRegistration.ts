@@ -16,8 +16,13 @@ import { boundary, decodeBoundary, decodeOptionalBoundary, type JsonObject, type
 const execFileAsync = promisify(execFile);
 
 const PANE_MCP_SERVER_NAME = 'pane';
-// Codex stops waiting for a tool after 60 s by default; `watch` and `panels wait` block longer.
-const CODEX_TOOL_TIMEOUT_SEC = 600;
+// Codex stops waiting for a tool after 300 s by default; `notify` waits for a person for hours.
+const CODEX_TOOL_TIMEOUT_SEC = 86_400;
+/**
+ * The calling panel, so `notify` can name its Pane and dock its card there. Claude Code passes its
+ * whole environment to MCP servers; Codex and Cursor pass only the variables their entry names.
+ */
+const PANEL_ENV_VARS = ['PANE_SESSION_ID', 'PANE_PANEL_ID'];
 const CLI_TIMEOUT_MS = 30_000;
 
 export interface PaneMcpServerEntry {
@@ -150,6 +155,11 @@ function sameClaudeEntry(entry: ClaudeEntry, server: PaneMcpServerEntry): boolea
 }
 
 async function syncCursor(configPath: string, server: PaneMcpServerEntry, enabled: boolean): Promise<Omit<RegistrationOutcome, 'client'>> {
+  // Cursor expands ${env:NAME} from the agent's environment when it starts the server.
+  const cursorServer: PaneMcpServerEntry = {
+    ...server,
+    env: { ...server.env, ...Object.fromEntries(PANEL_ENV_VARS.map(name => [name, `\${env:${name}}`])) },
+  };
   const current = await readIfExists(configPath);
   let config: JsonObject = {};
   if (current !== undefined && current.trim() !== '') {
@@ -167,11 +177,11 @@ async function syncCursor(configPath: string, server: PaneMcpServerEntry, enable
     if (!entry || entry.args?.[0] !== server.args[0]) {
       return { action: 'skipped', detail: `${configPath} has a "pane" MCP server that Pane did not add; left it unchanged` };
     }
-    if (enabled && sameClaudeEntry(entry, server) && entry.type === 'stdio') return { action: 'unchanged' };
+    if (enabled && sameClaudeEntry(entry, cursorServer) && entry.type === 'stdio') return { action: 'unchanged' };
   } else if (!enabled) return { action: 'unchanged' };
 
   const nextServers = { ...servers };
-  if (enabled) nextServers[PANE_MCP_SERVER_NAME] = { type: 'stdio', ...server };
+  if (enabled) nextServers[PANE_MCP_SERVER_NAME] = { type: 'stdio', ...cursorServer };
   else delete nextServers[PANE_MCP_SERVER_NAME];
   config.mcpServers = nextServers;
   await writeFileAtomic(configPath, `${JSON.stringify(config, null, 2)}\n`);
@@ -202,7 +212,7 @@ async function syncCodex(configPath: string, server: PaneMcpServerEntry, enabled
 }
 
 function codexEntry(server: PaneMcpServerEntry) {
-  return { command: server.command, args: server.args, env: server.env, tool_timeout_sec: CODEX_TOOL_TIMEOUT_SEC };
+  return { command: server.command, args: server.args, env: server.env, env_vars: PANEL_ENV_VARS, tool_timeout_sec: CODEX_TOOL_TIMEOUT_SEC };
 }
 
 /** The `pane` MCP entry and a JSON fingerprint of everything else, or undefined when the text is not valid TOML. */
@@ -259,6 +269,7 @@ function renderCodexTable(server: PaneMcpServerEntry): string[] {
     `command = ${JSON.stringify(entry.command)}`,
     `args = [${entry.args.map((arg) => JSON.stringify(arg)).join(', ')}]`,
     `env = { ${env} }`,
+    `env_vars = [${entry.env_vars.map((name) => JSON.stringify(name)).join(', ')}]`,
     `tool_timeout_sec = ${entry.tool_timeout_sec}`,
   ];
 }
@@ -408,7 +419,7 @@ async function buildWslTarget(host: PaneMcpHost, distro: string): Promise<McpReg
 function serverEnv(paneDir: string, forWsl: boolean): PaneMcpServerEntry['env'] {
   const entries: [string, string][] = [['ELECTRON_RUN_AS_NODE', '1']];
   if (!isDefaultPaneDir(paneDir)) entries.push(['PANE_DIR', paneDir]);
-  if (forWsl) entries.push(['WSLENV', entries.map(([name]) => name).join(':')]);
+  if (forWsl) entries.push(['WSLENV', [...entries.map(([name]) => name), ...PANEL_ENV_VARS].join(':')]);
   return Object.fromEntries(entries);
 }
 

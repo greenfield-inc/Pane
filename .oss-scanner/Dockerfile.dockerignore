@@ -1,0 +1,10 @@
+# Used instead of the root .dockerignore (which only admits the remote PWA
+# image's files) when building .oss-scanner/Dockerfile. The audit needs the
+# whole source tree; leave out only local installs and build output.
+**/node_modules
+**/dist
+dist-electron
+worktrees
+tmp
+.pane
+.codex

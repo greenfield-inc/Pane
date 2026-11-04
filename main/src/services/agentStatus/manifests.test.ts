@@ -8,6 +8,7 @@ import {
   OPENCODE_MANIFEST,
   getManifestForAgent,
 } from './manifests';
+import { CLAUDE_API_ENOTFOUND_SCREEN, CLAUDE_API_RETRYING_SCREEN, CLAUDE_API_SLEEP_SCREEN } from './__fixtures__/claudeApiErrorScreens';
 
 const screen = (s: string, oscTitle = '', oscProgress = '') => ({ screen: s, oscTitle, oscProgress });
 
@@ -118,6 +119,39 @@ describe('CLAUDE_MANIFEST', () => {
     ].join('\n');
     const r = detectAgentState(CLAUDE_MANIFEST, screen(s));
     expect(r.matchedRuleId).not.toBe('workspace_trust_prompt');
+  });
+
+  // Real Claude Code 2.1.314 screen from `claude --dangerously-skip-permissions` before the person accepted it.
+  const bypassWarning = [
+    '─'.repeat(100),
+    '  WARNING: Claude Code running in Bypass Permissions mode',
+    '',
+    '  In Bypass Permissions mode, Claude Code will not ask for your approval before running',
+    '  potentially dangerous commands.',
+    '',
+    '  This mode should only be used in a sandboxed container/VM that has restricted internet access',
+    '  and can easily be restored if damaged.',
+    '',
+    '  By proceeding, you accept all responsibility for actions taken while running in Bypass',
+    '  Permissions mode.',
+    '',
+    '  https://code.claude.com/docs/en/security',
+    '',
+    '  ❯ No, exit',
+    '    Yes, I accept',
+    '',
+    '  Enter to confirm · Esc to cancel',
+  ];
+
+  it('names the bypass-permissions warning, so the Onboarding Session can answer it', () => {
+    const r = detectAgentState(CLAUDE_MANIFEST, screen(bypassWarning.join('\n')));
+    expect(r.state).toBe('blocked');
+    expect(r.matchedRuleId).toBe('bypass_permissions_warning');
+  });
+
+  it('stops naming the bypass-permissions warning once Claude exits to the shell below it', () => {
+    const r = detectAgentState(CLAUDE_MANIFEST, screen([...bypassWarning, 'parsas@host demo % '].join('\n')));
+    expect(r.matchedRuleId).not.toBe('bypass_permissions_warning');
   });
 
   // Real Claude Code 2.1.282 startup screens: bypass-permissions warning and first-run setup.
@@ -251,6 +285,56 @@ describe('CLAUDE_MANIFEST', () => {
   });
 });
 
+describe('CLAUDE_MANIFEST prompts seen in Claude Code 2.1.300', () => {
+  it('classifies the external CLAUDE.md imports dialog as blocked', () => {
+    const s = [
+      ' p1-missing ?1 > claude --session-id 5c828cae-a5fd-4c8a-a3e9-afbe81f92fb4',
+      '',
+      '─'.repeat(80),
+      '  Allow external CLAUDE.md file imports?',
+      '',
+      '  This project\'s CLAUDE.md or .claude/rules imports files outside the current',
+      '  working directory. Never allow this for third-party repositories.',
+      '',
+      '  External imports:',
+      '    /private/tmp/scratchpad/ext-memory.md',
+      '',
+      '  Important: Only use Claude Code with files you trust. Accessing untrusted',
+      '  files may pose security risks https://code.claude.com/docs/en/security',
+      '',
+      '  ❯ No, disable external imports',
+      '    Yes, allow external imports',
+      '',
+      '  Enter to confirm · Esc to cancel',
+    ].join('\n');
+    const r = detectAgentState(CLAUDE_MANIFEST, screen(s));
+    expect(r.state).toBe('blocked');
+    expect(r.visibleBlocker).toBe(true);
+  });
+
+  it('classifies a Bash permission prompt as blocked', () => {
+    const s = [
+      '─'.repeat(80),
+      ' Bash command',
+      ' Tip: auto mode handles these prompts for you — choose "switch to auto mode"',
+      ' below',
+      ' Create empty proof-permission.txt file',
+      '╌'.repeat(80),
+      ' touch proof-permission.txt',
+      '╌'.repeat(80),
+      ' Do you want to proceed?',
+      ' ❯ 1. Yes',
+      '   2. Yes, and don’t ask again for: touch *',
+      '   3. Yes, and switch to auto mode · auto mode handles these prompts for you',
+      '   4. No',
+      ' Esc to cancel · Tab to amend',
+    ].join('\n');
+    const r = detectAgentState(CLAUDE_MANIFEST, screen(s));
+    expect(r.state).toBe('blocked');
+    expect(r.visibleBlocker).toBe(true);
+  });
+});
+
 describe('CODEX_MANIFEST', () => {
   it('classifies the Action Required title as blocked', () => {
     const r = detectAgentState(CODEX_MANIFEST, screen('working on it', 'Action Required · Codex'));
@@ -288,6 +372,75 @@ describe('CODEX_MANIFEST', () => {
     const r = detectAgentState(CODEX_MANIFEST, screen(s));
     expect(r.state).toBe('blocked');
     expect(r.visibleBlocker).toBe(true);
+  });
+
+  // Real Codex 0.160.1 startup screens (Pane dev build, 2026-10-15).
+  it.each([
+    ['update offer', 'update_prompt', [
+      '',
+      '',
+      '  Update available · 0.160.1 → 0.999.0',
+      '  Release notes: https://github.com/openai/codex/releases/latest',
+      '',
+      '› 1. Update now (runs `brew upgrade --cask codex`)                              ',
+      '  2. Skip',
+      '  3. Skip until next version',
+      '',
+      '  enter continue · esc skip',
+    ]],
+    ['sign-in choice', 'sign_in_prompt', [
+      '  Welcome to Codex, OpenAI\'s command-line coding agent',
+      '',
+      '  Sign in with ChatGPT to use Codex as part of your paid plan',
+      '  or connect an API key for usage-based billing',
+      ' ',
+      '> 1. Sign in with ChatGPT',
+      '     Usage included with Plus, Pro, Business, and Enterprise plans',
+      '',
+      '  2. Sign in with Device Code',
+      '     Sign in from another device with a one-time code',
+      '',
+      '  3. Provide your own API key',
+      '     Pay for what you use',
+      '',
+      '  Press enter to continue',
+    ]],
+    ['folder trust with the 0.160 footer', 'folder_trust_prompt', [
+      '  Folder access',
+      '  /tmp/rr-repo/worktrees/p1-missing',
+      '',
+      '  Note: You’re in a subdirectory of a Git project. Trusting will apply to the',
+      '  repository root:',
+      '  /tmp/rr-repo',
+      '',
+      '  Trust this folder? Codex can read, edit, and run files here, subject to your',
+      '  permission settings. Folder settings can run code automatically, even',
+      '  without a model request. Continue only if you trust these files. Your trust',
+      '  decision will be saved.',
+      '',
+      '› 1. Trust and continue                                                         ',
+      '  2. Back to Agent Command Center',
+      '',
+      '  enter continue · esc back',
+    ]],
+  ])('classifies the %s as blocked', (_name, ruleId, lines) => {
+    const r = detectAgentState(CODEX_MANIFEST, screen(lines.join('\n')));
+    expect(r.state).toBe('blocked');
+    expect(r.matchedRuleId).toBe(ruleId);
+    expect(r.visibleBlocker).toBe(true);
+  });
+
+  it('stops matching a startup prompt once Codex moved past it', () => {
+    const s = [
+      '  Update available · 0.160.1 → 0.999.0',
+      '  3. Skip until next version',
+      '  enter continue · esc skip',
+      '',
+      '› Summarize recent commits',
+      '',
+      '  gpt-5.5 default · ~/repo',
+    ].join('\n');
+    expect(detectAgentState(CODEX_MANIFEST, screen(s)).matchedRuleId).not.toBe('update_prompt');
   });
 
   // Real Codex 0.156.1 boot frame: the composer shows before the trust prompt replaces it.
@@ -570,5 +723,51 @@ describe('GENERIC_MANIFEST', () => {
     expect(detectAgentState(GENERIC_MANIFEST, screen('Do you want to proceed? [y/n] y\nok: y')).state).toBe('idle');
     expect(detectAgentState(GENERIC_MANIFEST, screen('Overwrite file? (y/n)\n$ ')).state).toBe('idle');
     expect(detectAgentState(GENERIC_MANIFEST, screen('$ ')).state).toBe('idle');
+  });
+
+  // Agent Farm's variant picker, captured from a live `agent-farm run` panel (#743).
+  const agentFarmPicker = [
+    '~/r/blooma/bloom-mono/w/ios-xcode27-launch on ios-xcode27-launch > agent-farm ru',
+    'n bigbrain/investigator --arg parent=/Users/x/.agent/status/investigator.json',
+    '│',
+    '◆  Which bigbrain/investigator variant?',
+    '│  ● claude (claude · claude-opus-5-5 high · default)',
+    '│  ○ codex',
+    '│  ↑/↓ to navigate • Enter: confirm',
+    '└',
+    '',
+    '',
+  ].join('\n');
+
+  it("detects a wrapper's open choice prompt as blocked", () => {
+    const r = detectAgentState(GENERIC_MANIFEST, screen(agentFarmPicker));
+    expect(r.state).toBe('blocked');
+    expect(r.matchedRuleId).toBe('live_choice_prompt');
+    expect(detectAgentState(GENERIC_MANIFEST, screen('◆  Project name?\n│  my-app\n└')).state).toBe('blocked');
+  });
+
+  it('does not stay blocked once the choice is answered', () => {
+    const answered = ['◇  Which bigbrain/investigator variant?', '│  claude', '', 'Starting Claude Code…'].join('\n');
+    expect(detectAgentState(GENERIC_MANIFEST, screen(answered)).state).toBe('idle');
+    const exited = [agentFarmPicker.trimEnd(), '$ '].join('\n');
+    expect(detectAgentState(GENERIC_MANIFEST, screen(exited)).state).toBe('idle');
+  });
+});
+
+describe('CLAUDE_MANIFEST API errors seen in Claude Code 2.1.302', () => {
+  // An agent-farm worker that loses the network or sleeps mid-turn ends here; the turn must read as
+  // over (idle), so READY fires and a missing report can be raised, while a retry is still work.
+  it('keeps a turn that is still retrying the API as working', () => {
+    for (const title of ['', '✳ Claude Code']) {
+      expect(detectAgentState(CLAUDE_MANIFEST, screen(CLAUDE_API_RETRYING_SCREEN, title)).state).toBe('working');
+    }
+  });
+
+  it('reads a turn that ended on a network error or a sleep as idle', () => {
+    for (const s of [CLAUDE_API_ENOTFOUND_SCREEN, CLAUDE_API_SLEEP_SCREEN]) {
+      for (const title of ['', '✳ Claude Code']) {
+        expect(detectAgentState(CLAUDE_MANIFEST, screen(s, title))).toMatchObject({ state: 'idle', matchedRuleId: 'live_prompt_box' });
+      }
+    }
   });
 });

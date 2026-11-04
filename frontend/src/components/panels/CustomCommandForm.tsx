@@ -59,7 +59,7 @@ export function CustomCommandForm({ existing, onSave, onCancel }: CustomCommandF
         <input className={inputClass} value={command} readOnly={!!existing} disabled={saving}
           placeholder="e.g. aider, npm run dev, bash" onChange={(event) => setCommand(event.target.value)} />
       </label>
-      <CustomResumeFields value={resume} onChange={setResume} />
+      <CustomResumeFields command={command} value={resume} onChange={setResume} />
       {error && <p role="alert" className="text-xs text-text-primary">{error}</p>}
       <div className="flex justify-end gap-2">
         <button type="button" className="px-2 py-1 text-sm rounded hover:bg-surface-hover" disabled={saving} onClick={onCancel}>Cancel</button>

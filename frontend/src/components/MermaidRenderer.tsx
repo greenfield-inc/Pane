@@ -1,5 +1,6 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import mermaid from 'mermaid';
+import DOMPurify from 'dompurify';
 
 interface MermaidRendererProps {
   chart: string;
@@ -8,6 +9,8 @@ interface MermaidRendererProps {
 
 export const MermaidRenderer: React.FC<MermaidRendererProps> = ({ chart, id }) => {
   const elementRef = useRef<HTMLDivElement>(null);
+  const instanceId = useId().replace(/:/g, '');
+  const renderSequence = useRef(0);
   const [hasError, setHasError] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
 
@@ -15,8 +18,8 @@ export const MermaidRenderer: React.FC<MermaidRendererProps> = ({ chart, id }) =
     const renderChart = async () => {
       if (!elementRef.current || !chart) return;
 
-      // Create a unique ID for this render (define it outside try block)
-      const graphId = `mermaid-${id}-${Date.now()}`;
+      // Mermaid uses CSS selectors internally; each instance/render owns its ID.
+      const graphId = `mermaid-${instanceId}-${++renderSequence.current}`;
 
       try {
         // Clear any previous content
@@ -29,16 +32,24 @@ export const MermaidRenderer: React.FC<MermaidRendererProps> = ({ chart, id }) =
         mermaid.initialize({
           startOnLoad: false,
           theme: isDarkTheme ? 'dark' : 'default',
-          securityLevel: 'loose',
+          // Charts come from untrusted READMEs and agent output: 'strict' encodes
+          // label HTML and disables click callbacks.
+          securityLevel: 'strict',
           fontFamily: 'monospace',
         });
 
         // Render the chart
         const { svg } = await mermaid.render(graphId, chart);
 
-        // Insert the SVG
+        // Strict mode already sanitizes the SVG; sanitize again where it is inserted, with
+        // mermaid's own settings, so this stays safe if that changes. Flowchart labels are
+        // HTML inside foreignObject, so it must stay an HTML integration point.
         if (elementRef.current) {
-          elementRef.current.innerHTML = svg;
+          elementRef.current.innerHTML = DOMPurify.sanitize(svg, {
+            ADD_TAGS: ['foreignobject'],
+            ADD_ATTR: ['dominant-baseline'],
+            HTML_INTEGRATION_POINTS: { foreignobject: true },
+          });
         }
       } catch (error: unknown) {
         console.error('Mermaid rendering error:', error);
@@ -55,13 +66,10 @@ export const MermaidRenderer: React.FC<MermaidRendererProps> = ({ chart, id }) =
         }
         setErrorMessage(message);
 
-        // Clean up any error SVGs that mermaid may have inserted
-        const errorElements = document.querySelectorAll(`#${graphId}, [id^="mermaid-"]`);
-        errorElements.forEach(el => {
-          if (el.parentNode) {
-            el.parentNode.removeChild(el);
-          }
-        });
+        // Remove only this render's SVG and Mermaid's temporary container.
+        // Other previews may already contain successfully rendered diagrams.
+        document.getElementById(graphId)?.remove();
+        document.getElementById(`d${graphId}`)?.remove();
 
         // Try to clean up mermaid's internal state
         try {
@@ -79,14 +87,14 @@ export const MermaidRenderer: React.FC<MermaidRendererProps> = ({ chart, id }) =
     // Render with a small delay to ensure DOM is ready
     const timer = setTimeout(renderChart, 50);
     return () => clearTimeout(timer);
-  }, [chart, id]);
+  }, [chart, id, instanceId]);
 
   if (hasError) {
     return (
       <div className="border border-status-error/30 rounded p-2 bg-status-error/5 text-sm">
-        <p className="text-status-error">
+        <p className="text-text-primary">
           <span className="font-semibold">⚠ Diagram error:</span>{' '}
-          <span className="text-status-error/90">{errorMessage}</span>
+          <span className="text-text-primary">{errorMessage}</span>
         </p>
       </div>
     );

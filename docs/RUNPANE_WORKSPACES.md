@@ -2,12 +2,14 @@
 
 `runpane workspace` lets your Macs, Windows PCs, and Linux machines read files, write files, run commands, and drive each other's Pane over the Tailscale network you already use. There is no SSH, no keys, and no pairing code: each request is trusted because Tailscale says which login it comes from. Your own login is always let in; a teammate's machine lets you in when its owner shares it with everyone on the tailnet.
 
-The same listener powers codeless desktop remote mode: Settings → Remote Access → **Your computers** lists the machines on your tailnet with Pane open, and **Connect** switches the desktop app to that machine with no `pane-remote://` code. `runpane workspace` reaches the same machines. Who may connect is set under **Access to this computer** → **Who can connect** (see [Who is trusted](#who-is-trusted)).
+The same listener powers codeless desktop remote mode: the sidebar's machine menu and Settings → Remote Access → **Switch to** list the machines on your tailnet, including ones you have never connected to (a teammate's machine that accepts only its owner shows as "Owner only" and can't be picked), and picking one switches the desktop app to that machine with no `pane-remote://` code. `runpane workspace` reaches the same machines. Who may connect is set under **Access** → **Who can connect** (see [Who is trusted](#who-is-trusted)).
+
+**All machines**, the first item in the machine menu, fills the sidebar with the Sessions and Panes of this computer and every saved machine, live, each row marked with its machine. A project with the same name on several machines shows once. Opening a row on another machine switches the app to that machine and keeps the sidebar in All machines; pin, archive, rename and permission answers from a row's menu run on its machine without switching, and **Allow** first shows the request in the permission dialog. Archived and the collapsed sidebar show the machine you're on. Search covers every machine's rows. A machine that stops answering keeps its rows, dimmed, with when it went offline and **Retry**. Picking one machine returns to its own sidebar, and the choice is kept across relaunch.
 
 ```
 runpane workspace list
 runpane workspace <machine> read  <path>
-runpane workspace <machine> write <path>          # content from stdin
+runpane workspace <machine> write <path>          # content from stdin, or --content <text>
 runpane workspace <machine> exec -- <command>     # runs in that machine's shell
 runpane workspace <machine> <runpane command>     # e.g. sessions list --json
 ```
@@ -15,6 +17,8 @@ runpane workspace <machine> <runpane command>     # e.g. sessions list --json
 `<machine>` is the Tailscale machine name (`parsa-devbox`), a unique prefix (`devbox`), the MagicDNS name, or a Tailscale IP.
 
 `runpane workspace list` shows your own machines first, then other people's machines on the tailnet labeled with their owner's login (`tylers-mac-mini (macOS, online, owner tbrownio@github)`). Each machine decides who it lets in. A machine set to "Only me" refuses other logins, and the error says how its owner can change that. A path shaped like another OS's (`C:\...` on a Mac) routes only to your own machines; reach someone else's machine by name.
+
+Agents can call them as MCP tools too: `workspace_list`, `workspace_read`, `workspace_write`, and `workspace_exec` are in the [Pane MCP server](PANE_MCP.md#toolsets)'s default toolset. `workspace_write` requires `content`, since a tool call has no stdin, and file contents and command output come back exactly as the CLI's `--json` prints them.
 
 These commands ship in the npm CLI (`npm i -g runpane`, or `npx --yes runpane@latest workspace list`). The Python package prints the workspaces status block but does not run them.
 
@@ -46,13 +50,15 @@ When workspaces are off, the first line says why and gives the one step that fix
 | Pane is not running | Open Pane. |
 | Turned off with `runpane workspace disable` | `runpane workspace enable` |
 
+While the tailnet has HTTPS Certificates turned off, the desktop app shows a notice with a link to that setting. Turning it on writes machine names (`<machine>.<tailnet>.ts.net`) to the public Certificate Transparency log. The notice clears within a minute of the change, and `runpane workspace list` names the setting as the reason other machines are not reachable.
+
 `runpane workspace disable` removes the 8443 handler and keeps this machine off until `runpane workspace enable`. This machine can still reach your other machines while it is off. A Pane started with a different data directory (`PANE_DIR` or `--pane-dir`) stays off unless you run `runpane workspace enable` against it.
 
 Pane must be running on a machine for others to reach it. Pane checks Tailscale again every minute, so signing in to Tailscale after Pane starts is enough. Serve handlers belong to one tailnet, so after you switch this machine to another tailnet Pane puts the 8443 handler back on the new one and reports the new URL within a minute.
 
 ## Who is trusted
 
-Two settings decide, in Settings → Remote Access → **Access to this computer**. Every request must pass both: its login is allowed by **visibility**, and, when **password protection** is on, it carries the password.
+Two settings decide, in Settings → Remote Access → **Access**. Every request must pass both: its login is allowed by **visibility**, and, when **password protection** is on, it carries the password.
 
 | Visibility | Who can connect | |
 |---|---|---|
@@ -67,7 +73,8 @@ Password protection is off by default. When it is on, every client must send the
 - Under "Only me", a device signed in as another Tailscale user, including a teammate's Mac shared into your tailnet, is refused.
 - A tagged device is refused: Serve sends no identity for it.
 - Pane answers only requests that arrive through Serve: Serve's target path carries a secret that changes every launch, and requests straight to the loopback port are refused. Another OS user on the same machine who can read `tailscale serve status` could learn it, so give other accounts on a joined machine only the trust you would give the owner.
-- Browsers are refused. A web page open on one of your devices could otherwise send requests that Serve signs with your login.
+- Browsers are refused. A web page open on one of your devices could otherwise send requests that Serve signs with your login. Pane refuses any request that carries a browser `Origin`; the phone app's WebSockets, which always carry one, send a fixed value no browser can. The one exception is the Pane glasses app for Even G2: it needs your Tailscale login, a per-device glasses token, and the Even app's origin (built in) or one you allowed, and it reaches only the commands the glasses use. See [Even G2 glasses](EVEN_G2_GLASSES.md#security).
+- Integration keys are shared only with the owner's login, even under "Everyone on this tailnet". See [Shared integration keys](SHARED_CREDENTIALS.md).
 - Any device signed in as you, your phone included, is trusted. `runpane workspace list` shows only Macs, Windows PCs, and Linux machines, but that is a listing choice, not a block.
 - Removing a device from Tailscale revokes it everywhere.
 - The same setting decides who opens the host's dev servers and HTML pages in the Remote Pane app's browser tabs, at their `https://<host>.ts.net:<n>` addresses. A page in a frame cannot send the password, so those pages are off while password protection is on. See [Browser tabs on the phone](SELF_HOSTED_REMOTE_DAEMON.md#browser-tabs-on-the-phone).
@@ -80,14 +87,16 @@ Every admitted login can also reach any port listening on the machine from deskt
 
 ## Hand a task to another machine
 
-`runpane handoff` uses workspaces to move a task to a fresh agent on another of your machines. The sending agent writes a handoff note; the CLI checks it, makes sure the branch is pushed, and starts the agent there:
+`runpane handoff` uses workspaces to move a task to an agent on another of your machines. The sending agent writes a handoff note; the CLI checks it, makes sure the branch is pushed, and starts the agent there. When the sender is a Pane tab running Claude, Codex or Cursor and the receiver is the same agent, the agent's own session moves too:
 
 ```
 runpane handoff --template > ~/handoff.md                      # fill in every section
 runpane handoff "claude opus on parsas-macbook-pro" --note-file ~/handoff.md --push
 ```
 
-The destination machine needs Pane running, the repository saved in Pane with a remote for the same GitHub repository, and its own `runpane` on PATH (otherwise it uses `npx runpane@latest`). The note lands in that machine's `~/.pane/handoffs/`, the agent starts in a new Pane branched from your branch, and it reports back to your panel with `runpane workspace <your machine> panels submit`. The note's sections are in the `handoff` skill's [note template](../main/src/services/paneChatBundle/skills/handoff/references/note-template.md).
+The destination machine needs Pane running, the repository saved in Pane with a remote for the same GitHub repository, and its own `runpane` on PATH (otherwise it uses `npx runpane@latest`). The note lands in that machine's `~/.pane/handoffs/`, the agent starts in a new Pane branched from your branch, and it reports back to your panel with `runpane workspace <your machine> panels submit`. For a same-agent handoff the session's files are copied into that machine's agent store (`~/.claude`, `~/.codex` or `~/.cursor`, at their default locations), the receiver resumes that session with no prompt, and the CLI checks it continued before telling it where the session moved. The result is `continued`, `inconclusive` (ask the receiver what it was last working on), or `not-continued` (exit 1; the receiver is kept, and `--note-only` starts a fresh agent with the note if you choose). `--note-only`, a different agent, or no session to carry starts a fresh agent with the note. Carrying a Cursor chat to another machine is best effort; on the same machine it is not carried, since a copied Cursor chat still writes to the original. A copy already on the destination is replaced only when yours holds all of it and no agent there runs it; otherwise nothing is copied and the result is `not-continued`. A destination Pane too old to resume a carried session is refused before anything is sent. The note's sections are in the `handoff` skill's [note template](../main/src/services/paneChatBundle/skills/handoff/references/note-template.md).
+
+Run from a Session's terminal, whose folder is outside git, handoff moves the Session instead (the Session menu's **Move to host…** asks the Session's agent to do this). It skips the git steps and pushes nothing, writes the note to the other machine's `~/.pane/handoffs/` the same way, and creates a Session there with the same name, goal and agent, whose next action is to read the note. With the same agent, the Session's agent session is copied there too and the new Session resumes that conversation when you first open it; the CLI can't check it until then, so it reports `inconclusive` and says what to check. The destination needs only Pane running with workspaces; no repository has to be saved there. The new Session waits for your first message, and the original stays where it is. A Session can't be handed off to the machine it is on. See [Move a Session to another machine](SESSIONS.md#move-a-session-to-another-machine).
 
 ## Paths across Windows, WSL, and macOS
 
@@ -98,7 +107,7 @@ The destination machine needs Pane running, the repository saved in Pane with a 
 - Inside WSL, `C:\...` becomes `/mnt/c/...`, and runpane reads the tailnet from Windows' `tailscale.exe`.
 - `~` is the home directory of the machine that runs the request.
 
-`read` prints the file to stdout (`--json` returns `content` with `encoding` `utf8` or `base64`) and lists a directory's entries. `write` reads stdin, creates missing parent folders, and replaces the file. `exec` runs in the shell Pane uses for terminals there (Git Bash or PowerShell on Windows, your default shell elsewhere), prints its stdout and stderr, ends with a line naming the machine, OS, shell, and exit code, and exits with the command's exit code. `--json` returns all of these fields. Pass the command as one quoted string (`exec -- 'grep "a b" notes.md'`): several words after `--` are joined with spaces. A command that starts a background job returns when the shell exits, and `--timeout-ms` stops the whole process tree. If that tree cannot be stopped, the result says so (`stillRunning` in `--json`, "may still be running" in text).
+`read` prints the file to stdout (`--json` returns `content` with `encoding` `utf8` or `base64`) and lists a directory's entries. `write` writes `--content <text>` or else stdin, creates missing parent folders, and replaces the file. `exec` runs in the shell Pane uses for terminals there (Git Bash or PowerShell on Windows, your default shell elsewhere), prints its stdout and stderr, ends with a line naming the machine, OS, shell, and exit code, and exits with the command's exit code. `--json` returns all of these fields. Pass the command as one quoted string (`exec -- 'grep "a b" notes.md'`): several words after `--` are joined with spaces. Without `--` (PowerShell drops it before npm's `runpane.ps1` sees it), the command starts at the first word that is not an exec option. That machine's own `runpane` comes first on `PATH`, so `exec -- 'runpane version'` works even where its user `PATH` lacks `~/.pane/bin`. A command that starts a background job returns when the shell exits, and `--timeout-ms` stops the whole process tree. If that tree cannot be stopped, the result says so (`stillRunning` in `--json`, "may still be running" in text).
 
 ## Without a machine name
 
@@ -122,6 +131,7 @@ Machine commands (`read`, `write`, `exec`) are served only to workspace identity
 
 ## Troubleshooting
 
+- When **Connect** fails, the desktop app shows a checklist naming the stage that failed and its fix; see [When a connection fails](SELF_HOSTED_REMOTE_DAEMON.md#when-a-connection-fails).
 - `runpane workspace list` shows each machine's state. "Pane is not answering there" means Pane is not running on that machine, its workspaces are off, or it runs a Pane version without workspaces.
 - `tailscale serve status` should list `https://<machine>.<tailnet>.ts.net:8443` proxying to `http://127.0.0.1:<port>`.
 - A Pane older than workspaces reports `Workspaces: off ... (this Pane is older than workspaces)`; update Pane.

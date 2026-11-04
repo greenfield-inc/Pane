@@ -27,40 +27,10 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { THEME_CLASSES } from '../shared/types/appearance.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const COLORS_CSS = path.join(here, '..', 'frontend', 'src', 'styles', 'tokens', 'colors.css');
-
-// Mirrors THEME_CLASSES in frontend/src/contexts/ThemeProvider.tsx.
-const THEME_CLASSES = {
-  'light': ['light'],
-  'light-rounded': ['light', 'light-rounded'],
-  'dark': ['dark'],
-  'oled': ['dark', 'oled'],
-  'dusk': ['dark', 'dusk'],
-  'dusk-oled': ['dark', 'dusk', 'dusk-oled'],
-  'forge': ['dark', 'forge'],
-  'ember': ['dark', 'ember'],
-  'aurora': ['dark', 'aurora'],
-  'night-owl': ['dark', 'night-owl'],
-  'night-owl-oled': ['dark', 'night-owl', 'night-owl-oled'],
-  'terracotta': ['dark', 'terracotta'],
-  'synthwave': ['dark', 'synthwave'],
-  'acid': ['dark', 'acid'],
-  'tokyo-rain': ['dark', 'tokyo-rain'],
-  'folio': ['light', 'folio'],
-  'newsprint': ['light', 'newsprint'],
-  'walnut': ['dark', 'walnut'],
-  'amber-crt': ['dark', 'amber-crt'],
-  'teletype': ['light', 'teletype'],
-  'dot-matrix': ['dark', 'dot-matrix'],
-  'haar': ['light', 'haar'],
-  'abyss': ['dark', 'abyss'],
-  'understory': ['dark', 'understory'],
-  'colorblind-safe': ['dark', 'colorblind-safe'],
-  'low-fatigue': ['dark', 'low-fatigue'],
-  'high-legibility': ['light', 'high-legibility'],
-};
 
 // Themes that must pass, each with the bar its family was designed to.
 //   body      minimum for text pairs (4.5 = AA; high-legibility promises AAA)
@@ -320,6 +290,13 @@ const UI_ON_SURFACES = [
   ['--color-interactive-primary', '--color-bg-primary'],
   ['--color-scrollbar-thumb', '--color-scrollbar-track', 'strict'],
   ['--color-terminal-cursor', '--color-terminal-bg'],
+  // Machine marks: the OS logo in the machine colour, on menus and settings cards.
+  ['--color-machine-1', '--color-surface-primary'],
+  ['--color-machine-2', '--color-surface-primary'],
+  ['--color-machine-3', '--color-surface-primary'],
+  ['--color-machine-4', '--color-surface-primary'],
+  ['--color-machine-5', '--color-surface-primary'],
+  ['--color-machine-6', '--color-surface-primary'],
 ];
 
 const TERMINAL_FG = [

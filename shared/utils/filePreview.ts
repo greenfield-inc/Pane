@@ -1,10 +1,10 @@
 import { mediaFileKind } from './mediaFile';
 
-export type FilePreviewKind = 'video' | 'audio' | 'image' | 'pdf' | 'markdown' | 'html' | 'table' | 'structured' | 'font' | 'archive' | 'sqlite';
+export type FilePreviewKind = 'video' | 'audio' | 'image' | 'pdf' | 'markdown' | 'table' | 'structured' | 'font' | 'archive' | 'sqlite';
 
 const KINDS = new Map<string, FilePreviewKind>([
   ...['png', 'jpg', 'jpeg', 'svg', 'webp', 'avif', 'gif', 'ico', 'bmp'].map(ext => [ext, 'image'] as const),
-  ['pdf', 'pdf'], ['md', 'markdown'], ['markdown', 'markdown'], ['html', 'html'], ['htm', 'html'],
+  ['pdf', 'pdf'], ['md', 'markdown'], ['markdown', 'markdown'],
   ['csv', 'table'], ['tsv', 'table'],
   ...['json', 'jsonl', 'ndjson', 'yaml', 'yml', 'toml'].map(ext => [ext, 'structured'] as const),
   ...['ttf', 'otf', 'woff', 'woff2'].map(ext => [ext, 'font'] as const),

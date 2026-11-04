@@ -55,8 +55,10 @@ describe.each([
         })}\n\n`);
         return;
       }
+      if (request.method !== 'POST') { response.writeHead(404); response.end(); return; }
       const chunks: Buffer[] = [];
       for await (const chunk of request) chunks.push(Buffer.from(chunk));
+      if (request.aborted || chunks.length === 0) { response.end(); return; }
       const parsed = decodeBoundary(JSON.parse(Buffer.concat(chunks).toString()), boundary.object({
         channel: boundary.string,
         args: boundary.array(boundary.json),
@@ -71,6 +73,8 @@ describe.each([
       baseUrl: `http://127.0.0.1:${address.port}`,
     });
     clients.push(client);
+    await client.connect();
+    if (client instanceof RemoteDaemonBrowserClient) await vi.waitFor(() => expect(client.getState().status).toBe('connected'));
     return { client, requests, getEventResponse: () => eventResponse };
   }
 
@@ -156,11 +160,11 @@ describe.each([
     await vi.waitFor(() => expect(requests).toHaveLength(1));
     reply(requests[0], 503);
     const message = _name === 'browser'
-      ? 'The remote action may have completed, but its result could not be confirmed. Check the current state before trying again. (Input failed)'
+      ? 'Delivery unknown: the remote action may have completed, but its result could not be confirmed. Check the current state before trying again. (Input failed)'
       : 'Input failed';
-    expect(await completed).toEqual([
-      { status: 'rejected', reason: new Error(message) },
-      { status: 'rejected', reason: new Error(message) },
+    expect(await completed).toMatchObject([
+      { status: 'rejected', reason: { message } },
+      { status: 'rejected', reason: { message: expect.stringContaining('queued terminal input was not sent') } },
     ]);
     expect(requests).toHaveLength(1);
   });
@@ -192,7 +196,6 @@ describe.each([
 
   it('discards queued input when the remote event connection is lost', async () => {
     const { client, requests, getEventResponse } = await setup();
-    await client.connect();
     await vi.waitFor(() => expect(getEventResponse()).toBeDefined());
     const completed = Promise.allSettled([
       client.invoke('terminal:input', ['panel-1', 'a']),

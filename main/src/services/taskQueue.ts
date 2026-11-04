@@ -22,6 +22,7 @@ import { emitFolderCreatedEvent } from './folderEvents';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { withLock } from '../utils/mutex';
 import { PaneError } from '../../../shared/paneError';
+import type { RunpanePaneBase } from '../../../shared/types/runpaneOrchestration';
 
 const loadQueueDependency = createRequire(__filename);
 
@@ -122,7 +123,19 @@ interface SendInputJob {
 
 export interface CreateSessionQueueResult {
   sessionId: string;
+  /** Set for a Pane with its own worktree: the base it started from. */
+  base?: RunpanePaneBase;
 }
+
+const createSessionQueueResultSchema = boundary.object({
+  sessionId: boundary.string,
+  base: boundary.optional(boundary.object({
+    ref: boundary.string,
+    commit: boundary.optional(boundary.string),
+    refresh: boundary.enumeration('fetched', 'recent', 'skipped', 'failed'),
+    notice: boundary.optional(boundary.string),
+  })),
+});
 
 export class TaskQueue {
   private sessionQueue: SessionCreationQueue;
@@ -282,13 +295,13 @@ export class TaskQueue {
         }
 
         // Reserve names through persistence, including concurrent creates on macOS/Windows.
-        const { session, worktreePath } = await withLock(`session-create-${targetProject.path}`, async () => {
+        const { session, worktreePath, base } = await withLock(`session-create-${targetProject.path}`, async () => {
           const names = await this.ensureUniqueNames(sessionName, worktreeName, targetProject, index, !job.data.isMainRepo, !job.data.branchName);
           sessionName = names.sessionName;
           worktreeName = names.worktreeName;
 
           // Resolve working directory — worktree or project directory
-          const { worktreePath, baseCommit, baseBranch: actualBaseBranch } = await worktreeManager.resolveWorkingDirectory(
+          const { worktreePath, baseCommit, baseBranch: actualBaseBranch, base } = await worktreeManager.resolveWorkingDirectory(
             targetProject.path, worktreeName, baseBranch, !job.data.isMainRepo, targetProject.worktree_folder || undefined, ctx.pathResolver, ctx.commandRunner,
             { branchName: job.data.branchName }
           );
@@ -313,7 +326,7 @@ export class TaskQueue {
             startPinned
           );
           createdSession = session;
-          return { session, worktreePath };
+          return { session, worktreePath, base };
         }, Infinity); // Checkout operations have their own timeouts; reservations wait for their turn.
 
         // Only add prompt-related data if there's actually a prompt
@@ -405,7 +418,7 @@ export class TaskQueue {
         this.setupRuns.set(session.id, setup);
         void this.settleSetup(setup, session.id, worktreePath, ctx);
 
-        return { sessionId: session.id };
+        return { sessionId: session.id, base };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (createdSession) {
@@ -621,7 +634,9 @@ export class TaskQueue {
       // No prompt provided - update session status to stopped if toolType is 'none'
       const resolvedToolType: 'claude' | 'none' = toolType || 'claude';
       if (resolvedToolType === 'none') {
-        console.log(`[TaskQueue] Session ${session.id} has no prompt and no AI tool, marking as stopped`);
+        // Tools and agents start in their own terminals after setup; runpane reports the
+        // Pane running while one of them is live, so don't announce the Pane as stopped.
+        console.log(`[TaskQueue] Session ${session.id} has no initial prompt (stored status: stopped); its live status follows its tool and agent terminals`);
         await sessionManager.updateSession(session.id, { status: 'stopped', statusMessage: undefined });
       }
     }
@@ -778,7 +793,7 @@ export class TaskQueue {
 
   private parseSessionCreationResult(result: CreateSessionQueueResult | undefined, jobId: string | number): CreateSessionQueueResult {
     try {
-      return decodeBoundary(result, boundary.object({ sessionId: boundary.string }));
+      return decodeBoundary(result, createSessionQueueResultSchema);
     } catch {
       throw new Error(`Session creation job ${jobId} completed without a sessionId`);
     }

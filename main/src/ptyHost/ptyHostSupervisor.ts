@@ -234,7 +234,7 @@ export class PtyHostSupervisor extends EventEmitter {
   private hostReadyResolve: (() => void) | null = null;
   private hostReadyReject: ((err: Error) => void) | null = null;
 
-  constructor() {
+  constructor(private readonly authorizeRendererWrite?: (ptyId: string, data: string) => void) {
     super();
     // Seed the first ready promise; `start()` replaces these on restart.
     this.readyPromise = new Promise<void>((resolve, reject) => {
@@ -656,6 +656,10 @@ export class PtyHostSupervisor extends EventEmitter {
     }
 
     if (frame.type === 'write') {
+      // The data port must enforce the same ownership fence as terminal:input.
+      // A stale viewer cannot type while the host transfers the conversation.
+      try { this.authorizeRendererWrite?.(frame.ptyId, frame.data); }
+      catch { return; }
       this.write(frame.ptyId, frame.data).catch(() => {
         /* ignore; stale write after host restart */
       });

@@ -11,6 +11,8 @@ interface FileEditorHeaderProps {
   onViewModeChange?: (mode: EditorViewMode) => void;
   /** Text files show the auto-save state; read-only previews do not. */
   showSaveState: boolean;
+  /** HTML files open their rendered page in a new browser tab. */
+  onPreviewInBrowser?: () => void;
 }
 
 export function FileEditorHeader({
@@ -20,6 +22,7 @@ export function FileEditorHeader({
   viewMode,
   onViewModeChange,
   showSaveState,
+  onPreviewInBrowser,
 }: FileEditorHeaderProps) {
   return (
     <div className="flex items-center justify-between px-4 py-2 bg-surface-secondary border-b border-border-primary">
@@ -40,6 +43,17 @@ export function FileEditorHeader({
         )}
       </div>
       <div className="flex flex-shrink-0 items-center gap-2">
+        {onPreviewInBrowser && (
+          <button
+            type="button"
+            onClick={onPreviewInBrowser}
+            className="px-2 py-1 text-xs font-medium rounded-lg border border-border-primary bg-surface-tertiary text-text-secondary hover:bg-surface-hover transition-colors flex items-center gap-1"
+            title="Open the rendered page in a new browser tab"
+          >
+            <Eye className="w-3 h-3" />
+            Preview
+          </button>
+        )}
         {viewMode && onViewModeChange && (
           <div className="flex items-center rounded-lg border border-border-primary bg-surface-tertiary">
             <button

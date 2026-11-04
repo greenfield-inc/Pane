@@ -1,7 +1,7 @@
 import type { ParsedArgs } from './commands';
 
 /** Ids that may appear in a pane:// link. Pane's URL handler applies the same rule. */
-const LINK_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+const LINK_ID = /^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$/;
 const REPO_ID = /^[1-9][0-9]{0,15}$/;
 
 /** A numeric repository id, as app channels and repo links take it. */

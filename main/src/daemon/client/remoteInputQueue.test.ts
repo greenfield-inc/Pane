@@ -58,8 +58,9 @@ describe('RemoteInputQueue lifecycle', () => {
       queue.invoke('terminal:input', ['panel', 'b']),
     ]);
     await vi.advanceTimersByTimeAsync(10_000);
-    expect((await completed).every(result => result.status === 'rejected'
-      && result.reason instanceof Error && result.reason.message.includes('timed out'))).toBe(true);
+    const results = await completed;
+    expect(results[0]).toMatchObject({ status: 'rejected', reason: expect.objectContaining({ message: expect.stringContaining('Delivery unknown:') }) });
+    expect(results[1]).toMatchObject({ status: 'rejected', reason: expect.objectContaining({ message: expect.stringContaining('queued terminal input was not sent') }) });
     expect(send).toHaveBeenCalledTimes(1);
     expect(send.mock.calls[0][2]?.aborted).toBe(true);
   });

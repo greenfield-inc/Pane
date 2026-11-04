@@ -5,7 +5,7 @@ import { SettingsSection } from '../../ui/SettingsSection';
 import { SettingRow, SettingsPage } from '../SettingRow';
 import { ImmediateToggle } from '../SettingsControls';
 import type { SettingsPersistence } from '../useSettingsPersistence';
-import { isMissionControlEnabled } from '../../../stores/configStore';
+import { isChatEnabled, isMissionControlEnabled, isNotesEnabled } from '../../../stores/configStore';
 import type { Journey, JourneyTimingSummary } from '../../../../../shared/types/journeyTimings';
 import type { IPCResponse } from '../../../utils/api';
 
@@ -159,6 +159,30 @@ export function AdvancedSettings({ persistence, platform, onDirtyChange }: Advan
             label="Mission Control"
             value={isMissionControlEnabled(config)}
             onSave={(value) => persistence.saveConfig('mission-control', { missionControlEnabled: value })}
+          />
+        </SettingRow>
+        <SettingRow
+          settingId="experimental-chat"
+          label="Chat interface"
+          description="Open Claude and Codex agents in a chat view instead of the terminal. Turning it off returns Chat tabs to the terminal and keeps their conversations."
+          saveState={persistence.saveStates['experimental-chat']}
+        >
+          <ImmediateToggle
+            label="Chat interface"
+            value={isChatEnabled(config)}
+            onSave={(value) => persistence.saveConfig('experimental-chat', { experimentalChatEnabled: value })}
+          />
+        </SettingRow>
+        <SettingRow
+          settingId="notes"
+          label="Notes"
+          description="Add Notes tabs and the terminal's Add to notes action, and let agents read the notes scoped to their Pane. New terminals pick up the change. Turning it off hides Notes and keeps every saved note."
+          saveState={persistence.saveStates.notes}
+        >
+          <ImmediateToggle
+            label="Notes"
+            value={isNotesEnabled(config)}
+            onSave={(value) => persistence.saveConfig('notes', { notesEnabled: value })}
           />
         </SettingRow>
         <SettingRow
