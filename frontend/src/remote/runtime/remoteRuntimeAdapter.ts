@@ -10,6 +10,8 @@ import type {
   OrchestrationSessionView,
 } from '../../../../shared/types/orchestrationSession';
 import type { ToolPanel } from '../../../../shared/types/panels';
+import type { FileDiffRequest } from '../../../../shared/types/gitDiff';
+import { BRANCH_SCOPE, decodeFileDiff, decodeManifest, type ChangeList } from '../../../../shared/gitDiffClient';
 import type { ListeningPortsSnapshot } from '../../../../shared/types/listeningPorts';
 import type { RemoteDaemonEventEnvelope, RemotePaneConnectionProfile, RemotePwaAffordances } from '../../../../shared/types/remoteDaemon';
 import type { RunpanePanelScreenResult, RunpanePauseResult } from '../../../../shared/types/runpaneOrchestration';
@@ -294,6 +296,12 @@ export class RemoteRuntimeAdapter {
   async listFiles(sessionId: string, path: string): Promise<RemoteFileEntry[]> {
     return (await this.invokeFileCommand<{ files: RemoteFileEntry[] }>('file:list', [{ sessionId, path }])).files;
   }
+
+  /** The branch's changes, read-only, as the phone's Diff tab reads them. */
+  readonly diff = {
+    manifest: async (sessionId: string): Promise<ChangeList> => decodeManifest(await this.client.invoke('sessions:get-diff-manifest', [sessionId, BRANCH_SCOPE])),
+    file: async (sessionId: string, request: FileDiffRequest) => decodeFileDiff(await this.client.invoke('sessions:get-file-diff', [sessionId, BRANCH_SCOPE, request])),
+  };
 
   /** A worktree file's text, or null when the host finds it binary. */
   async readTextFile(sessionId: string, filePath: string): Promise<string | null> {

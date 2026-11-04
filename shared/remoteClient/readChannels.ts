@@ -64,6 +64,9 @@ export const REMOTE_READ_CHANNELS = new Set([
   // Read a worktree folder or text file; nothing on the host changes.
   'file:list',
   'file:read',
+  // Read a branch's changes; the phone's and the PWA's Diff tabs.
+  'sessions:get-diff-manifest',
+  'sessions:get-file-diff',
 ]);
 
 

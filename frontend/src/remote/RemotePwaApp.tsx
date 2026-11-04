@@ -21,6 +21,7 @@ import { RemoteStatusBar } from './components/RemoteStatusBar';
 import { RemoteTerminalPanel } from './components/RemoteTerminalPanel';
 import { RemoteBrowserPanel } from './components/RemoteBrowserPanel';
 import { RemoteExplorerPanel } from './components/RemoteExplorerPanel';
+import { RemoteDiffPanel } from './components/RemoteDiffPanel';
 import { RemoteChatTab } from './components/RemoteChatTab';
 import { AgentFarmProfileDialog } from '../components/chatTab/AgentFarmProfileDialog';
 import type { ChatTabCreate } from '../../../shared/types/chatTab';
@@ -1147,7 +1148,10 @@ export function RemotePwaApp() {
                   onOpenWorker={openWorkerPane} onSelectPanel={selectPanel} />
               </Suspense>
             )}
-            {selectedPanel.type !== 'browser' && selectedPanel.type !== 'explorer' && selectedPanel.type !== 'chat' && <UnsupportedPanel session={selectedSession} panel={selectedPanel} />}
+            {selectedPanel.type === 'diff' && adapter && (
+              <RemoteDiffPanel key={selectedPanel.id} adapter={adapter} sessionId={selectedPanel.sessionId} />
+            )}
+            {!phoneShows(selectedPanel) && <UnsupportedPanel session={selectedSession} panel={selectedPanel} />}
           </div>
         )}
       </section>
@@ -1214,7 +1218,7 @@ function UnsupportedPanel({ session, panel }: { session: Session; panel: ToolPan
       <div className="max-w-md rounded-lg border border-border-primary bg-surface-primary p-6">
         <p className="text-sm font-semibold text-text-primary">{panel.title}</p>
         <p className="mt-2 text-sm text-text-secondary">
-          {PANEL_TYPE_LABELS[panel.type]} panels are visible in desktop Pane. Remote Pane PWA shows terminal, browser and explorer tabs for {session.name}.
+          {PANEL_TYPE_LABELS[panel.type]} panels are visible in desktop Pane. Remote Pane PWA shows terminal, chat, browser, explorer and diff tabs for {session.name}.
         </p>
       </div>
     </div>

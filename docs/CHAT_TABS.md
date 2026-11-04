@@ -63,8 +63,8 @@ the chat tab suites against the new version.
 - Replies stream as markdown; thinking is collapsed.
 - The agent's steps are grouped by kind: *Explored 2 files, 1 search*,
   *Edit file +18 −4* with **View diff** (which opens Pane's diff view; a diff
-  never renders in the thread by itself; the PWA, which draws no diffs, and the
-  phone bring the Pane's Diff tab forward), *Run* with the command's output
+  never renders in the thread by itself; the PWA and the phone bring the Pane's
+  Diff tab forward, which shows the branch's changes read-only), *Run* with the command's output
   streaming in its own row, *Ran 9 commands*.
 - To-do lists from the agent's plan updates.
 - **Approvals** dock above the composer with exactly the choices the adapter

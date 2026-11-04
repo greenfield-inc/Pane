@@ -198,7 +198,7 @@ The same connection code works in the Remote Pane PWA:
 https://runpane.com/app/
 ```
 
-Use the PWA for phone or tablet access to remote terminals, browser tabs and files:
+Use the PWA for phone or tablet access to remote terminals, chats, browser tabs, files and diffs:
 
 1. Set up the remote host with Tailscale or a trusted HTTPS tunnel.
 2. Copy the full `pane-remote://...` code printed by setup.
@@ -227,7 +227,7 @@ The Pane phone app shows page tabs with an address row (back, forward, address, 
 
 ### Files on the phone
 
-Each pane's Explorer tab shows its worktree as a tree. Tap a text file to read and edit it; Save writes it to the host. Text files over 1 MB, and binary files that are not images, PDFs, video or audio, stay on the desktop. Images, PDFs, video and audio of any size preview on the phone, and video seeks without downloading the whole file. Open in Safari opens a preview outside the app.
+Each pane's Explorer tab shows its worktree as a tree. Tap a text file to read and edit it; Save writes it to the host. The Diff tab lists the branch's changes with their counts and opens each file to its patch, read-only; a chat's **View diff** brings it forward. Text files over 1 MB, and binary files that are not images, PDFs, video or audio, stay on the desktop. Images, PDFs, video and audio of any size preview on the phone, and video seeks without downloading the whole file. Open in Safari opens a preview outside the app.
 
 In the Pane phone app, Explorer lists the branch's changed files first, then opens one folder at a time with a path bar and search, and files are read-only: code with syntax colours, Markdown rendered or as source, and images up to 5 MB. Text over 1 MB and other binaries stay on the computer, with Copy path. Everything, images included, comes through the app's own connection, so it works over every connection the app supports. Editor tabs open their file in the same viewer. The Diff tab lists the branch's changes with their counts and shows each file's patch, and Run script tabs show the script's output live; both are read-only, so commit, revert and start or stop the script on the computer.
 

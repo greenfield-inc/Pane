@@ -1,7 +1,7 @@
 import { QueryClient, QueryObserver } from '@tanstack/react-query';
 import { describe, expect, it, vi } from 'vitest';
 
-import { changeBadge, decodeDiffResponse, DiffError, INLINE_PATCH_ROWS, inlinePatch, parsePatch, refreshChanges, versusLabel } from './diff';
+import { changeBadge, decodeManifest, DiffError, INLINE_PATCH_ROWS, inlinePatch, parsePatch, refreshChanges, versusLabel } from './diff';
 
 describe('parsePatch', () => {
   it('turns a unified patch into hunk, removed, added and unchanged rows, without the file headers', () => {
@@ -47,17 +47,20 @@ describe('versusLabel', () => {
   });
 });
 
-describe('decodeDiffResponse', () => {
+describe('decodeManifest', () => {
   it('returns the data, or throws the computer’s reason with its code', () => {
-    expect(decodeDiffResponse({ success: true, data: { files: [] } })).toEqual({ files: [] });
+    const resolvedBase = { kind: 'comparison-base' as const, ref: 'main' };
+    const stats = { additions: 0, deletions: 0, filesChanged: 0 };
+    expect(decodeManifest({ success: true, data: { files: [], resolvedBase, stats } })).toEqual({ files: [], resolvedBase, stats });
     let thrown: unknown;
     try {
-      decodeDiffResponse({ success: false, error: 'The diff is too large to show', code: 'diff-too-large' });
+      decodeManifest({ success: false, error: 'The diff is too large to show', code: 'diff-too-large' });
     } catch (error) {
       thrown = error;
     }
     expect(thrown).toBeInstanceOf(DiffError);
     expect(thrown).toMatchObject({ message: 'The diff is too large to show', code: 'diff-too-large' });
+    expect(() => decodeManifest({ success: true, data: { files: 'none' } })).toThrow('The computer sent a list of changes Pane can’t read.');
   });
 });
 

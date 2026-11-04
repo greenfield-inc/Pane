@@ -21,8 +21,8 @@ interface RemoteChatTabProps {
 
 /**
  * The PWA's chat tab. The Session orchestrator's chat is quiet and lists its workers
- * from the host's Session overview, each opening its Pane (D-18, D-19). The PWA does
- * not draw diffs, so View diff brings the Pane's Diff tab forward, as the phone does.
+ * from the host's Session overview, each opening its Pane (D-18, D-19). View diff brings
+ * the Pane's Diff tab forward, which shows the branch's changes read-only, as the phone does.
  */
 export function RemoteChatTab({ adapter, panel, panels, connected, onOpenWorker, onSelectPanel }: RemoteChatTabProps) {
   // SAFETY: the panel type 'chat' carries ChatPanelState as its custom state.
