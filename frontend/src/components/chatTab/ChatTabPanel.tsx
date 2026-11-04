@@ -6,7 +6,7 @@ import {
 import { ArrowDown, ArrowUp, Plus, Square, X } from 'lucide-react';
 import type { AgentChatPermission } from '../../../../shared/types/agentChat';
 import type { ChatTabClient, ChatTabCommand, ChatTabSend } from '../../../../shared/types/chatTab';
-import { chatTurns } from '../../../../shared/chatTabPresentation';
+import { chatTurns, placeWorkers, type ChatWorkerLine } from '../../../../shared/chatTabPresentation';
 import { rejectOption } from '../../../../shared/chatTabPermissions';
 import { chatTabViewer, type ChatTabViewer } from '../../services/chatTabViewer';
 import { toAssistantMessage } from '../agentChat/convertMessage';
@@ -17,7 +17,7 @@ import { ipcErrorMessage } from '../../utils/ipcErrorMessage';
 import { ChatProblem } from './ChatProblem';
 import { ChatQuestionCard } from './ChatQuestionCard';
 import { ChatPermissionCard } from './ChatPermissionCard';
-import { ChatTurnView, type ChatTurnActions } from './ChatTurns';
+import { ChatTurnView, WorkerLine, type ChatTurnActions } from './ChatTurns';
 import { ChatCommandMenu, matchingCommands } from './ChatCommandMenu';
 import '../agentChat/agentChat.css';
 import './chatTab.css';
@@ -54,10 +54,12 @@ export interface ChatTabPanelProps {
   machine?: ActiveMachine | null;
   actions?: ChatTurnActions;
   placeholder?: string;
+  /** The Session's workers, one line each (the orchestrator's chat). */
+  workers?: ChatWorkerLine[];
 }
 
 /** A chat tab: one agent conversation over ACP, with no terminal (D-20). */
-export default function ChatTabPanel({ panelId, client, connected = true, quiet = false, machine, actions = {}, placeholder }: ChatTabPanelProps) {
+export default function ChatTabPanel({ panelId, client, connected = true, quiet = false, machine, actions = {}, placeholder, workers }: ChatTabPanelProps) {
   const viewer: ChatTabViewer = useMemo(() => chatTabViewer(client, panelId), [client, panelId]);
   const snapshot = useSyncExternalStore(viewer.subscribe, viewer.snapshot, viewer.snapshot);
   const view = snapshot.view;
@@ -66,6 +68,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, quiet 
   const messages = useMemo(() => snapshot.transcript?.messages ?? [], [snapshot.transcript?.messages]);
   const working = view?.status === 'working' || view?.status === 'blocked';
   const turns = useMemo(() => chatTurns(messages, { running: working }), [messages, working]);
+  const placedWorkers = useMemo(() => placeWorkers(turns, workers ?? []), [turns, workers]);
   const images = useMemo(() => new ChatImageAdapter(), []);
   const stopped = view?.status === 'stopped';
   const disabled = !connected || stopped || !view;
@@ -142,7 +145,8 @@ export default function ChatTabPanel({ panelId, client, connected = true, quiet 
             {snapshot.loadingEarlier ? 'Loading…' : `Earlier messages (${snapshot.transcript?.start})`}
           </button>}
           {!snapshot.transcript && !view?.problem && <p role="status" className="chat-notice">{view?.status === 'starting' || !view ? `Starting ${agentName}…` : 'Loading conversation…'}</p>}
-          {turns.map(turn => <ChatTurnView key={turn.id} turn={turn} quiet={quiet} permissions={view?.permissions ?? []} actions={actions} />)}
+          {turns.map(turn => <ChatTurnView key={turn.id} turn={turn} quiet={quiet} permissions={view?.permissions ?? []} actions={actions} workers={placedWorkers.byTurn.get(turn.id)} />)}
+          {placedWorkers.trailing.map(worker => <WorkerLine key={worker.paneId} worker={worker} onOpen={actions.onOpenWorker} />)}
           {view?.notice && <p role="status" className="chat-notice">{view.notice}</p>}
         </div>
       </ThreadPrimitive.Viewport>

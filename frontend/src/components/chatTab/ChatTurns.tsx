@@ -5,11 +5,13 @@ import remarkGfm from 'remark-gfm';
 import type { AgentChatPermission } from '../../../../shared/types/agentChat';
 import { describeChatContent, permissionToolId } from '../../../../shared/agentChatPresentation';
 import type { JsonValue } from '../../../../shared/validation/boundaryDecoder';
-import { imageOf, stoppedText, turnSummary, type ChatStep, type ChatTurn, type PlanEntry, type StepGroup, type TurnItem } from '../../../../shared/chatTabPresentation';
+import { imageOf, stoppedText, turnSummary, type ChatWorkerLine, type ChatStep, type ChatTurn, type PlanEntry, type StepGroup, type TurnItem } from '../../../../shared/chatTabPresentation';
 
 export interface ChatTurnActions {
   /** Opens the file's diff in Pane's diff view. A diff never renders in the thread by itself. */
   onViewDiff?: (path: string) => void;
+  /** Opens a Session worker's Pane. */
+  onOpenWorker?: (paneId: string) => void;
 }
 
 const Markdown = memo(({ text }: { text: string }) => <div className="chat-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: ({ children, ...props }) => <a {...props} target="_blank" rel="noopener noreferrer">{children}</a> }}>{text}</ReactMarkdown></div>);
@@ -106,11 +108,25 @@ function UserMessage({ turn }: { turn: ChatTurn }) {
     : part.type === 'content' ? <UserImage key={index} content={part.content} /> : null)}</div>;
 }
 
+const WORKER_ICONS = { running: LoaderCircle, waiting: AlertCircle, done: CircleCheck, failed: XCircle, idle: Circle, missing: XCircle };
+
+/** A Session worker as one line: state, what it is doing, its PR, and Open (round 3 · A; no worker board, D-18). */
+export function WorkerLine({ worker, onOpen }: { worker: ChatWorkerLine; onOpen?: (paneId: string) => void }) {
+  const Icon = WORKER_ICONS[worker.state];
+  return <div className="chat-worker" data-state={worker.state}>
+    <Terminal className="chat-worker-glyph" aria-hidden="true" />
+    <span className="chat-worker-name">{worker.name}</span>
+    <span className="chat-worker-state" data-state={worker.state}><span className="chat-step-icon"><Icon aria-hidden="true" /></span>{worker.label}</span>
+    {(worker.pr || worker.detail) && <span className="chat-worker-detail" title={worker.detail}>{[worker.pr && `PR #${worker.pr}`, worker.detail].filter(Boolean).join(' · ')}</span>}
+    {onOpen && worker.state !== 'missing' && <button type="button" className="chat-link chat-worker-open" onClick={() => onOpen(worker.paneId)} aria-label={`Open ${worker.name}`}>Open</button>}
+  </div>;
+}
+
 /**
  * One turn. In a quiet chat (the Session orchestrator, D-18) a running turn shows
  * only its current step and a finished turn folds its steps into one line.
  */
-export const ChatTurnView = memo(function ChatTurnView({ turn, quiet, permissions, actions }: { turn: ChatTurn; quiet: boolean; permissions: AgentChatPermission[]; actions: ChatTurnActions }) {
+export const ChatTurnView = memo(function ChatTurnView({ turn, quiet, permissions, actions, workers = [] }: { turn: ChatTurn; quiet: boolean; permissions: AgentChatPermission[]; actions: ChatTurnActions; workers?: ChatWorkerLine[] }) {
   const [open, setOpen] = useState(false);
   const waiting = new Set(permissions.flatMap(permission => { const id = permissionToolId(permission); return id ? [id] : []; }));
   const hasSteps = turn.items.some(item => item.type === 'steps');
@@ -138,5 +154,6 @@ export const ChatTurnView = memo(function ChatTurnView({ turn, quiet, permission
       </div>;
     })}
     {stoppedText(turn) && <p className="chat-turn-stopped">{stoppedText(turn)}</p>}
+    {workers.map(worker => <WorkerLine key={worker.paneId} worker={worker} onOpen={actions.onOpenWorker} />)}
   </div>;
 });

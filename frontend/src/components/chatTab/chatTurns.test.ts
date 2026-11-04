@@ -79,3 +79,34 @@ describe('approval summaries', () => {
     expect(rejectOption({ id: '1', generation: 1, title: '', toolCall: {}, options })).toBe('r');
   });
 });
+
+describe('worker lines in the Session chat', () => {
+  it('reads state, PR and one line of detail from Pane\'s own Session state', async () => {
+    const { workerLines } = await import('../../../../shared/chatTabPresentation');
+    const lines = workerLines([
+      { paneId: 'a', name: 'cmd-f-find', missing: false, archived: false, panels: [{ state: 'idle' }], report: { state: 'done', pr: 1230, summary: 'PR #1230 ready\nmore' } },
+      { paneId: 'b', name: 'csv-export', missing: false, archived: false, panels: [{ state: 'working' }] },
+      { paneId: 'c', name: 'notify-sound', missing: false, archived: false, panels: [{ state: 'blocked' }], report: { state: 'blocked', question: 'Which sound?' } },
+      { paneId: 'd', name: 'old', missing: false, archived: true, panels: [] },
+    ], new Map([['b', '2026-11-03T11:42:00.000Z']]));
+    expect(lines).toEqual([
+      { paneId: 'a', name: 'cmd-f-find', state: 'done', label: 'Done', detail: 'PR #1230 ready', pr: 1230 },
+      { paneId: 'b', name: 'csv-export', state: 'running', label: 'Running', attachedAt: '2026-11-03T11:42:00.000Z' },
+      { paneId: 'c', name: 'notify-sound', state: 'waiting', label: 'Waiting', detail: 'Which sound?' },
+    ]);
+  });
+
+  it('places a worker after the turn that started it', async () => {
+    const { placeWorkers } = await import('../../../../shared/chatTabPresentation');
+    const turns = [
+      { id: 't1', items: [], running: false, startedAt: '2026-11-03T11:40:00.000Z', endedAt: '2026-11-03T11:41:00.000Z' },
+      { id: 't2', items: [], running: false, startedAt: '2026-11-03T11:50:00.000Z' },
+    ];
+    const placed = placeWorkers(turns, [
+      { paneId: 'a', name: 'a', state: 'running', label: 'Running', attachedAt: '2026-11-03T11:40:30.000Z' },
+      { paneId: 'b', name: 'b', state: 'running', label: 'Running' },
+    ]);
+    expect([...placed.byTurn.entries()].map(([turn, workers]) => [turn, workers.map(worker => worker.paneId)])).toEqual([['t1', ['a']]]);
+    expect(placed.trailing.map(worker => worker.paneId)).toEqual(['b']);
+  });
+});

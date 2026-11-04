@@ -249,3 +249,66 @@ export function turnSummary(turn: ChatTurn): string {
   const head = turn.running ? 'Working' : duration ? `Worked ${duration}` : 'Worked';
   return [head, plural(steps.length, 'step'), edited && `edited ${plural(edited, 'file')}`, commands && `ran ${plural(commands, 'command')}`].filter(Boolean).join(' · ');
 }
+
+/** One worker of a Session, as one line in the orchestrator's chat (round 3 · A). */
+export interface ChatWorkerLine {
+  paneId: string;
+  name: string;
+  state: 'running' | 'waiting' | 'done' | 'failed' | 'idle' | 'missing';
+  label: string;
+  /** What it is doing or reported, in one short line. */
+  detail?: string;
+  pr?: number;
+  attachedAt?: string;
+}
+
+export interface WorkerPaneInput {
+  paneId: string;
+  name: string;
+  missing: boolean;
+  archived: boolean;
+  panels: Array<{ state: string; missing?: boolean }>;
+  report?: { state: string; pr?: number; summary?: string; question?: string };
+  git?: { prNumber?: number };
+}
+
+const WORKER_LABELS = { running: 'Running', waiting: 'Waiting', done: 'Done', failed: 'Failed', idle: 'Idle', missing: 'Missing' } as const;
+
+/** Worker lines from Pane's own Session state (its Panes, their reports and agent states), never from text the agent wrote. */
+export function workerLines(panes: readonly WorkerPaneInput[], attachedAt: ReadonlyMap<string, string> = new Map()): ChatWorkerLine[] {
+  return panes.filter(pane => !pane.archived).map(pane => {
+    const report = pane.report;
+    const state: ChatWorkerLine['state'] = pane.missing ? 'missing'
+      : report?.state === 'done' ? 'done'
+        : report?.state === 'failed' ? 'failed'
+          : report?.state === 'blocked' || pane.panels.some(panel => panel.state === 'blocked') ? 'waiting'
+            : pane.panels.some(panel => panel.state === 'working') ? 'running' : 'idle';
+    const firstLine = (text?: string) => text?.split('\n').map(line => line.trim()).find(Boolean)?.slice(0, 120);
+    const line: ChatWorkerLine = { paneId: pane.paneId, name: pane.name, state, label: WORKER_LABELS[state] };
+    const detail = state === 'waiting' ? firstLine(report?.question) ?? firstLine(report?.summary) : firstLine(report?.summary);
+    if (detail) line.detail = detail;
+    const pr = report?.pr ?? pane.git?.prNumber;
+    if (pr) line.pr = pr;
+    const at = attachedAt.get(pane.paneId);
+    if (at) line.attachedAt = at;
+    return line;
+  });
+}
+
+/**
+ * Where each worker line goes: after the last turn that started before the worker
+ * joined the Session, or after the conversation when no turn's time is known.
+ */
+export interface WorkerPlacement { byTurn: Map<string, ChatWorkerLine[]>; trailing: ChatWorkerLine[] }
+
+export function placeWorkers(turns: readonly ChatTurn[], workers: readonly ChatWorkerLine[]): WorkerPlacement {
+  const byTurn = new Map<string, ChatWorkerLine[]>();
+  const trailing: ChatWorkerLine[] = [];
+  for (const worker of workers) {
+    const joined = worker.attachedAt ? Date.parse(worker.attachedAt) : NaN;
+    const anchor = Number.isNaN(joined) ? undefined : [...turns].reverse().find(turn => turn.startedAt && Date.parse(turn.startedAt) <= joined);
+    if (anchor && anchor !== turns.at(-1)) byTurn.set(anchor.id, [...(byTurn.get(anchor.id) ?? []), worker]);
+    else trailing.push(worker);
+  }
+  return { byTurn, trailing };
+}

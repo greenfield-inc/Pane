@@ -82,3 +82,17 @@
 .chat-command-description { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--chat-muted-foreground); }
 .chat-machine { display:inline-flex; align-items:center; gap:6px; margin-left:6px; font-size:12px; color:var(--chat-muted-foreground); }
 .chat-turn-stopped { font-size:13px; font-style:italic; color:var(--chat-muted-foreground); }
+/* Session worker lines (round 3 · A). */
+.chat-worker { display:flex; align-items:center; gap:10px; min-height:40px; padding:6px 12px; border:1px solid var(--chat-border); border-radius:10px; font-size:14px; min-width:0; }
+.chat-worker-glyph { width:16px; height:16px; flex-shrink:0; color:var(--chat-muted-foreground); }
+.chat-worker-name { font-weight:600; flex-shrink:0; max-width:40%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+/* Every state pill shares one width so swapping states never shifts the line. */
+.chat-worker-state { display:inline-flex; align-items:center; gap:6px; width:96px; flex-shrink:0; padding:2px 8px; border-radius:999px; font-size:12px; font-weight:500; background:var(--chat-muted); color:var(--chat-muted-foreground); }
+.chat-worker-state[data-state=running] { color:var(--color-interactive); background:color-mix(in oklab,var(--color-interactive) 12%,transparent); }
+.chat-worker-state[data-state=running] svg { animation:chat-spin 1s linear infinite; }
+.chat-worker-state[data-state=waiting] { color:var(--color-status-warning); background:color-mix(in oklab,var(--color-status-warning) 14%,transparent); }
+.chat-worker-state[data-state=done] { color:var(--color-status-success); background:color-mix(in oklab,var(--color-status-success) 12%,transparent); }
+.chat-worker-state[data-state=failed],.chat-worker-state[data-state=missing] { color:var(--color-status-error); background:color-mix(in oklab,var(--color-status-error) 12%,transparent); }
+.chat-worker-detail { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; color:var(--chat-muted-foreground); }
+.chat-worker-open { margin-left:auto; }
+@media (prefers-reduced-motion:reduce) { .chat-worker-state svg { animation:none !important; } }
