@@ -105,7 +105,7 @@ async function verifyChatAdapters(appOutDir, platform, arch) {
     for (const adapter of ADAPTERS) {
       const manifest = `/node_modules/${adapter.packageName}/package.json`;
       if (!files.includes(manifest)) throw new Error(`${app.asar} is missing ${adapter.packageName}, so chat tabs would fail on every install. Check it is a dependency in package.json.`);
-      const { version } = JSON.parse(asar.extractFile(app.asar, manifest.slice(1)).toString('utf8'));
+      const { version } = JSON.parse(asar.extractFile(app.asar, path.join('node_modules', ...adapter.packageName.split('/'), 'package.json')).toString('utf8'));
       if (!runnable) { lines.push(`${adapter.packageName}@${version} present (not started: built for ${platform}-${arch})`); continue; }
       const entry = path.join(app.asar, 'node_modules', ...adapter.packageName.split('/'), 'dist', 'index.js');
       try {
