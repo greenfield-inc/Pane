@@ -10,8 +10,6 @@ import { chatTurns, placeWorkers, type ChatWorkerLine } from '../../../../shared
 import { rejectOption } from '../../../../shared/chatTabPermissions';
 import { chatTabViewer, type ChatTabViewer } from '../../../../shared/chatTabViewer';
 import { toAssistantMessage } from '../agentChat/convertMessage';
-import { AgentChatConfiguration } from '../agentChat/AgentChatConfiguration';
-import { MachineBadge } from '../machines/MachineBadge';
 import type { ActiveMachine } from '../../stores/activeMachineStore';
 import { ipcErrorMessage } from '../../utils/ipcErrorMessage';
 import { ChatProblem } from './ChatProblem';
@@ -20,6 +18,8 @@ import { ChatPermissionCard } from './ChatPermissionCard';
 import { ChatTurnView, WorkerLine, type ChatTurnActions } from './ChatTurns';
 import { ChatCommandMenu } from './ChatCommandMenu';
 import { matchingCommands } from './chatCommands';
+import { ChatModeChip, ChatModelMenu } from './ChatComposerControls';
+import { arrangeComposerControls } from './composerControls';
 import '../agentChat/agentChat.css';
 import './chatTab.css';
 
@@ -116,7 +116,7 @@ export interface ChatTabPanelProps {
   connected?: boolean;
   /** The Session orchestrator's chat (D-18): finished turns fold to one line and only the current step shows. */
   quiet?: boolean;
-  /** The machine the tab's agent runs on, shown in the composer. */
+  /** The machine the tab's agent runs on, named on an approval for a remote one. */
   machine?: ActiveMachine | null;
   actions?: ChatTurnActions;
   placeholder?: string;
@@ -160,6 +160,8 @@ export default function ChatTabPanel({ panelId, client, connected = true, quiet 
   const agentName = view ? AGENT_NAMES[view.agent] : 'the agent';
   const commands = matchingCommands(snapshot.draft, view?.commands ?? []);
   const activeCommand = commands[Math.min(commandIndex, commands.length - 1)];
+  const composerRow = useMemo(() => arrangeComposerControls(view?.controls ?? []), [view?.controls]);
+  const settingsLocked = disabled || view?.status !== 'idle';
 
   const deliver = async (request: ChatTabSend, retry: boolean) => {
     viewer.setPendingDelivery(request);
@@ -215,6 +217,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, quiet 
     setBusy(true);
     try { await operation(); viewer.setError(undefined); } catch (error) { viewer.setError(ipcErrorMessage(error, 'Pane did not say why.')); } finally { setBusy(false); }
   };
+  const configure = (id: string, value: string) => void act(() => client.configure(panelId, id, value));
   const answerPermission = (permission: AgentChatPermission, optionId: string) => void act(() => client.permission(panelId, permission.id, optionId));
   const pickCommand = (command: ChatTabCommand) => {
     const text = `/${command.name} `;
@@ -264,7 +267,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, quiet 
         <ComposerPrimitive.Root className="chat-composer">
           <ChatCommandMenu commands={commands} active={Math.min(commandIndex, commands.length - 1)} onPick={pickCommand} />
           <div className="flex flex-wrap gap-2 empty:hidden"><ComposerPrimitive.Attachments components={{ Attachment }} /></div>
-          <ComposerPrimitive.Input readOnly={!!snapshot.pendingDelivery} aria-label={`Message ${agentName}`} placeholder={placeholder ?? `Message ${agentName} — / commands`} rows={1}
+          <ComposerPrimitive.Input readOnly={!!snapshot.pendingDelivery} aria-label={`Message ${agentName}`} placeholder={placeholder ?? 'Ask anything'} rows={1}
             onChange={event => { viewer.setDraft(event.target.value); setCommandIndex(0); }}
             onKeyDown={event => {
               if (!activeCommand) return;
@@ -278,17 +281,17 @@ export default function ChatTabPanel({ panelId, client, connected = true, quiet 
             }}
             className="chat-input" />
           <div className="chat-composer-actions">
-            <div className="chat-configs">
-              {view?.canAttachImages && <ComposerPrimitive.AddAttachment aria-label="Attach image" title="Attach image" className="chat-icon rounded-full"><Plus className="h-4 w-4" /></ComposerPrimitive.AddAttachment>}
-              {!!view?.controls.length && <AgentChatConfiguration controls={view.controls} disabled={disabled || view.status !== 'idle'} configure={(id, value) => void act(() => client.configure(panelId, id, value))} />}
-              {machine && <span className="chat-machine" title={`Runs on ${machine.name}`}><MachineBadge machine={machine} /></span>}
+            {view?.canAttachImages && <ComposerPrimitive.AddAttachment aria-label="Attach image" title="Attach image" className="chat-icon"><Plus className="h-4 w-4" /></ComposerPrimitive.AddAttachment>}
+            {composerRow.mode && <ChatModeChip control={composerRow.mode} disabled={settingsLocked} configure={configure} />}
+            <div className="chat-composer-end">
+              <ChatModelMenu arranged={composerRow} disabled={settingsLocked} configure={configure} />
+              {working
+                ? <>
+                  <ComposerPrimitive.Send aria-label="Queue message" title="Queue message (sends after this turn)" className="chat-icon"><ArrowUp className="h-4 w-4" /></ComposerPrimitive.Send>
+                  <button type="button" aria-label="Stop agent turn" title="Stop" className="chat-send" onClick={() => void act(() => client.cancel(panelId))}><Square className="h-3.5 w-3.5 fill-current" /></button>
+                </>
+                : <ComposerPrimitive.Send aria-label="Send message" title="Send message" className="chat-send"><ArrowUp className="h-4 w-4" /></ComposerPrimitive.Send>}
             </div>
-            {working
-              ? <div className="flex items-center gap-1">
-                <ComposerPrimitive.Send aria-label="Queue message" title="Queue message (sends after this turn)" className="chat-icon"><ArrowUp className="h-4 w-4" /></ComposerPrimitive.Send>
-                <button type="button" aria-label="Stop agent turn" title="Stop" className="chat-send" onClick={() => void act(() => client.cancel(panelId))}><Square className="h-3.5 w-3.5 fill-current" /></button>
-              </div>
-              : <ComposerPrimitive.Send aria-label="Send message" title="Send message" className="chat-send"><ArrowUp className="h-4 w-4" /></ComposerPrimitive.Send>}
           </div>
         </ComposerPrimitive.Root>
       </div>

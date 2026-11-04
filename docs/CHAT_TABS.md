@@ -74,10 +74,17 @@ the chat tab suites against the new version.
 - **Questions** (ACP form elicitation, such as Claude's AskUserQuestion) dock
   as a form. Pane declares `elicitation.form`; without it Claude turns
   AskUserQuestion off.
-- The `/` menu lists the agent's own commands and skills; the chips change
-  model, mode and effort; **Stop** cancels the turn. A message sent while the
-  agent works is queued and sent next; **Remove** takes it out of the queue.
-- The composer shows the machine the agent runs on.
+- The composer is the input over one row of controls: attach image, the
+  permission mode chip, then one menu showing model and effort together
+  ("Opus 5.5 · Medium"). That menu also holds every other setting the adapter
+  offers (such as Claude's Fast mode, Ultracode and Agent), each under its own
+  name. Pane places a setting by its ACP category (`mode`, `model`,
+  `thought_level`), or by its id when the adapter sends none. The `/` menu lists
+  the agent's own commands and skills; **Stop** cancels the turn. A message sent
+  while the agent works is queued and sent next; **Remove** takes it out of the
+  queue.
+- The composer does not show the machine: the window's machine picker does, and
+  an approval from a remote machine names it.
 
 The Session orchestrator's chat is *quiet* (D-18): a finished turn folds to one
 line, "Worked 2 m 40 s · 14 steps · edited 2 files · ran 9 commands", that opens

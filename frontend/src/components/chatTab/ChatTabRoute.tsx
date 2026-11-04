@@ -43,7 +43,7 @@ export function ChatTabRoute({ panel }: { panel: ToolPanel }) {
     client={window.electronAPI.chatTab}
     machine={machine}
     quiet={isSessionChat(panel)}
-    placeholder={state?.orchestrationSessionId ? 'Message the Session…' : undefined}
+    placeholder={state?.orchestrationSessionId ? 'Ask the Session anything' : undefined}
     actions={{
       onOpenWorker: paneId => { setActiveSession(paneId); navigateToSessions(); },
       onViewDiff: file => void openFileInEditor({ sessionId: panel.sessionId, filePath: worktreeRelative(file, state?.cwd), pin: true, diff: { kind: 'scope', scope: { kind: 'session' } } })

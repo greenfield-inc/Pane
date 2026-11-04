@@ -35,5 +35,5 @@ export function RemoteChatTab({ adapter, panel, panels, connected, onOpenWorker,
   }), [diffPanelId, onOpenWorker, onSelectPanel, sessionId]);
   return <ChatTabPanel key={panel.id} panelId={panel.id} client={adapter.chatTab} connected={connected}
     quiet={isSessionChat(panel)} workers={workers} actions={actions}
-    placeholder={sessionId ? 'Message the Session…' : undefined} />;
+    placeholder={sessionId ? 'Ask the Session anything' : undefined} />;
 }

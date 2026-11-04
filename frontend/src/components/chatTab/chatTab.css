@@ -80,7 +80,26 @@
 .chat-commands li[aria-selected=true] button,.chat-commands button:hover { background:var(--chat-muted); }
 .chat-command-name { font-family:var(--font-mono,ui-monospace,monospace); flex-shrink:0; }
 .chat-command-description { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--chat-muted-foreground); }
-.chat-machine { display:inline-flex; align-items:center; gap:6px; margin-left:6px; font-size:12px; color:var(--chat-muted-foreground); }
+/* The composer: the input, then one row that never wraps (attach, mode | model menu, send). */
+.chat-tab .chat-composer { gap:4px; padding:10px 10px 8px; border-radius:20px; background:var(--chat-background); box-shadow:0 1px 2px color-mix(in oklab,var(--chat-foreground) 6%,transparent); }
+.chat-tab .chat-input { min-height:24px; padding:2px 6px; font-size:15px; }
+.chat-tab .chat-composer-actions { justify-content:flex-start; flex-wrap:nowrap; gap:2px; min-width:0; }
+.chat-composer-end { display:flex; align-items:center; gap:4px; min-width:0; margin-left:auto; }
+.chat-chip { display:inline-flex; align-items:center; gap:6px; height:28px; min-width:0; max-width:15rem; padding:0 8px; border-radius:999px; font-size:13px; color:var(--chat-muted-foreground); }
+.chat-chip:hover:not(:disabled),.chat-chip[aria-expanded=true] { background:var(--chat-muted); color:var(--chat-foreground); }
+.chat-chip:disabled { opacity:.55; }
+.chat-chip-icon,.chat-chip-chevron { flex-shrink:0; }
+.chat-chip-icon { width:14px; height:14px; }
+.chat-chip-chevron { width:12px; height:12px; }
+.chat-chip-label { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.chat-model { color:var(--chat-foreground); }
+.chat-fields { display:flex; flex-direction:column; gap:10px; padding:6px 8px; font-size:13px; color:var(--color-text-primary); }
+.chat-field { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.chat-field>span { color:var(--color-text-secondary); flex-shrink:0; }
+.chat-field select { width:9.5rem; flex-shrink:0; height:28px; padding:0 6px; border:1px solid var(--color-border-primary); border-radius:8px; background:var(--color-bg-primary); color:var(--color-text-primary); font-size:13px; cursor:pointer; }
+.chat-field select option { color:var(--color-text-primary); background:var(--color-bg-primary); }
+.chat-fields-rule { border:0; border-top:1px solid var(--color-border-primary); margin:0; }
+@container chat-composer (max-width:360px) { .chat-chip { max-width:8rem; } }
 .chat-turn-stopped { font-size:13px; font-style:italic; color:var(--chat-muted-foreground); }
 /* Session worker lines (round 3 · A). */
 .chat-worker { display:flex; align-items:center; gap:10px; min-height:40px; padding:6px 12px; border:1px solid var(--chat-border); border-radius:10px; font-size:14px; min-width:0; }
