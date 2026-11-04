@@ -1377,9 +1377,16 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void
         panel.state.customState = { agentType: 'claude', agentSessionId: 'conversation-1', hasClaudeSessionId: true, initialCommand: 'claude' };
         const { manager, handle } = await startTerminal(panel);
 
+        handle.emit('Claude: the plan is ready\r\n');
+        await vi.advanceTimersByTimeAsync(500);
+        // Ctrl+C ends the agent, and its shell prints over the screen before the terminal stops.
+        const write = handle.write.bind(handle);
+        handle.write = async (data: string) => { await write(data); if (data === '\x03') handle.emit('\x1b[2J\x1b[Hshell after exit $ '); };
         const pausing = manager.pausePanels([panel.id], mark);
         await vi.advanceTimersByTimeAsync(5000);
         expect(await pausing).toEqual([panel.id]);
+        expect(databaseService.getPanel(panel.id)?.state.customState?.screenText).toContain('the plan is ready');
+        expect(databaseService.getPanel(panel.id)?.state.customState?.screenText).not.toContain('shell after exit');
 
         expect(handle.written.filter(data => data === '\x03')).toHaveLength(2);
         expect(manager.isTerminalInitialized(panel.id)).toBe(false);

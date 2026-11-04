@@ -2025,6 +2025,10 @@ export class TerminalPanelManager extends EventEmitter {
 
     // Store in map (ptyHost path: pid is already populated on the shim).
     this.terminals.set(panel.id, terminalProcess);
+    // A tab starting in a Pane that has paused tabs (a new tab, or one resumed) can end the Pane's paused state.
+    if (panelManager.getPanelsForSession(panel.sessionId).some(other => pausedMarkOf(other))) {
+      this.emit('pause-changed', { panelIds: [], paneIds: [panel.sessionId], paused: false });
+    }
 
     // Install lifetime guards before any launch-state persistence can yield.
     this.setupTerminalHandlers(terminalProcess);
@@ -3192,6 +3196,22 @@ export class TerminalPanelManager extends EventEmitter {
         catch (error) { console.warn(`[TerminalPanelManager] Ctrl+C before pause failed for ${terminal.panelId}:`, error); }
       }
     };
+    // The paused view shows the screen the person last saw, so it is saved before Ctrl+C makes
+    // the agent exit; the save after exit keeps whatever the agent reported on its way out.
+    const lastScreens = new Map<string, { scrollbackBuffer?: string; serializedBuffer?: string; alternateScreenBuffer?: string; screenText?: string; isAlternateScreen?: boolean }>();
+    for (const terminal of live) {
+      await this.saveTerminalState(terminal.panelId);
+      const buffers = databaseService.getPanelBuffers(terminal.panelId);
+      const saved = panelManager.getPanel(terminal.panelId);
+      const custom = saved ? terminalCustomState(saved.state) : {};
+      lastScreens.set(terminal.panelId, {
+        scrollbackBuffer: buffers?.scrollback ?? undefined,
+        serializedBuffer: buffers?.serialized ?? undefined,
+        alternateScreenBuffer: buffers?.alternate ?? undefined,
+        screenText: custom.screenText,
+        isAlternateScreen: custom.isAlternateScreen,
+      });
+    }
     if (live.length > 0) {
       interrupt();
       await new Promise(resolve => setTimeout(resolve, PAUSE_SECOND_INTERRUPT_MS));
@@ -3202,6 +3222,10 @@ export class TerminalPanelManager extends EventEmitter {
       console.error(`[TerminalPanelManager] Pause could not stop ${panel.id}:`, error);
     })));
     await Promise.all(live.map(terminal => terminal.reaped));
+    for (const [panelId, screen] of lastScreens) {
+      const saved = panelManager.getPanel(panelId);
+      if (saved) await panelManager.updatePanel(panelId, { state: { ...saved.state, customState: { ...terminalCustomState(saved.state), ...screen } } });
+    }
     for (const panel of targets) void panelManager.emitPanelEvent(panel.id, 'terminal:paused', { by: mark.by, at: mark.at });
     this.emit('pause-changed', { panelIds: targets.map(panel => panel.id), paneIds: [...new Set(targets.map(panel => panel.sessionId))], paused: true });
     return targets.map(panel => panel.id);
