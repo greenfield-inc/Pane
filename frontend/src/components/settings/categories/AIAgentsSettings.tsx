@@ -13,9 +13,10 @@ import { SessionLaunchFields } from '../../SessionLaunchFields';
 import { DEFAULT_SESSION_PROFILE } from '../../../../../shared/types/sessionProfile';
 import { visibleAgentPresets } from '../../../utils/agentPresets';
 import type { AgentLaunchPresetId } from '../../../../../shared/constants/agentLaunchPresets';
+import { SessionImportSettingsRow } from '../../sessionImport/SessionImportSettingsRow';
 
 function isPaneChatAgent(id: AgentLaunchPresetId): id is PaneChatAgent {
-  return id === 'claude' || id === 'codex' || id === 'cursor';
+  return id === 'claude' || id === 'codex' || id === 'cursor' || id === 'opencode';
 }
 
 const paneChatAgentOptions = visibleAgentPresets()
@@ -88,7 +89,7 @@ export function AIAgentsSettings({ persistence, onDirtyChange }: AIAgentsSetting
         <SettingRow
           settingId="mcp-toolsets"
           label="Pane tools to register"
-          description="Core covers the common jobs: start an agent on a task, check on it, send it a follow-up, git status, docs, and links. All adds every Pane command, which can make smaller models pick tools less accurately."
+          description="Core covers the common jobs: start an agent on a task, check on it, send it a follow-up, git status, docs, links, and loops. All adds every Pane command, which can make smaller models pick tools less accurately."
           saveState={persistence.saveStates['mcp-toolsets']}
         >
           <SegmentedControl<McpToolsetChoice>
@@ -96,6 +97,18 @@ export function AIAgentsSettings({ persistence, onDirtyChange }: AIAgentsSetting
             value={config.agentContext?.mcpToolsets?.includes('all') ? 'all' : 'core'}
             options={mcpToolsetOptions}
             onChange={(value) => void persistence.saveConfig('mcp-toolsets', { agentContext: { mcpToolsets: [value] } })}
+          />
+        </SettingRow>
+        <SettingRow
+          settingId="answer-prompts-from-pane"
+          label="Answer prompts from Pane"
+          description="Claude tabs Pane starts also ask their permission and plan prompts in Notify and on your phone, through hooks Pane adds to each launch. The terminal still asks; the first answer wins. Turning it off takes effect at once; tabs started while it was off pick it up when they restart."
+          saveState={persistence.saveStates['answer-prompts-from-pane']}
+        >
+          <ImmediateToggle
+            label="Answer prompts from Pane"
+            value={config.answerPromptsFromPane !== false}
+            onSave={(value) => persistence.saveConfig('answer-prompts-from-pane', { answerPromptsFromPane: value })}
           />
         </SettingRow>
         <SettingRow
@@ -113,7 +126,7 @@ export function AIAgentsSettings({ persistence, onDirtyChange }: AIAgentsSetting
         <SettingRow
           settingId="agent-context"
           label="Publish Pane instructions to AGENTS.md"
-          description="Edits repository files: adds Pane instructions to AGENTS.md and exports scoped Notes to AGENTS.md and CLAUDE.md in their workspaces. These edits can appear in Git changes. Off by default; turning it off removes Pane's managed sections. Notes remain available through native Pane terminals."
+          description="Edits repository files: adds Pane instructions to AGENTS.md and, with experimental Notes on, exports scoped Notes to AGENTS.md and CLAUDE.md in their workspaces. These edits can appear in Git changes. Off by default; turning it off removes Pane's managed sections. With experimental Notes on, Notes remain available through native Pane terminals."
           saveState={persistence.saveStates['agent-context']}
         >
           <ImmediateToggle
@@ -122,6 +135,10 @@ export function AIAgentsSettings({ persistence, onDirtyChange }: AIAgentsSetting
             onSave={(value) => persistence.saveConfig('agent-context', { agentContext: { managedAgentsMd: value } })}
           />
         </SettingRow>
+      </SettingsSection>
+
+      <SettingsSection title="Your other agent tools">
+        <SessionImportSettingsRow />
       </SettingsSection>
 
       <SettingsSection title="Session defaults">

@@ -1,3 +1,4 @@
+import { remoteFailureKind, reportUnknownRemoteDelivery } from './utils/remoteFailure';
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
@@ -49,6 +50,12 @@ export function mountDesktopRenderer(): void {
 
   // Global error handlers catch failures outside React error boundaries.
   window.addEventListener('unhandledrejection', (event) => {
+    const remoteMessage = event.reason instanceof Error ? event.reason.message : String(event.reason);
+    if (remoteFailureKind(remoteMessage)) {
+      reportUnknownRemoteDelivery(remoteMessage);
+      event.preventDefault();
+      return;
+    }
     if (REMOTE_HOST_UNREACHABLE.test(getErrorMessage(event.reason))) {
       // The remote host dropped (sleep, a network change). The connection
       // status reports it and the client reconnects; this is not a crash.

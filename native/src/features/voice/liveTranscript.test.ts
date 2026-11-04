@@ -14,6 +14,11 @@ describe('voiceStreamUrl', () => {
     expect(voiceStreamUrl('http://127.0.0.1:42157')).toBe('ws://127.0.0.1:42157/voice/deepgram-stream');
     expect(voiceStreamUrl('https://mac.tail1234.ts.net/')).toBe('wss://mac.tail1234.ts.net/voice/deepgram-stream');
   });
+
+  it('keeps the path prefix of a workspace address', () => {
+    expect(voiceStreamUrl('https://mac.tail1234.ts.net/serve-secret')).toBe('wss://mac.tail1234.ts.net/serve-secret/voice/deepgram-stream');
+    expect(voiceStreamUrl('https://mac.tail1234.ts.net/serve-secret/')).toBe('wss://mac.tail1234.ts.net/serve-secret/voice/deepgram-stream');
+  });
 });
 
 describe('wavStreamHeader', () => {

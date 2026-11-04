@@ -1,20 +1,27 @@
 import * as claudeTranscripts from './claudeSessionTranscript';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import * as pty from '@lydell/node-pty';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ConfigManager } from './configManager';
-import { resetPaneRuntimeForTests, setPaneRuntime } from '../core/runtime';
+import { resetPaneRuntimeForTests, setPaneRuntime, type PtyHostRuntime } from '../core/runtime';
 import { createFanoutEventSink } from '../core/eventSink';
 import { createFlowControlRecord, disposeFlowControlRecord, type FlowControlRecord } from '../ptyHost/flowControl';
 import type { RemoteTerminalEmulator } from './terminalEmulatorClient';
 import { inProcessEmulatorHost } from '../test/inProcessEmulatorHost';
-import type { TerminalPanelState } from '../../../shared/types/panels';
+import type { TerminalPanelState, ToolPanel } from '../../../shared/types/panels';
 import { MISSION_CONTROL_VIEWER_PREFIX } from '../../../shared/types/missionControl';
+import * as openCodeLaunch from './agents/opencodeLaunch';
 
 import { TerminalPanelManager } from './terminalPanelManager';
+import { databaseService } from './database';
 import { ShellDetector } from '../utils/shellDetector';
+import * as shellPathUtils from '../utils/shellPath';
 import { panelManager } from '../test/setup';
 import { RunCommandManager } from './runCommandManager';
 import type { DatabaseService } from '../database/database';
+import * as processTree from '../utils/processTree';
 import { ArchiveProcessTracker, type ArchiveProcessIdentity, type ArchiveProcessObservation } from './archiveProcessTracker';
+import { spawnDetachedWorkerPty, type DetachedWorkerPty } from '../test/detachedWorkerPty';
 
 vi.spyOn(panelManager, 'emitPanelEvent');
 vi.spyOn(panelManager, 'getPanel');
@@ -41,8 +48,6 @@ type TerminalUnderTest = {
   scrollbackBuffer: string;
   alternateScreenBuffer: string;
   screenEmulator?: RemoteTerminalEmulator;
-  commandHistory: string[];
-  currentCommand: string;
   lastActivity: Date;
   lastOutputAt?: Date;
   outputGeneration: number;
@@ -173,8 +178,6 @@ function createTerminal(overrides: Partial<TerminalUnderTest> = {}): TerminalUnd
     sessionId: 'session-1',
     scrollbackBuffer: '',
     alternateScreenBuffer: '',
-    commandHistory: [],
-    currentCommand: '',
     lastActivity: new Date(),
     outputGeneration: 0,
     wslContext: null,
@@ -366,6 +369,42 @@ describe('TerminalPanelManager shell prompt scheduling', () => {
 
     await vi.advanceTimersByTimeAsync(300);
     expect(callback).toHaveBeenCalledTimes(1);
+  });
+
+  it('invokes once when repeated prompts race the fallback', async () => {
+    vi.useFakeTimers();
+    const manager = testAccess<ShellPromptSchedulerAccess>(new TerminalPanelManager());
+    const promptPty = createPromptPty();
+    const callback = vi.fn();
+
+    manager.scheduleAfterShellPrompt(promptPty.pty, callback);
+    promptPty.emit('\x1b[32m$\x1b[0m ');
+    promptPty.emit('\x1b[32m$\x1b[0m ');
+
+    await vi.runAllTimersAsync();
+    expect(callback).toHaveBeenCalledTimes(1);
+    expect(promptPty.dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it('declines the oh-my-zsh update prompt instead of typing the launch command into it', async () => {
+    vi.useFakeTimers();
+    const manager = testAccess<ShellPromptSchedulerAccess>(new TerminalPanelManager());
+    const promptPty = createPromptPty();
+    const callback = vi.fn();
+
+    manager.scheduleAfterShellPrompt(promptPty.pty, callback);
+    promptPty.emit('\x1b[1m[oh-my-zsh] Would you like to update?');
+    promptPty.emit(' [Y/n] \x1b[0m');
+
+    expect(promptPty.pty.write).toHaveBeenCalledTimes(1);
+    expect(promptPty.pty.write).toHaveBeenCalledWith('n');
+    expect(callback).not.toHaveBeenCalled();
+
+    promptPty.emit('n\r\n[oh-my-zsh] You can update manually by running `omz update`\r\n');
+    promptPty.emit('user@host ~ % ');
+    await vi.advanceTimersByTimeAsync(300);
+    expect(callback).toHaveBeenCalledTimes(1);
+    expect(promptPty.pty.write).toHaveBeenCalledTimes(1);
   });
 
   it('falls back after five seconds when no prompt is detected', async () => {
@@ -852,7 +891,6 @@ describe('TerminalPanelManager hidden output delivery', () => {
       alternateScreenBuffer: 'screen',
       screenEmulator,
       isAlternateScreen: true,
-      currentCommand: 'codex',
       capturedAgentSessionId: 'agent-session-1',
     });
     manager.terminals.set(terminal.panelId, terminal);
@@ -885,7 +923,6 @@ describe('TerminalPanelManager hidden output delivery', () => {
       screenText: 'agent screen',
       isAlternateScreen: true,
       activityStatus: 'idle',
-      currentCommand: 'codex',
       isCliPanel: true,
       isCliReady: true,
       agentType: 'codex',
@@ -993,9 +1030,11 @@ describe('TerminalPanelManager hidden output delivery', () => {
   it('delivers pending ready initial input with the panel submit strategy', async () => {
     vi.useFakeTimers();
     const manager = testAccess<InitialInputAccess>(new TerminalPanelManager());
-    const terminal = createTerminal({ screenEmulator: inProcessEmulatorHost().createEmulator(40, 5) });
+    const terminal = createTerminal({ agentType: 'codex', screenEmulator: inProcessEmulatorHost().createEmulator(40, 5) });
     manager.terminals.set(terminal.panelId, terminal);
     manager.registerAgentStatusPanel(terminal);
+    // Held input goes only to an identified agent at idle, after its startup grace.
+    vi.setSystemTime(Date.now() + 11_000);
     vi.mocked(panelManager.getPanel).mockReturnValue({
       id: terminal.panelId,
       sessionId: terminal.sessionId,
@@ -1032,10 +1071,12 @@ describe('TerminalPanelManager hidden output delivery', () => {
   });
 
   it('delivers after a premark clear when the cliReady path already skipped', async () => {
+    vi.useFakeTimers();
     const manager = testAccess<InitialInputAccess>(new TerminalPanelManager());
-    const terminal = createTerminal({ screenEmulator: inProcessEmulatorHost().createEmulator(40, 5) });
+    const terminal = createTerminal({ agentType: 'claude', screenEmulator: inProcessEmulatorHost().createEmulator(40, 5) });
     manager.terminals.set(terminal.panelId, terminal);
     manager.registerAgentStatusPanel(terminal);
+    vi.setSystemTime(Date.now() + 11_000);
     const panel = {
       id: terminal.panelId,
       sessionId: terminal.sessionId,
@@ -1064,12 +1105,14 @@ describe('TerminalPanelManager hidden output delivery', () => {
     expect(terminal.pty.write).not.toHaveBeenCalled();
     delete panel.state.customState.initialInputSentAt;
 
+    echoStagedWrites(terminal);
     manager.deliverPendingInitialInput(terminal.panelId);
     manager.pollAgentStatus();
     await flushPromises();
+    await vi.advanceTimersByTimeAsync(500);
 
-    expect(terminal.pty.write).toHaveBeenCalledTimes(1);
-    expect(terminal.pty.write).toHaveBeenCalledWith('/do TM-x\r');
+    // An agent gets the text, then the submit key as its own write.
+    expect(terminal.pty.write.mock.calls).toEqual([['/do TM-x'], ['\r']]);
     disposeFlowControlRecord(terminal.flowControl);
   });
 
@@ -1130,18 +1173,15 @@ describe('TerminalPanelManager hidden output delivery', () => {
     });
   });
 
-  it('allocates one stable selector for a fresh native OpenCode launch', () => {
+  it('starts a fresh native OpenCode launch without a session selector', () => {
     const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
 
     const result = manager.resolveCliLaunchCommand('panel-1', 'opencode --auto', {
       agentType: 'opencode',
     });
 
-    expect(result.customState.agentSessionId).toMatch(/^ses_[A-Za-z0-9]+$/);
-    expect(result.commandToRun).toBe(
-      `opencode --auto --session "${result.customState.agentSessionId}"`,
-    );
-    expect(result.commandToRun.match(/--session/g)).toHaveLength(1);
+    expect(result.commandToRun).toBe('opencode --auto');
+    expect(result.customState.agentSessionId).toBeUndefined();
     expect(result.customState).toMatchObject({
       agentType: 'opencode',
       isCliPanel: true,
@@ -1164,6 +1204,89 @@ describe('TerminalPanelManager hidden output delivery', () => {
       expect(result.commandToRun).toBe(`opencode --auto --session "${sessionId}"`);
       expect(result.customState.agentSessionId).toBe(sessionId);
       expect(result.customState.wasInterrupted).toBeUndefined();
+    }
+  });
+
+  it.each([undefined, 'session'])('resumes the exact recorded OpenCode update conversation without replaying input (Session=%s)', orchestrationSessionId => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const state: TerminalPanelState = {
+      agentType: 'opencode', agentSessionId: 'ses_Saved123', updateResumeId: 'ses_Saved123',
+      orchestrationSessionId, preserveLaunchCommand: Boolean(orchestrationSessionId), wasInterrupted: true,
+      initialInput: 'Do not replay this prompt', initialInputFile: '/saved/prompt.txt', initialInputMode: 'argument',
+    };
+    const before = structuredClone(state);
+
+    const result = manager.resolveCliLaunchCommand('panel', 'opencode --auto', state);
+
+    expect(result.commandToRun).toBe('opencode --auto --session "ses_Saved123"');
+    expect(result.isCliCommand).toBe(true);
+    expect(result.customState.agentSessionId).toBe(state.updateResumeId);
+    expect(result.customState.initialInput).toBeUndefined();
+    expect(result.customState.initialInputFile).toBeUndefined();
+    expect(result.customState.updateResumeId).toBeUndefined();
+    expect(state).toEqual(before);
+  });
+
+  it('refuses an OpenCode selector that differs from the recorded update conversation', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const state: TerminalPanelState = {
+      agentType: 'opencode', agentSessionId: 'ses_Saved123', updateResumeId: 'ses_Saved12',
+      initialInput: 'Do not replay this prompt', initialInputFile: '/saved/prompt.txt',
+    };
+    const before = structuredClone(state);
+
+    expect(() => manager.resolveCliLaunchCommand('panel', 'opencode --auto', state)).toThrowError(expect.objectContaining({
+      code: 'ERR_UPDATE_CONVERSATION', message: expect.stringContaining('No command or input was sent'),
+    }));
+    expect(state).toEqual(before);
+  });
+
+  it.each([
+    { launchMode: 'wrapped' as const },
+    { customResume: { mode: 'generated' as const, initialTemplate: '{command} {sessionId}', resumeTemplate: '{command} {sessionId}' } },
+  ])('rejects incompatible OpenCode Session update launches before spawn: %j', async incompatibleState => {
+    const manager = new TerminalPanelManager(inProcessEmulatorHost);
+    const command = 'opencode --auto';
+    const state: TerminalPanelState = {
+      agentType: 'opencode', initialCommand: command, orchestrationSessionId: 'update-session',
+      preserveLaunchCommand: true, agentSessionId: 'ses_Saved123', updateResumeId: 'ses_Saved123',
+      customResumeStarted: true, wasInterrupted: true, ...incompatibleState,
+    };
+    const panel: ToolPanel = {
+      id: 'update-panel', sessionId: 'session', type: 'terminal', title: 'OpenCode',
+      state: { isActive: true, customState: state },
+      metadata: { createdAt: '2026-10-19T00:00:00.000Z', lastActiveAt: '2026-10-19T00:00:00.000Z', position: 0 },
+    };
+    const before = structuredClone(state);
+    const spawn = vi.fn(async () => { throw new Error('Unexpected PTY host spawn'); });
+    setPaneRuntime({
+      eventSink: { send: vi.fn() }, getWebviewContextMap: () => new Map(),
+      getConfigManager: () => partialMock<ConfigManager>({ getPreferredShell: () => 'sh', getUsePtyHost: () => true }),
+      getPtyHostRuntime: () => partialMock<PtyHostRuntime>({ spawn }),
+    });
+    vi.mocked(panelManager.getPanel).mockReturnValue(panel);
+    const warmup = vi.spyOn(shellPathUtils, 'warmShellPath').mockResolvedValue();
+    const shellPath = vi.spyOn(shellPathUtils, 'getShellPath').mockReturnValue(process.env.PATH ?? '');
+    const shell = vi.spyOn(ShellDetector, 'getDefaultShell').mockReturnValue({ path: '/bin/sh', name: 'sh', args: [] });
+    const resolve = vi.spyOn(openCodeLaunch, 'resolveOpenCodeLaunchCommand');
+    const legacySpawn = vi.spyOn(pty, 'spawn').mockImplementation(() => { throw new Error('Unexpected legacy PTY spawn'); });
+    try {
+      const refusal = expect.objectContaining({ code: 'ERR_SESSION_OPENCODE_LAUNCH' });
+      expect(() => testAccess<LaunchCommandAccess>(manager).resolveCliLaunchCommand('update-panel', command, state))
+        .toThrowError(refusal);
+      await expect(manager.initializeTerminal(panel, process.cwd())).rejects.toThrowError(refusal);
+      expect(state).toEqual(before);
+      expect(resolve).not.toHaveBeenCalled();
+      expect(spawn).not.toHaveBeenCalled();
+      expect(legacySpawn).not.toHaveBeenCalled();
+      expect(panelManager.updatePanel).not.toHaveBeenCalled();
+      expect(manager.getActiveTerminals()).toEqual([]);
+    } finally {
+      legacySpawn.mockRestore();
+      resolve.mockRestore();
+      shell.mockRestore();
+      shellPath.mockRestore();
+      warmup.mockRestore();
     }
   });
 
@@ -1215,6 +1338,99 @@ describe('TerminalPanelManager hidden output delivery', () => {
     expect(result.customState.agentSessionId).toBeUndefined();
   });
 
+  it.each([
+    'opencode --auto', '"/opt/agent tools/opencode" --auto',
+    'PANE_TEST_FLAG=value opencode --auto', 'env PANE_TEST_FLAG=value opencode --auto',
+  ])('routes direct OpenCode Session commands before preservation: %s', command => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const state: TerminalPanelState = {
+      agentType: 'opencode', orchestrationSessionId: 'session', preserveLaunchCommand: true,
+      agentSessionId: 'ses_Saved123', initialInputSentAt: '2026-10-06T12:00:00.000Z', initialInputError: 'Saved delivery error',
+      scrollbackBuffer: 'Saved history', serializedBuffer: 'Saved screen',
+    };
+    const result = manager.resolveCliLaunchCommand('panel', command, state);
+    expect(result.commandToRun).toBe(`${command} --session "ses_Saved123"`);
+    expect(result.customState).toMatchObject({ ...state, preserveLaunchCommand: false, isCliPanel: true, isCliReady: false });
+    expect(state.preserveLaunchCommand).toBe(true);
+  });
+
+  it.each(['claude', 'generated', 'reported'] as const)('rejects OpenCode custom resume before template allocation: %s', mode => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const state: TerminalPanelState = {
+      agentType: 'claude', orchestrationSessionId: 'session', preserveLaunchCommand: true,
+      customResume: { mode, initialTemplate: '{command} {sessionId}', resumeTemplate: '{command} {sessionId}' },
+    };
+    expect(() => manager.resolveCliLaunchCommand('panel', 'env FLAG=value opencode --auto', state)).toThrow(/OpenCode.*custom resume/i);
+    expect(state.agentSessionId).toBeUndefined();
+    expect(() => manager.resolveCliLaunchCommand('panel', 'my-launcher run', { ...state, agentType: 'opencode' })).toThrow(/OpenCode.*custom resume/i);
+    expect(() => manager.resolveCliLaunchCommand('panel', 'env FLAG=value opencode --auto', state)).toThrowError(expect.objectContaining({
+      code: 'ERR_SESSION_OPENCODE_LAUNCH', next: expect.stringContaining('opencode --auto'),
+    }));
+  });
+
+  it('reports the OpenCode Session parser cause without changing state', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const state: TerminalPanelState = {
+      agentType: 'opencode', orchestrationSessionId: 'session', agentSessionId: 'ses_Saved123',
+      scrollbackBuffer: 'Saved history', initialInputSentAt: '2026-10-06T12:00:00.000Z',
+    };
+    const before = structuredClone(state);
+    const resolve = vi.spyOn(openCodeLaunch, 'resolveOpenCodeLaunchCommand');
+    expect(() => manager.resolveCliLaunchCommand('panel', 'opencode "unterminated', state)).toThrowError(expect.objectContaining({
+      code: 'ERR_SESSION_OPENCODE_LAUNCH',
+      message: expect.stringContaining('"OpenCode launch command has an unmatched quote"'),
+      next: expect.stringContaining('opencode --auto'),
+    }));
+    expect(state).toEqual(before);
+    expect(resolve).not.toHaveBeenCalled();
+  });
+
+  it.each(['my-launcher run', 'bash -lc "opencode --auto"', 'env -i opencode --auto', 'command opencode --auto'])(
+    'rejects unsupported OpenCode Session wrappers despite preservation: %s', command => {
+      const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+      expect(() => manager.resolveCliLaunchCommand('panel', command, {
+        agentType: 'opencode', orchestrationSessionId: 'session', preserveLaunchCommand: true,
+      })).toThrow(/OpenCode.*wrapper/i);
+    });
+
+  it('rejects explicit wrapped OpenCode Sessions but keeps other-agent Session wrappers opaque', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    expect(() => manager.resolveCliLaunchCommand('panel', 'opencode --auto', {
+      agentType: 'opencode', orchestrationSessionId: 'session', launchMode: 'wrapped',
+    })).toThrow(/OpenCode.*wrapped/i);
+    expect(() => manager.resolveCliLaunchCommand('panel', 'opencode --auto', {
+      agentType: 'opencode', orchestrationSessionId: 'session', launchMode: 'wrapped',
+    })).toThrowError(expect.objectContaining({
+      code: 'ERR_SESSION_OPENCODE_LAUNCH', next: expect.stringContaining('opencode --auto'),
+    }));
+    const result = manager.resolveCliLaunchCommand('other-panel', 'my-launcher run', {
+      agentType: 'claude', orchestrationSessionId: 'other-session', launchMode: 'wrapped', agentSessionId: 'saved-wrapper-id',
+    });
+    expect(result.commandToRun).toBe('my-launcher run');
+    expect(result.customState.agentSessionId).toBe('saved-wrapper-id');
+  });
+
+  it.each([
+    ['opencode --session ses_Other123', 'ids differ'],
+    ['opencode --session ses_Saved123 -s ses_Other123', 'multiple session selectors'],
+    ['opencode --continue', 'cannot use --continue'],
+    ['opencode --prompt replay', 'avoid replaying'],
+    ['opencode --session', 'selector is missing its operand'],
+    ['opencode --session invalid', 'Invalid OpenCode session id from --session'],
+  ])('rejects incompatible Session selectors despite preservation: %s', (command, error) => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const state: TerminalPanelState = {
+      agentType: 'opencode', orchestrationSessionId: 'session', preserveLaunchCommand: true, agentSessionId: 'ses_Saved123',
+    };
+    const before = structuredClone(state);
+    expect(() => manager.resolveCliLaunchCommand('panel', command, state)).toThrow(error);
+    expect(() => manager.resolveCliLaunchCommand('panel', command, state)).toThrowError(expect.objectContaining({
+      code: 'ERR_SESSION_OPENCODE_LAUNCH',
+      message: expect.stringContaining(error), next: expect.stringContaining('opencode --auto'),
+    }));
+    expect(state).toEqual(before);
+  });
+
   it('escapes shell-sensitive startup prompt arguments without changing ordinary prompts', () => {
     const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
     const unsafeCommandSubstitution = manager.resolveCliLaunchCommand('panel-1', 'codex --yolo', {
@@ -1237,6 +1453,26 @@ describe('TerminalPanelManager hidden output delivery', () => {
     expect(unsafeCommandSubstitution.commandToRun).not.toMatch(/(^|[^\\])(?:\\\\)*\$\(/);
     expect(escapedShellSyntax.commandToRun).toBe('codex --yolo "plain \\$value and \\`cmd\\`"');
     expect(ordinaryPrompt.commandToRun).toBe('codex --yolo "Read the guide and initialize Pane Chat."');
+  });
+
+  it('never puts a startup prompt on a PowerShell or cmd command line, and drops it rather than typing it later', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    // Windows PowerShell drops the embedded quotes when it passes an argument to a native program,
+    // which would turn this repository name into agent options; typed later, it could reach a shell.
+    const prompt: TerminalPanelState = { initialInputMode: 'argument', initialInput: 'Repo demo" --dangerously-skip-permissions --append-system-prompt "$(Write-Output X);Write-Output Y' };
+
+    for (const shellType of ['powershell', 'pwsh.exe', 'cmd']) {
+      const codex = manager.resolveCliLaunchCommand('panel-1', 'codex --yolo', { agentType: 'codex', ...prompt }, shellType);
+      const claude = manager.resolveCliLaunchCommand('11111111-1111-4111-8111-111111111111', 'claude', { agentType: 'claude', ...prompt }, shellType);
+
+      expect(codex.commandToRun).toBe('codex --yolo');
+      expect(claude.commandToRun).toBe('claude --session-id 11111111-1111-4111-8111-111111111111');
+      for (const { customState } of [codex, claude]) {
+        expect(customState.initialInput).toBeUndefined();
+        expect(customState.initialInputSentAt).toBeUndefined();
+        expect(customState.initialInputError).toContain('The starting message was not sent');
+      }
+    }
   });
 
   it('passes fresh Claude slash input as a quoted startup argument', () => {
@@ -1322,9 +1558,66 @@ describe('TerminalPanelManager hidden output delivery', () => {
     const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
     const state: TerminalPanelState = { agentType: 'codex', orchestrationSessionId: 'session', orchestrationWorkspace: '/tmp/new session', agentSessionId: 'saved-thread' };
     expect(manager.resolveCliLaunchCommand('panel', 'codex --yolo', state).commandToRun)
-      .toBe('codex --yolo resume "saved-thread" --cd "/tmp/new session"');
+      .toBe(`codex --yolo resume "saved-thread" --cd '/tmp/new session'`);
     expect(manager.resolveCliLaunchCommand('panel', 'codex --cd /custom', state).commandToRun)
       .toBe('codex --cd /custom resume "saved-thread"');
+  });
+
+  describe('quotes the resumed Codex folder for the terminal\'s own shell', () => {
+    // A legal folder name that each shell would expand if it were quoted for another shell.
+    const hostile = 'C:\\repos\\a b\\$(Write-Output PANE_SECURITY_SENTINEL)\\it\'s ’q’ `tick\\wt';
+    const resumeWord = (shellType: string | undefined, directory = hostile, field: 'resumeDirectory' | 'orchestrationWorkspace' = 'resumeDirectory'): string | undefined => {
+      const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+      const state: TerminalPanelState = { agentType: 'codex', agentSessionId: 'saved-thread', [field]: directory };
+      const { commandToRun } = manager.resolveCliLaunchCommand('panel', 'codex --yolo', state, shellType);
+      const prefix = 'codex --yolo resume "saved-thread"';
+      expect(commandToRun.startsWith(prefix)).toBe(true);
+      const rest = commandToRun.slice(prefix.length);
+      if (!rest) return undefined;
+      expect(rest.startsWith(' --cd ')).toBe(true);
+      return rest.slice(' --cd '.length);
+    };
+
+    it.each(['powershell', 'pwsh', 'powershell.exe', 'pwsh.exe'])('single-quotes it for %s, doubling straight and typographic single quotes', shell => {
+      expect(resumeWord(shell)).toBe('\'C:\\repos\\a b\\$(Write-Output PANE_SECURITY_SENTINEL)\\it\'\'s ’’q’’ `tick\\wt\'');
+      expect(resumeWord(shell, 'C:\\x‘y‚z‛w')).toBe('\'C:\\x‘‘y‚‚z‛‛w\'');
+    });
+
+    it('double-quotes it for cmd, and skips pinning a folder cmd would expand', () => {
+      expect(resumeWord('cmd.exe')).toBe('"C:\\repos\\a b\\$(Write-Output PANE_SECURITY_SENTINEL)\\it\'s ’q’ `tick\\wt"');
+      expect(resumeWord('cmd', 'C:\\repos\\%PATH%\\wt')).toBeUndefined();
+      expect(resumeWord('cmd', 'C:\\repos\\a!b\\wt')).toBeUndefined();
+      expect(resumeWord('cmd', 'C:\\repos\\a"b\\wt')).toBeUndefined();
+      expect(resumeWord('cmd', 'C:\\repos\\a\nb\\wt')).toBeUndefined();
+    });
+
+    it('single-quotes it for fish, escaping backslashes and single quotes', () => {
+      expect(resumeWord('fish')).toBe('\'C:\\\\repos\\\\a b\\\\$(Write-Output PANE_SECURITY_SENTINEL)\\\\it\\\'s ’q’ `tick\\\\wt\'');
+    });
+
+    it.each(['bash', 'zsh', 'sh', 'gitbash', '/bin/zsh', undefined])('single-quotes it for POSIX shells (%s)', shell => {
+      expect(resumeWord(shell)).toBe('\'C:\\repos\\a b\\$(Write-Output PANE_SECURITY_SENTINEL)\\it\'\\\'\'s ’q’ `tick\\wt\'');
+    });
+
+    it('quotes a managed orchestration workspace the same way', () => {
+      expect(resumeWord('powershell', hostile, 'orchestrationWorkspace')).toBe(resumeWord('powershell'));
+    });
+
+    it.skipIf(process.platform !== 'win32')('passes the folder through PowerShell as one literal word', () => {
+      // A managed workspace takes the same path, and was quoted for a POSIX shell before.
+      const word = resumeWord('powershell', hostile, 'orchestrationWorkspace');
+      expect(word).toBeDefined();
+      const result = spawnSync('powershell.exe', [
+        '-NoProfile', '-NonInteractive', '-Command',
+        `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Write-Output ${word}`,
+      ], { encoding: 'utf8' });
+      expect(result.status).toBe(0);
+      const stdout = result.stdout.replace(/\r?\n$/, '');
+      expect(stdout).toBe(hostile);
+      // The sentinel appears only inside the literal text, never as the output of an expansion.
+      expect(stdout.split('PANE_SECURITY_SENTINEL').length).toBe(2);
+      expect(stdout).toContain('$(Write-Output PANE_SECURITY_SENTINEL)');
+    });
   });
 
   it('uses generic templates to allocate and resume a wrapper conversation without changing its saved command', () => {
@@ -1872,6 +2165,21 @@ describe('TerminalPanelManager wrapper launches', () => {
   it('relaunches an interrupted wrapper as given instead of resuming the agent directly', () => {
     const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
 
+    const result = manager.resolveCliLaunchCommand('panel-1', 'other-wrapper run free-range', {
+      agentType: 'codex',
+      agentDetection: 'process',
+      launchMode: 'wrapped',
+      agentSessionId: '019a0000-0000-7000-8000-000000000000',
+      wasInterrupted: true,
+    });
+
+    expect(result.commandToRun).toBe('other-wrapper run free-range');
+    expect(result.customState.wasInterrupted).toBeUndefined();
+  });
+
+  it('resumes an interrupted Agent Farm wrapper through Agent Farm with its saved ID', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+
     const result = manager.resolveCliLaunchCommand('panel-1', 'agent-farm run free-range', {
       agentType: 'codex',
       agentDetection: 'process',
@@ -1880,7 +2188,7 @@ describe('TerminalPanelManager wrapper launches', () => {
       wasInterrupted: true,
     });
 
-    expect(result.commandToRun).toBe('agent-farm run free-range');
+    expect(result.commandToRun).toBe('agent-farm run free-range --resume "019a0000-0000-7000-8000-000000000000"');
     expect(result.customState.wasInterrupted).toBeUndefined();
   });
 
@@ -1905,6 +2213,10 @@ type DetectionAccess = AgentStatusAccess & {
 
 describe('TerminalPanelManager wrapper agent detection', () => {
   const rule = '─'.repeat(40);
+  // The fake shell pid 4242 may be a real process here: destroy must not track it.
+  let capture: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => { capture = vi.spyOn(ArchiveProcessTracker.prototype, 'capture').mockResolvedValue(); });
+  afterEach(() => { capture.mockRestore(); });
 
   function wrapperPanel(customState: TerminalPanelState = { initialCommand: 'agent-farm run free-range' }) {
     const panel = {
@@ -2258,4 +2570,247 @@ describe('chat promotion shutdown', () => {
     expect(save).not.toHaveBeenCalled();
     expect(terminal.pty.kill).not.toHaveBeenCalled();
   });
+});
+
+describe('TerminalPanelManager Agent Farm resume', () => {
+  const FARM = 'agent-farm run greenfield/implementer:opus';
+  const LAUNCH_ID = 'e6d42f7f-15b8-4e18-9e4c-7b2e64c7d675';
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.mocked(panelManager.getPanel).mockReset();
+    vi.mocked(panelManager.updatePanel).mockReset();
+  });
+
+  const mockFarmPanel = (customState: TerminalPanelState) => {
+    vi.mocked(panelManager.updatePanel).mockResolvedValue(undefined);
+    vi.mocked(panelManager.getPanel).mockReturnValue({
+      id: 'panel-1',
+      sessionId: 'session-1',
+      type: 'terminal',
+      title: 'Agent Farm',
+      state: { isActive: true, customState },
+      metadata: { createdAt: '2026-01-01T00:00:00.000Z', lastActiveAt: '2026-01-01T00:01:00.000Z', position: 0 },
+    });
+  };
+
+  it('runs the plain command first and never saves the derived config', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const result = manager.resolveCliLaunchCommand('panel-1', FARM, { initialCommand: FARM });
+    expect(result.commandToRun).toBe(FARM);
+    expect(result.isCliCommand).toBe(true);
+    expect(result.customState).toMatchObject({ customResumeStarted: true, isCliPanel: true });
+    expect(result.customState).not.toHaveProperty('customResume');
+  });
+
+  it('reopens the reported launch ID after a restart', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const state: TerminalPanelState = {
+      initialCommand: FARM, agentType: 'claude', agentSessionId: LAUNCH_ID, customResumeStarted: true, wasInterrupted: true,
+    };
+    const result = manager.resolveCliLaunchCommand('panel-1', FARM, state);
+    expect(result.commandToRun).toBe(`${FARM} --resume "${LAUNCH_ID}"`);
+    expect(result.customState).toMatchObject({ agentType: 'claude', agentSessionId: LAUNCH_ID });
+    expect(result.customState).not.toHaveProperty('customResume');
+  });
+
+  it('keeps a declared wrapper launch command and agent when resuming', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const result = manager.resolveCliLaunchCommand('panel-1', FARM, {
+      initialCommand: FARM, agentType: 'claude', agentDetection: 'declared', launchMode: 'wrapped',
+      agentSessionId: LAUNCH_ID, customResumeStarted: true,
+    });
+    expect(result.commandToRun).toBe(`${FARM} --resume "${LAUNCH_ID}"`);
+    expect(result.customState).toMatchObject({
+      agentType: 'claude', agentDetection: 'declared', launchMode: 'wrapped', launchCommand: FARM,
+    });
+  });
+
+  it('uses an explicit config instead of the Agent Farm rule', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const customResume = {
+      mode: 'generated', initialTemplate: '{command} --id {sessionId}', resumeTemplate: '{command} --continue {sessionId}',
+    } as const;
+    const state: TerminalPanelState = { initialCommand: FARM, customResume, agentSessionId: 'mine', customResumeStarted: true };
+    expect(manager.resolveCliLaunchCommand('panel-1', FARM, state).commandToRun).toBe(`${FARM} --continue "mine"`);
+  });
+
+  it.each([
+    `${FARM} --resume abc`,
+    `${FARM} && echo done`,
+    'agent-farm profiles list',
+    'my-wrapper run greenfield/implementer',
+  ])('leaves %s as it was', command => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const result = manager.resolveCliLaunchCommand('panel-1', command, {
+      initialCommand: command, agentSessionId: LAUNCH_ID, customResumeStarted: true, wasInterrupted: true,
+    });
+    expect(result.commandToRun).toBe(command);
+  });
+
+  it('recovers the last ID line from an existing panel\'s saved buffer, once', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const buffers = vi.spyOn(databaseService, 'getPanelBuffers').mockReturnValue({
+      scrollback: `$ ${FARM}\r\nPANE_AGENT_SESSION_ID=old-launch\r\n...\r\n$ ${FARM}\r\nPANE_AGENT_SESSION_ID=${LAUNCH_ID}\r\n\x1b[2Jworking`,
+      serialized: '',
+      alternate: '',
+    });
+    const result = manager.resolveCliLaunchCommand('panel-1', FARM, { initialCommand: FARM, agentType: 'claude' });
+    expect(buffers).toHaveBeenCalledWith('panel-1');
+    expect(result.commandToRun).toBe(`${FARM} --resume "${LAUNCH_ID}"`);
+    expect(result.customState).toMatchObject({ agentSessionId: LAUNCH_ID, customResumeStarted: true });
+
+    // A launch under the rule marks the panel, so it is never scanned again.
+    buffers.mockClear();
+    manager.resolveCliLaunchCommand('panel-1', FARM, { ...result.customState, agentSessionId: undefined });
+    expect(buffers).not.toHaveBeenCalled();
+  });
+
+  it('starts fresh when the saved buffer has no ID line', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    vi.spyOn(databaseService, 'getPanelBuffers').mockReturnValue({ scrollback: `$ ${FARM}\r\nhello\r\n`, serialized: '', alternate: '' });
+    const result = manager.resolveCliLaunchCommand('panel-1', FARM, { initialCommand: FARM });
+    expect(result.commandToRun).toBe(FARM);
+    expect(result.customState.agentSessionId).toBeUndefined();
+  });
+
+  it('does not scan buffers for an explicitly configured panel', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const buffers = vi.spyOn(databaseService, 'getPanelBuffers');
+    manager.resolveCliLaunchCommand('panel-1', FARM, { initialCommand: FARM, customResume: {
+      mode: 'reported', initialTemplate: '{command}', resumeTemplate: '{command} --resume {sessionId}',
+    } });
+    expect(buffers).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, 'claude'] as const)('captures the first ID line and ignores later ones (agent %s)', agentType => {
+    const manager = testAccess<AgentSessionCaptureAccess>(new TerminalPanelManager());
+    const terminal = createTerminal();
+    terminal.agentType = agentType;
+    mockFarmPanel({ initialCommand: FARM, agentType: agentType === 'claude' ? 'claude' : undefined });
+
+    manager.captureAgentSessionId(terminal, `PANE_AGENT_SESSION_ID=${LAUNCH_ID}\r\n`);
+    expect(terminal.capturedAgentSessionId).toBe(LAUNCH_ID);
+    const panel = panelManager.getPanel('panel-1');
+    expect(panel?.state.customState).toMatchObject({ agentSessionId: LAUNCH_ID });
+    expect(panel?.state.customState).not.toHaveProperty('customResume');
+
+    // The agent later prints another ID line, for example while reading logs.
+    terminal.agentType = 'claude';
+    manager.captureAgentSessionId(terminal, '\r\nPANE_AGENT_SESSION_ID=other-launch\r\n');
+    expect(terminal.capturedAgentSessionId).toBe(LAUNCH_ID);
+    expect(panel?.state.customState).toMatchObject({ agentSessionId: LAUNCH_ID });
+    disposeFlowControlRecord(terminal.flowControl);
+  });
+
+  it('captures from a declared Claude wrapper panel whose terminal is Codex-detected later', () => {
+    const manager = testAccess<AgentSessionCaptureAccess>(new TerminalPanelManager());
+    const terminal = createTerminal();
+    terminal.agentType = 'codex';
+    mockFarmPanel({ initialCommand: FARM, agentType: 'claude', launchMode: 'wrapped', agentDetection: 'declared' });
+    manager.captureAgentSessionId(terminal, `PANE_AGENT_SESSION_ID=${LAUNCH_ID}\r\n`);
+    expect(terminal.capturedAgentSessionId).toBe(LAUNCH_ID);
+    disposeFlowControlRecord(terminal.flowControl);
+  });
+});
+
+type DestroyTerminalAccess = {
+  terminals: Map<string, TerminalUnderTest>;
+  stoppingProcesses: Map<string, ArchiveProcessTracker>;
+  destroyTerminal(panelId: string): Promise<void>;
+  terminateAllTerminals(): Promise<void>;
+  flushOutputBuffer(terminal: TerminalUnderTest): void;
+};
+
+describe('TerminalPanelManager destroyTerminal teardown', () => {
+  afterEach(() => {
+    vi.mocked(panelManager.getPanel).mockReset();
+  });
+
+  it('arms the WSL kill even when the graceful exit write throws', async () => {
+    const manager = testAccess<DestroyTerminalAccess>(new TerminalPanelManager());
+    const terminal = createTerminal({ isWSL: true, outputBuffer: '' });
+    terminal.pty.write.mockImplementation(() => { throw new Error('EPIPE'); });
+    manager.terminals.set(terminal.panelId, terminal);
+
+    await manager.destroyTerminal(terminal.panelId).catch(() => undefined);
+    expect(terminal.pty.write).toHaveBeenCalledWith('exit\r');
+    await new Promise(resolve => setTimeout(resolve, 600));
+
+    expect(terminal.pty.kill).toHaveBeenCalled();
+    expect(manager.terminals.has(terminal.panelId)).toBe(false);
+  });
+
+  it('kills the PTY when the final output flush throws', async () => {
+    const manager = testAccess<DestroyTerminalAccess>(new TerminalPanelManager());
+    const terminal = createTerminal({ outputBuffer: '' });
+    manager.terminals.set(terminal.panelId, terminal);
+    vi.spyOn(manager, 'flushOutputBuffer').mockImplementation(() => { throw new Error('event sink exploded'); });
+
+    await expect(manager.destroyTerminal(terminal.panelId)).rejects.toThrow('event sink exploded');
+
+    expect(terminal.pty.kill).toHaveBeenCalled();
+    expect(manager.terminals.has(terminal.panelId)).toBe(false);
+  });
+});
+
+describe.skipIf(process.platform === 'win32')('TerminalPanelManager orphan reaping', () => {
+  const terminals: DetachedWorkerPty[] = [];
+  const bystanders: ChildProcess[] = [];
+
+  afterEach(() => {
+    for (const terminal of terminals.splice(0)) {
+      terminal.close();
+      if (processTree.isProcessAlive(terminal.workerPid)) process.kill(terminal.workerPid, 'SIGKILL');
+    }
+    for (const bystander of bystanders.splice(0)) bystander.kill('SIGKILL');
+  });
+
+  /** A real PTY shell with a worker that double-forked away from it, open in `panelId`. */
+  async function openTerminal(manager: DestroyTerminalAccess, panelId: string): Promise<DetachedWorkerPty> {
+    const terminal = await spawnDetachedWorkerPty();
+    terminals.push(terminal);
+    const record = createTerminal({ panelId, outputBuffer: '' });
+    record.pty.pid = terminal.shellPid;
+    record.pty.kill.mockImplementation(() => terminal.close());
+    manager.terminals.set(panelId, record);
+    return terminal;
+  }
+
+  /** An unrelated process, plus a leftover entry naming its pid with another process's start time. */
+  function bystanderWithStaleEntry() {
+    const bystander = spawn('sleep', ['600'], { stdio: 'ignore' });
+    bystanders.push(bystander);
+    // SAFETY: spawn of an existing binary yields a pid synchronously.
+    const pid = bystander.pid!;
+    return { pid, stale: new ArchiveProcessTracker([{ pid, parent: 1, started: 'Thu Jan  1 00:00:00 2015' }], () => undefined) };
+  }
+
+  it('on tab delete, kills what the terminal left running, but not a stale pid that now belongs to another process', async () => {
+    const manager = testAccess<DestroyTerminalAccess>(new TerminalPanelManager());
+    // A panel whose terminal was destroyed earlier, leaving an entry whose pid was since reused.
+    const bystander = bystanderWithStaleEntry();
+    manager.stoppingProcesses.set('panel-old', bystander.stale);
+    const terminal = await openTerminal(manager, 'panel-1');
+
+    await manager.destroyTerminal('panel-old');
+    await manager.destroyTerminal('panel-1');
+
+    await vi.waitFor(() => expect(manager.stoppingProcesses.has('panel-1')).toBe(false), { timeout: 15_000 });
+    expect(processTree.isProcessAlive(terminal.workerPid)).toBe(false);
+    expect(processTree.isProcessAlive(bystander.pid)).toBe(true);
+  }, 30_000);
+
+  it('on quit, kills what outlived the hangup, but not a stale pid that now belongs to another process', async () => {
+    const manager = testAccess<DestroyTerminalAccess>(new TerminalPanelManager());
+    const bystander = bystanderWithStaleEntry();
+    manager.stoppingProcesses.set('panel-deleted', bystander.stale);
+    const terminal = await openTerminal(manager, 'panel-1');
+
+    await manager.terminateAllTerminals();
+
+    expect(manager.terminals.size).toBe(0);
+    expect(processTree.isProcessAlive(terminal.workerPid)).toBe(false);
+    expect(processTree.isProcessAlive(bystander.pid)).toBe(true);
+  }, 30_000);
 });

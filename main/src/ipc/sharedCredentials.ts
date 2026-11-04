@@ -7,8 +7,8 @@ import type { AppServices } from './types';
 const trustedSchema = boundary.object({ clientId: boundary.nonEmptyString });
 
 /**
- * Lets a paired device read this host's integration keys and write newer ones.
- * HTTP appends the trusted second argument only after it has authenticated a paired client.
+ * Lets a paired device, or this computer's owner over a workspace, read this host's integration keys
+ * and write newer ones. HTTP appends the trusted second argument only after it has authenticated one.
  * Never bound to the renderer: the desktop reads its own config directly.
  */
 export function registerSharedCredentialHandlers(services: AppServices, commandRegistry: PaneCommandRegistry): void {

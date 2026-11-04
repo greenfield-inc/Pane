@@ -7,12 +7,12 @@ import type { FileDiffResult } from '../../../../../shared/types/gitDiff';
 import { isLightTheme, useTheme } from '../../../contexts/ThemeContext';
 import { openFileInEditor } from '../../../services/openFileInEditor';
 import { API } from '../../../utils/api';
+import { subscribeToSessionGitChanges } from '../../../utils/session-git-events';
 import { diffRefLabel, isMutableScope, normalizeEditorDiffRef, scopeKey } from './diffScope';
 import { getShikiHighlighter } from './diffSource';
 import '@git-diff-view/react/styles/diff-view.css';
 
 interface DiffTabViewProps { sessionId: string; filePath: string; diffRef: EditorDiffRef }
-const REFRESH_EVENTS = new Set(['git:operation_completed', 'diff:refreshed', 'terminal:command_executed', 'files:changed']);
 const resultCache = new Map<string, FileDiffResult>();
 const MAX_CACHE_ENTRIES = 50;
 
@@ -82,12 +82,8 @@ export function DiffTabView({ sessionId, filePath, diffRef }: DiffTabViewProps) 
 
   useEffect(() => {
     if (!normalized || !isMutableScope(normalized.scope)) return;
-    const handler = (event: Event) => {
-      if (event instanceof CustomEvent && REFRESH_EVENTS.has(event.detail?.type)) setReloadTick(value => value + 1);
-    };
-    window.addEventListener('panel:event', handler);
-    return () => window.removeEventListener('panel:event', handler);
-  }, [normalized]);
+    return subscribeToSessionGitChanges(sessionId, () => setReloadTick(value => value + 1));
+  }, [normalized, sessionId]);
 
   const handleViewTypeChange = useCallback((mode: DiffModeEnum) => {
     setViewType(mode);
@@ -115,7 +111,7 @@ export function DiffTabView({ sessionId, filePath, diffRef }: DiffTabViewProps) 
       </div>
       <div className="min-h-0 flex-1 overflow-auto">
         {loading && !result ? <div className="flex items-center gap-2 p-4 text-sm text-text-secondary"><RefreshCw className="h-3.5 w-3.5 animate-spin" />Loading diff…</div>
-          : error ? <div role="alert" className="m-4 rounded border border-status-error/30 bg-status-error/10 p-4 text-sm text-status-error">{error}</div>
+          : error ? <div role="alert" className="m-4 rounded border border-status-error/30 bg-status-error/10 p-4 text-sm text-text-primary">{error}</div>
             : !result || result.status === 'no-longer-changed' ? <div className="p-4 text-sm text-text-tertiary">{filePath} is no longer changed in {diffRefLabel(diffRef)}.</div>
               : result.file.isBinary ? <div className="p-4 text-sm text-text-secondary">Binary file</div>
                 : diffData ? <DiffView data={diffData} diffViewMode={viewType} diffViewTheme={isLightTheme(theme) ? 'light' : 'dark'} diffViewHighlight={Boolean(highlighter)} registerHighlighter={highlighter ?? undefined} diffViewWrap={true} diffViewFontSize={13} />

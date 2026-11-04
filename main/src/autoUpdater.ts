@@ -2,6 +2,11 @@ import { app, BrowserWindow } from 'electron';
 import { createRequire } from 'node:module';
 import type { AppUpdater } from 'electron-updater';
 import { setupTestUpdater } from './test-updater';
+import { getUpdateCapabilities } from './utils/updateCapabilities';
+import type { ConfigManager } from './services/configManager';
+
+/** How often a running Pane looks for a new build to download in the background. */
+const BACKGROUND_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000;
 
 const loadUpdaterDependency = createRequire(__filename);
 
@@ -12,7 +17,13 @@ export function getAutoUpdater(): AppUpdater {
   return autoUpdater;
 }
 
-export function setupAutoUpdater(getMainWindow: () => BrowserWindow | null): void {
+interface AutoUpdaterOptions {
+  getMainWindow: () => BrowserWindow | null;
+  configManager: ConfigManager;
+  onUpdateDownloaded: (version: string) => void;
+}
+
+export function setupAutoUpdater({ getMainWindow, configManager, onUpdateDownloaded }: AutoUpdaterOptions): void {
   // Only setup auto-updater for packaged apps (not development)
   if (!app.isPackaged && !process.env.TEST_UPDATES) {
     console.log('[AutoUpdater] App is not packaged, skipping auto-updater setup');
@@ -27,7 +38,7 @@ export function setupAutoUpdater(getMainWindow: () => BrowserWindow | null): voi
     console.log('[AutoUpdater] Using test update server at:', process.env.UPDATE_SERVER_URL || 'http://localhost:8080');
   } else {
     // Configure electron-updater for production
-    autoUpdater.autoDownload = false; // We'll manually trigger downloads
+    autoUpdater.autoDownload = false; // startBackgroundDownloads turns this on when the install can update itself
     autoUpdater.autoInstallOnAppQuit = true;
 
     // The publish configuration in package.json will be used automatically
@@ -85,5 +96,34 @@ export function setupAutoUpdater(getMainWindow: () => BrowserWindow | null): voi
       mainWindow.webContents.send('updater:update-downloaded', info);
       // Let the renderer handle the UI - no native dialog
     }
+    onUpdateDownloaded(info.version);
   });
+
+  void startBackgroundDownloads(autoUpdater, configManager);
+}
+
+/**
+ * Installs that can update themselves check at launch and every 4 hours and
+ * download without asking. "Check for updates automatically" turns this off.
+ */
+async function startBackgroundDownloads(autoUpdater: AppUpdater, configManager: ConfigManager): Promise<void> {
+  const testFeed = process.env.TEST_UPDATES === 'true';
+  const capabilities = await getUpdateCapabilities({
+    platform: process.platform,
+    isPackaged: app.isPackaged,
+    executablePath: process.execPath,
+  });
+  if (!testFeed && capabilities.mode !== 'seamless') {
+    console.log(`[AutoUpdater] Background downloads off: update mode is ${capabilities.mode} (${capabilities.reason})`);
+    return;
+  }
+  autoUpdater.autoDownload = true;
+  const check = () => {
+    if (configManager.getConfig().autoCheckUpdates === false) return;
+    autoUpdater.checkForUpdates().catch((error: Error) => {
+      console.warn('[AutoUpdater] Background update check failed:', error);
+    });
+  };
+  check();
+  setInterval(check, BACKGROUND_CHECK_INTERVAL_MS).unref();
 }

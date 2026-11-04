@@ -11,6 +11,35 @@ import type { RemoteAccessController } from './useRemoteAccessSettings';
 import type { RemoteSetupTunnelPreference } from '../../../../shared/types/remoteDaemon';
 import { getRemoteExecutableHealthPresentation } from '../../utils/remoteRuntimePresentation';
 import { useCommittedRef } from '../../hooks/useCommittedRef';
+import { ChecklistRow } from '../ConnectionChecklist';
+import type { RemoteHostSetupProgress, RemoteHostSetupStep } from '../../../../shared/types/remoteDaemon';
+
+const SETUP_STEP_LABELS = {
+  service: 'Pane can run as a service',
+  port: 'Port chosen',
+  tailscale: 'Tailscale ready',
+  https: 'HTTPS address on Tailscale',
+  code: 'Connection code created',
+  daemon: 'Daemon service running',
+} satisfies Record<RemoteHostSetupStep, string>;
+
+/** Set Up Host's steps as they ran, with the fix for the one that failed. */
+function SetupSteps({ controller }: { controller: RemoteAccessController }) {
+  if (controller.setupSteps.length === 0) return null;
+  const fixFor = (step: RemoteHostSetupProgress) => (step.status === 'failed' && step.step === 'tailscale' ? (
+    <>
+      <Button type="button" size="sm" onClick={() => window.electronAPI.openExternal('https://tailscale.com/download')}>Download Tailscale</Button>
+      <Button type="button" variant="secondary" size="sm" onClick={() => controller.openSetupTerminal(false)}>Open Tailscale Setup</Button>
+    </>
+  ) : undefined);
+  return (
+    <ul className="space-y-1.5" aria-label="Setup steps">
+      {controller.setupSteps.map((step) => (
+        <ChecklistRow key={step.step} status={step.status} label={SETUP_STEP_LABELS[step.step]} detail={step.detail} action={fixFor(step)} />
+      ))}
+    </ul>
+  );
+}
 
 interface RemoteAccessWorkflowsProps {
   subview: RemoteAccessSubviewId;
@@ -44,8 +73,8 @@ export function RemoteAccessWorkflows({ subview, controller, onBack, onDirtyChan
         Back to Remote Access
       </Button>
       <div className="mt-5">
-        {controller.error && <div className="mb-4 rounded-md border border-status-error/30 bg-status-error/10 p-3 text-sm text-status-error" role="alert">{controller.error}</div>}
-        {controller.result && <div className="mb-4 rounded-md border border-status-success/30 bg-status-success/10 p-3 text-sm text-status-success" aria-live="polite">{controller.result}</div>}
+        {controller.error && <div className="mb-4 rounded-md border border-status-error/30 bg-status-error/10 p-3 text-sm text-text-primary" role="alert">{controller.error}</div>}
+        {controller.result && <div className="mb-4 rounded-md border border-status-success/30 bg-status-success/10 p-3 text-sm text-text-primary" aria-live="polite">{controller.result}</div>}
         {subview === 'host-setup' && <HostSetup controller={controller} />}
         {subview === 'advanced-host' && <AdvancedHost controller={controller} />}
       </div>
@@ -68,7 +97,7 @@ function HostSetup({ controller }: { controller: RemoteAccessController }) {
       <SettingsSection title="Host status">
         {executableHealth && (
           <div
-            className={`mb-3 rounded-md border p-3 text-sm ${executableHealth.severity === 'error' ? 'border-status-error/30 bg-status-error/10 text-status-error' : 'border-status-warning/30 bg-status-warning/10 text-text-primary'}`}
+            className={`mb-3 rounded-md border p-3 text-sm ${executableHealth.severity === 'error' ? 'border-status-error/30 bg-status-error/10 text-text-primary' : 'border-status-warning/30 bg-status-warning/10 text-text-primary'}`}
             role="alert"
           >
             <p className="font-medium">{executableHealth.code}</p>
@@ -106,7 +135,8 @@ function HostSetup({ controller }: { controller: RemoteAccessController }) {
             )}
           </div>
         </SettingRow>
-        {controller.config.host.clients.map((client) => (
+        {/* Glasses are listed and revoked under Remote Access › Devices. */}
+        {controller.config.host.clients.map((client) => client.kind === 'glasses' ? null : (
           <div key={client.id} className="flex items-center justify-between gap-3 py-3">
             <div className="min-w-0">
               <p className="truncate text-sm font-medium text-text-primary">{client.label}</p>
@@ -169,6 +199,7 @@ function HostSetup({ controller }: { controller: RemoteAccessController }) {
               )}
               <Button type="button" size="sm" onClick={controller.setupHost} loading={controller.busy} disabled={!controller.validation.setupPort || !controller.validation.manualBaseUrl}>Create Connection Code</Button>
             </div>
+            <SetupSteps controller={controller} />
             {activeCode && (
               <button
                 type="button"

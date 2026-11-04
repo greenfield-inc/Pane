@@ -15,6 +15,16 @@ agent; a name you type or set later is kept. Each new Session opens as one Pane
 Chat and can be renamed later from the optional read-only overview. Expand a Session to see
 its associated Panes and open any Pane in its existing sidebar view.
 
+**New** at the top of the sidebar opens one dialog with a Session/Pane toggle
+on top and that kind's form below. When the desktop has saved other machines,
+a **Machine** picker sits between them. It starts on the machine you last
+created on from this computer (the first time, the machine the app is on) and
+dims machines that are offline or still connecting; they can't be picked until
+they answer. Repositories, branches, WSL distributions and agents come from the
+picked machine. Create runs there; Pane then switches to that machine and opens
+what you created. A Pane created on another machine starts at the repository
+level and does not join the Session you have open.
+
 The Sessions section below the divider can be collapsed from its header; the
 `+` remains available while it is collapsed. Sessions are opened from this
 section rather than from a duplicate top navigation shortcut.
@@ -24,6 +34,15 @@ workspace. Its default profile supports discussion, investigation, decisions,
 and delegation when authorized work benefits from it. No particular skill,
 ticket system, model, or Agent Farm installation is required. Users can select
 skills and workflows without Pane imposing an implementation pipeline.
+
+## The Onboarding Session
+
+On a new data folder, the default Session is named Onboarding. It is where a
+new person starts: the first-run screen hands off to it (see [Bring your
+existing sessions into Pane](#bring-your-existing-sessions-into-pane)), and its
+agent gives each later task a Session of its own. Archive it like any Session
+when you are done with it; Pane does not recreate it. Installs from before the
+first-run screen keep the name Pane Chat.
 
 ## Upgrading from Pane Chat
 
@@ -57,10 +76,12 @@ The command, behavior profile, and saved task context have separate purposes.
 A command selects how the agent runs; a profile describes how it should behave;
 saved goals, decisions, and next actions help it respond to later user input.
 Custom commands (including Agent Farm wrappers) retain their arguments. Pane
-only adds native flags through compatible built-in adapters unless you explicitly
-configure custom command resume. Wrappers keep control of instruction discovery;
-Pane does not infer native flags from a wrapper name. A user command
-that explicitly starts work remains the user's choice.
+only adds native flags through compatible built-in adapters, an explicit custom
+command resume config, or Agent Farm's resume contract (see
+[Resuming custom launchers](#resuming-custom-launchers)). Wrappers keep control of
+instruction discovery; apart from that one Agent Farm exception, Pane does not
+infer flags from a wrapper name. A user command that explicitly starts work
+remains the user's choice.
 
 Each Session owns a stable folder at `<PANE_DIR>/sessions/<session-id>/` for
 notes, plans, attachments, generated instructions, and artifacts. Renaming,
@@ -75,8 +96,9 @@ picker when WSL reports installed distributions. Windows is the default on every
 creation. Choose a named distribution to run the agent there; install the agent
 inside that distribution first. Cursor is available when WSL is selected.
 The runtime and distribution belong to the Session and survive reopening,
-application restart, and terminal supervisor restart. Existing records retain
-their host runtime through an additive store migration.
+application restart, and terminal supervisor restart. Only WSL Sessions carry a
+`runtime` (`"wsl"`); a Session on the native host omits it on every OS. Older
+records that stored `"windows"` for the native host lose the field when read.
 If creation fails before publishing a terminal owner, Pane removes untouched
 generated files so the name can be retried; user files or edits prevent rollback.
 
@@ -104,12 +126,15 @@ and panel identities. PowerShell is invoked by its mounted Windows path, so
 cannot replace this bridge for a Windows daemon.
 
 For CLI JSON creation, `runtime: "wsl"` and `wslDistribution: "Ubuntu-24.04"`
-select an installed distribution; omitted runtime selects the host.
+select an installed distribution; omitted runtime selects the native host.
+`runtime: "windows"` is still accepted as a legacy name for the native host and is
+not stored.
 
 ## Resuming custom launchers
 
 Use **Enable custom command resume** in Session launch settings or a saved custom
 command's editor. This is an explicit contract, independent of executable names.
+Agent Farm is the one exception, described in [Agent Farm](#agent-farm) below.
 Choose a session ID source and provide first-launch and resume templates:
 
 - **Claude:** Pane allocates a UUID and resumes it only when its transcript exists.
@@ -134,6 +159,35 @@ disabling the contract for that Session's next launch. No prompt is submitted ju
 to resume. Old conversations whose IDs were never saved cannot be recovered
 automatically; use an explicit resume command if you know their ID.
 
+### Agent Farm
+
+Agent Farm is the one launcher Pane recognizes by name, because Agent Farm
+publishes this contract for Pane: when `PANE_PANEL_ID` is set it prints
+`PANE_AGENT_SESSION_ID=<launch id>` once, before the agent starts, and documents
+`{command} --resume <id>` as the way to reopen that conversation. Pane keeps the
+first ID line of each launch and ignores later ones, which can only be agent
+output. Every other wrapper still needs an explicit config.
+
+A command counts when it is a single `agent-farm run <profile>` or
+`agent-farm agent <profile>`, optionally preceded by `VAR=value` assignments,
+with no shell operators, no `--`, and no `--resume` of its own. `npx`, `pnpm dlx`
+and aliases do not count. Such a panel with no explicit config behaves as
+**CLI reports its ID** with templates `{command}` and
+`{command} --resume {sessionId}`: Pane saves the printed ID and relaunches with
+it. The editor says so under the unticked checkbox. An explicit config always
+wins: tick **Enable custom command resume** and set your own templates.
+
+A panel created before this rule usually has no saved ID. On its next relaunch Pane
+makes one attempt to read the last `PANE_AGENT_SESSION_ID=` line from the
+panel's saved terminal buffer. Agent Farm older than 0.2.20 prints no ID, so
+those panels relaunch fresh, as before.
+
+To reopen an older conversation by hand, run
+`agent-farm run <profile> --resume <id>`. The ID is the launch ID (the
+`PANE_AGENT_SESSION_ID` value), shown as `resumeId` in
+`runpane panels list --json`. Agent Farm keeps launch records in
+`~/.local/state/agent-farm/launches/` for 90 days.
+
 ## Session sidebar and archive
 
 Pinned is the first sidebar category and can contain both Session chats and
@@ -146,9 +200,29 @@ out of Pinned until it is restored. RunPane can set the same preference with
 `isPinned` (default false), and update JSON accepts it without changing the
 preference when omitted.
 
-Click a Session row to open its chat, or use **Switch to Session: <name>** in the
-command palette (`⌘⇧P` / `Ctrl+Shift+P`), which also has **New Session**. A Session with associated Panes shows a
+Drag a Session up or down in Pinned, in Sessions, or in the compact rail to
+change its place; a line shows where it will land. With a Session row focused,
+**Alt+↑** and **Alt+↓** move it one place and a screen reader hears its new
+position. A drag or keypress reorders only the list it starts in: Pinned
+Sessions move among themselves, and a Session dragged across the Pinned line
+stays where it was. The order is saved on the host, so every desktop, the phone
+and `runpane sessions list` show it, and it survives restarts. New Sessions
+start at the top. A host that has never saved an order lists Sessions newest
+first. A host running an older Pane cannot save an order: the list snaps back
+and the error says to update Pane on that host. Dragging a Session onto the
+workspace still tiles it.
+
+Click a Session row to open its chat, or find it by name in Search (`⌘⇧P` /
+`Ctrl+Shift+P`, or the Search field above **New**), which also has **New Session**. A Session with associated Panes shows a
 chevron that expands or collapses them; a Session without Panes shows none.
+Every Session starts collapsed, including a new one and one that just got its
+first Pane, until you press its chevron. Opening the Session's chat, an agent
+adding Panes, or `runpane` focusing one of its Panes leaves it collapsed. Each
+device remembers the Sessions you opened, separately for each host: the
+desktop in its own settings, the remote web app (PWA) in browser storage
+(`pane.remotePwa.expandedSessions@<host id>`). Opening a Session under Pinned
+opens it under Sessions too. The native iOS and Android app does not follow
+this yet: its Sessions start expanded and it forgets on restart.
 Child Pane rows are indented beyond the Session chat icon and keep the ordinary
 Pane actions. Create Pane, opened while a Session is showing, has an
 **Add to <Session>** checkbox, on by default, that files the new Pane under that
@@ -174,9 +248,12 @@ unchanged, and ⌘1–9 number the Inbox rows while it is shown.
 
 The right sidebar has Overview, Files, and Changes tabs. Overview shows the
 Session's blockers, goal, next step, and decisions when they are set, then its
-Panes and recent activity. Agent state changes stay out of Activity; the status
-dot shows them. Files browses the Session workspace. Changes summarizes the
-Session's Panes and opens a Pane for detailed review. The upper-right sidebar
+Panes and recent activity. Each Pane card lists the Session's tabs in that Pane
+with their type icons: every tab when the Pane is linked whole, with Files and
+Changes last, or exactly the tabs a link names. Click a tab to open the Pane on
+it; Files and Changes open in the Pane's inspector. Agent state changes stay out
+of Activity; the status dot shows them. Files browses the Session workspace.
+Changes summarizes the Session's Panes and opens a Pane for detailed review. The upper-right sidebar
 button shows or hides the selected tab. A single Session uses two rows at the
 top: the window title bar shows its name and controls, and the tab strip sits
 directly below it. Session file clicks open editor tabs beside the agent tab in
@@ -196,10 +273,127 @@ navigation. Restore the Session from the sidebar’s Archived section. This is
 separate from archiving a project Pane and does not delete delegated work.
 
 The existing Session update contract accepts `archived: true` or
-`archived: false`. List results retain archived records; active navigation
-filters them. Archiving the selected Session chooses an available active
+`archived: false`. List results retain archived records, in the saved order;
+active navigation filters them. An archived Session keeps its place, so Undo or
+Restore puts it back where it was.
+
+`orchestration-sessions:reorder` takes `{ sessionIds }`. The listed Sessions
+trade the places they already hold, so a list that shows only some Sessions
+(Pinned, or the active ones while others are archived) rearranges just those;
+unknown ids are ignored. It writes an optional `order` id list beside the
+Sessions in `orchestration-sessions.json` (the store stays at version 1) and
+changes no Session's revision, `updatedAt` or activity. An older Pane reading
+the file ignores `order`, lists Sessions in its own default order, and drops it the next
+time it writes. Archiving the selected Session chooses an available active
 Session or clears the selection if none remain. Restoring a Session does not
 replace an unrelated selection.
+
+### Move a Session to another machine
+
+Right-click a Session, or use its ⋯ button, and choose **Move to host…** to
+continue it on another machine. The dialog lists your Tailscale machines
+running Pane, except the one the Session is on, and your teammates' machines
+running Pane, shown with the owner's login after the name. A teammate's machine
+is a target only when its owner set Who can connect to Everyone on tailnet.
+Machines Pane can't reach, or that accept only their owner, are shown disabled
+with the reason. If none can be reached, it says so:
+open Pane on the other machine, or sign in to Tailscale. While you view a host
+connected with a pairing code rather than over Tailscale, the item is disabled,
+because Pane can't tell which machine that is. Choosing a machine
+sends the Session's agent a prompt to hand the Session off with
+[`runpane handoff`](RUNPANE_WORKSPACES.md#hand-a-task-to-another-machine) and
+the `handoff` skill.
+
+The agent writes a handoff note, and handoff creates a Session on that machine
+with the same name (numbered "<name> 2" if the name is taken), goal and agent.
+Its next action is to read the note, which handoff saved in that machine's
+`~/.pane/handoffs/`. When the new Session uses the same agent, the conversation
+moves too: its agent session's files are copied to that machine, and the new
+Session resumes that conversation when you first open it. Check that it shows
+the last message, and if that is unclear, ask it what it was last working on.
+With a different agent, or `--note-only`, only the note moves and the new
+Session starts fresh from it. Like every Session, it waits for your first
+message: switch to that machine, open the Session, and send "continue". The
+Session folder and its Panes stay where they are, and the original Session is
+not archived; archive it from the same menu when you are done with it.
+
+## Bring your existing sessions into Pane
+
+On a new install, Pane's first-run screen asks two things before anything
+else:
+
+1. **Which agent do you use?** Claude Code, Codex or Cursor, showing only the
+   agents this computer supports. An agent whose CLI Pane can't find says "Not
+   found on this computer", with an install link. The screen says Pane runs it
+   with its permission prompts off, as Pane always launches these agents.
+   When Claude Code then shows its one-time bypass-permissions warning in the
+   Onboarding Session, Pane answers "Yes, I accept" in the terminal, and Claude
+   records the acceptance itself. Pane never edits Claude's config files while
+   Claude may be running. The pick becomes the Onboarding Session's agent and
+   the default for new Sessions (Settings → AI & Agents).
+2. **Bring your N sessions into Pane?** Pane looks for sessions from Claude
+   Code, Codex, Conductor, Superset, Herdr, Emdash, Orca and T3 Code on this
+   computer and counts those running now or used in the last 7 days. Pane opens
+   them in place and deletes nothing.
+
+**Yes** is the confirmation: the screen closes, the Onboarding Session opens,
+and its agent runs the `migrate-to-pane` skill below on that set with no list
+to confirm. It groups the work into one Session per workstream, says what a
+Session, a Pane and a tab are the first time it makes one, and ends by opening
+a Start here page beside the chat. The page lists your workstreams, a receipt
+of what came over and what was left out (with why), what you can undo, the
+words Pane uses, and 3 to 5 things to try next with prompts naming your own
+repositories. The page is saved as `<PANE_DIR>/migrate-to-pane/start-here.html`.
+
+**Not now**, or nothing found, shows "Open your project" (your repositories, a
+folder, a GitHub clone, or a sample repository). Opening one, or skipping, also
+lands in the Onboarding Session, whose agent makes a Start here page for that
+project, without the receipt. Without Git, the screen shows only how to
+install it.
+
+Settings → AI & Agents → "Bring sessions into Pane" → **Find sessions** brings
+idle sessions in with one click at any time:
+
+- Pane reads each tool's session list locally (metadata only; SQLite stores
+  from a temporary copy) and lists sessions active in the last 30 days, one row
+  per tool. Sessions from the last 7 days are preselected, at most 3 per
+  checkout; click a row to choose sessions.
+- **Bring them in** adopts each checkout in place as a Pane, with one tab per
+  session resumed by the agent's own id. A transcript kept in a tool's own agent
+  folder is first copied into your own Claude Code or Codex store.
+- Sessions still running elsewhere are listed but can't be chosen, and
+  neither can other sessions in the same checkout; quit them and press **Check
+  again**, or use the skill below, which forks them. A tab
+  whose agent exits without resuming is closed and reported, and a new Pane
+  whose sessions all failed is removed. A tab waiting at the agent's
+  folder-trust prompt, or whose agent is still starting, stays open for you.
+- The card and the skill share the record below, so neither brings a session
+  in twice.
+
+Say "migrate to Pane" in any Session, or Yes on the first-run screen, and the
+`migrate-to-pane` skill brings the conversations you already have in other
+agent tools (Claude Code, Codex, OpenCode, the Cursor agent, Conductor, or
+anything similar) into Pane tabs:
+
+- It reads session metadata on this machine, including WSL distros and agents
+  running in other terminals or editors, and shows one list grouped by
+  repository. Running sessions and those active in the last 7 days are
+  preselected; older ones can be added. Nothing is created until you confirm.
+  After a Yes on the first-run screen, it places that preselected set without
+  showing the list.
+- An idle session's checkout is adopted in place (`runpane panes adopt
+  --resume`); several sessions in one checkout become tabs in one Pane. A
+  session still running elsewhere is forked with its own tool into a new Pane
+  on a new branch, with your uncommitted and untracked files copied, and the
+  original keeps running untouched.
+- Each tab is resumed by its agent's own resume-by-id and must pass the
+  continuity check in the skill's `references/continuity.md` (same native
+  session, a restart comes back to it, history loaded, original untouched)
+  before it is reported as continued. A session that fails is reported as not
+  continued with the reason and next step, never replaced by a fresh agent.
+- It keeps a record in `<PANE_DIR>/migrate-to-pane/record.json`, so running it
+  again lists what is already in Pane and creates nothing twice. Archiving an
+  adopted Pane keeps your checkout.
 
 ## Session startup
 
@@ -209,6 +403,26 @@ its role, profile, and Pane capability instructions available. There is no
 automatic greeting, diagnostic sweep, watcher setup, or continuation of a
 saved next action. Reopening an already-running Session reconnects without
 interrupting work the user has already authorized.
+
+There are two exceptions, each at most once per Pane data directory.
+
+The first time the Onboarding Session launches after the first-run screen,
+Pane sends it one prompt, which says that Pane sent it and why. After Yes, the
+prompt tells the agent to bring in the sessions you said yes to; after Not now,
+to make a Start here page for the project you opened. The screen saves your
+answer in the `onboarding_handoff` user preference (`migrate` or `project`).
+Pane records the prompt in the `pane_chat_migrate_offer_sent` user preference
+once a launch has sent it, so a restart or an agent switch never sends it
+again. Installs that never showed the screen get no prompt. See
+[Bring your existing sessions into Pane](#bring-your-existing-sessions-into-pane).
+
+Pane may also offer Pane Chat once, in a card over a Pane, after you have
+created at least two worktree Panes and used Pane on at least three days, if you
+have never created a Session. "Try it" creates a Session named after the Pane's
+repository, whose agent introduces itself, suggests two small tasks from that
+repository, and waits for your answer before starting any Pane. Pane removes
+that opening prompt from the Session once a launch has sent it, so a restart
+never sends it again.
 
 Pane may prepare instruction files and terminal infrastructure at startup;
 that preparation does not require an agent turn. Unattended work and watchers
@@ -316,6 +530,54 @@ An association identifies work that a Session coordinates; it does not grant
 implementation authority by itself. Detach a Pane before assigning it to a
 different Session.
 
+## Worker file access
+
+A worker's agent may be allowed to read only its working directories (Claude
+Code's `permissions.blockReadsOutsideWorkingDirectories`). Its brief and the
+Session files the brief points to must not sit outside them, or the worker
+stops on a permission prompt nobody is watching.
+
+**Briefs and attachments.** `--as-file-pointer` (`panes create`,
+`panels create`, `panels submit`, `agents send`) writes the prompt inside the
+Pane's worktree, at `<worktree>/.pane/prompts/<timestamp>.md`, and sends the
+one line `Read and follow .pane/prompts/<timestamp>.md`. The path is relative
+to the worktree, where the agent starts: given an absolute path, Claude Code
+often reads it with `cd <worktree>; cat <file>`, which its read check can't
+verify, so it asks. The result's `promptFile` is always absolute. Pane adds `/.pane/prompts/` to the
+repository's `.git/info/exclude` (never a committed `.gitignore`), so the file
+can't be committed. `--attach <file>` (repeatable; `panes create`,
+`panels create` and `panels submit`, with `--as-file-pointer`) copies each file
+into `<worktree>/.pane/prompts/<timestamp>/` and sends
+`Read and follow <path> (attached: <copy>, ...)`, also worktree-relative; the
+result lists the copies, absolute, in `attachments`. Attach mockups, plans or dispatch notes the worker needs
+instead of pointing at the Session folder. Without a local git worktree (a
+folder that is not the top of a checkout, a WSL repo) the file goes to
+`<pane-dir>/prompts/<pane-id>/` as before, and the pointer line names it by
+absolute path.
+
+**The Session folder.** A Pane associated with a Session gets that Session's
+folder (`<pane-dir>/sessions/<id>`) as `PANE_SESSION_DIR` in every tab created
+after the association. The Session's own terminals get it too.
+`PANE_ORCHESTRATION_SESSION_ID` keeps its meaning: it is set only in the
+Session's own terminals, never in a worker's. Workers read the folder and never
+write it; the orchestrator is its only writer. What each built-in template gets:
+
+| Agent | Read access to the Session folder |
+| --- | --- |
+| Claude Code (`claude --dangerously-skip-permissions`) | Pane adds `--settings '{"permissions":{"additionalDirectories":["<folder>"],"deny":["Edit(/<folder>/**)"]}}'`. `additionalDirectories` (like `--add-dir`) makes the folder a working directory, which grants read and write; an `allow` rule alone does not lift `blockReadsOutsideWorkingDirectories`. The `Edit` deny rule takes the file tools' write access back (it covers Write too; Claude ignores `Write(path)` rules). Under bypass permissions Bash can still write anywhere, so the read-only rule is a guard, not a sandbox. The folder's `CLAUDE.md` is not loaded. Not added on Windows. At launch Pane merges this value into the tab's one settings file ([Claude's own prompts](PANE_NOTIFY.md#claudes-own-prompts)). |
+| Codex (`codex --yolo`) | Nothing to add: `--yolo` runs without a sandbox, and every Codex sandbox mode reads the whole disk. Codex's `--add-dir` grants write access, so Pane does not pass it. |
+| Cursor, OpenCode | Only `PANE_SESSION_DIR`. |
+| `--tool-command` wrappers (agent-farm) and custom commands | Only `PANE_SESSION_DIR`; the wrapper maps it to its harness's flag. |
+
+The flag is fixed when the tab is created: a tab opened before its Pane was
+associated has no `PANE_SESSION_DIR` until a new tab is created.
+
+Write the folder's absolute path into the brief rather than
+`$PANE_SESSION_DIR`. Under `blockReadsOutsideWorkingDirectories` Claude Code
+asks before any Bash command whose variables it cannot check, so a worker that
+runs `echo $PANE_SESSION_DIR` or `cat "$PANE_SESSION_DIR/..."` stops on a
+prompt. The variable is for wrappers and scripts.
+
 ## Stable interfaces
 
 The shared record and service are:
@@ -324,11 +586,24 @@ The shared record and service are:
 - `main/src/services/orchestrationSessionManager.ts`
 - `orchestration-sessions.json` below `PANE_DIR`
 
+The store has no size or count limit. On load, Pane keeps every Session in the
+file's `sessions` array that decodes, whatever the file's `version` says, and
+drops any malformed Session, link or activity entry. An invalid
+`selectedSessionId` or `order` is dropped. Only a file that is not JSON loads
+with no Sessions. If anything was dropped or repaired, Pane logs it and first
+copies the file to `orchestration-sessions.json.corrupt-<timestamp>` beside it.
+The original file stays as it was until the next write.
+
+Each Session keeps its newest 500 activity entries and 1000 inbox items. Set
+`retention` in `config.json` to change either:
+`"retention": { "sessionActivity": 500, "sessionInbox": 1000 }`. A missing or
+invalid value uses the default.
+
 The daemon and Electron IPC channels are:
 
 `orchestration-sessions:list`, `orchestration-sessions:select`,
 `orchestration-sessions:create`, `orchestration-sessions:get`,
-`orchestration-sessions:update`, `orchestration-sessions:set-agent`,
+`orchestration-sessions:update`, `orchestration-sessions:reorder`, `orchestration-sessions:set-agent`,
 `orchestration-sessions:associate`, `orchestration-sessions:detach`, and
 `orchestration-sessions:overview`.
 
@@ -351,10 +626,47 @@ runpane sessions associate --session <session-id-or-name> --pane <pane-id> --jso
 runpane sessions detach --session <session-id-or-name> --pane <pane-id> --json
 ```
 
+`sessions create` starts the Session's agent, as opening it in the app does.
+To give it a first prompt, wait for the agent, then submit:
+
+```text
+runpane panels wait --panel <panelId> --for ready --json
+runpane panels submit --panel <panelId> --text "<prompt>" --yes --json
+```
+
+When a Session's Claude runs on this machine, Pane answers Claude's "trust
+this folder" prompt for the Session's own folder, choosing "Yes, I trust this
+folder" in the terminal, so the agent starts without a click. Pane answers
+only when the Session launches a plain `claude …` command (the default, or a
+custom one with no `cd`, wrapper or shell operator), only when the prompt shows
+exactly the Session folder, never a project, and only until Claude is first
+ready. This is best effort: a prompt Pane does not recognize, or a folder path
+with a space in it, stays on screen for you to answer. A WSL Session's Claude
+is not answered, so it asks on its first launch.
+
 Use `--from-json` for structured create and update input. Keep multiline
 context, evidence, links, and reports in the JSON file or stdin; do not put
 external text into shell source. Re-read mutation results and inspect the
 overview after associations or updates.
+
+### Session JSON shapes
+
+- `decisions` and `blockers` are arrays of strings.
+- `evidence` and `outputs` are arrays of links:
+  `{"label", "url", "addedAt", "kind"?, "provenance"?}`. `url` starts with
+  `https://`, `http://`, `file://` or `grain://`; `addedAt` is an ISO 8601
+  date; `kind` is `evidence`, `output`, `ticket`, `pull-request` or `other`.
+- `report` (update only) is `{"summary", "status": "reported"|"verified",
+  "evidence": [at least one link], "reportedAt", "provenance"}`; `null`
+  clears it.
+- Arrays replace the stored value, so send the whole list.
+- A bad payload is refused whole with one `ERR_SESSION_PAYLOAD_INVALID` error
+  that lists every problem (`outputs[0].addedAt: missing`, ...). The CLI
+  checks it before calling Pane, and the daemon checks it again for clients
+  such as `runpane-py` (`main/src/services/orchestrationSessionPayload.ts`).
+
+`runpane agent-context --command "sessions update"` prints the fields and a
+complete example.
 
 ## Resume and refresh persisted context
 
@@ -443,28 +755,62 @@ runpane lock release --name testing-account --json
 If a worker interrupts a waiting `lock acquire`, the daemon may still grant it
 the lock for up to two minutes; release it, or let the TTL expire.
 
+## Orchestrator guide
+
+The mechanics of driving workers through Pane, for any orchestrator and any
+harness (a Pane Session, a Claude Code or Codex session in a Pane terminal, or
+a wrapper such as Agent Farm), live in one place: the bundled
+[`pane-orchestration`](../main/src/services/paneChatBundle/skills/pane-orchestration/SKILL.md)
+skill. Any agent can read it with
+`runpane docs read --doc skills/pane-orchestration/SKILL.md`, and the home
+`pane` skill points there. It covers one Pane per feature, launching a worker
+as a Pane or tab (including `--tool-command` wrappers, `--initial-input-file
+--as-file-pointer`, `--wait-ready` and reading the delivery result), the one
+wait primitive (`runpane watch --session <S> --as <name> --until-event`) and
+what each wake means, worker reports and how a status file pairs with them,
+answering workers, resuming after a restart or sleep, showing pages beside the
+person, shared-checkout and port etiquette, handoff, cleanup, and what changes
+after the next release. The sections below are the reference for each piece.
+
 ## Session watcher
 
 When monitoring is authorized, use one durable, named watcher per Session. Do not start it merely because a Session opens. `--session` takes the Session ID
 or exact name, and the daemon follows every Pane associated with it:
 
 ```text
-runpane watch --session <session-id> --follow --quiet --json \
-  --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone,pane.associated,pane.detached,pr.conflicted,pr.checks,pr.merged,agent.report \
-  --settle 180000 --blocked-settle 30000 --min-interval 600000 \
-  --idle-backoff
+runpane watch --session <session-id> --follow --json
 ```
 
 The daemon resolves the Session once per request and re-reads its
 associations on every journal read. A Pane associated after the watcher
 starts is included; a detached or archived Pane drops out, together with any
-line still held for it by `--settle` or `--min-interval`. The Session's own
+line still held for it by `--ready-settle` or `--min-interval`. The Session's own
 hidden owner and orchestrator panels never appear, and an association limited
 to specific panels reports only those panels. There is no re-arm after
 `sessions associate` or `sessions detach`. `--session` cannot be combined with
-`--pane` or `--all-managed`, an unknown Session fails the watch, and a daemon
+`--pane`, an unknown Session fails the watch, and a daemon
 that predates `--session` fails it with `WATCH ERROR` instead of watching every
 Pane.
+
+After a Pane restart, an agent panel whose process did not come back is
+reported once as `panel.stopped` (`STOPPED <pane-name> pane <pane-id> panel
+<panel-id>`, `running: false`), never as `agent.ready`. Restart it in place,
+with the same panel ID and its conversation, using `runpane panels resume
+--panel <panel-id> --wait-ready --yes --json`, or every stopped agent panel of
+the Session at once with `runpane panels resume --session <session-id>
+--wait-ready --yes --json`. A worker started with `agent-farm run <profile>`
+resumes with `--resume` and the launch ID Agent Farm printed, the same rule a
+restart uses (see "Agent Farm" above). The bulk form restarts `--concurrency` panels at a
+time (default 3), leaves running panels alone, waits on the resumed panels
+together, and returns one result per panel with its readiness, blocker, or
+error; `--all-stopped` does the same for every Pane. It relaunches finished
+workers too, so resume single panels when only some should continue.
+
+If a stopped panel's previous shell or agent process is still exiting, resume
+returns a `still stopping` error instead of starting a second process. Retry
+after the old processes exit. This also applies when bounded teardown could
+not kill a process; bulk resume reports the error for that panel and continues
+with the others. Archived Panes cannot be resumed, even if archive cleanup failed.
 
 Membership changes are journal entries: `pane.associated` (`JOINED <pane-name>
 pane <pane-id> session <session-id>`) and `pane.detached` (`LEFT ...`). The
@@ -474,36 +820,75 @@ receives them only when `--kinds` lists them, so older clients never see an
 unknown kind. Cadence state is keyed by the Session rather than its current
 Panes, so held lines survive membership changes.
 
-PR events come from the daemon's Session PR monitor
-(`main/src/services/sessionPrMonitor.ts`, decision D7). About every 3 minutes
-(jittered) it visits each Pane associated with a Session that is not
-archived. With no such Pane it runs no `gh` at all. A Pane whose PR is known to
-be open gets `gh pr view <number> --json
-number,url,state,mergeable,statusCheckRollup,headRefOid`. Any other member (no
-cached PR because nobody has looked at it, or a closed or merged one) is first
-looked up by branch with Pane's own `gh pr list --head <branch>` lookup, which
-also updates the Pane's git status, so a background worker's new or reopened PR
-is found within a round. All calls share the one-at-a-time `gh` slot Pane uses
-for its own PR lookups, so a round costs at most two calls per member. It
-appends, on transitions only:
+### Watching a PR from any Pane
 
-- `pr.conflicted` (`PR <pane-name> pane <pane-id> #<number> CONFLICTED`): the
-  PR now conflicts with its base. GitHub's transient `UNKNOWN` answer never
-  counts as a change.
-- `pr.checks` (`... CHECKS PASSED`, or `... CHECKS FAILED lint,test` with up to
-  five names): every check on the head commit finished. A new head commit
-  reports again once its checks finish.
-- `pr.merged` (`... MERGED`). A merged PR is not polled again. A closed PR stops
-  polling without an entry.
+```bash
+runpane pr watch --pane <pane-id> --url https://github.com/owner/repo/pull/123 --head <full-sha> --json
+runpane watch --pane <pane-id> --since <generation-returned-above> --epoch <epoch-returned-above> --until-event --json --kinds pr.checks,pr.conflicted,pr.base_changed,pr.base_deleted,pr.head,pr.review,pr.comment,pr.closed,pr.merged,pr.stopped,github.unavailable,github.recovered
+runpane pr list --pane <pane-id> --json
+runpane pr unwatch --pane <pane-id> --url https://github.com/owner/repo/pull/123 --json
+```
 
-Entries carry `pr: {number, url, headOid}`, and `pr.checks` adds `checks` and
-`failingChecks`. The first poll of a PR after the daemon starts only records
-its state, so a restart never restates old conflicts; check `gh pr view` once
-after a restart. `pr.conflicted` and failed `pr.checks` bypass
-`--min-interval` like `BLOCKED`. The PR kinds are opt-in like `JOINED`/`LEFT`.
-Without `gh`, or while it is signed out, rate limited, or timing out, the
-monitor logs once, doubles its delay up to an hour, and resumes when `gh`
-answers again.
+Inside a Pane, registration defaults to its `PANE_SESSION_ID`. Registration
+returns `generation` and `epoch`; use both for the first wait, including events
+that arrived between registration and arming. An identical active registration
+retry returns its original generation, including after daemon restart, so a
+lost response cannot skip an unread event. A new head pin or unwatch/re-register
+starts a new registration. Process every returned NDJSON
+event, then persist its `gen` and `epoch`. Rearm with `--since <gen> --epoch
+<epoch>`; use `--limit 1` for one event per invocation. Never reuse the initial
+registration generation after delivering an event, and never combine `--as`
+with `--since` or `--epoch`. A named cursor is a separate daemon-managed mode.
+
+Ordinary daemon restarts preserve the epoch and unread retained events. On
+`_reset` or `_dropped`, resynchronize current GitHub state before accepting
+success, then persist the control record's `generation` and `epoch`. Ignore
+`replay`/`baseline` records as new events. Retention is bounded; a journal reset
+cannot recover lost history. A consumer crash before saving its cursor can
+replay an event, so actions must be idempotent. Registration uses the full
+host/repository/number identity. It pins success to `--head`, or the first
+observed head; a new head emits `pr.head` and needs a fresh registration before
+success can be reported. Read existing discussions before arming. A wake
+means inspect the change; it never authorizes merging.
+
+The watch also reports when the ground under the PR moves. `pr.base_changed`
+(`BASE CHANGED`) fires when the base branch is retargeted, by a person or by
+GitHub after a stack parent merges and its branch is deleted; `base.from` and
+`base.to` name the old and new base. `pr.base_deleted` (`BASE DELETED`) fires
+when the base branch no longer exists; GitHub may close the PR right after.
+Both arrive at once under `--follow`. Rebase onto the new base and recheck CI.
+
+The daemon batches up to 25 fingerprints per host every two minutes (plus up
+to ten seconds of jitter), reads details on changes and at a 30-minute
+backstop, and keeps 10% of GitHub quota for interactive work. It uses `gh auth
+token` for cached authentication and direct GraphQL for reads. Session PR
+branch discovery still uses Pane's existing `gh pr list` lookup.
+
+Failures emit immediately, even while other checks run. Success requires a
+complete, nonempty set of checks on the pinned head and all required checks
+passing (all checks when none are marked required). BLOCKED/UNKNOWN merge
+status conservatively withholds success, including when reviews are missing.
+Feedback from every account is included: agents and people can share a login.
+Checks passing is a signal to inspect the PR, not proof of complete readiness;
+optional failures can still produce a separate failure event. Merge/close,
+eight non-rate-limit failures, or ten comment-only updates stop registration;
+archiving/deleting the Pane removes it. Rate limits pause instead of consuming
+the failure budget. Outages and recovery are journal events.
+
+Fingerprints include individual check outcomes and thread resolution state, so
+equal aggregate counts do not hide swaps or edits. When the fingerprint window
+is truncated (over 100 checks/discussion items or multiple comments in a review
+thread), the daemon reads details each round. Detail reads page through up to
+2,000 checks and retain the latest 100 comments, reviews, threads, and comments
+per thread. Truncated discussions emit `pr.review` with an incomplete-feedback
+reason and withhold success; read the full discussion on GitHub.
+
+Baselines and events are replaced atomically before readers wake. This prevents
+a process crash from advancing a baseline without its event. Delivery remains
+bounded by journal retention and cursor acknowledgments; replay after a consumer
+crash before acknowledgment is possible. This is not an exactly-once or
+power-loss durability guarantee.
+
 
 The cursor defaults to `session-<uuid>`, where `<uuid>` is the UUID inside the
 Session ID: the Session `__orchestration_session_<uuid>__` uses
@@ -522,21 +907,56 @@ never READY; re-read `sessions overview` instead of acting on it. Lines mode
 prints only `CHANGED` for them. Return blocked and decision findings to the
 Session conversation. Terminal idle or exit remains activity evidence only.
 
-`--quiet` (alias `--no-control-lines`) drops the control lines that only prove
-liveness: `_ok`, `_heartbeat`, and `_reconnected` (`WATCH OK`, `HEARTBEAT`,
-and `WATCH RECONNECTED` in lines mode). `_error`, `_reset`, and `_dropped`
-always print. Under `--follow`, JSON entries for a panel holding unsent
-composer text carry `heldInputPresent: true`, the JSON form of `STUCK`.
+`--follow` has one default cadence: READY settles for 3 minutes, BLOCKED
+for 30 seconds, and non-urgent events batch every 10 minutes. IDLE starts at
+10 minutes and backs off to 30 minutes, 1 hour, 3 hours, then daily. Heartbeats
+are off. WATCH OK prints once when armed; WATCH EXPIRED and exit 0 end a watch
+after 3 quiet hours. Meaningful events reset expiry; IDLE and replay do not.
 
-### Watch profiles
+Individual duration overrides accept `30s`, `3m`, `3h`, or `0`: `--ready-settle`, `--blocked-settle`,
+`--min-interval`, `--idle-after`, `--expire-after`, `--heartbeat`, and
+watch `--timeout-ms` (for example, `--until-event --timeout-ms 30s`).
+`--expire-after 0` disables natural expiry. Bare values retain milliseconds,
+except heartbeat's legacy seconds. `--json` selects NDJSON; otherwise lines.
 
-| Profile | When | Flags | Worst-case READY delay |
-|---|---|---|---|
-| Unattended (default) | Overnight or background runs; every wake-up costs a full context replay | `--settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff` | about 13 minutes |
-| User present | Someone is waiting on the result | `--settle 60000 --blocked-settle 15000 --min-interval 120000`, no `--idle-backoff` | about 3 minutes |
+`--present` and `--profile` were removed. Use individual timing flags such as
+`--ready-settle 1m --blocked-settle 15s --min-interval 2m` to override the defaults.
 
-Both profiles use the same `--kinds` list, `--quiet`, and named cursor.
-Switch profiles by stopping the previous monitor, then re-arming the same cursor. If a monitor reports that its cursor was superseded, keep the replacement and do not re-arm the old monitor.
+```bash
+runpane watch --session <session-id> --follow --json
+runpane watch --session <session-id> --follow --ready-settle 1m --blocked-settle 15s --min-interval 2m --json
+runpane watch --pane <pane-id> --until-event --json
+```
+
+Session membership changes need no re-arm. Named cursors survive daemon
+restarts; the journal and PR baselines are saved together. RESET/DROPPED mean
+refresh the overview; replayed baseline entries never mean a new READY.
+`--until-event` waits for REPORT, BLOCKED, EXIT or GONE by default and exits 0
+when one arrives, immediately without follow settling or batching. A harness
+that consumes a named follow stream gets its cadence; a process-exit waiter
+keeps these immediate single-event semantics. Cadence requires a named consumer
+(explicit `--as` or the name assigned by follow). `--follow --since <generation>`
+has no consumer name and also bypasses settling and batching. Named `--as`
+cannot be combined with numeric `--since`; switching only the wait mode does
+not enable cadence for a numeric generation/epoch cursor.
+Override `--kinds` for PR events. Its `--timeout-ms` is a
+total deadline (exit 124); under follow it bounds each daemon request.
+
+REPORT remains the completion signal: workers use `runpane report --state
+ready|blocked|failed|done --summary-file <path>`, adding a PR/head and a question
+when blocked. READY alone is activity evidence. Read the full report with
+`runpane agents status --panel <id> --json`. Resume stopped workers in the same
+panel with `runpane panels resume --panel <id> --wait-ready --yes --json`.
+
+Do not pipe follow through `head` or `grep -m1` to wait. Run `--until-event` as
+a supported background task, act on its events, then re-arm with its cursor
+(the [orchestrator guide](#orchestrator-guide) has the one wait command and
+what to do on each wake, timeout, reset and error).
+Never sleep-poll your own background task output. WATCH ERROR/nonzero exit
+means failure: re-read every worker's status, then re-arm once; a second
+failure goes to `runpane doctor --report`. A superseded cursor means keep the
+replacement. A normal expiry means re-arm with the next dispatch.
+
 
 ## Worker reports
 
@@ -563,20 +983,160 @@ The daemon then:
 - journals an `agent.report` entry with the same fields (summary cut to 2,000
   characters), printed as `REPORT <pane-name> pane <pane-id> panel <panel-id>
   ready pr#747 fc5dce9` or `... blocked: <question>`. It skips the
-  `--min-interval` batch. Only watchers that list `agent.report` in `--kinds`
-  receive it, because released CLIs reject journal kinds they don't know;
+  `--min-interval` batch. Only watchers that list `agent.report` in `--kinds`,
+  and Session watches, receive it, because released CLIs reject journal kinds
+  they don't know. It passes `--agents-only` (which `--follow` and
+  `--until-event` imply) whatever panel sent it, so a report from a shell tab
+  or a wrapper launch whose agent isn't detected yet still arrives;
 - appends a `report` activity (with the worker's `paneId` and `panelId`) to
   every Session the Pane is associated with, which makes an older Session
   report stale;
-- shows the report in `agents status`, `panels list`, and `sessions overview`,
-  where `panes[].report` is the newest report among the Pane's panels, with its
-  `panelId`.
+- shows the report in `agents status`, `panels list`, and `sessions overview`.
+  There each panel carries its own latest report as `panes[].panels[].report`,
+  and `panes[].report` is the newest report among the Pane's panels, with its
+  `panelId`. When the summary is a complete JSON object (a status file sent
+  with `--summary-file`, say), the panel's `report.data` holds it exactly as
+  given; a plain-text, array, scalar, invalid, truncated, or more than 64
+  levels deep summary has no `data`;
+- returns `liveWatchers`, the number of watches that were waiting and received
+  it. The CLI prints `Delivered to 1 waiting watcher.`; with no Session and
+  nobody waiting it says the report is stored on the panel and that a
+  named-cursor watch receives it when it next waits.
 
 The orchestrator treats REPORT as the completion signal. A READY without a
 report means look, and maybe nudge: `runpane panels last-message --panel
 <panel-id> --json` returns the agent's last reply from its Claude or Codex
 transcript (never the screen; `transcript-unavailable` otherwise), and the
 worker can be asked to run `runpane report`.
+
+An orchestrator whose harness wakes only when a process exits (Claude Code
+background Bash, Codex) waits with the one wait primitive from the
+[orchestrator guide](#orchestrator-guide): `runpane watch --session <S> --as
+<name> --until-event --json --kinds
+agent.report,agent.report.missing,agent.blocked,agent.ready,panel.exited,panel.stopped,pane.gone` (`--pane <pane-id>` outside a Session), run as a background
+task and run again after each event. `--until-event` exits 0 on the first
+event (124 at a `--timeout-ms` deadline, if you give one); a `RESET` and the caller's own panel never end
+the wait. When a worker keeps richer state in a status file, it writes the file
+first and reports with `--summary-file <status file>`; the file is the truth
+and the report is the signal.
+
+### Dispatching with `--wait`
+
+The [orchestrator guide](#orchestrator-guide) prescribes submission without
+`--wait`, followed by its named watch as the completion consumer. The CLI also
+offers an optional per-dispatch result for callers choosing that route instead:
+
+```text
+runpane panels submit --panel <panel-id> --input-file <prompt-file> --as-file-pointer --wait --yes
+```
+
+`panels create` and `panes create` with a prompt take `--wait` too. `--wait`
+turns the expected report on and blocks on that panel until the first
+`agent.report`, `agent.report.missing`, `agent.blocked`, `panel.exited`, or
+`pane.gone`. It then prints one line of JSON (`dispatchWaitResult` in the
+contract) and exits:
+
+| `outcome` | Exit | Carries |
+| --- | --- | --- |
+| `report` | 0 | `report`: state, summary, `summaryPath`, PR, head, question |
+| `missing` | 3 | `lastOutput` and `lastOutputSource` |
+| `blocked` | 4 | `screenLines`, the prompt the worker waits on |
+| `exited`, `gone` | 5 | `exitCode` or `reason` |
+| `indeterminate` | 6 | history was lost; inspect the panel and inbox before retrying |
+| `timeout` | 124 | after `--timeout <duration>` (`30m`, `2h`) |
+
+The result never includes the transcript. The daemon stamps the result of
+every create and submit with the journal generation and epoch it read before
+delivering the work. `--wait` adapts the existing `watch --until-event` reader,
+filtered to the Pane and panel. It reconnects after a daemon restart; a replaced
+or truncated journal returns an explicit indeterminate result (exit 6), since
+the task's outcome can no longer be established from that history. Like
+`--until-event`, it is a single-event wait: it delivers at once, without
+`--follow`'s settling or batching, and since it exits on the event, a plain
+background task is enough (no line-delivering monitor). Claude
+Code wakes the orchestrator when the background call exits, and the line
+arrives as the tool result. Report-expected work is serialized per panel: a
+new dispatch is refused before writing while an expectation or missing-output
+collection is outstanding. A send with `--no-expect-report` (`panels submit` or
+`agents send`) is a reply, such as an answer to the worker's question or an
+addition to its current work: it is delivered while a report is outstanding,
+and Pane keeps waiting for the original work's report.
+Held starting input is reserved but does not count startup readiness as task
+completion; tracking activates immediately before the prompt's submit or launch.
+
+### Expected reports
+
+Work sent to an agent through runpane expects a `runpane report` back: a
+`panels submit` to an agent's panel, and a `panels create` or `panes create`
+that carries a prompt. A request marked `--source user` (Pane's own UI marks
+its sends that way) expects none, and neither does typing into a tab, which
+never goes through runpane. `--no-expect-report` sends fire-and-forget input;
+`--expect-report` asks for a report anyway, also from a plain shell panel.
+`shouldExpectReport()` in `main/src/ipc/runpane.ts` holds the rule. Pane saves `{ since }` per panel in `expected-reports.json` below `PANE_DIR`
+(results echo it as `expectedReport`); only the tracker writes that file, so
+panel-state writes cannot bring back a cleared expectation. When the agent then goes ready (`agent.ready`)
+or its panel exits without a report made at or after `since`, Pane journals
+one `agent.report.missing` entry (`MISSING REPORT <pane-name> pane <pane-id>
+panel <panel-id> ready|exited`) and clears the expectation. The entry's
+`lastOutput` is the agent's last reply from its transcript, or else the last
+20 lines on its screen (`lastOutputSource: transcript|screen`), cut to 2,000
+characters with the end kept. A report clears the expectation.
+
+An agent can end its turn while work it started keeps running. Pane reads
+that from the screen: Claude Code counts running background shells in its
+footer (`⏵⏵ bypass permissions on · 1 shell`) and lists each running
+background subagent under it (`◯ general-purpose  <task>  14s`); Codex prints
+`1 background terminal running · /ps to view` above its prompt
+(`detectAgentBackgroundWork()` in `agentScreenSignature.ts`). While one shows,
+a READY does not raise the missing report. Claude takes a new turn when the
+work finishes, and that turn's READY decides. Codex doesn't, so Pane looks at
+the screen again every 10 seconds while the panel stays ready, and raises
+once nothing runs. An exit raises at once.
+
+Like
+`agent.report`, the kind reaches only watchers that list it in `--kinds` (a
+Session scope alone does not deliver it), and it skips the `--min-interval`
+batch. The tracker is `main/src/services/expectedReports.ts`.
+
+### Questions on screen
+
+Pane's status detection (`main/src/services/agentStatus/manifests.ts`)
+classifies a panel as blocked when its screen shows a live prompt waiting on
+input: Claude's AskUserQuestion picker, permission prompts, folder trust, the
+"Allow external CLAUDE.md file imports?" dialog, and Codex's folder-trust,
+sign-in, approval and "Update available" screens. The journal records
+`agent.blocked` only once a panel has stayed blocked for 2 seconds
+(`BLOCKED_DEBOUNCE_MS` in `workspaceJournal.ts`), so a prompt-like line that
+flashes past in normal output never becomes BLOCKED. The entry carries
+`screenLines`: up to 20 non-empty lines of the screen region the prompt was
+matched in. The agent does not need to report anything for this.
+
+### Session inbox
+
+Pane keeps, per Session, what its orchestrator has not acknowledged:
+reports (`agent.report`), missing reports (`agent.report.missing`), and
+questions on screen (`agent.blocked`, with `screenLines`). It is fed from the
+journal for every Pane associated with the Session (`main/src/services/sessionInbox.ts`)
+and saved with a journal epoch and replay watermark in `session-inbox.json`
+below `PANE_DIR`. Restart replays committed events after the watermark, with
+stable item IDs, including a report whose inbox write failed. Acknowledgements
+and the watermark are saved together; replay does not resurrect handled items.
+Recovery is bounded by the journal's retention. If entries expired before
+projection, or the journal was replaced, Pane logs the history loss explicitly;
+already projected items remain available. A newer report replaces the panel's
+older report or missing report; a blocked item goes once its panel moves on
+(busy, ready, exited, or reported). Each Session keeps its newest 1000 items
+(`retention.sessionInbox` in `config.json`).
+
+```text
+runpane inbox --session <id|name> [--json]       # defaults to $PANE_ORCHESTRATION_SESSION_ID
+runpane inbox ack <item-id>... [--session <id|name>]
+runpane inbox ack --all --session <id|name>
+```
+
+An orchestrator runs `runpane inbox` when it starts or resumes, to catch what
+finished while it was down. Pane never adds the inbox to the orchestrator's
+turns: worker output reaches it only as the result of a tool call it made.
 
 ## Skill contract
 
@@ -612,16 +1172,26 @@ Selecting a file opens an editor tab alongside the agent conversation. Panels
 are saved with the Session and reused when you reopen the tools; switching
 Sessions keeps their shells and files separate.
 
+Every Pane has the same dock: its first plain shell, titled **Terminal**, where
+the setup progress notices appear. It is not a tool or agent tab. `runpane panels
+list` marks it `dock: true`, and `runpane panes list` reports a Pane `running`
+only while one of its tool or agent terminals is live, not for the dock alone.
+
 ## Plans, pages, and split view
 
 Agents show pages and files with `runpane panels open --file <path>` or
 `--url <url>`. Files open in an editor tab with read-only previews for supported
-formats; HTML opens as read-only source. Use `--url` with an HTTP, HTTPS or file
-URL for an intentional live browser tab. By default the tab opens in split view:
+formats; HTML opens as editable source. Use `--url` with an HTTP, HTTPS or file
+URL for a live browser tab. By default the tab opens in split view:
 the first one splits the stage to the right of the conversation, and later ones
-join that side group as tabs.
+join that side group as tabs. A page opened while you are looking at another
+Session or Pane is in that side group when you come back, without taking focus
+from the tab you left showing; tabs you have already arranged stay where you put
+them.
 `--tab` opens it as a plain tab instead. Reopening the same file or URL reuses
-and reloads its tab. This works the same in Sessions and in project Panes.
+and reloads its tab; without `--tab`, a reopened tab that sits in the
+conversation's group moves to the side group. This works the same in Sessions
+and in worktree Panes.
 
 Generated Session instructions ask the orchestrator to write plans, reports, and
 other documents as self-contained HTML files in its Session folder and open them
@@ -633,6 +1203,12 @@ While the stage is split, each group has its own tab strip, including the agent
 tab in its group. For a single Session, the strips align directly below the
 window title bar. Closing the last tab in the side group returns to a single
 group. Layouts are saved with the Session.
+
+Drag any tab to rearrange the stage, as in a project Pane: drop it in the
+middle of a group to join that group, against an edge (the outer quarter) to
+split beside it, or between tabs on a strip to place it there. Dragging the
+last tab out of a group closes that group. In tiled Sessions a tab moves only
+within its own Session.
 
 ## Tiling Sessions side by side
 
@@ -660,7 +1236,7 @@ exactly the old behaviour — switching Sessions replaces the view.
 The `X` on a tile's title row stops tiling that Session; the Session itself,
 its conversation and its panels are untouched, and the layout collapses back
 around the space. The last tile has no close button, since a window with no
-Session in it has nothing to show. The command palette carries the same actions
+Session in it has nothing to show. Search carries the same commands
 for the keyboard: focus the Session left, right, above or below, and stop tiling
 the focused one.
 

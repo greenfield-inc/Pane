@@ -22,4 +22,9 @@ describe('invokeChannel', () => {
     await expect(invokeChannel(clientReturning(['main', 'dev']), 'projects:list-branches')).resolves.toEqual(['main', 'dev']);
     await expect(invokeChannel(clientReturning(null), 'panels:getActive')).resolves.toBeNull();
   });
+
+  it('preserves domain data and errors without a boolean IPC envelope marker', async () => {
+    const view = { panelId: 'panel-a', error: 'Provider authentication expired', running: false };
+    await expect(invokeChannel(clientReturning(view), 'panels:get', ['panel-a'])).resolves.toEqual(view);
+  });
 });

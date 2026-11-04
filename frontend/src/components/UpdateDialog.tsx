@@ -508,7 +508,7 @@ export function UpdateDialog({ isOpen, onClose, versionInfo }: UpdateDialogProps
                 <div className="flex items-start gap-3">
                   <CheckCircle className="w-5 h-5 text-status-success mt-0.5" />
                   <div className="flex-1">
-                    <h3 className="text-lg font-medium text-status-success mb-2">Update Downloaded</h3>
+                    <h3 className="text-lg font-medium text-text-primary mb-2">Update Downloaded</h3>
                     {isMac() && !canUseSeamlessUpdater ? (
                       <div className="space-y-4">
                         <p className="text-text-secondary">
@@ -557,14 +557,14 @@ export function UpdateDialog({ isOpen, onClose, versionInfo }: UpdateDialogProps
                 {/* Manual Download Box */}
                 {isMac() ? (
                   <div className="bg-interactive/10 border border-interactive/30 rounded-lg p-4">
-                    <h3 className="text-lg font-medium text-interactive mb-3">Manual Update Available</h3>
+                    <h3 className="text-lg font-medium text-text-primary mb-3">Manual Update Available</h3>
                     {renderMacUpdateActions()}
                   </div>
                 ) : versionInfo?.releaseUrl && (
                   <div className="bg-interactive/10 border border-interactive/30 rounded-lg p-4">
                     <div className="flex items-center justify-between">
                       <div>
-                        <h3 className="text-lg font-medium text-interactive mb-1">Manual Update Available</h3>
+                        <h3 className="text-lg font-medium text-text-primary mb-1">Manual Update Available</h3>
                         <p className="text-sm text-text-secondary">
                           Automatic update failed, but you can download the latest version manually.
                         </p>
@@ -585,7 +585,7 @@ export function UpdateDialog({ isOpen, onClose, versionInfo }: UpdateDialogProps
                   <div className="flex items-start gap-3">
                     <AlertCircle className="w-5 h-5 text-status-error mt-0.5" />
                     <div className="flex-1">
-                      <h3 className="text-lg font-medium text-status-error mb-2">Update Error</h3>
+                      <h3 className="text-lg font-medium text-text-primary mb-2">Update Error</h3>
                       <p className="text-text-secondary mb-2">{error}</p>
                       <div className="space-y-3">
                         {isMac() ? (
@@ -632,7 +632,7 @@ export function UpdateDialog({ isOpen, onClose, versionInfo }: UpdateDialogProps
             )}
 
             {message && (
-              <div className="bg-status-success/10 border border-status-success/30 rounded-lg p-3 text-sm text-status-success">
+              <div className="bg-status-success/10 border border-status-success/30 rounded-lg p-3 text-sm text-text-primary">
                 {message}
               </div>
             )}

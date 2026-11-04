@@ -3399,6 +3399,18 @@ export class DatabaseService {
       .all() as Session[];
   }
 
+  /** The newest archived worktree Pane ids outside the given projects, at most `limit`. */
+  getArchivedSessionIds(limit: number, excludeProjectIds: number[] = []): string[] {
+    const excluded = excludeProjectIds.length > 0 ? ` AND project_id NOT IN (${excludeProjectIds.map(() => '?').join(', ')})` : '';
+    // SAFETY: This fixed SQLite query projection matches the declared row type at this database boundary.
+    const rows = this.db
+      .prepare(
+        `SELECT id FROM sessions WHERE archived = 1 AND (is_main_repo = 0 OR is_main_repo IS NULL) AND (is_hidden = 0 OR is_hidden IS NULL)${excluded} ORDER BY updated_at DESC LIMIT ?`,
+      )
+      .all(...excludeProjectIds, limit) as Array<{ id: string }>;
+    return rows.map(row => row.id);
+  }
+
   getMainRepoSession(projectId: number): Session | undefined {
     // SAFETY: This fixed SQLite query projection matches the declared row type at this database boundary.
     return this.db
@@ -3536,13 +3548,13 @@ export class DatabaseService {
   }
 
   setSessionFavorite(id: string, pinned: boolean): Session | undefined {
+    // Pinning is metadata, not session activity: preserve updated_at and existing pin order.
     this.db.prepare(`
       UPDATE sessions SET
         is_favorite = @pinned,
         favorite_pinned_at = CASE WHEN @pinned
           THEN COALESCE(favorite_pinned_at, CURRENT_TIMESTAMP)
-          ELSE NULL END,
-        updated_at = CURRENT_TIMESTAMP
+          ELSE NULL END
       WHERE id = @id
     `).run({ id, pinned: pinned ? 1 : 0 });
 

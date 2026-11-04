@@ -1,9 +1,10 @@
-import type { ProjectEnvironment, TerminalAgentReport, TerminalAgentReportState, ToolPanelType } from './panels';
+import type { ProjectEnvironment, TerminalAgentReport, TerminalAgentReportState, TerminalExpectedReport, ToolPanelType } from './panels';
 import type { RunpaneAgent } from './generatedRunpaneContract';
 import type { RemoteDaemonExecutableHealth } from './remoteDaemon';
 import type { TerminalGraphicsProtocol } from '../constants/terminalGraphics';
 import type { AgentState } from './agentStatus';
 import type { UsageByPane, UsagePaneCostSlice, UsageTotals } from './usage';
+import type { Loop, LoopSchedulePreview } from './loop';
 import type {
   OrchestrationSessionOverview,
   OrchestrationSessionRecord,
@@ -136,18 +137,39 @@ export type RunpaneWorkspaceEntryKind =
   | 'pane.created'
   | 'pane.gone'
   | 'panel.exited'
+  /**
+   * An agent panel whose terminal process is not running (for example after a Pane restart).
+   * Opt-in like the Session kinds; other consumers get `agent.unknown` with `running: false`.
+   */
+  | 'panel.stopped'
   /** A worker report, delivered only when explicitly requested in kinds. */
   | 'agent.report'
+  /**
+   * A panel sent work with `--expect-report` went ready or exited without running `runpane report`.
+   * Delivered only when explicitly requested in kinds.
+   */
+  | 'agent.report.missing'
   /** The Pane joined a Session (`sessions associate`). */
   | 'pane.associated'
   /** The Pane left a Session (`sessions detach`). */
   | 'pane.detached'
-  /** A Session member's open PR became conflicting with its base. */
+  /** A watched open PR became conflicting with its base. */
   | 'pr.conflicted'
-  /** A Session member's PR checks settled (`checks: passed | failed`) for its head commit. */
+  /** A watched PR has a new failed check or complete passing checks for its head commit. */
   | 'pr.checks'
-  /** A Session member's PR was merged. */
-  | 'pr.merged';
+  /** A watched PR was merged. */
+  | 'pr.merged'
+  | 'pr.closed'
+  | 'pr.head'
+  /** A watched PR's base branch was retargeted (by a person, or by GitHub after its old base merged and was deleted). */
+  | 'pr.base_changed'
+  /** A watched PR's base branch no longer exists; GitHub may close the PR. */
+  | 'pr.base_deleted'
+  | 'pr.review'
+  | 'pr.comment'
+  | 'pr.stopped'
+  | 'github.unavailable'
+  | 'github.recovered';
 
 /** The PR a `pr.*` entry reports on. */
 export interface RunpaneWorkspacePullRequest {
@@ -178,6 +200,8 @@ export interface RunpaneWorkspaceEntry {
   heldInput?: string;
   heldInputPresent?: boolean;
   exitCode?: number;
+  /** Set on baseline agent entries: whether the panel's terminal process is live. */
+  running?: boolean;
   baseline?: true;
   /**
    * Set on the baseline entries a wait delivers after a reset. A replayed entry restates current
@@ -190,6 +214,8 @@ export interface RunpaneWorkspaceEntry {
   sessionName?: string;
   /** PR of a `pr.conflicted`, `pr.checks`, or `pr.merged` entry. */
   pr?: RunpaneWorkspacePullRequest;
+  /** Base branch of a `pr.base_changed` (old → new) or `pr.base_deleted` (`to` is the PR's current base name) entry. */
+  base?: { from: string; to: string };
   /** Settled result of a `pr.checks` entry. */
   checks?: 'passed' | 'failed';
   /** Up to five failing check names of a failed `pr.checks` entry. */
@@ -197,6 +223,16 @@ export interface RunpaneWorkspaceEntry {
   panels?: RunpaneWorkspacePanelSummary[];
   /** The report of an `agent.report` entry; its summary is cut to 2,000 characters (the panel keeps up to 16,000). */
   report?: TerminalAgentReport;
+  /**
+   * What an `agent.report.missing` entry's agent said last, up to 2,000 characters: its last reply
+   * from the transcript, or else the last lines on its screen (`lastOutputSource`).
+   */
+  lastOutput?: string;
+  lastOutputSource?: 'transcript' | 'screen';
+  /** When the report an `agent.report.missing` entry is about was asked for. */
+  expectedSince?: string;
+  /** The screen lines of the prompt an `agent.blocked` entry's agent is waiting on (at most 20). */
+  screenLines?: string[];
 }
 
 export interface RunpaneWorkspacePanelSummary {
@@ -204,10 +240,13 @@ export interface RunpaneWorkspacePanelSummary {
   title: string;
   agentType?: string;
   agentState?: AgentState;
+  running?: boolean;
 }
 
 export interface RunpaneWorkspaceWaitRequest {
   since?: number;
+  /** Expected journal epoch for a numeric cursor; mismatch requires resynchronization. */
+  epoch?: string;
   as?: string;
   from?: 'now' | 'earliest';
   timeoutMs?: number;
@@ -243,6 +282,7 @@ export type RunpaneWorkspaceResetReason =
   | 'unknown-consumer';
 
 export interface RunpaneWorkspaceWaitResult {
+  activityGeneration?: number;
   ok: true;
   epoch: string;
   generation: number;
@@ -283,6 +323,14 @@ export interface RunpaneRepoListResult {
   repos: RunpaneRepoSummary[];
 }
 
+/**
+ * What this Pane's daemon supports beyond its channel list, so a newer runpane can tell an older
+ * Pane apart before relying on a field an older one would drop. `resume-on-create`: panes create,
+ * panels create and sessions create honour `resume`, launching the agent's own resume for that id
+ * and recording it as the tab's conversation.
+ */
+export const RUNPANE_DAEMON_FEATURES = ['resume-on-create'] as const;
+
 export interface RunpaneDoctorResult {
   ok: true;
   app: {
@@ -294,6 +342,8 @@ export interface RunpaneDoctorResult {
   };
   daemon: {
     channels: string[];
+    /** See RUNPANE_DAEMON_FEATURES. */
+    features: string[];
     executableHealth: RemoteDaemonExecutableHealth;
   };
   repos: {
@@ -321,6 +371,16 @@ export interface RunpaneRepoAddRequest {
   dryRun?: boolean;
 }
 
+export interface RunpaneRepoRenameRequest {
+  repo: string;
+  name: string;
+}
+
+export interface RunpaneRepoRenameResult {
+  ok: true;
+  repo: RunpaneRepoSummary;
+}
+
 export interface RunpaneRepoAddPreview {
   name: string;
   path: string;
@@ -337,12 +397,84 @@ export interface RunpaneRepoAddResult {
   preview?: RunpaneRepoAddPreview;
 }
 
+/** A script Pane runs, and where it comes from. */
+export interface RunpaneRepoScriptSource {
+  command: string;
+  /** `Project Settings`, or the config file it was read from (`pane.json`, `conductor.json`, ...). */
+  source: string;
+}
+
+export interface RunpaneRepoScriptSetting {
+  /** Saved in Project Settings; null when unset. */
+  value: string | null;
+  /** What the repo's config file supplies when no value is saved. */
+  fallback: RunpaneRepoScriptSource | null;
+  /** What Pane runs: the saved value when set, otherwise the fallback. */
+  effective: RunpaneRepoScriptSource | null;
+}
+
+/** A saved repo's Project Settings, as the settings dialog shows them. */
+export interface RunpaneRepoSettings {
+  name: string;
+  path: string;
+  /** The branch checked out in the repo; detected, not a setting. */
+  currentBranch: string | null;
+  worktreeFolder: string | null;
+  openIdeCommand: string | null;
+  systemPrompt: string | null;
+  /** The config file the script fallbacks come from, read at the repo root. */
+  configFile: string | null;
+  buildScript: RunpaneRepoScriptSetting;
+  runScript: RunpaneRepoScriptSetting;
+  archiveScript: RunpaneRepoScriptSetting;
+}
+
+/** The settings `repos update` changes. A null or empty value clears the setting; `name` cannot be cleared. */
+export interface RunpaneRepoSettingsUpdate {
+  name?: string;
+  buildScript?: string | null;
+  runScript?: string | null;
+  archiveScript?: string | null;
+  worktreeFolder?: string | null;
+  openIdeCommand?: string | null;
+  systemPrompt?: string | null;
+}
+
+export type RunpaneRepoSettingField = keyof RunpaneRepoSettingsUpdate;
+
+export interface RunpaneRepoGetRequest {
+  repo?: RunpaneRepoSelector;
+}
+
+export interface RunpaneRepoGetResult {
+  ok: true;
+  repo: RunpaneRepoSummary;
+  settings: RunpaneRepoSettings;
+}
+
+export interface RunpaneRepoUpdateRequest {
+  repo: RunpaneRepoSelector;
+  settings: RunpaneRepoSettingsUpdate;
+  dryRun?: boolean;
+}
+
+export interface RunpaneRepoUpdateResult {
+  ok: true;
+  dryRun?: true;
+  /** The settings whose saved value differs from before. */
+  changed: RunpaneRepoSettingField[];
+  repo: RunpaneRepoSummary;
+  settings: RunpaneRepoSettings;
+}
+
 export interface RunpaneAgentToolSpec {
   agent: RunpaneAgentId;
   title?: string;
   initialInput?: string;
   /** Write initialInput to a prompt file and send `Read and follow <path>` instead (`--as-file-pointer`). */
   initialInputAsFilePointer?: boolean;
+  /** Absolute paths copied beside the prompt file and listed in the pointer line (`--attach`). */
+  initialInputAttachments?: string[];
 }
 
 export interface RunpaneCommandToolSpec {
@@ -353,6 +485,8 @@ export interface RunpaneCommandToolSpec {
   initialInput?: string;
   /** Write initialInput to a prompt file and send `Read and follow <path>` instead (`--as-file-pointer`). */
   initialInputAsFilePointer?: boolean;
+  /** Absolute paths copied beside the prompt file and listed in the pointer line (`--attach`). */
+  initialInputAttachments?: string[];
 }
 
 export type RunpaneToolSpec = RunpaneAgentToolSpec | RunpaneCommandToolSpec;
@@ -366,6 +500,11 @@ export interface RunpanePaneCreateItem {
   sessionPrompt?: string;
   pinned?: boolean;
   tool: RunpaneToolSpec;
+  /**
+   * A native agent session id to resume, as `panes adopt --resume`: Pane launches the agent's own
+   * resume for this id and records it as the tab's id, so a restart resumes the same conversation.
+   */
+  resume?: string;
 }
 
 export interface RunpanePaneCreateRequest {
@@ -381,6 +520,8 @@ export interface RunpanePaneCreateRequest {
   source?: RunpanePanelCreateSource;
   /** Session to associate each new Pane with (the calling orchestrator's PANE_ORCHESTRATION_SESSION_ID). */
   associateSession?: string;
+  /** The sender waits for a `runpane report`: journal `agent.report.missing` if the agent goes ready or exits without one. */
+  expectReport?: boolean;
 }
 
 export interface RunpanePaneAdoptItem {
@@ -429,6 +570,8 @@ export type RunpanePanelBlockerKind =
 
 export interface RunpanePanelStateSummary {
   initialized: boolean;
+  /** Whether the panel's terminal process is live. A stopped panel can be restarted with `panels resume`. */
+  running: boolean;
   isAlternateScreen?: boolean;
   /** @deprecated Derived from the authoritative agent status for wire compatibility. */
   activityStatus?: RunpanePanelActivityStatus;
@@ -444,6 +587,18 @@ export interface RunpanePanelBlockedState {
   suggestedCommand?: string;
 }
 
+/**
+ * Why a `ready` wait on a launched command has not matched: the command has
+ * shown no supported agent yet, the agent is up but its input box is not, or
+ * the command exited back to the shell.
+ */
+export type RunpaneReadinessReasonCode = 'no-agent-detected' | 'agent-not-ready' | 'command-exited';
+
+export interface RunpaneReadinessReason {
+  code: RunpaneReadinessReasonCode;
+  message: string;
+}
+
 export interface RunpanePaneReadiness {
   ok: boolean;
   condition: RunpanePanelWaitCondition;
@@ -452,6 +607,7 @@ export interface RunpanePaneReadiness {
   elapsedMs: number;
   state: RunpanePanelStateSummary;
   blocked?: RunpanePanelBlockedState;
+  reason?: RunpaneReadinessReason;
   nextCommand?: string;
 }
 
@@ -484,6 +640,25 @@ export interface RunpanePromptWarning {
   message: string;
 }
 
+/**
+ * How Pane brought a remote-tracking base up to date before creating the
+ * worktree: `fetched` ran `git fetch` for it, `recent` reused a fetch from the
+ * last few seconds, `skipped` means the base is not a remote-tracking branch,
+ * and `failed` means the Pane started from the local ref (see `notice`).
+ */
+export type RunpaneBaseRefreshStatus = 'fetched' | 'recent' | 'skipped' | 'failed';
+
+/** The base a new worktree Pane started from. */
+export interface RunpanePaneBase {
+  /** The ref the worktree was created from, such as `origin/main`. */
+  ref: string;
+  /** The commit the Pane started on. */
+  commit?: string;
+  refresh: RunpaneBaseRefreshStatus;
+  /** Set when `refresh` is `failed`: what happened, what it means and the next step. */
+  notice?: string;
+}
+
 export interface RunpanePaneCreateSuccessItem {
   ok: boolean;
   index: number;
@@ -505,10 +680,16 @@ export interface RunpanePaneCreateSuccessItem {
   initialInput?: RunpaneInitialInputDeliveryResult;
   /** The prompt file Pane wrote for `--as-file-pointer`. */
   promptFile?: string;
+  /** Copies of the `--attach` files beside the prompt file. */
+  attachments?: string[];
   warnings?: RunpanePromptWarning[];
   association?: RunpanePaneAssociationOutcome;
+  /** The report Pane now waits for (`expectReport`); absent when no agent panel was created. */
+  expectedReport?: TerminalExpectedReport;
   /** Set when the Pane's setup waits for a slot; its agent starts after setup, so there is no panel yet. */
   setupQueue?: { position: number; message: string };
+  /** Set for a Pane with its own worktree: the base it started from and whether that base was refreshed. */
+  base?: RunpanePaneBase;
 }
 
 /** Automatic Session association for a created or adopted Pane; failure never undoes the Pane. */
@@ -533,6 +714,8 @@ export type RunpanePaneCreateResultItem =
   | RunpanePaneCreateFailureItem;
 
 export interface RunpanePaneCreateResult {
+  /** Epoch of the pre-dispatch journal position. */
+  epoch?: string;
   ok: boolean;
   generation?: number;
   repo: RunpaneRepoSummary;
@@ -610,6 +793,38 @@ export interface RunpanePaneRenameResult {
   dryRun?: true;
   pane: RunpanePaneSummary;
 }
+
+export interface RunpaneLoopListResult {
+  ok: true;
+  loops: Loop[];
+}
+
+/** `runpane:loops:save` takes a `LoopInput`; `runpane:loops:set-enabled` and `run-now` answer the loop. */
+export interface RunpaneLoopResult {
+  ok: true;
+  loop: Loop;
+}
+
+export interface RunpaneLoopRequest {
+  loopId: string;
+}
+
+export interface RunpaneLoopSetEnabledRequest {
+  loopId: string;
+  enabled: boolean;
+}
+
+export interface RunpaneLoopDeleteResult {
+  ok: true;
+  deleted: string;
+}
+
+export interface RunpaneLoopPreviewRequest {
+  cron: string;
+}
+
+/** An invalid cron answers `ok: false` with the reason, not a thrown error. */
+export type RunpaneLoopPreviewResult = LoopSchedulePreview;
 
 export interface RunpanePaneFocusRequest {
   paneId: string;
@@ -794,16 +1009,30 @@ export interface RunpanePanelSummary {
   title: string;
   active: boolean;
   initialized?: boolean;
+  /** Terminal panels only: whether the terminal process is live. */
+  running?: boolean;
   agentType?: RunpaneAgentId;
   agentDetection?: RunpaneAgentDetection;
   launchCommand?: string;
   isCliPanel?: boolean;
+  /** The Pane's terminal dock: its plain shell, not a tool or agent tab. Omitted on every other panel. */
+  dock?: boolean;
   position?: number;
   createdAt?: string;
   lastActiveAt?: string;
   /** Latest `runpane report` from this panel's agent. */
   report?: TerminalAgentReport;
+  /** The agent session ID Pane saved for reopening this panel; omitted when none is saved. */
+  resumeId?: string;
+  /**
+   * Which rule resumes with `resumeId`: `agent-farm` (derived from an `agent-farm run|agent`
+   * command), `configured` (the panel's own resume command), or `agent` (built-in agent
+   * capture). Omitted with `resumeId`.
+   */
+  resumeSource?: RunpanePanelResumeSource;
 }
+
+export type RunpanePanelResumeSource = 'agent-farm' | 'configured' | 'agent';
 
 export interface RunpanePanelListRequest {
   paneId: string;
@@ -815,20 +1044,91 @@ export interface RunpanePanelListResult {
   panels: RunpanePanelSummary[];
 }
 
+export interface RunpanePanelResumeRequest {
+  panelId: string;
+  waitReady?: boolean;
+  readyTimeoutMs?: number;
+}
+
+export type RunpanePanelResumeAction = 'resumed' | 'already-running';
+
+/** Resume every stopped agent panel in one scope: a Session's associated Panes, or every Pane. */
+export interface RunpanePanelResumeManyRequest {
+  sessionId?: string;
+  allStopped?: boolean;
+  waitReady?: boolean;
+  readyTimeoutMs?: number;
+  concurrency?: number;
+}
+
+export interface RunpanePanelResumeManyItem {
+  ok: boolean;
+  panelId: string;
+  paneId: string;
+  paneName: string;
+  panelTitle?: string;
+  agentType?: string;
+  action?: RunpanePanelResumeAction;
+  message?: string;
+  agentSessionId?: string;
+  readiness?: RunpanePaneReadiness;
+  /** Why this panel could not be resumed; the others still were. */
+  error?: string;
+}
+
+export interface RunpanePanelResumeManyResult {
+  ok: boolean;
+  scope: { kind: 'session'; sessionId: string; sessionName: string } | { kind: 'all-stopped' };
+  resumed: number;
+  /** Agent panels in scope that were already running and were left alone. */
+  alreadyRunning: number;
+  /** Panels that could not be restarted (their item has `error`). */
+  failed: number;
+  /** With waitReady: resumed panels that were blocked or not ready in time. */
+  notReady: number;
+  /** Panels restarted at once. */
+  concurrency: number;
+  items: RunpanePanelResumeManyItem[];
+  nextCommand?: string;
+}
+
+export interface RunpanePanelResumeResult {
+  ok: boolean;
+  panelId: string;
+  paneId: string;
+  action: RunpanePanelResumeAction;
+  message: string;
+  agentType?: RunpaneAgentId;
+  /** The agent conversation the panel resumes, when Pane knows it. */
+  agentSessionId?: string;
+  panel: RunpanePanelSummary;
+  readiness?: RunpanePaneReadiness;
+  nextCommand: string;
+}
+
 export type RunpanePanelCreateSource = 'user' | 'agent';
 
 export interface RunpanePanelCreateRequest {
   paneId: string;
   type?: 'terminal';
   tool: RunpaneToolSpec;
+  /**
+   * A native agent session id to resume, as `panes adopt --resume`: Pane launches the agent's own
+   * resume for this id and records it as the tab's id, so a restart resumes the same conversation.
+   */
+  resume?: string;
   noFocus?: boolean;
   focus?: boolean;
   source?: RunpanePanelCreateSource;
   waitReady?: boolean;
   readyTimeoutMs?: number;
+  /** The sender waits for a `runpane report`: journal `agent.report.missing` if the agent goes ready or exits without one. */
+  expectReport?: boolean;
 }
 
 export interface RunpanePanelCreateResult {
+  /** Epoch of the pre-dispatch journal position. */
+  epoch?: string;
   ok: boolean;
   generation?: number;
   paneId: string;
@@ -845,7 +1145,11 @@ export interface RunpanePanelCreateResult {
   initialInput?: RunpaneInitialInputDeliveryResult;
   /** The prompt file Pane wrote for `--as-file-pointer`. */
   promptFile?: string;
+  /** Copies of the `--attach` files beside the prompt file. */
+  attachments?: string[];
   warnings?: RunpanePromptWarning[];
+  /** The report Pane now waits for (`expectReport`). */
+  expectedReport?: TerminalExpectedReport;
   nextCommand?: string;
 }
 
@@ -950,6 +1254,11 @@ export interface RunpaneReportResult {
   report: TerminalAgentReport;
   /** Named Sessions the Pane is associated with, which recorded the report as activity. */
   sessionIds: string[];
+  /**
+   * Watches that were waiting for this report when it was journaled and received it. A snapshot:
+   * a named-cursor watch that waits later still reads it. Absent from daemons older than the field.
+   */
+  liveWatchers?: number;
 }
 
 export interface RunpanePanelLastMessageRequest {
@@ -990,13 +1299,19 @@ export interface RunpanePanelInputResult {
 
 export interface RunpanePanelSubmitRequest {
   panelId: string;
+  /** Stable delivery ID for explicit reconciliation of a Chat submission. */
+  operationId?: string;
   input: string;
   /** Stop the current turn and wait for an empty idle composer before sending. */
   interrupt?: boolean;
   /** Write the text to a prompt file and submit `Read and follow <path>` instead. */
   asFilePointer?: boolean;
+  /** Absolute paths copied beside the prompt file and listed in the pointer line (`--attach`). */
+  attachments?: string[];
   /** `user` when a person typed it; their next finished turn notifies the phone. */
   source?: 'user' | 'agent';
+  /** The sender waits for a `runpane report`: journal `agent.report.missing` if the agent goes ready or exits without one. */
+  expectReport?: boolean;
 }
 
 export type RunpanePanelVerification = 'observed' | 'unverifiable';
@@ -1010,18 +1325,21 @@ export type RunpanePanelVerification = 'observed' | 'unverifiable';
  */
 export interface RunpaneDelivery {
   state: 'taken' | 'queued' | 'in-composer' | 'unknown';
-  evidence: 'transcript' | 'screen' | 'argv';
+  evidence: 'transcript' | 'screen' | 'argv' | 'acp-receipt';
   message?: string;
 }
 
 export interface RunpanePanelSubmitResult {
+  /** Epoch of the pre-dispatch journal position. */
+  epoch?: string;
   ok: boolean;
   generation?: number;
   panelId: string;
   paneId?: string;
   inputBytes: number;
-  enter: 'cr' | 'tab';
-  sequenceName: 'codex-ctrl-enter-cr' | 'enter-cr' | 'tab';
+  enter: 'cr' | 'tab' | 'none';
+  sequenceName: 'codex-ctrl-enter-cr' | 'enter-cr' | 'tab' | 'acp';
+  operationId?: string;
   verifiedSubmitted: boolean;
   verification?: RunpanePanelVerification;
   /** Present for Claude and Codex composers; `verifiedSubmitted` is true when it is `taken` or `queued`. */
@@ -1030,7 +1348,11 @@ export interface RunpanePanelSubmitResult {
   blocked?: RunpanePanelBlockedState;
   /** The prompt file Pane wrote for `asFilePointer`. */
   promptFile?: string;
+  /** Copies of the `attachments` beside the prompt file. */
+  attachments?: string[];
   warnings?: RunpanePromptWarning[];
+  /** The report Pane now waits for (`expectReport`); absent when nothing was sent. */
+  expectedReport?: TerminalExpectedReport;
   nextCommand?: string;
 }
 
@@ -1076,7 +1398,10 @@ export interface RunpanePanelWaitResult {
   elapsedMs: number;
   state: RunpanePanelStateSummary;
   blocked?: RunpanePanelBlockedState;
-  screen: Pick<RunpanePanelScreenResult, 'source' | 'text' | 'hasMore'>;
+  reason?: RunpaneReadinessReason;
+  /** The panel's terminal is not running, so it cannot become ready until `panels resume`. */
+  stopped?: true;
+  screen: { source: RunpanePanelScreenSource | 'acpTranscript'; text: string; hasMore: boolean };
   nextCommand?: string;
 }
 
@@ -1112,4 +1437,61 @@ export interface RunpaneResolvedTool {
   launchMode?: 'wrapped';
   initialInput?: string;
   initialInputAsFilePointer?: boolean;
+  initialInputAttachments?: string[];
+}
+
+/** What a Session inbox item is about. */
+export type RunpaneInboxItemKind = 'report' | 'report.missing' | 'blocked';
+
+/**
+ * Something a Session's orchestrator has not acknowledged yet: a worker's report, a missing report,
+ * or a question waiting on a worker's screen. Reports coalesce per panel, blockers clear when the
+ * panel moves on, and each Session keeps at most 200 items until acknowledged or superseded.
+ */
+export interface RunpaneInboxItem {
+  id: string;
+  sessionId: string;
+  kind: RunpaneInboxItemKind;
+  /** When Pane saw it. */
+  at: string;
+  paneId: string;
+  paneName: string;
+  panelId: string;
+  panelTitle?: string;
+  agentType?: string;
+  /** The report of a `report` item; its summary is cut to 2,000 characters. */
+  report?: TerminalAgentReport;
+  /** A `report.missing` item's agent output, as on the `agent.report.missing` entry. */
+  lastOutput?: string;
+  lastOutputSource?: 'transcript' | 'screen';
+  /** `ready` or `exited` for a `report.missing` item; the detection rule for a `blocked` one. */
+  reason?: string;
+  /** A `blocked` item's prompt lines. */
+  screenLines?: string[];
+}
+
+export interface RunpaneInboxListRequest {
+  /** Session id or exact name. */
+  session: string;
+}
+
+export interface RunpaneInboxListResult {
+  ok: true;
+  session: { id: string; name: string };
+  items: RunpaneInboxItem[];
+}
+
+export interface RunpaneInboxAckRequest {
+  /** Item ids to clear. */
+  ids?: string[];
+  /** Session id or exact name; with `all`, clears every item of that Session. */
+  session?: string;
+  all?: boolean;
+}
+
+export interface RunpaneInboxAckResult {
+  ok: true;
+  acknowledged: string[];
+  /** Ids that matched no item (already acknowledged, or never existed). */
+  unknown: string[];
 }

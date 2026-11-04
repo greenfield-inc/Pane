@@ -83,21 +83,18 @@
       "--from",
       "earliest",
       "--follow",
-      "--format",
-      "lines",
       "--heartbeat",
-      "60",
+      "60s",
       "--idle-after",
       "600000",
-      "--settle",
+      "--ready-settle",
       "180000",
       "--blocked-settle",
       "30000",
       "--min-interval",
       "600000",
-      "--idle-backoff",
-      "--all-managed",
-      "--agents-only",
+      "--expire-after",
+      "10800000",
       "--exclude-pane",
       "pane-old",
       "--kinds",
@@ -512,27 +509,23 @@
     [
       "watch",
       "--follow",
-      "--quiet",
       "--json",
       "--pane-dir",
       "/tmp/pane"
     ],
     [
       "watch",
-      "--follow",
-      "--no-control-lines",
-      "--all-managed"
+      "--follow"
     ],
     [
       "watch",
       "--session",
       "__orchestration_session_1b4e28ba-2fa1-11d2-883f-0016d3cca427__",
       "--follow",
-      "--quiet",
       "--json",
       "--kinds",
       "agent.ready,agent.blocked,pane.associated,pane.detached,pr.conflicted,pr.checks,pr.merged",
-      "--settle",
+      "--ready-settle",
       "180000"
     ],
     [
@@ -666,6 +659,27 @@
       "--summary-file=/tmp/report.md",
       "--pane-dir",
       "/tmp/pane"
+    ],
+    [
+      "panels",
+      "resume",
+      "--all-stopped",
+      "--wait-ready",
+      "--concurrency",
+      "2",
+      "--yes",
+      "--json"
+    ],
+    [
+      "panels",
+      "resume",
+      "--panel",
+      "panel-1",
+      "--wait-ready",
+      "--ready-timeout-ms",
+      "45000",
+      "--yes",
+      "--json"
     ],
     [
       "panels",
@@ -832,6 +846,364 @@
       "--interrupt",
       "--yes",
       "--json"
+    ],
+    [
+      "repos",
+      "get",
+      "--repo",
+      "Pane",
+      "--json"
+    ],
+    [
+      "repos",
+      "update",
+      "--repo",
+      "Pane",
+      "--build-script",
+      "pnpm install",
+      "--run-script",
+      "pnpm dev",
+      "--worktree-folder",
+      "../wt",
+      "--clear",
+      "archive-script,system-prompt",
+      "--yes",
+      "--dry-run",
+      "--json"
+    ],
+    [
+      "watch",
+      "--as",
+      "orch",
+      "--until-event",
+      "--json",
+      "--kinds",
+      "agent.report,agent.blocked,panel.exited,pane.gone",
+      "--timeout-ms",
+      "600000"
+    ],
+    [
+      "pr",
+      "watch",
+      "--pane",
+      "worker",
+      "--url",
+      "https://github.com/acme/app/pull/7"
+    ],
+    [
+      "pr",
+      "unwatch",
+      "--pane",
+      "worker",
+      "--url",
+      "https://github.com/acme/app/pull/7"
+    ],
+    [
+      "pr",
+      "list",
+      "--pane",
+      "worker"
+    ],
+    [
+      "watch",
+      "--follow",
+      "--ready-settle",
+      "5s",
+      "--expire-after",
+      "0"
+    ],
+    [
+      "watch",
+      "--until-event",
+      "--timeout-ms",
+      "30s"
+    ],
+    [
+      "watch",
+      "--timeout-ms",
+      "off"
+    ],
+    [
+      "watch",
+      "--since",
+      "42",
+      "--epoch",
+      "test-epoch",
+      "--until-event",
+      "--json"
+    ],
+    [
+      "watch",
+      "--follow",
+      "--ready-settle",
+      "5s",
+      "--expire-after",
+      "off"
+    ],
+    [
+      "watch",
+      "--follow",
+      "--ready-settle",
+      "5s",
+      "--blocked-settle",
+      "2s",
+      "--min-interval",
+      "1m",
+      "--idle-after",
+      "20m",
+      "--expire-after",
+      "off",
+      "--heartbeat",
+      "30s"
+    ],
+    [
+      "watch",
+      "--follow",
+      "--since",
+      "42",
+      "--epoch",
+      "test-epoch"
+    ],
+    [
+      "panels",
+      "submit",
+      "--panel",
+      "panel-1",
+      "--text",
+      "go",
+      "--expect-report",
+      "--yes",
+      "--json"
+    ],
+    [
+      "panels",
+      "create",
+      "--pane",
+      "pane-1",
+      "--agent",
+      "claude",
+      "--expect-report",
+      "--yes"
+    ],
+    [
+      "panes",
+      "create",
+      "--repo",
+      "active",
+      "--name",
+      "feat",
+      "--agent",
+      "codex",
+      "--expect-report",
+      "--yes"
+    ],
+    [
+      "inbox",
+      "--session",
+      "Release",
+      "--json"
+    ],
+    [
+      "inbox",
+      "ack",
+      "in-1a2b3c4d",
+      "in-5e6f7a8b",
+      "--session",
+      "Release",
+      "--json"
+    ],
+    [
+      "inbox",
+      "ack",
+      "--all",
+      "--session",
+      "Release"
+    ],
+    [
+      "panels",
+      "submit",
+      "--panel",
+      "panel-1",
+      "--text",
+      "fyi",
+      "--no-expect-report",
+      "--yes"
+    ],
+    [
+      "panels",
+      "submit",
+      "--panel",
+      "panel-1",
+      "--input-file",
+      "prompt.md",
+      "--as-file-pointer",
+      "--wait",
+      "--yes"
+    ],
+    [
+      "panels",
+      "submit",
+      "--panel",
+      "panel-1",
+      "--text",
+      "Red",
+      "--wait",
+      "--timeout",
+      "30m",
+      "--yes",
+      "--json"
+    ],
+    [
+      "panes",
+      "create",
+      "--repo",
+      "active",
+      "--name",
+      "feat",
+      "--agent",
+      "claude",
+      "--prompt-file",
+      "task.md",
+      "--wait",
+      "--yes"
+    ],
+    [
+      "lock",
+      "acquire",
+      "--name",
+      "deploy",
+      "--wait",
+      "5000"
+    ],
+    [
+      "loops",
+      "create",
+      "--repo",
+      "active",
+      "--name",
+      "nightly",
+      "--cron",
+      "0 3 * * *",
+      "--agent",
+      "claude",
+      "--prompt",
+      "Sweep bugs",
+      "--worktree-name",
+      "nightly-sweep",
+      "--paused",
+      "--dry-run",
+      "--yes",
+      "--json"
+    ],
+    [
+      "loops",
+      "create",
+      "--repo=2",
+      "--name=deps",
+      "--cron=0 9 * * 1",
+      "--tool-command",
+      "./scripts/nightly-report.sh",
+      "--prompt-file",
+      "-"
+    ],
+    [
+      "loops",
+      "create",
+      "--session",
+      "new",
+      "--name",
+      "triage",
+      "--cron",
+      "0 9 * * 1-5",
+      "--agent",
+      "claude",
+      "--prompt",
+      "Triage",
+      "--yes"
+    ],
+    [
+      "loops",
+      "update",
+      "--loop",
+      "loop-1",
+      "--cron",
+      "0 4 * * *",
+      "--yes"
+    ],
+    [
+      "loops",
+      "update",
+      "--loop",
+      "loop-1",
+      "--session",
+      "Nightly",
+      "--yes"
+    ],
+    [
+      "loops",
+      "run",
+      "--loop=loop-1",
+      "--yes",
+      "--json"
+    ],
+    [
+      "loops",
+      "pause",
+      "--loop",
+      "loop-1",
+      "--pane-dir",
+      "/tmp/pane"
+    ],
+    [
+      "loops",
+      "list",
+      "--json"
+    ],
+    [
+      "loops",
+      "--help"
+    ],
+    [
+      "notify",
+      "--ui",
+      "options",
+      "--title",
+      "Ship it?",
+      "--context",
+      "Tests pass.",
+      "--choices=[{\"label\":\"Yes\",\"recommended\":true},{\"label\":\"No\"}]",
+      "--json"
+    ],
+    [
+      "notify",
+      "--ui=approve",
+      "--title=Drop the table?",
+      "--detail=DROP TABLE t;",
+      "--detail-label=Show the SQL",
+      "--pane-dir",
+      "/tmp/pane"
+    ],
+    [
+      "notify",
+      "--ui",
+      "ask",
+      "--title",
+      "Which branch?",
+      "--suggestions=[\"main\"]"
+    ],
+    [
+      "notify",
+      "--ui",
+      "info",
+      "--title",
+      "Done",
+      "--action={\"label\":\"Open\",\"url\":\"https://example.com\"}"
+    ],
+    [
+      "notify",
+      "--resume",
+      "n-1",
+      "--json"
     ]
   ],
   "help": {
@@ -844,6 +1216,7 @@
       "runpane agent-context",
       "runpane repos list",
       "runpane repos add",
+      "runpane repos rename",
       "runpane panes list",
       "runpane panes create",
       "runpane panes archive",
@@ -863,11 +1236,13 @@
     ],
     "npmIncludes": [
       "pnpm dlx runpane@latest",
-      "npx --yes runpane@latest"
+      "npx --yes runpane@latest",
+      "runpane loops list"
     ],
     "pipIncludes": [
       "pipx run runpane",
-      "python -m pip install runpane && python -m runpane setup"
+      "python -m pip install runpane && python -m runpane setup",
+      "python -m runpane loops list"
     ],
     "installIncludes": [
       "--version <latest|vX.Y.Z>",

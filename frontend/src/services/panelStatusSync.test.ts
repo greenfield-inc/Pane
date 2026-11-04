@@ -3,6 +3,7 @@ import type { PanelAgentStatusEvent } from '../../../shared/types/agentStatus';
 import { usePanelStore } from '../stores/panelStore';
 import { subscribePanelStatus } from './panelStatusSync';
 import { useSessionStore } from '../stores/sessionStore';
+import { useAttentionInboxStore } from '../stores/attentionInboxStore';
 import type { JsonValue } from '../../../shared/validation/boundaryDecoder';
 
 let status: (event: PanelAgentStatusEvent) => void;
@@ -16,6 +17,7 @@ const event = (state: PanelAgentStatusEvent['state']) => ({ panelId: 'p', sessio
 const flush = () => new Promise(resolve => setTimeout(resolve, 0));
 
 beforeEach(() => {
+  useAttentionInboxStore.setState({ marks: {} });
   usePanelStore.setState({ panels: {}, activityStatus: {}, agentStatus: {}, agentStatusSession: {}, unviewedCompletedActivity: {}, agentStatusSnapshotVersion: 0 });
   useSessionStore.setState({ activeSessionId: 'foreground' });
   replies = [];
@@ -115,18 +117,20 @@ describe('panel status synchronization', () => {
     error.mockRestore();
   });
 
-  it.each(['exit', 'destroyed'])('silently clears working state on %s before panel deletion', async reason => {
+  it.each(['exit', 'destroyed', 'pty_host_restart'])('silently clears working state on %s', async reason => {
     replies[0](snapshot('working'));
     await flush();
     const baseline = usePanelStore.getState().agentStatusSnapshotVersion;
-    status({ ...event('idle'), reason });
+    status({ ...event('idle'), reason, workedVisibly: true });
     expect(usePanelStore.getState().getPanelAgentState('p')).toBe('idle');
+    expect(useAttentionInboxStore.getState().marks.s).toBeUndefined();
     expect(usePanelStore.getState().hasUnviewedCompletedActivity('s')).toBe(false);
     expect(usePanelStore.getState().agentStatusSnapshotVersion).toBe(baseline + 1);
     // The next lifetime can still produce a real completion.
     status(event('working'));
-    status(event('idle'));
+    status({ ...event('idle'), workedVisibly: true });
     expect(usePanelStore.getState().hasUnviewedCompletedActivity('s')).toBe(true);
+    expect(useAttentionInboxStore.getState().marks.s).toBe('finished');
   });
 
   it('marks real live completion unseen after hydration', async () => {

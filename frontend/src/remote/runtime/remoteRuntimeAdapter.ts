@@ -1,3 +1,4 @@
+import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
 import type {
   OrchestrationSessionCreateInput,
   OrchestrationSessionListResult,
@@ -65,12 +66,22 @@ export class RemoteRuntimeAdapter {
     return this.client.connect();
   }
 
+  retryNow(): void { this.client.retryNow(); }
+
+  suspend(): void { this.client.suspend(); }
+
+  resume(): void { this.client.resume(); }
+
   disconnect(): void {
     this.client.disconnect();
   }
 
   getStatus(): RemoteBrowserConnectionState {
     return this.client.getState();
+  }
+
+  onRestore(listener: (signal: AbortSignal) => Promise<void>): () => void {
+    return this.client.onRestore(listener);
   }
 
   onStatus(listener: RemoteRuntimeStatusListener): () => void {
@@ -277,5 +288,5 @@ export class RemoteRuntimeAdapter {
 }
 
 function isIpcResponse<T>(value: IpcLikeResponse<T> | T): value is IpcLikeResponse<T> {
-  return Boolean(value && value instanceof Object && ('success' in value || 'data' in value || 'error' in value));
+  return decodeOptionalBoundary(value, boundary.object({ success: boundary.boolean })) !== undefined;
 }

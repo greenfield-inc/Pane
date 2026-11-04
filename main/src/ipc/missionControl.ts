@@ -120,7 +120,7 @@ export function registerMissionControlHandlers(
           // Pane Chat has no project; naming its group after itself beats
           // filing it under "Unknown project".
           projectName: row.project_name
-            ?? (row.session_id === PANE_CHAT_SESSION_ID ? 'Pane Chat' : 'Unknown project'),
+            ?? (row.session_id === PANE_CHAT_SESSION_ID ? row.session_name ?? 'Pane Chat' : 'Unknown project'),
           // Pane Chat's panel is permanent; offering to close it would kill the
           // agent and leave the tile behind.
           isPermanent: Boolean(row.permanent),

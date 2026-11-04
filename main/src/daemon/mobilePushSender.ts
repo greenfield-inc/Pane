@@ -14,6 +14,7 @@ import {
   type RemoteMobilePushStatus,
 } from '../../../shared/types/remoteDaemon';
 import type { ApnsCredentialConfig } from '../../../shared/types/sharedCredentials';
+import type { NotifyItem } from '../../../shared/types/notify';
 
 interface MobilePushConfigManager {
   getConfig(): { remoteDaemon?: RemoteDaemonConfig; apns?: ApnsCredentialConfig };
@@ -27,11 +28,14 @@ export interface MobilePushRegistrationRequest {
   hostProfileId: string;
   needsInputEnabled?: boolean;
   completedEnabled?: boolean;
+  /** The app build draws Notify's answer buttons itself from a data-only Android message. */
+  notifyButtons?: boolean;
 }
 
 interface ProviderResponse { status: number; body: string; }
 export interface MobilePushTransport {
-  apns(request: { token: string; jwt: string; topic: string; collapseId: string; payload: JsonObject }): Promise<ProviderResponse>;
+  /** `background`: a silent update the app handles (a Notify clear), at low priority and with no alert. */
+  apns(request: { token: string; jwt: string; topic: string; collapseId: string; payload: JsonObject; pushType?: 'alert' | 'background'; environment: ApnsEnvironment }): Promise<ProviderResponse>;
   fcm(request: { token: string; accessToken: string; projectId: string; payload: JsonObject }): Promise<ProviderResponse>;
 }
 interface FcmServiceAccountKey { project_id: string; client_email: string; private_key: string; token_uri?: string; }
@@ -41,11 +45,14 @@ type FcmCredentials =
   | { kind: 'key'; projectId: string; key: FcmServiceAccountKey }
   | { kind: 'impersonation'; projectId: string; serviceAccount: string; user: GcloudUserCredentials };
 type ApnsCredentials = ApnsCredentialConfig;
+type ApnsEnvironment = ApnsCredentialConfig['environment'];
 class ProviderDeliveryError extends Error {
   constructor(readonly status: number, readonly body: string, message: string) { super(message); }
 }
 
 const MAX_RECENT_EVENTS = 64;
+/** Phones one owner login keeps registered on a host; registering one more drops the oldest. */
+const MAX_OWNER_REGISTRATIONS = 10;
 /**
  * How long an agent must stay idle after visible work before the phone hears
  * it finished. Measured on Claude Code 2.1.289: the longest idle inside one
@@ -56,6 +63,17 @@ const PROVIDER_TIMEOUT_MS = 15_000;
 const senderByConfigManager = new WeakMap<MobilePushConfigManager, MobilePushSender>();
 
 type AttentionKind = 'needs-input' | 'completed';
+
+/** iPhone notification categories the Pane app registers for Notify's answer buttons. */
+const NOTIFY_CATEGORIES = { approve: 'pane.notify.approve', ask: 'pane.notify.ask', options: 'pane.notify.options' } as const;
+/** Android shows at most three action buttons; an options question with more gets none. */
+const NOTIFY_MAX_CHOICE_BUTTONS = 3;
+
+/** A Notify alert's buttons: the iPhone category, plus the choice labels for an options question. */
+interface NotifyAlertButtons {
+  category?: string;
+  choices?: string[];
+}
 
 /** The name a Pane's alert is titled with, and the Pane whose alerts it stacks under. */
 export interface MobileAlertSubject {
@@ -78,6 +96,8 @@ export class MobilePushSender {
   /** Panels a person sent a prompt to whose turn has not been reported finished yet. */
   private readonly armed = new Set<string>();
   private readonly finishTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** Each Notify question's waits so far, and whether it waits now: Undo makes it wait, and alert, again. */
+  private readonly questionRounds = new Map<string, { round: number; open: boolean }>();
 
   constructor(
     private readonly configManager: MobilePushConfigManager,
@@ -115,13 +135,16 @@ export class MobilePushSender {
     const registrations = config.host.mobilePush.registrations.filter(existing => (
       !matchesInstallation(existing)
     ));
-    registrations.push({
+    const registration: RemoteMobilePushRegistration = {
       id: previous?.id ?? randomUUID(), clientId, platform: request.platform, token: request.token, installationId: request.installationId,
       hostProfileId: request.hostProfileId, needsInputEnabled: request.needsInputEnabled ?? previous?.needsInputEnabled ?? true,
       completedEnabled: request.completedEnabled ?? previous?.completedEnabled ?? true,
       createdAt: previous?.createdAt ?? now, updatedAt: now, recentEventIds: previous?.recentEventIds ?? [],
-    });
-    await this.save(configWithRegistrations(config, registrations));
+    };
+    if (request.notifyButtons) registration.notifyButtons = true;
+    if (previous?.apnsEnvironment) registration.apnsEnvironment = previous.apnsEnvironment;
+    registrations.push(registration);
+    await this.save(configWithRegistrations(config, withinOwnerLimit(registrations, clientId)));
     return this.getStatus(clientId, request.platform, request.installationId);
   }
 
@@ -214,6 +237,102 @@ export class MobilePushSender {
     }, STABLE_IDLE_MS));
   }
 
+  /**
+   * A Notify question started waiting (`open`), or stopped: answered, expired, withdrawn. Each
+   * phone with Needs Input on gets one alert per wait, titled with the Pane and saying only that
+   * it has a question; when it stops, a silent update lets the app remove that alert.
+   */
+  observeQuestion(event: { item: NotifyItem; open: boolean }): Promise<void> {
+    if (event.item.ui === 'info') return Promise.resolve();
+    return this.mutate(() => this.processQuestion(event.item, event.open));
+  }
+
+  private async processQuestion(item: NotifyItem, open: boolean): Promise<void> {
+    const config = this.config();
+    if (!hasLiveRegistration(config)) {
+      if (open) console.log('[Pane mobile push] No phone is registered for alerts on this computer', { kind: 'question' });
+      return;
+    }
+    const previous = this.questionRounds.get(item.id) ?? { round: 0, open: false };
+    if (previous.open === open) return;
+    const round = previous.round + (open ? 1 : 0);
+    this.questionRounds.set(item.id, { round, open });
+    const eventId = `notify:${item.id}:${open ? `ask:${round}` : 'clear'}`;
+    for (const registration of config.host.mobilePush.registrations) {
+      if (!isLive(config, registration) || !registration.needsInputEnabled) continue;
+      if (registration.recentEventIds.includes(eventId)) continue;
+      // An Android build that can't draw buttons can't remove its alert either; the system one stays.
+      if (!open && registration.platform === 'android' && !registration.notifyButtons) continue;
+      try {
+        await this.deliverQuestion(registration, eventId, item, open);
+        if (open) await this.markDelivered(registration.id, eventId);
+        console.log('[Pane mobile push] Delivered', { platform: registration.platform, kind: open ? 'question' : 'question-clear' });
+      } catch (error) {
+        if (error instanceof ProviderDeliveryError && isInvalidTokenResponse(error)) await this.revokeRegistration(registration.id);
+        const status = error instanceof ProviderDeliveryError ? error.status : undefined;
+        const reason = error instanceof ProviderDeliveryError ? providerReason(error.body) : undefined;
+        console.warn('[Pane mobile push] Delivery failed', { platform: registration.platform, kind: open ? 'question' : 'question-clear', status, reason });
+      }
+    }
+  }
+
+  private async deliverQuestion(registration: RemoteMobilePushRegistration, eventId: string, item: NotifyItem, open: boolean): Promise<void> {
+    const title = item.source.name.trim() || 'Pane';
+    const body = `${title} has a question`;
+    const collapseId = createHash('sha256').update(`notify:${item.id}`).digest('hex');
+    const routing: JsonObject = { eventId, hostProfileId: registration.hostProfileId, notifyId: item.id };
+    const threadId = item.source.paneId ? this.options.resolveSubject?.(item.source.paneId).groupPaneId ?? item.source.paneId : item.id;
+    if (item.source.paneId) {
+      routing.paneId = item.source.paneId;
+      routing.sessionPaneId = threadId;
+    }
+    if (item.source.panelId) routing.panelId = item.source.panelId;
+    const buttons = notifyButtons(item);
+    if (registration.platform === 'ios') {
+      const credentials = readApnsCredentials(this.configManager.getConfig().apns);
+      if (!credentials) throw new ProviderDeliveryError(503, '', 'APNs is not configured');
+      const payload: JsonObject = { ...routing };
+      if (open) {
+        const aps: JsonObject = { alert: { title, body }, sound: 'default', 'thread-id': threadId };
+        payload.notifyUi = item.ui;
+        if (buttons.category) aps.category = buttons.category;
+        if (buttons.choices) {
+          payload.notifyChoices = buttons.choices;
+          // The app's notification service extension registers this question's choice buttons.
+          aps['mutable-content'] = 1;
+        }
+        payload.aps = aps;
+      } else {
+        payload.notifyClear = true;
+        payload.aps = { 'content-available': 1 };
+      }
+      await this.sendApns(registration, credentials, { collapseId, payload, pushType: open ? 'alert' : 'background' });
+      return;
+    }
+    const credentials = readFcmCredentials();
+    if (!credentials) throw new ProviderDeliveryError(503, '', 'FCM is not configured');
+    // A build that draws buttons builds the alert itself, so it gets data only; older builds get the system alert.
+    let message: JsonObject;
+    if (!registration.notifyButtons) {
+      message = { token: registration.token, notification: { title, body }, android: { notification: { tag: collapseId } }, data: routing };
+    } else {
+      const data: JsonObject = { ...routing, notifyTag: collapseId };
+      if (open) {
+        data.notifyUi = item.ui;
+        data.notifyTitle = title;
+        data.notifyBody = body;
+        if (buttons.choices) data.notifyChoices = JSON.stringify(buttons.choices);
+      } else {
+        data.notifyClear = '1';
+      }
+      message = { token: registration.token, android: { priority: 'high' }, data };
+    }
+    const response = await this.transport.fcm({
+      token: registration.token, accessToken: await createFcmAccessToken(credentials), projectId: credentials.projectId, payload: { message },
+    });
+    if (!isSuccess(response.status)) throw new ProviderDeliveryError(response.status, response.body, 'FCM rejected notification');
+  }
+
   private async processStatus(event: PanelAgentStatusEvent): Promise<void> {
     const config = this.config();
     if (!hasLiveRegistration(config)) return;
@@ -234,8 +353,7 @@ export class MobilePushSender {
     const updatedConfig = withPanelState(config, event, sequence);
     await this.save(updatedConfig);
     for (const registration of updatedConfig.host.mobilePush.registrations) {
-      if (registration.revokedAt || !isEnabled(registration, kind)) continue;
-      if (!this.config().host.clients.some(client => client.id === registration.clientId)) continue;
+      if (!isLive(this.config(), registration) || !isEnabled(registration, kind)) continue;
       if (registration.recentEventIds.includes(eventId)) continue;
       try {
         await this.deliver(registration, eventId, event, kind);
@@ -262,8 +380,7 @@ export class MobilePushSender {
     if (registration.platform === 'ios') {
       const credentials = readApnsCredentials(this.configManager.getConfig().apns);
       if (!credentials) throw new ProviderDeliveryError(503, '', 'APNs is not configured');
-      const response = await this.transport.apns({ token: registration.token, jwt: createApnsJwt(credentials), topic: credentials.topic, collapseId, payload });
-      if (!isSuccess(response.status)) throw new ProviderDeliveryError(response.status, response.body, 'APNs rejected notification');
+      await this.sendApns(registration, credentials, { collapseId, payload });
       return;
     }
     const credentials = readFcmCredentials();
@@ -277,6 +394,38 @@ export class MobilePushSender {
       } },
     });
     if (!isSuccess(response.status)) throw new ProviderDeliveryError(response.status, response.body, 'FCM rejected notification');
+  }
+
+  /**
+   * The phone's build picks its APNs endpoint (a dev client sandbox, TestFlight and the App Store
+   * production), not the key. Start where this phone last worked, else at the key's environment;
+   * on BadDeviceToken try the other endpoint once, and remember it when it accepts.
+   */
+  private async sendApns(
+    registration: RemoteMobilePushRegistration,
+    credentials: ApnsCredentials,
+    request: { collapseId: string; payload: JsonObject; pushType?: 'alert' | 'background' },
+  ): Promise<void> {
+    const first = registration.apnsEnvironment ?? credentials.environment;
+    const send = (environment: ApnsEnvironment) => this.transport.apns({
+      ...request, token: registration.token, jwt: createApnsJwt(credentials), topic: credentials.topic, environment,
+    });
+    let response = await send(first);
+    if (response.status === 400 && /BadDeviceToken/.test(response.body)) {
+      const other: ApnsEnvironment = first === 'production' ? 'sandbox' : 'production';
+      const retried = await send(other);
+      if (isSuccess(retried.status)) await this.rememberApnsEnvironment(registration.id, other);
+      // A second refusal is the one that decides whether the token is revoked.
+      response = retried;
+    }
+    if (!isSuccess(response.status)) throw new ProviderDeliveryError(response.status, response.body, 'APNs rejected notification');
+  }
+
+  private async rememberApnsEnvironment(id: string, apnsEnvironment: ApnsEnvironment): Promise<void> {
+    const config = this.config();
+    await this.save(configWithRegistrations(config, config.host.mobilePush.registrations.map(item => (
+      item.id === id ? { ...item, apnsEnvironment } : item
+    ))));
   }
 
   private async markDelivered(id: string, eventId: string): Promise<void> {
@@ -308,7 +457,7 @@ export class MobilePushSender {
       const latest = normalizeRemoteDaemonConfig(current.remoteDaemon ?? createDefaultRemoteDaemonConfig());
       const mobilePush = {
         ...config.host.mobilePush,
-        registrations: config.host.mobilePush.registrations.filter(item => latest.host.clients.some(client => client.id === item.clientId)),
+        registrations: config.host.mobilePush.registrations.filter(item => isOwnerRegistration(item) || latest.host.clients.some(client => client.id === item.clientId)),
       };
       return { remoteDaemon: { ...latest, host: { ...latest.host, mobilePush } } };
     });
@@ -338,8 +487,40 @@ function providerReadiness(platform: RemoteMobilePlatform, apns: ApnsCredentialC
     : { provider: 'missing-config', code: 'ERR_FCM_NOT_CONFIGURED', message: 'This host has no valid FCM sender configuration.' };
 }
 
+/**
+ * The buttons an alert offers, chosen so each makes sense without the question shown: Approve and
+ * Deny, Reply, or up to three choices by label, recommended first. Anything else opens the sheet.
+ */
+function notifyButtons(item: NotifyItem): NotifyAlertButtons {
+  if (item.ui === 'approve') return { category: NOTIFY_CATEGORIES.approve };
+  if (item.ui === 'ask') return { category: NOTIFY_CATEGORIES.ask };
+  // An agent's prompt offers the phone list's Yes and No; the rest of its choices need the card.
+  if (item.agentPrompt) return { category: NOTIFY_CATEGORIES.options, choices: [item.agentPrompt.yes, item.agentPrompt.no] };
+  const choices = item.choices ?? [];
+  if (item.ui !== 'options' || choices.length === 0 || choices.length > NOTIFY_MAX_CHOICE_BUTTONS) return {};
+  const ordered = [...choices.filter(choice => choice.recommended), ...choices.filter(choice => !choice.recommended)];
+  return { category: NOTIFY_CATEGORIES.options, choices: ordered.map(choice => choice.label) };
+}
+
+/**
+ * A paired phone's registration lives as long as its client does. One from the owner's Tailscale
+ * login was checked when it registered and stays until it is revoked or its token goes dead.
+ */
+function isLive(config: RemoteDaemonConfig, registration: RemoteMobilePushRegistration): boolean {
+  return !registration.revokedAt && (isOwnerRegistration(registration) || config.host.clients.some(client => client.id === registration.clientId));
+}
+function isOwnerRegistration(registration: RemoteMobilePushRegistration): boolean {
+  return registration.clientId.startsWith('tailnet:');
+}
 function hasLiveRegistration(config: RemoteDaemonConfig): boolean {
-  return config.host.mobilePush.registrations.some(item => !item.revokedAt && config.host.clients.some(client => client.id === item.clientId));
+  return config.host.mobilePush.registrations.some(item => isLive(config, item));
+}
+/** Drops the oldest live registrations past the owner limit, so one login cannot grow config without bound. */
+function withinOwnerLimit(registrations: RemoteMobilePushRegistration[], clientId: string): RemoteMobilePushRegistration[] {
+  if (!clientId.startsWith('tailnet:')) return registrations;
+  const live = registrations.filter(item => item.clientId === clientId && !item.revokedAt);
+  const dropped = new Set(live.slice(0, Math.max(0, live.length - MAX_OWNER_REGISTRATIONS)).map(item => item.id));
+  return registrations.filter(item => !dropped.has(item.id));
 }
 function withPanelState(config: RemoteDaemonConfig, event: PanelAgentStatusEvent, attentionSequence = config.host.mobilePush.attentionSequence): RemoteDaemonConfig {
   const mobilePush = { ...config.host.mobilePush, attentionSequence, panelStates: { ...config.host.mobilePush.panelStates, [event.panelId]: event.state } };
@@ -431,8 +612,8 @@ async function postOAuthToken(tokenUri: string, form: Record<string, string>): P
 }
 function createProviderTransport(): MobilePushTransport {
   return {
-    apns: ({ token, jwt, topic, collapseId, payload }) => new Promise((resolve, reject) => {
-      const host = process.env.PANE_APNS_ENVIRONMENT === 'production' ? 'https://api.push.apple.com' : 'https://api.sandbox.push.apple.com';
+    apns: ({ token, jwt, topic, collapseId, payload, pushType = 'alert', environment }) => new Promise((resolve, reject) => {
+      const host = environment === 'production' ? 'https://api.push.apple.com' : 'https://api.sandbox.push.apple.com';
       const client = connectHttp2(host);
       let settled = false;
       const finish = (response: ProviderResponse | Error) => {
@@ -446,7 +627,11 @@ function createProviderTransport(): MobilePushTransport {
       const timeout = setTimeout(() => finish(new Error('APNs delivery timed out')), PROVIDER_TIMEOUT_MS);
       client.on('error', finish);
       client.on('close', () => finish(new Error('APNs connection closed before delivery completed')));
-      const request = client.request({ ':method': 'POST', ':path': `/3/device/${encodeURIComponent(token)}`, authorization: `bearer ${jwt}`, 'apns-topic': topic, 'apns-push-type': 'alert', 'apns-collapse-id': collapseId });
+      // APNs requires priority 5 for a background update.
+      const request = client.request({
+        ':method': 'POST', ':path': `/3/device/${encodeURIComponent(token)}`, authorization: `bearer ${jwt}`, 'apns-topic': topic,
+        'apns-push-type': pushType, ...(pushType === 'background' ? { 'apns-priority': '5' } : { 'apns-collapse-id': collapseId }),
+      });
       let body = '';
       request.setEncoding('utf8');
       request.on('response', headers => {

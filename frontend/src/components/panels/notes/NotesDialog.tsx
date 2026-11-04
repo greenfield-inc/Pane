@@ -1,12 +1,13 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { cn } from '../../../utils/cn';
 import './notesDialog.css';
 
 const focusable = 'button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), a[href], [tabindex]:not([tabindex="-1"])';
 
 /** Excalidraw portals its own dialogs to body, outside a native modal's top layer. */
-export default function NotesDialog({ label, children, onDismiss }: {
-  label: string; children: ReactNode; onDismiss?: () => void;
+export default function NotesDialog({ label, children, onDismiss, className }: {
+  label: string; children: ReactNode; onDismiss?: () => void; className?: string;
 }) {
   const overlay = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
@@ -21,9 +22,9 @@ export default function NotesDialog({ label, children, onDismiss }: {
       if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
     };
   }, []);
-  return createPortal(<div ref={overlay} className="pane-notes-dialog fixed inset-0 z-modal bg-modal-overlay p-4">
+  return createPortal(<div ref={overlay} className="pane-notes-dialog fixed inset-0 z-modal flex items-center justify-center bg-modal-overlay p-4 backdrop-blur-sm">
     <div ref={content} role="dialog" aria-modal="true" aria-label={label} tabIndex={-1}
-      className="flex h-full flex-col rounded-lg border border-border-primary bg-bg-primary text-text-primary shadow-xl outline-none"
+      className={cn('flex h-full w-full flex-col overflow-hidden rounded-modal border border-border-primary bg-bg-primary text-text-primary shadow-modal outline-none', className)}
       onKeyDown={event => {
         // Nested Excalidraw portals manage their own focus and Escape.
         if (!(event.target instanceof Node) || !content.current?.contains(event.target)) return;

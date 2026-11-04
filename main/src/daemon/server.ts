@@ -15,8 +15,10 @@ import { serializeJsonTransport } from './jsonTransport';
 import { toPaneDaemonError } from '../../../shared/paneError';
 
 const DAEMON_EVENT_PREFIXES = [
+  'agent-chat:',
   'archive:',
   'folder:',
+  'loops:',
   'panel:',
   'ports:',
   'project:',
@@ -31,6 +33,8 @@ const DAEMON_EVENT_EXACT_CHANNELS = new Set<string>([
   'git-status-loading',
   'git-status-updated',
   'logs:output',
+  'notes:changed',
+  'notify:shared-changed',
   'pane:focus-requested',
   'pane:open-link',
   'permission:request',
@@ -39,6 +43,7 @@ const DAEMON_EVENT_EXACT_CHANNELS = new Set<string>([
   'project-script-changed',
   'project-script-closing',
   'remote:settings-changed',
+  'remote:update-intent',
   'session-log',
   'session-logs-cleared',
   'script-closing',

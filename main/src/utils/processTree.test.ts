@@ -1,25 +1,56 @@
 import { type ChildProcess, spawn } from 'child_process';
-import { mkdtempSync, promises as fs, realpathSync, rmSync } from 'fs';
+import { mkdtempSync, promises as fs, realpathSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { isProcessAlive, listDescendantPids, terminateProcessTrees, waitForProcessesToExit } from './processTree';
 
 const spawned: ChildProcess[] = [];
+const reportedChildren = new Set<number>();
 const directories: string[] = [];
 
-/** A node process that idles forever, plus `children` identical grandchildren. */
-function idleProcess(cwd: string, children = 0): ChildProcess {
+/**
+ * A node process that idles forever, plus `children` identical grandchildren.
+ * It prints the grandchildren's pids once they exist, so tests check for those
+ * pids rather than counting the tree: under a loaded Windows runner the table
+ * has shown one to five extra short-lived descendants, so a count flakes.
+ */
+function idleProcess(cwd: string, children = 0, detachedChildren = false): ChildProcess & { childPids: Promise<number[]> } {
   const script = `
     const { spawn } = require('child_process');
+    const pids = [];
     for (let i = 0; i < ${children}; i++) {
-      spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { cwd: process.cwd(), stdio: 'ignore' });
+      pids.push(spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { cwd: process.cwd(), stdio: 'ignore', detached: ${detachedChildren} }).pid);
     }
+    process.stdout.write(JSON.stringify(pids) + '\\n');
     setInterval(() => {}, 1000);
   `;
-  const child = spawn(process.execPath, ['-e', script], { cwd, stdio: 'ignore' });
+  const child = spawn(process.execPath, ['-e', script], { cwd, stdio: ['ignore', 'pipe', 'ignore'] });
   spawned.push(child);
-  return child;
+  const childPids = new Promise<number[]>((resolve, reject) => {
+    let output = '';
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk: string) => {
+      output += chunk;
+      if (!output.includes('\n')) return;
+      const line = output.split('\n')[0];
+      try {
+        const pids: unknown = JSON.parse(line);
+        if (!Array.isArray(pids) || pids.length !== children || !pids.every(pid => Number.isInteger(pid) && pid > 0 && pid !== process.pid && pid !== child.pid)) {
+          throw new Error(`idle process reported ${line}, not its children's pids`);
+        }
+        for (const pid of pids) reportedChildren.add(pid);
+        resolve(pids);
+      } catch (error) {
+        reject(error);
+      }
+    });
+    child.once('error', reject);
+    child.once('exit', code => reject(new Error(`idle process exited (${code}) before reporting its children`)));
+  });
+  // A test that never reads the pids must not fail on the rejection when teardown kills the process.
+  childPids.catch(() => undefined);
+  return Object.assign(child, { childPids });
 }
 
 function temporaryDirectory(): string {
@@ -29,25 +60,33 @@ function temporaryDirectory(): string {
 }
 
 /**
- * The grandchildren are spawned after the parent is up, so poll for them
- * rather than sleeping a fixed amount: reading the process table costs a
+ * Lists `pid`'s descendants until every one of `expected` is among them. Poll
+ * rather than sleep a fixed amount: reading the process table costs a
  * PowerShell process on Windows, which is slow enough under a loaded test run
  * to make any guessed delay flaky.
  */
-async function waitForDescendants(pid: number, count: number): Promise<number[]> {
+async function waitForDescendants(pid: number, expected: readonly number[]): Promise<number[]> {
   const deadline = Date.now() + 20_000;
   for (;;) {
     const descendants = await listDescendantPids([pid]);
-    if (descendants.length >= count || Date.now() >= deadline) return descendants;
+    if (expected.every(child => descendants.includes(child)) || Date.now() >= deadline) return descendants;
     await new Promise(resolve => setTimeout(resolve, 100));
   }
 }
 
 afterEach(async () => {
   // One call, so teardown costs one process-table read rather than one each.
-  const pids = spawned.splice(0).flatMap(child => child.pid ? [child.pid] : []);
-  if (pids.length > 0) await terminateProcessTrees(pids, { timeoutMs: 15_000 });
-  for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
+  const roots = spawned.flatMap(child => child.pid && child.exitCode === null && child.signalCode === null ? [child.pid] : []);
+  // Keep reported children even after their parent exits and a tree walk loses them.
+  const pids = [...new Set([...roots, ...reportedChildren])].filter(isProcessAlive);
+  if (pids.length > 0) expect(await terminateProcessTrees(pids, { timeoutMs: 15_000 })).toEqual([]);
+  expect(pids.filter(isProcessAlive)).toEqual([]);
+  spawned.length = 0;
+  reportedChildren.clear();
+  for (const directory of directories.splice(0)) {
+    // Windows can release a dead process's cwd handle after it leaves the table.
+    await fs.rm(directory, { recursive: true, force: true, maxRetries: process.platform === 'win32' ? 5 : 0, retryDelay: 100 });
+  }
 });
 
 describe('isProcessAlive', () => {
@@ -79,12 +118,14 @@ describe('listDescendantPids', () => {
   it('finds the children a process launched, without the roots themselves', async () => {
     const child = idleProcess(temporaryDirectory(), 2);
     if (!child.pid) throw new Error('spawn reported no pid');
+    const grandchildren = await child.childPids;
+    expect(grandchildren).toHaveLength(2);
 
-    const descendants = await waitForDescendants(child.pid, 2);
+    const descendants = await waitForDescendants(child.pid, grandchildren);
 
-    expect(descendants).toHaveLength(2);
+    expect(descendants).toEqual(expect.arrayContaining(grandchildren));
     expect(descendants).not.toContain(child.pid);
-    for (const pid of descendants) expect(isProcessAlive(pid)).toBe(true);
+    for (const pid of grandchildren) expect(isProcessAlive(pid)).toBe(true);
   }, 30_000);
 
   it('has nothing to report for a pid that cannot exist', async () => {
@@ -94,14 +135,26 @@ describe('listDescendantPids', () => {
 });
 
 describe('terminateProcessTrees', () => {
+  it('retains a reported child for teardown after its parent exits', async () => {
+    // Escape the helper's Windows kill-on-close job so its child really survives.
+    const child = idleProcess(temporaryDirectory(), 1, true);
+    if (!child.pid) throw new Error('spawn reported no pid');
+    const [grandchild] = await child.childPids;
+
+    child.kill();
+    expect(await waitForProcessesToExit([child.pid], 5000)).toEqual([]);
+    expect(isProcessAlive(grandchild)).toBe(true);
+  });
+
   it('kills a process and its children, which frees the directory they were sitting in', async () => {
     const parent = temporaryDirectory();
     const held = join(parent, 'held');
     await fs.mkdir(held);
     const child = idleProcess(held, 2);
     if (!child.pid) throw new Error('spawn reported no pid');
-    const tree = [child.pid, ...await waitForDescendants(child.pid, 2)];
-    expect(tree).toHaveLength(3);
+    const grandchildren = await child.childPids;
+    expect(await waitForDescendants(child.pid, grandchildren)).toEqual(expect.arrayContaining(grandchildren));
+    const tree = [child.pid, ...grandchildren];
 
     // Windows refuses to move a directory that is a live process's cwd; this
     // is the lock that used to make archiving a Pane fail.
@@ -118,8 +171,8 @@ describe('terminateProcessTrees', () => {
   it('kills a child its parent left behind', async () => {
     const child = idleProcess(temporaryDirectory(), 1);
     if (!child.pid) throw new Error('spawn reported no pid');
-    const [grandchild] = await waitForDescendants(child.pid, 1);
-    expect(grandchild).toBeTypeOf('number');
+    const [grandchild] = await child.childPids;
+    expect(await waitForDescendants(child.pid, [grandchild])).toContain(grandchild);
 
     expect(await terminateProcessTrees([child.pid], { timeoutMs: 15_000 })).toEqual([]);
 

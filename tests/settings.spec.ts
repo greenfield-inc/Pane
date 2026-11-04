@@ -4,6 +4,8 @@ import { installElectronApiMock } from './electronApiMock';
 
 type SettingsMock = {
   getConfig: () => JsonObject;
+  getInvokeCalls: (channel: string) => Array<{ args: unknown[] }>;
+  getProjectUpdates: () => Array<{ projectId: string; updates: JsonObject }>;
   getConfigUpdates: () => JsonObject[];
   getListenerCount: (channel: string) => number;
   getPreferenceWrites: () => Array<{ key: string; value: string }>;
@@ -35,21 +37,25 @@ test.describe('Settings', () => {
     await page.getByRole('button', { name: 'Appearance', exact: true }).click();
     const mode = page.getByRole('radiogroup', { name: 'Appearance mode' });
     await expect(mode.getByRole('radio', { name: 'System' })).toHaveAttribute('aria-checked', 'true');
-    await expect(page.getByRole('combobox', { name: 'Light palette' })).toHaveText('Light (rounded)');
-    await expect(page.getByRole('combobox', { name: 'Dark palette' })).toHaveText('Dark (sharp)');
+    await expect(page.getByRole('combobox', { name: 'Light palette' })).toHaveText('Folio');
+    await expect(page.getByRole('combobox', { name: 'Dark palette' })).toHaveText('Dusk (OLED)');
     await expect(page.getByText('Active now')).toBeVisible();
 
+    // Both System pickers list every theme, whatever its own base.
     await page.getByRole('combobox', { name: 'Light palette' }).click();
-    await expect(page.getByRole('option', { name: /^Forge/ })).toHaveCount(0);
+    await expect(page.getByRole('option')).toHaveCount(27);
+    await page.getByRole('option', { name: /^Abyss/ }).click();
+    await expect(page.locator('html')).toHaveClass(/\bdark\b.*\babyss\b/);
+    await page.getByRole('combobox', { name: 'Light palette' }).click();
     await page.getByRole('option', { name: /^Folio/ }).click();
     await expect(page.locator('html')).toHaveClass(/folio/);
     await page.getByRole('combobox', { name: 'Dark palette' }).click();
-    await expect(page.getByRole('option', { name: /^Folio/ })).toHaveCount(0);
+    await expect(page.getByRole('option')).toHaveCount(27);
     await page.getByRole('option', { name: /^Forge/ }).click();
     await expect(page.locator('html')).toHaveClass(/folio/);
 
     await mode.getByRole('radio', { name: 'Fixed' }).click();
-    await expect(page.getByRole('combobox', { name: 'Theme' })).toHaveText('Light (rounded)');
+    await expect(page.getByRole('combobox', { name: 'Theme' })).toHaveText('Folio');
     await page.getByRole('combobox', { name: 'Theme' }).click();
     await page.getByRole('option', { name: /^Night Owl(?! \(OLED\))/ }).click();
     await expect(page.locator('html')).toHaveClass(/night-owl/);
@@ -168,7 +174,10 @@ test.describe('Settings', () => {
 
     await page.getByRole('button', { name: 'AI & Agents', exact: true }).click();
     const agentChoices = page.getByRole('radiogroup', { name: 'Default Pane Chat agent' });
-    await expect(agentChoices.getByRole('radio')).toHaveCount(2);
+    await expect(agentChoices.getByRole('radio')).toHaveCount(3);
+    await expect(agentChoices.getByRole('radio', { name: 'Claude', exact: true })).toBeVisible();
+    await expect(agentChoices.getByRole('radio', { name: 'Codex', exact: true })).toBeVisible();
+    await expect(agentChoices.getByRole('radio', { name: 'OpenCode', exact: true })).toBeVisible();
     await expect(agentChoices.getByRole('radio', { name: 'Cursor' })).toHaveCount(0);
   });
 
@@ -185,6 +194,7 @@ test.describe('Settings', () => {
       'Integrations',
       'Shortcuts',
       'Privacy',
+      'Import & Export',
       'Advanced',
     ];
     const navigation = page.getByRole('navigation', { name: 'Settings categories' });
@@ -253,14 +263,14 @@ test.describe('Settings', () => {
     expect(updates).toContainEqual({ keyboardShortcutsEnabled: false });
   });
 
-  test('configures the Command Palette exception and opens the shortcut reference', async ({ page }) => {
+  test('configures the Search shortcut exception and opens the shortcut reference', async ({ page }) => {
     await bootSettings(page, {
       initialConfig: { keyboardShortcutsEnabled: false, commandPaletteShortcutEnabled: true },
     });
     await page.getByRole('button', { name: 'Shortcuts', exact: true }).click();
 
-    await expect(page.getByText("When disabled, Pane shortcuts won't work, but native terminal and embedded app shortcuts will. The Command Palette shortcut can remain enabled below.")).toBeVisible();
-    const paletteToggle = page.getByRole('switch', { name: 'Keep Command Palette shortcut enabled' });
+    await expect(page.getByText("When disabled, Pane shortcuts won't work, but native terminal and embedded app shortcuts will. The Search shortcut can remain enabled below.")).toBeVisible();
+    const paletteToggle = page.getByRole('switch', { name: 'Keep Search shortcut enabled' });
     await expect(paletteToggle).toHaveAttribute('aria-checked', 'true');
     await paletteToggle.click();
 
@@ -272,7 +282,7 @@ test.describe('Settings', () => {
 
     await page.getByRole('button', { name: 'View all Pane keyboard shortcuts' }).click();
     await expect(page.getByRole('dialog', { name: 'Keyboard Shortcuts' })).toBeVisible();
-    await expect(page.getByText('Open Command Palette')).toBeVisible();
+    await expect(page.getByText('Open Search')).toBeVisible();
   });
 
   test('guards the shortcut reference when snippet edits are dirty', async ({ page }) => {
@@ -311,18 +321,97 @@ test.describe('Settings', () => {
     expect(writes.preferences).toContainEqual({ key: 'sidebar_pane_row_layout', value: 'two-row' });
   });
 
-  test('persists the keep-awake toggle to config', async ({ page }) => {
+  test('persists the keep-awake toggle and its power options to config', async ({ page }) => {
     await bootSettings(page, { initialConfig: { keepAwakeWhileSessionsActive: true } });
 
-    await page.getByRole('switch', { name: 'Keep computer awake while sessions are active' }).click();
-    await expect(page.getByText('Saved', { exact: true })).toBeVisible();
+    const master = page.getByRole('switch', { name: 'Keep awake while sessions are active' });
+    const pluggedIn = page.getByRole('checkbox', { name: /While plugged in/ });
+    const onBattery = page.getByRole('checkbox', { name: /While on battery/ });
+    await expect(master).toHaveAttribute('aria-checked', 'true');
+    await expect(pluggedIn).toBeChecked();
+    await expect(onBattery).not.toBeChecked();
+
+    await onBattery.check();
+    await pluggedIn.uncheck();
+    await master.click();
+    await expect(pluggedIn).toBeDisabled();
+    await expect(onBattery).toBeDisabled();
+    await expect(pluggedIn).not.toBeChecked();
+    await expect(onBattery).toBeChecked();
 
     // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
-    const updates = await page.evaluate(() => (
+    await expect.poll(() => page.evaluate(() => (
       window as typeof window & { __paneTestElectronMock: SettingsMock }
-    ).__paneTestElectronMock.getConfigUpdates());
-    expect(updates).toContainEqual({ keepAwakeWhileSessionsActive: false });
+    ).__paneTestElectronMock.getConfigUpdates())).toEqual([
+      { keepAwakeOnBattery: true },
+      { keepAwakeWhilePluggedIn: false },
+      { keepAwakeWhileSessionsActive: false },
+    ]);
   });
+
+  test('a failed keep-awake option save shows the error and the saved value', async ({ page }) => {
+    await bootSettings(page);
+    await page.evaluate(() => {
+      // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
+      (window as typeof window & { __paneTestElectronMock: SettingsMock }).__paneTestElectronMock.failNextConfigUpdate('Disk is read-only');
+    });
+
+    const onBattery = page.getByRole('checkbox', { name: /While on battery/ });
+    await onBattery.click();
+
+    await expect(page.getByRole('alert')).toContainText('Disk is read-only');
+    await expect(onBattery).not.toBeChecked();
+    await expect(onBattery).toBeEnabled();
+  });
+
+  test('keep-awake options start open and the chevron hides them', async ({ page }) => {
+    await bootSettings(page);
+
+    const chevron = page.getByRole('button', { name: 'Keep-awake options' });
+    await expect(chevron).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.getByRole('checkbox', { name: /While plugged in/ })).toBeVisible();
+
+    await chevron.click();
+    await expect(chevron).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.getByRole('checkbox', { name: /While plugged in/ })).toBeHidden();
+    await expect(page.getByRole('checkbox', { name: /While on battery/ })).toBeHidden();
+
+    await chevron.click();
+    await expect(page.getByRole('checkbox', { name: /While on battery/ })).toBeVisible();
+  });
+
+  for (const { platform, battery, lid, otherLids } of [
+    {
+      platform: 'Win32',
+      battery: 'Keeps the screen on and stops auto-lock. Uses more battery.',
+      lid: 'Closing the lid still puts your PC to sleep.',
+      otherLids: ['Closing the lid still puts your Mac to sleep', 'Closing the lid still suspends most systems.'],
+    },
+    {
+      platform: 'MacIntel',
+      battery: 'Keeps the screen on. Uses more battery.',
+      lid: 'Closing the lid still puts your Mac to sleep',
+      otherLids: ['Closing the lid still puts your PC to sleep.', 'Closing the lid still suspends most systems.'],
+    },
+    {
+      platform: 'Linux x86_64',
+      battery: 'Keeps the screen on. Uses more battery.',
+      lid: 'Closing the lid still suspends most systems.',
+      otherLids: ['Closing the lid still puts your PC to sleep.', 'Closing the lid still puts your Mac to sleep'],
+    },
+  ]) {
+    test(`keep-awake shows only the ${platform} battery line and lid hint`, async ({ page }) => {
+      await page.addInitScript((value) => {
+        Object.defineProperty(Navigator.prototype, 'platform', { get: () => value, configurable: true });
+      }, platform);
+      await bootSettings(page);
+
+      const options = page.locator('[data-setting-id="keep-awake"]');
+      await expect(options.getByText(battery, { exact: true })).toBeVisible();
+      await expect(options.getByText(lid)).toBeVisible();
+      for (const other of otherLids) await expect(options.getByText(other)).toHaveCount(0);
+    });
+  }
 
   test('announces a failed save and restores the authoritative value', async ({ page }) => {
     await bootSettings(page, { initialConfig: { autoCheckUpdates: true } });
@@ -344,7 +433,7 @@ test.describe('Settings', () => {
     expect(config.autoCheckUpdates).toBe(true);
   });
 
-  test('recovers from config-load failure and preference-write failure', async ({ page }) => {
+  test('recovers from config-load failure and preference-write failure', async ({ page }, testInfo) => {
     await bootSettings(page, { configGetFailures: 100 });
     await expect(page.getByRole('alert')).toContainText('Mock config read failed');
     await page.evaluate(() => {
@@ -364,6 +453,7 @@ test.describe('Settings', () => {
     await page.getByRole('radio', { name: 'Two rows' }).click();
     await expect(page.getByRole('alert')).toContainText('Preference database is read-only');
     await expect(page.getByRole('radio', { name: 'Single row' })).toHaveAttribute('aria-checked', 'true');
+    await page.screenshot({ path: testInfo.outputPath('preference-write-rejected.png') });
   });
 
   test('applies a staged worktree editor without closing settings', async ({ page }) => {
@@ -393,7 +483,9 @@ test.describe('Settings', () => {
 
     const confirm = page.getByRole('dialog', { name: 'Discard unsaved changes?' });
     await expect(confirm).toBeVisible();
-    await confirm.getByRole('button', { name: 'Stay' }).click();
+    await expect(confirm.getByRole('button', { name: 'Discard Changes' })).toBeFocused();
+    await confirm.getByRole('button', { name: 'Stay' }).focus();
+    await page.keyboard.press('Enter');
     await expect(page.getByRole('heading', { name: 'Worktrees & Git' })).toBeVisible();
 
     await page.getByRole('button', { name: 'Back', exact: true }).click();
@@ -402,7 +494,8 @@ test.describe('Settings', () => {
     await expect(page.getByTestId('settings-page')).toBeVisible();
 
     await page.getByRole('button', { name: 'Appearance', exact: true }).click();
-    await confirm.getByRole('button', { name: 'Discard Changes' }).click();
+    await confirm.getByRole('button', { name: 'Discard Changes' }).focus();
+    await page.keyboard.press('Enter');
     await expect(page.getByRole('heading', { name: 'Appearance' })).toBeVisible();
   });
 
@@ -490,6 +583,81 @@ test.describe('Settings', () => {
     await page.screenshot({ path: 'test-results/settings-dark.png' });
   });
 
+  test('exports the kept sections, previews an import, cancels, then applies it', async ({ page }) => {
+    await bootSettings(page, { platform: 'darwin' });
+    const mock = () => page.evaluate(() => {
+      // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
+      const bridge = (window as typeof window & { __paneTestElectronMock: SettingsMock }).__paneTestElectronMock;
+      return {
+        exports: bridge.getInvokeCalls('setup:export').map((call) => call.args[0]),
+        previews: bridge.getInvokeCalls('setup:preview').length,
+        configUpdates: bridge.getConfigUpdates(),
+        preferenceWrites: bridge.getPreferenceWrites(),
+        projectUpdates: bridge.getProjectUpdates(),
+      };
+    });
+    await page.getByRole('navigation', { name: 'Settings categories' }).getByRole('button', { name: 'Import & Export', exact: true }).click();
+    const content = page.getByTestId('settings-content');
+
+    await expect(content.getByText('Claude Code · Codex')).toBeVisible();
+    await expect(content.getByText('· 1 left out')).toBeVisible();
+    const shortcuts = content.getByRole('checkbox', { name: 'Terminal shortcuts' });
+    await expect(shortcuts).toHaveAttribute('aria-checked', 'true');
+    await shortcuts.click();
+    await expect(shortcuts).toHaveAttribute('aria-checked', 'false');
+    await content.getByRole('button', { name: 'Export…' }).click();
+    await expect(content.getByText(/Saved pane-setup-2026-10-26\.json\. Left out deploy-prod because it looks like it contains a token\./)).toBeVisible();
+    await expect(content.getByRole('button', { name: 'Show in Finder' })).toBeVisible();
+    expect((await mock()).exports).toEqual([
+      ['agentPresets', 'customCommands', 'runScripts', 'skills', 'worktreeFileSync', 'appearance', 'preferences'],
+    ]);
+
+    await content.getByRole('button', { name: 'Import…' }).click();
+    await expect(content.getByRole('heading', { name: 'Import pane-setup-2026-10-26.json' })).toBeVisible();
+    await expect(content.getByText('From Pane 2.4.202 on macOS. Nothing is removed, and nothing changes until you import.')).toBeVisible();
+    await expect(content.getByRole('checkbox', { name: 'Terminal shortcuts' })).toBeDisabled();
+    await expect(content.getByText('1 of 2 repositories here')).toBeVisible();
+    await content.getByRole('button', { name: 'Show Custom commands changes' }).click();
+    await expect(content.getByText('claude "/review --strict"')).toBeVisible();
+    await expect(content.getByText('was claude "/review"')).toBeVisible();
+    await content.getByRole('button', { name: 'Cancel' }).click();
+    await expect(content.getByRole('heading', { name: 'Export your Pane setup' })).toBeVisible();
+    expect(await mock()).toMatchObject({ previews: 0, configUpdates: [], projectUpdates: [] });
+
+    // Mounted Run buttons re-resolve their command on this event.
+    await page.evaluate(() => {
+      let updates = 0;
+      window.addEventListener('project-settings-updated', () => { document.body.dataset.projectSettingsUpdates = String(++updates); });
+    });
+    await content.getByRole('button', { name: 'Import…' }).click();
+    await content.getByRole('checkbox', { name: 'Preferences' }).click();
+    await content.getByRole('button', { name: 'Import 2 sections' }).click();
+    await expect(content.getByText("Imported 2 sections. Skipped marketing-site, which isn't in Pane on this computer.")).toBeVisible();
+    await expect(content.getByRole('heading', { name: 'Export your Pane setup' })).toBeVisible();
+    const applied = await mock();
+    expect(applied.previews).toBe(1);
+    expect(applied.configUpdates).toEqual([{
+      customCommands: [
+        { name: 'lint-fix', command: 'pnpm lint --fix' },
+        { name: 'review', command: 'claude "/review --strict"' },
+      ],
+    }]);
+    expect(applied.preferenceWrites.filter((write) => write.key === 'sidebar_pane_row_layout')).toEqual([]);
+    expect(applied.projectUpdates).toEqual([{ projectId: '1', updates: { run_script: 'pnpm dev' } }]);
+    await expect(page.locator('body')).toHaveAttribute('data-project-settings-updates', '1');
+  });
+
+  test('says why a file was refused and changes nothing', async ({ page }) => {
+    await bootSettings(page, {
+      setupImportError: "Couldn't import notes.json: it isn't a Pane setup file. Nothing changed. Next: Choose a file exported from Settings › Import & Export.",
+    });
+    await page.getByRole('navigation', { name: 'Settings categories' }).getByRole('button', { name: 'Import & Export', exact: true }).click();
+    const content = page.getByTestId('settings-content');
+    await content.getByRole('button', { name: 'Import…' }).click();
+    await expect(content.getByRole('alert')).toHaveText("Couldn't import notes.json: it isn't a Pane setup file. Nothing changed. Choose a file exported from Settings › Import & Export.");
+    await expect(content.getByRole('heading', { name: 'Export your Pane setup' })).toBeVisible();
+  });
+
   test('returns to the workspace with Back', async ({ page }) => {
     await bootSettings(page);
     await expect(page.getByTestId('sidebar')).toBeHidden();
@@ -497,4 +665,31 @@ test.describe('Settings', () => {
     await expect(page.getByTestId('settings-page')).toHaveCount(0);
     await expect(page.getByTestId('sidebar')).toBeVisible();
   });
+
+  test('refuses a pasted paragraph as a Deepgram key, then saves a real one and shows what Deepgram said', async ({ page }) => {
+    await bootSettings(page);
+    await page.getByRole('navigation', { name: 'Settings categories' }).getByRole('button', { name: 'Integrations', exact: true }).click();
+    const key = page.getByRole('textbox', { name: 'Deepgram API key' });
+    const apply = page.getByRole('button', { name: 'Apply Voice Settings' });
+    // SAFETY: installElectronApiMock defines this test-only bridge before the page loads.
+    const mock = () => page.evaluate(() => (window as typeof window & { __paneTestElectronMock: SettingsMock }).__paneTestElectronMock.getConfigUpdates().length);
+    const updatesBefore = await mock();
+
+    await key.fill('Here is the key Deepgram gave me:\n“dg_0123456789”');
+    await apply.click();
+    await expect(page.getByText("That isn't a Deepgram key: it has spaces or line breaks. Copy only the key from Deepgram and paste it again.")).toBeVisible();
+    await expect(key).toHaveAttribute('aria-invalid', 'true');
+    expect(await mock()).toBe(updatesBefore);
+
+    await key.fill('dg-revoked-0123456789abcdef');
+    await expect(key).toHaveAttribute('aria-invalid', 'false');
+    await apply.click();
+    await expect(page.getByText('Saved, but Deepgram rejected this key (HTTP 401).', { exact: false })).toBeVisible();
+    expect(await mock()).toBe(updatesBefore + 1);
+
+    await key.fill('dg-good-0123456789abcdef');
+    await apply.click();
+    await expect(page.getByText('Deepgram accepted this key.')).toBeVisible();
+  });
 });
+

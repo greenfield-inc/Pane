@@ -1,6 +1,6 @@
 import { CompactSessionMenu, type CompactSessionMenuState } from './CompactSessionMenu';
 import { useState, useEffect, useMemo, useCallback, useRef, useId } from 'react';
-import { Check, ChevronDown, ChevronRight, Plus, GitBranch, MoreHorizontal, Archive, ArchiveRestore, Trash2, GitPullRequest, GitPullRequestDraft, Pin, Monitor, MessageSquare, Settings, LayoutGrid, Server } from 'lucide-react';
+import { Bell, Check, ChevronDown, ChevronRight, Plus, GitBranch, MoreHorizontal, Archive, ArchiveRestore, Trash2, GitPullRequest, GitPullRequestDraft, Pin, Monitor, MessageSquare, Settings, LayoutGrid, Server, Repeat } from 'lucide-react';
 import { SessionDetailTooltip } from './SessionDetailTooltip';
 import { useSessionStore } from '../stores/sessionStore';
 import { useNavigationStore } from '../stores/navigationStore';
@@ -19,14 +19,18 @@ import { API } from '../utils/api';
 import { ipcErrorMessage } from '../utils/ipcErrorMessage';
 import { showActionError } from '../stores/errorStore';
 import { cn } from '../utils/cn';
+import { paneIconColor } from '../utils/paneIconColor';
 import type { Session, GitStatus } from '../types/session';
 import type { AgentDisplayStatus } from '../../../shared/types/agentStatus';
 import type { Project } from '../types/project';
 import { usePanelStore } from '../stores/panelStore';
 import { useAttentionInboxStore } from '../stores/attentionInboxStore';
+import { paneHasWaitingQuestion, useNotifyStore, waitingCount } from '../stores/notifyStore';
 import { rollupSessionAgentState } from '../utils/agentStatus';
 import { OrchestrationSessionNav } from './OrchestrationSessionNav';
 import { useSshHostsStore } from '../stores/sshHostsStore';
+import { navigateToLoops, useLoopsStore } from '../stores/loopsStore';
+import { useAnyLoopRunning } from './loops/loopRunView';
 import { SSH_HOSTS_SESSION_ID } from '../../../shared/types/sshHosts';
 import type { TerminalPanelState } from '../../../shared/types/panels';
 import {
@@ -44,9 +48,9 @@ import {
 const SIDEBAR_ROW_BASE = 'flex w-[calc(100%-1rem)] items-center text-left transition-colors';
 const SIDEBAR_ROW_PADDING = 'mx-2 px-2';
 const SIDEBAR_ROW_GAP = 'gap-2';
-const SIDEBAR_SECTION_ROW = 'pane-sidebar-projects-header sticky bottom-0 z-30 mt-3 flex h-8 w-full shrink-0 items-center justify-between gap-2 bg-surface-secondary pl-4 pr-3 py-1';
-const SIDEBAR_SECTION_LABEL = 'truncate text-[10px] font-semibold uppercase tracking-wider leading-4 text-text-tertiary';
-const SIDEBAR_SECTION_TOGGLE = 'group/section relative z-20 flex min-h-4 min-w-0 flex-1 items-center justify-between gap-2 text-left text-text-tertiary transition-colors hover:text-text-primary focus-visible:text-text-primary';
+export const SIDEBAR_SECTION_ROW = 'pane-sidebar-projects-header sticky bottom-0 z-30 mt-3 flex h-8 w-full shrink-0 items-center justify-between gap-2 bg-surface-secondary pl-4 pr-3 py-1';
+export const SIDEBAR_SECTION_LABEL = 'truncate text-[10px] font-semibold uppercase tracking-wider leading-4 text-text-tertiary';
+export const SIDEBAR_SECTION_TOGGLE = 'group/section relative z-20 flex min-h-4 min-w-0 flex-1 items-center justify-between gap-2 text-left text-text-tertiary transition-colors hover:text-text-primary focus-visible:text-text-primary';
 
 interface ProjectSessionListProps {
   projects: Project[];
@@ -130,13 +134,9 @@ export function ProjectSessionList({
 
     const loadSidebarPaneRowLayout = async () => {
       try {
-        // SAFETY: The named IPC/API channel contract establishes this response payload type.
-        const result = await window.electron?.invoke(
-          'preferences:get',
-          SETTINGS_PREFERENCE_KEYS.sidebarPaneRowLayout
-        ) as { success?: boolean; data?: string } | undefined;
+        const value = await API.preferences.get(SETTINGS_PREFERENCE_KEYS.sidebarPaneRowLayout);
         if (!cancelled) {
-          setSidebarPaneRowLayout(normalizeSidebarPaneRowLayout(result?.data));
+          setSidebarPaneRowLayout(normalizeSidebarPaneRowLayout(value));
         }
       } catch {
         if (!cancelled) setSidebarPaneRowLayout('single');
@@ -415,6 +415,8 @@ export function ProjectSessionList({
   return (
     <>
       <div className="flex flex-col pb-2">
+        <NotifyNavRow active={activeView === 'notify'} />
+
         {orchestrationAvailability === 'unavailable' || orchestrationAvailability === 'idle' ? (
           <button
             type="button"
@@ -439,6 +441,8 @@ export function ProjectSessionList({
           </button>
         ) : null}
 
+        <LoopsNavRow active={activeView === 'loops'} />
+
         {missionControlEnabled && (
           <button
             type="button"
@@ -462,7 +466,7 @@ export function ProjectSessionList({
             {/* Agents waiting on an answer are worth seeing without opening the grid. */}
             {blockedAgentCount > 0 && (
               <span
-                className="ml-auto flex items-center gap-1 rounded-full bg-status-error/15 px-1.5 text-[10px] font-medium tabular-nums text-status-error"
+                className="ml-auto flex items-center gap-1 rounded-full bg-status-error/15 px-1.5 text-[10px] font-medium tabular-nums text-status-error-on-tint"
                 title={`${blockedAgentCount} ${blockedAgentCount === 1 ? 'agent needs' : 'agents need'} input`}
               >
                 <AgentStatusDot status="blocked" size="sm" />
@@ -693,7 +697,7 @@ export function ProjectSessionList({
 
       {settingsProject && (
         <ProjectSettings
-          project={settingsProject}
+          project={projectById.get(settingsProject.id) ?? settingsProject}
           isOpen={showProjectSettings}
           onClose={() => {
             setShowProjectSettings(false);
@@ -708,6 +712,79 @@ export function ProjectSessionList({
 }
 
 
+
+// --- Notify nav entry ---
+
+/** Opens the Notify inbox; the count is waiting questions only, never updates. */
+export function NotifyNavRow({ active }: { active: boolean }) {
+  const available = useNotifyStore(s => s.snapshot !== null);
+  const count = useNotifyStore(s => waitingCount(s.snapshot));
+  const navigateToNotify = useNavigationStore(s => s.navigateToNotify);
+  const setSidebarNavigationScope = useNavigationStore(s => s.setSidebarNavigationScope);
+  if (!available) return null;
+  return (
+    <button
+      type="button"
+      data-testid="notify-nav"
+      onClick={() => {
+        setSidebarNavigationScope('repositories');
+        navigateToNotify();
+      }}
+      className={cn(
+        SIDEBAR_ROW_BASE,
+        SIDEBAR_ROW_GAP,
+        SIDEBAR_ROW_PADDING,
+        'h-7 rounded-md text-[13px] hover:bg-surface-hover hover:text-text-primary',
+        active ? 'bg-surface-hover text-text-primary' : 'text-text-secondary',
+      )}
+    >
+      <Bell className="h-3.5 w-3.5" />
+      <span>Notify</span>
+      {count > 0 && (
+        <span
+          className="ml-auto inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-text-primary px-[5px] text-[11px] font-semibold tabular-nums text-bg-primary"
+          aria-label={`${count} ${count === 1 ? 'question' : 'questions'} waiting`}
+        >
+          {count}
+        </span>
+      )}
+    </button>
+  );
+}
+
+// --- Loops nav entry ---
+
+/** Opens the Loops page; shows how many loops exist and a blue dot while any run is working. */
+export function LoopsNavRow({ active }: { active: boolean }) {
+  const loops = useLoopsStore(s => s.loops);
+  const running = useAnyLoopRunning(loops);
+  return (
+    <button
+      type="button"
+      data-testid="loops-nav"
+      onClick={() => navigateToLoops()}
+      className={cn(
+        SIDEBAR_ROW_BASE,
+        SIDEBAR_ROW_GAP,
+        SIDEBAR_ROW_PADDING,
+        'h-7 rounded-md text-[13px] hover:bg-surface-hover hover:text-text-primary',
+        active ? 'bg-surface-hover text-text-primary' : 'text-text-secondary',
+      )}
+    >
+      <Repeat className="h-3.5 w-3.5" />
+      <span>Loops</span>
+      {loops.length > 0 && (
+        <span className="ml-auto flex items-center gap-1 text-[11px] tabular-nums text-text-tertiary">
+          {/* The dot keeps its box while hidden, so the count never shifts. */}
+          <span className="flex h-3 w-3 items-center justify-center" aria-hidden="true">
+            <span className={cn('h-1.5 w-1.5 rounded-full bg-status-info', !running && 'invisible')} />
+          </span>
+          <span aria-label={running ? `${loops.length} loops, a run in progress` : `${loops.length} loops`}>{loops.length}</span>
+        </span>
+      )}
+    </button>
+  );
+}
 
 // --- Attention inbox footer ---
 
@@ -824,7 +901,20 @@ function AttentionInboxToggle({ sessions, members, showAll, onShowAllChange }: {
 
 // --- Session row button content ---
 
-function SessionRowContent({
+/** Same footprint as AgentStatusDot, so the swap never shifts the row. */
+function NotifyWaitingDot({ className }: { className?: string }) {
+  return (
+    <span className={cn('inline-flex h-3 w-3 flex-shrink-0 items-center justify-center', className)} role="status" aria-label="Notify question waiting">
+      <span className="h-2 w-2 rounded-full bg-status-warning ring-[3px] ring-status-warning/20" />
+    </span>
+  );
+}
+
+function NotifyWaitingLabel() {
+  return <span className="ml-auto shrink-0 pl-1 text-[11px] text-status-warning-on-tint">Waiting</span>;
+}
+
+export function SessionRowContent({
   session,
   gs,
   iconColor,
@@ -837,6 +927,8 @@ function SessionRowContent({
   showUnviewedCompleted,
   agentDisplayStatus,
   rowLayout,
+  isLoopRun,
+  notifyWaiting,
 }: {
   session: Session;
   gs: GitStatus | undefined;
@@ -850,10 +942,15 @@ function SessionRowContent({
   showUnviewedCompleted: boolean;
   agentDisplayStatus: AgentDisplayStatus;
   rowLayout: SidebarPaneRowLayout;
+  isLoopRun: boolean;
+  /** A Notify question from this Pane is waiting: an amber dot and "Waiting". */
+  notifyWaiting: boolean;
 }) {
   const title = displayName || gs?.prTitle || session.name || 'Untitled';
   const prNumber = gs?.prNumber;
   const PullRequestIcon = gs?.prIsDraft ? GitPullRequestDraft : GitPullRequest;
+  // A loop's run Pane wears the loop icon until it has a PR.
+  const BranchIcon = isLoopRun ? Repeat : GitBranch;
   const showMetadata = Boolean(prNumber || hasDiff || session.worktreeOwnership === 'external');
   // The repository yields all its space before the Pane name gives up any.
   const repositoryLabel = repositoryName ? (
@@ -866,9 +963,9 @@ function SessionRowContent({
         {prNumber ? (
           <PullRequestIcon className={`w-3.5 h-3.5 flex-shrink-0 ${iconColor}`} />
         ) : (
-          <GitBranch className={`w-3.5 h-3.5 flex-shrink-0 ${iconColor}`} />
+          <BranchIcon className={`w-3.5 h-3.5 flex-shrink-0 ${iconColor}`} />
         )}
-        <AgentStatusDot status={agentDisplayStatus} size="sm" className="flex-shrink-0" />
+        {notifyWaiting ? <NotifyWaitingDot /> : <AgentStatusDot status={agentDisplayStatus} size="sm" className="flex-shrink-0" />}
         <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
           <span className={cn(
             'min-w-0 truncate text-[13px] font-medium text-text-primary decoration-status-info decoration-2 underline-offset-4',
@@ -879,6 +976,7 @@ function SessionRowContent({
           </span>
           {repositoryLabel}
         </span>
+        {notifyWaiting && <NotifyWaitingLabel />}
       </div>
     );
   }
@@ -888,9 +986,9 @@ function SessionRowContent({
       {prNumber ? (
         <PullRequestIcon className={`mt-0.5 w-3.5 h-3.5 flex-shrink-0 ${iconColor}`} />
       ) : (
-        <GitBranch className={`mt-0.5 w-3.5 h-3.5 flex-shrink-0 ${iconColor}`} />
+        <BranchIcon className={`mt-0.5 w-3.5 h-3.5 flex-shrink-0 ${iconColor}`} />
       )}
-      <AgentStatusDot status={agentDisplayStatus} size="sm" className="mt-0.5 flex-shrink-0" />
+      {notifyWaiting ? <NotifyWaitingDot className="mt-0.5" /> : <AgentStatusDot status={agentDisplayStatus} size="sm" className="mt-0.5 flex-shrink-0" />}
       <div className="flex min-w-0 flex-1 flex-col">
         <span className="flex min-w-0 items-baseline gap-1.5">
           <span className={cn(
@@ -901,6 +999,7 @@ function SessionRowContent({
             {title}
           </span>
           {repositoryLabel}
+          {notifyWaiting && <NotifyWaitingLabel />}
         </span>
         {showMetadata && (
           <span className="mt-1.5 flex min-w-0 items-center gap-1.5 text-[10px] font-semibold leading-3">
@@ -950,11 +1049,12 @@ function SessionRow({
   onArchive, onTogglePinned, onDismiss, displayName, repositoryName, rowLayout, nested = false,
 }: SessionRowProps) {
   const [contextMenu, setContextMenu] = useState<CompactSessionMenuState | null>(null);
-  const [localGitStatus, setLocalGitStatus] = useState<GitStatus | undefined>(session.gitStatus);
   const initialGitStatusRequestRef = useRef<string | null>(null);
 
   const hasUnviewedCompletedActivity = usePanelStore(s => Boolean(s.unviewedCompletedActivity[session.id]));
   const agentDisplayStatus = useSessionAgentDisplayStatus(session.id);
+  const isLoopRun = useLoopsStore(s => s.runsBySessionId.has(session.id));
+  const notifyWaiting = useNotifyStore(s => paneHasWaitingQuestion(s.snapshot, session.id));
 
   // Queue the initial refresh even when cached status is available, so cached
   // PR state is corrected by the background git/PR refresh path.
@@ -972,7 +1072,7 @@ function SessionRow({
           true
         ) as GitStatusIPCResponse;
         if (res?.success && res.gitStatus) {
-          setLocalGitStatus(res.gitStatus);
+          useSessionStore.getState().updateSessionGitStatus(session.id, res.gitStatus);
         }
       } catch {
         // Silently fail
@@ -981,35 +1081,9 @@ function SessionRow({
     fetchStatus();
   }, [session.id, session.archived, session.status]);
 
-  // Sync from session prop when store updates
-  useEffect(() => {
-    if (session.gitStatus) setLocalGitStatus(session.gitStatus);
-  }, [session.gitStatus]);
+  const gs = session.gitStatus;
 
-  // Listen for background git status updates (e.g., PR enrichment)
-  useEffect(() => {
-    const handler = (e: Event) => {
-      // SAFETY: The registered DOM/custom-event source establishes this target and detail shape.
-      const detail = (e as CustomEvent<{ sessionId: string; gitStatus: GitStatus }>).detail;
-      if (detail?.sessionId === session.id && detail?.gitStatus) {
-        setLocalGitStatus(detail.gitStatus);
-      }
-    };
-    window.addEventListener('git-status-updated', handler);
-    return () => window.removeEventListener('git-status-updated', handler);
-  }, [session.id]);
-
-  const gs = localGitStatus;
-
-  const iconColor = gs?.prState
-    ? gs.prState === 'MERGED' ? 'text-purple-400'
-    : gs.prState === 'CLOSED' ? 'text-red-400'
-    : 'text-green-400'
-    : session.status === 'running' || session.status === 'initializing'
-    ? 'text-status-success'
-    : session.status === 'error'
-    ? 'text-status-error'
-    : 'text-text-tertiary';
+  const iconColor = paneIconColor(session);
 
   const adds = (gs?.commitAdditions ?? 0) + (gs?.additions ?? 0);
   const dels = (gs?.commitDeletions ?? 0) + (gs?.deletions ?? 0);
@@ -1037,7 +1111,7 @@ function SessionRow({
       )}
     >
       <Tooltip
-        content={<SessionDetailTooltip session={session} gitStatus={localGitStatus} showName showDiffStats={false} globalIndex={globalIndex} />}
+        content={<SessionDetailTooltip session={session} gitStatus={session.gitStatus} showName showDiffStats={false} globalIndex={globalIndex} />}
         side="right"
         interactive
       >
@@ -1063,12 +1137,15 @@ function SessionRow({
           showUnviewedCompleted={hasUnviewedCompletedActivity && !isActive && !showActivity}
           agentDisplayStatus={agentDisplayStatus}
           rowLayout={rowLayout}
+          isLoopRun={isLoopRun}
+          notifyWaiting={notifyWaiting}
         />
       </div>
 
-      {/* Each action masks only its own area. A pinned row shows just the pin
-          at rest; hover or keyboard focus reveals Archive as well. */}
-      <div className="absolute inset-y-0 right-2 z-10 flex items-center">
+      {/* Each action masks only its own area, inset 2px so the row's focus ring
+          stays whole. A pinned row shows just the pin at rest; hover or
+          keyboard focus reveals Archive as well. */}
+      <div className="absolute inset-y-0.5 right-2 z-10 flex items-center">
         {onDismiss && (
           <div className={cn(actionSurfaceClassName, 'pr-0.5 opacity-0')}>
             <button

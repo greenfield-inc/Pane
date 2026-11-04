@@ -151,16 +151,24 @@ const CombinedDiffView = memo(forwardRef<CombinedDiffViewHandle, CombinedDiffVie
 
   const handleRevert = useCallback(async (commitHash: string) => {
     if (!window.confirm(`Revert commit ${commitHash.slice(0, 7)}?`)) return;
-    const response = await window.electronAPI.invoke('git:revert', { sessionId, commitHash });
-    if (!response.success) throw new Error(response.error || 'Failed to revert commit');
-    refresh();
+    try {
+      const response = await window.electronAPI.invoke('git:revert', { sessionId, commitHash });
+      if (!response.success) throw new Error(response.error || 'Failed to revert commit');
+      refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Failed to revert commit');
+    }
   }, [refresh, sessionId]);
 
   const handleRestore = useCallback(async () => {
     if (!window.confirm('Restore all uncommitted changes?')) return;
-    const response = await window.electronAPI.invoke('git:restore', { sessionId });
-    if (!response.success) throw new Error(response.error || 'Failed to restore changes');
-    refresh();
+    try {
+      const response = await window.electronAPI.invoke('git:restore', { sessionId });
+      if (!response.success) throw new Error(response.error || 'Failed to restore changes');
+      refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Failed to restore changes');
+    }
   }, [refresh, sessionId]);
 
   const label = scopeLabel(scope, { ref: visibleManifest?.resolvedBase.ref });
@@ -177,7 +185,7 @@ const CombinedDiffView = memo(forwardRef<CombinedDiffViewHandle, CombinedDiffVie
   return (
     <div className="combined-diff-view flex h-full flex-col">
       <div className="flex items-center justify-between gap-2 border-b border-border-primary bg-surface-secondary px-3 py-1.5">
-        <div className="flex min-w-0 items-center gap-2">
+        <div className="flex min-w-0 items-center gap-2 overflow-hidden">
           <span className="truncate text-xs font-medium text-text-secondary">{headerLabel}</span>
           {visibleManifest && (
             <div className="flex flex-shrink-0 items-center gap-2 text-xs">
@@ -195,8 +203,8 @@ const CombinedDiffView = memo(forwardRef<CombinedDiffViewHandle, CombinedDiffVie
           )}
           {hasUncommitted && (
             <>
-              <button type="button" onClick={() => setShowCommitDialog(true)} className="rounded px-1.5 py-0.5 text-[11px] font-medium text-status-success hover:bg-status-success/15">Commit</button>
-              <button type="button" onClick={handleRestore} title="Restore all uncommitted changes" className="rounded px-1.5 py-0.5 text-[11px] font-medium text-status-warning hover:bg-status-warning/15">Restore</button>
+              <button type="button" onClick={() => setShowCommitDialog(true)} className="rounded px-1.5 py-0.5 text-[11px] font-medium text-status-success hover:bg-status-success/15 hover:text-text-primary">Commit</button>
+              <button type="button" onClick={handleRestore} title="Restore all uncommitted changes" className="rounded px-1.5 py-0.5 text-[11px] font-medium text-status-warning hover:bg-status-warning/15 hover:text-text-primary">Restore</button>
             </>
           )}
           {scope.kind === 'commit' && (
@@ -215,13 +223,13 @@ const CombinedDiffView = memo(forwardRef<CombinedDiffViewHandle, CombinedDiffVie
             <RefreshCw className="mb-4 h-12 w-12 animate-spin text-interactive" />
             <div className="text-center text-text-secondary">
               <p className="font-medium">Git operation in progress</p>
-              <p className="mt-1 text-sm text-text-tertiary">Please wait while the operation completes...</p>
+              <p className="mt-1 text-sm text-text-tertiary">Please wait while the operation completes…</p>
             </div>
           </div>
         ) : loading && !visibleManifest ? <div className="animate-pulse p-4 text-sm text-text-secondary">Loading {label}…</div>
-          : error ? <div role="alert" className="m-4 rounded border border-status-error/30 bg-status-error/10 p-4 text-sm text-status-error">{error}</div>
+          : error ? <div role="alert" className="m-4 rounded border border-status-error/30 bg-status-error/10 p-4 text-sm text-text-primary">{error}</div>
             : visible && visible.manifest.files.length > 0 ? <ChangesList sessionId={sessionId} rows={visible.rows} scopeKey={scopeKey(scope)} activePath={activeDiffPath} onFileOpen={handleFileOpen} />
-              : <div className="flex h-full items-center justify-center text-sm text-text-secondary"><div className="space-y-2 text-center"><p>{emptyMessage}</p>{isMainRepo && historySource === 'remote' && <p className="text-sm text-text-tertiary">Create new commits to see them here.</p>}</div></div>}
+              : <div className="flex h-full items-center justify-center px-4 text-sm text-text-secondary"><div className="space-y-2 text-center"><p>{emptyMessage}</p>{isMainRepo && historySource === 'remote' && <p className="text-sm text-text-tertiary">Create new commits to see them here.</p>}</div></div>}
       </div>
       <CommitDialog isOpen={showCommitDialog} onClose={() => setShowCommitDialog(false)} onCommit={handleCommit} fileCount={visibleManifest?.stats.filesChanged ?? 0} sessionId={sessionId} />
     </div>

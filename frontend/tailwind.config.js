@@ -1,5 +1,5 @@
 /** @type {import('tailwindcss').Config} */
-export default {
+const config = {
   darkMode: 'class',
   content: [
     "./index.html",
@@ -110,6 +110,7 @@ export default {
           'on-dark-focus': 'var(--color-text-interactive-on-dark-focus)',
           'surface': 'var(--color-interactive-surface)',
           'surface-hover': 'var(--color-interactive-surface-hover)',
+          'on-tint': 'var(--color-interactive-on-tint)',
           'border': 'var(--color-interactive-border)',
           'border-hover': 'var(--color-interactive-border-hover)',
         },
@@ -133,6 +134,10 @@ export default {
           'error': 'var(--color-status-error)',
           'error-hover': 'var(--color-status-error-hover)',
           'info': 'var(--color-status-info)',
+          'success-on-tint': 'var(--color-status-success-on-tint)',
+          'warning-on-tint': 'var(--color-status-warning-on-tint)',
+          'error-on-tint': 'var(--color-status-error-on-tint)',
+          'info-on-tint': 'var(--color-status-info-on-tint)',
           'neutral': 'var(--color-status-neutral)',
         },
         // Brand colors
@@ -314,3 +319,22 @@ export default {
   },
   plugins: [],
 }
+
+// Theme colors are CSS variables, which Tailwind cannot fade on its own, so an
+// opacity modifier such as bg-status-error/10 would emit no CSS at all. A class
+// with a modifier mixes the variable with transparent; every other class keeps
+// the bare variable, so computed colors still read back as rgb().
+const withAlpha = (value) => {
+  if (typeof value !== 'string') {
+    return Object.fromEntries(Object.entries(value).map(([key, nested]) => [key, withAlpha(nested)]));
+  }
+  if (!value.startsWith('var(')) return value;
+  return ({ opacityValue }) => opacityValue === undefined || String(opacityValue).startsWith('var(')
+    ? value
+    : `color-mix(in srgb, ${value} calc(${opacityValue} * 100%), transparent)`;
+};
+
+config.theme.extend.colors = withAlpha(config.theme.extend.colors);
+config.theme.extend.ringColor = withAlpha(config.theme.extend.ringColor);
+
+export default config;

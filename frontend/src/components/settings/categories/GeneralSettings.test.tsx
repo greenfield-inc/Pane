@@ -4,13 +4,14 @@ import { GeneralSettings } from './GeneralSettings';
 import { SETTINGS_CATEGORIES, settingDomId } from '../catalog';
 import type { SettingsPersistence } from '../useSettingsPersistence';
 import { DEFAULT_SETTINGS_PREFERENCES } from '../../../types/settings';
+import type { AppConfig } from '../../../types/config';
 
-function createPersistence(): SettingsPersistence {
+function createPersistence(config: AppConfig = {}): SettingsPersistence {
   return {
-    config: {},
+    config,
     isLoading: false,
     configError: null,
-    fetchConfig: () => Promise.resolve({}),
+    fetchConfig: () => Promise.resolve(config),
     saveConfig: () => Promise.resolve(true),
     runSave: () => Promise.resolve(true),
     saveStates: {},
@@ -39,5 +40,33 @@ describe('GeneralSettings feedback entry', () => {
     const general = SETTINGS_CATEGORIES.find((category) => category.id === 'general');
     expect(general?.settingIds).toContain('send-feedback');
     expect(general?.aliases).toContain('feedback');
+  });
+});
+
+describe('GeneralSettings Open HTML files row', () => {
+  it('registers html-file-open-mode under General with search aliases', () => {
+    const general = SETTINGS_CATEGORIES.find((category) => category.id === 'general');
+    expect(general?.settingIds).toContain('html-file-open-mode');
+    expect(general?.aliases).toEqual(expect.arrayContaining(['html', 'preview']));
+  });
+
+  it('renders the row with Preview in browser selected when the setting is absent', () => {
+    const markup = renderToStaticMarkup(
+      <GeneralSettings persistence={createPersistence()} onUpdate={vi.fn()} onSendFeedback={vi.fn()} />,
+    );
+
+    expect(markup).toContain(`id="${settingDomId('html-file-open-mode')}"`);
+    expect(markup).toContain('Open HTML files');
+    expect(markup).toContain('What a click on an .html file in Explorer opens.');
+    expect(markup).toMatch(/aria-checked="true"[^>]*>Preview in browser</);
+    expect(markup).toMatch(/aria-checked="false"[^>]*>Edit source</);
+  });
+
+  it('selects Edit source when the config says source', () => {
+    const markup = renderToStaticMarkup(
+      <GeneralSettings persistence={createPersistence({ htmlFileOpenMode: 'source' })} onUpdate={vi.fn()} onSendFeedback={vi.fn()} />,
+    );
+
+    expect(markup).toMatch(/aria-checked="true"[^>]*>Edit source</);
   });
 });

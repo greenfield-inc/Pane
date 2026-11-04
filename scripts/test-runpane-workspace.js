@@ -18,6 +18,7 @@ const peer = (name, OS, Online, ip, UserID = owner, Tags = null) => ({
 });
 const status = {
   BackendState: 'Running',
+  CertDomains: ['parsas-macbook-pro.tail.invalid'],
   Self: peer('parsas-macbook-pro', 'macOS', true, '100.64.0.1'),
   Peer: {
     a: peer('parsa-devbox', 'windows', true, '100.64.0.2'),
@@ -106,6 +107,20 @@ test('list shows a teammate\'s machines after mine, labeled with their owner', p
   assert.doesNotMatch(list.output, /guest-mac|ci-runner/);
 });
 
+test('with HTTPS Certificates off, list names the tailnet setting for machines that do not answer', posixOnly, () => {
+  const certificatesOff = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-certs-off-'));
+  fs.writeFileSync(path.join(certificatesOff, 'tailscale'), `#!/bin/sh\ncat <<'EOF'\n${JSON.stringify({ ...status, CertDomains: null })}\nEOF\n`, { mode: 0o755 });
+  const result = spawnSync(process.execPath, ['--require', answers, cli, 'workspace', 'list'], {
+    cwd: certificatesOff,
+    encoding: 'utf8',
+    timeout: 20_000,
+    env: { ...process.env, PATH: `${certificatesOff}${path.delimiter}${process.env.PATH}`, PANE_DIR: certificatesOff, RUNPANE_TELEMETRY_DISABLED: '1' },
+  });
+  assert.match(result.stdout, /^parsa-devbox \(Windows, online\): not reachable: this tailnet has HTTPS certificates turned off\. Fix: Turn on HTTPS Certificates at https:\/\/login\.tailscale\.com\/admin\/dns\.$/m, result.stdout + result.stderr);
+  // A machine that answers keeps its own reason.
+  assert.match(result.stdout, /^tylers-pc \(Windows, online, owner tbrownio@github\): not reachable: tylers-pc: This machine accepts only/m);
+});
+
 test('list probes online machines first, so offline ones never use up the probe limit', posixOnly, () => {
   const crowded = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-crowded-'));
   const offline = Object.fromEntries(Array.from({ length: 70 }, (_, index) => [`o${index}`, peer(`old-box-${index}`, 'linux', false, `100.64.1.${index}`)]));
@@ -130,7 +145,7 @@ test('a machine set to "Only me" refuses other logins and says how its owner can
   const refused = runpane('workspace', 'tylers-pc', 'sessions', 'list', '--json');
   assert.equal(refused.status, 1);
   assert.match(refused.output, /tylers-pc: This machine accepts only its owner's Tailscale login; parsa@github is refused\./);
-  assert.match(refused.output, /Its owner can let you in from Pane on that machine: Settings → Remote Access → Access to this computer → Who can connect → Everyone on tailnet\./);
+  assert.match(refused.output, /Its owner can let you in from Pane on that machine: Settings → Remote Access → Access → Who can connect → Everyone on tailnet\./);
 });
 
 test('a path that cannot exist on this machine routes to the online machines whose OS fits it', posixOnly, () => {

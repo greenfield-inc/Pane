@@ -16,15 +16,26 @@ import { registerPromptHandlers } from './prompt';
 import { registerScriptHandlers } from './script';
 import { registerSessionHandlers } from './session';
 import { registerVoiceHandlers } from './voice';
+import { registerLoopHandlers } from './loops';
+import type { LoopManager } from '../services/loops/loopManager';
 import { registerUsageHandlers } from './usage';
 import { registerMissionControlHandlers } from './missionControl';
 import type { AppServices } from './types';
 import { isDaemonOwnedChannel } from '../../../shared/types/daemon';
+import { PaneError, paneErrorText, toPaneDaemonError } from '../../../shared/paneError';
 
 const USAGE_CHANNELS = [
   'usage:get-report',
   'usage:get-status',
   'usage:rescan',
+] as const;
+const LOOP_CHANNELS = [
+  'loops:list',
+  'loops:save',
+  'loops:delete',
+  'loops:set-enabled',
+  'loops:run-now',
+  'loops:preview',
 ] as const;
 const MISSION_CONTROL_CHANNELS = [
   'mission-control:list-agents',
@@ -73,6 +84,7 @@ const PROMPT_CHANNELS = [
 const PANE_CHAT_CHANNELS = [
   'pane-chat:get-or-create',
   'pane-chat:set-agent',
+  'pane-chat:intro-offer',
 ] as const;
 const ORCHESTRATION_SESSION_CHANNELS = [
   'orchestration-sessions:runtimes',
@@ -82,6 +94,7 @@ const ORCHESTRATION_SESSION_CHANNELS = [
   'orchestration-sessions:create',
   'orchestration-sessions:get',
   'orchestration-sessions:update',
+  'orchestration-sessions:reorder',
   'orchestration-sessions:set-agent',
   'orchestration-sessions:associate',
   'orchestration-sessions:detach',
@@ -121,6 +134,7 @@ const FILE_CHANNELS = [
 
 const PANEL_CHANNELS = [
   'panels:read-browser-file',
+  'panels:open-html-file',
   'panels:create',
   'panels:delete',
   'panels:update',
@@ -372,6 +386,7 @@ describe('daemon registry IPC bindings', () => {
       },
       // Cursor depends on the host platform, so only the agents every host runs are pinned.
       sessionAgents: { agents: expect.arrayContaining(['claude', 'codex']), defaultAgent: 'codex' },
+      os: expect.stringMatching(/^(macOS|Windows|Linux)$/),
     });
   });
 
@@ -398,6 +413,17 @@ describe('daemon registry IPC bindings', () => {
 
     expect(registry.listChannels()).toEqual([...USAGE_CHANNELS].sort());
     expect(ipcMain.boundChannels.sort()).toEqual([...USAGE_CHANNELS].sort());
+  });
+
+  it('binds daemon-owned loop channels through the shared registry', () => {
+    const registry = new PaneCommandRegistry();
+    const ipcMain = createIpcMainStub();
+
+    // SAFETY: Binding never calls the manager.
+    registerLoopHandlers(ipcMain, {} as LoopManager, registry);
+
+    expect(registry.listChannels()).toEqual([...LOOP_CHANNELS].sort());
+    expect(ipcMain.boundChannels.sort()).toEqual([...LOOP_CHANNELS].sort());
   });
 
   it('binds daemon-owned missionControl channels through the shared registry', () => {
@@ -452,6 +478,86 @@ describe('daemon registry IPC bindings', () => {
 
     expect(registry.listChannels()).toEqual([...ORCHESTRATION_SESSION_CHANNELS].sort());
     expect(ipcMain.boundChannels.sort()).toEqual([...ORCHESTRATION_SESSION_CHANNELS].sort());
+  });
+
+  it('keeps actionable Session refusal text and the existing IPC failure shape', async () => {
+    const registry = new PaneCommandRegistry();
+    const failure = new PaneError('ERR_SESSION_OPENCODE_LAUNCH',
+      'OpenCode Session launch was refused: "OpenCode launch command has an unmatched quote". No OpenCode terminal launch was started; saved conversation identity was kept.',
+      'Use a direct `opencode --auto` Session launch without wrappers or custom resume settings.');
+    const getView = vi.fn(async () => { throw failure; });
+    registerOrchestrationSessionHandlers(createIpcMainStub(), createServicesStub({
+      // SAFETY: The get channel only reaches this getView refusal stub.
+      orchestrationSessionManager: { getView } as never,
+    }), registry);
+    expect(toPaneDaemonError(failure, 'ERR_INTERNAL')).toEqual({
+      code: failure.code, message: failure.message, next: failure.next,
+    });
+    await expect(registry.invoke('orchestration-sessions:get', [{ sessionId: 'session-1' }]))
+      .resolves.toEqual({ success: false, error: paneErrorText(failure) });
+    getView.mockRejectedValueOnce(new Error('plain cause')).mockRejectedValueOnce('non-error');
+    await expect(registry.invoke('orchestration-sessions:get', [{ sessionId: 'session-1' }]))
+      .resolves.toEqual({ success: false, error: 'plain cause' });
+    await expect(registry.invoke('orchestration-sessions:get', [{ sessionId: 'session-1' }]))
+      .resolves.toEqual({ success: false, error: 'Sessions operation failed' });
+  });
+
+  it('accepts OpenCode in both Session set-agent forms', async () => {
+    const registry = new PaneCommandRegistry();
+    const setAgent = vi.fn(async () => ({ agent: 'opencode' }));
+    // SAFETY: Only setAgent is reached; the stub exposes the decoded selection.
+    registerOrchestrationSessionHandlers(createIpcMainStub(), createServicesStub({
+      orchestrationSessionManager: { setAgent } as never,
+    }), registry);
+
+    await expect(registry.invoke('orchestration-sessions:set-agent', [{ sessionId: 'session-1', agent: 'opencode' }]))
+      .resolves.toMatchObject({ success: true, data: { agent: 'opencode' } });
+    await expect(registry.invoke('orchestration-sessions:set-agent', [{ name: 'Coordinator' }, 'opencode']))
+      .resolves.toMatchObject({ success: true, data: { agent: 'opencode' } });
+    expect(setAgent).toHaveBeenNthCalledWith(1, { sessionId: 'session-1', name: undefined }, 'opencode');
+    expect(setAgent).toHaveBeenNthCalledWith(2, { sessionId: undefined, name: 'Coordinator' }, 'opencode');
+  });
+
+  it('accepts OpenCode in Session create and update', async () => {
+    const registry = new PaneCommandRegistry();
+    const create = vi.fn(async () => ({ agent: 'opencode' }));
+    const update = vi.fn(async () => ({ agent: 'opencode' }));
+    // SAFETY: Only create/update are reached; the stubs expose the decoded agent.
+    registerOrchestrationSessionHandlers(createIpcMainStub(), createServicesStub({
+      orchestrationSessionManager: { create, update } as never,
+    }), registry);
+
+    await expect(registry.invoke('orchestration-sessions:create', [{ name: 'Coordinator', agent: 'opencode' }]))
+      .resolves.toMatchObject({ success: true, data: { agent: 'opencode' } });
+    await expect(registry.invoke('orchestration-sessions:update', [{ sessionId: 'session-1' }, { agent: 'opencode' }]))
+      .resolves.toMatchObject({ success: true, data: { agent: 'opencode' } });
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ name: 'Coordinator', agent: 'opencode' }));
+    expect(update).toHaveBeenCalledWith({ sessionId: 'session-1' }, expect.objectContaining({ agent: 'opencode' }));
+  });
+
+  it('rejects unknown Session agents before calling the manager', async () => {
+    const registry = new PaneCommandRegistry();
+    const create = vi.fn();
+    const update = vi.fn();
+    const setAgent = vi.fn();
+    // SAFETY: Invalid agents must be rejected before any manager method is reached.
+    registerOrchestrationSessionHandlers(createIpcMainStub(), createServicesStub({
+      orchestrationSessionManager: { create, update, setAgent } as never,
+    }), registry);
+
+    for (const agent of ['aider', 'constructor', 'toString', '__proto__']) {
+      await expect(registry.invoke('orchestration-sessions:create', [{ name: 'Invalid', agent }]))
+        .resolves.toMatchObject({ success: false, error: expect.stringContaining('expected one of') });
+      await expect(registry.invoke('orchestration-sessions:update', [{ sessionId: 'session-1' }, { agent }]))
+        .resolves.toMatchObject({ success: false, error: expect.stringContaining('expected one of') });
+      await expect(registry.invoke('orchestration-sessions:set-agent', [{ sessionId: 'session-1', agent }]))
+        .rejects.toThrow('expected one of');
+      await expect(registry.invoke('orchestration-sessions:set-agent', [{ sessionId: 'session-1' }, agent]))
+        .rejects.toThrow('expected one of');
+    }
+    expect(create).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
+    expect(setAgent).not.toHaveBeenCalled();
   });
 
   it('binds daemon-owned permission channels through the shared registry', () => {
@@ -519,10 +625,21 @@ describe('daemon registry IPC bindings', () => {
     expect(
       ipcMain.boundChannels.filter(
         channel => channel !== 'terminal:clipboard-paste-image' && channel !== 'browser-panel:register-webview'
-          && channel !== 'browser-panel:prepare-file',
+          && channel !== 'browser-panel:prepare-file' && channel !== 'browser-data:clear',
       ).sort(),
     ).toEqual([...PANEL_CHANNELS].sort());
     expect(registry.has('terminal:clipboard-paste-image')).toBe(false);
+  });
+
+  it('clears browser data on the machine showing the browser, never on a remote host', () => {
+    const registry = new PaneCommandRegistry();
+    const ipcMain = createIpcMainStub();
+
+    registerPanelHandlers(ipcMain, createServicesStub(), registry);
+
+    expect(ipcMain.boundChannels).toContain('browser-data:clear');
+    expect(registry.has('browser-data:clear')).toBe(false);
+    expect(isDaemonOwnedChannel('browser-data:clear')).toBe(false);
   });
 
   it('keeps local IDE launching outside the daemon registry surface', () => {

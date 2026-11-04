@@ -104,7 +104,7 @@ export function RemoteConnectionScreen({
         </div>
 
         {showFirstRunMenu && error && (
-          <p role="alert" className="mb-4 rounded-md border border-status-error/30 bg-status-error/10 px-3 py-2 text-sm text-status-error">{error}</p>
+          <p role="alert" className="mb-4 rounded-md border border-status-error/30 bg-status-error/10 px-3 py-2 text-sm text-text-primary">{error}</p>
         )}
         {showFirstRunMenu ? (
           <div className="space-y-4">
@@ -190,10 +190,10 @@ export function RemoteConnectionScreen({
             />
 
             {(error || clipboardError) && (
-              <div id={connectionErrorId} role="alert" className="mt-3 rounded-md border border-status-error/30 bg-status-error/10 px-3 py-2 text-sm text-status-error">
+              <div id={connectionErrorId} role="alert" className="mt-3 rounded-md border border-status-error/30 bg-status-error/10 px-3 py-2 text-sm text-text-primary">
                 <p>{error || clipboardError}</p>
                 {showConnectionTroubleshooting && (
-                  <p className="mt-2 text-xs text-status-error">
+                  <p className="mt-2 text-xs text-text-primary">
                     If this profile uses Tailscale, install or open Tailscale on this device, sign in to the same tailnet as the host, then retry.
                   </p>
                 )}

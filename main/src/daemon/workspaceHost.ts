@@ -7,7 +7,13 @@ import { randomBytes } from 'crypto';
 import type { PaneEventSink } from '../core/eventSink';
 import type { WorkspaceAccessPolicy } from './auth';
 import { createWorkspacePasswordVerifier, type SecretCheck } from './workspacePassword';
-import type { WorkspaceAccessSummary, WorkspacePasswordHash } from '../../../shared/types/workspaceAccess';
+import { GlassesAccess } from './glassesAccess';
+import {
+  TAILNET_HTTPS_OFF_REASON,
+  TAILSCALE_DNS_ADMIN_URL,
+  type WorkspaceAccessSummary,
+  type WorkspacePasswordHash,
+} from '../../../shared/types/workspaceAccess';
 import {
   readTailnetIdentity,
   readTailscaleServeHandlers,
@@ -17,20 +23,17 @@ import {
   runTailscaleServe,
   type ResolvedCommand,
 } from './tailscaleSetup';
+import { inBootWindow as paneInBootWindow } from '../services/freshBoot';
+import { WORKSPACE_HTTPS_PORT } from './workspacePort';
 
-/**
- * Tailnet port for workspaces; the remote daemon keeps 443. `PANE_WORKSPACES_PORT` moves it for
- * development, so a test host never takes over the 8443 handler of the Pane in daily use.
- */
-const WORKSPACE_HTTPS_PORT = readWorkspacePort(process.env.PANE_WORKSPACES_PORT);
+export { readWorkspacePort } from './workspacePort';
+
 /** How often Pane re-reads the tailnet: Tailscale may start after Pane, or switch tailnets under it. */
 const CHECK_INTERVAL_MS = 60_000;
+/** Right after the computer starts, Tailscale is usually still signing in. */
+const BOOT_CHECK_INTERVAL_MS = 15_000;
 const RETRIES = 'Pane retries within a minute';
 
-export function readWorkspacePort(value: string | undefined): number {
-  const port = Number(value);
-  return Number.isInteger(port) && port > 0 && port < 65536 ? port : 8443;
-}
 
 export type TailnetSelf =
   | {
@@ -103,8 +106,8 @@ export function readTailnetSelf(statusJson: string): TailnetSelf {
   if (!parsed.CertDomains?.length) {
     return {
       ok: false,
-      reason: 'this tailnet has HTTPS certificates turned off',
-      fix: 'Turn on HTTPS Certificates at https://login.tailscale.com/admin/dns.',
+      reason: TAILNET_HTTPS_OFF_REASON,
+      fix: `Turn on HTTPS Certificates at ${TAILSCALE_DNS_ADMIN_URL}.`,
     };
   }
   const owner = decodeOptionalBoundary(parsed.User?.[String(parsed.Self.UserID)], tailnetUserSchema);
@@ -133,6 +136,7 @@ export function readTailnetSelf(statusJson: string): TailnetSelf {
 
 interface WorkspaceConfigProvider {
   getConfig(): Pick<ReturnType<ConfigManager['getConfig']>, 'deepgramApiKey' | 'remoteDaemon' | 'workspaces'>;
+  updateConfigWith: ConfigManager['updateConfigWith'];
   on(event: 'config-updated', listener: () => void): object;
   off(event: 'config-updated', listener: () => void): object;
 }
@@ -164,6 +168,8 @@ export class PaneWorkspaceHostController {
   private readonly configUpdatedListener = () => {
     void this.sync();
   };
+  /** The Pane glasses app's device tokens and pairing secrets for this listener. */
+  readonly glasses: GlassesAccess;
 
   constructor(
     private readonly commandRegistry: PaneCommandRegistry,
@@ -171,7 +177,11 @@ export class PaneWorkspaceHostController {
     private readonly defaultEnabled: boolean,
     private readonly run: RemoteSetupCommandRunner = runRemoteSetupCommand,
     private readonly isForwardedPort?: (port: number) => boolean,
-  ) {}
+    private readonly paneVersion?: string,
+    private readonly inBootWindow: () => boolean = paneInBootWindow,
+  ) {
+    this.glasses = new GlassesAccess(configManager);
+  }
 
   getEventSink(): PaneEventSink {
     return this.eventSink;
@@ -291,8 +301,11 @@ export class PaneWorkspaceHostController {
       this.tailnet = { tailscale, dnsName: self.dnsName, machineName: self.machineName, ownerLogin: self.ownerLogin };
       this.tailnetLogins = new Set(self.tailnetLogins);
       const port = await this.ensureServer();
+      const handlers = readTailscaleServeHandlers((await this.runServe(tailscale, ['status', '--json'])).stdout);
+      // Glasses tokens are refused while Funnel publishes this port to the internet.
+      this.glasses.setFunnelOn(handlers.funnelOn(self.dnsName, WORKSPACE_HTTPS_PORT));
       // Serve handlers belong to one tailnet profile, so a tailnet switch drops this one.
-      if (this.servedPort !== port || !(await this.hasHandler(tailscale, self.dnsName))) {
+      if (this.servedPort !== port || !handlers.hasHttpsHandler(self.dnsName, WORKSPACE_HTTPS_PORT)) {
         const target = `http://127.0.0.1:${port}/${this.pathSecret}`;
         const serve = await this.runServe(tailscale, ['--bg', `--https=${WORKSPACE_HTTPS_PORT}`, target]);
         if (!serve.ok) {
@@ -322,7 +335,7 @@ export class PaneWorkspaceHostController {
     // A sync that finishes after shutdown must not start the next one.
     if (!this.watching) return;
     this.clearCheck();
-    this.checkTimer = setTimeout(() => void this.sync(), CHECK_INTERVAL_MS);
+    this.checkTimer = setTimeout(() => void this.sync(), this.inBootWindow() ? BOOT_CHECK_INTERVAL_MS : CHECK_INTERVAL_MS);
     this.checkTimer.unref?.();
   }
 
@@ -335,8 +348,9 @@ export class PaneWorkspaceHostController {
     const address = this.server?.getAddress();
     if (address) return address.port;
     const server = new PaneRemoteHttpApiServer(this.commandRegistry, this.configManager, {
-      workspace: { listenPort: 0, pathSecret: this.pathSecret, access: () => this.getAccessPolicy() },
+      workspace: { listenPort: 0, pathSecret: this.pathSecret, access: () => this.getAccessPolicy(), glasses: this.glasses },
       isForwardedPort: this.isForwardedPort,
+      paneVersion: this.paneVersion,
     });
     await server.start();
     this.server = server;
@@ -366,11 +380,6 @@ export class PaneWorkspaceHostController {
     return null;
   }
 
-
-  private async hasHandler(tailscale: ResolvedCommand, dnsName: string): Promise<boolean> {
-    const status = await this.runServe(tailscale, ['status', '--json']);
-    return readTailscaleServeHandlers(status.stdout).hasHttpsHandler(dnsName, WORKSPACE_HTTPS_PORT);
-  }
 
   private runServe(tailscale: ResolvedCommand, args: string[]) {
     return runTailscaleServe(this.run, tailscale, args);

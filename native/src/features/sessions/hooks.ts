@@ -1,7 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query';
 
 import type {
-  OrchestrationSessionCreateInput,
   OrchestrationSessionListResult,
   OrchestrationSessionUpdateInput,
   OrchestrationSessionView,
@@ -28,8 +27,12 @@ export function useSessions() {
     // An open Session follows the desktop when its agent changes.
     void queryClient.invalidateQueries({ queryKey: [profile.id, GET] });
   });
-  const unavailable = sessions.error?.message.includes('No Pane daemon command registered') ?? false;
-  return { ...sessions, unavailable };
+  return { ...sessions, unavailable: sessionsUnavailable(sessions.error) };
+}
+
+/** Hosts without Sessions answer their channels with "No Pane daemon command registered". */
+export function sessionsUnavailable(error: Error | null): boolean {
+  return error?.message.includes('No Pane daemon command registered') ?? false;
 }
 
 /** A Session with its workspace Pane and agent chat. Never selects it on the host, so the desktop stays put. */
@@ -49,20 +52,5 @@ export function useUpdateSession() {
       sessions: list.sessions.map(session => session.id === sessionId ? { ...session, ...update, updatedAt: new Date().toISOString() } : session),
     });
     await mutation.mutateAsync([{ sessionId }, update]);
-  };
-}
-
-/** Creates a Session and starts its agent; the result is cached so the Session opens without another fetch. */
-export function useCreateSession() {
-  const queryClient = useQueryClient();
-  const { profile } = useDaemon();
-  const mutation = useInvokeMutation<[OrchestrationSessionCreateInput], SessionView>('orchestration-sessions:create', { invalidates: [LIST] });
-  return {
-    isPending: mutation.isPending,
-    create: async (input: OrchestrationSessionCreateInput) => {
-      const view = await mutation.mutateAsync([input]);
-      queryClient.setQueryData([profile.id, GET, { sessionId: view.session.id }], view);
-      return view;
-    },
   };
 }

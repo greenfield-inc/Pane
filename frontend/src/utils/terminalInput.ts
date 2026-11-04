@@ -1,3 +1,4 @@
+import { reportUnknownRemoteDelivery } from './remoteFailure';
 import { terminalTiming } from './terminalTiming';
 
 /**
@@ -14,6 +15,7 @@ export function sendTerminalInput(panelId: string, data: string): void {
     void delivery.then(() => terminalTiming?.record('inputRoundTrip', performance.now() - started), () => {});
   }
   void delivery.catch(error => {
+    reportUnknownRemoteDelivery(error instanceof Error ? error.message : String(error));
     console.warn('[Terminal] Input was not delivered:', error);
   });
 }

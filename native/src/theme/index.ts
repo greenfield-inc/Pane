@@ -1,4 +1,4 @@
-export { monoFontFamily } from './tokens';
+export { brandColors, monoFontFamily } from './tokens';
 export type { ThemeColors, TypographyVariant } from './tokens';
 export { useTheme } from './useTheme';
 export { withAlpha } from './withAlpha';

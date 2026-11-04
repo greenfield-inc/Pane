@@ -27,20 +27,46 @@ describe('UIStateManager expanded repositories', () => {
   });
 });
 
-describe('UIStateManager collapsed Sessions', () => {
-  it('keeps each host’s collapsed Sessions separate from this computer’s', () => {
+describe('UIStateManager opened Sessions', () => {
+  it('starts with no opened Sessions, so every Session shows collapsed', () => {
+    const manager = new UIStateManager(createUiStateDb());
+    expect(manager.getExpandedState().expandedSessions).toEqual([]);
+  });
+
+  it('keeps each host’s opened Sessions separate from this computer’s', () => {
     let remoteHostId: string | null = null;
     const manager = new UIStateManager(createUiStateDb(), () => remoteHostId);
 
-    manager.saveCollapsedSessions(['local-session']);
+    manager.saveExpandedSessions(['local-session']);
     remoteHostId = 'host-b';
-    expect(manager.getExpandedState().collapsedSessions).toEqual([]);
-    manager.saveCollapsedSessions(['remote-session']);
+    expect(manager.getExpandedState().expandedSessions).toEqual([]);
+    manager.saveExpandedSessions(['remote-session']);
 
     remoteHostId = null;
-    expect(manager.getExpandedState().collapsedSessions).toEqual(['local-session']);
+    expect(manager.getExpandedState().expandedSessions).toEqual(['local-session']);
     remoteHostId = 'host-b';
-    expect(manager.getExpandedState().collapsedSessions).toEqual(['remote-session']);
+    expect(manager.getExpandedState().expandedSessions).toEqual(['remote-session']);
+  });
+
+  it('does not read the old collapsed-Sessions list as opened', () => {
+    const db = createUiStateDb();
+    db.setUIState('treeView.collapsedSessions', JSON.stringify(['old-collapsed']));
+    db.setUIState('treeView.collapsedSessions@host-b', JSON.stringify(['old-remote']));
+    let remoteHostId: string | null = null;
+    const manager = new UIStateManager(db, () => remoteHostId);
+
+    expect(manager.getExpandedState().expandedSessions).toEqual([]);
+    remoteHostId = 'host-b';
+    expect(manager.getExpandedState().expandedSessions).toEqual([]);
+  });
+
+  it('forgets this computer’s opened Sessions on clear', () => {
+    const manager = new UIStateManager(createUiStateDb());
+    manager.saveExpandedSessions(['local-session']);
+
+    manager.clear();
+
+    expect(manager.getExpandedState().expandedSessions).toEqual([]);
   });
 });
 

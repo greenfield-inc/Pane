@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Modal } from './ui/Modal';
+import { DOCS_BROWSER_PARTITION } from '../../../shared/constants/browserPartitions';
 import { cn } from '../utils/cn';
 
 const DOCS_URL = 'https://runpane.com/docs';
@@ -167,7 +168,7 @@ export function DocsDialog({ isOpen, onClose }: DocsDialogProps) {
         <webview
           ref={webviewRef}
           src={DOCS_URL}
-          partition="persist:pane-docs"
+          partition={DOCS_BROWSER_PARTITION}
           allowpopups
           className="w-full h-full border-0"
           style={{ display: 'inline-flex' }}

@@ -5,6 +5,8 @@ import { API } from '../utils/api';
 import { useConfigStore } from '../stores/configStore';
 import { ToolPanel } from '../../../shared/types/panels';
 import type { AgentState } from '../../../shared/types/agentStatus';
+import { isDesktopAlertHandedOff } from './desktopAlertHandoff';
+import { openPanelOnClick } from './notificationClick';
 
 // Extend window interface for webkit audio context compatibility
 declare global {
@@ -18,9 +20,38 @@ interface NotificationSettings {
   enabled: boolean;
 }
 
+/** Pane's short two-tone beep, for desktop alerts and Notify questions. */
+function playBeep(): void {
+  try {
+    // Create a simple notification sound using Web Audio API
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) {
+      console.warn('AudioContext not supported');
+      return;
+    }
+    const audioContext = new AudioContextClass();
+    const oscillator = audioContext.createOscillator();
+    const gainNode = audioContext.createGain();
+
+    oscillator.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+
+    oscillator.frequency.setValueAtTime(800, audioContext.currentTime);
+    oscillator.frequency.setValueAtTime(600, audioContext.currentTime + 0.1);
+
+    gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
+
+    oscillator.start(audioContext.currentTime);
+    oscillator.stop(audioContext.currentTime + 0.3);
+  } catch (error) {
+    console.warn('Could not play notification sound:', error);
+  }
+}
+
 export function useNotifications() {
   const settings = useConfigStore((state) => state.config?.notifications) ?? {
-    playSound: true,
+    playSound: false,
     enabled: true,
   } satisfies NotificationSettings;
 
@@ -102,59 +133,49 @@ export function useNotifications() {
   }, []);
 
   const playNotificationSound = useCallback(() => {
-    if (!settingsRef.current.playSound) return;
-
-    try {
-      // Create a simple notification sound using Web Audio API
-      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-      if (!AudioContextClass) {
-        console.warn('AudioContext not supported');
-        return;
-      }
-      const audioContext = new AudioContextClass();
-      const oscillator = audioContext.createOscillator();
-      const gainNode = audioContext.createGain();
-
-      oscillator.connect(gainNode);
-      gainNode.connect(audioContext.destination);
-
-      oscillator.frequency.setValueAtTime(800, audioContext.currentTime);
-      oscillator.frequency.setValueAtTime(600, audioContext.currentTime + 0.1);
-
-      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
-      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
-
-      oscillator.start(audioContext.currentTime);
-      oscillator.stop(audioContext.currentTime + 0.3);
-    } catch (error) {
-      console.warn('Could not play notification sound:', error);
-    }
+    if (settingsRef.current.playSound) playBeep();
   }, []);
 
-  // showNotification fires unconditionally so that the two direct callers in
-  // App.tsx (unclean-shutdown and version-update) always work. Activity gating
-  // lives only inside maybeNotifyPanelIdle.
-  const showNotification = useCallback((
+  // Pane Notify: main decides when a question chimes (its own Sound setting).
+  useEffect(() => window.electronAPI?.notify?.onChime(playBeep), []);
+
+  // Fires unconditionally; activity gating lives in the maybeNotify* callers.
+  // A notification replaces an earlier one with the same tag. A panel target
+  // makes the notification open that tab when clicked.
+  const fireNotification = useCallback((
     title: string,
     body: string,
     icon?: string,
-    _triggerEvent?: string,
-    _trackingKey?: string,
+    tag?: string,
+    panelTarget?: { paneId: string; panelId: string },
   ) => {
     requestPermission().then((hasPermission) => {
       if (hasPermission) {
-        new Notification(title, {
+        const notification = new Notification(title, {
           body,
           icon: icon || '/favicon.ico',
           badge: '/favicon.ico',
-          tag: 'claude-code-commander',
+          tag,
           requireInteraction: false,
         });
+        const openPaneLink = window.electronAPI?.window?.openPaneLink;
+        if (panelTarget && openPaneLink) openPanelOnClick(notification, panelTarget, openPaneLink);
 
         playNotificationSound();
       }
     });
   }, [playNotificationSound, requestPermission]);
+
+  // showNotification is for the two direct callers in App.tsx
+  // (unclean-shutdown and version-update), so they always work.
+  const showNotification = useCallback((
+    title: string,
+    body: string,
+    icon?: string,
+    tag?: string,
+  ) => {
+    fireNotification(title, body, icon, tag);
+  }, [fireNotification]);
 
   /** Resolve a panel to its session + display names, or null when unknown. */
   function findPanelContext(panelId: string) {
@@ -179,6 +200,7 @@ export function useNotifications() {
       : '';
     return {
       session,
+      panelTarget: { paneId: session.id, panelId },
       panelName: foundPanel.title || 'Terminal',
       body: projectName ? `${session.name} · ${projectName}` : session.name,
     };
@@ -199,13 +221,10 @@ export function useNotifications() {
     const context = findPanelContext(panelId);
     if (!context) return;
 
-    showNotification(
-      `${context.panelName} finished`,
-      context.body,
-      undefined,
-      'panel_idle',
-      `idle:${panelId}:${Date.now()}`,
-    );
+    void isDesktopAlertHandedOff(window.electronAPI?.notifications?.isHandedOff).then((handedOff) => {
+      if (handedOff) return;
+      fireNotification(`${context.panelName} finished`, context.body, undefined, `pane:panel:${panelId}`, context.panelTarget);
+    });
   }
 
   // Fires as soon as an agent flips to blocked: it is waiting on the human, so
@@ -218,13 +237,10 @@ export function useNotifications() {
     const context = findPanelContext(panelId);
     if (!context) return;
 
-    showNotification(
-      `${context.panelName} needs your input`,
-      context.body,
-      undefined,
-      'panel_blocked',
-      `blocked:${panelId}:${Date.now()}`,
-    );
+    void isDesktopAlertHandedOff(window.electronAPI?.notifications?.isHandedOff).then((handedOff) => {
+      if (handedOff) return;
+      fireNotification(`${context.panelName} needs your input`, context.body, undefined, `pane:panel:${panelId}`, context.panelTarget);
+    });
   }
 
   // Subscribe to panelStore.agentStatus (the unified per-panel agent state) and

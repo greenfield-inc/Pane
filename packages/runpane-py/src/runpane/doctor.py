@@ -667,23 +667,17 @@ def resolve_daemon_recovery_command(endpoint: Dict[str, str], message: str) -> s
     return "Open Pane, then rerun runpane doctor --json"
 
 
-WATCH_DEFAULTS_NOT_REPORTED = {"format", "agentsOnly", "includeHeldInputPresence"}
-
-
 def watch_defaults() -> Dict[str, Any]:
-    defaults = RUNPANE_CONTRACT["defaults"]["watch"]
-    return {
-        **{key: value for key, value in defaults.items() if key not in WATCH_DEFAULTS_NOT_REPORTED},
-        "kinds": "all",
-    }
+    return RUNPANE_CONTRACT["defaults"]["watch"]
 
 
 def format_watch_defaults(defaults: Dict[str, Any]) -> str:
+    follow = defaults["follow"]
     return (
-        f"Watch defaults (--follow): heartbeat {defaults['heartbeatSeconds']}s, idle-after {defaults['idleAfterMs']}ms, "
-        f"settle {defaults['settleMs']}ms, blocked-settle {defaults['blockedSettleMs']}ms, "
-        f"min-interval {defaults['minIntervalMs']}ms, "
-        f"idle-backoff {'on' if defaults['idleBackoff'] else 'off'}, kinds {defaults['kinds']}"
+        f"Watch defaults (--follow): heartbeat {follow['heartbeat']}, idle-after {follow['idleAfter']}, "
+        f"ready-settle {follow['readySettle']}, blocked-settle {follow['blockedSettle']}, "
+        f"min-interval {follow['minInterval']}, expire-after {follow['expireAfter']}, "
+        f"idle-backoff {'on' if follow['idleBackoff'] else 'off'}, kinds {','.join(follow['kinds'])}"
     )
 
 

@@ -12,7 +12,7 @@ Pane saves the profile and attempts to connect immediately. Local desktop mode i
 
 ## Workspaces or pairing codes?
 
-To let machines on your tailnet reach each other from the runpane CLI, you do not need this guide or a code. [Workspaces](RUNPANE_WORKSPACES.md) put each desktop Pane on your tailnet automatically (port 8443) and trust your Tailscale login, plus everyone on the tailnet when a machine's owner allows it, so `runpane workspace <machine> read|write|exec|<command>` works between your Macs, Windows PCs, and Linux machines, and the desktop app's remote mode connects to them from Settings → Remote Access → Your computers. Use the remote daemon and pairing codes in this guide for browsers and phones, and for devices outside your tailnet. The remote daemon keeps port 443, and the two run side by side.
+To let machines on your tailnet reach each other from the runpane CLI, you do not need this guide or a code. [Workspaces](RUNPANE_WORKSPACES.md) put each desktop Pane on your tailnet automatically (port 8443) and trust your Tailscale login, plus everyone on the tailnet when a machine's owner allows it, so `runpane workspace <machine> read|write|exec|<command>` works between your Macs, Windows PCs, and Linux machines, and the desktop app's remote mode connects to them from the sidebar's machine menu or Settings → Remote Access → Switch to. Use the remote daemon and pairing codes in this guide for browsers and phones, and for devices outside your tailnet. The remote daemon keeps port 443, and the two run side by side.
 
 ## Guided quick start
 
@@ -145,7 +145,7 @@ it up as a Remote Pane host:
    builds you plan to run. It only needs inbound SSH. The daemon listens on
    loopback, and you reach it through Tailscale or an SSH tunnel.
 2. SSH in as a regular user with `sudo`, not as `root`.
-3. Install what your agents need on the VM: `git`, Node.js 20 or newer (for
+3. Install what your agents need on the VM: `git`, patched Node.js 22.23.4+ (22.x), 24.22.1+ (24.x), or 26.12.1+ (26.x) (for
    `npx`), and the agent CLIs you use, such as Claude Code or Codex. Sign in
    to each CLI on the VM. Agents run there, not on your laptop.
 4. Install Tailscale and join your tailnet:
@@ -184,11 +184,11 @@ check [Troubleshooting](#troubleshooting).
 On your local desktop machine:
 
 1. Open Pane.
-2. Go to `Settings > Remote Access` and click `Add with a Code` under `Your computers`.
+2. Go to `Settings > Remote Access` and click `Add a machine` at the end of `Switch to`.
 3. Paste the full `pane-remote://...` code into `Connection Code`.
 4. Click `Connect`.
 
-If the tunnel is not reachable yet, Pane still saves the host and shows the connection error. Start the printed SSH/Tailscale tunnel and click `Connect` next to the saved host.
+If the tunnel is not reachable yet, Pane still saves the host and shows the connection error. Start the printed SSH/Tailscale tunnel and pick the saved host again from `Switch to` or the sidebar's machine menu.
 
 ## Use the Mobile / Browser App
 
@@ -223,9 +223,13 @@ How a host page reaches the phone:
 
 Who can open these pages: the devices that **Who can connect** admits (see [Who is trusted](RUNPANE_WORKSPACES.md#who-is-trusted)). Phone pages need that setting on, Tailscale running on the host, and the phone on the same tailnet. A page in a frame cannot send the machine's password, so phone pages are off while password protection is on. A refused device sees "This page runs on &lt;host&gt;. Open it from a device signed in as &lt;login&gt;." A pairing code or SSH tunnel does not grant access to these pages: they need the phone on this tailnet, signed in with a login that setting admits. Navigation inside a page stays on the phone; the tab saves only the addresses you enter or pick.
 
+The Pane phone app shows page tabs with an address row (back, forward, address, reload, Open in Safari) and loads them through the same phone addresses. When the files address is off or the phone can't reach it, the app reads an HTML file through its own connection instead (`panels:read-browser-file`), so a self-contained page opens over a pairing code too; pages that load other files from their folder need the phone address. Entering an address saves it to the tab. Each case that can't load names its reason: nothing listens on the port, phone pages are off on that computer (with its reason), the phone is not on Tailscale, the computer is offline, or its Pane predates phone pages.
+
 ### Files on the phone
 
 Each pane's Explorer tab shows its worktree as a tree. Tap a text file to read and edit it; Save writes it to the host. Text files over 1 MB, and binary files that are not images, PDFs, video or audio, stay on the desktop. Images, PDFs, video and audio of any size preview on the phone, and video seeks without downloading the whole file. Open in Safari opens a preview outside the app.
+
+In the Pane phone app, Explorer lists the branch's changed files first, then opens one folder at a time with a path bar and search, and files are read-only: code with syntax colours, Markdown rendered or as source, and images up to 5 MB. Text over 1 MB and other binaries stay on the computer, with Copy path. Everything, images included, comes through the app's own connection, so it works over every connection the app supports. Editor tabs open their file in the same viewer. The Diff tab lists the branch's changes with their counts and shows each file's patch, and Run script tabs show the script's output live; both are read-only, so commit, revert and start or stop the script on the computer.
 
 Browsing and editing go through the PWA's own connection, so they work over every connection the PWA supports. Previews load from the same Serve address as HTML files in browser tabs, so they need what [browser tabs on the phone](#browser-tabs-on-the-phone) need: Tailscale on the host, password protection off, and a phone signed in to a login that **Who can connect** admits. Without that, a preview explains why it cannot load. Files outside the worktree are refused.
 
@@ -324,13 +328,13 @@ On Windows the endpoint is `pipe:<pipe name>`. This is the local control endpoin
 
 ### 5. Connect the Desktop Client
 
-Use `Add connection` for a generated code, or use `Save existing remote profile` under `Pairing tools` with:
+Use `Add a machine` under `Switch to` for a generated code, or use `Save existing remote profile` under `More > Advanced > Pairing tools` with:
 
 - label
 - base URL
 - bearer token
 
-Click `Save Remote Profile`, then click `Connect` on the saved profile.
+Click `Save Remote Profile`, then pick the saved profile from `Switch to` or the sidebar's machine menu.
 
 ## Validation
 
@@ -343,6 +347,52 @@ Recommended checks after connecting:
 5. Open a file and confirm read/write works.
 6. Check git status and commit/diff flows.
 7. Run an approve-mode command and confirm the permission dialog appears on the client.
+
+## When a connection fails
+
+When you connect to a host (Switch in Settings → Remote Access, Add a machine,
+the sidebar's machine menu, or Retry), the main area shows a checklist of
+the connection's stages. The first stage that fails shows what went wrong and a
+fix. The same checklist appears when Pane gives up reconnecting after five
+minutes, and from **Retry now** on the "Can't reach <machine>" banner. That
+banner appears once the connection has been down for 10 seconds; until then
+the workspace dims and the host dot pulses while Pane reconnects.
+
+The host's 5-second heartbeat decides whether a connection is alive. One failed
+request fails only itself; three requests in a row that get no answer reconnect.
+Reconnects wait 250 ms, 750 ms and 2 s, then double up to 30 s between tries.
+
+| Stage | Fails when | Fix |
+|---|---|---|
+| Tailscale on this computer (Tailscale machines only) | Tailscale is signed out or not installed here | Open Tailscale Setup, or Download Tailscale |
+| Host reachable | The host times out or its name does not resolve; a Tailscale machine is offline | Check that both computers are on the same network or tailnet |
+| Pane daemon running / Pane open | The host refuses the connection, or a proxy such as Tailscale Serve answers 502-504 | Start it, or Copy command |
+| Signed in | The host rejects this computer's token or password | Paste new code, or Enter password |
+| Versions match | The host runs a different Pane version (a warning; the workspace still loads) | Update it, or Update Pane on this computer |
+| Workspace loaded | The host answered but the workspace did not restore | Retry |
+
+**Start it** and **Update it** run one fixed command on the host over your own
+SSH config. They appear only when exactly one `Host` alias in `~/.ssh/config`
+matches the host: its Tailscale machine name, or the first label of the host
+name in its address (`devbox` for `devbox.tail1234.ts.net`). Pane runs:
+
+```bash
+ssh -o BatchMode=yes -o ConnectTimeout=10 <alias> "$SHELL" -lc '<command>'
+```
+
+`BatchMode` makes ssh fail instead of asking for a password, and the login
+shell puts `npx` on the `PATH`. With no single matching alias, or when ssh
+fails, the row offers **Copy command** so you can run the same command on the
+host yourself:
+
+| Fix | Code host (daemon) | Tailscale machine (Pane app) |
+|---|---|---|
+| Start it | `npx --yes runpane@latest daemon repair --yes` | `open -a Pane` (macOS hosts only; otherwise open Pane there) |
+| Update it | `npx --yes runpane@latest update && npx --yes runpane@latest daemon repair --yes` | `npx --yes runpane@latest update` |
+
+`daemon repair` uses the default daemon data directory, `~/.pane_remote`. For a
+host set up with another `--pane-dir`, run `runpane daemon repair --pane-dir
+<dir> --yes` there instead.
 
 ## Troubleshooting
 
@@ -378,11 +428,26 @@ Check:
 
 ### A remote action could not be confirmed
 
-The browser client automatically retries a reviewed set of read-only requests after
-transient network or server failures. It sends actions such as terminal input and
-pane creation once: the host may finish an action even if the response is lost.
-If Pane says the action may have completed, inspect the current panes or terminal
-before submitting it again. Authentication failures stop immediately.
+Pane's remote clients (desktop, browser, phone and glasses) retry a reviewed set
+of read-only requests and dictation cleanup after transient network or server
+failures, on the reconnect schedule for up to five minutes. Authentication
+failures stop immediately.
+
+A host on a current Pane runs each action once per request ID and says so when a
+client connects (`deduplicatesRequestIds` in the `ready` event). It remembers
+each client's recent IDs and answers for ten minutes, in memory, up to 10,000
+per client; while a client is at that limit, the host refuses its new actions
+before running them and the client sends them again. Against such a
+host, every action a client sends (terminal input, prompts, new panes and tabs,
+Notify answers) carries an ID. An action issued while the connection is
+reconnecting waits for it; one whose answer is lost is resent with the same ID
+until the host answers or five minutes pass since it was issued. Terminal
+input keeps its order per terminal. Typing into a dimmed terminal is not queued.
+
+Delivery is unknown only when no answer arrives in that time: inspect the
+current panes or terminal before submitting it again. An action that was never
+sent says so. Against an older host, actions other than chat sends (which the
+host de-duplicates by operation ID) are sent once, as before.
 
 The browser normally uses native EventSource for output. Its fetch fallback and
 the desktop transport share one SSE text parser, accepting LF, CRLF, and CR line
@@ -418,4 +483,4 @@ To the clipboard of the machine you are sitting at. In remote mode, dragging to 
 - No full live remote end-to-end CI harness yet
 # Mobile push notifications
 
-The native companion may register an APNs/FCM token through its existing paired bearer token. Registrations are scoped to that paired client and revalidated before every send. The daemon sends attention alerts for `blocked` transitions and for settled `working → idle` transitions of turns a person started; controls can disable either category per device. See [Native mobile](NATIVE_MOBILE.md) for the operator-only credentials and signing setup.
+The native companion registers an APNs/FCM token with every computer it has saved. With a paired bearer token, the registration is scoped to that paired client and revalidated before every send. Over Tailscale Serve with no code, only the computer's owner login can register; the registration is filed under `tailnet:<login>` and the phone's install id, checked when it registers, and lasts until the phone revokes it or the provider reports the token dead. One owner login keeps at most 10 live registrations per computer, dropping the oldest. The daemon sends attention alerts for `blocked` transitions and for settled `working → idle` transitions of turns a person started; controls can disable either category per device. See [Native mobile](NATIVE_MOBILE.md) for the operator-only credentials and signing setup.

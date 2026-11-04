@@ -1,4 +1,4 @@
-import { customCommandResumeSchema, type CustomCommandResume } from '../../../shared/types/customCommandResume';
+import { customCommandResumeSchema, effectiveCustomResume, type CustomCommandResume } from '../../../shared/types/customCommandResume';
 /**
  * Session management for Pane.
  * Note: "Sessions" are called "Panes" in the UI. Internally they remain
@@ -132,7 +132,7 @@ function normalizeDbOutputType(type: DbSessionOutputType): SessionOutput['type']
 type DbSessionOutputType = import('../database/models').SessionOutput['type'];
 
 // Interface for panel state with custom state that can hold any AI-specific data
-import { addSessionLog } from '../ipc/logs';
+import { addSessionLog, cleanupSessionLogs, startSessionLogs } from './session-logs';
 import { PathResolver } from '../utils/pathResolver';
 import { CommandRunner, type CommandRunOptions } from '../utils/commandRunner';
 import { withLock } from '../utils/mutex';
@@ -281,6 +281,9 @@ export class SessionManager extends EventEmitter {
     // Hidden sessions are included for crash recovery, but not emitted to the
     // normal renderer session list.
     const dbSessions = this.db.getAllSessions(undefined, { includeHidden: true });
+    for (const session of dbSessions) {
+      if (!session.archived) startSessionLogs(session.id);
+    }
     const visibleDbSessions = dbSessions.filter(s => !s.is_hidden);
 
     // Partition sessions by status
@@ -333,7 +336,7 @@ export class SessionManager extends EventEmitter {
       projectId: dbSession.project_id ?? undefined,
       folderId: dbSession.folder_id,
       displayOrder: dbSession.display_order, // Include displayOrder for proper sorting
-      isFavorite: dbSession.is_favorite,
+      isFavorite: Boolean(dbSession.is_favorite),
       favoritePinnedAt: dbSession.favorite_pinned_at ?? undefined,
       // Model is now managed at panel level
       toolType: normalizedToolType,
@@ -445,9 +448,6 @@ export class SessionManager extends EventEmitter {
       throw new Error(`Session with ID ${id} already exists`);
     }
     
-    // Add log entry for session creation
-    addSessionLog(id, 'info', `Creating session: ${name}`, 'SessionManager');
-    
     let targetProject: Project | null = null;
     const isDetached = options?.detached === true;
     
@@ -488,6 +488,8 @@ export class SessionManager extends EventEmitter {
     };
 
     const dbSession = this.db.createSession(sessionData);
+    startSessionLogs(id);
+    addSessionLog(id, 'info', `Creating session: ${name}`, 'SessionManager');
     
     const session = this.convertDbSessionToSession(dbSession);
     session.toolType = toolType || session.toolType;
@@ -607,6 +609,24 @@ export class SessionManager extends EventEmitter {
     });
   }
 
+  renameSession(id: string, name: string): Session {
+    const trimmedName = name.trim();
+    if (!trimmedName) throw new Error('Session name must be non-empty');
+    return this.publishSessionMetadata(id, this.db.updateSession(id, { name: trimmedName }));
+  }
+
+  setFavorite(id: string, pinned: boolean): Session {
+    return this.publishSessionMetadata(id, this.db.setSessionFavorite(id, pinned));
+  }
+
+  private publishSessionMetadata(id: string, updated: DbSession | undefined): Session {
+    if (!updated) throw new Error(`Session ${id} not found`);
+    const session = this.convertDbSessionToSession(updated);
+    this.activeSessions.set(id, session);
+    this.emit('session-updated', session);
+    return session;
+  }
+
   updateSession(id: string, update: SessionUpdate): void {
 
     // Add log entry for important status changes
@@ -620,7 +640,9 @@ export class SessionManager extends EventEmitter {
       addSessionLog(id, 'error', `Session error: ${update.error}`, 'SessionManager');
     }
 
+    const { run_started_at: runStartedAt, ...sessionUpdate } = update;
     const dbUpdate: UpdateSessionData = {};
+    if (runStartedAt !== undefined) dbUpdate.run_started_at = runStartedAt;
 
     if (update.status !== undefined) {
       dbUpdate.status = this.mapSessionStatusToDbStatus(update.status);
@@ -645,7 +667,7 @@ export class SessionManager extends EventEmitter {
     const session = this.convertDbSessionToSession(updatedDbSession);
 
     // Apply any additional updates not stored in DB
-    Object.assign(session, update);
+    Object.assign(session, sessionUpdate);
 
     this.activeSessions.set(id, session);
     this.emit('session-updated', session);
@@ -839,6 +861,7 @@ export class SessionManager extends EventEmitter {
     else await this.terminalSessionManager.closeTerminalSession(id);
     
     this.activeSessions.delete(id);
+    cleanupSessionLogs(id);
     this.emit('session-deleted', { id }); // Keep the same event name for frontend compatibility
   }
 
@@ -1487,9 +1510,15 @@ export class SessionManager extends EventEmitter {
     return result;
   }
 
-  async resumeInterruptedSessions(sessionIds: string[]): Promise<void> {
+  /**
+   * Relaunches each interrupted agent panel on its saved conversation. A panel
+   * that fails does not stop the others; its Pane stays interrupted and is
+   * returned in `failedSessionIds`.
+   */
+  async resumeInterruptedSessions(sessionIds: string[]): Promise<{ failedSessionIds: string[] }> {
     console.log(`[SessionManager] resumeInterruptedSessions called with ${sessionIds.length} session(s): ${sessionIds.join(', ')}`);
     const { terminalPanelManager } = await import('./terminalPanelManager');
+    const failedSessionIds: string[] = [];
 
     for (const sessionId of sessionIds) {
       const dbSession = this.db.getSession(sessionId);
@@ -1502,6 +1531,7 @@ export class SessionManager extends EventEmitter {
       const panels = this.db.getPanelsForSession(sessionId);
       console.log(`[SessionManager] Session ${sessionId} has ${panels.length} panel(s): ${panels.map(p => `${p.id} (${p.type})`).join(', ')}`);
       let resumedPanelCount = 0;
+      let failedPanelCount = 0;
 
       for (const panel of panels) {
         if (panel.type === 'terminal') {
@@ -1512,7 +1542,7 @@ export class SessionManager extends EventEmitter {
             const customState: TerminalPanelState = { ...terminalCustomState(state.customState), ...termState };
             const agentType = customState.agentType ?? resolveAgentTypeFromCommand(customState.initialCommand);
 
-            if (!isCliAgentType(agentType) && !customState.customResume) {
+            if (!isCliAgentType(agentType) && !effectiveCustomResume(customState)) {
               continue;
             }
             customState.agentType = agentType;
@@ -1531,18 +1561,29 @@ export class SessionManager extends EventEmitter {
 
             const reloadedPanel = panelManager.getPanel(panel.id) ?? this.db.getPanel(panel.id);
             if (reloadedPanel) {
-              await terminalPanelManager.initializeTerminal(reloadedPanel, worktreePath);
-              console.log(`[SessionManager] Resumed terminal panel ${panel.id} via launch-time ${agentType} resolver`);
-              resumedPanelCount++;
+              try {
+                await terminalPanelManager.initializeTerminal(reloadedPanel, worktreePath);
+                console.log(`[SessionManager] Resumed terminal panel ${panel.id} via launch-time ${agentType} resolver`);
+                resumedPanelCount++;
+              } catch (error) {
+                failedPanelCount++;
+                console.error(`[SessionManager] Failed to resume panel ${panel.id}:`, error);
+              }
             }
           }
         }
       }
 
+      if (failedPanelCount > 0) {
+        failedSessionIds.push(sessionId);
+        console.warn(`[SessionManager] Session ${sessionId} stays interrupted: ${failedPanelCount} panel(s) failed to resume`);
+        continue;
+      }
       // Update session status to running
       this.updateSession(sessionId, { status: 'running' });
       console.log(`[SessionManager] Resumed session ${sessionId}: ${resumedPanelCount} panels`);
     }
+    return { failedSessionIds };
   }
 
   async dismissInterruptedSessions(sessionIds: string[]): Promise<void> {

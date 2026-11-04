@@ -111,10 +111,10 @@ function createServicesStub(projects: Project[]): AppServices {
 
 describe('config IPC handlers', () => {
   it.each([
-    { platform: 'darwin', agents: ['claude', 'codex', 'cursor'] },
-    { platform: 'linux', agents: ['claude', 'codex', 'cursor'] },
-    { platform: 'win32', agents: ['claude', 'codex'] },
-  ])('keeps terminal-only OpenCode out of remote Session agents on $platform', async ({ platform, agents }) => {
+    { platform: 'darwin', agents: ['claude', 'codex', 'cursor', 'opencode'] },
+    { platform: 'linux', agents: ['claude', 'codex', 'cursor', 'opencode'] },
+    { platform: 'win32', agents: ['claude', 'codex', 'opencode'] },
+  ])('includes OpenCode in remote Session agents on $platform', async ({ platform, agents }) => {
     const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue(platform);
     try {
       const ipcMain = createIpcMainStub();
@@ -124,6 +124,30 @@ describe('config IPC handlers', () => {
       await expect(registry.invoke('remote:pwa-affordances')).resolves.toMatchObject({
         sessionAgents: { agents, defaultAgent: 'claude' },
       });
+      const services = createServicesStub([]);
+      await services.configManager.updateConfig({ defaultOrchestratorAgent: 'opencode' });
+      const configuredRegistry = new PaneCommandRegistry();
+      // SAFETY: The stub implements the IpcMain handle surface exercised by registerConfigHandlers.
+      registerConfigHandlers(ipcMain as IpcMain, services, configuredRegistry);
+      await expect(configuredRegistry.invoke('remote:pwa-affordances')).resolves.toMatchObject({
+        sessionAgents: { agents, defaultAgent: 'opencode' },
+      });
+    } finally {
+      platformSpy.mockRestore();
+    }
+  });
+
+  it.each([
+    { platform: 'darwin', os: 'macOS' },
+    { platform: 'linux', os: 'Linux' },
+    { platform: 'win32', os: 'Windows' },
+  ])("reports $platform as $os, for the glasses' OS logo", async ({ platform, os }) => {
+    const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue(platform);
+    try {
+      const registry = new PaneCommandRegistry();
+      // SAFETY: The stub implements the IpcMain handle surface exercised by registerConfigHandlers.
+      registerConfigHandlers(createIpcMainStub() as IpcMain, createServicesStub([]), registry);
+      await expect(registry.invoke('remote:pwa-affordances')).resolves.toMatchObject({ os });
     } finally {
       platformSpy.mockRestore();
     }
@@ -175,13 +199,13 @@ describe('config IPC handlers', () => {
     const ipcMain = createIpcMainStub();
     const services = createServicesStub([]);
     services.configManager.updateConfig = async () => {
-      throw new AppearanceValidationError('systemLightTheme must be a light palette');
+      throw new AppearanceValidationError('systemLightTheme must be a valid palette');
     };
     // SAFETY: The stub implements the IpcMain handle surface exercised by registerConfigHandlers.
     registerConfigHandlers(ipcMain as IpcMain, services);
-    await expect(ipcMain.handlers.get('config:update')?.({}, { systemLightTheme: 'dark' })).resolves.toEqual({
+    await expect(ipcMain.handlers.get('config:update')?.({}, { systemLightTheme: 'unknown' })).resolves.toEqual({
       success: false,
-      error: 'systemLightTheme must be a light palette',
+      error: 'systemLightTheme must be a valid palette',
     });
   });
 
@@ -218,9 +242,10 @@ describe('config IPC handlers', () => {
       const services = createServicesStub([]);
       services.configManager = configManager;
       const registry = new PaneCommandRegistry();
+      const ipcMain = createIpcMainStub();
       // SAFETY: The stub implements the IpcMain handle surface exercised by registerConfigHandlers.
-      registerConfigHandlers(createIpcMainStub() as IpcMain, services, registry);
-      return { configManager, registry };
+      registerConfigHandlers(ipcMain as IpcMain, services, registry);
+      return { configManager, registry, ipcMain };
     }
 
     const screenshotShortcut = {
@@ -262,21 +287,33 @@ describe('config IPC handlers', () => {
       const { registry } = await registerRemoteSettings();
 
       // SAFETY: remote:settings:update returns the refreshed affordances.
-      const live = await registry.invokeRemote('remote:settings:update', [{ deepgramApiKey: 'dg-key-1' }]) as RemotePwaAffordances;
+      const live = await registry.invokeRemote('remote:settings:update', [{ deepgramApiKey: 'dg-key-0123456789abcdef' }]) as RemotePwaAffordances;
       expect(live.voiceTranscription.availableModes).toEqual(['streaming']);
       // SAFETY: remote:settings:update returns the refreshed affordances.
-      const both = await registry.invokeRemote('remote:settings:update', [{ falApiKey: 'fal-key-1' }]) as RemotePwaAffordances;
+      const both = await registry.invokeRemote('remote:settings:update', [{ falApiKey: 'fal-key-0123456789abcdef' }]) as RemotePwaAffordances;
       expect(both.voiceTranscription.availableModes).toEqual(['streaming', 'recorded']);
       expect(both.voiceTranscription.configured.cleanup).toBe(false);
     });
 
     it('leaves fields the patch omits as they were', async () => {
       const { configManager, registry } = await registerRemoteSettings();
-      await registry.invokeRemote('remote:settings:update', [{ openRouterApiKey: 'or-key-1' }]);
+      await registry.invokeRemote('remote:settings:update', [{ openRouterApiKey: 'or-key-0123456789abcdef' }]);
 
       await registry.invokeRemote('remote:settings:update', [{ terminalShortcuts: [screenshotShortcut] }]);
 
-      expect(configManager.getConfig().openRouterApiKey).toBe('or-key-1');
+      expect(configManager.getConfig().openRouterApiKey).toBe('or-key-0123456789abcdef');
+    });
+
+    it('refuses a voice key that cannot be one, from the phone or desktop, saying why without repeating it', async () => {
+      const { configManager, registry, ipcMain } = await registerRemoteSettings();
+      const prose = 'Here is the key Deepgram gave me — paste it below.';
+
+      await expect(registry.invokeRemote('remote:settings:update', [{ deepgramApiKey: prose }]))
+        .rejects.toMatchObject({ code: 'ERR_VOICE_KEY_INVALID', message: "That isn't a Deepgram key: it has spaces or line breaks. No settings were saved." });
+      const desktop = await ipcMain.handlers.get('config:update')?.({}, { falApiKey: 'fal-key-0123456789abcdef\u201d' });
+      expect(desktop).toEqual({ success: false, error: expect.stringContaining("That isn't a fal key: it has characters no key has") });
+      expect(JSON.stringify(desktop)).not.toContain('0123456789');
+      expect([configManager.getConfig().deepgramApiKey, configManager.getConfig().falApiKey]).toEqual([undefined, undefined]);
     });
 
     it('refuses a patch with any other config field and writes nothing', async () => {
@@ -324,7 +361,7 @@ describe('config IPC handlers', () => {
         const { registry } = await registerRemoteSettings();
         captureEvents();
 
-        await registry.invokeRemote('remote:settings:update', [{ falApiKey: 'fal-key-1' }]);
+        await registry.invokeRemote('remote:settings:update', [{ falApiKey: 'fal-key-0123456789abcdef' }]);
 
         expect(sent).toHaveBeenCalledWith('remote:settings-changed');
       });

@@ -1,75 +1,172 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as Notifications from 'expo-notifications';
 import { useEffect } from 'react';
+import { AppState } from 'react-native';
+import { create } from 'zustand';
 
-import type { RemoteMobilePushStatus } from '@shared/types/remoteDaemon';
+import type { RemotePaneConnectionProfile } from '@shared/types/remoteDaemon';
+import { boundary, decodeOptionalBoundary } from '@shared/validation/boundaryDecoder';
 
-import { invokeChannel, useDaemon, useDaemonQueryKey } from '@/daemon';
+import { useHostsStore } from '@/auth/hostsStore';
+import { secureStore } from '@/auth/secureStore';
+import { invokeChannel } from '@/daemon';
+import { createDaemonClient } from '@/daemon/createClient';
+import { isDemoProfile } from '@/features/demo/demoHost';
 
 import { devicePush, getInstallationId } from './device';
-import { registerForPush, type PushSetupResult } from './registration';
+import { createWriteGate, preferencesFrom, registerEverywhere, type PushHost, type PushPreferences, type PushSetupResult } from './registration';
 
-const SETUP_KEY = 'push-setup';
+/** Per phone, not per computer: every computer gets the same switches. */
+const PREFERENCES_KEY = 'pane.native.pushPreferences';
+const DEFAULT_PREFERENCES: PushPreferences = { needsInputEnabled: true, completedEnabled: true };
+const REGISTER_DEBOUNCE_MS = 500;
 
-// The stream's first `ready` invalidates every query while the mount's
-// registration may still be waiting on the permission prompt. Share that run.
-const inFlight = new Map<string, Promise<PushSetupResult>>();
+interface PushState {
+  preferences: PushPreferences;
+  /**
+   * `saved`: the phone's own switches, sent to every computer. `absent`: never chosen on this phone,
+   * so the first pass adopts what the computers had. `unreadable`: storage failed, so nothing is sent.
+   */
+  preferencesSource: 'saved' | 'absent' | 'unreadable';
+  /** The last result per saved computer, by profile id. Missing means not checked yet. */
+  results: Record<string, PushSetupResult>;
+  setPreference(key: keyof PushPreferences, value: boolean): void;
+}
+
+export const usePushStore = create<PushState>(set => ({
+  preferences: DEFAULT_PREFERENCES,
+  preferencesSource: 'absent',
+  results: {},
+  setPreference: (key, value) => {
+    set(state => {
+      const preferences = { ...state.preferences, [key]: value };
+      savePreferences(preferences);
+      return { preferences, preferencesSource: 'saved' };
+    });
+    requestPushRegistration();
+  },
+}));
+
+const preferencesSchema = boundary.object({ needsInputEnabled: boundary.boolean, completedEnabled: boundary.boolean });
+// Registration waits for the saved switches, so a default never overwrites one turned off.
+const preferencesLoaded = secureStore.getItem(PREFERENCES_KEY).then(saved => {
+  if (!saved) return;
+  const preferences = decodeOptionalBoundary(JSON.parse(saved), preferencesSchema);
+  usePushStore.setState(preferences ? { preferences, preferencesSource: 'saved' } : { preferencesSource: 'unreadable' });
+}).catch(() => usePushStore.setState({ preferencesSource: 'unreadable' }));
+
+function savePreferences(preferences: PushPreferences): void {
+  void secureStore.setItem(PREFERENCES_KEY, JSON.stringify(preferences)).catch(() => undefined);
+}
+
+/** Orders Sign Out after any registration write to that computer. */
+const gate = createWriteGate();
+
+let timer: ReturnType<typeof setTimeout> | null = null;
+let running = false;
+let pending = false;
+
+/** Registers this phone with every saved computer, sending the current switches. Debounced. */
+export function requestPushRegistration(): void {
+  if (timer) clearTimeout(timer);
+  timer = setTimeout(() => {
+    timer = null;
+    void run();
+  }, REGISTER_DEBOUNCE_MS);
+}
+
+async function run(): Promise<void> {
+  if (running) {
+    pending = true;
+    return;
+  }
+  running = true;
+  try {
+    await preferencesLoaded;
+    const profiles = useHostsStore.getState().profiles.filter(profile => !isDemoProfile(profile));
+    const saved = new Set(profiles.map(profile => profile.id));
+    usePushStore.setState(state => ({
+      results: Object.fromEntries(Object.entries(state.results).filter(([id]) => saved.has(id))),
+    }));
+    const { preferences, preferencesSource } = usePushStore.getState();
+    const results = await registerEverywhere(devicePush, profiles.map(pushHost), preferencesSource === 'saved' ? preferences : null, (id, result) => {
+      if (!isSaved(id)) return;
+      usePushStore.setState(state => ({ results: { ...state.results, [id]: result } }));
+    });
+    if (preferencesSource !== 'saved') adoptPreferences(results, preferencesSource);
+  } finally {
+    running = false;
+    if (pending) {
+      pending = false;
+      requestPushRegistration();
+    }
+  }
+}
 
 /**
- * This phone's notification registration with the active host. The first
- * mount registers (asking for permission once), and so does every reconnect,
- * because `DaemonProvider` refetches the host's queries when the stream opens.
+ * Shows the switches the computers already had. A phone that never chose them saves that as its
+ * own and sends it everywhere, but only once every saved computer has reported its values; until
+ * then, and when storage failed, the values are only shown, and each computer keeps its own.
  */
-export function usePushSetup() {
-  const { client, profile } = useDaemon();
-  const queryClient = useQueryClient();
-  const query = useQuery<PushSetupResult>({
-    queryKey: [profile.id, SETUP_KEY],
-    queryFn: () => {
-      const running = inFlight.get(profile.id);
-      if (running) return running;
-      const run = registerForPush({ ...devicePush, invoke: (channel, args) => invokeChannel(client, channel, args) }, profile.id)
-        .finally(() => inFlight.delete(profile.id));
-      inFlight.set(profile.id, run);
-      return run;
-    },
-    staleTime: Infinity,
-    retry: false,
-    // Coming back from the Settings app may have turned notifications on.
-    refetchOnWindowFocus: current => (current.state.data?.state === 'denied' ? 'always' : false),
-  });
+function adoptPreferences(results: Record<string, PushSetupResult>, source: 'absent' | 'unreadable'): void {
+  if (!Object.values(results).some(result => result.state === 'registered')) return;
+  const { preferences, complete } = preferencesFrom(results);
+  if (source === 'unreadable' || !complete) {
+    usePushStore.setState({ preferences });
+    return;
+  }
+  savePreferences(preferences);
+  usePushStore.setState({ preferences, preferencesSource: 'saved' });
+  const differs = Object.values(results).some(result => result.state === 'registered'
+    && (result.status.needsInputEnabled !== preferences.needsInputEnabled || result.status.completedEnabled !== preferences.completedEnabled));
+  if (differs) requestPushRegistration();
+}
+
+function isSaved(profileId: string): boolean {
+  return useHostsStore.getState().profiles.some(profile => profile.id === profileId);
+}
+
+function pushHost(profile: RemotePaneConnectionProfile): PushHost {
+  // Registration needs no workspace stream: each call is one request to that computer.
+  const client = createDaemonClient(profile);
+  return gate.host(profile.id, (channel, args) => invokeChannel(client, channel, args), () => isSaved(profile.id));
+}
+
+/**
+ * Keeps every saved computer's registration current: when the app opens or
+ * returns to the foreground (notifications may have been turned on in
+ * Settings), when the saved computers change, and when APNs or FCM rotates
+ * this phone's token. Render it once, after saved hosts have loaded.
+ */
+export function PushRegistrationSync() {
+  const profiles = useHostsStore(state => state.profiles);
 
   useEffect(() => {
-    // APNs and FCM can rotate a token while the app runs.
-    const subscription = Notifications.addPushTokenListener(() => void queryClient.invalidateQueries({ queryKey: [profile.id, SETUP_KEY] }));
-    return () => subscription.remove();
-  }, [queryClient, profile.id]);
+    requestPushRegistration();
+  }, [profiles]);
 
-  return query;
+  useEffect(() => {
+    const appState = AppState.addEventListener('change', status => {
+      if (status === 'active') requestPushRegistration();
+    });
+    const token = Notifications.addPushTokenListener(() => requestPushRegistration());
+    return () => {
+      appState.remove();
+      token.remove();
+    };
+  }, []);
+
+  return null;
 }
 
-/** Turns one alert kind on or off for this phone on the active host. */
-export function usePushControls() {
-  const { client } = useDaemon();
-  const queryKey = useDaemonQueryKey(SETUP_KEY);
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (controls: { needsInputEnabled?: boolean; completedEnabled?: boolean }) =>
-      invokeChannel<RemoteMobilePushStatus>(client, 'mobile:push-controls', [
-        { platform: devicePush.platform, installationId: await getInstallationId(), ...controls },
-      ]),
-    onSuccess: (status: RemoteMobilePushStatus) => {
-      const next: PushSetupResult = { state: 'registered', status };
-      queryClient.setQueryData(queryKey, next);
-    },
-    // The host may have applied a change whose response was lost: show what it has.
-    onError: () => queryClient.invalidateQueries({ queryKey }),
-  });
-}
-
-/** Best effort: stops this host from sending to this phone before its token is deleted. */
-export async function revokePush(client: Parameters<typeof invokeChannel>[0], hostProfileId: string): Promise<void> {
-  const revoke = getInstallationId().then(installationId =>
-    invokeChannel(client, 'mobile:push-revoke', [{ platform: devicePush.platform, installationId, hostProfileId }]));
-  await Promise.race([revoke, new Promise(resolve => setTimeout(resolve, 3_000))]).catch(() => undefined);
+/**
+ * Signs this phone out of a computer: stops its alerts here, best effort within 3 s, then
+ * `remove` forgets the profile. A registration already on its way lands before the revoke.
+ */
+export function signOutPush(profile: RemotePaneConnectionProfile, remove: () => void): Promise<void> {
+  const revoke = async () => {
+    const installationId = await getInstallationId();
+    await invokeChannel(createDaemonClient(profile), 'mobile:push-revoke', [{ platform: devicePush.platform, installationId, hostProfileId: profile.id }]);
+  };
+  const bounded = () => Promise.race([revoke(), new Promise(resolve => setTimeout(resolve, 3_000))]).then(() => undefined, () => undefined);
+  return gate.close(profile.id, bounded, remove);
 }

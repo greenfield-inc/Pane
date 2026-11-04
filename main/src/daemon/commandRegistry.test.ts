@@ -13,6 +13,21 @@ describe('PaneCommandRegistry', () => {
       registry.invokeRemote('panels:origin'), registry.invoke('panels:origin'),
     ])).toEqual([true, false]);
   });
+  it('fences new mutations and waits for existing work before update quiescence', async () => {
+    const registry = new PaneCommandRegistry();
+    let finish!: () => void;
+    registry.register('panels:create', () => new Promise<void>(resolve => { finish = resolve; }));
+    registry.register('panels:list', () => []);
+    const pending = registry.invoke('panels:create');
+    let settled = false;
+    const quiescing = registry.quiesceForUpdate().then(() => { settled = true; });
+    await expect(registry.invoke('panels:create')).rejects.toMatchObject({ code: 'ERR_UPDATE_QUIESCING' });
+    expect(settled).toBe(false);
+    await expect(registry.invoke('panels:list')).resolves.toEqual([]);
+    finish(); await pending; await quiescing;
+    expect(settled).toBe(true);
+  });
+
   it('registers and invokes daemon-owned commands', async () => {
     const registry = new PaneCommandRegistry();
     registry.register('folders:get-by-project', async (projectId: number) => ({ projectId }));

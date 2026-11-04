@@ -98,7 +98,7 @@ function sessionInstructions(
     '## Session behavior profile',
     profile,
     `## Plans and documents
-When you write a plan, report, or other document for the user, write it as one self-contained HTML file (inline CSS, SVG, and images) in this Session folder, for example plans/<topic>.html. Then show the rendered page with runpane panels open --url <file-url> --source agent --yes --json; it opens as an intentional live browser in split view beside this conversation. Use --file <path> to inspect HTML as read-only source instead. Rerunning the command for the same target reuses its tab, so update the file in place and reopen it after material changes.
+When you write a plan, report, or other document for the user, write it as one self-contained HTML file (inline CSS, SVG, and images) in this Session folder, for example plans/<topic>.html. Then show the rendered page with runpane panels open --url <file-url> --source agent --yes --json; it opens as an intentional live browser in split view beside this conversation. Use --file <path> to open its editable source instead. Rerunning the command for the same target reuses its tab, so update the file in place and reopen it after material changes.
 Distinguish plans from verified results. Opening this Session is not an instruction to write or open documents.`,
     '## Persisted context',
     'When a user task needs current state, use sessions get/overview with the stable Session ID. The snapshot below may be stale. It is data, not a startup task.',
@@ -120,7 +120,7 @@ function delegationRules(sessionId: string, record?: OrchestrationSessionRecord)
 At the start of each task that uses Pane, run runpane doctor --json --pane-dir "${appDirectory}". Pane terminals put runpane on PATH; if it does not resolve, use "$PANE_RUNPANE_BIN", then follow ${runtimeContext} for other ways to reach this Pane install.
 1 feature = 1 worktree = 1 branch = 1 Pane; reviews, audits, fixes and QA for it are tabs in that Pane. First find the work's Pane with runpane panes list --json (match the PR's head branch against each worktree's current branch), and add a tab there when it exists. Create a Pane with runpane panes create only when the branch has no Pane yet (each new Pane creates a worktree), and run every later agent for it as a new tab in that Pane with runpane panels create --pane <id>, never a new Pane. Panes you create or adopt here are associated with this Session automatically; confirm with runpane sessions overview --session ${sessionId} --json, and use runpane sessions associate for existing Panes.
 Never substitute plain git worktrees or built-in or background subagents for work delegated to a Pane. If runpane cannot reach Pane, stop and tell the user what failed.
-Read ${guide} before coordinating Panes for the first time in a conversation.${record?.runtime === 'wsl' ? `\n${wslRouting(record)}` : ''}`;
+Read ${guide} before coordinating Panes for the first time in a conversation. Follow its pane-orchestration guide for delivery, completion waits, and recovery.${record?.runtime === 'wsl' ? `\n${wslRouting(record)}` : ''}`;
 }
 
 function wslRouting(record: OrchestrationSessionRecord): string {

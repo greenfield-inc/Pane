@@ -29,7 +29,7 @@ describe('appearance service', () => {
 
   it('builds an exact snapshot and pre-window options', () => {
     expect(buildAppearanceSnapshot(DEFAULT_APPEARANCE)).toEqual(DEFAULT_APPEARANCE);
-    const options = buildWindowAppearanceOptions(DEFAULT_APPEARANCE, true, { dark: '#112233' });
+    const options = buildWindowAppearanceOptions(DEFAULT_APPEARANCE, true, { 'dusk-oled': '#112233' });
     expect(options.additionalArguments[0]).toMatch(new RegExp(`^${APPEARANCE_ARG_PREFIX}`));
     expect(options.backgroundColor).toBe('#112233');
   });

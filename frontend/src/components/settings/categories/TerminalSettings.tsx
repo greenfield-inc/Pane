@@ -1,3 +1,5 @@
+import { AT_TERMINAL_LINE_COUNT_PRESETS } from '../../../types/settings';
+import { DEFAULT_TERMINAL_FONT_SIZE } from '../../../../../shared/types/appearance';
 import { useEffect, useState } from 'react';
 import { Minus, Plus } from 'lucide-react';
 import { IconButton } from '../../ui/Button';
@@ -23,18 +25,18 @@ interface TerminalSettingsProps {
 
 export function TerminalSettings({ persistence, systemMonoFonts }: TerminalSettingsProps) {
   const config = persistence.config!;
-  const saveTerminalLineCount = (value: number) => {
-    // SAFETY: SegmentedControl values are generated from the four supported line-count literals below.
-    return persistence.savePreference('atTerminalLineCount', value as 100 | 300 | 500 | -1);
-  };
   const hostShell = useHostShellSettings();
   const savePreferredShell = (value: string) => {
     // SAFETY: Select options use only PreferredShell identifiers supplied by the backend.
     return persistence.runSave('terminal-shell', () => hostShell.setPreferredShell(value as PreferredShell));
   };
-  const [customFont, setCustomFont] = useState(config.terminalFontFamily ?? 'Geist Mono');
-  useEffect(() => setCustomFont(config.terminalFontFamily ?? 'Geist Mono'), [config.terminalFontFamily]);
-  const fontSize = config.terminalFontSize ?? 14;
+  const fontFamily = config.terminalFontFamily ?? 'Geist Mono';
+  const [customFont, setCustomFont] = useState(fontFamily);
+  useEffect(() => setCustomFont(fontFamily), [fontFamily]);
+  // The current font always has an option, so the select never shows blank for the
+  // bundled default or a custom name. Dot-prefixed families are hidden system fonts.
+  const fontOptions = [...new Set([fontFamily, ...systemMonoFonts.filter((font) => !font.startsWith('.'))])];
+  const fontSize = config.terminalFontSize ?? DEFAULT_TERMINAL_FONT_SIZE;
 
   return (
     <SettingsPage title="Terminal" description="Defaults for terminal panels across all projects.">
@@ -49,12 +51,12 @@ export function TerminalSettings({ persistence, systemMonoFonts }: TerminalSetti
           <div className="w-full space-y-2 sm:w-72">
             {systemMonoFonts.length > 0 && (
               <Select
-                value={config.terminalFontFamily ?? 'Geist Mono'}
+                value={fontFamily}
                 onValueChange={(value) => void persistence.saveConfig('terminal-font-family', { terminalFontFamily: value })}
               >
                 <SelectTrigger aria-label="Terminal font family"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {systemMonoFonts.map((font) => <SelectItem key={font} value={font}>{font}</SelectItem>)}
+                  {fontOptions.map((font) => <SelectItem key={font} value={font}>{font}</SelectItem>)}
                 </SelectContent>
               </Select>
             )}
@@ -143,8 +145,8 @@ export function TerminalSettings({ persistence, systemMonoFonts }: TerminalSetti
             label="Default terminal reference line count"
             value={persistence.preferences.atTerminalLineCount}
             columns={4}
-            options={[100, 300, 500, -1].map((value) => ({ id: value, label: value === -1 ? 'All' : String(value) }))}
-            onChange={(value) => void saveTerminalLineCount(value)}
+            options={AT_TERMINAL_LINE_COUNT_PRESETS.map((value) => ({ id: value, label: value === -1 ? 'All' : String(value) }))}
+            onChange={(value) => void persistence.savePreference('atTerminalLineCount', value)}
           />
         </SettingRow>
       </SettingsSection>

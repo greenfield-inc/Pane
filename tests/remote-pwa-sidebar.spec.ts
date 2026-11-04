@@ -105,7 +105,7 @@ test('archiving a Session from its row menu can be undone from the toast', async
   await expect(page.getByRole('group', { name: 'Sessions' }).getByRole('button', { name: 'Open Session Release prep' })).toBeVisible();
 });
 
-test('reopening reconnects to the last host, and shows the connect form when that fails or after Disconnect', async ({ page }) => {
+test('reopening keeps the last host through an outage and Disconnect returns to the connect form', async ({ page }) => {
   await openConnectedRemotePwa(page);
   await page.reload();
   await expect(page.getByRole('tablist', { name: 'Remote tool panels' })).toBeVisible();
@@ -113,13 +113,11 @@ test('reopening reconnects to the last host, and shows the connect form when tha
   const health = 'http://anim-pane.test/remote/browser/health';
   await page.route(health, route => route.abort());
   await page.reload();
-  await expect(page.getByRole('status').filter({ hasText: 'Reconnecting to MacBook Pro' })).toBeVisible();
-  // The client retries the health check for about 20 seconds before giving up.
-  await expect(page.getByRole('button', { name: 'Connect', exact: true })).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByRole('alert')).toBeVisible();
-
+  // Startup failure keeps the selected host and its bounded recovery cycle.
+  await expect(page.getByRole('button', { name: 'Disconnect' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Connect', exact: true })).toHaveCount(0);
   await page.unroute(health);
-  await page.getByRole('button', { name: 'Connect', exact: true }).click();
+  await expect(page.getByRole('tablist', { name: 'Remote tool panels' })).toBeVisible({ timeout: 25_000 });
   await page.getByRole('button', { name: 'Disconnect' }).click();
   await page.reload();
   await expect(page.getByRole('button', { name: 'Connect', exact: true })).toBeVisible();
@@ -217,4 +215,82 @@ test('a Session shows its recorded blockers on its row and above its chat', asyn
   await expect(row).toContainText('Blocked: Waiting on the signing certificate');
   await row.click();
   await expect(page.getByRole('region', { name: 'Blockers' })).toContainText('Waiting on the signing certificate');
+});
+
+/** Gives each mock Session one Pane, so its row has a chevron and nested Pane rows. */
+async function openWithSessionPanes(page: Page) {
+  const host = await openConnectedRemotePwa(page, { orchestrationSessionNames: ['Release prep', 'Billing fix'] });
+  host.sessions[0].associations = [{ paneId: 'anim-remote-1', panelIds: [], attachedAt: new Date(0).toISOString() }];
+  host.sessions[1].associations = [{ paneId: 'anim-remote-2', panelIds: [], attachedAt: new Date(0).toISOString() }];
+  await page.getByRole('button', { name: 'Refresh remote sessions' }).click();
+  return host;
+}
+
+const sessionsGroup = (page: Page) => page.getByRole('group', { name: 'Sessions' });
+const sessionToggle = (page: Page, name: string) => sessionsGroup(page).getByRole('button', { name: new RegExp(`^(Show|Hide) panes in ${name}$`) });
+
+test('Sessions start collapsed and this device remembers which ones were opened', async ({ page }) => {
+  await openWithSessionPanes(page);
+  const releaseToggle = sessionToggle(page, 'Release prep');
+  const billingToggle = sessionToggle(page, 'Billing fix');
+
+  await expect(releaseToggle).toHaveAccessibleName('Show panes in Release prep');
+  await expect(releaseToggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(billingToggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(sessionsGroup(page).getByRole('button', { name: /^server-side funnel events/ })).toBeHidden();
+  await expect(sessionsGroup(page).getByRole('button', { name: /^sms opt-in consent at signup/ })).toBeHidden();
+
+  // Opening a Session does not expand it; only the chevron does.
+  await sessionsGroup(page).getByRole('button', { name: 'Open Session Release prep' }).click();
+  await expect(page.getByRole('tab', { name: 'Claude', exact: true })).toHaveAttribute('aria-selected', 'true');
+  await expect(releaseToggle).toHaveAttribute('aria-expanded', 'false');
+
+  await releaseToggle.click();
+  await expect(releaseToggle).toHaveAccessibleName('Hide panes in Release prep');
+  await expect(releaseToggle).toHaveAttribute('aria-expanded', 'true');
+  await expect(sessionsGroup(page).getByRole('button', { name: /^server-side funnel events/ })).toBeVisible();
+
+  await page.reload();
+  await expect(releaseToggle).toHaveAttribute('aria-expanded', 'true');
+  await expect(sessionsGroup(page).getByRole('button', { name: /^server-side funnel events/ })).toBeVisible();
+  await expect(billingToggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(sessionsGroup(page).getByRole('button', { name: /^sms opt-in consent at signup/ })).toBeHidden();
+  // Stored per host, by Session id alone.
+  expect(await page.evaluate(() => window.localStorage.getItem('pane.remotePwa.expandedSessions@anim-host')))
+    .toBe(JSON.stringify(['__orchestration_session_mock-0__']));
+
+  // Pinning the Session shows it open under Pinned too.
+  await page.getByRole('button', { name: 'Pin Session Release prep' }).click();
+  await expect(page.getByRole('group', { name: 'Pinned' }).getByRole('button', { name: 'Hide panes in Release prep' })).toHaveAttribute('aria-expanded', 'true');
+});
+
+test('another host\'s opened Sessions do not open this host\'s', async ({ page }) => {
+  // The mock serves one host, so this stands in for switching hosts: the other host's choice is stored under its own key.
+  await page.addInitScript(() => {
+    window.localStorage.setItem('pane.remotePwa.expandedSessions@other-host', JSON.stringify(['__orchestration_session_mock-0__']));
+  });
+  await openWithSessionPanes(page);
+  await expect(sessionToggle(page, 'Release prep')).toHaveAttribute('aria-expanded', 'false');
+});
+
+test('the Session toggle still works for the visit when storage is unavailable', async ({ page }) => {
+  await page.addInitScript(() => {
+    const { getItem, setItem } = Storage.prototype;
+    Storage.prototype.getItem = function (key: string) {
+      if (key.startsWith('pane.remotePwa.expandedSessions')) throw new DOMException('Storage disabled', 'SecurityError');
+      return getItem.call(this, key);
+    };
+    Storage.prototype.setItem = function (key: string, value: string) {
+      if (key.startsWith('pane.remotePwa.expandedSessions')) throw new DOMException('Storage disabled', 'SecurityError');
+      setItem.call(this, key, value);
+    };
+  });
+  await openWithSessionPanes(page);
+  const releaseToggle = sessionToggle(page, 'Release prep');
+  await expect(releaseToggle).toHaveAttribute('aria-expanded', 'false');
+  await releaseToggle.click();
+  await expect(releaseToggle).toHaveAttribute('aria-expanded', 'true');
+  await expect(sessionsGroup(page).getByRole('button', { name: /^server-side funnel events/ })).toBeVisible();
+  await releaseToggle.click();
+  await expect(releaseToggle).toHaveAttribute('aria-expanded', 'false');
 });

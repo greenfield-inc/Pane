@@ -1,7 +1,23 @@
 const fs = require('fs');
 const path = require('path');
+const { Arch } = require('electron-builder');
 
 const { verifyPackedApp } = require('./verify-packaged-icon');
+const { verifyChatAdapters } = require('./verify-chat-adapters');
+
+function verifyLinuxSqliteArchitecture(appOutDir, arch) {
+  const name = Arch[arch];
+  const expected = { x64: 62, arm64: 183 }[name];
+  if (!expected) throw new Error(`Unsupported Linux SQLite architecture: ${name}`);
+  const file = path.join(appOutDir, 'resources', 'app.asar.unpacked', 'node_modules',
+    'better-sqlite3-multiple-ciphers', 'build', 'Release', 'better_sqlite3.node');
+  const binary = fs.readFileSync(file);
+  if (binary.length < 20 || binary.subarray(0, 4).toString() !== '\x7fELF'
+    || binary[5] !== 1 || binary.readUInt16LE(18) !== expected) {
+    throw new Error(`Packaged SQLite does not target Linux ${name}: ${file}`);
+  }
+  console.log(`[native-architecture] Packaged SQLite matches Linux ${name}`);
+}
 
 // Linux only: the package ships `pane`, and `Pane` is a compatibility alias for
 // callers that still use the old capitalised name.
@@ -30,8 +46,11 @@ async function afterPack(context) {
   // checked here — rcedit writes it after this hook — scripts/build-win.js
   // checks it once electron-builder has finished.
   verifyPackedApp(context.appOutDir, context.electronPlatformName, { checkExecutable: false });
+  // Chat tabs run the bundled ACP adapters; a build that cannot start them fails here.
+  await verifyChatAdapters(context.appOutDir, context.electronPlatformName, Arch[context.arch]);
 
   if (context.electronPlatformName !== 'linux') return;
+  verifyLinuxSqliteArchitecture(context.appOutDir, context.arch);
   createLinuxCompatibilityAlias(context.appOutDir);
 }
 
@@ -39,3 +58,4 @@ module.exports = afterPack;
 module.exports.default = afterPack;
 module.exports.afterPack = afterPack;
 module.exports.createLinuxCompatibilityAlias = createLinuxCompatibilityAlias;
+module.exports.verifyLinuxSqliteArchitecture = verifyLinuxSqliteArchitecture;

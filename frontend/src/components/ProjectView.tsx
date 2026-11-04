@@ -7,6 +7,7 @@ import { PanelTabBar } from './panels/PanelTabBar';
 import { PanelContainer } from './panels/PanelContainer';
 import { usePanelStore } from '../stores/panelStore';
 import { panelApi } from '../services/panelApi';
+import { requestBrowserNavigation } from './panels/browser/browserNavigation';
 import { useConfigStore } from '../stores/configStore';
 import { readPaneLayout, rememberPaneLayout } from '../utils/paneLayoutMemory';
 import { createSingleGroupLayout } from '../utils/panelLayout';
@@ -321,9 +322,7 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
       await panelApi.updatePanel(existingPanel.id, { title, state: updatedPanel.state });
       updatePanelState(updatedPanel);
       await handlePanelSelect(updatedPanel);
-      window.dispatchEvent(new CustomEvent('browser-panel:navigate', {
-        detail: { url, sessionId: mainRepoSessionId },
-      }));
+      requestBrowserNavigation({ url, sessionId: mainRepoSessionId, panelId: existingPanel.id });
       return;
     }
 

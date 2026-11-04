@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { AgentState } from '../../../shared/types/agentStatus';
 import { SETTINGS_PREFERENCE_KEYS } from '../types/settings';
+import { API } from '../utils/api';
 import { rollupAgentState } from '../utils/agentStatus';
 import { usePanelStore } from './panelStore';
 import { useSessionStore } from './sessionStore';
@@ -51,9 +52,7 @@ export const useAttentionInboxStore = create<AttentionInboxState>((set) => ({
   markFinished: (sessionId) => set(state => ({ marks: { ...state.marks, [sessionId]: 'finished' } })),
   loadEnabled: async () => {
     try {
-      // SAFETY: The named IPC/API channel contract establishes this response payload type.
-      const result = await window.electron?.invoke('preferences:get', SETTINGS_PREFERENCE_KEYS.sidebarAttentionInbox) as { data?: string } | undefined;
-      set({ enabled: result?.data === 'true' });
+      set({ enabled: await API.preferences.get(SETTINGS_PREFERENCE_KEYS.sidebarAttentionInbox) === 'true' });
     } catch {
       set({ enabled: false });
     }

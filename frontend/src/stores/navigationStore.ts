@@ -42,11 +42,12 @@ interface NavigationState {
   expandProject: (projectId: number) => number[] | null;
   registerProjectIds: (projectIds: number[]) => number[] | null;
 
-  // Sessions whose Pane rows the sidebar hides. Kept here so the choice
-  // outlives the sidebar remounting between its full and compact layouts.
-  collapsedSessions: Set<string>;
-  hydrateCollapsedSessions: (sessionIds: string[]) => void;
-  toggleSessionCollapsed: (sessionId: string) => string[];
+  // Sessions whose Pane rows the sidebar shows; every other Session is collapsed.
+  // Only the Session's chevron changes it. Kept here so the choice outlives the
+  // sidebar remounting between its full and compact layouts.
+  expandedSessions: Set<string>;
+  hydrateExpandedSessions: (sessionIds: string[]) => void;
+  toggleSessionExpanded: (sessionId: string) => string[];
 
   // Repositories open inside the sidebar's Archived list, kept here for the same reason.
   expandedArchivedProjects: Set<number>;
@@ -66,6 +67,8 @@ interface NavigationState {
   navigateToPaneChat: () => void;
   navigateToMissionControl: () => void;
   navigateToSsh: () => void;
+  navigateToLoops: () => void;
+  navigateToNotify: () => void;
 }
 
 export const useNavigationStore = create<NavigationState>((set, get) => ({
@@ -129,15 +132,15 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
     return toProjectIdArray(next);
   },
 
-  collapsedSessions: new Set<string>(),
-  hydrateCollapsedSessions: (sessionIds) => {
-    set({ collapsedSessions: new Set(sessionIds) });
+  expandedSessions: new Set<string>(),
+  hydrateExpandedSessions: (sessionIds) => {
+    set({ expandedSessions: new Set(sessionIds) });
   },
-  toggleSessionCollapsed: (sessionId) => {
-    const next = new Set(get().collapsedSessions);
+  toggleSessionExpanded: (sessionId) => {
+    const next = new Set(get().expandedSessions);
     if (next.has(sessionId)) next.delete(sessionId);
     else next.add(sessionId);
-    set({ collapsedSessions: next });
+    set({ expandedSessions: next });
     return Array.from(next);
   },
 
@@ -180,6 +183,18 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
 
   navigateToSsh: () => set({
     activeView: 'ssh',
+    activeProjectId: null
+  }),
+
+  // Loops span every project, so the page clears the project scope.
+  navigateToLoops: () => set({
+    activeView: 'loops',
+    activeProjectId: null
+  }),
+
+  // The Notify inbox lists questions from every project.
+  navigateToNotify: () => set({
+    activeView: 'notify',
     activeProjectId: null
   }),
 }));

@@ -358,6 +358,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
           />
         ) : null;
 
+        const tooltipTab = tooltipContent && tabButton ? <Tooltip content={tooltipContent} side="bottom">{tabButton}</Tooltip> : tabButton;
         const tab = (
           <div
             className={cn(
@@ -387,9 +388,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
             onDragOver={(e) => handleStripDragOver(e, index)}
             onDrop={handleStripDrop}
           >
-            {tooltipContent && tabButton ? (
-              <Tooltip content={tooltipContent} side="bottom">{tabButton}</Tooltip>
-            ) : tabButton}
+            {tooltipTab}
             {/* Strip drop indicator line. Between-tab boundaries render as the
                 next tab's left edge; only the strip's end renders a right edge. */}
             {isTabDragging && stripDropIndex === index && (

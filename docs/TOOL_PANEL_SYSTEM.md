@@ -38,6 +38,9 @@ The tool panel system consists of several key components:
 - XTerm.js instances mount/unmount based on panel visibility to save memory
 - Working directories are maintained independently per panel
 - Command history and environment variables can be preserved across restarts
+- Each shell gets `PANE_PANEL_KIND`, set when it starts so shell startup files can branch on it: `dock` (the first
+  plain shell, pinned to the bottom terminal dock), `shell` (another plain shell tab), `agent` (an agent CLI such as
+  Claude Code or Codex) or `command` (any other launch command)
 - Cmd-click on macOS or Ctrl-click on Windows/Linux opens `pane://open?pane=<pane-id>&panel=<panel-id>` links in terminal output inside Pane. The panel parameter is optional.
 
 ## Database Schema
@@ -49,14 +52,14 @@ The tool panel system consists of several key components:
 ## Event System
 
 - A client's tab click (`panels:set-active`), `runpane panes focus` and opening a Session view update `active_panel_id` and move no other client. A host- or agent-initiated activation (`runpane panels open`, `panels create`/`panes create` with focus, Pane Chat, new-Pane setup, run scripts) sends `panel:activeChanged` (`PanelActivationRequest`), which only clients already showing that Pane follow
-- The remote web and mobile app remembers its own Pane, Session and tab per host in browser storage. Each desktop remembers its own split and tabs per Pane in its local `ui_state` (`paneLayout.<pane id>[@<host profile id>]`) and its own Session in navigation memory; it opens a Pane on `active_panel_id` and the stored `panel_layout` only when it has no memory of it
+- The remote web and mobile app remembers its own Pane, Session and tab per host in browser storage. Each desktop remembers its own split and tabs per Pane in its local `ui_state` (`paneLayout.<pane id>[@<host profile id>]`) and its own Session in navigation memory; it opens a Pane on `active_panel_id` and the stored `panel_layout` only when it has no memory of it. Tabs missing from its memory join the primary group, except agent-opened ones (`metadata.openPlacement: 'split'`), which go to the side group, inactive
 - Terminal panels emit `terminal:command_executed`, `terminal:exit`, and `files:changed` events
 - Event bus routes events to subscribed panels (planned for future panel types)
 - Events support future inter-panel communication (e.g., diff panels reacting to file changes)
 
 ## Implemented Panel Types
 
-The tool panel system supports 8 panel types (`ToolPanelType` in `shared/types/panels.ts`):
+The tool panel system supports 9 panel types (`ToolPanelType` in `shared/types/panels.ts`):
 
 1. **Terminal** (`terminal`): PTY shells, several per pane. Agent CLIs such as
    Claude Code, Codex and Cursor Agent run in terminal panels
@@ -70,6 +73,8 @@ The tool panel system supports 8 panel types (`ToolPanelType` in `shared/types/p
 7. **Setup Tasks** (`setup-tasks`): project setup checklist. Singleton,
    permanent, projects only.
 8. **Browser** (`browser`): embedded browser. Worktrees only.
+9. **Notes** (`notes`): the Pane's notes. Singleton. Experimental: hidden
+   until Settings → Advanced → Notes is on.
 
 ## Panel Capabilities
 

@@ -18,11 +18,16 @@
     "enumMembers": "error",
     "namespaceMembers": "error"
   },
+  "ignoreIssues": {
+    "tests/fixtures/agent-chat-lifecycle.tsx": ["unlisted"],
+    "native/src/features/composer/autocorrectPreference.ts": ["exports"]
+  },
   "workspaces": {
     ".": {
       "entry": [
         "scripts/**/*.{js,mjs}",
         "tests/**/*.spec.ts",
+        "tests/fixtures/agent-chat-lifecycle.tsx",
         "playwright*.ts"
       ],
       "project": [
@@ -33,6 +38,9 @@
       "ignoreUnresolved": ["/usr/bin/time"],
       "ignoreDependencies": [
         "original-fs",
+        "@agentclientprotocol/claude-agent-acp",
+        "@agentclientprotocol/codex-acp",
+        "@agentclientprotocol/sdk",
         "@anthropic-ai/sdk",
         "@lydell/node-pty",
         "@modelcontextprotocol/sdk",
@@ -42,6 +50,7 @@
         "better-sqlite3-multiple-ciphers",
         "bull",
         "chokidar",
+        "croner",
         "electron-updater",
         "smol-toml",
         "web-streams-polyfill",
@@ -53,6 +62,7 @@
       "entry": [
         "src/main.tsx",
         "src/remote/main.tsx",
+        "src/notifyWindow.tsx",
         "src/**/*.test.{ts,tsx}",
         "vite.config.ts"
       ],
@@ -85,7 +95,8 @@
         "pkill",
         "wslpath",
         "explorer.exe",
-        "dscl"
+        "dscl",
+        "mkfifo"
       ]
     },
     "packages/runpane": {
@@ -99,7 +110,8 @@
         "scripts/mark-executable.js"
       ],
       "project": ["src/**/*.ts", "scripts/**/*.js"],
-      "ignoreBinaries": ["ditto"]
+      "ignoreBinaries": ["ditto"],
+      "ignoreUnresolved": ["/usr/bin/codesign", "/usr/bin/ditto", "/usr/sbin/spctl", "/usr/libexec/PlistBuddy", "/usr/bin/otool"]
     },
     "mobile": {
       "entry": ["capacitor.config.ts", "src/**/*.test.ts", "scripts/**/*.mjs"],
@@ -112,9 +124,14 @@
       ]
     },
     "native": {
-      "entry": ["src/app/**/*.tsx", "src/**/*.test.ts", "metro.config.js", "vitest.config.ts", "terminal-web/page.ts", "scripts/*.mjs"],
-      "project": ["src/**/*.{ts,tsx}", "metro.config.js", "vitest.config.ts", "terminal-web/*.ts", "scripts/*.mjs"],
+      "entry": ["index.ts", "src/app/**/*.tsx", "src/**/*.test.ts", "metro.config.js", "vitest.config.ts", "terminal-web/page.ts", "scripts/*.mjs"],
+      "project": ["index.ts", "src/**/*.{ts,tsx}", "metro.config.js", "vitest.config.ts", "terminal-web/*.ts", "scripts/*.mjs"],
       "ignoreDependencies": ["expo-updates"]
+    },
+    "glasses": {
+      "entry": ["src/main.ts", "dev/gallery.ts", "dev/ambient.ts", "test/**/*.test.ts", "scripts/*.mjs", "vite.config.ts"],
+      "project": ["src/**/*.ts", "dev/*.ts", "test/**/*.ts", "scripts/*.mjs", "vite.config.ts"],
+      "ignoreDependencies": ["@evenrealities/evenhub-cli", "@evenrealities/evenhub-simulator"]
     },
     "shared": {
       "entry": ["types/*.ts", "remoteClient/index.ts"],

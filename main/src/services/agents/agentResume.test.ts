@@ -36,6 +36,14 @@ describe('resolveResumeId', () => {
     expect(resolveResumeId('claude', PANEL_ID, { customResume })).toBeUndefined();
   });
 
+  it('resumes a recognized Agent Farm command like a reported custom resume', () => {
+    const initialCommand = 'agent-farm run greenfield/implementer';
+    expect(resolveResumeId(undefined, PANEL_ID, { initialCommand, agentSessionId: CAPTURED_ID })).toBe(CAPTURED_ID);
+    expect(resolveResumeId('claude', PANEL_ID, { initialCommand, agentSessionId: CAPTURED_ID })).toBe(CAPTURED_ID);
+    // Without a reported ID there is nothing to resume, not Claude's panel-id fallback.
+    expect(resolveResumeId('claude', PANEL_ID, { initialCommand })).toBeUndefined();
+  });
+
   it('returns undefined for unknown agents', () => {
     expect(resolveResumeId(undefined, PANEL_ID, {})).toBeUndefined();
   });

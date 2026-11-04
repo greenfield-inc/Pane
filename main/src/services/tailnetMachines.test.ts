@@ -17,6 +17,7 @@ const status = {
     h: { DNSName: 'ci.tail1.ts.net.', UserID: 3, OS: 'linux', Online: true, Tags: ['tag:ci'], TailscaleIPs: ['100.64.0.9'] },
     i: { DNSName: 'phone.tail1.ts.net.', UserID: 1, OS: 'iOS', Online: true, TailscaleIPs: ['100.64.0.10'] },
     j: { DNSName: 'guest.other.ts.net.', UserID: 4, OS: 'linux', Online: true, ShareeNode: true, TailscaleIPs: ['100.64.0.11'] },
+    k: { DNSName: 'old-shared-box.tail1.ts.net.', UserID: 2, OS: 'linux', Online: true, TailscaleIPs: ['100.64.0.12'] },
   },
   User: {
     1: { LoginName: 'me@example.org' },
@@ -38,6 +39,7 @@ const answers = new Map<string, WorkspaceProbeResult>([
   ['shared-box', describedAs('tailnet')],
   ['private-box', { kind: 'refused' }],
   ['locked-box', { kind: 'password-required' }],
+  ['old-shared-box', { kind: 'outdated' }],
 ]);
 
 function fakeProbe(seen: Array<{ name: string; ip: string; secret?: string }> = []): WorkspaceProbe {
@@ -65,6 +67,18 @@ describe('discoverTailnetMachines', () => {
     });
   });
 
+  it('lists other people\'s machines that keep me out as refused when asked to, so the app can say why', async () => {
+    const list = await discoverTailnetMachines({ readStatus: async () => JSON.stringify(status), probe: fakeProbe(), includeRefused: true });
+    if (!list.ok) throw new Error('expected machines');
+    expect(list.machines.filter(machine => !machine.mine).map(machine => [machine.name, machine.state])).toEqual([
+      ['shared-box', 'available'],
+      ['locked-box', 'password-required'],
+      // An older Pane accepts only its owner's login.
+      ['old-shared-box', 'refused'],
+      ['private-box', 'refused'],
+    ]);
+  });
+
   it('lists the computer it runs on first when asked on behalf of a phone', async () => {
     const list = await discoverTailnetMachines({
       readStatus: async () => JSON.stringify(status),
@@ -79,7 +93,7 @@ describe('discoverTailnetMachines', () => {
   it('never probes tagged devices, phones, offline machines, or devices outside this tailnet', async () => {
     const seen: Array<{ name: string; ip: string }> = [];
     await discoverTailnetMachines({ readStatus: async () => JSON.stringify(status), probe: fakeProbe(seen) });
-    expect(seen.map(probe => probe.name).sort()).toEqual(['locked-box', 'my-mac', 'my-old-mac', 'my-pc', 'private-box', 'shared-box']);
+    expect(seen.map(probe => probe.name).sort()).toEqual(['locked-box', 'my-mac', 'my-old-mac', 'my-pc', 'old-shared-box', 'private-box', 'shared-box']);
     expect(seen.find(probe => probe.name === 'my-mac')?.ip).toBe('100.64.0.2');
   });
 
@@ -138,7 +152,7 @@ describe('resolveTailnetMachineUrl', () => {
   it('refuses to follow a name onto another tailnet, where it is a different machine', async () => {
     const switched = { ...status, MagicDNSSuffix: 'tail2.ts.net', CurrentTailnet: { Name: 'me.github' }, Peer: { a: { ...status.Peer.a, DNSName: 'my-mac.tail2.ts.net.' } } };
     await expect(resolveTailnetMachineUrl({ name: 'my-mac', domain: 'tail1.ts.net' }, async () => JSON.stringify(switched)))
-      .rejects.toThrow('my-mac was saved on another tailnet (tail1.ts.net). This computer is now on me.github; connect again from Your computers.');
+      .rejects.toThrow('my-mac was saved on another tailnet (tail1.ts.net). This computer is now on me.github; connect again from Settings › Remote Access › Switch to.');
   });
 
   it('says so when the machine is not on its tailnet any more', async () => {

@@ -1,4 +1,5 @@
 import React from 'react';
+import { API } from '../utils/api';
 import { usePaneLogo } from '../hooks/usePaneLogo';
 import { Modal, ModalFooter } from './ui/Modal';
 import { Button } from './ui/Button';
@@ -14,13 +15,10 @@ export default function Welcome({ isOpen, onClose }: WelcomeProps) {
 
   React.useEffect(() => {
     const loadPreference = async () => {
-      if (window.electron?.invoke) {
+      if (window.electronAPI?.preferences) {
         try {
-          const result = await window.electron.invoke('preferences:get', 'hide_welcome');
-          if (result?.success) {
-            const shouldHide = result.data === 'true';
-            setDontShowAgain(shouldHide);
-          }
+          const value = await API.preferences.get('hide_welcome');
+          setDontShowAgain(value === 'true');
         } catch (error) {
           console.error('[Welcome] Error loading preference:', error);
         }
@@ -39,7 +37,7 @@ export default function Welcome({ isOpen, onClose }: WelcomeProps) {
         <p className="text-sm text-text-tertiary mt-1">
           Run multiple agentic coding sessions in parallel, each in its own git worktree.
         </p>
-        <p className="text-xs text-text-quaternary mt-3">
+        <p className="text-xs text-text-muted mt-3">
           Make sure your CLI tool (Claude Code, Codex, etc.) is installed and authenticated.
         </p>
       </div>
@@ -49,9 +47,9 @@ export default function Welcome({ isOpen, onClose }: WelcomeProps) {
           onClick={async () => {
             const newValue = !dontShowAgain;
             setDontShowAgain(newValue);
-            if (window.electron?.invoke) {
+            if (window.electronAPI?.preferences) {
               try {
-                await window.electron.invoke('preferences:set', 'hide_welcome', newValue ? 'true' : 'false');
+                await API.preferences.set('hide_welcome', newValue ? 'true' : 'false');
               } catch (error) {
                 console.error('[Welcome] Error setting preference:', error);
               }

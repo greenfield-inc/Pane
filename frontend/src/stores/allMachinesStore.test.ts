@@ -1,0 +1,115 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { machineViews, startAllMachinesFeed, useAllMachinesStore } from './allMachinesStore';
+import type { MachineConnectionsEvent, MachineResult, MachineState } from '../../../shared/types/machineConnections';
+
+const machines: MachineState[] = [
+  { id: 'local', label: 'This computer', kind: 'local', status: 'online', offlineSince: null },
+  { id: 'build', label: 'build-box', kind: 'remote', status: 'online', offlineSince: null },
+  { id: 'devbox', label: 'parsa-devbox', kind: 'remote', status: 'online', offlineSince: null },
+];
+
+let emit: (event: MachineConnectionsEvent) => void;
+const read = vi.fn((machineId: string, channel: string): Promise<MachineResult> => Promise.resolve({
+  machineId,
+  data: { success: true, data: channel === 'sessions:get-all-with-projects' ? [{ id: 1, name: `${machineId}-repo`, sessions: [] }] : [] },
+}));
+const readsOf = (machineId: string) => read.mock.calls.filter(([id]) => id === machineId).map(([, channel]) => channel);
+
+let stop: () => void;
+
+beforeEach(async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-10-30T09:20:00Z'));
+  read.mockReset();
+  vi.stubGlobal('window', { electronAPI: { machines: {
+    list: () => Promise.resolve(machines),
+    read,
+    onEvent: (callback: typeof emit) => { emit = callback; return () => undefined; },
+  } } });
+  stop = startAllMachinesFeed();
+  // The first read of every machine.
+  await vi.runAllTimersAsync();
+  read.mockClear();
+});
+
+afterEach(() => {
+  stop();
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+});
+
+describe('All machines feed', () => {
+  it('re-reads only the machine an event came from, once per burst', async () => {
+    emit({ type: 'event', machineId: 'build', channel: 'session:updated', args: [] });
+    emit({ type: 'event', machineId: 'build', channel: 'panel:agentStatus', args: [] });
+    await vi.runAllTimersAsync();
+
+    expect(readsOf('local')).toEqual([]);
+    expect(readsOf('devbox')).toEqual([]);
+    expect(readsOf('build').sort()).toEqual(['panels:agent-statuses', 'sessions:get-all-with-projects']);
+  });
+
+  it('re-reads every list of a machine that resyncs', async () => {
+    emit({ type: 'resync', machineId: 'devbox' });
+    await vi.runAllTimersAsync();
+
+    expect(readsOf('build')).toEqual([]);
+    expect(readsOf('devbox').sort()).toEqual([
+      'notify:remote-snapshot',
+      'orchestration-sessions:list',
+      'panels:agent-statuses',
+      'permission:getPending',
+      'sessions:get-all-with-projects',
+    ]);
+  });
+
+  it('keeps the newer list when an older read of it lands later', async () => {
+    let status = 'working';
+    let answerNotify: () => void = () => undefined;
+    read.mockImplementation((machineId: string, channel: string) => {
+      if (channel === 'notify:remote-snapshot') return new Promise(resolve => { answerNotify = () => resolve({ machineId, data: { success: true, data: [] } }); });
+      return Promise.resolve({ machineId, data: { success: true, data: channel === 'panels:agent-statuses' ? [{ panelId: 'panel-1', status }] : [] } });
+    });
+
+    // A resync reads every list and waits on Notify; a status event reads statuses again meanwhile.
+    emit({ type: 'resync', machineId: 'build' });
+    await vi.advanceTimersByTimeAsync(300);
+    status = 'blocked';
+    emit({ type: 'event', machineId: 'build', channel: 'panel:agentStatus', args: [] });
+    await vi.advanceTimersByTimeAsync(300);
+    answerNotify();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(useAllMachinesStore.getState().snapshots.build?.statuses).toEqual([{ panelId: 'panel-1', status: 'blocked' }]);
+  });
+
+  it('keeps one read of a list in flight on a slow machine, and reads it once more after events arrived meanwhile', async () => {
+    const answers: Array<() => void> = [];
+    read.mockImplementation((machineId: string) => new Promise(resolve => {
+      answers.push(() => resolve({ machineId, data: { success: true, data: [] } }));
+    }));
+
+    // Status events every 250 ms for 2 s while build-box takes longer than that to answer.
+    for (let tick = 0; tick < 8; tick += 1) {
+      emit({ type: 'event', machineId: 'build', channel: 'panel:agentStatus', args: [] });
+      await vi.advanceTimersByTimeAsync(250);
+    }
+    expect(readsOf('build')).toEqual(['panels:agent-statuses']);
+
+    answers[0]();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(readsOf('build')).toEqual(['panels:agent-statuses', 'panels:agent-statuses']);
+  });
+
+  it('keeps an offline machine\'s rows and dims them once its grace has passed', async () => {
+    emit({ type: 'machines', machines: machines.map(machine => machine.id === 'build'
+      ? { ...machine, status: 'offline', offlineSince: '2026-10-30T09:20:00Z' }
+      : machine) });
+
+    const build = () => machineViews(useAllMachinesStore.getState()).find(item => item.machine.id === 'build');
+    expect(build()?.offline).toBe(false);
+    await vi.advanceTimersByTimeAsync(3_100);
+    expect(build()?.offline).toBe(true);
+    expect(build()?.snapshot?.projects.map(project => project.name)).toEqual(['build-repo']);
+  });
+});

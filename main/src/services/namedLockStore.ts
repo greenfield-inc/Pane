@@ -10,12 +10,8 @@ import {
 import type { RunpaneLockOwner, RunpaneLockRecord } from '../../../shared/types/runpaneOrchestration';
 
 const NAMED_LOCK_STORE_VERSION = 1;
-const MAX_STORE_BYTES = 1_000_000;
-/** Bounds the store so a runaway script cannot grow it without limit. */
-export const MAX_NAMED_LOCKS = 512;
 /** Same character set as watch cursor names, up to 128 characters. */
 export const NAMED_LOCK_NAME_PATTERN = /^[A-Za-z0-9._-]{1,128}$/u;
-export const MAX_NAMED_LOCK_TEXT_LENGTH = 500;
 
 interface NamedLockStoreData {
   version: typeof NAMED_LOCK_STORE_VERSION;
@@ -57,9 +53,6 @@ export class NamedLockStore {
   read(): RunpaneLockRecord[] {
     try {
       const raw = fs.readFileSync(this.filePath, 'utf8');
-      if (Buffer.byteLength(raw, 'utf8') > MAX_STORE_BYTES) {
-        throw new Error(`named lock store exceeds ${MAX_STORE_BYTES} bytes`);
-      }
       return validateStore(decodeBoundary(JSON.parse(raw), boundary.json)).locks;
     } catch (error) {
       if (error instanceof Error && isFileMissing(error)) return [];
@@ -73,11 +66,7 @@ export class NamedLockStore {
     const temporaryPath = `${this.filePath}.tmp-${process.pid}-${randomUUID()}`;
     fs.mkdirSync(path.dirname(this.filePath), { recursive: true, mode: 0o700 });
     try {
-      const payload = `${JSON.stringify(validated, null, 2)}\n`;
-      if (Buffer.byteLength(payload, 'utf8') > MAX_STORE_BYTES) {
-        throw new Error(`named lock store exceeds ${MAX_STORE_BYTES} bytes`);
-      }
-      fs.writeFileSync(temporaryPath, payload, { mode: 0o600 });
+      fs.writeFileSync(temporaryPath, `${JSON.stringify(validated, null, 2)}\n`, { mode: 0o600 });
       fs.renameSync(temporaryPath, this.filePath);
     } finally {
       if (fs.existsSync(temporaryPath)) fs.unlinkSync(temporaryPath);
@@ -87,9 +76,6 @@ export class NamedLockStore {
 
 function validateStore(value: JsonValue | NamedLockStoreData): NamedLockStoreData {
   const decoded = decodeBoundary(value, storeSchema);
-  if (decoded.locks.length > MAX_NAMED_LOCKS) {
-    throw new Error(`named lock store contains more than ${MAX_NAMED_LOCKS} locks`);
-  }
   const keys = new Set<string>();
   for (const lock of decoded.locks) {
     validateLock(lock);
@@ -107,11 +93,6 @@ function validateLock(lock: RunpaneLockRecord): void {
   }
   if (lock.owner.kind === 'pane' && !lock.owner.paneId) throw new Error(`Lock ${lock.name} Pane owner needs a Pane id`);
   if (lock.owner.kind === 'external' && !lock.owner.label) throw new Error(`Lock ${lock.name} external owner needs a label`);
-  for (const text of [lock.note, lock.owner.label]) {
-    if (text !== undefined && text.length > MAX_NAMED_LOCK_TEXT_LENGTH) {
-      throw new Error(`Lock ${lock.name} text exceeds ${MAX_NAMED_LOCK_TEXT_LENGTH} characters`);
-    }
-  }
   if (!Number.isFinite(lock.ttlMs) || lock.ttlMs <= 0) throw new Error(`Lock ${lock.name} has an invalid TTL`);
   for (const timestamp of [lock.acquiredAt, lock.expiresAt]) {
     if (!Number.isFinite(Date.parse(timestamp))) throw new Error(`Lock ${lock.name} has an invalid timestamp`);

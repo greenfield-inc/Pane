@@ -1,8 +1,10 @@
 // Test setup file for Vitest
+import { EventEmitter } from 'events';
 import { mkdtempSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { vi } from 'vitest';
+import type { ToolPanel } from '../../../shared/types/panels';
 
 // Every module that imports services/database opens `${PANE_DIR}/sessions.db`
 // and runs the startup migrations at import time. Point that at a scratch
@@ -19,6 +21,28 @@ export const app = {
   getPath: vi.fn(() => '/mock/path'),
   getName: vi.fn(() => 'Pane'),
   getVersion: vi.fn(() => '0.1.0'),
+  on: vi.fn(),
+  focus: vi.fn(),
+};
+
+export const globalShortcut = {
+  register: vi.fn(() => true),
+  unregister: vi.fn(),
+};
+
+export class Tray {
+  setImage = vi.fn();
+  setToolTip = vi.fn();
+  setContextMenu = vi.fn();
+  destroy = vi.fn();
+}
+
+export const Menu = {
+  buildFromTemplate: vi.fn(() => ({})),
+};
+
+export const nativeImage = {
+  createFromPath: vi.fn(() => ({})),
 };
 
 export const ipcMain = {
@@ -33,7 +57,11 @@ export const powerSaveBlocker = {
   isStarted: vi.fn(() => false),
 };
 
-export const BrowserWindow = vi.fn();
+export const powerMonitor = Object.assign(new EventEmitter(), {
+  isOnBatteryPower: vi.fn(() => false),
+});
+
+export const BrowserWindow = Object.assign(vi.fn(), { getAllWindows: vi.fn(() => []) });
 
 export const nativeTheme = {
   // SAFETY: Test stub models Electron's writable three-value themeSource property.
@@ -46,6 +74,7 @@ export const nativeTheme = {
 export const panelManager = {
   emitPanelEvent: vi.fn(),
   getPanel: vi.fn(),
+  getPanelsForSession: vi.fn((): ToolPanel[] => []),
   updatePanel: vi.fn(),
 };
 

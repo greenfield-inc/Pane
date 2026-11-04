@@ -71,10 +71,9 @@ export function RemoteTerminalPanel({
         onCreateStreamingSocket={() => adapter.createDeepgramStreamingSocket()}
         onGetDeepgramToken={() => adapter.getDeepgramStreamingToken()}
         onFinalizeStreamingAudio={(request) => adapter.finalizeStreamingVoice(request)}
-        onSendInput={(data) => {
-          void sendInput(data).then(() => {
-            window.requestAnimationFrame(focusTerminal);
-          });
+        onSendInput={async (data) => {
+          await sendInput(data);
+          window.requestAnimationFrame(focusTerminal);
         }}
       />
     </div>

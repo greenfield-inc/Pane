@@ -84,7 +84,8 @@ function revealInLayout(sessionId: string, panelId: string): void {
   rememberPaneLayout(config ? getActiveRemoteHostId(config.remoteDaemon) : undefined, sessionId, next);
 }
 
-async function activate(sessionId: string, panelId: string): Promise<void> {
+/** Bring a tab to the front: the store, the layout group the tab strip shows, and the host. */
+export async function activatePanel(sessionId: string, panelId: string): Promise<void> {
   usePanelStore.getState().setActivePanel(sessionId, panelId);
   revealInLayout(sessionId, panelId);
   await panelApi.setActivePanel(sessionId, panelId);
@@ -131,7 +132,7 @@ export async function openFileInEditor(options: OpenFileInEditorOptions): Promis
       patch.scrollPosition = undefined;
     }
     if (Object.keys(patch).length > 0) panel = await updateEditorPanel(existing, patch);
-    await activate(sessionId, panel.id);
+    await activatePanel(sessionId, panel.id);
     // An already-mounted editor will not remount, so ask it to move directly.
     // Dispatched after activation so a freshly mounted view has its listener.
     if (cursorPosition) {
@@ -150,7 +151,7 @@ export async function openFileInEditor(options: OpenFileInEditorOptions): Promis
       { filePath, diff, isPreview: true, isDirty: false, cursorPosition, scrollPosition: undefined },
       editorTitleFor(filePath, false, diff),
     );
-    await activate(sessionId, panel.id);
+    await activatePanel(sessionId, panel.id);
     return panel;
   }
 
@@ -161,6 +162,6 @@ export async function openFileInEditor(options: OpenFileInEditorOptions): Promis
     initialState: { customState: withoutUndefined({ filePath, diff, isPreview: !pin, isDirty: false, cursorPosition }) },
   });
   store.addPanel(created);
-  await activate(sessionId, created.id);
+  await activatePanel(sessionId, created.id);
   return created;
 }

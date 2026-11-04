@@ -45,6 +45,22 @@ describe('panel status snapshot IPC', () => {
       { panelId: 'chat', sessionId: PANE_CHAT_SESSION_ID, state: 'blocked', reason: null },
     ] });
   });
+
+  it('includes the hidden owner Pane of each named Session, so its status shows before its next change', async () => {
+    vi.spyOn(panelManager, 'getPanelsForSession').mockImplementation(sessionId => sessionId === 'release-owner'
+      ? [panel('release-agent', sessionId)]
+      : []);
+    vi.spyOn(terminalPanelManager, 'getAgentStatus').mockImplementation(panelId => panelId === 'release-agent' ? 'blocked' : undefined);
+    const services = partial<AppServices>({
+      sessionManager: partial<AppServices['sessionManager']>({ getAllSessions: () => [] }),
+      orchestrationSessionManager: partial<NonNullable<AppServices['orchestrationSessionManager']>>({ ownerPaneIds: () => ['release-owner'] }),
+    });
+    const registry = new PaneCommandRegistry();
+    registerPanelHandlers(partial<IpcMain>({ handle: vi.fn() }), services, registry);
+    await expect(registry.invoke('panels:agent-statuses')).resolves.toEqual({ success: true, data: [
+      { panelId: 'release-agent', sessionId: 'release-owner', state: 'blocked', reason: null },
+    ] });
+  });
 });
 
 describe('panel deletion IPC', () => {

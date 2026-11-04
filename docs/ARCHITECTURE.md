@@ -3,6 +3,10 @@
 This is an index of how Pane fits together. It names the owning files; the code
 is the reference for details.
 
+## Renderer preference boundary
+
+Use `API.preferences.get(key)`, `getAll()`, and `set(key, value)` instead of generic IPC invokes. The preload's `preferences` methods validate host responses through `shared/types/preferences.ts` before returning values. A missing key returns `null`, an empty value remains `''`, and all preference values are strings. Failed or malformed responses reject; callers retain their existing loading/error handling. The frontend API forwards these typed values without parsing IPC envelopes again.
+
 ## Words
 
 - **Repository (project):** a saved base git repo.
@@ -67,7 +71,8 @@ Agent status (working, idle, blocked) is derived in
 
 `FileEditorView.tsx` routes editor tabs from the Files inspector, terminal links,
 and `runpane panels open --file` using `shared/utils/filePreview.ts`. Supported
-formats open read-only; ordinary code and text retain the editor and auto-save.
+formats open read-only; ordinary code and text, HTML included, retain the editor
+and auto-save.
 Images, PDFs, fonts, video and audio load through `pane-media`, registered in
 `main/src/services/mediaPreview.ts`. A revocable URL grants access to one file;
 each request rechecks the existing worktree/symlink boundary through
@@ -79,10 +84,17 @@ route with the same boundary check and byte ranges. Archive and SQLite listings
 copies the file to a temporary folder on that desktop and opens the copy;
 "Reveal in folder" appears only on the host.
 
-Markdown, HTML, CSV/TSV and structured text fetch at most 1 MiB. Markdown renders
-with a source toggle. HTML displays as read-only source, so markup, links and
-resource references remain inert; use `panels open --url` for an intentional
-live browser tab.
+HTML is not a preview format. Clicking an `.html`/`.htm` file in the Explorer,
+or its Eye button, opens it rendered in a browser tab: the tab already showing
+that file, or else a new one (a tab showing anything else is never retargeted).
+The "Open HTML files" setting (Settings → General) switches Explorer clicks to
+editable source, and an HTML file's right-click menu offers both "Open preview
+in browser" and "Open as file". A browser tab showing a worktree file offers
+"View source", and an HTML editor tab offers "Preview", which works like a click. `panels open --file` always
+opens the source; `--url file://...` renders.
+
+Markdown, CSV/TSV and structured text fetch at most 1 MiB. Markdown renders
+with a source toggle.
 Tables display at most 500 data rows and 100 columns. JSON/JSONL are formatted;
 YAML/TOML retain source formatting in read-only Monaco with folding. Fonts use
 a temporary FontFace specimen. Decode failures offer system open/reveal actions.
@@ -108,12 +120,20 @@ Preview components never enter the editable auto-save path, even on errors.
   `PANE_DIR` overrides it (`main/src/utils/appDirectory.ts`).
 - `sessions.db` is SQLite in WAL mode. The base schema is
   `main/src/database/schema.sql`; later changes are inline migrations in
-  `main/src/database/database.ts` that run at startup.
+  `main/src/database/database.ts` that run at startup. These guarded upgrades inspect
+  the existing schema (for example with `PRAGMA table_info` and `sqlite_master`);
+  there is no migration-version table or numbered SQL-file runner. For schema
+  changes, update the fresh-install schema and the guarded `runMigrations()`
+  upgrade, preserving ordering across table rebuilds. Verify fresh and older
+  databases in isolated tests; a standalone SQL file does not run an upgrade.
 - `config.json` holds app settings (`main/src/services/configManager.ts`,
   types in `main/src/types/config.ts`).
 - Worktrees go in `<repo>/worktrees/` unless the project sets another folder
-  (`worktreeManager.ts`). `worktreePoolManager.ts` keeps empty reserve
-  worktrees on `_reserve/<hex>` branches so new panes open fast.
+  (`worktreeManager.ts`). A worktree on a remote-tracking base fetches that
+  branch first (`worktreeBaseRefresh.ts`: capped at about 10 s, shared by
+  concurrent creates, never fails the create). `worktreePoolManager.ts` keeps
+  empty reserve worktrees on `_reserve/<hex>` branches so new panes open fast;
+  a reserve is only claimed while its base ref still points at its commit.
 - Archive cleanup intents live in SQLite's `archive_cleanup_jobs`, atomically
   committed with the session archive flag. `ArchiveCleanupManager` resumes only
   those intents, validates physical directory/Git identity, and serializes work
@@ -135,11 +155,24 @@ Preview components never enter the editable auto-save path, even on errors.
   `<git-common-dir>/pane-archive-cleanup`, separate from legacy trash sweeps.
 - Per-repo setup, run and archive scripts come from `pane.json` and friends:
   [CONFIG_FILES.md](CONFIG_FILES.md).
+- Settings › Import & Export writes and reads an allowlisted setup file in main
+  (`services/setupTransfer.ts`); the renderer applies it through Settings' own
+  save calls: [SETUP_EXPORT_IMPORT.md](SETUP_EXPORT_IMPORT.md).
 - Per-project environment variables (`main/src/services/projectEnvVars.ts`) are
   read at spawn time by the terminal, script and legacy CLI spawners; keychain
   values stay in the macOS keychain: [PROJECT_ENV_VARS.md](PROJECT_ENV_VARS.md).
 
 ## Notes
+
+Notes is experimental and off by default: Settings → Advanced → Notes
+(`notesEnabled`). While it is off, Pane hides the Notes tab type, the add-tab
+entries and the terminal's Add to notes action, shows a one-line pointer to the
+setting in a restored Notes tab, gives new terminals an empty `PANE_NOTES_FILE`,
+leaves the scoped-notes instruction out of user agent files, and removes scoped
+notes from repository `AGENTS.md` and `CLAUDE.md` exports. Saved notes stay on
+disk. Turning it on restores the UI, the instruction and repository exports
+right away; terminals opened while it was off need reopening to get
+`PANE_NOTES_FILE`.
 
 Local Notes panels use `main/src/services/notes.ts` through `main/src/ipc/notes.ts`.
 Canonical documents live in `<PANE_DIR>/notes/notes.json`, outside disposable
@@ -159,7 +192,7 @@ labels in agent-facing Markdown. Global destinations are Claude's user
 `rules/pane-memories.mdc`. Cursor CLI also receives the generated memory through
 a user `sessionStart` hook (`cursorNoteHook.ts`), preserving existing hooks.
 Scoped content is exported outside repositories to
-`<PANE_DIR>/notes/contexts/<pane-id>.md`. Each new native Pane terminal receives
+`<PANE_DIR>/notes/contexts/<pane-id>.md`. While Notes is on, each new native Pane terminal receives
 its path through `PANE_NOTES_FILE`; the user-level integration tells agents to
 read that file before each turn. Project contexts contain only that project's
 notes plus the current feature; Session contexts contain only Session notes.
@@ -176,7 +209,16 @@ new agent conversation to load the scoped-reading instruction. Global-file chang
 turn, Claude resume, or a new Cursor conversation in the tested CLI versions;
 updating a file alone cannot erase context already read. Notes support native
 macOS, Windows, and Linux installations; WSL agent exports report an unsupported
-destination instead of claiming delivery. There is no cross-machine sync.
+destination instead of claiming delivery. There is no cross-machine sync: the
+`notes:` commands are daemon-owned, so a desktop connected to another machine
+reads and writes that machine's notes. The notes reach a machine's agents only
+while Notes is on for that machine: its new terminals then read them through
+`PANE_NOTES_FILE`. While it is off, the Notes tab says "Turn on Notes on
+<machine> so its agents read these". Only the machine's owner may use its
+notes; a teammate on a tailnet-shared workspace is refused. The glasses cannot
+reach them. A machine on a Pane
+without these commands gets "Update Pane on <machine> to use its notes" in its
+Notes tab.
 
 ## Subsystems
 
@@ -187,6 +229,9 @@ destination instead of claiming delivery. There is no cross-machine sync.
 | Renderer updates | IPC events in `main/src/events.ts` | [STATE_MANAGEMENT.md](STATE_MANAGEMENT.md) |
 | Timestamps | `main/src/utils/timestampUtils.ts` | [TIMESTAMP_HANDLING.md](TIMESTAMP_HANDLING.md) |
 | Pane Chat and orchestration sessions | `paneChatManager.ts`, `skillCacheManager.ts`, `paneChatBundle/` | [SESSIONS.md](SESSIONS.md) |
+| Loops (scheduled tasks) | `main/src/services/loops/`, `main/src/ipc/loops.ts`, `shared/types/loop.ts` | [LOOPS.md](LOOPS.md) |
+| Pane Notify (agent questions) | In-memory queue, floating strip and round windows, tray icon in `main/src/services/notify/`; `main/src/ipc/notify.ts`, `shared/types/notify.ts`; the floating windows load `frontend/notify.html`. Desktops (one slot per saved machine, fed by `main/src/services/machineConnections.ts`) and phones read each host's queue over `notify:remote-snapshot`, `notify:remote-command` and the `notify:shared-changed` event; phone alerts go through `main/src/daemon/mobilePushSender.ts` | [PANE_NOTIFY.md](PANE_NOTIFY.md) |
+| Machine connections | `main/src/services/machineConnections.ts` holds the desktop's one connection to each saved machine; key sharing (`sharedCredentialSync.ts`) and the renderer use it; the sidebar's All machines view (`frontend/src/stores/allMachinesStore.ts`, `frontend/src/components/machines/AllMachinesSidebar.tsx`) reads every machine through it and re-reads one machine when its events arrive. `main/src/ipc/machineConnections.ts` and `shared/types/machineConnections.ts` give the renderer `machines:list`, `machines:read` (list reads), `machines:run` (a short command list) and `machines:retry`, and push `machines:event` (events tagged with their machine, never terminal output) to windows that subscribe. This computer is the machine `local` | |
 | SSH hosts view | `sshConfigHosts.ts`, `ipc/sshHosts.ts`, `SshView.tsx` | [SSH_HOSTS.md](SSH_HOSTS.md) |
 | `runpane` CLI contract | `contracts/runpane/` | [RUNPANE_CLI_CONTRACT.md](RUNPANE_CLI_CONTRACT.md) |
 | Analytics | `analyticsManager.ts`, `frontend/src/services/posthog.ts` | [ANALYTICS_INVARIANTS.md](ANALYTICS_INVARIANTS.md) |
@@ -206,3 +251,4 @@ destination instead of claiming delivery. There is no cross-machine sync.
   `\\wsl$`.
 - Production builds must never include React Scan (`pnpm perf:scan` is dev
   only).
+

@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { SettingsSection } from '../../ui/SettingsSection';
+import { BrowserDataSetting } from './BrowserDataSetting';
 import { SettingRow, SettingsPage } from '../SettingRow';
 import { ImmediateToggle } from '../SettingsControls';
 import type { SettingsPersistence } from '../useSettingsPersistence';
@@ -79,11 +80,14 @@ export function PrivacySettings({ persistence }: { persistence: SettingsPersiste
         <SettingRow
           settingId="analytics"
           label="Product analytics"
-          description="Product analytics are on by default. Pane collects feature usage and may associate it with locally available GitHub or Git account details, such as a username or email. App error reports contain coarse error details and relative app stack locations. Pane never collects prompts, code, or repository paths. Turn this off to stop telemetry."
+          description="Product analytics are on by default. Pane collects feature usage and may associate it with locally available GitHub or Git account details, such as a username or email. App error reports contain coarse error details and relative app stack locations. Pane never collects prompts, code, or repository paths. Turn this off to stop product analytics and error reports. Pane still sends a ping with this install's ID, app version and OS each time it starts and every 24 hours while it runs, so we can count active installs."
           saveState={persistence.saveStates.analytics}
         >
           <ImmediateToggle label="Allow product analytics" value={analytics.enabled === true} onSave={saveAnalytics} />
         </SettingRow>
+      </SettingsSection>
+      <SettingsSection title="Browser">
+        <BrowserDataSetting />
       </SettingsSection>
     </SettingsPage>
   );

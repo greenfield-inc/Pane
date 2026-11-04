@@ -13,6 +13,17 @@ export class WorkspaceWatchCancelledError extends Error {
 /** Owns a whole watch request, so takeover cannot revive a superseded cadence loop. */
 export class WorkspaceWatchLeases {
   private readonly named = new Map<string, AbortController>();
+  private readonly lastReleasedAt = new Map<string, number>();
+
+  /**
+   * A `--follow` watcher re-polls right after each poll returns, so it counts as
+   * attached while a poll is in flight and for `graceMs` after the last one ended.
+   */
+  isAttached(name: string, graceMs: number): boolean {
+    if (this.named.has(name)) return true;
+    const releasedAt = this.lastReleasedAt.get(name);
+    return releasedAt !== undefined && Date.now() - releasedAt <= graceMs;
+  }
 
   acquire(name?: string, connection?: AbortSignal) {
     if (connection?.aborted) throw new WorkspaceWatchCancelledError('disconnected');
@@ -25,7 +36,10 @@ export class WorkspaceWatchLeases {
     const release = () => {
       connection?.removeEventListener('abort', disconnect);
       clearTimeout(timer);
-      if (name !== undefined && this.named.get(name) === controller) this.named.delete(name);
+      if (name !== undefined && this.named.get(name) === controller) {
+        this.named.delete(name);
+        this.lastReleasedAt.set(name, Date.now());
+      }
     };
     const timer = setTimeout(() => {
       controller.abort(new Error('Workspace watch lease expired'));

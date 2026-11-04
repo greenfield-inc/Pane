@@ -22,6 +22,10 @@ function memoryStore(): KeyValueStore & { keys(): string[] } {
 }
 
 describe('saved hosts', () => {
+  it('never saves the demo computer as a host, whatever code names it', () => {
+    expect(() => addHost(EMPTY_HOSTS, profile('studio-mac', 'https://studio-mac.demo.invalid', 'invented-token'))).toThrow(/demo/);
+  });
+
   it('makes a newly paired host the active one', () => {
     const hosts = addHost(addHost(EMPTY_HOSTS, office), laptop);
     expect(hosts.profiles.map(p => p.label)).toEqual(['Office', 'Laptop']);

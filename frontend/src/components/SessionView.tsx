@@ -31,6 +31,7 @@ import { OuterResizeSeparator } from './ui/OuterResizeSeparator';
 import { usePanelStore } from '../stores/panelStore';
 import { useProjectViewActionsStore } from '../stores/projectViewActionsStore';
 import { panelApi } from '../services/panelApi';
+import { requestBrowserNavigation } from './panels/browser/browserNavigation';
 import { setPendingViewCommit } from './panels/diff/pendingViewCommit';
 import { PanelTabBar } from './panels/PanelTabBar';
 import { PanelContainer } from './panels/PanelContainer';
@@ -47,6 +48,7 @@ import {
   removePanelFromLayout,
   addPanelToGroup,
   placePanelInSplit,
+  showPanelInSplit,
   findGroup,
   primaryGroup,
   allGroups,
@@ -68,9 +70,14 @@ import { isMissionControlEnabled, useConfigStore } from '../stores/configStore';
 import { cycleIndex } from '../utils/arrayUtils';
 import { formatKeyDisplay } from '../utils/hotkeyUtils';
 import { Kbd } from './ui/Kbd';
-import type { InspectorTab } from './InspectorTabs';
+import { OPEN_INSPECTOR_EVENT, type InspectorRequest, type InspectorTab } from './InspectorTabs';
 import { useErrorStore } from '../stores/errorStore';
 import ProjectSettings from './ProjectSettings';
+import { LoopsView } from './loops/LoopsView';
+import { LivePreviewPrompt } from './LivePreviewPrompt';
+import { NotifyInbox } from './notify/NotifyInbox';
+import { LoopRunHeader, LoopRunsRail } from './loops/LoopRunChrome';
+import { useLoopsStore } from '../stores/loopsStore';
 
 function pickDefaultPanel(panelList: ToolPanel[], hasReviewPr: boolean): ToolPanel | undefined {
   return (hasReviewPr ? panelList.find(p => p.type === 'diff') : undefined)
@@ -133,6 +140,9 @@ export const SessionView = memo(() => {
     // Otherwise look in regular sessions
     return state.sessions.find(session => session.id === state.activeSessionId);
   });
+  // A loop's run Pane: known from the loops already loaded, so its header and
+  // rail are there on the Pane's first render and never refit the terminal later.
+  const loopRun = useLoopsStore(state => activeSession ? state.runsBySessionId.get(activeSession.id) : undefined);
   const ownsPanelLoad = panelLoad?.id === selectedPaneId && panelLoad?.revision === selectionRevision && panelLoad?.hostId === hostId;
   const activeProjectEnvironment = sessionProject && sessionProject.id === activeSession?.projectId
     ? sessionProject.environment
@@ -369,9 +379,10 @@ export const SessionView = memo(() => {
           sortedLive.filter(p => !splitIdsNow.has(p.id)).map(p => p.id),
           fallbackActiveId,
         );
-        // This desktop's own memory takes new tabs inactive into its own groups;
-        // the shared split placement only shapes the host's seed layout.
-        const { layout: reconciledLayout } = reconcileLayout(base, liveIdsNow, remembered ? new Set<string>() : splitIdsNow);
+        // Agent pages this desktop has never placed (opened while it showed
+        // something else) go beside the primary group, inactive. Tabs already
+        // in its remembered layout keep their place.
+        const { layout: reconciledLayout } = reconcileLayout(base, liveIdsNow, splitIdsNow);
         const layout = fallbackActiveId
           ? activatePanelInLayout(reconciledLayout, fallbackActiveId)
           : reconciledLayout;
@@ -487,6 +498,16 @@ export const SessionView = memo(() => {
     };
   }, [activeSession?.id, addPanel, updatePanelState, removePanel, panels, applyLayout]);
 
+  // Terminal collapse state with localStorage persistence (collapsed by default)
+  const [isTerminalCollapsed, setIsTerminalCollapsed] = useState(() => {
+    const stored = localStorage.getItem('pane-terminal-collapsed');
+    return stored === null ? true : stored === 'true';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('pane-terminal-collapsed', String(isTerminalCollapsed));
+  }, [isTerminalCollapsed]);
+
   // Apply a requested tab once this visit's layout has loaded, so it wins over
   // the remembered one. A request for a panel this Pane lacks is dropped.
   const activationRequest = usePanelStore(state => activeSession ? state.activationRequests[activeSession.id] : undefined);
@@ -500,12 +521,18 @@ export const SessionView = memo(() => {
     const sessionPanelList = store.panels[sid] || [];
     const panel = sessionPanelList.find(p => p.id === activationRequest.panelId);
     if (!current || !panel) return;
-    // The dock and the inspector panels live outside the layout tree.
-    if (getDockTerminalPanel(sessionPanelList)?.id === panel.id || isInspectorPanelType(panel.type)) return;
+    // The dock and the inspector panels live outside the layout tree. Requesting
+    // the dock terminal expands the dock.
+    if (getDockTerminalPanel(sessionPanelList)?.id === panel.id) {
+      setIsTerminalCollapsed(false);
+      return;
+    }
+    if (isInspectorPanelType(panel.type)) return;
     const focusedGid = store.focusedGroupIds[sid];
     const group = (focusedGid && findGroup(current.root, focusedGid)) || primaryGroup(current.root);
+    // A split request also moves a tab out of the primary group.
     const root = activationRequest.placement === 'split'
-      ? placePanelInSplit(current.root, panel.id)
+      ? showPanelInSplit(current.root, panel.id)
       : addPanelToGroup(current.root, group.id, panel.id);
     applyLayout(sid, activatePanelInLayout({ ...current, root }, panel.id));
   }, [activationRequest, panelLoadReady, applyLayout]);
@@ -519,6 +546,11 @@ export const SessionView = memo(() => {
   useEffect(() => {
     if (activeSession?.id && activeSessionPanelsLoaded) markPaneViewShown(activeSession.id);
   }, [activeSession?.id, activeSessionPanelsLoaded]);
+
+  // Keyed by Pane so an open that failed stays with the Pane it failed in.
+  const livePreviewPrompt = activeSession?.projectId !== undefined && activeSessionPanelsLoaded ? (
+    <LivePreviewPrompt key={activeSession.id} paneId={activeSession.id} projectId={activeSession.projectId} panels={sessionPanels} />
+  ) : null;
 
   // The bottom dock holds the first plain shell, never an agent or command panel.
   const defaultTerminalPanel = useMemo(
@@ -698,13 +730,20 @@ export const SessionView = memo(() => {
   );
 
   // --- Inspector (right rail: Details / Files / Changes) ---
-  const [detailVisible, setDetailVisible] = useState(() => {
+  const [paneDetailVisible, setPaneDetailVisible] = useState(() => {
     const stored = localStorage.getItem('pane-detail-panel-visible');
     return stored !== null ? stored === 'true' : true;
   });
   useEffect(() => {
-    localStorage.setItem('pane-detail-panel-visible', String(detailVisible));
-  }, [detailVisible]);
+    localStorage.setItem('pane-detail-panel-visible', String(paneDetailVisible));
+  }, [paneDetailVisible]);
+  // Loop run Panes remember their own choice and start with the inspector closed.
+  const [loopRunDetailVisible, setLoopRunDetailVisible] = useState(() => localStorage.getItem('pane-loop-run-detail-panel-visible') === 'true');
+  useEffect(() => {
+    localStorage.setItem('pane-loop-run-detail-panel-visible', String(loopRunDetailVisible));
+  }, [loopRunDetailVisible]);
+  const detailVisible = loopRun ? loopRunDetailVisible : paneDetailVisible;
+  const setDetailVisible = loopRun ? setLoopRunDetailVisible : setPaneDetailVisible;
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>(() => {
     const stored = localStorage.getItem('pane-inspector-tab');
     return stored === 'files' || stored === 'details' ? stored : 'changes';
@@ -724,7 +763,21 @@ export const SessionView = memo(() => {
     setInspectorTab(tab);
     setDetailVisible(true);
     setIsDetailCollapsed(false);
+  }, [setDetailVisible]);
+  // Applied once the requested Pane is active, so a loop run's own visibility choice is the one that changes.
+  const [inspectorRequest, setInspectorRequest] = useState<InspectorRequest | null>(null);
+  useEffect(() => {
+    const handleRequest = (event: CustomEvent<InspectorRequest>) => setInspectorRequest(event.detail);
+    // SAFETY: OPEN_INSPECTOR_EVENT is always dispatched as a CustomEvent carrying an InspectorRequest.
+    window.addEventListener(OPEN_INSPECTOR_EVENT, handleRequest as EventListener);
+    // SAFETY: Same listener and event shape as registered above.
+    return () => window.removeEventListener(OPEN_INSPECTOR_EVENT, handleRequest as EventListener);
   }, []);
+  useEffect(() => {
+    if (!inspectorRequest || inspectorRequest.sessionId !== activeSession?.id) return;
+    openInspector(inspectorRequest.tab);
+    setInspectorRequest(null);
+  }, [inspectorRequest, activeSession?.id, openInspector]);
 
   const handleCommitClick = useCallback(
     async (commitHash: string) => {
@@ -1127,9 +1180,7 @@ export const SessionView = memo(() => {
       await panelApi.updatePanel(existingPanel.id, { title, state: updatedPanel.state });
       updatePanelState(updatedPanel);
       await handlePanelSelect(updatedPanel);
-      window.dispatchEvent(new CustomEvent('browser-panel:navigate', {
-        detail: { url, sessionId: activeSession.id },
-      }));
+      requestBrowserNavigation({ url, sessionId: activeSession.id, panelId: existingPanel.id });
       return;
     }
 
@@ -1472,6 +1523,22 @@ export const SessionView = memo(() => {
     }
   }, [activeView, activeProjectId]);
 
+  // Project Settings saved anywhere (this window, another window, runpane, MCP) replace the
+  // loaded project in place, without the loading state a first load shows.
+  useEffect(() => {
+    const reload = () => {
+      void API.projects.getAll().then(response => {
+        if (!response.success || !response.data) return;
+        const projects: Project[] = response.data;
+        const fresh = (current: Project | null) => (current ? projects.find(project => project.id === current.id) ?? current : current);
+        setSessionProject(fresh);
+        setProjectData(fresh);
+      });
+    };
+    window.addEventListener('project-changed', reload);
+    return () => window.removeEventListener('project-changed', reload);
+  }, []);
+
   const hook = useSessionView(activeSession);
 
   // Handler to open set tracking dialog
@@ -1638,17 +1705,7 @@ export const SessionView = memo(() => {
     } else {
       setDetailVisible(v => !v);
     }
-  }, [immersiveMode, swappedLayoutRendered, toggleDetailCollapse]);
-
-  // Terminal collapse state with localStorage persistence (collapsed by default)
-  const [isTerminalCollapsed, setIsTerminalCollapsed] = useState(() => {
-    const stored = localStorage.getItem('pane-terminal-collapsed');
-    return stored === null ? true : stored === 'true';
-  });
-
-  useEffect(() => {
-    localStorage.setItem('pane-terminal-collapsed', String(isTerminalCollapsed));
-  }, [isTerminalCollapsed]);
+  }, [immersiveMode, setDetailVisible, swappedLayoutRendered, toggleDetailCollapse]);
 
   const toggleTerminalCollapse = useCallback(() => {
     setIsTerminalCollapsed(prev => !prev);
@@ -1909,6 +1966,14 @@ export const SessionView = memo(() => {
     return <SshView />;
   }
 
+  if (activeView === 'loops') {
+    return <LoopsView />;
+  }
+
+  if (activeView === 'notify') {
+    return <NotifyInbox />;
+  }
+
   const loadError = selectionError ?? (ownsPanelLoad ? panelLoad?.error : null);
   if (selectedPaneId && (!activeSession || !ownsPanelLoad || loadError)) {
     return <div className="flex flex-1 flex-col bg-bg-primary">
@@ -1926,6 +1991,10 @@ export const SessionView = memo(() => {
       <LiveRegion mode={activeSession.status === 'error' ? 'assertive' : 'polite'}>
         {sessionStatusAnnouncement}
       </LiveRegion>
+      {loopRun && <LoopRunHeader runRef={loopRun} />}
+      {/* Always this shape, run Pane or not, so the panels below never remount. */}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-row">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       {/* SINGLE SessionProvider wraps everything */}
       <SessionProvider session={activeSession} gitBranchActions={branchActions} isMerging={hook.isMerging} gitCommands={hook.gitCommands} onOpenIDEWithCommand={handleOpenIDEWithCommand} onOpenUrlInBrowser={handleOpenUrlInBrowser} onConfigureIDE={() => setShowProjectSettings(true)} onSetTracking={handleOpenSetTracking} trackingBranch={currentUpstream} configuredIDECommand={sessionProject?.open_ide_command} isRemoteMode={isRemoteMode}>
 
@@ -1963,6 +2032,7 @@ export const SessionView = memo(() => {
                 {/* Top: active panel content */}
                 <div className="pane-editor-stage flex-1 relative min-h-0 overflow-hidden bg-bg-editor">
                   {editorStageElement || emptyStage}
+                  {livePreviewPrompt}
                 </div>
 
                 {/* Bottom: horizontal detail panel */}
@@ -2044,6 +2114,7 @@ export const SessionView = memo(() => {
                 {/* Top: active panel content */}
                 <div className="pane-editor-stage flex-1 relative min-h-0 overflow-hidden bg-bg-editor">
                   {editorStageElement || emptyStage}
+                  {livePreviewPrompt}
                 </div>
 
                 {/* Bottom: persistent terminal (collapsible) */}
@@ -2072,13 +2143,13 @@ export const SessionView = memo(() => {
                       inert={!terminalDockContentActive ? true : undefined}
                     >
                       {/* Terminal tab header with collapse toggle and pill shortcuts */}
-                      <div className="pane-terminal-shell-header flex items-center h-8 px-3 bg-surface-primary border-b border-border-primary gap-2 flex-shrink-0">
-                        {/* Left: chevron + icon + label */}
+                      <div className="pane-terminal-shell-header flex items-center h-8 bg-surface-primary border-b border-border-primary flex-shrink-0">
+                        {/* The whole header toggles the dock, like the Session view's terminal header. */}
                         <button
                           type="button"
                           onClick={toggleTerminalCollapse}
                           aria-label={isTerminalCollapsed ? 'Expand terminal' : 'Collapse terminal'}
-                          className="p-0.5 hover:bg-surface-hover rounded transition-colors"
+                          className="flex h-full flex-1 items-center gap-2 px-3 text-left hover:bg-surface-hover transition-colors"
                           title={isTerminalCollapsed ? 'Expand terminal' : 'Collapse terminal'}
                         >
                           {isTerminalCollapsed ? (
@@ -2086,11 +2157,9 @@ export const SessionView = memo(() => {
                           ) : (
                             <ChevronDown className="w-3.5 h-3.5 text-text-tertiary" />
                           )}
+                          <Terminal className="w-3.5 h-3.5 text-text-tertiary" />
+                          <span className="text-[11px] font-medium text-text-secondary uppercase tracking-wider">Terminal</span>
                         </button>
-                        <Terminal className="w-3.5 h-3.5 text-text-tertiary" />
-                        <span className="text-[11px] font-medium text-text-secondary uppercase tracking-wider">Terminal</span>
-
-                        <div className="flex-1" />
                       </div>
                       {/* Terminal content (hidden when collapsed) */}
                       {!isTerminalCollapsed && (
@@ -2142,6 +2211,9 @@ export const SessionView = memo(() => {
         </div>
 
       </SessionProvider>
+      </div>
+      {loopRun && <LoopRunsRail runRef={loopRun} />}
+      </div>
 
       <CommitMessageDialog
         isOpen={hook.showCommitMessageDialog}

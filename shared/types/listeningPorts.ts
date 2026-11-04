@@ -60,12 +60,18 @@ const listeningPortsSnapshotSchema: BoundarySchema<ListeningPortsSnapshot> = bou
     kind: boundary.enumeration('web', 'tcp'),
     sessionId: boundary.optional(boundary.string),
     paneName: boundary.optional(boundary.string),
+    phoneUrl: boundary.optional(boundary.string),
     localPort: boundary.optional(boundary.number),
   })),
+  phone: boundary.optional(boundary.union(
+    boundary.object({ state: boundary.literal('on'), filesUrl: boundary.string }),
+    boundary.object({ state: boundary.literal('off'), reason: boundary.string }),
+  )),
   unsupportedHost: boundary.optional(boundary.literal(true)),
 });
 
 /** A Ports list that crossed a process or network boundary, or null when it has another shape. */
-export function decodeListeningPortsSnapshot<Value>(value: Value): ListeningPortsSnapshot | null {
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- Port lists from another process or host are decoded immediately with listeningPortsSnapshotSchema.
+export function decodeListeningPortsSnapshot(value: unknown): ListeningPortsSnapshot | null {
   return decodeOptionalBoundary(value, listeningPortsSnapshotSchema) ?? null;
 }

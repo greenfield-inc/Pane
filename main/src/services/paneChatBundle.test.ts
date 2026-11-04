@@ -32,6 +32,10 @@ describe('Pane Chat skill bundle', () => {
     }
   });
 
+  it('ships the orchestrator guide', async () => {
+    await expect(fs.access(path.join(bundleRoot, 'skills', 'pane-orchestration', 'SKILL.md'))).resolves.toBeUndefined();
+  });
+
   it('gives each helper subagent a bundled skill', async () => {
     for (const agent of await fs.readdir(path.join(bundleRoot, 'agents'))) {
       const text = await fs.readFile(path.join(bundleRoot, 'agents', agent), 'utf8');

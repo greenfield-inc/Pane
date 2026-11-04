@@ -65,6 +65,7 @@ export class PaneRemoteTransportController {
     private readonly configManager: RemoteTransportConfigProvider,
     private readonly analyticsManager?: Pick<AnalyticsManager, 'track'>,
     private readonly isForwardedPort?: (port: number) => boolean,
+    private readonly paneVersion?: string,
   ) {
     this.mobilePushSender = getMobilePushSender(configManager);
   }
@@ -129,6 +130,7 @@ export class PaneRemoteTransportController {
       const remoteHttpApiServer = new PaneRemoteHttpApiServer(this.commandRegistry, this.configManager, {
         analyticsSink: createRemotePaneAnalyticsSink(this.analyticsManager),
         isForwardedPort: this.isForwardedPort,
+        paneVersion: this.paneVersion,
       });
       try {
         await remoteHttpApiServer.start();

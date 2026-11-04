@@ -67,10 +67,21 @@ test('stays on its tab when the host brings forward a tab phones cannot show, an
   // a reload returns to this Pane and the last tab the phone can show.
   const second = await page.context().newPage();
   await connectAnotherRemoteClient(second, host);
+  let releasePanels: () => void = () => {};
+  host.held['panels:getActive'] = new Promise<void>(resolve => { releasePanels = resolve; });
+  const pendingQ = second.waitForRequest(request => {
+    const body = request.postDataJSON();
+    return body?.channel === 'panels:getActive' && body?.args?.[0] === Q;
+  });
   await paneButton(second, 'Pane Q').click();
+  await pendingQ;
   await expect(shownPane(second)).toHaveText(/^Pane Q/);
   await page.getByRole('tab', { name: 'notes.md', exact: true }).click();
   await expect(selectedTab(page)).toHaveText('notes.md');
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('pane.remotePwa.view@anim-host') ?? '{}').paneId)).toBe(P);
+  releasePanels();
+  delete host.held['panels:getActive'];
+  await expect(selectedTab(second)).toHaveText('claude');
   await page.reload();
   await reconnected(page);
   await expect(shownPane(page)).toHaveText(/^Pane P/);
@@ -96,6 +107,51 @@ test('remembers its Pane and tab across a reload and a dropped connection', asyn
   host.panes[1].name = 'Pane Q renamed';
   await restoreRemoteConnection(page);
   await expect(shownPane(page)).toHaveText(/^Pane Q renamed/);
+  await expect(selectedTab(page)).toHaveText('shell');
+});
+
+for (const timing of ['before', 'during'] as const) {
+  test(`a background refresh preserves a same-Pane tab chosen ${timing} its request`, async ({ page, context }) => {
+    const host = await openConnectedRemotePwa(page, { sessionNames: ['Pane P', 'Pane Q'] });
+    const second = await context.newPage();
+    await connectAnotherRemoteClient(second, host);
+    // A title restored by panels:list gives us an observable completion barrier.
+    await emitRemoteHostEvent(second, 'panel:updated', {
+      id: 'anim-panel-0', sessionId: P, type: 'terminal', title: 'claude (before refresh)',
+      state: { isActive: true }, metadata: { createdAt: '', lastActiveAt: '', position: 0 },
+    });
+    await expect(selectedTab(second)).toHaveText('claude (before refresh)');
+    if (timing === 'before') await page.getByRole('tab', { name: 'shell', exact: true }).click();
+
+    let releasePanels = () => {};
+    host.held['panels:getActive'] = new Promise<void>(resolve => { releasePanels = resolve; });
+    await dropRemoteConnection(second);
+    const pendingPanels = second.waitForRequest(request => {
+      const body = request.postDataJSON();
+      return body?.channel === 'panels:getActive' && body?.args?.[0] === P;
+    });
+    await restoreRemoteConnection(second);
+    await pendingPanels;
+    if (timing === 'during') await page.getByRole('tab', { name: 'shell', exact: true }).click();
+    await expect(selectedTab(page)).toHaveText('shell');
+
+    releasePanels();
+    delete host.held['panels:getActive'];
+    await expect(selectedTab(second)).toHaveText('claude');
+    await page.reload();
+    await reconnected(page);
+    await expect(shownPane(page)).toHaveText(/^Pane P/);
+    await expect(selectedTab(page)).toHaveText('shell');
+  });
+}
+
+test('caches the initial host default before another client changes the host tab', async ({ page }) => {
+  const host = await openConnectedRemotePwa(page, { activePanelIndex: 1 });
+  await expect(selectedTab(page)).toHaveText('shell');
+  host.activePanelIds[P] = 'anim-panel-0';
+
+  await page.reload();
+  await reconnected(page);
   await expect(selectedTab(page)).toHaveText('shell');
 });
 
@@ -237,4 +293,25 @@ test('moves to the next visible Session tab when another client closes the one i
   await page.reload();
   await reconnected(page);
   await expect(selectedTab(page)).toHaveText('Tool B');
+});
+
+test('keeps a phone draft and identifies unknown delivery without replaying it', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openConnectedRemotePwa(page);
+  let submissions = 0;
+  await page.route('http://anim-pane.test/**/invoke', async route => {
+    // SAFETY: this fixture intercepts the PWA's JSON invoke request envelope.
+    const body = route.request().postDataJSON() as { channel?: string };
+    if (body.channel !== 'terminal:input') return route.fallback();
+    submissions += 1;
+    await route.abort('failed');
+  });
+  const draft = page.getByPlaceholder('Type command or prompt...');
+  await draft.fill('do this once');
+  await draft.press('Enter');
+  await expect(page.getByText(/Delivery unknown/).last()).toBeVisible();
+  await expect(draft).toHaveValue('do this once');
+  await expect.poll(() => submissions).toBe(1);
+  await expect(draft).toBeEnabled();
+  expect(submissions).toBe(1);
 });

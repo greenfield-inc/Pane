@@ -4,7 +4,7 @@ import { defineConfig } from '@playwright/test';
 // adapter. No dev app, daemon, profile, or network dependency is needed.
 export default defineConfig({
   testDir: './tests',
-  testMatch: ['file-editor-lifecycle.spec.ts', 'file-preview-lifecycle.spec.ts', 'html-preview-source.spec.ts'],
+  testMatch: ['file-editor-lifecycle.spec.ts', 'file-preview-lifecycle.spec.ts', 'html-editable-source.spec.ts', 'html-explorer-open.spec.ts', 'file-tree-selection.spec.ts'],
   timeout: 30000,
   expect: { timeout: 5000 },
   workers: 1,

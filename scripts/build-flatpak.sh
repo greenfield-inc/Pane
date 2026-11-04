@@ -15,10 +15,10 @@ if ! command -v flatpak-builder &> /dev/null; then
 fi
 
 # Check if AppImage exists
-APPIMAGE=$(ls dist-electron/Pane-*-x64.AppImage 2>/dev/null | head -n1)
+APPIMAGE=$(ls dist-electron/Pane-*-linux-x86_64.AppImage 2>/dev/null | head -n1)
 if [ -z "$APPIMAGE" ]; then
     echo "Error: No AppImage found in dist-electron/"
-    echo "Please build the AppImage first with: pnpm run build:linux"
+    echo "Please build the x64 AppImage first on an x64 Linux host: pnpm run build:linux:x64"
     exit 1
 fi
 

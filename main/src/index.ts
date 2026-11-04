@@ -2,12 +2,16 @@
 import './versionQuery';
 // Load ReadableStream polyfill before any other imports
 import './polyfills/readablestream';
+import { acknowledgeUpdateQuiescence } from './services/updateShutdown';
+
+import { registerStartupNotice } from './ipc/startup-notice';
 
 import { hasHeadlessDaemonLaunchArg, hasRemoteSetupLaunchArg } from './utils/runtimeMode';
 import { getAppDirectory } from './utils/appDirectory';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { boundary, decodeBoundary } from '../../shared/validation/boundaryDecoder';
+import type { PaneCommandValue } from './daemon/commandRegistry';
 import type { PaneEventArgument } from './core/eventSink';
 
 const launchHeadlessDaemon = hasHeadlessDaemonLaunchArg();
@@ -62,12 +66,15 @@ if (getStartupTerminalPowerMode() === 'batterySaver') {
 
 // Set Windows AUMID to match electron-builder's appId so Windows resolves
 // the installed Start Menu shortcut for notification icon and display name.
+// Dev builds get their own id: Electron writes a Start Menu shortcut for the
+// running exe, and one claiming the installed id makes notification clicks
+// launch a bare electron.exe.
 if (process.platform === 'win32') {
-  app.setAppUserModelId('com.dcouple.pane');
+  app.setAppUserModelId(app.isPackaged ? 'com.dcouple.pane' : 'com.dcouple.pane.dev');
 }
 
 // Now import the rest of electron
-import { autoUpdater as nativeAutoUpdater, BrowserWindow, ipcMain, screen, shell, dialog, session, WebContents, webContents, WebContentsView, type BrowserWindowConstructorOptions, type IpcMainEvent } from 'electron';
+import { autoUpdater as nativeAutoUpdater, BrowserWindow, ipcMain, screen, dialog, session, WebContents, webContents, WebContentsView, type BrowserWindowConstructorOptions, type IpcMainEvent } from 'electron';
 import * as path from 'path';
 import * as os from 'os';
 import type { SessionManager } from './services/sessionManager';
@@ -94,15 +101,19 @@ import type { WorktreeManager } from './services/worktreeManager';
 import type { GitStatusManager } from './services/gitStatusManager';
 import type { DatabaseService } from './database/database';
 import type { RunCommandManager } from './services/runCommandManager';
-import type { VersionChecker } from './services/versionChecker';
+import type { VersionChecker, VersionInfo } from './services/versionChecker';
 import type { Logger } from './utils/logger';
 import type { ArchiveProgressManager } from './services/archiveProgressManager';
 import type { AnalyticsManager } from './services/analyticsManager';
 import { readWebAttribution, resolveAnalyticsIdentity } from './services/analyticsIdentity';
 import { resourceMonitorService } from './services/resourceMonitorService';
-import { applyAppDirectoryOverrideFromArgs, getAppDirectoryOverrideFromArgs, migrateDataDirectory } from './utils/appDirectory';
+import { applyAppDirectoryOverrideFromArgs, isPackagedOnDefaultDirectory, migrateDataDirectory } from './utils/appDirectory';
 import { getCurrentWorktreeName } from './utils/worktreeUtils';
 import { setupAutoUpdater } from './autoUpdater';
+import { getUpdateCapabilities } from './utils/updateCapabilities';
+import { UIStateManager } from './services/uiStateManager';
+import { getActiveRemoteHostId } from '../../shared/types/remoteDaemon';
+import { cancelRestartToUpdate, setUpdateAvailable, setUpdateReady, startRestartToUpdate } from './services/restartToUpdate/restartToUpdate';
 import type { CliManagerFactory } from './services/cliManagerFactory';
 import { setupConsoleWrapper } from './utils/consoleWrapper';
 import * as fs from 'fs';
@@ -112,10 +123,14 @@ import { panelManager } from './services/panelManager';
 import { worktreePoolManager } from './services/worktreePoolManager';
 import { usageManager } from './services/usage/usageManager';
 import { SharedCredentialSync } from './services/sharedCredentialSync';
+import { MachineConnections } from './services/machineConnections';
+import { registerMachineConnectionHandlers } from './ipc/machineConnections';
+import { followSavedMachines } from './ipc/notify';
 import { LeaderboardService } from './services/leaderboardService';
 import { registerLeaderboardHandlers } from './ipc/leaderboard';
 import { PtyHostSupervisor } from './ptyHost/ptyHostSupervisor';
 import { syncAutoStartOnBoot } from './utils/autoStart';
+import { addRunpaneToUserPathBestEffort } from './services/runpaneShim';
 import { syncPaneMcpForApp } from './services/paneMcpRegistration';
 import { findPaneLinkArg, forwardPaneLinkToRunningPane, OPEN_PANE_LINK_CHANNEL, PANE_LINK_SCHEME, parsePaneLink } from './services/paneLinks';
 import { createPaneDaemonHost, type PaneDaemonHost } from './daemon/bootstrap';
@@ -124,6 +139,9 @@ import { startHeadlessPaneProcess } from './daemon/startHeadless';
 import { runRemoteSetupCli } from './daemon/setupRemoteHostCli';
 import { PowerSaveManager } from './services/powerSaveManager';
 import { warmShellPath } from './utils/shellPath';
+import { routeWebviewPopups } from './services/webviewPopups';
+import { openExternalUrl } from './utils/openExternalUrl';
+import { hardenWebviewPreferences } from './services/webviewPreferences';
 import { APP_MENU_ACTION_CHANNEL, attachEditContextMenu, installApplicationMenu, type AppMenuAction } from './services/nativeMenus';
 import { fitBoundsToWorkAreas, parseSavedWindowState, trackWindowState, WINDOW_STATE_KEY } from './utils/windowState';
 
@@ -234,6 +252,7 @@ function setAppTitle() {
 // Service instances (configManager exported for shell preference access)
 export let configManager: ConfigManager;
 let sharedCredentialSync: SharedCredentialSync | null = null;
+let machineConnections: MachineConnections | null = null;
 let logger: Logger;
 export let sessionManager: SessionManager;
 let worktreeManager: WorktreeManager;
@@ -299,7 +318,7 @@ function showMainWindow(): void {
  * the installed app, so those run beside it without taking the lock.
  */
 function acquireSingleInstanceLock(): boolean {
-  if (!app.isPackaged || getAppDirectoryOverrideFromArgs() || process.env.PANE_DIR || process.env.FOOZOL_DIR) {
+  if (!isPackagedOnDefaultDirectory()) {
     return true;
   }
   return app.requestSingleInstanceLock();
@@ -565,12 +584,9 @@ async function createWindow() {
     }
   });
 
-  // Security hook: strip preload and enforce sandbox on any webview tags
+  // Security and opacity hook for every webview tag, including the docs dialog
   mainWindow.webContents.on('will-attach-webview', (_event, webPreferences, _params) => {
-    delete webPreferences.preload;
-    webPreferences.nodeIntegration = false;
-    webPreferences.contextIsolation = true;
-    webPreferences.sandbox = true;
+    hardenWebviewPreferences(webPreferences);
   });
 
   // Set up popup interception on webviews IMMEDIATELY when they attach (before any page loads).
@@ -578,54 +594,13 @@ async function createWindow() {
   // The context map (panelId/sessionId) is populated later by the browser-panel:register-webview IPC.
   mainWindow.webContents.on('did-attach-webview', (_event, wvContents: WebContents) => {
     attachEditContextMenu(wvContents);
-    wvContents.setWindowOpenHandler(({ url, disposition }) => {
-      // Auth popups (Firebase signInWithPopup, OAuth providers, etc.) use window.open()
-      // with explicit features (width, height, toolbar=no), which Chromium reports as
-      // disposition 'new-window'. Let these open as real BrowserWindows so the
-      // postMessage channel between popup and opener remains intact.
-      if (disposition === 'new-window') {
-        if (!webviewContextMap.has(wvContents.id)) {
-          console.warn('[BrowserPanel] Auth popup allowed for unregistered webview (pre-dom-ready), wcId:', wvContents.id);
-        }
-        return {
-          action: 'allow',
-          overrideBrowserWindowOptions: {
-            autoHideMenuBar: true,
-            webPreferences: {
-              contextIsolation: true,
-              sandbox: true,
-            },
-          },
-        };
-      }
-
-      // Regular navigations (target="_blank" links, etc.) → open as new browser panel tab
-      const ctx = webviewContextMap.get(wvContents.id);
-      if (ctx) {
-        mainWindow?.webContents.send('browser-panel:popup-requested', {
-          url,
-          sourceSessionId: ctx.sessionId,
-          sourcePanelId: ctx.panelId,
-        });
-      } else {
-        // Context not yet registered (popup fired before dom-ready).
-        // Fall back to opening in the system browser so the popup isn't silently lost.
-        shell.openExternal(url);
-      }
-      return { action: 'deny' };
-    });
-
-    // Track and manage auth popup windows created by { action: 'allow' }.
-    // Clean up when the parent webview is destroyed so popups don't orphan.
-    wvContents.on('did-create-window', (popupWindow) => {
-      // If the parent webview is destroyed (e.g., panel closed), close the popup too.
-      // This is a one-shot listener; safe even if the popup closes first because
-      // popupWindow.isDestroyed() is checked before calling close().
-      wvContents.once('destroyed', () => {
-        if (!popupWindow.isDestroyed()) {
-          popupWindow.close();
-        }
-      });
+    routeWebviewPopups(wvContents, {
+      contextOf: id => webviewContextMap.get(id),
+      openBrowserTab: request => mainWindow?.webContents.send('browser-panel:popup-requested', request),
+      openExternal: url => void openExternalUrl(url).catch((error) => {
+        console.error('[BrowserPanel] Did not open popup URL externally:', error);
+      }),
+      openPaneLink,
     });
 
     wvContents.setBackgroundThrottling(true);
@@ -847,7 +822,7 @@ async function createWindow() {
       return { action: 'deny' };
     }
 
-    void shell.openExternal(url).catch((error) => {
+    void openExternalUrl(url).catch((error) => {
       console.error('Failed to open external URL from window.open:', error);
     });
     return { action: 'deny' };
@@ -1143,6 +1118,7 @@ async function createWindow() {
 async function initializeServices() {
   const electronPaneEventSink = {
     send(channel: string, ...args: PaneEventArgument[]) {
+      machineConnections?.forwardLocal(channel, args);
       if (!remotePaneClientController.shouldForwardLocalRendererEvent(channel)) {
         return;
       }
@@ -1179,12 +1155,36 @@ async function initializeServices() {
   logger = services.logger;
   archiveProgressManager = services.archiveProgressManager;
   analyticsManager = services.analyticsManager;
-  powerSaveManager = new PowerSaveManager(configManager, sessionManager);
+  powerSaveManager = new PowerSaveManager(configManager, sessionManager, terminalPanelManager, { logger });
   powerSaveManager.sync();
+  const navigationMemory = new UIStateManager(databaseService);
+  startRestartToUpdate({
+    getMainWindow: () => mainWindow,
+    configManager,
+    readNavigation: () => {
+      const hostId = getActiveRemoteHostId(configManager.getConfig().remoteDaemon);
+      const memory = navigationMemory.getNavigationMemory(hostId);
+      return memory ? { hostId, memory } : null;
+    },
+    archiveProgressManager,
+  });
 
   leaderboardService = new LeaderboardService(configManager);
   registerLeaderboardHandlers(ipcMain, leaderboardService);
 
+  // One connection per saved machine, shared by key sharing and All machines; started with key sharing.
+  const { commandRegistry } = paneDaemonHost;
+  machineConnections = new MachineConnections({
+    configManager,
+    invokeLocal: (channel, args) => commandRegistry.invoke(channel, args),
+  });
+  registerMachineConnectionHandlers(ipcMain, machineConnections);
+  // The Notify inbox, badge and tray count cover every saved machine, in any mode.
+  followSavedMachines(machineConnections);
+
+  // Read before the first identity lookup overwrites it, so the renderer can
+  // tell when the desktop id changed since the last launch.
+  const previousAnalyticsDistinctId = configManager.getAnalyticsDistinctId();
   ipcMain.handle('analytics:get-identity', async () => {
     try {
       const installId = await configManager.getOrCreateAnalyticsInstallId();
@@ -1205,6 +1205,7 @@ async function initializeServices() {
       identity.webAttributionPresent = webDistinctId !== undefined;
       identity.isFirstLaunch = isFirstLaunch;
       identity.previousVersion = previousVersion;
+      identity.previousDistinctId = previousAnalyticsDistinctId;
       await configManager.setAnalyticsIdentity(identity);
       return { success: true, data: identity };
     } catch (error) {
@@ -1330,7 +1331,7 @@ if (launchRemoteSetup) {
       app.exit(0);
       return;
     }
-    if (app.isPackaged && !app.isDefaultProtocolClient(PANE_LINK_SCHEME)) {
+    if (process.env.PANE_DISABLE_OS_INTEGRATION !== '1' && app.isPackaged && !app.isDefaultProtocolClient(PANE_LINK_SCHEME)) {
       app.setAsDefaultProtocolClient(PANE_LINK_SCHEME);
     }
 
@@ -1339,8 +1340,9 @@ if (launchRemoteSetup) {
     // after the window opens reads the cache instead of blocking on the shell.
     void warmShellPath();
     await initializeServices();
-    syncAutoStartOnBoot(app, configManager.getConfig().autoStartOnBoot !== false);
-    setTimeout(() => syncPaneMcpForApp({
+    if (process.env.PANE_DISABLE_OS_INTEGRATION !== '1') syncAutoStartOnBoot(app, configManager.getConfig().autoStartOnBoot !== false);
+    void addRunpaneToUserPathBestEffort();
+    if (process.env.PANE_DISABLE_OS_INTEGRATION !== '1') setTimeout(() => syncPaneMcpForApp({
       isPackaged: app.isPackaged,
       config: configManager.getConfig(),
       getProjects: () => databaseService.getAllProjects(),
@@ -1350,6 +1352,13 @@ if (launchRemoteSetup) {
   // Register before any renderer loads. useNotifications pulls this on mount
   // and will race a late registration inside createWindow/loadURL.
   ipcMain.handle('window:is-focused', () => mainWindow?.isFocused() ?? true);
+  // A clicked desktop notification opens its tab the way an OS pane:// link does.
+  // The window comes forward even when the tab has since been closed.
+  ipcMain.handle('window:open-pane-link', (_event, link: PaneCommandValue) => {
+    showMainWindow();
+    openPaneLink(decodeBoundary(link, boundary.string));
+  });
+  registerStartupNotice(ipcMain, path.join(getAppDirectory(), '.running'));
 
   // Start the ptyHost supervisor before the window opens so the renderer's
   // preload listener for 'ptyHost-port' has a port to receive when the window
@@ -1405,23 +1414,7 @@ if (launchRemoteSetup) {
   paneLinksReady = true;
   if (pendingPaneLink) openPaneLink(pendingPaneLink);
 
-  // Crash sentinel: detect if the previous session ended uncleanly.
-  // We write a file on startup and delete it on clean shutdown.
-  // If it exists at startup, the app crashed or the OS killed it.
-  const crashSentinelPath = path.join(getAppDirectory(), '.running');
-  try {
-    if (fs.existsSync(crashSentinelPath)) {
-      console.warn('[Main] Unclean shutdown detected — crash sentinel was still present');
-      // Notify the renderer once it's ready
-      mainWindow?.webContents.once('did-finish-load', () => {
-        mainWindow?.webContents.send('app:unclean-shutdown-detected');
-      });
-    }
-    // Write the sentinel for this session
-    fs.writeFileSync(crashSentinelPath, `${process.pid}\n${new Date().toISOString()}`);
-  } catch (err) {
-    console.warn('[Main] Failed to manage crash sentinel:', err);
-  }
+  analyticsManager.startHeartbeat();
 
   // Track app lifecycle events
   try {
@@ -1470,10 +1463,21 @@ if (launchRemoteSetup) {
   // here too: loading electron-updater blocks the main thread, which would
   // hold up the renderer's first requests if it ran as the window opens.
   setTimeout(async () => {
-    setupAutoUpdater(() => mainWindow);
+    setupAutoUpdater({ getMainWindow: () => mainWindow, configManager, onUpdateDownloaded: setUpdateReady });
+    if (configManager.getConfig().autoCheckUpdates === false) return;
     console.log('[Main] Performing startup version check...');
     await versionChecker.checkOnStartup();
   }, 1000); // Small delay to ensure window is fully ready
+
+  // Installs that cannot download in the background (macOS manual mode) show
+  // "Update available" in the sidebar instead of "Restart to update".
+  process.on('version-update-available', (versionInfo: VersionInfo) => {
+    if (!app.isPackaged) return;
+    void getUpdateCapabilities({ platform: process.platform, isPackaged: true, executablePath: process.execPath })
+      .then(capabilities => {
+        if (capabilities.mode === 'manual') setUpdateAvailable(versionInfo.latest);
+      });
+  });
 
 // Initialize worktree pool — cleanup orphans and seed reserves
   setTimeout(async () => {
@@ -1494,10 +1498,8 @@ if (launchRemoteSetup) {
       if (activeProject?.path) {
         const ctx = sessionManager.getProjectContextByProjectId(activeProject.id);
         if (ctx) {
-          const mainBranch = await worktreeManager.getProjectMainBranch(activeProject.path, ctx.commandRunner).catch(() => 'HEAD');
-          worktreePoolManager.createReserve(
+          worktreeManager.seedReserve(
             activeProject.path,
-            mainBranch,
             activeProject.worktree_folder ?? undefined,
             ctx.pathResolver,
             ctx.commandRunner
@@ -1510,8 +1512,11 @@ if (launchRemoteSetup) {
   }, 5000); // Delay to not slow down app startup
 
   // Share integration keys with the hosts this desktop has paired with.
-  sharedCredentialSync = new SharedCredentialSync(configManager);
-  sharedCredentialSync.start();
+  if (machineConnections) {
+    machineConnections.start();
+    sharedCredentialSync = new SharedCredentialSync(configManager, machineConnections);
+    sharedCredentialSync.start();
+  }
 
   // Index agent CLI transcripts for the usage page. Read-only, and deferred so
   // a first pass over a large ~/.claude never delays window creation.
@@ -1555,6 +1560,7 @@ if (launchRemoteSetup) {
 
   usageManager.stop();
   void sharedCredentialSync?.stop();
+  void machineConnections?.stop();
 
   // Guard against multiple shutdown attempts
   if (shutdownInProgress) {
@@ -1597,6 +1603,7 @@ if (launchRemoteSetup) {
       // User chose to wait - reset guard and cancel quit
       shutdownInProgress = false;
       appIsQuitting = false;
+      cancelRestartToUpdate();
       return;
     }
 
@@ -1604,15 +1611,16 @@ if (launchRemoteSetup) {
     archiveProgressManager.clearAll();
   }
 
+  analyticsManager?.stopHeartbeat();
   powerSaveManager?.dispose();
   powerSaveManager = null;
 
   // Safety net: force exit if graceful shutdown takes too long
   // Placed after the dialog so user interaction time isn't counted
   const shutdownSafetyTimeout = setTimeout(() => {
-    logToFile('FORCED EXIT: shutdown timed out after 10s');
+    logToFile('FORCED EXIT: shutdown timed out after 30s');
     app.exit(1);
-  }, 10_000);
+  }, 30_000);
 
   try {
     if (paneDaemonHost?.paneDaemonServer) {
@@ -1685,7 +1693,7 @@ if (launchRemoteSetup) {
     // Kill all terminal panel PTY processes so Claude doesn't survive as an orphan
     logToFile('Destroying all terminal panel processes');
     console.log('[Main] Destroying all terminal panel processes...');
-    terminalPanelManager.destroyAllTerminals();
+    await terminalPanelManager.terminateAllTerminals();
     console.log('[Main] Terminal panel processes destroyed');
 
     // Phase 4: Host/runtime cleanup
@@ -1696,6 +1704,8 @@ if (launchRemoteSetup) {
       paneDaemonHost = null;
       console.log('[Main] Daemon host services stopped');
     }
+
+    acknowledgeUpdateQuiescence();
 
     // Track app closed event with session duration.
     // Send directly via HTTP instead of IPC — the renderer may already be

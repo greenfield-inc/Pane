@@ -22,11 +22,16 @@ import {
   addPanelToGroup,
   createSingleGroupLayout,
   findGroup,
+  findGroupContainingPanel,
+  movePanel,
   placePanelInSplit,
   primaryGroup,
   reconcile,
   removePanelFromLayout,
+  showPanelInSplit,
+  subsetInsertIndex,
   updateSizes,
+  type DropZone,
 } from '../utils/panelLayout';
 
 const EMPTY_PANELS: ToolPanel[] = [];
@@ -189,12 +194,11 @@ export function SessionWorkspacePanels({
       const storedIds = layoutPanelIds(base);
       const stage = (usePanelStore.getState().panels[sessionId] ?? saved)
         .filter(panel => isStagePanel(panel, agentPanelIdsRef.current, storedIds));
-      // This desktop's own memory takes new tabs inactive into its own groups;
-      // the shared split placement only shapes the host's seed layout.
+      // Agent pages this desktop has never placed (opened while it showed
+      // something else) go beside the conversation, inactive. Tabs already in
+      // its remembered layout keep their place.
       const splitIds = new Set<string>();
-      if (!remembered) {
-        for (const panel of stage) if (panel.metadata?.openPlacement === 'split') splitIds.add(panel.id);
-      }
+      for (const panel of stage) if (panel.metadata?.openPlacement === 'split') splitIds.add(panel.id);
       applyLayout(reconcile(base, [agentPanelId, ...stage.map(panel => panel.id)], splitIds).layout);
       setLoaded(true);
     }).catch(error => {
@@ -249,8 +253,9 @@ export function SessionWorkspacePanels({
     if (!current || !panel) return;
     if (panel.id !== agentPanelId && !isStagePanel(panel, agentPanelIdsRef.current, layoutPanelIds(current))) return;
     const focused = findGroup(current.root, current.focusedGroupId ?? '') ?? primaryGroup(current.root);
+    // A split request also moves a tab out of the conversation's group.
     const root = activationRequest.placement === 'split'
-      ? placePanelInSplit(current.root, panel.id)
+      ? showPanelInSplit(current.root, panel.id)
       : addPanelToGroup(current.root, focused.id, panel.id);
     applyLayout(activatePanelInLayout({ ...current, root }, panel.id));
   }, [activationRequest, loaded, sessionId, agentPanelId, applyLayout]);
@@ -348,6 +353,41 @@ export function SessionWorkspacePanels({
     if (current) applyLayout({ ...current, root: updateSizes(current.root, splitNodeId, sizes) });
   }, [sessionId, applyLayout]);
   const handleClose = useCallback((panel: ToolPanel) => { void closePanel(panel); }, [closePanel]);
+
+  // Tab drag and drop, the same gesture as a worktree Pane: a group's centre
+  // takes the tab, an edge splits, a strip slot inserts. The state is local to
+  // this mounted Session, so a tiled neighbour never offers itself as a target.
+  const [draggedPanelId, setDraggedPanelId] = useState<string | null>(null);
+  const [dropZones, setDropZones] = useState<Map<string, DropZone | null>>(new Map());
+  const endTabDrag = useCallback(() => {
+    setDraggedPanelId(null);
+    setDropZones(new Map());
+  }, []);
+  const handleDropZoneChange = useCallback((groupId: string, zone: DropZone | null) => {
+    setDropZones(prev => {
+      const next = new Map(prev);
+      if (zone === null) next.delete(groupId);
+      else next.set(groupId, zone);
+      return next;
+    });
+  }, []);
+  const handleDropTab = useCallback((groupId: string, zone: DropZone) => {
+    const current = usePanelStore.getState().layouts[sessionId];
+    endTabDrag();
+    if (!current || !draggedPanelId) return;
+    const source = findGroupContainingPanel(current.root, draggedPanelId);
+    // Its own centre, or a group's only tab onto that group, changes nothing.
+    if (source?.id === groupId && (zone === 'center' || source.panelIds.length === 1)) return;
+    const root = zone === 'center'
+      ? movePanel(current.root, draggedPanelId, { groupId, index: findGroup(current.root, groupId)?.panelIds.length ?? 0 })
+      : movePanel(current.root, draggedPanelId, { groupId, edge: zone });
+    applyLayout({ ...current, root });
+  }, [sessionId, draggedPanelId, applyLayout, endTabDrag]);
+  const handleStripDrop = useCallback((groupId: string, panelId: string, insertIndex: number) => {
+    const current = usePanelStore.getState().layouts[sessionId];
+    endTabDrag();
+    if (current) applyLayout({ ...current, root: movePanel(current.root, panelId, { groupId, index: insertIndex }) });
+  }, [sessionId, applyLayout, endTabDrag]);
   // A single group keeps its tabs in the workspace toolbar, directly under the
   // title bar. Once split, every group owns a strip — the agent tab included —
   // so all tab strips sit on one row and the toolbar row goes away.
@@ -361,7 +401,12 @@ export function SessionWorkspacePanels({
       <PanelTabStrip panels={primaryTabs} activePanelId={primary?.activePanelId ?? agentPanelId} idNamespace={`session-${sessionId}`}
         alwaysShowClose
         onPanelSelect={panel => { if (primary) selectPanel(primary.id, panel); }}
-        onPanelClose={handleClose} />
+        onPanelClose={handleClose}
+        onDragStart={setDraggedPanelId} onDragEnd={endTabDrag}
+        onStripDrop={(panelId, index) => {
+          if (primary) handleStripDrop(primary.id, panelId, subsetInsertIndex(primary.panelIds, primaryTabs.map(panel => panel.id), index));
+        }}
+        isTabDragging={draggedPanelId !== null} draggedPanelId={draggedPanelId} />
     </div>
   );
   const titleBarActions = (
@@ -397,14 +442,18 @@ export function SessionWorkspacePanels({
             {layout && <SplitLayout layout={layout} panels={tabs} focusedGroupId={focusWithin ? layout.focusedGroupId ?? primaryGroup(layout.root).id : ''}
               isMainRepo={false} onSizesChange={resizeSplit} onPanelSelect={selectPanel} onPanelClose={handleClose}
               onFocusGroup={focusGroup} alwaysShowClose keepPermanentTabsInGroups
-              renderAddTool={renderGroupAddTool} />}
+              renderAddTool={renderGroupAddTool}
+              isTabDragging={draggedPanelId !== null} draggedPanelId={draggedPanelId} dropZones={dropZones}
+              onDropZoneChange={handleDropZoneChange} onDropTab={handleDropTab} onDragStart={setDraggedPanelId}
+              onDragEnd={endTabDrag} onStripDrop={handleStripDrop} />}
           </div>
           <div className="flex flex-shrink-0 flex-col border-t border-border-primary" style={{ height: showTerminal ? '35%' : 32 }}>
             <button type="button" disabled={!loaded} aria-label={showTerminal ? 'Collapse terminal' : 'Expand terminal'}
               aria-expanded={showTerminal} onClick={() => { void toggleTool('terminal'); }}
               className="flex h-8 flex-shrink-0 items-center gap-2 px-3 text-xs text-text-secondary hover:bg-surface-hover">
-              {showTerminal ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronUp className="h-3.5 w-3.5" />}
-              <Terminal className="h-3.5 w-3.5" /> Terminal
+              {showTerminal ? <ChevronDown className="h-3.5 w-3.5 text-text-tertiary" /> : <ChevronUp className="h-3.5 w-3.5 text-text-tertiary" />}
+              <Terminal className="h-3.5 w-3.5 text-text-tertiary" />
+              <span className="text-[11px] font-medium uppercase tracking-wider">Terminal</span>
             </button>
             {terminal && <div className="relative min-h-0 flex-1" style={{ display: showTerminal ? 'block' : 'none' }}>
               <PanelContainer panel={terminal} isActive={showTerminal} autoFocus={false} />
@@ -426,7 +475,7 @@ export function SessionWorkspacePanels({
                   const offset = event.key === 'ArrowRight' ? 1 : SESSION_INSPECTOR_TABS.length - 1;
                   selectSidebarTab(SESSION_INSPECTOR_TABS[(index + offset) % SESSION_INSPECTOR_TABS.length]);
                 }}
-                className={`flex flex-1 items-center justify-center rounded-t-md border border-transparent px-2 text-[12px] font-medium focus:outline-none focus:ring-0 ${sidebarTab === tab ? 'border-border-primary border-b-surface-primary bg-surface-primary text-text-primary -mb-px' : 'text-text-tertiary hover:text-text-primary hover:bg-surface-hover'}`}>
+                className={`flex flex-1 items-center justify-center rounded-t-md border border-transparent px-2 text-[12px] font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-border-focus ${sidebarTab === tab ? 'border-border-primary border-b-surface-primary bg-surface-primary text-text-primary -mb-px' : 'text-text-tertiary hover:text-text-primary hover:bg-surface-hover'}`}>
                 {tab === 'overview' ? 'Overview' : tab === 'files' ? 'Files' : 'Changes'}
               </button>
             ))}

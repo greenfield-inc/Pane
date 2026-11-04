@@ -1,9 +1,10 @@
 import type { VoiceDeepgramStreamingMetadata } from '@shared/types/voiceTranscription';
 import { parseDeepgramLiveMessage, readResultsMetadata } from '@shared/voice/deepgramLive';
 
-/** The host's WebSocket that proxies live audio to Deepgram. */
+/** The host's WebSocket that proxies live audio to Deepgram, under the base URL's path (a workspace's path secret). */
 export function voiceStreamUrl(baseUrl: string): string {
-  const url = new URL('/voice/deepgram-stream', baseUrl);
+  const url = new URL(baseUrl);
+  url.pathname = `${url.pathname.replace(/\/+$/, '')}/voice/deepgram-stream`;
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
   return url.toString();
 }

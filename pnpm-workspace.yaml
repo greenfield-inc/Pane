@@ -3,10 +3,58 @@ packages:
   - 'main'
   - 'mobile'
   - 'native'
+  - 'glasses'
   - 'packages/runpane'
   - 'shared'
+onlyBuiltDependencies:
+  - electron
+  - better-sqlite3-multiple-ciphers
+  - '@lydell/node-pty'
+  - esbuild
+  - msgpackr-extract
+  - electron-winstaller
+overrides:
+  prebuild-install>node-abi: ^4.33.0
+  d3-sankey>d3-array: ^3.2.0
+  # Security floors for transitive packages, each kept inside its current major.
+  dompurify: ^3.4.17
+  protobufjs@7: ^7.6.1
+  shell-quote: ^1.9.0
+  '@xmldom/xmldom@0.8': ^0.8.15
+  tmp: ^0.2.6
+  brace-expansion@1: ^1.1.20
+  brace-expansion@2: ^2.1.6
+  '@isaacs/brace-expansion': ^5.0.1
+  minimatch@3: ^3.1.4
+  minimatch@5: ^5.1.8
+  minimatch@9: ^9.0.7
+  minimatch@10: ^10.2.3
+packageExtensions:
+  # langium (under mermaid) imports vscode-jsonrpc without declaring it, so it
+  # took whichever version hoisting chose. codex-acp brings 9.x, whose exports
+  # drop the 8.x subpaths langium imports. Declare the 8.x it is built against.
+  langium@3:
+    dependencies:
+      vscode-jsonrpc: 8.2.0
+patchedDependencies:
+  '@xterm/addon-webgl@0.20.0-beta.298': patches/@xterm__addon-webgl@0.20.0-beta.298.patch
 minimumReleaseAge: 10080
 minimumReleaseAgeExclude:
+  # Exact ACP and assistant-ui releases validated together by the Chat fixtures.
+  - '@agentclientprotocol/sdk@2.0.1 || 2.4.0'
+  # The bundled chat adapters (main/src/services/agentChat/adapterSetup.ts) and what they pin exactly.
+  - '@agentclientprotocol/claude-agent-acp@0.100.0'
+  - '@agentclientprotocol/codex-acp@2.5.0'
+  - '@anthropic-ai/claude-agent-sdk@0.3.316'
+  - '@assistant-ui/react@0.15.31'
+  # Native distribution matching the web runtime's core/store/tap versions.
+  - '@assistant-ui/react-native@0.1.50'
+  - '@assistant-ui/core@0.3.31'
+  - '@assistant-ui/store@0.3.22'
+  - '@assistant-ui/tap@0.9.24'
+  - 'assistant-cloud@0.2.8'
+  - 'assistant-stream@0.3.54'
+  - 'safe-content-frame@0.0.34'
   - electron
   # Capacitor's core/platform packages must stay in one tested release family.
   - '@capacitor/android'
@@ -17,6 +65,11 @@ minimumReleaseAgeExclude:
   - '@capacitor/ios'
   - '@capacitor/keyboard'
   - '@capacitor/push-notifications'
+# The chat adapters run the person's installed claude and codex
+# (CLAUDE_CODE_EXECUTABLE, CODEX_PATH), never these bundled native binaries.
+ignoredOptionalDependencies:
+  - '@anthropic-ai/claude-agent-sdk-*'
+  - '@openai/codex-*'
 supportedArchitectures:
   os:
     - current

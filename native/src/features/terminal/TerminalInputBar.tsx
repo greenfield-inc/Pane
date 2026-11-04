@@ -6,6 +6,8 @@ import { ActivityIndicator, Pressable, StyleSheet, TextInput, View } from 'react
 import { useTheme } from '@/theme';
 import { Icon, Text } from '@/ui';
 
+import { useAutocorrect } from '../composer/autocorrectPreference';
+import { straightenKeyboardEdit } from '../composer/smartPunctuation';
 import { recordingClock } from '../voice/recordingLimits';
 import type { useVoiceDictation } from '../voice/useVoiceDictation';
 
@@ -33,14 +35,15 @@ export interface TerminalInputBarProps {
   onSelectionChange: (selection: { start: number; end: number }) => void;
   /** Moves the cursor after an insert; undefined leaves it to the user. */
   selection?: { start: number; end: number };
+  /** The terminal can't take input: Send and the host actions wait. Typing, Paste and Shortcuts still work. */
   disabled?: boolean;
 }
 
 /**
  * One box holds every composer action: the draft on top, then Attach, Paste,
  * Shortcuts and Copy on the left and the mic and Send/Enter on the right.
- * Return adds a line; the button sends. While dictating, the words heard so
- * far show in the box, dimmed and read-only.
+ * Return and the button both send, and sending closes the keyboard. While
+ * dictating, the words heard so far show in the box, dimmed and read-only.
  */
 export function TerminalInputBar({
   draft, onChangeDraft, onSubmit, voice, onAttach, onPaste, onShortcuts, onCopy, onSetupVoice, controllerShown, onToggleController, onSelectionChange, selection, disabled = false,
@@ -49,6 +52,8 @@ export function TerminalInputBar({
   const { colors } = theme;
   const voiceBusy = voice.phase !== 'idle';
   const previewing = voiceBusy && voice.preview.length > 0;
+  // Settings › Autocorrect. On, iOS also turns on smart punctuation, which the box undoes so commands still parse.
+  const autocorrect = useAutocorrect(state => state.enabled);
   const shown = previewing ? (draft.trim() ? `${draft}${/\s$/.test(draft) ? '' : ' '}${voice.preview}` : voice.preview) : draft;
 
   return (
@@ -56,26 +61,31 @@ export function TerminalInputBar({
       <TextInput
         testID="terminal-input"
         value={shown}
-        onChangeText={text => !previewing && onChangeDraft(text)}
+        onChangeText={text => !previewing && onChangeDraft(autocorrect ? straightenKeyboardEdit(draft, text) : text)}
         onSelectionChange={event => onSelectionChange(event.nativeEvent.selection)}
         selection={previewing ? undefined : selection}
-        editable={!disabled && !previewing}
+        editable={!previewing}
         placeholder="Type, dictate or pick a shortcut"
         placeholderTextColor={colors.textMuted}
         multiline
+        // Return is the terminal's Enter: it sends and closes the keyboard, like the button.
+        returnKeyType="send"
+        submitBehavior="blurAndSubmit"
+        onSubmitEditing={() => { if (!disabled && !voiceBusy) onSubmit(); }}
+        // No capitals even with autocorrect on: a capitalized first word breaks a command.
         autoCapitalize="none"
-        autoCorrect={false}
-        spellCheck={false}
+        autoCorrect={autocorrect}
+        spellCheck={autocorrect}
         smartInsertDelete={false}
         keyboardAppearance={theme.scheme}
         textAlignVertical="top"
         selectionColor={colors.accent}
-        style={[styles.input, { color: previewing ? colors.textMuted : colors.text, opacity: disabled ? 0.5 : 1 }]}
+        style={[styles.input, { color: previewing ? colors.textMuted : colors.text }]}
       />
       <View style={styles.actions}>
         <BoxAction testID="terminal-attach" label="Attach files" hint="Copies photos or files to the host and inserts their paths" ios="paperclip" android="attach_file" disabled={disabled} onPress={onAttach} />
-        <BoxAction testID="terminal-paste" label="Paste" hint="Pastes the clipboard at the cursor" ios="doc.on.clipboard" android="content_paste" tinted disabled={disabled} onPress={onPaste} />
-        <BoxAction testID="terminal-shortcuts" label="Shortcuts" hint="Inserts one of the host's shortcuts" ios="bolt" android="bolt" disabled={disabled} onPress={onShortcuts} />
+        <BoxAction testID="terminal-paste" label="Paste" hint="Pastes the clipboard at the cursor" ios="doc.on.clipboard" android="content_paste" tinted disabled={false} onPress={onPaste} />
+        <BoxAction testID="terminal-shortcuts" label="Shortcuts" hint="Inserts one of the host's shortcuts" ios="bolt" android="bolt" disabled={false} onPress={onShortcuts} />
         <BoxAction testID="terminal-copy" label="Copy from terminal" hint="Shows recent output to copy" ios="doc.on.doc" android="content_copy" disabled={disabled} onPress={onCopy} />
         <View style={styles.spacer} />
         <BoxAction

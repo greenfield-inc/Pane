@@ -237,11 +237,9 @@ function downloadBetterSqlitePrebuiltForArch(targetArch) {
 
   // Get Electron version from package.json
   const packageJson = JSON.parse(fs.readFileSync(path.join(ROOT_DIR, 'package.json'), 'utf8'));
-  const electronVersion = packageJson.devDependencies?.electron?.replace('^', '') || '41.10.3';
+  const electronVersion = packageJson.devDependencies?.electron?.replace('^', '') || '43.8.3';
 
   console.log(`  📦 Electron version: ${electronVersion}, arch: ${targetArch}`);
-
-  const isCrossCompiling = targetArch !== HOST_ARCH;
 
   try {
     execSync(
@@ -254,17 +252,23 @@ function downloadBetterSqlitePrebuiltForArch(targetArch) {
     );
     console.log(`  ✅ Downloaded Electron prebuilt for better-sqlite3 (${targetArch})`);
   } catch (error) {
-    if (isCrossCompiling) {
-      // When cross-compiling, we MUST have the correct arch binary - abort the build
-      console.error(`  ❌ Failed to download ${targetArch} prebuilt for better-sqlite3.`);
-      console.error(`     Host arch is ${HOST_ARCH} but target is ${targetArch} - cannot use existing binary.`);
-      console.error(`     Error: ${error.message}`);
-      process.exit(1);
-    }
-    // Same arch as host - the existing binary from pnpm install should work
-    console.warn(`  ⚠️  Failed to download ${targetArch} prebuilt, using existing binary (host arch matches)`);
+    // New Electron ABIs may not have upstream prebuilts yet. Rebuild for the
+    // requested Electron/architecture rather than retaining a host/Node binary.
+    console.warn(`  ⚠️  No usable ${targetArch} prebuilt; compiling the pinned SQLite source for Electron ${electronVersion}.`);
     console.warn(`     Error: ${error.message}`);
+    run(`pnpm exec electron-rebuild --force --only better-sqlite3-multiple-ciphers --module-dir ./main --arch ${targetArch} --version ${electronVersion}`);
   }
+
+  const binaryPath = path.join(betterSqliteDir, 'build', 'Release', 'better_sqlite3.node');
+  const binary = fs.readFileSync(binaryPath);
+  const peOffset = binary.readUInt32LE(0x3c);
+  const expectedMachine = targetArch === 'arm64' ? 0xaa64 : 0x8664;
+  if (binary.subarray(0, 2).toString() !== 'MZ'
+    || binary.subarray(peOffset, peOffset + 4).toString() !== 'PE\0\0'
+    || binary.readUInt16LE(peOffset + 4) !== expectedMachine) {
+    throw new Error(`SQLite binary does not target Windows ${targetArch}: ${binaryPath}`);
+  }
+  console.log(`  ✅ Verified SQLite PE architecture: ${targetArch}`);
 }
 
 /**

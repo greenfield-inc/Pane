@@ -1,6 +1,10 @@
+import fs from 'fs';
 import net from 'net';
+import os from 'os';
+import path from 'path';
 import { pipeline } from 'stream';
 import { createWebSocketStream, type WebSocket } from 'ws';
+import { PaneError, reasonOf } from '../../../../shared/paneError';
 
 /**
  * Mirrors a remote host's forwarded ports onto this machine's loopback. Each port gets
@@ -30,9 +34,23 @@ const LOOPBACK_HOSTS = ['127.0.0.1', '::1'] as const;
 const MAX_PORT_ATTEMPTS = 20;
 const ANSWER_PROBE_TIMEOUT_MS = 300;
 const MAX_PORT = 65_535;
+const liveTunnels = new Set<ReadonlyMap<number, PortListener>>();
+let removesRegistryOnExit = false;
+
+/**
+ * Every Pane process of this user on this machine lists its tunnel listeners here, one file per
+ * pid, so hosts leave them out of their Ports lists. Otherwise two desktops would mirror each
+ * other's listeners without end: two clients of one host, or two Panes connected to each other.
+ * Under the home folder, which only this user can write and which a desktop and a background
+ * host agree on (temp folders differ between them). One folder per machine, for shared homes.
+ */
+function tunnelRegistryDir(): string {
+  return path.join(os.homedir(), '.cache', 'pane-port-tunnels', os.hostname());
+}
 
 export function createPortTunnel(openStream: OpenPortStream): PortTunnel {
   const listeners = new Map<number, PortListener>();
+  liveTunnels.add(listeners);
   let closed = false;
 
   const ownLocalPorts = () => new Set([...listeners.values()].map(listener => listener.localPort));
@@ -85,18 +103,122 @@ export function createPortTunnel(openStream: OpenPortStream): PortTunnel {
         const listener = await open(hostPort);
         if (!listener) continue;
         // A disconnect while this port was opening: the tunnel is gone, so is this listener.
-        if (closed) await shut(listener);
-        else listeners.set(hostPort, listener);
+        if (closed) {
+          await shut(listener);
+          continue;
+        }
+        listeners.set(hostPort, listener);
+        try {
+          recordTunnelListeners();
+        } catch (error) {
+          // A listener hosts cannot recognize could be mirrored back here without end.
+          listeners.delete(hostPort);
+          await shut(listener);
+          throw error;
+        }
       }
+      tryRecordTunnelListeners();
       return new Map([...listeners].map(([hostPort, listener]) => [hostPort, listener.localPort]));
     },
     async close() {
       closed = true;
       const all = [...listeners.values()];
       listeners.clear();
+      liveTunnels.delete(listeners);
+      tryRecordTunnelListeners();
       await Promise.all(all.map(shut));
     },
   };
+}
+
+/** Rewrites this process's registry file, or removes it when no tunnel listens. Throws when it cannot. */
+function recordTunnelListeners(): void {
+  const dir = tunnelRegistryDir();
+  const file = path.join(dir, `${process.pid}.json`);
+  const ports = [...liveTunnels].flatMap(listeners => [...listeners.values()].map(listener => listener.localPort));
+  try {
+    if (ports.length === 0) {
+      fs.rmSync(file, { force: true });
+      return;
+    }
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    if (!removesRegistryOnExit) {
+      removesRegistryOnExit = true;
+      process.once('exit', () => fs.rmSync(file, { force: true }));
+    }
+    // Written to a new file, then renamed into place, so a host never reads half a file.
+    const partial = `${file}.${Date.now()}.tmp`;
+    try {
+      fs.writeFileSync(partial, JSON.stringify(ports), { flag: 'wx', mode: 0o600 });
+      fs.renameSync(partial, file);
+    } finally {
+      fs.rmSync(partial, { force: true });
+    }
+  } catch (error) {
+    throw new PaneError(
+      'ERR_PORT_TUNNEL_REGISTRY',
+      `Pane could not record its forwarded ports in ${dir}: ${reasonOf(error)}. The port that needed it was not forwarded.`,
+      `Make sure ${dir} is a folder you can write to, then reconnect to the host.`,
+    );
+  }
+}
+
+/** For closing listeners: a file that still lists a closed port hides nothing anyone else owns. */
+function tryRecordTunnelListeners(): void {
+  try {
+    recordTunnelListeners();
+  } catch (error) {
+    console.warn('[Pane port tunnel] registry_write_failed:', error);
+  }
+}
+
+/**
+ * The tunnel listeners of this user's Pane processes on this machine, by pid. A process removes
+ * its file when it exits, and a host removes the file of a process that is gone, so a crashed
+ * process's ports never hide a later process that reuses its pid. Throws when the registry exists
+ * but cannot be read: an incomplete answer would let tunnel listeners through.
+ */
+export async function readTunnelListeners(): Promise<ReadonlyMap<number, ReadonlySet<number>>> {
+  const dir = tunnelRegistryDir();
+  const byPid = new Map<number, Set<number>>();
+  try {
+    const files = await fs.promises.readdir(dir).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return [];
+      throw error;
+    });
+    await Promise.all(files.filter(file => /^\d+\.json$/u.test(file)).map(async file => {
+      const pid = Number.parseInt(file, 10);
+      const filePath = path.join(dir, file);
+      if (!isRunning(pid)) {
+        await fs.promises.rm(filePath, { force: true });
+        return;
+      }
+      const text = await fs.promises.readFile(filePath, 'utf8').catch((error: NodeJS.ErrnoException) => {
+        // Removed between the listing and the read: that process has no tunnel any more.
+        if (error.code === 'ENOENT') return '[]';
+        throw error;
+      });
+      const ports: unknown = JSON.parse(text);
+      if (Array.isArray(ports)) byPid.set(pid, new Set(ports.filter(Number.isInteger)));
+    }));
+  } catch (error) {
+    throw new PaneError(
+      'ERR_PORT_TUNNEL_REGISTRY',
+      `Pane could not read the forwarded-port records in ${dir}: ${reasonOf(error)}. The Ports list was not updated.`,
+      `Delete ${dir}; Pane recreates it. Then refresh the Ports list.`,
+    );
+  }
+  return byPid;
+}
+
+function isRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // EPERM: running, as another user.
+    return error instanceof Error && 'code' in error && error.code === 'EPERM';
+  }
 }
 
 /**

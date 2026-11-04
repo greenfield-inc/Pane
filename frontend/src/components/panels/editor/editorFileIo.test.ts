@@ -22,7 +22,7 @@ describe('editor file routing', () => {
 it.each([
   ['diagram.svg', 'image'], ['photo.avif', 'image'], ['photo.webp', 'image'], ['animation.gif', 'image'],
   ['favicon.ico', 'image'], ['bitmap.bmp', 'image'], ['manual.pdf', 'pdf'], ['README.md', 'markdown'],
-  ['page.html', 'html'], ['rows.csv', 'table'], ['rows.tsv', 'table'], ['data.json', 'structured'],
+  ['rows.csv', 'table'], ['rows.tsv', 'table'], ['data.json', 'structured'],
   ['events.jsonl', 'structured'], ['config.yaml', 'structured'], ['config.toml', 'structured'],
   ['face.ttf', 'font'], ['face.otf', 'font'], ['face.woff', 'font'], ['face.woff2', 'font'],
   ['bundle.zip', 'archive'], ['bundle.tar', 'archive'], ['app.sqlite', 'sqlite'],
@@ -33,7 +33,7 @@ it.each([
   expect(invoke).not.toHaveBeenCalled();
 });
 
-it.each(['app.ts', 'notes.txt', 'Dockerfile', 'source.py'])('keeps %s in the text editor', async filePath => {
+it.each(['app.ts', 'notes.txt', 'Dockerfile', 'source.py', 'page.html', 'legacy.HTM'])('keeps %s in the text editor', async filePath => {
   vi.stubGlobal('window', { electronAPI: { invoke: vi.fn().mockResolvedValue({ success: true, content: 'plain text' }) } });
   expect(await readEditorFile('session', filePath)).toEqual({ kind: 'text', content: 'plain text' });
 });

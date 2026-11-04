@@ -149,6 +149,7 @@ function backendStateIssue(backendState: string): TailscaleIssue {
 const serveConfigSchema = boundary.object({
   TCP: boundary.optional(boundary.nullable(boundary.jsonObject)),
   Web: boundary.optional(boundary.nullable(boundary.jsonObject)),
+  AllowFunnel: boundary.optional(boundary.nullable(boundary.jsonObject)),
 });
 const tcpHandlerSchema = boundary.object({
   TCPForward: boundary.optional(boundary.string),
@@ -163,6 +164,8 @@ export interface TailscaleServeHandlers {
   port443Target(): string | null;
   /** Whether an HTTPS web handler exists for `<dnsName>:<port>`. */
   hasHttpsHandler(dnsName: string, port: number): boolean;
+  /** Whether Funnel publishes `<dnsName>:<port>` to the internet. */
+  funnelOn(dnsName: string, port: number): boolean;
 }
 
 export function readTailscaleServeHandlers(serveStatusJson: string): TailscaleServeHandlers {
@@ -187,6 +190,9 @@ export function readTailscaleServeHandlers(serveStatusJson: string): TailscaleSe
     },
     hasHttpsHandler(dnsName, port) {
       return Object.prototype.hasOwnProperty.call(web, `${dnsName}:${port}`);
+    },
+    funnelOn(dnsName, port) {
+      return parsed?.AllowFunnel?.[`${dnsName}:${port}`] === true;
     },
   };
 }

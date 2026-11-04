@@ -4,6 +4,7 @@ import { terminalPanelManager } from './terminalPanelManager';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import type { AgentState } from '../../../shared/types/agentStatus';
 import { extractWorkspaceHeldInput } from './workspaceHeldInput';
+import { isAgentFarmLaunchCommand } from '../../../shared/types/customCommandResume';
 import type {
   RunpaneWorkspaceEntry,
   RunpaneWorkspaceEntryKind,
@@ -21,6 +22,8 @@ export interface ManagedCliPanel {
   repoName?: string;
   worktreePath?: string;
   agentState: AgentState;
+  /** Whether the panel's terminal process is live; a stopped panel has no agent to be idle. */
+  running: boolean;
   lastActivityTime?: string;
   heldInputPresent?: boolean;
 }
@@ -69,23 +72,24 @@ export class WorkspaceStateReader {
           isCliPanel: boundary.optional(boundary.boolean),
           agentType: boundary.optional(boundary.string),
         }));
-        const agentState = resolveAgentState(panel.id);
         panelSummaries.push({
           panelId: panel.id,
           title: panel.title,
           agentType: customState.agentType,
-          agentState,
+          agentState: resolveAgentState(panel.id),
+          running: terminalPanelManager.isTerminalInitialized(panel.id),
         });
 
       }
 
       const agentEntries = (managedByPane.get(session.id) ?? []).map((panel): RunpaneWorkspaceEntry => ({
           ...common,
-          kind: entryKindForState(panel.agentState),
+          kind: panel.running ? entryKindForState(panel.agentState) : 'panel.stopped',
           panelId: panel.panelId,
           panelTitle: panel.panelTitle,
           agentType: panel.agentType,
           to: panel.agentState,
+          running: panel.running,
           source: 'agent',
         }));
 
@@ -110,21 +114,34 @@ export class WorkspaceStateReader {
         const customState = decodeBoundary(panel.state.customState ?? {}, boundary.object({
           isCliPanel: boundary.optional(boundary.boolean),
           agentType: boundary.optional(boundary.string),
+          initialCommand: boundary.optional(boundary.string),
         }));
         const snapshot = terminalPanelManager.getTerminalSnapshot(panel.id);
-        if ((snapshot?.isCliPanel ?? customState.isCliPanel) !== true) continue;
+        // An Agent Farm panel is an agent panel before its first launch flags it as one,
+        // so a panel stopped before then is still listed and can be resumed.
+        const isAgentPanel = (snapshot?.isCliPanel ?? customState.isCliPanel) === true
+          || isAgentFarmLaunchCommand(customState.initialCommand);
+        if (!isAgentPanel) continue;
+        const agentType = snapshot?.agentType ?? customState.agentType;
         result.push({
           panelId: panel.id,
           paneId: session.id,
           paneName: session.name,
           panelTitle: panel.title,
-          agentType: snapshot?.agentType ?? customState.agentType,
+          agentType,
           repoId: project?.id,
           repoName: project?.name,
           worktreePath: session.worktreePath,
           agentState: resolveAgentState(panel.id),
+          running: terminalPanelManager.isTerminalInitialized(panel.id),
           lastActivityTime: snapshot?.lastActivityTime,
-          heldInputPresent: snapshot?.screenText ? extractWorkspaceHeldInput(snapshot.screenText) !== undefined : undefined,
+          // Typed cells only, so a dim or grey prompt suggestion is not held input.
+          heldInputPresent: snapshot
+            ? extractWorkspaceHeldInput(agentType, {
+              screenText: snapshot.screenText,
+              typedText: terminalPanelManager.getInputScreenText(panel.id),
+            }) !== undefined
+            : undefined,
         });
       }
     }
@@ -133,10 +150,9 @@ export class WorkspaceStateReader {
 }
 
 function resolveAgentState(panelId: string): AgentState {
-  const tracked = terminalPanelManager.getAgentStatus(panelId);
-  if (tracked) return tracked;
-  const initialized = terminalPanelManager.isTerminalInitialized(panelId);
-  return initialized ? 'unknown' : 'idle';
+  // A panel whose terminal is not running has no agent to be idle or ready.
+  if (!terminalPanelManager.isTerminalInitialized(panelId)) return 'unknown';
+  return terminalPanelManager.getAgentStatus(panelId) ?? 'unknown';
 }
 
 function entryKindForState(state: AgentState): RunpaneWorkspaceEntryKind {

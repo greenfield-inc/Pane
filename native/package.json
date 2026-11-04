@@ -2,14 +2,14 @@
   "name": "@pane/native",
   "private": true,
   "version": "0.0.0",
-  "main": "expo-router/entry",
+  "main": "index.ts",
   "scripts": {
     "start": "expo start --dev-client --port ${RCT_METRO_PORT:-8137}",
     "ios": "expo run:ios --port ${RCT_METRO_PORT:-8137}",
     "android": "expo run:android --port ${RCT_METRO_PORT:-8137}",
     "prebuild": "expo prebuild --clean",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p terminal-web",
+    "typecheck": "node ../node_modules/@typescript/native/bin/tsc --noEmit && node ../node_modules/@typescript/native/bin/tsc --noEmit -p terminal-web",
     "build:terminal-web": "node scripts/build-terminal-web.mjs"
   },
   "dependencies": {
@@ -34,9 +34,13 @@
     "expo-status-bar": "~57.0.0",
     "expo-symbols": "~57.0.0",
     "expo-system-ui": "~57.0.0",
+    "expo-task-manager": "~57.0.21",
+    "expo-updates": "~57.0.26",
+    "highlight.js": "11.11.1",
     "react": "19.2.3",
     "react-native": "0.86.3",
     "react-native-gesture-handler": "~2.32.0",
+    "react-native-marked": "8.3.2",
     "react-native-reanimated": "4.5.1",
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "~4.26.0",
@@ -46,6 +50,7 @@
     "zustand": "^5.0.2"
   },
   "devDependencies": {
+    "@bacons/apple-targets": "5.0.0",
     "@react-native/metro-config": "0.86.3",
     "@types/react": "~19.2.2",
     "@xterm/addon-fit": "0.12.0-beta.299",

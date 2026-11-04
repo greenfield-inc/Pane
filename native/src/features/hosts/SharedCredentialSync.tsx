@@ -5,6 +5,7 @@ import { syncSharedCredentials, type SharedCredentialHost, type SharedCredential
 
 import { useHostsStore } from '@/auth/hostsStore';
 import { createDaemonClient } from '@/daemon/createClient';
+import { requestPushRegistration } from '@/features/notifications/usePushSetup';
 
 const SYNC_DEBOUNCE_MS = 500;
 let timer: ReturnType<typeof setTimeout> | null = null;
@@ -12,9 +13,9 @@ let running = false;
 let pending = false;
 
 /**
- * Copies the newest integration keys between every host this phone is paired
- * with. The phone relays keys and keeps no copy. Hosts too old to share keys,
- * or out of reach, are skipped until a later sync.
+ * Copies the newest integration keys between every host this phone has saved.
+ * The phone relays keys and keeps no copy. Hosts too old to share keys, out of
+ * reach, or owned by someone else are skipped until a later sync.
  */
 export function requestSharedCredentialSync(): void {
   if (timer) clearTimeout(timer);
@@ -31,7 +32,8 @@ async function run(): Promise<void> {
   }
   running = true;
   try {
-    const profiles = useHostsStore.getState().profiles.filter(profile => !profile.tailnetMachine);
+    // A computer reached over Tailscale shares keys only with its owner and refuses everyone else.
+    const profiles = useHostsStore.getState().profiles;
     if (profiles.length < 2) return;
     const hosts = profiles.map((profile): SharedCredentialHost => {
       const client = createDaemonClient(profile);
@@ -40,7 +42,9 @@ async function run(): Promise<void> {
         apply: async credentials => { await client.invoke('credentials:shared:apply', [credentials]); },
       };
     });
-    await syncSharedCredentials(hosts);
+    // A computer that just got the push key can now register this phone.
+    const { updated } = await syncSharedCredentials(hosts);
+    if (updated > 0) requestPushRegistration();
   } finally {
     running = false;
     if (pending) {

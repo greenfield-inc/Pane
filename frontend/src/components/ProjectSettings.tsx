@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Save, Trash2, FolderIcon, GitBranch, Settings, Code2, BrainCircuit } from 'lucide-react';
 import { API } from '../utils/api';
 import { ipcErrorMessage } from '../utils/ipcErrorMessage';
@@ -13,6 +13,39 @@ import { Card } from './ui/Card';
 import { ProjectEnvVarsSection } from './ProjectEnvVarsSection';
 import { projectEnvInputsFrom, projectEnvRowProblem, projectEnvRowsFrom, type ProjectEnvRow } from './projectEnvRows';
 
+/** The editable fields, as the form holds them: an unset setting is ''. */
+interface SettingsForm {
+  name: string;
+  path: string;
+  systemPrompt: string;
+  runScript: string;
+  buildScript: string;
+  archiveScript: string;
+  openIdeCommand: string;
+  worktreeFolder: string;
+}
+
+const EMPTY_FORM: SettingsForm = {
+  name: '', path: '', systemPrompt: '', runScript: '', buildScript: '', archiveScript: '', openIdeCommand: '', worktreeFolder: '',
+};
+
+function formFromProject(project: Project): SettingsForm {
+  return {
+    name: project.name,
+    path: project.path,
+    systemPrompt: project.system_prompt || '',
+    runScript: project.run_script || '',
+    buildScript: project.build_script || '',
+    archiveScript: project.archive_script || '',
+    openIdeCommand: project.open_ide_command || '',
+    worktreeFolder: project.worktree_folder || '',
+  };
+}
+
+const FORM_FIELDS: readonly (keyof SettingsForm)[] = [
+  'name', 'path', 'systemPrompt', 'runScript', 'buildScript', 'archiveScript', 'openIdeCommand', 'worktreeFolder',
+];
+
 interface ProjectSettingsProps {
   project: Project;
   isOpen: boolean;
@@ -22,16 +55,11 @@ interface ProjectSettingsProps {
 }
 
 export default function ProjectSettings({ project, isOpen, onClose, onUpdate, onDelete }: ProjectSettingsProps) {
-  const [name, setName] = useState('');
-  const [path, setPath] = useState('');
-  const [systemPrompt, setSystemPrompt] = useState('');
-  const [runScript, setRunScript] = useState('');
-  const [buildScript, setBuildScript] = useState('');
-  const [archiveScript, setArchiveScript] = useState('');
+  const [form, setForm] = useState<SettingsForm>(EMPTY_FORM);
+  // The project the form edits, and its saved values. A field still equal to them is untouched.
+  const savedForm = useRef<{ projectId: number; form: SettingsForm } | null>(null);
   const [detectedConfig, setDetectedConfig] = useState<DetectedProjectConfig | null>(null);
   const [currentBranch, setCurrentBranch] = useState<string | null>(null);
-  const [openIdeCommand, setOpenIdeCommand] = useState('');
-  const [worktreeFolder, setWorktreeFolder] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -39,53 +67,80 @@ export default function ProjectSettings({ project, isOpen, onClose, onUpdate, on
   // Null until loaded, so a failed load never saves an empty list over the stored one.
   const [loadedEnvRows, setLoadedEnvRows] = useState<ProjectEnvRow[] | null>(null);
 
-  useEffect(() => {
-    if (isOpen && project) {
-      setName(project.name);
-      setPath(project.path);
-      setSystemPrompt(project.system_prompt || '');
-      setRunScript(project.run_script || '');
-      setBuildScript(project.build_script || '');
-      setArchiveScript(project.archive_script || '');
-      // Fetch the current branch when dialog opens
-      if (project.path) {
-        window.electronAPI.git.detectBranch(project.path).then((result) => {
-          if (result.success && result.data) {
-            setCurrentBranch(result.data);
-          }
-        });
-      }
-      setOpenIdeCommand(project.open_ide_command || '');
-      setWorktreeFolder(project.worktree_folder || '');
-      setError(null);
-      setEnvRows([]);
-      setLoadedEnvRows(null);
-      window.electronAPI.projects.getEnvVars(project.id).then((result) => {
-        if (result.success && result.data) {
-          const rows = projectEnvRowsFrom(result.data);
-          setEnvRows(rows);
-          setLoadedEnvRows(rows);
-        } else {
-          setError(result.error || 'Pane could not load this project\'s environment variables.');
-        }
-      }).catch((err) => {
-        setError(ipcErrorMessage(err, 'Pane could not load this project\'s environment variables.'));
-      });
-      // Detect the project's config file (pane.json / conductor.json / .gitpod.yml /
-      // devcontainer.json) asynchronously when the modal opens.  The result populates
-      // `detectedConfig` which drives the "From <source>" badge shown beneath each
-      // script field when the user has not set an explicit override in Project Settings.
-      // Detection is best-effort: if the IPC call fails the badges simply don't appear,
-      // which is fine because the fallback still happens at runtime in the main process.
-      setDetectedConfig(null);
-      window.electronAPI.projects.detectConfig(project.id.toString()).then((result) => {
-        if (result.success && result.data) {
-          setDetectedConfig(result.data);
-        }
-      }).catch(() => {
-        // Config detection is optional — don't block the UI
+  const { name, path, systemPrompt, runScript, buildScript, archiveScript, openIdeCommand, worktreeFolder } = form;
+  const setField = (field: keyof SettingsForm) => (value: string) => setForm(current => ({ ...current, [field]: value }));
+  const setName = setField('name');
+  const setPath = setField('path');
+  const setSystemPrompt = setField('systemPrompt');
+  const setRunScript = setField('runScript');
+  const setBuildScript = setField('buildScript');
+  const setArchiveScript = setField('archiveScript');
+  const setOpenIdeCommand = setField('openIdeCommand');
+  const setWorktreeFolder = setField('worktreeFolder');
+
+  // The branch and config file shown beside the scripts, read from the project's path.
+  // Detection is best-effort: if a call fails the badges simply don't appear, which is
+  // fine because the config-file fallback still happens at runtime in the main process.
+  // A reply for an earlier project or path is dropped.
+  const detection = useRef(0);
+  const detectProject = (target: Project) => {
+    const request = ++detection.current;
+    setCurrentBranch(null);
+    setDetectedConfig(null);
+    if (target.path) {
+      window.electronAPI.git.detectBranch(target.path).then((result) => {
+        if (request === detection.current && result.success && result.data) setCurrentBranch(result.data);
       });
     }
+    window.electronAPI.projects.detectConfig(target.id.toString()).then((result) => {
+      if (request === detection.current && result.success && result.data) setDetectedConfig(result.data);
+    }).catch(() => {
+      // Config detection is optional; don't block the UI
+    });
+  };
+
+  useEffect(() => {
+    if (!isOpen || !project) {
+      savedForm.current = null;
+      return;
+    }
+    const previous = savedForm.current?.projectId === project.id ? savedForm.current.form : null;
+    const saved = formFromProject(project);
+    savedForm.current = { projectId: project.id, form: saved };
+    if (previous) {
+      // Settings saved elsewhere while the dialog is open (runpane, MCP, another window)
+      // update the fields the user hasn't edited and keep the ones they have.
+      setForm(current => {
+        const next = { ...current };
+        for (const field of FORM_FIELDS) {
+          if (current[field] === previous[field]) next[field] = saved[field];
+        }
+        return next;
+      });
+      if (saved.path !== previous.path) detectProject(project);
+      return;
+    }
+    // Opened, or switched to another project (the active Pane moved to another repo):
+    // start over so no edit made for one project is saved onto another.
+    setForm(saved);
+    setError(null);
+    detectProject(project);
+    setEnvRows([]);
+    setLoadedEnvRows(null);
+    const projectId = project.id;
+    window.electronAPI.projects.getEnvVars(projectId).then((result) => {
+      if (savedForm.current?.projectId !== projectId) return;
+      if (result.success && result.data) {
+        const rows = projectEnvRowsFrom(result.data);
+        setEnvRows(rows);
+        setLoadedEnvRows(rows);
+      } else {
+        setError(result.error || 'Pane could not load this project\'s environment variables.');
+      }
+    }).catch((err) => {
+      if (savedForm.current?.projectId !== projectId) return;
+      setError(ipcErrorMessage(err, 'Pane could not load this project\'s environment variables.'));
+    });
   }, [isOpen, project]);
 
   const handleSave = async () => {
@@ -106,21 +161,25 @@ export default function ProjectSettings({ project, isOpen, onClose, onUpdate, on
         setLoadedEnvRows(savedRows);
       }
 
-      const updates: Partial<Project> = {
-        name,
-        path,
-        system_prompt: systemPrompt || null,
-        run_script: runScript || null,
-        build_script: buildScript || null,
-        archive_script: archiveScript || null,
-        open_ide_command: openIdeCommand || null,
-        worktree_folder: worktreeFolder || null
-      };
-      
-      const response = await API.projects.update(project.id.toString(), updates);
+      // Save only the fields edited here, so a save never undoes a change made
+      // elsewhere while the dialog was open.
+      const saved = savedForm.current?.form ?? EMPTY_FORM;
+      const edited = (field: keyof SettingsForm) => form[field] !== saved[field];
+      const updates: Partial<Project> = {};
+      if (edited('name')) updates.name = name;
+      if (edited('path')) updates.path = path;
+      if (edited('systemPrompt')) updates.system_prompt = systemPrompt || null;
+      if (edited('runScript')) updates.run_script = runScript || null;
+      if (edited('buildScript')) updates.build_script = buildScript || null;
+      if (edited('archiveScript')) updates.archive_script = archiveScript || null;
+      if (edited('openIdeCommand')) updates.open_ide_command = openIdeCommand || null;
+      if (edited('worktreeFolder')) updates.worktree_folder = worktreeFolder || null;
 
-      if (!response.success) {
-        throw new Error(response.error || 'Failed to update project');
+      if (Object.keys(updates).length > 0) {
+        const response = await API.projects.update(project.id.toString(), updates);
+        if (!response.success) {
+          throw new Error(response.error || 'Failed to update project');
+        }
       }
 
       onUpdate();
@@ -153,7 +212,7 @@ export default function ProjectSettings({ project, isOpen, onClose, onUpdate, on
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} size="xl">
+    <Modal isOpen={isOpen} onClose={onClose} size="xl" showCloseButton={false}>
       <ModalHeader 
         title="Project Settings" 
         icon={<Settings className="w-5 h-5" />}
@@ -175,7 +234,7 @@ export default function ProjectSettings({ project, isOpen, onClose, onUpdate, on
 
       <ModalBody>
         {error && (
-          <div className="mb-6 p-4 bg-status-error/10 border border-status-error/30 rounded-lg text-status-error">
+          <div className="mb-6 p-4 bg-status-error/10 border border-status-error/30 rounded-lg text-text-primary">
             {error}
           </div>
         )}
@@ -218,7 +277,7 @@ export default function ProjectSettings({ project, isOpen, onClose, onUpdate, on
                   size="lg"
                   fullWidth
                 />
-                {project.wsl_enabled && project.wsl_distribution && (
+                {!!project.wsl_enabled && project.wsl_distribution && (
                   <div className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-blue-500/10 border border-blue-500/20 text-blue-400 text-sm">
                     <span className="font-semibold">WSL</span>
                     <span className="text-blue-300/70">|</span>
@@ -365,7 +424,7 @@ export default function ProjectSettings({ project, isOpen, onClose, onUpdate, on
             {detectedConfig && (
               <div className="rounded-lg border border-border-secondary bg-surface-secondary/30 px-3 py-2.5 text-xs text-text-tertiary">
                 <p className="font-medium text-text-secondary mb-1">
-                  Auto-detected: <span className="font-mono text-text-accent">{detectedConfig.source}</span>
+                  Auto-detected: <span className="font-mono text-interactive">{detectedConfig.source}</span>
                 </p>
                 <p className="leading-relaxed">
                   Pane found a config file in your repo root and will use its scripts as defaults.
@@ -374,7 +433,7 @@ export default function ProjectSettings({ project, isOpen, onClose, onUpdate, on
                     ? ' This file uses the pane.json format: { "scripts": { "setup": "...", "run": "...", "archive": "..." } }'
                     : ''}
                 </p>
-                <p className="mt-1 text-[10px] text-text-quaternary">
+                <p className="mt-1 text-[10px] text-text-muted">
                   Detection priority: pane.json → conductor.json → .gitpod.yml → devcontainer.json
                 </p>
               </div>

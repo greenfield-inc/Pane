@@ -9,15 +9,19 @@ import { TerminalSettings } from './settings/categories/TerminalSettings';
 import { AIAgentsSettings } from './settings/categories/AIAgentsSettings';
 import { WorktreesGitSettings } from './settings/categories/WorktreesGitSettings';
 import { NotificationSettings } from './NotificationSettings';
+import { NotifySettings } from './settings/categories/NotifySettings';
 import { RemoteAccessSettings } from './settings/categories/RemoteAccessSettings';
 import { IntegrationsSettings } from './settings/categories/IntegrationsSettings';
 import { ShortcutsSettings } from './settings/categories/ShortcutsSettings';
 import { PrivacySettings } from './settings/categories/PrivacySettings';
+import { ImportExportSettings } from './settings/categories/ImportExportSettings';
 import { AdvancedSettings } from './settings/categories/AdvancedSettings';
 import { UsageView } from './usage/UsageView';
 import { RemoteAccessWorkflows } from './settings/RemoteAccessWorkflows';
+import { MachineDetails } from './settings/MachineDetails';
 import { useSettingsPersistence } from './settings/useSettingsPersistence';
 import { useDirtySettingsForms } from './settings/useDirtySettingsForms';
+import { registerSettingsExit } from '../utils/settingsExit';
 import { useRemoteAccessSettings } from './settings/useRemoteAccessSettings';
 import { SETTINGS_CATEGORIES, settingDomId } from './settings/catalog';
 import type {
@@ -54,6 +58,25 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
   const [platform, setPlatform] = useState('darwin');
   const [systemMonoFonts, setSystemMonoFonts] = useState<string[]>([]);
   const [remoteSubview, setRemoteSubview] = useState<RemoteAccessSubviewId | undefined>();
+  const [addCodeRequest, setAddCodeRequest] = useState<number>();
+  // Remote Access › Machine details: the machine shown, while open.
+  const [remoteMachineId, setRemoteMachineId] = useState<string>();
+  const [passwordRequest, setPasswordRequest] = useState<{ machine: string; nonce: number }>();
+  const passwordNonce = useRef(0);
+  // A request opens its field once; leaving the page drops it so coming back starts closed.
+  const clearRemoteRequests = useCallback(() => {
+    setAddCodeRequest(undefined);
+    setPasswordRequest(undefined);
+  }, []);
+  const openMachineDetails = useCallback((machineId: string) => {
+    clearRemoteRequests();
+    setRemoteMachineId(machineId);
+  }, [clearRemoteRequests]);
+  const askMachinePassword = useCallback((machine: string) => {
+    passwordNonce.current += 1;
+    setPasswordRequest({ machine, nonce: passwordNonce.current });
+    setRemoteMachineId(undefined);
+  }, []);
   const handledRequestRef = useRef<number | null>(null);
   const fontsLoadedRef = useRef(false);
   const remote = useRemoteAccessSettings(isOpen, onClose);
@@ -87,25 +110,42 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
     requestTransition(() => {
       onCategoryChange(openRequest.target.category);
       setRemoteSubview(openRequest.target.subview);
-      focusSetting(openRequest.target.setting);
+      setRemoteMachineId(undefined);
+      if (openRequest.target.setting === 'remote-add-code') setAddCodeRequest(openRequest.nonce);
+      if (openRequest.target.machine) askMachinePassword(openRequest.target.machine);
+      // A machine's password field takes focus itself once its row is listed.
+      if (!openRequest.target.machine) focusSetting(openRequest.target.setting);
     });
     onOpenRequestHandled();
-  }, [focusSetting, isOpen, onCategoryChange, onOpenRequestHandled, openRequest, requestTransition]);
+  }, [askMachinePassword, focusSetting, isOpen, onCategoryChange, onOpenRequestHandled, openRequest, requestTransition]);
 
   const changeCategory = useCallback((nextCategory: SettingsCategoryId) => {
-    if (nextCategory === category && !remoteSubview) return;
+    if (nextCategory === category && !remoteSubview && !remoteMachineId) return;
     requestTransition(() => {
       setRemoteSubview(undefined);
+      setRemoteMachineId(undefined);
+      clearRemoteRequests();
       onCategoryChange(nextCategory);
     });
-  }, [category, onCategoryChange, remoteSubview, requestTransition]);
+  }, [category, clearRemoteRequests, onCategoryChange, remoteMachineId, remoteSubview, requestTransition]);
 
   const requestClose = useCallback(() => {
     requestTransition(() => {
       setRemoteSubview(undefined);
+      setRemoteMachineId(undefined);
+      clearRemoteRequests();
       onClose();
     });
-  }, [onClose, requestTransition]);
+  }, [clearRemoteRequests, onClose, requestTransition]);
+
+  // Search leaves Settings before it opens a Pane, Session or project, through the unsaved-edits guard.
+  useEffect(() => registerSettingsExit(then => requestTransition(() => {
+    setRemoteSubview(undefined);
+    setRemoteMachineId(undefined);
+    clearRemoteRequests();
+    onClose();
+    then();
+  })), [clearRemoteRequests, onClose, requestTransition]);
 
   const showKeyboardShortcuts = useCallback(() => {
     requestTransition(onShowKeyboardShortcuts);
@@ -114,14 +154,19 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
   const showUpdate = useCallback((versionInfo: VersionInfo) => {
     requestTransition(() => {
       setRemoteSubview(undefined);
+      setRemoteMachineId(undefined);
+      clearRemoteRequests();
       onClose();
       onUpdate(versionInfo);
     });
-  }, [onClose, onUpdate, requestTransition]);
+  }, [clearRemoteRequests, onClose, onUpdate, requestTransition]);
 
   const openRemoteSubview = useCallback((subview: RemoteAccessSubviewId) => {
-    requestTransition(() => setRemoteSubview(subview));
-  }, [requestTransition]);
+    requestTransition(() => {
+      clearRemoteRequests();
+      setRemoteSubview(subview);
+    });
+  }, [clearRemoteRequests, requestTransition]);
 
   const content = () => {
     if (!persistence.config) return null;
@@ -142,18 +187,34 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
         return <UsageView />;
       case 'worktrees-git':
         return <WorktreesGitSettings persistence={persistence} {...sharedDirtyProps} />;
+      case 'notify':
+        return <NotifySettings persistence={persistence} />;
       case 'notifications':
         return <NotificationSettings persistence={persistence} />;
       case 'remote-access':
-        return remoteSubview
-          ? <RemoteAccessWorkflows subview={remoteSubview} controller={remote} onBack={() => requestTransition(() => setRemoteSubview(undefined))} {...sharedDirtyProps} />
-          : <RemoteAccessSettings controller={remote} onOpenSubview={openRemoteSubview} />;
+        if (remoteSubview) {
+          return <RemoteAccessWorkflows subview={remoteSubview} controller={remote} onBack={() => requestTransition(() => setRemoteSubview(undefined))} {...sharedDirtyProps} />;
+        }
+        if (remoteMachineId) {
+          return <MachineDetails machineId={remoteMachineId} controller={remote} onBack={() => setRemoteMachineId(undefined)} onNeedsPassword={askMachinePassword} />;
+        }
+        return (
+          <RemoteAccessSettings
+            controller={remote}
+            onOpenSubview={openRemoteSubview}
+            onOpenMachine={openMachineDetails}
+            addCodeRequest={addCodeRequest}
+            passwordRequest={passwordRequest}
+          />
+        );
       case 'integrations':
         return <IntegrationsSettings persistence={persistence} {...sharedDirtyProps} />;
       case 'shortcuts':
         return <ShortcutsSettings persistence={persistence} onShowKeyboardShortcuts={showKeyboardShortcuts} {...sharedDirtyProps} />;
       case 'privacy':
         return <PrivacySettings persistence={persistence} />;
+      case 'import-export':
+        return <ImportExportSettings persistence={persistence} platform={platform} />;
       case 'advanced':
         return <AdvancedSettings persistence={persistence} platform={platform} {...sharedDirtyProps} />;
     }

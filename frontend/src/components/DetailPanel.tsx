@@ -38,7 +38,7 @@ interface DetailPanelProps {
   isMainRepo?: boolean;
 }
 
-const sidebarButtonClass = 'w-full !h-7 justify-start !rounded-md !px-2 !py-0 !text-[12px] !font-medium !text-text-secondary hover:!bg-surface-hover hover:!text-text-primary focus:!ring-0';
+const sidebarButtonClass = 'w-full !h-7 justify-start !rounded-md !px-2 !py-0 !text-[12px] !font-medium !text-text-secondary enabled:hover:!bg-surface-hover enabled:hover:!text-text-primary focus-visible:!ring-inset focus-visible:!ring-offset-0';
 const remoteIdeTooltip = 'Open in IDE is only available in local mode. Switch this client back to the local runtime to use your desktop IDE.';
 
 function SectionHeader({ children }: { children: React.ReactNode }) {
@@ -265,7 +265,7 @@ export function DetailPanel({
                       </Button>
                     )}
                     items={ideItems}
-                    footer={onConfigureIDE ? <DropdownMenuItem icon={Settings} label="Configure..." onClick={onConfigureIDE} /> : undefined}
+                    footer={onConfigureIDE ? <DropdownMenuItem icon={Settings} label="Configure…" onClick={onConfigureIDE} /> : undefined}
                     position="auto"
                     width="sm"
                   />
@@ -279,7 +279,7 @@ export function DetailPanel({
               <div className="p-2 bg-status-error/10 border border-status-error/30 rounded-md">
                 <div className="flex items-start gap-2">
                   <AlertTriangle className="w-4 h-4 text-status-error flex-shrink-0 mt-0.5" />
-                  <p className="text-xs text-status-error">{mergeError}</p>
+                  <p className="text-xs text-text-primary">{mergeError}</p>
                 </div>
               </div>
             </div>
@@ -304,7 +304,7 @@ export function DetailPanel({
         {!gitUnavailable && session.worktreePath && (
           <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
             <div className="px-2 pt-2 flex-shrink-0"><SectionHeader>History</SectionHeader></div>
-            <div ref={detailScrollSurfaceRef} role="region" tabIndex={0} aria-label="Commit history" className="flex-1 min-h-0 overflow-y-auto px-2 pb-2">
+            <div ref={detailScrollSurfaceRef} role="region" tabIndex={0} aria-label="Commit history" className="flex-1 min-h-0 overflow-y-auto px-2 pb-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-border-focus">
               <GitHistoryGraph
                 sessionId={session.id}
                 baseBranch={session.baseBranch || 'main'}

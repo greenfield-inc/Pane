@@ -9,11 +9,12 @@ const trustedSchema = boundary.object({ clientId: boundary.nonEmptyString });
 const registrationSchema = boundary.object({
   platform: platformSchema, token: boundary.nonEmptyString, installationId: boundary.nonEmptyString,
   hostProfileId: boundary.nonEmptyString, needsInputEnabled: boundary.optional(boundary.boolean), completedEnabled: boundary.optional(boundary.boolean),
+  notifyButtons: boundary.optional(boundary.boolean),
 });
 const installationSchema = boundary.object({ platform: platformSchema, installationId: boundary.nonEmptyString });
 const controlsSchema = boundary.object({ platform: platformSchema, installationId: boundary.nonEmptyString, needsInputEnabled: boundary.optional(boundary.boolean), completedEnabled: boundary.optional(boundary.boolean) });
 
-/** HTTP appends TrustedMobileRequest only after it has authenticated a paired client. */
+/** HTTP appends the trusted client id: a paired client's, or `tailnet:<login>` for this computer's owner. */
 export function registerMobilePushHandlers(ipcMain: IpcMain, services: AppServices, commandRegistry: PaneCommandRegistry): void {
   const sender = getMobilePushSender(services.configManager);
   commandRegistry.register('mobile:push-status', (input: PaneCommandValue, trusted: PaneCommandValue) => {

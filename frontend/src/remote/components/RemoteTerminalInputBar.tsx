@@ -1,5 +1,5 @@
 import { ClipboardPaste, Command, Loader2, Mic, Send, Square, X } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import type {
   RemotePwaTerminalShortcut,
   RemotePwaVoiceTranscriptionAffordance,
@@ -20,7 +20,7 @@ interface RemoteTerminalInputBarProps {
   disabled?: boolean;
   onOpenShortcuts?: () => void;
   onResetTerminal: () => void;
-  onSendInput: (data: string) => void;
+  onSendInput: (data: string) => Promise<void>;
   onTranscribeAudio?: (request: VoiceTranscriptionRequest) => Promise<VoiceTranscriptionResult>;
   onCreateStreamingSocket?: () => WebSocket;
   onGetDeepgramToken?: () => Promise<VoiceDeepgramTokenResult>;
@@ -63,6 +63,8 @@ export function RemoteTerminalInputBar({
   onFinalizeStreamingAudio,
 }: RemoteTerminalInputBarProps) {
   const [draft, setDraft] = useState('');
+  const sending = useRef(false);
+  const [pending, setPending] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [clipboardError, setClipboardError] = useState<string | null>(null);
 
@@ -100,14 +102,19 @@ export function RemoteTerminalInputBar({
 
   const sendInput = (data: string) => {
     if (disabled || !data) return;
-    onSendInput(data);
+    void onSendInput(data).catch(error => setClipboardError(error instanceof Error ? error.message : 'Input delivery failed. Check the panel before retrying.'));
   };
 
-  const sendDraft = () => {
-    if (isVoiceBusy) return;
-    if (!draft.trim()) return;
-    sendInput(`${draft}\r`);
-    setDraft('');
+  const sendDraft = async () => {
+    if (isVoiceBusy || disabled || sending.current || !draft.trim()) return;
+    sending.current = true; setPending(true);
+    const submitted = draft;
+    try {
+      await onSendInput(`${submitted}\r`);
+      setDraft(current => current === submitted ? '' : current);
+    } catch (error) {
+      setClipboardError(error instanceof Error ? error.message : 'Delivery unknown. Check the original panel before resubmitting.');
+    } finally { sending.current = false; setPending(false); }
   };
 
   const insertText = (text: string) => {
@@ -208,7 +215,7 @@ export function RemoteTerminalInputBar({
             disabled={(!voice.isRecording && (disabled || voice.isTranscribing || !canUseSelectedVoiceMode))}
             className={`pane-press pane-press-touch absolute right-3 top-3 flex h-9 w-9 items-center justify-center rounded-md border bg-bg-primary disabled:cursor-not-allowed disabled:opacity-50 ${
               voice.isRecording
-                ? 'border-status-error/50 text-status-error hover:bg-status-error/10'
+                ? 'border-status-error/50 text-status-error hover:bg-status-error/10 hover:text-text-primary'
                 : 'border-border-secondary text-text-secondary hover:bg-surface-hover hover:text-text-primary'
             }`}
             aria-label={voice.isRecording ? 'Stop voice recording' : 'Start voice recording'}
@@ -226,7 +233,7 @@ export function RemoteTerminalInputBar({
         <button
           type="button"
           onClick={sendDraft}
-          disabled={disabled || isVoiceBusy || !draft.trim()}
+          disabled={disabled || pending || isVoiceBusy || !draft.trim()}
           className="pane-press pane-press-touch flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-interactive text-text-on-interactive hover:bg-interactive-hover disabled:cursor-not-allowed disabled:opacity-50"
           aria-label="Send input"
           title="Send"

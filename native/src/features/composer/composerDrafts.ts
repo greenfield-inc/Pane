@@ -1,5 +1,7 @@
 import { File, Paths } from 'expo-file-system';
 
+import { DraftStore } from './draftStore';
+
 /**
  * Unsent composer text per host, pane and terminal tab, kept on this device
  * so it survives leaving the pane and restarting the app. One JSON file,
@@ -22,12 +24,12 @@ export function draftKey(hostId: string, paneId: string, panelId: string): strin
   return `${hostId}/${paneId}/${panelId}`;
 }
 
-export function readDraft(key: string): string {
+function readDraft(key: string): string {
   return all()[key] ?? '';
 }
 
 /** Saves `text` for `key`; empty text removes it. */
-export function writeDraft(key: string, text: string): void {
+function writeDraft(key: string, text: string): void {
   const current = all();
   if ((current[key] ?? '') === text) return;
   if (text) current[key] = text;
@@ -38,3 +40,5 @@ export function writeDraft(key: string, text: string): void {
     // A draft is a convenience; losing one must never break typing.
   }
 }
+
+export const composerDraftStore = new DraftStore({ read: readDraft, write: writeDraft });

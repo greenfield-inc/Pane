@@ -1,5 +1,7 @@
+import fs from 'fs';
+import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
-import { ToolPanel, CreatePanelRequest, PanelEventType, PanelActivationRequest, PanelOpenPlacement, ToolPanelState, ToolPanelMetadata, ToolPanelType, LogsPanelState } from '../../../shared/types/panels';
+import { ToolPanel, CreatePanelRequest, PanelEventType, PanelActivationRequest, PanelOpenPlacement, ToolPanelState, ToolPanelMetadata, ToolPanelType, LogsPanelState, TerminalPanelState } from '../../../shared/types/panels';
 import { getPaneEventSink, getPaneWebviewContextMap } from '../core/runtime';
 import { databaseService } from './database';
 import { splitPanelBufferState } from '../database/panelBuffers';
@@ -9,6 +11,11 @@ import type { AnalyticsManager } from './analyticsManager';
 import type { PaneEventArgument } from '../core/eventSink';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { assertHostBrowserFileNavigation } from './browserPanelFiles';
+import { OrchestrationSessionStore } from './orchestrationSessionStore';
+import { sessionWorkspacePath } from './sessionWorkspace';
+import { getAppDirectory } from '../utils/appDirectory';
+import { withSessionFolderAccess } from './agents/sessionFolderAccess';
+import { reasonOf } from '../../../shared/paneError';
 
 function logsPanelState(panel: ToolPanel): LogsPanelState {
   // SAFETY: Callers first discriminate `panel.type === 'logs'`; this state is
@@ -80,7 +87,11 @@ class PanelManager {
     });
   }
   
-  async createPanel(request: CreatePanelRequest): Promise<ToolPanel> {
+  /**
+   * `hostFileGrant` is set only by host code that has already checked a file
+   * entry URL itself (`panels:open-html-file`); requests never carry it.
+   */
+  async createPanel(request: CreatePanelRequest, options: { hostFileGrant?: boolean } = {}): Promise<ToolPanel> {
     return await withLock(`panel-creation-${request.sessionId}`, async () => {
       // When user manually creates a panel, remove it from the closed panel types list
       // This allows auto-creation to work again in the future if they close it again and create a new session
@@ -107,7 +118,31 @@ class PanelManager {
         hasBeenViewed: false,
         customState
       };
-      assertHostBrowserFileNavigation(request.type, state);
+      if (request.type === 'terminal') {
+        // Snapshot the association at creation, so later association does not
+        // silently change the access of an existing tab (including lazy shells).
+        // CLI launches may already carry it for prompt/staged-command preparation.
+        // SAFETY: This branch creates terminal panels; their custom state uses TerminalPanelState.
+        const terminalState = customState as TerminalPanelState;
+        if (!terminalState.orchestrationSessionId && !terminalState.sessionFolder) {
+          try {
+            const sessions = new OrchestrationSessionStore(path.join(getAppDirectory(), 'orchestration-sessions.json')).read().sessions;
+            const session = sessions.find(item => item.associations.some(association => association.paneId === request.sessionId));
+            const folder = session && sessionWorkspacePath(session.id);
+            if (folder && fs.statSync(folder, { throwIfNoEntry: false })?.isDirectory()) {
+              terminalState.sessionFolder = folder;
+              if (terminalState.initialCommand) {
+                const tool = withSessionFolderAccess({ title, command: terminalState.initialCommand, agent: 'claude', launchMode: terminalState.launchMode }, folder);
+                if (terminalState.launchCommand === terminalState.initialCommand) terminalState.launchCommand = tool.command;
+                terminalState.initialCommand = tool.command;
+              }
+            }
+          } catch (error) {
+            console.warn(`[PanelManager] Could not configure Session access for terminal ${panelId}: ${reasonOf(error)}. The terminal will open without Session access; Session storage was left unchanged. Next: Check ${path.join(getAppDirectory(), 'orchestration-sessions.json')} and the associated Session folder for invalid data or unreadable paths, repair the data or permissions, then open a new terminal tab.`);
+          }
+        }
+      }
+      if (!options.hostFileGrant) assertHostBrowserFileNavigation(request.type, state);
       
       // Create metadata (merge with any provided overrides)
       const metadata: ToolPanelMetadata = {
@@ -323,7 +358,7 @@ class PanelManager {
       console.log(`[PanelManager] Updated panel ${panelId}`);
     });
   }
-  
+
   /**
    * Host- or agent-initiated activation: records the tab as last used and asks
    * clients already showing this Pane to bring it forward.

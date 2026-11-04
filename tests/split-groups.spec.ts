@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { installElectronApiMock } from './electronApiMock';
+import type { PanelActivationRequest, ToolPanel } from '../shared/types/panels';
 
 // Once a pane is split, every tab lives in its group's strip: the top tab
 // row collapses (its Run / inspector controls sit on the title strip), and
@@ -177,4 +178,72 @@ for (const layoutReadFails of [false, true]) {
     await expect(groups.nth(0).getByRole('tab', { name: 'Alpha', exact: true })).toHaveAttribute('aria-selected', 'true');
     await expect(groups.nth(1).getByRole('tab', { name: 'plan.html', exact: true })).toHaveAttribute('aria-selected', 'true');
   });
+}
+
+for (const leaveVia of ['another Pane', 'the repository view'] as const) {
+  test(`pages an agent opens while you are in ${leaveVia} land in the split, keeping the remembered focus`, async ({ page }) => {
+    const other = { ...session, id: 'other-session', name: 'Other pane', worktreePath: '/tmp/split-fixture/other-session', displayOrder: 1 };
+    await installElectronApiMock(page, {
+      platform: 'darwin',
+      initialProjects: [project],
+      initialSessions: [session, other],
+      initialPanels: panels,
+      initialLayout: layout,
+      activeProjectId: project.id,
+      rememberPaneLayouts: true,
+    });
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await page.getByRole('button', { name: /^Expand project Split fixture$/ }).click();
+    await page.getByRole('button', { name: 'Split pane', exact: true }).click();
+    const groups = page.locator('.panel-group-tab-bar');
+    await expect(groups).toHaveCount(2);
+    // Focus the right group, then leave: this desktop now remembers the layout.
+    await groups.nth(1).getByRole('tab', { name: 'Beta', exact: true }).click();
+    await expect.poll(() => rememberedFocusedGroup(page, session.id)).toEqual(['beta']);
+    if (leaveVia === 'another Pane') await page.getByRole('button', { name: 'Other pane', exact: true }).click();
+    else {
+      await page.getByRole('button', { name: 'Project actions for Split fixture', exact: true }).click();
+      await page.getByText('Open session on main', { exact: true }).click();
+    }
+    await expect(page.getByRole('tab', { name: 'Beta', exact: true })).toHaveCount(0);
+
+    await page.evaluate(sessionId => {
+      // SAFETY: installElectronApiMock adds these controls before the app loads.
+      const mock = (window as typeof window & { __paneTestElectronMock: { emitPanelCreated: (panel: ToolPanel) => void; emitPanelActivation: (request: PanelActivationRequest) => void } }).__paneTestElectronMock;
+      const now = new Date(0).toISOString();
+      // As the host does for `panels open --file src/app.ts` and `--url http://localhost:5173`.
+      for (const [id, title] of [['agent-file', 'app.ts'], ['agent-url', 'localhost:5173']] as const) {
+        mock.emitPanelCreated({
+          id, sessionId, type: 'browser', title,
+          state: { isActive: true, hasBeenViewed: false, customState: { currentUrl: 'about:blank' } },
+          metadata: { createdAt: now, lastActiveAt: now, position: 3, openPlacement: 'split' },
+        });
+        mock.emitPanelActivation({ sessionId, panelId: id, placement: 'split' });
+      }
+    }, session.id);
+    await page.getByRole('button', { name: 'Split pane', exact: true }).click();
+
+    await expect(groups).toHaveCount(2);
+    await expect(groups.nth(1).getByRole('tab')).toHaveCount(3);
+    expect(await groups.nth(0).getByRole('tab').evaluateAll(tabs => tabs.map(tab => tab.getAttribute('aria-label')))).toEqual(['Alpha']);
+    expect(await groups.nth(1).getByRole('tab').evaluateAll(tabs => tabs.map(tab => tab.getAttribute('aria-label')))).toEqual(['Beta', 'app.ts', 'localhost:5173']);
+    // Loading never steals focus: the side group keeps showing the tab it showed.
+    await expect(groups.nth(1).getByRole('tab', { name: 'Beta', exact: true })).toHaveAttribute('aria-selected', 'true');
+    await expect(groups.nth(0).getByRole('tab', { name: 'Alpha', exact: true })).toHaveAttribute('aria-selected', 'true');
+  });
+}
+
+/** The group this desktop remembers as focused for a Pane, as its panel ids. */
+async function rememberedFocusedGroup(page: Page, paneId: string): Promise<string[] | null> {
+  return page.evaluate(paneId => {
+    type Node = { type: 'group'; id: string; panelIds: string[] } | { type: 'split'; children: Node[] };
+    // SAFETY: installElectronApiMock's rememberPaneLayouts keeps layouts under this key, keyed `${hostId}/${paneId}`.
+    const layouts = JSON.parse(window.localStorage.getItem('__pane_test_pane_layouts__') ?? '{}') as Record<string, { root: Node; focusedGroupId?: string }>;
+    const layout = Object.entries(layouts).find(([key]) => key.endsWith(`/${paneId}`))?.[1];
+    if (!layout) return null;
+    const find = (node: Node): string[] | null => node.type === 'group'
+      ? (node.id === layout.focusedGroupId ? node.panelIds : null)
+      : node.children.map(find).find(Boolean) ?? null;
+    return find(layout.root);
+  }, paneId);
 }

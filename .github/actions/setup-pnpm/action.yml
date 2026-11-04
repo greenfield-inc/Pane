@@ -5,7 +5,7 @@ description: Installs Node.js and activates the pnpm version pinned in package.j
 inputs:
   node-version:
     description: Node.js version to install
-    default: '22.18.0'
+    default: '22.23.4'
 runs:
   using: composite
   steps:

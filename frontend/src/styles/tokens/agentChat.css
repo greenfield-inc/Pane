@@ -1,0 +1,26 @@
+/* assistant-ui minimal template zinc palette, scoped to Chat.
+ * Source: assistant-ui/assistant-ui@a24d074, templates/minimal/app/globals.css.
+ * The approved default theme is deliberately independent of the surrounding shell.
+ */
+.agent-chat {
+  --chat-background: oklch(1 0 0);
+  --chat-foreground: oklch(0.141 0.005 285.823);
+  --chat-primary: oklch(0.21 0.006 285.885);
+  --chat-primary-foreground: oklch(0.985 0 0);
+  --chat-muted: oklch(0.967 0.001 286.375);
+  --chat-muted-foreground: oklch(0.552 0.016 285.938);
+  --chat-border: oklch(0.92 0.004 286.32);
+  --chat-destructive: #b91c1c;
+  --chat-ring: oklch(0.705 0.015 286.067);
+}
+.dark .agent-chat {
+  --chat-background: oklch(0.141 0.005 285.823);
+  --chat-foreground: oklch(0.985 0 0);
+  --chat-primary: oklch(0.92 0.004 286.32);
+  --chat-primary-foreground: oklch(0.21 0.006 285.885);
+  --chat-muted: oklch(0.274 0.006 286.033);
+  --chat-muted-foreground: oklch(0.705 0.015 286.067);
+  --chat-border: oklch(1 0 0 / 10%);
+  --chat-destructive: oklch(0.704 0.191 22.216);
+  --chat-ring: oklch(0.552 0.016 285.938);
+}

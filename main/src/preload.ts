@@ -1,4 +1,10 @@
+import type { LoopInput } from '../../shared/types/loop';
+import type { TestNotificationResult } from '../../shared/types/notifications';
+import type { SetupFile, SetupSectionId } from '../../shared/types/setupTransfer';
+import type { SessionImportProgress, SessionImportRunResult, SessionImportScan } from '../../shared/types/sessionImport';
+import type { RestartToUpdateSource, RestartToUpdateState, UpdateRestoreResult } from '../../shared/types/updater';
 import { contextBridge, ipcRenderer } from 'electron';
+import { createPreferencesApi } from '../../shared/types/preferences';
 import { isDaemonOwnedChannel } from '../../shared/types/daemon';
 import {
   WINDOW_CONTROLS_OVERLAY_ARG,
@@ -20,14 +26,21 @@ import type {
   RemoteHostSetupResult,
   RemoteHostSetupTerminalCommandResult,
   RemotePaneConnectionState,
+  RemoteConnectionCheckStage,
+  RemoteHostSetupProgress,
   RemotePaneConnectionProfile,
 } from '../../shared/types/remoteDaemon';
 import type { TailnetMachineList, WorkspaceAccessSummary, WorkspaceAccessUpdate } from '../../shared/types/workspaceAccess';
+import type { GlassesAccessState, GlassesRevokeEverywhereResult } from '../../shared/types/glasses';
+import type { VoiceKeyCheck } from '../../shared/voice/voiceKeys';
 import type { HostNavigationMemory } from '../../shared/types/hostNavigation';
 import type { SessionWorkspaceLayout } from '../../shared/types/sessionWorkspaceLayout';
 import type { PanelActivationRequest, SessionPanelLayout, ToolPanel } from '../../shared/types/panels';
+import type { PaneChatAgent } from '../../shared/types/paneChat';
 import type { DiffScope, FileDiffRequest } from '../../shared/types/gitDiff';
 import type { PanelAgentStatusEvent } from '../../shared/types/agentStatus';
+import type { NotifyCommand, NotifySnapshot, NotifyWindowSize } from '../../shared/types/notify';
+import type { MachineCommand, MachineConnectionsEvent, MachineReadChannel, MachineResult, MachineState } from '../../shared/types/machineConnections';
 import type {
   OrchestrationAssociationInput,
   OrchestrationSessionCreateInput,
@@ -274,6 +287,13 @@ try {
       console.error('Failed to dispatch browser-panel:popup-requested to window:', e);
     }
   });
+  ipcRenderer.on('browser-panel:file-refused', (_event: Electron.IpcRendererEvent, data: { panelId: string; message: string; next?: string }) => {
+    try {
+      window.dispatchEvent(new CustomEvent('browser-panel:file-refused', { detail: data }));
+    } catch (e) {
+      console.error('Failed to dispatch browser-panel:file-refused to window:', e);
+    }
+  });
 } catch {
   // Ignore if IPC is not available for some reason
 }
@@ -337,12 +357,18 @@ function invokeIpc(channel: string, ...args: unknown[]) {
   return ipcRenderer.invoke(channel, ...args);
 }
 
+let machineEventListeners = 0;
+
+// Main has no network event; a reconnecting remote host retries when the renderer sees the network return.
+window.addEventListener('online', () => ipcRenderer.send('remote-daemon:network-online'));
+
 contextBridge.exposeInMainWorld('electronAPI', {
   onNotesChanged: (callback: () => void) => {
     const listener = () => callback();
     ipcRenderer.on('notes:changed', listener);
     return () => ipcRenderer.removeListener('notes:changed', listener);
   },
+  preferences: createPreferencesApi(invokeIpc),
   // Generic invoke method for direct IPC calls
   invoke: (channel: string, ...args: unknown[]) => invokeIpc(channel, ...args),
   
@@ -376,6 +402,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     installUpdate: (): Promise<IPCResponse> => invokeIpc('updater:install-update'),
     copyUpdateCommand: (): Promise<IPCResponse> => invokeIpc('updater:copy-update-command'),
     openTerminalWithCommand: (): Promise<IPCResponse> => invokeIpc('updater:open-terminal-with-command'),
+    getRestartState: (): Promise<IPCResponse<RestartToUpdateState>> => invokeIpc('updater:get-restart-state'),
+    restartToUpdate: (source: RestartToUpdateSource): Promise<IPCResponse> => invokeIpc('updater:restart-to-update', source),
+    snooze: (): Promise<IPCResponse<RestartToUpdateState>> => invokeIpc('updater:snooze'),
+    setTonight: (enabled: boolean): Promise<IPCResponse<RestartToUpdateState>> => invokeIpc('updater:set-tonight', enabled),
+    takeRestoreResult: (): Promise<IPCResponse<UpdateRestoreResult | null>> => invokeIpc('updater:take-restore-result'),
   },
 
   // System utilities
@@ -399,7 +430,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   paneChat: {
     getOrCreate: (): Promise<IPCResponse> => invokeIpc('pane-chat:get-or-create'),
-    setAgent: (agent: 'claude' | 'codex' | 'cursor'): Promise<IPCResponse> => invokeIpc('pane-chat:set-agent', agent),
+    setAgent: (agent: PaneChatAgent): Promise<IPCResponse> => invokeIpc('pane-chat:set-agent', agent),
+    introOffer: (): Promise<IPCResponse<{ eligible: boolean; openingPromptAtLaunch: boolean }>> => invokeIpc('pane-chat:intro-offer'),
   },
   sshHosts: {
     list: (): Promise<IPCResponse> => invokeIpc('ssh-hosts:list'),
@@ -413,7 +445,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     create: (input: OrchestrationSessionCreateInput): Promise<IPCResponse> => invokeIpc('orchestration-sessions:create', input),
     get: (selector: OrchestrationSessionSelector): Promise<IPCResponse> => invokeIpc('orchestration-sessions:get', selector),
     update: (selector: OrchestrationSessionSelector, input: OrchestrationSessionUpdateInput): Promise<IPCResponse> => invokeIpc('orchestration-sessions:update', selector, input),
-    setAgent: (selector: OrchestrationSessionSelector, agent: 'claude' | 'codex' | 'cursor'): Promise<IPCResponse> => invokeIpc('orchestration-sessions:set-agent', selector, agent),
+    reorder: (sessionIds: string[]): Promise<IPCResponse> => invokeIpc('orchestration-sessions:reorder', { sessionIds }),
+    setAgent: (selector: OrchestrationSessionSelector, agent: PaneChatAgent): Promise<IPCResponse> => invokeIpc('orchestration-sessions:set-agent', selector, agent),
     associate: (selector: OrchestrationSessionSelector, association: OrchestrationAssociationInput): Promise<IPCResponse> => invokeIpc('orchestration-sessions:associate', selector, association),
     detach: (selector: OrchestrationSessionSelector, paneId?: string): Promise<IPCResponse> => invokeIpc('orchestration-sessions:detach', selector, paneId),
     overview: (selector: OrchestrationSessionSelector): Promise<IPCResponse> => invokeIpc('orchestration-sessions:overview', selector),
@@ -424,6 +457,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getReport: (request?: { fromMs?: number; toMs?: number; bucket?: 'hour' | 'day' }): Promise<IPCResponse> => invokeIpc('usage:get-report', request),
     getStatus: (): Promise<IPCResponse> => invokeIpc('usage:get-status'),
     rescan: (): Promise<IPCResponse> => invokeIpc('usage:rescan'),
+  },
+
+  // Bring sessions from other agent tools into Pane
+  sessionImport: {
+    scan: (): Promise<SessionImportScan> => invokeIpc('session-import:scan'),
+    run: (keys: string[]): Promise<SessionImportRunResult> => invokeIpc('session-import:run', keys),
+    progress: (): Promise<SessionImportProgress> => invokeIpc('session-import:progress'),
   },
 
   // Leaderboard opt-in and submission
@@ -443,6 +483,23 @@ contextBridge.exposeInMainWorld('electronAPI', {
       invokeIpc('export:share-image', data, filename),
   },
 
+  // Settings › Import & Export: always this computer's setup
+  setup: {
+    summary: (): Promise<IPCResponse> => invokeIpc('setup:summary'),
+    export: (sections: SetupSectionId[]): Promise<IPCResponse> => invokeIpc('setup:export', sections),
+    chooseImport: (): Promise<IPCResponse> => invokeIpc('setup:choose-import'),
+    preview: (file: SetupFile, fileName: string): Promise<IPCResponse> => invokeIpc('setup:preview', file, fileName),
+  },
+
+  // Loops (scheduled tasks)
+  loops: {
+    list: (): Promise<IPCResponse> => invokeIpc('loops:list'),
+    save: (input: LoopInput): Promise<IPCResponse> => invokeIpc('loops:save', input),
+    delete: (id: string): Promise<IPCResponse> => invokeIpc('loops:delete', id),
+    setEnabled: (id: string, enabled: boolean): Promise<IPCResponse> => invokeIpc('loops:set-enabled', id, enabled),
+    runNow: (id: string): Promise<IPCResponse> => invokeIpc('loops:run-now', id),
+    preview: (cron: string): Promise<IPCResponse> => invokeIpc('loops:preview', cron),
+  },
   // Mission Control — live overview of every agent pane across all sessions
   missionControl: {
     listAgents: (options?: { includeArchived?: boolean }): Promise<IPCResponse> => invokeIpc('mission-control:list-agents', options),
@@ -544,7 +601,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // Log operations
     getLogs: (sessionId: string): Promise<IPCResponse> => invokeIpc('sessions:get-logs', sessionId),
     clearLogs: (sessionId: string): Promise<IPCResponse> => invokeIpc('sessions:clear-logs', sessionId),
-    addLog: (sessionId: string, entry: LogEntry): Promise<IPCResponse> => invokeIpc('sessions:add-log', sessionId, entry),
   },
 
   // Project management
@@ -612,9 +668,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     updateSessionPreferences: (preferences: AppConfig['sessionCreationPreferences']): Promise<IPCResponse> => invokeIpc('config:update-session-preferences', preferences),
     getMonospaceFonts: (): Promise<IPCResponse> => invokeIpc('config:get-monospace-fonts'),
     chooseApnsKey: (): Promise<IPCResponse<{ privateKey: string; keyId: string | null } | null>> => invokeIpc('dialog:open-apns-key'),
+    checkDeepgramKey: (key: string): Promise<VoiceKeyCheck> => invokeIpc('config:check-deepgram-key', key),
   },
 
   remoteDaemon: {
+    restoreComplete: (restoreId: number, error?: string): Promise<void> => ipcRenderer.invoke('remote-daemon:restore-complete', restoreId, error),
+    /** The renderer now handles restorations; main resends one it sent too early. */
+    restoreReady: (): void => ipcRenderer.send('remote-daemon:restore-ready'),
     getConfig: (): Promise<IPCResponse<RemoteDaemonConfig>> => invokeIpc('remote-daemon:get-config'),
     getConnectionState: (): Promise<IPCResponse<RemotePaneConnectionState>> => invokeIpc('remote-daemon:get-connection-state'),
     getHostState: (): Promise<IPCResponse<RemoteDaemonHostRuntimeState>> => invokeIpc('remote-daemon:get-host-state'),
@@ -653,8 +713,23 @@ contextBridge.exposeInMainWorld('electronAPI', {
     updateWorkspaceAccess: (update: WorkspaceAccessUpdate): Promise<IPCResponse<WorkspaceAccessSummary>> =>
       invokeIpc('remote-daemon:update-workspace-access', update),
     listTailnetMachines: (): Promise<IPCResponse<TailnetMachineList>> => invokeIpc('remote-daemon:list-tailnet-machines'),
+    getGlasses: (): Promise<IPCResponse<GlassesAccessState>> => invokeIpc('remote-daemon:get-glasses'),
+    revokeGlasses: (id: string): Promise<IPCResponse<GlassesAccessState>> => invokeIpc('remote-daemon:revoke-glasses', id),
+    revokeGlassesEverywhere: (phoneId: string): Promise<IPCResponse<GlassesRevokeEverywhereResult>> =>
+      invokeIpc('remote-daemon:revoke-glasses-everywhere', phoneId),
+    setGlassesOrigin: (update: { origin: string; allowed: boolean }): Promise<IPCResponse<GlassesAccessState>> =>
+      invokeIpc('remote-daemon:set-glasses-origin', update),
     saveTailnetMachine: (input: { name: string; password?: string }): Promise<IPCResponse<RemotePaneConnectionProfile>> =>
       invokeIpc('remote-daemon:save-tailnet-machine', input),
+    runCheckFix: (checkId: number, stage: RemoteConnectionCheckStage): Promise<IPCResponse<RemotePaneConnectionState>> =>
+      invokeIpc('remote-daemon:run-check-fix', { checkId, stage }),
+    dismissCheck: (checkId: number): Promise<IPCResponse<RemotePaneConnectionState>> =>
+      invokeIpc('remote-daemon:dismiss-check', { checkId }),
+    onSetupProgress: (callback: (progress: RemoteHostSetupProgress) => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, progress: RemoteHostSetupProgress) => callback(progress);
+      ipcRenderer.on('remote-daemon:setup-progress', wrappedCallback);
+      return () => ipcRenderer.removeListener('remote-daemon:setup-progress', wrappedCallback);
+    },
     onConnectionStateChanged: (callback: (state: RemotePaneConnectionState) => void) => {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, state: RemotePaneConnectionState) => callback(state);
       ipcRenderer.on('remote-daemon:connection-state-changed', wrappedCallback);
@@ -728,6 +803,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
       return () => ipcRenderer.removeListener('onboarding:github-auth-pty-exit', wrappedCallback);
     },
     setupDefaultRepo: (): Promise<IPCResponse> => invokeIpc('onboarding:setup-default-repo'),
+    findRepos: (): Promise<IPCResponse> => invokeIpc('onboarding:find-repos'),
+    findWslRepos: (distro: string): Promise<IPCResponse> => invokeIpc('onboarding:find-wsl-repos', distro),
+    checkFolder: (folder: string): Promise<IPCResponse> => invokeIpc('onboarding:check-folder', folder),
+    findAgents: (): Promise<IPCResponse> => invokeIpc('onboarding:find-agents'),
+    firstSteps: (): Promise<IPCResponse> => invokeIpc('onboarding:first-steps'),
     supportProject: (): Promise<IPCResponse> => invokeIpc('onboarding:support-project'),
   },
 
@@ -739,7 +819,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     saveExpandedFolders: (folderIds: string[]): Promise<IPCResponse> => invokeIpc('ui-state:save-expanded-folders', folderIds),
     saveSessionSortAscending: (ascending: boolean): Promise<IPCResponse> => invokeIpc('ui-state:save-session-sort-ascending', ascending),
     saveSidebarSectionExpanded: (section: 'pinned' | 'repositories' | 'sshHosts' | 'sessions' | 'archived', expanded: boolean): Promise<IPCResponse> => invokeIpc('ui-state:save-sidebar-section-expanded', section, expanded),
-    saveCollapsedSessions: (sessionIds: string[]): Promise<IPCResponse> => invokeIpc('ui-state:save-collapsed-sessions', sessionIds),
+    saveExpandedSessions: (sessionIds: string[]): Promise<IPCResponse> => invokeIpc('ui-state:save-expanded-sessions', sessionIds),
     saveExpandedArchivedProjects: (projectIds: number[]): Promise<IPCResponse> => invokeIpc('ui-state:save-expanded-archived-projects', projectIds),
     // Per-host navigation memory. The caller names the host because the renderer
     // can still be showing the outgoing host while main has switched runtimes.
@@ -800,6 +880,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
       const wrappedCallback = () => callback();
       ipcRenderer.on('remote:settings-changed', wrappedCallback);
       return () => ipcRenderer.removeListener('remote:settings-changed', wrappedCallback);
+    },
+    onLoopsChanged: (callback: () => void) => {
+      const wrappedCallback = () => callback();
+      ipcRenderer.on('loops:changed', wrappedCallback);
+      return () => ipcRenderer.removeListener('loops:changed', wrappedCallback);
     },
     onPaneFocusRequested: (callback: (data: RunpanePaneFocusRequestedEvent) => void) => {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, data: RunpanePaneFocusRequestedEvent) => callback(data);
@@ -988,13 +1073,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.removeAllListeners(channel);
     },
     
-    // Unclean shutdown detection (crash sentinel)
-    onUncleanShutdownDetected: (callback: () => void) => {
-      const wrappedCallback = (_event: Electron.IpcRendererEvent) => callback();
-      ipcRenderer.on('app:unclean-shutdown-detected', wrappedCallback);
-      return () => ipcRenderer.removeListener('app:unclean-shutdown-detected', wrappedCallback);
-    },
-
     // Main process logging
     onMainLog: (callback: (level: string, message: string) => void) => {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, level: string, message: string) => callback(level, message);
@@ -1035,6 +1113,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('updater:update-downloaded', wrappedCallback);
       return () => ipcRenderer.removeListener('updater:update-downloaded', wrappedCallback);
     },
+    onRestartToUpdateState: (callback: (state: RestartToUpdateState) => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, state: RestartToUpdateState) => callback(state);
+      ipcRenderer.on('updater:restart-state', wrappedCallback);
+      return () => ipcRenderer.removeListener('updater:restart-state', wrappedCallback);
+    },
     onUpdaterError: (callback: (error: Error) => void) => {
       const wrappedCallback = (_event: Electron.IpcRendererEvent, error: Error) => callback(error);
       ipcRenderer.on('updater:error', wrappedCallback);
@@ -1070,8 +1153,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('window:focus-changed', wrappedCallback);
       return () => ipcRenderer.removeListener('window:focus-changed', wrappedCallback);
     },
-    onRemoteDaemonResyncRequested: (callback: (event: { hostChanged: boolean }) => void) => {
-      const wrappedCallback = (_event: Electron.IpcRendererEvent, payload?: { hostChanged?: boolean }) => callback({ hostChanged: payload?.hostChanged === true });
+    onRemoteDaemonResyncRequested: (callback: (event: { hostChanged: boolean; restoreId?: number }) => void) => {
+      const wrappedCallback = (_event: Electron.IpcRendererEvent, payload?: { hostChanged?: boolean; restoreId?: number }) => callback({ hostChanged: payload?.hostChanged === true, restoreId: payload?.restoreId });
       ipcRenderer.on('remote-daemon:resync-required', wrappedCallback);
       return () => ipcRenderer.removeListener('remote-daemon:resync-required', wrappedCallback);
     },
@@ -1153,9 +1236,66 @@ contextBridge.exposeInMainWorld('electronAPI', {
       invokeIpc('agent-usage:get', force),
   },
 
+  // Desktop notifications: Dictate's handoff (Pane skips its own alert) and Settings' test
+  notifications: {
+    isHandedOff: async (): Promise<boolean> => decodeBoundary(await invokeIpc('notifications:handed-off'), boundary.boolean),
+    test: (): Promise<TestNotificationResult> => invokeIpc('notifications:test'),
+    openSettings: (): Promise<void> => invokeIpc('notifications:open-settings'),
+  },
+
+  // Pane Notify: the queue's snapshot and the actions every surface sends back
+  notify: {
+    getSnapshot: (): Promise<NotifySnapshot> => invokeIpc('notify:snapshot'),
+    run: (command: NotifyCommand): Promise<void> => invokeIpc('notify:command', command),
+    onSnapshot: (callback: (snapshot: NotifySnapshot) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, snapshot: NotifySnapshot) => callback(snapshot);
+      ipcRenderer.on('notify:snapshot', listener);
+      return () => ipcRenderer.removeListener('notify:snapshot', listener);
+    },
+    /** A new question arrived and Sound is on; the main window plays the beep. */
+    onChime: (callback: () => void) => {
+      const listener = () => callback();
+      ipcRenderer.on('notify:chime', listener);
+      return () => ipcRenderer.removeListener('notify:chime', listener);
+    },
+    /** Main asks the main window to show the Notify inbox or Settings → Notify. */
+    onNavigate: (callback: (target: 'inbox' | 'settings') => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, target: 'inbox' | 'settings') => callback(target);
+      ipcRenderer.on('notify:navigate', listener);
+      return () => ipcRenderer.removeListener('notify:navigate', listener);
+    },
+    /** Floating windows only: fit the window to its card. */
+    resizeWindow: (size: NotifyWindowSize): void => ipcRenderer.send('notify:window-size', size),
+    /** Floating strip only: take key focus so a text or note field can be typed in. */
+    focusWindow: (): Promise<void> => invokeIpc('notify:window-focus'),
+  },
+
+  // Every machine the desktop knows: this computer and each saved machine, addressed by id
+  machines: {
+    list: (): Promise<MachineState[]> => ipcRenderer.invoke('machines:list'),
+    read: (machineId: string, channel: MachineReadChannel, args: unknown[] = []): Promise<MachineResult> =>
+      ipcRenderer.invoke('machines:read', machineId, channel, args),
+    run: (machineId: string, command: MachineCommand): Promise<MachineResult> => ipcRenderer.invoke('machines:run', machineId, command),
+    retry: (machineId: string): Promise<void> => ipcRenderer.invoke('machines:retry', machineId),
+    onEvent: (callback: (event: MachineConnectionsEvent) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, event: MachineConnectionsEvent) => callback(event);
+      ipcRenderer.on('machines:event', listener);
+      // Main sends these only while a listener is subscribed.
+      if (machineEventListeners++ === 0) ipcRenderer.send('machines:subscribe', true);
+      return () => {
+        ipcRenderer.removeListener('machines:event', listener);
+        if (--machineEventListeners === 0) ipcRenderer.send('machines:subscribe', false);
+      };
+    },
+  },
+
   // Window state queries (invoke, not event subscriptions)
   window: {
+    consumeUncleanShutdown: async (): Promise<boolean> => decodeBoundary(await invokeIpc('app:consume-unclean-shutdown'), boundary.boolean),
     isFocused: async (): Promise<boolean> => decodeBoundary(await invokeIpc('window:is-focused'), boundary.boolean),
+    openPaneLink: async (link: string): Promise<void> => {
+      await invokeIpc('window:open-pane-link', link);
+    },
   },
 
   // ptyHost: typed wrapper over the per-window MessagePort. The raw port is

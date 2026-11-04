@@ -32,23 +32,40 @@ function createFakeHost() {
   const requests: RecordedRequest[] = [];
   const streams: Array<ReadableStreamDefaultController<Uint8Array>> = [];
   let eventsStatus = 200;
+  let sendReady = true;
   let hangEvents = false;
   let hostDown = false;
-  let invokeHandler: (body: { channel: string; args: unknown[] }) => Response = () =>
+  let tunnelDown = false;
+  let ready = '{"replay":"none"}';
+  let invokeHandler: (body: { channel: string; args: unknown[]; requestId?: string }) => Response | Promise<Response> = () =>
     Response.json({ ok: true, result: null });
 
   const fetch = vi.fn(async (url: string, init?: RequestInit): Promise<Response> => {
     requests.push({ url, init });
     const path = new URL(url).pathname;
     if (hostDown) throw new TypeError('Network request failed');
+    // Like a VPN tunnel still coming back after sleep: the request goes nowhere, even once the tunnel returns.
+    if (tunnelDown) {
+      return new Promise<Response>((_, reject) => init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true }));
+    }
     if (path === '/health') return Response.json({ ok: true });
-    if (path === '/invoke') return invokeHandler(JSON.parse(String(init?.body)));
+    if (path === '/invoke') {
+      // Like fetch: an aborted request rejects even when the host never answers.
+      const signal = init?.signal;
+      return Promise.race([
+        invokeHandler(JSON.parse(String(init?.body))),
+        new Promise<Response>((_, reject) => signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true })),
+      ]);
+    }
     if (path === '/events') {
       // Like a half-dead mobile socket: no headers, and aborting does not settle it.
       if (hangEvents) return new Promise<Response>(() => {});
       if (eventsStatus !== 200) return Response.json({ ok: false }, { status: eventsStatus });
       const body = new ReadableStream<Uint8Array>({
-        start: (controller) => { streams.push(controller); },
+        start: (controller) => {
+          streams.push(controller);
+          if (sendReady) controller.enqueue(new TextEncoder().encode(`event: ready\ndata: ${ready}\n\n`));
+        },
       });
       init?.signal?.addEventListener('abort', () => {
         try { streams.at(-1)?.error(new DOMException('Aborted', 'AbortError')); } catch { /* closed */ }
@@ -65,9 +82,13 @@ function createFakeHost() {
     write(text: string) { streams.at(-1)?.enqueue(new TextEncoder().encode(text)); },
     writeBytes(bytes: Uint8Array) { streams.at(-1)?.enqueue(bytes); },
     end() { streams.at(-1)?.close(); },
+    sendReady(value: boolean) { sendReady = value; },
+    /** Says in its ready event that it runs each request id once, as hosts with that capability do. */
+    deduplicateRequestIds() { ready = '{"replay":"none","deduplicatesRequestIds":true}'; },
     rejectEvents(status: number) { eventsStatus = status; },
     hangEvents(hang: boolean) { hangEvents = hang; },
     goDown(down: boolean) { hostDown = down; },
+    dropTunnel(down: boolean) { tunnelDown = down; },
     onInvoke(handler: typeof invokeHandler) { invokeHandler = handler; },
   };
 }
@@ -89,13 +110,30 @@ async function flush(): Promise<void> {
 
 beforeEach(() => {
   vi.useFakeTimers();
+  vi.spyOn(Math, 'random').mockReturnValue(0.5);
 });
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
 });
 
 describe('RemoteDaemonClient with the fetch event stream transport', () => {
+  it.each(['suspend', 'retry'] as const)('does not dispatch an admitted mutation after %s retires its stream', async transition => {
+    const host = createFakeHost();
+    const client = createClient(host);
+    await client.connect();
+    await flush();
+    expect(client.getState().status).toBe('connected');
+    const pending = client.invoke('panels:create', ['session-1']);
+    const rejected = expect(pending).rejects.toMatchObject({ code: 'ERR_REMOTE_OFFLINE' });
+    if (transition === 'suspend') client.suspend();
+    else client.retryNow();
+    await rejected;
+    expect(host.requests.filter(request => request.url.endsWith('/invoke'))).toHaveLength(0);
+    client.disconnect();
+  });
+
   it('sends the token only in the Authorization header', async () => {
     const host = createFakeHost();
     const client = createClient(host);
@@ -154,7 +192,7 @@ describe('RemoteDaemonClient with the fetch event stream transport', () => {
     client.disconnect();
   });
 
-  it('reconnects with 1, 2, 4, 8, 15 s backoff, then gives up', async () => {
+  it('reconnects with capped backoff for five minutes, then stops', async () => {
     const host = createFakeHost();
     host.rejectEvents(503);
     const client = createClient(host);
@@ -162,7 +200,7 @@ describe('RemoteDaemonClient with the fetch event stream transport', () => {
     await client.connect();
     await flush();
 
-    for (const [index, delayMs] of [1_000, 2_000, 4_000, 8_000, 15_000].entries()) {
+    for (const [index, delayMs] of [250, 750, 2_000, 4_000, 8_000, 16_000, 30_000].entries()) {
       expect(client.getState()).toMatchObject({
         status: 'reconnecting',
         lastError: 'Remote event stream failed with 503',
@@ -173,8 +211,21 @@ describe('RemoteDaemonClient with the fetch event stream transport', () => {
       expect(eventRequests()).toBe(index + 2);
     }
     await vi.runAllTimersAsync();
-    expect(eventRequests()).toBe(6);
-    expect(client.getState()).toMatchObject({ status: 'error', lastError: 'Remote event stream failed with 503' });
+    expect(eventRequests()).toBeGreaterThan(7);
+    expect(client.getState()).toMatchObject({ status: 'error', lastError: expect.stringContaining('five minutes') });
+  });
+
+  it('keeps the outage deadline while ready streams fail restoration', async () => {
+    const host = createFakeHost();
+    const client = createClient(host);
+    client.onRestore(async () => { throw new Error('State refresh failed'); });
+    await client.connect();
+    await vi.advanceTimersByTimeAsync(300_000);
+    expect(client.getState().status).toBe('error');
+    const requests = host.requests.length;
+    await vi.advanceTimersByTimeAsync(300_000);
+    expect(host.requests).toHaveLength(requests);
+    client.disconnect();
   });
 
   it('resets the backoff after a stream opens again', async () => {
@@ -213,6 +264,37 @@ describe('RemoteDaemonClient with the fetch event stream transport', () => {
     expect(host.streamCount).toBe(2);
     expect(client.getState().status).toBe('connected');
     client.disconnect();
+  });
+
+  it('rejects unsent mutations while restoration is pending but permits snapshot reads', async () => {
+    const host = createFakeHost();
+    const client = createClient(host);
+    let release!: () => void;
+    client.onRestore(() => new Promise<void>(resolve => { release = resolve; }));
+    await client.connect(); await flush();
+    expect(client.getState().status).toBe('restoring');
+    await expect(client.invoke('terminal:input', ['panel', 'never send'])).rejects.toMatchObject({ code: 'ERR_REMOTE_OFFLINE' });
+    expect(host.requests.filter(request => request.url.endsWith('/invoke'))).toHaveLength(0);
+    await client.invoke('terminal:getState', ['panel']);
+    release(); await flush();
+    expect(client.getState().status).toBe('connected');
+    client.disconnect();
+  });
+
+  it.each(['credentials:shared:get', 'credentials:shared:apply', 'mobile:push-register', 'mobile:push-controls', 'mobile:push-revoke'])(
+    'sends %s from a client that never opened the event stream', async channel => {
+      const host = createFakeHost();
+      const client = createClient(host);
+      await expect(client.invoke(channel, [{}])).resolves.toBeNull();
+      expect(host.requests.filter(request => request.url.endsWith('/invoke'))).toHaveLength(1);
+    },
+  );
+
+  it('passes a host\'s own refusal of a command through, not the pairing-code advice', async () => {
+    const host = createFakeHost();
+    host.onInvoke(() => Response.json({ ok: false, error: { code: 'ERR_MOBILE_PUSH_OWNER_REQUIRED', message: 'Only this computer\'s owner can get its alerts on a phone.' } }, { status: 403 }));
+    const client = createClient(host);
+    await expect(client.invoke('mobile:push-register', [{}])).rejects.toThrow('Only this computer\'s owner can get its alerts on a phone.');
   });
 
   it('cuts an event stream request that never answers', async () => {
@@ -282,7 +364,7 @@ describe('RemoteDaemonClient with the fetch event stream transport', () => {
     const rejected = expect(connecting).rejects.toThrow('Network request failed');
     await vi.runAllTimersAsync();
     await rejected;
-    expect(client.getState()).toMatchObject({ status: 'error', lastError: 'Network request failed' });
+    expect(client.getState()).toMatchObject({ status: 'error', lastError: expect.stringContaining('five minutes') });
 
     host.goDown(false);
     await client.connect();
@@ -300,6 +382,124 @@ describe('RemoteDaemonClient with the fetch event stream transport', () => {
 
     expect(host.streamCount).toBe(1);
     expect(client.getState().status).toBe('local');
+  });
+});
+
+describe('RemoteDaemonClient when the phone leaves and returns', () => {
+  it('reconnects on return after more than five minutes in the background', async () => {
+    const host = createFakeHost();
+    // No heartbeats in these tests; keep the stale-stream timer out of the way.
+    const client = createClient(host, 600_000);
+    await client.connect();
+    await flush();
+
+    client.suspend();
+    await vi.advanceTimersByTimeAsync(6 * 60_000);
+    client.resume();
+    await flush();
+
+    expect(client.getState()).toMatchObject({ status: 'connected', lastError: null });
+    client.disconnect();
+  });
+
+  it('reconnects within a second of the tunnel returning after a wake, though the first try never answers', async () => {
+    const host = createFakeHost();
+    const client = createClient(host, 20_000);
+    await client.connect();
+    await flush();
+
+    client.suspend();
+    host.dropTunnel(true);
+    await vi.advanceTimersByTimeAsync(60_000);
+    client.resume();
+    await vi.advanceTimersByTimeAsync(2_000);
+    host.dropTunnel(false);
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    const state = client.getState();
+    expect(state).toMatchObject({ status: 'connected', lastError: null });
+    // The record says the network, not the host, held it up.
+    expect(state.lastWake).toMatchObject({ lastError: 'No answer within 2 s' });
+    expect(state.lastWake?.firstAnswerMs).toBeGreaterThanOrEqual(2_000);
+    expect(state.lastWake?.connectedMs).toBeLessThan(3_000);
+    expect(state.lastWake?.attempts).toBeGreaterThan(5);
+    client.disconnect();
+  });
+
+  it('keeps probing on the backoff after the first seconds, so a longer outage still ends well before the stale-stream timer', async () => {
+    const host = createFakeHost();
+    const client = createClient(host, 20_000);
+    await client.connect();
+    await flush();
+
+    client.suspend();
+    host.dropTunnel(true);
+    client.resume();
+    await vi.advanceTimersByTimeAsync(9_000);
+    host.dropTunnel(false);
+    await vi.advanceTimersByTimeAsync(3_000);
+
+    expect(client.getState().status).toBe('connected');
+    client.disconnect();
+  });
+
+  it('finishes connecting when the app was backgrounded during the handshake', async () => {
+    const host = createFakeHost();
+    // No heartbeats in these tests; keep the stale-stream timer out of the way.
+    const client = createClient(host, 600_000);
+    const connecting = client.connect();
+    client.suspend();
+    await connecting;
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(client.getState().status).not.toBe('connected');
+
+    client.resume();
+    await flush();
+    expect(client.getState().status).toBe('connected');
+    client.disconnect();
+  });
+
+  it('reconnects when restoration does not finish within 30 seconds', async () => {
+    const host = createFakeHost();
+    // No heartbeats in these tests; keep the stale-stream timer out of the way.
+    const client = createClient(host, 600_000);
+    let hang = true;
+    client.onRestore(() => (hang ? new Promise<void>(() => {}) : Promise.resolve()));
+    await client.connect();
+    await flush();
+    expect(client.getState().status).toBe('restoring');
+
+    hang = false;
+    await vi.advanceTimersByTimeAsync(29_000);
+    expect(client.getState().status).toBe('restoring');
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(client.getState().status).toBe('connected');
+    expect(host.streamCount).toBe(2);
+    client.disconnect();
+  });
+
+  it('stays connected through one unanswered terminal input and reconnects after three', async () => {
+    const host = createFakeHost();
+    // No heartbeats in these tests; keep the stale-stream timer out of the way.
+    const client = createClient(host, 600_000);
+    const restores: number[] = [];
+    client.onRestore(async () => { restores.push(Date.now()); });
+    await client.connect();
+    await flush();
+    host.onInvoke(() => new Promise<Response>(() => {}));
+
+    for (let typedCount = 1; typedCount <= 3; typedCount += 1) {
+      const failed = expect(client.invoke('terminal:input', ['panel-1', 'x'])).rejects.toThrow('Delivery unknown');
+      await vi.advanceTimersByTimeAsync(10_000);
+      await failed;
+      expect(client.getState().status).toBe(typedCount < 3 ? 'connected' : 'reconnecting');
+    }
+    await vi.advanceTimersByTimeAsync(250);
+
+    expect(client.getState().status).toBe('connected');
+    expect(host.streamCount).toBe(2);
+    expect(restores).toHaveLength(2);
+    client.disconnect();
   });
 });
 
@@ -329,18 +529,92 @@ describe('RemoteDaemonClient invoke errors', () => {
     expect(host.fetch).toHaveBeenCalledTimes(1);
   });
 
+  it('reports uncertainty when the connection changes after a mutation was dispatched', async () => {
+    const host = createFakeHost();
+    const client = createClient(host);
+    await client.connect();
+    await flush();
+    host.onInvoke(() => { client.disconnect(); return Response.json({ ok: true, result: 'stale' }); });
+    await expect(client.invoke('panels:create', [])).rejects.toBeInstanceOf(RemoteUnconfirmedResultError);
+    expect(host.requests.filter(request => request.url.endsWith('/invoke'))).toHaveLength(1);
+  });
+
+  it('keeps the connection through one lost mutation response and reconnects after three in a row', async () => {
+    const host = createFakeHost();
+    const client = createClient(host, 600_000);
+    await client.connect();
+    await flush();
+    host.onInvoke(() => { throw new TypeError('Network connection was lost'); });
+
+    await expect(client.invoke('panels:create', [])).rejects.toBeInstanceOf(RemoteUnconfirmedResultError);
+    await expect(client.invoke('panels:create', [])).rejects.toBeInstanceOf(RemoteUnconfirmedResultError);
+    expect(client.getState().status).toBe('connected');
+    await expect(client.invoke('panels:create', [])).rejects.toBeInstanceOf(RemoteUnconfirmedResultError);
+    expect(client.getState()).toMatchObject({ status: 'reconnecting', lastError: expect.stringContaining('3 requests in a row failed') });
+    client.disconnect();
+  });
+
+  it('retries a read lost in transit until the host answers, without reconnecting', async () => {
+    const host = createFakeHost();
+    const client = createClient(host, 600_000);
+    await client.connect();
+    await flush();
+    let calls = 0;
+    host.onInvoke(() => {
+      calls += 1;
+      if (calls <= 6) throw new TypeError('Network connection was lost');
+      return Response.json({ ok: true, result: { text: 'Cleaned up.' } });
+    });
+
+    const result = client.invoke('voice:finalize-streaming', [{ rawText: 'cleaned up' }]);
+    // 250 ms, 750 ms, 2 s, 4 s, 8 s, 16 s.
+    await vi.advanceTimersByTimeAsync(31_000 - 1);
+    expect(calls).toBe(6);
+    expect(client.getState().status).toBe('connected');
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(result).resolves.toEqual({ text: 'Cleaned up.' });
+    expect(host.streamCount).toBe(1);
+    client.disconnect();
+  });
+
+  it('resends a chat prompt whose response was lost, since the host de-duplicates its operation ID', async () => {
+    const host = createFakeHost();
+    const client = createClient(host, 600_000);
+    await client.connect();
+    await flush();
+    const sent: unknown[] = [];
+    host.onInvoke(body => {
+      sent.push(body.args[1]);
+      if (sent.length === 1) throw new TypeError('Network connection was lost');
+      return Response.json({ ok: true, result: { operationId: 'op-1', state: 'accepted' } });
+    });
+
+    const receipt = client.invoke('agent-chat:send', ['panel-1', { generation: 1, operationId: 'op-1', text: 'hi' }]);
+    await vi.advanceTimersByTimeAsync(250);
+    await expect(receipt).resolves.toEqual({ operationId: 'op-1', state: 'accepted' });
+    expect(sent).toEqual([
+      { generation: 1, operationId: 'op-1', text: 'hi' },
+      { generation: 1, operationId: 'op-1', text: 'hi' },
+    ]);
+    client.disconnect();
+  });
+
   it('does not replay a mutation whose response was lost', async () => {
     const host = createFakeHost();
     host.onInvoke(() => { throw new TypeError('Network connection was lost'); });
 
-    const error = await createClient(host).invoke('terminal:input', ['panel-1', 'ls\r']).catch((cause: Error) => cause);
+    const client = createClient(host);
+    await client.connect();
+    await flush();
+    host.fetch.mockClear();
+    const error = await client.invoke('terminal:input', ['panel-1', 'ls\r']).catch((cause: Error) => cause);
 
-    expect(error).toBeInstanceOf(RemoteUnconfirmedResultError);
-    expect(error.message).toMatch(/may have completed.+Network connection was lost/);
+    expect(error.message).toMatch(/^Delivery unknown:.+Check the current state/);
+    client.disconnect();
     expect(host.fetch).toHaveBeenCalledTimes(1);
   });
 
-  it.each(['panels:list', 'runpane:workspaces:machines'])('retries the safe read %s after 2, 4 and 6 s', async channel => {
+  it.each(['panels:list', 'runpane:workspaces:machines'])('retries the safe read %s after 250 ms, 750 ms and 2 s', async channel => {
     const host = createFakeHost();
     let calls = 0;
     host.onInvoke(() => {
@@ -349,10 +623,219 @@ describe('RemoteDaemonClient invoke errors', () => {
     });
 
     const result = createClient(host).invoke(channel);
-    await vi.advanceTimersByTimeAsync(2_000 + 4_000 + 5_999);
+    await vi.advanceTimersByTimeAsync(250 + 750 + 1_999);
     expect(calls).toBe(3);
     await vi.advanceTimersByTimeAsync(1);
     await expect(result).resolves.toEqual(['panel']);
+  });
+});
+
+describe('RemoteDaemonClient timed reads', () => {
+  it('reads a host it never connected to, and gives up on a silent host on time, once, without holding up the other', async () => {
+    const answering = createFakeHost();
+    answering.onInvoke(() => Response.json({ ok: true, result: [{ id: 1, name: 'pane' }] }));
+    const silent = createFakeHost();
+    silent.dropTunnel(true);
+    let slowSettled = false;
+    const slow = createClient(silent).read('sessions:get-all-with-projects', [], { timeoutMs: 8_000 });
+    void slow.catch(() => undefined).finally(() => { slowSettled = true; });
+
+    await expect(createClient(answering).read('sessions:get-all-with-projects', [], { timeoutMs: 8_000 })).resolves.toEqual([{ id: 1, name: 'pane' }]);
+    await vi.advanceTimersByTimeAsync(7_999);
+    expect(slowSettled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(slow).rejects.toMatchObject({ code: 'ERR_REMOTE_READ_TIMEOUT', message: 'Remote Host did not answer within 8 s. Nothing changed there.' });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(silent.requests.filter(request => request.url.endsWith('/invoke'))).toHaveLength(1);
+  });
+
+  it('refuses to send a change as a timed read', async () => {
+    const host = createFakeHost();
+    await expect(createClient(host).read('runpane:panes:create', [{}], { timeoutMs: 8_000 })).rejects.toMatchObject({ code: 'ERR_REMOTE_NOT_A_READ' });
+    expect(host.requests).toHaveLength(0);
+  });
+});
+
+describe('RemoteDaemonClient against a host that runs each request id once', () => {
+  async function connectToDeduplicatingHost() {
+    const host = createFakeHost();
+    host.deduplicateRequestIds();
+    const client = createClient(host, 600_000);
+    await client.connect();
+    await flush();
+    expect(client.getState().status).toBe('connected');
+    /** The link dies: requests fail and the stream ends, so the client reconnects. */
+    const drop = () => { host.goDown(true); host.end(); };
+    return { host, client, drop };
+  }
+
+  it('resends a write whose answer was lost, with the same id, and resolves once', async () => {
+    const { host, client } = await connectToDeduplicatingHost();
+    const ids: Array<string | undefined> = [];
+    host.onInvoke(body => {
+      ids.push(body.requestId);
+      if (ids.length < 3) throw new TypeError('Network connection was lost');
+      return Response.json({ ok: true, result: { id: 'pane-1' } });
+    });
+
+    const created = client.invoke('runpane:panes:create', [{ name: 'fix' }]);
+    await vi.advanceTimersByTimeAsync(250 + 750);
+    await expect(created).resolves.toEqual({ id: 'pane-1' });
+    expect(ids).toHaveLength(3);
+    expect(new Set(ids).size).toBe(1);
+    expect(ids[0]).toEqual(expect.any(String));
+    client.disconnect();
+  });
+
+  it('holds a write made during a drop and sends it once the connection is back', async () => {
+    const { host, client, drop } = await connectToDeduplicatingHost();
+    const sent: unknown[] = [];
+    host.onInvoke(body => { sent.push(body.args); return Response.json({ ok: true, result: null }); });
+    drop();
+    await flush();
+    expect(client.getState().status).toBe('reconnecting');
+
+    const answered = client.invoke('notify:remote-command', [{ type: 'answer', id: 'q-1' }]);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(sent).toEqual([]);
+    host.goDown(false);
+    await vi.advanceTimersByTimeAsync(30_000);
+    await expect(answered).resolves.toBeNull();
+    expect(sent).toEqual([[{ type: 'answer', id: 'q-1' }]]);
+    client.disconnect();
+  });
+
+  it('delivers terminal input caught in a drop once, in order, after reconnecting', async () => {
+    const { host, client, drop } = await connectToDeduplicatingHost();
+    const applied = new Map<string, string>();
+    let holdFirst = true;
+    host.onInvoke(body => {
+      // The first batch reaches the host, but its answer is lost in the drop.
+      if (body.requestId && !applied.has(body.requestId)) applied.set(body.requestId, String(body.args[1]));
+      if (holdFirst) { holdFirst = false; drop(); throw new TypeError('Network connection was lost'); }
+      return Response.json({ ok: true, result: null });
+    });
+
+    const typed = [client.invoke('terminal:input', ['panel-1', 'l']), client.invoke('terminal:input', ['panel-1', 's\r'])];
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(client.getState().status).toBe('reconnecting');
+    host.goDown(false);
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    await expect(Promise.all(typed)).resolves.toEqual([null, null]);
+    expect([...applied.values()].join('')).toBe('ls\r');
+    expect(client.getState().status).toBe('connected');
+    client.disconnect();
+  });
+
+  it('resends terminal input in flight when the app is backgrounded, and the host applies it once', async () => {
+    const { host, client } = await connectToDeduplicatingHost();
+    const applied = new Map<string, string>();
+    const attempts: Array<string | undefined> = [];
+    host.onInvoke(body => {
+      attempts.push(body.requestId);
+      if (body.requestId && !applied.has(body.requestId)) applied.set(body.requestId, String(body.args[1]));
+      // The first attempt reaches the host but never answers; backgrounding cuts it.
+      if (attempts.length === 1) return new Promise<Response>(() => {});
+      return Response.json({ ok: true, result: null });
+    });
+
+    const typed = client.invoke('terminal:input', ['panel-1', 'y']);
+    await flush();
+    client.suspend();
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(attempts).toHaveLength(1);
+    client.resume();
+    // Well inside the 30 s attempt timeout: only cutting the old attempt resends this soon.
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    await expect(typed).resolves.toBeNull();
+    expect(attempts).toHaveLength(2);
+    expect(attempts[1]).toBe(attempts[0]);
+    expect([...applied.values()]).toEqual(['y']);
+    client.disconnect();
+  });
+
+  it('does not resend a write whose five minutes passed while the app was asleep', async () => {
+    const { host, client } = await connectToDeduplicatingHost();
+    const attempts: Array<string | undefined> = [];
+    host.onInvoke(body => {
+      attempts.push(body.requestId);
+      // Applied, but the answer is lost as the phone goes to sleep.
+      client.suspend();
+      throw new TypeError('Network connection was lost');
+    });
+
+    const typed = expect(client.invoke('terminal:input', ['panel-1', 'ls\r'])).rejects.toThrow(/^Delivery unknown:/);
+    await flush();
+    // Asleep for ten minutes: the clock moves, but no timer runs.
+    vi.setSystemTime(Date.now() + 601_000);
+    host.onInvoke(body => { attempts.push(body.requestId); return Response.json({ ok: true, result: null }); });
+    client.resume();
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    await typed;
+    expect(attempts).toHaveLength(1);
+    client.disconnect();
+  });
+
+  it('resends a write the host refused because its memory of answers was full', async () => {
+    const { host, client } = await connectToDeduplicatingHost();
+    let calls = 0;
+    host.onInvoke(() => {
+      calls += 1;
+      return calls === 1
+        ? Response.json({ ok: false, error: { message: 'Still holding answers', code: 'ERR_REMOTE_WRITES_BUSY' } }, { status: 503 })
+        : Response.json({ ok: true, result: 'ran' });
+    });
+
+    const created = client.invoke('panels:create', ['session-1']);
+    await vi.advanceTimersByTimeAsync(250);
+    await expect(created).resolves.toBe('ran');
+    expect(calls).toBe(2);
+    client.disconnect();
+  });
+
+  it('takes the host\'s own error as the answer, without resending', async () => {
+    const { host, client } = await connectToDeduplicatingHost();
+    host.onInvoke(() => Response.json({ ok: false, error: { message: 'No terminal panel-1', code: 'ERR_PANEL_NOT_FOUND' } }, { status: 500 }));
+
+    await expect(client.invoke('terminal:input', ['panel-1', 'x'])).rejects.toMatchObject({ message: 'No terminal panel-1', code: 'ERR_PANEL_NOT_FOUND' });
+    expect(host.requests.filter(request => request.url.endsWith('/invoke'))).toHaveLength(1);
+    client.disconnect();
+  });
+
+  it('says a held write was not sent when reconnecting gives up', async () => {
+    const { client, drop } = await connectToDeduplicatingHost();
+    drop();
+    await flush();
+    const held = expect(client.invoke('panels:create', ['session-1'])).rejects.toMatchObject({
+      code: 'ERR_REMOTE_OFFLINE',
+      message: expect.stringContaining('The action was not sent.'),
+    });
+    await vi.advanceTimersByTimeAsync(300_000);
+    await held;
+    expect(client.getState().status).toBe('error');
+  });
+
+  it('says a sent write was not confirmed when reconnecting gives up', async () => {
+    const { host, client, drop } = await connectToDeduplicatingHost();
+    host.onInvoke(() => { drop(); throw new TypeError('Network connection was lost'); });
+    const sent = expect(client.invoke('panels:create', ['session-1'])).rejects.toThrow(/^Delivery unknown: Pane resent this action for up to five minutes, but the host never confirmed it/);
+    await vi.advanceTimersByTimeAsync(300_000);
+    await sent;
+  });
+
+  it('still refuses a write made while restoring, which restore steps rely on', async () => {
+    const { client, host, drop } = await connectToDeduplicatingHost();
+    let restoring: Promise<unknown> | null = null;
+    client.onRestore(async () => { restoring ??= client.invoke('panels:initialize', ['panel-1']).catch((error: Error) => error); });
+    drop();
+    await flush();
+    host.goDown(false);
+    await vi.advanceTimersByTimeAsync(30_000);
+    await expect(restoring).resolves.toMatchObject({ code: 'ERR_REMOTE_OFFLINE' });
+    client.disconnect();
   });
 });
 

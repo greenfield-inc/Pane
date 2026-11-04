@@ -102,12 +102,24 @@ If the CLI reads a config directory (like `.cursor/`), add it to
 `DEFAULT_WORKTREE_FILE_SYNC_ENTRIES` in `shared/types/worktreeFileSync.ts` so it is
 copied into new worktrees.
 
-## 9. Pane Chat (optional)
+## 9. Pane Chat and named Sessions (optional)
 
-To offer the agent as a Pane Chat orchestrator: widen `PaneChatAgent` and the panel-id
-maps in `shared/types/paneChat.ts`, extend `paneChatManager` (title, session-id
-strategy, bootstrap prompt), and teach `skillCacheManager` to emit the orchestrator
-guide in a format the CLI actually reads (Cursor: `.cursor/rules/*.mdc`).
+To offer the agent as an orchestrator, widen `PaneChatAgent` and the fixed panel-id
+maps in `shared/types/paneChat.ts`, complete older persisted Session maps without
+rewriting them on read, and extend the existing manager registrations, IPC/RunPane
+validators, preload types, remote agent filter, create-dialog options, and settings.
+Configuration update/reload already uses the shared agent normalizer.
+
+Reuse the terminal's native conversation identity and launch/resume support; do not
+allocate a second orchestrator identity or replay a bootstrap prompt. Sessions emit
+generated `AGENTS.md` instructions. OpenCode uses that existing context without new
+OpenCode skill/MCP installation and retains its default `opencode --auto` behavior:
+non-denied operations are auto-approved, not sandboxed.
+
+OpenCode Session launches must be supported direct commands; wrappers and custom
+resume templates are rejected. Saved IDs restore history when it exists, but an
+allocated ID does not establish history. Closing, archiving, switching, or PTY exit
+does not add a guarantee that shared-service work has stopped.
 
 ## 10. Tests are the spec
 
@@ -121,8 +133,15 @@ doctor), `agentLaunchPresets.test.ts`, `scripts/test-runpane-contract.js`.
 People often start a supported agent through their own command, such as
 `agent-farm run free-range` or a shell script. The launch command then says
 nothing about the agent, but Pane still needs to know it, because composer
-detection, `panels submit` staging, the status manifest, `panels list` and the
-workspace journal (`watch`) all depend on the panel's `agentType`.
+detection, `panels submit` staging, the agent-specific status manifest and the
+agent shown in `panels list` depend on the panel's `agentType`.
+
+Managed agent panels emit `agent.busy`, `agent.ready`, `agent.blocked`,
+`agent.unknown` and `agent.idle` events before identification. These reach the
+default agents-only workspace watch even without an `agentType`; ordinary shell
+panels do not emit them. For example, an Agent Farm variant picker can report
+`agent.blocked` before the agent starts. An untyped `panel.exited` is still
+filtered by the agents-only watch.
 
 Pane decides a terminal panel's agent in this order, and records the source in
 `TerminalPanelState.agentDetection`:
@@ -143,7 +162,10 @@ Pane decides a terminal panel's agent in this order, and records the source in
    (for example a Node process that spawns the agent in its own process group)
    hides the agent from this check.
 4. **`screen`**: Claude's closed rule/`❯`/rule composer box, or Codex's
-   `OpenAI Codex` header with its `›` prompt
+   `OpenAI Codex` header with its `›` prompt, or either agent's folder-trust
+   screen: Claude's `Claude Code'll be able to read` with
+   `Yes, I trust this folder`, or Codex's `Codex can read, edit, and run files here`
+   with `Trust and continue`
    (`main/src/services/agents/agentScreenSignature.ts`). Pane adopts it only after
    two consecutive status polls match. It ignores the check while Pane's own
    shell is in the foreground, so an agent's last frame left above a shell
@@ -156,24 +178,56 @@ it is known, Pane:
 - stores `agentType`, `agentDetection`, `launchCommand`, `isCliPanel: true` and
   `launchMode: 'wrapped'` on the panel's custom state;
 - switches the panel to that agent's status manifest;
-- restates the panel's current status, so watchers that ignored the panel so far
-  see it from now on.
+- restates the panel's current status with the identified agent attached.
+
+Agent-specific composer readiness and a starting message key off the identified
+agent, however it was identified. Pre-identification watch events and folder-trust
+identification do not establish composer readiness:
+
+- `--wait-ready` (and `panels wait --for ready`) on a launched command matches
+  only once the panel has an agent and that agent's own ready rule passes:
+  Claude's composer, Codex's configured footer, the existing rules for the
+  others. A wrapper's first output byte never counts. A command that shows no
+  supported agent times out with `readiness.reason.code: no-agent-detected`;
+  one that exits back to Pane's shell fails at once with `command-exited`
+  (where the foreground process is known). A plain shell with no launch
+  command is ready once it exists.
+- Prompts before the agent appears come back as `blocked` with their text:
+  Agent Farm's `Trust this repository workspace? [y/N]`, and any `[y/N]` or
+  similar last-line question a wrapper or shell asks, even when `--agent` was
+  declared. Pane never answers them.
+- With `--wait-ready`, runpane owns the starting message: it claims the
+  message at create, waits for readiness, stages the text and presses the
+  detected agent's submit key separately (Ctrl+Enter for Codex), and verifies
+  it like `panels submit`. Without `--wait-ready`, the terminal manager holds
+  the message until the agent is identified and idle at its composer, then
+  stages and submits it the same way. If no agent appears within 30 seconds
+  (a blocking prompt restarts that wait), it records `initialInputError` and
+  never types the message into the shell or the wrapper.
+- `[TerminalPanelManager] Starting message …` and `[Runpane] Starting message …`
+  log lines mark each write and its outcome, with the agent, detection source,
+  byte count, submit key and any `PANE_AGENT_SESSION_ID` the wrapper printed.
+  They never include the message text.
 
 `launchMode: 'wrapped'` means the command is launched exactly as given.
 `resolveCliLaunchCommand` never adds `--session-id`, resume flags or a prompt
 argument to it. On restart, Pane runs the wrapper again, and the wrapper handles
-its own resume. For the same reason, `--resume` is rejected for wrapper
-commands.
+its own resume. The exceptions are a panel with an explicit custom command resume
+config and a recognized `agent-farm run|agent` command, which relaunch through
+their resume template (see
+[Resuming custom launchers](SESSIONS.md#resuming-custom-launchers)). For the same
+reason, `--resume` is rejected for wrapper commands.
 
-Direct OpenCode launches use Pane's durable session id and readiness-gated input.
+Direct OpenCode launches start without a selector, capture the session id from OpenCode's exit line (`opencode -s <id>`), resume it with `--session`, and use readiness-gated input. OpenCode refuses `--session` for an id it did not create, so Pane never invents one.
 Native selector insertion accepts literal direct commands and simple assignment or
 `env NAME=value` prefixes, not recognized shell wrappers or `env --` forms. Those
-forms fail before native identity allocation; explicitly wrapped launches remain opaque.
+forms fail before spawn; explicitly wrapped launches remain opaque.
 Native commands reject both `--continue` and `-c`, and reject OpenCode's
 `--prompt` argument because it would replay on every restore. Supply initial
 input through Pane (or RunPane's `--prompt`) instead.
-Wrapped OpenCode launches run unchanged; the wrapper owns session selection and
-resume, just as it does for the other supported agents.
+Outside Pane Chat and named Sessions, wrapped OpenCode launches run unchanged;
+the wrapper owns session selection and resume, just as it does for the other
+supported agents. OpenCode Session launches reject wrappers and custom resume.
 
 A new built-in agent works with wrappers once its executable name is in
 `AGENT_EXECUTABLES`. Add a screen signature only if the agent's UI has a stable,

@@ -30,8 +30,8 @@ export default function ShortcutsSettingsScreen() {
           ),
         }}
       />
-      <Screen scroll testID="shortcuts-settings">
-        <Text variant="subhead" tone="secondary">
+      <Screen scroll grouped testID="shortcuts-settings">
+        <Text variant="subhead" tone="secondary" style={styles.inset}>
           Saved on <Text variant="subhead" style={styles.bold}>{profile.label}</Text>. Desktop and every phone paired with it see this same list.
         </Text>
         {affordances.isPending ? (
@@ -41,8 +41,8 @@ export default function ShortcutsSettingsScreen() {
         ) : shortcuts.length === 0 ? (
           <EmptyState testID="shortcuts-none" title="No shortcuts" message="Tap Add to save text you send often." />
         ) : (
-          <View style={styles.section}>
-            <Text variant="caption" tone="muted" style={styles.caption}>SHORTCUTS</Text>
+          <View>
+            <Text variant="sectionLabel" tone="muted" style={styles.label}>Shortcuts</Text>
             <ShortcutList
               shortcuts={shortcuts}
               disabled={save.isPending}
@@ -51,11 +51,11 @@ export default function ShortcutsSettingsScreen() {
               onOpen={shortcut => router.push({ pathname: '/settings/shortcut', params: { id: shortcut.id } })}
             />
             {save.error ? (
-              <Text variant="footnote" tone="danger" testID="shortcuts-save-error" accessibilityLiveRegion="polite" style={styles.caption}>
+              <Text variant="rowDetail" tone="danger" testID="shortcuts-save-error" accessibilityLiveRegion="polite" style={styles.footer}>
                 {saveErrorMessage(save.error, profile.label)}
               </Text>
             ) : (
-              <Text variant="footnote" tone="muted" style={styles.caption}>
+              <Text variant="rowDetail" tone="muted" style={styles.footer}>
                 Drag to reorder. Turn one off to hide it on the phone and free its desktop hotkey.
               </Text>
             )}
@@ -68,6 +68,8 @@ export default function ShortcutsSettingsScreen() {
 
 const styles = StyleSheet.create({
   bold: { fontWeight: '600' },
-  section: { gap: 6 },
-  caption: { paddingHorizontal: 4 },
+  inset: { paddingHorizontal: 4 },
+  // ListSection's label and footer, around a card that ListSection can't hold (rows lift out of it).
+  label: { paddingHorizontal: 4, paddingBottom: 6 },
+  footer: { paddingHorizontal: 4, paddingTop: 6 },
 });
