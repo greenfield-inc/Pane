@@ -70,6 +70,11 @@ manual builds. The generic multi-architecture command does not provide a
 cross-compiler or bypass this guard.
 Nightly and canary builds use the same native runner split and architecture
 commands, so their artifacts pass the same packaging guard.
+The x64 jobs set `CFLAGS`/`CXXFLAGS` to `-march=x86-64 -mtune=generic`, because
+the Ubuntu 26.04 runner's GCC defaults to x86-64-v3 (AVX2). Before an x64
+package uploads, `scripts/after-pack.js` disassembles every native module built
+from source and fails if one uses AVX or BMI instructions outside SQLite's
+runtime-dispatched AEGIS cipher code, since those crash older CPUs with SIGILL.
 
 ```
 build (macOS + Linux) ─┐

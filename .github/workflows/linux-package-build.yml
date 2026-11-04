@@ -1,0 +1,59 @@
+name: Linux Package Build
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/after-pack.js'
+      - 'scripts/test-packaged-native-architecture.js'
+      - 'scripts/test-packaged-headless-remote-setup.sh'
+      - 'main/package.json'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - '.npmrc'
+      - '.github/workflows/build.yml'
+      - '.github/workflows/nightly-release.yml'
+      - '.github/workflows/linux-package-build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            os: ubuntu-latest
+            appimage: '*x86_64.AppImage'
+          - arch: arm64
+            os: ubuntu-24.04-arm
+            appimage: '*arm64.AppImage'
+    name: build (${{ matrix.arch }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-pnpm
+      # Ubuntu 26.04's GCC defaults to -march=x86-64-v3 (AVX2, BMI2), so native
+      # modules built from source crash with SIGILL on older x86-64 CPUs (#1226).
+      - name: Target the generic x86-64 baseline for native modules
+        if: matrix.arch == 'x64'
+        run: |
+          echo 'CFLAGS=-march=x86-64 -mtune=generic' >> "$GITHUB_ENV"
+          echo 'CXXFLAGS=-march=x86-64 -mtune=generic' >> "$GITHUB_ENV"
+      - run: pnpm install --frozen-lockfile
+      - run: node --test scripts/test-packaged-native-architecture.js
+      - name: Build native ${{ matrix.arch }} Linux packages
+        run: pnpm run build:linux:${{ matrix.arch }}
+      - name: Exercise packaged ${{ matrix.arch }} headless runtime
+        run: scripts/test-packaged-headless-remote-setup.sh "$(find dist-electron -maxdepth 1 -name '${{ matrix.appimage }}' -print -quit)"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pane-linux-${{ matrix.arch }}-validation
+          path: |
+            dist-electron/*.deb
+            dist-electron/*.AppImage
+          if-no-files-found: error

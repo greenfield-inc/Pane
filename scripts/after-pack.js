@@ -1,3 +1,4 @@
+const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const { Arch } = require('electron-builder');
@@ -17,6 +18,52 @@ function verifyLinuxSqliteArchitecture(appOutDir, arch) {
     throw new Error(`Packaged SQLite does not target Linux ${name}: ${file}`);
   }
   console.log(`[native-architecture] Packaged SQLite matches Linux ${name}`);
+}
+
+// AVX (VEX-encoded `v*` instructions) and BMI1/BMI2 need CPUs newer than the
+// generic x86-64 baseline. SQLite3 Multiple Ciphers compiles its AEGIS cipher
+// for several CPU levels and picks one at runtime, so only `aegis` functions
+// may use them (issue #1226).
+const NEWER_CPU_INSTRUCTION = /^(v[a-z]|(andn|bextr|blsi|blsmsk|blsr|bzhi|mulx|pdep|pext|rorx|sarx|shlx|shrx)$)/;
+const RUNTIME_DISPATCHED_FUNCTION = /aegis/i;
+
+function functionsNeedingNewerX64Cpu(file) {
+  const disassembly = execFileSync('objdump', ['-d', '--no-show-raw-insn', file],
+    { encoding: 'utf8', maxBuffer: 1024 * 1024 * 1024 });
+  const offenders = new Set();
+  let currentFunction = '';
+  for (const line of disassembly.split('\n')) {
+    const header = /^[0-9a-f]+ <(.+)>:$/.exec(line);
+    if (header) {
+      currentFunction = header[1];
+      continue;
+    }
+    const mnemonic = line.split('\t')[1]?.trim().split(/\s/)[0];
+    if (mnemonic && NEWER_CPU_INSTRUCTION.test(mnemonic)
+      && !RUNTIME_DISPATCHED_FUNCTION.test(currentFunction)) {
+      offenders.add(currentFunction);
+    }
+  }
+  return [...offenders];
+}
+
+function nativeModulesBuiltFromSource(directory) {
+  return fs.readdirSync(directory, { recursive: true })
+    .filter((entry) => entry.endsWith('.node') && entry.split(path.sep).includes('build'))
+    .map((entry) => path.join(directory, entry));
+}
+
+function verifyLinuxX64Baseline(appOutDir) {
+  const modules = path.join(appOutDir, 'resources', 'app.asar.unpacked', 'node_modules');
+  for (const file of nativeModulesBuiltFromSource(modules)) {
+    const offenders = functionsNeedingNewerX64Cpu(file);
+    if (offenders.length > 0) {
+      throw new Error(`${file} uses AVX or BMI instructions outside runtime CPU dispatch, `
+        + `so it crashes with SIGILL on older x86-64 CPUs. Rebuild it with `
+        + `CFLAGS/CXXFLAGS='-march=x86-64 -mtune=generic'. Functions: ${offenders.slice(0, 10).join(', ')}`);
+    }
+    console.log(`[native-baseline] ${path.relative(modules, file)} targets generic x86-64`);
+  }
 }
 
 // Linux only: the package ships `pane`, and `Pane` is a compatibility alias for
@@ -51,6 +98,7 @@ async function afterPack(context) {
 
   if (context.electronPlatformName !== 'linux') return;
   verifyLinuxSqliteArchitecture(context.appOutDir, context.arch);
+  if (Arch[context.arch] === 'x64') verifyLinuxX64Baseline(context.appOutDir);
   createLinuxCompatibilityAlias(context.appOutDir);
 }
 
