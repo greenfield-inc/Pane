@@ -53,8 +53,8 @@ interface ProjectSettingsProps {
 
 export default function ProjectSettings({ project, isOpen, onClose, onUpdate, onDelete }: ProjectSettingsProps) {
   const [form, setForm] = useState<SettingsForm>(EMPTY_FORM);
-  // The saved values the form started from. A field still equal to it is untouched.
-  const savedForm = useRef<SettingsForm | null>(null);
+  // The project the form edits, and its saved values. A field still equal to them is untouched.
+  const savedForm = useRef<{ projectId: number; form: SettingsForm } | null>(null);
   const [detectedConfig, setDetectedConfig] = useState<DetectedProjectConfig | null>(null);
   const [currentBranch, setCurrentBranch] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -72,14 +72,35 @@ export default function ProjectSettings({ project, isOpen, onClose, onUpdate, on
   const setOpenIdeCommand = setField('openIdeCommand');
   const setWorktreeFolder = setField('worktreeFolder');
 
+  // The branch and config file shown beside the scripts, read from the project's path.
+  // Detection is best-effort: if a call fails the badges simply don't appear, which is
+  // fine because the config-file fallback still happens at runtime in the main process.
+  // A reply for an earlier project or path is dropped.
+  const detection = useRef(0);
+  const detectProject = (target: Project) => {
+    const request = ++detection.current;
+    setCurrentBranch(null);
+    setDetectedConfig(null);
+    if (target.path) {
+      window.electronAPI.git.detectBranch(target.path).then((result) => {
+        if (request === detection.current && result.success && result.data) setCurrentBranch(result.data);
+      });
+    }
+    window.electronAPI.projects.detectConfig(target.id.toString()).then((result) => {
+      if (request === detection.current && result.success && result.data) setDetectedConfig(result.data);
+    }).catch(() => {
+      // Config detection is optional; don't block the UI
+    });
+  };
+
   useEffect(() => {
     if (!isOpen || !project) {
       savedForm.current = null;
       return;
     }
-    const previous = savedForm.current;
+    const previous = savedForm.current?.projectId === project.id ? savedForm.current.form : null;
     const saved = formFromProject(project);
-    savedForm.current = saved;
+    savedForm.current = { projectId: project.id, form: saved };
     if (previous) {
       // Settings saved elsewhere while the dialog is open (runpane, MCP, another window)
       // update the fields the user hasn't edited and keep the ones they have.
@@ -90,32 +111,14 @@ export default function ProjectSettings({ project, isOpen, onClose, onUpdate, on
         }
         return next;
       });
+      if (saved.path !== previous.path) detectProject(project);
       return;
     }
+    // Opened, or switched to another project (the active Pane moved to another repo):
+    // start over so no edit made for one project is saved onto another.
     setForm(saved);
-    // Fetch the current branch when dialog opens
-    if (project.path) {
-      window.electronAPI.git.detectBranch(project.path).then((result) => {
-        if (result.success && result.data) {
-          setCurrentBranch(result.data);
-        }
-      });
-    }
     setError(null);
-    // Detect the project's config file (pane.json / conductor.json / .gitpod.yml /
-    // devcontainer.json) asynchronously when the modal opens.  The result populates
-    // `detectedConfig` which drives the "From <source>" badge shown beneath each
-    // script field when the user has not set an explicit override in Project Settings.
-    // Detection is best-effort: if the IPC call fails the badges simply don't appear,
-    // which is fine because the fallback still happens at runtime in the main process.
-    setDetectedConfig(null);
-    window.electronAPI.projects.detectConfig(project.id.toString()).then((result) => {
-      if (result.success && result.data) {
-        setDetectedConfig(result.data);
-      }
-    }).catch(() => {
-      // Config detection is optional — don't block the UI
-    });
+    detectProject(project);
   }, [isOpen, project]);
 
   const handleSave = async () => {
@@ -125,7 +128,7 @@ export default function ProjectSettings({ project, isOpen, onClose, onUpdate, on
     try {
       // Save only the fields edited here, so a save never undoes a change made
       // elsewhere while the dialog was open.
-      const saved = savedForm.current ?? EMPTY_FORM;
+      const saved = savedForm.current?.form ?? EMPTY_FORM;
       const edited = (field: keyof SettingsForm) => form[field] !== saved[field];
       const updates: Partial<Project> = {};
       if (edited('name')) updates.name = name;
