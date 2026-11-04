@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AgentChatMessage } from '../../../../shared/types/agentChat';
-import { chatTurns, turnSummary } from '../../../../shared/chatTabPresentation';
+import { chatTurns, planEntryKeys, turnSummary } from '../../../../shared/chatTabPresentation';
 
 const user = (id: string, text: string): AgentChatMessage => ({ id, role: 'user', parts: [{ type: 'text', text }] });
 const say = (id: string, text: string): AgentChatMessage => ({ id, role: 'assistant', parts: [{ type: 'text', text }] });
@@ -108,5 +108,12 @@ describe('worker lines in the Session chat', () => {
     ]);
     expect([...placed.byTurn.entries()].map(([turn, workers]) => [turn, workers.map(worker => worker.paneId)])).toEqual([['t1', ['a']]]);
     expect(placed.trailing.map(worker => worker.paneId)).toEqual(['b']);
+  });
+});
+
+describe('planEntryKeys', () => {
+  it('keys plan rows by their text and numbers repeats, so a row keeps its key as the list grows', () => {
+    expect(planEntryKeys([{ content: 'Read the code', status: 'completed' }, { content: 'Run tests', status: 'pending' }, { content: 'Run tests', status: 'pending' }]))
+      .toEqual(['Read the code', 'Run tests', 'Run tests#2']);
   });
 });

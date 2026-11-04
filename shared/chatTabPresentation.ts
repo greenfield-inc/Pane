@@ -39,6 +39,16 @@ export interface StepGroup {
 
 export interface PlanEntry { content: string; status: string; priority?: string }
 
+/** ACP plan entries carry no id: key each by its text, numbering repeats, so a row keeps its key while the list grows. */
+export function planEntryKeys(entries: readonly PlanEntry[]): string[] {
+  const seen = new Map<string, number>();
+  return entries.map(entry => {
+    const count = (seen.get(entry.content) ?? 0) + 1;
+    seen.set(entry.content, count);
+    return count === 1 ? entry.content : `${entry.content}#${count}`;
+  });
+}
+
 export type TurnItem =
   | { type: 'text'; id: string; text: string }
   | { type: 'thought'; id: string; text: string }

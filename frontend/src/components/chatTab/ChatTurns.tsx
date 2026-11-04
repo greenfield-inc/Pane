@@ -5,7 +5,7 @@ import remarkGfm from 'remark-gfm';
 import type { AgentChatPermission } from '../../../../shared/types/agentChat';
 import { describeChatContent, permissionToolId } from '../../../../shared/agentChatPresentation';
 import type { JsonValue } from '../../../../shared/validation/boundaryDecoder';
-import { imageOf, stoppedText, turnSummary, type ChatWorkerLine, type ChatStep, type ChatTurn, type PlanEntry, type StepGroup, type TurnItem } from '../../../../shared/chatTabPresentation';
+import { imageOf, planEntryKeys, stoppedText, turnSummary, type ChatWorkerLine, type ChatStep, type ChatTurn, type PlanEntry, type StepGroup, type TurnItem } from '../../../../shared/chatTabPresentation';
 
 export interface ChatTurnActions {
   /** Opens the file's diff in Pane's diff view. A diff never renders in the thread by itself. */
@@ -73,9 +73,10 @@ function StepGroupRow({ group, waiting, actions }: { group: StepGroup; waiting: 
 
 function TodoList({ entries }: { entries: PlanEntry[] }) {
   const done = entries.filter(entry => entry.status === 'completed').length;
+  const keys = planEntryKeys(entries);
   return <section className="chat-todo" aria-label="Agent's to-do list">
     <p className="chat-todo-title">To-do · {done} of {entries.length} done</p>
-    <ul>{entries.map((entry, index) => <li key={`${index}:${entry.content}`} data-status={entry.status}>
+    <ul>{entries.map((entry, position) => <li key={keys[position]} data-status={entry.status}>
       <span className="chat-step-icon">{entry.status === 'completed' ? <CircleCheck aria-hidden="true" /> : entry.status === 'in_progress' ? <LoaderCircle aria-hidden="true" /> : <Circle aria-hidden="true" />}</span>
       <span>{entry.content}</span>
     </li>)}</ul>

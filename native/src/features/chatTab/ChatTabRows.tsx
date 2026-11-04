@@ -4,7 +4,7 @@ import { useMarkdown } from 'react-native-marked';
 
 import type { ChatStep, ChatWorkerLine, PlanEntry, StepGroup } from '@shared/chatTabPresentation';
 import { describeChatContent } from '@shared/agentChatPresentation';
-import { imageOf } from '@shared/chatTabPresentation';
+import { imageOf, planEntryKeys } from '@shared/chatTabPresentation';
 
 import { monoFontFamily, useTheme } from '@/theme';
 import { Icon, Text } from '@/ui';
@@ -71,9 +71,10 @@ function CurrentStep({ step }: { step: ChatStep }) {
 
 function Todo({ entries }: { entries: PlanEntry[] }) {
   const theme = useTheme();
+  const keys = planEntryKeys(entries);
   return <View testID="chat-todo" style={[styles.card, { borderColor: theme.chat.border }]}>
     <Text variant="subhead" style={{ color: theme.chat.foreground, fontWeight: '600' }}>To-do · {entries.filter(entry => entry.status === 'completed').length} of {entries.length} done</Text>
-    {entries.map((entry, index) => <View key={index} style={styles.todoRow}>
+    {entries.map((entry, position) => <View key={keys[position]} style={styles.todoRow}>
       <Icon ios={entry.status === 'completed' ? 'checkmark.circle' : 'circle'} android={entry.status === 'completed' ? 'check_circle' : 'radio_button_unchecked'} size={16} color={theme.chat.mutedForeground} />
       <Text variant="subhead" style={{ color: entry.status === 'completed' ? theme.chat.mutedForeground : theme.chat.foreground, textDecorationLine: entry.status === 'completed' ? 'line-through' : 'none', flex: 1 }}>{entry.content}</Text>
     </View>)}
