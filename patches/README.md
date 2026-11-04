@@ -19,12 +19,16 @@ overflowed the stack. The patch, in both `lib/` bundles:
    instead of re-walking the cells of every earlier row.
 3. Walks back to a wrapped line's first row in a loop instead of one
    recursive call per row.
+4. Lower-cases a line once per search instead of once per match: highlighting
+   calls `find` for each of up to 1,000 matches, and each call lower-cased the
+   whole joined line (about 100 ms per keystroke on that 500,000-character
+   line).
 
 `frontend/src/components/terminal/searchAddonWrappedLines.test.ts` runs the
 patched addon over such a line. When bumping the addon, run that test against
 the new version unpatched first; if it passes, drop the patch. Otherwise
 regenerate it with `pnpm patch @xterm/addon-search@<version>` and reapply the
-three edits.
+four edits.
 
 ## @xterm/addon-webgl
 
@@ -60,8 +64,16 @@ trimming), the marker's line becomes -1 before the decoration is disposed.
 decoration service never drops it, so its highlight stays painted on screen
 for the life of the terminal.
 
-The patch, in both `lib/` bundles, renames `SortedList.delete` to
-`_deleteByKey` and makes `delete` fall back to finding the value by identity
-when the keyed lookup misses. Regenerate it the same way as the WebGL patch
+The patch, in both `lib/` bundles:
+
+1. Renames `SortedList.delete` to `_deleteByKey` and makes `delete` fall back
+   to finding the value by identity when the keyed lookup misses.
+2. Makes `buffer.getLine(y)` return undefined for a row outside the buffer,
+   as its typings say. It read the circular list's backing array without a
+   bounds check, so after `clear` it returned stale rows from earlier output,
+   and the search addon joined a stale soft-wrapped row onto the last line
+   (find showed "0 of N" after wrapping past the last match).
+   `frontend/src/components/terminal/xtermBufferBounds.test.ts` covers it. Regenerate it the same way as the WebGL patch
 when bumping `@xterm/xterm`, after checking whether upstream fixed
-`SortedList.delete` (or `DecorationService`'s dispose path) itself.
+`SortedList.delete` (or `DecorationService`'s dispose path) and
+`BufferApiView.getLine` itself.
