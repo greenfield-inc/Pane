@@ -183,6 +183,8 @@ export class NotifyService {
         state: 'waiting',
         createdAt: at,
         relay: { inboxItemId: entry.id, worker: entry.paneName, question },
+        // D-81: the worker's status file, which its report named, opens beside the card.
+        ...(entry.report?.summaryPath ? { links: [{ label: `${entry.paneName} status`, path: entry.report.summaryPath }] } : {}),
       });
     }
     this.queue.setRelays(relays);

@@ -141,7 +141,7 @@ function RelatedLinks({ item, paneId }: { item: NotifyItem; paneId?: string }) {
 }
 
 /** A worker's question its orchestrator hasn't picked up: read-only, answered in the orchestrator's tab. */
-function RelayCard({ item }: { item: NotifyItem }) {
+function RelayCard({ item, paneId }: { item: NotifyItem; paneId?: string }) {
   return (
     <div className="rounded-[18px] bg-surface-primary p-3.5 shadow-card ring-1 ring-status-warning" data-testid="approvals-relay">
       <div className="text-[12px] text-text-tertiary">
@@ -149,14 +149,15 @@ function RelayCard({ item }: { item: NotifyItem }) {
       </div>
       <div className="mt-1 text-[14px] font-semibold text-text-primary">{item.relay?.question ?? item.title}</div>
       <div className="mt-1.5 text-[12.5px] text-text-tertiary">Its orchestrator hasn&rsquo;t picked this up. Answer in the orchestrator&rsquo;s tab on the right.</div>
+      <div className="-mx-3.5 -mb-3.5 mt-3"><RelatedLinks item={item} paneId={paneId} /></div>
     </div>
   );
 }
 
 function SelectedItem({ item, beside, mark, onOpenInPane }: { item: NotifyItem; beside: Beside; mark: ReactNode; onOpenInPane?: () => void }) {
-  if (item.relay) return <RelayCard item={item} />;
-  const view = item.state === 'waiting' ? 'question' : item.state === 'sent' ? 'sent' : item.state === 'expired' ? 'expired' : null;
   const linkPane = beside.kind === 'session' || beside.kind === 'pane' ? beside.paneId : undefined;
+  if (item.relay) return <RelayCard item={item} paneId={linkPane} />;
+  const view = item.state === 'waiting' ? 'question' : item.state === 'sent' ? 'sent' : item.state === 'expired' ? 'expired' : null;
   if (!view) return null;
   return (
     <div className="[&_[data-notify-view=sent]]:w-full [&_[data-notify-view=sent]]:min-w-0">

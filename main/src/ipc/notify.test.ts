@@ -324,7 +324,7 @@ describe('Approvals items, through the registered handlers', () => {
   }
   const blocked = (at: number): RunpaneInboxItem => ({
     id: 'in-1', sessionId: 'session-1', kind: 'report', at: new Date(at).toISOString(), paneId: 'worker', paneName: 'api-fix', panelId: 'worker-panel',
-    report: { state: 'blocked', question: 'Use the invoice id or number in the PDF filename?', reportedAt: new Date(at).toISOString() },
+    report: { state: 'blocked', question: 'Use the invoice id or number in the PDF filename?', summaryPath: '/work/api-fix/status.json', reportedAt: new Date(at).toISOString() },
   });
 
   it("files the orchestrator's question under its Session, and a standalone Pane's under none", async () => {
@@ -397,6 +397,8 @@ describe('Approvals items, through the registered handlers', () => {
       title: 'Use the invoice id or number in the PDF filename?',
       source: { paneId: 'worker', panelId: 'worker-panel', name: 'api-fix', session: launch },
       relay: { inboxItemId: 'in-1', worker: 'api-fix', question: 'Use the invoice id or number in the PDF filename?' },
+      // The worker's status file, which its report named, opens beside the card.
+      links: [{ label: 'api-fix status', path: '/work/api-fix/status.json' }],
     });
     expect(relay.choices).toBeUndefined();
     expect(pane.notify.snapshot().queue).toEqual([]);
