@@ -6,8 +6,10 @@ import { cn } from '../../utils/cn';
 import { runNotify, useNotifyStore } from '../../stores/notifyStore';
 import { useNavigationStore } from '../../stores/navigationStore';
 import { useSessionStore } from '../../stores/sessionStore';
+import { useOrchestrationSessionStore } from '../../stores/orchestrationSessionStore';
 import { useAllMachinesStore } from '../../stores/allMachinesStore';
 import { panelApi } from '../../services/panelApi';
+import { usePanelStore } from '../../stores/panelStore';
 import { showActionError } from '../../stores/errorStore';
 import { openOnMachine } from '../../utils/machineRowActions';
 import { MachineMark } from '../machines/MachineMark';
@@ -210,6 +212,16 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
   const beside: Beside = selected ? besideOf(selected) : { kind: 'none' };
   const besidePaneId = beside.kind === 'pane' ? beside.paneId : undefined;
   const besidePanelId = beside.kind === 'pane' ? beside.panelId : undefined;
+  // A Session's item is about its orchestrator: show the orchestrator's tab (the asking one,
+  // or for a fallback item the Session's current orchestrator tab), not the last tab opened there.
+  const orchestratorPanelId = useOrchestrationSessionStore((state) => {
+    if (beside.kind !== 'session' || !selected) return undefined;
+    if (!selected.relay && selected.source.panelId) return selected.source.panelId;
+    const record = state.sessions.find((session) => session.id === beside.sessionId);
+    return record ? record.panelIds[record.agent] : undefined;
+  });
+  const sessionPaneId = beside.kind === 'session' ? beside.paneId : undefined;
+  const shownItemId = selected?.id;
 
   // A Pane's item shows that Pane's own shell on the right, on the asking tab.
   useEffect(() => {
@@ -217,6 +229,13 @@ export function ApprovalsView({ paneView }: { paneView: ReactNode }) {
     if (besidePanelId) void panelApi.setActivePanel(besidePaneId, besidePanelId).catch(() => undefined);
     if (useSessionStore.getState().activeSessionId !== besidePaneId) void useSessionStore.getState().setActiveSession(besidePaneId);
   }, [besidePaneId, besidePanelId]);
+
+  useEffect(() => {
+    if (!sessionPaneId || !orchestratorPanelId) return;
+    // The Session workspace follows activation requests, as for a tab an agent opens.
+    // Re-run per selection: a link opened since then may have taken the front.
+    usePanelStore.getState().requestActivation({ sessionId: sessionPaneId, panelId: orchestratorPanelId });
+  }, [sessionPaneId, orchestratorPanelId, shownItemId]);
 
   const openInPane = (item: NotifyItem, target: Beside) => {
     const machineId = item.machineId ?? activeMachineId;
