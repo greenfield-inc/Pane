@@ -235,9 +235,13 @@ export function createPageTextAdapter(panelId: string, getRoot: () => HTMLElemen
     addInterval(around, null);
     painted = [around];
     if (scroll && current > 0) {
-      // Moving to a match scrolls it into view, which is inside `around`.
+      // Typing and stepping scroll the current match into view, so what's on
+      // screen is inside `around`; skip the on-screen scan (it forces layout).
       const currentMatch = toRange(matches[current - 1]);
       if (currentMatch && text) scrollRangeIntoView(currentMatch, text.root);
+      highlightsByTab.set(panelId, { all, current: currentRange });
+      syncHighlights();
+      return;
     }
     const visible = visibleInterval();
     if (visible && !isPainted(visible)) {

@@ -177,8 +177,11 @@ test('markdown preview: matches scrolled into view by hand are highlighted', asy
   await findBar(page).getByRole('textbox', { name: 'Find' }).fill('kiwi');
   await expect(findBar(page)).toContainText('1 of 1100');
 
-  await last.scrollIntoViewIfNeeded();
-  await expect(last).toBeInViewport();
+  // The preview can re-render its paragraphs once more after loading; retry the scroll.
+  await expect(async () => {
+    await last.scrollIntoViewIfNeeded({ timeout: 1000 });
+    await expect(last).toBeInViewport({ timeout: 500 });
+  }).toPass();
   await expect.poll(() => page.evaluate(() => {
     const target = Array.from(document.querySelectorAll('p')).find(p => p.textContent === 'Paragraph 1099 has a kiwi.');
     const highlight = CSS.highlights.get('pane-find-match');
