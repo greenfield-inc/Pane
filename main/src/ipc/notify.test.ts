@@ -4,6 +4,7 @@ import { PaneCommandRegistry } from '../daemon/commandRegistry';
 import { remotePaneClientController } from '../daemon/client/remotePaneClient';
 import { followSavedMachines, registerNotifyHandlers, type NotifyMachines } from './notify';
 import { PaneError } from '../../../shared/paneError';
+import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { ConfigManager } from '../services/configManager';
 import { resetPaneRuntimeForTests, setPaneRuntime } from '../core/runtime';
 import type { NotifyItem, NotifyResult, NotifySharedState } from '../../../shared/types/notify';
@@ -404,5 +405,53 @@ describe('Approvals items, through the registered handlers', () => {
     await flush();
     expect(pane.notify.snapshot().items).toEqual([]);
     pane.notify.dispose();
+  });
+});
+
+describe('Approvals related links, through the registered handlers', () => {
+  beforeEach(() => vi.stubEnv('PANE_DISABLE_OS_INTEGRATION', '1'));
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it('opens a file link as a tab of the Pane shown beside it, as a file page when it is outside that worktree, and a URL as a browser tab', async () => {
+    const registry = new PaneCommandRegistry();
+    const configManager = new ConfigManager();
+    await configManager.initialize();
+    await configManager.updateConfig({ notify: { showOutsidePane: false, enabled: true } });
+    const opened: PaneCommandValue[] = [];
+    let pageRefused = false;
+    registry.register('runpane:panels:open', async (request: PaneCommandValue) => {
+      opened.push(request);
+      const { paneId, filePath } = decodeBoundary(request, boundary.object({ paneId: boundary.string, filePath: boundary.optional(boundary.string) }));
+      if (paneId === 'session-pane' && filePath) throw new Error('File path must be inside the Pane worktree: /work/api/plan.md');
+      if (paneId === 'session-pane' && pageRefused) throw new Error('Pane could not open that page.');
+      return { ok: true };
+    });
+    const worker = { id: 'worker', name: 'api-fix' };
+    const notify = registerNotifyHandlers(ipcMain, { configManager, sessionManager: { getSession: (id: string) => id === 'worker' ? worker : undefined }, getMainWindow: () => null }, registry);
+    void registry.invoke('runpane:notify', [{
+      ui: 'approve', title: 'Ship?', caller: { paneId: 'worker', cwd: '/work/api' },
+      links: [{ label: 'Plan', path: 'plan.md' }, { label: 'PR', url: 'https://github.com/org/repo/pull/1' }],
+    }]);
+    await flush();
+    const id = notify.snapshot().items[0].id;
+
+    await notify.run({ type: 'open-link', id, index: 0, paneId: 'session-pane' });
+    await notify.run({ type: 'open-link', id, index: 1, paneId: 'session-pane' });
+    expect(opened).toEqual([
+      { paneId: 'session-pane', filePath: '/work/api/plan.md', placement: 'tab', source: 'user' },
+      { paneId: 'session-pane', url: 'file:///work/api/plan.md', title: 'Plan', placement: 'tab', source: 'user' },
+      { paneId: 'session-pane', url: 'https://github.com/org/repo/pull/1', placement: 'tab', source: 'user' },
+    ]);
+
+    // When the shown Pane can't take it at all, the asking Pane opens it.
+    opened.length = 0;
+    pageRefused = true;
+    await notify.run({ type: 'open-link', id, index: 0, paneId: 'session-pane' });
+    expect(opened.map(request => decodeBoundary(request, boundary.object({ paneId: boundary.string })).paneId)).toEqual(['session-pane', 'session-pane', 'worker']);
+    await expect(notify.run({ type: 'open-link', id, index: 5, paneId: 'session-pane' })).rejects.toMatchObject({ code: 'ERR_APPROVALS_LINK_GONE' });
+    notify.dispose();
   });
 });

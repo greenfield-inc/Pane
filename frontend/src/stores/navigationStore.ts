@@ -68,7 +68,23 @@ interface NavigationState {
   navigateToMissionControl: () => void;
   navigateToSsh: () => void;
   navigateToLoops: () => void;
-  navigateToNotify: () => void;
+  /**
+   * Opens Approvals (the `notify` view), on `itemId` when given. The first entry remembers the
+   * view and Pane you left (`returnPaneId`), which `leaveApprovals` hands back.
+   */
+  navigateToNotify: (options?: { itemId?: string; returnPaneId?: string | null }) => void;
+  /** The item selected in the Approvals queue. */
+  selectedApprovalId: string | null;
+  selectApproval: (itemId: string | null) => void;
+  approvalsReturn: ApprovalsReturn | null;
+  /** Leaves Approvals for the view it was opened from, and says which Pane was active there. */
+  leaveApprovals: () => ApprovalsReturn;
+}
+
+export interface ApprovalsReturn {
+  view: ActiveView;
+  projectId: number | null;
+  paneId: string | null;
 }
 
 export const useNavigationStore = create<NavigationState>((set, get) => ({
@@ -192,9 +208,25 @@ export const useNavigationStore = create<NavigationState>((set, get) => ({
     activeProjectId: null
   }),
 
-  // The Notify inbox lists questions from every project.
-  navigateToNotify: () => set({
-    activeView: 'notify',
-    activeProjectId: null
-  }),
+  // Approvals lists what waits on you from every project.
+  navigateToNotify: (options) => {
+    const state = get();
+    const approvalsReturn = state.activeView === 'notify'
+      ? state.approvalsReturn
+      : { view: state.activeView, projectId: state.activeProjectId, paneId: options?.returnPaneId ?? null };
+    set({
+      activeView: 'notify',
+      activeProjectId: null,
+      approvalsReturn,
+      selectedApprovalId: options?.itemId ?? state.selectedApprovalId,
+    });
+  },
+  selectedApprovalId: null,
+  selectApproval: (itemId) => set({ selectedApprovalId: itemId }),
+  approvalsReturn: null,
+  leaveApprovals: () => {
+    const back = get().approvalsReturn ?? { view: 'sessions', projectId: null, paneId: null };
+    set({ activeView: back.view === 'notify' ? 'sessions' : back.view, activeProjectId: back.projectId, approvalsReturn: null });
+    return back;
+  },
 }));

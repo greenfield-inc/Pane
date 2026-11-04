@@ -21,7 +21,6 @@ import { buildWindowAppearanceOptions } from '../services/appearanceService';
 import { normalizeAppearance } from '../../../shared/types/appearance';
 import { PaneError } from '../../../shared/paneError';
 import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../shared/validation/boundaryDecoder';
-import type { PaneLinkTarget } from '../../../shared/types/paneLinks';
 import { NOTIFY_LINK_LABEL_MAX, NOTIFY_LINKS_MAX, type NotifyCommand, type NotifyLink, type NotifyRemoteCommand, type NotifyRequest, type NotifyResult, type NotifySession, type NotifySharedState } from '../../../shared/types/notify';
 import type { RunpaneInboxItem } from '../../../shared/types/runpaneOrchestration';
 import type { AgentState } from '../../../shared/types/agentStatus';
@@ -87,6 +86,7 @@ const notifyCommandSchema = boundary.union(
   idCommand('dismiss'),
   idCommand('skip'),
   idCommand('open-in-pane'),
+  boundary.object({ type: boundary.literal('open-link'), id: boundary.nonEmptyString, index: boundary.number, paneId: boundary.optional(boundary.nonEmptyString) }),
   boundary.object({ type: boundary.literal('remind'), id: boundary.nonEmptyString, after: boundary.enumeration('3m', '5m', '15m', '10m', '1h', 'pane') }),
   boundary.object({ type: boundary.literal('hover-info'), id: boundary.nonEmptyString, hovering: boundary.boolean }),
   boundary.object({ type: boundary.literal('pause'), minutes: boundary.number }),
@@ -173,8 +173,10 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
       const agentType = decodeOptionalBoundary(panel?.state.customState, panelAgentSchema)?.agentType;
       return { paneId: pane.id, panelId: panel?.id, name: pane.name, agentType };
     },
-    focusPanel: async (paneId, panelId) => {
-      await commandRegistry.invoke('runpane:panes:focus', [{ paneId, panelId, source: 'user' }]);
+    openLink: async (paneId, link) => {
+      // A file page is titled by its label, as the card shows it.
+      const target = 'path' in link ? { filePath: link.path } : link.url.startsWith('file:') ? { url: link.url, title: link.label } : { url: link.url };
+      await commandRegistry.invoke('runpane:panels:open', [{ paneId, ...target, placement: 'tab', source: 'user' }]);
     },
     rendererArguments: () => buildWindowAppearanceOptions(normalizeAppearance(services.configManager.getConfig()).appearance, false, {}).additionalArguments,
     headless: hasHeadlessDaemonLaunchArg(),
@@ -205,16 +207,10 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
         console.warn('[Notify] The phone alert for a question was not sent:', error);
       });
     },
-    // A connected desktop ignores the host's pane:focus-requested; it opens Panes as pane:// links.
     wslDistros: () => (services.databaseService?.getAllProjects() ?? [])
       .flatMap(project => project.wsl_enabled && project.wsl_distribution ? [project.wsl_distribution] : []),
     sessionOf: (paneId, panelId) => services.orchestrationSessionManager?.approvalSession(paneId, panelId),
     inbox: services.sessionInbox,
-    showHostPane: (paneId, panelId) => {
-      const window = services.getMainWindow();
-      const target: PaneLinkTarget = panelId ? { kind: 'pane', paneId, panelId } : { kind: 'pane', paneId };
-      if (window && !window.isDestroyed()) window.webContents.send('pane:open-link', target);
-    },
   });
 
   /** Set once the machine connections start: every saved machine's questions then show here. */

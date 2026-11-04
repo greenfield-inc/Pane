@@ -1932,7 +1932,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           notifySnapshot = clone(snapshot);
           emit('notify:snapshot', clone(snapshot));
         },
-        emitNotifyNavigate(target: 'inbox' | 'settings') {
+        emitNotifyNavigate(target: 'inbox' | 'settings' | { approval: string }) {
           emit('notify:navigate', target);
         },
         getMachineRuns() {

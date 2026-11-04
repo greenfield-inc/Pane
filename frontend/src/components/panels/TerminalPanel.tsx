@@ -52,7 +52,6 @@ import { ipcErrorMessage } from '../../utils/ipcErrorMessage';
 import type { InterceptorState, TerminalSuggestion } from '../../services/terminalInterceptor/types';
 import { markPaneTerminalShown, markPanelOutput, startSendPrompt } from '../../utils/journeyTimings';
 import '@xterm/xterm/css/xterm.css';
-import { NotifyDock } from '../notify/NotifyInPane';
 
 interface DropdownPosition {
   x: number;
@@ -2153,8 +2152,6 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
         </div>
       )}
 
-      {/* Open in Pane docks a Notify question here, over the bottom of the output. */}
-      <NotifyDock panelId={panel.id} />
 
       {/* Terminal link overlays */}
       <TerminalLinkTooltip

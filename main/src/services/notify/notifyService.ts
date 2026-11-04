@@ -1,5 +1,6 @@
 import { app, BrowserWindow, globalShortcut } from 'electron';
 import path from 'path';
+import { pathToFileURL } from 'url';
 import type { ConfigManager } from '../configManager';
 import type { AppConfig } from '../../types/config';
 import {
@@ -8,6 +9,8 @@ import {
   type NotifyCommand,
   type NotifyInstructionsFile,
   type NotifyItem,
+  type NotifyLink,
+  type NotifyNavigateTarget,
   type NotifyRemoteCommand,
   type NotifyRequest,
   type NotifyResult,
@@ -19,6 +22,7 @@ import {
   type NotifyWindowSize,
 } from '../../../../shared/types/notify';
 import { type NotifyQueueEnvironment, NotifyQueue } from './notifyQueue';
+import { PaneError } from '../../../../shared/paneError';
 import { canFloatOverOtherApps, NotifyWindows } from './notifyWindows';
 import { NotifyTray } from './notifyTray';
 import { syncNotifyInstructions, syncWslNotifyInstructions } from './notifyInstructions';
@@ -33,8 +37,8 @@ export interface NotifyServiceDependencies {
   getMainWindow: () => BrowserWindow | null;
   /** The Pane and panel a call came from, when its PANE_SESSION_ID / PANE_PANEL_ID check out. */
   findPane: (caller: NotifyCaller) => { paneId: string; panelId?: string; name: string; agentType?: string } | undefined;
-  /** Brings Pane to the front on the asking panel (`runpane panes focus`). */
-  focusPanel: (paneId: string, panelId?: string) => Promise<void>;
+  /** Opens a related link as a tab of a Pane (`runpane panels open`); rejects when the Pane can't show it. */
+  openLink?: (paneId: string, link: NotifyLink) => Promise<void>;
   /** Arguments the main window's renderer reads before its first paint (theme). */
   rendererArguments: () => string[];
   /** A headless host has no screen: no floating windows, tray or shortcut; connected screens show its questions. */
@@ -49,8 +53,6 @@ export interface NotifyServiceDependencies {
   sendToMachine: (machineId: string, command: NotifyRemoteCommand) => Promise<void>;
   /** Reads a saved machine's state again, after it refused or missed a command. */
   refreshMachine: (machineId: string) => void;
-  /** Shows the connected host's Pane in this window, for Open in Pane on the host's question. */
-  showHostPane: (paneId: string, panelId?: string) => void;
   /** Hears each new question once and each one that stops waiting (the phone alert). */
   onQuestion?: (event: { item: NotifyItem; open: boolean }) => void;
   /** WSL distros Pane runs agents in (its WSL projects'), whose homes get the instructions too. */
@@ -87,6 +89,7 @@ export class NotifyService {
   private lastShared = '';
   private lastStates = new Map<string, NotifyItem['state']>();
   private relayTimer?: ReturnType<typeof setTimeout>;
+  private mainWindowFocused = false;
   private stopInbox?: () => void;
 
   constructor(private readonly deps: NotifyServiceDependencies) {
@@ -212,6 +215,7 @@ export class NotifyService {
       case 'open-inbox': this.navigate('inbox'); return;
       case 'show-details': await this.updateSettings({ showDetails: command.shown }); return;
       case 'open-in-pane': await this.openInPane(command.id); return;
+      case 'open-link': await this.openLink(command.id, command.index, command.paneId); return;
       default:
         if ('id' in command && command.id && this.queue.remoteTarget(command.id)) await this.runOnMachine(command);
         else await this.queue.run(command);
@@ -231,7 +235,7 @@ export class NotifyService {
    * A command for a saved machine's question: it goes to that machine only, under the id the
    * machine knows the question by. What stays on this screen runs here.
    */
-  private async runOnMachine(command: Exclude<Extract<NotifyCommand, { id: string }>, { type: 'open-in-pane' }>): Promise<void> {
+  private async runOnMachine(command: Exclude<Extract<NotifyCommand, { id: string }>, { type: 'open-in-pane' | 'open-link' }>): Promise<void> {
     const target = this.queue.remoteTarget(command.id);
     if (!target) return;
     if (command.type === 'hover-info') {
@@ -272,6 +276,7 @@ export class NotifyService {
   }
 
   setMainWindowFocused(focused: boolean): void {
+    this.mainWindowFocused = focused;
     this.queue.setPaneFocused(focused);
   }
 
@@ -308,28 +313,47 @@ export class NotifyService {
     this.windows.openRound(itemId);
   }
 
+  /** Open in Pane: Pane comes to the front on Approvals, with this item selected beside its Session or Pane. */
   private async openInPane(itemId: string): Promise<void> {
-    const item = this.queue.snapshot().items.find(candidate => candidate.id === itemId);
-    // A Pane on a machine the app isn't on opens after switching there, which this card doesn't do.
-    if (!item?.source.paneId || item.elsewhere) return;
+    if (!this.queue.snapshot().items.some(candidate => candidate.id === itemId)) return;
     this.windows.closeRound();
-    this.queue.run({ type: 'dock', id: itemId });
-    if (!this.queue.remoteTarget(itemId)) {
-      await this.deps.focusPanel(item.source.paneId, item.source.panelId);
-      return;
-    }
-    // The host's Pane opens in this window; the host's own window stays where it is.
-    const window = this.deps.getMainWindow();
-    if (window && !window.isDestroyed()) {
-      if (window.isMinimized()) window.restore();
-      window.show();
-      window.focus();
-      if (process.platform === 'darwin') app.focus({ steal: true });
-    }
-    this.deps.showHostPane(item.source.paneId, item.source.panelId);
+    this.navigate({ approval: itemId });
   }
 
-  private navigate(target: 'inbox' | 'settings'): void {
+  /**
+   * Approvals: a related link opens as a tab of the Pane shown beside the card. A file outside
+   * that Pane's worktree opens in the asking Pane instead.
+   */
+  private async openLink(itemId: string, index: number, shownPaneId: string | undefined): Promise<void> {
+    const item = this.queue.snapshot().items.find(candidate => candidate.id === itemId);
+    const link = item?.links?.[index];
+    if (!item || !link || !this.deps.openLink) {
+      throw new PaneError('ERR_APPROVALS_LINK_GONE', 'That link is no longer on the card, so nothing was opened.', 'Open the link from the card again.');
+    }
+    const openLink = this.deps.openLink;
+    // A Session's workspace Pane holds no checkout, so a file outside the shown Pane's worktree
+    // opens there as a page (file://), as orchestrators show pages; only then the asking Pane.
+    const attempts: Array<[string, NotifyLink]> = [];
+    if (shownPaneId) {
+      attempts.push([shownPaneId, link]);
+      if ('path' in link) attempts.push([shownPaneId, { label: link.label, url: pathToFileURL(link.path).href }]);
+    }
+    if (item.source.paneId && item.source.paneId !== shownPaneId) attempts.push([item.source.paneId, link]);
+    let failure: unknown;
+    for (const [paneId, target] of attempts) {
+      try {
+        await openLink(paneId, target);
+        return;
+      } catch (error) {
+        failure = error;
+      }
+    }
+    throw new PaneError('ERR_APPROVALS_LINK_OPEN',
+      `Pane couldn't open ${link.label} as a tab (${failure instanceof Error ? failure.message : 'the card names no Pane'}). Nothing was opened.`,
+      'url' in link ? 'Open the address in your browser.' : 'Check the file still exists inside the asking Pane\'s folder.');
+  }
+
+  private navigate(target: NotifyNavigateTarget): void {
     const window = this.deps.getMainWindow();
     if (!window || window.isDestroyed()) return;
     if (window.isMinimized()) window.restore();
@@ -384,7 +408,11 @@ export class NotifyService {
     if (this.deps.headless || !settings.enabled || !settings.shortcut) return;
     try {
       // register() returns false when another app already holds the shortcut.
-      this.shortcutRegistered = globalShortcut.register(settings.shortcut, () => this.openRound());
+      // While Pane is in front the shortcut opens Approvals; over other apps it opens the round.
+      this.shortcutRegistered = globalShortcut.register(settings.shortcut, () => {
+        if (this.mainWindowFocused) this.navigate('inbox');
+        else this.openRound();
+      });
     } catch (error) {
       console.warn(`[Notify] ${settings.shortcut} is not a shortcut Pane can register:`, error);
       this.shortcutRegistered = false;

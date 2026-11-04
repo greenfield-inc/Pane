@@ -121,7 +121,6 @@ export class NotifyQueue extends EventEmitter {
   private roundOpen = false;
   private pausedUntil: number | null = null;
   private pauseTimer?: Timer;
-  private dockedItemId: string | null = null;
   /** The first question ever on a strip carries the "Click to answer" hint for as long as it shows. */
   private hintItemId: string | undefined;
   private midnightTimer?: Timer;
@@ -211,7 +210,6 @@ export class NotifyQueue extends EventEmitter {
       case 'hover-info': this.hoverInfo(command.id, command.hovering); break;
       case 'pause': this.pause(command.minutes); break;
       case 'resume': this.unpause(); break;
-      case 'dock': this.dockedItemId = command.id; this.changed(); break;
     }
   }
 
@@ -538,7 +536,6 @@ export class NotifyQueue extends EventEmitter {
       hidden: [...this.allHidden()],
       strip,
       stripSurface: this.stripSurface(strip),
-      dockedItemId: this.dockedItemId && this.find(this.dockedItemId)?.state === 'waiting' ? this.dockedItemId : null,
       pausedUntil: this.isPaused() ? this.pausedUntil : null,
       shortcutRegistered: this.env.shortcutRegistered(),
       showOutsideSupported: this.env.showOutsideSupported,

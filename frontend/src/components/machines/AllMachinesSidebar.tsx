@@ -9,7 +9,6 @@ import { MachineBadge } from './MachineBadge';
 import { MachineMark } from './MachineMark';
 import {
   LoopsNavRow,
-  NotifyNavRow,
   SIDEBAR_SECTION_LABEL,
   SIDEBAR_SECTION_ROW,
   SIDEBAR_SECTION_TOGGLE,
@@ -286,7 +285,6 @@ export function AllMachinesSidebar({ onNew }: { onNew: () => void }) {
 
   return (
     <div className="flex flex-col pb-2" data-testid="all-machines-sidebar">
-      <NotifyNavRow active={activeView === 'notify'} />
       <LoopsNavRow active={activeView === 'loops'} />
 
       {offline.map(({ machine }) => (

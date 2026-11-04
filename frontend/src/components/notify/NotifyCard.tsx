@@ -48,6 +48,10 @@ export interface NotifyCardProps {
   onOpenUrl?: (url: string) => void;
   /** Inbox: the asking machine's mark, shown before its name. */
   machineMark?: ReactNode;
+  /** Approvals: the card's related links, shown under its context. */
+  related?: ReactNode;
+  /** Approvals: what Open in Pane does there (the card already sits in Pane). */
+  onOpenInPane?: () => void;
   className?: string;
 }
 
@@ -506,7 +510,7 @@ function recommendedIndex(choices: NotifyChoice[]): number {
 }
 
 function QuestionCard({
-  item, form, queue, shortcutHint, showDetails, narrow, menuPlacement, onCommand, onFieldFocusRequest, machineMark, className,
+  item, form, queue, shortcutHint, showDetails, narrow, menuPlacement, onCommand, onFieldFocusRequest, machineMark, related, onOpenInPane, className,
 }: NotifyCardProps) {
   // Details: the choices with notes, or an approval's detail.
   const [expanded, setExpanded] = useState(form === 'docked' || (form === 'strip' && Boolean(showDetails)));
@@ -822,6 +826,7 @@ function QuestionCard({
       <div className={cn(titleClass, !expanded && 'line-clamp-3')} title={item.title}>{item.title}</div>
       {/* An agent prompt's context is a command or a plan: its line breaks carry meaning. */}
       {showContext && <div className={cn(contextClass, item.agentPrompt && 'max-h-[40vh] overflow-y-auto whitespace-pre-line')}>{item.context}</div>}
+      {related}
       {body}
       {item.unreachable && <UnreachableNotice item={item} className={form === 'inbox' ? 'px-3.5 pb-3' : 'px-[22px] pb-3'} />}
       {form === 'inbox' && (
@@ -829,7 +834,7 @@ function QuestionCard({
           {item.snoozedUntil !== undefined && <span className="min-w-0 truncate">{snoozedLabel(item.snoozedUntil)}</span>}
           <div className="ml-auto flex shrink-0 items-center gap-3">
             {item.source.paneId && !item.elsewhere && (
-              <FooterLink onClick={() => onCommand({ type: 'open-in-pane', id: item.id })}>
+              <FooterLink onClick={onOpenInPane ?? (() => onCommand({ type: 'open-in-pane', id: item.id }))}>
                 <ExternalLink className="h-3.5 w-3.5" /> Open in Pane
               </FooterLink>
             )}

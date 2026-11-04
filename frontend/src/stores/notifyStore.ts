@@ -45,6 +45,11 @@ export function waitingCount(snapshot: NotifySnapshot | null): number {
   return snapshot?.items.filter((item) => item.state === 'waiting').length ?? 0;
 }
 
+/** Something from this Session (its orchestrator or a worker Pane) waits on you. */
+export function sessionHasWaitingQuestion(snapshot: NotifySnapshot | null, sessionId: string): boolean {
+  return snapshot?.items.some((item) => item.state === 'waiting' && item.source.session?.id === sessionId) ?? false;
+}
+
 export function paneHasWaitingQuestion(snapshot: NotifySnapshot | null, paneId: string): boolean {
   return snapshot?.items.some((item) => item.state === 'waiting' && item.source.paneId === paneId) ?? false;
 }

@@ -39,7 +39,7 @@ import { subscribePanelStatus } from './services/panelStatusSync';
 import { subscribeAttentionInbox, useAttentionInboxStore } from './stores/attentionInboxStore';
 import { runNotify, subscribeNotify, useNotifyStore } from './stores/notifyStore';
 import { acceleratorFromKeys } from './components/notify/notifyFormat';
-import { NotifyInPaneStrip } from './components/notify/NotifyInPane';
+import { openApprovals } from './components/approvals/approvalsNavigation';
 import { useConfigStore } from './stores/configStore';
 import { usePanelStore } from './stores/panelStore';
 import { API } from './utils/api';
@@ -203,7 +203,7 @@ function App() {
       return;
     }
     closeSettings();
-    useNavigationStore.getState().navigateToNotify();
+    openApprovals(target === 'inbox' ? undefined : target.approval);
   }), [closeSettings, openSettings]);
 
   /**
@@ -1023,7 +1023,6 @@ function App() {
               : <SessionView />}
           <PaneChatIntroOffer suppressed={isSettingsOpen || isOnboardingOpen || isWelcomeOpen} />
         </RemoteWorkspace>
-        <NotifyInPaneStrip left={sidebarCollapsed ? 48 : sidebarWidth} />
         </div>
         <OnboardingDialog
           isOpen={isOnboardingOpen}

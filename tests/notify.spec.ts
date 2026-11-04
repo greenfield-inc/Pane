@@ -36,7 +36,7 @@ interface NotifyMock {
   getNotifyCommands(): NotifyCommand[];
   getConfigUpdates(): JsonObject[];
   emitNotifySnapshot(snapshot: NotifySnapshot): void;
-  emitNotifyNavigate(target: 'inbox' | 'settings'): void;
+  emitNotifyNavigate(target: 'inbox' | 'settings' | { approval: string }): void;
 }
 
 async function boot(
@@ -64,12 +64,16 @@ const commands = (page: Page) => page.evaluate(() => (window as MockWindow).__pa
 // SAFETY: installElectronApiMock installs these test-only IPC controls on the page.
 const configUpdates = (page: Page) => page.evaluate(() => (window as MockWindow).__paneTestElectronMock.getConfigUpdates());
 
-test.describe('Pane Notify in the main window', () => {
-  test('the sidebar counts waiting questions and marks each waiting Pane', async ({ page }) => {
-    await boot(page);
-    await expect(page.getByTestId('notify-nav')).toContainText('Notify');
-    // Three questions wait; the update never adds to the count.
-    await expect(page.getByTestId('notify-nav').getByLabel('3 questions waiting')).toHaveText('3');
+test.describe('Approvals in the main window', () => {
+  test('the badge counts what waits, Panes and Sessions say Waiting, and nothing covers the work', async ({ page }) => {
+    // Main says the strip would show inside Pane: Approvals draws no strip or docked card there.
+    await boot(page, { ...notifyFixture(), stripSurface: 'pane' });
+    const badge = page.getByTestId('approvals-badge');
+    await expect(badge).toHaveAccessibleName('Approvals, 3 waiting');
+    await expect(badge).toContainText('3');
+    await expect(page.getByTestId('notify-nav')).toHaveCount(0);
+    await expect(page.getByTestId('notify-in-pane-strip')).toHaveCount(0);
+    await expect(page.getByTestId('notify-dock')).toHaveCount(0);
 
     const row = (name: string) => page.locator('.group\\/session', { hasText: name });
     await expect(row('auth-refactor')).toContainText('Waiting');
@@ -77,37 +81,49 @@ test.describe('Pane Notify in the main window', () => {
     await expect(row('sms-retry')).not.toContainText('Waiting');
   });
 
-  test('the inbox answers in one click and lists updates and history', async ({ page }) => {
+  test('Approvals groups by Session, opens the selected item in place, and answers it', async ({ page }) => {
     await boot(page);
-    await page.getByTestId('notify-nav').click();
-    const inbox = page.getByTestId('notify-inbox');
-    await expect(inbox.getByRole('heading', { name: 'Notify' })).toBeVisible();
-    await expect(inbox.getByRole('tab', { name: 'Waiting 3' })).toHaveAttribute('aria-selected', 'true');
-    await expect(inbox.getByTestId('notify-card')).toHaveCount(3);
+    await page.getByTestId('approvals-badge').click();
+    const queue = page.getByTestId('approvals-queue');
+    await expect(queue.getByRole('heading', { name: 'Approvals' })).toBeVisible();
+    await expect(queue.getByRole('tab', { name: 'Waiting 3' })).toHaveAttribute('aria-selected', 'true');
+    await expect(queue.getByTestId('approvals-group')).toHaveText([/Launch\s*1/, /Not in a Session\s*2/]);
 
-    await inbox.getByRole('button', { name: /Keep Redis/ }).click();
-    await inbox.getByRole('button', { name: /Approve/ }).click();
-    await inbox.getByPlaceholder('Type your answer').fill('Answer your agents from anywhere');
-    await inbox.getByPlaceholder('Type your answer').press('Enter');
-    await inbox.getByRole('button', { name: 'Answer all' }).click();
+    // The oldest waiting item is selected first; others are rows.
+    const selected = queue.getByTestId('approvals-selected');
+    await expect(selected).toContainText('Which session store should the refactor use?');
+    await expect(selected.getByTestId('approvals-related').getByRole('button')).toHaveText(['plan.html', 'PR #812']);
+    await selected.getByTestId('approvals-related').getByRole('button', { name: 'PR #812' }).click();
+    await selected.getByRole('button', { name: /Keep Redis/ }).click();
+
+    await queue.getByTestId('approvals-row').filter({ hasText: 'Apply migration 0042' }).click();
+    await queue.getByTestId('approvals-selected').getByRole('button', { name: /Approve/ }).click();
     await expect.poll(() => commands(page)).toEqual([
+      { type: 'open-link', id: 'q-options', index: 1, paneId: 'pane-auth' },
       { type: 'answer', id: 'q-options', answer: { choice: 'Keep Redis' } },
       { type: 'answer', id: 'q-approve', answer: { approved: true } },
-      { type: 'answer', id: 'q-ask', answer: { text: 'Answer your agents from anywhere' } },
-      { type: 'open-round' },
     ]);
 
-    await expect(inbox.getByText('For your information')).toBeVisible();
-    await expect(inbox.getByText('PR #812 checks passed')).toBeVisible();
-    const history = inbox.getByTestId('notify-history-row');
-    await expect(history.filter({ hasText: 'Retry backoff' })).toContainText('→ Exponential');
-    await expect(history.filter({ hasText: 'Lint rule question' })).toContainText('Expired');
+    await queue.getByRole('tab', { name: /Answered/ }).click();
+    const rows = queue.getByTestId('approvals-row');
+    await expect(rows.filter({ hasText: 'Retry backoff' })).toContainText('→ Exponential');
+    await expect(rows.filter({ hasText: 'Lint rule question' })).toContainText('Expired');
+    await expect(rows.filter({ hasText: 'PR #812 checks passed' })).toContainText('Update');
+  });
+
+  test('a worker item shows its Pane beside it', async ({ page }) => {
+    await boot(page);
+    await page.getByTestId('approvals-badge').click();
+    const beside = page.getByTestId('approvals-beside');
+    await expect(beside).toContainText('Pane');
+    await expect(beside).toContainText('auth-refactor');
   });
 
   test('a suggestion fills the answer field and waits for Enter', async ({ page }) => {
     await boot(page);
-    await page.getByTestId('notify-nav').click();
-    const card = page.getByTestId('notify-inbox').getByTestId('notify-card').filter({ hasText: 'release headline' });
+    await page.getByTestId('approvals-badge').click();
+    await page.getByTestId('approvals-row').filter({ hasText: 'release headline' }).click();
+    const card = page.getByTestId('approvals-selected');
     await card.getByRole('button', { name: /Notify is here/ }).click();
     const field = card.getByPlaceholder('Type your answer');
     await expect(field).toHaveValue('Notify is here');
@@ -120,55 +136,23 @@ test.describe('Pane Notify in the main window', () => {
     await expect.poll(() => commands(page)).toEqual([{ type: 'answer', id: 'q-ask', answer: { text: 'Notify is here in 2.5' } }]);
   });
 
-  test('the inbox explains Notify when nothing waits, and main can open it', async ({ page }) => {
+  test('says nothing waits in one line, and main can open it', async ({ page }) => {
     const empty = { ...notifyFixture(), items: [], queue: [], strip: null, stripSurface: null };
     await boot(page, empty);
-    await expect(page.getByTestId('notify-nav').getByLabel(/waiting/)).toHaveCount(0);
+    await expect(page.getByTestId('approvals-badge')).toHaveAccessibleName('Approvals');
     // SAFETY: installElectronApiMock installs these test-only IPC controls on the page.
     await page.evaluate(() => (window as MockWindow).__paneTestElectronMock.emitNotifyNavigate('inbox'));
-    await expect(page.getByTestId('notify-empty')).toContainText('notify');
+    await expect(page.getByTestId('notify-empty')).toHaveText('Nothing is waiting on you.');
   });
 
-  test('the strip stays up for a docked question while its terminal is out of view', async ({ page }) => {
-    // Open in Pane docked q-options in auth-refactor's terminal, but no Pane is open now.
-    await boot(page, { ...notifyFixture(), dockedItemId: 'q-options' });
-    await expect(page.getByTestId('notify-in-pane-strip').getByText('Which session store should the refactor use?')).toBeVisible();
-  });
-
-  test('the in-Pane strip answers, hides, and offers a reminder', async ({ page }) => {
+  test('the badge clicked again returns to the view you left', async ({ page }) => {
     await boot(page);
-    const strip = page.getByTestId('notify-in-pane-strip');
-    await expect(strip.getByText('Which session store should the refactor use?')).toBeVisible();
-    await expect(strip).toContainText('1 is recommended');
-    await expect(strip).toContainText('Next: Apply migration 0042 to staging? · billing-migration');
-
-    await strip.getByRole('button', { name: /Postgres table/ }).click();
-    await strip.getByRole('button', { name: 'Close' }).click({ button: 'right' });
-    await strip.getByRole('menuitem', { name: 'In 1 hour' }).click();
-    await strip.getByRole('button', { name: 'Close' }).click();
-    await expect.poll(() => commands(page)).toEqual([
-      { type: 'answer', id: 'q-options', answer: { choice: 'Postgres table' } },
-      { type: 'remind', id: 'q-options', after: '1h' },
-      { type: 'dismiss', id: 'q-options' },
-    ]);
-
-    // Details: a click selects, Send confirms with the note.
-    await strip.getByRole('button', { name: 'Details' }).click();
-    await strip.getByRole('button', { name: /Stateless JWT/ }).click();
-    await strip.getByPlaceholder('Add a note for Claude (optional)').fill('Keep sign-out working');
-    await strip.getByRole('button', { name: 'Send', exact: true }).click();
-    await expect.poll(async () => (await commands(page)).at(-1)).toEqual(
-      { type: 'answer', id: 'q-options', answer: { choice: 'Stateless JWT', note: 'Keep sign-out working' } },
-    );
-
-    const sent = notifyFixture();
-    sent.items[0] = { ...sent.items[0], state: 'sent', answerSummary: 'Stateless JWT' };
-    sent.strip = { kind: 'sent', itemId: 'q-options' };
-    // SAFETY: installElectronApiMock installs these test-only IPC controls on the page.
-    await page.evaluate((snapshot) => (window as MockWindow).__paneTestElectronMock.emitNotifySnapshot(snapshot), sent);
-    await expect(strip).toContainText('Sent to Claude');
-    await strip.getByRole('button', { name: 'Undo' }).click();
-    await expect.poll(async () => (await commands(page)).at(-1)).toEqual({ type: 'undo', id: 'q-options' });
+    await page.getByRole('button', { name: 'Loops' }).first().click();
+    await page.getByTestId('approvals-badge').click();
+    await expect(page.getByTestId('approvals-queue')).toBeVisible();
+    await page.getByTestId('approvals-badge').click();
+    await expect(page.getByTestId('approvals-queue')).toHaveCount(0);
+    await expect(page.getByTestId('approvals-badge')).toHaveAttribute('aria-pressed', 'false');
   });
 });
 
@@ -271,17 +255,17 @@ test.describe('Settings → Secrets', () => {
   });
 });
 
-test.describe('Settings → Notify', () => {
-  const openNotifySettings = async (page: Page) => {
+test.describe('Settings → Approvals', () => {
+  const openApprovalsSettings = async (page: Page) => {
     await page.getByRole('button', { name: 'Settings' }).first().click();
     await expect(page.getByTestId('settings-page')).toBeVisible();
-    await page.getByRole('button', { name: 'Notify', exact: true }).click();
+    await page.getByRole('button', { name: 'Approvals', exact: true }).click();
   };
 
   test('shows the defaults and saves Show outside Pane', async ({ page }) => {
     await boot(page);
-    await openNotifySettings(page);
-    await expect(page.getByRole('switch', { name: 'Notify' })).toHaveAttribute('aria-checked', 'true');
+    await openApprovalsSettings(page);
+    await expect(page.getByRole('switch', { name: 'Approvals' })).toHaveAttribute('aria-checked', 'true');
     await expect(page.getByRole('switch', { name: 'Show outside Pane' })).toHaveAttribute('aria-checked', 'true');
     await expect(page.getByRole('radio', { name: 'Bottom center' })).toHaveAttribute('aria-checked', 'true');
     await expect(page.getByRole('switch', { name: 'Sound' })).toHaveAttribute('aria-checked', 'true');
@@ -301,7 +285,7 @@ test.describe('Settings → Notify', () => {
 
   test('shows a change made from the tray and saves only the edited setting', async ({ page }) => {
     await boot(page);
-    await openNotifySettings(page);
+    await openApprovalsSettings(page);
     const fromTray = notifyFixture();
     fromTray.settings.showOutsidePane = false;
     // SAFETY: installElectronApiMock installs these test-only IPC controls on the page.
@@ -312,10 +296,10 @@ test.describe('Settings → Notify', () => {
     await expect.poll(() => configUpdates(page)).toEqual([{ notify: { position: 'top-right' } }]);
   });
 
-  test('greys out every child setting while Notify is off', async ({ page }) => {
+  test('greys out every child setting while Approvals are off', async ({ page }) => {
     await boot(page, notifyFixture(), { notify: { enabled: false } });
-    await openNotifySettings(page);
-    await expect(page.getByRole('switch', { name: 'Notify' })).toHaveAttribute('aria-checked', 'false');
+    await openApprovalsSettings(page);
+    await expect(page.getByRole('switch', { name: 'Approvals' })).toHaveAttribute('aria-checked', 'false');
     await expect(page.getByRole('switch', { name: 'Show outside Pane' })).toBeDisabled();
     await expect(page.getByRole('radio', { name: 'Top right' })).toBeDisabled();
     await expect(page.getByRole('button', { name: 'Change' })).toBeDisabled();
@@ -325,7 +309,7 @@ test.describe('Settings → Notify', () => {
 
   test('says when the shortcut is taken or floating cards are unavailable', async ({ page }) => {
     await boot(page, { ...notifyFixture(), shortcutRegistered: false, showOutsideSupported: false });
-    await openNotifySettings(page);
+    await openApprovalsSettings(page);
     await expect(page.getByRole('alert')).toContainText('Another app is using');
     await expect(page.getByText('Unavailable on native Wayland')).toBeVisible();
     await expect(page.getByRole('switch', { name: 'Show outside Pane' })).toBeDisabled();

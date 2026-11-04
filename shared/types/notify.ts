@@ -222,8 +222,6 @@ export interface NotifySnapshot {
   strip: NotifyStripView | null;
   /** Where the strip shows right now. `pane`: inside Pane's main window. */
   stripSurface: 'window' | 'pane' | null;
-  /** The question docked in its terminal by Open in Pane. */
-  dockedItemId: string | null;
   /** Epoch ms; strips and sound are off until then. */
   pausedUntil: number | null;
   /** False when another app holds the answer-all shortcut. */
@@ -293,6 +291,8 @@ export type NotifyCommand =
   /** Round →: move to the back of the queue. */
   | { type: 'skip'; id: string }
   | { type: 'open-in-pane'; id: string }
+  /** Approvals: open the item's link `index` as a tab of `paneId` (the Pane shown beside it), else of the asking Pane. */
+  | { type: 'open-link'; id: string; index: number; paneId?: string }
   | { type: 'hover-info'; id: string; hovering: boolean }
   | { type: 'pause'; minutes: number }
   | { type: 'resume' }
@@ -301,6 +301,9 @@ export type NotifyCommand =
   | { type: 'open-inbox' }
   /** Show or Hide details on a pop-up card: the next card opens the same way. */
   | { type: 'show-details'; shown: boolean };
+
+/** Where main sends the main window: Approvals (optionally on one item) or its settings. */
+export type NotifyNavigateTarget = 'inbox' | 'settings' | { approval: string };
 
 /** The floating windows report their card's size so main can fit and place them. */
 export interface NotifyWindowSize {
