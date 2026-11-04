@@ -3,17 +3,19 @@ import { router } from 'expo-router';
 import { useState, type ReactNode } from 'react';
 import { Alert, Pressable, StyleSheet, View } from 'react-native';
 
+import { ApprovalGroups } from '@/features/approvals/ApprovalGroups';
+import { questionDetail } from '@/features/approvals/approvals';
+import { openApproval } from '@/features/approvals/ApprovalScreen';
 import { MachineBadge } from '@/features/machines/MachineBadge';
 import { MachineMark } from '@/features/machines/MachineMark';
 import type { Machine } from '@/features/machines/machines';
 import { AgentPromptActions } from '@/features/notify/AgentPromptActions';
-import { openNotifySheet } from '@/features/notify/NotifySheet';
 import { LoadingRows, Notice, SectionHeader } from '@/features/panes/PaneKit';
 import { describePermission } from '@/features/panes/permissions';
 import { SearchField } from '@/features/panes/SearchField';
 import { PausedBadge, StatusBadge, statusPresentation } from '@/features/panes/StatusBadge';
 import { SwipeRow, swipeRowAccessibility } from '@/features/panes/SwipeRow';
-import { useTheme, withAlpha } from '@/theme';
+import { useTheme } from '@/theme';
 import { Button, Icon, Text } from '@/ui';
 
 import { buildAllMachinesList, sinceLabel, type AllPane, type MachineFeed, type RecentRow, type WaitingRow } from './allMachinesList';
@@ -40,7 +42,7 @@ export interface CurrentMachineActions {
 }
 
 /**
- * Home's All machines list: what's waiting on you from every saved machine, then every Pane and
+ * Home's All machines list: Approvals from every saved machine, grouped by Session, then every Pane and
  * Session newest first, each with its machine's badge. An unreachable machine's rows stay,
  * dimmed, under a note that says since when, with Retry.
  */
@@ -94,14 +96,9 @@ export function AllMachinesHome({ machines, feeds, currentKey, loading, refreshi
     if (row.stale) return sayOffline(row.machineKey, row.type === 'question' ? 'question' : 'request');
     const here = row.machineKey === currentKey;
     if (row.type === 'question') {
-      // Only the terminal can answer it now: open its Pane.
-      if (row.item.agentPrompt?.inTerminal && row.item.source.paneId) {
-        if (here) actions.openPane(row.item.source.paneId);
-        else router.push({ pathname: '/open', params: { host: row.machineKey, paneId: row.item.source.paneId } });
-        return;
-      }
-      // Another machine's question answers there, without switching.
-      openNotifySheet(row.item.id, row.item.source.paneId, here ? undefined : row.machineKey);
+      // The approval screen shows its machine's Session below the card, so another machine's switches first.
+      if (here) openApproval(row.item.id);
+      else router.push({ pathname: '/open', params: { host: row.machineKey, notifyId: row.item.id } });
     } else if (here) {
       router.push({ pathname: '/pane/[paneId]/permission', params: { paneId: row.request.sessionId, requestId: row.request.id } });
     } else {
@@ -111,38 +108,35 @@ export function AllMachinesHome({ machines, feeds, currentKey, loading, refreshi
 
   const header = (
     <View>
-      {waiting.length > 0 ? (
-        <View style={styles.waitingSection}>
-          <SectionHeader title="Waiting on you" count={waiting.length} first />
-          <View style={[styles.waitingCard, { borderRadius: theme.radius.card, backgroundColor: withAlpha(theme.colors.warning, 0.09) }]}>
-            {waiting.map((row, index) => {
-              const machine = machineOf(row.machineKey);
-              const permission = row.type === 'permission' ? describePermission(row.request) : null;
-              return (
-                <View key={row.key}>
-                <AllRow
-                  testID={row.type === 'question' ? `notify-row-${row.item.id}` : `permission-row-${row.request.sessionId}`}
-                  title={row.type === 'question' ? row.item.source.name : row.paneName}
-                  detail={row.type === 'question' ? row.item.title : permission?.target ? `${permission.title}: ${permission.target}` : permission?.title ?? ''}
-                  machine={machine}
-                  stale={row.stale}
-                  divided={index > 0}
-                  leading={<StatusBadge status="blocked" />}
-                  onPress={() => openWaiting(row)}
+      <ApprovalGroups
+        entries={waiting}
+        machineOf={machineOf}
+        renderEntry={(row, divided) => {
+          const machine = machineOf(row.machineKey);
+          const permission = row.type === 'permission' ? describePermission(row.request) : null;
+          return (
+            <>
+              <AllRow
+                testID={row.type === 'question' ? `notify-row-${row.item.id}` : `permission-row-${row.request.sessionId}`}
+                title={row.type === 'question' ? row.item.source.name : row.paneName}
+                detail={row.type === 'question' ? questionDetail(row.item) : permission?.target ? `${permission.title}: ${permission.target}` : permission?.title ?? ''}
+                machine={machine}
+                stale={row.stale}
+                divided={divided}
+                leading={<StatusBadge status="blocked" />}
+                onPress={() => openWaiting(row)}
+              />
+              {row.type === 'question' && row.item.state === 'waiting' ? (
+                <AgentPromptActions
+                  item={row.item}
+                  machine={row.machineKey === currentKey ? null : machine?.profile ?? null}
+                  offline={row.stale ? machine?.name ?? 'Its machine' : undefined}
                 />
-                {row.type === 'question' ? (
-                  <AgentPromptActions
-                    item={row.item}
-                    machine={row.machineKey === currentKey ? null : machine?.profile ?? null}
-                    offline={row.stale ? machine?.name ?? 'Its machine' : undefined}
-                  />
-                ) : null}
-                </View>
-              );
-            })}
-          </View>
-        </View>
-      ) : null}
+              ) : null}
+            </>
+          );
+        }}
+      />
       {recent.length > 0 ? <SectionHeader title={noneAnswer ? 'Last seen' : 'Recent'} first={waiting.length === 0} /> : null}
     </View>
   );
@@ -332,8 +326,6 @@ const styles = StyleSheet.create({
   bold: { fontWeight: '600' },
   center: { textAlign: 'center' },
   content: { padding: 12 },
-  waitingSection: { marginBottom: 12 },
-  waitingCard: { overflow: 'hidden' },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 60, paddingHorizontal: 12, paddingVertical: 8 },
   leading: { width: 12, alignItems: 'center' },
   divider: { position: 'absolute', top: 0, left: 36, right: 0, height: StyleSheet.hairlineWidth },

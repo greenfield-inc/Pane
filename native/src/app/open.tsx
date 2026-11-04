@@ -3,19 +3,20 @@ import { useEffect } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
 import { useHostsStore } from '@/auth/hostsStore';
-import { resolveOpenTarget } from '@/features/links/links';
-import { openNotifySheet } from '@/features/notify/NotifySheet';
+import { openRoute, resolveOpenTarget } from '@/features/links/links';
 import { useTheme } from '@/theme';
 import { Button, EmptyState } from '@/ui';
 
 /**
  * Opens a pane named by a `pane://pane/…?host=` link, a notification tap (a Notify question's
- * sheet when the tap names one) or a row of All machines (a pane or a Session), switching to its
- * host first. It only ever connects to a saved host.
+ * approval screen when the tap names one) or a row of All machines (a pane, a Session or an
+ * approval), switching to its host first. It only ever connects to a saved host.
  */
 export default function OpenScreen() {
   const theme = useTheme();
-  const { host, paneId, panelId, notifyId, sessionId } = useLocalSearchParams<{ host?: string; paneId?: string; panelId?: string; notifyId?: string; sessionId?: string }>();
+  const { host, paneId, panelId, notifyId, sessionId, sessionPaneId } = useLocalSearchParams<{
+    host?: string; paneId?: string; panelId?: string; notifyId?: string; sessionId?: string; sessionPaneId?: string;
+  }>();
   const profiles = useHostsStore(state => state.profiles);
   const activeId = useHostsStore(state => state.activeId);
   const setActive = useHostsStore(state => state.setActive);
@@ -33,11 +34,10 @@ export default function OpenScreen() {
     }
     // Start from the host's pane list, so Back never lands on another host's screens.
     router.dismissTo('/');
-    // A Notify alert opens its question's sheet over the pane list.
-    if (notifyId) openNotifySheet(notifyId, paneId);
-    else if (sessionId) router.push({ pathname: '/session/[sessionId]', params: { sessionId } });
-    else if (paneId) router.push({ pathname: '/pane/[paneId]', params: panelId ? { paneId, panelId } : { paneId } });
-  }, [hostId, switchHost, paneId, panelId, notifyId, sessionId, setActive]);
+    // A Notify alert opens its approval screen over the pane list.
+    const route = openRoute({ paneId, panelId, notifyId, sessionId, sessionPaneId });
+    if (route) router.push(route);
+  }, [hostId, switchHost, paneId, panelId, notifyId, sessionId, sessionPaneId, setActive]);
 
   if (resolved.type === 'unknown-host') {
     return (

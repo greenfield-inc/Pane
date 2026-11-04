@@ -11,6 +11,8 @@ export interface OpenTarget {
   notifyId?: string;
   /** An orchestrator Session to open instead of a pane. */
   sessionId?: string;
+  /** A Notify alert's Session workspace Pane (or its own Pane): the approval screen shows it while the question can't be read. */
+  sessionPaneId?: string;
 }
 
 export type IncomingLink =
@@ -35,7 +37,9 @@ export function parsePushTarget(request: unknown): OpenTarget | null {
   const host = stringField(data, 'hostProfileId');
   if (!host) return null;
   const notifyId = stringField(data, 'notifyId');
-  return withPane(notifyId ? { host, notifyId } : { host }, stringField(data, 'paneId'), stringField(data, 'panelId'));
+  const sessionPaneId = notifyId ? stringField(data, 'sessionPaneId') : undefined;
+  const base = notifyId ? (sessionPaneId ? { host, notifyId, sessionPaneId } : { host, notifyId }) : { host };
+  return withPane(base, stringField(data, 'paneId'), stringField(data, 'panelId'));
 }
 
 /** A Notify question's alert, as the host sends it (main/src/daemon/mobilePushSender.ts, observeQuestion). */
@@ -171,7 +175,29 @@ function stripSlash(url: string): string {
 
 /** The `/open` route for a target, used by links and notification taps. */
 export function openHref(target: OpenTarget): string {
-  const params = Object.entries({ host: target.host, paneId: target.paneId, panelId: target.panelId, notifyId: target.notifyId, sessionId: target.sessionId })
+  const params = Object.entries({
+    host: target.host, paneId: target.paneId, panelId: target.panelId, notifyId: target.notifyId, sessionId: target.sessionId, sessionPaneId: target.sessionPaneId,
+  })
     .flatMap(([key, value]) => value ? [`${key}=${encodeURIComponent(value)}`] : []);
   return `/open?${params.join('&')}`;
+}
+
+/** Where `/open` goes once it is on the target's host. */
+export type OpenRoute =
+  | { pathname: '/approval/[notifyId]'; params: { notifyId: string; paneId?: string } }
+  | { pathname: '/session/[sessionId]'; params: { sessionId: string } }
+  | { pathname: '/pane/[paneId]'; params: { paneId: string; panelId?: string } };
+
+/**
+ * A Notify alert opens its approval screen, with the Pane the alert names (its Session's
+ * workspace for a worker, else its own) as the fallback under the card; then a Session, then a Pane.
+ */
+export function openRoute(target: Omit<OpenTarget, 'host'>): OpenRoute | null {
+  if (target.notifyId) {
+    const paneId = target.sessionPaneId ?? target.paneId;
+    return { pathname: '/approval/[notifyId]', params: paneId ? { notifyId: target.notifyId, paneId } : { notifyId: target.notifyId } };
+  }
+  if (target.sessionId) return { pathname: '/session/[sessionId]', params: { sessionId: target.sessionId } };
+  if (target.paneId) return { pathname: '/pane/[paneId]', params: target.panelId ? { paneId: target.paneId, panelId: target.panelId } : { paneId: target.paneId } };
+  return null;
 }

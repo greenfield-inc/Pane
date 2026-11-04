@@ -1,4 +1,4 @@
-# Answer a Notify question from the pane list's sheet. Before running, ask one
+# Answer a Notify question from home's Approvals, on its approval screen. Before running, ask one
 # on the dev host and leave it waiting: `PANE_SESSION_ID=<pane-id> node
 # packages/runpane/dist/cli.js notify --pane-dir <pane-dir> --ui approve
 # --title "Run the migration?"` (see native/README.md).
@@ -7,20 +7,25 @@ name: Answer a Notify question
 ---
 - runFlow: subflows/signed-in.yaml
 - extendedWaitUntil:
-    visible: "QUESTIONS"
+    visible:
+      id: approvals-section
     timeout: 20000
 - tapOn:
     id: "notify-row-.*"
 - extendedWaitUntil:
     visible:
-      id: notify-sheet
+      id: approval-card
     timeout: 10000
 - assertVisible:
     id: notify-title
+- assertVisible:
+    id: approval-position
 - tapOn:
     id: notify-approve
 - assertVisible:
     id: notify-sent
+# Once the agent has it, the screen goes back home (nothing else waits) and Approvals clears.
 - extendedWaitUntil:
-    notVisible: "QUESTIONS"
+    notVisible:
+      id: approvals-section
     timeout: 15000

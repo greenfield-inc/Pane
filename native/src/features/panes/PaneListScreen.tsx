@@ -4,8 +4,14 @@ import { useState } from 'react';
 import { Alert, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import type { NotifyItem } from '@shared/types/notify';
+import type { PanePermissionRequest } from '@shared/types/permissions';
+
 import { useDaemon } from '@/daemon';
 import { AllMachinesHome, type AllMachinesFeed } from '@/features/allMachines/AllMachinesHome';
+import { ApprovalGroups } from '@/features/approvals/ApprovalGroups';
+import { approvalItems, itemEntry, questionDetail, sessionsByPane, type ApprovalEntry } from '@/features/approvals/approvals';
+import { openApproval } from '@/features/approvals/ApprovalScreen';
 import { useOtherMachines } from '@/features/allMachines/useOtherMachines';
 import { DemoBadge } from '@/features/demo/DemoBadge';
 import { ConnectionBar, Dimmed, presenceLabel } from '@/features/hosts/ConnectionStatus';
@@ -18,8 +24,7 @@ import { useMachines } from '@/features/machines/useMachines';
 import { useNotifyShared } from '@/features/notify/hooks';
 import { AgentPromptActions } from '@/features/notify/AgentPromptActions';
 import { waitingQuestions } from '@/features/notify/notifyQuestions';
-import { openNotifySheet } from '@/features/notify/NotifySheet';
-import { useTheme, withAlpha } from '@/theme';
+import { useTheme } from '@/theme';
 import { Icon, Text } from '@/ui';
 
 import { useSessions, useSetSessionPaused, useUpdateSession } from '../sessions/hooks';
@@ -47,7 +52,7 @@ import { StatusBadge } from './StatusBadge';
 
 /**
  * Home: the Pane logo and a chip per machine, then Pinned, Sessions, Repositories and Archived,
- * with search and one card of what's waiting on you (permission requests and Notify questions).
+ * with search and Approvals above them (Notify questions and permission requests, grouped by Session).
  * With the All chip selected, one list from every saved machine instead (AllMachinesHome).
  */
 export function PaneListScreen() {
@@ -105,7 +110,16 @@ export function PaneListScreen() {
   // Wait for statuses too, so dots don't flip from "No agent" to their real status.
   const loading = projects.isPending || statuses.isPending;
   const divider = { borderColor: theme.colors.border };
-  const waitingCount = waiting.length + questions.length;
+  // Approvals: questions (and answers held for Undo) and permission requests, filed under their Session.
+  const sessionOfPane = sessionsByPane(sessions.data?.sessions);
+  const approvals: HomeApproval[] = [
+    ...approvalItems(notify.data).map(item => ({ ...itemEntry(item, profile.id), kind: 'question' as const })),
+    ...waiting.map(request => {
+      const session = sessionOfPane.get(request.sessionId);
+      return { key: `${profile.id}:permission:${request.id}`, machineKey: profile.id, at: request.timestamp, kind: 'permission' as const, request, ...(session ? { session } : {}) };
+    }),
+  ];
+  const waitingCount = approvals.length;
 
   const confirmArchive = (pane: { id: string; name: string }) => {
     Alert.alert(`Archive “${pane.name}”?`, 'Its agents stop and its worktree is removed. You can still find it under Archived.', [
@@ -331,37 +345,30 @@ export function PaneListScreen() {
               style={styles.fill}
               contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 12 + NEW_BUTTON + 16 }]}
               ListHeaderComponent={waitingCount > 0 ? (
-                <View style={styles.waitingSection}>
-                  <SectionHeader title="Waiting on you" count={waitingCount} first />
-                  <View style={[styles.waitingCard, { borderRadius: theme.radius.card, backgroundColor: withAlpha(theme.colors.warning, 0.09) }]}>
-                    {questions.map((item, index) => (
-                      <View key={item.id}>
-                        <WaitingRow
-                          testID={`notify-row-${item.id}`}
-                          name={item.source.name}
-                          detail={item.title}
-                          divided={index > 0}
-                          // Only the terminal can answer it now: open its Pane.
-                          onPress={() => (item.agentPrompt?.inTerminal && item.source.paneId ? openPane(item.source.paneId) : openNotifySheet(item.id, item.source.paneId))}
-                        />
-                        <AgentPromptActions item={item} inset={33} offline={presence === 'unreachable' ? profile.label : undefined} />
-                      </View>
-                    ))}
-                    {waiting.map((request, index) => {
-                      const { title, target } = describePermission(request);
-                      return (
-                        <WaitingRow
-                          key={request.id}
-                          testID={`permission-row-${request.sessionId}`}
-                          name={paneNames.get(request.sessionId) ?? 'Pane'}
-                          detail={target ? `${title}: ${target}` : title}
-                          divided={questions.length + index > 0}
-                          onPress={() => router.push({ pathname: '/pane/[paneId]/permission', params: { paneId: request.sessionId, requestId: request.id } })}
-                        />
-                      );
-                    })}
-                  </View>
-                </View>
+                <ApprovalGroups
+                  entries={approvals}
+                  machineOf={key => (key === profile.id ? current : undefined)}
+                  renderEntry={(entry, divided) => (entry.kind === 'question' ? (
+                    <>
+                      <WaitingRow
+                        testID={`notify-row-${entry.item.id}`}
+                        name={entry.item.source.name}
+                        detail={questionDetail(entry.item)}
+                        divided={divided}
+                        onPress={() => openApproval(entry.item.id)}
+                      />
+                      {entry.item.state === 'waiting' ? <AgentPromptActions item={entry.item} inset={33} offline={presence === 'unreachable' ? profile.label : undefined} /> : null}
+                    </>
+                  ) : (
+                    <WaitingRow
+                      testID={`permission-row-${entry.request.sessionId}`}
+                      name={paneNames.get(entry.request.sessionId) ?? 'Pane'}
+                      detail={permissionDetail(entry.request)}
+                      divided={divided}
+                      onPress={() => router.push({ pathname: '/pane/[paneId]/permission', params: { paneId: entry.request.sessionId, requestId: entry.request.id } })}
+                    />
+                  ))}
+                />
               ) : null}
               ListEmptyComponent={
                 loading ? <LoadingRows />
@@ -377,6 +384,13 @@ export function PaneListScreen() {
       )}
     </View>
   );
+}
+
+type HomeApproval = ApprovalEntry & ({ kind: 'question'; item: NotifyItem } | { kind: 'permission'; request: PanePermissionRequest });
+
+function permissionDetail(request: PanePermissionRequest): string {
+  const { title, target } = describePermission(request);
+  return target ? `${title}: ${target}` : title;
 }
 
 /** Home's +: one New sheet for a Session or a Pane, on any saved machine. */
@@ -441,8 +455,6 @@ const styles = StyleSheet.create({
   nested: { marginLeft: 20, paddingLeft: 8, borderLeftWidth: 1 },
   shrink: { flexShrink: 1 },
   content: { padding: 12 },
-  waitingSection: { marginBottom: 12 },
-  waitingCard: { overflow: 'hidden' },
   waitingRow: { flexDirection: 'row', alignItems: 'center', gap: 11, paddingHorizontal: 14, paddingVertical: 10 },
   waitingDivider: { position: 'absolute', top: 0, left: 33, right: 0, height: StyleSheet.hairlineWidth },
 });
