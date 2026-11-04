@@ -89,7 +89,12 @@
    truncate; attach and send never shrink. */
 .chat-anchor { display:flex; min-width:0; flex:0 1 auto; }
 .chat-anchor-mode { flex-shrink:100; }
-.chat-composer-actions .chat-icon,.chat-composer-actions .chat-send { flex-shrink:0; }
+.chat-composer-actions .chat-icon,.chat-composer-actions .chat-send,.chat-risk { flex-shrink:0; }
+/* A window dragged very narrow (QA of D-120): the row keeps send and drops the rest rather than
+   squeezing controls on top of each other. Settings come back once the column is wider. */
+.chat-model,.chat-phone-model { min-width:4.5rem; }
+@container chat-composer (max-width:200px) { .chat-composer-actions .chat-anchor,.chat-composer-actions .chat-risk { display:none; } }
+@container chat-composer (max-width:100px) { .chat-composer-actions .chat-icon { display:none; } }
 .chat-model { max-width:16rem; }
 @container chat-composer (max-width:560px) { .chat-anchor-mode .chat-chip-label { display:none; } .chat-anchor-mode .chat-chip { padding:0 7px; } }
 .chat-chip { display:inline-flex; align-items:center; gap:6px; height:28px; min-width:0; max-width:15rem; padding:0 8px; border-radius:999px; font-size:13px; color:var(--chat-muted-foreground); }
@@ -112,7 +117,7 @@
 .chat-composer-actions[data-layout=phone] .chat-send { width:44px; height:44px; padding:4px; background-clip:content-box; }
 .chat-risk { display:inline-flex; align-items:center; justify-content:center; width:28px; height:44px; color:var(--color-status-warning); }
 .chat-risk svg { width:15px; height:15px; }
-.chat-phone-model { display:inline-flex; gap:6px; min-width:0; max-width:16rem; min-height:44px; padding:0 8px; align-self:stretch; align-items:center; border-radius:10px; font-size:15px; color:var(--chat-foreground); }
+.chat-phone-model { display:inline-flex; gap:6px; max-width:16rem; min-height:44px; padding:0 8px; align-self:stretch; align-items:center; border-radius:10px; font-size:15px; color:var(--chat-foreground); }
 .chat-phone-model:disabled { opacity:.55; }
 .chat-phone-model:active:not(:disabled) { background:var(--chat-muted); }
 .chat-phone-model-name,.chat-phone-model-effort { min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
