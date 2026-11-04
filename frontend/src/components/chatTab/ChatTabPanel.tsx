@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type RefObject } from 'react';
 import {
   AssistantRuntimeProvider, AttachmentPrimitive, ComposerPrimitive, ThreadPrimitive,
   SimpleImageAttachmentAdapter, useExternalStoreRuntime, useThreadViewport, useThreadViewportStore,
@@ -37,10 +37,53 @@ class ChatImageAdapter extends SimpleImageAttachmentAdapter {
   }
 }
 
-function ScrollToLatest() {
+/** A window scrolled back from the newest message reads the newest window again first. */
+function ScrollToLatest({ viewer, hasNewer }: { viewer: ChatTabViewer; hasNewer: boolean }) {
   const isAtBottom = useThreadViewport(state => state.isAtBottom);
   const viewport = useThreadViewportStore();
-  return <button type="button" disabled={isAtBottom} onClick={() => viewport.getState().scrollToBottom({ behavior: 'instant' })} className="chat-latest" aria-label="Scroll to latest message"><ArrowDown className="h-4 w-4" /></button>;
+  const jump = async () => {
+    if (hasNewer) await viewer.jumpToLatest();
+    requestAnimationFrame(() => viewport.getState().scrollToBottom({ behavior: 'instant' }));
+  };
+  return <button type="button" disabled={isAtBottom && !hasNewer} onClick={() => void jump()} className="chat-latest" aria-label="Scroll to latest message"><ArrowDown className="h-4 w-4" /></button>;
+}
+
+interface ScrollAnchor { id: string; offset: number }
+
+/** The turn under the middle of the viewport and its offset from the top, so a page added or trimmed elsewhere does not move it. */
+function readAnchor(viewport: HTMLElement): ScrollAnchor | undefined {
+  const box = viewport.getBoundingClientRect();
+  const middle = box.top + box.height / 2;
+  let best: { id: string; top: number; distance: number } | undefined;
+  for (const element of viewport.querySelectorAll<HTMLElement>('[data-turn-id]')) {
+    const rect = element.getBoundingClientRect();
+    const distance = rect.top <= middle && rect.bottom >= middle ? 0 : Math.min(Math.abs(rect.top - middle), Math.abs(rect.bottom - middle));
+    if (!best || distance < best.distance) best = { id: element.dataset.turnId!, top: rect.top, distance };
+    if (distance === 0) break;
+  }
+  return best && { id: best.id, offset: best.top - box.top };
+}
+
+/**
+ * Keeps the reader's place while the bounded window pages in or trims messages
+ * at either end (the viewport sets overflow-anchor:none, so the browser will not).
+ */
+function useWindowAnchor(viewport: RefObject<HTMLElement | null>, start: number | undefined, length: number) {
+  const anchor = useRef<ScrollAnchor | undefined>(undefined);
+  const record = useCallback(() => { if (viewport.current) anchor.current = readAnchor(viewport.current); }, [viewport]);
+  const previous = useRef({ start, length });
+  useLayoutEffect(() => {
+    const element = viewport.current;
+    const moved = previous.current.start !== start || (previous.current.length > length);
+    previous.current = { start, length };
+    if (element && moved && anchor.current) {
+      const atBottom = element.scrollHeight - element.scrollTop - element.clientHeight < 4;
+      const target = element.querySelector<HTMLElement>(`[data-turn-id="${CSS.escape(anchor.current.id)}"]`);
+      if (target && !atBottom) element.scrollTop += target.getBoundingClientRect().top - element.getBoundingClientRect().top - anchor.current.offset;
+    }
+    record();
+  }, [viewport, start, length, record]);
+  return record;
 }
 
 const AGENT_NAMES = { claude: 'Claude', codex: 'Codex' } as const;
@@ -69,6 +112,8 @@ export default function ChatTabPanel({ panelId, client, connected = true, quiet 
   const [busy, setBusy] = useState(false);
   const [commandIndex, setCommandIndex] = useState(0);
   const messages = useMemo(() => snapshot.transcript?.messages ?? [], [snapshot.transcript?.messages]);
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const recordAnchor = useWindowAnchor(viewportRef, snapshot.transcript?.start, messages.length);
   const working = view?.status === 'working' || view?.status === 'blocked';
   const turns = useMemo(() => chatTurns(messages, { running: working }), [messages, working]);
   const placedWorkers = useMemo(() => placeWorkers(turns, workers ?? []), [turns, workers]);
@@ -142,19 +187,22 @@ export default function ChatTabPanel({ panelId, client, connected = true, quiet 
         onSignIn={() => void act(() => client.signIn(panelId))}
         onInstall={url => void window.electronAPI?.openExternal(url)} />}
       {snapshot.error && <div role="alert" className="chat-alert">{snapshot.error}</div>}
-      <ThreadPrimitive.Viewport aria-label="Conversation messages" role="region" className="chat-viewport" scrollToBottomOnRunStart={false}>
+      <ThreadPrimitive.Viewport ref={viewportRef} onScroll={recordAnchor} aria-label="Conversation messages" role="region" className="chat-viewport" scrollToBottomOnRunStart={false} autoScroll={!snapshot.hasNewer}>
         <div className="chat-column">
-          {(snapshot.transcript?.start ?? 0) > 0 && <button type="button" className="chat-button chat-button-outline self-center" disabled={snapshot.loadingEarlier} onClick={() => void viewer.loadEarlier()}>
+          {(snapshot.transcript?.start ?? 0) > 0 && <button type="button" className="chat-button chat-button-outline self-center" disabled={snapshot.loadingEarlier} onClick={() => { recordAnchor(); void viewer.loadEarlier(); }}>
             {snapshot.loadingEarlier ? 'Loading…' : `Earlier messages (${snapshot.transcript?.start})`}
           </button>}
           {!snapshot.transcript && !view?.problem && <p role="status" className="chat-notice">{view?.status === 'starting' || !view ? `Starting ${agentName}…` : 'Loading conversation…'}</p>}
           {turns.map(turn => <ChatTurnView key={turn.id} turn={turn} quiet={quiet} permissions={view?.permissions ?? []} actions={actions} workers={placedWorkers.byTurn.get(turn.id)} />)}
           {placedWorkers.trailing.map(worker => <WorkerLine key={worker.paneId} worker={worker} onOpen={actions.onOpenWorker} />)}
-          {view?.notice && <p role="status" className="chat-notice">{view.notice}</p>}
+          {snapshot.hasNewer && <button type="button" className="chat-button chat-button-outline self-center" disabled={snapshot.loadingNewer} onClick={() => { recordAnchor(); void viewer.loadNewer(); }}>
+            {snapshot.loadingNewer ? 'Loading…' : 'Newer messages'}
+          </button>}
+          {!snapshot.hasNewer && view?.notice && <p role="status" className="chat-notice">{view.notice}</p>}
         </div>
       </ThreadPrimitive.Viewport>
       <div className="chat-composer-footer">
-        <ScrollToLatest />
+        <ScrollToLatest viewer={viewer} hasNewer={snapshot.hasNewer} />
         {snapshot.pendingDelivery && <div className="chat-dock" role="status">
           <span>Delivery is unconfirmed.</span>
           <button type="button" className="chat-button chat-button-outline" disabled={!connected} onClick={() => void deliver(snapshot.pendingDelivery!, false)}>Check delivery</button>

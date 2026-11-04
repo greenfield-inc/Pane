@@ -133,7 +133,7 @@ export const ChatTurnView = memo(function ChatTurnView({ turn, quiet, permission
   const hasSteps = turn.items.some(item => item.type === 'steps');
   const foldSteps = quiet && hasSteps;
   let foldShown = false;
-  return <div className="chat-turn" data-running={turn.running}>
+  return <div className="chat-turn" data-turn-id={turn.id} data-running={turn.running}>
     <UserMessage turn={turn} />
     {turn.items.map(item => {
       if (item.type !== 'steps' || !foldSteps) return <Item key={item.id} item={item} waiting={waiting} actions={actions} />;
