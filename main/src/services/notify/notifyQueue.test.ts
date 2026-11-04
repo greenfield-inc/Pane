@@ -39,6 +39,20 @@ describe('NotifyQueue', () => {
   });
   afterEach(() => vi.useRealTimers());
 
+  it('withdraws the cards of paused tabs, leaving nothing in Notify and telling their agents', async () => {
+    const { queue } = makeQueue();
+    const paused = ask(queue, sessionStore, claude);
+    ask(queue, migration, codex);
+    expect(queue.hasOpenFor(['panel-1'])).toBe(true);
+
+    queue.withdrawForPanels(['panel-1']);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(paused.result).toMatchObject({ unavailable: 'Its tab was paused in Pane.' });
+    expect(queue.hasOpenFor(['panel-1'])).toBe(false);
+    expect(queue.snapshot().items.map(item => item.source.panelId)).toEqual(['panel-2']);
+  });
+
   it('shows one question at a time, oldest first, and the next one after an answer', async () => {
     const { queue } = makeQueue();
     const first = ask(queue, sessionStore, claude);

@@ -279,6 +279,24 @@ describe('WorkspaceJournal', () => {
     expect(journal.readySince('panel-1')).toBeUndefined();
   });
 
+  it('records pause and resume as their own events, only for consumers that ask for them', () => {
+    const journal = new WorkspaceJournal({
+      resolvePanel: panelId => ({ panelId, paneId: 'pane-1', isCliPanel: true }),
+    });
+    journal.send('session:created', { id: 'pane-1', name: 'Monitor' });
+    journal.send('panel:event', { type: 'terminal:exit', source: { panelId: 'panel-1', sessionId: 'pane-1' }, data: { exitCode: 0 } });
+    journal.send('panel:event', { type: 'terminal:paused', source: { panelId: 'panel-1', sessionId: 'pane-1' }, data: { by: 'manual', at: '2026-11-04T12:00:00.000Z' } });
+    journal.send('panel:event', { type: 'terminal:resumed', source: { panelId: 'panel-1', sessionId: 'pane-1' }, data: { at: '2026-11-04T13:00:00.000Z' } });
+
+    const asked = journal.readAfter(0, { kinds: ['panel.exited', 'panel.paused', 'panel.unpaused'] }).entries;
+    expect(asked.map(entry => [entry.kind, entry.panelId, entry.reason])).toEqual([
+      ['panel.exited', 'panel-1', 'terminal:exit'],
+      ['panel.paused', 'panel-1', 'manual'],
+      ['panel.unpaused', 'panel-1', undefined],
+    ]);
+    expect(journal.readAfter(0).entries.map(entry => entry.kind)).toEqual(['pane.created', 'panel.exited']);
+  });
+
   it('forgets panel state when a terminal exits', () => {
     const journal = new WorkspaceJournal({
       resolvePanel: panelId => ({ panelId, paneId: 'pane-1', isCliPanel: true }),
