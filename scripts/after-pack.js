@@ -20,31 +20,42 @@ function verifyLinuxSqliteArchitecture(appOutDir, arch) {
   console.log(`[native-architecture] Packaged SQLite matches Linux ${name}`);
 }
 
-// AVX (VEX-encoded `v*` instructions) and BMI1/BMI2 need CPUs newer than the
-// generic x86-64 baseline. SQLite3 Multiple Ciphers compiles its AEGIS cipher
-// for several CPU levels and picks one at runtime, so only `aegis` functions
-// may use them (issue #1226).
-const NEWER_CPU_INSTRUCTION = /^(v[a-z]|(andn|bextr|blsi|blsmsk|blsr|bzhi|mulx|pdep|pext|rorx|sarx|shlx|shrx)[lq]?$)/;
+// AVX (VEX-encoded `v*` instructions), BMI1/BMI2, MOVBE, LZCNT and POPCNT need
+// CPUs newer than the generic x86-64 baseline. SQLite3 Multiple Ciphers compiles
+// its AEGIS cipher for several CPU levels and picks one at runtime, so only
+// `aegis` functions may use them (issue #1226).
+const NEWER_CPU_INSTRUCTION = /^(v[a-z]|(andn|bextr|blsi|blsmsk|blsr|bzhi|mulx|pdep|pext|rorx|sarx|shlx|shrx)[lq]?$|(movbe|lzcnt|popcnt)[wlq]?$)/;
 const RUNTIME_DISPATCHED_FUNCTION = /aegis/i;
 
-function functionsNeedingNewerX64Cpu(file) {
-  const disassembly = execFileSync('objdump', ['-d', '--no-show-raw-insn', file],
-    { encoding: 'utf8', maxBuffer: 1024 * 1024 * 1024 });
+function disassemble(file) {
+  try {
+    return execFileSync('objdump', ['-d', '--no-show-raw-insn', file],
+      { encoding: 'utf8', maxBuffer: 1024 * 1024 * 1024 });
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+    throw new Error('The Linux x64 package check needs objdump to scan native modules, '
+      + 'and objdump is not on PATH. Install binutils and run the build again.');
+  }
+}
+
+function scanForNewerX64Instructions(file) {
   const offenders = new Set();
+  let instructions = 0;
   let currentFunction = '';
-  for (const line of disassembly.split('\n')) {
+  for (const line of disassemble(file).split('\n')) {
     const header = /^[0-9a-f]+ <(.+)>:$/.exec(line);
     if (header) {
       currentFunction = header[1];
       continue;
     }
-    const mnemonic = line.split('\t')[1]?.trim().split(/\s/)[0];
+    const mnemonic = /^\s*[0-9a-f]+:\s+(\S+)/.exec(line)?.[1];
+    if (mnemonic) instructions += 1;
     if (mnemonic && NEWER_CPU_INSTRUCTION.test(mnemonic)
       && !RUNTIME_DISPATCHED_FUNCTION.test(currentFunction)) {
       offenders.add(currentFunction);
     }
   }
-  return [...offenders];
+  return { offenders: [...offenders], instructions };
 }
 
 function nativeModulesBuiltFromSource(directory) {
@@ -56,13 +67,19 @@ function nativeModulesBuiltFromSource(directory) {
 function verifyLinuxX64Baseline(appOutDir) {
   const modules = path.join(appOutDir, 'resources', 'app.asar.unpacked', 'node_modules');
   for (const file of nativeModulesBuiltFromSource(modules)) {
-    const offenders = functionsNeedingNewerX64Cpu(file);
-    if (offenders.length > 0) {
-      throw new Error(`${file} uses AVX or BMI instructions outside runtime CPU dispatch, `
-        + `so it crashes with SIGILL on older x86-64 CPUs. Rebuild it with `
-        + `CFLAGS/CXXFLAGS='-march=x86-64 -mtune=generic'. Functions: ${offenders.slice(0, 10).join(', ')}`);
+    const { offenders, instructions } = scanForNewerX64Instructions(file);
+    if (instructions === 0) {
+      throw new Error(`objdump printed no instructions for ${file}, so the x86-64 baseline `
+        + 'scan cannot check it. Check that the objdump on PATH can disassemble x86-64.');
     }
-    console.log(`[native-baseline] ${path.relative(modules, file)} targets generic x86-64`);
+    if (offenders.length > 0) {
+      throw new Error(`${file} uses instructions newer than the x86-64 baseline outside runtime `
+        + 'CPU dispatch, so it crashes with SIGILL on older x86-64 CPUs. Export '
+        + "CFLAGS/CXXFLAGS='-march=x86-64 -mtune=generic', then run pnpm install (its postinstall "
+        + `rebuilds native modules) and the build again. Functions: ${offenders.slice(0, 10).join(', ')}`);
+    }
+    console.log(`[native-baseline] ${path.relative(modules, file)}: no AVX, BMI, MOVBE, LZCNT or `
+      + `POPCNT outside AEGIS (${instructions} instructions scanned)`);
   }
 }
 

@@ -289,7 +289,10 @@ Releases, CI and deploys are covered in [RUNBOOK.md](RUNBOOK.md).
 Test UI and packaging changes in a packaged build for your platform
 (`pnpm build:mac`, `pnpm build:linux:x64` on x64 Linux,
 `pnpm build:linux:arm64` on ARM64 Linux, or `pnpm build:win:x64`; output in
-`dist-electron/`). The packaged app can show problems that development mode
+`dist-electron/`). The x64 Linux build scans native modules with `objdump`
+(from binutils) and fails if one needs a CPU newer than generic x86-64; if your
+compiler defaults higher, export `CFLAGS` and `CXXFLAGS` as
+`-march=x86-64 -mtune=generic` before `pnpm install`. The packaged app can show problems that development mode
 hides. Check that you can create a pane, run an agent, use git operations and
 run scripts, and that settings persist after a restart.
 
