@@ -30,7 +30,7 @@ describe('agent chat host commands', () => {
 });
 
 // These fixtures use a POSIX fake CLI. Actual Windows processes have separate runtime QA.
-it.skipIf(process.platform === 'win32')('keeps a native conversation usable when automatic adapter setup fails and persists the checkpoint identity', async () => {
+it.skipIf(process.platform === 'win32')('keeps a native conversation usable when the installed CLI is too old for chat and persists the checkpoint identity', async () => {
   const { mkdtempSync, writeFileSync, rmSync } = await import('fs');
   const { tmpdir } = await import('os');
   const { join } = await import('path');
@@ -60,10 +60,8 @@ it.skipIf(process.platform === 'win32')('keeps a native conversation usable when
     recordNativeHook(saved.launch.journalFile, { session_id: nativeId, hook_event_name: 'SessionStart', cwd: directory, source: 'startup' });
     recordNativeHook(saved.launch.journalFile, { session_id: nativeId, hook_event_name: 'Stop', permission_mode: 'default', background_tasks: [], session_crons: [] });
     await expect.poll(() => events.mock.calls.some(([channel, payload]) => channel === 'agent-chat:state' && decodeOptionalBoundary(payload, boundary.object({ running: boundary.boolean }))?.running === false)).toBe(true);
-    expect(manager.view(panel.id)).toMatchObject({ available: true, setupRequired: true });
-    vi.stubEnv('npm_config_registry', 'http://127.0.0.1:1');
-    vi.stubEnv('npm_config_fetch_retries', '0');
-    await expect(manager.switchTo(panel.id, 'chat', 1)).rejects.toMatchObject({ code: 'CHAT_ADAPTER_INSTALL_FAILED' });
+    expect(manager.view(panel.id)).toMatchObject({ available: true, setupRequired: false });
+    await expect(manager.switchTo(panel.id, 'chat', 1)).rejects.toMatchObject({ code: 'CHAT_AGENT_OUTDATED', next: expect.stringContaining('npm install -g @anthropic-ai/claude-code@latest') });
     expect(manager.view(panel.id).conversation?.active).toBe('terminal');
     expect(() => manager.guardNativeInput(panel.id, 'New prompt\r')).not.toThrow();
     events.mockClear();
@@ -78,11 +76,8 @@ it.skipIf(process.platform === 'win32')('switches one exact conversation through
   const { spawn } = await import('child_process');
   const { once } = await import('events');
   const { recordNativeHook } = await import('./nativeHookJournal');
-  const { CLAUDE_ADAPTER_VERSION } = await import('./adapterSetup');
-  const { getAppDirectory } = await import('../../utils/appDirectory');
-  const adapter = join(getAppDirectory(), 'agent-adapters', `claude-${CLAUDE_ADAPTER_VERSION}`, 'node_modules', '@agentclientprotocol', 'claude-agent-acp');
+  const adapter = mkdtempSync(join(tmpdir(), 'pane-scripted-adapter-'));
   mkdirSync(join(adapter, 'dist'), { recursive: true });
-  writeFileSync(join(adapter, 'package.json'), JSON.stringify({ version: CLAUDE_ADAPTER_VERSION }));
   writeFileSync(join(adapter, 'dist', 'index.js'), `let buffer='';
 const send = value => process.stdout.write(JSON.stringify(value)+'\\n');
 let mode='default', effort='medium';
@@ -101,14 +96,16 @@ process.stdin.on('data', chunk => { buffer += chunk; let end; while ((end=buffer
 }}); process.stdin.on('end',()=>process.exit(0));`);
   const directory = mkdtempSync(join(tmpdir(), 'pane-native-handoff-'));
   const executable = join(directory, 'claude');
-  writeFileSync(executable, '#!/bin/sh\necho "2.1.309 (Claude Code)"\n', { mode: 0o700 });
+  // A project-selected wrapper: it answers --version only from its project folder.
+  writeFileSync(join(directory, '.claude-version'), '2.1.316 (Claude Code)\n');
+  writeFileSync(executable, '#!/bin/sh\ncat .claude-version\n', { mode: 0o700 });
   let child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
   let exited = once(child, 'exit');
   await once(child, 'spawn');
   const id = randomUUID(), nativeId = randomUUID();
   databaseService.createSession({ id, name: id, initial_prompt: '', worktree_name: id, worktree_path: directory, project_id: null, tool_type: 'none' });
   const panel = await panelManager.createPanel({ sessionId: id, type: 'terminal', initialState: { agentType: 'claude', initialCommand: executable, agentSessionId: nativeId } });
-  const manager = new AgentChatManager({ enabled: () => true });
+  const manager = new AgentChatManager({ enabled: () => true, adapterEntry: () => join(adapter, 'dist', 'index.js') });
   // SAFETY: This fixture creates a terminal panel and reads its typed custom state.
   const state = () => (panelManager.getPanel(panel.id)!.state.customState as TerminalPanelState).agentChat!;
   const hook = (name: string, extra = {}) => recordNativeHook(state().launch.journalFile, { session_id: state().conversation.nativeSessionId, hook_event_name: name, cwd: directory, ...extra });
@@ -272,6 +269,28 @@ it.skipIf(process.platform === 'win32')('keeps a new Codex tab in its native Ter
     expect((panelManager.getPanel(panel.id)!.state.customState as TerminalPanelState).agentChat).toBeUndefined();
     expect(manager.view(panel.id).available).toBe(false);
   } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+it.skipIf(process.platform === 'win32')('tells a new Chat tab how to update a claude too old for chat', async () => {
+  const { mkdtempSync, writeFileSync, rmSync } = await import('fs');
+  const { tmpdir } = await import('os');
+  const { join } = await import('path');
+  const { getRuntimeConfigManager } = await import('../../core/runtime');
+  await getRuntimeConfigManager().updateConfig({ defaultAgentInterface: 'chat' });
+  const directory = mkdtempSync(join(tmpdir(), 'pane-outdated-claude-'));
+  const executable = join(directory, 'claude');
+  writeFileSync(executable, '#!/bin/sh\necho "2.1.200 (Claude Code)"\n', { mode: 0o700 });
+  const id = randomUUID();
+  databaseService.createSession({ id, name: id, initial_prompt: '', worktree_name: id, worktree_path: directory, project_id: null, tool_type: 'none' });
+  const panel = await panelManager.createPanel({ sessionId: id, type: 'terminal', initialState: { agentType: 'claude', initialCommand: executable } });
+  const manager = new AgentChatManager({ enabled: () => true });
+  try {
+    expect(await manager.prepareFreshChat(panel, directory, process.env, 'bash', false)).toBe(true);
+    const recovery = manager.view(panel.id).conversation?.recovery ?? '';
+    expect(recovery).toContain('2.1.200');
+    expect(recovery).toContain('npm install -g @anthropic-ai/claude-code@latest');
+    expect(recovery).not.toMatch(/network/i);
+  } finally { manager.detachObservers(); rmSync(directory, { recursive: true, force: true }); }
 });
 
 it.skipIf(process.platform === 'win32')('shares one Codex owner between native and Chat and remembers the last selected interface', async () => {
