@@ -3700,6 +3700,8 @@ async function checkRepoSettingsParity() {
     ['repos', 'get'],
     ['repos', 'update', '--repo', 'Cura', '--build-script', 'pnpm install', '--run-script', 'pnpm dev\npnpm worker', '--clear', 'archive-script,system-prompt', '--yes', '--json'],
     ['repos', 'update', '--repo', '7', '--from-json', settingsFile, '--run-script', 'from flag', '--name', '  Cura Monorepo ', '--dry-run'],
+    // A value may start with "-" (a Markdown bullet), and an empty value clears.
+    ['repos', 'update', '--repo', 'Cura', '--system-prompt', '- Use pnpm', '--run-script', '', '--dry-run', '--json'],
   ];
   const failures = [
     [['repos', 'update', '--repo', 'Cura', '--run-script', 'pnpm dev'], /needs confirmation/],
@@ -3747,6 +3749,10 @@ async function checkRepoSettingsParity() {
     {
       channel: 'runpane:repos:update',
       request: { repo: '7', settings: { runScript: 'from flag', worktreeFolder: '../wt', systemPrompt: null, name: 'Cura Monorepo' }, dryRun: true },
+    },
+    {
+      channel: 'runpane:repos:update',
+      request: { repo: 'Cura', settings: { runScript: '', systemPrompt: '- Use pnpm' }, dryRun: true },
     },
   ]);
   failures.forEach(([argv, pattern], index) => assert.match(errors[index], pattern, argv.join(' ')));

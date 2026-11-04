@@ -1267,10 +1267,15 @@ function splitInlineValues(rawArgs: string[]): SplitArgs {
   return { args, literalValues };
 }
 
+const REPO_SETTING_FLAGS = ['--build-script', '--run-script', '--archive-script', '--worktree-folder', '--open-ide-command', '--system-prompt'];
+
 function readValue(args: string[], index: number, flag: string, literalValues: Set<number>): string {
   const value = args[index];
   if (literalValues.has(index)) return value;
-  const freeText = ['--text', '--content', '--prompt', '--initial-input', '--title', '--name', '--name-contains'].includes(flag);
+  // repos update settings take any text, and an empty value clears the setting.
+  const clearable = REPO_SETTING_FLAGS.includes(flag);
+  if (clearable && value === '') return value;
+  const freeText = clearable || ['--text', '--content', '--prompt', '--initial-input', '--title', '--name', '--name-contains'].includes(flag);
   if (!value || (!freeText && value.startsWith('-') && value !== '-')) {
     throw new Error(`${flag} requires a value.`);
   }

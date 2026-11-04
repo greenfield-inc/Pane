@@ -1189,10 +1189,17 @@ def append_remote_arg(parsed: ParsedArgs, flag: str, value: Optional[str] = None
     raise ValueError(f'{flag} is only valid with "runpane install daemon".')
 
 
+REPO_SETTING_FLAGS = {"--build-script", "--run-script", "--archive-script", "--worktree-folder", "--open-ide-command", "--system-prompt"}
+
+
 def read_value(args: List[str], index: int, flag: str, literal_values: Set[int]) -> str:
     if index in literal_values:
         return args[index]
-    free_text = flag in {"--text", "--prompt", "--initial-input", "--title", "--name", "--name-contains"}
+    # repos update settings take any text, and an empty value clears the setting.
+    clearable = flag in REPO_SETTING_FLAGS
+    if clearable and index < len(args) and args[index] == "":
+        return ""
+    free_text = clearable or flag in {"--text", "--prompt", "--initial-input", "--title", "--name", "--name-contains"}
     if index >= len(args) or not args[index] or (not free_text and args[index].startswith("-") and args[index] != "-"):
         raise ValueError(f"{flag} requires a value.")
     return args[index]
