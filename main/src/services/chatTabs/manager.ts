@@ -24,7 +24,7 @@ export interface ResolvedLaunch {
 }
 
 /** Events a chat tab sends to every viewer. */
-export type ChatTabChannel = 'chat-tab:event' | 'chat-tab:state' | 'panel:agentStatus';
+type ChatTabChannel = 'chat-tab:event' | 'chat-tab:state' | 'panel:agentStatus';
 
 export interface ChatTabLauncher {
   /** Throws a PaneError; `CHAT_NOT_SIGNED_IN`, `CHAT_AGENT_NOT_INSTALLED` and `CHAT_UNSUPPORTED_HOST` become their stopped states. */

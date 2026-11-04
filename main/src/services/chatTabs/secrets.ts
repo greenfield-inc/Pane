@@ -19,7 +19,7 @@ const schema = boundary.object({ claude: boundary.optional(boundary.string), cod
  * through Electron's safeStorage), never synced to other hosts, never sent to
  * viewers, and given to the agent process only as env.
  */
-export class ChatTabKeyStore implements ChatTabSecrets {
+class ChatTabKeyStore implements ChatTabSecrets {
   constructor(private readonly file = () => path.join(getAppDirectory(), FILE)) {}
 
   apiKey(agent: ChatAgent): string | undefined {

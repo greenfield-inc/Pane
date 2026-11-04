@@ -46,9 +46,9 @@ const agentFarmProfiles = new AgentFarmProfiles({
   },
 });
 
-export const CHAT_TAB_CHANNELS = ['create', 'get', 'history', 'send', 'receipt', 'unqueue', 'configure', 'cancel', 'permission', 'answer', 'restart', 'sign-in', 'keys', 'set-key'] as const;
+const CHAT_TAB_CHANNELS = ['create', 'get', 'history', 'send', 'receipt', 'unqueue', 'configure', 'cancel', 'permission', 'answer', 'restart', 'sign-in', 'keys', 'set-key'] as const;
 
-export function chatTabsEnabled(): boolean { return getRuntimeConfigManager().getConfig().chatTabsEnabled === true; }
+function chatTabsEnabled(): boolean { return getRuntimeConfigManager().getConfig().chatTabsEnabled === true; }
 
 const AGENT_TITLES = { claude: 'Claude', codex: 'Codex' } satisfies Record<ChatAgent, string>;
 

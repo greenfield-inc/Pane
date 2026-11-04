@@ -37,7 +37,7 @@ function useSessionWorkers(sessionId: string | undefined): ChatWorkerLine[] | un
 const ChatTabPanel = lazy(() => import('./ChatTabPanel'));
 
 /** A path the agent reported, relative to the tab's worktree when it is inside it. */
-export function worktreeRelative(file: string, cwd: string | undefined): string {
+function worktreeRelative(file: string, cwd: string | undefined): string {
   if (!cwd) return file;
   const root = cwd.replace(/[\\/]+$/, '');
   return file.startsWith(`${root}/`) || file.startsWith(`${root}\\`) ? file.slice(root.length + 1) : file;

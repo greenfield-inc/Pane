@@ -83,7 +83,7 @@ function Todo({ entries }: { entries: PlanEntry[] }) {
 const WORKER_COLORS = { running: 'accentText', waiting: 'warning', done: 'success', failed: 'danger', missing: 'danger', idle: 'textSecondary' } as const;
 
 /** A Session worker as one line: state, PR or what it does, and Open (round 3 · A). */
-export function WorkerRow({ worker, onOpen }: { worker: ChatWorkerLine; onOpen?: (paneId: string) => void }) {
+function WorkerRow({ worker, onOpen }: { worker: ChatWorkerLine; onOpen?: (paneId: string) => void }) {
   const theme = useTheme();
   const color = theme.colors[WORKER_COLORS[worker.state]];
   return <View testID={`chat-worker-${worker.paneId}`} style={[styles.worker, { borderColor: theme.chat.border }]}>

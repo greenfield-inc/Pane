@@ -20,7 +20,7 @@ export function chatTabNoTerminal(panel: ToolPanel, command: 'input' | 'submit-c
   return new PaneError('CHAT_TAB_NO_TERMINAL', `Panel ${panel.id} is a chat tab, which has no terminal, so \`panels ${command}\` sent nothing.`, `Send a prompt with \`runpane panels submit --panel ${panel.id} --text "<message>"\`.`);
 }
 
-export function messageText(message: AgentChatMessage): string {
+function messageText(message: AgentChatMessage): string {
   return message.parts.flatMap(part => {
     if (part.type === 'text') return [part.text];
     if (part.type === 'tool') return [`[${part.title}: ${part.status}]`];
@@ -49,7 +49,7 @@ function transcriptTail(manager: ChatTabManager, panelId: string, chars: number)
   return { text: text.slice(-chars), hasMore: length > chars || before > 0 };
 }
 
-export function chatTabState(view: ChatTabView): RunpanePanelStateSummary {
+function chatTabState(view: ChatTabView): RunpanePanelStateSummary {
   const running = view.status !== 'stopped';
   return {
     initialized: view.status !== 'starting', running, isCliPanel: true, isCliReady: view.status === 'idle', agentType: view.agent,
