@@ -2608,6 +2608,11 @@ export class TerminalPanelManager extends EventEmitter {
     return state === 'working' || state === 'blocked' ? 'active' : 'idle';
   }
 
+  /** A running tab's last terminal output or input, in memory; undefined when the tab is not running. */
+  getLastActivity(panelId: string): Date | undefined {
+    return this.terminals.get(panelId)?.lastActivity;
+  }
+
   getAgentStatus(panelId: string): AgentState | undefined {
     return this.agentStatusMonitor.getState(panelId);
   }

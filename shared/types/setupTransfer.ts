@@ -103,6 +103,9 @@ export interface SetupPreferenceConfig {
   keepAwakeWhileSessionsActive?: boolean;
   keepAwakeWhilePluggedIn?: boolean;
   keepAwakeOnBattery?: boolean;
+  resumePausedOnOpen?: boolean;
+  autoPauseEnabled?: boolean;
+  autoPauseAfterHours?: number;
   terminalPowerMode?: 'performance' | 'batterySaver';
   retention?: Partial<SessionRetention>;
   voiceTranscriptionMode?: VoiceTranscriptionMode;

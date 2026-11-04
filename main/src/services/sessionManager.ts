@@ -12,6 +12,7 @@ import type { Session, SessionUpdate, SessionOutput } from '../types/session';
 import type { DatabaseService } from '../database/database';
 import type { Session as DbSession, CreateSessionData, UpdateSessionData, ConversationMessage, PromptMarker, ExecutionDiff, CreateExecutionDiffData, Project } from '../database/models';
 import { TerminalSessionManager } from './terminalSessionManager';
+import { parseSessionTimestampMs } from './paneInactivity';
 import { panePausedMark, pausedMarkOf, type TerminalPanelState, type ToolPanelState, type ResumableSession } from '../../../shared/types/panels';
 import { formatForDisplay } from '../utils/timestampUtils';
 import { isCliAgentType, resolveAgentTypeFromCommand } from './agents/agentIdentity';
@@ -319,8 +320,8 @@ export class SessionManager extends EventEmitter {
         ? 'External worktree directory is missing'
         : dbSession.status_message,
       pid: dbSession.pid,
-      createdAt: new Date(dbSession.created_at),
-      lastActivity: new Date(dbSession.updated_at),
+      createdAt: new Date(parseSessionTimestampMs(dbSession.created_at)),
+      lastActivity: new Date(parseSessionTimestampMs(dbSession.updated_at)),
       output: [], // Will be loaded separately by frontend when needed
       jsonMessages: [], // Will be loaded separately by frontend when needed
       error: dbSession.exit_code && dbSession.exit_code !== 0 ? `Exit code: ${dbSession.exit_code}` : undefined,

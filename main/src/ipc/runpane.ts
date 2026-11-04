@@ -12,6 +12,7 @@ import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { browserFileContext } from '../services/browserFileContext';
 import { PaneError, paneErrorText, reasonOf } from '../../../shared/paneError';
+import { parseSessionTimestampMs } from '../services/paneInactivity';
 import { isOrchestrationInternalSessionId, resolveSessionRetention } from '../../../shared/types/orchestrationSession';
 import type { IpcMain } from 'electron';
 import type { AppServices } from './types';
@@ -4537,11 +4538,6 @@ function emptyPaneCostSlice() {
     cacheHitRate: 0,
     byModel: [],
   };
-}
-
-function parseSessionTimestampMs(value: string): number {
-  const sqliteTimestamp = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(value);
-  return Date.parse(sqliteTimestamp ? `${value.replace(' ', 'T')}Z` : value);
 }
 
 function isSessionArchived(value: boolean | number | null | undefined): boolean {
