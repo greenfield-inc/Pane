@@ -11,7 +11,8 @@ export type ChatAgent = 'claude' | 'codex';
 
 /** How a chat tab is launched. Saved without env: env is rebuilt at every start. */
 export type ChatTabLaunch =
-  | { kind: 'agent' }
+  /** `mode`: the session mode to select at every start, such as bypassPermissions for a Session orchestrator. */
+  | { kind: 'agent'; mode?: string }
   | { kind: 'profile'; profile: string; args?: Record<string, string> };
 
 /** Last known runtime state. `stopped` always carries a `problem` or an explicit stop. */

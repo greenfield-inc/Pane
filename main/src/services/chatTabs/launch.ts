@@ -1,6 +1,7 @@
 import path from 'path';
 import type { ToolPanel } from '../../../../shared/types/panels';
-import type { ChatAgent, ChatPanelState } from '../../../../shared/types/chatTab';
+import type { ChatAgent, ChatPanelState, ChatTabLaunch } from '../../../../shared/types/chatTab';
+import { tokenizeShellCommand } from '../agents/agentIdentity';
 import { PaneError } from '../../../../shared/paneError';
 import { getAppDirectory } from '../../utils/appDirectory';
 import { findExecutableInPath, getShellPath } from '../../utils/shellPath';
@@ -83,6 +84,38 @@ export class AgentChatLauncher implements ChatTabLauncher {
     await installAdapter(state.agent);
     const entry = adapterEntry(state.agent);
     if (!entry) throw new PaneError('CHAT_ADAPTER_INSTALL_FAILED', 'The chat adapter was not usable after setup.', 'Press Restart to set it up again.');
-    return { command: { executable: process.execPath, args: [entry], cwd: state.cwd, env: { ...env, ELECTRON_RUN_AS_NODE: '1' } } };
+    const launch: ResolvedLaunch = { command: { executable: process.execPath, args: [entry], cwd: state.cwd, env: { ...env, ELECTRON_RUN_AS_NODE: '1' } } };
+    if (state.launch.mode) launch.mode = state.launch.mode;
+    return launch;
   }
+}
+
+/** The ACP session mode that matches an agent's "skip approvals" flag. */
+const BYPASS_MODES = { claude: 'bypassPermissions', codex: 'agent-full-access' } satisfies Record<ChatAgent, string>;
+
+/**
+ * A terminal launch command a chat tab can run instead: the plain agent (with its
+ * skip-approvals flag as the session mode) or `agent-farm run <profile> [--arg k=v]`.
+ * Anything else (wrappers, other flags) keeps its terminal, where it runs unchanged.
+ */
+export function chatLaunchFromCommand(command: string | undefined, agent: ChatAgent): ChatTabLaunch | undefined {
+  const tokens = tokenizeShellCommand(command?.trim() || agent, process.platform);
+  if (!tokens?.length) return undefined;
+  if (tokens[0] === agent) {
+    const rest = tokens.slice(1);
+    const bypass = agent === 'claude' ? '--dangerously-skip-permissions' : '--yolo';
+    if (rest.some(token => token !== bypass)) return undefined;
+    return rest.length ? { kind: 'agent', mode: BYPASS_MODES[agent] } : { kind: 'agent' };
+  }
+  if (tokens[0] === 'agent-farm' && tokens[1] === 'run' && tokens[2] && !tokens[2].startsWith('-')) {
+    const args: Record<string, string> = {};
+    for (let index = 3; index < tokens.length; index += 2) {
+      const value = tokens[index + 1];
+      const separator = value?.indexOf('=') ?? -1;
+      if (tokens[index] !== '--arg' || !value || separator <= 0) return undefined;
+      args[value.slice(0, separator)] = value.slice(separator + 1);
+    }
+    return Object.keys(args).length ? { kind: 'profile', profile: tokens[2], args } : { kind: 'profile', profile: tokens[2] };
+  }
+  return undefined;
 }

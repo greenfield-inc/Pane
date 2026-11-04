@@ -11,6 +11,16 @@ import { randomUUID } from 'crypto';
 import { withLock } from '../utils/mutex';
 import { getAppDirectory } from '../utils/appDirectory';
 import { panelManager } from './panelManager';
+import { getChatTabManager } from './chatTabs';
+import { chatLaunchFromCommand } from './chatTabs/launch';
+import type { ChatPanelState, ChatTabLaunch } from '../../../shared/types/chatTab';
+
+/** What a Session needs from the host's chat tabs. */
+export interface SessionChatTabs {
+  ensure(panelId: string): Promise<void>;
+  isRunning(panelId: string): boolean;
+  agentState(panelId: string): AgentState;
+}
 import { terminalPanelManager } from './terminalPanelManager';
 import { databaseService } from './database';
 import type { ConfigManager } from './configManager';
@@ -177,7 +187,7 @@ export class OrchestrationSessionManager extends EventEmitter {
         agent: record.agent,
         cwd: sessionRuntimePath(sessionWorkspacePath(record.id), record),
         guidePath: sessionRuntimePath(await this.ensureGuidePath(), record),
-        started: terminalPanelManager.isTerminalInitialized(panel.id),
+        started: this.agentStarted(panel.id),
       };
     });
   }
@@ -755,7 +765,7 @@ export class OrchestrationSessionManager extends EventEmitter {
         this.buildTerminalState(record);
         await this.reconcilePersistedSessionOwner(record);
         await this.finishPromotion(record);
-        if (!Object.values(record.panelIds).some(id => terminalPanelManager.isTerminalInitialized(id))) {
+        if (!Object.values(record.panelIds).some(id => this.agentStarted(id))) {
           prepareSessionWorkspace(record.id, record.profile, record);
         }
         for (const agent of PANE_CHAT_AGENTS) {
@@ -917,7 +927,7 @@ export class OrchestrationSessionManager extends EventEmitter {
   private createInternalSession(record: OrchestrationSessionRecord): void {
     const existing = this.sessionManager.getSession(record.internalSessionId);
     if (existing) {
-      const running = Object.values(record.panelIds).some(id => terminalPanelManager.isTerminalInitialized(id));
+      const running = Object.values(record.panelIds).some(id => this.agentStarted(id));
       const workspace = running
         ? sessionWorkspacePath(record.id)
         : prepareSessionWorkspace(record.id, record.profile, record);
@@ -970,15 +980,31 @@ export class OrchestrationSessionManager extends EventEmitter {
   }
 
   private async ensurePanelForAgent(record: OrchestrationSessionRecord): Promise<ToolPanel> {
-    if (!Object.values(record.panelIds).some(id => terminalPanelManager.isTerminalInitialized(id))) {
+    if (!Object.values(record.panelIds).some(id => this.agentStarted(id))) {
       prepareSessionWorkspace(record.id, record.profile, record);
     }
     await this.finishPromotion(record);
     const panelId = record.panelIds[record.agent];
     const existing = panelManager.getPanel(panelId);
+    // A chat-tab orchestrator keeps its conversation in its own state; there is no terminal launch to refresh.
+    if (existing?.type === 'chat') return existing;
     if (existing) {
       await this.refreshPanelLaunchState(existing, record);
       return panelManager.getPanel(panelId) ?? existing;
+    }
+    const chatLaunch = this.chatLaunch(record);
+    if (chatLaunch && (record.agent === 'claude' || record.agent === 'codex')) {
+      const workspace = sessionRuntimePath(sessionWorkspacePath(record.id), record);
+      const state: ChatPanelState = { agent: record.agent, launch: chatLaunch, cwd: workspace, status: 'starting', orchestrationSessionId: record.id, sessionFolder: workspace };
+      const opening = this.firstPrompt(record);
+      if (opening) state.initialInput = opening;
+      const panel = await panelManager.createPanel({
+        id: panelId, sessionId: record.internalSessionId, type: 'chat',
+        title: `${record.name} · ${RUNPANE_CONTRACT.agentTemplates[record.agent].title}`,
+        initialState: { customState: state }, metadata: { permanent: true },
+      });
+      void this.chatTabs().ensure(panel.id).catch(error => console.warn(`[Sessions] ${record.name}'s chat did not start: ${error instanceof Error ? error.message : String(error)}`));
+      return panel;
     }
     return panelManager.createPanel({
       id: panelId,
@@ -988,6 +1014,30 @@ export class OrchestrationSessionManager extends EventEmitter {
       initialState: this.buildTerminalState(record),
       metadata: { permanent: true },
     });
+  }
+
+  /**
+   * D-16: with chat tabs on, a new Claude or Codex Session runs its orchestrator in a chat
+   * tab. Sessions that resume or promote a terminal conversation, run in WSL, use a custom
+   * resume, or launch a wrapper keep their terminal.
+   */
+  private chatLaunch(record: OrchestrationSessionRecord): ChatTabLaunch | undefined {
+    if (this.configManager.getConfig().chatTabsEnabled !== true) return undefined;
+    if (record.agent !== 'claude' && record.agent !== 'codex') return undefined;
+    if (record.runtime === 'wsl' || record.resume || record.promotedFrom || record.customResume) return undefined;
+    return chatLaunchFromCommand(record.launchCommand?.trim() || RUNPANE_CONTRACT.agentTemplates[record.agent].command, record.agent);
+  }
+
+  private chatTabPort?: SessionChatTabs;
+
+  /** Chat tabs the Session drives; tests pass their own. */
+  attachChatTabs(port: SessionChatTabs): void { this.chatTabPort = port; }
+
+  private chatTabs(): SessionChatTabs { return this.chatTabPort ?? getChatTabManager(); }
+
+  /** Whether the Session's agent runs: its terminal process, or its chat tab's adapter. */
+  private agentStarted(panelId: string): boolean {
+    return terminalPanelManager.isTerminalInitialized(panelId) || this.chatTabs().isRunning(panelId);
   }
 
   private async refreshPanelLaunchState(panel: ToolPanel, record: OrchestrationSessionRecord): Promise<void> {
@@ -1136,7 +1186,7 @@ export class OrchestrationSessionManager extends EventEmitter {
       agent: record.agent,
       cwd: sessionRuntimePath(sessionWorkspacePath(record.id), record),
       guidePath: sessionRuntimePath(await this.ensureGuidePath(), record),
-      started: terminalPanelManager.isTerminalInitialized(panel.id),
+      started: this.agentStarted(panel.id),
     };
   }
 
@@ -1158,17 +1208,19 @@ export class OrchestrationSessionManager extends EventEmitter {
     const panels: OrchestrationPanelOverview[] = allPanels.map(panel => {
       const customState = decodeBoundary(panel.state.customState ?? {}, boundary.object({
         agentType: boundary.optional(boundary.enumeration(...CLI_AGENT_TYPES)),
+        agent: boundary.optional(boundary.enumeration('claude', 'codex')),
         isInitialized: boundary.optional(boundary.boolean),
       }));
       const snapshot = panel.type === 'terminal' ? terminalPanelManager.getTerminalSnapshot(panel.id) : null;
-      const initialized = panel.type === 'terminal' && terminalPanelManager.isTerminalInitialized(panel.id);
-      const panelAgent = snapshot?.agentType ?? customState.agentType;
+      const chat = panel.type === 'chat';
+      const initialized = chat ? this.chatTabs().isRunning(panel.id) : panel.type === 'terminal' && terminalPanelManager.isTerminalInitialized(panel.id);
+      const panelAgent = snapshot?.agentType ?? customState.agentType ?? (chat ? customState.agent : undefined);
       const overview: OrchestrationPanelOverview = {
         panelId: panel.id,
         title: panel.title,
         type: panel.type,
         agentType: isPaneChatAgent(panelAgent) ? panelAgent : undefined,
-        state: terminalPanelManager.getAgentStatus(panel.id) ?? 'unknown',
+        state: chat ? this.chatTabs().agentState(panel.id) : terminalPanelManager.getAgentStatus(panel.id) ?? 'unknown',
         initialized: initialized || customState.isInitialized === true,
         lastActivityAt: snapshot?.lastActivityTime,
       };

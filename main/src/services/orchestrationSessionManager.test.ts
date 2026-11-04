@@ -36,6 +36,7 @@ const liveStates = new Map<string, AgentState>();
 
 const temporaryDirectories: string[] = [];
 
+
 function createSession(
   id: string,
   name: string,
@@ -281,6 +282,34 @@ afterEach(() => {
 });
 
 describe('OrchestrationSessionManager', () => {
+  it('opens a new Claude Session as a chat tab with its opening prompt when chat tabs are on (D-16)', async () => {
+    const fixture = createFixture();
+    const chatEnsure = vi.fn(async () => undefined);
+    fixture.manager.attachChatTabs({ ensure: chatEnsure, isRunning: () => false, agentState: () => 'unknown' });
+    Object.assign(fixture.configManager.getConfig(), { chatTabsEnabled: true });
+    try {
+      const created = await fixture.manager.create({ name: 'Chat orchestrator', agent: 'claude', openingPrompt: 'Pane sent this once, to start. Plan the work.' });
+      expect(created.panel.type).toBe('chat');
+      expect(created.panel.state.customState).toMatchObject({
+        agent: 'claude', launch: { kind: 'agent', mode: 'bypassPermissions' }, orchestrationSessionId: created.session.id,
+        initialInput: 'Pane sent this once, to start. Plan the work.',
+      });
+      expect(chatEnsure).toHaveBeenCalledWith(created.panel.id);
+      const cursor = await fixture.manager.create({ name: 'Cursor stays a terminal', agent: 'cursor' });
+      expect(cursor.panel.type).toBe('terminal');
+      const resumed = await fixture.manager.create({ name: 'Resumed stays a terminal', agent: 'claude', resume: '5d0c7a1e-2b9f-4e3a-8c61-0f7d2e4b9a35' });
+      expect(resumed.panel.type).toBe('terminal');
+    } finally {
+      Object.assign(fixture.configManager.getConfig(), { chatTabsEnabled: false });
+    }
+  });
+
+  it('keeps Session orchestrators in terminals while chat tabs are off', async () => {
+    const fixture = createFixture();
+    const created = await fixture.manager.create({ name: 'Terminal orchestrator', agent: 'claude' });
+    expect(created.panel.type).toBe('terminal');
+  });
+
   it('opens a Session view as a client-local read that asks no client to move', async () => {
     const fixture = createFixture();
     const created = await fixture.manager.create({ name: 'Quiet open' });

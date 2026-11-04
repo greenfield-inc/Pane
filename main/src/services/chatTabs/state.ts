@@ -12,7 +12,7 @@ const report = boundary.object({
 const schema: BoundarySchema<ChatPanelState> = boundary.object({
   agent: boundary.enumeration('claude', 'codex'),
   launch: boundary.union(
-    boundary.object({ kind: boundary.literal('agent') }),
+    boundary.object({ kind: boundary.literal('agent'), mode: boundary.optional(boundary.string) }),
     boundary.object({ kind: boundary.literal('profile'), profile: boundary.nonEmptyString, args: boundary.optional(boundary.record(boundary.string)) }),
   ),
   cwd: boundary.string,
