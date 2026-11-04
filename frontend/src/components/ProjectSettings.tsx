@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Save, Trash2, FolderIcon, GitBranch, Settings, Code2, BrainCircuit } from 'lucide-react';
 import { API } from '../utils/api';
 import type { Project } from '../types/project';
@@ -10,6 +10,39 @@ import { EnhancedInput } from './ui/EnhancedInput';
 import { FieldWithTooltip } from './ui/FieldWithTooltip';
 import { Card } from './ui/Card';
 
+/** The editable fields, as the form holds them: an unset setting is ''. */
+interface SettingsForm {
+  name: string;
+  path: string;
+  systemPrompt: string;
+  runScript: string;
+  buildScript: string;
+  archiveScript: string;
+  openIdeCommand: string;
+  worktreeFolder: string;
+}
+
+const EMPTY_FORM: SettingsForm = {
+  name: '', path: '', systemPrompt: '', runScript: '', buildScript: '', archiveScript: '', openIdeCommand: '', worktreeFolder: '',
+};
+
+function formFromProject(project: Project): SettingsForm {
+  return {
+    name: project.name,
+    path: project.path,
+    systemPrompt: project.system_prompt || '',
+    runScript: project.run_script || '',
+    buildScript: project.build_script || '',
+    archiveScript: project.archive_script || '',
+    openIdeCommand: project.open_ide_command || '',
+    worktreeFolder: project.worktree_folder || '',
+  };
+}
+
+const FORM_FIELDS: readonly (keyof SettingsForm)[] = [
+  'name', 'path', 'systemPrompt', 'runScript', 'buildScript', 'archiveScript', 'openIdeCommand', 'worktreeFolder',
+];
+
 interface ProjectSettingsProps {
   project: Project;
   isOpen: boolean;
@@ -19,54 +52,70 @@ interface ProjectSettingsProps {
 }
 
 export default function ProjectSettings({ project, isOpen, onClose, onUpdate, onDelete }: ProjectSettingsProps) {
-  const [name, setName] = useState('');
-  const [path, setPath] = useState('');
-  const [systemPrompt, setSystemPrompt] = useState('');
-  const [runScript, setRunScript] = useState('');
-  const [buildScript, setBuildScript] = useState('');
-  const [archiveScript, setArchiveScript] = useState('');
+  const [form, setForm] = useState<SettingsForm>(EMPTY_FORM);
+  // The saved values the form started from. A field still equal to it is untouched.
+  const savedForm = useRef<SettingsForm | null>(null);
   const [detectedConfig, setDetectedConfig] = useState<DetectedProjectConfig | null>(null);
   const [currentBranch, setCurrentBranch] = useState<string | null>(null);
-  const [openIdeCommand, setOpenIdeCommand] = useState('');
-  const [worktreeFolder, setWorktreeFolder] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
+  const { name, path, systemPrompt, runScript, buildScript, archiveScript, openIdeCommand, worktreeFolder } = form;
+  const setField = (field: keyof SettingsForm) => (value: string) => setForm(current => ({ ...current, [field]: value }));
+  const setName = setField('name');
+  const setPath = setField('path');
+  const setSystemPrompt = setField('systemPrompt');
+  const setRunScript = setField('runScript');
+  const setBuildScript = setField('buildScript');
+  const setArchiveScript = setField('archiveScript');
+  const setOpenIdeCommand = setField('openIdeCommand');
+  const setWorktreeFolder = setField('worktreeFolder');
+
   useEffect(() => {
-    if (isOpen && project) {
-      setName(project.name);
-      setPath(project.path);
-      setSystemPrompt(project.system_prompt || '');
-      setRunScript(project.run_script || '');
-      setBuildScript(project.build_script || '');
-      setArchiveScript(project.archive_script || '');
-      // Fetch the current branch when dialog opens
-      if (project.path) {
-        window.electronAPI.git.detectBranch(project.path).then((result) => {
-          if (result.success && result.data) {
-            setCurrentBranch(result.data);
-          }
-        });
-      }
-      setOpenIdeCommand(project.open_ide_command || '');
-      setWorktreeFolder(project.worktree_folder || '');
-      setError(null);
-      // Detect the project's config file (pane.json / conductor.json / .gitpod.yml /
-      // devcontainer.json) asynchronously when the modal opens.  The result populates
-      // `detectedConfig` which drives the "From <source>" badge shown beneath each
-      // script field when the user has not set an explicit override in Project Settings.
-      // Detection is best-effort: if the IPC call fails the badges simply don't appear,
-      // which is fine because the fallback still happens at runtime in the main process.
-      setDetectedConfig(null);
-      window.electronAPI.projects.detectConfig(project.id.toString()).then((result) => {
-        if (result.success && result.data) {
-          setDetectedConfig(result.data);
+    if (!isOpen || !project) {
+      savedForm.current = null;
+      return;
+    }
+    const previous = savedForm.current;
+    const saved = formFromProject(project);
+    savedForm.current = saved;
+    if (previous) {
+      // Settings saved elsewhere while the dialog is open (runpane, MCP, another window)
+      // update the fields the user hasn't edited and keep the ones they have.
+      setForm(current => {
+        const next = { ...current };
+        for (const field of FORM_FIELDS) {
+          if (current[field] === previous[field]) next[field] = saved[field];
         }
-      }).catch(() => {
-        // Config detection is optional — don't block the UI
+        return next;
+      });
+      return;
+    }
+    setForm(saved);
+    // Fetch the current branch when dialog opens
+    if (project.path) {
+      window.electronAPI.git.detectBranch(project.path).then((result) => {
+        if (result.success && result.data) {
+          setCurrentBranch(result.data);
+        }
       });
     }
+    setError(null);
+    // Detect the project's config file (pane.json / conductor.json / .gitpod.yml /
+    // devcontainer.json) asynchronously when the modal opens.  The result populates
+    // `detectedConfig` which drives the "From <source>" badge shown beneath each
+    // script field when the user has not set an explicit override in Project Settings.
+    // Detection is best-effort: if the IPC call fails the badges simply don't appear,
+    // which is fine because the fallback still happens at runtime in the main process.
+    setDetectedConfig(null);
+    window.electronAPI.projects.detectConfig(project.id.toString()).then((result) => {
+      if (result.success && result.data) {
+        setDetectedConfig(result.data);
+      }
+    }).catch(() => {
+      // Config detection is optional — don't block the UI
+    });
   }, [isOpen, project]);
 
   const handleSave = async () => {
@@ -74,21 +123,25 @@ export default function ProjectSettings({ project, isOpen, onClose, onUpdate, on
     setError(null);
 
     try {
-      const updates: Partial<Project> = {
-        name,
-        path,
-        system_prompt: systemPrompt || null,
-        run_script: runScript || null,
-        build_script: buildScript || null,
-        archive_script: archiveScript || null,
-        open_ide_command: openIdeCommand || null,
-        worktree_folder: worktreeFolder || null
-      };
-      
-      const response = await API.projects.update(project.id.toString(), updates);
+      // Save only the fields edited here, so a save never undoes a change made
+      // elsewhere while the dialog was open.
+      const saved = savedForm.current ?? EMPTY_FORM;
+      const edited = (field: keyof SettingsForm) => form[field] !== saved[field];
+      const updates: Partial<Project> = {};
+      if (edited('name')) updates.name = name;
+      if (edited('path')) updates.path = path;
+      if (edited('systemPrompt')) updates.system_prompt = systemPrompt || null;
+      if (edited('runScript')) updates.run_script = runScript || null;
+      if (edited('buildScript')) updates.build_script = buildScript || null;
+      if (edited('archiveScript')) updates.archive_script = archiveScript || null;
+      if (edited('openIdeCommand')) updates.open_ide_command = openIdeCommand || null;
+      if (edited('worktreeFolder')) updates.worktree_folder = worktreeFolder || null;
 
-      if (!response.success) {
-        throw new Error(response.error || 'Failed to update project');
+      if (Object.keys(updates).length > 0) {
+        const response = await API.projects.update(project.id.toString(), updates);
+        if (!response.success) {
+          throw new Error(response.error || 'Failed to update project');
+        }
       }
 
       onUpdate();
