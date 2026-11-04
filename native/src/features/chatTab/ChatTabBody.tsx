@@ -29,7 +29,7 @@ export function ChatTabBody({ panel, panels }: { panel: ToolPanel; panels: reado
   const workers = useSessionWorkers(sessionId);
   const diff = panels.find(candidate => candidate.type === 'diff');
   return <ChatTabScreen key={panel.id} panelId={panel.id} quiet={!!sessionId} workers={workers}
-    placeholder={sessionId ? 'Message the Session…' : undefined}
+    placeholder={sessionId ? 'Ask the Session anything' : undefined}
     onOpenWorker={paneId => router.push({ pathname: '/pane/[paneId]', params: { paneId } })}
     onViewDiff={diff ? () => router.setParams({ panelId: diff.id }) : undefined} />;
 }

@@ -29,7 +29,11 @@ export interface ChatTabComposerProps {
   working: boolean;
   canStop: boolean;
   canAttach: boolean;
-  configLabel?: string;
+  /** The model and its effort, shown as plain text that opens the settings sheet (D-118). */
+  model?: string;
+  effort?: string;
+  /** The permission mode's name when it never asks (Bypass): a small marker stays on the row. */
+  riskyMode?: string;
   canConfigure: boolean;
   onDraft: (text: string) => void;
   onAttach: () => void;
@@ -41,7 +45,7 @@ export interface ChatTabComposerProps {
  * The phone's composer on assistant-ui's primitives: the runtime holds the text and
  * the attached images and hands a send to the screen's onNew. Pane draws it.
  */
-export function ChatTabComposer({ agent, placeholder, disabled, pending, working, canStop, canAttach, configLabel, canConfigure, onDraft, onAttach, onSettings, onStop }: ChatTabComposerProps) {
+export function ChatTabComposer({ agent, placeholder, disabled, pending, working, canStop, canAttach, model, effort, riskyMode, canConfigure, onDraft, onAttach, onSettings, onStop }: ChatTabComposerProps) {
   const theme = useTheme();
   const empty = useAuiState(state => state.composer.isEmpty);
   const attached = useAuiState(state => state.composer.attachments.length > 0);
@@ -55,11 +59,18 @@ export function ChatTabComposer({ agent, placeholder, disabled, pending, working
     <View style={styles.actions}>
       {canAttach && <ComposerPrimitive.AddAttachment testID="chat-attach" accessibilityLabel="Attach image" disabled={disabled || pending} onPress={onAttach}
         style={[styles.target, { opacity: disabled || pending ? 0.5 : 1 }]}>
-        <Icon ios="plus" android="add" size={18} color={theme.chat.foreground} />
+        <Icon ios="plus" android="add" size={22} color={theme.chat.foreground} />
       </ComposerPrimitive.AddAttachment>}
-      <Pressable testID="chat-settings" accessibilityRole="button" accessibilityLabel="Agent settings" disabled={!canConfigure || disabled} onPress={onSettings} style={styles.config}>
-        <Text numberOfLines={1} variant="footnote" style={{ color: theme.chat.foreground }}>{configLabel || 'Agent settings'}</Text>
-        <Icon ios="chevron.down" android="expand_more" size={14} color={theme.chat.mutedForeground} />
+      {riskyMode && <View testID="chat-risky-mode" accessible accessibilityRole="image" accessibilityLabel={`Permissions: ${riskyMode}`} style={styles.marker}>
+        <Icon ios="shield.slash" android="remove_moderator" size={15} color={theme.colors.warning} />
+      </View>}
+      <View style={styles.spacer} />
+      <Pressable testID="chat-settings" accessibilityRole="button" accessibilityLabel={`Model and options: ${[model, effort].filter(Boolean).join(' · ') || 'Agent settings'}`}
+        disabled={!canConfigure || disabled} onPress={onSettings} style={({ pressed }) => [styles.model, { backgroundColor: pressed ? theme.chat.muted : 'transparent', opacity: !canConfigure || disabled ? 0.5 : 1 }]}>
+        {model || effort
+          ? <>{model && <Text numberOfLines={1} style={[styles.modelText, { color: theme.chat.foreground }]}>{model}</Text>}
+            {effort && <Text numberOfLines={1} style={[styles.modelText, { color: theme.chat.mutedForeground }]}>{effort}</Text>}</>
+          : <Text numberOfLines={1} style={[styles.modelText, { color: theme.chat.foreground }]}>Agent settings</Text>}
       </Pressable>
       {/* Stop cancels the host's turn; the runtime never runs, since the host queues a message sent meanwhile. */}
       {working && <Pressable testID="chat-stop" accessibilityRole="button" accessibilityLabel="Stop" disabled={!canStop} onPress={onStop} style={styles.target}>
@@ -77,9 +88,12 @@ const styles = StyleSheet.create({
   composer: { borderWidth: 1, borderRadius: 24, padding: 8, gap: 4 },
   input: { minHeight: 40, maxHeight: 160, paddingHorizontal: 10, paddingVertical: 4, fontSize: 16, lineHeight: 22, textAlignVertical: 'top' },
   actions: { flexDirection: 'row', alignItems: 'center' },
-  config: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 44, paddingHorizontal: 6 },
+  spacer: { flex: 1 },
+  marker: { width: 28, height: 44, alignItems: 'center', justifyContent: 'center' },
+  model: { flexShrink: 1, flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 44, paddingHorizontal: 8, borderRadius: 12 },
+  modelText: { fontSize: 16, flexShrink: 1 },
   target: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
-  send: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
+  send: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
   thumbs: { gap: 8, paddingHorizontal: 4, paddingTop: 4 },
   thumb: { width: 64, height: 64 },
   thumbImage: { width: 56, height: 56, borderRadius: 8, marginTop: 8 },

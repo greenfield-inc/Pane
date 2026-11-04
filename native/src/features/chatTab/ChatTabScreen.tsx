@@ -3,6 +3,7 @@ import { LegendList } from '@legendapp/list/react-native';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Keyboard, StyleSheet, View } from 'react-native';
 
+import { arrangeComposerControls, choiceName, isRiskyMode } from '@shared/chatComposerControls';
 import { chatTurns, type ChatWorkerLine } from '@shared/chatTabPresentation';
 import { rejectOption } from '@shared/chatTabPermissions';
 import type { ChatTabCommand, ChatTabSend } from '@shared/types/chatTab';
@@ -14,6 +15,7 @@ import { ComposerSheet } from '../composer/ComposerSheet';
 import { Dimmed } from '../hosts/ConnectionStatus';
 import { ChatCommandList } from './ChatCommandList';
 import { ChatTabComposer } from './ChatTabComposer';
+import { ChatTabSettings } from './ChatTabSettings';
 import { matchingCommands } from './chatComposer';
 import { ApprovalCard, DockButton, ProblemBanner, QuestionCard, QueueList } from './ChatTabDock';
 import { ChatRowView } from './ChatTabRows';
@@ -137,7 +139,7 @@ export function ChatTabScreen({ panelId, quiet = false, workers, onOpenWorker, o
   };
 
   const error = snapshot.error;
-  const configLabel = view?.controls.map(control => control.options.find(option => option.value === control.currentValue)?.name).filter(Boolean).join(' · ');
+  const arranged = arrangeComposerControls(view?.controls ?? []);
   const footer = snapshot.hasNewer
     ? <DockButton testID="chat-newer" title={snapshot.loadingNewer ? 'Loading…' : 'Newer messages'} disabled={snapshot.loadingNewer} onPress={() => void viewer.loadNewer()} style={styles.newer} />
     : view?.notice ? <Text variant="footnote" style={{ color: theme.chat.mutedForeground }}>{view.notice}</Text> : null;
@@ -172,17 +174,14 @@ export function ChatTabScreen({ panelId, quiet = false, workers, onOpenWorker, o
         {view?.permissions.map(permission => <ApprovalCard key={permission.id} permission={permission} agent={agent} disabled={disabled || busy} onAnswer={optionId => void act(() => chat.permission(panelId, permission.id, optionId))} />)}
         {!!view?.queue.length && <QueueList queue={view.queue} onRemove={operationId => void act(() => chat.unqueue(panelId, operationId))} />}
         <ChatCommandList commands={commands} onPick={pickCommand} />
-        <ChatTabComposer agent={agent} placeholder={placeholder ?? `Message ${agent}${view?.commands.length ? ' — / commands' : ''}`}
+        <ChatTabComposer agent={agent} placeholder={placeholder ?? 'Ask anything'}
           disabled={disabled} pending={pending} working={working} canStop={!busy && connected} canAttach={!!view?.canAttachImages}
-          configLabel={configLabel} canConfigure={!!view?.controls.length}
+          model={arranged.model && choiceName(arranged.model)} effort={arranged.effort && choiceName(arranged.effort)}
+          riskyMode={arranged.mode && isRiskyMode(arranged.mode) ? choiceName(arranged.mode) : undefined} canConfigure={!!view?.controls.length}
           onDraft={text => viewer.setDraft(text)} onAttach={() => void attach()} onSettings={() => setSettings(true)} onStop={() => void act(() => chat.cancel(panelId))} />
       </View>
       <ComposerSheet visible={settings} onClose={() => setSettings(false)} testID="chat-settings-sheet">
-        <View style={styles.settings}>{(view?.controls ?? []).map(control => <View key={control.id} style={styles.choices}>
-          <Text variant="headline">{control.name}</Text>
-          {control.options.map(option => <DockButton key={option.value} testID={`chat-config-${control.id}-${option.value}`} title={option.name} primary={option.value === control.currentValue}
-            disabled={disabled || busy || view?.status !== 'idle'} onPress={() => void act(() => chat.configure(panelId, control.id, option.value))} />)}
-        </View>)}</View>
+        <ChatTabSettings arranged={arranged} disabled={disabled || busy || view?.status !== 'idle'} configure={(id, value) => void act(() => chat.configure(panelId, id, value))} />
       </ComposerSheet>
     </ThreadPrimitive.Root>
   </AssistantRuntimeProvider>;
@@ -199,6 +198,4 @@ const styles = StyleSheet.create({
   error: { marginHorizontal: 12, marginTop: 8, padding: 10, borderWidth: 1, borderRadius: 8 },
   dock: { paddingHorizontal: 12, paddingTop: 6, paddingBottom: 6, gap: 8 },
   inline: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 },
-  settings: { padding: 16, gap: 24 },
-  choices: { gap: 8 },
 });
