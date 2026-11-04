@@ -96,7 +96,9 @@ process.stdin.on('data', chunk => { buffer += chunk; let end; while ((end=buffer
 }}); process.stdin.on('end',()=>process.exit(0));`);
   const directory = mkdtempSync(join(tmpdir(), 'pane-native-handoff-'));
   const executable = join(directory, 'claude');
-  writeFileSync(executable, '#!/bin/sh\necho "2.1.316 (Claude Code)"\n', { mode: 0o700 });
+  // A project-selected wrapper: it answers --version only from its project folder.
+  writeFileSync(join(directory, '.claude-version'), '2.1.316 (Claude Code)\n');
+  writeFileSync(executable, '#!/bin/sh\ncat .claude-version\n', { mode: 0o700 });
   let child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
   let exited = once(child, 'exit');
   await once(child, 'spawn');

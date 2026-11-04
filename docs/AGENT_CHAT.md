@@ -33,7 +33,10 @@ tabs use and passed as `CLAUDE_CODE_EXECUTABLE` or `CODEX_PATH`. Nothing is
 downloaded at first use. Chat uses the existing provider login and leaves global
 provider configuration alone. A missing CLI, or one older than the adapter needs
 (Claude Code 2.1.316, Codex 0.165.0), is reported with the install or upgrade
-command; terminal tabs are unaffected. Change a pin only with its minimum
+command; terminal tabs are unaffected. The version is read with `--version` in the
+tab's own folder and launch environment, so a project-selected wrapper answers as
+it would for the adapter; a CLI that cannot run or prints no version is reported
+with the reason, not as outdated. Change a pin only with its minimum
 version, the `minimumReleaseAgeExclude` entries in `pnpm-workspace.yaml`, and a
 packaged build: `scripts/after-pack.js` runs `scripts/verify-chat-adapters.js`,
 which fails the build unless each packaged adapter starts and answers ACP

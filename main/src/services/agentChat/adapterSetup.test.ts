@@ -60,6 +60,27 @@ it.skipIf(process.platform === 'win32')('accepts a CLI at the minimum version an
   expect(runs(executable)).toBe(1);
 });
 
+it.skipIf(process.platform === 'win32')('checks the CLI from the tab\'s project folder and environment', async () => {
+  // A project-selected wrapper that only answers from its project with its launch environment.
+  const project = mkdtempSync(path.join(directory, 'project-'));
+  writeFileSync(path.join(project, '.claude-version'), '2.1.318 (Claude Code)');
+  const executable = path.join(directory, 'claude-wrapper');
+  writeFileSync(executable, '#!/bin/sh\n[ "$PANE_WRAPPER" = on ] && cat .claude-version || exit 3\n', { mode: 0o700 });
+  await expect(installAdapter('claude', executable, { cwd: project, env: { ...process.env, PANE_WRAPPER: 'on' } })).resolves.toBeUndefined();
+});
+
+it('reports a CLI that cannot run as unreadable, with the reason, not as outdated', async () => {
+  const missing = path.join(directory, 'deleted-claude');
+  await expect(installAdapter('claude', missing)).rejects.toMatchObject({
+    code: 'CHAT_AGENT_VERSION_UNREADABLE', message: expect.stringContaining('ENOENT'), next: expect.stringContaining(`${missing} --version`),
+  });
+});
+
+it.skipIf(process.platform === 'win32')('reports a CLI that prints no version as unreadable', async () => {
+  const executable = fakeCli('codex', 'usage: codex [options]');
+  await expect(installAdapter('codex', executable)).rejects.toMatchObject({ code: 'CHAT_AGENT_VERSION_UNREADABLE', message: expect.stringContaining('usage: codex') });
+});
+
 it('compares dotted versions numerically', () => {
   expect(compareVersions('2.1.316', '2.1.316')).toBe(0);
   expect(compareVersions('2.1.40', '2.1.316')).toBeLessThan(0);

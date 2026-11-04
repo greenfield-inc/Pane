@@ -569,13 +569,13 @@ export class AgentChatManager {
     if (target === 'chat' && !this.environments.has(record.panelId)) throw new PaneError('CHAT_ENVIRONMENT_UNVERIFIED', 'The original launch environment is no longer in memory. Chat recovery did not start.', 'Recover this exact conversation in Terminal first; its normal launcher restores the workspace environment.');
     if (!this.native) throw new PaneError('CHAT_NATIVE_OWNER_MISSING', 'The native terminal owner is unavailable.', 'Restart Pane before recovering this conversation.');
     const command = hostCommand(saved.launch.executable, ['--version']);
-    await execFileAsync(command.executable, command.args, { timeout: 5000, maxBuffer: 16 * 1024, env: this.environments.get(record.panelId), windowsVerbatimArguments: command.windowsVerbatimArguments });
+    await execFileAsync(command.executable, command.args, { cwd: saved.launch.cwd, timeout: 5000, maxBuffer: 16 * 1024, env: this.environments.get(record.panelId), windowsVerbatimArguments: command.windowsVerbatimArguments });
     if (target === 'chat' && !this.adapters.has(record.panelId)) await this.startAdapter(record);
   }
 
   private async startAdapter(record: ConversationRecord): Promise<AcpProcess> {
     const saved = this.required(record.panelId);
-    await installAdapter(record.provider, saved.launch.executable);
+    await installAdapter(record.provider, saved.launch.executable, { cwd: saved.launch.cwd, env: this.environments.get(record.panelId) });
     const entry = (this.options.adapterEntry ?? adapterEntry)(record.provider);
     if (!entry) throw new PaneError('CHAT_ADAPTER_MISSING', 'This Pane build is missing its bundled chat adapter. The conversation was not replaced.', 'Reinstall Pane from runpane.com. Terminal agent tabs are not affected.');
     const projection = new TranscriptProjection(record.panelId, record.generation + 1);

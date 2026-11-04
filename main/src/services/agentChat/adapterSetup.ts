@@ -4,7 +4,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { findExecutableInPath, getShellPath } from '../../utils/shellPath';
 import { boundary, decodeOptionalBoundary } from '../../../../shared/validation/boundaryDecoder';
-import { PaneError } from '../../../../shared/paneError';
+import { PaneError, reasonOf } from '../../../../shared/paneError';
 import { hostCommand } from './hostCommand';
 
 const execFileAsync = promisify(execFile);
@@ -38,29 +38,42 @@ export function adapterEntry(provider: Provider): string | undefined {
 
 export async function installClaudeAdapter(): Promise<void> { return installAdapter('claude'); }
 
+/** Where the adapter will run the CLI: the tab's project folder and launch environment. */
+export interface LaunchContext { cwd?: string; env?: NodeJS.ProcessEnv }
+
 /**
  * Checks that the person's installed CLI can run under the bundled adapter.
  * Nothing is downloaded or installed. `executable` defaults to the same PATH
- * lookup terminal agent tabs use.
+ * lookup terminal agent tabs use. The version is read in `context`, the folder
+ * and environment the adapter will run the CLI in, because a project-selected
+ * wrapper may answer only there.
  */
-export async function installAdapter(provider: Provider, executable: string | null = findExecutableInPath(provider)): Promise<void> {
+export async function installAdapter(provider: Provider, executable: string | null = findExecutableInPath(provider), context: LaunchContext = {}): Promise<void> {
   const { name, minimum, upgrade } = adapters[provider];
   if (!adapterEntry(provider)) throw new PaneError('CHAT_ADAPTER_MISSING', `This Pane build is missing its bundled ${name} chat adapter.`, 'Reinstall Pane from runpane.com. Terminal agent tabs are not affected.');
   if (!executable) throw new PaneError('CHAT_AGENT_NOT_INSTALLED', `${name} is not installed on this machine, or not on its PATH.`, `Install it with \`${upgrade}\`, then start Chat again. Terminal agent tabs are not affected.`);
-  if (checked.has(executable)) return;
-  const version = await installedVersion(executable);
-  if (!version || compareVersions(version, minimum) < 0) {
-    throw new PaneError('CHAT_AGENT_OUTDATED', `${name} ${version ?? '(unknown version)'} at ${executable} is older than ${minimum}, the oldest version chat supports.`, `Update it with \`${upgrade}\`, then start Chat again. Terminal agent tabs are not affected.`);
+  const key = `${executable}\0${context.cwd ?? ''}`;
+  if (checked.has(key)) return;
+  const version = await installedVersion(name, executable, context);
+  if (compareVersions(version, minimum) < 0) {
+    throw new PaneError('CHAT_AGENT_OUTDATED', `${name} ${version} at ${executable} is older than ${minimum}, the oldest version chat supports.`, `Update it with \`${upgrade}\`, then start Chat again. Terminal agent tabs are not affected.`);
   }
-  checked.add(executable);
+  checked.add(key);
 }
 
-async function installedVersion(executable: string): Promise<string | undefined> {
+/** The CLI's `--version`, or a PaneError keeping why it could not be read. */
+async function installedVersion(name: string, executable: string, { cwd, env }: LaunchContext): Promise<string> {
   const command = hostCommand(executable, ['--version']);
+  const next = `Check that \`${executable} --version\` runs in a terminal in this project, then start Chat again. Terminal agent tabs are not affected.`;
+  let stdout: string;
   try {
-    const { stdout } = await execFileAsync(command.executable, command.args, { env: { ...process.env, PATH: getShellPath() }, timeout: 15_000, maxBuffer: 64 * 1024, windowsHide: true, windowsVerbatimArguments: command.windowsVerbatimArguments });
-    return /(\d+\.\d+\.\d+)/.exec(stdout)?.[1];
-  } catch { return; }
+    ({ stdout } = await execFileAsync(command.executable, command.args, { cwd, env: env ?? { ...process.env, PATH: getShellPath() }, timeout: 15_000, maxBuffer: 64 * 1024, windowsHide: true, windowsVerbatimArguments: command.windowsVerbatimArguments }));
+  } catch (error) {
+    throw new PaneError('CHAT_AGENT_VERSION_UNREADABLE', `Pane could not run ${name} at ${executable} to read its version: ${reasonOf(error)}. Chat did not start.`, next);
+  }
+  const version = /(\d+\.\d+\.\d+)/.exec(stdout)?.[1];
+  if (!version) throw new PaneError('CHAT_AGENT_VERSION_UNREADABLE', `${name} at ${executable} printed no version number for \`--version\` (it printed "${stdout.trim().slice(0, 200)}"). Chat did not start.`, next);
+  return version;
 }
 
 export function compareVersions(left: string, right: string): number {
