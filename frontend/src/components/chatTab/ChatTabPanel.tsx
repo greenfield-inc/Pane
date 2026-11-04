@@ -18,7 +18,8 @@ import { ChatProblem } from './ChatProblem';
 import { ChatQuestionCard } from './ChatQuestionCard';
 import { ChatPermissionCard } from './ChatPermissionCard';
 import { ChatTurnView, WorkerLine, type ChatTurnActions } from './ChatTurns';
-import { ChatCommandMenu, matchingCommands } from './ChatCommandMenu';
+import { ChatCommandMenu } from './ChatCommandMenu';
+import { matchingCommands } from './chatCommands';
 import '../agentChat/agentChat.css';
 import './chatTab.css';
 
@@ -59,7 +60,9 @@ export interface ChatTabPanelProps {
 }
 
 /** A chat tab: one agent conversation over ACP, with no terminal (D-20). */
-export default function ChatTabPanel({ panelId, client, connected = true, quiet = false, machine, actions = {}, placeholder, workers }: ChatTabPanelProps) {
+const NO_ACTIONS: ChatTurnActions = {};
+
+export default function ChatTabPanel({ panelId, client, connected = true, quiet = false, machine, actions = NO_ACTIONS, placeholder, workers }: ChatTabPanelProps) {
   const viewer: ChatTabViewer = useMemo(() => chatTabViewer(client, panelId), [client, panelId]);
   const snapshot = useSyncExternalStore(viewer.subscribe, viewer.snapshot, viewer.snapshot);
   const view = snapshot.view;
@@ -111,10 +114,10 @@ export default function ChatTabPanel({ panelId, client, connected = true, quiet 
       // The composer clears before onNew; keep the text until the host confirms it.
       runtime.thread.composer.setText(text);
       // Typing while an approval waits tells the agent what to do instead (round 2).
-      for (const permission of view?.permissions ?? []) {
+      await Promise.all((view?.permissions ?? []).map(permission => {
         const reject = rejectOption(permission);
-        if (reject) await client.permission(panelId, permission.id, reject).catch(() => undefined);
-      }
+        return reject ? client.permission(panelId, permission.id, reject).catch(() => undefined) : undefined;
+      }));
       await deliver({ operationId: crypto.randomUUID(), text, images: imageParts }, true);
     },
   });

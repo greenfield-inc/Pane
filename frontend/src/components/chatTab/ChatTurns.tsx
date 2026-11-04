@@ -75,7 +75,7 @@ function TodoList({ entries }: { entries: PlanEntry[] }) {
   const done = entries.filter(entry => entry.status === 'completed').length;
   return <section className="chat-todo" aria-label="Agent's to-do list">
     <p className="chat-todo-title">To-do · {done} of {entries.length} done</p>
-    <ul>{entries.map((entry, index) => <li key={index} data-status={entry.status}>
+    <ul>{entries.map((entry, index) => <li key={`${index}:${entry.content}`} data-status={entry.status}>
       <span className="chat-step-icon">{entry.status === 'completed' ? <CircleCheck aria-hidden="true" /> : entry.status === 'in_progress' ? <LoaderCircle aria-hidden="true" /> : <Circle aria-hidden="true" />}</span>
       <span>{entry.content}</span>
     </li>)}</ul>
@@ -86,7 +86,7 @@ function Item({ item, waiting, actions }: { item: TurnItem; waiting: Set<string>
   switch (item.type) {
     case 'text': return <Markdown text={item.text} />;
     case 'thought': return <details className="chat-thought"><summary><Brain aria-hidden="true" />Thinking</summary><div className="whitespace-pre-wrap">{item.text}</div></details>;
-    case 'image': return <img className="chat-image" alt="Image from the agent" src={`data:${item.mimeType};base64,${item.data}`} />;
+    case 'image': return <img className="chat-image" alt="Sent by the agent" src={`data:${item.mimeType};base64,${item.data}`} />;
     case 'plan': return <TodoList entries={item.entries} />;
     case 'steps': return <div className="chat-steps">{item.groups.map(group => <StepGroupRow key={group.id} group={group} waiting={waiting} actions={actions} />)}</div>;
     case 'content': {
@@ -98,14 +98,14 @@ function Item({ item, waiting, actions }: { item: TurnItem; waiting: Set<string>
 
 function UserImage({ content }: { content: JsonValue }) {
   const picture = imageOf(content);
-  return picture ? <img className="chat-image" alt="Attached image" src={`data:${picture.mimeType};base64,${picture.data}`} /> : null;
+  return picture ? <img className="chat-image" alt="Attached to your message" src={`data:${picture.mimeType};base64,${picture.data}`} /> : null;
 }
 
 function UserMessage({ turn }: { turn: ChatTurn }) {
   if (!turn.user) return null;
   return <div className="chat-user">{turn.user.parts.map((part, index) => part.type === 'text'
-    ? <span key={index} className="whitespace-pre-wrap">{part.text}</span>
-    : part.type === 'content' ? <UserImage key={index} content={part.content} /> : null)}</div>;
+    ? <span key={`${turn.id}:${index}`} className="whitespace-pre-wrap">{part.text}</span>
+    : part.type === 'content' ? <UserImage key={`${turn.id}:${index}`} content={part.content} /> : null)}</div>;
 }
 
 const WORKER_ICONS = { running: LoaderCircle, waiting: AlertCircle, done: CircleCheck, failed: XCircle, idle: Circle, missing: XCircle };

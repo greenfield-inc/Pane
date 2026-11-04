@@ -96,3 +96,5 @@
 .chat-worker-detail { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; color:var(--chat-muted-foreground); }
 .chat-worker-open { margin-left:auto; }
 @media (prefers-reduced-motion:reduce) { .chat-worker-state svg { animation:none !important; } }
+.chat-commands li { display:flex; gap:10px; padding:6px 10px; border-radius:8px; font-size:13px; cursor:pointer; }
+.chat-commands li[aria-selected=true],.chat-commands li:hover { background:var(--chat-muted); }

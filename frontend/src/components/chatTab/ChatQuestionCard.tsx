@@ -44,9 +44,10 @@ function Field({ field, value, disabled, onChange }: { field: QuestionField; val
   }
   if (field.kind === 'multiple') {
     const chosen = Array.isArray(value) ? value : [];
+    const picked = new Set(chosen);
     return <fieldset className="chat-question-field" disabled={disabled}><legend>{label}</legend>
       {field.choices.map(choice => <label key={choice.value} className="chat-question-choice">
-        <input type="checkbox" checked={chosen.includes(choice.value)} onChange={event => onChange(event.target.checked ? [...chosen, choice.value] : chosen.filter(entry => entry !== choice.value))} />
+        <input type="checkbox" checked={picked.has(choice.value)} onChange={event => onChange(event.target.checked ? [...chosen, choice.value] : chosen.filter(entry => entry !== choice.value))} />
         <span>{choice.title}{choice.description && <span className="chat-question-hint">{choice.description}</span>}</span>
       </label>)}
     </fieldset>;
@@ -57,6 +58,10 @@ function Field({ field, value, disabled, onChange }: { field: QuestionField; val
   return <label className="chat-question-field">{label}
     <input type={field.kind === 'number' ? 'number' : 'text'} className="chat-question-input" disabled={disabled} value={value === undefined || value === null ? '' : String(value)}
       placeholder={field.kind === 'text' ? 'Your own answer (optional)' : undefined}
-      onChange={event => onChange(field.kind === 'number' ? Number(event.target.value) : event.target.value)} />
+      onChange={event => {
+        const raw = event.target.value;
+        // An empty or partial number is left as text, never stored as 0 or NaN.
+        onChange(field.kind === 'number' && raw.trim() !== '' && Number.isFinite(Number(raw)) ? Number(raw) : raw);
+      }} />
   </label>;
 }
