@@ -128,7 +128,7 @@ export class OrchestrationSessionManager extends EventEmitter {
       const nextData: OrchestrationSessionStoreData = { ...data, order };
       this.store.write(nextData);
       this.emit('changed', { sessionId: sessionIds.find(id => order.includes(id)) ?? '', kind: 'reordered' });
-      return { sessions: orderedSessions(nextData).map(clone), selectedSessionId: nextData.selectedSessionId };
+      return { sessions: orderedSessions(nextData).map(record => this.withPaused(clone(record))), selectedSessionId: nextData.selectedSessionId };
     });
   }
 
@@ -144,7 +144,7 @@ export class OrchestrationSessionManager extends EventEmitter {
       this.store.write(next);
       this.emit('changed', { sessionId: session.id, kind: 'selected' });
       return {
-        sessions: orderedSessions(next).map(clone),
+        sessions: orderedSessions(next).map(record => this.withPaused(clone(record))),
         selectedSessionId: next.selectedSessionId,
       };
     });
@@ -403,7 +403,7 @@ export class OrchestrationSessionManager extends EventEmitter {
       };
       this.store.write(nextData);
       this.emitChanged(nextRecord, input.report ? 'report' : 'updated', selectedSessionId !== data.selectedSessionId);
-      return clone(nextRecord);
+      return this.withPaused(clone(nextRecord));
     });
   }
 
@@ -471,7 +471,7 @@ export class OrchestrationSessionManager extends EventEmitter {
         this.sessionManager.emit('session-updated', pane);
       }
       this.emitChanged(nextRecord, 'associated', false, joined ? [input.paneId] : []);
-      return clone(nextRecord);
+      return this.withPaused(clone(nextRecord));
     });
   }
 
@@ -494,7 +494,7 @@ export class OrchestrationSessionManager extends EventEmitter {
       this.trimActivity(nextRecord);
       this.store.write(replaceSession(data, nextRecord));
       this.emitChanged(nextRecord, 'detached', false, removed.map(item => item.paneId));
-      return clone(nextRecord);
+      return this.withPaused(clone(nextRecord));
     });
   }
 

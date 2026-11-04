@@ -1851,6 +1851,24 @@ describe('OrchestrationSessionManager', () => {
     expect(JSON.stringify(serializeJsonTransport(overview, boundary.json))).toBe(JSON.stringify(overview));
   });
 
+  it('reports a Session as paused in every response once its chat is paused', async () => {
+    const fixture = createFixture();
+    const created = await fixture.manager.create({ name: 'Paused work' });
+    const mark = { at: '2026-11-04T22:50:20.984Z', by: 'manual' as const };
+    const chat = fixture.sessions.get(created.session.internalSessionId);
+    if (!chat) throw new Error('The Session has no chat Pane');
+    chat.paused = mark;
+
+    const find = (result: { sessions: OrchestrationSessionRecord[] }) => result.sessions.find(session => session.id === created.session.id);
+    expect(find(await fixture.manager.list())?.paused).toEqual(mark);
+    expect(find(await fixture.manager.select({ sessionId: created.session.id }))?.paused).toEqual(mark);
+    expect(find(await fixture.manager.reorder([created.session.id]))?.paused).toEqual(mark);
+    expect((await fixture.manager.update({ sessionId: created.session.id }, { goal: 'Still paused' })).paused).toEqual(mark);
+
+    chat.paused = undefined;
+    expect(find(await fixture.manager.select({ sessionId: created.session.id }))?.paused).toBeUndefined();
+  });
+
   it('supports exact-name selectors and rejects lost updates with an optimistic revision guard', async () => {
     const fixture = createFixture();
     const created = await fixture.manager.create({ name: 'Context handoff', context: 'Initial context' });
