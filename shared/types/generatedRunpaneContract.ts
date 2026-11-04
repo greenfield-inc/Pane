@@ -8688,6 +8688,9 @@ export const RUNPANE_CONTRACT = {
         "panelId": {
           "type": "string"
         },
+        "panelTitle": {
+          "type": "string"
+        },
         "agentType": {
           "type": "string"
         },
@@ -8823,6 +8826,39 @@ export const RUNPANE_CONTRACT = {
         "epoch": {
           "type": "string",
           "description": "Added to watch --json NDJSON events. Persist with gen after processing for numeric rearm."
+        },
+        "panels": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "panelId",
+              "title"
+            ],
+            "properties": {
+              "panelId": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "agentType": {
+                "type": "string"
+              },
+              "agentState": {
+                "enum": [
+                  "blocked",
+                  "working",
+                  "idle",
+                  "unknown"
+                ]
+              },
+              "running": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          }
         },
         "lastOutput": {
           "type": "string",
