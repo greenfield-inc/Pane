@@ -10,7 +10,9 @@ const MAX_LENGTH = 120;
 export function attachmentFileName(original: string): string {
   // A name from another platform may use either separator; keep only the last part.
   const base = original.split(/[\\/]/).pop() ?? '';
-  let name = base.replace(/[<>:"|?*\u0000-\u001f]/g, '_').trim().replace(/[. ]+$/, '');
+  // Control characters and the ones Windows refuses become "_".
+  const refused = (char: string) => char.charCodeAt(0) < 0x20 || '<>:"|?*'.includes(char);
+  let name = [...base].map(char => refused(char) ? '_' : char).join('').trim().replace(/[. ]+$/, '');
   if (!name || name === '.' || name === '..') return 'file';
   if (name.length > MAX_LENGTH) {
     const extension = path.extname(name).slice(0, 16);
