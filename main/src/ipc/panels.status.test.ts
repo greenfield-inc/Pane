@@ -86,8 +86,8 @@ describe('panel deletion IPC', () => {
     vi.spyOn(panelManager, 'getPanelsForSession').mockReturnValue([paused, panel('running', 'pane-1')]);
     vi.spyOn(terminalPanelManager, 'destroyTerminal').mockResolvedValue();
     vi.spyOn(panelManager, 'deletePanel').mockResolvedValue();
-    const changes: unknown[] = [];
-    const listener = (change: unknown) => changes.push(change);
+    const changes: Array<{ paneIds: string[] }> = [];
+    const listener = (change: { paneIds: string[] }) => changes.push(change);
     terminalPanelManager.on('pause-changed', listener);
     try {
       const registry = new PaneCommandRegistry();
