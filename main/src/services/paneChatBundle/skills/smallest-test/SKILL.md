@@ -34,5 +34,5 @@ Possible examples:
 ## Return the learning
 
 - Before execution, return the question, test, possible outcomes, and decision each would inform. After execution, add actual evidence, limitations, and the smallest justified next step.
-- Keep short results in chat. If creating files and Grain is connected, follow its installed skill and reuse the task workspace, or create a clearly named one in `Development Artifacts` if none exists.
+- Keep short results in chat. If creating files, publish them to the document destination your workspace instructions name, reusing the task's folder or creating a clearly named one; otherwise keep them in the work's page bundle (see [page](../page/SKILL.md)).
 - Reuse artifact IDs and pass the storage rule to any helpers. Keep needed local copies, respect privacy and explicit destinations, and use normal local files when disconnected. Report failed connected saves honestly.

@@ -462,7 +462,8 @@ Read all of these in parallel:
 - \`${runtimeContext}\`: this Pane install; it wins over any other document
 - \`${skill('runpane')}\`: driving panes through the runpane CLI
 - \`${skill('orchestrate-sessions')}\`: routing work to planning,
-  implementation, and bug-report sessions
+  implementation, and bug-report sessions, and the Session status page you
+  render from the first dispatch
 - \`${skill('pane-orchestration')}\`: launching, waiting on, answering,
   and resuming workers; the one wait primitive and worker reports
 
@@ -1146,6 +1147,14 @@ if __name__ == "__main__":
       '  keep using the one-shot form or fix PATH. Stay on this Pane install.',
       ...devWrapperGuidance,
       powerShellPolicy,
+      '',
+      '## Node for bundled scripts',
+      '',
+      'Some bundled skills run a Node script, such as the Session status page',
+      'renderer. When `node` is not on PATH, run the script with `pane-node`',
+      '(same arguments): Pane\'s own runtime, on PATH beside `runpane` in Pane',
+      `terminals and at ${markdownCode(path.join(appDirectory, 'bin', process.platform === 'win32' ? 'pane-node.cmd' : 'pane-node'))}.`,
+      ...(process.platform === 'win32' ? ['Git Bash and WSL use the extensionless `pane-node` beside it.'] : []),
       '',
       '## Wrong instance',
       '',

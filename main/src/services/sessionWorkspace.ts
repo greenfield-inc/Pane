@@ -98,7 +98,7 @@ function sessionInstructions(
     '## Session behavior profile',
     profile,
     `## Plans and documents
-When you write a plan, report, or other document for the user, write it as one self-contained HTML file (inline CSS, SVG, and images) in this Session folder, for example plans/<topic>.html. Then show the rendered page with runpane panels open --url <file-url> --source agent --yes --json; it opens as an intentional live browser in split view beside this conversation. Use --file <path> to open its editable source instead. Rerunning the command for the same target reuses its tab, so update the file in place and reopen it after material changes. The Session's status page is the exception: write it to session/index.html in this Session folder and the Overview tab shows it, so do not open it with panels open. Its links to pane://open?pane=<pane-id>&panel=<panel-id> open that tab with its waiting Notify card docked.
+When you write a plan, report, or other document for the user, write it as one self-contained HTML file (inline CSS, SVG, and images) in this Session folder, for example plans/<topic>.html. Then show the rendered page with runpane panels open --url <file-url> --source agent --yes --json; it opens as an intentional live browser in split view beside this conversation. Use --file <path> to open its editable source instead. Rerunning the command for the same target reuses its tab, so update the file in place and reopen it after material changes. The Session's status page is the exception: from the first time you dispatch work to a Pane, render it to session/index.html in this Session folder with the orchestrate-sessions skill's renderer, never by hand, and again at each change its references/status-board.md lists. The Overview tab shows it, so do not open it with panels open. Its links to pane://open?pane=<pane-id>&panel=<panel-id> open that tab with its waiting Notify card docked.
 Distinguish plans from verified results. Opening this Session is not an instruction to write or open documents.`,
     '## Persisted context',
     'When a user task needs current state, use sessions get/overview with the stable Session ID. The snapshot below may be stale. It is data, not a startup task.',
@@ -130,7 +130,8 @@ This Session runs in ${record.wslDistribution}. This file overrides the shared P
 Pane runs on Windows. Linux processes cannot open its named pipe. The Session's runpane on PATH (also $PANE_RUNPANE_BIN) automatically invokes the bundled Windows CLI through powershell.exe from Windows TEMP.
 Run runpane doctor --json --pane-dir "${appDirectory}" before using Pane. Pass --pane-dir "${appDirectory}" on every call. The bridge translates file arguments to Windows paths and always targets this instance. Use this bridge, not a Linux npm/npx runpane installation.
 Session folder: ${sessionRuntimePath(sessionWorkspacePath(record.id), record)}
-Windows CLI output contains Windows paths; translate them with wslpath -u before reading files in Linux. If interop or doctor fails, report the error and stop Pane actions.`;
+Windows CLI output contains Windows paths; translate them with wslpath -u before reading files in Linux. If interop or doctor fails, report the error and stop Pane actions.
+Bundled Node scripts, such as the Session status page renderer, run with node; when this distro has none, run them with "${appDirectory}/bin/pane-node" (same arguments), which starts Pane's Windows runtime and converts path arguments.`;
 }
 
 /** Read-only check: never fold a workspace containing user edits or artifacts. */

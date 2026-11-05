@@ -22,19 +22,20 @@ A timeline of tool calls answers only question 5. Also capture:
 
 1. **Title and lede.** The task, the harness and model, the date and time window. One sentence on what the page is.
 2. **Stats row.** Requests, tool calls, subagents, PRs, wall clock.
-3. **What happened.** Three to six plain sentences: the job, how it went, what came out, and the one or two things worth knowing. No jargon a newcomer wouldn't know.
-4. **Key moments.** 4–8 cards, in time order. Each card has the time, a short title, and one sentence on why it mattered, and it links to its request. Pick from: the original ask, decisions, user corrections, failures and recoveries, merges and releases, and surprises. Skip routine steps.
-5. **Timeline.** One row per request on the session's clock, with its first line beside the bar. Mark PRs as ticks above it and star the key moments. Show subagents as their own rows in a second colour.
-6. **Pull requests.** A linked list with times, and status when known.
-7. **Every request, step by step.** Collapsed by default. Each shows the full ask (long pastes trimmed with a note), each tool call with a timing bar and its description, earlier progress updates collapsed, and the final reply.
-8. **Subagents.** The same step view for each child agent.
-9. **Raw trace.** A link to the OpenTelemetry JSON.
+3. **Conversation access.** A prominent link jumps straight to the conversation, with each role clearly labeled.
+4. **What happened.** Three to six plain sentences: the job, how it went, what came out, and the one or two things worth knowing. No jargon a newcomer wouldn't know.
+5. **Key moments.** 4–8 cards, in time order. Each card has the time, a short title, and one sentence on why it mattered, and it links to its request. Pick from: the original ask, decisions, user corrections, failures and recoveries, merges and releases, and surprises. Skip routine steps.
+6. **Timeline.** One row per request on the session's clock, with its first line beside the bar. Mark PRs as ticks above it and star the key moments. Show subagents as their own rows in a second colour.
+7. **Pull requests.** A linked list with times, and status when known.
+8. **Every request, step by step.** Open by default, with the user–agent conversation up front. Each shows the full ask (long pastes trimmed with a note), the agent's progress messages and final reply in order, and a separately collapsed group of tool calls with timing and descriptions.
+9. **Subagents.** The same step view for each child agent.
+10. **Raw trace.** A link to the OpenTelemetry JSON.
 
 ## UX principles
 
 Keep these whatever the layout becomes:
 
-- **Summary first, detail on demand.** The page opens as a short read (story, moments, timeline). Every request starts collapsed.
+- **Summary first, detail on demand.** The page opens as a short read (story, moments, timeline). Conversation requests start open. Tool details start collapsed and stay collapsed when a request opens.
 - **Everything links to its evidence.** Timeline rows and key-moment cards jump to their request and open it. A jumped-to item is highlighted, and each opened request has a way back to the timeline.
 - **Findable in a long session.** A filter box narrows requests by what was asked or done, and one button expands or collapses them all.
 - **Works at any width.** Grids collapse to one column, bars get taller tap targets, and long text wraps instead of overflowing. Check a phone width as well as desktop.

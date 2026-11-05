@@ -16,6 +16,12 @@ Code that compiles, and tests that pass, can still do the wrong thing. The only 
 5. **Judge it critically.** Compare it with step 1, then check around the change for what else it touched. Believe the evidence over your expectation.
 6. **Fix and observe again** the same way, until the evidence shows what you meant.
 
+## Cross-OS checks
+
+For OS-sensitive changes or cross-platform claims, follow
+[Cross-OS Workspaces](../pr-test-automation/references/cross-os-workspaces.md)
+to discover machines, run isolated native checks, and report per-OS proof.
+
 ## Examples
 
 | Change | Observe | Look for |

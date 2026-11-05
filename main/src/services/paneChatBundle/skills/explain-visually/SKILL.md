@@ -1,6 +1,6 @@
 ---
 name: explain-visually
-description: Complement an answer or discussion with a first-principles visual HTML explanation, saved in Grain when connected. Use when explaining how something works, why it changes, or how options differ and a visual would materially help understanding, including requests like "show me" or "help me understand." Skip simple factual answers and text-only requests.
+description: Complement an answer or discussion with a first-principles visual HTML explanation, published to the workspace's document destination when one is named. Use when explaining how something works, why it changes, or how options differ and a visual would materially help understanding, including requests like "show me" or "help me understand." Skip simple factual answers and text-only requests.
 ---
 
 # Explain visually
@@ -36,8 +36,8 @@ Place visuals beside the explanation they support. Introduce technical terms whe
 
 ## Save, verify, and return
 
-- When Grain is connected, read its installed skill and reuse the supplied task workspace or matching explanation workspace. Otherwise create a clearly named workspace in the requested folder, defaulting to `Development Artifacts`. Keep its ID for follow-up updates and retain local working files when needed.
-- Without Grain, save it under `explainers/` in the work's page bundle (see [page](../page/SKILL.md)), or the requested location, and continue without setup ceremony. If a connected save fails, keep the local artifact and report it as unsynced.
+- Publish to the document destination your workspace instructions name: reuse the supplied task page or matching explanation page, or create a clearly named one in the requested folder, defaulting to that destination's default folder. Keep its ID for follow-up updates and retain local working files when needed.
+- Without a destination, save it under `explainers/` in the work's page bundle (see [page](../page/SKILL.md)), or the requested location, and continue without setup ceremony. If a connected save fails, keep the local artifact and report it as unsynced.
 - Keep secrets and private source material out of uploads; do not create public shares or change audience permissions without authorization. Honor local-only requests.
 - Check the explanation against its sources. Inspect the saved page with available browser tools for clipping, readable labels, light/dark and mobile layout, navigation, and links; fix observed problems. If visual inspection is unavailable, report that limit rather than claiming it passed.
 - Answer the question briefly in chat and link the verified companion; the essential answer must not require opening it. Open the page when supported and welcome in the current workflow, without stealing focus from ongoing work.

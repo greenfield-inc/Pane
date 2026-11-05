@@ -1,10 +1,10 @@
 # A PR that teaches the change
 
-Read this before drafting a PR. The reader has the diff and this body, but no chat, private plan, or Grain access. Use the structure and level of explanation below; replace every example fact with evidence from the current task. Scale length to the mechanism, not the number of files. A one-line copy fix needs less exposition than a change with alternate paths.
+Read this before drafting a PR. The reader has the diff and this body, but no chat, private plan, or document-destination access. Use the structure and level of explanation below; replace every example fact with evidence from the current task. Scale length to the mechanism, not the number of files. A one-line copy fix needs less exposition than a change with alternate paths.
 
 ## Build the explanation
 
-Choose the explanation and visuals that make the underlying idea easiest to understand. Build from first principles, keep useful detail, and let the subject determine the format, in both the PR and its Grain companion.
+Choose the explanation and visuals that make the underlying idea easiest to understand. Build from first principles, keep useful detail, and let the subject determine the format, in both the PR and its companion page.
 
 Possible examples, not required formats:
 
@@ -67,20 +67,20 @@ The four regression cases and required CI passed on commit `b222222` in this fic
 
 ### Supporting evidence
 
-The supplied screenshot and recording exist locally, but the fixture provides no successful publication record. Report publication as unavailable until verified; do not turn local paths into upload claims. A usable release-asset path remains available when Grain is disconnected.
+The supplied screenshot and recording exist locally, but the fixture provides no successful publication record. Report publication as unavailable until verified; do not turn local paths into upload claims. A usable release-asset path remains available when no document destination is named.
 
 ## When the why is missing
 
 If the ticket says only “make refunds negative,” write: “The requested behavior is signed refund exports; the originating motivation was not supplied.” Carry the gap forward, ask when it materially affects the approach, and do not invent an accountant request, revenue impact, or compliance driver. The completed example above is not evidence about the current task.
 
-## Grain companion
+## Companion page
 
-Link the PR description to its Grain and the Grain back to the PR; verify both links are clickable, including private/unshared Grains, and preserve access settings.
+Link the PR description to its companion page and the page back to the PR; verify both links are clickable, including private or unshared pages, and preserve access settings.
 
-When Grain is connected, use the [bundled visual starter](../assets/pr-walkthrough.html). Replace its slots with the **published final PR body**, converted to semantic HTML; preserve every explanatory section, example and limitation. Render diagrams, using self-contained SVG or locally saved rendered images, and retain descriptive text/source as a fallback. Add named code and evidence links. Put QA visuals under Validation and limitations after a plain-language takeaway; link detailed reports and optionally add a top jump link. Preserve the PR's explanation even if Grain is unavailable.
+Every companion page, published or kept locally, starts from the [bundled walkthrough template](../assets/pr-walkthrough.html) and follows the `page` skill's house standard. Replace its slots with the **published final PR body**, converted to semantic HTML; preserve every explanatory section, example and limitation. Put the PR's visual overview in the drawing slot right under the summary; that image is the page's opening drawing for `page`'s Draw first rule. Render other diagrams as self-contained SVG or locally saved rendered images, keeping descriptive text or source as a fallback. Add named code and evidence links. Put QA visuals under Validation and limitations after a plain-language takeaway, and link detailed reports. Preserve the PR's explanation even without a companion page.
 
-The template supplies typography, responsive light/dark layout, section navigation, evidence cards and expandable diagrams. Populate `TITLE`, `INTRO`, `PR_URL`, `SOURCE_SHA`, `BODY_HTML` and `EVIDENCE_HTML`; escape text/attribute values and insert only trusted generated HTML into the two HTML slots. Do not publish unfilled slots. Keep an exact downloadable copy of the final Markdown beside the page; verify it matches the persisted PR body. Verify screenshots, navigation, diagrams and links in the saved page. A saved layout or sample screenshot does not prove the current app passed QA. Follow the Grain skill for destination, publication and audience authorization; use the existing durable-publication path when disconnected.
+The template carries `page`'s colours, one-column layout and components: status chip, panels, before/after pairs, call-outs and `details`. Fill `TITLE`, `SUMMARY`, `STATUS_HTML`, `PR_URL`, `SOURCE_SHA`, `DIAGRAM_HTML`, `CONTENTS_HTML` (a list of links to each `h2`), `BODY_HTML` and `EVIDENCE_HTML`; escape text and attribute values, and insert only trusted generated HTML into the `_HTML` slots. Do not publish unfilled slots. Wrap each table in `<div class="table-wrap">` so a wide one scrolls on a phone. Keep an exact copy of the final Markdown as `pr-body.md` beside the page and verify it matches the persisted PR body. Check the page against `page`'s Before you share it list, and verify screenshots, links and diagrams in the saved page. A saved layout or sample screenshot does not prove the current app passed QA. When your workspace instructions name a document destination, publish there and follow its rules for publication and audience authorization; otherwise keep the page in the local companion folder. A companion folder holds `index.html`, `pr-body.md` and `evidence/`; it is the PR's artifact, not a `page` bundle, so it needs no `bundle.json`.
 
 ## Refreshing an older PR
 
-`prepare-pr` automatically uses this guide when the supplied URL or current branch has an existing PR; `rewrite <PR URL>` is also accepted. Full code/branch preparation for an existing PR requires an explicit request. Recover the motivating discussion/ticket and preserve its source links; retain accurate evidence and explain any missing rationale. Replace stale descriptions of abandoned approaches with the final mechanism, while preserving relevant human context and closing lines. A better explanation does not upgrade old tests to the latest SHA or turn missing QA into a pass. Refresh the visual companion from the persisted rewritten body when Grain is connected; report an editorial update without claiming the underlying PR is ready.
+`prepare-pr` automatically uses this guide when the supplied URL or current branch has an existing PR; `rewrite <PR URL>` is also accepted. Full code/branch preparation for an existing PR requires an explicit request. Recover the motivating discussion/ticket and preserve its source links; retain accurate evidence and explain any missing rationale. Replace stale descriptions of abandoned approaches with the final mechanism, while preserving relevant human context and closing lines. A better explanation does not upgrade old tests to the latest SHA or turn missing QA into a pass. Refresh the visual companion from the persisted rewritten body when one exists, keeping the page its `pr-artifact` marker names; when you cannot reach that page, keep the marker and say the page was not refreshed. Reuse the visual overview when the diff still matches it, and redraw it when the change moved. Run `cold-read` on the rewritten body as for a new PR. Report an editorial update without claiming the underlying PR is ready.

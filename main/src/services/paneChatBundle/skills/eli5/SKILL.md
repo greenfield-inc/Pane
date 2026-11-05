@@ -1,6 +1,6 @@
 ---
 name: eli5
-description: Teach an unfamiliar topic from first principles with a picture-first HTML explanation, saved in Grain when connected. Use for "explain from scratch," "I'm lost," "what does this mean?", "explain in plain English," beginner questions about how something works, or /eli5; no explicit skill invocation is needed. Skip simple factual lookups and respect text-only requests.
+description: Teach an unfamiliar topic from first principles with a picture-first HTML explanation, published to the workspace's document destination when one is named. Use for "explain from scratch," "I'm lost," "what does this mean?", "explain in plain English," beginner questions about how something works, or /eli5; no explicit skill invocation is needed. Skip simple factual lookups and respect text-only requests.
 argument-hint: "<topic, question, or path to explain>"
 allowed-tools: Read, Grep, Glob, Bash, Write
 ---
@@ -73,7 +73,7 @@ rather than forcing an object.
 
 ## Boundaries
 
-- Save the page in the existing task's Grain workspace when connected, following [explain-visually](../explain-visually/SKILL.md); pass the workspace ID and storage rule to any writer. Keep needed local files, respect audience/privacy limits, and fall back locally when disconnected. This overrides the renderer's local-only/no-publication defaults, not its visual standards.
+- Save the page in the existing task's folder at the document destination your workspace instructions name, following [explain-visually](../explain-visually/SKILL.md); pass the workspace ID and storage rule to any writer. Keep needed local files, respect audience/privacy limits, and without a destination save it in the work's page bundle (see [page](../page/SKILL.md)) and open it with `runpane panels open --file <path> --source agent --yes`. This overrides the renderer's local-only/no-publication defaults, not its visual standards.
 - Accuracy outranks simplicity: simplify by omission, never by
   distortion, and name the biggest thing you left out in floor 3.
 - The page is the deliverable; the chat reply is one line saying where

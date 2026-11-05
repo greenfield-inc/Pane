@@ -25,6 +25,13 @@ same command to the end of your own `PATH`, so it works in any terminal.
   run `npx --yes runpane@latest update`. It exits 127 (`runpane.cmd`: 1). When Pane is not running,
   `runpane update` installs the latest release instead of updating in place,
   so it works in this state.
+- Beside it, `<PANE_DIR>/bin/pane-node` (plus `pane-node.cmd` on Windows)
+  runs any script with the same binary as Node, or `node` from `PATH` when the
+  binary is gone, so bundled skill scripts such as the Session status page
+  renderer work on a machine without Node. In WSL it starts the Windows binary
+  through interop and converts path arguments to Windows paths. On Linux, both
+  shims use `$APPIMAGE` when Pane runs as an AppImage, since its `execPath` is
+  a per-launch mount.
 - The shim checks only that the binary exists and is executable. If the
   binary exists but crashes on launch, `runpane` fails with it; run
   `npx --yes runpane@latest update` to reinstall Pane.
