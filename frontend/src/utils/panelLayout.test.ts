@@ -11,8 +11,11 @@ import type {
   PanelSplitNode,
   PanelLayoutNode,
   SessionPanelLayout,
+  ToolPanel,
 } from '../../../shared/types/panels';
 import {
+  applyPanelReplacements,
+  placeCreatedPanel,
   primaryGroup,
   allGroups,
   allPanelIds,
@@ -690,5 +693,58 @@ describe('dropZoneFor', () => {
   it('picks the closest edge in a corner', () => {
     expect(dropZoneFor(5, 20, rect)).toBe('left');
     expect(dropZoneFor(20, 5, rect)).toBe('top');
+  });
+});
+
+describe('placing a chat tab that replaces a terminal tab (D-191)', () => {
+  const panel = (id: string, metadata: Partial<ToolPanel['metadata']> = {}): Pick<ToolPanel, 'id' | 'metadata'> => ({ id, metadata: { createdAt: '', lastActiveAt: '', position: 0, ...metadata } });
+
+  it('goes right after the tab it replaces, so closing that tab leaves it in the exact slot', () => {
+    const { root } = createSingleGroupLayout(['term', 'file-a', 'file-b'], 'term');
+    const placed = placeCreatedPanel(root, primaryGroup(root).id, panel('chat', { replacesPanelId: 'term' }));
+    expect(primaryGroup(placed).panelIds).toEqual(['term', 'chat', 'file-a', 'file-b']);
+    expect(primaryGroup(placed).activePanelId).toBe('term');
+    expect(primaryGroup(removePanelFromLayout(placed, 'term')!).panelIds).toEqual(['chat', 'file-a', 'file-b']);
+  });
+
+  it('stays in the replaced tab\'s group, not the focused one', () => {
+    const { root: left } = createSingleGroupLayout(['term', 'file-a'], 'term');
+    const split = splitGroup(left, primaryGroup(left).id, 'file-a', 'row');
+    const other = allGroups(split).find(group => group.panelIds.includes('file-a'))!;
+    const placed = placeCreatedPanel(split, other.id, panel('chat', { replacesPanelId: 'term' }));
+    expect(findGroupContainingPanel(placed, 'chat')?.panelIds).toEqual(['term', 'chat']);
+  });
+
+  it('still appends every other new tab, and a replacement whose tab is not in this layout', () => {
+    const { root } = createSingleGroupLayout(['a'], 'a');
+    const group = primaryGroup(root).id;
+    expect(primaryGroup(placeCreatedPanel(root, group, panel('b'))).panelIds).toEqual(['a', 'b']);
+    expect(primaryGroup(placeCreatedPanel(root, group, panel('c', { replacesPanelId: 'gone' }))).panelIds).toEqual(['a', 'c']);
+    expect(primaryGroup(placeCreatedPanel(root, group, panel('b'))).activePanelId).toBe('a');
+  });
+});
+
+describe('a saved layout that still names the tab a chat replaced (D-191)', () => {
+  const panel = (id: string, replacesPanelId?: string): Pick<ToolPanel, 'id' | 'metadata'> => ({ id, metadata: { createdAt: '', lastActiveAt: '', position: 0, replacesPanelId } });
+
+  it('gives the chat that tab\'s slot and selection', () => {
+    const { root } = createSingleGroupLayout(['term', 'docs'], 'term');
+    const next = applyPanelReplacements(root, [panel('chat', 'term'), panel('docs')]);
+    expect(primaryGroup(next).panelIds).toEqual(['chat', 'docs']);
+    expect(primaryGroup(next).activePanelId).toBe('chat');
+  });
+
+  it('moves a chat already appended at the end into that slot', () => {
+    const { root } = createSingleGroupLayout(['term', 'docs', 'chat'], 'docs');
+    const next = applyPanelReplacements(root, [panel('chat', 'term'), panel('docs')]);
+    expect(primaryGroup(next).panelIds).toEqual(['chat', 'docs']);
+    expect(primaryGroup(next).activePanelId).toBe('docs');
+  });
+
+  it('leaves the layout alone while the replaced tab is still open, or once it has left the layout', () => {
+    const { root } = createSingleGroupLayout(['term', 'chat', 'docs'], 'term');
+    expect(applyPanelReplacements(root, [panel('term'), panel('chat', 'term'), panel('docs')])).toBe(root);
+    const { root: later } = createSingleGroupLayout(['docs', 'chat'], 'docs');
+    expect(applyPanelReplacements(later, [panel('chat', 'term'), panel('docs')])).toBe(later);
   });
 });

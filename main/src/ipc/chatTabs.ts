@@ -173,7 +173,7 @@ function switchPorts(services: AppServices, registry: PaneCommandRegistry): Swit
       },
     },
     chat: {
-      create: async (paneId, title, state) => (await panelManager.createPanel({ sessionId: paneId, type: 'chat', title, initialState: { customState: state }, activate: false, announceActivation: false })).id,
+      create: async (replaces, state) => (await panelManager.createPanel({ sessionId: replaces.sessionId, type: 'chat', title: replaces.title, initialState: { customState: state }, metadata: { position: replaces.metadata.position, replacesPanelId: replaces.id }, activate: false, announceActivation: false })).id,
       start: id => {
         let timer: ReturnType<typeof setTimeout> | undefined;
         const limit = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new PaneError('CHAT_SWITCH_TIMEOUT', 'The agent did not reopen the conversation within 3 minutes.', 'Keep working in the terminal, then try again.')), REOPEN_LIMIT_MS); });

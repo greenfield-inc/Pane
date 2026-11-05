@@ -52,7 +52,8 @@ function world(panel: ToolPanel, overrides: Partial<World> = {}) {
       },
     },
     chat: {
-      create: async (_paneId, _title, state) => {
+      create: async (replaces, state) => {
+        expect(replaces.id).toBe(panel.id);
         const id = `chat-${++next}`;
         w.chats.set(id, state);
         w.log.push(`create ${id} load ${state.acpSessionId}`);

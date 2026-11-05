@@ -53,7 +53,8 @@ Nothing is touched when:
 
 Otherwise Pane stops the terminal agent, opens the chat tab and loads the
 conversation with ACP `session/load`, so the history shows, then closes the
-terminal tab. A Session's orchestrator becomes its chat tab.
+terminal tab. The chat takes the terminal's exact place in the tab order and is
+selected. A Session's orchestrator becomes its chat tab.
 
 Two Codex cases fail cleanly today. A terminal Codex that runs through Codex's
 shared background service (`codex app-server daemon`) stays that thread's writer

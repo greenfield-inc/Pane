@@ -15,6 +15,7 @@ import type {
   PanelGroupNode,
   PanelLayoutNode,
   SessionPanelLayout,
+  ToolPanel,
 } from '../../../shared/types/panels';
 import {
   allLeaves,
@@ -167,6 +168,48 @@ export function addPanelToGroup(
   }
 
   return insert(root);
+}
+
+/**
+ * Where a tab created outside this client's own menu goes, without showing it. A tab that replaces
+ * another (Switch to chat) goes right after it, so it holds that tab's slot once that tab closes.
+ */
+export function placeCreatedPanel(root: PanelLayoutNode, focusedGroupId: string, panel: Pick<ToolPanel, 'id' | 'metadata'>): PanelLayoutNode {
+  if (panel.metadata?.openPlacement === 'split') return placePanelInSplit(root, panel.id, false);
+  const replaced = panel.metadata?.replacesPanelId;
+  const group = replaced ? findGroupContainingPanel(root, replaced) : null;
+  if (!replaced || !group || allPanelIds(root).includes(panel.id)) return addPanelToGroup(root, focusedGroupId, panel.id, { activate: false });
+  const insert = (node: PanelLayoutNode): PanelLayoutNode => {
+    if (node.type !== 'group') return { ...node, children: node.children.map(insert) };
+    if (node.id !== group.id) return node;
+    const panelIds = [...node.panelIds];
+    panelIds.splice(panelIds.indexOf(replaced) + 1, 0, panel.id);
+    return { ...node, panelIds };
+  };
+  return insert(root);
+}
+
+/**
+ * A saved layout can still name a tab that has since been replaced (Switch to chat): the
+ * replacement takes that tab's slot and selection instead of being appended at the end.
+ */
+export function applyPanelReplacements(root: PanelLayoutNode, panels: ReadonlyArray<Pick<ToolPanel, 'id' | 'metadata'>>): PanelLayoutNode {
+  const live = new Set(panels.map(panel => panel.id));
+  let next = root;
+  for (const panel of panels) {
+    const replaced = panel.metadata?.replacesPanelId;
+    if (!replaced || live.has(replaced) || !allPanelIds(next).includes(replaced)) continue;
+    const swap = (node: PanelLayoutNode): PanelLayoutNode => {
+      if (node.type !== 'group') return { ...node, children: node.children.map(swap) };
+      return {
+        ...node,
+        panelIds: node.panelIds.filter(id => id !== panel.id).map(id => id === replaced ? panel.id : id),
+        activePanelId: node.activePanelId === replaced ? panel.id : node.activePanelId,
+      };
+    };
+    next = swap(next);
+  }
+  return next;
 }
 
 /**

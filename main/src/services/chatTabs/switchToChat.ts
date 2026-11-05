@@ -45,8 +45,8 @@ export interface SwitchToChatPorts {
     close(panelId: string): Promise<void>;
   };
   chat: {
-    /** Adds a chat tab beside the terminal, not yet shown or started. */
-    create(paneId: string, title: string, state: ChatPanelState): Promise<string>;
+    /** Adds a chat tab right after the terminal it replaces, in that tab's position, not yet shown or started. */
+    create(replaces: ToolPanel, state: ChatPanelState): Promise<string>;
     /** Starts its agent; throws a PaneError when it does not start or cannot load the conversation. */
     start(panelId: string): Promise<void>;
     close(panelId: string): Promise<void>;
@@ -122,7 +122,7 @@ export async function switchToChat(panelId: string, ports: SwitchToChatPorts): P
   };
 
   let chatId: string;
-  try { chatId = await ports.chat.create(panel.sessionId, panel.title, chatState); }
+  try { chatId = await ports.chat.create(panel, chatState); }
   catch (error) { return fail(reasonOf(error), NOTHING_SWITCHED); }
   try { await ports.chat.start(chatId); }
   catch (error) {
