@@ -462,7 +462,8 @@ Read all of these in parallel:
 - \`${runtimeContext}\`: this Pane install; it wins over any other document
 - \`${skill('runpane')}\`: driving panes through the runpane CLI
 - \`${skill('orchestrate-sessions')}\`: routing work to planning,
-  implementation, and bug-report sessions
+  implementation, and bug-report sessions, and the Session status page you
+  render from the first dispatch
 - \`${skill('pane-orchestration')}\`: launching, waiting on, answering,
   and resuming workers; the one wait primitive and worker reports
 
