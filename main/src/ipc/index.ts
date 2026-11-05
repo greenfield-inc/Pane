@@ -127,8 +127,10 @@ export function registerIpcHandlers(services: AppServices): PaneCommandRegistry 
   registerWorkspaceAccessHandlers(ipcMain, services, commandRegistry);
   registerRunpaneHandlers(ipcMain, services, commandRegistry);
   registerDesktopAlertHandlers(ipcMain, services);
-  services.notifyService = registerNotifyHandlers(ipcMain, services, commandRegistry);
+  const notify = registerNotifyHandlers(ipcMain, services, commandRegistry);
+  services.notifyService = notify;
   registerPaneLinkHandler(commandRegistry, {
+    dockWaitingCard: (paneId, panelId) => notify.queue.dockWaitingCard(paneId, panelId),
     repoExists: (repoId) => Boolean(services.databaseService.getProject(repoId)),
     navigate: (target) => {
       const window = services.getMainWindow();

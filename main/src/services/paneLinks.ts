@@ -7,8 +7,9 @@ import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDec
 
 /**
  * pane:// deep links: `pane://open?pane=<id>[&panel=<id>]`, `pane://open?repo=<id>`, or
- * `pane://open?session=<id>`. Opening one navigates the app to what it names; it never
- * changes Pane state, and anything that doesn't parse exactly is rejected.
+ * `pane://open?session=<id>`. Opening one navigates the app to what it names, and a panel link
+ * docks that tab's waiting Notify card as Open in Pane does. It never answers a card or changes
+ * other Pane state, and anything that doesn't parse exactly is rejected.
  */
 export const PANE_LINK_SCHEME = 'pane';
 export const OPEN_PANE_LINK_CHANNEL = 'runpane:links:open';
@@ -62,6 +63,8 @@ interface PaneLinkOpener {
   /** Shows the window and asks the renderer to navigate to a repository or Session. */
   navigate: (target: PaneLinkNavigation) => void;
   repoExists: (repoId: number) => boolean;
+  /** Docks the tab's oldest waiting Notify card under its terminal; does nothing when none waits. */
+  dockWaitingCard: (paneId: string, panelId: string) => void;
 }
 
 /** Registers `runpane:links:open`, the one path every pane:// link (OS or CLI) goes through. */
@@ -72,6 +75,7 @@ export function registerPaneLinkHandler(commandRegistry: PaneCommandRegistry, op
       if (target.kind === 'pane') {
         // The same code path as `runpane panes focus`: validates the pane and panel, raises the window.
         await commandRegistry.invoke('runpane:panes:focus', [{ paneId: target.paneId, panelId: target.panelId, source: 'user' }]);
+        if (target.panelId) opener.dockWaitingCard(target.paneId, target.panelId);
       } else {
         if (target.kind === 'repo' && !opener.repoExists(target.repoId)) {
           throw new Error(`No Pane repo found with id ${target.repoId}. Run \`runpane repos list\` to see saved repos.`);
