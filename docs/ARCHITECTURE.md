@@ -163,8 +163,8 @@ Preview components never enter the editable auto-save path, even on errors.
   and keychain values are read then and never stored with the project:
   [PROJECT_ENV_VARS.md](PROJECT_ENV_VARS.md).
 - Pane secrets (`main/src/services/paneSecrets.ts`, `main/src/ipc/paneSecrets.ts`)
-  keep an index in `config.json` and values in the keychain or an encrypted 0600
-  file, sync with the shared keys, and reach commands only through
+  keep an index in `config.json` and values in the keychain or a 0600 file
+  (encrypted where the OS offers it), sync with the shared keys, and reach commands only through
   `runpane secrets exec`: [PANE_SECRETS.md](PANE_SECRETS.md).
 
 ## Notes

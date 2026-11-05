@@ -641,9 +641,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
      * Used by `PanelTabBar` to start/stop the dev server for a session.
      */
     resolveRunScript: (sessionId: string): Promise<IPCResponse> => invokeIpc('projects:resolve-run-script', sessionId),
-    /** The project's environment variables. Keychain variables carry only their item reference, never the value. */
+    /** The project's environment variables. Pane secret and keychain variables carry only their reference, never the value. */
     getEnvVars: (projectId: number): Promise<IPCResponse> => invokeIpc('projects:get-env-vars', projectId),
-    /** Replace the project's environment variables. A typed secret is stored in the keychain and dropped. */
+    /** Replace the project's environment variables. A typed secret is stored as a Pane secret and dropped. */
     setEnvVars: (projectId: number, variables: ProjectEnvVarInput[]): Promise<IPCResponse> => invokeIpc('projects:set-env-vars', projectId, variables),
   },
 
