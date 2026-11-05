@@ -27,7 +27,7 @@ const TRUNCATION_MARKER = '[earlier output cut]\n';
 /** How often a ready panel with background work is looked at again. */
 const BACKGROUND_RECHECK_MS = 10_000;
 const STATE_CHANGES: ReadonlySet<RunpaneWorkspaceEntry['kind']> = new Set([
-  'agent.ready', 'agent.busy', 'agent.blocked', 'agent.unknown', 'agent.report', 'panel.exited', 'panel.stopped',
+  'agent.ready', 'agent.busy', 'agent.blocked', 'agent.unknown', 'agent.report', 'panel.exited', 'panel.stopped', 'panel.paused',
 ]);
 
 const expectationsFileSchema = boundary.object({
@@ -135,6 +135,11 @@ export class ExpectedReportTracker {
     if (entry.kind === 'agent.report') {
       if (this.expectations.get(panelId)?.pending) return;
       this.clear(panelId);
+      return;
+    }
+    // Pause stopped the agent mid-work; like its withdrawn Notify cards, the report it owed is dropped.
+    if (entry.kind === 'panel.paused') {
+      if (!this.raising.has(panelId)) this.clear(panelId);
       return;
     }
     if (entry.kind !== 'agent.ready' && entry.kind !== 'panel.exited') return;
