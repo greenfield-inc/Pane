@@ -133,16 +133,10 @@ export function posixJoin(...segments: string[]): string {
  * Bypasses cmd.exe entirely, avoiding all cmd.exe escaping issues (%, ^, &, etc.).
  * If cwd provided, cd to it first inside the bash -c command.
  */
-export function getWSLExecArgs(command: string, distro: string, cwd?: string, extraEnv?: Record<string, string>): WSLCommand {
+export function getWSLExecArgs(command: string, distro: string, cwd?: string): WSLCommand {
   let bashCommand = command;
   if (cwd) {
     bashCommand = `cd ${escapeForBash(cwd)} && ${command}`;
-  }
-  if (extraEnv && Object.keys(extraEnv).length > 0) {
-    const exports = Object.entries(extraEnv)
-      .map(([key, value]) => `export ${key}=${escapeForBash(value)}`)
-      .join('; ');
-    bashCommand = `${exports}; ${bashCommand}`;
   }
   return {
     file: 'wsl.exe',

@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { CommandExecutor } from './commandExecutor';
 
 describe('CommandExecutor.execFileAsync', () => {
-  it('builds one escaped bash command for the WSL branch', async () => {
+  it('builds one escaped bash command for the WSL branch, with variables in the environment only', async () => {
     const fileExecutor = vi.fn(async () => ({ stdout: 'ok\n', stderr: '' }));
     const executor = new CommandExecutor(fileExecutor);
 
@@ -30,9 +30,10 @@ describe('CommandExecutor.execFileAsync', () => {
         '--',
         'bash',
         '-c',
-        "export PANE_DIFF_TEST_ENV='value with space'; cd '/repo with space' && 'git' 'diff' '$HOME' 'quote'\\''arg'",
+        "cd '/repo with space' && 'git' 'diff' '$HOME' 'quote'\\''arg'",
       ],
-      expect.objectContaining({ cwd: undefined }),
+      // The value crosses into WSL through the environment, never the command line.
+      expect.objectContaining({ cwd: undefined, env: expect.objectContaining({ PANE_DIFF_TEST_ENV: 'value with space', WSLENV: expect.stringMatching(/(^|:)PANE_DIFF_TEST_ENV$/) }) }),
     );
   });
 });
