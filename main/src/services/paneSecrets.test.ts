@@ -114,7 +114,10 @@ describe('PaneSecretStore on the file backend', () => {
  */
 function fakeSecurity() {
   const items = new Map<string, string>();
+  /** Calls the keychain refuses, as a locked keychain or a denied prompt does. */
+  let refuses: (args: readonly string[], stdin: string) => boolean = () => false;
   const run: SecurityRunner = async (args, stdin = '') => {
+    if (refuses(args, stdin)) return { code: 51, stdout: '', stderr: 'security: User interaction is not allowed.\n' };
     if (args[0] === '-i') {
       const line = stdin.replace(/\n$/, '');
       const [command, rest] = [line.slice(0, 4095), line.slice(4095)];
@@ -128,7 +131,7 @@ function fakeSecurity() {
     if (args[0] === 'delete-generic-password') items.delete(key);
     return { code: 0, stdout: '', stderr: `password: 0x${Buffer.from(value).toString('hex').toUpperCase()}  "…"\n` };
   };
-  return { items, run };
+  return { items, run, refuse: (when: typeof refuses) => { refuses = when; } };
 }
 
 describe('Pane secrets in the macOS keychain', () => {
@@ -148,6 +151,35 @@ describe('Pane secrets in the macOS keychain', () => {
     expect([...security.items.keys()]).toEqual(['Pane|secret:gcp/SERVICE_ACCOUNT']);
 
     await store.set('gcp', 'SERVICE_ACCOUNT', longValue);
+    await store.delete('gcp', 'SERVICE_ACCOUNT');
+    expect(security.items.size).toBe(0);
+  });
+
+  it('keeps the earlier value and leaves no parts when the keychain refuses the last write of a long value', async () => {
+    const security = fakeSecurity();
+    const store = new PaneSecretStore(memoryConfig(), keychainSecretBackend(macKeychain(security.run), 'Pane'), () => 'this-mac');
+    await store.set('gcp', 'SERVICE_ACCOUNT', 'earlier');
+    // The main item's line is the one that names no part.
+    security.refuse((args, stdin) => args[0] === '-i' && stdin.includes('-a "secret:gcp/SERVICE_ACCOUNT" '));
+
+    await expect(store.set('gcp', 'SERVICE_ACCOUNT', longValue)).rejects.toMatchObject({ code: 'SECRET_WRITE_FAILED' });
+
+    expect([...security.items.keys()]).toEqual(['Pane|secret:gcp/SERVICE_ACCOUNT']);
+    expect(await store.read('gcp', 'SERVICE_ACCOUNT')).toBe('earlier');
+  });
+
+  it('keeps a long secret listed when the keychain refuses its delete, and removes every item on retry', async () => {
+    const security = fakeSecurity();
+    const store = new PaneSecretStore(memoryConfig(), keychainSecretBackend(macKeychain(security.run), 'Pane'), () => 'this-mac');
+    await store.set('gcp', 'SERVICE_ACCOUNT', longValue);
+    security.refuse(args => args[0] === 'find-generic-password');
+
+    const failure = await store.delete('gcp', 'SERVICE_ACCOUNT').catch((error: Error) => error);
+
+    expect(failure).toMatchObject({ code: 'SECRET_WRITE_FAILED' });
+    expect(String(failure)).not.toContain('MIIEvQIBADAN');
+    expect(store.has('gcp', 'SERVICE_ACCOUNT')).toBe(true);
+    security.refuse(() => false);
     await store.delete('gcp', 'SERVICE_ACCOUNT');
     expect(security.items.size).toBe(0);
   });

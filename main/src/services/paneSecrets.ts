@@ -18,7 +18,7 @@ import type { AppConfig } from '../types/config';
 import type { ConfigManager } from './configManager';
 import { getPaneEventSink, getRuntimeConfigManager } from '../core/runtime';
 import { getAppDirectory } from '../utils/appDirectory';
-import { paneKeychainService, systemKeychain, type Keychain } from './keychain';
+import { KeychainItemMissing, paneKeychainService, systemKeychain, type Keychain } from './keychain';
 
 /** Index record for one secret, kept in config.json. Never holds the value. */
 export interface PaneSecretMeta {
@@ -85,10 +85,23 @@ export function keychainSecretBackend(keychain: Keychain, service: string): Secr
     const match = main.startsWith(PARTS_MARKER) ? /^([0-9a-z]+):(\d+)$/.exec(main.slice(PARTS_MARKER.length)) : null;
     return match ? { generation: match[1], count: Number(match[2]) } : null;
   };
-  const removeParts = (key: string, parts: { generation: string; count: number }) => Promise.allSettled(
-    Array.from({ length: parts.count }, (_, index) => keychain.remove(service, partAccount(key, parts.generation, index))),
-  );
-  const currentParts = (key: string) => keychain.read(service, account(key)).then(partsOf, () => null);
+  /** Removes the parts; an item already gone counts as removed, any other failure is thrown. */
+  const removeParts = async (key: string, parts: { generation: string; count: number }) => {
+    const results = await Promise.allSettled(
+      Array.from({ length: parts.count }, (_, index) => keychain.remove(service, partAccount(key, parts.generation, index))),
+    );
+    const failed = results.find(result => result.status === 'rejected' && !(result.reason instanceof KeychainItemMissing));
+    if (failed?.status === 'rejected') throw failed.reason;
+  };
+  /** The parts the main item lists, or null when there is no main item or it holds the value itself. */
+  const currentParts = async (key: string) => {
+    try {
+      return partsOf(await keychain.read(service, account(key)));
+    } catch (error) {
+      if (error instanceof KeychainItemMissing) return null;
+      throw error;
+    }
+  };
   return {
     storage: () => ({ kind: 'keychain', encrypted: true }),
     async read(key) {
@@ -108,18 +121,24 @@ export function keychainSecretBackend(keychain: Keychain, service: string): Secr
         const parts = { generation, count: pieces.length };
         try {
           for (const [index, piece] of pieces.entries()) await keychain.write(service, partAccount(key, generation, index), piece);
+          await keychain.write(service, account(key), `${PARTS_MARKER}${generation}:${pieces.length}`);
         } catch (error) {
-          await removeParts(key, parts);
+          await removeParts(key, parts).catch(() => undefined);
           throw error;
         }
-        await keychain.write(service, account(key), `${PARTS_MARKER}${generation}:${pieces.length}`);
       }
-      if (previous) await removeParts(key, previous);
+      // Nothing points at the earlier parts now. One that cannot be removed keeps the earlier value.
+      if (previous) await removeParts(key, previous).catch(() => undefined);
     },
     async remove(key) {
+      // Parts first: the main item is the only record of them, so it goes last.
       const previous = await currentParts(key);
-      await keychain.remove(service, account(key));
       if (previous) await removeParts(key, previous);
+      try {
+        await keychain.remove(service, account(key));
+      } catch (error) {
+        if (!(error instanceof KeychainItemMissing)) throw error;
+      }
     },
   };
 }
@@ -316,12 +335,21 @@ export class PaneSecretStore {
     return this.serial(async () => {
       if (!this.has(project, name)) throw secretNotFound(project, name);
       const key = paneSecretKey(project, name);
+      // The value first, so a refused removal leaves the secret listed and the delete can be retried.
+      try {
+        await this.values.remove(key);
+      } catch (error) {
+        throw new PaneError(
+          'SECRET_WRITE_FAILED',
+          `Pane could not delete ${key}: ${reasonOf(error)}. The secret is still saved.`,
+          this.values.storage().kind === 'keychain'
+            ? 'Unlock the login keychain in Keychain Access, then delete it again.'
+            : 'Check that Pane can write to its data directory, then delete it again.',
+        );
+      }
       const meta: PaneSecretMeta = { updatedAt: this.now().toISOString(), source: this.hostLabel(), deleted: true };
       await this.config.updateConfigWith(config => ({ paneSecrets: { ...config.paneSecrets, [key]: meta } }));
       this.known.delete(key);
-      await this.values.remove(key).catch(error => {
-        console.warn(`[PaneSecrets] Could not remove the stored value of ${key}: ${reasonOf(error)}`);
-      });
       this.onLocalChange();
     });
   }

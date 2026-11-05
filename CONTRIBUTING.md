@@ -74,7 +74,8 @@ install's data:
 - **Pane secrets** on macOS live in your login keychain, which `PANE_DIR` does
   not move. A dev build with its own `PANE_DIR` uses its own service,
   `Pane (<data directory>)`, so it never reads or deletes the installed app's
-  secrets, but its items stay in your keychain until you delete them.
+  secrets, but its items (several for a value over 1 KB) stay in your keychain
+  until you delete them.
 - **Electron's browser profile** (localStorage, cache, cookies) is not covered
   by `PANE_DIR`. An unpackaged build uses the same profile folder as the
   installed app (`~/Library/Application Support/Pane` on macOS). `pnpm dev`

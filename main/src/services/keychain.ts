@@ -26,6 +26,11 @@ export type SecurityRunner = (args: readonly string[], stdin?: string) => Promis
 const SECURITY_TIMEOUT_MS = 60_000;
 /** Longest command line `security -i` reads whole; it splits longer ones at about 4 KB. */
 const SECURITY_LINE_BYTES = 4000;
+/** `security`'s exit code for an item that does not exist (errSecItemNotFound). */
+const ITEM_NOT_FOUND_EXIT = 44;
+
+/** A read or removal of a keychain item that does not exist. */
+export class KeychainItemMissing extends Error {}
 
 const runSecurity: SecurityRunner = (args, stdin) => new Promise(resolve => {
   const child = execFile('/usr/bin/security', [...args], { timeout: SECURITY_TIMEOUT_MS, encoding: 'utf8' }, (error, stdout, stderr) => {
@@ -68,6 +73,7 @@ export function macKeychain(run: SecurityRunner = runSecurity): Keychain {
     supported: true,
     async read(service, account) {
       const result = await run(['find-generic-password', '-s', service, '-a', account, '-g']);
+      if (result.code === ITEM_NOT_FOUND_EXIT) throw new KeychainItemMissing(securityFailure(result));
       const password = result.code === 0 ? parseSecurityPassword(result.stderr) : null;
       if (password === null) throw new Error(securityFailure(result));
       return password;
@@ -85,6 +91,7 @@ export function macKeychain(run: SecurityRunner = runSecurity): Keychain {
     },
     async remove(service, account) {
       const result = await run(['delete-generic-password', '-s', service, '-a', account]);
+      if (result.code === ITEM_NOT_FOUND_EXIT) throw new KeychainItemMissing(securityFailure(result));
       if (result.code !== 0) throw new Error(securityFailure(result));
     },
   };

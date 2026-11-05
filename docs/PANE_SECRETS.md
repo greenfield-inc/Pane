@@ -78,11 +78,13 @@ their own copy: see [Project environment variables](PROJECT_ENV_VARS.md).
 
 | Host | Store |
 | --- | --- |
-| macOS | The login keychain: service `Pane` (or `Pane (<data directory>)` for a dev build's `PANE_DIR`), account `secret:<project>/<NAME>` |
+| macOS | The login keychain: service `Pane` (or `Pane (<data directory>)` for a dev build's `PANE_DIR`), account `secret:<project>/<NAME>`. A value over 1 KB is kept in part items `secret:<project>/<NAME>#<id>.<n>`, which that account lists. |
 | Windows, desktop Linux | `secrets.json` in the Pane data directory, mode 0600, each value encrypted with the OS (DPAPI, or the desktop keyring) through Electron's safeStorage |
 | Linux without a keyring (a headless server) | The same 0600 file, as plain text. `runpane secrets list` on that host says so. |
 
 The index of names, times and machines lives in `config.json` under `paneSecrets`.
+A delete removes the stored value first. If the keychain refuses, the secret stays
+saved and listed, and the delete can be run again once the keychain is unlocked.
 
 ## How secrets sync
 

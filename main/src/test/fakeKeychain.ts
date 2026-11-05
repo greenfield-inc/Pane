@@ -1,4 +1,4 @@
-import type { Keychain } from '../services/keychain';
+import { KeychainItemMissing, type Keychain } from '../services/keychain';
 
 /** In-memory stand-in for the OS keychain, so tests never touch a real login keychain. */
 export class FakeKeychain implements Keychain {
@@ -31,7 +31,7 @@ export class FakeKeychain implements Keychain {
     const reason = this.failures.get(this.id(service, account));
     if (reason) throw new Error(reason);
     const secret = this.get(service, account);
-    if (secret === undefined) throw new Error('The specified item could not be found in the keychain.');
+    if (secret === undefined) throw new KeychainItemMissing('The specified item could not be found in the keychain.');
     return secret;
   }
 
