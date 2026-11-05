@@ -506,6 +506,26 @@ describe('daemon registry IPC bindings', () => {
       .resolves.toEqual({ success: false, error: 'Sessions operation failed' });
   });
 
+  it('tells a phone app too old for chat tabs to update instead of sending it a chat orchestrator (D-203)', async () => {
+    const registry = new PaneCommandRegistry();
+    const view = (type: 'chat' | 'terminal') => ({ session: { id: 'session-1' }, panel: { id: 'p1', type } });
+    const getView = vi.fn(async () => view('chat'));
+    registerOrchestrationSessionHandlers(createIpcMainStub(), createServicesStub({
+      // SAFETY: The get channel only reaches this getView stub.
+      orchestrationSessionManager: { getView } as never,
+    }), registry);
+    // Apps released before chat tabs send no options, and crash on a tab kind they do not know.
+    const old = await registry.invoke('orchestration-sessions:get', [{ sessionId: 'session-1' }]);
+    expect(old).toMatchObject({ success: false });
+    expect(JSON.stringify(old)).toContain('This Session runs as a chat');
+    expect(JSON.stringify(old)).toContain('Update Pane on your phone');
+    await expect(registry.invoke('orchestration-sessions:get', [{ sessionId: 'session-1' }, { chatTabs: true }]))
+      .resolves.toEqual({ success: true, data: view('chat') });
+    getView.mockResolvedValueOnce(view('terminal'));
+    await expect(registry.invoke('orchestration-sessions:get', [{ sessionId: 'session-1' }]))
+      .resolves.toEqual({ success: true, data: view('terminal') });
+  });
+
   it('accepts OpenCode in both Session set-agent forms', async () => {
     const registry = new PaneCommandRegistry();
     const setAgent = vi.fn(async () => ({ agent: 'opencode' }));

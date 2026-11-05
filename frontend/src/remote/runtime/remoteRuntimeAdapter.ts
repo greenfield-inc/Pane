@@ -240,7 +240,7 @@ export class RemoteRuntimeAdapter {
    * leaves the host's selected Session alone so a phone never moves the desktop.
    */
   openOrchestrationSession(sessionId: string): Promise<OrchestrationSessionView<Session>> {
-    return this.invoke<OrchestrationSessionView<Session>>('orchestration-sessions:get', [{ sessionId }]);
+    return this.invoke<OrchestrationSessionView<Session>>('orchestration-sessions:get', [{ sessionId }, { chatTabs: true }]);
   }
 
   createOrchestrationSession(input: OrchestrationSessionCreateInput): Promise<OrchestrationSessionView<Session>> {
