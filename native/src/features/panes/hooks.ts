@@ -124,6 +124,8 @@ export function useSetPanePaused() {
       projects && setPanePaused(projects, paneId, paused ? { at: new Date().toISOString(), by: 'manual' } : undefined));
     const result = await (paused ? pause : resume).mutateAsync([{ paneId }]);
     if (!result.ok) throw new Error(result.message);
+    // Chat tabs can't pause yet (D-187): what the person must know, for the caller to show.
+    return result.chatTabsNotPaused ? result.message : undefined;
   };
 }
 

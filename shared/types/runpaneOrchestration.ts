@@ -1154,6 +1154,8 @@ export interface RunpanePauseResult {
   unchanged: number;
   /** Tabs that could not be resumed, with why; the others still were. */
   failed: Array<{ panelId: string; error: string }>;
+  /** On a pause: chat tabs in scope, which can't pause yet, so their agents keep running. */
+  chatTabsNotPaused?: number;
   message: string;
   nextCommand: string;
 }
