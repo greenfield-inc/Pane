@@ -2510,8 +2510,8 @@ describe('runpane IPC handlers', () => {
         set: [{ key: 'STRIPE_KEY', source: 'secret', project: 'stripe', name: 'STRIPE_SECRET_KEY', value: 'sk_canary' }],
       } } }])).rejects.toMatchObject({
         code: 'ERR_RUNPANE_REPO_SETTINGS_INVALID',
-        message: expect.stringContaining('runpane secrets set'),
-        next: expect.not.stringContaining('sk_canary'),
+        message: expect.not.stringContaining('sk_canary'),
+        next: expect.stringContaining('runpane secrets set'),
       });
       expect(envVars).toEqual([]);
     });

@@ -17,7 +17,7 @@ export interface ResolvedProjectEnv {
 
 type ProjectEnvStore = Pick<DatabaseService, 'getProjectEnvVars' | 'replaceProjectEnvVars' | 'getSession'>;
 
-const SETTINGS_STEP = 'Open Project Settings → Environment Variables and correct it.';
+const SETTINGS_STEP = 'Correct it in Project Settings → Environment Variables, or with `runpane repos update --env`.';
 
 function invalid(message: string): PaneError {
   return new PaneError('PROJECT_ENV_INVALID', `${message} Nothing was saved.`, SETTINGS_STEP);

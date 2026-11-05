@@ -81,6 +81,20 @@ describe('PaneSecretStore on the file backend', () => {
     await expect(store.delete('qa', 'GONE')).rejects.toMatchObject({ code: 'SECRET_NOT_FOUND' });
   });
 
+  it('announces a change made here, so connected desktops sync it, and stays quiet for changes that arrived by sync', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pane-secrets-'));
+    tempDirs.push(dir);
+    const changes: string[] = [];
+    const store = new PaneSecretStore(memoryConfig(), fileSecretBackend(path.join(dir, 'secrets.json'), fakeEncryption(true)), () => 'linux-box', () => new Date(), () => changes.push('changed'));
+
+    await store.set('qa', 'HOST_SET', 'v');
+    await store.delete('qa', 'HOST_SET');
+    expect(changes).toEqual(['changed', 'changed']);
+
+    await store.applyFromSync({ 'qa/FROM_MAC': { value: 'm', updatedAt: '2026-01-01T00:00:00.000Z', source: 'mac' } });
+    expect(changes).toHaveLength(2);
+  });
+
   it('refuses names exec could not inject, and bad projects', async () => {
     const { store } = await fileStore(true);
 

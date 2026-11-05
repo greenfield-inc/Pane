@@ -15,7 +15,7 @@ import {
 import type { SharedCredential } from '../../../shared/types/sharedCredentials';
 import type { AppConfig } from '../types/config';
 import type { ConfigManager } from './configManager';
-import { getRuntimeConfigManager } from '../core/runtime';
+import { getPaneEventSink, getRuntimeConfigManager } from '../core/runtime';
 import { getAppDirectory } from '../utils/appDirectory';
 import { paneKeychainService, systemKeychain, type Keychain } from './keychain';
 
@@ -185,6 +185,8 @@ export class PaneSecretStore {
     private readonly values: SecretValueBackend,
     private readonly hostLabel: () => string = localHostLabel,
     private readonly now: () => Date = () => new Date(),
+    /** Called after a set or delete made on this host, never for one that arrived by sync. */
+    private readonly onLocalChange: () => void = () => undefined,
   ) {}
 
   storage(): PaneSecretStorage {
@@ -236,6 +238,7 @@ export class PaneSecretStore {
       }
       const meta: PaneSecretMeta = { updatedAt: this.now().toISOString(), source: this.hostLabel() };
       await this.config.updateConfigWith(config => ({ paneSecrets: { ...config.paneSecrets, [key]: meta } }));
+      this.onLocalChange();
       return { replaced, secret: { project, name, updatedAt: meta.updatedAt, machine: meta.source } };
     });
   }
@@ -251,6 +254,7 @@ export class PaneSecretStore {
       await this.values.remove(key).catch(error => {
         console.warn(`[PaneSecrets] Could not remove the stored value of ${key}: ${reasonOf(error)}`);
       });
+      this.onLocalChange();
     });
   }
 
@@ -322,7 +326,10 @@ let shared: PaneSecretStore | null = null;
 /** This host's secret store, built on first use from the runtime config and data directory. */
 export function paneSecretStore(): PaneSecretStore {
   if (!shared) {
-    shared = new PaneSecretStore(getRuntimeConfigManager(), systemSecretBackend(getAppDirectory()));
+    // A connected desktop syncs when its hosts report a settings change, as they do for shared keys.
+    shared = new PaneSecretStore(getRuntimeConfigManager(), systemSecretBackend(getAppDirectory()), localHostLabel, () => new Date(), () => {
+      getPaneEventSink().send('remote:settings-changed');
+    });
   }
   return shared;
 }

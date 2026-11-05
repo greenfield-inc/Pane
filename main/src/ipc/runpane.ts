@@ -5153,7 +5153,11 @@ const repoEnvVarsUpdateSchema = boundary.object({
 function parseRepoEnvVarsUpdate(value: PaneCommandValue): RunpaneRepoEnvVarsUpdate {
   // Values in `set` are never echoed: an agent may have put a secret in a plain variable.
   if (isRecord(value) && Array.isArray(value.set) && value.set.some(entry => isRecord(entry) && entry.source === 'secret' && 'value' in entry)) {
-    throw invalidRepoSettings('envVars cannot set a Pane secret\'s value; set it with `runpane secrets set` and reference it here by project and name.');
+    throw new PaneError(
+      'ERR_RUNPANE_REPO_SETTINGS_INVALID',
+      'envVars cannot set a Pane secret\'s value. Nothing was changed.',
+      'Set the value with `printf %s "$VALUE" | runpane secrets set --project <p> --name <N> --yes`, then reference it here as {"source":"secret","project":"<p>","name":"<N>"}.',
+    );
   }
   let update: RunpaneRepoEnvVarsUpdate;
   try {
