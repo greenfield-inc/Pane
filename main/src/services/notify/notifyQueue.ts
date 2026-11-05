@@ -15,6 +15,7 @@ import type {
   NotifyStripView,
 } from '../../../../shared/types/notify';
 import { PaneError } from '../../../../shared/paneError';
+import { teammateSecretRefusal } from '../../../../shared/types/paneSecrets';
 
 /** Pane holds an answer this long so Undo can take it back. */
 const NOTIFY_UNDO_MS = 3_000;
@@ -211,13 +212,15 @@ export class NotifyQueue extends EventEmitter {
 
   /**
    * A command from another screen or a phone (`notify:remote-command`). `device` is the server's
-   * name for the sender. Refuses a command for a question no longer in the state it needs.
+   * name for the sender, and `teammate` the login of a sender who is not this computer's owner.
+   * Refuses a command for a question no longer in the state it needs.
    */
-  runRemote(command: NotifyRemoteCommand, device: string): void | Promise<void> {
+  runRemote(command: NotifyRemoteCommand, device: string, teammate: string | null = null): void | Promise<void> {
     const entry = this.entries.get(command.id);
     if (!entry) {
       throw new PaneError('ERR_NOTIFY_GONE', `That question is no longer on ${this.machine()}: it finished earlier, or Pane restarted there. Nothing was sent.`, 'Nothing to do: the agent is no longer waiting on it.');
     }
+    if (teammate && entry.item.ui === 'secret') throw teammateSecretRefusal(teammate, 'answer a secret card');
     const needs = command.type === 'answer' ? 'waiting' : command.type === 'undo' ? 'sent' : 'queued';
     const state = entry.item.state;
     if ((needs === 'queued' && !this.queue.includes(command.id)) || (needs !== 'queued' && state !== needs)) {

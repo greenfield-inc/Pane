@@ -159,8 +159,8 @@ export class NotifyService {
   }
 
   /** The `notify:remote-command` daemon command: another screen or a phone acts on this machine's question. */
-  async runRemote(command: NotifyRemoteCommand, device: string): Promise<void> {
-    await this.queue.runRemote(command, device);
+  async runRemote(command: NotifyRemoteCommand, device: string, teammate: string | null = null): Promise<void> {
+    await this.queue.runRemote(command, device, teammate);
   }
 
   sharedState(): NotifySharedState {

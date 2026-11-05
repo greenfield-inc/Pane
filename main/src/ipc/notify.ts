@@ -2,7 +2,7 @@ import { app, BrowserWindow, type IpcMain } from 'electron';
 import os from 'os';
 import type { AppServices } from './types';
 import type { PaneCommandRegistry, PaneCommandValue } from '../daemon/commandRegistry';
-import { paneCommandSignal } from '../daemon/commandRegistry';
+import { paneCommandSignal, teammatePaneCaller } from '../daemon/commandRegistry';
 import { remotePaneClientController } from '../daemon/client/remotePaneClient';
 import { getPaneEventSink } from '../core/runtime';
 import { hasHeadlessDaemonLaunchArg } from '../utils/runtimeMode';
@@ -206,7 +206,7 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
   commandRegistry.register('notify:remote-command', async (command: PaneCommandValue, sender: PaneCommandValue) => {
     // A Mac names itself "studio.local" on its event stream; cards call it "studio".
     const device = decodeBoundary(sender, remoteSenderSchema).device.replace(/\.local$/i, '');
-    await notify.runRemote(decodeBoundary(command, notifyRemoteCommandSchema) satisfies NotifyRemoteCommand, device);
+    await notify.runRemote(decodeBoundary(command, notifyRemoteCommandSchema) satisfies NotifyRemoteCommand, device, teammatePaneCaller());
     return null;
   });
 

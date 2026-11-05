@@ -3,7 +3,7 @@ import zlib from 'zlib';
 import WebSocket from 'ws';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDefaultRemoteDaemonConfig, NATIVE_APP_WEBSOCKET_ORIGIN, type RemoteDaemonConfig, type RemoteInvokeRequest } from '../../../shared/types/remoteDaemon';
-import { PaneCommandRegistry } from './commandRegistry';
+import { PaneCommandRegistry, teammatePaneCaller } from './commandRegistry';
 import { hashRemoteDaemonToken } from './auth';
 import { boundary, decodeBoundary, type JsonValue } from '../../../shared/validation/boundaryDecoder';
 
@@ -1151,6 +1151,19 @@ describe('workspace identity mode', () => {
     const tagged = await requestJson(server, 'POST', invokePath, invoke);
     expect(tagged.statusCode).toBe(403);
     expect(JSON.stringify(tagged.body)).toContain('ERR_WORKSPACE_IDENTITY_REQUIRED');
+  });
+
+  it('runs a teammate\'s commands as a teammate, so Pane secrets refuse them, and the owner\'s as the owner', async () => {
+    const registry = new PaneCommandRegistry();
+    registry.register('runpane:machine:info', () => ({ teammate: teammatePaneCaller() }));
+    const server = new PaneRemoteHttpApiServer(registry, createConfigManagerStub(), {
+      workspace: { listenPort: 0, pathSecret: 'serve-secret', access: () => ownerOnly({ visibility: 'tailnet' }) },
+    });
+    activeServers.push(server);
+    await server.start();
+
+    expect((await requestJson(server, 'POST', invokePath, invoke, undefined, as(teammate))).body).toEqual({ ok: true, result: { teammate } });
+    expect((await requestJson(server, 'POST', invokePath, invoke, undefined, as(owner))).body).toEqual({ ok: true, result: { teammate: null } });
   });
 
   it.each(['credentials:shared:get', 'credentials:shared:apply'])(

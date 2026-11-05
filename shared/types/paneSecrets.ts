@@ -3,6 +3,7 @@
  * `runpane secrets exec`, addressed as `<project>/<NAME>`. Every saved host keeps
  * a copy; values live only in the host's OS store, never in config.json.
  */
+import { PaneError } from '../paneError';
 import { projectEnvKeyProblem } from './projectEnvVars';
 
 /** A secret as lists show it. Never carries a value. */
@@ -47,4 +48,13 @@ export function parsePaneSecretKey(key: string): { project: string; name: string
   const project = key.slice(0, slash);
   const name = key.slice(slash + 1);
   return paneSecretProjectProblem(project) || paneSecretNameProblem(name) ? null : { project, name };
+}
+
+/** Pane secrets are the owner's: a teammate a workspace lets in can use the computer, but not them. */
+export function teammateSecretRefusal(teammate: string, action: string): PaneError {
+  return new PaneError(
+    'SECRET_OWNER_REQUIRED',
+    `Only this computer's owner can use its Pane secrets, so ${teammate} cannot ${action}. Nothing was read or changed.`,
+    'Ask the owner to do it on their own devices.',
+  );
 }

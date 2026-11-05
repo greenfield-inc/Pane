@@ -10,10 +10,19 @@ export function paneCommandSignal(): AbortSignal | undefined {
   return invocationSignal.getStore();
 }
 
-const remoteInvocation = new AsyncLocalStorage<boolean>();
+/** A remote call, and the Tailscale login of a caller who is not this computer's owner. */
+const remoteInvocation = new AsyncLocalStorage<{ teammate: string | null }>();
 
 export function isRemotePaneCommand(): boolean {
-  return remoteInvocation.getStore() === true;
+  return remoteInvocation.getStore() !== undefined;
+}
+
+/**
+ * The login of a teammate a workspace lets in ("everyone on the tailnet"), or null for the
+ * owner's own devices and local callers. Pane secrets are the owner's alone.
+ */
+export function teammatePaneCaller(): string | null {
+  return remoteInvocation.getStore()?.teammate ?? null;
 }
 
 type PaneCommandObject = object;
@@ -105,8 +114,8 @@ export class PaneCommandRegistry {
   }
 
   /** Provenance is set by the HTTP transport, never by caller-supplied arguments. */
-  invokeRemote(channel: string, args: readonly PaneCommandValue[] = []): Promise<PaneCommandValue> {
-    return remoteInvocation.run(true, () => this.invoke(channel, args));
+  invokeRemote(channel: string, args: readonly PaneCommandValue[] = [], caller: { teammate?: string | null } = {}): Promise<PaneCommandValue> {
+    return remoteInvocation.run({ teammate: caller.teammate ?? null }, () => this.invoke(channel, args));
   }
 
   bindChannel(ipcMain: IpcMainHandleLike, channel: string): void {

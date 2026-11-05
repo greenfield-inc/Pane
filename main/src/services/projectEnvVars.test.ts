@@ -3,6 +3,7 @@ import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DatabaseService } from '../database/database';
+import { PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
 import { PaneError } from '../../../shared/paneError';
 import { FakeKeychain } from '../test/fakeKeychain';
 import { memorySecretStore } from '../test/memorySecretStore';
@@ -45,6 +46,44 @@ describe('project environment variables', () => {
     expect(await secrets.read('cura', 'UIVERIFY')).toBe('sk-live-123');
     expect(JSON.stringify(service.list(project.id))).not.toContain('sk-live-123');
     expect(fs.readFileSync(path.join(tempDir, 'sessions.db')).includes('sk-live-123')).toBe(false);
+  });
+
+  /** Runs `work` as a call from a teammate a workspace lets in under "everyone on the tailnet". */
+  function asTeammate(work: () => Promise<PaneCommandValue>): Promise<PaneCommandValue> {
+    const registry = new PaneCommandRegistry();
+    registry.register('runpane:machine:info', work);
+    return registry.invokeRemote('runpane:machine:info', [], { teammate: 'teammate@example.com' });
+  }
+
+  it('gives a teammate\'s processes none of the owner\'s secrets, and says so without the value', async () => {
+    const project = db.createProject('cura', '/repos/cura');
+    await secrets.set('shared', 'TOKEN', 'sk-owner-only');
+    await service.save(project.id, [
+      { key: 'API_TOKEN', source: 'secret', project: 'shared', name: 'TOKEN' },
+      { key: 'NODE_ENV', source: 'plain', value: 'development' },
+    ]);
+
+    const resolved = await asTeammate(() => service.resolve(project.id) as Promise<PaneCommandValue>);
+
+    expect(resolved).toMatchObject({ env: { NODE_ENV: 'development' } });
+    expect(JSON.stringify(resolved)).not.toContain('sk-owner-only');
+    expect(JSON.stringify(resolved)).toContain('teammate@example.com');
+  });
+
+  it('lets a teammate keep the owner\'s secret variables but not add, repoint or overwrite one', async () => {
+    const project = db.createProject('cura', '/repos/cura');
+    const existing = { key: 'API_TOKEN', source: 'secret' as const, project: 'shared', name: 'TOKEN' };
+    await service.save(project.id, [existing]);
+
+    await expect(asTeammate(() => service.save(project.id, [existing, { key: 'NODE_ENV', source: 'plain', value: 'test' }]))).resolves.toHaveLength(2);
+    for (const change of [
+      [{ ...existing, name: 'OTHER' }],
+      [{ ...existing, value: 'sk-teammate' }],
+      [existing, { key: 'AWS', source: 'keychain' as const, service: 'aws', account: 'me' }],
+    ]) {
+      await expect(asTeammate(() => service.save(project.id, change))).rejects.toMatchObject({ code: 'SECRET_OWNER_REQUIRED' });
+    }
+    await expect(secrets.read('shared', 'TOKEN')).rejects.toThrow();
   });
 
   it('checks a dry run like a real save and writes nothing', async () => {

@@ -68,7 +68,8 @@ A missing secret fails with `SECRET_NOT_FOUND` and the next step: request it, or
 open Pane on a desktop connected to that machine so it syncs.
 
 Secrets are managed on the machine itself: `runpane workspace <machine> secrets …`
-is refused. Run `runpane workspace <machine> exec -- runpane secrets …` instead.
+is refused. From your own devices, run `runpane workspace <machine> exec -- runpane secrets …`
+instead.
 
 A project's environment variables can point at a Pane secret instead of holding
 their own copy: see [Project environment variables](PROJECT_ENV_VARS.md).
@@ -103,7 +104,7 @@ The safeguards stop accidental exposure; they don't sandbox anything.
 | Any agent or process running as you on a host | Yes | runpane's local socket is mode 0600 with no token. On macOS, items trust `/usr/bin/security`. |
 | Every host Pane syncs to | Yes, holds a copy | Each saved host keeps a copy for offline use. |
 | Your paired phone | Relays, never stores | The same rule as shared keys: a paired device can already open terminals on the host. |
-| Other people on your tailnet, even with "everyone on the tailnet" visibility | No | Secrets ride the owner-only key-sharing channels; `runpane secrets` channels refuse every remote caller. |
+| Other people on your tailnet, under "everyone on the tailnet" visibility | Not through Pane; yes by reading the store directly | Pane refuses them every secret path: `runpane secrets` in their `workspace exec` commands, secret cards, project variables that point at or change a secret, and the key-sharing channels. Their terminals and scripts start without secret variables. Their `exec` commands still run as you, so one that reads the keychain or `secrets.json` directly gets the values. Keep "Only me" on a machine whose secrets teammates must not read. |
 | A Linux host without a keyring | At rest in a 0600 file, unencrypted | Settings → Secrets says so on that host. |
 | Chat, MCP output, Notify history and broadcasts, push payloads, Pane logs, analytics, `sessions.db`, `config.json` | No | Pane never writes or returns a value to any of them. |
 | An agent's transcript and Pane's saved terminal scrollback | Only if the agent prints it | `exec` puts the value in a child's environment; if that command echoes it, the output goes wherever its output goes. |

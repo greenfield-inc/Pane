@@ -94,6 +94,12 @@ describe('machine file and command operations', () => {
     expect(result.stdout.trim()).toBe('pane-runpane version');
   });
 
+  it.skipIf(process.platform === 'win32')('marks a teammate\'s command so runpane secrets refuses it, and leaves the owner\'s unmarked', async () => {
+    const command = 'printf "[%s]" "$PANE_TEAMMATE_LOGIN"';
+    await expect(execOnMachine({ command }, undefined, 'teammate@example.com')).resolves.toMatchObject({ stdout: '[teammate@example.com]' });
+    await expect(execOnMachine({ command })).resolves.toMatchObject({ stdout: '[]' });
+  });
+
   it('answers when the shell exits even if a background job still holds its output', async () => {
     const started = Date.now();
     const result = await execOnMachine({ command: 'sleep 5 & echo started' });

@@ -68,6 +68,24 @@ describe('NotifyQueue secret cards', () => {
     expect(everythingVisible(queue, call.result)).not.toContain(CANARY);
   });
 
+  it('refuses a teammate\'s answer to a secret card and keeps it waiting for the owner', async () => {
+    const secrets = fakeSecrets();
+    const queue = makeQueue(secrets.env);
+    const call = ask(queue, stripeKey);
+    const [id] = queue.snapshot().queue;
+
+    expect(() => queue.runRemote({ type: 'answer', id, answer: { text: CANARY } }, 'build-mac', 'teammate@example.com'))
+      .toThrow(expect.objectContaining({ code: 'SECRET_OWNER_REQUIRED' }));
+    expect(() => queue.runRemote({ type: 'answer', id, answer: { approved: false } }, 'build-mac', 'teammate@example.com'))
+      .toThrow(expect.objectContaining({ code: 'SECRET_OWNER_REQUIRED' }));
+    expect(secrets.saved.size).toBe(0);
+
+    await queue.runRemote({ type: 'answer', id, answer: { text: CANARY } }, 'owner-laptop');
+    expect(secrets.saved.get('stripe/STRIPE_SECRET_KEY')).toBe(CANARY);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(call.result).toEqual({ status: 'saved', project: 'stripe', name: 'STRIPE_SECRET_KEY' });
+  });
+
   it('says when saving replaces an existing secret', () => {
     const queue = makeQueue(fakeSecrets(['stripe/STRIPE_SECRET_KEY']).env);
     ask(queue, stripeKey);

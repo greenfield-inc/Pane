@@ -5,7 +5,9 @@ import {
   type ProjectEnvVarInput,
 } from '../../../shared/types/projectEnvVars';
 import type { DatabaseService } from '../database/database';
+import { teammatePaneCaller } from '../daemon/commandRegistry';
 import { keychainUnsupportedError, systemKeychain, type Keychain } from './keychain';
+import { teammateSecretRefusal } from '../../../shared/types/paneSecrets';
 import { paneSecretStore, validatePaneSecretAddress, type PaneSecretStore } from './paneSecrets';
 
 /** A project's variables, ready to merge into a child process environment. */
@@ -71,6 +73,15 @@ export class ProjectEnvService {
       if (input.source === 'keychain') return { key: input.key, source: 'keychain', service: input.service.trim(), account: input.account.trim() };
       return { key: input.key, source: 'secret', project: input.project.trim(), name: input.name.trim() };
     });
+    const teammate = teammatePaneCaller();
+    if (teammate) {
+      // A teammate keeps the owner's secret variables as they are but adds or changes none:
+      // either would let their terminals read a secret, or overwrite one.
+      const current = new Map(this.store.getProjectEnvVars(projectId).map(variable => [variable.key, JSON.stringify(variable)]));
+      const touchesSecret = inputs.some(input => input.source === 'secret' && input.value)
+        || variables.some(variable => variable.source !== 'plain' && current.get(variable.key) !== JSON.stringify(variable));
+      if (touchesSecret) throw teammateSecretRefusal(teammate, 'add or change a Pane secret or keychain variable');
+    }
     if (options.dryRun) return variables;
     // Secrets first, so a failed write leaves the project's variables as they were.
     for (const input of inputs) {
@@ -95,6 +106,11 @@ export class ProjectEnvService {
     await Promise.all(variables.map(async variable => {
       if (variable.source === 'plain') {
         env[variable.key] = variable.value;
+        return;
+      }
+      const teammate = teammatePaneCaller();
+      if (teammate) {
+        warnings.push(`Pane did not set ${variable.key}: ${teammate} started this, and only this computer's owner can use its secrets. Everything else started normally.`);
         return;
       }
       if (variable.source === 'secret') {

@@ -1,5 +1,5 @@
 import type { AppConfig } from '../types/config';
-import { isRemotePaneCommand, type PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
+import { isRemotePaneCommand, teammatePaneCaller, type PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
 import type { PaneWorkspaceHostController, WorkspaceHostStatus } from '../daemon/workspaceHost';
 import { describeMachine, execOnMachine, readMachineFile, writeMachineFile } from '../services/workspaceMachine';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
@@ -87,7 +87,7 @@ export function registerWorkspaceCommands(
   registry.register('runpane:machine:write', (request: PaneCommandValue) =>
     writeMachineFile(decodeBoundary(request, writeRequestSchema)));
   registry.register('runpane:machine:exec', (request: PaneCommandValue) =>
-    execOnMachine(decodeBoundary(request, execRequestSchema), preferredShell()));
+    execOnMachine(decodeBoundary(request, execRequestSchema), preferredShell(), teammatePaneCaller()));
 
   registry.register('runpane:workspaces:status', () => status());
   registry.register('runpane:workspaces:set-enabled', async (request: PaneCommandValue) => {

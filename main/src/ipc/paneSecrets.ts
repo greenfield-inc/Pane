@@ -34,8 +34,8 @@ function refuseRemote(): void {
   if (isRemotePaneCommand()) {
     throw new PaneError(
       'SECRET_LOCAL_ONLY',
-      'Pane secrets can be managed only on the machine itself. Nothing was changed.',
-      'Run `runpane workspace <machine> exec -- runpane secrets …` to use that machine\'s secrets.',
+      'Pane secrets are managed only on the machine itself, so their values never cross the network. Nothing was changed.',
+      'Run `runpane secrets …` on that machine, or `runpane workspace <machine> exec -- runpane secrets …` from your own devices.',
     );
   }
 }
