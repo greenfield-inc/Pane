@@ -1,20 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { SHARED_BROWSER_PARTITION } from '../../../shared/constants/browserPartitions';
-import { panelApi } from '../services/panelApi';
-import { activatePanel } from '../services/openFileInEditor';
-import { usePanelStore } from '../stores/panelStore';
+import { openBesideChat } from '../hooks/useSessionStatusPage';
 
 function samePage(a: string, b: string): boolean {
   return a.split('#')[0] === b.split('#')[0];
-}
-
-/** A link the page follows to anything but itself opens as a browser tab beside chat. */
-async function openLinkBesideChat(sessionId: string, url: string): Promise<void> {
-  let title = 'Page';
-  try { title = decodeURIComponent(new URL(url).pathname.split('/').pop() || '') || new URL(url).hostname || title; } catch { /* malformed URL */ }
-  const panel = await panelApi.createPanel({ sessionId, type: 'browser', title, initialState: { customState: { currentUrl: url } } });
-  usePanelStore.getState().addPanel(panel);
-  await activatePanel(sessionId, panel.id);
 }
 
 /**
@@ -35,7 +24,7 @@ export function SessionStatusPage({ url, folderSessionId }: { url: string; folde
       // Main routes pane:// links itself; only web and file pages open beside chat.
       if (!event.isMainFrame || event.isInPlace || samePage(event.url, url) || !/^(https?|file):/i.test(event.url)) return;
       webview.stop();
-      void openLinkBesideChat(folderSessionId, event.url).catch(error => {
+      void openBesideChat(folderSessionId, event.url).catch(error => {
         console.error('[SessionStatusPage] Did not open the link beside chat:', error);
       });
     };

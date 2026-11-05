@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { OrchestrationSessionOverview } from '../../../shared/types/orchestrationSession';
 import { useConfigStore } from '../stores/configStore';
-import { previewHtmlFileInBrowser } from '../components/panels/editor/previewHtmlFile';
 
 /** Where an orchestrator writes its Session's status page, relative to the Session folder. */
 const SESSION_STATUS_PAGE = 'session/index.html';
@@ -31,7 +30,10 @@ export function useSessionStatusPage(folderSessionId: string, recheck: Orchestra
   return url;
 }
 
-/** Opens the status page full-size in the Session's split, in the tab already showing it. */
-export function openStatusPageBesideChat(folderSessionId: string): Promise<void> {
-  return previewHtmlFileInBrowser(folderSessionId, SESSION_STATUS_PAGE);
+/**
+ * Opens a page as a browser tab in the split beside the Session's chat, or brings back the
+ * tab already showing it (`runpane panels open --url`, as Open preview does).
+ */
+export async function openBesideChat(folderSessionId: string, url: string): Promise<void> {
+  await window.electronAPI.invoke('runpane:panels:open', { paneId: folderSessionId, url, placement: 'split', source: 'user' });
 }

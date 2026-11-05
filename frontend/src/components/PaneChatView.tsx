@@ -25,7 +25,7 @@ import { Input } from './ui/Input';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from './ui/Modal';
 import { SessionLaunchFields } from './SessionLaunchFields';
 import { SessionStatusPage } from './SessionStatusPage';
-import { openStatusPageBesideChat, useSessionStatusPage } from '../hooks/useSessionStatusPage';
+import { openBesideChat, useSessionStatusPage } from '../hooks/useSessionStatusPage';
 import { useConfigStore } from '../stores/configStore';
 import { DEFAULT_SESSION_PROFILE } from '../../../shared/types/sessionProfile';
 import { cn } from '../utils/cn';
@@ -993,7 +993,7 @@ function SessionOverviewPanel({ record, folderSessionId, overview, error, onRefr
           <button type="button" aria-label={editing ? 'Cancel renaming Session' : 'Rename Session'} title={editing ? 'Cancel renaming' : 'Rename Session'} onClick={() => setEditing(value => !value)} className={OVERVIEW_ACTION}>{editing ? <X className="h-3.5 w-3.5" /> : <Pencil className="h-3.5 w-3.5" />}</button>
           {statusPage && <>
             <button type="button" aria-label="Open beside chat" title="Open beside chat" className={OVERVIEW_ACTION}
-              onClick={() => void openStatusPageBesideChat(folderSessionId).catch((cause: unknown) => console.error('[SessionOverview] Did not open the status page beside chat:', cause))}>
+              onClick={() => void openBesideChat(folderSessionId, statusPage).catch((cause: unknown) => console.error('[SessionOverview] Did not open the status page beside chat:', cause))}>
               <PanelRight className="h-3.5 w-3.5" />
             </button>
             <button type="button" aria-label={showDetails ? 'Show status page' : 'Show Session details'} title={showDetails ? 'Show status page' : 'Show Session details'} aria-pressed={showDetails}
