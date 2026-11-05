@@ -95,7 +95,7 @@ export function keychainUnsupportedError(platform: string = process.platform): P
   return new PaneError(
     'KEYCHAIN_UNSUPPORTED',
     `Pane can use keychain-backed environment variables only on macOS, and this host runs ${platform}.`,
-    'Give the variable a plain value in Project Settings → Environment Variables on this host.',
+    'Point the variable at a Pane secret instead, in Project Settings → Environment Variables.',
   );
 }
 
