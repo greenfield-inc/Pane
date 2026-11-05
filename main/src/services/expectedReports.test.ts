@@ -165,6 +165,17 @@ describe('ExpectedReportTracker', () => {
     expect(missing()).toHaveLength(1);
   });
 
+  it('drops the expectation when the tab is paused, so resumed work can be sent again', async () => {
+    const { expectations, journal, missing, settle, tracker } = setup();
+    expectations.set('panel-1', { since: '2026-10-15T10:00:00.000Z' });
+    journal.append({ kind: 'panel.paused', paneId: 'pane-1', paneName: 'Worker', panelId: 'panel-1', source: 'session', reason: 'manual' });
+    await settle();
+
+    expect(missing()).toEqual([]);
+    expect(expectations.has('panel-1')).toBe(false);
+    expect(() => tracker.arm('panel-1', '2026-10-15T11:00:00.000Z')).not.toThrow();
+  });
+
   it('stays quiet when the agent reported after the work was sent', async () => {
     const { expectations, reports, ready, missing, settle } = setup();
     expectations.set('panel-1', { since: '2026-10-15T10:00:00.000Z' });

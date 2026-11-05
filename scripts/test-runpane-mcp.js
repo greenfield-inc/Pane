@@ -1024,6 +1024,44 @@ test('panels_close closes a tab through the daemon and keeps the --yes rule', as
   }
 });
 
+test('pause and resume tools stop and restart tabs through the daemon, with --yes only where the CLI asks for it', async () => {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-mcp-'));
+  const result = (action, scope) => ({
+    ok: true, action, scope, panelIds: ['panel-1'], unchanged: 1, failed: [],
+    message: `${action === 'paused' ? 'Paused' : 'Resumed'} 1 tab.`, nextCommand: 'runpane panes list --json',
+  });
+  try {
+    await withStubDaemon(paneDir, {
+      'runpane:panes:pause': (args) => result('paused', { kind: 'pane', paneId: args[0].paneId, paneName: 'worker' }),
+      'runpane:sessions:resume': (args) => result('resumed', { kind: 'session', sessionId: args[0].sessionId, sessionName: 'Release' }),
+    }, async (requests) => {
+      await withMcpClient(async (client) => {
+        const tools = (await client.listTools()).tools;
+        const pause = tools.find((item) => item.name === 'panes_pause');
+        const resume = tools.find((item) => item.name === 'sessions_resume');
+        assert.ok(pause && resume, 'panes_pause and sessions_resume are served');
+        assert.ok(tools.some((item) => item.name === 'panels_pause') && tools.some((item) => item.name === 'panes_resume') && tools.some((item) => item.name === 'sessions_pause'));
+        assert.equal(pause.annotations.readOnlyHint, false);
+        const refused = await client.callTool({ name: 'panes_pause', arguments: { pane: 'pane-1', paneDir } });
+        assert.equal(refused.isError, true);
+        const paused = await client.callTool({ name: 'panes_pause', arguments: { pane: 'pane-1', yes: true, paneDir } });
+        assert.equal(paused.isError, undefined, paused.content[0].text);
+        assertMatchesAdvertisedSchema(pause, paused.structuredContent);
+        const resumed = await client.callTool({ name: 'sessions_resume', arguments: { session: 'Release', paneDir } });
+        assert.equal(resumed.isError, undefined, resumed.content[0].text);
+        assertMatchesAdvertisedSchema(resume, resumed.structuredContent);
+        assert.equal(resumed.structuredContent.action, 'resumed');
+      }, { args: ['--toolsets', 'panels,panes,sessions'] });
+      assert.deepEqual(requests.map((request) => [request.channel, request.args[0]]), [
+        ['runpane:panes:pause', { paneId: 'pane-1' }],
+        ['runpane:sessions:resume', { sessionId: 'Release' }],
+      ]);
+    });
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
+});
+
 test('panels_resume resumes every stopped agent panel of a Session or of every Pane', async () => {
   const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-mcp-'));
   const bulk = (args) => ({

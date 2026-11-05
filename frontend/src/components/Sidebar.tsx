@@ -14,7 +14,9 @@ import { Dropdown } from './ui/Dropdown';
 import type { DropdownItem } from './ui/Dropdown';
 import { useSessionStore } from '../stores/sessionStore';
 import { useNavigationStore } from '../stores/navigationStore';
-import { AgentActivityDot, AgentStatusDot } from './ui/AgentStatusDot';
+import { AgentActivityDot, AgentStatusDot, PausedGlyph } from './ui/AgentStatusDot';
+import { resumeIfOpenResumes } from '../utils/pause';
+import { cn } from '../utils/cn';
 import { useSessionAgentDisplayStatus, useBlockedAgentCount } from '../hooks/useAgentStatus';
 import { PANE_CHAT_SESSION_ID } from '../../../shared/types/paneChat';
 import { API } from '../utils/api';
@@ -64,12 +66,14 @@ function ProjectAgentStatus({ sessions }: { sessions: readonly Session[] }) {
 }
 
 // The rail draws every Pane with the Pane icon; agent status sits on its corner.
-function CompactPaneIcon({ sessionId, testId }: { sessionId: string; testId: string }) {
+function CompactPaneIcon({ sessionId, paused, testId }: { sessionId: string; paused: boolean; testId: string }) {
   const status = useSessionAgentDisplayStatus(sessionId);
   return (
     <>
-      <SquareTerminal data-testid={testId} aria-hidden="true" className="h-4 w-4" />
-      <AgentStatusDot status={status} size="sm" className="absolute bottom-0 right-0" />
+      <SquareTerminal data-testid={testId} aria-hidden="true" className={cn('h-4 w-4', paused && 'text-text-disabled')} />
+      {paused
+        ? <PausedGlyph size="sm" className="absolute bottom-0 right-0" />
+        : <AgentStatusDot status={status} size="sm" className="absolute bottom-0 right-0" />}
     </>
   );
 }
@@ -406,10 +410,11 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
     [sessions, projectById],
   );
 
-  const openCompactSession = useCallback((sessionId: string, scope: 'pinned' | 'repositories') => {
+  const openCompactSession = useCallback((session: Session, scope: 'pinned' | 'repositories') => {
     setCompactSessionMenu(null);
     setSidebarNavigationScope(scope);
-    void setActiveSession(sessionId);
+    resumeIfOpenResumes({ kind: 'pane', id: session.id }, Boolean(session.paused));
+    void setActiveSession(session.id);
     navigateToSessions();
   }, [navigateToSessions, setActiveSession, setSidebarNavigationScope]);
 
@@ -746,12 +751,12 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
                       type="button"
                       data-testid={`compact-pinned-pane-${session.id}`}
                       data-compact-rail-item
-                      onClick={() => openCompactSession(session.id, 'pinned')}
+                      onClick={() => openCompactSession(session, 'pinned')}
                       onContextMenu={(event) => openCompactSessionMenu(event, session)}
                       aria-label={`Open pinned pane ${label}`}
                       className={`${COMPACT_RAIL_BUTTON} ${session.id === activeSessionId && activeView === 'sessions' ? COMPACT_RAIL_ACTIVE : COMPACT_RAIL_IDLE}`}
                     >
-                      <CompactPaneIcon sessionId={session.id} testId={`compact-pinned-pane-placeholder-${session.id}`} />
+                      <CompactPaneIcon sessionId={session.id} paused={Boolean(session.paused)} testId={`compact-pinned-pane-placeholder-${session.id}`} />
                     </button>
                   </Tooltip>
                 ))}
@@ -810,12 +815,12 @@ export function Sidebar({ onAboutClick, onSettingsClick, onRemoteSettingsClick, 
                           type="button"
                           data-testid={`compact-repository-pane-${session.id}`}
                           data-compact-rail-item
-                          onClick={() => openCompactSession(session.id, 'repositories')}
+                          onClick={() => openCompactSession(session, 'repositories')}
                           onContextMenu={(event) => openCompactSessionMenu(event, session)}
                           aria-label={`Open pane ${project.name}/${session.name || 'Untitled'}`}
                           className={`${COMPACT_RAIL_BUTTON} ${session.id === activeSessionId && activeView === 'sessions' ? COMPACT_RAIL_ACTIVE : COMPACT_RAIL_IDLE}`}
                         >
-                          <CompactPaneIcon sessionId={session.id} testId={`compact-repository-pane-placeholder-${session.id}`} />
+                          <CompactPaneIcon sessionId={session.id} paused={Boolean(session.paused)} testId={`compact-repository-pane-placeholder-${session.id}`} />
                         </button>
                       </Tooltip>
                     ))}

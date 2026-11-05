@@ -76,6 +76,7 @@ export const panelManager = {
   getPanel: vi.fn(),
   getPanelsForSession: vi.fn((): ToolPanel[] => []),
   updatePanel: vi.fn(),
+  commitPaused: vi.fn(),
 };
 
 // Set up global test environment

@@ -9,6 +9,7 @@ import type {
 import type { ToolPanel } from '../../../../shared/types/panels';
 import type { ListeningPortsSnapshot } from '../../../../shared/types/listeningPorts';
 import type { RemoteDaemonEventEnvelope, RemotePaneConnectionProfile, RemotePwaAffordances } from '../../../../shared/types/remoteDaemon';
+import type { RunpanePanelScreenResult, RunpanePauseResult } from '../../../../shared/types/runpaneOrchestration';
 import type {
   VoiceDeepgramTokenResult,
   VoiceStreamingFinalizeRequest,
@@ -155,6 +156,25 @@ export class RemoteRuntimeAdapter {
 
   archiveSession(sessionId: string): Promise<void> {
     return this.invoke<void>('sessions:delete', [sessionId]);
+  }
+
+  /** Pauses or resumes every terminal tab of a Pane, or a Session's chat and Panes. */
+  async setPaused(target: { kind: 'pane' | 'session'; id: string }, paused: boolean): Promise<void> {
+    const noun = target.kind === 'pane' ? 'panes' : 'sessions';
+    const key = target.kind === 'pane' ? 'paneId' : 'sessionId';
+    const result = await this.invoke<RunpanePauseResult>(`runpane:${noun}:${paused ? 'pause' : 'resume'}`, [{ [key]: target.id }]);
+    // A resume that left some tabs stopped answers `ok: false` with why.
+    if (!result.ok) throw new Error(result.message);
+  }
+
+  /** Resumes one paused tab through the host's usual restart. */
+  resumePanel(panelId: string): Promise<void> {
+    return this.invoke<void>('runpane:panels:resume', [{ panelId }]);
+  }
+
+  /** A terminal tab's screen as text: the live one, or the one saved when it stopped. */
+  getPanelScreen(panelId: string, limit: number): Promise<RunpanePanelScreenResult> {
+    return this.invoke<RunpanePanelScreenResult>('runpane:panels:screen', [{ panelId, limit }]);
   }
 
   getArchivedProjectsWithSessions(): Promise<RemoteProjectWithSessions[]> {

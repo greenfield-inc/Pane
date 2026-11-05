@@ -232,6 +232,9 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
     const agentType = decodeOptionalBoundary(panelManager.getPanel(change.panelId)?.state.customState, panelAgentSchema)?.agentType;
     if (agentType === 'codex') notify.queue.panelStatus(change.panelId, change.state === 'idle');
   });
+  terminalPanelManager.on('pause-changed', (change: { panelIds: string[]; paused: boolean }) => {
+    if (change.paused) notify.queue.withdrawForPanels(change.panelIds);
+  });
   app.on('browser-window-created', (_event, window: BrowserWindow) => {
     window.on('closed', () => notify.closeFloatingWindowsIfAlone());
   });

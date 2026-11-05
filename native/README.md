@@ -36,7 +36,7 @@ The + at the bottom right (and a repository's own +) opens **New**: a Session/Pa
 
 Each machine has a color and its OS logo (`src/features/machines/`). The color comes from the machine's Tailscale name, or its label when paired with a code, and is never stored: names settle clashes alphabetically, so pairing order never changes a color. The logo is solid when reachable, pulses while the current machine reconnects (one 1.6 s rhythm; dimmed instead under Reduce Motion), and is dimmed when the machine can't be reached.
 
-Settings opens on the current machine, with every other machine under **Switch to** and **Add a machine** (Your computers, or **Add with a code**). **Composer** is saved on the current machine, which its title names; **General** (Notifications, Glasses, Autocorrect) covers every saved machine. On home, swipe a Pane or Session right to pin it and left to archive it; VoiceOver and TalkBack offer Pin and Archive as row actions.
+Settings opens on the current machine, with every other machine under **Switch to** and **Add a machine** (Your computers, or **Add with a code**). **Composer** is saved on the current machine, which its title names; **General** (Notifications, Glasses, Autocorrect) covers every saved machine. On home, swipe a Pane or Session right to pin it, and left to pause or resume it or archive it; VoiceOver and TalkBack offer Pin, Pause or Resume, and Archive as row actions. A paused Pane or Session is grayed out with a pause glyph where its status dot goes. Opening a paused tab shows its last screen under a **Paused … · last screen** bar with **Resume**, and starts nothing; when the computer's Settings turn on resuming paused Panes on open, opening the tab resumes it.
 
 ## Point it at a host
 
@@ -79,6 +79,8 @@ maestro --device <simulator-udid> test -e CONNECTION_CODE="$(cat ~/.pane_rn_dev/
 `subflows/launch-dev-client.yaml` clears app state and the Keychain, opens the dev client against `127.0.0.1:${METRO_PORT}` and gets the dev menu out of the way. `subflows/sign-in.yaml` pairs with `CONNECTION_CODE`. Start a feature flow with `- runFlow: subflows/signed-in.yaml`, which runs both. It uses Metro on port 8137 unless you pass `-e METRO_PORT=<port>`. Pressable rows merge their text for accessibility, so match rows by `testID` or a regex such as `"fix-login-bug.*"`.
 
 `demo.yaml` needs no host: it starts the demo, answers a question, uses a terminal, visits the other screens and exits. Run it without `CONNECTION_CODE`. `tabs.yaml` needs no host either: it opens a page, Explorer, the file viewer, Diff, Run script, an Editor tab and a placeholder in the demo.
+
+`pause.yaml` pauses and resumes a new Pane and a new Session on a host with a repository and Sessions, with resuming paused Panes on open turned off (the default).
 
 `terminal.yaml` needs a host whose first pane has a plain `Terminal` tab and a `Claude Code` tab, which is what `runpane panes create --agent claude` gives you. On a busy machine, set `MAESTRO_DRIVER_STARTUP_TIMEOUT=240000` if Maestro reports that the iOS driver was not ready in time.
 

@@ -3,6 +3,7 @@ import { EventEmitter } from 'events';
 import type { AnalyticsIdentity, AppConfig } from '../types/config';
 import { DEFAULT_PANE_CHAT_AGENT, normalizePaneChatAgent } from '../../../shared/types/paneChat';
 import { DEFAULT_TERMINAL_FONT_SIZE } from '../../../shared/types/appearance';
+import { DEFAULT_AUTO_PAUSE_HOURS } from '../../../shared/types/autoPause';
 import { createDefaultRemoteDaemonConfig, normalizeRemoteDaemonConfig } from '../../../shared/types/remoteDaemon';
 import type { WorktreeFileSyncEntry } from '../../../shared/types/worktreeFileSync';
 import { DEFAULT_WORKTREE_FILE_SYNC_ENTRIES } from '../../../shared/types/worktreeFileSync';
@@ -72,6 +73,9 @@ export class ConfigManager extends EventEmitter {
       keepAwakeWhileSessionsActive: true,
       keepAwakeWhilePluggedIn: false,
       keepAwakeOnBattery: false,
+      resumePausedOnOpen: false,
+      autoPauseEnabled: true,
+      autoPauseAfterHours: DEFAULT_AUTO_PAUSE_HOURS,
       notifications: {
         playSound: false,
         enabled: true

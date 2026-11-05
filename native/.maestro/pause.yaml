@@ -1,0 +1,149 @@
+# Pause a Pane from its row, open its paused tab and resume it there; then pause and
+# resume a Session from its row. Archives both at the end. Needs a dev host with at
+# least one repository and Sessions (README), with resume-on-open off (the default).
+appId: com.dcouple.pane.mobile
+name: Pause journeys
+---
+- runFlow: subflows/signed-in.yaml
+- evalScript: ${output.pane = 'mae-' + Date.now().toString(36)}
+- evalScript: ${output.session = 'mae-s-' + Date.now().toString(36)}
+
+# A new Pane with a Claude tab.
+- tapOn:
+    id: home-new
+- tapOn:
+    id: panes-new
+- extendedWaitUntil:
+    visible:
+      id: new-pane-branch
+    timeout: 15000
+- waitForAnimationToEnd
+- tapOn:
+    id: new-pane-agent-claude
+- tapOn:
+    id: new-pane-name
+- eraseText: 60
+- inputText: ${output.pane}
+- pressKey: Enter
+- extendedWaitUntil:
+    visible:
+      id: pane-detail-screen
+    timeout: 60000
+- swipe:
+    start: 5%, 50%
+    end: 90%, 50%
+    duration: 400
+- tapOn:
+    id: panes-search
+- inputText: ${output.pane}
+- hideKeyboard
+
+# Swipe left: Pause sits beside Archive. The row grays out and reads as paused.
+- swipe:
+    from: "${output.pane}, .*Claude Code.*"
+    direction: LEFT
+- tapOn:
+    id: "pane-swipe-pause-.*"
+    index: 0
+- extendedWaitUntil:
+    visible: "${output.pane}, Paused.*"
+    timeout: 30000
+
+# Opening the paused Pane shows its last screen under the Paused bar and starts nothing.
+- tapOn: "${output.pane}, Paused.*"
+- extendedWaitUntil:
+    visible:
+      id: paused-bar
+    timeout: 15000
+- assertVisible: "Paused .*"
+- assertNotVisible:
+    id: terminal-loading
+# Resume from the bar: the live terminal comes back.
+- tapOn:
+    id: paused-resume
+- extendedWaitUntil:
+    notVisible:
+      id: paused-bar
+    timeout: 30000
+- swipe:
+    start: 5%, 50%
+    end: 90%, 50%
+    duration: 400
+- extendedWaitUntil:
+    visible: "${output.pane}, .*Claude Code.*"
+    timeout: 15000
+- assertNotVisible: "${output.pane}, Paused.*"
+
+# Clean up: archive the Pane.
+- swipe:
+    from: "${output.pane}, .*Claude Code.*"
+    direction: LEFT
+- tapOn:
+    id: "pane-swipe-archive-.*"
+    index: 0
+- tapOn:
+    text: "Archive"
+    rightOf: "Cancel"
+- extendedWaitUntil:
+    visible:
+      id: panes-no-results
+    timeout: 20000
+- tapOn:
+    id: panes-search-clear
+- waitForAnimationToEnd
+
+# A new Session, then Pause and Resume from its row's swipe actions.
+- tapOn:
+    id: home-new
+- tapOn:
+    id: sessions-new
+- extendedWaitUntil:
+    visible:
+      id: new-session-name
+    timeout: 15000
+- waitForAnimationToEnd
+- tapOn:
+    id: new-session-name
+- inputText: ${output.session}
+- pressKey: Enter
+- extendedWaitUntil:
+    visible:
+      id: pane-detail-screen
+    timeout: 60000
+- swipe:
+    start: 5%, 50%
+    end: 90%, 50%
+    duration: 400
+- extendedWaitUntil:
+    visible: "Open Session ${output.session}"
+    timeout: 15000
+- swipe:
+    from: "Open Session ${output.session}"
+    direction: LEFT
+- tapOn:
+    id: "session-swipe-pause-.*"
+    rightOf: "Open Session ${output.session}"
+- extendedWaitUntil:
+    visible: "Open Session ${output.session}, Paused"
+    timeout: 30000
+- swipe:
+    from: "Open Session ${output.session}, Paused"
+    direction: LEFT
+- tapOn:
+    id: "session-swipe-pause-.*"
+    rightOf: "Open Session ${output.session}, Paused"
+- extendedWaitUntil:
+    notVisible: "Open Session ${output.session}, Paused"
+    timeout: 30000
+- assertVisible: "Open Session ${output.session}"
+
+# Clean up: archive the Session.
+- swipe:
+    from: "Open Session ${output.session}"
+    direction: LEFT
+- tapOn:
+    id: "session-swipe-archive-.*"
+    rightOf: "Open Session ${output.session}"
+- extendedWaitUntil:
+    notVisible: "Open Session ${output.session}"
+    timeout: 10000

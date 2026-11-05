@@ -12,11 +12,12 @@ import type { Session, SessionUpdate, SessionOutput } from '../types/session';
 import type { DatabaseService } from '../database/database';
 import type { Session as DbSession, CreateSessionData, UpdateSessionData, ConversationMessage, PromptMarker, ExecutionDiff, CreateExecutionDiffData, Project } from '../database/models';
 import { TerminalSessionManager } from './terminalSessionManager';
-import type { TerminalPanelState, ToolPanelState, ResumableSession } from '../../../shared/types/panels';
+import { parseSessionTimestampMs } from './paneInactivity';
+import { pausedMarkOf, type TerminalPausedMark, type TerminalPanelState, type ToolPanelState, type ResumableSession } from '../../../shared/types/panels';
 import { formatForDisplay } from '../utils/timestampUtils';
 import { isCliAgentType, resolveAgentTypeFromCommand } from './agents/agentIdentity';
 import { resolveResumeId } from './agents/agentResume';
-import { boundary, decodeBoundary, type JsonValue } from '../../../shared/validation/boundaryDecoder';
+import { boundary, decodeBoundary, decodeOptionalBoundary, type JsonValue } from '../../../shared/validation/boundaryDecoder';
 
 interface CreateSessionOptions {
   detached?: boolean;
@@ -118,6 +119,13 @@ function parseTerminalResumeState(value: ToolPanelState['customState']): {
     return undefined;
   }
 }
+
+const pausedMarkSchema = boundary.object({
+  at: boundary.nonEmptyString,
+  by: boundary.enumeration('manual', 'auto'),
+  idleHours: boundary.optional(boundary.number),
+  runScript: boundary.optional(boundary.boolean),
+});
 
 function terminalCustomState(value: ToolPanelState['customState']): TerminalPanelState {
   // SAFETY: This helper is called only for panels whose type is terminal; their
@@ -304,10 +312,32 @@ export class SessionManager extends EventEmitter {
     }
 
     // Load all sessions from database
-    this.emit('sessions-loaded', visibleDbSessions.map(this.convertDbSessionToSession.bind(this)));
+    this.emit('sessions-loaded', this.toSessions(visibleDbSessions));
   }
 
-  private convertDbSessionToSession(dbSession: DbSession): Session {
+  /** Converts many Panes with one read of every tab's pause mark. */
+  private toSessions(dbSessions: DbSession[]): Session[] {
+    const marks = dbSessions.length > 1 ? this.pausedMarks() : undefined;
+    return dbSessions.map(dbSession => this.convertDbSessionToSession(dbSession, marks));
+  }
+
+  /**
+   * Each Pane's paused mark: set when the Pane has terminal tabs and every one is paused, as the
+   * latest of their marks. Read from the marks alone, so no tab state is parsed.
+   */
+  private pausedMarks(sessionId?: string): Map<string, TerminalPausedMark | null> {
+    const marks = new Map<string, TerminalPausedMark | null>();
+    for (const row of this.db.getTerminalPauseMarks(sessionId)) {
+      const previous = marks.get(row.session_id);
+      if (previous === null) continue;
+      const mark = row.paused === null ? undefined : decodeOptionalBoundary(JSON.parse(row.paused), pausedMarkSchema);
+      if (!mark) { marks.set(row.session_id, null); continue; }
+      if (!previous || mark.at > previous.at) marks.set(row.session_id, mark);
+    }
+    return marks;
+  }
+
+  private convertDbSessionToSession(dbSession: DbSession, pausedMarks?: Map<string, TerminalPausedMark | null>): Session {
     const toolTypeFromDb = dbSession.tool_type;
     const normalizedToolType: 'claude' | 'none' = toolTypeFromDb === 'none'
         ? 'none'
@@ -323,8 +353,8 @@ export class SessionManager extends EventEmitter {
         ? 'External worktree directory is missing'
         : dbSession.status_message,
       pid: dbSession.pid,
-      createdAt: new Date(dbSession.created_at),
-      lastActivity: new Date(dbSession.updated_at),
+      createdAt: new Date(parseSessionTimestampMs(dbSession.created_at)),
+      lastActivity: new Date(parseSessionTimestampMs(dbSession.updated_at)),
       output: [], // Will be loaded separately by frontend when needed
       jsonMessages: [], // Will be loaded separately by frontend when needed
       error: dbSession.exit_code && dbSession.exit_code !== 0 ? `Exit code: ${dbSession.exit_code}` : undefined,
@@ -342,6 +372,7 @@ export class SessionManager extends EventEmitter {
       // Model is now managed at panel level
       toolType: normalizedToolType,
       archived: dbSession.archived || false,
+      paused: (pausedMarks ?? this.pausedMarks(dbSession.id)).get(dbSession.id) ?? undefined,
       isHidden: !!dbSession.is_hidden,
       baseCommit: dbSession.base_commit,
       baseBranch: dbSession.base_branch,
@@ -375,17 +406,17 @@ export class SessionManager extends EventEmitter {
   getAllSessions(): Session[] {
     // Return all sessions regardless of active project
     const dbSessions = this.db.getAllSessions();
-    return dbSessions.map(this.convertDbSessionToSession.bind(this));
+    return this.toSessions(dbSessions);
   }
 
   getPowerSaveSnapshotSessions(): Session[] {
     const dbSessions = this.db.getPowerSaveSnapshotSessions();
-    return dbSessions.map(this.convertDbSessionToSession.bind(this));
+    return this.toSessions(dbSessions);
   }
 
   getSessionsForProject(projectId: number): Session[] {
     const dbSessions = this.db.getAllSessions(projectId);
-    return dbSessions.map(this.convertDbSessionToSession.bind(this));
+    return this.toSessions(dbSessions);
   }
 
   getSession(id: string): Session | undefined {
@@ -618,6 +649,12 @@ export class SessionManager extends EventEmitter {
 
   setFavorite(id: string, pinned: boolean): Session {
     return this.publishSessionMetadata(id, this.db.setSessionFavorite(id, pinned));
+  }
+
+  /** Re-sends a Pane after its tabs paused or resumed, so every client grays it out or back. */
+  publishPausedChange(id: string): void {
+    const dbSession = this.db.getSession(id);
+    if (dbSession) this.publishSessionMetadata(id, dbSession);
   }
 
   private publishSessionMetadata(id: string, updated: DbSession | undefined): Session {
@@ -1489,7 +1526,7 @@ export class SessionManager extends EventEmitter {
       for (const panel of panels) {
         if (panel.type === 'terminal') {
           const termState = parseTerminalResumeState(panel.state?.customState);
-          if (termState?.wasInterrupted && termState?.initialCommand) {
+          if (termState?.wasInterrupted && termState?.initialCommand && !pausedMarkOf(panel)) {
             const agentType = termState.agentType ?? resolveAgentTypeFromCommand(termState.initialCommand);
             const resumeId = resolveResumeId(agentType, panel.id, termState);
             if (resumeId) {
@@ -1539,7 +1576,7 @@ export class SessionManager extends EventEmitter {
         if (panel.type === 'terminal') {
           const termState = parseTerminalResumeState(panel.state?.customState);
 
-          if (termState?.wasInterrupted && termState?.initialCommand) {
+          if (termState?.wasInterrupted && termState?.initialCommand && !pausedMarkOf(panel)) {
             const state = panel.state;
             const customState: TerminalPanelState = { ...terminalCustomState(state.customState), ...termState };
             const agentType = customState.agentType ?? resolveAgentTypeFromCommand(customState.initialCommand);

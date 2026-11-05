@@ -199,6 +199,8 @@ print(json.dumps([effective_watch_heartbeat_ms(180), effective_watch_heartbeat_m
     ['panel.exited', 'EXIT Issue 538 pane pane-1 panel panel-1 code 3', { exitCode: 3 }],
     ['panel.stopped', 'STOPPED Issue 538 pane pane-1 panel panel-1', { running: false }],
     ['panel.stopped', 'STOPPED Issue 538 pane pane-1 panel panel-1', { running: false, baseline: true, changedWhileAway: true }],
+    ['panel.paused', 'PAUSED Issue 538 pane pane-1 panel panel-1', { running: false }],
+    ['panel.unpaused', 'UNPAUSED Issue 538 pane pane-1 panel panel-1'],
     ['pane.associated', 'JOINED Issue 538 pane pane-1 session session-9', { sessionId: 'session-9' }],
     ['pane.detached', 'LEFT Issue 538 pane pane-1 session session-9', { sessionId: 'session-9' }],
     ['pr.conflicted', 'PR Issue 538 pane pane-1 #747 CONFLICTED', { panelId: undefined, pr }],
@@ -5269,6 +5271,65 @@ async function checkSessionPinCommands() {
   }
 }
 
+async function checkPauseCommands() {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-pause-'));
+  const paused = {
+    ok: true, action: 'paused', scope: { kind: 'pane', paneId: 'pane-1', paneName: 'worker' },
+    panelIds: ['panel-1', 'panel-2'], unchanged: 0, failed: [],
+    message: 'Pane worker is paused: 2 tab(s) stopped. Resume keeps their conversations.',
+    nextCommand: 'runpane panes resume --pane pane-1 --yes',
+  };
+  const partlyResumed = {
+    ok: false, action: 'resumed', scope: { kind: 'session', sessionId: 'session-1', sessionName: 'Release' },
+    panelIds: ['panel-1'], unchanged: 0, failed: [{ panelId: 'panel-2', error: 'codex is not installed' }],
+    message: 'Session Release: 1 tab(s) resumed, 1 could not start.',
+    nextCommand: 'runpane watch --session session-1 --until-event --json',
+  };
+  const cases = [
+    [['panels', 'pause', '--panel', 'panel-1', '--yes'], 'runpane:panels:pause', { panelId: 'panel-1' }],
+    [['panes', 'pause', '--pane', 'pane-1', '--yes'], 'runpane:panes:pause', { paneId: 'pane-1' }],
+    [['panes', 'resume', '--pane', 'pane-1', '--yes'], 'runpane:panes:resume', { paneId: 'pane-1' }],
+    [['sessions', 'pause', '--session', 'Release'], 'runpane:sessions:pause', { sessionId: 'Release' }],
+    [['sessions', 'resume', '--session', 'Release'], 'runpane:sessions:resume', { sessionId: 'Release' }],
+  ];
+  const run = (runtime, args) => new Promise((resolve) => {
+    childProcess.execFile(runtime === 'npm' ? process.execPath : findPython(),
+      runtime === 'npm' ? [npmCli, ...args] : ['-m', 'runpane', ...args],
+      { cwd: rootDir, encoding: 'utf8', timeout: 10_000, env: { ...process.env, PANE_DIR: paneDir, PYTHONPATH: pythonSource, PYTHONDONTWRITEBYTECODE: '1' } },
+      (error, stdout, stderr) => resolve({ code: error ? error.code : 0, stdout: stdout.trim(), stderr }));
+  });
+  try {
+    for (const runtime of ['npm', 'pip']) {
+      for (const [args, channel, request] of cases) {
+        const output = await withFakeDaemon(paneDir, (frame) => {
+          assert.strictEqual(frame.channel, channel, `${runtime} ${args.join(' ')}`);
+          assert.deepStrictEqual(frame.args, [request], `${runtime} ${args.join(' ')}`);
+          return { result: paused };
+        }, () => run(runtime, [...args, '--json']));
+        assert.strictEqual(output.code, 0, `${runtime} ${args.join(' ')}: ${output.stderr}`);
+        assert.deepStrictEqual(JSON.parse(output.stdout), paused);
+      }
+
+      const text = await withFakeDaemon(paneDir, () => ({ result: partlyResumed }), () => run(runtime, ['sessions', 'resume', '--session', 'Release']));
+      assert.strictEqual(text.code, 1, `${runtime} exits 1 when a tab could not resume`);
+      assert.deepStrictEqual(text.stdout.split(/\r?\n/), [
+        'Session Release: 1 tab(s) resumed, 1 could not start.',
+        'FAIL panel panel-2: codex is not installed',
+        'Next: runpane watch --session session-1 --until-event --json',
+      ], `${runtime} resume text`);
+
+      const requests = [];
+      const refused = await withFakeDaemon(paneDir, () => ({ result: paused }), () => run(runtime, ['panes', 'pause', '--pane', 'pane-1', '--json']),
+        (frame) => { if (frame.type === 'request') requests.push(frame.channel); });
+      assert.notStrictEqual(refused.code, 0, `${runtime} panes pause without --yes must refuse`);
+      assert.match(refused.stdout + refused.stderr, /Rerun with --yes/);
+      assert.ok(!requests.includes('runpane:panes:pause'), `${runtime} sent a pause it was not allowed to`);
+    }
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
+}
+
 async function checkSessionRuntime() {
   const daemonClient = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'daemonClient.js'));
   const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
@@ -5730,6 +5791,7 @@ async function runChecks() {
   checkBoundaryDecoderCollectsEveryIssue();
   await checkSessionPayloadErrors();
   await checkSessionPinCommands();
+  await checkPauseCommands();
   await checkPanesAdoptCliParity();
   await checkPanesCreateBaseNotice();
   checkContractDocListsEveryCommand();

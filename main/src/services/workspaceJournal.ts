@@ -28,6 +28,8 @@ interface WorkspacePanelMetadata {
   agentType?: string;
   panelTitle?: string;
   lastActivityAt?: string;
+  /** Pause stopped this panel: its exit is journalled as `panel.paused`, not `panel.exited`. */
+  paused?: boolean;
   /** The live viewport and its typed layer; held input is read from the typed layer only. */
   screen?: WorkspaceHeldInputScreen;
 }
@@ -133,6 +135,8 @@ function isRetiredEntry(entry: JsonValue): boolean {
 /** Kinds only a consumer that asks for them (by `kinds`, or a Session scope) receives, so older clients never see them. */
 const OPT_IN_KINDS: readonly RunpaneWorkspaceEntryKind[] = [
   'panel.stopped',
+  'panel.paused',
+  'panel.unpaused',
   'pane.associated',
   'pane.detached',
   'pr.conflicted',
@@ -167,6 +171,7 @@ const panelExitEventSchema = boundary.object({
   data: boundary.object({
     exitCode: boundary.optional(boundary.number),
     signal: boundary.optional(boundary.number),
+    by: boundary.optional(boundary.string),
   }),
 });
 
@@ -424,12 +429,32 @@ export class WorkspaceJournal implements PaneEventSink {
 
     if (channel === 'panel:event') {
       const payload = decodeOptionalBoundary(args[0], panelExitEventSchema);
+      if (payload && (payload.type === 'terminal:paused' || payload.type === 'terminal:resumed')) {
+        const pane = this.lookupPane(payload.source.sessionId);
+        if (!pane) return;
+        const panel = this.resolvePanel?.(payload.source.panelId);
+        this.append({
+          ...pane,
+          kind: payload.type === 'terminal:paused' ? 'panel.paused' : 'panel.unpaused',
+          panelId: payload.source.panelId,
+          panelTitle: panel?.panelTitle,
+          agentType: panel?.agentType,
+          source: 'session',
+          reason: payload.data.by,
+        });
+        return;
+      }
       if (!payload || payload.type !== 'terminal:exit') return;
       const { panelId, sessionId: paneId } = payload.source;
       if (this.exitedPanels.has(panelId)) return;
       const pane = this.lookupPane(paneId);
       if (!pane) return;
       const panel = this.resolvePanel?.(panelId);
+      if (panel?.paused) {
+        this.stateByPanel.delete(panelId);
+        this.readySinceByPanel.delete(panelId);
+        return;
+      }
       this.append({
         ...pane,
         kind: 'panel.exited',

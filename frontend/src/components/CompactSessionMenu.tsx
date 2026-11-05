@@ -6,7 +6,8 @@ import { useSessionStore } from '../stores/sessionStore';
 import { useErrorStore } from '../stores/errorStore';
 import { useState } from 'react';
 import { PromotePaneDialog } from './PromotePaneDialog';
-import { Archive, Pin, ArrowUpRight, Pencil, FolderPlus, FolderMinus, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Archive, Pin, ArrowUpRight, Pencil, FolderPlus, FolderMinus, ChevronLeft, ChevronRight, Pause, Play } from 'lucide-react';
+import { runPauseAction } from '../utils/pause';
 import { isArchivedOrchestrationSession, useOrchestrationSessionStore } from '../stores/orchestrationSessionStore';
 import type { Session } from '../types/session';
 import type { OrchestrationSessionRecord } from '../../../shared/types/orchestrationSession';
@@ -88,6 +89,16 @@ export function CompactSessionMenu({ menu, onClose, onTogglePinned, onArchive }:
           <span className="flex items-center gap-2">
             <Pin className="h-4 w-4 rotate-45" />
             {menu?.session.isFavorite ? 'Unpin' : 'Pin'}
+          </span>
+        </PopoverButton>
+        {/* Pause sits under Pin: it is safe to undo, so the reflex slot is fine. */}
+        <PopoverButton role="menuitem" onClick={() => {
+          if (menu) void runPauseAction({ kind: 'pane', id: menu.session.id }, !menu.session.paused);
+          close();
+        }}>
+          <span className="flex items-center gap-2">
+            {menu?.session.paused ? <Play className="h-4 w-4 fill-current" /> : <Pause className="h-4 w-4" />}
+            {menu?.session.paused ? 'Resume' : 'Pause'}
           </span>
         </PopoverButton>
         <PopoverButton role="menuitem" onClick={() => { if (menu) setPromoting(menu.session); onClose(); }}>

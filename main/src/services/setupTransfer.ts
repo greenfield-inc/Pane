@@ -1,3 +1,4 @@
+import { isValidAutoPauseHours } from '../../../shared/types/autoPause';
 import { isDeepStrictEqual } from 'node:util';
 import type { AppConfig } from '../types/config';
 import type { DetectedProjectConfig } from '../../../shared/types/projectConfig';
@@ -71,6 +72,7 @@ const PREFERENCE_CONFIG_KEYS = [
   'notifications', 'keyboardShortcutsEnabled', 'commandPaletteShortcutEnabled', 'kittyKeyboardEnabled',
   'htmlFileOpenMode', 'enableCommitFooter', 'gitAttributionEnabled', 'autoCheckUpdates',
   'keepAwakeWhileSessionsActive', 'keepAwakeWhilePluggedIn', 'keepAwakeOnBattery', 'terminalPowerMode',
+  'resumePausedOnOpen', 'autoPauseEnabled', 'autoPauseAfterHours',
   'retention', 'voiceTranscriptionMode', 'missionControlEnabled', 'notesEnabled',
   'sessionCreationPreferences',
 ] as const satisfies readonly (keyof SetupPreferences)[];
@@ -119,6 +121,9 @@ const FIELD_LABELS = {
   keepAwakeWhileSessionsActive: 'Keep awake',
   keepAwakeWhilePluggedIn: 'Keep awake when plugged in',
   keepAwakeOnBattery: 'Keep awake on battery',
+  resumePausedOnOpen: 'Resume paused Panes when opened',
+  autoPauseEnabled: 'Auto-pause idle Panes',
+  autoPauseAfterHours: 'Auto-pause after',
   terminalPowerMode: 'Terminal power mode',
   retention: 'Session retention',
   voiceTranscriptionMode: 'Voice transcription',
@@ -450,6 +455,9 @@ const sectionSchemas = {
     keepAwakeWhileSessionsActive: booleanField,
     keepAwakeWhilePluggedIn: booleanField,
     keepAwakeOnBattery: booleanField,
+    resumePausedOnOpen: booleanField,
+    autoPauseEnabled: booleanField,
+    autoPauseAfterHours: boundary.optional(boundary.refine(boundary.number, isValidAutoPauseHours, 'expected whole hours from 1 to 720')),
     terminalPowerMode: boundary.optional(boundary.enumeration('performance', 'batterySaver')),
     retention: boundary.optional(boundary.object({ sessionActivity: boundary.optional(boundary.number), sessionInbox: boundary.optional(boundary.number) })),
     voiceTranscriptionMode: boundary.optional(boundary.enumeration('recorded', 'streaming')),

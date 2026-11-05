@@ -158,7 +158,7 @@ Run the watch as a background command that wakes you when it exits:
 
 ```sh
 runpane watch --session <session id or name> --as <your-name> --until-event --json \
-  --kinds agent.report,agent.report.missing,agent.blocked,agent.ready,panel.exited,panel.stopped,pane.gone
+  --kinds agent.report,agent.report.missing,agent.blocked,agent.ready,panel.exited,panel.stopped,panel.paused,pane.gone
 ```
 
 - Outside a Session, use `--pane <pane id>` (repeatable) instead of
@@ -183,6 +183,7 @@ What wakes it, and what to do:
 | `READY` (`agent.ready`) | 0 | the agent's turn ended | if there's no new report, read its status file; if that hasn't moved either, read `runpane panels last-message --panel <id> --json` once and tell the person (done, stuck on an error, or waiting) |
 | `EXIT` (`panel.exited`), `GONE` (`pane.gone`) | 0 | the process ended, or the Pane went away | read the status file once; tell the person |
 | `STOPPED` (`panel.stopped`) | 0 | after a Pane restart the agent didn't come back | [Resume](#resume-after-a-restart-or-sleep) |
+| `PAUSED` (`panel.paused`) | 0 | the person, or auto-pause, paused the worker | leave it paused ([Paused workers](#paused-workers)) |
 | `RESET`, `DROPPED` before the event | 0 | the journal restarted or lost entries | also read the inbox (below) |
 | `WATCH ERROR` (`_error`) then `WATCH RECONNECTED` | keeps waiting | the daemon dropped and came back | nothing; the wait retries by itself |
 | `WATCH ERROR` and a non-zero exit | 2 | the wait failed (for example, unknown Session) | read the inbox, then wait again once; on a second failure run `runpane doctor --report --title "runpane watch failed" --json` and tell the person |
@@ -301,12 +302,31 @@ runpane panels resume --panel <panel id> --wait-ready --yes --json   # one worke
 runpane panels resume --session <S> --wait-ready --yes --json        # every stopped agent in the Session
 ```
 
+The `--session` and `--all-stopped` forms skip paused tabs.
+
 Resume relaunches the same panel with the agent's own conversation. A wrapper
 that prints `PANE_AGENT_SESSION_ID=<id>` (Agent Farm does) resumes with
 `<command> --resume <id>`. The bulk form also relaunches finished workers, so
 resume single panels when only some should continue. Then tell each resumed
 worker where it was, for example: "You were interrupted. Re-read your status
 file and continue."
+
+## Paused workers
+
+A paused worker is reported once as `PAUSED` (`panel.paused`). The person
+paused it, or auto-pause did after hours without use. Its panel and
+conversation are intact. Leave it paused unless the person asks you to resume
+it, then resume it by name:
+
+```sh
+runpane panels resume --panel <panel id> --wait-ready --yes --json   # one tab
+runpane panes resume --pane <pane id> --yes --json                   # every paused tab of a Pane
+runpane sessions resume --session <S> --json                         # the Session's chat and Panes
+```
+
+`UNPAUSED` (`panel.unpaused`) means it was resumed; `READY` follows as usual.
+`runpane panes list --json` shows each Pane's `paused` mark and
+`inactiveSince` (its last terminal output, input or selection).
 
 A worker cut off by sleep or a network error usually ends its turn on an API
 error and sits at its prompt. That turn end is a READY, with a MISSING REPORT

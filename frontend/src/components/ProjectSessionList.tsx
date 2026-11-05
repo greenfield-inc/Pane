@@ -11,7 +11,8 @@ import { AddProjectDialog } from './AddProjectDialog';
 import ProjectSettings from './ProjectSettings';
 import { Dropdown } from './ui/Dropdown';
 import { Tooltip } from './ui/Tooltip';
-import { AgentStatusDot } from './ui/AgentStatusDot';
+import { AgentStatusDot, PausedGlyph } from './ui/AgentStatusDot';
+import { resumeIfOpenResumes } from '../utils/pause';
 import type { DropdownItem } from './ui/Dropdown';
 import { useSessionAgentDisplayStatus, useBlockedAgentCount } from '../hooks/useAgentStatus';
 import { PANE_CHAT_SESSION_ID } from '../../../shared/types/paneChat';
@@ -947,6 +948,16 @@ export function SessionRowContent({
   notifyWaiting: boolean;
 }) {
   const title = displayName || gs?.prTitle || session.name || 'Untitled';
+  // A paused Pane is grayed out in place: muted name and icon, the pause glyph in the dot's box, no Waiting mark.
+  const paused = Boolean(session.paused);
+  const waiting = notifyWaiting && !paused;
+  const statusIndicator = (className?: string) => paused
+    ? <PausedGlyph size="sm" className={cn('flex-shrink-0', className)} />
+    : waiting
+      ? <NotifyWaitingDot className={className} />
+      : <AgentStatusDot status={agentDisplayStatus} size="sm" className={cn('flex-shrink-0', className)} />;
+  const titleTone = paused ? 'font-normal text-text-muted' : 'font-medium text-text-primary';
+  const branchIconColor = paused ? 'text-text-disabled' : iconColor;
   const prNumber = gs?.prNumber;
   const PullRequestIcon = gs?.prIsDraft ? GitPullRequestDraft : GitPullRequest;
   // A loop's run Pane wears the loop icon until it has a PR.
@@ -961,22 +972,23 @@ export function SessionRowContent({
     return (
       <div className="flex min-w-0 w-full items-center gap-1.5">
         {prNumber ? (
-          <PullRequestIcon className={`w-3.5 h-3.5 flex-shrink-0 ${iconColor}`} />
+          <PullRequestIcon className={`w-3.5 h-3.5 flex-shrink-0 ${branchIconColor}`} />
         ) : (
-          <BranchIcon className={`w-3.5 h-3.5 flex-shrink-0 ${iconColor}`} />
+          <BranchIcon className={`w-3.5 h-3.5 flex-shrink-0 ${branchIconColor}`} />
         )}
-        {notifyWaiting ? <NotifyWaitingDot /> : <AgentStatusDot status={agentDisplayStatus} size="sm" className="flex-shrink-0" />}
+        {statusIndicator()}
         <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
           <span className={cn(
-            'min-w-0 truncate text-[13px] font-medium text-text-primary decoration-status-info decoration-2 underline-offset-4',
-            showActivity && 'animate-sidebar-active-label',
+            'min-w-0 truncate text-[13px] decoration-status-info decoration-2 underline-offset-4',
+            titleTone,
+            showActivity && !paused && 'animate-sidebar-active-label',
             showUnviewedCompleted && 'underline decoration-dashed'
           )}>
             {title}
           </span>
           {repositoryLabel}
         </span>
-        {notifyWaiting && <NotifyWaitingLabel />}
+        {waiting && <NotifyWaitingLabel />}
       </div>
     );
   }
@@ -984,22 +996,23 @@ export function SessionRowContent({
   return (
     <div className="flex min-w-0 w-full items-start gap-1.5">
       {prNumber ? (
-        <PullRequestIcon className={`mt-0.5 w-3.5 h-3.5 flex-shrink-0 ${iconColor}`} />
+        <PullRequestIcon className={`mt-0.5 w-3.5 h-3.5 flex-shrink-0 ${branchIconColor}`} />
       ) : (
-        <BranchIcon className={`mt-0.5 w-3.5 h-3.5 flex-shrink-0 ${iconColor}`} />
+        <BranchIcon className={`mt-0.5 w-3.5 h-3.5 flex-shrink-0 ${branchIconColor}`} />
       )}
-      {notifyWaiting ? <NotifyWaitingDot className="mt-0.5" /> : <AgentStatusDot status={agentDisplayStatus} size="sm" className="mt-0.5 flex-shrink-0" />}
+      {statusIndicator('mt-0.5')}
       <div className="flex min-w-0 flex-1 flex-col">
         <span className="flex min-w-0 items-baseline gap-1.5">
           <span className={cn(
-            'min-w-0 truncate text-[13px] font-medium leading-5 text-text-primary decoration-status-info decoration-2 underline-offset-4',
-            showActivity && 'animate-sidebar-active-label',
+            'min-w-0 truncate text-[13px] leading-5 decoration-status-info decoration-2 underline-offset-4',
+            titleTone,
+            showActivity && !paused && 'animate-sidebar-active-label',
             showUnviewedCompleted && 'underline decoration-dashed'
           )}>
             {title}
           </span>
           {repositoryLabel}
-          {notifyWaiting && <NotifyWaitingLabel />}
+          {waiting && <NotifyWaitingLabel />}
         </span>
         {showMetadata && (
           <span className="mt-1.5 flex min-w-0 items-center gap-1.5 text-[10px] font-semibold leading-3">
@@ -1117,7 +1130,7 @@ function SessionRow({
       >
         <button
           type="button"
-          onClick={onClick}
+          onClick={() => { resumeIfOpenResumes({ kind: 'pane', id: session.id }, Boolean(session.paused)); onClick(); }}
           aria-current={isActive ? 'page' : undefined}
           aria-label={accessibleName}
           className="absolute inset-0 z-0 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-interactive"

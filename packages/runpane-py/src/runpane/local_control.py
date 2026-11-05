@@ -1804,6 +1804,31 @@ def run_panels_resume(parsed: Any) -> int:
     return 0 if result.get("ok") else 1
 
 
+def run_pause(parsed: Any, scope: str, action: str) -> int:
+    """`panels pause`, `panes pause|resume` and `sessions pause|resume`: one daemon call each, printed alike."""
+    flag, key, value = {
+        "panel": ("--panel", "panelId", parsed.panel_id),
+        "pane": ("--pane", "paneId", parsed.pane_id),
+        "session": ("--session", "sessionId", (parsed.session_id or "").strip() or None),
+    }[scope]
+    if not value:
+        raise ValueError(f"runpane {parsed.command} requires {flag}.")
+    # Like the other Session updates, Session pause and resume need no --yes.
+    if scope != "session":
+        confirm_mutation(parsed)
+    group = {"panel": "panels", "pane": "panes", "session": "sessions"}[scope]
+    # Pause waits for every tab's processes to exit; resume restarts them a few at a time.
+    result = invoke_daemon(f"runpane:{group}:{action}", [{key: value}], pane_dir=parsed.pane_dir, timeout_ms=5 * 60_000)
+    if parsed.json:
+        print_json(result)
+    else:
+        print(result.get("message"))
+        for item in result.get("failed") or []:
+            print(f"FAIL panel {item.get('panelId')}: {item.get('error')}")
+        print(f"Next: {result.get('nextCommand')}")
+    return 0 if result.get("ok") else 1
+
+
 def run_panels_resume_many(parsed: Any) -> int:
     # The resumed panels wait together, so the wait adds one --ready-timeout-ms however many there are.
     timeout_ms = 5 * 60_000 + ((parsed.ready_timeout_ms or 30_000) if parsed.wait_ready else 0)
@@ -2317,6 +2342,10 @@ def format_workspace_entry_line(entry: Dict[str, Any]) -> Optional[str]:
         return f"CHANGED {name} {pane}{panel}"
     if kind == "panel.stopped":
         return f"STOPPED {name} {pane}{panel}"
+    if kind == "panel.paused":
+        return f"PAUSED {name} {pane}{panel}"
+    if kind == "panel.unpaused":
+        return f"UNPAUSED {name} {pane}{panel}"
     if kind == "agent.idle":
         minutes = max(0, int(entry.get("idleMs") or 0) // 60_000)
         return f"IDLE {name} {minutes}m {pane}{panel}"
@@ -2410,6 +2439,8 @@ def workspace_label(kind: Any) -> str:
         "pane.gone": "GONE",
         "panel.exited": "EXIT",
         "panel.stopped": "STOPPED",
+        "panel.paused": "PAUSED",
+        "panel.unpaused": "UNPAUSED",
         "pane.associated": "JOINED",
         "pane.detached": "LEFT",
         "pr.conflicted": "PR CONFLICTED",
@@ -2447,7 +2478,8 @@ def print_pane_list_result(result: Dict[str, Any]) -> None:
     for pane in panes:
         repo = f" {pane.get('repoName')}" if pane.get("repoName") else ""
         pinned = " pinned" if pane.get("pinned") else ""
-        print(f"{pane.get('id')}\t{pane.get('name')}\t{pane.get('status')}{pinned}\t{pane.get('panelCount')} panels\t{pane.get('worktreePath')}{repo}")
+        paused = " paused" if pane.get("paused") else ""
+        print(f"{pane.get('id')}\t{pane.get('name')}\t{pane.get('status')}{pinned}{paused}\t{pane.get('panelCount')} panels\t{pane.get('worktreePath')}{repo}")
 
 
 def print_pane_cost_result(result: Dict[str, Any]) -> None:
@@ -2704,7 +2736,9 @@ def print_panel_list_result(result: Dict[str, Any]) -> None:
         initialized = ""
         if panel.get("initialized") is not None:
             initialized = " initialized" if panel.get("initialized") else " not-initialized"
-        if panel.get("running") is False:
+        if panel.get("paused"):
+            initialized += " paused"
+        elif panel.get("running") is False:
             initialized += " stopped"
         agent = f" {panel.get('agentType')}" if panel.get("agentType") else ""
         detection = panel.get("agentDetection")

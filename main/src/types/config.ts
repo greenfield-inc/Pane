@@ -88,6 +88,11 @@ export interface AppConfig {
   // Under the master toggle: hold keep-awake on AC power (default on) and on battery (default off)
   keepAwakeWhilePluggedIn?: boolean;
   keepAwakeOnBattery?: boolean;
+  // Pause: selecting a paused Pane or Session chat resumes it (default off)
+  resumePausedOnOpen?: boolean;
+  // Pause Panes nobody has used for autoPauseAfterHours (default on, 48 hours; whole hours 1 to 720)
+  autoPauseEnabled?: boolean;
+  autoPauseAfterHours?: number;
   // Theme preference
   appearanceMode?: AppearanceMode;
   theme?: Theme;
@@ -226,6 +231,9 @@ export interface UpdateConfigRequest {
   keepAwakeWhileSessionsActive?: boolean;
   keepAwakeWhilePluggedIn?: boolean;
   keepAwakeOnBattery?: boolean;
+  resumePausedOnOpen?: boolean;
+  autoPauseEnabled?: boolean;
+  autoPauseAfterHours?: number;
   appearanceMode?: AppearanceMode;
   theme?: Theme;
   systemLightTheme?: Theme;

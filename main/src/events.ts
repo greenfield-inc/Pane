@@ -51,6 +51,11 @@ export function setupEventListeners(services: AppServices): void {
   orchestrationSessionManager?.on('changed', (change: { sessionId: string; kind: string; selectionChanged?: boolean; sessionName?: string; paneIds?: string[] }) => {
     sendRendererEvent('orchestration-sessions:changed', change);
   });
+  // Pausing or resuming tabs can change whether their Pane and its Session read as paused.
+  terminalPanelManager.on('pause-changed', (change: { paneIds: string[] }) => {
+    for (const paneId of change.paneIds) sessionManager.publishPausedChange(paneId);
+    orchestrationSessionManager?.notifyPausedChange(change.paneIds);
+  });
   orchestrationSessionManager?.on('overview-updated', (change: { panelId: string; state: string }) => {
     sendRendererEvent('orchestration-sessions:overview-updated', change);
   });

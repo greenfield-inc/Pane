@@ -40,6 +40,7 @@ import {
   runPanelsClose,
   runPanelsWait,
   runPanelsResume,
+  runPause,
   runPanesArchive,
   runPanesAdopt,
   runPanesCreate,
@@ -271,6 +272,8 @@ const commandHandlers = new Map<string, CommandHandler>(Object.entries({
   },
   'sessions pin': async (parsed) => runSessionsPin(parsed, true),
   'sessions unpin': async (parsed) => runSessionsPin(parsed, false),
+  'sessions pause': async (parsed) => runPause(parsed, 'session', 'pause'),
+  'sessions resume': async (parsed) => runPause(parsed, 'session', 'resume'),
   'sessions set-agent': async (parsed, telemetryContext) => {
     return runSessionsSetAgent(parsed);
   },
@@ -330,6 +333,8 @@ const commandHandlers = new Map<string, CommandHandler>(Object.entries({
   'panes unpin': async (parsed, telemetryContext) => {
     return runPanesPin(parsed, false);
   },
+  'panes pause': async (parsed) => runPause(parsed, 'pane', 'pause'),
+  'panes resume': async (parsed) => runPause(parsed, 'pane', 'resume'),
   'panes rename': async (parsed, telemetryContext) => {
     return runPanesRename(parsed);
   },
@@ -369,6 +374,7 @@ const commandHandlers = new Map<string, CommandHandler>(Object.entries({
   'panels resume': async (parsed, telemetryContext) => {
     return runPanelsResume(parsed);
   },
+  'panels pause': async (parsed) => runPause(parsed, 'panel', 'pause'),
   'panels last-message': async (parsed, telemetryContext) => {
     return runPanelsLastMessage(parsed);
   },

@@ -156,6 +156,11 @@ export class GitStatusManager extends EventEmitter {
   }
 
 
+  /** The Pane the desktop window shows, from the renderer's active-Pane hint. */
+  getActiveSessionId(): string | null {
+    return this.activeSessionId;
+  }
+
   /**
    * Set the currently active session for smart polling
    */

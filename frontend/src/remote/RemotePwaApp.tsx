@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import type { OrchestrationSessionRecord, OrchestrationSessionView } from '../../../shared/types/orchestrationSession';
-import type { PanelActivationRequest, ToolPanel, ToolPanelType } from '../../../shared/types/panels';
+import { pausedMarkOf, type PanelActivationRequest, type ToolPanel, type ToolPanelType } from '../../../shared/types/panels';
 import type { RemotePaneConnectionProfile, RemotePaneConnectionStatus, RemotePwaAffordances } from '../../../shared/types/remoteDaemon';
 import type { Session } from '../types/session';
 import {
@@ -697,8 +697,12 @@ export function RemotePwaApp() {
     });
   }, [adapter, setLastError]);
 
+  // The Pane the person just picked in the sidebar, until its shown tab has loaded. Selections the
+  // app makes itself (the first Pane after loading, back and forward, a notification) never set it.
+  const personOpenedPaneRef = useRef<string | null>(null);
   const selectRemoteSession = useCallback((sessionId: string, scope: string) => {
     navigationRequestRef.current += 1;
+    personOpenedPaneRef.current = sessionId;
     setSelectedPaneScope({ paneId: sessionId, scope });
     requestView(`pane:${sessionId}`);
     selectSession(sessionId);
@@ -742,6 +746,10 @@ export function RemotePwaApp() {
         await Promise.all([refreshProjects(runtime), loadArchivedIfShown(runtime)]);
       });
     },
+    setPanePaused: (paneId, paused) => void runSidebarAction(paneId, paused ? 'Failed to pause pane' : 'Failed to resume pane', async (runtime) => {
+      await runtime.setPaused({ kind: 'pane', id: paneId }, paused);
+      await refreshProjects(runtime);
+    }),
     restorePane: (paneId) => void runSidebarAction(paneId, 'Failed to restore pane', async (runtime) => {
       await runtime.restoreSession(paneId);
       await Promise.all([refreshProjects(runtime), loadArchived(runtime)]);
@@ -761,6 +769,10 @@ export function RemotePwaApp() {
       await runtime.updateOrchestrationSession(session.id, { archived });
       setArchivedSessionToast(current => archived ? session : current?.id === session.id ? null : current);
       await refreshOrchestrationSessions(runtime);
+    }),
+    setSessionPaused: (session, paused) => void runSidebarAction(session.id, paused ? 'Failed to pause Session' : 'Failed to resume Session', async (runtime) => {
+      await runtime.setPaused({ kind: 'session', id: session.id }, paused);
+      await Promise.all([refreshOrchestrationSessions(runtime), refreshProjects(runtime)]);
     }),
     reloadSessions: () => void refreshOrchestrationSessions(adapter),
     loadArchived: () => void loadArchived(adapter),
@@ -795,13 +807,29 @@ export function RemotePwaApp() {
     setSidebarOpen(false);
   }, [adapter, refreshProjects, requestView, selectSession]);
 
+  // With the host's resume-on-open setting, a paused tab the person opens resumes: the tab shown
+  // when they pick a Pane or Session, or a tab they pick. Tabs kept loaded out of sight never count.
+  const resumeOnOpen = affordances.resumePausedOnOpen === true;
+  const resumeOpenedPanel = useCallback((panel: ToolPanel | undefined) => {
+    if (!adapter || !resumeOnOpen || !panel || !pausedMarkOf(panel)) return;
+    adapter.resumePanel(panel.id).catch((error: Error) => {
+      if (adapter === activeRuntimeRef.current) setLastError(error.message || 'Could not resume the tab.');
+    });
+  }, [adapter, resumeOnOpen, setLastError]);
+  useEffect(() => {
+    if (!selectedSessionId || !selectedPanel || personOpenedPaneRef.current !== selectedSessionId) return;
+    personOpenedPaneRef.current = null;
+    resumeOpenedPanel(selectedPanel);
+  }, [resumeOpenedPanel, selectedPanel, selectedSessionId]);
+
   const selectPanel = useCallback((panelId: string) => {
     if (!adapter || !selectedSessionId) return;
+    if (panelId !== selectedPanel?.id) resumeOpenedPanel(selectedPanels.find(panel => panel.id === panelId));
     setSelectedPanel(panelId);
     void adapter.setActivePanel(selectedSessionId, panelId).catch(error => {
       setLastError(error instanceof Error ? error.message : 'Failed to set active panel');
     });
-  }, [adapter, selectedSessionId, setSelectedPanel, setLastError]);
+  }, [adapter, resumeOpenedPanel, selectedPanel?.id, selectedPanels, selectedSessionId, setSelectedPanel, setLastError]);
 
   useEffect(() => {
     if (!adapter) return;

@@ -221,7 +221,7 @@ export const Tooltip = React.forwardRef<HTMLElement, TooltipProps>(({
         {children}
       </Slot>
 
-      {isOpen && createPortal(
+      {isOpen && content != null && createPortal(
         <div
           id={tooltipId}
           ref={tooltipRef}

@@ -10,13 +10,16 @@ interface SwipeRowActions {
   pinned: boolean;
   onTogglePinned: () => void;
   onArchive: () => void;
+  /** Pause or Resume beside Archive; rows that can't pause leave it out. */
+  pause?: { paused: boolean; onToggle: () => void };
 }
 
 /**
- * A home-list row that swipes right to pin or unpin and left to archive.
- * The swipe actions' testIDs are `<testIDPrefix>-swipe-pin-<id>` and `<testIDPrefix>-swipe-archive-<id>`.
+ * A home-list row that swipes right to pin or unpin, and left to pause or resume and archive.
+ * The swipe actions' testIDs are `<testIDPrefix>-swipe-pin-<id>`, `<testIDPrefix>-swipe-pause-<id>`
+ * and `<testIDPrefix>-swipe-archive-<id>`.
  */
-export function SwipeRow({ testIDPrefix, id, pinned, onTogglePinned, onArchive, children }: SwipeRowActions & {
+export function SwipeRow({ testIDPrefix, id, pinned, onTogglePinned, onArchive, pause, children }: SwipeRowActions & {
   testIDPrefix: string;
   id: string;
   children: ReactNode;
@@ -38,12 +41,24 @@ export function SwipeRow({ testIDPrefix, id, pinned, onTogglePinned, onArchive, 
           />
         )}
         renderRightActions={(_progress, _translation, swipe) => (
-          <SwipeAction
-            testID={`${testIDPrefix}-swipe-archive-${id}`}
-            label="Archive"
-            color="danger"
-            onPress={() => { swipe.close(); onArchive(); }}
-          />
+          <View style={styles.actions}>
+            {pause ? (
+              <SwipeAction
+                testID={`${testIDPrefix}-swipe-pause-${id}`}
+                label={pause.paused ? 'Resume' : 'Pause'}
+                color="surfacePressed"
+                tone="primary"
+                onPress={() => { swipe.close(); pause.onToggle(); }}
+              />
+            ) : null}
+            {/* Archive stays outermost. */}
+            <SwipeAction
+              testID={`${testIDPrefix}-swipe-archive-${id}`}
+              label="Archive"
+              color="danger"
+              onPress={() => { swipe.close(); onArchive(); }}
+            />
+          </View>
         )}
         onSwipeableWillOpen={() => void Haptics.selectionAsync()}
       >
@@ -53,21 +68,29 @@ export function SwipeRow({ testIDPrefix, id, pinned, onTogglePinned, onArchive, 
   );
 }
 
-/** Pin/Unpin and Archive as screen reader actions, for the row's focusable Pressable. */
-export function swipeRowAccessibility({ pinned, onTogglePinned, onArchive }: SwipeRowActions) {
+/** Pin/Unpin, Pause/Resume and Archive as screen reader actions, for the row's focusable Pressable. */
+export function swipeRowAccessibility({ pinned, onTogglePinned, onArchive, pause }: SwipeRowActions) {
   return {
     accessibilityActions: [
       { name: 'pin', label: pinned ? 'Unpin' : 'Pin' },
+      ...(pause ? [{ name: 'pause', label: pause.paused ? 'Resume' : 'Pause' }] : []),
       { name: 'archive', label: 'Archive' },
     ],
     onAccessibilityAction: (event: AccessibilityActionEvent) => {
       if (event.nativeEvent.actionName === 'pin') onTogglePinned();
+      else if (event.nativeEvent.actionName === 'pause') pause?.onToggle();
       else if (event.nativeEvent.actionName === 'archive') onArchive();
     },
   };
 }
 
-function SwipeAction({ label, color, onPress, testID }: { label: string; color: keyof ThemeColors; onPress: () => void; testID: string }) {
+function SwipeAction({ label, color, tone = 'onAccent', onPress, testID }: {
+  label: string;
+  color: keyof ThemeColors;
+  tone?: 'onAccent' | 'primary';
+  onPress: () => void;
+  testID: string;
+}) {
   const theme = useTheme();
   return (
     <Pressable
@@ -77,7 +100,7 @@ function SwipeAction({ label, color, onPress, testID }: { label: string; color: 
       onPress={onPress}
       style={[styles.swipeAction, { backgroundColor: theme.colors[color] }]}
     >
-      <Text variant="caption" tone="onAccent">{label}</Text>
+      <Text variant="caption" tone={tone}>{label}</Text>
     </Pressable>
   );
 }
@@ -85,5 +108,6 @@ function SwipeAction({ label, color, onPress, testID }: { label: string; color: 
 const styles = StyleSheet.create({
   // space-y-1 between rows.
   outer: { marginBottom: 4, overflow: 'hidden' },
+  actions: { flexDirection: 'row' },
   swipeAction: { width: 84, alignItems: 'center', justifyContent: 'center' },
 });

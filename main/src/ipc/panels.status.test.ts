@@ -79,4 +79,23 @@ describe('panel deletion IPC', () => {
     await expect(deleting).resolves.toEqual({ success: true });
     expect(remove).toHaveBeenCalledWith('p');
   });
+
+  it("tells listeners the Pane's pause state may have changed when a tab closes in a Pane with paused tabs", async () => {
+    const paused = { ...panel('paused', 'pane-1'), state: { isActive: false, customState: { paused: { at: '2026-11-04T12:00:00.000Z', by: 'manual' } } } };
+    vi.spyOn(panelManager, 'getPanel').mockReturnValue(panel('running', 'pane-1'));
+    vi.spyOn(panelManager, 'getPanelsForSession').mockReturnValue([paused, panel('running', 'pane-1')]);
+    vi.spyOn(terminalPanelManager, 'destroyTerminal').mockResolvedValue();
+    vi.spyOn(panelManager, 'deletePanel').mockResolvedValue();
+    const changes: Array<{ paneIds: string[] }> = [];
+    const listener = (change: { paneIds: string[] }) => changes.push(change);
+    terminalPanelManager.on('pause-changed', listener);
+    try {
+      const registry = new PaneCommandRegistry();
+      registerPanelHandlers(partial<IpcMain>({ handle: vi.fn() }), partial<AppServices>({}), registry);
+      await expect(registry.invoke('panels:delete', 'running')).resolves.toEqual({ success: true });
+      expect(changes).toEqual([expect.objectContaining({ paneIds: ['pane-1'] })]);
+    } finally {
+      terminalPanelManager.off('pause-changed', listener);
+    }
+  });
 });

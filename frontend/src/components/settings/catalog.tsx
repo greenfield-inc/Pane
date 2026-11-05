@@ -31,10 +31,10 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategoryDefinition[] = [
   {
     id: 'general',
     label: 'General',
-    description: 'Startup, application updates, feedback, and opening files.',
+    description: 'Startup, application updates, feedback, pausing idle Panes, and opening files.',
     icon: Settings,
-    settingIds: ['automatic-updates', 'check-updates-now', 'send-feedback', 'start-on-login', 'keep-awake', 'html-file-open-mode'],
-    aliases: ['startup', 'updates', 'feedback', 'bug report', 'feature request', 'github issue', 'login', 'sleep', 'caffeinate', 'awake', 'power', 'battery', 'plugged in', 'lid', 'html', 'preview', 'open html', 'explorer', 'source'],
+    settingIds: ['automatic-updates', 'check-updates-now', 'send-feedback', 'start-on-login', 'keep-awake', 'resume-paused-on-open', 'auto-pause', 'html-file-open-mode'],
+    aliases: ['startup', 'updates', 'feedback', 'bug report', 'feature request', 'github issue', 'login', 'sleep', 'caffeinate', 'awake', 'power', 'battery', 'plugged in', 'lid', 'pause', 'paused', 'resume', 'idle', 'auto-pause', 'html', 'preview', 'open html', 'explorer', 'source'],
   },
   {
     id: 'appearance',
