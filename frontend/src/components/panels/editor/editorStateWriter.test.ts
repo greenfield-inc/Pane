@@ -14,6 +14,27 @@ describe('editor state writer', () => {
     expect(write).toHaveBeenCalledWith('panel', 'session', { isDirty: true });
   });
 
+  it('debounces a tab that is already dirty, so typing writes once per wait rather than per keystroke', () => {
+    const write = vi.fn();
+    const writer = createEditorStateWriter(write, 500);
+
+    writer.update('panel', 'session', { isDirty: true });
+    writer.update('panel', 'session', { isDirty: true });
+    writer.update('panel', 'session', { isDirty: true, cursorPosition: { line: 2, column: 4 } });
+    expect(write).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(500);
+
+    expect(write).toHaveBeenCalledTimes(2);
+    expect(write).toHaveBeenLastCalledWith('panel', 'session', { isDirty: true, cursorPosition: { line: 2, column: 4 } });
+
+    // Saved and written clean, then edited again: the tab turns dirty once more and is written at once.
+    writer.update('panel', 'session', { isDirty: false });
+    vi.advanceTimersByTime(500);
+    writer.update('panel', 'session', { isDirty: true });
+    expect(write).toHaveBeenCalledTimes(4);
+    expect(write).toHaveBeenLastCalledWith('panel', 'session', { isDirty: true });
+  });
+
   it('keeps a pending dirty flag when a cursor or scroll update follows it', () => {
     const write = vi.fn();
     const writer = createEditorStateWriter(write, 500);
