@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { chatLaunchFromCommand, sessionChatLaunch } from './launch';
+import { chatLaunchForTerminal, chatLaunchFromCommand, sessionChatLaunch, sessionFolderMeta } from './launch';
 import { AGENT_FARM_RESUME } from '../../../../shared/types/customCommandResume';
+import { withSessionFolderAccess } from '../agents/sessionFolderAccess';
+import { RUNPANE_CONTRACT } from '../../../../shared/types/generatedRunpaneContract';
 
 describe('which terminal launches a chat tab can run', () => {
   it('runs the plain agent, keeping its skip-approvals flag as the session mode', () => {
@@ -44,5 +46,52 @@ describe('which Sessions can run as a chat', () => {
     expect(reason({ agent: 'claude', launchCommand: 'claude', resume: 'abc' })).toContain('terminal conversation');
     expect(reason({ agent: 'claude', launchCommand: 'claude', promoted: true })).toContain('terminal conversation');
     expect(reason({ agent: 'cursor' })).toContain('Claude and Codex');
+  });
+});
+
+describe('the chat launch for a terminal agent tab being switched to chat', () => {
+  it('keeps the agent, its skip-approvals mode, or its Agent Farm profile', () => {
+    expect(chatLaunchForTerminal('claude --dangerously-skip-permissions', 'claude')).toEqual({ launch: { kind: 'agent', mode: 'bypassPermissions' } });
+    expect(chatLaunchForTerminal('agent-farm run greenfield/orchestrator --arg docs=grain', 'claude')).toEqual({ launch: { kind: 'profile', profile: 'greenfield/orchestrator', args: { docs: 'grain' } } });
+  });
+  it('carries a --model flag over as the chat\'s model setting', () => {
+    expect(chatLaunchForTerminal('claude --model opus --dangerously-skip-permissions', 'claude')).toEqual({ launch: { kind: 'agent', mode: 'bypassPermissions' }, settings: { model: 'opus' } });
+    expect(chatLaunchForTerminal('codex --model=gpt-5.5', 'codex')).toEqual({ launch: { kind: 'agent' }, settings: { model: 'gpt-5.5' } });
+  });
+  it('runs the plain agent when the terminal saved no launch command', () => {
+    expect(chatLaunchForTerminal(undefined, 'codex')).toEqual({ launch: { kind: 'agent' } });
+  });
+  it('names what a chat tab cannot run, instead of switching to a different launch', () => {
+    expect(chatLaunchForTerminal('claude --dangerously-skip-permissions --verbose', 'claude')).toEqual({ unsupported: '--verbose' });
+    expect(chatLaunchForTerminal('agent-farm run greenfield/orchestrator --reasoning high --arg docs=grain', 'claude')).toEqual({ unsupported: '--reasoning' });
+    expect(chatLaunchForTerminal('my-wrapper claude', 'claude')).toEqual({ unsupported: 'my-wrapper' });
+  });
+});
+
+describe('Session folder access in a switched Session Pane chat (D-161)', () => {
+  const folder = '/Users/me/.pane/sessions/s-1';
+  const sessionPaneCommand = withSessionFolderAccess({ title: 'Claude Code', command: RUNPANE_CONTRACT.agentTemplates.claude.command, agent: 'claude' }, folder, 'darwin').command;
+
+  it.skipIf(process.platform === 'win32')('switches the launch Pane gives Claude in a Session\'s Pane, dropping only its own Session folder settings', () => {
+    expect(sessionPaneCommand).toContain('--settings');
+    expect(chatLaunchForTerminal(sessionPaneCommand, 'claude', { sessionFolder: folder })).toEqual({ launch: { kind: 'agent', mode: 'bypassPermissions' } });
+  });
+
+  it.skipIf(process.platform === 'win32')('still refuses --settings that are not Pane\'s own for that folder', () => {
+    expect(chatLaunchForTerminal(sessionPaneCommand, 'claude', { sessionFolder: '/somewhere/else' })).toEqual({ unsupported: '--settings' });
+    expect(chatLaunchForTerminal('claude --settings \'{"model":"opus"}\'', 'claude', { sessionFolder: folder })).toEqual({ unsupported: '--settings' });
+  });
+
+  it('gives the chat the same read-only Session folder access the terminal had', () => {
+    expect(sessionFolderMeta({ agent: 'claude', cwd: '/work/pane', sessionFolder: folder }, 'darwin')).toEqual({
+      claudeCode: { options: { settings: { permissions: { additionalDirectories: [folder], deny: [`Edit(/${folder}/**)`] } } } },
+    });
+  });
+
+  it('adds none for a Session orchestrator, which works in its own folder, for Codex, or on Windows', () => {
+    expect(sessionFolderMeta({ agent: 'claude', cwd: folder, sessionFolder: folder }, 'darwin')).toBeUndefined();
+    expect(sessionFolderMeta({ agent: 'codex', cwd: '/work/pane', sessionFolder: folder }, 'darwin')).toBeUndefined();
+    expect(sessionFolderMeta({ agent: 'claude', cwd: '/work/pane', sessionFolder: folder }, 'win32')).toBeUndefined();
+    expect(sessionFolderMeta({ agent: 'claude', cwd: '/work/pane' }, 'darwin')).toBeUndefined();
   });
 });

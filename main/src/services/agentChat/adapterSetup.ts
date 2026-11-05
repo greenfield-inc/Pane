@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
@@ -38,6 +38,27 @@ export function adapterEntry(provider: Provider): string | undefined {
   catch { return; }
   const entry = path.join(root, 'dist', 'index.js');
   return metadata?.version === version && existsSync(entry) ? entry : undefined;
+}
+
+/**
+ * The adapter as a file another program's plain Node can run, for Agent Farm profiles. In a
+ * packaged Pane the entry is inside app.asar, which only Electron can read, so Agent Farm refuses
+ * it. Outside app.asar this is the entry itself; inside, it is a small launcher in `directory`
+ * that runs the entry with Pane's own Electron, the way plain chat tabs and the release check do.
+ */
+export function adapterFileForPlainNode(entry: string, directory: string, electron: string = process.execPath): string {
+  if (!/\.asar[\\/]/.test(entry)) return entry;
+  const file = path.join(directory, `${path.basename(path.dirname(path.dirname(entry)))}-launcher.cjs`);
+  const content = `// Written by Pane: runs its bundled chat adapter with Pane's Electron, because plain Node cannot read app.asar.
+const { spawn } = require('child_process');
+const child = spawn(${JSON.stringify(electron)}, [${JSON.stringify(entry)}, ...process.argv.slice(2)], { stdio: 'inherit', windowsHide: true, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } });
+for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(signal, () => child.kill(signal));
+child.on('error', error => { console.error('Pane could not start its chat adapter: ' + error.message); process.exit(1); });
+child.on('exit', (code, signal) => { if (signal) process.kill(process.pid, signal); else process.exit(code ?? 1); });
+`;
+  mkdirSync(directory, { recursive: true });
+  if (!existsSync(file) || readFileSync(file, 'utf8') !== content) writeFileSync(file, content, { mode: 0o755 });
+  return file;
 }
 
 /** Where the adapter will run the CLI: the tab's project folder and launch environment. */

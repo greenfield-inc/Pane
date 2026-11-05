@@ -2426,8 +2426,8 @@ export class TerminalPanelManager extends EventEmitter {
     let cwd = (panel.state.customState && 'cwd' in panel.state.customState) ? panel.state.customState.cwd : undefined;
     cwd = cwd || terminal.launchCwd;
     try {
-      // Try to get CWD from process (platform-specific)
-      if (process.platform !== 'win32') {
+      // Only Linux exposes a process's folder through /proc.
+      if (process.platform === 'linux') {
         const pid = terminal.pty.pid;
         if (pid) {
           // This is a simplified approach - in production you might use platform-specific methods
@@ -2998,6 +2998,20 @@ export class TerminalPanelManager extends EventEmitter {
     if (terminal.outputFlushTimer) clearTimeout(terminal.outputFlushTimer);
     disposeFlowControlRecord(terminal.flowControl);
     this.serializedBuffers.delete(panelId);
+  }
+
+  /** Where and when the panel's current launch started; undefined when no terminal is live. */
+  getLaunchInfo(panelId: string): { cwd: string; startedAt: number } | undefined {
+    const terminal = this.terminals.get(panelId);
+    return terminal?.launchCommandWrittenAt ? { cwd: terminal.launchCwd, startedAt: terminal.launchCommandWrittenAt } : undefined;
+  }
+
+  /** Whether the panel's agent is mid-turn, read from its screen first (the sidebar holds "working" after output). */
+  async isAgentMidTurn(panelId: string): Promise<boolean> {
+    const terminal = this.terminals.get(panelId);
+    if (!terminal) return false;
+    if (terminal.screenEmulator) await terminal.screenEmulator.refresh();
+    return !this.isIdleForPromotion(terminal);
   }
 
   private isIdleForPromotion(terminal: TerminalProcess): boolean {

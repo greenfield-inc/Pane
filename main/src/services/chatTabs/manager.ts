@@ -301,7 +301,9 @@ export class ChatTabManager {
           receipts: current.receipts?.map(receipt => receipt.operationId === interrupted.operationId && receipt.state === 'accepted' ? { ...receipt, state: 'failed', error: 'Pane closed before the turn finished.' } : receipt),
         }));
       }
-      this.update(panelId, current => ({ ...current, status: 'idle' }));
+      const { notice } = this.required(panelId);
+      if (notice) tab.notice = notice;
+      this.update(panelId, current => ({ ...current, status: 'idle', notice: undefined }));
       this.publish(panelId);
       this.sendInitialInput(panelId);
       this.drain(panelId);

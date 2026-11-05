@@ -13,6 +13,7 @@ import { getAppDirectory } from '../utils/appDirectory';
 import { panelManager } from './panelManager';
 import { getChatTabManager } from './chatTabs';
 import { sessionChatLaunch } from './chatTabs/launch';
+import type { SessionAdoption } from './chatTabs/switchToChat';
 import type { ChatPanelState, ChatTabLaunch } from '../../../shared/types/chatTab';
 
 /** What a Session needs from the host's chat tabs. */
@@ -427,6 +428,63 @@ export class OrchestrationSessionManager extends EventEmitter {
       const panel = await this.ensurePanelForAgent(updated);
       return this.viewFromRecord(updated, panel);
     });
+  }
+
+  /**
+   * Switch to chat: the Session whose agent runs in `fromPanelId` now runs it in the chat tab
+   * `toPanelId`, which becomes its permanent tab. Any other tab is left alone.
+   *
+   * Saving the record is the single commit point. The chat is permanent before the record can
+   * name it, so a Session never owns a chat that can be closed, and nothing has to be undone once
+   * the record is saved. A store write that throws did not land (it publishes by atomic rename),
+   * so on failure the terminal is the confirmed owner; `chatReleased` says whether the chat could
+   * be made closable again.
+   */
+  async adoptAgentPanel(fromPanelId: string, toPanelId: string): Promise<SessionAdoption> {
+    return withLock('orchestration-sessions', async () => {
+      await this.ensureInitializedUnlocked();
+      const data = this.store.read();
+      const record = data.sessions.find(session => session.panelIds[session.agent] === fromPanelId);
+      if (!record) return { owner: 'chat' };
+      const target = panelManager.getPanel(toPanelId);
+      if (!target) return { owner: 'terminal', chatReleased: true, reason: `chat tab ${toPanelId} is missing` };
+      const release = async (reason: string): Promise<SessionAdoption> => {
+        try { await panelManager.updatePanel(toPanelId, { metadata: { ...target.metadata, permanent: false } }); }
+        catch (error) { return { owner: 'terminal', chatReleased: false, reason: `${reason}; the chat tab could not be made closable again: ${reasonOf(error)}` }; }
+        if (panelManager.getPanel(toPanelId)?.metadata.permanent) return { owner: 'terminal', chatReleased: false, reason: `${reason}; the chat tab could not be made closable again` };
+        return { owner: 'terminal', chatReleased: true, reason };
+      };
+      try {
+        await panelManager.updatePanel(toPanelId, { metadata: { ...target.metadata, permanent: true } });
+        // updatePanel resolves without writing when the database refuses the row.
+        if (!panelManager.getPanel(toPanelId)?.metadata.permanent) throw new Error('the chat tab could not be saved as permanent');
+        this.store.write(replaceSession(data, {
+          ...record,
+          panelIds: { ...record.panelIds, [record.agent]: toPanelId },
+          // The promoted conversation lives on in the chat tab.
+          promotedFrom: record.promotedFrom?.panelId === fromPanelId ? { ...record.promotedFrom, panelId: toPanelId } : record.promotedFrom,
+          revision: record.revision + 1,
+          updatedAt: new Date().toISOString(),
+        }));
+      } catch (error) {
+        return release(reasonOf(error));
+      }
+      // Committed. Closing the terminal clears this mark again if this write fails.
+      const previous = panelManager.getPanel(fromPanelId);
+      if (previous?.metadata.permanent) {
+        await panelManager.updatePanel(fromPanelId, { metadata: { ...previous.metadata, permanent: false } })
+          .catch(error => console.warn(`[OrchestrationSessionManager] ${fromPanelId} stays marked permanent for now: ${reasonOf(error)}`));
+      }
+      this.emitChanged(this.findSession(this.store.read(), { sessionId: record.id }), 'updated');
+      return { owner: 'chat' };
+    });
+  }
+
+  /** The launch a Session saved for its agent tab `panelId` (its template's when none was set); undefined for any other tab. */
+  agentLaunchCommand(panelId: string): string | undefined {
+    const record = this.store.read().sessions.find(session => session.panelIds[session.agent] === panelId);
+    if (!record) return undefined;
+    return record.launchCommand?.trim() || RUNPANE_CONTRACT.agentTemplates[record.agent].command;
   }
 
   async associate(selector: OrchestrationSessionSelector, input: OrchestrationAssociationInput): Promise<OrchestrationSessionRecord> {

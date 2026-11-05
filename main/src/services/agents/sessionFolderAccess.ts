@@ -11,14 +11,20 @@ import type { RunpaneResolvedTool } from '../../../../shared/types/runpaneOrches
  * A single `--settings` value, unlike the variadic `--add-dir`, cannot swallow a
  * launch prompt argument and keeps `claudeResumeBase` able to parse the command.
  */
-function claudeSessionFolderSettings(folder: string): string {
+export function claudeSessionFolderSettings(folder: string) {
   const rulePath = `/${folder.replace(/\/+$/u, '')}/**`;
-  return JSON.stringify({
+  return {
     permissions: {
       additionalDirectories: [folder],
       deny: [`Edit(${rulePath})`],
     },
-  });
+  };
+}
+
+/** Whether a `--settings` value is exactly the Session folder access Pane gave a Claude terminal for `folder`. */
+export function isSessionFolderSettings(value: string, folder: string): boolean {
+  try { return JSON.stringify(JSON.parse(value)) === JSON.stringify(claudeSessionFolderSettings(folder)); }
+  catch { return false; }
 }
 
 /**
@@ -36,6 +42,6 @@ export function withSessionFolderAccess(
   if (platform === 'win32' || tool.agent !== 'claude' || tool.launchMode || tool.command !== RUNPANE_CONTRACT.agentTemplates.claude.command) {
     return tool;
   }
-  const quoted = `'${claudeSessionFolderSettings(folder).replace(/'/gu, `'\\''`)}'`;
+  const quoted = `'${JSON.stringify(claudeSessionFolderSettings(folder)).replace(/'/gu, `'\\''`)}'`;
   return { ...tool, command: `${tool.command} --settings ${quoted}` };
 }

@@ -15,6 +15,7 @@ import type {
 import type { SessionTileNode, SessionWorkspaceLayout } from '../../../shared/types/sessionWorkspaceLayout';
 import { getActiveRemoteHostId } from '../../../shared/types/remoteDaemon';
 import { SessionProvider } from '../contexts/SessionContext';
+import { SwitchToChatButton } from './panels/SwitchToChatButton';
 import { PanelContainer } from './panels/PanelContainer';
 import { DropOverlay } from './panels/DropOverlay';
 import { SessionWorkspacePanels } from './SessionWorkspacePanels';
@@ -451,12 +452,13 @@ function SessionTile({
     return () => { requestGeneration.current += 1; };
   }, [load]);
 
-  // The view carries a snapshot of the record; a changed agent needs a fresh
-  // panel, while any other edit only needs the newer record folded in.
+  // The view carries a snapshot of the record; a changed agent, or an agent tab
+  // that moved (Switch to chat), needs a fresh panel, while any other edit only
+  // needs the newer record folded in.
   useEffect(() => {
     if (!view || !record || view.session.id !== record.id) return;
-    if (view.agent !== record.agent) {
-      const reloadKey = `${record.id}:${record.agent}`;
+    if (view.agent !== record.agent || view.panel.id !== record.panelIds[record.agent]) {
+      const reloadKey = `${record.id}:${record.agent}:${record.panelIds[record.agent]}`;
       if (agentReloadKey.current === reloadKey) return;
       agentReloadKey.current = reloadKey;
       void load().finally(() => {
@@ -820,14 +822,15 @@ function NamedSessionWorkspace({ view, error, chrome, onOverviewUpdate, onRetry 
     return record;
   }, [onOverviewUpdate]);
 
-  const sessionControls = (
+  const sessionControls = (<>
+    <SwitchToChatButton key={view.panel.id} panel={view.panel} palette={chrome.isFocused ? 'session' : undefined} className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded text-text-secondary hover:bg-surface-hover hover:text-text-primary" />
     <Tooltip content="Session settings" side="bottom">
       <button type="button" aria-label="Session settings" onClick={() => setShowSettings(true)}
         className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded text-text-secondary hover:bg-surface-hover hover:text-text-primary">
         <Settings className="h-4 w-4" aria-hidden="true" />
       </button>
     </Tooltip>
-  );
+  </>);
 
   return (
     <div data-session-content-id={view.session.id} className="pane-chat-shell flex-1 flex min-h-0 flex-col overflow-hidden bg-bg-primary">

@@ -306,6 +306,16 @@ describe('chat tab manager', () => {
     expect(manager.view('p1').queue).toEqual([]);
   });
 
+  it('shows a saved notice once, when the tab finishes starting', async () => {
+    const { manager, store, directory } = harness();
+    store.add('p1', { ...newTab(directory), notice: 'Switched from a terminal tab.' });
+    await manager.ensure('p1');
+    expect(manager.view('p1').notice).toBe('Switched from a terminal tab.');
+    expect(store.state('p1')?.notice).toBeUndefined();
+    await manager.restart('p1');
+    expect(manager.view('p1').notice).toBeUndefined();
+  });
+
   it('keeps chosen settings across a restart', async () => {
     const { manager, store, directory } = harness();
     store.add('p1', newTab(directory));

@@ -49,11 +49,20 @@ export interface ChatPanelState {
   /** First prompt, sent once after the conversation is created. */
   initialInput?: string;
   initialInputSentAt?: string;
+  /** Shown once, when the tab next finishes starting (why a switched-from-terminal chat looks the way it does). */
+  notice?: string;
   /** Orchestration identity, as on terminal agent tabs. */
   orchestrationSessionId?: string;
   sessionFolder?: string;
   agentReport?: TerminalAgentReport;
 }
+
+/**
+ * Switch to chat reopened the conversation in chat tab `panelId`; any failure to do so is an error,
+ * with the terminal running again. `terminalKept`: the chat has the conversation, but the
+ * terminal tab could not be closed or the Session could not be moved; `reason` says what to do.
+ */
+export interface ChatTabSwitchResult { panelId: string; terminalKept: boolean; reason?: string }
 
 /**
  * A prompt waiting for the agent. With `stored`, `text` is a preview and the full

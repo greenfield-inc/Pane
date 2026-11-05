@@ -1,4 +1,5 @@
 import type { IpcMain } from 'electron';
+import path from 'path';
 import type { PaneCommandRegistry, PaneCommandValue } from '../daemon/commandRegistry';
 import type { AppServices } from './types';
 import type { ChatAgent, ChatPanelState, ChatTabAnswer, ChatTabCreate } from '../../../shared/types/chatTab';
@@ -11,8 +12,13 @@ import { configureChatTabs, getChatTabManager } from '../services/chatTabs';
 import { chatTabSecrets } from '../services/chatTabs/secrets';
 import { AgentFarmProfiles, printedCli } from '../services/chatTabs/agentFarm';
 import { chatTabEnv } from '../services/chatTabs/launch';
-import { adapterEntry, installAdapter } from '../services/agentChat/adapterSetup';
+import { adapterEntry, adapterFileForPlainNode, installAdapter } from '../services/agentChat/adapterSetup';
 import { findExecutableInPath } from '../utils/shellPath';
+import { terminalPanelManager } from '../services/terminalPanelManager';
+import { switchToChat, terminalRestored, type SwitchToChatPorts } from '../services/chatTabs/switchToChat';
+import { findCodexThread } from '../services/agents/codexThreads';
+import { getAppDirectory } from '../utils/appDirectory';
+import type { TerminalPanelState } from '../../../shared/types/panels';
 
 const agentSchema = boundary.enumeration('claude', 'codex');
 const imageSchema = boundary.object({ mimeType: boundary.string, data: boundary.string });
@@ -41,12 +47,12 @@ const agentFarmProfiles = new AgentFarmProfiles({
   adapter: async agent => {
     const entry = adapterEntry(agent);
     if (!entry) throw new PaneError('CHAT_ADAPTER_MISSING', 'This Pane build is missing its bundled chat adapter.', 'Reinstall Pane from runpane.com. Terminal agent tabs are not affected.');
-    return entry;
+    return adapterFileForPlainNode(entry, path.join(getAppDirectory(), 'agent-adapters'));
   },
   checkCli: (agent, context) => installAdapter(agent, printedCli(agent, context.env, findExecutableInPath), context),
 });
 
-const CHAT_TAB_CHANNELS = ['create', 'get', 'history', 'send', 'receipt', 'unqueue', 'configure', 'cancel', 'permission', 'answer', 'restart', 'sign-in', 'keys', 'set-key'] as const;
+const CHAT_TAB_CHANNELS = ['create', 'switch', 'get', 'history', 'send', 'receipt', 'unqueue', 'configure', 'cancel', 'permission', 'answer', 'restart', 'sign-in', 'keys', 'set-key'] as const;
 
 function chatTabsEnabled(): boolean { return getRuntimeConfigManager().getConfig().chatTabsEnabled === true; }
 
@@ -70,6 +76,7 @@ export function registerChatTabHandlers(ipcMain: IpcMain, services: AppServices,
     const request: ChatTabCreate = decodeBoundary(value, createSchema);
     return createChatTab(services, request);
   });
+  registry.register('chat-tab:switch', (id: string) => switchToChat(panelId(id), switchPorts(services, registry)));
   registry.register('chat-tab:get', (id: string, limit?: number) => manager.view(panelId(id), limit === undefined ? undefined : decodeBoundary(limit, boundary.number)));
   registry.register('chat-tab:history', (id: string, before: number, limit: number) => manager.history(panelId(id), decodeBoundary(before, boundary.number), decodeBoundary(limit, boundary.number)));
   registry.register('chat-tab:send', (id: string, request: PaneCommandValue) => manager.send(panelId(id), decodeBoundary(request, sendSchema)));
@@ -121,4 +128,64 @@ export async function createChatTab(services: AppServices, request: ChatTabCreat
   const panel = await panelManager.createPanel({ sessionId: request.sessionId, type: 'chat', title, initialState: { customState: state }, activate: request.activate, announceActivation: request.activate !== false });
   void getChatTabManager().ensure(panel.id).catch(error => console.warn(`[ChatTabs] ${panel.id} did not start: ${error instanceof Error ? error.message : String(error)}`));
   return { panelId: panel.id };
+}
+
+/** A chat that has not reopened by now is treated as failed, so the terminal comes back. */
+const REOPEN_LIMIT_MS = 3 * 60_000;
+const resumeResultSchema = boundary.object({ readiness: boundary.optional(boundary.object({ ok: boundary.boolean, blocked: boundary.optional(boundary.object({ message: boundary.string })), reason: boundary.optional(boundary.object({ code: boundary.string, message: boundary.string })), state: boundary.optional(boundary.object({ running: boundary.boolean })) })) });
+const deleteResultSchema = boundary.object({ success: boundary.boolean, error: boundary.optional(boundary.string) });
+
+/** Switch to chat over the real terminal, chat tab and Session owners. */
+function switchPorts(services: AppServices, registry: PaneCommandRegistry): SwitchToChatPorts {
+  const manager = getChatTabManager();
+  const releasePermanent = async (id: string) => {
+    const panel = panelManager.getPanel(id);
+    if (panel?.metadata.permanent) await panelManager.updatePanel(id, { metadata: { ...panel.metadata, permanent: false } });
+  };
+  return {
+    chatTabsEnabled,
+    panel: id => panelManager.getPanel(id),
+    paneDirectory: paneId => services.sessionManager.getSession(paneId)?.worktreePath,
+    terminal: {
+      busy: id => terminalPanelManager.isAgentMidTurn(id),
+      conversationId: async id => {
+        const panel = panelManager.getPanel(id);
+        // SAFETY: Switch to chat only asks this of terminal panels, which persist TerminalPanelState.
+        const state = panel?.state.customState as TerminalPanelState | undefined;
+        const known = state?.agentSessionId ?? terminalPanelManager.getLaunchSessionId(id);
+        if (known) return { id: known };
+        const launch = terminalPanelManager.getLaunchInfo(id);
+        if (!panel || !state || state.agentType !== 'codex' || !launch) return { problem: 'this terminal has no saved conversation' };
+        const found = await findCodexThread(launch.cwd, launch.startedAt);
+        // Saved, so a restart of this terminal resumes this conversation instead of opening Codex's picker.
+        if ('id' in found) await panelManager.updatePanel(id, { state: { ...panel.state, customState: { ...state, agentSessionId: found.id } } });
+        return found;
+      },
+      stop: id => terminalPanelManager.stopForPromotion(id),
+      restart: async id => {
+        const { readiness } = decodeBoundary(await registry.invoke('runpane:panels:resume', [{ panelId: id, waitReady: true }]), resumeResultSchema);
+        if (!terminalRestored(readiness)) throw new Error(readiness?.reason?.message ?? 'its agent did not start again');
+      },
+      close: async id => {
+        await releasePermanent(id);
+        const result = decodeBoundary(await registry.invoke('panels:delete', [id]), deleteResultSchema);
+        if (!result.success) throw new Error(result.error ?? 'unknown error');
+      },
+    },
+    chat: {
+      create: async (paneId, title, state) => (await panelManager.createPanel({ sessionId: paneId, type: 'chat', title, initialState: { customState: state }, activate: false, announceActivation: false })).id,
+      start: id => {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const limit = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new PaneError('CHAT_SWITCH_TIMEOUT', 'The agent did not reopen the conversation within 3 minutes.', 'Keep working in the terminal, then try again.')), REOPEN_LIMIT_MS); });
+        return Promise.race([manager.ensure(id), limit]).finally(() => clearTimeout(timer));
+      },
+      close: async id => { await manager.close(id); await panelManager.deletePanel(id); },
+      activate: async id => {
+        const panel = panelManager.getPanel(id);
+        if (panel) await panelManager.setActivePanel(panel.sessionId, id);
+      },
+    },
+    adoptSessionPanel: (from, to) => services.orchestrationSessionManager?.adoptAgentPanel(from, to) ?? Promise.resolve({ owner: 'chat' }),
+    sessionLaunchCommand: id => services.orchestrationSessionManager?.agentLaunchCommand(id),
+  };
 }
