@@ -2,6 +2,7 @@
 // usage: node render.mjs <status.json> <out.html>
 // Diagrams are drawn with rough.js at render time; the page itself has no script and fetches nothing.
 // rough.mjs and the Inter font are vendored beside this file, so it needs nothing but Node.
+// Pane's copy adds `.qid:empty` and the narrow `.qq` wrap (Needs-you rows in the 359 px Overview sidebar); keep them when refreshing from Agent Farm.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
