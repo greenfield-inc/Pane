@@ -185,7 +185,7 @@ export class ChatTranscript {
     if (this.chunk?.role === role && this.chunk.agentId === agentId) return this.chunk.id;
     if (role === 'user') this.sequence++; // A replayed prompt starts a turn: the next to-do list is its own.
     const id = agentId && !this.indexes.has(agentId) ? agentId : `${role}:${this.generation}:${++this.sequence}`;
-    this.chunk = { id, role, ...(agentId ? { agentId } : {}) };
+    this.chunk = { id, role, agentId };
     return id;
   }
 

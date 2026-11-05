@@ -55,18 +55,19 @@ const asyncTaskUpdate = boundary.object({
  * so one still arrives in order with the updates around it.
  */
 const ASYNC_TASK_NOTIFICATION = '_pane/async_task';
-const taskMessage = boundary.object({ method: boundary.literal('session/update'), params: boundary.object({ sessionId: boundary.string, update: asyncTaskUpdate }) });
+const asyncTaskParams = boundary.object({ sessionId: boundary.string, update: asyncTaskUpdate });
+const taskMessage = boundary.object({ method: boundary.literal('session/update'), params: asyncTaskParams });
 function withAsyncTasks(stream: Stream): Stream {
   return {
     writable: stream.writable,
     readable: stream.readable.pipeThrough(new TransformStream<AnyMessage, AnyMessage>({
       transform(message, controller) {
+        // SAFETY: only the method changes, on a message just checked to be a notification.
         controller.enqueue(decodeOptionalBoundary(message, taskMessage) ? { ...message, method: ASYNC_TASK_NOTIFICATION } as AnyMessage : message);
       },
     })),
   };
 }
-const decodeAsyncTask = { parse: (value: unknown) => decodeBoundary(value, boundary.object({ sessionId: boundary.string, update: asyncTaskUpdate })) };
 type AsyncTaskUpdate = { sessionUpdate: string; asyncTaskId: string; taskType?: string; state?: string };
 
 /**
@@ -133,7 +134,7 @@ export class ChatTabRuntime {
           this.options.onState();
         });
       })
-      .onNotification(ASYNC_TASK_NOTIFICATION, decodeAsyncTask, ({ params }) => { if (params.sessionId === this.sessionId) this.asyncTask(params.update); })
+      .onNotification(ASYNC_TASK_NOTIFICATION, { parse: value => decodeBoundary(value, asyncTaskParams) }, ({ params }) => { if (params.sessionId === this.sessionId) this.asyncTask(params.update); })
       .connect(withAsyncTasks(this.process.stream));
     void this.process.exited.then(exit => {
       this.withdraw();
