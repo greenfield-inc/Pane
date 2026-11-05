@@ -105,9 +105,9 @@ interface Injection {
   file: boolean;
 }
 
+/** Every case counts: secrets sync across platforms, and Windows reads Path as PATH. */
 function isReservedTarget(name: string): boolean {
-  // Windows environment names ignore case, so Path is PATH there.
-  const key = process.platform === 'win32' ? name.toUpperCase() : name;
+  const key = name.toUpperCase();
   return key === 'PATH' || key === 'WORKTREE_PATH' || key.startsWith('PANE_');
 }
 
@@ -121,7 +121,7 @@ function checkTargets(injections: readonly Injection[]): void {
       throw new RunpaneError(
         'SECRET_RESERVED_NAME',
         `${target} is set by Pane itself (PATH, WORKTREE_PATH and PANE_* are reserved), so runpane secrets exec does not set it. Nothing was run.`,
-        `Inject it under another name, such as --env MY_${target.replace(/^PANE_/, '')}=${secret}.`,
+        `Inject it under another name, such as --env MY_${target.replace(/^PANE_/i, '')}=${secret}.`,
       );
     }
     const key = process.platform === 'win32' ? target.toUpperCase() : target;

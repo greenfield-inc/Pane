@@ -3933,6 +3933,10 @@ async function checkSecretsParity() {
   const refusals = [
     [['secrets', 'exec', '--project', 'stripe', '--env', 'PATH=STRIPE_SECRET_KEY', '--', 'true'], 'SECRET_RESERVED_NAME', undefined, /^PATH is set by Pane itself/],
     [['secrets', 'exec', '--project', 'stripe', '--only', 'PANE_TOKEN', '--', 'true'], 'SECRET_RESERVED_NAME', undefined, /^PANE_TOKEN is set by Pane itself/],
+    // Every case is reserved on every platform, since secrets sync to Windows, where Path is PATH.
+    [['secrets', 'exec', '--project', 'stripe', '--only', 'path', '--', 'true'], 'SECRET_RESERVED_NAME', undefined, /^path is set by Pane itself/],
+    [['secrets', 'exec', '--project', 'stripe', '--only', 'Worktree_Path', '--', 'true'], 'SECRET_RESERVED_NAME', undefined, /^Worktree_Path is set by Pane itself/],
+    [['secrets', 'exec', '--project', 'stripe', '--env', 'pane_token=K', '--', 'true'], 'SECRET_RESERVED_NAME', undefined, /^pane_token is set by Pane itself/],
     [['secrets', 'exec', '--project', 'stripe', '--env', 'STRIPE_SECRET_KEY', '--', 'true'], 'SECRET_INVALID', undefined, /^--env must be VAR=NAME/],
     [['secrets', 'exec', '--project', 'stripe', '--only', 'A', '--env', 'A=B', '--', 'true'], 'SECRET_INVALID', undefined, /^A is set twice/],
     [['secrets', 'exec', '--project', 'stripe'], 'SECRET_INVALID', undefined, /needs a command after --/],

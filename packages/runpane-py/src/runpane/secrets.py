@@ -94,8 +94,8 @@ def run_secrets_delete(parsed: Any) -> int:
 
 
 def is_reserved_target(name: str) -> bool:
-    # Windows environment names ignore case, so Path is PATH there.
-    key = name.upper() if WINDOWS else name
+    # Every case counts: secrets sync across platforms, and Windows reads Path as PATH.
+    key = name.upper()
     return key in {"PATH", "WORKTREE_PATH"} or key.startswith("PANE_")
 
 
@@ -109,7 +109,7 @@ def check_targets(injections: List[Dict[str, Any]]) -> None:
                 "See the naming rules with `runpane help secrets`.",
             )
         if is_reserved_target(target):
-            short = target[len("PANE_"):] if target.startswith("PANE_") else target
+            short = target[len("PANE_"):] if target.upper().startswith("PANE_") else target
             raise RunpaneError(
                 "SECRET_RESERVED_NAME",
                 f"{target} is set by Pane itself (PATH, WORKTREE_PATH and PANE_* are reserved), so runpane secrets exec does not set it. Nothing was run.",
