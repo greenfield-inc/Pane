@@ -85,6 +85,15 @@ describe('project environment variables', () => {
     await expect(secrets.read('shared', 'TOKEN')).rejects.toThrow();
   });
 
+  it('names a bad secret address once, with one "Nothing was saved"', async () => {
+    const project = db.createProject('cura', '/repos/cura');
+
+    const error = await service.save(project.id, [{ key: 'A', source: 'secret', project: 'qa', name: 'pane_token' }]).catch((caught: Error) => caught);
+
+    expect(error.message).toMatch(/^A: .*pane_token.* Nothing was saved\.$/);
+    expect(error.message).not.toContain('Nothing was changed');
+  });
+
   it('checks a dry run like a real save and writes nothing', async () => {
     const project = db.createProject('cura', '/repos/cura');
 

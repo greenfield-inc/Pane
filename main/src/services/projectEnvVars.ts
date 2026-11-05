@@ -7,8 +7,8 @@ import {
 import type { DatabaseService } from '../database/database';
 import { teammatePaneCaller } from '../daemon/commandRegistry';
 import { keychainUnsupportedError, systemKeychain, type Keychain } from './keychain';
-import { teammateSecretRefusal } from '../../../shared/types/paneSecrets';
-import { paneSecretStore, validatePaneSecretAddress, type PaneSecretStore } from './paneSecrets';
+import { paneSecretNameProblem, paneSecretProjectProblem, teammateSecretRefusal } from '../../../shared/types/paneSecrets';
+import { paneSecretStore, type PaneSecretStore } from './paneSecrets';
 
 /** A project's variables, ready to merge into a child process environment. */
 export interface ResolvedProjectEnv {
@@ -57,11 +57,8 @@ export class ProjectEnvService {
         throw invalid(`${input.key} needs both a keychain service and an account.`);
       }
       if (input.source === 'secret') {
-        try {
-          validatePaneSecretAddress(input.project.trim(), input.name.trim());
-        } catch (error) {
-          throw invalid(`${input.key}: ${reasonOf(error)}.`);
-        }
+        const problem = paneSecretProjectProblem(input.project.trim()) ?? paneSecretNameProblem(input.name.trim());
+        if (problem) throw invalid(`${input.key}: ${problem}`);
       }
     }
     if (!this.keychain().supported && inputs.some(input => input.source === 'keychain')) {
