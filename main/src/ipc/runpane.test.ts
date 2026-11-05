@@ -7989,6 +7989,73 @@ describe('runpane IPC handlers', () => {
       });
     }, 15000);
 
+    it('refuses a Pane whose agent is mid-turn unless forced, in the dry run too', async () => {
+      const externalSession: Session = { ...session, worktreeOwnership: 'external' };
+      const services = createServices({
+        // SAFETY: This test double provides the exact SessionManager members exercised by archive.
+        sessionManager: { ...createServices().sessionManager, getSession: vi.fn(() => externalSession) } as never,
+      });
+      vi.mocked(terminalPanelManager.getAgentStatus).mockReturnValue('blocked');
+      const registry = createRegistry(services);
+      const sessionsDelete = registerSessionsDeleteStub(registry, services);
+
+      expect(await registry.invoke('runpane:panes:archive', [{ paneId: session.id, dryRun: true }])).toMatchObject({
+        ok: true, dryRun: true, wouldArchive: false,
+        blocked: { code: 'agent-busy', safetyCheck: { busyAgents: [{ panelId: terminalPanel.id, state: 'blocked' }] } },
+      });
+      expect(await registry.invoke('runpane:panes:archive', [{ paneId: session.id }])).toMatchObject({
+        ok: false,
+        blocked: { code: 'agent-busy', message: expect.stringContaining('Codex') },
+        nextCommand: `runpane panes archive --pane ${session.id} --force --yes --json`,
+      });
+      expect(sessionsDelete).not.toHaveBeenCalled();
+
+      expect(await registry.invoke('runpane:panes:archive', [{ paneId: session.id, force: true }])).toMatchObject({ ok: true, archived: true, forced: true });
+      expect(sessionsDelete).toHaveBeenCalledWith(session.id);
+    });
+
+    it('keeps a Pane whose idle agent holds a draft or whose editor has unsaved edits', async () => {
+      const externalSession: Session = { ...session, worktreeOwnership: 'external' };
+      const drafting: ToolPanel = { ...terminalPanel, id: 'drafting', title: 'Codex' };
+      const editing: ToolPanel = { ...terminalPanel, id: 'editing', type: 'editor', title: 'notes.md', state: { isActive: false, customState: { filePath: 'notes.md', isDirty: true } } };
+      vi.mocked(panelManager.getPanelsForSession).mockReturnValue([drafting, editing]);
+      vi.mocked(panelManager.getPanel).mockImplementation(panelId => [drafting, editing].find(panel => panel.id === panelId));
+      vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(terminalSnapshot('› my unsent draft', 'idle'));
+      // Typing into an idle agent can read as working; the draft is still the reason given.
+      vi.mocked(terminalPanelManager.getAgentStatus).mockReturnValue('working');
+      const services = createServices({
+        // SAFETY: This test double provides the exact SessionManager members exercised by archive.
+        sessionManager: { ...createServices().sessionManager, getSession: vi.fn(() => externalSession) } as never,
+      });
+      const registry = createRegistry(services);
+      const sessionsDelete = registerSessionsDeleteStub(registry, services);
+
+      expect(await registry.invoke('runpane:panes:archive', [{ paneId: session.id, dryRun: true }])).toMatchObject({
+        wouldArchive: false,
+        blocked: { code: 'unsent-input', safetyCheck: { unsentInput: [{ panelId: 'drafting', title: 'Codex', kind: 'composer' }, { panelId: 'editing', title: 'notes.md', kind: 'editor' }] } },
+      });
+      expect(await registry.invoke('runpane:panes:archive', [{ paneId: session.id }])).toMatchObject({
+        ok: false,
+        blocked: { code: 'unsent-input', message: expect.stringContaining('Codex (panel drafting) has text typed but not sent') },
+      });
+      expect(sessionsDelete).not.toHaveBeenCalled();
+    });
+
+    it('does not count a busy plain terminal, such as a dev server, as an agent mid-turn', async () => {
+      const externalSession: Session = { ...session, worktreeOwnership: 'external' };
+      const devServer: ToolPanel = { ...terminalPanel, id: 'dev-server', title: 'pnpm dev', state: { isActive: false, customState: { initialCommand: 'pnpm dev' } } };
+      vi.mocked(panelManager.getPanelsForSession).mockReturnValue([devServer]);
+      vi.mocked(terminalPanelManager.getAgentStatus).mockReturnValue('working');
+      const services = createServices({
+        // SAFETY: This test double provides the exact SessionManager members exercised by archive.
+        sessionManager: { ...createServices().sessionManager, getSession: vi.fn(() => externalSession) } as never,
+      });
+      const registry = createRegistry(services);
+      registerSessionsDeleteStub(registry, services);
+
+      expect(await registry.invoke('runpane:panes:archive', [{ paneId: session.id, dryRun: true }]))
+        .toMatchObject({ ok: true, wouldArchive: true, safetyCheck: { performed: false } });
+    });
     it('rejects archiving a pane that is already archived', async () => {
       const services = createServices({
         // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
@@ -8935,6 +9002,45 @@ describe('runpane IPC handlers', () => {
         expect(JSON.stringify(result)).not.toContain('Rerun with --force');
       }, 15000);
 
+      it('keeps a merged Pane whose agent holds a draft', async () => {
+        const { pane } = createRemoteRepo();
+        const panes = [pane('pane-draft')];
+        const drafting: ToolPanel = { ...terminalPanel, id: 'draft-panel', sessionId: 'pane-draft', title: 'Codex' };
+        vi.mocked(panelManager.getPanelsForSession).mockImplementation((paneId: string) => paneId === 'pane-draft' ? [drafting] : []);
+        vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(terminalSnapshot('› my unsent draft', 'idle'));
+        const { services } = createBulkServices(panes, panes.map(p => p.id));
+        const registry = createRegistry(services);
+        const sessionsDelete = registerSessionsDeleteStub(registry, services);
+
+        expect(await registry.invoke('runpane:panes:archive', [{ sessionId: 'refactor', merged: true }])).toMatchObject({
+          items: [{ paneId: 'pane-draft', outcome: 'skipped', skipped: { code: 'unsent-input' } }],
+        });
+        expect(sessionsDelete).not.toHaveBeenCalled();
+      });
+
+      it('keeps a merged Pane whose agent is mid-turn', async () => {
+        const { pane } = createRemoteRepo();
+        const panes = [pane('pane-busy'), pane('pane-idle')];
+        const busyPanel: ToolPanel = { ...terminalPanel, id: 'busy-panel', sessionId: 'pane-busy', title: 'Claude Code' };
+        vi.mocked(panelManager.getPanelsForSession).mockImplementation((paneId: string) => paneId === 'pane-busy' ? [busyPanel] : []);
+        vi.mocked(terminalPanelManager.getAgentStatus).mockImplementation(panelId => panelId === 'busy-panel' ? 'working' : 'idle');
+        const { services } = createBulkServices(panes, panes.map(p => p.id));
+        const registry = createRegistry(services);
+        const sessionsDelete = registerSessionsDeleteStub(registry, services);
+
+        const preview = await registry.invoke('runpane:panes:archive', [{ sessionId: 'refactor', merged: true, dryRun: true }]);
+        expect(preview).toMatchObject({ items: [{ paneId: 'pane-busy', outcome: 'skipped', skipped: { code: 'agent-busy' } }, { paneId: 'pane-idle', outcome: 'would-archive' }] });
+
+        const result = await registry.invoke('runpane:panes:archive', [{ sessionId: 'refactor', merged: true }]);
+        expect(sessionsDelete).toHaveBeenCalledTimes(1);
+        expect(sessionsDelete).toHaveBeenCalledWith('pane-idle');
+        expect(result).toMatchObject({
+          items: [
+            { paneId: 'pane-busy', outcome: 'skipped', skipped: { code: 'agent-busy', message: expect.stringContaining('Claude Code') }, safetyCheck: { busyAgents: [{ panelId: 'busy-panel', title: 'Claude Code', state: 'working' }] } },
+            { paneId: 'pane-idle', outcome: 'archived' },
+          ],
+        });
+      });
       it('dry-runs the Session archive, says what it would do, and reports a reason for every skipped Pane', async () => {
         const { pane } = createRemoteRepo();
         const panes = [

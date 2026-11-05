@@ -256,7 +256,8 @@ Archiving removes a Pane's worktree, so it needs the user's cleanup approval.
 Once PRs merge, preview with
 `runpane panes archive --session <id|name> --merged --dry-run --json`, then
 rerun with `--yes`. It archives only Panes whose PR is merged and whose
-worktree has no uncommitted, untracked or unpushed work. It keeps a Pane with
+worktree has no uncommitted, untracked or unpushed work, no agent mid-turn
+(`agent-busy`) and no unsent draft or unsaved edits (`unsent-input`). It keeps a Pane with
 an open PR (`pr-open`), no PR or a closed unmerged one (`pr-not-merged`), or a
 PR state GitHub can't confirm (`pr-status-unknown`), and gives every other
 kept Pane a `skipped.code` with the next step. Adopted worktrees are kept unless

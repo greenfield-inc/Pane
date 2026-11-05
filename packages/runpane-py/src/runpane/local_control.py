@@ -2616,6 +2616,12 @@ def print_archive_commit_evidence(safety_check: Dict[str, Any], file: Any = None
         print(f"Merged via PR #{merged.get('number')} (head {merged.get('headOid')})", file=destination)
     for commit in safety_check.get("unpushedCommitDetails") or []:
         print(f"Unpushed: {commit.get('sha')} {commit.get('subject')}", file=destination)
+    for agent in safety_check.get("busyAgents") or []:
+        state = "mid-turn" if agent.get("state") == "working" else "waiting for an answer"
+        print(f"Busy: {agent.get('title')} (panel {agent.get('panelId')}) is {state}", file=destination)
+    for unsent in safety_check.get("unsentInput") or []:
+        what = "has unsaved edits" if unsent.get("kind") == "editor" else "has text typed but not sent"
+        print(f"Unsent: {unsent.get('title')} (panel {unsent.get('panelId')}) {what}", file=destination)
 
 
 def print_panel_create_result(result: Dict[str, Any]) -> None:

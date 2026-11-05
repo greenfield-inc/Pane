@@ -530,6 +530,10 @@ when both hold:
   skipped as `pr-not-merged`, so a worker that has pushed but not opened its
   PR keeps its Pane. A PR state GitHub can't confirm is skipped as
   `pr-status-unknown`.
+- **No agent in it is mid-turn.** A Pane with a working agent is kept as
+  `agent-busy`; archiving would stop it. A Pane with a tab holding text typed
+  but not sent, or an editor with unsaved edits, is kept as `unsent-input`;
+  archiving would lose it. `runpane panes archive --pane <id>` checks the same.
 - **Its worktree holds no unsaved work.** It has no uncommitted or untracked
   changes, and every commit is on its upstream after a fresh `git fetch`, or,
   without an upstream, on a remote-tracking branch or the base branch. A

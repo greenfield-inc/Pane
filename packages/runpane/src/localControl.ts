@@ -591,6 +591,13 @@ interface PanelOpenResult {
   reused: boolean;
 }
 
+/** An agent mid-turn (`working`) or waiting for an answer (`blocked`); archiving would stop it. */
+interface PaneArchiveBusyAgent {
+  panelId: string;
+  title: string;
+  state: 'working' | 'blocked';
+}
+
 interface PaneArchiveSafetyCheck {
   performed: boolean;
   hasUncommittedChanges?: boolean;
@@ -604,9 +611,11 @@ interface PaneArchiveSafetyCheck {
   worktreeWillRemain?: true;
   upstreamGone?: boolean;
   mergedViaPr?: { number: number; headOid: string };
+  busyAgents?: PaneArchiveBusyAgent[];
+  unsentInput?: Array<{ panelId: string; title: string; kind: 'composer' | 'editor' }>;
 }
 
-type PaneArchiveBlockCode = 'uncommitted-changes' | 'unpushed-commits' | 'uncommitted-and-unpushed' | 'status-unknown';
+type PaneArchiveBlockCode = 'uncommitted-changes' | 'unpushed-commits' | 'uncommitted-and-unpushed' | 'status-unknown' | 'agent-busy' | 'unsent-input';
 
 interface PaneArchiveBlockedResult {
   ok: false;
@@ -1260,6 +1269,16 @@ const archiveSafetySchema: BoundarySchema<PaneArchiveSafetyCheck> = boundary.obj
     number: boundary.number,
     headOid: boundary.string,
   })),
+  busyAgents: boundary.optional(boundary.array(boundary.object({
+    panelId: boundary.string,
+    title: boundary.string,
+    state: boundary.enumeration('working', 'blocked'),
+  }))),
+  unsentInput: boundary.optional(boundary.array(boundary.object({
+    panelId: boundary.string,
+    title: boundary.string,
+    kind: boundary.enumeration('composer', 'editor'),
+  }))),
 });
 const agentReportFields = {
   state: boundary.enumeration('ready', 'blocked', 'failed', 'done'),
@@ -1301,7 +1320,7 @@ const panelLastMessageResultSchema: BoundarySchema<PanelLastMessageResult> = bou
     message: boundary.string,
   }),
 );
-const archiveBlockCodeSchema = boundary.enumeration('uncommitted-changes', 'unpushed-commits', 'uncommitted-and-unpushed', 'status-unknown');
+const archiveBlockCodeSchema = boundary.enumeration('uncommitted-changes', 'unpushed-commits', 'uncommitted-and-unpushed', 'status-unknown', 'agent-busy', 'unsent-input');
 const worktreeCleanupSchema = boundary.enumeration('completed', 'failed', 'timeout', 'not-applicable');
 const trashDeletionSchema = boundary.enumeration('pending', 'done');
 const panelSummarySchema: BoundarySchema<PanelSummary> = boundary.object({
@@ -1754,6 +1773,8 @@ const paneArchiveBulkResultSchema: BoundarySchema<PaneArchiveBulkResult> = bound
         'unpushed-commits',
         'uncommitted-and-unpushed',
         'status-unknown',
+        'agent-busy',
+        'unsent-input',
         'missing-pane',
         'already-archived',
         'main-repo',
@@ -4823,6 +4844,12 @@ function printArchiveCommitEvidence(
   }
   for (const commit of safetyCheck.unpushedCommitDetails ?? []) {
     print(`Unpushed: ${commit.sha} ${commit.subject}`);
+  }
+  for (const agent of safetyCheck.busyAgents ?? []) {
+    print(`Busy: ${agent.title} (panel ${agent.panelId}) is ${agent.state === 'working' ? 'mid-turn' : 'waiting for an answer'}`);
+  }
+  for (const input of safetyCheck.unsentInput ?? []) {
+    print(`Unsent: ${input.title} (panel ${input.panelId}) ${input.kind === 'editor' ? 'has unsaved edits' : 'has text typed but not sent'}`);
   }
 }
 
