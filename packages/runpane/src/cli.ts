@@ -154,7 +154,7 @@ const THIS_MACHINE_ONLY = new Set<string>([
   'docs search', 'docs read', 'agents start', 'agents status', 'agents send', 'handoff',
   // Workspace commands pick their own machine; `workspace state` is a daemon call and passes through.
   'workspace list', 'workspace enable', 'workspace disable', 'workspace read', 'workspace write', 'workspace exec',
-  // Secret values never cross the network through these commands; another machine runs its own.
+  // These read or change this machine's own secret store; another machine runs its own.
   'secrets list', 'secrets set', 'secrets delete', 'secrets exec', 'secrets request',
 ]);
 

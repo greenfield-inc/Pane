@@ -29,12 +29,12 @@ function decode<Value>(value: PaneCommandValue, schema: Parameters<typeof decode
   }
 }
 
-/** Secret values never cross the network through these channels; other hosts get them only through shared-key sync. */
+/** These channels answer only this machine's own callers; other hosts get values through shared-key sync. */
 function refuseRemote(): void {
   if (isRemotePaneCommand()) {
     throw new PaneError(
       'SECRET_LOCAL_ONLY',
-      'Pane secrets are managed only on the machine itself, so their values never cross the network. Nothing was changed.',
+      'Pane refused a secrets request from another machine: this machine\'s secrets answer only callers running on it. Nothing was changed.',
       'Run `runpane secrets …` on that machine, or `runpane workspace <machine> exec -- runpane secrets …` from your own devices.',
     );
   }

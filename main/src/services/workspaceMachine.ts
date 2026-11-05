@@ -170,8 +170,8 @@ export async function execOnMachine(
   // This Pane's runpane comes first, as in its terminals: the user's PATH may lack it, and Pane's own
   // environment predates the PATH entry it adds at startup.
   const env: NodeJS.ProcessEnv = { ...withRunpaneBinOnPath(process.platform === 'win32' ? process.env : { ...process.env, PATH: getShellPath() }) };
-  // A teammate's command runs as the owner, so it could read the OS store directly; this marker
-  // makes `runpane secrets` refuse it, so Pane itself never hands a teammate a secret.
+  // A teammate's command runs as the owner and can reach every secret. This marker only makes a
+  // plain `runpane secrets` call in it refuse; the command can drop it or read the store directly.
   if (teammate) env[TEAMMATE_ENV] = teammate;
   else delete env[TEAMMATE_ENV];
 
