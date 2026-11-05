@@ -271,7 +271,8 @@ export function currentActivity(turn: ChatTurn, waiting: ReadonlySet<string> = n
   const step = turn.current;
   if (!step || (step.status !== 'pending' && step.status !== 'in_progress')) return 'Working';
   const subject = step.kind === 'run' ? (step.command ?? step.title).split('\n')[0] : step.path ? fileName(step.path) : step.title;
-  const line = step.kind === 'think' ? ACTIVITY_VERBS.think : `${ACTIVITY_VERBS[step.kind]} ${subject}`;
+  // A search has no file to name; its title already says what it does ("grep foo").
+  const line = step.kind === 'think' ? ACTIVITY_VERBS.think : step.kind === 'explore' && !step.path ? step.title : `${ACTIVITY_VERBS[step.kind]} ${subject}`;
   return waiting.has(step.id) ? `Waiting for you · ${line}` : line;
 }
 

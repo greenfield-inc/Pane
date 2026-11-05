@@ -136,6 +136,7 @@ describe('what a turn shows by default (D-192)', () => {
     expect(currentActivity(working(say('a', 'Hi')))).toBe('Working');
     expect(currentActivity(working(thought('t', 'Hmm')))).toBe('Thinking');
     expect(currentActivity(working(tool('r', 'read', { status: 'in_progress', locations: [{ path: '/repo/a.ts' }] })))).toBe('Reading a.ts');
+    expect(currentActivity(working(tool('s', 'search', { status: 'in_progress', title: 'grep foo' })))).toBe('grep foo');
     expect(currentActivity(working(tool('e', 'edit', { status: 'in_progress', locations: [{ path: '/repo/a.ts' }] })), new Set(['e']))).toBe('Waiting for you · Editing a.ts');
     expect(currentActivity(working(tool('x', 'execute', { status: 'in_progress', input: { command: 'pnpm test\n--all' } })))).toBe('Running pnpm test');
     const turn = working(tool('r', 'read'), say('a', 'Hi'));
