@@ -246,23 +246,72 @@ describe('readSuperset', () => {
     ['darwin', '/Users/me'],
     ['win32', 'C:\\Users\\me'],
     ['linux', '/home/me'],
-  ] as const)('looks in ~/.superset on %s', async (platform, fakeHome) => {
+  ] as const)('looks in ~/.paradev and ~/.superset on %s', async (platform, fakeHome) => {
     const result = await readSuperset(context({ platform, home: fakeHome }));
 
-    expect(result).toEqual({ source: 'superset', status: 'absent', storePaths: [path.join(fakeHome, '.superset')], sessions: [] });
+    expect(result).toEqual({ source: 'superset', status: 'absent', storePaths: [path.join(fakeHome, '.paradev'), path.join(fakeHome, '.superset')], sessions: [] });
   });
 
-  it('follows SUPERSET_HOME_DIR', async () => {
+  it('follows SUPERSET_HOME_DIR over ~/.paradev and ~/.superset', async () => {
     const custom = path.join(root, 'custom-superset');
     writeHostDb(path.join(custom, 'host', 'org-1', 'host.db'), {
       workspaces: [{ id: 'w1', project: null, path: '/s/1', branch: 'main', name: 'Scratch' }],
       bindings: [{ terminal: 't1', workspace: 'w1', agent: 'claude', sessionId: CLAUDE_A, startedAt: NOW - HOUR, lastEventAt: NOW - HOUR, endedAt: NOW - HOUR, endReason: 'detached' }],
     });
 
+    writeHostDb(path.join(home, '.paradev', 'host', 'org-1', 'host.db'), {
+      workspaces: [{ id: 'w1', project: null, path: '/s/1', branch: 'main', name: 'Scratch' }],
+      bindings: [{ terminal: 't1', workspace: 'w1', agent: 'codex', sessionId: CODEX_B, startedAt: NOW - HOUR, lastEventAt: NOW - HOUR, endedAt: NOW - HOUR, endReason: 'detached' }],
+    });
+
     const result = await readSuperset(context({ env: { SUPERSET_HOME_DIR: custom } }));
 
     expect(result.sessions.map(s => s.sessionId)).toEqual([CLAUDE_A]);
     expect(result.storePaths).toContain(path.join(custom, 'host', 'org-1', 'host.db'));
+  });
+
+  it('reads a fresh Paradev install from ~/.paradev', async () => {
+    writeHostDb(path.join(home, '.paradev', 'host', 'org-1', 'host.db'), {
+      workspaces: [{ id: 'w1', project: null, path: '/s/1', branch: 'main', name: 'Scratch' }],
+      bindings: [{ terminal: 't1', workspace: 'w1', agent: 'claude', sessionId: CLAUDE_A, startedAt: NOW - HOUR, lastEventAt: NOW - HOUR, endedAt: NOW - HOUR, endReason: 'detached' }],
+    });
+
+    const result = await readSuperset(context());
+
+    expect(result.status).toBe('ok');
+    expect(result.sessions.map(s => s.sessionId)).toEqual([CLAUDE_A]);
+  });
+
+  it('lists each session once when ~/.superset is Paradev\'s link to ~/.paradev', async () => {
+    writeHostDb(path.join(home, '.paradev', 'host', 'org-1', 'host.db'), {
+      workspaces: [{ id: 'w1', project: null, path: '/s/1', branch: 'main', name: 'Scratch' }],
+      bindings: [{ terminal: 't1', workspace: 'w1', agent: 'claude', sessionId: CLAUDE_A, startedAt: NOW - HOUR, lastEventAt: NOW - HOUR, endedAt: NOW - HOUR, endReason: 'detached' }],
+    });
+    fs.symlinkSync(path.join(home, '.paradev'), path.join(home, '.superset'), 'dir');
+
+    const result = await readSuperset(context());
+
+    expect(result.sessions.map(s => s.sessionId)).toEqual([CLAUDE_A]);
+    expect(result.storePaths).toEqual([path.join(home, '.paradev', 'host', 'org-1', 'host.db'), path.join(home, '.paradev', 'host', 'org-1', 'manifest.json')]);
+  });
+
+  it('reads ~/.paradev as well as a separate older ~/.superset', async () => {
+    const scratch = { id: 'w1', project: null, path: '/s/1', branch: 'main', name: 'Scratch' };
+    writeHostDb(path.join(home, '.paradev', 'host', 'org-1', 'host.db'), {
+      workspaces: [scratch],
+      bindings: [{ terminal: 't1', workspace: 'w1', agent: 'claude', sessionId: CLAUDE_A, startedAt: NOW - HOUR, lastEventAt: NOW - HOUR, endedAt: NOW - HOUR, endReason: 'detached' }],
+    });
+    writeHostDb(path.join(home, '.superset', 'host', 'org-1', 'host.db'), {
+      workspaces: [scratch],
+      bindings: [
+        { terminal: 't1', workspace: 'w1', agent: 'claude', sessionId: CLAUDE_A, startedAt: NOW - DAY, lastEventAt: NOW - DAY, endedAt: NOW - DAY, endReason: 'detached' },
+        { terminal: 't2', workspace: 'w1', agent: 'codex', sessionId: CODEX_B, startedAt: NOW - DAY, lastEventAt: NOW - DAY, endedAt: NOW - DAY, endReason: 'detached' },
+      ],
+    });
+
+    const result = await readSuperset(context());
+
+    expect(byId(result.sessions).map(s => [s.sessionId, s.lastActiveMs])).toEqual([[CLAUDE_A, NOW - HOUR], [CODEX_B, NOW - DAY]]);
   });
 
   it('fails closed on a host.db without agent session ids', async () => {
