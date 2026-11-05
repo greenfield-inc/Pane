@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import * as Clipboard from 'expo-clipboard';
 import { ActivityIndicator, Image, Pressable, StyleSheet, View } from 'react-native';
 import { useMarkdown } from 'react-native-marked';
 
-import type { ChatWorkerLine, PlanEntry, StepGroup } from '@shared/chatTabPresentation';
+import type { PlanEntry, StepGroup, WorkerNote } from '@shared/chatTabPresentation';
 import { describeChatContent } from '@shared/agentChatPresentation';
 import { imageOf, planEntryKeys } from '@shared/chatTabPresentation';
 import { userMarkdown } from '@shared/chatTabMarkdown';
@@ -50,8 +50,8 @@ function CopyAction({ label, text, testID }: { label: string; text: string; test
   </Pressable>;
 }
 
-/** Rendered Markdown isn't selectable on the phone; a long press copies the text and says how it went. */
-function LongPressCopy({ text }: { text: string }) {
+/** Rendered Markdown isn't selectable on the phone; a long press copies the text and says how it went, with when it was written (D-202). */
+function LongPressCopy({ text, at }: { text: string; at?: string }) {
   const theme = useTheme();
   const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle');
   useEffect(() => {
@@ -62,7 +62,22 @@ function LongPressCopy({ text }: { text: string }) {
   return <Pressable accessibilityHint="Long press to copy" delayLongPress={400}
     onLongPress={() => { Clipboard.setStringAsync(text).then(() => setState('copied'), () => setState('failed')); }}>
     <Markdown text={text} />
-    {state !== 'idle' && <Text accessibilityLiveRegion="polite" variant="footnote" style={{ color: state === 'copied' ? theme.colors.success : theme.colors.danger }}>{state === 'copied' ? 'Copied' : 'Could not copy'}</Text>}
+    {state !== 'idle' && <Text accessibilityLiveRegion="polite" variant="footnote" style={{ color: state === 'copied' ? theme.colors.success : theme.colors.danger }}>{[state === 'copied' ? 'Copied' : 'Could not copy', at].filter(Boolean).join(' · ')}</Text>}
+  </Pressable>;
+}
+
+/** A long press on the person's message shows when it was sent (D-202); its Copy button copies it. */
+function UserBubble({ children, at }: { children: ReactNode; at?: string }) {
+  const theme = useTheme();
+  const [shown, setShown] = useState(false);
+  useEffect(() => {
+    if (!shown) return;
+    const timer = setTimeout(() => setShown(false), 3000);
+    return () => clearTimeout(timer);
+  }, [shown]);
+  return <Pressable testID="chat-user-message" accessibilityHint={at ? 'Long press to see when it was sent' : undefined} delayLongPress={400} onLongPress={() => setShown(!!at)}>
+    <View style={[styles.user, { backgroundColor: theme.chat.muted }]}>{children}</View>
+    {shown && <Text accessibilityLiveRegion="polite" variant="footnote" style={{ color: theme.chat.mutedForeground, textAlign: 'right' }}>{at}</Text>}
   </Pressable>;
 }
 
@@ -111,19 +126,13 @@ function Todo({ entries }: { entries: PlanEntry[] }) {
   </View>;
 }
 
-const WORKER_COLORS = { running: 'accentText', waiting: 'warning', done: 'success', failed: 'danger', missing: 'danger', idle: 'textSecondary' } as const;
-
-/** A Session worker as one line: state, PR or what it does, and Open (round 3 · A). */
-function WorkerRow({ worker, onOpen }: { worker: ChatWorkerLine; onOpen?: (paneId: string) => void }) {
+/** A worker the latest turn has news of, as one compact line with Open (D-201). */
+function WorkerNoteRow({ note, onOpen }: { note: WorkerNote; onOpen?: (paneId: string) => void }) {
   const theme = useTheme();
-  const color = theme.colors[WORKER_COLORS[worker.state]];
-  return <View testID={`chat-worker-${worker.paneId}`} style={[styles.worker, { borderColor: theme.chat.border }]}>
-    <Icon ios="apple.terminal" android="terminal" size={15} color={theme.chat.mutedForeground} />
-    <View style={styles.workerText}>
-      <Text variant="subhead" numberOfLines={1} style={{ color: theme.chat.foreground, fontWeight: '600' }}>{worker.name}</Text>
-      <Text variant="footnote" numberOfLines={1} style={{ color: theme.chat.mutedForeground }}><Text variant="footnote" style={{ color }}>{worker.label}</Text>{[worker.pr && ` · PR #${worker.pr}`, worker.detail && ` · ${worker.detail}`].filter(Boolean).join('')}</Text>
-    </View>
-    {onOpen && worker.state !== 'missing' && <Pressable testID={`chat-worker-open-${worker.paneId}`} accessibilityRole="button" accessibilityLabel={`Open ${worker.name}`} onPress={() => onOpen(worker.paneId)} style={styles.workerOpen}><Text variant="subhead" style={{ color: theme.colors.accentText }}>Open</Text></Pressable>}
+  const { worker } = note;
+  return <View testID={`chat-worker-${worker.paneId}`} style={styles.stepLine}>
+    <Text variant="subhead" numberOfLines={1} style={{ color: worker.state === 'waiting' ? theme.colors.warning : theme.chat.mutedForeground, flexShrink: 1 }}>{note.text}</Text>
+    {onOpen && worker.state !== 'missing' && <Pressable testID={`chat-worker-open-${worker.paneId}`} accessibilityRole="button" accessibilityLabel={`Open ${worker.name}`} onPress={() => onOpen(worker.paneId)} hitSlop={10}><Text variant="subhead" style={{ color: theme.colors.accentText }}>Open</Text></Pressable>}
   </View>;
 }
 
@@ -133,15 +142,16 @@ export function ChatRowView({ row, actions }: { row: ChatRow; actions: ChatRowAc
     case 'user': {
       const copy = userMarkdown({ id: row.key, user: row.message, items: [], running: false });
       return <View style={styles.userRow}>
-        <View style={[styles.user, { backgroundColor: theme.chat.muted }]}>{row.message.parts.map((part, index) => {
-          if (part.type === 'text') return <Text key={index} selectable style={{ color: theme.chat.foreground }}>{part.text}</Text>;
+        <UserBubble at={row.at}>{row.message.parts.map((part, index) => {
+          if (part.type === 'text') return <Text key={index} style={{ color: theme.chat.foreground }}>{part.text}</Text>;
           const picture = part.type === 'content' ? imageOf(part.content) : undefined;
           return picture ? <Image key={index} accessibilityLabel="Attached image" source={{ uri: `data:${picture.mimeType};base64,${picture.data}` }} style={styles.image} /> : null;
-        })}</View>
+        })}</UserBubble>
         {copy ? <CopyAction testID="chat-copy-message" label="Copy message" text={copy} /> : null}
       </View>;
     }
-    case 'text': return <LongPressCopy text={row.text} />;
+    case 'text': return <LongPressCopy text={row.text} at={row.at} />;
+    case 'time': return <Text testID="chat-turn-time" accessibilityLabel={row.full} variant="footnote" style={{ color: theme.chat.mutedForeground }}>{row.short}</Text>;
     case 'copy': return <CopyAction testID="chat-copy-response" label="Copy response" text={row.text} />;
     case 'thought': return <Text variant="footnote" style={{ color: theme.chat.mutedForeground }} numberOfLines={3}>Thinking: {row.text}</Text>;
     case 'image': return <Image accessibilityLabel="Image from the agent" source={{ uri: `data:${row.mimeType};base64,${row.data}` }} style={styles.image} />;
@@ -153,7 +163,7 @@ export function ChatRowView({ row, actions }: { row: ChatRow; actions: ChatRowAc
     </Pressable>;
     case 'plan': return <Todo entries={row.entries} />;
     case 'stopped': return <Text variant="footnote" style={{ color: theme.chat.mutedForeground, fontStyle: 'italic' }}>{row.text}</Text>;
-    case 'worker': return <WorkerRow worker={row.worker} onOpen={actions.onOpenWorker} />;
+    case 'worker': return <WorkerNoteRow note={row.note} onOpen={actions.onOpenWorker} />;
     case 'content': return <Text variant="footnote" numberOfLines={2} style={{ color: theme.chat.mutedForeground }}>{describeChatContent(row.content).label}</Text>;
   }
 }
@@ -171,7 +181,4 @@ const styles = StyleSheet.create({
   output: { padding: 8, borderRadius: 8, overflow: 'hidden' },
   card: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 12, padding: 12, gap: 6 },
   todoRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  worker: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: StyleSheet.hairlineWidth, borderRadius: 12, paddingHorizontal: 12, minHeight: 52 },
-  workerText: { flex: 1, minWidth: 0 },
-  workerOpen: { minHeight: 44, minWidth: 44, alignItems: 'center', justifyContent: 'center' },
 });

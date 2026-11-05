@@ -5,7 +5,7 @@ import remarkGfm from 'remark-gfm';
 import type { AgentChatPermission } from '../../../../shared/types/agentChat';
 import { describeChatContent, permissionToolId } from '../../../../shared/agentChatPresentation';
 import type { JsonValue } from '../../../../shared/validation/boundaryDecoder';
-import { imageOf, planEntryKeys, stoppedText, turnDisplay, turnSummary, workersLabel, type ChatWorkerLine, type ChatStep, type ChatTurn, type PlanEntry, type StepGroup, type TurnItem } from '../../../../shared/chatTabPresentation';
+import { imageOf, messageTime, planEntryKeys, stoppedText, turnDisplay, turnFooter, turnSummary, type WorkerNote, type ChatStep, type ChatTurn, type PlanEntry, type StepGroup, type TurnItem } from '../../../../shared/chatTabPresentation';
 import { responseText, userMarkdown } from '../../../../shared/chatTabMarkdown';
 import { ChatCopyButton } from './ChatCopyButton';
 
@@ -115,7 +115,7 @@ function UserImage({ content }: { content: JsonValue }) {
 
 function UserMessage({ turn }: { turn: ChatTurn }) {
   if (!turn.user) return null;
-  return <div className="chat-user-row">
+  return <div className="chat-user-row" title={messageTime(turn.startedAt)?.full}>
     <div className="chat-user" data-anchor-id={turn.user.id}>{turn.user.parts.map((part, index) => part.type === 'text'
       ? <span key={`${turn.id}:${index}`} className="whitespace-pre-wrap">{part.text}</span>
       : part.type === 'content' ? <UserImage key={`${turn.id}:${index}`} content={part.content} /> : null)}</div>
@@ -123,48 +123,32 @@ function UserMessage({ turn }: { turn: ChatTurn }) {
   </div>;
 }
 
-const WORKER_ICONS = { running: LoaderCircle, waiting: AlertCircle, done: CircleCheck, failed: XCircle, idle: Circle, missing: XCircle };
-
-/** A Session worker as one line: state, what it is doing, its PR, and Open (round 3 · A; no worker board, D-18). */
-export function WorkerLine({ worker, onOpen }: { worker: ChatWorkerLine; onOpen?: (paneId: string) => void }) {
-  const Icon = WORKER_ICONS[worker.state];
-  return <div className="chat-worker" data-state={worker.state}>
-    <Terminal className="chat-worker-glyph" aria-hidden="true" />
-    <span className="chat-worker-name">{worker.name}</span>
-    <span className="chat-worker-state" data-state={worker.state}><span className="chat-step-icon"><Icon aria-hidden="true" /></span>{worker.label}</span>
-    {(worker.pr || worker.detail) && <span className="chat-worker-detail" title={worker.detail}>{[worker.pr && `PR #${worker.pr}`, worker.detail].filter(Boolean).join(' · ')}</span>}
-    {onOpen && worker.state !== 'missing' && <button type="button" className="chat-link chat-worker-open" onClick={() => onOpen(worker.paneId)} aria-label={`Open ${worker.name}`}>Open</button>}
-  </div>;
-}
-
-/** What's left of the Session's workers after the ones worth a line: one row that opens to them (D-192). */
-export function WorkerFoldRow({ workers, onOpen }: { workers: ChatWorkerLine[]; onOpen?: (paneId: string) => void }) {
-  const [open, setOpen] = useState(false);
-  if (!workers.length) return null;
-  return <div>
-    <button type="button" className="chat-fold" aria-expanded={open} onClick={() => setOpen(!open)}>
-      <span>{workersLabel(workers.length)}</span>
-      {open ? <ChevronDown className="chat-fold-chevron" /> : <ChevronRight className="chat-fold-chevron" />}
-    </button>
-    {open && <div className="chat-fold-workers">{workers.map(worker => <WorkerLine key={worker.paneId} worker={worker} onOpen={onOpen} />)}</div>}
-  </div>;
+/** A worker the latest turn has news of, as one compact line with Open (D-201). */
+export function WorkerNoteLine({ note, onOpen }: { note: WorkerNote; onOpen?: (paneId: string) => void }) {
+  return <p className="chat-worker-note" data-state={note.worker.state}>
+    <span className="chat-worker-note-text" title={note.text}>{note.text}</span>
+    {onOpen && note.worker.state !== 'missing' && <> · <button type="button" className="chat-link" onClick={() => onOpen(note.worker.paneId)} aria-label={`Open ${note.worker.name}`}>Open</button></>}
+  </p>;
 }
 
 /**
  * One turn (D-192): the agent's text, with its activity folded into one row. While
  * the turn runs the row says what it's doing now; afterwards, how long it worked.
  */
-export const ChatTurnView = memo(function ChatTurnView({ turn, permissions, actions }: { turn: ChatTurn; permissions: AgentChatPermission[]; actions: ChatTurnActions }) {
+export const ChatTurnView = memo(function ChatTurnView({ turn, permissions, actions, latest = false }: { turn: ChatTurn; permissions: AgentChatPermission[]; actions: ChatTurnActions; latest?: boolean }) {
   const [open, setOpen] = useState(false);
   const waiting = new Set(permissions.flatMap(permission => { const id = permissionToolId(permission); return id ? [id] : []; }));
   const { shown, activity, foldAt } = turnDisplay(turn);
   const showFold = turn.running || activity.length > 0;
+  // D-202: the latest turn says when it finished; every message shows its time on hover.
+  const ended = messageTime(turn.endedAt);
+  const label = latest && !turn.running ? turnFooter(turn, activity.length > 0) ?? turnSummary(turn) : turnSummary(turn, waiting);
   const liveIcon = <span className="chat-step-icon" data-state={turn.current && waiting.has(turn.current.id) ? 'waiting' : 'running'}>{turn.current && waiting.has(turn.current.id) ? <AlertCircle aria-hidden="true" /> : <LoaderCircle aria-hidden="true" />}</span>;
   const fold = showFold && <div key="fold" className="chat-fold-row" data-running={turn.running}>
     {activity.length > 0
       ? <button type="button" className="chat-fold" aria-expanded={open} onClick={() => setOpen(!open)}>
         {turn.running && liveIcon}
-        <span className="chat-fold-label" title={turnSummary(turn, waiting)}>{turnSummary(turn, waiting)}</span>
+        <span className="chat-fold-label" title={ended?.full ?? label}>{label}</span>
         {open ? <ChevronDown className="chat-fold-chevron" /> : <ChevronRight className="chat-fold-chevron" />}
       </button>
       : <p className="chat-fold">{liveIcon}<span className="chat-fold-label">{turnSummary(turn, waiting)}</span></p>}
@@ -174,10 +158,13 @@ export const ChatTurnView = memo(function ChatTurnView({ turn, permissions, acti
   const after = shown.slice(before.length);
   return <div className="chat-turn" data-anchor-id={turn.id} data-running={turn.running}>
     <UserMessage turn={turn} />
-    {before.map(item => <Item key={item.id} item={item} waiting={waiting} actions={actions} />)}
+    <div className="contents" title={ended?.full}>{before.map(item => <Item key={item.id} item={item} waiting={waiting} actions={actions} />)}</div>
     {fold}
-    {after.map(item => <Item key={item.id} item={item} waiting={waiting} actions={actions} />)}
-    {!turn.running && responseText(turn) && <div className="chat-message-actions chat-response-actions"><ChatCopyButton label="Copy response" text={() => responseText(turn)} /></div>}
+    <div className="contents" title={ended?.full}>{after.map(item => <Item key={item.id} item={item} waiting={waiting} actions={actions} />)}</div>
+    {!turn.running && (responseText(turn) || (latest && !activity.length && ended)) && <div className="chat-message-actions chat-response-actions">
+      {responseText(turn) && <ChatCopyButton label="Copy response" text={() => responseText(turn)} />}
+      {latest && !activity.length && ended && <span className="chat-turn-time" title={ended.full}>{ended.short}</span>}
+    </div>}
     {stoppedText(turn) && <p className="chat-turn-stopped">{stoppedText(turn)}</p>}
   </div>;
 });

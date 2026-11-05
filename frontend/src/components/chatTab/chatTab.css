@@ -51,7 +51,6 @@
 .chat-fold-label { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .chat-fold-chevron { width:14px; height:14px; flex-shrink:0; }
 .chat-fold-body { display:flex; flex-direction:column; gap:8px; margin:2px 0 8px; }
-.chat-fold-workers { display:flex; flex-direction:column; gap:8px; margin-top:4px; }
 .chat-thought { font-size:14px; color:var(--chat-muted-foreground); }
 .chat-thought>summary { display:flex; align-items:center; gap:8px; cursor:pointer; list-style:none; }
 .chat-thought>summary svg { width:16px; height:16px; }
@@ -147,19 +146,9 @@
 @container chat-composer (max-width:360px) { .chat-chip { max-width:8rem; } }
 .chat-turn-stopped { font-size:13px; font-style:italic; color:var(--chat-muted-foreground); }
 /* Session worker lines (round 3 · A). */
-.chat-worker { display:flex; align-items:center; gap:10px; min-height:40px; padding:6px 12px; border:1px solid var(--chat-border); border-radius:10px; font-size:14px; min-width:0; }
-.chat-worker-glyph { width:16px; height:16px; flex-shrink:0; color:var(--chat-muted-foreground); }
-.chat-worker-name { font-weight:600; flex-shrink:0; max-width:40%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-/* Every state pill shares one width so swapping states never shifts the line. */
-.chat-worker-state { display:inline-flex; align-items:center; gap:6px; width:96px; flex-shrink:0; padding:2px 8px; border-radius:999px; font-size:12px; font-weight:500; background:var(--chat-muted); color:var(--chat-muted-foreground); }
-.chat-worker-state[data-state=running] { color:var(--color-interactive); background:color-mix(in oklab,var(--color-interactive) 12%,transparent); }
-.chat-worker-state[data-state=running] svg { animation:chat-spin 1s linear infinite; }
-.chat-worker-state[data-state=waiting] { color:var(--color-status-warning); background:color-mix(in oklab,var(--color-status-warning) 14%,transparent); }
-.chat-worker-state[data-state=done] { color:var(--color-status-success); background:color-mix(in oklab,var(--color-status-success) 12%,transparent); }
-.chat-worker-state[data-state=failed],.chat-worker-state[data-state=missing] { color:var(--color-status-error); background:color-mix(in oklab,var(--color-status-error) 12%,transparent); }
-.chat-worker-detail { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; color:var(--chat-muted-foreground); }
-.chat-worker-open { margin-left:auto; }
-@media (prefers-reduced-motion:reduce) { .chat-worker-state svg { animation:none !important; } }
+.chat-worker-note { display:flex; align-items:center; gap:4px; min-width:0; font-size:14px; color:var(--chat-muted-foreground); }
+.chat-worker-note[data-state=waiting] .chat-worker-note-text { color:var(--color-status-warning); }
+.chat-worker-note-text { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .chat-commands li { display:flex; gap:10px; padding:6px 10px; border-radius:8px; font-size:13px; cursor:pointer; }
 .chat-commands li[aria-selected=true],.chat-commands li:hover { background:var(--chat-muted); }
 /* Drag and drop and pasted attachments (D-139). */
@@ -186,7 +175,8 @@
 .chat-user-row { align-self:flex-end; display:flex; flex-direction:column; align-items:flex-end; gap:2px; max-width:min(85%, 40rem); }
 .chat-user-row .chat-user { align-self:auto; max-width:100%; }
 .chat-message-actions { display:flex; min-height:28px; }
-.chat-response-actions { margin-top:-4px; }
+.chat-response-actions { margin-top:-4px; align-items:center; gap:4px; }
+.chat-turn-time { font-size:13px; color:var(--chat-muted-foreground); }
 .chat-copy { display:inline-flex; align-items:center; gap:6px; height:28px; min-width:28px; padding:0 6px; border-radius:8px; font-size:12px; color:var(--chat-muted-foreground); }
 .chat-copy:hover { background:var(--chat-muted); color:var(--chat-foreground); }
 .chat-copy[data-state=copied] { color:var(--color-status-success, var(--chat-foreground)); }

@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { chatTurns } from '@shared/chatTabPresentation';
 import type { AgentChatMessage } from '@shared/types/agentChat';
 
-import { chatRows, WORKERS_FOLD } from './chatRows';
+import { chatRows } from './chatRows';
 
 const messages: AgentChatMessage[] = [
   { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'Rebase them' }] },
@@ -16,9 +16,12 @@ const messages: AgentChatMessage[] = [
 describe('phone chat rows', () => {
   it('folds a finished turn to one row and opens it on request (D-192)', () => {
     const turns = chatTurns(messages, { running: false });
-    const folded = chatRows(turns, { open: new Set() });
+    const folded = chatRows(turns, { open: new Set(), now: new Date(2026, 10, 5) });
     expect(folded.map(row => row.kind)).toEqual(['user', 'fold', 'text', 'copy']);
-    expect(folded[1]).toMatchObject({ summary: 'Worked for 2m 40s', open: false, running: false });
+    // D-202: the latest turn says when it finished.
+    const folded1 = folded[1];
+    expect(folded1.kind === 'fold' && folded1.summary.replace(/\s/g, ' ')).toMatch(/^Worked for 2m 40s · Nov 3, \d{1,2}:\d{2} [AP]M$/);
+    expect(folded1).toMatchObject({ open: false, running: false });
     const opened = chatRows(turns, { open: new Set([turns[0].id]) });
     expect(opened.map(row => row.kind)).toEqual(['user', 'fold', 'steps', 'steps', 'text', 'copy']);
     // D-182: a finished response copies as the agent's text only, not its activity lines.
@@ -33,15 +36,16 @@ describe('phone chat rows', () => {
     expect(rows[1]).toMatchObject({ summary: 'Running git fetch', running: true, expandable: true });
   });
 
-  it('keeps a line for a worker at work and folds the rest into one row', () => {
+  it('mentions only a worker the latest turn has news of (D-201)', () => {
     const turns = chatTurns(messages, { running: false });
     const workers = [
       { paneId: 'p', name: 'csv-export', state: 'running' as const, label: 'Running' },
-      ...['a', 'b'].map(paneId => ({ paneId, name: paneId, state: 'done' as const, label: 'Done' })),
+      { paneId: 'q', name: 'switch-to-chat', state: 'waiting' as const, label: 'Waiting' },
+      { paneId: 'a', name: 'approvals-global', state: 'done' as const, label: 'Done', reportedAt: '2026-11-03T10:01:00.000Z' },
+      { paneId: 'b', name: 'old', state: 'done' as const, label: 'Done', reportedAt: '2026-11-03T09:00:00.000Z' },
     ];
     const rows = chatRows(turns, { open: new Set(), workers });
-    expect(rows.slice(-2).map(row => row.key)).toEqual(['worker:p', 'workers:fold']);
-    expect(rows.at(-1)).toMatchObject({ summary: '2 workers' });
-    expect(chatRows(turns, { open: new Set([WORKERS_FOLD]), workers }).slice(-2).map(row => row.key)).toEqual(['worker:a', 'worker:b']);
+    expect(rows.flatMap(row => row.kind === 'worker' ? [row.note.text] : [])).toEqual(['switch-to-chat is asking you', 'approvals-global finished']);
+    expect(rows.some(row => row.kind === 'fold' && row.summary.includes('worker'))).toBe(false);
   });
 });

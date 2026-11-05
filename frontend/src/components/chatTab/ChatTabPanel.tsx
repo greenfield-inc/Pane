@@ -6,7 +6,7 @@ import {
 import { ArrowDown, ArrowUp, FileText, Image as ImageIcon, LoaderCircle, Paperclip, Plus, Square, X } from 'lucide-react';
 import type { AgentChatPermission } from '../../../../shared/types/agentChat';
 import type { ChatTabClient, ChatTabCommand, ChatTabSend } from '../../../../shared/types/chatTab';
-import { chatTurns, foldWorkers, type ChatWorkerLine } from '../../../../shared/chatTabPresentation';
+import { chatTurns, workerNotes, type ChatWorkerLine } from '../../../../shared/chatTabPresentation';
 import { rejectOption } from '../../../../shared/chatTabPermissions';
 import { chatTabViewer, type ChatTabViewer } from '../../../../shared/chatTabViewer';
 import { toAssistantMessage } from '../agentChat/convertMessage';
@@ -15,7 +15,7 @@ import { ipcErrorMessage } from '../../utils/ipcErrorMessage';
 import { ChatProblem } from './ChatProblem';
 import { ChatQuestionCard } from './ChatQuestionCard';
 import { ChatPermissionCard } from './ChatPermissionCard';
-import { ChatTurnView, WorkerFoldRow, WorkerLine, type ChatTurnActions } from './ChatTurns';
+import { ChatTurnView, WorkerNoteLine, type ChatTurnActions } from './ChatTurns';
 import { ChatCommandMenu } from './ChatCommandMenu';
 import { matchingCommands } from './chatCommands';
 import { ChatModeChip, ChatModelMenu, ChatPhoneModelMenu, ChatRiskyModeMarker, usePhoneWidth } from './ChatComposerControls';
@@ -169,7 +169,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
   };
   const working = view?.status === 'working' || view?.status === 'blocked';
   const turns = useMemo(() => chatTurns(messages, { running: working }), [messages, working]);
-  const workerFold = useMemo(() => foldWorkers(turns, workers ?? []), [turns, workers]);
+  const notes = useMemo(() => workerNotes(turns, workers ?? []), [turns, workers]);
   const [copying, setCopying] = useState(0);
   const canAttachImages = !!view?.canAttachImages;
   const attachments = useMemo(() => {
@@ -326,9 +326,8 @@ export default function ChatTabPanel({ panelId, client, connected = true, machin
             {snapshot.loadingEarlier ? 'Loading…' : `Earlier messages (${snapshot.transcript?.start})`}
           </button>}
           {!snapshot.transcript && !view?.problem && <p role="status" className="chat-notice">{view?.status === 'starting' || !view ? `Starting ${agentName}…` : 'Loading conversation…'}</p>}
-          {turns.map(turn => <ChatTurnView key={turn.id} turn={turn} permissions={view?.permissions ?? []} actions={actions} />)}
-          {workerFold.shown.map(worker => <WorkerLine key={worker.paneId} worker={worker} onOpen={actions.onOpenWorker} />)}
-          <WorkerFoldRow workers={workerFold.rest} onOpen={actions.onOpenWorker} />
+          {turns.map(turn => <ChatTurnView key={turn.id} turn={turn} latest={turn === turns.at(-1)} permissions={view?.permissions ?? []} actions={actions} />)}
+          {notes.map(note => <WorkerNoteLine key={note.worker.paneId} note={note} onOpen={actions.onOpenWorker} />)}
           {snapshot.hasNewer && <button type="button" className="chat-button chat-button-outline self-center" disabled={snapshot.loadingNewer} onClick={() => { recordAnchor(); setPaged(true); void viewer.loadNewer(); }}>
             {snapshot.loadingNewer ? 'Loading…' : 'Newer messages'}
           </button>}

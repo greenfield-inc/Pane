@@ -123,17 +123,24 @@ the way (D-192). While a turn runs, one quiet line says what it's doing now
 ("Running pnpm test", "Thinking"). When it ends, its steps, thinking, to-do lists
 and notices fold into one row, "Worked for 27s", that opens to them.
 
+The latest turn says when it finished (D-202): "Worked for 27s · 2:04 PM", or
+"2:04 PM" alone when it did nothing but answer. An older time reads "Yesterday
+4:12 PM" or "Nov 3, 4:12 PM", in the person's locale. Every other message shows
+its time on hover; on the phone, a long press shows it. A conversation reopened
+after a restart has no times for its earlier turns.
+
 The conversation stays in the order things happened (D-193). Claude can start a
 turn by itself, for example when a background command finishes. Pane sees that
 through the adapter's `asyncTasks` capability: the tab shows as working, the turn
 gets its own row, and a message sent meanwhile waits in the queue until the turn
 ends, like one sent during any other turn. Stop ends it.
 
-In a Session orchestrator's chat, workers follow the conversation. Each worker
-that's running, blocked or changed in the latest turn gets one line with its
-state, PR and **Open**, and the rest fold into one row, "14 workers", that opens
-to them. All of this comes from Pane's own Session state (its Panes, their agent
-states and `runpane report`s), never from what the agent wrote.
+In a Session orchestrator's chat, a worker appears only when the latest turn has
+news of it (D-201): one line, "approvals-global finished · **Open**" when it
+finished or reported, or "switch-to-chat is asking you · **Open**" when it waits
+on the person. Idle, running and unchanged workers stay out of the chat; the
+sidebar lists every Pane. This comes from Pane's own Session state (its Panes,
+their agent states and `runpane report`s), never from what the agent wrote.
 
 Approvals and questions are also asked in Notify and on the phone (see
 [PANE_NOTIFY.md](PANE_NOTIFY.md)), a question form one field at a time. The

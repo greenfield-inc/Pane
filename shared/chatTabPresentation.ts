@@ -334,19 +334,50 @@ export function workerLines(panes: readonly WorkerPaneInput[], attachedAt: Reado
   });
 }
 
-/**
- * The Session's workers at the end of its conversation (D-192): those running, blocked
- * or changed in the latest turn each keep a line; the rest fold into one "14 workers" row.
- */
-export interface WorkerFold { shown: ChatWorkerLine[]; rest: ChatWorkerLine[] }
+/** When something happened, short for the chat and full for a tooltip (D-202). */
+export interface MessageTime { short: string; full: string }
 
-export function foldWorkers(turns: readonly ChatTurn[], workers: readonly ChatWorkerLine[]): WorkerFold {
+/**
+ * "2:04 PM" today, "Yesterday 4:12 PM", "Nov 3, 4:12 PM" this year, with the year
+ * before that; in the person's locale. Undefined when the time is unknown.
+ */
+export function messageTime(iso: string | undefined, now = new Date(), locale?: string): MessageTime | undefined {
+  const at = iso ? new Date(iso) : undefined;
+  if (!at || Number.isNaN(at.getTime())) return undefined;
+  const time = at.toLocaleTimeString(locale, { hour: 'numeric', minute: '2-digit' });
+  const day = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  const daysAgo = Math.round((day(now) - day(at)) / 86_400_000);
+  const dateFormat: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric' };
+  if (at.getFullYear() !== now.getFullYear()) dateFormat.year = 'numeric';
+  const date = at.toLocaleDateString(locale, dateFormat);
+  const short = daysAgo === 0 ? time : daysAgo === 1 ? `Yesterday ${time}` : `${date}, ${time}`;
+  return { short, full: at.toLocaleString(locale, { dateStyle: 'full', timeStyle: 'medium' }) };
+}
+
+/** The footer of the latest finished turn: "Worked for 27s · 2:04 PM", or the time alone with no activity. */
+export function turnFooter(turn: ChatTurn, hasActivity: boolean, now?: Date, locale?: string): string | undefined {
+  const time = messageTime(turn.endedAt, now, locale);
+  if (turn.running || !time) return hasActivity ? turnSummary(turn) : undefined;
+  return hasActivity ? `${turnSummary(turn)} · ${time.short}` : time.short;
+}
+
+/** A worker the latest turn has news of, as one line: "approvals-global finished". */
+export interface WorkerNote { worker: ChatWorkerLine; text: string }
+
+/**
+ * Which workers the Session chat mentions (D-201): one blocked or waiting on the person,
+ * or one that finished or reported in the latest turn. Idle, running and unchanged
+ * workers stay out of the chat; the sidebar lists every Pane.
+ */
+export function workerNotes(turns: readonly ChatTurn[], workers: readonly ChatWorkerLine[]): WorkerNote[] {
   const latest = turns.at(-1);
   // A running turn has no start time yet; it began after the turn before it ended.
   const since = Date.parse(latest?.startedAt ?? turns.at(-2)?.endedAt ?? '');
   const changed = (at?: string) => !!at && !Number.isNaN(since) && Date.parse(at) >= since;
-  const live = (worker: ChatWorkerLine) => worker.state === 'running' || worker.state === 'waiting' || changed(worker.reportedAt) || changed(worker.attachedAt);
-  return { shown: workers.filter(live), rest: workers.filter(worker => !live(worker)) };
+  return workers.flatMap(worker => {
+    if (worker.state === 'waiting') return [{ worker, text: `${worker.name} is asking you` }];
+    if (!changed(worker.reportedAt)) return [];
+    const verb = worker.state === 'done' ? 'finished' : worker.state === 'failed' ? 'failed' : 'reported';
+    return [{ worker, text: `${worker.name} ${verb}` }];
+  });
 }
-
-export const workersLabel = (count: number) => plural(count, 'worker');

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AgentChatMessage } from '../../../../shared/types/agentChat';
-import { chatTurns, currentActivity, foldWorkers, planEntryKeys, stoppedText, turnDisplay, turnSummary, type ChatTurn, type ChatWorkerLine } from '../../../../shared/chatTabPresentation';
+import { chatTurns, currentActivity, messageTime, planEntryKeys, stoppedText, turnFooter, turnDisplay, turnSummary, workerNotes, type ChatTurn, type ChatWorkerLine } from '../../../../shared/chatTabPresentation';
 
 const user = (id: string, text: string): AgentChatMessage => ({ id, role: 'user', parts: [{ type: 'text', text }] });
 const say = (id: string, text: string): AgentChatMessage => ({ id, role: 'assistant', parts: [{ type: 'text', text }] });
@@ -98,19 +98,21 @@ describe('worker lines in the Session chat', () => {
     ]);
   });
 
-  it('keeps a line for workers running, blocked or changed in the latest turn, and folds the rest (D-192)', () => {
+  it('mentions a worker only when it finished, reported or is asking in the latest turn (D-201)', () => {
     const turns: ChatTurn[] = [
       { id: 't1', items: [], running: false, startedAt: '2026-11-03T11:40:00.000Z', endedAt: '2026-11-03T11:41:00.000Z' },
       { id: 't2', items: [], running: false, startedAt: '2026-11-03T11:50:00.000Z', endedAt: '2026-11-03T11:51:00.000Z' },
     ];
     const worker = (paneId: string, state: ChatWorkerLine['state'], reportedAt?: string): ChatWorkerLine => ({ paneId, name: paneId, state, label: state, reportedAt });
-    const workers = [worker('running', 'running'), worker('blocked', 'waiting'), worker('just-done', 'done', '2026-11-03T11:50:30.000Z'), worker('old-done', 'done', '2026-11-03T11:00:00.000Z'), worker('idle', 'idle')];
-    const fold = foldWorkers(turns, workers);
-    expect(fold.shown.map(line => line.paneId)).toEqual(['running', 'blocked', 'just-done']);
-    expect(fold.rest.map(line => line.paneId)).toEqual(['old-done', 'idle']);
+    const notes = workerNotes(turns, [
+      worker('running', 'running'), worker('switch-to-chat', 'waiting'), worker('approvals-global', 'done', '2026-11-03T11:50:30.000Z'),
+      worker('broke', 'failed', '2026-11-03T11:50:40.000Z'), worker('said', 'idle', '2026-11-03T11:50:50.000Z'),
+      worker('old-done', 'done', '2026-11-03T11:00:00.000Z'), worker('idle', 'idle'),
+    ]);
+    expect(notes.map(note => note.text)).toEqual(['switch-to-chat is asking you', 'approvals-global finished', 'broke failed', 'said reported']);
     // A running turn has no start of its own yet: it began when the one before it ended.
-    const running = foldWorkers([turns[0], { id: 't2', items: [], running: true }], [worker('since', 'done', '2026-11-03T11:45:00.000Z'), worker('before', 'done', '2026-11-03T11:30:00.000Z')]);
-    expect(running.shown.map(line => line.paneId)).toEqual(['since']);
+    const running = workerNotes([turns[0], { id: 't2', items: [], running: true }], [worker('since', 'done', '2026-11-03T11:45:00.000Z'), worker('before', 'done', '2026-11-03T11:30:00.000Z')]);
+    expect(running.map(note => note.text)).toEqual(['since finished']);
   });
 });
 
@@ -141,6 +143,30 @@ describe('what a turn shows by default (D-192)', () => {
     expect(currentActivity(working(tool('x', 'execute', { status: 'in_progress', input: { command: 'pnpm test\n--all' } })))).toBe('Running pnpm test');
     const turn = working(tool('r', 'read'), say('a', 'Hi'));
     expect(turnDisplay(turn).foldAt).toBe(1);
+  });
+});
+
+describe('when a message was written (D-202)', () => {
+  const now = new Date(2026, 10, 5, 15, 0);
+  const at = (day: number, hour: number, minute: number) => new Date(2026, 10, day, hour, minute).toISOString();
+  const clean = (text?: string) => text?.replace(/\s/g, ' ');
+
+  it('says the time today, Yesterday before that, then the date', () => {
+    expect(clean(messageTime(at(5, 14, 4), now, 'en-US')?.short)).toBe('2:04 PM');
+    expect(clean(messageTime(at(4, 16, 12), now, 'en-US')?.short)).toBe('Yesterday 4:12 PM');
+    expect(clean(messageTime(at(3, 16, 12), now, 'en-US')?.short)).toBe('Nov 3, 4:12 PM');
+    expect(clean(messageTime(new Date(2025, 10, 3, 16, 12).toISOString(), now, 'en-US')?.short)).toBe('Nov 3, 2025, 4:12 PM');
+    expect(clean(messageTime(at(5, 14, 4), now, 'en-US')?.full)).toMatch(/^Thursday, November 5, 2026 at 2:04:00 PM$/);
+    expect(messageTime(undefined, now)).toBeUndefined();
+  });
+
+  it('puts the time after Worked for, alone without activity, and nothing while running', () => {
+    const turn = (extra: Partial<ChatTurn>): ChatTurn => ({ id: 't', items: [], running: false, startedAt: at(5, 14, 3), endedAt: at(5, 14, 4), ...extra });
+    expect(clean(turnFooter(turn({}), true, now, 'en-US'))).toBe('Worked for 1m 0s · 2:04 PM');
+    expect(clean(turnFooter(turn({}), false, now, 'en-US'))).toBe('2:04 PM');
+    expect(turnFooter(turn({ running: true, endedAt: undefined }), true, now, 'en-US')).toBe('Working');
+    // A reopened turn has no time.
+    expect(turnFooter(turn({ startedAt: undefined, endedAt: undefined }), false, now)).toBeUndefined();
   });
 });
 
