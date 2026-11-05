@@ -70,6 +70,14 @@ jobs:
         key: ${{ runner.os }}-electron-${{ hashFiles('**/pnpm-lock.yaml') }}
         restore-keys: ${{ runner.os }}-electron-
 
+    # Ubuntu 26.04's GCC defaults to -march=x86-64-v3 (AVX2, BMI2), so native
+    # modules built from source crash with SIGILL on older x86-64 CPUs (#1226).
+    - name: Target the generic x86-64 baseline for native modules
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        echo 'CFLAGS=-march=x86-64 -mtune=generic' >> "$GITHUB_ENV"
+        echo 'CXXFLAGS=-march=x86-64 -mtune=generic' >> "$GITHUB_ENV"
+
     - run: pnpm install
 
     - name: Patch electron-builder temporary keychain password handling
