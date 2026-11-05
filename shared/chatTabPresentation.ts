@@ -279,7 +279,6 @@ export function currentActivity(turn: ChatTurn, waiting: ReadonlySet<string> = n
 export function turnSummary(turn: ChatTurn, waiting?: ReadonlySet<string>): string {
   if (turn.running) return currentActivity(turn, waiting);
   const duration = turn.startedAt && turn.endedAt ? formatDuration(Date.parse(turn.endedAt) - Date.parse(turn.startedAt)) : undefined;
-  if (turn.stopReason && turn.stopReason !== 'end_turn') return `Stopped${duration ? ` after ${duration}` : ''}`;
   if (duration) return `Worked for ${duration}`;
   // A reopened conversation's earlier turns have no times.
   const steps = turn.items.reduce((sum, item) => sum + (item.type === 'steps' ? item.groups.reduce((total, group) => total + group.steps.length, 0) : 0), 0);

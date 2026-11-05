@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AgentChatMessage } from '../../../../shared/types/agentChat';
-import { chatTurns, currentActivity, foldWorkers, planEntryKeys, turnDisplay, turnSummary, type ChatTurn, type ChatWorkerLine } from '../../../../shared/chatTabPresentation';
+import { chatTurns, currentActivity, foldWorkers, planEntryKeys, stoppedText, turnDisplay, turnSummary, type ChatTurn, type ChatWorkerLine } from '../../../../shared/chatTabPresentation';
 
 const user = (id: string, text: string): AgentChatMessage => ({ id, role: 'user', parts: [{ type: 'text', text }] });
 const say = (id: string, text: string): AgentChatMessage => ({ id, role: 'assistant', parts: [{ type: 'text', text }] });
@@ -53,7 +53,9 @@ describe('chat turns', () => {
   it('says how a turn stopped when it did not end normally', () => {
     const [turn] = chatTurns([user('u1', 'go'), say('a', 'partial'), end('t', 5, 'cancelled')], { running: false });
     expect(turn.stopReason).toBe('cancelled');
-    expect(turnSummary(turn)).toBe('Stopped after 5s');
+    // How it stopped is said once, in the line under the turn.
+    expect(turnSummary(turn)).toBe('Worked for 5s');
+    expect(stoppedText(turn)).toBe('Stopped.');
   });
 
   it('keeps a todo list and unknown content as their own items', () => {

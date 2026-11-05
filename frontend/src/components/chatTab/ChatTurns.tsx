@@ -159,14 +159,15 @@ export const ChatTurnView = memo(function ChatTurnView({ turn, permissions, acti
   const waiting = new Set(permissions.flatMap(permission => { const id = permissionToolId(permission); return id ? [id] : []; }));
   const { shown, activity, foldAt } = turnDisplay(turn);
   const showFold = turn.running || activity.length > 0;
+  const liveIcon = <span className="chat-step-icon" data-state={turn.current && waiting.has(turn.current.id) ? 'waiting' : 'running'}>{turn.current && waiting.has(turn.current.id) ? <AlertCircle aria-hidden="true" /> : <LoaderCircle aria-hidden="true" />}</span>;
   const fold = showFold && <div key="fold" className="chat-fold-row" data-running={turn.running}>
     {activity.length > 0
       ? <button type="button" className="chat-fold" aria-expanded={open} onClick={() => setOpen(!open)}>
-        {turn.running && <span className="chat-step-icon" data-state="running"><LoaderCircle aria-hidden="true" /></span>}
+        {turn.running && liveIcon}
         <span className="chat-fold-label" title={turnSummary(turn, waiting)}>{turnSummary(turn, waiting)}</span>
         {open ? <ChevronDown className="chat-fold-chevron" /> : <ChevronRight className="chat-fold-chevron" />}
       </button>
-      : <p className="chat-fold"><span className="chat-step-icon" data-state="running"><LoaderCircle aria-hidden="true" /></span><span className="chat-fold-label">{turnSummary(turn, waiting)}</span></p>}
+      : <p className="chat-fold">{liveIcon}<span className="chat-fold-label">{turnSummary(turn, waiting)}</span></p>}
     {open && <div className="chat-fold-body">{activity.map(item => <Item key={item.id} item={item} waiting={waiting} actions={actions} />)}</div>}
   </div>;
   const before = shown.slice(0, foldAt < 0 ? shown.length : Math.min(foldAt, shown.length));
