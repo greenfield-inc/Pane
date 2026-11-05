@@ -11,18 +11,22 @@ export function terminalPanelIdsOf(paneIds: readonly string[]): string[] {
 }
 
 /**
- * Pauses whole Panes: their terminal tabs and their run script (the Logs panel process). A run
- * script Pause stopped is recorded in the tabs' saved marks, so Resume runs it again even after
- * Pane restarts. Each Pane is paused on its own: one that fails is reported and the rest still pause.
+ * Pauses whole Panes: their terminal tabs and their run script (the Logs panel process). The tabs are
+ * marked first, and the script stops only once a mark records it, so Resume runs it again even after
+ * Pane restarts. A Pane with no tab paused keeps its script. Each Pane is paused on its own: one that
+ * fails is reported and the rest still pause.
  */
 export async function pausePanes(registry: PaneCommandRegistry, paneIds: readonly string[], mark: TerminalPausedMark): Promise<PauseOutcome> {
   const outcomes = await Promise.all(paneIds.map(async (paneId): Promise<PauseOutcome> => {
+    const panelIds = terminalPanelIdsOf([paneId]);
     try {
-      const scriptStopped = await stopRunScript(registry, paneId);
-      return await terminalPanelManager.pausePanels(terminalPanelIdsOf([paneId]), scriptStopped ? { ...mark, runScript: true } : mark);
+      const scriptRunning = panelIds.length > 0 && await runScriptRunning(paneId);
+      const outcome = await terminalPanelManager.pausePanels(panelIds, scriptRunning ? { ...mark, runScript: true } : mark);
+      if (scriptRunning && outcome.paused.length > 0) await stopRunScript(registry, paneId);
+      return outcome;
     } catch (error) {
       console.error(`[Pause] Pane ${paneId} could not be paused:`, error);
-      return { paused: [], failed: [{ panelId: paneId, error: reasonOf(error) }] };
+      return { paused: [], failed: panelIds.map(panelId => ({ panelId, error: reasonOf(error) })) };
     }
   }));
   return { paused: outcomes.flatMap(outcome => outcome.paused), failed: outcomes.flatMap(outcome => outcome.failed) };
@@ -44,10 +48,16 @@ export async function restartRunScripts(registry: PaneCommandRegistry, paneIds: 
   }
 }
 
-async function stopRunScript(registry: PaneCommandRegistry, paneId: string): Promise<boolean> {
+async function runScriptRunning(paneId: string): Promise<boolean> {
   // The live process is the truth; the Logs panel's saved flag can lag a script that just restarted.
-  const running = (await logsManager.getRunningProcess(paneId)) !== undefined || (await logsManager.isRunning(paneId));
-  if (!running) return false;
-  await registry.invoke('sessions:stop-script', [paneId]);
-  return true;
+  return (await logsManager.getRunningProcess(paneId)) !== undefined || (await logsManager.isRunning(paneId));
+}
+
+async function stopRunScript(registry: PaneCommandRegistry, paneId: string): Promise<void> {
+  try {
+    await registry.invoke('sessions:stop-script', [paneId]);
+  } catch (error) {
+    // The tabs are paused and their marks record the script, so Resume restarts it either way.
+    console.error(`[Pause] Pane ${paneId}'s tabs paused, but its run script did not stop:`, error);
+  }
 }

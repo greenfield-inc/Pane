@@ -4891,11 +4891,13 @@ export class DatabaseService {
    * instead of parsing every tab's state. One Pane when `sessionId` is given, else every Pane.
    */
   getTerminalPauseMarks(sessionId?: string): Array<{ session_id: string; paused: string | null }> {
-    const sql = "SELECT session_id, json_extract(state, '$.customState.paused') AS paused FROM tool_panels WHERE type = 'terminal'";
+    // json_valid keeps one tab with unreadable state from failing every Pane read.
+    const columns = "SELECT session_id, CASE WHEN json_valid(state) THEN json_extract(state, '$.customState.paused') END AS paused";
     // SAFETY: This fixed SQLite query projection matches the declared row type at this database boundary.
     return (sessionId === undefined
-      ? this.db.prepare(sql).all()
-      : this.db.prepare(`${sql} AND session_id = ?`).all(sessionId)) as Array<{ session_id: string; paused: string | null }>;
+      ? this.db.prepare(`${columns} FROM tool_panels WHERE type = 'terminal'`).all()
+      // `+type` keeps the planner off the type index, which would read every terminal tab ever created.
+      : this.db.prepare(`${columns} FROM tool_panels WHERE session_id = ? AND +type = 'terminal'`).all(sessionId)) as Array<{ session_id: string; paused: string | null }>;
   }
 
   getPanelsForSession(sessionId: string): ToolPanel[] {
