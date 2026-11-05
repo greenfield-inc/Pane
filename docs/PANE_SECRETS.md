@@ -80,7 +80,7 @@ their own copy: see [Project environment variables](PROJECT_ENV_VARS.md).
 | --- | --- |
 | macOS | The login keychain: service `Pane` (or `Pane (<data directory>)` for a dev build's `PANE_DIR`), account `secret:<project>/<NAME>` |
 | Windows, desktop Linux | `secrets.json` in the Pane data directory, mode 0600, each value encrypted with the OS (DPAPI, or the desktop keyring) through Electron's safeStorage |
-| Linux without a keyring (a headless server) | The same 0600 file, as plain text. Settings → Secrets says so on that host. |
+| Linux without a keyring (a headless server) | The same 0600 file, as plain text. `runpane secrets list` on that host says so. |
 
 The index of names, times and machines lives in `config.json` under `paneSecrets`.
 
@@ -105,7 +105,7 @@ The safeguards stop accidental exposure; they don't sandbox anything.
 | Every host Pane syncs to | Yes, holds a copy | Each saved host keeps a copy for offline use. |
 | Your paired phone | Relays, never stores | The same rule as shared keys: a paired device can already open terminals on the host. |
 | Other people on your tailnet, under "everyone on the tailnet" visibility | Not through Pane; yes by reading the store directly | Pane refuses them every secret path: `runpane secrets` in their `workspace exec` commands, secret cards, project variables that point at or change a secret, and the key-sharing channels. Their terminals and scripts start without secret variables. Their `exec` commands still run as you, so one that reads the keychain or `secrets.json` directly gets the values. Keep "Only me" on a machine whose secrets teammates must not read. |
-| A Linux host without a keyring | At rest in a 0600 file, unencrypted | Settings → Secrets says so on that host. |
+| A Linux host without a keyring | At rest in a 0600 file, unencrypted | `runpane secrets list` on that host says so. |
 | Chat, MCP output, Notify history and broadcasts, push payloads, Pane logs, analytics, `sessions.db`, `config.json` | No | Pane never writes or returns a value to any of them. |
 | An agent's transcript and Pane's saved terminal scrollback | Only if the agent prints it | `exec` puts the value in a child's environment; if that command echoes it, the output goes wherever its output goes. |
 | Running processes | Yes, through the environment | `ps eww` shows a process's environment to the same user. |
