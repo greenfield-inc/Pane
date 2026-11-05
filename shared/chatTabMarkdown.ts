@@ -2,9 +2,9 @@ import { describeChatContent } from './agentChatPresentation';
 import { imageOf, type ChatTurn, type StepGroup, type TurnItem } from './chatTabPresentation';
 
 /**
- * A chat as Markdown, for the copy buttons (D-140): a message, a response, or the
- * conversation with speaker labels. Tool steps become one short line each, the way the
- * chat shows them, never their raw output.
+ * A chat as Markdown, for the copy buttons (D-140): a message, a response's text, or the
+ * conversation with speaker labels. In the conversation, tool steps become one short line
+ * each, the way the chat shows them, never their raw output.
  */
 
 const DONE = { explore: 'Explored', edit: 'Edited', run: 'Ran', think: 'Thought', other: 'Used' } satisfies Record<StepGroup['kind'], string>;
@@ -46,8 +46,13 @@ export function userMarkdown(turn: ChatTurn): string {
   }).join('\n\n');
 }
 
-/** The agent's response in a turn: its text, its steps one line each, and its to-do list. */
-export function responseMarkdown(turn: ChatTurn): string {
+/** What the agent wrote in a turn, without its activity (D-182): what per-message Copy copies. */
+export function responseText(turn: ChatTurn): string {
+  return turn.items.flatMap(item => item.type === 'text' && item.text.trim() ? [item.text.trim()] : []).join('\n\n');
+}
+
+/** A turn's whole response for the conversation: its text, its steps one line each, and its to-do list. */
+function responseWithActivity(turn: ChatTurn): string {
   return turn.items.map(itemMarkdown).filter(Boolean).join('\n\n');
 }
 
@@ -56,7 +61,7 @@ export function conversationMarkdown(turns: readonly ChatTurn[], agent: string):
   return turns.flatMap(turn => {
     const sections: string[] = [];
     const user = userMarkdown(turn);
-    const response = responseMarkdown(turn);
+    const response = responseWithActivity(turn);
     if (user) sections.push(`**You:**\n\n${user}`);
     if (response) sections.push(`**${agent}:**\n\n${response}`);
     return sections;

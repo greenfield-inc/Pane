@@ -17,9 +17,10 @@ describe('phone chat rows', () => {
   it('shows every step group in a worker chat', () => {
     const rows = chatRows(chatTurns(messages, { running: false }), { quiet: false, open: new Set() });
     expect(rows.map(row => row.kind)).toEqual(['user', 'steps', 'steps', 'text', 'copy']);
-    // D-140: the finished response copies as Markdown, its steps one line each.
+    // D-182: a finished response copies as the agent's text only, not its activity lines.
     const copy = rows.at(-1);
-    expect(copy?.kind === 'copy' && copy.text).toContain('- Ran `git fetch`');
+    expect(copy?.kind === 'copy' && copy.text).not.toContain('git fetch');
+    expect(copy?.kind === 'copy' && copy.text).toBe(rows.flatMap(row => row.kind === 'text' ? [row.text.trim()] : []).join('\n\n'));
   });
 
   it('folds a finished turn to one line in the Session chat, and opens it on request', () => {

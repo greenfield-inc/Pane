@@ -99,11 +99,12 @@ says, and after running the chat tab suites against it.
   queue.
 - **Copying**: message text can be selected and copied like any page. Each
   message and each finished response has a copy button (on hover with a mouse,
-  always on touch) that copies it as Markdown, with each tool step as one short
-  line and no raw output. **Copy conversation** above the thread copies the
-  loaded conversation under **You:** and the agent's name. Code blocks have
-  their own copy button. On the phone app, each message has a copy action, and a
-  long press on a reply copies it.
+  always on touch) that copies what was written, as Markdown, without the
+  agent's activity. **Copy conversation** above the thread copies the loaded
+  conversation under **You:** and the agent's name, with each tool step as one
+  short line and no raw output. Code blocks have their own copy button. On the
+  phone app, each message has a copy action, and a long press on a reply copies
+  it.
 - **Attachments** (desktop and PWA): drop photos and files anywhere on the chat,
   paste them into the composer, or pick them with **+**. An image the agent
   takes (PNG, JPEG, WebP or GIF up to 5 MB) is sent as an image. Any other file,

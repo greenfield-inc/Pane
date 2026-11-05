@@ -40,10 +40,8 @@ test('each message copies as Markdown, and its icon confirms', async ({ page }) 
   expect(await clipboard(page)).toBe('Why does pnpm test fail?');
 
   await page.getByRole('button', { name: 'Copy response' }).first().click();
-  const response = await clipboard(page);
-  expect(response).toContain('- Ran `pnpm test` (failed)');
-  expect(response).toContain('```ts\nimport { a } from "./lib/a";\n```');
-  expect(response).not.toContain('FAIL src/a.test.ts');
+  // D-182: the agent's text only, without its activity lines.
+  expect(await clipboard(page)).toBe('The `a.test.ts` suite imports a file that moved. Change the import:\n\n```ts\nimport { a } from "./lib/a";\n```');
 });
 
 test('the whole conversation copies with speaker labels', async ({ page }) => {
@@ -51,6 +49,8 @@ test('the whole conversation copies with speaker labels', async ({ page }) => {
   await page.getByRole('button', { name: 'Copy conversation' }).click();
   const conversation = await clipboard(page);
   expect(conversation.startsWith('**You:**\n\nWhy does pnpm test fail?\n\n**Claude:**\n\n')).toBe(true);
+  expect(conversation).toContain('- Ran `pnpm test` (failed)');
+  expect(conversation).not.toContain('FAIL src/a.test.ts');
   expect(conversation).toContain('**You:**\n\nThanks, fix it please.\n\n**Claude:**\n\nDone: the import now points at `./lib/a`, and the suite passes.');
 });
 

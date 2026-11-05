@@ -6,7 +6,7 @@ import type { AgentChatPermission } from '../../../../shared/types/agentChat';
 import { describeChatContent, permissionToolId } from '../../../../shared/agentChatPresentation';
 import type { JsonValue } from '../../../../shared/validation/boundaryDecoder';
 import { imageOf, planEntryKeys, stoppedText, turnSummary, type ChatWorkerLine, type ChatStep, type ChatTurn, type PlanEntry, type StepGroup, type TurnItem } from '../../../../shared/chatTabPresentation';
-import { responseMarkdown, userMarkdown } from '../../../../shared/chatTabMarkdown';
+import { responseText, userMarkdown } from '../../../../shared/chatTabMarkdown';
 import { ChatCopyButton } from './ChatCopyButton';
 
 export interface ChatTurnActions {
@@ -168,7 +168,7 @@ export const ChatTurnView = memo(function ChatTurnView({ turn, quiet, permission
         {open && <div className="chat-fold-body"><Item item={item} waiting={waiting} actions={actions} /></div>}
       </div>;
     })}
-    {!turn.running && responseMarkdown(turn) && <div className="chat-message-actions chat-response-actions"><ChatCopyButton label="Copy response" text={() => responseMarkdown(turn)} /></div>}
+    {!turn.running && responseText(turn) && <div className="chat-message-actions chat-response-actions"><ChatCopyButton label="Copy response" text={() => responseText(turn)} /></div>}
     {stoppedText(turn) && <p className="chat-turn-stopped">{stoppedText(turn)}</p>}
     {workers.map(worker => <WorkerLine key={worker.paneId} worker={worker} onOpen={actions.onOpenWorker} />)}
   </div>;

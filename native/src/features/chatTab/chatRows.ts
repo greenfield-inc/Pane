@@ -1,4 +1,4 @@
-import { responseMarkdown } from '@shared/chatTabMarkdown';
+import { responseText } from '@shared/chatTabMarkdown';
 import { placeWorkers, stoppedText, turnSummary, type ChatStep, type ChatTurn, type ChatWorkerLine, type PlanEntry, type StepGroup } from '@shared/chatTabPresentation';
 import type { AgentChatMessage } from '@shared/types/agentChat';
 import type { JsonValue } from '@shared/validation/boundaryDecoder';
@@ -15,7 +15,7 @@ export type ChatRow =
   | { key: string; kind: 'content'; content: JsonValue }
   | { key: string; kind: 'stopped'; text: string }
   | { key: string; kind: 'worker'; worker: ChatWorkerLine }
-  /** Copies a finished response as Markdown (D-140). */
+  /** Copies a finished response's text as Markdown (D-140, D-182). */
   | { key: string; kind: 'copy'; text: string };
 
 /**
@@ -50,7 +50,7 @@ export function chatRows(turns: readonly ChatTurn[], options: { quiet: boolean; 
       else if (item.type === 'plan') rows.push({ key: item.id, kind: 'plan', entries: item.entries });
       else rows.push({ key: item.id, kind: 'content', content: item.content });
     }
-    const response = turn.running ? '' : responseMarkdown(turn);
+    const response = turn.running ? '' : responseText(turn);
     if (response) rows.push({ key: `${turn.id}:copy`, kind: 'copy', text: response });
     const stopped = stoppedText(turn);
     if (stopped) rows.push({ key: `${turn.id}:stopped`, kind: 'stopped', text: stopped });
