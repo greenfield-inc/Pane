@@ -15650,11 +15650,12 @@ export const RUNPANE_CONTRACT = {
           "runpane secrets exec --project gcp --file SERVICE_ACCOUNT_JSON -- sh -c 'gcloud auth activate-service-account --key-file \"$SERVICE_ACCOUNT_JSON\"'"
         ],
         "notes": [
-          "Target names PATH, WORKTREE_PATH and PANE_* are refused with SECRET_RESERVED_NAME, and nothing runs.",
+          "Target names PATH, WORKTREE_PATH and PANE_*, in any case, are refused with SECRET_RESERVED_NAME, and nothing runs.",
           "A missing secret fails with SECRET_NOT_FOUND before anything runs; ask for it with `runpane secrets request`.",
           "Do not echo a secret from inside the command: its output lands wherever the command's output goes, such as your transcript.",
           "There is no MCP tool for this command; run it in a shell.",
-          "Runs on this machine only: `runpane workspace <machine> secrets ...` is refused. Use `runpane workspace <machine> exec -- runpane secrets ...` for another machine."
+          "Runs on this machine only: `runpane workspace <machine> secrets ...` is refused. Use `runpane workspace <machine> exec -- runpane secrets ...` for another machine.",
+          "Secrets are the machine owner's: every secrets command in a teammate's `runpane workspace exec` (PANE_TEAMMATE_LOGIN set) fails with SECRET_OWNER_REQUIRED."
         ]
       },
       "secrets request": {
