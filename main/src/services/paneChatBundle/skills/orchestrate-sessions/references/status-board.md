@@ -8,7 +8,7 @@ One HTML page per Session for the person: the workstream map. You fill a status 
 node <this skill's directory>/assets/status-page/render.mjs <Session folder>/.agent/status.json <Session folder>/session/index.html
 ```
 
-- When `node` is not on PATH, run the same script with Pane's own runtime, as the runtime context file says.
+- When `node` is not on PATH, run the same command with `pane-node` in place of `node`: Pane's own runtime, on PATH beside `runpane` (the runtime context file says where).
 - Write the page to `<Session folder>/session/index.html`. Pane shows that file in the Session's Overview tab, so never open it with `runpane panels open`. Outside a Pane Session, open it once with `runpane panels open --url file://<absolute path>` and reopen the same URL after each rewrite.
 - Write it at the first dispatch, again at each material change (a worker report, a decision, a PR opened, reviewed or merged) and when the person asks. Each rewrite replaces the same file.
 - The page carries `<meta http-equiv="refresh" content="60">`, so the Overview tab reloads it every minute.
@@ -17,7 +17,7 @@ node <this skill's directory>/assets/status-page/render.mjs <Session folder>/.ag
 
 ## The status JSON
 
-Every fact comes from the Session's real state: the ledger, the workers' reports and status files, `runpane sessions overview` and GitHub. Write "unknown" rather than guess. Say each fact once: a rail, a question row and a `next` line never repeat each other. The renderer escapes every field, except that `next` and `settings` keep `<b>`, `<code>` and `<a href="…">` links.
+Every fact comes from the Session's real state: the ledger, the workers' reports and status files, `runpane sessions overview` and GitHub. Write "unknown" rather than guess. Say each fact once: a rail, a question row and a `next` line never repeat each other. The renderer escapes every field and turns any link whose scheme is not `http`, `https`, `file` or `pane` into `#`; `next` and `settings` keep `<b>`, `<code>` and `<a href="…">` links.
 
 ```json
 {
@@ -63,7 +63,7 @@ Keep the JSON at `<Session folder>/.agent/status.json` and update it in place, s
 
 **Needs you.** One entry per open question, approval or finding waiting on the person, newest blocking first; `[]` when there are none.
 
-- A worker's question asked through Notify (its card is live): `id` is `null`, since it is numbered once answered, and `link` is `pane://open?pane=<pane id>&panel=<panel id>`, the item's Pane id and the asking worker's panel id from the ledger. The person clicks it to open that tab with its card docked.
+- A worker's question asked through Notify (its card is live): `id` is `null`, since it is numbered once answered, and `link` is `pane://open?pane=<pane id>&panel=<panel id>`, the item's Pane id and the asking worker's panel id from your per-worker record (`pane-orchestration`'s Record what came back). The person clicks it to open that tab with its card docked.
 - A question you relay yourself: its Q-n and no `link`, since the person answers it in your conversation. Link its files in `files`.
 - Review findings waiting on the person: the F-n, with no `link`.
 

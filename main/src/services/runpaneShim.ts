@@ -16,6 +16,9 @@
  * ELECTRON_RUN_AS_NODE and PANE_DIR across. A WSL rcfile re-applies PATH after
  * the user's login files, using `wslpath` for the Linux side of each path.
  *
+ * Beside it, a `pane-node` shim runs any script with the same binary as Node,
+ * so bundled skill scripts work on a machine without Node.
+ *
  * The installed app also appends `<PANE_DIR>/bin` to the end of the user's own
  * PATH (shell startup files, or the Windows user PATH), so `runpane` works in
  * terminals Pane did not open, such as when recovering from a failed update.
@@ -38,6 +41,8 @@ const MANAGED_SHELL_MARKER = 'pane-managed-shell-wrapper v1';
 // No cmd.exe metacharacters: the Windows shim echoes it unquoted.
 const MISSING_RUNTIME_MESSAGE = 'runpane: Pane is missing and Node.js is not on PATH. Reinstall Pane from https://runpane.com, or install Node.js and run: npx --yes runpane@latest update';
 const WSL_MISSING_MESSAGE = 'runpane: Pane is missing, so WSL has no Windows CLI to run. Nothing was run. Reinstall Pane from https://runpane.com.';
+const NODE_MISSING_MESSAGE = 'pane-node: Pane is missing and Node.js is not on PATH. Reinstall Pane from https://runpane.com, or install Node.js.';
+const WSL_NODE_MISSING_MESSAGE = 'pane-node: Pane is missing, so WSL has no Windows runtime to run. Nothing was run. Reinstall Pane from https://runpane.com.';
 
 export interface RunpaneShimState {
   binDir: string;
@@ -111,14 +116,20 @@ function ensureDirectory(directory: string): void {
  * path-valued flags become Windows paths. WSL Session terminals use
  * sessionWSLBridge.ts instead, a PowerShell bridge pinned to their Session.
  */
-function wslShimLines(execPath: string, cliPath: string): string[] {
+function wslInteropLines(name: string): string[] {
   return [
     'if [ -n "${WSL_DISTRO_NAME:-}" ]; then',
     "  if ! grep -qs '^enabled' /proc/sys/fs/binfmt_misc/WSLInterop /proc/sys/fs/binfmt_misc/WSLInterop-late; then",
-    '    echo "runpane: WSL interop is off in $WSL_DISTRO_NAME, so it cannot start Pane\'s Windows CLI. Nothing was run. Set enabled=true under [interop] in /etc/wsl.conf, then run wsl.exe --shutdown from Windows." >&2',
+    `    echo "${name}: WSL interop is off in $WSL_DISTRO_NAME, so it cannot start Pane's Windows ${name === 'runpane' ? 'CLI' : 'runtime'}. Nothing was run. Set enabled=true under [interop] in /etc/wsl.conf, then run wsl.exe --shutdown from Windows." >&2`,
     '    exit 126',
     '  fi',
     ...RUNPANE_WSL_PATH_FUNCTIONS.map(line => `  ${line}`),
+  ];
+}
+
+function wslShimLines(execPath: string, cliPath: string): string[] {
+  return [
+    ...wslInteropLines('runpane'),
     '  case "$PANE_DIR" in /*) PANE_DIR=$(pane_windows_path "$PANE_DIR") ;; esac',
     '  # Rebuild "$@" with path values converted; everything after -- passes through.',
     '  pane_count=$# pane_next= pane_rest=',
@@ -147,6 +158,60 @@ function wslShimLines(execPath: string, cliPath: string): string[] {
     `  ELECTRON_RUN_AS_NODE=1 exec "$pane_exe" ${shellQuote(cliPath)} "$@"`,
     'fi',
   ];
+}
+
+/** pane-node in WSL: the Windows binary reads Windows paths, so absolute and relative path arguments are converted. */
+function wslNodeShimLines(execPath: string): string[] {
+  return [
+    ...wslInteropLines('pane-node'),
+    '  pane_count=$#',
+    '  while [ "$pane_count" -gt 0 ]; do',
+    '    pane_arg=$1; shift; pane_count=$((pane_count - 1))',
+    '    case "$pane_arg" in /*|./*|../*) pane_arg=$(pane_windows_path "$pane_arg") ;; esac',
+    '    set -- "$@" "$pane_arg"',
+    '  done',
+    `  pane_exe=$(${WSLPATH} -u ${shellQuote(execPath)} 2>/dev/null)`,
+    `  if [ ! -x "$pane_exe" ]; then echo ${shellQuote(WSL_NODE_MISSING_MESSAGE)} >&2; exit 127; fi`,
+    '  WSLENV="${WSLENV:+$WSLENV:}ELECTRON_RUN_AS_NODE"; export WSLENV',
+    '  ELECTRON_RUN_AS_NODE=1 exec "$pane_exe" "$@"',
+    'fi',
+  ];
+}
+
+/** `pane-node <script> [args]`: runs a Node script with this Electron binary as Node, or node on PATH. */
+function posixNodeShim(execPath: string, platform: NodeJS.Platform): string {
+  return [
+    '#!/bin/sh',
+    `# ${PANE_MANAGED_SHIM_MARKER}: Pane rewrites this file at startup; edits are lost.`,
+    '# Runs a Node script with this Pane build\'s Electron binary as Node, or Node on PATH when that binary is gone.',
+    ...(platform === 'win32' ? wslNodeShimLines(execPath) : []),
+    `if [ -x ${shellQuote(execPath)} ]; then ELECTRON_RUN_AS_NODE=1 exec ${shellQuote(execPath)} "$@"; fi`,
+    'if command -v node >/dev/null 2>&1; then exec node "$@"; fi',
+    `echo ${shellQuote(NODE_MISSING_MESSAGE)} >&2`,
+    'exit 127',
+    '',
+  ].join('\n');
+}
+
+function windowsNodeShim(execPath: string): string {
+  const exe = execPath.replace(/%/g, '%%');
+  return [
+    '@echo off',
+    `rem ${PANE_MANAGED_SHIM_MARKER}: Pane rewrites this file at startup; edits are lost.`,
+    'setlocal',
+    `if not exist "${exe}" goto node`,
+    'set ELECTRON_RUN_AS_NODE=1',
+    `"${exe}" %*`,
+    'exit /b %ERRORLEVEL%',
+    ':node',
+    'where node >nul 2>nul || goto missing',
+    'node %*',
+    'exit /b %ERRORLEVEL%',
+    ':missing',
+    `echo ${NODE_MISSING_MESSAGE} 1>&2`,
+    'exit /b 1',
+    '',
+  ].join('\r\n');
 }
 
 function posixShim(appDirectory: string, execPath: string, cliPath: string, platform: NodeJS.Platform): string {
@@ -347,6 +412,10 @@ export function installRunpaneShim(options: InstallRunpaneShimOptions): RunpaneS
     return null;
   }
 
+  // pane-node is a convenience: a user's own file of that name stays, and runpane still works.
+  writeManagedFile(path.join(binDir, 'pane-node'), posixNodeShim(execPath, platform), PANE_MANAGED_SHIM_MARKER, 0o755);
+  if (platform === 'win32') writeManagedFile(path.join(binDir, 'pane-node.cmd'), windowsNodeShim(execPath), PANE_MANAGED_SHIM_MARKER, 0o755);
+
   const zshDotDir = path.join(options.appDirectory, 'shell', 'zsh');
   const bashDir = path.join(options.appDirectory, 'shell', 'bash');
   ensureDirectory(zshDotDir);
@@ -371,7 +440,8 @@ export function getRunpaneShimState(): RunpaneShimState | null {
 
 export function installRunpaneShimBestEffort(appDirectory: string): RunpaneShimState | null {
   try {
-    const state = installRunpaneShim({ appDirectory, bundledCliPath: defaultBundledRunpaneCliPath(), execPath: process.execPath });
+    // An AppImage's execPath is a per-launch mount; APPIMAGE is the stable file.
+    const state = installRunpaneShim({ appDirectory, bundledCliPath: defaultBundledRunpaneCliPath(), execPath: process.env.APPIMAGE || process.execPath });
     if (!state) console.warn('[runpane] Bundled CLI unavailable; terminals will use runpane from PATH if installed');
     return state;
   } catch (error) {

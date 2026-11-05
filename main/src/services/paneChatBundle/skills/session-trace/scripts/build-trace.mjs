@@ -2,7 +2,9 @@
 // Build a trace page (trace.html) and OpenTelemetry spans (trace.otlp.json) from a
 // Claude Code or Codex session log. No dependencies; Node 18+.
 //
-//   node build-trace.mjs --out DIR [--session FILE | --launch ID] [--codex-home DIR] [--title TEXT] [--back HREF] [--story FILE] [--outline]
+//   node build-trace.mjs --out DIR [--session FILE] [--codex-home DIR] [--title TEXT] [--back HREF] [--story FILE] [--outline]
+//   (--launch ID applies only to Agent Farm launches; in Pane, pass the worker's log with --session.)
+//   node build-trace.mjs --out DIR [--launch ID] [--codex-home DIR] [--title TEXT] [--back HREF] [--story FILE] [--outline]
 //
 // --outline prints one line per request (anchor, time, steps, first line) to pick key moments from.
 // --story FILE is JSON {"summary": "...", "moments": [{"turn": 12, "title": "...", "detail": "..."}]};

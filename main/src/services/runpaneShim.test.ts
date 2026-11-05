@@ -89,6 +89,20 @@ describe('installRunpaneShim', () => {
     expect(result.stdout.trim()).toBe('pane-runpane C:\\pane update');
   });
 
+  it.skipIf(process.platform === 'win32')('runs any script through pane-node, with Pane\'s binary or node on PATH', () => {
+    const script = path.join(root, 'hello.mjs');
+    fs.writeFileSync(script, "console.log('ran ' + process.argv.slice(2).join(' '));\n");
+    const state = install();
+    const result = spawnSync(path.join(state.binDir, 'pane-node'), [script, 'a b'], { encoding: 'utf8', env: { PATH: path.join(root, 'empty') } });
+    expect(result.stdout.trim()).toBe('ran a b');
+
+    const moved = installRunpaneShim({ appDirectory, bundledCliPath, execPath: path.join(root, 'moved', 'Pane'), platform: 'darwin' })!;
+    const viaNode = spawnSync(path.join(moved.binDir, 'pane-node'), [script], { encoding: 'utf8', env: { PATH: path.dirname(process.execPath) } });
+    expect(viaNode.stdout.trim()).toBe('ran');
+    const neither = spawnSync(path.join(moved.binDir, 'pane-node'), [script], { encoding: 'utf8', env: { PATH: path.join(root, 'empty') } });
+    expect(neither.status).toBe(127);
+  });
+
   it('rewrites only when content changes', () => {
     const state = install();
     const past = new Date('2020-01-01T00:00:00Z');

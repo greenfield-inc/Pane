@@ -1,6 +1,6 @@
 # Post-mortem
 
-A short HTML page for the person about a PR where something went wrong. The orchestrator writes it after the PR's review loop closes, or when the PR merges or closes unreviewed, and only when something went wrong: a worker timed out, a tab died, a permission or tool was missing, a step crashed, or a fix loop thrashed. A PR that went cleanly gets no post-mortem; its card and front page say "no issues hit". Standalone, with no orchestrator, the implementer writes it the same way at the end of its run.
+A short HTML page for the person about a PR where something went wrong. The orchestrator writes it after the PR's review loop closes, or when the PR merges or closes unreviewed, and only when something went wrong: a worker timed out, a tab died, a permission or tool was missing, a step crashed, or a fix loop thrashed. A PR that went cleanly gets no post-mortem; its card and front page say "no issues hit". Standalone, with no orchestrator, the implementation session writes it the same way at the end of its run.
 
 Its home is the PR's own artifact (`prepare-pr`'s companion page, or the local companion folder), linked from the item's front page, and noted on its Done entry on the status page. Gather it from the workers' status files (`failure` and `attempts`), the orchestrator's own events, and the traces. Lead with the outcome and whether the feature actually works, against the approved plan when there is one.
 

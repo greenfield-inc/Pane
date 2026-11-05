@@ -33,9 +33,9 @@ pass. If it fails, stop and say what failed; don't fall back to raw
 3. Wait with the one wait primitive. It exits when something happens.
 4. On wake, read the worker's report and its status file, then act: answer
    it, relay a question to the person, start the next worker, or resume one.
-   In a Pane Session, render the Session's status page after the first launch
-   and after each report ([`orchestrate-sessions`](../orchestrate-sessions/SKILL.md)
-   has the renderer).
+   In a Pane Session, keep the Session's status page current as
+   [`orchestrate-sessions`](../orchestrate-sessions/SKILL.md)' status-board
+   reference says.
 5. Wait again.
 
 ## One Pane per feature

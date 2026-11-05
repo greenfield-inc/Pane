@@ -1151,12 +1151,10 @@ if __name__ == "__main__":
       '## Node for bundled scripts',
       '',
       'Some bundled skills run a Node script, such as the Session status page',
-      'renderer. When `node` is not on PATH, run the script with Pane\'s own',
-      'runtime instead:',
-      '',
-      `- ${markdownCode(process.platform === 'win32'
-        ? `$env:ELECTRON_RUN_AS_NODE=1; & "${process.execPath}" <script> <args>`
-        : `ELECTRON_RUN_AS_NODE=1 ${quoteForDisplayedShellArg(process.execPath)} <script> <args>`)}`,
+      'renderer. When `node` is not on PATH, run the script with `pane-node`',
+      '(same arguments): Pane\'s own runtime, on PATH beside `runpane` in Pane',
+      `terminals and at ${markdownCode(path.join(appDirectory, 'bin', process.platform === 'win32' ? 'pane-node.cmd' : 'pane-node'))}.`,
+      ...(process.platform === 'win32' ? ['Git Bash and WSL use the extensionless `pane-node` beside it.'] : []),
       '',
       '## Wrong instance',
       '',
