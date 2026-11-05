@@ -441,7 +441,7 @@ function runWatchCli(runtime, args, paneDir, until, timeoutMs = 8_000, extraEnv 
   });
 }
 
-function runCliOnce(runtime, args, paneDir, timeoutMs = 20_000, extraEnv = {}) {
+function runCliOnce(runtime, args, paneDir, timeoutMs = 20_000, extraEnv = {}, input = undefined) {
   const command = runtime === 'npm' ? process.execPath : findPython();
   const commandArgs = runtime === 'npm' ? [npmCli, ...args] : ['-m', 'runpane', ...args];
   const env = {
@@ -454,7 +454,8 @@ function runCliOnce(runtime, args, paneDir, timeoutMs = 20_000, extraEnv = {}) {
   delete env.PANE_PANEL_ID;
   Object.assign(env, extraEnv);
   return new Promise((resolve, reject) => {
-    const child = childProcess.spawn(command, commandArgs, { cwd: rootDir, env, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = childProcess.spawn(command, commandArgs, { cwd: rootDir, env, stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'] });
+    if (input !== undefined) child.stdin.end(input);
     let stdout = '';
     let stderr = '';
     const timer = setTimeout(() => {
@@ -3674,7 +3675,7 @@ async function checkRepoSettingsParity() {
   const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
   const { runReposGet, runReposUpdate } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'localControl.js'));
   const settingsFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-repo-settings-')), 'settings.json');
-  fs.writeFileSync(settingsFile, JSON.stringify({ runScript: 'from file', worktreeFolder: '../wt', systemPrompt: null }));
+  fs.writeFileSync(settingsFile, JSON.stringify({ runScript: 'from file', worktreeFolder: '../wt', systemPrompt: null, envVars: { set: [{ key: 'FROM_FILE', source: 'plain', value: '1' }], remove: ['OLD'] } }));
   const script = (command, source) => ({ command, source });
   const settings = {
     name: 'Cura',
@@ -3687,7 +3688,13 @@ async function checkRepoSettingsParity() {
     buildScript: { value: 'pnpm install', fallback: script('conductor setup', 'conductor.json'), effective: script('pnpm install', 'Project Settings') },
     runScript: { value: null, fallback: script('pnpm dev\npnpm worker', 'conductor.json'), effective: script('pnpm dev\npnpm worker', 'conductor.json') },
     archiveScript: { value: null, fallback: null, effective: null },
+    envVars: [
+      { key: 'API_URL', source: 'plain', value: 'https://api.test' },
+      { key: 'GH_TOKEN', source: 'keychain', service: 'gh', account: 'me' },
+      { key: 'STRIPE_KEY', source: 'secret', project: 'stripe', name: 'STRIPE_SECRET_KEY' },
+    ],
   };
+  const stripeVar = { key: 'STRIPE_KEY', source: 'secret', project: 'stripe', name: 'STRIPE_SECRET_KEY' };
   const repo = { id: 7, name: 'Cura', path: '/repo/cura', active: false, sessionCount: 0 };
   const respond = (channel, request) => {
     if (channel === 'runpane:repos:get') return { ok: true, repo, settings };
@@ -3702,12 +3709,16 @@ async function checkRepoSettingsParity() {
     ['repos', 'update', '--repo', '7', '--from-json', settingsFile, '--run-script', 'from flag', '--name', '  Cura Monorepo ', '--dry-run'],
     // A value may start with "-" (a Markdown bullet), and an empty value clears.
     ['repos', 'update', '--repo', 'Cura', '--system-prompt', '- Use pnpm', '--run-script', '', '--dry-run', '--json'],
+    // --env replaces --from-json's set and keeps its remove; repeated --env arrays join.
+    ['repos', 'update', '--repo', 'Cura', '--from-json', settingsFile, '--env', JSON.stringify([stripeVar]), '--env', '[]', '--dry-run', '--json'],
+    ['repos', 'update', '--repo', 'Cura', '--env-remove', 'OLD,STALE', '--yes', '--json'],
   ];
   const failures = [
     [['repos', 'update', '--repo', 'Cura', '--run-script', 'pnpm dev'], /needs confirmation/],
     [['repos', 'update', '--repo', 'Cura', '--yes'], /at least one setting/],
     [['repos', 'update', '--build-script', 'pnpm install', '--yes'], /requires --repo/],
-    [['repos', 'update', '--repo', 'Cura', '--clear', 'env-vars', '--yes'], /Unknown setting "env-vars" for --clear/],
+    [['repos', 'update', '--repo', 'Cura', '--clear', 'bogus', '--yes'], /Unknown setting "bogus" for --clear/],
+    [['repos', 'update', '--repo', 'Cura', '--env', '{"key":"A"}', '--yes'], /--env must be a JSON array of variables/],
     [['repos', 'update', '--repo', 'Cura', '--run-script', 'pnpm dev', '--clear', 'run-script', '--yes'], /both sets and clears run-script/],
     [['repos', 'update', '--repo', 'Cura', '--run-script', '--json', '--yes'], /--run-script requires a value/],
   ];
@@ -3749,11 +3760,23 @@ async function checkRepoSettingsParity() {
     },
     {
       channel: 'runpane:repos:update',
-      request: { repo: '7', settings: { runScript: 'from flag', worktreeFolder: '../wt', systemPrompt: null, name: 'Cura Monorepo' }, dryRun: true },
+      request: {
+        repo: '7',
+        settings: { runScript: 'from flag', worktreeFolder: '../wt', systemPrompt: null, envVars: { set: [{ key: 'FROM_FILE', source: 'plain', value: '1' }], remove: ['OLD'] }, name: 'Cura Monorepo' },
+        dryRun: true,
+      },
     },
     {
       channel: 'runpane:repos:update',
       request: { repo: 'Cura', settings: { runScript: '', systemPrompt: '- Use pnpm' }, dryRun: true },
+    },
+    {
+      channel: 'runpane:repos:update',
+      request: { repo: 'Cura', settings: { runScript: 'from file', worktreeFolder: '../wt', systemPrompt: null, envVars: { set: [stripeVar], remove: ['OLD'] } }, dryRun: true },
+    },
+    {
+      channel: 'runpane:repos:update',
+      request: { repo: 'Cura', settings: { envVars: { remove: ['OLD', 'STALE'] } } },
     },
   ]);
   failures.forEach(([argv, pattern], index) => assert.match(errors[index], pattern, argv.join(' ')));
@@ -3761,7 +3784,8 @@ async function checkRepoSettingsParity() {
   assertIncludes(human.join('\n'), 'Build script (Project Settings, overrides conductor.json): pnpm install');
   assertIncludes(human.join('\n'), 'Run script (from conductor.json):\n    pnpm dev\n    pnpm worker');
   assertIncludes(human.join('\n'), 'Archive script: not set');
-  assertIncludes(stdout.join('\n'), 'Would update Cura: runScript, worktreeFolder, systemPrompt, name');
+  assertIncludes(human.join('\n'), 'Environment variables:\n  API_URL=https://api.test\n  GH_TOKEN from keychain item gh / me\n  STRIPE_KEY from Pane secret stripe/STRIPE_SECRET_KEY');
+  assertIncludes(stdout.join('\n'), 'Would update Cura: runScript, worktreeFolder, systemPrompt, envVars, name');
 
   const python = JSON.parse(runPythonSnippet(`
 import contextlib
@@ -3803,6 +3827,139 @@ print(json.dumps({"calls": calls, "stdout": stdout.getvalue(), "errors": errors}
   assert.deepStrictEqual(python.calls, calls);
   assert.strictEqual(python.stdout, `${stdout.join('\n')}\n`);
   failures.forEach(([argv, pattern], index) => assert.match(python.errors[index], pattern, `python ${argv.join(' ')}`));
+}
+
+async function checkSecretsParity() {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-secrets-'));
+  const secret = { project: 'stripe', name: 'STRIPE_SECRET_KEY', updatedAt: '2026-11-04T10:00:00.000Z', machine: 'studio' };
+  const listResult = { ok: true, secrets: [secret], storage: { kind: 'file', encrypted: false } };
+  const values = { STRIPE_SECRET_KEY: 'sk_test_canary', WEBHOOK_SECRET: 'whsec_canary' };
+  const respond = (frame) => {
+    const [request] = frame.args;
+    if (frame.channel === 'runpane:secrets:list') return listResult;
+    if (frame.channel === 'runpane:secrets:set') return { ok: true, replaced: true, secret };
+    if (frame.channel === 'runpane:secrets:delete') return { ok: true, deleted: { project: request.project, name: request.name } };
+    if (frame.channel === 'runpane:secrets:resolve') {
+      const names = request.names ?? Object.keys(values);
+      return { ok: true, values: Object.fromEntries(names.filter((name) => name in values).map((name) => [name, values[name]])) };
+    }
+    return request.secret.name === 'DECLINED' ? { status: 'declined' } : { status: 'saved', project: request.secret.project, name: request.secret.name };
+  };
+  // The child reports what it got: the injected variables, each --file's contents and mode, and its own path.
+  const probe = [
+    'const fs = require("fs");',
+    'const file = process.env.WEBHOOK_SECRET;',
+    'const mode = process.platform === "win32" ? "n/a" : (fs.statSync(file).mode & 0o777).toString(8);',
+    'process.stdout.write(JSON.stringify({ key: process.env.STRIPE_API_KEY, own: process.env.STRIPE_SECRET_KEY ?? null, file: fs.readFileSync(file, "utf8"), mode, path: file }));',
+    'process.exit(7);',
+  ].join(' ');
+  const runs = [
+    { args: ['secrets', 'list'] },
+    { args: ['secrets', 'list', '--project', 'stripe', '--json'] },
+    // One trailing CRLF is dropped; the value travels only in the request.
+    { args: ['secrets', 'set', '--project', 'stripe', '--name', 'STRIPE_SECRET_KEY', '--yes'], input: 'sk_test_canary\r\n' },
+    { args: ['secrets', 'set', '--project', 'stripe', '--name', 'STRIPE_SECRET_KEY', '--yes', '--json'], input: 'two\nlines\n' },
+    { args: ['secrets', 'delete', '--project', 'stripe', '--name', 'STRIPE_SECRET_KEY', '--yes'] },
+    { args: ['secrets', 'exec', '--project', 'stripe', '--env', 'STRIPE_API_KEY=STRIPE_SECRET_KEY', '--file', 'WEBHOOK_SECRET', '--', process.execPath, '-e', probe] },
+    { args: ['secrets', 'exec', '--project', 'stripe', '--', process.execPath, '-e', 'process.stdout.write(`${process.env.STRIPE_SECRET_KEY} ${process.env.WEBHOOK_SECRET}`)'] },
+    { args: ['secrets', 'request', '--project', 'stripe', '--name', 'STRIPE_SECRET_KEY', '--title', 'Stripe test secret key', '--reason', 'Run the webhook tests.'] },
+    { args: ['secrets', 'request', '--project', 'stripe', '--name', 'DECLINED', '--title', 'Stripe test secret key', '--reason', 'Run the webhook tests.', '--json'] },
+  ];
+  const outputs = { npm: [], pip: [] };
+  const frames = { npm: [], pip: [] };
+  try {
+    for (const runtime of ['npm', 'pip']) {
+      for (const { args, input } of runs) {
+        const run = await withFakeDaemon(paneDir, (frame) => {
+          frames[runtime].push({ channel: frame.channel, args: frame.args });
+          return { result: respond(frame) };
+        }, () => runCliOnce(runtime, args, paneDir, 20_000, { PANE_SESSION_ID: 'session-1', PANE_PANEL_ID: 'panel-1' }, input));
+        outputs[runtime].push({ code: run.code, stdout: run.stdout });
+      }
+    }
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
+  // --file paths are random; each wrapper must have removed its file once the command exited.
+  const EXEC_RUN = 5;
+  for (const runtime of ['npm', 'pip']) {
+    const report = JSON.parse(outputs[runtime][EXEC_RUN].stdout);
+    assert.ok(!fs.existsSync(report.path), `${runtime} secrets exec left its --file file behind`);
+    outputs[runtime][EXEC_RUN].stdout = JSON.stringify({ ...report, path: undefined });
+  }
+  assert.deepStrictEqual(outputs.pip, outputs.npm, 'Python and Node secrets commands printed different output');
+  assert.deepStrictEqual(frames.pip, frames.npm, 'Python and Node secrets commands sent different requests');
+  const [list, listJson, set, setJson, deleted, exec, execAll, saved, declined] = outputs.npm;
+  assert.strictEqual(list.stdout, 'stripe/STRIPE_SECRET_KEY  set 2026-11-04T10:00:00.000Z on studio\nThis machine has no OS keyring, so its secret values are stored unencrypted in a file only you can read.\n');
+  assert.deepStrictEqual(JSON.parse(listJson.stdout), listResult);
+  assert.strictEqual(set.stdout, 'Replaced stripe/STRIPE_SECRET_KEY\n');
+  assert.deepStrictEqual(JSON.parse(setJson.stdout), { ok: true, replaced: true, secret });
+  assert.strictEqual(deleted.stdout, 'Deleted stripe/STRIPE_SECRET_KEY\n');
+  assert.strictEqual(exec.code, 7, 'secrets exec returns the child\'s exit code');
+  assert.deepStrictEqual(JSON.parse(exec.stdout), {
+    key: 'sk_test_canary', own: null, file: 'whsec_canary', mode: process.platform === 'win32' ? 'n/a' : '600',
+  });
+  assert.deepStrictEqual(execAll, { code: 0, stdout: 'sk_test_canary whsec_canary' });
+  assert.deepStrictEqual(saved, { code: 0, stdout: 'Saved as stripe/STRIPE_SECRET_KEY\n' });
+  assert.deepStrictEqual(JSON.parse(declined.stdout), { status: 'declined' });
+  assert.deepStrictEqual(frames.npm.map(({ channel, args }) => ({ channel, args })), [
+    { channel: 'runpane:secrets:list', args: [{}] },
+    { channel: 'runpane:secrets:list', args: [{ project: 'stripe' }] },
+    { channel: 'runpane:secrets:set', args: [{ project: 'stripe', name: 'STRIPE_SECRET_KEY', value: 'sk_test_canary' }] },
+    { channel: 'runpane:secrets:set', args: [{ project: 'stripe', name: 'STRIPE_SECRET_KEY', value: 'two\nlines' }] },
+    { channel: 'runpane:secrets:delete', args: [{ project: 'stripe', name: 'STRIPE_SECRET_KEY' }] },
+    { channel: 'runpane:secrets:resolve', args: [{ project: 'stripe', names: ['STRIPE_SECRET_KEY', 'WEBHOOK_SECRET'] }] },
+    { channel: 'runpane:secrets:resolve', args: [{ project: 'stripe' }] },
+    {
+      channel: 'runpane:notify',
+      args: [{
+        ui: 'secret', title: 'Stripe test secret key', context: 'Run the webhook tests.', secret: { project: 'stripe', name: 'STRIPE_SECRET_KEY' },
+        caller: { paneId: 'session-1', panelId: 'panel-1', cwd: rootDir },
+      }],
+    },
+    {
+      channel: 'runpane:notify',
+      args: [{
+        ui: 'secret', title: 'Stripe test secret key', context: 'Run the webhook tests.', secret: { project: 'stripe', name: 'DECLINED' },
+        caller: { paneId: 'session-1', panelId: 'panel-1', cwd: rootDir },
+      }],
+    },
+  ]);
+  for (const { stdout } of [...outputs.npm.slice(0, 5), ...outputs.npm.slice(7)]) {
+    assert.ok(!stdout.includes('canary'), `runpane printed a secret value: ${stdout}`);
+  }
+
+  // Refusals happen before Pane is asked for anything, with the same code, message and next step in both wrappers.
+  const refusals = [
+    [['secrets', 'exec', '--project', 'stripe', '--env', 'PATH=STRIPE_SECRET_KEY', '--', 'true'], 'SECRET_RESERVED_NAME', undefined, /^PATH is set by Pane itself/],
+    [['secrets', 'exec', '--project', 'stripe', '--only', 'PANE_TOKEN', '--', 'true'], 'SECRET_RESERVED_NAME', undefined, /^PANE_TOKEN is set by Pane itself/],
+    [['secrets', 'exec', '--project', 'stripe', '--env', 'STRIPE_SECRET_KEY', '--', 'true'], 'SECRET_INVALID', undefined, /^--env must be VAR=NAME/],
+    [['secrets', 'exec', '--project', 'stripe', '--only', 'A', '--env', 'A=B', '--', 'true'], 'SECRET_INVALID', undefined, /^A is set twice/],
+    [['secrets', 'exec', '--project', 'stripe'], 'SECRET_INVALID', undefined, /needs a command after --/],
+    [['secrets', 'exec', '--', 'true'], 'SECRET_INVALID', undefined, /requires --project/],
+    [['secrets', 'set', '--project', 'stripe', '--name', 'K', '--yes'], 'SECRET_INVALID', '\n', /^The value on stdin is empty/],
+    [['secrets', 'set', '--project', 'stripe', '--name', 'K'], 'ERR_RUNPANE_CONFIRMATION_REQUIRED', 'value', /needs confirmation/],
+    [['secrets', 'request', '--project', 'stripe', '--name', 'K', '--title', 'Key'], 'SECRET_INVALID', undefined, /requires --reason\. Nothing was shown to the person\./],
+    [['secrets', 'set', '--project', 'stripe', '--name', 'K', '--value', 'x', '--yes'], 'ERR_RUNPANE_FAILED', '', /Unknown option for secrets set: --value/],
+  ];
+  const refusalDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-secrets-refusals-'));
+  try {
+    for (const [args, code, input, pattern] of refusals) {
+      const [node, python] = await Promise.all(['npm', 'pip'].map((runtime) => runCliOnce(runtime, [...args.slice(0, 2), '--json', ...args.slice(2)], refusalDir, 20_000, {}, input)));
+      assert.strictEqual(node.code, 1, `${args.join(' ')} should fail: ${node.stdout}${node.stderr}`);
+      const failure = JSON.parse(node.stdout).error;
+      assert.strictEqual(failure.code, code, args.join(' '));
+      assert.match(failure.message, pattern);
+      assert.deepStrictEqual(JSON.parse(python.stdout).error, failure, `Python and Node refuse ${args.join(' ')} differently`);
+    }
+  } finally {
+    fs.rmSync(refusalDir, { recursive: true, force: true });
+  }
+
+  const { main } = require(npmCli);
+  await assert.rejects(main(['workspace', 'studio', 'secrets', 'exec', '--project', 'stripe', '--', 'true']), {
+    message: 'runpane secrets exec runs on this machine only. On studio, use: runpane workspace studio exec -- runpane secrets exec --project stripe -- true',
+  });
 }
 
 async function checkLockParity() {
@@ -5250,6 +5407,9 @@ async function checkNotifyParity() {
     [{ answer: 'Redis', note: 'Keep it small.' }, 'Answer: Redis. Note: Keep it small.'],
     [{ approved: false }, 'Denied'],
     [{ delivered: 'inbox' }, 'Added to the Notify inbox.'],
+    // `notify --resume` on a secret card returns what `secrets request` would.
+    [{ status: 'saved', project: 'stripe', name: 'STRIPE_SECRET_KEY' }, 'Saved as stripe/STRIPE_SECRET_KEY'],
+    [{ status: 'declined' }, 'Declined'],
     [{ waiting: true, id: 'n-1', next: 'Call `runpane notify --resume n-1` now.' }, 'Still waiting (id n-1). Call `runpane notify --resume n-1` now.'],
   ];
   const frames = { npm: [], pip: [] };
@@ -5461,6 +5621,7 @@ async function runChecks() {
   await checkPanesCostParity();
   await checkPaneRenameParity();
   await checkRepoSettingsParity();
+  await checkSecretsParity();
   await checkLockParity();
   await checkLoopsParity();
   await checkOverviewReportsAndLocks();

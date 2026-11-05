@@ -1204,6 +1204,84 @@
       "--resume",
       "n-1",
       "--json"
+    ],
+    [
+      "secrets",
+      "list",
+      "--project",
+      "stripe",
+      "--json"
+    ],
+    [
+      "secrets",
+      "set",
+      "--project",
+      "stripe",
+      "--name",
+      "STRIPE_SECRET_KEY",
+      "--yes"
+    ],
+    [
+      "secrets",
+      "delete",
+      "--project",
+      "stripe",
+      "--name",
+      "STRIPE_SECRET_KEY",
+      "--yes",
+      "--json"
+    ],
+    [
+      "secrets",
+      "exec",
+      "--project",
+      "stripe",
+      "--only",
+      "A,B",
+      "--env",
+      "KEY=STRIPE_SECRET_KEY",
+      "--env=TOKEN=GH_TOKEN",
+      "--file",
+      "CERT",
+      "--",
+      "node",
+      "-e",
+      "run()",
+      "--json"
+    ],
+    [
+      "secrets",
+      "exec",
+      "--project",
+      "qa",
+      "sh",
+      "-c",
+      "echo ok"
+    ],
+    [
+      "secrets",
+      "request",
+      "--project",
+      "stripe",
+      "--name",
+      "STRIPE_SECRET_KEY",
+      "--title",
+      "Stripe test key",
+      "--reason",
+      "- for the webhook tests",
+      "--json"
+    ],
+    [
+      "repos",
+      "update",
+      "--repo",
+      "Pane",
+      "--env",
+      "[{\"key\":\"API_URL\",\"source\":\"plain\",\"value\":\"x\"}]",
+      "--env-remove",
+      "OLD,STALE",
+      "--yes",
+      "--json"
     ]
   ],
   "help": {

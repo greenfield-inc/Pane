@@ -110,7 +110,13 @@ runpane repos add --path /path/to/repo --name Pane --yes --json
 runpane repos get --repo Pane --json
 runpane repos update --repo Pane --build-script "pnpm install" --run-script "pnpm dev" --worktree-folder ../pane-worktrees --yes --json
 runpane repos update --repo Pane --clear run-script --yes --json
+runpane repos update --repo Pane --env '[{"key":"API_URL","source":"plain","value":"https://api.test"},{"key":"STRIPE_KEY","source":"secret","project":"stripe","name":"STRIPE_SECRET_KEY"}]' --env-remove OLD_TOKEN --yes --json
 runpane repos rename --repo 3 --name Lev --yes --json
+runpane secrets list --json
+printf %s "$VALUE" | runpane secrets set --project stripe --name STRIPE_SECRET_KEY --yes
+runpane secrets delete --project stripe --name STRIPE_SECRET_KEY --yes --json
+runpane secrets exec --project stripe --only STRIPE_SECRET_KEY -- pnpm test:webhooks
+runpane secrets request --project stripe --name STRIPE_SECRET_KEY --title "Stripe test secret key" --reason "Run the webhook tests against Stripe test mode." --json
 runpane panes list --repo active --json
 runpane panes cost --pane <pane-id> --json
 runpane panes create --repo active --name issue-252 --agent <agent> --prompt "Kick off the discussion skill for issue 252" --source agent --no-focus --wait-ready --yes --json
@@ -188,9 +194,11 @@ The wrapper must stream Pane stdout/stderr without reformatting because `pane --
 
 `runpane repos get` prints a saved repository's Project Settings. Each script shows its saved value, the fallback from the repository's config file, and the one Pane will run.
 
-`runpane repos update` changes a saved repository's Project Settings through the same save as the Project Settings dialog. It requires `--yes`, supports `--dry-run`, and clears settings with `--clear`.
+`runpane repos update` changes a saved repository's Project Settings through the same save as the Project Settings dialog. It requires `--yes`, supports `--dry-run`, clears settings with `--clear`, and adds, replaces or removes project environment variables with `--env` and `--env-remove`.
 
 `runpane repos rename` trims and sets a saved repository's display name, the same rename as the repository settings in the app, and returns the updated repository record.
+
+`runpane secrets` manages Pane secrets: named values, addressed as `<project>/<NAME>`, that every machine saved in Pane keeps a copy of. `list` shows names, times and machines only. `set` reads the value from stdin. `delete` removes one everywhere. `exec` runs a command with secrets in its environment and returns its exit code. `request` asks the person on a masked Notify card and returns only `saved` or `declined`. No command prints a value, and the MCP server has no tool that sets or reads one. These commands run on the machine itself, so `runpane workspace <machine> secrets ...` is refused; use `runpane workspace <machine> exec -- runpane secrets ...`.
 
 `runpane panes list` lists Pane sessions, optionally scoped to one saved repository.
 
@@ -299,8 +307,13 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `repos list`: List repositories saved in the running Pane app.
 - `repos add`: Register an existing git repository with the running Pane app.
 - `repos get`: Show a saved repository's Project Settings and the scripts Pane will run.
-- `repos update`: Change a saved repository's Project Settings: scripts, worktree folder, name, IDE command, and system prompt.
+- `repos update`: Change a saved repository's Project Settings: scripts, worktree folder, name, IDE command, system prompt, and environment variables.
 - `repos rename`: Rename a repository saved in the running Pane app.
+- `secrets list`: List the Pane secrets on this machine: project, name, and when and where each was set. Never shows a value.
+- `secrets set`: Save a Pane secret, adding or replacing it. Reads the value from stdin.
+- `secrets delete`: Delete a Pane secret from this machine and, through sync, from your other machines.
+- `secrets exec`: Run a command with Pane secrets in its environment. Nothing prints a value.
+- `secrets request`: Ask the person for a secret on a masked card. Pane saves what they type as a Pane secret and never returns it.
 - `panes list`: List Pane sessions in a saved repository.
 - `panes cost`: Report estimated token cost per Pane, with per-model breakdown and cache efficiency.
 - `workspace state`: Read one workspace snapshot of every Pane and CLI panel.
@@ -400,8 +413,13 @@ runpane mcp [--toolsets <name,...>] [--read-only]
 runpane repos list [--json] [--pane-dir <path>]
 runpane repos add --path <path> [--name <name>] [--json] [--yes] [--pane-dir <path>]
 runpane repos get [--repo <selector>] [--json] [--pane-dir <path>]
-runpane repos update --repo <selector> [--name <name>] [--build-script <script>] [--run-script <script>] [--archive-script <script>] [--worktree-folder <path>] [--open-ide-command <command>] [--system-prompt <text>] [--clear <setting,...>] [--from-json <path|->] --yes [--dry-run] [--json] [--pane-dir <path>]
+runpane repos update --repo <selector> [--name <name>] [--build-script <script>] [--run-script <script>] [--archive-script <script>] [--worktree-folder <path>] [--open-ide-command <command>] [--system-prompt <text>] [--env <json>] [--env-remove <name,...>] [--clear <setting,...>] [--from-json <path|->] --yes [--dry-run] [--json] [--pane-dir <path>]
 runpane repos rename --repo <selector> --name <name> --yes [--json] [--pane-dir <path>]
+runpane secrets list [--project <project>] [--json] [--pane-dir <path>]
+runpane secrets set --project <project> --name <name> --yes [--json] [--pane-dir <path>]
+runpane secrets delete --project <project> --name <name> --yes [--json] [--pane-dir <path>]
+runpane secrets exec --project <project> [--only <name,...>] [--env <VAR=NAME>]... [--file <name>]... [--pane-dir <path>] -- <command>...
+runpane secrets request --project <project> --name <name> --title <text> --reason <text> [--json] [--pane-dir <path>]
 runpane panes list [--repo <selector>] [--json] [--pane-dir <path>]
 runpane panes cost [--repo <selector>] [--pane <pane-id>] [--json] [--pane-dir <path>]
 runpane workspace state [--repo <selector>] [--json] [--pane-dir <path>]
@@ -525,8 +543,11 @@ Brief tools:
 - `repos list`: List repositories saved in the running Pane app.
 - `repos add`: Register an existing git repository with the running Pane app.
 - `repos get`: Show a saved repository's Project Settings and the scripts Pane will run.
-- `repos update`: Change a saved repository's Project Settings: scripts, worktree folder, name, IDE command, and system prompt.
+- `repos update`: Change a saved repository's Project Settings: scripts, worktree folder, name, IDE command, system prompt, and environment variables.
 - `repos rename`: Rename a repository saved in the running Pane app.
+- `secrets list`: List Pane secrets: project, name, time and machine. Never a value.
+- `secrets exec`: Run a command with Pane secrets in its environment.
+- `secrets request`: Ask the person for a secret on a masked card; returns saved or declined, never the value.
 - `panes list`: List Pane sessions, optionally scoped to a saved repository.
 - `panes cost`: Report estimated token cost per Pane, with per-model breakdown and cache efficiency.
 - `panes create`: 1 feature = 1 worktree = 1 branch = 1 Pane; reviews, audits, fixes and QA for it are tabs in that Pane. Create a Pane (a new worktree) only when the work's branch has no Pane yet; for review, audit, fix or QA on existing work use `panels create --pane <id>`.
@@ -659,6 +680,11 @@ These flags are consumed by local daemon-control commands:
 --open-ide-command <command>
 --system-prompt <text>
 --clear <setting,...>
+--env <VAR=NAME|json>
+--env-remove <name,...>
+--project <project>
+--only <name,...>
+--reason <text>
 --epoch <epoch>
 --ui <options|approve|ask|info>
 --context <text>

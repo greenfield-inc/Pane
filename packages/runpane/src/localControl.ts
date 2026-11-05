@@ -230,6 +230,12 @@ interface RepoScriptSetting {
   effective: RepoScriptSource | null;
 }
 
+/** A project environment variable as Pane returns it: never a secret's value. */
+type ProjectEnvVar =
+  | { key: string; source: 'plain'; value: string }
+  | { key: string; source: 'keychain'; service: string; account: string }
+  | { key: string; source: 'secret'; project: string; name: string };
+
 interface RepoSettings {
   name: string;
   path: string;
@@ -241,6 +247,8 @@ interface RepoSettings {
   buildScript: RepoScriptSetting;
   runScript: RepoScriptSetting;
   archiveScript: RepoScriptSetting;
+  /** Absent from a Pane older than project environment variables. */
+  envVars?: ProjectEnvVar[];
 }
 
 interface RepoGetResult {
@@ -1292,6 +1300,11 @@ const repoSettingsSchema: BoundarySchema<RepoSettings> = boundary.object({
   buildScript: repoScriptSettingSchema,
   runScript: repoScriptSettingSchema,
   archiveScript: repoScriptSettingSchema,
+  envVars: boundary.optional(boundary.array(boundary.union(
+    boundary.object({ key: boundary.string, source: boundary.literal('plain'), value: boundary.string }),
+    boundary.object({ key: boundary.string, source: boundary.literal('keychain'), service: boundary.string, account: boundary.string }),
+    boundary.object({ key: boundary.string, source: boundary.literal('secret'), project: boundary.string, name: boundary.string }),
+  ))),
 });
 const repoGetResultSchema: BoundarySchema<RepoGetResult> = boundary.object({
   ok: boundary.literal(true),
@@ -2182,10 +2195,38 @@ function buildRepoSettingsUpdate(parsed: ParsedArgs): RepoSettingsUpdate {
     if (value !== undefined) settings[setting.key] = value;
     if (clear) settings[setting.key] = null;
   }
+  applyEnvVarFlags(parsed, settings);
   if (Object.keys(settings).length === 0) {
-    throw invalidRepoSettings(`runpane repos update needs at least one setting: ${REPO_SETTINGS.map((setting) => setting.flag).join(', ')}, --clear <setting,...>, or --from-json <path|->.`);
+    throw invalidRepoSettings(`runpane repos update needs at least one setting: ${REPO_SETTINGS.map((setting) => setting.flag).join(', ')}, --env <json>, --env-remove <name,...>, --clear <setting,...>, or --from-json <path|->.`);
   }
   return settings;
+}
+
+/** --env and --env-remove as `envVars` operations; each flag replaces the same operation from --from-json. */
+function applyEnvVarFlags(parsed: ParsedArgs, settings: RepoSettingsUpdate): void {
+  if (parsed.envArgs === undefined && parsed.envRemove === undefined) return;
+  let envVars: JsonObject = {};
+  try {
+    envVars = { ...decodeBoundary(settings.envVars, boundary.jsonObject) };
+  } catch {
+    // No envVars (or a malformed one) in --from-json: the flags give the whole value.
+  }
+  if (parsed.envArgs !== undefined) {
+    envVars.set = parsed.envArgs.flatMap((text) => {
+      let value: JsonValue;
+      try {
+        value = decodeBoundary(JSON.parse(text), boundary.json);
+      } catch {
+        value = null;
+      }
+      if (!Array.isArray(value)) {
+        throw invalidRepoSettings('--env must be a JSON array of variables, such as [{"key":"API_URL","source":"plain","value":"https://api.test"}].');
+      }
+      return value;
+    });
+  }
+  if (parsed.envRemove !== undefined) envVars.remove = parsed.envRemove;
+  settings.envVars = envVars;
 }
 
 function printRepoSettings(repo: RepoSummary, settings: RepoSettings): void {
@@ -2206,6 +2247,13 @@ function printRepoSettings(repo: RepoSummary, settings: RepoSettings): void {
       : `from ${effective.source}`;
     const command = effective.command.includes('\n') ? `\n    ${effective.command.split('\n').join('\n    ')}` : ` ${effective.command}`;
     console.log(`${label} (${from}):${command}`);
+  }
+  if (settings.envVars === undefined) return;
+  console.log(`Environment variables:${settings.envVars.length === 0 ? ' none' : ''}`);
+  for (const variable of settings.envVars) {
+    if (variable.source === 'plain') console.log(`  ${variable.key}=${variable.value}`);
+    else if (variable.source === 'keychain') console.log(`  ${variable.key} from keychain item ${variable.service} / ${variable.account}`);
+    else console.log(`  ${variable.key} from Pane secret ${variable.project}/${variable.name}`);
   }
 }
 

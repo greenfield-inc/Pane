@@ -233,6 +233,57 @@ test('notify types its inputs, so a model passes choices as objects, and needs n
   );
 });
 
+test('agents reach secrets only through list, delete and request: no MCP tool sets or prints a value', async () => {
+  const { buildMcpTools } = require(dist('mcpTools.js'));
+  const names = buildMcpTools().map((tool) => tool.name).filter((name) => name.startsWith('secrets_')).sort();
+  assert.deepEqual(names, ['secrets_delete', 'secrets_list', 'secrets_request']);
+
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-mcp-'));
+  const listed = { ok: true, secrets: [{ project: 'stripe', name: 'STRIPE_SECRET_KEY', updatedAt: '2026-11-04T10:00:00.000Z', machine: 'studio' }], storage: { kind: 'keychain', encrypted: true } };
+  const saved = { status: 'saved', project: 'stripe', name: 'STRIPE_SECRET_KEY' };
+  try {
+    await withStubDaemon(paneDir, {
+      'runpane:secrets:list': listed,
+      'runpane:secrets:delete': { ok: true, deleted: { project: 'stripe', name: 'STRIPE_SECRET_KEY' } },
+      'runpane:notify': saved,
+    }, async (requests) => {
+      await withMcpClient(async (client) => {
+        const tools = (await client.listTools()).tools;
+        const request = tools.find((tool) => tool.name === 'secrets_request');
+        assert.deepEqual(request.inputSchema.required, ['project', 'name', 'title', 'reason']);
+        assert.ok(!('yes' in request.inputSchema.properties), 'secrets_request runs without yes, like notify');
+
+        const list = await client.callTool({ name: 'secrets_list', arguments: { project: 'stripe', paneDir } });
+        assert.deepEqual(list.structuredContent, listed);
+        assertMatchesAdvertisedSchema(tools.find((tool) => tool.name === 'secrets_list'), list.structuredContent);
+        const refused = await client.callTool({ name: 'secrets_delete', arguments: { project: 'stripe', name: 'STRIPE_SECRET_KEY', paneDir } });
+        assert.equal(refused.isError, true);
+        const deleted = await client.callTool({ name: 'secrets_delete', arguments: { project: 'stripe', name: 'STRIPE_SECRET_KEY', yes: true, paneDir } });
+        assert.notEqual(deleted.isError, true, deleted.content[0].text);
+        const answer = await client.callTool({
+          name: 'secrets_request',
+          arguments: { project: 'stripe', name: 'STRIPE_SECRET_KEY', title: 'Stripe test secret key', reason: 'Run the webhook tests.', paneDir },
+        });
+        assert.deepEqual(answer.structuredContent, saved);
+        assertMatchesAdvertisedSchema(request, answer.structuredContent);
+      }, { args: ['--toolsets', 'core,secrets'], clientName: 'cursor-agent', env: { PANE_SESSION_ID: '', PANE_PANEL_ID: '' } });
+      assert.deepEqual(requests.map(({ channel, args }) => ({ channel, args })), [
+        { channel: 'runpane:secrets:list', args: [{ project: 'stripe' }] },
+        { channel: 'runpane:secrets:delete', args: [{ project: 'stripe', name: 'STRIPE_SECRET_KEY' }] },
+        {
+          channel: 'runpane:notify',
+          args: [{
+            ui: 'secret', title: 'Stripe test secret key', context: 'Run the webhook tests.', secret: { project: 'stripe', name: 'STRIPE_SECRET_KEY' },
+            returnAfterMs: 50000, caller: { cwd: requests[2].args[0].caller.cwd, agent: 'Cursor' },
+          }],
+        },
+      ]);
+    });
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
+});
+
 test('notify tells Pane who is asking, and returns waiting early only for clients whose calls time out', async () => {
   const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-mcp-'));
   const waiting = { waiting: true, id: 'n-1', next: 'Call `runpane notify --resume n-1` now.' };
@@ -379,7 +430,9 @@ test('repos_get and repos_update read and change Project Settings, and an update
   const settings = {
     name: 'cura', path: '/work/cura', currentBranch: 'main', worktreeFolder: '../cura-worktrees', openIdeCommand: null, systemPrompt: null,
     configFile: 'conductor.json', buildScript: script('pnpm install', 'conductor setup'), runScript: script(null, 'pnpm dev'), archiveScript: script(null, null),
+    envVars: [{ key: 'API_URL', source: 'plain', value: 'https://api.test' }, { key: 'STRIPE_KEY', source: 'secret', project: 'stripe', name: 'STRIPE_SECRET_KEY' }],
   };
+  const stripeVar = { key: 'STRIPE_KEY', source: 'secret', project: 'stripe', name: 'STRIPE_SECRET_KEY' };
   const repo = { id: 2, name: 'cura', path: '/work/cura', active: false, environment: 'linux', sessionCount: 1 };
   const updated = { ok: true, changed: ['buildScript', 'runScript'], repo, settings };
   try {
@@ -394,7 +447,7 @@ test('repos_get and repos_update read and change Project Settings, and an update
         assert.equal(get.annotations.readOnlyHint, true);
         assert.equal(update.annotations.readOnlyHint, false);
         assert.deepEqual(update.inputSchema.required, ['repo']);
-        for (const input of ['buildScript', 'runScript', 'archiveScript', 'worktreeFolder', 'clear', 'fromJson', 'dryRun', 'yes']) {
+        for (const input of ['buildScript', 'runScript', 'archiveScript', 'worktreeFolder', 'env', 'envRemove', 'clear', 'fromJson', 'dryRun', 'yes']) {
           assert.ok(input in update.inputSchema.properties, `repos_update is missing ${input}`);
         }
 
@@ -409,7 +462,7 @@ test('repos_get and repos_update read and change Project Settings, and an update
 
         const changed = await client.callTool({
           name: 'repos_update',
-          arguments: { repo: 'cura', buildScript: 'pnpm install', runScript: 'pnpm dev', clear: 'archive-script', yes: true, paneDir },
+          arguments: { repo: 'cura', buildScript: 'pnpm install', runScript: 'pnpm dev', env: [stripeVar], envRemove: 'OLD', clear: 'archive-script', yes: true, paneDir },
         });
         assert.notEqual(changed.isError, true, changed.content[0].text);
         assert.deepEqual(changed.structuredContent, updated);
@@ -417,7 +470,10 @@ test('repos_get and repos_update read and change Project Settings, and an update
       });
       assert.deepEqual(requests.map(({ channel, args }) => ({ channel, args })), [
         { channel: 'runpane:repos:get', args: [{ repo: 'cura' }] },
-        { channel: 'runpane:repos:update', args: [{ repo: 'cura', settings: { buildScript: 'pnpm install', runScript: 'pnpm dev', archiveScript: null } }] },
+        {
+          channel: 'runpane:repos:update',
+          args: [{ repo: 'cura', settings: { buildScript: 'pnpm install', runScript: 'pnpm dev', archiveScript: null, envVars: { set: [stripeVar], remove: ['OLD'] } } }],
+        },
       ]);
     });
   } finally {
@@ -657,7 +713,7 @@ test('serves the core toolset by default, and named toolsets or read-only on req
     'agents_send', 'agents_start', 'agents_status', 'docs_read', 'docs_search', 'doctor', 'links_create',
     'loops_create', 'loops_delete', 'loops_list', 'loops_pause', 'loops_resume', 'loops_run', 'loops_update', 'notify',
     'panels_create', 'panels_input', 'panels_open', 'panes_adopt', 'panes_archive', 'panes_git_status', 'panes_list', 'panes_rename', 'panes_restore',
-    'repos_add', 'repos_list', 'repos_rename', 'sessions_associate', 'sessions_create', 'sessions_pin',
+    'repos_add', 'repos_list', 'repos_rename', 'secrets_request', 'sessions_associate', 'sessions_create', 'sessions_pin',
     'workspace_exec', 'workspace_list', 'workspace_read', 'workspace_state', 'workspace_write',
   ]);
   const git = await names(['--toolsets', 'git']);
@@ -665,6 +721,8 @@ test('serves the core toolset by default, and named toolsets or read-only on req
     'panes_commit', 'panes_fetch', 'panes_git_status', 'panes_pull', 'panes_push', 'panes_rebase_main',
     'panes_soft_reset', 'panes_squash_rebase', 'panes_stash', 'panes_stash_pop',
   ]);
+  const secrets = await names(['--toolsets', 'secrets']);
+  assert.deepEqual(secrets.map((tool) => tool.name).sort(), ['secrets_delete', 'secrets_list']);
   const readOnly = await names(['--toolsets', 'all', '--read-only']);
   assert.ok(readOnly.length > 0 && readOnly.every((tool) => tool.annotations.readOnlyHint));
   assert.ok(!readOnly.some((tool) => tool.name === 'panes_archive'));
