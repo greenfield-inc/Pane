@@ -111,5 +111,5 @@ export function systemKeychain(platform: string = process.platform): Keychain {
  * own service, so two Pane instances never share or delete each other's items.
  */
 export function paneKeychainService(appDirectory: string, homeDirectory: string = os.homedir()): string {
-  return path.resolve(appDirectory) === path.join(homeDirectory, '.pane') ? 'Pane' : `Pane (${path.resolve(appDirectory)})`;
+  return path.resolve(appDirectory) === path.resolve(homeDirectory, '.pane') ? 'Pane' : `Pane (${path.resolve(appDirectory)})`;
 }

@@ -83,7 +83,7 @@
         "build-mcp-bridge.js"
       ],
       "project": ["src/**/*.ts", "build-mcp-bridge.js"],
-      "ignoreUnresolved": ["/bin/sh"],
+      "ignoreUnresolved": ["/bin/sh", "/usr/bin/security"],
       "ignoreBinaries": [
         "fc-list",
         "system_profiler",

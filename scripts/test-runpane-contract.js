@@ -3874,7 +3874,7 @@ async function checkSecretsParity() {
           frames[runtime].push({ channel: frame.channel, args: frame.args });
           return { result: respond(frame) };
         }, () => runCliOnce(runtime, args, paneDir, 20_000, { PANE_SESSION_ID: 'session-1', PANE_PANEL_ID: 'panel-1' }, input));
-        outputs[runtime].push({ code: run.code, stdout: run.stdout });
+        outputs[runtime].push({ code: run.code, stdout: lf(run.stdout) });
       }
     }
   } finally {

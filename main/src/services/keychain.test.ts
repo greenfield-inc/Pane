@@ -1,3 +1,4 @@
+import path from 'path';
 import { describe, expect, it } from 'vitest';
 import { macKeychain, paneKeychainService, parseSecurityPassword, systemKeychain, type SecurityRunner } from './keychain';
 
@@ -44,6 +45,7 @@ describe('macOS keychain', () => {
 describe('Pane keychain service name', () => {
   it('is "Pane" for the default data directory and names any other one', () => {
     expect(paneKeychainService('/Users/me/.pane', '/Users/me')).toBe('Pane');
-    expect(paneKeychainService('/Users/me/.pane_test', '/Users/me')).toBe('Pane (/Users/me/.pane_test)');
+    // Named by the resolved path, which on Windows gains the current drive.
+    expect(paneKeychainService('/Users/me/.pane_test', '/Users/me')).toBe(`Pane (${path.resolve('/Users/me/.pane_test')})`);
   });
 });
