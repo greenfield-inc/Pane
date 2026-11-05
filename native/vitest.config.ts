@@ -2,7 +2,7 @@ import { fileURLToPath } from 'node:url';
 
 import { defineConfig } from 'vitest/config';
 
-// Unit tests cover plain TS modules only (no React Native imports).
+// Unit tests run in Node: a test that reaches React Native or Expo mocks those modules.
 export default defineConfig({
   resolve: {
     alias: {

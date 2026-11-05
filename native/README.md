@@ -62,7 +62,7 @@ To add projects and panes to the dev host, use the RunPane CLI against its data 
 ## Test it
 
 ```bash
-pnpm --filter @pane/native test        # Vitest: plain TS modules (src/**/*.test.ts)
+pnpm --filter @pane/native test        # Vitest in Node (src/**/*.test.ts); mocks React Native where a test reaches it
 pnpm --filter @pane/native typecheck
 ```
 
