@@ -268,7 +268,8 @@ async function runChild(command: string[], env: NodeJS.ProcessEnv): Promise<Chil
 /**
  * On Windows, npm, pnpm and npx are .cmd shims, which only cmd.exe can run. Finds the command the
  * way cmd.exe does (the current directory, then PATH, with each PATHEXT extension) and, for a .cmd
- * or .bat file, returns a cmd.exe invocation that passes every argument literally.
+ * or .bat file, returns a cmd.exe invocation that passes every argument literally. Keep the cmd quoting
+ * rules aligned with `quoteShellWord(word, 'cmd')` in main/src/services/agentChat/hostCommand.ts.
  */
 function windowsBatchCommand(command: string[], env: NodeJS.ProcessEnv): [string, string[], boolean] | undefined {
   if (process.platform !== 'win32') return undefined;

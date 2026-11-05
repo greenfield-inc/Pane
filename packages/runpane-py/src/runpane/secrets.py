@@ -265,7 +265,8 @@ def windows_batch_command(command: List[str]) -> Optional[str]:
 
     Finds the command the way cmd.exe does (the current directory, then PATH, with each PATHEXT
     extension) and, for a .cmd or .bat file, returns a cmd.exe command line that passes every
-    argument literally.
+    argument literally. Keep the cmd quoting rules aligned with quoteShellWord(word, 'cmd') in
+    main/src/services/agentChat/hostCommand.ts.
     """
     if not WINDOWS:
         return None
