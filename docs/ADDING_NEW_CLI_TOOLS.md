@@ -58,8 +58,11 @@ If the CLI owns its session ids, scrape them from PTY output via
 launch readiness cannot key on first PTY byte (e.g. shell traffic precedes the TUI),
 add a ready detector like `createCursorReadyDetector` and gate `signalCliReady` on it.
 
-OpenCode validates a `ses_*` id and durably persists it before spawning the PTY,
-then reuses that exact id with `--session`. Its idle composer gates readiness and
+OpenCode creates its own `ses_*` id on the first message and refuses `--session`
+for an id it did not create, so a new conversation starts bare. Pane saves the id
+from the line OpenCode prints after leaving its TUI (`Continue  opencode -s <id>`),
+persists it before the next spawn and resumes it with `--session`. Ids from Pane's
+earlier allocator (`ses_` + 32 lowercase hex) are dropped. Its idle composer gates readiness and
 once-only stdin prompt delivery; wrapped commands remain opaque. RunPane doctor
 checks the installed executable's session capability before reporting support.
 
@@ -117,8 +120,7 @@ OpenCode skill/MCP installation and retains its default `opencode --auto` behavi
 non-denied operations are auto-approved, not sandboxed.
 
 OpenCode Session launches must be supported direct commands; wrappers and custom
-resume templates are rejected. Saved IDs restore history when it exists, but an
-allocated ID does not establish history. Closing, archiving, switching, or PTY exit
+resume templates are rejected. Saved IDs restore history when it exists. Closing, archiving, switching, or PTY exit
 does not add a guarantee that shared-service work has stopped.
 
 ## 10. Tests are the spec

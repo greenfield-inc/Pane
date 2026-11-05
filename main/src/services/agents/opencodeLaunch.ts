@@ -24,8 +24,8 @@ interface OpenCodeLaunchCommand {
 /** Ids from Pane's earlier allocator (`ses_` + a dashless lowercase UUID). OpenCode never creates these, so they never resume. */
 const PANE_ALLOCATED_SESSION_ID = /^ses_[0-9a-f]{32}$/;
 
-/** OpenCode prints `Continue  opencode -s <id>` when its TUI exits. */
-const OPENCODE_CONTINUE_LINE = /\bopencode\s+(?:-s|--session)\s+(ses_[A-Za-z0-9]+)\b/g;
+/** The line OpenCode prints, alone, when its TUI exits: `Continue  opencode -s <id>`. */
+const OPENCODE_CONTINUE_LINE = /^[ \t]*Continue[ \t]+opencode[ \t]+-s[ \t]+(ses_[A-Za-z0-9]+)[ \t]*\r?$/gm;
 
 function isShellWhitespace(character: string): boolean {
   return character === ' ' || character === '\t';
@@ -181,7 +181,7 @@ function scanDirectOpenCodeTokens(command: string, windowsPaths = false): ShellT
   }
   const executable = tokens[executableIndex]?.value.replace(/\\/g, '/').split('/').pop()?.toLowerCase();
   if (executable !== 'opencode') {
-    throw new Error('OpenCode native launch contains an unsupported command wrapper; use an explicit wrapped launch');
+    throw new Error('OpenCode native launch contains an unsupported command wrapper; run `opencode` directly');
   }
   return tokens.slice(executableIndex);
 }

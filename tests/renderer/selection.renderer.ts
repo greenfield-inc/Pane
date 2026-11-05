@@ -60,6 +60,22 @@ test('OpenCode creation sends the API payload and keeps the named Session agent 
   expect(await page.evaluate(() => window.selectionTest.transportCalls().filter(call => call.method === 'orchestrationSessions.select').map(call => call.payload))).toEqual([{ sessionId: 'b' }, { sessionId: 'created' }]);
 });
 
+test('an OpenCode Session is created without app launch defaults it cannot use, which stay saved', async ({ page }) => {
+  await page.goto('/renderer-tests/selection.html?compact');
+  const defaults = { defaultSessionCommand: 'my-launcher run', defaultSessionResume: { mode: 'reported', initialTemplate: '{command}', resumeTemplate: '{command} --resume {sessionId}' } };
+  await page.evaluate(`window.electronAPI.config.update(${JSON.stringify(defaults)})`);
+  await page.reload();
+  await page.getByRole('button', { name: 'New Session', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Create Session', exact: true });
+  await dialog.getByTestId('create-session-agent-opencode').click();
+  await dialog.getByRole('button', { name: 'Create Session', exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  const calls = await page.evaluate(() => window.selectionTest.transportCalls());
+  expect(calls.filter(call => call.method === 'orchestrationSessions.create').map(call => call.payload))
+    .toEqual([expect.objectContaining({ agent: 'opencode', launchCommand: '', customResume: null })]);
+  expect(calls.filter(call => call.method === 'config.update').map(call => call.payload)).toEqual([{ defaultOrchestratorAgent: 'opencode' }]);
+});
+
 test('a refused Session create leaves the saved Session defaults unchanged', async ({ page }) => {
   await page.goto('/renderer-tests/selection.html?compact');
   await page.getByRole('button', { name: 'New Session', exact: true }).click();
