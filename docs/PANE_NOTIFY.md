@@ -22,6 +22,9 @@ optional `context` shown under **Details** and in the round.
 
 When Notify is off or Pane isn't running, the result is
 `{unavailable, next}` and the agent asks in its terminal as it does today.
+For an API key, token or password, agents call `secrets_request` (or
+`runpane secrets request`), never `ask`. When that returns `unavailable`, the
+agent asks you to save the secret in Pane under Settings > Secrets.
 
 ```sh
 runpane notify --ui options --title "Which session store should the refactor use?" \

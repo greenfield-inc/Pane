@@ -517,6 +517,7 @@ test('conforms to MCP 2026-07-28 on the wire: discovery, tool shapes, errors, on
   assert.deepEqual(Object.keys(discover.capabilities).sort(), ['resources', 'tools']);
   assert.equal(discover._meta['io.modelcontextprotocol/serverInfo'].name, 'pane');
   assert.ok(discover.instructions.length > 0);
+  assert.match(discover.instructions, /For an API key, token or password, call `secrets_request` \(or `runpane secrets request`\), never `ask`\./);
 
   const list = responses.get(2).result;
   assert.equal(list.resultType, 'complete');

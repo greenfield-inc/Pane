@@ -60,6 +60,8 @@ The core set is built around the three jobs agents most often need, each finishe
 
 `notify` asks the person a question, or tells them something, on screen wherever they are, and returns their answer as the tool result. `ui` picks the look: `options` (1 to 9 `choices`; returns `{answer, note?}` with the chosen label), `approve` (returns `{approved, note?}`), `ask` (returns `{answer}`), or `info` (returns `{delivered}` at once). `choices`, `suggestions` and `action` are typed arrays and objects in the input schema. It needs no `yes`. When Pane is not running, Notify is off, or the Pane is too old to have notify, it returns `{unavailable, next}` and the agent asks in its terminal instead.
 
+For an API key, token or password, agents call `secrets_request`, never `notify` with `ask`. The person enters the value on a secret card, Pane saves it as a [Pane secret](PANE_SECRETS.md), and the result is only `{status: "saved", project, name}` or `{status: "declined"}`. When it returns `unavailable`, the agent asks the person to save the secret in Pane under Settings > Secrets.
+
 A question can wait for hours, and each client limits a tool call differently:
 
 - While any call runs, the server sends a `notifications/progress` about every minute when the request carried a progress token. That keeps Claude Code's 30-minute idle window for stdio servers open.
@@ -174,7 +176,7 @@ A few flags are left out. `--json` is always passed. `--follow` and `--until-eve
 
 ## Confirmation
 
-Mutating tools keep the CLI's confirmation rule. Every command whose usage includes `--yes` gets a `yes` input; without `yes: true`, the call fails with the CLI's own refusal and changes nothing. `workspace_exec` and `workspace_write` have no `--yes` in the CLI, so the server asks for `yes: true` itself and refuses the call before anything runs. `notify`, `report`, and the `sessions_*` and lock tools have no `yes`. Tools are also annotated with `readOnlyHint`, so clients can auto-approve read-only tools and prompt for the rest.
+Mutating tools keep the CLI's confirmation rule. Every command whose usage includes `--yes` gets a `yes` input; without `yes: true`, the call fails with the CLI's own refusal and changes nothing. `workspace_exec` and `workspace_write` have no `--yes` in the CLI, so the server asks for `yes: true` itself and refuses the call before anything runs. `notify`, `secrets_request`, `report`, and the `sessions_*` and lock tools have no `yes`. Tools are also annotated with `readOnlyHint`, so clients can auto-approve read-only tools and prompt for the rest.
 
 ## Agent guidance
 

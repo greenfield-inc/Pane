@@ -50,6 +50,7 @@ describe('Pane Notify instructions in the agents\' user-level files', () => {
     expect(written.startsWith(`${own}${BEGIN}\r\n## Pane\r\n`)).toBe(true);
     expect(written).toContain('\r\n## Pane Notify\r\n');
     expect(written).toContain("call the `pane` MCP's `notify` instead of asking in the terminal");
+    expect(written).toContain('- For an API key, token or password, call `secrets_request` (or `runpane secrets request`), never `ask`.\r\n');
     expect(written.endsWith(`${END}\r\n`)).toBe(true);
     // Codex's folder had no AGENTS.md, so Pane created one holding only the block.
     expect(text(codexFile).startsWith(BEGIN)).toBe(true);

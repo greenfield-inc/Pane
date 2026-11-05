@@ -19975,7 +19975,7 @@ export const RUNPANE_CONTRACT = {
       "",
       "1 feature = 1 worktree = 1 branch = 1 Pane; reviews, audits, fixes and QA for it are tabs in that Pane. Open later agents with `runpane panels create --pane <id>` (MCP: `panels_create` or `agents_start` with `pane`), not a new Pane.",
       "",
-      "When you need the person (a choice, an approval, a short answer), call the `notify` MCP tool (or `runpane notify`) instead of asking in the terminal. If it returns `waiting`, call it again with `resume`; if it returns `unavailable`, ask in the terminal.",
+      "When you need the person (a choice, an approval, a short answer), call the `notify` MCP tool (or `runpane notify`) instead of asking in the terminal. If it returns `waiting`, call it again with `resume`; if it returns `unavailable`, ask in the terminal. For an API key, token or password, call `secrets_request` (or `runpane secrets request`), never `ask`; if that returns `unavailable`, ask the person to save it in Pane under Settings > Secrets.",
       "",
       "CLI: `npm i -g runpane` (or `npx --yes runpane@latest`), then `runpane doctor --json`. Full command reference: `runpane agent-context --json`.",
       "",
@@ -19986,10 +19986,11 @@ export const RUNPANE_CONTRACT = {
         "Ask only what you can't find out yourself.",
         "Put related questions in one card.",
         "Send `info` rarely, only for what the person must know now.",
-        "Keep titles short and choices to a few words."
+        "Keep titles short and choices to a few words.",
+        "For an API key, token or password, call `secrets_request` (or `runpane secrets request`), never `ask`."
       ],
       "cardRule": "The person is juggling many tasks and has lost the thread. In plain words, say what the work is for (the outcome, not the file), what just happened, and what you need. For a decision, give the options and what each one means. Pane already shows which Pane and agent sent it.",
-      "results": "`waiting` means call `notify` again with `resume`; `unavailable` means ask in the terminal.",
+      "results": "`waiting` means call `notify` again with `resume`. `unavailable` means ask in the terminal; for a secret, ask the person to save it in Pane under Settings > Secrets.",
       "examples": [
         {
           "name": "Needs a decision",
