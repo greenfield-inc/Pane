@@ -64,7 +64,7 @@ startup; no transcript or workspace files are deleted by this migration.
 Sessions use the same built-in launch presets and saved custom commands as
 ordinary project/worktree panels, including custom arguments. The application
 default seeds new Sessions. Creating a Session remembers its launch command and
-arguments for the next creation; cancelling leaves that default unchanged.
+arguments for the next creation; cancelling, or a create Pane refuses, leaves that default unchanged.
 Selecting the agent default clears the remembered custom command. Each Session saves its own launch configuration
 and behavior profile. Changing defaults does not overwrite existing Sessions.
 Launch changes take effect on the next explicit restart.
@@ -82,6 +82,16 @@ command resume config, or Agent Farm's resume contract (see
 instruction discovery; apart from that one Agent Farm exception, Pane does not
 infer flags from a wrapper name. A user command that explicitly starts work
 remains the user's choice.
+
+An OpenCode Session runs `opencode` directly: its launch command may add
+arguments, assignments or an `env NAME=value` prefix, but not a wrapper
+(`bash -c opencode`), a wrapped launch or a custom command resume. Pane refuses
+those before anything starts, with `ERR_SESSION_OPENCODE_LAUNCH`. An app default
+command or custom resume that doesn't suit OpenCode is left out when a Session
+is created with the OpenCode agent. Pane resumes the conversation id OpenCode
+prints when it exits (`Continue  opencode -s <id>`); a conversation still open
+when Pane quits has no saved id yet and starts fresh. Loops run Claude, Codex or
+Cursor, so the Loop editor doesn't offer OpenCode Sessions.
 
 Each Session owns a stable folder at `<PANE_DIR>/sessions/<session-id>/` for
 notes, plans, attachments, generated instructions, and artifacts. Renaming,
@@ -139,6 +149,9 @@ Choose a session ID source and provide first-launch and resume templates:
 
 - **Claude:** Pane allocates a UUID and resumes it only when its transcript exists.
 - **Codex / Cursor:** Pane captures the native resume ID from terminal output.
+  OpenCode does the same without this setting (see
+  [Launch configuration and profile](#launch-configuration-and-profile)); OpenCode
+  Sessions refuse custom command resume.
 - **Pane allocates an ID:** for other CLIs that accept a caller-provided ID.
 - **CLI reports its ID:** the CLI or wrapper prints a standalone newline-terminated
   `PANE_AGENT_SESSION_ID=your-session-id` line. IDs may contain letters, digits,

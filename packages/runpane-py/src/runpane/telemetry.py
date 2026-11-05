@@ -179,8 +179,23 @@ def build_wrapper_telemetry_properties(
     return properties
 
 
+# Polling and status commands agents run in loops: their failures are routine and send nothing.
+QUIET_COMMANDS = frozenset({
+    "panes list", "panels wait", "watch", "panes archive", "workspace state", "agents status", "doctor",
+})
+
+
+def _is_expected_failure(context: WrapperTelemetryContext) -> bool:
+    """Install and update failures always report; elsewhere quiet commands and `not_found` are expected outcomes."""
+    if context.get("resolved_command") in {"install", "update"}:
+        return False
+    return context.get("command") in QUIET_COMMANDS or context.get("failure_category") == "not_found"
+
+
 def track_wrapper_event(event: str, context: WrapperTelemetryContext) -> None:
     if _telemetry_disabled():
+        return
+    if event == "runpane_wrapper_command_failed" and _is_expected_failure(context):
         return
     try:
         status, config = _read_config(os.path.join(_app_directory(), "config.json"))

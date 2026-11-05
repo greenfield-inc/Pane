@@ -1091,8 +1091,22 @@ export class TerminalPanelManager extends EventEmitter {
     const firstLineOnly = resume?.source === 'agent-farm';
     if (firstLineOnly && terminal.reportedSessionIdLocked) return;
 
+    let scraped = output;
+    if (!resume && terminal.agentType === 'opencode') {
+      // OpenCode prints its exit line after leaving its full-screen TUI; text shown inside the TUI
+      // (model replies, another tab's output) never names this tab's conversation.
+      if (terminal.isAlternateScreen) {
+        terminal.agentSessionScrapeBuffer = '';
+        return;
+      }
+      const leftTui = output.lastIndexOf('\x1b[?1049l');
+      if (leftTui !== -1) {
+        terminal.agentSessionScrapeBuffer = '';
+        scraped = output.slice(leftTui);
+      }
+    }
     terminal.agentSessionScrapeBuffer = trimAnsiSafe(
-      terminal.agentSessionScrapeBuffer + output,
+      terminal.agentSessionScrapeBuffer + scraped,
       2000
     );
 
