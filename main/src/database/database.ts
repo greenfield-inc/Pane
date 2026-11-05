@@ -4886,6 +4886,18 @@ export class DatabaseService {
 
   // Panel rows never carry terminal bytes (see panel_buffers), so one query
   // serves both startup summaries and full restoration reads.
+  /**
+   * Each terminal tab's pause mark (its JSON, or null when running), read with one indexed query
+   * instead of parsing every tab's state. One Pane when `sessionId` is given, else every Pane.
+   */
+  getTerminalPauseMarks(sessionId?: string): Array<{ session_id: string; paused: string | null }> {
+    const sql = "SELECT session_id, json_extract(state, '$.customState.paused') AS paused FROM tool_panels WHERE type = 'terminal'";
+    // SAFETY: This fixed SQLite query projection matches the declared row type at this database boundary.
+    return (sessionId === undefined
+      ? this.db.prepare(sql).all()
+      : this.db.prepare(`${sql} AND session_id = ?`).all(sessionId)) as Array<{ session_id: string; paused: string | null }>;
+  }
+
   getPanelsForSession(sessionId: string): ToolPanel[] {
     // SAFETY: This fixed SQLite query projection matches the declared row type at this database boundary.
     const rows = this.db
