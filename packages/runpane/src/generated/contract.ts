@@ -2485,7 +2485,7 @@ export const RUNPANE_CONTRACT = {
       },
       {
         "name": "--force",
-        "description": "Archive even if the pane's branch has uncommitted, untracked, or unpushed changes or one of its agents is mid-turn; for lock release, release another owner's lock."
+        "description": "Archive even if the pane's branch has uncommitted, untracked, or unpushed changes, one of its agents is mid-turn, or a tab holds unsent input; for lock release, release another owner's lock."
       },
       {
         "name": "--remove-worktree",
@@ -3139,12 +3139,12 @@ export const RUNPANE_CONTRACT = {
         "  runpane panes archive --pane <pane-id> [--source user|agent] [--force] [--remove-worktree] [--dry-run] --yes [--json]",
         "  runpane panes archive --session <id|name> --merged [--remove-worktree] [--source user|agent] [--dry-run] --yes [--json]",
         "",
-        "Archives a Pane (session) exactly like the UI Archive action, including removal of its Pane-managed git worktree. Refreshes the configured upstream before checking for unpushed commits and reports exact commit evidence. When the branch has no upstream or its upstream is gone, a merged GitHub pull request whose head is HEAD (found with `gh`) counts as pushed. Refuses unsafe archives unless --force is passed. An adopted worktree is kept unless --remove-worktree is passed, which applies the same safety check and removal. The local branch is always kept. With --session and --merged, archives every Pane associated with the Session whose work is clean and pushed or merged, and reports a reason for each Pane it skips. Use --dry-run to print the evidence without mutating Pane state. Refuses a Pane with an agent mid-turn or waiting for an answer (agent-busy) unless --force is passed; the --session sweep skips it.",
+        "Archives a Pane (session) exactly like the UI Archive action, including removal of its Pane-managed git worktree. Refreshes the configured upstream before checking for unpushed commits and reports exact commit evidence. When the branch has no upstream or its upstream is gone, a merged GitHub pull request whose head is HEAD (found with `gh`) counts as pushed. Refuses unsafe archives unless --force is passed. An adopted worktree is kept unless --remove-worktree is passed, which applies the same safety check and removal. The local branch is always kept. With --session and --merged, archives every Pane associated with the Session whose work is clean and pushed or merged, and reports a reason for each Pane it skips. Use --dry-run to print the evidence without mutating Pane state. Refuses a Pane with an agent mid-turn or waiting for an answer (agent-busy), or with a tab holding unsent composer text or unsaved editor edits (unsent-input), unless --force is passed; the --session sweep skips it.",
         "",
         "Options:",
         "  --pane <pane-id>               Pane/session id to archive",
         "  --source <user|agent>          Mark mutation source",
-        "  --force                        Archive even if the pane has uncommitted, untracked, or unpushed changes or a busy agent",
+        "  --force                        Archive even if the pane has uncommitted, untracked, or unpushed changes, a busy agent, or unsent input",
         "  --remove-worktree              Also check and remove an adopted Pane's worktree (the branch is kept)",
         "  --session <id|name>            Archive the Panes associated with this Session (requires --merged)",
         "  --merged                       Only archive Panes that are clean and pushed, or merged via a PR",
@@ -4903,7 +4903,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane panes archive --pane <pane-id> [--source user|agent] [--force] [--remove-worktree] [--dry-run] --yes [--json]",
         "  runpane panes archive --session <id|name> --merged [--remove-worktree] [--source user|agent] [--dry-run] --yes [--json]",
         "",
-        "Archives a Pane (session) exactly like the UI Archive action, including removal of its Pane-managed git worktree. Refreshes the configured upstream before checking for unpushed commits and reports exact commit evidence. When the branch has no upstream or its upstream is gone, a merged GitHub pull request whose head is HEAD (found with `gh`) counts as pushed. Refuses unsafe archives unless --force is passed. An adopted worktree is kept unless --remove-worktree is passed, which applies the same safety check and removal. The local branch is always kept. With --session and --merged, archives every Pane associated with the Session whose work is clean and pushed or merged, and reports a reason for each Pane it skips. Use --dry-run to print the evidence without mutating Pane state. Refuses a Pane with an agent mid-turn or waiting for an answer (agent-busy) unless --force is passed; the --session sweep skips it.",
+        "Archives a Pane (session) exactly like the UI Archive action, including removal of its Pane-managed git worktree. Refreshes the configured upstream before checking for unpushed commits and reports exact commit evidence. When the branch has no upstream or its upstream is gone, a merged GitHub pull request whose head is HEAD (found with `gh`) counts as pushed. Refuses unsafe archives unless --force is passed. An adopted worktree is kept unless --remove-worktree is passed, which applies the same safety check and removal. The local branch is always kept. With --session and --merged, archives every Pane associated with the Session whose work is clean and pushed or merged, and reports a reason for each Pane it skips. Use --dry-run to print the evidence without mutating Pane state. Refuses a Pane with an agent mid-turn or waiting for an answer (agent-busy), or with a tab holding unsent composer text or unsaved editor edits (unsent-input), unless --force is passed; the --session sweep skips it.",
         "",
         "Options:",
         "  --pane <pane-id>",
@@ -16784,7 +16784,7 @@ export const RUNPANE_CONTRACT = {
       "panes archive": {
         "name": "panes archive",
         "summary": "Archive a Pane (session) exactly like the UI Archive action, including safe removal of its Pane-managed git worktree, or archive every merged Pane in a Session.",
-        "details": "Use this to close out a Pane once its PR has merged. The safety check refreshes the configured upstream before comparing it to HEAD and includes exact unpushed commit IDs and subjects. When the branch has no upstream or its upstream is gone (GitHub deletes merged branches), a merged pull request whose head is HEAD counts as pushed, so squash-merged branches archive without --force. Refuses unsafe archive operations unless --force is used. Use --dry-run to inspect the same evidence without mutating Pane state. Use --session <id|name> --merged to close out every finished Pane of a Session at once. Archive also refuses a Pane with an agent mid-turn or waiting for an answer (`agent-busy`, listed in `safetyCheck.busyAgents`) unless --force is used, since archiving stops it.",
+        "details": "Use this to close out a Pane once its PR has merged. The safety check refreshes the configured upstream before comparing it to HEAD and includes exact unpushed commit IDs and subjects. When the branch has no upstream or its upstream is gone (GitHub deletes merged branches), a merged pull request whose head is HEAD counts as pushed, so squash-merged branches archive without --force. Refuses unsafe archive operations unless --force is used. Use --dry-run to inspect the same evidence without mutating Pane state. Use --session <id|name> --merged to close out every finished Pane of a Session at once. Archive also refuses a Pane with an agent mid-turn or waiting for an answer (`agent-busy`, listed in `safetyCheck.busyAgents`), or with a tab holding unsent composer text or unsaved editor edits (`unsent-input`, listed in `safetyCheck.unsentInput`), unless --force is used, since archiving stops the agent or loses the input.",
         "requiresPaneDaemon": true,
         "mutates": true,
         "arguments": [
@@ -16803,7 +16803,7 @@ export const RUNPANE_CONTRACT = {
           {
             "name": "--force",
             "required": false,
-            "description": "Archive even if the pane's branch has uncommitted, untracked, or unpushed changes, or one of its agents is mid-turn or waiting for an answer (archiving stops it)."
+            "description": "Archive even if the pane's branch has uncommitted, untracked, or unpushed changes, one of its agents is mid-turn or waiting for an answer (archiving stops it), or a tab holds unsent input (archiving loses it)."
           },
           {
             "name": "--remove-worktree",

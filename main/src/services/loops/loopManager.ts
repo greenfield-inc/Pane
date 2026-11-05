@@ -14,7 +14,7 @@ import type { LoopRepository, StoredLoop } from './loopRepository';
 import type { Logger } from '../../utils/logger';
 
 /** The note on an old run whose Pane was not archived. */
-const KEPT_RUN_NOTE = 'Kept because the run Pane has uncommitted or unpushed work. Archive it yourself when you\'re done.';
+const KEPT_RUN_NOTE = 'Kept because the run Pane has unfinished work (a busy agent, unsent input, or uncommitted or unpushed changes). Archive it yourself when you\'re done.';
 
 /** The longest the timer sleeps, so a changed clock or a slept laptop is noticed within the grace period. */
 const MAX_SLEEP_MS = 60 * 1000;
@@ -28,7 +28,7 @@ export type LoopRunStarter = (loop: StoredLoop, slotAtMs: number) => Promise<{ s
 export interface LoopManagerOptions {
   repo: LoopRepository;
   startRun: LoopRunStarter;
-  /** Archive a run Pane that fell out of the kept runs. False when Pane refused, to keep uncommitted or unpushed work. */
+  /** Archive a run Pane that fell out of the kept runs. False when Pane refused, to keep unfinished work. */
   archiveRun: (sessionId: string) => Promise<boolean>;
   projectExists: (projectId: number) => boolean;
   /**
@@ -223,7 +223,7 @@ export class LoopManager {
 
   /**
    * Archive the Panes of runs past the kept ten, and drop each row once its Pane
-   * is gone. Rows without a Pane (Session loop runs, failures, skips) just go. A Pane kept for its uncommitted or unpushed work keeps its row, with a note, so the
+   * is gone. Rows without a Pane (Session loop runs, failures, skips) just go. A Pane kept for its unfinished work keeps its row, with a note, so the
    * loop still links to it. Trimming never fails a run.
    */
   private trim(loopId: string): void {
@@ -248,7 +248,7 @@ export class LoopManager {
           if (archived) {
             repo.deleteRun(run.id);
           } else {
-            logger?.info(`[Loops] Kept old run Pane ${sessionId}: it has uncommitted or unpushed work.`);
+            logger?.info(`[Loops] Kept old run Pane ${sessionId}: it has unfinished work (a busy agent, unsent input, or uncommitted or unpushed changes).`);
             repo.finishRun(run.id, { status: run.status, error: KEPT_RUN_NOTE, sessionId });
           }
         }, error => {

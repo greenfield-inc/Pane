@@ -298,7 +298,7 @@ export async function prepareLoopSession(
   return session.id;
 }
 
-/** Archive an old run Pane the way `runpane panes archive` does. False when uncommitted or unpushed work blocked it. */
+/** Archive an old run Pane the way `runpane panes archive` does. False when unfinished work (a busy agent, unsent input, or uncommitted or unpushed changes) blocked it. */
 export async function archiveLoopRun(commandRegistry: PaneCommandRegistry, sessionId: string): Promise<boolean> {
   const result = decodeBoundary(await commandRegistry.invoke('runpane:panes:archive', [{ paneId: sessionId, source: 'agent' }]), paneArchiveResultSchema);
   return result.blocked === undefined;

@@ -3317,7 +3317,7 @@ export async function runPanesArchive(parsed: ParsedArgs): Promise<number> {
   if (parsed.dryRun) request.dryRun = true;
   if (parsed.removeWorktree) request.removeWorktree = true;
 
-  await confirmPaneArchive(parsed, `Archive pane ${request.paneId}${request.force ? ' (including any uncommitted or unpushed work)' : ''}`);
+  await confirmPaneArchive(parsed, `Archive pane ${request.paneId}${request.force ? ' (stopping its agents and discarding any unsent input, uncommitted or unpushed work)' : ''}`);
 
   const result = await invokeDaemon('runpane:panes:archive', [request], paneArchiveResultSchema, {
     paneDir: parsed.paneDir,

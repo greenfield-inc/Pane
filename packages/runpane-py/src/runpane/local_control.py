@@ -1172,7 +1172,7 @@ def run_panes_archive(parsed: Any) -> int:
         **optional_value("removeWorktree", True if parsed.remove_worktree else None),
     }
 
-    suffix = " (including any uncommitted or unpushed work)" if request.get("force") else ""
+    suffix = " (stopping its agents and discarding any unsent input, uncommitted or unpushed work)" if request.get("force") else ""
     confirm_pane_archive(parsed, f"Archive pane {request.get('paneId')}{suffix}")
 
     result = invoke_daemon(
