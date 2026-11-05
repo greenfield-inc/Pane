@@ -259,7 +259,15 @@ until its agent works again. The row under the Inbox counts the hidden Panes
 ("3 running · 1 idle") and **Show all** lists every Pane. Pinned rows are
 unchanged, and ⌘1–9 number the Inbox rows while it is shown.
 
-The right sidebar has Overview, Files, and Changes tabs. Overview shows the
+The right sidebar has Overview, Files, and Changes tabs. When the Session
+folder holds a status page at `session/index.html` (an orchestrator writes it
+there), Overview shows that page under a header with the Session name, Rename,
+**Open beside chat** (the page full-size in the split, in the tab already
+showing it) and **Show Session details** (the record described next). Pane checks for
+the page each time the Session refreshes. Links in the page to
+`pane://open?pane=<id>&panel=<id>` open that tab with its waiting Notify card
+docked; other links open as a browser tab beside chat. A client connected to
+a remote host shows the record only. Without a page, Overview shows the
 Session's blockers, goal, next step, and decisions when they are set, then its
 Panes and recent activity. Each Pane card lists the Session's tabs in that Pane
 with their type icons: every tab when the Pane is linked whole, with Files and
