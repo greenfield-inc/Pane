@@ -676,15 +676,6 @@ export function registerRemoteDaemonHandlers(
       const next = await updateClientState(decodeBoundary(updates, boundary.jsonObject));
       return { success: true, data: next.client };
     } catch (error) {
-      trackRemotePaneEvent(analyticsManager, 'remote_pane_client_connection_failed', {
-        surface: 'desktop',
-        role: 'client',
-        flow: 'connect',
-        result: 'failed',
-        failure_stage: 'update_client_state',
-        failure_category: getRemoteFailureCategory(error instanceof Error ? error.message : String(error)),
-        client_kind: 'desktop',
-      });
       return { success: false, error: getErrorMessage(error, 'Failed to update remote daemon client state') };
     }
   });

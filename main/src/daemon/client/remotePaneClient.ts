@@ -1373,16 +1373,6 @@ export class RemotePaneClientController extends EventEmitter {
             tunnel_kind: profile.tunnel?.kind ?? 'unknown',
             client_kind: 'desktop',
           });
-        } else if (status === 'error') {
-          trackRemotePaneEvent(this.analyticsManager, 'remote_pane_client_connection_failed', {
-            surface: 'desktop',
-            role: 'client',
-            flow: 'connect',
-            result: 'failed',
-            failure_stage: 'remote_client_state',
-            failure_category: getRemoteFailureCategory(errorMessage),
-            client_kind: 'desktop',
-          });
         }
         this.setConnectionState({
           mode: 'remote',
