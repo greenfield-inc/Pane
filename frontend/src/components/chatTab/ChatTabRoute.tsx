@@ -4,7 +4,6 @@ import type { ChatPanelState } from '../../../../shared/types/chatTab';
 import { useActiveMachineStore } from '../../stores/activeMachineStore';
 import { openFileInEditor } from '../../services/openFileInEditor';
 import { showActionError } from '../../stores/errorStore';
-import { isSessionChat } from './sessionChat';
 import { API } from '../../utils/api';
 import { useSessionStore } from '../../stores/sessionStore';
 import { useNavigationStore } from '../../stores/navigationStore';
@@ -30,7 +29,7 @@ function worktreeRelative(file: string, cwd: string | undefined): string {
   return file.startsWith(`${root}/`) || file.startsWith(`${root}\\`) ? file.slice(root.length + 1) : file;
 }
 
-/** The desktop's chat tab: the Session orchestrator's chat is quiet (D-18). */
+/** The desktop's chat tab: the Session orchestrator's chat lists its workers (D-18). */
 export function ChatTabRoute({ panel }: { panel: ToolPanel }) {
   const machine = useActiveMachineStore(state => state.machine);
   const setActiveSession = useSessionStore(store => store.setActiveSession);
@@ -47,7 +46,6 @@ export function ChatTabRoute({ panel }: { panel: ToolPanel }) {
     panelId={panel.id}
     client={window.electronAPI.chatTab}
     machine={machine}
-    quiet={isSessionChat(panel)}
     placeholder={state?.orchestrationSessionId ? 'Ask the Session anything' : undefined}
     actions={{
       onOpenWorker: paneId => { setActiveSession(paneId); navigateToSessions(); },

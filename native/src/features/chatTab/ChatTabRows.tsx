@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import * as Clipboard from 'expo-clipboard';
-import { Image, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Image, Pressable, StyleSheet, View } from 'react-native';
 import { useMarkdown } from 'react-native-marked';
 
-import type { ChatStep, ChatWorkerLine, PlanEntry, StepGroup } from '@shared/chatTabPresentation';
+import type { ChatWorkerLine, PlanEntry, StepGroup } from '@shared/chatTabPresentation';
 import { describeChatContent } from '@shared/agentChatPresentation';
 import { imageOf, planEntryKeys } from '@shared/chatTabPresentation';
 import { userMarkdown } from '@shared/chatTabMarkdown';
@@ -99,11 +99,6 @@ function StepLine({ group, actions }: { group: StepGroup; actions: ChatRowAction
   </View>;
 }
 
-function CurrentStep({ step }: { step: ChatStep }) {
-  const group: StepGroup = { id: step.id, kind: step.kind, label: step.path?.split(/[\\/]/).pop() ?? step.title, added: step.added ?? 0, removed: step.removed ?? 0, steps: [step] };
-  return <StepLine group={group} actions={{ onToggleTurn: () => undefined }} />;
-}
-
 function Todo({ entries }: { entries: PlanEntry[] }) {
   const theme = useTheme();
   const keys = planEntryKeys(entries);
@@ -151,11 +146,10 @@ export function ChatRowView({ row, actions }: { row: ChatRow; actions: ChatRowAc
     case 'thought': return <Text variant="footnote" style={{ color: theme.chat.mutedForeground }} numberOfLines={3}>Thinking: {row.text}</Text>;
     case 'image': return <Image accessibilityLabel="Image from the agent" source={{ uri: `data:${row.mimeType};base64,${row.data}` }} style={styles.image} />;
     case 'steps': return <StepLine group={row.group} actions={actions} />;
-    case 'current': return <CurrentStep step={row.step} />;
-    case 'fold': return <Pressable testID="chat-fold" accessibilityRole="button" accessibilityState={{ expanded: row.open }} onPress={() => actions.onToggleTurn(row.turnId)} style={styles.stepLine}>
-      <View style={styles.stepIcon}><Icon ios="checkmark.circle" android="check_circle" size={15} color={theme.chat.mutedForeground} /></View>
+    case 'fold': return <Pressable testID="chat-fold" accessibilityRole="button" accessibilityState={{ expanded: row.open }} disabled={!row.expandable} onPress={() => actions.onToggleTurn(row.turnId)} style={styles.stepLine}>
+      {row.running && <View style={styles.stepIcon}><ActivityIndicator size="small" color={theme.chat.mutedForeground} /></View>}
       <Text variant="subhead" numberOfLines={1} style={{ color: theme.chat.mutedForeground, flexShrink: 1 }}>{row.summary}</Text>
-      <Icon ios={row.open ? 'chevron.down' : 'chevron.right'} android={row.open ? 'expand_more' : 'chevron_right'} size={13} color={theme.chat.mutedForeground} />
+      {row.expandable && <Icon ios={row.open ? 'chevron.down' : 'chevron.right'} android={row.open ? 'expand_more' : 'chevron_right'} size={13} color={theme.chat.mutedForeground} />}
     </Pressable>;
     case 'plan': return <Todo entries={row.entries} />;
     case 'stopped': return <Text variant="footnote" style={{ color: theme.chat.mutedForeground, fontStyle: 'italic' }}>{row.text}</Text>;

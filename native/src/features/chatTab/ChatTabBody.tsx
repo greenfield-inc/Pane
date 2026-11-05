@@ -19,7 +19,7 @@ function useSessionWorkers(sessionId: string | undefined) {
 }
 
 /**
- * A chat tab in the phone's tab strip. The Session orchestrator's chat is quiet and
+ * A chat tab in the phone's tab strip. The Session orchestrator's chat
  * lists its workers, each opening its Pane (D-18, D-19).
  */
 export function ChatTabBody({ panel, panels }: { panel: ToolPanel; panels: readonly ToolPanel[] }) {
@@ -28,7 +28,7 @@ export function ChatTabBody({ panel, panels }: { panel: ToolPanel; panels: reado
   const sessionId = state?.orchestrationSessionId;
   const workers = useSessionWorkers(sessionId);
   const diff = panels.find(candidate => candidate.type === 'diff');
-  return <ChatTabScreen key={panel.id} panelId={panel.id} quiet={!!sessionId} workers={workers}
+  return <ChatTabScreen key={panel.id} panelId={panel.id} workers={workers}
     placeholder={sessionId ? 'Ask the Session anything' : undefined}
     onOpenWorker={paneId => router.push({ pathname: '/pane/[paneId]', params: { paneId } })}
     onViewDiff={diff ? () => router.setParams({ panelId: diff.id }) : undefined} />;

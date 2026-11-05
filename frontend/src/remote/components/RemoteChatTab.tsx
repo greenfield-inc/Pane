@@ -1,7 +1,6 @@
 import { lazy, useMemo } from 'react';
 import type { ChatPanelState } from '../../../../shared/types/chatTab';
 import type { ToolPanel } from '../../../../shared/types/panels';
-import { isSessionChat } from '../../components/chatTab/sessionChat';
 import { useSessionWorkers } from '../../components/chatTab/sessionWorkers';
 import type { ChatTurnActions } from '../../components/chatTab/ChatTurns';
 import type { RemoteRuntimeAdapter } from '../runtime/remoteRuntimeAdapter';
@@ -20,7 +19,7 @@ interface RemoteChatTabProps {
 }
 
 /**
- * The PWA's chat tab. The Session orchestrator's chat is quiet and lists its workers
+ * The PWA's chat tab. The Session orchestrator's chat lists its workers
  * from the host's Session overview, each opening its Pane (D-18, D-19). View diff brings
  * the Pane's Diff tab forward, which shows the branch's changes read-only, as the phone does.
  */
@@ -36,6 +35,6 @@ export function RemoteChatTab({ adapter, panel, panels, connected, onOpenWorker,
   // Dropped and pasted files land in the Pane's folder on the host, as the terminal's do.
   const saveFile = useMemo(() => (file: { name: string; dataUrl: string }) => adapter.saveFile(panel.sessionId, file), [adapter, panel.sessionId]);
   return <ChatTabPanel key={panel.id} panelId={panel.id} client={adapter.chatTab} connected={connected}
-    quiet={isSessionChat(panel)} workers={workers} actions={actions} saveFile={saveFile}
+    workers={workers} actions={actions} saveFile={saveFile}
     placeholder={sessionId ? 'Ask the Session anything' : undefined} />;
 }

@@ -6,7 +6,7 @@ import {
 import { ArrowDown, ArrowUp, FileText, Image as ImageIcon, LoaderCircle, Paperclip, Plus, Square, X } from 'lucide-react';
 import type { AgentChatPermission } from '../../../../shared/types/agentChat';
 import type { ChatTabClient, ChatTabCommand, ChatTabSend } from '../../../../shared/types/chatTab';
-import { chatTurns, placeWorkers, type ChatWorkerLine } from '../../../../shared/chatTabPresentation';
+import { chatTurns, foldWorkers, type ChatWorkerLine } from '../../../../shared/chatTabPresentation';
 import { rejectOption } from '../../../../shared/chatTabPermissions';
 import { chatTabViewer, type ChatTabViewer } from '../../../../shared/chatTabViewer';
 import { toAssistantMessage } from '../agentChat/convertMessage';
@@ -15,7 +15,7 @@ import { ipcErrorMessage } from '../../utils/ipcErrorMessage';
 import { ChatProblem } from './ChatProblem';
 import { ChatQuestionCard } from './ChatQuestionCard';
 import { ChatPermissionCard } from './ChatPermissionCard';
-import { ChatTurnView, WorkerLine, type ChatTurnActions } from './ChatTurns';
+import { ChatTurnView, WorkerFoldRow, WorkerLine, type ChatTurnActions } from './ChatTurns';
 import { ChatCommandMenu } from './ChatCommandMenu';
 import { matchingCommands } from './chatCommands';
 import { ChatModeChip, ChatModelMenu, ChatPhoneModelMenu, ChatRiskyModeMarker, usePhoneWidth } from './ChatComposerControls';
@@ -130,13 +130,11 @@ export interface ChatTabPanelProps {
   panelId: string;
   client: ChatTabClient;
   connected?: boolean;
-  /** The Session orchestrator's chat (D-18): finished turns fold to one line and only the current step shows. */
-  quiet?: boolean;
   /** The machine the tab's agent runs on, named on an approval for a remote one. */
   machine?: ActiveMachine | null;
   actions?: ChatTurnActions;
   placeholder?: string;
-  /** The Session's workers, one line each (the orchestrator's chat). */
+  /** The Session's workers (the orchestrator's chat). */
   workers?: ChatWorkerLine[];
   /** Copies a dropped, pasted or picked file to the chat's machine (D-139); without it only images attach. */
   saveFile?: SaveChatFile;
@@ -145,7 +143,7 @@ export interface ChatTabPanelProps {
 /** A chat tab: one agent conversation over ACP, with no terminal (D-20). */
 const NO_ACTIONS: ChatTurnActions = {};
 
-export default function ChatTabPanel({ panelId, client, connected = true, quiet = false, machine, actions = NO_ACTIONS, placeholder, workers, saveFile }: ChatTabPanelProps) {
+export default function ChatTabPanel({ panelId, client, connected = true, machine, actions = NO_ACTIONS, placeholder, workers, saveFile }: ChatTabPanelProps) {
   const viewer: ChatTabViewer = useMemo(() => chatTabViewer(client, panelId), [client, panelId]);
   const snapshot = useSyncExternalStore(viewer.subscribe, viewer.snapshot, viewer.snapshot);
   const view = snapshot.view;
@@ -171,7 +169,7 @@ export default function ChatTabPanel({ panelId, client, connected = true, quiet 
   };
   const working = view?.status === 'working' || view?.status === 'blocked';
   const turns = useMemo(() => chatTurns(messages, { running: working }), [messages, working]);
-  const placedWorkers = useMemo(() => placeWorkers(turns, workers ?? []), [turns, workers]);
+  const workerFold = useMemo(() => foldWorkers(turns, workers ?? []), [turns, workers]);
   const [copying, setCopying] = useState(0);
   const canAttachImages = !!view?.canAttachImages;
   const attachments = useMemo(() => {
@@ -328,8 +326,9 @@ export default function ChatTabPanel({ panelId, client, connected = true, quiet 
             {snapshot.loadingEarlier ? 'Loading…' : `Earlier messages (${snapshot.transcript?.start})`}
           </button>}
           {!snapshot.transcript && !view?.problem && <p role="status" className="chat-notice">{view?.status === 'starting' || !view ? `Starting ${agentName}…` : 'Loading conversation…'}</p>}
-          {turns.map(turn => <ChatTurnView key={turn.id} turn={turn} quiet={quiet} permissions={view?.permissions ?? []} actions={actions} workers={placedWorkers.byTurn.get(turn.id)} />)}
-          {placedWorkers.trailing.map(worker => <WorkerLine key={worker.paneId} worker={worker} onOpen={actions.onOpenWorker} />)}
+          {turns.map(turn => <ChatTurnView key={turn.id} turn={turn} permissions={view?.permissions ?? []} actions={actions} />)}
+          {workerFold.shown.map(worker => <WorkerLine key={worker.paneId} worker={worker} onOpen={actions.onOpenWorker} />)}
+          <WorkerFoldRow workers={workerFold.rest} onOpen={actions.onOpenWorker} />
           {snapshot.hasNewer && <button type="button" className="chat-button chat-button-outline self-center" disabled={snapshot.loadingNewer} onClick={() => { recordAnchor(); setPaged(true); void viewer.loadNewer(); }}>
             {snapshot.loadingNewer ? 'Loading…' : 'Newer messages'}
           </button>}

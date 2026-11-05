@@ -37,7 +37,6 @@ function errorText(error: unknown): string {
 export interface ChatTabScreenProps {
   panelId: string;
   /** The Session orchestrator's chat (D-18): finished turns fold, only the current step shows. */
-  quiet?: boolean;
   workers?: ChatWorkerLine[];
   onOpenWorker?: (paneId: string) => void;
   onViewDiff?: (path: string) => void;
@@ -50,7 +49,7 @@ export interface ChatTabScreenProps {
  * owns the composer; Pane draws the rows (Legend List over chatRows), the dock
  * and the composer's parts.
  */
-export function ChatTabScreen({ panelId, quiet = false, workers, onOpenWorker, onViewDiff, placeholder }: ChatTabScreenProps) {
+export function ChatTabScreen({ panelId, workers, onOpenWorker, onViewDiff, placeholder }: ChatTabScreenProps) {
   const theme = useTheme();
   const { chat, viewer, snapshot, connected } = useChatTab(panelId);
   const view = snapshot.view;
@@ -59,7 +58,7 @@ export function ChatTabScreen({ panelId, quiet = false, workers, onOpenWorker, o
   const [settings, setSettings] = useState(false);
   const working = view?.status === 'working' || view?.status === 'blocked';
   const messages = snapshot.transcript?.messages ?? [];
-  const rows = chatRows(chatTurns(messages, { running: working }), { quiet, open, workers });
+  const rows = chatRows(chatTurns(messages, { running: working }), { open, workers });
   const agent = view ? AGENT_NAMES[view.agent] : 'the agent';
   const disabled = !connected || !view || view.status === 'stopped';
   const commands = matchingCommands(snapshot.draft, view?.commands ?? []);

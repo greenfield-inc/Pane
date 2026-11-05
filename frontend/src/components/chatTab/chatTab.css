@@ -45,10 +45,13 @@
 .chat-step-details { padding:2px 0 6px 24px; font-size:13px; }
 .chat-step-details li { padding:2px 0; }
 .chat-step-output { margin:4px 0 6px 24px; max-height:16rem; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; padding:8px 10px; border-radius:8px; background:color-mix(in oklab,var(--chat-muted) 60%,transparent); font:12px/1.5 var(--font-mono,ui-monospace,monospace); }
-.chat-fold { display:flex; align-items:center; gap:8px; min-height:28px; font-size:14px; color:var(--chat-muted-foreground); border-radius:6px; }
+.chat-fold { display:flex; align-items:center; gap:8px; min-height:28px; max-width:100%; font-size:14px; color:var(--chat-muted-foreground); border-radius:6px; }
 .chat-fold:hover { color:var(--chat-foreground); }
-.chat-fold-chevron { width:14px; height:14px; }
-.chat-fold-body { margin:2px 0 4px 7px; padding-left:16px; border-left:1px solid var(--chat-border); }
+.chat-fold-row[data-running=false] { border-bottom:1px solid var(--chat-border); }
+.chat-fold-label { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.chat-fold-chevron { width:14px; height:14px; flex-shrink:0; }
+.chat-fold-body { display:flex; flex-direction:column; gap:8px; margin:2px 0 8px; }
+.chat-fold-workers { display:flex; flex-direction:column; gap:8px; margin-top:4px; }
 .chat-thought { font-size:14px; color:var(--chat-muted-foreground); }
 .chat-thought>summary { display:flex; align-items:center; gap:8px; cursor:pointer; list-style:none; }
 .chat-thought>summary svg { width:16px; height:16px; }

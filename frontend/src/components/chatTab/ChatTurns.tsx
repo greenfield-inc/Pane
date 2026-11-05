@@ -1,11 +1,11 @@
 import { memo, useState } from 'react';
-import { AlertCircle, Brain, Check, ChevronDown, ChevronRight, Circle, CircleCheck, Eye, LoaderCircle, Pencil, Terminal, Wrench, XCircle } from 'lucide-react';
+import { AlertCircle, Brain, ChevronDown, ChevronRight, Circle, CircleCheck, Eye, LoaderCircle, Pencil, Terminal, Wrench, XCircle } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { AgentChatPermission } from '../../../../shared/types/agentChat';
 import { describeChatContent, permissionToolId } from '../../../../shared/agentChatPresentation';
 import type { JsonValue } from '../../../../shared/validation/boundaryDecoder';
-import { imageOf, planEntryKeys, stoppedText, turnSummary, type ChatWorkerLine, type ChatStep, type ChatTurn, type PlanEntry, type StepGroup, type TurnItem } from '../../../../shared/chatTabPresentation';
+import { imageOf, planEntryKeys, stoppedText, turnDisplay, turnSummary, workersLabel, type ChatWorkerLine, type ChatStep, type ChatTurn, type PlanEntry, type StepGroup, type TurnItem } from '../../../../shared/chatTabPresentation';
 import { responseText, userMarkdown } from '../../../../shared/chatTabMarkdown';
 import { ChatCopyButton } from './ChatCopyButton';
 
@@ -137,39 +137,46 @@ export function WorkerLine({ worker, onOpen }: { worker: ChatWorkerLine; onOpen?
   </div>;
 }
 
+/** What's left of the Session's workers after the ones worth a line: one row that opens to them (D-192). */
+export function WorkerFoldRow({ workers, onOpen }: { workers: ChatWorkerLine[]; onOpen?: (paneId: string) => void }) {
+  const [open, setOpen] = useState(false);
+  if (!workers.length) return null;
+  return <div>
+    <button type="button" className="chat-fold" aria-expanded={open} onClick={() => setOpen(!open)}>
+      <span>{workersLabel(workers.length)}</span>
+      {open ? <ChevronDown className="chat-fold-chevron" /> : <ChevronRight className="chat-fold-chevron" />}
+    </button>
+    {open && <div className="chat-fold-workers">{workers.map(worker => <WorkerLine key={worker.paneId} worker={worker} onOpen={onOpen} />)}</div>}
+  </div>;
+}
+
 /**
- * One turn. In a quiet chat (the Session orchestrator, D-18) a running turn shows
- * only its current step and a finished turn folds its steps into one line.
+ * One turn (D-192): the agent's text, with its activity folded into one row. While
+ * the turn runs the row says what it's doing now; afterwards, how long it worked.
  */
-export const ChatTurnView = memo(function ChatTurnView({ turn, quiet, permissions, actions, workers = [] }: { turn: ChatTurn; quiet: boolean; permissions: AgentChatPermission[]; actions: ChatTurnActions; workers?: ChatWorkerLine[] }) {
+export const ChatTurnView = memo(function ChatTurnView({ turn, permissions, actions }: { turn: ChatTurn; permissions: AgentChatPermission[]; actions: ChatTurnActions }) {
   const [open, setOpen] = useState(false);
   const waiting = new Set(permissions.flatMap(permission => { const id = permissionToolId(permission); return id ? [id] : []; }));
-  const hasSteps = turn.items.some(item => item.type === 'steps');
-  const foldSteps = quiet && hasSteps;
-  let foldShown = false;
+  const { shown, activity, foldAt } = turnDisplay(turn);
+  const showFold = turn.running || activity.length > 0;
+  const fold = showFold && <div key="fold" className="chat-fold-row" data-running={turn.running}>
+    {activity.length > 0
+      ? <button type="button" className="chat-fold" aria-expanded={open} onClick={() => setOpen(!open)}>
+        {turn.running && <span className="chat-step-icon" data-state="running"><LoaderCircle aria-hidden="true" /></span>}
+        <span className="chat-fold-label" title={turnSummary(turn, waiting)}>{turnSummary(turn, waiting)}</span>
+        {open ? <ChevronDown className="chat-fold-chevron" /> : <ChevronRight className="chat-fold-chevron" />}
+      </button>
+      : <p className="chat-fold"><span className="chat-step-icon" data-state="running"><LoaderCircle aria-hidden="true" /></span><span className="chat-fold-label">{turnSummary(turn, waiting)}</span></p>}
+    {open && <div className="chat-fold-body">{activity.map(item => <Item key={item.id} item={item} waiting={waiting} actions={actions} />)}</div>}
+  </div>;
+  const before = shown.slice(0, foldAt < 0 ? shown.length : Math.min(foldAt, shown.length));
+  const after = shown.slice(before.length);
   return <div className="chat-turn" data-anchor-id={turn.id} data-running={turn.running}>
     <UserMessage turn={turn} />
-    {turn.items.map(item => {
-      if (item.type !== 'steps' || !foldSteps) return <Item key={item.id} item={item} waiting={waiting} actions={actions} />;
-      if (turn.running) {
-        if (foldShown || !turn.current) return null;
-        foldShown = true;
-        const current: StepGroup = { id: turn.current.id, kind: turn.current.kind, label: turn.current.path?.split(/[\\/]/).pop() ?? turn.current.title, added: turn.current.added ?? 0, removed: turn.current.removed ?? 0, steps: [turn.current] };
-        return <div key="current" className="chat-steps"><StepGroupRow group={current} waiting={waiting} actions={actions} /></div>;
-      }
-      if (foldShown) return open ? <Item key={item.id} item={item} waiting={waiting} actions={actions} /> : null;
-      foldShown = true;
-      return <div key={item.id}>
-        <button type="button" className="chat-fold" aria-expanded={open} onClick={() => setOpen(!open)}>
-          <span className="chat-step-icon"><Check aria-hidden="true" /></span>
-          <span>{turnSummary(turn)}</span>
-          {open ? <ChevronDown className="chat-fold-chevron" /> : <ChevronRight className="chat-fold-chevron" />}
-        </button>
-        {open && <div className="chat-fold-body"><Item item={item} waiting={waiting} actions={actions} /></div>}
-      </div>;
-    })}
+    {before.map(item => <Item key={item.id} item={item} waiting={waiting} actions={actions} />)}
+    {fold}
+    {after.map(item => <Item key={item.id} item={item} waiting={waiting} actions={actions} />)}
     {!turn.running && responseText(turn) && <div className="chat-message-actions chat-response-actions"><ChatCopyButton label="Copy response" text={() => responseText(turn)} /></div>}
     {stoppedText(turn) && <p className="chat-turn-stopped">{stoppedText(turn)}</p>}
-    {workers.map(worker => <WorkerLine key={worker.paneId} worker={worker} onOpen={actions.onOpenWorker} />)}
   </div>;
 });

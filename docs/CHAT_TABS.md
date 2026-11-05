@@ -118,12 +118,22 @@ says, and after running the chat tab suites against it.
 - The composer does not show the machine: the window's machine picker does, and
   an approval from a remote machine names it.
 
-The Session orchestrator's chat is *quiet* (D-18): a finished turn folds to one
-line, "Worked 2 m 40 s · 14 steps · edited 2 files · ran 9 commands", that opens
-to its steps; while a turn runs only its current step shows. Each worker Pane is
-one line with its state, PR and **Open**, drawn from Pane's own Session state
-(its Panes, their agent states and `runpane report`s), never from what the agent
-wrote.
+A chat shows the agent's text and pictures; what it did in between stays out of
+the way (D-192). While a turn runs, one quiet line says what it's doing now
+("Running pnpm test", "Thinking"). When it ends, its steps, thinking, to-do lists
+and notices fold into one row, "Worked for 27s", that opens to them.
+
+The conversation stays in the order things happened (D-193). Claude can start a
+turn by itself, for example when a background command finishes. Pane sees that
+through the adapter's `asyncTasks` capability: the tab shows as working, the turn
+gets its own row, and a message sent meanwhile waits in the queue until the turn
+ends, like one sent during any other turn. Stop ends it.
+
+In a Session orchestrator's chat, workers follow the conversation. Each worker
+that's running, blocked or changed in the latest turn gets one line with its
+state, PR and **Open**, and the rest fold into one row, "14 workers", that opens
+to them. All of this comes from Pane's own Session state (its Panes, their agent
+states and `runpane report`s), never from what the agent wrote.
 
 Approvals and questions are also asked in Notify and on the phone (see
 [PANE_NOTIFY.md](PANE_NOTIFY.md)), a question form one field at a time. The

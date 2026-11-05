@@ -4,7 +4,7 @@ import type { AgentChatMessage, AgentChatPart } from './types/agentChat';
 /**
  * How a chat tab's conversation reads, shared by desktop, the PWA and the phone:
  * turns that start at each prompt, with the agent's steps grouped by kind
- * (round 2 · Option 1) and a one-line summary for folded turns (round 3 · A).
+ * (round 2 · Option 1) and, by default, one row that folds a turn's activity (D-192).
  */
 export type StepKind = 'explore' | 'edit' | 'run' | 'think' | 'other';
 
@@ -62,7 +62,7 @@ export interface ChatTurn {
   user?: AgentChatMessage;
   items: TurnItem[];
   running: boolean;
-  /** The step in progress, shown alone while a turn runs in a quiet chat. */
+  /** The latest step, for the line that says what a running turn is doing. */
   current?: ChatStep;
   startedAt?: string;
   endedAt?: string;
@@ -199,14 +199,14 @@ export function chatTurns(messages: readonly AgentChatMessage[], options: { runn
   };
   for (const message of messages) {
     if (message.role === 'user') { open(`turn:${message.id}`, message); continue; }
-    const current = turn ?? open(`turn:start:${message.id}`);
     for (const [index, part] of message.parts.entries()) {
       const id = `${message.id}:${index}`;
+      const end = part.type === 'content' ? decodeOptionalBoundary(part.content, marker) : undefined;
+      // A finished turn stays finished: what the agent does afterwards, with no prompt open, is a turn of its own.
+      if (end && turn?.endedAt) continue;
+      const current: ChatTurn = turn && !turn.endedAt ? turn : open(`turn:start:${message.id}`);
       if (part.type === 'tool') { pending.push(toStep(part)); continue; }
-      if (part.type === 'content') {
-        const end = decodeOptionalBoundary(part.content, marker);
-        if (end) { flush(); current.startedAt = end.startedAt; current.endedAt = end.endedAt; current.stopReason = end.stopReason; continue; }
-      }
+      if (end) { flush(); current.startedAt = end.startedAt; current.endedAt = end.endedAt; current.stopReason = end.stopReason; continue; }
       flush();
       if (part.type === 'text' || part.type === 'thought') {
         if (part.text) current.items.push({ type: part.type, id, text: part.text });
@@ -243,21 +243,47 @@ export function stoppedText(turn: ChatTurn): string | undefined {
 
 export function formatDuration(ms: number): string {
   const seconds = Math.max(0, Math.round(ms / 1000));
-  if (seconds < 60) return `${seconds} s`;
+  if (seconds < 60) return `${seconds}s`;
   const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes} m ${seconds % 60} s`;
-  return `${Math.floor(minutes / 60)} h ${minutes % 60} m`;
+  if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
 
-/** "Worked 2 m 40 s · 14 steps · edited 2 files · ran 9 commands" (round 3 · A). */
-export function turnSummary(turn: ChatTurn): string {
-  const steps = turn.items.flatMap(item => item.type === 'steps' ? item.groups.flatMap(group => group.steps) : []);
+/**
+ * A turn as it reads by default (D-192): the agent's text and pictures, with
+ * everything it did in between (steps, thinking, notices, to-do lists) folded into
+ * one row at `foldAt`. While the turn runs, the row sits below the text so far.
+ */
+export interface TurnDisplay { shown: TurnItem[]; activity: TurnItem[]; foldAt: number }
+
+export function turnDisplay(turn: ChatTurn): TurnDisplay {
+  const isShown = (item: TurnItem) => item.type === 'text' || item.type === 'image';
+  const shown = turn.items.filter(isShown);
+  const activity = turn.items.filter(item => !isShown(item));
+  return { shown, activity, foldAt: turn.running ? shown.length : turn.items.findIndex(item => !isShown(item)) };
+}
+
+const ACTIVITY_VERBS = { explore: 'Reading', edit: 'Editing', run: 'Running', think: 'Thinking', other: 'Using' } satisfies Record<StepKind, string>;
+
+/** What a running turn is doing now, as one quiet line. */
+export function currentActivity(turn: ChatTurn, waiting: ReadonlySet<string> = new Set()): string {
+  if (turn.items.at(-1)?.type === 'thought') return 'Thinking';
+  const step = turn.current;
+  if (!step || (step.status !== 'pending' && step.status !== 'in_progress')) return 'Working';
+  const subject = step.kind === 'run' ? (step.command ?? step.title).split('\n')[0] : step.path ? fileName(step.path) : step.title;
+  const line = step.kind === 'think' ? ACTIVITY_VERBS.think : `${ACTIVITY_VERBS[step.kind]} ${subject}`;
+  return waiting.has(step.id) ? `Waiting for you · ${line}` : line;
+}
+
+/** The fold row's words: "Worked for 27s", or what the turn is doing while it runs. */
+export function turnSummary(turn: ChatTurn, waiting?: ReadonlySet<string>): string {
+  if (turn.running) return currentActivity(turn, waiting);
   const duration = turn.startedAt && turn.endedAt ? formatDuration(Date.parse(turn.endedAt) - Date.parse(turn.startedAt)) : undefined;
   if (turn.stopReason && turn.stopReason !== 'end_turn') return `Stopped${duration ? ` after ${duration}` : ''}`;
-  const edited = new Set(steps.filter(step => step.kind === 'edit').map(step => step.path ?? step.id)).size;
-  const commands = steps.filter(step => step.kind === 'run').length;
-  const head = turn.running ? 'Working' : duration ? `Worked ${duration}` : 'Worked';
-  return [head, plural(steps.length, 'step'), edited && `edited ${plural(edited, 'file')}`, commands && `ran ${plural(commands, 'command')}`].filter(Boolean).join(' · ');
+  if (duration) return `Worked for ${duration}`;
+  // A reopened conversation's earlier turns have no times.
+  const steps = turn.items.reduce((sum, item) => sum + (item.type === 'steps' ? item.groups.reduce((total, group) => total + group.steps.length, 0) : 0), 0);
+  return steps ? `Worked · ${plural(steps, 'step')}` : 'Worked';
 }
 
 /** One worker of a Session, as one line in the orchestrator's chat (round 3 · A). */
@@ -270,6 +296,8 @@ export interface ChatWorkerLine {
   detail?: string;
   pr?: number;
   attachedAt?: string;
+  /** When its report last changed. */
+  reportedAt?: string;
 }
 
 export interface WorkerPaneInput {
@@ -278,7 +306,7 @@ export interface WorkerPaneInput {
   missing: boolean;
   archived: boolean;
   panels: Array<{ state: string; missing?: boolean }>;
-  report?: { state: string; pr?: number; summary?: string; question?: string };
+  report?: { state: string; pr?: number; summary?: string; question?: string; reportedAt?: string };
   git?: { prNumber?: number };
 }
 
@@ -301,24 +329,24 @@ export function workerLines(panes: readonly WorkerPaneInput[], attachedAt: Reado
     if (pr) line.pr = pr;
     const at = attachedAt.get(pane.paneId);
     if (at) line.attachedAt = at;
+    if (report?.reportedAt) line.reportedAt = report.reportedAt;
     return line;
   });
 }
 
 /**
- * Where each worker line goes: after the last turn that started before the worker
- * joined the Session, or after the conversation when no turn's time is known.
+ * The Session's workers at the end of its conversation (D-192): those running, blocked
+ * or changed in the latest turn each keep a line; the rest fold into one "14 workers" row.
  */
-export interface WorkerPlacement { byTurn: Map<string, ChatWorkerLine[]>; trailing: ChatWorkerLine[] }
+export interface WorkerFold { shown: ChatWorkerLine[]; rest: ChatWorkerLine[] }
 
-export function placeWorkers(turns: readonly ChatTurn[], workers: readonly ChatWorkerLine[]): WorkerPlacement {
-  const byTurn = new Map<string, ChatWorkerLine[]>();
-  const trailing: ChatWorkerLine[] = [];
-  for (const worker of workers) {
-    const joined = worker.attachedAt ? Date.parse(worker.attachedAt) : NaN;
-    const anchor = Number.isNaN(joined) ? undefined : [...turns].reverse().find(turn => turn.startedAt && Date.parse(turn.startedAt) <= joined);
-    if (anchor && anchor !== turns.at(-1)) byTurn.set(anchor.id, [...(byTurn.get(anchor.id) ?? []), worker]);
-    else trailing.push(worker);
-  }
-  return { byTurn, trailing };
+export function foldWorkers(turns: readonly ChatTurn[], workers: readonly ChatWorkerLine[]): WorkerFold {
+  const latest = turns.at(-1);
+  // A running turn has no start time yet; it began after the turn before it ended.
+  const since = Date.parse(latest?.startedAt ?? turns.at(-2)?.endedAt ?? '');
+  const changed = (at?: string) => !!at && !Number.isNaN(since) && Date.parse(at) >= since;
+  const live = (worker: ChatWorkerLine) => worker.state === 'running' || worker.state === 'waiting' || changed(worker.reportedAt) || changed(worker.attachedAt);
+  return { shown: workers.filter(live), rest: workers.filter(worker => !live(worker)) };
 }
+
+export const workersLabel = (count: number) => plural(count, 'worker');

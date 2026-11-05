@@ -18,9 +18,10 @@ its associated Panes and open any Pane in its existing sidebar view.
 With [chat tabs](CHAT_TABS.md) on (Settings → Advanced → Chat tabs), a new Claude
 or Codex Session runs its orchestrator in a chat tab instead of a terminal, from
 the plain agent or the Session's `agent-farm run <profile>` launch, and sends its
-opening prompt once. That chat is quiet: finished turns fold to one line, and
-each worker Pane is one line with its state, PR and **Open**. Workers the
-orchestrator starts stay terminal tabs. Agent Farm's standard resume template
+opening prompt once. Like every chat, finished turns fold to one row. Each worker
+Pane that's running, blocked or changed in the latest turn is one line with its
+state, PR and **Open**, and the rest fold into one row. Workers the orchestrator
+starts stay terminal tabs. Agent Farm's standard resume template
 (`{command} --resume {sessionId}`, which the dialog saves) doesn't stop a chat,
 since a chat reopens through ACP. Sessions that resume or promote a terminal
 conversation, run in WSL, use a truly custom resume command or a wrapper launch,

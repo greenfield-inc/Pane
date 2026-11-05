@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AgentChatMessage } from '../../../../shared/types/agentChat';
-import { chatTurns, planEntryKeys, turnSummary } from '../../../../shared/chatTabPresentation';
+import { chatTurns, currentActivity, foldWorkers, planEntryKeys, turnDisplay, turnSummary, type ChatTurn, type ChatWorkerLine } from '../../../../shared/chatTabPresentation';
 
 const user = (id: string, text: string): AgentChatMessage => ({ id, role: 'user', parts: [{ type: 'text', text }] });
 const say = (id: string, text: string): AgentChatMessage => ({ id, role: 'assistant', parts: [{ type: 'text', text }] });
@@ -30,7 +30,7 @@ describe('chat turns', () => {
       { kind: 'edit', label: 'a.ts' },
     ]);
     expect(steps.type === 'steps' && steps.groups[1].steps[0]).toMatchObject({ path: '/repo/a.ts', added: 2, removed: 1 });
-    expect(turnSummary(first)).toBe('Worked 2 m 40 s · 4 steps · edited 1 file');
+    expect(turnSummary(first)).toBe('Worked for 2m 40s');
     expect(first.running).toBe(false);
     expect(turns[1].running).toBe(false);
   });
@@ -47,13 +47,13 @@ describe('chat turns', () => {
     const steps = turn.items[0];
     expect(steps.type === 'steps' && steps.groups[0]).toMatchObject({ kind: 'run', label: '3 commands', detail: 'pnpm test ×2, git fetch' });
     expect(turn.current?.command).toBe('pnpm test');
-    expect(turnSummary(turn)).toBe('Working · 3 steps · ran 3 commands');
+    expect(turnSummary(turn)).toBe('Running pnpm test');
   });
 
   it('says how a turn stopped when it did not end normally', () => {
     const [turn] = chatTurns([user('u1', 'go'), say('a', 'partial'), end('t', 5, 'cancelled')], { running: false });
     expect(turn.stopReason).toBe('cancelled');
-    expect(turnSummary(turn)).toBe('Stopped after 5 s');
+    expect(turnSummary(turn)).toBe('Stopped after 5s');
   });
 
   it('keeps a todo list and unknown content as their own items', () => {
@@ -96,18 +96,71 @@ describe('worker lines in the Session chat', () => {
     ]);
   });
 
-  it('places a worker after the turn that started it', async () => {
-    const { placeWorkers } = await import('../../../../shared/chatTabPresentation');
-    const turns = [
+  it('keeps a line for workers running, blocked or changed in the latest turn, and folds the rest (D-192)', () => {
+    const turns: ChatTurn[] = [
       { id: 't1', items: [], running: false, startedAt: '2026-11-03T11:40:00.000Z', endedAt: '2026-11-03T11:41:00.000Z' },
-      { id: 't2', items: [], running: false, startedAt: '2026-11-03T11:50:00.000Z' },
+      { id: 't2', items: [], running: false, startedAt: '2026-11-03T11:50:00.000Z', endedAt: '2026-11-03T11:51:00.000Z' },
     ];
-    const placed = placeWorkers(turns, [
-      { paneId: 'a', name: 'a', state: 'running', label: 'Running', attachedAt: '2026-11-03T11:40:30.000Z' },
-      { paneId: 'b', name: 'b', state: 'running', label: 'Running' },
-    ]);
-    expect([...placed.byTurn.entries()].map(([turn, workers]) => [turn, workers.map(worker => worker.paneId)])).toEqual([['t1', ['a']]]);
-    expect(placed.trailing.map(worker => worker.paneId)).toEqual(['b']);
+    const worker = (paneId: string, state: ChatWorkerLine['state'], reportedAt?: string): ChatWorkerLine => ({ paneId, name: paneId, state, label: state, reportedAt });
+    const workers = [worker('running', 'running'), worker('blocked', 'waiting'), worker('just-done', 'done', '2026-11-03T11:50:30.000Z'), worker('old-done', 'done', '2026-11-03T11:00:00.000Z'), worker('idle', 'idle')];
+    const fold = foldWorkers(turns, workers);
+    expect(fold.shown.map(line => line.paneId)).toEqual(['running', 'blocked', 'just-done']);
+    expect(fold.rest.map(line => line.paneId)).toEqual(['old-done', 'idle']);
+    // A running turn has no start of its own yet: it began when the one before it ended.
+    const running = foldWorkers([turns[0], { id: 't2', items: [], running: true }], [worker('since', 'done', '2026-11-03T11:45:00.000Z'), worker('before', 'done', '2026-11-03T11:30:00.000Z')]);
+    expect(running.shown.map(line => line.paneId)).toEqual(['since']);
+  });
+});
+
+describe('what a turn shows by default (D-192)', () => {
+  const thought = (id: string, text: string): AgentChatMessage => ({ id, role: 'assistant', parts: [{ type: 'thought', text }] });
+
+  it('shows only text and folds steps, thinking, notices and to-do lists at the first of them', () => {
+    const [turn] = chatTurns([
+      user('u', 'go'), say('a1', 'Looking.'), thought('th', 'Hmm'), tool('r', 'read'),
+      { id: 'plan:1', role: 'assistant', parts: [{ type: 'content', content: { type: 'plan', entries: [{ content: 'x', status: 'pending' }] } }] },
+      { id: 'n', role: 'assistant', parts: [{ type: 'content', content: { sessionUpdate: 'notice', text: 'A background command finished' } }] },
+      say('a2', 'Done.'), end('t', 27),
+    ], { running: false });
+    const display = turnDisplay(turn);
+    expect(display.shown.map(item => item.type === 'text' && item.text)).toEqual(['Looking.', 'Done.']);
+    expect(display.activity.map(item => item.type)).toEqual(['thought', 'steps', 'plan', 'content']);
+    expect(display.foldAt).toBe(1);
+    expect(turnSummary(turn)).toBe('Worked for 27s');
+  });
+
+  it('puts the live row under the text so far and says what is happening', () => {
+    const working = (...rest: AgentChatMessage[]) => chatTurns([user('u', 'go'), ...rest], { running: true })[0];
+    expect(currentActivity(working(say('a', 'Hi')))).toBe('Working');
+    expect(currentActivity(working(thought('t', 'Hmm')))).toBe('Thinking');
+    expect(currentActivity(working(tool('r', 'read', { status: 'in_progress', locations: [{ path: '/repo/a.ts' }] })))).toBe('Reading a.ts');
+    expect(currentActivity(working(tool('e', 'edit', { status: 'in_progress', locations: [{ path: '/repo/a.ts' }] })), new Set(['e']))).toBe('Waiting for you · Editing a.ts');
+    expect(currentActivity(working(tool('x', 'execute', { status: 'in_progress', input: { command: 'pnpm test\n--all' } })))).toBe('Running pnpm test');
+    const turn = working(tool('r', 'read'), say('a', 'Hi'));
+    expect(turnDisplay(turn).foldAt).toBe(1);
+  });
+});
+
+describe('time order (D-193)', () => {
+  it('starts a turn of its own for what the agent does after a turn ended, before the next message', () => {
+    const turns = chatTurns([
+      user('u1', 'one'), tool('a', 'read'), end('t1', 5),
+      tool('b', 'read'), say('own', 'A background command finished.'), end('t2', 2),
+      user('u2', 'two'), tool('c', 'read'), end('t3', 1),
+    ], { running: false });
+    expect(turns.map(turn => turn.user?.id)).toEqual(['u1', undefined, 'u2']);
+    expect(turns.map(turn => turn.items.flatMap(item => item.type === 'steps' ? item.groups.flatMap(group => group.steps.map(step => step.id)) : []))).toEqual([['a'], ['b'], ['c']]);
+    expect(turns.map(turn => turnSummary(turn))).toEqual(['Worked for 5s', 'Worked for 2s', 'Worked for 1s']);
+  });
+
+  it('marks the agent\'s own turn as running while it works', () => {
+    const turns = chatTurns([user('u1', 'one'), end('t1', 5), tool('b', 'read', { status: 'in_progress' })], { running: true });
+    expect(turns.map(turn => turn.running)).toEqual([false, true]);
+  });
+
+  it('never rewrites a finished turn\'s time with a later marker', () => {
+    const [turn] = chatTurns([user('u1', 'one'), end('t1', 5), end('t2', 50)], { running: false });
+    expect(turnSummary(turn)).toBe('Worked for 5s');
   });
 });
 
