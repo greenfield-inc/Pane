@@ -247,8 +247,8 @@ describe('terminal status events', () => {
     await destroying;
     expect(panelManager.updatePanel).toHaveBeenCalledWith('p', { state: expect.objectContaining({
       customState: expect.objectContaining({
-        // Pane reads a live process cwd only off Windows.
-        cwd: process.platform === 'win32' ? '/old' : '/live',
+        // Only Linux exposes a live process's folder, through /proc.
+        cwd: process.platform === 'linux' ? '/live' : '/old',
         scrollbackBuffer: expect.stringContaining('last output before archive'),
       }),
     }) });
