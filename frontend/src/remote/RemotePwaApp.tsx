@@ -697,8 +697,12 @@ export function RemotePwaApp() {
     });
   }, [adapter, setLastError]);
 
+  // The Pane the person just picked in the sidebar, until its shown tab has loaded. Selections the
+  // app makes itself (the first Pane after loading, back and forward, a notification) never set it.
+  const personOpenedPaneRef = useRef<string | null>(null);
   const selectRemoteSession = useCallback((sessionId: string, scope: string) => {
     navigationRequestRef.current += 1;
+    personOpenedPaneRef.current = sessionId;
     setSelectedPaneScope({ paneId: sessionId, scope });
     requestView(`pane:${sessionId}`);
     selectSession(sessionId);
@@ -812,14 +816,9 @@ export function RemotePwaApp() {
       if (adapter === activeRuntimeRef.current) setLastError(error.message || 'Could not resume the tab.');
     });
   }, [adapter, resumeOnOpen, setLastError]);
-  const openCheckedPaneRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!selectedSessionId) {
-      openCheckedPaneRef.current = null;
-      return;
-    }
-    if (!selectedPanel || openCheckedPaneRef.current === selectedSessionId) return;
-    openCheckedPaneRef.current = selectedSessionId;
+    if (!selectedSessionId || !selectedPanel || personOpenedPaneRef.current !== selectedSessionId) return;
+    personOpenedPaneRef.current = null;
     resumeOpenedPanel(selectedPanel);
   }, [resumeOpenedPanel, selectedPanel, selectedSessionId]);
 
