@@ -87,7 +87,7 @@ describe('NotifyQueue secret cards', () => {
   });
 
   it('keeps a Decline sent during a slow save from contradicting the save', async () => {
-    let finish = () => undefined as void;
+    let finish: () => void = () => undefined;
     const saved: string[] = [];
     const queue = makeQueue({ exists: () => false, save: async (_project, _name, value) => { await new Promise<void>(resolve => { finish = resolve; }); saved.push(value); } });
     const call = ask(queue, stripeKey);
