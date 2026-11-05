@@ -1,5 +1,6 @@
 import { KeyRound, Plus, Trash2 } from 'lucide-react';
 import { Input } from './ui/Input';
+import { SecretField } from './ui/SecretField';
 import { Button, IconButton } from './ui/Button';
 import { SegmentedControl } from './settings/SettingsControls';
 import { isMac } from '../utils/platformUtils';
@@ -128,16 +129,12 @@ export function ProjectEnvVarsSection({ rows, onChange, defaultProject }: Projec
                         />
                       </div>
                     </div>
-                    <Input
-                      type="password"
-                      autoComplete="off"
-                      spellCheck={false}
+                    <SecretField
                       aria-label={`Secret value of ${row.key || 'variable'}`}
                       value={row.secretValue}
                       onChange={(e) => update(row.id, { secretValue: e.target.value })}
                       placeholder={`Type a value to save it as ${secretLabel(row)}, or leave empty to use the saved one`}
-                      className="font-mono text-sm"
-                      fullWidth
+                      className="w-full font-mono text-sm"
                     />
                   </div>
                 )

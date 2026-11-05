@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode, type RefObject } from 'react';
 import { ArrowUp, Bell, Check, Clock, ExternalLink, Info, ShieldCheck, X } from 'lucide-react';
 import type { NotifyChoice, NotifyCommand, NotifyItem, NotifyRemindAfter } from '../../../../shared/types/notify';
 import { cn } from '../../utils/cn';
 import { askedBy, NOTIFY_KIND_DOT, NOTIFY_KIND_LABEL, relativeAge, SECRET_KEPT_OUT, secretSavesAs, unreachableText } from './notifyFormat';
 import { useNow } from './useNow';
+import { SecretField } from '../ui/SecretField';
 
 /** The compact strip shows this many choices, then More. */
 const COMPACT_CHOICE_LIMIT = 4;
@@ -307,7 +308,7 @@ function CardHeader({ item, form, queue, onCommand, menuPlacement, machineMark }
   );
 }
 
-function focusAfterRequest(input: HTMLInputElement | null, request?: () => Promise<void>) {
+function focusAfterRequest(input: HTMLInputElement | HTMLTextAreaElement | null, request?: () => Promise<void>) {
   if (!input) return;
   if (!request) {
     input.focus();
@@ -327,41 +328,57 @@ interface TextFieldProps {
   sendLabel?: string;
   /** Focuses the field each time it changes, such as after a suggestion fills it. */
   focusKey?: number;
-  /** A secret: masked, never autofilled or spellchecked. */
+  /** A secret: masked, keeps line breaks, never autofilled or spellchecked. */
   masked?: boolean;
 }
 
 function TextField({ value, onChange, onSubmit, placeholder, onFieldFocusRequest, autoFocus, sendLabel, focusKey = 0, masked }: TextFieldProps) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const secretRef = useRef<HTMLTextAreaElement>(null);
+  const field = () => inputRef.current ?? secretRef.current;
   useEffect(() => {
-    if (autoFocus || focusKey > 0) focusAfterRequest(inputRef.current, onFieldFocusRequest);
+    if (autoFocus || focusKey > 0) focusAfterRequest(field(), onFieldFocusRequest);
     // Focus when the field appears (autoFocus) and whenever focusKey asks again.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusKey]);
   const hasText = value.trim().length > 0;
+  const fieldProps = {
+    value,
+    placeholder,
+    'aria-label': placeholder,
+    className: 'h-full min-w-0 flex-1 bg-transparent text-[14.5px] text-text-primary outline-none placeholder:text-text-muted',
+    onMouseDown: (event: ReactMouseEvent) => {
+      if (!onFieldFocusRequest || document.activeElement === field()) return;
+      // The floating strip can't take keys yet: ask for focus first, then focus the field.
+      event.preventDefault();
+      focusAfterRequest(field(), onFieldFocusRequest);
+    },
+  };
   return (
     <div className="flex h-[42px] items-center gap-2 rounded-xl bg-surface-tertiary pl-3.5 pr-2 focus-within:ring-[1.5px] focus-within:ring-inset focus-within:ring-border-hover">
-      <input
-        ref={inputRef}
-        value={value}
-        placeholder={placeholder}
-        aria-label={placeholder}
-        {...(masked ? { type: 'password', autoComplete: 'off', spellCheck: false, autoCorrect: 'off', autoCapitalize: 'off' } : {})}
-        className="h-full min-w-0 flex-1 bg-transparent text-[14.5px] text-text-primary outline-none placeholder:text-text-muted"
-        onMouseDown={(event) => {
-          if (!onFieldFocusRequest || document.activeElement === inputRef.current) return;
-          // The floating strip can't take keys yet: ask for focus first, then focus the field.
-          event.preventDefault();
-          focusAfterRequest(inputRef.current, onFieldFocusRequest);
-        }}
-        onChange={(event) => onChange(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
-            event.preventDefault();
-            onSubmit();
-          }
-        }}
-      />
+      {masked ? (
+        // One line tall: a pasted multi-line value scrolls inside the field.
+        <SecretField
+          ref={secretRef}
+          appearance="bare"
+          {...fieldProps}
+          className={cn(fieldProps.className, 'h-auto leading-5')}
+          onChange={(event) => onChange(event.target.value)}
+          onEnter={onSubmit}
+        />
+      ) : (
+        <input
+          ref={inputRef}
+          {...fieldProps}
+          onChange={(event) => onChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+              event.preventDefault();
+              onSubmit();
+            }
+          }}
+        />
+      )}
       {sendLabel && (
         <button
           type="button"

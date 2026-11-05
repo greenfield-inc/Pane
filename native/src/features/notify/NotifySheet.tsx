@@ -202,6 +202,8 @@ function QuestionSheet({ item, machine, answer, busy, error, onClose }: {
               </Text>
             ) : null}
             <Text variant="footnote" tone="muted">Kept out of chat. Any agent on your machines can use it with runpane secrets exec.</Text>
+            {/* A secure field on the phone is one line, so a pasted value loses its line breaks. */}
+            <Text testID="notify-secret-one-line" variant="footnote" tone="muted">Takes one line. Answer a multi-line value, such as a PEM key, on your computer.</Text>
           </>
         ) : item.ui === 'ask' ? (
           <>

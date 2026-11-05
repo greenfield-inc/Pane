@@ -5,6 +5,7 @@ import { cn } from '../../utils/cn';
 import { askedBy, NOTIFY_KIND_DOT, NOTIFY_KIND_LABEL, relativeAge, SECRET_KEPT_OUT, secretSavesAs } from './notifyFormat';
 import { ShortcutCap, UnreachableNotice } from './NotifyCard';
 import { useNow } from './useNow';
+import { SecretField } from '../ui/SecretField';
 
 interface NotifyRoundProps {
   snapshot: NotifySnapshot;
@@ -102,8 +103,9 @@ function RoundPanel({ item, position, total, onCommand }: RoundPanelProps) {
   const [text, setText] = useState('');
   const noteRef = useRef<HTMLInputElement>(null);
   const textRef = useRef<HTMLInputElement>(null);
+  const secretRef = useRef<HTMLTextAreaElement>(null);
 
-  useEffect(() => { if (ask) textRef.current?.focus(); }, [ask]);
+  useEffect(() => { if (ask) (textRef.current ?? secretRef.current)?.focus(); }, [ask]);
   useEffect(() => { if (noteOpen) noteRef.current?.focus(); }, [noteOpen]);
 
   const send = (index = selected) => {
@@ -145,7 +147,8 @@ function RoundPanel({ item, position, total, onCommand }: RoundPanelProps) {
         onCommand({ type: 'close-round' });
         return;
       }
-      if (event.key === 'Enter' && !event.isComposing) {
+      // Shift+Enter adds a line break to a secret.
+      if (event.key === 'Enter' && !event.isComposing && !(event.shiftKey && event.target instanceof HTMLTextAreaElement)) {
         event.preventDefault();
         sendRef.current();
         return;
@@ -212,15 +215,28 @@ function RoundPanel({ item, position, total, onCommand }: RoundPanelProps) {
       <div className="mt-2.5 border-t border-border-secondary px-[26px] pb-1.5 pt-3.5 text-[13px] text-text-tertiary">
         {secret ? 'The secret' : ask ? 'Your answer' : 'Choose one'}
       </div>
-      {ask && (
+      {secret && (
+        <div className="px-[26px] pb-2">
+          {/* One line tall: a pasted multi-line value scrolls inside the field. */}
+          <SecretField
+            ref={secretRef}
+            appearance="bare"
+            value={text}
+            onChange={(event) => setText(event.target.value)}
+            placeholder="Type the secret"
+            aria-label="The secret"
+            className="h-[46px] w-full rounded-xl bg-surface-tertiary px-3.5 py-0 text-[16px] leading-[46px] text-text-primary outline-none placeholder:text-text-muted focus:ring-[1.5px] focus:ring-inset focus:ring-border-hover"
+          />
+        </div>
+      )}
+      {ask && !secret && (
         <div className="px-[26px] pb-2">
           <input
             ref={textRef}
             value={text}
             onChange={(event) => { setText(event.target.value); setSelected(-1); }}
-            placeholder={secret ? 'Type the secret' : 'Type your answer'}
-            aria-label={secret ? 'The secret' : 'Your answer'}
-            {...(secret ? { type: 'password', autoComplete: 'off', spellCheck: false, autoCorrect: 'off', autoCapitalize: 'off' } : {})}
+            placeholder="Type your answer"
+            aria-label="Your answer"
             className="h-[46px] w-full rounded-xl bg-surface-tertiary px-3.5 text-[16px] text-text-primary outline-none placeholder:text-text-muted focus:ring-[1.5px] focus:ring-inset focus:ring-border-hover"
           />
         </div>

@@ -132,7 +132,10 @@ describe('NotifyCard', () => {
     expect(visible).toContain('Saves as Pane secret stripe/STRIPE_SECRET_KEY');
     expect(visible).not.toContain('replaces the saved value');
     expect(visible).toContain('Kept out of chat. Any agent on your machines can use it with runpane secrets exec.');
-    expect(markup).toMatch(/<input[^>]*type="password"[^>]*autoComplete="off"[^>]*spellCheck="false"/);
+    const field = markup.match(/<textarea[^>]*>/)?.[0] ?? '';
+    expect(field).toContain('[-webkit-text-security:disc]');
+    expect(field).toContain('autoComplete="off"');
+    expect(field).toContain('spellCheck="false"');
 
     expect(text(render({ ...secret, secret: { project: 'stripe', name: 'STRIPE_SECRET_KEY', replaces: true } }, { form: 'inbox' })))
       .toContain('Saves as Pane secret stripe/STRIPE_SECRET_KEY · replaces the saved value');

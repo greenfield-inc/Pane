@@ -180,7 +180,7 @@ test.describe('Notify secret requests', () => {
     await expect(strip).toContainText("Run the webhook integration tests against Stripe's test mode.");
     await expect(strip).toContainText('Saves as Pane secret stripe/STRIPE_SECRET_KEY · replaces the saved value');
     const field = strip.getByPlaceholder('Click to type the secret');
-    await expect(field).toHaveAttribute('type', 'password');
+    await expect(field).toHaveCSS('-webkit-text-security', 'disc');
     await expect(strip.getByRole('button', { name: 'Save securely' })).toBeDisabled();
 
     // Digits go into the field; the card has no number-key shortcuts.
