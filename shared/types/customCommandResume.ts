@@ -38,6 +38,17 @@ export const AGENT_FARM_RESUME: CustomCommandResume = {
   resumeTemplate: '{command} --resume {sessionId}',
 };
 
+/**
+ * Whether a saved resume is only Agent Farm's standard form, which the new-Session dialog
+ * saves for every Agent Farm Session. It carries no instruction of its own: a chat tab
+ * reopens its conversation through ACP and has no use for it.
+ */
+export function isStandardCustomResume(resume: CustomCommandResume): boolean {
+  return resume.mode === AGENT_FARM_RESUME.mode
+    && resume.initialTemplate.trim() === AGENT_FARM_RESUME.initialTemplate
+    && resume.resumeTemplate.trim() === AGENT_FARM_RESUME.resumeTemplate;
+}
+
 export type EffectiveCustomResumeSource = 'explicit' | 'agent-farm';
 
 export interface EffectiveCustomResume {

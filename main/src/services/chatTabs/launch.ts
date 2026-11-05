@@ -10,6 +10,7 @@ import { getGitAttributionEnv } from '../../utils/attribution';
 import { getRuntimeConfigManager } from '../../core/runtime';
 import { noteContextPath } from '../noteFiles';
 import { withRunpaneBinOnPath } from '../runpaneShim';
+import { isStandardCustomResume, type CustomCommandResume } from '../../../../shared/types/customCommandResume';
 import { adapterEntry, installAdapter } from '../agentChat/adapterSetup';
 import { providerScript } from '../agentChat/hostCommand';
 import { panePortFor } from '../panePort';
@@ -119,4 +120,30 @@ export function chatLaunchFromCommand(command: string | undefined, agent: ChatAg
     return Object.keys(args).length ? { kind: 'profile', profile: tokens[2], args } : { kind: 'profile', profile: tokens[2] };
   }
   return undefined;
+}
+
+export interface SessionChatInput {
+  agent: string;
+  launchCommand?: string;
+  customResume?: CustomCommandResume | null;
+  runtime?: string;
+  resume?: string;
+  /** The Session continues a conversation promoted from a terminal. */
+  promoted?: boolean;
+}
+
+/**
+ * How a Session's orchestrator runs with chat tabs on (D-16, D-185): the chat launch, or why
+ * it keeps a terminal, in words the Session's overview can show. Agent Farm's standard resume
+ * template doesn't count as custom; a chat reopens through ACP without it.
+ */
+export function sessionChatLaunch(input: SessionChatInput): { launch: ChatTabLaunch } | { terminalReason: string } {
+  const { agent } = input;
+  if (agent !== 'claude' && agent !== 'codex') return { terminalReason: 'Chat tabs run only Claude and Codex.' };
+  if (input.runtime === 'wsl') return { terminalReason: 'Chat tabs don\'t run in WSL.' };
+  if (input.resume || input.promoted) return { terminalReason: 'This Session continues a terminal conversation.' };
+  if (input.customResume && !isStandardCustomResume(input.customResume)) return { terminalReason: 'Its launch settings use a custom resume command, which only a terminal can run.' };
+  const command = input.launchCommand?.trim();
+  const launch = chatLaunchFromCommand(command, agent);
+  return launch ? { launch } : { terminalReason: `A chat can't run its launch command the same way: ${command}.` };
 }

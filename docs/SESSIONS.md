@@ -20,9 +20,12 @@ or Codex Session runs its orchestrator in a chat tab instead of a terminal, from
 the plain agent or the Session's `agent-farm run <profile>` launch, and sends its
 opening prompt once. That chat is quiet: finished turns fold to one line, and
 each worker Pane is one line with its state, PR and **Open**. Workers the
-orchestrator starts stay terminal tabs. Sessions that resume or promote a
-terminal conversation, run in WSL, use a custom resume command or a wrapper
-launch, and Cursor Sessions, keep their terminal.
+orchestrator starts stay terminal tabs. Agent Farm's standard resume template
+(`{command} --resume {sessionId}`, which the dialog saves) doesn't stop a chat,
+since a chat reopens through ACP. Sessions that resume or promote a terminal
+conversation, run in WSL, use a truly custom resume command or a wrapper launch,
+and Cursor Sessions, keep their terminal, and the Session's overview says why. A
+Session keeps the kind of tab it started with.
 
 **New** at the top of the sidebar opens one dialog with a Session/Pane toggle
 on top and that kind's form below. When the desktop has saved other machines,

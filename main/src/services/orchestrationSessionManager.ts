@@ -12,7 +12,7 @@ import { withLock } from '../utils/mutex';
 import { getAppDirectory } from '../utils/appDirectory';
 import { panelManager } from './panelManager';
 import { getChatTabManager } from './chatTabs';
-import { chatLaunchFromCommand } from './chatTabs/launch';
+import { sessionChatLaunch } from './chatTabs/launch';
 import type { ChatPanelState, ChatTabLaunch } from '../../../shared/types/chatTab';
 
 /** What a Session needs from the host's chat tabs. */
@@ -519,7 +519,7 @@ export class OrchestrationSessionManager extends EventEmitter {
       const report = record.report
         ? { ...cloneReport(record.report), freshness: isReportCurrent(record) ? 'current' as const : 'stale' as const }
         : undefined;
-      return {
+      const result: OrchestrationSessionOverview = {
         session: clone(record),
         status,
         panes,
@@ -528,6 +528,9 @@ export class OrchestrationSessionManager extends EventEmitter {
         report,
         refreshedAt: new Date().toISOString(),
       };
+      const terminalReason = this.terminalReason(record);
+      if (terminalReason) result.terminalReason = terminalReason;
+      return result;
     });
   }
 
@@ -992,10 +995,10 @@ export class OrchestrationSessionManager extends EventEmitter {
       await this.refreshPanelLaunchState(existing, record);
       return panelManager.getPanel(panelId) ?? existing;
     }
-    const chatLaunch = this.chatLaunch(record);
-    if (chatLaunch && (record.agent === 'claude' || record.agent === 'codex')) {
+    const chat = this.chatLaunch(record);
+    if (chat && 'launch' in chat && (record.agent === 'claude' || record.agent === 'codex')) {
       const workspace = sessionRuntimePath(sessionWorkspacePath(record.id), record);
-      const state: ChatPanelState = { agent: record.agent, launch: chatLaunch, cwd: workspace, status: 'starting', orchestrationSessionId: record.id, sessionFolder: workspace };
+      const state: ChatPanelState = { agent: record.agent, launch: chat.launch, cwd: workspace, status: 'starting', orchestrationSessionId: record.id, sessionFolder: workspace };
       const opening = this.firstPrompt(record);
       if (opening) state.initialInput = opening;
       const panel = await panelManager.createPanel({
@@ -1018,14 +1021,22 @@ export class OrchestrationSessionManager extends EventEmitter {
 
   /**
    * D-16: with chat tabs on, a new Claude or Codex Session runs its orchestrator in a chat
-   * tab. Sessions that resume or promote a terminal conversation, run in WSL, use a custom
-   * resume, or launch a wrapper keep their terminal.
+   * tab. Sessions that resume or promote a terminal conversation, run in WSL, use a truly
+   * custom resume, or launch a wrapper keep their terminal (`sessionChatLaunch` says why).
    */
-  private chatLaunch(record: OrchestrationSessionRecord): ChatTabLaunch | undefined {
+  private chatLaunch(record: OrchestrationSessionRecord) {
     if (this.configManager.getConfig().chatTabsEnabled !== true) return undefined;
-    if (record.agent !== 'claude' && record.agent !== 'codex') return undefined;
-    if (record.runtime === 'wsl' || record.resume || record.promotedFrom || record.customResume) return undefined;
-    return chatLaunchFromCommand(record.launchCommand?.trim() || RUNPANE_CONTRACT.agentTemplates[record.agent].command, record.agent);
+    return sessionChatLaunch({
+      agent: record.agent, runtime: record.runtime, resume: record.resume, promoted: !!record.promotedFrom, customResume: record.customResume,
+      launchCommand: record.launchCommand?.trim() || RUNPANE_CONTRACT.agentTemplates[record.agent].command,
+    });
+  }
+
+  /** Why a Session with chat tabs on runs in a terminal, for its overview. */
+  private terminalReason(record: OrchestrationSessionRecord): string | undefined {
+    const result = this.chatLaunch(record);
+    if (!result || panelManager.getPanel(record.panelIds[record.agent])?.type !== 'terminal') return undefined;
+    return 'terminalReason' in result ? result.terminalReason : 'It started in a terminal, and a Session keeps the kind of tab it started with. A new Session opens as a chat.';
   }
 
   private chatTabPort?: SessionChatTabs;
@@ -1041,6 +1052,8 @@ export class OrchestrationSessionManager extends EventEmitter {
   }
 
   private async refreshPanelLaunchState(panel: ToolPanel, record: OrchestrationSessionRecord): Promise<void> {
+    // A chat keeps its conversation in its own state; there is no terminal launch to refresh.
+    if (panel.type === 'chat') return;
     // SAFETY: Session-owned terminal panels persist their launch fields in the
     // TerminalPanelState custom state; resume ids and terminal buffers are
     // retained by spreading this previously validated state below.

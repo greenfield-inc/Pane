@@ -1007,6 +1007,12 @@ function SessionOverviewPanel({ record, folderSessionId, overview, error, onRefr
       {statusPage && !showDetails ? <SessionStatusPage url={statusPage} folderSessionId={folderSessionId} /> : <div className={cn('space-y-3 p-3 text-xs', statusPage && 'min-h-0 flex-1 overflow-y-auto')}>
         {editing ? renameForm : null}
 
+        {overview?.terminalReason && (
+          <div className="rounded-md border border-border-primary bg-surface-secondary px-2 py-2" data-testid="session-terminal-reason">
+            <h3 className={cn(OVERVIEW_HEADING, 'text-text-primary')}>Runs in a terminal</h3>
+            <p className="select-text text-text-secondary">{overview.terminalReason}</p>
+          </div>
+        )}
         {record.blockers.length > 0 && (
           <div className="rounded-md border border-status-error/30 bg-status-error/10 px-2 py-2">
             <h3 className={cn(OVERVIEW_HEADING, 'text-text-primary')}>Blockers</h3>

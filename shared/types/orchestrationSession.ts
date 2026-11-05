@@ -225,6 +225,8 @@ export interface OrchestrationSessionOverview {
   activity: OrchestrationActivity[];
   report?: OrchestrationReport & { freshness: 'current' | 'stale' };
   refreshedAt: string;
+  /** With chat tabs on, why this Session's orchestrator runs in a terminal instead of a chat. */
+  terminalReason?: string;
 }
 
 export interface OrchestrationSessionCreateInput {
