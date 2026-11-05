@@ -88,6 +88,12 @@ interface RunpaneSessionResult {
   session: OrchestrationSessionRecord;
   panelId?: string;
   internalSessionId?: string;
+  /** On `sessions update` with `archived: true`: what happened to each associated Pane. */
+  panes?: {
+    archivedPaneIds: string[];
+    keptPanes: Array<{ paneId: string; name: string; code: PaneArchiveBlockCode }>;
+    failedPanes: Array<{ paneId: string; name: string; error: string }>;
+  };
 }
 
 interface SessionSelectorValue {
@@ -591,6 +597,13 @@ interface PanelOpenResult {
   reused: boolean;
 }
 
+/** An agent mid-turn (`working`) or waiting for an answer (`blocked`); archiving would stop it. */
+interface PaneArchiveBusyAgent {
+  panelId: string;
+  title: string;
+  state: 'working' | 'blocked';
+}
+
 interface PaneArchiveSafetyCheck {
   performed: boolean;
   hasUncommittedChanges?: boolean;
@@ -604,9 +617,11 @@ interface PaneArchiveSafetyCheck {
   worktreeWillRemain?: true;
   upstreamGone?: boolean;
   mergedViaPr?: { number: number; headOid: string };
+  busyAgents?: PaneArchiveBusyAgent[];
+  unsentInput?: Array<{ panelId: string; title: string; kind: 'composer' | 'editor' }>;
 }
 
-type PaneArchiveBlockCode = 'uncommitted-changes' | 'unpushed-commits' | 'uncommitted-and-unpushed' | 'status-unknown';
+type PaneArchiveBlockCode = 'uncommitted-changes' | 'unpushed-commits' | 'uncommitted-and-unpushed' | 'status-unknown' | 'agent-busy' | 'unsent-input';
 
 interface PaneArchiveBlockedResult {
   ok: false;
@@ -1260,6 +1275,16 @@ const archiveSafetySchema: BoundarySchema<PaneArchiveSafetyCheck> = boundary.obj
     number: boundary.number,
     headOid: boundary.string,
   })),
+  busyAgents: boundary.optional(boundary.array(boundary.object({
+    panelId: boundary.string,
+    title: boundary.string,
+    state: boundary.enumeration('working', 'blocked'),
+  }))),
+  unsentInput: boundary.optional(boundary.array(boundary.object({
+    panelId: boundary.string,
+    title: boundary.string,
+    kind: boundary.enumeration('composer', 'editor'),
+  }))),
 });
 const agentReportFields = {
   state: boundary.enumeration('ready', 'blocked', 'failed', 'done'),
@@ -1301,7 +1326,7 @@ const panelLastMessageResultSchema: BoundarySchema<PanelLastMessageResult> = bou
     message: boundary.string,
   }),
 );
-const archiveBlockCodeSchema = boundary.enumeration('uncommitted-changes', 'unpushed-commits', 'uncommitted-and-unpushed', 'status-unknown');
+const archiveBlockCodeSchema = boundary.enumeration('uncommitted-changes', 'unpushed-commits', 'uncommitted-and-unpushed', 'status-unknown', 'agent-busy', 'unsent-input');
 const worktreeCleanupSchema = boundary.enumeration('completed', 'failed', 'timeout', 'not-applicable');
 const trashDeletionSchema = boundary.enumeration('pending', 'done');
 const panelSummarySchema: BoundarySchema<PanelSummary> = boundary.object({
@@ -1459,6 +1484,11 @@ export const runpaneSessionResultSchema: BoundarySchema<RunpaneSessionResult> = 
   session: orchestrationSessionRecordSchema,
   panelId: boundary.optional(boundary.nonEmptyString),
   internalSessionId: boundary.optional(boundary.nonEmptyString),
+  panes: boundary.optional(boundary.object({
+    archivedPaneIds: boundary.array(boundary.nonEmptyString),
+    keptPanes: boundary.array(boundary.object({ paneId: boundary.nonEmptyString, name: boundary.string, code: archiveBlockCodeSchema })),
+    failedPanes: boundary.array(boundary.object({ paneId: boundary.nonEmptyString, name: boundary.string, error: boundary.string })),
+  })),
 });
 const orchestrationPanelOverviewSchema = boundary.object({
   panelId: boundary.nonEmptyString,
@@ -1754,6 +1784,8 @@ const paneArchiveBulkResultSchema: BoundarySchema<PaneArchiveBulkResult> = bound
         'unpushed-commits',
         'uncommitted-and-unpushed',
         'status-unknown',
+        'agent-busy',
+        'unsent-input',
         'missing-pane',
         'already-archived',
         'main-repo',
@@ -2874,6 +2906,11 @@ function printSessionResult(result: RunpaneSessionResult, json: boolean, action:
   const prefix = action ? `${action} ` : '';
   console.log(`${prefix}${result.session.name} (${result.session.id})`);
   if (result.panelId) console.log(`  panel: ${result.panelId}`);
+  if (result.panes) {
+    console.log(`  archived ${result.panes.archivedPaneIds.length} Pane(s)`);
+    for (const pane of result.panes.keptPanes) console.log(`  kept open: ${pane.name} (${pane.paneId}) ${pane.code}; check it with \`runpane panes archive --pane ${pane.paneId} --dry-run\``);
+    for (const pane of result.panes.failedPanes) console.log(`  failed: ${pane.name} (${pane.paneId}) ${pane.error}`);
+  }
   return 0;
 }
 
@@ -3280,7 +3317,7 @@ export async function runPanesArchive(parsed: ParsedArgs): Promise<number> {
   if (parsed.dryRun) request.dryRun = true;
   if (parsed.removeWorktree) request.removeWorktree = true;
 
-  await confirmPaneArchive(parsed, `Archive pane ${request.paneId}${request.force ? ' (including any uncommitted or unpushed work)' : ''}`);
+  await confirmPaneArchive(parsed, `Archive pane ${request.paneId}${request.force ? ' (stopping its agents and discarding any unsent input, uncommitted or unpushed work)' : ''}`);
 
   const result = await invokeDaemon('runpane:panes:archive', [request], paneArchiveResultSchema, {
     paneDir: parsed.paneDir,
@@ -4823,6 +4860,12 @@ function printArchiveCommitEvidence(
   }
   for (const commit of safetyCheck.unpushedCommitDetails ?? []) {
     print(`Unpushed: ${commit.sha} ${commit.subject}`);
+  }
+  for (const agent of safetyCheck.busyAgents ?? []) {
+    print(`Busy: ${agent.title} (panel ${agent.panelId}) is ${agent.state === 'working' ? 'mid-turn' : 'waiting for an answer'}`);
+  }
+  for (const input of safetyCheck.unsentInput ?? []) {
+    print(`Unsent: ${input.title} (panel ${input.panelId}) ${input.kind === 'editor' ? 'has unsaved edits' : 'has text typed but not sent'}`);
   }
 }
 

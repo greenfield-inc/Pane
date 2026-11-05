@@ -152,9 +152,9 @@ runpane loops create --session new --name morning-standup --cron "0 9 * * 1-5" \
   are never caught up.
 - **Overlap.** A run starts even if the previous one is still going.
 - **Kept runs.** Pane keeps each loop's last 10 runs and archives older run
-  Panes. A run Pane with uncommitted or unpushed work is not archived: its run
-  stays in the loop's list with the note "Kept because the run Pane has
-  uncommitted or unpushed work", so a loop can show more than 10 runs. Archive the Pane yourself
+  Panes. A run Pane with unfinished work (a busy agent, unsent input, or
+  uncommitted or unpushed changes) is not archived: its run stays in the loop's
+  list with the note "Kept because the run Pane has unfinished work", so a loop can show more than 10 runs. Archive the Pane yourself
   when you're done; Pane tries again after each new run.
 - **Delete.** Deleting a loop stops its schedule. Its run Panes stay, as
   normal Panes.
@@ -193,7 +193,7 @@ runs happen in its Session; their `sessionId` is null.
   at a prompt such as folder trust, never became ready, or Pane could not
   confirm the prompt arrived. The app and plain `runpane loops list` show such
   a run as **needs attention**. On an older run, `error` can instead be the
-  note that its Pane was kept for its uncommitted or unpushed work.
+  note that its Pane was kept for its unfinished work.
 - `failed`: the Pane could not be created, or the Session could not be
   reached; `error` says why.
 - `skipped`: the run came and went while Pane was not running or the computer

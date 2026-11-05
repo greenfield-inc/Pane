@@ -442,6 +442,7 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     const titleBarOverlayWrites: JsonObject[] = [];
     const preferenceWrites: Array<{ key: string; value: string }> = [];
     const sessionDeleteCalls: string[] = [];
+    const sessionRestoreCalls: string[] = [];
     const sessionFavoriteToggleCalls: string[] = [];
     const gitStageAndCommitCalls: Array<{ sessionId: string; message: string }> = [];
     let gitIdentity = mockOptions.gitIdentity ? clone(mockOptions.gitIdentity) : null;
@@ -1340,6 +1341,10 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
           sessionDeleteCalls.push(sessionId);
           return success();
         },
+        restore: (sessionId: string) => {
+          sessionRestoreCalls.push(sessionId);
+          return success();
+        },
         permanentDelete: () => success(),
         permanentDeleteArchived: () => success({ deletedCount: 0 }),
         toggleFavorite: (sessionId: string) => {
@@ -1894,6 +1899,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         getSessionDeleteCalls() {
           return clone(sessionDeleteCalls);
+        },
+        getSessionRestoreCalls() {
+          return clone(sessionRestoreCalls);
         },
         getSessionFavoriteToggleCalls() {
           return clone(sessionFavoriteToggleCalls);

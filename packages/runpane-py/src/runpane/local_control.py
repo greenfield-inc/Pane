@@ -713,6 +713,13 @@ def print_session_result(result: Dict[str, Any], as_json: bool, action: str) -> 
     print(f"{prefix}Session {session.get('name')} ({session.get('id')})")
     if result.get("panelId"):
         print(f"Panel: {result.get('panelId')}")
+    panes = result.get("panes")
+    if panes:
+        print(f"Archived {len(panes.get('archivedPaneIds', []))} Pane(s)")
+        for pane in panes.get("keptPanes", []):
+            print(f"Kept open: {pane.get('name')} ({pane.get('paneId')}) {pane.get('code')}; check it with `runpane panes archive --pane {pane.get('paneId')} --dry-run`")
+        for pane in panes.get("failedPanes", []):
+            print(f"Failed: {pane.get('name')} ({pane.get('paneId')}) {pane.get('error')}")
     return 0
 
 
@@ -1165,7 +1172,7 @@ def run_panes_archive(parsed: Any) -> int:
         **optional_value("removeWorktree", True if parsed.remove_worktree else None),
     }
 
-    suffix = " (including any uncommitted or unpushed work)" if request.get("force") else ""
+    suffix = " (stopping its agents and discarding any unsent input, uncommitted or unpushed work)" if request.get("force") else ""
     confirm_pane_archive(parsed, f"Archive pane {request.get('paneId')}{suffix}")
 
     result = invoke_daemon(
@@ -2616,6 +2623,12 @@ def print_archive_commit_evidence(safety_check: Dict[str, Any], file: Any = None
         print(f"Merged via PR #{merged.get('number')} (head {merged.get('headOid')})", file=destination)
     for commit in safety_check.get("unpushedCommitDetails") or []:
         print(f"Unpushed: {commit.get('sha')} {commit.get('subject')}", file=destination)
+    for agent in safety_check.get("busyAgents") or []:
+        state = "mid-turn" if agent.get("state") == "working" else "waiting for an answer"
+        print(f"Busy: {agent.get('title')} (panel {agent.get('panelId')}) is {state}", file=destination)
+    for unsent in safety_check.get("unsentInput") or []:
+        what = "has unsaved edits" if unsent.get("kind") == "editor" else "has text typed but not sent"
+        print(f"Unsent: {unsent.get('title')} (panel {unsent.get('panelId')}) {what}", file=destination)
 
 
 def print_panel_create_result(result: Dict[str, Any]) -> None:

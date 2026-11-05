@@ -2485,7 +2485,7 @@ export const RUNPANE_CONTRACT = {
       },
       {
         "name": "--force",
-        "description": "Archive even if the pane's branch has uncommitted, untracked, or unpushed changes; for lock release, release another owner's lock."
+        "description": "Archive even if the pane's branch has uncommitted, untracked, or unpushed changes, one of its agents is mid-turn, or a tab holds unsent input; for lock release, release another owner's lock."
       },
       {
         "name": "--remove-worktree",
@@ -3139,12 +3139,12 @@ export const RUNPANE_CONTRACT = {
         "  runpane panes archive --pane <pane-id> [--source user|agent] [--force] [--remove-worktree] [--dry-run] --yes [--json]",
         "  runpane panes archive --session <id|name> --merged [--remove-worktree] [--source user|agent] [--dry-run] --yes [--json]",
         "",
-        "Archives a Pane (session) exactly like the UI Archive action, including removal of its Pane-managed git worktree. Refreshes the configured upstream before checking for unpushed commits and reports exact commit evidence. When the branch has no upstream or its upstream is gone, a merged GitHub pull request whose head is HEAD (found with `gh`) counts as pushed. Refuses unsafe archives unless --force is passed. An adopted worktree is kept unless --remove-worktree is passed, which applies the same safety check and removal. The local branch is always kept. With --session and --merged, archives every Pane associated with the Session whose work is clean and pushed or merged, and reports a reason for each Pane it skips. Use --dry-run to print the evidence without mutating Pane state.",
+        "Archives a Pane (session) exactly like the UI Archive action, including removal of its Pane-managed git worktree. Refreshes the configured upstream before checking for unpushed commits and reports exact commit evidence. When the branch has no upstream or its upstream is gone, a merged GitHub pull request whose head is HEAD (found with `gh`) counts as pushed. Refuses unsafe archives unless --force is passed. An adopted worktree is kept unless --remove-worktree is passed, which applies the same safety check and removal. The local branch is always kept. With --session and --merged, archives every Pane associated with the Session whose work is clean and pushed or merged, and reports a reason for each Pane it skips. Use --dry-run to print the evidence without mutating Pane state. Refuses a Pane with an agent mid-turn or waiting for an answer (agent-busy), or with a tab holding unsent composer text or unsaved editor edits (unsent-input), unless --force is passed; the --session sweep skips it.",
         "",
         "Options:",
         "  --pane <pane-id>               Pane/session id to archive",
         "  --source <user|agent>          Mark mutation source",
-        "  --force                        Archive even if the pane has uncommitted, untracked, or unpushed changes",
+        "  --force                        Archive even if the pane has uncommitted, untracked, or unpushed changes, a busy agent, or unsent input",
         "  --remove-worktree              Also check and remove an adopted Pane's worktree (the branch is kept)",
         "  --session <id|name>            Archive the Panes associated with this Session (requires --merged)",
         "  --merged                       Only archive Panes that are clean and pushed, or merged via a PR",
@@ -4903,7 +4903,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane panes archive --pane <pane-id> [--source user|agent] [--force] [--remove-worktree] [--dry-run] --yes [--json]",
         "  runpane panes archive --session <id|name> --merged [--remove-worktree] [--source user|agent] [--dry-run] --yes [--json]",
         "",
-        "Archives a Pane (session) exactly like the UI Archive action, including removal of its Pane-managed git worktree. Refreshes the configured upstream before checking for unpushed commits and reports exact commit evidence. When the branch has no upstream or its upstream is gone, a merged GitHub pull request whose head is HEAD (found with `gh`) counts as pushed. Refuses unsafe archives unless --force is passed. An adopted worktree is kept unless --remove-worktree is passed, which applies the same safety check and removal. The local branch is always kept. With --session and --merged, archives every Pane associated with the Session whose work is clean and pushed or merged, and reports a reason for each Pane it skips. Use --dry-run to print the evidence without mutating Pane state.",
+        "Archives a Pane (session) exactly like the UI Archive action, including removal of its Pane-managed git worktree. Refreshes the configured upstream before checking for unpushed commits and reports exact commit evidence. When the branch has no upstream or its upstream is gone, a merged GitHub pull request whose head is HEAD (found with `gh`) counts as pushed. Refuses unsafe archives unless --force is passed. An adopted worktree is kept unless --remove-worktree is passed, which applies the same safety check and removal. The local branch is always kept. With --session and --merged, archives every Pane associated with the Session whose work is clean and pushed or merged, and reports a reason for each Pane it skips. Use --dry-run to print the evidence without mutating Pane state. Refuses a Pane with an agent mid-turn or waiting for an answer (agent-busy), or with a tab holding unsent composer text or unsaved editor edits (unsent-input), unless --force is passed; the --session sweep skips it.",
         "",
         "Options:",
         "  --pane <pane-id>",
@@ -6197,7 +6197,7 @@ export const RUNPANE_CONTRACT = {
       "`runpane panes cost` reports estimated token costs per Pane for the last 30 days, including per-model breakdowns and cache efficiency; unscoped output includes an Unattributed bucket that reconciles against workspace totals.",
       "`runpane panes create` connects to the running local Pane daemon, resolves the requested saved base repository, creates user-visible Pane sessions backed by Pane-managed worktrees/branches, opens terminal-backed tool tabs, and optionally sends initial input to the started tool. Built-in agent panes and `--source agent` default to background/no-focus unless `--focus` is passed. New Panes are pinned into the UI's favorite/pin set by default, except when the CLI runs inside a Session orchestrator (`PANE_ORCHESTRATION_SESSION_ID`), where child worktrees default to unpinned. Explicit `--pinned` / `--no-pinned` override creation defaults. First Session association clears an existing pin, including an explicit creation pin; use `panes pin` after association to pin a child. This avoids duplicating Session children in the global pinned list. Manual pins applied afterward are preserved. Panes created interactively in the Pane UI are unaffected. Inside a Session orchestrator (`PANE_ORCHESTRATION_SESSION_ID` set), new Panes are associated with that Session automatically; `--no-associate` opts out. A failed association is reported on the item and never undoes the Pane.",
       "For `panes create --wait-ready` (and `panels create`, `panes adopt --launch`), ready means an identified agent at its own input box: declared with `--agent`, or detected from the command, its foreground process or its screen. A `--tool-command` that never shows a supported agent is not ready: `readiness.ok` is false with `readiness.reason.code` `no-agent-detected` after the timeout, or `command-exited` as soon as the command exits back to the shell, and nothing is typed into it. `agent-not-ready` means the agent was detected but its input box was not ready in time. CLI readiness is confirmed on consecutive polls. Codex also requires a recognized configured model or context footer below its live composer; its provisional startup composer is not ready. Hidden or unrecognized Codex status lines conservatively time out rather than prove readiness. Startup prompts return blocked with the prompt's own text in blocked.message and a suggestedCommand, and Pane never answers them, apart from Claude's folder trust for a Session's own folder: first-run trust and daemon dialogs and Agent Farm's `Trust this repository workspace? [y/N]` as blocked.kind=first-run-dialog; Codex's security setup banner and any other prompt, including a wrapper's or shell's `[y/N]` before the agent appears, as agent-prompt. A starting message blocked this way is held and sent once the prompt is answered and the agent's input box is ready. Every create with a starting message returns `initialInput`. Pane stages the text in the composer, presses the agent's submit key separately (Ctrl+Enter for Codex, declared or detected), and checks where it went: `initialInput.delivery` is `taken` or `queued` (from the agent's transcript or its screen), `in-composer`, or `unknown` (`argv` means a prompt was routed at launch; Pane gives the transcript up to 10 seconds before settling on unknown). `initialInput.verifiedSubmitted` is true exactly when it is `taken` or `queued`, and the create's `ok` is false unless a Claude or Codex starting message is verified. Cursor and OpenCode have no acceptance probe: their delivery stays `unknown` with a delivery.message saying so, `verification: unverifiable`, and `ok` follows readiness. Without `--wait-ready` the create returns at once with `initialInput.verifiedSubmitted: false`, a delivery.message saying the call did not wait, and a `panels wait` nextCommand; Pane still sends the message once the agent is identified and at its input box, and gives up without typing it if no supported agent appears within 30 seconds.",
-      "`runpane panes archive` refreshes the configured upstream, reports exact unpushed commit evidence, and refuses unsafe archive operations unless `--force` is used. A branch whose upstream is gone counts as pushed when a merged GitHub pull request has HEAD as its head (`safetyCheck.mergedViaPr`). Add `--dry-run` to inspect the same evidence without archiving. `--remove-worktree` applies the same check and removal to an adopted worktree; local branches are always kept. Successful archives report `worktreeCleanup: completed` once the worktree is gone from its path and from git; `trashDeletion: pending` means its files are still being deleted in the background. `runpane panes archive --session <id|name> --merged` archives every Session Pane that is clean and pushed or merged, and reports a reason for each skipped Pane.",
+      "`runpane panes archive` refreshes the configured upstream, reports exact unpushed commit evidence, and refuses unsafe archive operations unless `--force` is used. A branch whose upstream is gone counts as pushed when a merged GitHub pull request has HEAD as its head (`safetyCheck.mergedViaPr`). Add `--dry-run` to inspect the same evidence without archiving. `--remove-worktree` applies the same check and removal to an adopted worktree; local branches are always kept. Successful archives report `worktreeCleanup: completed` once the worktree is gone from its path and from git; `trashDeletion: pending` means its files are still being deleted in the background. `runpane panes archive --session <id|name> --merged` archives every Session Pane that is clean and pushed or merged, and reports a reason for each skipped Pane. Archive refuses a Pane with an agent mid-turn or waiting for an answer (`agent-busy`, listed in `safetyCheck.busyAgents`), or with a tab holding unsent composer text or unsaved editor edits (`unsent-input`, listed in `safetyCheck.unsentInput`), unless `--force` is used, and the Session sweep skips it.",
       "`runpane panes rename` trims and updates a Pane's display name without changing its worktree, branch, panels, or focus, and returns the updated pane summary.",
       "`runpane panes focus` raises the Pane window and selects a Pane (and optionally one of its panels) exactly like clicking it in the UI. Because it steals the user's window focus, run it only on an explicit user request to open, focus, show, or switch to a Pane; never focus a Pane proactively, the same doctrine that keeps `panes create` background/no-focus for `--source agent`.",
       "`runpane panels open` opens a URL or a file from the Pane worktree as a tab in an existing Pane (default: the calling panel's Pane from `PANE_SESSION_ID`), in split view beside the agent unless `--tab` is passed. Files open in an editor tab with read-only previews for supported formats, and HTML opens as editable source; an existing tab showing the same target is reused. It brings the tab forward for clients already showing that Pane, and never raises or focuses the Pane window or switches anyone's Pane.",
@@ -10863,6 +10863,60 @@ export const RUNPANE_CONTRACT = {
                     }
                   },
                   "additionalProperties": false
+                },
+                "busyAgents": {
+                  "type": "array",
+                  "description": "Agents in the Pane that are mid-turn (working) or waiting for an answer (blocked). Archiving would stop them, so archive refuses with agent-busy unless --force.",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "panelId",
+                      "title",
+                      "state"
+                    ],
+                    "properties": {
+                      "panelId": {
+                        "type": "string"
+                      },
+                      "title": {
+                        "type": "string"
+                      },
+                      "state": {
+                        "enum": [
+                          "working",
+                          "blocked"
+                        ]
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "unsentInput": {
+                  "type": "array",
+                  "description": "Tabs holding input a person typed that archiving would lose: an agent composer's unsent text or an editor's unsaved edits. Archive refuses with unsent-input unless --force.",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "panelId",
+                      "title",
+                      "kind"
+                    ],
+                    "properties": {
+                      "panelId": {
+                        "type": "string"
+                      },
+                      "title": {
+                        "type": "string"
+                      },
+                      "kind": {
+                        "enum": [
+                          "composer",
+                          "editor"
+                        ]
+                      }
+                    },
+                    "additionalProperties": false
+                  }
                 }
               },
               "additionalProperties": false
@@ -10939,7 +10993,9 @@ export const RUNPANE_CONTRACT = {
                     "uncommitted-changes",
                     "unpushed-commits",
                     "uncommitted-and-unpushed",
-                    "status-unknown"
+                    "status-unknown",
+                    "agent-busy",
+                    "unsent-input"
                   ]
                 },
                 "message": {
@@ -11001,6 +11057,12 @@ export const RUNPANE_CONTRACT = {
                     },
                     "worktreeWillRemain": {
                       "const": true
+                    },
+                    "busyAgents": {
+                      "$ref": "#/jsonSchemas/paneArchiveResult/oneOf/0/properties/safetyCheck/properties/busyAgents"
+                    },
+                    "unsentInput": {
+                      "$ref": "#/jsonSchemas/paneArchiveResult/oneOf/0/properties/safetyCheck/properties/unsentInput"
                     }
                   },
                   "additionalProperties": false
@@ -12965,6 +13027,77 @@ export const RUNPANE_CONTRACT = {
         },
         "internalSessionId": {
           "type": "string"
+        },
+        "panes": {
+          "type": "object",
+          "description": "Only when the update archived the Session: what happened to each associated Pane.",
+          "required": [
+            "archivedPaneIds",
+            "keptPanes",
+            "failedPanes"
+          ],
+          "properties": {
+            "archivedPaneIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "keptPanes": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "paneId",
+                  "name",
+                  "code"
+                ],
+                "properties": {
+                  "paneId": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "code": {
+                    "enum": [
+                      "uncommitted-changes",
+                      "unpushed-commits",
+                      "uncommitted-and-unpushed",
+                      "status-unknown",
+                      "agent-busy",
+                      "unsent-input"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "failedPanes": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "paneId",
+                  "name",
+                  "error"
+                ],
+                "properties": {
+                  "paneId": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "error": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -13714,6 +13847,8 @@ export const RUNPANE_CONTRACT = {
                       "unpushed-commits",
                       "uncommitted-and-unpushed",
                       "status-unknown",
+                      "agent-busy",
+                      "unsent-input",
                       "missing-pane",
                       "already-archived",
                       "main-repo",
@@ -16649,7 +16784,7 @@ export const RUNPANE_CONTRACT = {
       "panes archive": {
         "name": "panes archive",
         "summary": "Archive a Pane (session) exactly like the UI Archive action, including safe removal of its Pane-managed git worktree, or archive every merged Pane in a Session.",
-        "details": "Use this to close out a Pane once its PR has merged. The safety check refreshes the configured upstream before comparing it to HEAD and includes exact unpushed commit IDs and subjects. When the branch has no upstream or its upstream is gone (GitHub deletes merged branches), a merged pull request whose head is HEAD counts as pushed, so squash-merged branches archive without --force. Refuses unsafe archive operations unless --force is used. Use --dry-run to inspect the same evidence without mutating Pane state. Use --session <id|name> --merged to close out every finished Pane of a Session at once.",
+        "details": "Use this to close out a Pane once its PR has merged. The safety check refreshes the configured upstream before comparing it to HEAD and includes exact unpushed commit IDs and subjects. When the branch has no upstream or its upstream is gone (GitHub deletes merged branches), a merged pull request whose head is HEAD counts as pushed, so squash-merged branches archive without --force. Refuses unsafe archive operations unless --force is used. Use --dry-run to inspect the same evidence without mutating Pane state. Use --session <id|name> --merged to close out every finished Pane of a Session at once. Archive also refuses a Pane with an agent mid-turn or waiting for an answer (`agent-busy`, listed in `safetyCheck.busyAgents`), or with a tab holding unsent composer text or unsaved editor edits (`unsent-input`, listed in `safetyCheck.unsentInput`), unless --force is used, since archiving stops the agent or loses the input.",
         "requiresPaneDaemon": true,
         "mutates": true,
         "arguments": [
@@ -16668,7 +16803,7 @@ export const RUNPANE_CONTRACT = {
           {
             "name": "--force",
             "required": false,
-            "description": "Archive even if the pane's branch has uncommitted, untracked, or unpushed changes."
+            "description": "Archive even if the pane's branch has uncommitted, untracked, or unpushed changes, one of its agents is mid-turn or waiting for an answer (archiving stops it), or a tab holds unsent input (archiving loses it)."
           },
           {
             "name": "--remove-worktree",
@@ -16732,7 +16867,9 @@ export const RUNPANE_CONTRACT = {
           "With --session --merged, each item has outcome archived, would-archive (dry run), skipped (with skipped.code and skipped.message), or failed.",
           "Archiving a main-repo Pane (no Pane-managed worktree) always succeeds immediately since nothing is deleted from disk.",
           "Undo an archive with `runpane panes restore --pane <pane-id> --yes`, which recreates the worktree. `runpane links create --pane <pane-id>` gives the user a link to review the Pane first.",
-          "When the safety check is skipped, `safetyCheck.reason` says why: `external-worktree` (an adopted Pane whose worktree Pane does not own), `main-repo`, `missing-project-context`, or `git-error`. `worktreeWillRemain: true` means archiving leaves the worktree on disk."
+          "When the safety check is skipped, `safetyCheck.reason` says why: `external-worktree` (an adopted Pane whose worktree Pane does not own), `main-repo`, `missing-project-context`, or `git-error`. `worktreeWillRemain: true` means archiving leaves the worktree on disk.",
+          "An agent mid-turn or waiting for an answer blocks archive with `agent-busy` (`safetyCheck.busyAgents` lists them); wait until it is idle with `runpane panels wait --panel <id> --for idle`, then archive again. The Session sweep skips such a Pane with skipped.code `agent-busy`.",
+          "A tab holding text typed into an agent's composer but not sent, or an editor with unsaved edits, blocks archive with `unsent-input` (`safetyCheck.unsentInput` lists them); send, save or clear it, then archive again. `--force` discards it."
         ]
       },
       "panes pin": {
@@ -19312,6 +19449,7 @@ export const RUNPANE_CONTRACT = {
           "JSON isPinned: true/false sets the UI pin star. Creation defaults to false; update preserves the pin when omitted.",
           "Payload fields (all optional on update; name required on create): name, goal, context, nextAction, launchCommand, profile (strings); isPinned and, on update, archived (booleans); agent (codex|claude|cursor); decisions and blockers (arrays of strings); evidence and outputs (arrays of links); create also takes runtime (windows|wsl) and wslDistribution; update also takes report, expectedRevision (the revision you read; the update is refused if the Session has moved on) and source (user|agent).",
           "A link is {\"label\": non-empty string, \"url\": an https://, http://, file:// or grain:// URL, \"addedAt\": ISO 8601 date such as 2026-10-14T09:30:00Z, \"kind\"?: evidence|output|ticket|pull-request|other, \"provenance\"?: string}.",
+          "archived: true also archives every Pane associated with the Session, as `panes archive --pane` would. A Pane that check refuses stays open (agent-busy, unsent-input, uncommitted-changes, unpushed-commits, uncommitted-and-unpushed, status-unknown), and so does one whose archive fails. The result's `panes` lists `archivedPaneIds`, `keptPanes` (with `code`) and `failedPanes` (with `error`); check a kept Pane with `panes archive --pane <id> --dry-run --json`. Undo is the person's: `panes restore`.",
           "Arrays replace the stored value: send the whole list, not only new items.",
           "Every problem in the payload is reported at once in one ERR_SESSION_PAYLOAD_INVALID error (paths such as outputs[0].addedAt, \"missing\" for an absent required field), and nothing is changed.",
           "update only: report is {\"summary\": non-empty string, \"status\": reported|verified, \"evidence\": [at least one link], \"reportedAt\": ISO 8601 date, \"provenance\": non-empty string}; report null clears it.",

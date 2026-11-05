@@ -44,6 +44,7 @@ import type { MachineCommand, MachineConnectionsEvent, MachineReadChannel, Machi
 import type {
   OrchestrationAssociationInput,
   OrchestrationSessionCreateInput,
+  OrchestrationSessionArchiveSelection,
   OrchestrationSessionSelector,
   OrchestrationSessionUpdateInput,
 } from '../../shared/types/orchestrationSession';
@@ -456,6 +457,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     associate: (selector: OrchestrationSessionSelector, association: OrchestrationAssociationInput): Promise<IPCResponse> => invokeIpc('orchestration-sessions:associate', selector, association),
     detach: (selector: OrchestrationSessionSelector, paneId?: string): Promise<IPCResponse> => invokeIpc('orchestration-sessions:detach', selector, paneId),
     overview: (selector: OrchestrationSessionSelector): Promise<IPCResponse> => invokeIpc('orchestration-sessions:overview', selector),
+    archivePreview: (selector: OrchestrationSessionSelector): Promise<IPCResponse> => invokeIpc('orchestration-sessions:archive-preview', selector),
+    archive: (selector: OrchestrationSessionSelector, selection: OrchestrationSessionArchiveSelection): Promise<IPCResponse> => invokeIpc('orchestration-sessions:archive', selector, selection),
   },
 
   // Token usage, cost and rate-limit reporting

@@ -144,6 +144,8 @@ import type {
   RunpanePanelCreateRequest,
   RunpanePanelCreateResult,
   RunpanePanelOpenRequest,
+  RunpanePaneArchiveBusyAgent,
+  RunpanePaneArchiveUnsentInput,
   RunpanePanelOpenResult,
   RunpanePanelInputRequest,
   RunpanePanelInputResult,
@@ -227,7 +229,13 @@ import { previewLoopSchedule } from '../services/loops/loopSchedule';
 import { loopInputSchema } from '../../../shared/types/loop';
 import type {
   OrchestrationAssociationInput,
+  OrchestrationSessionArchivedPanes,
+  OrchestrationSessionArchivePane,
+  OrchestrationSessionArchivePreview,
+  OrchestrationSessionArchiveSelection,
   OrchestrationSessionCreateInput,
+  OrchestrationSessionRecord,
+  OrchestrationSessionSelector,
   OrchestrationSessionUpdateInput,
 } from '../../../shared/types/orchestrationSession';
 import type { PaneChatAgent } from '../../../shared/types/paneChat';
@@ -686,10 +694,9 @@ export function registerRunpaneHandlers(
 
   commandRegistry.register('runpane:sessions:update', async (request: PaneCommandValue): Promise<RunpaneSessionResult> => {
     return withRunpaneAction(services, 'sessions:update', {}, async () => {
-      const manager = requireOrchestrationSessionManager(services);
       const normalized = parseOrchestrationSessionUpdateRequest(request);
-      const session = await manager.update(normalized.selector, normalized.input);
-      return { ok: true, session };
+      const { session, panes } = await updateOrchestrationSession(services, commandRegistry, normalized.selector, normalized.input);
+      return panes ? { ok: true, session, panes } : { ok: true, session };
     }, result => ({ resultCount: 1 }));
   });
 
@@ -1122,14 +1129,7 @@ export function registerRunpaneHandlers(
 
       const removeWorktree = Boolean(normalized.removeWorktree);
       await assertRemovableWorktree(services, pane, removeWorktree);
-      const worktreeCleanupApplicable = ownsRemovableWorktree(databaseService.getSession(pane.id))
-        || (removeWorktree && removesPaneWorktree(pane, removeWorktree));
-      const cleanupSkipReason = worktreeCleanupApplicable ? undefined : archiveCleanupSkipReason(pane);
-      const safetyCheck: RunpanePaneArchiveSafetyCheck = worktreeCleanupApplicable
-        ? await computeArchiveSafety(services, pane)
-        : { performed: false, reason: cleanupSkipReason, worktreeWillRemain: true };
-
-      const blockCode = classifyArchiveBlock(safetyCheck, worktreeCleanupApplicable);
+      const { safetyCheck, blockCode, worktreeCleanupApplicable } = await checkPaneArchive(services, pane, removeWorktree);
       if (normalized.dryRun) {
         return {
           ok: true,
@@ -2221,6 +2221,20 @@ function panelResumeSummary(
   const source = effectiveCustomResume({ initialCommand, customResume: optionalCustomResume(customState.customResume) })?.source;
   const resumeSource: RunpanePanelResumeSource = source === 'agent-farm' ? 'agent-farm' : source === 'explicit' ? 'configured' : 'agent';
   return { resumeId, resumeSource };
+}
+
+/** A live terminal's current screen, or undefined for any other tab. */
+async function livePanelScreen(panel: ToolPanel): Promise<RunpanePanelScreenResult | undefined> {
+  if (panel.type !== 'terminal') return undefined;
+  if (!terminalPanelManager.isTerminalInitialized(panel.id)) return undefined;
+  const screen = await buildPanelScreenResult(panel, DEFAULT_PANEL_SCREEN_LIMIT);
+  return screen.state.running ? screen : undefined;
+}
+
+/** Input a person typed that closing or archiving this tab would lose: a composer draft or unsaved editor edits. */
+function panelUnsentInput(panel: ToolPanel, screen: RunpanePanelScreenResult | undefined): RunpanePaneArchiveUnsentInput['kind'] | undefined {
+  if (panel.type === 'editor' && isRecord(panel.state.customState) && panel.state.customState.isDirty === true) return 'editor';
+  return screen?.composer.hasUndeliveredText ? 'composer' : undefined;
 }
 
 /**
@@ -5454,6 +5468,96 @@ function resolvePane(sessionManager: AppServices['sessionManager'], paneId: stri
   return session;
 }
 
+/**
+ * Updates a Session; `archived: true` also archives the Panes associated with it (see
+ * `archiveSessionPanesWith`) and returns what happened to each in `panes`.
+ */
+export async function updateOrchestrationSession(
+  services: AppServices,
+  commandRegistry: PaneCommandRegistry,
+  selector: OrchestrationSessionSelector,
+  input: OrchestrationSessionUpdateInput,
+  selection?: OrchestrationSessionArchiveSelection,
+): Promise<{ session: OrchestrationSessionRecord; panes?: OrchestrationSessionArchivedPanes }> {
+  const session = await requireOrchestrationSessionManager(services).update(selector, input);
+  if (input.archived !== true) return { session };
+  return { session, panes: await archiveSessionPanesWith(services, commandRegistry, session, selection) };
+}
+
+/**
+ * Archives the Session's open Panes after the Session itself. Without a selection every Pane is
+ * considered and one the single-Pane archive refuses stays open. With one, only the approved Panes
+ * are: `archivePaneIds` are checked again, `forcePaneIds` are archived as the person chose. Each
+ * archive waits for its worktree removal, so restoring the Pane right after (Undo) finds no cleanup
+ * in flight.
+ */
+async function archiveSessionPanesWith(
+  services: AppServices,
+  commandRegistry: PaneCommandRegistry,
+  session: Pick<OrchestrationSessionRecord, 'associations'>,
+  selection: OrchestrationSessionArchiveSelection | undefined,
+): Promise<OrchestrationSessionArchivedPanes> {
+  const result: OrchestrationSessionArchivedPanes = { archivedPaneIds: [], keptPanes: [], failedPanes: [] };
+  for (const pane of openSessionPanes(services, session)) {
+    const force = selection?.forcePaneIds.includes(pane.id) ?? false;
+    if (selection && !force && !selection.archivePaneIds.includes(pane.id)) continue;
+    try {
+      const check = await checkPaneArchive(services, pane, false);
+      if (check.blockCode && !force) {
+        result.keptPanes.push({ paneId: pane.id, name: pane.name, code: check.blockCode });
+        continue;
+      }
+      const { worktreeCleanup } = await archivePaneAndRemoveWorktree(services, commandRegistry, pane, check.worktreeCleanupApplicable);
+      if (isArchiveCleanupOk(worktreeCleanup)) result.archivedPaneIds.push(pane.id);
+      else result.failedPanes.push({ paneId: pane.id, name: pane.name, error: 'Pane was archived but its worktree could not be removed.' });
+    } catch (error) {
+      result.failedPanes.push({ paneId: pane.id, name: pane.name, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  return result;
+}
+
+/** The Panes archiving this Session would take, each with the code a plain archive refuses it with, if any. Changes nothing. */
+export async function previewOrchestrationSessionArchive(
+  services: AppServices,
+  selector: OrchestrationSessionSelector,
+): Promise<OrchestrationSessionArchivePreview> {
+  const session = await requireOrchestrationSessionManager(services).get(selector);
+  const panes: OrchestrationSessionArchivePane[] = [];
+  for (const pane of openSessionPanes(services, session)) {
+    // A Pane whose check fails is reported as unsafe, so the person is asked about it and the rest still preview.
+    const blockCode = await checkPaneArchive(services, pane, false).then(check => check.blockCode, (): RunpanePaneArchiveBlockCode => 'status-unknown');
+    panes.push({ paneId: pane.id, name: pane.name, blocked: blockCode });
+  }
+  return { sessionId: session.id, panes };
+}
+
+/** Each open Pane associated with the Session, once. */
+function openSessionPanes(services: AppServices, session: Pick<OrchestrationSessionRecord, 'associations'>): Session[] {
+  return [...new Set(session.associations.map(association => association.paneId))]
+    .map(paneId => services.sessionManager.getSession(paneId))
+    .filter((pane): pane is Session => pane !== undefined && !pane.archived);
+}
+
+/**
+ * What archiving this Pane would put at risk: agents mid-turn, unsent input and, when archiving
+ * removes its worktree, unsaved work there. `blockCode` is why a plain archive refuses it.
+ */
+async function checkPaneArchive(services: AppServices, pane: Session, removeWorktree: boolean): Promise<{
+  safetyCheck: RunpanePaneArchiveSafetyCheck;
+  blockCode: RunpanePaneArchiveBlockCode | undefined;
+  worktreeCleanupApplicable: boolean;
+}> {
+  const worktreeCleanupApplicable = ownsRemovableWorktree(services.databaseService.getSession(pane.id))
+    || (removeWorktree && removesPaneWorktree(pane, removeWorktree));
+  const safetyCheck: RunpanePaneArchiveSafetyCheck = worktreeCleanupApplicable
+    ? await computeArchiveSafety(services, pane)
+    : { performed: false, reason: archiveCleanupSkipReason(pane), worktreeWillRemain: true };
+  withBusyAgents(safetyCheck, pane.id);
+  await withUnsentInput(safetyCheck, pane.id);
+  return { safetyCheck, blockCode: classifyArchiveBlock(safetyCheck, worktreeCleanupApplicable), worktreeCleanupApplicable };
+}
+
 /** Why archive leaves this pane's worktree alone, or undefined when archive removes it. */
 function archiveCleanupSkipReason(pane: Session): RunpanePaneArchiveSafetyCheckReason | undefined {
   if (pane.worktreeOwnership === 'external') return 'external-worktree';
@@ -5715,7 +5819,7 @@ async function archiveSessionPanes(
       }
       // Evaluate every Pane, including adopted ones that keep their worktree:
       // --merged selects by evidence, not by what archiving deletes.
-      const safetyCheck = await computeArchiveSafety(services, pane);
+      const safetyCheck = await withUnsentInput(withBusyAgents(await computeArchiveSafety(services, pane), paneId), paneId);
       if (!removesWorktree) safetyCheck.worktreeWillRemain = true;
       const blockCode = classifyArchiveBlock(safetyCheck, true);
       if (blockCode) {
@@ -5830,7 +5934,54 @@ function describeUnmergedPr(
   }
 }
 
+/**
+ * `working` or `blocked` when the panel's agent is mid-turn or waiting for an answer. Only agent
+ * tabs count: Pane reports any terminal printing output as working, and a dev server is not a turn.
+ */
+function agentBusyState(panel: ToolPanel): 'working' | 'blocked' | undefined {
+  const state = panel.type === 'terminal' && panelToSummary(panel).isCliPanel ? terminalPanelManager.getAgentStatus(panel.id) : undefined;
+  return state === 'working' || state === 'blocked' ? state : undefined;
+}
+
+/** Record the Pane's agents that are mid-turn on the safety check; archiving would stop them. */
+function withBusyAgents(check: RunpanePaneArchiveSafetyCheck, paneId: string): RunpanePaneArchiveSafetyCheck {
+  const busyAgents = panelManager.getPanelsForSession(paneId).flatMap((panel): RunpanePaneArchiveBusyAgent[] => {
+    const state = agentBusyState(panel);
+    return state ? [{ panelId: panel.id, title: panel.title, state }] : [];
+  });
+  if (busyAgents.length > 0) check.busyAgents = busyAgents;
+  return check;
+}
+
+/** Record the Pane's tabs holding unsent or unsaved input; archiving would lose it. */
+async function withUnsentInput(check: RunpanePaneArchiveSafetyCheck, paneId: string): Promise<RunpanePaneArchiveSafetyCheck> {
+  const unsentInput: RunpanePaneArchiveUnsentInput[] = [];
+  for (const panel of panelManager.getPanelsForSession(paneId)) {
+    const kind = panelUnsentInput(panel, await livePanelScreen(panel));
+    if (kind) unsentInput.push({ panelId: panel.id, title: panel.title, kind });
+  }
+  if (unsentInput.length > 0) check.unsentInput = unsentInput;
+  return check;
+}
+
+function describeUnsentInput(check: RunpanePaneArchiveSafetyCheck): string {
+  return (check.unsentInput ?? [])
+    .map(input => `${input.title} (panel ${input.panelId}) ${input.kind === 'editor' ? 'has unsaved edits' : 'has text typed but not sent'}`)
+    .join('; ');
+}
+
+function describeBusyAgents(check: RunpanePaneArchiveSafetyCheck): string {
+  return (check.busyAgents ?? [])
+    .map(agent => `${agent.title} (panel ${agent.panelId}) is ${agent.state === 'working' ? 'mid-turn' : 'waiting for an answer'}`)
+    .join('; ');
+}
+
 function classifyArchiveBlock(check: RunpanePaneArchiveSafetyCheck, applicable: boolean): RunpanePaneArchiveBlockCode | undefined {
+  // Archiving stops every agent in the Pane, whether or not its worktree is removed.
+  // Archiving stops every terminal and closes every editor, losing a draft or unsaved edits. Typing
+  // into an idle agent can briefly read as working, so the draft, what archiving would lose, comes first.
+  if (check.unsentInput?.length) return 'unsent-input';
+  if (check.busyAgents?.length) return 'agent-busy';
   if (!applicable) {
     return undefined;
   }
@@ -5853,6 +6004,10 @@ function describeBulkArchiveBlock(code: RunpanePaneArchiveBlockCode, check: Runp
   const unpushedCount = check.unpushedCommits ?? 0;
   const unpushedPhrase = unpushedCount === 1 ? '1 commit' : `${unpushedCount} commits`;
   switch (code) {
+    case 'agent-busy':
+      return `${describeBusyAgents(check)}. ${kept}, since archiving would stop it. Rerun the sweep once it is idle (\`runpane panels wait --panel <id> --for idle\`).`;
+    case 'unsent-input':
+      return `${describeUnsentInput(check)}. ${kept}, since archiving would lose it. Rerun the sweep once it is sent, saved or cleared.`;
     case 'uncommitted-and-unpushed':
       return `The worktree has uncommitted or untracked changes and ${unpushedPhrase} on no remote or base branch. ${kept}, since removing the worktree would lose that work. Commit and push it, then rerun the sweep; to discard it instead, run ${discard}.`;
     case 'uncommitted-changes':
@@ -5869,6 +6024,10 @@ function describeArchiveBlock(code: RunpanePaneArchiveBlockCode, check: RunpaneP
   const unpushedCount = check.unpushedCommits ?? 0;
   const unpushedPhrase = unpushedCount === 1 ? '1 commit' : `${unpushedCount} commits`;
   switch (code) {
+    case 'agent-busy':
+      return `${describeBusyAgents(check)}. Archiving would stop it. Wait until it is idle, then archive again; rerun with --force to stop it and archive anyway.`;
+    case 'unsent-input':
+      return `${describeUnsentInput(check)}. Archiving would lose it. Archive again once it is sent, saved or cleared; rerun with --force to discard it and archive anyway.`;
     case 'uncommitted-and-unpushed':
       return `Pane has uncommitted or untracked changes and ${unpushedPhrase} not pushed to any remote. Archiving would remove the worktree and discard this work. Rerun with --force to archive anyway.`;
     case 'uncommitted-changes':

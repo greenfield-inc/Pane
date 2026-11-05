@@ -207,6 +207,12 @@ async function installSessionsFixture(
     const selectedIds: string[] = [];
     let overviewCalls = 0;
     let nextOrchestrationUpdateError: string | null = null;
+    type ArchiveSelection = { archivePaneIds: string[]; forcePaneIds: string[] };
+    const archiveSelections: ArchiveSelection[] = [];
+    // The block code the preview reports for a Pane; by default every Pane is safe.
+    const archiveBlocks: Record<string, string> = {};
+    // Panes the host finds busy at archive time although the preview found them safe.
+    const busyAtArchive = new Set<string>();
     // A failed answer, or a thrown error the way an older host's refusal reaches the renderer.
     let nextReorderFailure: { message: string; thrown: boolean } | null = null;
     const reorderCalls: string[][] = [];
@@ -425,6 +431,25 @@ async function installSessionsFixture(
         changed();
         return success(clone(record));
       },
+      archivePreview: async (selector: Selector) => {
+        const record = find(selector);
+        return success({
+          sessionId: record.id,
+          panes: record.associations.map(({ paneId }) => ({ paneId, name: paneId, blocked: archiveBlocks[paneId] })),
+        });
+      },
+      // Like the host: archives the approved Panes, keeping a safe one that turned busy.
+      archive: async (selector: Selector, selection: ArchiveSelection) => {
+        archiveSelections.push(clone(selection));
+        await api.update(selector, { archived: true });
+        const kept = selection.archivePaneIds.filter(paneId => busyAtArchive.has(paneId));
+        return success({
+          session: clone(find(selector)),
+          archivedPaneIds: [...selection.archivePaneIds.filter(paneId => !busyAtArchive.has(paneId)), ...selection.forcePaneIds],
+          keptPanes: kept.map(paneId => ({ paneId, name: paneId, code: 'agent-busy' })),
+          failedPanes: [],
+        });
+      },
       overview: async (selector: Selector) => {
         const record = find(selector);
         overviewCalls += 1;
@@ -458,6 +483,9 @@ async function installSessionsFixture(
       getOrchestrationSelectedSessionId: () => selectedSessionId,
       getOrchestrationRecord: (sessionId: string) => clone(sessions.find(session => session.id === sessionId) ?? null),
       failNextOrchestrationUpdate: (message: string) => { nextOrchestrationUpdateError = message; },
+      getOrchestrationArchiveSelections: () => clone(archiveSelections),
+      blockPaneArchive: (paneId: string, code: string) => { archiveBlocks[paneId] = code; },
+      makePaneBusyAtArchive: (paneId: string) => { busyAtArchive.add(paneId); },
       failNextOrchestrationReorder: (message: string, thrown = false) => { nextReorderFailure = { message, thrown }; },
       getOrchestrationReorderCalls: () => clone(reorderCalls),
       // Stands in for a lost transport: the next associate or detach rejects instead of answering.
@@ -1468,6 +1496,65 @@ test('Session rows archive and restore without losing selection or associated Pa
     selected: 'beta',
     record: { archived: false, associations: [{ paneId: 'pane-alpha' }] },
   });
+});
+
+test('archiving a Session asks first when one of its Panes has work in progress, and Undo restores the Panes it archived', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  const attachedAt = '2026-09-16T12:00:00.000Z';
+  await installSessionsFixture(page, [
+    sessionFixture('alpha', 'Alpha', 'Alpha goal.', 'Alpha context.', attachedAt, [
+      { paneId: 'pane-safe', panelIds: [], attachedAt },
+      { paneId: 'pane-busy', panelIds: [], attachedAt },
+    ]),
+    sessionFixture('beta', 'Beta', 'Beta goal.', 'Beta context.', '2026-09-16T12:01:00.000Z'),
+  ]);
+  await page.goto('/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  await dismissStartupDialogs(page);
+  type ArchiveMock = {
+    blockPaneArchive: (paneId: string, code: string) => void;
+    makePaneBusyAtArchive: (paneId: string) => void;
+    getOrchestrationArchiveSelections: () => Array<{ archivePaneIds: string[]; forcePaneIds: string[] }>;
+    getSessionRestoreCalls: () => string[];
+  };
+  // SAFETY: installSessionsFixture adds this control before the app loads.
+  await page.evaluate(() => (window as typeof window & { __paneTestElectronMock: ArchiveMock }).__paneTestElectronMock.blockPaneArchive('pane-busy', 'agent-busy'));
+  // SAFETY: installSessionsFixture adds these controls before the app loads.
+  const archiveSelections = () => page.evaluate(() => (window as typeof window & { __paneTestElectronMock: ArchiveMock }).__paneTestElectronMock.getOrchestrationArchiveSelections());
+  const alphaRow = page.getByTestId('orchestration-session-alpha');
+  await expect(alphaRow).toBeVisible({ timeout: 10_000 });
+  const archiveAlpha = async () => {
+    await alphaRow.click({ button: 'right' });
+    await page.getByRole('menuitem', { name: 'Archive Session', exact: true }).click();
+  };
+  const dialog = page.getByRole('dialog', { name: 'Archive Alpha?' });
+
+  await archiveAlpha();
+  await expect(dialog).toContainText('Archiving this Session also archives its 2 Panes. This one has work in progress:');
+  await expect(dialog).toContainText('pane-busy · An agent is working or waiting for an answer');
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(alphaRow).toBeVisible();
+  expect(await archiveSelections()).toEqual([]);
+
+  // Keep sends only the Pane the person approved, so the host can never archive the kept one.
+  await archiveAlpha();
+  await dialog.getByRole('button', { name: 'Keep it open', exact: true }).click();
+  await expect(alphaRow).toHaveCount(0);
+  expect(await archiveSelections()).toEqual([{ archivePaneIds: ['pane-safe'], forcePaneIds: [] }]);
+  await page.getByRole('status').filter({ hasText: 'Archived Alpha and its Pane' }).getByRole('button', { name: 'Undo', exact: true }).click();
+  await expect(alphaRow).toBeVisible();
+  // SAFETY: installElectronApiMock adds this control before the app loads.
+  await expect.poll(() => page.evaluate(() => (window as typeof window & { __paneTestElectronMock: ArchiveMock }).__paneTestElectronMock.getSessionRestoreCalls())).toEqual(['pane-safe']);
+
+  // The toast and Undo follow what the host archived: pane-safe turned busy after the preview and stayed open.
+  // SAFETY: installSessionsFixture adds this control before the app loads.
+  await page.evaluate(() => (window as typeof window & { __paneTestElectronMock: ArchiveMock }).__paneTestElectronMock.makePaneBusyAtArchive('pane-safe'));
+  await archiveAlpha();
+  await dialog.getByRole('button', { name: 'Archive all', exact: true }).click();
+  expect((await archiveSelections()).at(-1)).toEqual({ archivePaneIds: ['pane-safe'], forcePaneIds: ['pane-busy'] });
+  await page.getByRole('status').filter({ hasText: 'Archived Alpha and its Pane · kept pane-safe open' }).getByRole('button', { name: 'Undo', exact: true }).click();
+  // SAFETY: installElectronApiMock adds this control before the app loads.
+  await expect.poll(() => page.evaluate(() => (window as typeof window & { __paneTestElectronMock: ArchiveMock }).__paneTestElectronMock.getSessionRestoreCalls())).toEqual(['pane-safe', 'pane-busy']);
 });
 
 test('the Session actions menu works by keyboard, and its archive Undo survives collapsing the sidebar', async ({ page }) => {

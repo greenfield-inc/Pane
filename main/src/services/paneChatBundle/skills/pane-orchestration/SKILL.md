@@ -410,5 +410,5 @@ the agent fills in `runpane handoff --template`, then runs
 
 Archiving removes a Pane's worktree, so it needs the person's approval. Once
 PRs merge, preview with `runpane panes archive --session <S> --merged --dry-run --json`
-and rerun with `--yes`. It keeps any Pane with an open or unmerged PR or
-unpushed work, and says why. Close every page, server and browser you opened.
+and rerun with `--yes`. It keeps any Pane with an open or unmerged PR,
+unpushed work, a busy agent or unsent input, and says why. Close every page, server and browser you opened.

@@ -7,6 +7,7 @@ import type { AgentState } from './agentStatus';
 import type { UsageByPane, UsagePaneCostSlice, UsageTotals } from './usage';
 import type { Loop, LoopSchedulePreview } from './loop';
 import type {
+  OrchestrationSessionArchivedPanes,
   OrchestrationSessionOverview,
   OrchestrationSessionRecord,
 } from './orchestrationSession';
@@ -29,6 +30,8 @@ export interface RunpaneSessionResult {
   session: OrchestrationSessionRecord;
   panelId?: string;
   internalSessionId?: string;
+  /** On `sessions update` with `archived: true`: what happened to each associated Pane. */
+  panes?: OrchestrationSessionArchivedPanes;
 }
 
 export interface RunpaneSessionOverviewResult extends OrchestrationSessionOverview {
@@ -899,7 +902,23 @@ export type RunpanePaneArchiveBlockCode =
   | 'uncommitted-changes'
   | 'unpushed-commits'
   | 'uncommitted-and-unpushed'
-  | 'status-unknown';
+  | 'status-unknown'
+  | 'agent-busy'
+  | 'unsent-input';
+
+/** A tab holding input a person typed and Pane would lose: an agent composer's draft or an editor's unsaved edits. */
+export interface RunpanePaneArchiveUnsentInput {
+  panelId: string;
+  title: string;
+  kind: 'composer' | 'editor';
+}
+
+/** An agent tab in the Pane that is mid-turn (`working`) or waiting for an answer (`blocked`). */
+export interface RunpanePaneArchiveBusyAgent {
+  panelId: string;
+  title: string;
+  state: 'working' | 'blocked';
+}
 
 /**
  * Why the archive safety check was skipped or could not run. `external-worktree` (an adopted Pane
@@ -928,6 +947,10 @@ export interface RunpanePaneArchiveSafetyCheck {
   upstreamGone?: boolean;
   /** A merged pull request whose head is exactly this worktree's HEAD; its commits do not count as unpushed. */
   mergedViaPr?: RunpanePaneArchiveMergedPr;
+  /** Agents mid-turn in the Pane; archiving would stop them, so archive refuses without --force. */
+  busyAgents?: RunpanePaneArchiveBusyAgent[];
+  /** Tabs holding unsent or unsaved input; archiving would lose it, so archive refuses without --force. */
+  unsentInput?: RunpanePaneArchiveUnsentInput[];
 }
 
 export interface RunpanePaneArchiveMergedPr {

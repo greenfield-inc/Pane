@@ -37,7 +37,7 @@ import { CommandRunner } from '../utils/commandRunner';
 import { PathResolver } from '../utils/pathResolver';
 import { agentTranscripts } from '../services/agentTranscript';
 import { claudeProjectDirName } from '../services/agentTranscript/claude';
-import { registerRunpaneHandlers } from './runpane';
+import { previewOrchestrationSessionArchive, registerRunpaneHandlers, updateOrchestrationSession } from './runpane';
 import { LoopManager } from '../services/loops/loopManager';
 import { LoopRepository } from '../services/loops/loopRepository';
 import { createLoopTestDb } from '../services/loops/loopTestDb';
@@ -7989,6 +7989,73 @@ describe('runpane IPC handlers', () => {
       });
     }, 15000);
 
+    it('refuses a Pane whose agent is mid-turn unless forced, in the dry run too', async () => {
+      const externalSession: Session = { ...session, worktreeOwnership: 'external' };
+      const services = createServices({
+        // SAFETY: This test double provides the exact SessionManager members exercised by archive.
+        sessionManager: { ...createServices().sessionManager, getSession: vi.fn(() => externalSession) } as never,
+      });
+      vi.mocked(terminalPanelManager.getAgentStatus).mockReturnValue('blocked');
+      const registry = createRegistry(services);
+      const sessionsDelete = registerSessionsDeleteStub(registry, services);
+
+      expect(await registry.invoke('runpane:panes:archive', [{ paneId: session.id, dryRun: true }])).toMatchObject({
+        ok: true, dryRun: true, wouldArchive: false,
+        blocked: { code: 'agent-busy', safetyCheck: { busyAgents: [{ panelId: terminalPanel.id, state: 'blocked' }] } },
+      });
+      expect(await registry.invoke('runpane:panes:archive', [{ paneId: session.id }])).toMatchObject({
+        ok: false,
+        blocked: { code: 'agent-busy', message: expect.stringContaining('Codex') },
+        nextCommand: `runpane panes archive --pane ${session.id} --force --yes --json`,
+      });
+      expect(sessionsDelete).not.toHaveBeenCalled();
+
+      expect(await registry.invoke('runpane:panes:archive', [{ paneId: session.id, force: true }])).toMatchObject({ ok: true, archived: true, forced: true });
+      expect(sessionsDelete).toHaveBeenCalledWith(session.id);
+    });
+
+    it('keeps a Pane whose idle agent holds a draft or whose editor has unsaved edits', async () => {
+      const externalSession: Session = { ...session, worktreeOwnership: 'external' };
+      const drafting: ToolPanel = { ...terminalPanel, id: 'drafting', title: 'Codex' };
+      const editing: ToolPanel = { ...terminalPanel, id: 'editing', type: 'editor', title: 'notes.md', state: { isActive: false, customState: { filePath: 'notes.md', isDirty: true } } };
+      vi.mocked(panelManager.getPanelsForSession).mockReturnValue([drafting, editing]);
+      vi.mocked(panelManager.getPanel).mockImplementation(panelId => [drafting, editing].find(panel => panel.id === panelId));
+      vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(terminalSnapshot('› my unsent draft', 'idle'));
+      // Typing into an idle agent can read as working; the draft is still the reason given.
+      vi.mocked(terminalPanelManager.getAgentStatus).mockReturnValue('working');
+      const services = createServices({
+        // SAFETY: This test double provides the exact SessionManager members exercised by archive.
+        sessionManager: { ...createServices().sessionManager, getSession: vi.fn(() => externalSession) } as never,
+      });
+      const registry = createRegistry(services);
+      const sessionsDelete = registerSessionsDeleteStub(registry, services);
+
+      expect(await registry.invoke('runpane:panes:archive', [{ paneId: session.id, dryRun: true }])).toMatchObject({
+        wouldArchive: false,
+        blocked: { code: 'unsent-input', safetyCheck: { unsentInput: [{ panelId: 'drafting', title: 'Codex', kind: 'composer' }, { panelId: 'editing', title: 'notes.md', kind: 'editor' }] } },
+      });
+      expect(await registry.invoke('runpane:panes:archive', [{ paneId: session.id }])).toMatchObject({
+        ok: false,
+        blocked: { code: 'unsent-input', message: expect.stringContaining('Codex (panel drafting) has text typed but not sent') },
+      });
+      expect(sessionsDelete).not.toHaveBeenCalled();
+    });
+
+    it('does not count a busy plain terminal, such as a dev server, as an agent mid-turn', async () => {
+      const externalSession: Session = { ...session, worktreeOwnership: 'external' };
+      const devServer: ToolPanel = { ...terminalPanel, id: 'dev-server', title: 'pnpm dev', state: { isActive: false, customState: { initialCommand: 'pnpm dev' } } };
+      vi.mocked(panelManager.getPanelsForSession).mockReturnValue([devServer]);
+      vi.mocked(terminalPanelManager.getAgentStatus).mockReturnValue('working');
+      const services = createServices({
+        // SAFETY: This test double provides the exact SessionManager members exercised by archive.
+        sessionManager: { ...createServices().sessionManager, getSession: vi.fn(() => externalSession) } as never,
+      });
+      const registry = createRegistry(services);
+      registerSessionsDeleteStub(registry, services);
+
+      expect(await registry.invoke('runpane:panes:archive', [{ paneId: session.id, dryRun: true }]))
+        .toMatchObject({ ok: true, wouldArchive: true, safetyCheck: { performed: false } });
+    });
     it('rejects archiving a pane that is already archived', async () => {
       const services = createServices({
         // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
@@ -8935,6 +9002,45 @@ describe('runpane IPC handlers', () => {
         expect(JSON.stringify(result)).not.toContain('Rerun with --force');
       }, 15000);
 
+      it('keeps a merged Pane whose agent holds a draft', async () => {
+        const { pane } = createRemoteRepo();
+        const panes = [pane('pane-draft')];
+        const drafting: ToolPanel = { ...terminalPanel, id: 'draft-panel', sessionId: 'pane-draft', title: 'Codex' };
+        vi.mocked(panelManager.getPanelsForSession).mockImplementation((paneId: string) => paneId === 'pane-draft' ? [drafting] : []);
+        vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(terminalSnapshot('› my unsent draft', 'idle'));
+        const { services } = createBulkServices(panes, panes.map(p => p.id));
+        const registry = createRegistry(services);
+        const sessionsDelete = registerSessionsDeleteStub(registry, services);
+
+        expect(await registry.invoke('runpane:panes:archive', [{ sessionId: 'refactor', merged: true }])).toMatchObject({
+          items: [{ paneId: 'pane-draft', outcome: 'skipped', skipped: { code: 'unsent-input' } }],
+        });
+        expect(sessionsDelete).not.toHaveBeenCalled();
+      });
+
+      it('keeps a merged Pane whose agent is mid-turn', async () => {
+        const { pane } = createRemoteRepo();
+        const panes = [pane('pane-busy'), pane('pane-idle')];
+        const busyPanel: ToolPanel = { ...terminalPanel, id: 'busy-panel', sessionId: 'pane-busy', title: 'Claude Code' };
+        vi.mocked(panelManager.getPanelsForSession).mockImplementation((paneId: string) => paneId === 'pane-busy' ? [busyPanel] : []);
+        vi.mocked(terminalPanelManager.getAgentStatus).mockImplementation(panelId => panelId === 'busy-panel' ? 'working' : 'idle');
+        const { services } = createBulkServices(panes, panes.map(p => p.id));
+        const registry = createRegistry(services);
+        const sessionsDelete = registerSessionsDeleteStub(registry, services);
+
+        const preview = await registry.invoke('runpane:panes:archive', [{ sessionId: 'refactor', merged: true, dryRun: true }]);
+        expect(preview).toMatchObject({ items: [{ paneId: 'pane-busy', outcome: 'skipped', skipped: { code: 'agent-busy' } }, { paneId: 'pane-idle', outcome: 'would-archive' }] });
+
+        const result = await registry.invoke('runpane:panes:archive', [{ sessionId: 'refactor', merged: true }]);
+        expect(sessionsDelete).toHaveBeenCalledTimes(1);
+        expect(sessionsDelete).toHaveBeenCalledWith('pane-idle');
+        expect(result).toMatchObject({
+          items: [
+            { paneId: 'pane-busy', outcome: 'skipped', skipped: { code: 'agent-busy', message: expect.stringContaining('Claude Code') }, safetyCheck: { busyAgents: [{ panelId: 'busy-panel', title: 'Claude Code', state: 'working' }] } },
+            { paneId: 'pane-idle', outcome: 'archived' },
+          ],
+        });
+      });
       it('dry-runs the Session archive, says what it would do, and reports a reason for every skipped Pane', async () => {
         const { pane } = createRemoteRepo();
         const panes = [
@@ -9044,6 +9150,118 @@ describe('runpane IPC handlers', () => {
           blocked: { code: 'unpushed-commits', safetyCheck: { hasUpstream: false, unpushedCommits: 1, unpushedCommitDetails: [{ sha: head, subject: 'unpublished' }] } },
         });
       }, REAL_GH_TIMEOUT_MS);
+
+      describe('archiving the Session', () => {
+        /** A clean Pane, one with an agent mid-turn, one with uncommitted work and one already archived. */
+        function createSessionPanes() {
+          const { pane } = createRemoteRepo();
+          const panes = [
+            pane('pane-clean'),
+            pane('pane-busy'),
+            pane('pane-dirty', worktreePath => fs.writeFileSync(path.join(worktreePath, 'draft.txt'), 'unsaved work')),
+            { ...session, id: 'pane-archived', name: 'archived', archived: true },
+          ];
+          const busyPanel: ToolPanel = { ...terminalPanel, id: 'busy-panel', sessionId: 'pane-busy', title: 'Claude Code' };
+          vi.mocked(panelManager.getPanelsForSession).mockImplementation((paneId: string) => paneId === 'pane-busy' ? [busyPanel] : []);
+          vi.mocked(terminalPanelManager.getAgentStatus).mockImplementation(panelId => panelId === 'busy-panel' ? 'working' : 'idle');
+          const { services, get } = createBulkServices(panes, panes.map(p => p.id));
+          const update = vi.fn(async () => ({ ...(await get()), archived: true }));
+          // SAFETY: This test fixture supplies the Sessions manager surface the Session archive reads and writes.
+          services.orchestrationSessionManager = { get, update } as never;
+          const registry = createRegistry(services);
+          return { services, registry, update, sessionsDelete: registerSessionsDeleteStub(registry, services) };
+        }
+
+        it('archives every safe Pane with it, keeps the ones archiving would put at risk, and says which', async () => {
+          const { services, registry, update, sessionsDelete } = createSessionPanes();
+
+          const preview = await previewOrchestrationSessionArchive(services, { sessionId: 'refactor' });
+          expect(preview.panes).toEqual([
+            { paneId: 'pane-clean', name: 'pane-clean', blocked: undefined },
+            { paneId: 'pane-busy', name: 'pane-busy', blocked: 'agent-busy' },
+            { paneId: 'pane-dirty', name: 'pane-dirty', blocked: 'uncommitted-changes' },
+          ]);
+          expect(update).not.toHaveBeenCalled();
+          expect(sessionsDelete).not.toHaveBeenCalled();
+
+          const result = await registry.invoke('runpane:sessions:update', [{ selector: { sessionId: 'refactor' }, input: { archived: true } }]);
+
+          expect(update).toHaveBeenCalledWith({ sessionId: 'refactor' }, { archived: true });
+          expect(sessionsDelete.mock.calls.map(([paneId]) => paneId)).toEqual(['pane-clean']);
+          expect(result).toMatchObject({
+            ok: true,
+            session: { archived: true },
+            panes: {
+              archivedPaneIds: ['pane-clean'],
+              keptPanes: [
+                { paneId: 'pane-busy', name: 'pane-busy', code: 'agent-busy' },
+                { paneId: 'pane-dirty', name: 'pane-dirty', code: 'uncommitted-changes' },
+              ],
+              failedPanes: [],
+            },
+          });
+        });
+
+        it('archives the other Panes when checking one fails, and previews that one as unsafe', async () => {
+          const { services, registry, sessionsDelete } = createSessionPanes();
+          vi.mocked(panelManager.getPanelsForSession).mockImplementation((paneId: string) => {
+            if (paneId === 'pane-busy') throw new Error('panel store unavailable');
+            return [];
+          });
+
+          const preview = await previewOrchestrationSessionArchive(services, { sessionId: 'refactor' });
+          expect(preview.panes.map(pane => pane.blocked)).toEqual([undefined, 'status-unknown', 'uncommitted-changes']);
+
+          const { panes } = await updateOrchestrationSession(services, registry, { sessionId: 'refactor' }, { archived: true }, {
+            archivePaneIds: ['pane-clean'],
+            forcePaneIds: ['pane-busy', 'pane-dirty'],
+          });
+
+          expect(sessionsDelete.mock.calls.map(([paneId]) => paneId)).toEqual(['pane-clean', 'pane-dirty']);
+          expect(panes).toEqual({
+            archivedPaneIds: ['pane-clean', 'pane-dirty'],
+            keptPanes: [],
+            failedPanes: [{ paneId: 'pane-busy', name: 'pane-busy', error: 'panel store unavailable' }],
+          });
+        });
+
+        it('archives the unsafe Panes the person chose to archive anyway', async () => {
+          const { services, registry, sessionsDelete } = createSessionPanes();
+
+          const { panes } = await updateOrchestrationSession(services, registry, { sessionId: 'refactor' }, { archived: true }, {
+            archivePaneIds: ['pane-clean'],
+            forcePaneIds: ['pane-busy', 'pane-dirty'],
+          });
+
+          expect(sessionsDelete.mock.calls.map(([paneId]) => paneId)).toEqual(['pane-clean', 'pane-busy', 'pane-dirty']);
+          expect(panes?.archivedPaneIds).toEqual(['pane-clean', 'pane-busy', 'pane-dirty']);
+        });
+
+        it('keeps a Pane the person chose to keep even after its agent goes idle, and one that became busy after the check', async () => {
+          const { services, registry, sessionsDelete } = createSessionPanes();
+          // The dialog showed pane-busy as working; by the time the person picks Keep, its turn ended and pane-clean's began.
+          const cleanPanel: ToolPanel = { ...terminalPanel, id: 'clean-panel', sessionId: 'pane-clean', title: 'Codex' };
+          vi.mocked(panelManager.getPanelsForSession).mockImplementation((paneId: string) => paneId === 'pane-clean' ? [cleanPanel] : []);
+          vi.mocked(terminalPanelManager.getAgentStatus).mockImplementation(panelId => panelId === 'clean-panel' ? 'working' : 'idle');
+
+          const { panes } = await updateOrchestrationSession(services, registry, { sessionId: 'refactor' }, { archived: true }, {
+            archivePaneIds: ['pane-clean'],
+            forcePaneIds: [],
+          });
+
+          expect(sessionsDelete).not.toHaveBeenCalled();
+          expect(panes).toEqual({ archivedPaneIds: [], keptPanes: [{ paneId: 'pane-clean', name: 'pane-clean', code: 'agent-busy' }], failedPanes: [] });
+        });
+
+        it('leaves the Panes alone when an update does not archive the Session', async () => {
+          const { services, registry, sessionsDelete } = createSessionPanes();
+
+          const { panes } = await updateOrchestrationSession(services, registry, { sessionId: 'refactor' }, { name: 'renamed' });
+
+          expect(sessionsDelete).not.toHaveBeenCalled();
+          expect(panes).toBeUndefined();
+        });
+      });
 
       it('rejects a Session archive without --merged or with --force', async () => {
         const { services } = createBulkServices([], []);
