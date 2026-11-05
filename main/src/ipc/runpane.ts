@@ -162,6 +162,7 @@ import type {
   RunpanePanelStateSummary,
   RunpanePanelSubmitComposerRequest,
   RunpanePanelSubmitComposerResult,
+  RunpanePanelCloseResult,
   RunpanePanelSubmitComposerStrategy,
   RunpanePanelSubmitRequest,
   RunpanePanelSubmitResult,
@@ -282,6 +283,7 @@ const RUNPANE_CHANNELS = [
   'runpane:panels:screen',
   'runpane:panels:submit',
   'runpane:panels:submit-composer',
+  'runpane:panels:close',
   'runpane:panels:wait',
   'runpane:panels:resume',
   'runpane:panels:resume-many',
@@ -356,6 +358,7 @@ const MUTATING_RUNPANE_ACTIONS = new Set([
   'panels:input',
   'panels:submit',
   'panels:submit-composer',
+  'panels:close',
   'report',
   'sessions:create',
   'sessions:update',
@@ -1675,6 +1678,22 @@ export function registerRunpaneHandlers(
       ok: result.ok,
       inputBytes: result.inputBytes,
     }));
+  });
+
+  commandRegistry.register('runpane:panels:close', async (request: PaneCommandValue): Promise<RunpanePanelCloseResult> => {
+    return withRunpaneAction(services, 'panels:close', {}, async () => {
+      const { panelId } = decodeBoundary(request, boundary.object({ panelId: boundary.nonEmptyString }));
+      const panel = resolvePanel(panelId);
+      // The app's own close-tab path: it stops a terminal's process and tells every window.
+      const closed = decodeBoundary(
+        await commandRegistry.invoke('panels:delete', [panel.id]),
+        boundary.object({ success: boundary.boolean, error: boundary.optional(boundary.string) }),
+      );
+      if (!closed.success) {
+        throw new PaneError('ERR_RUNPANE_PANEL_CLOSE_FAILED', `Pane could not close panel ${panel.id}: ${closed.error ?? 'it gave no reason'}. The tab is still open.`, 'See the Pane\'s tabs with `runpane panels list --pane <pane-id>`.');
+      }
+      return { ok: true as const, paneId: panel.sessionId, panelId: panel.id, type: panel.type, title: panel.title };
+    }, result => ({ paneId: result.paneId, panelId: result.panelId }));
   });
 
   commandRegistry.register('runpane:panels:wait', async (request: PaneCommandValue): Promise<RunpanePanelWaitResult> => {

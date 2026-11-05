@@ -1370,6 +1370,15 @@ export interface RunpanePanelSubmitResult {
 
 export type RunpanePanelSubmitComposerStrategy = 'auto' | 'codex-ctrl-enter' | 'enter' | 'tab';
 
+export interface RunpanePanelCloseResult {
+  ok: true;
+  generation?: number;
+  paneId: string;
+  panelId: string;
+  type: string;
+  title: string;
+}
+
 export interface RunpanePanelSubmitComposerRequest {
   panelId: string;
   strategy?: RunpanePanelSubmitComposerStrategy;

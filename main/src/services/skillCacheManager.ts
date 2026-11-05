@@ -736,6 +736,9 @@ What each line means under follow (the JSON \`kind\` is in parentheses):
   "$PANE_ORCHESTRATION_SESSION_ID" --wait-ready --yes --json\` restarts them
   all and reports each one's readiness or blocker. It relaunches finished
   workers too, so resume single panels when only some should continue.
+  To drop a worker tab you no longer need, finished or stuck, close it with
+  \`runpane panels close --panel <panel-id> --yes --json\`, which stops its
+  process as closing the tab in the app does.
 - BLOCKED (\`agent.blocked\`): the agent is waiting on a human, such as an
   AskUserQuestion picker, a permission or trust prompt, or Codex's update
   screen, even if it never reported. \`screenLines\` holds the prompt. It

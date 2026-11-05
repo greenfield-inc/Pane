@@ -536,6 +536,7 @@
         "panels wait",
         "panels resume",
         "panels last-message",
+        "panels close",
         "agent-context",
         "mcp",
         "panes git-status",
@@ -741,6 +742,9 @@
           "$ref": "#/$defs/helpLines"
         },
         "panels last-message": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "panels close": {
           "$ref": "#/$defs/helpLines"
         },
         "agent-context": {

@@ -150,6 +150,7 @@ runpane report --state ready --pr 747 --head fc5dce9 --summary-file /tmp/report.
 runpane panels last-message --panel <panel-id> --json
 runpane panels resume --panel <panel-id> --wait-ready --yes --json
 runpane panels resume --session <id|name> --wait-ready --yes --json
+runpane panels close --panel <panel-id> --yes --json
 runpane docs search --query "archive a pane" --json
 runpane links create --pane <pane-id> --json
 runpane panes git-status --pane <pane-id> --json
@@ -342,6 +343,7 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `panels submit-composer`: Submit an agent composer using the panel-appropriate key sequence.
 - `panels wait`: Wait for a terminal panel to initialize, become ready/idle, or contain text.
 - `panels resume`: Restart a stopped terminal panel in place, resuming its agent's conversation.
+- `panels close`: Close a tab in a Pane, stopping its process, as closing the tab in the app does.
 - `panels last-message`: Read an agent's last reply from its transcript, without scraping the screen.
 - `panes git-status`: Read the git status of a Pane worktree: uncommitted, unpushed, and behind-main counts.
 - `panes commit`: Stage all changes in a Pane worktree and commit them.
@@ -455,6 +457,7 @@ runpane panels submit-composer --panel <panel-id> [--strategy auto|codex-ctrl-en
 runpane panels wait --panel <panel-id> [--for initialized|ready|idle|text] [--contains <text>] [--timeout-ms <ms>] [--interval-ms <ms>] [--json] [--pane-dir <path>]
 runpane panels resume --panel <panel-id> [--wait-ready] [--ready-timeout-ms <ms>] --yes [--json] [--pane-dir <path>]
 runpane panels resume (--session <id|name>|--all-stopped) [--wait-ready] [--ready-timeout-ms <ms>] [--concurrency <count>] --yes [--json] [--pane-dir <path>]
+runpane panels close --panel <panel-id> --yes [--json] [--pane-dir <path>]
 runpane panels last-message --panel <panel-id> [--limit <count>] [--json] [--pane-dir <path>]
 runpane panes git-status --pane <pane-id> [--json] [--pane-dir <path>]
 runpane panes commit --pane <pane-id> --message <message> --yes [--json] [--pane-dir <path>]
@@ -566,6 +569,7 @@ Brief tools:
 - `panels submit-composer`: Submit an agent composer with the key for its current state.
 - `panels wait`: Wait for terminal initialized, ready, idle, or text state with compact output.
 - `panels resume`: Restart a stopped terminal panel in place (same panel id), resuming its agent's conversation.
+- `panels close`: Close a tab, stopping its process, as the app's close button does.
 - `watch`: Wait for workspace events from the durable daemon journal; follow uses conservative cadence and quiet expiry by default.
 - `notify`: Ask the person a question wherever they are and wait for the answer; prefer it to asking in the terminal.
 

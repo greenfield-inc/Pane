@@ -1000,6 +1000,30 @@ test('panels_resume restarts a stopped panel through the daemon and keeps the --
   }
 });
 
+test('panels_close closes a tab through the daemon and keeps the --yes rule', async () => {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-mcp-'));
+  try {
+    await withStubDaemon(paneDir, {
+      'runpane:panels:close': (args) => ({ ok: true, paneId: 'pane-1', panelId: args[0].panelId, type: 'terminal', title: 'Codex' }),
+    }, async (requests) => {
+      await withMcpClient(async (client) => {
+        const tool = (await client.listTools()).tools.find((item) => item.name === 'panels_close');
+        assert.ok(tool, 'panels_close is served in the panels toolset');
+        assert.equal(tool.annotations.destructiveHint, true);
+        const refused = await client.callTool({ name: 'panels_close', arguments: { panel: 'panel-9', paneDir } });
+        assert.equal(refused.isError, true);
+        const closed = await client.callTool({ name: 'panels_close', arguments: { panel: 'panel-9', yes: true, paneDir } });
+        assert.equal(closed.isError, undefined, closed.content[0].text);
+        assertMatchesAdvertisedSchema(tool, closed.structuredContent);
+        assert.equal(closed.structuredContent.panelId, 'panel-9');
+      }, { args: ['--toolsets', 'panels'] });
+      assert.deepEqual(requests.map((request) => request.args[0]), [{ panelId: 'panel-9' }]);
+    });
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
+});
+
 test('panels_resume resumes every stopped agent panel of a Session or of every Pane', async () => {
   const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-mcp-'));
   const bulk = (args) => ({

@@ -2433,6 +2433,57 @@ print(json.dumps(stdout.getvalue().splitlines()))
   }
 }
 
+async function checkPanelCloseParity() {
+  const result = { ok: true, generation: 41, paneId: 'session-1', panelId: 'panel-1', type: 'terminal', title: 'Claude Code' };
+  assertMatchesJsonSchema(result, contract.jsonSchemas.panelCloseResult, 'panels close result');
+  const expected = 'Closed terminal tab "Claude Code" (panel-1) in pane session-1.';
+
+  const daemonClient = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'daemonClient.js'));
+  const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
+  const { runPanelsClose } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'localControl.js'));
+  const originalInvokeDaemon = daemonClient.invokeDaemon;
+  const originalConsoleLog = console.log;
+  const calls = [];
+  const stdout = [];
+  daemonClient.invokeDaemon = async (channel, args) => { calls.push({ channel, request: args[0] }); return result; };
+  console.log = (line) => stdout.push(String(line));
+  try {
+    await runPanelsClose(parseRunpaneArgs(['panels', 'close', '--panel', 'panel-1', '--yes']));
+    await runPanelsClose(parseRunpaneArgs(['panels', 'close', '--panel', 'panel-1', '--yes', '--json']));
+  } finally {
+    daemonClient.invokeDaemon = originalInvokeDaemon;
+    console.log = originalConsoleLog;
+  }
+  assert.deepStrictEqual(calls, [
+    { channel: 'runpane:panels:close', request: { panelId: 'panel-1' } },
+    { channel: 'runpane:panels:close', request: { panelId: 'panel-1' } },
+  ]);
+  assert.deepStrictEqual(stdout[0], expected);
+  assert.deepStrictEqual(JSON.parse(stdout[1]), result);
+
+  const python = JSON.parse(runPythonSnippet(`
+import contextlib
+import io
+import json
+import sys
+import runpane.local_control as local_control
+from runpane.cli import parse_args
+
+result = json.load(sys.stdin)
+calls = []
+def invoke(channel, args, **kwargs):
+    calls.append({"channel": channel, "request": args[0]})
+    return result
+local_control.invoke_daemon = invoke
+stdout = io.StringIO()
+with contextlib.redirect_stdout(stdout):
+    local_control.run_panels_close(parse_args(["panels", "close", "--panel", "panel-1", "--yes"]))
+print(json.dumps({"calls": calls, "stdout": stdout.getvalue().splitlines()}))
+`, JSON.stringify(result)));
+  assert.deepStrictEqual(python.calls, [calls[0]]);
+  assert.deepStrictEqual(python.stdout, [expected]);
+}
+
 async function checkPanePinParity() {
   const daemonClient = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'daemonClient.js'));
   const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
@@ -5666,6 +5717,7 @@ async function runChecks() {
   await checkNotifyParity();
   await checkPaneCreateBlockedReadiness();
   await checkPanelResumeCommandExitedReadiness();
+  await checkPanelCloseParity();
   await checkSessionChildPinDefaults();
   await checkPanesCostParity();
   await checkPaneRenameParity();

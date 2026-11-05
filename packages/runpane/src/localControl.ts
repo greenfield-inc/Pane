@@ -547,6 +547,15 @@ interface PanelOpenRequest {
   source?: 'user' | 'agent';
 }
 
+interface PanelCloseResult {
+  ok: true;
+  generation?: number;
+  paneId: string;
+  panelId: string;
+  type: string;
+  title: string;
+}
+
 interface PanelOpenResult {
   ok: true;
   paneId: string;
@@ -1745,6 +1754,14 @@ const panelOpenResultSchema: BoundarySchema<PanelOpenResult> = boundary.object({
   placement: boundary.enumeration('split', 'tab'),
   active: boundary.boolean,
   reused: boundary.boolean,
+});
+const panelCloseResultSchema: BoundarySchema<PanelCloseResult> = boundary.object({
+  ok: boundary.literal(true),
+  generation: boundary.optional(boundary.number),
+  paneId: boundary.string,
+  panelId: boundary.string,
+  type: boundary.string,
+  title: boundary.string,
 });
 export const panelListResultSchema: BoundarySchema<PanelListResult> = boundary.object({
   ok: boundary.literal(true),
@@ -3891,6 +3908,24 @@ export async function runPanelsSubmitComposer(parsed: ParsedArgs): Promise<numbe
   }
 
   return result.ok ? 0 : 1;
+}
+
+export async function runPanelsClose(parsed: ParsedArgs): Promise<number> {
+  if (!parsed.panelId) {
+    throw new Error('runpane panels close requires --panel.');
+  }
+  await confirmMutation(parsed);
+
+  const result = await invokeDaemon('runpane:panels:close', [{ panelId: parsed.panelId }], panelCloseResultSchema, {
+    paneDir: parsed.paneDir,
+  });
+
+  if (parsed.json) {
+    printJson(result);
+  } else {
+    console.log(`Closed ${result.type} tab "${result.title}" (${result.panelId}) in pane ${result.paneId}.`);
+  }
+  return 0;
 }
 
 export async function runPanelsWait(parsed: ParsedArgs): Promise<number> {
