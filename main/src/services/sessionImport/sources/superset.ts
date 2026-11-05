@@ -318,8 +318,7 @@ async function readHome(context: ReaderContext, base: string): Promise<SourceRea
 
 /** Every home's sessions, the newest copy of each; any unreadable home fails the read closed. */
 export const readSuperset: SourceReader = async context => {
-  const results = [];
-  for (const home of supersetHomes(context)) results.push(await readHome(context, home));
+  const results = await Promise.all(supersetHomes(context).map(home => readHome(context, home)));
   const unreadableHome = results.find(result => result.status === 'unreadable');
   if (unreadableHome) return unreadableHome;
   const read = results.filter(result => result.status === 'ok');
