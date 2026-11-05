@@ -21,7 +21,7 @@ import { boundary, decodeBoundary, decodeOptionalBoundary } from '../../../share
 import type { PaneLinkTarget } from '../../../shared/types/paneLinks';
 import type { NotifyCommand, NotifyRemoteCommand, NotifyRequest, NotifyResult, NotifySharedState } from '../../../shared/types/notify';
 import type { AgentState } from '../../../shared/types/agentStatus';
-import { paneSecretNameProblem, paneSecretProjectProblem } from '../../../shared/types/paneSecrets';
+import { paneSecretNameProblem, paneSecretProjectProblem, teammateSecretRefusal } from '../../../shared/types/paneSecrets';
 import { paneSecretStore } from '../services/paneSecrets';
 
 const MAX_CHOICES = 9;
@@ -199,7 +199,11 @@ export function registerNotifyHandlers(ipcMain: IpcMain, services: NotifyService
   showActiveMachine();
 
   commandRegistry.register('runpane:notify', async (request: PaneCommandValue): Promise<NotifyResult> => {
-    return notify.ask(parseNotifyRequest(request), paneCommandSignal());
+    const parsed = parseNotifyRequest(request);
+    const teammate = teammatePaneCaller();
+    // A secret card writes the owner's secret store, so a teammate cannot post one.
+    if (teammate && parsed.ui === 'secret') throw teammateSecretRefusal(teammate, 'ask for a secret');
+    return notify.ask(parsed, paneCommandSignal());
   });
 
   commandRegistry.register('notify:remote-snapshot', async () => notify.sharedState());
