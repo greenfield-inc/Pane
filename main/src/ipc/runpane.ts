@@ -627,7 +627,7 @@ export function registerRunpaneHandlers(
       const nextEnv = normalized.settings.envVars ? applyRepoEnvVarsUpdate(currentEnv, normalized.settings.envVars) : currentEnv;
       if (JSON.stringify(nextEnv) !== JSON.stringify(currentEnv)) changed.push('envVars');
       // Variables first: they are the part that can be refused (a keychain variable off macOS).
-      if (!normalized.dryRun && changed.includes('envVars')) await projectEnv.save(project.id, nextEnv);
+      if (changed.includes('envVars')) await projectEnv.save(project.id, nextEnv, { dryRun: normalized.dryRun });
       const saved = normalized.dryRun ? { ...project, ...updates } : saveProjectSettings(services, project.id, updates);
       if (!saved) throw repoNotFound(`with id ${project.id}`);
       const result: RunpaneRepoUpdateResult = {

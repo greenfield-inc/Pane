@@ -41,9 +41,10 @@ export class ProjectEnvService {
 
   /**
    * Replace the project's variables. A Pane secret variable that carries a value
-   * creates or replaces that secret first; only its address is stored here.
+   * creates or replaces that secret first; only its address is stored here. A dry run
+   * checks everything and returns what would be saved, writing nothing.
    */
-  async save(projectId: number, inputs: readonly ProjectEnvVarInput[]): Promise<ProjectEnvVar[]> {
+  async save(projectId: number, inputs: readonly ProjectEnvVarInput[], options: { dryRun?: boolean } = {}): Promise<ProjectEnvVar[]> {
     const seen = new Set<string>();
     for (const input of inputs) {
       const problem = projectEnvKeyProblem(input.key);
@@ -70,6 +71,7 @@ export class ProjectEnvService {
       if (input.source === 'keychain') return { key: input.key, source: 'keychain', service: input.service.trim(), account: input.account.trim() };
       return { key: input.key, source: 'secret', project: input.project.trim(), name: input.name.trim() };
     });
+    if (options.dryRun) return variables;
     // Secrets first, so a failed write leaves the project's variables as they were.
     for (const input of inputs) {
       if (input.source === 'secret' && input.value) await this.secrets().set(input.project.trim(), input.name.trim(), input.value);

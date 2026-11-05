@@ -2516,6 +2516,15 @@ describe('runpane IPC handlers', () => {
       expect(envVars).toEqual([]);
     });
 
+    it('refuses an invalid variable on a dry run, as the real run would, and writes nothing', async () => {
+      const { services, envVars } = createSettingsServices();
+
+      await expect(createRegistry(services).invoke('runpane:repos:update', [{ repo: '7', dryRun: true, settings: { envVars: {
+        set: [{ key: 'PATH', source: 'plain', value: '/tmp' }],
+      } } }])).rejects.toMatchObject({ code: 'PROJECT_ENV_INVALID' });
+      expect(envVars).toEqual([]);
+    });
+
     it('saves settings through the Project Settings save path and returns them', async () => {
       const { services, runCommands } = createSettingsServices({ archive_script: 'old cleanup' });
 

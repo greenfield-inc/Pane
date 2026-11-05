@@ -47,6 +47,16 @@ describe('project environment variables', () => {
     expect(fs.readFileSync(path.join(tempDir, 'sessions.db')).includes('sk-live-123')).toBe(false);
   });
 
+  it('checks a dry run like a real save and writes nothing', async () => {
+    const project = db.createProject('cura', '/repos/cura');
+
+    await expect(service.save(project.id, [{ key: 'PANE_X', source: 'plain', value: 'x' }], { dryRun: true })).rejects.toMatchObject({ code: 'PROJECT_ENV_INVALID' });
+    await expect(service.save(project.id, [{ key: 'API_TOKEN', source: 'secret', project: 'shared', name: 'TOKEN', value: 'v' }], { dryRun: true }))
+      .resolves.toEqual([{ key: 'API_TOKEN', source: 'secret', project: 'shared', name: 'TOKEN' }]);
+    expect(service.list(project.id)).toEqual([]);
+    expect(secrets.has('shared', 'TOKEN')).toBe(false);
+  });
+
   it('reads a Pane secret at each resolve, so a changed secret reaches the next process', async () => {
     const project = db.createProject('cura', '/repos/cura');
     await secrets.set('shared', 'TOKEN', 'first');
