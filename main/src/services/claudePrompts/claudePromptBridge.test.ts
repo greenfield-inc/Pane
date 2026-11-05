@@ -60,7 +60,7 @@ describe('ClaudePromptBridge', () => {
 
     const item = await ctx.waiting();
     expect(item).toMatchObject({ title: 'Run pnpm vitest run src/http?', source, agentPrompt: { yes: 'Yes' } });
-    ctx.queue.runRemote({ type: 'answer', id: item.id, answer: { choice: 'No', note: 'Only unit tests' } }, 'iPhone');
+    ctx.queue.runRemote({ type: 'answer', id: item.id, answer: { choice: 'No', note: 'Only unit tests' } }, 'iPhone', null);
 
     // After Notify's 3-second Undo hold.
     expect(await (await response).json()).toEqual({
@@ -115,7 +115,7 @@ describe('ClaudePromptBridge', () => {
     const response = ctx.call({ hook_event_name: 'PermissionRequest', tool_name: 'Bash', tool_input: input });
     const item = await ctx.waiting();
 
-    ctx.queue.runRemote({ type: 'answer', id: item.id, answer: { choice: 'Yes' } }, 'iPhone');
+    ctx.queue.runRemote({ type: 'answer', id: item.id, answer: { choice: 'Yes' } }, 'iPhone', null);
     await ctx.call({ hook_event_name: 'Stop' });
 
     expect(await (await response).json()).toEqual({});
@@ -164,7 +164,7 @@ describe('ClaudePromptBridge', () => {
     expect(await response).toBe('cancelled');
     await vi.waitFor(() => expect(ctx.queue.snapshot().items[0].agentPrompt?.inTerminal).toBe(true));
     expect(ctx.queue.snapshot().queue).toEqual([item.id]);
-    expect(() => ctx.queue.runRemote({ type: 'answer', id: item.id, answer: { choice: 'Yes' } }, 'iPhone')).toThrow(/asking in its terminal/);
+    expect(() => ctx.queue.runRemote({ type: 'answer', id: item.id, answer: { choice: 'Yes' } }, 'iPhone', null)).toThrow(/asking in its terminal/);
 
     await ctx.call({ hook_event_name: 'Stop' });
     expect(ctx.queue.snapshot().items[0]).toMatchObject({ state: 'answered', answerSummary: ANSWERED_IN_TERMINAL });
@@ -177,7 +177,7 @@ describe('ClaudePromptBridge', () => {
     const response = ctx.call({ hook_event_name: 'PermissionRequest', tool_name: 'Bash', tool_input: input }, { signal: timeout.signal }).catch(() => 'cancelled');
     const item = await ctx.waiting();
 
-    ctx.queue.runRemote({ type: 'answer', id: item.id, answer: { choice: 'Yes' } }, 'iPhone');
+    ctx.queue.runRemote({ type: 'answer', id: item.id, answer: { choice: 'Yes' } }, 'iPhone', null);
     expect(ctx.queue.snapshot().items[0].state).toBe('sent');
     timeout.abort();
     expect(await response).toBe('cancelled');
@@ -188,7 +188,7 @@ describe('ClaudePromptBridge', () => {
     expect(handedOver.answeredOn).toBeUndefined();
     expect(ctx.queue.snapshot().queue).toEqual([item.id]);
     // Undo has nothing left to restore, and the hold never delivers.
-    expect(() => ctx.queue.runRemote({ type: 'undo', id: item.id }, 'iPhone')).toThrow();
+    expect(() => ctx.queue.runRemote({ type: 'undo', id: item.id }, 'iPhone', null)).toThrow();
     await new Promise(resolve => setTimeout(resolve, 3_300));
     expect(ctx.queue.snapshot().items[0]).toMatchObject({ state: 'waiting', agentPrompt: { inTerminal: true } });
 
@@ -220,7 +220,7 @@ describe('ClaudePromptBridge', () => {
     });
     // Each tab asks four prompts in turn; each is answered a different way.
     const ways: Array<(panelId: string, id: string, toolInput: JsonObject) => Promise<void>> = [
-      async (_panelId, id) => queue.runRemote({ type: 'answer', id, answer: { choice: 'Yes' } }, 'iPhone'),
+      async (_panelId, id) => queue.runRemote({ type: 'answer', id, answer: { choice: 'Yes' } }, 'iPhone', null),
       async (panelId, _id, toolInput) => { await post(panelId, { hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_input: toolInput }, true); },
       async (panelId) => { bridge!.panelStatus(panelId, 'blocked'); bridge!.panelStatus(panelId, 'working'); },
       async (panelId) => { await post(panelId, { hook_event_name: 'Stop' }, true); },

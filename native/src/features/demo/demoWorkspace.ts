@@ -466,8 +466,10 @@ export class DemoWorkspace {
     if (!item) throw new Error('This question is no longer waiting.');
     if (command.type === 'answer' && item.state === 'waiting') {
       const generation = this.nextAnswerGeneration(item.id);
-      this.replaceNotify({ ...item, state: 'sent', answerSummary: summarize(command.answer) });
-      this.later(UNDO_HOLD_MS, () => this.deliver(item.id, generation));
+      this.replaceNotify({ ...item, state: 'sent', answerSummary: summarize(item, command.answer) });
+      // Like a host, a secret is saved and delivered at once, with no Undo hold.
+      if (item.ui === 'secret') this.deliver(item.id, generation);
+      else this.later(UNDO_HOLD_MS, () => this.deliver(item.id, generation));
     } else if (command.type === 'undo' && item.state === 'sent') {
       this.nextAnswerGeneration(item.id);
       this.replaceNotify({ ...item, state: 'waiting', answerSummary: undefined });
@@ -586,7 +588,9 @@ export class DemoWorkspace {
   }
 }
 
-function summarize(answer: NotifyAnswer): string {
+function summarize(item: NotifyItem, answer: NotifyAnswer): string {
+  // A secret's value never shows anywhere, as on a host.
+  if (item.ui === 'secret') return 'approved' in answer ? 'Declined' : `Saved as ${item.secret?.project}/${item.secret?.name}`;
   if ('choice' in answer) return answer.choice;
   if ('approved' in answer) return answer.approved ? 'Approved' : 'Denied';
   return answer.text;

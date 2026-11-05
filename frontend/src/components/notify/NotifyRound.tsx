@@ -2,9 +2,10 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 're
 import { ArrowRight, CornerDownLeft, X } from 'lucide-react';
 import type { NotifyCommand, NotifyItem, NotifySnapshot } from '../../../../shared/types/notify';
 import { cn } from '../../utils/cn';
-import { askedBy, NOTIFY_KIND_DOT, NOTIFY_KIND_LABEL, relativeAge } from './notifyFormat';
+import { askedBy, NOTIFY_KIND_DOT, NOTIFY_KIND_LABEL, relativeAge, SECRET_KEPT_OUT, secretSavesAs } from './notifyFormat';
 import { ShortcutCap, UnreachableNotice } from './NotifyCard';
 import { useNow } from './useNow';
+import { SecretValueInput } from '../ui/SecretValueInput';
 
 interface NotifyRoundProps {
   snapshot: NotifySnapshot;
@@ -72,6 +73,7 @@ function rowsFor(item: NotifyItem): RoundRow[] {
       { key: 'N', label: 'Deny', detail: 'You can add a reason' },
     ];
   }
+  if (item.ui === 'secret') return [];
   if (item.ui === 'ask') {
     return (item.suggestions ?? []).map((suggestion, index) => ({ key: String(index + 1), label: suggestion }));
   }
@@ -91,7 +93,9 @@ function RoundPanel({ item, position, total, onCommand }: RoundPanelProps) {
   const now = useNow();
   const rows = rowsFor(item);
   const approval = item.ui === 'approve';
-  const ask = item.ui === 'ask';
+  const secret = item.ui === 'secret';
+  // A secret takes typed text like a free-text question, but masked and without suggestions or a note.
+  const ask = item.ui === 'ask' || secret;
   // Approvals start with nothing chosen: Y or N is required.
   const [selected, setSelected] = useState(() => (approval || ask) ? -1 : Math.max(0, rows.findIndex((row) => row.recommended)));
   const [noteOpen, setNoteOpen] = useState(false);
@@ -99,12 +103,19 @@ function RoundPanel({ item, position, total, onCommand }: RoundPanelProps) {
   const [text, setText] = useState('');
   const noteRef = useRef<HTMLInputElement>(null);
   const textRef = useRef<HTMLInputElement>(null);
+  const secretRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => { if (ask) textRef.current?.focus(); }, [ask]);
+  useEffect(() => { if (ask) (textRef.current ?? secretRef.current)?.focus(); }, [ask]);
   useEffect(() => { if (noteOpen) noteRef.current?.focus(); }, [noteOpen]);
 
   const send = (index = selected) => {
     const trimmedNote = note.trim();
+    if (secret) {
+      // Sent as typed, and dropped from state at once.
+      if (text) onCommand({ type: 'answer', id: item.id, answer: { text } });
+      setText('');
+      return;
+    }
     if (ask) {
       const answer = (index >= 0 ? rows[index]?.label : text)?.trim();
       if (answer) onCommand({ type: 'answer', id: item.id, answer: { text: answer } });
@@ -136,7 +147,8 @@ function RoundPanel({ item, position, total, onCommand }: RoundPanelProps) {
         onCommand({ type: 'close-round' });
         return;
       }
-      if (event.key === 'Enter' && !event.isComposing) {
+      // The secret field sends on Enter itself.
+      if (event.key === 'Enter' && !event.isComposing && !event.defaultPrevented) {
         event.preventDefault();
         sendRef.current();
         return;
@@ -172,7 +184,7 @@ function RoundPanel({ item, position, total, onCommand }: RoundPanelProps) {
   }, [approval, ask, item.id, onCommand, rows.length]);
 
   const canSend = ask ? text.trim().length > 0 : selected >= 0;
-  const action = approval && selected < 0 ? 'Press Y or N' : `Send to ${item.source.agent}`;
+  const action = approval && selected < 0 ? 'Press Y or N' : secret ? 'Save securely' : `Send to ${item.source.agent}`;
 
   return (
     <div className="w-[700px] overflow-hidden rounded-[24px] bg-surface-primary shadow-modal ring-1 ring-border-secondary" data-testid="notify-round">
@@ -201,9 +213,23 @@ function RoundPanel({ item, position, total, onCommand }: RoundPanelProps) {
       )}
 
       <div className="mt-2.5 border-t border-border-secondary px-[26px] pb-1.5 pt-3.5 text-[13px] text-text-tertiary">
-        {ask ? 'Your answer' : 'Choose one'}
+        {secret ? 'The secret' : ask ? 'Your answer' : 'Choose one'}
       </div>
-      {ask && (
+      {secret && (
+        <div className="px-[26px] pb-2">
+          <SecretValueInput
+            ref={secretRef}
+            appearance="bare"
+            value={text}
+            onValueChange={setText}
+            onEnter={() => sendRef.current()}
+            placeholder="Type the secret"
+            aria-label="The secret"
+            className="h-[46px] w-full rounded-xl bg-surface-tertiary px-3.5 py-0 text-[16px] leading-[46px] text-text-primary outline-none placeholder:text-text-muted focus:ring-[1.5px] focus:ring-inset focus:ring-border-hover"
+          />
+        </div>
+      )}
+      {ask && !secret && (
         <div className="px-[26px] pb-2">
           <input
             ref={textRef}
@@ -213,6 +239,15 @@ function RoundPanel({ item, position, total, onCommand }: RoundPanelProps) {
             aria-label="Your answer"
             className="h-[46px] w-full rounded-xl bg-surface-tertiary px-3.5 text-[16px] text-text-primary outline-none placeholder:text-text-muted focus:ring-[1.5px] focus:ring-inset focus:ring-border-hover"
           />
+        </div>
+      )}
+      {secret && (
+        <div className="space-y-1 px-[26px] pb-3 text-[13px] text-text-tertiary">
+          {/* A failed save swaps in for the destination line, in the same one-line box. */}
+          {item.secretError
+            ? <div className="h-5 truncate leading-5 text-status-error" role="alert" title={item.secretError}>{item.secretError}</div>
+            : <div className="h-5 truncate leading-5">{secretSavesAs(item)}</div>}
+          <div>{SECRET_KEPT_OUT}</div>
         </div>
       )}
       {rows.length > 0 && (
@@ -266,6 +301,11 @@ function RoundPanel({ item, position, total, onCommand }: RoundPanelProps) {
         <FooterKey label="Close" cap="Esc" onClick={() => onCommand({ type: 'close-round' })} />
         <FooterKey label="Skip" cap={<ArrowRight className="inline h-3 w-3" />} onClick={() => onCommand({ type: 'skip', id: item.id })} />
         {!ask && <FooterKey label="Note" cap="Tab" onClick={() => setNoteOpen((open) => !open)} />}
+        {secret && (
+          <button type="button" onClick={() => { setText(''); onCommand({ type: 'answer', id: item.id, answer: { approved: false } }); }} className="hover:text-text-primary">
+            Decline
+          </button>
+        )}
         <div className="ml-auto flex items-center gap-[22px]">
           <span className="tabular-nums">{position} of {total}</span>
           <button

@@ -2,7 +2,8 @@ import { expect, test, type Page } from '@playwright/test';
 import type { NotifyCommand, NotifySnapshot } from '../shared/types/notify';
 import type { JsonObject } from '../shared/validation/boundaryDecoder';
 import { installElectronApiMock } from './electronApiMock';
-import { notifyFixture } from './fixtures/notifySnapshot';
+import { notifyFixture, secretFixture } from './fixtures/notifySnapshot';
+import type { PaneSecretStorage, PaneSecretSummary } from '../shared/types/paneSecrets';
 
 const project = {
   id: 1,
@@ -38,9 +39,15 @@ interface NotifyMock {
   emitNotifyNavigate(target: 'inbox' | 'settings'): void;
 }
 
-async function boot(page: Page, snapshot: NotifySnapshot = notifyFixture(), initialConfig: JsonObject = {}) {
+async function boot(
+  page: Page,
+  snapshot: NotifySnapshot = notifyFixture(),
+  initialConfig: JsonObject = {},
+  paneSecrets?: { secrets: PaneSecretSummary[]; storage: PaneSecretStorage },
+) {
   await installElectronApiMock(page, {
     initialConfig,
+    paneSecrets,
     initialProjects: [project],
     initialSessions: [pane('pane-auth', 'auth-refactor'), pane('pane-billing', 'billing-migration'), pane('pane-sms', 'sms-retry')],
     initialUiState: { expandedProjects: [1], repositoriesSectionExpanded: true },
@@ -162,6 +169,105 @@ test.describe('Pane Notify in the main window', () => {
     await expect(strip).toContainText('Sent to Claude');
     await strip.getByRole('button', { name: 'Undo' }).click();
     await expect.poll(async () => (await commands(page)).at(-1)).toEqual({ type: 'undo', id: 'q-options' });
+  });
+});
+
+test.describe('Notify secret requests', () => {
+  test('a secret is typed masked, saved once, and cleared from the card; Decline declines', async ({ page }) => {
+    await boot(page, secretFixture(true));
+    const strip = page.getByTestId('notify-in-pane-strip');
+    await expect(strip).toContainText('Asking for a secret');
+    await expect(strip).toContainText("Run the webhook integration tests against Stripe's test mode.");
+    await expect(strip).toContainText('Saves as Pane secret stripe/STRIPE_SECRET_KEY · replaces the saved value');
+    const field = strip.getByPlaceholder('Click to type the secret');
+    await expect(field).toHaveAttribute('type', 'password');
+    await expect(strip.getByRole('button', { name: 'Save securely' })).toBeDisabled();
+
+    // Digits go into the field; the card has no number-key shortcuts.
+    await field.click();
+    await field.pressSequentially('sk_test_123');
+    await expect(strip.getByRole('button', { name: 'Save securely' })).toBeEnabled();
+    expect(await commands(page)).toEqual([]);
+    await strip.getByRole('button', { name: 'Save securely' }).click();
+    await expect.poll(() => commands(page)).toEqual([{ type: 'answer', id: 'q-secret', answer: { text: 'sk_test_123' } }]);
+    await expect(field).toHaveValue('');
+
+    // The host couldn't save it: the card keeps waiting and says why where the destination was.
+    const failed = secretFixture(true);
+    failed.items[0] = { ...failed.items[0], secretError: 'The login keychain is locked. Nothing was saved. Unlock it and save again.' };
+    // SAFETY: installElectronApiMock installs these test-only IPC controls on the page.
+    await page.evaluate((snapshot) => (window as MockWindow).__paneTestElectronMock.emitNotifySnapshot(snapshot), failed);
+    await expect(strip.getByRole('alert')).toHaveText('The login keychain is locked. Nothing was saved. Unlock it and save again.');
+    await expect(strip).not.toContainText('Saves as Pane secret');
+    await expect(field).toHaveValue('');
+
+    await field.pressSequentially('typed then declined');
+    await strip.getByRole('button', { name: 'Decline' }).click();
+    await expect.poll(async () => (await commands(page)).at(-1)).toEqual({ type: 'answer', id: 'q-secret', answer: { approved: false } });
+    await expect(field).toHaveValue('');
+  });
+
+  test('the inbox history says where a secret was saved, never its value', async ({ page }) => {
+    const snapshot = secretFixture();
+    snapshot.items[0] = { ...snapshot.items[0], state: 'answered', answerSummary: 'Saved as stripe/STRIPE_SECRET_KEY', resolvedAt: Date.now() };
+    snapshot.queue.shift();
+    snapshot.strip = null;
+    await boot(page, snapshot);
+    await page.getByTestId('notify-nav').click();
+    await expect(page.getByTestId('notify-history-row').filter({ hasText: 'Stripe test secret key' })).toContainText('→ Saved as stripe/STRIPE_SECRET_KEY');
+  });
+});
+
+test.describe('Settings → Secrets', () => {
+  const secrets: PaneSecretSummary[] = [
+    { project: 'stripe', name: 'STRIPE_SECRET_KEY', updatedAt: new Date(Date.now() - 2 * 86_400_000).toISOString(), machine: 'mac-studio' },
+    { project: 'qa', name: 'UIVERIFY', updatedAt: new Date(Date.now() - 3_600_000).toISOString(), machine: 'parsa-devbox' },
+  ];
+  const openSecrets = async (page: Page) => {
+    await page.getByRole('button', { name: 'Settings' }).first().click();
+    await expect(page.getByTestId('settings-page')).toBeVisible();
+    await page.getByRole('button', { name: 'Secrets', exact: true }).click();
+  };
+  // SAFETY: installElectronApiMock installs these test-only IPC controls on the page.
+  const secretCalls = (page: Page) => page.evaluate(() => (window as typeof window & { __paneTestElectronMock: { getPaneSecretCalls(): JsonObject[] } }).__paneTestElectronMock.getPaneSecretCalls());
+
+  test('lists secrets by project, and adds, replaces and deletes them', async ({ page }) => {
+    await boot(page, notifyFixture(), {}, { secrets, storage: { kind: 'keychain', encrypted: true } });
+    await openSecrets(page);
+    await expect(page.getByText('Any agent on your machines can use these with runpane secrets exec. Values are never shown again.')).toBeVisible();
+    await expect(page.getByTestId('pane-secrets-unencrypted')).toHaveCount(0);
+    const row = (address: string) => page.locator(`[data-secret="${address}"]`);
+    await expect(row('stripe/STRIPE_SECRET_KEY')).toContainText('Set on mac-studio 2 days ago');
+    await expect(row('qa/UIVERIFY')).toContainText('Set on parsa-devbox 1 hour ago');
+
+    await row('qa/UIVERIFY').getByRole('button', { name: 'Replace' }).click();
+    await row('qa/UIVERIFY').getByLabel('New value for qa/UIVERIFY').fill('new-value');
+    await row('qa/UIVERIFY').getByRole('button', { name: 'Save' }).click();
+    await expect(row('qa/UIVERIFY')).toContainText('Set on this-mac');
+
+    await row('stripe/STRIPE_SECRET_KEY').getByRole('button', { name: 'Delete' }).click();
+    await expect(row('stripe/STRIPE_SECRET_KEY')).toContainText('Delete stripe/STRIPE_SECRET_KEY from all your machines?');
+    await row('stripe/STRIPE_SECRET_KEY').getByRole('group').getByRole('button', { name: 'Delete' }).click();
+    await expect(row('stripe/STRIPE_SECRET_KEY')).toHaveCount(0);
+
+    await page.getByRole('button', { name: 'Add secret' }).click();
+    await page.getByLabel('Secret project').fill('openai');
+    await page.getByLabel('Secret name').fill('OPENAI_API_KEY');
+    await page.getByLabel('Secret value').fill('sk-proj');
+    await page.getByRole('button', { name: 'Save securely' }).click();
+    await expect(row('openai/OPENAI_API_KEY')).toBeVisible();
+    expect(await secretCalls(page)).toEqual([
+      { action: 'set', project: 'qa', name: 'UIVERIFY' },
+      { action: 'delete', project: 'stripe', name: 'STRIPE_SECRET_KEY' },
+      { action: 'set', project: 'openai', name: 'OPENAI_API_KEY' },
+    ]);
+  });
+
+  test('says when this host stores values unencrypted', async ({ page }) => {
+    await boot(page, notifyFixture(), {}, { secrets: [], storage: { kind: 'file', encrypted: false } });
+    await openSecrets(page);
+    await expect(page.getByTestId('pane-secrets-unencrypted')).toHaveText('Stored unencrypted on this host (no OS keyring).');
+    await expect(page.getByText('No secrets yet.')).toBeVisible();
   });
 });
 

@@ -15,6 +15,7 @@ import type {
   NotifyStripView,
 } from '../../../../shared/types/notify';
 import { PaneError } from '../../../../shared/paneError';
+import { teammateSecretRefusal } from '../../../../shared/types/paneSecrets';
 
 /** Pane holds an answer this long so Undo can take it back. */
 const NOTIFY_UNDO_MS = 3_000;
@@ -31,6 +32,13 @@ const HISTORY_LIMIT = 100;
 
 const REMIND_AFTER_MS = { '3m': 3 * 60_000, '5m': 5 * 60_000, '15m': 15 * 60_000, '10m': 10 * 60_000, '1h': 60 * 60_000 } satisfies Record<Exclude<NotifyRemindAfter, 'pane'>, number>;
 const ASK_IN_TERMINAL = 'Ask in the terminal instead.';
+/** A secret must never be typed into a terminal or chat. */
+const SECRET_UNAVAILABLE_NEXT = 'Ask the person to save it in Pane under Settings > Secrets, then run your command with `runpane secrets exec`. Do not ask them to paste it into the chat.';
+
+/** A secret card's unavailable result points at Settings, never at the terminal. */
+function forSecret(result: NotifyResult): NotifyResult {
+  return 'unavailable' in result ? { ...result, next: SECRET_UNAVAILABLE_NEXT } : result;
+}
 
 type Timer = ReturnType<typeof setTimeout>;
 
@@ -51,6 +59,8 @@ interface Entry {
   remindTimer?: Timer;
   idleTimer?: Timer;
   remindOnPaneFocus?: boolean;
+  /** A secret card's value is being written to the store; a second answer waits for it. */
+  saving?: boolean;
 }
 
 export interface NotifyQueueEnvironment {
@@ -60,6 +70,11 @@ export interface NotifyQueueEnvironment {
   instructionFiles: () => NotifyInstructionsFile[];
   /** This machine's name, as connected screens and phones show it. */
   machine?: string;
+  /** Where a secret card's answer goes. The value is passed here and nowhere else. */
+  secrets?: {
+    exists(project: string, name: string): boolean;
+    save(project: string, name: string, value: string): Promise<void>;
+  };
 }
 
 /**
@@ -125,6 +140,12 @@ export class NotifyQueue extends EventEmitter {
 
   /** Handles one notify call. Resolves when the person answers, the call must return, or the caller leaves. */
   ask(request: { question?: NotifyQuestion; resume?: string; returnAfterMs?: number; source: NotifySource; id?: string }, signal?: AbortSignal): Promise<NotifyResult> {
+    const secret = request.question?.ui === 'secret' || (request.resume !== undefined && this.entries.get(request.resume)?.item.ui === 'secret');
+    const result = this.askOnce(request, signal);
+    return secret ? result.then(forSecret) : result;
+  }
+
+  private askOnce(request: { question?: NotifyQuestion; resume?: string; returnAfterMs?: number; source: NotifySource; id?: string }, signal?: AbortSignal): Promise<NotifyResult> {
     if (!this.env.settings().enabled) {
       return Promise.resolve(unavailable('Notify is off in Pane.'));
     }
@@ -132,6 +153,9 @@ export class NotifyQueue extends EventEmitter {
     const question = request.question;
     if (!question) return Promise.resolve(unavailable('The call named no question.'));
 
+    if (question.ui === 'secret' && (!question.secret || !this.env.secrets)) {
+      return Promise.resolve(unavailable('This Pane cannot save secrets.'));
+    }
     const item: NotifyItem = {
       ...question,
       id: request.id ?? randomUUID(),
@@ -139,6 +163,10 @@ export class NotifyQueue extends EventEmitter {
       state: question.ui === 'info' ? 'info' : 'waiting',
       createdAt: Date.now(),
     };
+    if (question.secret) {
+      const { project, name } = question.secret;
+      item.secret = { project, name, replaces: this.env.secrets?.exists(project, name) ?? false };
+    }
     const entry: Entry = { item, resumeLoop: false };
     this.entries.set(item.id, entry);
 
@@ -168,9 +196,9 @@ export class NotifyQueue extends EventEmitter {
     | { type: 'hover-info'; id: string; hovering: boolean }
     | { type: 'pause'; minutes: number }
     | { type: 'resume' }
-    | { type: 'dock'; id: string | null }): void {
+    | { type: 'dock'; id: string | null }): void | Promise<void> {
     switch (command.type) {
-      case 'answer': this.answer(command.id, command.answer); break;
+      case 'answer': return this.answer(command.id, command.answer);
       case 'undo': this.undo(command.id); break;
       case 'dismiss': this.hide(command.id); break;
       case 'remind': this.remind(command.id, command.after); break;
@@ -194,13 +222,15 @@ export class NotifyQueue extends EventEmitter {
 
   /**
    * A command from another screen or a phone (`notify:remote-command`). `device` is the server's
-   * name for the sender. Refuses a command for a question no longer in the state it needs.
+   * name for the sender, and `teammate` the login of a sender who is not this computer's owner.
+   * Refuses a command for a question no longer in the state it needs.
    */
-  runRemote(command: NotifyRemoteCommand, device: string): void {
+  runRemote(command: NotifyRemoteCommand, device: string, teammate: string | null): void | Promise<void> {
     const entry = this.entries.get(command.id);
     if (!entry) {
       throw new PaneError('ERR_NOTIFY_GONE', `That question is no longer on ${this.machine()}: it finished earlier, or Pane restarted there. Nothing was sent.`, 'Nothing to do: the agent is no longer waiting on it.');
     }
+    if (teammate && entry.item.ui === 'secret') throw teammateSecretRefusal(teammate, 'answer a secret card');
     const needs = command.type === 'answer' ? 'waiting' : command.type === 'undo' ? 'sent' : 'queued';
     const state = entry.item.state;
     if ((needs === 'queued' && !this.queue.includes(command.id)) || (needs !== 'queued' && state !== needs)) {
@@ -213,10 +243,15 @@ export class NotifyQueue extends EventEmitter {
       throw new PaneError('ERR_NOTIFY_NOT_SENT', `That question is waiting again (it was undone). Nothing was changed.`, 'Answer it again if you meant to.');
     }
     if (command.type === 'answer') {
+      const invalidAnswer = (error: Error): never => {
+        if (error instanceof PaneError) throw error;
+        throw new PaneError('ERR_NOTIFY_INVALID', `${error.message} Nothing was sent.`, 'Answer with one of the question\'s choices, or the kind of answer it asks for.');
+      };
       try {
-        this.answer(command.id, command.answer, device);
+        const saving = this.answer(command.id, command.answer, device);
+        return saving?.catch(invalidAnswer);
       } catch (error) {
-        throw new PaneError('ERR_NOTIFY_INVALID', `${error instanceof Error ? error.message : String(error)} Nothing was sent.`, 'Answer with one of the question\'s choices, or the kind of answer it asks for.');
+        invalidAnswer(error instanceof Error ? error : new Error(String(error)));
       }
       return;
     }
@@ -232,7 +267,9 @@ export class NotifyQueue extends EventEmitter {
       epoch: this.epoch,
       revision: this.revision,
       enabled: this.env.settings().enabled,
-      items: [...this.entries.values()].map(({ item }) => (
+      // A secret card is shared only while it waits: Pane versions before secrets can't read one,
+      // so a finished card left in today's history would keep them from showing this machine's cards.
+      items: [...this.entries.values()].filter(({ item }) => item.ui !== 'secret' || item.state === 'waiting').map(({ item }) => (
         item.state === 'sent' || item.state === 'answered' ? { ...item, answeredOn: item.answeredOn ?? machine } : { ...item }
       )),
       queue: [...this.queue],
@@ -561,12 +598,13 @@ export class NotifyQueue extends EventEmitter {
     });
   }
 
-  private answer(id: string, answer: NotifyAnswer, device?: string): void {
+  private answer(id: string, answer: NotifyAnswer, device?: string): void | Promise<void> {
     const entry = this.entries.get(id);
     if (!entry || entry.item.state !== 'waiting') return;
     if (entry.item.agentPrompt?.inTerminal) {
       throw new PaneError('ERR_NOTIFY_IN_TERMINAL', `${entry.item.source.agent} stopped waiting on Pane and is asking in its terminal now. Nothing was sent.`, 'Open the tab and answer in the terminal.');
     }
+    if (entry.item.ui === 'secret') return this.answerSecret(entry, answer, device);
     const result = toResult(entry.item, answer);
     entry.item.state = 'sent';
     entry.item.answerSummary = summarize(entry.item, result);
@@ -577,6 +615,48 @@ export class NotifyQueue extends EventEmitter {
     entry.holdTimer = setTimeout(() => this.deliver(entry, result), NOTIFY_UNDO_MS);
     this.setTransient({ kind: 'sent', itemId: id }, NOTIFY_UNDO_MS);
     this.changed();
+  }
+
+  /**
+   * A secret card's value goes to the secret store and nowhere else: not the result, the
+   * summary, the snapshot, history or the Undo hold. The agent gets `{status:'saved'}` at
+   * once, since a saved value cannot be taken back by Undo. A failed save keeps the card
+   * waiting, with the reason on it, so the person can try again.
+   */
+  private async answerSecret(entry: Entry, answer: NotifyAnswer, device?: string): Promise<void> {
+    const target = entry.item.secret;
+    if (!target || !this.env.secrets) throw new Error('This card has nowhere to save a secret.');
+    // A value is being saved: the card ends as saved, so a Decline now would contradict it.
+    if (entry.saving) return;
+    if ('approved' in answer && !answer.approved) {
+      this.finishSecret(entry, { status: 'declined' }, 'Declined', device);
+      return;
+    }
+    if (!('text' in answer) || !answer.text) throw new Error('A secret card takes the secret value, or Decline.');
+    entry.saving = true;
+    try {
+      await this.env.secrets.save(target.project, target.name, answer.text);
+    } catch (error) {
+      entry.saving = false;
+      if (entry.item.state !== 'waiting') return;
+      entry.item.secretError = error instanceof PaneError && error.next ? `${error.message} ${error.next}` : error instanceof Error ? error.message : String(error);
+      this.changed();
+      throw error;
+    }
+    entry.saving = false;
+    if (entry.item.state !== 'waiting') return;
+    this.finishSecret(entry, { status: 'saved', project: target.project, name: target.name }, `Saved as ${target.project}/${target.name}`, device);
+  }
+
+  private finishSecret(entry: Entry, result: NotifyResult, summary: string, device?: string): void {
+    const id = entry.item.id;
+    delete entry.item.secretError;
+    entry.item.answerSummary = summary;
+    entry.item.answeredOn = device;
+    this.queue = this.queue.filter(other => other !== id);
+    this.hidden.delete(id);
+    endReminder(entry);
+    this.deliver(entry, result);
   }
 
   private deliver(entry: Entry, result: NotifyResult): void {

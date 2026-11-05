@@ -62,6 +62,15 @@ export interface ParsedArgs {
   openIdeCommand?: string;
   systemPrompt?: string;
   clear?: string[];
+  /** `--env`, repeatable: `VAR=NAME` for secrets exec, a JSON array of variables for repos update. */
+  envArgs?: string[];
+  /** `repos update --env-remove`: project variables to remove. */
+  envRemove?: string[];
+  /** `runpane secrets`: the secret project, exec's --only and --file names, and request's reason. */
+  project?: string;
+  only?: string[];
+  secretFiles?: string[];
+  reason?: string;
   timeoutMs?: number;
   waitReady?: boolean;
   readyTimeoutMs?: number;
@@ -193,7 +202,7 @@ const targetSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.installTarge
 const formatSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.artifactFormats);
 const channelSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.channels);
 const agentSchema = boundary.enumeration(...RUNPANE_CONTRACT.enums.agents);
-const COMMAND_GROUP_HELP_TOPICS = new Set(['panes', 'panels', 'sessions', 'workspace', 'lock', 'loops']);
+const COMMAND_GROUP_HELP_TOPICS = new Set(['panes', 'panels', 'sessions', 'workspace', 'lock', 'loops', 'secrets']);
 const LOCK_DURATION_PATTERN = /^(\d+)(ms|s|m|h)?$/u;
 const LOCK_DURATION_UNIT_MS = { ms: 1, s: 1_000, m: 60_000, h: 3_600_000 } as const;
 const MAX_LOCK_DURATION_MS = 86_400_000;
@@ -426,7 +435,7 @@ function takeWorkspaceMachine(args: string[]): string | undefined {
   return args.splice(1, 1)[0];
 }
 
-/** `--` (or else the first word after exec's options) takes the rest of the line for exec; read and write take one path; inbox ack takes item ids. */
+/** `--` (or else the first word after exec's options) takes the rest of the line for workspace and secrets exec; read and write take one path; inbox ack takes item ids. */
 function takeWorkspaceVerbArgs(command: string, args: string[]): Pick<ParsedArgs, 'workspacePath' | 'execCommand' | 'handoffDestination' | 'inboxIds'> {
   if (command === 'inbox ack') {
     const ids: string[] = [];
@@ -438,7 +447,7 @@ function takeWorkspaceVerbArgs(command: string, args: string[]): Pick<ParsedArgs
     while (args[0] !== undefined && !args[0].startsWith('-')) words.push(args.shift() ?? '');
     return words.length ? { handoffDestination: words.join(' ') } : {};
   }
-  if (command === 'workspace exec') {
+  if (command === 'workspace exec' || command === 'secrets exec') {
     const separator = args.indexOf('--');
     if (separator !== -1) return { execCommand: args.splice(separator).slice(1) };
     // PowerShell drops `--` before a .ps1 shim sees it, so the first word that is not
@@ -850,7 +859,8 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
     return;
   }
   if (flag === '--file') {
-    parsed.file = value;
+    if (parsed.command === 'secrets exec') (parsed.secretFiles ??= []).push(value);
+    else parsed.file = value;
     return;
   }
   if (flag === '--name') {
@@ -937,7 +947,27 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
     return;
   }
   if (flag === '--clear') {
-    (parsed.clear ??= []).push(...value.split(',').map((setting) => setting.trim()).filter(Boolean));
+    (parsed.clear ??= []).push(...splitList(value));
+    return;
+  }
+  if (flag === '--env') {
+    (parsed.envArgs ??= []).push(value);
+    return;
+  }
+  if (flag === '--env-remove') {
+    (parsed.envRemove ??= []).push(...splitList(value));
+    return;
+  }
+  if (flag === '--only') {
+    (parsed.only ??= []).push(...splitList(value));
+    return;
+  }
+  if (flag === '--project') {
+    parsed.project = value;
+    return;
+  }
+  if (flag === '--reason') {
+    parsed.reason = value;
     return;
   }
   if (flag === '--timeout-ms') {
@@ -1187,6 +1217,10 @@ function parseLocalValueFlag(flag: string, value: string, parsed: ParsedArgs): v
   throw new Error(`Unknown option for ${parsed.command}: ${flag}`);
 }
 
+function splitList(value: string): string[] {
+  return value.split(',').map((item) => item.trim()).filter(Boolean);
+}
+
 /** A lock TTL such as 90s, 30m, or 2h; a bare number is milliseconds. */
 function parseLockTtl(value: string): number {
   const match = LOCK_DURATION_PATTERN.exec(value.trim());
@@ -1277,7 +1311,7 @@ function readValue(args: string[], index: number, flag: string, literalValues: S
   const clearable = REPO_SETTING_FLAGS.includes(flag);
   if (clearable && value === '') return value;
   const freeText = (clearable && !/^--[a-z][a-z-]*$/.test(value ?? ''))
-    || ['--text', '--content', '--prompt', '--initial-input', '--title', '--name', '--name-contains'].includes(flag);
+    || ['--text', '--content', '--prompt', '--initial-input', '--title', '--name', '--name-contains', '--reason'].includes(flag);
   if (!value || (!freeText && value.startsWith('-') && value !== '-')) {
     throw new Error(`${flag} requires a value.`);
   }

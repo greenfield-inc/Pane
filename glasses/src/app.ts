@@ -636,6 +636,8 @@ export class GlassesApp {
   }
 
   private async startVoiceAnswer(card: Card): Promise<void> {
+    // A spoken secret would pass through the transcription provider.
+    if (card.ui === 'secret') return;
     this.go({ name: 'voice-answer', key: card.key, transcript: '' });
     try {
       await this.startListening(card.computerId, (text) => {

@@ -4,16 +4,27 @@ export const NOTIFY_KIND_LABEL = {
   options: 'Needs a choice',
   approve: 'Needs approval',
   ask: 'Needs an answer',
+  secret: 'Asking for a secret',
   info: 'Update',
 } satisfies Record<NotifyUi, string>;
 
-/** Blue asks for a choice or answer, amber for approval, green for an update. */
+/** Blue asks for a choice, answer or secret, amber for approval, green for an update. */
 export const NOTIFY_KIND_DOT = {
   options: 'bg-status-info',
   approve: 'bg-status-warning',
   ask: 'bg-status-info',
+  secret: 'bg-status-info',
   info: 'bg-status-success',
 } satisfies Record<NotifyUi, string>;
+
+/** A secret card's destination line: "Saves as Pane secret stripe/STRIPE_KEY · replaces the saved value". */
+export function secretSavesAs(item: NotifyItem): string {
+  const target = item.secret;
+  if (!target) return '';
+  return `Saves as Pane secret ${target.project}/${target.name}${target.replaces ? ' · replaces the saved value' : ''}`;
+}
+
+export const SECRET_KEPT_OUT = 'Kept out of chat. Any agent on your machines can use it with runpane secrets exec.';
 
 /** Who asked: "notify-remote · Claude", plus the machine while two machines' questions show. */
 export function askedBy(item: NotifyItem): string {

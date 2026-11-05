@@ -115,6 +115,35 @@ describe('NotifyCard', () => {
     expect(markup).toContain('aria-label="Send to Claude"');
   });
 
+  it('asks for a secret in a masked field with Save securely and Decline, and says where it is saved', () => {
+    const secret: NotifyItem = {
+      ...base,
+      ui: 'secret',
+      title: 'Stripe test secret key',
+      context: "Run the webhook integration tests against Stripe's test mode.",
+      secret: { project: 'stripe', name: 'STRIPE_SECRET_KEY' },
+    };
+    const markup = render(secret);
+    const visible = text(markup);
+    expect(visible).toContain('Asking for a secret');
+    expect(visible).toContain("Run the webhook integration tests against Stripe's test mode.");
+    expect(visible).toContain('Save securely');
+    expect(visible).toContain('Decline');
+    expect(visible).toContain('Saves as Pane secret stripe/STRIPE_SECRET_KEY');
+    expect(visible).not.toContain('replaces the saved value');
+    expect(visible).toContain('Kept out of chat. Any agent on your machines can use it with runpane secrets exec.');
+    const field = markup.match(/<input[^>]*type="password"[^>]*>/)?.[0] ?? '';
+    expect(field).toContain('autoComplete="off"');
+    expect(field).toContain('spellCheck="false"');
+
+    expect(text(render({ ...secret, secret: { project: 'stripe', name: 'STRIPE_SECRET_KEY', replaces: true } }, { form: 'inbox' })))
+      .toContain('Saves as Pane secret stripe/STRIPE_SECRET_KEY · replaces the saved value');
+
+    const failed = text(render({ ...secret, secretError: 'The login keychain is locked. Nothing was saved. Unlock it and save again.' }));
+    expect(failed).toContain('The login keychain is locked. Nothing was saved. Unlock it and save again.');
+    expect(failed).not.toContain('Saves as Pane secret');
+  });
+
   it('shows an update as one line with its action', () => {
     const visible = text(render(
       { ...base, ui: 'info', state: 'info', title: 'PR #812 checks passed', action: { label: 'Open PR', url: 'https://example.com/pr/812' } },

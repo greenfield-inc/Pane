@@ -317,6 +317,11 @@ export interface ToolPanelMetadata {
    * as tabs). Ignored once the panel is in the stored layout.
    */
   openPlacement?: PanelOpenPlacement;
+  /**
+   * The login of the teammate whose request created this panel. Its processes
+   * start without secret variables, also after a respawn or restart.
+   */
+  teammate?: string;
 }
 
 export type PanelOpenPlacement = 'split' | 'tab';

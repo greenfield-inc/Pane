@@ -52,6 +52,7 @@ import type { ResourceSnapshot } from '../../shared/types/resourceMonitor';
 import type { SubmitFeedbackRequest } from '../../shared/types/feedback';
 import type { RunpanePaneFocusRequestedEvent } from '../../shared/types/runpaneOrchestration';
 import type { PaneLinkTarget } from '../../shared/types/paneLinks';
+import type { ProjectEnvVarInput } from '../../shared/types/projectEnvVars';
 import type { ArchiveProgressSnapshot } from '../../shared/types/archiveProgress';
 import type { ListeningPortsSnapshot } from '../../shared/types/listeningPorts';
 import type {
@@ -362,6 +363,12 @@ let machineEventListeners = 0;
 window.addEventListener('online', () => ipcRenderer.send('remote-daemon:network-online'));
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  /** Settings → Secrets: this computer's Pane secret store. Values go in only; nothing returns one. */
+  paneSecrets: {
+    list: (): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:list'),
+    set: (project: string, name: string, value: string): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:set', project, name, value),
+    delete: (project: string, name: string): Promise<IPCResponse> => ipcRenderer.invoke('pane-secrets:delete', project, name),
+  },
   onNotesChanged: (callback: () => void) => {
     const listener = () => callback();
     ipcRenderer.on('notes:changed', listener);
@@ -634,6 +641,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
      * Used by `PanelTabBar` to start/stop the dev server for a session.
      */
     resolveRunScript: (sessionId: string): Promise<IPCResponse> => invokeIpc('projects:resolve-run-script', sessionId),
+    /** The project's environment variables. Pane secret and keychain variables carry only their reference, never the value. */
+    getEnvVars: (projectId: number): Promise<IPCResponse> => invokeIpc('projects:get-env-vars', projectId),
+    /** Replace the project's environment variables. A typed secret is stored as a Pane secret and dropped. */
+    setEnvVars: (projectId: number, variables: ProjectEnvVarInput[]): Promise<IPCResponse> => invokeIpc('projects:set-env-vars', projectId, variables),
   },
 
   // Git operations

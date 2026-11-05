@@ -12,6 +12,7 @@ import { runDocsRead, runDocsSearch } from './docs';
 import { runHandoff } from './handoff';
 import { runLinksCreate } from './links';
 import { runNotify } from './notify';
+import { runSecretsDelete, runSecretsExec, runSecretsList, runSecretsRequest, runSecretsSet } from './secrets';
 import { helpText, parseRunpaneArgs, splitWorkspacePassThrough, wantsJsonOutput, type ParsedArgs, type RunpaneCommand } from './commands';
 import { PaneDaemonClientError, routeDaemonCallsTo } from './daemonClient';
 import { describeFailure, printFailure, RunpaneError } from './errors';
@@ -153,6 +154,8 @@ const THIS_MACHINE_ONLY = new Set<string>([
   'docs search', 'docs read', 'agents start', 'agents status', 'agents send', 'handoff',
   // Workspace commands pick their own machine; `workspace state` is a daemon call and passes through.
   'workspace list', 'workspace enable', 'workspace disable', 'workspace read', 'workspace write', 'workspace exec',
+  // These read or change this machine's own secret store; another machine runs its own.
+  'secrets list', 'secrets set', 'secrets delete', 'secrets exec', 'secrets request',
 ]);
 
 /** `runpane workspace <machine> <command...>`: the same command, answered by that machine's Pane. */
@@ -244,6 +247,11 @@ const commandHandlers = new Map<string, CommandHandler>(Object.entries({
   'repos rename': async (parsed, telemetryContext) => {
     return runReposRename(parsed);
   },
+  'secrets list': async (parsed) => runSecretsList(parsed),
+  'secrets set': async (parsed) => runSecretsSet(parsed),
+  'secrets delete': async (parsed) => runSecretsDelete(parsed),
+  'secrets exec': async (parsed) => runSecretsExec(parsed),
+  'secrets request': async (parsed) => runSecretsRequest(parsed),
   'panes list': async (parsed, telemetryContext) => {
     return runPanesList(parsed);
   },

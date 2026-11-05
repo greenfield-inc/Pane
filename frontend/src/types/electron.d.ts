@@ -67,6 +67,8 @@ import type { SetupExportResult, SetupExportSummary, SetupFile, SetupImportPrevi
 import type { MissionControlAgentPanel, MissionControlSnapshotRequest, MissionControlSnapshotResult } from '../../../shared/types/missionControl';
 import type { CreateSessionRequest } from './session';
 import type { DetectedProjectConfig } from '../../../shared/types/projectConfig';
+import type { ProjectEnvVar, ProjectEnvVarInput } from '../../../shared/types/projectEnvVars';
+import type { PaneSecretStorage, PaneSecretSummary } from '../../../shared/types/paneSecrets';
 import type { RunpanePaneFocusRequestedEvent } from '../../../shared/types/runpaneOrchestration';
 import type { PaneLinkTarget } from '../../../shared/types/paneLinks';
 import type { ArchiveProgressSnapshot } from '../../../shared/types/archiveProgress';
@@ -116,6 +118,13 @@ interface IPCResponse<T = any> {
 }
 
 interface ElectronAPI {
+  /** Settings → Secrets: this computer's Pane secret store. Values go in only; nothing returns one. */
+  paneSecrets: {
+    list: () => Promise<IPCResponse<{ secrets: PaneSecretSummary[]; storage: PaneSecretStorage }>>;
+    /** Data is true when it replaced a saved value. */
+    set: (project: string, name: string, value: string) => Promise<IPCResponse<boolean>>;
+    delete: (project: string, name: string) => Promise<IPCResponse<boolean>>;
+  };
   onNotesChanged: (callback: () => void) => () => void;
   preferences: PreferencesApi;
   // Generic invoke method. Daemon-owned channels route through the main-process
@@ -379,6 +388,10 @@ interface ElectronAPI {
     detectConfig: (projectId: string) => Promise<IPCResponse<DetectedProjectConfig | null>>;
     /** Resolve which run script to execute for a session (DB > config files > scripts/pane-run-script.js). Used by PanelTabBar Play button. */
     resolveRunScript: (sessionId: string) => Promise<IPCResponse<{ command: string; source: string } | null>>;
+    /** The project's environment variables. Keychain variables carry only their item reference, never the value. */
+    getEnvVars: (projectId: number) => Promise<IPCResponse<ProjectEnvVar[]>>;
+    /** Replace the project's environment variables. A typed secret is stored in the keychain and dropped. */
+    setEnvVars: (projectId: number, variables: ProjectEnvVarInput[]) => Promise<IPCResponse<ProjectEnvVar[]>>;
   };
 
   // Git operations

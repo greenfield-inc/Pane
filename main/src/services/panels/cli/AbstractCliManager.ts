@@ -214,8 +214,11 @@ export abstract class AbstractCliManager extends EventEmitter {
       // Get system environment with PATH enhancement
       const systemEnv = await this.getSystemEnvironment();
 
-      // Merge environments
-      const env = { ...systemEnv, ...cliEnv };
+      // Merge environments: the project's variables, then the CLI's own.
+      const { panelManager } = await import('../../panelManager');
+      const projectEnv = await this.sessionManager.resolveProjectEnv(sessionId, panelManager.getPanel(panelId)?.metadata.teammate ?? null);
+      for (const warning of projectEnv.warnings) this.logger?.warn(warning);
+      const env = { ...systemEnv, ...projectEnv.env, ...cliEnv };
 
       // Get CLI executable path
       const cliCommand = await this.getCliExecutablePath();

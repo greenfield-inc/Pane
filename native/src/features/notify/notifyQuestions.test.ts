@@ -22,6 +22,13 @@ describe('notifySheetState', () => {
     expect(notifySheetState(at(5, sent), 'q1', thisPhone)).toEqual({ kind: 'held', title: 'Sent to Claude', summary: 'Approved' });
   });
 
+  it('closes on a secret as soon as the host accepts it, with no Undo, and says where it was saved', () => {
+    const secret: NotifyItem = { ...question, ui: 'secret', title: 'Stripe key', secret: { project: 'stripe', name: 'STRIPE_KEY' } };
+    expect(notifySheetState(at(4, secret), 'q1', thisPhone)).toEqual({ kind: 'done', title: 'Answered' });
+    expect(notifySheetState(at(5, { ...secret, state: 'answered', answerSummary: 'Saved as stripe/STRIPE_KEY' }), 'q1', thisPhone))
+      .toEqual({ kind: 'done', title: 'Answered', summary: 'Saved as stripe/STRIPE_KEY' });
+  });
+
   it('holds another screen\'s answer for Undo too, naming that screen', () => {
     expect(notifySheetState(at(5, { ...sent, answeredOn: 'Parsa’s MacBook' }), 'q1', null))
       .toEqual({ kind: 'held', title: 'Answered on Parsa’s MacBook', summary: 'Approved' });

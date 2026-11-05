@@ -1,6 +1,7 @@
 import type { ConfigManager } from './configManager';
 import type { MachineConnections } from './machineConnections';
 import { applySharedCredentials, readSharedCredentials, sharedCredentialsSchema } from './sharedCredentials';
+import { paneSecretStore, type PaneSecretStore } from './paneSecrets';
 import { decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { LOCAL_MACHINE_ID } from '../../../shared/types/machineConnections';
 import { syncSharedCredentials, type SharedCredentialHost } from '../../../shared/types/sharedCredentials';
@@ -26,6 +27,7 @@ export class SharedCredentialSync {
   constructor(
     private readonly configManager: ConfigManager,
     private readonly machines: Pick<MachineConnections, 'subscribe' | 'remotes'>,
+    private readonly secrets: () => PaneSecretStore = paneSecretStore,
   ) {}
 
   start(): void {
@@ -61,8 +63,11 @@ export class SharedCredentialSync {
     this.running = true;
     try {
       const local: SharedCredentialHost = {
-        read: async () => readSharedCredentials(this.configManager.getConfig()),
-        apply: async credentials => { await applySharedCredentials(this.configManager, credentials); },
+        read: async () => ({ ...readSharedCredentials(this.configManager.getConfig()), paneSecrets: await this.secrets().exportForSync() }),
+        apply: async credentials => {
+          await applySharedCredentials(this.configManager, credentials);
+          if (credentials.paneSecrets) await this.secrets().applyFromSync(credentials.paneSecrets);
+        },
       };
       const peers = this.machines.remotes().map((peer): SharedCredentialHost => ({
         read: async () => decodeBoundary(await peer.invoke('credentials:shared:get', []), sharedCredentialsSchema),
@@ -81,8 +86,9 @@ export class SharedCredentialSync {
     }
   }
 
-  /** Changes when any shared key here is set or cleared; never contains a value. */
+  /** Changes when any shared key or Pane secret here is set or cleared; never contains a value. */
   private fingerprint(): string {
-    return JSON.stringify(this.configManager.getConfig().sharedCredentials ?? {});
+    const config = this.configManager.getConfig();
+    return JSON.stringify([config.sharedCredentials ?? {}, config.paneSecrets ?? {}]);
   }
 }

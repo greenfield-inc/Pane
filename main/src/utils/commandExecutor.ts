@@ -1,7 +1,7 @@
 import { exec, execFile, ExecOptions, ExecFileOptions } from 'child_process';
 import { promisify } from 'util';
 import { getShellPath } from './shellPath';
-import { WSLContext, escapeForBash, getWSLExecArgs } from './wslUtils';
+import { WSLContext, buildWSLENV, escapeForBash, getWSLExecArgs } from './wslUtils';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 
 const nodeExecAsync = promisify(exec);
@@ -46,6 +46,16 @@ function decodeStringCwd(cwd: string | URL): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * `env` with WSLENV naming every variable that differs from Pane's own environment, so
+ * WSL copies them into the Linux shell. Values stay in the environment, never in the
+ * `wsl.exe` command line, which the process list and Pane's log show.
+ */
+function withWSLENV(env: NodeJS.ProcessEnv, mergedEnv?: Record<string, string | undefined>): NodeJS.ProcessEnv {
+  const extra = getExtraEnvVars(mergedEnv);
+  return extra ? { ...env, WSLENV: buildWSLENV(Object.keys(extra)) } : env;
 }
 
 /**
@@ -100,8 +110,7 @@ export class CommandExecutor {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { cwd: _cwd, silent: _silent, ...cleanOptions } = options || {};
       const wslCwd = decodeStringCwd(cwd);
-      const extraEnv = getExtraEnvVars(cleanOptions?.env);
-      const { file, args } = getWSLExecArgs(command, wslContext.distribution, wslCwd, extraEnv);
+      const { file, args } = getWSLExecArgs(command, wslContext.distribution, wslCwd);
 
       if (!silentMode) {
         console.log(`[CommandExecutor] Executing async (WSL): ${file} ${args.join(' ')} in ${cwd}`);
@@ -112,7 +121,7 @@ export class CommandExecutor {
         ...cleanOptions,
         timeout,
         maxBuffer,
-        env: { ...process.env, ...cleanOptions?.env, PATH: shellPath },
+        env: withWSLENV({ ...process.env, ...cleanOptions?.env, PATH: shellPath }, cleanOptions?.env),
       };
 
       try {
@@ -200,12 +209,11 @@ export class CommandExecutor {
 
     if (wslContext) {
       const wslCwd = decodeStringCwd(cwd);
-      const extraEnv = getExtraEnvVars(cleanOptions.env);
       const command = [file, ...args].map(escapeForBash).join(' ');
-      const wrapped = getWSLExecArgs(command, wslContext.distribution, wslCwd, extraEnv);
+      const wrapped = getWSLExecArgs(command, wslContext.distribution, wslCwd);
       executable = wrapped.file;
       executableArgs = wrapped.args;
-      executionOptions = { ...executionOptions, cwd: undefined };
+      executionOptions = { ...executionOptions, cwd: undefined, env: withWSLENV(executionOptions.env ?? process.env, cleanOptions.env) };
     }
 
     if (!silentMode) console.log(`[CommandExecutor] Executing file: ${executable} ${executableArgs.join(' ')} in ${cwd}`);

@@ -1,4 +1,5 @@
 import { EventEmitter } from 'events';
+import { AsyncLocalStorage } from 'async_hooks';
 
 export interface Job<T, R> {
   id: string;
@@ -15,6 +16,8 @@ export class SimpleQueue<T, R = unknown> extends EventEmitter {
   private concurrency: number;
   private processor?: (job: Job<T, R>) => Promise<R>;
   private jobIdCounter = 0;
+  /** Each job runs in the async context that added it, not the one of the job that finished before it. */
+  private readonly contexts = new Map<string, <Result>(work: () => Result) => Result>();
 
   constructor(name: string, concurrency = 1) {
     super();
@@ -35,6 +38,7 @@ export class SimpleQueue<T, R = unknown> extends EventEmitter {
     };
 
     this.jobs.set(job.id, job);
+    this.contexts.set(job.id, AsyncLocalStorage.snapshot());
     this.queue.push(job.id);
     
     this.emit('waiting', job);
@@ -70,7 +74,10 @@ export class SimpleQueue<T, R = unknown> extends EventEmitter {
     this.emit('active', job);
     
     try {
-      const result = await this.processor!(job);
+      const processor = this.processor!;
+      const inContext = this.contexts.get(jobId);
+      this.contexts.delete(jobId);
+      const result = await (inContext ? inContext(() => processor(job)) : processor(job));
       job.status = 'completed';
       job.result = result;
       this.emit('completed', job, result);
@@ -106,5 +113,6 @@ export class SimpleQueue<T, R = unknown> extends EventEmitter {
     // Clean up
     this.queue = [];
     this.jobs.clear();
+    this.contexts.clear();
   }
 }

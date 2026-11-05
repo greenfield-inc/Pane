@@ -843,9 +843,12 @@ export class PaneRemoteHttpApiServer {
     }
 
     const login = getSingleHeaderValue(request.headers['tailscale-user-login'])?.trim().toLowerCase();
+    // A teammate the workspace lets in may use this computer, but never its Pane secrets.
+    const teammate = this.workspace && !this.workspaceOwnerLogin(request) ? login || 'another tailnet user' : null;
     await this.respondToInvoke(request, response, invokeRequest.requestId, auth.client?.id ?? (login ? `login:${login}` : 'open'), () => this.commandRegistry.invokeRemote(
       invokeRequest.channel,
       this.getInvokeArgsForRequest(invokeRequest, auth, request),
+      { teammate },
     ));
   }
 

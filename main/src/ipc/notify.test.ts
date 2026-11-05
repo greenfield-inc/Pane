@@ -109,6 +109,35 @@ describe('Notify across machines, through the registered handlers', () => {
     pane.notify.dispose();
   });
 
+  it('refuses a secret card a teammate posts, so the owner never sees one to answer', async () => {
+    const host = await startPane();
+    setPaneRuntime({ eventSink: { send: () => undefined }, getConfigManager: () => new ConfigManager(), getPtyHostRuntime: () => null, getWebviewContextMap: () => new Map() });
+
+    const call = host.registry.invokeRemote('runpane:notify', [{ ui: 'secret', title: 'Stripe key', secret: { project: 'stripe', name: 'STRIPE_SECRET_KEY' }, caller: { cwd: '/repo/api' } }], { teammate: 'bob@example.com' });
+    call.catch(() => undefined);
+    await flush();
+
+    expect(host.notify.snapshot().items).toEqual([]);
+    await expect(call).rejects.toMatchObject({ code: 'SECRET_OWNER_REQUIRED' });
+    resetPaneRuntimeForTests();
+    host.notify.dispose();
+  });
+
+  it('shows another machine\'s secret card and sends the typed value only to that machine', async () => {
+    const pane = await startPane();
+    const card: NotifyItem = { ...question('q-9', 'Stripe test secret key', 1_000), ui: 'secret', secret: { project: 'stripe', name: 'STRIPE_SECRET_KEY', replaces: true } };
+    const saved = savedMachines({ studio: stateOf('mac-studio', card) });
+    followSavedMachines(saved.machines);
+    await flush();
+    expect(pane.notify.snapshot().items.find(item => item.id === 'studio:q-9')).toMatchObject({ ui: 'secret', secret: { project: 'stripe', replaces: true } });
+
+    await pane.notify.run({ type: 'answer', id: 'studio:q-9', answer: { text: 'pane-canary-remote' } });
+
+    expect(saved.sent).toEqual([['studio', { type: 'notify', command: { type: 'answer', id: 'q-9', answer: { text: 'pane-canary-remote' } } }]]);
+    expect(JSON.stringify(pane.notify.snapshot())).not.toContain('pane-canary-remote');
+    pane.notify.dispose();
+  });
+
   it('keeps the same question id on two machines as two cards, and an answer reaches only its own machine', async () => {
     const pane = await startPane();
     const saved = savedMachines({ studio: stateOf('mac-studio', question('q-1', 'Ship it?', 1_000)), devbox: stateOf('parsa-devbox', question('q-1', 'Ship it?', 2_000)) });

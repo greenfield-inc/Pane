@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
-import { ArrowUp, Bell, Check, Clock, ExternalLink, Info, X } from 'lucide-react';
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode, type RefObject } from 'react';
+import { ArrowUp, Bell, Check, Clock, ExternalLink, Info, ShieldCheck, X } from 'lucide-react';
 import type { NotifyChoice, NotifyCommand, NotifyItem, NotifyRemindAfter } from '../../../../shared/types/notify';
 import { cn } from '../../utils/cn';
-import { askedBy, NOTIFY_KIND_DOT, NOTIFY_KIND_LABEL, relativeAge, unreachableText } from './notifyFormat';
+import { askedBy, NOTIFY_KIND_DOT, NOTIFY_KIND_LABEL, relativeAge, SECRET_KEPT_OUT, secretSavesAs, unreachableText } from './notifyFormat';
 import { useNow } from './useNow';
+import { SecretValueInput } from '../ui/SecretValueInput';
 
 /** The compact strip shows this many choices, then More. */
 const COMPACT_CHOICE_LIMIT = 4;
@@ -327,38 +328,55 @@ interface TextFieldProps {
   sendLabel?: string;
   /** Focuses the field each time it changes, such as after a suggestion fills it. */
   focusKey?: number;
+  /** A secret: a password field that keeps a pasted value's line breaks. */
+  masked?: boolean;
 }
 
-function TextField({ value, onChange, onSubmit, placeholder, onFieldFocusRequest, autoFocus, sendLabel, focusKey = 0 }: TextFieldProps) {
+function TextField({ value, onChange, onSubmit, placeholder, onFieldFocusRequest, autoFocus, sendLabel, focusKey = 0, masked }: TextFieldProps) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const secretRef = useRef<HTMLInputElement>(null);
+  const field = () => inputRef.current ?? secretRef.current;
   useEffect(() => {
-    if (autoFocus || focusKey > 0) focusAfterRequest(inputRef.current, onFieldFocusRequest);
+    if (autoFocus || focusKey > 0) focusAfterRequest(field(), onFieldFocusRequest);
     // Focus when the field appears (autoFocus) and whenever focusKey asks again.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusKey]);
   const hasText = value.trim().length > 0;
+  const fieldProps = {
+    value,
+    placeholder,
+    'aria-label': placeholder,
+    className: 'h-full min-w-0 flex-1 bg-transparent text-[14.5px] text-text-primary outline-none placeholder:text-text-muted',
+    onMouseDown: (event: ReactMouseEvent) => {
+      if (!onFieldFocusRequest || document.activeElement === field()) return;
+      // The floating strip can't take keys yet: ask for focus first, then focus the field.
+      event.preventDefault();
+      focusAfterRequest(field(), onFieldFocusRequest);
+    },
+  };
   return (
     <div className="flex h-[42px] items-center gap-2 rounded-xl bg-surface-tertiary pl-3.5 pr-2 focus-within:ring-[1.5px] focus-within:ring-inset focus-within:ring-border-hover">
-      <input
-        ref={inputRef}
-        value={value}
-        placeholder={placeholder}
-        aria-label={placeholder}
-        className="h-full min-w-0 flex-1 bg-transparent text-[14.5px] text-text-primary outline-none placeholder:text-text-muted"
-        onMouseDown={(event) => {
-          if (!onFieldFocusRequest || document.activeElement === inputRef.current) return;
-          // The floating strip can't take keys yet: ask for focus first, then focus the field.
-          event.preventDefault();
-          focusAfterRequest(inputRef.current, onFieldFocusRequest);
-        }}
-        onChange={(event) => onChange(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
-            event.preventDefault();
-            onSubmit();
-          }
-        }}
-      />
+      {masked ? (
+        <SecretValueInput
+          ref={secretRef}
+          appearance="bare"
+          {...fieldProps}
+          onValueChange={onChange}
+          onEnter={onSubmit}
+        />
+      ) : (
+        <input
+          ref={inputRef}
+          {...fieldProps}
+          onChange={(event) => onChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+              event.preventDefault();
+              onSubmit();
+            }
+          }}
+        />
+      )}
       {sendLabel && (
         <button
           type="button"
@@ -521,6 +539,12 @@ function QuestionCard({
     const trimmed = value.trim();
     if (trimmed) onCommand({ type: 'answer', id: item.id, answer: { text: trimmed } });
   };
+  // A secret is sent as typed, and leaves this card's state at once.
+  const saveSecret = () => {
+    if (!text) return;
+    onCommand({ type: 'answer', id: item.id, answer: { text } });
+    setText('');
+  };
   const showDetailsChange = (shown: boolean) => {
     setExpanded(shown);
     if (form === 'strip') onCommand({ type: 'show-details', shown });
@@ -561,7 +585,7 @@ function QuestionCard({
     ? () => onCommand({ type: 'open-in-pane', id: item.id })
     : undefined;
 
-  const showContext = Boolean(item.context) && (expanded || item.ui === 'approve' || form === 'inbox');
+  const showContext = Boolean(item.context) && (expanded || item.ui === 'approve' || item.ui === 'secret' || form === 'inbox');
   const recommended = recommendedIndex(choices);
 
   let body: ReactNode = null;
@@ -692,6 +716,48 @@ function QuestionCard({
           />
         </div>
       </>
+    );
+  } else if (item.ui === 'secret') {
+    body = (
+      <div className={cn(fieldPad, 'space-y-2.5')}>
+        <div className="flex items-center gap-2">
+          <div className="min-w-0 flex-1">
+            <TextField
+              masked
+              value={text}
+              onChange={setText}
+              onSubmit={saveSecret}
+              placeholder={form === 'strip' ? 'Click to type the secret' : 'Type the secret'}
+              onFieldFocusRequest={onFieldFocusRequest}
+            />
+          </div>
+          <button
+            type="button"
+            disabled={!text}
+            onClick={saveSecret}
+            className="h-[42px] shrink-0 rounded-xl bg-interactive px-4 text-[14px] font-medium text-text-on-interactive hover:bg-interactive-hover disabled:opacity-50"
+          >
+            Save securely
+          </button>
+        </div>
+        {/* A failed save swaps in for the destination line, in the same one-line box. */}
+        {item.secretError ? (
+          <div className="h-[18px] truncate text-[12.5px] leading-[18px] text-status-error" role="alert" title={item.secretError} data-testid="notify-secret-error">{item.secretError}</div>
+        ) : (
+          <div className="h-[18px] truncate text-[12.5px] leading-[18px] text-text-tertiary" title={secretSavesAs(item)} data-testid="notify-secret-target">{secretSavesAs(item)}</div>
+        )}
+        <div className="flex items-center gap-2 text-[12.5px] text-text-tertiary">
+          <ShieldCheck className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <span className="min-w-0 flex-1">{SECRET_KEPT_OUT}</span>
+          <button
+            type="button"
+            onClick={() => { setText(''); answerApproval(false); }}
+            className="h-[30px] shrink-0 rounded-[10px] px-2.5 text-[12.5px] font-medium text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+          >
+            Decline
+          </button>
+        </div>
+      </div>
     );
   }
 

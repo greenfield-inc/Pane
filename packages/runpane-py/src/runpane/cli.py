@@ -78,6 +78,7 @@ from .local_control import (
     run_workspace_state,
 )
 from .notify import run_notify
+from .secrets import run_secrets_delete, run_secrets_exec, run_secrets_list, run_secrets_request, run_secrets_set
 from .platforms import detect_platform
 from .releases import resolve_release
 from .telemetry import (
@@ -102,6 +103,7 @@ COMMAND_GROUP_HELP_TOPICS = {"panes", "panels", "workspace"}
 COMMAND_GROUP_HELP_TOPICS.add("sessions")
 COMMAND_GROUP_HELP_TOPICS.add("lock")
 COMMAND_GROUP_HELP_TOPICS.add("loops")
+COMMAND_GROUP_HELP_TOPICS.add("secrets")
 LOCK_DURATION_PATTERN = re.compile(r"^(\d+)(ms|s|m|h)?$")
 LOCK_DURATION_UNIT_MS = {"ms": 1, "s": 1_000, "m": 60_000, "h": 3_600_000}
 MAX_LOCK_DURATION_MS = 86_400_000
@@ -188,6 +190,15 @@ class ParsedArgs:
     open_ide_command: Optional[str] = None
     system_prompt: Optional[str] = None
     clear: Optional[List[str]] = None
+    # `--env`, repeatable: VAR=NAME for secrets exec, a JSON array of variables for repos update.
+    env_args: Optional[List[str]] = None
+    env_remove: Optional[List[str]] = None
+    # `runpane secrets`: the secret project, exec's --only and --file names and command, and request's reason.
+    project: Optional[str] = None
+    only: Optional[List[str]] = None
+    secret_files: Optional[List[str]] = None
+    reason: Optional[str] = None
+    exec_command: Optional[List[str]] = None
     timeout_ms: Optional[float] = None
     wait_ready: bool = False
     ready_timeout_ms: Optional[float] = None
@@ -494,6 +505,8 @@ def parse_args(argv: List[str]) -> ParsedArgs:
     del args[:len(tokens)]
 
     parsed = ParsedArgs(command=command)
+    if parsed.command == "secrets exec":
+        parsed.exec_command = take_exec_command(args)
     if parsed.command == "inbox ack":
         while args and not args[0].startswith("-"):
             parsed.inbox_ids.append(args.pop(0))
@@ -544,6 +557,25 @@ def parse_args(argv: List[str]) -> ParsedArgs:
     if parsed.command == "inbox ack" and parsed.all and parsed.inbox_ids:
         raise ValueError("runpane inbox ack accepts either item ids or --all, not both.")
     return parsed
+
+
+def take_exec_command(args: List[str]) -> Optional[List[str]]:
+    """`--` (or else the first word after exec's options) takes the rest of the line, like the npm CLI."""
+    if "--" in args:
+        separator = args.index("--")
+        command = args[separator + 1:]
+        del args[separator:]
+        return command
+    # PowerShell drops `--` before a .ps1 shim sees it, so the first word that is not one of
+    # exec's own options (or its value) starts the command.
+    start = 0
+    while start < len(args) and args[start].startswith("-"):
+        start += 2 if args[start] in LOCAL_VALUE_FLAGS else 1
+    if start >= len(args):
+        return None
+    command = args[start:]
+    del args[start:]
+    return command
 
 
 # The commands that dispatch work and accept `--wait` for its result.
@@ -914,7 +946,10 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
         parsed.url = value
         return
     if flag == "--file":
-        parsed.file = value
+        if parsed.command == "secrets exec":
+            parsed.secret_files = [*(parsed.secret_files or []), value]
+        else:
+            parsed.file = value
         return
     if flag == "--folder":
         parsed.folder = value
@@ -979,7 +1014,22 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
         parsed.system_prompt = value
         return
     if flag == "--clear":
-        parsed.clear = [*(parsed.clear or []), *(setting.strip() for setting in value.split(",") if setting.strip())]
+        parsed.clear = [*(parsed.clear or []), *split_list(value)]
+        return
+    if flag == "--env":
+        parsed.env_args = [*(parsed.env_args or []), value]
+        return
+    if flag == "--env-remove":
+        parsed.env_remove = [*(parsed.env_remove or []), *split_list(value)]
+        return
+    if flag == "--only":
+        parsed.only = [*(parsed.only or []), *split_list(value)]
+        return
+    if flag == "--project":
+        parsed.project = value
+        return
+    if flag == "--reason":
+        parsed.reason = value
         return
     if flag == "--timeout-ms":
         if parsed.command == "watch":
@@ -1182,6 +1232,10 @@ def parse_local_value_flag(parsed: ParsedArgs, flag: str, value: str) -> None:
 
 
 
+def split_list(value: str) -> List[str]:
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
 def append_remote_arg(parsed: ParsedArgs, flag: str, value: Optional[str] = None) -> None:
     if parsed.command == "install" and parsed.target == "daemon":
         parsed.remote_setup_args.append(flag)
@@ -1203,7 +1257,7 @@ def read_value(args: List[str], index: int, flag: str, literal_values: Set[int])
     if clearable and index < len(args) and args[index] == "":
         return ""
     bare_flag = index < len(args) and re.fullmatch(r"--[a-z][a-z-]*", args[index]) is not None
-    free_text = (clearable and not bare_flag) or flag in {"--text", "--prompt", "--initial-input", "--title", "--name", "--name-contains"}
+    free_text = (clearable and not bare_flag) or flag in {"--text", "--prompt", "--initial-input", "--title", "--name", "--name-contains", "--reason"}
     if index >= len(args) or not args[index] or (not free_text and args[index].startswith("-") and args[index] != "-"):
         raise ValueError(f"{flag} requires a value.")
     return args[index]
@@ -1419,6 +1473,11 @@ COMMAND_HANDLERS: Dict[str, Callable[[ParsedArgs, WrapperTelemetryContext], int]
     "repos get": lambda parsed, context: run_repos_get(parsed),
     "repos update": lambda parsed, context: run_repos_update(parsed),
     "repos rename": lambda parsed, context: run_repos_rename(parsed),
+    "secrets list": lambda parsed, context: run_secrets_list(parsed),
+    "secrets set": lambda parsed, context: run_secrets_set(parsed),
+    "secrets delete": lambda parsed, context: run_secrets_delete(parsed),
+    "secrets exec": lambda parsed, context: run_secrets_exec(parsed),
+    "secrets request": lambda parsed, context: run_secrets_request(parsed),
     "sessions list": lambda parsed, context: run_sessions_list(parsed),
     "sessions create": lambda parsed, context: run_sessions_create(parsed),
     "sessions get": lambda parsed, context: run_sessions_get(parsed),

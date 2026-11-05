@@ -2,6 +2,7 @@ import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDec
 import type { PaneCommandRegistry, PaneCommandValue } from '../daemon/commandRegistry';
 import { getPaneEventSink } from '../core/runtime';
 import { applySharedCredentials, readSharedCredentials, sharedCredentialsSchema } from '../services/sharedCredentials';
+import { paneSecretStore, type PaneSecretStore } from '../services/paneSecrets';
 import type { AppServices } from './types';
 
 const trustedSchema = boundary.object({ clientId: boundary.nonEmptyString });
@@ -11,17 +12,25 @@ const trustedSchema = boundary.object({ clientId: boundary.nonEmptyString });
  * and write newer ones. HTTP appends the trusted second argument only after it has authenticated one.
  * Never bound to the renderer: the desktop reads its own config directly.
  */
-export function registerSharedCredentialHandlers(services: AppServices, commandRegistry: PaneCommandRegistry): void {
+export function registerSharedCredentialHandlers(
+  services: AppServices,
+  commandRegistry: PaneCommandRegistry,
+  secrets: PaneSecretStore = paneSecretStore(),
+): void {
   const { configManager } = services;
-  commandRegistry.register('credentials:shared:get', (_input: PaneCommandValue, trusted: PaneCommandValue) => {
+  const readAll = async () => ({ ...readSharedCredentials(configManager.getConfig()), paneSecrets: await secrets.exportForSync() });
+  commandRegistry.register('credentials:shared:get', async (_input: PaneCommandValue, trusted: PaneCommandValue) => {
     decodeBoundary(trusted, trustedSchema);
-    return readSharedCredentials(configManager.getConfig());
+    return readAll();
   });
   commandRegistry.register('credentials:shared:apply', async (input: PaneCommandValue, trusted: PaneCommandValue) => {
     decodeBoundary(trusted, trustedSchema);
-    const { credentials, changed } = await applySharedCredentials(configManager, decodeBoundary(input, sharedCredentialsSchema));
+    const incoming = decodeBoundary(input, sharedCredentialsSchema);
+    const { changed } = await applySharedCredentials(configManager, incoming);
+    const changedSecrets = incoming.paneSecrets ? await secrets.applyFromSync(incoming.paneSecrets) : [];
     // Carries no values, so no key ever rides an event.
-    if (changed.length > 0) getPaneEventSink().send('remote:settings-changed');
-    return credentials;
+    if (changed.length + changedSecrets.length > 0) getPaneEventSink().send('remote:settings-changed');
+    // The keys only, as before secrets: callers ignore the answer, so secret values never travel back.
+    return readSharedCredentials(configManager.getConfig());
   });
 }

@@ -124,12 +124,35 @@ def build_repo_settings_update(parsed: Any) -> Dict[str, Any]:
             settings[key] = value
         if clear:
             settings[key] = None
+    apply_env_var_flags(parsed, settings)
     if not settings:
         flags = ", ".join(flag for _, flag, _ in REPO_SETTINGS)
         raise invalid_repo_settings(
-            f"runpane repos update needs at least one setting: {flags}, --clear <setting,...>, or --from-json <path|->."
+            f"runpane repos update needs at least one setting: {flags}, --env <json>, --env-remove <name,...>, --clear <setting,...>, or --from-json <path|->."
         )
     return settings
+
+
+def apply_env_var_flags(parsed: Any, settings: Dict[str, Any]) -> None:
+    """--env and --env-remove as envVars operations; each flag replaces the same operation from --from-json."""
+    if parsed.env_args is None and parsed.env_remove is None:
+        return
+    base = settings.get("envVars")
+    env_vars: Dict[str, Any] = dict(base) if isinstance(base, dict) else {}
+    if parsed.env_args is not None:
+        variables: List[Any] = []
+        for text in parsed.env_args:
+            try:
+                value = json.loads(text)
+            except ValueError:
+                value = None
+            if not isinstance(value, list):
+                raise invalid_repo_settings('--env must be a JSON array of variables, such as [{"key":"API_URL","source":"plain","value":"https://api.test"}].')
+            variables.extend(value)
+        env_vars["set"] = variables
+    if parsed.env_remove is not None:
+        env_vars["remove"] = parsed.env_remove
+    settings["envVars"] = env_vars
 
 
 def print_repo_settings(repo: Dict[str, Any], settings: Dict[str, Any]) -> None:
@@ -152,6 +175,17 @@ def print_repo_settings(repo: Dict[str, Any], settings: Dict[str, Any]) -> None:
         command = effective["command"]
         shown = "\n    " + "\n    ".join(command.split("\n")) if "\n" in command else f" {command}"
         print(f"{label} ({origin}):{shown}")
+    env_vars = settings.get("envVars")
+    if env_vars is None:
+        return
+    print(f"Environment variables:{'' if env_vars else ' none'}")
+    for variable in env_vars:
+        if variable.get("source") == "plain":
+            print(f"  {variable['key']}={variable['value']}")
+        elif variable.get("source") == "keychain":
+            print(f"  {variable['key']} from keychain item {variable['service']} / {variable['account']}")
+        else:
+            print(f"  {variable['key']} from Pane secret {variable['project']}/{variable['name']}")
 
 
 def run_repos_rename(parsed: Any) -> int:

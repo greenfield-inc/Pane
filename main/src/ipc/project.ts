@@ -18,6 +18,9 @@ import type { ConfigManager } from '../services/configManager';
 import type { Project } from '../database/models';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { createRequire } from 'node:module';
+import { PaneError, paneErrorText, reasonOf } from '../../../shared/paneError';
+import type { ProjectEnvVarInput } from '../../../shared/types/projectEnvVars';
+import { ProjectEnvService } from '../services/projectEnvVars';
 
 const loadProjectDependency = createRequire(__filename);
 
@@ -161,15 +164,51 @@ const DAEMON_PROJECT_CHANNELS = [
   'projects:detect-config',
   'projects:resolve-run-script',
   'projects:run-script',
+  'projects:get-env-vars',
+  'projects:set-env-vars',
 ] as const;
+
+const projectEnvVarInputsSchema = boundary.array(boundary.union(
+  boundary.object({ key: boundary.string, source: boundary.literal('secret'), project: boundary.string, name: boundary.string, value: boundary.optional(boundary.string) }),
+  boundary.object({ key: boundary.string, source: boundary.literal('keychain'), service: boundary.string, account: boundary.string }),
+  boundary.object({ key: boundary.string, source: boundary.literal('plain'), value: boundary.string }),
+));
 
 export function registerProjectHandlers(
   ipcMain: IpcMain,
   services: AppServices,
   commandRegistry: PaneCommandRegistry,
   scriptRuntime: ProjectScriptRuntime = projectScriptRuntime,
+  projectEnv: ProjectEnvService = new ProjectEnvService(services.databaseService),
 ): void {
   const { databaseService, sessionManager, worktreeManager, analyticsManager, configManager } = services;
+
+  // Values of keychain and Pane secret variables never leave main: both channels
+  // return only references.
+  commandRegistry.register('projects:get-env-vars', async (projectId: number) => {
+    try {
+      return { success: true, data: projectEnv.list(decodeBoundary(projectId, boundary.number)) };
+    } catch (error) {
+      console.error('[Main] Failed to read project environment variables:', reasonOf(error));
+      // The renderer gets only text from IPC, so a PaneError travels as "<message> Next: <next>".
+      return { success: false, error: error instanceof PaneError ? paneErrorText(error) : `Pane could not read the project's environment variables: ${reasonOf(error)}.` };
+    }
+  });
+
+  commandRegistry.register('projects:set-env-vars', async (projectId: number, inputs: ProjectEnvVarInput[]) => {
+    try {
+      const saved = await projectEnv.save(
+        decodeBoundary(projectId, boundary.number),
+        decodeBoundary(inputs, projectEnvVarInputsSchema),
+      );
+      analyticsManager?.track('project_settings_updated', { setting_category: 'env_vars' });
+      return { success: true, data: saved };
+    } catch (error) {
+      // Never log `inputs`: it can hold a secret.
+      console.error('[Main] Failed to save project environment variables:', reasonOf(error));
+      return { success: false, error: error instanceof PaneError ? paneErrorText(error) : `Pane could not save the project's environment variables: ${reasonOf(error)}.` };
+    }
+  });
 
   commandRegistry.register('projects:get-all', async () => {
     try {

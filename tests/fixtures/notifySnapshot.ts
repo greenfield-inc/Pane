@@ -96,3 +96,22 @@ export function notifyFixture(now = Date.now()): NotifySnapshot {
     remote: null,
   };
 }
+
+/** The fixture with a secret request first on the strip. */
+export function secretFixture(replaces = false): NotifySnapshot {
+  const snapshot = notifyFixture();
+  snapshot.items.unshift({
+    id: 'q-secret',
+    ui: 'secret',
+    title: 'Stripe test secret key',
+    context: "Run the webhook integration tests against Stripe's test mode.",
+    secret: { project: 'stripe', name: 'STRIPE_SECRET_KEY', replaces },
+    source: { paneId: 'pane-auth', panelId: 'panel-auth', name: 'auth-refactor', agent: 'Claude' },
+    state: 'waiting',
+    createdAt: Date.now() - MINUTE,
+  });
+  snapshot.queue.unshift('q-secret');
+  snapshot.strip = { kind: 'question', itemId: 'q-secret' };
+  snapshot.firstRun = false;
+  return snapshot;
+}

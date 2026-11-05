@@ -8,6 +8,11 @@ import { getShellPath } from '../../../utils/shellPath';
 import type { AnalyticsManager } from '../../analyticsManager';
 import type { PaneEventArgument } from '../../../core/eventSink';
 import { WSLContext, buildWSLENV } from '../../../utils/wslUtils';
+import { databaseService } from '../../database';
+import { ProjectEnvService } from '../../projectEnvVars';
+import { teammatePaneCaller } from '../../../daemon/commandRegistry';
+
+const projectEnvService = new ProjectEnvService(databaseService);
 
 function getLogsPanelState(panel: ToolPanel): LogsPanelState {
   // SAFETY: This manager only creates and receives panels with type `logs`,
@@ -159,6 +164,12 @@ export class LogsManager {
     }
     const panePort = String(3000 + (Math.abs(portHash) % 600) * 10);
 
+    // The project's variables; Pane's own PATH and PANE_* below win over them.
+    const projectEnv = await projectEnvService.resolveForSession(sessionId, teammatePaneCaller());
+    for (const warning of projectEnv.warnings) {
+      await this.handleOutput(panel.id, sessionId, `${warning}\n`, 'stderr');
+    }
+
     // Start process with shell
     let childProcess: ChildProcess;
 
@@ -168,10 +179,11 @@ export class LogsManager {
       childProcess = this.spawnProcess('wsl.exe', ['-d', wslContext.distribution, '--', 'bash', '-c', `cd '${cwd}' && ${command}`], {
         env: {
           ...process.env,
+          ...projectEnv.env,
           PATH: shellPath,
           PANE_PORT: panePort,
           PANE_WORKSPACE_PATH: cwd,
-          WSLENV: buildWSLENV(['PANE_PORT', 'PANE_WORKSPACE_PATH'])
+          WSLENV: buildWSLENV(['PANE_PORT', 'PANE_WORKSPACE_PATH', ...Object.keys(projectEnv.env)])
         }
       });
     } else {
@@ -180,6 +192,7 @@ export class LogsManager {
         shell: true,
         env: {
           ...process.env,
+          ...projectEnv.env,
           PATH: shellPath,
           PANE_PORT: panePort,
           PANE_WORKSPACE_PATH: cwd

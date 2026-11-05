@@ -109,6 +109,8 @@ const MAX_OUTPUT_BYTES = 10 * 1024 * 1024;
 const DEFAULT_EXEC_TIMEOUT_MS = 120_000;
 const MAX_EXEC_TIMEOUT_MS = 9 * 60_000;
 const OUTPUT_DRAIN_MS = 500;
+/** Set in a teammate's `runpane workspace exec` command; `runpane secrets` refuses to run under it. */
+const TEAMMATE_ENV = 'PANE_TEAMMATE_LOGIN';
 /** How long a timed-out command's tree gets to die before the request answers anyway. */
 const STOP_TIMEOUT_MS = 1_500;
 
@@ -159,14 +161,19 @@ export async function writeMachineFile(request: {
 
 export async function execOnMachine(
   request: { command: string; cwd?: string; timeoutMs?: number },
-  preferredShell?: string,
+  preferredShell: string | undefined,
+  teammate: string | null,
 ): Promise<MachineExecResult> {
   const cwd = request.cwd ? resolveMachinePath(request.cwd, await currentHost()) : os.homedir();
   const timeoutMs = Math.min(request.timeoutMs ?? DEFAULT_EXEC_TIMEOUT_MS, MAX_EXEC_TIMEOUT_MS);
   const { shell, args } = ShellDetector.getShellCommandArgs(request.command, preferredShell);
   // This Pane's runpane comes first, as in its terminals: the user's PATH may lack it, and Pane's own
   // environment predates the PATH entry it adds at startup.
-  const env = withRunpaneBinOnPath(process.platform === 'win32' ? process.env : { ...process.env, PATH: getShellPath() });
+  const env: NodeJS.ProcessEnv = { ...withRunpaneBinOnPath(process.platform === 'win32' ? process.env : { ...process.env, PATH: getShellPath() }) };
+  // A teammate's command runs as the owner and can reach every secret. This marker only makes a
+  // plain `runpane secrets` call in it refuse; the command can drop it or read the store directly.
+  if (teammate) env[TEAMMATE_ENV] = teammate;
+  else delete env[TEAMMATE_ENV];
 
   return new Promise((resolve, reject) => {
     // Its own process group on POSIX, so a timeout can stop everything the command started.

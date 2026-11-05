@@ -111,6 +111,22 @@ function QuestionSheet({ item, machine, answer, busy, error, onClose }: {
         <SheetButton testID="notify-approve" variant="primary" title="Approve" disabled={busy} onPress={() => answer(withNote({ approved: true }))} style={styles.answer} />
       </>
     );
+  } else if (item.ui === 'secret') {
+    footer = (
+      <>
+        <SheetButton testID="notify-decline" title="Decline" disabled={busy} onPress={() => { setText(''); answer({ approved: false }); }} style={styles.answer} />
+        <SheetButton
+          testID="notify-save-secret"
+          variant="primary"
+          title="Save securely"
+          loading={busy}
+          disabled={!text}
+          // Sent as typed, then dropped from this sheet's state.
+          onPress={() => { answer({ text }); setText(''); }}
+          style={styles.answer}
+        />
+      </>
+    );
   } else if (item.ui === 'ask') {
     footer = <SheetButton testID="notify-send" variant="primary" title={`Send to ${item.source.agent}`} loading={busy} disabled={!text.trim()} onPress={() => answer({ text: text.trim() })} style={styles.answer} />;
   }
@@ -158,7 +174,38 @@ function QuestionSheet({ item, machine, answer, busy, error, onClose }: {
           )
         ) : null}
 
-        {item.ui === 'ask' ? (
+        {item.ui === 'secret' ? (
+          <>
+            <TextField
+              testID="notify-secret"
+              placeholder="Type the secret"
+              value={text}
+              onChangeText={setText}
+              secureTextEntry
+              autoCorrect={false}
+              autoCapitalize="none"
+              autoComplete="off"
+              spellCheck={false}
+              textContentType="none"
+              importantForAutofill="no"
+              editable={!busy}
+              mono
+            />
+            {/* A failed save swaps in for the destination line, in the same two-line box. */}
+            {item.secretError ? (
+              <Text testID="notify-secret-error" variant="footnote" tone="danger" numberOfLines={2} style={styles.secretLine} accessibilityLiveRegion="polite">
+                {item.secretError}
+              </Text>
+            ) : item.secret ? (
+              <Text testID="notify-secret-target" variant="footnote" tone="muted" numberOfLines={2} style={styles.secretLine}>
+                {`Saves as Pane secret ${item.secret.project}/${item.secret.name}${item.secret.replaces ? ' · replaces the saved value' : ''}`}
+              </Text>
+            ) : null}
+            <Text variant="footnote" tone="muted">Kept out of chat. Any agent on your machines can use it with runpane secrets exec.</Text>
+            {/* A secure field on the phone is one line, so a pasted value loses its line breaks. */}
+            <Text testID="notify-secret-one-line" variant="footnote" tone="muted">Takes one line. Answer a multi-line value, such as a PEM key, on your computer.</Text>
+          </>
+        ) : item.ui === 'ask' ? (
           <>
             {(item.suggestions ?? []).length > 0 ? (
               <View style={styles.chips}>
@@ -208,6 +255,8 @@ function SentLine({ summary }: { summary?: string }) {
 
 const styles = StyleSheet.create({
   fill: { flex: 1 },
+  // Two footnote lines (16 pt each), so the destination and an error take the same room.
+  secretLine: { height: 32 },
   bold: { fontWeight: '600' },
   answer: { flex: 1 },
   choices: { gap: 8, marginTop: 4 },

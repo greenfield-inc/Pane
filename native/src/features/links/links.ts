@@ -88,7 +88,7 @@ export function parseNotifyPush(value: unknown): NotifyPush | null {
   };
 }
 
-const NOTIFY_UIS: readonly NotifyUi[] = ['options', 'approve', 'ask', 'info'];
+const NOTIFY_UIS: readonly NotifyUi[] = ['options', 'approve', 'ask', 'secret', 'info'];
 
 function choiceLabels(value: unknown): string[] {
   const list = typeof value === 'string' ? parseJson(value) : value;

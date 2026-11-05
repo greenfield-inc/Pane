@@ -25,6 +25,7 @@ import { getShellPath, warmShellPath } from '../utils/shellPath';
 import { terminalTiming } from '../utils/terminalTiming';
 import { trimAnsiSafe } from '../utils/ansiTrim';
 import { databaseService } from './database';
+import { ProjectEnvService } from './projectEnvVars';
 import { ShellDetector } from '../utils/shellDetector';
 import type { AnalyticsManager } from './analyticsManager';
 import { getWSLShellSpawn, buildWSLENV, WSLContext } from '../utils/wslUtils';
@@ -439,6 +440,7 @@ export class TerminalPanelManager extends EventEmitter {
     private readonly emulatorHost: () => TerminalEmulatorHostConnection = sharedEmulatorThread,
     private readonly readForegroundExecutable: (shellPid: number) => Promise<string | undefined> = readForegroundExecutablePath,
     private readonly readForegroundGroup: (shellPid: number) => Promise<number | undefined> = readForegroundProcessGroup,
+    private readonly projectEnv: Pick<ProjectEnvService, 'resolveForSession'> = new ProjectEnvService(databaseService),
   ) {
     super();
     this.setMaxListeners(100);
@@ -1733,6 +1735,13 @@ export class TerminalPanelManager extends EventEmitter {
       }
     }
 
+    // Read the project's variables before taking a spawn slot: a keychain item
+    // another app owns can make macOS ask the user first. Session panels belong
+    // to no project.
+    const projectEnv = sessionState.orchestrationSessionId
+      ? { env: {}, warnings: [] }
+      : await this.projectEnv.resolveForSession(panel.sessionId, panel.metadata?.teammate ?? null);
+
     // Wait for a spawn slot (caps concurrent PTY spawns to prevent CPU spikes)
     await this.acquireSpawnSlot(priority);
 
@@ -1893,6 +1902,7 @@ export class TerminalPanelManager extends EventEmitter {
             'GIT_CEILING_DIRECTORIES',
             'WORKTREE_PATH',
             'PANE_WORKSPACE_PATH',
+            ...Object.keys(projectEnv.env),
           ]),
         }
       : {};
@@ -1914,10 +1924,13 @@ export class TerminalPanelManager extends EventEmitter {
     const baseSpawnEnv = {
       ...inheritedEnv,
       ...getGitAttributionEnv(getRuntimeConfigManager().getConfig()),
-      PATH: enhancedPath,
       TERM: 'xterm-256color',
       COLORTERM: 'truecolor',
       LANG: process.env.LANG || 'en_US.UTF-8',
+      // The project's variables override the inherited environment; Pane's
+      // own PATH, WORKTREE_PATH and PANE_* below always win.
+      ...projectEnv.env,
+      PATH: enhancedPath,
       WORKTREE_PATH: cwd,
       PANE_SESSION_ID: panel.sessionId,
       PANE_NOTES_FILE: isWSL || getRuntimeConfigManager().getConfig().notesEnabled !== true ? '' : noteContextPath(path.join(getAppDirectory(), 'notes'), panel.sessionId),
@@ -2041,6 +2054,14 @@ export class TerminalPanelManager extends EventEmitter {
 
     // Begin at-a-glance status detection for AI/CLI agent panels.
     this.registerAgentStatusPanel(terminalProcess);
+
+    // A variable that could not be read is missing from this shell; say so
+    // after the first prompt, once the viewer that opened the panel is listening.
+    if (projectEnv.warnings.length > 0) {
+      this.scheduleAfterShellPrompt(ptyProcess, () => {
+        for (const warning of projectEnv.warnings) this.showNotice(panel.id, warning);
+      });
+    }
 
     // Tell the renderer which `ptyId` backs this panel so `TerminalPanel.tsx`
     // can ack flow-control bytes over the ptyHost port. Flag-off path skips

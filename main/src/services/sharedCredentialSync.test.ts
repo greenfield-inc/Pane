@@ -57,4 +57,30 @@ describe('syncSharedCredentials', () => {
 
     expect(mac.applies() + windows.applies()).toBe(0);
   });
+
+  it('carries Pane secrets the same way: newest wins, a deletion stays deleted, and a host that agrees gets no write', async () => {
+    const mac = host({ paneSecrets: {
+      'stripe/STRIPE_KEY': { value: 'sk_new', updatedAt: '2026-03-01T00:00:00.000Z', source: 'Mac' },
+      'qa/OLD': { value: null, updatedAt: '2026-03-01T00:00:00.000Z', source: 'Mac' },
+    } });
+    const linux = host({ paneSecrets: {
+      'stripe/STRIPE_KEY': { value: 'sk_old', updatedAt: '2026-01-01T00:00:00.000Z', source: 'linux-box' },
+      'qa/OLD': { value: 'still-here', updatedAt: '2026-02-01T00:00:00.000Z', source: 'linux-box' },
+      'qa/ONLY_LINUX': { value: 'l', updatedAt: '2026-02-01T00:00:00.000Z', source: 'linux-box' },
+    } });
+
+    await syncSharedCredentials([mac.endpoint, linux.endpoint]);
+
+    const expected = { paneSecrets: {
+      'stripe/STRIPE_KEY': { value: 'sk_new', updatedAt: '2026-03-01T00:00:00.000Z', source: 'Mac' },
+      'qa/OLD': { value: null, updatedAt: '2026-03-01T00:00:00.000Z', source: 'Mac' },
+      'qa/ONLY_LINUX': { value: 'l', updatedAt: '2026-02-01T00:00:00.000Z', source: 'linux-box' },
+    } };
+    expect(mac.current()).toEqual(expected);
+    expect(linux.current()).toEqual(expected);
+
+    const applied = mac.applies() + linux.applies();
+    await syncSharedCredentials([mac.endpoint, linux.endpoint]);
+    expect(mac.applies() + linux.applies()).toBe(applied);
+  });
 });

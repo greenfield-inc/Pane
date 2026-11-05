@@ -17,7 +17,7 @@ import {
   type NotifySource,
   type NotifyWindowSize,
 } from '../../../../shared/types/notify';
-import { NotifyQueue } from './notifyQueue';
+import { type NotifyQueueEnvironment, NotifyQueue } from './notifyQueue';
 import { canFloatOverOtherApps, NotifyWindows } from './notifyWindows';
 import { NotifyTray } from './notifyTray';
 import { syncNotifyInstructions, syncWslNotifyInstructions } from './notifyInstructions';
@@ -38,6 +38,8 @@ export interface NotifyServiceDependencies {
   headless: boolean;
   /** This machine's name, as connected screens and phones show it. */
   machine: string;
+  /** This host's Pane secret store, where secret cards save their answer. */
+  secrets?: NotifyQueueEnvironment['secrets'];
   /** Sends the shared state to every connected screen and phone (`notify:shared-changed`). */
   publish: (state: NotifySharedState) => void;
   /** Sends a command for a saved machine's question to that machine, under the id it knows the question by. */
@@ -82,6 +84,7 @@ export class NotifyService {
       shortcutRegistered: () => this.shortcutRegistered,
       instructionFiles: () => this.instructionFiles,
       machine: deps.machine,
+      secrets: deps.secrets,
     });
     this.windows = new NotifyWindows({
       rendererArguments: deps.rendererArguments,
@@ -151,13 +154,13 @@ export class NotifyService {
       case 'open-in-pane': await this.openInPane(command.id); return;
       default:
         if ('id' in command && command.id && this.queue.remoteTarget(command.id)) await this.runOnMachine(command);
-        else this.queue.run(command);
+        else await this.queue.run(command);
     }
   }
 
   /** The `notify:remote-command` daemon command: another screen or a phone acts on this machine's question. */
-  runRemote(command: NotifyRemoteCommand, device: string): void {
-    this.queue.runRemote(command, device);
+  async runRemote(command: NotifyRemoteCommand, device: string, teammate: string | null): Promise<void> {
+    await this.queue.runRemote(command, device, teammate);
   }
 
   sharedState(): NotifySharedState {

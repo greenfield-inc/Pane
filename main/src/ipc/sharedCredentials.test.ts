@@ -10,6 +10,8 @@ import { registerSharedCredentialHandlers } from './sharedCredentials';
 import { PaneCommandRegistry } from '../daemon/commandRegistry';
 import { ConfigManager } from '../services/configManager';
 import type { SharedCredentials } from '../../../shared/types/sharedCredentials';
+import { keychainSecretBackend, PaneSecretStore } from '../services/paneSecrets';
+import { FakeKeychain } from '../test/fakeKeychain';
 
 const tempDirs: string[] = [];
 const paired = { clientId: 'phone-1' };
@@ -32,11 +34,13 @@ async function registerHost(existingConfig?: Partial<AppConfig>) {
   const ipcMainStub: Pick<IpcMain, 'handle'> = { handle: () => undefined };
   // SAFETY: The config handlers use only ipcMain.handle, which the stub implements.
   registerConfigHandlers(ipcMainStub as IpcMain, services, registry);
-  registerSharedCredentialHandlers(services, registry);
+  const keychain = new FakeKeychain();
+  const secrets = new PaneSecretStore(configManager, keychainSecretBackend(keychain, 'Pane (test)'), () => 'this-mac');
+  registerSharedCredentialHandlers(services, registry, secrets);
   // SAFETY: credentials:shared:* returns SharedCredentials.
   const read = async () => await registry.invokeRemote('credentials:shared:get', [null, paired]) as SharedCredentials;
   const apply = (credentials: SharedCredentials) => registry.invokeRemote('credentials:shared:apply', [credentials, paired]);
-  return { configManager, registry, read, apply };
+  return { configManager, registry, read, apply, secrets, keychain };
 }
 
 describe('shared credentials on a host', () => {
@@ -131,5 +135,68 @@ describe('shared credentials on a host', () => {
     const credentials = await read();
     expect(credentials.openaiApiKey?.value).toBe('sk-openai-hand-edited');
     expect(Date.parse(credentials.openaiApiKey?.updatedAt ?? '')).toBeGreaterThan(0);
+  });
+
+  it('shares Pane secrets with their values and takes newer ones, keeping values out of config.json', async () => {
+    const { configManager, read, apply, secrets, keychain } = await registerHost();
+    await secrets.set('stripe', 'STRIPE_KEY', 'sk_test_local_canary');
+
+    const shared = (await read()).paneSecrets ?? {};
+    expect(shared['stripe/STRIPE_KEY']).toEqual({ value: 'sk_test_local_canary', updatedAt: expect.any(String), source: 'this-mac' });
+
+    await apply({ paneSecrets: {
+      'qa/FROM_LINUX': { value: 'linux-value', updatedAt: '2026-01-01T00:00:00.000Z', source: 'linux-box' },
+      'stripe/STRIPE_KEY': { value: 'older', updatedAt: '2020-01-01T00:00:00.000Z', source: 'linux-box' },
+    } });
+
+    expect(await secrets.read('qa', 'FROM_LINUX')).toBe('linux-value');
+    expect(await secrets.read('stripe', 'STRIPE_KEY')).toBe('sk_test_local_canary');
+    expect(keychain.get('Pane (test)', 'secret:qa/FROM_LINUX')).toBe('linux-value');
+    const onDisk = await fs.readFile(path.join(process.env.PANE_DIR ?? '', 'config.json'), 'utf8');
+    expect(onDisk).not.toContain('linux-value');
+    expect(onDisk).not.toContain('sk_test_local_canary');
+    expect(configManager.getConfig().paneSecrets?.['qa/FROM_LINUX']).toEqual({ updatedAt: '2026-01-01T00:00:00.000Z', source: 'linux-box' });
+  });
+
+  it('answers an apply without secret values, and syncs again without reading the keychain', async () => {
+    const { read, apply, secrets, keychain } = await registerHost();
+    await secrets.set('stripe', 'STRIPE_KEY', 'sk_test_local_canary');
+    const answer = await apply({ paneSecrets: { 'qa/FROM_LINUX': { value: 'linux-value', updatedAt: '2026-01-01T00:00:00.000Z', source: 'linux-box' } } });
+    expect(JSON.stringify(answer)).not.toMatch(/sk_test_local_canary|linux-value/);
+
+    const reads = vi.spyOn(keychain, 'read');
+    expect((await read()).paneSecrets).toMatchObject({
+      'stripe/STRIPE_KEY': { value: 'sk_test_local_canary' },
+      'qa/FROM_LINUX': { value: 'linux-value' },
+    });
+    expect(reads).not.toHaveBeenCalled();
+  });
+
+  it('keeps a deleted secret deleted on both sides when an older copy arrives', async () => {
+    const { read, apply, secrets, keychain } = await registerHost();
+    await apply({ paneSecrets: { 'qa/OLD': { value: 'old', updatedAt: '2026-01-01T00:00:00.000Z', source: 'linux-box' } } });
+
+    await secrets.delete('qa', 'OLD');
+    await apply({ paneSecrets: { 'qa/OLD': { value: 'old', updatedAt: '2026-01-01T00:00:00.000Z', source: 'linux-box' } } });
+
+    expect(secrets.has('qa', 'OLD')).toBe(false);
+    expect(keychain.get('Pane (test)', 'secret:qa/OLD')).toBeUndefined();
+    expect((await read()).paneSecrets?.['qa/OLD']).toEqual({ value: null, updatedAt: expect.any(String), source: 'this-mac' });
+
+    await apply({ paneSecrets: { 'qa/OLD': { value: 'set-again', updatedAt: '2099-01-01T00:00:00.000Z', source: 'linux-box' } } });
+    expect(await secrets.read('qa', 'OLD')).toBe('set-again');
+  });
+
+  it('drops secret records whose address is not a valid project/NAME', async () => {
+    const { apply, secrets } = await registerHost();
+
+    await apply({ paneSecrets: {
+      'no-slash': { value: 'x', updatedAt: '2026-01-01T00:00:00.000Z', source: 'a' },
+      'qa/PATH': { value: 'x', updatedAt: '2026-01-01T00:00:00.000Z', source: 'a' },
+      'qa/pane_token': { value: 'x', updatedAt: '2026-01-01T00:00:00.000Z', source: 'a' },
+      'qa/GOOD': { value: 'x', updatedAt: '2026-01-01T00:00:00.000Z', source: 'a' },
+    } });
+
+    expect(secrets.list().map(secret => `${secret.project}/${secret.name}`)).toEqual(['qa/GOOD']);
   });
 });

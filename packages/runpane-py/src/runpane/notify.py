@@ -6,7 +6,7 @@ import json
 import math
 import os
 import re
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from .daemon_client import PaneDaemonClientError, invoke_daemon
 
@@ -47,13 +47,7 @@ def build_notify_request(parsed: Any, env: Mapping[str, str], cwd: str) -> Dict[
         "suggestions": parsed.notify_suggestions,
         "action": parsed.notify_action,
     }
-    caller = {"cwd": cwd}
-    for key, name in (("paneId", "PANE_SESSION_ID"), ("panelId", "PANE_PANEL_ID"), ("agent", "RUNPANE_NOTIFY_AGENT")):
-        value = (env.get(name) or "").strip()
-        if value:
-            caller[key] = value
-    return_after = (env.get("RUNPANE_NOTIFY_RETURN_AFTER_MS") or "").strip()
-    timing = {"returnAfterMs": int(return_after)} if re.fullmatch(r"\d+", return_after) and int(return_after) > 0 else {}
+    caller, timing = notify_caller_fields(env, cwd)
 
     if parsed.resume is not None:
         if not parsed.resume.strip():
@@ -95,6 +89,18 @@ def build_notify_request(parsed: Any, env: Mapping[str, str], cwd: str) -> Dict[
     if given["action"] is not None:
         request["action"] = parse_action(given["action"])
     return request
+
+
+def notify_caller_fields(env: Mapping[str, str], cwd: str) -> Tuple[Dict[str, str], Dict[str, int]]:
+    """Who is asking, from the Pane terminal's environment, and how soon to return waiting; shared with `secrets request`."""
+    caller = {"cwd": cwd}
+    for key, name in (("paneId", "PANE_SESSION_ID"), ("panelId", "PANE_PANEL_ID"), ("agent", "RUNPANE_NOTIFY_AGENT")):
+        value = (env.get(name) or "").strip()
+        if value:
+            caller[key] = value
+    return_after = (env.get("RUNPANE_NOTIFY_RETURN_AFTER_MS") or "").strip()
+    timing = {"returnAfterMs": int(return_after)} if re.fullmatch(r"\d+", return_after) and int(return_after) > 0 else {}
+    return caller, timing
 
 
 def parse_choices(text: str) -> List[Dict[str, Any]]:
@@ -171,6 +177,8 @@ def describe_notify_result(result: Dict[str, Any]) -> str:
         return with_note("Approved" if result["approved"] else "Denied")
     if "answer" in result:
         return with_note(f"Answer: {result['answer']}")
+    if "status" in result:
+        return f"Saved as {result.get('project')}/{result.get('name')}" if result["status"] == "saved" else "Declined"
     return "Shown on screen." if result.get("delivered") == "screen" else "Added to the Notify inbox."
 
 

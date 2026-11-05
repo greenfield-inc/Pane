@@ -5,6 +5,8 @@ import { RunpaneError } from './errors';
 
 // The CLI's copy of the request and result in shared/types/notify.ts, which this package cannot import.
 type NotifyUi = 'options' | 'approve' | 'ask' | 'info';
+/** `runpane secrets request` sends ui secret; `runpane notify --ui` never takes it. */
+type NotifyRequestUi = NotifyUi | 'secret';
 
 interface NotifyChoice {
   label: string;
@@ -17,8 +19,10 @@ interface NotifyAction {
   url: string;
 }
 
-interface NotifyRequest {
-  ui?: NotifyUi;
+interface NotifyCaller { paneId?: string; panelId?: string; cwd?: string; agent?: string }
+
+export interface NotifyRequest {
+  ui?: NotifyRequestUi;
   title?: string;
   context?: string;
   choices?: NotifyChoice[];
@@ -26,15 +30,18 @@ interface NotifyRequest {
   detailLabel?: string;
   suggestions?: string[];
   action?: NotifyAction;
+  secret?: { project: string; name: string };
   resume?: string;
   returnAfterMs?: number;
-  caller: { paneId?: string; panelId?: string; cwd?: string; agent?: string };
+  caller: NotifyCaller;
 }
 
-type NotifyResult =
+export type NotifyResult =
   | { answer: string; note?: string }
   | { approved: boolean; note?: string }
   | { delivered: 'screen' | 'inbox' }
+  | { status: 'saved'; project: string; name: string }
+  | { status: 'declined' }
   | { waiting: true; id: string; next: string }
   | { unavailable: string; next: string };
 
@@ -55,12 +62,14 @@ const choiceSchema = boundary.object({
 });
 const actionSchema = boundary.object({ label: boundary.nonEmptyString, url: boundary.nonEmptyString });
 const note = boundary.optional(boundary.string);
-const notifyResultSchema: BoundarySchema<NotifyResult> = boundary.union(
+export const notifyResultSchema: BoundarySchema<NotifyResult> = boundary.union(
   boundary.object({ waiting: boundary.literal(true), id: boundary.nonEmptyString, next: boundary.string }),
   boundary.object({ unavailable: boundary.string, next: boundary.string }),
   boundary.object({ approved: boundary.boolean, note }),
   boundary.object({ answer: boundary.string, note }),
   boundary.object({ delivered: boundary.enumeration('screen', 'inbox') }),
+  boundary.object({ status: boundary.literal('saved'), project: boundary.string, name: boundary.string }),
+  boundary.object({ status: boundary.literal('declined') }),
 );
 
 function invalid(field: string, problem: string, next = `Fix ${field} and call notify again.`): RunpaneError {
@@ -83,14 +92,7 @@ function buildNotifyRequest(parsed: ParsedArgs, env: NodeJS.ProcessEnv, cwd: str
     suggestions: parsed.notifySuggestions,
     action: parsed.notifyAction,
   };
-  const caller = {
-    paneId: nonEmpty(env.PANE_SESSION_ID),
-    panelId: nonEmpty(env.PANE_PANEL_ID),
-    cwd,
-    agent: nonEmpty(env.RUNPANE_NOTIFY_AGENT),
-  };
-  const returnAfter = env.RUNPANE_NOTIFY_RETURN_AFTER_MS?.trim() ?? '';
-  const timing = /^\d+$/.test(returnAfter) && Number(returnAfter) > 0 ? { returnAfterMs: Number(returnAfter) } : {};
+  const { caller, timing } = notifyCallerFields(env, cwd);
 
   if (parsed.resume !== undefined) {
     if (!parsed.resume.trim()) throw invalid('resume', 'resume must be the id from a waiting result.');
@@ -126,6 +128,27 @@ function buildNotifyRequest(parsed: ParsedArgs, env: NodeJS.ProcessEnv, cwd: str
   if (given.suggestions !== undefined) request.suggestions = parseSuggestions(given.suggestions);
   if (given.action !== undefined) request.action = decodeOr(parseJson(given.action), actionSchema, invalid('action', ACTION_EXPECTED));
   return request;
+}
+
+/**
+ * Who is asking, from the Pane terminal's environment, and for MCP clients whose tool calls time
+ * out, how soon to return `waiting`. Shared with `runpane secrets request`.
+ */
+interface NotifyCallerFields {
+  caller: NotifyCaller;
+  timing: Pick<NotifyRequest, 'returnAfterMs'>;
+}
+
+export function notifyCallerFields(env: NodeJS.ProcessEnv, cwd: string): NotifyCallerFields {
+  const caller = {
+    paneId: nonEmpty(env.PANE_SESSION_ID),
+    panelId: nonEmpty(env.PANE_PANEL_ID),
+    cwd,
+    agent: nonEmpty(env.RUNPANE_NOTIFY_AGENT),
+  };
+  const returnAfter = env.RUNPANE_NOTIFY_RETURN_AFTER_MS?.trim() ?? '';
+  const timing = /^\d+$/.test(returnAfter) && Number(returnAfter) > 0 ? { returnAfterMs: Number(returnAfter) } : {};
+  return { caller, timing };
 }
 
 function parseChoices(text: string): NotifyChoice[] {
@@ -169,12 +192,13 @@ function nonEmpty(value: string | undefined): string | undefined {
 }
 
 /** One line for people: the answer, Approved or Denied, where an update went, or what to do next. */
-function describeNotifyResult(result: NotifyResult): string {
+export function describeNotifyResult(result: NotifyResult): string {
   const withNote = (text: string, noteText: string | undefined) => (noteText ? `${text}. Note: ${noteText}` : text);
   if ('waiting' in result) return `Still waiting (id ${result.id}). ${result.next}`;
   if ('unavailable' in result) return `Unavailable: ${result.unavailable} ${result.next}`;
   if ('approved' in result) return withNote(result.approved ? 'Approved' : 'Denied', result.note);
   if ('answer' in result) return withNote(`Answer: ${result.answer}`, result.note);
+  if ('status' in result) return result.status === 'saved' ? `Saved as ${result.project}/${result.name}` : 'Declined';
   return result.delivered === 'screen' ? 'Shown on screen.' : 'Added to the Notify inbox.';
 }
 

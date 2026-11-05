@@ -7,6 +7,7 @@ import {
   Gauge,
   GitBranch,
   Keyboard,
+  KeyRound,
   Link2,
   Monitor,
   Settings,
@@ -106,6 +107,14 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategoryDefinition[] = [
     icon: BrainCircuit,
     settingIds: ['voice-transcription', 'apns-credentials'],
     aliases: ['fal', 'openrouter', 'deepgram', 'voice', 'dictation', 'apns', 'push', 'notifications', 'keys'],
+  },
+  {
+    id: 'secrets',
+    label: 'Secrets',
+    description: 'Values agents use through runpane secrets exec, on every machine.',
+    icon: KeyRound,
+    settingIds: ['pane-secrets'],
+    aliases: ['secret', 'secrets', 'api key', 'token', 'password', 'credentials', 'keychain', 'env', 'environment', 'runpane secrets'],
   },
   {
     id: 'shortcuts',

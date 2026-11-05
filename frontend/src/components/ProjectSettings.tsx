@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Save, Trash2, FolderIcon, GitBranch, Settings, Code2, BrainCircuit } from 'lucide-react';
 import { API } from '../utils/api';
+import { ipcErrorMessage } from '../utils/ipcErrorMessage';
 import type { Project } from '../types/project';
 import type { DetectedProjectConfig } from '../../../shared/types/projectConfig';
 import { Modal, ModalHeader, ModalBody, ModalFooter } from './ui/Modal';
@@ -9,6 +10,8 @@ import { Button } from './ui/Button';
 import { EnhancedInput } from './ui/EnhancedInput';
 import { FieldWithTooltip } from './ui/FieldWithTooltip';
 import { Card } from './ui/Card';
+import { ProjectEnvVarsSection } from './ProjectEnvVarsSection';
+import { projectEnvInputsFrom, projectEnvRowProblem, projectEnvRowsFrom, secretProjectFor, type ProjectEnvRow } from './projectEnvRows';
 
 /** The editable fields, as the form holds them: an unset setting is ''. */
 interface SettingsForm {
@@ -60,6 +63,9 @@ export default function ProjectSettings({ project, isOpen, onClose, onUpdate, on
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [envRows, setEnvRows] = useState<ProjectEnvRow[]>([]);
+  // Null until loaded, so a failed load never saves an empty list over the stored one.
+  const [loadedEnvRows, setLoadedEnvRows] = useState<ProjectEnvRow[] | null>(null);
 
   const { name, path, systemPrompt, runScript, buildScript, archiveScript, openIdeCommand, worktreeFolder } = form;
   const setField = (field: keyof SettingsForm) => (value: string) => setForm(current => ({ ...current, [field]: value }));
@@ -119,6 +125,22 @@ export default function ProjectSettings({ project, isOpen, onClose, onUpdate, on
     setForm(saved);
     setError(null);
     detectProject(project);
+    setEnvRows([]);
+    setLoadedEnvRows(null);
+    const projectId = project.id;
+    window.electronAPI.projects.getEnvVars(projectId).then((result) => {
+      if (savedForm.current?.projectId !== projectId) return;
+      if (result.success && result.data) {
+        const rows = projectEnvRowsFrom(result.data);
+        setEnvRows(rows);
+        setLoadedEnvRows(rows);
+      } else {
+        setError(result.error || 'Pane could not load this project\'s environment variables.');
+      }
+    }).catch((err) => {
+      if (savedForm.current?.projectId !== projectId) return;
+      setError(ipcErrorMessage(err, 'Pane could not load this project\'s environment variables.'));
+    });
   }, [isOpen, project]);
 
   const handleSave = async () => {
@@ -126,6 +148,19 @@ export default function ProjectSettings({ project, isOpen, onClose, onUpdate, on
     setError(null);
 
     try {
+      const envProblem = envRows.map((row, index) => projectEnvRowProblem(row, envRows.slice(0, index))).find(Boolean);
+      if (envProblem) throw new Error(`${envProblem} Nothing was saved.`);
+      if (loadedEnvRows !== null && envRows !== loadedEnvRows) {
+        const envResponse = await window.electronAPI.projects.setEnvVars(project.id, projectEnvInputsFrom(envRows, secretProjectFor(project.name)));
+        if (!envResponse.success || !envResponse.data) {
+          throw new Error(envResponse.error || 'Pane could not save the environment variables.');
+        }
+        // Typed values are now Pane secrets; show the saved references.
+        const savedRows = projectEnvRowsFrom(envResponse.data);
+        setEnvRows(savedRows);
+        setLoadedEnvRows(savedRows);
+      }
+
       // Save only the fields edited here, so a save never undoes a change made
       // elsewhere while the dialog was open.
       const saved = savedForm.current?.form ?? EMPTY_FORM;
@@ -481,6 +516,10 @@ export default function ProjectSettings({ project, isOpen, onClose, onUpdate, on
             </FieldWithTooltip>
 
           </div>
+
+          {loadedEnvRows !== null && (
+            <ProjectEnvVarsSection rows={envRows} onChange={setEnvRows} defaultProject={secretProjectFor(project.name)} />
+          )}
 
           {/* AI Prompt Customization */}
           <div className="space-y-6">

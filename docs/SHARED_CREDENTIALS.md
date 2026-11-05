@@ -12,6 +12,9 @@ Set an integration key once and every Pane host you use gets it. A key set on yo
 
 A key that exists only in a host's environment (for example `FAL_KEY` or the `PANE_APNS_*` variables) stays on that host and is never shared. On that host the environment value wins over a shared one. To get phone alerts from every computer, load the APNs key once in Settings → Integrations rather than only in one host's environment. The APNs endpoint follows the phone's build, not the key's environment ([Native mobile](NATIVE_MOBILE.md#push-delivery-operator-setup)).
 
+[Pane secrets](PANE_SECRETS.md) travel the same way, with the same rules, but their
+values stay in each host's keychain or secret file rather than `config.json`.
+
 ## How keys travel
 
 Hosts never contact each other on their own. A device that has more than one host saved, whether found over Tailscale or paired with a code, carries the keys between them:

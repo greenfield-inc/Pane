@@ -14,6 +14,7 @@ answer as the tool's result.
 | `options` | The question and 1 to 9 `choices` (`{label, detail?, recommended?}`). The strip shows four, then **More**. | `{answer, note?}` |
 | `approve` | Deny and Approve, plus a disclosure with the preformatted `detail`. `detailLabel` names the disclosure (up to 40 characters; default **Show details**). | `{approved, note?}` |
 | `ask` | A text field, with optional `suggestions` as chips above it. | `{answer}` |
+| `secret` | A masked field with **Save securely** and **Decline**. Created only by `runpane secrets request` (MCP `secrets_request`), never with `notify --ui`. The host saves the value as a [Pane secret](PANE_SECRETS.md) and drops it; it never reaches the agent, history or other screens. No Undo. | `{status: "saved", project, name}` or `{status: "declined"}` |
 | `info` | One line, with at most one `action` button (`{label, url}`). It returns at once and hides after a few seconds. | `{delivered: "screen" \| "inbox"}` |
 
 Every card takes a `title` (one line on the strip, wrapping to three) and an
@@ -21,6 +22,9 @@ optional `context` shown under **Details** and in the round.
 
 When Notify is off or Pane isn't running, the result is
 `{unavailable, next}` and the agent asks in its terminal as it does today.
+For an API key, token or password, agents call `secrets_request` (or
+`runpane secrets request`), never `ask`. When that returns `unavailable`, the
+agent asks you to save the secret in Pane under Settings > Secrets.
 
 ```sh
 runpane notify --ui options --title "Which session store should the refactor use?" \

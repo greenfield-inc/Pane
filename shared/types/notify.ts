@@ -8,7 +8,19 @@
  * surface clears together. Nothing is persisted: a question lives only while its call is open.
  */
 
-export type NotifyUi = 'options' | 'approve' | 'ask' | 'info';
+export type NotifyUi = 'options' | 'approve' | 'ask' | 'secret' | 'info';
+
+/**
+ * secret only: where the typed value is saved. The host writes it to its Pane secret
+ * store when the card is answered and replaces it with `{status:'saved'}`; the value
+ * never reaches the agent, the snapshot, history or any other surface.
+ */
+export interface NotifySecretTarget {
+  project: string;
+  name: string;
+  /** Set by the host: a secret with this address already exists, so saving replaces it. */
+  replaces?: boolean;
+}
 
 export interface NotifyChoice {
   label: string;
@@ -36,6 +48,10 @@ export interface NotifyQuestion {
   suggestions?: string[];
   /** info only: one button. */
   action?: NotifyAction;
+  /** secret only: the Pane secret the answer is saved as. The card's title and context are the agent's label and reason. */
+  secret?: NotifySecretTarget;
+  /** secret only, set by the host: why the last save failed (never contains the value). The card stays waiting for another try. */
+  secretError?: string;
   /** Set when the question mirrors a prompt in an agent's terminal (Claude's permission and plan prompts). */
   agentPrompt?: NotifyAgentPrompt;
 }
@@ -73,6 +89,9 @@ export type NotifyResult =
   | { answer: string; note?: string }
   | { approved: boolean; note?: string }
   | { delivered: 'screen' | 'inbox' }
+  /** secret: the value was saved as `project/name`; it is never returned. */
+  | { status: 'saved'; project: string; name: string }
+  | { status: 'declined' }
   | { waiting: true; id: string; next: string }
   | { unavailable: string; next: string };
 
@@ -218,6 +237,10 @@ export interface NotifyInstructionsFile {
 /** Snooze takes 3m, 5m or 15m; the ✕ menu's reminders take 10m, 1h or pane. */
 export type NotifyRemindAfter = '3m' | '5m' | '15m' | '10m' | '1h' | 'pane';
 
+/**
+ * A secret card is answered with `{ text }` (the value, saved on the host and dropped)
+ * or declined with `{ approved: false }`.
+ */
 export type NotifyAnswer =
   | { choice: string; note?: string }
   | { approved: boolean; note?: string }

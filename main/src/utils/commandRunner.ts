@@ -2,6 +2,13 @@ import { commandExecutor } from './commandExecutor';
 import type { ExecFileAsyncOptions, ExecFileResult } from './commandExecutor';
 import { getWSLContextFromProject, type WSLContext } from './wslUtils';
 
+export interface CommandRunOptions {
+  timeout?: number;
+  maxBuffer?: number;
+  env?: Record<string, string>;
+  silent?: boolean;
+}
+
 export class CommandRunner {
   public readonly wslContext: WSLContext | null;
 
@@ -10,7 +17,7 @@ export class CommandRunner {
   }
 
   /** Execute command asynchronously, wrapping for WSL if needed */
-  async execAsync(command: string, cwd: string, options?: { timeout?: number; maxBuffer?: number; env?: Record<string, string>; silent?: boolean }): Promise<{ stdout: string; stderr: string }> {
+  async execAsync(command: string, cwd: string, options?: CommandRunOptions): Promise<{ stdout: string; stderr: string }> {
     return commandExecutor.execAsync(command, {
       cwd,
       ...options,

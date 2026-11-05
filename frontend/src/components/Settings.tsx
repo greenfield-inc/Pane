@@ -12,6 +12,7 @@ import { NotificationSettings } from './NotificationSettings';
 import { NotifySettings } from './settings/categories/NotifySettings';
 import { RemoteAccessSettings } from './settings/categories/RemoteAccessSettings';
 import { IntegrationsSettings } from './settings/categories/IntegrationsSettings';
+import { SecretsSettings } from './settings/categories/SecretsSettings';
 import { ShortcutsSettings } from './settings/categories/ShortcutsSettings';
 import { PrivacySettings } from './settings/categories/PrivacySettings';
 import { ImportExportSettings } from './settings/categories/ImportExportSettings';
@@ -209,6 +210,8 @@ export function Settings({ isOpen, onClose, category, onCategoryChange, openRequ
         );
       case 'integrations':
         return <IntegrationsSettings persistence={persistence} {...sharedDirtyProps} />;
+      case 'secrets':
+        return <SecretsSettings />;
       case 'shortcuts':
         return <ShortcutsSettings persistence={persistence} onShowKeyboardShortcuts={showKeyboardShortcuts} {...sharedDirtyProps} />;
       case 'privacy':

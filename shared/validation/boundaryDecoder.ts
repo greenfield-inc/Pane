@@ -262,6 +262,24 @@ export const boundary = {
       },
     };
   },
+  /** An object with any string keys, each value decoded by `schema`. */
+  record<Value>(schema: BoundarySchema<Value>): BoundarySchema<Record<string, Value>> {
+    return {
+      decode(current) {
+        if (typeof current.value !== "object" || current.value === null || Array.isArray(current.value)) {
+          current.fail("expected object");
+        }
+        // SAFETY: The object/null/array checks above establish an indexable plain object.
+        const source = current.value as ObjectValue;
+        const decoded: Record<string, Value> = {};
+        for (const key of Object.keys(source)) {
+          // SAFETY: decodeChild returns undefined only after recording an issue, and decodeBoundaryAll then throws.
+          decoded[key] = decodeChild(current, key, source[key], schema) as Value;
+        }
+        return decoded;
+      },
+    };
+  },
   /** Accepts a decoded value only when `test` holds; otherwise fails with `message`. */
   refine<Value>(
     schema: BoundarySchema<Value>,

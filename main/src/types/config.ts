@@ -1,3 +1,4 @@
+import type { PaneSecretMeta } from '../services/paneSecrets';
 import type { NotifySettings } from '../../../shared/types/notify';
 import type { CustomCommandResume } from '../../../shared/types/customCommandResume';
 import type { LeaderboardConfig } from '../../../shared/types/leaderboard';
@@ -59,6 +60,8 @@ export interface AppConfig {
   apns?: ApnsCredentialConfig;
   /** When and where each shared key was last set or cleared. A record without a value means cleared. */
   sharedCredentials?: Partial<Record<SharedCredentialId, SharedCredentialMeta>>;
+  /** Pane secrets index by `<project>/<NAME>`: when and where each was set or deleted. Values live in the OS store, never here. */
+  paneSecrets?: Record<string, PaneSecretMeta>;
   voiceTranscriptionMode?: VoiceTranscriptionMode;
   // Legacy fields for backward compatibility
   gitRepoPath?: string;

@@ -398,7 +398,7 @@ describe('NotifyQueue across machines', () => {
     expect(laptop.remoteTarget(laptopId)).toBeNull();
 
     laptop.noteAnsweredHere(hostKey, true);
-    host.runRemote({ type: 'answer', id: hostId, answer: { choice: 'Keep Redis' } }, 'parsa-devbox');
+    host.runRemote({ type: 'answer', id: hostId, answer: { choice: 'Keep Redis' } }, 'parsa-devbox', null);
     laptop.run({ type: 'answer', id: laptopId, answer: { approved: true } });
     await vi.advanceTimersByTimeAsync(3_000);
 
@@ -415,14 +415,14 @@ describe('NotifyQueue across machines', () => {
     const id = onlyId(host);
 
     answering.noteAnsweredHere(onStudio(id), true);
-    host.runRemote({ type: 'answer', id, answer: { approved: true } }, 'parsa-devbox');
+    host.runRemote({ type: 'answer', id, answer: { approved: true } }, 'parsa-devbox', null);
     expect(host.snapshot().strip).toEqual({ kind: 'sent', itemId: id });
     for (const screen of [answering, watching]) expect(screen.snapshot().strip).toEqual({ kind: 'sent', itemId: onStudio(id) });
     expect(host.snapshot().items[0].answeredOn).toBe('parsa-devbox');
     expect(answering.snapshot().items[0].answeredOn).toBeUndefined();
     expect(watching.snapshot().items[0].answeredOn).toBe('parsa-devbox');
 
-    host.runRemote({ type: 'undo', id }, "Parsa's iPhone");
+    host.runRemote({ type: 'undo', id }, "Parsa's iPhone", null);
     expect(host.snapshot().strip).toEqual({ kind: 'question', itemId: id });
     for (const screen of [answering, watching]) expect(screen.snapshot().strip).toEqual({ kind: 'question', itemId: onStudio(id) });
     await vi.advanceTimersByTimeAsync(10_000);
@@ -437,9 +437,9 @@ describe('NotifyQueue across machines', () => {
   it('takes a spoken reply to an options question: a named choice becomes that choice, anything else reaches the agent as said', async () => {
     const { queue: host } = makeQueue({}, 'mac-studio');
     const named = ask(host, sessionStore, claude);
-    host.runRemote({ type: 'answer', id: onlyId(host), answer: { text: ' keep redis. ' } }, 'Even G2');
+    host.runRemote({ type: 'answer', id: onlyId(host), answer: { text: ' keep redis. ' } }, 'Even G2', null);
     const ownWords = ask(host, sessionStore, codex);
-    host.runRemote({ type: 'answer', id: onlyId(host), answer: { text: 'Use SQLite for now' } }, 'Even G2');
+    host.runRemote({ type: 'answer', id: onlyId(host), answer: { text: 'Use SQLite for now' } }, 'Even G2', null);
     await vi.advanceTimersByTimeAsync(3_000);
 
     expect(named.result).toEqual({ answer: 'Keep Redis' });
@@ -451,8 +451,8 @@ describe('NotifyQueue across machines', () => {
     const call = ask(host, sessionStore, claude);
     const id = onlyId(host);
 
-    host.runRemote({ type: 'answer', id, answer: { choice: 'Postgres table' } }, "Parsa's iPhone");
-    expect(() => host.runRemote({ type: 'answer', id, answer: { choice: 'Keep Redis' } }, 'parsa-devbox'))
+    host.runRemote({ type: 'answer', id, answer: { choice: 'Postgres table' } }, "Parsa's iPhone", null);
+    expect(() => host.runRemote({ type: 'answer', id, answer: { choice: 'Keep Redis' } }, 'parsa-devbox', null))
       .toThrow(expect.objectContaining({ code: 'ERR_NOTIFY_ANSWERED', message: "Already answered on Parsa's iPhone. Nothing was sent." }));
     await vi.advanceTimersByTimeAsync(3_000);
     expect(call.result).toEqual({ answer: 'Postgres table' });
@@ -462,9 +462,9 @@ describe('NotifyQueue across machines', () => {
     const expired = onlyId(host);
     controller.abort();
     await vi.advanceTimersByTimeAsync(0);
-    expect(() => host.runRemote({ type: 'answer', id: expired, answer: { approved: true } }, 'parsa-devbox'))
+    expect(() => host.runRemote({ type: 'answer', id: expired, answer: { approved: true } }, 'parsa-devbox', null))
       .toThrow(expect.objectContaining({ code: 'ERR_NOTIFY_EXPIRED', message: 'Codex stopped waiting on this question. Nothing was sent.' }));
-    expect(() => host.runRemote({ type: 'answer', id: 'gone', answer: { approved: true } }, 'parsa-devbox'))
+    expect(() => host.runRemote({ type: 'answer', id: 'gone', answer: { approved: true } }, 'parsa-devbox', null))
       .toThrow(expect.objectContaining({ code: 'ERR_NOTIFY_GONE' }));
   });
 
@@ -476,12 +476,12 @@ describe('NotifyQueue across machines', () => {
     ask(host, migration, codex);
     const [first, second] = host.snapshot().queue;
 
-    host.runRemote({ type: 'skip', id: first }, 'parsa-devbox');
+    host.runRemote({ type: 'skip', id: first }, 'parsa-devbox', null);
     expect(laptop.snapshot().queue).toEqual([onStudio(second), onStudio(first)]);
-    host.runRemote({ type: 'dismiss', id: second }, 'parsa-devbox');
+    host.runRemote({ type: 'dismiss', id: second }, 'parsa-devbox', null);
     expect(host.snapshot().strip).toEqual({ kind: 'question', itemId: first });
     expect(laptop.snapshot().strip).toEqual({ kind: 'question', itemId: onStudio(first) });
-    host.runRemote({ type: 'remind', id: first, after: '10m' }, 'parsa-devbox');
+    host.runRemote({ type: 'remind', id: first, after: '10m' }, 'parsa-devbox', null);
     expect(laptop.snapshot().strip).toBeNull();
     await vi.advanceTimersByTimeAsync(10 * 60_000);
     expect(laptop.snapshot().strip).toEqual({ kind: 'question', itemId: onStudio(first) });

@@ -498,6 +498,12 @@
         "repos get",
         "repos update",
         "repos rename",
+        "secrets",
+        "secrets list",
+        "secrets set",
+        "secrets delete",
+        "secrets exec",
+        "secrets request",
         "panes",
         "panes list",
         "panes cost",
@@ -627,6 +633,24 @@
           "$ref": "#/$defs/helpLines"
         },
         "repos rename": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "secrets": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "secrets list": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "secrets set": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "secrets delete": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "secrets exec": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "secrets request": {
           "$ref": "#/$defs/helpLines"
         },
         "panes": {

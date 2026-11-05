@@ -312,9 +312,9 @@ export const RUNPANE_CONTRACT = {
     },
     {
       "name": "repos update",
-      "summary": "Change a saved repository's Project Settings: scripts, worktree folder, name, IDE command, and system prompt.",
+      "summary": "Change a saved repository's Project Settings: scripts, worktree folder, name, IDE command, system prompt, and environment variables.",
       "usage": [
-        "runpane repos update --repo <selector> [--name <name>] [--build-script <script>] [--run-script <script>] [--archive-script <script>] [--worktree-folder <path>] [--open-ide-command <command>] [--system-prompt <text>] [--clear <setting,...>] [--from-json <path|->] --yes [--dry-run] [--json] [--pane-dir <path>]"
+        "runpane repos update --repo <selector> [--name <name>] [--build-script <script>] [--run-script <script>] [--archive-script <script>] [--worktree-folder <path>] [--open-ide-command <command>] [--system-prompt <text>] [--env <json>] [--env-remove <name,...>] [--clear <setting,...>] [--from-json <path|->] --yes [--dry-run] [--json] [--pane-dir <path>]"
       ],
       "mutates": true,
       "idempotent": true,
@@ -342,6 +342,72 @@ export const RUNPANE_CONTRACT = {
       "jsonSchemas": [
         "repoRenameRequest",
         "repoRenameResult"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "secrets list",
+      "summary": "List the Pane secrets on this machine: project, name, and when and where each was set. Never shows a value.",
+      "usage": [
+        "runpane secrets list [--project <project>] [--json] [--pane-dir <path>]"
+      ],
+      "toolsets": [
+        "secrets"
+      ],
+      "jsonSchemas": [
+        "secretListRequest",
+        "secretListResult"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "secrets set",
+      "summary": "Save a Pane secret, adding or replacing it. Reads the value from stdin.",
+      "usage": [
+        "runpane secrets set --project <project> --name <name> --yes [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "idempotent": true,
+      "localControl": true
+    },
+    {
+      "name": "secrets delete",
+      "summary": "Delete a Pane secret from this machine and, through sync, from your other machines.",
+      "usage": [
+        "runpane secrets delete --project <project> --name <name> --yes [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "toolsets": [
+        "secrets"
+      ],
+      "jsonSchemas": [
+        "secretDeleteRequest",
+        "secretDeleteResult"
+      ],
+      "localControl": true
+    },
+    {
+      "name": "secrets exec",
+      "summary": "Run a command with Pane secrets in its environment. Nothing prints a value.",
+      "usage": [
+        "runpane secrets exec --project <project> [--only <name,...>] [--env <VAR=NAME>]... [--file <name>]... [--pane-dir <path>] -- <command>..."
+      ],
+      "localControl": true
+    },
+    {
+      "name": "secrets request",
+      "summary": "Ask the person for a secret on a masked card. Pane saves what they type as a Pane secret and never returns it.",
+      "usage": [
+        "runpane secrets request --project <project> --name <name> --title <text> --reason <text> [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "additive": true,
+      "toolsets": [
+        "core"
+      ],
+      "jsonSchemas": [
+        "notifyRequest",
+        "notifyResult"
       ],
       "localControl": true
     },
@@ -2310,6 +2376,31 @@ export const RUNPANE_CONTRACT = {
         "description": "Settings to clear, comma-separated: build-script, run-script, archive-script, worktree-folder, open-ide-command, system-prompt."
       },
       {
+        "name": "--env",
+        "value": "<VAR=NAME|json>",
+        "description": "secrets exec: inject secret NAME as VAR; repeatable. repos update: a JSON array of project variables to add or replace by key."
+      },
+      {
+        "name": "--env-remove",
+        "value": "<name,...>",
+        "description": "Project variables to remove, comma-separated."
+      },
+      {
+        "name": "--project",
+        "value": "<project>",
+        "description": "Pane secret project: up to 64 letters, digits, \".\", \"_\" or \"-\"."
+      },
+      {
+        "name": "--only",
+        "value": "<name,...>",
+        "description": "Secrets to inject, comma-separated. Defaults to every secret in the project."
+      },
+      {
+        "name": "--reason",
+        "value": "<text>",
+        "description": "Why you need the secret; shown on the card."
+      },
+      {
         "name": "--epoch",
         "value": "<epoch>",
         "description": "Journal epoch paired with --since; a mismatch emits _reset instead of silently skipping events."
@@ -2510,6 +2601,11 @@ export const RUNPANE_CONTRACT = {
         "  runpane repos get [--repo <selector>] [--json]",
         "  runpane repos update --repo <selector> [setting flags] --yes [--dry-run] [--json]",
         "  runpane repos rename --repo <selector> --name <name>",
+        "  runpane secrets list [--project <project>] [--json]",
+        "  runpane secrets set --project <project> --name <name> --yes   (value on stdin)",
+        "  runpane secrets delete --project <project> --name <name> --yes",
+        "  runpane secrets exec --project <project> [--only <name,...>] [--env <VAR=NAME>] [--file <name>] -- <command>...",
+        "  runpane secrets request --project <project> --name <name> --title <text> --reason <text> [--json]",
         "  runpane sessions list [--json] [--pane-dir <path>]",
         "  runpane sessions create --from-json <path|-> [--json] [--pane-dir <path>]",
         "  runpane sessions get --session <id|name> [--json] [--pane-dir <path>]",
@@ -2743,8 +2839,10 @@ export const RUNPANE_CONTRACT = {
         "  --worktree-folder <path>       Folder for new worktrees, absolute or relative to the repository",
         "  --open-ide-command <command>   Command the Open in IDE button runs",
         "  --system-prompt <text>         Project system prompt",
+        "  --env <json>                   Project variables to add or replace, a JSON array: [{\"key\":\"API_URL\",\"source\":\"plain\",\"value\":\"https://...\"}, {\"key\":\"STRIPE_KEY\",\"source\":\"secret\",\"project\":\"stripe\",\"name\":\"STRIPE_SECRET_KEY\"}]",
+        "  --env-remove <name,...>        Project variables to remove",
         "  --clear <setting,...>          Clear settings, e.g. run-script,archive-script; cleared scripts fall back to the repo's config file",
-        "  --from-json <path|->           Settings object: {\"runScript\": \"pnpm dev\", \"archiveScript\": null, ...}; flags override it",
+        "  --from-json <path|->           Settings object: {\"runScript\": \"pnpm dev\", \"archiveScript\": null, \"envVars\": {\"set\": [...], \"remove\": [\"OLD\"]}, ...}; flags override it",
         "  --dry-run                      Show the result without saving",
         "  --yes                          Skip confirmation for mutating commands",
         "  --json                         Print machine-readable output",
@@ -2762,6 +2860,93 @@ export const RUNPANE_CONTRACT = {
         "  --pane-dir <path>              Connect to a specific Pane data directory",
         "  --json                         Print machine-readable output",
         "  --yes                          Skip confirmation for mutating commands"
+      ],
+      "secrets": [
+        "Usage:",
+        "  runpane secrets <list|set|delete|exec|request> [options]",
+        "",
+        "Pane secrets are named values, addressed as <project>/<NAME>, that every machine you saved in Pane keeps a copy of.",
+        "Agents use them only through `runpane secrets exec`, which puts them in a command's environment. No command prints a value.",
+        "Ask the person for a new one with `runpane secrets request`; they type it on a masked card.",
+        "",
+        "Commands:",
+        "  runpane secrets list [--project <project>] [--json]",
+        "  runpane secrets set --project <project> --name <name> --yes   (value on stdin)",
+        "  runpane secrets delete --project <project> --name <name> --yes",
+        "  runpane secrets exec --project <project> [--only <name,...>] [--env <VAR=NAME>] [--file <name>] -- <command>...",
+        "  runpane secrets request --project <project> --name <name> --title <text> --reason <text> [--json]",
+        "",
+        "A project is up to 64 letters, digits, \".\", \"_\" or \"-\". A name follows environment variable rules: letters, digits and underscores, not starting with a digit. PATH, WORKTREE_PATH and PANE_* are reserved."
+      ],
+      "secrets list": [
+        "Usage:",
+        "  runpane secrets list [--project <project>] [--json] [--pane-dir <path>]",
+        "",
+        "Lists the Pane secrets on this machine: project, name, when each was last set, and on which machine. It never shows a value.",
+        "",
+        "Options:",
+        "  --project <project>            Only this project's secrets",
+        "  --json                         Print machine-readable output",
+        "  --pane-dir <path>              Connect to a specific Pane data directory"
+      ],
+      "secrets set": [
+        "Usage:",
+        "  printf %s \"$VALUE\" | runpane secrets set --project <project> --name <name> --yes [--json]",
+        "",
+        "Saves the value on stdin as the Pane secret <project>/<name>, adding it or replacing the saved value. One trailing newline is dropped. Pane syncs it to your other machines.",
+        "Agents should not set values they were given in chat. Ask the person with `runpane secrets request` instead.",
+        "",
+        "Options:",
+        "  --project <project>            Secret project",
+        "  --name <name>                  Secret name, such as STRIPE_SECRET_KEY",
+        "  --yes                          Skip confirmation for mutating commands",
+        "  --json                         Print machine-readable output",
+        "  --pane-dir <path>              Connect to a specific Pane data directory"
+      ],
+      "secrets delete": [
+        "Usage:",
+        "  runpane secrets delete --project <project> --name <name> --yes [--json]",
+        "",
+        "Deletes the Pane secret <project>/<name>. Your other machines delete it the next time they sync.",
+        "",
+        "Options:",
+        "  --project <project>            Secret project",
+        "  --name <name>                  Secret name",
+        "  --yes                          Skip confirmation for mutating commands",
+        "  --json                         Print machine-readable output",
+        "  --pane-dir <path>              Connect to a specific Pane data directory"
+      ],
+      "secrets exec": [
+        "Usage:",
+        "  runpane secrets exec --project <project> [--only <name,...>] [--env <VAR=NAME>]... [--file <name>]... -- <command>...",
+        "",
+        "Runs the command with Pane secrets added to your environment, and exits with its exit code. Each secret is injected under its own name and overrides a variable of that name.",
+        "With no --only, --env or --file, it injects every secret in the project.",
+        "",
+        "Options:",
+        "  --project <project>            Secret project",
+        "  --only <name,...>              Inject only these secrets",
+        "  --env <VAR=NAME>               Inject secret NAME as VAR; repeatable",
+        "  --file <name>                  Write secret NAME to a private temp file and set NAME to its path; repeatable. The file is removed when the command exits",
+        "  --pane-dir <path>              Connect to a specific Pane data directory",
+        "",
+        "Example:",
+        "  runpane secrets exec --project stripe --only STRIPE_SECRET_KEY -- pnpm test:webhooks"
+      ],
+      "secrets request": [
+        "Usage:",
+        "  runpane secrets request --project <project> --name <name> --title <text> --reason <text> [--json]",
+        "",
+        "Asks the person for a secret on a masked Notify card. What they type is saved as the Pane secret <project>/<name>; you get back only \"saved\" or \"declined\". Then use it with `runpane secrets exec`.",
+        "A waiting result means the card is still open: run `runpane notify --resume <id>` to keep waiting.",
+        "",
+        "Options:",
+        "  --project <project>            Secret project",
+        "  --name <name>                  Secret name, such as STRIPE_SECRET_KEY",
+        "  --title <text>                 What the secret is, such as \"Stripe test secret key\"",
+        "  --reason <text>                What you need it for",
+        "  --json                         Print machine-readable output",
+        "  --pane-dir <path>              Connect to a specific Pane data directory"
       ],
       "panes": [
         "Pane session commands.",
@@ -4201,6 +4386,11 @@ export const RUNPANE_CONTRACT = {
         "  runpane repos get [--repo <selector>] [--json]",
         "  runpane repos update --repo <selector> [setting flags] --yes [--dry-run] [--json]",
         "  runpane repos rename --repo <selector> --name <name>",
+        "  runpane secrets list [--project <project>] [--json]",
+        "  runpane secrets set --project <project> --name <name> --yes   (value on stdin)",
+        "  runpane secrets delete --project <project> --name <name> --yes",
+        "  runpane secrets exec --project <project> [--only <name,...>] [--env <VAR=NAME>] [--file <name>] -- <command>...",
+        "  runpane secrets request --project <project> --name <name> --title <text> --reason <text> [--json]",
         "  runpane panes list [--repo <selector>] [--json]",
         "  runpane panes cost [--repo <selector>] [--pane <pane-id>] [--json]",
         "  runpane workspace state [--repo <selector>] [--json]",
@@ -4421,6 +4611,8 @@ export const RUNPANE_CONTRACT = {
         "  --worktree-folder <path>",
         "  --open-ide-command <command>",
         "  --system-prompt <text>",
+        "  --env <json>",
+        "  --env-remove <name,...>",
         "  --clear <setting,...>",
         "  --from-json <path|->",
         "  --dry-run",
@@ -4440,6 +4632,93 @@ export const RUNPANE_CONTRACT = {
         "  --pane-dir <path>              Connect to a specific Pane data directory",
         "  --json                         Print machine-readable output",
         "  --yes                          Skip confirmation for mutating commands"
+      ],
+      "secrets": [
+        "Usage:",
+        "  python -m runpane secrets <list|set|delete|exec|request> [options]",
+        "",
+        "Pane secrets are named values, addressed as <project>/<NAME>, that every machine you saved in Pane keeps a copy of.",
+        "Agents use them only through `runpane secrets exec`, which puts them in a command's environment. No command prints a value.",
+        "Ask the person for a new one with `runpane secrets request`; they type it on a masked card.",
+        "",
+        "Commands:",
+        "  python -m runpane secrets list [--project <project>] [--json]",
+        "  python -m runpane secrets set --project <project> --name <name> --yes   (value on stdin)",
+        "  python -m runpane secrets delete --project <project> --name <name> --yes",
+        "  python -m runpane secrets exec --project <project> [--only <name,...>] [--env <VAR=NAME>] [--file <name>] -- <command>...",
+        "  python -m runpane secrets request --project <project> --name <name> --title <text> --reason <text> [--json]",
+        "",
+        "A project is up to 64 letters, digits, \".\", \"_\" or \"-\". A name follows environment variable rules: letters, digits and underscores, not starting with a digit. PATH, WORKTREE_PATH and PANE_* are reserved."
+      ],
+      "secrets list": [
+        "Usage:",
+        "  python -m runpane secrets list [--project <project>] [--json] [--pane-dir <path>]",
+        "",
+        "Lists the Pane secrets on this machine: project, name, when each was last set, and on which machine. It never shows a value.",
+        "",
+        "Options:",
+        "  --project <project>            Only this project's secrets",
+        "  --json                         Print machine-readable output",
+        "  --pane-dir <path>              Connect to a specific Pane data directory"
+      ],
+      "secrets set": [
+        "Usage:",
+        "  printf %s \"$VALUE\" | python -m runpane secrets set --project <project> --name <name> --yes [--json]",
+        "",
+        "Saves the value on stdin as the Pane secret <project>/<name>, adding it or replacing the saved value. One trailing newline is dropped. Pane syncs it to your other machines.",
+        "Agents should not set values they were given in chat. Ask the person with `runpane secrets request` instead.",
+        "",
+        "Options:",
+        "  --project <project>            Secret project",
+        "  --name <name>                  Secret name, such as STRIPE_SECRET_KEY",
+        "  --yes                          Skip confirmation for mutating commands",
+        "  --json                         Print machine-readable output",
+        "  --pane-dir <path>              Connect to a specific Pane data directory"
+      ],
+      "secrets delete": [
+        "Usage:",
+        "  python -m runpane secrets delete --project <project> --name <name> --yes [--json]",
+        "",
+        "Deletes the Pane secret <project>/<name>. Your other machines delete it the next time they sync.",
+        "",
+        "Options:",
+        "  --project <project>            Secret project",
+        "  --name <name>                  Secret name",
+        "  --yes                          Skip confirmation for mutating commands",
+        "  --json                         Print machine-readable output",
+        "  --pane-dir <path>              Connect to a specific Pane data directory"
+      ],
+      "secrets exec": [
+        "Usage:",
+        "  python -m runpane secrets exec --project <project> [--only <name,...>] [--env <VAR=NAME>]... [--file <name>]... -- <command>...",
+        "",
+        "Runs the command with Pane secrets added to your environment, and exits with its exit code. Each secret is injected under its own name and overrides a variable of that name.",
+        "With no --only, --env or --file, it injects every secret in the project.",
+        "",
+        "Options:",
+        "  --project <project>            Secret project",
+        "  --only <name,...>              Inject only these secrets",
+        "  --env <VAR=NAME>               Inject secret NAME as VAR; repeatable",
+        "  --file <name>                  Write secret NAME to a private temp file and set NAME to its path; repeatable. The file is removed when the command exits",
+        "  --pane-dir <path>              Connect to a specific Pane data directory",
+        "",
+        "Example:",
+        "  python -m runpane secrets exec --project stripe --only STRIPE_SECRET_KEY -- pnpm test:webhooks"
+      ],
+      "secrets request": [
+        "Usage:",
+        "  python -m runpane secrets request --project <project> --name <name> --title <text> --reason <text> [--json]",
+        "",
+        "Asks the person for a secret on a masked Notify card. What they type is saved as the Pane secret <project>/<name>; you get back only \"saved\" or \"declined\". Then use it with `runpane secrets exec`.",
+        "A waiting result means the card is still open: run `runpane notify --resume <id>` to keep waiting.",
+        "",
+        "Options:",
+        "  --project <project>            Secret project",
+        "  --name <name>                  Secret name, such as STRIPE_SECRET_KEY",
+        "  --title <text>                 What the secret is, such as \"Stripe test secret key\"",
+        "  --reason <text>                What you need it for",
+        "  --json                         Print machine-readable output",
+        "  --pane-dir <path>              Connect to a specific Pane data directory"
       ],
       "panes": [
         "Pane session commands.",
@@ -5839,7 +6118,13 @@ export const RUNPANE_CONTRACT = {
       "runpane repos get --repo Pane --json",
       "runpane repos update --repo Pane --build-script \"pnpm install\" --run-script \"pnpm dev\" --worktree-folder ../pane-worktrees --yes --json",
       "runpane repos update --repo Pane --clear run-script --yes --json",
+      "runpane repos update --repo Pane --env '[{\"key\":\"API_URL\",\"source\":\"plain\",\"value\":\"https://api.test\"},{\"key\":\"STRIPE_KEY\",\"source\":\"secret\",\"project\":\"stripe\",\"name\":\"STRIPE_SECRET_KEY\"}]' --env-remove OLD_TOKEN --yes --json",
       "runpane repos rename --repo 3 --name Lev --yes --json",
+      "runpane secrets list --json",
+      "printf %s \"$VALUE\" | runpane secrets set --project stripe --name STRIPE_SECRET_KEY --yes",
+      "runpane secrets delete --project stripe --name STRIPE_SECRET_KEY --yes --json",
+      "runpane secrets exec --project stripe --only STRIPE_SECRET_KEY -- pnpm test:webhooks",
+      "runpane secrets request --project stripe --name STRIPE_SECRET_KEY --title \"Stripe test secret key\" --reason \"Run the webhook tests against Stripe test mode.\" --json",
       "runpane panes list --repo active --json",
       "runpane panes cost --pane <pane-id> --json",
       "runpane panes create --repo active --name issue-252 --agent <agent> --prompt \"Kick off the discussion skill for issue 252\" --source agent --no-focus --wait-ready --yes --json",
@@ -5905,8 +6190,9 @@ export const RUNPANE_CONTRACT = {
       "`runpane repos list` connects to the running local Pane daemon and prints saved repository records.",
       "`runpane repos add` registers an existing git repository with the running local Pane daemon. It does not create directories or initialize git repositories by default.",
       "`runpane repos get` prints a saved repository's Project Settings. Each script shows its saved value, the fallback from the repository's config file, and the one Pane will run.",
-      "`runpane repos update` changes a saved repository's Project Settings through the same save as the Project Settings dialog. It requires `--yes`, supports `--dry-run`, and clears settings with `--clear`.",
+      "`runpane repos update` changes a saved repository's Project Settings through the same save as the Project Settings dialog. It requires `--yes`, supports `--dry-run`, clears settings with `--clear`, and adds, replaces or removes project environment variables with `--env` and `--env-remove`.",
       "`runpane repos rename` trims and sets a saved repository's display name, the same rename as the repository settings in the app, and returns the updated repository record.",
+      "`runpane secrets` manages Pane secrets: named values, addressed as `<project>/<NAME>`, that every machine saved in Pane keeps a copy of. `list` shows names, times and machines only. `set` reads the value from stdin. `delete` removes one everywhere. `exec` runs a command with secrets in its environment and returns its exit code. `request` asks the person on a masked Notify card and returns only `saved` or `declined`. No command prints a value, and the MCP server has no tool that sets or reads one. These commands run on the machine itself, so `runpane workspace <machine> secrets ...` is refused; use `runpane workspace <machine> exec -- runpane secrets ...`.",
       "`runpane panes list` lists Pane sessions, optionally scoped to one saved repository.",
       "`runpane panes cost` reports estimated token costs per Pane for the last 30 days, including per-model breakdowns and cache efficiency; unscoped output includes an Unattributed bucket that reconciles against workspace totals.",
       "`runpane panes create` connects to the running local Pane daemon, resolves the requested saved base repository, creates user-visible Pane sessions backed by Pane-managed worktrees/branches, opens terminal-backed tool tabs, and optionally sends initial input to the started tool. Built-in agent panes and `--source agent` default to background/no-focus unless `--focus` is passed. New Panes are pinned into the UI's favorite/pin set by default, except when the CLI runs inside a Session orchestrator (`PANE_ORCHESTRATION_SESSION_ID`), where child worktrees default to unpinned. Explicit `--pinned` / `--no-pinned` override creation defaults. First Session association clears an existing pin, including an explicit creation pin; use `panes pin` after association to pin a child. This avoids duplicating Session children in the global pinned list. Manual pins applied afterward are preserved. Panes created interactively in the Pane UI are unaffected. Inside a Session orchestrator (`PANE_ORCHESTRATION_SESSION_ID` set), new Panes are associated with that Session automatically; `--no-associate` opts out. A failed association is reported on the item and never undoes the Pane.",
@@ -7186,6 +7472,84 @@ export const RUNPANE_CONTRACT = {
         "--resume",
         "n-1",
         "--json"
+      ],
+      [
+        "secrets",
+        "list",
+        "--project",
+        "stripe",
+        "--json"
+      ],
+      [
+        "secrets",
+        "set",
+        "--project",
+        "stripe",
+        "--name",
+        "STRIPE_SECRET_KEY",
+        "--yes"
+      ],
+      [
+        "secrets",
+        "delete",
+        "--project",
+        "stripe",
+        "--name",
+        "STRIPE_SECRET_KEY",
+        "--yes",
+        "--json"
+      ],
+      [
+        "secrets",
+        "exec",
+        "--project",
+        "stripe",
+        "--only",
+        "A,B",
+        "--env",
+        "KEY=STRIPE_SECRET_KEY",
+        "--env=TOKEN=GH_TOKEN",
+        "--file",
+        "CERT",
+        "--",
+        "node",
+        "-e",
+        "run()",
+        "--json"
+      ],
+      [
+        "secrets",
+        "exec",
+        "--project",
+        "qa",
+        "sh",
+        "-c",
+        "echo ok"
+      ],
+      [
+        "secrets",
+        "request",
+        "--project",
+        "stripe",
+        "--name",
+        "STRIPE_SECRET_KEY",
+        "--title",
+        "Stripe test key",
+        "--reason",
+        "- for the webhook tests",
+        "--json"
+      ],
+      [
+        "repos",
+        "update",
+        "--repo",
+        "Pane",
+        "--env",
+        "[{\"key\":\"API_URL\",\"source\":\"plain\",\"value\":\"x\"}]",
+        "--env-remove",
+        "OLD,STALE",
+        "--yes",
+        "--json"
       ]
     ],
     "topLevelHelpIncludes": [
@@ -8079,7 +8443,7 @@ export const RUNPANE_CONTRACT = {
           "$ref": "#/jsonSchemas/repoListResult/properties/repos/items"
         },
         "settings": {
-          "$ref": "#/$defs/settings"
+          "$ref": "#/jsonSchemas/repoGetResult/$defs/settings"
         }
       },
       "additionalProperties": false,
@@ -8117,7 +8481,7 @@ export const RUNPANE_CONTRACT = {
             "fallback": {
               "anyOf": [
                 {
-                  "$ref": "#/$defs/scriptSource"
+                  "$ref": "#/jsonSchemas/repoGetResult/$defs/scriptSource"
                 },
                 {
                   "type": "null"
@@ -8127,7 +8491,7 @@ export const RUNPANE_CONTRACT = {
             "effective": {
               "anyOf": [
                 {
-                  "$ref": "#/$defs/scriptSource"
+                  "$ref": "#/jsonSchemas/repoGetResult/$defs/scriptSource"
                 },
                 {
                   "type": "null"
@@ -8149,7 +8513,8 @@ export const RUNPANE_CONTRACT = {
             "configFile",
             "buildScript",
             "runScript",
-            "archiveScript"
+            "archiveScript",
+            "envVars"
           ],
           "properties": {
             "name": {
@@ -8189,13 +8554,19 @@ export const RUNPANE_CONTRACT = {
               ]
             },
             "buildScript": {
-              "$ref": "#/$defs/scriptSetting"
+              "$ref": "#/jsonSchemas/repoGetResult/$defs/scriptSetting"
             },
             "runScript": {
-              "$ref": "#/$defs/scriptSetting"
+              "$ref": "#/jsonSchemas/repoGetResult/$defs/scriptSetting"
             },
             "archiveScript": {
-              "$ref": "#/$defs/scriptSetting"
+              "$ref": "#/jsonSchemas/repoGetResult/$defs/scriptSetting"
+            },
+            "envVars": {
+              "type": "array",
+              "items": {
+                "$ref": "#/jsonSchemas/projectEnvVar"
+              }
             }
           },
           "additionalProperties": false
@@ -8262,6 +8633,27 @@ export const RUNPANE_CONTRACT = {
                 "string",
                 "null"
               ]
+            },
+            "envVars": {
+              "type": "object",
+              "description": "set adds or replaces variables by key; remove deletes them by key.",
+              "minProperties": 1,
+              "properties": {
+                "set": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/jsonSchemas/projectEnvVar"
+                  }
+                },
+                "remove": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              "additionalProperties": false
             }
           },
           "additionalProperties": false
@@ -8297,7 +8689,8 @@ export const RUNPANE_CONTRACT = {
               "archiveScript",
               "worktreeFolder",
               "openIdeCommand",
-              "systemPrompt"
+              "systemPrompt",
+              "envVars"
             ]
           }
         },
@@ -8305,128 +8698,10 @@ export const RUNPANE_CONTRACT = {
           "$ref": "#/jsonSchemas/repoListResult/properties/repos/items"
         },
         "settings": {
-          "$ref": "#/$defs/settings"
+          "$ref": "#/jsonSchemas/repoGetResult/$defs/settings"
         }
       },
-      "additionalProperties": false,
-      "$defs": {
-        "scriptSource": {
-          "type": "object",
-          "required": [
-            "command",
-            "source"
-          ],
-          "properties": {
-            "command": {
-              "type": "string"
-            },
-            "source": {
-              "type": "string"
-            }
-          },
-          "additionalProperties": false
-        },
-        "scriptSetting": {
-          "type": "object",
-          "required": [
-            "value",
-            "fallback",
-            "effective"
-          ],
-          "properties": {
-            "value": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "fallback": {
-              "anyOf": [
-                {
-                  "$ref": "#/$defs/scriptSource"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "effective": {
-              "anyOf": [
-                {
-                  "$ref": "#/$defs/scriptSource"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            }
-          },
-          "additionalProperties": false
-        },
-        "settings": {
-          "type": "object",
-          "required": [
-            "name",
-            "path",
-            "currentBranch",
-            "worktreeFolder",
-            "openIdeCommand",
-            "systemPrompt",
-            "configFile",
-            "buildScript",
-            "runScript",
-            "archiveScript"
-          ],
-          "properties": {
-            "name": {
-              "type": "string"
-            },
-            "path": {
-              "type": "string"
-            },
-            "currentBranch": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "worktreeFolder": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "openIdeCommand": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "systemPrompt": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "configFile": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "buildScript": {
-              "$ref": "#/$defs/scriptSetting"
-            },
-            "runScript": {
-              "$ref": "#/$defs/scriptSetting"
-            },
-            "archiveScript": {
-              "$ref": "#/$defs/scriptSetting"
-            }
-          },
-          "additionalProperties": false
-        }
-      }
+      "additionalProperties": false
     },
     "repoRenameRequest": {
       "type": "object",
@@ -8460,6 +8735,254 @@ export const RUNPANE_CONTRACT = {
         }
       },
       "additionalProperties": false
+    },
+    "secretSummary": {
+      "type": "object",
+      "required": [
+        "project",
+        "name",
+        "updatedAt",
+        "machine"
+      ],
+      "properties": {
+        "project": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "ISO time it was last set."
+        },
+        "machine": {
+          "type": "string",
+          "description": "The machine where it was last set."
+        }
+      },
+      "additionalProperties": false
+    },
+    "secretListRequest": {
+      "type": "object",
+      "properties": {
+        "project": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "secretListResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "secrets",
+        "storage"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "secrets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/jsonSchemas/secretSummary"
+          }
+        },
+        "storage": {
+          "type": "object",
+          "description": "Where this machine keeps values. encrypted is false only for the file store on a machine without an OS keyring.",
+          "required": [
+            "kind",
+            "encrypted"
+          ],
+          "properties": {
+            "kind": {
+              "enum": [
+                "keychain",
+                "file"
+              ]
+            },
+            "encrypted": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "secretSetRequest": {
+      "description": "What `runpane secrets set` sends on runpane:secrets:set. value comes from stdin.",
+      "type": "object",
+      "required": [
+        "project",
+        "name",
+        "value"
+      ],
+      "properties": {
+        "project": {
+          "type": "string",
+          "minLength": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "value": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "secretSetResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "replaced",
+        "secret"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "replaced": {
+          "type": "boolean"
+        },
+        "secret": {
+          "$ref": "#/jsonSchemas/secretSummary"
+        }
+      },
+      "additionalProperties": false
+    },
+    "secretDeleteRequest": {
+      "type": "object",
+      "required": [
+        "project",
+        "name"
+      ],
+      "properties": {
+        "project": {
+          "type": "string",
+          "minLength": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "secretDeleteResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "deleted"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "deleted": {
+          "type": "object",
+          "required": [
+            "project",
+            "name"
+          ],
+          "properties": {
+            "project": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "projectEnvVar": {
+      "description": "A project environment variable. Plain values are shown in full; keychain and Pane secret variables are references, never values.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "key",
+            "source",
+            "value"
+          ],
+          "properties": {
+            "key": {
+              "type": "string",
+              "minLength": 1
+            },
+            "source": {
+              "const": "plain"
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "description": "An existing macOS keychain generic-password item.",
+          "required": [
+            "key",
+            "source",
+            "service",
+            "account"
+          ],
+          "properties": {
+            "key": {
+              "type": "string",
+              "minLength": 1
+            },
+            "source": {
+              "const": "keychain"
+            },
+            "service": {
+              "type": "string",
+              "minLength": 1
+            },
+            "account": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "description": "The Pane secret project/name.",
+          "required": [
+            "key",
+            "source",
+            "project",
+            "name"
+          ],
+          "properties": {
+            "key": {
+              "type": "string",
+              "minLength": 1
+            },
+            "source": {
+              "const": "secret"
+            },
+            "project": {
+              "type": "string",
+              "minLength": 1
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
     },
     "paneCreateRequest": {
       "type": "object",
@@ -13790,7 +14313,7 @@ export const RUNPANE_CONTRACT = {
       "additionalProperties": false
     },
     "notifyRequest": {
-      "description": "What `runpane notify` sends on the runpane:notify daemon channel: the question fields, or resume alone.",
+      "description": "What `runpane notify` and `runpane secrets request` send on the runpane:notify daemon channel: the question fields, or resume alone. Only `secrets request` sends ui secret.",
       "type": "object",
       "required": [
         "caller"
@@ -13801,6 +14324,7 @@ export const RUNPANE_CONTRACT = {
             "options",
             "approve",
             "ask",
+            "secret",
             "info"
           ]
         },
@@ -13835,6 +14359,25 @@ export const RUNPANE_CONTRACT = {
         },
         "action": {
           "$ref": "#/jsonSchemas/notifyAction"
+        },
+        "secret": {
+          "type": "object",
+          "description": "ui secret only: the Pane secret the answer is saved as.",
+          "required": [
+            "project",
+            "name"
+          ],
+          "properties": {
+            "project": {
+              "type": "string",
+              "minLength": 1
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
         },
         "resume": {
           "type": "string",
@@ -13912,6 +14455,40 @@ export const RUNPANE_CONTRACT = {
                 "inbox"
               ],
               "description": "screen: shown on the strip. inbox: listed in the Notify inbox because a question was on screen."
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "description": "secret: the person saved the value as project/name. The value is never returned.",
+          "required": [
+            "status",
+            "project",
+            "name"
+          ],
+          "properties": {
+            "status": {
+              "const": "saved"
+            },
+            "project": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "description": "secret: the person declined; nothing was saved.",
+          "required": [
+            "status"
+          ],
+          "properties": {
+            "status": {
+              "const": "declined"
             }
           },
           "additionalProperties": false
@@ -14390,7 +14967,8 @@ export const RUNPANE_CONTRACT = {
         "Use `runpane agent-context --json` for the full agent-facing CLI context, or `runpane agent-context --command <command> --json` for one detailed command definition.",
         "For `agent-context --command`, use canonical spaced names like `panes create`; copied forms like `panes.create` or `runpane panes create` are accepted too.",
         "Use `runpane repos list --json` to find the saved repository when unsure after doctor shows the daemon is reachable.",
-        "Read and change a repo's Project Settings (build, run, and archive scripts, worktree folder) with `runpane repos get` and `runpane repos update`; never edit Pane's database by hand.",
+        "Read and change a repo's Project Settings (build, run, and archive scripts, worktree folder, environment variables) with `runpane repos get` and `runpane repos update`; never edit Pane's database by hand.",
+        "When a command needs a secret (an API key, a token), run it with `runpane secrets exec --project <project> -- <command>`. If the secret is missing, ask the person with `runpane secrets request`; never ask them to paste a secret into the chat, and never print one.",
         "If WSL cannot reach Pane, the user may be running Windows Pane; try `/mnt/c/Users/<you>/.pane/bin/runpane doctor --json`, or with an older Pane build `powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane doctor --json'`.",
         "If the repository exists on disk but is not saved in Pane, use `runpane repos add --path <repo> --yes --json` before creating panes.",
         "Use `runpane agents doctor --agent <codex|claude|cursor> --repo <selector> --json` when agent availability differs across host, Windows, WSL, or repo environments.",
@@ -14461,13 +15039,15 @@ export const RUNPANE_CONTRACT = {
         },
         {
           "name": "repos update",
-          "summary": "Change a saved repository's Project Settings: scripts, worktree folder, name, IDE command, and system prompt.",
+          "summary": "Change a saved repository's Project Settings: scripts, worktree folder, name, IDE command, system prompt, and environment variables.",
           "arguments": [
             "--repo <selector>",
             "--build-script <script>",
             "--run-script <script>",
             "--archive-script <script>",
             "--worktree-folder <path>",
+            "--env <json>",
+            "--env-remove <name,...>",
             "--name <name>",
             "--clear <setting,...>",
             "--from-json <path|->",
@@ -14485,6 +15065,36 @@ export const RUNPANE_CONTRACT = {
             "--yes",
             "--json",
             "--pane-dir <path>"
+          ]
+        },
+        {
+          "name": "secrets list",
+          "summary": "List Pane secrets: project, name, time and machine. Never a value.",
+          "arguments": [
+            "--project <project>",
+            "--json"
+          ]
+        },
+        {
+          "name": "secrets exec",
+          "summary": "Run a command with Pane secrets in its environment.",
+          "arguments": [
+            "--project <project>",
+            "--only <name,...>",
+            "--env <VAR=NAME>",
+            "--file <name>",
+            "-- <command>..."
+          ]
+        },
+        {
+          "name": "secrets request",
+          "summary": "Ask the person for a secret on a masked card; returns saved or declined, never the value.",
+          "arguments": [
+            "--project <project>",
+            "--name <name>",
+            "--title <text>",
+            "--reason <text>",
+            "--json"
           ]
         },
         {
@@ -15157,7 +15767,7 @@ export const RUNPANE_CONTRACT = {
       "repos get": {
         "name": "repos get",
         "summary": "Show a saved repository's Project Settings and the scripts Pane will run.",
-        "details": "Use this before changing a repo's settings, or to find out what a new Pane will run. Each script reports `value` (saved in Project Settings), `fallback` (from the repo's config file), and `effective` (what Pane runs: the saved value when set, otherwise the fallback).",
+        "details": "Use this before changing a repo's settings, or to find out what a new Pane will run. Each script reports `value` (saved in Project Settings), `fallback` (from the repo's config file), and `effective` (what Pane runs: the saved value when set, otherwise the fallback). `envVars` lists the project environment variables: plain values in full, keychain items and Pane secrets as references, never their values.",
         "requiresPaneDaemon": true,
         "mutates": false,
         "arguments": [
@@ -15193,8 +15803,8 @@ export const RUNPANE_CONTRACT = {
       },
       "repos update": {
         "name": "repos update",
-        "summary": "Change a saved repository's Project Settings: scripts, worktree folder, name, IDE command, and system prompt.",
-        "details": "Saves through the same path as the Project Settings dialog: Pane drops its cached project context, rebuilds the run commands, and open windows reload the repo. Settings you do not pass keep their value. Clear a setting with `--clear` or an empty value; a cleared script falls back to the repo's config file.",
+        "summary": "Change a saved repository's Project Settings: scripts, worktree folder, name, IDE command, system prompt, and environment variables.",
+        "details": "Saves through the same path as the Project Settings dialog: Pane drops its cached project context, rebuilds the run commands, and open windows reload the repo. Settings you do not pass keep their value. Clear a setting with `--clear` or an empty value; a cleared script falls back to the repo's config file. --env adds or replaces project environment variables by key, and --env-remove removes them. A variable is plain text, an existing macOS keychain item, or a Pane secret reference; to store a new secret value, use `runpane secrets request` first.",
         "requiresPaneDaemon": true,
         "mutates": true,
         "arguments": [
@@ -15247,6 +15857,25 @@ export const RUNPANE_CONTRACT = {
             "description": "Project system prompt."
           },
           {
+            "name": "--env",
+            "value": "<json>",
+            "required": false,
+            "description": "Project variables to add or replace by key: a JSON array of {key, source: \"plain\", value}, {key, source: \"keychain\", service, account} or {key, source: \"secret\", project, name}.",
+            "schema": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/jsonSchemas/projectEnvVar"
+              }
+            }
+          },
+          {
+            "name": "--env-remove",
+            "value": "<name,...>",
+            "required": false,
+            "description": "Project variables to remove, comma-separated."
+          },
+          {
             "name": "--clear",
             "value": "<setting,...>",
             "required": false,
@@ -15256,7 +15885,7 @@ export const RUNPANE_CONTRACT = {
             "name": "--from-json",
             "value": "<path|->",
             "required": false,
-            "description": "JSON settings object with keys name, buildScript, runScript, archiveScript, worktreeFolder, openIdeCommand, systemPrompt; null clears. Flags override it."
+            "description": "JSON settings object with keys name, buildScript, runScript, archiveScript, worktreeFolder, openIdeCommand, systemPrompt, and envVars ({set: [...], remove: [...]}); null clears. Flags override it."
           },
           {
             "name": "--yes",
@@ -15283,7 +15912,8 @@ export const RUNPANE_CONTRACT = {
         "examples": [
           "runpane repos update --repo Pane --build-script \"pnpm install\" --run-script \"pnpm dev\" --yes --json",
           "runpane repos update --repo Pane --clear archive-script --dry-run --json",
-          "runpane repos update --repo Pane --from-json settings.json --yes --json"
+          "runpane repos update --repo Pane --from-json settings.json --yes --json",
+          "runpane repos update --repo Pane --env '[{\"key\":\"STRIPE_KEY\",\"source\":\"secret\",\"project\":\"stripe\",\"name\":\"STRIPE_SECRET_KEY\"}]' --env-remove OLD_TOKEN --yes --json"
         ],
         "jsonSchemas": [
           "repoUpdateRequest",
@@ -15291,7 +15921,8 @@ export const RUNPANE_CONTRACT = {
         ],
         "notes": [
           "`changed` lists the settings whose saved value differs from before.",
-          "The worktree folder applies to Panes created after the update; existing worktrees stay where they are."
+          "The worktree folder applies to Panes created after the update; existing worktrees stay where they are.",
+          "Plain values are saved and shown in full; do not put a secret in a plain variable. Point the variable at a Pane secret instead."
         ]
       },
       "repos rename": {
@@ -15339,6 +15970,253 @@ export const RUNPANE_CONTRACT = {
         ],
         "notes": [
           "The repository path, Panes, and settings are unchanged."
+        ]
+      },
+      "secrets list": {
+        "name": "secrets list",
+        "summary": "List the Pane secrets on this machine: project, name, and when and where each was set. Never shows a value.",
+        "details": "Use this to find the project and name to pass to `runpane secrets exec`. Each entry has project, name, updatedAt and machine. storage says how this machine keeps values; encrypted false means a plain 0600 file on a machine without an OS keyring.",
+        "requiresPaneDaemon": true,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "--project",
+            "value": "<project>",
+            "required": false,
+            "description": "Only this project's secrets."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane secrets list --json",
+          "runpane secrets list --project stripe --json"
+        ],
+        "jsonSchemas": [
+          "secretListRequest",
+          "secretListResult"
+        ],
+        "notes": [
+          "Runs on this machine only: `runpane workspace <machine> secrets ...` is refused. Use `runpane workspace <machine> exec -- runpane secrets ...` for another machine."
+        ]
+      },
+      "secrets set": {
+        "name": "secrets set",
+        "summary": "Save a Pane secret, adding or replacing it. Reads the value from stdin.",
+        "details": "The value comes only from stdin, so it never appears in argv or a transcript. One trailing newline (\\n or \\r\\n) is dropped; an empty value is refused. If stdin is a terminal it is refused too: pipe the value in, or have the person use Settings > Secrets or `runpane secrets request`. With --json it prints {ok, replaced, secret} (secretSetResult).",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--project",
+            "value": "<project>",
+            "required": true,
+            "description": "Secret project: up to 64 letters, digits, \".\", \"_\" or \"-\"."
+          },
+          {
+            "name": "--name",
+            "value": "<name>",
+            "required": true,
+            "description": "Secret name: letters, digits and underscores, not starting with a digit. PATH, WORKTREE_PATH and PANE_* are reserved."
+          },
+          {
+            "name": "--yes",
+            "required": true,
+            "description": "Confirm the change."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "printf %s \"$VALUE\" | runpane secrets set --project stripe --name STRIPE_SECRET_KEY --yes --json"
+        ],
+        "jsonSchemas": [
+          "secretSetRequest",
+          "secretSetResult"
+        ],
+        "notes": [
+          "Never set a value someone pasted into the chat; ask with `runpane secrets request` instead, so the value stays out of the transcript.",
+          "There is no MCP tool for this command: MCP arguments land in the transcript.",
+          "Runs on this machine only: `runpane workspace <machine> secrets ...` is refused. Use `runpane workspace <machine> exec -- runpane secrets ...` for another machine."
+        ]
+      },
+      "secrets delete": {
+        "name": "secrets delete",
+        "summary": "Delete a Pane secret from this machine and, through sync, from your other machines.",
+        "details": "Deletes <project>/<name> here. Each other machine deletes it the next time a desktop or the phone syncs with it.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--project",
+            "value": "<project>",
+            "required": true,
+            "description": "Secret project."
+          },
+          {
+            "name": "--name",
+            "value": "<name>",
+            "required": true,
+            "description": "Secret name."
+          },
+          {
+            "name": "--yes",
+            "required": true,
+            "description": "Confirm the change."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane secrets delete --project stripe --name STRIPE_SECRET_KEY --yes --json"
+        ],
+        "jsonSchemas": [
+          "secretDeleteRequest",
+          "secretDeleteResult"
+        ],
+        "notes": [
+          "A secret that does not exist fails with SECRET_NOT_FOUND.",
+          "Runs on this machine only: `runpane workspace <machine> secrets ...` is refused. Use `runpane workspace <machine> exec -- runpane secrets ...` for another machine."
+        ]
+      },
+      "secrets exec": {
+        "name": "secrets exec",
+        "summary": "Run a command with Pane secrets in its environment. Nothing prints a value.",
+        "details": "Reads the secrets from this machine's Pane when it runs, starts the command with your environment plus the secrets, passes stdin, stdout and stderr through, and exits with the command's exit code. By default it injects every secret in the project under its own name. --only limits that to the names given. --env VAR=NAME injects secret NAME as VAR. --file NAME writes secret NAME to a 0600 file in a private temp folder and sets NAME to the file's path; the file is removed when the command exits. Injected names override your environment.",
+        "requiresPaneDaemon": true,
+        "mutates": false,
+        "arguments": [
+          {
+            "name": "--project",
+            "value": "<project>",
+            "required": true,
+            "description": "Secret project."
+          },
+          {
+            "name": "--only",
+            "value": "<name,...>",
+            "required": false,
+            "description": "Inject only these secrets, comma-separated."
+          },
+          {
+            "name": "--env",
+            "value": "<VAR=NAME>",
+            "required": false,
+            "description": "Inject secret NAME as VAR. Repeatable."
+          },
+          {
+            "name": "--file",
+            "value": "<name>",
+            "required": false,
+            "description": "Write secret NAME to a private temp file and set NAME to its path. Repeatable."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          },
+          {
+            "name": "-- <command>",
+            "required": true,
+            "description": "The command to run and its arguments."
+          }
+        ],
+        "examples": [
+          "runpane secrets exec --project stripe -- pnpm test:webhooks",
+          "runpane secrets exec --project stripe --env STRIPE_API_KEY=STRIPE_SECRET_KEY -- node scripts/sync.js",
+          "runpane secrets exec --project gcp --file SERVICE_ACCOUNT_JSON -- sh -c 'gcloud auth activate-service-account --key-file \"$SERVICE_ACCOUNT_JSON\"'"
+        ],
+        "notes": [
+          "Target names PATH, WORKTREE_PATH and PANE_*, in any case, are refused with SECRET_RESERVED_NAME, and nothing runs.",
+          "A missing secret fails with SECRET_NOT_FOUND before anything runs; ask for it with `runpane secrets request`.",
+          "Do not echo a secret from inside the command: its output lands wherever the command's output goes, such as your transcript.",
+          "There is no MCP tool for this command; run it in a shell.",
+          "Runs on this machine only: `runpane workspace <machine> secrets ...` is refused. Use `runpane workspace <machine> exec -- runpane secrets ...` for another machine.",
+          "Secrets are the machine owner's: every secrets command in a teammate's `runpane workspace exec` (PANE_TEAMMATE_LOGIN set) fails with SECRET_OWNER_REQUIRED."
+        ]
+      },
+      "secrets request": {
+        "name": "secrets request",
+        "summary": "Ask the person for a secret on a masked card. Pane saves what they type as a Pane secret and never returns it.",
+        "details": "Shows a Notify card with your title and reason, a masked field, Save securely and Decline. What the person types is saved on this machine as the Pane secret <project>/<name> and synced to their other machines. You get back {status: \"saved\", project, name} or {status: \"declined\"}, never the value. Then use it with `runpane secrets exec`.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--project",
+            "value": "<project>",
+            "required": true,
+            "description": "Secret project, such as the service or repo it belongs to: up to 64 letters, digits, \".\", \"_\" or \"-\"."
+          },
+          {
+            "name": "--name",
+            "value": "<name>",
+            "required": true,
+            "description": "Secret name, such as STRIPE_SECRET_KEY: letters, digits and underscores, not starting with a digit."
+          },
+          {
+            "name": "--title",
+            "value": "<text>",
+            "required": true,
+            "description": "What the secret is, in a few words, such as \"Stripe test secret key\"."
+          },
+          {
+            "name": "--reason",
+            "value": "<text>",
+            "required": true,
+            "description": "What you need it for, in one sentence."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane secrets request --project stripe --name STRIPE_SECRET_KEY --title \"Stripe test secret key\" --reason \"Run the webhook integration tests against Stripe's test mode.\" --json"
+        ],
+        "jsonSchemas": [
+          "notifyRequest",
+          "notifyResult"
+        ],
+        "notes": [
+          "A result of {waiting: true, id} means the card is still open and your client would otherwise time out: call `runpane notify --resume <id>` right away to keep waiting.",
+          "A result of {unavailable, next} means nobody can answer through Pane right now. Do not ask for the secret in the chat; follow next.",
+          "Saving replaces a secret that already exists under that name; the card says so."
         ]
       },
       "panes list": {
@@ -19837,7 +20715,7 @@ export const RUNPANE_CONTRACT = {
       "",
       "1 feature = 1 worktree = 1 branch = 1 Pane; reviews, audits, fixes and QA for it are tabs in that Pane. Open later agents with `runpane panels create --pane <id>` (MCP: `panels_create` or `agents_start` with `pane`), not a new Pane.",
       "",
-      "When you need the person (a choice, an approval, a short answer), call the `notify` MCP tool (or `runpane notify`) instead of asking in the terminal. If it returns `waiting`, call it again with `resume`; if it returns `unavailable`, ask in the terminal.",
+      "When you need the person (a choice, an approval, a short answer), call the `notify` MCP tool (or `runpane notify`) instead of asking in the terminal. If it returns `waiting`, call it again with `resume`; if it returns `unavailable`, ask in the terminal. For an API key, token or password, call `secrets_request` (or `runpane secrets request`), never `ask`; if that returns `unavailable`, ask the person to save it in Pane under Settings > Secrets.",
       "",
       "CLI: `npm i -g runpane` (or `npx --yes runpane@latest`), then `runpane doctor --json`. Full command reference: `runpane agent-context --json`.",
       "",
@@ -19848,10 +20726,11 @@ export const RUNPANE_CONTRACT = {
         "Ask only what you can't find out yourself.",
         "Put related questions in one card.",
         "Send `info` rarely, only for what the person must know now.",
-        "Keep titles short and choices to a few words."
+        "Keep titles short and choices to a few words.",
+        "For an API key, token or password, call `secrets_request` (or `runpane secrets request`), never `ask`."
       ],
       "cardRule": "The person is juggling many tasks and has lost the thread. In plain words, say what the work is for (the outcome, not the file), what just happened, and what you need. For a decision, give the options and what each one means. Pane already shows which Pane and agent sent it.",
-      "results": "`waiting` means call `notify` again with `resume`; `unavailable` means ask in the terminal.",
+      "results": "`waiting` means call `notify` again with `resume`. `unavailable` means ask in the terminal; for a secret, ask the person to save it in Pane under Settings > Secrets.",
       "examples": [
         {
           "name": "Needs a decision",

@@ -230,7 +230,7 @@ const notifyStateSchema: BoundarySchema<NotifyCardState> = boundary.object({
   revision: boundary.number,
   items: boundary.array(boundary.object({
     id: boundary.string,
-    ui: boundary.enumeration('options', 'approve', 'ask', 'info'),
+    ui: boundary.enumeration('options', 'approve', 'ask', 'secret', 'info'),
     title: boundary.string,
     context: boundary.optional(boundary.string),
     choices: boundary.optional(boundary.array(boundary.object({ label: boundary.string }))),

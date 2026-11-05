@@ -326,6 +326,12 @@ call through the CLI:
 \`info\`. On \`waiting\`, run \`runpane notify --resume <id> --json\`; on
 \`unavailable\`, ask in the terminal.
 
+For an API key, token or password, call the \`secrets_request\` tool (or
+\`runpane secrets request --project <project> --name <NAME> --title "<text>" --reason "<what it is for>"\`),
+never \`ask\`. Pane saves the value as a Pane secret and returns only saved or
+declined; run commands with it through \`runpane secrets exec\`. If it returns
+\`unavailable\`, ask the person to save it in Pane under Settings > Secrets.
+
 ## When something looks missing
 
 - Pane keeps its data in \`~/.pane\` (or \`$PANE_DIR\`): \`bin/\` the CLI shims,
