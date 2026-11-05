@@ -669,7 +669,13 @@ The daemon and Electron IPC channels are:
 `orchestration-sessions:associate`, `orchestration-sessions:detach`, and
 `orchestration-sessions:overview`.
 
-Selectors accept a stable Session ID or an exact Session name. The existing
+Selectors accept a stable Session ID or an exact Session name. Phone apps
+released before chat tabs crash on a tab kind they don't know, so
+`orchestration-sessions:get` returns a Session whose orchestrator is a chat tab
+only to a client that passes `{ chatTabs: true }` as a second argument (desktop,
+the PWA and current phone apps do). Any other client gets
+`CHAT_TAB_CLIENT_OUTDATED`, which says to update Pane on the phone; `panels:list`
+leaves chat tabs out for those clients in the same way. The existing
 `pane-chat:*` channels remain compatibility endpoints for the imported legacy
 conversation.
 
