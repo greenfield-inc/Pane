@@ -25,7 +25,7 @@ const AGENT_NAMES = {
 } as const satisfies Record<string, string>;
 
 export const SOURCE_NAMES = {
-  claude: 'Claude Code', codex: 'Codex', conductor: 'Conductor', superset: 'Superset', herdr: 'Herdr', emdash: 'Emdash', orca: 'Orca', t3code: 'T3 Code',
+  claude: 'Claude Code', codex: 'Codex', conductor: 'Conductor', superset: 'Paradev (Superset)', herdr: 'Herdr', emdash: 'Emdash', orca: 'Orca', t3code: 'T3 Code',
 } as const satisfies Record<SessionImportSource, string>;
 
 interface GitCheckout {

@@ -45,9 +45,22 @@ interface ProfileDirs {
   codex?: string;
 }
 
-/** Superset's home: `SUPERSET_HOME_DIR`, else `~/.superset` on every OS. */
-function supersetHome(context: ReaderContext): string {
-  return context.env.SUPERSET_HOME_DIR || path.join(context.home, '.superset');
+/**
+ * Superset's homes: `SUPERSET_HOME_DIR`, else `~/.paradev` (Paradev 2.0.4+)
+ * and `~/.superset` on every OS. Paradev moves `~/.superset` into `~/.paradev`
+ * and leaves a link behind, so homes are compared by their real path.
+ */
+function supersetHomes(context: ReaderContext): string[] {
+  if (context.env.SUPERSET_HOME_DIR) return [context.env.SUPERSET_HOME_DIR];
+  const homes = [path.join(context.home, '.paradev'), path.join(context.home, '.superset')];
+  const real = (home: string) => {
+    try {
+      return fs.realpathSync(home);
+    } catch {
+      return home;
+    }
+  };
+  return homes.filter((home, index) => homes.findIndex(other => real(other) === real(home)) === index);
 }
 
 /** Pane's names for Superset's agent ids; others keep Superset's id. */
@@ -212,8 +225,7 @@ function readAppState(file: string): { sessions: V1Session[]; panes: Map<string,
   return { sessions, panes };
 }
 
-export const readSuperset: SourceReader = async context => {
-  const base = supersetHome(context);
+async function readHome(context: ReaderContext, base: string): Promise<SourceReadResult> {
   const hostRoot = path.join(base, 'host');
   const hostDbs = listDir(hostRoot)
     .map(org => path.join(hostRoot, org, 'host.db'))
@@ -302,4 +314,21 @@ export const readSuperset: SourceReader = async context => {
   }
 
   return { source: SOURCE, status: 'ok', storePaths, sessions: [...found.values()] };
+}
+
+/** Every home's sessions, the newest copy of each; any unreadable home fails the read closed. */
+export const readSuperset: SourceReader = async context => {
+  const results = [];
+  for (const home of supersetHomes(context)) results.push(await readHome(context, home));
+  const unreadableHome = results.find(result => result.status === 'unreadable');
+  if (unreadableHome) return unreadableHome;
+  const read = results.filter(result => result.status === 'ok');
+  if (read.length === 0) return absent(SOURCE, results.flatMap(result => result.storePaths));
+  const found = new Map<string, FoundSession>();
+  for (const session of read.flatMap(result => result.sessions)) {
+    const key = `${session.agent}:${session.sessionId}`;
+    const previous = found.get(key);
+    if (!previous || previous.lastActiveMs < session.lastActiveMs) found.set(key, session);
+  }
+  return { source: SOURCE, status: 'ok', storePaths: read.flatMap(result => result.storePaths), sessions: [...found.values()] };
 };

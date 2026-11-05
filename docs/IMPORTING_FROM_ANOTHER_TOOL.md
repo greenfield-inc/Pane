@@ -50,6 +50,6 @@ Pane never creates, file-syncs, builds, or recreates an external directory, and 
 
 Otherwise the tool that owns the worktree remains responsible for its archive and deletion lifecycle, and `runpane panes archive --dry-run --pane <id> --json` reports worktree cleanup as not applicable. Restoring an adopted Pane whose worktree was removed does not recreate it; `git worktree add <path> <branch>` does.
 
-## Conductor imports
+## Imports from other tools
 
-To bring Conductor workspaces in with their agents resumed, use Settings → AI & Agents → "Bring sessions into Pane" (see [Bring your existing sessions into Pane](SESSIONS.md#bring-your-existing-sessions-into-pane)). It adopts each idle workspace in place, as `panes adopt --resume` does. Pane already reads `conductor.json` for project scripts, but adoption deliberately does not run setup/build scripts.
+To bring sessions from Claude Code, Codex, Conductor, Paradev (formerly Superset), Herdr, Emdash, Orca or T3 Code in with their agents resumed, use Settings → AI & Agents → "Bring sessions into Pane" (see [Bring your existing sessions into Pane](SESSIONS.md#bring-your-existing-sessions-into-pane)). It adopts each idle checkout in place, as `panes adopt --resume` does. Pane already reads `conductor.json` for project scripts, but adoption deliberately does not run setup/build scripts.

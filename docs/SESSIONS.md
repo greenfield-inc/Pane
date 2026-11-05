@@ -374,8 +374,8 @@ else:
    Claude may be running. The pick becomes the Onboarding Session's agent and
    the default for new Sessions (Settings → AI & Agents).
 2. **Bring your N sessions into Pane?** Pane looks for sessions from Claude
-   Code, Codex, Conductor, Superset, Herdr, Emdash, Orca and T3 Code on this
-   computer and counts those running now or used in the last 7 days. Pane opens
+   Code, Codex, Conductor, Paradev (formerly Superset), Herdr, Emdash, Orca
+   and T3 Code on this computer and counts those running now or used in the last 7 days. Pane opens
    them in place and deletes nothing.
 
 **Yes** is the confirmation: the screen closes, the Onboarding Session opens,
@@ -399,7 +399,9 @@ idle sessions in with one click at any time:
 - Pane reads each tool's session list locally (metadata only; SQLite stores
   from a temporary copy) and lists sessions active in the last 30 days, one row
   per tool. Sessions from the last 7 days are preselected, at most 3 per
-  checkout; click a row to choose sessions.
+  checkout; click a row to choose sessions. Paradev's sessions are read from
+  `~/.paradev` and `~/.superset` (its folder before Paradev 2.0.4), or from
+  `SUPERSET_HOME_DIR` when it is set.
 - **Bring them in** adopts each checkout in place as a Pane, with one tab per
   session resumed by the agent's own id. A transcript kept in a tool's own agent
   folder is first copied into your own Claude Code or Codex store.

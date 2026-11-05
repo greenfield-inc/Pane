@@ -12,7 +12,7 @@ export const SOURCE_LABELS = {
   claude: 'Claude Code',
   codex: 'Codex',
   conductor: 'Conductor workspaces',
-  superset: 'Superset workspaces',
+  superset: 'Paradev (Superset) workspaces',
   herdr: 'Herdr workspaces',
   emdash: 'Emdash tasks',
   orca: 'Orca worktrees',
@@ -23,7 +23,7 @@ export const TOOL_NAMES = {
   claude: 'Claude Code',
   codex: 'Codex',
   conductor: 'Conductor',
-  superset: 'Superset',
+  superset: 'Paradev (Superset)',
   herdr: 'Herdr',
   emdash: 'Emdash',
   orca: 'Orca',
@@ -91,7 +91,7 @@ export function resultHeadline(result: SessionImportRunResult): string {
   return `Brought in ${plural(brought, 'session')} as ${plural(result.panesCreated, 'Pane')}${existing}.`;
 }
 
-export const EMPTY_STATE = 'No sessions found from Claude Code, Codex, Conductor, Superset, Herdr, Emdash, Orca or T3 Code on this computer.';
+export const EMPTY_STATE = 'No sessions found from Claude Code, Codex, Conductor, Paradev (Superset), Herdr, Emdash, Orca or T3 Code on this computer.';
 
 export type SessionImportSurface = 'settings';
 

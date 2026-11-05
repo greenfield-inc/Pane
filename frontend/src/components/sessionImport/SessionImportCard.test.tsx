@@ -50,7 +50,7 @@ describe('SessionImportCard', () => {
   it('shows the empty state when nothing was found', () => {
     const shown = text(renderToStaticMarkup(<SessionImportCard surface="settings" scan={{ scannedAt: 0, sources: [], sessions: [] }} onClose={() => undefined} />));
 
-    expect(shown).toContain('No sessions found from Claude Code, Codex, Conductor, Superset, Herdr, Emdash, Orca or T3 Code on this computer.');
+    expect(shown).toContain('No sessions found from Claude Code, Codex, Conductor, Paradev (Superset), Herdr, Emdash, Orca or T3 Code on this computer.');
     expect(shown).not.toContain('Pane found recent agent work');
     expect(shown).not.toContain('Bring them in');
   });
