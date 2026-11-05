@@ -39,7 +39,7 @@
   {
    "id": null,
    "item": "Per-project env vars",
-   "role": "Implementer",
+   "role": "Implementation",
    "blocks": "#1014",
    "q": "Should env vars be stored per project or per worktree?",
    "options": [
@@ -58,7 +58,7 @@
   {
    "id": "F-5",
    "item": "#1012 follow-up",
-   "role": "Reviewer",
+   "role": "Review",
    "blocks": "nothing (out of scope)",
    "q": "Move the retry logic into the shared client now, or file it?",
    "options": [

@@ -2,7 +2,8 @@
 // usage: node render.mjs <status.json> <out.html>
 // Diagrams are drawn with rough.js at render time; the page itself has no script and fetches nothing.
 // rough.mjs and the Inter font are vendored beside this file, so it needs nothing but Node.
-// Pane's copy adds `.qid:empty` and the narrow `.qq` wrap (Needs-you rows in the 359 px Overview sidebar); keep them when refreshing from Agent Farm.
+// Pane's copy adds, and a refresh from Agent Farm keeps: the `.qid:empty` and narrow `.qq` CSS (Needs-you rows in the
+// 359 px Overview sidebar); every link through href(); numeric counts; an allow-listed item state; a script-src 'none' CSP. example-status.json uses Pane's role and plan names.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,7 +12,7 @@ import rough from './rough.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const [inPath, outPath] = process.argv.slice(2);
 if (!inPath || !outPath) { console.error('usage: node render.mjs <status.json> <out.html>'); process.exit(2); }
-const d = { needs: [], items: [], done: [], decisions: [], sources: [], links: [], ...JSON.parse(fs.readFileSync(inPath, 'utf8')) };
+const d = { session: {}, needs: [], items: [], done: [], decisions: [], sources: [], links: [], ...JSON.parse(fs.readFileSync(inPath, 'utf8')) };
 const g = rough.generator();
 const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 // `next` and `settings` may carry <b>, <code> and <a href> links; everything else in them is escaped.
@@ -117,17 +118,17 @@ const blocked = d.items.filter(i => i.state === 'blocked' || i.state === 'failed
 const needs = d.needs.length;
 const stateCls = blocked ? 'blocked' : needs ? 'need' : 'ok';
 const stateText = [needs ? `${needs} need${needs === 1 ? 's' : ''} you` : null, blocked ? `${blocked} blocked` : null].filter(Boolean).join(' · ') || 'Nothing needs you';
-const c = d.session.counts;
-const counter = (cls, icon, n, label) => `<div class="ct ${cls}${n ? '' : ' zero'}"><span class="ic">${icon}</span><b>${n}</b><span class="lb">${label}</span></div>`;
+const c = d.session.counts || {};
+const counter = (cls, icon, count, label) => { const n = Number(count) || 0; return `<div class="ct ${cls}${n ? '' : ' zero'}"><span class="ic">${icon}</span><b>${n}</b><span class="lb">${label}</span></div>`; };
 
-const needCard = q => `<details class="need"><summary><span class="qid">${esc(q.id)}</span><span class="qq">${esc(q.q)}</span><span class="age">${esc(q.age)}</span>${q.link ? `<a class="btn sm" href="${esc(q.link)}">Answer →</a>` : ''}</summary>
+const href = u => SAFE_HREF.test(String(u || '')) ? esc(u) : '#';
+const needCard = q => `<details class="need"><summary><span class="qid">${esc(q.id)}</span><span class="qq">${esc(q.q)}</span><span class="age">${esc(q.age)}</span>${q.link ? `<a class="btn sm" href="${href(q.link)}">Answer →</a>` : ''}</summary>
   <div class="nbody"><div class="ask-from">${esc(q.item)} · ${esc(q.role)} · blocks ${esc(q.blocks)}</div>
   <div class="choices">${(q.options || []).map(o => `<span class="choice${o.rec ? ' rec' : ''}"${o.rec ? ' title="Recommended"' : ''}>${o.rec ? '★ ' : ''}${esc(o.label)}</span>`).join('')}</div>
-  ${q.why ? `<div class="why">${esc(q.why)}${q.files ? ` <a href="${esc(q.files)}">Options page</a>` : ''}</div>` : ''}</div></details>`;
+  ${q.why ? `<div class="why">${esc(q.why)}${q.files ? ` <a href="${href(q.files)}">Options page</a>` : ''}</div>` : ''}</div></details>`;
 const sec = (title, n, body) => `<details class="sec" open><summary><h2>${title}${n != null ? ` <span class="n">${n}</span>` : ''}</h2></summary>${body}</details>`;
 
 // Sources and links: rows grouped under a small heading per `group`, in first-seen order.
-const href = u => SAFE_HREF.test(String(u || '')) ? esc(u) : '#';
 const refRow = r => `<div class="rr"><a href="${href(r.link)}">${esc(r.label)}</a>${r.note ? ` <span class="dt">${esc(r.note)}</span>` : ''}</div>`;
 const refSec = (title, list) => {
   if (!list.length) return '';
@@ -136,13 +137,14 @@ const refSec = (title, list) => {
   return sec(title, list.length, `<div class="refs">${[...groups].map(([name, rs]) => `<div class="rg"><div class="rgh">${esc(name)} <span class="rgn">${rs.length}</span></div>${rs.map(refRow).join('')}</div>`).join('')}</div>`);
 };
 
-const itemCard = it => `<div class="card item ${it.state}">
-  <div class="hd"><a class="name" href="${esc(it.link || '#')}">${esc(it.name)}</a><span class="where">${it.pr ? `<a href="${esc(it.prLink || '#')}">${esc(it.pr)}</a> · ` : ''}${it.paneLink ? `<a href="${esc(it.paneLink)}">open ↗</a>` : esc(it.pane)}</span></div>
+const ITEM_STATES = new Set(['now', 'need', 'blocked', 'failed', 'done']);
+const itemCard = it => `<div class="card item ${ITEM_STATES.has(it.state) ? it.state : 'now'}">
+  <div class="hd"><a class="name" href="${href(it.link)}">${esc(it.name)}</a><span class="where">${it.pr ? `<a href="${href(it.prLink)}">${esc(it.pr)}</a> · ` : ''}${it.paneLink ? `<a href="${href(it.paneLink)}">open ↗</a>` : esc(it.pane)}</span></div>
   ${it.rail?.length ? diagram({ steps: it.rail }, 'rail', 'bare') : ''}
   <div class="tn">${rich(it.next)}</div></div>`;
 
 const html = `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><meta http-equiv="refresh" content="60">
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><meta http-equiv="refresh" content="60"><meta http-equiv="Content-Security-Policy" content="script-src 'none'">
 <title>${esc(d.session.title)}</title>
 <style>
 @font-face{font-family:"Inter Page";src:url(data:font/woff2;base64,${fs.readFileSync(path.join(here, 'inter-latin-wght-normal.woff2')).toString('base64')}) format("woff2");font-weight:100 900;font-display:block}
@@ -250,7 +252,7 @@ details{margin-top:14px;font-size:12px;color:var(--muted)}summary{cursor:pointer
 ${needs ? sec('Needs you', needs, `<div class="needs">${d.needs.map(needCard).join('')}</div>`) : ''}
 ${sec('In flight', d.items.length, d.items.length ? d.items.map(itemCard).join('') : '<p class="tn">Nothing in flight.</p>')}
 ${d.session.flow?.steps?.length && d.items.length > 1 ? sec('Order of work', null, diagram(d.session.flow, 'boxes')) : ''}
-${d.done.length ? sec('Done', d.done.length, `<div class="done-list">${d.done.map(x => `<div><span class="ck">✓</span><a href="${esc(x.link || '#')}">${esc(x.label)}</a> <span class="dt">${esc(x.detail || '')}</span></div>`).join('')}</div>`) : ''}
+${d.done.length ? sec('Done', d.done.length, `<div class="done-list">${d.done.map(x => `<div><span class="ck">✓</span><a href="${href(x.link)}">${esc(x.label)}</a> <span class="dt">${esc(x.detail || '')}</span></div>`).join('')}</div>`) : ''}
 ${d.decisions.length ? sec('Decisions', d.decisions.length, `<div class="decs">${d.decisions.map(x => `<details class="dec"><summary><span class="did">${esc(x.id)}</span><span class="dans">${esc(x.answer)}</span></summary><div class="dbody">
   ${x.q ? `<div class="dq">${esc(x.q)}</div>` : ''}
   ${x.options ? `<div class="choices">${x.options.map(o => `<span class="choice${o === x.chosen ? ' picked' : ''}">${o === x.chosen ? '✓ ' : ''}${esc(o)}</span>`).join('')}</div>` : ''}

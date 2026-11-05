@@ -38,14 +38,41 @@ describe('Pane Chat skill bundle', () => {
     await expect(fs.access(path.join(bundleRoot, 'skills', 'pane-orchestration', 'SKILL.md'))).resolves.toBeUndefined();
   });
 
+  const statusPage = path.join(bundleRoot, 'skills', 'orchestrate-sessions', 'assets', 'status-page');
+  async function renderStatusPage(statusFile: string): Promise<string> {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'status-page-'));
+    try {
+      execFileSync(process.execPath, [path.join(statusPage, 'render.mjs'), statusFile, path.join(dir, 'index.html')]);
+      return await fs.readFile(path.join(dir, 'index.html'), 'utf8');
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  }
+
   it('renders the Session status page from bundled files alone, with nothing fetched', async () => {
-    const statusPage = path.join(bundleRoot, 'skills', 'orchestrate-sessions', 'assets', 'status-page');
-    const out = path.join(await fs.mkdtemp(path.join(os.tmpdir(), 'status-page-')), 'index.html');
-    execFileSync(process.execPath, [path.join(statusPage, 'render.mjs'), path.join(statusPage, 'example-status.json'), out]);
-    const html = await fs.readFile(out, 'utf8');
+    const html = await renderStatusPage(path.join(statusPage, 'example-status.json'));
     expect(html).toContain('Get PRs in (example)');
     expect(html).toContain('href="pane://open?pane=pane-1014&amp;panel=panel-impl"');
-    expect(html).not.toMatch(/<script|<link\b|@import|(src|url)\(?=?["']?https?:/i);
+    expect(html).not.toMatch(/<script|<link\b|@import|(src|srcset|url)\s*\(?\s*=?\s*["']?https?:/i);
+  });
+
+  it('keeps script out of the status page whatever the status JSON holds', async () => {
+    const hostile = '<img src=x onerror=alert(1)>';
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'status-json-'));
+    const statusFile = path.join(dir, 'status.json');
+    await fs.writeFile(statusFile, JSON.stringify({
+      session: { title: hostile, counts: { running: hostile } },
+      needs: [{ id: null, q: hostile, link: 'javascript:alert(2)', files: 'data:text/html,x', why: 'w' }],
+      items: [{ name: hostile, state: '"><script>alert(3)</script>', link: 'javascript:alert(4)', pr: '#1', prLink: 'javascript:alert(5)', paneLink: 'javascript:alert(6)' }],
+      done: [{ label: 'x', link: 'javascript:alert(7)' }],
+    }));
+    try {
+      const html = await renderStatusPage(statusFile);
+      expect(html).not.toMatch(/<script>|<img|javascript:|data:text/i);
+      expect(html).toContain('&lt;img src=x onerror=alert(1)>');
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
   });
 
   it('gives each helper subagent a bundled skill', async () => {

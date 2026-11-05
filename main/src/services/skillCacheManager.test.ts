@@ -521,6 +521,8 @@ process.stdout.write(JSON.stringify(payload) + '\\n');
       expect(installed).toEqual(expect.arrayContaining([...bundledSkills, 'pane-orchestrator']));
       await expect(fs.readFile(path.join(root, 'runpane', 'SKILL.md'), 'utf8')).resolves.toBe(bundledRunpane);
     }
+    const font = path.join('orchestrate-sessions', 'assets', 'status-page', 'inter-latin-wght-normal.woff2');
+    expect((await fs.readFile(path.join(manager.paneChatSkillsRoot, font))).equals(await fs.readFile(path.join(bundleRoot, font)))).toBe(true);
     await expect(fs.access(legacySynced)).rejects.toThrow();
     await expect(fs.access(retired)).rejects.toThrow();
     await expect(fs.readFile(usersSkill, 'utf8')).resolves.toBe('# old\n');
