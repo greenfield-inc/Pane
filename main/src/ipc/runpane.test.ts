@@ -9202,6 +9202,29 @@ describe('runpane IPC handlers', () => {
           });
         });
 
+        it('archives the other Panes when checking one fails, and previews that one as unsafe', async () => {
+          const { services, registry, sessionsDelete } = createSessionPanes();
+          vi.mocked(panelManager.getPanelsForSession).mockImplementation((paneId: string) => {
+            if (paneId === 'pane-busy') throw new Error('panel store unavailable');
+            return [];
+          });
+
+          const preview = await previewOrchestrationSessionArchive(services, { sessionId: 'refactor' });
+          expect(preview.panes.map(pane => pane.blocked)).toEqual([undefined, 'status-unknown', 'uncommitted-changes']);
+
+          const { panes } = await updateOrchestrationSession(services, registry, { sessionId: 'refactor' }, { archived: true }, {
+            archivePaneIds: ['pane-clean'],
+            forcePaneIds: ['pane-busy', 'pane-dirty'],
+          });
+
+          expect(sessionsDelete.mock.calls.map(([paneId]) => paneId)).toEqual(['pane-clean', 'pane-dirty']);
+          expect(panes).toEqual({
+            archivedPaneIds: ['pane-clean', 'pane-dirty'],
+            keptPanes: [],
+            failedPanes: [{ paneId: 'pane-busy', name: 'pane-busy', error: 'panel store unavailable' }],
+          });
+        });
+
         it('archives the unsafe Panes the person chose to archive anyway', async () => {
           const { services, registry, sessionsDelete } = createSessionPanes();
 

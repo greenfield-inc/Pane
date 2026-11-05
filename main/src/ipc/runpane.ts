@@ -5501,12 +5501,12 @@ async function archiveSessionPanesWith(
   for (const pane of openSessionPanes(services, session)) {
     const force = selection?.forcePaneIds.includes(pane.id) ?? false;
     if (selection && !force && !selection.archivePaneIds.includes(pane.id)) continue;
-    const check = await checkPaneArchive(services, pane, false);
-    if (check.blockCode && !force) {
-      result.keptPanes.push({ paneId: pane.id, name: pane.name, code: check.blockCode });
-      continue;
-    }
     try {
+      const check = await checkPaneArchive(services, pane, false);
+      if (check.blockCode && !force) {
+        result.keptPanes.push({ paneId: pane.id, name: pane.name, code: check.blockCode });
+        continue;
+      }
       const { worktreeCleanup } = await archivePaneAndRemoveWorktree(services, commandRegistry, pane, check.worktreeCleanupApplicable);
       if (isArchiveCleanupOk(worktreeCleanup)) result.archivedPaneIds.push(pane.id);
       else result.failedPanes.push({ paneId: pane.id, name: pane.name, error: 'Pane was archived but its worktree could not be removed.' });
@@ -5525,7 +5525,8 @@ export async function previewOrchestrationSessionArchive(
   const session = await requireOrchestrationSessionManager(services).get(selector);
   const panes: OrchestrationSessionArchivePane[] = [];
   for (const pane of openSessionPanes(services, session)) {
-    const { blockCode } = await checkPaneArchive(services, pane, false);
+    // A Pane whose check fails is reported as unsafe, so the person is asked about it and the rest still preview.
+    const blockCode = await checkPaneArchive(services, pane, false).then(check => check.blockCode, (): RunpanePaneArchiveBlockCode => 'status-unknown');
     panes.push({ paneId: pane.id, name: pane.name, blocked: blockCode });
   }
   return { sessionId: session.id, panes };
