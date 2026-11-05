@@ -8,13 +8,20 @@ interface SecretFieldProps extends Omit<TextareaHTMLAttributes<HTMLTextAreaEleme
   onEnter?: () => void;
 }
 
+/** Scrolls the one-line field to the whole line the caret is on; the browser stops a few pixels short. */
+function showCaretLine(field: HTMLTextAreaElement): void {
+  const line = field.value.slice(0, field.selectionStart).split('\n').length - 1;
+  const top = line * parseFloat(getComputedStyle(field).lineHeight);
+  if (Number.isFinite(top) && field.scrollTop !== top) field.scrollTop = top;
+}
+
 /**
  * A masked one-line field for a secret value that keeps line breaks, so a pasted
  * PEM key arrives intact. Enter submits and Shift+Enter adds a line break.
  * A password input would strip CR and LF from the value.
  */
 export const SecretField = forwardRef<HTMLTextAreaElement, SecretFieldProps>(
-  ({ appearance = 'field', onEnter, onKeyDown, className, ...props }, ref) => (
+  ({ appearance = 'field', onEnter, onKeyDown, onScroll, onSelect, className, ...props }, ref) => (
     <textarea
       ref={ref}
       rows={1}
@@ -31,6 +38,16 @@ export const SecretField = forwardRef<HTMLTextAreaElement, SecretFieldProps>(
         // Line height carries the vertical padding, so no other line shows above or below. Last, so a text size can't reset it.
         appearance === 'field' && 'leading-[calc(1.25rem+2*var(--input-padding-y))]',
       )}
+      onScroll={(event) => {
+        onScroll?.(event);
+        showCaretLine(event.currentTarget);
+      }}
+      // The caret moved (typing, a paste, arrow keys): after the browser's own scroll, show its line.
+      onSelect={(event) => {
+        onSelect?.(event);
+        const field = event.currentTarget;
+        requestAnimationFrame(() => showCaretLine(field));
+      }}
       onKeyDown={(event) => {
         onKeyDown?.(event);
         if (event.defaultPrevented || event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return;

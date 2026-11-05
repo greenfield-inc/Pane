@@ -40,3 +40,13 @@ test('Settings → Secrets saves a pasted multi-line value with its line breaks'
   await page.keyboard.press('Enter');
   await expect.poll(() => saved(page)).toEqual([PEM]);
 });
+
+test('a multi-line value shows the whole line the caret is on', async ({ page }) => {
+  await page.goto('/renderer-tests/secret-fields.html?surface=settings');
+  await page.getByRole('button', { name: 'Add secret' }).click();
+  const field = page.getByLabel('Secret value');
+  await field.click();
+  await paste(page, `${'MIIEvQIBADANBgkqhkiG9w0BAQEF\n'.repeat(40)}END`);
+  // The caret is on line 41 of 41: the field scrolls by exactly 40 line heights.
+  await expect.poll(() => field.evaluate((element) => element.scrollTop / parseFloat(getComputedStyle(element).lineHeight))).toBe(40);
+});
