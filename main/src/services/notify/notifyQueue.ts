@@ -589,12 +589,13 @@ export class NotifyQueue extends EventEmitter {
   private async answerSecret(entry: Entry, answer: NotifyAnswer, device?: string): Promise<void> {
     const target = entry.item.secret;
     if (!target || !this.env.secrets) throw new Error('This card has nowhere to save a secret.');
+    // A value is being saved: the card ends as saved, so a Decline now would contradict it.
+    if (entry.saving) return;
     if ('approved' in answer && !answer.approved) {
       this.finishSecret(entry, { status: 'declined' }, 'Declined', device);
       return;
     }
     if (!('text' in answer) || !answer.text) throw new Error('A secret card takes the secret value, or Decline.');
-    if (entry.saving) return;
     entry.saving = true;
     try {
       await this.env.secrets.save(target.project, target.name, answer.text);

@@ -86,6 +86,23 @@ describe('NotifyQueue secret cards', () => {
     expect(call.result).toEqual({ status: 'saved', project: 'stripe', name: 'STRIPE_SECRET_KEY' });
   });
 
+  it('keeps a Decline sent during a slow save from contradicting the save', async () => {
+    let finish = () => undefined as void;
+    const saved: string[] = [];
+    const queue = makeQueue({ exists: () => false, save: async (_project, _name, value) => { await new Promise<void>(resolve => { finish = resolve; }); saved.push(value); } });
+    const call = ask(queue, stripeKey);
+    const [id] = queue.snapshot().queue;
+
+    const saving = queue.run({ type: 'answer', id, answer: { text: CANARY } });
+    await queue.run({ type: 'answer', id, answer: { approved: false } });
+    finish();
+    await saving;
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(saved).toEqual([CANARY]);
+    expect(call.result).toEqual({ status: 'saved', project: 'stripe', name: 'STRIPE_SECRET_KEY' });
+  });
+
   it('says when saving replaces an existing secret', () => {
     const queue = makeQueue(fakeSecrets(['stripe/STRIPE_SECRET_KEY']).env);
     ask(queue, stripeKey);
