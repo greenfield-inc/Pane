@@ -26,9 +26,10 @@ export type ProjectEnvVarInput =
 
 const KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
-/** Variables Pane always sets itself, so a project cannot define them. */
+/** Variables Pane always sets itself, in any case: Windows names ignore case, and secrets sync across platforms. */
 export function isReservedProjectEnvKey(key: string): boolean {
-  return key === 'PATH' || key === 'WORKTREE_PATH' || key.startsWith('PANE_');
+  const upper = key.toUpperCase();
+  return upper === 'PATH' || upper === 'WORKTREE_PATH' || upper.startsWith('PANE_');
 }
 
 /** Why `key` cannot be used, or null when it can. */

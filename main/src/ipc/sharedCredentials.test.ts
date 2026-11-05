@@ -193,6 +193,7 @@ describe('shared credentials on a host', () => {
     await apply({ paneSecrets: {
       'no-slash': { value: 'x', updatedAt: '2026-01-01T00:00:00.000Z', source: 'a' },
       'qa/PATH': { value: 'x', updatedAt: '2026-01-01T00:00:00.000Z', source: 'a' },
+      'qa/pane_token': { value: 'x', updatedAt: '2026-01-01T00:00:00.000Z', source: 'a' },
       'qa/GOOD': { value: 'x', updatedAt: '2026-01-01T00:00:00.000Z', source: 'a' },
     } });
 

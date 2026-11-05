@@ -4,7 +4,6 @@ import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DatabaseService } from '../database/database';
 import { PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
-import { PaneError } from '../../../shared/paneError';
 import { FakeKeychain } from '../test/fakeKeychain';
 import { memorySecretStore } from '../test/memorySecretStore';
 import type { PaneSecretStore } from './paneSecrets';
@@ -174,12 +173,15 @@ describe('project environment variables', () => {
       [{ key: '1BAD', source: 'plain', value: 'x' }],
       [{ key: 'PANE_PORT', source: 'plain', value: 'x' }],
       [{ key: 'PATH', source: 'plain', value: 'x' }],
+      [{ key: 'path', source: 'plain', value: 'x' }],
+      [{ key: 'Pane_Token', source: 'plain', value: 'x' }],
       [{ key: 'A', source: 'plain', value: 'x' }, { key: 'A', source: 'plain', value: 'y' }],
       [{ key: 'A', source: 'keychain', service: '', account: 'x' }],
       [{ key: 'A', source: 'secret', project: 'bad project', name: 'A', value: 'x' }],
       [{ key: 'A', source: 'secret', project: 'qa', name: 'PATH', value: 'x' }],
+      [{ key: 'A', source: 'secret', project: 'qa', name: 'pane_token', value: 'x' }],
     ] as const) {
-      await expect(service.save(project.id, [...inputs])).rejects.toBeInstanceOf(PaneError);
+      await expect(service.save(project.id, [...inputs])).rejects.toMatchObject({ code: 'PROJECT_ENV_INVALID' });
     }
     expect(service.list(project.id)).toEqual([{ key: 'KEEP', source: 'plain', value: '1' }]);
     expect(secrets.list()).toEqual([]);
