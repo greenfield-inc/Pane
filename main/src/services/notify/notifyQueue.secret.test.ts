@@ -62,8 +62,9 @@ describe('NotifyQueue secret cards', () => {
 
     expect(secrets.saved.get('stripe/STRIPE_SECRET_KEY')).toBe(CANARY);
     expect(call.result).toEqual({ status: 'saved', project: 'stripe', name: 'STRIPE_SECRET_KEY' });
-    const item = queue.sharedState().items.find(candidate => candidate.id === id);
-    expect(item).toMatchObject({ state: 'answered', answerSummary: 'Saved as stripe/STRIPE_SECRET_KEY' });
+    expect(queue.snapshot().items.find(candidate => candidate.id === id)).toMatchObject({ state: 'answered', answerSummary: 'Saved as stripe/STRIPE_SECRET_KEY' });
+    // Shared only while it waits, so screens on Pane versions before secrets can read the rest again.
+    expect(queue.sharedState().items.map(candidate => candidate.id)).not.toContain(id);
     expect(everythingVisible(queue, call.result)).not.toContain(CANARY);
   });
 
@@ -85,7 +86,7 @@ describe('NotifyQueue secret cards', () => {
 
     expect(call.result).toEqual({ status: 'declined' });
     expect(secrets.saved.size).toBe(0);
-    expect(queue.sharedState().items[0].answerSummary).toBe('Declined');
+    expect(queue.snapshot().items[0].answerSummary).toBe('Declined');
   });
 
   it('keeps the card waiting with the reason when the store refuses, and saves on the next try', async () => {
@@ -104,8 +105,8 @@ describe('NotifyQueue secret cards', () => {
     await queue.runRemote({ type: 'answer', id, answer: { text: CANARY } }, 'iPhone');
     await vi.advanceTimersByTimeAsync(0);
     expect(call.result).toEqual({ status: 'saved', project: 'stripe', name: 'STRIPE_SECRET_KEY' });
-    expect(queue.sharedState().items[0]).toMatchObject({ answeredOn: 'iPhone', answerSummary: 'Saved as stripe/STRIPE_SECRET_KEY' });
-    expect(queue.sharedState().items[0].secretError).toBeUndefined();
+    expect(queue.snapshot().items[0]).toMatchObject({ answeredOn: 'iPhone', answerSummary: 'Saved as stripe/STRIPE_SECRET_KEY' });
+    expect(queue.snapshot().items[0].secretError).toBeUndefined();
   });
 
   it('refuses a choice or empty text instead of saving it', async () => {

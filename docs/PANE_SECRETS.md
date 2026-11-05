@@ -46,8 +46,9 @@ says when saving replaces a value that already exists. The agent gets back
 
 The value is saved on the host the agent runs on, the moment it is answered. It
 travels once, from the screen that answered to that host, over the same connection
-as any Notify answer. History shows "Saved as stripe/STRIPE_SECRET_KEY". Secret cards
-have no Undo.
+as any Notify answer. That host's own Notify history shows "Saved as
+stripe/STRIPE_SECRET_KEY"; other screens drop the card once it is answered. Secret
+cards have no Undo.
 
 The card can be answered on the desktop and its floating strip, on another desktop
 showing that host, and in the phone app, which uses a secure text field. A

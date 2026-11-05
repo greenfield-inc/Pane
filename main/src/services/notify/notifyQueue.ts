@@ -254,7 +254,9 @@ export class NotifyQueue extends EventEmitter {
       epoch: this.epoch,
       revision: this.revision,
       enabled: this.env.settings().enabled,
-      items: [...this.entries.values()].map(({ item }) => (
+      // A secret card is shared only while it waits: Pane versions before secrets can't read one,
+      // so a finished card left in today's history would keep them from showing this machine's cards.
+      items: [...this.entries.values()].filter(({ item }) => item.ui !== 'secret' || item.state === 'waiting').map(({ item }) => (
         item.state === 'sent' || item.state === 'answered' ? { ...item, answeredOn: item.answeredOn ?? machine } : { ...item }
       )),
       queue: [...this.queue],
