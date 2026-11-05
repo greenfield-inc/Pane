@@ -6,6 +6,7 @@ import { Icon, Text } from '@/ui';
 
 import type { SidebarItem } from './paneList';
 import { IconButton } from './PaneKit';
+import { PausedBadge } from './StatusBadge';
 import { SwipeRow, swipeRowAccessibility } from './SwipeRow';
 
 /** The drawer's collapsible section header: chevron, sentence-case label and, for Archived, a count. */
@@ -35,19 +36,22 @@ export function SidebarSectionHeader({ item, first, onToggle }: {
 
 /**
  * A Session row: a chevron showing its panes (or a chat icon when it has none),
- * then the name and pane count. Swipe right pins, swipe left archives.
+ * then the name and pane count; a paused Session is grayed out behind a pause glyph.
+ * Swipe right pins; swipe left pauses or resumes, and archives.
  */
-export function SessionRow({ item, onOpen, onToggleNested, onTogglePinned, onArchive }: {
+export function SessionRow({ item, onOpen, onToggleNested, onTogglePinned, onArchive, onTogglePaused }: {
   item: Extract<SidebarItem, { type: 'session' }>;
   onOpen: () => void;
   onToggleNested: () => void;
   onTogglePinned: () => void;
   onArchive: () => void;
+  onTogglePaused: () => void;
 }) {
   const theme = useTheme();
   const [pressed, setPressed] = useState(false);
   const { session, label, paneCount, nestedKey, nestedExpanded } = item;
-  const actions = { pinned: Boolean(session.isPinned), onTogglePinned, onArchive };
+  const paused = Boolean(session.paused);
+  const actions = { pinned: Boolean(session.isPinned), onTogglePinned, onArchive, pause: { paused, onToggle: onTogglePaused } };
   return (
     <SwipeRow testIDPrefix="session" id={nestedKey} {...actions}>
       <View style={[styles.row, { backgroundColor: pressed ? theme.colors.selected : theme.colors.background }]}>
@@ -67,14 +71,15 @@ export function SessionRow({ item, onOpen, onToggleNested, onTogglePinned, onArc
         <Pressable
           testID={`session-row-${nestedKey}`}
           accessibilityRole="button"
-          accessibilityLabel={`Open Session ${label}`}
+          accessibilityLabel={`Open Session ${label}${paused ? ', Paused' : ''}`}
           {...swipeRowAccessibility(actions)}
           onPress={onOpen}
           onPressIn={() => setPressed(true)}
           onPressOut={() => setPressed(false)}
           style={styles.open}
         >
-          <Text variant="callout" numberOfLines={1} style={[styles.name, { color: pressed ? theme.colors.text : theme.colors.textSecondary }]}>{label}</Text>
+          {paused ? <PausedBadge /> : null}
+          <Text variant="callout" numberOfLines={1} style={[styles.name, { color: pressed ? theme.colors.text : paused ? theme.colors.textMuted : theme.colors.textSecondary }]}>{label}</Text>
           {paneCount > 0 ? <Text variant="caption" tone="muted" style={styles.count}>{paneCount}</Text> : null}
         </Pressable>
       </View>

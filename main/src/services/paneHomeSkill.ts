@@ -309,7 +309,7 @@ of it through the \`runpane\` CLI.
   wakes you when it exits; act on its event, then run it again (the named
   cursor misses nothing in between). Use \`--pane <pane-id>\` instead of
   \`--session\` outside a Session:
-  \`runpane watch --session <session> --as <your-name> --until-event --json --kinds agent.report,agent.report.missing,agent.blocked,agent.ready,panel.exited,panel.stopped,pane.gone\`
+  \`runpane watch --session <session> --as <your-name> --until-event --json --kinds agent.report,agent.report.missing,agent.blocked,agent.ready,panel.exited,panel.stopped,panel.paused,pane.gone\`
   Never pipe \`runpane watch --follow\` into \`grep -m1\` or \`head\` to wait:
   \`--follow\` never exits on news.
 - Workers end with \`runpane report --state <ready|blocked|failed|done> --summary-file <path>\`

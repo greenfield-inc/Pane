@@ -51,6 +51,7 @@ import { resourceMonitorService } from '../services/resourceMonitorService';
 import type { PaneCommandRegistry } from './commandRegistry';
 import { syncRemoteTransportForMode } from './remoteTransportStartup';
 import { panelManager } from '../services/panelManager';
+import { pausedMarkOf, type TerminalPanelState } from '../../../shared/types/panels';
 import { terminalPanelManager } from '../services/terminalPanelManager';
 import { createListeningPortMonitor } from '../services/listeningPorts';
 import type { ListeningPortsSnapshot } from '../../../shared/types/listeningPorts';
@@ -59,6 +60,9 @@ import { createPreviewFiles } from './previewProxy';
 import { WorkspaceJournal } from '../services/workspaceJournal';
 import { SessionPrMonitor } from '../services/sessionPrMonitor';
 import { LoopManager } from '../services/loops/loopManager';
+import { AutoPauser } from '../services/autoPause';
+import { pausePanes } from '../services/panePause';
+import { updateHoldIsLive } from '../services/updateRestoration';
 import { LoopRepository } from '../services/loops/loopRepository';
 import { archiveLoopRun, prepareLoopSession, startLoopRun } from '../ipc/loops';
 import { NamedLockService } from '../services/namedLockService';
@@ -300,6 +304,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
         agentType: snapshot?.agentType ?? customState.agentType,
         panelTitle: panel.title,
         lastActivityAt: snapshot?.lastActivityTime,
+        paused: !!pausedMarkOf(panel),
         // Typed cells only, so a dim or grey prompt suggestion is not held input.
         screen: { screenText: snapshot?.screenText, typedText: terminalPanelManager.getInputScreenText(panelId) },
       };
@@ -386,6 +391,27 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   };
 
   const commandRegistry = registerIpcHandlers(services);
+  const autoPauser = new AutoPauser({
+    now: () => Date.now(),
+    settings: () => ({ enabled: configManager.getConfig().autoPauseEnabled, hours: configManager.getConfig().autoPauseAfterHours }),
+    panes: () => databaseService.getAllSessions(undefined, { includeHidden: true }).map(row => {
+      const pane = sessionManager.getSession(row.id);
+      return { id: row.id, archived: pane?.archived ?? true, createdAt: pane?.createdAt ?? new Date(), lastViewedAt: pane?.lastViewedAt };
+    }),
+    panels: paneId => panelManager.getPanelsForSession(paneId),
+    liveActivity: panelId => terminalPanelManager.getLastActivity(panelId),
+    agentState: panelId => terminalPanelManager.getAgentStatus(panelId),
+    hasOpenNotify: panelIds => services.notifyService?.queue.hasOpenFor(panelIds) ?? false,
+    focusedPaneId: () => (options.getMainWindow()?.isFocused() ? gitStatusManager.getActiveSessionId() ?? undefined : undefined),
+    heldByUpdate: panel => {
+      // SAFETY: auto-pause only passes terminal panels; their custom state is TerminalPanelState.
+      const hold = (panel.state.customState as TerminalPanelState | undefined)?.updateResumeHold;
+      return !!hold && updateHoldIsLive(hold);
+    },
+    pause: (paneId, mark) => pausePanes(commandRegistry, [paneId], mark),
+    testThresholdMs: Number(process.env.PANE_AUTO_PAUSE_TEST_THRESHOLD_MS) || undefined,
+  });
+  configManager.on('config-updated', () => autoPauser.sync());
   const listeningPortMonitor = createListeningPortMonitor({
     // Terminal panels and agent CLIs (Claude, Codex) both run PTYs inside a Pane.
     terminalPanes: () => [terminalPanelManager, ...CliToolRegistry.getInstance().getAllManagers()].flatMap(manager =>
@@ -487,6 +513,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
   gitStatusManager.startPolling();
   sessionPrMonitor.start();
   loopManager.start();
+  autoPauser.sync();
   listeningPortMonitor.start();
   if (mode === 'desktop') {
     versionChecker.startPeriodicCheck();
@@ -522,6 +549,7 @@ export async function createPaneDaemonHost(options: PaneDaemonHostOptions): Prom
     async shutdown(): Promise<void> {
       // First, so no run starts while the services it needs are closing.
       loopManager.stop();
+      autoPauser.stop();
       await archiveCleanupManager.stop();
       // Before terminals stop: their exits during shutdown must not release locks.
       namedLockService.dispose();

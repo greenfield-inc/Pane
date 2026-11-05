@@ -3,6 +3,8 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Session, GitStatus } from '../types/session';
 import { formatTimeAgo } from '../utils/timestampUtils';
+import { pausedLabel, pausedReason } from '../utils/pause';
+import type { TerminalPausedMark } from '../../../shared/types/panels';
 
 interface SessionDetailTooltipProps {
   session: Session;
@@ -52,6 +54,12 @@ export function SessionDetailTooltip({ session, gitStatus, showName = true, show
 
   return (
     <div className="max-w-xs space-y-1.5">
+      {session.paused && (
+        <>
+          <PausedTooltipLines mark={session.paused} />
+          <div className="border-t border-border-primary" />
+        </>
+      )}
       {showName && (
         <>
           <p className="text-[11px] text-text-primary font-medium whitespace-pre-wrap break-words leading-snug">
@@ -158,6 +166,17 @@ export function SessionDetailTooltip({ session, gitStatus, showName = true, show
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+/** "Paused 2 days ago" and, for an auto-pause, the idle threshold that applied. */
+export function PausedTooltipLines({ mark }: { mark: TerminalPausedMark }) {
+  const reason = pausedReason(mark);
+  return (
+    <div className="text-[11px] leading-snug">
+      <p className="font-semibold text-text-primary">{pausedLabel(mark)}</p>
+      {reason && <p className="text-text-secondary">{reason}</p>}
     </div>
   );
 }

@@ -10,6 +10,7 @@ import { API } from '../../../utils/api';
 import type { HtmlFileOpenMode } from '../../../types/config';
 import { htmlFileOpenModeOf } from '../../../stores/configStore';
 import { KeepAwakeSetting } from './KeepAwakeSetting';
+import { PauseSettings } from './PauseSettings';
 
 interface GeneralSettingsProps {
   persistence: SettingsPersistence;
@@ -112,6 +113,10 @@ export function GeneralSettings({ persistence, onUpdate, onSendFeedback }: Gener
 
       <SettingsSection title="Power" description="System sleep behavior while sessions are active.">
         <KeepAwakeSetting persistence={persistence} />
+      </SettingsSection>
+
+      <SettingsSection title="Pause" description="Paused Panes stop their processes and keep their conversations until you resume them.">
+        <PauseSettings persistence={persistence} />
       </SettingsSection>
 
       <SettingsSection title="Files" description="How Pane opens files you click in Explorer.">

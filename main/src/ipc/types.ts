@@ -12,6 +12,7 @@ import type { NamedLockService } from '../services/namedLockService';
 import type { LoopManager } from '../services/loops/loopManager';
 import type { SessionInbox } from '../services/sessionInbox';
 import type { ExpectedReportTracker } from '../services/expectedReports';
+import type { NotifyService } from '../services/notify/notifyService';
 
 export interface DaemonHostServices extends CoreServices {
   taskQueue: TaskQueue | null;
@@ -27,6 +28,7 @@ export interface DaemonHostServices extends CoreServices {
   namedLockService?: NamedLockService;
   sessionInbox?: SessionInbox;
   expectedReportTracker?: ExpectedReportTracker;
+  notifyService?: NotifyService;
 }
 
 export interface AppServices extends DaemonHostServices {

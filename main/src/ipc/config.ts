@@ -44,6 +44,7 @@ export function registerConfigHandlers(
         voiceTranscription: buildRemotePwaVoiceAffordance(config),
         sessionAgents: buildRemotePwaSessionAgents(config.defaultOrchestratorAgent),
         os: machineOs(process.platform),
+        resumePausedOnOpen: config.resumePausedOnOpen === true,
       };
     };
     commandRegistry.register('remote:pwa-affordances', buildAffordances);

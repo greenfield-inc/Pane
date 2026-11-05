@@ -1,12 +1,15 @@
-import { Archive, ArchiveRestore, ChevronDown, ChevronRight, MessageSquare, Monitor, MoreHorizontal, Pin, PinOff, Plus, RefreshCw, TerminalSquare, X } from 'lucide-react';
+import { Archive, ArchiveRestore, ChevronDown, ChevronRight, MessageSquare, Monitor, MoreHorizontal, Pause, Pin, PinOff, Play, Plus, RefreshCw, TerminalSquare, X } from 'lucide-react';
 import { useEffect, useMemo, type ReactNode } from 'react';
 import type { OrchestrationSessionRecord } from '../../../../shared/types/orchestrationSession';
+import type { TerminalPausedMark } from '../../../../shared/types/panels';
 import type { RemoteProjectWithSessions } from '../runtime/remoteRuntimeAdapter';
 import type { Session } from '../../types/session';
 import { RemoteDesktopLink } from './RemoteDesktopLink';
 import { Dropdown } from '../../components/ui/Dropdown';
 import { SessionActivityDot, SessionActivitySummary } from '../../components/SessionActivity';
 import { SessionStatusBadge } from '../../components/SessionStatusBadge';
+import { PausedGlyph } from '../../components/ui/AgentStatusDot';
+import { pausedLabel, pausedReason } from '../../utils/pause';
 import { createProjectById, getPinnedSessions } from '../../utils/sessionOrdering';
 import { useRemoteSessionStore } from '../stores/remoteSessionStore';
 import { useRemoteSidebarSectionsStore, type RemoteSidebarSection } from '../stores/remoteSidebarSectionsStore';
@@ -18,6 +21,7 @@ export interface RemoteSidebarActions {
   selectPane: (paneId: string, scope: string) => void;
   togglePanePinned: (paneId: string) => void;
   archivePane: (paneId: string) => void;
+  setPanePaused: (paneId: string, paused: boolean) => void;
   restorePane: (paneId: string) => void;
   /** Without a repository, the sheet starts in the default one and lets the person pick. */
   createPane: (project?: RemoteProjectWithSessions) => void;
@@ -25,6 +29,7 @@ export interface RemoteSidebarActions {
   createSession: () => void;
   toggleSessionPinned: (session: OrchestrationSessionRecord) => void;
   setSessionArchived: (session: OrchestrationSessionRecord, archived: boolean) => void;
+  setSessionPaused: (session: OrchestrationSessionRecord, paused: boolean) => void;
   reloadSessions: () => void;
   loadArchived: () => void;
   refresh: () => void;
@@ -124,6 +129,7 @@ export function RemoteSidebar({
       onSelect={() => actions.selectPane(pane.id, scope)}
       onTogglePinned={() => actions.togglePanePinned(pane.id)}
       onArchive={() => actions.archivePane(pane.id)}
+      onTogglePaused={() => actions.setPanePaused(pane.id, !pane.paused)}
     />
   );
 
@@ -137,12 +143,15 @@ export function RemoteSidebar({
     const nestedExpanded = expandedSessionIds.has(session.id);
     const nestedId = `remote-session-panes-${placement}-${session.id}`;
     const name = session.name || 'Untitled';
+    const paused = session.paused;
     return (
       <div key={nestedKey}>
         <div className={`flex w-full items-stretch gap-1 rounded-md pl-1 pr-3 text-sm transition-colors ${
           openSessionId === session.id
             ? 'bg-interactive-surface text-text-primary'
-            : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
+            : paused
+              ? 'text-text-muted hover:bg-surface-hover hover:text-text-primary'
+              : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
         }`}>
           {panes.length > 0 ? (
             <button
@@ -159,7 +168,8 @@ export function RemoteSidebar({
           <button
             type="button"
             onClick={() => actions.openSession(session.id)}
-            aria-label={`Open Session ${name}`}
+            aria-label={`Open Session ${name}${paused ? ', paused' : ''}`}
+            title={paused ? pausedTitle(paused) : undefined}
             className="flex min-h-8 min-w-0 flex-1 items-center gap-2 py-1.5 text-left md:py-2"
           >
             {/* Without Panes the icon sits inside the button, so tapping it opens the Session too. */}
@@ -168,9 +178,9 @@ export function RemoteSidebar({
                 <MessageSquare className="h-3.5 w-3.5" />
               </span>
             )}
-            <SessionActivityDot session={session} paneIds={paneIds} />
+            {paused ? <PausedGlyph size="sm" className="shrink-0" /> : <SessionActivityDot session={session} paneIds={paneIds} />}
             <span className="flex min-w-0 flex-1 flex-col">
-              <span className="truncate font-medium">{name}</span>
+              <span className={`truncate ${paused ? 'font-normal' : 'font-medium'}`}>{name}</span>
               {/* Phones have no hover, so the first blocker shows as text under the name. */}
               {session.blockers.length > 0 && (
                 <span className="truncate text-[11px] text-status-error">
@@ -178,7 +188,7 @@ export function RemoteSidebar({
                 </span>
               )}
             </span>
-            <SessionActivitySummary session={session} paneIds={paneIds} />
+            {paused ? null : <SessionActivitySummary session={session} paneIds={paneIds} />}
           </button>
           <span className="flex shrink-0 items-center gap-0.5 py-1.5 md:py-2">
             <button
@@ -197,6 +207,12 @@ export function RemoteSidebar({
               position="bottom-right"
               itemClassName="min-h-11 md:min-h-[1.75rem]"
               items={[
+                {
+                  id: 'pause',
+                  label: paused ? 'Resume Session' : 'Pause Session',
+                  icon: paused ? Play : Pause,
+                  onClick: () => actions.setSessionPaused(session, !paused),
+                },
                 {
                   id: 'archive',
                   label: 'Archive Session',
@@ -460,6 +476,7 @@ interface RemotePaneRowProps {
   onSelect: () => void;
   onTogglePinned: () => void;
   onArchive: () => void;
+  onTogglePaused: () => void;
 }
 
 function RemotePaneRow({
@@ -471,24 +488,29 @@ function RemotePaneRow({
   onSelect,
   onTogglePinned,
   onArchive,
+  onTogglePaused,
 }: RemotePaneRowProps) {
+  const paused = pane.paused;
   return (
     <div
       className={`group flex w-full items-stretch justify-between gap-2 rounded-md px-3 text-left text-sm transition-colors ${
         selected
           ? 'bg-interactive-surface text-text-primary'
-          : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
+          : paused
+            ? 'text-text-muted hover:bg-surface-hover hover:text-text-primary'
+            : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
       }`}
     >
       <button
         type="button"
         onClick={onSelect}
         aria-current={selected ? 'page' : undefined}
+        title={paused ? pausedTitle(paused) : undefined}
         className="flex min-w-0 flex-1 items-center gap-2 py-1.5 text-left md:py-2"
       >
-        <SessionStatusBadge sessionId={pane.id} size="sm" />
+        {paused ? <PausedGlyph size="sm" className="shrink-0" /> : <SessionStatusBadge sessionId={pane.id} size="sm" />}
         <span className="min-w-0 flex-1 truncate">
-          <span className="font-medium">{label}</span>
+          <span className={paused ? 'font-normal' : 'font-medium'}>{label}</span>
           {detail && <span className="ml-2 text-xs text-text-muted">{detail}</span>}
         </span>
       </button>
@@ -503,6 +525,16 @@ function RemotePaneRow({
           aria-pressed={Boolean(pane.isFavorite)}
         >
           <PinIcon pinned={Boolean(pane.isFavorite)} />
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={onTogglePaused}
+          className={`${ROW_ACTION} text-text-muted hover:text-text-primary`}
+          title={paused ? 'Resume' : 'Pause'}
+          aria-label={paused ? 'Resume pane' : 'Pause pane'}
+        >
+          {paused ? <Play className="h-3.5 w-3.5" aria-hidden="true" /> : <Pause className="h-3.5 w-3.5" aria-hidden="true" />}
         </button>
         <button
           type="button"
@@ -524,4 +556,9 @@ function PinIcon({ pinned }: { pinned: boolean }) {
   return pinned
     ? <PinOff className="h-3.5 w-3.5" aria-hidden="true" />
     : <Pin className="h-3.5 w-3.5 rotate-45" aria-hidden="true" />;
+}
+
+/** The paused row's tooltip: "Paused 2 days ago", and why when it paused on its own. */
+function pausedTitle(mark: TerminalPausedMark): string {
+  return [pausedLabel(mark), pausedReason(mark)].filter(Boolean).join('\n');
 }

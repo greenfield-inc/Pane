@@ -5,6 +5,7 @@ import type {
   OrchestrationSessionUpdateInput,
   OrchestrationSessionView,
 } from '@shared/types/orchestrationSession';
+import type { RunpanePauseResult } from '@shared/types/runpaneOrchestration';
 
 import { useDaemon, useDaemonEvent, useDaemonQueryKey, useInvokeMutation, useInvokeQuery } from '@/daemon';
 
@@ -12,6 +13,7 @@ type SessionView = OrchestrationSessionView<{ id: string; name: string }>;
 
 const LIST = 'orchestration-sessions:list';
 const GET = 'orchestration-sessions:get';
+const PANES = 'sessions:get-all-with-projects';
 
 /**
  * Every Session on the host, refetched when the host reports a change. Hosts
@@ -52,5 +54,23 @@ export function useUpdateSession() {
       sessions: list.sessions.map(session => session.id === sessionId ? { ...session, ...update, updatedAt: new Date().toISOString() } : session),
     });
     await mutation.mutateAsync([{ sessionId }, update]);
+  };
+}
+
+/** Pauses or resumes a Session's chat and every Pane in it, graying the row out (or back) at once. */
+export function useSetSessionPaused() {
+  const queryClient = useQueryClient();
+  const queryKey = useDaemonQueryKey(LIST);
+  const pause = useInvokeMutation<[{ sessionId: string }], RunpanePauseResult>('runpane:sessions:pause', { invalidates: [LIST, PANES] });
+  const resume = useInvokeMutation<[{ sessionId: string }], RunpanePauseResult>('runpane:sessions:resume', { invalidates: [LIST, PANES] });
+  return async (sessionId: string, paused: boolean) => {
+    await queryClient.cancelQueries({ queryKey });
+    const mark = paused ? { at: new Date().toISOString(), by: 'manual' as const } : undefined;
+    queryClient.setQueryData<OrchestrationSessionListResult>(queryKey, list => list && {
+      ...list,
+      sessions: list.sessions.map(session => session.id === sessionId ? { ...session, paused: mark } : session),
+    });
+    const result = await (paused ? pause : resume).mutateAsync([{ sessionId }]);
+    if (!result.ok) throw new Error(result.message);
   };
 }

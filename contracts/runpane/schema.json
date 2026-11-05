@@ -516,6 +516,8 @@
         "panes archive",
         "panes pin",
         "panes unpin",
+        "panes pause",
+        "panes resume",
         "panes rename",
         "panes focus",
         "panels",
@@ -529,6 +531,7 @@
         "panels submit-composer",
         "panels wait",
         "panels resume",
+        "panels pause",
         "panels last-message",
         "panels close",
         "agent-context",
@@ -567,6 +570,8 @@
         "sessions update",
         "sessions pin",
         "sessions unpin",
+        "sessions pause",
+        "sessions resume",
         "sessions set-agent",
         "sessions associate",
         "sessions detach",
@@ -678,6 +683,12 @@
         "panes unpin": {
           "$ref": "#/$defs/helpLines"
         },
+        "panes pause": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "panes resume": {
+          "$ref": "#/$defs/helpLines"
+        },
         "panes rename": {
           "$ref": "#/$defs/helpLines"
         },
@@ -715,6 +726,9 @@
           "$ref": "#/$defs/helpLines"
         },
         "panels resume": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "panels pause": {
           "$ref": "#/$defs/helpLines"
         },
         "panels last-message": {
@@ -877,6 +891,12 @@
           "$ref": "#/$defs/helpLines"
         },
         "sessions unpin": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "sessions pause": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "sessions resume": {
           "$ref": "#/$defs/helpLines"
         },
         "pr watch": {

@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
-import { ToolPanel, CreatePanelRequest, PanelEventType, PanelActivationRequest, PanelOpenPlacement, ToolPanelState, ToolPanelMetadata, ToolPanelType, LogsPanelState, TerminalPanelState } from '../../../shared/types/panels';
+import { ToolPanel, CreatePanelRequest, PanelEventType, PanelActivationRequest, PanelOpenPlacement, ToolPanelState, ToolPanelMetadata, ToolPanelType, LogsPanelState, TerminalPanelState, TerminalPausedMark } from '../../../shared/types/panels';
 import { getPaneEventSink, getPaneWebviewContextMap } from '../core/runtime';
 import { databaseService } from './database';
 import { splitPanelBufferState } from '../database/panelBuffers';
@@ -15,7 +15,7 @@ import { OrchestrationSessionStore } from './orchestrationSessionStore';
 import { sessionWorkspacePath } from './sessionWorkspace';
 import { getAppDirectory } from '../utils/appDirectory';
 import { withSessionFolderAccess } from './agents/sessionFolderAccess';
-import { reasonOf } from '../../../shared/paneError';
+import { PaneError, reasonOf } from '../../../shared/paneError';
 
 function logsPanelState(panel: ToolPanel): LogsPanelState {
   // SAFETY: Callers first discriminate `panel.type === 'logs'`; this state is
@@ -334,6 +334,12 @@ class PanelManager {
         console.warn(`[PanelManager] Panel ${panelId} not found for update`);
         return;
       }
+      if (panel.type === 'terminal' && updates.state?.customState) {
+        // Only Pause and Resume write the pause mark; a stale renderer or remote snapshot keeps it.
+        // SAFETY: This database row belongs to the terminal panel above.
+        const current = databaseService.getPanel(panelId)?.state.customState as TerminalPanelState | undefined;
+        updates = { ...updates, state: { ...updates.state, customState: { ...updates.state.customState, paused: current?.paused } } };
+      }
       
       // Update in database. A refused write (state over the ceiling) is
       // already logged there with the panel, size and largest key; the cache
@@ -356,6 +362,26 @@ class PanelManager {
       this.sendRendererEvent('panel:updated', panel);
       
       console.log(`[PanelManager] Updated panel ${panelId}`);
+    });
+  }
+
+  /**
+   * Sets or clears a tab's pause mark. Normal panel updates keep the saved mark, so a
+   * stale renderer or remote snapshot can never pause or resume a tab by accident.
+   * Pausing also clears `wasInterrupted`: the launch Resume dialog never lists a paused tab.
+   */
+  async commitPaused(panelId: string, mark: TerminalPausedMark | undefined): Promise<void> {
+    await withLock(`panel-update-${panelId}`, async () => {
+      const panel = this.getPanel(panelId);
+      if (!panel || panel.type !== 'terminal') throw new PaneError('ERR_PANEL_NOT_FOUND', `Tab ${panelId} is not a terminal tab, so it cannot be paused or resumed.`, 'List the tabs with `runpane panels list --pane <pane> --json` and pick a terminal tab.');
+      // SAFETY: The terminal panel type was checked above; customState is its persisted terminal state.
+      const previous = (panel.state.customState ?? {}) as TerminalPanelState;
+      const customState: TerminalPanelState = { ...previous, paused: mark };
+      if (mark) customState.wasInterrupted = false;
+      const state = { ...panel.state, customState };
+      if (!databaseService.updatePanel(panelId, { state })) throw new PaneError('ERR_PANEL_PAUSE_NOT_SAVED', `Tab ${panel.title} could not be ${mark ? 'paused' : 'resumed'}: its saved state was not written.`, 'Check the Pane log for a storage error, then try again.');
+      panel.state = splitPanelBufferState(state).state;
+      this.sendRendererEvent('panel:updated', panel);
     });
   }
 

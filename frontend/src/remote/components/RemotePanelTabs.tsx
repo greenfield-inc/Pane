@@ -2,11 +2,12 @@ import { ChevronDown, Globe, Plus, TerminalSquare } from 'lucide-react';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { RemotePwaCustomCommand } from '../../../../shared/types/remoteDaemon';
-import type { ToolPanel } from '../../../../shared/types/panels';
+import { pausedMarkOf, type ToolPanel } from '../../../../shared/types/panels';
 import { AGENT_LAUNCH_PRESETS } from '../../../../shared/constants/agentLaunchPresets';
 import { getCliBrandIcon } from '../../components/ui/brandIconRegistry';
 import { getPanelIcon } from '../../components/panels/panelIcon';
 import { PanelTabStatusDot } from '../../components/panels/PanelTabStatusDot';
+import { PausedGlyph } from '../../components/ui/AgentStatusDot';
 import { getRemotePanelTabId, getRemotePanelTabPanelId } from './remotePanelTabIds';
 import { phoneShows } from '../stores/remoteSessionStore';
 
@@ -122,7 +123,9 @@ export function RemotePanelTabs({
   return (
     <div className="flex min-h-12 shrink-0 items-end gap-2 border-b border-border-primary bg-bg-secondary px-2 pt-2">
       <div className="flex min-w-0 flex-1 items-end gap-1 overflow-x-auto" role="tablist" aria-label="Remote tool panels">
-        {panels.map((panel, index) => (
+        {panels.map((panel, index) => {
+          const paused = pausedMarkOf(panel) !== undefined;
+          return (
           <button
             key={panel.id}
             ref={(element) => { tabRefs.current[index] = element; }}
@@ -139,14 +142,15 @@ export function RemotePanelTabs({
             className={`relative flex h-10 max-w-[min(12rem,55vw)] shrink-0 items-center gap-2 rounded-t-lg border px-3 text-sm font-medium shadow-sm ${
               selectedPanelId === panel.id
                 ? 'border-border-primary border-b-bg-primary bg-bg-primary text-text-primary shadow-[0_-1px_0_rgba(255,255,255,0.04)_inset]'
-                : 'border-border-secondary bg-surface-primary text-text-secondary hover:border-border-primary hover:bg-surface-hover hover:text-text-primary'
+                : `border-border-secondary bg-surface-primary ${paused ? 'font-normal text-text-muted' : 'text-text-secondary'} hover:border-border-primary hover:bg-surface-hover hover:text-text-primary`
             }`}
           >
-            {panel.type === 'terminal' && <PanelTabStatusDot panelId={panel.id} sessionId={panel.sessionId} />}
+            {paused ? <PausedGlyph size="sm" className="shrink-0" /> : panel.type === 'terminal' && <PanelTabStatusDot panelId={panel.id} sessionId={panel.sessionId} />}
             <span className="flex h-4 w-4 shrink-0 items-center justify-center" aria-hidden="true">{getPanelIcon(panel.type, panel, 'h-4 w-4')}</span>
             <span className="truncate">{panel.title}</span>
           </button>
-        ))}
+          );
+        })}
       </div>
 
       <div ref={menuRef} className="relative shrink-0">

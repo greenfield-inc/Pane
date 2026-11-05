@@ -2,9 +2,9 @@ import type { AgentState } from '@shared/types/agentStatus';
 import type { NotifyAnswer, NotifyItem, NotifyRemoteCommand, NotifySharedState } from '@shared/types/notify';
 import type { OrchestrationSessionRecord, OrchestrationSessionView } from '@shared/types/orchestrationSession';
 import type { PaneChatAgent } from '@shared/types/paneChat';
-import type { ToolPanel } from '@shared/types/panels';
+import type { TerminalPausedMark, ToolPanel } from '@shared/types/panels';
 import type { RemotePwaAffordances, RemotePwaTerminalShortcut } from '@shared/types/remoteDaemon';
-import type { RunpanePaneCreateRequest, RunpanePaneCreateResult, RunpaneWorkspaceStateResult } from '@shared/types/runpaneOrchestration';
+import type { RunpanePaneCreateRequest, RunpanePaneCreateResult, RunpanePauseResult, RunpanePauseScope, RunpaneWorkspaceStateResult } from '@shared/types/runpaneOrchestration';
 import type { JsonValue } from '@shared/validation/boundaryDecoder';
 
 import { demoChanges, demoFileDiff, demoFileText, demoFolder, demoLogs, demoSearch } from './demoFiles';
@@ -38,6 +38,8 @@ interface DemoPanel {
   pending: string[];
   /** What has been typed since the last Enter. */
   typed: string;
+  /** Set while Pause has stopped this terminal tab. */
+  paused?: TerminalPausedMark;
 }
 
 /** How long an answer waits for Undo before the agent gets it, as on the host. */
@@ -99,13 +101,33 @@ export class DemoWorkspace {
       ];
       case 'runpane:panes:create': return this.createPane(first as RunpanePaneCreateRequest);
       case 'runpane:workspace:state': return this.workspaceState();
+      case 'runpane:panes:pause':
+      case 'runpane:panes:resume': {
+        const pane = this.pane((first as { paneId?: string }).paneId);
+        return this.setPaused({ kind: 'pane', paneId: pane.id, paneName: pane.name }, [pane], channel.endsWith('pause'));
+      }
+      case 'runpane:sessions:pause':
+      case 'runpane:sessions:resume': {
+        const session = this.session(first);
+        return this.setPaused({ kind: 'session', sessionId: session.id, sessionName: session.name }, this.sessionPanes(session), channel.endsWith('pause'));
+      }
+      case 'runpane:panels:resume': {
+        const panel = this.panel((first as { panelId?: string }).panelId);
+        const pane = this.paneOfPanel(panel);
+        if (pane) this.setPaused({ kind: 'panel', panelId: panel.id, paneId: pane.id }, [pane], false, [panel]);
+        return { ok: true, panelId: panel.id, action: 'resumed', message: `Tab ${panel.title} resumed.` };
+      }
+      case 'runpane:panels:screen': {
+        const panel = this.panel((first as { panelId?: string }).panelId);
+        return { ok: true, panelId: panel.id, text: stripAnsi(panel.buffer) };
+      }
       case 'runpane:workspaces:machines': return { ok: true, tailnet: 'you@example.com', domain: 'demo.invalid', machines: toJson(demoMachines()) };
       case 'runpane:glasses:list': return { devices: [] };
       case 'permission:getPending': return [];
       case 'permission:respond': return null;
       case 'notify:remote-snapshot': return toJson(this.notifySnapshot());
       case 'notify:remote-command': return this.notifyCommand(first as NotifyRemoteCommand);
-      case 'orchestration-sessions:list': return toJson({ sessions: this.sessions });
+      case 'orchestration-sessions:list': return toJson({ sessions: this.sessions.map(session => ({ ...session, paused: this.sessionMark(session) })) });
       case 'orchestration-sessions:get': return toJson(this.sessionView(this.session(first)));
       case 'orchestration-sessions:create': return toJson(this.createSession(first as { name?: string; agent?: PaneChatAgent; isPinned?: boolean }));
       case 'orchestration-sessions:update': {
@@ -225,6 +247,7 @@ export class DemoWorkspace {
         id: pane.id, name: pane.name, baseBranch: pane.baseBranch, isFavorite: pane.isFavorite,
         archived: pane.archived, createdAt: pane.createdAt,
         ...(pane.favoritePinnedAt ? { favoritePinnedAt: pane.favoritePinnedAt } : {}),
+        ...(paneMark(pane) ? { paused: toJson(paneMark(pane)) } : {}),
       })),
     }));
   }
@@ -270,6 +293,40 @@ export class DemoWorkspace {
     return toJson(result);
   }
 
+  // Pause
+
+  /** Pauses or resumes the terminal tabs of `panes` (or just `only`), as the host's pause channels do. */
+  private setPaused(scope: RunpanePauseScope, panes: DemoPane[], paused: boolean, only?: DemoPanel[]): JsonValue {
+    const tabs = panes.flatMap(pane => pane.panels.filter(panel => !panel.tool && (!only || only.includes(panel))).map(panel => ({ pane, panel })));
+    const changed = tabs.filter(({ panel }) => Boolean(panel.paused) !== paused);
+    const mark: TerminalPausedMark = { at: new Date().toISOString(), by: 'manual' };
+    for (const { pane, panel } of changed) {
+      panel.paused = paused ? mark : undefined;
+      this.emit('panel:updated', toJson(this.panelsOf(pane).find(candidate => candidate.id === panel.id) ?? null));
+    }
+    for (const pane of panes) this.emit('session:updated', { id: pane.id });
+    for (const session of this.sessions) {
+      if (panes.some(pane => this.sessionPanes(session).includes(pane))) this.emit('orchestration-sessions:changed', { sessionId: session.id });
+    }
+    const result: RunpanePauseResult = {
+      ok: true, action: paused ? 'paused' : 'resumed', scope,
+      panelIds: changed.map(({ panel }) => panel.id), unchanged: tabs.length - changed.length, failed: [],
+      message: paused ? 'Paused.' : 'Resumed.', nextCommand: '',
+    };
+    return toJson(result);
+  }
+
+  /** A Session's own Pane and the Panes it works with that are not archived. */
+  private sessionPanes(session: OrchestrationSessionRecord): DemoPane[] {
+    const ids = [session.internalSessionId, ...session.associations.map(association => association.paneId)];
+    return this.panes.filter(pane => ids.includes(pane.id) && !pane.archived);
+  }
+
+  private sessionMark(session: OrchestrationSessionRecord): TerminalPausedMark | undefined {
+    const marks = this.sessionPanes(session).map(paneMark);
+    return marks.every(Boolean) ? marks.at(-1) : undefined;
+  }
+
   // Agent status
 
   private workspaceState(): JsonValue {
@@ -299,7 +356,9 @@ export class DemoWorkspace {
       id: panel.id, sessionId: pane.id, type: panel.tool?.type ?? 'terminal', title: panel.title,
       state: {
         isActive: position === 0, hasBeenViewed: true,
-        ...(panel.agentType ? { customState: { agentType: panel.agentType } } : panel.tool?.customState ? { customState: panel.tool.customState } : {}),
+        ...(panel.agentType || panel.paused
+          ? { customState: { ...(panel.agentType ? { agentType: panel.agentType } : {}), ...(panel.paused ? { paused: panel.paused } : {}) } }
+          : panel.tool?.customState ? { customState: panel.tool.customState } : {}),
       },
       metadata: { createdAt: pane.createdAt, lastActiveAt: pane.createdAt, position },
     }));
@@ -531,6 +590,12 @@ function summarize(answer: NotifyAnswer): string {
   if ('choice' in answer) return answer.choice;
   if ('approved' in answer) return answer.approved ? 'Approved' : 'Denied';
   return answer.text;
+}
+
+/** A Pane is paused while every terminal tab is. */
+function paneMark(pane: DemoPane): TerminalPausedMark | undefined {
+  const terminals = pane.panels.filter(panel => !panel.tool);
+  return terminals.length > 0 && terminals.every(panel => panel.paused) ? terminals[0].paused : undefined;
 }
 
 function stripAnsi(text: string): string {

@@ -244,6 +244,12 @@ Report one dashboard line set per workstream:
 A workstream is done when it is ready to merge. Merging needs its own exact
 authorization.
 
+A paused worker (`PAUSED`) stays paused: leave it out of the rotation and
+resume it only when the person asks
+([Paused workers](../pane-orchestration/SKILL.md#paused-workers)). Pause a
+Pane (`runpane panes pause --pane <id> --yes --json`) only when the person
+asks.
+
 ## Close out
 
 Archiving removes a Pane's worktree, so it needs the user's cleanup approval.

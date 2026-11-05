@@ -75,6 +75,8 @@ function formatEntryLine(entry: WatchEntry): string | undefined {
     case 'pane.associated': return `JOINED ${name} ${pane} session ${sanitizeName(entry.sessionId ?? '')}`;
     case 'pane.detached': return `LEFT ${name} ${pane} session ${sanitizeName(entry.sessionId ?? '')}`;
     case 'panel.stopped': return `STOPPED ${name} ${pane}${panel}`;
+    case 'panel.paused': return `PAUSED ${name} ${pane}${panel}`;
+    case 'panel.unpaused': return `UNPAUSED ${name} ${pane}${panel}`;
     case 'panel.exited': return `EXIT ${name} ${pane}${panel} code ${entry.exitCode ?? 'unknown'}`;
     case 'pr.conflicted': return `PR ${name} ${pane} #${entry.pr?.number ?? '?'} CONFLICTED`;
     case 'pr.checks': return formatChecksLine(`PR ${name} ${pane} #${entry.pr?.number ?? '?'}`, entry);

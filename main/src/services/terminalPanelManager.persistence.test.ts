@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetPaneRuntimeForTests, setPaneRuntime, type PtyHandleLike, type PtyHostRuntime } from '../core/runtime';
 import type { PaneEventArgument } from '../core/eventSink';
 import type { PtyHostSpawnOpts } from '../ptyHost/types';
-import type { TerminalPanelState, ToolPanel } from '../../../shared/types/panels';
+import type { TerminalPanelState, TerminalPausedMark, ToolPanel } from '../../../shared/types/panels';
 import { PANE_CHAT_MIGRATE_OFFER_OPENING } from '../../../shared/types/paneChat';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { DatabaseService, PANEL_STATE_CEILING_BYTES } from '../database/database';
@@ -1319,6 +1319,129 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void
 
       await expect(manager.initializeTerminal(panel, tempDir)).rejects.toThrow(/waiting for update running-update/);
       expect(ptyHost.spawnOptions).toHaveLength(0);
+    });
+  });
+
+  describe('pause', () => {
+    beforeEach(() => {
+      panelManagerMock.commitPaused.mockImplementation(async (panelId: string, mark: TerminalPausedMark | undefined) => {
+        const panel = panelManagerMock.getPanel(panelId);
+        panel.state.customState = { ...panel.state.customState, paused: mark };
+        databaseService.updatePanel(panelId, { state: panel.state });
+      });
+    });
+    afterEach(() => panelManagerMock.commitPaused.mockReset());
+
+    const mark = { at: '2026-11-04T12:00:00.000Z', by: 'manual' as const };
+
+    function pausedPanel(id: string): ToolPanel {
+      const panel = makePanel(id);
+      panel.state.customState = { agentType: 'claude', agentSessionId: 'conversation-1', hasClaudeSessionId: true, initialCommand: 'claude', paused: mark };
+      return panel;
+    }
+
+    it('refuses to start a paused tab, on every start path', async () => {
+      const panel = pausedPanel('paused-tab');
+      const manager = new TerminalPanelManager(inProcessEmulatorHost);
+      managers.push(manager);
+      panelManagerMock.getPanel.mockReturnValue(panel);
+
+      // A mount or retry, and the update restorer (which names its update operation).
+      await expect(manager.initializeTerminal(panel, tempDir)).rejects.toMatchObject({ code: 'ERR_PANEL_PAUSED' });
+      await expect(manager.initializeTerminal(panel, tempDir, undefined, 1, undefined, 'update-1')).rejects.toMatchObject({ code: 'ERR_PANEL_PAUSED' });
+      expect(ptyHost.spawnOptions).toHaveLength(0);
+    });
+
+    it('stops the tabs it could mark, reports the one it could not, and stops a marked tab left running', async () => {
+      vi.useFakeTimers();
+      try {
+        const first = makePanel('first-tab');
+        const second = makePanel('second-tab');
+        const manager = new TerminalPanelManager(inProcessEmulatorHost);
+        managers.push(manager);
+        const panels = new Map([[first.id, first], [second.id, second]]);
+        panelManagerMock.getPanel.mockImplementation((panelId: string) => panels.get(panelId));
+        for (const panel of panels.values()) {
+          databaseService.createPanel({ id: panel.id, sessionId: panel.sessionId, type: 'terminal', title: panel.title, state: panel.state });
+          await manager.initializeTerminal(panel, tempDir);
+        }
+        const markPanel = panelManagerMock.commitPaused.getMockImplementation();
+        panelManagerMock.commitPaused.mockImplementation(async (panelId: string, value: TerminalPausedMark | undefined) => {
+          if (panelId === second.id) throw new Error('state write refused');
+          await markPanel?.(panelId, value);
+        });
+        const changes: unknown[] = [];
+        manager.on('pause-changed', change => changes.push(change));
+
+        const pausing = manager.pausePanels([first.id, second.id], mark);
+        await vi.advanceTimersByTimeAsync(5000);
+        expect(await pausing).toEqual({ paused: [first.id], failed: [{ panelId: second.id, error: 'state write refused' }] });
+        expect(manager.isTerminalInitialized(first.id)).toBe(false);
+        expect(manager.isTerminalInitialized(second.id)).toBe(true);
+        expect(changes).toHaveLength(1);
+
+        // The second tab now carries a mark but still runs: the next pause stops it.
+        second.state.customState = { ...second.state.customState, paused: mark };
+        const again = manager.pausePanels([second.id], mark);
+        await vi.advanceTimersByTimeAsync(5000);
+        expect(await again).toEqual({ paused: [second.id], failed: [] });
+        expect(manager.isTerminalInitialized(second.id)).toBe(false);
+      } finally {
+        vi.clearAllTimers();
+        vi.useRealTimers();
+      }
+    });
+
+    it('stops a start that was already under way when the pause landed', async () => {
+      const panel = makePanel('starting-tab');
+      panel.state.customState = { agentType: 'claude', agentSessionId: 'conversation-1', hasClaudeSessionId: true, initialCommand: 'claude' };
+      const manager = new TerminalPanelManager(inProcessEmulatorHost);
+      managers.push(manager);
+      panelManagerMock.getPanel.mockReturnValue(panel);
+      databaseService.createPanel({ id: panel.id, sessionId: panel.sessionId, type: 'terminal', title: panel.title, state: panel.state });
+
+      // Pause lands while the PTY spawns, after this start already passed the gate.
+      let pausing: ReturnType<TerminalPanelManager['pausePanels']> | undefined;
+      ptyHost.onSpawn = () => { pausing = manager.pausePanels([panel.id], mark); };
+      await manager.initializeTerminal(panel, tempDir);
+      expect((await pausing)?.paused).toEqual([panel.id]);
+
+      expect(ptyHost.spawnOptions).toHaveLength(1);
+      expect(manager.isTerminalInitialized(panel.id)).toBe(false);
+    }, 15_000);
+
+    it('stops a running tab with Ctrl+C, keeps its conversation, and starts it again only after resume', async () => {
+      vi.useFakeTimers();
+      try {
+        const panel = makePanel('running-tab');
+        panel.state.customState = { agentType: 'claude', agentSessionId: 'conversation-1', hasClaudeSessionId: true, initialCommand: 'claude' };
+        const { manager, handle } = await startTerminal(panel);
+
+        handle.emit('Claude: the plan is ready\r\n');
+        await vi.advanceTimersByTimeAsync(500);
+        // Ctrl+C ends the agent, and its shell prints over the screen before the terminal stops.
+        const write = handle.write.bind(handle);
+        handle.write = async (data: string) => { await write(data); if (data === '\x03') handle.emit('\x1b[2J\x1b[Hshell after exit $ '); };
+        const pausing = manager.pausePanels([panel.id], mark);
+        await vi.advanceTimersByTimeAsync(5000);
+        expect((await pausing)?.paused).toEqual([panel.id]);
+        expect(databaseService.getPanel(panel.id)?.state.customState?.screenText).toContain('the plan is ready');
+        expect(databaseService.getPanel(panel.id)?.state.customState?.screenText).not.toContain('shell after exit');
+
+        expect(handle.written.filter(data => data === '\x03')).toHaveLength(2);
+        expect(manager.isTerminalInitialized(panel.id)).toBe(false);
+        expect(databaseService.getPanel(panel.id)?.state.customState).toMatchObject({ paused: mark, agentSessionId: 'conversation-1' });
+        await expect(manager.initializeTerminal(panel, tempDir)).rejects.toMatchObject({ code: 'ERR_PANEL_PAUSED' });
+        expect(ptyHost.spawnOptions).toHaveLength(1);
+
+        expect((await manager.pausePanels([panel.id], mark)).paused).toEqual([]);
+        expect(await manager.clearPaused([panel.id])).toEqual([panel.id]);
+        await manager.initializeTerminal(panel, tempDir);
+        expect(ptyHost.spawnOptions).toHaveLength(2);
+      } finally {
+        vi.clearAllTimers();
+        vi.useRealTimers();
+      }
     });
   });
 

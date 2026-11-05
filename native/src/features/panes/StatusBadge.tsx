@@ -25,6 +25,20 @@ export function StatusBadge({ status }: { status: AgentDisplayStatus }) {
   );
 }
 
+/** Two bars in the status dot's 8 pt box: the Pane or Session is paused. */
+export function PausedBadge() {
+  const theme = useTheme();
+  const bar = [styles.bar, { backgroundColor: theme.colors.textMuted }];
+  return (
+    <View testID="status-paused" accessibilityLabel="Paused" style={styles.paused}>
+      <View style={bar} />
+      <View style={bar} />
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   dot: { width: 8, height: 8, borderRadius: 4 },
+  paused: { width: 8, height: 8, flexDirection: 'row', justifyContent: 'space-between' },
+  bar: { width: 2.5, height: 8, borderRadius: 1 },
 });

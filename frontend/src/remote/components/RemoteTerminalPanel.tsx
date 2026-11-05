@@ -1,4 +1,4 @@
-import type { ToolPanel } from '../../../../shared/types/panels';
+import { pausedMarkOf, type ToolPanel } from '../../../../shared/types/panels';
 import type {
   RemotePaneConnectionStatus,
   RemotePwaTerminalShortcut,
@@ -6,6 +6,7 @@ import type {
 } from '../../../../shared/types/remoteDaemon';
 import type { RemoteRuntimeAdapter } from '../runtime/remoteRuntimeAdapter';
 import { useRemoteTerminal } from '../hooks/useRemoteTerminal';
+import { RemotePausedTerminal } from './RemotePausedTerminal';
 import { RemoteTerminalInputBar } from './RemoteTerminalInputBar';
 import { RemoteTerminalScrollJoystick } from './RemoteTerminalScrollJoystick';
 
@@ -20,7 +21,14 @@ interface RemoteTerminalPanelProps {
   onRefreshShortcuts: () => void;
 }
 
-export function RemoteTerminalPanel({
+export function RemoteTerminalPanel(props: RemoteTerminalPanelProps) {
+  // A paused tab shows its last screen and never starts: mounting the live terminal would.
+  const paused = pausedMarkOf(props.panel);
+  if (paused) return <RemotePausedTerminal adapter={props.adapter} panelId={props.panel.id} mark={paused} />;
+  return <NativeRemoteTerminalPanel {...props} />;
+}
+
+function NativeRemoteTerminalPanel({
   adapter,
   panel,
   sessionId,

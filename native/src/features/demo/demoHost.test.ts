@@ -2,13 +2,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { RemoteDaemonClient, type RemoteDaemonClientEvent } from '@shared/remoteClient';
 import type { NotifySharedState } from '@shared/types/notify';
-import type { ToolPanel } from '@shared/types/panels';
+import type { OrchestrationSessionListResult } from '@shared/types/orchestrationSession';
+import { pausedMarkOf, type ToolPanel } from '@shared/types/panels';
 import type { RunpanePaneCreateResult } from '@shared/types/runpaneOrchestration';
 
 import { decodeMachineList } from '@/auth/computers';
 import { invokeChannel } from '@/daemon/invoke';
 import type { ProjectWithPanes } from '@/features/panes/paneList';
 
+import { DEMO_SESSION } from './demoData';
 import { DEMO_PROFILE, demoConnection, isDemoProfile, resetDemoHost } from './demoHost';
 
 function connectDemo() {
@@ -136,6 +138,31 @@ describe('demo host', () => {
     for (const [channel, args] of fileReads) await expect(client.invoke(channel, args), channel).resolves.toMatchObject({ success: true });
     const machines = decodeMachineList(await invokeChannel(client, 'runpane:workspaces:machines'));
     expect(machines.ok && machines.machines.map(machine => machine.state)).toEqual(['available', 'available', 'offline']);
+    client.disconnect();
+  });
+
+  it('pauses a Pane and a Session, and a paused tab resumes on its own', async () => {
+    const { client } = connectDemo();
+    await connected(client);
+    const pane = async () => (await invokeChannel<ProjectWithPanes[]>(client, 'sessions:get-all-with-projects'))
+      .flatMap(project => project.sessions ?? []).find(session => session.id === 'demo-react-19');
+    const tabs = () => invokeChannel<ToolPanel[]>(client, 'panels:list', ['demo-react-19']);
+    const sessionPaused = async () => (await invokeChannel<OrchestrationSessionListResult>(client, 'orchestration-sessions:list')).sessions[0].paused;
+
+    await invokeChannel(client, 'runpane:panes:pause', [{ paneId: 'demo-react-19' }]);
+    expect((await pane())?.paused?.by).toBe('manual');
+    expect((await tabs()).filter(tab => tab.type === 'terminal').every(tab => pausedMarkOf(tab))).toBe(true);
+
+    // Resuming one tab leaves the Pane partly running, so it no longer reads as paused.
+    await invokeChannel(client, 'runpane:panels:resume', [{ panelId: 'demo-react-19-agent' }]);
+    expect((await pane())?.paused).toBeUndefined();
+    const marks = Object.fromEntries((await tabs()).map(tab => [tab.id, pausedMarkOf(tab)?.by]));
+    expect(marks).toMatchObject({ 'demo-react-19-agent': undefined, 'demo-react-19-shell': 'manual' });
+
+    await invokeChannel(client, 'runpane:sessions:pause', [{ sessionId: DEMO_SESSION.id }]);
+    expect(await sessionPaused()).toBeDefined();
+    await invokeChannel(client, 'runpane:sessions:resume', [{ sessionId: DEMO_SESSION.id }]);
+    expect(await sessionPaused()).toBeUndefined();
     client.disconnect();
   });
 

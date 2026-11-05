@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Archive, Check, ChevronDown, ChevronRight, MoreHorizontal, Pencil, Pin, Plus, RefreshCw, X } from 'lucide-react';
-import { AgentStatusDot } from '../ui/AgentStatusDot';
+import { Archive, Check, ChevronDown, ChevronRight, MoreHorizontal, Pause, Pencil, Pin, Play, Plus, RefreshCw, X } from 'lucide-react';
+import { AgentStatusDot, PausedGlyph } from '../ui/AgentStatusDot';
 import { Button } from '../ui/Button';
 import { PopoverButton, TerminalPopover } from '../terminal/TerminalPopover';
 import { RenameDialog } from '../CompactSessionMenu';
@@ -71,6 +71,7 @@ function RowActionsMenu({ menu, onClose, onRename, onReviewPermission }: {
   const session = menu?.target.kind === 'session' ? menu.target.row : null;
   const ref = pane ? { kind: 'pane' as const, id: pane.pane.id } : { kind: 'session' as const, id: session?.session.id ?? '' };
   const pinned = pane ? Boolean(pane.pane.isFavorite) : Boolean(session?.session.isPinned);
+  const paused = Boolean(pane ? pane.pane.paused : session?.session.paused);
   const noun = pane ? 'Pane' : 'Session';
   const act = (run: () => Promise<void>) => { onClose(); void run(); };
   const permission = pane?.permission ?? null;
@@ -90,6 +91,9 @@ function RowActionsMenu({ menu, onClose, onRename, onReviewPermission }: {
         )}
         <PopoverButton role="menuitem" onClick={() => act(() => runOnMachine(machineId, { type: 'pin', target: ref, pinned: !pinned }, `Could not pin or unpin the ${noun}`))}>
           <span className="flex items-center gap-2"><Pin className="h-4 w-4 rotate-45" />{pinned ? 'Unpin' : 'Pin'}</span>
+        </PopoverButton>
+        <PopoverButton role="menuitem" onClick={() => act(() => runOnMachine(machineId, { type: paused ? 'resume' : 'pause', target: ref }, `Could not ${paused ? 'resume' : 'pause'} the ${noun}`))}>
+          <span className="flex items-center gap-2">{paused ? <Play className="h-4 w-4 fill-current" /> : <Pause className="h-4 w-4" />}{paused ? 'Resume' : 'Pause'}{pane ? '' : ' Session'}</span>
         </PopoverButton>
         <PopoverButton role="menuitem" onClick={() => { if (menu) onRename(menu); onClose(); }}>
           <span className="flex items-center gap-2"><Pencil className="h-4 w-4" />Rename {noun}…</span>
@@ -211,8 +215,10 @@ function SessionRow({ row, active, expanded, onToggle, onMenu, renderPane }: {
         >
           {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
         </button>
-        <AgentStatusDot status={row.status} size="sm" className="pointer-events-none flex-shrink-0" />
-        <span className="pointer-events-none min-w-0 flex-1 truncate text-[13px] font-semibold text-text-primary">{session.name}</span>
+        {session.paused
+          ? <PausedGlyph size="sm" className="pointer-events-none flex-shrink-0" />
+          : <AgentStatusDot status={row.status} size="sm" className="pointer-events-none flex-shrink-0" />}
+        <span className={cn('pointer-events-none min-w-0 flex-1 truncate text-[13px]', session.paused ? 'text-text-muted' : 'font-semibold text-text-primary')}>{session.name}</span>
         {row.panes.length > 0 && <span className="pointer-events-none flex-shrink-0 text-[12px] tabular-nums text-text-tertiary">{row.panes.length}</span>}
         {session.isPinned && <PinnedMark />}
         <BadgeSlot machine={machine} label={session.name} onMenu={openMenu} />

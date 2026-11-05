@@ -228,6 +228,10 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
     const configState: JsonObject = {
       remoteDaemon: clone(remoteDaemonConfig),
       defaultOrchestratorAgent: 'claude',
+      // Pause defaults, as configManager seeds them: resume-on-open off, auto-pause on at 48 hours.
+      resumePausedOnOpen: false,
+      autoPauseEnabled: true,
+      autoPauseAfterHours: 48,
       ...clone(mockOptions.appearance.defaults),
       ...clone(mockOptions.initialConfig ?? {}),
       ...clone(mockOptions.appearance.seeded),

@@ -12,7 +12,7 @@ import { panelManager } from '../services/panelManager';
 import { terminalPanelManager } from '../services/terminalPanelManager';
 import { getMobilePushSender } from '../daemon/mobilePushSender';
 import { databaseService } from '../services/database';
-import { BrowserPanelState, CreatePanelRequest, PanelEventType, SessionPanelLayout, ToolPanel, decodeSessionPanelLayout } from '../../../shared/types/panels';
+import { BrowserPanelState, CreatePanelRequest, PanelEventType, SessionPanelLayout, ToolPanel, decodeSessionPanelLayout, pausedMarkOf } from '../../../shared/types/panels';
 import type { AppServices } from './types';
 import type { PanelAgentStatusEvent } from '../../../shared/types/agentStatus';
 import { PANE_CHAT_SESSION_ID } from '../../../shared/types/paneChat';
@@ -562,12 +562,16 @@ export function registerPanelHandlers(
         return { success: false, error: 'This panel cannot be closed.' };
       }
 
+      // Closing a terminal tab in a Pane with paused tabs can change whether the Pane reads as paused.
+      const pausedPane = panel?.type === 'terminal' && panelManager.getPanelsForSession(panel.sessionId).some(other => pausedMarkOf(other));
+
       // Clean up terminal process if it's a terminal panel
       if (panel?.type === 'terminal') {
         await terminalPanelManager.destroyTerminal(panelId, { saveState: false });
       }
 
       await panelManager.deletePanel(panelId);
+      if (panel && pausedPane) terminalPanelManager.emit('pause-changed', { panelIds: [], paneIds: [panel.sessionId], paused: false });
       return { success: true };
     } catch (error) {
       console.error('[IPC] Failed to delete panel:', error);

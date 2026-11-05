@@ -1,3 +1,4 @@
+import type { TerminalPausedMark } from '../../../shared/types/panels';
 import type { SessionStatus } from '../../../shared/types/sessionStatus';
 
 export interface Session {
@@ -27,6 +28,8 @@ export interface Session {
   model?: string;
   toolType?: 'claude' | 'none';
   archived?: boolean;
+  /** Set while every terminal tab of the Pane is paused: the latest tab's pause mark. Computed, never stored. */
+  paused?: TerminalPausedMark;
   isHidden?: boolean;
   gitStatus?: GitStatus;
   baseCommit?: string;

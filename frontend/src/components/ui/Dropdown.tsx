@@ -24,6 +24,10 @@ export interface DropdownItem {
   showDot?: boolean;
   dotColor?: string;
   shortcut?: string;
+  /** Draws a divider above this item. */
+  separatorBefore?: boolean;
+  /** Overrides the menu's `closeOnSelect` for this item. */
+  closeOnSelect?: boolean;
 }
 
 export interface DropdownProps {
@@ -160,7 +164,7 @@ export function Dropdown({
 
     item.onClick?.();
 
-    if (closeOnSelect) {
+    if (item.closeOnSelect ?? closeOnSelect) {
       handleClose();
     }
   };
@@ -465,7 +469,9 @@ export function Dropdown({
 
                 return (
                   <React.Fragment key={item.id}>
-                    {separateVariants && index > 0 && items[index - 1].variant !== item.variant && (
+                    {item.separatorBefore && index > 0 ? (
+                      <hr className="my-1 border-0 border-t border-border-primary" />
+                    ) : separateVariants && index > 0 && items[index - 1].variant !== item.variant && (
                       <div className="h-2" />
                     )}
 

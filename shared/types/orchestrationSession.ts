@@ -1,7 +1,7 @@
 import type { CustomCommandResume } from './customCommandResume';
 import type { AgentState } from './agentStatus';
 import type { PaneChatAgent } from './paneChat';
-import type { TerminalAgentReport, ToolPanel, ToolPanelType } from './panels';
+import type { TerminalAgentReport, TerminalPausedMark, ToolPanel, ToolPanelType } from './panels';
 import { boundary, decodeOptionalBoundary, type JsonObject } from '../validation/boundaryDecoder';
 
 /** Stable identifier of the built-in orchestration session imported from Pane Chat. */
@@ -101,6 +101,8 @@ export interface OrchestrationSessionRecord {
   archived?: boolean;
   /** Durable UI pin marker. Older records omit this field and read as unpinned. */
   isPinned?: boolean;
+  /** Set while the Session's chat and every Pane in it are paused. Computed when read, never stored. */
+  paused?: TerminalPausedMark;
   agent: PaneChatAgent;
   /** Empty uses the selected built-in agent command. */
   launchCommand?: string;

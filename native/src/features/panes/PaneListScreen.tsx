@@ -22,7 +22,7 @@ import { openNotifySheet } from '@/features/notify/NotifySheet';
 import { useTheme, withAlpha } from '@/theme';
 import { Icon, Text } from '@/ui';
 
-import { useSessions, useUpdateSession } from '../sessions/hooks';
+import { useSessions, useSetSessionPaused, useUpdateSession } from '../sessions/hooks';
 import { paneAgent, paneDisplayStatus } from './agentStatus';
 import {
   useAgentStatuses,
@@ -33,6 +33,7 @@ import {
   usePendingPermissions,
   useProjects,
   useRestorePane,
+  useSetPanePaused,
   useToggleFavorite,
 } from './hooks';
 import { LoadingRows, Notice, SectionHeader } from './PaneKit';
@@ -67,6 +68,8 @@ export function PaneListScreen() {
   const archive = useArchivePane();
   const sessions = useSessions();
   const updateSession = useUpdateSession();
+  const setPanePaused = useSetPanePaused();
+  const setSessionPaused = useSetSessionPaused();
   const expanded = useSidebarSections(state => state.expanded);
   const toggleSection = useSidebarSections(state => state.toggle);
   const archived = useArchivedProjects(expanded.archived);
@@ -125,6 +128,11 @@ export function PaneListScreen() {
       },
     ]);
   };
+
+  const togglePanePaused = (paneId: string, paused: boolean) => setPanePaused(paneId, paused)
+    .catch((error: Error) => Alert.alert(paused ? 'Couldn’t pause the pane' : 'Couldn’t resume the pane', error.message));
+  const toggleSessionPaused = (sessionId: string, paused: boolean) => setSessionPaused(sessionId, paused)
+    .catch((error: Error) => Alert.alert(paused ? 'Couldn’t pause the Session' : 'Couldn’t resume the Session', error.message));
 
   const refresh = async () => {
     setRefreshing(true);
@@ -202,6 +210,7 @@ export function PaneListScreen() {
               onOpen={() => openPane(item.pane.id)}
               onTogglePinned={() => toggleFavorite(item.pane.id).catch((error: Error) => Alert.alert('Couldn’t update pinned panes', error.message))}
               onArchive={() => confirmArchive(item.pane)}
+              onTogglePaused={() => void togglePanePaused(item.pane.id, !item.pane.paused)}
             />
           </View>
         );
@@ -216,6 +225,7 @@ export function PaneListScreen() {
             // Desktop archives Sessions without asking; Restore brings them back.
             onArchive={() => updateSession(item.session.id, { archived: true })
               .catch((error: Error) => Alert.alert('Couldn’t archive the Session', error.message))}
+            onTogglePaused={() => void toggleSessionPaused(item.session.id, !item.session.paused)}
           />
         );
       case 'archived':
@@ -292,6 +302,8 @@ export function PaneListScreen() {
                 .catch((error: Error) => Alert.alert('Couldn’t update the Session pin', error.message)),
               archiveSession: sessionId => updateSession(sessionId, { archived: true })
                 .catch((error: Error) => Alert.alert('Couldn’t archive the Session', error.message)),
+              setPanePaused: (paneId, paused) => void togglePanePaused(paneId, paused),
+              setSessionPaused: (sessionId, paused) => void toggleSessionPaused(sessionId, paused),
             }}
           />
           <NewButton bottom={insets.bottom + 16} />

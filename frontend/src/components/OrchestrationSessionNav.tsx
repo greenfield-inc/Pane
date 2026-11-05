@@ -1,6 +1,6 @@
 import { CreateOrchestrationSessionDialog, type SessionCreateRequest } from './CreateOrchestrationSessionDialog';
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
-import { Archive, ArrowRightLeft, ChevronDown, ChevronRight, MoreHorizontal, Pin, PinOff, Plus, Pencil, RefreshCw, Terminal } from 'lucide-react';
+import { Archive, ArrowRightLeft, ChevronDown, ChevronRight, MoreHorizontal, Pause, Pin, PinOff, Play, Plus, Pencil, RefreshCw, Terminal } from 'lucide-react';
 import { useNavigationStore } from '../stores/navigationStore';
 import { useSessionStore } from '../stores/sessionStore';
 import {
@@ -25,6 +25,11 @@ import { ipcErrorMessage } from '../utils/ipcErrorMessage';
 import { MoveSessionToHostDialog } from './MoveSessionToHostDialog';
 import { archiveOrchestrationSession, clearArchivedToast, setArchivedToast, setOrchestrationSessionPinned, useArchivedSessionToastStore } from './orchestrationSessionActions';
 import { useMoveToHostBlockedReason } from '../hooks/useMoveToHostBlockedReason';
+import { PausedGlyph } from './ui/AgentStatusDot';
+import { PausedTooltipLines } from './SessionDetailTooltip';
+import { resumeIfOpenResumes, runPauseAction } from '../utils/pause';
+import { usePanelStore } from '../stores/panelStore';
+import { panePausedMark } from '../../../shared/types/panels';
 
 interface OrchestrationSessionNavProps {
   compact?: boolean;
@@ -44,6 +49,7 @@ interface SessionContextMenuState {
   sessionId: string;
   sessionName: string;
   isPinned: boolean;
+  isPaused: boolean;
   x: number;
   y: number;
   /** The ⋯ button that opened the menu; focus moves into the menu and returns here on Escape. */
@@ -188,6 +194,14 @@ export function OrchestrationSessionNav({
     return () => window.removeEventListener('orchestration-sessions-changed', handleSessionsChanged);
   }, [refresh]);
 
+  /** A person clicked this Session row: resume only its chat when Settings asks. */
+  const resumeChatOnOpen = useCallback((session: OrchestrationSessionRecord) => {
+    const chatPanels = usePanelStore.getState().getSessionPanels(session.internalSessionId);
+    // Unloaded chat tabs may be paused; resuming a chat that is running changes nothing.
+    const chatPaused = Boolean(session.paused) || chatPanels.length === 0 || panePausedMark(chatPanels) !== undefined;
+    resumeIfOpenResumes({ kind: 'pane', id: session.internalSessionId }, chatPaused);
+  }, []);
+
   const openSession = useCallback(async (sessionId: string) => {
     // Navigation belongs to the click, never to the order of remote replies.
     void setActiveSession(null);
@@ -218,6 +232,7 @@ export function OrchestrationSessionNav({
       sessionId: session.id,
       sessionName: session.name || 'Pane Chat',
       isPinned: session.isPinned === true,
+      isPaused: Boolean(session.paused),
       x,
       y,
       trigger,
@@ -410,6 +425,34 @@ export function OrchestrationSessionNav({
     const panesId = `orchestration-session-panes-${placement}-${session.id}`;
     const isOpen = activeView === 'pane-chat' && session.id === selectedSessionId;
     const drag = sessionDragProps(session, placement);
+    const rowButton = (
+      <button
+        type="button"
+        data-testid={rowId}
+        aria-label={isLegacy ? label : `Open Session ${session.name}`}
+        // Dragging a row tiles the Session beside another, the same gesture
+        // as dragging a tab, or reorders it within its own list. Repository
+        // rows carry only text/plain, so the drags never answer each other.
+        {...drag.source}
+        onClick={() => { resumeChatOnOpen(session); void openSession(session.id); }}
+        onContextMenu={event => handleSessionContextMenu(event, session)}
+        onKeyDown={event => handleSessionKeyDown(event, session, placement)}
+        className="flex min-w-0 flex-1 items-center gap-2 rounded pl-2 pr-2 py-1 text-left focus:outline-none"
+      >
+        {session.paused ? (
+          <>
+            <PausedGlyph size="sm" className="flex-shrink-0" />
+            <span className="min-w-0 flex-1 truncate text-[13px] text-text-muted">{label}</span>
+          </>
+        ) : (
+          <>
+            <SessionActivityDot session={session} paneIds={visiblePaneIds} />
+            <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-text-primary">{label}</span>
+            <SessionActivitySummary session={session} paneIds={visiblePaneIds} />
+          </>
+        )}
+      </button>
+    );
 
     return (
       <div key={`${placement}-${session.id}`} className="group/orchestration-session relative" {...drag.target}>
@@ -432,23 +475,7 @@ export function OrchestrationSessionNav({
               {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
             </button>
           ) : <span className="ml-1 h-6 w-4 flex-shrink-0" aria-hidden="true" />}
-          <button
-            type="button"
-            data-testid={rowId}
-            aria-label={isLegacy ? label : `Open Session ${session.name}`}
-            // Dragging a row tiles the Session beside another, the same gesture
-            // as dragging a tab, or reorders it within its own list. Repository
-            // rows carry only text/plain, so the drags never answer each other.
-            {...drag.source}
-            onClick={() => void openSession(session.id)}
-            onContextMenu={event => handleSessionContextMenu(event, session)}
-            onKeyDown={event => handleSessionKeyDown(event, session, placement)}
-            className="flex min-w-0 flex-1 items-center gap-2 rounded pl-2 pr-2 py-1 text-left focus:outline-none"
-          >
-            <SessionActivityDot session={session} paneIds={visiblePaneIds} />
-            <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-text-primary">{label}</span>
-            <SessionActivitySummary session={session} paneIds={visiblePaneIds} />
-          </button>
+          {session.paused ? <Tooltip content={<PausedTooltipLines mark={session.paused} />} side="right">{rowButton}</Tooltip> : rowButton}
           {/* Same masked hover slot as Pane rows; it covers the activity summary while shown. */}
           <div className={cn(
             'absolute inset-y-0.5 right-2 z-10 flex items-center bg-surface-secondary pr-0.5 opacity-0 transition-opacity group-hover/orchestration-row:opacity-100 group-focus-within/orchestration-row:opacity-100',
@@ -502,7 +529,7 @@ export function OrchestrationSessionNav({
         {activeSessions.map(session => {
           const drag = sessionDragProps(session, 'rail');
           return (
-          <Tooltip key={session.id} content={`${session.name} · ${statusLabel(session)}`} side="right">
+          <Tooltip key={session.id} content={session.paused ? <><p>{session.name}</p><PausedTooltipLines mark={session.paused} /></> : `${session.name} · ${statusLabel(session)}`} side="right">
             <button
               type="button"
               data-testid={sessionTestId(session, 'rail')}
@@ -511,12 +538,13 @@ export function OrchestrationSessionNav({
               title={session.name}
               {...drag.source}
               {...drag.target}
-              onClick={() => void openSession(session.id)}
+              onClick={() => { resumeChatOnOpen(session); void openSession(session.id); }}
               onContextMenu={event => handleSessionContextMenu(event, session)}
               onKeyDown={event => handleSessionKeyDown(event, session, 'rail')}
               className={cn(
                 'flex h-9 min-h-9 w-9 min-w-9 shrink-0 items-center justify-center rounded-full text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-interactive',
                 session.id === selectedSessionId ? 'bg-surface-selected text-text-primary' : 'text-text-tertiary hover:bg-surface-hover hover:text-text-primary',
+                session.paused && 'text-text-disabled',
                 // The drop line is drawn outside the item, so it takes no room and moves nothing.
                 drag.indicator && 'relative before:pointer-events-none before:absolute before:inset-x-1 before:h-0.5 before:rounded-full before:bg-interactive before:content-[""]',
                 drag.indicator === 'before' && 'before:-top-[3px]',
@@ -727,6 +755,15 @@ function SessionContextMenu({ menu, onClose, onArchive, onPin, onMoveToHost }: S
           <span className="flex items-center gap-2">
             {menu?.isPinned ? <PinOff className="h-4 w-4" /> : <Pin className="h-4 w-4" />}
             {menu?.isPinned ? 'Unpin Session' : 'Pin Session'}
+          </span>
+        </PopoverButton>
+        <PopoverButton role="menuitem" onClick={() => {
+          if (menu) void runPauseAction({ kind: 'session', id: menu.sessionId }, !menu.isPaused);
+          onClose();
+        }}>
+          <span className="flex items-center gap-2">
+            {menu?.isPaused ? <Play className="h-4 w-4 fill-current" /> : <Pause className="h-4 w-4" />}
+            {menu?.isPaused ? 'Resume Session' : 'Pause Session'}
           </span>
         </PopoverButton>
         <PopoverButton role="menuitem" onClick={() => {

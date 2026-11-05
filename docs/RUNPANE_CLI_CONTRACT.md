@@ -145,6 +145,8 @@ runpane panels last-message --panel <panel-id> --json
 runpane panels resume --panel <panel-id> --wait-ready --yes --json
 runpane panels resume --session <id|name> --wait-ready --yes --json
 runpane panels close --panel <panel-id> --yes --json
+runpane panes pause --pane <pane-id> --yes --json
+runpane panes resume --pane <pane-id> --yes --json
 runpane docs search --query "archive a pane" --json
 runpane links create --pane <pane-id> --json
 runpane panes git-status --pane <pane-id> --json
@@ -265,7 +267,9 @@ The orchestrator guide prescribes submit without `--wait`, followed by its named
 
 `runpane inbox [--session <id|name>] [--json]` lists what a Session's orchestrator has not acknowledged: reports, missing reports, and on-screen questions (a question clears itself once its panel moves on). `runpane inbox ack <item-id>...` or `--all --session <id|name>` clears items. An orchestrator runs it when it starts or resumes, to catch anything that finished while it was down; Pane never injects the inbox into its turns.
 
-`runpane panels resume --panel <panel-id>` restarts a stopped terminal panel in place, keeping its panel id: an agent panel relaunches with its resume command (Claude `--resume <session>`, `codex resume <session>`, Agent Farm `agent-farm run <profile> --resume <id>` with the ID Agent Farm printed; the result's `agentSessionId` names it), the same restart the app runs when it shows the panel, without taking focus. A running panel is left alone (`action: "already-running"`); one whose agent exited back to its shell is stopped, and resume runs its saved command again in that shell (`action: "resumed"`). If that command exits at once, `--wait-ready` returns `ok: false` with `reason.code: "command-exited"` and the error line it printed. `--session <id|name>` or `--all-stopped` resumes every stopped agent panel in that scope, `--concurrency` at a time (default 3), then, with `--wait-ready`, waits on the resumed panels together, and returns `{ resumed, alreadyRunning, failed, notReady, items[] }` with each panel's own result, readiness, and blocker or error. After a Pane restart, or once an agent exits back to its shell, stopped panels report `running: false` (`initialized` stays true while the shell lives) in `panels list`, `panels screen`, and `panels wait` (which returns `stopped: true` instead of timing out), and `nextCommand` points at `panels resume`. `runpane watch` reports them as `panel.stopped` (`STOPPED ...`) when `--kinds` lists that kind; other consumers and `workspace state` see `agent.unknown` with `running: false`, never `agent.ready`.
+`runpane panels resume --panel <panel-id>` restarts a stopped terminal panel in place, keeping its panel id: an agent panel relaunches with its resume command (Claude `--resume <session>`, `codex resume <session>`, Agent Farm `agent-farm run <profile> --resume <id>` with the ID Agent Farm printed; the result's `agentSessionId` names it), the same restart the app runs when it shows the panel, without taking focus. A running panel is left alone (`action: "already-running"`); one whose agent exited back to its shell is stopped, and resume runs its saved command again in that shell (`action: "resumed"`). If that command exits at once, `--wait-ready` returns `ok: false` with `reason.code: "command-exited"` and the error line it printed. `--panel` also resumes a paused tab. `--session <id|name>` or `--all-stopped` resumes every stopped agent panel in that scope and skips paused ones, `--concurrency` at a time (default 3), then, with `--wait-ready`, waits on the resumed panels together, and returns `{ resumed, alreadyRunning, failed, notReady, items[] }` with each panel's own result, readiness, and blocker or error. After a Pane restart, or once an agent exits back to its shell, stopped panels report `running: false` (`initialized` stays true while the shell lives) in `panels list`, `panels screen`, and `panels wait` (which returns `stopped: true` instead of timing out), and `nextCommand` points at `panels resume`. `runpane watch` reports them as `panel.stopped` (`STOPPED ...`) when `--kinds` lists that kind; other consumers and `workspace state` see `agent.unknown` with `running: false`, never `agent.ready`.
+
+`runpane panels pause --panel <panel-id>`, `panes pause --pane <pane-id>` and `sessions pause --session <id|name>` pause a tab, a Pane, or a Session's chat and Panes: Pane stops each terminal tab the way quitting does, without asking, keeps its agent's conversation, and marks it paused. A paused tab stays stopped through clicks, app restarts and updates until `panels resume --panel`, `panes resume` or `sessions resume` restarts it in its saved conversation. Each returns `{ action, scope, panelIds, unchanged, failed, message, nextCommand }`. `panes list` reports a Pane's `paused` mark (`{ at, by: "manual" | "auto", idleHours? }`) and `inactiveSince`, the latest terminal output or input in its tabs or the last time the person selected it; `panels list` reports each tab's `paused`. `runpane watch` reports `panel.paused` (`PAUSED ...`) and `panel.unpaused` (`UNPAUSED ...`) under `--follow`, to a Session-scoped watch, or when `--kinds` lists them.
 
 `runpane panels last-message --panel <panel-id>` reads a Claude or Codex agent's last reply from its transcript (up to `--limit` characters, default 20,000, keeping the end and reporting `truncated`). It never scrapes the screen: without a transcript it prints `{ ok: false, reason: "transcript-unavailable" }` and exits 1.
 
@@ -318,6 +322,8 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `panes archive`: Archive a Pane (session) exactly like the UI Archive action, including safe removal of its Pane-managed git worktree, or archive every merged Pane in a Session.
 - `panes pin`: Declaratively pin a Pane; pinned is the Pane UI's favorite/pin star and repeated requests are idempotent.
 - `panes unpin`: Declaratively unpin a Pane; pinned is the Pane UI's favorite/pin star and repeated requests are idempotent.
+- `panes pause`: Pause a Pane: stop every terminal tab and keep their conversations until the Pane is resumed.
+- `panes resume`: Resume a paused Pane: restart its paused tabs in their saved conversations.
 - `panes rename`: Rename a Pane without changing its worktree, branch, panels, or focus.
 - `panes focus`: Raise the Pane window and select a Pane (and optionally one of its panels) on explicit user request.
 - `panels create`: Open a new agent or terminal tab inside an existing Pane, sharing its worktree. The default for review, QA, fixes and any other agent on work that already has a Pane.
@@ -331,6 +337,7 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `panels wait`: Wait for a terminal panel to initialize, become ready/idle, or contain text.
 - `panels resume`: Restart a stopped terminal panel in place, resuming its agent's conversation.
 - `panels close`: Close a tab in a Pane, stopping its process, as closing the tab in the app does.
+- `panels pause`: Pause a terminal tab: stop its process and keep its agent's conversation until it is resumed.
 - `panels last-message`: Read an agent's last reply from its transcript, without scraping the screen.
 - `panes git-status`: Read the git status of a Pane worktree: uncommitted, unpushed, and behind-main counts.
 - `panes commit`: Stage all changes in a Pane worktree and commit them.
@@ -372,6 +379,8 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `lock list`: List held named locks, optionally only one Session's.
 - `sessions unpin`: Declaratively unpin a named Session using the UI pin state; repeated requests keep the requested state.
 - `sessions pin`: Declaratively pin a named Session using the UI pin state; repeated requests keep the requested state.
+- `sessions pause`: Pause a Session: stop its chat and the tabs of every Pane in it, keeping their conversations.
+- `sessions resume`: Resume a paused Session: restart its chat and the paused tabs of its Panes.
 - `pr watch`: Register durable GitHub PR monitoring for a Pane.
 - `pr unwatch`: Remove a Pane’s explicit PR registration.
 - `pr list`: List PR registrations and stopped watches.
@@ -425,6 +434,8 @@ runpane panes archive --pane <pane-id> [--source user|agent] [--force] [--remove
 runpane panes archive --session <id|name> --merged [--remove-worktree] [--source user|agent] [--dry-run] --yes [--json] [--pane-dir <path>]
 runpane panes pin --pane <pane-id> --yes [--dry-run] [--json] [--pane-dir <path>]
 runpane panes unpin --pane <pane-id> --yes [--dry-run] [--json] [--pane-dir <path>]
+runpane panes pause --pane <pane-id> --yes [--json] [--pane-dir <path>]
+runpane panes resume --pane <pane-id> --yes [--json] [--pane-dir <path>]
 runpane panes rename --pane <pane-id> --name <new-name> --yes [--dry-run] [--json] [--pane-dir <path>]
 runpane panes focus --pane <pane-id> [--panel <panel-id>] --source user|agent --yes [--json] [--pane-dir <path>]
 runpane panels create --pane <pane-id> --agent <codex|claude|cursor> [--source user|agent] [--focus|--no-focus] [--wait-ready] [--expect-report|--no-expect-report] [--wait [--timeout <duration>]] --yes [--json] [--pane-dir <path>]
@@ -440,6 +451,7 @@ runpane panels wait --panel <panel-id> [--for initialized|ready|idle|text] [--co
 runpane panels resume --panel <panel-id> [--wait-ready] [--ready-timeout-ms <ms>] --yes [--json] [--pane-dir <path>]
 runpane panels resume (--session <id|name>|--all-stopped) [--wait-ready] [--ready-timeout-ms <ms>] [--concurrency <count>] --yes [--json] [--pane-dir <path>]
 runpane panels close --panel <panel-id> --yes [--json] [--pane-dir <path>]
+runpane panels pause --panel <panel-id> --yes [--json] [--pane-dir <path>]
 runpane panels last-message --panel <panel-id> [--limit <count>] [--json] [--pane-dir <path>]
 runpane panes git-status --pane <pane-id> [--json] [--pane-dir <path>]
 runpane panes commit --pane <pane-id> --message <message> --yes [--json] [--pane-dir <path>]
@@ -485,6 +497,8 @@ runpane lock release --name <name> [--force] [--session <id|name>] [--note <text
 runpane lock list [--session <id|name>] [--json] [--pane-dir <path>]
 runpane sessions unpin --session <id|name> [--json] [--pane-dir <path>]
 runpane sessions pin --session <id|name> [--json] [--pane-dir <path>]
+runpane sessions pause --session <id|name> [--json] [--pane-dir <path>]
+runpane sessions resume --session <id|name> [--json] [--pane-dir <path>]
 runpane pr watch [--pane <id>] --url <PR URL> [--head <full-sha>] [--json] [--pane-dir <path>]
 runpane pr unwatch [--pane <id>] --url <PR URL> [--json] [--pane-dir <path>]
 runpane pr list [--pane <id>] [--json] [--pane-dir <path>]

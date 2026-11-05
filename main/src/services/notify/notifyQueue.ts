@@ -373,6 +373,33 @@ export class NotifyQueue extends EventEmitter {
     }
   }
 
+  /**
+   * These tabs were paused: their open cards are withdrawn and their agents get `unavailable`.
+   * The agent that asked was stopped, so a card never comes back on resume; it asks again if it still needs to.
+   */
+  withdrawForPanels(panelIds: readonly string[]): void {
+    let withdrawn = false;
+    for (const entry of [...this.entries.values()]) {
+      const panelId = entry.item.source.panelId;
+      if (panelId && panelIds.includes(panelId) && isOpen(entry.item)) {
+        this.expire(entry.item.id, unavailable('Its tab was paused in Pane.'), false);
+        // Hidden, not moved to Earlier today: a paused Pane leaves nothing behind in Notify.
+        this.entries.delete(entry.item.id);
+        withdrawn = true;
+      }
+    }
+    if (withdrawn) this.changed();
+  }
+
+  /** Whether any of these tabs has a card still waiting on the person. */
+  hasOpenFor(panelIds: readonly string[]): boolean {
+    for (const entry of this.entries.values()) {
+      const panelId = entry.item.source.panelId;
+      if (panelId && panelIds.includes(panelId) && isOpen(entry.item)) return true;
+    }
+    return false;
+  }
+
   /** Notify was turned off: every waiting agent gets `unavailable` and every surface clears. */
   turnOff(): void {
     for (const entry of [...this.entries.values()]) {

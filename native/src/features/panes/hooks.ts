@@ -3,12 +3,12 @@ import { useRef } from 'react';
 
 import type { PanelAgentStatusEvent } from '@shared/types/agentStatus';
 import type { PanePermissionRequest, PanePermissionResponse } from '@shared/types/permissions';
-import type { RunpaneWorkspaceStateResult } from '@shared/types/runpaneOrchestration';
+import type { RunpanePauseResult, RunpaneWorkspaceStateResult } from '@shared/types/runpaneOrchestration';
 
 import { invokeChannel, useDaemon, useDaemonEvent, useDaemonQueryKey, useInvokeMutation, useInvokeQuery } from '@/daemon';
 
 import { agentStatusFromWorkspace, applyAgentStatusEvent, markSeen, type AgentStatusSnapshot } from './agentStatus';
-import { removePane, toggleFavorite, type ProjectWithPanes } from './paneList';
+import { removePane, setPanePaused, toggleFavorite, type ProjectWithPanes } from './paneList';
 
 const PANES = 'sessions:get-all-with-projects';
 const ARCHIVED = 'sessions:get-archived-with-projects';
@@ -106,6 +106,24 @@ export function useToggleFavorite() {
     queryClient.setQueryData<ProjectWithPanes[]>(queryKey, projects =>
       projects && toggleFavorite(projects, paneId, new Date().toISOString()));
     await mutation.mutateAsync([paneId]);
+  };
+}
+
+/**
+ * Pauses or resumes every terminal tab of a Pane. The row grays out (or back) at once; the host's
+ * update replaces the guess, and a failure refetches the real state.
+ */
+export function useSetPanePaused() {
+  const queryClient = useQueryClient();
+  const queryKey = useDaemonQueryKey(PANES);
+  const pause = useInvokeMutation<[{ paneId: string }], RunpanePauseResult>('runpane:panes:pause', { invalidates: [PANES, WORKSPACE] });
+  const resume = useInvokeMutation<[{ paneId: string }], RunpanePauseResult>('runpane:panes:resume', { invalidates: [PANES, WORKSPACE] });
+  return async (paneId: string, paused: boolean) => {
+    await queryClient.cancelQueries({ queryKey });
+    queryClient.setQueryData<ProjectWithPanes[]>(queryKey, projects =>
+      projects && setPanePaused(projects, paneId, paused ? { at: new Date().toISOString(), by: 'manual' } : undefined));
+    const result = await (paused ? pause : resume).mutateAsync([{ paneId }]);
+    if (!result.ok) throw new Error(result.message);
   };
 }
 

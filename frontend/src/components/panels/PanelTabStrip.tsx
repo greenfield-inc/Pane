@@ -6,9 +6,11 @@
  */
 
 import React, { useCallback, useEffect, useState, useRef, useMemo } from 'react';
-import { X } from 'lucide-react';
+import { Pause, Pencil, Play, X } from 'lucide-react';
 import { cn } from '../../utils/cn';
-import { ToolPanel, LogsPanelState } from '../../../../shared/types/panels';
+import { ToolPanel, LogsPanelState, pausedMarkOf } from '../../../../shared/types/panels';
+import { Dropdown, type DropdownItem } from '../ui/Dropdown';
+import { runPauseAction } from '../../utils/pause';
 import { useHotkeyStore } from '../../stores/hotkeyStore';
 import { formatKeyDisplay } from '../../utils/hotkeyUtils';
 import { Tooltip } from '../ui/Tooltip';
@@ -66,6 +68,9 @@ export interface PanelTabStripProps {
   idNamespace: string;
 }
 
+/** Resume's play mark is filled, as in the Pane and Session menus. */
+const FilledPlay = ({ className }: { className?: string }) => <Play className={cn(className, 'fill-current')} />;
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -108,6 +113,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
     });
   }, [activePanelId, panels]);
 
+  const [menuPanelId, setMenuPanelId] = useState<string | null>(null);
   const hotkeys = useHotkeyStore(s => s.hotkeys);
   const hotkeyDisplay = useCallback((id: string) => {
     const keys = hotkeys.get(id)?.keys;
@@ -115,8 +121,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
   }, [hotkeys]);
 
   // --- Rename handlers ---
-  const handleStartRename = useCallback((e: React.MouseEvent, panel: ToolPanel) => {
-    e.stopPropagation();
+  const startRename = useCallback((panel: ToolPanel) => {
     if (panel.type === 'diff') return;
     setEditingPanelId(panel.id);
     setEditingTitle(panel.title);
@@ -157,8 +162,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
   }, [handleRenameSubmit, handleRenameCancel]);
 
   // --- Close handler ---
-  const handlePanelClose = useCallback((e: React.MouseEvent, panel: ToolPanel) => {
-    e.stopPropagation();
+  const closePanel = useCallback((panel: ToolPanel) => {
     // Prevent closing logs panel while it's running
     if (panel.type === 'logs') {
       // SAFETY: The panel type discriminator determines the corresponding custom-state shape.
@@ -323,6 +327,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
         const isDragged = panel.id === draggedPanelId;
         const isCompactTab = panel.type === 'diff' || panel.type === 'explorer' || panel.type === 'browser';
         const isPreviewTab = editorPanelState(panel)?.isPreview === true;
+        const isPaused = pausedMarkOf(panel) !== undefined;
         const shortcutHint = shortcutHints[index];
         const tabId = getPanelTabId(idNamespace, panel.id);
         const tabPanelId = getPanelTabPanelId(idNamespace, panel.id);
@@ -351,14 +356,27 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
               if (isDisabled) return;
               // Editor tabs pin on double-click (VS Code); other tabs rename.
               if (panel.type === 'editor') { void pinEditorPanel(panel); return; }
-              if (!isPermanent && !isDiffPanel) handleStartRename(event, panel);
+              if (!isPermanent && !isDiffPanel) { event.stopPropagation(); startRename(panel); }
             }}
             onKeyDown={(event) => handleTabKeyDown(event, index)}
             className="absolute inset-0 z-0 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-focus-ring-subtle"
           />
         ) : null;
 
-        const tooltipTab = tooltipContent && tabButton ? <Tooltip content={tooltipContent} side="bottom">{tabButton}</Tooltip> : tabButton;
+        // The hover tooltip stays hidden while this tab's right-click menu is open, so it never covers the menu.
+        const tooltipTab = tooltipContent && tabButton ? <Tooltip content={menuPanelId === panel.id ? null : tooltipContent} side="bottom">{tabButton}</Tooltip> : tabButton;
+        const onMenuOpenChange = (open: boolean) => setMenuPanelId(open ? panel.id : current => (current === panel.id ? null : current));
+        // Right-click: rename, pause or resume, then close past a divider. A disabled tab offers none.
+        const menuItems: DropdownItem[] = isDisabled ? [] : [
+          ...(!isPermanent && !isDiffPanel ? [{ id: 'rename', label: 'Rename tab…', icon: Pencil, onClick: () => startRename(panel) }] : []),
+          ...(panel.type === 'terminal' ? [isPaused
+            ? { id: 'resume', label: 'Resume tab', icon: FilledPlay, onClick: () => void runPauseAction({ kind: 'panel', id: panel.id }, false) }
+            : { id: 'pause', label: 'Pause tab', icon: Pause, onClick: () => void runPauseAction({ kind: 'panel', id: panel.id }, true) }] : []),
+          ...(!isPermanent ? [{ id: 'close', label: 'Close tab', icon: X, separatorBefore: true, onClick: () => closePanel(panel) }] : []),
+        ];
+        const contextualTab = tooltipTab && menuItems.length > 0
+          ? <Dropdown className="contents" contextMenu menuLabel={`${displayTitle} actions`} width="sm" trigger={tooltipTab} items={menuItems} onOpenChange={onMenuOpenChange} />
+          : tooltipTab;
         const tab = (
           <div
             className={cn(
@@ -388,7 +406,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
             onDragOver={(e) => handleStripDragOver(e, index)}
             onDrop={handleStripDrop}
           >
-            {tooltipTab}
+            {contextualTab}
             {/* Strip drop indicator line. Between-tab boundaries render as the
                 next tab's left edge; only the strip's end renders a right edge. */}
             {isTabDragging && stripDropIndex === index && (
@@ -418,9 +436,10 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
               <span className={cn(
                 "relative z-10 pointer-events-none inline-flex items-center justify-center min-w-0",
                 compact ? "gap-1" : "gap-2",
+                isPaused && !isActive && "opacity-60",
               )}>
                 {panel.type === 'terminal' && (
-                  <PanelTabStatusDot panelId={panel.id} sessionId={panel.sessionId} />
+                  <PanelTabStatusDot panelId={panel.id} sessionId={panel.sessionId} paused={isPaused} />
                 )}
                 {getPanelIcon(panel.type, panel, compact ? 'w-3.5 h-3.5 flex-shrink-0' : 'w-4 h-4 flex-shrink-0')}
                 {/* Bold marks the primary group's strip: the group the top
@@ -428,7 +447,12 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
                     The title is the only shrinkable element in the tab, so
                     squeezed tabs truncate the text instead of crushing the
                     status dot / icon or spilling under the close button. */}
-                <span className={cn("min-w-0 truncate", compact && isPrimary && "font-semibold", isPreviewTab && "italic")}>{displayTitle}</span>
+                <span className={cn(
+                  "min-w-0 truncate",
+                  compact && isPrimary && "font-semibold",
+                  isPreviewTab && "italic",
+                  isPaused && (isActive ? "text-text-secondary" : "text-text-tertiary"),
+                )}>{displayTitle}</span>
               </span>
             )}
 
@@ -441,7 +465,7 @@ export const PanelTabStrip: React.FC<PanelTabStripProps> = React.memo(({
                   alwaysShowClose ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
                   compact ? "right-1" : "right-1.5",
                 )}
-                onClick={(e) => handlePanelClose(e, panel)}
+                onClick={(e) => { e.stopPropagation(); closePanel(panel); }}
               >
                 <X className="w-2.5 h-2.5" />
               </button>
