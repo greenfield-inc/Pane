@@ -7,7 +7,11 @@ description: Use after a pull request is open to watch its CI and review-bot com
 
 Most repositories run AI review bots and CI on every pull request. They are helpful, even when they are not right.
 
+Run it once the PR is open, when the person says "ready", or when your own instructions say to.
+
 ## Watch
+
+Match the effort to the change: a docs-only or few-line PR skips the watching below and the green-checks condition under Stop, and reports as soon as it's open.
 
 Watch the PR instead of checking once. In Claude Code, run `gh pr checks <pr> --watch` in the background or use a monitor, so you respond when checks or comments arrive. In Codex, or wherever nothing can wake you, poll `gh pr checks <pr>` and the review threads every few minutes.
 
@@ -35,11 +39,11 @@ gh api graphql -f query='mutation($id:ID!){resolveReviewThread(input:{threadId:$
 
 Every reply is posted under the person's account. Write it the way they would: short, specific, and without filler.
 
-Screenshots and videos help reviewers. Host them where the repository's workflow says (a Grain artifact or a release asset, for example) and link them. Never commit evidence files.
+Screenshots and videos help reviewers. Host them where the repository's workflow says (the document destination your workspace instructions name, or a release asset, for example) and link them. Never commit evidence files.
 
 Keep an eye on the base branch and rebase when needed. If an overlapping PR makes this one obsolete, stop monitoring, tell the person, and ask before closing it unless closing was explicitly authorized.
 
-Do not let review feedback expand the PR beyond the person's original goal. Address real shortcomings, but avoid scope creep.
+Fix every finding within the PR's goal, including small in-scope improvements a reviewer or bot raises; don't dismiss an in-scope finding as out of scope. For a suggestion beyond the goal, don't grow the PR: capture it with [create-ticket](../create-ticket/SKILL.md) (or in the PR's findings or handoff file when ticket creation isn't authorized) and reply on the thread with the link. When you decline a finding as wrong, reply with the reason.
 
 ## Stop
 

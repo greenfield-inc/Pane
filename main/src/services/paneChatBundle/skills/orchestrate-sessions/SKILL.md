@@ -51,8 +51,8 @@ on mechanics where the two differ:
 - Review and QA run as `runpane` describes: fresh agent tabs in the feature's
   Pane, returning findings to the implementation authority. Use the `reviewer`
   and `qa-and-verify` subagents only when the user asks for a private review.
-- Durable records live where `runpane` says. The status board is optional,
-  on request.
+- Durable records live where `runpane` says. Keep the Session status page
+  from the first dispatch: the Session's Overview tab shows it.
 - A new feature's workspace on a named branch comes from
   `runpane panes create --base <ref> --branch <name> --prompt-file <file>`,
   which replaces `git worktree add` plus `panes adopt`.
@@ -164,8 +164,10 @@ Record decisions and deliver answers through the host's worker messaging or resu
 
 Use host-provided durable state when available; otherwise `.agent/ledger.json` in the orchestrator workspace. It is a minimal cross-reference; ownership stays with the host. Read it when a coordination event arrives. See [references/ledger.md](references/ledger.md).
 
-Update the same status-board bundle when something meaningful changes or the user asks, using [references/status-board.md](references/status-board.md) and the [`page`](../page/SKILL.md) standard. Link each work item's canonical bundle so status lives in one place.
+Keep one status page (the workstream map) per Session, drawn by the renderer in `assets/status-page/` from a status JSON. How to fill and render it is in [references/status-board.md](references/status-board.md): before you first write it in a Session, and again before any rewrite, read status-board.md and write it from that, never from memory or from a summary such as this paragraph. Write it to `<Session folder>/session/index.html` at the first dispatch, at each material change (a worker report, a decision, a PR opened, reviewed or merged) and when the user asks. Record each item's `next`, `front_page` and each PR's `last_reviewed_head` in the ledger as they change. Every progress message to the person ends with "Next: …", naming who acts next, as the items' `next` lines do.
 
-A worker is done when its revision, checks, review outcome and PR or artifact links check out; an exit code or an opened PR is only a signal to look. Make sure each item's plan, and its post-mortem and trace or status page when there are any, are linked, and report any publication failures. Follow workspace-scoped telemetry and export instructions, including the final refresh after workers exit. Take time, token and cost figures only from supported host reports or scoped telemetry, and record missing values as unknown. Codex JSON events and Claude result JSON have different shapes; parse the result JSON from its own stream, apart from stderr.
+Every item has a front page that reaches every file made for it. A planned item's is its brief: after its review closes, add the findings file, the post-mortem (if any) and the trace to the brief's Contents & related files (`page`'s bundle reference). An item without a bundle (a quick fix, a tweak) gets a small hub in the Session folder, following [references/item-hub.md](references/item-hub.md). Link each work item's canonical bundle or hub so status lives in one place.
+
+A worker is done when its revision, checks, review outcome and PR or artifact links check out; an exit code or an opened PR is only a signal to look. Make sure each item's plan, and its post-mortem and trace when there are any, are linked from the status page, and report any publication failures. Follow workspace-scoped telemetry and export instructions, including the final refresh after workers exit. Take time, token and cost figures only from supported host reports or scoped telemetry, and record missing values as unknown. Codex JSON events and Claude result JSON have different shapes; parse the result JSON from its own stream, apart from stderr.
 
 Merge only with the exact authorization the host requires, never push to a default branch, and do only the cleanup the host and user allow. Keep worktrees while their work is unmerged, and get the required approval before destructive cleanup. At a cap, queue the remaining work and report it. Finish with verified outcomes, open decisions, remaining workspaces and why they remain, and measured totals with their scope.

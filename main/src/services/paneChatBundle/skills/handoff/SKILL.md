@@ -10,7 +10,7 @@ You are the outgoing collaborator. Give the next person or agent the verified co
 ## Capture what matters
 
 - Preserve the goal, why it matters, constraints, non-goals, and decisions with their reasons. Distinguish approved work from suggestions.
-- Verify the current state. Record completed work, remaining work, meaningful failed attempts, blockers, and the next concrete action.
+- Verify the current state. Record completed work, remaining work, which checks (CI, QA, review) have run and which are still pending, meaningful failed attempts, blockers, and the next concrete action.
 - Link authoritative instructions, plans, evidence, and artifacts. Make the brief self-contained and focused on what the next worker needs.
 - Include pending approvals and the scope of authorized work. Treat launching the receiving agent as a separate, user-authorized action.
 
@@ -57,16 +57,16 @@ When you are a Session's agent (your terminal sets `PANE_ORCHESTRATION_SESSION_I
 - A Session can't be handed off to the machine it is on; handoff refuses before sending anything.
 - Tell the person the new Session's name and machine. This Session stays as it is; they can archive it when they're done with it, which also archives its Panes on this machine.
 
-The note goes with every handoff: context for a carried session, and everything a fresh agent gets. Skip the two sections below unless the person also wants a saved page, a Grain workspace or a PR comment, or there is no receiving agent to start.
+The note goes with every handoff: context for a carried session, and everything a fresh agent gets. Skip the two sections below unless the person also wants a saved or published page or a PR comment, or there is no receiving agent to start.
 
 ## Save one authoritative brief
 
-- Honor an explicit destination. Otherwise, when Grain is connected, read its installed skill and update the existing task workspace; if none exists, create a clearly named one in `Development Artifacts`. Retain its ID for subsequent updates.
-- When the handoff lands in a Grain workspace and the `session-trace` skill is installed, attach this session's trace to it.
+- Honor an explicit destination. Otherwise publish to the document destination your workspace instructions name: update the existing task page there, or create a clearly named one. Retain its ID for subsequent updates.
+- When the handoff lands in a published page and the `session-trace` skill is installed, attach this session's trace to it.
 - Make essential text directly readable to both humans and agents. Link existing artifacts and retain one authoritative brief.
-- For cross-device delivery, prefer a public-safe Grain share when public sharing is authorized by the request or an established user preference. Otherwise use an appropriately restricted destination or ask before publishing.
+- For cross-device delivery, prefer a public-safe share from that destination when public sharing is authorized by the request or an established user preference. Otherwise use an appropriately restricted destination or ask before publishing.
 - Inspect the full shared content for its intended audience. Use access-controlled GitHub when the brief requires private source or sensitive context. Return the verified share URL supplied by the service.
-- If Grain is unavailable or unsuitable, save the handoff as a page in the work's page bundle (see [page](../page/SKILL.md)) and open it for the person. With a posting grant, also update a clearly labeled handoff/status section on the existing PR, or the issue if there is no PR. Preserve the original intent, acceptance criteria, and other contributors' content; use a timestamped comment when editing the body would be disruptive.
+- If no destination is named or it is unsuitable, save the handoff as a page in the work's page bundle (see [page](../page/SKILL.md)) and open it for the person with `runpane panels open --file <path> --source agent --yes`. With a posting grant, also update a clearly labeled handoff/status section on the existing PR, or the issue if there is no PR. Preserve the original intent, acceptance criteria, and other contributors' content; use a timestamped comment when editing the body would be disruptive.
 - If both destinations are unavailable, return a self-contained, copyable brief in chat with its save status. Create a new issue or PR when the user requests one.
 - Keep necessary local working files and verify that required material also has a remotely accessible copy. Report connected save failures and the outcome of any fallback.
 

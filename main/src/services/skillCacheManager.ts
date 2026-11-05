@@ -1147,6 +1147,16 @@ if __name__ == "__main__":
       ...devWrapperGuidance,
       powerShellPolicy,
       '',
+      '## Node for bundled scripts',
+      '',
+      'Some bundled skills run a Node script, such as the Session status page',
+      'renderer. When `node` is not on PATH, run the script with Pane\'s own',
+      'runtime instead:',
+      '',
+      `- ${markdownCode(process.platform === 'win32'
+        ? `$env:ELECTRON_RUN_AS_NODE=1; & "${process.execPath}" <script> <args>`
+        : `ELECTRON_RUN_AS_NODE=1 ${quoteForDisplayedShellArg(process.execPath)} <script> <args>`)}`,
+      '',
       '## Wrong instance',
       '',
       'If a fallback opens, focuses, or controls a different Pane window or data',

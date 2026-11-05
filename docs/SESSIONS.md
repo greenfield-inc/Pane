@@ -260,8 +260,9 @@ until its agent works again. The row under the Inbox counts the hidden Panes
 unchanged, and ⌘1–9 number the Inbox rows while it is shown.
 
 The right sidebar has Overview, Files, and Changes tabs. When the Session
-folder holds a status page at `session/index.html` (an orchestrator writes it
-there), Overview shows that page under a header with the Session name, Rename,
+folder holds a status page at `session/index.html` (an orchestrator renders it
+there from a status JSON with the `orchestrate-sessions` skill's bundled
+renderer), Overview shows that page under a header with the Session name, Rename,
 **Open beside chat** (the page full-size in the split, in the tab already
 showing it) and **Show Session details** (the record described next). Pane checks for
 the page each time the Session refreshes. Links in the page to

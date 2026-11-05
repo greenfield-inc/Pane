@@ -21,6 +21,9 @@ Validate as much of a PR as possible with local services, browser automation, CL
    - Discover verification tools before assuming a manual check is required. If Composio is available, use `composio search` to find candidate inbox, SMS/phone, payment, CRM, support, or provider-log tools, then inspect schemas with `--get-schema` before executing.
    - Prefer connected app tools for product data verification. Do not assume credentials are current.
    - Use test-mode accounts, test keys, local containers, and staging-safe endpoints unless the user explicitly asks for production verification.
+   - For OS-sensitive changes or cross-platform claims, follow
+     [Cross-OS Workspaces](references/cross-os-workspaces.md) for discovery,
+     isolated execution, and per-OS evidence throughout this workflow.
 
 3. Prepare the environment:
    - Install dependencies only where needed and report anything that changes lockfiles.
@@ -53,7 +56,7 @@ Validate as much of a PR as possible with local services, browser automation, CL
    Open with a verdict, then the evidence. The structure:
 
    ```
-   Verdict: <all-proven | partial | blocked-env | blocked-auth | product-bug-found>
+   Verdict: <all-proven | partial | blocked-env | blocked-auth | blocked-timeout | product-bug-found>
 
    | Journey / Check | Result | Evidence |
    |-----------------|--------|----------|
@@ -68,10 +71,13 @@ Validate as much of a PR as possible with local services, browser automation, CL
    | <account, org, record> | <run marker> | <staging / analytics / billing> | deleted · registered (<why not safe>) · none created |
    ```
 
+   Blocked and Left to human count as `undetermined`, never as a pass.
    A pass without quoted evidence is not a pass. "Blocked" is a terminal
    verdict: when a check cannot be exercised (missing env, service down,
    no credentials), stop trying rather than improvising a workaround.
-   Improvised test routes are not evidence.
+   Try documented Cross-OS Workspaces routes during preflight within the run
+   bounds. Once setup is blocked, continue independent platforms and report
+   the gap; evidence must come from the product's real test path.
 
    Terminal states and what the human should do next:
    - `all-proven`: every check passed with evidence. Ready for human review.
@@ -341,8 +347,9 @@ analytics, signup, login, or session handling:
 
 QA evidence is current-head evidence and the Manual tests checklist is the
 body's contract, so anything that would change either runs first. On a large
-PR (over 10 files or 300 hand-written lines) that has not had a `refactor`
-pass, say so and offer it before driving anything. A refactor landed after
+PR (over 10 files or 300 hand-written lines) that has not had a
+[refactor](../refactor/SKILL.md) pass, say so and offer it before driving
+anything. A refactor landed after
 QA means this whole pass runs again. Likewise `cold-read` on the PR body
 comes before QA, so the checklist you execute is the one the reader will see.
 

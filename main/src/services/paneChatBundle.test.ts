@@ -1,4 +1,6 @@
+import { execFileSync } from 'child_process';
 import fs from 'fs/promises';
+import os from 'os';
 import path from 'path';
 import { describe, expect, it } from 'vitest';
 
@@ -34,6 +36,16 @@ describe('Pane Chat skill bundle', () => {
 
   it('ships the orchestrator guide', async () => {
     await expect(fs.access(path.join(bundleRoot, 'skills', 'pane-orchestration', 'SKILL.md'))).resolves.toBeUndefined();
+  });
+
+  it('renders the Session status page from bundled files alone, with nothing fetched', async () => {
+    const statusPage = path.join(bundleRoot, 'skills', 'orchestrate-sessions', 'assets', 'status-page');
+    const out = path.join(await fs.mkdtemp(path.join(os.tmpdir(), 'status-page-')), 'index.html');
+    execFileSync(process.execPath, [path.join(statusPage, 'render.mjs'), path.join(statusPage, 'example-status.json'), out]);
+    const html = await fs.readFile(out, 'utf8');
+    expect(html).toContain('Get PRs in (example)');
+    expect(html).toContain('href="pane://open?pane=pane-1014&amp;panel=panel-impl"');
+    expect(html).not.toMatch(/<script|<link\b|@import|(src|url)\(?=?["']?https?:/i);
   });
 
   it('gives each helper subagent a bundled skill', async () => {
