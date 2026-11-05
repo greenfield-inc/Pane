@@ -63,7 +63,7 @@ describe('project environment variables', () => {
       { key: 'NODE_ENV', source: 'plain', value: 'development' },
     ]);
 
-    const resolved = await asTeammate(() => service.resolve(project.id) as Promise<PaneCommandValue>);
+    const resolved = await asTeammate(() => service.resolve(project.id));
 
     expect(resolved).toMatchObject({ env: { NODE_ENV: 'development' } });
     expect(JSON.stringify(resolved)).not.toContain('sk-owner-only');
