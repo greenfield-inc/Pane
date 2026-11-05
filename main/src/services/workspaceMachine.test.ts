@@ -7,6 +7,7 @@ import { execOnMachine, readMachineFile, resolveMachinePath, writeMachineFile } 
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
 });
 
 const windows = { platform: 'win32' as const, homeDir: 'C:\\Users\\khaza', wslDistro: 'Ubuntu' };
@@ -77,7 +78,7 @@ describe('machine file and command operations', () => {
 
   it('runs a command in the machine shell and reports output, exit code, and shell', async () => {
     const dir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'pane-machine-')));
-    const result = await execOnMachine({ command: 'echo out; echo err 1>&2; exit 3', cwd: dir });
+    const result = await execOnMachine({ command: 'echo out; echo err 1>&2; exit 3', cwd: dir }, undefined, null);
     expect(result).toMatchObject({ exitCode: 3, stdout: 'out\n', stderr: 'err\n', cwd: dir, timedOut: false });
     expect(result.shell).toMatch(/sh(\.exe)?$/);
     expect(result.os).toBe(new Map([['darwin', 'macOS'], ['win32', 'Windows']]).get(process.platform) ?? 'Linux');
@@ -89,26 +90,28 @@ describe('machine file and command operations', () => {
     const bundledCliPath = path.join(root, 'runpane.cjs');
     await fs.writeFile(bundledCliPath, "console.log('pane-runpane ' + process.argv.slice(2).join(' '));\n");
     expect(installRunpaneShim({ appDirectory: path.join(root, 'pane dir'), bundledCliPath, execPath: process.execPath })).not.toBeNull();
-    const result = await execOnMachine({ command: 'runpane version' }, shell);
+    const result = await execOnMachine({ command: 'runpane version' }, shell, null);
     expect(result, result.stderr).toMatchObject({ exitCode: 0 });
     expect(result.stdout.trim()).toBe('pane-runpane version');
   });
 
   it.skipIf(process.platform === 'win32')('marks a teammate\'s command so runpane secrets refuses it, and leaves the owner\'s unmarked', async () => {
     const command = 'printf "[%s]" "$PANE_TEAMMATE_LOGIN"';
+    // Set in Pane's own environment, as when Pane was started from a teammate's command.
+    vi.stubEnv('PANE_TEAMMATE_LOGIN', 'leaked@example.com');
     await expect(execOnMachine({ command }, undefined, 'teammate@example.com')).resolves.toMatchObject({ stdout: '[teammate@example.com]' });
-    await expect(execOnMachine({ command })).resolves.toMatchObject({ stdout: '[]' });
+    await expect(execOnMachine({ command }, undefined, null)).resolves.toMatchObject({ stdout: '[]' });
   });
 
   it('answers when the shell exits even if a background job still holds its output', async () => {
     const started = Date.now();
-    const result = await execOnMachine({ command: 'sleep 5 & echo started' });
+    const result = await execOnMachine({ command: 'sleep 5 & echo started' }, undefined, null);
     expect(result).toMatchObject({ exitCode: 0, stdout: 'started\n' });
     expect(Date.now() - started).toBeLessThan(3000);
   });
 
   it('stops a command that runs past its timeout', async () => {
-    const result = await execOnMachine({ command: 'sleep 5', timeoutMs: 200 });
+    const result = await execOnMachine({ command: 'sleep 5', timeoutMs: 200 }, undefined, null);
     expect(result.timedOut).toBe(true);
     expect(result.exitCode).not.toBe(0);
     expect(result.stillRunning).toBeUndefined();
@@ -120,7 +123,7 @@ describe('machine file and command operations', () => {
     const realKill = process.kill.bind(process);
     vi.spyOn(process, 'kill').mockImplementation((pid, signal) => (signal === 'SIGKILL' ? true : realKill(pid, signal)));
     const started = Date.now();
-    const result = await execOnMachine({ command: 'sleep 4', timeoutMs: 200 });
+    const result = await execOnMachine({ command: 'sleep 4', timeoutMs: 200 }, undefined, null);
     expect(result).toMatchObject({ timedOut: true, stillRunning: true, exitCode: null });
     expect(Date.now() - started).toBeLessThan(3500);
   });

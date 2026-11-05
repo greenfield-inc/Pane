@@ -161,8 +161,8 @@ export async function writeMachineFile(request: {
 
 export async function execOnMachine(
   request: { command: string; cwd?: string; timeoutMs?: number },
-  preferredShell?: string,
-  teammate: string | null = null,
+  preferredShell: string | undefined,
+  teammate: string | null,
 ): Promise<MachineExecResult> {
   const cwd = request.cwd ? resolveMachinePath(request.cwd, await currentHost()) : os.homedir();
   const timeoutMs = Math.min(request.timeoutMs ?? DEFAULT_EXEC_TIMEOUT_MS, MAX_EXEC_TIMEOUT_MS);

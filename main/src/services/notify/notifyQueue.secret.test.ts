@@ -80,7 +80,7 @@ describe('NotifyQueue secret cards', () => {
       .toThrow(expect.objectContaining({ code: 'SECRET_OWNER_REQUIRED' }));
     expect(secrets.saved.size).toBe(0);
 
-    await queue.runRemote({ type: 'answer', id, answer: { text: CANARY } }, 'owner-laptop');
+    await queue.runRemote({ type: 'answer', id, answer: { text: CANARY } }, 'owner-laptop', null);
     expect(secrets.saved.get('stripe/STRIPE_SECRET_KEY')).toBe(CANARY);
     await vi.advanceTimersByTimeAsync(0);
     expect(call.result).toEqual({ status: 'saved', project: 'stripe', name: 'STRIPE_SECRET_KEY' });
@@ -131,13 +131,13 @@ describe('NotifyQueue secret cards', () => {
     const [id] = queue.snapshot().queue;
     secrets.failNext(new PaneError('SECRET_WRITE_FAILED', 'Pane could not store stripe/STRIPE_SECRET_KEY: the keychain is locked. Nothing was changed.', 'Unlock the login keychain in Keychain Access, then try again.'));
 
-    await expect(queue.runRemote({ type: 'answer', id, answer: { text: CANARY } }, 'iPhone')).rejects.toMatchObject({ code: 'SECRET_WRITE_FAILED' });
+    await expect(queue.runRemote({ type: 'answer', id, answer: { text: CANARY } }, 'iPhone', null)).rejects.toMatchObject({ code: 'SECRET_WRITE_FAILED' });
 
     expect(call.result).toBeUndefined();
     expect(queue.sharedState().items[0]).toMatchObject({ state: 'waiting', secretError: expect.stringContaining('keychain is locked') });
     expect(everythingVisible(queue, call.result)).not.toContain(CANARY);
 
-    await queue.runRemote({ type: 'answer', id, answer: { text: CANARY } }, 'iPhone');
+    await queue.runRemote({ type: 'answer', id, answer: { text: CANARY } }, 'iPhone', null);
     await vi.advanceTimersByTimeAsync(0);
     expect(call.result).toEqual({ status: 'saved', project: 'stripe', name: 'STRIPE_SECRET_KEY' });
     expect(queue.snapshot().items[0]).toMatchObject({ answeredOn: 'iPhone', answerSummary: 'Saved as stripe/STRIPE_SECRET_KEY' });
@@ -150,8 +150,8 @@ describe('NotifyQueue secret cards', () => {
     ask(queue, stripeKey);
     const [id] = queue.snapshot().queue;
 
-    await expect(queue.runRemote({ type: 'answer', id, answer: { choice: 'Yes' } }, 'iPhone')).rejects.toMatchObject({ code: 'ERR_NOTIFY_INVALID' });
-    await expect(queue.runRemote({ type: 'answer', id, answer: { text: '' } }, 'iPhone')).rejects.toMatchObject({ code: 'ERR_NOTIFY_INVALID' });
+    await expect(queue.runRemote({ type: 'answer', id, answer: { choice: 'Yes' } }, 'iPhone', null)).rejects.toMatchObject({ code: 'ERR_NOTIFY_INVALID' });
+    await expect(queue.runRemote({ type: 'answer', id, answer: { text: '' } }, 'iPhone', null)).rejects.toMatchObject({ code: 'ERR_NOTIFY_INVALID' });
     expect(secrets.saved.size).toBe(0);
     expect(queue.sharedState().items[0].state).toBe('waiting');
   });

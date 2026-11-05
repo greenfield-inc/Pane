@@ -215,7 +215,7 @@ export class NotifyQueue extends EventEmitter {
    * name for the sender, and `teammate` the login of a sender who is not this computer's owner.
    * Refuses a command for a question no longer in the state it needs.
    */
-  runRemote(command: NotifyRemoteCommand, device: string, teammate: string | null = null): void | Promise<void> {
+  runRemote(command: NotifyRemoteCommand, device: string, teammate: string | null): void | Promise<void> {
     const entry = this.entries.get(command.id);
     if (!entry) {
       throw new PaneError('ERR_NOTIFY_GONE', `That question is no longer on ${this.machine()}: it finished earlier, or Pane restarted there. Nothing was sent.`, 'Nothing to do: the agent is no longer waiting on it.');

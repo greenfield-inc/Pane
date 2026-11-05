@@ -159,7 +159,7 @@ export class NotifyService {
   }
 
   /** The `notify:remote-command` daemon command: another screen or a phone acts on this machine's question. */
-  async runRemote(command: NotifyRemoteCommand, device: string, teammate: string | null = null): Promise<void> {
+  async runRemote(command: NotifyRemoteCommand, device: string, teammate: string | null): Promise<void> {
     await this.queue.runRemote(command, device, teammate);
   }
 
