@@ -104,7 +104,9 @@ Codex panel also expires when that panel sits idle at its prompt for 10 seconds.
   oldest first, updates, and what you answered earlier today. A question you
   answer there collapses out of the list, the cards below slide up, and the
   strip shows "Sent to <agent>" with **Undo**. **Open in Pane** jumps to the
-  asking terminal with the card docked under its output.
+  asking terminal with the card docked under its output. A link to a tab,
+  `pane://open?pane=<id>&panel=<id>` (a Session status page uses these),
+  docks that tab's oldest waiting card the same way; it never answers one.
 - **The menu bar or tray icon** shows an amber dot while questions wait. Its
   menu lists them and holds Show outside Pane, Pause for 1 hour, Open Notify
   inbox and Notify settings.

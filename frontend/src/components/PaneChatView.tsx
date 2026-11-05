@@ -1,7 +1,7 @@
 import { registerRemoteWorkspaceRestore } from '../utils/remoteRestoration';
 import type { CustomCommandResume } from '../../../shared/types/customCommandResume';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Info, Pencil, RefreshCw, Settings, Terminal, X } from 'lucide-react';
+import { Info, List, PanelRight, Pencil, RefreshCw, Settings, Terminal, X } from 'lucide-react';
 import { API } from '../utils/api';
 import type { Session } from '../types/session';
 import { PANE_CHAT_AGENT_LABELS, type PaneChatAgent, type PaneChatState } from '../../../shared/types/paneChat';
@@ -24,6 +24,8 @@ import { SelectionLoading } from './ui/SelectionLoading';
 import { Input } from './ui/Input';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from './ui/Modal';
 import { SessionLaunchFields } from './SessionLaunchFields';
+import { SessionStatusPage } from './SessionStatusPage';
+import { openBesideChat, useSessionStatusPage } from '../hooks/useSessionStatusPage';
 import { useConfigStore } from '../stores/configStore';
 import { DEFAULT_SESSION_PROFILE } from '../../../shared/types/sessionProfile';
 import { cn } from '../utils/cn';
@@ -841,6 +843,7 @@ function NamedSessionWorkspace({ view, error, chrome, onOverviewUpdate, onRetry 
             focusWithin={chrome.isFocused}
             overviewContent={<SessionOverviewPanel
             record={view.session}
+            folderSessionId={view.panel.sessionId}
             overview={overview}
             error={overviewError}
             onRefresh={refreshOverview}
@@ -927,6 +930,8 @@ const OVERVIEW_HEADING = 'mb-1 text-[11px] font-semibold uppercase tracking-wide
 
 interface SessionOverviewPanelProps {
   record: OrchestrationSessionRecord;
+  /** The Pane session whose worktree is the Session folder, where the status page lives. */
+  folderSessionId: string;
   overview: OrchestrationSessionOverview | null;
   error: string | null;
   onRefresh: () => Promise<void>;
@@ -934,7 +939,15 @@ interface SessionOverviewPanelProps {
   onRetry: () => void;
 }
 
-function SessionOverviewPanel({ record, overview, error, onRefresh, onUpdate, onRetry }: SessionOverviewPanelProps) {
+const OVERVIEW_ACTION = 'rounded p-1 text-text-tertiary hover:bg-surface-hover hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-interactive';
+
+/**
+ * The Overview tab. With a status page in the Session folder it shows the page under this
+ * header, and Show Session details brings back the record below; without one it is the record alone.
+ */
+function SessionOverviewPanel({ record, folderSessionId, overview, error, onRefresh, onUpdate, onRetry }: SessionOverviewPanelProps) {
+  const statusPage = useSessionStatusPage(folderSessionId, overview);
+  const [showDetails, setShowDetails] = useState(false);
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(record.name);
   const [isSaving, setIsSaving] = useState(false);
@@ -960,28 +973,39 @@ function SessionOverviewPanel({ record, overview, error, onRefresh, onUpdate, on
     }
   };
 
+  const renameForm = <>
+    <Input label="Name" value={name} onChange={event => setName(event.target.value)} fullWidth />
+    {saveError && <p role="alert" className="text-status-error">{saveError}</p>}
+    <div className="flex justify-end gap-2">
+      <Button type="button" variant="secondary" size="sm" onClick={() => setEditing(false)}>Cancel</Button>
+      <Button type="button" size="sm" loading={isSaving} loadingText="Saving…" onClick={() => void save()}>Save name</Button>
+    </div>
+  </>;
+
   return (
-    <div className="flex h-full min-w-0 flex-col overflow-y-auto bg-surface-primary">
-      <div className="flex items-center justify-between gap-2 border-b border-border-primary px-3 py-2">
-        <div>
+    <div className={cn('flex h-full min-w-0 flex-col bg-surface-primary', !statusPage && 'overflow-y-auto')}>
+      <div className="flex flex-shrink-0 items-center justify-between gap-2 border-b border-border-primary px-3 py-2">
+        <div className="min-w-0">
           <h2 className="truncate text-sm font-semibold text-text-primary">{record.name}</h2>
         </div>
-        <div className="flex items-center gap-1">
-          <button type="button" aria-label="Refresh Session overview" title="Refresh" onClick={() => void onRefresh()} className="rounded p-1 text-text-tertiary hover:bg-surface-hover hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-interactive"><RefreshCw className="h-3.5 w-3.5" /></button>
-          <button type="button" aria-label={editing ? 'Cancel renaming Session' : 'Rename Session'} title={editing ? 'Cancel renaming' : 'Rename Session'} onClick={() => setEditing(value => !value)} className="rounded p-1 text-text-tertiary hover:bg-surface-hover hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-interactive">{editing ? <X className="h-3.5 w-3.5" /> : <Pencil className="h-3.5 w-3.5" />}</button>
+        <div className="flex flex-shrink-0 items-center gap-1">
+          <button type="button" aria-label="Refresh Session overview" title="Refresh" onClick={() => void onRefresh()} className={OVERVIEW_ACTION}><RefreshCw className="h-3.5 w-3.5" /></button>
+          <button type="button" aria-label={editing ? 'Cancel renaming Session' : 'Rename Session'} title={editing ? 'Cancel renaming' : 'Rename Session'} onClick={() => setEditing(value => !value)} className={OVERVIEW_ACTION}>{editing ? <X className="h-3.5 w-3.5" /> : <Pencil className="h-3.5 w-3.5" />}</button>
+          {statusPage && <>
+            <button type="button" aria-label="Open beside chat" title="Open beside chat" className={OVERVIEW_ACTION}
+              onClick={() => void openBesideChat(folderSessionId, statusPage).catch((cause: unknown) => console.error('[SessionOverview] Did not open the status page beside chat:', cause))}>
+              <PanelRight className="h-3.5 w-3.5" />
+            </button>
+            <button type="button" aria-label={showDetails ? 'Show status page' : 'Show Session details'} title={showDetails ? 'Show status page' : 'Show Session details'} aria-pressed={showDetails}
+              onClick={() => setShowDetails(value => !value)} className={cn(OVERVIEW_ACTION, showDetails && 'bg-surface-hover text-text-primary')}>
+              <List className="h-3.5 w-3.5" />
+            </button>
+          </>}
         </div>
       </div>
-      <div className="space-y-3 p-3 text-xs">
-        {editing ? (
-          <>
-            <Input label="Name" value={name} onChange={event => setName(event.target.value)} fullWidth />
-            {saveError && <p role="alert" className="text-status-error">{saveError}</p>}
-            <div className="flex justify-end gap-2">
-              <Button type="button" variant="secondary" size="sm" onClick={() => setEditing(false)}>Cancel</Button>
-              <Button type="button" size="sm" loading={isSaving} loadingText="Saving…" onClick={() => void save()}>Save name</Button>
-            </div>
-          </>
-        ) : null}
+      {statusPage && !showDetails && editing && <div className="flex-shrink-0 space-y-3 border-b border-border-primary p-3 text-xs">{renameForm}</div>}
+      {statusPage && !showDetails ? <SessionStatusPage url={statusPage} folderSessionId={folderSessionId} /> : <div className={cn('space-y-3 p-3 text-xs', statusPage && 'min-h-0 flex-1 overflow-y-auto')}>
+        {editing ? renameForm : null}
 
         {record.blockers.length > 0 && (
           <div className="rounded-md border border-status-error/30 bg-status-error/10 px-2 py-2">
@@ -1031,7 +1055,7 @@ function SessionOverviewPanel({ record, overview, error, onRefresh, onUpdate, on
             ))}
           </div>
         </div>
-      </div>
+      </div>}
     </div>
   );
 }

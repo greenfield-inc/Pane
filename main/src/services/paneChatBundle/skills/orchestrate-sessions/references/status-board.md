@@ -1,6 +1,11 @@
 # Status board
 
-One HTML page for the person, updated in place.
+One HTML page for the person, updated in place. Write it to `session/index.html`
+in the Session folder: Pane shows that file in the Session's Overview tab, so it
+needs no `panels open`. Link each question that waits in a tab to
+`pane://open?pane=<pane-id>&panel=<panel-id>`; the link opens that tab with its
+waiting Notify card docked. The links work only while the page loads as a local
+file.
 
 ```
 Header            run name, started, last updated, sessions running / queued / done,

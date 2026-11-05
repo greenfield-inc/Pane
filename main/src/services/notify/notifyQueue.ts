@@ -183,6 +183,16 @@ export class NotifyQueue extends EventEmitter {
   }
 
   /**
+   * Docks the oldest question still waiting from this tab, as Open in Pane does; a question
+   * on a machine the app isn't on stays put.
+   */
+  dockWaitingCard(paneId: string, panelId: string): void {
+    const item = this.snapshot().items.find(candidate => candidate.state === 'waiting' && !candidate.elsewhere
+      && candidate.source.paneId === paneId && candidate.source.panelId === panelId);
+    if (item) this.run({ type: 'dock', id: item.id });
+  }
+
+  /**
    * A command from another screen or a phone (`notify:remote-command`). `device` is the server's
    * name for the sender. Refuses a command for a question no longer in the state it needs.
    */
