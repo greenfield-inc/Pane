@@ -54,6 +54,9 @@ import type {
   OrchestrationAssociationInput,
   OrchestrationSessionCreateInput,
   OrchestrationSessionListResult,
+  OrchestrationSessionArchivePreview,
+  OrchestrationSessionArchiveResult,
+  OrchestrationSessionArchiveSelection,
   OrchestrationSessionOverview,
   OrchestrationSessionRecord,
   OrchestrationSessionSelector,
@@ -213,6 +216,8 @@ interface ElectronAPI {
     associate: (selector: OrchestrationSessionSelector, association: OrchestrationAssociationInput) => Promise<IPCResponse<OrchestrationSessionRecord>>;
     detach: (selector: OrchestrationSessionSelector, paneId?: string) => Promise<IPCResponse<OrchestrationSessionRecord>>;
     overview: (selector: OrchestrationSessionSelector) => Promise<IPCResponse<OrchestrationSessionOverview>>;
+    archivePreview: (selector: OrchestrationSessionSelector) => Promise<IPCResponse<OrchestrationSessionArchivePreview>>;
+    archive: (selector: OrchestrationSessionSelector, selection: OrchestrationSessionArchiveSelection) => Promise<IPCResponse<OrchestrationSessionArchiveResult>>;
   };
 
   // Token usage, cost and rate-limit reporting

@@ -11,6 +11,9 @@ import type {
   OrchestrationAssociationInput,
   OrchestrationSessionCreateInput,
   OrchestrationSessionListResult,
+  OrchestrationSessionArchivePreview,
+  OrchestrationSessionArchiveResult,
+  OrchestrationSessionArchiveSelection,
   OrchestrationSessionOverview,
   OrchestrationSessionRecord,
   OrchestrationSessionSelector,
@@ -141,6 +144,14 @@ export class API {
     async overview(selector: OrchestrationSessionSelector): Promise<IPCResponse<OrchestrationSessionOverview>> {
       if (!isElectron()) throw new Error('Electron API not available');
       return window.electronAPI.orchestrationSessions.overview(selector);
+    },
+    async archivePreview(selector: OrchestrationSessionSelector): Promise<IPCResponse<OrchestrationSessionArchivePreview>> {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.orchestrationSessions.archivePreview(selector);
+    },
+    async archive(selector: OrchestrationSessionSelector, selection: OrchestrationSessionArchiveSelection): Promise<IPCResponse<OrchestrationSessionArchiveResult>> {
+      if (!isElectron()) throw new Error('Electron API not available');
+      return window.electronAPI.orchestrationSessions.archive(selector, selection);
     },
   };
 

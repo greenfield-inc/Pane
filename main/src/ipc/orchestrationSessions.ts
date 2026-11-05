@@ -5,10 +5,12 @@ import type { PaneCommandRegistry, PaneCommandValue } from '../daemon/commandReg
 import type { AppServices } from './types';
 import type {
   OrchestrationAssociationInput,
+  OrchestrationSessionArchiveResult,
   OrchestrationSessionSelector,
 } from '../../../shared/types/orchestrationSession';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { PaneError, paneErrorText } from '../../../shared/paneError';
+import { previewOrchestrationSessionArchive, updateOrchestrationSession } from './runpane';
 import {
   decodeOrchestrationSessionPayload,
   orchestrationExpectedRevisionSchema,
@@ -59,6 +61,10 @@ const updateSchema = boundary.object({
   report: boundary.optional(boundary.nullable(orchestrationReportSchema)),
   expectedRevision: boundary.optional(orchestrationExpectedRevisionSchema),
   source: boundary.optional(boundary.enumeration('user', 'agent')),
+});
+const archiveSelectionSchema = boundary.object({
+  archivePaneIds: boundary.array(boundary.nonEmptyString),
+  forcePaneIds: boundary.array(boundary.nonEmptyString),
 });
 const agentSchema = boundary.object({
   ...selectorSchemaFields(),
@@ -122,12 +128,32 @@ export function registerOrchestrationSessionHandlers(
   commandRegistry.bindChannel(ipcMain, 'orchestration-sessions:get');
 
   commandRegistry.register('orchestration-sessions:update', async (value: PaneCommandValue, update?: PaneCommandValue) => {
-    return invokeSafely(() => requireManager().update(
-      decodeSelector(value),
-      decodeOrchestrationSessionPayload(update, updateSchema, 'update'),
-    ));
+    return invokeSafely(async () => {
+      const input = decodeOrchestrationSessionPayload(update, updateSchema, 'update');
+      return (await updateOrchestrationSession(services, commandRegistry, decodeSelector(value), input)).session;
+    });
   });
   commandRegistry.bindChannel(ipcMain, 'orchestration-sessions:update');
+
+  commandRegistry.register('orchestration-sessions:archive', async (value: PaneCommandValue, selection?: PaneCommandValue) => {
+    return invokeSafely(async (): Promise<OrchestrationSessionArchiveResult> => {
+      const { session, panes } = await updateOrchestrationSession(
+        services,
+        commandRegistry,
+        decodeSelector(value),
+        { archived: true },
+        decodeBoundary(selection, archiveSelectionSchema),
+      );
+      if (!panes) throw new Error('Archiving the Session returned no Pane result');
+      return { session, ...panes };
+    });
+  });
+  commandRegistry.bindChannel(ipcMain, 'orchestration-sessions:archive');
+
+  commandRegistry.register('orchestration-sessions:archive-preview', async (value: PaneCommandValue) => {
+    return invokeSafely(() => previewOrchestrationSessionArchive(services, decodeSelector(value)));
+  });
+  commandRegistry.bindChannel(ipcMain, 'orchestration-sessions:archive-preview');
 
   commandRegistry.register('orchestration-sessions:reorder', async (value: PaneCommandValue) => {
     return invokeSafely(() => requireManager().reorder(decodeBoundary(value, reorderSchema).sessionIds));

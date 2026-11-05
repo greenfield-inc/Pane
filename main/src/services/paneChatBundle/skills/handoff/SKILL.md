@@ -55,7 +55,7 @@ When you are a Session's agent (your terminal sets `PANE_ORCHESTRATION_SESSION_I
 - When the receiver is the same agent as you, your agent session's files are copied to that machine and the new Session resumes your conversation when it is first opened. The CLI checks that the new Session records your conversation's id (if not, the result is `not-continued` and the command exits 1), but it can't check its history until then, so `continuity.result` is `inconclusive`: tell the person to open the Session and check it shows your last message; if that is unclear, ask it the probe from [continuity](../migrate-to-pane/references/continuity.md); then send it the moved message `continuity.next` gives. Then end your turn.
 - Otherwise (`--note-only`, or a different agent) the new Session is a fresh agent whose next action is to read the note, and `continuity.result` is `fresh-agent`. It waits for the person's first message, like every Session: they switch Pane to that machine, open it, and send "continue".
 - A Session can't be handed off to the machine it is on; handoff refuses before sending anything.
-- Tell the person the new Session's name and machine. This Session stays as it is; they can archive it when they're done with it.
+- Tell the person the new Session's name and machine. This Session stays as it is; they can archive it when they're done with it, which also archives its Panes on this machine.
 
 The note goes with every handoff: context for a carried session, and everything a fresh agent gets. Skip the two sections below unless the person also wants a saved page, a Grain workspace or a PR comment, or there is no receiving agent to start.
 

@@ -24,6 +24,7 @@ export const REMOTE_READ_CHANNELS = new Set([
   'orchestration-sessions:get',
   'orchestration-sessions:overview',
   'orchestration-sessions:runtimes',
+  'orchestration-sessions:archive-preview',
   'projects:get-all',
   'projects:get-running-script',
   'terminal:getAltScreenState',

@@ -2,6 +2,7 @@ import type { CustomCommandResume } from './customCommandResume';
 import type { AgentState } from './agentStatus';
 import type { PaneChatAgent } from './paneChat';
 import type { TerminalAgentReport, TerminalPausedMark, ToolPanel, ToolPanelType } from './panels';
+import type { RunpanePaneArchiveBlockCode } from './runpaneOrchestration';
 import { boundary, decodeOptionalBoundary, type JsonObject } from '../validation/boundaryDecoder';
 
 /** Stable identifier of the built-in orchestration session imported from Pane Chat. */
@@ -275,6 +276,40 @@ export interface OrchestrationSessionUpdateInput {
   report?: OrchestrationReport | null;
   expectedRevision?: number;
   source?: OrchestrationActivity['source'];
+}
+
+/** A Pane archiving its Session would take along; `blocked` is why a plain archive keeps it open. */
+export interface OrchestrationSessionArchivePane {
+  paneId: string;
+  name: string;
+  blocked?: RunpanePaneArchiveBlockCode;
+}
+
+/** `orchestration-sessions:archive-preview`: the Panes archiving the Session would take, unsafe ones flagged. Changes nothing. */
+export interface OrchestrationSessionArchivePreview {
+  sessionId: string;
+  panes: OrchestrationSessionArchivePane[];
+}
+
+/**
+ * `orchestration-sessions:archive`: the Panes the person approved in the archive dialog.
+ * `archivePaneIds` were safe in the preview and are checked again, so one that became unsafe stays
+ * open; `forcePaneIds` were shown as unsafe and archived anyway. Every other Pane stays open.
+ */
+export interface OrchestrationSessionArchiveSelection {
+  archivePaneIds: string[];
+  forcePaneIds: string[];
+}
+
+/** What archiving a Session did with each Pane it considered. */
+export interface OrchestrationSessionArchivedPanes {
+  archivedPaneIds: string[];
+  keptPanes: Array<{ paneId: string; name: string; code: RunpanePaneArchiveBlockCode }>;
+  failedPanes: Array<{ paneId: string; name: string; error: string }>;
+}
+
+export interface OrchestrationSessionArchiveResult extends OrchestrationSessionArchivedPanes {
+  session: OrchestrationSessionRecord;
 }
 
 export interface OrchestrationSessionSelector {

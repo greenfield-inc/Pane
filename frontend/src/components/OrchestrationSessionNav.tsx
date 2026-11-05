@@ -9,7 +9,7 @@ import {
   type OrchestrationSessionAvailability,
 } from '../stores/orchestrationSessionStore';
 import type { OrchestrationSessionRecord } from '../../../shared/types/orchestrationSession';
-import type { OrchestrationSessionUpdateInput } from '../../../shared/types/orchestrationSession';
+import type { OrchestrationSessionArchivedPanes, OrchestrationSessionUpdateInput } from '../../../shared/types/orchestrationSession';
 import { LEGACY_ORCHESTRATION_SESSION_ID, nextOrchestrationSessionName } from '../../../shared/types/orchestrationSession';
 import { Modal, ModalBody, ModalFooter, ModalHeader } from './ui/Modal';
 import { Button } from './ui/Button';
@@ -23,7 +23,7 @@ import { readDraggedSessionId, startSessionDrag, useDraggedSessionId } from '../
 import { dropOrder, stepOrder, type SessionDropTarget } from '../utils/sessionReorder';
 import { ipcErrorMessage } from '../utils/ipcErrorMessage';
 import { MoveSessionToHostDialog } from './MoveSessionToHostDialog';
-import { archiveOrchestrationSession, clearArchivedToast, setArchivedToast, setOrchestrationSessionPinned, useArchivedSessionToastStore } from './orchestrationSessionActions';
+import { archiveOrchestrationSession, clearArchivedToast, restoreArchivedPanes, setArchivedToast, setOrchestrationSessionPinned, useArchivedSessionToastStore } from './orchestrationSessionActions';
 import { useMoveToHostBlockedReason } from '../hooks/useMoveToHostBlockedReason';
 import { PausedGlyph } from './ui/AgentStatusDot';
 import { PausedTooltipLines } from './SessionDetailTooltip';
@@ -362,7 +362,7 @@ export function OrchestrationSessionNav({
 
   const undoArchive = useCallback(async () => {
     if (!archivedToast) return;
-    const { sessionId, wasOpen, hostRevision } = archivedToast;
+    const { sessionId, wasOpen, hostRevision, panes } = archivedToast;
     // Every await can outlive the host; nothing may act on a host that never archived this Session.
     const hostChanged = () => useOrchestrationSessionStore.getState().hostRevision !== hostRevision;
     setArchivedToast(null);
@@ -370,10 +370,14 @@ export function OrchestrationSessionNav({
     try {
       await update({ sessionId }, { archived: false } satisfies OrchestrationSessionUpdateInput);
       if (hostChanged()) return;
+      // The Session is back either way; a Pane that fails to restore is reported after the refresh.
+      const paneRestore = await restoreArchivedPanes(panes.archivedPaneIds).then(() => null, (cause: unknown) => cause);
+      if (hostChanged()) return;
       await refresh();
       // Reopen only if the person is still on Home where the archive left them.
       const stillHome = useNavigationStore.getState().activeView === 'sessions' && !useSessionStore.getState().activeSessionId;
       if (wasOpen && stillHome && !hostChanged()) await openSession(sessionId);
+      if (paneRestore) throw paneRestore;
     } catch (cause) {
       setActionError(cause instanceof Error ? cause.message : 'Failed to restore Session');
     }
@@ -386,7 +390,7 @@ export function OrchestrationSessionNav({
   const archivedToastElement = archivedToast && (
     <UndoToast
       key={archivedToast.sessionId}
-      message={`Archived ${archivedToast.sessionName}`}
+      message={describeArchive(archivedToast.sessionName, archivedToast.panes)}
       onUndo={() => void undoArchive()}
       onDismiss={clearArchivedToast}
     />
@@ -817,4 +821,13 @@ function SessionContextMenu({ menu, onClose, onArchive, onPin, onMoveToHost }: S
       </form>
     </Modal>
   </>);
+}
+
+/** "Archived Alpha and its 2 Panes · kept auth-fix open", from what the host reports. */
+function describeArchive(sessionName: string, panes: OrchestrationSessionArchivedPanes): string {
+  const count = panes.archivedPaneIds.length;
+  const parts = [`Archived ${sessionName}${count === 0 ? '' : count === 1 ? ' and its Pane' : ` and its ${count} Panes`}`];
+  if (panes.keptPanes.length > 0) parts.push(`kept ${panes.keptPanes.map(pane => pane.name).join(', ')} open`);
+  if (panes.failedPanes.length > 0) parts.push(`could not archive ${panes.failedPanes.map(pane => pane.name).join(', ')}`);
+  return parts.join(' · ');
 }

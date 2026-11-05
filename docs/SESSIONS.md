@@ -285,18 +285,38 @@ restores its tab.
 
 ![Two-row Session header in Walnut](screenshots/two-row-header-walnut.png)
 
-Right-click a Session, or use its ⋯ button, to archive it. An "Archived · Undo"
-toast offers to restore it for a few seconds, and archiving the open Session
-returns the desktop view to Home. Archiving hides the chat from the active
-Sessions list while retaining its identity, conversation history, and Pane
-associations. Its Panes and worktrees remain accessible through repository
-navigation. Restore the Session from the sidebar’s Archived section. This is
-separate from archiving a project Pane and does not delete delegated work.
+Right-click a Session, or use its ⋯ button, to archive it. Archiving a
+Session also archives every Pane associated with it, removing their
+worktrees. When a Pane has work in progress (an agent working or waiting for
+an answer, text typed but not sent, unsaved edits, or uncommitted or unpushed
+work in its worktree), Pane first lists those Panes and asks: Keep them open
+archives the Session and the rest, Archive all archives them too, Cancel
+changes nothing. With none, it archives without asking. An "Archived · Undo"
+toast offers to restore the Session and the Panes it archived for a few
+seconds; Undo brings Panes back on their branches, not uncommitted changes.
+Archiving the open Session returns the desktop view to Home. The Session keeps
+its identity, conversation history, and Pane associations. Restore the
+Session from the sidebar’s Archived section, and its Panes from the Archived
+Panes list.
 
-The existing Session update contract accepts `archived: true` or
-`archived: false`. List results retain archived records, in the saved order;
-active navigation filters them. An archived Session keeps its place, so Undo or
-Restore puts it back where it was.
+The Session update contract accepts `archived: true` or `archived: false`.
+`archived: true` archives the associated Panes on the host, whoever sends it
+(phone, `runpane sessions update`); a Pane with work in progress stays open.
+`runpane sessions update` reports what happened in `panes`: `archivedPaneIds`,
+`keptPanes` (with the block `code`) and `failedPanes` (with the `error`).
+
+The desktop uses two channels. `orchestration-sessions:archive-preview` lists
+the Panes an archive would take, each with the `blocked` code `runpane panes
+archive --pane` would refuse it with, and changes nothing.
+`orchestration-sessions:archive` takes the Panes the person approved,
+`{ archivePaneIds, forcePaneIds }`: it archives the Session and those Panes
+only, checks `archivePaneIds` again (one that became unsafe stays open),
+archives `forcePaneIds` as chosen, and returns the same `archivedPaneIds`,
+`keptPanes` and `failedPanes` for the toast and Undo.
+
+List results retain archived records, in the saved order; active navigation
+filters them. An archived Session keeps its place, so Undo or Restore puts it
+back where it was.
 
 `orchestration-sessions:reorder` takes `{ sessionIds }`. The listed Sessions
 trade the places they already hold, so a list that shows only some Sessions
@@ -336,7 +356,8 @@ With a different agent, or `--note-only`, only the note moves and the new
 Session starts fresh from it. Like every Session, it waits for your first
 message: switch to that machine, open the Session, and send "continue". The
 Session folder and its Panes stay where they are, and the original Session is
-not archived; archive it from the same menu when you are done with it.
+not archived; archive it from the same menu when you are done with it, which
+also archives its Panes on this machine.
 
 ## Bring your existing sessions into Pane
 
@@ -628,7 +649,7 @@ The daemon and Electron IPC channels are:
 
 `orchestration-sessions:list`, `orchestration-sessions:select`,
 `orchestration-sessions:create`, `orchestration-sessions:get`,
-`orchestration-sessions:update`, `orchestration-sessions:reorder`, `orchestration-sessions:set-agent`,
+`orchestration-sessions:update`, `orchestration-sessions:archive-preview`, `orchestration-sessions:archive`, `orchestration-sessions:reorder`, `orchestration-sessions:set-agent`,
 `orchestration-sessions:associate`, `orchestration-sessions:detach`, and
 `orchestration-sessions:overview`.
 

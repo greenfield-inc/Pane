@@ -229,7 +229,13 @@ import { previewLoopSchedule } from '../services/loops/loopSchedule';
 import { loopInputSchema } from '../../../shared/types/loop';
 import type {
   OrchestrationAssociationInput,
+  OrchestrationSessionArchivedPanes,
+  OrchestrationSessionArchivePane,
+  OrchestrationSessionArchivePreview,
+  OrchestrationSessionArchiveSelection,
   OrchestrationSessionCreateInput,
+  OrchestrationSessionRecord,
+  OrchestrationSessionSelector,
   OrchestrationSessionUpdateInput,
 } from '../../../shared/types/orchestrationSession';
 import type { PaneChatAgent } from '../../../shared/types/paneChat';
@@ -688,10 +694,9 @@ export function registerRunpaneHandlers(
 
   commandRegistry.register('runpane:sessions:update', async (request: PaneCommandValue): Promise<RunpaneSessionResult> => {
     return withRunpaneAction(services, 'sessions:update', {}, async () => {
-      const manager = requireOrchestrationSessionManager(services);
       const normalized = parseOrchestrationSessionUpdateRequest(request);
-      const session = await manager.update(normalized.selector, normalized.input);
-      return { ok: true, session };
+      const { session, panes } = await updateOrchestrationSession(services, commandRegistry, normalized.selector, normalized.input);
+      return panes ? { ok: true, session, panes } : { ok: true, session };
     }, result => ({ resultCount: 1 }));
   });
 
@@ -1124,16 +1129,7 @@ export function registerRunpaneHandlers(
 
       const removeWorktree = Boolean(normalized.removeWorktree);
       await assertRemovableWorktree(services, pane, removeWorktree);
-      const worktreeCleanupApplicable = ownsRemovableWorktree(databaseService.getSession(pane.id))
-        || (removeWorktree && removesPaneWorktree(pane, removeWorktree));
-      const cleanupSkipReason = worktreeCleanupApplicable ? undefined : archiveCleanupSkipReason(pane);
-      const safetyCheck: RunpanePaneArchiveSafetyCheck = worktreeCleanupApplicable
-        ? await computeArchiveSafety(services, pane)
-        : { performed: false, reason: cleanupSkipReason, worktreeWillRemain: true };
-      withBusyAgents(safetyCheck, pane.id);
-      await withUnsentInput(safetyCheck, pane.id);
-
-      const blockCode = classifyArchiveBlock(safetyCheck, worktreeCleanupApplicable);
+      const { safetyCheck, blockCode, worktreeCleanupApplicable } = await checkPaneArchive(services, pane, removeWorktree);
       if (normalized.dryRun) {
         return {
           ok: true,
@@ -5470,6 +5466,95 @@ function resolvePane(sessionManager: AppServices['sessionManager'], paneId: stri
     throw paneNotFound(paneId);
   }
   return session;
+}
+
+/**
+ * Updates a Session; `archived: true` also archives the Panes associated with it (see
+ * `archiveSessionPanesWith`) and returns what happened to each in `panes`.
+ */
+export async function updateOrchestrationSession(
+  services: AppServices,
+  commandRegistry: PaneCommandRegistry,
+  selector: OrchestrationSessionSelector,
+  input: OrchestrationSessionUpdateInput,
+  selection?: OrchestrationSessionArchiveSelection,
+): Promise<{ session: OrchestrationSessionRecord; panes?: OrchestrationSessionArchivedPanes }> {
+  const session = await requireOrchestrationSessionManager(services).update(selector, input);
+  if (input.archived !== true) return { session };
+  return { session, panes: await archiveSessionPanesWith(services, commandRegistry, session, selection) };
+}
+
+/**
+ * Archives the Session's open Panes after the Session itself. Without a selection every Pane is
+ * considered and one the single-Pane archive refuses stays open. With one, only the approved Panes
+ * are: `archivePaneIds` are checked again, `forcePaneIds` are archived as the person chose. Each
+ * archive waits for its worktree removal, so restoring the Pane right after (Undo) finds no cleanup
+ * in flight.
+ */
+async function archiveSessionPanesWith(
+  services: AppServices,
+  commandRegistry: PaneCommandRegistry,
+  session: Pick<OrchestrationSessionRecord, 'associations'>,
+  selection: OrchestrationSessionArchiveSelection | undefined,
+): Promise<OrchestrationSessionArchivedPanes> {
+  const result: OrchestrationSessionArchivedPanes = { archivedPaneIds: [], keptPanes: [], failedPanes: [] };
+  for (const pane of openSessionPanes(services, session)) {
+    const force = selection?.forcePaneIds.includes(pane.id) ?? false;
+    if (selection && !force && !selection.archivePaneIds.includes(pane.id)) continue;
+    const check = await checkPaneArchive(services, pane, false);
+    if (check.blockCode && !force) {
+      result.keptPanes.push({ paneId: pane.id, name: pane.name, code: check.blockCode });
+      continue;
+    }
+    try {
+      const { worktreeCleanup } = await archivePaneAndRemoveWorktree(services, commandRegistry, pane, check.worktreeCleanupApplicable);
+      if (isArchiveCleanupOk(worktreeCleanup)) result.archivedPaneIds.push(pane.id);
+      else result.failedPanes.push({ paneId: pane.id, name: pane.name, error: 'Pane was archived but its worktree could not be removed.' });
+    } catch (error) {
+      result.failedPanes.push({ paneId: pane.id, name: pane.name, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  return result;
+}
+
+/** The Panes archiving this Session would take, each with the code a plain archive refuses it with, if any. Changes nothing. */
+export async function previewOrchestrationSessionArchive(
+  services: AppServices,
+  selector: OrchestrationSessionSelector,
+): Promise<OrchestrationSessionArchivePreview> {
+  const session = await requireOrchestrationSessionManager(services).get(selector);
+  const panes: OrchestrationSessionArchivePane[] = [];
+  for (const pane of openSessionPanes(services, session)) {
+    const { blockCode } = await checkPaneArchive(services, pane, false);
+    panes.push({ paneId: pane.id, name: pane.name, blocked: blockCode });
+  }
+  return { sessionId: session.id, panes };
+}
+
+/** Each open Pane associated with the Session, once. */
+function openSessionPanes(services: AppServices, session: Pick<OrchestrationSessionRecord, 'associations'>): Session[] {
+  return [...new Set(session.associations.map(association => association.paneId))]
+    .map(paneId => services.sessionManager.getSession(paneId))
+    .filter((pane): pane is Session => pane !== undefined && !pane.archived);
+}
+
+/**
+ * What archiving this Pane would put at risk: agents mid-turn, unsent input and, when archiving
+ * removes its worktree, unsaved work there. `blockCode` is why a plain archive refuses it.
+ */
+async function checkPaneArchive(services: AppServices, pane: Session, removeWorktree: boolean): Promise<{
+  safetyCheck: RunpanePaneArchiveSafetyCheck;
+  blockCode: RunpanePaneArchiveBlockCode | undefined;
+  worktreeCleanupApplicable: boolean;
+}> {
+  const worktreeCleanupApplicable = ownsRemovableWorktree(services.databaseService.getSession(pane.id))
+    || (removeWorktree && removesPaneWorktree(pane, removeWorktree));
+  const safetyCheck: RunpanePaneArchiveSafetyCheck = worktreeCleanupApplicable
+    ? await computeArchiveSafety(services, pane)
+    : { performed: false, reason: archiveCleanupSkipReason(pane), worktreeWillRemain: true };
+  withBusyAgents(safetyCheck, pane.id);
+  await withUnsentInput(safetyCheck, pane.id);
+  return { safetyCheck, blockCode: classifyArchiveBlock(safetyCheck, worktreeCleanupApplicable), worktreeCleanupApplicable };
 }
 
 /** Why archive leaves this pane's worktree alone, or undefined when archive removes it. */

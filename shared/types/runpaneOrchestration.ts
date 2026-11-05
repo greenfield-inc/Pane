@@ -7,6 +7,7 @@ import type { AgentState } from './agentStatus';
 import type { UsageByPane, UsagePaneCostSlice, UsageTotals } from './usage';
 import type { Loop, LoopSchedulePreview } from './loop';
 import type {
+  OrchestrationSessionArchivedPanes,
   OrchestrationSessionOverview,
   OrchestrationSessionRecord,
 } from './orchestrationSession';
@@ -29,6 +30,8 @@ export interface RunpaneSessionResult {
   session: OrchestrationSessionRecord;
   panelId?: string;
   internalSessionId?: string;
+  /** On `sessions update` with `archived: true`: what happened to each associated Pane. */
+  panes?: OrchestrationSessionArchivedPanes;
 }
 
 export interface RunpaneSessionOverviewResult extends OrchestrationSessionOverview {

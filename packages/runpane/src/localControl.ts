@@ -88,6 +88,12 @@ interface RunpaneSessionResult {
   session: OrchestrationSessionRecord;
   panelId?: string;
   internalSessionId?: string;
+  /** On `sessions update` with `archived: true`: what happened to each associated Pane. */
+  panes?: {
+    archivedPaneIds: string[];
+    keptPanes: Array<{ paneId: string; name: string; code: PaneArchiveBlockCode }>;
+    failedPanes: Array<{ paneId: string; name: string; error: string }>;
+  };
 }
 
 interface SessionSelectorValue {
@@ -1478,6 +1484,11 @@ export const runpaneSessionResultSchema: BoundarySchema<RunpaneSessionResult> = 
   session: orchestrationSessionRecordSchema,
   panelId: boundary.optional(boundary.nonEmptyString),
   internalSessionId: boundary.optional(boundary.nonEmptyString),
+  panes: boundary.optional(boundary.object({
+    archivedPaneIds: boundary.array(boundary.nonEmptyString),
+    keptPanes: boundary.array(boundary.object({ paneId: boundary.nonEmptyString, name: boundary.string, code: archiveBlockCodeSchema })),
+    failedPanes: boundary.array(boundary.object({ paneId: boundary.nonEmptyString, name: boundary.string, error: boundary.string })),
+  })),
 });
 const orchestrationPanelOverviewSchema = boundary.object({
   panelId: boundary.nonEmptyString,
@@ -2895,6 +2906,11 @@ function printSessionResult(result: RunpaneSessionResult, json: boolean, action:
   const prefix = action ? `${action} ` : '';
   console.log(`${prefix}${result.session.name} (${result.session.id})`);
   if (result.panelId) console.log(`  panel: ${result.panelId}`);
+  if (result.panes) {
+    console.log(`  archived ${result.panes.archivedPaneIds.length} Pane(s)`);
+    for (const pane of result.panes.keptPanes) console.log(`  kept open: ${pane.name} (${pane.paneId}) ${pane.code}; check it with \`runpane panes archive --pane ${pane.paneId} --dry-run\``);
+    for (const pane of result.panes.failedPanes) console.log(`  failed: ${pane.name} (${pane.paneId}) ${pane.error}`);
+  }
   return 0;
 }
 

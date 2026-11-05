@@ -713,6 +713,13 @@ def print_session_result(result: Dict[str, Any], as_json: bool, action: str) -> 
     print(f"{prefix}Session {session.get('name')} ({session.get('id')})")
     if result.get("panelId"):
         print(f"Panel: {result.get('panelId')}")
+    panes = result.get("panes")
+    if panes:
+        print(f"Archived {len(panes.get('archivedPaneIds', []))} Pane(s)")
+        for pane in panes.get("keptPanes", []):
+            print(f"Kept open: {pane.get('name')} ({pane.get('paneId')}) {pane.get('code')}; check it with `runpane panes archive --pane {pane.get('paneId')} --dry-run`")
+        for pane in panes.get("failedPanes", []):
+            print(f"Failed: {pane.get('name')} ({pane.get('paneId')}) {pane.get('error')}")
     return 0
 
 

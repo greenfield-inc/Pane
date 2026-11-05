@@ -13027,6 +13027,77 @@ export const RUNPANE_CONTRACT = {
         },
         "internalSessionId": {
           "type": "string"
+        },
+        "panes": {
+          "type": "object",
+          "description": "Only when the update archived the Session: what happened to each associated Pane.",
+          "required": [
+            "archivedPaneIds",
+            "keptPanes",
+            "failedPanes"
+          ],
+          "properties": {
+            "archivedPaneIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "keptPanes": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "paneId",
+                  "name",
+                  "code"
+                ],
+                "properties": {
+                  "paneId": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "code": {
+                    "enum": [
+                      "uncommitted-changes",
+                      "unpushed-commits",
+                      "uncommitted-and-unpushed",
+                      "status-unknown",
+                      "agent-busy",
+                      "unsent-input"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "failedPanes": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "paneId",
+                  "name",
+                  "error"
+                ],
+                "properties": {
+                  "paneId": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "error": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -19378,6 +19449,7 @@ export const RUNPANE_CONTRACT = {
           "JSON isPinned: true/false sets the UI pin star. Creation defaults to false; update preserves the pin when omitted.",
           "Payload fields (all optional on update; name required on create): name, goal, context, nextAction, launchCommand, profile (strings); isPinned and, on update, archived (booleans); agent (codex|claude|cursor); decisions and blockers (arrays of strings); evidence and outputs (arrays of links); create also takes runtime (windows|wsl) and wslDistribution; update also takes report, expectedRevision (the revision you read; the update is refused if the Session has moved on) and source (user|agent).",
           "A link is {\"label\": non-empty string, \"url\": an https://, http://, file:// or grain:// URL, \"addedAt\": ISO 8601 date such as 2026-10-14T09:30:00Z, \"kind\"?: evidence|output|ticket|pull-request|other, \"provenance\"?: string}.",
+          "archived: true also archives every Pane associated with the Session, as `panes archive --pane` would. A Pane that check refuses stays open (agent-busy, unsent-input, uncommitted-changes, unpushed-commits, uncommitted-and-unpushed, status-unknown), and so does one whose archive fails. The result's `panes` lists `archivedPaneIds`, `keptPanes` (with `code`) and `failedPanes` (with `error`); check a kept Pane with `panes archive --pane <id> --dry-run --json`. Undo is the person's: `panes restore`.",
           "Arrays replace the stored value: send the whole list, not only new items.",
           "Every problem in the payload is reported at once in one ERR_SESSION_PAYLOAD_INVALID error (paths such as outputs[0].addedAt, \"missing\" for an absent required field), and nothing is changed.",
           "update only: report is {\"summary\": non-empty string, \"status\": reported|verified, \"evidence\": [at least one link], \"reportedAt\": ISO 8601 date, \"provenance\": non-empty string}; report null clears it.",
