@@ -1,7 +1,7 @@
 import { KeyRound, Plus, Trash2 } from 'lucide-react';
 import { Input } from './ui/Input';
 import { Button, IconButton } from './ui/Button';
-import { cn } from '../utils/cn';
+import { SegmentedControl } from './settings/SettingsControls';
 import { isMac } from '../utils/platformUtils';
 import { emptyProjectEnvRow, projectEnvRowProblem, rowSecretAddress, type ProjectEnvRow } from './projectEnvRows';
 
@@ -13,41 +13,14 @@ interface ProjectEnvVarsSectionProps {
 }
 
 const SOURCE_OPTIONS = [
-  { value: 'plain', label: 'Plain text' },
-  { value: 'secret', label: 'Pane secret' },
-  { value: 'keychain', label: 'macOS Keychain' },
+  { id: 'plain', label: 'Plain text' },
+  { id: 'secret', label: 'Pane secret' },
+  { id: 'keychain', label: 'macOS Keychain' },
 ] as const;
 
 /** Keychain items exist only on macOS; a row saved with one elsewhere still shows it. */
 function sourceOptions(row: ProjectEnvRow) {
-  return isMac() || row.source === 'keychain' ? SOURCE_OPTIONS : SOURCE_OPTIONS.filter(option => option.value !== 'keychain');
-}
-
-function Segment<Value extends string>({ value, options, onChange, label }: {
-  value: Value;
-  options: ReadonlyArray<{ value: Value; label: string }>;
-  onChange: (value: Value) => void;
-  label: string;
-}) {
-  return (
-    <div role="radiogroup" aria-label={label} className="inline-flex shrink-0 rounded-md border border-border-primary bg-surface-secondary p-0.5">
-      {options.map(option => (
-        <button
-          key={option.value}
-          type="button"
-          role="radio"
-          aria-checked={value === option.value}
-          onClick={() => onChange(option.value)}
-          className={cn(
-            'h-7 w-28 rounded text-xs font-medium transition-colors',
-            value === option.value ? 'bg-bg-primary text-text-primary shadow-sm' : 'text-text-tertiary hover:text-text-secondary',
-          )}
-        >
-          {option.label}
-        </button>
-      ))}
-    </div>
-  );
+  return isMac() || row.source === 'keychain' ? SOURCE_OPTIONS : SOURCE_OPTIONS.filter(option => option.id !== 'keychain');
 }
 
 /** Project Settings → Environment Variables. Secret and keychain values are write-only: a saved value is never shown. */
@@ -77,6 +50,7 @@ export function ProjectEnvVarsSection({ rows, onChange, defaultProject }: Projec
           <p className="text-sm text-text-tertiary">No variables. Pane&apos;s own variables (PATH, WORKTREE_PATH, PANE_*) are always set.</p>
         )}
         {rows.map((row, index) => {
+          const options = sourceOptions(row);
           const problem = row.key.trim() || row.value || row.secretProject || row.secretName || row.secretValue || row.service || row.account
             ? projectEnvRowProblem(row, rows.slice(0, index))
             : null;
@@ -93,11 +67,12 @@ export function ProjectEnvVarsSection({ rows, onChange, defaultProject }: Projec
                     fullWidth
                   />
                 </div>
-                <Segment
+                <SegmentedControl
                   label={`Where ${row.key || 'this variable'} comes from`}
                   value={row.source}
                   onChange={(source) => update(row.id, { source })}
-                  options={sourceOptions(row)}
+                  options={options}
+                  columns={options.length === 3 ? 3 : 2}
                 />
                 <IconButton
                   type="button"
