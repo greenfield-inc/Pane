@@ -430,6 +430,7 @@ interface PausedMark {
   at: string;
   by: 'manual' | 'auto';
   idleHours?: number;
+  runScript?: boolean;
 }
 
 interface PauseResult {
@@ -1135,6 +1136,7 @@ const pausedMarkSchema: BoundarySchema<PausedMark> = boundary.object({
   at: boundary.string,
   by: boundary.enumeration('manual', 'auto'),
   idleHours: boundary.optional(boundary.number),
+  runScript: boundary.optional(boundary.boolean),
 });
 const pauseResultSchema: BoundarySchema<PauseResult> = boundary.object({
   ok: boundary.boolean,

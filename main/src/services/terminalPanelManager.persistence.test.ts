@@ -1352,6 +1352,46 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void
       expect(ptyHost.spawnOptions).toHaveLength(0);
     });
 
+    it('stops the tabs it could mark, reports the one it could not, and stops a marked tab left running', async () => {
+      vi.useFakeTimers();
+      try {
+        const first = makePanel('first-tab');
+        const second = makePanel('second-tab');
+        const manager = new TerminalPanelManager(inProcessEmulatorHost);
+        managers.push(manager);
+        const panels = new Map([[first.id, first], [second.id, second]]);
+        panelManagerMock.getPanel.mockImplementation((panelId: string) => panels.get(panelId));
+        for (const panel of panels.values()) {
+          databaseService.createPanel({ id: panel.id, sessionId: panel.sessionId, type: 'terminal', title: panel.title, state: panel.state });
+          await manager.initializeTerminal(panel, tempDir);
+        }
+        const markPanel = panelManagerMock.commitPaused.getMockImplementation();
+        panelManagerMock.commitPaused.mockImplementation(async (panelId: string, value: TerminalPausedMark | undefined) => {
+          if (panelId === second.id) throw new Error('state write refused');
+          await markPanel?.(panelId, value);
+        });
+        const changes: unknown[] = [];
+        manager.on('pause-changed', change => changes.push(change));
+
+        const pausing = manager.pausePanels([first.id, second.id], mark);
+        await vi.advanceTimersByTimeAsync(5000);
+        expect(await pausing).toEqual({ paused: [first.id], failed: [{ panelId: second.id, error: 'state write refused' }] });
+        expect(manager.isTerminalInitialized(first.id)).toBe(false);
+        expect(manager.isTerminalInitialized(second.id)).toBe(true);
+        expect(changes).toHaveLength(1);
+
+        // The second tab now carries a mark but still runs: the next pause stops it.
+        second.state.customState = { ...second.state.customState, paused: mark };
+        const again = manager.pausePanels([second.id], mark);
+        await vi.advanceTimersByTimeAsync(5000);
+        expect(await again).toEqual({ paused: [second.id], failed: [] });
+        expect(manager.isTerminalInitialized(second.id)).toBe(false);
+      } finally {
+        vi.clearAllTimers();
+        vi.useRealTimers();
+      }
+    });
+
     it('stops a start that was already under way when the pause landed', async () => {
       const panel = makePanel('starting-tab');
       panel.state.customState = { agentType: 'claude', agentSessionId: 'conversation-1', hasClaudeSessionId: true, initialCommand: 'claude' };
@@ -1361,10 +1401,10 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void
       databaseService.createPanel({ id: panel.id, sessionId: panel.sessionId, type: 'terminal', title: panel.title, state: panel.state });
 
       // Pause lands while the PTY spawns, after this start already passed the gate.
-      let pausing: Promise<string[]> | undefined;
+      let pausing: ReturnType<TerminalPanelManager['pausePanels']> | undefined;
       ptyHost.onSpawn = () => { pausing = manager.pausePanels([panel.id], mark); };
       await manager.initializeTerminal(panel, tempDir);
-      expect(await pausing).toEqual([panel.id]);
+      expect((await pausing)?.paused).toEqual([panel.id]);
 
       expect(ptyHost.spawnOptions).toHaveLength(1);
       expect(manager.isTerminalInitialized(panel.id)).toBe(false);
@@ -1384,7 +1424,7 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void
         handle.write = async (data: string) => { await write(data); if (data === '\x03') handle.emit('\x1b[2J\x1b[Hshell after exit $ '); };
         const pausing = manager.pausePanels([panel.id], mark);
         await vi.advanceTimersByTimeAsync(5000);
-        expect(await pausing).toEqual([panel.id]);
+        expect((await pausing)?.paused).toEqual([panel.id]);
         expect(databaseService.getPanel(panel.id)?.state.customState?.screenText).toContain('the plan is ready');
         expect(databaseService.getPanel(panel.id)?.state.customState?.screenText).not.toContain('shell after exit');
 
@@ -1394,7 +1434,7 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void
         await expect(manager.initializeTerminal(panel, tempDir)).rejects.toMatchObject({ code: 'ERR_PANEL_PAUSED' });
         expect(ptyHost.spawnOptions).toHaveLength(1);
 
-        expect(await manager.pausePanels([panel.id], mark)).toEqual([]);
+        expect((await manager.pausePanels([panel.id], mark)).paused).toEqual([]);
         expect(await manager.clearPaused([panel.id])).toEqual([panel.id]);
         await manager.initializeTerminal(panel, tempDir);
         expect(ptyHost.spawnOptions).toHaveLength(2);

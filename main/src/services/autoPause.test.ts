@@ -22,7 +22,7 @@ function world(overrides: Partial<AutoPauseDependencies> = {}) {
   const panes: AutoPausePane[] = ['idle', 'focused', 'blocked', 'notify', 'archived', 'session-chat', 'updating', 'typed-recently']
     .map(id => ({ id, createdAt: new Date(START), archived: id === 'archived' }));
   const panels = new Map(panes.map(pane => [pane.id, [tab(`${pane.id}:1`, started)]]));
-  const pausedCalls: Array<{ panelIds: readonly string[]; mark: TerminalPausedMark }> = [];
+  const pausedCalls: Array<{ paneId: string; mark: TerminalPausedMark }> = [];
   let now = START;
   const deps: AutoPauseDependencies = {
     now: () => now,
@@ -34,7 +34,7 @@ function world(overrides: Partial<AutoPauseDependencies> = {}) {
     hasOpenNotify: panelIds => panelIds.includes('notify:1'),
     focusedPaneId: () => 'focused',
     heldByUpdate: panel => panel.id === 'updating:1',
-    pause: async (panelIds, mark) => { pausedCalls.push({ panelIds, mark }); return [...panelIds]; },
+    pause: async (paneId, mark) => { pausedCalls.push({ paneId, mark }); return { paused: [`${paneId}:1`], failed: [] }; },
     ...overrides,
   };
   return { deps, pausedCalls, panels, advance: (ms: number) => { now += ms; } };
@@ -51,8 +51,8 @@ describe('auto-pause', () => {
     advance(2 * HOUR);
     expect(await pauser.sweep()).toEqual(['idle', 'session-chat']);
     expect(pausedCalls).toEqual([
-      { panelIds: ['idle:1'], mark: { at: '2026-11-03T01:00:00.000Z', by: 'auto', idleHours: 48 } },
-      { panelIds: ['session-chat:1'], mark: { at: '2026-11-03T01:00:00.000Z', by: 'auto', idleHours: 48 } },
+      { paneId: 'idle', mark: { at: '2026-11-03T01:00:00.000Z', by: 'auto', idleHours: 48 } },
+      { paneId: 'session-chat', mark: { at: '2026-11-03T01:00:00.000Z', by: 'auto', idleHours: 48 } },
     ]);
   });
 
@@ -71,7 +71,7 @@ describe('auto-pause', () => {
     panels.set('idle', [tab('idle:1', new Date(START).toISOString(), mark)]);
     advance(72 * HOUR);
     expect(await new AutoPauser(deps).sweep()).toEqual(['session-chat']);
-    expect(pausedCalls.map(call => call.panelIds)).toEqual([['session-chat:1']]);
+    expect(pausedCalls.map(call => call.paneId)).toEqual(['session-chat']);
 
     const off = world({ settings: () => ({ enabled: false, hours: 48 }) });
     off.advance(72 * HOUR);
@@ -82,5 +82,16 @@ describe('auto-pause', () => {
     const { deps, advance } = world({ settings: () => ({ enabled: true, hours: 2 }), liveActivity: () => undefined });
     advance(3 * HOUR);
     expect(await new AutoPauser(deps).sweep()).toEqual(['idle', 'session-chat', 'typed-recently']);
+  });
+
+  it('keeps pausing the other idle Panes when one cannot pause', async () => {
+    const { deps, advance } = world({
+      pause: async (paneId) => {
+        if (paneId === 'idle') throw new Error('state write refused');
+        return { paused: [`${paneId}:1`], failed: [] };
+      },
+    });
+    advance(49 * HOUR);
+    expect(await new AutoPauser(deps).sweep()).toEqual(['session-chat']);
   });
 });

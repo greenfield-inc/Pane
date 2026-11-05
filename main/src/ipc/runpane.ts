@@ -13,7 +13,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import { browserFileContext } from '../services/browserFileContext';
 import { PaneError, paneErrorText, reasonOf } from '../../../shared/paneError';
 import { paneInactiveSince, parseSessionTimestampMs } from '../services/paneInactivity';
-import { restartRunScriptsAfterResume, stopRunScriptsForPause } from '../services/pausedRunScripts';
+import { panesWithStoppedRunScripts, pausePanes, restartRunScripts, terminalPanelIdsOf } from '../services/panePause';
 import { isOrchestrationInternalSessionId, resolveSessionRetention } from '../../../shared/types/orchestrationSession';
 import type { IpcMain } from 'electron';
 import type { AppServices } from './types';
@@ -26,7 +26,7 @@ import {
   selectPanelScreenText,
 } from '../services/panels/terminalScreenText';
 import { panelManager } from '../services/panelManager';
-import { terminalPanelManager, type TerminalPanelSnapshot } from '../services/terminalPanelManager';
+import { terminalPanelManager, type PauseOutcome, type TerminalPanelSnapshot } from '../services/terminalPanelManager';
 import { databaseService as panelDatabase } from '../services/database';
 import { ensureProjectAgentContext } from '../services/agentContextManager';
 import { getPaneEventSink } from '../core/runtime';
@@ -68,7 +68,7 @@ import { classifyWorktree } from '../services/worktreeTrash';
 import { CommandRunner } from '../utils/commandRunner';
 import type { Project } from '../database/models';
 import type { Session, SessionOutput } from '../types/session';
-import { pausedMarkOf, type BrowserPanelState, type CreatePanelRequest, type EditorPanelState, type TerminalAgentReport, type TerminalExpectedReport, type TerminalPanelState, type ToolPanel } from '../../../shared/types/panels';
+import { pausedMarkOf, type TerminalPausedMark, type BrowserPanelState, type CreatePanelRequest, type EditorPanelState, type TerminalAgentReport, type TerminalExpectedReport, type TerminalPanelState, type ToolPanel } from '../../../shared/types/panels';
 import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
 import { withSessionFolderAccess } from '../services/agents/sessionFolderAccess';
 import { sessionWorkspacePath } from '../services/sessionWorkspace';
@@ -1380,25 +1380,21 @@ export function registerRunpaneHandlers(
   commandRegistry.register('runpane:panels:pause', async (request: PaneCommandValue): Promise<RunpanePauseResult> => {
     return withRunpaneAction(services, 'panels:pause', {}, async () => {
       const panel = resolveTerminalPanel(parsePauseTarget(request, 'panelId', 'Panel pause'));
-      return pauseTabs(services, { kind: 'panel', panelId: panel.id, paneId: panel.sessionId }, [panel.id]);
+      return pauseTabs(services, { kind: 'panel', panelId: panel.id, paneId: panel.sessionId }, [panel.id], mark => terminalPanelManager.pausePanels([panel.id], mark));
     }, pauseActionMetrics);
   });
 
   commandRegistry.register('runpane:panes:pause', async (request: PaneCommandValue): Promise<RunpanePauseResult> => {
     return withRunpaneAction(services, 'panes:pause', {}, async () => {
       const pane = resolvePane(sessionManager, parsePauseTarget(request, 'paneId', 'Pane pause'));
-      const result = await pauseTabs(services, { kind: 'pane', paneId: pane.id, paneName: pane.name }, terminalPanelIdsOf([pane.id]));
-      await stopRunScriptsForPause(commandRegistry, [pane.id]);
-      return result;
+      return pauseTabs(services, { kind: 'pane', paneId: pane.id, paneName: pane.name }, terminalPanelIdsOf([pane.id]), mark => pausePanes(commandRegistry, [pane.id], mark));
     }, pauseActionMetrics);
   });
 
   commandRegistry.register('runpane:panes:resume', async (request: PaneCommandValue): Promise<RunpanePauseResult> => {
     return withRunpaneAction(services, 'panes:resume', {}, async () => {
       const pane = resolvePane(sessionManager, parsePauseTarget(request, 'paneId', 'Pane resume'));
-      const result = await resumeTabs(services, { kind: 'pane', paneId: pane.id, paneName: pane.name }, terminalPanelIdsOf([pane.id]));
-      await restartRunScriptsAfterResume(commandRegistry, [pane.id]);
-      return result;
+      return resumeTabs(services, commandRegistry, { kind: 'pane', paneId: pane.id, paneName: pane.name }, [pane.id]);
     }, pauseActionMetrics);
   });
 
@@ -1406,9 +1402,7 @@ export function registerRunpaneHandlers(
     return withRunpaneAction(services, 'sessions:pause', {}, async () => {
       const record = await requireOrchestrationSessionManager(services).get({ sessionId: parsePauseTarget(request, 'sessionId', 'Session pause') });
       const paneIds = requireOrchestrationSessionManager(services).pausablePaneIds(record.id);
-      const result = await pauseTabs(services, { kind: 'session', sessionId: record.id, sessionName: record.name }, terminalPanelIdsOf(paneIds));
-      await stopRunScriptsForPause(commandRegistry, paneIds);
-      return result;
+      return pauseTabs(services, { kind: 'session', sessionId: record.id, sessionName: record.name }, terminalPanelIdsOf(paneIds), mark => pausePanes(commandRegistry, paneIds, mark));
     }, pauseActionMetrics);
   });
 
@@ -1419,9 +1413,7 @@ export function registerRunpaneHandlers(
         throw new PaneError('ERR_RUNPANE_SESSION_ARCHIVED', `Session ${record.name} is archived, so it was not resumed. Nothing was changed.`, 'Restore the Session in Pane, then resume it.');
       }
       const paneIds = requireOrchestrationSessionManager(services).pausablePaneIds(record.id);
-      const result = await resumeTabs(services, { kind: 'session', sessionId: record.id, sessionName: record.name }, terminalPanelIdsOf(paneIds));
-      await restartRunScriptsAfterResume(commandRegistry, paneIds);
-      return result;
+      return resumeTabs(services, commandRegistry, { kind: 'session', sessionId: record.id, sessionName: record.name }, paneIds);
     }, pauseActionMetrics);
   });
 
@@ -3248,11 +3240,6 @@ function pauseActionMetrics(result: RunpanePauseResult) {
   return { ok: result.ok, resultCount: result.panelIds.length };
 }
 
-/** The terminal tabs of these Panes: what pausing or resuming a Pane or Session acts on. */
-function terminalPanelIdsOf(paneIds: readonly string[]): string[] {
-  return paneIds.flatMap(paneId => panelManager.getPanelsForSession(paneId).filter(panel => panel.type === 'terminal').map(panel => panel.id));
-}
-
 function pauseScopeLabel(scope: RunpanePauseScope): string {
   if (scope.kind === 'panel') return `Tab ${panelManager.getPanel(scope.panelId)?.title ?? scope.panelId}`;
   return scope.kind === 'pane' ? `Pane ${scope.paneName}` : `Session ${scope.sessionName}`;
@@ -3263,28 +3250,32 @@ function pauseScopeArgument(scope: RunpanePauseScope): string {
   return scope.kind === 'pane' ? `panes resume --pane ${scope.paneId} --yes` : `sessions resume --session ${scope.sessionId}`;
 }
 
-async function pauseTabs(services: AppServices, scope: RunpanePauseScope, panelIds: string[]): Promise<RunpanePauseResult> {
+async function pauseTabs(services: AppServices, scope: RunpanePauseScope, panelIds: string[], pause: (mark: TerminalPausedMark) => Promise<PauseOutcome>): Promise<RunpanePauseResult> {
   const pane = scope.kind === 'session' ? undefined : services.sessionManager.getSession(scope.paneId);
   if (pane?.archived) {
     throw new PaneError('ERR_RUNPANE_PANE_ARCHIVED', `Pane ${pane.name} is archived, so nothing was paused. Its processes already stopped when it was archived.`, 'Nothing to do; restore it from the Archived list first if you meant to run it.');
   }
-  const paused = await terminalPanelManager.pausePanels(panelIds, { at: new Date().toISOString(), by: 'manual' });
+  const { paused, failed } = await pause({ at: new Date().toISOString(), by: 'manual' });
   const label = pauseScopeLabel(scope);
   return {
-    ok: true,
+    ok: failed.length === 0,
     action: 'paused',
     scope,
     panelIds: paused,
-    unchanged: panelIds.length - paused.length,
-    failed: [],
-    message: panelIds.length === 0 ? `${label} has no terminal tabs, so nothing was paused.`
+    unchanged: Math.max(0, panelIds.length - paused.length - failed.length),
+    failed,
+    message: failed.length > 0 ? `${label}: ${paused.length} tab(s) paused, ${failed.length} could not be paused.`
+      : panelIds.length === 0 ? `${label} has no terminal tabs, so nothing was paused.`
       : paused.length === 0 ? `${label} was already paused.` : `${label} is paused: ${paused.length} tab(s) stopped. Resume keeps their conversations.`,
     nextCommand: `runpane ${pauseScopeArgument(scope)}`,
   };
 }
 
 /** Resumes the paused tabs in scope through the same restart `panels resume` runs. Running tabs are left alone. */
-async function resumeTabs(services: AppServices, scope: RunpanePauseScope, panelIds: string[]): Promise<RunpanePauseResult> {
+async function resumeTabs(services: AppServices, registry: PaneCommandRegistry, scope: RunpanePauseScope, paneIds: readonly string[]): Promise<RunpanePauseResult> {
+  const panelIds = terminalPanelIdsOf(paneIds);
+  // Read before resuming: resume clears the marks that record which run scripts Pause stopped.
+  const scripts = panesWithStoppedRunScripts(paneIds);
   const paused = panelIds.filter(isPanelPaused);
   const results = await mapWithConcurrency(paused, DEFAULT_RESUME_CONCURRENCY, async (panelId) => {
     try {
@@ -3296,6 +3287,7 @@ async function resumeTabs(services: AppServices, scope: RunpanePauseScope, panel
   });
   const failed = results.flatMap(item => item.error === undefined ? [] : [{ panelId: item.panelId, error: item.error }]);
   const resumed = results.filter(item => item.error === undefined).map(item => item.panelId);
+  await restartRunScripts(registry, scripts);
   const label = pauseScopeLabel(scope);
   return {
     ok: failed.length === 0,
@@ -3305,7 +3297,7 @@ async function resumeTabs(services: AppServices, scope: RunpanePauseScope, panel
     unchanged: panelIds.length - paused.length,
     failed,
     message: paused.length === 0 ? `${label} was not paused; nothing was restarted.`
-      : failed.length > 0 ? `${label}: ${resumed.length} tab(s) resumed, ${failed.length} could not start.` : `${label} resumed: ${resumed.length} tab(s) restarted in their saved conversations.`,
+      : failed.length > 0 ? `${label}: ${resumed.length} tab(s) resumed, ${failed.length} could not start.` : `${label} resumed: ${resumed.length} tab(s) restarted (agents in their saved conversations).`,
     nextCommand: scope.kind === 'session' ? `runpane watch --session ${scope.sessionId} --until-event --json`
       : scope.kind === 'pane' ? `runpane panels list --pane ${scope.paneId} --json` : panelWaitCommand(scope.panelId),
   };

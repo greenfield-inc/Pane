@@ -1,4 +1,5 @@
 import type { ToolPanel, TerminalPausedMark } from '../../../shared/types/panels';
+import type { PauseOutcome } from './terminalPanelManager';
 import { pausedMarkOf } from '../../../shared/types/panels';
 import type { AgentState } from '../../../shared/types/agentStatus';
 import { DEFAULT_AUTO_PAUSE_HOURS, isValidAutoPauseHours } from '../../../shared/types/autoPause';
@@ -26,7 +27,8 @@ export interface AutoPauseDependencies {
   focusedPaneId(): string | undefined;
   /** A tab an app update stopped and still holds for its own restore. */
   heldByUpdate(panel: ToolPanel): boolean;
-  pause(panelIds: readonly string[], mark: TerminalPausedMark): Promise<string[]>;
+  /** Pauses a whole Pane: its tabs and its run script. */
+  pause(paneId: string, mark: TerminalPausedMark): Promise<PauseOutcome>;
   /** Tests and QA only (`PANE_AUTO_PAUSE_TEST_THRESHOLD_MS`): a short threshold, swept every few seconds. */
   testThresholdMs?: number;
 }
@@ -71,10 +73,10 @@ export class AutoPauser {
     if (settings.enabled === false) return [];
     const hours = settings.hours !== undefined && isValidAutoPauseHours(settings.hours) ? settings.hours : DEFAULT_AUTO_PAUSE_HOURS;
     const now = this.deps.now();
-    const focused = this.deps.focusedPaneId();
     const paused: string[] = [];
     for (const pane of this.deps.panes()) {
-      if (pane.archived || pane.id === focused) continue;
+      // Read per Pane: each pause takes seconds, and the person may focus a Pane meanwhile.
+      if (pane.archived || pane.id === this.deps.focusedPaneId()) continue;
       const terminals = this.deps.panels(pane.id).filter(panel => panel.type === 'terminal');
       const running = terminals.filter(panel => !pausedMarkOf(panel));
       if (running.length === 0) continue;
@@ -82,8 +84,14 @@ export class AutoPauser {
       if (this.deps.hasOpenNotify(running.map(panel => panel.id))) continue;
       const inactiveSince = paneInactiveSince({ ...pane, panels: this.deps.panels(pane.id) }, this.deps.liveActivity);
       if (now - inactiveSince.getTime() < (this.deps.testThresholdMs ?? hours * HOUR_MS)) continue;
-      const done = await this.deps.pause(running.map(panel => panel.id), { at: new Date(now).toISOString(), by: 'auto', idleHours: hours });
-      if (done.length > 0) paused.push(pane.id);
+      // One Pane that cannot pause never stops the sweep for the Panes after it.
+      try {
+        const outcome = await this.deps.pause(pane.id, { at: new Date(now).toISOString(), by: 'auto', idleHours: hours });
+        if (outcome.failed.length > 0) console.error(`[AutoPause] Pane ${pane.id} did not fully pause:`, outcome.failed);
+        if (outcome.paused.length > 0) paused.push(pane.id);
+      } catch (error) {
+        console.error(`[AutoPause] Pane ${pane.id} could not be paused:`, error);
+      }
     }
     return paused;
   }

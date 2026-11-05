@@ -62,6 +62,8 @@ export interface TerminalPausedMark {
   by: 'manual' | 'auto';
   /** The auto-pause threshold in hours when `by` is `auto`. */
   idleHours?: number;
+  /** Pause stopped the Pane's run script too; Resume runs it again. */
+  runScript?: boolean;
 }
 
 /** The pause mark of a terminal tab, if Pause stopped it. */
