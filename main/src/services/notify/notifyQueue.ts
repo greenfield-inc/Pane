@@ -31,6 +31,13 @@ const HISTORY_LIMIT = 100;
 
 const REMIND_AFTER_MS = { '3m': 3 * 60_000, '5m': 5 * 60_000, '15m': 15 * 60_000, '10m': 10 * 60_000, '1h': 60 * 60_000 } satisfies Record<Exclude<NotifyRemindAfter, 'pane'>, number>;
 const ASK_IN_TERMINAL = 'Ask in the terminal instead.';
+/** A secret must never be typed into a terminal or chat. */
+const SECRET_UNAVAILABLE_NEXT = 'Ask the person to save it in Pane under Settings > Secrets, then run your command with `runpane secrets exec`. Do not ask them to paste it into the chat.';
+
+/** A secret card's unavailable result points at Settings, never at the terminal. */
+function forSecret(result: NotifyResult): NotifyResult {
+  return 'unavailable' in result ? { ...result, next: SECRET_UNAVAILABLE_NEXT } : result;
+}
 
 type Timer = ReturnType<typeof setTimeout>;
 
@@ -132,6 +139,12 @@ export class NotifyQueue extends EventEmitter {
 
   /** Handles one notify call. Resolves when the person answers, the call must return, or the caller leaves. */
   ask(request: { question?: NotifyQuestion; resume?: string; returnAfterMs?: number; source: NotifySource; id?: string }, signal?: AbortSignal): Promise<NotifyResult> {
+    const secret = request.question?.ui === 'secret' || (request.resume !== undefined && this.entries.get(request.resume)?.item.ui === 'secret');
+    const result = this.askOnce(request, signal);
+    return secret ? result.then(forSecret) : result;
+  }
+
+  private askOnce(request: { question?: NotifyQuestion; resume?: string; returnAfterMs?: number; source: NotifySource; id?: string }, signal?: AbortSignal): Promise<NotifyResult> {
     if (!this.env.settings().enabled) {
       return Promise.resolve(unavailable('Notify is off in Pane.'));
     }

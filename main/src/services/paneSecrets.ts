@@ -122,7 +122,7 @@ export function fileSecretBackend(filePath: string, encryption: SecretEncryption
 }
 
 /** Electron's safeStorage, or no encryption outside Electron. Linux's `basic_text` backend counts as none. */
-export function electronSecretEncryption(): SecretEncryption {
+function electronSecretEncryption(): SecretEncryption {
   type SafeStorage = Electron.SafeStorage;
   const safeStorage: SafeStorage | null = electronSafeStorage ?? null;
   const available = () => {
@@ -143,7 +143,7 @@ export function electronSecretEncryption(): SecretEncryption {
 }
 
 /** The value store for this host: the keychain on macOS, the file elsewhere. */
-export function systemSecretBackend(appDirectory: string, platform: string = process.platform): SecretValueBackend {
+function systemSecretBackend(appDirectory: string, platform: string = process.platform): SecretValueBackend {
   if (platform === 'darwin') return keychainSecretBackend(systemKeychain(platform), paneKeychainService(appDirectory));
   return fileSecretBackend(path.join(appDirectory, 'secrets.json'), electronSecretEncryption());
 }

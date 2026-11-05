@@ -5,11 +5,11 @@ import type { PaneSecretStorage, PaneSecretSummary } from '../../../shared/types
 import { isRemotePaneCommand, type PaneCommandRegistry, type PaneCommandValue } from '../daemon/commandRegistry';
 import { paneSecretStore, secretNotFound, validatePaneSecretAddress, type PaneSecretStore } from '../services/paneSecrets';
 
-export interface PaneSecretListResult { ok: true; secrets: PaneSecretSummary[]; storage: PaneSecretStorage }
-export interface PaneSecretSetResult { ok: true; replaced: boolean; secret: PaneSecretSummary }
-export interface PaneSecretDeleteResult { ok: true; deleted: { project: string; name: string } }
+interface PaneSecretListResult { ok: true; secrets: PaneSecretSummary[]; storage: PaneSecretStorage }
+interface PaneSecretSetResult { ok: true; replaced: boolean; secret: PaneSecretSummary }
+interface PaneSecretDeleteResult { ok: true; deleted: { project: string; name: string } }
 /** Only `runpane secrets exec` reads this; it is never an MCP tool or printed. */
-export interface PaneSecretResolveResult { ok: true; values: Record<string, string> }
+interface PaneSecretResolveResult { ok: true; values: Record<string, string> }
 
 const listSchema = boundary.object({ project: boundary.optional(boundary.string) });
 const addressSchema = boundary.object({ project: boundary.string, name: boundary.string });

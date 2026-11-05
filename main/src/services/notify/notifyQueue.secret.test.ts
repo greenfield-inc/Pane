@@ -58,6 +58,7 @@ describe('NotifyQueue secret cards', () => {
     const [id] = queue.snapshot().queue;
 
     await queue.run({ type: 'answer', id, answer: { text: CANARY } });
+    await vi.advanceTimersByTimeAsync(0);
 
     expect(secrets.saved.get('stripe/STRIPE_SECRET_KEY')).toBe(CANARY);
     expect(call.result).toEqual({ status: 'saved', project: 'stripe', name: 'STRIPE_SECRET_KEY' });
@@ -80,6 +81,7 @@ describe('NotifyQueue secret cards', () => {
     const [id] = queue.snapshot().queue;
 
     await queue.run({ type: 'answer', id, answer: { approved: false } });
+    await vi.advanceTimersByTimeAsync(0);
 
     expect(call.result).toEqual({ status: 'declined' });
     expect(secrets.saved.size).toBe(0);
@@ -100,6 +102,7 @@ describe('NotifyQueue secret cards', () => {
     expect(everythingVisible(queue, call.result)).not.toContain(CANARY);
 
     await queue.runRemote({ type: 'answer', id, answer: { text: CANARY } }, 'iPhone');
+    await vi.advanceTimersByTimeAsync(0);
     expect(call.result).toEqual({ status: 'saved', project: 'stripe', name: 'STRIPE_SECRET_KEY' });
     expect(queue.sharedState().items[0]).toMatchObject({ answeredOn: 'iPhone', answerSummary: 'Saved as stripe/STRIPE_SECRET_KEY' });
     expect(queue.sharedState().items[0].secretError).toBeUndefined();
@@ -117,8 +120,10 @@ describe('NotifyQueue secret cards', () => {
     expect(queue.sharedState().items[0].state).toBe('waiting');
   });
 
-  it('answers unavailable on a host that cannot save secrets', async () => {
+  it('answers unavailable on a host that cannot save secrets, pointing at Settings rather than the terminal', async () => {
     const queue = makeQueue(undefined);
-    await expect(queue.ask({ question: stripeKey, source: claude })).resolves.toMatchObject({ unavailable: expect.any(String) });
+    const result = await queue.ask({ question: stripeKey, source: claude });
+    expect(result).toMatchObject({ unavailable: expect.any(String), next: expect.stringContaining('Settings > Secrets') });
+    expect(JSON.stringify(result)).not.toContain('terminal');
   });
 });
