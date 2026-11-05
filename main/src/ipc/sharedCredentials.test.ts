@@ -158,6 +158,20 @@ describe('shared credentials on a host', () => {
     expect(configManager.getConfig().paneSecrets?.['qa/FROM_LINUX']).toEqual({ updatedAt: '2026-01-01T00:00:00.000Z', source: 'linux-box' });
   });
 
+  it('answers an apply without secret values, and syncs again without reading the keychain', async () => {
+    const { read, apply, secrets, keychain } = await registerHost();
+    await secrets.set('stripe', 'STRIPE_KEY', 'sk_test_local_canary');
+    const answer = await apply({ paneSecrets: { 'qa/FROM_LINUX': { value: 'linux-value', updatedAt: '2026-01-01T00:00:00.000Z', source: 'linux-box' } } });
+    expect(JSON.stringify(answer)).not.toMatch(/sk_test_local_canary|linux-value/);
+
+    const reads = vi.spyOn(keychain, 'read');
+    expect((await read()).paneSecrets).toMatchObject({
+      'stripe/STRIPE_KEY': { value: 'sk_test_local_canary' },
+      'qa/FROM_LINUX': { value: 'linux-value' },
+    });
+    expect(reads).not.toHaveBeenCalled();
+  });
+
   it('keeps a deleted secret deleted on both sides when an older copy arrives', async () => {
     const { read, apply, secrets, keychain } = await registerHost();
     await apply({ paneSecrets: { 'qa/OLD': { value: 'old', updatedAt: '2026-01-01T00:00:00.000Z', source: 'linux-box' } } });

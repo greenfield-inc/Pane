@@ -243,6 +243,8 @@ function isNewer(candidate: SharedCredential, current: PaneSecretMeta | undefine
  */
 export class PaneSecretStore {
   private queue: Promise<unknown> = Promise.resolve();
+  /** Values by key and `updatedAt`, so a sync reads the OS store only for a changed secret. */
+  private readonly known = new Map<string, { updatedAt: string; value: string }>();
 
   constructor(
     private readonly config: SecretConfig,
@@ -302,6 +304,7 @@ export class PaneSecretStore {
       }
       const meta: PaneSecretMeta = { updatedAt: this.now().toISOString(), source: this.hostLabel() };
       await this.config.updateConfigWith(config => ({ paneSecrets: { ...config.paneSecrets, [key]: meta } }));
+      this.known.set(key, { updatedAt: meta.updatedAt, value });
       this.onLocalChange();
       return { replaced, secret: { project, name, updatedAt: meta.updatedAt, machine: meta.source } };
     });
@@ -315,6 +318,7 @@ export class PaneSecretStore {
       const key = paneSecretKey(project, name);
       const meta: PaneSecretMeta = { updatedAt: this.now().toISOString(), source: this.hostLabel(), deleted: true };
       await this.config.updateConfigWith(config => ({ paneSecrets: { ...config.paneSecrets, [key]: meta } }));
+      this.known.delete(key);
       await this.values.remove(key).catch(error => {
         console.warn(`[PaneSecrets] Could not remove the stored value of ${key}: ${reasonOf(error)}`);
       });
@@ -350,7 +354,10 @@ export class PaneSecretStore {
         return;
       }
       try {
-        records[key] = { value: await this.values.read(key), updatedAt: meta.updatedAt, source: meta.source };
+        const known = this.known.get(key);
+        const value = known?.updatedAt === meta.updatedAt ? known.value : await this.values.read(key);
+        this.known.set(key, { updatedAt: meta.updatedAt, value });
+        records[key] = { value, updatedAt: meta.updatedAt, source: meta.source };
       } catch (error) {
         console.warn(`[PaneSecrets] Not sharing ${key}: its value could not be read (${reasonOf(error)})`);
       }
@@ -372,6 +379,8 @@ export class PaneSecretStore {
           console.warn(`[PaneSecrets] Could not save ${key} from ${record.source}: ${reasonOf(error)}`);
           continue;
         }
+        if (record.value === null) this.known.delete(key);
+        else this.known.set(key, { updatedAt: record.updatedAt, value: record.value });
         applied[key] = record.value === null
           ? { updatedAt: record.updatedAt, source: record.source, deleted: true }
           : { updatedAt: record.updatedAt, source: record.source };

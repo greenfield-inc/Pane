@@ -30,6 +30,7 @@ export function registerSharedCredentialHandlers(
     const changedSecrets = incoming.paneSecrets ? await secrets.applyFromSync(incoming.paneSecrets) : [];
     // Carries no values, so no key ever rides an event.
     if (changed.length + changedSecrets.length > 0) getPaneEventSink().send('remote:settings-changed');
-    return readAll();
+    // The keys only, as before secrets: callers ignore the answer, so secret values never travel back.
+    return readSharedCredentials(configManager.getConfig());
   });
 }
