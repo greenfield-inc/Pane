@@ -1,4 +1,5 @@
 import { safeStorage as electronSafeStorage } from 'electron';
+import { randomBytes } from 'crypto';
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
@@ -49,14 +50,77 @@ function localHostLabel(): string {
   return os.hostname().replace(/\.local$/i, '');
 }
 
-/** Values in the login keychain under Pane's per-data-dir service, account `secret:<project>/<NAME>`. */
+/** UTF-8 bytes per keychain item: `security -i` splits a command line at about 4 KB, and the value goes as hex. */
+const KEYCHAIN_PART_BYTES = 1024;
+/** Starts the main item of a value stored in parts; no text a person types starts with NUL. */
+const PARTS_MARKER = '\u0000pane-parts:';
+
+/** `value` cut into pieces of at most `limit` UTF-8 bytes, never inside a character. */
+function splitUtf8(value: string, limit: number): string[] {
+  const parts: string[] = [];
+  let current = '';
+  let bytes = 0;
+  for (const char of value) {
+    const size = Buffer.byteLength(char);
+    if (bytes + size > limit) {
+      parts.push(current);
+      current = '';
+      bytes = 0;
+    }
+    current += char;
+    bytes += size;
+  }
+  return [...parts, current];
+}
+
+/**
+ * Values in the login keychain under Pane's per-data-dir service, account `secret:<project>/<NAME>`.
+ * A value longer than one item holds is written as parts (`secret:<key>#<generation>.<n>`) first,
+ * then a main item that lists them, so a failed write leaves the earlier value whole.
+ */
 export function keychainSecretBackend(keychain: Keychain, service: string): SecretValueBackend {
   const account = (key: string) => `secret:${key}`;
+  const partAccount = (key: string, generation: string, index: number) => `secret:${key}#${generation}.${index}`;
+  const partsOf = (main: string): { generation: string; count: number } | null => {
+    const match = main.startsWith(PARTS_MARKER) ? /^([0-9a-z]+):(\d+)$/.exec(main.slice(PARTS_MARKER.length)) : null;
+    return match ? { generation: match[1], count: Number(match[2]) } : null;
+  };
+  const removeParts = (key: string, parts: { generation: string; count: number }) => Promise.allSettled(
+    Array.from({ length: parts.count }, (_, index) => keychain.remove(service, partAccount(key, parts.generation, index))),
+  );
+  const currentParts = (key: string) => keychain.read(service, account(key)).then(partsOf, () => null);
   return {
     storage: () => ({ kind: 'keychain', encrypted: true }),
-    read: key => keychain.read(service, account(key)),
-    write: (key, value) => keychain.write(service, account(key), value),
-    remove: key => keychain.remove(service, account(key)),
+    async read(key) {
+      const main = await keychain.read(service, account(key));
+      const parts = partsOf(main);
+      if (!parts) return main;
+      const pieces = await Promise.all(Array.from({ length: parts.count }, (_, index) => keychain.read(service, partAccount(key, parts.generation, index))));
+      return pieces.join('');
+    },
+    async write(key, value) {
+      const previous = await currentParts(key);
+      const pieces = splitUtf8(value, KEYCHAIN_PART_BYTES);
+      if (pieces.length === 1 && !value.startsWith(PARTS_MARKER)) {
+        await keychain.write(service, account(key), value);
+      } else {
+        const generation = randomBytes(6).toString('hex');
+        const parts = { generation, count: pieces.length };
+        try {
+          for (const [index, piece] of pieces.entries()) await keychain.write(service, partAccount(key, generation, index), piece);
+        } catch (error) {
+          await removeParts(key, parts);
+          throw error;
+        }
+        await keychain.write(service, account(key), `${PARTS_MARKER}${generation}:${pieces.length}`);
+      }
+      if (previous) await removeParts(key, previous);
+    },
+    async remove(key) {
+      const previous = await currentParts(key);
+      await keychain.remove(service, account(key));
+      if (previous) await removeParts(key, previous);
+    },
   };
 }
 

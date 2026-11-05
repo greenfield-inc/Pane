@@ -24,6 +24,8 @@ export type SecurityRunner = (args: readonly string[], stdin?: string) => Promis
 // A keychain item another app owns makes macOS ask the user before Pane may read
 // it; give them time to answer without holding a terminal open forever.
 const SECURITY_TIMEOUT_MS = 60_000;
+/** Longest command line `security -i` reads whole; it splits longer ones at about 4 KB. */
+const SECURITY_LINE_BYTES = 4000;
 
 const runSecurity: SecurityRunner = (args, stdin) => new Promise(resolve => {
   const child = execFile('/usr/bin/security', [...args], { timeout: SECURITY_TIMEOUT_MS, encoding: 'utf8' }, (error, stdout, stderr) => {
@@ -74,8 +76,12 @@ export function macKeychain(run: SecurityRunner = runSecurity): Keychain {
       // Through stdin and as hex, so the secret never appears in a process list
       // and needs no quoting.
       const hex = Buffer.from(secret, 'utf8').toString('hex');
-      const result = await run(['-i'], `add-generic-password -U -s ${quoteSecurityArg(service)} -a ${quoteSecurityArg(account)} -X ${hex}\n`);
-      if (result.code !== 0) throw new Error(securityFailure(result));
+      const line = `add-generic-password -U -s ${quoteSecurityArg(service)} -a ${quoteSecurityArg(account)} -X ${hex}\n`;
+      // `security -i` cuts a longer line in two: it would save the first half and print the rest.
+      if (Buffer.byteLength(line) > SECURITY_LINE_BYTES) throw new Error(`The value is too long for one keychain item (${Buffer.byteLength(secret)} bytes).`);
+      const result = await run(['-i'], line);
+      // Fixed text: `security` may echo the command line, which holds the value.
+      if (result.code !== 0) throw new Error(`The keychain refused the write (security exited with code ${result.code}).`);
     },
     async remove(service, account) {
       const result = await run(['delete-generic-password', '-s', service, '-a', account]);

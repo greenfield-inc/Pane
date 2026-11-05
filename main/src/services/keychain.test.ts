@@ -21,7 +21,7 @@ describe('macOS keychain', () => {
 
     expect(calls).toHaveLength(1);
     expect(calls[0].args.join(' ')).not.toContain('sk');
-    expect(calls[0].stdin).toBe(`add-generic-password -U -s "Pane" -a "2:UIVERIFY_API_KEY" -X ${Buffer.from('sk "live"').toString('hex')}\n`);
+    expect(calls[0].stdin).toBe(`add-generic-password -U -s "Pane" -a "2:UIVERIFY_API_KEY" -X 736b20226c69766522\n`);
   });
 
   it('reports the keychain\'s reason when a read fails', async () => {

@@ -3,7 +3,8 @@ import os from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { memoryConfig } from '../test/memorySecretStore';
-import { fileSecretBackend, PaneSecretStore, type SecretEncryption } from './paneSecrets';
+import { macKeychain, type SecurityRunner } from './keychain';
+import { fileSecretBackend, keychainSecretBackend, PaneSecretStore, type SecretEncryption } from './paneSecrets';
 
 const tempDirs: string[] = [];
 
@@ -104,5 +105,60 @@ describe('PaneSecretStore on the file backend', () => {
     await expect(store.set('has space', 'OK', 'x')).rejects.toMatchObject({ code: 'SECRET_INVALID' });
     await expect(store.set('qa', 'EMPTY', '')).rejects.toMatchObject({ code: 'SECRET_INVALID' });
     expect(store.list()).toEqual([]);
+  });
+});
+
+/**
+ * `/usr/bin/security` as observed: `-i` reads at most 4,095 bytes of a line as one command,
+ * runs the rest as another (`unknown command "…"`), and `-g` prints the password as hex.
+ */
+function fakeSecurity() {
+  const items = new Map<string, string>();
+  const run: SecurityRunner = async (args, stdin = '') => {
+    if (args[0] === '-i') {
+      const line = stdin.replace(/\n$/, '');
+      const [command, rest] = [line.slice(0, 4095), line.slice(4095)];
+      const match = /^add-generic-password -U -s "(.*)" -a "(.*)" -X ([0-9a-f]*)$/.exec(command);
+      if (match) items.set(`${match[1]}|${match[2]}`, Buffer.from(match[3], 'hex').toString('utf8'));
+      return rest ? { code: 1, stdout: '', stderr: `security: unknown command "${rest}"\n` } : { code: 0, stdout: '', stderr: '' };
+    }
+    const key = `${args[args.indexOf('-s') + 1]}|${args[args.indexOf('-a') + 1]}`;
+    const value = items.get(key);
+    if (value === undefined) return { code: 44, stdout: '', stderr: 'security: The specified item could not be found in the keychain.\n' };
+    if (args[0] === 'delete-generic-password') items.delete(key);
+    return { code: 0, stdout: '', stderr: `password: 0x${Buffer.from(value).toString('hex').toUpperCase()}  "…"\n` };
+  };
+  return { items, run };
+}
+
+describe('Pane secrets in the macOS keychain', () => {
+  // A 2,303-character service-account JSON with line breaks and non-ASCII text, as a person pastes it.
+  const longValue = `{"type":"service_account","private_key":"-----BEGIN PRIVATE KEY-----\n${'MIIEvQIBADANBgkqhkiG9w0BAQEFAASC'.repeat(70)}\n-----END PRIVATE KEY-----\n","note":"café"}`;
+
+  it('keeps a value longer than one keychain item whole, replaces it, and removes every part', async () => {
+    const security = fakeSecurity();
+    const store = new PaneSecretStore(memoryConfig(), keychainSecretBackend(macKeychain(security.run), 'Pane'), () => 'this-mac');
+
+    await store.set('gcp', 'SERVICE_ACCOUNT', longValue);
+    expect(await store.read('gcp', 'SERVICE_ACCOUNT')).toBe(longValue);
+    expect(security.items.size).toBeGreaterThan(1);
+
+    await store.set('gcp', 'SERVICE_ACCOUNT', 'short');
+    expect(await store.read('gcp', 'SERVICE_ACCOUNT')).toBe('short');
+    expect([...security.items.keys()]).toEqual(['Pane|secret:gcp/SERVICE_ACCOUNT']);
+
+    await store.set('gcp', 'SERVICE_ACCOUNT', longValue);
+    await store.delete('gcp', 'SERVICE_ACCOUNT');
+    expect(security.items.size).toBe(0);
+  });
+
+  it('never puts the value in a failed write\'s error', async () => {
+    const run: SecurityRunner = async (args, stdin = '') => ({ code: 1, stdout: '', stderr: `security: unknown command "${stdin}"\n` });
+
+    const failure = await keychainSecretBackend(macKeychain(run), 'Pane').write('gcp/KEY', 'sk-canary-value').catch((error: Error) => error);
+
+    expect(failure).toBeInstanceOf(Error);
+    expect(String(failure)).not.toContain(Buffer.from('sk-canary-value').toString('hex'));
+    expect(String(failure)).not.toContain('sk-canary-value');
   });
 });
