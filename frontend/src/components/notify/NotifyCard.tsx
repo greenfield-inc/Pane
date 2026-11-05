@@ -4,7 +4,7 @@ import type { NotifyChoice, NotifyCommand, NotifyItem, NotifyRemindAfter } from 
 import { cn } from '../../utils/cn';
 import { askedBy, NOTIFY_KIND_DOT, NOTIFY_KIND_LABEL, relativeAge, SECRET_KEPT_OUT, secretSavesAs, unreachableText } from './notifyFormat';
 import { useNow } from './useNow';
-import { SecretField } from '../ui/SecretField';
+import { SecretValueInput } from '../ui/SecretValueInput';
 
 /** The compact strip shows this many choices, then More. */
 const COMPACT_CHOICE_LIMIT = 4;
@@ -308,7 +308,7 @@ function CardHeader({ item, form, queue, onCommand, menuPlacement, machineMark }
   );
 }
 
-function focusAfterRequest(input: HTMLInputElement | HTMLTextAreaElement | null, request?: () => Promise<void>) {
+function focusAfterRequest(input: HTMLInputElement | null, request?: () => Promise<void>) {
   if (!input) return;
   if (!request) {
     input.focus();
@@ -328,13 +328,13 @@ interface TextFieldProps {
   sendLabel?: string;
   /** Focuses the field each time it changes, such as after a suggestion fills it. */
   focusKey?: number;
-  /** A secret: masked, keeps line breaks, never autofilled or spellchecked. */
+  /** A secret: a password field that keeps a pasted value's line breaks. */
   masked?: boolean;
 }
 
 function TextField({ value, onChange, onSubmit, placeholder, onFieldFocusRequest, autoFocus, sendLabel, focusKey = 0, masked }: TextFieldProps) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const secretRef = useRef<HTMLTextAreaElement>(null);
+  const secretRef = useRef<HTMLInputElement>(null);
   const field = () => inputRef.current ?? secretRef.current;
   useEffect(() => {
     if (autoFocus || focusKey > 0) focusAfterRequest(field(), onFieldFocusRequest);
@@ -357,13 +357,11 @@ function TextField({ value, onChange, onSubmit, placeholder, onFieldFocusRequest
   return (
     <div className="flex h-[42px] items-center gap-2 rounded-xl bg-surface-tertiary pl-3.5 pr-2 focus-within:ring-[1.5px] focus-within:ring-inset focus-within:ring-border-hover">
       {masked ? (
-        // One line tall: a pasted multi-line value scrolls inside the field.
-        <SecretField
+        <SecretValueInput
           ref={secretRef}
           appearance="bare"
           {...fieldProps}
-          className={cn(fieldProps.className, 'h-auto leading-5')}
-          onChange={(event) => onChange(event.target.value)}
+          onValueChange={onChange}
           onEnter={onSubmit}
         />
       ) : (

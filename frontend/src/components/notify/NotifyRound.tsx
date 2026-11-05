@@ -5,7 +5,7 @@ import { cn } from '../../utils/cn';
 import { askedBy, NOTIFY_KIND_DOT, NOTIFY_KIND_LABEL, relativeAge, SECRET_KEPT_OUT, secretSavesAs } from './notifyFormat';
 import { ShortcutCap, UnreachableNotice } from './NotifyCard';
 import { useNow } from './useNow';
-import { SecretField } from '../ui/SecretField';
+import { SecretValueInput } from '../ui/SecretValueInput';
 
 interface NotifyRoundProps {
   snapshot: NotifySnapshot;
@@ -103,7 +103,7 @@ function RoundPanel({ item, position, total, onCommand }: RoundPanelProps) {
   const [text, setText] = useState('');
   const noteRef = useRef<HTMLInputElement>(null);
   const textRef = useRef<HTMLInputElement>(null);
-  const secretRef = useRef<HTMLTextAreaElement>(null);
+  const secretRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { if (ask) (textRef.current ?? secretRef.current)?.focus(); }, [ask]);
   useEffect(() => { if (noteOpen) noteRef.current?.focus(); }, [noteOpen]);
@@ -147,8 +147,8 @@ function RoundPanel({ item, position, total, onCommand }: RoundPanelProps) {
         onCommand({ type: 'close-round' });
         return;
       }
-      // Shift+Enter adds a line break to a secret.
-      if (event.key === 'Enter' && !event.isComposing && !(event.shiftKey && event.target instanceof HTMLTextAreaElement)) {
+      // The secret field sends on Enter itself.
+      if (event.key === 'Enter' && !event.isComposing && !event.defaultPrevented) {
         event.preventDefault();
         sendRef.current();
         return;
@@ -217,12 +217,12 @@ function RoundPanel({ item, position, total, onCommand }: RoundPanelProps) {
       </div>
       {secret && (
         <div className="px-[26px] pb-2">
-          {/* One line tall: a pasted multi-line value scrolls inside the field. */}
-          <SecretField
+          <SecretValueInput
             ref={secretRef}
             appearance="bare"
             value={text}
-            onChange={(event) => setText(event.target.value)}
+            onValueChange={setText}
+            onEnter={() => sendRef.current()}
             placeholder="Type the secret"
             aria-label="The secret"
             className="h-[46px] w-full rounded-xl bg-surface-tertiary px-3.5 py-0 text-[16px] leading-[46px] text-text-primary outline-none placeholder:text-text-muted focus:ring-[1.5px] focus:ring-inset focus:ring-border-hover"

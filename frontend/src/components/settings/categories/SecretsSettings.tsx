@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { AlertTriangle, KeyRound, Plus } from 'lucide-react';
 import { Button } from '../../ui/Button';
 import { Input } from '../../ui/Input';
-import { SecretField } from '../../ui/SecretField';
+import { SecretValueInput } from '../../ui/SecretValueInput';
 import { SettingsSection } from '../../ui/SettingsSection';
 import { SettingsPage } from '../SettingRow';
 import { settingDomId } from '../catalog';
@@ -33,12 +33,12 @@ function ValueForm({ label, onSave, onCancel }: { label: string; onSave: (value:
   return (
     <form className="flex items-center gap-2" onSubmit={(event) => void submit(event)}>
       <div className="min-w-0 flex-1">
-        <SecretField
+        <SecretValueInput
           autoFocus
           aria-label={label}
           placeholder="New value"
           value={value}
-          onChange={(event) => setValue(event.target.value)}
+          onValueChange={setValue}
           className="w-full font-mono text-sm"
         />
       </div>
@@ -122,7 +122,7 @@ function AddSecretForm({ onAdd, onCancel }: { onAdd: (project: string, name: str
           <Input aria-label="Secret name" placeholder="NAME, e.g. STRIPE_SECRET_KEY" value={name} onChange={(event) => setName(event.target.value)} error={nameProblem ?? undefined} className="font-mono text-sm" fullWidth />
         </div>
       </div>
-      <SecretField aria-label="Secret value" placeholder="Value" value={value} onChange={(event) => setValue(event.target.value)} className="w-full font-mono text-sm" />
+      <SecretValueInput aria-label="Secret value" placeholder="Value" value={value} onValueChange={setValue} className="font-mono text-sm" />
       <div className="flex justify-end gap-2">
         <Button type="button" variant="ghost" size="sm" onClick={onCancel}>Cancel</Button>
         <Button type="submit" size="sm" disabled={!ready || busy}>Save securely</Button>
