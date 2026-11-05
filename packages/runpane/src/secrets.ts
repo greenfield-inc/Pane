@@ -221,7 +221,8 @@ async function runChild(command: string[], env: NodeJS.ProcessEnv): Promise<Chil
   // this CLI, so forwarding them would deliver them twice. Without a terminal the child gets its
   // own group and every signal is forwarded once.
   const ownGroup = process.platform !== 'win32' && !process.stdin.isTTY;
-  const child = spawn(command[0], command.slice(1), { stdio: 'inherit', env, detached: ownGroup });
+  const [file, args, windowsVerbatimArguments] = windowsBatchCommand(command, env) ?? [command[0], command.slice(1), false];
+  const child = spawn(file, args, { stdio: 'inherit', env, detached: ownGroup, windowsVerbatimArguments });
   const forward = (signal: NodeJS.Signals) => { child.kill(signal); };
   const interrupt = (signal: NodeJS.Signals) => () => { if (ownGroup) forward(signal); };
   const handlers: Array<[NodeJS.Signals, () => void]> = [
@@ -244,6 +245,32 @@ async function runChild(command: string[], env: NodeJS.ProcessEnv): Promise<Chil
     );
   }
   return result;
+}
+
+/**
+ * On Windows, npm, pnpm and npx are .cmd shims, which only cmd.exe can run. Finds the command the
+ * way cmd.exe does (the current directory, then PATH, with each PATHEXT extension) and, for a .cmd
+ * or .bat file, returns a cmd.exe invocation that passes every argument literally.
+ */
+function windowsBatchCommand(command: string[], env: NodeJS.ProcessEnv): [string, string[], boolean] | undefined {
+  if (process.platform !== 'win32') return undefined;
+  const read = (name: string) => Object.entries(env).find(([key]) => key.toUpperCase() === name)?.[1] ?? '';
+  const extensions = (read('PATHEXT') || '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean);
+  const [name] = command;
+  const names = extensions.some((extension) => name.toUpperCase().endsWith(extension.toUpperCase())) ? [name] : extensions.map((extension) => name + extension);
+  const directories = /[\\/]/.test(name) ? [''] : [process.cwd(), ...read('PATH').split(';').filter(Boolean)];
+  const found = directories.flatMap((directory) => names.map((candidate) => path.resolve(directory, candidate)))
+    .find((candidate) => fs.statSync(candidate, { throwIfNoEntry: false })?.isFile());
+  if (!found || !/\.(cmd|bat)$/i.test(found)) return undefined;
+  const words = [found, ...command.slice(1)];
+  // oxlint-disable-next-line no-control-regex -- control characters cannot be passed through cmd literally.
+  if (words.some((word) => /[%!"\x00-\x1f\x7f]/.test(word))) {
+    throw invalid(
+      `${name} is a Windows batch file, and cmd.exe cannot pass %, !, " or control characters in its arguments literally. Nothing was run.`,
+      'Remove those characters from the arguments, or run the program the batch file starts directly.',
+    );
+  }
+  return ['cmd.exe', ['/d', '/s', '/c', `"${words.map((word) => `"${word}"`).join(' ')}"`], true];
 }
 
 /** `runpane secrets request`: a secret Notify card. The answer is saved by Pane; only saved or declined comes back. */

@@ -3929,6 +3929,23 @@ async function checkSecretsParity() {
     assert.ok(!stdout.includes('canary'), `runpane printed a secret value: ${stdout}`);
   }
 
+  if (process.platform === 'win32') {
+    // npm, pnpm and npx are .cmd shims on Windows: exec finds one on PATH by its bare name and passes arguments literally.
+    const shimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-secrets-shim-'));
+    try {
+      fs.writeFileSync(path.join(shimDir, 'probe.js'), 'process.stdout.write(JSON.stringify({ args: process.argv.slice(2), key: process.env.STRIPE_SECRET_KEY }));');
+      fs.writeFileSync(path.join(shimDir, 'shim-probe.cmd'), `@"${process.execPath}" "%~dp0probe.js" %*\r\n`);
+      const pathKey = Object.keys(process.env).find((key) => key.toUpperCase() === 'PATH') ?? 'PATH';
+      const args = ['secrets', 'exec', '--project', 'stripe', '--only', 'STRIPE_SECRET_KEY', '--', 'shim-probe', 'plain', 'a b', 'x&y'];
+      for (const runtime of ['npm', 'pip']) {
+        const run = await withFakeDaemon(shimDir, (frame) => ({ result: respond(frame) }), () => runCliOnce(runtime, args, shimDir, 20_000, { [pathKey]: `${shimDir};${process.env[pathKey]}` }));
+        assert.deepStrictEqual({ code: run.code, stdout: run.stdout }, { code: 0, stdout: '{"args":["plain","a b","x&y"],"key":"sk_test_canary"}' }, `${runtime} secrets exec runs a .cmd shim: ${run.stderr}`);
+      }
+    } finally {
+      fs.rmSync(shimDir, { recursive: true, force: true });
+    }
+  }
+
   // Refusals happen before Pane is asked for anything, with the same code, message and next step in both wrappers.
   const refusals = [
     [['secrets', 'exec', '--project', 'stripe', '--env', 'PATH=STRIPE_SECRET_KEY', '--', 'true'], 'SECRET_RESERVED_NAME', undefined, /^PATH is set by Pane itself/],

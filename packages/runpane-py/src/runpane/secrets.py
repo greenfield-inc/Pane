@@ -208,8 +208,9 @@ def run_child(command: List[str], env: Mapping[str, str]) -> int:
     # this CLI, so forwarding them would deliver them twice. Without a terminal the child gets its
     # own group and every signal is forwarded once.
     own_group = not WINDOWS and not sys.stdin.isatty()
+    args = windows_batch_command(command) or command
     try:
-        child = subprocess.Popen(command, env=dict(env), start_new_session=own_group)
+        child = subprocess.Popen(args, env=dict(env), start_new_session=own_group)
     except OSError as error:
         code = errno.errorcode.get(error.errno or 0, "unknown error")
         raise RunpaneError(
@@ -237,6 +238,27 @@ def run_child(command: List[str], env: Mapping[str, str]) -> int:
         for number, handler in previous.items():
             signal.signal(number, handler)
     return status
+
+
+def windows_batch_command(command: List[str]) -> Optional[str]:
+    """On Windows, npm, pnpm and npx are .cmd shims, which only cmd.exe can run.
+
+    Finds the command the way cmd.exe does (the current directory, then PATH, with each PATHEXT
+    extension) and, for a .cmd or .bat file, returns a cmd.exe command line that passes every
+    argument literally.
+    """
+    if not WINDOWS:
+        return None
+    found = shutil.which(command[0])
+    if not found or not found.lower().endswith((".cmd", ".bat")):
+        return None
+    words = [found, *command[1:]]
+    if any(re.search(r'[%!"\x00-\x1f\x7f]', word) for word in words):
+        raise invalid(
+            f'{command[0]} is a Windows batch file, and cmd.exe cannot pass %, !, " or control characters in its arguments literally. Nothing was run.',
+            "Remove those characters from the arguments, or run the program the batch file starts directly.",
+        )
+    return 'cmd.exe /d /s /c "' + " ".join(f'"{word}"' for word in words) + '"'
 
 
 def run_secrets_request(parsed: Any, env: Optional[Mapping[str, str]] = None) -> int:
