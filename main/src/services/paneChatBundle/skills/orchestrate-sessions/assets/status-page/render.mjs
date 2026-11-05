@@ -229,7 +229,7 @@ details{margin-top:14px;font-size:12px;color:var(--muted)}summary{cursor:pointer
 .need summary{list-style:none;cursor:pointer;padding:7px 12px 7px 12px;display:flex;gap:10px;align-items:center}
 .need summary::-webkit-details-marker,.sec>summary::-webkit-details-marker{display:none}.need summary:hover{background:var(--wash)}
 .need summary:before{content:"›";color:var(--muted);transition:transform .15s;width:8px}.need[open] summary:before{transform:rotate(90deg)}
-.qid{font-weight:700;color:var(--warn);font-size:12px;min-width:34px}
+.qid{font-weight:700;color:var(--warn);font-size:12px;min-width:34px}.qid:empty{display:none}
 .qq{flex:1;min-width:0;font-weight:600;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .need[open] .qq{white-space:normal}
 .need .age{display:inline;margin:0;font-size:11px;color:var(--warn);white-space:nowrap}
@@ -241,7 +241,7 @@ details{margin-top:14px;font-size:12px;color:var(--muted)}summary{cursor:pointer
 .sec:not([open])>summary h2:before{transform:none}
 .sec>summary:hover h2{color:var(--ink)}
 .sec .n{font-weight:600;background:var(--wash);color:var(--muted);border-radius:999px;padding:0 6px;font-size:10px;letter-spacing:0}
-@media(max-width:640px){.nbody,.dbody{padding-left:14px}.need[open] summary{flex-wrap:wrap}.need[open] .qq{order:1;flex-basis:100%;overflow:visible}.ask{grid-template-columns:1fr}.act{text-align:left}.state .snext{margin-left:0;flex-basis:100%}}
+@media(max-width:640px){.qq{white-space:normal}.nbody,.dbody{padding-left:14px}.need[open] summary{flex-wrap:wrap}.need[open] .qq{order:1;flex-basis:100%;overflow:visible}.ask{grid-template-columns:1fr}.act{text-align:left}.state .snext{margin-left:0;flex-basis:100%}}
 </style></head><body><div class="wrap">
 <div class="top"><div><div class="eyebrow">${esc(d.session.eyebrow)}</div><h1>${esc(d.session.title)}</h1></div>
 <div class="counts">${counter('run', '', c.running, 'running')}${counter('q', '', c.queued, 'queued')}${counter('done', '✓', c.done, 'done')}</div></div>
