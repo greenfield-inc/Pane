@@ -215,7 +215,8 @@ export abstract class AbstractCliManager extends EventEmitter {
       const systemEnv = await this.getSystemEnvironment();
 
       // Merge environments: the project's variables, then the CLI's own.
-      const projectEnv = await this.sessionManager.resolveProjectEnv(sessionId);
+      const { panelManager } = await import('../../panelManager');
+      const projectEnv = await this.sessionManager.resolveProjectEnv(sessionId, panelManager.getPanel(panelId)?.metadata.teammate ?? null);
       for (const warning of projectEnv.warnings) this.logger?.warn(warning);
       const env = { ...systemEnv, ...projectEnv.env, ...cliEnv };
 

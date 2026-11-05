@@ -10,6 +10,7 @@ import type { PaneEventArgument } from '../../../core/eventSink';
 import { WSLContext, buildWSLENV } from '../../../utils/wslUtils';
 import { databaseService } from '../../database';
 import { ProjectEnvService } from '../../projectEnvVars';
+import { teammatePaneCaller } from '../../../daemon/commandRegistry';
 
 const projectEnvService = new ProjectEnvService(databaseService);
 
@@ -164,7 +165,7 @@ export class LogsManager {
     const panePort = String(3000 + (Math.abs(portHash) % 600) * 10);
 
     // The project's variables; Pane's own PATH and PANE_* below win over them.
-    const projectEnv = await projectEnvService.resolveForSession(sessionId);
+    const projectEnv = await projectEnvService.resolveForSession(sessionId, teammatePaneCaller());
     for (const warning of projectEnv.warnings) {
       await this.handleOutput(panel.id, sessionId, `${warning}\n`, 'stderr');
     }

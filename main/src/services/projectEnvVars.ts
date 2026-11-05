@@ -93,8 +93,11 @@ export class ProjectEnvService {
     this.store.replaceProjectEnvVars(projectId, []);
   }
 
-  /** Read every variable of the project. A value that cannot be read is skipped with a warning. */
-  async resolve(projectId: number): Promise<ResolvedProjectEnv> {
+  /**
+   * Read every variable of the project for a process `teammate` started (null: the owner).
+   * A value that cannot be read is skipped with a warning.
+   */
+  async resolve(projectId: number, teammate: string | null): Promise<ResolvedProjectEnv> {
     const env: Record<string, string> = {};
     const warnings: string[] = [];
     const variables = this.store.getProjectEnvVars(projectId);
@@ -105,7 +108,6 @@ export class ProjectEnvService {
         env[variable.key] = variable.value;
         return;
       }
-      const teammate = teammatePaneCaller();
       if (teammate) {
         warnings.push(`Pane did not set ${variable.key}: ${teammate} started this, and only this computer's owner can use its secrets. Everything else started normally.`);
         return;
@@ -142,8 +144,8 @@ export class ProjectEnvService {
   }
 
   /** The variables of the project that owns this Pane, or none for a Pane outside any project. */
-  async resolveForSession(sessionId: string): Promise<ResolvedProjectEnv> {
+  async resolveForSession(sessionId: string, teammate: string | null): Promise<ResolvedProjectEnv> {
     const projectId = this.store.getSession(sessionId)?.project_id;
-    return projectId ? this.resolve(projectId) : { env: {}, warnings: [] };
+    return projectId ? this.resolve(projectId, teammate) : { env: {}, warnings: [] };
   }
 }

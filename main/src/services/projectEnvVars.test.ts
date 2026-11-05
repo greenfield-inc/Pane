@@ -62,7 +62,7 @@ describe('project environment variables', () => {
       { key: 'NODE_ENV', source: 'plain', value: 'development' },
     ]);
 
-    const resolved = await asTeammate(() => service.resolve(project.id));
+    const resolved = await service.resolve(project.id, 'teammate@example.com');
 
     expect(resolved).toMatchObject({ env: { NODE_ENV: 'development' } });
     expect(JSON.stringify(resolved)).not.toContain('sk-owner-only');
@@ -108,11 +108,11 @@ describe('project environment variables', () => {
     const project = db.createProject('cura', '/repos/cura');
     await secrets.set('shared', 'TOKEN', 'first');
     await service.save(project.id, [{ key: 'API_TOKEN', source: 'secret', project: 'shared', name: 'TOKEN' }]);
-    await expect(service.resolve(project.id)).resolves.toEqual({ env: { API_TOKEN: 'first' }, warnings: [] });
+    await expect(service.resolve(project.id, null)).resolves.toEqual({ env: { API_TOKEN: 'first' }, warnings: [] });
 
     await secrets.set('shared', 'TOKEN', 'second');
 
-    await expect(service.resolve(project.id)).resolves.toEqual({ env: { API_TOKEN: 'second' }, warnings: [] });
+    await expect(service.resolve(project.id, null)).resolves.toEqual({ env: { API_TOKEN: 'second' }, warnings: [] });
   });
 
   it('skips a variable whose Pane secret is missing and says why without any value', async () => {
@@ -123,7 +123,7 @@ describe('project environment variables', () => {
     ]);
     await secrets.delete('shared', 'TOKEN');
 
-    const resolved = await service.resolve(project.id);
+    const resolved = await service.resolve(project.id, null);
 
     expect(resolved.env).toEqual({ NODE_ENV: 'development' });
     expect(resolved.warnings).toHaveLength(1);
@@ -155,7 +155,7 @@ describe('project environment variables', () => {
       { key: 'NODE_ENV', source: 'plain', value: 'development' },
     ]);
 
-    await expect(service.resolve(project.id)).resolves.toEqual({
+    await expect(service.resolve(project.id, null)).resolves.toEqual({
       env: { UIVERIFY_API_KEY: 'from-conductor', NODE_ENV: 'development' },
       warnings: [],
     });
@@ -169,9 +169,9 @@ describe('project environment variables', () => {
       db.createSession({ id, name: id, initial_prompt: '', worktree_name: id, worktree_path: `/w/${id}`, project_id: projectId, tool_type: 'none' });
     }
 
-    await expect(service.resolveForSession('cura-pane')).resolves.toEqual({ env: { UIVERIFY_API_KEY: 'cura-only' }, warnings: [] });
-    await expect(service.resolveForSession('other-pane')).resolves.toEqual({ env: {}, warnings: [] });
-    await expect(service.resolveForSession('no-such-pane')).resolves.toEqual({ env: {}, warnings: [] });
+    await expect(service.resolveForSession('cura-pane', null)).resolves.toEqual({ env: { UIVERIFY_API_KEY: 'cura-only' }, warnings: [] });
+    await expect(service.resolveForSession('other-pane', null)).resolves.toEqual({ env: {}, warnings: [] });
+    await expect(service.resolveForSession('no-such-pane', null)).resolves.toEqual({ env: {}, warnings: [] });
   });
 
   it('refuses invalid, reserved and duplicate names and saves nothing', async () => {
@@ -203,7 +203,7 @@ describe('project environment variables', () => {
 
     await expect(service.save(project.id, [{ key: 'TOKEN', source: 'keychain', service: 'svc', account: 'other' }]))
       .rejects.toMatchObject({ code: 'KEYCHAIN_UNSUPPORTED' });
-    const resolved = await service.resolve(project.id);
+    const resolved = await service.resolve(project.id, null);
     expect(resolved.env).toEqual({});
     expect(resolved.warnings[0]).toMatch(/TOKEN.*macOS/);
   });

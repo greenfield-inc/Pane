@@ -139,6 +139,7 @@ import { withLock } from '../utils/mutex';
 import { detectGitBase } from './worktreeManager';
 import { panelManager } from './panelManager';
 import { ProjectEnvService, type ResolvedProjectEnv } from './projectEnvVars';
+import { teammatePaneCaller } from '../daemon/commandRegistry';
 import type { AnalyticsManager } from './analyticsManager';
 
 export class SessionManager extends EventEmitter {
@@ -1248,8 +1249,9 @@ export class SessionManager extends EventEmitter {
   }
 
   /** The environment variables of the project that owns this Pane, for any process Pane starts in it. */
-  resolveProjectEnv(sessionId: string): Promise<ResolvedProjectEnv> {
-    return this.projectEnv.resolveForSession(sessionId);
+  /** The project's variables for a process `teammate` started (null: the owner). */
+  resolveProjectEnv(sessionId: string, teammate: string | null): Promise<ResolvedProjectEnv> {
+    return this.projectEnv.resolveForSession(sessionId, teammate);
   }
 
   /** Run project cleanup commands in the same environment as setup commands. */
@@ -1268,7 +1270,7 @@ export class SessionManager extends EventEmitter {
     let allOutput = '';
     let overallSuccess = true;
 
-    const projectEnv = await this.resolveProjectEnv(sessionId);
+    const projectEnv = await this.resolveProjectEnv(sessionId, teammatePaneCaller());
     for (const warning of projectEnv.warnings) addSessionLog(sessionId, 'warn', warning, label);
     const options: CommandRunOptions = {};
     if (label === 'Build') options.timeout = 0;

@@ -137,6 +137,16 @@ describe('terminal panels and project environment variables', () => {
     }
   });
 
+  it('starts a teammate\'s terminal without secret variables, also when no request of theirs is running', async () => {
+    const panel = panelIn('cura', 'terminal');
+    panel.metadata.teammate = 'bob@example.com';
+
+    const spawned = await start(panel);
+
+    expect(spawned.env.UIVERIFY_API_KEY).toBeUndefined();
+    expect(spawned.env.NODE_ENV).toBe('development');
+  });
+
   it('does not give another project\'s Pane the variables', async () => {
     const spawned = await start(panelIn('other', 'terminal'));
 

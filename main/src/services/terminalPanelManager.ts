@@ -1727,7 +1727,7 @@ export class TerminalPanelManager extends EventEmitter {
     // to no project.
     const projectEnv = sessionState.orchestrationSessionId
       ? { env: {}, warnings: [] }
-      : await this.projectEnv.resolveForSession(panel.sessionId);
+      : await this.projectEnv.resolveForSession(panel.sessionId, panel.metadata?.teammate ?? null);
 
     // Wait for a spawn slot (caps concurrent PTY spawns to prevent CPU spikes)
     await this.acquireSpawnSlot(priority);

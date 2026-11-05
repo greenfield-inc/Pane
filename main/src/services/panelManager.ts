@@ -16,6 +16,7 @@ import { sessionWorkspacePath } from './sessionWorkspace';
 import { getAppDirectory } from '../utils/appDirectory';
 import { withSessionFolderAccess } from './agents/sessionFolderAccess';
 import { reasonOf } from '../../../shared/paneError';
+import { teammatePaneCaller } from '../daemon/commandRegistry';
 
 function logsPanelState(panel: ToolPanel): LogsPanelState {
   // SAFETY: Callers first discriminate `panel.type === 'logs'`; this state is
@@ -149,7 +150,8 @@ class PanelManager {
         createdAt: new Date().toISOString(),
         lastActiveAt: new Date().toISOString(),
         position: this.getNextPosition(request.sessionId),
-        ...request.metadata // Apply any metadata overrides (like permanent flag)
+        ...request.metadata, // Apply any metadata overrides (like permanent flag)
+        teammate: teammatePaneCaller() ?? undefined,
       };
       
       // Create panel object
@@ -342,7 +344,8 @@ class PanelManager {
       const written = databaseService.updatePanel(panelId, {
         title: updates.title,
         state: updates.state,
-        metadata: updates.metadata
+        // Who created the panel stays as recorded.
+        metadata: updates.metadata && { ...updates.metadata, teammate: panel.metadata.teammate }
       });
       if (!written) return;
       
@@ -350,7 +353,7 @@ class PanelManager {
       // cached state (and the panel:updated payload) never carries them.
       if (updates.title !== undefined) panel.title = updates.title;
       if (updates.state !== undefined) panel.state = splitPanelBufferState(updates.state).state;
-      if (updates.metadata !== undefined) panel.metadata = updates.metadata;
+      if (updates.metadata !== undefined) panel.metadata = { ...updates.metadata, teammate: panel.metadata.teammate };
       
       // Emit IPC event to notify frontend
       this.sendRendererEvent('panel:updated', panel);
