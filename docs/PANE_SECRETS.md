@@ -99,14 +99,15 @@ carries keys reaches it. Hosts from before secrets ignore them.
 
 Any agent, and any program running as you, on any of your hosts, can use every Pane
 secret. That is the point: agents keep and share their own secrets across projects.
-The safeguards stop accidental exposure; they don't sandbox anything.
+The safeguards stop accidental exposure; they don't sandbox anything. Setting "Everyone on tailnet" on
+any host gives everyone on the tailnet the same access.
 
 | Who or where | Can read values? | Why |
 | --- | --- | --- |
 | Any agent or process running as you on a host | Yes | runpane's local socket is mode 0600 with no token. On macOS, items trust `/usr/bin/security`. |
 | Every host Pane syncs to | Yes, holds a copy | Each saved host keeps a copy for offline use. |
 | Your paired phone | Relays, never stores | The same rule as shared keys: a paired device can already open terminals on the host. |
-| Other people on your tailnet, when any one of your hosts is set to "Everyone on tailnet" | Yes, through their `exec` commands | Pane refuses secret requests that come from a teammate's own Pane app or `runpane workspace` calls: secret cards, project variables that point at or change a secret, and the key-sharing channels. Terminals and scripts they start through their Pane app open without secret variables. Anything their `workspace exec` runs, runs as you: it can read the keychain or `secrets.json`, run other `runpane` commands, and reach every secret. Every host keeps a copy of every secret, so "Everyone on tailnet" on any one host exposes all of them. Keep "Only me" on every host unless you trust everyone on the tailnet with all your secrets. |
+| Teammates (other Tailscale logins on your tailnet), when any one of your hosts is set to "Everyone on tailnet" | Yes | Their `workspace exec` commands and the terminals they open there run as you, so they can read the keychain or `secrets.json`, run `runpane`, and reach every secret. Each synced host keeps a copy of your secrets, so that setting on any one host exposes them all. Pane refuses only their direct secret requests: secret cards, secret variables and [shared key sync](SHARED_CREDENTIALS.md), and their terminals start without secret variables. Keep "Only me" on every host unless you trust everyone on the tailnet with all your secrets. |
 | A Linux host without a keyring | At rest in a 0600 file, unencrypted | `runpane secrets list` on that host says so. |
 | Chat, MCP output, Notify history and broadcasts, push payloads, Pane logs, analytics, `sessions.db`, `config.json` | No | Pane never writes or returns a value to any of them. |
 | An agent's transcript and Pane's saved terminal scrollback | Only if the agent prints it | `exec` puts the value in a child's environment; if that command echoes it, the output goes wherever its output goes. |

@@ -51,10 +51,9 @@ other projects' Panes. They are not a sandbox:
   environment (for example with `ps eww`).
 - Any agent can use any Pane secret through `runpane secrets exec`
   ([who can read a secret](PANE_SECRETS.md#who-can-read-a-secret)).
-- Terminals and scripts a teammate starts through their Pane app, on a host set to
-  "Everyone on tailnet", open without the Pane secret and keychain variables. Their
-  `runpane workspace exec` commands run as you and can reach every secret
-  ([who can read a secret](PANE_SECRETS.md#who-can-read-a-secret)).
+- On a host set to "Everyone on tailnet", a teammate's commands and terminals run as
+  you and can reach every secret. Pane only keeps the secret and keychain variables
+  out of the terminals and scripts they start.
 - An item you allowed with **Always Allow** trusts `/usr/bin/security`, so any
   process running as your user can read it without a prompt while the login
   keychain is unlocked.

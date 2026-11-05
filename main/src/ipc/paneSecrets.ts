@@ -34,8 +34,8 @@ function refuseRemote(): void {
   if (isRemotePaneCommand()) {
     throw new PaneError(
       'SECRET_LOCAL_ONLY',
-      'Pane refused a secrets request from another machine: this machine\'s secrets answer only callers running on it. Nothing was changed.',
-      'Run `runpane secrets …` on that machine, or `runpane workspace <machine> exec -- runpane secrets …` from your own devices.',
+      'Pane refused a secrets request from another machine: secrets answer only commands running on this machine. Nothing was changed.',
+      'From one of your own devices, run `runpane workspace <machine> exec -- runpane secrets …`, or run `runpane secrets …` on that machine.',
     );
   }
 }
