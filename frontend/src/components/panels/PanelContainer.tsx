@@ -4,12 +4,12 @@ import { ErrorBoundary } from 'react-error-boundary';
 import { PanelLoadingFallback } from './PanelLoadingFallback';
 import { PausedTerminalView } from './PausedTabView';
 import { pausedMarkOf } from '../../../../shared/types/panels';
-import { ChatTabRoute } from '../chatTab/ChatTabRoute';
 import { isNotesEnabled, useConfigStore } from '../../stores/configStore';
 import { renderLog } from '../../utils/console';
 
 // Lazy load panel components for better performance
 const TerminalPanel = lazy(() => import('./TerminalPanel'));
+const ChatTabRoute = lazy(() => import('../chatTab/ChatTabRoute').then(module => ({ default: module.ChatTabRoute })));
 const DiffPanel = lazy(() => import('./diff/DiffPanel'));
 const FileEditorTabPanel = React.lazy(() => import('./editor/FileEditorTabPanel'));
 const ExplorerPanel = lazy(() => import('./editor/EditorPanel'));
