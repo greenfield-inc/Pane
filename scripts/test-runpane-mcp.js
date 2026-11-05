@@ -284,6 +284,26 @@ test('agents reach secrets only through list, delete and request: no MCP tool se
   }
 });
 
+test('the secrets tools refuse a teammate before asking Pane', async () => {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-mcp-'));
+  try {
+    await withStubDaemon(paneDir, { 'runpane:secrets:list': { ok: true, secrets: [], storage: { kind: 'keychain', encrypted: true } } }, async (requests) => {
+      await withMcpClient(async (client) => {
+        const refused = await client.callTool({ name: 'secrets_list', arguments: { paneDir } });
+        assert.equal(refused.isError, true);
+        assert.equal(refused.content[0].text, [
+          "Only this computer's owner can use its Pane secrets, so ana@github cannot list them. Nothing was read or changed.",
+          'Next: Ask the owner to do it on their own devices.',
+          'Code: SECRET_OWNER_REQUIRED',
+        ].join('\n'));
+      }, { args: ['--toolsets', 'core,secrets'], env: { PANE_TEAMMATE_LOGIN: 'ana@github' } });
+      assert.deepEqual(requests, []);
+    });
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
+});
+
 test('notify tells Pane who is asking, and returns waiting early only for clients whose calls time out', async () => {
   const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-mcp-'));
   const waiting = { waiting: true, id: 'n-1', next: 'Call `runpane notify --resume n-1` now.' };

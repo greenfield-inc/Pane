@@ -45,12 +45,27 @@ function invalid(message: string, next: string): RunpaneError {
   return new RunpaneError('SECRET_INVALID', message, next);
 }
 
+/**
+ * Pane secrets are the owner's. Pane sets PANE_TEAMMATE_LOGIN on a teammate's `workspace exec`, and
+ * every secrets command refuses it before asking Pane for anything.
+ */
+function refuseTeammate(action: string, env: NodeJS.ProcessEnv = process.env): void {
+  const teammate = env.PANE_TEAMMATE_LOGIN;
+  if (!teammate) return;
+  throw new RunpaneError(
+    'SECRET_OWNER_REQUIRED',
+    `Only this computer's owner can use its Pane secrets, so ${teammate} cannot ${action}. Nothing was read or changed.`,
+    'Ask the owner to do it on their own devices.',
+  );
+}
+
 function requireFlag(parsed: ParsedArgs, value: string | undefined, flag: string, outcome: string): string {
   if (value?.trim()) return value;
   throw invalid(`runpane ${parsed.command} requires ${flag}. ${outcome}`, `See the options with \`runpane help ${parsed.command}\`.`);
 }
 
 export async function runSecretsList(parsed: ParsedArgs): Promise<number> {
+  refuseTeammate('list them');
   const request = parsed.project === undefined ? {} : { project: parsed.project };
   const result = await invokeDaemon('runpane:secrets:list', [request], listResultSchema, { paneDir: parsed.paneDir });
   if (parsed.json) {
@@ -70,6 +85,7 @@ export async function runSecretsList(parsed: ParsedArgs): Promise<number> {
 }
 
 export async function runSecretsSet(parsed: ParsedArgs): Promise<number> {
+  refuseTeammate('save one');
   const project = requireFlag(parsed, parsed.project, '--project', 'Nothing was saved.');
   const name = requireFlag(parsed, parsed.name, '--name', 'Nothing was saved.');
   if (process.stdin.isTTY) {
@@ -89,6 +105,7 @@ export async function runSecretsSet(parsed: ParsedArgs): Promise<number> {
 }
 
 export async function runSecretsDelete(parsed: ParsedArgs): Promise<number> {
+  refuseTeammate('delete one');
   const project = requireFlag(parsed, parsed.project, '--project', 'Nothing was deleted.');
   const name = requireFlag(parsed, parsed.name, '--name', 'Nothing was deleted.');
   await confirmMutation(parsed);
@@ -167,6 +184,7 @@ function readValues(values: JsonObject): Map<string, string> {
  * through, removes any --file files when it exits, and returns its exit code.
  */
 export async function runSecretsExec(parsed: ParsedArgs): Promise<number> {
+  refuseTeammate('run secrets exec');
   const project = requireFlag(parsed, parsed.project, '--project', 'Nothing was run.');
   const command = parsed.execCommand ?? [];
   if (command.length === 0) {
@@ -275,6 +293,7 @@ function windowsBatchCommand(command: string[], env: NodeJS.ProcessEnv): [string
 
 /** `runpane secrets request`: a secret Notify card. The answer is saved by Pane; only saved or declined comes back. */
 export async function runSecretsRequest(parsed: ParsedArgs, env: NodeJS.ProcessEnv = process.env): Promise<number> {
+  refuseTeammate('ask for one', env);
   const outcome = 'Nothing was shown to the person.';
   const project = requireFlag(parsed, parsed.project, '--project', outcome);
   const name = requireFlag(parsed, parsed.name, '--name', outcome);

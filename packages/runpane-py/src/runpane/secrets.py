@@ -31,6 +31,22 @@ def invalid(message: str, next_step: str) -> RunpaneError:
     return RunpaneError("SECRET_INVALID", message, next_step)
 
 
+def refuse_teammate(action: str, env: Optional[Mapping[str, str]] = None) -> None:
+    """Pane secrets are the owner's.
+
+    Pane sets PANE_TEAMMATE_LOGIN on a teammate's `workspace exec`, and every secrets command
+    refuses it before asking Pane for anything.
+    """
+    teammate = (os.environ if env is None else env).get("PANE_TEAMMATE_LOGIN")
+    if not teammate:
+        return
+    raise RunpaneError(
+        "SECRET_OWNER_REQUIRED",
+        f"Only this computer's owner can use its Pane secrets, so {teammate} cannot {action}. Nothing was read or changed.",
+        "Ask the owner to do it on their own devices.",
+    )
+
+
 def require_flag(parsed: Any, value: Optional[str], flag: str, outcome: str) -> str:
     if value and value.strip():
         return value
@@ -42,6 +58,7 @@ def print_json(value: Any) -> None:
 
 
 def run_secrets_list(parsed: Any) -> int:
+    refuse_teammate("list them")
     request = {} if parsed.project is None else {"project": parsed.project}
     result = invoke_daemon("runpane:secrets:list", [request], pane_dir=parsed.pane_dir)
     if parsed.json:
@@ -59,6 +76,7 @@ def run_secrets_list(parsed: Any) -> int:
 
 
 def run_secrets_set(parsed: Any) -> int:
+    refuse_teammate("save one")
     project = require_flag(parsed, parsed.project, "--project", "Nothing was saved.")
     name = require_flag(parsed, parsed.name, "--name", "Nothing was saved.")
     if sys.stdin.isatty():
@@ -82,6 +100,7 @@ def run_secrets_set(parsed: Any) -> int:
 
 
 def run_secrets_delete(parsed: Any) -> int:
+    refuse_teammate("delete one")
     project = require_flag(parsed, parsed.project, "--project", "Nothing was deleted.")
     name = require_flag(parsed, parsed.name, "--name", "Nothing was deleted.")
     confirm_mutation(parsed)
@@ -157,6 +176,7 @@ def resolve_secrets(parsed: Any, project: str, names: Optional[List[str]]) -> Di
 
 def run_secrets_exec(parsed: Any) -> int:
     """Starts the command with the secrets in its environment, passes stdio through, and returns its exit code."""
+    refuse_teammate("run secrets exec")
     project = require_flag(parsed, parsed.project, "--project", "Nothing was run.")
     command = parsed.exec_command or []
     if not command:
@@ -263,6 +283,7 @@ def windows_batch_command(command: List[str]) -> Optional[str]:
 
 def run_secrets_request(parsed: Any, env: Optional[Mapping[str, str]] = None) -> int:
     """A secret Notify card. The answer is saved by Pane; only saved or declined comes back."""
+    refuse_teammate("ask for one", env)
     outcome = "Nothing was shown to the person."
     project = require_flag(parsed, parsed.project, "--project", outcome)
     name = require_flag(parsed, parsed.name, "--name", outcome)

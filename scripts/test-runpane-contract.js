@@ -3977,6 +3977,34 @@ async function checkSecretsParity() {
     fs.rmSync(refusalDir, { recursive: true, force: true });
   }
 
+  // A teammate's `workspace exec` carries PANE_TEAMMATE_LOGIN; every secrets command refuses it without asking Pane.
+  const teammateRefusals = [
+    [['secrets', 'list'], 'list them'],
+    [['secrets', 'set', '--project', 'stripe', '--name', 'K', '--yes'], 'save one', 'value'],
+    [['secrets', 'delete', '--project', 'stripe', '--name', 'K', '--yes'], 'delete one'],
+    [['secrets', 'exec', '--project', 'stripe', '--', 'true'], 'run secrets exec'],
+    [['secrets', 'request', '--project', 'stripe', '--name', 'K', '--title', 'Key', '--reason', 'Tests.'], 'ask for one'],
+  ];
+  const teammateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-secrets-teammate-'));
+  try {
+    for (const [args, action, input] of teammateRefusals) {
+      for (const runtime of ['npm', 'pip']) {
+        const asked = [];
+        const run = await withFakeDaemon(teammateDir, (frame) => { asked.push(frame.channel); return { result: respond(frame) }; },
+          () => runCliOnce(runtime, [...args.slice(0, 2), '--json', ...args.slice(2)], teammateDir, 20_000, { PANE_TEAMMATE_LOGIN: 'ana@github' }, input));
+        assert.strictEqual(run.code, 1, `${runtime} ${args.join(' ')} should refuse a teammate`);
+        assert.deepStrictEqual(JSON.parse(run.stdout).error, {
+          code: 'SECRET_OWNER_REQUIRED',
+          message: `Only this computer's owner can use its Pane secrets, so ana@github cannot ${action}. Nothing was read or changed.`,
+          next: 'Ask the owner to do it on their own devices.',
+        }, `${runtime} ${args.join(' ')}`);
+        assert.deepStrictEqual(asked, [], `${runtime} ${args.join(' ')} asked Pane before refusing a teammate`);
+      }
+    }
+  } finally {
+    fs.rmSync(teammateDir, { recursive: true, force: true });
+  }
+
   const { main } = require(npmCli);
   await assert.rejects(main(['workspace', 'studio', 'secrets', 'exec', '--project', 'stripe', '--', 'true']), {
     message: 'runpane secrets exec runs on this machine only. On studio, use: runpane workspace studio exec -- runpane secrets exec --project stripe -- true',
