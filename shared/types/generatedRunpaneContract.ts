@@ -809,6 +809,22 @@ export const RUNPANE_CONTRACT = {
       "localControl": true
     },
     {
+      "name": "panels close",
+      "summary": "Close a tab in a Pane, stopping its process, as closing the tab in the app does.",
+      "usage": [
+        "runpane panels close --panel <panel-id> --yes [--json] [--pane-dir <path>]"
+      ],
+      "mutates": true,
+      "toolsets": [
+        "panels"
+      ],
+      "jsonSchemas": [
+        "panelCloseRequest",
+        "panelCloseResult"
+      ],
+      "localControl": true
+    },
+    {
       "name": "panels last-message",
       "summary": "Read an agent's last reply from its transcript, without scraping the screen.",
       "usage": [
@@ -2445,6 +2461,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane panels submit-composer --panel <panel-id> [--strategy auto|codex-ctrl-enter|enter|tab] --yes [--json]",
         "  runpane panels wait --panel <panel-id> [--for initialized|ready|idle|text] [--json]",
         "  runpane panels resume (--panel <panel-id>|--session <id|name>|--all-stopped) [--wait-ready] --yes [--json]",
+        "  runpane panels close --panel <panel-id> --yes [--json]",
         "  runpane panels last-message --panel <panel-id> [--limit <count>] [--json]",
         "  runpane panes git-status --pane <pane-id> [--json] [--pane-dir <path>]",
         "  runpane panes commit --pane <pane-id> --message <message> --yes [--json] [--pane-dir <path>]",
@@ -2934,6 +2951,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane panels submit-composer --panel <panel-id> [--strategy auto|codex-ctrl-enter|enter|tab] --yes [--json]",
         "  runpane panels wait --panel <panel-id> [--for initialized|ready|idle|text] [--json]",
         "  runpane panels resume (--panel <panel-id>|--session <id|name>|--all-stopped) [--wait-ready] --yes [--json]",
+        "  runpane panels close --panel <panel-id> --yes [--json]",
         "  runpane panels last-message --panel <panel-id> [--limit <count>] [--json]",
         "",
         "Run \"runpane help panels create\" or another command-specific topic for options."
@@ -3630,6 +3648,25 @@ export const RUNPANE_CONTRACT = {
         "  --pane-dir <path>              Connect to a specific Pane data directory",
         "  --json                         Print machine-readable output"
       ],
+      "panels close": [
+        "Close a tab in a Pane, stopping its process, as closing the tab in the app does.",
+        "",
+        "Usage:",
+        "  runpane panels close --panel <panel-id> --yes [--json] [--pane-dir <path>]",
+        "",
+        "Closes one tab (agent, terminal, browser or editor) the way its close button in the app does:",
+        "a terminal tab's process is stopped and the tab is removed from every window showing the Pane.",
+        "A Pane's permanent tabs cannot be closed. Closing the tab this command runs in stops this command too.",
+        "",
+        "Options:",
+        "  --panel <panel-id>            Panel id, from runpane panels list",
+        "  --yes                         Skip the confirmation prompt",
+        "  --pane-dir <path>             Connect to a specific Pane data directory",
+        "  --json                        Print machine-readable output",
+        "",
+        "Examples:",
+        "  runpane panels close --panel <panel-id> --yes --json"
+      ],
       "lock": [
         "Usage:",
         "  runpane lock <acquire|release|list> [options]",
@@ -4014,6 +4051,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane panels submit-composer --panel <panel-id> [--strategy auto|codex-ctrl-enter|enter|tab] --yes [--json]",
         "  runpane panels wait --panel <panel-id> [--for initialized|ready|idle|text] [--json]",
         "  runpane panels resume (--panel <panel-id>|--session <id|name>|--all-stopped) [--wait-ready] --yes [--json]",
+        "  runpane panels close --panel <panel-id> --yes [--json]",
         "  runpane panels last-message --panel <panel-id> [--limit <count>] [--json]",
         "  runpane panes git-status --pane <pane-id> [--json] [--pane-dir <path>]",
         "  runpane panes commit --pane <pane-id> --message <message> --yes [--json] [--pane-dir <path>]",
@@ -4501,6 +4539,7 @@ export const RUNPANE_CONTRACT = {
         "  runpane panels submit-composer --panel <panel-id> [--strategy auto|codex-ctrl-enter|enter|tab] --yes [--json]",
         "  runpane panels wait --panel <panel-id> [--for initialized|ready|idle|text] [--json]",
         "  runpane panels resume (--panel <panel-id>|--session <id|name>|--all-stopped) [--wait-ready] --yes [--json]",
+        "  runpane panels close --panel <panel-id> --yes [--json]",
         "  runpane panels last-message --panel <panel-id> [--limit <count>] [--json]",
         "",
         "Run \"runpane help panels create\" or another command-specific topic for options."
@@ -5157,6 +5196,25 @@ export const RUNPANE_CONTRACT = {
         "  --pane-dir <path>              Connect to a specific Pane data directory",
         "  --json                         Print machine-readable output"
       ],
+      "panels close": [
+        "Close a tab in a Pane, stopping its process, as closing the tab in the app does.",
+        "",
+        "Usage:",
+        "  python -m runpane panels close --panel <panel-id> --yes [--json] [--pane-dir <path>]",
+        "",
+        "Closes one tab (agent, terminal, browser or editor) the way its close button in the app does:",
+        "a terminal tab's process is stopped and the tab is removed from every window showing the Pane.",
+        "A Pane's permanent tabs cannot be closed. Closing the tab this command runs in stops this command too.",
+        "",
+        "Options:",
+        "  --panel <panel-id>            Panel id, from runpane panels list",
+        "  --yes                         Skip the confirmation prompt",
+        "  --pane-dir <path>             Connect to a specific Pane data directory",
+        "  --json                        Print machine-readable output",
+        "",
+        "Examples:",
+        "  python -m runpane panels close --panel <panel-id> --yes --json"
+      ],
       "lock": [
         "Usage:",
         "  python -m runpane lock <acquire|release|list> [options]",
@@ -5566,6 +5624,7 @@ export const RUNPANE_CONTRACT = {
       "runpane panels last-message --panel <panel-id> --json",
       "runpane panels resume --panel <panel-id> --wait-ready --yes --json",
       "runpane panels resume --session <id|name> --wait-ready --yes --json",
+      "runpane panels close --panel <panel-id> --yes --json",
       "runpane docs search --query \"archive a pane\" --json",
       "runpane links create --pane <pane-id> --json",
       "runpane panes git-status --pane <pane-id> --json",
@@ -6032,6 +6091,14 @@ export const RUNPANE_CONTRACT = {
         "panel-1",
         "--strategy",
         "auto",
+        "--yes",
+        "--json"
+      ],
+      [
+        "panels",
+        "close",
+        "--panel",
+        "panel-1",
         "--yes",
         "--json"
       ],
@@ -12023,6 +12090,50 @@ export const RUNPANE_CONTRACT = {
       },
       "additionalProperties": false
     },
+    "panelCloseRequest": {
+      "type": "object",
+      "required": [
+        "panelId"
+      ],
+      "properties": {
+        "panelId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "panelCloseResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "paneId",
+        "panelId",
+        "type",
+        "title"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "generation": {
+          "type": "number"
+        },
+        "paneId": {
+          "type": "string"
+        },
+        "panelId": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "description": "The closed tab's type, such as terminal, browser or editor."
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
     "sessionListResult": {
       "type": "object",
       "required": [
@@ -14214,6 +14325,15 @@ export const RUNPANE_CONTRACT = {
           ]
         },
         {
+          "name": "panels close",
+          "summary": "Close a tab, stopping its process, as the app's close button does.",
+          "arguments": [
+            "--panel <panel-id>",
+            "--yes",
+            "--json"
+          ]
+        },
+        {
           "name": "watch",
           "summary": "Wait for workspace events from the durable daemon journal; follow uses conservative cadence and quiet expiry by default.",
           "arguments": [
@@ -15964,6 +16084,49 @@ export const RUNPANE_CONTRACT = {
           "If readiness.blocked is present, the agent is at a startup prompt (trust, update, [y/n]); inspect `panels screen` or follow blocked.suggestedCommand. Ask the user before answering trust or permission prompts.",
           "A Claude panel resumes the conversation whose session id Pane launched it with; a Codex panel resumes the session id Pane captured from its output. Without one, the panel relaunches its original command.",
           "A bulk resume is ok only when every panel resumed and, with --wait-ready, became ready. Check items[].readiness.blocked and items[].error per panel."
+        ]
+      },
+      "panels close": {
+        "name": "panels close",
+        "summary": "Close a tab in a Pane, stopping its process, as closing the tab in the app does.",
+        "details": "Use this to remove a tab you no longer need, such as a finished or stuck worker. It runs the app's own close-tab path: a terminal tab's process is stopped, the tab disappears from every window showing the Pane, and another tab becomes active if it was the active one.",
+        "requiresPaneDaemon": true,
+        "mutates": true,
+        "arguments": [
+          {
+            "name": "--panel",
+            "value": "<panel-id>",
+            "required": true,
+            "description": "Panel id to close (any tab type)."
+          },
+          {
+            "name": "--yes",
+            "required": false,
+            "description": "Skip confirmation for this mutating command."
+          },
+          {
+            "name": "--json",
+            "required": false,
+            "description": "Print machine-readable output."
+          },
+          {
+            "name": "--pane-dir",
+            "value": "<path>",
+            "required": false,
+            "description": "Connect to a specific Pane data directory."
+          }
+        ],
+        "examples": [
+          "runpane panels close --panel <panel-id> --yes --json"
+        ],
+        "jsonSchemas": [
+          "panelCloseRequest",
+          "panelCloseResult"
+        ],
+        "notes": [
+          "Closing is not undoable: the tab and its scrollback are gone. To stop an agent and keep its tab, send it Ctrl-C with `panels input` instead; to restart a stopped one, use `panels resume`.",
+          "A Pane's permanent tabs cannot be closed; the command fails and nothing changes.",
+          "Closing the tab the command runs in stops the caller too, so it may not see the result."
         ]
       },
       "panels wait": {

@@ -3650,6 +3650,35 @@ describe('runpane IPC handlers', () => {
     });
   });
 
+  it('closes a panel through the app close-tab command and names what it closed', async () => {
+    const registry = createRegistry();
+    const closeTab = vi.fn(async () => ({ success: true }));
+    registry.register('panels:delete', closeTab);
+
+    const result = await registry.invoke('runpane:panels:close', [{ panelId: terminalPanel.id }]);
+
+    expect(closeTab).toHaveBeenCalledWith(terminalPanel.id);
+    expect(result).toMatchObject({ ok: true, paneId: session.id, panelId: terminalPanel.id, type: 'terminal', title: 'Codex' });
+  });
+
+  it('refuses to close an unknown panel without touching any tab', async () => {
+    const registry = createRegistry();
+    const closeTab = vi.fn(async () => ({ success: true }));
+    registry.register('panels:delete', closeTab);
+
+    await expect(registry.invoke('runpane:panels:close', [{ panelId: 'missing-panel' }]))
+      .rejects.toMatchObject({ code: 'ERR_RUNPANE_PANEL_NOT_FOUND' });
+    expect(closeTab).not.toHaveBeenCalled();
+  });
+
+  it('reports the app refusing to close a panel', async () => {
+    const registry = createRegistry();
+    registry.register('panels:delete', async () => ({ success: false, error: 'This panel cannot be closed.' }));
+
+    await expect(registry.invoke('runpane:panels:close', [{ panelId: terminalPanel.id }]))
+      .rejects.toMatchObject({ code: 'ERR_RUNPANE_PANEL_CLOSE_FAILED', message: expect.stringContaining('This panel cannot be closed.') });
+  });
+
   it('queues a working Codex composer with Tab and verifies it left the composer', async () => {
     vi.mocked(terminalPanelManager.getTerminalSnapshot)
       .mockReturnValueOnce(terminalSnapshot('• Working (tab to queue message)\n› follow-up\n', 'active'))

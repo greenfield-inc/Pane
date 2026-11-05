@@ -1685,6 +1685,20 @@ def print_prompt_notes(result: Dict[str, Any], prefix: str = "") -> None:
         print(f"{prefix}Warning ({warning.get('code')}): {warning.get('message')}")
 
 
+def run_panels_close(parsed: Any) -> int:
+    if not parsed.panel_id:
+        raise ValueError("runpane panels close requires --panel.")
+    confirm_mutation(parsed)
+
+    result = invoke_daemon("runpane:panels:close", [{"panelId": parsed.panel_id}], pane_dir=parsed.pane_dir)
+
+    if parsed.json:
+        print_json(result)
+    else:
+        print(f"Closed {result.get('type')} tab \"{result.get('title')}\" ({result.get('panelId')}) in pane {result.get('paneId')}.")
+    return 0
+
+
 def run_panels_submit_composer(parsed: Any) -> int:
     if not parsed.panel_id:
         raise ValueError("runpane panels submit-composer requires --panel.")

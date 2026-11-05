@@ -373,6 +373,14 @@
       "--json"
     ],
     [
+      "panels",
+      "close",
+      "--panel",
+      "panel-1",
+      "--yes",
+      "--json"
+    ],
+    [
       "sessions",
       "list",
       "--json"
