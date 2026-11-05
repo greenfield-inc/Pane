@@ -831,6 +831,8 @@ it in its conversation. The watch reports each paused tab once as
 `panel.paused` (`PAUSED <pane-name> pane <pane-id> panel <panel-id>`) and each
 resumed one as `panel.unpaused` (`UNPAUSED ...`), followed by its usual ready
 signal. An orchestrator leaves paused workers paused unless the person asks.
+Any other start of a paused tab (opening it, a retry, another machine) fails
+with `ERR_PANEL_PAUSED` and starts nothing.
 `runpane panes list --json` reports each Pane's `paused` mark (`{ at, by:
 "manual" | "auto", idleHours? }`) and `inactiveSince`, the latest terminal
 output or input in its tabs or the last time the person selected it;
